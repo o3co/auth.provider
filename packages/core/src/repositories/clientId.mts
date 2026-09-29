@@ -16,25 +16,15 @@
 
 /**
  * What a `client_id` from a request must look like before a
- * {@link ClientRepository} is asked for it — and what a registered one must
+ * {@link ClientRepository} is asked for it, and what a registered one must
  * look like for a request to be able to name it.
  *
- * A repository throws only when its store cannot answer, and that is answered
- * `503`. A client's malformed `client_id` must not be able to make one throw:
- * a SQL driver refuses a NUL byte, an HTTP store refuses a URL too long for
- * it — and the client's input would read as the server's outage. So the
- * routes that look a client up screen the id first and refuse a malformed one
- * the way they refuse an unknown one. The bundled repository refuses, when it
- * is built, to register an id that fails the same check: no request could
- * ever reach it.
- *
- * The rule is core's identifier rule (`security/identifier.mts`), shared with
- * a JWT `kid` and an assertion `iss`:
- * - no control character — C0 (`U+0000`–`U+001F`), DEL (`U+007F`), C1
- *   (`U+0080`–`U+009F`). RFC 6749 Appendix A.1 makes `client_id` `*VSCHAR`
- *   (printable ASCII), so no control character can be part of one; the rule
- *   stops short of refusing all non-ASCII, which a registry may already hold;
- * - at most {@link MAX_CLIENT_ID_LENGTH} characters, and not empty.
+ * A malformed `client_id` must not make a repository throw (a SQL driver
+ * refuses a NUL byte, an HTTP store an overlong URL): a throw is answered
+ * `503`, and the client's input would read as the server's outage. Routes
+ * refuse a malformed id like an unknown one, without a lookup, and the
+ * bundled repository refuses to register one. The rule is core's identifier
+ * rule (`security/identifier.mts`).
  *
  * @see ClientRepository
  */
@@ -47,16 +37,13 @@ import {
 
 /**
  * The longest `client_id` a repository is asked for: 256 characters. RFC 6749
- * bounds nothing; a registered client id is an operator-chosen identifier,
- * and a Client ID Metadata Document's is an `https` URL that names a
- * document — both far shorter in practice. A Client ID Metadata Document URL
- * longer than this is not a client id this server honours, at `/authorize`
- * or at the token endpoint.
+ * bounds nothing; registered ids and Client ID Metadata Document URLs are far
+ * shorter in practice, and a longer metadata-document URL is not a client id
+ * this server honours, at `/authorize` or at the token endpoint.
  *
- * It is not a column size. `VARCHAR(255)`, the most common identifier column,
- * holds one character fewer. A repository whose store fails on a 256-character
- * id, rather than finding no row, must answer that id `null` itself: only a
- * store that cannot answer may throw.
+ * Not a column size: `VARCHAR(255)` holds one character fewer. A repository
+ * whose store fails on a 256-character id, rather than finding no row, must
+ * answer that id `null` itself: only a store that cannot answer may throw.
  */
 export const MAX_CLIENT_ID_LENGTH = MAX_IDENTIFIER_LENGTH;
 

@@ -19,19 +19,16 @@
  * value, and its test double.
  *
  * `rateLimiterContract(input)` holds a limiter to what the rate-limit guard
- * relies on: a `kind` that names it; a `failMode`, when it declares one,
- * of the guard's two (#728: the limiter's own outage policy); a decision
- * whose `allowed` is a boolean and whose optional members are well formed
- * (`remaining` a whole number from 0, `limit` one from 1, `resetAt` a valid
- * Date, `reason` a string); with `withOutage`, an outage thrown — so that
- * the guard's policy and its report apply — never answered as a decision;
- * and with `withBudget`, a key allowed its limit and refused past it, each
- * key counted apart. How a limiter resolves a spec for a key is its own:
- * the budget case hands it one spec for every key.
+ * relies on: a `kind` that names it; a `failMode` (its own outage policy),
+ * if declared, of the guard's two; a well-formed decision; with
+ * `withOutage`, an outage thrown, never answered as a decision, so the
+ * guard's policy and report apply; with `withBudget`, a key allowed its
+ * limit and refused past it, each key counted apart. The budget case hands
+ * one spec for every key: how a limiter resolves a spec is its own.
  *
- * `createTestRateLimiter` records every key it is asked about, allows
- * every check or counts each key against a limit, and can stand in for a
- * backend that is down. Published on `@o3co/auth-provider-core/testing`.
+ * `createTestRateLimiter` records every key checked, allows every check or
+ * counts each key against a limit, and can stand in for a backend that is
+ * down. Published on `@o3co/auth-provider-core/testing`.
  */
 
 import assert from "node:assert/strict";

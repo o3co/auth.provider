@@ -34,19 +34,17 @@ const instant = (value: Date, name: string): number => {
 };
 
 /**
- * In-process Map-backed {@link SubjectRevocation} (#296), carrying both
- * boundaries of D13 (#593).
+ * In-process Map-backed {@link SubjectRevocation}, carrying both the
+ * sessions and the grants boundary (see ADR
+ * 2026-09-17-federation-grants-offline-delegation). Expired watermarks are
+ * dropped when read; there is no background sweep.
  *
- * GC is lazy — expired watermarks are dropped when read — mirroring
- * `createMemoryAccessTokenDenylist`. No background sweep.
- *
- * A second write for the same subject takes the **later** value per field
- * rather than the newer call's. Two credential changes in quick succession
- * must not have the second one, computed on a replica whose clock is behind,
- * move a line backwards and resurrect what the first one killed — and the two
- * fields take their maxima independently, so a sessions-only stamp at a later
- * instant cannot drag the grants boundary forward with it, and a late full
- * revocation at an earlier instant cannot drag the sessions boundary back.
+ * A second write for the same subject keeps the later value of each field,
+ * not the newer call's: a credential change computed on a replica whose
+ * clock is behind must not move a line back and resurrect what an earlier
+ * one killed. The fields take their maxima independently, so a sessions-only
+ * stamp cannot drag the grants boundary forward, nor a late full revocation
+ * drag the sessions boundary back.
  */
 export function createInMemorySubjectRevocation(): SubjectRevocation &
 	SupportsSessionsOnlyRevocation {
@@ -78,21 +76,15 @@ export function createInMemorySubjectRevocation(): SubjectRevocation &
 			grantsBeforeMs === null
 				? (existing?.grantsBeforeMs ?? null)
 				: Math.max(existing?.grantsBeforeMs ?? Number.NEGATIVE_INFINITY, grantsBeforeMs);
-		// The floor is about GRANTS, and it is anchored to the boundary rather
-		// than to a freshly sampled clock: what it has to outlive is every
-		// grant consented before that instant, and the ceiling `activate`
-		// enforces bounds those absolutely (D3). A caller cannot shorten it.
-		//
-		// It follows — and review found this comment claiming the opposite —
-		// that a password change DOES cost a year of retention, in every
-		// deployment: `revokeBefore` is what a credential change calls, and it
-		// advances the grants boundary whether or not this deployment has a
-		// single grant. That is deliberate (D13): the alternative is a
-		// boundary that lapses under a grant the caller knew nothing about.
-		// What a sessions-only stamp costs is still the caller's expiry alone.
-		// This adapter reclaims on a read of the same subject, so a
-		// long-running process holds one entry per revoked subject for the
-		// year rather than sweeping.
+		// The floor is about grants and is anchored to the boundary, not a
+		// fresh clock: it must outlive every grant consented before that
+		// instant, which `activate`'s ceiling bounds absolutely. A caller
+		// cannot shorten it. So a credential change (`revokeBefore`) costs a
+		// year of retention in every deployment, grants or not: deliberately,
+		// since otherwise the boundary could lapse under a grant the caller
+		// knew nothing about. A sessions-only stamp costs only the caller's
+		// expiry. Entries are reclaimed on a read of the same subject, not
+		// swept.
 		const grantFloor =
 			grants === null ? Number.NEGATIVE_INFINITY : grants + SUBJECT_REVOCATION_MIN_RETENTION_MS;
 		entries.set(subject, {

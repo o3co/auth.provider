@@ -28,24 +28,18 @@ import { cascadeSubjectSessions, type SubjectSessionCascade } from "./cascadeSub
 import type { SubjectRevocation, SubjectSessionIndex } from "./types.mjs";
 
 /**
- * Per-session teardown, supplied by the caller.
- *
- * `@o3co/auth-provider-oauth` owns `cascadeLogout`, which performs the
- * carefully ordered four-step store cascade for one session. Core cannot
- * import it without inverting the package dependency, so the caller passes it
- * in and this helper stays responsible only for *which* sessions and *in what
- * order relative to the watermark*.
+ * Per-session teardown, supplied by the caller: `cascadeLogout`, the ordered
+ * store cascade for one session, lives in `@o3co/auth-provider-oauth`, which
+ * core cannot import without inverting the package dependency. This helper
+ * decides only which sessions, and in what order relative to the watermark.
  */
 export type CascadeSession = (sid: string) => Promise<{ readonly ok: boolean }>;
 
 /**
- * The optional slots this helper consumes. Named rather than free strings so a
- * caller can branch on them, and so the set is greppable when #321 adds the
- * Redis adapters that fill them.
- *
- * `federationGrantStore` appears here for the failures it can report, not for
- * the gap it can leave: unlike the other two, leaving it out is a decision
- * rather than an omission, so it is never listed in `unavailable`.
+ * The optional slots this helper consumes, named so a caller can branch on
+ * them. `federationGrantStore` appears only for the failures it can report:
+ * leaving it out is a decision, not an omission, so it is never listed in
+ * `unavailable`.
  */
 export type RevokeAllForSubjectCapability =
 	| "subjectSessionIndex"
@@ -53,12 +47,10 @@ export type RevokeAllForSubjectCapability =
 	| "federationGrantStore";
 
 /**
- * One store call that was attempted and threw.
- *
- * Distinct from {@link RevokeAllForSubjectResult.unavailable}, and the
- * distinction matters operationally: `unavailable` is a composition gap fixed
- * by wiring a module, a failure here is a backend outage fixed by retrying.
- * Collapsing them would send an operator to the wrong runbook.
+ * One store call that was attempted and threw. Distinct from
+ * {@link RevokeAllForSubjectResult.unavailable}: that is a composition gap
+ * fixed by wiring a module, this a backend outage fixed by retrying, and
+ * collapsing them would send an operator to the wrong runbook.
  */
 export interface RevokeAllForSubjectFailure {
 	readonly capability: RevokeAllForSubjectCapability;
@@ -93,8 +85,8 @@ export interface RevokeAllForSubjectOptions {
 	readonly subjectSessionIndex?: SubjectSessionIndex;
 	readonly subjectRevocation?: SubjectRevocation;
 	/**
-	 * Supplying it asks for the subject's federation grants to be ended too
-	 * (#593). **Omitting it is not a missing capability** — see
+	 * Supplying it asks for the subject's federation grants to be ended too.
+	 * **Omitting it is not a missing capability**: see
 	 * {@link RevokeAllForSubjectResult.grantsRequested}.
 	 */
 	readonly federationGrantStore?: FederationGrantStore;
@@ -121,13 +113,10 @@ export interface RevokeAllForSubjectResult {
 	readonly tokensRevoked: boolean;
 	/**
 	 * Whether a grant store was supplied, and the grant pass therefore ran.
-	 *
-	 * `false` is reported rather than counted as a gap: every call written
-	 * before #593 omits the store, and a deployment that has no grants at all
-	 * is not incomplete for not revoking any. A caller that expects grants to
-	 * be ended checks this field; what covers the omission meanwhile is the
-	 * boundary the watermark just wrote, which the adapters apply to grants as
-	 * well as to sessions.
+	 * `false` is not a gap: a deployment with no grants is not incomplete for
+	 * revoking none. A caller that expects grants ended checks this field;
+	 * meanwhile the watermark's boundary, which the adapters apply to grants
+	 * too, covers the omission.
 	 */
 	readonly grantsRequested: boolean;
 	/** Grant ids this call ended. A grant that was already over is not one. */
@@ -135,13 +124,11 @@ export interface RevokeAllForSubjectResult {
 	/** Grant ids whose write threw — still live, safe to retry. */
 	readonly grantsFailed: readonly string[];
 	/**
-	 * Capabilities that were not wired, and therefore not exercised.
-	 *
-	 * Load-bearing rather than informational: the caller invokes this
-	 * immediately after writing a new credential, and a bare success while
-	 * nothing was revoked is the worst outcome this helper could produce. A
+	 * Capabilities that were not wired, and therefore not exercised. A
 	 * non-empty list means the revocation was **partial** and the caller must
-	 * treat it as a failure.
+	 * treat it as a failure: this runs right after a new credential is
+	 * written, and a bare success while nothing was revoked is the worst
+	 * outcome it could produce.
 	 */
 	readonly unavailable: readonly RevokeAllForSubjectCapability[];
 	/**
@@ -151,53 +138,37 @@ export interface RevokeAllForSubjectResult {
 	 */
 	readonly failures: readonly RevokeAllForSubjectFailure[];
 	/**
-	 * Everything that was asked for actually happened.
-	 *
-	 * The one field a caller has to check. Deriving it from the other four is a
-	 * four-way condition every integrator would have to get right independently,
-	 * and getting it wrong reads as a successful revocation — so it is computed
-	 * here once.
+	 * Everything that was asked for actually happened: the one field a caller
+	 * has to check. Computed here once, since a four-way condition each
+	 * integrator derives on its own reads as success when gotten wrong.
 	 */
 	readonly complete: boolean;
 }
 
 /**
- * Invalidate everything this authorization server issued for one subject
- * (#296).
+ * Invalidates everything this authorization server issued for one subject.
+ * The Store owns the credential-change flow (reset token, delivery, new
+ * password); this kills the sessions and tokens already minted against the
+ * old credential, and is called right after the credential write.
  *
- * The Store owns the credential-change flow — issuing the reset token,
- * delivering it, writing the new password. What it cannot do from outside is
- * kill the sessions and tokens already minted against the old credential, and
- * that is this function's whole job. The service calls it immediately after
- * the credential write.
+ * **The watermark is written first**, before any session is cascaded:
  *
- * **The watermark is written first, before any session is cascaded.** Two
- * reasons, and both are the difference between working and not:
- *
- *   - A refresh rotation or a concurrent login on another replica can mint a
- *     token *during* the cascade loop. Enumerating sessions first and writing
- *     the watermark afterwards leaves that token outside both mechanisms —
- *     its session was not in the list, and its `iat` predates the watermark
- *     that had not yet been written.
+ *   - A refresh rotation or a login on another replica can mint a token
+ *     during the cascade. Enumerating sessions first would leave that token
+ *     outside both mechanisms: its session was not listed, and its `iat`
+ *     predates a watermark not yet written.
  *   - On partial failure the safe direction is "tokens dead, some sessions
- *     perhaps alive", not the reverse. A live session with no usable token
- *     can be cleaned up on retry; a live token is the thing being revoked.
+ *     perhaps alive": a live session with no usable token can be cleaned up
+ *     on retry; a live token is the thing being revoked.
  *
- * **This never throws.** The caller has already written the new credential and
- * has no undo, so an exception would replace a partial result it could act on
- * — retry these sids, alert on that outage — with nothing at all. Every store
- * call is therefore reported rather than propagated, and `complete` is the one
- * field a caller has to check.
+ * **This never throws.** The caller has already written the new credential
+ * and has no undo, so an exception would replace a partial result it could
+ * act on (retry these sids, alert on that outage) with nothing. Every store
+ * failure is reported, and `complete` is the one field to check.
  *
- * The subject's federation grants are ended last, and only when a store is
- * supplied (#593). That pass comes after the sessions rather than before them
- * for the same reason the watermark comes first: the two older passes are what
- * every caller already depends on, and a grant store having a bad day must not
- * cost them. An outage in any pass still leaves the other two done.
- *
- * Does **not** fix #276 — the local logout route still does not run the
- * cascade for its own session. This builds on `cascadeLogout`, which is
- * complete; the gap there is that one caller does not invoke it.
+ * Federation grants are ended last, and only when a store is supplied, so a
+ * grant store's outage cannot cost the watermark and session passes. An
+ * outage in any pass still leaves the other two done.
  */
 export async function revokeAllForSubject(
 	opts: RevokeAllForSubjectOptions,
@@ -245,9 +216,8 @@ export async function revokeAllForSubject(
 		failures.push(...sessions.failures);
 	}
 
-	// Step 3 — end every federation grant the subject has. Last, because it is
-	// the pass a caller can opt out of: the two above are what this function
-	// has always promised, and an outage here must not cost them.
+	// Step 3 — end every federation grant the subject has. Last: an outage
+	// here must not cost the two passes above.
 	const grantsRevoked: string[] = [];
 	const grantsFailed: string[] = [];
 	const grantStore = opts.federationGrantStore;
@@ -256,8 +226,8 @@ export async function revokeAllForSubject(
 			store: grantStore,
 			now: () => new Date(now()),
 			audit: opts.federationGrantAudit,
-			// One ID for the pass, so that its events read as one operation
-			// (#618); the caller's own when it has one.
+			// One ID for the pass, so that its events read as one operation; the
+			// caller's own when it has one.
 			correlationId: federationGrantCorrelationId(opts.correlationId),
 		};
 		let grants: readonly FederationGrant[] = [];

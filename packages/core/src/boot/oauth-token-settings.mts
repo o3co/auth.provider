@@ -15,18 +15,16 @@
  */
 
 /**
- * What boot's own machinery reads of the oauth module's settings (#728): the
- * issuer the discovery document, the CORS table and a session requirement's
- * page are built on. The token-binding dispatch policy is not among them: it
- * is core's, and boot reads it from the configuration with
- * `resolveTokenBindingSettings`, whatever the composition holds.
+ * What boot's own machinery reads of the oauth module's settings: the issuer
+ * the discovery document, the CORS table and a session requirement's page are
+ * built on. The token-binding dispatch policy is core's; boot reads it from
+ * the configuration with `resolveTokenBindingSettings`.
  *
- * The issuer is the `oauthTokenSettings` slot's when the composition holds
- * it — the oauth module provides the slot eagerly, so it is there whenever
- * that module is installed — and otherwise read from the configuration core's
- * schema parsed, as before: core runs in compositions without the oauth
- * module. The stage-1 checks read the configuration alone, since no provider
- * has run by then (`validate-manifests.mts`, the `grantPolicy` issuer check).
+ * The issuer is the `oauthTokenSettings` slot's when the composition holds it
+ * (the oauth module provides the slot eagerly), otherwise the configuration's,
+ * since core runs in compositions without the oauth module. The stage-1
+ * checks read the configuration alone because no provider has run by then
+ * (`validate-manifests.mts`, the `grantPolicy` issuer check).
  */
 
 import { checkOAuthTokenSettings } from "../token-settings/check.mjs";
@@ -39,7 +37,7 @@ type Components = Readonly<Record<string, unknown>>;
  * first to what its readers read (`checkOAuthTokenSettings`), so a slot
  * without a canonical issuer refuses rather than the configuration's being
  * read beside it — else `oauth.jwt.issuer` as the configuration carries it,
- * unvalidated, for each reader to hold to its own rule as it always has.
+ * unvalidated, for each reader to hold to its own rule.
  */
 export function compositionIssuer(components: Components): unknown {
 	if (components.oauthTokenSettings !== undefined) {

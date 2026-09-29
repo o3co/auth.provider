@@ -15,15 +15,13 @@
  */
 
 /**
- * A relocation's tombstone held to the one case it is for (#728). A
- * tombstone is an old path's `${?VARIABLE}` binding a `reference.conf` keeps,
- * with no default, after the path moved, so that a variable an operator still
- * exports is refused (`config-path-relocated`) rather than ignored. It is for
- * a variable whose name changed with the path: a variable whose name is what
- * the new path is bound to (#728 B9 — a Redis store's `…_KEY_PREFIX` keeps its
- * name) is one the operator set correctly, and a tombstone for it would refuse
- * them. A package's tests run this over each tombstone its `reference.conf`
- * keeps. Published on `@o3co/auth-provider-core/testing`.
+ * A relocation's tombstone held to the one case it is for. A tombstone is an
+ * old path's `${?VARIABLE}` binding a `reference.conf` keeps, with no
+ * default, after the path moved, so a variable an operator still exports is
+ * refused (`config-path-relocated`) rather than ignored. It is only for a
+ * variable whose name changed with the path: one the new path is bound to
+ * (e.g. a Redis store's `…_KEY_PREFIX`) was set correctly, and a tombstone
+ * would refuse it.
  */
 
 import assert from "node:assert/strict";

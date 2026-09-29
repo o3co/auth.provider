@@ -15,18 +15,11 @@
  */
 
 /**
- * Re-export of the v0.5.0 boot planner createApp. The legacy v0.4.x
- * AppOptions / AppResult / createApp(options): AppResult shape was deleted
- * in Phase 9 of the v0.5.0 redesign per A2-γ §3.1.
- *
- * Consumers MUST use the new shape:
+ * Re-export of the boot planner's `createApp`:
  *
  *   const handle = await createApp({ modules, bootstrapComponents });
  *   app.use(handle.router);
  *   await handle.dispose();
- *
- * See A2-β §6.3 for AppHandle shape and A2-γ §4 for the standalone
- * worked example.
  */
 export {
 	type AppHandle,

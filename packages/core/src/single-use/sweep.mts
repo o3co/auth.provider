@@ -19,22 +19,15 @@
  * entries: once `sweepInterval` writes have accumulated **and** at least
  * `minSweepIntervalMs` has passed since the last sweep.
  *
- * Both stores are keyed by values that are never presented again once they
- * are done with — a finished or abandoned ceremony's challenge, an honoured
- * assertion's `jti` — so reclaiming an entry only when it is looked up again
- * reclaims almost nothing, and the sweep has to be its own step. It is
- * amortized on the store's writes rather than run on a timer: a background
- * interval would need lifecycle registration to avoid holding the process
- * open, and a write is the only operation that grows the map. The count
- * bounds the work per write; the floor bounds the O(size) scans per second
- * whatever the write rate. The floor is measured on the monotonic clock
- * (`performance.now()`), so a wall clock stepped back cannot stall sweeps;
- * which entries are expired stays the store's call, on the wall clock their
- * expiries are written in. Writes keep counting through the floor, so the
- * first write after it sweeps.
- *
- * The result is bounded growth, not zero-lag reclamation: the resident set is
- * the live entries plus at most those that expired within one interval.
+ * Their keys (a finished ceremony's challenge, an honoured assertion's `jti`)
+ * are never looked up again, so reclaiming on lookup reclaims almost nothing.
+ * The sweep rides on writes, the only operation that grows the map, rather
+ * than a timer that would need lifecycle registration to not hold the
+ * process open. The count bounds the work per write; the floor bounds the
+ * O(size) scans per second, and runs on the monotonic clock so a wall clock
+ * stepped back cannot stall sweeps (expiry itself stays on the wall clock).
+ * The resident set is the live entries plus at most those that expired
+ * within one interval.
  */
 
 /**

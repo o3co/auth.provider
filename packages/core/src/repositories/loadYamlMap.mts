@@ -18,20 +18,17 @@
  * `loadYamlMap`: a YAML file of named entries (the static clients and users
  * files), each validated against a schema, as a Map.
  *
- * A file that does not parse is refused with its path, the line and column,
- * and the parser's reason — and nothing else. js-yaml's own exception quotes
- * the lines around the fault in its message and holds the whole file in
- * `mark.buffer`, and these files hold client secrets and password hashes: a
- * boot failure prints the error it ends with, cause chain and fields
- * included. So the exception is neither passed on nor kept as a `cause`, and
- * what the parser wrote into its reason from the file — an alias or a tag
- * name, which an unquoted value starting with `*` or `!` becomes — is cut off
- * (`reasonOf`).
+ * These files hold client secrets and password hashes, and a boot failure
+ * prints its error with cause chain and fields. js-yaml's exception quotes
+ * the lines around the fault and holds the whole file in `mark.buffer`, so a
+ * file that does not parse is refused with its path, line, column and the
+ * parser's reason only: the exception is neither passed on nor kept as a
+ * `cause`, and input the reason quotes (an alias or tag name, which an
+ * unquoted value starting with `*` or `!` becomes) is cut off (`reasonOf`).
  */
 
 import fs from "node:fs";
-// js-yaml 5 dropped the default export; import the namespace so `yaml.load`
-// resolves to the named export.
+// js-yaml has no default export; `yaml.load` is the named export.
 import * as yaml from "js-yaml";
 import type { z } from "zod";
 
@@ -75,9 +72,9 @@ export const loadYamlMap = <T extends z.ZodTypeAny>(
 	schema: T,
 ): Map<string, z.infer<T>> => {
 	const content = fs.readFileSync(filePath, "utf-8");
-	// js-yaml 5 throws "expected a document" on empty / whitespace / comment-only
-	// input, where js-yaml 4 returned undefined. An empty config file means "no
-	// entries", so treat a document-less file as an empty mapping.
+	// js-yaml throws "expected a document" on empty / whitespace / comment-only
+	// input. An empty config file means "no entries", so treat a document-less
+	// file as an empty mapping.
 	const hasDocument = content.split(/\r?\n/).some((line) => {
 		const trimmed = line.trim();
 		return trimmed !== "" && !trimmed.startsWith("#");

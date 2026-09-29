@@ -21,16 +21,13 @@
  *
  *     <purpose> NUL ‖ u32(len key id) ‖ key id ‖ u32(len record) ‖ record
  *
- * (lengths 32-bit big-endian): the caller's purpose label, the ID of the key
- * that sealed, and the bytes of the record the value belongs to. None of it
- * is stored but the key ID; the caller presents the same purpose and record
- * to open.
+ * (lengths 32-bit big-endian). Only the key ID is stored; the caller presents
+ * the same purpose and record to open.
  *
- * The format is at rest in deployments. The federation grant store in
- * `@o3co/auth-provider-redis` has sealed under it with the purpose
- * `o3co:redis:v2` since before it moved here, which is why the header is a
- * NUL-terminated label rather than a length-prefixed one: that store's header
- * was always `o3co:redis:v2\0`.
+ * The format is at rest in deployments: the federation grant store in
+ * `@o3co/auth-provider-redis` seals under the purpose `o3co:redis:v2`, whose
+ * header has always been `o3co:redis:v2\0`, hence a NUL-terminated label
+ * rather than a length-prefixed one.
  */
 
 import { createCipheriv, createDecipheriv, randomBytes } from "node:crypto";
@@ -70,15 +67,14 @@ export interface SealBinding {
 }
 
 /**
- * What opening an envelope can say. Not an exception, because two of the
- * three are ordinary answers a store hands to its caller: an operator who
- * dropped a key can put it back (`key_unavailable`), and a value whose
- * authenticated data no longer matches never opens again (`unreadable`).
+ * What opening an envelope can say. Not an exception: `key_unavailable` (an
+ * operator can put the key back) and `unreadable` (the authenticated data no
+ * longer matches) are ordinary answers a store hands to its caller.
  *
- * `keyId` is the key the envelope names, which has passed the key id rule:
- * on `ok` the key that opened the value, so a caller can re-seal a value
- * opened under a key that is no longer first; on `key_unavailable` the key
- * to put back.
+ * `keyId` is the key the envelope names, which passed the key id rule: on
+ * `ok` the key that opened the value, so a caller can re-seal one opened
+ * under a key that is no longer first; on `key_unavailable` the key to put
+ * back.
  */
 export type OpenedSeal =
 	| { readonly state: "ok"; readonly value: string; readonly keyId: string }
@@ -130,15 +126,13 @@ const aad = (head: Buffer, keyId: Buffer, record: Buffer): Buffer =>
 
 /**
  * Seals under the ring's first key and returns
- * `v2.<key id>.<iv>.<ciphertext>.<tag>`, each segment base64url. The key ID
- * is encoded rather than written literally so that the separator cannot
- * appear inside it whatever an operator configures.
+ * `v2.<key id>.<iv>.<ciphertext>.<tag>`, each segment base64url, so the
+ * separator cannot appear in the key ID whatever an operator configures.
  *
- * Throws a `RangeError` on a ring that could not seal (empty, or refused by
- * `checkSealingKeyRing`, under the name "sealing key ring"), on a purpose
- * outside {@link SealBinding.purpose}'s rule, and on a record longer than a
- * 32-bit length prefix can state: each a fault of the caller or its
- * configuration, never of the value.
+ * Throws a `RangeError` on a ring that cannot seal (empty, or refused by
+ * `checkSealingKeyRing` as "sealing key ring"), a purpose outside
+ * {@link SealBinding.purpose}'s rule, or a record too long for a 32-bit
+ * length prefix: faults of the caller or its configuration, never the value.
  */
 export function sealWithKeyRing(
 	plaintext: string,

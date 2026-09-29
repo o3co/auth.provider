@@ -46,27 +46,13 @@ export interface MemoryAccessTokenDenylist extends AccessTokenDenylist {
 /**
  * In-process Map-backed AccessTokenDenylist.
  *
- * ## Why the sweep exists (#293 item 6)
- *
- * GC used to be lazy on `has` alone: an entry was reclaimed only if someone
- * presented that exact jti again *after* it expired. For a **revoked** token
- * that is precisely the request that stops coming, so nothing was ever
- * reclaimed and every revocation became a permanent Map entry on a
- * long-running single-process deployment.
- *
- * The sibling in-memory stores are bounded by what they key on — the rate
- * limiter caps buckets and evicts, the subject stores are keyed by subject, so
- * both are bounded by population. This one is keyed by jti, where nothing
- * bounds it but time. The sweep therefore has to be its own step rather than a
- * side effect of a lucky read.
- *
- * Amortized on `add` rather than on a timer: a background interval would need
- * lifecycle registration to avoid holding the process open, and a store this
- * simple should not need a shutdown hook. `add` is also the only operation that
- * grows the map, which makes it the honest place to pay for the growth. The
- * guarantee is therefore bounded growth, not zero-lag reclamation — an expired
- * entry is dropped **within** an interval, and `has` keeps answering correctly
- * for one that has not been swept yet.
+ * Keyed by jti, so nothing bounds it but time, and a revoked token is exactly
+ * the one nobody presents again: reclaiming only on `has` would keep every
+ * revocation forever. Expired entries are therefore swept, amortized on `add`
+ * (the only operation that grows the map) rather than on a timer, which would
+ * need lifecycle registration to avoid holding the process open. The guarantee
+ * is bounded growth: an expired entry is dropped within one interval, and `has`
+ * answers correctly for one not yet swept.
  *
  * Idempotent `add`: a second call for the same jti overwrites the expiry.
  */

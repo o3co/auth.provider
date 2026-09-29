@@ -31,42 +31,23 @@ const LEVEL_RANK: Record<LogLevel, number> = {
 
 export interface ConsoleLoggerOptions {
 	/**
-	 * Minimum level to emit. Defaults to `"info"`.
-	 *
-	 * The interface has carried six levels since D-4, but this implementation
-	 * emitted all of them unconditionally — so `trace` and `debug` fired in
-	 * production, burying the events an operator needs under request-shaped
-	 * detail. `"silent"` drops everything, which is what test harnesses want.
+	 * Minimum level to emit. Defaults to `"info"`, so `trace` and `debug` stay
+	 * out of production output. `"silent"` drops everything (for test harnesses).
 	 */
 	readonly level?: LogLevel;
 }
 
 /**
- * Console-backed `Logger` implementation. Default fallback when no structured
- * logger is injected via the manifest `ComponentMap.logger` slot.
+ * Writes one log call to `console.*`. Six levels map onto four methods:
+ * trace/debug → `debug`, info → `info`, warn → `warn`, error/fatal → `error`.
  *
- * Level routing (6 logger levels → 4 available `console.*` methods):
- *   trace → console.debug
- *   debug → console.debug
- *   info  → console.info
- *   warn  → console.warn
- *   error → console.error
- *   fatal → console.error
+ * The merged object (child bindings, then the per-call obj, which wins on key
+ * collision as in pino) is passed unstringified: Node's console formats it with
+ * `util.inspect`, and structured log aggregators consume the object form. Tests
+ * should assert on `console.*` call arguments, not on string output.
  *
- * The merged object (child bindings + per-call obj) is passed verbatim to the
- * underlying `console.*` method. No `JSON.stringify` happens here — Node's
- * console formats objects with `util.inspect` for terminal output, while
- * structured log aggregators (Datadog, GCP, etc.) generally consume the
- * unmodified object form. Tests should spy on `console.*` and assert on the
- * call arguments rather than on string output.
- *
- * Per-call obj wins over child bindings on key collision (pino-compatible
- * last-write-wins).
- *
- * The console prints every object at its default depth. A `loggableError`
- * projection prints whole — its cause chain and AggregateError members
- * included — because the projection carries its own `util.inspect.custom`
- * (see `loggableError`); nothing here widens any other object.
+ * Objects print at the console's default depth; a `loggableError` projection
+ * prints whole through its own `util.inspect.custom`.
  */
 function emit(
 	method: "debug" | "info" | "warn" | "error",
@@ -75,10 +56,7 @@ function emit(
 	msg: string | undefined,
 	args: unknown[],
 ): void {
-	// console.* IS the default Logger fallback here (this is the
-	// console-backed Logger implementation); biome's recommended preset
-	// in this repo does not enable `noConsole`, so no suppression is
-	// needed.
+	// No `noConsole` suppression needed: the repo's biome preset does not enable it.
 	if (typeof obj === "string") {
 		console[method]({ ...bindings }, obj, ...(msg !== undefined ? [msg] : []), ...args);
 	} else {
@@ -87,9 +65,9 @@ function emit(
 }
 
 /**
- * Create a `Logger` instance backed by `console.*`, optionally pre-bound with
- * the given `bindings`. Pass no argument to obtain a logger with no bindings
- * (equivalent to the exported `consoleLogger` singleton).
+ * Create a `Logger` backed by `console.*`, optionally pre-bound with
+ * `bindings`. This is the default when no logger is injected via the manifest
+ * `ComponentMap.logger` slot.
  */
 export function createConsoleLogger(
 	bindings: Record<string, unknown> = {},
@@ -118,9 +96,8 @@ export function createConsoleLogger(
 		fatal(obj: Record<string, unknown> | string, msg?: string, ...args: unknown[]) {
 			if (enabled("fatal")) emit("error", frozen, obj, msg, args);
 		},
-		// The child inherits the threshold. A child that reverted to the default
-		// would leak debug output from exactly the request-scoped loggers most
-		// likely to carry request detail.
+		// The child inherits the threshold; resetting it would leak debug output
+		// from the request-scoped loggers most likely to carry request detail.
 		child(extra) {
 			return createConsoleLogger({ ...frozen, ...extra }, options);
 		},

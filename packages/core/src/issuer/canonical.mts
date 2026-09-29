@@ -15,15 +15,12 @@
  */
 
 /**
- * Validation for `oauth.jwt.issuer` — the identity every token this deployment
+ * Validation for `oauth.jwt.issuer`: the identity every token this deployment
  * mints is bound to, and the value resource servers pin.
  *
- * The issuer is a property of the deployment, never of a request. It used to
- * fall back to the `Host` header when unset, which made `iss` caller-controlled
- * behind a trusted proxy and made the tokens non-portable. RFC 8414 §2 and OIDC
- * Discovery require a stable absolute URL, and that stability is also what makes
- * the provider swappable: a heavy-class OP publishes a fixed `iss` that resource
- * servers already pin.
+ * The issuer is a property of the deployment, never of a request: taken from
+ * the `Host` header, `iss` would be caller-controlled behind a trusted proxy.
+ * RFC 8414 §2 and OIDC Discovery require a stable absolute URL.
  */
 
 /** Hosts for which `http:` is accepted — local development has no TLS. */
@@ -42,13 +39,9 @@ export type IssuerRejection =
 
 /**
  * Returns `null` when `value` is a usable canonical issuer, otherwise the
- * reason it is not.
- *
- * Accepts an absolute `https:` URL, with a path prefix if the deployment needs
- * one, and an `http:` URL only for a loopback host. Rejects query strings and
- * fragments (OIDC Discovery derives the metadata URL from the issuer, so either
- * would produce a different document URL than the one served) and embedded
- * credentials.
+ * reason it is not. Accepts an absolute `https:` URL (a path prefix allowed),
+ * or `http:` for a loopback host only. Rejects a query or fragment (OIDC
+ * Discovery derives the metadata URL from the issuer) and embedded credentials.
  */
 export function checkCanonicalIssuer(value: unknown): IssuerRejection | null {
 	if (typeof value !== "string") return "not-a-string";

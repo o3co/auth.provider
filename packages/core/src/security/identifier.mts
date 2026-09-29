@@ -18,20 +18,17 @@
  * What an identifier this server looks something up by must look like: a
  * `client_id`, a JWT `kid`, an assertion's `iss`.
  *
- * Each arrives in a request before anything vouches for it, and each is
- * handed to a store or a keystore a deployment may have written itself — one
- * that throws on input it cannot handle, which this server answers as that
- * store's outage (`503`). So the value is screened first, and one that fails
- * is refused as naming nothing, without a lookup. The same rule is held at
- * the other end — where a kid is configured or a client registered — so a
- * value this server hands out is always one it will look up again.
+ * Each arrives before anything vouches for it and goes to a store or keystore
+ * a deployment may have written, one that may throw on input it cannot
+ * handle, which would read as that store's outage (`503`). So it is screened
+ * first, and a failing value is refused as naming nothing, without a lookup.
+ * Configured kids and registered clients are held to the same rule, so every
+ * value this server hands out is one it will look up again.
  *
- * - A string, not empty.
- * - At most {@link MAX_IDENTIFIER_LENGTH} characters.
- * - No control character: C0 (`U+0000`–`U+001F`), DEL (`U+007F`), C1
- *   (`U+0080`–`U+009F`). RFC 6749 Appendix A.1 makes `client_id` `*VSCHAR`,
- *   and none of these identifiers is text a person reads; the rule stops
- *   short of refusing all non-ASCII, which a registry may already hold.
+ * The rule: a non-empty string of at most {@link MAX_IDENTIFIER_LENGTH}
+ * characters with no C0 (`U+0000`–`U+001F`), DEL or C1 (`U+0080`–`U+009F`)
+ * control character. RFC 6749 Appendix A.1 makes `client_id` `*VSCHAR`;
+ * non-ASCII is not refused, since a registry may already hold it.
  */
 
 /**

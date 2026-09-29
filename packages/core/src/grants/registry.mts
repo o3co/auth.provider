@@ -18,10 +18,8 @@ import type { GrantHandler } from "./types.mjs";
 export type GrantRegistryErrorReason = "duplicate" | "unknown" | "frozen";
 
 /**
- * Error class for GrantRegistry mutation failures. Per A6+A7 §2.4.
- *
- * The `registered` snapshot lets callers see what is currently registered
- * so the diagnostic reveals the actual mental-model mismatch.
+ * Error for GrantRegistry mutation failures. `registered` snapshots what is
+ * registered, so the message shows where the caller's expectation was wrong.
  */
 export class GrantRegistryError extends Error {
 	readonly reason: GrantRegistryErrorReason;
@@ -54,22 +52,13 @@ export class GrantRegistryError extends Error {
 /**
  * Registry of grant handlers, keyed by grant_type URN.
  *
- * Per A6+A7 §2.1–§2.3 (v0.5.0 unified contract):
  * - `register(name, handler)` throws on duplicate (no silent overwrite).
  * - `replace(name, handler)` is the explicit override path.
- * - `freeze()` is the activation boundary — after freeze, mutation throws.
+ * - `freeze()` is the activation boundary; after it, mutation throws.
  *
- * The boot planner (Phase 4 / A2-β) is the only intended caller of
- * `register` / `replace` / `freeze` in the v0.5.0 architecture, driving
- * them from each module's `contributes.grants` and `overrides.grants`
- * declarations. Phase 9 (A2-γ caller migration) internalises the registry
- * and removes it from the public API. Phase 3 establishes the contract.
- *
- * Public-export removal status (AS-8): the public re-export of
- * `GrantRegistry` / `GrantRegistryError` from `@o3co/auth-provider-core`
- * was removed per A2-γ §3.3. Both classes remain as internal
- * implementation detail of the boot planner; external consumers wire
- * grants through module-based `contributes.grants` declarations.
+ * Only the boot planner mutates it, from each module's `contributes.grants`
+ * and `overrides.grants`. Not in `@o3co/auth-provider-core`'s main entry
+ * (only `/testing` re-exports it); consumers contribute grants through modules.
  *
  * @internal
  */

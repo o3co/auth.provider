@@ -18,15 +18,10 @@ import type { SessionFederationIndex } from "../types.mjs";
 import { createMemorySidSortedSet } from "./internalSidSortedSet.mjs";
 
 /**
- * In-memory SessionFederationIndex. Wraps `createMemorySidSortedSet` for
- * insertion-order-preserving, idempotent-add federation name tracking.
- *
- * Insertion order is LOAD-BEARING per A4 §5.4: the cascade orchestrator reads
- * `(await listFederations(sid))[0]` to choose the IdP for post-logout redirect.
- * Re-add of an existing member does NOT promote position (ZADD NX equivalent).
- *
- * Supports per-element `removeFederation(sid, name)` for federation logout
- * completion in addition to full `removeBySid` cleanup. Per A4 §5.4 + §7.1.
+ * In-memory SessionFederationIndex over `createMemorySidSortedSet`.
+ * Insertion order is load-bearing: logout reads
+ * `(await listFederations(sid))[0]` to choose the IdP for the post-logout
+ * redirect, and a re-add does not move a member (ZADD NX).
  */
 export function createInMemorySessionFederationIndex(): SessionFederationIndex {
 	const set = createMemorySidSortedSet();

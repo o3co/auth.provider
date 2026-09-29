@@ -29,15 +29,13 @@ export type { TestInspect } from "./test-inspect.mjs";
 export type TestAppHandle = AppHandle & { readonly inspect: TestInspect };
 
 /**
- * `createTestApp` extends the Phase 4 boot planner's `createApp` with:
+ * `createApp` for tests, with:
  * 1. Synthesised bootstrap components when `bootstrapComponents` is omitted —
  *    a minimal `{ config, pathResolver }` sufficient for a smoke-test boot.
  *    When `bootstrapComponents` is supplied, it is used verbatim — NO MERGE.
- * 2. A read-only `inspect` view of registries (grants, federations,
- *    tokenExchangeValidators, routes), exposed on the returned handle.
- *
- * Per A2-γ §7.2: TestInspect is a testing-only escape hatch and MUST NOT
- * appear on the production AppHandle.
+ * 2. A read-only `inspect` view of the registries on the returned handle:
+ *    a testing-only escape hatch that MUST NOT appear on the production
+ *    AppHandle.
  */
 export async function createTestApp<B extends BootstrapMap = DefaultBootstrapMap>(
 	options?: Partial<CreateAppOptions<B>>,
@@ -53,23 +51,16 @@ export async function createTestApp<B extends BootstrapMap = DefaultBootstrapMap
 		contributionKinds: options?.contributionKinds,
 	} as CreateAppOptions<B>);
 
-	// Project planner-internal collectors as ReadonlyMap views. The internal
-	// collectors are accessible to this same package via a planner-internal
-	// accessor exported from ./boot/. If no such accessor exists yet, add a
-	// narrow read-only export — see Step 6.
 	const inspect: TestInspect = projectInspect(handle);
 
-	// AppHandle is Object.frozen by assembleApp (Theme D). Spread into a new
-	// plain object so we can attach the testing-only `inspect` field without
-	// mutating the frozen production handle.
+	// AppHandle is frozen by assembleApp: spread into a new plain object so
+	// the testing-only `inspect` field does not touch the production handle.
 	return { ...handle, inspect } as TestAppHandle;
 }
 
 function projectInspect(handle: AppHandle): TestInspect {
-	// Project planner-internal synthetic collector projections as ReadonlyMap views.
-	// `grantHandlerResolver` and `tokenExchangeValidatorResolver` expose `.entries()`
-	// per their resolver interfaces (synthetic-keys.mts). `federationProviders` is
-	// already a ReadonlyMap. Per A2-γ §7.2.
+	// The planner's synthetic collectors as ReadonlyMap views: the two
+	// resolvers expose `.entries()`; `federationProviders` is already a map.
 	const { grantHandlerResolver, tokenExchangeValidatorResolver, federationProviders } =
 		handle.components;
 

@@ -15,36 +15,23 @@
  */
 
 /**
- * The MFA transaction, the subject state that bounds guessable proofs, and
- * the port that keeps both (the MFA ADR's D8 and D21), with its
- * `mfaTransactionStore` slot.
+ * The MFA transaction, the subject lock state that bounds guessable proofs, the
+ * port that keeps both, and its `mfaTransactionStore` slot. See ADR
+ * 2026-09-25-multi-factor-authentication (the MFA transaction; attempts,
+ * lockout and rate limits).
  *
  * A transaction is the short-lived, single-use record of one second-factor
- * ceremony, bound to what started it — a browser session, today — through a
- * typed binding every use compares whole (#742). Every operation a
- * race could split is atomic in the store: attempts are reserved before a
- * proof is checked, a challenge is taken once, and of the verifications in
- * flight one consumes the transaction.
+ * ceremony, bound to what started it. Every operation a race could split is
+ * atomic in the store: attempts are reserved before a proof is checked, a
+ * challenge is taken once, and one verification in flight consumes it.
  *
- * The subject state is D21's lock, for guessable proofs only: the
- * consecutive run with its short backoff and hard limit, the weekly budget
- * no success refunds, and the browsers an exempt success trusts against the
- * weekly hold. Each answer is judged on the time its caller passes, not on
- * the store's clock, so the callers' clocks must agree — the provider's is
- * NTP-synced (D22). A caller whose clock runs ahead is answered on its own
- * time, but what it erases is bounded: a store forgets a failure, or a trust,
- * only {@link MFA_CLOCK_SKEW_ALLOWANCE_MS} after it stops counting, judged no
- * later than the store's own clock. A caller ahead by less than the allowance
- * erases nothing a caller on time still counts, and one far ahead — on any
- * subject — erases nothing either.
- *
- * What bounds it: a subject is a user the Store authenticated, but where the
- * Store lets anyone sign up anyone can mint subjects, and a subject's run
- * never expires — only a success, an exempt success or `clearSubjectState`
- * ends it (D21's hard limit counts it across weeks). Transactions are bounded
- * by their expiry and the login rate limit, not per subject: one account can
- * open as many as it logs in, so the coordinator must bound the transactions
- * one session holds (the MFA package's concern, not the store's).
+ * Subject state is judged on the time each caller passes, not the store's
+ * clock, so callers' clocks must agree (NTP); see
+ * {@link MFA_CLOCK_SKEW_ALLOWANCE_MS} for what a fast clock can erase. A
+ * subject's run never expires (only a success, an exempt success or
+ * `clearSubjectState` ends it), and an open sign-up lets anyone mint subjects.
+ * Transactions are bounded by expiry and the login rate, not per subject, so
+ * the coordinator must bound the transactions one session holds.
  */
 
 import type { AdapterFactory } from "../adapters/AdapterFactory.mjs";
@@ -54,9 +41,8 @@ import { checkPrimaryContinuation } from "../session-admission/primary.mjs";
 import type { PrimaryContinuation } from "../session-admission/requirement.mjs";
 
 /**
- * A transaction bound to a browser session: `id` is the express session id
- * the login route regenerated, or the one a step-up or an enrollment began
- * in.
+ * A transaction bound to a browser session: `id` is the express session id the
+ * login route regenerated, or the one a step-up or an enrollment began in.
  */
 export interface MfaSessionBinding {
 	readonly kind: "session";
@@ -64,13 +50,12 @@ export interface MfaSessionBinding {
 }
 
 /**
- * What a transaction is bound to (#742): the one party that may continue its
- * ceremony. A union discriminated by `kind` — a browser session alone today;
- * a transport without a browser adds its own kinds (a key, a client) — which
- * a store keeps whole, as data, reading neither its kind nor its id. Every
- * use compares the whole binding, kind included
- * ({@link isMfaTransactionBoundTo}): a transaction bound to one party is not
- * read through another's binding, even one that carries the same id.
+ * What a transaction is bound to: the one party that may continue its ceremony.
+ * Discriminated by `kind` (a browser session today; a browserless transport
+ * adds its own kinds). A store keeps it whole, as data, reading neither field.
+ * Every use compares the whole binding, kind included
+ * ({@link isMfaTransactionBoundTo}), so another kind never matches, even with
+ * the same id.
  */
 export type MfaTransactionBinding = MfaSessionBinding;
 
@@ -85,11 +70,9 @@ export interface MfaTransaction {
 	/** `step_up` / `enroll`: the `UserSession` it upgrades. */
 	readonly sid: string | undefined;
 	/**
-	 * `login`: the continuation `admitPrimary` answered (the session-admission
-	 * ADR's D5) — the primary as the login route built it, the `User` the
-	 * session will be built from among it, and what every requirement that
-	 * completed before this one added — presented to `resumePrimary` when the
-	 * ceremony completes, for at most the transaction's life.
+	 * `login`: the continuation `admitPrimary` answered (the primary, the `User`
+	 * the session will be built from, and what earlier requirements added),
+	 * presented to `resumePrimary` when the ceremony completes.
 	 */
 	readonly continuation: PrimaryContinuation | undefined;
 	/** `login`: where the page goes afterwards, already held to `session.redirectAllowlist`. */
@@ -98,7 +81,7 @@ export interface MfaTransaction {
 	readonly emailProof: "not_required" | "required" | { readonly provedAtMs: number };
 	/** `step_up`: the `acr_values` hinted, for offering factors. */
 	readonly acrValues: readonly string[] | undefined;
-	/** A challenge sent and not yet taken; `state` sealed or digested (D11). */
+	/** A challenge sent and not yet taken; `state` sealed or digested. */
 	readonly challenge:
 		| {
 				readonly factorId: string;
@@ -107,7 +90,7 @@ export interface MfaTransaction {
 				readonly expiresAtMs: number;
 		  }
 		| undefined;
-	/** An enrollment begun and not yet completed; `state` sealed (D11). */
+	/** An enrollment begun and not yet completed; `state` sealed. */
 	readonly pendingEnrollment:
 		| { readonly kind: string; readonly state: string; readonly expiresAtMs: number }
 		| undefined;
@@ -122,15 +105,13 @@ export interface MfaTransaction {
 }
 
 /**
- * What `update` may change. A key with a value sets the field; `null` clears
- * a field that may be empty (`challenge`, `pendingEnrollment`,
- * `lastSentAtMs` — clearing the last send lifts the resend cooldown after a
- * failed delivery, and the retry still costs a send); a key absent — or present with `undefined`, which a spread
- * or an optional property produces — leaves the field as it is, so a patch
- * can never clear a limit by omission. A value a field does not admit is a
- * `RangeError` ({@link mfaTransactionPatchWrites}), and so is `null` for a
- * field that may not be empty. Nothing else about a transaction changes after
- * `create`: any other key a patch carries is ignored.
+ * What `update` may change. A value sets the field; `null` clears a clearable
+ * field (`challenge`, `pendingEnrollment`, `lastSentAtMs`: clearing the last
+ * send lifts the resend cooldown after a failed delivery, and the retry still
+ * costs a send). An absent or `undefined` key leaves the field alone, so a
+ * patch never clears a limit by omission. A value the field does not admit, or
+ * `null` for an unclearable field, is a `RangeError`
+ * ({@link mfaTransactionPatchWrites}). Other keys are ignored.
  */
 export interface MfaTransactionPatch {
 	readonly enrollment?: MfaTransaction["enrollment"];
@@ -163,13 +144,11 @@ const isRecord = (value: unknown): value is Readonly<Record<string, unknown>> =>
 	typeof value === "object" && value !== null && !Array.isArray(value);
 
 /**
- * `value` as a binding a transaction admits, copied to its known fields, or
- * `undefined`: a session binding's `id` is a non-empty, well-formed string —
- * a lone surrogate is no id, since every one encodes as U+FFFD's bytes and
- * two different ids would compare alike — and a kind this version does not
- * know is none. `kind` and `id` are read once, so a getter cannot pass the
- * check and hand over something else; a read that throws (a getter, a proxy
- * trap, a revoked proxy) is no binding either.
+ * `value` as an admitted binding, copied to its known fields, or `undefined`.
+ * A session id must be a non-empty, well-formed string: lone surrogates all
+ * encode as U+FFFD, so two different ids would compare alike. An unknown kind
+ * is no binding. `kind` and `id` are read once, so a getter cannot pass the
+ * check and hand over something else; a read that throws is no binding.
  */
 const bindingOf = (value: unknown): MfaTransactionBinding | undefined => {
 	try {
@@ -239,15 +218,12 @@ const CLEARABLE: ReadonlySet<keyof MfaTransactionPatch> = new Set([
 ]);
 
 /**
- * What a patch writes, field by field, after the rules of
- * {@link MfaTransactionPatch}: each entry a patch key and its new value as the
- * store keeps it — a sub-object copied to its known fields only — or
- * `undefined` for a field `null` clears. A key absent or present with
- * `undefined` is not an entry, and neither is a key outside
- * {@link MFA_TRANSACTION_PATCH_KEYS}. Throws a `RangeError` naming the key for
- * a value its field does not admit, before anything is written — every
- * adapter calls it first, and {@link checkMfaTransactionTransitions} once it
- * holds the record at the expected version.
+ * What a patch writes, per {@link MfaTransactionPatch}: each key with its value
+ * as the store keeps it (sub-objects copied to known fields), or `undefined`
+ * for a field `null` clears. Absent, `undefined` and unknown keys are skipped.
+ * Throws a `RangeError` naming the key before anything is written. Every
+ * adapter calls it first, then {@link checkMfaTransactionTransitions} on the
+ * record at the expected version.
  */
 export function mfaTransactionPatchWrites(
 	patch: MfaTransactionPatch,
@@ -284,14 +260,12 @@ const ENROLLMENT_RANK: Readonly<Record<MfaTransaction["enrollment"], number>> = 
 
 /**
  * Refuses, with a `RangeError`, writes that would refund a limit or undo a
- * requirement of `current`: `sends` going down (D21's send limit counts up
- * only); `lastSentAtMs` moving back; an email proof moving from `"required"`
- * to anything but met, or from met to anything but met (D24: a required proof
- * is met, never waived); `enrollment` going down (`none` < `allowed` <
- * `required`). A requirement may be raised. Clearing `lastSentAtMs` (`null`)
- * is deliberate: after a failed delivery (F5) the user may retry at once, and
- * the retry still costs a send. Every adapter calls it on the record at the expected version,
- * before it writes.
+ * requirement of `current`: `sends` going down, `lastSentAtMs` moving back, a
+ * required email proof becoming anything but met or a met one undone (a
+ * required proof is met, never waived), `enrollment` lowered (`none` <
+ * `allowed` < `required`). Clearing `lastSentAtMs` is allowed: after a failed
+ * delivery the user may retry at once, and the retry still costs a send. Every
+ * adapter calls it on the record at the expected version, before writing.
  */
 export function checkMfaTransactionTransitions(
 	current: MfaTransaction,
@@ -330,16 +304,13 @@ export function checkMfaTransactionTransitions(
 const isTextOrAbsent = (value: unknown): boolean => value === undefined || isText(value);
 
 /**
- * The record a store keeps for a new transaction, or a `RangeError`: every
- * field of {@link MfaTransaction} held to its type — the patch fields to the
- * same rules as a patch, `enrollment` and `emailProof` required — and the
- * counters a fresh record's: `attempts` `0`, and a `version` or `sends` that is
- * a safe non-negative integer. A limit is only as good as the count it starts
- * from: with `attempts` NaN, `NaN + 1 > max` is false and every reservation
- * would pass; with `emailProof` missing, no D24 gate. The record holds only
- * the fields a transaction has, sub-objects copied to their known fields.
- * Every adapter calls it in `create`, beside its own check of the expiry
- * against its clock.
+ * The record a store keeps for a new transaction, or a `RangeError`. Every
+ * field is held to its type (patch fields by the patch rules, `enrollment` and
+ * `emailProof` required), `attempts` must be `0`, and `version` and `sends`
+ * safe non-negative integers: a limit is only as good as the count it starts
+ * from (with `attempts` NaN, `NaN + 1 > max` is false and every reservation
+ * passes). Only a transaction's fields are kept, sub-objects copied to known
+ * fields. Every adapter calls it in `create`, beside its own expiry check.
  */
 export function newMfaTransactionRecord(tx: MfaTransaction): MfaTransaction {
 	const refuse = (what: string): never => {
@@ -412,19 +383,16 @@ export function newMfaTransactionRecord(tx: MfaTransaction): MfaTransaction {
 }
 
 /**
- * Whether `tx` is bound to `binding` — the whole binding, kind included (#742):
- * a binding of another kind never matches, whatever its id, and neither does
- * one that is not a binding a transaction admits, on either side — an id that
- * is not a well-formed string among them — nor one whose reading throws. Each
- * side's kind and id are read once, and the ids compared in constant time.
- * The one comparison every use of a transaction makes;
- * {@link getBoundMfaTransaction} reads through it.
+ * Whether `tx` is bound to `binding`, the whole binding compared, kind
+ * included. Another kind, a binding either side does not admit (such as an id
+ * that is not a well-formed string), or one whose reading throws never matches.
+ * Each side is read once and the ids compared in constant time. Every use of a
+ * transaction makes this comparison, through {@link getBoundMfaTransaction}.
  *
- * Constant time holds for ids of one length only (`security/timingSafe.mts`'s
- * contract): the comparison answers early when the lengths differ. For the
- * session kind the length is public — an express session id is 32 characters,
- * and the cookie carries it. A kind whose ids vary in length, and whose
- * length is secret, must compare fixed-length digests instead.
+ * Constant time holds only for ids of equal length (`security/timingSafe.mts`).
+ * The session kind's length is public (an express session id is 32 characters,
+ * carried in the cookie); a kind with secret-length ids must compare
+ * fixed-length digests instead.
  */
 export function isMfaTransactionBoundTo(
 	tx: Pick<MfaTransaction, "binding">,
@@ -437,20 +405,19 @@ export function isMfaTransactionBoundTo(
 }
 
 /**
- * The transaction `id` names when it is bound to `binding`, the whole binding
- * compared ({@link isMfaTransactionBoundTo}); `null` otherwise. A transaction
- * bound to anything else is answered as an id the store never held, so a
- * mismatch says nothing of what exists (the MFA ADR's D8 and D27). A store
+ * The transaction `id` names if it is bound to `binding`
+ * ({@link isMfaTransactionBoundTo}), else `null`: a transaction bound to
+ * anything else reads as an unknown id, so a mismatch reveals nothing. A store
  * that cannot answer rejects, as its `get` does.
  *
- * - **It comes first.** Every use of a transaction starts with this read, and
- *   after it calls only operations that carry the version it read (`update`,
- *   `takeChallenge`, `consume`) — and `reserveAttempt`, which carries none, only
- *   once the read held: it deletes the transaction past `max`, so called on an
- *   id alone it would let anyone holding the id destroy the ceremony.
+ * - **It comes first.** Every use of a transaction starts with this read, then
+ *   calls only operations carrying the version it read (`update`,
+ *   `takeChallenge`, `consume`), plus `reserveAttempt` once the read held: that
+ *   deletes the transaction past `max`, so on a bare id anyone holding it could
+ *   destroy the ceremony.
  * - **It is necessary, not sufficient.** A `step_up` or `enroll` transaction
- *   upgrades one `UserSession`: the route also compares `tx.sid` with the
- *   session's `sid`, outside the binding (the MFA ADR's F2 step 2).
+ *   upgrades one `UserSession`; the route also compares `tx.sid` with the
+ *   session's `sid`.
  */
 export async function getBoundMfaTransaction(
 	store: Pick<MfaTransactionStore, "get">,
@@ -462,8 +429,8 @@ export async function getBoundMfaTransaction(
 }
 
 /**
- * D21's subject lock (`mfa.lockout`). Every field is a positive whole number;
- * {@link checkMfaLockoutPolicy} is the rule.
+ * The subject lock policy (`mfa.lockout`). Every field is a positive whole
+ * number; {@link checkMfaLockoutPolicy} is the rule.
  */
 export interface MfaLockoutPolicy {
 	/** Consecutive failures that start the short backoff (5); at most `hardLimit`. */
@@ -474,10 +441,8 @@ export interface MfaLockoutPolicy {
 	readonly maxSeconds: number;
 	/**
 	 * How long after the last lock ends the backoff is forgotten, in seconds
-	 * (86400). Before any lock, the same quiet period after the previous
-	 * failure starts the count again: failures that never reached the
-	 * threshold are forgotten as a lock would be. Neither ends the run the
-	 * hard limit counts.
+	 * (86400). Before any lock, the same quiet period after the previous failure
+	 * restarts the count. Neither ends the run the hard limit counts.
 	 */
 	readonly memorySeconds: number;
 	/** Failures allowed in any rolling seven days (10). */
@@ -490,19 +455,18 @@ export interface MfaLockoutPolicy {
 	readonly trustedBrowserDays: number;
 }
 
-/** The weekly budget's window: any rolling seven days (D21). */
+/** The weekly budget's window: any rolling seven days. */
 export const MFA_WEEKLY_WINDOW_MS = 7 * 86_400_000;
 
 /**
- * How long a store keeps a failure, or a trust, after it stops counting: a
- * day, measured on the store's clock and never on a later one. A caller whose
- * clock runs ahead by less than this erases nothing a caller on time still
- * counts. Clocks are NTP-synced (D22), so a day is far more than a working
- * deployment needs; it costs one more day of state.
+ * How long a store keeps a failure or a trust after it stops counting: a day,
+ * on the store's clock. A caller whose clock runs ahead by less erases nothing
+ * a caller on time still counts. With NTP-synced clocks a day is ample; it
+ * costs a day of extra state.
  */
 export const MFA_CLOCK_SKEW_ALLOWANCE_MS = 86_400_000;
 
-/** The most consecutive failures a lockout policy may allow: NIST SP 800-63B-4's cap, which D21 cites. */
+/** The most consecutive failures a lockout policy may allow: NIST SP 800-63B-4's cap. */
 export const MFA_LOCKOUT_MAX_HARD_LIMIT = 100;
 
 /** Which hold refused a guessable attempt. `hard` lifts only on an exempt success, a credential change or an operator reset. */
@@ -520,10 +484,10 @@ export type MfaSubjectAttemptReservation =
 
 /**
  * How a reserved attempt ended. `failure`: it stands. `success`: a guessable
- * proof verified — it ends the consecutive run up to and including this
- * reservation (an attempt reserved after it, still in flight, starts the
- * next), and is not a failure. `void`: the proof was right but the factor's
- * write lost or failed — the attempt is removed, and the run goes on.
+ * proof verified; it ends the consecutive run up to and including this
+ * reservation (a later one still in flight starts the next). `void`: the proof
+ * was right but the factor's write lost or failed; the attempt is removed and
+ * the run goes on.
  */
 export type MfaSubjectAttemptOutcome = "failure" | "success" | "void";
 
@@ -531,31 +495,27 @@ export type MfaSubjectAttemptOutcome = "failure" | "success" | "void";
  * Where MFA transactions and the subject lock state are kept.
  *
  * Every operation is atomic on its own. A store that cannot answer throws:
- * an outage is `503`, never a verdict on a proof (D28).
+ * an outage is `503`, never a verdict on a proof.
  */
 export interface MfaTransactionStore {
 	readonly kind: string;
 
 	/**
-	 * Insert-only: a live id is refused. Refuses with a `RangeError` an
-	 * `expiresAtMs` that is not a future instant, and a field its type does not
-	 * admit or counters that are not a fresh record's
-	 * ({@link newMfaTransactionRecord}). It keeps only the fields a transaction
-	 * has. The lifetime has no ceiling here: it is `mfa.transactionTtlSeconds`,
-	 * which the MFA module refuses at boot when it is out of range, and the
-	 * coordinator derives `expiresAtMs` from nothing else.
+	 * Insert-only: a live id is refused. A `RangeError` for an `expiresAtMs` that
+	 * is not a future instant, or a record {@link newMfaTransactionRecord}
+	 * refuses. No lifetime ceiling here: the coordinator derives `expiresAtMs`
+	 * only from `mfa.transactionTtlSeconds`, which boot range-checks.
 	 */
 	create(tx: MfaTransaction): Promise<void>;
 	/** The transaction, or `null` once it expired. */
 	get(id: string): Promise<MfaTransaction | null>;
 	/**
-	 * Compare-and-set on `version`: applies `patch` by the rules of
-	 * {@link MfaTransactionPatch} and bumps `version` by one, only if the
-	 * transaction is still at `expectedVersion`. Answers the transaction as
-	 * written, or `null` when the version moved or it is gone. A patch value a
-	 * field does not admit is a `RangeError`, whatever the version; so is an
-	 * `expectedVersion` of `Number.MAX_SAFE_INTEGER`, whose next version would
-	 * be no safe integer (`checkMfaVersionAdvances`).
+	 * Compare-and-set on `version`: applies `patch` ({@link MfaTransactionPatch})
+	 * and bumps `version`, only if still at `expectedVersion`. Answers the
+	 * transaction as written, or `null` when the version moved or it is gone. A
+	 * value a field does not admit, or an `expectedVersion` of
+	 * `Number.MAX_SAFE_INTEGER` (`checkMfaVersionAdvances`), is a `RangeError`
+	 * whatever the version.
 	 */
 	update(
 		id: string,
@@ -563,13 +523,11 @@ export interface MfaTransactionStore {
 		patch: MfaTransactionPatch,
 	): Promise<MfaTransaction | null>;
 	/**
-	 * Atomic: `attempts` + 1, whatever the version. Answers `ok` while the
-	 * count is within `max`; the reservation past `max` — or any the store
-	 * cannot count, which fails closed — deletes the transaction and answers
-	 * `{ ok: false, attempts }` with the attempts it had reserved (`max`, unless
-	 * `max` was lowered in flight). No live transaction answers
-	 * `{ ok: false, attempts: 0 }`. Refuses a `max` that is not a positive
-	 * whole number with a `RangeError`.
+	 * Atomic: `attempts` + 1, whatever the version. `ok` while within `max`; the
+	 * reservation past `max`, or one the store cannot count (fails closed),
+	 * deletes the transaction and answers `{ ok: false, attempts }` with the
+	 * attempts already reserved. No live transaction: `{ ok: false, attempts: 0 }`.
+	 * A `max` that is not a positive whole number is a `RangeError`.
 	 */
 	reserveAttempt(
 		id: string,
@@ -607,15 +565,14 @@ export interface MfaTransactionStore {
 		outcome: MfaSubjectAttemptOutcome,
 	): Promise<void>;
 	/**
-	 * An exempt success (a recovery code, WebAuthn, the 80-bit email proof):
-	 * ends the run up to `nowMs` (an attempt reserved later stays) and with it
-	 * a hard hold, and trusts the browser against the weekly hold. Answers the
-	 * value the browser presents from then on — 32 bytes from the CSPRNG,
-	 * base64url — of which the store keeps a digest. When `browser` is one
-	 * already trusted, its trust is renewed under the new value rather than a
-	 * second one added, so a user's daily exempt sign-ins never push their
-	 * other browsers out of the `trustedBrowsers` list. The week stands. Call
-	 * it only after the transaction holding the exempt proof was consumed.
+	 * An exempt success (a recovery code, WebAuthn, the 80-bit email proof): ends
+	 * the run up to `nowMs` (a later reservation stays), and with it a hard hold,
+	 * and trusts the browser against the weekly hold. Answers the value the
+	 * browser presents from then on (32 CSPRNG bytes, base64url; the store keeps
+	 * a digest). An already-trusted `browser` is renewed under the new value, not
+	 * added, so daily exempt sign-ins never push other browsers out of
+	 * `trustedBrowsers`. The week stands. Call it only after the transaction
+	 * holding the exempt proof was consumed.
 	 */
 	noteExemptSuccess(
 		subject: string,
@@ -624,33 +581,30 @@ export interface MfaTransactionStore {
 		browser: string | undefined,
 	): Promise<{ readonly browser: string }>;
 	/**
-	 * Forget everything about `subject`'s lock — the run, the week and the
-	 * trusted browsers: the operator reset and a credential change (D21, D25).
-	 * A password change clearing the weekly budget is the owner's decision:
-	 * it is the remedy for an attacker who holds the password, and it ends
-	 * the hold that attacker caused.
+	 * Forget `subject`'s lock state (the run, the week, the trusted browsers):
+	 * the operator reset and a credential change. Clearing the week on a
+	 * password change is deliberate: it is the remedy for an attacker who holds
+	 * the password, and it ends the hold that attacker caused.
 	 */
 	clearSubjectState(subject: string): Promise<void>;
 
-	// The email proof the operator reset requires (D25).
+	// The email proof the operator reset requires.
 	/**
-	 * Record that `subject`'s next first binding requires the 80-bit email
-	 * proof, whatever `mfa.enrollment.requireEmailProof` says — the operator
-	 * reset's `requireEmailProof: true`. Idempotent. It has no expiry, and
-	 * `clearSubjectState` leaves it: the reset clears the lock state and a
-	 * password change clears it again, and neither may lift the requirement.
+	 * Record that `subject`'s next first binding requires the 80-bit email proof,
+	 * whatever `mfa.enrollment.requireEmailProof` says (the operator reset's
+	 * `requireEmailProof: true`). Idempotent. No expiry, and `clearSubjectState`
+	 * leaves it: neither the reset nor a password change may lift it.
 	 */
 	requireEmailProofAtNextBinding(subject: string): Promise<void>;
 	/** Whether the requirement is recorded for `subject`. */
 	emailProofRequiredAtNextBinding(subject: string): Promise<boolean>;
 	/**
-	 * Atomic read-and-clear, at the first binding the requirement was for:
-	 * `true` for the one caller that cleared it, `false` when none was
-	 * recorded or another caller cleared it first. Call it only after the
-	 * email proof was verified and the first counting factor written — create,
-	 * then consume — so a binding that fails leaves the requirement standing.
-	 * The adapter that keeps it must be as durable as the factor store: a lost
-	 * requirement lets a password holder bind without the proof.
+	 * Atomic read-and-clear at the first binding: `true` for the one caller that
+	 * cleared it, `false` when none was recorded or another cleared it first.
+	 * Call it only after the email proof was verified and the first counting
+	 * factor written, so a failed binding leaves the requirement standing. Keep
+	 * it as durably as the factor store: a lost requirement lets a password
+	 * holder bind without the proof.
 	 */
 	consumeEmailProofRequirement(subject: string): Promise<boolean>;
 }
@@ -662,14 +616,12 @@ const isPositiveWhole = (value: unknown): value is number =>
 	typeof value === "number" && Number.isSafeInteger(value) && value > 0;
 
 /**
- * Refuses a lockout policy a store cannot apply as written, with a
- * `RangeError` naming `setting` and the field: an object, every field a
- * positive whole number, `maxSeconds` at least `baseSeconds`, `threshold` at
- * most `hardLimit` (else the backoff would never engage before the hard
- * hold), `hardLimit` at most {@link MFA_LOCKOUT_MAX_HARD_LIMIT}, and every
- * duration one that ends within the Date range. The MFA module calls it at
- * boot with `"mfa.lockout"`, so a bad setting refuses the boot; every store
- * operation that takes a policy calls it again.
+ * Refuses a lockout policy a store cannot apply as written, with a `RangeError`
+ * naming `setting` and the field: an object, every field a positive whole
+ * number, `maxSeconds` ≥ `baseSeconds`, `threshold` ≤ `hardLimit` (else the
+ * backoff never engages before the hard hold), `hardLimit` ≤
+ * {@link MFA_LOCKOUT_MAX_HARD_LIMIT}, and every duration ending within the
+ * Date range. Called at boot and again by every store operation taking a policy.
  *
  * @param setting - where the policy was read from, for the message.
  */
@@ -718,7 +670,7 @@ export function checkMfaLockoutPolicy(policy: MfaLockoutPolicy, setting = "mfa.l
 // ---------------------------------------------------------------------------
 declare module "@o3co/auth-provider-core" {
 	interface ComponentMap {
-		/** MFA transactions and the subject lock state (the MFA ADR's D8, D21). */
+		/** MFA transactions and the subject lock state. */
 		readonly mfaTransactionStore?: MfaTransactionStore;
 	}
 }

@@ -15,23 +15,16 @@
  */
 
 /**
- * The federation adapter port (#626 P1).
+ * The federation adapter port. An adapter implements `FederationProvider`
+ * and, when it can do more, the capability interfaces below; the session
+ * router drives them, `oauth` reads them off `federationProviders`, and
+ * `federation-grants` delegates through them. It lives in core because those
+ * packages may not import one another and all depend on core.
  *
- * An adapter implements `FederationProvider` and, when it can do more, the
- * capability interfaces below; the session router drives them, `oauth` reads
- * them off `federationProviders`, and `federation-grants` delegates through
- * them. It lives in core because every one of those is a different package
- * and none of them may import another: the contract a contribution is
- * registered with has to be the one its consumer reads, and core is the only
- * place all of them already depend on.
- *
- * What stays in `@o3co/auth-provider-session` is what only its router uses:
- * `FederationResult`, the redirect policy it feeds, and the routes
- * themselves. The pure helpers an adapter builds its requests with and reads
- * its token response through — the PKCE challenge, the code-exchange URL,
- * the client-secret resolver, `federationTokenSnapshot` — are beside this
- * contract, in `pkce.mts`, `callback-url.mts`, `client-secret.mts` and
- * `token-snapshot.mts`.
+ * What only the session router uses (`FederationResult`, its redirect policy)
+ * stays in `@o3co/auth-provider-session`. The helpers an adapter builds its
+ * requests with are beside this file: `pkce.mts`, `callback-url.mts`,
+ * `client-secret.mts`, `token-snapshot.mts`.
  */
 
 import type { FederationResponseMode } from "./response-mode.mjs";
@@ -72,12 +65,10 @@ export interface FederationProfile {
 	readonly expiresAt: Date | null;
 	/**
 	 * `expires_in` from the token response, in seconds, as the adapter's
-	 * library read it (openid-client applies `parseFloat` to one that is not a
-	 * number); `null` when it carried none. `expiresAt` above is derived from
-	 * it on the adapter's clock, and one step of that clock is enough to turn
-	 * 3600 into 3601 — so a rule that judges the lifetime a token was ISSUED
-	 * with reads this, not the difference of two dates (#593, D5). Optional:
-	 * adapters written before it may omit it.
+	 * library read it (openid-client applies `parseFloat` to a non-number);
+	 * `null` when it carried none. A rule that judges the lifetime a token was
+	 * ISSUED with reads this, not a difference of dates: one clock step turns
+	 * 3600 into 3601. Optional; an adapter may omit it.
 	 */
 	readonly expiresIn?: number | null;
 	/** `scope` as the token response carried it, space-delimited (RFC 6749 §5.1). Absent when it carried none. */
@@ -91,58 +82,45 @@ export interface FederationProfile {
 /**
  * Pure-function interface for an upstream OAuth 2 / OIDC identity provider.
  *
- * Implementations MUST NOT expose vendor library types (passport, arctic, openid-client, etc)
- * through this interface or through types exported alongside it. Adapters should keep vendor
- * concerns below a ≤50-line facade (target).
+ * Implementations MUST NOT expose vendor library types (passport, arctic,
+ * openid-client, etc.) through this interface or types exported beside it.
  *
- * State (CSRF `state`, PKCE `codeVerifier`) is managed by the session route layer and passed
- * into both calls; providers never allocate state themselves.
+ * State (CSRF `state`, PKCE `codeVerifier`) is managed by the session route
+ * layer and passed into both calls; providers never allocate state.
  */
 export interface FederationProvider {
 	readonly name: string;
 	readonly scope: readonly string[];
 
 	/**
-	 * How this IdP delivers the authorization response — `"query"` (the
-	 * default, and what every federation written before Sign in with Apple
-	 * assumed) or `"form_post"`.
+	 * How this IdP delivers the authorization response: `"query"` (the
+	 * default, also for an absent or unrecognised value) or `"form_post"`.
 	 *
-	 * Declaring `"form_post"` changes three things in the route layer, and
-	 * nothing in the adapter:
+	 * `"form_post"` changes three things in the route layer and nothing in the
+	 * adapter:
 	 *
-	 * 1. the start route appends `response_mode=form_post` to the URL this
-	 *    provider's `buildAuthorizationUrl` returned, so the parameter is
-	 *    written once for every federation instead of in each adapter;
-	 * 2. `POST /session/oauth/federation/<name>/callback` starts accepting an
-	 *    `application/x-www-form-urlencoded` body, with the same state / PKCE
-	 *    / nonce binding as the GET callback (a provider that does not declare
-	 *    the mode answers 405 there, so no existing federation gains a POST
-	 *    surface);
-	 * 3. this federation's ephemeral state moves out of the session and into a
-	 *    federation transaction — an opaque id in a dedicated `HttpOnly;
-	 *    Secure; SameSite=None` cookie, path-scoped to the callback, and the
-	 *    envelope in a store record keyed by it — because the callback arrives
-	 *    as a cross-site POST that the session cookie does not accompany. The
-	 *    application session cookie is left exactly as configured; see
-	 *    `federations/transaction.mts` in `@o3co/auth-provider-session` (#494).
-	 *
-	 * Optional, and an unrecognised value is read as the default: absence must
-	 * mean "query" for every provider that predates this field.
+	 * 1. the start route appends `response_mode=form_post` to the URL
+	 *    `buildAuthorizationUrl` returned;
+	 * 2. `POST /session/oauth/federation/<name>/callback` accepts a form body,
+	 *    with the same state / PKCE / nonce binding as the GET callback (a
+	 *    provider without the mode answers 405 there);
+	 * 3. the flow's ephemeral state moves into a federation transaction with a
+	 *    dedicated cookie, because the cross-site POST callback does not carry
+	 *    the session cookie. See {@link FederationResponseMode}.
 	 */
 	readonly responseMode?: FederationResponseMode;
 
 	/**
-	 * Build the authorization URL for RFC 6749 §4.1 + RFC 7636 code flow.
+	 * Build the authorization URL for the RFC 6749 §4.1 + RFC 7636 code flow.
 	 *
-	 * `codeVerifier` MUST be a cryptographically strong URL-safe random string; the route
-	 * layer generates and stores it in the session before calling. Adapters compute
-	 * `code_challenge` with this package's `codeChallenge(codeVerifier)` (`pkce.mts`); do
-	 * not accept a pre-computed challenge to avoid mismatches between transform methods.
+	 * `codeVerifier` is a cryptographically strong URL-safe random string the
+	 * route layer stores before calling. Adapters derive `code_challenge` with
+	 * `codeChallenge(codeVerifier)` (`pkce.mts`) and never accept a
+	 * pre-computed challenge, so the transform methods cannot mismatch.
 	 *
-	 * `nonce` is optional — OIDC providers MUST forward it as the upstream `nonce`
-	 * authorization param so that the matching `expectedNonce` check in `exchangeCode`
-	 * binds the returned id_token to this session (OIDC Core §3.1.3.7). OAuth-only
-	 * providers (e.g. GitHub OAuth Apps) ignore it.
+	 * OIDC providers MUST forward `nonce` as the upstream `nonce` parameter so
+	 * `exchangeCode`'s `expectedNonce` check binds the id_token to this session
+	 * (OIDC Core §3.1.3.7). OAuth-only providers ignore it.
 	 */
 	buildAuthorizationUrl(params: {
 		readonly redirectUri: string;
@@ -152,15 +130,13 @@ export interface FederationProvider {
 	}): URL;
 
 	/**
-	 * Exchange an authorization `code` for a normalized `FederationProfile`.
+	 * Exchange an authorization `code` for a normalized `FederationProfile`,
+	 * which MUST include `issuer` and `sub`. Adapters post to the token
+	 * endpoint and may call UserInfo.
 	 *
-	 * Adapters post to the IdP's token endpoint, optionally call the userinfo endpoint,
-	 * and return a `FederationProfile`. They MUST include `issuer` and `sub`; all other
-	 * standard fields are optional.
-	 *
-	 * `nonce` is optional — OIDC providers MUST pass it as `expectedNonce` to the
-	 * upstream library so that the id_token nonce claim is verified against the
-	 * session-stored value (OIDC Core §3.1.3.7). OAuth-only providers ignore it.
+	 * OIDC providers MUST pass `nonce` as the library's `expectedNonce` so the
+	 * id_token's nonce is checked against the session's (OIDC Core §3.1.3.7).
+	 * OAuth-only providers ignore it.
 	 */
 	exchangeCode(params: {
 		readonly code: string;
@@ -168,36 +144,25 @@ export interface FederationProvider {
 		readonly redirectUri: string;
 		readonly nonce?: string;
 		/**
-		 * The rest of the callback's parameters — query string for a `"query"`
-		 * federation, form body for a `"form_post"` one — with only the string
-		 * values kept.
+		 * The rest of the callback's parameters (query string for `"query"`,
+		 * form body for `"form_post"`), string values only.
 		 *
-		 * **`code` and `state` are excluded.** Both are the framework's to bind,
-		 * and both are already accounted for: `code` arrives in its own field
-		 * above, and `state` is the value the route compared against the session
-		 * before calling. Leaving them in would put each in two places, one of
-		 * which the route validated and one of which it did not — so an adapter
-		 * cannot read a credential from the wrong one, because the wrong one is
-		 * not there.
+		 * `code` and `state` are excluded: the route binds both (`code` arrives
+		 * above, `state` was checked against the session), so an adapter cannot
+		 * read either from an unvalidated copy.
 		 *
-		 * Present so an IdP that returns identity data *beside* the token
-		 * response can be adapted without a second callback contract: Apple
-		 * sends the end user's name exactly once, in a `user` JSON field on the
-		 * first authorization, and never in the id_token.
+		 * Carries identity data an IdP returns beside the token response (Apple
+		 * sends the user's name once, in a `user` JSON field, never in the
+		 * id_token) and protocol parameters: `iss` (RFC 9207) goes to the
+		 * library's issuer check through `callbackUrlForExchange`, so narrowing
+		 * the bag would switch that check off.
 		 *
-		 * Protocol response parameters travel here as well. An adapter forwards
-		 * `iss` (RFC 9207) from this bag to its library's issuer check — through
-		 * this package's `callbackUrlForExchange` (`callback-url.mts`), so that
-		 * the rule lives in one place (#595, #597) — and narrowing the bag to
-		 * identity data would silently switch that check off.
-		 *
-		 * **These values are relayed through the user agent and are not signed.**
-		 * The `state` check binds them to this session, which is all it binds:
-		 * an adapter must treat anything read here as self-asserted, and the
-		 * route layer keeps whatever `mapClaims` makes of it under
-		 * `claims.federated[<provider>]` subject to the ordinary promotion
-		 * rules (see `federations/claim-precedence.mts` in
-		 * `@o3co/auth-provider-session`) — never as an authorization input.
+		 * **Relayed through the user agent and unsigned.** The `state` check
+		 * binds them to this session and nothing more: treat them as
+		 * self-asserted. What `mapClaims` makes of them stays under
+		 * `claims.federated[<provider>]`, subject to the promotion rules
+		 * (`federations/claim-precedence.mts` in `@o3co/auth-provider-session`),
+		 * never an authorization input.
 		 */
 		readonly callbackParams?: Readonly<Record<string, string>>;
 	}): Promise<FederationProfile>;
@@ -210,19 +175,16 @@ export interface EndSessionRequest {
 	idTokenHint?: string;
 	/**
 	 * Where the browser goes after the upstream logout. **A caller passes only
-	 * a URI it has already validated**: one that matched, exactly, a
-	 * `postLogoutRedirectUris` entry registered for the client that asked for
-	 * the logout (OIDC RP-Initiated Logout 1.0 §3), and that passes
-	 * `checkRedirectUri` — a custom `ClientRepository` can hold an entry that
-	 * does not — or `undefined`. Never the `post_logout_redirect_uri` a request
-	 * carried, unchecked.
+	 * a validated URI**: one that exactly matched a `postLogoutRedirectUris`
+	 * entry of the client asking for the logout (OIDC RP-Initiated Logout 1.0
+	 * §3) and passes `checkRedirectUri` (a custom `ClientRepository` may hold
+	 * one that does not), or `undefined`. Never the request's raw
+	 * `post_logout_redirect_uri`.
 	 *
-	 * An adapter may therefore treat it as a trusted redirect target, and the
-	 * bundled ones do: where the upstream publishes no end-session endpoint and
-	 * none is configured, Google, GitHub and Apple answer with this URI itself,
-	 * so an unchecked value here makes the provider's origin redirect to
-	 * anywhere; with an endpoint they forward it upstream. `oauth`'s two logout
-	 * routes hold it to the registered list before `endSession` is called.
+	 * Adapters treat it as a trusted redirect target: without an end-session
+	 * endpoint, the bundled Google, GitHub and Apple adapters redirect to it
+	 * directly, so an unchecked value would be an open redirect on the
+	 * provider's origin.
 	 */
 	postLogoutRedirectUri?: string;
 	state?: string;
@@ -267,15 +229,11 @@ export function supportsClaimMapping(
 /**
  * Partial token snapshot returned by `SupportsRefresh.refreshToken`.
  *
- * `issuer` and `sub` are optional because callers reuse the stored identity from the
- * original federation profile — the refresh grant does not re-assert identity. All other
- * token fields follow the same semantics as `FederationProfile`.
- *
- * The fields are named rather than derived from `FederationProfile`: `Omit`
- * over a type with a string index signature keeps only the index signature,
- * and a snapshot with an access token that was a number type-checked. Every
- * field is optional, so a snapshot of `{ issuer, sub }` still passes; a wrong
- * type on a named field does not, which it should never have.
+ * `issuer` and `sub` are optional: the refresh grant does not re-assert
+ * identity, so callers reuse the stored one. Other fields mean what they do
+ * on `FederationProfile`. They are named rather than derived with `Omit`,
+ * which over a string index signature keeps only the signature and lets a
+ * wrongly typed field through.
  */
 export interface RefreshedTokens {
 	readonly issuer?: string;
@@ -307,9 +265,9 @@ export function supportsRefresh(
 }
 
 /**
- * What a delegated authorization asks of an adapter (#593, D17): the URL a
- * user is sent to so that a client may hold the upstream's tokens without a
- * session. Unlike the login flow's `buildAuthorizationUrl`, the scopes are the
+ * What a delegated authorization asks of an adapter: the URL a user is sent
+ * to so that a client may hold the upstream's tokens without a session.
+ * Unlike the login flow's `buildAuthorizationUrl`, the scopes are the
  * intent's and not the adapter's, the nonce is required, and a resource
  * indicator (RFC 8707) and an operator's extra parameters may come along.
  */
@@ -319,7 +277,7 @@ export interface DelegatedAuthorizationRequest {
 	readonly codeVerifier: string;
 	/** Required: the id_token that comes back is bound to it (OIDC Core §3.1.3.7). */
 	readonly nonce: string;
-	/** The intent's scopes (D6), which core has already held to the connection's ceiling. */
+	/** The intent's scopes, which core has already held to the connection's ceiling. */
 	readonly scopes: readonly string[];
 	/** Sent as the RFC 8707 `resource` parameter. */
 	readonly resource?: string;
@@ -334,24 +292,21 @@ export interface DelegatedAuthorizationRequest {
 
 export interface DelegatedRefreshRequest {
 	readonly refreshToken: string;
-	/** The grant's scopes (D5): RFC 6749 §6 lets a refresh ask for no more than was granted. */
+	/** The grant's scopes: RFC 6749 §6 lets a refresh ask for no more than was granted. */
 	readonly scopes?: readonly string[];
 	/** The resource the grant was authorized for; an upstream that needs it at authorization needs it here too. */
 	readonly resource?: string;
-	/** Aborts the upstream request (D12). */
+	/** Aborts the upstream request. */
 	readonly signal?: AbortSignal;
 }
 
 /**
- * What a delegated refresh answers. Every field is optional on purpose: an
- * answer the adapter's library refused to parse may still carry the rotated
- * refresh token, and that one must never be lost (#593, D5) — so `{ refreshToken }`
- * alone is a valid answer, and core treats an answer without a usable access
- * token as `malformed_token_response`.
- *
- * One type, read by both ends: the capability answers with it and
- * `../federation-grants/retrieve.mts` consumes it. Until #626 P1 the two ends
- * were two identical declarations, and this one described the other.
+ * What a delegated refresh answers; the capability returns it and
+ * `../federation-grants/retrieve.mts` consumes it. Every field is optional:
+ * an answer the library refused to parse may still carry a rotated refresh
+ * token, which must never be lost, so `{ refreshToken }` alone is valid, and
+ * core treats an answer without a usable access token as
+ * `malformed_token_response`.
  */
 export interface DelegatedTokens {
 	readonly accessToken?: string;
@@ -382,21 +337,15 @@ export interface DelegatedTokens {
 }
 
 /**
- * The authorization parameters a delegated adapter owns, and which an
- * operator's `authorizationParams` may therefore not set (#593, D17).
+ * The authorization parameters a delegated adapter owns, which an operator's
+ * `authorizationParams` may therefore not set. An exclusion rather than an
+ * allowlist: vendors keep inventing parameters, and the ones that matter are
+ * those this provider computes (PKCE challenge, state, nonce, the redirect
+ * the callback is checked against). Setting those from configuration would
+ * take over the flow's security parameters.
  *
- * An exclusion rather than an allowlist: a closed list of permissible vendor
- * parameters would have to be extended for every IdP that invents one, and
- * the ones that matter are the ones this provider computes — the PKCE
- * challenge, the state, the nonce, the redirect it will check the callback
- * against. Setting any of those from configuration is not customisation, it
- * is taking over the security parameters of the flow.
- *
- * It lives here, next to {@link SupportsDelegatedAuthorization}, because two
- * readers need exactly the same set and neither owns it: the adapter that
- * builds the URL refuses these at the point of use, and the federation-grant
- * routes refuse them at boot, where an operator finds out before a user is
- * standing in front of a consent page.
+ * The adapter refuses these when building the URL, and the federation-grant
+ * routes refuse them at boot, before a user reaches a consent page.
  */
 export const RESERVED_DELEGATED_AUTHORIZATION_PARAMS: ReadonlySet<string> = new Set([
 	"client_id",
@@ -414,16 +363,13 @@ export const RESERVED_DELEGATED_AUTHORIZATION_PARAMS: ReadonlySet<string> = new 
 ]);
 
 /**
- * What the connect callback asks of an adapter (#593, D7, D17): exchange the
- * code the upstream sent back for the grant's first tokens, and say whose they
- * are.
+ * What the connect callback asks of an adapter: exchange the returned code for
+ * the grant's first tokens, and say whose they are.
  *
- * Not the login flow's `exchangeCode`. That one answers a login profile — it
- * may call UserInfo, map claims, and fill a lifetime the upstream never sent —
- * and it has no place for three things an acquisition needs: the RFC 8707
- * `resource` at the token endpoint, the lifetime the upstream SENT rather than
- * what a library coerced it to, and a per-call signal for the callback's time
- * budget.
+ * Separate from `exchangeCode`, which answers a login profile (it may call
+ * UserInfo, map claims, fill a lifetime the upstream never sent) and has no
+ * place for the RFC 8707 `resource` at the token endpoint, the lifetime the
+ * upstream SENT, or a per-call abort signal for the callback's time budget.
  */
 export interface DelegatedCodeExchangeRequest {
 	readonly code: string;
@@ -442,18 +388,17 @@ export interface DelegatedCodeExchangeRequest {
 	/** Aborts the upstream request. */
 	readonly signal?: AbortSignal;
 	/**
-	 * The id_token claims to carry beside the subject (#611) — what a Store
-	 * matches a person on across registrations where `sub` is pairwise, such
-	 * as Entra's `tid` and `oid`. A local allowlist: nothing about it is sent
-	 * upstream. Omitted means none. Names are checked by
-	 * {@link identityClaimsProblem}.
+	 * The id_token claims to carry beside the subject: what a Store matches a
+	 * person on across registrations where `sub` is pairwise, such as Entra's
+	 * `tid` and `oid`. A local allowlist, never sent upstream. Omitted means
+	 * none. Names are checked by {@link identityClaimsProblem}.
 	 */
 	readonly identityClaims?: readonly string[];
 }
 
 /**
  * The id_token claims {@link DelegatedCodeExchangeRequest.identityClaims} may
- * not name (#611): the protocol's own bindings and the token's and session's
+ * not name: the protocol's own bindings and the token's and session's
  * identifiers, which are the adapter's to check and say nothing stable about
  * who a person is — and the names that would reach an object's prototype.
  */
@@ -483,7 +428,7 @@ const IDENTITY_CLAIM_NAME = /^[\x21-\x7E]{1,256}$/;
 
 /**
  * Why `names` is not a usable `identityClaims` list, or `undefined` when it
- * is (#611). Case-sensitive names of printable ASCII without spaces, none
+ * is. Case-sensitive names of printable ASCII without spaces, none
  * reserved, none repeated — refused rather than trimmed or de-duplicated,
  * because a list an operator wrote wrongly is a list they meant differently.
  * Shared by the adapter, which refuses at the point of use, and the grant
@@ -505,7 +450,7 @@ export function identityClaimsProblem(names: readonly unknown[]): string | undef
 }
 
 /**
- * The claims asked for, out of a VERIFIED id_token's (#611): own properties
+ * The claims asked for, out of a VERIFIED id_token's: own properties
  * only, non-empty strings only, nothing coerced. A claim absent or of another
  * type is left out rather than failed on here — the caller knows which ones
  * it cannot do without.
@@ -547,13 +492,11 @@ export interface DelegatedAuthorizationResult {
 }
 
 /**
- * The capability behind federation grants (#593, D17): an adapter that can
- * send a user to authorize a delegation, exchange the code that comes back for
- * the grant's first tokens, and refresh them without a session. Detected by
- * ALL THREE methods being present; an adapter with some and not the others
- * does not have it — slice 6 added the exchange, and an adapter written
- * against the earlier pair is refused at boot by name rather than failing at a
- * callback with a user waiting.
+ * The capability behind federation grants: an adapter that can send a user to
+ * authorize a delegation, exchange the returned code for the grant's first
+ * tokens, and refresh them without a session. Detected by ALL THREE methods
+ * being present; an adapter with only some is refused at boot by name rather
+ * than failing at a callback with a user waiting.
  */
 export interface SupportsDelegatedAuthorization {
 	buildDelegatedAuthorizationUrl(params: DelegatedAuthorizationRequest): URL;

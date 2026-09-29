@@ -28,17 +28,16 @@ import {
 } from "./lifetime.mjs";
 
 /**
- * Where an issuer's signing keys come from (#525).
+ * Where an issuer's signing keys come from.
  *
- * - `key` — one public key, held in memory. The shape `createJwtAssertionVerifier`
- *   has always taken; rotation means re-registering.
- * - `jwks` — a static JSON Web Key Set, for an issuer that publishes several
+ * - `key`: one public key held in memory; rotation means re-registering.
+ * - `jwks`: a static JSON Web Key Set, for an issuer that publishes several
  *   keys but no endpoint.
- * - `jwks_uri` — a remote JWKS endpoint, fetched on first use and cached. An
- *   unknown `kid` triggers a refetch (bounded by `cooldownMs`), which is how a
- *   rotation at the issuer is picked up without a restart. `https` is required
- *   unless the host is loopback: signing keys fetched over plaintext are keys
- *   an on-path attacker chose.
+ * - `jwks_uri`: a remote JWKS endpoint, fetched on first use and cached. An
+ *   unknown `kid` triggers a refetch (bounded by `cooldownMs`), so a rotation
+ *   at the issuer is picked up without a restart. `https` is required unless
+ *   the host is loopback: keys fetched over plaintext are keys an on-path
+ *   attacker chose.
  */
 export type AssertionIssuerKeySource =
 	| { readonly type: "key"; readonly key: KeyLike }
@@ -55,30 +54,23 @@ export type AssertionIssuerKeySource =
 	  };
 
 /**
- * One issuer this deployment accepts RFC 7523 assertions from, and what it
- * accepts from them (#525) — as a caller WRITES it: the composition's entry
- * list, and `add`. A ceiling the entry does not name is left out, and absent
- * means "no ceiling". What a registry answers with is
- * {@link AssertionIssuerEntry}, the same fields with none of them optional.
+ * One issuer this deployment accepts RFC 7523 assertions from, and on what
+ * terms, as a caller writes it (the composition's entry list, and `add`). A
+ * registry answers with {@link AssertionIssuerEntry}, where no field is
+ * optional. Optional fields also admit an explicit `undefined`, so `list()`
+ * feeds `add()` under `exactOptionalPropertyTypes`.
  *
- * Each optional field also admits an explicit `undefined`, so that a stored
- * entry is accepted back as input — `list()` into `add()` — for a consumer
- * compiling with `exactOptionalPropertyTypes`, where `a?: T` alone refuses
- * the `undefined` a stored entry carries.
+ * Every field beyond `issuer`, `keys` and `algorithms` is a ceiling: it only
+ * narrows what an assertion may obtain, never widens the request, the client
+ * registration or the policy. Absent means no ceiling.
  *
- * Every field beyond `issuer`, `keys` and `algorithms` is a ceiling: it can
- * only narrow what an assertion from this issuer may obtain, never widen the
- * request, the client registration or the policy.
- *
- * An entry is **data**, so a registry can keep it in a store: every field
- * survives a JSON round trip, `expiresAt` revived as a `Date`. The one
- * exception is `keys.type: "key"`, a live key object for the in-process shape
- * `createJwtAssertionVerifier` builds — a store-backed registry holds `jwks`
- * (a one-key set is fine) or `jwks_uri` instead. How claims are *read* is code,
- * and code is the verifier's: `RegistryAssertionVerifierOptions.readersFor`. An entry is immutable
- * except for `expiresAt` — delete and re-add to change anything else, so the
- * audit trail of "what did we trust, and when" stays a list of adds and
- * removes.
+ * An entry is data: it survives a JSON round trip (`expiresAt` revived as a
+ * `Date`), except `keys.type: "key"`, a live key object; a store-backed
+ * registry holds `jwks` (a one-key set is fine) or `jwks_uri`. Claim readers
+ * are code and belong to the verifier
+ * (`RegistryAssertionVerifierOptions.readersFor`). Only `expiresAt` is
+ * mutable (delete and re-add to change anything else), so the trust history
+ * stays a list of adds and removes.
  */
 export interface AssertionIssuerEntryInput {
 	/** The exact `iss` value. Matched by string equality, never by prefix. */
@@ -90,8 +82,8 @@ export interface AssertionIssuerEntryInput {
 	 */
 	readonly algorithms: readonly string[];
 	/**
-	 * `sub` values accepted from this issuer. Absent means any subject — the
-	 * Store still decides whom a handle resolves to (#301).
+	 * `sub` values accepted from this issuer. Absent means any subject; the
+	 * Store still decides whom a handle resolves to.
 	 */
 	readonly allowedSubjects?: readonly string[] | undefined;
 	/**
@@ -102,9 +94,9 @@ export interface AssertionIssuerEntryInput {
 	readonly allowedScopes?: readonly string[] | undefined;
 	/**
 	 * Audiences a token minted from this issuer's assertions may name. A
-	 * ceiling on the issued `aud` whatever chose it, and — with no
-	 * authenticated client — the source the client registration would
-	 * otherwise be (#520).
+	 * ceiling on the issued `aud` whatever chose it, and, with no
+	 * authenticated client, the source the client registration would
+	 * otherwise be.
 	 */
 	readonly allowedAudiences?: readonly string[] | undefined;
 	/**
@@ -120,17 +112,15 @@ export interface AssertionIssuerEntryInput {
 	 */
 	readonly expiresAt?: Date | undefined;
 	/**
-	 * Which assertion profile this issuer mints (#526).
+	 * Which assertion profile this issuer mints.
 	 *
-	 * - `"rfc7523"` (default): the plain RFC 7523 §2.1 assertion — `iss`,
-	 *   `sub`, `aud` (any of the verifier's audiences), `exp`; a device
-	 *   credential.
-	 * - `"id-jag"`: the Identity Assertion JWT Authorization Grant an
-	 *   enterprise IdP mints for a client. `typ` `oauth-id-jag+jwt`, `aud`
-	 *   exactly this server's issuer identifier, `client_id` naming the
-	 *   authenticated presenter, `jti` accepted once, and `scope` / `resource`
-	 *   carried as claims. Needs `issuerIdentifier` and `replaySeenSet` on the
-	 *   verifier.
+	 * - `"rfc7523"` (default): the plain RFC 7523 §2.1 assertion (`iss`, `sub`,
+	 *   `aud` any of the verifier's audiences, `exp`); a device credential.
+	 * - `"id-jag"`: the Identity Assertion JWT Authorization Grant an enterprise
+	 *   IdP mints for a client: `typ` `oauth-id-jag+jwt`, `aud` exactly this
+	 *   server's issuer identifier, `client_id` naming the authenticated
+	 *   presenter, `jti` accepted once, `scope` / `resource` as claims. Needs
+	 *   `issuerIdentifier` and `replaySeenSet` on the verifier.
 	 */
 	readonly profile?: "rfc7523" | "id-jag" | undefined;
 	/**
@@ -138,45 +128,36 @@ export interface AssertionIssuerEntryInput {
 	 * from 0 to `MAX_ASSERTION_CLOCK_TOLERANCE_SECONDS` (300): it is added to
 	 * the lifetime ceiling and to every time check, so `NaN`, `Infinity` or a
 	 * string would switch them off. Checked by {@link checkAssertionIssuerEntry}
-	 * and again when the verifier reads a stored entry.
-	 *
-	 * An assertion admitted past its `exp` inside this tolerance still
-	 * verifies, but has no lifetime left for a token to inherit: the
-	 * jwt-bearer grant refuses it (auth.proxy#90).
+	 * and again when the verifier reads a stored entry. An assertion admitted
+	 * past its `exp` inside this tolerance verifies but leaves no lifetime for
+	 * a token to inherit, so the jwt-bearer grant refuses it.
 	 */
 	readonly clockToleranceSeconds?: number | undefined;
 }
 
 /**
  * An issuer entry as a registry holds and answers with it: every field of
- * {@link AssertionIssuerEntryInput}, and every one of them a REQUIRED key,
- * `undefined` where the entry names no ceiling.
+ * {@link AssertionIssuerEntryInput} as a REQUIRED key, `undefined` where the
+ * entry names no ceiling.
  *
- * Every field beyond `issuer`, `keys` and `algorithms` restricts the issuer,
- * and most of them are ceilings a registry that loses one WIDENS — it fails
- * open. `clockToleranceSeconds` is the exception that can go either way:
- * gone, the default applies, looser or stricter than what was configured.
- * `allowedClients` gone admits any presenter (an unauthenticated one too,
- * unless the entry is an ID-JAG one, whose presenter must authenticate);
- * `expiresAt` gone trusts the issuer for ever; `profile: "id-jag"` gone falls
- * back to plain RFC 7523, and with it the `jti` replay check, the `typ` check
- * and the exact-`aud` check. A registry over a store —
- * this port's documented way to survive a restart — reads each row back into
- * this shape. Built as an object literal of THIS type, naming every field, a
- * read-back that forgets a key fails to compile rather than dropping the
- * ceiling.
+ * A registry that loses a ceiling fails open: `allowedClients` gone admits any
+ * presenter (an unauthenticated one too, unless the entry is ID-JAG, whose
+ * presenter must authenticate); `expiresAt` gone trusts the issuer forever;
+ * `profile: "id-jag"` gone falls back to plain RFC 7523 and drops the `jti`
+ * replay, `typ` and exact-`aud` checks. (`clockToleranceSeconds` gone restores
+ * the default, looser or stricter than configured.) So a store-backed registry,
+ * this port's documented way to survive a restart, reads each row back as an
+ * object literal of THIS type naming every field: a forgotten key then fails
+ * to compile instead of dropping the ceiling.
  *
- * The guarantee is the literal's, not any helper's. Mapping a row through
- * {@link toAssertionIssuerEntry} does NOT carry it: that takes the input type,
- * where every ceiling is optional, so a forgotten column compiles there. Nor
- * does the type reach a registry in plain JavaScript, code that steps around
- * the checker (`as AssertionIssuerEntry` on an incomplete object,
- * `JSON.parse(row) as …`), or a store's own row type — declare that with every
- * key required too, or the write into it can forget one. And it does not reach
- * inside `keys`: a `jwks_uri` source's tuning (`cacheMaxAgeMs`, `cooldownMs`,
- * `timeoutMs`) is optional there as well; losing `cacheMaxAgeMs` restores the
- * ten-minute default, a bounded widening of how long a key withdrawn at the
- * issuer is still accepted.
+ * The guarantee is the literal's alone. It is lost by mapping a row through
+ * {@link toAssertionIssuerEntry} (which takes the optional input type), in
+ * plain JavaScript, behind a cast (`as AssertionIssuerEntry`,
+ * `JSON.parse(row) as …`), or through a store row type with optional keys
+ * (declare every key required there too). It does not reach inside `keys`:
+ * losing a `jwks_uri` source's `cacheMaxAgeMs` restores the ten-minute
+ * default, a bounded widening of how long a key withdrawn at the issuer is
+ * still accepted.
  */
 export interface AssertionIssuerEntry {
 	readonly issuer: string;
@@ -192,27 +173,26 @@ export interface AssertionIssuerEntry {
 }
 
 /**
- * Entry fields that were code and are now the verifier's (`readersFor`). An
- * entry still carrying one is refused rather than ignored: ignoring a handle
- * reader would hand the Store a bare `sub` that two issuers can share.
+ * Fields that are code and belong to the verifier (`readersFor`), not to an
+ * entry. An entry carrying one is refused rather than ignored: ignoring a
+ * handle reader would hand the Store a bare `sub` that two issuers can share.
  */
 const READER_FIELDS = ["readSubjectHandle", "readScope"] as const;
 
 /**
  * The lookup the registry verifier performs before any signature work: is
- * this `iss` one we trust, and on what terms?
+ * this `iss` trusted, and on what terms?
  *
- * Throwing means the registry could not answer — a backing store being down —
- * and is surfaced as `503`, like every other outage on the verification path.
- * `null` is the answer for an issuer nobody registered; never throw for one,
- * or a client's made-up `iss` turns into the server's outage.
+ * Throw only when the registry cannot answer (a backing store down); that
+ * surfaces as `503`, like every outage on the verification path. Answer
+ * `null` for an unregistered issuer and never throw for one, or a client's
+ * made-up `iss` becomes the server's outage.
  *
- * `issuer` is untrusted input: the assertion's own `iss`, read before any
- * signature is checked. The verifier passes only a well-formed identifier —
- * a string of 1 to 256 characters with no control character (core's
- * identifier rule, the one a `client_id` and a `kid` are held to) — but any
- * other character may be in it. A store-backed registry binds it as a query
- * parameter and never interpolates it into a query, a path or a URL.
+ * `issuer` is untrusted input, read before any signature is checked. The
+ * verifier passes only a well-formed identifier (1 to 256 characters, no
+ * control character: core's identifier rule), but any other character may be
+ * in it. A store-backed registry binds it as a query parameter and never
+ * interpolates it into a query, a path or a URL.
  */
 export interface AssertionIssuerRegistry {
 	readonly kind: string;
@@ -220,7 +200,7 @@ export interface AssertionIssuerRegistry {
 }
 
 /**
- * The admin surface (#525): add, list, remove, and the one permitted edit.
+ * The admin surface: add, list, remove, and the one permitted edit.
  * Entries are otherwise immutable so that the history of what was trusted
  * is the history of adds and removes.
  *
@@ -242,10 +222,9 @@ export interface MutableAssertionIssuerRegistry extends AssertionIssuerRegistry 
  * field. Shared by the memory registry and by anyone building an entry ahead
  * of registering it.
  *
- * Run on what the caller wrote, BEFORE {@link toAssertionIssuerEntry}: the
- * normaliser copies the entry's own fields and nothing else, so a reader
- * function left on an input would be silently stripped by it rather than
- * refused here — and refusing it is the point (see `READER_FIELDS`).
+ * Run it on what the caller wrote, BEFORE {@link toAssertionIssuerEntry},
+ * which copies only the entry's own fields and would silently strip a reader
+ * function that must be refused (see `READER_FIELDS`).
  */
 export function checkAssertionIssuerEntry(entry: AssertionIssuerEntryInput): void {
 	for (const field of READER_FIELDS) {
@@ -307,19 +286,11 @@ export function checkAssertionIssuerEntry(entry: AssertionIssuerEntryInput): voi
 }
 
 /**
- * The stored form of an input: every field named, `undefined` where the input
- * left a ceiling out. For normalising an entry a caller WROTE — what `add`
- * receives, what the composition lists — before holding or persisting it.
- *
- * Not for reading a store's rows back. Its parameter is the input type, where
- * every ceiling is optional, so a row mapped through it with a column forgotten
- * compiles and drops that ceiling. A read-back builds an
- * {@link AssertionIssuerEntry} literal naming every field instead; that is
- * what the type checks.
- *
- * Copies the entry's own fields only. Validate the input first
- * ({@link checkAssertionIssuerEntry}): anything else it carries is not copied,
- * and a reader function is something to refuse, not to lose.
+ * The stored form of an input a caller wrote (what `add` receives, what the
+ * composition lists): every field named, `undefined` where a ceiling was left
+ * out. Copies the entry's own fields only, so validate the input first
+ * ({@link checkAssertionIssuerEntry}). Not for reading a store's rows back:
+ * see {@link AssertionIssuerEntry}.
  */
 export function toAssertionIssuerEntry(input: AssertionIssuerEntryInput): AssertionIssuerEntry {
 	return {
@@ -342,16 +313,13 @@ export function toAssertionIssuerEntry(input: AssertionIssuerEntryInput): Assert
  * runtime and needs them to survive a restart implements
  * {@link AssertionIssuerRegistry} over its own store.
  *
- * **Replicas.** Entries supplied here are the same on every replica that runs
- * the same composition, so a static registry is replica-safe. The admin
- * surface is not: `add`, `remove` and `setExpiresAt` change this process only,
- * and an issuer revoked on the replica that took the call stays trusted on
- * every other. A restart does not converge them: it rebuilds the registry from
- * the composition's entries, restoring the revoked issuer on that replica too.
- * `deployment.mode = "multi"` cannot refuse it —
- * the registry sits inside the `assertionVerifier` a composition hands in, not
- * on a module manifest the boot guard reads — so a multi-replica deployment
- * changes the entry list by redeploying, or keeps it in a shared store.
+ * Replicas: a static registry is replica-safe, but `add`, `remove` and
+ * `setExpiresAt` change this process only. An issuer revoked on one replica
+ * stays trusted on the others, and a restart restores it from the
+ * composition's entries. `deployment.mode = "multi"` cannot refuse this (the
+ * registry sits inside the `assertionVerifier`, not on a module manifest the
+ * boot guard reads), so a multi-replica deployment changes the entry list by
+ * redeploying, or keeps it in a shared store.
  */
 export function createMemoryAssertionIssuerRegistry(
 	entries: readonly AssertionIssuerEntryInput[] = [],

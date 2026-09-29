@@ -13,18 +13,12 @@
  */
 
 /**
- * The ONE cnf/token-binding comparison matrix (issue #324).
- *
- * Before this module the matrix lived as four sibling implementations —
- * `oauth/grants/refreshToken.mts`, `oauth-token-exchange/grant.mts`,
- * `core/middleware/protectedResourceBinding.mts`, and
- * `oauth/types/introspect.mts` — so adding a `Confirmation` variant meant
- * synchronized edits in four files. Core owns the `Confirmation` union
- * (`grants/confirmation.mts`), so the matrix lives here with it: callers
- * consume {@link matchConfirmation} and keep only their own error mapping
- * (`invalid_grant` on the refresh grant and `invalid_request` on token
- * exchange, per RFC 8693 §2.2.2, at the token endpoint; a 401 challenge at a
- * protected resource; `active: false` at introspection).
+ * The ONE cnf/token-binding comparison matrix. Core owns the `Confirmation`
+ * union (`grants/confirmation.mts`), so the matrix lives here with it.
+ * Callers use {@link matchConfirmation} and keep only their own error
+ * mapping: `invalid_grant` on the refresh grant, `invalid_request` on token
+ * exchange (RFC 8693 §2.2.2), a 401 challenge at a protected resource,
+ * `active: false` at introspection.
  */
 
 import type { Confirmation } from "./confirmation.mjs";
@@ -33,21 +27,18 @@ import type { TokenBinding } from "./tokenBinding.mjs";
 /**
  * Per-`cnf`-member binding profile: the mechanism `kind` that owns the
  * member, the auth scheme a token bound by it must be presented under, and
- * the `WWW-Authenticate` challenge naming that scheme.
+ * the `WWW-Authenticate` challenge naming that scheme. Core vocabulary, kept
+ * with the `Confirmation` union rather than negotiated per mechanism package
+ * (see ADR 2026-05-20-token-binding-first-class-abstraction).
  *
- * All three halves are core vocabulary: core owns the `Confirmation` union
- * (`grants/confirmation.mts`), and the spec makes adding a variant a core
- * semver-minor change — so the mapping lives with the union rather than
- * being negotiated with each mechanism package. Gating on `kind` (rather
- * than on the confirmation's shape alone) is deliberate: `Confirmation` is
- * mechanism-extensible, so a third-party mechanism could emit `{ jkt }`
- * without ever validating a DPoP proof, and shape-matching alone would hand
- * it a bound token (PR #185).
+ * Matching gates on `kind`, not on the confirmation's shape alone:
+ * `Confirmation` is mechanism-extensible, so a third-party mechanism could
+ * emit `{ jkt }` without validating a DPoP proof and would otherwise be
+ * handed a bound token.
  *
- * `scheme` / `challenge`: `cnf.jkt` REQUIRES the `DPoP` auth scheme
- * (RFC 9449 §7.1 — a DPoP-bound token presented as a Bearer token must be
- * refused); `cnf["x5t#S256"]` keeps `Bearer`, because RFC 8705 does not
- * redefine the wire-level token type.
+ * `cnf.jkt` REQUIRES the `DPoP` scheme (RFC 9449 §7.1: a DPoP-bound token
+ * presented as Bearer is refused); `cnf["x5t#S256"]` keeps `Bearer`, since
+ * RFC 8705 does not redefine the wire-level token type.
  */
 export const BINDING_PROFILES = {
 	jkt: { kind: "dpop", scheme: "dpop", challenge: "DPoP" },
@@ -76,20 +67,17 @@ const readMember = (raw: unknown, member: ConfirmationMember): string | undefine
  * Outcome of comparing a token's raw `cnf` claim against the binding
  * presented on the current request.
  *
- * - `unbound` — the token names no binding (missing, non-object, or junk
- *   `cnf`). Nothing to enforce; callers that support the opt-in upgrade
- *   row ("unbound token + proof presented → issue a bound token") decide
- *   that themselves from the presented binding.
- * - `compound` — the `cnf` carries MORE than one well-formed member. This
- *   AS mints exactly one mechanism's confirmation per token, so a compound
- *   `cnf` means a forged token or an AS bug; every surface refuses rather
- *   than picking a winner.
- * - `no-proof` — the token is bound by `member` but no binding of the
- *   owning mechanism kind presented that member (stolen-token replay, or a
- *   deployment that dropped the mechanism while bound tokens are live).
- * - `mismatch` — the owning mechanism presented material for a different
- *   key or certificate (multi-key / multi-cert attack).
- * - `satisfied` — the presented material matches the token's binding.
+ * - `unbound`: the token names no binding. Callers that upgrade an unbound
+ *   token to a bound one decide that from the presented binding.
+ * - `compound`: more than one well-formed member. This AS mints one
+ *   mechanism's confirmation per token, so this is a forged token or an AS
+ *   bug; every surface refuses rather than picking a winner.
+ * - `no-proof`: bound by `member`, but no binding of the owning kind
+ *   presented it (stolen-token replay, or a mechanism removed while bound
+ *   tokens are live).
+ * - `mismatch`: the owning mechanism presented a different key or
+ *   certificate.
+ * - `satisfied`: the presented material matches the token's binding.
  */
 export type ConfirmationMatch =
 	| { readonly status: "unbound" }
@@ -102,18 +90,11 @@ export type ConfirmationMatch =
  * Evaluate the sender-constraint matrix for one token: does the binding
  * presented on this request satisfy the token's `cnf` claim?
  *
- * `cnf` is the RAW claim value straight off the JWT payload — validation of
- * its shape is this function's job. `binding` is the request's resolved
- * `TokenBinding` (or `null`/`undefined` when no mechanism produced one).
- *
- * Each member is compared only against a binding whose `kind` owns it (see
- * {@link BINDING_PROFILES}): the `Confirmation` union is
- * mechanism-extensible, so a non-DPoP mechanism emitting `{ jkt: "..." }`
- * (or a non-mTLS mechanism emitting `{ "x5t#S256": "..." }`) could
- * otherwise satisfy a bound token without actually presenting the right
- * proof. Restricting each member to its declared mechanism enforces the
- * kind boundary structurally, not by convention (PR #185 / Codex
- * Important #2).
+ * `cnf` is the RAW claim off the JWT payload; validating its shape is this
+ * function's job. `binding` is the request's resolved `TokenBinding`, if
+ * any. Each member is compared only against a binding whose `kind` owns it
+ * ({@link BINDING_PROFILES}), so a mechanism cannot satisfy a token bound by
+ * another's proof.
  */
 export const matchConfirmation = (
 	cnf: unknown,
@@ -130,12 +111,10 @@ export const matchConfirmation = (
 			? readMember(binding.confirmation, member)
 			: undefined;
 	if (presented === undefined) return { status: "no-proof", member, expected };
-	// Plain `!==` is acceptable here: `jkt` is a SHA-256 thumbprint of a
-	// *public* key (RFC 7638) and `x5t#S256` of a certificate's DER
-	// (RFC 8705 §3.1) presented openly during the TLS handshake — neither
-	// is secret, so a timing side-channel cannot leak material the caller
-	// does not already hold. Mirrors PKCE which uses
-	// constantTimeStringEqual only because the code_verifier IS secret.
+	// Plain `!==` is fine: `jkt` is a thumbprint of a *public* key (RFC 7638)
+	// and `x5t#S256` of a certificate sent openly in the TLS handshake
+	// (RFC 8705 §3.1). Neither is secret, so timing leaks nothing the caller
+	// lacks. (PKCE compares in constant time because its verifier IS secret.)
 	if (presented !== expected) return { status: "mismatch", member, expected };
 	return { status: "satisfied", member, value: expected };
 };
@@ -143,13 +122,11 @@ export const matchConfirmation = (
 /**
  * Narrow a presented binding's confirmation to the member its mechanism
  * `kind` owns, or `undefined` when the kind owns no recognized member (a
- * third-party mechanism) or the confirmation lacks that member.
+ * third-party mechanism) or the confirmation lacks it.
  *
- * This is the value a grant may stamp onto a token it issues for the
- * request: material the owning mechanism actually validated. Every grant
- * that issues tokens stamps this and never `binding.confirmation` itself,
- * which carries whatever a mechanism returned. The kind gating is the same
- * boundary {@link matchConfirmation} enforces.
+ * What a grant stamps onto a token it issues: material the owning mechanism
+ * validated, never `binding.confirmation` itself, which carries whatever a
+ * mechanism returned.
  */
 export const ownedConfirmation = (
 	binding: TokenBinding | null | undefined,
@@ -164,29 +141,17 @@ export const ownedConfirmation = (
 };
 
 /**
- * Validate and narrow a raw `cnf` claim value extracted from a JWT
- * payload into a `Confirmation`. Returns `undefined` when the value
- * is missing or fails any of:
+ * Validate and narrow a raw `cnf` claim value into a `Confirmation`, or
+ * `undefined` when it is not an object or carries no `jkt` / `x5t#S256`
+ * member that is a non-empty string (RFC 9449 §6, RFC 8705 §3).
  *
- * - non-object (null, array, primitive)
- * - missing both `jkt` and `x5t#S256` members
- * - member value is not a non-empty string
- *
- * Empty-string members are rejected because RFC 9449 §6 / RFC 8705 §3
- * define both `jkt` (RFC 7638 JWK Thumbprint) and `x5t#S256` (DER cert
- * SHA-256 thumbprint) as non-empty base64url strings.
- *
- * Compound binding (a cnf object carrying BOTH `jkt` and `x5t#S256`)
- * is out of scope for Stage 1 (spec §1 "out of scope"). If both are
- * present, this helper returns the `jkt` variant — matching the intent-
- * explicit dispatch policy (spec §3.5) where DPoP wins over an ambient
- * mTLS signal.
- *
- * That narrowing is a claim-shape contract, NOT an admission decision.
- * Callers that vouch for a token to a third party (the `/oauth/introspect`
- * handler) MUST screen with {@link isCompoundConfirmation} first and refuse
- * the token — narrowing alone would report a binding the AS never issued.
- * See the token-binding ADR, "compound cnf across the AS surfaces".
+ * A compound `cnf` narrows to `jkt`: DPoP wins over an ambient mTLS signal.
+ * That is a claim-shape contract, NOT an admission decision. A caller that
+ * vouches for a token to a third party (`/oauth/introspect`) MUST refuse a
+ * compound one first ({@link isCompoundConfirmation}), or it would report a
+ * binding the AS never issued. See ADR
+ * 2026-05-20-token-binding-first-class-abstraction, "Compound cnf across the
+ * AS surfaces".
  */
 export const extractConfirmation = (raw: unknown): Confirmation | undefined => {
 	for (const member of CONFIRMATION_MEMBERS) {
@@ -197,18 +162,13 @@ export const extractConfirmation = (raw: unknown): Confirmation | undefined => {
 };
 
 /**
- * The wire-level `token_type` for an access token whose `cnf` is `cnf` (the
- * raw claim, or the `Confirmation` a grant stamped): the scheme core's
- * binding profile names for the member it carries — `DPoP` for `jkt`
- * (RFC 9449 §5), `Bearer` for `x5t#S256` (RFC 8705 §3) — and `Bearer` for no
- * binding. Read through {@link extractConfirmation}, so a member counts only
- * as a non-empty string, as it does at every surface that reads a `cnf`. A
- * compound `cnf` narrows as `extractConfirmation` narrows it; a surface that
- * vouches for a token screens it out first ({@link isCompoundConfirmation}).
+ * The wire-level `token_type` for an access token with this `cnf` (the raw
+ * claim, or the `Confirmation` a grant stamped): `DPoP` for `jkt` (RFC 9449
+ * §5), `Bearer` for `x5t#S256` (RFC 8705 §3) or no binding. Read through
+ * {@link extractConfirmation}, as every surface reads a `cnf`.
  *
- * One reading for the token response (`generateTokenResponse`) and for
- * introspection, so the envelope and the introspection answer cannot
- * disagree about the same token.
+ * Shared by the token response (`generateTokenResponse`) and introspection so
+ * the two cannot disagree about the same token.
  */
 export const tokenTypeForConfirmation = (cnf: unknown): "Bearer" | "DPoP" => {
 	const confirmation = extractConfirmation(cnf);
@@ -218,20 +178,13 @@ export const tokenTypeForConfirmation = (cnf: unknown): "Bearer" | "DPoP" => {
 };
 
 /**
- * Whether a raw `cnf` claim value carries BOTH a well-formed `jkt` and a
- * well-formed `x5t#S256` — an ambiguous compound binding.
+ * Whether a raw `cnf` claim carries BOTH a well-formed `jkt` and a
+ * well-formed `x5t#S256`. This AS never mints one, so it means a forged token
+ * (signing-key compromise) or an AS bug: refuse the token rather than pick a
+ * winner, as the refresh grant does with `invalid_grant`.
  *
- * This AS never mints one: a grant emits exactly one mechanism's
- * confirmation. A compound cnf therefore indicates a forged token (signing-key
- * compromise) or an AS bug, and the response is to refuse the token rather
- * than to pick a winner — the same structural stance the refresh path already
- * takes (`grants/refreshToken.mts` rejects a compound RT cnf with
- * `invalid_grant`).
- *
- * Member validation matches {@link extractConfirmation}: a cnf whose second
- * member is empty-string or non-string is a single-mechanism binding with junk
- * attached, not an ambiguous one, so it is NOT compound and `extractConfirmation`
- * narrows it to the well-formed member as usual.
+ * Members are validated as in {@link extractConfirmation}: a second member
+ * that is empty or not a string is junk beside a single binding, not compound.
  */
 export const isCompoundConfirmation = (raw: unknown): boolean =>
 	CONFIRMATION_MEMBERS.filter((member) => readMember(raw, member) !== undefined).length > 1;

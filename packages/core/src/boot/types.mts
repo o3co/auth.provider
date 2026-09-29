@@ -15,20 +15,10 @@
  */
 
 /**
- * boot/types.mts — single file carrying every type the boot planner stages
- * share, plus the BootError class catalogue.
- *
- * A single file (not per-stage files) because the discriminated
- * BootError.details union has 23 variants and the intermediate stage types
- * form a tight chain — splitting would force unavoidable circular imports
- * between later stage modules.
- *
- * Per A2-β §3.2 (intermediate types), §6.1 (BootError + reasons + per-reason
- * details), §6.2 (createApp options + collector contracts), §6.3 (AppHandle).
- * A2-β is the boot-planner design document from the v0.5.0 module-system
- * campaign; the document itself was never committed, and its surviving
- * normative content is these doc comments plus the validate-manifests
- * spec-provenance registry — see docs/design-campaign-index.md.
+ * boot/types.mts: every type the boot planner's stages share, and the
+ * BootError catalogue. One file, because the `BootError.details` union and the
+ * chained stage types would otherwise force circular imports between the
+ * stage modules.
  */
 
 import type { Server as HttpServer } from "node:http";
@@ -59,45 +49,33 @@ import type { ReadinessProbe, ReadinessRegistrar } from "../readiness/types.mjs"
 import type { RegisteredRequirement } from "../session-admission/requirement.mjs";
 
 // ---------------------------------------------------------------------------
-// ComponentMap bootstrap slots (per A2-β §6.2 DefaultBootstrapMap contract)
+// ComponentMap bootstrap slots
 // ---------------------------------------------------------------------------
 //
-// `config` and `pathResolver` are the two slots every createApp call MUST
-// receive from the host environment per spec §6.2's DefaultBootstrapMap
-// shape. They are declaration-merged into ComponentMap here (in the boot
-// package, where they originate) so that DefaultBootstrapMap satisfies
-// `B extends BootstrapMap` and so modules can declare them in `requires`.
-//
-// Per A2-α §6.1 the v0.5.0 baseline slot set lands incrementally during
-// Phases 3-8; these two are owned by Phase 4 / A2-β because they are
-// the boot-planner-imposed contract, not protocol features.
+// `config` and `pathResolver` are the two slots every createApp call must
+// receive from the host (`DefaultBootstrapMap`). They are declaration-merged
+// into ComponentMap here, where they originate, so DefaultBootstrapMap
+// satisfies `B extends BootstrapMap` and modules can name them in `requires`.
 declare module "@o3co/auth-provider-core" {
 	interface ComponentMap {
 		readonly config: AppConfig;
 		readonly pathResolver: PathResolver;
 		/**
-		 * Boot-planner-owned lifecycle registrar (D-5). Pre-seeded as a bootstrap
-		 * component before any module factory runs. Modules that create disposable
-		 * sub-resources (Redis clients, interval timers) declare
-		 * `optional: ["lifecycleRegistrar"]` and forward the value into
-		 * `createAdapterFactory(kind, { lifecycle: deps.lifecycleRegistrar })`
-		 * so each builder receives the registrar via `BuilderContext.lifecycle`.
-		 *
-		 * This slot is NOT consumer-overridable — `bootstrap-component-collision`
-		 * fires if a consumer passes it via `bootstrapComponents` /
-		 * `overrideComponents`.
+		 * Boot-planner-owned lifecycle registrar, seeded before any module factory
+		 * runs. A module that creates disposable sub-resources (Redis clients,
+		 * interval timers) declares `optional: ["lifecycleRegistrar"]` and passes
+		 * it as `createAdapterFactory(kind, { lifecycle: deps.lifecycleRegistrar })`,
+		 * so each builder gets it as `BuilderContext.lifecycle`. A host cannot
+		 * supply it (`bootstrap-component-collision`).
 		 */
 		readonly lifecycleRegistrar: LifecycleRegistrar;
 		/**
-		 * Boot-planner-owned readiness registrar. Pre-seeded alongside
-		 * `lifecycleRegistrar` and subject to the same rules: modules that open a
-		 * connection declare `optional: ["readinessRegistrar"]` and forward the
-		 * value into `createAdapterFactory(kind, { readiness: deps.readinessRegistrar })`
-		 * so builders can register a probe for the resource they hold.
-		 *
-		 * Also NOT consumer-overridable — a second registrar would collect probes
-		 * the planner never reads, and `/readyz` would report ready while the
-		 * dependency it was meant to watch is down.
+		 * Boot-planner-owned readiness registrar, seeded and wired like
+		 * `lifecycleRegistrar` (`{ readiness: deps.readinessRegistrar }`), so a
+		 * builder can register a probe for the connection it opens. A host cannot
+		 * supply it: a second registrar would collect probes the planner never
+		 * reads, and `/readyz` would report ready while the dependency is down.
+		 * See ADR 2026-08-26-readiness-probes-registered-by-connection-owners.
 		 */
 		readonly readinessRegistrar: ReadinessRegistrar;
 	}
@@ -108,17 +86,10 @@ declare module "@o3co/auth-provider-core" {
 // ---------------------------------------------------------------------------
 
 /**
- * The set of contribution kinds used internally by the boot planner.
- * Built-in kinds are the fourteen listed (the 7 v0.5.0 originals, A5's
- * `federationRedirectPolicies`, `grantMiddleware`, `tokenBindingMechanisms`,
- * `discoveryMetadata`, the session-admission ADR's `sessionRequirements`,
- * and #728's `rateLimitBudgets` and `federationTypes`);
- * the structural escape
- * `(string & { readonly __consumerKind?: unique symbol })` admits
- * consumer-defined kinds added via `declare module` augmentation of
- * ContributesMap without widening to plain `string`.
- *
- * Per A2-β §3.2 + A5 §6.
+ * The contribution kinds the boot planner knows: the fourteen built-in kinds,
+ * plus consumer-defined kinds added by `declare module` augmentation of
+ * ContributesMap. The branded `string` member admits those without widening
+ * the union to plain `string`.
  */
 export type ContributionKind =
 	| "grants"
@@ -138,14 +109,12 @@ export type ContributionKind =
 	| (string & { readonly __consumerKind?: unique symbol });
 
 // ---------------------------------------------------------------------------
-// Intermediate stage types — Per A2-β §3.2
+// Intermediate stage types
 // ---------------------------------------------------------------------------
 
 /**
  * A single contribution (or override) entry extracted from a module's
  * `contributes` or `overrides` map during manifest normalisation.
- *
- * Per A2-β §3.2.
  */
 export interface ContributionEntry {
 	readonly kind: ContributionKind;
@@ -159,8 +128,6 @@ export interface ContributionEntry {
 /**
  * A module manifest normalised into a flat, resolved shape suitable for
  * subsequent boot planner stages.
- *
- * Per A2-β §3.2.
  */
 export interface NormalisedModule {
 	readonly name: string;
@@ -168,8 +135,8 @@ export interface NormalisedModule {
 	readonly optional: readonly ComponentKey[];
 	readonly providesKeys: readonly ComponentKey[];
 	/**
-	 * The manifest's `authoritative` as it was read, once (#728): stage 1
-	 * refuses a value that is not a list, and names it by what it is.
+	 * The manifest's `authoritative` as it was read, once: stage 1 refuses a
+	 * value that is not a list, and names it by what it is.
 	 */
 	readonly authoritativeDeclared: unknown;
 	/** `authoritativeDeclared`'s entries when it is a list; empty otherwise. */
@@ -181,15 +148,13 @@ export interface NormalisedModule {
 
 /**
  * A module manifest paired with its normalised representation.
- *
- * Per A2-β §3.2.
  */
 export interface ValidatedModule {
 	readonly manifest: Module;
 	readonly normalised: NormalisedModule;
 	/**
 	 * The module's own configuration section, parsed by its manifest's
-	 * `section.schema` at stage 1 (#728). Present exactly when the manifest
+	 * `section.schema` at stage 1. Present exactly when the manifest
 	 * declares a section — `value` is what the schema answered, which may be
 	 * `undefined` for a schema that accepts an absent section — and handed to
 	 * every factory of the module as `deps.section`.
@@ -200,8 +165,6 @@ export interface ValidatedModule {
 /**
  * Output of stage 1 (validateManifests). Holds validated modules in input
  * order plus fast-lookup indexes.
- *
- * Per A2-β §3.2.
  */
 export interface ValidatedManifests {
 	/** Manifests in their original input order; immutable. */
@@ -213,20 +176,17 @@ export interface ValidatedManifests {
 	/** Set of contribution kinds actually used by some module. */
 	readonly usedKinds: ReadonlySet<ContributionKind>;
 	/**
-	 * The bootstrap map with `config` replaced by the parsed (Zod-validated)
-	 * value. Zod defaults, transforms, and stripping are applied. All downstream
-	 * stages (planBoot, materializeComponents, applyContributions) must use this
-	 * field instead of the raw `bootstrapComponents` passed to `createApp` so
-	 * that Zod defaults / transforms reach provider factories.
-	 *
-	 * Per A2-β §5.1 step 13.
+	 * The bootstrap map with `config` replaced by its parsed value (Zod
+	 * defaults, transforms and stripping applied). Later stages must use this,
+	 * not the raw `bootstrapComponents`, so provider factories see the parsed
+	 * config.
 	 */
 	readonly bootstrapComponents: BootstrapMap;
 }
 
 /**
  * Per-module blueprint of dependency keys (values are resolved at
- * materialisation time). Per A2-β §3.2.
+ * materialisation time).
  */
 export interface DepsBlueprint {
 	readonly requires: readonly ComponentKey[];
@@ -237,8 +197,6 @@ export interface DepsBlueprint {
  * A single per-component activation record produced by planBoot.
  * Each entry names exactly one `(module, componentKey)` pair whose
  * factory will run during materializeComponents.
- *
- * Per A2-β §3.2.
  */
 export interface ProviderActivation {
 	readonly module: string;
@@ -255,8 +213,6 @@ export interface ProviderActivation {
  * Output of stage 2 (planBoot). The intermediate representation carrying
  * validation results, topological init order, and the per-component
  * activation list.
- *
- * Per A2-β §3.2.
  */
 export interface BootPlan {
 	readonly validated: ValidatedManifests;
@@ -278,8 +234,6 @@ export interface BootPlan {
 /**
  * A per-component cleanup record captured during materializeComponents.
  * Disposed in reverse order by AppHandle.dispose().
- *
- * Per A2-β §3.2.
  */
 export interface CleanupRecord {
 	readonly module: string;
@@ -292,16 +246,13 @@ export interface CleanupRecord {
 /**
  * Output of stage 3 (materializeComponents). Holds the boot plan, the
  * materialised component map, and captured cleanup records.
- *
- * Per A2-β §3.2.
  */
 export interface ComponentWorld {
 	readonly plan: BootPlan;
 	/**
-	 * Materialised component values. The TYPE is `Readonly<Partial<...>>` —
-	 * the planner-internal contract is that no stage code mutates this map
-	 * once it is handed forward. RUNTIME Object.freeze does NOT happen until
-	 * freezeWorld; the type-level readonly is enforced at the stage boundary.
+	 * Materialised component values. Typed readonly because no stage mutates
+	 * the map once it is handed forward; `Object.freeze` happens only in
+	 * freezeWorld.
 	 */
 	readonly components: Readonly<Partial<ComponentMap>>;
 	/**
@@ -311,14 +262,10 @@ export interface ComponentWorld {
 	 */
 	readonly cleanups: readonly CleanupRecord[];
 	/**
-	 * The set of component keys that originated from the host environment
-	 * (`bootstrapComponents` or `overrideComponents`). These keys are
-	 * consumer-owned: the boot planner must NOT call `Symbol.asyncDispose` on
-	 * their values in `AppHandle.dispose()`. Populated by
-	 * `materializeComponents`; threaded through subsequent stages unchanged.
-	 *
-	 * Per A2-β §5.3 (consumer-owned lifecycle) / §8.1 (dispose fallback
-	 * exclusion).
+	 * Keys from the host (`bootstrapComponents` or `overrideComponents`). They
+	 * are consumer-owned: `AppHandle.dispose()` must not call
+	 * `Symbol.asyncDispose` on their values. Set by `materializeComponents`
+	 * and passed through the later stages unchanged.
 	 */
 	readonly externalKeys: ReadonlySet<ComponentKey>;
 }
@@ -326,8 +273,6 @@ export interface ComponentWorld {
 /**
  * A route contribution collected during applyContributions, in module
  * declaration order.
- *
- * Per A2-β §3.2.
  */
 export interface CollectedRouteContribution {
 	readonly contribution: RouteContribution;
@@ -339,8 +284,6 @@ export interface CollectedRouteContribution {
 /**
  * A route contribution with its final mount index, produced exclusively
  * inside assembleApp (stage 6) after before/after resolution.
- *
- * Per A2-β §3.2.
  */
 export interface OrderedRouteContribution {
 	readonly contribution: RouteContribution;
@@ -352,8 +295,6 @@ export interface OrderedRouteContribution {
 /**
  * Output of stage 4 (applyContributions). Holds the component world, the
  * per-kind registries, and the collected route contributions.
- *
- * Per A2-β §3.2.
  */
 export interface RegistryWorld {
 	readonly material: ComponentWorld;
@@ -372,8 +313,6 @@ export interface RegistryWorld {
 /**
  * Output of stage 5 (freezeWorld). Component map and registries are now
  * structurally immutable (Object.frozen + freeze() called on each registry).
- *
- * Per A2-β §3.2.
  */
 export interface FrozenWorld {
 	/**
@@ -387,26 +326,21 @@ export interface FrozenWorld {
 	readonly routes: readonly CollectedRouteContribution[];
 	readonly cleanups: readonly CleanupRecord[];
 	/**
-	 * The set of component keys that originated from the host environment
-	 * (`bootstrapComponents` or `overrideComponents`). `assembleApp.buildDispose`
-	 * excludes these keys from the `Symbol.asyncDispose` fallback loop because
-	 * their lifecycle is the consumer's responsibility.
-	 *
-	 * Per A2-β §5.3 / §8.1.
+	 * Keys from the host (`bootstrapComponents` or `overrideComponents`), which
+	 * `assembleApp.buildDispose` leaves out of its `Symbol.asyncDispose`
+	 * fallback: their lifecycle is the consumer's.
 	 */
 	readonly externalKeys: ReadonlySet<ComponentKey>;
 }
 
 // ---------------------------------------------------------------------------
-// Collector contracts — Per A2-β §6.2
+// Collector contracts
 // ---------------------------------------------------------------------------
 
 /**
  * Collector for name-keyed contribution kinds (grants, federations,
  * tokenExchangeValidators, mfaFactors). Throws on duplicate register; throws
  * on unknown replace.
- *
- * Per A2-β §6.2.
  */
 export interface NameKeyedCollector<V> {
 	readonly kind: "name-keyed";
@@ -422,9 +356,7 @@ export interface NameKeyedCollector<V> {
 
 /**
  * Collector for list-shaped contribution kinds (auditHooks,
- * grantPolicyHooks). Same-instance deduplication per A2-α §4.5.
- *
- * Per A2-β §6.2.
+ * grantPolicyHooks). Same-instance values are deduplicated.
  */
 export interface ListCollector<V> {
 	readonly kind: "list";
@@ -439,8 +371,6 @@ export interface ListCollector<V> {
  * Collector for the routes contribution kind. Receives
  * CollectedRouteContribution (with declaration index); mount-order resolution
  * is deferred to assembleApp. freeze() is mandatory on RouteCollector.
- *
- * Per A2-β §6.2.
  */
 export interface RouteCollector {
 	readonly kind: "list-routes";
@@ -452,8 +382,6 @@ export interface RouteCollector {
 /**
  * Declaration-merged map of contribution-kind collectors. Core seeds the
  * built-in kinds; consumers add custom kinds via `declare module` augmentation.
- *
- * Per A2-β §6.2.
  */
 export interface ContributionCollectorMap {
 	readonly grants?: NameKeyedCollector<GrantHandler>;
@@ -463,7 +391,6 @@ export interface ContributionCollectorMap {
 	 * The concrete policy type (`FederationRedirectPolicy`) is declared in the
 	 * session package via `declare module` augmentation; core stores it as
 	 * `unknown` to avoid a cross-package dependency.
-	 * Per A5 §8.1.
 	 */
 	readonly federationRedirectPolicies?: NameKeyedCollector<unknown>;
 	readonly tokenExchangeValidators?: NameKeyedCollector<ExchangeTokenValidator>;
@@ -474,20 +401,20 @@ export interface ContributionCollectorMap {
 	 */
 	readonly mfaFactors?: NameKeyedCollector<MfaFactor | null>;
 	/**
-	 * Collector for `sessionRequirements` contributions (the session-admission
-	 * ADR's D3): the registered copy of each requirement, never `null`, which
-	 * `sessionRequirementResolver` projects in registration order.
+	 * Collector for `sessionRequirements` contributions: the registered copy
+	 * of each requirement, never `null`, which `sessionRequirementResolver`
+	 * projects in registration order. See ADR 2026-09-28-session-admission.
 	 */
 	readonly sessionRequirements?: NameKeyedCollector<RegisteredRequirement>;
 	/**
-	 * Collector for `rateLimitBudgets` contributions (#728), by prefix: the
+	 * Collector for `rateLimitBudgets` contributions, by prefix: the
 	 * frozen copy of each budget, or `null` for one its module's settings
 	 * switched off — which claims the prefix, and which
 	 * `rateLimitBudgetResolver` leaves out.
 	 */
 	readonly rateLimitBudgets?: NameKeyedCollector<RateLimitSpec | null>;
 	/**
-	 * Collector for `federationTypes` contributions (#728), by type: each
+	 * Collector for `federationTypes` contributions, by type: each
 	 * package's declaration, its factory bound to the module's deps. Nothing
 	 * dispatches configured entries to it yet.
 	 */
@@ -496,28 +423,19 @@ export interface ContributionCollectorMap {
 	readonly routes?: RouteCollector;
 	readonly grantPolicyHooks?: ListCollector<GrantPolicyHookContribution>;
 	/**
-	 * Collector for `grantMiddleware` contributions. Each entry is a
-	 * `RequestHandler | null` returned by a `GrantMiddlewareFactory`. Null
-	 * entries (disabled-by-config path) are filtered at consumption time in
-	 * `assembleApp` — they are appended to the collector for value-identity
-	 * dedup with sibling contributions but skipped when mounting on the
-	 * OAuth token endpoint (`/oauth/token` with the bundled `oauthModule`).
-	 *
-	 * Per Wave 2 Token-binding Cluster spec §4.7 / Phase 2 DPoP spec §11.1.
+	 * Collector for `grantMiddleware` contributions: each a `RequestHandler`,
+	 * or `null` when disabled by config. Nulls are appended for value-identity
+	 * dedup with sibling contributions, and `assembleApp` skips them when it
+	 * mounts the middleware on the token endpoint.
 	 */
 	readonly grantMiddleware?: ListCollector<RequestHandler | null>;
 	/**
-	 * Collector for `tokenBindingMechanisms` contributions. Each entry is a
-	 * `TokenBindingMechanism | null` returned by a
-	 * `TokenBindingMechanismFactory`. Null entries (disabled-by-config) are
-	 * filtered at consumption time in `assembleApp`.
-	 *
-	 * Unlike `grantMiddleware` which contributes pre-composed middleware,
-	 * this slot contributes raw mechanisms. `assembleApp` composes ONE
-	 * `tokenBindingMw` across all collected mechanisms so the configured
-	 * `DispatchPolicy` can arbitrate cross-module. See ADR
-	 * `packages/core/docs/adr/2026-05-20-token-binding-first-class-abstraction.md`
-	 * for the cross-mechanism design rationale.
+	 * Collector for `tokenBindingMechanisms` contributions: each a
+	 * `TokenBindingMechanism`, or `null` when disabled by config (skipped by
+	 * `assembleApp`). Unlike `grantMiddleware`, these are raw mechanisms:
+	 * `assembleApp` composes one `tokenBindingMw` over all of them so the
+	 * configured `DispatchPolicy` arbitrates across modules. See ADR
+	 * 2026-05-20-token-binding-first-class-abstraction.
 	 */
 	readonly tokenBindingMechanisms?: ListCollector<TokenBindingMechanism | null>;
 	/**
@@ -530,7 +448,7 @@ export interface ContributionCollectorMap {
 }
 
 /**
- * A `federationTypes` declaration as registered (#728): the type's entry
+ * A `federationTypes` declaration as registered: the type's entry
  * schema, and `create`, its factory bound to the contributing module's deps —
  * what the dispatch of configured entries by type will call once per entry
  * of the type, with the entry parsed by `entrySchema` and its name.
@@ -544,32 +462,24 @@ export interface RegisteredFederationType {
  * The actual public input shape on createApp: every key consumers need to
  * provide a custom collector for. Built-in kinds are auto-wired by core's
  * createApp; consumers omit them.
- *
- * Per A2-β §6.2.
  */
 export type ContributionKindMap = Partial<ContributionCollectorMap>;
 
 // ---------------------------------------------------------------------------
-// BootstrapMap and createApp options — Per A2-β §6.2
+// BootstrapMap and createApp options
 // ---------------------------------------------------------------------------
 
 /**
  * Map of component values originating from the host environment, pre-seeded
  * into the DI graph before any module factory runs.
- *
- * Per A2-β §6.2.
  */
 export type BootstrapMap = {
 	readonly [K in ComponentKey]?: ComponentMap[K];
 };
 
 /**
- * Default bootstrap map shape. The minimal host-environment contract for the
- * built-in createApp call. Closed shape per spec §6.2: independent of
- * ComponentMap's slot set — defines what createApp requires from the host
- * environment by default.
- *
- * Per A2-β §6.2.
+ * The minimal host contract of the built-in createApp call: a closed shape,
+ * independent of ComponentMap's slot set.
  */
 export type DefaultBootstrapMap = {
 	readonly config: AppConfig;
@@ -580,8 +490,6 @@ export type DefaultBootstrapMap = {
  * Options accepted by createApp. The generic B constrains bootstrapComponents
  * to a typed subset of ComponentMap so downstream stages receive a
  * well-typed config/pathResolver.
- *
- * Per A2-β §6.2.
  */
 export interface CreateAppOptions<B extends BootstrapMap = DefaultBootstrapMap> {
 	/** Module manifests in the order the consumer composed. */
@@ -607,37 +515,32 @@ export interface CreateAppOptions<B extends BootstrapMap = DefaultBootstrapMap> 
 	readonly contributionKinds?: ContributionKindMap;
 
 	/**
-	 * Optional composition-root substitutions for components. Keys present here
-	 * REPLACE the value a module's `provides[K]` would have produced. The
-	 * would-be provider factory is skipped. The override value's lifecycle is
-	 * the consumer's responsibility.
+	 * Composition-root substitutions: a key here replaces the value a module's
+	 * `provides[K]` would have produced, and that factory is skipped. The
+	 * override's lifecycle is the consumer's.
 	 *
-	 * Mutually exclusive with `bootstrapComponents` for the same key (collision
-	 * throws `bootstrap-component-collision` at validateManifests). And not for
-	 * a key a loaded module names `authoritative` (#728): a setting its readers
-	 * take as the module's own, which the module's code goes on deriving from
-	 * its section — an entry for one throws
-	 * `authoritative-component-overridden`; with that module not loaded, the
-	 * entry fills the slot as any other does. `__proto__` as an own key names
-	 * no component and throws `reserved-component-key`.
+	 * A key may not also be in `bootstrapComponents`
+	 * (`bootstrap-component-collision`), nor be one a loaded module declares
+	 * `authoritative` (`authoritative-component-overridden`): its readers take
+	 * it as the module's own, and the module keeps deriving it from its
+	 * section. With that module not loaded, the entry fills the slot as any
+	 * other. `__proto__` as an own key throws `reserved-component-key`.
 	 */
 	readonly overrideComponents?: Partial<ComponentMap>;
 }
 
 // ---------------------------------------------------------------------------
-// AppHandle — Per A2-β §6.3
+// AppHandle
 // ---------------------------------------------------------------------------
 
 /**
- * The public handle returned by createApp. Theme D: every field is readonly;
- * the component map is frozen; dispose is the only mutator.
- *
- * Per A2-β §6.3.
+ * The public handle returned by createApp. Every field is readonly, the
+ * component map is frozen, and dispose is the only mutator.
  */
 export interface AppHandle {
 	/**
 	 * Express router with all RouteContribution entries mounted in the order
-	 * computed by assembleApp §5.6. Consumer code mounts this at its host
+	 * computed by assembleApp. Consumer code mounts this at its host
 	 * server (`app.use(handle.router)`) or calls `handle.listen(port)`.
 	 */
 	readonly router: Router;
@@ -667,32 +570,27 @@ export interface AppHandle {
 
 	/**
 	 * Ordered route contributions in final mount order after before/after
-	 * resolution. Populated by assembleApp (stage 6). Per A2-β §6.3 / A2-γ §7.2.
+	 * resolution. Populated by assembleApp (stage 6).
 	 */
 	readonly routes: readonly OrderedRouteContribution[];
 
 	/**
-	 * Probes registered by builders during boot, in registration order.
-	 *
-	 * A composition root feeds these to the readiness route
-	 * (`routes/Readiness.mts`) — mounted on the host app rather than inside
-	 * `router`, so it stays answerable while the auth pipeline is degraded,
-	 * which is exactly when readiness has something to say. Empty when nothing
-	 * registered a probe (a memory-only deployment has no dependency to be
-	 * unready for).
+	 * Probes registered by builders during boot, in registration order. A
+	 * composition root feeds them to the readiness route
+	 * (`routes/Readiness.mts`), mounted on the host app rather than inside
+	 * `router` so it still answers while the auth pipeline is degraded. Empty
+	 * when nothing registered a probe (a memory-only deployment).
 	 */
 	readonly readinessProbes: readonly ReadinessProbe[];
 }
 
 // ---------------------------------------------------------------------------
-// BootStage — Per A2-β §6.1
+// BootStage
 // ---------------------------------------------------------------------------
 
 /**
  * The six pipeline stages of the boot planner. Used as a discriminator on
  * BootError to pinpoint which stage threw.
- *
- * Per A2-β §6.1.
  */
 export type BootStage =
 	| "validateManifests"
@@ -703,26 +601,12 @@ export type BootStage =
 	| "assembleApp";
 
 // ---------------------------------------------------------------------------
-// BootErrorReason — 37 literals, the union below. Per A2-β §6.1 (+ #271, #363, module-factory-not-called; #277's reason was folded into #363's by #375; the MFA ADR's D3 removed mfa-partial-wiring; the session-admission ADR's D3 and D7 added three)
+// BootErrorReason — 37 literals
 // ---------------------------------------------------------------------------
 
 /**
- * All possible reasons a BootError can be thrown. Each literal corresponds to
- * one validation or runtime failure the boot planner can detect. There are
- * exactly 37 reasons.
- *
- * Per A2-β §6.1. Extended by issue #101 (federation-stores-incomplete), the
- * OIDC discovery aggregator
- * (discovery-document-invalid), #363 (component-absence-undeclared —
- * which #375 also folded #277's retired access-token-revocation-unenforceable
- * reason into), and module-factory-not-called (a `modules` entry that is the
- * factory rather than the manifest it builds), and the session-admission
- * ADR's D3 and D7 (session-requirement-kind-guarded,
- * session-requirements-undeclared, session-requirement-missing), and #728's
- * module sections (reserved-component-key, module-section-path-invalid),
- * contribution kinds (contribution-kind-guarded, contribution-malformed),
- * relocated paths (config-path-relocated) and authoritative keys
- * (authoritative-without-provides, authoritative-component-overridden).
+ * Every reason a BootError can carry: one literal per validation or runtime
+ * failure the boot planner detects, 37 in all.
  */
 export type BootErrorReason =
 	| "module-factory-not-called"
@@ -764,7 +648,7 @@ export type BootErrorReason =
 	| "token-settings-lifetime-exceeds-configuration";
 
 // ---------------------------------------------------------------------------
-// Per-reason *Details interfaces — one per BootErrorReason, 37 total, Per A2-β §6.1 (+ #271, #363, module-factory-not-called, the session-admission ADR, #728)
+// Per-reason *Details interfaces — one per BootErrorReason, 37 in all
 // ---------------------------------------------------------------------------
 
 /**
@@ -781,14 +665,12 @@ export interface ModuleFactoryNotCalledDetails {
 	readonly name: string;
 }
 
-/** Per A2-β §6.1. */
 export interface DuplicateModuleNameDetails {
 	readonly reason: "duplicate-module-name";
 	readonly name: string;
 	readonly modules: readonly [string, string];
 }
 
-/** Per A2-β §6.1. */
 export interface DuplicateProvidesDetails {
 	readonly reason: "duplicate-provides";
 	readonly componentKey: ComponentKey;
@@ -799,8 +681,6 @@ export interface DuplicateProvidesDetails {
  * Sub-union: `source: "module-provides"` carries the declaring module name;
  * `source: "overrideComponents"` does not (overrideComponents is
  * composition-root data, not a module).
- *
- * Per A2-β §6.1.
  */
 export type BootstrapComponentCollisionDetails =
 	| {
@@ -816,15 +696,12 @@ export type BootstrapComponentCollisionDetails =
 	  };
 
 /**
- * A synthetic ComponentMap key (federationProviders, tokenExchangeValidatorResolver,
- * grantHandlerResolver) appeared in a module's `provides`, in
- * `bootstrapComponents`, or in `overrideComponents`. Per A2-α §6.5 these keys
- * are produced exclusively by prepareSyntheticProjections (§5.4 step 0).
- *
- * Sub-union: `source: "module-provides"` carries `module`; the other two
- * sources are composition-root data and carry no module name.
- *
- * Per A2-β §6.1.
+ * A synthetic ComponentMap key (federationProviders,
+ * tokenExchangeValidatorResolver, grantHandlerResolver) appeared in a
+ * module's `provides`, `bootstrapComponents` or `overrideComponents`; only
+ * prepareSyntheticProjections produces these keys. `source:
+ * "module-provides"` carries `module`; the other two sources are
+ * composition-root data and carry no module name.
  */
 export type SyntheticKeyCollisionDetails =
 	| {
@@ -845,9 +722,8 @@ export type SyntheticKeyCollisionDetails =
 	  };
 
 /**
- * Per A2-β §6.1. The `path` chain follows the requires → provides graph from
- * `rootModule` down to the failing module. See §5.1 step 4 for the
- * normative path-construction algorithm.
+ * The `path` chain follows the requires → provides graph from `rootModule`
+ * down to the failing module.
  */
 export interface MissingRequiredComponentDetails {
 	readonly reason: "missing-required-component";
@@ -860,7 +736,6 @@ export interface MissingRequiredComponentDetails {
 	}[];
 }
 
-/** Per A2-β §6.1. */
 export interface UnknownContributionKindDetails {
 	readonly reason: "unknown-contribution-kind";
 	readonly kind: string;
@@ -868,7 +743,7 @@ export interface UnknownContributionKindDetails {
 }
 
 /**
- * Per A2-β §6.1. `identityKind` discriminates name-keyed collision
+ * `identityKind` discriminates name-keyed collision
  * (`"name"`), route id collision (`"id"`), route mountPath collision
  * (`"mountPath"`), and effective method+path collision
  * (`"effective-method-path"`).
@@ -888,7 +763,6 @@ export interface DuplicateContributeDetails {
 	readonly modules: readonly [string, string];
 }
 
-/** Per A2-β §6.1. */
 export interface OverrideTargetMissingDetails {
 	readonly reason: "override-target-missing";
 	readonly kind: string;
@@ -896,7 +770,6 @@ export interface OverrideTargetMissingDetails {
 	readonly overridingModule: string;
 }
 
-/** Per A2-β §6.1. */
 export interface DuplicateOverrideDetails {
 	readonly reason: "duplicate-override";
 	readonly kind: string;
@@ -904,7 +777,6 @@ export interface DuplicateOverrideDetails {
 	readonly modules: readonly [string, string];
 }
 
-/** Per A2-β §6.1. */
 export interface ContributeAndOverrideSameKeyDetails {
 	readonly reason: "contribute-and-override-same-key";
 	readonly kind: string;
@@ -912,7 +784,6 @@ export interface ContributeAndOverrideSameKeyDetails {
 	readonly module: string;
 }
 
-/** Per A2-β §6.1. */
 export interface ListShapedOverrideDetails {
 	readonly reason: "list-shaped-override-not-allowed";
 	readonly kind:
@@ -925,7 +796,6 @@ export interface ListShapedOverrideDetails {
 	readonly module: string;
 }
 
-/** Per A2-β §6.1. */
 export interface LifecycleWithoutProvidesDetails {
 	readonly reason: "lifecycle-without-provides";
 	readonly componentKey: ComponentKey;
@@ -934,7 +804,7 @@ export interface LifecycleWithoutProvidesDetails {
 
 /**
  * A module names in `authoritative` a key it does not provide, or declares
- * `authoritative` as something other than a list (#728). For a key,
+ * `authoritative` as something other than a list. For a key,
  * `componentKey` names it — a key that is not a string described, never
  * rendered. For a value that is not a list, `declared` says what it is
  * (`the string "…"`, `null`, `the number 5`, `a Set`), and no key is named.
@@ -953,7 +823,7 @@ export type AuthoritativeWithoutProvidesDetails =
 
 /**
  * An `overrideComponents` entry substitutes a key a loaded module provides
- * as authoritative (#728): settings its readers take as the module's own,
+ * as authoritative: settings its readers take as the module's own,
  * derived from its section, which the module's code goes on reading.
  */
 export interface AuthoritativeComponentOverriddenDetails {
@@ -980,7 +850,6 @@ export interface TokenSettingsLifetimeExceedsConfigurationDetails {
 	readonly configurationSeconds: number;
 }
 
-/** Per A2-β §6.1. */
 export interface InvalidRouteAdvertisementPathDetails {
 	readonly reason: "invalid-route-advertisement-path";
 	readonly module: string;
@@ -991,20 +860,15 @@ export interface InvalidRouteAdvertisementPathDetails {
 }
 
 /**
- * A key no component may be named where it was written (#728), in either of
- * two places:
+ * A key no component may be named where it was written:
  *
- * - a module that declares its own configuration section and also requires
- *   or optionally reads a component under the key the section is set on:
- *   `section`. Its deps would carry both under one name, the section
- *   shadowing the slot. A component named `section` is otherwise an ordinary
- *   slot — a module without a section may provide or read one, and a host may
- *   bootstrap or override one — so only this module is refused; `module`
- *   names it;
- * - a host map, `bootstrapComponents` or `overrideComponents`, carrying
- *   `__proto__` as its own key: set on the component map it would replace
- *   the map's prototype, so every key of its value would read as a component
- *   no module provided. `source` names the map.
+ * - `section`, required or read optionally by a module that declares its own
+ *   configuration section: its deps would carry both under one name, the
+ *   section shadowing the slot. Elsewhere `section` is an ordinary slot, so
+ *   only this module is refused (`module`).
+ * - `__proto__` as an own key of a host map (`source`): set on the component
+ *   map it would replace the prototype, so every key of its value would read
+ *   as a component no module provided.
  */
 export type ReservedComponentKeyDetails =
 	| {
@@ -1024,15 +888,13 @@ export type ReservedComponentKeyDetails =
 	  };
 
 /**
- * A manifest's section path it cannot have written (#728): an `at` that is
- * not a dot-separated path of non-empty keys (`""`, `"a..b"`, `".a"`, `"a."`,
- * or not a string at all) — `at` names it — or a path another loaded module's
- * section is read at too — a section has one owner — where `at` is the path
- * and `problem` names the other module; or a `relocatedFrom` that is neither
- * a list of such paths nor a map from such paths to paths inside the section
- * (`""` for the section itself), or whose old path is, or holds, a loaded
- * module's section — `relocatedFrom` names the entry, or the value when it is
- * neither form, and `problem` says what is wrong with it.
+ * A section path a manifest cannot have written: an `at` that is not a
+ * dot-separated path of non-empty keys (or not a string), or one another
+ * loaded module's section is read at too, since a section has one owner
+ * (`problem` names that module); or a `relocatedFrom` that is neither a list
+ * of such paths nor a map from them to paths inside the section (`""` for the
+ * section itself), or whose old path is or holds a loaded module's section
+ * (`problem` says what is wrong).
  */
 export type ModuleSectionPathInvalidDetails =
 	| {
@@ -1052,15 +914,14 @@ export type ModuleSectionPathInvalidDetails =
 	  };
 
 /**
- * A configuration handed to `createApp` still sets keys at paths a loaded
- * module's section moved from (#728 B10; `section.relocatedFrom`), found
- * before the configuration is parsed. Each key: the module whose section it
- * moved to, the dot path the operator wrote, the one it is written at now
- * (`null` for a key removed rather than moved), and the environment variable
- * bound to the new path (#728 B9's naming) — absent for a removed key, and
- * for a new path under a transitional section path nothing binds yet. A
- * bridge for the 0.x line, removed at the first major release — the
- * relocated-paths drift test fails the cut that forgets.
+ * The configuration handed to `createApp` still sets keys at paths a loaded
+ * module's section moved from (`section.relocatedFrom`), found before it is
+ * parsed. Each entry: the module the key moved to, the dot path the operator
+ * wrote, its path now (`null` for a removed key), and the environment
+ * variable bound to the new path (absent for a removed key, or where nothing
+ * binds the new path yet). A bridge for the 0.x line, removed at the first
+ * major release; the relocated-paths drift test fails the release that
+ * forgets.
  */
 export interface ConfigPathRelocatedDetails {
 	readonly reason: "config-path-relocated";
@@ -1074,9 +935,9 @@ export interface ConfigPathRelocatedDetails {
 }
 
 /**
- * Per A2-β §6.1. Thrown by either of stage 1's two parses: the composed
- * schema over the whole configuration, or — once that passed — the modules'
- * own sections (#728), each parsed by its manifest's `section.schema`.
+ * Thrown by either of stage 1's two parses: the composed schema over the
+ * whole configuration, or, once that passed, the modules' own sections, each
+ * parsed by its manifest's `section.schema`.
  */
 export interface ConfigValidationFailedDetails {
 	readonly reason: "config-validation-failed";
@@ -1095,7 +956,6 @@ export interface ConfigValidationFailedDetails {
 	readonly modules: readonly { readonly module: string; readonly schemaPath?: string }[];
 }
 
-/** Per A2-β §6.1. */
 export interface CircularDependencyDetails {
 	readonly reason: "circular-dependency";
 	/**
@@ -1111,10 +971,9 @@ export interface CircularDependencyDetails {
 }
 
 /**
- * Per A2-β §6.1. `originalError` is a typed alias of `cause`; both are
- * populated for *-factory-failed reasons (Codex Session 03 verdict C3).
- * `cleanupErrors` captures any errors thrown by partial-cleanup callbacks
- * run before the error propagates.
+ * `originalError` is a typed alias of `cause`; both are set for the
+ * *-factory-failed reasons. `cleanupErrors` holds the errors of the partial
+ * cleanup run before the error propagates.
  */
 export interface ProvidesFactoryFailedDetails {
 	readonly reason: "provides-factory-failed";
@@ -1129,8 +988,8 @@ export interface ProvidesFactoryFailedDetails {
 }
 
 /**
- * Per A2-β §6.1. `originalError` is a typed alias of `cause`; both are
- * populated for *-factory-failed reasons (Codex Session 03 verdict C3).
+ * `originalError` is a typed alias of `cause`; both are set for the
+ * *-factory-failed reasons.
  */
 export interface ContributeFactoryFailedDetails {
 	readonly reason: "contribute-factory-failed";
@@ -1145,7 +1004,6 @@ export interface ContributeFactoryFailedDetails {
 	}[];
 }
 
-/** Per A2-β §6.1. */
 export interface RouteOrderCycleDetails {
 	readonly reason: "route-order-cycle";
 	readonly cycle: readonly {
@@ -1155,7 +1013,6 @@ export interface RouteOrderCycleDetails {
 	}[];
 }
 
-/** Per A2-β §6.1. */
 export interface RouteOrderTargetMissingDetails {
 	readonly reason: "route-order-target-missing";
 	/** The referenced id that was not found. */
@@ -1179,8 +1036,6 @@ export interface RouteOrderTargetMissingDetails {
  * `name`: the unmatched federation/policy key.
  * `side`: which side is missing its pair.
  * `contributedBy`: the module that contributed the unpaired side.
- *
- * Per A5 §8.2.
  */
 export interface FederationRedirectPolicyUnpairedDetails {
 	readonly reason: "federation-redirect-policy-unpaired";
@@ -1190,16 +1045,10 @@ export interface FederationRedirectPolicyUnpairedDetails {
 }
 
 /**
- * CP-20 invariant restoring the v0.4.x guard: when any module provides
- * `grantPolicy`, `config.oauth.jwt.issuer` must be a non-empty string.
- * The grant policy hook signs decisions against the configured issuer; an
- * empty issuer turns CP-18 fail-closed enforcement into silent allow-all.
- *
- * Phase 9 dropped the v0.4.x A4 four-store invariant: in v0.5.0 the four
- * user-session slots are split across packages (sessionModule consumes 2,
- * oauthModule consumes 2). Step 4 (checkRequiresClosure) already enforces
- * the per-module wiring contract, so a separate "all-or-none" check would
- * mis-fire on legitimate test fixtures that exercise only one subsystem.
+ * When any module provides `grantPolicy`, `config.oauth.jwt.issuer` must be a
+ * non-empty string: the grant policy hook signs decisions against the
+ * issuer, and an empty one turns its fail-closed enforcement into a silent
+ * allow-all.
  */
 export interface GrantPolicyWithoutIssuerDetails {
 	readonly reason: "grant-policy-without-issuer";
@@ -1207,13 +1056,11 @@ export interface GrantPolicyWithoutIssuerDetails {
 }
 
 /**
- * Per A2-β §6.1 amendment 2026-05 (issue #101 TODO-F-1); refreshTokenFamilyRevocation
- * added per #103 review (alignment with route-level gating in
- * packages/oauth/src/routes.mts).
- *
- * When config.federations.<name>.enabled is true, all 6 federation-related
- * slots must be wired: userSessionStore, sessionRPRegistry, sessionFamilyIndex,
- * sessionFederationIndex, federationTokenStore, and refreshTokenFamilyRevocation.
+ * When `config.federations.<name>.enabled` is true, all six federation slots
+ * must be wired: userSessionStore, sessionRPRegistry, sessionFamilyIndex,
+ * sessionFederationIndex, federationTokenStore and
+ * refreshTokenFamilyRevocation (matching the route-level gating in
+ * `packages/oauth/src/routes.mts`).
  */
 export interface FederationStoresIncompleteDetails {
 	readonly reason: "federation-stores-incomplete";
@@ -1229,7 +1076,7 @@ export interface FederationStoresIncompleteDetails {
  * contribution, conflicting values, empty signing algs, endpoint-in-metadata,
  * …). Wraps the underlying `DiscoveryDocumentError` (carried as `cause`) so a
  * discovery misconfiguration surfaces through the same `BootError` taxonomy as
- * every other assembleApp failure. Per the OIDC discovery aggregator.
+ * every other assembleApp failure.
  */
 export interface DiscoveryDocumentInvalidDetails {
 	readonly reason: "discovery-document-invalid";
@@ -1243,7 +1090,7 @@ export interface DiscoveryDocumentInvalidDetails {
 
 /**
  * A composition holds state in this process's memory that a multi-replica
- * deployment must share, while `deployment.mode` says `"multi"` (#271).
+ * deployment must share, while `deployment.mode` says `"multi"`.
  * `modules` names every offending module rather than the first, so one boot
  * attempt tells the operator everything they have to change.
  */
@@ -1254,13 +1101,10 @@ export interface ReplicaUnsafeAdapterDetails {
 
 /**
  * A module attached an `AbsencePolicy` to an optional key, nothing fills the
- * slot, and the config does not carry the policy's declared-absent value
- * (#363). The generic successor to the #277 pattern: an unfilled capability
- * slot must be a stated decision, never a silent no-op.
- *
- * Also thrown — with the offending modules named in the message — when two
- * modules attach *disagreeing* policies to the same key, because the boot
- * error's advice must not depend on module input order.
+ * slot, and the config does not carry the policy's declared-absent value: an
+ * unfilled capability slot must be a stated decision, never a silent no-op.
+ * Also thrown, naming the modules, when two modules attach disagreeing
+ * policies to one key, so the advice does not depend on module order.
  */
 export interface ComponentAbsenceUndeclaredDetails {
 	readonly reason: "component-absence-undeclared";
@@ -1279,7 +1123,7 @@ export interface ComponentAbsenceUndeclaredDetails {
 
 /**
  * A host `contributionKinds` collector for a kind whose collector is the
- * planner's alone (#728): `rateLimitBudgets` — a host collector could answer
+ * planner's alone: `rateLimitBudgets` — a host collector could answer
  * a looser budget than the owning module contributed, on a prefix such as
  * RFC 8628 §5.1's device verification — and `federationTypes`. Refused in
  * `createApp`, before the kinds are merged.
@@ -1291,7 +1135,7 @@ export interface ContributionKindGuardedDetails {
 
 /**
  * A contribution whose container, key or value its kind cannot take, found on
- * the manifest at stage 1, before any factory runs (#728): a
+ * the manifest at stage 1, before any factory runs: a
  * `rateLimitBudgets` or `federationTypes` container that is not a record
  * (an array, a function, `null`) — `name` then absent — a `rateLimitBudgets`
  * prefix that is empty or holds `:` — no limiter key carries it — or a
@@ -1311,11 +1155,10 @@ export interface ContributionMalformedDetails {
 /**
  * A `sessionRequirements` entry in a module's `overrides` (stage 1), or a
  * host `contributionKinds` collector for `sessionRequirements` or
- * `mfaFactors` (`createApp`, before the kinds are merged) — the
- * session-admission ADR's D3: a requirement is switched off by not
- * installing it, and the collector the projection and the boot line read is
- * the planner's. `module` names the overriding module; a host entry is
- * composition-root data and carries none.
+ * `mfaFactors` (`createApp`, before the kinds are merged): a requirement is
+ * switched off by not installing it, and the collector the projection and
+ * the boot line read is the planner's. `module` names the overriding module;
+ * a host entry carries none. See ADR 2026-09-28-session-admission.
  */
 export interface SessionRequirementKindGuardedDetails {
 	readonly reason: "session-requirement-kind-guarded";
@@ -1326,8 +1169,8 @@ export interface SessionRequirementKindGuardedDetails {
 
 /**
  * A consumer of session admission is installed and `sessionRequirements.expected`
- * is not the set of registered requirements — absent, or unequal in either
- * direction (the session-admission ADR's D7).
+ * is not the set of registered requirements: absent, or unequal in either
+ * direction. See ADR 2026-09-28-session-admission.
  */
 export interface SessionRequirementsUndeclaredDetails {
 	readonly reason: "session-requirements-undeclared";
@@ -1346,9 +1189,9 @@ export interface SessionRequirementsUndeclaredDetails {
 }
 
 /**
- * `mfa.mode` is not `off` while no requirement named `mfa` is registered
- * (the session-admission ADR's D7): refused rather than left believing
- * logins ask for a second factor.
+ * `mfa.mode` is not `off` while no requirement named `mfa` is registered:
+ * refused rather than left believing logins ask for a second factor. See ADR
+ * 2026-09-28-session-admission.
  */
 export interface SessionRequirementMissingDetails {
 	readonly reason: "session-requirement-missing";
@@ -1363,20 +1206,8 @@ export interface SessionRequirementMissingDetails {
 }
 
 /**
- * Discriminated union of all per-reason Details interfaces.
- * The `reason` field on each member is the discriminant.
- *
- * Per A2-β §6.1, extended by A5 §8.2 and the Phase 9 boot-validator
- * restoration (A4 four-store + CP-20 issuer guard). Extended by issue #101
- * (federation-stores-incomplete), the OIDC discovery aggregator
- * (discovery-document-invalid), #271 (replica-unsafe-adapter), #363
- * (component-absence-undeclared), module-factory-not-called and the
- * session-admission ADR's three (session-requirement-kind-guarded,
- * session-requirements-undeclared, session-requirement-missing) and #728's
- * (reserved-component-key, module-section-path-invalid, contribution-kind-guarded,
- * contribution-malformed, config-path-relocated, authoritative-without-provides,
- * authoritative-component-overridden) — one member per `BootErrorReason`, 37 in
- * all.
+ * Discriminated union (on `reason`) of the per-reason details: one member
+ * per `BootErrorReason`, 37 in all.
  */
 export type BootErrorDetails =
 	| ModuleFactoryNotCalledDetails
@@ -1418,19 +1249,14 @@ export type BootErrorDetails =
 	| TokenSettingsLifetimeExceedsConfigurationDetails;
 
 // ---------------------------------------------------------------------------
-// BootError class — Per A2-β §6.1
+// BootError class
 // ---------------------------------------------------------------------------
 
 /**
- * The single error class for the boot planner's scope. Every boot-time
- * failure surfaces as a BootError with a structured `details` payload and
- * a discriminated `reason` field.
- *
- * Codex Session 03 verdict: single class, discriminated reason, stage field.
- * `cause` is preserved verbatim for *-factory-failed reasons (verdict C3);
- * printed, it is projected (see the `util.inspect.custom` method).
- *
- * Per A2-β §6.1.
+ * The boot planner's single error class: every boot-time failure is a
+ * BootError with a discriminated `reason`, the `stage` that threw, and a
+ * structured `details` payload. `cause` is kept verbatim for the
+ * *-factory-failed reasons; printed, it is projected (`util.inspect.custom`).
  */
 export class BootError extends Error {
 	readonly reason: BootErrorReason;
@@ -1444,10 +1270,9 @@ export class BootError extends Error {
 		details: BootErrorDetails;
 		cause?: unknown;
 	}) {
-		// Pass `cause` to super only when defined. Calling
-		// `super(message, { cause: undefined })` materialises an own `cause`
-		// property with value `undefined`, breaking the spec §6.1 contract that
-		// cause is populated only for *-factory-failed reasons.
+		// Pass `cause` only when defined: `super(message, { cause: undefined })`
+		// would create an own `cause` property holding `undefined`, and `cause`
+		// is present only for the reasons that carry one.
 		super(args.message, args.cause !== undefined ? { cause: args.cause } : undefined);
 		this.name = "BootError";
 		this.reason = args.reason;
@@ -1456,16 +1281,13 @@ export class BootError extends Error {
 	}
 
 	/**
-	 * How a boot failure prints — Node's unhandled-rejection printer,
-	 * `console.error`, `util.inspect` — which is where one ends up: its name
-	 * and message (which names the error behind it by `failureSummary`), its
-	 * stack frames, `reason`, `stage` and `details`, and every error it
-	 * carries — the `cause`, `details.originalError`, each
-	 * `details.cleanupErrors[].error` — as its `loggableError` projection.
-	 * The errors themselves stay on the object for a caller that reads them
-	 * (the `cause` contract above); printed whole they would write what a
-	 * parser quoted, a Redis reply's arguments or a thrown string to the log
-	 * the process ends in.
+	 * How a boot failure prints (Node's unhandled-rejection printer,
+	 * `console.error`, `util.inspect`): name, message, stack frames, `reason`,
+	 * `stage` and `details`, with every error it carries (`cause`,
+	 * `details.originalError`, each `details.cleanupErrors[].error`) shown as
+	 * its `loggableError` projection. Printed whole, they would write what a
+	 * parser quoted, a Redis reply's arguments or a thrown string to the log.
+	 * The errors themselves stay on the object for callers that read them.
 	 */
 	[inspect.custom](_depth: number, options: InspectOptions, print: typeof inspect): string {
 		const details = (this.details ?? {}) as unknown as Record<string, unknown>;

@@ -15,22 +15,19 @@
  */
 
 /**
- * Federation grants (#593): the record of one user's consent that one client
- * may obtain upstream access tokens through one connection, within stated
- * scopes, until a stated time. The design, and the reasons for every rule
- * here, are in `docs/adr/2026-09-17-federation-grants-offline-delegation.md`;
- * "D<n>" below names a decision in it.
+ * Federation grants: the record of one user's consent that one client may
+ * obtain upstream access tokens through one connection, within stated
+ * scopes, until a stated time. Design and rationale: ADR
+ * 2026-09-17-federation-grants-offline-delegation.
  *
- * "Grant" here never means an OAuth grant type (`src/grants/`), which is why
- * every name this directory exports says `FederationGrant`. It sits next to
- * `federation-tokens/`, which stays what it is: the session-bound record that
- * logout deletes.
+ * "Grant" never means an OAuth grant type (`src/grants/`), hence the
+ * `FederationGrant` prefix. Unlike `federation-tokens/` (session-bound,
+ * deleted at logout), a grant outlives the session.
  *
- * Durations carry their unit in the name where it is milliseconds (`…Ms`);
- * a bare number of seconds is said to be one where it is declared.
+ * Milliseconds carry `Ms` in the name; seconds are noted where declared.
  */
 
-/** Who ended a grant. `backstop` is D13's boundary check, made durable on the first touch. */
+/** Who ended a grant. `backstop` is the subject boundary check, made durable on the first touch. */
 export type FederationGrantRevokedBy =
 	| "client"
 	| "subject"
@@ -38,7 +35,7 @@ export type FederationGrantRevokedBy =
 	| "logout_policy"
 	| "backstop";
 
-/** What every grant has from the moment the backend lodges its first intent (D1, D6). */
+/** What every grant has from the moment the backend lodges its first intent. */
 export interface FederationGrantBase {
 	/** Opaque, 256 bits, base64url. A reference, not a credential: it authorizes nothing by itself. */
 	readonly id: string;
@@ -48,11 +45,11 @@ export interface FederationGrantBase {
 	readonly clientId: string;
 	readonly connection: string;
 	readonly createdAt: Date;
-	/** Bumped by every status or credential change; the guard of D2's writes. */
+	/** Bumped by every status or credential change; the guard of the store's writes. */
 	readonly version: number;
 }
 
-/** What the user was shown and agreed to, and the session it was agreed through (D8). */
+/** What the user was shown and agreed to, and the session it was agreed through. */
 export interface FederationGrantConsent {
 	readonly at: Date;
 	readonly sid: string;
@@ -60,24 +57,19 @@ export interface FederationGrantConsent {
 }
 
 /**
- * What an activation writes, and only an activation replaces (D2).
+ * What an activation writes, and only an activation replaces: the fields
+ * that decide who may obtain what, until when. A store binds all of them
+ * (with `id`, `subject`, `clientId`, `connection`) into the sealed
+ * credential's authenticated envelope, so tampering makes the credential
+ * unreadable instead of widening the grant.
  *
- * These are the fields that decide who may obtain what, until when. A store
- * puts every one of them, with the grant's `id`, `subject`, `clientId` and
- * `connection`, into the authenticated envelope of the sealed credential
- * (D16), so that rewriting one in storage makes the credential unreadable
- * instead of widening the grant. Keeping them in a type of their own is what
- * gives an adapter that list.
- *
- * Every field is a required key (#626): `resource` holds `undefined` where the
- * connection names none, so a copy that forgot it — and asked the upstream
- * for a token without the audience the connection narrows it to — is a
- * compile error.
+ * Every field is a required key (`resource` is `undefined` where none), so
+ * a copy that dropped the audience restriction is a compile error.
  */
 export interface FederationGrantAuthorization {
-	/** Fingerprint of the connection's upstream issuer and client at consent (D4). */
+	/** Fingerprint of the connection's upstream issuer and client at consent. */
 	readonly identityRevision: string;
-	/** Fingerprint of what the connection asks for and where (D4). */
+	/** Fingerprint of what the connection asks for and where. */
 	readonly authorizationRevision: string;
 	readonly upstream: { readonly issuer: string; readonly subject: string };
 	/** RFC 8707, from the connection; `undefined` when it names none. */
@@ -86,44 +78,36 @@ export interface FederationGrantAuthorization {
 	readonly scopes: readonly string[];
 	readonly consent: FederationGrantConsent;
 	readonly authorizedAt: Date;
-	/** `consent.at` plus the consented lifetime. Fixed at consent; a refresh never moves it (D3). */
+	/** `consent.at` plus the consented lifetime. Fixed at consent; a refresh never moves it. */
 	readonly expiresAt: Date;
 }
 
 /**
- * What changes while a grant is in use, outside any activation and outside the
- * authenticated envelope: neither field decides what the grant allows.
+ * What changes while a grant is in use, outside any activation and outside
+ * the authenticated envelope: none of it decides what the grant allows.
  *
- * Each is a required key, `undefined` where there is none (#626). Two
- * decide how often the upstream is asked. A copy that lost `ineligible` would
- * let the upstream be asked whenever a refresh is otherwise due, instead of
- * once the marker's interval has passed: for an upstream that keeps issuing
- * tokens that cannot be disclosed, a lock and a refresh-token rotation on each
- * such request (D5). One that lost `refreshFailure` would let a failing
- * upstream be asked whenever a refresh is otherwise due, instead of after its
- * backoff (D12). Naming the key makes a copy built field by field that forgot one a
- * compile error. A write that spreads the old record and clears one says so
- * by convention (`refreshFailure: undefined`): the compiler cannot tell a
- * clear left out from a value meant to be kept, so the contract suite is
- * what holds those writes.
+ * Each is a required key, `undefined` where there is none: losing
+ * `ineligible` or `refreshFailure` in a copy would let the upstream be asked
+ * (and the refresh token rotated) on every request instead of after the
+ * interval. A write that spreads the old record clears one explicitly
+ * (`refreshFailure: undefined`); the contract suite, not the compiler,
+ * holds those writes.
  */
 export interface FederationGrantUsage {
 	readonly lastUsedAt: Date | undefined;
-	/** Left by a refresh whose token could not be disclosed (D5). */
+	/** Left by a refresh whose token could not be disclosed. */
 	readonly ineligible: FederationGrantIneligibilityMarker | undefined;
-	/** Left by a refresh that failed (D12). Cleared by whatever replaces or ends the credentials. */
+	/** Left by a refresh that failed. Cleared by whatever replaces or ends the credentials. */
 	readonly refreshFailure: FederationGrantRefreshFailure | undefined;
 }
 
 /**
- * How a refresh failed, as far as a later look needs to know: what to answer
- * meanwhile, and how long to wait before the upstream is asked again.
+ * How a refresh failed, as a later look needs to know it:
  *
- * - `unavailable` — an outage, a connection that failed, an answer nobody
- *   could read: the request may have been processed, and its answer lost.
- * - `rate_limited` — a 429: the request was not processed.
- * - `rejected` — an error code this provider knows, other than the ones that
- *   end the credentials: a configuration fault, until an operator acts.
+ * - `unavailable` — outage or unreadable answer: may have been processed.
+ * - `rate_limited` — a 429: not processed.
+ * - `rejected` — a known error code that does not end the credentials: a
+ *   configuration fault, until an operator acts.
  */
 export type FederationGrantRefreshFailureKind = "unavailable" | "rate_limited" | "rejected";
 
@@ -131,8 +115,7 @@ export type FederationGrantRefreshFailureKind = "unavailable" | "rate_limited" |
  * What a refresh reports of its failure. The store counts.
  *
  * The optional fields say `| undefined` so that a stored stamp, which names
- * both (#626), is still accepted where a report is — as it was when the stamp
- * extended this type — for a consumer compiling with
+ * both, is still accepted where a report is under
  * `exactOptionalPropertyTypes`.
  */
 export interface FederationGrantRefreshFailureInput {
@@ -140,26 +123,22 @@ export interface FederationGrantRefreshFailureInput {
 	readonly kind: FederationGrantRefreshFailureKind;
 	/** The upstream's `Retry-After`, in seconds, as the classifier bounded it. */
 	readonly retryAfterSeconds?: number | undefined;
-	/** For `rejected`: the error code, one this provider knows (D18). */
+	/** For `rejected`: the error code, one this provider knows. */
 	readonly upstreamCode?: string | undefined;
 }
 
 /**
- * Non-secret, and outside the authenticated envelope (D16). Without it every
- * request that needs a refresh would ask a failing upstream again (D12).
- *
- * The report's fields, each a required key (#626), and the store's count. A
- * `rate_limited` stamp that lost `retryAfterSeconds` would wait the default
- * backoff instead of the longer of that and the upstream's `Retry-After`,
- * both held to the ceiling — and so could ask the upstream again before it
- * said to.
+ * Non-secret, and outside the authenticated envelope. Without it every
+ * request needing a refresh would ask a failing upstream again. The report's
+ * fields are required keys (a lost `retryAfterSeconds` would retry before
+ * the upstream said to), plus the store's count.
  */
 export interface FederationGrantRefreshFailure {
 	readonly at: Date;
 	readonly kind: FederationGrantRefreshFailureKind;
 	/** The upstream's `Retry-After`, in seconds, as the classifier bounded it. */
 	readonly retryAfterSeconds: number | undefined;
-	/** For `rejected`: the error code, one this provider knows (D18). */
+	/** For `rejected`: the error code, one this provider knows. */
 	readonly upstreamCode: string | undefined;
 	/** Failures in a row, counted by the store: `1` for the first. */
 	readonly count: number;
@@ -202,7 +181,7 @@ export type RevokedFederationGrant =
 			FederationGrantRevocation)
 	| (FederationGrantBase & NeverAuthorized & FederationGrantRevocation);
 
-/** The stored record. `expired` is not a stored status: it is read off the clock (D1, D3). */
+/** The stored record. `expired` is not a stored status: it is read off the clock. */
 export type FederationGrant =
 	| PendingFederationGrant
 	| AuthorizedFederationGrant
@@ -218,7 +197,7 @@ export function hasFederationGrantAuthorization<G extends FederationGrant>(
 /**
  * A connection as the domain rules need it: the `federationGrants.connections.<name>`
  * entry, joined with the upstream issuer and client ID of the federation it
- * points at (D4). Reading it from configuration is the package's job.
+ * points at. Reading it from configuration is the package's job.
  */
 export interface FederationGrantConnection {
 	readonly name: string;
@@ -238,24 +217,25 @@ export interface FederationGrantConnection {
 	readonly authorizationParams?: Readonly<Record<string, string>>;
 	/** Names the environment. Required, so that isolation between environments is not opt-in. */
 	readonly boundary: string;
-	/** Seconds. What turns residual access into a number the operator chose (D5, D15). */
+	/** Seconds. What turns residual access into a number the operator chose. */
 	readonly maxAccessTokenLifetime: number;
-	/** `false`: every intent gets the full scope set (D19). Default `true`. */
+	/** `false`: every intent gets the full scope set (for IdPs that accumulate consent). Default `true`. */
 	readonly allowScopeSubsets?: boolean;
 	/**
 	 * `callbackURL`, exactly as configured: where the upstream returns the
-	 * browser at the end of a connect flow (D7). Optional here because spending
+	 * browser at the end of a connect flow. Optional here because spending
 	 * a grant never needs it; a deployment that creates grants is refused at
 	 * boot without it, and acquisition takes the connection as
 	 * `FederationGrantAcquisitionConnection`, where it is required.
 	 */
 	readonly callbackUri?: string;
 	/**
-	 * #611: the id_token claims the connect callback asks the adapter for and
-	 * hands the Store beside the subject — what a Store matches a person on
-	 * across registrations where `sub` is pairwise (Entra's `tid` and `oid`).
-	 * The package's resolver always sets it (`[]` when unset). In neither
-	 * revision: it changes what check 5 can see, not what was consented to.
+	 * The id_token claims the connect callback asks the adapter for and hands
+	 * the Store beside the subject — what a Store matches a person on across
+	 * registrations where `sub` is pairwise (Entra's `tid` and `oid`). The
+	 * package's resolver always sets it (`[]` when unset). In neither
+	 * revision: it changes what the account-binding check can see, not what
+	 * was consented to.
 	 */
 	readonly identityClaims?: readonly string[];
 }
@@ -264,7 +244,7 @@ export type FederationGrantIneligibilityReason =
 	| "no_finite_lifetime"
 	| "lifetime_over_maximum"
 	| "scope_exceeded"
-	/** Not a bearer token: a route with no proof key cannot present a sender-constrained one (D5). */
+	/** Not a bearer token: a route with no proof key cannot present a sender-constrained one. */
 	| "token_type_unsupported"
 	/**
 	 * The adapter reported a refresh without a usable access token, or with a
@@ -276,7 +256,7 @@ export type FederationGrantIneligibilityReason =
 /**
  * Non-secret, and outside the authenticated envelope. Without it a grant whose
  * upstream keeps answering with ineligible tokens would take the lock, call
- * the upstream and rotate the refresh token on every request (D5).
+ * the upstream and rotate the refresh token on every request.
  */
 export interface FederationGrantIneligibilityMarker {
 	readonly reason: FederationGrantIneligibilityReason;
@@ -289,7 +269,7 @@ export type FederationGrantReauthorizationReason =
 	| "upstream_invalid_grant"
 	| "connection_changed"
 	| "credential_unreadable"
-	// The upstream asked for the user (#616, D11): the refresh was refused
+	// The upstream asked for the user: the refresh was refused
 	// with one of the four interaction codes, and the credential is kept.
 	| "upstream_interaction_required"
 	| "upstream_login_required"
@@ -301,7 +281,7 @@ export type FederationGrantExpiredReason = "consented_lifetime" | "operator_maxi
 /**
  * What a caller is told about a grant, computed on every read and never
  * persisted, so that undoing a configuration change or restoring a key
- * restores the grant (D1).
+ * restores the grant.
  */
 export type EffectiveFederationGrantStatus =
 	| { readonly status: "pending" }
@@ -321,14 +301,10 @@ export type EffectiveFederationGrantStatus =
 	  };
 
 /**
- * What the sealed credential record holds (D5, D16). The access token may be
- * `undefined`: an ineligible one is withheld and never written. Its expiry is
- * not stored: it is `obtainedAt` plus `issuedLifetime`, and a second copy
- * would be a second thing that could disagree with what the eligibility rule
- * judged.
- *
- * `accessToken` is a required key (#626): a copy that forgot it would read as
- * a withheld token and send every request to the upstream for a refresh.
+ * What the sealed credential record holds. `accessToken` is `undefined` when
+ * an ineligible token was withheld, and is a required key so a copy cannot
+ * drop it (which would force a refresh on every request). Expiry is derived
+ * (`obtainedAt` + `issuedLifetime`), never stored separately.
  */
 export interface FederationGrantCredentials {
 	readonly refreshToken: string;
@@ -346,7 +322,7 @@ export interface FederationGrantCredentials {
 }
 
 // ---------------------------------------------------------------------------
-// The typed result of `retrieveFederationGrantToken` (D11).
+// The typed result of `retrieveFederationGrantToken`.
 // ---------------------------------------------------------------------------
 
 export type FederationGrantUnavailableReason =
@@ -393,9 +369,9 @@ export interface FederationGrantRetrievalFailure {
 }
 
 /**
- * One typed result for a token retrieval; one HTTP mapping is derived from it
- * (D11). The ADR's table lists codes with their reasons; here each code is an
- * object, so that a reason cannot be attached to a code that has none.
+ * One typed result for a token retrieval; one HTTP mapping is derived from
+ * it. Each code is its own object, so a reason cannot be attached to a code
+ * that has none.
  */
 export type FederationGrantDenial =
 	| { readonly code: "grant_not_found" }
@@ -422,7 +398,7 @@ export type FederationGrantDenial =
 	| {
 			readonly code: "upstream_rejected";
 			readonly reason: string;
-			/** Present when answered from the stamp of a failed refresh (D12). */
+			/** Present when answered from the stamp of a failed refresh. */
 			readonly retryAfterSeconds?: number;
 	  }
 	| {
@@ -435,12 +411,10 @@ export type FederationGrantDenial =
 			readonly reason: FederationGrantUnavailableReason;
 			readonly retryAfterSeconds?: number;
 			/**
-			 * The failure this answer was turned from, when a reported one was:
-			 * the very object the retrieval handed its `report` seam, so that the
-			 * route answering the 503 logs the outage once, with its cause, and
-			 * can tell it from the failures the answer did not carry. Absent for
-			 * a key missing from the ring, a deadline the upstream did not meet,
-			 * a backoff still standing, and contention — nothing was thrown.
+			 * The reported failure this answer was turned from (the same object
+			 * handed to `report`), so the route logs the outage once with its
+			 * cause. Absent when nothing was thrown (missing key, missed deadline,
+			 * standing backoff, contention).
 			 *
 			 * Not enumerable: a spread, `JSON.stringify` or a response built from
 			 * the answer never carries it.
@@ -453,7 +427,7 @@ export type FederationGrantTokenResult =
 			readonly ok: true;
 			readonly accessToken: string;
 			readonly tokenType: string;
-			/** Seconds. Clamped to the grant's remaining life: a cache hint, never enforcement (D10, D15). */
+			/** Seconds. Clamped to the grant's remaining life: a cache hint, never enforcement. */
 			readonly expiresIn: number;
 			/** What this token carries. */
 			readonly scopes: readonly string[];
@@ -461,7 +435,7 @@ export type FederationGrantTokenResult =
 			 * Whether this is a token the call itself fetched from the upstream. It
 			 * is `false` for a cached token, for somebody else's refresh, and for
 			 * the token the grant had when this call's refresh brought nothing
-			 * usable (D5).
+			 * usable.
 			 */
 			readonly refreshed: boolean;
 	  }

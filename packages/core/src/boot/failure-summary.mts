@@ -15,26 +15,19 @@
  */
 
 /*
- * `failureSummary`: what a `BootError`'s message says of the error behind
- * it — a factory's throw, the discovery planner's refusal.
+ * `failureSummary`: what a `BootError`'s message says of the error behind it
+ * (a factory's throw, the discovery planner's refusal).
  *
- * A boot failure ends the process, and whatever prints it (Node's
- * unhandled-rejection printer, a host's logger) writes the message to a log.
- * The message used to be the error flattened with `String(...)`: a parser's
- * error quotes its input and js-yaml's the lines around the fault, so a typo
- * in a clients file wrote other clients' secrets to stderr, a Redis reply
- * put the command's arguments there, and a thrown string went in whole. The
- * message now names the error by `loggableError`'s rules: its `name`, and
- * its message as the projection reads it (`uncappedDetail`: nothing of a
- * SyntaxError's or a YAMLException's text, a Redis reply's echoed arguments
- * cut, on one line); for a thrown
- * value that is not an Error, its kind alone. Not the projection's 256
- * character cap: a boot refusal's advice — the config key to set, the module
- * to wire — is often longer, and its end is what an operator acts on. The
- * error itself stays on the BootError as `cause` (and
- * `details.originalError`), for a caller that reads it; printed, a BootError
- * shows it by its projection (its `util.inspect.custom`, in `types.mts`), so
- * the message is not the only safe part of what the process ends with.
+ * A boot failure's message ends up in a log, so it follows `loggableError`'s
+ * rules and never `String(error)`: a parser's error quotes its input (a typo
+ * in a clients file would print other clients' secrets) and a Redis reply
+ * echoes the command's arguments. The message is the error's `name` plus
+ * `uncappedDetail`'s reading of its message, or the kind alone for a thrown
+ * non-Error. The projection's 256-character cap is not applied: a boot
+ * refusal's advice (the key to set, the module to wire) is often longer, and
+ * its end is what an operator acts on. The error itself stays on the
+ * BootError as `cause` and `details.originalError`; a printed BootError shows
+ * it by its projection (`util.inspect.custom` in `types.mts`).
  */
 
 import { loggableError, uncappedDetail } from "../logging/loggableError.mjs";

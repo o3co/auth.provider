@@ -30,15 +30,10 @@ import { DEFAULT_JWKS_PATH, isValidJwksPath } from "./path.mjs";
 const PRIVATE_JWK_MEMBERS: readonly string[] = ["d", "p", "q", "dp", "dq", "qi", "oth", "k"];
 
 /**
- * Reduce an exported JWK to its public members, or drop it entirely.
- *
- * Defense-in-depth for the `KeyStore` public extension point: the built-in
- * stores only ever hold public verification material, but a third-party / KMS
- * adapter that mistakenly returns a private (or symmetric) key as `publicKey`
- * would otherwise have `exportJWK`'s private components spread straight into
- * the JWKS response. Symmetric (`kty: "oct"`) keys have no public
- * representation at all, so they are excluded (returns `null`); for asymmetric
- * keys the private members are stripped.
+ * Reduces an exported JWK to its public members, or `null` for a symmetric
+ * (`kty: "oct"`) key, which has no public form. Defense in depth for custom
+ * `KeyStore` adapters: private or symmetric material returned as `publicKey`
+ * must never reach the JWKS response.
  */
 function toPublicJwk(jwk: Record<string, unknown>): Record<string, unknown> | null {
 	if (jwk.kty === "oct") return null;
@@ -76,32 +71,20 @@ export interface JwksRouterOptions {
 }
 
 /**
- * Build the JWKS publishing Router. The router registers `path` as an
- * **absolute** path internally, so the effective endpoint is the router's
- * mount point + `path`. Mount at the application root (`app.use(createRouter(
- * express, keyStore))`) for the common case. Prefix-mounting (e.g.
- * `app.use("/auth", createRouter(...))`) is valid only when the advertised
- * `jwks_uri` carries the same base path — typically because the issuer
- * identifier itself has that prefix (`jwks_uri = ${issuer}${path}`). If the
- * mount prefix and the issuer prefix disagree, discovery advertises a
- * `jwks_uri` that does not resolve. (The core `jwksModule` mounts at "/" and
- * relies on the issuer prefix to carry any base path.)
+ * Builds the JWKS publishing Router. `path` is registered as an absolute path,
+ * so the endpoint is the mount point + `path`. Mount at the application root;
+ * a prefix mount is valid only when the issuer carries the same prefix
+ * (`jwks_uri = ${issuer}${path}`), or discovery advertises a `jwks_uri` that
+ * does not resolve. `jwksModule` mounts at "/".
  *
- * A successful response carries `Cache-Control: public, max-age=N`, where N is
- * `cacheMaxAgeSeconds` (JWKS is public data and the most-polled verifier
- * endpoint).
+ * Success carries `Cache-Control: public, max-age=<cacheMaxAgeSeconds>`. An
+ * empty key set is never published: a symmetric (HS256) keystore answers
+ * `404 jwks_not_published`, an asymmetric one with no exportable public key
+ * `503 jwks_unavailable`, both `no-store` so a shared cache does not pin the
+ * condition past the operator's fix.
  *
- * The route never publishes an empty key set (#282). A symmetric (HS256)
- * keystore answers `404 jwks_not_published`; an asymmetric keystore that
- * yields no exportable public key answers `503 jwks_unavailable`. Both carry
- * `Cache-Control: no-store` so the condition is not pinned in a shared cache
- * after the operator fixes it.
- *
- * Direct callers bypass the config schema, so `path` and `cacheMaxAgeSeconds`
- * are validated here and the factory throws on misconfiguration (a non-
- * absolute path or a negative / non-integer cache age) — failing fast at
- * boot rather than registering an unexpected route or emitting an invalid
- * `Cache-Control` header.
+ * Direct callers bypass the config schema, so an invalid `path` or
+ * `cacheMaxAgeSeconds` throws here, at boot.
  */
 export const createRouter = (
 	express: { Router: () => Router },
@@ -126,22 +109,17 @@ export const createRouter = (
 
 	const cacheControl = `public, max-age=${cacheMaxAgeSeconds}`;
 
-	// #293 item 4: the export + hash work is done once per key SET, not once
-	// per request — the JWKS endpoint is the most-polled verifier surface, and
-	// every poll re-ran `exportJWK` (an async crypto export) per key. The
-	// cache is keyed on the set itself, (kid, publicKey identity) pairs,
-	// because the `KeyStore` contract has no rotation event to invalidate on:
-	// the built-in store's set shrinks by `previousKeys` expiry on its own
-	// clock, and a remote adapter may refresh whenever it likes. Identity
-	// comparison degrades gracefully — an adapter that mints fresh key objects
-	// per call recomputes per call, which is exactly the pre-cache behavior.
+	// Export and hashing run once per key set, not per request: this is the
+	// most-polled verifier endpoint. The cache is keyed on the set itself
+	// ((kid, publicKey identity) pairs) because `KeyStore` has no rotation
+	// event: the built-in store drops `previousKeys` on its own clock, and a
+	// remote adapter may refresh at will. An adapter minting fresh key objects
+	// per call simply recomputes per call.
 	//
-	// The strong `ETag` is the SHA-256 of the canonical serialization, hashed
-	// once at cache time, so a polling verifier sending `If-None-Match` gets
-	// `304` until the set actually changes. (`res.json`'s per-request
-	// stringify of the small cached document is noise next to the export.)
-	// Error responses (404/503) are never cached and carry no `ETag` of ours —
-	// an empty set is a lie that caches (#282), and so is its tag.
+	// The strong `ETag` is the SHA-256 of the serialized set, so a verifier
+	// sending `If-None-Match` gets `304` until the set changes. Error answers
+	// (404/503) are never cached and carry no `ETag`: an empty set is a lie
+	// that caches, and so is its tag.
 	let cached: {
 		keyRefs: readonly Pick<ManagedKey, "kid" | "publicKey">[];
 		keys: readonly Record<string, unknown>[];
@@ -153,12 +131,9 @@ export const createRouter = (
 		b: Pick<ManagedKey, "kid" | "publicKey">,
 	): number => (a.kid < b.kid ? -1 : a.kid > b.kid ? 1 : 0);
 
-	// Order-insensitive, deliberately: RFC 7517 assigns no meaning to key
-	// order, so a store that returns the same keys reordered keeps serving the
-	// cached bytes (the ETag stays byte-honest because the cached body is what
-	// is served). Sorting is by kid with a stable sort, so the degenerate
-	// duplicate-kid shapes at worst fail the identity compare and recompute —
-	// the safe direction.
+	// Order-insensitive: RFC 7517 gives key order no meaning, and the ETag
+	// stays honest because the cached body is what is served. A duplicate kid
+	// at worst fails the compare and recomputes, the safe direction.
 	const sameKeySet = (
 		current: readonly ManagedKey[],
 		previous: readonly Pick<ManagedKey, "kid" | "publicKey">[],
@@ -188,16 +163,11 @@ export const createRouter = (
 
 	router.get(path, async (req: Request, res: Response) => {
 		if (keyStore.algorithm === "HS256") {
-			// #282: this used to answer `200 { keys: [] }`. An empty key set is
-			// indistinguishable, to a relying party, from an issuer that has
-			// rotated every key away — so the RP caches the empty answer and
-			// then fails every verification with an unknown-kid error that
-			// points nowhere near the actual cause. Refusing to serve says what
-			// is true: this deployment publishes no JWKS at all.
-			//
-			// `no-store`, not `cacheControl`: this is a configuration state an
-			// operator can fix in a minute, and a shared cache pinning it for
-			// the full max-age would outlive the fix.
+			// An empty key set would look to a relying party like an issuer that
+			// rotated every key away: it would cache it and fail every verification
+			// with an unknown-kid error far from the cause. This deployment
+			// publishes no JWKS, and says so. `no-store`: an operator can fix this
+			// in a minute, and a shared cache would outlive the fix.
 			res.setHeader("Cache-Control", "no-store");
 			return res.status(404).json({
 				error: "jwks_not_published",
@@ -231,13 +201,10 @@ export const createRouter = (
 			);
 			const keys = exported.filter((k): k is NonNullable<typeof k> => k !== null);
 			if (keys.length === 0) {
-				// An asymmetric keystore that yields nothing publishable — a KMS
-				// adapter mid-rotation, or one whose keys all filtered out as
-				// non-public — is an outage, not a valid publication. Same reasoning
-				// as the HS256 branch: an empty set is a lie that caches. Not
-				// cached here either: the next request re-asks the keystore.
-				// Logged as the outage it is: every relying party that fetches
-				// now is told to come back later.
+				// Nothing publishable from an asymmetric keystore (a KMS adapter
+				// mid-rotation, or keys that all filtered out as non-public) is an
+				// outage, not a publication: an empty set is a lie that caches. Not
+				// cached, so the next request re-asks the keystore.
 				opts.logger?.error(
 					{ algorithm: keyStore.algorithm, keys: managedKeys.length },
 					"jwks_unavailable",
@@ -251,13 +218,9 @@ export const createRouter = (
 				etag: `"${createHash("sha256").update(body).digest("base64url")}"`,
 			};
 		}
-		// Headers set only after key export succeeded and produced at least one
-		// key. If we set them up-front and `getVerificationKeys()`/`exportJWK()`
-		// then threw (e.g. a remote KMS-backed keystore outage), Express would
-		// emit a 5xx with the headers still attached, and an explicit
-		// `public, max-age` makes that transient error cacheable by shared
-		// caches/CDNs for the full lifetime — turning a brief outage into a
-		// stuck JWKS failure.
+		// Set only after a successful export: set up front, a keystore outage
+		// would reach Express's 5xx with `public, max-age` attached, and shared
+		// caches would pin the transient error for the full lifetime.
 		res.setHeader("Cache-Control", cacheControl);
 		res.setHeader("ETag", cached.etag);
 		// Optional chain: hand-built callers (and the route's own unit tests)

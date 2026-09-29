@@ -7,18 +7,13 @@ import { defineModule } from "../modules/index.mjs";
 import { createInMemoryFederationTokenStore } from "./adapters/memory.mjs";
 
 /**
- * In-memory FederationTokenStore module. Maps to the existing
- * `createInMemoryFederationTokenStore` adapter (plaintext, single-process).
- *
- * For production, use `redisFederationTokenStoreModule` from
+ * In-memory FederationTokenStore module (plaintext, single-process). For
+ * production, use `redisFederationTokenStoreModule` from
  * `@o3co/auth-provider-redis`.
- *
- * Phase 10 Q5: completes the Module-pattern parity for the
- * `federationTokenStore` ComponentMap slot (added in Phase 9 Task 4).
  */
 export const memoryFederationTokenStoreModule = defineModule({
 	name: "core-federation-token-store-memory",
-	// #455: what forks per replica, quoted into a refused multi-replica boot.
+	// What forks per replica, quoted when a multi-replica boot is refused.
 	replicaSafety: {
 		unsafe: true,
 		reason:

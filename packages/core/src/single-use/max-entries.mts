@@ -15,20 +15,13 @@
  */
 
 /*
- * An in-process store's cap: what it may be, and how a module or an adapter
- * factory reads it from config (`replaySeenSet.memory.maxEntries`,
- * `challengeStore.memory.maxEntries`, an adapter config's `maxEntries`).
- *
- * A cap is a positive whole number no greater than
- * {@link MAX_MEMORY_STORE_ENTRIES}: a V8 `Map` refuses an entry past 2^24,
- * so a larger cap is one the store could never reach, and `Map.set` would
- * throw at the Map's own limit instead of the store refusing at its cap.
- * Read from config, absent (`undefined`) means the store's own default; a
- * number is the cap, and so is a string of digits — what HOCON's `${?VAR}`
- * substitution delivers. Anything else that is given — `null`, zero, a
- * negative or fractional number, one past the limit, other text, a boolean
- * — is refused with a RangeError naming the key, rather than replaced by the
- * default.
+ * An in-process store's cap, and how it is read from config
+ * (`replaySeenSet.memory.maxEntries`, `challengeStore.memory.maxEntries`,
+ * an adapter config's `maxEntries`). A cap is a positive whole number up to
+ * {@link MAX_MEMORY_STORE_ENTRIES}, past which `Map.set` would throw instead
+ * of the store refusing at its cap. Absent means the store's default; a
+ * number or a string of digits (what HOCON's `${?VAR}` delivers) is the cap;
+ * anything else is a RangeError naming the key, never the default.
  */
 
 /** The most entries a V8 `Map` holds, and so the largest cap an in-process store takes. */

@@ -18,25 +18,17 @@ import type { AdapterFactory } from "../adapters/AdapterFactory.mjs";
 import type { AuditedError } from "./auditedError.mjs";
 
 /**
- * Every audit-event type the bundled packages emit (#369).
+ * Every audit-event type the bundled packages emit, pinned against the
+ * emission sites in both directions by
+ * `audit/__tests__/auditEventInventory.drift.test.mts`: an emission missing
+ * here, or a name here with no emission left, fails CI.
  *
- * This used to be an informative doc comment, and it had drifted badly: it
- * named events nothing emits (`"logout"`, `"scope.denied"`,
- * `"login.success"`, the `"mfa.challenge.*"` family) and omitted most of
- * what IS emitted — so a sink implementor or dashboard author filtering on
- * the documented names matched nothing. The list is now a constant, pinned
- * against the actual emission sites in both directions by
- * `audit/__tests__/auditEventInventory.drift.test.mts`: adding an emission
- * without listing it here fails CI, and so does keeping a name here after
- * its last emission site is removed.
- *
- * The naming convention is dot-separated segments, most specific last and
- * `snake_case` within one segment — two segments for a plain
- * subject-and-outcome (`authorize.granted`, `rate_limit.unavailable`),
- * more when the subject itself is namespaced
- * (`federation.token.family_revoked`, `token.issued.failure`). Consumers
- * MAY emit custom event types; namespace them so they cannot collide with
- * future entries here.
+ * Names are dot-separated segments, most specific last, `snake_case` within a
+ * segment: two for a plain subject-and-outcome (`authorize.granted`,
+ * `rate_limit.unavailable`), more when the subject is namespaced
+ * (`federation.token.family_revoked`, `token.issued.failure`). Consumers MAY
+ * emit custom event types; namespace them so they cannot collide with future
+ * entries here.
  */
 export const BUILT_IN_AUDIT_EVENT_TYPES = [
 	"authorize.granted",
@@ -47,10 +39,9 @@ export const BUILT_IN_AUDIT_EVENT_TYPES = [
 	"device.decision_outcome_unknown",
 	"device.denied",
 	"device.rate_limited",
-	// #593: offline delegation. Emitted by `retrieveFederationGrantToken` and
-	// carried to the sink by the federation-grants routes, which is why the
-	// inventory scanner has to know about core's own `audit(...)` calls and
-	// `audits: [[...]]` tuples as well as `emitAuditEvent` — see the guard.
+	// Offline delegation: emitted by `retrieveFederationGrantToken` and carried
+	// to the sink by the federation-grants routes, so the inventory guard scans
+	// core's own `audit(...)` calls and `audits: [[...]]` tuples too.
 	"federation.grant.authorization_failed",
 	"federation.grant.authorized",
 	"federation.grant.reauthorization_required",
@@ -73,7 +64,7 @@ export const BUILT_IN_AUDIT_EVENT_TYPES = [
 	"federation.token.reauthentication_required",
 	"federation.token.refresh_failed",
 	"federation.token.success",
-	// #645: an upstream token whose `token_type` this provider may not hand on.
+	// An upstream token whose `token_type` this provider may not hand on.
 	"federation.token.upstream_ineligible",
 	"introspect.family_revoked",
 	"introspect.session_invalid",
@@ -82,8 +73,8 @@ export const BUILT_IN_AUDIT_EVENT_TYPES = [
 	"logout.family_revoked",
 	"logout.success",
 	"rate_limit.unavailable",
-	// The session-admission ADR's D10: a claim's subject that is not the
-	// record's, at any consumer of an authenticated browser session.
+	// A claim's subject that is not the record's, at any consumer of an
+	// authenticated browser session (ADR 2026-09-28-session-admission).
 	"session.admission.subject_mismatch",
 	"token.issued",
 	"token.issued.failure",
@@ -93,9 +84,8 @@ export interface AuditEvent {
 	readonly timestamp: Date;
 	/**
 	 * The event's type. The built-in vocabulary is
-	 * {@link BUILT_IN_AUDIT_EVENT_TYPES} — a constant rather than prose, so
-	 * the inventory cannot drift from the emission sites again. Kept an open
-	 * `string` because consumers emit custom, namespaced types of their own.
+	 * {@link BUILT_IN_AUDIT_EVENT_TYPES}. Kept an open `string` because
+	 * consumers emit custom, namespaced types of their own.
 	 */
 	readonly type: string;
 	readonly subject?: string;
@@ -145,20 +135,16 @@ export type AuditSinkFactory = AdapterFactory<AuditSink>;
 
 /**
  * The declared-absence policy every bundled module that reads `auditSink`
- * attaches to it (#363, the sink half of #287).
+ * attaches to it.
  *
- * `auditSink` stays optional to wire — which sink is a configuration
- * question — but not optional to decide: `emitAuditEvent` is a no-op on an
- * empty slot, so a composition that simply never fills it discards every
- * security event with no symptom, which is how the standalone template
- * shipped eventless until #287. The template answers by always wiring a sink
- * (`audit.sink.type` has no "none" builder there); every other composition
- * answers here — wire a sink, or write `audit.sink.type = "none"` and own
- * the decision in config.
+ * `auditSink` is optional to wire but not to decide: `emitAuditEvent` is a
+ * no-op on an empty slot, so a composition that never fills it discards every
+ * security event with no symptom. Wire a sink, or write
+ * `audit.sink.type = "none"` to own the decision in config. (The standalone
+ * template always wires one; it has no "none" builder.)
  *
- * One shared constant rather than three per-module copies, so the boot
- * error's advice cannot depend on which module tripped it — the
- * declared-absence guard refuses policies that disagree.
+ * One shared constant, so the boot error's advice cannot depend on which
+ * module tripped it; the declared-absence guard refuses policies that disagree.
  */
 export const AUDIT_SINK_ABSENCE_POLICY = {
 	configKey: ["audit", "sink", "type"],
@@ -169,16 +155,12 @@ export const AUDIT_SINK_ABSENCE_POLICY = {
 } as const;
 
 // ---------------------------------------------------------------------------
-// ComponentMap declaration-merge (A2-α §6.1 — optional slot)
+// ComponentMap declaration-merge (optional slot)
 //
 // Declared here so oauthModule can list "auditSink" in its `optional` array
-// and the DI graph types deps.auditSink as AuditSink | undefined.
-// The slot is optional to WIRE: when absent, oauth routes emit no audit
-// events (the emitAuditEvent helper is a no-op when sink is undefined). It is
-// no longer optional to DECIDE: the bundled modules attach
-// AUDIT_SINK_ABSENCE_POLICY, so an unfilled slot must be declared with
-// audit.sink.type = "none" or boot refuses (#363).
-// Phase 9 Task 4 augmentation.
+// and the DI graph types deps.auditSink as AuditSink | undefined. Optional to
+// wire, not to decide: an unfilled slot must be declared with
+// audit.sink.type = "none" or boot refuses (AUDIT_SINK_ABSENCE_POLICY).
 // ---------------------------------------------------------------------------
 declare module "@o3co/auth-provider-core" {
 	interface ComponentMap {

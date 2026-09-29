@@ -15,17 +15,11 @@
  */
 
 /**
- * boot/materialize-components.mts — Stage 3 of the A2-β boot planner pipeline.
- *
- * Takes the `BootPlan` from stage 2 plus `bootstrapComponents` and
- * `overrideComponents`, runs each provider factory in topological +
- * declaration-stable order, and emits a `ComponentWorld` carrying the
- * materialised values plus per-component cleanup records.
- *
- * The function is **async** (factories may be async) but **deterministic**:
- * same inputs (and same factory side-effects) → same output / same error.
- *
- * Per A2-β §5.3.
+ * boot/materialize-components.mts: stage 3 of the boot planner. Runs each
+ * provider factory of the `BootPlan` in topological, declaration-stable order
+ * and emits a `ComponentWorld` of the materialised values and their cleanup
+ * records. Async (factories may be) but deterministic: the same inputs and
+ * factory side effects give the same output or the same error.
  */
 
 import type { ComponentKey, ComponentMap } from "../modules/manifest/component-map.mjs";
@@ -45,18 +39,11 @@ import { BootError } from "./types.mjs";
 // ---------------------------------------------------------------------------
 
 /**
- * Build a typed deps object for a provider activation from the working
- * component map, given the activation's module DepsBlueprint.
- *
- * `requires` keys MUST be present — if they are missing it means an invariant
- * was violated in an earlier stage. Missing required key throws a plain Error
- * (programmer error, not a BootError).
- * `optional` keys may be absent; they are included as `undefined`.
- * `section`, the module's own configuration section parsed at stage 1
- * (#728), is set as `deps.section` when the module declares one, and the key
- * is absent otherwise.
- *
- * Per A2-β §5.3 step 3.
+ * Builds a provider activation's deps object from the working component map.
+ * A missing `requires` key means an earlier stage broke an invariant, so it
+ * throws a plain Error, not a BootError. Absent `optional` keys are included
+ * as `undefined`. `deps.section` is the module's own configuration section,
+ * parsed at stage 1, and is absent when the module declares none.
  * @internal
  */
 function buildDeps(
@@ -88,11 +75,8 @@ function buildDeps(
 }
 
 /**
- * Run a list of cleanup records in REVERSE order (best-effort).
- * Errors from individual cleanups are accumulated and returned; the loop does
- * NOT abort on a cleanup failure.
- *
- * Per A2-β §5.3 step 3 (partial rollback).
+ * Runs cleanup records in reverse order, best-effort: a failing cleanup does
+ * not stop the loop, and its error is returned.
  * @internal
  */
 async function runCleanupsReverse(cleanupRecords: readonly CleanupRecord[]): Promise<
@@ -126,25 +110,16 @@ async function runCleanupsReverse(cleanupRecords: readonly CleanupRecord[]): Pro
 // ---------------------------------------------------------------------------
 
 /**
- * Stage 3 of the A2-β boot planner pipeline.
+ * Stage 3 of the boot planner. Seeds `bootstrapComponents`, applies
+ * `overrideComponents`, injects the synthetic projections of
+ * `contributionKinds` when given (a provider that requires one reads it
+ * lazily, filled once stage 4 registers the contributions), then runs each
+ * provider factory in `plan.providerActivations` order.
  *
- * Pre-seeds `bootstrapComponents` into the working component map, applies
- * `overrideComponents` substitutions, injects the synthetic projections of
- * `contributionKinds` when it is given (`createApp` gives it: a provider
- * that requires one reads it lazily, filled once stage 4 registers the
- * contributions), then runs each provider factory in the topological +
- * declaration-stable order determined by `plan.providerActivations`.
- *
- * On factory failure:
- *   - Wraps the thrown value as `BootError reason="provides-factory-failed"`,
- *     its message naming the thrown value by `failureSummary` (never
- *     `String(thrown)`: see `failure-summary.mts`).
- *   - Runs a best-effort partial rollback of cleanups for components already
- *     materialised (in REVERSE order).
- *   - Cleanup errors are accumulated into `details.cleanupErrors` before the
- *     BootError propagates.
- *
- * Per A2-β §5.3.
+ * A factory failure becomes `BootError reason="provides-factory-failed"`, its
+ * message naming the thrown value by `failureSummary` (never
+ * `String(thrown)`). The cleanups of the components already materialised run
+ * first, in reverse, and their errors go to `details.cleanupErrors`.
  */
 export async function materializeComponents(
 	plan: BootPlan,
@@ -152,26 +127,22 @@ export async function materializeComponents(
 	overrideComponents: Partial<ComponentMap> | undefined,
 	contributionKinds?: ContributionCollectorMap,
 ): Promise<ComponentWorld> {
-	// Working component map — typed internally as a plain Record for mutation.
 	const components: Record<string, unknown> = {};
 
 	// Per-component cleanup records captured during successful materialisations.
 	const cleanups: CleanupRecord[] = [];
 
-	// Track which keys came from the host environment (bootstrap + override).
-	// These are consumer-owned: the boot planner must NOT call Symbol.asyncDispose
-	// on their values in AppHandle.dispose(). Per A2-β §5.3 / §8.1.
+	// Keys from the host (bootstrap and override) are consumer-owned:
+	// AppHandle.dispose() must not call Symbol.asyncDispose on their values.
 	const externalKeys = new Set<ComponentKey>();
 
-	// Step 1: Pre-seed bootstrapComponents. Per A2-β §5.3 step 1.
 	for (const [key, value] of Object.entries(bootstrapComponents)) {
 		components[key] = value;
 		externalKeys.add(key as ComponentKey);
 	}
 
-	// Step 2: Apply overrideComponents. Per A2-β §5.3 step 2.
-	// Override entries replace the would-be provider value; the factory is
-	// skipped entirely; the lifecycle[K].cleanup is NOT recorded.
+	// An override replaces the provider's value: its factory is skipped and
+	// its lifecycle cleanup is not recorded.
 	if (overrideComponents !== undefined) {
 		for (const [key, value] of Object.entries(overrideComponents)) {
 			components[key] = value;
@@ -179,23 +150,21 @@ export async function materializeComponents(
 		}
 	}
 
-	// Step 2b: the synthetic projections — stable read-through views of the
-	// collectors stage 4 fills — so a provider that requires one is handed the
-	// object the world keeps (the MFA coordinator reads `mfaFactorResolver`).
+	// Synthetic projections are stable read-through views of the collectors
+	// stage 4 fills, so a provider that requires one gets the object the world
+	// keeps (the MFA coordinator reads `mfaFactorResolver`).
 	if (contributionKinds !== undefined) {
 		prepareSyntheticProjections(components, contributionKinds);
 	}
 
-	// Step 3: Run providers in plan.providerActivations order. Per A2-β §5.3 step 3.
 	for (const activation of plan.providerActivations) {
 		const { module: moduleName, componentKey } = activation;
 
-		// If K is already present (bootstrap or override), skip entirely.
+		// Already present from bootstrap or override.
 		if (componentKey in components) {
 			continue;
 		}
 
-		// Retrieve the validated module manifest.
 		const validatedModule = plan.validated.byName.get(moduleName);
 		if (!validatedModule) {
 			throw new Error(
@@ -204,7 +173,6 @@ export async function materializeComponents(
 		}
 		const manifest = validatedModule.manifest;
 
-		// Look up the provider factory for this component key.
 		const factory = manifest.provides?.[componentKey];
 		if (!factory) {
 			throw new Error(
@@ -212,7 +180,6 @@ export async function materializeComponents(
 			);
 		}
 
-		// Build the typed deps object from the current working component map.
 		const blueprint = plan.depsBlueprint.get(moduleName);
 		const deps = buildDeps(
 			components,
@@ -221,13 +188,12 @@ export async function materializeComponents(
 			validatedModule.section,
 		);
 
-		// Invoke the factory (await uniformly — handles both sync and async).
+		// Awaited uniformly: a factory may be sync or async.
 		let value: unknown;
 		try {
 			value = await factory(deps as never);
 		} catch (thrownValue) {
-			// Partial rollback: run cleanups for already-materialised components
-			// in reverse order. Per A2-β §5.3 step 3 (on factory throw / reject).
+			// Partial rollback of the components already materialised.
 			const cleanupErrors = await runCleanupsReverse(cleanups);
 
 			throw new BootError({
@@ -245,10 +211,8 @@ export async function materializeComponents(
 			});
 		}
 
-		// Store the materialised value.
 		components[componentKey as string] = value;
 
-		// Capture cleanup record if lifecycle[K].cleanup is defined.
 		const cleanupFn = manifest.lifecycle?.[componentKey]?.cleanup;
 		if (cleanupFn !== undefined) {
 			cleanups.push({

@@ -20,15 +20,9 @@ import type { TokenBinding } from "./tokenBinding.mjs";
 
 /**
  * The client identity established by RFC 6749 §2.3 token-endpoint
- * authentication middleware (`clientAuthMw`) before a grant handler is
- * invoked.
- *
- * Every grant handler that gates on client identity (refresh, authorization
- * code, token-exchange) MUST consult this slot rather than the raw request
- * body — body parameters are attacker-controlled and may differ from the
- * authenticated identity. `null` indicates the request did not pass through
- * `clientAuthMw` (e.g., a custom route, or a unit test invoking the handler
- * directly with a hand-built `GrantContext`).
+ * authentication (`clientAuthMw`) before a grant handler runs. Grants that
+ * gate on client identity MUST use it, never the raw body: body parameters
+ * are attacker-controlled and may differ from the authenticated identity.
  */
 export interface AuthenticatedClient {
 	readonly clientId: string;
@@ -41,73 +35,59 @@ export interface AuthenticatedClient {
 	 */
 	readonly allowedScopes?: readonly string[];
 	/**
-	 * What an omitted `scope` grants (#396) — mirrored from the client
-	 * registration. Absent + non-empty `allowedScopes` means a scope-omitting
-	 * request answers `invalid_scope` instead of receiving the whole ceiling.
+	 * What an omitted `scope` grants, mirrored from the client registration.
+	 * Absent with a non-empty `allowedScopes`, a scope-omitting request answers
+	 * `invalid_scope` instead of receiving the whole ceiling.
 	 */
 	readonly defaultScopes?: readonly string[];
 	/**
 	 * Per-client grant-type gate, mirrored from the client registration by
-	 * `clientAuthMw`. Enforced **centrally** by `isGrantTypeAllowed` at grant
-	 * dispatch and at `/authorize`, so every grant inherits the check (#268);
-	 * `client_credentials` and the WebAuthn grant layer a stricter
-	 * deny-by-absence rule on top. The absent / empty / non-empty semantics
-	 * are documented once, on `Client.allowedGrantTypes` in
-	 * `../repositories/types.mts`.
+	 * `clientAuthMw`. Enforced centrally by `isGrantTypeAllowed` at grant
+	 * dispatch and at `/authorize`; `client_credentials` and the WebAuthn grant
+	 * add a stricter deny-by-absence rule. Semantics are documented on
+	 * `Client.allowedGrantTypes` in `../repositories/types.mts`.
 	 */
 	readonly allowedGrantTypes?: readonly string[];
 	/**
-	 * Audience values this client may receive tokens for. Every grant that
-	 * derives an audience takes the first entry as the default `aud` and lets a
-	 * `grantPolicy` narrow within the list; what an absent list falls back to
-	 * depends on whom the token is for (#520):
+	 * Audience values this client may receive tokens for. Grants take the first
+	 * entry as the default `aud` and let a `grantPolicy` narrow within the
+	 * list. An absent list falls back by whom the token is for:
 	 *
-	 * - **User-bound tokens** (`authorization_code`, `session`, the device,
-	 *   WebAuthn and jwt-bearer grants) fall back to the **client id**. The
-	 *   token is meant for a resource, so naming the authorization server would
-	 *   be wrong — and it is never null, because an audience-less token is
-	 *   accepted by anything that checks `aud` loosely.
-	 * - **Client-only tokens** (`client_credentials`) fall back to the
-	 *   **issuer**: there is no end user, and the registration is the party the
-	 *   token speaks for.
-	 * - **No authenticated client** (WebAuthn and jwt-bearer in client-less
-	 *   mode) mints the **issuer**. Nothing names a resource or a client, RFC
-	 *   9068 §2.2 still requires `aud`, and the issuer is the one audience every
-	 *   deployment has. A policy audience is refused here: with no list there
-	 *   is no ceiling to narrow within, and policy may narrow, never originate.
+	 * - User-bound tokens (`authorization_code`, `session`, the device, WebAuthn
+	 *   and jwt-bearer grants): the client id. The token is for a resource, so
+	 *   the issuer would be wrong; never null, since an audience-less token
+	 *   passes any loose `aud` check.
+	 * - Client-only tokens (`client_credentials`): the issuer. There is no end
+	 *   user, and the registration is the party the token speaks for.
+	 * - No authenticated client (WebAuthn and jwt-bearer client-less mode): the
+	 *   issuer, the one audience every deployment has (RFC 9068 §2.2 requires
+	 *   `aud`). A policy audience is refused: with no list there is no ceiling,
+	 *   and policy may narrow, never originate.
 	 *
 	 * `session.mts`, `jwtBearer.mts` and the WebAuthn grant cite this as their
 	 * authority; keep it true when adding a grant.
 	 */
 	readonly allowedAudiences?: readonly string[];
 	/**
-	 * Per-client sender-constraint requirement. The `/token` route
-	 * propagates this from `req.oauthClient`; the shared grant-dispatch
-	 * path enforces the binding-method rules in spec §4.8 step 2 before
-	 * invoking the concrete grant handler.
+	 * Per-client sender-constraint requirement, propagated by `/token` from
+	 * `req.oauthClient` and enforced by the shared grant dispatch before the
+	 * grant handler runs.
 	 */
 	readonly senderConstrained?: SenderConstraint;
 	/**
-	 * Per-client opt-in for the RFC 7636 `plain` PKCE challenge method (#273).
-	 * The `/token` route propagates it from `req.oauthClient` so the
-	 * authorization-code grant applies the same per-client method list
-	 * `/authorize` applied when it minted the code. Semantics are documented
-	 * once, on `Client.allowPlainPkce` in `../repositories/types.mts`.
+	 * Per-client opt-in for the RFC 7636 `plain` PKCE method, propagated by
+	 * `/token` from `req.oauthClient` so the authorization-code grant applies
+	 * the method list `/authorize` applied when minting the code. Semantics are
+	 * documented on `Client.allowPlainPkce` in `../repositories/types.mts`.
 	 */
 	readonly allowPlainPkce?: boolean;
 }
 
 /**
- * Session data exposed to grant handlers.
- *
- * D-1 (v0.5.1): identity binding for the authorization code grant moved out
- * of this session bag and into the code record (`Code.client_id` /
- * `Code.redirect_uri`). The previously exposed `code_client_id`,
- * `code_redirect_uri`, and `granted_scopes` fields have been removed because
- * `/authorize` no longer writes them and `/token` no longer reads them.
- *
- * `code` is retained because the authorization grant still clears it from
- * sessions issued before v0.5.1 ships (see `sessionMutation.clear`).
+ * Session data exposed to grant handlers. Authorization-code identity binding
+ * lives on the code record (`Code.client_id` / `Code.redirect_uri`), not
+ * here. `code` remains so the authorization grant can clear it from older
+ * sessions (`sessionMutation.clear`).
  */
 export interface SessionData {
 	user?: Record<string, unknown>;
@@ -115,16 +95,15 @@ export interface SessionData {
 	code?: string;
 	isAuthenticated?: boolean;
 	/**
-	 * The `UserSession` id this browser session belongs to — written by local
-	 * login (`POST /session/login`) or the federation callback, and preserved
-	 * across session regeneration. Exposed to grants so a token minted straight
-	 * from the browser session can carry it: `sid` is what every liveness check
-	 * downstream (`/userinfo`, `/introspect`, the refresh grant) keys on, so a
-	 * token minted without it is one logout cannot reach.
+	 * The `UserSession` id of this browser session, written by local login or
+	 * the federation callback and kept across session regeneration. A token
+	 * minted from the browser session carries it as `sid`, which every
+	 * liveness check (`/userinfo`, `/introspect`, the refresh grant) keys on;
+	 * without it, logout cannot reach the token.
 	 *
-	 * Absent for a deployment whose login wiring predates `sid` and for a
-	 * back-channel `/token` call carrying no cookie; grants treat absence as
-	 * "no session to bind to", never as an error.
+	 * Absent when the login wiring does not write it, or on a back-channel
+	 * `/token` call with no cookie; grants treat absence as "no session to
+	 * bind to", never as an error.
 	 */
 	sid?: string;
 }
@@ -143,27 +122,21 @@ export interface GrantContext {
 	readonly ip?: string;
 	readonly userAgent?: string;
 	/**
-	 * The authenticated client established by `clientAuthMw` before grant
-	 * dispatch on `/token`. Grant handlers that bind tokens to client identity
-	 * (authorization code, refresh, token-exchange) MUST use this field rather
-	 * than `body.client_id` — the body is attacker-controlled and bypasses
-	 * RFC 6749 §2.3 authentication.
-	 *
-	 * `null` when the grant is invoked outside the standard `/token` route
-	 * (custom wiring, direct unit-test invocation). Handlers that rely on a
-	 * client identity SHOULD reject `null` with `invalid_client` 401.
+	 * The client authenticated by `clientAuthMw` before `/token` dispatch.
+	 * Grants that bind tokens to client identity MUST use it, not
+	 * `body.client_id`, which is attacker-controlled and bypasses RFC 6749
+	 * §2.3 authentication. `null` outside the standard `/token` route (custom
+	 * wiring, direct invocation); handlers that need a client identity SHOULD
+	 * reject `null` with `invalid_client` 401.
 	 */
 	readonly authenticatedClient: AuthenticatedClient | null;
 	/**
-	 * Sender-binding established by `tokenBindingMw` before grant dispatch.
-	 * `undefined` when no binding mechanism is enabled, when the request
-	 * did not carry the required proof / cert, or when the grant is
-	 * invoked outside the standard `/token` route. Grant handlers that
-	 * issue tokens stamp `ownedConfirmation(tokenBinding)` — the member the
-	 * binding's mechanism kind owns, never the confirmation verbatim — as
-	 * `GenerateTokenOptions.confirmation`, and `generateTokenResponse` reads
-	 * the response's `token_type` off it. See Wave 2 Token-binding Cluster
-	 * spec §4.1.
+	 * Sender binding established by `tokenBindingMw` before grant dispatch;
+	 * `undefined` when no mechanism is enabled, the request carried no proof /
+	 * cert, or the grant runs outside the standard `/token` route. Grants that
+	 * issue tokens stamp `ownedConfirmation(tokenBinding)` (the member the
+	 * binding's kind owns, never the confirmation verbatim) as
+	 * `GenerateTokenOptions.confirmation`.
 	 */
 	readonly tokenBinding?: TokenBinding;
 }
@@ -199,68 +172,46 @@ export interface GrantHandlerResult {
 export interface GrantHandler {
 	handle(ctx: GrantContext): Promise<GrantHandlerResult>;
 	/**
-	 * Declares that this grant must never be acquired by omission (#326).
+	 * Declares that this grant must never be acquired by omission.
 	 *
-	 * The shared `/token` dispatch always enforces the base
-	 * `allowedGrantTypes` rule (`isGrantTypeAllowed`), under which an
-	 * **absent** allowlist means "no policy declared" and admits every
-	 * grant. A handler that sets this flag opts into the stricter
-	 * deny-by-absence composition: when the authenticated client's
-	 * `allowedGrantTypes` is absent, dispatch refuses the request with
-	 * `400 unauthorized_client` before the handler runs.
+	 * `/token` dispatch always enforces `isGrantTypeAllowed`, under which an
+	 * absent `allowedGrantTypes` admits every grant. With this flag, an absent
+	 * allowlist on the authenticated client is refused `400
+	 * unauthorized_client` before the handler runs. Declare it on grants that
+	 * are a standing capability rather than a per-user ceremony
+	 * (`client_credentials`, the WebAuthn grant), so a registration without
+	 * `allowedGrantTypes` cannot silently acquire them.
 	 *
-	 * Declare it on grants where access is a standing capability rather
-	 * than a per-user ceremony — machine-to-machine grants like
-	 * `client_credentials` and the WebAuthn grant do — so that a
-	 * registration written before `allowedGrantTypes` existed cannot
-	 * silently acquire them. Enforcement used to be hand-rolled inside
-	 * those two handlers; the flag replaces that folklore with a
-	 * declaration the dispatch enforces for every current and future
-	 * strict grant.
-	 *
-	 * The check only applies when an authenticated client is present.
-	 * `ctx.authenticatedClient === null` (custom wiring, direct handler
-	 * invocation, or a grant that deliberately serves unauthenticated
-	 * callers, e.g. WebAuthn's passkey-is-the-auth-event mode) has no
-	 * allowlist to consult; handlers that require a client identity keep
-	 * rejecting `null` themselves with `invalid_client`.
+	 * Applies only when `ctx.authenticatedClient` is non-null (WebAuthn's
+	 * client-less mode has no allowlist to consult); handlers that require a
+	 * client reject `null` themselves with `invalid_client`.
 	 */
 	readonly requiresExplicitGrantAllowlist?: boolean;
 }
 
 /**
- * The slots a grant may depend on, in `ComponentMap` terms (#626 P2, D4).
- *
- * One definition, derived from the DI graph rather than restated beside it:
- * every entry is a `ComponentMap` slot with that slot's type, `config` and
+ * The slots a grant may depend on, as `ComponentMap` slots: `config` and
  * `keyStore` required, the rest optional. A grant factory takes
- * `Pick<GrantDependencies, …>` of the slots it reads (plus
- * `ProviderDeps<…>` for a slot no other grant shares, such as the
- * authorization grant's repositories), and a module's own
- * `ProviderDeps<R, O>` has to satisfy that pick at the wiring — so a slot a
- * grant reads without its module declaring it is a compile error, not a
- * runtime `undefined`.
+ * `Pick<GrantDependencies, …>` of the slots it reads (plus `ProviderDeps<…>`
+ * for a slot no other grant shares), and its module's `ProviderDeps<R, O>`
+ * must satisfy that pick at the wiring, so an undeclared slot is a compile
+ * error rather than a runtime `undefined`.
  *
- * Why these are optional, slot by slot:
- * - `refreshTokenFamilyRotation` / `refreshTokenFamilyRevocation` — rotation
- *   persistence and the PB-1 replay revocation (RFC 6819 §5.2.2); a
- *   deployment without rotation wired has no replay path to reach.
- * - `grantPolicy` — the CP-18 policy gate; absent means no policy declared.
+ * Why each is optional:
+ * - `refreshTokenFamilyRotation` / `refreshTokenFamilyRevocation`: rotation
+ *   persistence and replay revocation (RFC 6819 §5.2.2); without rotation
+ *   there is no replay path.
+ * - `grantPolicy`: absent means no policy declared.
  * - `userSessionStore` / `sessionRPRegistry` / `sessionFamilyIndex` /
- *   `sessionFederationIndex` — session liveness and the four-store cascade;
- *   a back-channel deployment with no browser sessions wires none.
- * - `subjectRevocation` — #376: the #296 subject-revocation watermark,
- *   consulted by the refresh grant at RT redemption as the backstop for a
- *   partial #322 cascade failure — an RT family the cascade could not
- *   revoke must not keep minting fresh access tokens for a subject whose
- *   credential changed. A rotated RT carries a fresh `iat`, so the check
- *   only bites RTs minted before the credential change: exactly the
- *   intended set.
- * - `logger` — structured logger for security-relevant grant audit events
- *   (RT replay detection, unknown-family policy decisions, legacy-token
- *   acceptance). Falls back silently when absent so the grant factory
- *   remains usable from minimal test harnesses; production wires the
- *   `logger` slot.
+ *   `sessionFederationIndex`: session liveness and the four-store cascade; a
+ *   back-channel deployment with no browser sessions wires none.
+ * - `subjectRevocation`: the subject-revocation watermark, checked by the
+ *   refresh grant at RT redemption as the backstop for a partial cascade
+ *   failure, so a family the cascade could not revoke stops minting access
+ *   tokens for a subject whose credential changed. A rotated RT has a fresh
+ *   `iat`, so only RTs minted before the change are caught.
+ * - `logger`: security audit events (RT replay, unknown-family decisions,
+ *   legacy-token acceptance); silent when absent, for minimal test harnesses.
  */
 export type GrantDependencies = ProviderDeps<
 	"config" | "keyStore",

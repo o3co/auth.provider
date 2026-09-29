@@ -15,18 +15,16 @@
  */
 
 /**
- * In-process {@link FederationGrantIntentStore} (#593, D16, slice 6).
+ * In-process {@link FederationGrantIntentStore}.
  *
- * Dev, test and single-replica only: what it holds is one browser's flow — a
- * PKCE verifier, a nonce, the consent challenge — so a second replica answers
- * every callback the first one started with "unknown transaction", and a
- * restart loses flows in flight. It loses no established grant, which is why
- * this adapter beside a durable grant store is permitted for a single replica
- * and refused by name under `deployment.mode = "multi"`.
+ * Dev, test and single-replica only: it holds in-flight browser flows (PKCE
+ * verifier, nonce, consent challenge), which another replica cannot see and
+ * a restart loses. It loses no established grant, so it is allowed beside a
+ * durable grant store on one replica and refused under
+ * `deployment.mode = "multi"`.
  *
- * Every transition below is one synchronous critical section taken before the
- * promise resolves: the operations this port makes atomic are atomic here
- * because nothing awaits inside them.
+ * Every transition is one synchronous critical section, so the port's
+ * atomic operations are atomic here because nothing awaits inside them.
  */
 
 import {
@@ -167,7 +165,7 @@ function copyTransaction(
 
 /** Whether two records are the same one, for the retry `putIntent` answers `unchanged`. */
 function sameIntent(a: FederationGrantIntent, b: FederationGrantIntent): boolean {
-	// Keyed by the record's own keys (#626): a field added to the record and not
+	// Keyed by the record's own keys: a field added to the record and not
 	// compared here is a compile error, rather than a retry that differs only
 	// in it answering `unchanged` and keeping the first record's value.
 	const asKey = (record: FederationGrantIntent): string =>
@@ -429,7 +427,7 @@ export function createMemoryFederationGrantIntentStore(): MemoryFederationGrantI
 				nonce: answer.nonce,
 				consent: { at: new Date(nowMs), sid: binding.sid, scopes: [...record.scopes] },
 				// Dated here, by the store, at the answer: the grant's expiry is not
-				// the callback's to choose, and a caller cannot hand one in (D3).
+				// the callback's to choose, and a caller cannot hand one in.
 				grantExpiresAt: federationGrantConsentExpiry(new Date(nowMs), record.lifetimeMs),
 				createdAt: new Date(nowMs),
 				expiresAt: new Date(entry.record.expiresAt),

@@ -23,70 +23,48 @@ import type { Provider, ProviderDeps } from "./provider.mjs";
 
 /**
  * Optional Zod schema declaring the slice of application config a module
- * requires. Boot's one composed parse (#728; A2-β §5.1 step 13) runs it over
- * what core's transitional base made of the configuration, and lays its
- * output over that — a key it does not declare is kept, a value it coerces
- * arrives coerced. Two modules' schemas that make different values of one key
- * refuse boot (`config-validation-failed`).
+ * requires. Boot's one composed parse runs it over core's base parse and lays
+ * its output on top: an undeclared key is kept, a coerced value arrives
+ * coerced. Two schemas that make different values of one key refuse boot
+ * (`config-validation-failed`).
  *
- * Per A2-α §2.1.
- *
- * To be deprecated once each section moves under its module's name (#728): a
- * module then declares its own section instead — {@link ModuleSection}, the
- * manifest's `section` field — and receives it parsed as `deps.section`.
+ * To be deprecated once each section sits under its module's name; a module
+ * then declares a {@link ModuleSection} (`section`) and reads `deps.section`.
  */
 export type ConfigSchema = z.ZodObject<z.ZodRawShape>;
 
 /**
- * Per-component lifecycle hooks declared by a module for one of its
- * provided component slots.
- *
- * - `eager`: When `true` the boot planner instantiates this component
- *   unconditionally during `createApp`, even if no other component
- *   declares it as a dependency. Default is `false` (lazy).
- * - `cleanup`: Called during `app.dispose()` in reverse-topological
- *   order. Errors from all cleanup functions are aggregated into an
- *   `AggregateError` that `dispose()` rejects with (§6.3).
- *
- * The `K` parameter is a `ComponentKey`; `ComponentMap[K]` resolves to
- * the exact value type for that slot, giving `cleanup` a typed `value`
- * parameter.
- *
- * Per A2-β §4.1.
+ * Lifecycle hooks a module declares for one of its provided slots; `K` types
+ * `cleanup`'s value as `ComponentMap[K]`.
  */
 export interface ComponentLifecycle<K extends ComponentKey> {
-	/** When `true`, eagerly instantiate this component at boot. Per A2-β §4.1. */
+	/** When `true`, instantiate at `createApp` even if nothing depends on it. Default lazy. */
 	readonly eager?: boolean;
 	/**
-	 * Called on dispose with the resolved component value. Per A2-β §4.1.
-	 * Errors aggregate into the AggregateError that `dispose()` rejects with.
+	 * Called on `app.dispose()`, in reverse-topological order, with the resolved
+	 * value. Errors aggregate into the `AggregateError` that `dispose()` rejects with.
 	 */
 	readonly cleanup?: (value: ComponentMap[K]) => void | Promise<void>;
 }
 
 /**
  * A module's statement that the state it provides lives in this process's
- * memory and **must** be shared for a deployment to run more than one
- * replica correctly (#455).
+ * memory and **must** be shared for more than one replica to run correctly.
  *
- * The boot planner's replica-safety guard (#271) reads this off every
- * installed manifest: `deployment.mode = "multi"` refuses boot naming the
- * module, unset warns, `"single"` is silent. Until #455 the guard worked off a
- * table of core's module names, so a composition root's own in-memory
- * modules — the standalone template's, under names core had never seen —
- * booted under `"multi"` with their state forking per replica. The module is
- * where the fact is known, so the module is where it is declared.
+ * The replica-safety guard reads it off every installed manifest:
+ * `deployment.mode = "multi"` refuses boot naming the module, unset warns,
+ * `"single"` is silent. The module declares it because the module is where the
+ * fact is known, so a composition root's own in-memory modules are covered too.
  *
- * `reason` is quoted into the refused boot and the warning. Name what
- * diverges and what that costs — "back-channel logout reaches only the
- * replica that received it" — because "use redis" tells an operator what to
- * type without telling them what breaks.
+ * `reason` is quoted into the refusal and the warning. Name what diverges and
+ * what that costs ("back-channel logout reaches only the replica that received
+ * it"): "use redis" tells an operator what to type, not what breaks.
  */
 export interface ReplicaSafetyDeclaration {
 	/**
-	 * Always `true`. The literal is here so the declaration reads as one at
-	 * the call site (`replicaSafety: { unsafe: true, reason }`) rather than as
-	 * an opaque string, and so a future exemption shape has somewhere to go.
+	 * Always `true`, so the declaration reads as one at the call site
+	 * (`replicaSafety: { unsafe: true, reason }`) and a future exemption shape
+	 * has somewhere to go.
 	 */
 	readonly unsafe: true;
 	/** What forks per replica, and the consequence for a user or operator. */
@@ -94,16 +72,12 @@ export interface ReplicaSafetyDeclaration {
 }
 
 /**
- * Parameterised manifest type. The R / O generics are inferred at the
- * call site of `defineModule(...)` and carry the literal key sets
- * declared in `requires` / `optional` so providers and contribution
- * factories receive a typed deps object. `S` is the section's schema, which
- * types the deps' `section`: `defineModule` infers it from `section.schema`
- * and leaves it `never` for a module that declares no section. Written out,
- * `ModuleSpec<R, O>` defaults it to the widest schema, `SectionSchema` — the
- * erased form, so `ModuleSpec<ComponentKey, ComponentKey>` is `Module`.
- *
- * Per A2-α §2.1, §3.1.
+ * Parameterised manifest type. `defineModule` infers `R` / `O` from the literal
+ * `requires` / `optional` arrays, so providers and factories get typed deps.
+ * `S`, the section's schema, types `deps.section`: inferred from
+ * `section.schema`, `never` without a section, and when written out defaulting
+ * to the erased `SectionSchema`, so `ModuleSpec<ComponentKey, ComponentKey>` is
+ * `Module`.
  */
 export interface ModuleSpec<
 	R extends ComponentKey = never,
@@ -115,23 +89,19 @@ export interface ModuleSpec<
 	readonly name: string;
 
 	/**
-	 * The module's own configuration section (#728): its schema, where it
-	 * sits, and the `reference.conf` holding its defaults. Boot parses it at
-	 * stage 1 and every factory in `provides`, `contributes` and `overrides`
-	 * receives it as `deps.section`, typed as the schema's output. See
-	 * {@link ModuleSection}.
+	 * The module's own configuration section: its schema, where it sits, and the
+	 * `reference.conf` holding its defaults. Parsed at stage 1 and passed to
+	 * every factory in `provides`, `contributes` and `overrides` as
+	 * `deps.section`, typed as the schema's output. See {@link ModuleSection}.
 	 */
 	readonly section?: ModuleSection<S>;
 
 	/**
-	 * Optional Zod schema declaring this module's config slice.
-	 *
-	 * To be deprecated once the loader layers each package's
-	 * `reference.conf` (#728), in favour of the module's own `section`, read
-	 * from `deps.section`. Until then it composes with core's schema and
-	 * parses the whole configuration, as before — and, for a section still at
-	 * a path under a parent core's schema declares, it is what keeps the
-	 * section's keys (see `ModuleSection.at`).
+	 * Optional Zod schema declaring this module's config slice, composed with
+	 * core's schema over the whole configuration. To be deprecated in favour of
+	 * `section` once the loader layers each package's `reference.conf`. For a
+	 * section at a path under a parent core's schema declares, it is what keeps
+	 * the section's keys (see `ModuleSection.at`).
 	 */
 	readonly configSchema?: ConfigSchema;
 
@@ -149,85 +119,61 @@ export interface ModuleSpec<
 	readonly optional?: readonly O[];
 
 	/**
-	 * Declared-absence policies for optional keys (#363). A key listed here
-	 * stays optional to *wire* but not optional to *decide*: when nothing
-	 * fills the slot, the config must carry the policy's declared-absent
-	 * value or boot refuses (`component-absence-undeclared`).
+	 * Declared-absence policies for optional keys: optional to *wire*, not to
+	 * *decide*. When nothing fills the slot, the config must carry the policy's
+	 * declared-absent value or boot refuses (`component-absence-undeclared`).
 	 *
-	 * Keys are typed against `O` for authoring ergonomics, but that alone is
-	 * not an enforcement: `defineModule`'s `const O` inference unifies over
-	 * every position, so a policy key can *widen* `O` instead of being
-	 * checked against it. The declared-absence guard therefore verifies at
-	 * stage 1 that every policy key appears in this module's `requires` or
-	 * `optional`, and refuses boot when one does not — a policy on a slot
-	 * its module never reads is an authoring bug, not a rule. See
-	 * `manifest/absence-policy.mts` for what a policy is and why it is data.
+	 * Keys are typed against `O`, but `const O` inference can *widen* `O` from a
+	 * policy key instead of checking it, so stage 1 also refuses a policy key
+	 * missing from this module's `requires` or `optional`. See
+	 * `manifest/absence-policy.mts`.
 	 */
 	readonly absencePolicies?: { readonly [K in O]?: AbsencePolicy };
 
 	/**
-	 * Declares that this module holds, in this process's memory, state that
-	 * must be shared across replicas (#455). Read by the replica-safety guard
-	 * at stage 1; see {@link ReplicaSafetyDeclaration} for what it means and
-	 * what to write in `reason`. Omit it on a module whose state lives in a
-	 * shared store — or that holds none.
+	 * Declares in-process state that must be shared across replicas; read by the
+	 * replica-safety guard at stage 1 (see {@link ReplicaSafetyDeclaration}).
+	 * Omit it when the module's state lives in a shared store, or it holds none.
 	 */
 	readonly replicaSafety?: ReplicaSafetyDeclaration;
 
 	/**
-	 * Component values this module materialises into the DI graph. Each
-	 * value is `(deps) => ComponentMap[K] | Promise<ComponentMap[K]>`.
-	 *
-	 * The second member of the intersection only carries the provided keys
-	 * to `P`, which `defineModule` infers from them for `authoritative`.
+	 * Component values this module materialises into the DI graph, each
+	 * `(deps) => ComponentMap[K] | Promise<ComponentMap[K]>`. The intersection's
+	 * second member only carries the provided keys to `P` for `authoritative`.
 	 */
 	readonly provides?: {
 		readonly [K in ComponentKey]?: Provider<K, ProviderDeps<R, O, S>>;
 	} & { readonly [K in P]?: unknown };
 
 	/**
-	 * The keys of `provides` no composition may substitute while this module
-	 * is loaded (#728): settings other modules read as this module's own,
-	 * derived from its section. The module's own code reads that section, so
-	 * an `overrideComponents` entry for one would be a second source — its
-	 * readers would follow the override while the module went on doing what
-	 * its section says. Stage 1 refuses such an override
-	 * (`authoritative-component-overridden`), and a key named here that the
-	 * module does not provide (`authoritative-without-provides`). A
-	 * composition without the module fills the slot itself, override
-	 * included.
+	 * Keys of `provides` no composition may substitute while this module is
+	 * loaded: settings other modules read as this module's own, derived from its
+	 * section. The module's own code reads that section, so an
+	 * `overrideComponents` entry would be a second source its readers follow
+	 * while the module does not. Stage 1 refuses such an override
+	 * (`authoritative-component-overridden`) and a key the module does not
+	 * provide (`authoritative-without-provides`). A composition without the
+	 * module fills the slot itself, override included.
 	 *
-	 * Typed to the keys of `provides`: `defineModule` infers them as `P`, and
-	 * a call that writes its type arguments names `P` as the fourth to
-	 * declare any. Only an inferred `P` holds the list to what the module
-	 * provides; one written is taken as given, and the stage-1 row
+	 * Only an inferred `P` holds the list to the provided keys; a `P` written as
+	 * the fourth type argument is taken as given, and stage 1's
 	 * `authoritative-closure` refuses a key the module does not provide.
 	 */
 	readonly authoritative?: readonly NoInfer<P>[];
 
-	/**
-	 * Protocol-level features this module adds (grants, routes, federations,
-	 * etc.). Per A2-α §4.
-	 */
+	/** Protocol-level features this module adds (grants, routes, federations, etc.). */
 	readonly contributes?: ContributesMap<ProviderDeps<R, O, S>>;
 
 	/**
 	 * Protocol-level features this module REPLACES on an already-registered
-	 * key. Mirrors `contributes` shape. Missing target key throws at boot.
-	 * Per A2-α §5.
+	 * key. Mirrors `contributes`. A missing target key throws at boot.
 	 */
 	readonly overrides?: ContributesMap<ProviderDeps<R, O, S>>;
 
 	/**
-	 * Per-component lifecycle hooks. Each key `K` in this map MUST also
-	 * appear in `provides`; the boot planner's validate-manifests stage
-	 * throws `"lifecycle-without-provides"` for any orphaned lifecycle entry
-	 * (Phase 4 §6.1).
-	 *
-	 * The absence of this field is valid — all existing `(deps) => value`
-	 * provider forms remain unaffected.
-	 *
-	 * Per A2-β §4.1.
+	 * Per-component lifecycle hooks. Each key MUST also appear in `provides`,
+	 * or boot throws `lifecycle-without-provides`.
 	 */
 	readonly lifecycle?: {
 		readonly [K in ComponentKey]?: ComponentLifecycle<K>;
@@ -235,34 +181,17 @@ export interface ModuleSpec<
 }
 
 /**
- * Erased ModuleSpec — the lowest-common-denominator value the boot
- * planner accepts in `Module[]`. Per A2-α §2.1 / §3.1: authoring uses
- * `defineModule(...)` (which preserves R / O via inference); the boot
- * planner consumes the erased type.
+ * Erased ModuleSpec: what the boot planner accepts in `Module[]`. Authoring
+ * uses `defineModule(...)`, which keeps `R` / `O` by inference.
  *
- * `R = ComponentKey` and `O = ComponentKey` (NOT the default `never`)
- * is intentional: a `ModuleSpec<R', O'>` for any `R' ⊆ ComponentKey`
- * and `O' ⊆ ComponentKey` is structurally assignable to this widened
- * type via:
- * - covariance of `requires?: readonly R[]` and `optional?: readonly O[]`
- *   in their respective generics (R' ⊆ R is allowed)
- * - contravariance of `Provider`'s `deps` parameter: a narrower
- *   `ProviderDeps<R', O'>` (= the function takes fewer keys) is
- *   assignable to a wider `ProviderDeps<R, O>` position
+ * `R` and `O` are widened to `ComponentKey` (not the default `never`) on
+ * purpose: any `ModuleSpec<R', O'>` is then assignable, since `requires` /
+ * `optional` are covariant in them and `Provider`'s `deps` parameter is
+ * contravariant. With `never`, every `defineModule({ requires: [...] })` would
+ * be rejected (`readonly "key"[]` does not extend `readonly never[]`).
  *
- * Without this widening, `Module = ModuleSpec` (the default `never`
- * args) would reject every consumer-authored `defineModule({ requires: [...] })`
- * call once Phases 5–8 populate `ComponentMap` — `readonly "key"[]`
- * does not extend `readonly never[]`. Phase 1 builds compile either
- * way because `ComponentKey = never` in the empty baseline; the
- * widening is the structurally-correct erasure for all later phases.
- *
- * `S = SectionSchema`, the widest section schema and `ModuleSpec`'s default
- * for it, erases the section the same way (#728): `section.schema` is
- * covariant in it, and in the deps the widest schema is read as
- * `section: never` (`SectionDeps`), which every sectioned factory accepts —
- * as a module without a section's factories do. Being the default, it keeps
- * `ModuleSpec<ComponentKey, ComponentKey>` — how this type was spelled
- * before sections — the same type as `Module`.
+ * `S = SectionSchema` (the default) erases the section the same way:
+ * `section.schema` is covariant in it, and the widest schema reads as
+ * `section: never` in the deps (`SectionDeps`), which every factory accepts.
  */
 export type Module = ModuleSpec<ComponentKey, ComponentKey>;

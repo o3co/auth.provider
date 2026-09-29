@@ -15,14 +15,11 @@
  */
 
 /**
- * How the deployment runs, as two slots whose contracts are core's (#728):
- * what every module's HTTP behaviour depends on of the `http` module's
- * settings (`httpSettings`), and how many replicas the operator says run
+ * How the deployment runs, as two core-owned slots: the `http` module's
+ * settings other modules depend on (`httpSettings`) and the replica count
  * (`deploymentMode`). A module requires the slot rather than reading
- * `http {}` or `deployment.mode` from the configuration.
- *
- * The contract suites, and a test double for `httpSettings`, are published
- * on `@o3co/auth-provider-core/testing`. Types only.
+ * `http {}` or `deployment.mode` itself. Contract suites and a test double
+ * are on `@o3co/auth-provider-core/testing`. Types only.
  */
 
 /**
@@ -40,7 +37,7 @@ export interface HttpSettings {
 	readonly cors: {
 		/**
 		 * The browser origins core's CORS middleware lets read the token,
-		 * userinfo, revocation, discovery and JWKS responses (#500): serialized
+		 * userinfo, revocation, discovery and JWKS responses: serialized
 		 * origins; empty, CORS is off. Never a CSRF trust list.
 		 */
 		readonly allowedOrigins: readonly string[];
@@ -48,7 +45,7 @@ export interface HttpSettings {
 }
 
 /**
- * How many replicas the operator says this deployment runs (#271):
+ * How many replicas the operator says this deployment runs:
  * `single` or `multi` as `deployment.mode` states it, `unset` when it
  * states nothing — the state in which a module that holds per-process
  * state warns rather than refuses.
@@ -60,10 +57,10 @@ export type DeploymentMode = "single" | "multi" | "unset";
 // ---------------------------------------------------------------------------
 declare module "@o3co/auth-provider-core" {
 	interface ComponentMap {
-		/** What the deployment's HTTP behaviour depends on of the `http` module's settings (#728): provided by that module. */
+		/** What the deployment's HTTP behaviour depends on of the `http` module's settings: provided by that module. */
 		readonly httpSettings?: HttpSettings;
 		/**
-		 * How many replicas run (#728): core is to fill it from `core.deployment.mode`
+		 * How many replicas run: core is to fill it from `core.deployment.mode`
 		 * for every composition, as it fills the synthetic keys, and the key is
 		 * to be reserved when it does.
 		 */

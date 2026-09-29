@@ -15,19 +15,9 @@
  */
 
 /**
- * boot/validate-manifests.mts — Stage 1 of the A2-β boot planner pipeline.
- *
- * Accepts the consumer's `Module[]`, `bootstrapComponents`,
- * `contributionKinds`, and `overrideComponents`; runs the two ordered check
- * registries below against the manifests — the first row refusing an entry
- * that is a module factory rather than the manifest it builds; emits
- * `ValidatedManifests` on success or throws a typed `BootError` on the first
- * violation in input-array order.
- *
- * The stage is **deterministic and side-effect-free**: same inputs → same
- * output / same error.
- *
- * Per A2-β §5.1.
+ * boot/validate-manifests.mts: stage 1 of the boot planner. Checks the
+ * consumer's modules and host maps with two ordered check registries around
+ * the config parse, and emits `ValidatedManifests`; see `validateManifests`.
  */
 
 import { isDeepStrictEqual } from "node:util";
@@ -80,8 +70,6 @@ import { BootError } from "./types.mjs";
  * Input shape accepted by `validateManifests`. Mirrors `CreateAppOptions`
  * minus the generic `B` parameter (the bootstrap map is typed at the
  * `createApp` call site; stage 1 receives it erased to `BootstrapMap`).
- *
- * Per A2-β §5.1.
  */
 export interface ValidateManifestsInput {
 	readonly modules: readonly Module[];
@@ -92,7 +80,7 @@ export interface ValidateManifestsInput {
 }
 
 // ---------------------------------------------------------------------------
-// Module normalisation (per plan §3.3 normaliseModule)
+// Module normalisation
 // ---------------------------------------------------------------------------
 
 /**
@@ -108,14 +96,13 @@ const federationTypeSnapshots = new WeakMap<
 >();
 
 /**
- * The factory a name-keyed entry registers through. A `federationTypes`
- * entry is a declaration, `{ entrySchema, factory }` (#728), not a factory of
- * the value it registers: its schema and factory are read once, here, and
- * what registers is `RegisteredFederationType` — that schema, and `create`,
- * that factory bound to the module's deps, which the stage-4 pass builds from
- * the deps it hands every factory. The snapshot's shape is held at stage 1
- * (`checkContributionShapes`). A declaration that is not an object is left as
- * it is, for that check to refuse. Every other value is its own factory.
+ * The factory a name-keyed entry registers through. A `federationTypes` entry
+ * is a declaration, `{ entrySchema, factory }`, not a factory: its schema and
+ * factory are read once, here, and what registers is a
+ * `RegisteredFederationType` whose `create` binds that factory to the deps
+ * stage 4 hands every factory. `checkContributionShapes` holds the
+ * snapshot's shape; a declaration that is not an object is left for it to
+ * refuse. Every other value is its own factory.
  */
 function nameKeyedFactory(kind: string, value: unknown): unknown {
 	if (kind !== "federationTypes" || typeof value !== "object" || value === null) return value;
@@ -248,14 +235,12 @@ const BUILTIN_CONTRIBUTION_KINDS = new Set<string>([
 
 /**
  * A `modules` entry that is a function is a module factory listed without
- * being called — `deviceGrantModule` where `deviceGrantModule({ config })`
- * was meant, or `sessionStoreModuleFor` for `sessionStoreModuleFor(config)`.
- * Factories take different arguments, so the message does not guess them.
- * `Module` requires only `name`, and a function has one, so the compiler
- * accepts the entry; every other check below would then read it as
- * a manifest that declares nothing, and boot would succeed with the module's
- * grants, routes and refusals all silently absent. Refused first, before any
- * check reads a field of it.
+ * being called (`deviceGrantModule` for `deviceGrantModule({ config })`).
+ * `Module` requires only `name`, which a function has, so the compiler
+ * accepts it, and every later check would read it as a manifest that
+ * declares nothing: boot would succeed with the module's grants, routes and
+ * refusals silently absent. Refused first, before any check reads a field of
+ * it. Factories take different arguments, so the message does not guess them.
  * @internal
  */
 function checkModuleEntriesAreManifests(modules: readonly Module[]): void {
@@ -276,12 +261,10 @@ function checkModuleEntriesAreManifests(modules: readonly Module[]): void {
 
 // ---------------------------------------------------------------------------
 // Step 1 — Module identity uniqueness
-// Per A2-β §5.1 step 1.
 // ---------------------------------------------------------------------------
 
 /**
  * Step 1: Two manifests with the same `name` throw `duplicate-module-name`.
- * Per A2-β §5.1 step 1.
  * @internal
  */
 function checkUniqueModuleNames(modules: readonly Module[]): void {
@@ -306,12 +289,10 @@ function checkUniqueModuleNames(modules: readonly Module[]): void {
 
 // ---------------------------------------------------------------------------
 // Step 2 — Provides closure check (no duplicate providers)
-// Per A2-β §5.1 step 2.
 // ---------------------------------------------------------------------------
 
 /**
  * Step 2: Two modules providing the same ComponentKey throw `duplicate-provides`.
- * Per A2-β §5.1 step 2.
  * @internal
  */
 function checkProvidesClosure(modules: readonly NormalisedModule[]): void {
@@ -337,7 +318,7 @@ function checkProvidesClosure(modules: readonly NormalisedModule[]): void {
 }
 
 // ---------------------------------------------------------------------------
-// Authoritative keys (#728) — a module's settings slots have one source
+// Authoritative keys — a module's settings slots have one source
 // ---------------------------------------------------------------------------
 
 /**
@@ -375,13 +356,12 @@ function checkAuthoritativeClosure(modules: readonly NormalisedModule[]): void {
 }
 
 /**
- * A host map that carries `__proto__` as its own key — written as a computed
- * key, or parsed from JSON — refuses boot (`reserved-component-key`): set on
- * the component map, it would replace the map's prototype rather than name a
- * component, so every key of its value would read as one, no module's
- * provider would run for them, and no check that reads the map's own keys —
- * the authoritative one, the collision one — would see them. Runs before any
- * row reads the host maps.
+ * A host map carrying `__proto__` as its own key (a computed key, or parsed
+ * from JSON) refuses boot (`reserved-component-key`): set on the component
+ * map it would replace the prototype rather than name a component, so every
+ * key of its value would read as a component no provider ran for, unseen by
+ * the checks that read the map's own keys. Runs before any row reads the host
+ * maps.
  * @internal
  */
 function checkReservedHostKeys(
@@ -412,7 +392,7 @@ function checkReservedHostKeys(
  * module derives it from its own section and its own code reads that
  * section, so a second source would split what its readers see from what the
  * module does. A key no loaded module names authoritative may be overridden,
- * as before — and so may this one when its module is not loaded.
+ * and so may this one when its module is not loaded.
  * @internal
  */
 function checkAuthoritativeOverrides(
@@ -444,12 +424,10 @@ function checkAuthoritativeOverrides(
 // ---------------------------------------------------------------------------
 // Step 3 — Bootstrap closure, substitution-channel disjointness, and
 //          synthetic-key constraint.
-// Per A2-β §5.1 step 3.
 // ---------------------------------------------------------------------------
 
 /**
  * Step 3: Check bootstrap/overrideComponents/synthetic-key constraints.
- * Per A2-β §5.1 step 3.
  * @internal
  */
 function checkBootstrapAndSyntheticDisjointness(
@@ -551,14 +529,11 @@ function checkBootstrapAndSyntheticDisjointness(
 
 // ---------------------------------------------------------------------------
 // Step 4 — Requires/optional closure check + path-construction algorithm
-// Per A2-β §5.1 step 4.
 // ---------------------------------------------------------------------------
 
 /**
  * Build the diagnostic `path` chain from the entry-point module (`rootModule`)
  * down to the failing module `F` along the requires→provides chain.
- *
- * Per A2-β §5.1 step 4 normative algorithm.
  * @internal
  */
 function buildMissingRequiredPath(
@@ -580,19 +555,12 @@ function buildMissingRequiredPath(
 		indexByName.set(modules[i].name, i);
 	}
 
-	// Backward walk: from F, find the "root" by stepping to the earliest-
-	// input-array requirer (the module whose requires is satisfied by F's
-	// provides). Tie-break by lexicographically smallest name. Halt when no
-	// requirer exists or visited-set hit.
-	//
-	// During the walk, record each step as a parent-pointer link
-	// `{ child, parent, viaKey }` where `viaKey` is the lexicographically
-	// smallest key in `child.requires` whose provider is `parent`. Reversing
-	// the recorded links yields the forward chain rootModule → ... → F with
-	// each link's `requires` key already chosen — no second forward walk is
-	// needed (and no chance the walk dead-ends short of F, which was the
-	// failure mode of the previous greedy reconstruction). Per multi-agent
-	// review (Claude S2).
+	// Backward walk: from F, step to the earliest-declared module that
+	// requires a key the current one provides (ties by smallest name), until
+	// there is none or it was visited. Each step records the lexicographically
+	// smallest such key; reversing the links gives the forward chain
+	// rootModule → … → F with every `requires` already chosen, so no second
+	// forward walk can dead-end short of F.
 	const backwardChain: NormalisedModule[] = [failingModule];
 	const linkKeys: ComponentKey[] = []; // linkKeys[i] = key of backwardChain[i+1].requires whose provider is backwardChain[i]
 	const visited = new Set<string>();
@@ -646,9 +614,6 @@ function buildMissingRequiredPath(
 
 		visited.add(bestRequirer.name);
 		backwardChain.push(bestRequirer);
-		// viaKey is guaranteed non-undefined: bestRequirer was selected because
-		// some key of its requires has provider === current. The biome-ignore
-		// reflects that invariant.
 		// biome-ignore lint/style/noNonNullAssertion: bestRequirer-selection guarantees viaKey is defined
 		linkKeys.push(viaKey!);
 		current = bestRequirer;
@@ -680,14 +645,14 @@ function buildMissingRequiredPath(
 
 // ---------------------------------------------------------------------------
 // After step 3 — The session-requirement kind guard
-// The session-admission ADR's D3.
+// See ADR 2026-09-28-session-admission.
 // ---------------------------------------------------------------------------
 
-/** The two kinds no composition may replace the collector of, or override an entry of (the session-admission ADR's D3). */
+/** The two kinds no composition may replace the collector of, or override an entry of. */
 const GUARDED_KINDS = ["sessionRequirements", "mfaFactors"] as const;
 
 /**
- * The kinds whose collector is the planner's alone (#728): a host collector
+ * The kinds whose collector is the planner's alone: a host collector
  * for `rateLimitBudgets` could answer a looser budget than the owning module
  * contributed — on RFC 8628 §5.1's device-verification prefix, say — and
  * `federationTypes` is what the dispatch of configured federations will read.
@@ -696,13 +661,12 @@ const GUARDED_KINDS = ["sessionRequirements", "mfaFactors"] as const;
 const PLANNER_OWNED_KINDS = ["rateLimitBudgets", "federationTypes"] as const;
 
 /**
- * A requirement is switched off by not installing it, and nothing may
- * quietly remove one from behind the consumers: a module's
- * `overrides.sessionRequirements` is refused here, at stage 1 —
- * `session-requirement-kind-guarded`. A host collector for
- * `sessionRequirements` — or for `mfaFactors`, whose projection the MFA
- * requirement's reach is recomputed from — is refused under the same reason
- * by `refuseGuardedHostKinds`, in `createApp` before the kinds are merged.
+ * A requirement is switched off by not installing it, never removed from
+ * behind its consumers: a module's `overrides.sessionRequirements` is refused
+ * here (`session-requirement-kind-guarded`). A host collector for
+ * `sessionRequirements`, or for `mfaFactors` (the MFA requirement's reach is
+ * recomputed from its projection), is refused for the same reason by
+ * `refuseGuardedHostKinds`, in `createApp` before the kinds are merged.
  * @internal
  */
 function checkSessionRequirementKindGuard(modules: readonly NormalisedModule[]): void {
@@ -729,8 +693,8 @@ function checkSessionRequirementKindGuard(modules: readonly NormalisedModule[]):
 
 /**
  * The host's `contributionKinds` held to the same rule, in `createApp`
- * before the kinds are merged and before stage 1 (the session-admission
- * ADR's D3): a collector for `sessionRequirements` or `mfaFactors` the host
+ * before the kinds are merged and before stage 1: a collector for
+ * `sessionRequirements` or `mfaFactors` the host
  * supplies would sit behind the `sessionRequirementResolver` projection and
  * the `session_requirements_registered` boot line, which read the planner's.
  */
@@ -765,20 +729,18 @@ const containerShape = (container: unknown): string =>
 	container === null ? "null" : Array.isArray(container) ? "an array" : `a ${typeof container}`;
 
 /**
- * What a `rateLimitBudgets` or `federationTypes` contribution must be, read off
- * the manifest before any factory runs (#728), for contributions and
- * overrides alike:
+ * What a `rateLimitBudgets` or `federationTypes` contribution or override
+ * must be, read off the manifest before any factory runs:
  *
- * - the kind's container, a record keyed by prefix or by type — not an array,
- *   which normalisation would read as list-shaped and file under Symbol keys,
- *   not a function nor `null`, which it would pass over;
- * - a prefix a limiter key can carry before its first `:` — not empty,
- *   holding no `:` — whatever the budget's factory will answer, a `null`
- *   included;
- * - a declaration that is an object with a Zod `entrySchema` and a `factory`
- *   function, as normalisation read it once (`federationTypeSnapshots`), so
- *   one written in JavaScript is refused as itself rather than as a
- *   `TypeError` at registration.
+ * - its container is a record keyed by prefix or type (normalisation would
+ *   file an array as list-shaped under Symbol keys, and skip a function or
+ *   `null`);
+ * - a prefix is not empty and holds no `:`, since a limiter key carries it
+ *   before its first `:`, whatever the budget's factory answers;
+ * - a declaration, as normalisation read it (`federationTypeSnapshots`), is
+ *   an object with a Zod `entrySchema` and a `factory` function, so one
+ *   written in JavaScript is refused as itself, not as a `TypeError` at
+ *   registration.
  *
  * Throws `contribution-malformed`; `name` is absent for a container.
  * @internal
@@ -873,7 +835,6 @@ function checkContributionShapes(
  * For each module, every key in `requires` must appear in either
  * `bootstrapComponents`, the union of all modules' `provides`, or
  * `overrideComponents`, or be in the synthetic-key set (auto-satisfied).
- * Per A2-β §5.1 step 4.
  * @internal
  */
 function checkRequiresClosure(
@@ -921,14 +882,12 @@ function checkRequiresClosure(
 
 // ---------------------------------------------------------------------------
 // Step 5 — Contribution kind / collector closure
-// Per A2-β §5.1 step 5.
 // ---------------------------------------------------------------------------
 
 /**
  * Step 5: Every contribution kind referenced by a module must have a
  * collector (built-in kinds are auto-wired; custom kinds need a
  * `contributionKinds` entry).
- * Per A2-β §5.1 step 5.
  * @internal
  */
 function checkContributionKindCoverage(
@@ -972,21 +931,15 @@ function checkContributionKindCoverage(
 
 // ---------------------------------------------------------------------------
 // Step 6 — Per-kind duplicate contributes check (name-keyed kinds)
-// Per A2-β §5.1 step 6.
 // ---------------------------------------------------------------------------
 
 /**
- * Step 6: For name-keyed kinds, (kind, name) collisions across modules throw
- * `duplicate-contribute`. List-shaped kinds are handled in step 7 (routes)
- * or silently deduplicated (auditHooks, grantPolicyHooks per A2-α §4.5).
- *
- * Dispatches on `collector.kind === "name-keyed"` rather than a hardcoded
- * built-in name set, so consumer-defined name-keyed kinds (added via
- * declare-module augmentation of ContributionCollectorMap) are also
- * duplicate-checked. Mirrors the Task 6 fixup applied in
- * apply-contributions.mts (commit 4d03cc0b).
- *
- * Per A2-β §5.1 step 6.
+ * Step 6: for name-keyed kinds, a (kind, name) collision across modules
+ * throws `duplicate-contribute`. List-shaped kinds are checked in step 7
+ * (routes) or deduplicated (auditHooks, grantPolicyHooks). Dispatches on
+ * `collector.kind === "name-keyed"`, not a built-in name set, so
+ * consumer-defined name-keyed kinds are checked too, as in
+ * `apply-contributions.mts`.
  * @internal
  */
 function checkPerKindContributeDuplicates(
@@ -1030,13 +983,11 @@ function checkPerKindContributeDuplicates(
 
 // ---------------------------------------------------------------------------
 // Step 7 — RouteContribution collision check
-// Per A2-β §5.1 step 7.
 // ---------------------------------------------------------------------------
 
 /**
  * Collect all RouteContribution objects from modules' contributes.routes
- * (only static values at validate-manifests time; factories are not invoked
- * in this stage per A2-β §5.1).
+ * (static values only: factories are not invoked in this stage).
  * @internal
  */
 function collectRouteContributions(
@@ -1063,7 +1014,6 @@ function collectRouteContributions(
  * Step 7: RouteContribution collision check — id collision, mountPath
  * collision (no id), effective (method, mountPath+adv.path) collision, and
  * RouteAdvertisement.path leading-slash validation.
- * Per A2-β §5.1 step 7.
  * @internal
  */
 function checkRouteCollisions(
@@ -1167,7 +1117,6 @@ function checkRouteCollisions(
 
 // ---------------------------------------------------------------------------
 // Step 7.5 — Federation / federationRedirectPolicies pairing invariant
-// Per A5 §8.2.
 // ---------------------------------------------------------------------------
 
 /**
@@ -1175,22 +1124,17 @@ function checkRouteCollisions(
  * `federationRedirectPolicies[name]` contribution and vice versa.
  *
  * Throws BootError({ reason: "federation-redirect-policy-unpaired" }).
- * Per A5 §8.2.
  * @internal
  */
 function checkFederationRedirectPolicyPairing(modules: readonly NormalisedModule[]): void {
 	const federationNames = new Map<string, string>(); // name → first contributing module
 	const policyNames = new Map<string, string>(); // name → first contributing module
 
-	// Inspect both contributes and overrides: a name is considered "registered"
-	// for pairing-invariant purposes if EITHER side declares it (per spec §8.2
-	// intent — "policy is registered for this name from somewhere"). Walking
-	// only contributesEntries would mis-diagnose the case where Module A
-	// contributes federations[google] and Module B overrides
-	// federationRedirectPolicies[google]: pairing would fire
-	// "federation-without-policy" for google before step 8 (override-target-
-	// missing) could surface the more precise "override has no contribute
-	// target" error.
+	// A name counts as registered if contributes or overrides declares it.
+	// Walking contributes alone would report "federation-without-policy" when
+	// one module contributes federations[x] and another overrides
+	// federationRedirectPolicies[x], before step 8 could give the more precise
+	// override-target-missing.
 	for (const m of modules) {
 		const allEntries = [...m.contributesEntries, ...m.overridesEntries];
 		for (const entry of allEntries) {
@@ -1240,14 +1184,14 @@ function checkFederationRedirectPolicyPairing(modules: readonly NormalisedModule
 }
 
 // ---------------------------------------------------------------------------
-// Step 13.5 — CP-20 grantPolicy / jwt.issuer consistency invariant
+// Step 13.5 — grantPolicy / jwt.issuer consistency invariant
 //
-// Restores the v0.4.x guard. When `grantPolicy` is wired through ANY of the
-// three supported component sources — module `provides`, `bootstrapComponents`,
-// or `overrideComponents` — the configured issuer must be a non-empty string.
-// The policy hook signs decisions against that issuer; an empty value silently
-// disables CP-18 fail-closed enforcement at the JWT layer. Runs after step 13
-// (validateAndComposeConfig) so the parsed config is available.
+// When `grantPolicy` is wired through any of the three component sources
+// (module `provides`, `bootstrapComponents`, `overrideComponents`), the
+// configured issuer must be a non-empty string: the policy hook signs
+// decisions against it, and an empty value silently disables fail-closed
+// enforcement at the JWT layer. Runs after step 13 (validateAndComposeConfig)
+// so the parsed config is available.
 // ---------------------------------------------------------------------------
 
 function checkGrantPolicyIssuerInvariant(
@@ -1294,7 +1238,6 @@ function checkGrantPolicyIssuerInvariant(
 
 // ---------------------------------------------------------------------------
 // Step 13.7 — Federation stores wiring guard
-// Per issue #101 TODO-F-1, A2-β §6.1 amendment 2026-05.
 // ---------------------------------------------------------------------------
 
 const FEDERATION_REQUIRED_STORES = [
@@ -1307,17 +1250,13 @@ const FEDERATION_REQUIRED_STORES = [
 ] as const;
 
 /**
- * If any `config.federations.<name>.enabled === true`, all 6 session/
- * federation/refresh-token-family slots MUST be present in the planned
- * component set. A missing store causes federation routes either to 503 at
- * runtime with an opaque error (session/federationToken stores) or to never
- * mount at all (refreshTokenFamilyRevocation — see packages/oauth/src/routes.mts
- * `logoutSupported` / `federationTokenSupported` gates), surfacing as
- * unexpected 404s. Both failure modes are equally opaque from the operator's
- * perspective; the validator surfaces them at boot time.
- *
- * Per issue #101 TODO-F-1, A2-β §6.1 amendment 2026-05; refreshTokenFamilyRevocation
- * gating added per #103 review (alignment with route-level gating in oauth/routes.mts).
+ * If any `config.federations.<name>.enabled === true`, all six session,
+ * federation and refresh-token-family slots must be in the planned component
+ * set. A missing one makes federation routes either fail at runtime with an
+ * opaque 503 (the session and federation-token stores) or never mount,
+ * surfacing as unexpected 404s (refreshTokenFamilyRevocation, per the
+ * `logoutSupported` / `federationTokenSupported` gates in
+ * `packages/oauth/src/routes.mts`). Refusing at boot makes both visible.
  */
 export function checkFederationStoresWiring(
 	config: AppConfig,
@@ -1340,7 +1279,6 @@ export function checkFederationStoresWiring(
 
 // ---------------------------------------------------------------------------
 // Declared-absence guard
-// Per issue #363; #375 folded #277's access-token check onto it.
 // ---------------------------------------------------------------------------
 
 /**
@@ -1360,24 +1298,20 @@ function readConfigPath(config: unknown, path: readonly string[]): unknown {
 }
 
 /**
- * Generic enforcement for `ModuleSpec.absencePolicies` (#363): every optional
- * key carrying a policy must be filled from one of the three component
- * sources, or the config must carry the policy's declared-absent value.
- * Otherwise boot refuses with `component-absence-undeclared` — the capability
- * slot cannot be a silent no-op, which is the failure mode #277 (revocation),
- * #287 (audit sink) and #322 (subject revocation) all shipped.
+ * Enforces `ModuleSpec.absencePolicies`: every optional key carrying a policy
+ * must be filled from one of the three component sources, or the config must
+ * carry the policy's declared-absent value. Otherwise boot refuses with
+ * `component-absence-undeclared`: a capability slot (token revocation, an
+ * audit sink) must never be a silent no-op.
  *
- * Two modules attaching *different* policies to the same key is refused
- * outright, even when the absence is declared: the boot error's advice must
- * not depend on module input order, and the bundled modules share one policy
- * constant per key (e.g. `AUDIT_SINK_ABSENCE_POLICY`) precisely so this
- * cannot happen by accident.
+ * Two modules attaching different policies to one key are refused even when
+ * the absence is declared, so the advice does not depend on module order;
+ * the bundled modules share one policy constant per key
+ * (`AUDIT_SINK_ABSENCE_POLICY`) so this cannot happen by accident.
  *
- * `consumedBy` follows `checkAccessTokenRevocationWiring`'s reading: every
- * module naming the key in `requires` / `optional` is the evidence that the
- * slot is part of this app's surface. That check (#277, step 13.9) predates
- * this vocabulary and keeps its spec-pinned reason; new absence rules attach
- * an `AbsencePolicy` instead of adding another bespoke stage.
+ * `consumedBy` is every module naming the key in `requires` / `optional`, the
+ * evidence that the slot is part of this app's surface. New absence rules
+ * attach an `AbsencePolicy` rather than adding a bespoke check.
  */
 function checkDeclaredAbsence(
 	modules: readonly NormalisedModule[],
@@ -1499,26 +1433,15 @@ function checkDeclaredAbsence(
 
 // ---------------------------------------------------------------------------
 // Step 8 — Override target existence
-// Per A2-β §5.1 step 8.
 // ---------------------------------------------------------------------------
 
 /**
- * Step 8: Every `overrides[kind][name]` must have a matching target. The
- * target is satisfied by EITHER:
- *   1. some module's `contributes[kind][name]`, OR
- *   2. an entry pre-seeded in the consumer-supplied name-keyed collector
- *      (`contributionKinds[kind].get(name) !== undefined`).
- *
- * Carve-out (2) keeps validate-stage and apply-stage in agreement: §5.4
- * step 2 routes overrides through `collector.replace(name, value)`, which
- * succeeds whenever the collector already has an entry for `name` —
- * regardless of whether that entry came from a module or from a host-
- * supplied pre-seeded collector. Without this carve-out, the documented
- * "consumer extension via pre-loaded collector" path is rejected at
- * validate-stage and would never reach apply-stage. Per multi-agent
- * review (Codex P2).
- *
- * Per A2-β §5.1 step 8.
+ * Step 8: every `overrides[kind][name]` needs a target: some module's
+ * `contributes[kind][name]`, or an entry already in the host's name-keyed
+ * collector (`contributionKinds[kind].get(name) !== undefined`). The second
+ * keeps this stage in agreement with stage 4, whose
+ * `collector.replace(name, value)` succeeds for any existing entry, so a host
+ * extending a pre-loaded collector is not refused here.
  * @internal
  */
 function checkOverrideTargets(
@@ -1567,13 +1490,11 @@ function checkOverrideTargets(
 
 // ---------------------------------------------------------------------------
 // Step 9 — Override duplicate check
-// Per A2-β §5.1 step 9.
 // ---------------------------------------------------------------------------
 
 /**
  * Step 9: Two modules overriding the same (kind, name) throw
  * `duplicate-override`.
- * Per A2-β §5.1 step 9.
  * @internal
  */
 function checkOverrideDuplicates(modules: readonly NormalisedModule[]): void {
@@ -1603,14 +1524,12 @@ function checkOverrideDuplicates(modules: readonly NormalisedModule[]): void {
 
 // ---------------------------------------------------------------------------
 // Step 10 — Same-module contribute-and-override collision
-// Per A2-β §5.1 step 10.
 // ---------------------------------------------------------------------------
 
 /**
  * Step 10: A single module declaring both `contributes[kind][name]` and
  * `overrides[kind][name]` for the same (kind, name) throws
  * `contribute-and-override-same-key`.
- * Per A2-β §5.1 step 10.
  * @internal
  */
 function checkSameModuleContributeOverride(modules: readonly NormalisedModule[]): void {
@@ -1643,27 +1562,14 @@ function checkSameModuleContributeOverride(modules: readonly NormalisedModule[])
 
 // ---------------------------------------------------------------------------
 // Step 11 — List-shaped override rejection
-// Per A2-β §5.1 step 11.
 // ---------------------------------------------------------------------------
 
 /**
- * Step 11: A module's `overrides` carrying any list-shaped kind throws
- * `list-shaped-override-not-allowed`.
- *
- * Dispatches on `collector.kind === "list" | "list-routes"` so consumer-
- * defined list-shaped kinds are also caught. Mirrors the Task 6 fixup
- * applied in apply-contributions.mts (commit 4d03cc0b). The built-in
- * list-shaped kinds (routes, auditHooks, grantPolicyHooks, grantMiddleware)
- * match by collector identity; consumer-defined kinds with list-shaped
- * collectors match the same way.
- *
- * The `details.kind` literal is typed as the built-in union
- * `"routes" | "auditHooks" | "grantPolicyHooks" | "grantMiddleware"` per
- * spec §6.1 `ListShapedOverrideDetails`; a consumer-defined kind name is
- * widened via cast since the Details type does not yet model consumer
- * extensions.
- *
- * Per A2-β §5.1 step 11.
+ * Step 11: a module's `overrides` carrying any list-shaped kind throws
+ * `list-shaped-override-not-allowed`. Dispatches on
+ * `collector.kind === "list" | "list-routes"`, as `apply-contributions.mts`
+ * does, so consumer-defined list-shaped kinds are caught too; their name is
+ * cast into `details.kind`, whose type models only the built-in kinds.
  * @internal
  */
 function checkListShapedOverrides(
@@ -1698,13 +1604,11 @@ function checkListShapedOverrides(
 
 // ---------------------------------------------------------------------------
 // Step 12 — Lifecycle / provides closure
-// Per A2-β §5.1 step 12.
 // ---------------------------------------------------------------------------
 
 /**
  * Step 12: A `lifecycle[K]` entry whose `K` does not appear in the same
  * module's `provides` throws `lifecycle-without-provides`.
- * Per A2-β §5.1 step 12.
  * @internal
  */
 function checkLifecycleClosure(modules: readonly NormalisedModule[]): void {
@@ -1728,8 +1632,7 @@ function checkLifecycleClosure(modules: readonly NormalisedModule[]): void {
 }
 
 // ---------------------------------------------------------------------------
-// Step 13 — the one composed parse (#728)
-// Per A2-β §5.1 step 13.
+// Step 13 — the one composed parse
 // ---------------------------------------------------------------------------
 
 /**
@@ -1743,28 +1646,24 @@ function namedIssues(issues: readonly z.core.$ZodIssue[]): string {
 }
 
 /**
- * Step 13: parse the configuration a composition root handed over —
- * `bootstrapComponents.config`, as it resolved it — once, with every schema
- * that reads it:
+ * Step 13: parses the configuration the composition root handed over
+ * (`bootstrapComponents.config`) once, with every schema that reads it:
  *
  * 1. the transitional base (`TransitionalConfigSchema`): core's own sections
  *    and every section core's schema still mirrors for a package, each
- *    optional, with the coercions and checks they always applied — so a
- *    mirrored section is validated when the configuration carries it,
- *    whether or not the module that reads it is loaded, until the move pull
- *    requests take the mirrors out (#728);
+ *    optional, so a mirrored section is validated whenever the configuration
+ *    carries it, whether or not the module that reads it is loaded;
  * 2. laid over what was written (`overlayConfig`), so a key no schema
- *    declares — at the top or under a section core declares — is kept;
+ *    declares is kept;
  * 3. then each module's `configSchema`, over the base's output rather than
- *    what was written — so a module's schema reads an environment variable's
- *    string as the base coerced it — each laid over the result the same way.
+ *    what was written (so it reads an environment variable's string as the
+ *    base coerced it), each laid over the result the same way.
  *
- * Returns the composed configuration: what the `config` slot holds once
- * each module's section is written back into it (`parseModuleSections`).
- * Every refused value is one `config-validation-failed` naming each operator
- * path: the base's alone when the base refuses — the modules' schemas read
- * its output, and there is none — else every module schema's.
- * Per A2-β §5.1 step 13.
+ * Returns the composed configuration, which becomes the `config` slot once
+ * `parseModuleSections` writes each section back. Refused values make one
+ * `config-validation-failed` naming each operator path: the base's alone
+ * when the base refuses (the module schemas have no output to read), else
+ * every module schema's.
  * @internal
  */
 function validateAndComposeConfig(modules: readonly Module[], bootstrap: BootstrapMap): unknown {
@@ -1816,14 +1715,12 @@ function validateAndComposeConfig(modules: readonly Module[], bootstrap: Bootstr
 
 /**
  * Every key two modules' `configSchema`s make different values of, as one
- * issue each at its path naming both modules — never the values, which may be
- * secrets. Their outputs are laid over each other in module order, so a
- * disagreement would otherwise go to whichever module is listed later: the
- * refusal Zod's intersection gave (`Unmergable intersection`) when the
- * schemas were composed into one. A leaf is a value that is not a plain
- * object (a list is one value). An object — an empty one too — agrees with
- * every other object at its path, and disagrees with a leaf there. Equal
- * values (`isDeepStrictEqual`) agree.
+ * issue per path naming both modules, never the values (they may be secrets).
+ * Outputs are laid over each other in module order, so a disagreement would
+ * otherwise silently go to the module listed later. A leaf is a value that is
+ * not a plain object (a list is one value). An object, even an empty one,
+ * agrees with every other object at its path and disagrees with a leaf there.
+ * Equal values (`isDeepStrictEqual`) agree.
  */
 function conflictingOutputs(
 	outputs: readonly { readonly module: string; readonly data: unknown }[],
@@ -1872,8 +1769,8 @@ function conflictingOutputs(
 }
 
 /**
- * The top-level sections of the configuration as written that nothing owns
- * (#728 B8), sorted: not a section core's transitional base declares — its
+ * The top-level sections of the configuration as written that nothing owns,
+ * sorted: not a section core's transitional base declares — its
  * own, or one it mirrors — not a top-level key of a loaded module's
  * `configSchema`, and not the first key of a loaded module's section path.
  * Boot keeps them in the `config` slot and names them once in the log; a
@@ -1894,7 +1791,7 @@ function ignoredSections(modules: readonly Module[], raw: unknown): readonly str
 }
 
 // ---------------------------------------------------------------------------
-// Step 13, second half — each module's own configuration section (#728)
+// Step 13, second half — each module's own configuration section
 // ---------------------------------------------------------------------------
 
 /**
@@ -2031,32 +1928,25 @@ function kindOf(value: unknown): string {
 }
 
 /**
- * Parse every declared section and write each back into the configuration:
- * for each module whose manifest has a `section`, read the value at its path
- * out of the composed configuration — the base laid over what was written,
- * so the value arrives coerced where core's schema coerces it and whole
- * where no schema declares it — and parse it with the section's schema,
- * synchronously.
+ * Parses every declared section and writes each back into the configuration.
+ * A module's section is read at its path out of the composed configuration
+ * (coerced where core's schema coerces, whole where no schema declares it)
+ * and parsed synchronously with the section's schema.
  *
- * Each module is handed its schema's output as `deps.section`, a deeply
- * frozen copy (`frozenSection`). The `config` slot gets the same output
- * laid over what is at the section's path (`overlayConfig`), so a section
- * schema narrower than what is there drops nothing — a loaded module's
- * section is never stripped — outer sections before inner ones: every section is read before
- * any is written, so an outer schema that keeps only its own keys does not
- * take an inner module's section from it, and an inner section's output
- * lands inside the outer's. A section whose output is `undefined` removes
- * what is written at its path — its schema made nothing of it — and writes
- * nothing where nothing is. A section a scalar, a list or an instance stands
- * in the way of —
- * the outer section's output left no object where the inner path goes — is
+ * The module gets its schema's output as `deps.section`, deeply frozen
+ * (`frozenSection`). The `config` slot gets the same output laid over what is
+ * at the section's path (`overlayConfig`), so a narrower schema never strips
+ * a loaded module's section. Every section is read before any is written,
+ * and outer sections are written first, so an outer schema that keeps only
+ * its own keys cannot drop an inner section, and the inner output lands
+ * inside the outer's. An output of `undefined` removes what is written at
+ * the path. A section whose path a scalar, a list or an instance blocks is
  * refused at its path.
  *
  * When a schema refuses its value, every section is still parsed, and one
- * `config-validation-failed` names every refused one: each issue's path is
- * prefixed with its section's, so the message and `details.issues` name the
- * path the operator wrote (`legacy.fixture.retries`), and `details.modules`
- * lists each refused module with the path its section is read at. Every
+ * `config-validation-failed` names them all; each issue's path is prefixed
+ * with its section's, so it names the path the operator wrote, and
+ * `details.modules` lists each refused module with its section path. Every
  * module in `modules` is parsed, whether or not a factory of it will run.
  * @internal
  */
@@ -2132,26 +2022,16 @@ function parseModuleSections(
 
 // ---------------------------------------------------------------------------
 // Step 14 — Route-order edge sanity
-// Per A2-β §5.1 step 14.
 // ---------------------------------------------------------------------------
 
 /**
- * Step 14: For each `RouteContribution.before` / `after` token, the
- * referenced `id` must exist among the `id`s declared by some other
- * `RouteContribution`.
- *
- * Factory-shaped routes (`(deps) => RouteContribution`) produce their `id`
- * at materialise time, so their ids are opaque at validate-stage. When at
- * least one module declares a function-shaped routes entry anywhere,
- * unknown refs are deferred to assembleApp's mount-order pass (§5.6
- * step 1), which sees the full materialised id set. This carve-out keeps
- * the documented mixed static/factory route ordering scenario reachable.
- * Per multi-agent review (Codex P2).
- *
- * Pure-static apps (no factory route entries anywhere) get the typo-catch
- * benefit of the early check.
- *
- * Per A2-β §5.1 step 14.
+ * Step 14: every `RouteContribution.before` / `after` token must name an `id`
+ * some other `RouteContribution` declares. A factory-shaped route
+ * (`(deps) => RouteContribution`) has its `id` only once materialised, so
+ * when any module has one, unknown references are left to assembleApp's
+ * mount-order pass, which sees every id; this keeps mixed static and factory
+ * route ordering possible. Apps with only static routes get the early typo
+ * check.
  * @internal
  */
 function checkRouteOrderEdges(rawModules: readonly Module[]): void {
@@ -2225,7 +2105,7 @@ function checkRouteOrderEdges(rawModules: readonly Module[]): void {
 }
 
 // ---------------------------------------------------------------------------
-// #728 — the module section's manifest rules
+// The module section's manifest rules
 // ---------------------------------------------------------------------------
 
 /**
@@ -2237,11 +2117,9 @@ const SECTION_DEPS_KEY = "section";
 /**
  * A module that declares a section may not also require or optionally read a
  * component named `section`: its deps would carry both under one name, the
- * section shadowing the slot. Only that module is refused. A component named
- * `section` is otherwise an ordinary slot — provided, read by a module that
- * declares no section, bootstrapped or overridden — so a composition that
- * had one before sections existed boots as it did.
- * Throws `reserved-component-key`.
+ * section shadowing the slot. Only that module is refused; elsewhere
+ * `section` is an ordinary slot (provided, read by a module without a
+ * section, bootstrapped or overridden). Throws `reserved-component-key`.
  * @internal
  */
 function checkReservedComponentKeys(
@@ -2324,40 +2202,31 @@ function sectionRelocationsOf(m: Module): readonly SectionRelocation[] {
 }
 
 /**
- * Every section path a manifest writes is one it can have written (#728),
- * for every module:
+ * Every section path a manifest writes is one it can have written:
  *
- * - `section.at` is a dot-separated path of non-empty keys. `""`, `"a..b"`,
- *   `".a"` and `"a."` — or a value that is not a string — name no section
- *   anyone wrote. A string is quoted in the message, anything else named by
- *   its type — rendering it could throw (a bigint, a cyclic object) before
- *   the refusal exists — and the value itself is in `details.at`.
- * - `section.relocatedFrom` is a list of such paths, read at every index — a
- *   hole is refused, not skipped — or a plain map (its prototype
- *   `Object.prototype` or `null`; a Date, a Map or a class instance is
- *   neither form) from such paths to `""`, such a path inside the section,
- *   or `null` (removed); no old path is, or holds, a loaded module's
- *   section — its own or another's — which a configuration that sets that
- *   section would then be refused for; and no two loaded modules claim
- *   overlapping old paths — the same one, or one under the other's — since
- *   a key set there would have two new paths. (One module may cover its own
- *   old path with a more specific one: a subtree, and a key renamed in it.)
- *   The later module in `modules` is the one refused, and `problem` names
- *   both.
+ * - `section.at` is a dot-separated path of non-empty keys. A string is
+ *   quoted in the message, anything else named by its type (rendering it
+ *   could throw: a bigint, a cyclic object); the value is in `details.at`.
+ * - `section.relocatedFrom` is a list of such paths, read at every index (a
+ *   hole is refused, not skipped), or a plain map (prototype
+ *   `Object.prototype` or `null`) from such paths to `""`, a path inside the
+ *   section, or `null` (removed).
+ * - No old path is or holds a loaded module's section, its own or another's:
+ *   a configuration setting that section would then be refused.
+ * - No two loaded modules claim overlapping old paths (the same one, or one
+ *   under the other), since a key set there would have two new paths; one
+ *   module may cover its own old path with a more specific one. The later
+ *   module is refused, and `problem` names both.
  * - No new path lies at, under or over an old path: its own, where a key
- *   written right would be refused, or any other a loaded module declares —
- *   another entry of its own included — where a key moved there would be
- *   refused in turn, a chain of moves. The module whose new path it is is
- *   refused, and `problem` names the other old path and its module.
+ *   written right would be refused, or another loaded module's (or another
+ *   entry of its own), which would chain moves. The module whose new path it
+ *   is is refused, and `problem` names the other old path and its module.
  *
  * `details.relocatedFrom` names the entry, or the value when it is neither
- * form or has a hole, and `details.problem` what is wrong with it. A section
- * is known here only by a manifest's `section`: a module that reads its
- * settings through a `configSchema` alone declares no path to hold against.
- * Then no two modules' sections may be read at the same path
- * (`checkModuleSectionOwners`).
- *
- * Throws `module-section-path-invalid`.
+ * form or has a hole. Only a manifest's `section` declares a path to hold
+ * against; a module read through `configSchema` alone declares none. Then
+ * `checkModuleSectionOwners` holds each section to one owner. Throws
+ * `module-section-path-invalid`.
  * @internal
  */
 function checkModuleSectionPaths(rawModules: readonly Module[]): void {
@@ -2507,13 +2376,11 @@ function checkModuleSectionPaths(rawModules: readonly Module[]): void {
 
 /**
  * A configuration still setting a key at or under a path a loaded module's
- * section moved from refuses boot (#728 B10), before the configuration is
- * parsed — the old path may be in no section any loaded module reads, and
- * what a schema would make of its value is beside the point. Reads the
- * configuration as it was handed to `createApp`. Every such key is named, in
- * module order, with the path it moved to and the environment variable bound
- * there (`findRelocatedKeys`, beside the removed-key refusals). Throws
- * `config-path-relocated`.
+ * section moved from refuses boot (`config-path-relocated`) before it is
+ * parsed: the old path may be in no section any loaded module reads, and what
+ * a schema would make of its value is beside the point. Reads the
+ * configuration as handed to `createApp`, and names every such key in module
+ * order with its new path and environment variable (`findRelocatedKeys`).
  * @internal
  */
 function checkRelocatedConfigPaths(rawModules: readonly Module[], bootstrap: BootstrapMap): void {
@@ -2538,7 +2405,7 @@ function checkRelocatedConfigPaths(rawModules: readonly Module[], bootstrap: Boo
 }
 
 /**
- * A section has one owner (#728): two modules whose sections are read at the
+ * A section has one owner: two modules whose sections are read at the
  * same path — the same keys, a module's name counting as one key — would
  * each be handed the other's configuration and each write it back. The later
  * module in `modules` is refused with `module-section-path-invalid`, and
@@ -2569,7 +2436,7 @@ function checkModuleSectionOwners(rawModules: readonly Module[]): void {
 
 /**
  * Where stage 1's warnings go — the replica-safety warning and
- * `config_sections_ignored` (#728 B8), one rule for both: the logger the
+ * `config_sections_ignored`, one rule for both: the logger the
  * composition root wired as a bootstrap component. A composition that wired
  * none hears nothing from stage 1.
  */
@@ -2578,19 +2445,14 @@ function warningLogger(bootstrap: BootstrapMap): BootstrapMap["logger"] {
 }
 
 // ---------------------------------------------------------------------------
-// The stage-1 check registries (#368)
+// The stage-1 check registries
 // ---------------------------------------------------------------------------
 
 /**
- * Everything a stage-1 check may read. One shape for every check, so a row
- * is `(ctx) => void` and adding a guard is appending a row — not choosing a
- * fraction between two existing step numbers and finding the right brace in
- * `validateManifests` (which is how this file accreted steps 7.5 and
- * 13.5–13.10 before #368).
- *
- * `parsedConfig` is `undefined` for the pre-config registry: those checks
- * run before the config-parse stage that produces it, which is exactly what
- * splits the two registries.
+ * Everything a stage-1 check may read. One shape for every check, so a row is
+ * `(ctx) => void` and adding a guard is appending a row. `parsedConfig` is
+ * `undefined` for the pre-config registry, whose checks run before the config
+ * parse that produces it; that is what splits the two registries.
  */
 interface StageOneContext {
 	readonly rawModules: readonly Module[];
@@ -2600,25 +2462,22 @@ interface StageOneContext {
 	readonly contributionKinds: ContributionKindMap | undefined;
 	readonly parsedConfig: unknown;
 	/**
-	 * Provides ∪ bootstrapComponents ∪ overrideComponents — the three
-	 * supported component sources. Wiring guards MUST test against all three
-	 * or a composition root wiring via bootstrap/override is falsely rejected
-	 * (multi-agent-review I1+P2 convergence, 2026-05-01).
+	 * Provides ∪ bootstrapComponents ∪ overrideComponents, the three component
+	 * sources. Wiring guards must test all three, or a composition root wiring
+	 * through bootstrap or override is falsely rejected.
 	 */
 	readonly plannedKeys: ReadonlySet<string>;
 }
 
 /**
- * An `oauthTokenSettings` a host fills — through `bootstrapComponents` or
- * `overrideComponents` — names no token lifetime longer than the one core
+ * An `oauthTokenSettings` a host fills (through `bootstrapComponents` or
+ * `overrideComponents`) may name no token lifetime longer than the one core
  * resolves from the configuration (`lifetimeBeyondConfiguration`, the rule
- * every reader's `checkOAuthTokenSettings` applies to a held slot, whoever
- * provides it). A host map is known before any provider runs, so boot
- * refuses it here, with the map it came from
- * (`token-settings-lifetime-exceeds-configuration`), naming the member and
- * both values; a value a module provides is refused where a reader first
- * reads it. A member that is not a number is left to the readers' check,
- * which refuses it by name.
+ * every reader's `checkOAuthTokenSettings` applies). A host map is known
+ * before any provider runs, so it is refused here
+ * (`token-settings-lifetime-exceeds-configuration`), naming the map, the
+ * member and both values; a module-provided value is refused where a reader
+ * first reads it. A member that is not a number is left to the readers' check.
  * @internal
  */
 function checkHostTokenSettingsLifetimes(
@@ -2662,21 +2521,19 @@ export interface StageOneCheck {
 }
 
 /**
- * The checks that run BEFORE config parse, in order. These are A2-β §5.1's
- * numbered steps 1–12 (7.5 sits between 7 and 8 per A5 §8.2); the numbers
- * live in `spec`, so file order and spec order can never disagree with each
- * other silently — the registry order IS the execution order, and the
- * first-violation semantics follow from running rows in sequence.
- */
-/**
- * The registries are exported (so tooling and tests can read the plan) and
- * are the live structures `validateManifests` iterates — so they are frozen,
- * rows included: an execution plan for boot-time security validation must
- * not be mutable by anything running in-process. Per Copilot review on #380.
+ * The registries are exported, so tooling and tests can read the plan, and
+ * are the live structures `validateManifests` iterates, so they are frozen,
+ * rows included: boot-time security validation must not be mutable by
+ * anything running in-process.
  */
 const freezeChecks = (checks: readonly StageOneCheck[]): readonly StageOneCheck[] =>
 	Object.freeze(checks.map((check) => Object.freeze(check)));
 
+/**
+ * The checks that run before the config parse (steps 1–12), in order. The
+ * registry order is the execution order, so the first violation is the first
+ * failing row; each row's `spec` names its step.
+ */
 export const STAGE_ONE_PRE_CONFIG_CHECKS: readonly StageOneCheck[] = freezeChecks([
 	{
 		id: "module-entries-are-manifests",
@@ -2797,13 +2654,10 @@ export const STAGE_ONE_PRE_CONFIG_CHECKS: readonly StageOneCheck[] = freezeCheck
 ]);
 
 /**
- * The checks that run AFTER config parse (A2-β §5.1 step 13, which stays a
- * distinct stage in `validateManifests` because it *produces* the parsed
- * config these rows read), in order. This is where wiring guards live —
- * the rows that used to be hand-numbered 13.5–13.10 — plus the step-14
- * route-order sanity check that always ran last.
- *
- * Adding a wiring guard = appending a row before `route-order-edges`.
+ * The checks that run after the config parse (step 13, a distinct stage in
+ * `validateManifests` because it produces the parsed config these rows
+ * read), in order: the wiring guards, then the step-14 route-order check. A
+ * new wiring guard is a row appended before `route-order-edges`.
  */
 export const STAGE_ONE_POST_CONFIG_CHECKS: readonly StageOneCheck[] = freezeChecks([
 	{
@@ -2837,8 +2691,7 @@ export const STAGE_ONE_POST_CONFIG_CHECKS: readonly StageOneCheck[] = freezeChec
 		// reading.
 		//
 		// `rawModules`, not the normalised view: the guard reads each manifest's
-		// own `replicaSafety` declaration (#455), which normalisation does not
-		// carry.
+		// own `replicaSafety` declaration, which normalisation does not carry.
 		run: (ctx) => {
 			const bootLogger = warningLogger(ctx.bootstrapComponents);
 			checkReplicaSafety({
@@ -2870,21 +2723,16 @@ export const STAGE_ONE_POST_CONFIG_CHECKS: readonly StageOneCheck[] = freezeChec
 // ---------------------------------------------------------------------------
 
 /**
- * Stage 1 of the A2-β boot planner pipeline. Accepts the consumer's
- * `Module[]`, `bootstrapComponents`, `contributionKinds`, and
- * `overrideComponents` and runs the two check registries around the
- * config-parse stage: {@link STAGE_ONE_PRE_CONFIG_CHECKS}, then A2-β §5.1
+ * Stage 1 of the boot planner: runs {@link STAGE_ONE_PRE_CONFIG_CHECKS}, then
  * step 13 (`validateAndComposeConfig`, the one composed parse, and
  * `parseModuleSections`, which writes each module's section back into the
- * parsed config), then {@link STAGE_ONE_POST_CONFIG_CHECKS}.
+ * parsed config), then {@link STAGE_ONE_POST_CONFIG_CHECKS}. Returns
+ * `ValidatedManifests`, or throws a `BootError` for the first violation in
+ * input order.
  *
- * Returns a `ValidatedManifests` on success. Throws a typed `BootError`
- * on the first violation in input-array order.
- *
- * The stage is **deterministic**: same inputs → same output / same error.
- * Its only side effects are boot notices to the wired logger — the
- * top-level sections nothing owns (`config_sections_ignored`, #728 B8) and
- * the replica-safety warning. Per A2-β §5.1.
+ * Deterministic: the same inputs give the same output or error. Its only side
+ * effects are boot notices to the wired logger: the top-level sections
+ * nothing owns (`config_sections_ignored`) and the replica-safety warning.
  */
 export function validateManifests(input: ValidateManifestsInput): ValidatedManifests {
 	const { modules, bootstrapComponents, contributionKinds, overrideComponents } = input;
@@ -2910,12 +2758,12 @@ export function validateManifests(input: ValidateManifestsInput): ValidatedManif
 		check.run(baseContext);
 	}
 
-	// A2-β §5.1 step 13: config schema composition and validation. Not a
-	// registry row because it PRODUCES a value — the parsed config (with Zod
-	// defaults / transforms applied) that replaces the original config in the
-	// returned bootstrapComponents, and that every post-config row reads.
+	// Step 13, config composition and validation, is not a registry row: it
+	// produces the parsed config (Zod defaults and transforms applied) that
+	// replaces the original in the returned bootstrapComponents and that every
+	// post-config row reads.
 	const composedConfig = validateAndComposeConfig(modules, bootstrapComponents);
-	// Each module's own section (#728), parsed out of that configuration by
+	// Each module's own section, parsed out of that configuration by
 	// the module's schema and written back at its path — before any
 	// post-config row, which may assume the configuration is valid.
 	const { config: parsedConfig, sections } = parseModuleSections(modules, composedConfig);
@@ -2923,9 +2771,8 @@ export function validateManifests(input: ValidateManifestsInput): ValidatedManif
 		...bootstrapComponents,
 		config: parsedConfig as BootstrapMap["config"],
 	};
-	// #728 B8: the top-level sections nothing loaded owns, kept in the config
-	// slot and named once — to the logger the composition wired, as every
-	// boot notice is.
+	// The top-level sections nothing loaded owns stay in the config slot and
+	// are named once, to the logger the composition wired.
 	const ignored = ignoredSections(modules, (bootstrapComponents as Record<string, unknown>).config);
 	if (ignored.length > 0) {
 		warningLogger(bootstrapComponents)?.warn({ sections: [...ignored] }, "config_sections_ignored");

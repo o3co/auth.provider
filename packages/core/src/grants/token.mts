@@ -33,12 +33,9 @@ export interface Token {
 	audience?: string;
 	issuer?: string;
 	/**
-	 * Echo of `GenerateTokenOptions.confirmation` when set. It does NOT drive
-	 * claim emission — that is `GenerateTokenOptions.confirmation`'s job — but
-	 * on an access token it is what `generateTokenResponse` reads the
-	 * response's `token_type` from, so the envelope describes the `cnf` the
-	 * token carries. See RFC 7800 §3 for the `cnf` claim structure and Wave 2
-	 * Token-binding Cluster spec §4.4 for the field's role here.
+	 * Echo of `GenerateTokenOptions.confirmation` (the RFC 7800 §3 `cnf`). It
+	 * does not drive claim emission; `generateTokenResponse` reads an access
+	 * token's `token_type` from it.
 	 */
 	readonly confirmation?: Confirmation;
 }
@@ -61,12 +58,10 @@ export interface TokenResponse {
 /**
  * The RFC 6749 §5.1 token response for the tokens a grant minted.
  *
- * `token_type` is read off the access token's own confirmation (the echo
- * `generateToken` puts on the `Token`), not handed in: a grant that forgot to
- * say `DPoP` advertised a `cnf.jkt` token as Bearer, and a DPoP-aware client
- * believed the envelope and presented it as one — which RFC 9449 §7.1 has a
- * resource server refuse. Read off the token, the envelope cannot disagree
- * with the claim.
+ * `token_type` is read off the access token's own confirmation, not handed
+ * in, so the envelope cannot disagree with the `cnf` claim: a `cnf.jkt` token
+ * advertised as Bearer gets presented as one, and RFC 9449 §7.1 has the
+ * resource server refuse it.
  */
 export const generateTokenResponse = ({
 	accessToken,
@@ -109,11 +104,9 @@ export interface GenerateTokenOptions {
 	 */
 	confirmation?: Confirmation;
 	/**
-	 * The token's `jti`. A fresh UUID unless the caller supplies one — which
-	 * it does when the token's identity has to be reserved somewhere before
-	 * it is signed (#449): the refresh grant commits the rotation to the
-	 * family store first and signs only once the reservation holds, so a
-	 * lost race costs no signature.
+	 * The token's `jti`; a fresh UUID unless supplied. Supplied when the
+	 * identity must be reserved before signing: the refresh grant commits the
+	 * rotation to the family store first, so a lost race costs no signature.
 	 */
 	readonly jti?: string;
 	/**
@@ -140,10 +133,9 @@ export const generateToken = async (
 		issuedAt = undefined,
 	}: GenerateTokenOptions,
 ): Promise<Token> => {
-	// Both are reservations made before signing (#449). An empty `jti` would
-	// sign a token with no identity for every replay check keyed on it; an
-	// `issuedAt` that is not whole epoch seconds would sign `iat` / `exp` no
-	// verifier reads as intended.
+	// Both may be reservations made before signing. An empty `jti` would sign a
+	// token with no identity for replay checks; an `issuedAt` that is not whole
+	// epoch seconds would sign an `iat` / `exp` no verifier reads as intended.
 	if (jti.length === 0) throw new Error("generateToken: jti must not be empty");
 	if (issuedAt !== undefined && !(Number.isSafeInteger(issuedAt) && issuedAt >= 0)) {
 		throw new Error("generateToken: issuedAt must be a non-negative whole number of epoch seconds");
@@ -186,11 +178,8 @@ export const generateToken = async (
 		...(tokenType ? { header: { typ: tokenType } } : {}),
 	});
 
-	// Construct Token via spread so `readonly` fields (currently
-	// `confirmation`) can be assigned at construction without a cast.
-	// Spec §4.4 marks `Token.confirmation` readonly for caller-side
-	// immutability; building the record in one expression honors that
-	// contract without diverging from the existing per-field guards.
+	// Built in one expression so the readonly `confirmation` is assigned
+	// without a cast.
 	return {
 		token,
 		...(expiresIn !== undefined ? { expiresIn } : {}),

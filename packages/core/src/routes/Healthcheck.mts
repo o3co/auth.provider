@@ -21,13 +21,10 @@ export interface HealthcheckRouterOptions {
 }
 
 /**
- * Liveness endpoint — answers whether this process is up and its event loop is
- * turning. Always `200`, and deliberately so: it touches no dependency.
- *
- * The counterpart is `routes/Readiness.mts`. Wiring liveness to anything that
- * probes a backing service turns one dependency outage into a cluster-wide
- * restart loop, which reconnects nothing and adds cold starts to an incident.
- * Losing Redis is a reason to stop routing to a replica, not to kill it.
+ * Liveness endpoint: always `200`, deliberately touching no dependency.
+ * Wiring liveness to a backing service turns one outage into a cluster-wide
+ * restart loop that reconnects nothing; losing Redis is a reason to stop
+ * routing to a replica (`routes/Readiness.mts`), not to kill it.
  *
  * Mount it on the host app ahead of the composed auth router so it stays
  * reachable while the auth pipeline is degraded.

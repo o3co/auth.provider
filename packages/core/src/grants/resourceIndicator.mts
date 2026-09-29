@@ -15,48 +15,28 @@
  */
 
 /**
- * RFC 8707 resource indicators — the shared reading of the `resource` parameter
- * (and of RFC 8693's `audience`, the other target parameter), the audience a
- * request derives from it, and the check that an issued audience represents
- * it.
+ * RFC 8707 resource indicators: reading the `resource` parameter (and RFC
+ * 8693's `audience`), deriving an audience from it, and checking that an
+ * issued audience represents it. Pure functions, shared by grant packages
+ * that do not depend on one another; the consumers are listed in
+ * `docs/design-vocabulary.md`. See ADR 2026-07-31-rfc8707-resource-audience-binding.
  *
- * Read by the oauth package's `client_credentials`, `refresh_token`,
- * `authorization_code` and jwt-bearer grants and `/authorize`, by the
- * WebAuthn grant, which forwards `resource` to `grantPolicy`, and by the
- * token-exchange grant, which reads `resource` and `audience` strictly. Those
- * packages do not depend on one another, so the rule lives in core rather
- * than in a copy per package. The home is mapped in
- * `docs/design-vocabulary.md` and guarded by `designVocabulary.drift.test.mts`.
- *
- * Pure functions over a parsed parameter bag: no HTTP, no Express.
- *
- * No comma-splitting is performed: RFC 8707 §5.4 treats each `resource`
- * value as a URI and URIs may legally contain commas, so splitting would
- * silently corrupt valid resource indicators.
+ * Values are never comma-split: RFC 8707 §5.4 treats each value as a URI, and
+ * URIs may contain commas.
  */
 
 /**
- * Reads a target parameter — RFC 8707 `resource`, or RFC 8693 `audience` — as
- * a form or JSON body delivers it: the values it names, or `null` when it is
- * malformed.
+ * Reads a target parameter (RFC 8707 `resource` or RFC 8693 `audience`) as a
+ * form or JSON body delivers it.
  *
- * - Absent, `null` or `""`: `[]`, nothing named. RFC 6749 §3.2 has a
- *   parameter sent without a value treated as omitted.
- * - A string: that one value, kept whole.
- * - An array of strings (a repeated form parameter, or a JSON array): its
- *   non-empty entries, in order, so the array shape agrees with the string
- *   shape on what names nothing. `resource=&resource=https://x` reaches
- *   Express as `["", "https://x"]`; an empty entry surviving into the
- *   `invalid_target` check would be refused under an empty name. All-empty is
- *   `[]`.
- * - Anything else — a number, a boolean, an object, a nested array, an array
- *   holding a non-string — `null`: malformed. RFC 8707 §2 answers a value the
- *   server "fails to parse" with `invalid_target`. Nothing is converted to a
- *   string: `String([["https://x"]])` is `"https://x"`, so a conversion would
- *   name a target the client never sent as one.
- *
- * Only a JSON body can carry a malformed value: a form parses to a string or
- * an array of strings.
+ * - Absent, `null` or `""`: `[]` (RFC 6749 §3.2: a parameter without a value
+ *   is treated as omitted).
+ * - A string: that value, whole.
+ * - An array of strings: its non-empty entries in order, so
+ *   `resource=&resource=https://x` is not refused under an empty name.
+ * - Anything else: `null`, malformed (RFC 8707 §2 `invalid_target`). Never
+ *   stringified: `String([["https://x"]])` would name a target the client
+ *   never sent. Only a JSON body can carry such a value.
  */
 export function readTargetParameter(value: unknown): readonly string[] | null {
 	if (value === undefined || value === null || value === "") return [];
@@ -68,14 +48,10 @@ export function readTargetParameter(value: unknown): readonly string[] | null {
 }
 
 /**
- * Extracts the `resource` parameter per RFC 8707 from a request's parameters —
- * a token request body, or the `/authorize` query or form — as
- * {@link readTargetParameter} reads it.
- *
- * Returns `null` when it names nothing (absent, null, `""`, or empty entries
- * only) and also when it is malformed: these callers read a malformed
- * `resource` as none requested. The token-exchange grant, which refuses a
- * malformed one with `invalid_target`, calls {@link readTargetParameter}.
+ * The RFC 8707 `resource` of a token request body or `/authorize` query, read
+ * by {@link readTargetParameter}. `null` when it names nothing or is
+ * malformed: these callers treat a malformed `resource` as none requested.
+ * Token exchange, which refuses it, calls {@link readTargetParameter} instead.
  */
 export function extractResourceParam(body: Record<string, unknown>): readonly string[] | null {
 	const resources = readTargetParameter(body.resource);
@@ -84,21 +60,13 @@ export function extractResourceParam(body: Record<string, unknown>): readonly st
 
 /**
  * The audience to mint for when a `resource` was requested and no policy
- * narrowed one — RFC 8707 §2 read as "the AS derives the audience from the
- * request", rather than minting its default and then rejecting it.
+ * narrowed one (RFC 8707 §2: the AS derives the audience from the request).
  *
- * Returns `undefined` when derivation is not possible, leaving the caller's
- * existing fallback in place; {@link unrepresentedResources} then rejects the
- * request, so a non-derivable case still fails closed rather than silently
- * issuing a mismatched audience.
- *
- * Derivation is bounded by `allow` — the client's `allowedAudiences` plus its
- * own client id, the same ceiling a policy-returned audience is held to.
- * Without that bound, naming a resource would be enough to mint a token for
- * any audience, which is the opposite of what resource indicators are for.
- *
- * Two distinct resources are not derivable: `aud` is a single string. A
- * repeated identical resource collapses to that one audience.
+ * Bounded by `allow` (the client's `allowedAudiences` plus its client id, the
+ * ceiling a policy audience is held to); unbounded, naming a resource would
+ * mint a token for any audience. Two distinct resources are not derivable
+ * because `aud` is a single string. `undefined` when not derivable: the
+ * caller keeps its fallback and {@link unrepresentedResources} fails closed.
  */
 export function deriveAudienceFromResources(
 	resources: readonly string[] | null | undefined,
@@ -112,29 +80,14 @@ export function deriveAudienceFromResources(
 }
 
 /**
- * Returns the requested resource indicators that the issued token's audience
- * does NOT represent. Empty result means the request is satisfiable.
+ * The requested resource indicators the issued audience does NOT represent.
+ * Empty means satisfiable; otherwise the answer is `invalid_target` (RFC 8707
+ * §2).
  *
- * RFC 8707 §2 requires the access token's audience to be the resource
- * indicator(s) the client asked for; when the AS cannot bind the token to
- * them, the response is `invalid_target`. This helper is the shared decision
- * for that check across `client_credentials`, `refresh_token`,
- * `authorization_code`, jwt-bearer and `/authorize`, generalising the
- * enforcement the token-exchange grant has carried since v0.5.3 (IH-8).
- *
- * `generateToken` emits a SINGLE `aud`, so "represented" is string equality
- * against that one value. Two consequences worth stating, because both look
- * like helper decisions and are actually token-shape consequences:
- *
- * - Two distinct resources can never both be represented. The multi-resource
- *   case therefore rejects rather than issuing an array-valued `aud` or
- *   splitting into several tokens.
- * - A token with no audience represents nothing, so any resource request
- *   against it is unsatisfiable. Failing closed there avoids minting an
- *   audience-less token in response to an explicit targeting request.
- *
- * Duplicates that match the audience are not a widening — the client named one
- * target more than once — and are accepted.
+ * `generateToken` emits a single `aud`, so "represented" is string equality
+ * with it: two distinct resources never both pass, and a token with no
+ * audience represents nothing (fails closed). Duplicates of the audience are
+ * accepted.
  */
 export function unrepresentedResources(
 	resources: readonly string[] | null | undefined,

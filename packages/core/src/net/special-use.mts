@@ -17,23 +17,20 @@
 import { BlockList, isIP } from "node:net";
 
 /**
- * The IPv4 and IPv6 special-use address ranges of RFC 6890 (with the RFC
- * 8190 additions) — loopback, private, link-local, CGNAT, documentation,
- * benchmarking, multicast, reserved, unique-local, and the IPv4-mapped and
- * IPv4-compatible IPv6 forms of all of them.
+ * The IPv4 and IPv6 special-use ranges of RFC 6890 (with the RFC 8190
+ * additions), and the IPv4-mapped and IPv4-compatible IPv6 forms of all of
+ * them.
  *
- * One list, so every fetch of a URL that **a stranger chose** refuses the
- * same addresses: #529's Client ID Metadata Document fetch, where the
- * `client_id` is the URL, and whatever fetches a caller-supplied URL next.
- * The map row lives in `docs/design-vocabulary.md`; the drift guard fails a
- * second definition.
+ * One list, so every fetch of a URL that **a stranger chose** refuses the same
+ * addresses (the Client ID Metadata Document fetch, where the `client_id` is
+ * the URL, and any later caller-supplied fetch). Map row in
+ * `docs/design-vocabulary.md`; the drift guard fails a second definition.
  *
- * Not every outbound fetch is that decision. mtls revocation
- * (`packages/mtls/src/fullPki/fetchGuard.mts`) fetches URLs a trusted CA
- * wrote into a validated certificate, and only from hosts the operator put
- * on `revocation.allowed-hosts` — a stricter control than a denylist, and one
- * that must admit private addresses, because an internal CA publishes its CRLs
- * and runs its OCSP responder inside the network. Each home states the other.
+ * mtls revocation (`packages/mtls/src/fullPki/fetchGuard.mts`) is a different
+ * decision: it fetches URLs a trusted CA wrote into a validated certificate,
+ * and only from hosts on `revocation.allowed-hosts`. That allowlist is
+ * stricter and must admit private addresses, because an internal CA serves
+ * its CRLs and OCSP inside the network. Each home states the other.
  */
 const SPECIAL_USE = new BlockList();
 for (const [net, prefix] of [
@@ -74,22 +71,6 @@ for (const [net, prefix] of [
 	SPECIAL_USE.addSubnet(net, prefix, "ipv6");
 }
 
-/**
- * Whether `address` is an IP literal inside a special-use range (RFC 6890):
- * one that names this host, this network, a private network, a documentation
- * or benchmarking block, or a multicast / reserved block — none of which a
- * URL supplied by an untrusted party may legitimately resolve to.
- *
- * An IPv4-mapped or -compatible IPv6 address is judged by its IPv4 half,
- * in **every** spelling of it: `::ffff:10.0.0.1`, `::ffff:0a00:0001`,
- * `0:0:0:0:0:ffff:10.0.0.1`. The dotted forms are the ones a resolver
- * usually returns, but nothing stops a DNS answer from carrying another,
- * and `::ffff:0:0/96` is deliberately absent from the IPv6 table — so a
- * spelling that fell through to the IPv6 check used to answer `false` for
- * a private IPv4 address. A string that is not an IP address at all
- * answers `false`: the caller resolves names first and asks about each
- * address.
- */
 /** The 16 bytes of an IPv6 address written as groups, a dotted IPv4 tail included. */
 function toBytes(parts: readonly string[]): number[] | null {
 	const out: number[] = [];
@@ -108,13 +89,9 @@ function toBytes(parts: readonly string[]): number[] | null {
 
 /**
  * The IPv4 address an IPv4-mapped (`::ffff:0:0/96`) or IPv4-compatible
- * (`::/96`, deprecated) IPv6 address embeds, in any legal spelling, or
- * `null` when it embeds none.
- *
- * The address is expanded to its sixteen bytes and the prefix is read from
- * them, so `::ffff:10.0.0.1`, `::ffff:0a00:0001` and
- * `0:0:0:0:0:ffff:10.0.0.1` are one address, which is the point: they
- * reach the same host.
+ * (`::/96`, deprecated) IPv6 address embeds, or `null`. The address is
+ * expanded to its sixteen bytes before the prefix is read, so every legal
+ * spelling of one address gives the same answer.
  */
 function embeddedIpv4(address: string): string | null {
 	const bare = address.split("%")[0] ?? "";
@@ -141,6 +118,15 @@ function embeddedIpv4(address: string): string | null {
 	return v4.join(".");
 }
 
+/**
+ * Whether `address` is an IP literal inside a special-use range (RFC 6890),
+ * none of which a URL supplied by an untrusted party may legitimately resolve
+ * to. An IPv4-mapped or -compatible IPv6 address is judged by its IPv4 half in
+ * every spelling (`::ffff:10.0.0.1`, `::ffff:0a00:0001`,
+ * `0:0:0:0:0:ffff:10.0.0.1`), since a DNS answer may carry any of them. A
+ * string that is not an IP address answers `false`: the caller resolves names
+ * first and asks about each address.
+ */
 export function isSpecialUseAddress(address: string): boolean {
 	const family = isIP(address);
 	if (family === 4) return SPECIAL_USE.check(address, "ipv4");

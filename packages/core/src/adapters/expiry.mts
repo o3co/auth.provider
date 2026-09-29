@@ -15,20 +15,18 @@
  */
 
 /**
- * The expiries and lifetimes a store may be handed — one rule, for every
+ * The expiries and lifetimes a store may be handed: one rule for every
  * adapter, in-process or shared.
  *
- * An expiry is an instant in epoch milliseconds, and a store keeps something
- * until it. So it has to be a finite number (NaN is never `<= now`, so it
- * slipped past every "already expired" check and was kept for ever) inside
- * ECMAScript's Date range, ±8.64e15 ms: past that a number is no instant a
- * `Date` can hold, and no deadline Redis can take — `1e21` is sent as `1e+21`,
- * and a whole but enormous value overflows the server's expiry. A script that
- * writes its record before it sets the deadline then leaves the record with
- * no TTL at all, which is the failure this rule exists to make impossible.
+ * An expiry is an instant in epoch milliseconds that a store keeps something
+ * until, so it must be finite (NaN is never `<= now` and would be kept
+ * forever) and inside ECMAScript's Date range, ±8.64e15 ms. Past that, Redis
+ * cannot take it either (`1e21` is sent as `1e+21`; an enormous whole value
+ * overflows the server's expiry), and a script that writes its record before
+ * setting the deadline would leave the record with no TTL at all.
  *
  * A lifetime (a TTL, a wait, a code's `expiresIn`) is measured from now, so
- * its end has to be such an instant too.
+ * its end must be such an instant too.
  */
 
 /** The last instant a store keeps anything until: the end of ECMAScript's Date range. */

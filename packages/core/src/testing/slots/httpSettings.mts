@@ -15,16 +15,13 @@
  */
 
 /**
- * The contract suite of the `httpSettings` slot (#728) and its test double.
- * `httpSettingsContract(input)` holds the settings to what the configuration
- * schema holds `http.trustProxy` and the CORS origins to, through the same
- * rules: a `trustProxy` of the shapes Express's `trust proxy` reads as meant
- * — a boolean, a whole hop count up to `MAX_TRUST_PROXY_HOPS`, or a
- * non-empty list whose every entry `checkTrustedProxyEntry` accepts — and
- * allowed origins `checkSerializedOrigin` accepts; the whole frozen.
- * `createTestHttpSettings` trusts no hop and lets no origin read unless told
- * otherwise; it checks nothing. Published on
- * `@o3co/auth-provider-core/testing`.
+ * The contract suite of the `httpSettings` slot and its test double.
+ * `httpSettingsContract(input)` holds the settings to the configuration
+ * schema's rules: a `trustProxy` Express reads as meant (a boolean, a hop
+ * count up to `MAX_TRUST_PROXY_HOPS`, or a non-empty list of entries
+ * `checkTrustedProxyEntry` accepts), CORS origins `checkSerializedOrigin`
+ * accepts, the whole frozen. `createTestHttpSettings` trusts no hop and lets
+ * no origin read unless told otherwise; it checks nothing.
  */
 
 import assert from "node:assert/strict";

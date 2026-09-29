@@ -19,22 +19,14 @@ import { type CryptoKey, exportJWK, generateKeyPair, type JWK, SignJWT } from "j
 import { readSpaceDelimitedParameter } from "../federations/scope.mjs";
 
 /**
- * A fake OpenID Provider behind a `fetch` implementation (#542).
- *
- * The provider under test is handed `idp.fetch` through its `fetch` option,
- * which openid-client uses for every request it makes — discovery, JWKS,
- * token, userinfo — so nothing here touches the network and every request is
- * recorded for the tests to inspect. The IdP signs real RS256 id_tokens under
- * a key it publishes at its JWKS URI; the knobs below let a test make it
- * misbehave in exactly one way at a time.
- *
- * One harness for the OpenID Connect adapters — Google, Apple and the generic
- * OIDC one — so they are held to one fake rather than to copies that drift.
- * (GitHub is not an OpenID Provider; its tests run on its own fake GitHub.)
- * Endpoints may be named explicitly — Google's and Apple's are not paths
- * under the issuer, and those providers build their metadata locally — or
- * left to default to paths under the issuer, with `discovery` serving the
- * document a discovering provider (federation-oidc) reads at boot.
+ * A fake OpenID Provider behind a `fetch` implementation: one harness for the
+ * OpenID Connect adapters (Google, Apple, generic OIDC). The provider under
+ * test is handed `idp.fetch`, which openid-client uses for every request, so
+ * nothing touches the network and every request is recorded. The IdP signs
+ * real RS256 id_tokens under a key it publishes at its JWKS URI; the knobs
+ * below make it misbehave one way at a time. Endpoints default to paths
+ * under the issuer or are named explicitly (Google's and Apple's are not
+ * under it); `discovery` serves the document a discovering provider reads.
  */
 export interface FakeIdpOptions {
 	readonly issuer: string;

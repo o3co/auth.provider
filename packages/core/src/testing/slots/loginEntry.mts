@@ -15,17 +15,14 @@
  */
 
 /**
- * The contract suite of the `loginEntry` slot (#728) and its test double.
- * `loginEntryContract(input)` builds an entry for each of three login pages
- * — a path, a path with a query of its own, an absolute URL — and holds
- * `urlFor` to the protocol `/authorize` and the federation-grants connect
- * flow send a browser by today: `redirect_to` added once to the page's own
- * query, `&`-joined when the page has one, the target encoded whole so that
- * its query and fragment never read as the page's; for a page with a
- * fragment, `redirect_to` joins the query before it and the fragment is
- * kept; and a page whose own query already carries `redirect_to` is refused
- * when the entry is built. `createTestLoginEntry` keeps it for the page it is
- * given, `/login` by default. Published on `@o3co/auth-provider-core/testing`.
+ * The contract suite of the `loginEntry` slot and its test double.
+ * `loginEntryContract(input)` holds `urlFor` to the protocol `/authorize`
+ * and the federation-grants connect flow send a browser by: `redirect_to`
+ * added once to the page's own query, before any fragment (which is kept),
+ * the target encoded whole so its query and fragment never read as the
+ * page's; a page whose query already carries `redirect_to` is refused when
+ * the entry is built. `createTestLoginEntry` keeps it, for `/login` by
+ * default. Published on `@o3co/auth-provider-core/testing`.
  */
 
 import assert from "node:assert/strict";

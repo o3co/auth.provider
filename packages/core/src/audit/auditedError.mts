@@ -17,27 +17,23 @@
 /**
  * What an audit event may carry of an error.
  *
- * An audit sink is a record other systems read — a SIEM, a dashboard, a
- * compliance archive — and a deployment chooses it. A store's or an IdP's
- * error message is peer-written text: the arguments a Redis reply quotes
- * (a token among them), the input a JSON parser choked on, an upstream's own
- * description. `loggableError` decides what a log line may keep of that; an
- * audit event keeps less, because it is kept longer and read by more.
+ * An audit sink is a record other systems read (a SIEM, a dashboard, a
+ * compliance archive). A store's or an IdP's error message is peer-written
+ * text: a Redis reply may quote a token, a JSON parser the input it choked on.
+ * An audit event keeps less of it than `loggableError` lets a log line keep,
+ * because it is kept longer and read by more.
  */
 
 import { auditErrorText } from "../errors/envelope.mjs";
 import { type LoggableError, loggableError } from "../logging/loggableError.mjs";
 
 /**
- * An error as an audit event's `details.cause` carries it: the name and the
- * code `loggableError` reads, each sanitised and capped as
- * {@link auditErrorText} does, one level of its cause the same way, and never
- * a message.
- *
- * Every field keeps one type in every event — a numeric code is written as a
- * string — because a sink that fixes a field's type the first time it sees it
- * (Elasticsearch dynamic mapping, a BigQuery schema, a Datadog facet) drops
- * the events that disagree.
+ * An error as an audit event's `details.cause` carries it: the name and code
+ * `loggableError` reads, sanitised and capped as {@link auditErrorText} does,
+ * one level of cause the same way, and never a message. Every field keeps one
+ * type in every event (a numeric code is written as a string): a sink that
+ * fixes a field's type on first sight (Elasticsearch dynamic mapping, a
+ * BigQuery schema, a Datadog facet) drops the events that disagree.
  */
 export interface AuditedError {
 	/** The error's `name`; `"NonError"` for a thrown value that is not an Error. */

@@ -26,58 +26,45 @@ import { isUsableRateLimitSpec, requireUsableConfiguredRateLimitSpec } from "./u
 export const DEVICE_VERIFICATION_RATE_LIMIT_PREFIX = "device_verification";
 
 /**
- * Is `value` a budget the verification endpoint can be limited by — a
- * positive whole `limit` and `windowSeconds`, the window ending within the
- * Date range?
+ * Is `value` a budget the verification endpoint can be limited by: a positive
+ * whole `limit` and `windowSeconds`, the window ending within the Date range?
  *
  * It is `isUsableRateLimitSpec` itself, the predicate every limiter adapter
- * judges a spec by, under the name #448 gave it. The seed below and
- * `deviceGrantModule` both refuse anything else, with the one message
- * `requireUsableConfiguredRateLimitSpec` gives; with two definitions they
- * could answer differently for the same input, and the gap between them is a
- * deployment whose boot refusal reasons from five attempts while the limiter
- * applies sixty. A second definition here was that gap for a window past the
- * Date range: the module mounted, and the limiter refused the seeded spec
- * under its own name rather than this key's.
- * `docs/design-vocabulary.md` maps the concept, and the drift guard keeps a
- * second definition from appearing.
+ * judges a spec by. The seed below and `deviceGrantModule` both refuse
+ * anything else with the message `requireUsableConfiguredRateLimitSpec`
+ * gives. A second definition could answer differently for the same input,
+ * leaving a boot refusal that reasons from five attempts while the limiter
+ * applies sixty; `docs/design-vocabulary.md` maps the concept and the drift
+ * guard keeps a second definition from appearing.
  *
- * `0` is what an empty environment variable coerces to; a zero-attempt
- * budget locks every user out and a zero window is not a window. Both are
- * refused for the same reason the device-grant schema refuses them.
+ * `0` is what an empty environment variable coerces to: a zero-attempt budget
+ * locks every user out, and a zero window is not a window.
  */
 export const isDeviceVerificationRateLimitSpec: (value: unknown) => value is RateLimitSpec =
 	isUsableRateLimitSpec;
 
 /**
  * Seed a rate-limiter adapter's `limits` with the device-verification spec
- * drawn from `config.oauth.deviceAuthorization.rateLimit`.
+ * from `config.oauth.deviceAuthorization.rateLimit`.
  *
- * RFC 8628 §5.1 sizes the user code's entropy *against* a rate limit — its
- * worked example reaches 2^-32 only where "the rate-limiting interval and
- * validity period would need to only allow 5 attempts" — and the device-grant
- * module refuses to boot without a limiter on exactly that argument. But the
- * adapters resolve a spec by key prefix from their own `limits` map, and
- * nothing seeded `device_verification`, so the key fell through to the
- * adapter's `defaultLimit` of 60/60s: twelve times the budget the boot
- * refusal reasons from, silently, on the one endpoint whose whole job is
- * resisting code guessing. The package README meanwhile documented a key that
- * nothing read.
+ * RFC 8628 §5.1 sizes the user code's entropy against a rate limit (2^-32
+ * only where the interval "would need to only allow 5 attempts"), and the
+ * device-grant module refuses to boot without a limiter on that argument.
+ * Adapters resolve a spec by key prefix from their own `limits`, so an
+ * unseeded `device_verification` falls to the adapter's `defaultLimit`
+ * (60/60s), twelve times the budget the boot refusal reasons from.
  *
- * Same shape as `resolveLoginLimitSpec` (#270): one config key that is the
- * source of truth, seeded into each adapter unless the operator declared the
- * prefix explicitly — an explicit `limits.device_verification` is a statement
- * about this adapter and wins.
+ * Same shape as `resolveLoginLimitSpec`: one config key is the source of
+ * truth, seeded into each adapter unless the operator declared the prefix
+ * explicitly; an explicit `limits.device_verification` wins.
  *
- * A key that is not given (the section absent, the device-grant package not
- * loaded) seeds nothing. A key that is given is read as core's schema coerces
- * it (a numeric string is its number) and judged by the one predicate, even
- * though the schema validates it: a hand-built config never passed that
- * schema, and it is still a configuration someone wrote. One the predicate
- * refuses (`0`, `"five"`, a blank string, a window past the Date range) is a
- * `RangeError` naming `oauth.deviceAuthorization.rateLimit`, whether or not an
- * explicit entry would have won; it used to be skipped, and the route ran on
- * the adapter's default instead.
+ * A key not given (section absent, device-grant package not loaded) seeds
+ * nothing. A given key is read as core's schema coerces it and judged by the
+ * one predicate even though the schema validates it, because a hand-built
+ * config never passed that schema. One the predicate refuses (`0`, `"five"`,
+ * a blank string, a window past the Date range) is a `RangeError` naming
+ * `oauth.deviceAuthorization.rateLimit`, whether or not an explicit entry
+ * would have won.
  *
  * @param limits  The adapter's own configured limits.
  * @param config  The full application config (only

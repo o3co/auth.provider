@@ -16,23 +16,16 @@
 
 /**
  * The tail of a login as a contract, and the `loginCompletion` slot it is
- * reached through (#728; the session-admission ADR's D5).
+ * reached through. Types only.
  *
- * Establishing a session is the session package's: the `UserSession`
- * record, its subject-index entry, the express session's regeneration, its
- * signed-in state and its save, and the rollback at each point one of them
- * fails. A requirement's completion — the MFA package's, after
- * `resumePrimary` — finishes a login the same way, and a package imports
- * only core, so it requires this slot instead of importing
- * `establishSession` and `answerInterruption`. The contract is those two
- * functions with what the provider holds taken out of their arguments: the
- * session stores, the session's lifetime and the CSRF mechanism are the
- * provider's, and a caller hands only the request, the response where one
- * is answered, and a reporter that logs in its own vocabulary.
- *
- * The contract suite and a recording double are published on
- * `@o3co/auth-provider-core/testing` (`loginCompletionContract`,
- * `createRecordingLoginCompletion`). Types only.
+ * Establishing a session (record, subject index, regeneration, sign-in,
+ * save, rollback) is the session package's. A requirement's completion
+ * finishes a login the same way, but a package imports only core, so it
+ * requires this slot. The session stores, the session's lifetime and the
+ * CSRF mechanism stay the provider's: a caller hands only the request, the
+ * response where one is answered, and a reporter in its own vocabulary.
+ * The contract suite and a recording double are on
+ * `@o3co/auth-provider-core/testing`.
  */
 
 import type { Request, Response } from "express";
@@ -137,10 +130,10 @@ export interface LoginCompletion {
 	 * Answer the login a requirement interrupted: regenerate the express
 	 * session and leave it unauthenticated, open the requirement's ceremony
 	 * on the new id, save, and answer the requirement's `403` with a fresh
-	 * token from the deployment's `csrfGuard` (the MFA ADR's D27: the page
-	 * goes on posting on the regenerated session) — or `503`, with no token,
-	 * at whichever of those failed, the cookie session dropped. Sends the
-	 * response either way and answers what it sent.
+	 * token from the deployment's `csrfGuard` (the page goes on posting on
+	 * the regenerated session), or a `503` with no token at whichever step
+	 * failed, the cookie session dropped. Sends the response either way and
+	 * answers what it sent.
 	 */
 	answerInterruption(
 		admission: InterruptAdmission,
@@ -153,7 +146,7 @@ export interface LoginCompletion {
 // ---------------------------------------------------------------------------
 declare module "@o3co/auth-provider-core" {
 	interface ComponentMap {
-		/** The tail of a login (#728): provided by the session module, required by a requirement's completion. */
+		/** The tail of a login: provided by the session module, required by a requirement's completion. */
 		readonly loginCompletion?: LoginCompletion;
 	}
 }

@@ -15,14 +15,12 @@
  */
 
 /**
- * The in-process {@link MfaFactorStore}: development and a single replica.
- * Its records fork per replica and are gone at the next restart, after which
- * every subject reads as one with nothing enrolled — the loss the enrollment
- * witness (the MFA ADR's D12) is there to catch.
+ * The in-process {@link MfaFactorStore}, for development and a single replica.
+ * Records fork per replica and vanish on restart, after which every subject
+ * reads as having nothing enrolled; the enrollment witness catches that loss.
  *
- * Every operation is one synchronous step on a `Map`, so each is atomic. What
- * it stores and what it hands out are copies: a caller changing a returned
- * record, or one it wrote, changes nothing kept here.
+ * Each operation is one synchronous `Map` step, so atomic. Records are copied
+ * in and out: changing a returned or written record changes nothing kept here.
  */
 
 import type { MfaFactorRecord, MfaFactorRecordUpdate, MfaFactorStore } from "./factorStore.mjs";

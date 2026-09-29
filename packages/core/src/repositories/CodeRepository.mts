@@ -18,19 +18,17 @@ import type { Code } from "./types.mjs";
 
 /**
  * What `/authorize` hands {@link CodeRepository.createCode}: the record's own
- * fields but the code, which the repository mints (#626).
+ * fields but the code, which the repository mints.
  *
- * Tied to {@link Code} rather than declared again, so a field added to the
- * record is one the writer has to name. Each is a required key for the same
- * reason the record's own fields are: a writer that forgot `nonce` or `acr`
- * would issue a code whose id_token lacks it. `expiresIn` alone may be left out: absent,
- * the repository's configured default applies.
+ * Derived from {@link Code} so a field added to the record is one the writer
+ * has to name; every key is required so a forgotten `nonce` or `acr` cannot
+ * issue a code whose id_token lacks it. Only `expiresIn` may be omitted, for
+ * the repository's configured default (whole seconds).
  *
- * `expiresIn` is in seconds and must be a positive finite number whose end is
- * within the Date range (`isStorableLifetime`) — fractional is fine, and a
- * store that keeps whole milliseconds rounds it up. Anything else is a
- * `RangeError` from `createCode`, and no code is stored. A repository's
- * configured default is whole seconds.
+ * `expiresIn` is in seconds, a positive finite number whose end is within the
+ * Date range (`isStorableLifetime`); fractions are fine, and a store keeping
+ * whole milliseconds rounds up. Anything else is a `RangeError` from
+ * `createCode`, and no code is stored.
  */
 export type CreateCodeInput = Omit<Code, "code" | "expiresIn"> & {
 	readonly expiresIn?: number | undefined;
@@ -39,24 +37,14 @@ export type CreateCodeInput = Omit<Code, "code" | "expiresIn"> & {
 export interface CodeRepository {
 	/**
 	 * Issue an authorization code and persist all associated data atomically.
-	 * After `consumeByCode`, the code is single-use; `client_id` and
-	 * `redirect_uri` embedded in the record replace the session-based identity
-	 * binding removed in v0.5.1 (D-1 spec).
+	 * `consumeByCode` makes the code single-use; the `client_id` and
+	 * `redirect_uri` in the record bind it to its client.
 	 */
 	createCode(params: CreateCodeInput): Promise<Code>;
 	/**
-	 * Retrieve a code record by the authorization code string. Returns
-	 * `null` when no record matches — the method is fail-soft on absence,
-	 * matching the `findBy<Field>` convention used by
-	 * `ClientRepository.findById`.
-	 *
-	 * Naming note (AS-10): renamed from `getByCode` to `findByCode` at 1.0
-	 * GA to align with the repository-method convention introduced in
-	 * v0.5.2: `findBy<Field>` for optional lookups (`null` on absence),
-	 * `get(<id>)` for single-object stores, and operation-specific names
-	 * like `consumeByCode` (atomic single-use) for non-lookup operations.
-	 * The v0.5.x `getByCode` name was deprecated via the JSDoc-only
-	 * documentation in v0.5.2 (AS-10).
+	 * Retrieve a code record by the authorization code string, or `null` when
+	 * none matches (the `findBy<Field>` convention of
+	 * `ClientRepository.findById`).
 	 */
 	findByCode(code: string): Promise<Code | null>;
 	/**
@@ -69,15 +57,11 @@ export interface CodeRepository {
 }
 
 // ---------------------------------------------------------------------------
-// ComponentMap slot declaration (per A2-α §6.1)
+// ComponentMap slot declaration
 //
-// `codeRepository` is a core component produced by a composition-root-local
-// module (e.g. `repositoriesModule` in A2-γ §3.8 standalone template). Modules
-// that issue or exchange authorization codes declare `requires: ["codeRepository"]`
-// and receive the instance through the typed DI graph.
-//
-// Per A2-γ §3.2.2: oauthAuthorizationModule requires codeRepository in its
-// manifest to pass it into createAuthorizationGrant.
+// `codeRepository` is produced by a composition-root-local module (e.g. the
+// standalone template's `repositoriesModule`). Modules that issue or exchange
+// authorization codes declare `requires: ["codeRepository"]`.
 // ---------------------------------------------------------------------------
 declare module "@o3co/auth-provider-core" {
 	interface ComponentMap {

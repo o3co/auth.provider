@@ -28,17 +28,14 @@ import { loadYamlMap } from "./loadYamlMap.mjs";
 import type { UserRepository } from "./UserRepository.mjs";
 
 /**
- * Construct the three default repository factories with built-in yaml/static/memory
- * adapters pre-registered. Consumers register additional adapters via:
- *   - `@o3co/auth-provider-foundation` `registerBuiltinAdapters` — http user repo
- *   - `@o3co/auth-provider-redis` builders (e.g. `redisCodeRepositoryBuilder`)
+ * Construct the three default repository factories with the built-in
+ * yaml/static/memory adapters registered. Other packages add their own
+ * (`@o3co/auth-provider-foundation` `registerBuiltinAdapters`, the
+ * `@o3co/auth-provider-redis` builders).
  *
- * @param ctx — optional `BuilderContext`. When supplied (typically from a
- *   module factory that received `deps.lifecycleRegistrar`), built-in
- *   builders that create disposable sub-resources (e.g. the memory
- *   `CodeRepository`'s GC interval) register their cleanup via
- *   `ctx.lifecycle?.register(...)` so `AppHandle.dispose()` drains them.
- *   Direct callers (unit tests, ad-hoc scripts) may omit `ctx`.
+ * @param ctx — optional `BuilderContext`. When supplied, builders that own
+ *   disposable resources (e.g. the memory `CodeRepository`'s GC interval)
+ *   register their cleanup so `AppHandle.dispose()` drains them.
  */
 export const createRepositoryFactories = (
 	ctx?: BuilderContext,
@@ -80,8 +77,8 @@ export const createRepositoryFactories = (
 			throw new RangeError('"defaultExpiresIn" must be a positive whole number of seconds');
 		}
 		const repo = new InMemoryCodeRepository({ defaultExpiresIn });
-		// D-5 / IH-11: register the periodic-GC interval for disposal so it
-		// doesn't keep the event loop alive past `AppHandle.dispose()`.
+		// Register the periodic-GC interval for disposal so it doesn't keep the
+		// event loop alive past `AppHandle.dispose()`.
 		builderCtx.lifecycle?.register(async () => {
 			repo.dispose();
 		});

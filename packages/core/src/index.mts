@@ -14,8 +14,8 @@
  * limitations under the License.
  */
 
-// Access-token extraction from the Authorization header (folded down from
-// the oauth package in #324 so `protectedResourceBindingMw` shares it).
+// Access-token extraction from the Authorization header (in core so
+// `protectedResourceBindingMw` shares it).
 export {
 	type AccessTokenAuthorization,
 	type AccessTokenScheme,
@@ -36,10 +36,10 @@ export {
 	isStorableLifetime,
 	MAX_STORABLE_EXPIRY_MS,
 } from "./adapters/expiry.mjs";
-// App factory — v0.5.0 boot planner. Re-exports from ./boot/index.mjs through
-// ./app.mjs for backwards-compatible import-path stability.
+// App factory (the boot planner), re-exported through ./app.mjs to keep its
+// import path stable.
 export { createApp } from "./app.mjs";
-// #525: the trust registry behind the jwt-bearer grant — which issuers are
+// The trust registry behind the jwt-bearer grant — which issuers are
 // accepted, on what keys, on what terms — and the verifier over it. The
 // one-key `createJwtAssertionVerifier` is a one-entry registry.
 export {
@@ -82,7 +82,7 @@ export {
 	type RemoteKeySetCacheOptions,
 	type RemoteKeySetTuning,
 } from "./assertions/remoteKeySet.mjs";
-// #301: possession proof for the RFC 7523 jwt-bearer grant. The port is here;
+// Possession proof for the RFC 7523 jwt-bearer grant. The port is here;
 // the JWT implementation is the vendor-neutral one, and a platform attestation
 // (DeviceCheck, Play Integrity) is the operator's own.
 export type {
@@ -105,12 +105,10 @@ export {
 } from "./audit/factory.mjs";
 // Audit
 export type { AuditEvent, AuditEventDetails, AuditSink, AuditSinkFactory } from "./audit/types.mjs";
-// Two audit constants: the declared-absence policy the bundled auditSink
-// readers share (#363 — one constant, so the boot error's advice cannot
-// depend on which module tripped it; the AbsencePolicy vocabulary itself is
-// exported below with the manifest types), and the built-in audit-event
-// inventory (#369 — pinned against the emission sites by a drift-guard test,
-// so sinks and dashboards filter on names that actually occur).
+// The declared-absence policy the bundled auditSink readers share (one
+// constant, so the boot error's advice does not depend on which module tripped
+// it), and the built-in audit-event inventory (pinned against the emission
+// sites by a drift-guard test, so sinks filter on names that actually occur).
 export { AUDIT_SINK_ABSENCE_POLICY, BUILT_IN_AUDIT_EVENT_TYPES } from "./audit/types.mjs";
 export type {
 	AppHandle,
@@ -159,12 +157,10 @@ export type {
 	TokenSettingsLifetimeExceedsConfigurationDetails,
 	UnknownContributionKindDetails,
 } from "./boot/index.mjs";
-// Boot planner — BootError catalogue. `createApp` is exported above (via app.mjs).
-// #271: replica-safety guard, exported so a custom composition root can run
-// the same check and so the module set is greppable from a deployment's tests.
-// #455: `replicaUnsafeReason` reads a module's own `replicaSafety`
-// declaration, so a deployment asserts on its manifests rather than on the
-// (core-only) name list.
+// Boot planner — BootError catalogue, and the replica-safety guard, exported so
+// a custom composition root can run the same check. `replicaUnsafeReason` reads
+// a module's own `replicaSafety` declaration, so a deployment asserts on its
+// manifests rather than on the core-only name list.
 export {
 	BootError,
 	type CheckReplicaSafetyInput,
@@ -174,14 +170,14 @@ export {
 	replicaUnsafeReason,
 } from "./boot/index.mjs";
 // The login page's URL rule: the one home of what /authorize's fallback and
-// the session package's loginEntry do to a login page (#728, #750).
+// the session package's loginEntry do to a login page.
 export {
 	LOGIN_RETURN_PARAMETER,
 	loginPageCarriesReturn,
 	loginPageUrlFor,
 } from "./browser-session/login-page.mjs";
-// #728: what the session package owns of the browser session that other
-// packages use — the login page, the one CSRF policy (#710), the session
+// What the session package owns of the browser session that other
+// packages use — the login page, the one CSRF policy, the session
 // cookie's attributes — each through a slot rather than the session's
 // configuration.
 export type {
@@ -202,13 +198,13 @@ export {
 	AppConfigSchema,
 	type CoreConfig,
 	CoreConfigSchema,
-	// #593: the four spellings an environment variable may say a boolean in,
+	// The four spellings an environment variable may say a boolean in,
 	// for the packages outside core that read a section this file declares.
 	coerceBooleanFromEnv,
 	composeConfigSchema,
 	fullSectionsSchema,
 	isLifetimeSeconds,
-	// #728: the hop ceiling `http.trustProxy` is held to, which the
+	// The hop ceiling `http.trustProxy` is held to, which the
 	// `httpSettings` contract suite holds the slot's value to as well.
 	MAX_TRUST_PROXY_HOPS,
 	type RefreshTokenLifetimeSource,
@@ -216,16 +212,15 @@ export {
 	resolveAccessTokenLifetime,
 	resolveRefreshTokenLifetime,
 } from "./config/application.schema.mjs";
-// #728, transitional: what a composition root reads before it knows its
-// modules — the switches that choose them — until those switches move into
-// the composition root's own section (#728 B5). `createApp` takes the
-// resolved configuration itself, and parses it once.
+// Transitional: the switches that choose a composition root's modules, read
+// before it knows them. `createApp` takes the resolved configuration itself,
+// and parses it once.
 export { readTransitionalConfig } from "./config/composed.mjs";
 export { MAX_DURATION_MS, MAX_DURATION_SECONDS } from "./config/durations.mjs";
-// #728: the reference.conf files a composition layers beneath its own
+// The reference.conf files a composition layers beneath its own
 // configuration — core's, and each loaded module's package's (`section.reference`).
 export { coreReference, moduleReferences } from "./config/references.mjs";
-// #728: how the deployment runs — what its HTTP behaviour depends on of the
+// How the deployment runs — what its HTTP behaviour depends on of the
 // `http` module's settings, and how many replicas the operator says run —
 // each through a slot rather than the configuration.
 export type { DeploymentMode, HttpSettings } from "./deployment/types.mjs";
@@ -234,9 +229,8 @@ export type { DeploymentMode, HttpSettings } from "./deployment/types.mjs";
 // `/.well-known/openid-configuration` document via `buildDiscoveryDocument`.
 export { buildDiscoveryDocument, DiscoveryDocumentError } from "./discovery/buildDocument.mjs";
 export type { OidcDiscoveryContribution } from "./discovery/types.mjs";
-// AS-1/AS-2 RFC 6749 §5.2 shared error envelope. Consumer code that builds
-// custom routes outside the bundled session/oauth surfaces benefits from
-// the same helper so the entire auth product surface emits a single shape.
+// RFC 6749 §5.2 shared error envelope, for custom routes too, so the whole
+// product surface emits a single shape.
 export {
 	auditErrorList,
 	auditErrorText,
@@ -250,16 +244,16 @@ export {
 	registerBuiltinFederationTokenStores,
 } from "./federation-tokens/factory.mjs";
 export { memoryFederationTokenStoreModule } from "./federation-tokens/module.mjs";
-// SF-13's classifier, moved from the session-bound token route so that the
-// federation grant retrieval (#593, D12) shares it.
+// The federation refresh-error classifier, shared by the session-bound token
+// route and the federation grant retrieval.
 export {
 	classifyFederationRefreshError,
 	type FederationRefreshErrorClassification,
 	type FederationRefreshErrorReason,
 	isKnownFederationRefreshErrorCode,
 } from "./federation-tokens/refresh-error.mjs";
-// FederationTokenStore — TODO-F-1. Backing client interface
-// (FederationTokenStoreClient) lives in @o3co/auth-provider-redis (S3).
+// FederationTokenStore. Backing client interface
+// (FederationTokenStoreClient) lives in @o3co/auth-provider-redis.
 export type {
 	AcquireLockOptions,
 	FederationTokenStore,
@@ -288,8 +282,7 @@ export {
 	FEDERATION_RESPONSE_MODES,
 	resolveFederationResponseMode,
 } from "./federations/response-mode.mjs";
-// RFC 6749 §3.3's scope grammar, in one place. Three packages had their own
-// copy before #647 and all three were wrong about whitespace in the same way.
+// RFC 6749 §3.3's scope grammar, in one place.
 export {
 	canonicalScope,
 	isScopeToken,
@@ -303,13 +296,13 @@ export type {
 } from "./federations/token-snapshot.mjs";
 export { federationTokenSnapshot } from "./federations/token-snapshot.mjs";
 // RFC 6749's `token_type`, in one place: what an upstream token may be handed
-// on as, and the case-insensitive comparison (§5.1) that decides it (#645).
+// on as, and the case-insensitive comparison (§5.1) that decides it.
 export {
 	BEARER_TOKEN_TYPE,
 	canonicalTokenType,
 	isBearerTokenType,
 } from "./federations/token-type.mjs";
-// The federation adapter port (#626 P1). An adapter implements
+// The federation adapter port. An adapter implements
 // `FederationProvider` and whichever capability interfaces it can honour; the
 // session router drives them, `oauth` reads them off `federationProviders`,
 // and `federation-grants` delegates through them. `FederationProvider` itself
@@ -342,7 +335,7 @@ export {
 	supportsLogout,
 	supportsRefresh,
 } from "./federations/types.mjs";
-// The authentication claims a token may carry (#481)
+// The authentication claims a token may carry
 export {
 	composeAmr,
 	EMAIL_OTP_AMR,
@@ -358,7 +351,7 @@ export {
 } from "./grants/authenticationClaims.mjs";
 export { filterClaimsByScope } from "./grants/claimFilter.mjs";
 export type { Confirmation } from "./grants/confirmation.mjs";
-// The ONE cnf/token-binding comparison matrix (#324) — consumed by the
+// The ONE cnf/token-binding comparison matrix — consumed by the
 // refresh and token-exchange grants, `protectedResourceBindingMw`, and the
 // introspection handler; each caller keeps only its own error mapping.
 export {
@@ -371,7 +364,7 @@ export {
 	tokenTypeForConfirmation,
 } from "./grants/confirmationMatch.mjs";
 export { isEmailVerified } from "./grants/emailVerifiedGate.mjs";
-// Grant-policy evaluation and its bounds (#520): the one answer every minting
+// Grant-policy evaluation and its bounds: the one answer every minting
 // path gives a policy that throws, denies, or exceeds its ceiling.
 export {
 	boundPolicyAudience,
@@ -395,7 +388,7 @@ export {
 	type GenerateLogoutTokenOptions,
 	generateLogoutToken,
 } from "./grants/logoutToken.mjs";
-// RFC 8707 resource indicators (#172, #173): the one reading of `resource`,
+// RFC 8707 resource indicators: the one reading of `resource`,
 // the audience derived from it, and the `invalid_target` check — shared by the
 // oauth grants, `/authorize` and the WebAuthn grant. `readTargetParameter` is
 // the strict reading underneath, which also reads RFC 8693's `audience`: the
@@ -410,13 +403,8 @@ export type { SenderConstraint } from "./grants/senderConstraint.mjs";
 // The two ways an access token names its session: `sid` (liveness and the
 // session's capabilities) and `liveness_sid` (a derived token's liveness link).
 export { LIVENESS_SID_CLAIM, livenessSidOf } from "./grants/sessionClaims.mjs";
-// Grant types and interfaces.
-//
-// `GrantRegistry` and `GrantRegistryError` (deprecated public re-exports
-// in v0.5.1 per AS-8) were removed per A2-γ §3.3. The classes
-// remain as internal implementation detail of the boot planner; consumer
-// code wires grants via module-based `contributes.grants` declarations
-// instead.
+// Grant types and interfaces. Consumers wire grants through a module's
+// `contributes.grants`; `GrantRegistry` is internal to the boot planner.
 // Token formatting utility (used by oauth package)
 export {
 	formatObject,
@@ -462,7 +450,7 @@ export {
 	MAX_NUMERIC_DATE_SECONDS,
 	malformedNumericDateClaim,
 } from "./jwt/numericDate.mjs";
-// JWT verifier (SF-1) — central verifyJwt with alg/iss/aud/typ pinning
+// JWT verifier — central verifyJwt with alg/iss/aud/typ pinning
 export type {
 	JwtRevocationSources,
 	JwtType,
@@ -504,7 +492,7 @@ export {
 // The one rule for a kid a keystore is built with and a kid header verifyJwt
 // looks up, so a token this server signed always carries a kid it will look up.
 export { isWellFormedKid, MAX_KID_LENGTH } from "./keys/kid.mjs";
-// #303: the KeyStore whose private key never enters this process. Wired by a
+// The KeyStore whose private key never enters this process. Wired by a
 // composition root rather than selected in config — a `RemoteSigner` is a
 // function, and there is no HOCON spelling for one.
 export type {
@@ -516,7 +504,7 @@ export {
 	createRemoteSigningKeyStore,
 	derToJoseEcdsaSignature,
 } from "./keys/remoteSigning.mjs";
-// Shared-secret entropy floor (#282). Exported so a composition root that
+// Shared-secret entropy floor. Exported so a composition root that
 // builds its own KeyStore — or accepts any other HMAC secret from an
 // operator — can apply the same check the built-in `local` builder does.
 export type { SecretEntropyRequirement } from "./keys/secretEntropy.mjs";
@@ -542,7 +530,7 @@ export {
 	lineSafeText,
 	loggableError,
 } from "./logging/loggableError.mjs";
-// Mail (the MFA ADR's D5): the port MFA codes and notices leave through
+// Mail: the port MFA codes and notices leave through
 export type { MailMessage, MailSender } from "./mail/types.mjs";
 // MFA — the second-factor contract (the manifest group below exports its
 // MfaFactor name)
@@ -610,7 +598,7 @@ export {
 	newMfaTransactionRecord,
 } from "./mfa/transactionStore.mjs";
 export { checkMfaVersionAdvances } from "./mfa/version.mjs";
-// Middleware — CORS for the browser-facing OAuth surface (#500)
+// Middleware — CORS for the browser-facing OAuth surface
 export {
 	browserFacingCorsRoutes,
 	type CorsMiddlewareOptions,
@@ -624,7 +612,7 @@ export {
 } from "./middleware/protectedResourceBinding.mjs";
 // Middleware — the answer to an error a route let through; `createApp` ends its router with it
 export { terminalErrorHandler } from "./middleware/terminalError.mjs";
-// Middleware — tokenBindingMw factory + plugin surface (Wave 2 Token-binding Cluster §4.7)
+// Middleware — tokenBindingMw factory + plugin surface
 export {
 	type DispatchPolicy,
 	isTokenBindingMw,
@@ -636,10 +624,9 @@ export {
 	type TokenBindingSettings,
 	tokenBindingMw,
 } from "./middleware/tokenBinding.mjs";
-// Module system — v0.5.0 manifest types. The v0.4.x `LegacyModule` /
-// `ModuleContext` interfaces were deleted in Phase 9 (A2-γ caller migration);
-// authoring code uses `Module` and `defineModule()` from here (the same
-// vocabulary is also the `@o3co/auth-provider-core/modules/manifest` subpath).
+// Module system — manifest types. Authoring code uses `Module` and
+// `defineModule()` from here (also the `@o3co/auth-provider-core/modules/manifest`
+// subpath).
 export type {
 	AbsencePolicy,
 	AuditHook,
@@ -652,41 +639,38 @@ export type {
 	ExchangeTokenValidator,
 	ExchangeTokenValidatorFactory,
 	FederationFactory,
-	// #728: one configured federation as its type's factory receives it, and
+	// One configured federation as its type's factory receives it, and
 	// what a federation package declares it handles, keyed by type.
 	FederationInstance,
 	FederationProvider,
 	FederationTypeContribution,
-	// GrantFactory, GrantHandler: excluded — names collide with legacy
+	// GrantFactory, GrantHandler: excluded — names collide with
 	// ./grants/types.mjs exports at this boundary. Import from
 	// @o3co/auth-provider-core/modules/manifest directly.
 	GrantHandlerResolver,
 	GrantMiddlewareFactory,
-	// AS-7 collision resolution (v0.5.1): the manifest's contributes-map
-	// placeholder previously named `GrantPolicyHook` was renamed to
-	// `GrantPolicyHookContribution`. The canonical `GrantPolicyHook`
-	// interface lives in `./policy/types.mjs` and is re-exported from the
-	// policy block below.
+	// The contributes-map entry type; the `GrantPolicyHook` interface itself is
+	// re-exported from ./policy/types.mjs below.
 	GrantPolicyHookContribution,
-	// GrantPolicyHookFactory: excluded — name collides with legacy
+	// GrantPolicyHookFactory: excluded — name collides with the
 	// ./policy/types.mjs export at this boundary. Import from
 	// @o3co/auth-provider-core/modules/manifest directly.
 	MfaFactor,
 	MfaFactorFactory,
 	MfaFactorResolver,
 	Module,
-	// #728: a module's own configuration section, and what it adds to deps.
+	// A module's own configuration section, and what it adds to deps.
 	ModuleSection,
 	ModuleSpec,
 	OidcDiscoveryContributionFactory,
 	PathResolver,
 	Provider,
 	ProviderDeps,
-	// #728: a module's budget for a rate-limit prefix it owns, and the view
+	// A module's budget for a rate-limit prefix it owns, and the view
 	// core composes the budgets into.
 	RateLimitBudgetFactory,
 	RateLimitBudgetResolver,
-	// #455 / #474: the manifest's replica-safety declaration, so a package
+	// The manifest's replica-safety declaration, so a package
 	// building its manifest from config can type the value it attaches.
 	ReplicaSafetyDeclaration,
 	RouteContribution,
@@ -700,19 +684,19 @@ export type {
 	TokenExchangeValidatorResolver,
 } from "./modules/index.mjs";
 export {
-	// #728: the way to author a federationTypes declaration, its entry tied to its schema.
+	// The way to author a federationTypes declaration, its entry tied to its schema.
 	defineFederationType,
 	defineModule,
 	type FederationTypeDeclaration,
 	SYNTHETIC_COMPONENT_KEYS,
 } from "./modules/index.mjs";
-// The single loopback-hostname vocabulary (#364) — the predicate behind every
+// The single loopback-hostname vocabulary — the predicate behind every
 // "http:// is accepted for loopback hosts only" carve-out
 // (`checkSecureEndpoint` in foundation, `checkRedirectShape` in session).
 // Exported so consumers import or re-export it rather than defining a copy;
 // the designVocabulary drift guard fails any second definition.
 export { isLoopbackHostname } from "./net/loopback.mjs";
-// The serialized-origin vocabulary (#500) — what a configured browser origin
+// The serialized-origin vocabulary — what a configured browser origin
 // may be. Enforced on `cors.allowedOrigins` by the config schema at boot and
 // re-applied by `corsMw`, and on every web entry of the WebAuthn package's
 // `origin` / `topOrigin`; exported so a consumer assembling its own policy
@@ -726,11 +710,11 @@ export {
 	normalizeAllowedOrigins,
 	type SerializedOriginRejection,
 } from "./net/origin.mjs";
-// The registered-redirect-URI shape vocabulary (#395) — enforced by
+// The registered-redirect-URI shape vocabulary — enforced by
 // ClientEntrySchema at boot; exported so a custom ClientRepository, which
 // bypasses that schema by design, can hold its registrations to the same
 // rules and refuse in the same words.
-// `matchesRegisteredRedirectUri` (#483) is the runtime half of the same
+// `matchesRegisteredRedirectUri` is the runtime half of the same
 // vocabulary — the /authorize allowlist comparison, exact except for the RFC
 // 8252 §7.3 loopback port. Exported alongside the shape checker so a custom
 // authorization endpoint matches the way this one does.
@@ -740,17 +724,17 @@ export {
 	matchesRegisteredRedirectUri,
 	type RedirectUriRejection,
 } from "./net/redirect-uri.mjs";
-// The single canonical-request-URL vocabulary (#292, #356) — "the URL this
+// The single canonical-request-URL vocabulary — "the URL this
 // request reached" is the configured origin plus `req.originalUrl`, never
 // `req.protocol` + the `Host` header (attacker-influenced under
 // `trust proxy`). DPoP htu comparison and the /authorize login round-trip
 // both consume this; the designVocabulary drift guard fails any second
 // definition.
 export { buildCanonicalRequestUrl } from "./net/request-url.mjs";
-// #529: the RFC 6890 special-use ranges a caller-supplied URL must not
+// The RFC 6890 special-use ranges a caller-supplied URL must not
 // resolve to — the SSRF guard's one list.
 export { isSpecialUseAddress } from "./net/special-use.mjs";
-// The single trusted-proxy address vocabulary (#292) — Express's own
+// The single trusted-proxy address vocabulary — Express's own
 // `trust proxy` forms. `http.trustProxy` validates its entries with
 // `checkTrustedProxyEntry`; `@o3co/auth-provider-mtls` matches
 // `req.socket.remoteAddress` with `createTrustedProxyMatcher`. Exported so a
@@ -782,9 +766,9 @@ export {
 	createRateLimiterFactory,
 	registerBuiltinRateLimiters,
 } from "./ratelimit/factory.mjs";
-// #325: single guard factory behind both the OAuth-endpoint throttles and
-// the /session/login brute-force guard. #457: the guard's check + outage
-// policy on its own, for a route whose budget is not keyed on the IP.
+// The single guard factory behind the OAuth-endpoint throttles and the
+// /session/login brute-force guard, and (`checkWithFailMode`) its check and
+// outage policy alone, for a route whose budget is not keyed on the IP.
 export {
 	checkWithFailMode,
 	createRateLimitGuard,
@@ -809,7 +793,7 @@ export {
 export { memoryRateLimiterModule } from "./ratelimit/module.mjs";
 export { resolveSeededLimitSpecs } from "./ratelimit/seededSpecs.mjs";
 // Rate limiter. Backing client interface (RateLimiterClient) lives in
-// @o3co/auth-provider-redis (S3).
+// @o3co/auth-provider-redis.
 export type {
 	RateLimitContext,
 	RateLimitDecision,
@@ -927,7 +911,7 @@ export {
 	type TokenCarrier,
 	tokenClaim,
 } from "./session-admission/admit.mjs";
-// #728: the tail of a login as a contract — what a requirement's completion
+// The tail of a login as a contract — what a requirement's completion
 // requires through the `loginCompletion` slot instead of importing the
 // session package.
 export type {
@@ -979,18 +963,18 @@ export {
 	type SessionView,
 	type StepUpPage,
 } from "./session-admission/requirement.mjs";
-// The token-exchange validator port (#626 P1). `ExchangeTokenValidator` is
+// The token-exchange validator port. `ExchangeTokenValidator` is
 // exported with the manifest types below, as the contribution value type.
 export type {
 	ExchangeTokenValidationContext,
 	ValidatedToken,
 } from "./token-exchange/validator.mjs";
-// #728: what other modules read of the oauth module's token settings, through
+// What other modules read of the oauth module's token settings, through
 // the `oauthTokenSettings` slot rather than the oauth section.
 export { checkOAuthTokenSettings } from "./token-settings/check.mjs";
 export type { OAuthTokenSettings } from "./token-settings/types.mjs";
-// The MFA ADR's D9: how a session was established and what this provider
-// vouches for, read one way by every consumer of a session.
+// How a session was established and what this provider vouches for, read one
+// way by every consumer of a session.
 export {
 	checkSecondFactorEvent,
 	federatedSessionAuthentication,
@@ -1013,7 +997,7 @@ export {
 export { createInMemorySessionFamilyIndex } from "./user-sessions/memory/sessionFamilyIndex.mjs";
 export { createInMemorySessionFederationIndex } from "./user-sessions/memory/sessionFederationIndex.mjs";
 export { createInMemorySessionRPRegistry } from "./user-sessions/memory/sessionRPRegistry.mjs";
-// #296: subject-keyed session index + per-subject access-token watermark, and
+// Subject-keyed session index + per-subject access-token watermark, and
 // the orchestrator a credential-change flow calls after writing the new secret.
 export { createInMemorySubjectRevocation } from "./user-sessions/memory/subjectRevocation.mjs";
 export { createInMemorySubjectSessionIndex } from "./user-sessions/memory/subjectSessionIndex.mjs";
@@ -1036,12 +1020,11 @@ export {
 	type SubjectRevocationServiceDeps,
 } from "./user-sessions/subjectRevocationService.mjs";
 // ---------------------------------------------------------------------------
-// A4 user-sessions (post v0.5.0 redesign): 4-way decomposition.
-// Per spec §5.1-§5.7, §7.1, §8.1.
+// User sessions
 // ---------------------------------------------------------------------------
 // Backing client interfaces (UserSessionStoreClient, SessionRPRegistryClient
 // (+Multi), SessionSidSortedSetClient (+Multi)) live in
-// @o3co/auth-provider-redis (S3).
+// @o3co/auth-provider-redis.
 export type {
 	CreateUserSessionInput,
 	RegisteredRP,
@@ -1069,7 +1052,7 @@ export {
 } from "./user-sessions/types.mjs";
 
 // ---------------------------------------------------------------------------
-// A1 — Challenge Store + Replay Seen Set + Default Ceremony (Phase 5)
+// Challenge Store + Replay Seen Set + Default Ceremony
 // ---------------------------------------------------------------------------
 
 // Memory adapters (re-exported so consumers can construct without going through modules)
@@ -1126,15 +1109,15 @@ export {
 	DPOP_PROOF_REPLAY_SHARE,
 } from "./replay-seen-set/scopes.mjs";
 export type { ReplaySeenSet } from "./replay-seen-set/types.mjs";
-// Canonical key helper (exported for integrators writing their own adapters
-// to preserve cross-adapter parity per A1 §7.3)
+// Canonical key helper, exported so integrators' own adapters keep
+// cross-adapter parity
 export { canonicalKey as canonicalChallengeKey } from "./single-use/canonical-key.mjs";
 export type { ChallengeStorageErrorReason } from "./single-use/errors.mjs";
 // Errors
 export { ChallengeStorageError } from "./single-use/errors.mjs";
 
 // ===========================================================================
-// A3 — RefreshTokenFamilyStore + RefreshTokenFamilyRotation + RefreshTokenFamilyRevocation
+// RefreshTokenFamilyStore + RefreshTokenFamilyRotation + RefreshTokenFamilyRevocation
 // ===========================================================================
 
 export { createMemoryRefreshTokenFamilyStore } from "./refresh-token-family/adapters/memory.mjs";
@@ -1177,7 +1160,7 @@ export type {
 } from "./refresh-token-family/types.mjs";
 
 // ===========================================================================
-// Wave 1 — AccessTokenDenylist (RFC 7009 §2.1 access-token revocation)
+// AccessTokenDenylist (RFC 7009 §2.1 access-token revocation)
 // ===========================================================================
 
 export {
@@ -1195,10 +1178,10 @@ export {
 } from "./access-token-denylist/memory.mjs";
 export { memoryAccessTokenDenylistModule } from "./access-token-denylist/module.mjs";
 export type { AccessTokenDenylist } from "./access-token-denylist/types.mjs";
-// #375: the declared-absence policy the denylist readers share — #277's boot
-// refusal, expressed through the #363 vocabulary instead of a bespoke stage.
+// The declared-absence policy the denylist readers share: a boot refusal
+// expressed through the AbsencePolicy vocabulary.
 export { ACCESS_TOKEN_DENYLIST_ABSENCE_POLICY } from "./access-token-denylist/types.mjs";
-// #527: where an end-user's consent to a client that is not first-party is
+// Where an end-user's consent to a client that is not first-party is
 // recorded. Optional — without it `/authorize` refuses such clients.
 export {
 	type ConsentStoreFactory,
@@ -1215,7 +1198,7 @@ export {
 	type MemoryPendingConsentStore,
 } from "./consents/memory.mjs";
 export { memoryConsentStoreModule } from "./consents/module.mjs";
-// #552: the record an `/authorize` request is parked in while the consent
+// The record an `/authorize` request is parked in while the consent
 // page asks, consumed by exactly one answer.
 export {
 	type ConsentRecord,
@@ -1225,22 +1208,18 @@ export {
 	type PendingConsentRecord,
 	type PendingConsentStore,
 } from "./consents/types.mjs";
-// #593 (D9): a client's grant registration fields, read as a list or as nothing.
+// A client's grant registration fields, read as a list or as nothing.
 export { federationGrantAllowlist } from "./federation-grants/allowlist.mjs";
-// #593 (D18): what an audit event says about the grant it concerns. Its own
+// What an audit event says about the grant it concerns. Its own
 // module because the retrieval, the revocation library call and the routes all
 // need the same answer and cannot import each other.
 export { federationGrantAuditMetadata } from "./federation-grants/auditMetadata.mjs";
-// #593: federation grants — a consented, bounded grant under which the
-// provider holds an upstream refresh credential for a confidential client.
-// These are the domain rules only: no store, no route, nothing is wired yet.
-// See docs/adr/2026-09-17-federation-grants-offline-delegation.md.
-//
-// Every name says FederationGrant. This barrel already exports GrantContext,
-// GrantResult and GrantPolicy* for OAuth grant types, which these are not.
-// The store port, its memory adapter and the credential the port carries are
-// exported: a Redis adapter implements against them. So are the retrieval and
-// its typed result, which the routes package maps to HTTP and nothing else.
+// Federation grants: a consented, bounded grant under which the provider holds
+// an upstream refresh credential for a confidential client. See ADR
+// 2026-09-17-federation-grants-offline-delegation. Every name says
+// FederationGrant, apart from the OAuth grant types (GrantContext, GrantResult,
+// GrantPolicy*) this barrel also exports. The store port and credential are
+// exported for a Redis adapter; the retrieval result, for the routes package.
 export {
 	coveredByRevocationBoundary,
 	type EffectiveFederationGrantStatusContext,
@@ -1339,11 +1318,11 @@ export {
 	federationGrantAuthorizationRevision,
 	federationGrantIdentityRevision,
 } from "./federation-grants/revision.mjs";
-// #593 slice 5: the wiring a grants deployment must have before a grant may
-// outlive a session (D13). Shared so the routes module and the subject
+// The wiring a grants deployment must have before a grant may outlive a
+// session. Shared so the routes module and the subject
 // revocation service module cannot hold an adapter to different rules.
 export { requireFederationGrantSubjectRevocation } from "./federation-grants/revocationWiring.mjs";
-// #593, D13: what a Store calls instead of an admin route this provider does
+// What a Store calls instead of an admin route this provider does
 // not mount — ending one grant, and listing a subject's for a connected-
 // applications page.
 export {
@@ -1351,7 +1330,7 @@ export {
 	listFederationGrantsForSubject,
 	revokeFederationGrant,
 } from "./federation-grants/revoke.mjs";
-// #593 slice 4: the `federationGrants.*` block an operator writes, turned into
+// The `federationGrants.*` block an operator writes, turned into
 // the limits the retrieval takes. In core because the block is core's.
 export {
 	FEDERATION_GRANT_SETTING_DEFAULTS,
@@ -1394,17 +1373,15 @@ export {
 	type PendingFederationGrant,
 	type RevokedFederationGrant,
 } from "./federation-grants/types.mjs";
-// #593, D13: the two boundaries of a subject revocation, and how long each has
-// to be kept. The skew leaves `jwt/verify.mts` because the grants comparison
-// has to use the same allowance the watermark comparison already does.
+// The two boundaries of a subject revocation, and how long each has to be
+// kept. The skews come from `jwt/verify.mts` so the grants comparison uses the
+// allowance the watermark comparison does.
 export {
 	DEFAULT_CLOCK_SKEW_MS,
 	DEFAULT_SUBJECT_REVOCATION_SKEW_MS,
 } from "./jwt/verify.mjs";
-// SF-3 + MIN-4 (v0.5.1): timing-safe primitives. Exported from the package
-// root because `packages/core/package.json#exports` does not register a
-// `./security/*` subpath — Codex Delta 1 confirmed the subpath approach
-// would fail at runtime under Node's exports gating.
+// Timing-safe primitives, exported from the package root because
+// `package.json#exports` registers no `./security/*` subpath.
 export { constantTimeStringEqual } from "./security/timingSafe.mjs";
 export {
 	resolveSubjectRevocationHorizonMs,
@@ -1435,7 +1412,7 @@ export {
 } from "./sealing/keyRing.mjs";
 
 // ===========================================================================
-// Device Authorization Grant — DeviceCodeStore port + codes (RFC 8628, #298)
+// Device Authorization Grant — DeviceCodeStore port + codes (RFC 8628)
 // ===========================================================================
 
 export {
@@ -1470,7 +1447,7 @@ export {
 } from "./device-authorization/userCode.mjs";
 
 // ===========================================================================
-// Wave 1 — WebAuthnCredential + WebAuthnCredentialStore (spec §2.3.1)
+// WebAuthnCredential + WebAuthnCredentialStore
 // ===========================================================================
 
 export {

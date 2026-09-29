@@ -49,18 +49,6 @@ const httpUrlSchema = z
 	);
 
 /**
- * One entry of a registered-redirect-URI list, held to the shared
- * `net/redirect-uri` grammar and reporting refusals under `field`.
- *
- * Parameterised by the field name so `allowedRedirectUris` and
- * `postLogoutRedirectUris` — the two lists on this record whose entries are
- * URIs a *user agent* is sent to — are one vocabulary rather than two. The
- * refusal wording comes from the checker, so a custom `ClientRepository`
- * opting into `checkRedirectUri` refuses in the same words.
- *
- * @internal
- */
-/**
  * The members a public JWK never carries (RFC 7518 §6.2.2, §6.3.2, §6.4):
  * a registration is the client's *public* keys, and one that smuggles the
  * private half in would expose it through the `PublicClient` projection.
@@ -90,10 +78,9 @@ const publicJwkSchema = z.record(z.string(), z.unknown()).superRefine((jwk, ctx)
 });
 
 /**
- * #484: where a `private_key_jwt` client publishes its keys. `https`, or
- * `http` on a loopback host for local development — the same carve-out
- * every other operator-registered URL in this schema gets. The URI is
- * configuration written by the operator, not a value a request supplies.
+ * Where a `private_key_jwt` client publishes its keys: `https`, or `http` on
+ * a loopback host for local development, like every other operator-registered
+ * URL in this schema. Operator configuration, not request input.
  */
 const jwksUriSchema = z
 	.string()
@@ -113,6 +100,17 @@ const jwksUriSchema = z
 		{ message: "jwksUri must be an https URL (plain http only on a loopback host)" },
 	);
 
+/**
+ * One entry of a registered-redirect-URI list, held to the shared
+ * `net/redirect-uri` grammar and reporting refusals under `field`.
+ *
+ * Shared by `allowedRedirectUris` and `postLogoutRedirectUris`, the two lists
+ * of URIs a user agent is sent to. The refusal wording comes from the
+ * checker, so a custom `ClientRepository` opting into `checkRedirectUri`
+ * refuses in the same words.
+ *
+ * @internal
+ */
 const redirectUriEntrySchema = (field: string) =>
 	z.string().superRefine((uri, ctx) => {
 		const rejection = checkRedirectUri(uri);
@@ -127,20 +125,16 @@ const redirectUriEntrySchema = (field: string) =>
 /**
  * @internal
  *
- * Zod schema for per-client configuration entries consumed by the in-memory and
- * YAML client repositories. NOT part of the public API — consumers implementing
- * a custom `ClientRepository` should define their own input schema suited to
- * their backing store (database row, JWT claims, LDAP attributes, etc.).
- * This schema is exported only to share fixtures with unit tests within the
- * package.
+ * Zod schema for client entries consumed by the in-memory and YAML client
+ * repositories; not public API. A custom `ClientRepository` defines its own
+ * input schema for its backing store. Exported only to share fixtures with
+ * unit tests in this package.
  */
 export const ClientEntrySchema = z
 	.object({
-		// D-6 (v0.5.1): RFC 6749 §2.3 / RFC 7591 §2 client authentication method.
-		// Required — `clientSecret` is now optional and gated by the superRefine
-		// below so confidential clients still surface a startup error when the
-		// secret is missing, and public clients (`"none"`) cannot smuggle a
-		// secret in.
+		// RFC 6749 §2.3 / RFC 7591 §2 client authentication method. The
+		// superRefine below requires `clientSecret` for confidential methods and
+		// refuses it for `"none"`.
 		tokenEndpointAuthMethod: z.enum([
 			"client_secret_basic",
 			"client_secret_post",
@@ -148,107 +142,75 @@ export const ClientEntrySchema = z
 			"none",
 		]),
 		clientSecret: z.string().min(1).optional(),
-		// #484: the key sources for `private_key_jwt`. Exactly one of the two
-		// for that method, neither for any other — the superRefine below.
+		// The key sources for `private_key_jwt`: exactly one of the two for that
+		// method, neither for any other (superRefine below).
 		jwks: z.object({ keys: z.array(publicJwkSchema).min(1) }).optional(),
 		jwksUri: jwksUriSchema.optional(),
-		// #395: held to the registered-redirect-URI shape (net/redirect-uri.mts)
-		// at boot — a `javascript:` target, a fragment, userinfo, or plain http
-		// off loopback used to register cleanly and become a valid redirect.
-		// The logout URL fields below were already URL-validated; the more
-		// dangerous surface now is too. Refusal wording comes from the checker,
-		// so a custom ClientRepository opting in refuses in the same words.
+		// Held to the registered-redirect-URI grammar (net/redirect-uri.mts) at
+		// boot: a `javascript:` target, a fragment, userinfo or plain http off
+		// loopback is refused.
 		allowedRedirectUris: z.array(redirectUriEntrySchema("allowedRedirectUris")).default([]),
 		allowedScopes: z.array(z.string()).default([]),
-		// #396: what an omitted `scope` parameter grants. Optional — absent plus a
-		// non-empty allowlist makes a scope-omitting request `invalid_scope`
-		// (deny-by-absence; the old behavior granted the ENTIRE allowlist). Held
-		// to ⊆ allowedScopes by the superRefine below: a default the allowlist
-		// would refuse is a misconfiguration, not a grant.
+		// What an omitted `scope` parameter grants. Absent plus a non-empty
+		// allowlist makes a scope-omitting request `invalid_scope`
+		// (deny-by-absence). Must be ⊆ allowedScopes (superRefine below).
 		defaultScopes: z.array(z.string()).optional(),
-		// #521: `""` is a malformed audience, not a widening — nothing matches
-		// it — but `generateToken` would stamp `aud: ""` on every token minted
-		// for this client. Refuse it at registration.
+		// `""` matches nothing, but `generateToken` would stamp `aud: ""` on every
+		// token minted for this client, so it is refused at registration.
 		allowedAudiences: z.array(z.string().min(1)).default([]),
-		// Wave 1 §3.4.1: per-client grant type allowlist. Absent means no restriction on
-		// existing grants (authorization_code, refresh_token). Grants that declare
-		// `requiresExplicitGrantAllowlist` (client_credentials, WebAuthn) are gated by
-		// deny-by-absence at /token dispatch (#326).
+		// Per-client grant type allowlist. Absent means no restriction on
+		// authorization_code and refresh_token; grants that declare
+		// `requiresExplicitGrantAllowlist` (client_credentials, WebAuthn) are
+		// deny-by-absence at /token dispatch.
 		allowedGrantTypes: z.array(z.string()).optional(),
-		// NEW (TODO-F-5): Logout metadata.
+		// Logout metadata.
 		//
-		// #498: `postLogoutRedirectUris` uses the SAME checker as
-		// `allowedRedirectUris` above, and for the same reason — it is a URI a
-		// user agent is redirected to, so it wants the redirect-target grammar,
-		// not "is this an http URL". On `httpUrlSchema` an app whose only
-		// redirect target is a reverse-DNS custom scheme (`com.example.app:/
-		// signout`) could register where it receives the authorization response
-		// and NOT where it is sent afterwards, so RP-initiated logout ended in a
-		// JSON body instead of back in the app.
-		//
-		// The move also TIGHTENS this field: `checkRedirectUri` refuses a
-		// fragment (RFC 6749 §3.1.2), userinfo, control characters and plain
-		// `http:` off a loopback host, all of which `httpUrlSchema` admitted.
-		// That is the same list `allowedRedirectUris` has been held to since
-		// #395; a post-logout target is not the weaker surface.
+		// `postLogoutRedirectUris` uses the same checker as `allowedRedirectUris`:
+		// it is a URI a user agent is redirected to, so it takes the redirect-target
+		// grammar. A custom scheme (`com.example.app:/signout`) is allowed; a
+		// fragment (RFC 6749 §3.1.2), userinfo, control characters and `http:` off
+		// a loopback host are refused.
 		postLogoutRedirectUris: z.array(redirectUriEntrySchema("postLogoutRedirectUris")).optional(),
-		// The other two logout fields deliberately STAY on `httpUrlSchema`, and
-		// are not a drift from the line above. Neither is a redirect target:
-		// `backchannelLogoutUri` is fetched by this server as an RFC-defined
-		// POST, and `frontchannelLogoutUri` is rendered as an iframe `src`. A
-		// custom scheme is meaningless to the first (nothing here can dispatch
-		// `com.example.app:` — an OS handler can) and actively dangerous in the
-		// second, where the browser resolves the value in a document context.
-		// http/https is the whole vocabulary either one has.
+		// The other two logout fields stay on `httpUrlSchema` deliberately: neither
+		// is a redirect target. `backchannelLogoutUri` is POSTed by this server and
+		// `frontchannelLogoutUri` is rendered as an iframe `src`; a custom scheme is
+		// meaningless to the first and dangerous in the second, where the browser
+		// resolves it in a document context.
 		backchannelLogoutUri: httpUrlSchema.optional(),
-		// NOTE: OIDC Back-Channel Logout 1.0 §2.2 defines backchannel_logout_session_required
-		// as defaulting to `false` when omitted. This implementation intentionally defaults to
-		// `true` to include `sid` in logout_token by default, which mitigates CSRF / session-
-		// confusion risk for self-hosted deployments where RPs often cannot correlate logouts
-		// without sid. Clients that want the spec-default behavior must set the field explicitly
-		// to `false`. The OIDC Discovery metadata (`backchannel_logout_session_supported`,
-		// `frontchannel_logout_session_supported`) must advertise `true` — see Task 7.
+		// Defaults to `true`, unlike OIDC Back-Channel Logout 1.0 §2.2 (`false`
+		// when omitted): `sid` in logout_token mitigates CSRF / session confusion
+		// where RPs cannot otherwise correlate logouts. Set `false` explicitly for
+		// the spec default. Discovery must advertise
+		// `backchannel_logout_session_supported` and
+		// `frontchannel_logout_session_supported` as `true`.
 		backchannelLogoutSessionRequired: z.boolean().optional().default(true),
 		frontchannelLogoutUri: httpUrlSchema.optional(),
 		frontchannelLogoutSessionRequired: z.boolean().optional().default(true),
-		// NEW (TODO-F-6): Federation-token access opt-in. Default false — deny-by-default.
+		// Federation-token access opt-in; deny by default.
 		allowedAzpForFederationToken: z.boolean().optional().default(false),
-		// #593, D9: which federation grant connections this client may spend a
-		// grant on, and where a connect flow may return to. Absent means none of
-		// either; a name is compared exactly against configuration, so nothing
-		// here is trimmed, folded or sorted. Duplicates are refused rather than
-		// deduplicated: a registration that lists one twice is a mistake worth
-		// reporting at boot, not a set to tidy.
+		// Which federation grant connections this client may spend a grant on, and
+		// where a connect flow may return to. Absent means none of either. Names are
+		// compared exactly, so nothing is trimmed, folded or sorted; duplicates are
+		// refused at boot rather than deduplicated.
 		allowedFederationGrantConnections: z
 			.array(z.string().regex(/^[A-Za-z0-9_-]+$/, "must be a connection name"))
 			.optional(),
 		federationGrantRedirectUris: z.array(z.string().min(1)).optional(),
-		// #316: /authorize admits only `firstParty: true` clients, and #330 removed
-		// the migration flag that used to admit unmarked ones. This schema is
-		// `.strict()`, so without the key a YAML/static registration could neither
-		// carry the marking (unrecognized key → boot error) nor go without it
-		// (unmarked → every /authorize returns unauthorized_client): the file-backed
-		// adapters had no working configuration at all. Absent still means "not
-		// first-party" — the marking is deliberately opt-in.
+		// /authorize admits only `firstParty: true` clients. Absent means "not
+		// first-party": the marking is opt-in.
 		firstParty: z.boolean().optional(),
-		// #527: what the consent page shows for a client that is not first-party.
+		// What the consent page shows for a client that is not first-party.
 		clientName: z.string().min(1).optional(),
-		// #527 review: the consent page renders this as a link, so it is held
-		// to the same http(s) rule as every other user-facing client URL here.
-		// `z.string().url()` admits `javascript:` and `data:`, which a page
-		// that links it would execute.
+		// Rendered as a link on the consent page, so held to http(s):
+		// `z.string().url()` admits `javascript:` and `data:`.
 		clientUri: httpUrlSchema.optional(),
-		// #273: the ONLY way to reach the RFC 7636 `plain` challenge method.
-		// Optional with no default, because absent must stay distinguishable
-		// from an explicit `false` in the record the repositories surface, and
-		// both mean "S256 only" at the policy site.
+		// The only way to reach the RFC 7636 `plain` challenge method. No default:
+		// absent must stay distinguishable from an explicit `false` in the surfaced
+		// record; both mean "S256 only" at the policy site.
 		allowPlainPkce: z.boolean().optional(),
-		// Wave 2 §4.8: per-client sender-constraint requirement.
-		// `methods` is `string().min(1)` so accidental empty kinds (typos
-		// or trailing-comma artifacts) cannot silently match a future
-		// mechanism with `kind: ""`. `superRefine` below rejects the
-		// degenerate `required:true + methods:[]` combo at boot rather
-		// than letting it fail-closed at every request.
+		// Per-client sender-constraint requirement. `methods` entries are
+		// non-empty so a typo cannot match a future mechanism with `kind: ""`; the
+		// superRefine below refuses `required: true` with no methods.
 		senderConstrained: z
 			.object({
 				required: z.boolean(),
@@ -259,9 +221,8 @@ export const ClientEntrySchema = z
 	})
 	.strict()
 	.superRefine((data, ctx) => {
-		// #396: defaultScopes ⊆ allowedScopes, at boot. An entry outside the
-		// allowlist could never be granted to a scope-CARRYING request; letting
-		// it ride the omitted-scope path would make omission the wider grant.
+		// defaultScopes ⊆ allowedScopes: otherwise omitting `scope` would grant
+		// more than any scope-carrying request could.
 		if (data.defaultScopes !== undefined) {
 			const outside = data.defaultScopes.filter((s) => !data.allowedScopes.includes(s));
 			if (outside.length > 0) {
@@ -272,11 +233,9 @@ export const ClientEntrySchema = z
 				});
 			}
 		}
-		// D-6 (v0.5.1): the discriminator must select the right credential shape.
-		// Confidential clients (basic / post) must carry a secret; public clients
-		// (`"none"`) MUST NOT — accepting a secret on a `"none"` client would leave
-		// the credential in config where an operator could later assume the client
-		// had been promoted to confidential without changing the auth method.
+		// Confidential clients (basic / post) must carry a secret. Public clients
+		// (`"none"`) must not: a secret left in config invites an operator to assume
+		// the client is confidential.
 		const needsSecret =
 			data.tokenEndpointAuthMethod === "client_secret_basic" ||
 			data.tokenEndpointAuthMethod === "client_secret_post";
@@ -319,8 +278,8 @@ export const ClientEntrySchema = z
 					path: ["federationGrantRedirectUris"],
 				});
 			}
-			// #593 slice 6: the end of a flow appends these. Refused here so a
-			// configured deployment hears it at boot, not when a user is waiting.
+			// The end of a grant flow appends these; refused at boot rather than when
+			// a user is waiting.
 			const reserved = federationGrantRedirectUriReservedParameter(uri);
 			if (reserved !== undefined) {
 				ctx.addIssue({
@@ -339,8 +298,8 @@ export const ClientEntrySchema = z
 				path: ["clientSecret"],
 			});
 		}
-		// #484: private_key_jwt proves possession of a key, so it carries keys
-		// and no secret; every other method carries no keys.
+		// private_key_jwt proves possession of a key, so it carries keys and no
+		// secret; every other method carries no keys.
 		const hasKeys = data.jwks !== undefined;
 		const hasKeysUri = data.jwksUri !== undefined;
 		if (data.tokenEndpointAuthMethod === "private_key_jwt") {
@@ -368,10 +327,8 @@ export const ClientEntrySchema = z
 				path: [hasKeys ? "jwks" : "jwksUri"],
 			});
 		}
-		// Wave 2 §4.8: `required: true` with an empty `methods` list
-		// would reject every binding at runtime and is almost certainly
-		// operator error. Fail at boot instead so misconfiguration is
-		// surfaced immediately.
+		// `required: true` with no methods would reject every binding at runtime;
+		// fail at boot instead.
 		if (data.senderConstrained?.required === true && data.senderConstrained.methods.length === 0) {
 			ctx.addIssue({
 				code: z.ZodIssueCode.custom,
@@ -448,12 +405,10 @@ export class InMemoryClientRepository implements ClientRepository {
 		const entry = this.clients.get(clientId);
 		if (!entry) return null;
 
-		// D-6 (v0.5.1): public clients have no `clientSecret` to authenticate
-		// against. `clientAuthMw` already routes them through `findById` instead
-		// of `authenticate` — but this guard makes the contract structural rather
-		// than relying on every caller to dispatch correctly. Returning null
-		// (rather than throwing) keeps the failure indistinguishable from
-		// "wrong secret" so the timing surface stays uniform.
+		// Public clients have no secret to check. `clientAuthMw` already routes
+		// them to `findById`; this guard makes the contract structural. Returning
+		// null, not throwing, keeps the failure indistinguishable from a wrong
+		// secret so the timing surface stays uniform.
 		if (entry.tokenEndpointAuthMethod === "none" || entry.clientSecret === undefined) {
 			return null;
 		}

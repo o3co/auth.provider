@@ -15,31 +15,20 @@
  */
 
 /**
- * The two calls a Store makes, rather than two routes this server mounts
- * (#593, D13).
+ * Grant revocation and listing as library calls for a Store (an operator
+ * console, a user's "connected applications" page), not routes: this
+ * provider mounts no admin route and has no operator identity model, so
+ * authenticating the person and checking ownership belong to the Store. A
+ * Store must:
  *
- * `revokeFederationGrant` is how an operator's console ends a grant.
- * `listFederationGrantsForSubject` is what lets a Store offer a user a
- * "connected applications" page — and without it a user has no direct way to
- * withdraw a grant at all, which is why it is part of the same decision.
- *
- * They are library calls because this provider mounts no admin route and has
- * no operator identity model to authorize one with. Authenticating the person,
- * and checking that the grant they picked is theirs, belongs to the Store,
- * which has both. What a Store owes its callers:
- *
- *  - list by the **authenticated** local subject, never by one submitted with
- *    the request;
- *  - check that a grant the user selected belongs to that subject before
- *    withdrawing it;
+ *  - list by the **authenticated** local subject, never one from the request;
+ *  - check that a selected grant belongs to that subject before withdrawing;
  *  - use `by: "subject"` for a user's own withdrawal and `"operator"` for an
- *    administrative one — they are different facts, and the runbook tells an
- *    operator different things about each.
+ *    administrative one — they are different facts.
  *
- * What comes back from the listing carries no credential, but it does carry
- * this provider's internal domain metadata: revisions, versions, consent
- * instants, failure stamps. It is a library result and not a page. A Store
- * projects the fields its page needs.
+ * The listing carries no credential but does carry internal metadata
+ * (revisions, versions, consent instants, failure stamps); a Store projects
+ * what its page needs.
  */
 
 import { randomUUID } from "node:crypto";
@@ -49,11 +38,9 @@ import type { FederationGrantStore, FederationGrantWrite } from "./store.mjs";
 import type { FederationGrant, FederationGrantRevokedBy } from "./types.mjs";
 
 /**
- * The correlation ID an operation's events carry (#618): the caller's, when it
- * gave one that is not empty, and otherwise one generated for the operation —
- * an empty string correlates nothing, and is not a value a caller means.
- * Called once per operation, so that everything the operation audits shares
- * the one ID.
+ * The correlation ID an operation's events carry: the caller's, when it is
+ * not empty, else a generated one (an empty string correlates nothing).
+ * Called once per operation, so everything it audits shares the one ID.
  */
 export function federationGrantCorrelationId(given: string | undefined): string {
 	return typeof given === "string" && given.length > 0 ? given : randomUUID();
@@ -71,7 +58,7 @@ export interface FederationGrantAdministrationDeps {
 	audit?(event: FederationGrantAuditEvent): void | Promise<void>;
 	/**
 	 * What correlates this call's events with the caller's own record of it —
-	 * a request ID, a job ID. Absent, the events get one of their own (#618):
+	 * a request ID, a job ID. Absent, the events get one of their own:
 	 * a correlation ID that is empty correlates nothing, and an operator
 	 * reading the sink still has to tell one pass from another.
 	 */
@@ -79,17 +66,12 @@ export interface FederationGrantAdministrationDeps {
 }
 
 /**
- * End one grant.
+ * End one grant, with the store's atomic, always-winning write. It **does not
+ * read the record first**: a record whose credential cannot be decoded must
+ * still be endable.
  *
- * It calls the store's own atomic, always-winning write and **does not read
- * the record first**. A read in front of this would refuse exactly the cleanup
- * an operator needs most: the Redis store deliberately allows revoking a
- * record whose credential cannot be decoded, and a record nobody can decode is
- * one that must still be endable.
- *
- * `{ ok: false }` is not a failure. It means the write changed nothing —
- * because the grant is already revoked, or is not there — and a Store retrying
- * after a timeout must be able to tell that from an outage. An outage rejects.
+ * `{ ok: false }` means the write changed nothing (already revoked, or
+ * absent), not a failure; an outage rejects.
  */
 export async function revokeFederationGrant(
 	deps: FederationGrantAdministrationDeps,
@@ -102,14 +84,9 @@ export async function revokeFederationGrant(
 }
 
 /**
- * Every record this subject has, in no particular order — `pending` ones and
- * retained terminal ones included.
- *
- * A page that listed only active grants would hide the authorization a user is
- * in the middle of giving, and the one they are wondering why they lost.
- *
- * An outage rejects rather than answering `[]`. "You have no connected
- * applications" is a sentence a user acts on.
+ * Every record this subject has, unordered, `pending` and retained terminal
+ * ones included (a user should see a grant in progress and one they lost).
+ * An outage rejects rather than answering `[]`, which a user would act on.
  */
 export async function listFederationGrantsForSubject(
 	deps: FederationGrantAdministrationDeps,

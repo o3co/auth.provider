@@ -44,26 +44,21 @@ export interface ReadinessRouterOptions {
 	 * Include each failing probe's error message in the response body.
 	 * Defaults to `false`.
 	 *
-	 * This endpoint is unauthenticated by design — an orchestrator has no
-	 * credentials — and probe failures carry text straight from the driver:
-	 * `connect ECONNREFUSED 10.0.3.14:6379` names an internal host and port.
-	 * On an identity provider that is a free map of the backend network for
-	 * anyone who can reach the pod. The failing dependency's *name* is what a
-	 * probe consumer needs; the message goes to the log, where the operator
-	 * reading it has already authenticated. Turn this on only when the
-	 * endpoint is reachable solely from inside the deployment.
+	 * The endpoint is unauthenticated (an orchestrator has no credentials), and
+	 * a driver message such as `connect ECONNREFUSED 10.0.3.14:6379` maps the
+	 * backend network for anyone who can reach the pod. The body names the
+	 * failing dependency; the message goes to the log. Turn this on only when
+	 * the endpoint is reachable solely from inside the deployment.
 	 */
 	readonly includeErrorDetail?: boolean;
 }
 
 /**
- * Readiness endpoint — answers whether this replica can currently serve.
+ * Readiness endpoint: answers whether this replica can currently serve.
  *
- * Distinct from `/_healthcheck`, which is liveness: a static 200 proving the
- * process is up and its event loop is turning. Liveness answering 200 during a
- * Redis partition is correct — restarting the process would not reconnect
- * Redis any faster — but it must not be what a load balancer uses to decide
- * whether to keep sending logins here. That is this route's job.
+ * Distinct from `/_healthcheck` (liveness), which rightly stays 200 during a
+ * Redis partition since a restart would not reconnect faster. A load balancer
+ * deciding whether to keep sending logins here uses this route.
  *
  * Mount it on the host app ahead of the composed auth router so it stays
  * reachable while the auth pipeline is degraded.
@@ -91,11 +86,9 @@ export function createRouter(
 		res.setHeader("Cache-Control", "no-store");
 
 		if (!report.ready) {
-			// The log keeps the full detail the body drops — the operator reading
-			// it is already inside the deployment.
-			// Each failed check's projection, never its message as text. At warn:
-			// a 503 here is the signal to the orchestrator, not a refusal of a
-			// client.
+			// The log keeps the detail the body drops, as each failed check's
+			// projection. At warn: a 503 here signals the orchestrator; it does not
+			// refuse a client.
 			opts.logger?.warn(
 				{
 					checks: report.checks

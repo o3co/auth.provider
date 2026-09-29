@@ -15,24 +15,17 @@
  */
 
 /**
- * The establishment vocabulary as it is checked and copied (the
- * session-admission ADR's D5): a `PrimaryAuthentication` as core's builders
- * make it, the additions a completing requirement presents, and the
- * `PrimaryContinuation` a requirement persists in its own record — the MFA
- * transaction — and presents to `resumePrimary`: an explicitly serialisable
- * DTO, every instant as epoch milliseconds, built here (`continuationOf`),
- * checked here (`checkPrimaryContinuation`) and rehydrated here
- * (`primaryFromDto`, `additionsFromDto`). Each check answers a frozen deep
- * copy, so what admission asks the requirements about, and what a store
- * records, shares nothing with the caller's object; a value the contract
- * does not admit is a `RangeError` naming what is wrong, and quoting nothing
- * but an `amr` value's marker.
+ * The establishment vocabulary as it is checked and copied: a
+ * `PrimaryAuthentication` as core's builders make it, the additions a
+ * completing requirement presents, and the `PrimaryContinuation` a
+ * requirement persists and presents to `resumePrimary`, a serialisable DTO
+ * with every instant as epoch milliseconds, built, checked and rehydrated
+ * here. `admitPrimary`, `resumePrimary` and `MfaTransactionStore.create` all
+ * read through these checks.
  *
- * What the checks refuse is a mistake — a primary rebuilt by hand with
- * `mfaAt` set, an addition that names a primary's marker, a reserved value
- * under a requirement not named `mfa`, a completion under `mfa` that
- * verified no second factor — and what they keep honest is the contract: `admitPrimary`, `resumePrimary` and `MfaTransactionStore.create`
- * all read through them.
+ * Each check answers a frozen deep copy that shares nothing with the
+ * caller's object; a value the contract does not admit is a `RangeError`
+ * naming what is wrong and quoting nothing but an `amr` value's marker.
  */
 
 import {
@@ -139,7 +132,7 @@ function copyRecorded(value: unknown, refuse: (what: string) => never): Recorded
 	const amr = value.amr as readonly string[];
 	// A password login records `pwd` alone; a second-factor value beside it
 	// is what a step-up adds, never what a route hands in. A federated login
-	// may carry what a trusted IdP asserted (D13).
+	// may carry what a trusted IdP asserted.
 	if (
 		authentication.primary === PASSWORD_AMR &&
 		amr.some((entry) => SECOND_FACTOR_AMR.has(entry))
@@ -181,12 +174,9 @@ function copyPrimaryFields(
 }
 
 /**
- * `value` as a `PrimaryAuthentication` core's builders make (D5): a
- * non-empty `subject`; a `user` and `claims` that can be copied; `recorded` with a
- * non-empty `amr` and an `authentication` whose `mfaAt` is not set — and no
- * second-factor value beside a password primary; a valid `authTime`; a
- * `redirectTo` that is a string or `undefined`; a `request` object whose
- * `ip` and `userAgent` are strings when present. A frozen deep copy.
+ * `value` as a `PrimaryAuthentication` core's builders make: `recorded` has
+ * a non-empty `amr`, no `mfaAt`, and no second-factor value beside a
+ * password primary; `user` and `claims` must be copyable. A frozen deep copy.
  */
 export function checkPrimaryAuthentication(value: unknown): PrimaryAuthentication {
 	const refuse = (what: string): never => {
@@ -216,15 +206,12 @@ export function primaryFromDto(dto: PrimaryAuthenticationDto): PrimaryAuthentica
 }
 
 /**
- * What a completing requirement named `requirement` may add (D5): an `amr`
- * of non-empty strings — empty when the requirement reaches nothing, which
- * every one but `mfa` does in this release — none a primary's marker, `mfa`
- * never alone (it comes beside a factor's own value, D14); `mfaAt` a valid
- * date or absent, never beside an empty `amr`. A second-factor value, or an
- * `mfaAt`, under any name but `mfa` is refused: a risk score or a re-consent
- * cannot make a session meet `urn:o3co:acr:mfa`. Under the name `mfa`, a
- * completion is a verified second factor (`checkMfaCompletion`). A frozen
- * copy.
+ * What a completing requirement named `requirement` may add: an `amr` of
+ * non-empty strings, none a primary's marker, `mfa` never alone; `mfaAt`
+ * never beside an empty `amr`. A second-factor value or an `mfaAt` under any
+ * name but `mfa` is refused, so a risk score or a re-consent cannot make a
+ * session meet `urn:o3co:acr:mfa`. Under `mfa`, see `checkMfaCompletion`.
+ * A frozen copy.
  */
 export function checkPrimaryAdditions(requirement: string, value: unknown): PrimaryAdditions {
 	const refuse = (what: string): never => {
@@ -251,15 +238,13 @@ export function checkPrimaryAdditions(requirement: string, value: unknown): Prim
 }
 
 /**
- * Under the name `mfa`, a completion is a verified second factor (D5): at
- * least one second-factor `amr` value of the factor's own (not `mfa`); `mfa`
- * beside it — every factor adds it but the email code, whose `addsMfa` is off
- * by default (the MFA ADR's D14 and O7: an email login is `["pwd", "email"]`
- * with `mfaAt` set); and when it was verified (`mfaAt`). This is the
- * fail-closed guarantee the `mfa` requirement's own re-ask gave before
- * `resumePrimary` stopped asking a requirement already done: a completion
- * that verified nothing cannot establish a password-only session. Any other
- * name is not held to it.
+ * Under the name `mfa`, a completion is a verified second factor: at least
+ * one second-factor `amr` value of the factor's own, `mfa` beside it (only
+ * the email code may leave it out, see ADR
+ * 2026-09-25-multi-factor-authentication), and `mfaAt`. `resumePrimary`
+ * does not re-ask a completed requirement, so this check is what keeps a
+ * completion that verified nothing from establishing a password-only
+ * session.
  */
 function checkMfaCompletion(
 	requirement: string,
@@ -286,8 +271,8 @@ function checkAddedAmr(
 	refuse: (what: string) => never,
 ): readonly string[] {
 	const amr = value.amr;
-	// Empty is allowed: a requirement that reaches nothing — every one but
-	// `mfa` in this release — completes its ceremony adding no value.
+	// Empty is allowed: a requirement that reaches nothing completes its
+	// ceremony adding no value.
 	if (!isStringList(amr) || !amr.every(isNonEmptyString)) {
 		refuse("an amr that is not a list of non-empty strings");
 	}
@@ -359,12 +344,10 @@ function copyCompleted(value: unknown, refuse: (what: string) => never): Complet
 }
 
 /**
- * `value` as a `PrimaryContinuation` (D5): a primary DTO
- * (`checkPrimaryAuthenticationDto`) and `done`, a list of completed
- * requirements each with what it added (`checkPrimaryAdditionsDto`), no name
- * twice — every field its type admits, every instant epoch milliseconds. A
- * frozen deep copy: what a requirement's record holds and what
- * `resumePrimary` reads back.
+ * `value` as a `PrimaryContinuation`: a primary DTO and `done`, the
+ * completed requirements with what each added, no name twice, every instant
+ * epoch milliseconds. A frozen deep copy: what a requirement's record holds
+ * and what `resumePrimary` reads back.
  */
 export function checkPrimaryContinuation(value: unknown): PrimaryContinuation {
 	const refuse = (what: string): never => {
@@ -388,10 +371,9 @@ export function checkPrimaryContinuation(value: unknown): PrimaryContinuation {
 }
 
 /**
- * The continuation admission answers an interruption with (D5): the
- * primary as the route built it and every completed requirement's
- * additions, as the serialisable DTO — every instant as epoch milliseconds.
- * Frozen.
+ * The continuation admission answers an interruption with: the primary as
+ * the route built it and every completed requirement's additions, as the
+ * serialisable DTO. Frozen.
  */
 export function continuationOf(
 	primary: PrimaryAuthentication,

@@ -17,21 +17,18 @@
 /**
  * What an {@link AssertionVerifier} concluded about a presented assertion.
  *
- * `subjectHandle` is the value handed to `UserRepository.authenticateByToken`.
- * It is an **opaque handle**, not an identity: the verifier proves the caller
- * possesses the credential, and the Store decides who that is. Splitting the
- * two is the whole point — possession is cryptography and belongs here;
- * resolution is identity data and belongs to the Store (#301).
- *
- * Namespacing the handle (`device:<id>`, `agent:<id>`) is the deployment's
- * choice and its Store's contract, not this library's.
+ * `subjectHandle` is the value handed to `UserRepository.authenticateByToken`:
+ * an opaque handle, not an identity. The verifier proves possession
+ * (cryptography); the Store decides who that is (identity data). Namespacing
+ * the handle (`device:<id>`, `agent:<id>`) is the deployment's choice and its
+ * Store's contract, not this library's.
  */
 export interface AssertionVerificationResult {
 	/** Opaque handle for `UserRepository.authenticateByToken`. */
 	readonly subjectHandle: string;
 	/**
-	 * The issuer the assertion verified against, when the verifier knows one
-	 * (#525). For logs, and for anything that scopes state per issuer.
+	 * The issuer the assertion verified against, when the verifier knows one.
+	 * For logs, and for anything that scopes state per issuer.
 	 */
 	readonly issuer?: string;
 	/**
@@ -44,44 +41,34 @@ export interface AssertionVerificationResult {
 	readonly scope?: readonly string[];
 	/**
 	 * Audiences a token minted from this assertion may name, if the issuer's
-	 * terms say (#525).
-	 *
-	 * A ceiling, and — with no authenticated client — the source: it bounds
-	 * the issued `aud` whatever chose it (a policy, a `resource` parameter,
-	 * the client registration), and stands in for the registration's
-	 * `allowedAudiences` when there is none (#520). Absent, the issuer says
-	 * nothing about audiences and the other parties stay in charge.
+	 * terms say. A ceiling on the issued `aud` whatever chose it (a policy, a
+	 * `resource` parameter, the client registration), and, with no
+	 * authenticated client, the stand-in for the registration's
+	 * `allowedAudiences`. Absent, the other parties stay in charge.
 	 */
 	readonly audience?: readonly string[];
 	/**
-	 * When the verified assertion expires, in epoch seconds — its `exp`
-	 * (auth.proxy#90).
+	 * When the verified assertion expires (its `exp`), in epoch seconds.
 	 *
 	 * A ceiling on the issued token's lifetime: the jwt-bearer grant mints
-	 * `min(oauth.accessToken.defaultExpiresIn, expiresAt − now)`, so a token never
-	 * outlives the assertion it was exchanged for, and refuses an assertion
-	 * with no whole second left (`invalid_grant`). Report the claim as it is:
-	 * one inside a verifier's clock tolerance is already past, and clamping
-	 * it forward would mint a token the issuing authority never backed.
+	 * `min(oauth.accessToken.defaultExpiresIn, expiresAt − now)` and refuses an
+	 * assertion with no whole second left (`invalid_grant`). Report the claim
+	 * as it is: clamping one inside the clock tolerance forward would mint a
+	 * token the issuing authority never backed.
 	 *
-	 * Optional so a verifier written before it existed keeps compiling, but
-	 * omitting it is a statement, not a default: a verifier that returns no
-	 * `expiresAt` is asserting a credential with **no expiry**, and the
-	 * configured lifetime stands uncapped. A verifier whose credential expires
-	 * — a signed JWT, a platform attestation with a validity window — reports
-	 * it. The bundled registry verifier always does, from the `exp` it
-	 * requires.
-	 *
-	 * Present, it must be a finite number. Anything else — a numeric string,
-	 * `null`, `NaN`, `Infinity` — is refused as `invalid_grant`: a malformed
-	 * expiry is neither an expiry nor its absence.
+	 * Omitting it is a statement, not a default: it asserts a credential with
+	 * **no expiry**, and the configured lifetime stands uncapped. A verifier
+	 * whose credential expires (a signed JWT, an attestation with a validity
+	 * window) reports it; the bundled registry verifier always does. Present,
+	 * it must be a finite number; anything else (a numeric string, `null`,
+	 * `NaN`, `Infinity`) is refused as `invalid_grant`.
 	 */
 	readonly expiresAt?: number;
 }
 
 /**
  * What the grant knows about the presentation, handed to the verifier so
- * trust can depend on it (#525).
+ * trust can depend on it.
  */
 export interface AssertionVerificationContext {
 	/**
@@ -94,34 +81,24 @@ export interface AssertionVerificationContext {
 
 /**
  * Proves that whoever presented an assertion possesses the credential behind
- * it (#301).
+ * it.
  *
- * ## Why this is a slot rather than a fixed implementation
+ * A slot rather than a fixed implementation: "assertion" covers a signed
+ * device JWT, an Apple DeviceCheck token, a Play Integrity verdict, a TPM
+ * quote, each verified against a different authority, several by a network
+ * call to a vendor. This library ships the seam and one vendor-neutral JWT
+ * implementation instead of bundling a vendor into every deployment.
  *
- * "Assertion" covers a signed device JWT, an Apple DeviceCheck token, a Play
- * Integrity verdict, a TPM quote — each verified against a different authority
- * by a different protocol, several of them requiring a network call to a
- * vendor. Fixing one here would bundle that vendor into every deployment; this
- * library ships the seam and one vendor-neutral JWT implementation, the same
- * split #303 made for remote signing.
+ * **A bare identifier is not authentication.** A verifier MUST establish
+ * possession (a signature, an attestation, something the holder could not
+ * have fabricated) before returning a handle, so `{"assertion": "device-1234"}`
+ * is never a login. Returning `null` refuses; the grant never falls back to
+ * trusting the input.
  *
- * ## The rule this exists to enforce
- *
- * **A bare identifier is not authentication.** The failure this guards against
- * is a deployment accepting `{"assertion": "device-1234"}` as a login because
- * the string looked like a credential. A verifier MUST establish possession —
- * a signature, an attestation, something the holder could not have fabricated
- * — before returning a handle. Returning `null` refuses the login; the grant
- * never falls back to trusting the input.
- *
- * ## Failure vocabulary
- *
- * `null` means "not verified", and is answered as `invalid_grant`. **Throwing**
- * means the verifier could not reach a conclusion — a vendor attestation
- * service being down — and is answered as `503`, not as a refusal, for the same
- * reason #408 separated a revocation-store outage from a revocation: telling a
- * caller their credential is bad when the truth is that a backend is unreachable
- * sends them to re-enrol a device that was fine.
+ * `null` means "not verified" and is answered as `invalid_grant`. Throwing
+ * means no conclusion was reached (a vendor attestation service down) and is
+ * answered as `503`: calling a credential bad when a backend is unreachable
+ * sends the caller to re-enrol a device that was fine.
  */
 export interface AssertionVerifier {
 	/** Adapter kind, for logs and boot diagnostics. */
@@ -131,9 +108,9 @@ export interface AssertionVerifier {
 	 * assertion does not prove possession. Throws when verification could not
 	 * be attempted.
 	 *
-	 * `context` says who is presenting (#525). A verifier that does not care
-	 * ignores it; the registry verifier refuses a presenter an issuer's entry
-	 * does not admit.
+	 * `context` says who is presenting. A verifier that does not care ignores
+	 * it; the registry verifier refuses a presenter an issuer's entry does not
+	 * admit.
 	 */
 	verify(
 		assertion: string,
@@ -142,13 +119,11 @@ export interface AssertionVerifier {
 }
 
 // ---------------------------------------------------------------------------
-// ComponentMap slot (#301)
+// ComponentMap slot
 //
-// Optional to wire: a deployment that never enables the jwt-bearer grant has
-// no use for it. The grant declares it in `requires`, so enabling the grant
-// without wiring a verifier fails boot rather than at the first login — there
-// is no default, deliberately, because the only possible default would be one
-// that accepts things.
+// Optional to wire: only the jwt-bearer grant uses it, and declares it in
+// `requires`, so enabling the grant without a verifier fails boot. There is
+// deliberately no default: the only possible default would accept things.
 // ---------------------------------------------------------------------------
 declare module "@o3co/auth-provider-core" {
 	interface ComponentMap {

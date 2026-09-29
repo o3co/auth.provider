@@ -8,32 +8,26 @@ import type { FederationTokenStore, FederationTokens, SupportsLock } from "../ty
 
 const key = (sid: string, name: string) => `${sid}\u0000${name}`;
 
-/**
- * In-memory FederationTokenStore adapter (dev/test only).
- *
- * Expiry semantics: this adapter does NOT auto-expire entries. Unlike
- * UserSessionStore where the session's `expiresAt` bounds the record lifetime,
- * federation `tokens.expiresAt` is the access_token's expiry, which is shorter
- * than the refresh_token lifetime — deleting the record at access_token expiry
- * would strand the refresh_token. Token lifecycle (refresh vs expiry decision)
- * is the consumer's responsibility in F-6 flows.
- *
- * Cleanup of stale entries happens via UserSessionStore logout cascade, which
- * calls `removeBySid(sid)` when a session ends. For process longevity
- * consider redis instead (production-grade TTL + cross-instance replication).
- */
 const cloneTokens = (t: FederationTokens): FederationTokens => ({
 	accessToken: t.accessToken,
 	refreshToken: t.refreshToken,
 	idToken: t.idToken,
-	// Copy Date so caller-held references can't mutate stored state.
-	// `null` means upstream provider issued no finite expiry — pass through as-is.
+	// Copy the Date so caller-held references can't mutate stored state;
+	// `null` (no finite upstream expiry) passes through.
 	expiresAt: t.expiresAt === null ? null : new Date(t.expiresAt.getTime()),
 	tokenType: t.tokenType,
 	scope: t.scope,
 	grantedScope: t.grantedScope,
 });
 
+/**
+ * In-memory FederationTokenStore adapter (dev/test only).
+ *
+ * Entries never auto-expire: `tokens.expiresAt` is the access token's expiry,
+ * and deleting the record then would strand the longer-lived refresh token.
+ * Refresh-or-expire is the consumer's call. Stale entries go when logout
+ * calls `removeBySid(sid)`; long-lived processes should use redis.
+ */
 export function createInMemoryFederationTokenStore(): FederationTokenStore & SupportsLock {
 	const store = new Map<string, FederationTokens>();
 	const lock = createInProcessLock();

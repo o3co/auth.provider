@@ -15,14 +15,12 @@
  */
 
 /**
- * Private memory helper used by `SessionFamilyIndex` + `SessionFederationIndex`.
- * Mirrors the Redis `createRedisSidSortedSet` semantics: insertion-order
- * preserving (ZADD NX equivalent), TTL-synced to `expiresAt`, no-op writes
- * after expiry, per-member remove. Per A4 §7.1 (lines 533-565 of the spec).
- *
- * Insertion-order is load-bearing for `SessionFederationIndex` per A4 §5.4
- * (orchestrator reads `(await listFederations(sid))[0]` to choose the IdP
- * for post-logout redirect).
+ * Private memory helper for `SessionFamilyIndex` and `SessionFederationIndex`,
+ * with the semantics of the Redis `createRedisSidSortedSet`: insertion order
+ * kept (ZADD NX), one expiry per sid, no-op writes after expiry, per-member
+ * remove. Insertion order is load-bearing: logout reads
+ * `(await listFederations(sid))[0]` to choose the IdP for the post-logout
+ * redirect.
  */
 export interface MemorySidSortedSet {
 	add(sid: string, member: string, expiresAt: Date): void;
@@ -52,16 +50,15 @@ export function createMemorySidSortedSet(): MemorySidSortedSet {
 			const existing = store.get(sid);
 			// Lazy GC: if the previous bucket has already expired, drop its state
 			// so a re-used sid does not leak federation/family IDs from a prior
-			// session into the new one. (Aligns with the `list()` GC path.)
+			// session into the new one.
 			const isStale = existing != null && existing.expiresAtMs <= Date.now();
 			if (existing && !isStale) {
 				if (!existing.seen.has(member)) {
 					existing.ordered.push(member);
 					existing.seen.add(member);
 				}
-				// expiresAt is immutable per A4 §5.1; same-sid writes always carry
-				// the SAME expiresAt. Refreshing the local mirror is a no-op when
-				// inputs are valid, and benign otherwise (mirrors PEXPIREAT idempotence).
+				// A session's expiresAt is immutable, so same-sid writes carry the
+				// same one: refreshing it is a no-op for valid input (as PEXPIREAT is).
 				existing.expiresAtMs = expiresAtMs;
 			} else {
 				store.set(sid, {

@@ -16,16 +16,12 @@
 
 /**
  * What the session package owns of the browser session that other packages
- * use, as slots whose contracts are core's (#728): the login page a
- * browser that is not signed in is sent to (`loginEntry`), the one policy
- * for whether a browser's request may change state (`csrfGuard`, #710),
- * the session cookie's attributes (`sessionCookiePolicy`), and the CSRF
- * token's signature (`csrfTokenSigner`), which the owner of the session
- * secret provides to the guard's provider. The session package
- * owns the configuration behind them; another package requires the slot
- * rather than reading that configuration or rebuilding the policy from it.
- *
- * The contract suites and test doubles are published on
+ * use, as slots whose contracts are core's: the login page (`loginEntry`),
+ * the one policy for whether a browser's request may change state
+ * (`csrfGuard`), the session cookie's attributes (`sessionCookiePolicy`), and
+ * the CSRF token's signature (`csrfTokenSigner`). Another package requires
+ * the slot rather than reading the session configuration or rebuilding the
+ * policy from it. Contract suites and test doubles are published on
  * `@o3co/auth-provider-core/testing`. Types only.
  */
 
@@ -69,33 +65,28 @@ export type NavigationVerdict =
 	  };
 
 /**
- * The one policy for whether a browser may change state (#272; #710, C4),
- * in its two forms.
+ * The one policy for whether a browser may change state, in two forms:
  *
- * - **A request that changes state** (`check`, `middleware`) — a login, a
- *   logout, device verification, an MFA route, the federation-grants
- *   consent answer. A request whose `Origin` — or, without one, `Referer` —
- *   names another origin is refused whatever else it carries; one that
- *   names this origin or a trusted one is accepted; with neither, a signed
- *   double-submit token decides: the value of the `cookieName` cookie,
- *   echoed in the `headerName` header or in the `bodyField` of a parsed
- *   form body.
- * - **A navigation that starts such a flow** (`checkNavigation`) — the
- *   account-link start, a GET a page navigates to, which carries no token
- *   and often no `Origin`. `Sec-Fetch-Site` answers first where the browser
- *   sends it: `same-origin` and `none` (a typed URL, a bookmark) are
- *   accepted, `cross-site` is refused; otherwise — `same-site`, which a
- *   sibling subdomain sends too, an unknown value, or none — the `Origin`
- *   or `Referer` the request names is held to this origin and the trusted
- *   ones, and a request that names neither is refused.
+ * - **A request that changes state** (`check`, `middleware`): a login, a
+ *   logout, device verification, an MFA route, the federation-grants consent
+ *   answer. An `Origin` (or, without one, `Referer`) naming another origin is
+ *   refused whatever else the request carries; one naming this origin or a
+ *   trusted one is accepted; with neither, a signed double-submit token
+ *   decides: the `cookieName` cookie's value, echoed in the `headerName`
+ *   header or the `bodyField` of a parsed form body.
+ * - **A navigation that starts such a flow** (`checkNavigation`): the
+ *   account-link start, a GET that carries no token and often no `Origin`.
+ *   `Sec-Fetch-Site` answers first where sent: `same-origin` and `none` (a
+ *   typed URL, a bookmark) are accepted, `cross-site` is refused. Otherwise
+ *   (`same-site`, which a sibling subdomain also sends, an unknown value, or
+ *   none) the `Origin` or `Referer` is held to this origin and the trusted
+ *   ones, and a request naming neither is refused.
  *
- * The token's signing key is derived from the session cookie's secret,
- * which the session store's module owns, while the session module provides
- * the guard (#728): the key is to reach the guard's provider as
- * `csrfTokenSigner`, the signer the owner of the secret provides — never as
- * the secret or the key itself. Until the session store's configuration
- * becomes a section of its own, the session module still derives it from the
- * `session` section the two modules share.
+ * The token's signing key is derived from the session cookie's secret, which
+ * the session store's module owns, while the session module provides the
+ * guard: the key is to reach the guard's provider only as `csrfTokenSigner`,
+ * never as the secret or the key. For now the session module still derives
+ * it from the `session` section the two modules share.
  */
 export interface CsrfGuard {
 	/** The cookie the double-submit token is set in; script reads it. */
@@ -130,20 +121,19 @@ export interface CsrfGuard {
 }
 
 /**
- * The CSRF token's signature (#728): what the `csrfGuard` provider signs a
- * double-submit token with, and checks one against, without holding the key.
+ * The CSRF token's signature: what the `csrfGuard` provider signs and checks
+ * a double-submit token with, without holding the key.
  *
- * The key has one owner — the module that owns the session cookie's secret
- * (`session.secret`: the session store's) — which derives it from that secret
- * for this purpose alone, so a token's signature is never a session cookie's
- * signature, nor an oracle for one. How it derives the key is the owner's, not
- * this contract's: two providers that derive it differently do not verify each
- * other's tokens, so switching between them invalidates the tokens outstanding
- * (short-lived, and issued afresh), and a provider that must keep verifying
- * what an earlier one issued pins that derivation in its own tests. Neither
- * the secret nor the derived key leaves the signer: a plain object, its prototype
- * `Object.prototype` or `null`, that carries `sign` and `verify` alone, own or
- * inherited, and is frozen.
+ * The key's one owner, the module owning the session cookie's secret
+ * (`session.secret`, the session store's), derives it from that secret for
+ * this purpose alone, so a token's signature is never a session cookie's nor
+ * an oracle for one. The derivation is the owner's: providers that derive it
+ * differently do not verify each other's tokens (switching invalidates the
+ * short-lived outstanding ones), and a provider that must keep verifying an
+ * earlier one's tokens pins that derivation in its own tests. Neither the
+ * secret nor the key leaves the signer: a frozen plain object (prototype
+ * `Object.prototype` or `null`) carrying `sign` and `verify` alone, own or
+ * inherited.
  */
 export interface CsrfTokenSigner {
 	/**
@@ -182,17 +172,17 @@ export interface SessionCookiePolicy {
 // ---------------------------------------------------------------------------
 declare module "@o3co/auth-provider-core" {
 	interface ComponentMap {
-		/** The login page and the `redirect_to` protocol (#728): provided by the session module. */
+		/** The login page and the `redirect_to` protocol: provided by the session module. */
 		readonly loginEntry?: LoginEntry;
-		/** The one browser-origin / CSRF policy (#728, #710): provided by the session module. */
+		/** The one browser-origin / CSRF policy: provided by the session module. */
 		readonly csrfGuard?: CsrfGuard;
 		/**
-		 * The CSRF token's signature (#728): provided by the module that owns the
+		 * The CSRF token's signature: provided by the module that owns the
 		 * session cookie's secret (the session store's), read by the `csrfGuard`
 		 * provider.
 		 */
 		readonly csrfTokenSigner?: CsrfTokenSigner;
-		/** The session cookie's attributes (#728): provided by the session store's module, which owns the session cookie. */
+		/** The session cookie's attributes: provided by the session store's module, which owns the session cookie. */
 		readonly sessionCookiePolicy?: SessionCookiePolicy;
 	}
 }

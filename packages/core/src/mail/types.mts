@@ -15,14 +15,11 @@
  */
 
 /**
- * The `MailSender` port and its `mailSender` slot (the MFA ADR's D5): how
- * the one-time codes and security notices multi-factor authentication sends
- * leave the provider.
- *
- * It is in core because its implementer (an SMTP package) and its consumer
- * (the MFA package) must not depend on each other. The consumer renders the
- * message; a deployment that delivers through its own mail service
- * implements `send` and nothing else. Types only — this directory is a leaf.
+ * The `MailSender` port and its `mailSender` slot: how MFA one-time codes and
+ * security notices leave the provider (ADR 2026-09-25-multi-factor-authentication).
+ * In core so the SMTP package and the MFA package need not depend on each
+ * other. The consumer renders the message; a custom sender implements `send`
+ * only. Types only; this directory is a leaf.
  */
 
 /** A rendered message: one recipient, a subject and plain text. */
@@ -47,7 +44,7 @@ export interface MailSender {
 // ---------------------------------------------------------------------------
 declare module "@o3co/auth-provider-core" {
 	interface ComponentMap {
-		/** Where MFA codes and notices are delivered (the MFA ADR's D5). */
+		/** Where MFA codes and notices are delivered. */
 		readonly mailSender?: MailSender;
 	}
 }

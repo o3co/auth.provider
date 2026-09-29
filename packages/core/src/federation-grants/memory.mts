@@ -38,7 +38,7 @@ import {
 	type PendingFederationGrant,
 } from "./types.mjs";
 
-/** How long a record outlives its expiry, so that the status route can still answer for it (D16). */
+/** How long a record outlives its expiry, so that the status route can still answer for it. */
 export const DEFAULT_FEDERATION_GRANT_TOMBSTONE_RETENTION_MS = 30 * 86_400_000;
 
 /**
@@ -143,7 +143,7 @@ function copyCredentials(from: FederationGrantCredentials): FederationGrantCrede
  * is a date, and its issued lifetime a finite number. A lifetime of NaN or
  * infinity is refused at the write, where every adapter refuses it alike,
  * rather than kept here and read back as unreadable by an adapter that seals
- * what it stores (#631).
+ * what it stores.
  */
 const storableCredentials = (credentials: FederationGrantCredentials): boolean =>
 	credentials.accessToken === undefined ||
@@ -151,27 +151,20 @@ const storableCredentials = (credentials: FederationGrantCredentials): boolean =
 		Number.isFinite(credentials.accessToken.issuedLifetime));
 
 /**
- * In-process Map-backed {@link FederationGrantStore} (#593, D16).
+ * In-process Map-backed {@link FederationGrantStore}.
  *
- * Every write checks and applies with no `await` in between, which on one
- * thread is the atomic step the port asks for. Nothing is sealed: the
- * credentials sit in a Map beside the record, so `unreadable` and
- * `key_unavailable` are states this adapter never reports. What it does keep
- * is everything the contract says about them — one snapshot per `open`, no
- * credential outside `active`, none past the expiry.
+ * Every write checks and applies with no `await` in between, which is the
+ * atomic step the port asks for. Nothing is sealed, so `unreadable` and
+ * `key_unavailable` never occur; the other credential rules hold (one
+ * snapshot per `open`, none outside `active`, none past the expiry).
  *
- * Two clocks, kept apart as a store with key TTLs keeps them. What a caller is
- * told is judged on the `now` it passes. What is reclaimed — a record nothing
- * can read any more, a credential whose grant has expired — is judged on this
- * process's own clock, whenever an operation touches the record and when a
- * lodging sweeps. So a `now` that is wrong for one call is told the wrong
- * thing once, and costs nothing: the next call finds the record where it was.
- * A listing scans the store, which is what a development adapter can afford.
+ * Two clocks, as a store with key TTLs has: what a caller is told is judged
+ * on the `now` it passes; what is reclaimed is judged on this process's clock
+ * when a record is touched or a lodging sweeps. A wrong `now` misleads one
+ * call and destroys nothing.
  *
- * Single-replica only. Grants fork per replica: one lodged, revoked or
- * refreshed on one replica is unknown, still usable or stale on every other,
- * which is why the module that provides this declares itself replica-unsafe
- * and `deployment.mode = "multi"` refuses it by name.
+ * Single-replica only: grants fork per replica, so the module declares
+ * itself replica-unsafe and `deployment.mode = "multi"` refuses it.
  */
 export function createMemoryFederationGrantStore(
 	options: MemoryFederationGrantStoreOptions = {},
@@ -194,12 +187,10 @@ export function createMemoryFederationGrantStore(
 	/**
 	 * The instant from which the record answers nothing.
 	 *
-	 * - `pending`: when its first intent lapses, with no retention (D2).
-	 * - Authorized, in whatever state it is now: the stored expiry plus the
-	 *   retention. A revocation moves no horizon, which is what a store with key
-	 *   TTLs does without being asked.
-	 * - Revoked while `pending`: it has no expiry, so the revocation plus the
-	 *   retention — long enough for the client to be told `revoked`.
+	 * - `pending`: when its first intent lapses, with no retention.
+	 * - Authorized, in any state: the stored expiry plus the retention (a
+	 *   revocation moves no horizon).
+	 * - Revoked while `pending`: the revocation plus the retention.
 	 */
 	const goneAt = (entry: Entry): number => {
 		const grant = entry.grant;
@@ -221,7 +212,7 @@ export function createMemoryFederationGrantStore(
 			!(wallMs < grant.expiresAt.getTime())
 		) {
 			// The record is retained so that the status route can answer for it.
-			// The secret is not (D16).
+			// The secret is not.
 			entry.credentials = null;
 		}
 		return true;
@@ -413,7 +404,7 @@ export function createMemoryFederationGrantStore(
 			if (!mayActivate(entry, input.intentHandle, nowMs)) return failed();
 
 			// What the activation carries, all of it checked before anything is
-			// written: a refusal leaves the grant exactly as it was (D7).
+			// written: a refusal leaves the grant exactly as it was.
 			const authorization = input.authorization;
 			// The NEW expiry: after this write, and within the ceiling of the new consent.
 			if (!(nowMs < authorization.expiresAt.getTime())) return failed();
@@ -423,13 +414,13 @@ export function createMemoryFederationGrantStore(
 				return failed();
 			}
 			// Not dated after this write, with no allowance: a revocation boundary
-			// stamped from now on must always cover the consent (D13). Negated, so
+			// stamped from now on must always cover the consent. Negated, so
 			// that a date that is not one is refused as well.
 			if (!(authorization.consent.at.getTime() <= nowMs)) return failed();
 			if (!(authorization.authorizedAt.getTime() <= nowMs)) return failed();
 			if (!storableCredentials(input.credentials)) return failed();
 			// A renewal never re-points a grant: same upstream account, same
-			// identity revision (D4, D7). `mayActivate` has refused a revoked grant,
+			// identity revision. `mayActivate` has refused a revoked grant,
 			// so one that has an authorization here is `active` or needs the user.
 			const grant = entry.grant;
 			if (
@@ -472,13 +463,13 @@ export function createMemoryFederationGrantStore(
 			if (!(nowMs < grant.expiresAt.getTime())) return failed();
 			// The credential it replaces must still be there. One this process's
 			// clock has reclaimed is not written back by a caller whose clock is
-			// behind, as a key TTL that has fired is not (#631): that same caller
+			// behind, as a key TTL that has fired is not: that same caller
 			// would read the new one as `absent` a call later.
 			if (entry.credentials === null) return failed();
 			if (!storableCredentials(input.credentials)) return failed();
 			if (input.ineligible !== null && !isDate(input.ineligible.at)) return failed();
 			// A maximum that is not a finite number is not one the marker was judged
-			// against, nor one every adapter can keep (#631).
+			// against, nor one every adapter can keep.
 			if (input.ineligible !== null && !Number.isFinite(input.ineligible.judgedAgainst)) {
 				return failed();
 			}
@@ -543,7 +534,7 @@ export function createMemoryFederationGrantStore(
 			if (!(nowMs < grant.expiresAt.getTime())) return failed();
 			if (!isDate(input.failure.at)) return failed();
 			// A backoff that is not a finite number is not one the classifier
-			// bounded, nor one every adapter can keep (#631).
+			// bounded, nor one every adapter can keep.
 			const retryAfter = input.failure.retryAfterSeconds;
 			if (retryAfter !== undefined && !Number.isFinite(retryAfter)) return failed();
 			const atMs = input.failure.at.getTime();
@@ -551,7 +542,7 @@ export function createMemoryFederationGrantStore(
 			// Never back: a stamp that outlived its caller's budget arrives after a
 			// newer one, and must not replace it.
 			if (previous !== undefined && atMs < previous.at.getTime()) return failed();
-			// Never over the user (#616, D12): a stamp that says the user has to
+			// Never over the user: a stamp that says the user has to
 			// come back is what the grant reads as `reauthorization_required`, and
 			// no later outage, rate limit or refusal says otherwise. Only what
 			// replaces or ends the credentials clears it.
@@ -583,7 +574,7 @@ export function createMemoryFederationGrantStore(
 
 		async acquireRefreshLock(grantId, { ttlMs, waitForMs }): Promise<FederationGrantLockResult> {
 			// A TTL of NaN compares as already expired: exclusion would be silently
-			// off, and two refreshes would present one refresh token (D12).
+			// off, and two refreshes would present one refresh token.
 			// And each must end within the Date range: a lease or a wait past it
 			// is one no clock reaches the end of.
 			if (!isStorableLifetime(ttlMs)) {
@@ -596,7 +587,7 @@ export function createMemoryFederationGrantStore(
 			// Redis lock measures them: `Date.now()` steps when the host's clock is
 			// set, and a wait would then be reported as negative, or as hours, and
 			// core would refuse the lease of a lock that was in fact taken at once
-			// (#631). The lease itself stays on this process's clock, in `tryLock`.
+			// The lease itself stays on this process's clock, in `tryLock`.
 			const askedAt = performance.now();
 			const deadline = askedAt + waitForMs;
 			// Rounded DOWN to a whole millisecond, as the Redis lock rounds: a

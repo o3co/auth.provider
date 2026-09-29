@@ -22,19 +22,14 @@ import { resolveWebAuthnAuthenticationOptionsLimitSpec } from "./webauthnSpec.mj
 
 /**
  * Every per-endpoint spec that lives in its own config slice, seeded into an
- * adapter's `limits` in one call.
- *
- * Both bundled adapter modules (memory here, redis in
- * `@o3co/auth-provider-redis`) call this rather than each seed individually,
- * so a spec seeded into one adapter cannot be forgotten in the other — which
- * is how `device_verification` went unseeded in both while `login` was
- * seeded in each. The prefixes: `login` (`rateLimit.login`),
+ * adapter's `limits` in one call. Both bundled adapter modules (memory here,
+ * redis in `@o3co/auth-provider-redis`) call this, so a seed cannot be
+ * forgotten in one of them. Prefixes: `login` (`rateLimit.login`),
  * `device_verification` (`oauth.deviceAuthorization.rateLimit`),
  * `webauthn-authentication-options` (`webauthn.rateLimit.authenticationOptions`),
  * `mfa` (`mfa.rateLimit.routes`) and `mfa-email`
- * (`mfa.factors.email.sendLimit`).
- * An operator-declared entry for any prefix still wins; see the individual
- * resolvers.
+ * (`mfa.factors.email.sendLimit`). An operator-declared entry for any prefix
+ * still wins.
  */
 export const resolveSeededLimitSpecs = (
 	limits: Readonly<Record<string, RateLimitSpec>>,

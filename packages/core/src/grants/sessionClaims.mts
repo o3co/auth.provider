@@ -17,27 +17,19 @@
 /**
  * The two ways an access token names the browser session behind it.
  *
- * - **`sid`** is the session a token was minted from, by the grant that holds
- *   it (`authorization_code`, `refresh_token`, `session`). It is a liveness
- *   link — a logout ends the `UserSession` and with it the token — and a
- *   capability: `/oauth/userinfo` releases the session's claims on it,
- *   `POST /oauth/federation/:name/logout` deletes the session's upstream tokens
- *   on it, and the federation token route hands the upstream access token out
- *   on it.
- * - **`liveness_sid`** ({@link LIVENESS_SID_CLAIM}) is the session a token was
- *   derived from without being minted from it — a token-exchange result. It is
- *   the liveness link alone: the logout that ends the subject token ends this
- *   one too, and nothing is authorised on it. A downstream holder of an
- *   exchanged token is not the session's client, so none of the session's
- *   capabilities may be reachable with it.
+ * - `sid`: the session the token was minted from (`authorization_code`,
+ *   `refresh_token`, `session` grants). A liveness link (logout ends the
+ *   token) and a capability: `/oauth/userinfo`, federation logout and the
+ *   federation token route act on the session through it.
+ * - `liveness_sid` ({@link LIVENESS_SID_CLAIM}): the session a token-exchange
+ *   result was derived from. Liveness only; nothing is authorised on it,
+ *   because a downstream holder is not the session's client.
  *
- * Two claims rather than one claim and a mark that the capability routes
- * refuse: a surface that reads `sid` — every capability today and any added
- * later — can never be reached with an exchanged token, because it does not
- * carry one; only the liveness checks opt in to the second claim. A
- * forgotten opt-in leaves a token live after a logout, which is the state
- * before the link existed; a forgotten refusal would hand a session's
- * capabilities to whoever holds a derived token.
+ * Two claims, not one claim plus a mark the capability routes refuse: every
+ * surface reading `sid` is unreachable with an exchanged token, and only
+ * liveness checks opt in to the second claim. A forgotten opt-in leaves a
+ * token live after logout; a forgotten refusal would hand out the session's
+ * capabilities.
  */
 
 /** The claim a derived token names its subject's session under — read by liveness checks only. */

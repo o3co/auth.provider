@@ -15,23 +15,17 @@
  */
 
 /**
- * The check a package runs over its own `config/reference.conf` (#728): the
- * file holds only the sections of the modules that declare it
+ * The check a package runs over its own `config/reference.conf`: the file
+ * holds only the sections of the modules that declare it
  * (`section.reference`), and each such module's section schema parses its
- * part of the file without losing a path. A reference that holds another
- * package's section would set that package's defaults from the wrong place;
- * a path the schema drops is a default no module ever reads.
+ * part without losing a path. Another package's section would set that
+ * package's defaults from the wrong place; a dropped path is a default no
+ * module reads. The file comes already resolved by the package's own HOCON
+ * reader, so core takes no HOCON dependency.
  *
- * It takes the file already resolved — the package's test parses it with
- * the HOCON reader it uses (`@o3co/ts.hocon`) — so core takes no HOCON
- * dependency. {@link packageReferenceProblems} is the whole check a
- * package's test runs; {@link referenceConfProblems} is its second half.
- *
- * Its limits: a list is one path — arrays are values, not keys, so an
- * element a schema drops from a list is not reported; a key whose value is
- * `undefined` is no path at all; and an empty object counts as kept when the
- * schema's output has keys under it (a schema that fills defaults in), lost
- * only when the output has nothing there.
+ * Limits: a list is one path, so an element a schema drops is not reported;
+ * a key whose value is `undefined` is no path; an empty object counts as
+ * kept when the schema's output has keys under it.
  */
 
 import { fileURLToPath } from "node:url";
@@ -78,14 +72,9 @@ const within = (path: string, section: string): boolean =>
 
 /**
  * What is wrong with a package's `reference.conf`, one line per problem,
- * sorted — `[]` when nothing is:
- *
- * - no module in `modules` declares `reference`;
- * - a path no module declaring it owns (outside every such module's section,
- *   `section.at` or else its name);
- * - a module's section, as the file holds it, that its schema refuses —
- *   each issue at its operator path;
- * - a path under a module's section that its schema's output lacks.
+ * sorted (`[]` when nothing is): no module declares `reference`; a path
+ * outside every declaring module's section; a section its schema refuses,
+ * each issue at its operator path; a path its schema's output lacks.
  */
 export function referenceConfProblems(check: ReferenceConfCheck): string[] {
 	const owners = check.modules.filter(
@@ -95,7 +84,7 @@ export function referenceConfProblems(check: ReferenceConfCheck): string[] {
 	const problems: string[] = [];
 	const sections = owners.map((module) => {
 		const section = module.section as NonNullable<Module["section"]>;
-		// Unset, `at` is the module's name as one key, not split on dots (#736).
+		// Unset, `at` is the module's name as one key, not split on dots.
 		const segments = section.at === undefined ? [module.name] : section.at.split(".");
 		return { module, schema: section.schema, path: segments.join("."), segments };
 	});

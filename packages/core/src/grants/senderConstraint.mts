@@ -15,14 +15,10 @@
  */
 
 /**
- * Per-client sender-constraint requirement. See Wave 2 Token-binding
- * Cluster spec §4.8.
- *
- * When `required: true` and no binding is presented, the request is
- * rejected `invalid_client`. When `required: true` and a binding is
- * presented whose `kind` is not in `methods`, the request is rejected
- * `unauthorized_client`. When `required: false`, `methods` is advisory
- * (no rejection occurs based on it).
+ * Per-client sender-constraint requirement. With `required: true`, a request
+ * presenting no binding is rejected `invalid_client`, and one whose binding
+ * `kind` is not in `methods` is rejected `unauthorized_client`. With
+ * `required: false`, `methods` is advisory.
  */
 export interface SenderConstraint {
 	readonly required: boolean;

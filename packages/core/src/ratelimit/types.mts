@@ -35,18 +35,11 @@ export interface RateLimitDecision {
 	 */
 	readonly reason?: string;
 	/**
-	 * The limit the adapter actually applied to this key.
-	 *
-	 * Adapters resolve a spec per key prefix, so the enforced limit is not
-	 * always the one the *caller* configured: an operator who declares
-	 * `limits.login` on the adapter overrides the value seeded from
-	 * `rateLimit.login`, and a key with no matching prefix falls to
-	 * `defaultLimit`. A caller emitting RFC 9239 `RateLimit-*` headers has to
-	 * report what was enforced, not what it asked for, or the headers
-	 * advertise a limit no request is measured against.
-	 *
-	 * Optional so pre-existing custom adapters keep compiling; callers fall
-	 * back to their own configured value when it is absent.
+	 * The limit the adapter actually applied to this key. It can differ from
+	 * the caller's: an operator's `limits.login` on the adapter overrides the
+	 * value seeded from `rateLimit.login`, and an unmatched key falls to
+	 * `defaultLimit`. RFC 9239 `RateLimit-*` headers must report what was
+	 * enforced. Optional; callers then fall back to their configured value.
 	 */
 	readonly limit?: number;
 }
@@ -57,16 +50,12 @@ export interface RateLimitDecision {
 export interface RateLimiter {
 	readonly kind: string;
 	/**
-	 * The limiter's own outage policy (#728): what the guard does when
-	 * `check` throws — `"open"` lets the request through, `"closed"` answers
-	 * `503` — reported through the guard's log line and audit event either
-	 * way. It belongs to the limiter because only its backend can be down:
-	 * the module that builds the limiter owns the setting. Absent means
-	 * `closed`, the default `reference.conf` ships for `rateLimit.failMode` —
-	 * as on a limiter with no backend of its own, such as the in-process one,
-	 * and on one written before the member. Declared ahead of its readers:
-	 * the guard and its callers still take the policy from
-	 * `rateLimit.failMode`.
+	 * The limiter's outage policy: what the guard does when `check` throws
+	 * (`"open"` lets the request through, `"closed"` answers `503`), logged and
+	 * audited either way. It belongs to the limiter because only its backend can
+	 * be down. Absent (as on the in-process limiter) means `closed`, the
+	 * `rateLimit.failMode` default. Not read yet: the guard and its callers
+	 * still take the policy from `rateLimit.failMode`.
 	 */
 	readonly failMode?: RateLimitFailMode;
 	/**
@@ -88,23 +77,12 @@ export interface RateLimitSpec {
 }
 
 // ---------------------------------------------------------------------------
-// ComponentMap declaration-merge (A2-α §6.1 — optional slot)
-//
-// Declared here so oauthModule can list "rateLimiter" in its `optional` array
-// and the DI graph types deps.rateLimiter as RateLimiter | undefined.
-// The slot is optional: when absent, oauth routes degrade gracefully (no
-// rate-limiting applied, fail-open per createOAuthRouter semantics).
-// Phase 9 Task 4 augmentation.
+// ComponentMap slot: `rateLimiter`, optional in oauthModule, so
+// `deps.rateLimiter` is `RateLimiter | undefined`. Absent, oauth routes apply
+// no rate limiting.
 // ---------------------------------------------------------------------------
 declare module "@o3co/auth-provider-core" {
 	interface ComponentMap {
 		readonly rateLimiter?: RateLimiter;
 	}
 }
-
-// ---------------------------------------------------------------------------
-// Backing client interface (Phase 10 addendum §3)
-// ---------------------------------------------------------------------------
-
-// RateLimiterClient backing-client interface relocated to
-// @o3co/auth-provider-redis (v0.5.0 pre-tag interface review S3).

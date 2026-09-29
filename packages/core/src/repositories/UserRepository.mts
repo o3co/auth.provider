@@ -17,14 +17,14 @@
 import type { User } from "./types.mjs";
 
 /**
- * A federated identity to link to an existing user (#482).
+ * A federated identity to link to an existing user.
  *
  * `provider:sub` is the whole identity: the federation's name and the IdP's
  * opaque, stable subject. `claims` is what the IdP asserted, as the provider
- * mapped it — `email`, `emailVerified`, `name`, `picture`, and whatever else
- * the adapter surfaces — and it is self-asserted upstream data. The rules a
- * Store must apply before it links (never on an unverified or relay address,
- * never by e-mail alone) are in the session package README.
+ * mapped it (`email`, `emailVerified`, `name`, `picture`, ...), and it is
+ * self-asserted upstream data. The rules a Store must apply before it links
+ * (never on an unverified or relay address, never by e-mail alone) are in
+ * the session package README.
  */
 export interface FederatedIdentityLink {
 	/** The federation name — the `:name` route segment, e.g. `"apple"`. */
@@ -38,11 +38,11 @@ export interface FederatedIdentityLink {
 }
 
 /**
- * The upstream registration an identity was issued under (#611): the
- * federation's name, the issuer the id_token was verified against, and the
- * client it was issued to. All three come from the deployment's configuration
- * of the grant's connection, never from the upstream; `issuer` has already
- * been compared with the verified id_token's.
+ * The upstream registration an identity was issued under: the federation's
+ * name, the issuer the id_token was verified against, and the client it was
+ * issued to. All three come from the deployment's configuration of the
+ * grant's connection, never from the upstream; `issuer` has already been
+ * compared with the verified id_token's.
  */
 export interface FederatedIdentityRegistration {
 	readonly provider: string;
@@ -56,14 +56,14 @@ export interface FederatedIdentityLookup extends FederatedIdentityRegistration {
 	readonly sub: string;
 	/**
 	 * The connection's `identityClaims`, each one present, from the verified
-	 * id_token and nowhere else (#611) — `{}` when the connection names none. A
-	 * callback missing any of them does not ask. Transient: the Store must not
-	 * log, persist or echo them.
+	 * id_token and nowhere else; `{}` when the connection names none. A callback
+	 * missing any of them does not ask. Transient: the Store must not log,
+	 * persist or echo them.
 	 */
 	readonly claims: Readonly<Record<string, string>>;
 }
 
-/** What {@link UserRepository.findSubjectByFederatedIdentity} answers (#611). */
+/** What {@link UserRepository.findSubjectByFederatedIdentity} answers. */
 export type FederatedIdentityLookupResult =
 	| { readonly kind: "linked"; readonly subject: string }
 	| { readonly kind: "unlinked" }
@@ -72,7 +72,7 @@ export type FederatedIdentityLookupResult =
 			readonly reason: "registration_not_covered" | "identity_not_resolvable";
 	  };
 
-/** What the Store answered a link request with (#482). */
+/** What the Store answered a link request with. */
 export type LinkFederatedIdentityResult =
 	| { readonly ok: true; readonly user: User }
 	| {
@@ -86,15 +86,13 @@ export interface UserRepository {
 	authenticate(username: string, password: string): Promise<User | null>;
 	authenticateByToken(token: string): Promise<User | null>;
 	/**
-	 * Link a federated identity to an existing user (#482). Optional: a Store
-	 * that does not implement it makes linking unavailable — the federation
-	 * start route refuses `link=1` with `link_unsupported` before sending the
-	 * browser anywhere. Called by the federation callback only when the
-	 * browser holds an authenticated session for `userId` and the identity
-	 * resolves to no user; the Store decides, and answers `refused` (policy)
-	 * or `conflict` (the identity is already another account's). Nothing
-	 * links implicitly: without `link=1` an unknown identity stays
-	 * `unknown_user`.
+	 * Link a federated identity to an existing user. Optional: without it the
+	 * federation start route refuses `link=1` with `link_unsupported` before
+	 * sending the browser anywhere. Called by the federation callback only when
+	 * the browser holds an authenticated session for `userId` and the identity
+	 * resolves to no user; the Store answers `refused` (policy) or `conflict`
+	 * (already another account's). Nothing links implicitly: without `link=1` an
+	 * unknown identity stays `unknown_user`.
 	 */
 	linkFederatedIdentity?(
 		userId: string,
@@ -102,83 +100,65 @@ export interface UserRepository {
 	): Promise<LinkFederatedIdentityResult>;
 	/**
 	 * Whether this Store can answer {@link findSubjectByFederatedIdentity}
-	 * completely for identities issued under `registration` (#611). Synchronous
-	 * and side-effect-free; asked at boot for every federation-grant connection
-	 * while `federationGrants.identityLookup` is `"required"`, and only a literal
-	 * `true` lets the deployment start.
+	 * completely for identities issued under `registration`. Synchronous and
+	 * side-effect-free. Asked at boot for every federation-grant connection
+	 * while `federationGrants.identityLookup` is `"required"`; only a literal
+	 * `true` lets the deployment start. Implemented together with the lookup;
+	 * one without the other is refused at boot.
 	 *
-	 * `true` is a statement about an implemented strategy, not about any one
-	 * person: that for this registration the Store can find every local link
-	 * that names the person behind an identity — whichever registration of the
-	 * IdP that link was made through — and so can tell "linked to nobody" from
-	 * "linked somewhere I cannot see". A Store that only keys links by
-	 * federation name and `sub` cannot say that for a registration of its own,
-	 * because a login links under the federation the user signed in through,
-	 * and an IdP whose `sub` is pairwise per registration (Entra's is) gives the
-	 * same person another `sub` under every registration. Required together
-	 * with the lookup; one without the other is refused at boot.
-	 *
-	 * `identityClaims` is what the connection will hand the lookup as `claims`
-	 * (#611). A Store whose strategy needs claims answers `false` unless they
-	 * are named — a directory keyed by Entra's tenant and object id needs both
-	 * `tid` and `oid`. A Store that learns identities only from logins, where
-	 * `<provider>:<sub>` is all it is told, cannot cover a registration whose
-	 * `sub` is pairwise at all: that `sub` is first seen at the grant callback.
+	 * `true` means the Store can find every local link naming the person behind
+	 * an identity, whichever registration the link was made through, and so can
+	 * tell "linked to nobody" from "linked somewhere I cannot see". Keying links
+	 * by federation name and `sub` cannot, where the IdP's `sub` is pairwise per
+	 * registration (Entra's is). `identityClaims` is what the lookup will get as
+	 * `claims`; a strategy that needs claims (Entra's `tid` and `oid`) answers
+	 * `false` unless they are named. See ADR
+	 * 2026-09-17-federation-grants-offline-delegation.
 	 */
 	supportsFederatedIdentityLookup?(
 		registration: FederatedIdentityRegistration,
 		identityClaims: readonly string[],
 	): boolean;
 	/**
-	 * Who an upstream identity belongs to locally (#593, D7 check 5; #611).
-	 * Optional; a deployment says whether it has it with
-	 * `federationGrants.identityLookup`, and one that requires it is refused at
-	 * boot without it (and without {@link supportsFederatedIdentityLookup}
-	 * answering `true` for every connection's registration).
+	 * Who an upstream identity belongs to locally. Optional; a deployment says
+	 * whether it has it with `federationGrants.identityLookup`, and one that
+	 * requires it is refused at boot without it (and without
+	 * {@link supportsFederatedIdentityLookup} answering `true` for every
+	 * connection's registration).
 	 *
 	 * The grant callback asks this to refuse a delegation whose upstream account
-	 * already belongs to another local user. `authenticateByToken` cannot stand
-	 * in: it carries login semantics, and a Store may stamp a last login or
-	 * provision a user on first sight. So this one MUST change nothing — no
-	 * login recorded, no link made, no user created, no claims merged, nothing
-	 * inferred from an email.
+	 * already belongs to another local user. It MUST change nothing: no login
+	 * recorded, no link made, no user created, no claims merged, nothing inferred
+	 * from an email. `authenticateByToken` cannot stand in: it has login
+	 * semantics.
 	 *
-	 * The answers are about ownership across every registration, not about the
-	 * one the identity came through:
+	 * Answers are about ownership across every registration:
 	 *
-	 * - `linked` — a complete resolution found exactly one local owner; its
-	 *   `subject` is that user's `id` (what `User.id` is everywhere else).
-	 *   Several links that all name the same user are one owner.
-	 * - `unlinked` — a complete resolution established that no local user holds
-	 *   this person. Not "this query returned no rows": a Store that searched
-	 *   only the namespace it was given, where a link could live elsewhere, has
-	 *   not established this.
-	 * - `indeterminate` — it cannot say either. `registration_not_covered`: it
-	 *   has no strategy for this registration (boot asked, so this means
-	 *   coverage was lost since). `identity_not_resolvable`: it has one, and
-	 *   this identity is not in it — an alias it was never told of, records
-	 *   whose provenance it does not know. The callback refuses the delegation.
+	 * - `linked`: a complete resolution found exactly one local owner; `subject`
+	 *   is its `User.id`. Several links naming the same user are one owner.
+	 * - `unlinked`: a complete resolution established that no local user holds
+	 *   this person, not merely that a search of one namespace found no rows.
+	 * - `indeterminate`: neither. `registration_not_covered`: no strategy for
+	 *   this registration (coverage lost since boot). `identity_not_resolvable`:
+	 *   a strategy, but this identity is not in it. The callback refuses.
 	 *
-	 * A backend that cannot answer throws, and so does one whose data names more
-	 * than one owner: the answer decides whether a delegation is refused as
-	 * somebody else's, and an arbitrary pick is worse than an outage.
+	 * Throws when the backend cannot answer or its data names more than one
+	 * owner: the answer decides a refusal, and an arbitrary pick is worse than
+	 * an outage.
 	 */
 	findSubjectByFederatedIdentity?(
 		identity: FederatedIdentityLookup,
 	): Promise<FederatedIdentityLookupResult>;
 	/**
-	 * Tell the Store whether `subject` has a second factor enrolled — the MFA
-	 * enrollment witness it answers on `authenticate` as `User.mfaEnrolled`
-	 * (the MFA ADR's D12). Optional; detected by
-	 * {@link supportsMfaEnrollmentWitness}.
+	 * Persist whether `subject` has a second factor enrolled: the MFA enrollment
+	 * witness the Store answers on `authenticate` as `User.mfaEnrolled`.
+	 * Optional; detected by {@link supportsMfaEnrollmentWitness}.
 	 *
-	 * The provider decides and the Store only persists. It is called with
-	 * `true` after the first counting factor has been written, and with
-	 * `false` after the last one was removed or an operator reset every factor
-	 * — so a crash between the two leaves a factor without a witness, never a
-	 * witness without a factor. A verification whose `User` lacks the witness
-	 * while a counting factor exists marks it again. Idempotent. A backend that
-	 * cannot answer throws.
+	 * The provider decides and the Store only persists: `true` after the first
+	 * counting factor has been written, `false` after the last one is removed or
+	 * reset, so a crash in between never leaves a witness without a factor.
+	 * Idempotent. A backend that cannot answer throws. See the MFA ADR
+	 * (2026-09-25-multi-factor-authentication), D12.
 	 */
 	markMfaEnrolled?(subject: string, enrolled: boolean): Promise<void>;
 }
@@ -203,15 +183,11 @@ export function supportsMfaEnrollmentWitness(
 }
 
 // ---------------------------------------------------------------------------
-// ComponentMap slot declaration (per A2-α §6.1)
+// ComponentMap slot declaration
 //
-// `userRepository` is a core component produced by a composition-root-local
-// module (e.g. `repositoriesModule` in A2-γ §3.8 standalone template). Modules
-// that authenticate users (sessionModule's /login, federation routes after
-// callback) declare `requires: ["userRepository"]` and receive the instance
-// through the typed DI graph.
-//
-// Per A2-γ §3.4: sessionModule requires userRepository in its manifest.
+// `userRepository` is produced by a composition-root-local module (e.g. the
+// standalone template's `repositoriesModule`). Modules that authenticate
+// users declare `requires: ["userRepository"]`.
 // ---------------------------------------------------------------------------
 declare module "@o3co/auth-provider-core" {
 	interface ComponentMap {
@@ -228,13 +204,11 @@ export type MfaEnrollmentWitness = "enrolled" | "not_enrolled" | "malformed";
 /**
  * The one reading of `User.mfaEnrolled`, for the `User` a login's
  * `authenticate` answered and for the session's snapshot of it alike: `true`
- * is `enrolled`; `false` or absent is `not_enrolled`; any other value — `1`,
- * `"true"`, `null` — is `malformed`. A malformed witness is never read as
+ * is `enrolled`; `false` or absent is `not_enrolled`; any other value (`1`,
+ * `"true"`, `null`) is `malformed`. A malformed witness is never read as
  * "not enrolled", which would open a first binding to whoever holds the
- * password: the MFA package answers it `503 temporarily_unavailable` and binds
- * nothing — at login its `mfa` requirement records the audit event and throws,
- * so admission's one `session_admission_unavailable` line carries the cause
- * (the MFA ADR's D12, as amended); a route that reads it logs its own line.
+ * password: the MFA package answers it `503 temporarily_unavailable` and
+ * binds nothing (the MFA ADR's D12).
  */
 export function readMfaEnrollmentWitness(
 	user: Readonly<Record<string, unknown>>,
