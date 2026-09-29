@@ -621,6 +621,8 @@ export interface Composition {
 	readonly handle: Awaited<ReturnType<typeof createApp>>;
 	/** The configuration boot parsed: what the handle's `config` slot holds. */
 	readonly config: AppConfig;
+	/** What `createApp` was handed: the configuration as resolved (phase two), unparsed. */
+	readonly resolved: AppConfig;
 	readonly modules: readonly Module[];
 	readonly logger: RecordingLogger;
 	readonly upstreams: Upstreams;
@@ -643,10 +645,13 @@ export async function compose(options: ComposeOptions = {}): Promise<Composition
 	const logger = createRecordingLogger();
 	// Phase two: the configuration as resolved over every loaded package's
 	// reference.conf, which createApp parses once.
+	const resolved = adjust(
+		resolveForBoot(ownFiles(), modules, switches.sessionRequirements, { env }),
+	);
 	const handle = await createApp({
 		modules,
 		bootstrapComponents: {
-			config: adjust(resolveForBoot(ownFiles(), modules, switches.sessionRequirements, { env })),
+			config: resolved,
 			pathResolver: (s) => s,
 			logger,
 		},
@@ -666,7 +671,7 @@ export async function compose(options: ComposeOptions = {}): Promise<Composition
 	);
 	app.use(handle.router);
 	if (options.terminalErrorHandler !== false) app.use(terminalErrorHandler(logger));
-	return { app, handle, config: parsed, modules, logger, upstreams: fakes };
+	return { app, handle, config: parsed, resolved, modules, logger, upstreams: fakes };
 }
 
 // ---------------------------------------------------------------------------

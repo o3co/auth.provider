@@ -299,6 +299,73 @@ describe("the full set boots together", () => {
 });
 
 // ---------------------------------------------------------------------------
+// The configuration (#728)
+// ---------------------------------------------------------------------------
+
+const isObject = (value: unknown): value is Record<string, unknown> =>
+	typeof value === "object" && value !== null && !Array.isArray(value);
+
+/** Every dotted path in `tree` that carries a value; a list is one value. */
+function leafPaths(tree: unknown, prefix = ""): string[] {
+	if (!isObject(tree) || Object.keys(tree).length === 0) return prefix === "" ? [] : [prefix];
+	return Object.entries(tree).flatMap(([key, value]) =>
+		leafPaths(value, prefix === "" ? key : `${prefix}.${key}`),
+	);
+}
+
+/** The value at a dotted path, or `undefined`. */
+function valueAt(tree: unknown, path: string): unknown {
+	let cursor: unknown = tree;
+	for (const key of path.split(".")) {
+		if (!isObject(cursor) || !Object.hasOwn(cursor, key)) return undefined;
+		cursor = cursor[key];
+	}
+	return cursor;
+}
+
+describe("the configuration createApp is handed reaches every loaded module whole (#728)", () => {
+	it("layers each added package's reference.conf, because its modules declare it", async () => {
+		const { resolved } = await boot();
+		// A default each package ships and no layer above it sets.
+		for (const path of [
+			"oauth.deviceAuthorization.rateLimit.windowSeconds",
+			"oauth.dpop.iat-window-seconds",
+			"oauth.mtls.full-pki.max-chain-depth",
+			"webauthn.rateLimit.authenticationOptions.limit",
+			"mfa.factors.totp.enabled",
+		]) {
+			expect(valueAt(resolved, path), path).toBeDefined();
+		}
+	});
+
+	it("strips no path of what createApp was handed", async () => {
+		const { resolved, config } = await boot();
+		const paths = leafPaths(resolved);
+		expect(paths.length).toBeGreaterThan(150);
+		expect(paths.filter((path) => valueAt(config, path) === undefined)).toEqual([]);
+	});
+
+	it("keeps each added package's switch as the deployment wrote it (#472, #496)", async () => {
+		const { config } = await boot();
+		const on = config as unknown as Record<string, unknown>;
+		// #472: the device grant's `enabled = true` reached nothing once.
+		expect(valueAt(on, "oauth.deviceAuthorization.enabled")).toBe(true);
+		// #496: DPoP, mTLS and WebAuthn reported themselves switched off.
+		expect(valueAt(on, "oauth.dpop.enabled")).toBe(true);
+		expect(valueAt(on, "oauth.mtls.enabled")).toBe(true);
+		expect(valueAt(on, "oauth.mtls.trusted-proxies")).toEqual(["loopback"]);
+		expect(valueAt(on, "webauthn.rpId")).toBe("auth.test");
+	});
+
+	it("names no section as ignored: every one it is handed has an owner", async () => {
+		const { logger } = await boot();
+		expect(
+			logger.lines.filter((line) => JSON.stringify(line).includes("config_sections_ignored")),
+		).toEqual([]);
+	});
+});
+
+// ---------------------------------------------------------------------------
 // Session requirements (the session-admission ADR's D7)
 // ---------------------------------------------------------------------------
 
