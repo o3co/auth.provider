@@ -31,7 +31,7 @@ import type {
 	RateLimiter,
 	UserRepository,
 } from "@o3co/auth-provider-core";
-import { resolverForTests } from "@o3co/auth-provider-core/testing";
+import { createTestCsrfTokenSigner, resolverForTests } from "@o3co/auth-provider-core/testing";
 import express from "express";
 import request from "supertest";
 import { describe, expect, it, vi } from "vitest";
@@ -41,7 +41,6 @@ import { createRouter } from "../Session.mjs";
 const stubConfig = {
 	cors: { allowedOrigins: [] },
 	session: {
-		secret: "test-session-secret",
 		name: "auth.session",
 		secure: false,
 		sameSite: "lax",
@@ -53,10 +52,12 @@ const stubConfig = {
 
 /**
  * The CSRF guard runs ahead of the rate-limit guard, so every
- * request here has to clear it or these tests measure the wrong 403.
+ * request here has to clear it or these tests measure the wrong 403: the
+ * router is given `SIGNER`, and `csrf` mints over it.
  */
+const SIGNER = createTestCsrfTokenSigner();
 const csrf = createCsrfProtection({
-	secret: "test-session-secret",
+	signer: SIGNER,
 	cookieName: "auth.session.csrf",
 });
 const csrfToken = csrf.mint();
@@ -104,6 +105,7 @@ const makeApp = (
 	app.use(
 		"/session",
 		createRouter(express, {
+			csrfTokenSigner: SIGNER,
 			userRepository,
 			requirements: resolverForTests([]),
 			config: opts.config ?? stubConfig,
@@ -242,6 +244,7 @@ describe("/session/login rate limiting — fallback", () => {
 			next();
 		});
 		createRouter(express, {
+			csrfTokenSigner: SIGNER,
 			userRepository,
 			requirements: resolverForTests([]),
 			config: stubConfig,
@@ -272,6 +275,7 @@ describe("/session/login rate limiting — fallback under deployment.mode", () =
 		const warn = vi.fn();
 		const router = () =>
 			createRouter(express, {
+				csrfTokenSigner: SIGNER,
 				userRepository,
 				requirements: resolverForTests([]),
 				config,

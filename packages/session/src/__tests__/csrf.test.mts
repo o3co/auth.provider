@@ -23,6 +23,7 @@
  */
 
 import { fullSectionsSchema, type Logger } from "@o3co/auth-provider-core";
+import { createTestCsrfTokenSigner } from "@o3co/auth-provider-core/testing";
 import express, { type NextFunction, type Request, type Response } from "express";
 import request from "supertest";
 import { describe, expect, it, vi } from "vitest";
@@ -35,10 +36,11 @@ import {
 	MAX_CSRF_TTL_SECONDS,
 } from "#/csrf.mjs";
 
-const SECRET = "test-session-secret-value";
+/** What the tokens are signed with: the `csrfTokenSigner` slot's double. */
+const SIGNER = createTestCsrfTokenSigner();
 
 const makeCsrf = (overrides: Partial<CsrfProtectionOptions> = {}) =>
-	createCsrfProtection({ secret: SECRET, ...overrides });
+	createCsrfProtection({ signer: SIGNER, ...overrides });
 
 /** Minimal `Request` stand-in — the module reads headers, body and host only. */
 const fakeRequest = (init: {
@@ -161,11 +163,11 @@ describe("csrf — signed double-submit token", () => {
 		expect(verdict).toBe("invalid");
 	});
 
-	it("rejects a well-formed token signed with a different secret", () => {
+	it("rejects a well-formed token signed by another signer", () => {
 		// This is what separates a signed double-submit from a plain one: a
 		// subdomain that can write the parent-domain cookie still cannot forge
 		// material the provider will accept.
-		const attacker = createCsrfProtection({ secret: "some-other-secret" });
+		const attacker = createCsrfProtection({ signer: createTestCsrfTokenSigner() });
 		const csrf = makeCsrf();
 		const forged = attacker.mint();
 
@@ -181,7 +183,7 @@ describe("csrf — signed double-submit token", () => {
 
 	it("rejects an expired token", () => {
 		let now = 1_000_000_000_000;
-		const csrf = createCsrfProtection({ secret: SECRET, ttlSeconds: 60, now: () => now });
+		const csrf = createCsrfProtection({ signer: SIGNER, ttlSeconds: 60, now: () => now });
 		const token = csrf.mint();
 
 		now += 61_000;
@@ -226,19 +228,19 @@ describe("csrf — ttlSeconds validation at construction", () => {
 		["Infinity", Number.POSITIVE_INFINITY],
 		["a value beyond the ceiling", MAX_CSRF_TTL_SECONDS + 1],
 	])("throws on %s", (_label, ttlSeconds) => {
-		expect(() => createCsrfProtection({ secret: SECRET, ttlSeconds })).toThrow(/ttlSeconds/);
+		expect(() => createCsrfProtection({ signer: SIGNER, ttlSeconds })).toThrow(/ttlSeconds/);
 	});
 
 	it("accepts the ceiling itself", () => {
 		expect(() =>
-			createCsrfProtection({ secret: SECRET, ttlSeconds: MAX_CSRF_TTL_SECONDS }),
+			createCsrfProtection({ signer: SIGNER, ttlSeconds: MAX_CSRF_TTL_SECONDS }),
 		).not.toThrow();
 	});
 
 	it("throws rather than silently flooring a decimal", () => {
 		// Rounding would hide an operator's typo behind a working system, and
 		// the value it silently picked would not be the one they wrote.
-		expect(() => createCsrfProtection({ secret: SECRET, ttlSeconds: 7200.5 })).toThrow();
+		expect(() => createCsrfProtection({ signer: SIGNER, ttlSeconds: 7200.5 })).toThrow();
 	});
 
 	it("agrees with the config schema about what is acceptable", () => {
@@ -252,7 +254,7 @@ describe("csrf — ttlSeconds validation at construction", () => {
 			}).success;
 			let constructorAccepts = true;
 			try {
-				createCsrfProtection({ secret: SECRET, ttlSeconds });
+				createCsrfProtection({ signer: SIGNER, ttlSeconds });
 			} catch {
 				constructorAccepts = false;
 			}
@@ -270,7 +272,7 @@ describe("csrf — ttlSeconds validation at construction", () => {
 		// `POST /session/login` then rejects.
 		const wireShape = /^\d{1,15}\.[A-Za-z0-9_-]{16,}\.[A-Za-z0-9_-]{16,}$/;
 		for (const ttlSeconds of [1, 60, 7200, MAX_CSRF_TTL_SECONDS]) {
-			const csrf = createCsrfProtection({ secret: SECRET, ttlSeconds });
+			const csrf = createCsrfProtection({ signer: SIGNER, ttlSeconds });
 			const token = csrf.mint();
 			expect(token).toMatch(wireShape);
 			// And it round-trips, which the shape alone does not prove.
@@ -289,7 +291,7 @@ describe("csrf — ttlSeconds validation at construction", () => {
 		// `Date.now()` is integral in practice, but a seam or a faked clock need
 		// not be — and the expiry is floored, not the raw sum.
 		const csrf = createCsrfProtection({
-			secret: SECRET,
+			signer: SIGNER,
 			ttlSeconds: 7200,
 			now: () => 1_000_000_000_123.7,
 		});
@@ -310,7 +312,7 @@ describe("csrf — ttlSeconds validation at construction", () => {
 describe("csrf — cookie issuance", () => {
 	it("writes a JS-readable cookie mirroring the session cookie's transport attributes", () => {
 		const csrf = createCsrfProtection({
-			secret: SECRET,
+			signer: SIGNER,
 			cookieName: "auth.session.csrf",
 			ttlSeconds: 900,
 			cookie: { secure: true, sameSite: "lax", domain: "example.com" },
@@ -338,7 +340,7 @@ describe("csrf — cookie issuance", () => {
 
 	it("omits the domain attribute when no cookie domain is configured", () => {
 		const csrf = createCsrfProtection({
-			secret: SECRET,
+			signer: SIGNER,
 			cookie: { secure: false, sameSite: "lax" },
 		});
 		const res = fakeResponse();
@@ -407,7 +409,7 @@ describe("csrf — origin / referer check", () => {
 describe("csrf — guard acceptance rule", () => {
 	const buildApp = (opts: { trustedOrigins?: string[] } = {}) => {
 		const csrf = createCsrfProtection({
-			secret: SECRET,
+			signer: SIGNER,
 			cookie: { secure: false, sameSite: "lax" },
 		});
 		const app = express();
@@ -510,7 +512,7 @@ describe("csrf — guard acceptance rule", () => {
 describe("csrf — issue endpoint", () => {
 	it("hands out a token, sets the paired cookie, and forbids caching", async () => {
 		const csrf = createCsrfProtection({
-			secret: SECRET,
+			signer: SIGNER,
 			cookie: { secure: false, sameSite: "lax" },
 		});
 		const app = express();

@@ -31,6 +31,7 @@ import {
 	type CsrfTokenSigner,
 	defineModule,
 	type FederationTokenStore,
+	type Module,
 	type SessionFederationIndex,
 	type UserRepository,
 	type UserSessionStore,
@@ -283,10 +284,7 @@ const probe = () =>
 	});
 
 /** An app over `modules`, booted on `config`. */
-const bootApp = async (
-	modules: Parameters<typeof createTestApp>[0]["modules"],
-	config: AppConfig,
-): Promise<express.Express> => {
+const bootApp = async (modules: Module[], config: AppConfig): Promise<express.Express> => {
 	const handle = await createTestApp({
 		modules,
 		bootstrapComponents: { config, pathResolver: (s: string) => s },

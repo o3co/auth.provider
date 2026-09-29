@@ -28,6 +28,7 @@ import {
 } from "@o3co/auth-provider-core";
 import {
 	createTestApp,
+	createTestCsrfTokenSigner,
 	makeValidAppConfig,
 	resolverForTests,
 } from "@o3co/auth-provider-core/testing";
@@ -101,6 +102,12 @@ const sessionFederationIndexModule = defineModule({
 	provides: { sessionFederationIndex: () => makeSessionFederationIndex() },
 });
 
+/** The CSRF token's signer, which the session store's module provides where it is loaded. */
+const csrfTokenSignerModule = defineModule({
+	name: "test:csrf-token-signer",
+	provides: { csrfTokenSigner: () => createTestCsrfTokenSigner() },
+});
+
 /**
  * Stubs for three oauth-package slots that no session-package module
  * provides. The boot-time `federation-stores-incomplete` validator requires
@@ -156,6 +163,7 @@ const baseTestModules = [
 	userSessionStoreModule,
 	federationTokenStoreModule,
 	sessionFederationIndexModule,
+	csrfTokenSignerModule,
 	// Oauth-package stubs for the `federation-stores-incomplete` validator (above).
 	sessionRPRegistryModule,
 	sessionFamilyIndexModule,
@@ -181,6 +189,7 @@ describe("sessionModule (static manifest)", () => {
 				"userSessionStore",
 				"federationTokenStore",
 				"sessionFederationIndex",
+				"csrfTokenSigner",
 				"federationProviders",
 				"federationRedirectPolicyResolver",
 			]),
@@ -448,7 +457,6 @@ describe("sessionModule — the password login is a consumer of session admissio
 		const base = makeValidAppConfig();
 		const config = {
 			...base,
-			session: { ...base.session, secret: "module-test-secret" },
 			deployment: { mode: "single" },
 		} as unknown as AppConfig;
 		const factory = sessionModule.contributes?.routes?.[0] as unknown as (deps: unknown) => {
@@ -464,6 +472,7 @@ describe("sessionModule — the password login is a consumer of session admissio
 			userSessionStore: makeUserSessionStore(),
 			federationTokenStore: makeFederationTokenStore(),
 			sessionFederationIndex: makeSessionFederationIndex(),
+			csrfTokenSigner: createTestCsrfTokenSigner(),
 			sessionRequirementResolver: resolverForTests(requirements),
 		});
 		expect(contribution.id).toBe("session-routes");

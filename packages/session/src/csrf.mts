@@ -23,9 +23,11 @@
  *    attacker can neither write the victim's cookie for this origin nor set a
  *    custom header without a CORS preflight the provider never grants, so a
  *    matching pair is evidence the request was composed by same-site code.
- *    The HMAC means only this provider can mint a token that verifies; a plain
- *    double-submit would trust whatever a sibling subdomain able to write a
- *    parent-domain cookie put there. It is stateless because
+ *    The signature means only the holder of the session secret can mint a
+ *    token that verifies; a plain double-submit would trust whatever a sibling
+ *    subdomain able to write a parent-domain cookie put there. The signature
+ *    is the `csrfTokenSigner` slot's (`./csrf-token-signer.mts`), so nothing
+ *    here holds the secret or the key. It is stateless because
  *    `POST /session/login` runs before there is a session to bind to, and with
  *    `saveUninitialized: false` an anonymous visitor has no stable session id.
  * 2. **A strict same-origin `Origin` / `Referer` check** with its own trust
@@ -36,10 +38,11 @@
  * held to ({@link checkNavigationOrigin}).
  */
 
-import { createHash, createHmac, hkdfSync, randomBytes, timingSafeEqual } from "node:crypto";
+import { randomBytes } from "node:crypto";
 import {
 	auditErrorText,
 	type CsrfGuard,
+	type CsrfTokenSigner,
 	type CsrfVerdict,
 	consoleLogger,
 	errorEnvelope,
@@ -47,6 +50,7 @@ import {
 	type NavigationVerdict,
 } from "@o3co/auth-provider-core";
 import type { CookieOptions, NextFunction, Request, RequestHandler, Response } from "express";
+import { constantTimeEquals } from "./internal/constantTimeEquals.mjs";
 import { readCookie } from "./internal/cookies.mjs";
 
 /** Default cookie carrying the double-submit value. */
@@ -65,15 +69,6 @@ export const DEFAULT_CSRF_TTL_SECONDS = 7200;
  * `core`, not the reverse); a test in this package pins the schema to it.
  */
 export const MAX_CSRF_TTL_SECONDS = 86_400;
-
-/**
- * HKDF `info` string. The signing key is derived from the session secret
- * rather than being the session secret, so a token signature can never be
- * confused with — or used as an oracle against — a session cookie signature.
- * The version suffix is what a future format change bumps to invalidate every
- * token in flight in one move.
- */
-const CSRF_KEY_INFO = "o3co.auth.provider/session-csrf/v1";
 
 /**
  * What the token arm concluded.
@@ -96,10 +91,12 @@ export interface CsrfCookieAttributes {
 
 export interface CsrfProtectionOptions {
 	/**
-	 * Secret the signing key is derived from. Pass `session.secret`; the key
-	 * itself is an HKDF expansion of it, never the secret.
+	 * What signs and verifies a token's `<expiry>.<nonce>`: the
+	 * `csrfTokenSigner` slot's signer, which the session store's module
+	 * provides from `session.secret` (`createSessionCsrfTokenSigner`). The
+	 * protection holds neither the secret nor the key.
 	 */
-	readonly secret: string;
+	readonly signer: CsrfTokenSigner;
 	readonly cookieName?: string;
 	readonly headerName?: string;
 	readonly bodyField?: string;
@@ -121,25 +118,6 @@ export interface CsrfProtection {
 	/** Check the double-submit pair carried by `req`. */
 	verify(req: Request): CsrfTokenVerdict;
 }
-
-const deriveSigningKey = (secret: string): Buffer =>
-	Buffer.from(hkdfSync("sha256", secret, "", CSRF_KEY_INFO, 32));
-
-const sign = (key: Buffer, payload: string): string =>
-	createHmac("sha256", key).update(payload, "utf8").digest("base64url");
-
-/**
- * Length-independent constant-time comparison.
- *
- * `timingSafeEqual` throws on differing lengths, and guarding that with a
- * length check leaks the length. Comparing fixed-width digests of the inputs
- * sidesteps both.
- */
-const constantTimeEquals = (a: string, b: string): boolean =>
-	timingSafeEqual(
-		createHash("sha256").update(a, "utf8").digest(),
-		createHash("sha256").update(b, "utf8").digest(),
-	);
 
 /** `<expiry-seconds>.<nonce>.<signature>` */
 const TOKEN_SHAPE = /^(\d{1,15})\.([A-Za-z0-9_-]{16,})\.([A-Za-z0-9_-]{16,})$/;
@@ -175,19 +153,19 @@ export const createCsrfProtection = (options: CsrfProtectionOptions): CsrfProtec
 	assertValidTtlSeconds(ttlSeconds);
 	const cookie = options.cookie ?? { secure: true, sameSite: "lax" as const };
 	const now = options.now ?? Date.now;
-	const key = deriveSigningKey(options.secret);
+	const { signer } = options;
 
 	const mint = (): string => {
 		const expires = Math.floor(now() / 1000) + ttlSeconds;
 		const nonce = randomBytes(24).toString("base64url");
-		return `${expires}.${nonce}.${sign(key, `${expires}.${nonce}`)}`;
+		return `${expires}.${nonce}.${signer.sign(`${expires}.${nonce}`)}`;
 	};
 
 	const isWellSigned = (token: string): boolean => {
 		const match = TOKEN_SHAPE.exec(token);
 		if (!match) return false;
 		const [, expires, nonce, signature] = match;
-		if (!constantTimeEquals(signature ?? "", sign(key, `${expires}.${nonce}`))) return false;
+		if (!signer.verify(`${expires}.${nonce}`, signature ?? "")) return false;
 		return Number(expires) * 1000 > now();
 	};
 
@@ -407,9 +385,10 @@ export const checkNavigationOrigin = (
  * - `issue` sets a fresh token in `csrf`'s cookie, which the session module
  *   names from the session cookie and gives its attributes.
  *
- * The signing key is `csrf`'s; the session module builds `csrf` from
- * `session.secret` (`createCsrfProtectionFromConfig`), which the session
- * store's module owns.
+ * `csrf` signs through the `csrfTokenSigner` slot, which the session store's
+ * module fills from `session.secret`: the session module builds it with
+ * {@link createCsrfProtectionFromConfig}, as the session routes build theirs,
+ * so a token either issues passes the other's check.
  */
 export const createSessionCsrfGuard = ({
 	csrf,
@@ -457,7 +436,6 @@ export const createCsrfIssueHandler = (csrf: CsrfProtection): RequestHandler => 
  * can be called with a partial config in tests without an `AppConfig` cast.
  */
 export interface SessionCsrfConfigSlice {
-	readonly secret: string;
 	readonly name: string;
 	readonly secure: boolean;
 	readonly sameSite: "lax" | "strict" | "none";
@@ -471,7 +449,9 @@ export interface SessionCsrfConfigSlice {
 }
 
 /**
- * Build the protection from the `session` config slice.
+ * Build the protection from the `session` config slice, signing through
+ * `options.signer` (the `csrfTokenSigner` slot's signer). The slice carries no
+ * secret: this reads the cookie's name and attributes and the token's lifetime.
  *
  * The cookie name is derived as `<session.name>.csrf`, so it inherits the
  * session cookie's prefix. For `__Host-` that means the CSRF cookie cannot
@@ -481,10 +461,9 @@ export interface SessionCsrfConfigSlice {
  */
 export const createCsrfProtectionFromConfig = (
 	session: SessionCsrfConfigSlice,
-	overrides: Partial<CsrfProtectionOptions> = {},
+	options: Pick<CsrfProtectionOptions, "signer"> & Partial<CsrfProtectionOptions>,
 ): CsrfProtection =>
 	createCsrfProtection({
-		secret: session.secret,
 		cookieName: `${session.name}.csrf`,
 		ttlSeconds: session.csrf?.ttlSeconds ?? DEFAULT_CSRF_TTL_SECONDS,
 		cookie: {
@@ -492,5 +471,5 @@ export const createCsrfProtectionFromConfig = (
 			sameSite: session.sameSite,
 			...(session.domain ? { domain: session.domain } : {}),
 		},
-		...overrides,
+		...options,
 	});

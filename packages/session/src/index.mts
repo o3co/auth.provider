@@ -33,7 +33,7 @@ export {
 // guard on routes this package does not own. Another package reaches the guard
 // through the `csrfGuard` slot the session module provides;
 // `createSessionCsrfGuard` builds that slot's value, for a composition that
-// provides it without the module.
+// provides it without the module. Every one signs through a `CsrfTokenSigner`.
 export type {
 	CsrfCookieAttributes,
 	CsrfGuardOptions,
@@ -56,6 +56,10 @@ export {
 	DEFAULT_CSRF_TTL_SECONDS,
 	MAX_CSRF_TTL_SECONDS,
 } from "./csrf.mjs";
+// The `csrfTokenSigner` slot the session store's module provides from
+// `session.secret`; exported so a composition that mounts its own cookie
+// session provides the slot the same way, and its tokens keep verifying.
+export { createSessionCsrfTokenSigner } from "./csrf-token-signer.mjs";
 // The session-admission ADR's D5 — the tail of a login: the session written
 // from the `Establishment` core's admission built, and nothing beside it. Both
 // login routes call it, and a requirement's completion (the MFA package's,
