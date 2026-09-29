@@ -196,6 +196,10 @@ export {
 	resolveRefreshTokenLifetime,
 } from "./config/application.schema.mjs";
 export { MAX_DURATION_MS, MAX_DURATION_SECONDS } from "./config/durations.mjs";
+// #728: how the deployment runs — what its HTTP behaviour depends on of the
+// `http` module's settings, and how many replicas the operator says run —
+// each through a slot rather than the configuration.
+export type { DeploymentMode, HttpSettings } from "./deployment/types.mjs";
 // OIDC discovery aggregation — modules contribute `discoveryMetadata`
 // (OidcDiscoveryContributionFactory above) and core synthesizes the
 // `/.well-known/openid-configuration` document via `buildDiscoveryDocument`.

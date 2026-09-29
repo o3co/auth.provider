@@ -98,6 +98,16 @@ export {
 	type TestCsrfGuardOptions,
 } from "./slots/csrfGuard.mjs";
 export {
+	type DeploymentModeContractInput,
+	deploymentModeContract,
+} from "./slots/deploymentMode.mjs";
+export {
+	createTestHttpSettings,
+	type HttpSettingsContractInput,
+	httpSettingsContract,
+	type TestHttpSettingsOverrides,
+} from "./slots/httpSettings.mjs";
+export {
 	createRecordingLoginCompletion,
 	type LoginCompletionContractInput,
 	loginCompletionContract,
