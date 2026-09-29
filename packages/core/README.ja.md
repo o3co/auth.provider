@@ -229,7 +229,7 @@ JWT の `exp`・`iat`・`nbf` は、有限で Date の範囲に収まるとき�
 
 それぞれの仕組みが拡張面の 1 つの軸です: `routes`・`grants`・`federations` への contribution は振る舞いを足し（plugin）、`provides` はポートのスロットを埋め（adapter）、`supportsX` ガードで検出される任意のメソッドはアダプターの追加機能であり（capability）、core が合成する contribution の種別は core の判断の意味を変えます（extension）。新しいポリシーをどの軸に載せるかは [AGENTS.md](../../AGENTS.md#extension-surface-four-axes) の規則です。
 
-設定を読むモジュールは、自分のセクションをマニフェストで宣言します（[#728](https://github.com/o3co/auth.provider/issues/728)）: `section.schema` はモジュールが所有する唯一のセクションの Zod スキーマで、boot はどのファクトリーよりも先にそのセクションをパースし、スキーマの出力の型を持つ `deps.section` としてすべてのファクトリーに渡します。スキーマが拒否する値は、オペレーターが書いたパスを示して boot を拒否します（`config-validation-failed`）。セクションはモジュール名の位置から読まれ、まだ古いパスにある間は `section.at` の位置から読まれます。`section.reference`（パッケージの `config/reference.conf`）と `section.relocatedFrom`（セクションの移動元のパス）は宣言だけで、まだ何にも使われません。core のスキーマと合成されて設定全体をパースする `configSchema` は非推奨です。
+設定を読むモジュールは、自分のセクションをマニフェストで宣言します（[#728](https://github.com/o3co/auth.provider/issues/728)）: `section.schema` はモジュールが所有する唯一のセクションの Zod スキーマで、boot はどのファクトリーよりも先にそのセクションをパースし、スキーマの出力の型を持つ `deps.section` としてすべてのファクトリーに渡します。スキーマが拒否する値は、オペレーターが書いたパスを示して boot を拒否します（`config-validation-failed`）。セクションはモジュール名の位置から読まれ、まだ古いパスにある間は `section.at` の位置から読まれます。`section.reference`（パッケージの `config/reference.conf`）と `section.relocatedFrom`（セクションの移動元のパス）は宣言だけで、まだ何にも使われません。core のスキーマと合成されて設定全体をパースする `configSchema` は、ローダーが各パッケージの `reference.conf` を重ねるようになった時点で非推奨になります。それまでは、core のパースを通してセクションのキーを残すものでもあります。
 
 ```typescript
 const myModule = defineModule({
