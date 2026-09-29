@@ -658,9 +658,11 @@ incarnation `create` wrote, after core's own checks of the patch; and
 `newMfaTransactionRecord` answers it and read back through the same function,
 so it has the in-process store's shape; one that does not read back is
 answered as absent, and the ceremony starts again. So is one at or past its
-`expiresAtMs` on the store's own clock (`now`, `Date.now` by default): the key
-expires on the server's clock, and a server running behind must not let a
-ceremony complete past its deadline. The record travels as JSON,
+`expiresAtMs` on the store's own clock (`now`, `Date.now` by default), by every
+operation — `reserveAttempt` and `takeChallenge` in their scripts, which are
+handed that clock and spend or take nothing then: the key expires on the
+server's clock, and a server running behind must not let a ceremony spend an
+attempt, take a challenge or complete past its deadline. The record travels as JSON,
 as the session envelope's `claims` and the cookie session's `user` do, so a
 login continuation's `user` and `claims` must be JSON-representable: a `Date`
 comes back as its string and an `undefined` value as a missing key, where the

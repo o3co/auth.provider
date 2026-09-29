@@ -50,9 +50,11 @@
  *
  * **Two clocks.** A transaction's key expires on the server's clock, at its
  * `expiresAtMs` rounded up to a whole millisecond (`PEXPIREAT`); on this
- * side's clock (`now`) `create` refuses one already past, and a read answers
- * one at or past its `expiresAtMs` as absent, so a server running behind
- * cannot let a ceremony complete past its deadline. D21's answers are judged on the
+ * side's clock (`now`) `create` refuses one already past, and every other
+ * operation answers one at or past its `expiresAtMs` as absent — a read on
+ * this side, `reserveAttempt` and `takeChallenge` in their scripts, which
+ * are handed the clock — so a server running behind cannot let a ceremony
+ * spend an attempt, take a challenge or complete past its deadline. D21's answers are judged on the
  * time the caller passes; what the scripts forget and what Redis reclaims is
  * judged no later than the server's clock, less a day
  * (`MFA_CLOCK_SKEW_ALLOWANCE_MS`). While a run is counted the subject's keys
@@ -293,12 +295,12 @@ export function createRedisMfaTransactionStore(
 					"MfaTransactionStore.reserveAttempt: max must be a positive whole number",
 				);
 			}
-			return client.reserveAttempt(txKey(id), max);
+			return client.reserveAttempt(txKey(id), max, clock());
 		},
 
 		async takeChallenge(id, expectedVersion) {
 			if (!isWholeVersion(expectedVersion)) return null;
-			return challengeOf(await client.takeChallenge(txKey(id), String(expectedVersion)));
+			return challengeOf(await client.takeChallenge(txKey(id), String(expectedVersion), clock()));
 		},
 
 		async consume(id, expectedVersion) {

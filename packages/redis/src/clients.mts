@@ -1543,15 +1543,23 @@ export interface MfaTransactionStoreClient {
 	/**
 	 * Atomically: `attempts` + 1 while that is within `max`; past it — or on
 	 * a count that is not a number — the transaction is deleted and the
-	 * attempts it had are answered with `ok: false`. No transaction:
-	 * `{ ok: false, attempts: 0 }`.
+	 * attempts it had are answered with `ok: false`. No transaction, or one
+	 * gone at `nowMs` — at or past the `expiresAtMs` its `record` holds, or
+	 * holding none that reads — `{ ok: false, attempts: 0 }`, spending
+	 * nothing: the store's clock is the transaction's, whatever the server's
+	 * says, and the key is left to its deadline on the server's.
 	 */
 	reserveAttempt(
 		key: string,
 		max: number,
+		nowMs: number,
 	): Promise<{ readonly ok: boolean; readonly attempts: number }>;
-	/** Atomically: the `challenge` field, removed, while the version is `expectedVersion`; `null` otherwise. */
-	takeChallenge(key: string, expectedVersion: string): Promise<string | null>;
+	/**
+	 * Atomically: the `challenge` field, removed, while the version is
+	 * `expectedVersion` and the transaction is not gone at `nowMs` (as
+	 * `reserveAttempt` judges it); `null` otherwise, taking nothing.
+	 */
+	takeChallenge(key: string, expectedVersion: string, nowMs: number): Promise<string | null>;
 	/** Atomically: every field, and the hash deleted, while the version is `expectedVersion`; `null` otherwise. */
 	consume(key: string, expectedVersion: string): Promise<Readonly<Record<string, string>> | null>;
 	/** D21's `reserveSubjectAttempt`, one script over both keys. */

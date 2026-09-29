@@ -2748,15 +2748,39 @@ return redis.call('HGETALL', KEYS[1])
 `.trim();
 
 /**
+ * Shared by the two operations that decide on a live transaction inside a
+ * script — `reserveAttempt` and `takeChallenge` — whose caller's clock has
+ * to reach the script: whether the transaction at `key` is gone at `now`,
+ * as a read (`transactionOf`) judges it — at or past the `expiresAtMs` its
+ * `record` holds, or holding none that decodes to a number. `cjson` reads
+ * that number as the double `JSON.parse` does, so both sides judge the same
+ * instant alike, to the fraction of a millisecond. Nothing here deletes:
+ * the key stays until its deadline on the server's clock, so a caller whose
+ * clock runs ahead is told the transaction is gone and costs no other caller
+ * the transaction — as `fg_visible` treats a federation grant.
+ */
+const LUA_MFA_TX_PRELUDE = `
+local function mfa_tx_gone(key, now)
+  local text = redis.call('HGET', key, 'record')
+  if not text then return true end
+  local ok, fixed = pcall(cjson.decode, text)
+  if not ok or type(fixed) ~= 'table' or type(fixed['expiresAtMs']) ~= 'number' then return true end
+  return not (now < fixed['expiresAtMs'])
+end
+`;
+
+/**
  * `MfaTransactionStoreClient.reserveAttempt`.
  *
- * `KEYS[1]` = the transaction; `ARGV[1]` = max. Returns `{ok, attempts}`:
- * `{1, n}` for the nth attempt within max; `{0, n}` — and the transaction
- * gone — for the one past it, n being what it had; `{0, 0}` for no
- * transaction, or for a count that is not a number (fails closed: deleted).
+ * `KEYS[1]` = the transaction; `ARGV[1]` = max, `ARGV[2]` = the store's
+ * clock. Returns `{ok, attempts}`: `{1, n}` for the nth attempt within max;
+ * `{0, n}` — and the transaction gone — for the one past it, n being what it
+ * had; `{0, 0}` for no transaction, for one gone at the store's clock (left
+ * as it is), or for a count that is not a number (fails closed: deleted).
  */
-const LUA_MFA_TX_RESERVE_ATTEMPT = `
+const LUA_MFA_TX_RESERVE_ATTEMPT = `${LUA_MFA_TX_PRELUDE}
 if redis.call('EXISTS', KEYS[1]) == 0 then return {0, 0} end
+if mfa_tx_gone(KEYS[1], tonumber(ARGV[2])) then return {0, 0} end
 local attempts = tonumber(redis.call('HGET', KEYS[1], 'attempts'))
 if attempts == nil then
   redis.call('DEL', KEYS[1])
@@ -2769,9 +2793,14 @@ end
 return {1, redis.call('HINCRBY', KEYS[1], 'attempts', 1)}
 `.trim();
 
-/** `MfaTransactionStoreClient.takeChallenge`. `KEYS[1]` = the transaction; `ARGV[1]` = the expected version. */
-const LUA_MFA_TX_TAKE_CHALLENGE = `
+/**
+ * `MfaTransactionStoreClient.takeChallenge`. `KEYS[1]` = the transaction;
+ * `ARGV[1]` = the expected version, `ARGV[2]` = the store's clock. Nothing
+ * is taken from a transaction gone at that clock.
+ */
+const LUA_MFA_TX_TAKE_CHALLENGE = `${LUA_MFA_TX_PRELUDE}
 if redis.call('HGET', KEYS[1], 'version') ~= ARGV[1] then return false end
+if mfa_tx_gone(KEYS[1], tonumber(ARGV[2])) then return false end
 local challenge = redis.call('HGET', KEYS[1], 'challenge')
 if not challenge then return false end
 redis.call('HDEL', KEYS[1], 'challenge')
@@ -3155,13 +3184,23 @@ export function makeIoredisMfaTransactionStoreClient(io: Redis): MfaTransactionS
 			);
 			return Array.isArray(reply) ? hashFields(reply) : null;
 		},
-		async reserveAttempt(key, max) {
-			const reply = await runScript(io, MFA_TX_RESERVE_ATTEMPT, [key], [String(max)]);
+		async reserveAttempt(key, max, nowMs) {
+			const reply = await runScript(
+				io,
+				MFA_TX_RESERVE_ATTEMPT,
+				[key],
+				[String(max), String(nowMs)],
+			);
 			const [ok, attempts] = Array.isArray(reply) ? reply : [0, 0];
 			return { ok: ok === 1, attempts: Number(attempts) };
 		},
-		async takeChallenge(key, expectedVersion) {
-			const reply = await runScript(io, MFA_TX_TAKE_CHALLENGE, [key], [expectedVersion]);
+		async takeChallenge(key, expectedVersion, nowMs) {
+			const reply = await runScript(
+				io,
+				MFA_TX_TAKE_CHALLENGE,
+				[key],
+				[expectedVersion, String(nowMs)],
+			);
 			return typeof reply === "string" ? reply : null;
 		},
 		async consume(key, expectedVersion) {
