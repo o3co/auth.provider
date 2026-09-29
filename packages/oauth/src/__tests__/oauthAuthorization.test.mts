@@ -482,6 +482,72 @@ describe("oauthAuthorizationModule — createTestApp integration", () => {
 });
 
 /**
+ * The authorization_code grant redeems the codes `/authorize` issues into the
+ * code repository, and no other grant reads one. So the repository is the
+ * grant's to require: on, it must be wired; off, the composition needs none.
+ */
+describe("oauthAuthorizationModule — the authorization_code grant needs a code repository", () => {
+	const withGrants = (grants: Record<string, { enabled: boolean }>) => {
+		const base = makeValidAppConfig();
+		return {
+			...base,
+			oauth: { ...base.oauth, grants: { ...base.oauth.grants, ...grants } },
+		};
+	};
+	const boot = (config: AppConfig, modules: readonly Module[]) =>
+		createTestApp({
+			modules: [
+				oauthAuthorizationModule({ config }),
+				clientRepositoryModule,
+				keyStoreModule,
+				...familyStoreModules,
+				...modules,
+			],
+			bootstrapComponents: { config, pathResolver: (s: string) => s },
+		});
+
+	it("refuses to boot with the grant on and no code repository, naming the slot and the switch", async () => {
+		const refusal = await boot(withGrants({ authorization_code: { enabled: true } }), []).then(
+			async (handle) => {
+				await handle.dispose();
+				return undefined;
+			},
+			(err: unknown) => err as { cause?: { message?: unknown } },
+		);
+		expect(refusal, "boot must be refused").toMatchObject({
+			name: "BootError",
+			reason: "contribute-factory-failed",
+			details: { module: "oauth-authorization", kind: "grants", name: "authorization_code" },
+		});
+		expect(String(refusal?.cause?.message)).toMatch(
+			/authorization_code grant is enabled \(oauth\.grants\.authorization_code\.enabled\) but codeRepository is not wired/,
+		);
+	});
+
+	it("boots with the grant off and no code repository", async () => {
+		const handle = await boot(
+			withGrants({
+				authorization_code: { enabled: false },
+				refresh_token: { enabled: false },
+				client_credentials: { enabled: true },
+			}),
+			[],
+		);
+		expect(handle.inspect.grants.has("client_credentials")).toBe(true);
+		expect(handle.inspect.grants.has("authorization_code")).toBe(false);
+		await handle.dispose();
+	});
+
+	it("boots with the grant on and a code repository wired", async () => {
+		const handle = await boot(withGrants({ authorization_code: { enabled: true } }), [
+			codeRepositoryModule,
+		]);
+		expect(handle.inspect.grants.has("authorization_code")).toBe(true);
+		await handle.dispose();
+	});
+});
+
+/**
  * The refresh_token grant rotates each refresh token through its family,
  * refuses a replayed one and revokes the family, and `/oauth/revoke` revokes
  * the family the grant reads. Both family slots are optional to wire, but

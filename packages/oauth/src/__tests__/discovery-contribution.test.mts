@@ -38,14 +38,15 @@ const allLogoutStores = {
 };
 
 /**
- * Minimal `GrantHandlerResolver` stand-in exposing the registered grant-type
- * names. `grant_types_supported` is derived from exactly this read, so the
- * stub only needs to answer `entries()`.
+ * Minimal `GrantHandlerResolver` stand-in over the named grant types: `get`
+ * answers whether one is registered, `entries` lists them, as the resolver
+ * the boot planner builds does.
  */
 function grantResolver(...grantTypes: readonly string[]) {
+	const handlers = new Map(grantTypes.map((t) => [t, {}]));
 	return {
-		get: () => undefined,
-		entries: () => new Map(grantTypes.map((t) => [t, {}])).entries(),
+		get: (grantType: string) => handlers.get(grantType),
+		entries: () => handlers.entries(),
 	};
 }
 
@@ -73,7 +74,9 @@ async function discoveryContribution(
 	// a promise.
 	return await factory({
 		config,
-		grantHandlerResolver: grantResolver(),
+		// An authorization server that serves /authorize unless a test says
+		// otherwise.
+		grantHandlerResolver: grantResolver("authorization_code"),
 		sessionRequirementResolver: resolverForTests([]),
 		...deps,
 	} as never);
@@ -203,7 +206,7 @@ describe("oauthModule — discoveryMetadata contribution", () => {
 		// Empty is the honest answer for a composition that registered no grant
 		// module: every `grant_type` gets `unsupported_grant_type`. Omitting the
 		// field would instead assert `authorization_code` + `implicit` support.
-		const meta = await discoveryContribution();
+		const meta = await discoveryContribution({ grantHandlerResolver: grantResolver() });
 		expect(meta.metadata?.grant_types_supported).toEqual([]);
 	});
 
@@ -559,5 +562,46 @@ describe("oauthModule — private_key_jwt is advertised only where it can be hon
 		expect(withStore.metadata?.revocation_endpoint_auth_methods_supported).toContain(
 			"private_key_jwt",
 		);
+	});
+});
+
+describe("a composition with no authorization_code grant", () => {
+	const headless = () =>
+		discoveryContribution({ grantHandlerResolver: grantResolver("client_credentials") });
+
+	it("names no authorization endpoint and lists no response type", async () => {
+		const meta = await headless();
+		expect(meta.endpoints).not.toHaveProperty("authorization_endpoint");
+		expect(meta.metadata?.response_types_supported).toEqual([]);
+		expect(meta.endpoints?.token_endpoint).toBe("/oauth/token");
+		expect(meta.metadata?.grant_types_supported).toEqual(["client_credentials"]);
+	});
+
+	it("advertises none of the authorization request's parameters", async () => {
+		const meta = await headless();
+		expect(meta.metadata).not.toHaveProperty("code_challenge_methods_supported");
+		expect(meta.metadata).not.toHaveProperty("request_uri_parameter_supported");
+	});
+
+	it("advertises no acr table: acr_values are asked for at /authorize", async () => {
+		const base = configWithRevocation();
+		const config = {
+			...base,
+			oauth: { ...base.oauth, authorize: { acrValues: { "urn:example:pwd": ["pwd"] } } },
+		} as unknown as AppConfig;
+		const meta = await discoveryContribution(
+			{ grantHandlerResolver: grantResolver("client_credentials") },
+			config,
+		);
+		expect(meta.metadata).not.toHaveProperty("acr_values_supported");
+	});
+
+	it("with the grant, names /oauth/authorize and the code response type", async () => {
+		const meta = await discoveryContribution({
+			grantHandlerResolver: grantResolver("authorization_code", "client_credentials"),
+		});
+		expect(meta.endpoints?.authorization_endpoint).toBe("/oauth/authorize");
+		expect(meta.metadata?.response_types_supported).toEqual(["code"]);
+		expect(meta.metadata?.code_challenge_methods_supported).toEqual(["S256"]);
 	});
 });

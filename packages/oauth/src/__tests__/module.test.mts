@@ -1240,3 +1240,82 @@ describe("oauthModule — a consumer of session admission", () => {
 		expect(module.requires).toContain("grantHandlerResolver");
 	});
 });
+
+describe("oauthModule — a composition with no authorization_code grant", () => {
+	/**
+	 * Tokens for machines only: client_credentials, no code repository, no
+	 * session package. The issuer is set, so core serves the discovery
+	 * document.
+	 */
+	const headlessConfig = (authorizationCode: boolean) => {
+		const base = makeValidAppConfig();
+		return {
+			...base,
+			oauth: {
+				...base.oauth,
+				jwt: { ...base.oauth.jwt, issuer: "https://auth.example.com" },
+				grants: {
+					...base.oauth.grants,
+					authorization_code: { enabled: authorizationCode },
+					refresh_token: { enabled: false },
+					client_credentials: { enabled: true },
+				},
+			},
+		} as ReturnType<typeof makeValidAppConfig>;
+	};
+	const boot = (authorizationCode: boolean, extra: readonly Module[] = []) => {
+		const config = headlessConfig(authorizationCode);
+		return createTestApp({
+			modules: [
+				oauthModule({ config }),
+				oauthAuthorizationModule({ config }),
+				memoryAccessTokenDenylistModule,
+				jwksModule,
+				clientRepositoryModule,
+				keyStoreModule,
+				...extra,
+			],
+			bootstrapComponents: { config, pathResolver: (s) => s },
+		});
+	};
+
+	it("boots with no code repository, and answers /oauth/authorize 404 on GET and POST", async () => {
+		const handle = await boot(false);
+		const app = express();
+		app.use(handle.router);
+
+		expect((await request(app).get("/oauth/authorize")).status).toBe(404);
+		expect((await request(app).post("/oauth/authorize")).status).toBe(404);
+		await handle.dispose();
+	});
+
+	it.each(["/.well-known/openid-configuration", "/.well-known/oauth-authorization-server"])(
+		"serves %s naming no authorization endpoint and no response type",
+		async (path) => {
+			const handle = await boot(false);
+			const app = express();
+			app.use(handle.router);
+
+			const { status, body } = await request(app).get(path);
+			expect(status).toBe(200);
+			expect(body).not.toHaveProperty("authorization_endpoint");
+			expect(body.response_types_supported).toEqual([]);
+			expect(body.grant_types_supported).toEqual(["client_credentials"]);
+			expect(body.token_endpoint).toBe("https://auth.example.com/oauth/token");
+			expect(body).not.toHaveProperty("code_challenge_methods_supported");
+			await handle.dispose();
+		},
+	);
+
+	it("with the grant and a code repository, serves /oauth/authorize and names it", async () => {
+		const handle = await boot(true, [codeRepositoryModule]);
+		const app = express();
+		app.use(handle.router);
+
+		expect((await request(app).get("/oauth/authorize")).status).not.toBe(404);
+		const { body } = await request(app).get("/.well-known/openid-configuration");
+		expect(body.authorization_endpoint).toBe("https://auth.example.com/oauth/authorize");
+		expect(body.response_types_supported).toEqual(["code"]);
+		await handle.dispose();
+	});
+});

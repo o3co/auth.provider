@@ -681,3 +681,49 @@ describe("createOAuthRouter", () => {
 		});
 	});
 });
+
+describe("createOAuthRouter — /authorize is the authorization_code grant's", () => {
+	/** A registry holding stand-ins for the named grants. */
+	const registryOf = (...grantTypes: readonly string[]): GrantRegistry => {
+		const registry = new GrantRegistry();
+		for (const grantType of grantTypes) registry.register(grantType, {} as GrantHandler);
+		return registry;
+	};
+	const build = (
+		registry: GrantRegistry,
+		codeRepository: CodeRepository | undefined,
+		expressLike: Parameters<typeof createOAuthRouter>[0],
+	) =>
+		createOAuthRouter(expressLike, {
+			requirements: resolverForTests([]),
+			registry,
+			config: mockConfig,
+			clientRepository: {} as ClientRepository,
+			...(codeRepository === undefined ? {} : { codeRepository }),
+			keyStore: createSymmetricKeyStore("test-secret"),
+		});
+
+	it("mounts GET and POST /authorize when the registry holds the authorization_code grant", async () => {
+		const { calls, expressLike } = createTrackingExpress();
+		await build(registryOf("authorization_code"), {} as CodeRepository, expressLike);
+
+		expect(calls.get.some((args) => args[0] === "/authorize")).toBe(true);
+		expect(calls.post.some((args) => args[0] === "/authorize")).toBe(true);
+	});
+
+	it("mounts no /authorize without that grant, and builds with no code repository", async () => {
+		const { calls, expressLike } = createTrackingExpress();
+		await build(registryOf("client_credentials"), undefined, expressLike);
+
+		expect(calls.get.some((args) => args[0] === "/authorize")).toBe(false);
+		expect(calls.post.some((args) => args[0] === "/authorize")).toBe(false);
+		expect(calls.post.some((args) => args[0] === "/token")).toBe(true);
+	});
+
+	it("refuses to build /authorize without a code repository to issue its codes into", async () => {
+		const { expressLike } = createTrackingExpress();
+		await expect(build(registryOf("authorization_code"), undefined, expressLike)).rejects.toThrow(
+			/authorization_code grant is registered but no codeRepository is wired/,
+		);
+	});
+});
