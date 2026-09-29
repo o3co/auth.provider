@@ -84,9 +84,10 @@ const withOutage = () => {
 const GUARD = createTestCsrfGuard();
 
 /**
- * The suite's whole input over the recording double: its completions issue
- * a fresh token through `GUARD`, their session records are counted, and
- * each is `wrap`ped; `over` replaces any of it.
+ * The suite's whole input over the recording double: its completions — the
+ * ones over a store that answers and the ones over a store that is down —
+ * issue a fresh token through `GUARD`, the session records of the one built
+ * last are counted, and each is `wrap`ped; `over` replaces any of it.
  */
 const inputOver = (
 	wrap: (original: RecordingLoginCompletion) => LoginCompletion = (completion) => completion,
@@ -98,7 +99,11 @@ const inputOver = (
 			last = createRecordingLoginCompletion({ csrfGuard: GUARD });
 			return wrap(last);
 		},
-		withSessionStoreOutage: withOutage,
+		withSessionStoreOutage: () => {
+			last = createRecordingLoginCompletion({ csrfGuard: GUARD });
+			last.failSessionStore(new Error("session store down"));
+			return wrap(last);
+		},
 		records: () => last?.records ?? 0,
 		csrfCookieName: GUARD.cookieName,
 		...over,
@@ -716,6 +721,20 @@ describe("loginCompletionContract — each way a completion can break it", () =>
 				})),
 			),
 		).toContain(RULES.established);
+	});
+
+	it("a session-store outage answered after a record was written and left behind", async () => {
+		expect(
+			await failing(
+				leaking((original, leak) => ({
+					establishSession: async (establishment, call) => {
+						const result = await original.establishSession(establishment, call);
+						if (result.outcome === "unavailable" && result.store === "user_session") leak();
+						return result;
+					},
+				})),
+			),
+		).toContain(RULES.storeOutage);
 	});
 
 	it("a cookie-session outage that leaves the session record behind", async () => {

@@ -317,6 +317,21 @@ describe("csrfGuardContract — each way a guard can break it", () => {
 		).toContain(RULES.foreign);
 	});
 
+	it("a same-origin Referer read before a foreign Origin: the Origin is not authoritative", async () => {
+		const refererFirst = (req: Request): Request => {
+			const referer = header(req, "referer");
+			return referer === undefined
+				? req
+				: ({ ...req, headers: { ...req.headers, origin: referer } } as unknown as Request);
+		};
+		expect(
+			await failing(withPolicy((req, original) => original.check(refererFirst(req)))),
+		).toContain(RULES.foreign);
+		expect(
+			await failing(withNavigation((req, original) => original.checkNavigation(refererFirst(req)))),
+		).toContain(RULES.navigation);
+	});
+
 	it("a request with no origin signal waved through — the pre-#272 guard", async () => {
 		expect(
 			await failing(
