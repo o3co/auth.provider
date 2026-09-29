@@ -5,8 +5,9 @@ import type { Contributed } from "../contributed.mjs";
 import type {
 	AuditHookFactory,
 	ContributesMap,
-	FederationContribution,
 	FederationFactory,
+	FederationInstance,
+	FederationTypeContribution,
 	GrantFactory,
 	RateLimitBudgetFactory,
 } from "../contributes-map.mjs";
@@ -15,7 +16,7 @@ import type { ProviderDeps } from "../provider.mjs";
 // Local fixture deps — does NOT augment shared ComponentMap.
 type LocalDeps = { readonly _localCfg: { readonly url: string } };
 
-test("ContributesMap has all 7 v0.5.0 base kinds plus grantMiddleware + tokenBindingMechanisms + discoveryMetadata + sessionRequirements + rateLimitBudgets", () => {
+test("ContributesMap has all 7 v0.5.0 base kinds plus grantMiddleware + tokenBindingMechanisms + discoveryMetadata + sessionRequirements + rateLimitBudgets + federationTypes", () => {
 	// Per A2-α §4.1 baseline declares 7 kinds. A5 (Phase 7) adds
 	// `federationRedirectPolicies` via `declare module` augmentation in the
 	// session package. Wave 2 Phase 1 retro (Phase 2 DPoP spec §11.1) adds
@@ -28,8 +29,9 @@ test("ContributesMap has all 7 v0.5.0 base kinds plus grantMiddleware + tokenBin
 	// `/.well-known/openid-configuration` document, which core synthesizes.
 	// The session-admission ADR's D3 adds `sessionRequirements` as the 11th:
 	// the requirements every consumer of a browser session asks through
-	// admission. #728 adds `rateLimitBudgets` as the 12th: the budgets each
-	// module owns for its rate-limit prefixes.
+	// admission. #728 adds `rateLimitBudgets` as the 12th — the budgets each
+	// module owns for its rate-limit prefixes — and `federationTypes` as the
+	// 13th: the federation types a package handles, keyed by type.
 	type Keys = keyof ContributesMap<LocalDeps>;
 	expectTypeOf<Keys>().toEqualTypeOf<
 		| "grants"
@@ -44,6 +46,7 @@ test("ContributesMap has all 7 v0.5.0 base kinds plus grantMiddleware + tokenBin
 		| "discoveryMetadata"
 		| "sessionRequirements"
 		| "rateLimitBudgets"
+		| "federationTypes"
 	>();
 });
 
@@ -102,14 +105,26 @@ test("rateLimitBudgets is name-keyed by prefix, each factory answering a budget 
 	>();
 });
 
-test("a federations entry is a factory, or a contribution declaring the type it handles and its entry schema", () => {
+test("a federations entry is the factory alone, name-keyed by the federation's name", () => {
 	type Entry = NonNullable<ContributesMap<LocalDeps>["federations"]>[string];
-	expectTypeOf<Entry>().toEqualTypeOf<
-		FederationFactory<LocalDeps> | FederationContribution<LocalDeps>
-	>();
-	expectTypeOf<FederationContribution<LocalDeps>>().branded.toEqualTypeOf<{
-		readonly type: string;
-		readonly entrySchema: z.ZodType;
-		readonly factory: FederationFactory<LocalDeps>;
+	expectTypeOf<Entry>().toEqualTypeOf<FederationFactory<LocalDeps>>();
+});
+
+test("federationTypes is name-keyed by the type an entry names, each declaring its entry schema and a factory given the entry", () => {
+	type Field = NonNullable<ContributesMap<LocalDeps>["federationTypes"]>;
+	expectTypeOf<Field>().toEqualTypeOf<{
+		readonly [type: string]: FederationTypeContribution<LocalDeps>;
 	}>();
+	type Entry = { readonly issuer: string };
+	type Declared = FederationTypeContribution<LocalDeps, Entry>;
+	expectTypeOf<Declared["entrySchema"]>().toEqualTypeOf<z.ZodType<Entry>>();
+	expectTypeOf<Parameters<Declared["factory"]>>().toEqualTypeOf<
+		[deps: LocalDeps, instance: FederationInstance<Entry>]
+	>();
+	expectTypeOf<FederationInstance<Entry>>().toEqualTypeOf<{
+		readonly name: string;
+		readonly entry: Entry;
+	}>();
+	// A declaration typed for its entry is one the record accepts.
+	expectTypeOf<Declared>().toMatchTypeOf<Field[string]>();
 });

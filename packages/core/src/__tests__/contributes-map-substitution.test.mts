@@ -24,7 +24,9 @@ import type { Contributed } from "../modules/manifest/contributed.mjs";
 import type {
 	AuditHook,
 	ExchangeTokenValidator,
+	FederationInstance,
 	FederationProvider,
+	FederationTypeContribution,
 	GrantHandler,
 	GrantPolicyHookContribution,
 	MfaFactor,
@@ -163,40 +165,67 @@ describe("#728: rate-limit budgets and declared federation contributions", () =>
 		expect(true).toBe(true);
 	});
 
-	it("a federation contribution may declare the type it handles and its entry schema beside its factory", () => {
+	const AcmeEntry = z.object({ issuer: z.string(), clientId: z.string() });
+	type AcmeEntry = z.output<typeof AcmeEntry>;
+
+	it("a federation type is contributed by type, its factory given the module's deps and the entry", () => {
 		defineModule({
-			name: "acme-federation-declared",
+			name: "acme-federation-type",
 			requires: ["config"],
 			contributes: {
-				federations: {
-					corp: {
-						type: "acme",
-						entrySchema: z.object({ clientId: z.string() }),
-						factory: (deps) => {
-							// The factory's deps are the module's, as a bare factory's are.
+				federationTypes: {
+					acme: {
+						entrySchema: AcmeEntry,
+						// Inline, the entry is typed by annotating the instance.
+						factory: (deps, { name, entry }: FederationInstance<AcmeEntry>) => {
 							expectTypeOf(deps.config).not.toBeUnknown();
-							return provider;
+							expectTypeOf(entry.issuer).toEqualTypeOf<string>();
+							return { ...provider, name };
 						},
 					},
 				},
 			},
 		});
-		expect(true).toBe(true);
+		// Declared on its own, the schema and the entry are held to one type.
+		const declared: FederationTypeContribution<{ readonly tag: string }, AcmeEntry> = {
+			entrySchema: AcmeEntry,
+			factory: (deps, { entry }) => {
+				expectTypeOf(deps.tag).toEqualTypeOf<string>();
+				expectTypeOf(entry).toEqualTypeOf<AcmeEntry>();
+				return provider;
+			},
+		};
+		expect(declared.entrySchema).toBe(AcmeEntry);
 	});
 
-	it("refuses a declared federation contribution whose factory builds no provider, or that names no type", () => {
+	it("refuses a federation type whose factory builds no provider, or whose schema is not the entry's", () => {
 		defineModule({
-			name: "acme-federation-declared-wrong",
+			name: "acme-federation-type-wrong",
 			contributes: {
-				federations: {
-					corp: {
-						type: "acme",
-						entrySchema: z.object({}),
+				federationTypes: {
+					acme: {
+						entrySchema: AcmeEntry,
 						// @ts-expect-error — no `buildAuthorizationUrl`, no `exchangeCode`
 						factory: () => ({ name: "corp", scope: [] }),
 					},
-					// @ts-expect-error — a declaration names the type it handles
-					other: { entrySchema: z.object({}), factory: () => provider },
+				},
+			},
+		});
+		const mismatched: FederationTypeContribution<unknown, AcmeEntry> = {
+			// @ts-expect-error — this schema's output is not an AcmeEntry
+			entrySchema: z.object({ issuer: z.number() }),
+			factory: () => provider,
+		};
+		expect(mismatched).toBeDefined();
+	});
+
+	it("a federations entry is a bare factory again: a declaration there does not compile", () => {
+		defineModule({
+			name: "acme-federation-declared",
+			contributes: {
+				federations: {
+					// @ts-expect-error — `federations` takes the factory; a type is declared under `federationTypes`
+					corp: { type: "acme", entrySchema: AcmeEntry, factory: () => provider },
 				},
 			},
 		});

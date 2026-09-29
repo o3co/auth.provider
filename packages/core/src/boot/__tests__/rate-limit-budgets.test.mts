@@ -28,7 +28,7 @@ import { describe, expect, it } from "vitest";
 import { defineModule } from "../../modules/manifest/index.mjs";
 import { memoryRateLimiterModule } from "../../ratelimit/module.mjs";
 import { makeValidCoreConfig } from "../../testing/fixtures/valid-config.mjs";
-import { createApp } from "../create-app.mjs";
+import { createApp, mergeWithBuiltins } from "../create-app.mjs";
 import type { BootstrapMap } from "../types.mjs";
 import { BootError } from "../types.mjs";
 
@@ -126,6 +126,25 @@ describe("rateLimitBudgets — contributed by the module that owns the prefix", 
 		await handle.dispose();
 	});
 
+	it("an override gives a budget to a prefix whose owner switched it off", async () => {
+		const owner = defineModule({
+			name: "budget-owner",
+			contributes: { rateLimitBudgets: { fixture: () => null } },
+		});
+		const replacer = defineModule({
+			name: "budget-replacer",
+			overrides: { rateLimitBudgets: { fixture: () => ({ limit: 2, windowSeconds: 30 }) } },
+		});
+
+		const handle = await createApp({ modules: [owner, replacer], bootstrapComponents: bootWith() });
+
+		expect(handle.components.rateLimitBudgetResolver?.get("fixture")).toEqual({
+			limit: 2,
+			windowSeconds: 30,
+		});
+		await handle.dispose();
+	});
+
 	it("an override replaces the budget another module contributed for the prefix", async () => {
 		const owner = defineModule({
 			name: "budget-owner",
@@ -205,19 +224,74 @@ describe("rateLimitBudgets — refused", () => {
 	);
 
 	it.each([
-		["empty", ""],
-		["carrying a colon", "fixture:ip"],
-	])("a prefix no limiter key can carry — %s — refuses boot", async (_label, prefix) => {
-		const mod = defineModule({
-			name: "budget-misfiled",
-			contributes: { rateLimitBudgets: { [prefix]: () => ({ limit: 5, windowSeconds: 60 }) } },
-		});
+		["empty", "", "contributes", () => ({ limit: 5, windowSeconds: 60 })],
+		["carrying a colon", "fixture:ip", "contributes", () => ({ limit: 5, windowSeconds: 60 })],
+		["carrying a colon, on a budget switched off", "fixture:ip", "contributes", () => null],
+		["carrying a colon, in an override", "fixture:ip", "overrides", () => null],
+	] as const)(
+		"a prefix no limiter key can carry — %s — refuses boot at stage 1, before any factory runs",
+		async (_label, prefix, channel, answer) => {
+			let ran = false;
+			const factory = () => {
+				ran = true;
+				return answer();
+			};
+			const mod = defineModule({
+				name: "budget-misfiled",
+				[channel]: { rateLimitBudgets: { [prefix]: factory } },
+			});
 
-		const err = await refusal(createApp({ modules: [mod], bootstrapComponents: bootWith() }));
+			const err = await refusal(createApp({ modules: [mod], bootstrapComponents: bootWith() }));
 
-		expect(err.reason).toBe("contribute-factory-failed");
-		expect(err.details).toMatchObject({ kind: "rateLimitBudgets", name: prefix });
-		expect(err.message).toContain("before its first");
+			expect(err.reason).toBe("contribution-malformed");
+			expect(err.stage).toBe("validateManifests");
+			expect(err.details).toMatchObject({
+				reason: "contribution-malformed",
+				module: "budget-misfiled",
+				kind: "rateLimitBudgets",
+				name: prefix,
+				channel,
+			});
+			expect(err.message).toContain("before its first");
+			expect(ran).toBe(false);
+		},
+	);
+
+	it.each([
+		["undefined", undefined],
+		["a string", "5"],
+	])(
+		"a factory answering %s instead of a budget refuses boot naming the module and prefix",
+		async (_label, answered) => {
+			const mod = defineModule({
+				name: "budget-broken",
+				contributes: { rateLimitBudgets: { fixture: () => answered as never } },
+			});
+
+			const err = await refusal(createApp({ modules: [mod], bootstrapComponents: bootWith() }));
+
+			expect(err.reason).toBe("contribute-factory-failed");
+			expect(err.details).toMatchObject({
+				module: "budget-broken",
+				kind: "rateLimitBudgets",
+				name: "fixture",
+			});
+			expect(err.message).toContain('rateLimitBudgets "fixture"');
+		},
+	);
+
+	it("a host may not replace the collector: the kind is guarded", async () => {
+		const err = await refusal(
+			createApp({
+				modules: [],
+				bootstrapComponents: bootWith(),
+				contributionKinds: { rateLimitBudgets: mergeWithBuiltins(undefined).rateLimitBudgets },
+			}),
+		);
+
+		expect(err.reason).toBe("contribution-kind-guarded");
+		expect(err.stage).toBe("validateManifests");
+		expect(err.details).toEqual({ reason: "contribution-kind-guarded", kind: "rateLimitBudgets" });
 	});
 
 	it("a provider that reads the view while the provides factories run refuses boot", async () => {
