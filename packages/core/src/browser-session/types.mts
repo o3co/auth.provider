@@ -134,8 +134,9 @@ export interface CsrfGuard {
  * signature, nor an oracle for one: the session package's derivation today is
  * HKDF-SHA256 over the secret, no salt, info
  * `o3co.auth.provider/session-csrf/v1`, 32 bytes. Neither the secret nor the
- * derived key leaves the signer; it carries `sign` and `verify` alone, and is
- * frozen.
+ * derived key leaves the signer: a plain object, its prototype
+ * `Object.prototype` or `null`, that carries `sign` and `verify` alone, own or
+ * inherited, and is frozen.
  */
 export interface CsrfTokenSigner {
 	/**

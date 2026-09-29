@@ -26,12 +26,13 @@
  * another signer — `input.other`, built with another key — signed, the two
  * signers answering differently; `verify` never throws, an empty,
  * non-base64url or wrong-length signature, or a value that is not a string,
- * being `false`; the signer carries `sign` and `verify` alone — no key, no
- * secret — and is frozen. Given `sessionSecret`, the secret the signer was
- * built from, the suite also checks that the key was derived for this
- * purpose: a signature is not an HMAC-SHA256 of the payload under the secret
- * itself, in any encoding a cookie signature is written in, and the secret
- * does not show when the signer is printed.
+ * being `false`; the signer is a plain object, its prototype
+ * `Object.prototype` or `null`, that carries `sign` and `verify` alone, own
+ * or inherited — no key, no secret — and is frozen. Given `sessionSecret`,
+ * the secret the signer was built from, the suite also checks that the key
+ * was derived for this purpose: a signature is not an HMAC-SHA256 of the
+ * payload under the secret itself, in any encoding a cookie signature is
+ * written in, and the secret does not show when the signer is printed.
  *
  * That `verify` compares in constant time is the contract too, and is not
  * checked: a timing difference is not something a unit suite can measure
@@ -220,17 +221,30 @@ export function csrfTokenSignerContract(
 			},
 		},
 		{
-			name: "the signer carries sign and verify alone: no key and no secret",
+			name: "the signer is a plain object carrying sign and verify alone, own or inherited: no key and no secret",
 			run: async () => {
 				const signer = build();
 				assert.equal(typeof signer.sign, "function", "sign is not a function");
 				assert.equal(typeof signer.verify, "function", "verify is not a function");
-				for (const key of Reflect.ownKeys(signer)) {
-					assert.ok(
-						key === "sign" || key === "verify",
-						`the signer carries ${String(key)} beside sign and verify: a key or a secret has no business on it`,
-					);
+				// Every member reachable short of Object.prototype's, own or inherited.
+				for (
+					let holder: object | null = signer;
+					holder !== null && holder !== Object.prototype;
+					holder = Reflect.getPrototypeOf(holder)
+				) {
+					const where = holder === signer ? "carries" : "inherits";
+					for (const key of Reflect.ownKeys(holder)) {
+						assert.ok(
+							holder === signer && (key === "sign" || key === "verify"),
+							`the signer ${where} ${String(key)} beside its own sign and verify: a key or a secret has no business on it`,
+						);
+					}
 				}
+				const prototype = Reflect.getPrototypeOf(signer);
+				assert.ok(
+					prototype === Object.prototype || prototype === null,
+					"the signer's prototype is neither Object.prototype nor null: what it inherits is not the contract's to see",
+				);
 				if (sessionSecret !== undefined) {
 					assert.ok(
 						!inspect(signer, { showHidden: true, depth: 10 }).includes(sessionSecret),
