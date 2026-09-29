@@ -761,7 +761,7 @@ describe("Session routes — POST /session/login", () => {
 			}
 		});
 
-		it("no longer grants CSRF trust to cors.allowedOrigins", async () => {
+		it("does not grant CSRF trust to cors.allowedOrigins", async () => {
 			// The CORS list is a resource-sharing policy, not the CSRF trust list:
 			// trust is stated on `session.csrf.trustedOrigins`.
 			const { app } = buildApp({
@@ -1305,7 +1305,7 @@ describe("Session routes — a store that cannot answer is an outage, logged onc
 		expect(JSON.stringify(logger.error.mock.calls)).not.toContain("alice");
 	});
 
-	it("the session record: 503 and one error line — it used to be silent", async () => {
+	it("the session record: 503 and one error line", async () => {
 		const logger = spyLogger();
 		const { app } = buildApp({
 			userSessionStore: {
