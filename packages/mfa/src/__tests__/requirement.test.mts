@@ -173,11 +173,35 @@ describe("what the requirement declares (D3, D6)", () => {
 		expect(build("optional", { factors: [] }).requirement.reach.size).toBe(0);
 	});
 
-	it("reads the factors when asked, not when built: a factor registered afterwards is reached, as boot's name-keyed pass registers them", () => {
+	it("reads the factors at its reach's first read, not when built: a factor registered before that read — in boot's name-keyed pass — is reached", () => {
+		const factors: MfaFactor[] = [];
+		const { requirement } = build("required", { factors });
+		factors.push(FACTORS.totp());
+		expect([...requirement.reach].sort()).toEqual(["mfa", "otp"]);
+	});
+
+	it("keeps the reach of its first read — boot's, which core seals and merges with — for its own verdicts too", async () => {
 		const factors: MfaFactor[] = [];
 		const { requirement } = build("required", { factors });
 		expect(requirement.reach.size).toBe(0);
+		// A factor that appears after that read changes neither the reach nor admit.
 		factors.push(FACTORS.totp());
+		expect(requirement.reach.size).toBe(0);
+		expect(await requirement.admit(about(password()))).toEqual(UNMET);
+
+		const later: MfaFactor[] = [FACTORS.totp()];
+		const reaching = build("required", { factors: later }).requirement;
+		expect([...reaching.reach].sort()).toEqual(["mfa", "otp"]);
+		later.pop();
+		expect([...reaching.reach].sort()).toEqual(["mfa", "otp"]);
+		expect(await reaching.admit(about(password()))).toEqual(STEP_UP);
+	});
+
+	it("reads its reach at its first verdict when nothing read it before", async () => {
+		const factors: MfaFactor[] = [FACTORS.totp()];
+		const { requirement } = build("required", { factors });
+		expect(await requirement.admit(about(password()))).toEqual(STEP_UP);
+		factors.pop();
 		expect([...requirement.reach].sort()).toEqual(["mfa", "otp"]);
 	});
 });
