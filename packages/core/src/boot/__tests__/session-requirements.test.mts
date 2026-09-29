@@ -793,12 +793,10 @@ describe("the reach and the page, read once at the end of stage 4 (D3)", () => {
 			{ sessionRequirements: { expected: ["consent"] } },
 			{},
 			undefined,
-			{ oauthTokenSettings: createTestOAuthTokenSettings({ issuer: "https://slot.test/tenant" }) },
+			{ oauthTokenSettings: createTestOAuthTokenSettings({ issuer: "https://slot.test" }) },
 		);
 		try {
-			expect(seen.resolver?.get("consent")?.stepUpPage?.href).toBe(
-				"https://slot.test/tenant/consent",
-			);
+			expect(seen.resolver?.get("consent")?.stepUpPage?.href).toBe("https://slot.test/consent");
 		} finally {
 			await handle.dispose();
 		}

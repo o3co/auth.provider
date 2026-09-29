@@ -62,6 +62,7 @@ import {
 	sealRegisteredReach,
 } from "../session-admission/requirement.mjs";
 import { failureSummary } from "./failure-summary.mjs";
+import { compositionIssuer } from "./oauth-token-settings.mjs";
 import type {
 	CleanupRecord,
 	CollectedRouteContribution,
@@ -432,10 +433,14 @@ export function prepareSyntheticProjections(
 	}
 }
 
-/** `oauth.jwt.issuer` as the parsed configuration carries it, for the pages a requirement declares; `undefined` when it is not a string. */
-const issuerOf = (config: unknown): string | undefined => {
-	const issuer = (config as { oauth?: { jwt?: { issuer?: unknown } } } | undefined)?.oauth?.jwt
-		?.issuer;
+/**
+ * The issuer the pages a requirement declares are registered on: the
+ * `oauthTokenSettings` slot's when the composition holds it (#728), otherwise
+ * `oauth.jwt.issuer` as the parsed configuration carries it; `undefined` when
+ * it is not a non-empty string.
+ */
+const issuerOf = (components: Readonly<Record<string, unknown>>): string | undefined => {
+	const issuer = compositionIssuer(components);
 	return typeof issuer === "string" && issuer.length > 0 ? issuer : undefined;
 };
 
@@ -462,7 +467,12 @@ const issuerOf = (config: unknown): string | undefined => {
  *   settings) passes, and stays claimed. The prefix was held at stage 1.
  * @internal
  */
-function checkNameKeyedValue(kind: string, name: string, value: unknown, config: unknown): unknown {
+function checkNameKeyedValue(
+	kind: string,
+	name: string,
+	value: unknown,
+	issuer: string | undefined,
+): unknown {
 	if (kind === "mfaFactors") {
 		if (value === null) return value;
 		if ((value as { kind?: unknown } | undefined)?.kind !== name) {
@@ -530,7 +540,7 @@ function checkNameKeyedValue(kind: string, name: string, value: unknown, config:
 				`sessionRequirements "${name}": the requirement's name must be the key it is contributed under`,
 			);
 		}
-		return registeredRequirement(value, issuerOf(config));
+		return registeredRequirement(value, issuer);
 	}
 	return value;
 }
@@ -992,7 +1002,7 @@ export async function applyContributions(
 
 			let value: unknown;
 			try {
-				value = checkNameKeyedValue(entry.kind, name, await factory(deps), components.config);
+				value = checkNameKeyedValue(entry.kind, name, await factory(deps), issuerOf(components));
 			} catch (thrownValue) {
 				const cleanupErrors = await runCleanupsReverse(material.cleanups);
 				throw new BootError({
@@ -1024,7 +1034,7 @@ export async function applyContributions(
 
 			let value: unknown;
 			try {
-				value = checkNameKeyedValue(entry.kind, name, await factory(deps), components.config);
+				value = checkNameKeyedValue(entry.kind, name, await factory(deps), issuerOf(components));
 			} catch (thrownValue) {
 				const cleanupErrors = await runCleanupsReverse(material.cleanups);
 				throw new BootError({

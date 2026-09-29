@@ -55,14 +55,19 @@ export const memoryRefreshTokenFamilyStoreModule = defineModule({
  */
 export const defaultRefreshTokenFamilyRotationModule = defineModule({
 	name: "core-default-refresh-token-family-rotation",
-	// `config` for the access-token maximum that sizes how long a family
-	// revoked on replay is remembered (`retention.mts`).
+	// The access-token maximum sizes how long a family revoked on replay is
+	// remembered (`retention.mts`): the oauth module's `oauthTokenSettings`
+	// when the composition holds it (#728), otherwise `config`.
 	requires: ["refreshTokenFamilyStore", "config"] as const,
+	optional: ["oauthTokenSettings"] as const,
 	provides: {
 		refreshTokenFamilyRotation: (deps) =>
 			createRefreshTokenFamilyRotation({
 				refreshTokenFamilyStore: deps.refreshTokenFamilyStore,
-				accessTokenHorizonMs: resolveFamilyAccessTokenHorizonMs(deps.config),
+				accessTokenHorizonMs: resolveFamilyAccessTokenHorizonMs(
+					deps.config,
+					deps.oauthTokenSettings,
+				),
 			}),
 	},
 });
@@ -77,11 +82,16 @@ export const defaultRefreshTokenFamilyRotationModule = defineModule({
 export const defaultRefreshTokenFamilyRevocationModule = defineModule({
 	name: "core-default-refresh-token-family-revocation",
 	requires: ["refreshTokenFamilyStore", "config"] as const,
+	// As the rotation module reads it (#728).
+	optional: ["oauthTokenSettings"] as const,
 	provides: {
 		refreshTokenFamilyRevocation: (deps) =>
 			createRefreshTokenFamilyRevocation({
 				refreshTokenFamilyStore: deps.refreshTokenFamilyStore,
-				accessTokenHorizonMs: resolveFamilyAccessTokenHorizonMs(deps.config),
+				accessTokenHorizonMs: resolveFamilyAccessTokenHorizonMs(
+					deps.config,
+					deps.oauthTokenSettings,
+				),
 			}),
 	},
 });
