@@ -46,10 +46,12 @@
  * - **The routes' mount.** Contributes the route `mfa-routes` at
  *   `/session/mfa`, after the session middleware. Its factory runs after
  *   every name-keyed contribution has registered, so it is where the
- *   installed factors are held to what the requirement needs of them: an
- *   enabled factor whose kind core's hint grammar refuses — a first
- *   binding's `hints.enrollable` names it — is refused, naming the kind;
- *   and `mfa.mode = "required"` with no counting factor enabled is refused
+ *   installed factors are held to what the requirement needs of them, each
+ *   refusal a `cause` with a `reason`: an enabled factor whose kind core's
+ *   hint grammar refuses — a first binding's `hints.enrollable` names it —
+ *   (`mfa-factor-kind-unhintable`, naming the kind); more enabled counting
+ *   factors than core's hint list carries, 16 (`mfa-too-many-factors`); and
+ *   `mfa.mode = "required"` with no counting factor enabled
  *   (`mfa-no-counting-factor`, D20): nobody could meet the requirement. The
  *   routes themselves — the transaction, the challenge, the verification —
  *   are build-order step 8's third part; until then it answers nothing and
@@ -144,17 +146,56 @@ export class MfaNoCountingFactorError extends RangeError {
 /**
  * An enabled factor whose kind core's hint grammar refuses: a first
  * binding's answer lists the kinds (`hints.enrollable`), and core would
- * refuse that answer at every such login. `JSON.stringify` quotes the kind,
- * whatever it holds.
+ * refuse that answer at every such login. The `cause` of the boot's
+ * refusal; `JSON.stringify` quotes the kind, whatever it holds.
  */
-function refuseUnhintableKinds(factors: MfaFactorResolver): void {
-	for (const [kind] of factors.entries()) {
-		if (!isHintToken(kind)) {
-			throw new RangeError(
-				`the MFA factor of kind ${JSON.stringify(kind)} cannot be offered: a first binding's hints.enrollable names each kind, and core admits a hint only of the form ^[a-z][a-z0-9_-]{0,63}$ — contribute the factor under such a kind`,
-			);
-		}
+export class MfaFactorKindUnhintableError extends RangeError {
+	readonly reason = "mfa-factor-kind-unhintable";
+
+	constructor(kind: string) {
+		super(
+			`the MFA factor of kind ${JSON.stringify(kind)} cannot be offered: a first binding's hints.enrollable names each kind, and core admits a hint only of the form ^[a-z][a-z0-9_-]{0,63}$ — contribute the factor under such a kind`,
+		);
+		this.name = "MfaFactorKindUnhintableError";
 	}
+}
+
+/**
+ * The most kinds a hint list carries: core's cap on a hint's list
+ * (`HINT_LIST_MAX` in `session-admission/admit.mts`, which core does not
+ * export; `module.test.mts` holds the two to each other).
+ */
+const HINT_LIST_MAX = 16;
+
+/**
+ * More enabled counting factors than a hint list carries: a first binding's
+ * `hints.enrollable` would list them all, and core would refuse that answer
+ * at every such login. The `cause` of the boot's refusal.
+ */
+export class MfaTooManyFactorsError extends RangeError {
+	readonly reason = "mfa-too-many-factors";
+
+	constructor(count: number) {
+		super(
+			`${count} counting MFA factors are enabled, and a first binding's hints.enrollable lists at most ${HINT_LIST_MAX}, as core admits a hint list of no more: enable ${HINT_LIST_MAX} or fewer`,
+		);
+		this.name = "MfaTooManyFactorsError";
+	}
+}
+
+/**
+ * What the requirement needs of the installed factors, checked once they
+ * have all registered: every kind one a hint can carry, no more counting
+ * factors than a hint list carries, and — under `required` — at least one.
+ */
+function checkInstalledFactors(factors: MfaFactorResolver, mode: MfaRequirementMode): void {
+	const installed = [...factors.entries()];
+	for (const [kind] of installed) {
+		if (!isHintToken(kind)) throw new MfaFactorKindUnhintableError(kind);
+	}
+	const counting = installed.filter(([, factor]) => factor.counting).length;
+	if (counting > HINT_LIST_MAX) throw new MfaTooManyFactorsError(counting);
+	if (mode === "required" && counting === 0) throw new MfaNoCountingFactorError();
 }
 
 /** The page a step-up starts on: `endpoints.mfa.url` (D19), which core's reference.conf defaults. */
@@ -250,13 +291,7 @@ export function mfaModule(options: MfaModuleOptions = {}): Module {
 			routes: [
 				(deps) => {
 					const { mode } = mfaBootState(deps.mfaFactorResolver);
-					refuseUnhintableKinds(deps.mfaFactorResolver);
-					if (
-						mode === "required" &&
-						![...deps.mfaFactorResolver.entries()].some(([, factor]) => factor.counting)
-					) {
-						throw new MfaNoCountingFactorError();
-					}
+					checkInstalledFactors(deps.mfaFactorResolver, mode);
 					return {
 						id: MFA_ROUTES_ID,
 						mountPath: MFA_ROUTES_MOUNT_PATH,
