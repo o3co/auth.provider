@@ -132,6 +132,7 @@ import {
 	isFederationUpstreamOutage,
 	judgeUpstreamAccessToken,
 	type Logger,
+	type LoginEntry,
 	parseScopeTokens,
 	type RateLimiter,
 	type RateLimitFailMode,
@@ -192,8 +193,12 @@ export interface FederationGrantBrowserRouterOptions {
 	readonly authorizerFor: (federation: string) => FederationGrantDelegatedAuthorizer | undefined;
 	/** `federationGrants.consent.url`: a path, or an absolute URL on the provider's origin. */
 	readonly consentUrl: string;
-	/** `endpoints.login.url`, read per request as `/authorize` reads it. */
-	readonly loginUrl: () => string;
+	/**
+	 * The login page a browser that is not signed in is sent to, and its
+	 * `redirect_to` protocol: the `loginEntry` slot the session module
+	 * provides (#728).
+	 */
+	readonly login: Pick<LoginEntry, "urlFor">;
 	/** `oauth.jwt.issuer`, held to core's `checkCanonicalIssuer`: every URL this router builds is built on it. */
 	readonly issuer: string;
 	readonly rateLimiter: RateLimiter;
@@ -682,13 +687,9 @@ export function createFederationGrantBrowserRouter(
 				// `/authorize` reads it.
 				const claim = claimOf(req);
 				if (!claim.authenticated) {
-					const login = options.loginUrl();
-					const joiner = login.includes("?") ? "&" : "?";
 					res.redirect(
 						303,
-						`${login}${joiner}redirect_to=${encodeURIComponent(
-							federationGrantConnectUri(options.issuer, handle),
-						)}`,
+						options.login.urlFor(federationGrantConnectUri(options.issuer, handle)),
 					);
 					return;
 				}

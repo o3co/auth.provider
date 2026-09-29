@@ -149,6 +149,7 @@ describe("resolveFederationGrantAcquisitionSettings", () => {
 			resolveFederationGrantAcquisitionSettings(
 				{ oauth: { jwt: {} }, federationGrants: { consent: { url: "/c" } } },
 				new Map(),
+				createTestLoginEntry("/login"),
 			),
 		).toThrow(/oauth\.jwt\.issuer must be configured/);
 		expect(() => resolve({ consent: { url: "/c" } }, [], "auth.example.test")).toThrow(

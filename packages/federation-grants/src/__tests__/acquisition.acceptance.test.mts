@@ -281,6 +281,9 @@ const boot = async (
 			clientRepository,
 			userRepository,
 			userSessionStore: { get: async (sid: string) => durable.get(sid) ?? null },
+			// The login page, which the session module provides in a real
+			// composition (#728).
+			loginEntry: acquisitionLoginEntry(),
 			sessionRPRegistry: {},
 			sessionFamilyIndex: {},
 			sessionFederationIndex: {},
