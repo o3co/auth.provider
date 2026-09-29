@@ -224,7 +224,7 @@ describe("the routes that take a subject and nothing else", () => {
 	}
 });
 
-describe("the lodging routes' bodies (slice 6)", () => {
+describe("the lodging routes' bodies", () => {
 	for (const [name, parse] of [
 		["create", parseFederationGrantCreateRequest],
 		["reauthorize", parseFederationGrantReauthorizeRequest],

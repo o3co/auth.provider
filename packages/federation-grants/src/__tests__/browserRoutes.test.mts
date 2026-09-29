@@ -1198,7 +1198,7 @@ describe("the callback for a renewal", () => {
 	});
 });
 
-describe("rules the first draft of these tests did not reach", () => {
+describe("what the flow re-checks at each step, and the dates it records", () => {
 	it("stops at connect when the client may no longer use the connection, or its callback moved", async () => {
 		const w = world();
 		const { handle } = await w.lodge();
@@ -1302,7 +1302,7 @@ describe("rules the first draft of these tests did not reach", () => {
 	});
 });
 
-describe("what the browser-half mutation pass found", () => {
+describe("the browser: what the login trip carries back, and a session that is not the flow's", () => {
 	it("sends the browser back from the login page with the handle and nothing else it came with", async () => {
 		const w = world();
 		const { handle } = await w.lodge();
@@ -1410,7 +1410,7 @@ describe("shutting down", () => {
 	});
 });
 
-describe("what the adversarial review found", () => {
+describe("across the flow: correlation, redirects, the identity lookup, sessions, outages and a declined consent", () => {
 	it("correlates every event of one flow by the id its lodging carried", async () => {
 		const w = world();
 		const a = await approved(w, "b-1");
