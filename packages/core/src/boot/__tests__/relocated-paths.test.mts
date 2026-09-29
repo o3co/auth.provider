@@ -302,6 +302,79 @@ describe("a relocated path — a manifest that names one it cannot", () => {
 			problem: expect.stringContaining("fixture-other"),
 		});
 	});
+
+	it.each([
+		["a Date", () => new Date()],
+		["a Map", () => new Map([["legacy.fixture", ""]])],
+		[
+			"a class instance",
+			() =>
+				new (class Relocations {
+					readonly "legacy.fixture" = "";
+				})(),
+		],
+	] as const)(
+		"refuses relocatedFrom that is %s: a list or a plain map, nothing read as one",
+		async (_label, make) => {
+			const relocatedFrom = make();
+			const relocating = defineModule({
+				name: "fixture-relocating",
+				section: { schema: RetrySection, relocatedFrom: relocatedFrom as never },
+			});
+
+			const err = await refusal(
+				createApp({ modules: [relocating], bootstrapComponents: bootWith(current) }),
+			);
+
+			expect(err.reason).toBe("module-section-path-invalid");
+			expect(err.stage).toBe("validateManifests");
+			expect(err.details).toMatchObject({
+				reason: "module-section-path-invalid",
+				module: "fixture-relocating",
+				problem: expect.stringContaining("a list of old paths, or a map"),
+			});
+			expect((err.details as { relocatedFrom?: unknown }).relocatedFrom).toBe(relocatedFrom);
+		},
+	);
+
+	it("refuses a list with a hole, naming its index, rather than throwing on it", async () => {
+		const relocatedFrom: string[] = ["legacy.a"];
+		relocatedFrom[2] = "legacy.b";
+		const relocating = defineModule({
+			name: "fixture-relocating",
+			section: { schema: RetrySection, relocatedFrom },
+		});
+
+		const err = await refusal(
+			createApp({ modules: [relocating], bootstrapComponents: bootWith(current) }),
+		);
+
+		expect(err.reason).toBe("module-section-path-invalid");
+		expect(err.details).toMatchObject({
+			module: "fixture-relocating",
+			problem: expect.stringContaining("index 1"),
+		});
+		expect((err.details as { relocatedFrom?: unknown }).relocatedFrom).toBe(relocatedFrom);
+	});
+
+	it("reads a map with no prototype as a map", async () => {
+		const relocatedFrom: Record<string, string> = Object.assign(Object.create(null), {
+			"legacy.retries": "retries",
+		});
+		const relocating = defineModule({
+			name: "fixture-relocating",
+			section: { schema: RetrySection, relocatedFrom },
+		});
+
+		const err = await refusal(
+			createApp({
+				modules: [relocating],
+				bootstrapComponents: bootWith({ ...current, legacy: { retries: 3 } }),
+			}),
+		);
+
+		expect(err.reason).toBe("config-path-relocated");
+	});
 });
 
 describe("a relocated path — claimed by two loaded modules", () => {
@@ -479,5 +552,136 @@ describe("a relocated path — more", () => {
 		);
 
 		expect(err.details).toMatchObject({ problem: expect.stringContaining(words) });
+	});
+});
+
+describe("a relocated path — a chain: a new path that another relocation refuses in turn", () => {
+	it("refuses a new path at another of the module's old paths, naming both", async () => {
+		const relocating = defineModule({
+			name: "fixture-relocating",
+			section: {
+				schema: RetrySection,
+				at: "current",
+				relocatedFrom: { "legacy.a": "b", "current.b": "c" },
+			},
+		});
+
+		const err = await refusal(
+			createApp({
+				modules: [relocating],
+				bootstrapComponents: bootWith({ current: { retries: 1 } }),
+			}),
+		);
+
+		expect(err.reason).toBe("module-section-path-invalid");
+		expect(err.stage).toBe("validateManifests");
+		expect(err.details).toMatchObject({
+			reason: "module-section-path-invalid",
+			module: "fixture-relocating",
+			relocatedFrom: "legacy.a",
+		});
+		const problem = (err.details as { problem?: string }).problem ?? "";
+		expect(problem).toContain('"current.b"');
+		expect(problem).toContain('"fixture-relocating"');
+	});
+
+	it("refuses a new path that holds another of the module's old paths", async () => {
+		const relocating = defineModule({
+			name: "fixture-relocating",
+			section: {
+				schema: RetrySection,
+				at: "current",
+				relocatedFrom: { legacy: "", "current.b": "c" },
+			},
+		});
+
+		const err = await refusal(
+			createApp({
+				modules: [relocating],
+				bootstrapComponents: bootWith({ current: { retries: 1 } }),
+			}),
+		);
+
+		expect(err.reason).toBe("module-section-path-invalid");
+		expect(err.details).toMatchObject({
+			module: "fixture-relocating",
+			relocatedFrom: "legacy",
+			problem: expect.stringContaining('"current.b"'),
+		});
+	});
+
+	it("refuses a new path that holds its own old path: a key moved up could land under it", async () => {
+		const relocating = defineModule({
+			name: "fixture-relocating",
+			section: { schema: RetrySection, at: "current", relocatedFrom: { "current.b": "" } },
+		});
+
+		const err = await refusal(
+			createApp({
+				modules: [relocating],
+				bootstrapComponents: bootWith({ current: { retries: 1 } }),
+			}),
+		);
+
+		expect(err.reason).toBe("module-section-path-invalid");
+		expect(err.details).toMatchObject({
+			module: "fixture-relocating",
+			relocatedFrom: "current.b",
+			problem: expect.stringContaining("holds the old path"),
+		});
+	});
+
+	const first = defineModule({
+		name: "fixture-first",
+		section: { schema: RetrySection, at: "first", relocatedFrom: { "legacy.x": "x" } },
+	});
+	const second = defineModule({
+		name: "fixture-second",
+		section: { schema: RetrySection, relocatedFrom: ["first.x"] },
+	});
+	const hoisting = defineModule({
+		name: "fixture-first",
+		section: { schema: RetrySection, at: "first", relocatedFrom: ["legacy-first"] },
+	});
+	const config = { first: { retries: 1 }, "fixture-second": { retries: 1 } };
+
+	it.each([
+		["at another module's old path, loaded after it", [first, second]],
+		["at another module's old path, loaded before it", [second, first]],
+		["over another module's old path", [hoisting, second]],
+	] as const)("refuses a new path %s, naming both modules", async (_label, modules) => {
+		const err = await refusal(
+			createApp({ modules: [...modules], bootstrapComponents: bootWith(config) }),
+		);
+
+		expect(err.reason).toBe("module-section-path-invalid");
+		expect(err.details).toMatchObject({
+			module: "fixture-first",
+			relocatedFrom: modules.includes(first) ? "legacy.x" : "legacy-first",
+		});
+		const problem = (err.details as { problem?: string }).problem ?? "";
+		expect(problem).toContain('"first.x"');
+		expect(problem).toContain('"fixture-second"');
+	});
+
+	it("lets a key be renamed inside the section, and a removed key name any path", async () => {
+		const relocating = defineModule({
+			name: "fixture-relocating",
+			section: {
+				schema: RetrySection,
+				at: "current",
+				relocatedFrom: {
+					"current.max-retries": "retries",
+					"legacy.gone": null,
+					"current.gone": null,
+				},
+			},
+		});
+
+		const handle = await createApp({
+			modules: [relocating],
+			bootstrapComponents: bootWith({ current: { retries: 1 } }),
+		});
+		await handle.dispose();
 	});
 });
