@@ -15,52 +15,24 @@
  */
 
 /**
- * `POST /oauth/device_authorization` — RFC 8628 §3.1–§3.2 (#298).
+ * `POST /oauth/device_authorization` — RFC 8628 §3.1–§3.2. Opens a pending
+ * device authorization (a polling `device_code` and a displayed `user_code`);
+ * the verification endpoint decides it later.
  *
- * The device asks for a pair of codes: one it keeps and polls with, one it
- * shows the human. Nothing is authorized yet; this endpoint only opens the
- * session that the verification endpoint later decides.
+ * The scope is checked against the client's `allowedScopes` here, not at
+ * approval, so what the verification page shows is exactly what approving it
+ * grants.
  *
- * ### Why the scope is settled here and not at approval
+ * Client authentication (RFC 8628 §3.1, §5.6) belongs to
+ * `createClientAuthMiddleware` from `@o3co/auth-provider-oauth`, mounted ahead
+ * with `allowPublicClients: true` exactly as for `/oauth/token`. This handler
+ * reads `req.oauthClient` and never looks a client up itself: a second notion
+ * of client authentication would drift from the canonical one.
  *
- * The request names a scope, and the approval happens minutes later on a
- * different device. Filtering against the client's `allowedScopes` at approval
- * time would mean the human is shown a scope that has not been checked yet —
- * so they could approve something the client is not permitted to have and see
- * a narrower grant appear, or approve nothing visible and get a token anyway.
- * Settling it here means what the verification page displays is exactly what
- * approving it grants.
- *
- * ### Client authentication
- *
- * RFC 8628 §3.1: "The client authentication requirements of Section 3.2.1 of
- * [RFC6749] apply to requests on this endpoint" — and §5.6 observes that
- * device clients "should be treated as public clients".
- *
- * Both are satisfied by mounting `createClientAuthMiddleware` from
- * `@o3co/auth-provider-oauth` with `allowPublicClients: true` — the same
- * middleware, with the same options, that `/oauth/token` uses. That is why
- * this handler reads `req.oauthClient` and never looks a client up itself:
- * the middleware has already enforced the registration's own
- * `tokenEndpointAuthMethod`, so a **confidential** client cannot be
- * identified by its `client_id` alone, while a public one can.
- *
- * Re-deriving that here would be a second notion of client authentication
- * living beside the canonical one, differing in exactly the ways nobody
- * notices until one of them is wrong — the drift #292 removed when it moved
- * the trusted-proxy vocabulary into a single shared matcher.
- *
- * ### The client must be allowed the grant it is starting
- *
- * The token endpoint refuses the `device_code` exchange for a client whose
- * `allowedGrantTypes` do not name it — and, because the grant declares
- * `requiresExplicitGrantAllowlist` (#326), for a client that declares no
- * allowlist at all. This endpoint applies the same rule with the same shared
- * predicate, `isGrantTypeAllowed`. Without it a client registered for nothing
- * but `authorization_code` could still open pending authorizations: a real
- * `user_code`, a real `verification_uri`, a real-looking prompt on the
- * verification page — the exact material a phishing page needs — for a grant
- * that can never complete.
+ * The client must be allowed the `device_code` grant under the token
+ * endpoint's rule (`isGrantTypeAllowed`, explicit allowlist required).
+ * Otherwise any client could mint real user codes and verification prompts —
+ * phishing material — for a grant that can never complete.
  */
 
 import type { AuthenticatedClient } from "@o3co/auth-provider-core";
@@ -91,12 +63,8 @@ const fail = (res: Response, status: number, body: OAuthErrorBody): void => {
 
 /**
  * Resolve the scope this authorization will carry, filtered by what the client
- * may have.
- *
- * The shape follows `clientCredentials.mts`'s deny-by-absence rule (#396): an
- * omitted `scope` draws on the client's declared `defaultScopes`, never on the
- * whole allowlist, because "forgot to send scope" must not be the maximum
- * grant.
+ * may have. An omitted `scope` draws on `defaultScopes`, never on the whole
+ * allowlist: "forgot to send scope" must not be the maximum grant.
  */
 const resolveScope = (
 	raw: unknown,
@@ -191,9 +159,8 @@ export const createDeviceAuthorizationHandler = (
 ): RequestHandler => {
 	const now = options.now ?? Date.now;
 	const { settings } = options;
-	// Refused where the handler is built: read per request, a hand-built value
-	// reached `expiresAtMs` arithmetic and the wire's `expires_in` / `interval`
-	// on every request instead of failing the composition once.
+	// Validated once at build time, so a bad value fails the composition
+	// rather than every request.
 	requireWholeSeconds(
 		"settings.codeLifetimeSeconds",
 		settings.codeLifetimeSeconds,
@@ -250,25 +217,10 @@ export const createDeviceAuthorizationHandler = (
 		const issuedAtMs = now();
 		const expiresAtMs = issuedAtMs + settings.codeLifetimeSeconds * 1000;
 
-		// A collision means two live authorizations would share a code. The
-		// store refuses it rather than overwriting, says so with
-		// `DeviceCodeStoreError { reason: "collision" }`, and the honest response
-		// to that is to draw again — not to hand the caller an error for a
-		// condition it did not cause and cannot fix. That reason, and only it,
-		// is retried.
-		//
-		// A full store is the other refusal, and the opposite response (#445):
-		// the store is at its cap with every record live and keeps those
-		// rather than evict one for this request, so the slot was refused,
-		// not the code, and re-drawing cannot help. RFC 6749 §5.2's
-		// `temporarily_unavailable` — "temporary overloading" — is exactly
-		// the condition; the per-IP guard mounted ahead of this handler
-		// bounds how often one caller can be told so.
-		//
-		// Anything else is the store failing — an outage, a timeout, a store
-		// that broke its own contract — and is answered as an outage: 503, at
-		// once, logged. Re-drawing cannot reach a store that is down, and a 500
-		// after five attempts blamed the server for it.
+		// Store refusals: `collision` (a live record holds the code) is retried
+		// with fresh codes; `full` (at cap, every record live) is RFC 6749 §5.2
+		// `temporarily_unavailable`, since re-drawing cannot free a slot; any
+		// other error is a store outage, answered 503 at once.
 		let created: { deviceCode: string; userCode: string } | null = null;
 		let lastError: unknown = null;
 		for (let attempt = 0; attempt < CODE_COLLISION_RETRIES; attempt++) {

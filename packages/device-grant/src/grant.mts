@@ -16,85 +16,35 @@
 
 /**
  * `grant_type=urn:ietf:params:oauth:grant-type:device_code` — RFC 8628 §3.4,
- * §3.5 (#298).
+ * §3.5. The device polls here until its user answers elsewhere.
  *
- * The device polls here until its user answers somewhere else. Almost all of
- * this handler is about answering *precisely enough*: RFC 8628 defines four
- * error codes for four different states, and a client library's whole control
- * flow is built on telling them apart.
+ * RFC 8628's four error codes must stay distinct, since client libraries
+ * branch on them: `authorization_pending` (keep polling), `slow_down` (§3.5:
+ * the interval grows by 5 seconds), `access_denied` (the user refused),
+ * `expired_token` (the window closed). Collapsing any of them into
+ * `invalid_grant` turns a clear outcome into endless retries.
  *
- *   - `authorization_pending` — keep polling, nothing has happened.
- *   - `slow_down` — keep polling, but you are going too fast. §3.5: "the
- *     interval MUST be increased by 5 seconds for this and all subsequent
- *     requests".
- *   - `access_denied` — stop; the user said no.
- *   - `expired_token` — stop; the window closed.
+ * - The polling interval is enforced atomically in `DeviceCodeStore.poll`; a
+ *   read-compare-write here would let concurrent polls both pass.
+ * - A code is redeemable only by the client it was issued to, read from the
+ *   authenticated client, never the attacker-controlled body; otherwise a
+ *   leaked code lets another client redeem the user's approval.
+ * - A poll that presents a DPoP proof or client certificate gets a token
+ *   bound to it (`ownedConfirmation`), and `generateTokenResponse` derives
+ *   `token_type` from that binding (`DPoP` for `cnf.jkt`, RFC 9449 §5;
+ *   `Bearer` for mTLS, RFC 8705 §3).
+ * - With `subjectRevocation` wired, an approval at or before the subject's
+ *   sessions boundary (`coveredByRevocationBoundary`, with `verifyJwt`'s
+ *   skew), or one with no recorded `approvedAtMs` while a boundary is in
+ *   force, is `invalid_grant`. The approval check alone is not enough: a
+ *   stolen session could approve codes ahead and redeem them after the
+ *   victim's credential change. An unreadable boundary is 503
+ *   `temporarily_unavailable`.
+ * - A throwing `poll` is a store outage, answered 503
+ *   `temporarily_unavailable` — none of the four codes is true of it.
  *
- * Collapsing any pair of these into `invalid_grant` turns a client that would
- * have shown "you denied this on your phone" into one that retries forever.
- *
- * ### Where the interval is enforced
- *
- * In the store, not here. The check and the state change have to be one
- * operation — see `DeviceCodeStore.poll` — and a handler that read the record,
- * compared timestamps, and wrote back would let two concurrent polls both pass
- * the gate.
- *
- * ### Client binding
- *
- * The device code is issued to one client and only that client may redeem it.
- * A device code leaked to another registered client would otherwise be
- * redeemable by it, converting a leak into a full impersonation of the user's
- * approval. The check reads the authenticated client identity rather than the
- * body — the body is attacker-controlled, and reading it here would be the
- * same defect the session grant fixed in #295.
- *
- * ### A sender-constrained poll
- *
- * A poll that presented a DPoP proof or a client certificate gets an access
- * token bound to it: the member the binding's mechanism kind owns (core's
- * `ownedConfirmation`), and nothing for a contributed kind that owns neither.
- * The response's `token_type` is read off that confirmation by
- * `generateTokenResponse` — `DPoP` for `cnf.jkt` (RFC 9449 §5), `Bearer` for
- * an mTLS-bound token (RFC 8705 §3). It used to be `Bearer` for both, and a
- * DPoP-aware device presented its DPoP-bound token as a bearer token, which a
- * resource server enforcing the binding refuses (§7.1).
- *
- * ### A revocation between the approval and the poll
- *
- * The approval is checked against the live session when it is given
- * (`verificationEndpoint.mts`). A `revokeAllForSubject` that lands after it
- * and before the device polls — anywhere within the code's lifetime — is
- * older than the token this poll mints, so `verifyJwt` never refuses that
- * token; a holder of a stolen live session could approve codes ahead and
- * redeem them after the victim's credential change. So with
- * `subjectRevocation` wired, the poll holds the approval's own instant
- * (`DeviceAuthorization.approvedAtMs`) against the subject's sessions
- * boundary, as the verification endpoint holds the session's `authTime`
- * against it: an approval at or before the boundary (core's
- * `coveredByRevocationBoundary`, with `verifyJwt`'s one-second allowance) is
- * `400 invalid_grant` — the approval was revoked, and the device starts
- * again. An approval that records no instant (a record approved before the
- * store recorded one) is refused while a boundary is in force, as an
- * `iat`-less token is. A boundary that cannot be read is `503
- * temporarily_unavailable` "the revocation boundary is unavailable; start a
- * new device authorization request" — not the device-code store's
- * description, since that store answered — logged once at error as
- * `device_code_grant_revocation_unavailable` (`store:
- * "revocation_boundary"`, `step: "read"`). The approval was consumed by the
- * poll either way, so a refused or unanswered device starts over.
- *
- * ### A store outage is 503, not a verdict
- *
- * A `poll` that throws is the device-code store failing, which the handler
- * answers as every grant answers a store outage: `503
- * temporarily_unavailable`, logged at error as
- * `device_code_grant_store_unavailable` (`storeOutage.mts`). None of RFC
- * 8628's four codes would be true of it, and a thrown error reached the host
- * app's error handler as a `500`. It does not say the approval is still
- * waiting: `poll` consumes an approval in the same script that reads it, and
- * one whose reply was lost is gone — the device's retry is then answered
- * `invalid_grant`, and the device starts again.
+ * `poll` consumes an approval in the same step that reads it, so after any
+ * refusal or lost reply the device starts over.
  */
 
 import type {
@@ -138,12 +88,9 @@ const error = (status: number, code: string, description: string): GrantHandlerR
 
 export const createDeviceCodeGrant = (options: DeviceCodeGrantOptions): GrantHandler => {
 	const now = options.now ?? Date.now;
-	// The one lifetime this grant mints with, held to the rule core's
-	// resolvers hold `oauth.accessToken.*` to (`isLifetimeSeconds`: a whole
-	// number of seconds from 1 to a year), so building the grant by hand and
-	// through `deviceGrantModule` accept the same values. `generateToken` would
-	// refuse a bad one too, but only on the first poll after a user approved a
-	// device; a composition fault is refused where the composition is assembled.
+	// Held to core's `isLifetimeSeconds` rule so hand-built and module-built
+	// grants accept the same values, and a bad value fails at composition
+	// rather than on the first approved poll.
 	const { accessTokenExpiresIn } = options;
 	if (!isLifetimeSeconds(accessTokenExpiresIn)) {
 		throw new RangeError(
@@ -316,9 +263,8 @@ export const createDeviceCodeGrant = (options: DeviceCodeGrantOptions): GrantHan
 		},
 
 		/**
-		 * #326: this grant is a standing capability of a registration, not a
-		 * per-user ceremony, so a client registered before `allowedGrantTypes`
-		 * existed must not acquire it by omission.
+		 * A standing capability of a registration, so a client that declares no
+		 * `allowedGrantTypes` must not acquire it by omission.
 		 */
 		requiresExplicitGrantAllowlist: true,
 	};

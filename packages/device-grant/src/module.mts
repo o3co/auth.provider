@@ -15,119 +15,24 @@
  */
 
 /**
- * Module factory for the RFC 8628 device authorization grant (#298).
+ * Module factory for the RFC 8628 device authorization grant. Enabled, it
+ * contributes the `urn:ietf:params:oauth:grant-type:device_code` grant,
+ * `POST /oauth/device_authorization` (where a device starts),
+ * `POST /oauth/device/verification` (where the user answers) and
+ * `device_authorization_endpoint` in discovery (RFC 8628 §4).
  *
- * Enabled, the module contributes:
+ * Off by default. The switch is read from the config handed to
+ * `deviceGrantModule({ config })`; disabled, no grant is registered (so
+ * `grant_types_supported` does not name it), no discovery field is added and
+ * both routes answer 404. Routes and discovery use the config `createApp`
+ * parsed, and boot is refused if the two disagree (`settingsFor`).
  *
- *   - the `urn:ietf:params:oauth:grant-type:device_code` grant on `/token`;
- *   - `POST /oauth/device_authorization`, where a device starts;
- *   - `POST /oauth/device/verification`, where a human answers;
- *   - `device_authorization_endpoint` in the discovery document, because a
- *     client has no other way to find the first of those (RFC 8628 §4).
- *
- * ### Secure-default opt-in
- *
- * `oauth.deviceAuthorization.enabled = false` in `reference.conf`. Mounting a
- * package must not turn on a grant; the operator says so.
- *
- * `deviceGrantModule({ config })` reads that key from the config the
- * composition root hands it, the way `oauthAuthorizationModule` reads
- * `oauth.grants.<name>.enabled`: a grant is contributed only when it is on.
- * A module whose manifest is fixed would have to contribute the grant either
- * way, and oauth's `grant_types_supported` is read off the grant resolver, so
- * a disabled grant registered as a handler that refuses was advertised to
- * every client as supported. Disabled, the module contributes no grant — the
- * token endpoint answers `unsupported_grant_type` as it does for any grant
- * nobody registered — no discovery field, and the two routes answer `404`.
- * The grant, the routes and the discovery field are built from the config
- * `createApp` parsed, and a boot where that config disagrees with the
- * factory's is refused (`settingsFor`), first of anything each of them
- * checks, so the two cannot split one grant in half.
- *
- * Since #728 a composition root hands `createApp` the configuration it
- * resolved, unparsed, and reads what it needs before boot — this switch among
- * it — with core's transitional reader (the standalone template's
- * `readSwitches`, naming `oauth.deviceAuthorization.enabled`), which parses it
- * as boot does. Read otherwise, an environment variable's `"true"` is on at
- * boot and off here, and the boot is refused.
- *
- * ### Two settings with no defaults
- *
- * `verification-uri` has none because there is nothing to guess — the page
- * belongs to the deployment, and a device that displays a wrong URL sends
- * users somewhere that cannot help them. A `rateLimiter` is *required* rather
- * than optional for a different reason: RFC 8628 §5.1 computes the user
- * code's entropy budget *against* a rate limit, so an unlimited deployment is
- * not a slower version of a limited one, it is 34.5 bits against an unbounded
- * attacker. Both fail at boot rather than at the first request. So does an
- * enabled grant with no `deviceCodeStore` (#626): the slot is optional to
- * wire, because the #363 absence policy lets a deployment that leaves the
- * grant off boot without one, and declaring it absent says why it is missing
- * — it does not make the grant work without it.
- *
- * And so does an enabled grant with no `userSessionStore`. The verification
- * endpoint admits every action through core's session admission, handed the
- * `sessionRequirementResolver` this module requires, and so approves only
- * from a live `UserSession` — the record behind the cookie's `sid`, not the
- * cookie's `isAuthenticated` — because the device token an approval leads
- * to carries no `sid` and no `family_id`, so no logout reaches it
- * afterwards (see `verificationEndpoint.mts`). Without the store that
- * question cannot be asked, and an endpoint that trusted the cookie instead
- * would look guarded and not be — the limiter's argument again. The slot
- * stays optional in the manifest, as it is on `oauthModule`: a deployment
- * that leaves the grant off needs none, and there is nothing to declare.
- *
- * `subjectRevocation` is read by both halves when it is wired: the
- * verification endpoint's admission refuses a session its sessions boundary
- * covers, and the grant refuses an approval made at or before it (the
- * window between an approval and the poll, which a watermark stamped in
- * between would otherwise not reach — the token minted at the poll
- * postdates it). Optional and undeclared here: `oauthModule`, which every
- * enabled grant is composed with, carries its absence policy.
- *
- * ### The verification endpoint is a CSRF target, and is guarded as one
- *
- * `POST /oauth/device/verification` authorises on the end-user session cookie
- * — the one credential a browser attaches to a request some other site made.
- * That is the whole of RFC 8628 §5.4's remote-phishing attack: any public
- * `client_id` obtains a `user_code`, a page on the attacker's origin
- * auto-submits `action=approve&user_code=…` from the victim's browser, and
- * the attacker's device collects the victim's token. Turning
- * `verification_uri_complete` off keeps the *user* typing the code; a forged
- * POST types it for them.
- *
- * So the route the module mounts is JSON-only — a form body is a "simple"
- * request the browser sends without a preflight, `application/json` is not;
- * the handler refuses any other media type itself — and sits behind the
- * guard `/session/login` runs (#272), the `csrfGuard` slot the session module
- * provides (#728, #710 C4): a foreign `Origin` / `Referer` is refused
- * outright, the server's own origin or one on `session.csrf.trustedOrigins`
- * is accepted, and a request with no origin signal must carry the session's
- * signed double-submit token. That is one CSRF policy for the product rather
- * than a second one that can drift, and this package reads it through the
- * slot's contract in core rather than importing the session package or
- * reading its configuration. The slot is optional in the manifest, as the
- * limiter is, and enabling the grant without it fails at boot.
- *
- * ### Each route parses its own body
- *
- * Both routes live under `/oauth`, beside `oauthModule`'s router, which
- * parses the bodies of its own routes only. So what these routes accept —
- * the 16 KiB bound, the media type, where a CSRF token may come from — is
- * decided by their own middleware whatever order the modules are listed
- * in, and they declare no ordering edge.
- *
- * ### One outage policy for both routes (#457)
- *
- * Both routes are rate-limited, and both apply `rateLimit.failMode` when the
- * limiter backend itself is down — `POST /oauth/device_authorization` through
- * `createRateLimitGuard`, `POST /oauth/device/verification` through the same
- * check the guard is built on (`checkWithFailMode`, because its budget is
- * keyed on the subject and its 429 is its own audit event). The key is read
- * by `requireFailMode` for each route factory, so a composition that enables
- * the grant with no policy is refused whichever factory the planner runs
- * first. Before #457 only the authorization route read it, and a limiter
- * outage on the verification route was an unhandled throw.
+ * Enabled, boot is refused without each setting and slot the grant needs to
+ * be safe; the `require*` helpers below say why. The verification endpoint
+ * authorises on the session cookie, which makes it a CSRF target (RFC 8628
+ * §5.4 remote phishing: a foreign page auto-submits `approve` for the
+ * attacker's `user_code`), so it accepts JSON only — a form POST needs no
+ * preflight — and runs the session module's `csrfGuard` on the whole route.
  */
 
 import {
@@ -162,13 +67,8 @@ import { createDeviceVerificationHandler } from "./verificationEndpoint.mjs";
 
 /**
  * `oauth.deviceAuthorization.rateLimit` — the budget RFC 8628 §5.1 sizes the
- * user code against. `.int().positive()` is load-bearing: `0` is what an
- * empty environment variable coerces to, and a zero-attempt budget locks
- * every user out while a zero window is not a window. Core's
- * `isUsableRateLimitSpec` states the same bounds structurally for configs
- * that never passed this schema, and the limiter-module seed and
- * `requireVerificationRateLimit` below both refuse by it, through
- * `requireUsableConfiguredRateLimitSpec`, with one message (#448).
+ * user code against. `.int().positive()` is load-bearing: an empty
+ * environment variable coerces to `0`, and a zero budget locks every user out.
  */
 const rateLimitSpecSchema = z.object({
 	limit: z.number().int().positive(),
@@ -221,15 +121,12 @@ export const deviceGrantConfigSchema = z.object({
 					.default(5),
 				/**
 				 * The verification endpoint's budget per authenticated subject,
-				 * seeded into whichever rate-limiter adapter is wired under the
-				 * `device_verification` prefix (an operator-declared
-				 * `limits.device_verification` on the adapter still wins). This
-				 * is the number the "requires a rateLimiter" boot refusal
-				 * reasons from, so it has to be the number the limiter applies.
+				 * seeded into the rate limiter under the `device_verification`
+				 * prefix (an adapter's own `limits.device_verification` wins).
 				 */
 				rateLimit: rateLimitSpecSchema.default(DEFAULT_VERIFICATION_RATE_LIMIT),
 				/**
-				 * Declared absence for the `deviceCodeStore` slot (#363).
+				 * Declared absence for the `deviceCodeStore` slot.
 				 * `"unsupported"` is the only value; anything else is a typo that
 				 * would otherwise read as a declaration.
 				 */
@@ -252,8 +149,8 @@ interface DeviceAuthorizationConfigSlice {
 	readonly "code-lifetime-seconds": number;
 	readonly "polling-interval-seconds": number;
 	/**
-	 * Applied by core's limiter modules when they seed `limits`, not here;
-	 * here it is only required to be present and usable (#448).
+	 * Applied by core's limiter modules when they seed `limits`; here it is
+	 * only required to be present and usable.
 	 */
 	readonly rateLimit?: unknown;
 }
@@ -262,17 +159,13 @@ const REQUIRES = [
 	"config",
 	"clientRepository",
 	"keyStore",
-	// The synthetic key every consumer of session admission takes (the
-	// session-admission ADR's D1): the verification endpoint admits each
-	// action through it. Always present — the planner fills it — so it
-	// needs no presence check and no absence policy.
+	// Session admission's synthetic key: the verification endpoint admits
+	// each action through it. The planner always fills it.
 	"sessionRequirementResolver",
 ] as const;
-// #484: `replaySeenSet` is what records a client assertion's single-use
-// `jti`. Optional here for the same reason it is optional on the OAuth
-// router — a composition with no `private_key_jwt` client needs none —
-// and a request using the method without one is `server_error`, never an
-// assertion accepted unchecked.
+// `replaySeenSet` records a client assertion's single-use `jti`. Optional as
+// on the OAuth router: without it a `private_key_jwt` request is
+// `server_error`, never an assertion accepted unchecked.
 const OPTIONAL = [
 	"deviceCodeStore",
 	"rateLimiter",
@@ -286,22 +179,19 @@ const OPTIONAL = [
 	// The subject's sessions boundary: read by the verification endpoint
 	// (a session it covers) and the grant (an approval it covers).
 	"subjectRevocation",
-	// The one CSRF policy (#728, #710 C4), which the session module provides:
-	// the verification endpoint runs it on the whole route. Required once the
-	// grant is enabled (`requireCsrfGuard`), unused while it is off.
+	// The session module's CSRF policy, run on the whole verification route.
+	// Required once the grant is enabled (`requireCsrfGuard`).
 	"csrfGuard",
-	// What the oauth module provides of `oauth {}` (#728): the issuer client
-	// authentication is held to, the access-token lifetime the grant mints and
-	// `requireEmailVerified`. Optional: an enabled grant boots without the
-	// oauth module — another token endpoint may dispatch through core's grant
-	// registry — and then reads the configuration, as before (`tokenSettings`).
+	// What the oauth module provides of `oauth {}`: the issuer, the
+	// access-token lifetime and `requireEmailVerified`. Optional: another token
+	// endpoint may dispatch through core's grant registry, and then they are
+	// read from the configuration (`tokenSettings`).
 	"oauthTokenSettings",
 ] as const;
 
 /**
  * The deps every contribution of {@link deviceGrantModule} receives: exactly
- * its `requires` / `optional`, typed (#626 P2). The helpers below read the
- * optional slots behind a presence check or not at all.
+ * its `requires` / `optional`, typed.
  */
 type Requires = (typeof REQUIRES)[number];
 type Optional = (typeof OPTIONAL)[number];
@@ -309,12 +199,8 @@ export type DeviceGrantModuleDeps = ProviderDeps<Requires, Optional>;
 
 /**
  * What this module reads of `oauth {}`: the `oauthTokenSettings` slot when a
- * module provides it (#728) — read whole, held first to what its readers read
- * (`checkOAuthTokenSettings`), never a member of it beside the configuration —
- * otherwise the configuration read as it always was: the issuer as written,
- * the lifetime through core's `resolveAccessTokenLifetime`, and
- * `requireEmailVerified` on only when `true`. Each is read where it is needed,
- * so a composition that never reaches one never resolves it.
+ * module provides it (checked whole by `checkOAuthTokenSettings`), otherwise
+ * the configuration. Each value is resolved only where it is needed.
  */
 const tokenSettings = (deps: DeviceGrantModuleDeps) => {
 	const held = () =>
@@ -361,17 +247,10 @@ const isEnabled = (config: AppConfig): boolean =>
 	config.oauth?.deviceAuthorization?.enabled === true;
 
 /**
- * The settings slice from the config the boot validated — `null` when the
- * grant is off there — held to the factory's own decision.
- *
- * Whether the grant is contributed is decided from the config handed to
- * `deviceGrantModule({ config })` — what the composition root read before
- * boot; the routes and the discovery field are built from the one `createApp`
- * parsed. Two that disagree would otherwise boot half a grant: one that is
- * registered and advertised while no device can start it, or a flow whose
- * token endpoint refuses the grant. Read from the same files and parsed the
- * same way, they agree, so a disagreement is refused — naming how to read the
- * switch before boot.
+ * The settings slice from the config `createApp` parsed (`null` when the
+ * grant is off there), held to the factory's decision. A disagreement refuses
+ * boot; otherwise half a grant would run — advertised with no way to start
+ * it, or startable while the token endpoint refuses it.
  */
 const settingsFor = (
 	enabled: boolean,
@@ -412,11 +291,9 @@ const BODY_LIMIT = "16kb";
 const BODY_LIMIT_BYTES = 16 * 1024;
 
 /**
- * The cache directives every exit of both routes carries — mounted first on
- * each router, so the answers no handler here writes (the throttle's `429`,
- * client authentication's `401`, the CSRF guard's `403`) carry them too, as
- * federation-grants' `transport()` does for its routes. A refusal an
- * intermediary caches is served to the next caller.
+ * Cache directives on every exit of both routes, mounted first so answers no
+ * handler here writes (the throttle's 429, client authentication's 401, the
+ * CSRF guard's 403) carry them too: a cached refusal reaches the next caller.
  */
 const noStore: RequestHandler = (_req, res, next) => {
 	res.set("Cache-Control", "no-store").set("Pragma", "no-cache");
@@ -438,15 +315,9 @@ const refuseTooLarge = (res: Response): void => {
 };
 
 /**
- * The body limit, restated ahead of the parsers — federation-grants'
- * `withinBodyLimit`, with its status and body.
- *
- * A declared `Content-Length` over the bound is refused here, before any of
- * the body is read. A body with no `Content-Length` (chunked) is left to the
- * parsers' own `limit`, as federation-grants leaves it; no other module's
- * parser reads these routes' bodies (`oauthModule`'s router parses its own
- * routes only), and `parserRefusals` gives the parsers' refusal the same
- * answer.
+ * Refuses a declared `Content-Length` over the bound before any of the body
+ * is read. A chunked body is left to the parsers' `limit`, and
+ * `parserRefusals` answers that refusal the same way.
  */
 const withinBodyLimit: RequestHandler = (req, res, next) => {
 	const declared = Number(req.headers["content-length"]);
@@ -458,20 +329,12 @@ const withinBodyLimit: RequestHandler = (req, res, next) => {
 };
 
 /**
- * A body-parser refusal that is the caller's mistake, as the answer it gets.
- *
- * body-parser raises `http-errors`: `expose: true` with a 4xx `status` for
- * everything the request got wrong — a body over the limit or with more
- * parameters than it takes, a charset or `Content-Encoding` it cannot
- * decode, JSON it cannot read, a compressed body that does not decompress.
- * Those are answered as 4xx, with no error-level log: on the verification
- * route the parser runs ahead of the CSRF guard and of any throttle, so a
- * 500 and an error line for them would let anyone fill the error log at
- * will. `null` for anything else — including an error one of whose three
- * fields throws when read (a getter, a Proxy's trap). The reads go through
- * core's `guardedRead`, the read `loggableError` is built on: a throw here
- * would be `parserRefusals` throwing, and Express would hand
- * `unexpectedErrors` that throw in place of the error.
+ * Maps a body-parser refusal that is the caller's mistake (`http-errors` with
+ * `expose: true` and a 4xx `status`) to its answer, else `null`. These must
+ * not become 500s or error-level logs: on the verification route the parser
+ * runs before the CSRF guard and any throttle, so anyone could fill the error
+ * log. Fields are read through `guardedRead`: a throwing getter here would
+ * replace the error `unexpectedErrors` receives.
  */
 const callerMistake = (
 	error: unknown,
@@ -493,17 +356,10 @@ const callerMistake = (
 };
 
 /**
- * The parsers' refusals, answered — mounted directly after `noStore`, the
- * throttle, `withinBodyLimit` and the parsers, so it sees their errors and
- * nobody else's. What `callerMistake` recognises is the caller's mistake:
- * `413 body_too_large` (a chunked body the parsers found over the bound gets
- * the answer a declared one gets from `withinBodyLimit`), `415
- * unsupported_encoding` or `400 malformed_body`, quoting none of the body
- * and logging nothing at error level. Anything else passes on to
- * `unexpectedErrors`.
- *
- * Mounted last instead, it would read an `expose`d 4xx from anywhere — a
- * store, a handler — as a refused body, and answer and log it as one.
+ * Answers the parsers' refusals as `callerMistake` classifies them, quoting
+ * none of the body; anything else passes on to `unexpectedErrors`. It must be
+ * mounted directly after the parsers: mounted last, it would treat an exposed
+ * 4xx from a store or handler as a refused body.
  */
 const parserRefusals: ErrorRequestHandler = (error, _req, res, next) => {
 	const mistake = res.headersSent ? null : callerMistake(error);
@@ -515,13 +371,10 @@ const parserRefusals: ErrorRequestHandler = (error, _req, res, next) => {
 };
 
 /**
- * The last error handler on either route: every error that reaches it is a
- * `500 server_error` (`unexpected_error`), with core's `loggableError`
- * projection of it in the log — never the error, whose `body` (a parser's)
- * or `command.args` (an ioredis reply's) is what the request or the store
- * said. RFC 8628 §3.2 gives `/oauth/device_authorization` RFC
- * 6749 §5.2's JSON error response, and the verification API answers in JSON
- * throughout, so nothing falls through to the host app's error page.
+ * The last error handler on both routes: `500 server_error`, logging only
+ * core's `loggableError` projection (the raw error can carry request or store
+ * data). Always JSON (RFC 8628 §3.2, RFC 6749 §5.2), never the host app's
+ * error page.
  */
 const unexpectedErrors =
 	(logger: DeviceGrantModuleDeps["logger"]): ErrorRequestHandler =>
@@ -535,14 +388,10 @@ const unexpectedErrors =
 	};
 
 /**
- * What a disabled deployment mounts instead of the real endpoint.
- *
- * A router that answers 404: to a client the endpoint does not exist, which
- * is exactly what `enabled = false` means. It is mounted rather than left
- * out because, unlike a missing package, the description names the config
- * key, so an operator can tell a disabled grant from an uninstalled one.
- * Nothing here reads the rest of the config, so a deployment that leaves the
- * grant off never trips its required settings.
+ * What a disabled deployment mounts: a 404 whose description names the config
+ * key, so an operator can tell a disabled grant from an uninstalled one. It
+ * reads nothing else of the config, so a disabled grant's required settings
+ * are never checked.
  */
 const disabledRoute = (id: string, mountPath: string) => {
 	const router = express.Router();
@@ -566,13 +415,10 @@ const disabledRoute = (id: string, mountPath: string) => {
 };
 
 /**
- * The CSRF guard the verification route runs: the `csrfGuard` slot, which the
- * session module provides — the guard `/session/login` runs, over the same
- * signed double-submit token, cookie and trust list (#728, #710 C4).
- *
- * Optional in the manifest, required when the grant is on, as the limiter is:
- * the endpoint authorises on the session cookie, and mounted without the guard
- * it would have no CSRF defence at all.
+ * The `csrfGuard` slot the session module provides — the guard
+ * `/session/login` runs. Required when the grant is on: the verification
+ * endpoint authorises on the session cookie and would otherwise have no CSRF
+ * defence.
  */
 const requireCsrfGuard = (
 	deps: DeviceGrantModuleDeps,
@@ -592,11 +438,10 @@ const requireCsrfGuard = (
 };
 
 /**
- * OR-5: the outage policy for a limiter-backend failure is `rateLimit.failMode`
- * — one decision for the product, read by every guarded route. Defaulting it
- * here would be a second policy, so its absence is a boot refusal. Both
- * route factories call this (#457), so the refusal does not depend on which
- * one the planner happens to run first.
+ * `rateLimit.failMode` is the product's one outage policy for a failed
+ * limiter backend; defaulting it here would be a second policy, so its
+ * absence refuses boot. Both route factories call this, so the refusal does
+ * not depend on planner order.
  */
 const requireFailMode = (deps: DeviceGrantModuleDeps): RateLimitFailMode => {
 	const failMode = deps.config?.rateLimit?.failMode;
@@ -629,14 +474,9 @@ const requireRateLimiter = (
 };
 
 /**
- * The store is read by the grant and by both endpoints, and the slot is
- * optional — so this is the presence check, a boot refusal in the same shape
- * as the limiter's (#626). Before it, an enabled grant with the store declared
- * absent (`oauth.deviceAuthorization.store = "unsupported"`) booted and
- * mounted endpoints that threw on the first request; the declaration is for a
- * deployment that leaves the grant off (#363), not a way to run it without
- * one. An enabled grant with no store and no declaration is still refused
- * earlier, by the absence policy, naming the config key.
+ * Presence check for the optional `deviceCodeStore` slot, read by the grant
+ * and both endpoints. Declaring the store `"unsupported"` is for deployments
+ * that leave the grant off; it does not let an enabled grant run without one.
  */
 const requireDeviceCodeStore = (
 	deps: DeviceGrantModuleDeps,
@@ -657,10 +497,8 @@ const requireDeviceCodeStore = (
 
 /**
  * The verification endpoint reads the `UserSession` behind the cookie before
- * any action (see `verificationEndpoint.mts`), so an enabled grant without the
- * store is refused here, in the shape of the limiter's and the store's
- * refusals — optional in the manifest, required when the grant is on, as
- * `federationGrantsModule` requires it for the same kind of browser consent.
+ * any action (see `verificationEndpoint.mts`), so the store is required when
+ * the grant is on.
  */
 const requireUserSessionStore = (
 	deps: DeviceGrantModuleDeps,
@@ -680,20 +518,13 @@ const requireUserSessionStore = (
 };
 
 /**
- * #448: the budget the refusal above reasons from has to be one the limiter
- * was actually seeded with.
- *
- * The limiter applies five attempts to `device_verification:` only because
- * its adapter module seeded that prefix from
- * `oauth.deviceAuthorization.rateLimit`, and the seed seeds nothing when the
- * key is not given. A composition booted through `createApp` cannot reach
- * here without the key, because the schema defaults it; a hand-built config
- * never passed the schema, and its verification endpoint ran on twelve times
- * the budget the `rateLimiter` requirement argues from, with no symptom.
- *
- * A key that is given but unusable is refused by core's
- * `requireUsableConfiguredRateLimitSpec`, the same call the seed makes, so
- * the same budget gets the same message whichever of the two meets it first.
+ * The limiter applies this budget to `device_verification` only because its
+ * adapter module seeds that prefix from `oauth.deviceAuthorization.rateLimit`,
+ * and it seeds nothing when the key is absent. A hand-built config that
+ * skipped the schema default would silently run on the adapter's default
+ * budget instead of the one the `rateLimiter` requirement reasons from. An
+ * unusable key is refused with the same call the seed makes, so both give the
+ * same message.
  */
 const requireVerificationRateLimit = (slice: DeviceAuthorizationConfigSlice): RateLimitSpec => {
 	const spec = slice.rateLimit;
@@ -711,13 +542,10 @@ const requireVerificationRateLimit = (slice: DeviceAuthorizationConfigSlice): Ra
 };
 
 /**
- * The `oauth.deviceAuthorization` section as the module declares it (#728):
- * its schema, the package's `config/reference.conf` that holds its defaults,
- * and the path it sits at until it moves under the module's name. Its
- * `configSchema` still declares the same path with the same schema until then,
- * so boot parses the value there twice — the `configSchema` over what core's
- * base made of it, then the section over that, written back at its path —
- * which is idempotent; the `configSchema` goes when the section moves.
+ * The `oauth.deviceAuthorization` section: its schema, the package's
+ * `config/reference.conf` holding its defaults, and its path. `configSchema`
+ * declares the same path with the same schema until the section moves under
+ * the module's name, so boot parses the value twice (idempotently).
  */
 const DEVICE_GRANT_SECTION_SCHEMA = deviceGrantConfigSchema.shape.oauth.shape.deviceAuthorization;
 
@@ -740,7 +568,7 @@ export const deviceGrantModule = (params: { config: AppConfig }): Module => {
 		},
 		requires: REQUIRES,
 		optional: OPTIONAL,
-		// #363: optional to wire, not optional to decide. A composition with no
+		// Optional to wire, not optional to decide. A composition with no
 		// sink discards every device approval — a consent event — with no
 		// symptom, so it has to write `audit.sink.type = "none"` to say so.
 		absencePolicies: {
@@ -788,15 +616,12 @@ export const deviceGrantModule = (params: { config: AppConfig }): Module => {
 					// stay `router.use`: Express skips routes while an error is pending, and
 					// an error here can only come from this router's own layers.
 					router.all("/", noStore);
-					// Throttled like every other public entry point (#325), and
-					// AHEAD of client authentication — the token endpoint's D-6
-					// ordering — so repeated unauthenticated hits are bounded before
-					// they reach a repository lookup, and so a public client cannot
-					// fill the device-code store by asking. Keyed
-					// `device_authorization:ip:<ip>`; the adapter resolves the spec
-					// by that prefix and falls back to its default. Ahead of the
-					// size check too, as federation-grants places it: an oversized
-					// request spends an attempt like any other.
+					// Throttled ahead of client authentication, as at the token
+					// endpoint, so unauthenticated hits are bounded before any
+					// repository lookup and a public client cannot fill the
+					// device-code store; ahead of the size check too, so an
+					// oversized request spends an attempt. Keyed
+					// `device_authorization:ip:<ip>`.
 					router.all(
 						"/",
 						createRateLimitGuard({
@@ -814,24 +639,16 @@ export const deviceGrantModule = (params: { config: AppConfig }): Module => {
 					router.all("/", express.json({ limit: BODY_LIMIT }));
 					router.all("/", express.urlencoded({ extended: false, limit: BODY_LIMIT }));
 					router.use(parserRefusals);
-					// RFC 8628 §3.1 applies RFC 6749 §3.2.1's client-authentication
-					// requirements to this endpoint, and §5.6 expects device clients
-					// to be public. `allowPublicClients: true` is exactly that pair:
-					// a public client is identified by `client_id`, a confidential
-					// one must still present its secret. The same middleware and the
-					// same option `/oauth/token` uses, so there is one notion of
-					// client authentication rather than two that can drift.
+					// RFC 8628 §3.1 / §5.6: the client authentication `/oauth/token`
+					// uses, with public clients identified by `client_id` alone.
 					router.all(
 						"/",
 						createClientAuthMiddleware(deps.clientRepository, {
 							issuer: tokenSettings(deps).issuer(),
 							allowPublicClients: true,
-							// #484: the composition's replay store, so a `private_key_jwt`
-							// client is authenticated here the way it is at every other
-							// endpoint. Without it the middleware has nowhere to record the
-							// assertion's `jti` and answers `server_error` — which is what
-							// this route did for every such client. The accepted `aud` is
-							// derived from `issuer` above, as it is at `/oauth/revoke`.
+							// Records a `private_key_jwt` assertion's `jti`; without it
+							// such clients get `server_error`. The accepted `aud` is
+							// derived from `issuer`, as at `/oauth/revoke`.
 							...(deps.replaySeenSet ? { replaySeenSet: deps.replaySeenSet } : {}),
 							...(deps.logger ? { logger: deps.logger } : {}),
 						}),
@@ -863,27 +680,17 @@ export const deviceGrantModule = (params: { config: AppConfig }): Module => {
 					}
 					const router = express.Router();
 					router.all("/", noStore);
-					// JSON only, deliberately — see the file header. A form body is
-					// a "simple" request a browser sends cross-site with the
-					// victim's cookie and no preflight; JSON is not. No form parser
-					// is mounted here, and `oauthModule`'s router parses its own
-					// routes only, so nothing else parses this body either. The
-					// handler still checks the media type itself and answers
-					// anything else `415`: the rule belongs to the endpoint, not to
-					// what is mounted around it.
+					// JSON only — see the file header. No form parser is mounted, and
+					// the handler also refuses other media types itself (415): the
+					// rule belongs to the endpoint, not to what is mounted around it.
 					router.all("/", withinBodyLimit);
 					router.all("/", express.json({ limit: BODY_LIMIT }));
 					router.use(parserRefusals);
-					// The session guard, verbatim — the `csrfGuard` slot: foreign
-					// origin refused, same origin or `session.csrf.trustedOrigins`
-					// accepted, no origin signal → the signed double-submit token
-					// `GET /session/csrf` mints. On the whole route rather than on
-					// `approve` / `deny` alone, for the reason the three actions are
-					// one route: no way to add a fourth that forgets it.
+					// The session module's CSRF guard, on the whole route rather than
+					// on `approve` / `deny` alone, so no future action can forget it.
 					const csrfGuard = requireCsrfGuard(deps);
-					// The budget this route is limited by is applied inside the
-					// limiter, seeded from config; asserting it here is what makes
-					// the `rateLimiter` requirement mean five attempts (#448).
+					// Asserted here so the `rateLimiter` requirement really means the
+					// configured budget; the limiter applies it, seeded from config.
 					requireVerificationRateLimit(slice);
 					const userSessionStore = requireUserSessionStore(deps);
 					router.post(
@@ -892,16 +699,15 @@ export const deviceGrantModule = (params: { config: AppConfig }): Module => {
 						createDeviceVerificationHandler({
 							store: requireDeviceCodeStore(deps),
 							rateLimiter: requireRateLimiter(deps),
-							// The same outage policy the device_authorization guard
-							// applies, from the same key (#457): the handler keys
-							// its budget on the subject, so it runs the guard's
-							// check itself rather than the guard as a middleware.
+							// The outage policy the device_authorization guard applies.
+							// The handler keys its budget on the subject, so it runs the
+							// guard's check itself rather than the guard as middleware.
 							failMode: requireFailMode(deps),
 							// What session admission reads for every action: the
 							// live session, and the requirements registered.
 							userSessionStore,
 							requirements: deps.sessionRequirementResolver,
-							// #297, read as `/authorize` reads it: `=== true`, so a
+							// Read as `/authorize` reads it: `=== true`, so a
 							// hand-built config that never passed the schema is off.
 							requireEmailVerified: tokenSettings(deps).requireEmailVerified(),
 							// The sessions boundary admission reads, when the
@@ -929,17 +735,11 @@ export const deviceGrantModule = (params: { config: AppConfig }): Module => {
 				(deps: DeviceGrantModuleDeps) => {
 					const slice = settingsFor(enabled, deps);
 					if (slice === null) return {};
-					// RFC 8628 §4. A client that cannot discover this endpoint cannot
-					// start the flow, so the metadata is the feature being reachable
-					// rather than a description of it.
-					//
-					// An issuer-relative path under `endpoints`, which core prefixes
-					// with the issuer and validates. Core's builder refuses an
-					// `*_endpoint` field under `metadata`, so a URL built here would
-					// fail every boot that has an issuer — every boot beside
-					// `oauthModule`. The grant type itself is not contributed here:
-					// `grant_types_supported` is read off the grant resolver
-					// `/oauth/token` dispatches against (#283).
+					// RFC 8628 §4: a client that cannot discover this endpoint cannot
+					// start the flow. An issuer-relative path under `endpoints`, which
+					// core prefixes and validates (it refuses `*_endpoint` under
+					// `metadata`). The grant type is advertised via the grant
+					// resolver, not here.
 					return {
 						endpoints: { device_authorization_endpoint: "/oauth/device_authorization" },
 					};
