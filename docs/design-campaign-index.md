@@ -176,7 +176,7 @@ AS-1/AS-2 unified RFC 6749 §5.2 error envelope (+429 body migration) · AS-3 `r
 - **CC (config correctness)**: CC-2 `unknownFamilyPolicy` key · CC-3 production misconfiguration hard-fails (warn-only in dev; residual closed by OR-12) · CC-4 compiled test artifacts must not ship (CI guard) · CC-5 readonly public DTOs — all [verified]
 - **TS (type safety, Wave 5g)**: TS-1 code-record payload persistence (=IH-2) · TS-2 runtime validation replaces the `as User` cast in HttpUserRepository · TS-3 corrupt Redis envelope validation replaces `JSON.parse as` · TS-4 `resolvePkceSupportedMethods` per-element narrowing · TS-6 refresh-family builder structural client guard — all [verified]
 - **SC (supply chain)**: SC-4 pnpm version pinned in both package.json · SC-5 dependency pin alignment · SC-6 dependency major bump for Express 5 · SC-7 `pnpm audit --prod` CI gate — all [verified]
-- **TD (test debt)**: TD-1 code-persistence tests · TD-2 unknown-family tests · TD-4 TTL/extended-field round-trips · TD-5/TD-10 residual OAuth-route + introspection-cascade tests · TD-6 federation cleanup/replay assertions · TD-7 SF-6 rejection tests · TD-9 inspect-pattern for exchangeCode — all [verified]
+- **TD (test debt)**: TD-1 code-persistence tests · TD-2 unknown-family tests · TD-4 TTL/extended-field round-trips · TD-5/TD-10 residual OAuth-route + introspection-cascade tests · TD-6 federation cleanup/replay assertions · TD-7 SF-6 rejection tests — all [verified]
 
 Phase G's own items were M1–M6 (migration-flag removals) plus its S2 (the
 `legacyTypAccept` default flip — see the S-series note in chapter 5).
