@@ -72,7 +72,7 @@ describe("serializeFederationGrantTokenResult", () => {
 		expect(rendered.body).toMatchObject({ token_type: "bearer", expires_in: 0, scope: "" });
 	});
 
-	it("maps every denial in the union to the status D11 gives it", () => {
+	it("maps every denial in the union to its status and error body", () => {
 		const rows: readonly [FederationGrantTokenResult, number, string | undefined][] = [
 			[{ ok: false, code: "grant_not_found" }, 404, undefined],
 			[{ ok: false, code: "authorization_pending" }, 400, undefined],
@@ -169,7 +169,7 @@ describe("serializeFederationGrantLodgingRefusal", () => {
 	type Refusal = Exclude<FederationGrantReauthorizationResult, { ok: true }>;
 	const refusal = (fields: Record<string, unknown>) => ({ ok: false, ...fields }) as Refusal;
 
-	it("renders every refusal lodging can give as D6's exit for it", () => {
+	it("renders every refusal lodging can give as its status and error body", () => {
 		const rows: [Record<string, unknown>, number, Record<string, string>][] = [
 			[
 				{ reason: "connection_not_permitted" },

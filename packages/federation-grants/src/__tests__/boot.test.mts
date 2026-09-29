@@ -317,7 +317,7 @@ describe("enabling the feature", () => {
 		await expect(boot({ revocation: "absent" })).rejects.toThrow(/subjectRevocation component/);
 	});
 
-	it("refuses an adapter that carries only the boundary #296 shipped", async () => {
+	it("refuses a revocation adapter with no grants boundary, naming grantsRevokedBefore", async () => {
 		await expect(boot({ revocation: "older" })).rejects.toThrow(/grantsRevokedBefore/);
 	});
 
@@ -453,7 +453,7 @@ describe("what creating a grant needs (slice 6)", () => {
 		);
 	});
 
-	it("holds every connection's callback to the origin of the oauthTokenSettings issuer, over the configuration's (#728)", async () => {
+	it("holds every connection's callback to the origin of the oauthTokenSettings issuer, over the configuration's", async () => {
 		// The callbacks are written on the configuration's issuer; the slot names
 		// another origin, so they are no longer on the provider's own.
 		await expect(boot({ tokenSettingsIssuer: "https://slot.test" })).rejects.toThrow(
@@ -513,7 +513,7 @@ describe("what creating a grant needs (slice 6)", () => {
 		await handle.dispose();
 	});
 
-	it("refuses the bundled repository beside a connection, and boots once the deployment records it does not ask (#611)", async () => {
+	it("refuses the bundled repository beside a connection, and boots once the deployment records it does not ask", async () => {
 		await expect(boot({ userRepository: "bundled" })).rejects.toThrow(
 			/connections\.calendar[\s\S]*identityLookup = "unsupported"/,
 		);

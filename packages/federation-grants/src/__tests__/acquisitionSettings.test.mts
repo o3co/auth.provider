@@ -99,7 +99,7 @@ describe("resolveFederationGrantAcquisitionSettings", () => {
 		);
 	});
 
-	it("refuses a deployment with no consent page: consent is the provider's own and is never skipped (D8)", () => {
+	it("refuses a deployment with no consent page: consent is the provider's own and is never skipped", () => {
 		expect(() => resolve({})).toThrow(/federationGrants\.consent\.url/);
 		expect(() => resolve({ consent: {} })).toThrow(/federationGrants\.consent\.url/);
 		expect(() => resolve({ consent: { url: "" } })).toThrow(/federationGrants\.consent\.url/);
@@ -254,7 +254,7 @@ describe("requireFederationGrantIdentityLookup", () => {
 		}
 	});
 
-	it("refuses a lookup that cannot say which registrations it covers (#611)", () => {
+	it("refuses a lookup that cannot say which registrations it covers", () => {
 		expect(() =>
 			requireFederationGrantIdentityLookup(
 				"required",
@@ -343,7 +343,7 @@ describe("requireFederationGrantIdentityLookup", () => {
 		expect(message).not.toContain("directory offline");
 	});
 
-	it("tells the Store which claims each connection will hand it, connection by connection, even on one registration (#611)", () => {
+	it("tells the Store which claims each connection will hand it, connection by connection, even on one registration", () => {
 		// A directory keyed by tenant and object id covers a registration only
 		// when both are named; the same registration configured without them
 		// on another connection is refused, not covered by its neighbour.
@@ -360,7 +360,7 @@ describe("requireFederationGrantIdentityLookup", () => {
 		expect(store.claimsAsked).toEqual([["oid", "tid"], []]);
 	});
 
-	it("refuses a probe written as async that rejects, and leaves no unhandled rejection behind (Copilot, #612)", async () => {
+	it("refuses a probe written as async that rejects, and leaves no unhandled rejection behind", async () => {
 		// The probe is synchronous; one declared `async` answers a promise, which
 		// is not `true` and is refused. If that promise rejects, nothing else
 		// would ever observe it, and the host would see an unhandled rejection
@@ -390,7 +390,7 @@ describe("requireFederationGrantIdentityLookup", () => {
 		).toThrow(/connections\.calendar[\s\S]*identityLookup = "unsupported"/);
 	});
 
-	it("requires nothing with no connection configured, not even the methods: no callback can ask (Copilot, #612)", () => {
+	it("requires nothing with no connection configured, not even the methods: no callback can ask", () => {
 		// Removing the last connection must stay operable for a deployment whose
 		// repository has no lookup at all: nothing can reach check 5.
 		for (const repository of [

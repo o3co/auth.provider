@@ -437,7 +437,7 @@ describe("GET /session/federation-grants/connect — the start a client sends th
 		expect(w.intents.size).toBe(1);
 	});
 
-	it("builds that trip with the loginEntry it is handed (#728)", async () => {
+	it("builds that trip with the loginEntry it is handed", async () => {
 		// The login page and its `redirect_to` protocol are the session
 		// module's: the router asks the entry, and builds no URL of its own.
 		const asked: string[] = [];
@@ -460,7 +460,7 @@ describe("GET /session/federation-grants/connect — the start a client sends th
 		expect(new URL(asked[0] as string).searchParams.get("request")).toBe(handle);
 	});
 
-	it("sends a login page with a fragment its redirect_to in the page's query, before the fragment (#728)", async () => {
+	it("sends a login page with a fragment its redirect_to in the page's query, before the fragment", async () => {
 		// `?redirect_to=…` goes before the page's fragment: after it, the page
 		// would never read it. Through the entry the connect flow follows core's
 		// login-page rule, as `/authorize` does.
@@ -1145,7 +1145,7 @@ describe("the callback for a renewal", () => {
 		return { grantId, state, before };
 	};
 
-	it("clears the stamp of the user's absence and the ineligibility marker together when the renewal activates (#616)", async () => {
+	it("clears the stamp of the user's absence and the ineligibility marker together when the renewal activates", async () => {
 		const w = world();
 		const { grantId, state } = await renewalOfAStarvedGrant(w);
 		returned(await callback(w, { state, code: "c2" }, "b-2"));
@@ -1156,7 +1156,7 @@ describe("the callback for a renewal", () => {
 		expect(after).toHaveProperty("refreshFailure", undefined);
 	});
 
-	it("leaves both exactly as they were when the renewal is refused for another upstream account (#616)", async () => {
+	it("leaves both exactly as they were when the renewal is refused for another upstream account", async () => {
 		const w = world();
 		const { grantId, state, before } = await renewalOfAStarvedGrant(w);
 		w.state.exchange = {
@@ -1362,7 +1362,7 @@ describe("what the browser-half mutation pass found", () => {
 	});
 });
 
-describe("shutting down (Codex on slice 6)", () => {
+describe("shutting down", () => {
 	it("refuses new browser work once the drain has begun, and spends nothing doing so", async () => {
 		// A callback admitted into the drain is waited for; one that is not could
 		// consume its transaction and then have the grant store closed under it
@@ -1386,7 +1386,7 @@ describe("shutting down (Codex on slice 6)", () => {
 		await draining;
 	});
 
-	it("refuses to show the question once the drain has begun, as it refuses the answer (Copilot)", async () => {
+	it("refuses to show the question once the drain has begun, as it refuses the answer", async () => {
 		// Reading the question touches the durable session, the intent store and
 		// the client registry — each of which the drain is about to close.
 		const w = world();
@@ -1453,7 +1453,7 @@ describe("what the adversarial review found", () => {
 		]);
 	});
 
-	it("does not finish a flow whose connection was re-pointed onto another federation since it was lodged (Copilot, #612)", async () => {
+	it("does not finish a flow whose connection was re-pointed onto another federation since it was lodged", async () => {
 		// The revisions pin the issuer and the client, not the federation's
 		// name, so a connection could move onto another entry for the same
 		// registration mid-flow. Boot probed the Store's coverage under the NEW
@@ -2022,7 +2022,7 @@ describe("the callback, when the world fails or moves", () => {
 	});
 });
 
-describe("the identity lookup (D7 check 5), when it cannot answer", () => {
+describe("the identity lookup, when it cannot answer", () => {
 	it("fails closed when the lookup is required and throws, or has gone from the repository", async () => {
 		const throwing = world();
 		const a = await approved(throwing);
@@ -2109,7 +2109,7 @@ class TenantDirectory {
 	}
 }
 
-describe("#611: verified identity claims let a Store place a pairwise sub", () => {
+describe("verified identity claims let a Store place a pairwise sub", () => {
 	const ENTRA = { ...CONNECTION, identityClaims: ["oid", "tid"] };
 	const entraWorld = (people: ReadonlyMap<string, string>) => {
 		const directory = new TenantDirectory(people);
@@ -2229,7 +2229,7 @@ describe("#611: verified identity claims let a Store place a pairwise sub", () =
 		expect(directory.asked).toHaveLength(1);
 	});
 
-	it("refuses an array answered as the claims, even under a claim name an array has (Copilot, #612)", async () => {
+	it("refuses an array answered as the claims, even under a claim name an array has", async () => {
 		// `"0"` is a legal claim name, and `typeof [] === "object"`: an adapter
 		// answering `["owner-id"]` would otherwise pass for `{ "0": "owner-id" }`.
 		const directory = new TenantDirectory(new Map());
@@ -2271,7 +2271,7 @@ describe("#611: verified identity claims let a Store place a pairwise sub", () =
 	});
 });
 
-describe("#611: an answer that establishes no ownership refuses the delegation", () => {
+describe("an answer that establishes no ownership refuses the delegation", () => {
 	for (const reason of ["registration_not_covered", "identity_not_resolvable"] as const) {
 		it(`refuses on indeterminate/${reason}: no activation, no grant event, the flow spent`, async () => {
 			const w = world();
@@ -2440,7 +2440,7 @@ describe("an audit sink that drops everything", () => {
 	});
 });
 
-describe("a callback that carries a parameter twice (Copilot on #610)", () => {
+describe("a callback that carries a parameter twice", () => {
 	it("refuses it as a malformed response rather than dropping the copies, and exchanges nothing", async () => {
 		// Dropping a repeated `iss` from what the adapter is handed would make
 		// whether RFC 9207's check runs depend on the issuer's metadata, not on
@@ -2518,7 +2518,7 @@ describe("connect — what an outage logs", () => {
 		},
 	);
 
-	it("logs the session store that could not answer once, as admission's line (the session-admission ADR's D10), with the grant and the request's id", async () => {
+	it("logs the session store that could not answer once, as admission's line, with the grant and the request's id", async () => {
 		const { w, response, grantId } = await connectWith((w) =>
 			w.state.faults.set("userSessionStore.get", 0),
 		);
@@ -3116,7 +3116,7 @@ const on =
 
 const STEP_UP: RequirementVerdict = { outcome: "step_up", whenStillUnmet: "reauthenticate" };
 
-describe("the browser half on session admission (the session-admission ADR's D8)", () => {
+describe("the browser half on session admission", () => {
 	it("admits connect, the consent read and answered, and the callback twice — each its own action, graded use — on the cookie's claim", async () => {
 		const asked: RequirementInput[] = [];
 		const w = world({ requirements: [fixture(() => ({ outcome: "met" }), asked)] });

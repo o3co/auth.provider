@@ -398,7 +398,7 @@ describe("a subject-wide revocation, from the service to the disclosure", () => 
 	});
 });
 
-describe("a revocation outlives the watermark retention sized before #593 (review condition 1)", () => {
+describe("a revocation outlives the watermark retention a grant-unaware caller sizes", () => {
 	// A grant-unaware caller sizes the watermark to the longest-lived
 	// refresh token (`revokeAllForSubject` documents it so). A grant lives
 	// longer, so a boundary that lapsed with that horizon would let a revoked

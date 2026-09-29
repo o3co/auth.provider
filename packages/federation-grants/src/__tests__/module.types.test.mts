@@ -47,7 +47,7 @@ const OPTIONAL = [
 ] as const;
 type Declared = ProviderDeps<(typeof REQUIRES)[number], (typeof OPTIONAL)[number]>;
 
-describe("federationGrantsModule's deps are the slots it declares (#626 P2)", () => {
+describe("federationGrantsModule's deps are the slots it declares", () => {
 	it("types every contribution callback as ProviderDeps of `requires` / `optional`", () => {
 		expectTypeOf<FederationGrantsModuleDeps>().branded.toEqualTypeOf<Declared>();
 		expect([...(federationGrantsModule.requires ?? [])].sort()).toEqual([...REQUIRES].sort());

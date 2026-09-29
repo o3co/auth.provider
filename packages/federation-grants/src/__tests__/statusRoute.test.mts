@@ -50,7 +50,7 @@ const ask = (h: ReturnType<typeof harness>, id = GRANT_ID, body: unknown = { sub
 		.send(body as object);
 
 describe("the status route — what it reports", () => {
-	it("reports a refresh refused for the user's absence as needing the user, through inspect alone (#616)", async () => {
+	it("reports a refresh refused for the user's absence as needing the user, through inspect alone", async () => {
 		const h = harness();
 		await h.seed();
 		const grant = await h.store.find(GRANT_ID, h.world.now);

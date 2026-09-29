@@ -157,7 +157,7 @@ describe("POST /oauth/federation-grants — lodging a first-time intent", () => 
 		expect(response.body).toEqual({ error: "invalid_request", error_description: "duplicate_sub" });
 	});
 
-	it("maps what core refused to D6's exits", async () => {
+	it("maps each refusal core made to its own error and error_description", async () => {
 		const h = harness();
 		h.world.allowedConnections = [];
 		expect((await lodge(h)).body).toEqual({
@@ -252,7 +252,7 @@ describe("POST /oauth/federation-grants/:grantId/reauthorize — renewing a gran
 		expect((await h.store.find(GRANT_ID, h.world.now))?.status).toBe("active");
 	});
 
-	it("admits a grant starved of scope and answers 201 with the ineligibility it does not change (#616)", async () => {
+	it("admits a grant starved of scope and answers 201 with the ineligibility it does not change", async () => {
 		const h = harness();
 		await h.seed();
 		const grant = await h.store.find(GRANT_ID, h.world.now);
@@ -279,7 +279,7 @@ describe("POST /oauth/federation-grants/:grantId/reauthorize — renewing a gran
 		});
 	});
 
-	it("refuses every other ineligibility as it did: 502, by its reason, and no intent (#616)", async () => {
+	it("refuses a grant ineligible for a lifetime over the maximum: 502, by its reason", async () => {
 		const h = harness();
 		await h.seed();
 		h.world.connections.set(connection.name, { ...connection, maxAccessTokenLifetime: 0 });
@@ -350,7 +350,7 @@ describe("POST /oauth/federation-grants/:grantId/reauthorize — renewing a gran
 		});
 	});
 
-	it("refuses what a renewal cannot mend with D11's status for it", async () => {
+	it("refuses what a renewal cannot mend, each with its own status and error", async () => {
 		const h = harness();
 		await h.seed();
 		// The operator lowered the maximum below the grant's age.
@@ -383,7 +383,7 @@ describe("POST /oauth/federation-grants/:grantId/reauthorize — renewing a gran
 	});
 });
 
-describe("what the coverage report on #610 showed no test reached", () => {
+describe("lodging and renewing, when the drain has begun or something fails", () => {
 	it("refuses to lodge once the drain has begun, and writes nothing", async () => {
 		const h = harness();
 		const draining = h.background.drain();
