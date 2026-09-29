@@ -129,8 +129,10 @@
  * consumer answers the page) — on any of the three actions: the MFA requirement never steps up `lookup` or `deny` (a
  * user refuses a phished device request without one, the ADR's D6), but
  * another requirement may. An outage — the store, the boundary, or a
- * requirement that throws — fails closed as `503 temporarily_unavailable`
- * ("session store unavailable", the answer `/oauth/consent` gives), not
+ * requirement that throws — fails closed as `503 temporarily_unavailable`,
+ * described by what could not answer as `/oauth/consent` describes it
+ * (core's `describeAdmissionOutage`: "session store unavailable",
+ * "revocation store unavailable" or "session requirement unavailable"), not
  * `login_required`, which would tell the page the user is signed out when
  * the store said nothing. Admission writes the lines — one at error for an
  * outage (`session_admission_unavailable`, with the store and the action,
@@ -208,6 +210,7 @@ import {
 	checkWithFailMode,
 	consoleLogger,
 	cookieClaim,
+	describeAdmissionOutage,
 	describeIssuerRejection,
 	emitAuditEvent,
 	isEmailVerified,
@@ -335,7 +338,10 @@ const refusalOf = (
 		case "unavailable":
 			return {
 				status: 503,
-				body: { error: "temporarily_unavailable", error_description: "session store unavailable" },
+				body: {
+					error: "temporarily_unavailable",
+					error_description: describeAdmissionOutage(admission.store),
+				},
 			};
 		case "step_up":
 			return {

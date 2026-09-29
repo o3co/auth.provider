@@ -70,6 +70,25 @@ export const isAdmissionInfrastructureStore = (
 ): store is AdmissionInfrastructureStore =>
 	(ADMISSION_INFRASTRUCTURE_STORES as readonly unknown[]).includes(store);
 
+/** How each of admission's own stores is described when it could not answer: the revocation boundary's in the words the token side uses for it. */
+const INFRASTRUCTURE_OUTAGES: Readonly<Record<AdmissionInfrastructureStore, string>> = {
+	user_session: "session store unavailable",
+	revocation_boundary: "revocation store unavailable",
+};
+
+/**
+ * What an `unavailable` admission is described as to the client, by the
+ * store it names (D10): one of {@link ADMISSION_INFRASTRUCTURE_STORES} by
+ * name, anything else as a requirement's outage — never by the
+ * requirement's name, which is the operator's, in the log line. One text
+ * for every consumer, so none reports a requirement's outage as the
+ * session store's.
+ */
+export const describeAdmissionOutage = (store: string): string =>
+	isAdmissionInfrastructureStore(store)
+		? INFRASTRUCTURE_OUTAGES[store]
+		: "session requirement unavailable";
+
 declare const claimBrand: unique symbol;
 declare const resolverBrand: unique symbol;
 declare const establishmentBrand: unique symbol;
@@ -776,7 +795,7 @@ export type Admission =
 	  }
 	| {
 			readonly outcome: "unavailable";
-			/** One of {@link ADMISSION_INFRASTRUCTURE_STORES}, or the name of the requirement that could not answer. */
+			/** One of {@link ADMISSION_INFRASTRUCTURE_STORES}, or the name of the requirement that could not answer; {@link describeAdmissionOutage} words it for a client. */
 			readonly store: string;
 	  };
 

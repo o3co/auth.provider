@@ -22,6 +22,7 @@ import {
 	admitSession,
 	boundPolicyAudience,
 	deriveAudienceFromResources,
+	describeAdmissionOutage,
 	evaluateGrantPolicy,
 	extractResourceParam,
 	type GrantContext,
@@ -48,7 +49,7 @@ import {
 	wellFormedAmr,
 } from "@o3co/auth-provider-core";
 import type { JWTPayload } from "jose";
-import { requireRequirements, stepUpRefusal, unavailableDescription } from "../admission.mjs";
+import { requireRequirements, stepUpRefusal } from "../admission.mjs";
 
 /**
  * Taken off the family ceiling a rotation reports before the refresh token's
@@ -119,7 +120,7 @@ const refusalFor = (admission: Admission): GrantError | undefined => {
 			return {
 				status: 503,
 				error: "temporarily_unavailable",
-				errorDescription: unavailableDescription(admission.store),
+				errorDescription: describeAdmissionOutage(admission.store),
 			};
 	}
 };

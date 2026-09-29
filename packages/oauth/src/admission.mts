@@ -25,10 +25,8 @@
  */
 
 import {
-	type AdmissionInfrastructureStore,
 	checkResolver,
 	type GrantError,
-	isAdmissionInfrastructureStore,
 	type SessionRequirementResolver,
 } from "@o3co/auth-provider-core";
 
@@ -53,24 +51,6 @@ export function requireRequirements(
 	}
 	return checkResolver(requirements);
 }
-
-/** How each store admission reads itself is described when it could not answer: the revocation boundary's in the words the token side uses for it. */
-const INFRASTRUCTURE_OUTAGES: Readonly<Record<AdmissionInfrastructureStore, string>> = {
-	user_session: "session store unavailable",
-	revocation_boundary: "revocation store unavailable",
-};
-
-/**
- * What an `unavailable` admission is described as, by the store it names
- * (the session-admission ADR's D10): one of admission's own stores — core's
- * `ADMISSION_INFRASTRUCTURE_STORES`, which no requirement may be registered
- * under — or a registered requirement, whose name is the operator's, in the
- * log line, and not the client's.
- */
-export const unavailableDescription = (store: string): string =>
-	isAdmissionInfrastructureStore(store)
-		? INFRASTRUCTURE_OUTAGES[store]
-		: "session requirement unavailable";
 
 /** The token endpoint's `step_up` refusal: `invalid_grant`, and the requirement that asked, so an updated client can offer the step-up. */
 export interface StepUpRefusal extends GrantError {

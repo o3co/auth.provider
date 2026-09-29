@@ -19,6 +19,7 @@ import {
 	type AdmissionDeps,
 	admitSession,
 	cookieClaim,
+	describeAdmissionOutage,
 	type GrantContext,
 	type GrantDependencies,
 	type GrantError,
@@ -34,7 +35,7 @@ import {
 	vouchedAmr,
 	wellFormedAmr,
 } from "@o3co/auth-provider-core";
-import { requireRequirements, stepUpRefusal, unavailableDescription } from "../admission.mjs";
+import { requireRequirements, stepUpRefusal } from "../admission.mjs";
 import { resolveOAuthOptions } from "../resolveOAuthOptions.mjs";
 
 /**
@@ -119,7 +120,7 @@ const refusalFor = (admission: Admission): GrantError | undefined => {
 			return {
 				status: 503,
 				error: "temporarily_unavailable",
-				errorDescription: unavailableDescription(admission.store),
+				errorDescription: describeAdmissionOutage(admission.store),
 			};
 	}
 };

@@ -884,6 +884,7 @@ export {
 	type CompletedRequirement,
 	type CompletedRequirementDto,
 	checkStepUpPage,
+	describeAdmissionOutage,
 	type Establishment,
 	type InterruptAdmission,
 	type InterruptionAnswer,
