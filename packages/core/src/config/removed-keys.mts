@@ -39,7 +39,8 @@
  * (`relocatedKeyMessage`) live here beside `withRemovedKeys`, sharing its
  * message shape; boot reads the rows off the loaded modules' manifests, since
  * an old path may sit in no section any of them still parses. The refusal is
- * deleted at 1.0.0 (`relocatedPaths.drift.test.mts`).
+ * removed at the first major release — `relocatedPaths.drift.test.mts` fails
+ * the cut that forgets.
  *
  * ## The coercion-walk caveat
  *
@@ -130,10 +131,11 @@ export function withRemovedKeys<S extends z.ZodTypeAny>(
 
 /**
  * One configuration path that moved (#728 B10): the keys an operator wrote it
- * at, and the keys it is written at now. A subtree moves with everything
- * under it — `oauth.dpop` to `dpop` takes `oauth.dpop.nonce.lifetime` to
- * `dpop.nonce.lifetime` — unless a more specific relocation says otherwise
- * (`oauth.dpop.iat-window-seconds` to `dpop.iatWindowSeconds`).
+ * at, and the keys it is written at now — or `null` for a key removed rather
+ * than moved. A subtree moves with everything under it — `oauth.dpop` to
+ * `dpop` takes `oauth.dpop.nonce.lifetime` to `dpop.nonce.lifetime` — unless
+ * a more specific relocation says otherwise (`oauth.dpop.iat-window-seconds`
+ * to `dpop.iatWindowSeconds`).
  *
  * Unlike a removed key, which a section's own schema detects
  * (`withRemovedKeys`), a moved path is declared by the module that now owns it
@@ -143,23 +145,30 @@ export function withRemovedKeys<S extends z.ZodTypeAny>(
  */
 export interface RelocatedPath {
 	readonly from: readonly string[];
-	readonly to: readonly string[];
+	readonly to: readonly string[] | null;
+	/**
+	 * Whether no environment variable binds the new path yet — it lies under a
+	 * section path that is still transitional — so none is named.
+	 */
+	readonly unbound?: boolean;
 }
 
 /**
  * A key a configuration still sets at or under a relocated path: the dot path
- * it was written at, the dot path it moved to, and — for a value, not a
- * subtree — the environment variable bound to the new path (#728 B9's rule,
- * `environmentVariableFor`).
+ * it was written at, the dot path it moved to (`null` when it was removed),
+ * and the environment variable bound to the new path (#728 B9's rule,
+ * `environmentVariableFor`, a list of objects' elements indexed per #728 R4)
+ * — absent when the key was removed, or nothing binds the new path yet.
  */
 export interface RelocatedKey {
 	readonly from: string;
-	readonly to: string;
+	readonly to: string | null;
 	readonly environmentVariable?: string;
 }
 
+/** Plain data: an object whose prototype is `Object.prototype` or none — not an array, a Date or a URL. */
 const isPlainObject = (value: unknown): value is Readonly<Record<string, unknown>> => {
-	if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
+	if (typeof value !== "object" || value === null) return false;
 	const prototype: unknown = Object.getPrototypeOf(value);
 	return prototype === Object.prototype || prototype === null;
 };
@@ -174,17 +183,22 @@ const readOwn = (config: unknown, path: readonly string[]): unknown => {
 	return value;
 };
 
+/** Whether `path` is `prefix` or lies under it. Keys are non-empty, so a shorter path never matches. */
 const startsWith = (path: readonly string[], prefix: readonly string[]): boolean =>
-	prefix.length <= path.length && prefix.every((key, index) => path[index] === key);
+	prefix.every((key, index) => path[index] === key);
 
 /**
  * Every key `config` sets at or under a relocated path, each once, in the
- * order the relocations are given and the configuration lists its keys: a
- * value (a list included) at the path it was written at; the values under a
- * subtree, each at its own path; an empty subtree at its own path. Each key is
- * mapped by the most specific relocation that covers it — the longest `from`,
- * the first given on a tie — its keys below that relocation's `from` carried
- * over unchanged. Keys are read as own properties.
+ * order the relocations are given and the configuration lists its keys. A
+ * value is one key; so is a list of values (an environment variable carries
+ * it whole, comma-separated), and a value that is not plain data (a Date, a
+ * URL). A subtree is walked, and so is a list of objects, each index a key
+ * (#728 R4); an empty one sets nothing — HOCON leaves `{}` where an unset
+ * `${?VARIABLE}` was an object's only binding. Each key is mapped by the most
+ * specific relocation that covers it — the longest `from`, the first given
+ * on a tie — its keys below that relocation's `from` carried over unchanged,
+ * or to nothing when that relocation's `to` is `null`. Keys are read as own
+ * properties.
  *
  * Each result carries the relocation that mapped it.
  */
@@ -193,9 +207,7 @@ export function findRelocatedKeys<R extends RelocatedPath>(
 	relocations: readonly R[],
 ): (RelocatedKey & { readonly relocation: R })[] {
 	const found = new Map<string, RelocatedKey & { readonly relocation: R }>();
-	const add = (path: readonly string[], isValue: boolean): void => {
-		const from = path.join(".");
-		if (found.has(from)) return;
+	const add = (path: readonly string[]): void => {
 		let mapping: R | undefined;
 		for (const relocation of relocations) {
 			if (!startsWith(path, relocation.from)) continue;
@@ -204,25 +216,31 @@ export function findRelocatedKeys<R extends RelocatedPath>(
 			}
 		}
 		if (mapping === undefined) return;
+		const from = path.join(".");
+		if (mapping.to === null) {
+			found.set(from, { from, to: null, relocation: mapping });
+			return;
+		}
 		const to = [...mapping.to, ...path.slice(mapping.from.length)];
 		found.set(from, {
 			from,
 			to: to.join("."),
-			...(isValue ? { environmentVariable: environmentVariableFor(to) } : {}),
+			...(mapping.unbound === true ? {} : { environmentVariable: environmentVariableFor(to) }),
 			relocation: mapping,
 		});
 	};
 	const walk = (path: readonly string[], value: unknown): void => {
-		if (!isPlainObject(value)) {
-			add(path, true);
+		if (isPlainObject(value)) {
+			for (const key of Object.keys(value)) walk([...path, key], value[key]);
 			return;
 		}
-		const keys = Object.keys(value);
-		if (keys.length === 0) {
-			add(path, false);
+		if (Array.isArray(value) && value.length > 0 && value.every(isPlainObject)) {
+			value.forEach((element, index) => {
+				walk([...path, String(index)], element);
+			});
 			return;
 		}
-		for (const key of keys) walk([...path, key], value[key]);
+		add(path);
 	};
 	for (const relocation of relocations) {
 		const value = readOwn(config, relocation.from);
@@ -231,8 +249,12 @@ export function findRelocatedKeys<R extends RelocatedPath>(
 	return [...found.values()];
 }
 
+/** What every relocated key's message ends with: remove it, from the file or the environment. */
+const THIS_FIELD = "this field from your config (or unset the environment variable that sets it).";
+
 /** What to tell the operator still setting a relocated key, in the words a removed key is refused in. */
 export function relocatedKeyMessage(key: RelocatedKey): string {
+	if (key.to === null) return goneKeyMessage(key.from, "was removed", `Remove ${THIS_FIELD}`);
 	const variable =
 		key.environmentVariable === undefined
 			? ""
@@ -240,6 +262,6 @@ export function relocatedKeyMessage(key: RelocatedKey): string {
 	return goneKeyMessage(
 		key.from,
 		`has moved to ${key.to}`,
-		`Write it there${variable} and remove this field from your config.`,
+		`Write it there${variable} and remove ${THIS_FIELD}`,
 	);
 }

@@ -237,7 +237,7 @@ test("a section declares its reference.conf, a transitional path and the paths i
 	expectTypeOf<ModuleSection["reference"]>().toEqualTypeOf<URL | undefined>();
 	expectTypeOf<ModuleSection["at"]>().toEqualTypeOf<string | undefined>();
 	expectTypeOf<ModuleSection["relocatedFrom"]>().toEqualTypeOf<
-		readonly string[] | Readonly<Record<string, string>> | undefined
+		readonly string[] | Readonly<Record<string, string | null>> | undefined
 	>();
 });
 
@@ -250,6 +250,8 @@ test("relocatedFrom is a list of old paths moved whole, or a map from each old p
 				"oauth.retrying": "",
 				"oauth.retrying.max-retries": "retries",
 				"endpoints.retry.url": "page.url",
+				// Removed rather than moved.
+				"oauth.retrying.legacy-flag": null,
 			},
 		},
 	});

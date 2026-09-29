@@ -1968,23 +1968,36 @@ interface SectionRelocation extends RelocatedPath {
 }
 
 /**
- * A module's `relocatedFrom` as relocations: each old path, and the path it
- * moved to — the section's path as it is read today (`sectionSegmentsOf`)
- * followed by the entry's path inside it (none for a list entry, or a map
- * entry of `""`). Read after `checkModuleSectionPaths` held its shape.
+ * The new path of a `relocatedFrom` entry: the section's path as it is read
+ * today (`sectionSegmentsOf`) followed by the entry's path inside it — none
+ * for a list entry or a map entry of `""` — or `null` for an entry of
+ * `null`, a key removed rather than moved.
+ */
+const relocationTarget = (
+	section: readonly string[],
+	inside: string | null,
+): readonly string[] | null =>
+	inside === null ? null : inside === "" ? section : [...section, ...inside.split(".")];
+
+/**
+ * A module's `relocatedFrom` as relocations: each old path, and where it went
+ * (`relocationTarget`). A section still read at a transitional `at` is bound
+ * to no environment variable yet, so its relocations name none. Read after
+ * `checkModuleSectionPaths` held their shape.
  */
 function sectionRelocationsOf(m: Module): readonly SectionRelocation[] {
 	const relocatedFrom = m.section?.relocatedFrom;
 	if (relocatedFrom === undefined) return [];
 	const section = sectionSegmentsOf(m);
-	const entries: readonly (readonly [string, string])[] = Array.isArray(relocatedFrom)
+	const entries: readonly (readonly [string, string | null])[] = Array.isArray(relocatedFrom)
 		? relocatedFrom.map((from: string) => [from, ""] as const)
-		: Object.entries(relocatedFrom as Readonly<Record<string, string>>);
+		: Object.entries(relocatedFrom as Readonly<Record<string, string | null>>);
 	return entries.map(([from, inside]) => ({
 		module: m.name,
 		entry: from,
 		from: from.split("."),
-		to: inside === "" ? section : [...section, ...inside.split(".")],
+		to: relocationTarget(section, inside),
+		...(m.section?.at === undefined ? {} : { unbound: true }),
 	}));
 }
 
@@ -1998,16 +2011,20 @@ function sectionRelocationsOf(m: Module): readonly SectionRelocation[] {
  *   its type — rendering it could throw (a bigint, a cyclic object) before
  *   the refusal exists — and the value itself is in `details.at`.
  * - `section.relocatedFrom` is a list of such paths, or a map from such paths
- *   to `""` or such a path inside the section; no old path is, or holds, a
- *   loaded module's section — its own or another's — which a configuration
- *   that sets that section would then be refused for; and no two loaded
+ *   to `""`, such a path inside the section, or `null` (removed); no old path
+ *   is, or holds, a loaded module's section — its own or another's — which a
+ *   configuration that sets that section would then be refused for; no new
+ *   path lies at or under its own old path, where a key written right would
+ *   be refused; and no two loaded
  *   modules claim overlapping old paths — the same one, or one under the
  *   other's — since a key set there would have two new paths. (One module may
  *   cover its own old path with a more specific one: a subtree, and a key
  *   renamed in it.) The later module in `modules` is the one refused, and
  *   `problem` names both.
  *   `details.relocatedFrom` names the entry, or the value when it is neither
- *   form, and `details.problem` what is wrong with it.
+ *   form, and `details.problem` what is wrong with it. A section is known
+ *   here only by a manifest's `section`: a module that reads its settings
+ *   through a `configSchema` alone declares no path to hold against.
  *
  * Throws `module-section-path-invalid`.
  * @internal
@@ -2039,11 +2056,12 @@ function checkModuleSectionPaths(rawModules: readonly Module[]): void {
 	const sections = rawModules
 		.filter((m) => m.section !== undefined)
 		.map((m) => ({ module: m.name, path: sectionSegmentsOf(m) }));
+	/** Whether `path` is `prefix` or lies under it. Keys are non-empty, so a shorter path never matches. */
+	const under = (path: readonly string[], prefix: readonly string[]): boolean =>
+		prefix.every((key, i) => path[i] === key);
 	/** Whether one path is the other or lies under it, in either direction. */
-	const overlaps = (a: readonly string[], b: readonly string[]): boolean => {
-		const [shorter, longer] = a.length <= b.length ? [a, b] : [b, a];
-		return shorter.every((key, i) => longer[i] === key);
-	};
+	const overlaps = (a: readonly string[], b: readonly string[]): boolean =>
+		under(a, b) || under(b, a);
 	/** The old paths the modules before this one claimed. */
 	const claimed: {
 		readonly module: string;
@@ -2069,27 +2087,34 @@ function checkModuleSectionPaths(rawModules: readonly Module[]): void {
 			if (!isKeyPath(from)) {
 				throw refusal(m, from, "an old path is a dot-separated path of non-empty keys");
 			}
-			if (inside !== "" && !isKeyPath(inside)) {
+			if (inside !== "" && inside !== null && !isKeyPath(inside)) {
 				throw refusal(
 					m,
 					from,
-					'its new path is "" (the section itself) or a dot-separated path of non-empty keys inside the section',
+					'its new path is "" (the section itself), a dot-separated path of non-empty keys inside the section, or null (removed)',
 				);
 			}
 			const old = from.split(".");
-			const held = sections.find(
-				({ path }) => old.length <= path.length && old.every((key, i) => path[i] === key),
-			);
+			const held = sections.find(({ path }) => under(path, old));
 			if (held !== undefined) {
+				const is = held.path.length === old.length ? "is" : "holds";
 				throw refusal(
 					m,
 					from,
 					held.module === m.name
-						? "it is the path the section is read at, so every configuration that sets the section would be refused"
-						: `it holds the section of module "${held.module}", so every configuration that sets that section would be refused`,
+						? `it ${is} the path the section is read at, so every configuration that sets the section would be refused`
+						: `it ${is} the section of module "${held.module}", so every configuration that sets that section would be refused`,
 				);
 			}
-			const other = claimed.find(({ module, path }) => module !== m.name && overlaps(path, old));
+			const target = relocationTarget(sectionSegmentsOf(m), inside as string | null);
+			if (target !== null && under(target, old)) {
+				throw refusal(
+					m,
+					from,
+					`its new path "${target.join(".")}" lies at or under the old path, so a key written there would be refused`,
+				);
+			}
+			const other = claimed.find(({ path }) => overlaps(path, old));
 			if (other !== undefined) {
 				throw refusal(
 					m,

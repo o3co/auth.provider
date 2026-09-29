@@ -83,6 +83,7 @@ export {
 	createRecordingMailSender,
 	type RecordingMailSender,
 } from "./recordingMailSender.mjs";
+export { assertRelocationTombstone, type RelocationTombstone } from "./relocationTombstone.mjs";
 export {
 	type CsrfGuardContractInput,
 	createTestCsrfGuard,

@@ -965,17 +965,20 @@ export type ModuleSectionPathInvalidDetails =
  * A configuration handed to `createApp` still sets keys at paths a loaded
  * module's section moved from (#728 B10; `section.relocatedFrom`), found
  * before the configuration is parsed. Each key: the module whose section it
- * moved to, the dot path the operator wrote, the one it is written at now,
- * and — for a value rather than an empty subtree — the environment variable
- * bound to the new path (#728 B9's naming). A bridge for the 0.x line,
- * deleted at 1.0.0.
+ * moved to, the dot path the operator wrote, the one it is written at now
+ * (`null` for a key removed rather than moved), and the environment variable
+ * bound to the new path (#728 B9's naming) — absent for a removed key, and
+ * for a new path under a transitional section path nothing binds yet. A
+ * bridge for the 0.x line, removed at the first major release — the
+ * relocated-paths drift test fails the cut that forgets.
  */
 export interface ConfigPathRelocatedDetails {
 	readonly reason: "config-path-relocated";
 	readonly relocated: readonly {
 		readonly module: string;
 		readonly from: string;
-		readonly to: string;
+		/** The dot path it moved to; `null` for a key removed rather than moved. */
+		readonly to: string | null;
 		readonly environmentVariable?: string;
 	}[];
 }
