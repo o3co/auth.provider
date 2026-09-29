@@ -214,7 +214,7 @@ describe("/oauth/consent on admission", () => {
 		expect(store.get).not.toHaveBeenCalled();
 	});
 
-	it("(1) a cookie with isAuthenticated but no sid, while a store is wired, is not_live: 401 login_required on both methods", async () => {
+	it("a cookie with isAuthenticated but no sid, while a store is wired, is not_live: 401 login_required on both methods", async () => {
 		const store = storeWith(record());
 		const { app } = await makeApp({
 			userSessionStore: store,
@@ -225,7 +225,7 @@ describe("/oauth/consent on admission", () => {
 		expect(store.get).not.toHaveBeenCalled();
 	});
 
-	it("(3) a cookie without user.id is not_live: 401 login_required, where it was 400", async () => {
+	it("a cookie without user.id is not_live: 401 login_required on both methods, with no store read", async () => {
 		const store = storeWith(record());
 		const { app } = await makeApp({
 			userSessionStore: store,
@@ -236,7 +236,7 @@ describe("/oauth/consent on admission", () => {
 		expect(store.get).not.toHaveBeenCalled();
 	});
 
-	it("(3) a record whose sub differs from the cookie's user.id is not_live: 401 login_required, audited", async () => {
+	it("a record whose sub differs from the cookie's user.id is not_live: 401 login_required, audited", async () => {
 		const events: AuditEvent[] = [];
 		const { app } = await makeApp({
 			userSessionStore: storeWith(record({ sub: "someone-else" })),
@@ -246,7 +246,7 @@ describe("/oauth/consent on admission", () => {
 		expect(events.map((e) => e.type)).toEqual(["session.admission.subject_mismatch"]);
 	});
 
-	it("(4) the subject-revocation boundary applies when subjectRevocation is wired: 401 login_required", async () => {
+	it("the subject-revocation boundary applies when subjectRevocation is wired: 401 login_required", async () => {
 		const revocation = createInMemorySubjectRevocation();
 		await revocation.revokeBefore(SUBJECT, new Date(), new Date(Date.now() + 3_600_000));
 		const { app } = await makeApp({
@@ -257,7 +257,7 @@ describe("/oauth/consent on admission", () => {
 		expectLoginRequired(await answer(app, "accept"));
 	});
 
-	it("(5) a record past its expiresAt is not_live: 401 login_required", async () => {
+	it("a record past its expiresAt is not_live: 401 login_required", async () => {
 		const { app } = await makeApp({
 			userSessionStore: storeWith(record({ expiresAt: minutesAgo(1) })),
 		});
@@ -319,7 +319,7 @@ describe("/oauth/consent on admission", () => {
 		expect(store.get).not.toHaveBeenCalled();
 	});
 
-	it("without a store, a cookie naming a subject is admitted on its word, as today", async () => {
+	it("without a store, a cookie naming a subject is admitted on its word", async () => {
 		const { app } = await makeApp({});
 		expect((await show(app)).status).toBe(200);
 	});

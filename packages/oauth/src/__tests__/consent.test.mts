@@ -236,7 +236,7 @@ describe("the page is told which host a URL-shaped client_id names", () => {
 		expect(res.body).toMatchObject({ client_id: DOC_ID, client_id_host: "tools.example" });
 	});
 
-	it("omits it for a pre-registered client whose id merely looks like a URL (review)", async () => {
+	it("omits it for a pre-registered client whose id merely looks like a URL", async () => {
 		// The operator registered it; no document was fetched, so the host in
 		// the id is not a fact this server verified about the client.
 		const record = {

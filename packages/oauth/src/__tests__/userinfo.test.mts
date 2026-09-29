@@ -249,7 +249,7 @@ describe("GET /oauth/userinfo", () => {
 		expect(res.body.error).toBe("invalid_token");
 	});
 
-	it("returns {sub} only when userSessionStore is not wired (backward compat)", async () => {
+	it("returns {sub} only when userSessionStore is not wired", async () => {
 		const token = await mintAT({ family_id: "fam-1", sid: "sid-1", scope: "openid email" });
 
 		const res = await callUserinfo({

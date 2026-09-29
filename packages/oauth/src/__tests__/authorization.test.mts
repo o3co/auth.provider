@@ -899,7 +899,7 @@ describe("createAuthorizationGrant", () => {
 			});
 
 			it.each([true, false])(
-				"rejects a PKCE-less code with requireS256=%s (was: redeemable)",
+				"rejects a PKCE-less code as invalid_request with requireS256=%s",
 				async (requireS256) => {
 					const handler = createAuthorizationGrant(
 						makeLegacyDeps(requireS256, {

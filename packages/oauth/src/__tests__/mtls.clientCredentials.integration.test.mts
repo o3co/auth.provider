@@ -148,7 +148,7 @@ function makeMtlsMechanism(thumbprint: string): TokenBindingMechanism {
 // Tests
 // ---------------------------------------------------------------------------
 
-describe("mTLS cnf-claim propagation — client_credentials grant (§9.1)", () => {
+describe("mTLS cnf-claim propagation — client_credentials grant", () => {
 	describe("AT cnf propagation", () => {
 		it("issues mTLS-bound AT with cnf.x5t#S256 when a cert is presented", async () => {
 			const app = await buildApp([makeMtlsMechanism("MTLS-CC-THUMB")]);

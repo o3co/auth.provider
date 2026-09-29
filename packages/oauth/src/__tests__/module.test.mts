@@ -1227,7 +1227,7 @@ describe("oauthModule — the login trip is the loginEntry slot when a module pr
 		expect(location).toBe(`/sign-in?back=${encodeURIComponent(asked[0] as string)}`);
 	});
 
-	it("reads endpoints.login.url, as before, when no module provides one", async () => {
+	it("reads endpoints.login.url when no module provides one", async () => {
 		const location = await loginTrip([]);
 		expect(location.startsWith("/login?redirect_to=")).toBe(true);
 	});

@@ -167,7 +167,7 @@ const dpopBinding = (jkt: string): TokenBinding => ({
 // 5-row matrix tests
 // ---------------------------------------------------------------------------
 
-describe("DPoP refresh-token binding matrix — §9.2 (5 rows)", () => {
+describe("DPoP refresh-token binding matrix (5 rows)", () => {
 	it("row 1: RT plain + no proof → unbound AT, Bearer", async () => {
 		// An RT never bound, no proof presented: the grant MUST keep issuing
 		// Bearer only — binding is opt-in.
@@ -514,7 +514,7 @@ describe("confidential-client RT binding — opt-in", () => {
 	});
 
 	// A public client was already bound; the flag must not reach it.
-	it("leaves the public-client rule exactly as it was", async () => {
+	it("binds a public client's new RT to the proof with the flag unset or off", async () => {
 		const rt = await mintRefreshToken({ clientId: PUBLIC_CLIENT_ID });
 		for (const deps of [mockDeps, depsWithConfidentialBinding(false)]) {
 			const { result } = await createRefreshTokenGrant(deps).handle(

@@ -434,7 +434,7 @@ describe("the step_up member on the wire (/oauth/token)", () => {
 		expect(res.body).not.toHaveProperty("step_up");
 	});
 
-	it("mints with no requirement registered, as before", async () => {
+	it("mints with no requirement registered", async () => {
 		const res = await mint(await buildApp([]));
 		expect(res.status).toBe(200);
 		expect(res.body.access_token).toEqual(expect.any(String));
