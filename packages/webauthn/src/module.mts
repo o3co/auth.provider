@@ -15,51 +15,14 @@
  */
 
 /**
- * WebAuthn module manifest — ties together the grant handler and the three
- * ceremony endpoints contributed as a deployable unit (Wave 1 §2.4.1 / T31).
+ * WebAuthn module manifest: contributes the `urn:o3co:oauth:grant-type:webauthn` grant and the
+ * three ceremony routes under `/oauth/webauthn/` (registration/options, registration/verify,
+ * authentication/options).
  *
- * Contributions:
- *   - `grants[WEBAUTHN_GRANT_TYPE]` — the urn:o3co:oauth:grant-type:webauthn
- *     grant handler (T30). Registered with the boot planner's GrantRegistry
- *     via the `contributes.grants` slot.
- *   - `routes[0]` — POST /oauth/webauthn/registration/options (T27).
- *   - `routes[1]` — POST /oauth/webauthn/registration/verify (T28).
- *   - `routes[2]` — POST /oauth/webauthn/authentication/options (T29).
- *
- * `logger` (optional, `consoleLogger` when unwired) is where the grant and
- * the three routes report a store that cannot answer — each answered `503
- * temporarily_unavailable` — and where the rate-limit guard reports its own.
- *
- * DI requires (all consumed transitively by the grant or routes):
- *   - `webauthnConfig`         — consumer-supplied via a bootstrap module's
- *                                 `provides` slot. Schema exported from this
- *                                 package; NOT auto-intersected into AppConfig.
- *   - `webauthnCredentialStore` — credential storage (findByCredentialId,
- *                                  listByUserId, updateSignCount).
- *   - `challengeStore`         — raw challenge persistence (issue, consume).
- *   - `challengeCeremony`      — 3-outcome replay protection (consume).
- *   - `config`                 — AppConfig; grant reads the oauth.accessToken lifetime
- *                                and oauth.resourceIndicator.enabled.
- *   - `keyStore`               — JWT signing; consumed by generateToken inside
- *                                the grant handler.
- *
- * `grantPolicy` is declared as OPTIONAL **in the dependency type signature** so
- * the manifest can be wired into compositions where other (non-webauthn) modules
- * may run without policy. But the **grant factory enforces it at boot time**:
- * if `webauthnModule` is wired without a `grantPolicy` slot, the factory throws
- * a clear error (Wave 1 post-merge audit H-2 fail-fast). Unlike `client_credentials`
- * (which falls back to `client.allowedScopes`) and `authorization_code` (narrowed
- * at /authorize), the webauthn grant has NO library-side scope ceiling — the
- * passkey is the authentication event, not a scope authorization. Without
- * `grantPolicy`, an attacker can request any scope and receive it verbatim.
- *
- * When wired, the grant invokes `grantPolicy.evaluate` UNCONDITIONALLY (rt-style),
- * mirroring `refresh_token`. `oauth.resourceIndicator.enabled` gates ONLY whether
- * `body.resource` is forwarded to the policy; it does NOT gate whether the policy
- * runs.
- *
- * Cross-refs: Plan T31 / spec §2.4.1 / PR #172 C1 security fix / Codex Round 3 P1 /
- *             Wave 1 post-merge audit H-2
+ * `grantPolicy` is an optional slot only so the manifest composes with other modules; the grant
+ * factory refuses to boot without it. This grant has no library-side scope ceiling (the passkey
+ * is the authentication event, not a scope authorization), so without a policy it would issue
+ * whatever scope the caller requests.
  */
 
 import {
@@ -84,38 +47,25 @@ import { createRegistrationOptionsHandler } from "./routes/registrationOptions.m
 import { createRegistrationVerifyHandler } from "./routes/registrationVerify.mjs";
 
 /**
- * The `webauthn` section as the module declares it (#728): the package's
- * `config/reference.conf`, which holds its defaults, and the path it sits at.
- * Its schema checks nothing yet: the module reads the section through the
- * `webauthnConfig` slot, which the deployment fills from it with
- * `webauthnConfigSchema` (or hard-codes), and a check here would refuse at
- * boot what that slot accepts today. The schema takes over when the section
- * moves under the module's name.
+ * The `webauthn` section's declaration: the package's `config/reference.conf` (its defaults) and
+ * its path. The schema checks nothing: the module reads its settings from the `webauthnConfig`
+ * slot, which the deployment fills (with `webauthnConfigSchema`, or hard-coded), and a check
+ * here could refuse at boot what that slot accepts.
  */
 const WEBAUTHN_SECTION_SCHEMA = z.unknown();
 
 /**
  * Declarative manifest for the WebAuthn passkey module.
  *
- * Consumer composition roots provide `webauthnConfig` via a small bootstrap
- * module that reads from application config (per A5 §10.2 const-Module
- * pattern). This module does NOT read from AppConfig directly —
- * WebAuthnConfig is a separate component slot (T21 ComponentMap augmentation).
+ * Settings come from the `webauthnConfig` slot, which a bootstrap module fills from application
+ * config; this module does not read them from AppConfig. Each route has its own id for collision
+ * detection and ordering.
  *
- * The three routes are mounted under dedicated sub-paths so they can
- * each carry individual IDs for collision detection and ordering:
- *   /oauth/webauthn/registration/options   — id: webauthn-registration-options
- *   /oauth/webauthn/registration/verify    — id: webauthn-registration-verify
- *   /oauth/webauthn/authentication/options — id: webauthn-authentication-options
- *
- * `POST /oauth/webauthn/authentication/options` is rate-limited by this module
- * (#281). The route factory mounts core's shared `createRateLimitGuard` under
- * the `webauthn-authentication-options` tag, on the wired `rateLimiter`
- * component when there is one and on a per-process memory limiter (with a
- * warning) when there is not. The spec comes from
- * `webauthnConfig.rateLimit.authenticationOptions`; the outage policy comes
- * from `config.rateLimit.failMode`, the same key the OAuth endpoints and
- * `/session/login` read.
+ * `POST /oauth/webauthn/authentication/options` is rate-limited by the module itself: core's
+ * `createRateLimitGuard` under the `webauthn-authentication-options` tag, on the wired
+ * `rateLimiter` or else a per-process memory limiter (with a warning). The budget is
+ * `webauthnConfig.rateLimit.authenticationOptions`; the outage policy is
+ * `config.rateLimit.failMode`, as for the OAuth endpoints and `/session/login`.
  */
 export const webauthnModule = defineModule<
 	| "webauthnConfig"
@@ -147,46 +97,34 @@ export const webauthnModule = defineModule<
 		"keyStore",
 	],
 	optional: [
-		// grantPolicy is REQUIRED by the webauthn grant (H-2 fail-fast in the
-		// factory below). Declared `optional` here only so the manifest is
-		// composable with non-webauthn modules that don't need policy — the
-		// factory throws at boot when this slot is unwired.
+		// Required by the grant factory, which throws at boot without it; optional here only so
+		// the manifest composes with modules that need no policy.
 		"grantPolicy",
-		// #281 — the authentication/options throttle. `rateLimiter` optional so a
-		// composition installing no limiter module still boots; unlike the OAuth
-		// routes, absence does NOT mean unguarded here (see the route factory).
+		// Optional so a composition without a limiter boots; the authentication/options route
+		// then falls back to a per-process limiter rather than going unguarded.
 		"rateLimiter",
-		// #281 — `rate_limit.unavailable` during a limiter outage. No events when
-		// absent, matching how oauth and session treat the slot.
+		// `rate_limit.unavailable` events during a limiter outage; none when absent.
 		"auditSink",
-		// #281 — operator-visible outage channel + the fallback-limiter warning;
-		// also where the grant and the routes log a store that cannot answer.
+		// Store and limiter outages, and the fallback-limiter warning (`consoleLogger` if unset).
 		"logger",
-		// #480 — the refresh-token family the grant opens when the client is
-		// allowed `refresh_token`. A3 §5.2, the same component the
-		// authorization_code grant registers its initial rt+jwt with. Optional so
-		// a composition that issues no refresh tokens still boots; when it IS
-		// wired, the grant is fail-closed on a store outage.
+		// The refresh-token family the grant opens, the component the authorization_code grant
+		// uses. Optional for compositions that issue no refresh tokens; when wired, a store
+		// outage fails closed.
 		"refreshTokenFamilyRotation",
-		// #728 — what the grant reads of `oauth {}`, which the oauth module
-		// provides; the configuration's values when no module does.
+		// What the grant reads of `oauth {}`, provided by the oauth module; the configuration's
+		// values when no module provides it.
 		"oauthTokenSettings",
 	],
-	// #363: `auditSink` is optional to wire, not optional to decide — an
-	// unfilled slot must be declared with audit.sink.type = "none" or boot
-	// refuses. Same shared policy as the oauth and session modules.
+	// `auditSink` is optional to wire, not to decide: an unfilled slot needs
+	// audit.sink.type = "none" or boot refuses (the policy the oauth and session modules share).
 	absencePolicies: { auditSink: AUDIT_SINK_ABSENCE_POLICY },
 	contributes: {
 		grants: {
 			[WEBAUTHN_GRANT_TYPE]: (deps) => {
-				// Wave 1 post-merge audit H-2: fail-fast at boot if grantPolicy is
-				// not wired. The webauthn grant has no library-side scope ceiling
-				// (no client → no client.allowedScopes); grantPolicy is the sole
-				// scope gate. Booting without it silently accepts unbounded scope.
+				// grantPolicy is this grant's only scope bound; booting without it would accept
+				// unbounded scope.
 				if (!deps.grantPolicy) {
-					// No package ships a GrantPolicyHook: the policy is the deployment's
-					// own, so the message says how to fill the slot rather than what to
-					// install.
+					// No package ships a GrantPolicyHook, so the message says how to fill the slot.
 					throw new Error(
 						"webauthn grant requires `grantPolicy` to be wired. " +
 							"Unlike client_credentials (client.allowedScopes ceiling) and " +
@@ -202,26 +140,19 @@ export const webauthnModule = defineModule<
 							"See the @o3co/auth-provider-webauthn README, SECURITY — scope authorization.",
 					);
 				}
-				// Handed over whole, as the oauth module hands its grants theirs.
-				// A bag built here field by field is how a declared slot went
-				// missing twice — the C1 `grantPolicy` bypass, and #480's
-				// refresh-token family — with nothing to say so. The `satisfies`
-				// holds the other direction: every slot the grant reads is one
-				// this module declares, optional ones included, which plain
-				// assignability would let through as a permanent `undefined`.
+				// Handed over whole, as the oauth module does for its grants, so no declared slot
+				// can be dropped on the way. The `satisfies` checks the other direction: every slot
+				// the grant reads is declared here, optional ones included (plain assignability
+				// would let an undeclared one through as a permanent `undefined`).
 				return createWebAuthnGrant(deps satisfies Pick<typeof deps, keyof WebAuthnGrantDeps>);
 			},
 		},
 		routes: [
 			// POST /oauth/webauthn/registration/options
-			// express.json() is installed on the router, not at the host app level —
-			// createApp installs no global JSON parser, and oauthModule's router parses
-			// only its own routes' bodies, so each contributed router installs its own.
-			// On the route's own path (`router.all("/")`), not `router.use`: core
-			// mounts this router on its path by prefix, so a `use` parser would read
-			// the body of a later module's route beneath it too.
-			// 100kb limit: realistic WebAuthn blobs are under 10KB; 100kb caps DoS.
-			// Cross-refs: Codex Round 4 P1
+			// Each contributed router installs its own JSON parser (createApp installs none), on
+			// the route's own path (`router.all("/")`), not `router.use`: core mounts routers by
+			// prefix, so a `use` parser would also read the bodies of later routes beneath it.
+			// 100kb caps DoS; real WebAuthn payloads are under 10KB.
 			(deps) => {
 				const router = express.Router();
 				router.all("/", express.json({ limit: "100kb" }));
@@ -261,12 +192,8 @@ export const webauthnModule = defineModule<
 				};
 			},
 			// POST /oauth/webauthn/authentication/options
-			// express.json() on the route's own path — same rationale as above.
-			//
-			// #281: the rate limit is MOUNTED here. It used to be "composed
-			// externally at module-wiring time (S10/S15)" — a comment, not a
-			// middleware, on the one webauthn route that is unauthenticated and
-			// writes a challenge per request.
+			// express.json() on the route's own path, as above. The route is unauthenticated and
+			// writes a challenge per request, so the module mounts its rate limit here.
 			(deps) => {
 				const router = express.Router();
 				router.all("/", express.json({ limit: "100kb" }));
@@ -277,15 +204,11 @@ export const webauthnModule = defineModule<
 					windowSeconds: deps.webauthnConfig.rateLimit.authenticationOptions.windowSeconds,
 				};
 				if (deps.rateLimiter === undefined) {
-					// #474: the per-process fallback below is replica-unsafe state
-					// of the same kind the boot guard refuses (#271), and it sat
-					// outside the guard because it is built here rather than
-					// declared on the manifest. Read the same three-state switch:
-					// "multi" refuses — the flood and enumeration budget on this
-					// route would be multiplied by the replica count — "single" is
-					// silent, unset warns. Thrown from a route factory, the planner
-					// wraps this as `contribute-factory-failed` with this error as
-					// its `cause`.
+					// The per-process fallback below is replica-unsafe state, built here where the
+					// boot guard does not see it, so it reads `deployment.mode` itself: "multi"
+					// refuses (the budget would multiply by the replica count), "single" is
+					// silent, unset warns. The planner wraps the throw as
+					// `contribute-factory-failed`, with this error as its `cause`.
 					const deploymentMode = deps.config.deployment?.mode;
 					if (deploymentMode === "multi") {
 						throw new BootError({
@@ -306,18 +229,13 @@ export const webauthnModule = defineModule<
 						);
 					}
 				} else {
-					// A shared limiter applies what its module seeded from the app
-					// config's `webauthn.rateLimit.authenticationOptions`, not this
-					// slot: the bundled limiter modules read config, and this slot
-					// may be hard-coded (`webauthnConfigSchema.parse({…})`). Without
-					// the key the route runs on the limiter's default; with a
-					// different one the limiter applies the key. Either way the
-					// budget in force is not the one this slot states, so boot says
-					// so, once, with both values and the key to set. The key is read
-					// as the seed reads it, so numeric strings agree with numbers. An
-					// explicit `limits.webauthn-authentication-options` in the
-					// limiter's own section, which it applies over both, is not
-					// visible here and is not compared.
+					// A shared limiter applies the budget its module seeded from the app config's
+					// `webauthn.rateLimit.authenticationOptions`, not this slot (which may be
+					// hard-coded). When the key is missing or differs, the budget in force is not
+					// the one this slot states, so boot warns once with both values. The key is
+					// read as the seed reads it (numeric strings equal numbers). An explicit
+					// `limits.webauthn-authentication-options` in the limiter's own section
+					// overrides both and is not visible here.
 					const configured = (
 						deps.config as {
 							webauthn?: { rateLimit?: { authenticationOptions?: unknown } };
@@ -339,13 +257,9 @@ export const webauthnModule = defineModule<
 						);
 					}
 				}
-				// Falling back rather than leaving the route unguarded, the same
-				// choice `/session/login` makes: this endpoint is the credential-
-				// store flood and enumeration surface, so a per-process bucket is
-				// weak protection, not absent protection. The warning above says
-				// which one is in force so the weakness is stated, not implied.
-				// Wire the shared `rateLimiter` component (Redis in a scaled
-				// deployment) to get one bucket set across replicas.
+				// Fall back rather than leave the route unguarded, as `/session/login` does: this is
+				// the credential-store flood and enumeration surface, and a per-process bucket is
+				// weak protection, not none. The warning above states which one is in force.
 				const limiter: RateLimiter =
 					deps.rateLimiter ??
 					createMemoryRateLimiter({

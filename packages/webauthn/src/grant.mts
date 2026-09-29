@@ -15,101 +15,14 @@
  */
 
 /**
- * WebAuthn grant handler — `urn:o3co:oauth:grant-type:webauthn` (spec §2.4).
+ * WebAuthn grant handler: `urn:o3co:oauth:grant-type:webauthn`. Exchanges a verified passkey
+ * assertion for an access token, plus a refresh token when the authenticated client is allowed
+ * `refresh_token`. Client authentication is optional: the passkey is the authentication event.
  *
- * Flow:
- *   1. Parse `body.assertion` as AuthenticationResponseJSON. Malformed → 400 invalid_grant.
- *   2. Extract challenge from assertion.response.clientDataJSON (base64url JSON).
- *   3. Look up credential via credentialStore.findByCredentialId(assertion.id).
- *      Not found → 400 invalid_grant.
- *   4. Consume challenge via challengeCeremony.consume("webauthn:authentication", value).
- *      outcome !== "consumed" → 400 invalid_grant.
- *   5. Verify assertion via verifyWebAuthnAssertion. ok=false → 400 invalid_grant.
- *   6. Atomic CAS sign-count update via credentialStore.updateSignCount.
- *      Returns false → 400 invalid_grant (concurrent race / clone attack).
- *   7. Optional grantPolicy gate — rt-style: called unconditionally when deps.grantPolicy
- *      is wired (Codex Round 3 P1). The resourceIndicator flag gates ONLY whether
- *      body.resource is forwarded in the request payload (Stage 1 plumbing contract).
- *      CP-18 fail-closed — policy throw → 503 temporarily_unavailable.
- *
- *      SECURITY: webauthn grant has no client.allowedScopes ceiling (the passkey is
- *      the auth event, not scope authorization). Policy is the ONLY scope-bounding gate.
- *      Deployments wanting scope authorization MUST wire grantPolicy.
- *
- *   8. Issue an access token, and a refresh token when the authenticated client's
- *      `allowedGrantTypes` names `refresh_token` (#480). The refresh token opens a
- *      family through `refreshTokenFamilyRotation`, exactly as the authorization-code
- *      grant does, so rotation and RFC 6819 §5.2.2.3 replay detection are the shared
- *      ones. A registration that does not name `refresh_token` — including one that
- *      declares no `allowedGrantTypes` at all — receives the access token alone.
- *
- * Store outages:
- *   A store that cannot answer at steps 3, 4 or 6, or when the refresh-token
- *   family is registered in step 8 (under a reserved `jti` and expiry, before
- *   either token is signed), is the server's outage, not a verdict on the
- *   passkey: 503 temporarily_unavailable, logged once at error level as
- *   `webauthn_grant_store_unavailable` with `store` and `step`, and no token.
- *   Nothing is spent before step 4; from there the challenge may be consumed,
- *   so the client's retry of the same assertion is 400 invalid_grant and the
- *   user runs the ceremony again.
- *
- * Sender binding:
- *   A DPoP- or mTLS-bound request carries its RFC 7800 confirmation into BOTH
- *   tokens, on the two different gates the other grants apply (#489).
- *
- *   The access token binds whenever the request carried a confirmation its
- *   mechanism owns, with no further condition — the rule every grant applies
- *   (core's `ownedConfirmation`: DPoP's `jkt`, mTLS's `x5t#S256`, and nothing
- *   for a contributed kind that owns neither). A resource server checks an
- *   access token's `cnf` against the proof on every call, so a token minted
- *   from a proven key and handed back unbound is a token that replays from
- *   anywhere; one minted with a binding no owning mechanism validated is one
- *   no resource server can honour.
- *
- *   The refresh token binds on the narrower gate `authorization.mts` and
- *   `refreshToken.mts` apply: public clients always, confidential clients only
- *   under `oauth.tokenBinding.bindConfidentialClientRefreshTokens` (#275),
- *   because for them the client secret is already the refresh-time
- *   authenticator (RFC 9449 §5). The setting is core's, read through
- *   `resolveTokenBindingSettings` as those grants read it (#728).
- *
- *   The response `token_type` says which of the two the access token is: "DPoP"
- *   for a DPoP-bound token (RFC 9449 §5), "Bearer" otherwise — including for an
- *   mTLS-bound one, which is presented as a bearer token and checked against the
- *   TLS client certificate (RFC 8705 §3).
- *
- *   A client registered `senderConstrained` needs nothing from this handler: the
- *   shared grant-dispatch gate in the /token route refuses a proofless request
- *   with 401 `invalid_client` before any handler runs, for every grant type. The
- *   hole #489 named was the other half — a request that DID prove its key still
- *   received an unbound access token.
- *
- * Audience derivation (#520 — the rule the session, device, code and jwt-bearer
- * grants share; the two fallback families are documented on
- * `AuthenticatedClient.allowedAudiences`):
- *   - With an authenticated client: allowedAudiences[0] ?? clientId. The token
- *     is bound to an end user and meant for a resource, so the fallback is the
- *     client, never the authorization server.
- *   - Without one: the issuer. Nothing names a resource or a client, RFC 9068
- *     §2.2 still requires `aud`, and the issuer is the one audience every
- *     deployment has.
- *   - A `grantPolicy` may narrow within `allowedAudiences`. With no client there
- *     is no ceiling to narrow within, and a policy audience is refused.
- *   (WebAuthn grant does not require client authentication — the passkey IS the
- *    authentication event. Consumers may optionally wire clientAuthMw before this
- *    handler to bind tokens to a specific client application.)
- *
- * RFC 8707 (Wave 1 §5.3):
- *   - resource forwarded to grantPolicy when resourceIndicator.enabled === true
- *   - read by core's `extractResourceParam`, the reading the oauth grants and
- *     /authorize use: each value kept whole, empty entries of a repeated
- *     parameter dropped, and an all-empty parameter read as none requested.
- *   - No audience is derived from `resource` here. #173 landed that for
- *     client_credentials, refresh_token and /authorize and did not cover this
- *     grant; a policy that wants to honour `resource` narrows within
- *     `allowedAudiences`.
- *
- * Cross-refs: Plan T30 / spec §2.4 / PR #172 W1P3 patterns / Codex Round 3 P1
+ * Because a passkey authenticates rather than authorizes scope, there is no `allowedScopes`
+ * ceiling: `grantPolicy` is the only scope bound, and `webauthnModule` refuses to boot without it.
+ * A store that cannot answer is 503 temporarily_unavailable, never a verdict on the passkey. The
+ * package README's SECURITY sections state the full rules.
  */
 
 import { randomUUID } from "node:crypto";
@@ -147,10 +60,7 @@ import { verifyWebAuthnAssertion } from "./internal/verification.mjs";
 
 export const WEBAUTHN_GRANT_TYPE = "urn:o3co:oauth:grant-type:webauthn";
 
-/**
- * The grant type a client must be allowed before this grant hands it a refresh
- * token (#480). RFC 6749 §6 — a plain name, not a URN.
- */
+/** The grant type a client must be allowed to receive a refresh token (RFC 6749 §6). */
 const REFRESH_TOKEN_GRANT_TYPE = "refresh_token";
 
 // ---------------------------------------------------------------------------
@@ -158,24 +68,14 @@ const REFRESH_TOKEN_GRANT_TYPE = "refresh_token";
 // ---------------------------------------------------------------------------
 
 /**
- * What the WebAuthn grant reads (#626 P2), declared the way the oauth grants
- * declare theirs: the shared grant slots it uses — `config` and `keyStore` to
- * mint, `grantPolicy` to bound scope, `refreshTokenFamilyRotation` to open a
- * refresh-token family — plus the credential store and the challenge ceremony
- * only this grant reads, and the RP fields of `webauthnConfig` the assertion
- * check needs.
+ * What the WebAuthn grant reads: the shared grant slots (`config` and `keyStore` to mint,
+ * `grantPolicy`, `refreshTokenFamilyRotation`, `logger`), the credential store and challenge
+ * ceremony, the oauth token settings, and the RP fields of `webauthnConfig`.
  *
- * `webauthnModule` hands its deps over whole and checks, with `satisfies`,
- * that every key here is a slot it declares. A slot read here without the
- * module declaring it — optional or not — is therefore a compile error at
- * that call rather than an `undefined` at runtime, and a slot the module
- * declares cannot be dropped on the way. That check stops at slots: that the
- * `webauthnConfig` fields read here are all fields of `WebAuthnConfig` is
- * pinned by `grant.types.test.mts`, which `pnpm run typecheck` compiles.
- *
- * `grantPolicy` stays optional in this type although `webauthnModule` refuses
- * to boot without it (H-2): a handler built directly, as the unit tests do,
- * still runs without one.
+ * `webauthnModule` hands its deps over whole and checks with `satisfies` that every key here is a
+ * slot it declares; `grant.types.test.mts` pins that the `webauthnConfig` fields exist on
+ * `WebAuthnConfig`. `grantPolicy` stays optional so a handler built directly (as unit tests do)
+ * runs without one; the module refuses to boot without it.
  */
 export interface WebAuthnGrantDeps
 	extends Pick<
@@ -187,18 +87,13 @@ export interface WebAuthnGrantDeps
 		readonly rpId: string;
 		readonly origin: readonly string[];
 		/**
-		 * #554 audit: origins this RP accepts being framed by, for a
-		 * cross-origin (iframe) ceremony. Absent, a browser-reported
-		 * cross-origin authentication is refused.
+		 * Origins this RP accepts being framed by in a cross-origin (iframe) ceremony. Absent, a
+		 * browser-reported cross-origin authentication is refused.
 		 */
 		readonly topOrigin?: readonly string[];
 		/**
-		 * WebAuthn UserVerificationRequirement (W3C §5.8.6).
-		 *
-		 * Threaded through to verifyWebAuthnAssertion so SimpleWebAuthn enforces
-		 * the UV flag when the deployment sets userVerification = "required".
-		 *
-		 * Cross-refs: Codex Round 2 P1-1 / spec §2.5
+		 * UserVerificationRequirement (W3C WebAuthn §5.8.6); "required" makes the assertion check
+		 * enforce the UV flag.
 		 */
 		readonly userVerification: "required" | "preferred" | "discouraged";
 	};
@@ -217,16 +112,10 @@ export interface WebAuthnGrantDeps
  */
 export const createWebAuthnGrant = (deps: WebAuthnGrantDeps): GrantHandler => {
 	const { config, keyStore } = deps;
-	// The lifetimes it mints with, read once, when the grant is built. A
-	// configuration built by hand that the resolvers refuse is a composition
-	// fault, refused before any request reaches the ceremony — read per
-	// request, it was refused only after the challenge was consumed, and a
-	// missing refresh lifetime signed a refresh token with no `exp`.
-	//
-	// What it reads of `oauth {}` is the `oauthTokenSettings` slot the oauth
-	// module provides (#728) when the composition holds it — read whole,
-	// checked first, never a member of it beside the configuration; otherwise
-	// the configuration, through core's one reader of each value.
+	// Token lifetimes are read once, here, so a hand-built configuration the resolvers refuse
+	// fails at composition, before any challenge is consumed. They come from the oauth module's
+	// `oauthTokenSettings` slot when the composition holds it (checked whole first), otherwise
+	// from the configuration through core's resolvers.
 	const tokenSettings =
 		deps.oauthTokenSettings === undefined
 			? undefined
@@ -245,13 +134,10 @@ export const createWebAuthnGrant = (deps: WebAuthnGrantDeps): GrantHandler => {
 	const logger = deps.logger ?? consoleLogger;
 
 	/**
-	 * A store this grant needs could not answer: the server's outage, never a
-	 * verdict on the passkey. One line at error level —
-	 * `webauthn_grant_store_unavailable`, `store` naming which and `step` the
-	 * operation, the client when one authenticated, and the error's projection
-	 * (a store's error can carry what it was sent) — and `503
-	 * temporarily_unavailable`, so the client retries rather than discards
-	 * anything.
+	 * A store this grant needs could not answer: the server's outage, never a verdict on the
+	 * passkey. Logs one `webauthn_grant_store_unavailable` error line (`store`, `step`, the client
+	 * if any, and the error's projection, since a store's error can carry what it was sent) and
+	 * answers 503 temporarily_unavailable so the client retries.
 	 */
 	const storeUnavailable = (
 		store: Exclude<WebAuthnStore, "challenge">,
@@ -278,17 +164,9 @@ export const createWebAuthnGrant = (deps: WebAuthnGrantDeps): GrantHandler => {
 	};
 
 	return {
-		// allowedGrantTypes strictness for authenticated clients — mirroring
-		// the cc pattern (§3.4.1 deny-by-absence): a client must be explicitly
-		// authorized for the webauthn grant type. Declared here, enforced at
-		// /token dispatch before `handle` runs (#326; previously a hand-rolled
-		// Step 0 in this handler — Codex Round 2 P1-2 / cc parity).
-		//
-		// When ctx.authenticatedClient is null, dispatch skips the check
-		// entirely: the webauthn grant does not require client authentication —
-		// the passkey IS the auth event. Consumers may optionally wire
-		// clientAuthMw before this handler; when they do not, there is no
-		// allowedGrantTypes source to validate against.
+		// An authenticated client must name this grant type in `allowedGrantTypes` (absence
+		// denies); /token dispatch enforces it before `handle` runs. With no authenticated client
+		// there is nothing to check and the grant still runs: the passkey is the authentication.
 		requiresExplicitGrantAllowlist: true,
 		async handle(ctx: GrantContext): Promise<GrantHandlerResult> {
 			const { body, issuer } = ctx;
@@ -369,13 +247,10 @@ export const createWebAuthnGrant = (deps: WebAuthnGrantDeps): GrantHandler => {
 				expectedChallenge: challengeValue,
 				expectedRpId: deps.webauthnConfig.rpId,
 				expectedOrigins: deps.webauthnConfig.origin,
-				// #554 audit: the frames this RP accepts being embedded in, when the
-				// deployment named any. Absent, a browser-reported cross-origin
-				// ceremony is refused.
+				// Absent, a browser-reported cross-origin ceremony is refused.
 				...(deps.webauthnConfig.topOrigin === undefined
 					? {}
 					: { expectedTopOrigins: deps.webauthnConfig.topOrigin }),
-				// Thread configured UV through to SimpleWebAuthn (Codex Round 2 P1-1).
 				userVerification: deps.webauthnConfig.userVerification,
 			});
 			if (!verificationResult.ok) {
@@ -425,29 +300,14 @@ export const createWebAuthnGrant = (deps: WebAuthnGrantDeps): GrantHandler => {
 			let effectiveScopes = scopeOutcome.scopes;
 
 			// ------------------------------------------------------------------
-			// Step 7: Optional grantPolicy gate — rt-style (Codex Round 3 P1).
+			// Step 7: grantPolicy gate
 			//
-			// Policy is invoked unconditionally when deps.grantPolicy is wired,
-			// regardless of oauth.resourceIndicator.enabled. The resourceIndicator
-			// flag gates ONLY whether body.resource is forwarded in the payload
-			// (Stage 1 RFC 8707 plumbing contract from PR #172).
-			//
-			// SECURITY rationale: webauthn grant has no client.allowedScopes ceiling
-			// (the passkey is the auth event, not scope authorization). Policy is the
-			// ONLY scope-bounding gate. Gating the policy call on resourceIndicator
-			// (the prior cc-style gate) would silently skip scope enforcement for all
-			// deployments that left resourceIndicator at its default (false), allowing
-			// any caller with a valid assertion to mint a token with any requested scope.
-			//
-			// Mirrors refreshToken.mts: unconditional policy call when wired;
-			// resourceIndicator flag gates only the resource field.
-			// CP-18 fail-closed — same rationale as clientCredentials.mts.
-			//
-			// H-2 invariant: webauthnModule's grant factory throws at boot when
-			// grantPolicy is unwired, so the `deps.grantPolicy` check below is
-			// effectively always true under the module wiring. Tests that drive
-			// createWebAuthnGrant directly may still pass deps without grantPolicy;
-			// the check keeps the unit-test surface usable.
+			// Runs whenever `grantPolicy` is wired, as in the refresh grant;
+			// `oauth.resourceIndicator.enabled` gates only whether `resource` (RFC 8707) is
+			// forwarded. The policy is this grant's only scope bound, so gating the call on that
+			// flag (default false) would let any valid assertion mint any requested scope. A
+			// policy error fails closed. `webauthnModule` refuses to boot without a policy; the
+			// check below serves handlers built directly, as in unit tests.
 			// ------------------------------------------------------------------
 			const resourceIndicatorEnabled =
 				tokenSettings === undefined
@@ -457,8 +317,6 @@ export const createWebAuthnGrant = (deps: WebAuthnGrantDeps): GrantHandler => {
 			let policyGrantedAudience: string | null = null;
 
 			if (deps.grantPolicy) {
-				// Resource is forwarded only when the flag is on (PR #172 Stage 1 plumbing).
-				// Policy invocation itself is unconditional when wired.
 				const resource = resourceIndicatorEnabled
 					? extractResourceParam(body as Record<string, unknown>)
 					: null;
@@ -468,14 +326,10 @@ export const createWebAuthnGrant = (deps: WebAuthnGrantDeps): GrantHandler => {
 					deps.grantPolicy,
 					{
 						grantType: WEBAUTHN_GRANT_TYPE,
-						// clientId from authenticated client when present; undefined otherwise
-						// (webauthn grant does not require client auth — the passkey IS the
-						// auth event).
 						clientId: client?.clientId,
 						subject: credential.userId,
 						requestedScope: effectiveScopes.length > 0 ? [...effectiveScopes] : undefined,
-						// RFC 8707: resource is null when body has no `resource` param;
-						// undefined passed to policy signals "no resource requested".
+						// Undefined: no resource requested.
 						resource: resource ?? undefined,
 					},
 					{ ip: ctx.ip, userAgent: ctx.userAgent, issuer: issuer ?? "" },
@@ -483,20 +337,14 @@ export const createWebAuthnGrant = (deps: WebAuthnGrantDeps): GrantHandler => {
 					{ logger },
 				);
 				if (!policy.ok) return { result: policy.result };
-				// CP-18 / CP-15: the scope came back re-validated against the
-				// requested set — never a broader allowlist; this grant has none —
-				// and an empty array is honoured as strip-all.
+				// Re-validated against the requested set (there is no broader allowlist); an empty
+				// array strips every scope.
 				effectiveScopes = policy.scopes;
 
-				// #520: the audience half, bounded by the client's `allowedAudiences`.
-				// Without an authenticated client there is no ceiling to narrow
-				// within and a policy audience is refused. This used to be the one
-				// path where a policy could put ANY audience on a token (the "trust
-				// asymmetry" of the Wave 1 audit, M-4), staged for a library-side
-				// ceiling that #173 then delivered only for client_credentials,
-				// refresh_token and /authorize. Policy may narrow, never originate:
-				// a deployment that wants a resource `aud` on a passkey token
-				// registers a client with `allowedAudiences` and authenticates it.
+				// The policy may narrow the audience within the client's `allowedAudiences`, never
+				// originate one; with no authenticated client there is no ceiling, so a policy
+				// audience is refused. A resource `aud` on a passkey token needs a registered,
+				// authenticated client.
 				const policyAudience = boundPolicyAudience(
 					policy.decision,
 					client ? (client.allowedAudiences ?? []) : undefined,
@@ -509,56 +357,30 @@ export const createWebAuthnGrant = (deps: WebAuthnGrantDeps): GrantHandler => {
 			// Step 8: Derive audience + issue tokens
 			// ------------------------------------------------------------------
 			const client = ctx.authenticatedClient;
-			// Audience derivation (#520): policy override > client.allowedAudiences[0]
-			// > client id — the rule every user-bound grant applies. This token is
-			// meant for a resource, so its fallback is the client, not the
-			// authorization server. Without a client nothing names a resource or a
-			// client and the issuer stands: RFC 9068 §2.2 requires `aud`, and the
-			// issuer is the one audience every deployment has.
+			// Policy audience > `allowedAudiences[0]` > client id, the rule every user-bound grant
+			// applies (the token is for a resource, so the fallback is the client, not the AS).
+			// Without a client, the issuer: RFC 9068 §2.2 requires `aud`.
 			const audience =
 				policyGrantedAudience ??
 				(client ? (client.allowedAudiences?.[0] ?? client.clientId) : (issuer ?? null));
 
 			const scopeClaim = effectiveScopes.length > 0 ? effectiveScopes.join(" ") : null;
 
-			// #489: the confirmation the request already carries belongs on the
-			// access token too — the member the binding's mechanism kind owns
-			// (core's `ownedConfirmation`: DPoP's `{ jkt }`, mTLS's
-			// `{ "x5t#S256" }`, nothing for a kind that owns neither), and
-			// ungated, exactly as every other grant applies it. Until #489, a
-			// client registered `senderConstrained: "dpop"` had its proof
-			// verified at the token endpoint and was then handed a bearer access
-			// token; the proof bought it nothing, and a captured token replayed.
-			//
-			// The refresh token keeps its own, narrower gate below. #480 wired only
-			// that one, which is what made the asymmetry visible. The response's
-			// `token_type` is read off the access token's confirmation by
-			// `generateTokenResponse`: "DPoP" for `cnf.jkt` (RFC 9449 §5), "Bearer"
-			// for an mTLS-bound token (RFC 8705 §3).
+			// The request's confirmation goes on the access token whenever its mechanism owns it
+			// (core's `ownedConfirmation`: DPoP `jkt`, mTLS `x5t#S256`), ungated, as in every
+			// grant: an unbound token minted from a proven key would replay from anywhere. The
+			// refresh token has its own, narrower gate below. `generateTokenResponse` derives
+			// `token_type` from it: "DPoP" for `cnf.jkt` (RFC 9449 §5), "Bearer" for mTLS
+			// (RFC 8705 §3).
 			const confirmation = ownedConfirmation(ctx.tokenBinding);
 			const bindingIsDpop = ctx.tokenBinding?.kind === "dpop";
 			const bindingIsMtls = ctx.tokenBinding?.kind === "mtls";
 
-			// #480: a passkey is the primary login on a native app, and the access
-			// token is short-lived — without a refresh token the user is sent back
-			// to the platform authenticator at every expiry. The grant now issues
-			// one, on the same machinery `authorization_code` uses.
-			//
-			// Two conditions, both structural rather than policy:
-			//
-			//   1. There must be an authenticated client. `refresh_token`'s own
-			//      handler refuses an unauthenticated caller with `invalid_client`
-			//      and binds the RT to `azp`, so an RT minted in the client-less
-			//      passkey-is-the-auth-event mode could never be redeemed. Issuing
-			//      one would be a token that only looks like a capability.
-			//
-			//   2. The client's `allowedGrantTypes` must NAME `refresh_token` —
-			//      absence denies (#268 / #311 / #326). A refresh token is a
-			//      standing credential with a lifetime measured in days, so it is
-			//      exactly the thing that must not be acquired by omission: a
-			//      registration written before this shipped keeps getting today's
-			//      access-token-only response. `isGrantTypeAllowed` with
-			//      `requireAllowlist` is the central rule, not a second copy of it.
+			// A refresh token requires both:
+			//   1. An authenticated client: the refresh grant refuses an unauthenticated caller and
+			//      binds the RT to `azp`, so a client-less RT could never be redeemed.
+			//   2. `refresh_token` named in the client's `allowedGrantTypes`, absence denying: a
+			//      standing credential must not be acquired by omission.
 			const issueRefreshToken =
 				client !== null &&
 				isGrantTypeAllowed(client.allowedGrantTypes, REFRESH_TOKEN_GRANT_TYPE, {
@@ -571,23 +393,13 @@ export const createWebAuthnGrant = (deps: WebAuthnGrantDeps): GrantHandler => {
 			// without it survives a revocation that was meant to kill it.
 			const familyId = issueRefreshToken ? randomUUID() : null;
 
-			// #449: the refresh token's identity — its `jti`, and the instant its
-			// lifetime is measured from — is reserved here, and its family
-			// registered under it, before anything is signed, as the refresh grant
-			// commits a rotation before it signs. The expiry registered is exactly
-			// the one signed (`issuedAt + expiresIn`), with no read-back of the
-			// token; and a family store that cannot answer costs no signature, a
-			// billable remote call under a KMS-backed key (#303). The other order's
-			// cost is an orphan: if signing fails after the registration (a KMS
-			// outage), the family is left with no token — none carrying its
-			// `family_id` was served, so it is harmless, and it expires at the
-			// expiry registered for it.
-			//
-			// Fail-closed, mirroring authorization.mts CP-16: a refresh token whose
-			// family was never registered has no replay detection behind it, and
-			// serving it would quietly break the RFC 6819 §5.2.2.3 contract the
-			// family exists to keep. A controlled 503 tells the client to retry;
-			// `invalid_grant` would tell it to throw the passkey session away.
+			// The RT's `jti` and `iat` are reserved and its family registered before anything is
+			// signed (as the refresh grant commits a rotation before signing), with exactly the
+			// expiry that will be signed. A family-store outage then costs no signature (a billable
+			// call under a KMS-backed key); a signing failure after registration leaves a family no
+			// served token carries, which expires on its own. Fail closed: an RT with no registered
+			// family has no replay detection (RFC 6819 §5.2.2.3). 503 tells the client to retry;
+			// `invalid_grant` would make it discard the passkey session.
 			const refreshReservation =
 				familyId === null
 					? null
@@ -604,20 +416,15 @@ export const createWebAuthnGrant = (deps: WebAuthnGrantDeps): GrantHandler => {
 				}
 			}
 
-			// Mint client_id + authorizedParty when client authenticated so the AT is
-			// revocable via /oauth/revoke (Wave 1 post-merge security audit H-1: the
-			// revoke endpoint resolves the token's client via `client_id ?? azp ?? aud`
-			// and requires it match the revoking client. Empty data + non-clientId aud
-			// silently caused revoke 200 + no denylist insertion).
-			// Unauthenticated client mode (passkey IS the auth event) remains unrevocable
-			// by /oauth/revoke per RFC 7009 — documented as a known limitation.
+			// `client_id` and `azp` when a client authenticated, so /oauth/revoke (which resolves the
+			// owner as `client_id ?? azp ?? aud`) matches the revoking client. A client-less token
+			// cannot be revoked there (RFC 7009); see the README's token revocation limitations.
 			const accessToken = await generateToken(
 				{
 					...(client ? { client_id: client.clientId } : {}),
 					...(familyId ? { family_id: familyId } : {}),
-					// #481: a passkey login, on the token itself — this grant mints no
-					// id_token and creates no session. RFC 8176 `hwk`: passkeys are
-					// platform- or hardware-bound keys, and the assertion just proved one.
+					// RFC 8176 `hwk`: the assertion proved a platform- or hardware-bound key. On the
+					// token itself, since this grant mints no id_token and creates no session.
 					amr: ["hwk"],
 				},
 				{
@@ -635,19 +442,11 @@ export const createWebAuthnGrant = (deps: WebAuthnGrantDeps): GrantHandler => {
 
 			let refreshToken: Token | undefined;
 			if (client && refreshReservation) {
-				// Sender-binding for the RT is the gate `authorization.mts` and
-				// `refreshToken.mts` already apply, reused verbatim rather than
-				// restated: a mechanism allowlist (only the kinds whose
-				// refresh-time enforcement matrix `refreshToken.mts` knows) AND a
-				// public-client restriction, which `#275`'s
-				// `bindConfidentialClientRefreshTokens` lifts for a deployment that
-				// protects its client secret and its key differently.
-				//
-				// Narrower than the access token's gate above on purpose: a
-				// confidential client authenticates itself again at every refresh,
-				// so RFC 9449 §5 leaves its RT unbound rather than pin it to one key
-				// for the RT's whole lifetime. Nothing of the sort applies to the
-				// access token, which has no such second credential behind it.
+				// The RT binds on the gate `authorization.mts` and `refreshToken.mts` apply: a
+				// mechanism the refresh grant enforces, AND a public client unless
+				// `bindConfidentialClientRefreshTokens` is set. Narrower than the access token's gate
+				// on purpose: a confidential client re-authenticates at every refresh, so RFC 9449 §5
+				// leaves its RT unbound rather than pinned to one key for the RT's lifetime.
 				const isPublicClient = client.tokenEndpointAuthMethod === "none";
 				const bindConfidentialClients =
 					resolveTokenBindingSettings(config).bindConfidentialClientRefreshTokens;
@@ -655,8 +454,7 @@ export const createWebAuthnGrant = (deps: WebAuthnGrantDeps): GrantHandler => {
 					(bindingIsDpop || bindingIsMtls) && (isPublicClient || bindConfidentialClients);
 
 				refreshToken = await generateToken(
-					// #481 audit: the refresh grant mirrors `amr` from the refresh token
-					// it is handed, so the passkey's `hwk` has to be here too.
+					// The refresh grant copies `amr` from the refresh token, so `hwk` goes here too.
 					{ family_id: refreshReservation.familyId, amr: ["hwk"] },
 					{
 						expiresIn: refreshTokenExpiresIn,
@@ -667,7 +465,7 @@ export const createWebAuthnGrant = (deps: WebAuthnGrantDeps): GrantHandler => {
 						authorizedParty: client.clientId,
 						scope: scopeClaim,
 						tokenType: "rt+jwt",
-						// #449: the identity the family was registered under above.
+						// The identity the family was registered under above.
 						jti: refreshReservation.jti,
 						issuedAt: refreshReservation.issuedAt,
 						...(bindRefreshToken && confirmation ? { confirmation } : {}),
@@ -701,15 +499,9 @@ type AssertionParseErr = { ok: false; reason: string };
 type AssertionParseResult = AssertionParseOk | AssertionParseErr;
 
 /**
- * Parses and validates `body.assertion` as AuthenticationResponseJSON and
- * extracts the challenge value from clientDataJSON.
- *
- * The challenge stored by the options endpoint is the base64url string from
- * SimpleWebAuthn's generateAuthenticationOptions output. The authenticator
- * echoes it back inside clientDataJSON (base64url-encoded JSON:
- * { type, challenge, origin }). We decode clientDataJSON → extract `challenge`
- * → use that as the ceremony lookup key. This matches the pattern in
- * registrationVerify.mts (T28).
+ * Shape-checks `body.assertion` as AuthenticationResponseJSON and extracts the challenge the
+ * authenticator echoed in its clientDataJSON (base64url JSON `{ type, challenge, origin }`). That
+ * challenge is the ceremony lookup key, as in registrationVerify.mts.
  */
 function parseAssertionBody(raw: unknown): AssertionParseResult {
 	if (raw === null || raw === undefined || typeof raw !== "object" || Array.isArray(raw)) {
@@ -758,17 +550,9 @@ function parseAssertionBody(raw: unknown): AssertionParseResult {
 }
 
 /**
- * Resolves the effective scope set from the request body.
- *
- * Unlike client_credentials, the webauthn grant has no per-client allowedScopes
- * ceiling in the request (credentials are not associated with client registrations
- * at the grant-handler level — that is a consumer-policy concern). The handler
- * accepts whatever scopes the caller requests, relying on grantPolicy to enforce
- * policy ceilings when wired.
- *
- * RFC 6749 §3.3: scope must be a space-delimited list of scope-tokens, read
- * strictly. With no allowlist and possibly no policy, nothing downstream would
- * catch a malformed one, and it would reach the token's `scope` claim as sent.
+ * Reads the requested scope. There is no per-client `allowedScopes` ceiling; bounding it is
+ * `grantPolicy`'s job. The RFC 6749 §3.3 syntax is enforced strictly here, since nothing
+ * downstream would stop a malformed value from reaching the token's `scope` claim.
  */
 function resolveScope(
 	ctx: GrantContext,
