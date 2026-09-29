@@ -494,7 +494,7 @@ describe("POST /oauth/federation/:name/callback — surface", () => {
  * refuses POST, and a callback carrying no `state` is not treated as an
  * attempt on the transaction at all. See README, When a transaction is spent.
  */
-describe("a cross-site request cannot spend an in-flight transaction (#502)", () => {
+describe("a cross-site request cannot spend an in-flight transaction", () => {
 	it("refuses GET on a form_post federation's callback with 405 and Allow: POST", async () => {
 		// The mirror of the 405 a query federation answers to a POST. Apple only
 		// ever POSTs here, so a GET is either a misconfiguration or someone
@@ -873,7 +873,7 @@ describe("fake Apple end-to-end through the federation routes", () => {
 	});
 });
 
-describe("POST callback — account linking through a form_post federation (#482)", () => {
+describe("POST callback — account linking through a form_post federation", () => {
 	it("links to the session that started the flow, which the cross-site POST does not carry", async () => {
 		const linkFederatedIdentity = vi.fn(async () => ({
 			ok: true,

@@ -17,7 +17,7 @@
 import { describe, expect, it } from "vitest";
 import { consentedScope } from "../consented-scope.mjs";
 
-describe("consentedScope (#647)", () => {
+describe("consentedScope", () => {
 	it("takes what the upstream answered when it names a scope", () => {
 		// RFC 6749 section 5.1 makes the field REQUIRED when the granted scope
 		// differs from the requested one, so a named scope is what was granted.

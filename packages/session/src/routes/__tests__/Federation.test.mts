@@ -555,7 +555,7 @@ async function plantAndGetAgent(app: express.Express): Promise<ReturnType<typeof
 // Tests
 // ---------------------------------------------------------------------------
 
-describe("account linking across federations (#482)", () => {
+describe("account linking across federations", () => {
 	const providers = new Map([["test", makeFakeProvider()]]);
 	const LIVE = {
 		sid: "s-1",
@@ -649,7 +649,7 @@ describe("account linking across federations (#482)", () => {
 			expect(JSON.parse(inspect.text).federation.link).toEqual({ sid: "s-1", subject: "user-1" });
 		});
 
-		describe("a link start must come from this deployment's own pages (v0.13.0 audit)", () => {
+		describe("a link start must come from this deployment's own pages", () => {
 			// The start is a GET and the session cookie is SameSite=Lax, which a
 			// top-level cross-site navigation carries: any page could send a
 			// signed-in victim to `?link=1`. Paired with a login CSRF at the IdP —
@@ -808,7 +808,7 @@ describe("account linking across federations (#482)", () => {
 	});
 
 	describe("the callback", () => {
-		it("records the requested scope as consent when the adapter names none (#647)", async () => {
+		it("records the requested scope as consent when the adapter names none", async () => {
 			// The fallback limb, through the route rather than through the helper
 			// alone: this is where the answered scope and the requested list are
 			// actually wired together. RFC 6749 section 3.3 makes the answer
@@ -859,7 +859,7 @@ describe("account linking across federations (#482)", () => {
 			// inventing what — and the disclosure point refuses `""` already.
 			// Erasing it would make the route read Bearer.
 			["a non-string, normalised to the empty string", 7, ""],
-		])("records %s at link time (#645)", async (_label, named, expected) => {
+		])("records %s at link time", async (_label, named, expected) => {
 			// Recorded, not judged. A login does not need the upstream's access
 			// token, so a type this provider cannot hand on must not cost the user
 			// their sign-in — `POST /oauth/federation/:name/token` is where the
@@ -904,7 +904,7 @@ describe("account linking across federations (#482)", () => {
 			);
 		});
 
-		it("records no type when the adapter names none (#645)", async () => {
+		it("records no type when the adapter names none", async () => {
 			// Absent is the ONLY reading the disclosure point takes as Bearer:
 			// RFC 6749 §5.1 makes `token_type` REQUIRED, so silence is an adapter
 			// written before the field rather than an upstream meaning something
@@ -1600,7 +1600,7 @@ describe("Federation routes", () => {
 			).toThrow("federation routes require userRepository");
 		});
 
-		it("throws if requirements is missing (the session-admission ADR's D1)", () => {
+		it("throws if requirements is missing", () => {
 			expect(() =>
 				createRouter(express, {
 					config: {} as never,
@@ -1664,7 +1664,7 @@ describe("Federation routes", () => {
 		});
 
 		// RFC 6749 §5.2 error envelope.
-		it("AS-1: 404 unknown provider returns RFC 6749 envelope (no `message`)", async () => {
+		it("404 unknown provider returns RFC 6749 envelope (no `message`)", async () => {
 			const app = buildStatelessApp({ providers: new Map([["test", makeFakeProvider()]]) });
 			const res = await request(app).get("/oauth/federation/unknown");
 			expect(res.status).toBe(404);
@@ -1940,7 +1940,7 @@ describe("Federation routes", () => {
 			expect(JSON.parse(inspect.text).sid).toBe(createArg.sid);
 		});
 
-		it("records the upstream's token type on the login path too (#645)", async () => {
+		it("records the upstream's token type on the login path too", async () => {
 			// The link path is the other attach site; this keeps the two in step.
 			const provider = makeFakeProvider({
 				exchangeCode: vi.fn(async () => ({
@@ -2275,7 +2275,7 @@ describe("Federation routes", () => {
 		});
 
 		// RFC 6749 §5.2 error envelope, as on the start route.
-		it("AS-1: 404 unknown provider on callback returns RFC 6749 envelope (no `message`)", async () => {
+		it("404 unknown provider on callback returns RFC 6749 envelope (no `message`)", async () => {
 			const app = buildStatelessApp({ providers: new Map([["test", makeFakeProvider()]]) });
 			const res = await request(app).get("/oauth/federation/unknown/callback?state=x&code=y");
 			expect(res.status).toBe(404);
@@ -2287,7 +2287,7 @@ describe("Federation routes", () => {
 		});
 
 		// Session fixation: the session is regenerated after a successful login.
-		it("Fix 1: regenerates session after successful auth; new session has sid/isAuthenticated/user", async () => {
+		it("regenerates session after successful auth; new session has sid/isAuthenticated/user", async () => {
 			const provider = makeFakeProvider();
 			const providers = new Map([["test", provider]]);
 			const repo = makeUserRepository({ id: "user-1", username: "alice" });
@@ -2330,7 +2330,7 @@ describe("Federation routes", () => {
 			expect((sessionData.user as Record<string, unknown>).id).toBe("user-1");
 		});
 
-		it("Fix 1: regenerate failure → UserSessionStore.delete rollback + 503", async () => {
+		it("regenerate failure → UserSessionStore.delete rollback + 503", async () => {
 			const provider = makeFakeProvider();
 			const providers = new Map([["test", provider]]);
 			const uss = makeUserSessionStore();
@@ -2366,7 +2366,7 @@ describe("Federation routes", () => {
 		});
 
 		// Reuse prevention fails closed.
-		it("Fix 2: reuse-prevention save failure returns 503 and does NOT call exchangeCode", async () => {
+		it("reuse-prevention save failure returns 503 and does NOT call exchangeCode", async () => {
 			const provider = makeFakeProvider();
 			const providers = new Map([["test", provider]]);
 
@@ -2403,7 +2403,7 @@ describe("Federation routes", () => {
 			expect(provider.exchangeCode).not.toHaveBeenCalled();
 		});
 
-		it("Fix 3: authenticateByToken throws → 503 temporarily_unavailable", async () => {
+		it("authenticateByToken throws → 503 temporarily_unavailable", async () => {
 			const provider = makeFakeProvider();
 			const providers = new Map([["test", provider]]);
 			const repo: UserRepository = {
@@ -2426,7 +2426,7 @@ describe("Federation routes", () => {
 		});
 
 		// No rollback is needed when create itself fails.
-		it("C-1: userSessionStore.create throws → 503 temporarily_unavailable; exchangeCode was called", async () => {
+		it("userSessionStore.create throws → 503 temporarily_unavailable; exchangeCode was called", async () => {
 			const provider = makeFakeProvider();
 			const providers = new Map([["test", provider]]);
 			const uss = makeUserSessionStore();
@@ -2452,7 +2452,7 @@ describe("Federation routes", () => {
 		});
 
 		// Refused before the exchange: 400, not 502 exchange_failed.
-		it("Fix 4: missing code query param returns 400 invalid_request", async () => {
+		it("missing code query param returns 400 invalid_request", async () => {
 			const provider = makeFakeProvider();
 			const providers = new Map([["test", provider]]);
 
@@ -2474,7 +2474,7 @@ describe("Federation routes", () => {
 			expect(provider.exchangeCode).not.toHaveBeenCalled();
 		});
 
-		it("Fix 4: empty string code query param returns 400 invalid_request", async () => {
+		it("empty string code query param returns 400 invalid_request", async () => {
 			const provider = makeFakeProvider();
 			const providers = new Map([["test", provider]]);
 
@@ -2494,7 +2494,7 @@ describe("Federation routes", () => {
 		// Sibling-store invariants
 		// -----------------------------------------------------------------------
 
-		describe("federation login: A4 sibling-store invariants", () => {
+		describe("federation login: sibling-store invariants", () => {
 			it("create succeeds + addFederation succeeds → both stores called, no federations in create input", async () => {
 				const provider = makeFakeProvider();
 				const providers = new Map([["test", provider]]);
@@ -2693,7 +2693,7 @@ describe("Federation routes", () => {
 		// Federation OIDC nonce wiring (start + callback)
 		// -----------------------------------------------------------------------
 
-		describe("PB-4: federation nonce generation + thread-through", () => {
+		describe("federation nonce generation + thread-through", () => {
 			// The session-side assertion matters: a nonce that reaches the provider but
 			// not the session leaves the callback unable to bind the id_token via
 			// expectedNonce.
@@ -2772,7 +2772,7 @@ describe("Federation routes", () => {
 		// Reuse / replay-prevention assertions
 		// -----------------------------------------------------------------------
 
-		describe("TD-6: session.federation cleanup on success path", () => {
+		describe("session.federation cleanup on success path", () => {
 			// Catches an envelope saved back onto the session after it was cleared.
 			it("happy-path callback clears session.federation as part of reuse prevention", async () => {
 				const provider = makeFakeProvider();
@@ -2827,7 +2827,7 @@ describe("Federation routes", () => {
 // exists, and every rollback path that deletes the session removes the entry.
 // ---------------------------------------------------------------------------
 
-describe("federation login: subject session index (#296)", () => {
+describe("federation login: subject session index", () => {
 	it("records the sid against the subject on a successful federated login", async () => {
 		const providers = new Map([["test", makeFakeProvider()]]);
 		const uss = makeUserSessionStore();
@@ -3009,7 +3009,7 @@ describe("federation login: subject session index (#296)", () => {
 	});
 });
 
-describe("amr on federated sessions (#481, the MFA ADR's D9 and D13)", () => {
+describe("amr on federated sessions", () => {
 	/** One federated login through the callback: what it handed `UserSessionStore.create`. */
 	const loginWith = async (
 		upstream: readonly string[] | undefined,

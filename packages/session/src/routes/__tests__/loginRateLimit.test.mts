@@ -122,7 +122,7 @@ const login = (app: express.Express) =>
 		.type("json")
 		.send({ username: "alice", password: "pw" });
 
-describe("/session/login rate limiting — shared limiter (#270)", () => {
+describe("/session/login rate limiting — shared limiter", () => {
 	it("consults the injected RateLimiter rather than a per-process store", async () => {
 		const limiter = scriptedLimiter(() => ({ allowed: true, remaining: 19 }));
 		await login(makeApp({ rateLimiter: limiter }));
@@ -179,7 +179,7 @@ describe("/session/login rate limiting — shared limiter (#270)", () => {
 	});
 });
 
-describe("/session/login rate limiting — limiter failure (#270)", () => {
+describe("/session/login rate limiting — limiter failure", () => {
 	it("fails closed with 503 when the limiter throws and failMode is closed", async () => {
 		// Parity with the OAuth endpoints: one failMode policy for the product,
 		// not one per router.
@@ -198,7 +198,7 @@ describe("/session/login rate limiting — limiter failure (#270)", () => {
 		expect(res.status).not.toBe(503);
 	});
 
-	it("emits rate_limit.unavailable when an audit sink is wired (#325)", async () => {
+	it("emits rate_limit.unavailable when an audit sink is wired", async () => {
 		// The shared guard emits this event on a limiter outage, as the OAuth
 		// endpoints do. The sink is optional.
 		const events: AuditEvent[] = [];
@@ -220,7 +220,7 @@ describe("/session/login rate limiting — limiter failure (#270)", () => {
 	});
 });
 
-describe("/session/login rate limiting — fallback (#270)", () => {
+describe("/session/login rate limiting — fallback", () => {
 	it("still limits when no RateLimiter is wired", async () => {
 		// Losing the limiter entirely would turn a weak protection into none on
 		// the one endpoint that exists to resist password guessing.
@@ -261,7 +261,7 @@ describe("/session/login rate limiting — fallback (#270)", () => {
 // guard; unset keeps the warning.
 // ---------------------------------------------------------------------------
 
-describe("/session/login rate limiting — fallback under deployment.mode (#474)", () => {
+describe("/session/login rate limiting — fallback under deployment.mode", () => {
 	const withMode = (mode: "single" | "multi" | undefined): AppConfig =>
 		({
 			...stubConfig,

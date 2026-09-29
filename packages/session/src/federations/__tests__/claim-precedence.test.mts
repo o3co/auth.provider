@@ -29,7 +29,7 @@ const namespaceOf = (claims: UserSessionClaims, provider = "test"): Record<strin
 	return ns?.[provider] ?? {};
 };
 
-describe("mergeFederatedClaims — precedence (#279)", () => {
+describe("mergeFederatedClaims — precedence", () => {
 	describe("the promotable set", () => {
 		it("contains only non-authorization profile claims", () => {
 			expect([...PROMOTABLE_FEDERATED_CLAIMS]).toEqual(["email", "name", "picture"]);
@@ -131,7 +131,7 @@ describe("mergeFederatedClaims — precedence (#279)", () => {
 		});
 	});
 
-	describe("emailVerified is Store-owned (#297) and federation cannot write it", () => {
+	describe("emailVerified is Store-owned and federation cannot write it", () => {
 		it("does not set emailVerified when the local record does not model it", () => {
 			const claims = mergeFederatedClaims({
 				localClaims: {},

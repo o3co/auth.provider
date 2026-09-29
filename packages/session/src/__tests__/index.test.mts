@@ -17,7 +17,7 @@
 import { describe, expect, it } from "vitest";
 
 describe("package public surface (@o3co/auth-provider-session)", () => {
-	it("does not re-export the federation adapter port, which core owns (#626 P1)", async () => {
+	it("does not re-export the federation adapter port, which core owns", async () => {
 		// The hard break: the contract a federation is registered with is the one
 		// `oauth` and `federation-grants` read, and it is reachable by one path.
 		// A second export here is what made the contribution type `unknown`.
@@ -60,12 +60,12 @@ describe("package public surface (@o3co/auth-provider-session)", () => {
 		expect((sessionModule as { name: string }).name).toBe("session");
 	});
 
-	it("exports establishSession, so a requirement's completion finishes a login as the two login routes do (the session-admission ADR's D5)", async () => {
+	it("exports establishSession as a function", async () => {
 		const mod = (await import("#/index.mjs")) as Record<string, unknown>;
 		expect(typeof mod.establishSession).toBe("function");
 	});
 
-	it("exports what a composition needs to provide the csrfGuard and loginEntry slots without sessionModule (#728)", async () => {
+	it("exports what a composition needs to provide the csrfGuard and loginEntry slots without sessionModule", async () => {
 		// device-grant and federation-grants require these slots once enabled; a
 		// composition with a login page of its own and no sessionModule builds
 		// them with the same functions the module does.
@@ -75,7 +75,7 @@ describe("package public surface (@o3co/auth-provider-session)", () => {
 		}
 	});
 
-	it("exports loginCompletionModule, the loginCompletion slot over the deployment's csrfGuard (#728)", async () => {
+	it("exports loginCompletionModule, which provides the loginCompletion slot alone", async () => {
 		const mod = (await import("#/index.mjs")) as Record<string, unknown>;
 		const loaded = mod.loginCompletionModule as { name?: unknown; provides?: object } | undefined;
 		expect(loaded?.name).toBe("login-completion");
@@ -96,7 +96,7 @@ describe("package public surface (@o3co/auth-provider-session)", () => {
 		);
 	});
 
-	it("does NOT export the standalone validateRedirect helper (#278)", async () => {
+	it("does NOT export the standalone validateRedirect helper", async () => {
 		const mod = await import("#/index.mjs");
 		// It derived its answer from `sessionDomain` alone and accepted every
 		// http(s) URL when that was unset — an open redirect for any consumer
@@ -131,7 +131,7 @@ describe("package public surface (@o3co/auth-provider-session)", () => {
 		expect((mod as { FEDERATED_AMR?: unknown }).FEDERATED_AMR).toBe("fed");
 	});
 
-	it("does NOT export the deleted v0.4.x federation factory surface", async () => {
+	it("does NOT export the createFederationProviderFactory federation factory", async () => {
 		const mod = await import("#/index.mjs");
 		// No createFederationProviderFactory / FederationProviderFactory: federation
 		// consumers extend via per-federation defineModule

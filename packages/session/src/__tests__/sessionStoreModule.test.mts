@@ -83,7 +83,7 @@ function makeRegistrar(): LifecycleRegistrar & { calls: Array<() => Promise<void
 	};
 }
 
-describe("sessionStoreModule (D-5)", () => {
+describe("sessionStoreModule", () => {
 	it("declares lifecycleRegistrar and readinessRegistrar as optional and config as required", () => {
 		const m = sessionStoreModule as unknown as Module;
 		expect(m.name).toBe("session-store");
@@ -247,7 +247,7 @@ const redisConfig: SessionLikeConfig = {
 	},
 };
 
-describe("sessionStoreModuleFor(config) — replica-safety declaration (#474)", () => {
+describe("sessionStoreModuleFor(config) — replica-safety declaration", () => {
 	it("declares replica-unsafe state on the manifest when session.storage.type is memory", () => {
 		const m = sessionStoreModuleFor(memoryConfig as never) as unknown as Module;
 		expect(m.replicaSafety?.unsafe).toBe(true);
@@ -322,7 +322,7 @@ describe("sessionStoreModuleFor(config) — replica-safety declaration (#474)", 
 	});
 });
 
-describe("sessionStoreModule (static manifest) — factory-time refusal under multi (#474)", () => {
+describe("sessionStoreModule (static manifest) — factory-time refusal under multi", () => {
 	// A composition root that wires the static manifest has not told the
 	// stage-1 guard anything, so the route factory — which is where the
 	// storage type is first known for certain — refuses the same combination

@@ -81,7 +81,7 @@ function interruptingEveryLogin(): {
 	};
 }
 
-describe("the federation callback's login establishes without asking (D5)", () => {
+describe("the federation callback's login establishes without asking", () => {
 	it("is not interrupted by a requirement that would interrupt a password login: the session is established, the requirement never asked", async () => {
 		const { requirement, asked } = interruptingEveryLogin();
 		const harness = buildFederationApp({

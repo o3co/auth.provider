@@ -173,7 +173,7 @@ describe("sessionModule (static manifest)", () => {
 		expect(sessionModule.name).toBe("session");
 	});
 
-	it("declares the Amendment 5 + A5 dep set in `requires`", () => {
+	it("declares its dep set in `requires`, without the oauth package's sessionRPRegistry, sessionFamilyIndex or refreshTokenFamilyRevocation", () => {
 		expect(sessionModule.requires).toEqual(
 			expect.arrayContaining([
 				"config",
@@ -288,7 +288,7 @@ describe("sessionModule (boot integration)", () => {
 	});
 });
 
-describe("auditSink absence policy (#363)", () => {
+describe("auditSink absence policy", () => {
 	it("carries the shared AUDIT_SINK_ABSENCE_POLICY constant, by identity", async () => {
 		// Identity, not shape: the declared-absence guard refuses modules whose
 		// policies for one key disagree, and sharing the one constant is what
@@ -399,7 +399,7 @@ describe("sessionModule — the link routes are a consumer of session admission"
 			.set("Sec-Fetch-Site", "same-origin");
 	}
 
-	it("hands the link routes the wired subjectRevocation: (4) a revoked subject's link start is refused", async () => {
+	it("hands the link routes the wired subjectRevocation: a revoked subject's link start is refused", async () => {
 		const subjectRevocation = {
 			kind: "test",
 			revokeBefore: async () => {},
@@ -438,7 +438,7 @@ describe("sessionModule — the link routes are a consumer of session admission"
 	});
 });
 
-describe("sessionModule — the password login is a consumer of session admission (the session-admission ADR's D5)", () => {
+describe("sessionModule — the password login is a consumer of session admission", () => {
 	/**
 	 * The session-routes factory, called as the planner calls it, its router
 	 * mounted behind a cookie session: what a password login answers says

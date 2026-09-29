@@ -213,7 +213,7 @@ const createdSid = (h: ReturnType<typeof harness>): string =>
 	(h.userSessionStore.create.mock.calls[0][0] as { sid: string }).sid;
 
 describe("establishSession", () => {
-	describe("what it writes: the establishment's primary, and nothing beside it (D5)", () => {
+	describe("what it writes: the establishment's primary, and nothing beside it", () => {
 		it("writes the record and the session from the primary — its subject, user, claims, authTime, recorded and redirectTo — whatever the caller hands beside it", async () => {
 			const h = harness();
 			const fedAuthTime = new Date("2026-09-28T08:00:00.000Z");

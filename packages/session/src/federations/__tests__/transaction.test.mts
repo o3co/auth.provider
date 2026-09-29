@@ -192,7 +192,7 @@ describe("the federation transaction store, over an express-session store", () =
 		});
 	});
 
-	it("round-trips a link intent with the session and the subject the start admitted (the session-admission ADR's D8)", async () => {
+	it("round-trips a link intent with its sid and its subject", async () => {
 		const store = fakeStore();
 		const transactions = createFederationTransactionStore(store);
 		await transactions.set(

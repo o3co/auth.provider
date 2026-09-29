@@ -295,7 +295,7 @@ const storedSessions = (cookieStore: MemoryStore): Record<string, string> =>
 // The router takes the resolver
 // ---------------------------------------------------------------------------
 
-describe("the session router takes the session requirements (the session-admission ADR's D1)", () => {
+describe("the session router takes the session requirements", () => {
 	it("throws at construction without requirements", () => {
 		expect(() =>
 			createRouter(express, {
@@ -619,7 +619,7 @@ describe("POST /session/login — a requirement interrupts", () => {
 // completion (the MFA package's, after `resumePrimary` interrupts again)
 // ---------------------------------------------------------------------------
 
-describe("answerInterruption — the login's interruption answer, exported (the session-admission ADR's D5)", () => {
+describe("answerInterruption — the login's interruption answer, exported", () => {
 	/**
 	 * A route, behind express-session over a traced `MemoryStore`, that has
 	 * `admitPrimary` interrupt through `requirement` and hands the admission to
