@@ -223,16 +223,20 @@ describe("rateLimitBudgets — refused", () => {
 		},
 	);
 
-	it.each([
-		["empty", "", "contributes", () => ({ limit: 5, windowSeconds: 60 })],
-		["carrying a colon", "fixture:ip", "contributes", () => ({ limit: 5, windowSeconds: 60 })],
-		["carrying a colon, on a budget switched off", "fixture:ip", "contributes", () => null],
-		["carrying a colon, in an override", "fixture:ip", "overrides", () => null],
-	] as const)(
+	type Budget = { readonly limit: number; readonly windowSeconds: number } | null;
+	const spec = (): Budget => ({ limit: 5, windowSeconds: 60 });
+	const off = (): Budget => null;
+
+	it.each<readonly [string, string, "contributes" | "overrides", () => Budget]>([
+		["empty", "", "contributes", spec],
+		["carrying a colon", "fixture:ip", "contributes", spec],
+		["carrying a colon, on a budget switched off", "fixture:ip", "contributes", off],
+		["carrying a colon, in an override", "fixture:ip", "overrides", off],
+	])(
 		"a prefix no limiter key can carry — %s — refuses boot at stage 1, before any factory runs",
 		async (_label, prefix, channel, answer) => {
 			let ran = false;
-			const factory = () => {
+			const factory = (): Budget => {
 				ran = true;
 				return answer();
 			};

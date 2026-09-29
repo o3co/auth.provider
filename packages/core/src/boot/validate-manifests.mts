@@ -34,6 +34,10 @@ import { z } from "zod";
 import type { AppConfig } from "../config/application.schema.mjs";
 import { composeConfigSchema } from "../config/application.schema.mjs";
 import type { ComponentKey, ComponentMap } from "../modules/manifest/component-map.mjs";
+import type {
+	FederationInstance,
+	FederationTypeContribution,
+} from "../modules/manifest/contributes-map.mjs";
 import type { Module } from "../modules/manifest/module-spec.mjs";
 import type { RouteContribution } from "../modules/manifest/route-contribution.mjs";
 import { SYNTHETIC_COMPONENT_KEYS } from "../modules/manifest/synthetic-keys.mjs";
@@ -45,6 +49,7 @@ import type {
 	ContributionKind,
 	ContributionKindMap,
 	NormalisedModule,
+	RegisteredFederationType,
 	ValidatedManifests,
 	ValidatedModule,
 } from "./types.mjs";
@@ -74,17 +79,22 @@ export interface ValidateManifestsInput {
 // ---------------------------------------------------------------------------
 
 /**
- * The factory a name-keyed entry registers through. A `federations` entry
- * may be a declaration — `{ type, entrySchema, factory }` (#728) — whose
- * factory is registered exactly as a bare one is; its `type` and
- * `entrySchema` stay on the manifest, unread by boot until federation
- * entries are dispatched by type. Every other value is its own factory.
+ * The factory a name-keyed entry registers through. A `federationTypes`
+ * entry is a declaration, `{ entrySchema, factory }` (#728), not a factory of
+ * the value it registers: what registers is the declaration with its factory
+ * bound to the module's deps (`RegisteredFederationType`), which the stage-4
+ * pass builds from the deps it hands every factory. The declaration's shape is
+ * held at stage 1 (`checkContributionShapes`). Every other value is its own
+ * factory.
  */
 function nameKeyedFactory(kind: string, value: unknown): unknown {
-	if (kind === "federations" && typeof value === "object" && value !== null) {
-		return (value as { readonly factory?: unknown }).factory;
-	}
-	return value;
+	if (kind !== "federationTypes") return value;
+	const declaration = value as FederationTypeContribution<Record<string, unknown>>;
+	return (deps: Record<string, unknown>): RegisteredFederationType =>
+		Object.freeze({
+			entrySchema: declaration.entrySchema,
+			create: (instance: FederationInstance<unknown>) => declaration.factory(deps, instance),
+		});
 }
 
 /**
@@ -181,6 +191,7 @@ const BUILTIN_CONTRIBUTION_KINDS = new Set<string>([
 	"tokenBindingMechanisms",
 	"discoveryMetadata",
 	"rateLimitBudgets",
+	"federationTypes",
 ]);
 
 // ---------------------------------------------------------------------------
@@ -523,6 +534,15 @@ function buildMissingRequiredPath(
 const GUARDED_KINDS = ["sessionRequirements", "mfaFactors"] as const;
 
 /**
+ * The kinds whose collector is the planner's alone (#728): a host collector
+ * for `rateLimitBudgets` could answer a looser budget than the owning module
+ * contributed — on RFC 8628 §5.1's device-verification prefix, say — and
+ * `federationTypes` is what the dispatch of configured federations will read.
+ * Unlike `GUARDED_KINDS`, a module may override an entry of either.
+ */
+const PLANNER_OWNED_KINDS = ["rateLimitBudgets", "federationTypes"] as const;
+
+/**
  * A requirement is switched off by not installing it, and nothing may
  * quietly remove one from behind the consumers: a module's
  * `overrides.sessionRequirements` is refused here, at stage 1 —
@@ -573,6 +593,82 @@ export function refuseGuardedHostKinds(host: ContributionKindMap | undefined): v
 				stage: "validateManifests",
 				details: { reason: "session-requirement-kind-guarded", kind, channel: "contributionKinds" },
 			});
+		}
+	}
+	for (const kind of PLANNER_OWNED_KINDS) {
+		if (Object.hasOwn(host, kind)) {
+			throw new BootError({
+				message: `contributionKinds replaces the collector for "${kind}", which is the planner's: the modules that own its entries contribute them, and a module may override one.`,
+				reason: "contribution-kind-guarded",
+				stage: "validateManifests",
+				details: { reason: "contribution-kind-guarded", kind },
+			});
+		}
+	}
+}
+
+/**
+ * What a `rateLimitBudgets` key or a `federationTypes` value must be, read off
+ * the manifest before any factory runs (#728), for contributions and
+ * overrides alike: a prefix a limiter key can carry before its first `:` —
+ * not empty, holding no `:` — whatever the budget's factory will answer, a
+ * `null` included; and a declaration that is an object with a Zod
+ * `entrySchema` and a `factory` function, so one written in JavaScript is
+ * refused as itself rather than as a `TypeError` at registration.
+ * Throws `contribution-malformed`.
+ * @internal
+ */
+function checkContributionShapes(rawModules: readonly Module[]): void {
+	const refuse = (
+		m: Module,
+		kind: "rateLimitBudgets" | "federationTypes",
+		name: string,
+		channel: "contributes" | "overrides",
+		problem: string,
+	): never => {
+		throw new BootError({
+			message: `Module "${m.name}" ${channel} ${kind} "${name}": ${problem}.`,
+			reason: "contribution-malformed",
+			stage: "validateManifests",
+			details: { reason: "contribution-malformed", module: m.name, kind, name, channel, problem },
+		});
+	};
+	for (const m of rawModules) {
+		for (const channel of ["contributes", "overrides"] as const) {
+			const map = m[channel];
+			for (const prefix of Object.keys(map?.rateLimitBudgets ?? {})) {
+				if (prefix.length === 0 || prefix.includes(":")) {
+					refuse(
+						m,
+						"rateLimitBudgets",
+						prefix,
+						channel,
+						`a prefix is what a limiter key carries before its first ":", so it is not empty and holds no ":"`,
+					);
+				}
+			}
+			for (const [type, value] of Object.entries(map?.federationTypes ?? {})) {
+				const declaration: unknown = value;
+				if (typeof declaration !== "object" || declaration === null) {
+					refuse(
+						m,
+						"federationTypes",
+						type,
+						channel,
+						"a declaration is an object with an entrySchema and a factory",
+					);
+				}
+				const { entrySchema, factory } = declaration as {
+					entrySchema?: unknown;
+					factory?: unknown;
+				};
+				if (typeof (entrySchema as { safeParse?: unknown } | null)?.safeParse !== "function") {
+					refuse(m, "federationTypes", type, channel, "its entrySchema is not a Zod schema");
+				}
+				if (typeof factory !== "function") {
+					refuse(m, "federationTypes", type, channel, "its factory is not a function");
+				}
+			}
 		}
 	}
 }
@@ -1914,6 +2010,11 @@ export const STAGE_ONE_PRE_CONFIG_CHECKS: readonly StageOneCheck[] = freezeCheck
 		id: "contribution-kind-coverage",
 		spec: "A2-β §5.1 step 5",
 		run: (ctx) => checkContributionKindCoverage(ctx.modules, ctx.contributionKinds),
+	},
+	{
+		id: "contribution-shapes",
+		spec: "issue #728 (a rate-limit prefix; a federation type's declaration)",
+		run: (ctx) => checkContributionShapes(ctx.rawModules),
 	},
 	{
 		id: "per-kind-contribute-duplicates",

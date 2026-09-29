@@ -26,10 +26,12 @@ export type {
 	ContributesMap,
 	ExchangeTokenValidator,
 	ExchangeTokenValidatorFactory,
-	// #728: a federation contribution that declares the type it handles.
-	FederationContribution,
 	FederationFactory,
+	// #728: one configured federation as its type's factory receives it, and
+	// what a federation package declares it handles, keyed by type.
+	FederationInstance,
 	FederationProvider,
+	FederationTypeContribution,
 	GrantFactory,
 	GrantHandler,
 	GrantMiddlewareFactory,

@@ -126,7 +126,9 @@ export type {
 	ContributeAndOverrideSameKeyDetails,
 	ContributeFactoryFailedDetails,
 	ContributionCollectorMap,
+	ContributionKindGuardedDetails,
 	ContributionKindMap,
+	ContributionMalformedDetails,
 	CreateAppOptions,
 	DefaultBootstrapMap,
 	DuplicateContributeDetails,
@@ -145,6 +147,7 @@ export type {
 	OrderedRouteContribution,
 	OverrideTargetMissingDetails,
 	ProvidesFactoryFailedDetails,
+	RegisteredFederationType,
 	ReservedComponentKeyDetails,
 	RouteCollector,
 	RouteOrderCycleDetails,
@@ -604,10 +607,12 @@ export type {
 	ContributesMap,
 	ExchangeTokenValidator,
 	ExchangeTokenValidatorFactory,
-	// #728: a federation contribution that declares the type it handles.
-	FederationContribution,
 	FederationFactory,
+	// #728: one configured federation as its type's factory receives it, and
+	// what a federation package declares it handles, keyed by type.
+	FederationInstance,
 	FederationProvider,
+	FederationTypeContribution,
 	// GrantFactory, GrantHandler: excluded — names collide with legacy
 	// ./grants/types.mjs exports at this boundary. Import from
 	// @o3co/auth-provider-core/modules/manifest directly.

@@ -43,7 +43,9 @@ import type { TokenBindingMechanism } from "../middleware/tokenBinding.mjs";
 import type { ComponentKey, ComponentMap } from "../modules/manifest/component-map.mjs";
 import type {
 	AuditHook,
+	Contributed,
 	ExchangeTokenValidator,
+	FederationInstance,
 	FederationProvider,
 	GrantHandler,
 	GrantPolicyHookContribution,
@@ -107,10 +109,10 @@ declare module "@o3co/auth-provider-core" {
 
 /**
  * The set of contribution kinds used internally by the boot planner.
- * Built-in kinds are the thirteen listed (the 7 v0.5.0 originals, A5's
+ * Built-in kinds are the fourteen listed (the 7 v0.5.0 originals, A5's
  * `federationRedirectPolicies`, `grantMiddleware`, `tokenBindingMechanisms`,
  * `discoveryMetadata`, the session-admission ADR's `sessionRequirements`,
- * and #728's `rateLimitBudgets`);
+ * and #728's `rateLimitBudgets` and `federationTypes`);
  * the structural escape
  * `(string & { readonly __consumerKind?: unique symbol })` admits
  * consumer-defined kinds added via `declare module` augmentation of
@@ -132,6 +134,7 @@ export type ContributionKind =
 	| "tokenBindingMechanisms"
 	| "discoveryMetadata"
 	| "rateLimitBudgets"
+	| "federationTypes"
 	| (string & { readonly __consumerKind?: unique symbol });
 
 // ---------------------------------------------------------------------------
@@ -476,6 +479,12 @@ export interface ContributionCollectorMap {
 	 * `rateLimitBudgetResolver` leaves out.
 	 */
 	readonly rateLimitBudgets?: NameKeyedCollector<RateLimitSpec | null>;
+	/**
+	 * Collector for `federationTypes` contributions (#728), by type: each
+	 * package's declaration, its factory bound to the module's deps. Nothing
+	 * dispatches configured entries to it yet.
+	 */
+	readonly federationTypes?: NameKeyedCollector<RegisteredFederationType>;
 	readonly auditHooks?: ListCollector<AuditHook>;
 	readonly routes?: RouteCollector;
 	readonly grantPolicyHooks?: ListCollector<GrantPolicyHookContribution>;
@@ -511,6 +520,17 @@ export interface ContributionCollectorMap {
 	 * `buildDiscoveryDocument` (mounted only when an issuer is configured).
 	 */
 	readonly discoveryMetadata?: ListCollector<OidcDiscoveryContribution>;
+}
+
+/**
+ * A `federationTypes` declaration as registered (#728): the type's entry
+ * schema, and `create`, its factory bound to the contributing module's deps —
+ * what the dispatch of configured entries by type will call once per entry
+ * of the type, with the entry parsed by `entrySchema` and its name.
+ */
+export interface RegisteredFederationType {
+	readonly entrySchema: z.ZodType;
+	readonly create: (instance: FederationInstance<unknown>) => Contributed<FederationProvider>;
 }
 
 /**
@@ -667,13 +687,13 @@ export type BootStage =
 	| "assembleApp";
 
 // ---------------------------------------------------------------------------
-// BootErrorReason — 31 literals, Per A2-β §6.1 (+ #271, #363, module-factory-not-called; #277's reason was folded into #363's by #375; the MFA ADR's D3 removed mfa-partial-wiring; the session-admission ADR's D3 and D7 added three; #728 added two)
+// BootErrorReason — 33 literals, Per A2-β §6.1 (+ #271, #363, module-factory-not-called; #277's reason was folded into #363's by #375; the MFA ADR's D3 removed mfa-partial-wiring; the session-admission ADR's D3 and D7 added three; #728 added four)
 // ---------------------------------------------------------------------------
 
 /**
  * All possible reasons a BootError can be thrown. Each literal corresponds to
  * one validation or runtime failure the boot planner can detect. There are
- * exactly 31 reasons.
+ * exactly 33 reasons.
  *
  * Per A2-β §6.1. Extended by issue #101 (federation-stores-incomplete), the
  * OIDC discovery aggregator
@@ -683,7 +703,8 @@ export type BootStage =
  * factory rather than the manifest it builds), and the session-admission
  * ADR's D3 and D7 (session-requirement-kind-guarded,
  * session-requirements-undeclared, session-requirement-missing), and #728's
- * module sections (reserved-component-key, module-section-path-invalid).
+ * module sections (reserved-component-key, module-section-path-invalid) and
+ * contribution kinds (contribution-kind-guarded, contribution-malformed).
  */
 export type BootErrorReason =
 	| "module-factory-not-called"
@@ -716,10 +737,12 @@ export type BootErrorReason =
 	| "session-requirements-undeclared"
 	| "session-requirement-missing"
 	| "reserved-component-key"
-	| "module-section-path-invalid";
+	| "module-section-path-invalid"
+	| "contribution-kind-guarded"
+	| "contribution-malformed";
 
 // ---------------------------------------------------------------------------
-// Per-reason *Details interfaces — one per BootErrorReason, 31 total, Per A2-β §6.1 (+ #271, #363, module-factory-not-called, the session-admission ADR, #728)
+// Per-reason *Details interfaces — one per BootErrorReason, 33 total, Per A2-β §6.1 (+ #271, #363, module-factory-not-called, the session-admission ADR, #728)
 // ---------------------------------------------------------------------------
 
 /**
@@ -1129,6 +1152,34 @@ export interface ComponentAbsenceUndeclaredDetails {
 }
 
 /**
+ * A host `contributionKinds` collector for a kind whose collector is the
+ * planner's alone (#728): `rateLimitBudgets` — a host collector could answer
+ * a looser budget than the owning module contributed, on a prefix such as
+ * RFC 8628 §5.1's device verification — and `federationTypes`. Refused in
+ * `createApp`, before the kinds are merged.
+ */
+export interface ContributionKindGuardedDetails {
+	readonly reason: "contribution-kind-guarded";
+	readonly kind: "rateLimitBudgets" | "federationTypes";
+}
+
+/**
+ * A contribution whose key or value its kind cannot take, found on the
+ * manifest at stage 1, before any factory runs (#728): a `rateLimitBudgets`
+ * prefix that is empty or holds `:` — no limiter key carries it — or a
+ * `federationTypes` declaration that is not an object with a Zod
+ * `entrySchema` and a `factory`. `problem` says which.
+ */
+export interface ContributionMalformedDetails {
+	readonly reason: "contribution-malformed";
+	readonly module: string;
+	readonly kind: "rateLimitBudgets" | "federationTypes";
+	readonly name: string;
+	readonly channel: "contributes" | "overrides";
+	readonly problem: string;
+}
+
+/**
  * A `sessionRequirements` entry in a module's `overrides` (stage 1), or a
  * host `contributionKinds` collector for `sessionRequirements` or
  * `mfaFactors` (`createApp`, before the kinds are merged) — the
@@ -1192,9 +1243,10 @@ export interface SessionRequirementMissingDetails {
  * (discovery-document-invalid), #271 (replica-unsafe-adapter), #363
  * (component-absence-undeclared), module-factory-not-called and the
  * session-admission ADR's three (session-requirement-kind-guarded,
- * session-requirements-undeclared, session-requirement-missing) and #728's two
- * (reserved-component-key, module-section-path-invalid) — one member per
- * `BootErrorReason`, 31 in all.
+ * session-requirements-undeclared, session-requirement-missing) and #728's four
+ * (reserved-component-key, module-section-path-invalid, contribution-kind-guarded,
+ * contribution-malformed) — one member per
+ * `BootErrorReason`, 33 in all.
  */
 export type BootErrorDetails =
 	| ModuleFactoryNotCalledDetails
@@ -1227,7 +1279,9 @@ export type BootErrorDetails =
 	| SessionRequirementsUndeclaredDetails
 	| SessionRequirementMissingDetails
 	| ReservedComponentKeyDetails
-	| ModuleSectionPathInvalidDetails;
+	| ModuleSectionPathInvalidDetails
+	| ContributionKindGuardedDetails
+	| ContributionMalformedDetails;
 
 // ---------------------------------------------------------------------------
 // BootError class — Per A2-β §6.1

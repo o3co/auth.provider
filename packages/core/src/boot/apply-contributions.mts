@@ -455,11 +455,11 @@ const issuerOf = (config: unknown): string | undefined => {
  *   makes, its page held to the issuer's origin (the session-admission ADR's
  *   D3). Its `reach` is not read here: the end of the name-keyed pass reads
  *   it once (`checkSessionRequirements`);
- * - a `rateLimitBudgets` prefix no limiter key can carry — empty, or holding
- *   the `:` a key's prefix ends at — or a budget no limiter can apply as
- *   written (`isUsableRateLimitSpec`) (#728). What registers is a frozen copy
- *   of the budget's `limit` and `windowSeconds`, read once here; `null`
- *   (switched off by its module's settings) passes, and stays claimed.
+ * - a `rateLimitBudgets` budget no limiter can apply as written
+ *   (`isUsableRateLimitSpec`) — a string, `undefined` and fractions included
+ *   (#728). What registers is a frozen copy of the budget's `limit` and
+ *   `windowSeconds`, read once here; `null` (switched off by its module's
+ *   settings) passes, and stays claimed. The prefix was held at stage 1.
  * @internal
  */
 function checkNameKeyedValue(kind: string, name: string, value: unknown, config: unknown): unknown {
@@ -500,11 +500,7 @@ function checkNameKeyedValue(kind: string, name: string, value: unknown, config:
 		return value;
 	}
 	if (kind === "rateLimitBudgets") {
-		if (name.length === 0 || name.includes(":")) {
-			throw new RangeError(
-				`rateLimitBudgets "${name}": a prefix is what a limiter key carries before its first ":", so it is not empty and holds no ":"`,
-			);
-		}
+		// The prefix itself was held at stage 1 (`contribution-shapes`).
 		if (value === null) return value;
 		if (!isUsableRateLimitSpec(value)) {
 			const { limit, windowSeconds } =
