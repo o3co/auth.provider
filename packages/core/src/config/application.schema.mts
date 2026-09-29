@@ -342,7 +342,9 @@ const jwtSchemaBase = z.object({
 	// Operator-tunable; defaults to 300 (applied by `resolveJwksCacheMaxAge`).
 	// Keep well below the key-overlap window so a rotated kid propagates to
 	// caching verifiers in time. See `core/src/jwks/cache.mts`.
-	jwksCacheMaxAge: z.number().int().nonnegative().optional(),
+	// `z.coerce` for the #288 reason: a `${?VAR}` an operator's file sets it
+	// from arrives as a string (#728: no bridge coerces it on the way).
+	jwksCacheMaxAge: z.coerce.number().int().nonnegative().optional(),
 	// SF-1 (v0.5.1): when true, the central JWT verifier accepts tokens whose
 	// `typ` header is absent and emits a deprecation warning. No schema
 	// default — per the v0.5.1 ADR the literal lives in `reference.conf`,
@@ -1909,7 +1911,9 @@ export const fullSectionsSchema = z.object({
 			ttl: z.coerce.number().int().positive().optional(),
 			encryptionMode: z.enum(["required", "allow-plaintext"]).optional(),
 			encryptionKey: z.string().optional(),
-			scanFallback: z.boolean().optional(),
+			// `coerceBooleanFromEnv` for the #288 reason: a `${?VAR}` an operator's
+			// file sets it from arrives as a string (#728: no bridge coerces it).
+			scanFallback: coerceBooleanFromEnv.optional(),
 		})
 		.optional(),
 	// #472: module-internal config for `redisDeviceCodeStoreModule` (#433).
