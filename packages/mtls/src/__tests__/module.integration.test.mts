@@ -272,7 +272,7 @@ describe("mtlsModule — integration via createApp", () => {
 		await handle.dispose();
 	});
 
-	it("boot fails when source='header' and trusted-proxies is empty (#280)", async () => {
+	it("boot fails when source='header' and trusted-proxies is empty", async () => {
 		const boot = makeBoot({
 			enabled: true,
 			source: "header",
@@ -287,7 +287,7 @@ describe("mtlsModule — integration via createApp", () => {
 		).rejects.toThrow(/trusted-proxies/);
 	});
 
-	it("when enabled + header source + a peer outside trusted-proxies: HTTP 400 (#280)", async () => {
+	it("when enabled + header source + a peer outside trusted-proxies: HTTP 400", async () => {
 		// supertest connects over loopback; the allowlist names a different
 		// address, so the forwarded certificate must be refused: reaching the
 		// app directly must not assert an identity by setting the header.
@@ -357,7 +357,7 @@ describe("mtlsModule — integration via createApp", () => {
 // Config defaults
 // ---------------------------------------------------------------------------
 
-describe("mtlsConfigSchema — secure defaults (#280)", () => {
+describe("mtlsConfigSchema — secure defaults", () => {
 	it("defaults `source` to tls-layer, not the forwarded header", () => {
 		// A "header" default would make merely enabling mTLS trust an
 		// X-Forwarded-Client-Cert from whoever opened the connection. The

@@ -448,7 +448,7 @@ describe("OCSP resolver — who may sign a response (RFC 6960 §4.2.2.2)", () =>
 	});
 });
 
-describe("OCSP resolver — the signature-algorithm policy applies to the answer too (#470)", () => {
+describe("OCSP resolver — the signature-algorithm policy applies to the answer too", () => {
 	it("refuses a response signed with SHA-1 as algorithm_not_permitted, and remembers it for the negative window", async () => {
 		// pkijs verifies ecdsa-with-SHA1 and sha1WithRSAEncryption without
 		// complaint, so a SHA-1-signed answer *about* a certificate was
@@ -1106,7 +1106,7 @@ describe("OCSP resolver — through the guarded fetch", () => {
 	});
 });
 
-describe("delegated responder revocation (#468)", () => {
+describe("delegated responder revocation", () => {
 	/** A delegated responder the CA issued, without `id-pkix-ocsp-nocheck`. */
 	const responderWithoutNoCheck = (int: Minted) =>
 		mintOcspResponder("OCSP Responder", 50, int, {
@@ -1203,7 +1203,7 @@ describe("delegated responder revocation (#468)", () => {
 	});
 });
 
-describe("delegated responder revocation — the cached answer (#550 review)", () => {
+describe("delegated responder revocation — the cached answer, and a malformed nocheck", () => {
 	const responderWithoutNoCheck = (int: Minted) =>
 		mintOcspResponder("OCSP Responder", 50, int, {
 			extensions: [basicConstraints(false), keyUsage(KEY_USAGE.digitalSignature), ocspSigningEku()],

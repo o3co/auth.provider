@@ -318,7 +318,7 @@ describe("guarded fetch — response limits", () => {
 	});
 });
 
-describe("guarded fetch — POST, for OCSP (#431)", () => {
+describe("guarded fetch — POST, for OCSP", () => {
 	const body = new Uint8Array([0x30, 0x00]);
 	const ocspRequest = {
 		method: "POST" as const,

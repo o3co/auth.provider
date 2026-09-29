@@ -308,7 +308,7 @@ describe("createMtlsMechanism — PKI mode (chain validation before thumbprint)"
 // authenticated trusted proxy (RFC 8705 §3).
 // ---------------------------------------------------------------------------
 
-describe("createMtlsMechanism — default certificate source (#280)", () => {
+describe("createMtlsMechanism — default certificate source", () => {
 	it("defaults to the TLS layer when `source` is omitted", async () => {
 		// The certificate comes from the transport by default. A forwarded
 		// header, which any peer that can reach the process could set, is opt-in.
@@ -331,7 +331,7 @@ describe("createMtlsMechanism — default certificate source (#280)", () => {
 	});
 });
 
-describe("createMtlsMechanism — trusted-proxy allowlist for the header source (#280)", () => {
+describe("createMtlsMechanism — trusted-proxy allowlist for the header source", () => {
 	it("throws at construction when source === 'header' and no trustedProxies are configured", () => {
 		expect(() =>
 			createMtlsMechanism({

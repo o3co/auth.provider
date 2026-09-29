@@ -223,7 +223,7 @@ describe("validateCertChain — narrow PKI mode (spec §7.2)", () => {
  * from what `X509Certificate` exposes directly: `basicConstraints` and
  * `extendedKeyUsage`.
  */
-describe("validateCertChain — leaf certificate profile (#280)", () => {
+describe("validateCertChain — leaf certificate profile", () => {
 	it("accepts a leaf whose extendedKeyUsage includes clientAuth", () => {
 		const result = validateCertChain(extLeafClientAuth, [], [extRoot], EXT_NOW);
 		expect(result.ok).toBe(true);

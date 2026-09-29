@@ -230,7 +230,7 @@ describe("CRL resolver — one fetch per distribution point, not one per caller"
 	});
 });
 
-describe("CRL resolver — extensions it does not process (#447, #446)", () => {
+describe("CRL resolver — extensions it does not process", () => {
 	it("remembers a CRL carrying an unsupported critical extension for the negative window, under its own name", async () => {
 		// pkijs's `verify` answers `false` for a critical extension outside its
 		// known list — the same answer as a forged signature — and that used to
@@ -372,7 +372,7 @@ describe("CRL resolver — extensions it does not process (#447, #446)", () => {
 	});
 });
 
-describe("CRL resolver — several distribution points on one certificate (#446, #469)", () => {
+describe("CRL resolver — several distribution points on one certificate", () => {
 	it("skips a distribution point carrying reasons without fetching it, and still consults the plain point beside it", async () => {
 		// With reasons, no single CRL is the complete answer, and the
 		// reasons-mask bookkeeping of RFC 5280 §6.3.3 is not implemented. But
@@ -564,7 +564,7 @@ describe("CRL resolver — several distribution points on one certificate (#446,
 	});
 });
 
-describe("CRL resolver — the signature-algorithm policy applies to the CRL too (#470)", () => {
+describe("CRL resolver — the signature-algorithm policy applies to the CRL too", () => {
 	it("refuses a CRL signed with SHA-1 as algorithm_not_permitted, and remembers it for the negative window", async () => {
 		// pkijs verifies ecdsa-with-SHA1 and sha1WithRSAEncryption without
 		// complaint, so unchecked, a SHA-1-signed CRL would be believed while a

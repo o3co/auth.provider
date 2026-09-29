@@ -295,7 +295,7 @@ describe("dpopModule + mtlsModule — cross-mechanism dispatch (refactor §6.4)"
  * real modules, so a refactor that makes DPoP failures non-fatal (which would
  * look like a DoS fix) fails here.
  */
-describe("dpopModule + mtlsModule — no downgrade on mixed validity (#199 R2)", () => {
+describe("dpopModule + mtlsModule — no downgrade on mixed validity", () => {
 	it("malformed DPoP + valid mTLS cert → 400, NOT a silent fallback to the mTLS binding", async () => {
 		const received: Received = {};
 		const handle = await createApp({
