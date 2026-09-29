@@ -20,8 +20,9 @@
  * `admitSession` after the client and the parameters are validated; freshness
  * (`max_age`, `prompt=login`) decided on the session the verdict carries
  * before the verdict is acted on; each outcome mapped to the protocol's
- * answer. Tests prefixed (1)–(7) pin the ADR's changes of those numbers. The
- * step-up trip is driven with a fixture requirement through `resolverForTests`.
+ * answer. Every change D8 makes to `/authorize` has a session-read test named
+ * for it. The step-up trip is driven with a fixture requirement through
+ * `resolverForTests`.
  */
 
 import crypto from "node:crypto";

@@ -21,8 +21,8 @@
  * found and before anything is shown or recorded. A live session whose
  * subject is the parked request's proceeds; every other outcome is
  * `401 login_required`, a requirement's step-up included, because
- * `/authorize` decides again after consent; an outage stays `503`. Tests
- * prefixed (1), (3), (4), (5) pin the ADR's changes of those numbers.
+ * `/authorize` decides again after consent; an outage stays `503`. Every
+ * change D8 makes to consent has a test named for it.
  */
 
 import {

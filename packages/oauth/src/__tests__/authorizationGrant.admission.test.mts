@@ -21,8 +21,8 @@
  * is signed, with `codeClaimFirstRead(code)` (a code carries no subject); the
  * second, before the family is linked, with `codeClaimRevalidation(code, sub)`
  * on the first read's `sub`, so a subject changed in between is refused as
- * `session_invalidated`. Tests prefixed (4) and (5) pin the ADR's changes of
- * those numbers, on both reads.
+ * `session_invalidated`. D8's changes for this grant, the subject-revocation
+ * boundary and a record past its `expiresAt`, are each pinned on both reads.
  */
 
 import crypto from "node:crypto";

@@ -568,11 +568,8 @@ describe("createRefreshTokenGrant", () => {
 			});
 
 			it("rejects a typ-less JWT as invalid_grant, with legacyTypAccept off", async () => {
-				// legacyTypAccept=true lets a typ-less JWT through the central
-				// verifier. This grant-level gate must STILL reject it because
-				// the token declares no refresh marker (header.typ is the only
-				// accepted one). Without it, any AT or non-refresh JWT signed
-				// with the same key could pass as a refresh token.
+				// With `legacyTypAccept` off (the default), the verifier refuses
+				// the typ-less token; the grant's own `rt+jwt` gate is not reached.
 				const typLessUnmarkedToken = await new SignJWT({
 					sub: "u1",
 					azp: DEFAULT_CLIENT_ID,
