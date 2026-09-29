@@ -133,7 +133,9 @@ describe("readTransitionalConfig — the switches a composition root reads befor
 		}
 		expect(thrown).toBeInstanceOf(RangeError);
 		expect((thrown as Error).message).toMatch(/threw instead of answering/);
-		expect((thrown as Error).message).toMatch(/the port getter broke/);
+		// The error it threw is carried, not flattened into the message.
+		expect(((thrown as Error).cause as Error).message).toBe("the port getter broke");
+		expect((thrown as Error).message).not.toMatch(/the port getter broke/);
 	});
 
 	it("refuses a configuration that is not an object, naming the configuration itself", () => {
