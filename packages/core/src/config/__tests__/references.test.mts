@@ -25,15 +25,17 @@
 
 import { existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { z } from "zod";
-import { CORE_REFERENCE, moduleReferences } from "#/config/references.mjs";
+import { coreReference, moduleReferences } from "#/config/references.mjs";
 import { defineModule } from "#/modules/manifest/index.mjs";
 import type { Module } from "#/modules/manifest/module-spec.mjs";
-import { referenceConfProblems } from "#/testing/referenceConf.mjs";
+import { packageReferenceProblems, referenceConfProblems } from "#/testing/referenceConf.mjs";
 
 const REF_A = new URL("file:///packages/a/config/reference.conf");
 const REF_B = new URL("file:///packages/b/config/reference.conf");
+/** Core's own `reference.conf`, found from this file. */
+const CORE_HREF = new URL("../../../config/reference.conf", import.meta.url).href;
 
 const sectioned = (name: string, reference: URL | undefined, at?: string): Module =>
 	defineModule({
@@ -47,8 +49,24 @@ const sectioned = (name: string, reference: URL | undefined, at?: string): Modul
 
 describe("moduleReferences — the references a composition layers beneath its own files", () => {
 	it("names core's own reference.conf, a file that exists", () => {
-		expect(CORE_REFERENCE.protocol).toBe("file:");
-		expect(existsSync(fileURLToPath(CORE_REFERENCE))).toBe(true);
+		expect(coreReference().href).toBe(CORE_HREF);
+		expect(existsSync(fileURLToPath(coreReference()))).toBe(true);
+	});
+
+	it("answers a new URL for core's each time, so changing one changes no other", () => {
+		const first = coreReference();
+		first.pathname = "/elsewhere/reference.conf";
+		expect(coreReference().href).toBe(CORE_HREF);
+	});
+
+	it("hands out copies: changing an answer changes neither a module's declaration nor the next answer", () => {
+		const declared = new URL(REF_A.href);
+		const module = sectioned("a", declared);
+		const [first, core] = moduleReferences([module]);
+		(first as URL).pathname = "/elsewhere/reference.conf";
+		(core as URL).pathname = "/elsewhere/core.conf";
+		expect(declared.href).toBe(REF_A.href);
+		expect(moduleReferences([module]).map(String)).toEqual([REF_A.href, CORE_HREF]);
 	});
 
 	it("answers core's alone for modules that declare none", () => {
@@ -56,7 +74,7 @@ describe("moduleReferences — the references a composition layers beneath its o
 			moduleReferences([defineModule({ name: "plain" }), sectioned("no-reference", undefined)]).map(
 				String,
 			),
-		).toEqual([CORE_REFERENCE.href]);
+		).toEqual([CORE_HREF]);
 	});
 
 	it("answers each declared reference once, in module order, with core's at the bottom", () => {
@@ -66,16 +84,15 @@ describe("moduleReferences — the references a composition layers beneath its o
 			sectioned("b-two", new URL(REF_B.href)),
 			defineModule({ name: "plain" }),
 		]);
-		expect(references.map(String)).toEqual([REF_B.href, REF_A.href, CORE_REFERENCE.href]);
+		expect(references.map(String)).toEqual([REF_B.href, REF_A.href, CORE_HREF]);
 	});
 
 	it("keeps core's at the bottom when a module declares it too", () => {
 		expect(
-			moduleReferences([
-				sectioned("declares-core", new URL(CORE_REFERENCE.href)),
-				sectioned("a", REF_A),
-			]).map(String),
-		).toEqual([REF_A.href, CORE_REFERENCE.href]);
+			moduleReferences([sectioned("declares-core", new URL(CORE_HREF)), sectioned("a", REF_A)]).map(
+				String,
+			),
+		).toEqual([REF_A.href, CORE_HREF]);
 	});
 
 	it("refuses a reference that is not a file: URL, naming the module", () => {
@@ -146,6 +163,45 @@ describe("referenceConfProblems — a package's reference holds its modules' sec
 		]);
 	});
 
+	it("counts no key whose value is undefined as a path", () => {
+		expect(
+			referenceConfProblems({
+				tree: { oauth: { dpop: { enabled: false, retired: undefined } }, stray: undefined },
+				reference: REF_A,
+				modules: [dpopLike],
+			}),
+		).toEqual([]);
+	});
+
+	it("counts an empty object as kept when the schema's output has keys under it", () => {
+		const filling = defineModule({
+			name: "filling",
+			section: {
+				schema: z.object({
+					enabled: z.boolean(),
+					limits: z.object({ token: z.number().default(60) }),
+				}),
+				reference: REF_A,
+				at: "oauth.dpop",
+			},
+		});
+		expect(
+			referenceConfProblems({
+				tree: { oauth: { dpop: { enabled: false, limits: {} } } },
+				reference: REF_A,
+				modules: [filling],
+			}),
+		).toEqual([]);
+		// An empty object the schema drops is still lost.
+		expect(
+			referenceConfProblems({
+				tree: { oauth: { dpop: { enabled: false, limits: {} } } },
+				reference: REF_A,
+				modules: [dpopLike],
+			}),
+		).toEqual(['oauth.dpop.limits: lost by module "dpop-like"\'s section schema']);
+	});
+
 	it("names a reference no module declares", () => {
 		expect(referenceConfProblems({ tree: {}, reference: REF_B, modules: [dpopLike] })).toEqual([
 			`${REF_B.href}: no module declares this reference`,
@@ -162,5 +218,39 @@ describe("referenceConfProblems — a package's reference holds its modules' sec
 				modules: [outer, inner, dpopLike],
 			}),
 		).toEqual([]);
+	});
+});
+
+describe("packageReferenceProblems — the check each package's test runs over its own reference", () => {
+	const dpopLike = defineModule({
+		name: "dpop-like",
+		section: { schema: z.object({ enabled: z.boolean() }), reference: REF_A, at: "oauth.dpop" },
+	});
+
+	it("reads the file with the reader it is given, and checks what it read", () => {
+		const read = vi.fn((_path: string): unknown => ({ oauth: { dpop: { enabled: false } } }));
+		expect(packageReferenceProblems({ reference: REF_A, modules: [dpopLike], read })).toEqual([]);
+		expect(read).toHaveBeenCalledWith(fileURLToPath(REF_A));
+
+		const lossy = vi.fn((_path: string): unknown => ({
+			oauth: { dpop: { enabled: false, x: 1 } },
+		}));
+		expect(
+			packageReferenceProblems({ reference: REF_A, modules: [dpopLike], read: lossy }),
+		).toEqual(['oauth.dpop.x: lost by module "dpop-like"\'s section schema']);
+	});
+
+	it("names each module it is given that does not declare the file", () => {
+		const read = (): unknown => ({ oauth: { dpop: { enabled: false } } });
+		expect(
+			packageReferenceProblems({
+				reference: REF_A,
+				modules: [dpopLike, sectioned("elsewhere", REF_B), defineModule({ name: "plain" })],
+				read,
+			}),
+		).toEqual([
+			`module "elsewhere": its section's reference is ${REF_B.href}, not this file`,
+			'module "plain": declares no section reference',
+		]);
 	});
 });

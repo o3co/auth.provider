@@ -23,11 +23,17 @@
  * import.meta.url)` from a file under `src/` — names the same file from the
  * source and from the published `dist/`, and a composition root that layers
  * what its modules declare finds it in an installed package.
+ *
+ * And the references are disjoint: no path is set by two of them, so the
+ * order a composition layers them in decides nothing — and each package that
+ * ships one checks it in its own tests with `packageReferenceProblems` from
+ * core's testing entry.
  */
 
 import { readdirSync, readFileSync } from "node:fs";
 import { join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
+import { parseFile } from "@o3co/ts.hocon";
 import { describe, expect, it } from "vitest";
 
 const REPO_ROOT = fileURLToPath(new URL("../../../../../", import.meta.url));
@@ -45,6 +51,41 @@ function shippedReferenceConfs(dir: string, found: string[] = []): string[] {
 }
 
 const REFERENCES = shippedReferenceConfs(PACKAGES);
+
+/**
+ * Every path `path`'s reference sets, with each variable it substitutes set:
+ * a path only an environment variable fills is one it sets too. A list is one
+ * path.
+ */
+function pathsSetBy(path: string): string[] {
+	const text = readFileSync(join(REPO_ROOT, path), "utf8");
+	const env = Object.fromEntries(
+		[...text.matchAll(/\$\{\??([A-Za-z0-9_]+)\}/g)].map((match) => [String(match[1]), "set"]),
+	);
+	const leaves = (tree: unknown, prefix: string): string[] =>
+		typeof tree === "object" &&
+		tree !== null &&
+		!Array.isArray(tree) &&
+		Object.keys(tree).length > 0
+			? Object.entries(tree).flatMap(([key, value]) =>
+					leaves(value, prefix === "" ? key : `${prefix}.${key}`),
+				)
+			: prefix === ""
+				? []
+				: [prefix];
+	return leaves(parseFile(join(REPO_ROOT, path), { env }).toObject(), "");
+}
+
+/** Every file under `dir`, relative to the repository, skipping build output. */
+function sourceFiles(dir: string, found: string[] = []): string[] {
+	for (const entry of readdirSync(dir, { withFileTypes: true })) {
+		if (["node_modules", "dist", "coverage"].includes(entry.name)) continue;
+		const full = join(dir, entry.name);
+		if (entry.isDirectory()) sourceFiles(full, found);
+		else found.push(full);
+	}
+	return found;
+}
 
 describe("every package keeps its defaults at config/reference.conf (#728)", () => {
 	it("finds the packages that ship defaults (the guard is not vacuous)", () => {
@@ -83,5 +124,49 @@ describe("every package keeps its defaults at config/reference.conf (#728)", () 
 			return problems;
 		});
 		expect(unpublished).toEqual([]);
+	});
+});
+
+describe("the shipped references are disjoint, and each package checks its own (#728)", () => {
+	const setBy = new Map<string, string[]>();
+	for (const reference of REFERENCES) {
+		for (const path of pathsSetBy(reference))
+			setBy.set(path, [...(setBy.get(path) ?? []), reference]);
+	}
+
+	it("reads every reference's paths (the guard is not vacuous)", () => {
+		expect(setBy.size).toBeGreaterThan(150);
+	});
+
+	it("sets no path in two references, so the order they are layered in decides nothing", () => {
+		expect([...setBy].filter(([, references]) => references.length > 1)).toEqual([]);
+	});
+
+	it("sets no value at a path another reference sets keys under", () => {
+		const paths = [...setBy.keys()];
+		expect(
+			paths.flatMap((outer) =>
+				paths
+					.filter((inner) => inner.startsWith(`${outer}.`))
+					.map((inner) => `${outer} (${setBy.get(outer)}) holds ${inner} (${setBy.get(inner)})`),
+			),
+		).toEqual([]);
+	});
+
+	it("checks each package's reference in the package's own tests with packageReferenceProblems", () => {
+		const packages = [...new Set(REFERENCES.map((path) => path.split("/")[1] as string))].filter(
+			// Core's reference holds the sections core's schema declares; it is
+			// checked against that schema (reference-conf-drift), not a module's.
+			(name) => name !== "core",
+		);
+		const unchecked = packages.filter(
+			(name) =>
+				!sourceFiles(join(PACKAGES, name, "src")).some(
+					(file) =>
+						/\.test\.mts$/.test(file) &&
+						readFileSync(file, "utf8").includes("packageReferenceProblems("),
+				),
+		);
+		expect(unchecked).toEqual([]);
 	});
 });
