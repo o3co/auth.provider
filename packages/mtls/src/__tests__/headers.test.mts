@@ -135,7 +135,7 @@ describe("parsePlainPemHeader", () => {
 		expect(result.certPem).toBe(TEST_CERT_PEM);
 	});
 
-	it("rejects a header containing multiple PEM blocks (spec OQ1 §14.1 strict)", () => {
+	it("rejects a header containing multiple PEM blocks", () => {
 		// Multi-cert concatenation is explicitly forbidden — operators must use
 		// the envoy dialect's Chain= field instead.
 		const multiPem = `${TEST_CERT_PEM}\n${TEST_CHAIN_PEM}`;

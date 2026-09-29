@@ -558,7 +558,7 @@ describe("createMtlsMechanism — boot-time validation", () => {
 		).not.toThrow();
 	});
 
-	it("resolves `file:<path>` trustedCas entries from disk at boot (spec §7.1)", async () => {
+	it("resolves `file:<path>` trustedCas entries from disk, and validates a chain against them", async () => {
 		// Operator-friendly form documented in reference.conf — file paths are
 		// read synchronously at module construction. Use the committed root.pem
 		// fixture as the source.

@@ -147,7 +147,7 @@ const makeObserverModule = (received: Received) =>
 // Tests
 // ---------------------------------------------------------------------------
 
-describe("dpopModule + mtlsModule — cross-mechanism dispatch (refactor §6.4)", () => {
+describe("dpopModule + mtlsModule — cross-mechanism dispatch", () => {
 	it("intent-explicit: request presents BOTH DPoP and mTLS → DPoP (explicit) wins", async () => {
 		const received: Received = {};
 		const handle = await createApp({
