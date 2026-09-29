@@ -1,4 +1,5 @@
 import { expectTypeOf, test } from "vitest";
+import { z } from "zod";
 import type { ProviderDeps } from "../provider.mjs";
 
 // ---------------------------------------------------------------------------
@@ -94,4 +95,13 @@ test("Provider<K, Deps> is a function from Deps to ComponentMap[K] | Promise", (
 	expectTypeOf<ConfigProvider>().toMatchTypeOf<
 		(deps: NoDeps) => { readonly host: string } | Promise<{ readonly host: string }>
 	>();
+});
+
+test("ProviderDeps' third argument adds the module's section, typed as its schema's output (#728)", () => {
+	const Section = z.object({ retries: z.coerce.number(), label: z.string().optional() });
+	expectTypeOf<ProviderDeps<never, never, typeof Section>>().branded.toEqualTypeOf<{
+		readonly section: { retries: number; label?: string | undefined };
+	}>();
+	// A module without a section gets no `section` key at all, not an optional one.
+	expectTypeOf<ProviderDeps<never, never>>().not.toHaveProperty("section");
 });

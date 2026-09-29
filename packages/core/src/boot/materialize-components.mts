@@ -52,6 +52,9 @@ import { BootError } from "./types.mjs";
  * was violated in an earlier stage. Missing required key throws a plain Error
  * (programmer error, not a BootError).
  * `optional` keys may be absent; they are included as `undefined`.
+ * `section`, the module's own configuration section parsed at stage 1
+ * (#728), is set as `deps.section` when the module declares one, and the key
+ * is absent otherwise.
  *
  * Per A2-β §5.3 step 3.
  * @internal
@@ -60,6 +63,7 @@ function buildDeps(
 	components: Record<string, unknown>,
 	requires: readonly ComponentKey[],
 	optional: readonly ComponentKey[],
+	section: { readonly value: unknown } | undefined,
 ): Record<string, unknown> {
 	const deps: Record<string, unknown> = {};
 
@@ -74,6 +78,10 @@ function buildDeps(
 
 	for (const key of optional) {
 		deps[key as string] = components[key as string];
+	}
+
+	if (section !== undefined) {
+		deps.section = section.value;
 	}
 
 	return deps;
@@ -206,7 +214,12 @@ export async function materializeComponents(
 
 		// Build the typed deps object from the current working component map.
 		const blueprint = plan.depsBlueprint.get(moduleName);
-		const deps = buildDeps(components, blueprint?.requires ?? [], blueprint?.optional ?? []);
+		const deps = buildDeps(
+			components,
+			blueprint?.requires ?? [],
+			blueprint?.optional ?? [],
+			validatedModule.section,
+		);
 
 		// Invoke the factory (await uniformly — handles both sync and async).
 		let value: unknown;

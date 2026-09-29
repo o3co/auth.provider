@@ -174,6 +174,14 @@ export interface NormalisedModule {
 export interface ValidatedModule {
 	readonly manifest: Module;
 	readonly normalised: NormalisedModule;
+	/**
+	 * The module's own configuration section, parsed by its manifest's
+	 * `section.schema` at stage 1 (#728). Present exactly when the manifest
+	 * declares a section — `value` is what the schema answered, which may be
+	 * `undefined` for a schema that accepts an absent section — and handed to
+	 * every factory of the module as `deps.section`.
+	 */
+	readonly section?: { readonly value: unknown };
 }
 
 /**
@@ -649,13 +657,13 @@ export type BootStage =
 	| "assembleApp";
 
 // ---------------------------------------------------------------------------
-// BootErrorReason — 29 literals, Per A2-β §6.1 (+ #271, #363, module-factory-not-called; #277's reason was folded into #363's by #375; the MFA ADR's D3 removed mfa-partial-wiring; the session-admission ADR's D3 and D7 added three)
+// BootErrorReason — 31 literals, Per A2-β §6.1 (+ #271, #363, module-factory-not-called; #277's reason was folded into #363's by #375; the MFA ADR's D3 removed mfa-partial-wiring; the session-admission ADR's D3 and D7 added three; #728 added two)
 // ---------------------------------------------------------------------------
 
 /**
  * All possible reasons a BootError can be thrown. Each literal corresponds to
  * one validation or runtime failure the boot planner can detect. There are
- * exactly 29 reasons.
+ * exactly 31 reasons.
  *
  * Per A2-β §6.1. Extended by issue #101 (federation-stores-incomplete), the
  * OIDC discovery aggregator
@@ -664,7 +672,8 @@ export type BootStage =
  * reason into), and module-factory-not-called (a `modules` entry that is the
  * factory rather than the manifest it builds), and the session-admission
  * ADR's D3 and D7 (session-requirement-kind-guarded,
- * session-requirements-undeclared, session-requirement-missing).
+ * session-requirements-undeclared, session-requirement-missing), and #728's
+ * module sections (reserved-component-key, module-section-path-invalid).
  */
 export type BootErrorReason =
 	| "module-factory-not-called"
@@ -695,10 +704,12 @@ export type BootErrorReason =
 	| "component-absence-undeclared"
 	| "session-requirement-kind-guarded"
 	| "session-requirements-undeclared"
-	| "session-requirement-missing";
+	| "session-requirement-missing"
+	| "reserved-component-key"
+	| "module-section-path-invalid";
 
 // ---------------------------------------------------------------------------
-// Per-reason *Details interfaces — one per BootErrorReason, 30 total, Per A2-β §6.1 (+ #271, #363, module-factory-not-called, the session-admission ADR)
+// Per-reason *Details interfaces — one per BootErrorReason, 31 total, Per A2-β §6.1 (+ #271, #363, module-factory-not-called, the session-admission ADR, #728)
 // ---------------------------------------------------------------------------
 
 /**
@@ -876,12 +887,52 @@ export interface InvalidRouteAdvertisementPathDetails {
 	readonly identityKind: "missing-leading-slash";
 }
 
-/** Per A2-β §6.1. */
+/**
+ * A module that declares its own configuration section and also requires or
+ * optionally reads a component under the key the section is set on (#728):
+ * `section`. Its deps would carry both under one name, the section shadowing
+ * the slot. A component named `section` is otherwise an ordinary slot — a
+ * module without a section may provide or read one, and a host may bootstrap
+ * or override one — so only this module is refused.
+ */
+export interface ReservedComponentKeyDetails {
+	readonly reason: "reserved-component-key";
+	readonly componentKey: string;
+	readonly source: "module-requires" | "module-optional";
+	readonly module: string;
+}
+
+/**
+ * A manifest's `section.at` that is not a dot-separated path of non-empty
+ * keys (#728): `""`, `"a..b"`, `".a"`, `"a."` — or not a string at all. Such
+ * a path names no section anyone wrote.
+ */
+export interface ModuleSectionPathInvalidDetails {
+	readonly reason: "module-section-path-invalid";
+	readonly module: string;
+	/** The `at` the manifest wrote. */
+	readonly at: unknown;
+}
+
+/**
+ * Per A2-β §6.1. Thrown by either of stage 1's two parses: the composed
+ * schema over the whole configuration, or — once that passed — the modules'
+ * own sections (#728), each parsed by its manifest's `section.schema`.
+ */
 export interface ConfigValidationFailedDetails {
 	readonly reason: "config-validation-failed";
-	/** Verbatim Zod issues from the failed parse. */
+	/**
+	 * The Zod issues from the failed parse. A section's issues are the
+	 * schema's own with the section's path in front, so each `path` is the
+	 * path in the configuration the operator wrote.
+	 */
 	readonly issues: readonly z.ZodIssue[];
-	/** Modules whose configSchema participated in the composed schema. */
+	/**
+	 * The composed parse: the modules whose configSchema participated, with
+	 * no `schemaPath`. A section's parse: the modules whose section was
+	 * refused, each with `schemaPath`, the dot-separated path its section is
+	 * read at.
+	 */
 	readonly modules: readonly { readonly module: string; readonly schemaPath?: string }[];
 }
 
@@ -1131,8 +1182,9 @@ export interface SessionRequirementMissingDetails {
  * (discovery-document-invalid), #271 (replica-unsafe-adapter), #363
  * (component-absence-undeclared), module-factory-not-called and the
  * session-admission ADR's three (session-requirement-kind-guarded,
- * session-requirements-undeclared, session-requirement-missing) — one member
- * per `BootErrorReason`, 29 in all.
+ * session-requirements-undeclared, session-requirement-missing) and #728's two
+ * (reserved-component-key, module-section-path-invalid) — one member per
+ * `BootErrorReason`, 31 in all.
  */
 export type BootErrorDetails =
 	| ModuleFactoryNotCalledDetails
@@ -1163,7 +1215,9 @@ export type BootErrorDetails =
 	| ComponentAbsenceUndeclaredDetails
 	| SessionRequirementKindGuardedDetails
 	| SessionRequirementsUndeclaredDetails
-	| SessionRequirementMissingDetails;
+	| SessionRequirementMissingDetails
+	| ReservedComponentKeyDetails
+	| ModuleSectionPathInvalidDetails;
 
 // ---------------------------------------------------------------------------
 // BootError class — Per A2-β §6.1
