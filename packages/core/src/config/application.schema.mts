@@ -1917,8 +1917,8 @@ export const fullSectionsSchema = z.object({
 	// without a top-level entry `AppConfigSchema.parse(...)` strips the key
 	// before the module's own `configSchema` sees it, and the namespace the
 	// redis README documents is silently the default. The default lives in
-	// the module. `reference-conf-drift.test.mts` is what keeps the next
-	// section from being forgotten the same way.
+	// the module. Since #728 boot's composed parse strips nothing, so the
+	// next section cannot be forgotten this way.
 	redisDeviceCodeStore: z
 		.object({
 			keyPrefix: z.string().optional(),
@@ -2038,8 +2038,8 @@ export const fullSectionsSchema = z.object({
 		})
 		.optional(),
 	// #495: the last two `redis*` namespaces without an entry here, found by
-	// `module-config-key-parity.test.mts` rather than by an operator — which
-	// is the point of that test. Presence-only, defaults in the modules.
+	// a guard rather than by an operator. Presence-only, defaults in the
+	// modules.
 	redisChallengeStore: z
 		.object({
 			keyPrefix: z.string().optional(),

@@ -14,39 +14,35 @@
  * limitations under the License.
  */
 
-import { readdirSync } from "node:fs";
-import { join, relative } from "node:path";
+import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseFile } from "@o3co/ts.hocon";
-import { validate } from "@o3co/ts.hocon/zod";
 import { describe, expect, it } from "vitest";
-import { AppConfigSchema } from "#/config/application.schema.mjs";
+import { readTransitionalConfig, TransitionalConfigSchema } from "#/config/composed.mjs";
 
 /**
- * #472 — `AppConfigSchema` must not strip a single path the shipped defaults
- * carry.
+ * #472 — core's `reference.conf` holds only what core's schema declares.
  *
- * The schema is a strip-mode `z.object`: a key it does not declare is dropped
- * at parse time, silently, before any module's own `configSchema` runs. That
- * has now bitten seven times over — `redisSessionStores` (MIN-3),
- * `redisRefreshTokenFamilyStore` (D-2 v2), `redisCodeRepository` (OR-9),
- * `redisFederationTokenStore` (#456), `redisDeviceCodeStore` and
- * `oauth.deviceAuthorization` (#472), `redisRateLimiter` (#495) and
- * `oauth.mtls` / `oauth.dpop` / `webauthn` (#496) — each found by an operator
- * whose documented override did nothing. Every fix declared the one missing
- * section and left the mechanism in place.
+ * Core's schema was a strip-mode `z.object` that composition roots parsed
+ * with before `createApp`, and a key it did not declare was dropped, silently,
+ * before any module's own `configSchema` ran. That bit seven times over —
+ * `redisSessionStores` (MIN-3), `redisRefreshTokenFamilyStore` (D-2 v2),
+ * `redisCodeRepository` (OR-9), `redisFederationTokenStore` (#456),
+ * `redisDeviceCodeStore` and `oauth.deviceAuthorization` (#472),
+ * `redisRateLimiter` (#495) and `oauth.mtls` / `oauth.dpop` / `webauthn`
+ * (#496) — each found by an operator whose documented override did nothing.
  *
- * This resolves `reference.conf` the way the standalone does, runs it through
- * the schema, and diffs the key trees: any path the resolved HOCON has that
- * the parsed config lacks is a section the next module forgot to declare, and
- * it fails here by name rather than in production by omission.
+ * Since #728 nothing strips: a composition root hands `createApp` what it
+ * resolved, and boot's one composed parse lays each schema's output over
+ * what was written, writing every loaded module's section back at its path
+ * (`boot/__tests__/composed-parse.test.mts`; across every package, the
+ * full-set composition in `tools/composition`). Each package checks its own
+ * `reference.conf` against its modules' sections (`packageReferenceProblems`).
  *
- * #496: every package that ships defaults gets the same treatment, in the
- * chained shape a composition root actually assembles (`withFallback` down to
- * core's). Core's own file could only ever cover core's own sections, and
- * `oauth.mtls`, `oauth.dpop` and `webauthn` ship their defaults from the
- * packages that own them — so the sections most likely to be forgotten here
- * were exactly the ones the original diff could not see.
+ * What stays here is core's own file against core's own schema: resolved and
+ * parsed with the transitional base, with nothing laid back over it, any path
+ * the file has and the parse lacks is a default core ships that core's
+ * schema does not declare — one no reader is sure to see.
  */
 
 const REFERENCE_CONF_PATH = fileURLToPath(
@@ -54,21 +50,6 @@ const REFERENCE_CONF_PATH = fileURLToPath(
 );
 
 const REPO_ROOT = fileURLToPath(new URL("../../../../../", import.meta.url));
-
-/**
- * Every `reference.conf` shipped by a workspace under `packages/`, found by
- * looking rather than by a list: a new package's defaults join this diff
- * without anyone remembering to add them.
- */
-function shippedReferenceConfs(dir: string, found: string[] = []): string[] {
-	for (const entry of readdirSync(dir, { withFileTypes: true })) {
-		if (entry.name === "node_modules" || entry.name === "dist") continue;
-		const full = join(dir, entry.name);
-		if (entry.isDirectory()) shippedReferenceConfs(full, found);
-		else if (entry.name === "reference.conf") found.push(full);
-	}
-	return found.sort();
-}
 
 /** The three substitutions `reference.conf` cannot validate without. */
 const REQUIRED_ENV = {
@@ -92,20 +73,6 @@ function collectPaths(tree: unknown, prefix = ""): string[] {
 	});
 }
 
-/**
- * Only the dotted paths that carry a value. Branches are excluded because two
- * files sharing a branch (`oauth`, say) is how HOCON layering is meant to
- * work; two files setting the same leaf is the case where a merge order
- * decides which value an operator gets.
- */
-function collectLeafPaths(tree: unknown, prefix = ""): string[] {
-	if (!isPlainObject(tree)) return [];
-	return Object.entries(tree).flatMap(([key, value]) => {
-		const path = prefix === "" ? key : `${prefix}.${key}`;
-		return isPlainObject(value) ? collectLeafPaths(value, path) : [path];
-	});
-}
-
 function hasPath(tree: unknown, path: string): boolean {
 	let cursor: unknown = tree;
 	for (const segment of path.split(".")) {
@@ -115,10 +82,10 @@ function hasPath(tree: unknown, path: string): boolean {
 	return true;
 }
 
-describe("core's reference.conf survives AppConfigSchema without losing a path (#472)", () => {
-	const raw = parseFile(REFERENCE_CONF_PATH, { env: REQUIRED_ENV });
-	const resolved = raw.toObject();
-	const parsed = validate(raw, AppConfigSchema);
+describe("core's reference.conf holds only what core's schema declares (#472)", () => {
+	const resolved = parseFile(REFERENCE_CONF_PATH, { env: REQUIRED_ENV }).toObject();
+	// The base alone, stripping what it does not declare: nothing laid back over it.
+	const parsed = TransitionalConfigSchema.parse(resolved);
 
 	it("resolves to a non-trivial tree, so the diff below is over something", () => {
 		const paths = collectPaths(resolved);
@@ -127,89 +94,12 @@ describe("core's reference.conf survives AppConfigSchema without losing a path (
 		expect(paths).toContain("redisFederationTokenStore.keyPrefix");
 	});
 
-	it("strips no path the shipped defaults carry", () => {
+	it("ships no path core's schema does not declare", () => {
 		const stripped = collectPaths(resolved).filter((path) => !hasPath(parsed, path));
-		// A path listed here is a section `reference.conf` ships that
-		// `AppConfigSchema` does not declare. Declare it — presence-only, like
-		// the `redis*` sections in `fullSectionsSchema` — rather than adding it
-		// to an allowlist here.
-		expect(stripped).toEqual([]);
-	});
-});
-
-describe("every shipped reference.conf survives AppConfigSchema (#496)", () => {
-	const confPaths = shippedReferenceConfs(join(REPO_ROOT, "packages"));
-
-	// The chain a composition root assembles: core's defaults at the bottom,
-	// each package's own `reference.conf` layered over them. `a.withFallback(b)`
-	// keeps `a` where both define a path (the direction `app.mts` relies on), so
-	// the accumulated config is the FALLBACK argument here — the file that owns
-	// a section wins for the keys in it, which is the reading each package's
-	// README documents for its own defaults.
-	//
-	// No two shipped files define the same leaf — asserted below rather than
-	// assumed — so the merge is the union of every shipped default and the
-	// order cannot quietly pick a winner. The order is still written down, so
-	// that stays a property of the files rather than of this reduce.
-	const chained = confPaths
-		.filter((path) => path !== REFERENCE_CONF_PATH)
-		.reduce(
-			(config, path) => parseFile(path, { env: REQUIRED_ENV }).withFallback(config),
-			parseFile(REFERENCE_CONF_PATH, { env: REQUIRED_ENV }),
-		);
-	const resolved = chained.toObject();
-	const parsed = validate(chained, AppConfigSchema);
-
-	it("finds the packages that ship defaults", () => {
-		// Named rather than counted: the diff below is the assertion, and a new
-		// package's `reference.conf` joins it without touching this test. These
-		// five are here so a lookup that silently found nothing — a moved file,
-		// a renamed directory — fails as itself rather than as a passing diff
-		// over an empty tree.
-		expect(confPaths.map((path) => relative(REPO_ROOT, path))).toEqual(
-			expect.arrayContaining([
-				"packages/core/config/reference.conf",
-				"packages/device-grant/config/reference.conf",
-				"packages/dpop/config/reference.conf",
-				"packages/mtls/config/reference.conf",
-				"packages/webauthn/config/reference.conf",
-			]),
-		);
-	});
-
-	it("has no leaf two of them both define, so the merge order cannot hide one", () => {
-		const owners = new Map<string, string[]>();
-		for (const path of confPaths) {
-			const tree = parseFile(path, { env: REQUIRED_ENV }).toObject();
-			for (const leaf of collectLeafPaths(tree)) {
-				owners.set(leaf, [...(owners.get(leaf) ?? []), relative(REPO_ROOT, path)]);
-			}
-		}
-		const contested = [...owners]
-			.filter(([, files]) => files.length > 1)
-			.map(([leaf, files]) => `${leaf} — ${files.join(", ")}`);
-		// Two packages shipping a default for the same key is a question about
-		// which one an operator gets, and this diff would answer it silently by
-		// merge order. Decide it where the key lives instead: one package owns
-		// the section, the other reads it.
-		expect(contested).toEqual([]);
-	});
-
-	it("resolves the sections those packages own", () => {
-		const paths = collectPaths(resolved);
-		expect(paths).toContain("oauth.mtls.full-pki.max-chain-depth");
-		expect(paths).toContain("oauth.dpop.replay-store-ttl-seconds");
-		expect(paths).toContain("oauth.deviceAuthorization.enabled");
-		expect(paths).toContain("webauthn.rateLimit.authenticationOptions.limit");
-		expect(paths).toContain("redisRateLimiter.defaultLimit.limit");
-	});
-
-	it("strips no path any shipped default carries", () => {
-		const stripped = collectPaths(resolved).filter((path) => !hasPath(parsed, path));
-		// A path listed here is a section some package ships that
-		// `AppConfigSchema` does not declare, so an operator who overrides it
-		// hands `createApp` a configuration without it. Declare it —
-		// presence-only, like the `redis*` sections in `fullSectionsSchema`.
+		// A path listed here is a section core's `reference.conf` ships that
+		// core's schema does not declare. Declare it where it belongs, or move
+		// the default to the package that owns the section, rather than adding
+		// it to an allowlist here.
 		expect(stripped).toEqual([]);
 	});
 });
@@ -221,14 +111,14 @@ describe("core's reference.conf declares the operator keys a composition layerin
 	// so HOCON substituted its variable nowhere else and `?link=1` answered
 	// `link_unsupported`, and `acrValues` appeared in no reference.conf at all.
 
-	it("substitutes CLIENT_USER_LINK_FEDERATED_IDENTITY_URL and keeps it through AppConfigSchema", () => {
+	it("substitutes CLIENT_USER_LINK_FEDERATED_IDENTITY_URL and keeps it through boot's parse", () => {
 		const raw = parseFile(REFERENCE_CONF_PATH, {
 			env: {
 				...REQUIRED_ENV,
 				CLIENT_USER_LINK_FEDERATED_IDENTITY_URL: "https://store.example/link",
 			},
 		});
-		const parsed = validate(raw, AppConfigSchema) as {
+		const parsed = readTransitionalConfig(raw.toObject()) as {
 			repositories?: { user?: { http?: { linkFederatedIdentityUrl?: unknown } } };
 		};
 		expect(parsed.repositories?.user?.http?.linkFederatedIdentityUrl).toBe(
@@ -237,23 +127,22 @@ describe("core's reference.conf declares the operator keys a composition layerin
 	});
 
 	it("leaves it absent when the variable is unset, so the link seam stays off", () => {
-		const parsed = validate(
-			parseFile(REFERENCE_CONF_PATH, { env: REQUIRED_ENV }),
-			AppConfigSchema,
+		const parsed = readTransitionalConfig(
+			parseFile(REFERENCE_CONF_PATH, { env: REQUIRED_ENV }).toObject(),
 		) as {
 			repositories?: { user?: { http?: Record<string, unknown> } };
 		};
 		expect(parsed.repositories?.user?.http).not.toHaveProperty("linkFederatedIdentityUrl");
 	});
 
-	it("substitutes CLIENT_USER_FIND_SUBJECT_BY_FEDERATED_IDENTITY_URL and keeps it through AppConfigSchema (#613)", () => {
+	it("substitutes CLIENT_USER_FIND_SUBJECT_BY_FEDERATED_IDENTITY_URL and keeps it through boot's parse (#613)", () => {
 		const raw = parseFile(REFERENCE_CONF_PATH, {
 			env: {
 				...REQUIRED_ENV,
 				CLIENT_USER_FIND_SUBJECT_BY_FEDERATED_IDENTITY_URL: "https://store.example/identity",
 			},
 		});
-		const parsed = validate(raw, AppConfigSchema) as {
+		const parsed = readTransitionalConfig(raw.toObject()) as {
 			repositories?: { user?: { http?: { findSubjectByFederatedIdentityUrl?: unknown } } };
 		};
 		expect(parsed.repositories?.user?.http?.findSubjectByFederatedIdentityUrl).toBe(
@@ -267,9 +156,8 @@ describe("core's reference.conf declares the operator keys a composition layerin
 		// operator reads. The coverage list is HOCON's to fill; an empty default
 		// is what a deployment that never declares any gets — and it must reach
 		// the factory as a list, not vanish.
-		const parsed = validate(
-			parseFile(REFERENCE_CONF_PATH, { env: REQUIRED_ENV }),
-			AppConfigSchema,
+		const parsed = readTransitionalConfig(
+			parseFile(REFERENCE_CONF_PATH, { env: REQUIRED_ENV }).toObject(),
 		) as {
 			repositories?: { user?: { http?: Record<string, unknown> } };
 		};
@@ -277,14 +165,15 @@ describe("core's reference.conf declares the operator keys a composition layerin
 		expect(parsed.repositories?.user?.http?.federatedIdentityLookupCoverage).toEqual([]);
 	});
 
-	it("substitutes CLIENT_USER_BEARER_TOKEN and keeps it through AppConfigSchema", () => {
+	it("substitutes CLIENT_USER_BEARER_TOKEN and keeps it through boot's parse", () => {
 		// The credential the http user adapter presents to the Store. Declared
 		// here for the reason the link URL is: a composition layering on this
 		// file alone would otherwise export the variable and send nothing.
 		const token = "0328d706529061d93abd6d826e09ef0f0a1e71a12af813b29e5cd2977b7dc63a";
-		const parsed = validate(
-			parseFile(REFERENCE_CONF_PATH, { env: { ...REQUIRED_ENV, CLIENT_USER_BEARER_TOKEN: token } }),
-			AppConfigSchema,
+		const parsed = readTransitionalConfig(
+			parseFile(REFERENCE_CONF_PATH, {
+				env: { ...REQUIRED_ENV, CLIENT_USER_BEARER_TOKEN: token },
+			}).toObject(),
 		) as {
 			repositories?: { user?: { http?: { bearerToken?: unknown } } };
 		};
@@ -294,9 +183,8 @@ describe("core's reference.conf declares the operator keys a composition layerin
 	it("leaves the Store credential absent when the variable is unset, so no Authorization is sent", () => {
 		// Absent, not blank: a blank token is refused by the adapter, so an
 		// unset variable must not reach it as "".
-		const parsed = validate(
-			parseFile(REFERENCE_CONF_PATH, { env: REQUIRED_ENV }),
-			AppConfigSchema,
+		const parsed = readTransitionalConfig(
+			parseFile(REFERENCE_CONF_PATH, { env: REQUIRED_ENV }).toObject(),
 		) as {
 			repositories?: { user?: { http?: Record<string, unknown> } };
 		};
@@ -304,9 +192,8 @@ describe("core's reference.conf declares the operator keys a composition layerin
 	});
 
 	it("declares oauth.authorize.acrValues, empty, so an unset table resolves to no acr values", () => {
-		const parsed = validate(
-			parseFile(REFERENCE_CONF_PATH, { env: REQUIRED_ENV }),
-			AppConfigSchema,
+		const parsed = readTransitionalConfig(
+			parseFile(REFERENCE_CONF_PATH, { env: REQUIRED_ENV }).toObject(),
 		) as {
 			oauth?: { authorize?: { acrValues?: unknown } };
 		};
@@ -317,7 +204,7 @@ describe("core's reference.conf declares the operator keys a composition layerin
 describe("the WebAuthn origin lists reach the composition root as the string the environment set", () => {
 	// An environment variable carries a list only as one string, so
 	// `WEBAUTHN_ORIGIN=https://a.example,https://b.example` has to survive
-	// HOCON resolution and `AppConfigSchema` intact for
+	// HOCON resolution and core's parse intact for
 	// `webauthnConfigSchema` — which decides the list's shape, as it does for
 	// `CORS_ALLOWED_ORIGINS` here — to split it. The webauthn package's
 	// `module.boot.test.mts` boots from exactly this section; this is the half
@@ -335,7 +222,7 @@ describe("the WebAuthn origin lists reach the composition root as the string the
 		const chained = parseFile(WEBAUTHN_CONF_PATH, { env }).withFallback(
 			parseFile(REFERENCE_CONF_PATH, { env }),
 		);
-		const parsed = validate(chained, AppConfigSchema) as {
+		const parsed = readTransitionalConfig(chained.toObject()) as {
 			webauthn?: Record<string, unknown>;
 		};
 		expect(parsed.webauthn?.origin).toBe("https://a.example,https://b.example");

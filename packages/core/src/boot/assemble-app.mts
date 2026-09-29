@@ -656,10 +656,10 @@ export function assembleApp(
 		const configured = config?.cors?.allowedOrigins;
 		const logger = components.logger as Logger | undefined;
 		// Read through the shared shape normaliser rather than testing for an
-		// array. The config reaching this point has not necessarily been
-		// through `AppConfigSchema`: `validateAndComposeConfig` validates with
-		// the core schema, which does not declare `cors`, and shallow-merges
-		// the raw top-level extras back over the result. So an operator who
+		// array. Through `createApp` the config has been through the schema
+		// core mirrors for `cors` since #728, but `assembleApp` is a stage of
+		// its own, and before that boot parsed only core's sections and laid
+		// the raw top-level extras back over them. So an operator who
 		// configured this the documented way — `${?CORS_ALLOWED_ORIGINS}`, a
 		// comma-separated string, the only shape an environment variable can
 		// carry a list in — handed an `Array.isArray` test a string, and the
