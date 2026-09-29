@@ -164,13 +164,33 @@ const isRecord = (value: unknown): value is Readonly<Record<string, unknown>> =>
 
 /**
  * `value` as a binding a transaction admits, copied to its known fields, or
- * `undefined`: a session binding's `id` is a non-empty string, and a kind
- * this version does not know is none.
+ * `undefined`: a session binding's `id` is a non-empty, well-formed string —
+ * a lone surrogate is no id, since every one encodes as U+FFFD's bytes and
+ * two different ids would compare alike — and a kind this version does not
+ * know is none. `kind` and `id` are read once, so a getter cannot pass the
+ * check and hand over something else; a read that throws (a getter, a proxy
+ * trap, a revoked proxy) is no binding either.
  */
-const bindingOf = (value: unknown): MfaTransactionBinding | undefined =>
-	isRecord(value) && value.kind === "session" && isText(value.id) && value.id.length > 0
-		? { kind: "session", id: value.id }
-		: undefined;
+const bindingOf = (value: unknown): MfaTransactionBinding | undefined => {
+	try {
+		if (!isRecord(value)) return undefined;
+		const { kind, id } = value;
+		return kind === "session" && isText(id) && id.length > 0 && id.isWellFormed()
+			? { kind, id }
+			: undefined;
+	} catch {
+		return undefined;
+	}
+};
+
+/** The binding `holder` carries, read once through {@link bindingOf}; `undefined` when reading it throws. */
+const heldBinding = (holder: unknown): MfaTransactionBinding | undefined => {
+	try {
+		return isRecord(holder) ? bindingOf(holder.binding) : undefined;
+	} catch {
+		return undefined;
+	}
+};
 
 /**
  * Each patch field's rule: the value as the store keeps it — sub-objects
@@ -331,8 +351,8 @@ export function newMfaTransactionRecord(tx: MfaTransaction): MfaTransaction {
 	if (!isCount(tx.sends)) refuse("sends must be a safe non-negative integer");
 	if (!isText(tx.id) || !isText(tx.subject)) refuse("id and subject must be strings");
 	const binding =
-		bindingOf(tx.binding) ??
-		refuse('binding must be { kind: "session", id } with id a non-empty string');
+		heldBinding(tx) ??
+		refuse('binding must be { kind: "session", id } with id a non-empty, well-formed string');
 	if (tx.purpose !== "login" && tx.purpose !== "step_up" && tx.purpose !== "enroll") {
 		refuse("purpose is not a value it admits");
 	}
@@ -394,15 +414,17 @@ export function newMfaTransactionRecord(tx: MfaTransaction): MfaTransaction {
 /**
  * Whether `tx` is bound to `binding` — the whole binding, kind included (#742):
  * a binding of another kind never matches, whatever its id, and neither does
- * one that is not a binding a transaction admits, on either side. The ids are
- * compared in constant time. The one comparison every use of a transaction
- * makes; {@link getBoundMfaTransaction} reads through it.
+ * one that is not a binding a transaction admits, on either side — an id that
+ * is not a well-formed string among them — nor one whose reading throws. Each
+ * side's kind and id are read once, and the ids compared in constant time.
+ * The one comparison every use of a transaction makes;
+ * {@link getBoundMfaTransaction} reads through it.
  */
 export function isMfaTransactionBoundTo(
 	tx: Pick<MfaTransaction, "binding">,
 	binding: MfaTransactionBinding,
 ): boolean {
-	const held = bindingOf(isRecord(tx) ? tx.binding : undefined);
+	const held = heldBinding(tx);
 	const presented = bindingOf(binding);
 	if (held === undefined || presented === undefined) return false;
 	return held.kind === presented.kind && constantTimeStringEqual(held.id, presented.id);
