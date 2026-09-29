@@ -37,10 +37,10 @@
  * `deployment:requirement-bare`, in the fixture) are registered, declared and
  * said at boot here, and refused when the declaration disagrees — the
  * session-admission ADR's D7 through the template's boot — and a password
- * login both interrupt is resumed through each requirement's completion
- * route and established once (D5, its acceptance criterion 2). The step-up
- * flows they could start are the consumers' and the MFA module's suites, not
- * this one.
+ * login that both requirements interrupt is resumed through each one's
+ * completion route and established once (D5, its acceptance criterion 2).
+ * The step-up flows they could start are the consumers' and the MFA
+ * module's suites, not this one.
  *
  * `it.fails` marks a contract the full set breaks today; its entry names the
  * defect, and the fix that mends it turns the case red. An outage case pins

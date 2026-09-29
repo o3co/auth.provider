@@ -36,13 +36,13 @@ another's body limit, or a memory store booting under `deployment.mode =
   switch, their flows, their body limits in both mount orders, and one outage
   per added store under the #685 rule. The two session requirements are
   registered, declared and said at boot, refused when the declaration
-  disagrees, and a password login both interrupt is resumed through each
-  one's completion route and established once (the session-admission ADR's
-  acceptance criterion 2). The fixtures' completion routes are a sketch, not
-  a route to copy: the real one (the MFA package's) sits behind the session's
-  CSRF guard, projects every error it logs, and answers a `RangeError` from
-  `resumePrimary` — a continuation naming a requirement a deploy removed,
-  say — as "log in again".
+  disagrees, and a password login that both requirements interrupt is
+  resumed through each one's completion route and established once (the
+  session-admission ADR's acceptance criterion 2). The fixtures' completion
+  routes are a sketch, not a route to copy: the real one (the MFA package's)
+  sits behind the session's CSRF guard, projects every error it logs, and
+  answers a `RangeError` from `resumePrimary` — a continuation naming a
+  requirement a deploy removed, say — as "log in again".
 - **What it checks on real Redis, under `deployment.mode = "multi"`.** That
   nothing in the full set declares replica-unsafe state, that each added
   memory store is refused at boot by name, and that two replicas on one
