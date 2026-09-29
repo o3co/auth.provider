@@ -22,62 +22,28 @@ import type {
 } from "../../config/application.schema.mjs";
 
 /**
- * Minimal schema-valid config factories for tests that need to satisfy
- * `CoreConfigSchema` or `AppConfigSchema` parse without exercising the
- * HOCON load pipeline.
+ * Minimal schema-valid config factories for tests that parse `CoreConfigSchema`
+ * or `AppConfigSchema` without the HOCON load pipeline. Defaults live only in
+ * `reference.conf` (ADR 2026-04-30), so each call site would otherwise invent
+ * this shape. For production defaults, parse `reference.conf` through the test
+ * harness.
  *
- * These factories return the smallest object shape that passes schema
- * validation; they intentionally diverge from `packages/core/config/
- * reference.conf` for test ergonomics. The deliberate divergences are:
+ * Deliberate divergences from `reference.conf`:
+ * - `session.storage.type` is `"memory"` (`"redis"` there);
+ * - `federations` is `{}` (no built-in `google` block);
+ * - the signing key is HS256 (EdDSA there) with an inline secret that clears
+ *   the entropy floor, so the fixture carries no PEM material; tests of JWKS
+ *   or asymmetric signing build their own key pair;
+ * - `oauth.jwt.issuer` is a fixed test issuer (`${?OAUTH_JWT_ISSUER}` there);
+ * - `repositories.*` carry only `type`;
+ * - `oauth.grants` enables `session`, `authorization_code` and
+ *   `refresh_token` explicitly (`oauthAuthorizationModule` requires
+ *   `enabled === true`) and omits `client_credentials`, as the standalone
+ *   template does.
  *
- * - `session.storage.type` is `"memory"` (hocon defaults to `"redis"`).
- * - `federations` is `{}` (hocon ships a built-in `federations.google`
- *   block with `enabled = false`).
- * - `oauth.jwt.signingKey.local.algorithm` is `"HS256"` (hocon defaults to
- *   `"EdDSA"` since #282). HS256 keeps the fixture free of PEM key material;
- *   tests that exercise the JWKS route or asymmetric signing build their own
- *   key pair.
- * - `oauth.jwt.signingKey.local.secret` carries an inline test secret
- *   (hocon uses `${?OAUTH_JWT_SECRET}` substitution). It clears the #282
- *   entropy floor so the fixture models a valid deployment.
- * - `oauth.jwt.issuer` carries a fixed test issuer (hocon uses
- *   `${?OAUTH_JWT_ISSUER}` substitution). It is required by the schema —
- *   every token this deployment mints is bound to it.
- * - `repositories.{client,user,code}` declare only the discriminator
- *   `type` field; nested adapter-specific fields (`yaml.path`,
- *   `memory.defaultExpiresIn`, …) are omitted because the schema marks
- *   them optional or the adapter-specific factory is not exercised.
- * - `endpoints.client` and `endpoints.authCallback` are omitted because
- *   the schema marks them `.optional()`. Callers exercising those
- *   endpoints' behaviour should add the missing fields per-test.
- * - `oauth.grants` explicitly enables `session`, `authorization_code`, and
- *   `refresh_token` (the three standalone template defaults). These must be
- *   set to `enabled: true` because `oauthAuthorizationModule` uses strict
- *   `=== true` opt-in semantics — `enabled` absent or non-boolean is treated
- *   as not-enabled. Note that `client_credentials` is deliberately omitted —
- *   the factory mirrors the standalone template defaults, where
- *   client_credentials remains off unless the deployment explicitly enables
- *   M2M. `authorization_code` carries no `pkce` sub-object: #273 made PKCE
- *   mandatory and S256-only, so every key that block used to hold is inert
- *   (the resolver warns about a config that still sets one).
- *
- * If you need fixture values that match production defaults, parse
- * `reference.conf` directly via the test harness.
- *
- * Background: per ADR 2026-04-30 (schema-strict defaults from hocon),
- * defaults live exclusively in `reference.conf`. Tests that previously
- * relied on schema-side `.default(X)` to populate bare `{}` inputs must
- * now supply explicit values; these factories provide the canonical
- * minimal shape so each call site does not re-invent it.
- *
- * The factories use `satisfies` against `CoreConfig` / `AppConfig` so
- * the returned object is type-checked against the schema *and* preserves
- * the narrow inferred shape (literal enum values such as `algorithm:
- * "HS256"` are not widened to `string`), so consumer tests can assign
- * the result to typed variables without casts.
- *
- * Each factory returns a fresh, mutable object so callers can apply
- * local overrides without bleeding into siblings.
+ * `satisfies CoreConfig` / `AppConfig` type-checks the result while keeping
+ * literal types, so tests assign it without casts. Each call returns a fresh,
+ * mutable object.
  */
 
 type FullSectionsConfig = z.infer<typeof fullSectionsSchema>;
@@ -94,11 +60,9 @@ export function makeValidCoreConfig() {
 					local: {
 						algorithm: "HS256",
 						kid: "v0",
-						// #282: HS256 secrets must carry >= 32 bytes of key
-						// material. The '.' characters keep this value outside
-						// the base64/base64url alphabets so the UTF-8 reading
-						// (38 bytes) is the one that counts — see
-						// `measureSecretEntropyBytes`.
+						// At least 32 bytes of key material. The '.' characters keep it
+						// out of the base64/base64url alphabets, so the UTF-8 reading
+						// (38 bytes) is the one that counts (`measureSecretEntropyBytes`).
 						secret: "test-hs256-secret.at-least-32-bytes.ok",
 						previousSecrets: [],
 					},
@@ -122,29 +86,18 @@ export function makeValidCoreConfig() {
 				// off unless the deployment explicitly enables M2M.
 			},
 			oidcMode: "oidc-required",
-			// #406: the same move #363 made for `auditSink`, for the two
-			// subject-level revocation slots. Test compositions rarely wire
-			// them, so the fixture declares the capability absent explicitly —
-			// which is also what it is: this fixture has no subject-level
-			// revocation, on purpose. A test exercising the guard itself
-			// removes the key.
-			//
-			// `accessToken` comes along because the schema requires it once the
-			// `revocation` object exists, and `"denylist"` is the reading #277
-			// already gives an omitted key — so this restates the fixture's
-			// behaviour rather than changing it.
+			// Declares both subject-level revocation slots absent: this fixture
+			// has none, on purpose. A test of the declared-absence guard removes
+			// the key. `accessToken` is required once `revocation` exists, and
+			// `"denylist"` is what an omitted key already reads as.
 			revocation: { accessToken: "denylist", subject: "unsupported" },
-			// #330: `oauth.authorize` is gone from the required surface — the
-			// `allowUnmarkedClients` migration flag was removed, and /authorize
-			// enforces the first-party invariant unconditionally.
 		},
-		// The MFA ADR's D19: MFA off, as `reference.conf` and the schema's
-		// default give it. A test of the default removes the key.
+		// MFA off, as `reference.conf` and the schema default give it. A test of
+		// the default removes the key.
 		mfa: { mode: "off" },
-		// The session-admission ADR's D7: what this composition expects of
-		// session admission — nothing — so a createApp test that installs a
-		// consumer of admission states its posture, as every composition must.
-		// A test of the declaration itself removes the key.
+		// This composition expects nothing of session admission, stated because
+		// a createApp test that installs a consumer of admission must state its
+		// posture. A test of the declaration itself removes the key.
 		sessionRequirements: { expected: [] },
 	} satisfies CoreConfig;
 }
@@ -152,8 +105,7 @@ export function makeValidCoreConfig() {
 export function makeValidFullSections() {
 	return {
 		session: {
-			// #282: `session.secret` carries a 256-bit entropy floor enforced
-			// by AppConfigSchema, so the fixture must clear it too.
+			// `session.secret` has a 256-bit entropy floor in AppConfigSchema.
 			secret: "test-session-secret.at-least-32-bytes.ok",
 			name: "__Host-auth.session",
 			maxAge: 3600000,
@@ -173,16 +125,13 @@ export function makeValidFullSections() {
 			code: { type: "memory" },
 		},
 		endpoints: {
-			// `oauthModule.configSchema` requires a non-empty `endpoints.login.url`
-			// because `routes.mts:339` builds the unauthenticated /authorize redirect
-			// from it. Keeping the fixture valid across all v0.5.0 module schemas.
+			// Required by `oauthModule.configSchema`: the unauthenticated
+			// /authorize redirect is built from it.
 			login: { url: "/login" },
 		},
-		// #363: the bundled modules refuse to boot with an unfilled `auditSink`
-		// unless the config declares the capability absent. Test compositions
-		// rarely wire a sink, so the fixture makes the declaration explicitly —
-		// which is also what it is: this fixture has no audit trail, on purpose.
-		// A test exercising the declared-absence guard itself removes this key.
+		// Declares the audit sink absent (this fixture has no audit trail, on
+		// purpose); the bundled modules refuse an unfilled `auditSink` otherwise.
+		// A test of the declared-absence guard removes the key.
 		audit: { sink: { type: "none" } },
 		cors: { allowedOrigins: [] },
 	} satisfies FullSectionsConfig;

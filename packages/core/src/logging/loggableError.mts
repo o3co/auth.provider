@@ -15,101 +15,34 @@
  */
 
 /*
- * `loggableError`: what a log line may carry of an error that came out of a
- * library or a store talking to another system — an allowlist of fields,
- * never the error. An error built from a parsed upstream response carries
- * whatever that response said: an OAuth library puts the token answer it
- * refused on the cause chain, a JSON parser quotes the text it could not
- * parse, a Redis reply echoes the command it refused, and ioredis puts that
- * command's arguments — a token record, for a store write under
- * `allow-plaintext` — on the error. What the projection does, exactly:
+ * `loggableError`: what a log line may carry of an error from a library or a
+ * store talking to another system. An allowlist of fields, never the error:
+ * such an error carries whatever the peer said (an OAuth library puts the
+ * refused token answer on the cause chain, a JSON parser quotes its input, a
+ * Redis reply echoes the refused command, ioredis puts the command's
+ * arguments, e.g. a plaintext token record, on the error).
  *
- * - It is plain data, and what a logger is handed is what the line carries.
- *   It has no `message`: a serializer takes a value with a string `message`
- *   for an Error and rewrites it — pino's err serializer folds each `cause`
- *   into one message and stack and writes none of the cause's fields, and
- *   writes the name over `type`. Every such serializer (pino's `err` and
- *   `errWithCause` among them) hands anything else through untouched, so
- *   under pino's defaults, the standalone template's logger, `consoleLogger`
- *   or any other, every field below reaches the line, at every level.
- * - `detail`: the error's message, capped at 256 characters, with the
- *   known quoting shapes removed — `detail` (RFC 7807's name for an
- *   occurrence's human-readable explanation) rather than `message`, for the
- *   reason above. A SyntaxError's message is dropped (V8's JSON.parse and
- *   body-parser quote the input); only ` at position N` survives, as
- *   `position`, N at most ten digits and none from a longer number. A
- *   YAMLException's is dropped whole (js-yaml quotes the lines around the
- *   fault). Redis's `, with args beginning with: …` is cut from any
- *   message. Other text a
- *   peer wrote into a message is kept — the projection cannot tell it from
- *   this process's own — but on one line: every character that breaks a
- *   line or reorders it on screen ({@link lineSafeText}: C0, DEL, C1,
- *   U+2028/U+2029, the directional marks, the bidi embedding, override and
- *   isolate controls) is
- *   replaced by `?`. `"`, `\` and any other character stay.
- * - `error_description`: the one peer-written string kept on purpose — an
- *   operator needs "Token has been expired or revoked." — and only its first
- *   line (split on CRLF or LF), when that line is within RFC 6749 §5.2's
- *   character set (`%x20-21 / %x23-5B / %x5D-7E`), cut at the start of the
- *   space-delimited word that holds its first run of twenty or more
- *   characters from `[A-Za-z0-9._~+/=-]`, and trimmed; omitted when nothing
- *   is left; capped at 256.
- * - `stack`: the frames, never the header. The stack must start with the
- *   whole header V8 writes — `name: message`, Node's `name [code]:
- *   message`, and for an empty message also `name` or `name [code]` — ending its
- *   line, and the header is dropped; a stack that does not (a message
- *   rewritten after V8 formatted it, a message that is not a string) gives
- *   no stack. After it, the unbroken run of lines starting with four spaces
- *   and `at ` is kept (it ends at the first line that is not one); the
- *   first ten, joined by `\n`, then cut at 2048 characters. Absent when no
- *   frame is left or `stack` cannot be read. See `framesOf` for what can
- *   still pass for a frame.
- * - Also kept: `name`; a string or numeric `code`; an integer `status`; a
- *   string `type`; an `error` within §5.2's set; `response: { status,
- *   contentType }` for a Response on the cause or on `response`; and the
- *   Error causes, the same way, three deep. Every string is on one line —
- *   the filter `detail` gets — and capped at 256 (the stack at 2048), a cut
- *   never falling inside a surrogate pair.
- * - Closed-set fields a store's or a client's error records, kept because
- *   their shape cannot hold free text: an own `reason` that is a code —
- *   lowercase words joined by `_` or `-`, at most 64 characters
- *   (`unreachable`, `expired-at-issue`) — and an own `<word>Status` field
- *   holding an HTTP status, 100–599, at most four of them (`storeStatus`: an
- *   upstream's answer an error records beside its own `status`, which
- *   Express reads as this server's).
- * - An AggregateError's members (any error's `errors` array): of its first
- *   {@link LOGGED_AGGREGATE_MAX_ERRORS}, the Errors, projected as causes are
- *   and within the same three levels, as `aggregateErrors` — the name pino
- *   writes a raw AggregateError's members under, so one query finds both —
- *   and how many members are not among them, as `aggregateErrorsOmitted`.
- *   Neither field when none of those five is an Error.
- * - The command a store's error answered, by name alone: `command: { name }`
- *   from ioredis's `command: { name, args }` when the name is a token of at
- *   most 32 letters, digits and `_`, or two joined by one `.` (a module's
- *   `JSON.SET`) — which Redis command failed, and never
- *   its arguments. Kept at ioredis's own path, so a query on
- *   `err.command.name` reads a raw and a projected line alike.
- * - A budget for the line: at most {@link LOGGED_MAX_PROJECTIONS}
- *   projections, the error and its causes and members together, taken
- *   nearest first (breadth first: the error's own cause and members before
- *   any of theirs). Every cut shows, whether the budget or the depth limit
- *   made it: a member left out counts in `aggregateErrorsOmitted`, and a
- *   cause left out leaves `causeOmitted: true`.
- * - Never kept: a cause or a member that is not an Error, any other field
- *   (a command's `args`, `body`, `buffer`), and anything of a thrown value that is
- *   not an Error but its `typeof`, as `thrown`.
- * - Printed whole: each projection carries a non-enumerable
- *   `util.inspect.custom` that prints it {@link LOGGED_PRINT_DEPTH} levels
- *   deep rather than Node's default two, so `consoleLogger` (and anything
- *   else that inspects it) shows its causes and members instead of
- *   `[Object]`. Only a projection is printed so — any other object a caller
- *   logs keeps Node's default depth. The hook is a symbol, so JSON, pino and
- *   a spy never see it, and the projection is still not error-like.
- * - It never throws: an error from another realm counts; a throwing getter
- *   drops its field; a value the Error check cannot inspect reads as a
- *   non-Error.
- *
- * No state.
+ * - The projection is plain data with no `message`: a serializer (pino's `err`,
+ *   `errWithCause`) takes a value with a string `message` for an Error and
+ *   rewrites it, dropping the causes' fields; anything else passes through, so
+ *   every kept field reaches the line under any logger. Hence `detail`.
+ * - Peer text in a message cannot be told from this process's own, so it is
+ *   kept, but on one line ({@link lineSafeText}'s filter) and capped; messages
+ *   known to quote their input are dropped. `error_description` is the one
+ *   peer string kept on purpose, with token-shaped runs cut.
+ * - Kept: the fields of {@link LoggableError}, for the error, its Error causes
+ *   and AggregateError members, three deep and at most
+ *   {@link LOGGED_MAX_PROJECTIONS} projections, nearest first. Closed-set
+ *   fields (a `reason` code, `<word>Status`, a command's name) are kept
+ *   because their shape cannot hold free text. Every cut is marked
+ *   (`causeOmitted`, `aggregateErrorsOmitted`).
+ * - Never kept: a non-Error cause or member, any other field (a command's
+ *   `args`, `body`, `buffer`), and of a thrown non-Error anything but its
+ *   `typeof`.
+ * - Each projection carries a non-enumerable `util.inspect.custom` printing it
+ *   {@link LOGGED_PRINT_DEPTH} levels deep; JSON and pino never see it.
+ * - Never throws: a foreign-realm error counts, a throwing getter drops its
+ *   field, a value the Error check cannot inspect reads as a non-Error.
  */
 
 import { type InspectOptions, inspect } from "node:util";
@@ -296,18 +229,14 @@ const cutAt = (text: string, length: number): string => {
 const LINE_SAFE_MIN_LENGTH = 4;
 
 /**
- * Text a peer wrote, as a log line carries it: on one line — every character
- * that breaks a line or reorders it on screen (C0, DEL, C1, U+2028/U+2029,
- * the directional marks, the bidi embedding, override and isolate controls)
- * replaced by `?` — and cut at `maxLength` characters (256 by default), the
- * cut marked with `...` and never falling inside a surrogate pair. A
- * `maxLength` that is not an integer of at least 4 — room for one character
- * and the mark — is a RangeError.
- * The filter `loggableError` applies to a message, for a package that logs
- * peer text that is not an error's: a certificate's subject, a URL a
- * certificate names, a responder's Content-Type. Not RFC 6749's set
- * (`auditErrorText`): a non-ASCII name, `"` and `\` stay legible. A value
- * that is not a string answers `undefined`.
+ * Peer-written text as a log line carries it: every character that breaks a
+ * line or reorders it on screen (C0, DEL, C1, U+2028/U+2029, the directional
+ * marks, the bidi controls) replaced by `?`, and cut at `maxLength`
+ * characters (256 by default) with a `...` mark, never inside a surrogate
+ * pair. For peer text that is not an error's (a certificate subject, a URL, a
+ * Content-Type). Unlike RFC 6749's set (`auditErrorText`), non-ASCII, `"` and
+ * `\` stay legible. A non-string answers `undefined`; a `maxLength` that is
+ * not an integer of at least 4 (one character and the mark) is a RangeError.
  */
 export function lineSafeText(text: string, maxLength?: number): string;
 export function lineSafeText(text: unknown, maxLength?: number): string | undefined;
@@ -337,17 +266,14 @@ const OAUTH_ERROR_TEXT = /^[\x20\x21\x23-\x5B\x5D-\x7E]+$/;
 const TOKEN_RUN = /[A-Za-z0-9._~+/=-]{20,}/;
 
 /**
- * An upstream's `error_description`: its first line — Azure AD puts a Trace
- * ID, a Correlation ID and a timestamp on CRLF-separated lines after the
- * AADSTS one — when that line is within RFC 6749 §5.2's character set, cut
- * at the start of the word that holds its first token-shaped run, and
- * trimmed. The word goes whole, so no part of the token and no fragment of
- * the word is left: "Invalid refresh token: <the token>" (or "…: abc:<the
- * token>") keeps "Invalid refresh token:", AADSTS700016 keeps "Application
- * with identifier", a redirect URI named by Azure AD or Okta goes with its
- * `https:`. §5.2's set has no tab, so a word ends at a space. Omitted when
- * nothing is left. The one peer-written string the projection keeps,
- * because an operator needs it to tell a revoked grant from a broken client.
+ * An upstream's `error_description`: its first line (Azure AD appends trace
+ * and correlation IDs on further CRLF lines), when within RFC 6749 §5.2's
+ * character set, cut at the start of the word holding its first token-shaped
+ * run, and trimmed. The whole word goes, so no fragment of the token remains:
+ * "Invalid refresh token: <the token>" keeps "Invalid refresh token:". §5.2's
+ * set has no tab, so a word ends at a space. Omitted when nothing is left.
+ * Kept because an operator needs it to tell a revoked grant from a broken
+ * client.
  */
 const descriptionOf = (value: unknown): string | undefined => {
 	if (typeof value !== "string") return undefined;
@@ -456,37 +382,24 @@ const headerEnd = (stack: string, name: string, code: unknown, message: string):
 };
 
 /**
- * The frames of an error's `stack`, and nothing of the header ahead of them
- * — pinned by the `stack` vectors in `__tests__/loggableError.test.mts`:
+ * The frames of an error's `stack` and nothing of its header, pinned by the
+ * `stack` vectors in `__tests__/loggableError.test.mts`:
  *
- * 1. `stack` or `message` not a string (or its read threw): no stack.
- * 2. The header is what V8 writes from the error's `name` (a non-string one
- *    compares as `"Error"`), a string `code` and `message`: `name:
- *    message`, or Node's `name [code]: message`; for an empty message, also
- *    `name` or `name [code]`. The stack must start with one of them, and
- *    the header must end its line (a line break or the end of the stack
- *    follows it). The message is the untrusted part: matched whole, from
- *    the start, a message line shaped like a frame goes with the header —
- *    never counted in lines. A stack that starts otherwise (the message
- *    rewritten after V8 formatted the stack, which it does on the first
- *    read of `stack`, to text found inside the name, part-way along the
- *    header's line, or nowhere in it) means no stack, because the header can
- *    no longer be told from the frames.
- * 3. After the header, the unbroken run of `    at ` lines starting at the
- *    first such line is kept, and it ends at the first line that is not one
- *    — so a section appended after the frames ("Caused by: …") is not kept,
- *    frame-shaped lines in it included.
- * 4. The first {@link LOGGED_STACK_MAX_FRAMES} of the run, joined by `\n`,
- *    then cut at {@link LOGGED_STACK_MAX_LENGTH} characters. No frame: no
- *    stack.
+ * 1. `stack` or `message` not a string: no stack.
+ * 2. The stack must start with the header V8 writes ({@link headerEnd}),
+ *    ending its line. The message is the untrusted part and is matched whole,
+ *    so a frame-shaped message line goes with the header. A stack that starts
+ *    otherwise (message rewritten after V8 formatted the stack) gives no
+ *    stack: header and frames can no longer be told apart.
+ * 3. After the header, the unbroken run of `    at ` lines is kept; anything
+ *    appended after it ("Caused by: …") is not.
+ * 4. At most {@link LOGGED_STACK_MAX_FRAMES} frames, joined by `\n`, cut at
+ *    {@link LOGGED_STACK_MAX_LENGTH}. No frame: no stack.
  *
- * What the text cannot show, and so could still pass for frames:
- * - a message rewritten, after the stack was formatted, to a leading part
- *   of itself that ends at one of its own line breaks: the header V8 would
- *   write for the new message, and the old message's later lines follow it
- *   — its `    at `-shaped lines, if any, read as frames;
- * - a `stack` assigned by hand with a frame-shaped line that carries data:
- *   it is a frame by every test this can make.
+ * Can still pass for frames: a message rewritten after formatting to a prefix
+ * of itself ending at one of its line breaks (its later `    at `-shaped lines
+ * then follow a valid header), and a hand-assigned `stack` with a
+ * frame-shaped line that carries data.
  */
 const framesOf = (
 	stack: unknown,
@@ -623,16 +536,10 @@ export function uncappedDetail(err: unknown): string | undefined {
 }
 
 /**
- * Project an error onto the fields a log line may carry — the rules are the
- * file header's.
- *
- * A logger that prints the whole error writes what its peer said to the
- * log. Before this projection both shipped paths did so for a store error:
- * pino's err serializer copies every enumerable property of an error —
- * ioredis's `command.args` included — and `consoleLogger` hands the error to
- * `console.*`, whose inspection prints them. A deployment chooses its logger,
- * so a call site that logs a library's or a store's error hands the logger
- * this instead of the error, and every logger writes it as it is. It never
+ * Project an error onto the fields a log line may carry (rules in the file
+ * header). Log this, never the error, for a library's or a store's error:
+ * pino's err serializer copies every enumerable property (ioredis's
+ * `command.args` included) and `console.*` inspection prints them. Never
  * throws.
  */
 export function loggableError(err: unknown): LoggableError {

@@ -15,65 +15,25 @@
  */
 
 /**
- * In-process `DeviceCodeStore`. Development and single-replica only.
+ * In-process `DeviceCodeStore`. Development and single-replica only: a device
+ * polling a replica other than the one holding its record is told its code
+ * does not exist (declared replica-unsafe on the module manifest).
  *
- * Declared replica-unsafe on its module's manifest (`replicaSafety`, #455): a
- * device that polls a different replica than the one holding its record is
- * told its code does not exist, and the human's approval lands on a replica
- * the device may never reach again.
+ * Methods run without interleaving on the event loop, but keep the shape a
+ * Redis adapter must reproduce atomically in a script.
  *
- * The atomicity the port demands is free here — JavaScript's single-threaded
- * event loop means the body of each method runs without interleaving — but
- * the *shape* still matters, because it is the shape a Redis adapter has to
- * reproduce in a script rather than discover it needed to.
+ * Bounded three ways: every read path drops an expired record it finds;
+ * `create` runs an amortized sweep every `sweepInterval` creates; `maxEntries`
+ * caps the resident set. The optional timer only adds zero-lag reclamation.
  *
- * ### Bounded, three ways
- *
- * The first cut was unbounded in practice: the module built it with no
- * `sweepIntervalMs`, so the timer was null; `findPendingByUserCode`,
- * `approve` and `deny` answered "expired" without dropping the record; only
- * `poll` reclaimed. A device that asks for a code and never polls — or a
- * caller who asks for ten thousand — left records resident until exit.
- *
- * Same fix the access-token denylist got (#293 item 6), plus the cap the
- * rate limiter already had:
- *
- *   1. every read path drops an expired record it finds, so the ordinary
- *      traffic of a verification page reclaims as it goes;
- *   2. `create` — the one operation that grows the map — pays for the growth
- *      with an amortized sweep every `sweepInterval` creates, so a record
- *      nobody asks about again is reclaimed within one interval;
- *   3. `maxEntries` caps the resident set outright. At the cap, expired
- *      records are reclaimed first; if every resident record is still live,
- *      `create` refuses with `DeviceCodeStoreError { reason: "full" }`
- *      rather than evicting one.
- *
- * The optional timer stays for deployments that want zero-lag reclamation;
- * it is no longer what bounds the store.
- *
- * ### Why the cap refuses instead of evicting (#445)
- *
- * The first cut evicted the live record closest to expiry, on the argument
- * that it was the least harm — the one about to be reclaimed anyway. Under
- * the flood that actually reaches the cap that argument inverts: every
- * attacker record carries the newest expiry, so the records closest to
- * expiry are precisely the pre-existing ones — a human's pending approval,
- * an approval a device has not yet polled for — and all of them were
- * evicted before a single one of the attacker's. Roughly seventeen IPs at
- * the default 60/min reach 10 000 inside one 600 s code lifetime.
- *
- * The sibling caps evict because what they hold is reconstructible: an
- * evicted rate-limit bucket is a counter that resets, an evicted CRL cache
- * entry is a fetch that repeats. A device authorization is neither —
- * nothing can re-derive an approval the user already gave — so the answer
- * is the fail-closed one every other refusal in this repository gives: keep
- * what was issued, refuse what is new. The refused `create` comes from
- * `POST /oauth/device_authorization`, which sits behind the per-IP
- * rate-limit guard, so the flooder is the one told to come back later and a
- * legitimate device retries into a slot the next expiry frees. Evicting
- * same-`clientId` records first was considered and rejected: device clients
- * are public (RFC 8628 §5.6), so a flood is sent *as* the legitimate client,
- * and that policy would evict its real users first all the same.
+ * At the cap, `create` refuses (`DeviceCodeStoreError { reason: "full" }`)
+ * rather than evicting. Under a flood every attacker record carries the newest
+ * expiry, so evicting "closest to expiry" drops legitimate pending approvals
+ * first, and unlike a rate-limit bucket or a cache entry an approval cannot be
+ * reconstructed. The refused request sits behind the per-IP rate limit, so the
+ * flooder is the one told to retry. Evicting by `clientId` does not help:
+ * device clients are public (RFC 8628 §5.6), so a flood arrives as the
+ * legitimate client.
  */
 
 import { isStorableExpiry } from "../adapters/expiry.mjs";
@@ -245,18 +205,16 @@ export const createMemoryDeviceCodeStore = (
 				});
 			}
 			createsSinceSweep += 1;
-			// At most one O(n) pass per create (Copilot on #451). The amortized
-			// cadence and the cap both want the same thing — expired records
-			// gone before anything else is decided — and a second pass straight
-			// after the first has nothing left to find. The interval therefore
-			// counts creates since the last sweep, whichever reason ran it.
+			// At most one O(n) pass per create: the cadence and the cap both want
+			// expired records gone first, so the interval counts creates since the
+			// last sweep, whichever reason ran it.
 			if (createsSinceSweep >= sweepInterval || byDeviceCode.size >= maxEntries) {
 				createsSinceSweep = 0;
 				sweep(Date.now());
 			}
 			if (byDeviceCode.size >= maxEntries) {
-				// Every resident record is live. See "Why the cap refuses
-				// instead of evicting" in the file header (#445).
+				// Every resident record is live: refuse rather than evict (see the
+				// file header).
 				throw new DeviceCodeStoreError({
 					reason: "full",
 					message:
@@ -268,9 +226,8 @@ export const createMemoryDeviceCodeStore = (
 				deviceCode: input.deviceCode,
 				userCode: input.userCode,
 				clientId: input.clientId,
-				// Truthiness, as before #626: an untyped caller's `null`, `""` or
-				// `false` is "no scope", as the Redis store reads it, rather than a
-				// value every reader must guard. An array — empty included — is kept.
+				// Truthiness: an untyped caller's `null`, `""` or `false` is "no
+				// scope", as the Redis store reads it. An array, empty included, is kept.
 				requestedScope: input.requestedScope ? input.requestedScope : undefined,
 				expiresAtMs: input.expiresAtMs,
 				intervalSeconds: input.intervalSeconds,

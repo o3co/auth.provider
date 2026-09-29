@@ -61,7 +61,7 @@ export interface JwtAssertionVerifierOptions {
 	/**
 	 * Clock skew for `exp` / `nbf`, in seconds. Default 60. An assertion past
 	 * its `exp` inside the tolerance verifies, but the jwt-bearer grant
-	 * refuses it: no lifetime is left for a token to inherit (auth.proxy#90).
+	 * refuses it: no lifetime is left for a token to inherit.
 	 */
 	readonly clockToleranceSeconds?: number;
 	/** Defaults to reading `sub`. */
@@ -71,48 +71,23 @@ export interface JwtAssertionVerifierOptions {
 }
 
 /**
- * The vendor-neutral {@link AssertionVerifier}: a JWT signed by an authority
- * this deployment trusts (#301).
+ * The vendor-neutral {@link AssertionVerifier}: an RFC 7523 §3 JWT signed by an
+ * authority this deployment trusts, checked against one static key. It is a
+ * one-entry {@link createRegistryAssertionVerifier}; several issuers, JWKS keys
+ * or per-issuer terms need a registry and that verifier directly. Platform
+ * attestations (DeviceCheck, Play Integrity) are the operator's own port.
  *
- * This is the RFC 7523 §3 shape — `iss`, `sub`, `aud`, `exp` checked against a
- * configured key — and it ships because otherwise every deployment hand-rolls
- * JWT verification for its device tokens, which is exactly where "a bare
- * identifier was accepted as a login" comes from. Platform attestations (Apple
- * DeviceCheck, Play Integrity) need a vendor call and are the operator's own
- * implementation of the port.
+ * Returns `null` for a bad signature, a wrong `iss` or `aud` (without `aud`, an
+ * assertion minted for another service is replayable here), an expired
+ * assertion, one with no `exp` (RFC 7523 §3 item 4; jose checks `exp` only when
+ * present), and claims with no usable handle. `algorithms` has no default, so
+ * `alg: none` and every unlisted algorithm are refused.
  *
- * Since #525 this is a one-entry {@link createRegistryAssertionVerifier}: the
- * same checks, the same refusals, one issuer with one static key. A deployment
- * that trusts several issuers, fetches keys from a JWKS endpoint, or admits an
- * issuer on terms (subjects, scopes, audiences, clients) builds a registry and
- * uses that verifier directly.
- *
- * ## What it refuses, and why each one is here
- *
- * - **A bad signature, a wrong `iss`, a wrong `aud`, an expired assertion** —
- *   `null`, i.e. not verified. `aud` in particular: an assertion addressed to
- *   another service is replayable here without it.
- * - **An assertion with no `exp`** — `null`. RFC 7523 §3 item 4 makes it
- *   mandatory, and jose does not: it validates `exp` only when present, so an
- *   assertion that omits it would otherwise be accepted for ever. There is
- *   no lifetime ceiling beyond `exp` itself (no `maxTokenAge`): the RFC gives
- *   the issuing authority that decision, and this verifier has no knob for
- *   second-guessing it. The `exp` is reported as `expiresAt`, and the
- *   jwt-bearer grant caps the token it mints there (auth.proxy#90).
- * - **Replay within `exp` is not detected here.** RFC 7523 §3 item 7 lets
- *   an AS track `jti` to refuse a second presentation; this verifier does
- *   not, and neither does the grant that consumes it. An assertion is
- *   accepted as many times as it is presented until it expires, so an
- *   authority should mint short-lived assertions.
- * - **A claims set with no usable handle** — `null`. A verified signature over
- *   a token naming nobody is not an authentication.
- * - **`alg: none` and every unlisted algorithm** — `algorithms` is required
- *   with no default, so a deployment names what it accepts rather than
- *   inheriting "anything this key can verify".
- *
- * A verification that could not be *attempted* is not modelled here: this
- * implementation is local and cannot fail that way. A vendor-backed verifier
- * throws instead, and the grant answers `503`.
+ * `exp` is the only lifetime bound: it is reported as `expiresAt` and the
+ * jwt-bearer grant caps its token there. Replay within `exp` is not detected
+ * (no `jti` tracking, RFC 7523 §3 item 7), so authorities should mint
+ * short-lived assertions. Verification here is local and never fails to be
+ * attempted; a vendor-backed verifier throws instead and the grant answers 503.
  */
 export function createJwtAssertionVerifier(
 	options: JwtAssertionVerifierOptions,

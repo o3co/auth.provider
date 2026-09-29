@@ -16,53 +16,32 @@
 
 /**
  * What other modules read of the oauth module's token settings, and the
- * `oauthTokenSettings` slot they read it through (#728).
+ * `oauthTokenSettings` slot they read it through. Types only.
  *
- * A token cannot exist apart from OAuth, so its settings belong to the oauth
- * module's section, `oauth {}`. A key several modules read has one owner, and
- * the others receive it through a slot whose contract is core's: the owner
- * parses its section once and provides these values, and a reader reads the
- * slot rather than the section. Every reader lists it as optional, since
- * each also runs in compositions without the oauth module, and reads the
- * configuration only when no module provides the slot — never a member of
- * one beside the configuration: a slot it holds is read whole, checked first
- * with `checkOAuthTokenSettings`. The members are what modules
- * outside `packages/oauth` read today. Two settings of the section are not
- * here: the grant-type allowlist switch, which only the oauth module reads,
- * and the revocation modes (`oauth.revocation.accessToken`,
- * `oauth.revocation.subject`). Those are the declarations core's
- * declared-absence guard reads for the absence policies `oauth-token-exchange`,
- * `session` and `webauthn` attach as well as oauth: the guard reads them at
- * validation, before any provider runs, so a slot cannot serve them, and
- * where they live once `oauth {}` is the oauth module's alone is decided
- * with that move.
+ * A key several modules read has one owner (here the oauth module, owner of
+ * `oauth {}`), which parses its section once and provides these values.
+ * Readers list the slot as optional, since they also run without the oauth
+ * module, and read the configuration only when no module provides it. A
+ * provided slot is read whole, checked with `checkOAuthTokenSettings`, never
+ * mixed with the configuration.
  *
- * Nor are the token-binding settings, `oauth.tokenBinding` — the dispatch
- * policy and whether a confidential client's refresh tokens are bound —
- * though they sit in `oauth {}` today: they apply across every mechanism
- * installed at core's token-binding extension point, and the extension
- * point's owner, core, owns them (#728). Core reads them with its own
- * `resolveTokenBindingSettings` — boot the policy, the grants the binding
- * rule — in every composition, and a slot that carried one would be a second
- * source for it; the contract refuses one that does. Where the keys live is
- * decided with the move of the configuration.
+ * Not here:
+ * - the grant-type allowlist switch: only the oauth module reads it;
+ * - the revocation modes (`oauth.revocation.*`): the declared-absence guard
+ *   reads them at validation, before any provider runs;
+ * - `oauth.tokenBinding`: owned by core's token-binding extension point and
+ *   read with `resolveTokenBindingSettings`; a slot carrying it would be a
+ *   second source, which the contract refuses.
  *
- * Not every module can read the slot. The boot planner orders modules, not
- * components: a module that reads a key depends on the whole module providing
- * it. So no module in the oauth module's dependency set — the providers of its
- * `requires` and its `optional` keys, and whatever those depend on in turn —
- * can read this slot, because the oauth module would depend on it and it on
- * the oauth module, and boot refuses the pair as a cycle. Such a module reads
- * the configuration, as before: the default refresh-token family revocation
- * module is one, since the oauth module reads the `refreshTokenFamilyRevocation`
- * it provides. Providing the slot from a module that depends on none of them
- * would lift the constraint; that is left for later.
+ * A module in the oauth module's dependency set (providers of its `requires`
+ * and `optional` keys, transitively) cannot read the slot: boot orders
+ * modules, not components, so that would be a cycle. Such a module (e.g. the
+ * default refresh-token family revocation module) reads the configuration.
  *
- * Each value is resolved — no deprecated alias and no absence left for a
- * reader to interpret — and the whole is frozen, so a reader cannot change
- * what the others read. The contract suite and a test double are published
- * on `@o3co/auth-provider-core/testing` (`oauthTokenSettingsContract`,
- * `createTestOAuthTokenSettings`). Types only.
+ * Every value is resolved (no deprecated alias or absence left to interpret)
+ * and the whole is frozen. Contract suite and test double:
+ * `oauthTokenSettingsContract`, `createTestOAuthTokenSettings` on
+ * `@o3co/auth-provider-core/testing`.
  */
 
 import type { AccessTokenLifetime } from "../config/application.schema.mjs";
@@ -94,8 +73,7 @@ export interface OAuthTokenSettings {
 	readonly resourceIndicatorEnabled: boolean;
 	/**
 	 * `oauth.requireEmailVerified`, `false` when unset: whether tokens for an
-	 * end-user subject require the Store to have verified the user's email
-	 * (#297).
+	 * end-user subject require the Store to have verified the user's email.
 	 */
 	readonly requireEmailVerified: boolean;
 }
@@ -105,7 +83,7 @@ export interface OAuthTokenSettings {
 // ---------------------------------------------------------------------------
 declare module "@o3co/auth-provider-core" {
 	interface ComponentMap {
-		/** What other modules read of the oauth module's token settings (#728), provided by the module that owns `oauth {}`. */
+		/** What other modules read of the oauth module's token settings, provided by the module that owns `oauth {}`. */
 		readonly oauthTokenSettings?: OAuthTokenSettings;
 	}
 }

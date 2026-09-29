@@ -17,102 +17,44 @@
 import { isLoopbackHostname } from "./loopback.mjs";
 
 /**
- * The serialized-origin vocabulary — what a configured browser origin may be
- * (#500).
+ * The serialized-origin vocabulary: what a configured browser origin may be.
  *
- * `cors.allowedOrigins` is matched against the `Origin` request header by
- * **exact string equality**, so every rule here exists to stop an entry that
- * would parse cleanly at boot and then never match a real request. A CORS
- * allowlist that silently never matches is worse than one that is absent: the
- * operator has stated an intent, the config looks right, and every request
- * fails at the browser with no server-side trace.
+ * Origins are matched against the `Origin` header by exact string equality, so
+ * these rules stop entries that parse at boot but never match, a failure with
+ * no server-side trace. An entry must equal its own serialized origin
+ * (RFC 6454 §6.1, WHATWG URL): scheme, host, and a non-default port only. That
+ * one comparison refuses a trailing slash, an explicit default port, an
+ * uppercase host, a path / query / fragment, and userinfo.
  *
- * A serialized origin is what RFC 6454 §6.1 / the WHATWG URL Standard's
- * "origin" serialization produces, and what a browser puts in the header:
- * scheme, host, and a port only when it is not the scheme's default. Nothing
- * else — no path, no `/`, no query, no fragment, no userinfo.
- *
- * The check is therefore mostly one line: parse it, serialize the origin, and
- * require the two to be **identical**. That single comparison catches the
- * whole family at once, and each member of the family is a real typo:
- *
- *   - `https://example.com/` — a trailing slash. Copy-pasted from a browser
- *     address bar every time.
- *   - `https://example.com:443` — an explicit default port. The browser sends
- *     `https://example.com`.
- *   - `https://EXAMPLE.com` — mixed case. The browser lowercases the host.
- *   - `https://example.com/app`, `?x=1`, `#f` — a URL where an origin was
- *     wanted.
- *   - `https://u:p@example.com` — userinfo, which an origin never carries.
- *
- * Two rules do not fall out of that comparison and are stated explicitly:
- *
- *   - **No wildcards.** `https://*.example.com` round-trips through
- *     `URL.origin` unchanged — WHATWG accepts `*` in a host — so the
- *     comparison alone would admit it, and it would then match nothing. There
- *     is no subdomain matching here and there is not going to be: a wildcard
- *     allowlist entry is how a forgotten subdomain takeover becomes a token
- *     endpoint the attacker can read.
- *   - **`https:`, or `http:` for a loopback host.** The same carve-out
- *     `checkSecureEndpoint`, `checkRedirectShape` and `checkRedirectUri`
- *     consume, through the shared {@link isLoopbackHostname} home (#364).
- *     Letting a plaintext origin read token responses is a downgrade of the
- *     whole exchange; letting `http://localhost:5173` do it is how a front-end
- *     dev server works. Opaque-origin schemes (anything WHATWG serializes as
- *     `"null"` — custom app schemes, `data:`) are refused by name: a browser
- *     sends the literal `Origin: null` for those, which is not a value an
- *     allowlist can safely name, because every sandboxed document in the world
- *     shares it.
+ * Stated separately:
+ * - No wildcards (WHATWG accepts `*` in a host, so the comparison alone would
+ *   pass it). There is no subdomain matching: a wildcard entry turns a
+ *   forgotten subdomain takeover into a token endpoint the attacker can read.
+ * - `https:`, or `http:` for a loopback host ({@link isLoopbackHostname}, the
+ *   carve-out `checkSecureEndpoint` and the redirect checks share). Opaque
+ *   origins (custom schemes, `data:`) are refused: the browser sends
+ *   `Origin: null`, which every sandboxed document shares.
  */
 
 /**
- * Read a configured origin allowlist from whatever shape it arrived in:
- * `cors.allowedOrigins` here. The WebAuthn package reads the environment
- * spelling of `webauthn.origin` / `webauthn.topOrigin` (`${?WEBAUTHN_ORIGIN}` /
- * `${?WEBAUTHN_TOP_ORIGIN}`) with it too, which is why it is on the package
- * barrel; that package reads a list itself and refuses a non-string entry
- * rather than dropping it.
+ * Reads a configured origin allowlist from either legitimate shape: an array
+ * (a config file, a hand-built `AppConfig`) or a comma-separated string (the
+ * only way an environment variable carries a list). Used for
+ * `cors.allowedOrigins`, and by the WebAuthn package for the environment
+ * spelling of `webauthn.origin` / `webauthn.topOrigin`.
  *
- * Two shapes are legitimate and both have to work at every reader:
+ * The string is split, trimmed, and empty pieces dropped (an exported-but-empty
+ * variable is no list). The array keeps every string entry trimmed, empty ones
+ * included so the entry check refuses them by index, and drops non-strings.
+ * Anything else yields no origins; the caller decides whether to warn.
  *
- *   - an array, which is what `application.conf` and a hand-built `AppConfig`
- *     carry, and
- *   - a comma-separated string, which is the only shape an environment
- *     variable can carry a list in (`${?CORS_ALLOWED_ORIGINS}`).
- *
- * The two are read differently. The string is split on commas, each entry
- * trimmed, and the empty ones dropped — an exported-but-empty variable is no
- * list at all. The array keeps every string entry, trimmed, empty ones
- * included so the entry check refuses them by index, and drops an entry that
- * is not a string.
- *
- * The split only yields pieces of what the operator wrote, and the caller
- * checks each piece as it would an array entry, so the string spelling cannot
- * admit an origin the array spelling would refuse. A comma is legal inside a
- * special-scheme host (`https://a,b.example` parses), and the string spelling
- * cannot express such an origin: it splits there, the piece after the comma
- * has no scheme, and the list is refused.
- *
- * It lives here, beside {@link checkSerializedOrigin}, because the config
- * schema is not the only reader. `assembleApp` decides whether to mount the
- * CORS middleware from `components.config`, and until #728 that config had
- * not been through the `cors` schema: the boot pipeline validated with the
- * core schema and shallow-merged the raw top-level extras back over the
- * result, so an operator who set the environment variable — the documented way
- * to configure this — handed the mount site a string. Testing that for
- * `Array.isArray` answered "no origins configured" and mounted nothing, with
- * no error and no log: precisely the silent no-op this key was wired up to
- * stop being.
- *
- * Only the shape is normalised here. Each entry is still checked with
- * {@link checkSerializedOrigin}: for CORS by both the schema (which fails
- * boot naming the index) and the middleware (which drops it with a warning);
- * for WebAuthn by `webauthnConfigSchema`, which adds that the host must be a
- * domain and admits the Android app form in `origin`. So this cannot widen an
- * allowlist; it can only stop one being dropped whole.
- *
- * Anything that is neither an array nor a string yields no origins; the caller
- * decides whether that shape deserves a warning.
+ * Only the shape is normalised: every entry is still checked with
+ * {@link checkSerializedOrigin} (by the schema and the CORS middleware, or by
+ * `webauthnConfigSchema`), so this cannot widen an allowlist. A comma inside a
+ * host (`https://a,b.example`) cannot be written in the string form: the piece
+ * after it has no scheme and is refused. It lives here, not in the schema,
+ * because `assembleApp` also reads the key off configs that may not have been
+ * through the schema.
  */
 export function normalizeAllowedOrigins(raw: unknown): readonly string[] {
 	if (Array.isArray(raw)) {
@@ -136,13 +78,10 @@ export type SerializedOriginRejection =
 	| { reason: "not-serialized"; serialized: string };
 
 /**
- * Check one configured origin against the rules above. Returns `null` when
- * acceptable, a {@link SerializedOriginRejection} otherwise.
- *
- * Pure and exported (with {@link describeSerializedOriginRejection}) so the
- * config schema and the CORS middleware hold the same vocabulary — the
- * middleware re-applies it so a hand-built `AppConfig` that never passed the
- * schema cannot install an entry the schema would have refused.
+ * Checks one configured origin against the rules above: `null` when
+ * acceptable, a {@link SerializedOriginRejection} otherwise. Shared by the
+ * config schema and the CORS middleware, which re-applies it so a hand-built
+ * `AppConfig` cannot install an entry the schema would refuse.
  */
 export function checkSerializedOrigin(raw: string): SerializedOriginRejection | null {
 	// Before the parse: WHATWG accepts `*` inside a host, so `URL.origin` would

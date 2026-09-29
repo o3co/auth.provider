@@ -15,48 +15,27 @@
  */
 
 /**
- * Whether a failed call to an upstream IdP is an OUTAGE — not reached, not
- * answered in time, or answered with a 5xx — rather than the upstream's
- * verdict. Every path that calls an upstream decides on it:
+ * Whether a failed upstream IdP call is an OUTAGE (not reached, timed out, or
+ * answered 5xx) rather than the upstream's verdict. The refresh-error
+ * classifier (`refresh-error.mts`) checks it before the OAuth codes that
+ * reject a refresh token, and the federation-grant connect callback and
+ * retrieval answer an outage `temporarily_unavailable` / `503 upstream`
+ * instead of treating it as a refusal.
  *
- * - the refresh-error classifier (`classifyFederationRefreshError` in
- *   `refresh-error.mts`, beside it) reads it before the OAuth codes that
- *   reject a refresh token, so an outage is never a rejected refresh token —
- *   for the session-bound token route and a federation grant's retrieval
- *   alike;
- * - the federation-grant connect callback's code exchange answers an outage
- *   `temporarily_unavailable` and anything else `upstream_error` (#593, D7);
- * - the federation-grant retrieval's refresh answers an outage `503 upstream`
- *   and a refusal `upstream_rejected`.
- *
- * It sits with the classifier, not with the grants, because the classifier
- * reads it and the grants read the classifier.
- *
- * Read off what the library raised — the `name`, the `code` and a numeric
- * `status` of the error and of its first causes that are themselves Errors
- * (of this realm or another), and the `status` of a `Response` it was raised
- * over (this realm's fetch or another copy's) — and never off what a
- * text says or what a peer wrote: a message is whatever the library or the
- * upstream wrote, and openid-client puts the IdP's parsed error body on a
- * `ResponseBodyError` as its `cause`, where a `status`, a `code` or a `name`
- * would be the IdP's to choose. So the walk follows a cause only into an
- * Error, and reads a status only on an Error or a `Response`; a thrown value
- * that is not an Error is no outage. The shapes it knows are what
- * openid-client / oauth4webapi and undici throw, held to the real libraries
- * by federation-oidc's `delegated-outage.test.mts`:
- *
+ * Decided only from what the library raised, never from text or peer-written
+ * data: openid-client puts the IdP's parsed error body on a
+ * `ResponseBodyError` as `cause`, where `status`, `code` and `name` are the
+ * IdP's to choose. So the walk follows a cause only into an Error (of any
+ * realm), reads a status only on an Error or a `Response`, and a thrown
+ * non-Error is no outage. Recognised shapes, pinned to the real openid-client,
+ * oauth4webapi and undici by federation-oidc's `delegated-outage.test.mts`:
  * - `AbortError` / `TimeoutError`, bare or as the cause of openid-client's
- *   `ClientError` `OAUTH_TIMEOUT` — a request given up on;
- * - a transport's code on any of them ({@link isTransportCode}: a connection
- *   code, a certificate that could not be verified, undici's, llhttp's, the
- *   TLS layer's, an unparseable URL), whether under `fetch`'s `TypeError` or
- *   raised on its own — nothing answered. Any other code — an adapter's
- *   validation error, even wrapped in a `TypeError` — is not an outage;
- * - a `status` from 500 to 599 on the error (an OAuth error body under a 5xx)
- *   or on its cause (oauth4webapi's `OAUTH_RESPONSE_IS_NOT_CONFORM` over the
- *   `Response` it would not read) — the upstream answered that it is down.
+ *   `OAUTH_TIMEOUT`;
+ * - a transport code ({@link isTransportCode}), under `fetch`'s `TypeError`
+ *   or on its own; any other code, even under a `TypeError`, is not;
+ * - a 5xx `status` on the error, or on the `Response` it was raised over.
  *
- * It never throws: every read is guarded.
+ * Never throws: every read is guarded.
  */
 
 /** The names a request that was given up on is raised under: `AbortSignal.timeout` raises `TimeoutError`. */
@@ -116,15 +95,11 @@ const X509_VERIFICATION: ReadonlySet<string> = new Set([
 ]);
 
 /**
- * Families of codes, each the closed vocabulary of its producer, bounded so
- * that a value which merely starts like one is not one: undici's own
- * (`UND_ERR_SOCKET`, `UND_ERR_CLOSED`, … — this server's transport or its
- * composition, a 503 whichever member), llhttp's parser errors
- * (`HPE_INVALID_CONSTANT`, undici's `HTTPParserError`), Node's TLS codes
- * (`ERR_TLS_CERT_ALTNAME_INVALID`) and OpenSSL's (`ERR_SSL_WRONG_VERSION_NUMBER`;
- * OpenSSL 3's `ERR_SSL_SSL/TLS_ALERT_HANDSHAKE_FAILURE`, one slash in it).
- * foundation's Store transport (`repositories/storeErrors.mts`) keeps the same
- * families for what it may say of a Store it could not reach.
+ * Code families, each its producer's closed vocabulary, anchored and bounded
+ * so a value that merely starts like one does not match: undici's
+ * (`UND_ERR_*`), llhttp's parser errors (`HPE_*`), Node's TLS codes
+ * (`ERR_TLS_*`) and OpenSSL's (`ERR_SSL_*`; an OpenSSL 3 code may hold one
+ * slash). `repositories/storeErrors.mts` keeps the same families.
  */
 const FAMILIES: readonly RegExp[] = [
 	/^UND_ERR_[A-Z_]{1,48}$/,

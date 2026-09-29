@@ -14,27 +14,19 @@
  * limitations under the License.
  */
 /**
- * Schema design principle: pure type contract.
- *
- * Schemas in this file describe the SHAPE that is required to be present at
- * the boundary, not the value that is "reasonable to default to." Defaults
- * live in a single place — `packages/core/config/reference.conf` — and
- * `${?ENV_VAR}` substitutions in that file are the only override surface.
- *
- * Consequence: schema parse rejects bare `{}` inputs. Tests that need a
- * valid config must either (a) load it through `parseFile` against the
- * built-in hocon, or (b) supply a minimal schema-valid baseline (e.g.
- * the `makeValidCoreConfig` factory exposed via the
- * `@o3co/auth-provider-core/testing` subpath, which intentionally
- * diverges from `reference.conf` for test ergonomics). See
- * ADR 2026-04-30.
+ * Zod schemas for the application config. They are a pure type contract: the
+ * shape required at the boundary, not defaults. Defaults live only in
+ * `packages/core/config/reference.conf`, whose `${?ENV_VAR}` substitutions are
+ * the only override surface, so parsing `{}` fails. Tests load through
+ * `parseFile` or start from `makeValidCoreConfig`
+ * (`@o3co/auth-provider-core/testing`). See ADR 2026-04-30.
  */
 import { z } from "zod";
 
 /**
- * A list that an environment variable may carry as one comma-separated
- * string (#529). Entries are trimmed and empties dropped, so `"a, ,b"` is
- * `["a", "b"]` and an exported-but-empty variable is `[]`.
+ * A list an environment variable may carry as one comma-separated string.
+ * Entries are trimmed and empties dropped, so `"a, ,b"` is `["a", "b"]` and an
+ * exported-but-empty variable is `[]`.
  */
 const commaList = z.union([z.array(z.string()), z.string()]).transform((value) =>
 	Array.isArray(value)
@@ -67,64 +59,18 @@ import { type RemovedKey, withRemovedKeys } from "./removed-keys.mjs";
 import { environmentCoercer } from "./schema-path.mjs";
 
 /**
- * The one coercion every env-overridable boolean in this file goes through
- * (#288).
+ * The coercion every env-overridable boolean goes through. HOCON substitutes
+ * `${?VAR}` as a string, and the hocon zod bridge coerces only leaves it can
+ * reach (object shapes, arrays, optional / default-style wrappers), not ones
+ * behind `z.preprocess` or `z.record`. So no env-reachable boolean may be a
+ * bare `z.boolean()`.
  *
- * HOCON substitutes `${?VAR}` as a **string**, always, so no boolean leaf that
- * an environment variable can reach may be a bare `z.boolean()`. Two of them
- * were, and it is worth being precise about why that mostly worked and how it
- * stopped:
- *
- * `@o3co/ts.hocon`'s zod bridge pre-coerces the parsed object against the
- * schema before `parse` runs, but it only walks what it recognises —
- * `ZodObject` shapes, array elements, and the optional / nullable / default /
- * catch / readonly wrappers. Anything else it hands through untouched. So a
- * bare boolean leaf sitting directly in an object shape got coerced for free,
- * and the moment that leaf ended up behind something the walker does not
- * descend into, the free coercion vanished with no other symptom than a boot
- * failure in the field:
- *
- *   - `z.preprocess(...)` compiles to a `ZodPipe`, which the walker does not
- *     enter. `oauth.jwt` is wrapped that way to catch legacy flat fields, and
- *     that is what silently broke `OAUTH_JWT_LEGACY_TYP_ACCEPT` — the
- *     documented override failed boot for *both* `true` and `false`.
- *   - `z.record(...)` likewise, which is why `federations.<name>.enabled`
- *     needed the explicit coercion from the start.
- *
- * #292 hit the same wall from the other side and wrote it down at
- * `normalizeTrustProxy`: widening `http.trustProxy` to a union left the bridge
- * with nothing to coerce towards, so the mapping had to move into the schema.
- * This is that finding applied to every remaining boolean, so the property is
- * owned by the field rather than by what happens to be wrapped around it.
- *
- * The accepted spellings are deliberately narrow:
- *
- *   "true" | "1"        → true
- *   "false" | "0" | ""  → false
- *   boolean             → pass-through unchanged
- *   anything else       → rejected, naming the spellings it accepts
- *
- * Case-insensitive and trimmed, because `FOO=True` and a trailing space in a
- * `.env` file are typing, not intent.
- *
- * `""` — an exported-but-empty variable, the shape a `.env` file, a compose
- * `environment:` entry or a blank ConfigMap key produces — reads as `false`,
- * matching what `normalizeTrustProxy` already decided for the same input.
- *
- * Rejecting the rest is the point. `z.coerce.boolean()` is `Boolean(value)`,
- * so every non-empty string is `true` — `"false"` included, which would turn
- * an operator switching a feature off into switching it on. Refusing `"ture"`
- * outright, loudly, at boot, is the only reading that cannot be silently wrong.
- * Note this is narrower than the hocon bridge's own vocabulary, which also
- * takes `yes` / `no` / `on` / `off`: those used to work by accident on the
- * leaves the bridge could reach, and now fail at boot naming the four
- * spellings that are real.
- *
- * Exported since #593: the federation-grants routes ship in a package of their
- * own and read `federationGrants.enabled`, which `reference.conf` lets
- * `FEDERATION_GRANTS_ENABLED` reach. A second copy of these spellings out
- * there is a second vocabulary to drift from this one, and the feature it
- * would drift on is one whose default is off.
+ * Accepted, trimmed and case-insensitive: `"true"` / `"1"` → true;
+ * `"false"` / `"0"` / `""` (an exported-but-empty variable) → false; booleans
+ * unchanged. Anything else fails boot, including the bridge's `yes` / `no` /
+ * `on` / `off`: `z.coerce.boolean()` would read `"false"` as true, turning a
+ * feature on when an operator meant off. Exported so other packages (the
+ * federation-grants routes) share this one vocabulary.
  */
 export const coerceBooleanFromEnv = environmentCoercer(
 	z.preprocess(
@@ -144,9 +90,8 @@ export const coerceBooleanFromEnv = environmentCoercer(
 );
 
 const rateLimitSchema = z.object({
-	// #282: an empty RATE_LIMIT env var coerces to 0, and a zero window (or a
-	// zero limit) turns the /session/login brute-force guard into a no-op
-	// while still looking configured.
+	// An empty env var coerces to 0, and a zero window (or limit) would turn the
+	// /session/login brute-force guard into a no-op that still looks configured.
 	windowMs: z.coerce.number().int().positive().max(MAX_DURATION_MS),
 	limit: z.coerce.number().int().positive(),
 });
@@ -158,15 +103,6 @@ const rateLimitSpecSchema = z.object({
 	windowSeconds: z.coerce.number().int().positive().max(MAX_DURATION_SECONDS),
 });
 
-// IH-9: HS256 key rotation is symmetric — `previousSecrets` carries
-// shared secrets keyed by `kid`, distinct from the asymmetric
-// `previousKeys` shape (publicKey / publicKeyPath). The schema is split
-// via discriminated union so an operator who wires `previousKeys`
-// (asymmetric-shaped) under HS256 gets a clear validation error at
-// boot rather than silent rotation breakage at the first refresh —
-// Codex calibration m1 requires strict() rejection rather than relying
-// on field omission, since `.passthrough()` would otherwise let
-// `previousKeys` survive into the parsed config.
 // A configured kid is held to the rule `verifyJwt` holds a kid header to
 // (`keys/kid.mts`): one it would refuse makes every token signed under it fail
 // as the client's fault. The keystores check again when they are built, for a
@@ -181,6 +117,9 @@ const hs256PreviousSecretSchema = z.object({
 	expiresAt: z.string(),
 });
 
+// HS256 rotation keeps shared secrets under `previousSecrets`, not the
+// asymmetric `previousKeys`. `.strict()` so `previousKeys` under HS256 fails at
+// boot instead of surviving parse and breaking rotation at the first refresh.
 const signingKeyLocalHs256Schema = z
 	.object({
 		algorithm: z.literal("HS256"),
@@ -198,10 +137,8 @@ const signingKeyLocalAsymmetricSchema = z
 		privateKeyPath: z.string().optional(),
 		publicKey: z.string().optional(),
 		publicKeyPath: z.string().optional(),
-		// IH-9: optional so the shared HOCON default file can omit
-		// `previousKeys = []` without forcing all asymmetric operators
-		// to add boilerplate. The factory's `narrowPreviousKeysArray`
-		// treats absent/null/[] equivalently.
+		// Optional so the shared HOCON default can omit `previousKeys = []`; the
+		// factory treats absent, null and [] alike.
 		previousKeys: z
 			.array(
 				z.object({
@@ -240,22 +177,12 @@ const LEGACY_JWT_FIELDS = [
 ] as const;
 
 /**
- * Fields removed from `oauth.refreshToken`. Detected on the raw input by the
- * preprocess wrapper below so that operators upgrading from v0.5.x get a
- * targeted error instead of having their flag silently stripped by Zod's
- * default `unknown-key strip` behavior.
- *
- * The `removedIn` field carries the released tag plus a marker — the phase
- * (`v0.6.0 (Phase G / M4)`) or the PR (`v0.10.0 (#330)`) — so the
- * operator-facing error message names the release that performed the removal
- * and the CHANGELOG entry that documents it. Per docs/release-policy.md R5,
- * the released-tag portion is filled in at release-cut time (R6 step 5) — an
- * entry added on HEAD between cuts reads `"this release (#NNN)"` until then.
- * The PR number is not decoration: `removedIn.drift.test.mts` (#458) accepts
- * a placeholder only until the CHANGELOG lists that PR under a version
- * section — the section is written at cut time (R2, #475) — so the cut that
- * ships it cannot forget the stamp again — `"this release
- * (#330)"` went out in v0.10.0 and v0.11.0 before that guard existed.
+ * Fields removed from `oauth.refreshToken`, detected on the raw input so an
+ * upgrading operator gets a targeted error instead of Zod silently stripping
+ * the key. `removedIn` is the release tag plus the phase or PR, so the error
+ * names the release and its CHANGELOG entry. An entry added between cuts reads
+ * `"this release (#NNN)"` until the cut stamps it (docs/release-policy.md R5,
+ * R6), which `removedIn.drift.test.mts` enforces.
  */
 const REMOVED_REFRESH_TOKEN_FIELDS: readonly RemovedKey[] = [
 	{
@@ -269,12 +196,9 @@ const REMOVED_REFRESH_TOKEN_FIELDS: readonly RemovedKey[] = [
 ];
 
 /**
- * Fields removed from `oauth.authorize`. Same mechanism and rationale as
- * `REMOVED_REFRESH_TOKEN_FIELDS` above — detected on the raw input so the
- * operator gets a targeted boot error instead of Zod silently stripping a
- * config line they believe is load-bearing. `reference.conf` deliberately
- * keeps the `${?OAUTH_AUTHORIZE_ALLOW_UNMARKED_CLIENTS}` substitution as a
- * tombstone, so a still-exported env var reaches this check too.
+ * Fields removed from `oauth.authorize`; same mechanism as above.
+ * `reference.conf` keeps the `${?OAUTH_AUTHORIZE_ALLOW_UNMARKED_CLIENTS}`
+ * substitution as a tombstone so a still-exported env var reaches this check.
  */
 const REMOVED_AUTHORIZE_FIELDS: readonly RemovedKey[] = [
 	{
@@ -291,15 +215,10 @@ const REMOVED_AUTHORIZE_FIELDS: readonly RemovedKey[] = [
 ];
 
 /**
- * Fields removed from `oauth.dpop`. Same mechanism as the two tables above.
- *
- * `replay-store` said what an empty `dpopReplayStore` slot meant — a
- * per-process fallback under `"memory"`, a boot refusal under `"redis"` —
- * and the slot and the fallback are both gone: every accepted proof is
- * recorded in the `replaySeenSet` component. Failed rather than ignored
- * (docs/release-policy.md "Retiring a config key"): a deployment that had
+ * Fields removed from `oauth.dpop`; same mechanism as above. Failed rather than
+ * ignored (docs/release-policy.md "Retiring a config key"): a deployment that
  * wired a shared DPoP store beside a memory seen-set would otherwise move its
- * DPoP records into memory with nothing new to read.
+ * DPoP records into memory silently.
  */
 const REMOVED_DPOP_FIELDS: readonly RemovedKey[] = [
 	{
@@ -315,19 +234,11 @@ const REMOVED_DPOP_FIELDS: readonly RemovedKey[] = [
 ];
 
 /**
- * A duration an operator wrote, read strictly (#593).
- *
- * `z.coerce.number()` is the house default for a value HOCON may substitute as
- * a string, and for most sections it is right. It is wrong for this block, and
- * Copilot named why: `Number()` reads `null` and `[]` as `0`, `true` as `1` and
- * `"1e3"` as `1000`, so a malformed duration was NORMALISED here and the
- * package's own strict reader — which refuses exactly those — never saw the
- * value an operator wrote. `tombstoneRetention: null` silently disabled
- * tombstones; `refreshBuffer: null` handed out tokens with milliseconds left.
- *
- * So: a number, or the plain decimal string an environment variable arrives
- * as. Anything that would have to be converted to be understood was not
- * written as a duration, and fails boot naming the key.
+ * A duration read strictly: a number, or the plain decimal string an
+ * environment variable arrives as. Not `z.coerce.number()`, which reads `null`
+ * and `[]` as 0, `true` as 1 and `"1e3"` as 1000: a malformed duration would be
+ * normalised (`tombstoneRetention: null` disabling tombstones) instead of
+ * failing boot naming the key.
  */
 const durationFromEnv = (bounds: z.ZodNumber) =>
 	environmentCoercer(
@@ -341,10 +252,9 @@ const durationFromEnv = (bounds: z.ZodNumber) =>
 	);
 
 const jwtSchemaBase = z.object({
-	// The issuer is a property of the deployment, not of a request. It is
-	// REQUIRED: `/oauth/token` used to fall back to `req.get("host")` when this
-	// was unset, which made `iss` caller-controlled behind a trusted proxy and
-	// the resulting tokens non-portable. See `core/src/issuer/canonical.mts`.
+	// Required: the issuer belongs to the deployment, never to a request. An
+	// `iss` derived from the Host header is caller-controlled behind a trusted
+	// proxy. See `core/src/issuer/canonical.mts`.
 	issuer: z.string().superRefine((value, ctx) => {
 		const rejection = checkCanonicalIssuer(value);
 		if (rejection) {
@@ -367,38 +277,22 @@ const jwtSchemaBase = z.object({
 				"dot-segments, query/fragment, backslash, percent-encoding, or control characters",
 		})
 		.optional(),
-	// JWKS response `Cache-Control: public, max-age=<N>` lifetime (seconds).
-	// Operator-tunable; defaults to 300 (applied by `resolveJwksCacheMaxAge`).
-	// Keep well below the key-overlap window so a rotated kid propagates to
-	// caching verifiers in time. See `core/src/jwks/cache.mts`.
-	// Read strictly (`durationFromEnv`): the plain decimal string a `${?VAR}`
-	// an operator's file sets it from arrives as (#728: no bridge coerces it on
-	// the way), and nothing `Number()` would read as 0 or 1 — an empty
-	// variable is refused, not served as `max-age=0`.
+	// JWKS `Cache-Control: public, max-age=<N>` in seconds (default 300, applied
+	// by `resolveJwksCacheMaxAge`). Keep well below the key-overlap window so a
+	// rotated kid reaches caching verifiers in time (`core/src/jwks/cache.mts`).
+	// Read strictly: an empty variable is refused, not served as `max-age=0`.
 	jwksCacheMaxAge: durationFromEnv(z.number().int().nonnegative()).optional(),
-	// SF-1 (v0.5.1): when true, the central JWT verifier accepts tokens whose
-	// `typ` header is absent and emits a deprecation warning. No schema
-	// default — per the v0.5.1 ADR the literal lives in `reference.conf`,
-	// which ships `false` (a typ-less token is refused as a misconfiguration
-	// or downgrade signal); `OAUTH_JWT_LEGACY_TYP_ACCEPT=true` is the bounded
-	// migration override. This comment called `true` the default long after
-	// reference.conf flipped it (#458).
-	//
-	// #288: `coerceBooleanFromEnv`, not `z.boolean()`. This section is wrapped
-	// in `z.preprocess` (see `jwtSchema` below), which the hocon zod bridge
-	// does not descend into — so `OAUTH_JWT_LEGACY_TYP_ACCEPT` arrived here as
-	// the raw substituted string and failed boot for every value an operator
-	// could write.
+	// When true, the JWT verifier accepts tokens with no `typ` header and warns.
+	// No schema default: `reference.conf` ships `false` (a typ-less token is a
+	// misconfiguration or downgrade signal); `OAUTH_JWT_LEGACY_TYP_ACCEPT=true`
+	// is a migration override. `coerceBooleanFromEnv` because this section sits
+	// behind `z.preprocess`, which the hocon bridge does not coerce through.
 	legacyTypAccept: coerceBooleanFromEnv.optional(),
 });
 
 /**
- * jwtSchema wraps the base object schema with a preprocess step that detects
- * legacy flat oauth.jwt.* fields before zod strips unknown keys.
- *
- * Zod's default object behavior strips unknown keys before superRefine sees
- * the data, so superRefine on the parsed output cannot detect stripped fields.
- * z.preprocess runs on the raw input and can emit a ZodError early.
+ * Detects legacy flat `oauth.jwt.*` fields on the raw input: Zod strips unknown
+ * keys before `superRefine` runs, so only `z.preprocess` can see them.
  */
 const jwtSchema = z.preprocess((raw, ctx) => {
 	if (typeof raw === "object" && raw !== null && !Array.isArray(raw)) {
@@ -439,13 +333,11 @@ export interface AccessTokenConfig {
 	 */
 	maxExpiresIn?: number;
 	/**
-	 * The resolved default lifetime, in seconds — mirrored here for readers
-	 * written before `defaultExpiresIn` existed, so they keep minting what every
-	 * other grant mints.
+	 * The resolved default lifetime, in seconds, mirrored so readers of this key
+	 * mint what every other grant mints.
 	 *
-	 * @deprecated since v0.14.0: as a configuration key this is an alias of
-	 * `defaultExpiresIn`, and readers should call `resolveAccessTokenLifetime`.
-	 * See CHANGELOG.
+	 * @deprecated As a configuration key, an alias of `defaultExpiresIn`; readers
+	 * should call `resolveAccessTokenLifetime`. See CHANGELOG.
 	 */
 	expiresIn: number;
 }
@@ -478,12 +370,10 @@ const ACCESS_TOKEN_LIFETIME_KEYS = ["defaultExpiresIn", "maxExpiresIn", "expires
 type AccessTokenLifetimeKey = (typeof ACCESS_TOKEN_LIFETIME_KEYS)[number];
 
 /**
- * Whether a value is a token lifetime this provider accepts: a whole number of
- * seconds from 1 to the one-year ceiling (`MAX_DURATION_SECONDS`). The rule
- * `resolveAccessTokenLifetime` and `resolveRefreshTokenLifetime` apply, and
- * the one to hold a lifetime handed over as a number — rather than read from
- * configuration — to, so that building a grant by hand and through its module
- * accept the same values.
+ * Whether a value is a token lifetime this provider accepts: whole seconds from
+ * 1 to `MAX_DURATION_SECONDS`. Both lifetime resolvers apply it; hold a lifetime
+ * handed over as a number to it too, so a grant built by hand and one built
+ * through its module accept the same values.
  */
 export const isLifetimeSeconds = (value: unknown): value is number =>
 	typeof value === "number" &&
@@ -496,14 +386,10 @@ type AccessTokenLifetimeCheck =
 	| { readonly ok: false; readonly key: AccessTokenLifetimeKey; readonly message: string };
 
 /**
- * The rules, in one place, for the schema's refinement and the resolver alike.
- *
- * `defaultExpiresIn` wins over the deprecated `expiresIn` whenever it is set —
- * the OR-9 precedent (`oauth.code.adapter` over `repositories.code.type`). It
- * cannot be the other way round, and a disagreement cannot fail boot, because
- * `reference.conf` keeps the shipped literal on `expiresIn`: a configuration
- * that adopts the new key always carries both, and the two differ whenever the
- * operator chose anything but the shipped value.
+ * The lifetime rules, shared by the schema refinement and the resolver.
+ * `defaultExpiresIn` wins over the deprecated `expiresIn` whenever set, and a
+ * disagreement cannot fail boot: `reference.conf` keeps the shipped literal on
+ * `expiresIn`, so a configuration using the new key always carries both.
  */
 function checkAccessTokenLifetime(
 	accessToken: AccessTokenLifetimeSource["oauth"]["accessToken"],
@@ -545,30 +431,23 @@ function checkAccessTokenLifetime(
 }
 
 /**
- * The access-token lifetime a deployment configured: the DEFAULT minted when a
- * request asks for nothing, and the MAX no request may exceed.
- *
- * Every grant reads the lifetime through this function, when it is built —
- * there is no other correct reader:
+ * The access-token lifetime a deployment configured: the default minted when a
+ * request asks for nothing, and the max no request may exceed. Every grant
+ * reads it through this function when it is built.
  *
  * - `defaultExpiresIn` when set, otherwise the deprecated `expiresIn`;
- * - `maxExpiresIn` when set, otherwise the default, so nothing is extended
- *   past the default unless the operator opts in;
- * - a default above the max, a missing default, or a value that is not a
- *   whole number of seconds within the one-year ceiling throws a
- *   `RangeError`, naming the key.
+ * - `maxExpiresIn` when set, otherwise the default, so nothing is extended past
+ *   the default unless the operator opts in.
  *
- * The schema enforces the same rules at boot, so a loaded configuration never
- * throws here. The checks are repeated for configurations built by hand, which
- * reach a grant without meeting the schema; before this function the grants
- * handed such a value straight to `exp` arithmetic, and while they read it per
- * request they refused it only after the request's single-use credential was
- * spent. {@link resolveRefreshTokenLifetime} is the refresh token's counterpart.
+ * The schema enforces the same rules at boot; they are repeated for
+ * configurations built by hand, so a bad value fails when the grant is built
+ * rather than after a request's single-use credential is spent. The alias is
+ * resolved here, not in HOCON, because `parseFile` resolves substitutions per
+ * file before the layers merge. {@link resolveRefreshTokenLifetime} is the
+ * refresh token's counterpart.
  *
- * Why the alias is resolved here rather than in HOCON: `parseFile` resolves
- * substitutions per file before the layers merge, so a
- * `${oauth.accessToken.expiresIn}` in `reference.conf` would never see an
- * application layer's override of it.
+ * @throws RangeError naming the key, for a missing default, a default above the
+ * max, or a value that is not whole seconds within the one-year ceiling.
  */
 export function resolveAccessTokenLifetime(config: AccessTokenLifetimeSource): AccessTokenLifetime {
 	const check = checkAccessTokenLifetime(config.oauth?.accessToken);
@@ -586,22 +465,15 @@ export interface RefreshTokenLifetimeSource {
 }
 
 /**
- * The refresh-token lifetime a deployment configured, in seconds:
- * `oauth.refreshToken.expiresIn`.
+ * The refresh-token lifetime a deployment configured, in seconds
+ * (`oauth.refreshToken.expiresIn`), and the one reader of that key: every grant
+ * minting a refresh token reads it when built, as does the subject-revocation
+ * horizon. The schema refuses bad values at boot; the check is repeated for
+ * hand-built configurations so a grant fails when built, not after spending a
+ * code or challenge or signing a refresh token with no `exp`.
  *
- * The counterpart of {@link resolveAccessTokenLifetime}, and the one reader of
- * the key: every grant that mints a refresh token reads it through this when
- * it is built, and so does the subject-revocation horizon. It holds the value
- * to the schema's rule — a whole number of seconds from 1 to the one-year
- * ceiling (`isLifetimeSeconds`, which the schema's `lifetimeSecondsSchema`
- * states in zod) — and throws a `RangeError` naming the key for anything else,
- * absence included.
- *
- * The schema already refuses such a value at boot. The check is repeated for
- * configurations built by hand, which reach a grant without meeting it; read
- * at request time, the grants spent an authorization code or a WebAuthn
- * challenge before `generateToken` refused the value, and signed a refresh
- * token with no `exp` when it was missing.
+ * @throws RangeError naming the key, for anything but whole seconds from 1 to
+ * the one-year ceiling (`isLifetimeSeconds`), absence included.
  */
 export function resolveRefreshTokenLifetime(config: RefreshTokenLifetimeSource): number {
 	const value = config.oauth?.refreshToken?.expiresIn;
@@ -614,18 +486,16 @@ export function resolveRefreshTokenLifetime(config: RefreshTokenLifetimeSource):
 }
 
 /**
- * A lifetime in whole seconds: positive and bounded (#282), so the
- * exported-but-empty variable that `z.coerce.number()` reads as `0` fails boot.
+ * A lifetime in whole seconds, positive and bounded, so the exported-but-empty
+ * variable that `z.coerce.number()` reads as `0` fails boot.
  */
 const lifetimeSecondsSchema = z.coerce.number().int().positive().max(MAX_DURATION_SECONDS);
 
 /**
- * `oauth.accessToken`. Every key is optional in the input so either spelling of
- * the default can stand alone; the refinement requires one of them and fails
- * boot on a default above the max. The output mirrors the resolved default onto
- * `expiresIn`, which is what keeps readers of the old key — outside this
- * repository included — minting the lifetime every grant here mints. The
- * mirror is idempotent, which matters: `createApp` parses the loaded
+ * `oauth.accessToken`. Every key is optional so either spelling of the default
+ * can stand alone; the refinement requires one and refuses a default above the
+ * max. The output mirrors the resolved default onto `expiresIn` for readers of
+ * that key. The mirror must stay idempotent: `createApp` parses the loaded
  * configuration a second time.
  */
 const accessTokenSchema = z
@@ -633,8 +503,8 @@ const accessTokenSchema = z
 		defaultExpiresIn: lifetimeSecondsSchema.optional(),
 		maxExpiresIn: lifetimeSecondsSchema.optional(),
 		/**
-		 * @deprecated since v0.14.0 — an alias of `defaultExpiresIn`, still read
-		 * when that key is unset. See CHANGELOG.
+		 * @deprecated An alias of `defaultExpiresIn`, still read when that key is
+		 * unset. See CHANGELOG.
 		 */
 		expiresIn: lifetimeSecondsSchema.optional(),
 	})
@@ -664,28 +534,22 @@ const accessTokenSchema = z
 	);
 
 const refreshTokenSchemaBase = z.object({
-	// #282: positive and bounded. See MAX_DURATION_SECONDS. The rule
+	// Positive and bounded (`MAX_DURATION_SECONDS`): the rule
 	// `resolveRefreshTokenLifetime` holds a hand-built configuration to.
 	expiresIn: lifetimeSecondsSchema,
-	// CC-2 (v0.5.1): policy for refresh tokens whose `family_id` does not
-	// match a known family record. `"reject"` is the safe default; the
-	// pre-fix behavior was implicit `"accept"` (silent fall-through to
-	// success). `"accept"` is intended only for time-bounded migration
-	// windows. Per the v0.5.1 ADR the literal default lives in
-	// `reference.conf`, not here.
+	// Policy for refresh tokens whose `family_id` matches no family record.
+	// `"reject"` is the safe choice; `"accept"` is only for time-bounded
+	// migration windows. The default lives in `reference.conf`.
 	unknownFamilyPolicy: z.enum(["accept", "reject"]),
-	// SF-6 (v0.5.1) / Phase G / M6: policy for refresh tokens lacking
-	// `jti` or `family_id` claims when family rotation is wired. The
-	// `"accept-with-warning"` migration-window value was removed in this
-	// release; only `"reject"` remains. Operators upgrading from v0.5.x
-	// who still set `accept-with-warning` get a Zod
-	// `invalid_enum_value` error pointing at this field.
+	// Refresh tokens lacking `jti` or `family_id` while family rotation is wired
+	// are rejected. `"reject"` is the only value, so a stale
+	// `accept-with-warning` fails boot on this field.
 	legacyRtPolicy: z.enum(["reject"]),
 });
 
 /**
- * Fields removed from `oauth.refreshToken` die loudly via `withRemovedKeys`
- * (#366) — see `./removed-keys.mts` for why detection runs on the raw input.
+ * Fields removed from `oauth.refreshToken` fail boot via `withRemovedKeys`; see
+ * `./removed-keys.mts` for why detection runs on the raw input.
  */
 const refreshTokenSchema = withRemovedKeys(
 	"oauth.refreshToken",
@@ -694,77 +558,57 @@ const refreshTokenSchema = withRemovedKeys(
 );
 
 /**
- * One `oauth.authorize.acrValues` entry (the MFA ADR's D15): a list of `amr`
- * values, every one of which a session must carry, or a list of such lists,
- * any one of which it must — `"urn:o3co:acr:phr" = [["hwk"], ["swk"]]`. A
- * list, or an alternative, that requires nothing is refused: it would be
- * satisfied by every session and vouch for nothing.
+ * One `oauth.authorize.acrValues` entry: `amr` values a session must all carry,
+ * or a list of such lists, any one of which suffices —
+ * `"urn:o3co:acr:phr" = [["hwk"], ["swk"]]`. An empty list or alternative is
+ * refused: every session would satisfy it.
  */
 const acrAlternativeSchema = z.array(z.string().min(1)).min(1);
 const acrRequirementSchema = z.union([acrAlternativeSchema, z.array(acrAlternativeSchema).min(1)]);
 
 /**
- * `oauth.authorize` carries one live key, `acrValues` (#481), and retires
- * `allowUnmarkedClients` loudly (#330) via `withRemovedKeys` (#366).
- * Optional because nothing requires the section: `reference.conf` declares
- * `acrValues {}`, and the tombstone env substitution resolves to nothing
- * unless a stale variable is still exported.
+ * `oauth.authorize`: one live key, `acrValues`, plus the retired
+ * `allowUnmarkedClients`. Optional: `reference.conf` declares `acrValues {}`,
+ * and the tombstone env substitution resolves to nothing unless a stale
+ * variable is still exported.
  */
 const authorizeSchema = withRemovedKeys(
 	"oauth.authorize",
 	REMOVED_AUTHORIZE_FIELDS,
 	z
 		.object({
-			// #481: the Authentication Context Class References this deployment
-			// can vouch for, each mapped to the RFC 8176 `amr` values a session
-			// must carry to satisfy it — or, since the MFA ADR (D15), to several
-			// such lists, any one of which does. `/authorize` answers
-			// `acr_values` from this table alone — an acr that is not here is
-			// refused rather than silently accepted — and discovery advertises
-			// the keys as `acr_values_supported`, less any entry nothing
-			// installed can satisfy, which oauth drops at boot with a log line.
+			// The Authentication Context Class References this deployment can
+			// vouch for, each mapped to the RFC 8176 `amr` values that satisfy it.
+			// `/authorize` answers `acr_values` from this table alone (an acr not
+			// here is refused), and discovery advertises the keys as
+			// `acr_values_supported`, less entries nothing installed can satisfy
+			// (dropped at boot with a log line).
 			acrValues: z.record(z.string().min(1), acrRequirementSchema).optional(),
 		})
 		.optional(),
 );
 
 /**
- * Sanity ceiling for `http.trustProxy` expressed as a hop count.
- *
- * A typo guard, not a policy: no HTTP path has 256 reverse proxies in front of
- * it, and a large number written to mean "trust everything" produces exactly
- * the blanket trust `true` expresses — except silently, and without the
- * operator having decided it. Making them write `true` keeps that decision
- * visible in the config. Exported so the `httpSettings` contract suite holds
- * the slot's value to the same ceiling.
+ * Ceiling for `http.trustProxy` as a hop count: a typo guard, not a policy. A
+ * large number meant as "trust everything" would silently grant the blanket
+ * trust `true` states openly. Exported so the `httpSettings` contract suite
+ * holds the slot to the same ceiling.
  */
 export const MAX_TRUST_PROXY_HOPS = 255;
 
 /**
- * A decimal integer, optionally signed and optionally fractional — the shapes
- * an environment variable can carry that are meant as a hop count. Anything
- * else (`10.0.0.7`, `loopback`) has more than one dot or a non-digit and falls
- * through to the address-list reading. `-1` and `1.5` are matched deliberately
- * so they are rejected as bad hop counts rather than silently reinterpreted as
- * one-entry address lists.
+ * A decimal, optionally signed or fractional: the env-var shapes meant as a hop
+ * count. `-1` and `1.5` match on purpose, so they fail as bad hop counts rather
+ * than read as one-entry address lists; `10.0.0.7` and `loopback` do not match.
  */
 const NUMERIC_STRING = /^-?[0-9]+(\.[0-9]+)?$/;
 
 /**
- * Normalise whatever the config source produced into one of the three
- * `trust proxy` shapes Express accepts.
- *
- * HOCON substitutes `${?HTTP_TRUST_PROXY}` as a **string**, always — the only
- * reason the pre-#292 `z.boolean()` worked is that `@o3co/ts.hocon`'s Zod
- * bridge coerces for a bare boolean leaf. A union gives the bridge nothing to
- * coerce towards, so the mapping has to live here. Without it the sole
- * documented override surface (the env var) could not express a list at all.
- *
- * #288 generalised that finding: no env-overridable boolean in this file
- * relies on the bridge any more. This function stays separate because
- * `trustProxy` is not a boolean — it reads `1` and `0` as **hop counts**,
- * where `coerceBooleanFromEnv` reads them as true and false. The two
- * deliberately diverge; `true` / `false` / `""` agree.
+ * Normalises the config source's value into one of Express's `trust proxy`
+ * shapes. HOCON substitutes `${?HTTP_TRUST_PROXY}` as a string, and a union
+ * gives the hocon bridge nothing to coerce towards, so the mapping lives here.
+ * Separate from `coerceBooleanFromEnv` on purpose: `1` and `0` are hop counts
+ * here, not booleans; `true` / `false` / `""` agree.
  */
 const normalizeTrustProxy = (raw: unknown): unknown => {
 	if (Array.isArray(raw)) {
@@ -791,28 +635,19 @@ const normalizeTrustProxy = (raw: unknown): unknown => {
 };
 
 /**
- * `http.trustProxy` — handed straight to Express's `trust proxy`.
+ * `http.trustProxy`, handed straight to Express's `trust proxy`:
  *
- * Boolean-only until #292, which meant the only way to accept `X-Forwarded-For`
- * at all was `true`: trust the leftmost forwarded entry from **whoever opened
- * the connection**. Anyone able to reach the process directly, or through one
- * more hop than the deployment accounted for, could then choose `req.ip` and
- * forge a rate-limit identity.
+ * - `false`: trust nothing; `req.ip` is the socket peer. The default.
+ * - `true`: trust every hop. Correct only when nothing but the proxy can reach
+ *   this process; otherwise anyone can choose `req.ip` and forge a rate-limit
+ *   identity.
+ * - a hop count: trust that many hops back from the socket peer.
+ * - an address list: IP literals, CIDR ranges or named ranges (`loopback`,
+ *   `linklocal`, `uniquelocal`); the only shape that says which hop is trusted.
  *
- * The four accepted shapes are Express's own:
- *
- *   - `false` — trust nothing; `req.ip` is the socket peer. The default.
- *   - `true` — trust every hop. Still available, still blanket, and correct
- *     only when nothing but the proxy can route to this process.
- *   - a **hop count** — trust that many hops back from the socket peer.
- *   - an **address list** — IP literals, CIDR ranges, or the named ranges
- *     (`loopback`, `linklocal`, `uniquelocal`). The only shape that expresses
- *     *which* hop is trusted.
- *
- * Entries are validated against the shared vocabulary in `../net/trusted-proxy`
- * — the same one `@o3co/auth-provider-mtls` matches its `trusted-proxies`
- * allowlist with — so a typo fails at boot naming its index, rather than
- * becoming a policy that silently never matches.
+ * Entries are validated with `../net/trusted-proxy`, the vocabulary
+ * `@o3co/auth-provider-mtls` uses, so a typo fails at boot naming its index
+ * instead of silently never matching.
  */
 const trustProxySchema = z
 	.preprocess(
@@ -849,25 +684,14 @@ const trustProxySchema = z
 export const CoreConfigSchema = z.object({
 	http: z.object({
 		port: z.coerce.number(),
-		// #292: boolean | hop count | address list. See `trustProxySchema`.
+		// Boolean, hop count or address list. See `trustProxySchema`.
 		trustProxy: trustProxySchema,
-		// Per-probe deadline for the readiness endpoint. Must stay well under
-		// the orchestrator's probe timeout, or a partitioned dependency reads
-		// as a slow replica rather than an unready one. Shape-only; default
-		// lives in HOCON.
-		//
-		// `.positive()` is load-bearing, not decoration. HOCON substitutes an
-		// empty environment variable as `""` — a very common shape in a .env
-		// file, a compose `environment:` entry, or a ConfigMap key left blank —
-		// and `z.coerce.number()` turns `""` into `0`. `setTimeout` clamps 0 to
-		// 1ms, so every probe against a perfectly healthy Redis would time out
-		// and the replica would answer 503 forever, draining all traffic with
-		// nothing actually wrong. Failing boot loudly is the right outcome.
-		// The upper bound is Node's timer range. `setTimeout` silently clamps a
-		// delay above 2^31-1 to 1ms, so an operator who wrote a large number
-		// meaning "be patient" would get the most impatient possible deadline
-		// and a replica that is unready forever — the same failure as the empty
-		// string, reached from the opposite direction.
+		// Per-probe deadline for the readiness endpoint; keep it well under the
+		// orchestrator's probe timeout, or a partitioned dependency reads as a
+		// slow replica instead of an unready one. Default in HOCON. Bounded both
+		// ways because `setTimeout` turns 0 (an empty env var through
+		// `z.coerce.number()`) and anything above 2^31-1 into 1ms: every probe
+		// would time out and the replica would answer 503 with nothing wrong.
 		readinessTimeoutMs: z.coerce.number().int().positive().max(2_147_483_647),
 	}),
 	// Shape-only; the default lives in HOCON. `silent` is a threshold, not a
@@ -883,80 +707,42 @@ export const CoreConfigSchema = z.object({
 		accessToken: accessTokenSchema,
 		refreshToken: refreshTokenSchema,
 		grants: z.object({}).passthrough(),
-		// IH-6 (v0.5.3): when acting as an OIDC OP, `/authorize` rejects
-		// requests that omit `openid` unless operators explicitly choose dual
-		// OAuth/OIDC mode. Shape-only; default lives in HOCON.
+		// As an OIDC OP, `/authorize` rejects requests without `openid` unless the
+		// operator chooses dual OAuth/OIDC mode. Default in HOCON.
 		oidcMode: z.enum(["oidc-required", "dual"]),
-		// #297: require a Store-published verified email before issuing tokens
-		// for an end-user subject. Optional and off by default — `emailVerified`
-		// is Store data that many Stores simply do not model, so defaulting this
-		// on would refuse every user of every deployment that has not adopted
-		// the field. The verification *flow* stays with the Store; this is only
-		// a gate on what this library issues.
-		//
-		// #288: `coerceBooleanFromEnv`. `OAUTH_REQUIRE_EMAIL_VERIFIED` reached a
-		// bare `z.boolean()` and worked only because the hocon bridge happens to
-		// coerce a boolean leaf sitting directly in an object shape — a property
-		// of where the field sits, not of the field. Wrapping `oauth` the way
-		// `oauth.jwt` is wrapped would have taken it away silently.
+		// Require a Store-published verified email before issuing tokens for an
+		// end-user subject. Off by default: many Stores do not model
+		// `emailVerified`, and turning it on would refuse all their users. The
+		// verification flow stays with the Store; this only gates issuance.
 		requireEmailVerified: coerceBooleanFromEnv.optional(),
-		// #311: deployment-wide deny-by-absence for `allowedGrantTypes`.
-		//
-		// #268 made a *declared* allowlist restrict which grants a client may
-		// use, and had to keep absence meaning "unrestricted": the grants that
-		// ignored the field predate it, so denying on absence would have
-		// revoked every grant from every registration written before it
-		// existed. The consequence is that the secure posture is opt-in per
-		// registration and a deployment cannot state it once — an omitted
-		// field silently gets every grant.
-		//
-		// Off by default for the same reason the central rule allows by
-		// absence. Turning it on is the operator saying they have audited
-		// their registrations; it composes with the per-grant
-		// `requiresExplicitGrantAllowlist` (#326) to the stricter of the two,
-		// which for the absent case is this one.
-		//
-		// `coerceBooleanFromEnv` for the reason the field above documents:
-		// `OAUTH_REQUIRE_GRANT_TYPE_ALLOWLIST` arrives as a string.
+		// Deployment-wide deny-by-absence for `allowedGrantTypes`. Per client, an
+		// absent allowlist means every grant, so registrations without the field
+		// keep working; the secure posture is otherwise opt-in per registration.
+		// Off by default: turning it on says the operator audited their
+		// registrations. Composes with the per-grant
+		// `requiresExplicitGrantAllowlist` to the stricter of the two.
 		requireGrantTypeAllowlist: coerceBooleanFromEnv.optional(),
-		// #267: `/authorize` refuses a client not marked `firstParty: true` —
-		// one with no `firstParty` field and one carrying an explicit `false`
-		// alike. The `allowUnmarkedClients` migration escape hatch that
-		// admitted unmarked registrations (#317) was removed in #330, and the
-		// section still carries the tombstone that rejects a config setting it
-		// (see `REMOVED_AUTHORIZE_FIELDS`) — beside `acrValues` (#481).
+		// `/authorize` refuses a client not marked `firstParty: true` (a missing
+		// field and an explicit `false` alike). The section carries `acrValues`
+		// and the tombstone for the removed `allowUnmarkedClients` (see
+		// `REMOVED_AUTHORIZE_FIELDS`).
 		authorize: authorizeSchema,
-		// OR-9 (Wave 5d): adapter switch for the OAuth authorization-code
-		// repository. Multi-replica deployments MUST set this to `"redis"`;
-		// the in-memory variant loses codes on restart and across replicas.
-		//
-		// `adapter` is `.optional()` (not required-when-code-is-present)
-		// because the core HOCON binds it to `${?OAUTH_CODE_ADAPTER}` with
-		// no literal default — when the env var is unset, HOCON still
-		// produces an empty `oauth.code = {}` block. Requiring `adapter`
-		// here would reject that valid "no override" state. The
-		// `buildModules` legacy `repositories.code.type = "redis"` fallback
-		// only fires when `adapter` is undefined, so leaving it optional
-		// is what keeps the deprecation window real.
+		// Adapter for the OAuth authorization-code repository. Multi-replica
+		// deployments MUST use `"redis"`: memory loses codes on restart and across
+		// replicas. Optional because HOCON binds it to `${?OAUTH_CODE_ADAPTER}`
+		// with no literal, leaving `oauth.code = {}` when unset, and
+		// `buildModules` falls back to the deprecated `repositories.code.type`
+		// only when `adapter` is undefined.
 		code: z
 			.object({
 				adapter: z.enum(["memory", "redis"]).optional(),
 			})
 			.optional(),
-		// #472: the RFC 8628 device-grant section `deviceGrantModule` reads.
-		// Declared here for the reason the `redis*` sections below are: this
-		// object strips keys it does not know, and the standalone validates
-		// against it before any module's own `configSchema` runs, so an
-		// operator's `enabled = true` — and the verification URI, code
-		// lifetime and rate-limit budget beside it — vanished at parse time.
-		//
-		// Presence-only. The defaults live in the device-grant package's
-		// `reference.conf` and in `deviceGrantConfigSchema`, which also
-		// enforces the real bounds; the two enum-shaped keys keep their
-		// vocabulary so a typo fails here by name rather than reading as a
-		// silently-absent declaration downstream. The booleans ride
-		// `coerceBooleanFromEnv` for the #288 reason: a `${?VAR}` arrives as a
-		// string.
+		// The RFC 8628 device-grant section `deviceGrantModule` reads, mirrored so
+		// a parse through this strip-mode object keeps it. Presence-only: defaults
+		// and real bounds live in the device-grant package's `reference.conf` and
+		// `deviceGrantConfigSchema`; enum-shaped keys keep their vocabulary so a
+		// typo fails here by name.
 		deviceAuthorization: z
 			.object({
 				enabled: coerceBooleanFromEnv.optional(),
@@ -970,47 +756,38 @@ export const CoreConfigSchema = z.object({
 						windowSeconds: z.coerce.number().int().positive().max(MAX_DURATION_SECONDS),
 					})
 					.optional(),
-				// #363: the declared-absence spelling for the `deviceCodeStore`
-				// slot. `"unsupported"` is the only value the module accepts.
+				// The declared-absence spelling for the `deviceCodeStore` slot;
+				// `"unsupported"` is the only value the module accepts.
 				store: z.literal("unsupported").optional(),
 			})
 			.optional(),
-		// IH-16 (v0.5.1): bound the OIDC `nonce` query parameter at /authorize
-		// ingress so a malicious RP cannot exhaust per-request memory or amplify
-		// the id_token payload by sending a multi-megabyte nonce. Shape-only —
-		// per the v0.5.1 ADR (defaults live in HOCON, not in zod).
+		// Bounds the OIDC `nonce` at /authorize so a malicious RP cannot exhaust
+		// per-request memory or bloat the id_token. Default in HOCON.
 		nonce: z
 			.object({
 				maxLength: z.coerce.number().int().positive(),
 			})
 			.optional(),
-		// F10 (v0.5.3): bound RFC 8693 actor delegation chains so repeated
-		// token exchanges cannot grow unbounded nested `act` claims. Shape-only —
-		// defaults live in HOCON, not zod.
+		// Bounds RFC 8693 actor delegation chains so repeated token exchanges
+		// cannot nest `act` claims without limit. Default in HOCON.
 		tokenExchange: z
 			.object({
 				maxActorChainDepth: z.coerce.number().int().positive(),
 			})
 			.optional(),
-		// Wave 1 §5.3 (v0.6.x): opt-in gate for RFC 8707 Resource Indicator
-		// enforcement. `enabled = false` in reference.conf ensures the feature
-		// is off by default; operators set `enabled = true` (or
-		// `OAUTH_RESOURCE_INDICATOR_ENABLED=true`) to activate. Shape-only per
-		// ADR 2026-04-30 — no `.default()` here; default lives in reference.conf
-		// (added in Task 18). `coerceBooleanFromEnv` handles the HOCON
-		// env-substitution string → boolean coercion established by PR #171.
+		// Opt-in RFC 8707 Resource Indicator enforcement; off in reference.conf
+		// (`OAUTH_RESOURCE_INDICATOR_ENABLED=true` turns it on).
 		resourceIndicator: z
 			.object({
 				enabled: coerceBooleanFromEnv,
 			})
 			.optional(),
-		// #529: Client ID Metadata Documents — a client whose `client_id` is the
-		// https URL of its own registration (draft-ietf-oauth-client-id-metadata-
-		// document; the MCP 2026-07-28 registration model). Off by default. The
-		// list-valued keys accept a comma-separated string, which is how an
-		// environment variable carries a list (the `cors.allowedOrigins` shape).
-		// Every ceiling here is the operator's: a document says who a client is,
-		// never what it may reach.
+		// Client ID Metadata Documents: a `client_id` that is the https URL of the
+		// client's own registration (draft-ietf-oauth-client-id-metadata-document;
+		// the MCP 2026-07-28 registration model). Off by default. List keys also
+		// take a comma-separated string, for environment variables. Every ceiling
+		// here is the operator's: a document says who a client is, never what it
+		// may reach.
 		clientIdMetadataDocuments: z
 			.object({
 				enabled: coerceBooleanFromEnv,
@@ -1027,114 +804,57 @@ export const CoreConfigSchema = z.object({
 				maxConcurrentFetches: z.coerce.number().int().positive().optional(),
 			})
 			.optional(),
-		// #277: what `POST /oauth/revoke` promises for ACCESS tokens.
-		//
-		//   "denylist"    — revoking an access token adds its `jti` to the
-		//                   `accessTokenDenylist` component, which token
-		//                   verification consults. Boot refuses when the slot is
-		//                   unwired: the endpoint would answer RFC 7009's
-		//                   mandatory 200 while the JWT stayed valid until expiry.
-		//   "unsupported" — this deployment does not revoke access tokens.
-		//                   `token_type_hint = access_token` gets RFC 7009 §2.2.1
-		//                   `unsupported_token_type`, and no denylist is needed.
-		//
-		// REFRESH-token revocation is unaffected by this key in either mode — it
-		// runs off `refreshTokenFamilyRevocation` and never needed a denylist.
-		//
-		// `.optional()` with NO default here, in the schema or in code:
-		// `readAccessTokenRevocationMode` reports omission as `undefined` and
-		// leaves the resolution to the two layers that consume it, because they
-		// are asking different questions. The boot validator asks whether a
-		// composition may run and reads omission as `"denylist"`, so an embedder
-		// hand-building a config cannot fall into the silent no-op by leaving the
-		// key out. The revocation router asks what to answer given what it was
-		// handed, and with no denylist reports `unsupported_token_type`. A single
-		// baked-in default would have to pick one and be wrong at the other.
-		//
-		// `reference.conf` still carries the literal `"denylist"` — not as the
-		// source of the default, but so the key is discoverable and greppable
-		// where operators read configuration.
+		// What `POST /oauth/revoke` promises for access tokens:
+		//   "denylist"    — the `jti` goes into the `accessTokenDenylist`
+		//                   component that verification consults. Boot refuses an
+		//                   unwired slot: RFC 7009's mandatory 200 would otherwise
+		//                   leave the JWT valid until expiry.
+		//   "unsupported" — `token_type_hint = access_token` gets RFC 7009
+		//                   §2.2.1 `unsupported_token_type`; no denylist needed.
+		// Refresh-token revocation is unaffected (`refreshTokenFamilyRevocation`).
+		// Optional with no default in schema or code (see
+		// `readAccessTokenRevocationMode`); `reference.conf` carries `"denylist"`
+		// so the key is discoverable.
 		revocation: z
 			.object({
 				accessToken: z.enum(["denylist", "unsupported"]),
-				// #406: the declared-absence spelling for BOTH subject-level
-				// revocation slots (`subjectRevocation`, `subjectSessionIndex`).
-				// One key because they are one capability — the index enumerates
-				// what a credential change cascades over, the watermark refuses
-				// what the cascade missed — and a deployment that has neither has
-				// one thing to say.
-				//
-				// `.optional()` and unvalued by default, like `accessToken`: the
-				// guard reads it only when a slot is unfilled, and a deployment
-				// that wires both never has to write it.
+				// The declared-absence spelling for both subject-level revocation
+				// slots (`subjectRevocation`, `subjectSessionIndex`). One key because
+				// they are one capability: the index enumerates what a credential
+				// change cascades over, the watermark refuses what it missed. Read
+				// only when a slot is unfilled.
 				subject: z.enum(["watermark", "unsupported"]).optional(),
 			})
 			.optional(),
-		// Wave 2 cross-mechanism dispatch refactor: declared in core (single
-		// source of truth) because the dispatch-policy applies across ALL
-		// installed binding-mechanism modules (DPoP, mTLS, ...). Each module
-		// no longer redeclares this key in its own schema. Shape-only — the
-		// default lives in HOCON (see core reference.conf). The synthesized
-		// `tokenBindingMw` in `assembleApp` reads it through
-		// `resolveTokenBindingSettings`, `"intent-explicit"` when absent:
-		// the policy is core's (#728), and no slot carries it.
-		//
-		// See ADR `packages/core/docs/adr/2026-05-20-token-binding-first-class-abstraction.md`
-		// for the cross-mechanism design rationale.
+		// Declared in core because the dispatch policy spans every installed
+		// binding mechanism (DPoP, mTLS, ...). Default in HOCON; `assembleApp`'s
+		// `tokenBindingMw` reads it through `resolveTokenBindingSettings`
+		// (`"intent-explicit"` when absent), and no slot carries it. See
+		// `packages/core/docs/adr/2026-05-20-token-binding-first-class-abstraction.md`.
 		tokenBinding: z
 			.object({
 				"dispatch-policy": z.enum(["intent-explicit", "strict-mutual-exclusion"]),
-				// #275: bind a CONFIDENTIAL client's refresh token to the
-				// presented DPoP key / client certificate, which is otherwise
-				// done only for public clients.
-				//
-				// Neither RFC requires the public-client restriction and neither
-				// forbids lifting it. RFC 9449 §5's "refresh tokens issued to
-				// confidential clients ... are not bound" is descriptive prose
-				// with no RFC 2119 keyword, next to three MUSTs for public
-				// clients; RFC 8705 §7.1 says the same about certificates. Their
-				// rationale — a confidential client authenticates when it
-				// refreshes, so the RT is already constrained — holds for this
-				// implementation, which refuses an unauthenticated caller and an
-				// RT whose `azp` is not the authenticated client.
-				//
-				// So this is hardening for one specific shape: a deployment
-				// whose DPoP key is better protected than its client secret (key
-				// in an HSM or TPM, secret in an environment variable), where
-				// leaking the secret alone is then not enough. Off by default,
-				// because a bound RT pins the client to one key or certificate
-				// for the RT's whole lifetime and rotating mid-lifetime breaks
-				// refresh.
-				//
-				// Lives here rather than under `oauth.dpop` for the reason
-				// `dispatch-policy` does: it applies across every installed
-				// binding mechanism, so one home keeps the mechanisms from
-				// drifting apart — and, like it, it is core's (#728): every
-				// grant reads it through `resolveTokenBindingSettings`, and no
-				// slot carries it.
+				// Bind a confidential client's refresh token to the presented DPoP
+				// key or client certificate, as is always done for public clients.
+				// RFC 9449 §5 and RFC 8705 §7.1 neither require nor forbid it: a
+				// confidential client authenticates on refresh, and this
+				// implementation refuses an unauthenticated caller and an RT whose
+				// `azp` is not that client. Hardening for deployments whose key is
+				// better protected than the client secret (HSM or TPM vs an env var).
+				// Off by default: a bound RT pins the client to one key for its whole
+				// lifetime, so rotating mid-lifetime breaks refresh. Core's, like
+				// `dispatch-policy`, read through `resolveTokenBindingSettings`.
 				bindConfidentialClientRefreshTokens: coerceBooleanFromEnv.optional(),
 			})
 			.optional(),
-		// #496: the two binding-mechanism sections `tokenBinding` above
-		// dispatches over. Declared here for the reason `deviceAuthorization`
-		// is: this object strips keys it does not know, and the composition
-		// root `packages/core/README.md` documents parses through it BEFORE
-		// `createApp` composes the modules' own `configSchema`s. So an
-		// operator's whole mTLS or DPoP posture vanished at that first parse,
-		// `enabled` fell to the module's `false` default, and the mechanism
-		// reported itself as switched off rather than as misconfigured — the
-		// quietest of the failure modes, because nothing errors.
-		//
-		// For mTLS that also made every boot refusal added this cycle (#431,
-		// #469, #470) unreachable on the documented path: each one inspects a
-		// configuration that never arrived.
-		//
-		// Both are presence-only, like the `redis*` sections in
-		// `fullSectionsSchema`: the bounds and the defaults stay in
-		// `mtlsConfigSchema` / `dpopConfigSchema` and in the `reference.conf`
-		// each package ships. The enum-shaped keys keep their vocabulary so a
-		// typo fails here by name, and the booleans ride `coerceBooleanFromEnv`
-		// (#288) so a `${?VAR}` string still reads.
+		// The two binding-mechanism sections `tokenBinding` dispatches over,
+		// mirrored so a parse through this strip-mode object keeps them. A lost
+		// section is the quietest failure: `enabled` falls to the module's
+		// `false` and the mechanism reads as switched off, not misconfigured, with
+		// its boot refusals never seeing the config. Presence-only: bounds and
+		// defaults stay in `mtlsConfigSchema` / `dpopConfigSchema` and each
+		// package's `reference.conf`; enum-shaped keys keep their vocabulary so a
+		// typo fails here by name.
 		mtls: z
 			.object({
 				enabled: coerceBooleanFromEnv.optional(),
@@ -1147,17 +867,13 @@ export const CoreConfigSchema = z.object({
 				"full-pki": z
 					.object({
 						"max-chain-depth": z.coerce.number().int().positive().optional(),
-						// Left as strings rather than restated as an enum: the
-						// signature-algorithm vocabulary is owned by the mtls package
-						// and checked there. Copying nine literals into core would be
-						// two lists that must agree, which is the drift this whole
-						// section exists to avoid.
+						// Strings, not an enum: the mtls package owns and checks this
+						// vocabulary, and a copy here would drift.
 						"signature-algorithms": z.array(z.string()).optional(),
 						"min-rsa-key-bits": z.coerce.number().int().positive().optional(),
-						// #341: the one block with no defaults anywhere — the module
-						// refuses boot unless the operator writes `mode` and
-						// `on-unavailable` down. A refusal can only fire on what
-						// survives this parse.
+						// No defaults anywhere: the module refuses boot unless the
+						// operator writes `mode` and `on-unavailable`, and it can only
+						// see what survives this parse.
 						revocation: z
 							.object({
 								mode: z.enum(["crl", "ocsp", "both", "disabled"]).optional(),
@@ -1174,7 +890,7 @@ export const CoreConfigSchema = z.object({
 			})
 			.optional(),
 		// `replay-store` is retired loudly (REMOVED_DPOP_FIELDS). Every field
-		// below owns its coercion, which the preprocess wrapper requires (#288).
+		// below owns its coercion, which the preprocess wrapper requires.
 		dpop: withRemovedKeys(
 			"oauth.dpop",
 			REMOVED_DPOP_FIELDS,
@@ -1184,7 +900,7 @@ export const CoreConfigSchema = z.object({
 					"iat-window-seconds": z.coerce.number().int().positive().optional(),
 					"alg-whitelist": z.array(z.string()).optional(),
 					"replay-store-ttl-seconds": z.coerce.number().int().positive().optional(),
-					// #530: server-provided nonce; the module's own schema defaults it.
+					// Server-provided nonce; the module's own schema defaults it.
 					nonce: z
 						.object({
 							required: z.enum(["never", "as", "as+rs"]).optional(),
@@ -1196,19 +912,14 @@ export const CoreConfigSchema = z.object({
 				.optional(),
 		),
 	}),
-	// The MFA ADR's D19 and the session-admission ADR's D7: whether a password
-	// login asks for a second factor. `mfa.mode` admits its three values, `off`
-	// by reference default — core keeps the key and the default because this
-	// schema is strip-mode (a key the MFA package alone declared would be
-	// dropped silently), and whether a mode other than `off` is honoured is
-	// boot's to refuse: `session-requirement-missing` when no requirement named
-	// `mfa` is registered. A value that is none of the three is refused here,
-	// naming the key — in the schema `createApp` parses itself, so a
-	// composition that never ran `AppConfigSchema` is refused too. A
-	// hand-built configuration that never wrote the key reads as `off`, a
-	// deliberate exception to the 2026-04-30 ADR (defaults live in HOCON): the
-	// parsed type always carries `mfa`. The rest of the section belongs to the
-	// package that reads it and passes through.
+	// Whether a password login asks for a second factor (MFA and
+	// session-admission ADRs). Core declares the key because this schema strips
+	// unknown keys. A mode other than `off` with no registered `mfa` requirement
+	// is refused at boot (`session-requirement-missing`); an unknown value is
+	// refused here, in the schema `createApp` parses itself. Defaulting to `off`
+	// in the schema is a deliberate exception to ADR 2026-04-30, so the parsed
+	// type always carries `mfa`. The rest of the section passes through to the
+	// package that reads it.
 	mfa: z
 		.object({
 			mode: z
@@ -1219,11 +930,10 @@ export const CoreConfigSchema = z.object({
 		})
 		.passthrough()
 		.default({ mode: "off" }),
-	// The session-admission ADR's D7: the requirement names a composition
-	// expects, compared at the end of boot's stage 4 with what registered —
-	// required whenever a consumer of admission is installed, `[]` allowed,
-	// and with no default here or in `reference.conf`: every composition
-	// states its posture.
+	// The requirement names a composition expects (session-admission ADR),
+	// compared at the end of boot's stage 4 with what registered. Required
+	// whenever a consumer of admission is installed, `[]` allowed, and no
+	// default anywhere: every composition states its posture.
 	sessionRequirements: z
 		.object({
 			expected: z.array(
@@ -1236,39 +946,25 @@ export const CoreConfigSchema = z.object({
 export type CoreConfig = z.infer<typeof CoreConfigSchema>;
 
 /**
- * What `POST /oauth/revoke` does with an access token (#277).
- *
- * `"denylist"` requires an `accessTokenDenylist`; `"unsupported"` declares the
- * capability absent so the endpoint says so on the wire instead of pretending.
+ * What `POST /oauth/revoke` does with an access token. `"denylist"` requires an
+ * `accessTokenDenylist`; `"unsupported"` declares the capability absent, so the
+ * endpoint says so on the wire instead of pretending.
  */
 export type AccessTokenRevocationMode = "denylist" | "unsupported";
 
 /**
- * Read `oauth.revocation.accessToken` off any config-shaped value, returning
- * `undefined` when the operator has not declared one.
+ * Reads `oauth.revocation.accessToken` off any config-shaped value; `undefined`
+ * when undeclared. Deliberately undefaulted, because its two consumers resolve
+ * omission differently and both are right:
  *
- * Deliberately undefaulted. The two layers that consume this key resolve
- * omission differently, and both are right:
+ * - boot reads omission as `"denylist"` (`ACCESS_TOKEN_DENYLIST_ABSENCE_POLICY`:
+ *   only an explicit `"unsupported"` excuses an unfilled denylist slot), so a
+ *   revocation endpoint never answers 200 with nothing behind it;
+ * - the revocation router, handed no denylist and no declaration, answers
+ *   `unsupported_token_type`, never a 200 that means nothing.
  *
- * - The **boot-time reading** is that omission means `"denylist"`: every
- *   config written before #277 omits the key, and those are exactly the
- *   deployments whose revocation endpoint was answering 200 with nothing
- *   behind it. Since #375 that reading is enforced by
- *   `ACCESS_TOKEN_DENYLIST_ABSENCE_POLICY` through the declared-absence
- *   guard — only an explicit `"unsupported"` at this key excuses an unfilled
- *   denylist slot — rather than by a bespoke validator stage calling this
- *   function.
- * - The **revocation router** decides what to answer given what it was handed.
- *   Handed no denylist and no declaration, it cannot revoke access tokens, and
- *   `unsupported_token_type` is the honest answer. It never returns to a 200
- *   that means nothing.
- *
- * A collapsed default would have to pick one of those and be wrong at the
- * other layer, so the resolution stays where the reasoning lives.
- *
- * Accepts `unknown` because its callers in `packages/oauth` — the revocation
- * router and the module's discovery-metadata wiring — read through their own
- * config/options shapes, which may predate the key.
+ * Accepts `unknown` because its callers in `packages/oauth` read through their
+ * own config shapes, which may lack the key.
  */
 export function readAccessTokenRevocationMode(
 	config: unknown,
@@ -1280,16 +976,14 @@ export function readAccessTokenRevocationMode(
 }
 
 /**
- * Composes a config schema by merging module-specific schemas with the CoreConfigSchema.
- * Each module can declare its required config shape; the resulting schema validates
- * the intersection of core + all module schemas.
+ * Composes a config schema by intersecting module schemas with
+ * `CoreConfigSchema`.
  *
- * @deprecated Boot no longer composes the modules' schemas into one (#728): it
- * parses the configuration once with core's transitional base, then each
- * module's `configSchema` over the base's output, and refuses two outputs that
- * disagree — the intersection parsed every schema over the raw input, so a
- * module's schema refused the environment strings core's schema coerces.
- * Kept exported for a caller that still composes a schema of its own.
+ * @deprecated Boot parses the configuration once with core's transitional base,
+ * then each module's `configSchema` over the base's output, and refuses outputs
+ * that disagree. An intersection parses every schema over the raw input, so a
+ * module's schema refuses the environment strings core's schema coerces. Kept
+ * for callers that still compose a schema of their own.
  */
 export function composeConfigSchema(moduleSchemas: z.ZodObject<z.ZodRawShape>[]): z.ZodType {
 	let schema: z.ZodType = CoreConfigSchema;
@@ -1303,49 +997,39 @@ const federationEntrySchema = z
 	.object({
 		enabled: coerceBooleanFromEnv,
 		type: z.string().optional(),
-		// The MFA ADR's D13: whether this federation's upstream IdP's `amr`
-		// counts — recorded in the session's `amr` beside `fed`, stamped on
-		// tokens and matched for `acr`. Absent is `false`: the values are kept
-		// apart (`authentication.upstreamAmr`). Beside `enabled` in both
-		// shapes, never inside a type's own section.
+		// Whether this federation's upstream IdP's `amr` counts (MFA ADR): it is
+		// recorded in the session's `amr` beside `fed`, stamped on tokens and
+		// matched for `acr`. Absent is `false`: the values are kept apart
+		// (`authentication.upstreamAmr`). Beside `enabled` in both shapes, never
+		// inside a type's own section.
 		trustUpstreamAmr: coerceBooleanFromEnv.optional(),
 	})
 	.passthrough();
 
 /**
- * The sections core mirrors for the modules of other packages. Until #728 a
- * composition root pre-parsed with `AppConfigSchema`, which stripped every
- * key it did not declare, so each section a module read had to be declared
- * here to survive — the reason the comments below give for most of them. Boot
- * no longer strips anything: it parses the configuration once, with these
- * sections optional in its transitional base (`TransitionalConfigSchema`),
- * and a mirror stays for the coercions and checks it applies, validated
- * whenever the configuration carries it, until the move pull request for its
- * package takes it out.
+ * The sections core mirrors for other packages' modules. This object strips
+ * undeclared keys, so a section parsed through `AppConfigSchema` survives only
+ * if declared here. Boot itself parses once, with these sections optional in its
+ * transitional base (`TransitionalConfigSchema`); each mirror stays for the
+ * coercions and checks it applies, validated whenever the configuration carries
+ * it, until its package owns the section. Mirrors are presence and shape only:
+ * bounds and defaults stay with the owning package.
  */
 export const fullSectionsSchema = z.object({
-	// #593, D9/D16: the federation-grants section. Declared here for the
-	// reason `deviceAuthorization` above is — this object strips keys it
-	// does not know and the standalone validates against it before any
-	// module's own `configSchema` runs — and for one of its own: the
-	// bundled Redis grant store reads the same block, and it is installed
-	// whether or not the routes are. An undeclared block would take an
-	// operator's encryption keys and lifetime bound with it, silently.
-	//
-	// Presence and shape only, as elsewhere here. The bounds live where the
-	// values are used (`assertFederationGrantRetrievalLimits`, the store's
-	// constructor) and the defaults in `config/reference.conf`. Numbers ride
-	// `z.coerce` and booleans `coerceBooleanFromEnv` for the #288 reason: a
-	// `${?VAR}` arrives as a string.
+	// The federation-grants section (see the federation-grants ADR). The bundled
+	// Redis grant store reads it too and is installed whether or not the routes
+	// are, so losing the block would silently drop the operator's encryption
+	// keys and lifetime bound. Bounds live where the values are used
+	// (`assertFederationGrantRetrievalLimits`, the store's constructor);
+	// defaults in `config/reference.conf`.
 	federationGrants: z
 		.object({
 			enabled: coerceBooleanFromEnv.optional(),
-			// Seconds. A grant's own lifetime (D3): what a new one gets, and
-			// the most an operator permits — the code's one-year ceiling still
-			// applies above it.
+			// Seconds. A new grant's lifetime, and the most an operator permits;
+			// the code's one-year ceiling still applies above it.
 			defaultExpiresIn: durationFromEnv(z.number().int().positive()).optional(),
 			maxExpiresIn: durationFromEnv(z.number().int().positive()).optional(),
-			// Seconds. The retrieval's timings (D10, D12).
+			// Seconds. The retrieval's timings.
 			refreshBuffer: durationFromEnv(z.number().int().nonnegative()).optional(),
 			ineligibleRetryAfter: durationFromEnv(z.number().int().positive()).optional(),
 			refreshFailureBackoff: durationFromEnv(z.number().int().nonnegative()).optional(),
@@ -1356,39 +1040,36 @@ export const fullSectionsSchema = z.object({
 			lockWaitMs: durationFromEnv(z.number().int().nonnegative()).optional(),
 			persistRetryBudgetMs: durationFromEnv(z.number().int().positive()).optional(),
 			// Seconds. How long a record answers past the end of what it was
-			// authorized for (D16). Zero is a deployment that keeps no
-			// tombstones.
-			// One year at most, the ceiling of every duration here. Past the
-			// Date range it is a deadline no store can keep, and the stores
-			// refuse it when they are built.
+			// authorized for; zero keeps no tombstones. At most one year: past the
+			// Date range it is a deadline no store can keep, and stores refuse it.
 			tombstoneRetention: durationFromEnv(
 				z.number().int().nonnegative().max(MAX_DURATION_SECONDS),
 			).optional(),
-			// Whether a subject-wide revocation may be ASKED to leave this
-			// subject's established grants standing (D13). An allowance and not
-			// an instruction: the caller still has to ask, what it asked for and
-			// what happened are both reported, and boot refuses the pairing with
-			// an adapter that cannot stamp the two boundaries separately.
+			// Whether a subject-wide revocation may be asked to leave this
+			// subject's established grants standing. An allowance, not an
+			// instruction: the caller must ask, the request and the outcome are
+			// both reported, and boot refuses it with an adapter that cannot stamp
+			// the two boundaries separately.
 			allowKeepOnSubjectRevocation: coerceBooleanFromEnv.optional(),
 			// Whether the connect callback refuses an upstream account already
-			// linked to another local user (D7 check 5), which needs
-			// `UserRepository.findSubjectByFederatedIdentity`. "required" — the
-			// default — refuses to boot without it; "unsupported" records that
-			// this deployment does not make that check.
+			// linked to another local user, which needs
+			// `UserRepository.findSubjectByFederatedIdentity`. "required", the
+			// default, refuses to boot without it; "unsupported" records that this
+			// deployment does not make that check.
 			identityLookup: z.enum(["required", "unsupported"]).optional(),
-			// The deployment's consent page for grants (D8). No default: enabling
-			// the feature is a statement that such a page exists, and boot refuses
-			// it without one. A path, or an absolute URL on the provider's origin.
+			// The deployment's consent page for grants. No default: enabling the
+			// feature states that such a page exists, and boot refuses it without
+			// one. A path, or an absolute URL on the provider's origin.
 			consent: z.object({ url: z.string().min(1).optional() }).optional(),
-			// The credential envelope's key ring (D16). The first key seals;
-			// every listed key opens, so one stays in the ring for as long as
-			// a paused grant may live.
+			// The credential envelope's key ring. The first key seals; every
+			// listed key opens, so a key stays in the ring for as long as a paused
+			// grant may live.
 			encryptionMode: z.enum(["required", "allow-plaintext"]).optional(),
 			encryptionKeys: z
 				.array(z.object({ id: z.string().min(1), key: z.string().min(1) }))
 				.optional(),
-			// What a grant may be for (D6). An empty map is valid: removing the
-			// last connection must remain an operable change.
+			// What a grant may be for. An empty map is valid: removing the last
+			// connection must remain an operable change.
 			connections: z
 				.record(
 					z.string().min(1),
@@ -1397,15 +1078,16 @@ export const fullSectionsSchema = z.object({
 						scopes: z.array(z.string().min(1)).min(1),
 						resource: z.string().min(1).optional(),
 						// No default for either: a guessed access-token maximum
-						// invents a residual-access policy (D15), and a guessed
-						// boundary silently shares one (D13).
+						// invents a residual-access policy, and a guessed boundary
+						// silently shares one.
 						boundary: z.string().min(1),
 						maxAccessTokenLifetime: durationFromEnv(z.number().int().positive()),
 						allowScopeSubsets: coerceBooleanFromEnv.optional(),
 						authorizationParams: z.record(z.string(), z.string()).optional(),
 						callbackURL: z.string().min(1).optional(),
-						// #611: the verified id_token claims D7 check 5 hands the
-						// Store beside the subject. Names only; the package checks them.
+						// Verified id_token claims handed to the Store beside the
+						// subject for the linked-account check. Names only; the
+						// package checks them.
 						identityClaims: z.array(z.string()).optional(),
 					}),
 				)
@@ -1414,13 +1096,10 @@ export const fullSectionsSchema = z.object({
 		.optional(),
 	session: z
 		.object({
-			// #282: the session secret signs the cookie that IS the
-			// authenticated session, so guessing it forges logins. It had no
-			// floor at all; it now clears the same 256 bits the JWT signing
-			// secret does. Unlike the JWT secret (whose floor lives in the
-			// keystore builder because that is the only boundary it crosses),
-			// this value goes straight from config into express-session, so
-			// the schema is the only place to catch it.
+			// Signs the cookie that is the authenticated session, so guessing it
+			// forges logins: held to the same 256-bit floor as the JWT signing
+			// secret. It goes straight into express-session, so this schema is the
+			// only place to check it.
 			secret: z.string().superRefine((value, ctx) => {
 				const actualBytes = measureSecretEntropyBytes(value);
 				if (actualBytes < MIN_SECRET_ENTROPY_BYTES) {
@@ -1434,86 +1113,48 @@ export const fullSectionsSchema = z.object({
 				}
 			}),
 			name: z.string(),
-			// #282: positive and bounded. A `maxAge` of 0 (what an exported-but-
-			// empty SESSION_MAX_AGE coerces to) makes express-session emit a
-			// cookie that has already expired, so every request arrives
-			// unauthenticated and the deployment looks like a login outage with
-			// nothing in the logs.
+			// Positive and bounded: a `maxAge` of 0 (an exported-but-empty
+			// SESSION_MAX_AGE) makes express-session emit an already-expired cookie,
+			// which looks like a login outage with nothing in the logs.
 			maxAge: z.coerce.number().int().positive().max(MAX_DURATION_MS),
-			// #288: `coerceBooleanFromEnv`. `SESSION_SECURE=false` is the
-			// override every plain-HTTP local run and the umbrella E2E depend
-			// on, and it reached a bare `z.boolean()` — surviving only because
-			// this section's `.superRefine` leaves it a `ZodObject` the hocon
-			// bridge can still walk into. Reshape the section as a preprocess
-			// and the boot failure appears with nothing here having changed.
+			// `SESSION_SECURE=false` (plain-HTTP local runs, the umbrella E2E)
+			// arrives as a string, and must not depend on the hocon bridge happening
+			// to reach this leaf.
 			secure: coerceBooleanFromEnv,
 			sameSite: z.enum(["lax", "none", "strict"]),
 			domain: z.string().nullable(),
 			/**
-			 * #405 — the exact URLs `POST /session/login` may accept as
-			 * `redirect_to`.
-			 *
-			 * `.optional()` because absence is already the safe answer: the
-			 * policy fails closed, so a deployment that never sends
-			 * `redirect_to` needs no key and one that omits it by mistake gets
-			 * a refused redirect naming this path, not an open redirect. That
-			 * is the opposite of the `.optional()` slots #363 gave an
-			 * `AbsencePolicy` — those default to *doing nothing*, this one
-			 * defaults to *refusing everything*.
-			 *
-			 * Entries are exact URLs, matched after `new URL(x).href`
-			 * normalization; there is no wildcard or prefix form. They are
-			 * validated where the router is built (`@o3co/auth-provider-session`),
-			 * not here, because the rule they are held to also narrows them
-			 * against `session.domain` — one check reading two keys belongs
-			 * with the code that owns the rule rather than split across the
-			 * schema.
+			 * The exact URLs `POST /session/login` may accept as `redirect_to`,
+			 * matched after `new URL(x).href` normalization, with no wildcard or
+			 * prefix form. Optional because absence fails closed: a missing key
+			 * refuses the redirect, naming this path, rather than opening one.
+			 * Validated where the router is built (`@o3co/auth-provider-session`),
+			 * because the rule also narrows entries against `session.domain`.
 			 */
 			redirectAllowlist: z.array(z.string()).optional(),
 			/**
-			 * #272 — CSRF policy for the state-changing session routes.
+			 * CSRF policy for the state-changing session routes. Optional: every
+			 * value has a code-side default, so a hand-built config need not
+			 * restate it.
 			 *
-			 * `.optional()` on purpose: a deployment inheriting `reference.conf`
-			 * always has it, and every value has a code-side default, so a
-			 * hand-built config (tests, embedders composing their own object) is
-			 * not forced to restate a section it has no opinion about.
-			 *
-			 * `trustedOrigins` is NOT `cors.allowedOrigins`. "May this origin read
-			 * my responses" and "may this origin make me change state" are two
-			 * questions, and #272 was filed because one list was answering both.
-			 * Deployments whose login UI is served from a different origin than
-			 * the provider list those origins here — explicitly. The same list
-			 * decides where an account-link start (`?link=1`) may be navigated
-			 * from.
+			 * `trustedOrigins` is not `cors.allowedOrigins`: "may this origin read
+			 * my responses" and "may it make me change state" are separate
+			 * questions. List a login UI served from another origin here,
+			 * explicitly. The same list decides where an account-link start
+			 * (`?link=1`) may be navigated from.
 			 */
 			csrf: z
 				.object({
 					trustedOrigins: z.array(z.string()),
-					// `.int().positive()` is load-bearing, not decoration — the same
-					// trap `http.readinessTimeoutMs` above documents, reached through
-					// a different door. The value is used in arithmetic AND
-					// stringified into the CSRF token as its expiry field, so every
-					// non-conforming value disables the token arm *silently*:
-					//
-					//   ""   -> HOCON substitutes an empty SESSION_CSRF_TTL_SECONDS as
-					//           the empty string and `z.coerce.number()` makes that
-					//           `0`, so every minted token is already expired. The
-					//           token arm is dead, header-less clients are locked out,
-					//           and nothing in the config looks wrong.
-					//   0/-n -> the same, stated outright.
-					//   7200.5 -> the expiry stringifies as a decimal, which the
-					//           token's own shape check rejects. Every token the
-					//           provider issues is unverifiable the instant it is
-					//           issued, including the one `GET /session/csrf` just
-					//           handed the caller.
-					//
-					// The ceiling is a policy bound, not a mechanical one: a token
-					// whose job is to outlive a login form sitting open stops being
-					// that and becomes a long-lived bearer value in a JS-readable
-					// cookie. It restates `MAX_CSRF_TTL_SECONDS` from
-					// `@o3co/auth-provider-session`'s `csrf.mts`, which cannot be
-					// imported here (session depends on core, not the reverse); the
-					// two are pinned together by a test in that package.
+					// A positive integer: the value is stringified into the CSRF token
+					// as its expiry, so 0 (an empty SESSION_CSRF_TTL_SECONDS through
+					// `z.coerce.number()`), a negative or a fractional value silently
+					// makes every token expired or unverifiable at issue. The ceiling
+					// is policy: a token meant to outlive an open login form must not
+					// become a long-lived bearer value in a JS-readable cookie. It
+					// restates `MAX_CSRF_TTL_SECONDS` from
+					// `@o3co/auth-provider-session`'s `csrf.mts` (session depends on
+					// core, not the reverse); a test there pins the two together.
 					ttlSeconds: z.coerce.number().int().positive().max(86_400),
 				})
 				.optional(),
@@ -1534,11 +1175,9 @@ export const fullSectionsSchema = z.object({
 				.passthrough(),
 		})
 		.superRefine((session, ctx) => {
-			// #282: every current browser refuses to store a `SameSite=None`
-			// cookie that is not also `Secure` (Chrome 80+, Firefox 96+,
-			// Safari 13+). The combination is not "less safe" — it is
-			// completely non-functional, and it fails on the client with no
-			// server-side signal at all, which is why it has to be caught here.
+			// Browsers refuse to store a `SameSite=None` cookie that is not
+			// `Secure`, so the combination fails on the client with no server-side
+			// signal.
 			if (session.sameSite === "none" && session.secure !== true) {
 				ctx.addIssue({
 					code: z.ZodIssueCode.custom,
@@ -1552,36 +1191,22 @@ export const fullSectionsSchema = z.object({
 			}
 		}),
 	/**
-	 * Rate-limit config for SESSION routes (e.g. `/session/login` bruteforce
-	 * protection). Uses `windowMs` (milliseconds) for historical reasons —
-	 * the section was shaped by `express-rate-limit`, which
-	 * `packages/session/src/routes/Session.mts` consumed until #270.
+	 * Rate limits for session routes (`/session/login` brute-force protection).
+	 * `windowMs` is milliseconds, the `express-rate-limit` shape. The login guard
+	 * runs on the shared `rateLimiter` component, keyed `login:ip:<ip>`; these
+	 * values stay its source of truth, which both bundled limiter adapters seed
+	 * into `limits.login` in whole seconds (`resolveLoginLimitSpec`).
 	 *
-	 * Since #270 `/session/login` runs on the shared `rateLimiter` component
-	 * instead, keyed `login:ip:<ip>`, so the guard is one bucket set across
-	 * replicas rather than one per process. These values stay the single
-	 * source of truth: both bundled limiter adapters seed their own
-	 * `limits.login` from them (`resolveLoginLimitSpec`), converting to the
-	 * whole seconds a `RateLimitSpec` takes.
-	 *
-	 * IH-18 — config split:
-	 * This section ONLY governs session-route rate limiting. OAuth endpoint
-	 * rate limiting (`/token`, `/authorize`) is provided via the optional
-	 * `rateLimiter` component slot; the built-in module config lives under
-	 * `memoryRateLimiter.*` / `redisRateLimiter.*` and uses `windowSeconds`
-	 * (seconds) per `RateLimitSpec` in `packages/core/src/ratelimit/types.mts`.
-	 * Two independent systems, different keys, different units.
+	 * OAuth endpoint limits (`/token`, `/authorize`) are separate: the
+	 * `rateLimiter` slot's modules take them under `memoryRateLimiter.*` /
+	 * `redisRateLimiter.*` in `windowSeconds` (`ratelimit/types.mts`).
 	 */
 	rateLimit: z.object({
 		login: rateLimitSchema,
-		// OR-5: fail-mode policy for the OAuth-endpoint rate limiter when
-		// the limiter backend itself errors. No `.default()` per ADR — the
-		// literal lives in `reference.conf`, which ships `"closed"`: HTTP 503
-		// plus a log line, secure-by-default load shedding. `"open"` lets
-		// traffic through and still emits `logger.error`, so operators see
-		// the outage even when the audit sink is also down; deployments that
-		// prefer availability set it (`RATE_LIMIT_FAIL_MODE=open`). This
-		// comment called `"open"` the default (#458).
+		// What the OAuth-endpoint limiter does when its backend errors. The
+		// default lives in `reference.conf`: `"closed"` answers 503 and logs.
+		// `"open"` (`RATE_LIMIT_FAIL_MODE=open`) lets traffic through and still
+		// logs at error, so the outage is visible even with the audit sink down.
 		failMode: z.enum(["open", "closed"]),
 	}),
 	federations: z.record(z.string(), federationEntrySchema),
@@ -1603,66 +1228,39 @@ export const fullSectionsSchema = z.object({
 			.passthrough(),
 	}),
 	endpoints: z.object({
-		// IH-17: tightened from `z.string().optional()` to `z.string()`. The
-		// runtime invariant was already enforced by `oauthModule.configSchema`
-		// at boot time; the base schema now matches the contract so AppConfig
-		// no longer types the field as optional + downstream consumers don't
-		// need null guards. Default `/login` lives in HOCON.
+		// Required: `oauthModule` needs it at boot, so consumers need no null
+		// guard. Default `/login` lives in HOCON.
 		login: z.object({ url: z.string() }),
-		// #527: the deployment-owned consent page a client that is not
-		// first-party is routed through, same pattern as `login`. Optional here;
-		// `/consent` is the default, from HOCON — the deployment's page, not the
-		// `/oauth/consent` JSON API that page calls.
+		// The deployment-owned consent page for non-first-party clients, like
+		// `login`. Default `/consent` from HOCON: the deployment's page, not the
+		// `/oauth/consent` JSON API it calls.
 		consent: z.object({ url: z.string() }).optional(),
-		// The MFA ADR's D6: the deployment's page a browser is sent to for a
-		// step-up, `/mfa` by default, from HOCON. The MFA package's `mfa`
-		// requirement registers it as its step-up page: once that package is
-		// installed, its `step_up` verdicts send a browser there.
+		// The deployment's step-up page (`/mfa` by default, from HOCON). The MFA
+		// package's `mfa` requirement registers it, so its `step_up` verdicts
+		// send a browser there.
 		mfa: z.object({ url: z.string() }).optional(),
-		// IH-10: `client` / `authCallback` removed — no production consumer
-		// reads them. The pre-fix env-var-only HOCON lines silently leaked
-		// values into AppConfig that nothing consumed.
 	}),
 	cors: z.object({
 		/**
-		 * The browser origins allowed to read the token, userinfo, revocation
-		 * and discovery/JWKS responses (#500). Empty — the default — means CORS
-		 * is off and no middleware is mounted.
+		 * The browser origins allowed to read the token, userinfo, revocation and
+		 * discovery/JWKS responses. Empty (the default) means CORS is off and no
+		 * middleware is mounted.
 		 *
-		 * Entries are validated at boot against the shared serialized-origin
-		 * vocabulary in `../net/origin`, so a typo fails here naming its index
-		 * rather than becoming a rule that silently never matches. That is not
-		 * a hypothetical for this key: matching is exact string equality
-		 * against the `Origin` header, so `https://app.example.com/` — a
-		 * trailing slash, the shape an address bar hands you — is an allowlist
-		 * that admits nobody, with nothing anywhere to say so.
-		 *
-		 * `${?CORS_ALLOWED_ORIGINS}` arrives as a comma-separated string, the
-		 * only shape an environment variable can carry a list in. Normalising
-		 * it here rather than relying on the hocon bridge is the #292 /
-		 * `normalizeTrustProxy` finding applied again: the bridge coerces only
-		 * leaves it can reach and towards a type it can name, and an array of
-		 * strings is neither.
-		 *
-		 * Those are the two spellings, and `null` reads as no list. Any other
-		 * shape — a number, an object, a boolean, which only a configuration
-		 * file can write — is refused here by path: normalised, it read as no
-		 * origins, and CORS was silently off for a key someone wrote.
-		 *
-		 * This list does NOT confer CSRF trust — that is
-		 * `session.csrf.trustedOrigins`, and #272 was filed because one list
-		 * was answering both questions.
+		 * Matching is exact string equality against `Origin`, so entries are
+		 * validated at boot with `../net/origin`: `https://app.example.com/` (a
+		 * trailing slash) would otherwise admit nobody, silently. Accepts a list
+		 * or one comma-separated string (`${?CORS_ALLOWED_ORIGINS}`; the hocon
+		 * bridge cannot coerce to an array), and `null` reads as no list. Any
+		 * other shape is refused by path rather than silently turning CORS off.
+		 * This list confers no CSRF trust: see `session.csrf.trustedOrigins`.
 		 */
 		allowedOrigins: z
 			.preprocess(
-				// Shape normalisation is shared with `assembleApp`'s mount site
-				// (`net/origin.mts`), which reads the same key off a config that
-				// has not necessarily been through this schema. A second copy
-				// here is how the two would disagree about what a
-				// comma-separated `CORS_ALLOWED_ORIGINS` means. A shape neither
-				// reads is refused before it gets there: the mount site, which
-				// sees it only in a configuration that skipped this schema,
-				// warns (`cors_allowed_origins_unreadable`).
+				// Normalisation is shared with `assembleApp`'s mount site
+				// (`net/origin.mts`), which reads the key off configs that may skip
+				// this schema, so the two cannot disagree. A shape neither reads is
+				// refused here; the mount site only warns
+				// (`cors_allowed_origins_unreadable`).
 				(raw, ctx) => {
 					if (raw === undefined) return raw;
 					if (raw !== null && typeof raw !== "string" && !Array.isArray(raw)) {
@@ -1689,20 +1287,12 @@ export const fullSectionsSchema = z.object({
 				});
 			}),
 	}),
-	// #496: the WebAuthn deployer section. `@o3co/auth-provider-webauthn`
-	// ships it in its own `reference.conf` and parses it with
-	// `webauthnConfigSchema` inside the bootstrap module a composition root
-	// writes — which reads `config.webauthn`, so the section has to reach the
-	// composition root first. It did not: this schema declared no `webauthn`,
-	// and a strip-mode object drops what it does not declare, so the operator's
-	// relying-party identity and the #281 throttle went missing between
-	// `parseFile` and the bootstrap module's `webauthnConfigSchema.parse(...)`
-	// — which then failed on a *missing* `rpId` rather than on the one the
-	// operator had written.
-	//
-	// Presence-only, like the sections above: `webauthnConfigSchema` owns the
-	// real constraints (the origin allowlist's no-wildcard / secure-scheme
-	// rules above all) and the package's `reference.conf` owns the defaults.
+	// The WebAuthn deployer section, which a composition root's bootstrap
+	// module parses with `webauthnConfigSchema`; lost here, the bootstrap fails
+	// on a missing `rpId` instead of reading the operator's. Presence-only:
+	// `webauthnConfigSchema` owns the constraints (the origin allowlist's
+	// no-wildcard / secure-scheme rules) and the package's `reference.conf` the
+	// defaults.
 	webauthn: z
 		.object({
 			rpId: z.string().optional(),
@@ -1712,9 +1302,8 @@ export const fullSectionsSchema = z.object({
 			// shape is decided; narrowing to an array here would fail the env
 			// spelling at the wrong layer, with the wrong message.
 			origin: z.union([z.string(), z.array(z.string())]).optional(),
-			// #554 audit: the origins this RP may be framed by. Same two spellings
-			// as `origin` and for the same reason — this object strips what it does
-			// not name, so a key missing here never reaches `webauthnConfigSchema`.
+			// The origins this RP may be framed by; the same two spellings as
+			// `origin`, for the same reason.
 			topOrigin: z.union([z.string(), z.array(z.string())]).optional(),
 			challengeTtlMs: z.coerce.number().int().positive().optional(),
 			attestationPreference: z.enum(["none", "indirect", "direct", "enterprise"]).optional(),
@@ -1727,26 +1316,15 @@ export const fullSectionsSchema = z.object({
 				.optional(),
 		})
 		.optional(),
-	// #287 / #304: where security-relevant audit events go. `type` selects a
-	// builder in the composition root's `AuditSinkFactory`, so it stays an open
-	// string rather than an enum — `registerBuiltinAuditSinks` ships `console`,
-	// and a deployment that registers its own sink must not need a schema
-	// change in this package to name it. Sub-keys pass through for the same
-	// reason: an out-of-tree sink's options are its own. The one value core
-	// itself reads is `type = "none"`: the declared-absence guard (#363) takes
-	// it as the operator's statement that this composition runs sink-less on
-	// purpose (AUDIT_SINK_ABSENCE_POLICY) — the standalone template registers
-	// no "none" builder, so there the spelling still fails boot.
-	//
-	// Declared here because, before #728, `AppConfigSchema` stripped
-	// undeclared top-level keys, so an operator's `audit { … }` block
-	// vanished between `parseFile` and the composition root — the sink selector
-	// silently read `undefined` while the configuration sat in the file
-	// looking effective.
-	//
-	// `.optional()` because a hand-built config is not forced to restate it;
-	// the safe default (a sink, never "none" — #304's sink policy) is the
-	// composition root's job, and the literal lives in `reference.conf`.
+	// Where security-relevant audit events go. `type` selects a builder in the
+	// composition root's `AuditSinkFactory`, so it is an open string and
+	// sub-keys pass through: an out-of-tree sink needs no schema change here
+	// (`registerBuiltinAuditSinks` ships `console`). Core reads one value:
+	// `type = "none"`, which the declared-absence guard
+	// (AUDIT_SINK_ABSENCE_POLICY) takes as running sink-less on purpose; the
+	// standalone registers no "none" builder, so there it still fails boot. The
+	// safe default (a sink, never "none") is the composition root's job, and
+	// the literal lives in `reference.conf`.
 	audit: z
 		.object({
 			sink: z
@@ -1756,12 +1334,9 @@ export const fullSectionsSchema = z.object({
 				.passthrough(),
 		})
 		.optional(),
-	// D-2 v2: connection-config for the standalone refresh-token-family
-	// client. Defaults live in HOCON (`reference.conf`) per ADR — no
-	// `.default()` here. Module-internal config (`keyPrefix`, `casRetryLimit`)
-	// is declared on a SEPARATE top-level key below, which (before #728)
-	// kept `AppConfigSchema` from stripping it before the boot-time module
-	// schema saw it.
+	// Connection config for the standalone refresh-token-family client; defaults
+	// in HOCON. Module-internal config (`keyPrefix`, `casRetryLimit`) is on the
+	// separate top-level key `redisRefreshTokenFamilyStore`.
 	refreshTokenFamilyStore: z
 		.object({
 			redis: z
@@ -1772,40 +1347,29 @@ export const fullSectionsSchema = z.object({
 				.optional(),
 		})
 		.optional(),
-	// #271: how many replicas this deployment runs. Read only by the boot
-	// replica-safety guard (`checkReplicaSafety`).
-	//
-	// Deliberately `.optional()` with **no HOCON literal default**, because
-	// "unset" is a meaningful third state and a baked-in `"single"` would make
-	// it unreachable:
+	// How many replicas this deployment runs, read only by the boot
+	// replica-safety guard (`checkReplicaSafety`). Optional with no HOCON
+	// literal, because unset is a meaningful third state:
 	//   - `"multi"`  → boot fails if any in-memory shared store is wired
 	//   - `"single"` → the operator has declared one replica; silent
-	//   - unset      → nothing declared; one consolidated warning naming what
-	//                  is in memory and what it costs when scaled
-	// Same reasoning as `oauth.code.adapter` above, for a different key.
+	//   - unset      → one consolidated warning naming what is in memory and
+	//                  what it costs when scaled
 	deployment: z
 		.object({
 			mode: z.enum(["single", "multi"]).optional(),
 		})
 		.optional(),
-	// Wave 5d (IH-14 + OR-M1): adapter switch for the rate limiter. Default
-	// `"memory"` lives in HOCON. Since #270 this one component serves BOTH
-	// the OAuth endpoints and `/session/login`, so `"redis"` is what makes
-	// either of them safe across replicas. `rateLimit.login.windowMs` remains
-	// a separate config *section* — it configures the login window and limit,
-	// which the adapters seed into `limits.login` — but no longer a separate
-	// rate-limit *system*. See `RateLimitSpec` JSDoc + `reference.conf`
-	// comments for the IH-18 split rationale.
+	// Adapter for the rate limiter, which serves both the OAuth endpoints and
+	// `/session/login`, so `"redis"` is what makes either safe across replicas.
+	// Default `"memory"` in HOCON. `rateLimit.login` still configures the login
+	// window and limit, which the adapters seed into `limits.login`.
 	rateLimiter: z
 		.object({
 			adapter: z.enum(["memory", "redis"]).optional(),
 		})
 		.optional(),
-	// SF-10 (v0.5.3): module-internal config for `memoryRateLimiterModule`.
-	// Declared here so that, before #728, `AppConfigSchema` preserved HOCON/env
-	// overrides before module schema validation applied its defaults; it stays
-	// for its coercions and bounds, which boot's composed parse applies.
-	// Defaults live in HOCON.
+	// Module-internal config for `memoryRateLimiterModule`, kept for its
+	// coercions and bounds. Defaults live in HOCON.
 	memoryRateLimiter: z
 		.object({
 			limits: z.record(z.string(), rateLimitSpecSchema).optional(),
@@ -1813,67 +1377,43 @@ export const fullSectionsSchema = z.object({
 			maxBuckets: z.coerce.number().int().positive().optional(),
 		})
 		.optional(),
-	// #495: the same section for the OTHER adapter, and the one every
-	// multi-replica deployment actually runs — `rateLimiter.adapter = "redis"`
-	// is what the standalone's production compose file pins. Undeclared until
-	// now, and `redisRateLimiterModule.configSchema` defaults the whole object
-	// to 60 requests / 60 s, so an operator's per-endpoint budgets were
-	// dropped here and replaced by a number nobody chose. `login` and
-	// `device_verification` kept theirs by accident: `resolveSeededLimitSpecs`
-	// seeds those two prefixes from `rateLimit.login` and
-	// `oauth.deviceAuthorization.rateLimit`, which ARE declared — `token`,
-	// `authorize`, `introspect` and the WebAuthn options route were the ones
-	// lost. Presence-only; the defaults live in `reference.conf` and in the
-	// module.
+	// The same section for the Redis adapter, which multi-replica deployments
+	// run. Lost, `redisRateLimiterModule.configSchema` defaults the whole object
+	// to 60 requests / 60 s in place of the operator's per-endpoint budgets.
+	// Presence-only; defaults in `reference.conf` and the module.
 	redisRateLimiter: z
 		.object({
 			limits: z.record(z.string(), rateLimitSpecSchema).optional(),
 			defaultLimit: rateLimitSpecSchema.optional(),
 		})
 		.optional(),
-	// Wave 5d (OR-4): adapter switch for the four user-session stores
-	// (`userSessionStore`, `sessionRPRegistry`, `sessionFamilyIndex`,
-	// `sessionFederationIndex`). Multi-replica deployments MUST set this
-	// to `"redis"`; the in-memory variant loses session state on restart
-	// and across replicas. Top-level key (not `oauth.session.*`) to avoid
-	// confusion with the existing `session.*` cookie/express-session
-	// configuration tree (different responsibility, different backend).
+	// Adapter for the four user-session stores (`userSessionStore`,
+	// `sessionRPRegistry`, `sessionFamilyIndex`, `sessionFederationIndex`).
+	// Multi-replica deployments MUST use `"redis"`: memory loses session state
+	// on restart and across replicas. Top-level, not under `session.*`, which
+	// is the express-session cookie configuration.
 	userSessionStores: z
 		.object({
 			adapter: z.enum(["memory", "redis"]).optional(),
 		})
 		.optional(),
-	// #456: adapter switch for the federation token store — the upstream IdP
-	// tokens held on behalf of a session. Default `"memory"` lives in HOCON,
-	// matching the switches above. This key was never declared here, so the
-	// switch the standalone README documented was stripped at parse time
-	// before `buildModules` could read it.
-	//
-	// `"memory"` forks per replica, and the standalone's memory module says so
-	// on its manifest (`replicaSafety`, #455), so `deployment.mode = "multi"`
-	// refuses it by name. `"redis"` mounts `redisFederationTokenStoreModule`,
-	// whose options live under `redisFederationTokenStore` below.
+	// Adapter for the federation token store (upstream IdP tokens held for a
+	// session); default `"memory"` in HOCON. Memory forks per replica and its
+	// module declares `replicaSafety`, so `deployment.mode = "multi"` refuses it
+	// by name. `"redis"` mounts `redisFederationTokenStoreModule`, configured
+	// under `redisFederationTokenStore`.
 	federationTokenStore: z
 		.object({
 			type: z.enum(["memory", "redis"]).optional(),
 		})
 		.optional(),
-	// #456: module-internal config for `redisFederationTokenStoreModule`.
-	// Presence-only, for the same reason as `redisSessionStores` below: without
-	// a top-level entry `AppConfigSchema.parse(...)` stripped the key before
-	// #728 — and with it the encryption key the store cannot start without —
-	// before the module's own `configSchema` saw it. Defaults live in `reference.conf`
-	// and in the module.
-	// #593 slice 7: the two adapter switches a composition like the standalone
-	// installs federation grants from, declared for the reason
-	// `federationTokenStore` above is — undeclared, the operator's choice was
-	// stripped before `buildModules` read it (before #728). Two switches because the grant
-	// store and the intent store are installed independently: grants in Redis
-	// with acquisition in memory is a supported single-replica shape (a restart
-	// loses flows in progress and nothing else). Both `"memory"` modules declare
+	// The two adapter switches for federation grants. The grant store and the
+	// intent store are installed independently: grants in Redis with
+	// acquisition in memory is a supported single-replica shape (a restart
+	// loses only flows in progress). Both memory modules declare
 	// `replicaSafety` and are refused by name under `deployment.mode = "multi"`;
 	// a Redis grant store beside a memory subject revocation is refused by the
-	// routes module itself (D13). Defaults live in `reference.conf`.
+	// routes module. Defaults in `reference.conf`.
 	federationGrantStore: z
 		.object({
 			adapter: z.enum(["memory", "redis"]).optional(),
@@ -1884,15 +1424,10 @@ export const fullSectionsSchema = z.object({
 			adapter: z.enum(["memory", "redis"]).optional(),
 		})
 		.optional(),
-	// The MFA ADR's D19: which store keeps enrolled factors, and which keeps
-	// MFA transactions and the lock state. Declared for the reason the other
-	// switches are — undeclared, an operator's choice was stripped before a
-	// composition root read it (before #728). Read by a composition root that installs
-	// MFA and picks its stores by name, which none does yet: `tools/composition`
-	// names its MFA store modules itself, and the standalone template wires MFA
-	// from the MFA ADR's build-order step 20, installing it when `mfa.mode` is
-	// not `off`. The factor store may be kept in the Store; a transaction is
-	// verification state and has no Store variant. Defaults live in
+	// Which store keeps enrolled MFA factors, and which keeps MFA transactions
+	// and the lock state (MFA ADR); read by a composition root that picks its
+	// MFA stores by name. The factor store may be kept in the Store; a
+	// transaction is verification state and has no Store variant. Defaults in
 	// `reference.conf`.
 	mfaFactorStore: z
 		.object({
@@ -1908,13 +1443,10 @@ export const fullSectionsSchema = z.object({
 			memory: z.object({ maxEntries: z.unknown().optional() }).optional(),
 		})
 		.optional(),
-	// The MFA ADR's D19: module-internal config for the Redis package's
-	// `redisMfaFactorStoreModule` and `redisMfaTransactionStoreModule`.
-	// Presence-only, for the reason every `redis*` section here is: without a
-	// top-level entry `AppConfigSchema.parse(...)` stripped the key before the
-	// module's own `configSchema` saw it (before #728). The defaults (`mfaf:`, `mfat:`) live
-	// in `reference.conf` and in the modules, which refuse a prefix with a
-	// brace.
+	// Module-internal config for `redisMfaFactorStoreModule` and
+	// `redisMfaTransactionStoreModule`. Presence-only; the defaults (`mfaf:`,
+	// `mfat:`) live in `reference.conf` and the modules, which refuse a prefix
+	// with a brace.
 	redisMfaFactorStore: z
 		.object({
 			keyPrefix: z.string().optional(),
@@ -1925,9 +1457,9 @@ export const fullSectionsSchema = z.object({
 			keyPrefix: z.string().optional(),
 		})
 		.optional(),
-	// #593, D16: this adapter's own layout, beside the other stores' prefixes.
-	// What a grant may BE is `federationGrants` above; this is where its keys
-	// live and how far past a horizon the subject index keeps a member.
+	// This adapter's own layout: where a grant's keys live and how far past a
+	// horizon the subject index keeps a member. What a grant may be is
+	// `federationGrants` above.
 	redisFederationGrantStore: z
 		.object({
 			keyPrefix: z.string().optional(),
@@ -1935,59 +1467,48 @@ export const fullSectionsSchema = z.object({
 			listingAllowanceMs: z.coerce.number().int().nonnegative().max(MAX_DURATION_MS).optional(),
 		})
 		.optional(),
+	// Module-internal config for `redisFederationTokenStoreModule`, including
+	// the encryption key the store cannot start without. Presence-only;
+	// defaults in `reference.conf` and the module.
 	redisFederationTokenStore: z
 		.object({
 			keyPrefix: z.string().optional(),
 			ttl: z.coerce.number().int().positive().optional(),
 			encryptionMode: z.enum(["required", "allow-plaintext"]).optional(),
 			encryptionKey: z.string().optional(),
-			// `coerceBooleanFromEnv` for the #288 reason: a `${?VAR}` an operator's
-			// file sets it from arrives as a string (#728: no bridge coerces it).
-			// Under the house rule an exported-but-empty variable reads as
-			// `false` — which, for this flag, turns off #291's migration safety
-			// net, whose default is `true`. Before #728 the bridge refused an
-			// empty value; set the variable to `true` or `false`, never empty.
+			// An exported-but-empty variable reads as `false`, which turns off
+			// this migration safety net (default `true`): set the variable to
+			// `true` or `false`, never empty.
 			scanFallback: coerceBooleanFromEnv.optional(),
 		})
 		.optional(),
-	// #472: module-internal config for `redisDeviceCodeStoreModule` (#433).
-	// Presence-only, for the same reason as every `redis*` section here:
-	// without a top-level entry `AppConfigSchema.parse(...)` stripped the key
-	// before the module's own `configSchema` saw it, and the namespace the
-	// redis README documents was silently the default. The default lives in
-	// the module. Since #728 boot's composed parse strips nothing, so the
-	// next section cannot be forgotten this way.
+	// Module-internal config for `redisDeviceCodeStoreModule`. Presence-only;
+	// the default lives in the module.
 	redisDeviceCodeStore: z
 		.object({
 			keyPrefix: z.string().optional(),
 		})
 		.optional(),
-	// #277: adapter switch for the RFC 7009 access-token denylist. Default
-	// `"memory"` lives in HOCON, matching `rateLimiter` / `userSessionStores`.
-	//
-	// `"memory"` forks per replica — a revocation served by one replica leaves
-	// the token working on the others — which is why
-	// `core-access-token-denylist-memory` is in the replica-safety guard's
-	// refused set. Anything running more than one replica needs `"redis"`, and
-	// `deployment.mode = "multi"` enforces that rather than trusting the reading.
+	// Adapter for the RFC 7009 access-token denylist; default `"memory"` in
+	// HOCON. Memory forks per replica (a revocation on one leaves the token
+	// working on the others), so `core-access-token-denylist-memory` is in the
+	// replica-safety guard's refused set under `deployment.mode = "multi"`.
 	accessTokenDenylist: z
 		.object({
 			adapter: z.enum(["memory", "redis"]).optional(),
 		})
 		.optional(),
-	// #484: backend for the replay seen-set — the `jti` single-use record
-	// behind `private_key_jwt` client authentication (and the WebAuthn
-	// challenge ceremony when that module is installed). Same replica
-	// reasoning as the denylist above: `core-replay-seen-set-memory` is in the
-	// guard's refused set, because a captured assertion would replay once per
-	// replica.
+	// Backend for the replay seen-set: the single-use `jti` record behind
+	// `private_key_jwt` client authentication (and the WebAuthn challenge
+	// ceremony when installed). `core-replay-seen-set-memory` is in the
+	// replica-safety guard's refused set: a captured assertion would replay
+	// once per replica.
 	replaySeenSet: z
 		.object({
 			adapter: z.enum(["memory", "redis"]).optional(),
 			// The memory seen-set's cap, read by `memoryReplaySeenSetModule`,
-			// which refuses at boot, with a RangeError naming this key, a value
-			// that is not a positive whole number (a string of digits, as an
-			// environment variable delivers one, is taken). Absent: the
+			// which refuses at boot anything but a positive whole number (a digit
+			// string from an environment variable is taken). Absent: the
 			// adapter's default.
 			memory: z.object({ maxEntries: z.unknown().optional() }).optional(),
 		})
@@ -1999,86 +1520,60 @@ export const fullSectionsSchema = z.object({
 			memory: z.object({ maxEntries: z.unknown().optional() }).optional(),
 		})
 		.optional(),
-	// #527: where consent to a client that is not first-party is recorded.
-	// `"none"` (the HOCON default) wires nothing, and such clients are refused
-	// as before; `"memory"` forks per replica and is refused by name under
-	// `deployment.mode = "multi"`; `"redis"` (#561) shares the consent records
-	// and the parked requests, and is what a multi-replica deployment selects.
+	// Where consent to a non-first-party client is recorded. `"none"` (the HOCON
+	// default) wires nothing, so such clients are refused; `"memory"` forks per
+	// replica and is refused under `deployment.mode = "multi"`; `"redis"` shares
+	// consent records and parked requests across replicas.
 	consentStore: z
 		.object({
 			adapter: z.enum(["none", "memory", "redis"]).optional(),
 		})
 		.optional(),
-	// #561: module-internal config for `redisConsentStoreModule`. Presence-only,
-	// for the reason every `redis*` section here is: without a top-level entry
-	// `AppConfigSchema.parse(...)` stripped the key before the module's own
-	// `configSchema` saw it (before #728). The default lives in
-	// `reference.conf` and in the module.
+	// Module-internal config for `redisConsentStoreModule`. Presence-only;
+	// defaults in `reference.conf` and the module.
 	redisConsentStore: z
 		.object({
 			keyPrefix: z.string().optional(),
 		})
 		.optional(),
-	// #277: module-internal config for `redisAccessTokenDenylistModule`.
-	// Declared here for the same reason as `redisRefreshTokenFamilyStore` below:
-	// without a top-level entry, `AppConfigSchema.parse(...)` stripped the key
-	// before the module's own `configSchema` ever saw the operator's override
-	// (before #728).
-	// Presence-only; the default lives in `reference.conf` and in the module.
+	// Module-internal config for `redisAccessTokenDenylistModule`.
+	// Presence-only; defaults in `reference.conf` and the module.
 	redisAccessTokenDenylist: z
 		.object({
 			keyPrefix: z.string().optional(),
 		})
 		.optional(),
-	// MIN-3 (v0.5.3): preserve the bundled Redis user-session namespace
-	// override before `redisSessionStoresModule.configSchema` applies its
-	// own defaults. Without this top-level passthrough, AppConfigSchema
-	// stripped `redisSessionStores.keyPrefix` before the module saw it
-	// (before #728).
+	// Module-internal config for `redisSessionStoresModule` (the bundled Redis
+	// user-session namespace). Presence-only.
 	redisSessionStores: z
 		.object({
 			keyPrefix: z.string().optional(),
 		})
 		.optional(),
-	// D-2 v2: module-internal config for `redisRefreshTokenFamilyStoreModule`.
-	// Declared here (in `fullSectionsSchema`) so that, before #728,
-	// `AppConfigSchema.parse(...)` in `app.mts` preserved operator overrides
-	// (`REFRESH_TOKEN_FAMILY_STORE_KEY_PREFIX` / `..._CAS_RETRY_LIMIT`) before
-	// the module's `configSchema` ran at boot time: without it Zod stripped
-	// the unknown top-level key and the env-var overrides silently no-oped. The actual defaults still live in `reference.conf`; this entry
-	// is presence-only (both fields optional). The duplicate-source-of-truth
-	// concern is intentional: the module's `configSchema` enforces shape +
-	// defaults, this schema only ensures the keys survive validation.
+	// Module-internal config for `redisRefreshTokenFamilyStoreModule`
+	// (`REFRESH_TOKEN_FAMILY_STORE_KEY_PREFIX` / `..._CAS_RETRY_LIMIT`).
+	// Presence-only: the module's `configSchema` owns shape and defaults, with
+	// `reference.conf`.
 	redisRefreshTokenFamilyStore: z
 		.object({
 			keyPrefix: z.string().optional(),
 			casRetryLimit: z.coerce.number().optional(),
 		})
 		.optional(),
-	// OR-9 (Wave 5d): module-internal config for `redisCodeRepositoryModule`.
-	// Declared here (in `fullSectionsSchema`) so that, before #728,
-	// `AppConfigSchema.parse(...)` in `app.mts` preserved operator overrides
-	// (`CLIENT_CODE_KEY_PREFIX` / `CLIENT_CODE_DEFAULT_EXPIRES_IN`) before
-	// the module's `configSchema` ran at boot time. Same gotcha as D-2 v2's
-	// `redisRefreshTokenFamilyStore` block above. Defaults stay in
-	// `reference.conf`; this entry is presence-only (both fields optional).
+	// Module-internal config for `redisCodeRepositoryModule`
+	// (`CLIENT_CODE_KEY_PREFIX` / `CLIENT_CODE_DEFAULT_EXPIRES_IN`).
+	// Presence-only; defaults in `reference.conf`.
 	redisCodeRepository: z
 		.object({
 			keyPrefix: z.string().optional(),
-			// `defaultExpiresIn` is the Redis PX TTL (seconds) for OAuth
-			// authorization codes. Constrained to a positive integer: a bad
-			// env-var override (`CLIENT_CODE_DEFAULT_EXPIRES_IN=0`, `="-1"`,
-			// non-numeric) fails boot's composed parse (this schema's check,
-			// #728) rather than silently propagating to a Redis PX call that
-			// errors per request. Mirrored at the module configSchema level +
-			// at the `RedisCodeRepository` constructor for defense in depth.
-			// Per Copilot review on PR #122.
+			// The Redis PX TTL, in seconds, for authorization codes. A positive
+			// integer so a bad env override fails boot instead of erroring on
+			// every Redis call; the module schema and the `RedisCodeRepository`
+			// constructor check it again.
 			defaultExpiresIn: z.coerce.number().int().positive().optional(),
 		})
 		.optional(),
-	// #495: the last two `redis*` namespaces without an entry here, found by
-	// a guard rather than by an operator. Presence-only, defaults in the
-	// modules.
+	// Presence-only; defaults in the modules.
 	redisChallengeStore: z
 		.object({
 			keyPrefix: z.string().optional(),
@@ -2092,18 +1587,15 @@ export const fullSectionsSchema = z.object({
 });
 
 /**
- * Full application config schema including all optional module sections.
- * Kept as a plain ZodObject (via .extend) for backward compatibility:
- * - consumers can access .shape (e.g. AppConfigSchema.shape.oauth.shape.jwt)
- * - ts.hocon/zod coercion traverses ZodObject shape, not ZodIntersection
+ * Full application config schema including all optional module sections. A
+ * plain ZodObject (via `.extend`) so consumers can read `.shape` and the
+ * ts.hocon zod coercion can traverse it.
  *
- * @deprecated A composition root no longer parses its configuration before
- * `createApp` (#728): it hands `createApp` the configuration it resolved,
- * and boot parses it once, with each loaded module's own schema — a parse
- * with this schema first strips every section it does not declare, which is
- * how #472, #495 and #496 lost theirs. Read what the root needs before it
- * knows its modules with `readTransitionalConfig`. `AppConfig`, the type,
- * stays.
+ * @deprecated A composition root hands `createApp` the configuration it
+ * resolved, and boot parses it once with each loaded module's own schema;
+ * parsing with this schema first strips every section it does not declare.
+ * Read what the root needs before it knows its modules with
+ * `readTransitionalConfig`. The `AppConfig` type stays.
  */
 export const AppConfigSchema = CoreConfigSchema.extend(fullSectionsSchema.shape);
 

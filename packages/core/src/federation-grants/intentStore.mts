@@ -15,137 +15,91 @@
  */
 
 /**
- * The second port of D16 (#593, slice 6): what acquisition needs to remember
- * between a backend lodging an intent and a browser coming back from the
- * upstream with a code.
+ * The federation-grant intent store port: what acquisition remembers between a
+ * backend lodging an intent and a browser returning from the upstream with a
+ * code. It holds:
  *
- * Three records and one bound live here, and nothing else does:
+ * - the intent: what a confidential client asserted and where the browser
+ *   returns, surviving a navigation the client's session does not accompany;
+ * - the consent challenge, answered once atomically so an accept and a deny in
+ *   flight cannot both apply;
+ * - the connect transaction (PKCE verifier, nonce, approved snapshot),
+ *   consumed exactly once by the callback;
+ * - the bound on live first-time intents per `(client, subject)`, enforced
+ *   where a record is admitted.
  *
- * - the **intent** — what a confidential client asserted and where it wants the
- *   browser returned, which has to survive a navigation the client's own
- *   session does not accompany;
- * - the **consent** challenge — read by the deployment's page and answered
- *   once, atomically, so that an accept and a deny in flight cannot both
- *   apply (D8);
- * - the **connect transaction** — the PKCE verifier, the nonce and the
- *   approved snapshot, consumed exactly once by the callback (D7);
- * - the **bound** on live first-time intents per `(client, subject)`, enforced
- *   where a record is admitted rather than counted in a route.
+ * A grant knows an intent only by a pointer in {@link FederationGrantStore},
+ * where supersession is settled; no operation spans both ports.
  *
- * What a grant record knows of an intent is a pointer — its handle and when it
- * lapses — and that lives in {@link FederationGrantStore} (D2). Supersession is
- * settled there, by the pointer, and not here: these keys share a tag of their
- * own, no operation spans both ports, and core orders the two writes once
- * (D16).
+ * One deadline: the intent's `expiresAt` ({@link FEDERATION_GRANT_FLOW_BUDGET_MS}
+ * after lodging) caps the consent and the transaction too, since `activate`
+ * refuses a handle the grant's pointer no longer calls current, and nothing
+ * extends it.
  *
- * ## One deadline
+ * Two clocks: the caller's `now` decides what it is told; what an adapter
+ * reclaims is judged on its own clock, like a key TTL. No operation deletes,
+ * frees or overwrites anything because of a caller's time, and a time that is
+ * not a date is refused (every comparison with NaN is false).
  *
- * There is exactly one date in an acquisition: the intent's `expiresAt`, set
- * when the intent is lodged, ten minutes out
- * ({@link FEDERATION_GRANT_FLOW_BUDGET_MS}). The consent and the transaction
- * carry it rather than a deadline of their own, because a record that outlived
- * the intent would be one an activation can no longer use: `activate` refuses a
- * handle the grant's pointer no longer calls current, and nothing moves that
- * date — `nameIntent` refuses a `pending` grant, and no other operation
- * extends a pointer.
- *
- * So it is the whole flow's budget, from lodging to activation, and the
- * operator-visible consequence is in the runbook: a user who sits on the
- * consent page until the ninth minute leaves one minute for the upstream leg,
- * and the remedy is to start again — which supersession already covers.
- *
- * ## Two clocks, kept apart
- *
- * Every operation takes the time from its caller, sampled at the operation and
- * not at the start of the request, and that time decides what the caller is
- * told and which transitions are eligible. What an adapter *reclaims* is
- * judged on the adapter's own clock, as a key TTL is. A caller whose clock is
- * ahead is told the wrong thing once, and costs nothing: no operation deletes a
- * record, frees a reservation or overwrites a resident handle because of the
- * time its caller passed. A time that is not a date is refused and not
- * compared — every comparison with NaN is false, so a record would read as
- * lapsed.
- *
- * ## Nothing here heals itself
- *
- * A record an adapter cannot read is refused, in both directions, as the grant
- * store refuses one: these are security state, and a record that cannot be
- * parsed may be a newer release's. A reader that deleted it would make a
- * rollback destroy live flows. That is deliberately unlike
- * `PendingConsentStore`'s Redis adapter, which reclaims a corrupt record as a
- * second compare-and-delete step.
+ * Nothing heals itself: an unreadable record is refused, never deleted, since
+ * it may be a newer release's and deleting it would make a rollback destroy
+ * live flows (unlike `PendingConsentStore`'s Redis adapter). See the storage
+ * decision of ADR 2026-09-17 (federation grants).
  */
 
 import { federationGrantExpiresAt } from "./lifetime.mjs";
 
 /**
- * The whole flow's budget: lodging → connect → consent → upstream → callback →
- * activation, in milliseconds. D6 gives the handle ten minutes, and because
- * every later record is capped by the intent's deadline (see the module note),
- * that is the budget for all of it.
+ * The whole flow's budget, lodging to activation, in milliseconds. Every later
+ * record is capped by the intent's deadline, so this bounds all of it.
  */
 export const FEDERATION_GRANT_FLOW_BUDGET_MS = 600_000;
 
 /**
- * How many live first-time intents one client may hold for one subject.
- *
- * This is the only admission control in front of `createPending`: every intent
- * that gets in creates a `pending` grant record that lives to its own
- * deadline. A policy that evicted the oldest instead of refusing — as
- * `PENDING_CONSENT_PER_SESSION_LIMIT` does for parked requests, which own no
- * record outside themselves — would therefore let one client mint unbounded
- * records in the *grant* store, the one with the credential key ring and the
- * subject index, while the intent count stayed at sixteen. Refusing caps grant
- * records at sixteen per `(client, subject)` per flow budget.
- *
- * A reauthorization is not counted: it names an intent on a grant that already
- * exists, so admitting it creates no record, and a subject whose grants are all
- * near renewal must not be locked out by a client's abandoned first attempts.
- * Part of the port rather than of one adapter, so both hold it and the contract
- * suite checks it.
+ * How many live first-time intents one client may hold for one subject: the
+ * only admission control in front of `createPending`. It refuses rather than
+ * evicting, because every admitted intent creates a `pending` grant record that
+ * lives to its own deadline; eviction would let one client mint unbounded
+ * records in the grant store. A reauthorization is not counted: it creates no
+ * record, and abandoned first attempts must not lock out renewals. Part of the
+ * port, so both adapters hold it and the contract suite checks it.
  */
 export const FEDERATION_GRANT_FIRST_INTENTS_PER_CLIENT_SUBJECT_LIMIT = 16;
 
 /**
- * What a backend lodged, and what every later step is judged against (D6).
+ * What a backend lodged, and what every later step is judged against.
+ * Immutable: the callback decides against what the client asserted and the
+ * user was shown, not against configuration minutes later, so the connection's
+ * revisions are pinned and the callback refuses when they have moved.
  *
- * Immutable: the callback must decide against what the client asserted and the
- * user was shown, not against configuration as it stands minutes later. The
- * connection's revisions are pinned here for that reason, and the callback
- * refuses when they have moved.
- *
- * Every field is a required key (#626): `resource` and `upstreamSubject` hold
- * `undefined` where there is none. Both stores copy the intent field by
- * field, and a copy that lost either widened the flow — the upstream asked
- * without the audience the connection narrows it to, or the callback no
- * longer checking that the upstream account is the one the client said to
- * expect (the issuer and a renewal's existing account are still checked, and
- * the identity lookup where one is configured). Naming the key makes that copy a compile error.
+ * Every field is a required key (`resource` and `upstreamSubject` hold
+ * `undefined` where there is none), so a store copying the intent field by
+ * field cannot silently drop one and widen the flow.
  */
 export interface FederationGrantIntent {
 	/** Opaque, single-use, 256 bits. Addresses this record and nothing else. */
 	readonly handle: string;
 	/**
 	 * `"initial"` lodges a new grant and counts against the bound;
-	 * `"reauthorization"` names an intent on a grant that exists (D6).
+	 * `"reauthorization"` names an intent on a grant that exists.
 	 */
 	readonly kind: "initial" | "reauthorization";
 	/** The grant this intent will activate: a fresh ID, or the existing one being renewed. */
 	readonly grantId: string;
 	/** The confidential client that lodged it, as authenticated. */
 	readonly clientId: string;
-	/** The local subject it was lodged for. An assertion until a session proves it (D7). */
+	/** The local subject it was lodged for. An assertion until a session proves it. */
 	readonly subject: string;
 
 	readonly connection: string;
 	/** The federation the connection names, resolved at lodging. */
 	readonly federation: string;
-	/** Pinned at lodging (D4): the callback refuses when either has moved. */
+	/** Pinned at lodging: the callback refuses when either has moved. */
 	readonly identityRevision: string;
 	readonly authorizationRevision: string;
 	/** The connection's `callbackURL`, exactly as configured: authorization and exchange use this spelling. */
 	readonly callbackUri: string;
-	/** Validated against the connection's ceiling at lodging (D6); what consent shows and the upstream is asked for. */
+	/** Validated against the connection's ceiling at lodging; what consent shows and the upstream is asked for. */
 	readonly scopes: readonly string[];
 	/** RFC 8707, from the connection; `undefined` when it names none. */
 	readonly resource: string | undefined;
@@ -158,7 +112,7 @@ export interface FederationGrantIntent {
 	readonly clientState: string;
 	/**
 	 * What the client already expects the upstream account to be, checked at the
-	 * callback (D6); `undefined` when the client named none.
+	 * callback; `undefined` when the client named none.
 	 */
 	readonly upstreamSubject: string | undefined;
 	/** The grant lifetime that applied, in milliseconds: clamped at lodging, shown at consent. */
@@ -172,12 +126,10 @@ export interface FederationGrantIntent {
 
 /**
  * The browser a flow started in, as both halves of this provider's session
- * identity (D7).
- *
- * `sessionId` is the express-session record the challenge was issued to, and
- * what makes a challenge answerable from that browser alone. `sid` is the
- * durable {@link UserSession}, re-read at every step so that a session revoked
- * in between cannot finish a flow, and what `grant.consent.sid` records.
+ * identity. `sessionId` is the express-session record the challenge was issued
+ * to, so only that browser can answer it. `sid` is the durable
+ * {@link UserSession}, re-read at every step so a session revoked in between
+ * cannot finish a flow, and what `grant.consent.sid` records.
  */
 export interface FederationGrantBrowserBinding {
 	readonly sessionId: string;
@@ -185,7 +137,7 @@ export interface FederationGrantBrowserBinding {
 	readonly subject: string;
 }
 
-/** A consent challenge parked for the deployment's page to answer (D8). */
+/** A consent challenge parked for the deployment's page to answer. */
 export interface FederationGrantConsentRecord {
 	/** 32 random bytes, reaching the page through the redirect and nowhere else. */
 	readonly challenge: string;
@@ -201,11 +153,9 @@ export interface FederationGrantConsentRecord {
 }
 
 /**
- * What an approval created and the callback consumes exactly once (D7).
- *
- * It carries the intent as a snapshot because the intent is spent by the answer
- * that created this: the callback decides against what was approved, and a
- * second look at a record the answer removed would find nothing.
+ * What an approval created and the callback consumes exactly once. It carries
+ * the intent as a snapshot because the answer that created it spent the intent:
+ * the callback decides against what was approved.
  */
 export interface FederationGrantConnectTransaction {
 	/** The upstream `state`. Never the client's own. */
@@ -214,13 +164,13 @@ export interface FederationGrantConnectTransaction {
 	readonly binding: FederationGrantBrowserBinding;
 	readonly codeVerifier: string;
 	readonly nonce: string;
-	/** What the user agreed to, and when: `grant.consent` is written from this (D8). */
+	/** What the user agreed to, and when: `grant.consent` is written from this. */
 	readonly consent: {
 		readonly at: Date;
 		readonly sid: string;
 		readonly scopes: readonly string[];
 	};
-	/** `consent.at + lifetimeMs`, computed by the store at the answer so no later step can move it (D3). */
+	/** `consent.at + lifetimeMs`, computed by the store at the answer so no later step can move it. */
 	readonly grantExpiresAt: Date;
 	readonly createdAt: Date;
 	/** The intent's deadline. An approval does not restart it. */
@@ -241,18 +191,14 @@ export type FederationGrantConsentAnswer =
 /**
  * What an answer did.
  *
- * - `empty` — there was nothing to answer: an unknown, expired or already
- *   answered challenge, a challenge another browser holds, or an intent that is
- *   no longer live. One outcome for all of them, on purpose: the route answers
- *   them identically, so that whether a challenge belongs to somebody else is
- *   not something a caller can find out.
- * - `denied` / `accepted` — the answer applied, and nothing else can now apply.
- * - `refused` — the answer could have applied but the store would not: the
- *   `state` an approval brought is already a resident transaction's, so
- *   accepting would either overwrite that flow or hand two flows one record.
- *   Nothing is spent. It is its own outcome rather than `empty` because it is a
- *   fault on this side: the operator should see it, and the user should not be
- *   told to start again as if their link had expired.
+ * - `empty`: nothing to answer (an unknown, expired or answered challenge, one
+ *   another browser holds, or an intent no longer live). One outcome on
+ *   purpose, so a caller cannot learn whether a challenge is someone else's.
+ * - `denied` / `accepted`: the answer applied, and nothing else can now apply.
+ * - `refused`: the approval's `state` is already a resident transaction's, so
+ *   accepting would overwrite that flow or share one record. Nothing is spent.
+ *   Distinct from `empty` because it is a fault on this side: the operator
+ *   should see it, and the user should not be told their link expired.
  */
 export type FederationGrantConsentAnswerResult =
 	| { readonly outcome: "empty" }
@@ -263,15 +209,12 @@ export type FederationGrantConsentAnswerResult =
 /**
  * Why an intent was not admitted.
  *
- * - `limit` — the `(client, subject)` bound is full.
- * - `collision` — a *different* record is resident under this handle. Refused
- *   even when that record is invisible to this caller's clock: a handle is
- *   taken for as long as a record is there under it, not for as long as a
- *   caller can see it.
- * - `expired` — the record's own deadline is not after the caller's `now`;
- *   there is nothing to store.
- * - `closed` — this handle was answered or finished. The marker outlives the
- *   record so that a retried write cannot resurrect a spent intent.
+ * - `limit`: the `(client, subject)` bound is full.
+ * - `collision`: a different record is resident under this handle, even one
+ *   this caller's clock cannot see.
+ * - `expired`: the record's own deadline is not after the caller's `now`.
+ * - `closed`: this handle was answered or finished; the marker outlives the
+ *   record so a retried write cannot resurrect a spent intent.
  */
 export type FederationGrantIntentRefusal = "limit" | "collision" | "expired" | "closed";
 
@@ -284,17 +227,12 @@ export interface FederationGrantIntentStore {
 	readonly kind: string;
 
 	/**
-	 * Admits an intent: reserves the bound's capacity and writes the record, as
-	 * one step.
-	 *
-	 * Atomic on purpose. Counting and then inserting lets concurrent clients
-	 * exceed the bound; inserting and then counting leaves uncounted records
-	 * behind a crash.
-	 *
-	 * Writing the *same* record again is `unchanged`: it neither extends the
-	 * deadline nor takes a second place against the bound, so core may retry a
-	 * write whose answer it lost. Any other record under a resident handle is a
-	 * `collision`, and no write ever replaces one.
+	 * Admits an intent: reserves the bound's capacity and writes the record
+	 * atomically (count-then-insert lets concurrent clients exceed the bound;
+	 * insert-then-count leaves uncounted records behind a crash). Writing the
+	 * same record again is `unchanged`, with no deadline extension and no second
+	 * place, so core may retry a lost answer. Any other record under a resident
+	 * handle is a `collision`, never replaced.
 	 */
 	putIntent(record: FederationGrantIntent, now: Date): Promise<FederationGrantIntentWrite>;
 
@@ -306,14 +244,11 @@ export interface FederationGrantIntentStore {
 	getIntent(handle: string, now: Date): Promise<FederationGrantIntent | null>;
 
 	/**
-	 * Parks a consent challenge for a live intent, bound to the browser that
-	 * asked, and answers with the record the page will read.
-	 *
-	 * One challenge per intent: a second start from the same browser is given
-	 * the one already parked, with its deadline untouched, so that a user who
-	 * reloads the connect link does not mint challenges. A start from any other
-	 * browser gets `null`, as does one for an intent that is not live — the
-	 * route cannot tell those apart, and must not.
+	 * Parks a consent challenge for a live intent, bound to the asking browser,
+	 * and returns the record the page will read. One challenge per intent: a
+	 * repeat start from the same browser gets the parked one, deadline
+	 * untouched. Another browser, or an intent that is not live, gets `null`;
+	 * the route must not be able to tell those apart.
 	 */
 	parkConsent(input: {
 		readonly handle: string;
@@ -331,18 +266,11 @@ export interface FederationGrantIntentStore {
 	getConsent(challenge: string, now: Date): Promise<FederationGrantConsentRecord | null>;
 
 	/**
-	 * Answers a challenge, once, as one step: the challenge is removed, the
-	 * intent is spent, and an approval creates the transaction — or none of it
-	 * happens.
-	 *
-	 * Reading the challenge and then removing it would let an accept and a deny
-	 * in flight both apply; spending the intent and then creating the
-	 * transaction would let a crash consume a valid consent with nothing to
-	 * continue with.
-	 *
-	 * A denial releases the capacity it reserved. An approval keeps it until
-	 * {@link finishIntent}: the flow is still running, and the record the
-	 * callback will activate is still to be written.
+	 * Answers a challenge once, atomically: the challenge is removed, the intent
+	 * spent, and an approval creates the transaction, or none of it happens
+	 * (otherwise an accept and a deny could both apply, or a crash could consume
+	 * a consent with nothing to continue). A denial releases its reserved
+	 * capacity; an approval keeps it until {@link finishIntent}.
 	 */
 	answerConsent(input: {
 		readonly challenge: string;
@@ -352,12 +280,9 @@ export interface FederationGrantIntentStore {
 	}): Promise<FederationGrantConsentAnswerResult>;
 
 	/**
-	 * Reads and removes the transaction the callback presents, as one step, and
-	 * only when it belongs to the connection the callback arrived on.
-	 *
-	 * Reading and then removing would let two callbacks exchange one code. A
-	 * transaction of another connection is left exactly where it is: a callback
-	 * on the wrong path must not spend somebody else's flow.
+	 * Reads and removes the callback's transaction atomically, so two callbacks
+	 * cannot exchange one code, and only when it belongs to the connection the
+	 * callback arrived on; another connection's transaction is left untouched.
 	 */
 	consumeTransaction(input: {
 		readonly state: string;
@@ -366,23 +291,18 @@ export interface FederationGrantIntentStore {
 	}): Promise<FederationGrantConnectTransaction | null>;
 
 	/**
-	 * Ends a flow: closes the handle, drops whatever consent or transaction is
-	 * left under it, and releases its capacity — once, however many times this
-	 * is called.
-	 *
-	 * Called after every terminal outcome, including the failures. It never
-	 * touches a grant: what a grant knows of this intent is its pointer, and
-	 * ending that is `retireIntent`'s (D13).
+	 * Ends a flow: closes the handle, drops any consent or transaction left under
+	 * it and releases its capacity, idempotently. Called after every terminal
+	 * outcome, failures included. Never touches a grant: ending its pointer is
+	 * `retireIntent`'s job.
 	 */
 	finishIntent(handle: string, now: Date): Promise<void>;
 }
 
 /**
- * `consent.at + lifetimeMs`, as an adapter must compute it when it records an
- * approval (D3): from the answer, and never from the callback that follows it.
- *
- * Here rather than in each adapter so that both compute it the same way, and so
- * that no caller can hand a store an expiry of its own.
+ * `consent.at + lifetimeMs`, as an adapter computes it when recording an
+ * approval: from the answer, never from the callback. Shared so both adapters
+ * agree and no caller can hand a store its own expiry.
  */
 export function federationGrantConsentExpiry(consentAt: Date, lifetimeMs: number): Date {
 	return federationGrantExpiresAt(consentAt, lifetimeMs);
@@ -394,9 +314,9 @@ export function federationGrantConsentExpiry(consentAt: Date, lifetimeMs: number
 declare module "@o3co/auth-provider-core" {
 	interface ComponentMap {
 		/**
-		 * Acquisition's records (#593, D16). Optional: a deployment that spends
-		 * grants without issuing them needs none, and one with federation grants
-		 * enabled is refused at boot without it.
+		 * Acquisition's records. Optional: a deployment that spends grants without
+		 * issuing them needs none, and one with federation grants enabled is
+		 * refused at boot without it.
 		 */
 		readonly federationGrantIntentStore?: FederationGrantIntentStore;
 	}

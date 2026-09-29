@@ -17,66 +17,33 @@
 import { timingSafeEqual } from "node:crypto";
 
 /**
- * Constant-time string equality — for inputs whose **byte length is public
- * information** (e.g. PKCE code_verifier, OAuth `code_challenge`).
+ * Constant-time string equality, for inputs whose byte length is public
+ * (PKCE `code_verifier`, `code_challenge`). `===` short-circuits on the first
+ * mismatch, letting a network attacker recover a stored value byte by byte
+ * (RFC 7636 §4.1, OAuth 2.1 BCP §4.5).
  *
- * `===`/`!==` short-circuit on the first mismatched byte, leaking timing
- * information about how many bytes of the candidate matched the secret.
- * For PKCE `code_verifier` comparison (RFC 7636 §4.1) and OAuth 2.1 BCP
- * §4.5 this is a security defect — a network-positioned attacker can
- * iteratively recover a stored `code_challenge` byte-by-byte.
+ * Contract: NOT constant-time across different lengths; a length mismatch
+ * returns early. Safe here because PKCE lengths are protocol-bounded and not
+ * secret (verifier 43–128 chars, S256 challenge always 43). Do not reuse for
+ * secrets whose length is sensitive; compare fixed-size digests (e.g. HMAC)
+ * instead.
  *
- * ## Contract — read this BEFORE reusing the helper
+ * A string that is not well formed never compares equal, not even to itself
+ * (`false`, never a throw): UTF-8 encodes every lone surrogate as U+FFFD's
+ * bytes, so `"s\uD800"` and `"s�"` would otherwise match. Callers compare
+ * against server-made or well-formed protocol values, so none loses a match.
  *
- * The early-return on byte-length mismatch (`bufA.length !== bufB.length →
- * return false`) is structurally NOT constant-time across length-distinct
- * inputs: an attacker can distinguish "lengths differ" (returns ~immediately)
- * from "lengths equal but bytes differ" (returns after `timingSafeEqual`'s
- * fixed-time loop). For the use cases this helper currently serves —
- * PKCE `code_verifier` (RFC 7636: 43–128 chars) and the SHA-256 base64url
- * `code_challenge` (always 43 chars) — input lengths are bounded by the
- * protocol and are not secrets, so the length-mismatch branch is NOT a
- * usable oracle.
- *
- * **DO NOT** reuse this helper for secrets whose byte length is itself
- * sensitive (variable-length tokens, password hashes of variable cost,
- * etc.) without first auditing whether a length oracle is acceptable.
- * For the secret-length-is-secret case, compare fixed-size digests
- * (e.g. HMAC) instead, or use a dedicated constant-time-irrespective-
- * of-length primitive. Per Copilot review on PR #126: the helper is
- * named/documented as suitable for public-length inputs only; widening
- * its contract is out of scope for v0.5.1.
- *
- * ## Well-formed strings only
- *
- * Equal bytes mean equal strings only when both strings are well formed:
- * UTF-8 encoding writes every lone surrogate (`\uD800`–`\uDFFF` without its
- * pair) as EF BF BD, U+FFFD's bytes, so `"s\uD800"`, `"s\uDC00"` and
- * `"s\uFFFD"` would all encode alike. A string that is not well formed
- * (`String.prototype.isWellFormed`) therefore never compares equal — not
- * even to itself — and the answer is `false`, never a throw. Every caller
- * compares against a value the server made (a digest, a code, a generated
- * handle) or a well-formed protocol string, so none loses a match it had.
- *
- * ## Implementation note
- *
- * Codex Delta 3 of SF-3 spec: the buffers are encoded BEFORE the length
- * check. `timingSafeEqual` requires equal-length inputs, and JS string
- * length does not equal UTF-8 byte length for multi-byte code points
- * (`"😀".length === 2` but `Buffer.byteLength("😀") === 4`). Comparing
- * byte-lengths after encoding keeps a well-formed non-ASCII input from
- * throwing a `RangeError`.
- *
- * Per SF-3 + MIN-4 (v0.5.1).
+ * Buffers are encoded before the length check: `timingSafeEqual` needs equal
+ * byte lengths, and string length differs from UTF-8 byte length for
+ * non-ASCII input.
  */
 export function constantTimeStringEqual(a: string, b: string): boolean {
-	// A lone surrogate encodes as U+FFFD's bytes: see § "Well-formed strings only".
+	// A lone surrogate encodes as U+FFFD's bytes (see the JSDoc).
 	if (!a.isWellFormed() || !b.isWellFormed()) return false;
 	const bufA = Buffer.from(a, "utf8");
 	const bufB = Buffer.from(b, "utf8");
-	// NOTE: this length check is intentional — `timingSafeEqual` throws on
-	// unequal lengths. Constant-time across DIFFERENT lengths is not the
-	// helper's contract; see the JSDoc § "Contract" above.
+	// Intentional: `timingSafeEqual` throws on unequal lengths, and constant
+	// time across different lengths is not this helper's contract.
 	if (bufA.length !== bufB.length) return false;
 	return timingSafeEqual(bufA, bufB);
 }

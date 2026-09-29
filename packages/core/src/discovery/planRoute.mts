@@ -15,47 +15,21 @@
  */
 
 /**
- * discovery/planRoute.mts — the OIDC discovery subsystem's boot-planner hook.
+ * The OIDC discovery subsystem's boot-planner hook. Keeps OIDC-specific
+ * knowledge (activation, document construction and validation, the discovery
+ * paths) out of `boot/assemble-app.mts`: the planner calls
+ * {@link planDiscoveryDocument}, then {@link discoveryRouteFor}, and gets an
+ * ordinary route contribution.
  *
- * Keeps ALL OIDC-specific knowledge (provider activation, document
- * construction + validation, and the spec-fixed discovery paths) out of the
- * generic boot planner (`boot/assemble-app.mts`). The planner calls
- * {@link planDiscoveryDocument} and, when a document is planned,
- * {@link discoveryRouteFor}, and gets back a normal route contribution; from
- * `assembleApp`'s perspective discovery is just another route that flows
- * through the standard collision-check + mount-order + mount pipeline — no
- * special-casing.
+ * Takes values rather than the boot component map and does not import
+ * `boot/`: the error taxonomy belongs to the boot stage.
  *
- * It takes VALUES, not the boot world (#626 F4). Until then it took
- * `assembleApp`'s own `Readonly<Partial<ComponentMap>>` widened to
- * `Record<string, unknown>` and cast three readings back out of it, and it
- * imported `BootError` from `boot/` to raise one — so the domain step and the
- * boot step referenced each other, and a typed map was laundered through
- * `unknown` to do it. Neither is needed: the caller already holds both values
- * typed, and the error taxonomy belongs to the stage that owns the taxonomy.
- *
- * A document that failed to validate is RETURNED, not thrown. The caller
- * converts it into its own failure taxonomy, and it must convert exactly that
- * and nothing else — which a `try` around the planner could not promise: the
- * planner also runs host-supplied code (the key store's algorithm, the
- * collector, a contribution's `providerRoot`), and any of it could throw an
- * error that merely has the right type. The router factory is not among them:
- * {@link discoveryRouteFor} runs it, after planning and outside any
- * conversion. Two review rounds on
- * #650 found one such path each. Catching only around
- * {@link buildDiscoveryDocument} here and handing the error back as a value
- * makes provenance structural: the caller cannot mistake anything else for
- * it, because nothing else arrives as a value.
- *
- * The line is drawn at the builder, and it is the line the conversion had
- * before #626 F4 moved it: whatever raises while the builder runs is the
- * builder's. That includes a contribution's `endpoints` or `metadata` getter,
- * which the builder reads — a `DiscoveryDocumentError` from one comes back as
- * `"invalid"`, as it was converted before. Snapshotting the contributions to
- * move the line further in would be a change of behaviour, not of structure.
- *
- * {@link discoveryRouteFor} builds the route for a planned document,
- * separately, because it calls the router factory.
+ * A document that fails validation is returned, not thrown, so the caller
+ * converts exactly that error and nothing else. The planner also runs
+ * host-supplied code (the algorithm reader, the metadata collector,
+ * `providerRoot` getters) that may throw an error of the same type; only what
+ * raises while {@link buildDiscoveryDocument} runs, including a contribution's
+ * `endpoints`/`metadata` getters it reads, comes back as `"invalid"`.
  */
 
 import type { NextFunction, Request, Response, Router } from "express";
@@ -88,38 +62,22 @@ export type DiscoveryDocumentPlanning =
 
 /**
  * Decide whether the core-synthesized OIDC discovery document is served, and
- * assemble it. The answer is a {@link DiscoveryDocumentPlanning}:
- * `"not-served"` when either activation condition below is unmet, `"planned"`
- * with the document and its paths, or `"invalid"` with the error the builder
- * raised.
+ * assemble it.
  *
- * A document is served (at every path a client may look for it at — OIDC
- * Discovery's `/.well-known/openid-configuration` and RFC 8414's
- * `/.well-known/oauth-authorization-server`, formed per the issuer's path
- * component by {@link discoveryPathsFor}, #528) when BOTH:
+ * Served, at every path a client may look for it (OIDC Discovery's
+ * `/.well-known/openid-configuration` and RFC 8414's
+ * `/.well-known/oauth-authorization-server`, see {@link discoveryPathsFor}),
+ * when both:
  *   1. an issuer is configured (`config.oauth.jwt.issuer`), and
- *   2. some contribution declares `providerRoot: true` — the EXPLICIT
- *      "an OpenID Provider exists here" signal. An ancillary contributor like
- *      the JWKS module (only `jwks_uri`) leaves it unset, so a key-publishing
- *      deployment can mount JWKS without being treated as a provider; and a
- *      provider that does not expose `authorization_endpoint` (CIBA, device
- *      flow) still activates discovery instead of silently serving nothing.
+ *   2. some contribution declares `providerRoot: true`. The explicit signal
+ *      lets a deployment publish JWKS without becoming a provider, and lets a
+ *      provider without `authorization_endpoint` (CIBA, device flow) still
+ *      activate discovery.
  *
- * The document is validated by {@link buildDiscoveryDocument}. A
- * `DiscoveryDocumentError` it raises (missing required field, reserved-field
- * contribution, conflicting values, …) comes back as `outcome: "invalid"`, and
- * the caller turns it into its own failure taxonomy — `boot/assemble-app.mts`
- * into a `BootError` with `reason: "discovery-document-invalid"`. Naming that
- * error here would mean importing the boot stage into the step it is a step
- * of (#626 F4).
- *
- * Anything else is thrown as it is, whatever its type. That includes a
- * `DiscoveryDocumentError` from the host-supplied code this runs outside the
- * builder — the signing-algorithm reader and a contribution's `providerRoot`
- * getter: those are not a document that failed to validate. What runs INSIDE
- * the builder is the builder's, which is the boundary the conversion had
- * before #626 F4 moved it.
- *
+ * A `DiscoveryDocumentError` raised by {@link buildDiscoveryDocument} comes
+ * back as `outcome: "invalid"`; `boot/assemble-app.mts` turns it into a
+ * `BootError` (`discovery-document-invalid`). Anything else is rethrown,
+ * including a `DiscoveryDocumentError` from host code run outside the builder.
  * Builds no router.
  */
 export function planDiscoveryDocument(input: {
@@ -130,36 +88,24 @@ export function planDiscoveryDocument(input: {
 	readonly issuer: string | undefined;
 	/**
 	 * What the document advertises as `id_token_signing_alg_values_supported`;
-	 * empty when no key store named an algorithm.
-	 *
-	 * A reader rather than a value, so that it is only read once both
-	 * activation conditions have passed — as it was before #626 F4 moved it.
-	 * The key store is a slot a host may fill with an object of its own, and
-	 * a deployment that serves no discovery document has never touched its
-	 * algorithm.
+	 * empty when no key store named an algorithm. A reader, so the host-supplied
+	 * key store is touched only once both activation conditions have passed.
 	 */
 	readonly readSigningAlgs: () => readonly string[];
 	/**
-	 * Every `discoveryMetadata` contribution, in registration order. A reader
-	 * for the same reason as `readSigningAlgs`: the collector is host-supplied,
-	 * and before #626 F4 it was not iterated until an issuer had been found. As
-	 * a plain value it would be read by the caller while building the argument,
-	 * ahead of the issuer gate (#650 review).
+	 * Every `discoveryMetadata` contribution, in registration order. A reader,
+	 * so the host-supplied collector is not iterated before the issuer gate.
 	 */
 	readonly readMetadata: () => readonly OidcDiscoveryContribution[];
 }): DiscoveryDocumentPlanning {
 	const { issuer, readSigningAlgs, readMetadata } = input;
 
-	// #266 made `oauth.jwt.issuer` required at the schema boundary, so a config
-	// that passed the schema always has one. The guard is for a caller that
-	// reaches here with one that did not — a hand-built `AppConfig` through
-	// `bootstrapComponents`, which is not type-checked at the boundary it
-	// crosses.
+	// The schema requires `oauth.jwt.issuer`; this guards a hand-built
+	// `AppConfig` passed through `bootstrapComponents`, which is not validated.
 	if (typeof issuer !== "string" || issuer.length === 0) return { outcome: "not-served" };
 
-	// Host-supplied inputs are read here, in the order the planner needs them —
-	// the collector after the issuer gate, the algorithms after both — which is
-	// the order the planner read them in before #626 F4 made them inputs.
+	// Host-supplied inputs are read in the order the planner needs them: the
+	// collector after the issuer gate, the algorithms after both.
 	const metadata = readMetadata();
 	if (!metadata.some((item) => item.providerRoot === true)) return { outcome: "not-served" };
 
@@ -176,9 +122,9 @@ export function planDiscoveryDocument(input: {
 		throw err;
 	}
 
-	// #528: one document, every path a client may look for it at — OIDC's
-	// appended form and RFC 8414's inserted form — through one handler, so
-	// the bodies and headers cannot differ between them.
+	// One document, every path a client may look for it at (OIDC's appended
+	// form and RFC 8414's inserted form), through one handler, so the bodies
+	// and headers cannot differ between them.
 	const discovery = discoveryPathsFor(issuer);
 	return { outcome: "planned", plan: { document, paths: [...discovery.oidc, ...discovery.oauth] } };
 }
@@ -197,19 +143,12 @@ export function discoveryRouteFor(
 ): RouteContribution {
 	const { document: doc, paths } = plan;
 	const router = routerFactory();
-	// These paths are literals, not route patterns. An issuer is a URL and
-	// its path may hold characters Express 5's parser reads as syntax —
-	// `+`, `*`, `(`, `)`, `:`, `{}` — so `router.get(path)` on
-	// `https://as.example/tenant+blue` either throws at boot or matches
-	// requests this server never advertised. Matching the pathname itself
-	// keeps the route exactly what the document says it is, which is also
-	// what RFC 8414 §3.3 requires of the two to agree.
-	//
-	// Exactly, but for a trailing slash: Express's default non-strict
-	// routing accepted one and clients send it, so that stays. Case is not
-	// folded — a well-known URI is case-sensitive (RFC 8615 §3), and an
-	// issuer identifier is compared as a string (RFC 8414 §3.3), so the two
-	// cannot be allowed to differ by case here.
+	// Match the pathname literally, not as a route pattern: an issuer path may
+	// hold characters Express 5 parses as syntax (`+`, `*`, `(`, `)`, `:`,
+	// `{}`), which would throw at boot or match paths never advertised, and
+	// RFC 8414 §3.3 requires route and document to agree. A trailing slash is
+	// tolerated (clients send it); case is not folded, since well-known URIs are
+	// case-sensitive (RFC 8615 §3) and issuers compare as strings.
 	const advertised = new Set(paths);
 	const trimTrailingSlash = (path: string): string =>
 		path.length > 1 && path.endsWith("/") ? path.slice(0, -1) : path;
