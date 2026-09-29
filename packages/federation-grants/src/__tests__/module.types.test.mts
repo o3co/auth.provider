@@ -40,6 +40,8 @@ const OPTIONAL = [
 	"federationGrantIntentStore",
 	"userRepository",
 	"userSessionStore",
+	// The login page connect sends a browser that is not signed in to (#728).
+	"loginEntry",
 ] as const;
 type Declared = ProviderDeps<(typeof REQUIRES)[number], (typeof OPTIONAL)[number]>;
 
