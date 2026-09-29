@@ -206,14 +206,17 @@ browser session; `m2m` has no login for a second factor to interrupt.
   in `standalone`'s `clients.yaml.example`: the hosted providers' split, which
   belongs in the client registry (D1).
 
-## Open
+## Relation to #728's B5
 
-- **The composition root's own configuration section.** #728's B5 moves adapter
-  selection into a section the composition root owns, decided as
-  `standalone { adapters { … } }`. With a template per shape, a section named
-  after the template gives each template different environment variable names
-  for the same setting (B9 derives them from the path). A section every
-  template shares — for example `composition { adapters { … } }` — keeps one
-  name per setting across templates, and one fixed name is also one core can
-  leave out of B8's boot-time notice of sections nothing owns. Raised on #728
-  for the owner's decision.
+#728 decides where a composition root selects its adapters: a section the
+root owns, `standalone { adapters { … } }` (B5), with environment variable
+names derived from the path (B9). That decision stands, and this record does
+not change it: `standalone` implements B5 as decided, and a second template
+follows the same rule with a section named after itself
+(`m2m { adapters { … } }`).
+
+The consequence — the same setting under a different variable in each template
+(`STANDALONE_ADAPTERS_*`, `M2M_ADAPTERS_*`) — was raised on #728
+([comment](https://github.com/o3co/auth.provider/issues/728#issuecomment-5890344702)),
+with a proposal for one section every template shares
+(`composition { adapters { … } }`). If #728 amends B5, this record follows it.
