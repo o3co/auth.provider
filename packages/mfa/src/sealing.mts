@@ -15,48 +15,30 @@
  */
 
 /**
- * Secrets at rest (the MFA ADR's D11), over core's key-ring envelope
- * (`sealWithKeyRing` / `openWithKeyRing`). One place seals, so no factor ever
- * holds a key (D7).
+ * Secrets at rest, over core's key-ring envelope (`sealWithKeyRing` /
+ * `openWithKeyRing`). Sealing happens only here, so no factor ever holds a key.
  *
- * - **A factor's data** is JSON sealed under the purpose `o3co:mfa:factor`
- *   with its record — subject ‖ factor id ‖ kind, each length-prefixed — as
- *   the authenticated data: data copied into another subject's record, under
- *   another id, or relabelled as another kind does not open.
- * - **A ceremony's state** — a challenge, a pending enrollment — is sealed
- *   with the transaction id (and the factor's kind) as the authenticated
- *   data, under a purpose of its own for each, so neither opens as the
- *   other, nor as a factor's data.
- * - **Every part of a binding or a digest is well-formed text**: UTF-8 would
- *   write a lone surrogate as U+FFFD's bytes, making two bindings one.
- *   Sealing and digesting refuse such a part; opening answers `unreadable`.
- * - **What is sealed is what opening gives back**: a JSON object of JSON
- *   values — plain objects and real arrays, nothing JSON would change, drop
- *   or refuse (a Date, a Map, a `toJSON`, a BigInt, NaN, a cycle), and no
- *   accessor at any depth — or a `RangeError` that quotes nothing. The value
- *   is read once, into a copy, and the copy is what is serialised: nothing a
- *   getter answers can differ between the check and the text.
- * - **Opening never throws** on what it is handed: `unreadable` for anything
- *   that is not its envelope or does not open to a JSON object under this
- *   binding — which no key would cure — and `key_unavailable`, naming the
- *   key, when the key that sealed it has left the ring — which putting the
- *   key back cures. Both are the coordinator's `503` and one
- *   `mfa_factor_unreadable` line, never "no factor" or a wrong code.
- * - **Rotation**: what is sealed is sealed under the ring's first key.
- *   Opening a factor's data sealed under another key logs
- *   `mfa_factor_sealed_with_retired_key` (info, the key id) once per key id,
- *   so an operator knows that key is still needed.
- * - **Keyed digests** for codes that are compared and never recovered: an
- *   HMAC-SHA-256 over the factor's kind and the parts, each length-prefixed,
- *   base64url, kept with the id of the key it was made under and compared
- *   in constant time under that key — or `key_unavailable` when it has left
- *   the ring. A stored value that is not such a digest is refused with a
- *   `RangeError`: it is neither a missing key nor a wrong code. The HMAC key is not the sealing key itself but one derived
- *   from it (HKDF-SHA-256, info `o3co:mfa:digest`): the same key is not used
- *   by two algorithms.
- *
- * Building one checks the ring as core's envelope does, and refuses an empty
- * one: every seal needs a first key.
+ * - A factor's data is sealed under `o3co:mfa:factor` with its record (subject,
+ *   factor id, kind, each length-prefixed) as authenticated data, so data copied
+ *   to another subject, id or kind does not open. A ceremony's state (challenge,
+ *   pending enrollment) is bound to its transaction id and kind under a purpose of
+ *   its own, so neither opens as the other or as a factor's data.
+ * - Every binding or digest part must be well-formed text: UTF-8 writes a lone
+ *   surrogate as U+FFFD's bytes, which would make two bindings one.
+ * - Only a JSON object of plain JSON values is sealed (no Date, Map, `toJSON`,
+ *   BigInt, NaN, cycle, or accessor at any depth); it is copied once and the copy
+ *   is serialised, so a getter cannot answer the check and the text differently.
+ * - Opening never throws: `unreadable` for anything no key would cure, and
+ *   `key_unavailable` (naming the key) when the sealing key has left the ring.
+ *   Callers answer both with a `503`, never "no factor" or a wrong code.
+ * - New seals use the ring's first key. Opening a factor's data sealed under
+ *   another key logs `mfa_factor_sealed_with_retired_key` once per key id, so an
+ *   operator knows that key is still needed.
+ * - Keyed digests for codes compared but never recovered: HMAC-SHA-256 over the
+ *   kind and parts (length-prefixed), under a key derived by HKDF-SHA-256 (info
+ *   `o3co:mfa:digest`) so no key serves two algorithms; stored with the key id and
+ *   compared in constant time. A stored value that is not such a digest is a
+ *   `RangeError`: neither a missing key nor a wrong code.
  */
 
 import { createHmac, hkdfSync } from "node:crypto";
@@ -77,7 +59,7 @@ import {
 	sealWithKeyRing,
 } from "@o3co/auth-provider-core";
 
-/** The purpose a factor's data is sealed under (D11). Fixed while any is at rest. */
+/** The purpose a factor's data is sealed under. Fixed while any is at rest. */
 export const MFA_FACTOR_SEALING_PURPOSE = "o3co:mfa:factor";
 /** The purpose a pending challenge's state is sealed under. */
 export const MFA_CHALLENGE_SEALING_PURPOSE = "o3co:mfa:challenge";
@@ -87,7 +69,7 @@ export const MFA_ENROLLMENT_SEALING_PURPOSE = "o3co:mfa:enrollment";
 /** The HKDF info a digest key is derived from a ring key with. */
 const DIGEST_KEY_INFO = "o3co:mfa:digest";
 
-/** The record a factor's data belongs to (D7): what its sealing is bound to. */
+/** The record a factor's data belongs to: what its sealing is bound to. */
 export interface MfaFactorBinding {
 	readonly subject: string;
 	readonly id: string;
@@ -175,18 +157,13 @@ const hasAccessor = (value: object): boolean =>
 	});
 
 /**
- * A copy of `value` made of what its own data properties hold, each read
- * once, through its descriptor — or {@link NOT_JSON} when JSON would not give
- * it back as it is. JSON's: `null`, a boolean, a finite number, a string, a
- * real array (its prototype `Array.prototype`) of such values with no hole
- * and no `undefined`, or a plain object (its prototype `Object.prototype` or
- * none) whose enumerable values are such values or `undefined`, which JSON
- * leaves out and the copy does too. Refused: an accessor anywhere — a getter
- * or a setter, on an object or at an index, at any depth — since a getter
- * could answer this check one thing and the serialisation another; a Date, a
- * Map, a class instance, an Array subclass, a function (a `toJSON` among
- * them), a BigInt, NaN or Infinity, a cycle. What is serialised is the copy:
- * the value that was checked, and nothing read again.
+ * A copy of `value` built from its own data properties, each read once through
+ * its descriptor, or {@link NOT_JSON} when JSON would not give it back unchanged.
+ * Accepted: `null`, booleans, finite numbers, strings, real arrays with no hole
+ * or `undefined`, and plain (or null-prototype) objects, whose `undefined` values
+ * are dropped as JSON drops them. Refused: any accessor at any depth (a getter
+ * could answer the check and the serialisation differently), other objects,
+ * functions, BigInt, NaN, Infinity and cycles.
  */
 function jsonCopy(value: unknown, ancestors: Set<object>): unknown {
 	if (value === null || typeof value === "string" || typeof value === "boolean") return value;
@@ -361,8 +338,8 @@ export function createMfaSealing({ ring, logger = consoleLogger }: MfaSealingOpt
 					digest: mac(first, digestInput(kind, parts)),
 				}),
 				matchesDigest(parts: readonly string[], stored: MfaKeyedDigest): MfaDigestMatch {
-					// A record that is not a digest is neither a missing key nor a
-					// wrong code (D11): it is refused, quoting nothing.
+					// A record that is not a digest is neither a missing key nor a wrong code: it is
+					// refused, quoting nothing.
 					if (
 						typeof stored !== "object" ||
 						stored === null ||
