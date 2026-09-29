@@ -144,7 +144,6 @@ export type {
 	MissingRequiredComponentDetails,
 	ModuleFactoryNotCalledDetails,
 	ModuleSectionPathInvalidDetails,
-	ModuleSectionPathSharedDetails,
 	NameKeyedCollector,
 	OrderedRouteContribution,
 	OverrideTargetMissingDetails,

@@ -76,7 +76,6 @@ export type {
 	MissingRequiredComponentDetails,
 	ModuleFactoryNotCalledDetails,
 	ModuleSectionPathInvalidDetails,
-	ModuleSectionPathSharedDetails,
 	NameKeyedCollector,
 	NormalisedModule,
 	OrderedRouteContribution,

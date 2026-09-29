@@ -2160,6 +2160,8 @@ function sectionRelocationsOf(m: Module): readonly SectionRelocation[] {
  * form or has a hole, and `details.problem` what is wrong with it. A section
  * is known here only by a manifest's `section`: a module that reads its
  * settings through a `configSchema` alone declares no path to hold against.
+ * Then no two modules' sections may be read at the same path
+ * (`checkModuleSectionOwners`).
  *
  * Throws `module-section-path-invalid`.
  * @internal
@@ -2344,28 +2346,29 @@ function checkRelocatedConfigPaths(rawModules: readonly Module[], bootstrap: Boo
 /**
  * A section has one owner (#728): two modules whose sections are read at the
  * same path — the same keys, a module's name counting as one key — would
- * each be handed the other's configuration and each write it back. Throws
- * `module-section-path-shared` naming the path and every module declaring
- * it, in module order. A section inside another module's is not shared: it
- * is written back inside the outer one (`parseModuleSections`).
+ * each be handed the other's configuration and each write it back. The later
+ * module in `modules` is refused with `module-section-path-invalid`, and
+ * `problem` names the earlier one. A section inside another module's is not
+ * shared: it is written back inside the outer one (`parseModuleSections`).
  * @internal
  */
 function checkModuleSectionOwners(rawModules: readonly Module[]): void {
-	const owners = new Map<string, { readonly at: string; readonly modules: string[] }>();
+	const owners = new Map<string, string>();
 	for (const m of rawModules) {
 		if (m.section === undefined) continue;
 		const key = JSON.stringify(sectionSegmentsOf(m));
-		const entry = owners.get(key) ?? { at: sectionPathOf(m), modules: [] };
-		entry.modules.push(m.name);
-		owners.set(key, entry);
-	}
-	for (const { at, modules } of owners.values()) {
-		if (modules.length < 2) continue;
+		const owner = owners.get(key);
+		if (owner === undefined) {
+			owners.set(key, m.name);
+			continue;
+		}
+		const at = sectionPathOf(m);
+		const problem = `module "${owner}" declares its section there too, and a section has one owner`;
 		throw new BootError({
-			message: `Modules ${modules.map((name) => `"${name}"`).join(", ")} each declare their section at "${at}": a section has one owner. Declare each module's section at a path of its own.`,
-			reason: "module-section-path-shared",
+			message: `Module "${m.name}" declares its section at "${at}": ${problem}. Declare each module's section at a path of its own.`,
+			reason: "module-section-path-invalid",
 			stage: "validateManifests",
-			details: { reason: "module-section-path-shared", at, modules },
+			details: { reason: "module-section-path-invalid", module: m.name, at, problem },
 		});
 	}
 }

@@ -258,14 +258,15 @@ describe("a section nested in another module's", () => {
 			],
 			resolved({ fixture: { shared: { retries: 1 } } }),
 		);
-		expect(err.reason).toBe("module-section-path-shared");
-		expect(err.message).toMatch(/"first"/);
-		expect(err.message).toMatch(/"second"/);
-		expect(err.message).toMatch(/fixture\.shared/);
+		expect(err.reason).toBe("module-section-path-invalid");
+		expect(err.message).toMatch(
+			/^Module "second" declares its section at "fixture\.shared": module "first"/,
+		);
 		expect(err.details).toEqual({
-			reason: "module-section-path-shared",
+			reason: "module-section-path-invalid",
+			module: "second",
 			at: "fixture.shared",
-			modules: ["first", "second"],
+			problem: 'module "first" declares its section there too, and a section has one owner',
 		});
 	});
 });
