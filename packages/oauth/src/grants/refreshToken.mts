@@ -218,7 +218,7 @@ export const createRefreshTokenGrant = (deps: RefreshTokenGrantDeps): GrantHandl
 
 			// Defends against an access token presented as a refresh token:
 			// `rt+jwt` is required here even when `legacyTypAccept` lets a
-			// typ-less token through the verifier. Keep the RT-OC test green.
+			// typ-less token through the verifier; `refreshToken.test.mts` pins it.
 			if (typ !== "rt+jwt") {
 				return {
 					result: {
