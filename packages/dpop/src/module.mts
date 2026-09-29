@@ -27,9 +27,9 @@
  *     enabled; an empty contribution otherwise.
  *
  * DI requires:
- *   - `config` — reads `config.oauth.dpop` + `config.oauth.tokenBinding`, and
- *     `config.oauth.jwt.issuer`, whose origin is the authority half of every
- *     proof's expected `htu` (#292).
+ *   - `config` — reads `config.oauth.dpop`, and `config.oauth.jwt.issuer`
+ *     when no module provides `oauthTokenSettings`: the issuer's origin is
+ *     the authority half of every proof's expected `htu` (#292).
  *
  * DI optional:
  *   - `logger`         — handed to `createDPoPMechanism`; core's
@@ -45,6 +45,8 @@
  *                        module is refused under `"multi"` and warned about
  *                        when the mode is unset. This module adds no check of
  *                        its own.
+ *   - `oauthTokenSettings` — the issuer, which the oauth module provides from
+ *                        `oauth {}` (#728); the configuration's when absent.
  *
  * Secure-default-opt-in: `oauth.dpop.enabled = false` in reference.conf.
  * Operators must explicitly set `enabled = true` to activate DPoP.
@@ -154,7 +156,7 @@ const DPOP_SECTION_SCHEMA = dpopConfigSchema.shape.oauth.shape.dpop;
  */
 export const dpopModule = defineModule<
 	"config",
-	"logger" | "replaySeenSet",
+	"logger" | "replaySeenSet" | "oauthTokenSettings",
 	typeof DPOP_SECTION_SCHEMA
 >({
 	name: "dpop",
@@ -165,7 +167,9 @@ export const dpopModule = defineModule<
 		at: "oauth.dpop",
 	},
 	requires: ["config"],
-	optional: ["logger", "replaySeenSet"],
+	// `oauthTokenSettings` (#728): the issuer, which the oauth module provides;
+	// read from the configuration when no module does, as before.
+	optional: ["logger", "replaySeenSet", "oauthTokenSettings"],
 	contributes: {
 		// RFC 9449 §5.1 authorization-server metadata (#283). Without it a client
 		// reading `/.well-known/openid-configuration` cannot discover that this
@@ -239,11 +243,14 @@ export const dpopModule = defineModule<
 				//
 				// `oauth.jwt.issuer` has been required by core's
 				// `CoreConfigSchema` since #266/#307, so this is not a second
-				// place to configure an origin — it is the same one, read. The
-				// guard exists for a composition root that hand-builds a config
-				// object without core's schema; `createDPoPMechanism` validates
-				// the value itself and produces the operator-facing message.
-				const issuer = typedConfig.oauth.jwt?.issuer;
+				// place to configure an origin — it is the same one, read:
+				// through the `oauthTokenSettings` slot the oauth module
+				// provides (#728), or from the configuration when no module
+				// provides it. The guard exists for a composition root that
+				// hand-builds a config object without core's schema;
+				// `createDPoPMechanism` validates the value itself and produces
+				// the operator-facing message.
+				const issuer = deps.oauthTokenSettings?.issuer ?? typedConfig.oauth.jwt?.issuer;
 				if (typeof issuer !== "string" || issuer === "") {
 					throw new Error(
 						"dpopModule: config.oauth.jwt.issuer is required when DPoP is enabled. Its origin " +
