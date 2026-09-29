@@ -81,11 +81,11 @@ describe("BootStage", () => {
 // "contribution-kind-guarded" and "contribution-malformed", its relocated
 // paths "config-path-relocated", and its authoritative keys
 // "authoritative-without-provides" and "authoritative-component-overridden"
-// — 36)
+// — 37)
 // ---------------------------------------------------------------------------
 
 describe("BootErrorReason", () => {
-	it("contains exactly the 36 reason literals", () => {
+	it("contains exactly the 37 reason literals", () => {
 		expectTypeOf<BootErrorReason>().toEqualTypeOf<
 			| "module-factory-not-called"
 			| "duplicate-module-name"
@@ -123,6 +123,7 @@ describe("BootErrorReason", () => {
 			| "config-path-relocated"
 			| "authoritative-without-provides"
 			| "authoritative-component-overridden"
+			| "token-settings-lifetime-exceeds-configuration"
 		>();
 	});
 });
