@@ -1897,13 +1897,14 @@ function conflictingOutputs(
  * @internal
  */
 function ignoredSections(modules: readonly Module[], raw: unknown): readonly string[] {
-	if (!isPlainConfigObject(raw)) return [];
+	// Boot's parse accepted `raw` as an object before this runs — a plain one
+	// or an instance: its own keys are the sections.
 	const owned = new Set<string>(Object.keys(TransitionalConfigSchema.shape));
 	for (const m of modules) {
 		for (const key of Object.keys(m.configSchema?.shape ?? {})) owned.add(key);
 		if (m.section !== undefined) owned.add(sectionSegmentsOf(m)[0] as string);
 	}
-	return Object.keys(raw)
+	return Object.keys(raw as object)
 		.filter((key) => !owned.has(key))
 		.sort();
 }
