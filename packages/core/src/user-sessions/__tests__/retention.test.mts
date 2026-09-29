@@ -29,6 +29,7 @@
  */
 
 import { describe, expect, it } from "vitest";
+import { MAX_DURATION_MS } from "#/config/durations.mjs";
 import { FEDERATION_GRANT_LIFETIME_CEILING_MS } from "#/federation-grants/lifetime.mjs";
 import {
 	resolveSubjectRevocationHorizonMs,
@@ -149,6 +150,14 @@ describe("resolveSubjectRevocationHorizonMs", () => {
 			expect(horizon).toBeLessThan(86_400_000);
 		});
 
+		it("accepts a session lifetime at the one-year ceiling", () => {
+			expect(
+				resolveSubjectRevocationHorizonMs(config(), {
+					sessionCookie: sessionCookie(MAX_DURATION_MS),
+				}),
+			).toBeGreaterThan(MAX_DURATION_MS);
+		});
+
 		it("holds a slot's lifetime to the rule the configuration's is held to, naming the slot", () => {
 			// A slot built by hand meets no schema either. Read through `??`, a
 			// zero or a string went straight into the arithmetic and sized the
@@ -159,6 +168,10 @@ describe("resolveSubjectRevocationHorizonMs", () => {
 				["sessionCookiePolicy.maxAgeMs", { sessionCookie: sessionCookie(Number.NaN) }],
 				["sessionCookiePolicy.maxAgeMs", { sessionCookie: sessionCookie("12h") }],
 				["sessionCookiePolicy.maxAgeMs", { sessionCookie: sessionCookie(undefined) }],
+				// The session store's provider holds session.maxAge to whole
+				// milliseconds within the one-year ceiling, as the schema does.
+				["sessionCookiePolicy.maxAgeMs", { sessionCookie: sessionCookie(1.5) }],
+				["sessionCookiePolicy.maxAgeMs", { sessionCookie: sessionCookie(MAX_DURATION_MS + 1) }],
 				[
 					"oauthTokenSettings.refreshTokenExpiresIn",
 					{ tokenSettings: tokenSettings({ refreshTokenExpiresIn: 0 }) },
