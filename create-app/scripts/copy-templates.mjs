@@ -34,9 +34,10 @@ const destRoot = resolve(__dirname, "../templates");
 // NOTE: `reference.conf` is intentionally NOT copied here. It lives in
 // `packages/core/config/reference.conf` and is shipped to consumers via the
 // `@o3co/auth-provider-core` package's `exports` field (`./reference.conf`
-// subpath export, files: ["config", ...]). Consumers and the standalone
-// composition root resolve it at boot via
-// `import.meta.resolve("@o3co/auth-provider-core/reference.conf")`.
+// subpath export, files: ["config", ...]). Each package that ships defaults
+// does the same, and its modules declare the file (#728): the standalone
+// composition root layers core's reference and the ones its loaded modules
+// declare with `coreReference()` / `moduleReferences(modules)`.
 // The template's `config/` directory contains only consumer-facing files
 // (`application.conf`, `development.conf`, `production.conf`) — the
 // per-deployment delta layer, not the library baseline.

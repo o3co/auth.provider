@@ -164,7 +164,7 @@ standalone テンプレートのような構成での主なエンドポイント
 
 ## 設定
 
-HOCON 設定ファイル + 環境変数オーバーライド。設定スキーマは登録されたモジュールに依存する。`@o3co/auth-provider-core` がライブラリのデフォルトを `reference.conf` として同梱し、コンポジションルートがその上に自前のファイルを重ねる。
+HOCON 設定ファイル + 環境変数オーバーライド。設定スキーマは登録されたモジュールに依存する。`@o3co/auth-provider-core` と、デフォルトを持つ各パッケージは、それを自分のモジュールが宣言する `reference.conf` として同梱する。コンポジションルートは、読み込むモジュールの reference（`moduleReferences(modules)`、core のものを最後）の上に自前のファイルを重ね、その結果を `createApp` に渡し、boot はそれを一度だけパースする（[#728](https://github.com/o3co/auth.provider/issues/728)）。
 
 **Core (常に必要):**
 
