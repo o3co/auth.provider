@@ -255,7 +255,9 @@ describe("the boot refusals (the MFA ADR's D20; the session-admission ADR's D7)"
 			const err = await refusal({
 				config: configFor("required", TOTP_OFF),
 				withoutTotpModule,
-				extraModules: [contributing(stubFactor("recovery_code", ["recovery"], { counting: false }))],
+				extraModules: [
+					contributing(stubFactor("recovery_code", ["recovery"], { counting: false })),
+				],
 			});
 			expect(err.cause, String(withoutTotpModule)).toMatchObject({
 				reason: "mfa-no-counting-factor",
