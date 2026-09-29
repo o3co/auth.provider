@@ -117,6 +117,25 @@ describe("readTransitionalConfig — the switches a composition root reads befor
 		expect((thrown as Error).cause).toBeInstanceOf(z.ZodError);
 	});
 
+	it("refuses a configuration a read of which throws, as a RangeError, rather than letting the error escape", () => {
+		const http = {
+			trustProxy: false,
+			readinessTimeoutMs: 1000,
+			get port(): number {
+				throw new Error("the port getter broke");
+			},
+		};
+		let thrown: unknown;
+		try {
+			readTransitionalConfig(resolved({ http }), ["http.port"]);
+		} catch (err) {
+			thrown = err;
+		}
+		expect(thrown).toBeInstanceOf(RangeError);
+		expect((thrown as Error).message).toMatch(/threw instead of answering/);
+		expect((thrown as Error).message).toMatch(/the port getter broke/);
+	});
+
 	it("refuses a configuration that is not an object, naming the configuration itself", () => {
 		expect(() => readTransitionalConfig("http.port = 3000", ["http.port"])).toThrow(
 			/^Config validation failed — 1 issue\(s\) found: \(the configuration\): /,

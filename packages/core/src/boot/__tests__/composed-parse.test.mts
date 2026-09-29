@@ -136,6 +136,54 @@ describe("one composed parse over the transitional base", () => {
 		expect(err.message).toMatch(/deployment\.mode: /);
 	});
 
+	it.each([
+		[
+			"an async refinement",
+			z.object({ widget: z.object({ size: z.number() }) }).refine(async () => true),
+			/could not be parsed synchronously/,
+		],
+		[
+			"a transform that throws",
+			z.object({
+				widget: z.object({
+					size: z.number().transform((): number => {
+						throw new Error("the widget broke");
+					}),
+				}),
+			}),
+			/the widget broke/,
+		],
+	])(
+		"refuses a module's configSchema that throws instead of answering — %s — naming the module",
+		async (_label, configSchema, cause) => {
+			const err = await bootRefused(
+				[defineModule({ name: "throwing-reader", configSchema: configSchema as z.ZodObject })],
+				resolved({ widget: { size: 3 } }),
+			);
+			expect(err.reason).toBe("config-validation-failed");
+			expect(err.message).toMatch(
+				/module "throwing-reader"'s configSchema threw instead of answering/,
+			);
+			expect(err.message).toMatch(cause);
+		},
+	);
+
+	it("refuses a configuration a read of which throws, rather than letting the error escape", async () => {
+		// A hand-built configuration with a getter that throws: core's own parse
+		// reads it.
+		const http = {
+			trustProxy: false,
+			readinessTimeoutMs: 1000,
+			get port(): number {
+				throw new Error("the port getter broke");
+			},
+		};
+		const err = await bootRefused([], resolved({ http }));
+		expect(err.reason).toBe("config-validation-failed");
+		expect(err.message).toMatch(/core's configuration schema threw instead of answering/);
+		expect(err.message).toMatch(/the port getter broke/);
+	});
+
 	it("names the configuration itself when it is not an object", async () => {
 		const err = await bootRefused([], "http.port = 3000" as unknown as Record<string, unknown>);
 		expect(err.reason).toBe("config-validation-failed");
