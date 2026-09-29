@@ -106,6 +106,15 @@ export default defineConfig({
 				// The MFA enrollment witness on `User` and `UserRepository`. Paired
 				// with tsconfig.test.json.
 				"src/repositories/__tests__/mfaEnrollmentWitness.test.mts",
+				// The slots through which modules share what one of them owns
+				// (#728): the slot types are asserted with expectTypeOf, and the
+				// fixtures claim the contracts' types. Paired with
+				// tsconfig.test.json.
+				"src/token-settings/__tests__/**/*.test.mts",
+				"src/browser-session/__tests__/**/*.test.mts",
+				"src/deployment/__tests__/**/*.test.mts",
+				// The RateLimiter port's `failMode` and its contract suite (#728).
+				"src/ratelimit/__tests__/rateLimiter.contract.test.mts",
 			],
 			// vitest 5 collects a typecheck-included file's tests from the file
 			// itself, where 4 was content to let an imported helper register

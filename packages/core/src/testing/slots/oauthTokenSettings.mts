@@ -1,0 +1,172 @@
+/*
+ * Copyright 2026 1o1 Co. Ltd.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+/**
+ * The contract suite of the `oauthTokenSettings` slot (#728) and its test
+ * double. `oauthTokenSettingsContract(input)` answers one case per rule, as
+ * `sessionRequirementContract` does: a name and an async `run` that throws
+ * when the value breaks the rule. What it holds the settings to is what the
+ * configuration schema holds `oauth {}` to, resolved: a canonical issuer,
+ * lifetimes within the one-year ceiling with the access-token default not
+ * above its max, a dispatch policy of the two, every switch a boolean — and
+ * the whole frozen. `createTestOAuthTokenSettings` answers the fixture
+ * configuration's settings, resolved, with any member replaced; it checks
+ * nothing, so a test of a broken value builds it here. Published on
+ * `@o3co/auth-provider-core/testing`.
+ */
+
+import assert from "node:assert/strict";
+import { type AccessTokenLifetime, isLifetimeSeconds } from "../../config/application.schema.mjs";
+import { checkCanonicalIssuer, describeIssuerRejection } from "../../issuer/canonical.mjs";
+import type { DispatchPolicy } from "../../middleware/tokenBinding.mjs";
+import type { ContractCase } from "../../session-admission/testing/requirement.contract.mjs";
+import type { OAuthTokenBindingSettings, OAuthTokenSettings } from "../../token-settings/types.mjs";
+import { unfrozenPath } from "./shared.mjs";
+
+export interface OAuthTokenSettingsContractInput {
+	/** The settings under test, built afresh for each case: a provider's, over the configuration its test chose. */
+	readonly build: () => OAuthTokenSettings;
+}
+
+const DISPATCH_POLICIES: ReadonlySet<unknown> = new Set<DispatchPolicy>([
+	"intent-explicit",
+	"strict-mutual-exclusion",
+]);
+
+const lifetime = (value: unknown, what: string): void => {
+	assert.ok(
+		isLifetimeSeconds(value),
+		`${what} must be a whole number of seconds from 1 to the one-year ceiling (got ${String(value)})`,
+	);
+};
+
+/** The cases of the `oauthTokenSettings` contract over the settings `input` builds. */
+export function oauthTokenSettingsContract(
+	input: OAuthTokenSettingsContractInput,
+): readonly ContractCase[] {
+	const { build } = input;
+	return [
+		{
+			name: "issuer is a canonical issuer",
+			run: async () => {
+				const { issuer } = build();
+				const rejection = checkCanonicalIssuer(issuer);
+				assert.equal(
+					rejection,
+					null,
+					rejection === null ? "" : `issuer ${describeIssuerRejection(rejection)}`,
+				);
+			},
+		},
+		{
+			name: "the access-token lifetime is a default and a max, each a lifetime, the default not above the max",
+			run: async () => {
+				const { accessTokenLifetime } = build();
+				lifetime(accessTokenLifetime?.defaultExpiresIn, "accessTokenLifetime.defaultExpiresIn");
+				lifetime(accessTokenLifetime?.maxExpiresIn, "accessTokenLifetime.maxExpiresIn");
+				assert.ok(
+					accessTokenLifetime.defaultExpiresIn <= accessTokenLifetime.maxExpiresIn,
+					"no default the max would cut down: accessTokenLifetime.defaultExpiresIn must not exceed maxExpiresIn",
+				);
+			},
+		},
+		{
+			name: "the refresh-token lifetime is a lifetime",
+			run: async () => {
+				lifetime(build().refreshTokenExpiresIn, "refreshTokenExpiresIn");
+			},
+		},
+		{
+			name: "the dispatch policy is intent-explicit or strict-mutual-exclusion",
+			run: async () => {
+				const policy = build().tokenBinding?.dispatchPolicy;
+				assert.ok(
+					DISPATCH_POLICIES.has(policy),
+					`tokenBinding.dispatchPolicy must be "intent-explicit" or "strict-mutual-exclusion" (got ${String(policy)})`,
+				);
+			},
+		},
+		{
+			name: "every switch is true or false",
+			run: async () => {
+				const settings = build();
+				const switches: Record<string, unknown> = {
+					legacyTypAccept: settings.legacyTypAccept,
+					"tokenBinding.bindConfidentialClientRefreshTokens":
+						settings.tokenBinding?.bindConfidentialClientRefreshTokens,
+					resourceIndicatorEnabled: settings.resourceIndicatorEnabled,
+					requireEmailVerified: settings.requireEmailVerified,
+				};
+				for (const [name, value] of Object.entries(switches)) {
+					assert.equal(
+						typeof value,
+						"boolean",
+						`${name} must be resolved to true or false, never left absent or as the string an environment variable carries (got ${String(value)})`,
+					);
+				}
+			},
+		},
+		{
+			name: "the settings are frozen, the nested ones too",
+			run: async () => {
+				const found = unfrozenPath(build(), "the settings");
+				assert.equal(
+					found,
+					undefined,
+					`${found} is not frozen: a module that reads the settings could change them under the others`,
+				);
+			},
+		},
+	];
+}
+
+/** What a test replaces of the double's settings; a nested member is replaced member by member. */
+export interface TestOAuthTokenSettingsOverrides {
+	readonly issuer?: string;
+	readonly legacyTypAccept?: boolean;
+	readonly accessTokenLifetime?: Partial<AccessTokenLifetime>;
+	readonly refreshTokenExpiresIn?: number;
+	readonly tokenBinding?: Partial<OAuthTokenBindingSettings>;
+	readonly resourceIndicatorEnabled?: boolean;
+	readonly requireEmailVerified?: boolean;
+}
+
+/**
+ * The settings of the fixture configuration (`makeValidCoreConfig`),
+ * resolved — its issuer, a 3600-second access token, a 86400-second
+ * refresh token, the `intent-explicit` policy, every switch off — with
+ * `overrides` applied, frozen all the way down.
+ */
+export function createTestOAuthTokenSettings(
+	overrides: TestOAuthTokenSettingsOverrides = {},
+): OAuthTokenSettings {
+	return Object.freeze({
+		issuer: overrides.issuer ?? "https://auth.test",
+		legacyTypAccept: overrides.legacyTypAccept ?? false,
+		accessTokenLifetime: Object.freeze({
+			defaultExpiresIn: overrides.accessTokenLifetime?.defaultExpiresIn ?? 3600,
+			maxExpiresIn: overrides.accessTokenLifetime?.maxExpiresIn ?? 3600,
+		}),
+		refreshTokenExpiresIn: overrides.refreshTokenExpiresIn ?? 86_400,
+		tokenBinding: Object.freeze({
+			dispatchPolicy: overrides.tokenBinding?.dispatchPolicy ?? "intent-explicit",
+			bindConfidentialClientRefreshTokens:
+				overrides.tokenBinding?.bindConfidentialClientRefreshTokens ?? false,
+		}),
+		resourceIndicatorEnabled: overrides.resourceIndicatorEnabled ?? false,
+		requireEmailVerified: overrides.requireEmailVerified ?? false,
+	});
+}

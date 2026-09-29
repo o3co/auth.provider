@@ -83,4 +83,53 @@ export {
 	createRecordingMailSender,
 	type RecordingMailSender,
 } from "./recordingMailSender.mjs";
+export {
+	type CsrfGuardContractInput,
+	createTestCsrfGuard,
+	csrfGuardContract,
+	type TestCsrfGuardOptions,
+} from "./slots/csrfGuard.mjs";
+export {
+	type DeploymentModeContractInput,
+	deploymentModeContract,
+} from "./slots/deploymentMode.mjs";
+export {
+	createTestHttpSettings,
+	type HttpSettingsContractInput,
+	httpSettingsContract,
+	type TestHttpSettingsOverrides,
+} from "./slots/httpSettings.mjs";
+export {
+	createRecordingLoginCompletion,
+	type LoginCompletionContractInput,
+	loginCompletionContract,
+	type RecordingLoginCompletion,
+	type RecordingLoginCompletionOptions,
+} from "./slots/loginCompletion.mjs";
+export {
+	createTestLoginEntry,
+	type LoginEntryContractInput,
+	loginEntryContract,
+} from "./slots/loginEntry.mjs";
+export {
+	createTestOAuthTokenSettings,
+	type OAuthTokenSettingsContractInput,
+	oauthTokenSettingsContract,
+	type TestOAuthTokenSettingsOverrides,
+} from "./slots/oauthTokenSettings.mjs";
+export {
+	createTestRateLimiter,
+	type RateLimiterContractInput,
+	rateLimiterContract,
+	type TestRateLimiter,
+	type TestRateLimiterOptions,
+} from "./slots/rateLimiter.mjs";
+// The slots through which modules share what one of them owns (#728): each
+// slot's contract suite, and a test double a consumer's tests fill the slot
+// with instead of importing the owner's package.
+export {
+	createTestSessionCookiePolicy,
+	type SessionCookiePolicyContractInput,
+	sessionCookiePolicyContract,
+} from "./slots/sessionCookiePolicy.mjs";
 export type { TestInspect } from "./test-inspect.mjs";

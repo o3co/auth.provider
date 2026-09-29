@@ -54,6 +54,8 @@ A package changes what the provider does in one of four ways, and each has its o
 - An adapter's optional extra beyond its port: a capability.
 - A pure predicate with one home: a shared helper (below).
 
+The adapter axis is "one implementation per composition", not only a port's: a key one module owns and others read is a slot too — a settings slot (`oauthTokenSettings`, `httpSettings`, `sessionCookiePolicy`, `deploymentMode`), filled once by its owner and read through its contract in core ([#728](https://github.com/o3co/auth.provider/issues/728)).
+
 Two more things can look like an axis and are not one:
 
 - **A shared helper** is a pure predicate, or the one reading of a value, with one home in [docs/design-vocabulary.md](docs/design-vocabulary.md): `isLoopbackHostname` and `coveredByRevocationBoundary`, for example. It is replaced by editing its home, never by a deployment. A second definition is a defect, not a second implementation, and the vocabulary's drift guard catches it for every row marked guarded.
@@ -61,7 +63,7 @@ Two more things can look like an axis and are not one:
 
 **Packages depend on core alone** ([#728](https://github.com/o3co/auth.provider/issues/728), its decided B4 and B13). In code, a package imports only `@o3co/auth-provider-core`; at run time, one package depends on another only through a slot whose contract lives in core. Four edges predate the rule and are tolerated on a list that may only shrink, never grow: `device-grant` → `oauth`, `federation-grants` → `oauth`, `device-grant` → `session`, and the federation adapters (`federation-google`, `federation-github`, `federation-apple`, `federation-oidc`) → `session`. [`packages/core/src/__tests__/packageImports.drift.test.mts`](packages/core/src/__tests__/packageImports.drift.test.mts) holds that list, with the names each edge imports: an import between packages that is not on it fails, value or type-only, and so does an entry whose import is gone. Each package's runtime dependencies on other packages in its `package.json` must match that list, and every import of a package goes through its published entry. A package's tests may import another package that the package declares, since tests compose what they test and never ship; the standalone template and `tools/composition` compose every package and are not held to the rule.
 
-`packages/session` exports `establishSession` and `answerInterruption` today for a peer: the MFA package, which is to finish a login with them. The session-admission ADR planned that as an import (its D5 and §7), which the rule above would count as a new edge. How the MFA package reaches them is an open owner decision; the direction #728 points to is a slot whose contract core declares and the session module provides.
+`packages/session` exports `establishSession` and `answerInterruption` today for a peer: the MFA package, which is to finish a login with them. The session-admission ADR planned that as an import (its D5 and §7), which the rule above would count as a new edge. #728 decided that the MFA package reaches them through a slot instead: core declares the contract, `loginCompletion` (`packages/core/src/session-admission/login-completion.mts`), the session module is to provide it and the MFA package to require it. Until the session module provides it, the two stay exported.
 
 ## Development Process
 

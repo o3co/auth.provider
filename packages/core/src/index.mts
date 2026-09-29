@@ -166,6 +166,17 @@ export {
 	type ReplicaSafetyModuleRef,
 	replicaUnsafeReason,
 } from "./boot/index.mjs";
+// #728: what the session package owns of the browser session that other
+// packages use — the login page, the one CSRF policy (#710), the session
+// cookie's attributes — each through a slot rather than the session's
+// configuration.
+export type {
+	CsrfGuard,
+	CsrfVerdict,
+	LoginEntry,
+	NavigationVerdict,
+	SessionCookiePolicy,
+} from "./browser-session/types.mjs";
 // Configuration
 export {
 	type AccessTokenConfig,
@@ -182,12 +193,19 @@ export {
 	composeConfigSchema,
 	fullSectionsSchema,
 	isLifetimeSeconds,
+	// #728: the hop ceiling `http.trustProxy` is held to, which the
+	// `httpSettings` contract suite holds the slot's value to as well.
+	MAX_TRUST_PROXY_HOPS,
 	type RefreshTokenLifetimeSource,
 	readAccessTokenRevocationMode,
 	resolveAccessTokenLifetime,
 	resolveRefreshTokenLifetime,
 } from "./config/application.schema.mjs";
 export { MAX_DURATION_MS, MAX_DURATION_SECONDS } from "./config/durations.mjs";
+// #728: how the deployment runs — what its HTTP behaviour depends on of the
+// `http` module's settings, and how many replicas the operator says run —
+// each through a slot rather than the configuration.
+export type { DeploymentMode, HttpSettings } from "./deployment/types.mjs";
 // OIDC discovery aggregation — modules contribute `discoveryMetadata`
 // (OidcDiscoveryContributionFactory above) and core synthesizes the
 // `/.well-known/openid-configuration` document via `buildDiscoveryDocument`.
@@ -869,6 +887,19 @@ export {
 	type TokenCarrier,
 	tokenClaim,
 } from "./session-admission/admit.mjs";
+// #728: the tail of a login as a contract — what a requirement's completion
+// requires through the `loginCompletion` slot instead of importing the
+// session package.
+export type {
+	LoginCompletion,
+	LoginEstablishmentCall,
+	LoginEstablishmentReporter,
+	LoginEstablishmentResult,
+	LoginInterruptionCall,
+	LoginInterruptionReporter,
+	LoginInterruptionResult,
+	LoginInterruptionStep,
+} from "./session-admission/login-completion.mjs";
 export { checkPrimaryContinuation } from "./session-admission/primary.mjs";
 export {
 	ADMISSION_ACTIONS,
@@ -914,6 +945,12 @@ export type {
 	ExchangeTokenValidationContext,
 	ValidatedToken,
 } from "./token-exchange/validator.mjs";
+// #728: what other modules read of the oauth module's token settings, through
+// the `oauthTokenSettings` slot rather than the oauth section.
+export type {
+	OAuthTokenBindingSettings,
+	OAuthTokenSettings,
+} from "./token-settings/types.mjs";
 // The MFA ADR's D9: how a session was established and what this provider
 // vouches for, read one way by every consumer of a session.
 export {
