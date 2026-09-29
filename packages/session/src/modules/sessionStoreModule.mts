@@ -19,7 +19,7 @@ import {
 } from "@o3co/auth-provider-core";
 import session from "express-session";
 import { guardCookieSession } from "../internal/cookieSession.mjs";
-import { sessionCookiePolicyFrom } from "../session-cookie-policy.mjs";
+import { assertHostPrefixKept, sessionCookiePolicyFrom } from "../session-cookie-policy.mjs";
 import { createSessionStoreFactory, registerBuiltinSessionStores } from "../store/factory.mjs";
 
 /**
@@ -99,14 +99,9 @@ function buildSessionStoreModule(replicaSafety: ReplicaSafetyDeclaration | undef
 							details: { reason: "replica-unsafe-adapter", modules: [MODULE_NAME] },
 						});
 					}
-					if (
-						config.session.name.startsWith("__Host-") &&
-						(config.session.secure !== true || config.session.domain !== null)
-					) {
-						throw new Error(
-							"session.name with __Host- prefix requires session.secure=true and session.domain=null",
-						);
-					}
+					// The cookie's one rule, shared with the sessionCookiePolicy the
+					// module provides, so the two cannot disagree about it.
+					assertHostPrefixKept(config.session);
 					const store = await factory.create({
 						type: storageSlice.type,
 						...((storageSlice[storageSlice.type] ?? {}) as Record<string, unknown>),
