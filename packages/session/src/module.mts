@@ -17,9 +17,11 @@
 import {
 	type AppConfig,
 	AUDIT_SINK_ABSENCE_POLICY,
+	type CsrfGuard,
 	consoleLogger,
 	defineModule,
 	fullSectionsSchema,
+	type Logger,
 	SUBJECT_REVOCATION_ABSENCE_POLICY,
 } from "@o3co/auth-provider-core";
 import express from "express";
@@ -30,6 +32,7 @@ import {
 } from "./csrf.mjs";
 import { extractFederationSection } from "./federations/extract-federation-section.mjs";
 import { deriveFederationTransactionCookieName } from "./federations/transaction.mjs";
+import { createLoginCompletion } from "./login-completion.mjs";
 import { loginEntryFromConfig } from "./login-entry.mjs";
 import * as federationRoutes from "./routes/Federation.mjs";
 import * as sessionRoutes from "./routes/Session.mjs";
@@ -71,6 +74,28 @@ function deriveProviderCallbackUrls(
 	}
 	return out;
 }
+
+/**
+ * The session's CSRF guard, as the session routes build theirs: the signed
+ * double-submit token of `createCsrfProtectionFromConfig` over `session.*` —
+ * the key derived from `session.secret`, the cookie named
+ * `<session.name>.csrf` with the session cookie's attributes — and
+ * `session.csrf.trustedOrigins`. Two guards built from one configuration
+ * accept each other's tokens: the token is signed, not stored.
+ *
+ * The key is to reach the guard through the session store's
+ * `csrfTokenSigner` slot before the session store's configuration becomes a
+ * section of its own (#728); until then `session` is one section, read by
+ * both modules, and nothing changes owner.
+ */
+const csrfGuardOf = (config: AppConfig, logger: Logger): CsrfGuard => {
+	const session = config.session as unknown as SessionCsrfConfigSlice;
+	return createSessionCsrfGuard({
+		csrf: createCsrfProtectionFromConfig(session),
+		trustedOrigins: session.csrf?.trustedOrigins ?? [],
+		logger,
+	});
+};
 
 /**
  * Const Module for the session and federation route surface.
@@ -175,22 +200,25 @@ export const sessionModule = defineModule<
 	provides: {
 		// The one CSRF policy (#710 C4): the guard `/session/login` runs, over
 		// the same key, cookie and trust list — so a token `GET /session/csrf`
-		// hands out is accepted wherever the slot is mounted. The key is derived
-		// from `session.secret`, as the session routes derive theirs; it is to
-		// come from the session store's `csrfTokenSigner` slot before the
-		// session store's configuration becomes a section of its own.
-		csrfGuard: (deps) => {
-			const session = (deps.config as AppConfig).session as unknown as SessionCsrfConfigSlice;
-			return createSessionCsrfGuard({
-				csrf: createCsrfProtectionFromConfig(session),
-				trustedOrigins: session.csrf?.trustedOrigins ?? [],
-				logger: deps.logger ?? consoleLogger,
-			});
-		},
+		// hands out is accepted wherever the slot is mounted (`csrfGuardOf`).
+		csrfGuard: (deps) => csrfGuardOf(deps.config as AppConfig, deps.logger ?? consoleLogger),
 		// The login page (`endpoints.login.url`) and the `redirect_to` protocol
 		// `/authorize` and the federation-grants connect flow send a browser
 		// there by. Built with no page configured, failing where it is read.
 		loginEntry: (deps) => loginEntryFromConfig(deps.config),
+		// The tail of a login (the session-admission ADR's D5), for a
+		// requirement's completion: the session stores this module requires,
+		// the session's lifetime, and a guard over the same CSRF key, whose
+		// fresh token an interruption's `403` carries (the MFA ADR's D27).
+		loginCompletion: (deps) => {
+			const config = deps.config as AppConfig;
+			return createLoginCompletion({
+				userSessionStore: deps.userSessionStore,
+				...(deps.subjectSessionIndex ? { subjectSessionIndex: deps.subjectSessionIndex } : {}),
+				sessionTtlMs: config.session.maxAge,
+				csrf: csrfGuardOf(config, deps.logger ?? consoleLogger),
+			});
+		},
 	},
 	contributes: {
 		routes: [
