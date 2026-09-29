@@ -15,7 +15,7 @@
  */
 
 /**
- * #529 — Client ID Metadata Documents: a client whose `client_id` is the
+ * Client ID Metadata Documents: a client whose `client_id` is the
  * `https` URL of its own registration. Almost every case is a refusal, and
  * the ones that are not pin what the fetched document turns into. No network:
  * `fetch` and `lookup` are the resolver's seams.
@@ -357,7 +357,7 @@ describe("createClientIdMetadataDocumentResolver — the fetch (#529)", () => {
 
 	it("reports the client server's own failure as a fetch failure, not a rejection", async () => {
 		// A 5xx or a 429 is their availability, not their registration. The
-		// distinction decides whether a warm entry survives (#529 audit) — and
+		// distinction decides whether a warm entry survives — and
 		// it is the one an operator needs from the log.
 		for (const [name, response] of [
 			["500", () => json({}, {}, 500)],
@@ -499,7 +499,7 @@ describe("createClientIdMetadataDocumentResolver — the document (#529)", () =>
 
 	it("checks the shapes of what the consent page will show", async () => {
 		await refuses("client_name", { client_name: 42 }, /client_name/);
-		// #529 review: the consent page shows this, and a document client is by
+		// The consent page shows this, and a document client is by
 		// definition one the deployment never registered.
 		await refuses("client_name absent", { client_name: undefined }, /client_name/);
 		await refuses("client_name blank", { client_name: "   " }, /client_name/);
@@ -539,12 +539,11 @@ describe("createClientIdMetadataDocumentResolver — caching (#529)", () => {
 	});
 
 	it("never caches an error or an invalid document as a client, and respects no-store", async () => {
-		// A refusal is remembered as a refusal for a bounded window (#529
-		// audit) — never as a client, and never for long: the retry after the
-		// window is a real fetch, so a client that fixes its document is not
-		// locked out. What must not happen is re-fetching the refusal on every
-		// request, which is what made an unauthenticated caller's outbound cost
-		// unbounded.
+		// A refusal is remembered as a refusal for a bounded window — never as
+		// a client, and never for long: the retry after the window is a real
+		// fetch, so a client that fixes its document is not locked out. What
+		// must not happen is re-fetching the refusal on every request, which
+		// would make an unauthenticated caller's outbound cost unbounded.
 		const clock = { now: 1_000_000 };
 		const failing = resolver({ now: () => clock.now }, [
 			() => json({}, {}, 500),
@@ -693,13 +692,12 @@ describe("the host policy holds whichever way the name is spelled (#529 audit)",
 
 describe("the cache tells the truth about an outage (#529 audit)", () => {
 	it("serves a cached registration through a failed revalidation rather than breaking the client", async () => {
-		// The catch deleted the entry and answered `null` for every error — a
-		// DNS blip, a 5xx, a timeout — which `/authorize` turns into
-		// `invalid_client`. That is the distinction this codebase draws
-		// everywhere else (#408): telling a caller their credential is bad when
-		// the truth is that a backend is unreachable. Defensible on a cold
-		// lookup; on a warm cache it is a working client broken by someone
-		// else's outage.
+		// Deleting the entry and answering `null` for every error — a DNS
+		// blip, a 5xx, a timeout — would have `/authorize` answer
+		// `invalid_client`: telling a caller their credential is bad when the
+		// truth is that a backend is unreachable, which this codebase refuses
+		// everywhere else. Defensible on a cold lookup; on a warm cache it is a
+		// working client broken by someone else's outage.
 		const clock = { now: 1_000_000 };
 		const { fetch, calls } = fakeFetch([
 			() => json(document(), { "cache-control": "max-age=1" }),

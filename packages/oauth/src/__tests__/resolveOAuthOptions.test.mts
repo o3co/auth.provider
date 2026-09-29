@@ -51,7 +51,7 @@ describe("resolveOAuthOptions", () => {
 		expect(options.legacyTypAccept).toBeUndefined();
 		expect(options.oidcMode).toBe("oidc-required");
 		expect(options.requireEmailVerified).toBe(false);
-		// #273: fixed policy, not a knob — the same object whatever the config.
+		// Fixed policy, not a knob — the same object whatever the config.
 		expect(options.pkce).toEqual({ required: true, supportedMethods: ["S256"] });
 		expect(options.nonceMaxLength).toBe(256);
 		expect(options.resourceIndicatorEnabled).toBe(false);
@@ -64,7 +64,7 @@ describe("resolveOAuthOptions", () => {
 		expect(options.legacyTypAccept).toBeUndefined();
 		expect(options.oidcMode).toBe("oidc-required");
 		expect(options.requireEmailVerified).toBe(false);
-		// #273: fixed policy, not a knob — the same object whatever the config.
+		// Fixed policy, not a knob — the same object whatever the config.
 		expect(options.pkce).toEqual({ required: true, supportedMethods: ["S256"] });
 		expect(options.nonceMaxLength).toBe(256);
 		expect(options.resourceIndicatorEnabled).toBe(false);
@@ -72,7 +72,7 @@ describe("resolveOAuthOptions", () => {
 
 	it("treats the boolean opt-ins strictly — only literal `true` enables", () => {
 		// A hand-built config can carry an uncoerced env-var string. The strict
-		// `=== true` reads (matching the pre-#328 inline casts) must not widen.
+		// `=== true` reads must not widen.
 		const options = resolveOAuthOptions({
 			oauth: {
 				requireEmailVerified: "true",

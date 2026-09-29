@@ -1310,8 +1310,9 @@ describe("/authorize — dead sid is unauthenticated (R1b)", () => {
 		expect(params.get("error")).toBe("temporarily_unavailable");
 		expect(params.get("error_description")).toBe("session store unavailable");
 		expect(createCode).not.toHaveBeenCalled();
-		// The outage is logged once, at error level, by admission (D10): the
-		// store and the action, the projection — never the sid, not a warn.
+		// The outage is logged once, at error level, by admission (the
+		// session-admission ADR's D10): the store and the action, the
+		// projection — never the sid, not a warn.
 		expect(logger.warn).not.toHaveBeenCalled();
 		expect(logger.error).toHaveBeenCalledTimes(1);
 		expect(logger.error).toHaveBeenCalledWith(
@@ -1403,7 +1404,7 @@ describe("/authorize — step-up and re-authentication (#481)", () => {
 			}),
 			delete: vi.fn(async () => {}),
 		}) as unknown as UserSessionStore;
-	/** A federated session recorded since D9 for a federation that trusts its IdP's `amr`. */
+	/** A federated session as the MFA ADR's D9 records it, for a federation that trusts its IdP's `amr`. */
 	const TRUSTED_FEDERATION: SessionAuthentication = {
 		primary: "fed",
 		federation: "google",

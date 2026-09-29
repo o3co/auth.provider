@@ -19,13 +19,11 @@ import type { GrantRegistry } from "@o3co/auth-provider-core/testing";
 import { describe, expect, expectTypeOf, it } from "vitest";
 import type { createOAuthRouter } from "#/routes.mjs";
 
-// #626 (comment): `createOAuthRouter` reads `registry.get` and nothing else
+// `createOAuthRouter` reads `registry.get` and nothing else
 // (`module.mts` reads `entries()` off the planner's resolver, not off the
 // router's), so its `registry` parameter asks for `get` alone — whatever
-// else a registry has. It once asked for the whole `GrantHandlerResolver`,
-// which core's `GrantRegistry` could not satisfy while it had no `entries`,
-// and that kept 27 of this package's test files out of typecheck. The
-// contract is what the router reads; these fire under typecheck only.
+// else a registry has. The contract is what the router reads; these fire
+// under typecheck only.
 
 type RouterOptions = Parameters<typeof createOAuthRouter>[1];
 type RouterResult = Awaited<ReturnType<typeof createOAuthRouter>>;

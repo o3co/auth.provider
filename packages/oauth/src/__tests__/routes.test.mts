@@ -39,7 +39,7 @@ import { codeRecord } from "./_helpers/codeRecord.mjs";
 import { createMockLogger } from "./_helpers/mockLogger.mjs";
 
 const mockConfig = {
-	// `oauth.jwt.issuer` is required by createOAuthRouter (#266) — the router
+	// `oauth.jwt.issuer` is required by createOAuthRouter — the router
 	// stamps it on every minted token and never derives one from the request.
 	oauth: { jwt: { issuer: "https://issuer.example" } },
 	endpoints: {
@@ -249,7 +249,7 @@ describe("createOAuthRouter", () => {
 		expect(calls.post.some((args) => args[0] === "/logout")).toBe(true);
 	});
 
-	// D-6 (v0.5.1) integration coverage: exercise the full /oauth/token pipeline
+	// Integration coverage: exercise the full /oauth/token pipeline
 	// end-to-end via supertest + a real express app. The mocked-router tests
 	// above only verify wiring; these tests cover the success-path token
 	// response, audit emit, and the 401 → `WWW-Authenticate: Bearer` branch.
@@ -558,7 +558,7 @@ describe("createOAuthRouter", () => {
 			});
 		});
 
-		// #293 item 10: a missing required parameter is `invalid_request`
+		// A missing required parameter is `invalid_request`
 		// (RFC 6749 §5.2); `unsupported_grant_type` is for a value the server
 		// does not support.
 		it("missing grant_type: returns 400 invalid_request + audit failure", async () => {

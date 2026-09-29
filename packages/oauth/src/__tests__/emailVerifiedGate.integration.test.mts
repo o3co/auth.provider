@@ -15,7 +15,7 @@
  */
 
 /**
- * Issue #297 — `oauth.requireEmailVerified` gates token issuance for an
+ * `oauth.requireEmailVerified` gates token issuance for an
  * end-user subject on the verification state the Store published.
  *
  * Two enforcement points, because they are the two that hold the user's

@@ -15,7 +15,7 @@
  */
 
 /**
- * The re-authentication ask record (#481), on its own.
+ * The re-authentication ask record, on its own.
  *
  * `/authorize`'s suite drives the round trip; this one drives the store the
  * round trip rests on — the rejections that keep a forged or foreign ask from
@@ -98,9 +98,10 @@ describe("createReauthAskStore — minting and spending an ask (#481)", () => {
 	});
 
 	it("records a step-up trip per requirement beside the login, and hands both back", async () => {
-		// The MFA ADR's D17, amended: one ask accumulates what was asked — the
-		// login, and each requirement's trip under its name — so a second
-		// requirement's trip is not refused as "already sent".
+		// ADR 2026-09-25-multi-factor-authentication, D17 as amended: one ask
+		// accumulates what was asked — the login, and each requirement's trip
+		// under its name — so a second requirement's trip is not refused as
+		// "already sent".
 		const backing = memoryStore();
 		const store = createReauthAskStore(backing);
 		const now = Date.now();
@@ -154,8 +155,9 @@ describe("createReauthAskStore — minting and spending an ask (#481)", () => {
 	});
 
 	it("measures the window from the last write, not from the record's creation, which a chain of trips keeps", async () => {
-		// The MFA ADR's D17: each stage write opens a new window; `createdAt`
-		// is kept across writes, for the cap a later record measures from it.
+		// ADR 2026-09-25-multi-factor-authentication, D17: each stage write
+		// opens a new window; `createdAt` is kept across writes, for the cap a
+		// later record measures from it.
 		const backing = memoryStore();
 		const store = createReauthAskStore(backing);
 		const createdAt = Date.now() - REAUTH_ASK_TTL_MS - 1000;

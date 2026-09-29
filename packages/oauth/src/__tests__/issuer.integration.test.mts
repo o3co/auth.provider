@@ -15,12 +15,12 @@
  */
 
 /**
- * `iss` is a property of the deployment, never of a request (#266).
+ * `iss` is a property of the deployment, never of a request.
  *
- * `/oauth/token` used to compute `config.oauth.jwt.issuer ?? req.get("host")`,
- * so a deployment that had not configured an issuer minted access and refresh
- * tokens whose `iss` came from a header the caller controls behind a trusted
- * proxy. These tests pin that the configured value is the only source.
+ * Falling back to `req.get("host")` would let a deployment that had not
+ * configured an issuer mint access and refresh tokens whose `iss` came from a
+ * header the caller controls behind a trusted proxy. These tests pin that the
+ * configured value is the only source.
  */
 
 import {
@@ -61,7 +61,7 @@ const clientRepo: ClientRepository = (() => {
 		tokenEndpointAuthMethod: "client_secret_basic" as const,
 		allowedRedirectUris: [],
 		allowedScopes: ["read"],
-		// #396: the old implicit omitted-scope grant, now declared.
+		// What an omitted `scope` parameter grants.
 		defaultScopes: ["read"],
 		allowedAudiences: ["https://api.example"],
 		allowedGrantTypes: ["client_credentials"],

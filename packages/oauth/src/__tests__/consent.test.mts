@@ -15,12 +15,8 @@
  */
 
 /**
- * #527 — the consent step for clients that are not first-party.
- *
- * Before this, `/authorize` refused every client not marked `firstParty` —
- * and the only way to serve a third-party client was to mark it first-party,
- * after which a code was minted with no consent step at all. Now the user is
- * asked, on the deployment's own page, and what they answered is recorded.
+ * The consent step for clients that are not first-party: the user is asked,
+ * on the deployment's own page, and what they answered is recorded.
  */
 
 import crypto from "node:crypto";
@@ -76,18 +72,18 @@ const makeApp = async (opts: {
 	client?: Record<string, unknown>;
 	consentStore?: ConsentStore;
 	/**
-	 * #552: where a parked request waits for its answer. Defaults to the
+	 * Where a parked request waits for its answer. Defaults to the
 	 * memory store; `null` wires none, for the composition check.
 	 */
 	pendingConsentStore?: PendingConsentStore | null;
-	/** #552: the express-session id the middleware reports, per request. */
+	/** The express-session id the middleware reports, per request. */
 	sessionId?: () => string | undefined;
 	session?: Session;
 	consentUrl?: string;
 	auditSink?: AuditSink;
-	/** #527 review: the durable session behind the cookie, when a test needs one. */
+	/** The durable session behind the cookie, when a test needs one. */
 	userSessionStore?: UserSessionStore;
-	/** #527 review: a registry that fails, or forgets the client, mid-flow. */
+	/** A registry that fails, or forgets the client, mid-flow. */
 	clientRepository?: ClientRepository;
 }) => {
 	const record = {
@@ -154,7 +150,7 @@ const makeApp = async (opts: {
 	});
 	app.use((req, _res, next) => {
 		(req as unknown as { session: Session }).session = session;
-		// What express-session would report as this session's id (#552).
+		// What express-session would report as this session's id.
 		(req as unknown as { sessionID?: string }).sessionID = opts.sessionId
 			? opts.sessionId()
 			: "sess-1";
@@ -313,7 +309,7 @@ describe("/authorize for a client that is not first-party (#527)", () => {
 		expect(createCode).not.toHaveBeenCalled();
 		const parked = await pending.get(challenge);
 		// Bound to the session that parked it and the subject it was asked
-		// of, so only they can answer (#552).
+		// of, so only they can answer.
 		expect(parked).toMatchObject({
 			challenge,
 			sessionId: "sess-1",
@@ -592,7 +588,7 @@ describe("the parked request resumes as the request that was made (#527 review)"
 	});
 
 	it("does not reach the consent step while a re-authentication is outstanding", async () => {
-		// `prompt=login consent` is answered by #481's re-authentication first —
+		// `prompt=login consent` is answered by the re-authentication first —
 		// here by `invalid_request`, because this composition wires no user
 		// session store — so nothing is parked and the one-shot `consent` is
 		// still to be spent on the way back.
@@ -788,7 +784,7 @@ describe("the consent page and its answer, on the edges (#527 review)", () => {
 	/**
 	 * The outage's one line, admission's (the session-admission ADR's D10):
 	 * error level, the store, the action and the projection — never the sid,
-	 * never a warn. The consent step's own line is gone.
+	 * never a warn. The consent step logs no line of its own.
 	 */
 	const expectLivenessOutageLogged = (logger: ReturnType<typeof createMockLogger>) => {
 		const lines = logger.error.mock.calls.filter(

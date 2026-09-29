@@ -153,11 +153,11 @@ describe("POST /oauth/revoke — access token path", () => {
 		expect(res.status).toBe(200);
 	});
 
-	// #277: the pre-fix behaviour of this branch was a warn-logged no-op — the
-	// client got RFC 7009's mandatory 200 and the token stayed valid until
-	// expiry. A warning emitted once per revocation attempt is not a signal an
-	// operator can act on mid-incident, so the branch is gone. What replaces it
-	// depends on whether the caller CLAIMED the capability.
+	// Without a denylist, an access-token revocation cannot take effect: a 200
+	// (RFC 7009's mandatory answer) would leave the token valid until expiry,
+	// and a warning per revocation attempt is not a signal an operator can act
+	// on mid-incident. What happens instead depends on whether the caller
+	// CLAIMED the capability.
 	it("refuses construction when denylist-backed AT revocation is claimed without a denylist", () => {
 		expect(() =>
 			createRevokeRouter(express, {
@@ -236,7 +236,7 @@ describe("POST /oauth/revoke — access token path", () => {
 });
 
 // ---------------------------------------------------------------------------
-// C1: RFC 7009 §2.1 cross-type fallback — hint=access_token with an actual RT
+// RFC 7009 §2.1 cross-type fallback — hint=access_token with an actual RT
 // ---------------------------------------------------------------------------
 
 async function mintRefreshTokenForCrossType(opts: {
@@ -302,7 +302,7 @@ describe("POST /oauth/revoke — C1: cross-type fallback (hint=access_token + RT
 });
 
 // ---------------------------------------------------------------------------
-// #277: accessTokenRevocation = "unsupported" — the declared-absent capability
+// accessTokenRevocation = "unsupported" — the declared-absent capability
 // ---------------------------------------------------------------------------
 
 describe('POST /oauth/revoke — accessTokenRevocation: "unsupported"', () => {
@@ -348,7 +348,7 @@ describe('POST /oauth/revoke — accessTokenRevocation: "unsupported"', () => {
 			.type("form")
 			.send({ token: at, token_type_hint: "access_token" });
 		// RFC 7009 §2.2.1 — the server does not support revoking this token type.
-		// A 200 here would be the very lie #277 was filed about.
+		// A 200 here would claim a revocation that did not happen.
 		expect(res.status).toBe(400);
 		expect(res.body.error).toBe("unsupported_token_type");
 	});
@@ -397,7 +397,7 @@ describe('POST /oauth/revoke — accessTokenRevocation: "unsupported"', () => {
 });
 
 // ---------------------------------------------------------------------------
-// C2: Public-client revocation (RFC 7009 §2.1 + spec §4.4)
+// Public-client revocation (RFC 7009 §2.1)
 // ---------------------------------------------------------------------------
 
 const publicClientId = "pub-client-1";

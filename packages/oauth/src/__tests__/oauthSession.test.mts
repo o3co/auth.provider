@@ -231,14 +231,11 @@ describe("oauthSessionModule", () => {
 			modules: [oauthSessionModule({ config }), keyStoreModule],
 			bootstrapComponents: { config, pathResolver: (s) => s },
 		});
-		// TestInspect.grants is ReadonlyMap<string, unknown> because contributes-map.mts
-		// uses a structural placeholder for GrantHandler until Phase 9 substitutes the
-		// concrete type. Cast to the concrete GrantHandler from grants/types.mts here.
 		const handler = handle.inspect.grants.get("session") as GrantHandler | undefined;
 		if (!handler) throw new Error("expected session grant to be registered");
 		// A real client, because the grant answers `401 invalid_client` for a
-		// missing one BEFORE it looks at the session (#626): with
-		// `authenticatedClient: null` this test used to pass on the client
+		// missing one BEFORE it looks at the session: with
+		// `authenticatedClient: null` this test would pass on the client
 		// branch under the session's name. `session.test.mts` covers
 		// `invalid_client`; this asserts the branch it is named after.
 		const { result } = await handler.handle({

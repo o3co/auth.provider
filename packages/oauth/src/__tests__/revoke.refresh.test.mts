@@ -97,7 +97,7 @@ describe("POST /oauth/revoke — refresh token path", () => {
 			isFamilyRevoked: vi.fn(async () => false),
 		};
 
-		// #277: refresh-token revocation needs no denylist and must keep working
+		// Refresh-token revocation needs no denylist and must keep working
 		// without one. The whole suite runs on a deployment that has declared
 		// access-token revocation unsupported — if that ever stops being a
 		// buildable composition, this fixture fails to construct and says so.
@@ -211,7 +211,7 @@ describe("POST /oauth/revoke — refresh token path", () => {
 });
 
 // ---------------------------------------------------------------------------
-// C1: RFC 7009 §2.1 cross-type fallback — hint=refresh_token with actual AT
+// RFC 7009 §2.1 cross-type fallback — hint=refresh_token with actual AT
 // ---------------------------------------------------------------------------
 
 async function mintAccessTokenForCrossType(opts: {

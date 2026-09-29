@@ -15,9 +15,8 @@
  */
 
 /**
- * `parseAccessTokenHeader` moved to core in #324 so
- * `protectedResourceBindingMw` could share it instead of re-parsing the
- * header inline with its own duplicate scheme set. Re-exported here for
- * import-path compatibility within this package.
+ * `parseAccessTokenHeader` lives in core so `protectedResourceBindingMw`
+ * shares it instead of re-parsing the header with a scheme set of its own.
+ * Re-exported here for import-path compatibility within this package.
  */
 export { parseAccessTokenHeader } from "@o3co/auth-provider-core";

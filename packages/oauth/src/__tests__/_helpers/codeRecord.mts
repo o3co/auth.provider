@@ -17,7 +17,7 @@ import type { Code } from "@o3co/auth-provider-core";
 
 /**
  * A `Code` for a stub repository: the fields a test names, every other one
- * `undefined` (#626). `Code` names each field as a required key so that a
+ * `undefined`. `Code` names each field as a required key so that a
  * repository's copy cannot forget one; a stub that returns a fixed record has
  * nothing to forget, and spelling eight `undefined`s into each would hide
  * the fields the test is about.

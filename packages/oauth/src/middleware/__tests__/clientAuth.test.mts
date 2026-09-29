@@ -45,7 +45,7 @@ const buildPublicClient = (c: FakeClient): PublicClient => ({
 
 /**
  * Test repository that supports both confidential (basic / post) and public
- * (`"none"`) clients. After D-6, `clientAuthMw` calls `findById` to obtain the
+ * (`"none"`) clients. `clientAuthMw` calls `findById` to obtain the
  * configured `tokenEndpointAuthMethod`, then `authenticate` for confidential
  * clients only — so tests must populate both methods consistently.
  */
@@ -161,7 +161,8 @@ describe("createClientAuthMiddleware (D-6 PB-2)", () => {
 		it("B-6: public client supplies only client_id in body → next() with public method (when allowPublicClients=true)", async () => {
 			// `/oauth/token` admits public clients (PKCE/S256 enforces authenticity
 			// at `/oauth/authorize`). Other routes leave `allowPublicClients` at
-			// the default `false` and would reject — see the dedicated P1 group.
+			// the default `false` and would reject — see the dedicated
+			// `allowPublicClients` group.
 			const app = express().use(express.urlencoded({ extended: false }));
 			app.post(
 				"/test",
@@ -601,8 +602,8 @@ describe("createClientAuthMiddleware (D-6 PB-2)", () => {
 		});
 
 		it("backward-compat: accepts a Logger argument directly", async () => {
-			// F1 D-4 callers passed `Logger` as the second argument; the new signature
-			// takes an options object but keeps the legacy form working.
+			// A caller may pass `Logger` as the second argument; the signature takes
+			// an options object but keeps that legacy form working.
 			const calls: { ctx: unknown; msg?: string }[] = [];
 			const logger = {
 				trace: () => {},

@@ -15,9 +15,9 @@
  */
 
 /**
- * #529 — a Client ID Metadata Document client at `/oauth/authorize`: resolved
+ * A Client ID Metadata Document client at `/oauth/authorize`: resolved
  * through the router's own repository, never first-party, so it lands on the
- * consent step (#527) with what the document says about it.
+ * consent step with what the document says about it.
  */
 
 import crypto from "node:crypto";
@@ -53,9 +53,9 @@ const document = {
 const makeApp = async (opts: {
 	enabled: boolean;
 	document?: unknown;
-	/** #529 audit: wire the consent step a document client needs. Default: yes. */
+	/** Wire the consent step a document client needs. Default: yes. */
 	consent?: boolean;
-	/** #529 audit: set the cache and fetch-budget knobs in config. */
+	/** Set the cache and fetch-budget knobs in config. */
 	knobs?: boolean;
 }) => {
 	const config = {
@@ -67,7 +67,7 @@ const makeApp = async (opts: {
 				enabled: opts.enabled,
 				allowedScopes: ["read"],
 				allowedAudiences: ["https://mcp.example"],
-				// #529 audit: the cache and fetch-budget knobs travel from config
+				// The cache and fetch-budget knobs travel from config
 				// through `createOAuthRouter`. Opt-in, so the composition that
 				// sets none of them — every other case here — is exercised too.
 				...(opts.knobs
@@ -121,7 +121,7 @@ const makeApp = async (opts: {
 	const app = express();
 	app.use((req, _res, next) => {
 		(req as unknown as { session: Record<string, unknown> }).session = session;
-		// #552: the consent step binds its challenge to the express-session id.
+		// The consent step binds its challenge to the express-session id.
 		(req as unknown as { sessionID?: string }).sessionID = "sess-1";
 		next();
 	});

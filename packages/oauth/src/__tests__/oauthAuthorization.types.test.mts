@@ -32,7 +32,7 @@ import {
 	oauthAuthorizationModule,
 } from "#/oauthAuthorization.mjs";
 
-// #626 P2 (D4): a module's contribution callbacks read only the slots it
+// A module's contribution callbacks read only the slots it
 // declares in `requires` / `optional`, and the grant factories it hands those
 // deps to declare the slots they read. Both are compile-time facts, so they
 // only fire under vitest's typecheck mode; a passing `vitest run` alone
