@@ -342,7 +342,7 @@ const settingsFor = (
 				`configuration createApp parsed has oauth.deviceAuthorization.enabled ${booted}. ` +
 				"Whether the grant is contributed is decided from the first — the configuration " +
 				"read before boot — and its routes and discovery field from the second. " +
-				"read oauth.deviceAuthorization.enabled before boot from the same configuration " +
+				"Read oauth.deviceAuthorization.enabled before boot from the same configuration " +
 				"files, parsed as boot parses it — with core's readTransitionalConfig naming the " +
 				"path (the standalone template: readSwitches, `reads`) — so that an environment " +
 				'variable\'s "true" is on in both.',

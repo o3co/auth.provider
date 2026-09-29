@@ -341,7 +341,7 @@ describe("deviceGrantModule — boot", () => {
 				modules: [deviceGrantModule({ config: handedToFactory })],
 				bootstrapComponents,
 			}),
-		).rejects.toThrow(/read oauth\.deviceAuthorization\.enabled before boot/);
+		).rejects.toThrow(/\. Read oauth\.deviceAuthorization\.enabled before boot/);
 	});
 
 	it("refuses a switch read before boot without its schema: an environment string is on at boot, and off in the factory", async () => {
@@ -366,7 +366,7 @@ describe("deviceGrantModule — boot", () => {
 					} as unknown as AppConfig,
 				},
 			}),
-		).rejects.toThrow(/read oauth\.deviceAuthorization\.enabled before boot/);
+		).rejects.toThrow(/\. Read oauth\.deviceAuthorization\.enabled before boot/);
 	});
 
 	it("names the disagreement, not a missing store, when the booted config declares the store absent", async () => {
@@ -389,7 +389,7 @@ describe("deviceGrantModule — boot", () => {
 				modules: [deviceGrantModule({ config: handedToFactory })],
 				bootstrapComponents,
 			}),
-		).rejects.toThrow(/read oauth\.deviceAuthorization\.enabled before boot/);
+		).rejects.toThrow(/\. Read oauth\.deviceAuthorization\.enabled before boot/);
 	});
 
 	it('refuses to boot with no audit sink unless audit.sink.type = "none" says so', async () => {
