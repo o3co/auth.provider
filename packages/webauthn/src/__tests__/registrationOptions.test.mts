@@ -15,13 +15,11 @@
  */
 
 /**
- * Tests for POST /oauth/webauthn/registration/options endpoint (spec §2.4).
+ * Tests for POST /oauth/webauthn/registration/options endpoint.
  *
  * Uses supertest + express for HTTP-level testing. Memory adapters from
  * @o3co/auth-provider-core are used for ChallengeStore and
  * WebAuthnCredentialStore — no hand-rolled stubs.
- *
- * Cross-refs: Plan T27 / spec §2.4
  */
 
 import {

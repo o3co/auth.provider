@@ -156,7 +156,7 @@ describe("generateRegistrationOptionsForUser (spec §2.4)", () => {
 			challenge: makeChallenge(),
 		});
 
-		// SimpleWebAuthn v13.1.1 does not accept "indirect" in its server API;
+		// SimpleWebAuthn does not accept "indirect" in its server API;
 		// the helper maps it to "none".
 		expect(result.attestation).toBe("none");
 	});
