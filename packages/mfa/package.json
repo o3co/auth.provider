@@ -49,12 +49,12 @@
 		"@o3co/auth-provider-session": "workspace:*",
 		"@o3co/ts.hocon": "^1.13.0",
 		"@types/express": "^5.0.6",
-		"@types/node": "^26.5.1",
+		"@types/node": "^26.6.3",
 		"@types/supertest": "^7.2.1",
-		"@vitest/coverage-v8": "^5.0.0",
+		"@vitest/coverage-v8": "^5.0.2",
 		"express": "^5.2.1",
-		"supertest": "^7.2.2",
+		"supertest": "^7.3.0",
 		"typescript": "^6.0.3",
-		"vitest": "^5.0.0"
+		"vitest": "^5.0.2"
 	}
 }

@@ -30,11 +30,11 @@
 		"@o3co/auth-provider-standalone": "workspace:*",
 		"@o3co/auth-provider-webauthn": "workspace:*",
 		"@types/express": "^5.0.6",
-		"@types/node": "^26.5.1",
+		"@types/node": "^26.6.3",
 		"@types/supertest": "^7.2.1",
 		"ioredis": "^6.0.0",
-		"supertest": "^7.1.0",
+		"supertest": "^7.3.0",
 		"typescript": "^6.0.3",
-		"vitest": "^5.0.0"
+		"vitest": "^5.0.2"
 	}
 }
