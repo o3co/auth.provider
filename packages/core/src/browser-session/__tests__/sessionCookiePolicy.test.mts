@@ -15,7 +15,7 @@
  */
 
 /**
- * The `cookiePolicy` slot (#728): the session cookie's attributes, which
+ * The `sessionCookiePolicy` slot (#728): the session cookie's attributes, which
  * other modules need to set a cookie of their own beside it or to size what
  * must outlive a session. Its contract suite and the test double: the
  * double keeps every case, and each way a policy can break the contract
@@ -38,7 +38,8 @@ const RULES = {
 	name: "name is a cookie name: a non-empty RFC 6265 token",
 	attributes: "sameSite is lax, strict or none, and secure is true or false",
 	domain: "domain is a non-empty string, or undefined for a host-only cookie",
-	host: "a __Host- name is secure and host-only",
+	crossSite: "a cookie sent cross-site (sameSite none) is secure",
+	host: "a __Host- name is secure and host-only, and a __Secure- name secure",
 	maxAge: "maxAgeMs is a whole number of milliseconds from 1 to the one-year ceiling",
 	frozen: "the policy is frozen",
 } as const;
@@ -60,12 +61,15 @@ const failing = async (build: SessionCookiePolicyContractInput["build"]): Promis
 const policyWith = (members: Record<string, unknown>): SessionCookiePolicy =>
 	Object.freeze({ ...createTestSessionCookiePolicy(), ...members }) as SessionCookiePolicy;
 
-describe("the cookiePolicy slot", () => {
-	it("is optional, and holds the session cookie's attributes", () => {
-		expectTypeOf<ComponentMap["cookiePolicy"]>().toEqualTypeOf<SessionCookiePolicy | undefined>();
+describe("the sessionCookiePolicy slot", () => {
+	it("is optional, and holds the session cookie's attributes — named for it, not for the CSRF token's cookie", () => {
+		expectTypeOf<ComponentMap["sessionCookiePolicy"]>().toEqualTypeOf<
+			SessionCookiePolicy | undefined
+		>();
 		expectTypeOf<
-			ProviderDeps<"cookiePolicy">["cookiePolicy"]
+			ProviderDeps<"sessionCookiePolicy">["sessionCookiePolicy"]
 		>().toEqualTypeOf<SessionCookiePolicy>();
+		expectTypeOf<"cookiePolicy" extends keyof ComponentMap ? true : false>().toEqualTypeOf<false>();
 		expectTypeOf<SessionCookiePolicy>().toEqualTypeOf<{
 			readonly name: string;
 			readonly secure: boolean;
@@ -81,15 +85,15 @@ describe("the cookiePolicy slot", () => {
 		let seen: SessionCookiePolicy | undefined;
 		const owner = defineModule({
 			name: "test:cookie-policy-owner",
-			provides: { cookiePolicy: () => policy },
+			provides: { sessionCookiePolicy: () => policy },
 		});
 		const reader = defineModule({
 			name: "test:cookie-policy-reader",
-			requires: ["cookiePolicy"] as const,
+			requires: ["sessionCookiePolicy"] as const,
 			contributes: {
 				routes: [
 					(deps) => {
-						seen = deps.cookiePolicy;
+						seen = deps.sessionCookiePolicy;
 						return {
 							id: "test-cookie-policy-reader",
 							mountPath: "/__test_cookie_policy_reader__",
@@ -122,6 +126,7 @@ describe("sessionCookiePolicyContract — the double", () => {
 			RULES.name,
 			RULES.attributes,
 			RULES.domain,
+			RULES.crossSite,
 			RULES.host,
 			RULES.maxAge,
 			RULES.frozen,
@@ -130,6 +135,16 @@ describe("sessionCookiePolicyContract — the double", () => {
 
 	it.each(cases)("$name", async ({ run }) => {
 		await run();
+	});
+
+	it("keeps them for a cookie sent cross-site over HTTPS, under either prefix", async () => {
+		for (const name of ["__Host-auth.session", "__Secure-auth.session", "auth.session"]) {
+			expect(
+				await failing(() =>
+					createTestSessionCookiePolicy({ name, sameSite: "none", secure: true }),
+				),
+			).toEqual([]);
+		}
 	});
 
 	it("keeps them for a cookie shared across subdomains, over plain HTTP in development", async () => {
@@ -181,6 +196,22 @@ describe("sessionCookiePolicyContract — each way a policy can break it", () =>
 				RULES.domain,
 			]);
 		}
+	});
+
+	it("a cookie sent cross-site that is not secure: the browser refuses it", async () => {
+		expect(
+			await failing(() =>
+				createTestSessionCookiePolicy({ name: "auth.session", sameSite: "none", secure: false }),
+			),
+		).toEqual([RULES.crossSite]);
+	});
+
+	it("a __Secure- name that is not secure", async () => {
+		expect(
+			await failing(() =>
+				createTestSessionCookiePolicy({ name: "__Secure-auth.session", secure: false }),
+			),
+		).toEqual([RULES.host]);
 	});
 
 	it("a __Host- name that is not secure, or that names a domain", async () => {
