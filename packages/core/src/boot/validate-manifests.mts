@@ -1790,6 +1790,9 @@ function parseSection(
 	}
 }
 
+/** What `writeConfigPath` writes to remove the key at the path. */
+const REMOVED: unique symbol = Symbol("removed");
+
 /** What stands in the way of writing a section back: the path, and what it holds. */
 interface WriteBlocked {
 	readonly blockedAt: readonly string[];
@@ -1808,6 +1811,7 @@ function writeConfigPath(
 	value: unknown,
 	walked: readonly string[] = [],
 ): { readonly written: unknown } | WriteBlocked {
+	// `value` may be `REMOVED`: the key at the path goes.
 	if (segments.length === 0) return { written: value };
 	if (target !== undefined && !isPlainConfigObject(target)) {
 		return { blockedAt: walked, holding: target };
@@ -1823,7 +1827,8 @@ function writeConfigPath(
 	if (target !== undefined) {
 		for (const name of Object.keys(target)) defineConfigKey(copy, name, target[name]);
 	}
-	defineConfigKey(copy, key, below.written);
+	if (below.written === REMOVED) delete copy[key];
+	else defineConfigKey(copy, key, below.written);
 	return { written: copy };
 }
 
@@ -1849,8 +1854,10 @@ function kindOf(value: unknown): string {
  * stripped — outer sections before inner ones: every section is read before
  * any is written, so an outer schema that keeps only its own keys does not
  * take an inner module's section from it, and an inner section's output
- * lands inside the outer's. A section whose output is `undefined` writes
- * nothing. A section a scalar, a list or an instance stands in the way of —
+ * lands inside the outer's. A section whose output is `undefined` removes
+ * what is written at its path — its schema made nothing of it — and writes
+ * nothing where nothing is. A section a scalar, a list or an instance stands
+ * in the way of —
  * the outer section's output left no object where the inner path goes — is
  * refused at its path.
  *
@@ -1909,8 +1916,10 @@ function parseModuleSections(
 	let config = composedConfig;
 	const byDepth = [...parsed].sort((a, b) => a.segments.length - b.segments.length);
 	for (const { module, segments, data } of byDepth) {
-		if (data === undefined) continue;
-		const result = writeConfigPath(config, segments, data);
+		// A schema that made nothing of the value written there removes it; with
+		// nothing written there, there is nothing to write.
+		if (data === undefined && readConfigPath(config, segments) === undefined) continue;
+		const result = writeConfigPath(config, segments, data === undefined ? REMOVED : data);
 		if ("written" in result) {
 			config = result.written;
 			continue;

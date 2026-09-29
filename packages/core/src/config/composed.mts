@@ -64,12 +64,22 @@ export function isPlainConfigObject(value: unknown): value is Record<string, unk
 }
 
 /**
- * `over` laid on `under`, key by key through plain objects: where both hold
- * an object, their keys are merged the same way; anywhere else `over`'s value
- * wins, unless it is `undefined`, which leaves `under`'s. A key only `under`
- * has is kept — which is how a key a schema does not declare survives the
- * schema's parse. Neither input is changed: every object on a merged path is
- * a new one, and a value only one side holds is that side's own.
+ * `over` — a schema's parse — laid on `under` — what was written — key by
+ * key through plain objects (`isPlainConfigObject`):
+ *
+ * - where both hold a plain object, their keys are merged the same way;
+ * - anywhere else the parsed value wins, whole: a list, a `URL`, a value
+ *   whose type the schema changed;
+ * - a key the parse holds as `undefined` is removed — the schema made
+ *   nothing of the value written there (an empty environment variable read
+ *   as unset), and the value it did not accept is not kept;
+ * - a key the parse does not hold is kept as written — the schema did not
+ *   declare it, and stripped it — which is how a key no schema declares
+ *   survives the parse.
+ *
+ * No `over` at all (`undefined`) answers `under`. Neither input is changed:
+ * every object on a merged path is a new one, and a value only one side
+ * holds is that side's own.
  */
 export function overlayConfig(under: unknown, over: unknown): unknown {
 	if (over === undefined) return under;
@@ -77,10 +87,15 @@ export function overlayConfig(under: unknown, over: unknown): unknown {
 	const merged: Record<string, unknown> = {};
 	for (const key of Object.keys(under)) defineConfigKey(merged, key, under[key]);
 	for (const key of Object.keys(over)) {
+		const value = over[key];
+		if (value === undefined) {
+			delete merged[key];
+			continue;
+		}
 		defineConfigKey(
 			merged,
 			key,
-			Object.hasOwn(under, key) ? overlayConfig(under[key], over[key]) : over[key],
+			Object.hasOwn(under, key) ? overlayConfig(under[key], value) : value,
 		);
 	}
 	return merged;
