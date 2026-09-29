@@ -34,39 +34,30 @@ import {
 
 const GRANT_TYPE = "client_credentials";
 
-/**
- * `client_credentials` grant per RFC 6749 §4.4 + Wave 1 §3.
- *
- * Public clients (`tokenEndpointAuthMethod === "none"`) are rejected (§3.4):
- * RFC 6749 §4.4 limits the grant to confidential clients. Per-client gating
- * is via `AuthenticatedClient.allowedGrantTypes`, enforced at `/token`
- * dispatch: the handler declares `requiresExplicitGrantAllowlist`, so an
- * absent or empty list denies the grant (§3.4.1
- * deny-by-absence-only-for-`client_credentials`, made declarative in #326).
- *
- * The issued access token has `sub = client.clientId` (RFC 6749 §4.4.2: no
- * end-user) and no refresh token is issued (RFC 6749 §4.4.3).
- */
-/** What the client_credentials grant reads (#626 P2); see `AuthorizationGrantDeps`. */
+/** What the client_credentials grant reads; see `AuthorizationGrantDeps`. */
 export type ClientCredentialsGrantDeps = Pick<
 	GrantDependencies,
 	"config" | "keyStore" | "grantPolicy" | "logger"
 >;
 
+/**
+ * `client_credentials` grant (RFC 6749 §4.4), for confidential clients only:
+ * a public client (`tokenEndpointAuthMethod === "none"`) is rejected. The
+ * handler declares `requiresExplicitGrantAllowlist`, so `/token` dispatch
+ * denies a client whose `allowedGrantTypes` is absent or empty.
+ *
+ * The access token has `sub = client.clientId` (RFC 6749 §4.4.2: no
+ * end-user), and no refresh token is issued (RFC 6749 §4.4.3).
+ */
 export const createClientCredentialsGrant = (deps: ClientCredentialsGrantDeps): GrantHandler => {
 	const { config, keyStore } = deps;
-	// The lifetime it mints with, read once, when the grant is built: a
-	// configuration built by hand that the resolver refuses is a composition
-	// fault, refused before any request — read per request, it was refused
-	// only after client authentication had spent whatever it spends, with
-	// a 500.
+	// Resolved once when the grant is built, so a hand-built configuration the
+	// resolver refuses fails composition rather than a request.
 	const accessTokenExpiresIn = resolveAccessTokenLifetime(config).defaultExpiresIn;
 
 	return {
-		// §3.4.1: machine-to-machine access is never acquired by omission — a
-		// registration that never declared `allowedGrantTypes` does not get
-		// this grant. Dispatch enforces the denial before `handle` runs
-		// (#326); it used to be a hand-rolled check in this handler.
+		// Machine-to-machine access is never acquired by omission: dispatch
+		// denies a registration without `allowedGrantTypes` before `handle`.
 		requiresExplicitGrantAllowlist: true,
 		async handle(ctx: GrantContext): Promise<GrantHandlerResult> {
 			const client = ctx.authenticatedClient;
@@ -96,37 +87,27 @@ export const createClientCredentialsGrant = (deps: ClientCredentialsGrantDeps): 
 			}
 			let effectiveScopes = scopeOutcome.scopes;
 
-			// Pass `ctx.issuer` through untouched: `generateToken` omits the
-			// `iss` claim when it is null/undefined, matching the sibling
-			// authorization_code / refresh_token grants. Coercing undefined to
-			// `""` would emit a malformed `iss: ""` JWT.
+			// Untouched: `generateToken` omits `iss` when it is null/undefined,
+			// where `""` would emit a malformed `iss: ""`.
 			const issuer = ctx.issuer;
 
-			// Audience from policy evaluation (Fix #3): set inside the
-			// grantPolicy block when decision.grantedAudience is valid.
-			// null means "no policy override — use the existing fallback".
+			// The policy's audience, when it narrowed one; null falls back below.
 			let policyGrantedAudience: string | null = null;
 
-			// RFC 8707: resource-indicator policy check. Only runs when grantPolicy
-			// is wired AND oauth.resourceIndicator.enabled === true. Flag-off
-			// (the default) skips this block entirely — preserving pre-existing
-			// semantics for deployments that wire grantPolicy without RFC 8707.
+			// The policy runs only when grantPolicy is wired AND
+			// oauth.resourceIndicator.enabled (off by default).
 			const resourceIndicatorEnabled = deps.config.oauth.resourceIndicator?.enabled === true;
-			// Stage 2 (#173): read outside the policy block. Enforcement is gated
-			// on the flag ALONE — a deployment that enables RFC 8707 without a
-			// policy hook still derives an audience below, and minting it for a
-			// resource the client did not request is the §2 violation Stage 2
-			// closes. Stage 1 only ever read this when a policy was wired.
+			// Read outside the policy block: RFC 8707 enforcement is gated on the
+			// flag alone, since an audience is derived below even without a
+			// policy hook.
 			const requestedResource = resourceIndicatorEnabled
 				? extractResourceParam(ctx.body as Record<string, unknown>)
 				: null;
 			if (deps.grantPolicy && resourceIndicatorEnabled) {
-				// CP-18: the fail-closed evaluation (throw → 503, deny → 400)
-				// and the scope re-validation — the policy may only narrow the
-				// already-narrowed effective scope, never draw on the allowlist,
-				// and an empty array is strip-all — live in `evaluateGrantPolicy`,
-				// shared by every minting path through core. The audience half is
-				// `boundPolicyAudience`, handed this client's `allowedAudiences`.
+				// `evaluateGrantPolicy` (core, shared by every minting path) fails
+				// closed (throw → 503, deny → 400) and lets the policy only narrow
+				// the effective scope, never draw on the allowlist; an empty array
+				// strips all.
 				const resource = requestedResource;
 				const policy = await evaluateGrantPolicy(
 					deps.grantPolicy,
@@ -147,23 +128,17 @@ export const createClientCredentialsGrant = (deps: ClientCredentialsGrantDeps): 
 				);
 				if (!policy.ok) return { result: policy.result };
 				effectiveScopes = policy.scopes;
-				// The audience half of the same fail-closed rule, bounded by this
-				// client's `allowedAudiences` (#520): a policy may narrow to one of
-				// them and nothing else, so a buggy or compromised policy cannot
-				// mint a token a resource server the client is not registered for
-				// would accept.
+				// The audience half, bounded by this client's `allowedAudiences`, so a
+				// buggy or compromised policy cannot mint a token for a resource
+				// server the client is not registered for.
 				const policyAudience = boundPolicyAudience(policy.decision, client.allowedAudiences ?? []);
 				if (!policyAudience.ok) return { result: policyAudience.result };
 				policyGrantedAudience = policyAudience.audience;
 			}
 
-			// RFC 8707 §2 audience derivation (Stage 2, #173). When a `resource`
-			// was requested and no policy narrowed an audience, the AS derives
-			// `aud` from the request instead of minting its default and then
-			// rejecting it — otherwise resource indicators would be unusable
-			// without a policy hook wired, which is not what the flag promises.
-			// Bounded by allowedAudiences ∪ {clientId}, the same ceiling a
-			// policy-returned audience is checked against.
+			// RFC 8707 §2: with a `resource` requested and no policy audience, `aud`
+			// is derived from the request (bounded by allowedAudiences ∪
+			// {clientId}), so resource indicators work without a policy hook.
 			const derivedAudience =
 				policyGrantedAudience ??
 				deriveAudienceFromResources(
@@ -172,12 +147,8 @@ export const createClientCredentialsGrant = (deps: ClientCredentialsGrantDeps): 
 				);
 			const audience = derivedAudience ?? client.allowedAudiences?.[0] ?? issuer ?? null;
 
-			// RFC 8707 §2 (Stage 2, #173): the token's audience MUST be the
-			// resource indicator(s) the client asked for. Everything above only
-			// *forwarded* `resource` to the policy; this is where an audience
-			// that fails to represent the request stops being issued. Runs after
-			// the audience is final so it covers all three derivations — policy
-			// narrowing, the allowedAudiences fallback, and the issuer fallback.
+			// RFC 8707 §2: the audience MUST represent the requested resources.
+			// After the audience is final, so it covers every derivation above.
 			const unrepresented = unrepresentedResources(requestedResource, audience);
 			if (unrepresented.length > 0) {
 				return {
@@ -191,16 +162,9 @@ export const createClientCredentialsGrant = (deps: ClientCredentialsGrantDeps): 
 
 			const scopeClaim = effectiveScopes.length > 0 ? effectiveScopes.join(" ") : null;
 
-			// Wave 2 Phase 2 §9.1: propagate the token-binding confirmation
-			// (RFC 7800 `cnf`) into the issued AT — the member the binding's
-			// mechanism kind owns (core's `ownedConfirmation`): DPoP's
-			// `{ jkt }`, mTLS's `{ "x5t#S256" }`, and nothing for a kind that
-			// owns neither, so a contributed mechanism cannot have a binding
-			// minted that no owning mechanism validated. The wire-level
-			// `token_type` is read off it by `generateTokenResponse` ("DPoP"
-			// per RFC 9449 §5; mTLS keeps "Bearer" per RFC 8705 §3). RFC 6749
-			// §4.4.3 says client_credentials does not issue a refresh token,
-			// so no RT-binding branch is needed here.
+			// The AT's `cnf` (RFC 7800) is the member the binding's mechanism kind
+			// owns, nothing for a kind that owns neither; see README, "Token
+			// binding (`cnf`)". No refresh token, so no RT binding.
 			const confirmation = ownedConfirmation(ctx.tokenBinding);
 
 			const accessToken = await generateToken(
@@ -241,11 +205,9 @@ function resolveScope(
 			errorDescription: string;
 	  } {
 	const allowed = client.allowedScopes ?? [];
-	// #396: an omitted scope draws on the client's DECLARED default, never on
-	// the whole allowlist — "forgot to send scope" used to be the maximum
-	// grant. A client with no defaultScopes and a non-empty allowlist answers
-	// invalid_scope (deny-by-absence); an empty allowlist keeps the empty
-	// grant, since there is nothing to over-grant.
+	// An omitted scope draws on the client's declared default, never on the
+	// whole allowlist. No defaultScopes with a non-empty allowlist is
+	// invalid_scope; an empty allowlist keeps the empty grant.
 	const omittedScopeGrant = ():
 		| { scopes: readonly string[] }
 		| { status: 400; error: "invalid_scope"; errorDescription: string } => {
@@ -267,11 +229,9 @@ function resolveScope(
 	if (requestedRaw === undefined || requestedRaw === null) {
 		return omittedScopeGrant();
 	}
-	// RFC 6749 §3.3: `scope` MUST be a single space-delimited string when
-	// present. A non-string value (e.g. an array materialized by Express'
-	// urlencoded body-parser from repeated `scope=a&scope=b` form keys) is
-	// malformed — silently defaulting to the client's full `allowedScopes`
-	// would grant a broader scope than the caller submitted.
+	// RFC 6749 §3.3: `scope` MUST be a single space-delimited string. A
+	// non-string (e.g. an array from repeated `scope=a&scope=b` form keys) is
+	// malformed, not defaulted, which would over-grant.
 	if (typeof requestedRaw !== "string") {
 		return {
 			status: 400,
@@ -279,11 +239,9 @@ function resolveScope(
 			errorDescription: "scope must be a space-delimited string",
 		};
 	}
-	// RFC 6749 §3.3, read strictly (`readSpaceDelimitedParameter`): the space
-	// is the one delimiter, so a tab- or newline-delimited value from a
-	// non-conformant client is refused as malformed — neither re-tokenized nor
-	// left to fail the subset check under a scope named with a tab. Spaces
-	// alone name nothing, which is an omitted scope.
+	// RFC 6749 §3.3, read strictly: the space is the one delimiter, so a tab-
+	// or newline-delimited value is refused as malformed. Spaces alone name
+	// nothing, which is an omitted scope.
 	const requested = readSpaceDelimitedParameter(requestedRaw);
 	if (requested === null) {
 		return {

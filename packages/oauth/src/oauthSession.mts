@@ -23,39 +23,24 @@ import {
 import { createSessionGrant } from "./grants/session.mjs";
 
 /**
- * Returns true if `value` is an explicit opt-in to enable a feature.
- *
- * HOCON's `passthrough` sub-trees (e.g. `oauth.grants.*`) do not coerce
- * env-var substitution strings to booleans. A resolved `enabled` value can
- * therefore be the string `"true"` (from `OAUTH_GRANTS_SESSION_ENABLED=true`)
- * or the boolean `true` (from an `application.conf` literal). This helper
- * accepts both forms and rejects everything else — including the string
- * `"false"`, the boolean `false`, absent / undefined, and unrelated truthy
- * strings like `"yes"` / `"1"`. Mirrors the same helper in
- * `oauthAuthorization.mts`; both modules apply the same opt-in semantics.
+ * Returns true if `value` is an explicit opt-in to enable a feature: the
+ * boolean `true` (an `application.conf` literal) or the string `"true"`
+ * (from `OAUTH_GRANTS_SESSION_ENABLED=true`, since HOCON's `passthrough`
+ * sub-trees do not coerce env-var substitutions). Everything else is
+ * refused. Mirrors the helper in `oauthAuthorization.mts`.
  */
 function isExplicitlyEnabled(value: unknown): boolean {
 	return value === true || value === "true";
 }
 
 /**
- * Declarative manifest for the session grant.
+ * Declarative manifest for the session grant. It needs no
+ * `clientRepository`: the grant authorizes against `ctx.authenticatedClient`.
  *
- * Per A2-γ §3.2.3: the v0.4.x `oauthSessionModule({ clientRepository })` factory
- * whose `init(ctx)` conditionally called `ctx.grantRegistry.register("session", ...)` is
- * replaced by a `defineModule(...)` factory whose `contributes.grants.session` entry
- * the boot planner registers automatically.
- *
- * Caller surface: `oauthSessionModule({ clientRepository })` → `oauthSessionModule({ config })`.
- * `keyStore` flows through `requires` from the DI graph. `clientRepository` is
- * no longer required at all: the grant authorizes against
- * `ctx.authenticatedClient` (#295) and #331 dropped the unused dependency.
- *
- * Per the secure-default opt-in discipline (matches `oauthAuthorizationModule`):
- * the session grant registers only when `config.oauth.grants.session.enabled`
- * is explicitly truthy (boolean `true` or string `"true"`). Absent keys and
- * other values are treated as not-enabled and the factory returns a no-op
- * module. A2-α §7.5 permits a module with no `contributes` map.
+ * Secure-default opt-in, as in `oauthAuthorizationModule`: the grant
+ * registers only when `config.oauth.grants.session.enabled` is boolean
+ * `true` or the string `"true"`; otherwise the factory returns a no-op
+ * module with no `contributes` map.
  */
 export const oauthSessionModule = (params: { config: AppConfig }): Module => {
 	// `oauth.grants` is `z.object({}).passthrough()` in the schema — values
@@ -68,30 +53,26 @@ export const oauthSessionModule = (params: { config: AppConfig }): Module => {
 	if (!isExplicitlyEnabled(grantConfig?.enabled)) {
 		return defineModule({ name: "oauth-session" });
 	}
-	// Intentionally no `configSchema`: this module reads only slices already
-	// declared in `CoreConfigSchema` (`oauth.grants.session.enabled`,
-	// `oauth.accessToken`). Adding a symmetric configSchema would be
-	// theatre — boot's composed parse (#728) already validates these fields
-	// with core's schema. Declare a configSchema here only if a future change
-	// adds a read of a `config.<full-section>` key that lives in
-	// `fullSectionsSchema` (e.g. `config.session`, `config.endpoints`).
+	// No `configSchema`: this module reads only slices `CoreConfigSchema`
+	// declares (`oauth.grants.session.enabled`, `oauth.accessToken`), which
+	// boot's composed parse already validates. One is needed only for a read
+	// of a key in `fullSectionsSchema` (e.g. `config.session`).
 	return defineModule({
 		name: "oauth-session",
 		// `config` is required because createSessionGrant reads the access-token lifetime from it
 		// when building the token response for authenticated sessions.
-		// `sessionRequirementResolver` (the session-admission ADR's D1): the
-		// synthetic key every consumer of admission takes; the grant reads the
-		// browser session through `admitSession` with it.
+		// `sessionRequirementResolver`: the synthetic key every consumer of
+		// admission takes (ADR 2026-09-28-session-admission); the grant reads
+		// the browser session through `admitSession` with it.
 		requires: ["config", "keyStore", "sessionRequirementResolver"],
-		// The slots admission reads beside the resolver (D8, D10): the durable
-		// session, the subject-revocation boundary — change (4): the boundary
-		// now applies here when it is wired — the audit sink for a subject
-		// mismatch, and the logger, which carries admission's outage line
-		// (`session_admission_unavailable`). Boot hands a module only the
-		// slots its manifest names, so without them the grant would read no
-		// boundary and log nothing, whatever the composition root had wired.
+		// The slots admission reads beside the resolver: the durable session,
+		// the subject-revocation boundary (applied here when wired), the audit
+		// sink for a subject mismatch, and the logger, which carries
+		// admission's outage line (`session_admission_unavailable`). Boot hands
+		// a module only the slots its manifest names, so without them the
+		// grant would read no boundary and log nothing.
 		optional: ["userSessionStore", "subjectRevocation", "auditSink", "logger"],
-		// Optional to wire, not optional to decide (#363, #406): an unfilled
+		// Optional to wire, not optional to decide: an unfilled
 		// slot must be declared absent, as every other consumer of the two
 		// slots declares it, so that the grants installed without `oauthModule`
 		// still refuse a composition that left the decision unmade.

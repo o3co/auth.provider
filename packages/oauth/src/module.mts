@@ -37,21 +37,19 @@ import { createOAuthRouter } from "./routes.mjs";
 import { oauthTokenSettingsFrom } from "./tokenSettings.mjs";
 
 /**
- * Config-slice schema for `oauthModule`. The OAuth `/authorize` route
- * reads `config.endpoints.login.url` to build the redirect for
- * unauthenticated requests when no module provides the `loginEntry` slot,
- * and the session module builds that slot from the same key (#728). Core's
- * `CoreConfigSchema` requires a string there; this module additionally
- * requires it non-empty — an empty one names no page — and keeps both rules
- * when `loginEntry` is provided, since the slot is built from the same key:
- * without a `redirect_to` of its own, as `/authorize` adds `redirect_to`,
- * naming the request to come back to (core's `LoginEntry` contract), and a
- * login URL that carried one would send two, a page reading the first
- * sending the user to the preconfigured target, not the one the provider
- * asked for.
+ * Config-slice schema for `oauthModule`. `/authorize` redirects an
+ * unauthenticated request to `config.endpoints.login.url` when no module
+ * provides the `loginEntry` slot, and the session module builds that slot
+ * from the same key, so both rules below hold either way:
  *
- * Parsed by boot's composed parse (#728; validate-manifests step 13) over
- * what core's base made of the configuration, so boot fails with
+ * - non-empty (core's `CoreConfigSchema` requires only a string): an empty
+ *   URL names no page;
+ * - no `redirect_to` of its own: `/authorize` adds one naming the request to
+ *   come back to (core's `LoginEntry` contract), and with two a page reading
+ *   the first would send the user to the preconfigured target.
+ *
+ * Parsed by boot's composed parse over what core's base made of the
+ * configuration, so boot fails with
  * `BootError(reason: "config-validation-failed")`, the issue at
  * `endpoints.login.url`, before any request hits the route.
  */
@@ -69,58 +67,31 @@ const oauthConfigSchema = z.object({
 });
 
 /**
- * Declarative manifest for the OAuth 2.0 endpoint suite.
+ * Declarative manifest for the OAuth 2.0 endpoint suite. Every dependency
+ * flows through the typed DI graph (`requires` / `optional`).
  *
- * Per A2-γ §3.2.1 + Amendment 1 (§1.1.1 routes-factory shape) +
- * Amendment 3 (§1.1.3 grantHandlerResolver synthetic dep) +
- * Amendment 4 (§1.1.4 four-store session split).
+ * Contributes one route, "oauth-endpoints" at `/oauth`, and a
+ * `discoveryMetadata` slice (its issuer-relative endpoints and capability
+ * metadata); core's `assembleApp` aggregates every module's slice into the
+ * single `/.well-known/openid-configuration` document, mounted only when an
+ * issuer is configured.
  *
- * Caller surface: `oauthModule({ clientRepository, codeRepository, express? })`
- *   → `oauthModule({ config })`.
- * All dependencies now flow through the typed DI graph (`requires` / `optional`).
- *
- * Route contributions (Amendment 1):
- *   - "oauth-endpoints" @ /oauth — the only route, always contributed.
- *
- * OIDC discovery is NO LONGER an oauth route. oauth instead contributes a
- * `discoveryMetadata` slice (its issuer-relative endpoints + capability
- * metadata); core's `assembleApp` aggregates every module's `discoveryMetadata`
- * (oauth's endpoints, the jwksModule's `jwks_uri`) into the single
- * `/.well-known/openid-configuration` document, mounting it only when an issuer
- * is configured.
- *
- * The v0.4.x lazy closure `() => context.federationProviders` is REMOVED.
- * `deps.federationProviders` is the typed, stable read at factory invocation
- * time (Theme E structural fix).
- *
- * `grantPolicy` and `refreshTokenFamilyRevocation` are declared as
- * ComponentMap slots (colocated augmentations in `core/src/policy/types.mts`
- * and `core/src/refresh-token-family/types.mts`). Both are consumed by
- * `routes.mts` — `grantPolicy.evaluate` gates `/oauth/token`, and
+ * `grantPolicy.evaluate` gates `/oauth/token`, and
  * `refreshTokenFamilyRevocation.isFamilyRevoked` is read by introspect,
- * userinfo, logout cascade, and federation-token. The legacy
- * `RefreshTokenStoreBase` slot was removed in issue #101 (A3 §5.3).
- *
- * Theme B (one responsibility per module), Theme C (no synthetic-key redeclaration),
- * Theme D (immutability — const defineModule, no ctx mutation),
- * Theme E (structural temporal contracts — stable deps closure replaces lazy getter).
+ * userinfo, the logout cascade and federation-token.
  */
 export const oauthModule = (_params: { config: AppConfig }): Module => {
 	// Inline route factories so `defineModule` infers the typed `deps`
-	// shape from `requires` / `optional` (ProviderDeps<R, O>). Splitting
-	// them into a typed const array would require restating R / O at the
-	// type level.
+	// shape from `requires` / `optional`; a typed const array would have to
+	// restate R / O. The factory bridges `deps` to `createOAuthRouter`'s
+	// explicit options (`registry: Pick<GrantHandlerResolver, "get">`,
+	// `getFederationProviders: () => ...`).
 	//
-	// createOAuthRouter takes explicit options rather than the module's deps
-	// (`registry: Pick<GrantHandlerResolver, "get">` — what it reads, #626 —
-	// and `getFederationProviders: () => ...`). The route factory bridges the
-	// typed `deps` to that shape; the router internals are not redesigned here.
-	//
-	// Explicit `defineModule<R, O>` generics: needed so contextual typing
-	// reaches the conditional-spread factory below (TS does not propagate
-	// the contributes element type through `...(cond ? [fn] : [])`). Written
-	// out, they infer nothing, so the section schema (none: `never`) and the
-	// provided keys `authoritative` is typed against are written too.
+	// Explicit `defineModule<R, O>` generics, so contextual typing reaches
+	// the factories (TS does not propagate the contributes element type
+	// through `...(cond ? [fn] : [])`). Written out, they infer nothing, so
+	// the section schema (none: `never`) and the provided keys
+	// `authoritative` is typed against are written too.
 	return defineModule<
 		| "config"
 		| "clientRepository"
@@ -155,38 +126,37 @@ export const oauthModule = (_params: { config: AppConfig }): Module => {
 			"clientRepository",
 			"codeRepository",
 			"keyStore",
-			"grantHandlerResolver", // Amendment 3 (§1.1.3) — synthetic, auto-injected by boot planner
-			"sessionRequirementResolver", // the session-admission ADR's D1: every consumer of admission takes it; here it decides the acr drop (D6), and /authorize and the consent step read their sessions through it
+			"grantHandlerResolver", // synthetic, auto-injected by boot planner
+			"sessionRequirementResolver", // every consumer of admission takes it (ADR 2026-09-28-session-admission); here it decides the acr drop, and /authorize and the consent step read their sessions through it
 		],
 		optional: [
-			"rateLimiter", // Phase 9 Task 4 augmentation — oauth routes degrade gracefully without
-			"auditSink", // Phase 9 Task 4 augmentation — no events emitted when absent
-			"grantPolicy", // Phase 9 Task 4 augmentation — gates POST /oauth/token; allow-all when absent
-			"refreshTokenFamilyRevocation", // A3 §5.3 — introspect/userinfo/logout cascade family-revocation check
-			"accessTokenDenylist", // Wave 1 — RFC 7009 AT revocation; introspect + AT validation consult denylist when wired
-			"subjectRevocation", // #296 — per-subject AT watermark; the same surfaces consult it, so a credential change actually invalidates
-			"userSessionStore", // Phase 8 A4 four-store split
-			"sessionRPRegistry", // Amendment 4 (§1.1.4)
-			"sessionFamilyIndex", // Amendment 4 (§1.1.4)
-			"sessionFederationIndex", // Amendment 4 (§1.1.4)
-			"federationTokenStore", // Phase 9 Task 4 augmentation — federation-token routes
-			"consentStore", // #527 — the consent step for clients that are not first-party; such clients are refused without it
-			"pendingConsentStore", // #552 — where the consent step parks a request; the memory consent module provides it with consentStore, and the router refuses one without the other
+			"rateLimiter", // oauth routes degrade gracefully without
+			"auditSink", // no events emitted when absent
+			"grantPolicy", // gates POST /oauth/token; allow-all when absent
+			"refreshTokenFamilyRevocation", // introspect/userinfo/logout cascade family-revocation check
+			"accessTokenDenylist", // RFC 7009 AT revocation; introspect + AT validation consult denylist when wired
+			"subjectRevocation", // per-subject AT watermark; the same surfaces consult it, so a credential change actually invalidates
+			"userSessionStore", // this and the next three: the four session stores
+			"sessionRPRegistry",
+			"sessionFamilyIndex",
+			"sessionFederationIndex",
+			"federationTokenStore", // federation-token routes
+			"consentStore", // the consent step for clients that are not first-party; such clients are refused without it
+			"pendingConsentStore", // where the consent step parks a request; the memory consent module provides it with consentStore, and the router refuses one without the other
 			"federationProviders", // synthetic — boot planner injects ReadonlyMap from federation contributions
-			"replaySeenSet", // #484 — jti single-use for private_key_jwt client assertions; server_error on that path when absent
-			"loginEntry", // #728 — the login page /authorize sends a browser to, which the session module provides; endpoints.login.url is read when absent
-			"logger", // D-4 — structured logger; falls back to consoleLogger when absent
+			"replaySeenSet", // jti single-use for private_key_jwt client assertions; server_error on that path when absent
+			"loginEntry", // the login page /authorize sends a browser to, which the session module provides; endpoints.login.url is read when absent
+			"logger", // structured logger; falls back to consoleLogger when absent
 		],
-		// #363/#375: optional to wire, not optional to decide. `auditSink`
-		// absence must be declared with audit.sink.type = "none";
-		// `accessTokenDenylist` absence with oauth.revocation.accessToken =
-		// "unsupported" (#277's boot refusal, now expressed as a policy).
+		// Optional to wire, not optional to decide. `auditSink` absence must
+		// be declared with audit.sink.type = "none"; `accessTokenDenylist`
+		// absence with oauth.revocation.accessToken = "unsupported".
 		absencePolicies: {
 			subjectRevocation: SUBJECT_REVOCATION_ABSENCE_POLICY,
 			auditSink: AUDIT_SINK_ABSENCE_POLICY,
 			accessTokenDenylist: ACCESS_TOKEN_DENYLIST_ABSENCE_POLICY,
 		},
-		// #728: what other modules read of `oauth {}` — the issuer, the token
+		// What other modules read of `oauth {}` — the issuer, the token
 		// lifetimes and the switches — resolved once from the section this
 		// module owns, and frozen. The readers outside this package take the
 		// slot instead of reading the section. The token-binding dispatch
@@ -194,7 +164,7 @@ export const oauthModule = (_params: { config: AppConfig }): Module => {
 		provides: {
 			oauthTokenSettings: (deps) => oauthTokenSettingsFrom(deps.config),
 		},
-		// #728: one source while this module is loaded. Its own code reads
+		// One source while this module is loaded. Its own code reads
 		// `oauth {}`, so an `overrideComponents` entry for the slot would split
 		// what the slot's readers see from what the module does; boot refuses
 		// it (`authoritative-component-overridden`). A composition without the
@@ -208,7 +178,7 @@ export const oauthModule = (_params: { config: AppConfig }): Module => {
 		lifecycle: { oauthTokenSettings: { eager: true } },
 		contributes: {
 			routes: [
-				// oauth-endpoints — always contributed (Theme D: const shape).
+				// oauth-endpoints — always contributed.
 				async (deps) => {
 					// GrantHandlerResolver is what the synthetic key resolves to
 					// and what createOAuthRouter's `registry` param accepts —
@@ -237,35 +207,29 @@ export const oauthModule = (_params: { config: AppConfig }): Module => {
 						pendingConsentStore: deps.pendingConsentStore,
 						...(deps.loginEntry === undefined ? {} : { loginEntry: deps.loginEntry }),
 						logger: deps.logger ?? consoleLogger,
-						// Theme E structural fix: typed deps replace the v0.4.x lazy
-						// () => ctx.federationProviders closure. The closure re-wraps the
-						// typed read so `getFederationProviders` is satisfied without
-						// changing routes.mts. No cast since #626 P1: the slot and the
-						// parameter are the same `FederationProvider`.
+						// Wraps the typed read to fit `getFederationProviders`. No
+						// cast: the slot and the parameter are the same
+						// `FederationProvider`.
 						getFederationProviders: () => deps.federationProviders,
 						requirements: deps.sessionRequirementResolver,
 					});
 					return { id: "oauth-endpoints", mountPath: "/oauth", handler: router };
 				},
 			],
-			// OIDC discovery contribution. core's `assembleApp` merges this with every
-			// other module's `discoveryMetadata` (notably the core jwksModule's
-			// `jwks_uri`) into the single `/.well-known/openid-configuration` document,
-			// prefixing the issuer-relative endpoint paths and owning `issuer` +
-			// `id_token_signing_alg_values_supported`. core gates the document on a
-			// configured issuer, so oauth contributes unconditionally — the document is
-			// simply not emitted when no issuer is set.
+			// OIDC discovery contribution. Core's `assembleApp` merges it with every
+			// other module's `discoveryMetadata` into the single
+			// `/.well-known/openid-configuration` document, prefixing the
+			// issuer-relative endpoint paths and owning `issuer` +
+			// `id_token_signing_alg_values_supported`. Core emits the document only
+			// when an issuer is configured, so oauth contributes unconditionally.
 			//
-			// `jwks_uri` is deliberately NOT contributed here: it is a key-management
-			// concern owned by the core jwksModule, so a provider can publish
-			// verification keys without the full OAuth grant suite and the advertised
-			// URI never drifts from the registered JWKS route. See core/src/jwks/.
-			//
-			// The same ownership rule places the token-binding metadata elsewhere:
+			// Metadata comes from the module that owns the mechanism. `jwks_uri` is
+			// core's jwksModule's, so keys can be published without the OAuth grant
+			// suite and the URI never drifts from the JWKS route (core/src/jwks/).
 			// `dpop_signing_alg_values_supported` (RFC 9449 §5.1) comes from
 			// `@o3co/auth-provider-dpop` and `tls_client_certificate_bound_access_tokens`
-			// (RFC 8705 §3.3) from `@o3co/auth-provider-mtls`, each read off the same
-			// config the mechanism itself is constructed from (#283).
+			// (RFC 8705 §3.3) from `@o3co/auth-provider-mtls`, each read off the
+			// config the mechanism itself is constructed from.
 			discoveryMetadata: [
 				(
 					deps: ProviderDeps<
@@ -302,87 +266,63 @@ export const oauthModule = (_params: { config: AppConfig }): Module => {
 						!!deps.sessionFederationIndex &&
 						!!deps.federationTokenStore &&
 						!!deps.refreshTokenFamilyRevocation;
-					// #283: `POST /oauth/revoke` is mounted unconditionally by
-					// `createOAuthRouter`, but "mounted" and "can revoke something" are
-					// different claims — the whole point of #277. The gate is therefore
-					// "can this endpoint revoke ANYTHING", and it takes both arms of that
-					// question at their real resolution rules.
+					// `POST /oauth/revoke` is always mounted, but "mounted" and "can
+					// revoke something" are different claims: it is advertised only
+					// when it can revoke anything, each arm at its real resolution rule.
 					//
-					// The REFRESH arm is pure wiring: `tryRevokeRefreshToken` returns
-					// immediately without a `refreshTokenFamilyRevocation`, and the #277
-					// mode never touches this path.
+					// The refresh arm is pure wiring: `tryRevokeRefreshToken` returns
+					// immediately without a `refreshTokenFamilyRevocation`, and the
+					// access-token revocation mode never touches this path.
 					const revokesRefreshTokens = !!deps.refreshTokenFamilyRevocation;
-					// The ACCESS arm is wiring AND the declaration. A denylist sitting in
-					// the component map is not the capability: `createRevokeRouter`
+					// The access arm is wiring AND the declaration: `createRevokeRouter`
 					// resolves `opts.accessTokenRevocation ?? (denylist ? …)`, so an
 					// explicit `"unsupported"` turns the access path off however the
 					// composition is wired, and the endpoint answers
-					// `unsupported_token_type` instead. Reading the same
-					// `readAccessTokenRevocationMode` helper the router reads — rather
-					// than re-deriving the rule — is what keeps the two from drifting.
-					// An UNDECLARED key reports `undefined`, which both consuming layers
-					// (core's boot validator, the router) read as `"denylist"`, so only a
-					// literal `"unsupported"` disables this arm.
+					// `unsupported_token_type`. Reading the router's own
+					// `readAccessTokenRevocationMode` keeps the two from drifting. An
+					// undeclared key reports `undefined`, which core's boot validator
+					// and the router read as `"denylist"`, so only a literal
+					// `"unsupported"` disables this arm.
 					const revokesAccessTokens =
 						!!deps.accessTokenDenylist &&
 						readAccessTokenRevocationMode(deps.config) !== "unsupported";
-					// Either arm is enough. RFC 7009 §2.2.1 defines
-					// `unsupported_token_type` precisely so an AS may revoke one token
-					// type and not the other, so "refresh tokens only" is a revocation
-					// endpoint, not a broken one — and the client most in need of finding
-					// it (revoking an RT at logout) is served by the arm that still works.
-					// Withholding the URL would leave that client unable to revoke
-					// anything at all, which is strictly worse than letting it learn the
-					// access-token half from the endpoint's own spec-defined error.
-					//
-					// With NEITHER arm the endpoint still answers RFC 7009's mandatory
-					// 200 and nothing happens; advertising that is the #277 failure
-					// restated as metadata, so it stays unadvertised.
-					//
-					// WHICH token types it revokes is still not advertised: RFC 7009 /
-					// RFC 8414 define no per-token-type metadata field, and inventing one
-					// would put a non-standard claim in a standard document. The
-					// access-token answer lives at the endpoint.
+					// Either arm is enough: RFC 7009 §2.2.1 defines
+					// `unsupported_token_type` so an AS may revoke one token type and
+					// not the other, and withholding the URL would leave a client that
+					// revokes an RT at logout unable to revoke anything. With neither
+					// arm the endpoint still answers RFC 7009's mandatory 200 and
+					// nothing happens, so it stays unadvertised. Which token types it
+					// revokes is not advertised: RFC 7009 / RFC 8414 define no
+					// per-token-type metadata field.
 					const revocationSupported = revokesRefreshTokens || revokesAccessTokens;
-					// #529: advertised only when on **and** completable. MCP clients
-					// select Client ID Metadata Documents on this flag plus `none` in
-					// token_endpoint_auth_methods_supported (below, unconditional).
-					// Every document client is by definition not first-party, so
-					// `/authorize` refuses it without a consent store (#527): saying
-					// otherwise would send a client down a flow this deployment cannot
-					// finish.
-					// #484: `private_key_jwt` is advertised only when it can be
-					// honoured. A client assertion's `jti` is single-use, and the
-					// verifier answers `500 server_error` when the composition wired
-					// no `replaySeenSet` rather than accepting an unchecked one — so
-					// without a store the method is advertised at three endpoints
-					// that all refuse it. The same "on **and** completable" rule the
-					// logout, revocation and CIMD gates apply below and above.
+					// Client ID Metadata Documents: advertised only when on **and**
+					// completable. MCP clients select them on this flag plus `none` in
+					// token_endpoint_auth_methods_supported (below, unconditional). A
+					// document client is never first-party, so `/authorize` refuses it
+					// without a consent store.
+					// `private_key_jwt`: advertised only when it can be honoured. The
+					// verifier answers `500 server_error` when no `replaySeenSet` is
+					// wired rather than accept an unchecked `jti`, so without a store
+					// all three endpoints would refuse the method.
 					const clientAssertionSupported = deps.replaySeenSet !== undefined;
 					const cimdSupported =
 						(deps.config as { oauth?: { clientIdMetadataDocuments?: { enabled?: unknown } } }).oauth
 							?.clientIdMetadataDocuments?.enabled === true && deps.consentStore !== undefined;
-					// #283: RFC 8414 §2 says an OMITTED `grant_types_supported` means
-					// `["authorization_code", "implicit"]` — so saying nothing advertised
-					// an implicit flow this AS has never implemented, while hiding the
-					// grants it does implement (client_credentials, token-exchange,
-					// webauthn, …). Read straight off the resolver `/oauth/token`
-					// dispatches against, which is also what `allowedGrantTypes` is
-					// checked against at dispatch (#312 / #326): a hand-maintained list
-					// would drift the moment a grant module is added, removed, or gated
-					// off by `oauth.grants.<name>.enabled`.
-					//
-					// Empty is a legitimate answer (a composition with no grant module
-					// registered), and emitting `[]` is still strictly better than
-					// omitting the field: it says "no grant types", where omission would
-					// assert two.
+					// RFC 8414 §2: an omitted `grant_types_supported` means
+					// `["authorization_code", "implicit"]`, which would advertise an
+					// implicit flow this AS does not implement. Read straight off the
+					// resolver `/oauth/token` dispatches against (also what
+					// `allowedGrantTypes` is checked against), so it cannot drift as a
+					// grant module is added, removed, or gated off by
+					// `oauth.grants.<name>.enabled`. Empty is still emitted: it says "no
+					// grant types", where omission would assert two.
 					const grantTypesSupported = [...deps.grantHandlerResolver.entries()].map(
 						([grantType]) => grantType,
 					);
-					// The MFA ADR's D15: the entries `/authorize` answers from — the
-					// configured table less what nothing this composition installs can
-					// satisfy, computed as the router computes it (which says at boot
-					// what it dropped).
+					// The entries `/authorize` answers from: the configured table less
+					// what nothing this composition installs can satisfy, computed as
+					// the router computes it (which says at boot what it dropped). See
+					// ADR 2026-09-25-multi-factor-authentication.
 					const acrValuesSupported = Object.keys(
 						vouchableAcrValues(
 							readAcrTable(
@@ -411,28 +351,21 @@ export const oauthModule = (_params: { config: AppConfig }): Module => {
 						},
 						metadata: {
 							response_types_supported: ["code"],
-							// #284: OIDC Discovery defaults this to **true** when
-							// omitted, so saying nothing claimed support for
-							// `request_uri` — which `/authorize` has never
-							// implemented. Same shape #283 found in
-							// `grant_types_supported`, and worse in consequence: an RP
-							// that believed it had sent a signed, tamper-proof request
-							// object would have had the query string processed
-							// instead. `/authorize` now also refuses the parameter
-							// outright with `request_uri_not_supported`.
-							//
-							// `request_parameter_supported` and
-							// `claims_parameter_supported` stay omitted: both default
-							// to `false`, so omission already tells the truth, and
-							// restating a correct default is noise in a document RPs
-							// read.
+							// OIDC Discovery defaults this to **true** when omitted,
+							// which would claim `request_uri` support `/authorize`
+							// does not have: an RP that believed it had sent a signed
+							// request object would have the query string processed
+							// instead. `/authorize` also refuses the parameter with
+							// `request_uri_not_supported`. `request_parameter_supported`
+							// and `claims_parameter_supported` stay omitted: both
+							// default to `false`.
 							request_uri_parameter_supported: false,
 							...(cimdSupported ? { client_id_metadata_document_supported: true } : {}),
 							subject_types_supported: ["public"],
 							// `groups` is supported by filterClaimsByScope (non-standard but opt-in)
 							scopes_supported: ["openid", "profile", "email", "groups"],
 							grant_types_supported: grantTypesSupported,
-							// #484: `private_key_jwt` on every client-authenticated endpoint
+							// `private_key_jwt` on every client-authenticated endpoint
 							// that can honour it, and the assertion algorithms it accepts
 							// (RFC 8414 §2). Only asymmetric ones — a shared secret is what
 							// the method avoids. The algorithm list travels with the method:
@@ -488,27 +421,17 @@ export const oauthModule = (_params: { config: AppConfig }): Module => {
 											: {}),
 									}
 								: {}),
-							// #273 + #283: S256 only, and since #273 that is simply true —
-							// PKCE is mandatory for every authorization-code client and
-							// `ResolvedPkceOptions.supportedMethods` is `["S256"]` with no
-							// operator knob that can widen it.
-							//
-							// `plain` is reachable only through a client registration
-							// carrying `allowPlainPkce: true` (`pkceMethodsForClient`), and
-							// that is exactly why it stays out of this array.
-							// `code_challenge_methods_supported` is SERVER-WIDE metadata
-							// (RFC 8414 §2 / RFC 7636 §4.4): every client that reads it
-							// concludes "I may use any of these". A per-client exception
-							// does not belong in a server-wide array in EITHER direction —
-							// listing `plain` tells the clients that cannot use it that they
-							// can, and the one client the operator named in its registration
-							// does not need discovery to find out.
-							//
-							// So the advertised set is what EVERY authorization-code client
-							// may use and the AS always accepts, which is exactly `S256`.
+							// S256 only: PKCE is mandatory for every authorization-code
+							// client, and `ResolvedPkceOptions.supportedMethods` is
+							// `["S256"]` with no operator knob that can widen it. `plain`,
+							// reachable only through a registration carrying
+							// `allowPlainPkce: true` (`pkceMethodsForClient`), stays out:
+							// this is server-wide metadata (RFC 8414 §2 / RFC 7636 §4.4)
+							// that every client reads as "I may use any of these", and the
+							// one client the operator named does not need discovery.
 							code_challenge_methods_supported: ["S256"],
-							// #481: the acr table's keys, when there is one — less the entries
-							// nothing installed can satisfy (the MFA ADR's D15). Omitted
+							// The acr table's keys, when there is one — less the entries
+							// nothing installed can satisfy. Omitted
 							// otherwise — an RP that sends `acr_values` to a server with no
 							// table gets `unmet_authentication_requirements`, and the metadata
 							// says so.

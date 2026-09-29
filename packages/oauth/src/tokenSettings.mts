@@ -16,13 +16,12 @@
 
 /**
  * The oauth module's token settings as core's `OAuthTokenSettings` — the
- * `oauthTokenSettings` slot this module provides (#728).
+ * `oauthTokenSettings` slot this module provides.
  *
  * A token cannot exist apart from OAuth, so these settings are this module's,
- * in `oauth {}`; the modules outside this package that mint, bind or verify
+ * in `oauth {}`; modules outside this package that mint, bind or verify
  * tokens, or build a URL on the issuer, read them through the slot instead of
- * reading the section. Each value is resolved here the way its readers
- * resolved it for themselves:
+ * the section. Each value is resolved here:
  *
  * - the issuer as written, held to core's `checkCanonicalIssuer` — the oauth
  *   router refuses the same issuer at construction;
@@ -30,13 +29,11 @@
  *   deprecated `expiresIn` read in its place) and `resolveRefreshTokenLifetime`;
  * - every switch on only when it is `true`.
  *
- * The token-binding settings are not among them, though their keys sit in
- * `oauth {}` under `tokenBinding`: they apply across core's token-binding
- * extension point, so they are core's, and core reads them itself with
- * `resolveTokenBindingSettings` (#728).
+ * The token-binding settings under `oauth.tokenBinding` are not among them:
+ * they apply across core's token-binding extension point, so core reads them
+ * itself (`resolveTokenBindingSettings`).
  *
- * The whole is frozen, the nested members too, so no reader can change what
- * the others read.
+ * Frozen, nested members too, so no reader can change what the others read.
  */
 
 import {

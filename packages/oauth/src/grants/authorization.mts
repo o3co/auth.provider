@@ -54,10 +54,10 @@ import { resolveOAuthOptions } from "../resolveOAuthOptions.mjs";
 import { PKCE_METHOD_S256, pkceMethodsForClient } from "./pkce.mjs";
 
 /**
- * What the authorization-code grant reads (#626 P2): the shared grant slots
- * it uses, plus the two repositories only this grant redeems against. The
- * module's `ProviderDeps<R, O>` has to satisfy this at the wiring, so a slot
- * read here without the module declaring it is a compile error.
+ * What the authorization-code grant reads: the shared grant slots it uses,
+ * plus the repositories only this grant redeems against. The module's
+ * `ProviderDeps<R, O>` must satisfy this at the wiring, so a slot read here
+ * without the module declaring it is a compile error.
  */
 export type AuthorizationGrantDeps = Pick<
 	GrantDependencies,
@@ -70,17 +70,15 @@ export type AuthorizationGrantDeps = Pick<
 	| "sessionFamilyIndex"
 	| "sessionRPRegistry"
 > &
-	// The session-admission ADR's D1, D8: `sessionRequirementResolver` — the
-	// synthetic key, by its slot's name, so the module hands its deps over
-	// whole — is what the two reads of the code's session go through, with
-	// `subjectRevocation` and `auditSink` beside the store and the logger.
-	// Required: a factory built by hand without one is refused.
+	// `sessionRequirementResolver` (the synthetic key, by its slot's name, so
+	// the module hands its deps over whole) is what the two reads of the
+	// code's session go through (ADR 2026-09-28-session-admission). Required:
+	// a factory built by hand without one is refused.
 	ProviderDeps<"codeRepository" | "clientRepository" | "sessionRequirementResolver", "auditSink">;
 
 /**
- * A requirement's verdict or an outage, as the token endpoint answers it
- * (the session-admission ADR's D8): `step_up` is `invalid_grant` with
- * `step_up: "<requirement>"` beside it (the MFA ADR's D16 row), `unmet` and
+ * A requirement's verdict or an outage, as the token endpoint answers it:
+ * `step_up` is `invalid_grant` with `step_up: "<requirement>"`, `unmet` and
  * `reauthenticate` are `invalid_grant` naming the requirement, and
  * `unavailable` is `503`, logged once by admission.
  */
@@ -111,9 +109,7 @@ const requirementOrOutageRefusal = (
 
 export const createAuthorizationGrant = (deps: AuthorizationGrantDeps): GrantHandler => {
 	const { config, codeRepository, clientRepository, keyStore, logger } = deps;
-	// What admission reads for this grant's two session reads (the
-	// session-admission ADR's D1): the module's own slots as wired, and no acr
-	// table — the acr was chosen at /authorize and travels on the code.
+	// No acr table: the acr was chosen at /authorize and travels on the code.
 	const admissionDeps: AdmissionDeps = {
 		userSessionStore: deps.userSessionStore,
 		subjectRevocation: deps.subjectRevocation,
@@ -122,11 +118,10 @@ export const createAuthorizationGrant = (deps: AuthorizationGrantDeps): GrantHan
 		logger,
 		auditSink: deps.auditSink,
 	};
-	// Every store this grant reads or writes itself that cannot answer is
-	// `503`, logged once at error level as `authorization_grant_store_unavailable`,
-	// `store` naming which and `step` the operation, with the error's
-	// projection — never the error, which can carry what the store was sent.
-	// The session store is read through admission, which logs its own outage.
+	// A store this grant reads or writes itself that cannot answer is `503`,
+	// logged once at error with the error's projection, never the error, which
+	// can carry what the store was sent. The session store is read through
+	// admission, which logs its own outage.
 	const storeUnavailable = (
 		store:
 			| "authorization_code"
@@ -144,13 +139,11 @@ export const createAuthorizationGrant = (deps: AuthorizationGrantDeps): GrantHan
 	};
 
 	/**
-	 * The first read's answer when it does not admit (D8): a code with no
-	 * `sid` while a store is wired is refused as it always was, naming the
-	 * login wiring; a record gone, past its expiry or without a subject, and
-	 * a session established before the subject's sessions were revoked
-	 * (change 4), are `session_invalid`; a requirement's verdict is
-	 * `invalid_grant` naming it, with `step_up` beside it for a step-up; an
-	 * outage is `503`, logged once by admission.
+	 * The first read's answer when it does not admit: a code with no `sid`
+	 * while a store is wired is refused naming the login wiring; a record
+	 * gone, past its expiry or without a subject, and a session established
+	 * before the subject's sessions were revoked, are `session_invalid`; a
+	 * requirement's verdict or an outage as {@link requirementOrOutageRefusal}.
 	 */
 	const firstReadRefusal = (admission: Exclude<Admission, { outcome: "admitted" }>): GrantError => {
 		switch (admission.outcome) {
@@ -175,14 +168,13 @@ export const createAuthorizationGrant = (deps: AuthorizationGrantDeps): GrantHan
 	};
 
 	/**
-	 * The second read's answer when it does not admit (D8): a session that
-	 * went away, expired, was revoked or changed its subject since the first
-	 * read is `session_invalidated`, and the grant says which of the two it
-	 * saw at warn — Codex Delta 3: a security-relevant rejection SIEMs
-	 * correlate against `cascadeLogout`'s audit events, with the `sid` and the
-	 * client, and never a code identifier (`CodeData` carries no stable jti,
-	 * and the raw `code` is secret material). A requirement's verdict or an
-	 * outage is answered as on the first read.
+	 * The second read's answer when it does not admit: a session that went
+	 * away, expired, was revoked or changed its subject since the first read
+	 * is `session_invalidated`, logged at warn (subject change or otherwise)
+	 * with the `sid` and the client for SIEM correlation with `cascadeLogout`'s
+	 * audit events, and never a code identifier (`CodeData` has no stable jti,
+	 * and the raw `code` is secret). A requirement's verdict or an outage is
+	 * answered as on the first read.
 	 */
 	const revalidationRefusal = (
 		admission: Admission,
@@ -205,30 +197,23 @@ export const createAuthorizationGrant = (deps: AuthorizationGrantDeps): GrantHan
 		}
 	};
 
-	// TODO-F-4: id_token issuance requires a configured issuer URL. We read it
-	// directly from config (not ctx.issuer) because the express adapter falls
-	// back to `req.get("host")` — which is a host string, not an issuer URL —
-	// when config.oauth.jwt.issuer is unset. Emitting a request-derived `iss`
-	// in id_tokens would violate OIDC Core §2 (iss MUST be a URL).
+	// id_token issuance requires a configured issuer URL, read from config and
+	// not `ctx.issuer`: the express adapter falls back to the Host header when
+	// the issuer is unset, and OIDC Core §2 requires `iss` to be a URL.
 	const configuredIssuer: string | undefined = (() => {
 		const jwt = (config.oauth as { jwt?: { issuer?: unknown } } | undefined)?.jwt;
 		const value = jwt?.issuer;
 		return typeof value === "string" && value.length > 0 ? value : undefined;
 	})();
 
-	// #273: ONE PKCE policy, resolved from the same config through the same
-	// resolver `/authorize` uses (`grants/session.mts` reads its own knob the
-	// same way). Pre-#273 this site re-derived its own view — a `required`
-	// flag plus a `requireS256` legacy fallback the authorization endpoint did
-	// not honour — so `/authorize` could mint a code that `/token` refused.
-	// Resolved once at composition; `logger` carries the inert-config warning.
+	// One PKCE policy, through the same resolver `/authorize` uses, so
+	// `/authorize` cannot mint a code that `/token` refuses. Resolved once at
+	// composition; `logger` carries the inert-config warning.
 	const pkce = resolveOAuthOptions(config, logger).pkce;
 
-	// The lifetimes it mints with, read here for the same reason: once, when
-	// the grant is built. A configuration built by hand that the resolvers
-	// refuse is a composition fault, refused before any request can reach
-	// `consumeByCode` — read per request, it was refused only after the code
-	// was spent, and a missing refresh lifetime signed a token with no `exp`.
+	// The lifetimes, also resolved once when the grant is built, so a
+	// hand-built configuration the resolvers refuse fails composition rather
+	// than a request after `consumeByCode` has spent the code.
 	const accessTokenExpiresIn = resolveAccessTokenLifetime(config).defaultExpiresIn;
 	const refreshTokenExpiresIn = resolveRefreshTokenLifetime(config);
 
@@ -242,18 +227,12 @@ export const createAuthorizationGrant = (deps: AuthorizationGrantDeps): GrantHan
 			} = body as {
 				code?: string;
 				code_verifier?: string | null;
-				// D-6: `client_id` / `client_secret` from body are no longer
-				// destructured — `clientAuthMw` populates `ctx.authenticatedClient`
-				// and the binding gate below verifies `codeData.client_id` against
-				// the authenticated identity.
 				redirect_uri?: string | null;
 			};
 
-			// D-6: client identity comes from RFC 6749 §2.3 token-endpoint
-			// authentication (clientAuthMw). A grant invocation that did not pass
-			// through that middleware (custom route, direct unit-test call) cannot
-			// be bound to a client and MUST be refused — the previous body-based
-			// `client_secret` check was superseded by route-level middleware.
+			// Client identity comes from RFC 6749 §2.3 token-endpoint
+			// authentication (`clientAuthMw`). An invocation that bypassed it
+			// cannot be bound to a client and is refused.
 			if (!ctx.authenticatedClient) {
 				return {
 					result: {
@@ -265,11 +244,9 @@ export const createAuthorizationGrant = (deps: AuthorizationGrantDeps): GrantHan
 			}
 			const authenticatedClientId = ctx.authenticatedClient.clientId;
 
-			// D-1: presence-only check on `code`. The string itself is verified by
-			// `consumeByCode` (atomic getDel), which is the sole authenticity gate.
-			// The previous `code !== session.code` cross-check was redundant
-			// defense-in-depth that introduced the CR-2 last-write-wins race when
-			// two /authorize requests shared an Express session.
+			// Presence only: `consumeByCode` (atomic getDel) is the sole
+			// authenticity gate. A cross-check against the Express session would
+			// race when two /authorize requests share one.
 			if (!code) {
 				return {
 					result: {
@@ -280,10 +257,8 @@ export const createAuthorizationGrant = (deps: AuthorizationGrantDeps): GrantHan
 				};
 			}
 
-			// D-1: hoist redirect_uri presence check ahead of consumeByCode so
-			// requests missing it reject without burning the (otherwise valid)
-			// code via the atomic getDel. The full equality check against
-			// codeData.redirect_uri still happens below.
+			// Before consumeByCode, so a request missing it does not burn a valid
+			// code. The equality check against the code's redirect_uri is below.
 			if (!redirect_uri) {
 				return {
 					result: {
@@ -294,16 +269,11 @@ export const createAuthorizationGrant = (deps: AuthorizationGrantDeps): GrantHan
 				};
 			}
 
-			// Atomically consume code data from repository (replay attack prevention).
-			// A store that cannot answer is `503`, logged — not the terminal
-			// handler's `500`: the client did nothing wrong. Whether a retry
-			// can redeem the code depends on where the failure fell. A store
-			// that never ran the consume leaves the code in place, and a retry
-			// once the store is back redeems it. A store that ran it and lost
-			// the reply (a `commandTimeout` after the delete) has spent the
-			// code: the retry gets `400 invalid_grant` and the user starts the
-			// authorization again, as single-use codes require. Nothing was
-			// issued either way, so there is nothing to revoke.
+			// Atomic consume (replay prevention). A store that cannot answer is a
+			// logged `503`, not `500`: the client did nothing wrong. If the
+			// consume never ran, a retry redeems the code; if it ran and the reply
+			// was lost, the code is spent and the retry gets `400 invalid_grant`,
+			// as single-use codes require. Nothing was issued either way.
 			let codeData: Awaited<ReturnType<typeof codeRepository.consumeByCode>>;
 			try {
 				codeData = await codeRepository.consumeByCode(code);
@@ -327,10 +297,8 @@ export const createAuthorizationGrant = (deps: AuthorizationGrantDeps): GrantHan
 				};
 			}
 
-			// D-6: canonical authority binding. The middleware authenticated the
-			// presenter; the code repository persisted the original `/authorize`
-			// caller. They must agree, otherwise an authenticated client could
-			// redeem a code issued to a different client.
+			// The authenticated presenter must be the client the code was issued
+			// to, or a client could redeem another client's code.
 			if (codeData.client_id !== authenticatedClientId) {
 				return {
 					result: {
@@ -341,13 +309,8 @@ export const createAuthorizationGrant = (deps: AuthorizationGrantDeps): GrantHan
 				};
 			}
 
-			// A-2: redirect_uri binding (RFC 6749 §4.1.3)
-			// D-1: codeData.redirect_uri is now always populated (required field).
-			// The previous `?? session.code_redirect_uri` fallback hid the IH-4
-			// vacuous-pass bug where Redis silently dropped redirect_uri and the
-			// check was skipped entirely. Now strictly enforced. The presence
-			// check on `redirect_uri` is hoisted above consumeByCode; this site
-			// only verifies the equality binding.
+			// redirect_uri binding (RFC 6749 §4.1.3), strict: the code always
+			// carries one, and no fallback may let a missing value skip the check.
 			if (redirect_uri !== codeData.redirect_uri) {
 				return {
 					result: {
@@ -358,30 +321,17 @@ export const createAuthorizationGrant = (deps: AuthorizationGrantDeps): GrantHan
 				};
 			}
 
-			// C-2 / D-1: only the values persisted on Code at /authorize time are
-			// authoritative. The session.granted_scopes fallback is removed along
-			// with the four /authorize session writes. Do NOT re-run grantPolicy
-			// here — evaluate-once-at-authorize is the contract.
+			// Only the values persisted on the code at /authorize are
+			// authoritative. Do NOT re-run grantPolicy here: it is evaluated once,
+			// at /authorize.
 			const grantedScopes: readonly string[] | undefined = codeData.grantedScope;
 			const grantedAudiencesFromCode = codeData.grantedAudience;
 
-			// SF-3 fixup: a code record carrying `code_challenge` without
-			// `code_challenge_method` would silently bypass PKCE validation
-			// because the outer `if (codeData.code_challenge_method)` gate
-			// below is falsy. The /authorize route never persists this shape
-			// (challenge is stored only when method is resolved — see
-			// `routes.mts:632-661`), so in practice this guard fires only on
-			// a corrupt store record or a custom CodeRepository implementation
-			// that wrote the partial state.
-			//
-			// RFC 6749 error mapping (Copilot review on PR #126): the request
-			// itself is well-formed; the persisted authorization code is
-			// unredeemable. `invalid_grant` is the standard code for "this
-			// code cannot be used", which matches what is happening here
-			// (and is also what the other unredeemable-code branches in this
-			// handler return). errorDescription says "invalid code" (the
-			// same wording used by the other invalid-code branches above)
-			// so storage implementation details do not leak to the client.
+			// A challenge without a method is a corrupt record (/authorize never
+			// persists that shape) or a custom CodeRepository's. The request is
+			// well-formed but the code is unredeemable: `invalid_grant` /
+			// "invalid code", as the other such branches, so storage details do
+			// not leak.
 			if (codeData.code_challenge && !codeData.code_challenge_method) {
 				return {
 					result: {
@@ -392,24 +342,13 @@ export const createAuthorizationGrant = (deps: AuthorizationGrantDeps): GrantHan
 				};
 			}
 
-			// #273: PKCE is required of every authorization-code client, so a
-			// code carrying neither challenge nor method is unredeemable — by a
-			// confidential client too. `/authorize` no longer mints one, so
-			// reaching here means a code issued before the upgrade or by a
-			// custom CodeRepository.
-			//
-			// Unconditional, deliberately. `ResolvedPkceOptions.required` is the
-			// literal `true`, so gating this on it would be a branch that cannot
-			// take its other path — dead code reading as though PKCE were still
-			// switchable here. The type is the guarantee; the runtime read that
-			// ties this endpoint to `/authorize` is `pkceMethodsForClient(pkce, …)`
-			// below, which consults the very object `/authorize` consults.
-			//
-			// Ordered AFTER the corrupt-shape guard above on purpose: a record
-			// that carries a challenge but no method is a storage defect, not a
-			// client that skipped PKCE, and it keeps its own `invalid_grant` /
-			// "invalid code" answer rather than being relabelled as a missing
-			// challenge the client never actually omitted.
+			// PKCE is required of every authorization-code client, confidential
+			// ones too, so a code with neither challenge nor method (a custom
+			// CodeRepository's, or minted before PKCE was mandatory) is
+			// unredeemable. Unconditional: `ResolvedPkceOptions.required` is the
+			// literal `true`; the runtime tie to `/authorize` is
+			// `pkceMethodsForClient(pkce, …)` below. After the corrupt-shape guard
+			// above, so a storage defect keeps its own answer.
 			const challengeMethod = codeData.code_challenge_method;
 			if (!challengeMethod) {
 				return {
@@ -421,20 +360,9 @@ export const createAuthorizationGrant = (deps: AuthorizationGrantDeps): GrantHan
 				};
 			}
 
-			// Validate code_verifier against the code record. Unconditional and
-			// un-nested: this used to sit inside `if (codeData.code_challenge_method)`,
-			// the shape from when PKCE was optional and a code could legitimately
-			// carry no method. The mandatory check above returns for exactly that
-			// case now, so the wrapper could never take its false path.
-			//
-			// SF-3 (v0.5.1): a code record with `code_challenge_method` set
-			// but no `code_challenge` is structurally invalid — the two are a
-			// pair persisted together at /authorize. Pre-SF-3 this state was
-			// silently accepted because `verifier !== undefined` is always
-			// true (the comparison "passed" for the wrong reason). Now that
-			// `constantTimeStringEqual` requires both arguments to be
-			// strings, the malformed shape is rejected explicitly. Reject as
-			// invalid_request; the code is consumed already so no replay risk.
+			// A method without a challenge is a structurally invalid record (the
+			// two are persisted together) and must not reach the comparison. The
+			// code is already consumed, so there is no replay risk.
 			if (typeof codeData.code_challenge !== "string") {
 				return {
 					result: {
@@ -444,11 +372,10 @@ export const createAuthorizationGrant = (deps: AuthorizationGrantDeps): GrantHan
 					},
 				};
 			}
-			// #273: the method must be one THIS client may use — `S256`,
-			// plus `plain` only for a registration that opted in. Same
-			// `pkceMethodsForClient` call `/authorize` made when it minted
-			// the code, against the same registration, so a code this AS
-			// issued is never refused here for its method.
+			// The method must be one this client may use (`S256`, plus `plain`
+			// only for a registration that opted in): the call `/authorize` made
+			// when it minted the code, so a code this AS issued is never refused
+			// here for its method.
 			if (!pkceMethodsForClient(pkce, ctx.authenticatedClient).includes(challengeMethod)) {
 				return {
 					result: {
@@ -478,26 +405,17 @@ export const createAuthorizationGrant = (deps: AuthorizationGrantDeps): GrantHan
 					},
 				};
 			}
-			// #273: `pkceMethodsForClient` admits exactly `S256` and `plain`,
-			// and the allowlist check above already refused anything else —
-			// against a frozen constant in `grants/pkce.mts`, not an
-			// operator-supplied list. So this is a two-way choice, not a
-			// switch with a `default` guard against operator/switch
-			// divergence: that divergence used to be reachable through the
-			// `pkce.supportedMethods` knob, and #273 removed the knob.
-			// `pkce.test.mts` pins the admissible set to exactly these two,
-			// so growing it without revisiting this comparison fails there.
-			//
-			// For `S256` the stored challenge is the digest of the verifier;
-			// for `plain` it is the verifier itself (RFC 7636 §4.2).
+			// `pkceMethodsForClient` admits exactly `S256` and `plain` (a frozen
+			// constant in `grants/pkce.mts`, pinned by `pkce.test.mts`), and the
+			// check above refused anything else, so this is a two-way choice. For
+			// `S256` the stored challenge is the verifier's digest; for `plain`,
+			// the verifier itself (RFC 7636 §4.2).
 			const expectedChallenge =
 				challengeMethod === PKCE_METHOD_S256
 					? crypto.createHash("sha256").update(code_verifier).digest("base64url")
 					: code_verifier;
-			// SF-3 + MIN-4 (v0.5.1): timing-safe compare, on both methods —
-			// a short-circuit `!==` leaks per-byte progress of a candidate
-			// verifier against the stored challenge (RFC 7636 §4.1, OAuth 2.1
-			// BCP §4.5). One call site now instead of two identical ones.
+			// Timing-safe for both methods: `!==` leaks per-byte progress of a
+			// candidate verifier (RFC 7636 §4.1, OAuth 2.1 BCP §4.5).
 			if (!constantTimeStringEqual(expectedChallenge, codeData.code_challenge)) {
 				return {
 					result: {
@@ -508,33 +426,22 @@ export const createAuthorizationGrant = (deps: AuthorizationGrantDeps): GrantHan
 				};
 			}
 
-			// TODO-F-3: sid from the code record — written at /authorize time by the
-			// login/federation callback wiring (Task 2).
-			// Only enforce sid presence when userSessionStore is wired. Deployments
-			// that opt out of session tracking (userSessionStore not configured) have
-			// no store to write sid at login time, so requiring it here would be a
-			// backward-compat regression. When the store IS wired, sid is mandatory
-			// so subsequent linkFamily / registerRP can execute.
+			// `sid` is written at /authorize by the login or federation callback.
+			// Required only when userSessionStore is wired (for the family and RP
+			// linking below); without a store nothing writes it at login.
 			const sid = codeData.sid;
-			// TODO-F-4: nonce from the code record — written at /authorize time and
-			// must be reflected verbatim in the id_token per OIDC Core §2.
+			// Reflected verbatim in the id_token (OIDC Core §2).
 			const nonce = codeData.nonce;
 
-			// The subject of every token issued here is the user the *code* was
-			// bound to, resolved through `sid` — not whoever owns the session that
-			// happens to accompany the token request. For a confidential client
-			// `/token` is a back-channel call with no end-user cookie, so
-			// `session.user` is undefined; reading it there produced access and
-			// refresh tokens with no `sub` at all, while the id_token (which has
-			// always read the UserSession) carried one. In a same-origin topology
-			// where `/token` does carry cookies, the two could name different
-			// users if the session changed between `/authorize` and `/token`.
+			// Every token's subject is the user the code was bound to, resolved
+			// through `sid`, not the owner of whatever session accompanies the
+			// token request: a confidential client's back-channel `/token` has no
+			// end-user cookie, and in a same-origin topology the cookie's user may
+			// have changed since `/authorize`.
 			//
-			// Read here, through admission (the session-admission ADR's D8), rather
-			// than in the linking block below, so a session deleted, expired or
-			// revoked between `/authorize` and `/token` is rejected before any
-			// token is signed. The code's claim names no subject — `CodeData`
-			// carries none — so this first read's record supplies it, and the
+			// Read through admission here, before any token is signed, so a session
+			// deleted, expired or revoked since `/authorize` is refused. `CodeData`
+			// names no subject, so this first read's record supplies it and the
 			// second read is compared against it.
 			const firstRead = await admitSession(admissionDeps, {
 				claim: codeClaimFirstRead(codeData),
@@ -545,12 +452,10 @@ export const createAuthorizationGrant = (deps: AuthorizationGrantDeps): GrantHan
 			}
 			let userSession: UserSession | null = firstRead.session;
 
-			// With a store, admission read a record — a non-empty `sub`, live —
-			// and that is the subject. The fallback is gated on the *store* being
-			// absent, never on the record: reverting to the cookie-derived
-			// identity whenever a record lacks a usable `sub` would reintroduce
-			// exactly the cross-user mismatch this removes, in the one topology
-			// (same-origin/BFF) where `/token` does carry cookies.
+			// With a store, admission read a live record with a non-empty `sub`,
+			// and that is the subject. The cookie fallback is gated on the store
+			// being absent, never on the record, or the cross-user mismatch above
+			// returns in the same-origin/BFF topology.
 			let subject: string | null;
 			if (deps.userSessionStore) {
 				if (userSession === null) {
@@ -572,34 +477,20 @@ export const createAuthorizationGrant = (deps: AuthorizationGrantDeps): GrantHan
 			// family_id; revoking the family revokes every descendant.
 			const familyId = crypto.randomUUID();
 
-			// generateToken carries a single `aud` claim; if policy narrowed to multiple
-			// audiences we flatten to the first. Multi-audience tokens are out of scope
-			// for the authorization code grant.
-			// D-6: default `aud` to the authenticated client (was raw body
-			// `client_id`). The binding gate above already proved the two are
-			// identical to `codeData.client_id`, so this rewrite is equivalent
-			// and removes the body-spoofable surface that Codex M2 flagged.
+			// generateToken carries a single `aud`: several granted audiences are
+			// flattened to the first, and the default is the authenticated client,
+			// never the body's `client_id`.
 			const audience =
 				grantedAudiencesFromCode && grantedAudiencesFromCode.length > 0
 					? grantedAudiencesFromCode[0]
 					: authenticatedClientId;
 
-			// RFC 8707 §2 (Stage 2, #173). RFC 8707 permits `resource` at both
-			// `/authorize` and `/token` for this flow, so a conformant client may
-			// present it here — but the audience was already decided at
-			// `/authorize` and persisted on the code.
-			//
-			// This is enforcement ONLY: a comparison against the persisted value,
-			// with no policy invocation. Re-running `grantPolicy` here to
-			// re-narrow would reintroduce exactly the token-endpoint surface D-1
-			// removed and break evaluate-once-at-authorize (C-2 / D-1). Ignoring
-			// the parameter instead would silently hand back a token whose `aud`
-			// is not what the client asked for, which is the §2 violation. So the
-			// request is honoured by being checked, not by being re-decided.
-			//
-			// The `/authorize` endpoint forwards `resource` to the policy hook so
-			// the audience persisted on the code can reflect it; see the ADR
-			// `packages/core/docs/adr/2026-07-31-rfc8707-resource-audience-binding.md`.
+			// RFC 8707 §2: a client may present `resource` at `/token` too, but the
+			// audience was decided at `/authorize` and persisted on the code. It is
+			// checked, not re-decided: re-running `grantPolicy` would break
+			// evaluate-once-at-authorize, and ignoring it would hand back an `aud`
+			// the client did not ask for. See ADR
+			// 2026-07-31-rfc8707-resource-audience-binding.
 			const resourceIndicatorEnabled = deps.config.oauth.resourceIndicator?.enabled === true;
 			if (resourceIndicatorEnabled) {
 				const requestedResource = extractResourceParam(body as Record<string, unknown>);
@@ -615,102 +506,58 @@ export const createAuthorizationGrant = (deps: AuthorizationGrantDeps): GrantHan
 				}
 			}
 
-			// CP-12: normalize empty scope array to null so the token response
-			// omits `scope` entirely instead of emitting `scope: ""` (which
-			// consumers can't distinguish from "scope claim omitted").
+			// An empty scope is null, so the response omits `scope` rather than
+			// emitting `scope: ""`.
 			const scopeClaim = grantedScopes && grantedScopes.length > 0 ? grantedScopes.join(" ") : null;
 
-			// Wave 2 Phase 2 §9.1 + Phase 3 §9.1 (mTLS RT binding):
-			// propagate the token-binding confirmation (RFC 7800 `cnf`) into
-			// the issued tokens.
+			// Token-binding confirmation (RFC 7800 `cnf`) on the issued tokens;
+			// see README, "Token binding (`cnf`)".
 			//
-			// **AT cnf** is the member the binding's mechanism kind owns —
-			// core's `ownedConfirmation`, the boundary `matchConfirmation`
-			// enforces on the way back in. `ctx.tokenBinding` carries what a
-			// mechanism returned, and `Confirmation` is extensible by
-			// mechanism, so a contributed kind presenting `{jkt}` or
-			// `{x5t#S256}`, a DPoP binding presenting an mTLS member, or a
-			// compound confirmation would otherwise be minted as a binding no
-			// mechanism that owns it validated. Such a request is issued
-			// unbound; a compound one keeps the owning member alone.
+			// AT `cnf` is the member the binding's mechanism kind owns (core's
+			// `ownedConfirmation`, the boundary `matchConfirmation` enforces on
+			// the way back in). `Confirmation` is extensible by mechanism, so a
+			// member no owning mechanism validated is not minted: that request is
+			// issued unbound, and a compound one keeps the owning member alone.
 			//
-			// **RT cnf** is gated on `(bindingIsDpop || bindingIsMtls) &&
-			// isPublicClient`:
-			//   1. RT binding is restricted to **public clients**
-			//      (`tokenEndpointAuthMethod === "none"`): confidential
-			//      clients use the client secret as the refresh-time
-			//      authenticator (RFC 9449 §5 for DPoP; the same rationale
-			//      generalizes to mTLS per RFC 8705 §4 which talks about
-			//      client-cert-bound RTs for clients that have no other
-			//      strong refresh-time credential). RT-key-binding adds no
-			//      security for confidential clients and would force key /
-			//      cert retention across the RT lifetime.
-			//   2. The gate is a **mechanism allowlist** — only the binding
-			//      kinds whose refresh-time enforcement matrix this grant
-			//      knows how to honor are admitted. A future mechanism
-			//      (FIDO attestation etc.) MUST land its refresh-time
-			//      matrix in `refreshToken.mts` BEFORE being added here,
-			//      mirroring the PR #185 mechanism-allowlist rationale that
-			//      stopped Phase 2 from silently emitting unenforceable
-			//      mTLS-bound RTs.
-			//
-			// The wire-level `token_type` is read off the access token's
-			// confirmation by `generateTokenResponse`: "DPoP" for `cnf.jkt`,
-			// "Bearer" otherwise (mTLS keeps it per RFC 8705 §3).
+			// RT `cnf` needs a mechanism on the allowlist below and, unless opted
+			// out, a public client (`tokenEndpointAuthMethod === "none"`): a
+			// confidential client's own authentication is its refresh-time
+			// authenticator (RFC 9449 §5, RFC 8705 §4). The allowlist admits only
+			// kinds whose refresh-time matrix `refreshToken.mts` honours; a new
+			// mechanism MUST land that matrix before being added here
+			// (CONTRIBUTING.md §5).
 			const confirmation = ownedConfirmation(ctx.tokenBinding);
 			const bindingIsDpop = ctx.tokenBinding?.kind === "dpop";
 			const bindingIsMtls = ctx.tokenBinding?.kind === "mtls";
 			const isPublicClient = ctx.authenticatedClient.tokenEndpointAuthMethod === "none";
-			// #275: `bindConfidentialClientRefreshTokens` opts a deployment out of
-			// the `isPublicClient` restriction.
-			//
-			// Neither RFC requires the restriction and neither forbids lifting
-			// it. RFC 9449 §5's "refresh tokens issued to confidential clients
-			// ... are not bound" is descriptive prose with no RFC 2119 keyword,
-			// sitting next to three MUSTs for public clients; RFC 8705 §7.1 says
-			// the same about certificates. Their shared rationale holds here —
-			// this grant refuses an unauthenticated caller and refuses an RT
-			// whose `azp` is not the authenticated client — so a stolen RT is
-			// unusable without the client's own credential and binding buys
-			// nothing against the threat as usually stated.
-			//
-			// It buys something only where the two credentials are protected
-			// differently: a client secret in an environment variable, a DPoP
-			// key in an HSM or TPM. Leaking the secret alone is then not enough.
-			// Off by default because the cost is real in the other direction — a
-			// bound RT pins the client to one key or certificate for the RT's
-			// whole lifetime, so rotating mid-lifetime breaks refresh.
-			//
-			// Mechanism-neutral, because the gate is and because
-			// `oauth.tokenBinding` is where cross-mechanism policy already
-			// lives — core's, read through its one reader of the section
-			// (#728). Nothing else is needed to make it mean something: the
-			// refresh-time continuity matrix runs off the RT's own `cnf`, so a
-			// confidential client's newly bound RT is enrolled in it by the same
-			// rule that already covers public clients.
+			// `bindConfidentialClientRefreshTokens` lifts the public-client
+			// restriction, which neither RFC requires (RFC 9449 §5 and RFC 8705
+			// §7.1 are descriptive there). A stolen RT is already unusable without
+			// the client's credential; binding helps only where the two are
+			// protected differently (a secret in an env var, a DPoP key in an HSM).
+			// Off by default: a bound RT pins the client to one key or certificate
+			// for the RT's lifetime. The refresh-time matrix runs off the RT's own
+			// `cnf`, so a newly bound confidential RT is enforced like any other.
 			const bindConfidentialClients =
 				resolveTokenBindingSettings(config).bindConfidentialClientRefreshTokens;
 			const bindRefreshToken =
 				(bindingIsDpop || bindingIsMtls) && (isPublicClient || bindConfidentialClients);
 
-			// #481: how, and to which acr, the user authenticated — read once, in the
-			// shape every grant reads, and stamped on the id_token, the access token
-			// and the refresh token alike. `amr` is what the session vouches for
-			// (the MFA ADR's D9, D13): never a value an untrusted upstream IdP
-			// asserted, which a session written before the split still holds.
+			// How, and to which acr, the user authenticated: read once and stamped
+			// on the id_token, the access token and the refresh token alike. `amr`
+			// is what the session vouches for, never a value an untrusted upstream
+			// IdP asserted (see ADR 2026-09-25-multi-factor-authentication).
 			const amr = wellFormedAmr(userSession ? vouchedAmr(userSession) : undefined);
 			const acr = wellFormedAcr(codeData.acr);
 
-			// TODO-F-3: both access_token and refresh_token carry family_id and, when
-			// sid is present, the sid claim so introspect (Task 5) and refresh (Task 4)
-			// can propagate them without re-reading the session store on every request.
-			// sid is omitted when no userSessionStore is wired (backward-compat path).
+			// Both tokens carry family_id and, when present, sid, so introspect and
+			// refresh need not re-read the session store. No sid without a
+			// userSessionStore.
 			const accessToken = await generateToken(
 				{
 					family_id: familyId,
 					...(sid ? { sid } : {}),
-					// #481: mirror the authentication method and context onto the access
-					// token, so a resource server (or auth.policy-verifier) can gate on them.
+					// So a resource server (or auth.policy-verifier) can gate on them.
 					...(amr ? { amr } : {}),
 					...(acr ? { acr } : {}),
 				},
@@ -720,28 +567,24 @@ export const createAuthorizationGrant = (deps: AuthorizationGrantDeps): GrantHan
 					issuer,
 					audience,
 					subject,
-					// D-6: `azp` is the authenticated client (was raw body `client_id`).
 					authorizedParty: authenticatedClientId,
 					scope: scopeClaim,
 					tokenType: "at+jwt",
 					...(confirmation ? { confirmation } : {}),
 				},
 			);
-			// #449: the refresh token's identity — its `jti`, and the instant its
-			// lifetime is measured from — is reserved here, so the family below is
-			// registered under exactly the `jti` and `exp` the token carries, as
-			// the refresh grant registers a rotation. It is never read back from
-			// the signer's output, which a `KeyStore` may return in a form this
-			// grant cannot decode.
+			// The refresh token's `jti` and issue instant are fixed here, so the
+			// family below is registered under exactly the `jti` and `exp` the
+			// token carries. Never read back from the signer's output, which a
+			// `KeyStore` may return in a form this grant cannot decode.
 			const refreshTokenIssuedAt = Math.floor(Date.now() / 1000);
 			const refreshTokenJti = crypto.randomUUID();
 			const refreshToken = await generateToken(
 				{
 					family_id: familyId,
 					...(sid ? { sid } : {}),
-					// #481 audit: carried so the refresh grant can mirror them onto the
-					// access tokens it mints. `acr` lives on the code, which is spent
-					// here — there is nowhere else a refresh could read it from.
+					// For the refresh grant to mirror onto the access tokens it mints:
+					// `acr` lives on the code, spent here, so nowhere else holds it.
 					...(amr ? { amr } : {}),
 					...(acr ? { acr } : {}),
 				},
@@ -751,7 +594,6 @@ export const createAuthorizationGrant = (deps: AuthorizationGrantDeps): GrantHan
 					issuer,
 					audience,
 					subject,
-					// D-6: `azp` is the authenticated client (was raw body `client_id`).
 					authorizedParty: authenticatedClientId,
 					scope: scopeClaim,
 					tokenType: "rt+jwt",
@@ -761,19 +603,11 @@ export const createAuthorizationGrant = (deps: AuthorizationGrantDeps): GrantHan
 				},
 			);
 
-			// Register the initial refresh token family so replay detection is
-			// active from the first use. Per A3 §5.2: use the dedicated
-			// RefreshTokenFamilyRotation.register(newJti, familyId, expiresAtMs) rather
-			// than the v0.4.x rotate(null, ...) trick — expiresAtMs is epoch-ms.
-			// Every refresh token served with a rotation wired has its family
-			// registered; there is no branch that serves one without.
+			// Register the family so replay detection is active from the first
+			// use; with a rotation wired, no refresh token is served unregistered.
 			if (deps.refreshTokenFamilyRotation) {
-				// CP-16: fail-closed when the store is unavailable. If we cannot
-				// register the initial rt, we cannot guarantee replay detection
-				// for the family — serving a token whose replay-detection is
-				// blind would undermine the RFC 6819 §5.2.2.3 contract. Return
-				// a controlled 503 JSON so clients see a retryable error instead
-				// of an unhandled HTML 500 from express.
+				// Fail closed: a token whose replay detection is blind would break
+				// RFC 6819 §5.2.2.3. A retryable 503, not an HTML 500.
 				try {
 					await deps.refreshTokenFamilyRotation.register(
 						refreshTokenJti,
@@ -792,53 +626,30 @@ export const createAuthorizationGrant = (deps: AuthorizationGrantDeps): GrantHan
 				}
 			}
 
-			// TODO-F-3: link the new token family to the user session (via
-			// sessionFamilyIndex.addFamilyId) and register the RP for back/front-channel
-			// logout (via sessionRPRegistry.registerRP). All calls are fail-closed: if the
-			// session store is unavailable or the session was deleted between /authorize
-			// and /token, we return a controlled error rather than issuing tokens that
-			// are invisible to logout orchestration.
-			// sid is guaranteed non-null here when deps.userSessionStore is set: the
-			// first read refused a code without one (admission's `not_live` / `no_sid`).
-			// `userSession` was resolved before token generation (Fix I1: a session
-			// deleted between /authorize and /token must not produce tokens, which
-			// would be orphaned from logout orchestration); the re-check below keeps
-			// the CR-4 window narrow across the findById await.
+			// Link the new family to the user session and register the RP for
+			// back/front-channel logout. Fail closed: a store that cannot answer or
+			// a session gone since /authorize is an error, never tokens invisible
+			// to logout. With a store wired, the first read already refused a code
+			// without a sid.
 			if (deps.userSessionStore && sid) {
-				// Fix I2: clientRepository.findById is fallible — move inside try/catch
-				// so a throw here returns a controlled 503 instead of propagating to the
-				// express default handler as an unhandled HTML 500.
-				// Which dependency the block below is waiting on, so the one catch
-				// that answers them all can log the one that failed.
+				// Which dependency the block is waiting on, so the one catch can log
+				// the one that failed.
 				let linking: "client" | "session_family_index" | "session_rp_registry" = "client";
 				try {
-					// D-6: logout-metadata lookup uses the authenticated client id
-					// (was raw body `client_id`). The two are guaranteed equal by
-					// the binding gate above, but reading from the authenticated
-					// slot keeps Codex M2's "no raw body for identity" invariant.
 					const clientRecord = await clientRepository.findById(authenticatedClientId);
 
-					// CR-4: re-validate the session immediately before mutating the
-					// family index — the second read, through admission again (the
-					// session-admission ADR's D8). The first read happens before token
-					// generation, so the span between the two also covers both
-					// `generateToken` signings and `refreshTokenFamilyRotation.register`
-					// in addition to the `findById` awaited just above — a
-					// `cascadeLogout` in that window would leave the just-issued tokens
-					// orphaned from logout orchestration. Per Codex Delta 1, this
-					// REDUCES the window for the common case (logout fully completes
-					// before the second check). It does NOT close the sub-millisecond
-					// window between this check and `addFamilyId`; Phase F's atomic
-					// `addFamilyIdIfSessionActive` Lua EVAL closes that.
+					// The second read, right before mutating the family index: a
+					// `cascadeLogout` since the first read (spanning both signings, the
+					// family registration and `findById`) would orphan the new tokens
+					// from logout. This narrows the window; it does not close the gap
+					// between this check and `addFamilyId`, which needs an atomic
+					// check-and-add.
 					//
-					// The claim carries the first read's `sub`, which
-					// `codeClaimRevalidation` requires: the access and refresh tokens
-					// were signed from it, and the id_token below is minted from this
-					// read, so a store that answered a different subject for the same
-					// `sid` between the two reads would hand back tokens that disagree
-					// about who the user is. A `sub` change under a fixed `sid` is a
-					// store invariant violation, not a race worth tolerating — admission
-					// refuses it (`subject_mismatch`, audited), and so does this grant.
+					// The claim carries the first read's `sub`: the tokens were signed
+					// from it and the id_token is minted from this read, so a different
+					// subject under the same `sid` would yield tokens that disagree on
+					// the user. That is a store invariant violation, refused by
+					// admission (`subject_mismatch`, audited).
 					const revalidation = await admitSession(admissionDeps, {
 						// With a store wired and admitted, the subject is the record's
 						// non-empty `sub` (above).
@@ -853,15 +664,12 @@ export const createAuthorizationGrant = (deps: AuthorizationGrantDeps): GrantHan
 							}),
 						};
 					}
-					// Use the revalidated session for downstream TTL bookkeeping. Subsequent
-					// id_token generation reads `userSession`, so refresh the outer binding.
+					// The revalidated session drives the TTLs below and the id_token.
 					userSession = revalidation.session;
 
-					// Composition-root invariant (A4 §3.4/§8): the bundled session-stores
-					// module wires all 4 sibling stores together. When deps.userSessionStore is
-					// present (outer guard), sessionFamilyIndex and sessionRPRegistry are also
-					// present. Using ?. would silently no-op on a misconfigured root instead of
-					// surfacing the bug at the throw site.
+					// Composition-root invariant: the session-stores module wires its
+					// sibling stores together, so with userSessionStore present these
+					// two are too. `?.` would silently no-op on a misconfigured root.
 					linking = "session_family_index";
 					// biome-ignore lint/style/noNonNullAssertion: intentional — see invariant comment above
 					await deps.sessionFamilyIndex!.addFamilyId(sid, familyId, userSession.expiresAt);
@@ -870,12 +678,9 @@ export const createAuthorizationGrant = (deps: AuthorizationGrantDeps): GrantHan
 					await deps.sessionRPRegistry!.registerRP(
 						sid,
 						{
-							// D-6: RP record carries the authenticated client id.
 							clientId: authenticatedClientId,
-							// Read off the typed client record. These were each read
-							// through `as Record<string, unknown>` and cast back, so a
-							// misspelt field would have read `undefined` and dropped the
-							// RP from the logout cascade without a sound.
+							// Typed reads: a misspelt field would silently drop the RP
+							// from the logout cascade.
 							backchannelLogoutUri: clientRecord?.backchannelLogoutUri,
 							backchannelLogoutSessionRequired: clientRecord?.backchannelLogoutSessionRequired,
 							frontchannelLogoutUri: clientRecord?.frontchannelLogoutUri,
@@ -885,12 +690,9 @@ export const createAuthorizationGrant = (deps: AuthorizationGrantDeps): GrantHan
 						userSession.expiresAt,
 					);
 				} catch (err) {
-					// Fail-closed for any downstream dependency throw in this block —
-					// clientRepository.findById, sessionFamilyIndex.addFamilyId, or
-					// sessionRPRegistry.registerRP. The errorDescription is intentionally
-					// generic because the try spans both client lookup and session-store
-					// mutations; a more specific message would misattribute failures.
-					// The log line is not: it names the one that threw.
+					// Fail closed on any throw here. The errorDescription is generic
+					// because the try spans the client lookup and the store writes; the
+					// log line names the one that threw.
 					if (linking === "client") {
 						logClientRepositoryUnavailable(
 							logger,
@@ -915,30 +717,18 @@ export const createAuthorizationGrant = (deps: AuthorizationGrantDeps): GrantHan
 				}
 			}
 
-			// TODO-F-4: issue id_token when the openid scope was granted and the
-			// session is available. The condition naturally handles all cases:
-			//   F-4-1: openid scope + userSession wired  → id_token issued
-			//   F-4-2: no openid scope                   → id_token omitted
-			//   F-4-3: no userSessionStore               → userSession is null → omitted
-			//   no configured issuer                     → id_token omitted
-			//     We gate on `configuredIssuer` (read directly from
-			//     config.oauth.jwt.issuer at factory time) rather than ctx.issuer,
-			//     because the express adapter falls back to `req.get("host")` when
-			//     config is unset — that is a host string, not an OIDC-compliant
-			//     URL, and using it as `iss` would violate OIDC Core §2.
-			// userSession truthy implies (deps.userSessionStore && sid) were both truthy
-			// earlier, so the `&& sid` guard below is defensive rather than redundant.
+			// An id_token needs the openid scope, a session (none without a
+			// userSessionStore) and a configured issuer (see `configuredIssuer`).
+			// A session implies a sid here; `&& sid` is defensive.
 			let idToken: Token | undefined;
 			if (grantedScopes?.includes("openid") && userSession && sid && configuredIssuer) {
 				idToken = await generateIdToken({
 					sub: userSession.sub,
-					// D-6: id_token `aud` / `azp` bind to the authenticated client.
 					aud: authenticatedClientId,
 					azp: authenticatedClientId,
 					authTime: userSession.authTime,
 					...(nonce ? { nonce } : {}),
 					sid,
-					// #481: how, and to which acr, the user authenticated.
 					...(amr ? { amr } : {}),
 					...(acr ? { acr } : {}),
 					scopes: grantedScopes,
@@ -954,12 +744,8 @@ export const createAuthorizationGrant = (deps: AuthorizationGrantDeps): GrantHan
 					tokens: generateTokenResponse({ accessToken, refreshToken, idToken }),
 				},
 				sessionMutation: {
-					// D-1: /authorize no longer writes session.code* in v0.5.1.
-					// `code` is the only key still cleared here because the
-					// authorization grant doesn't read the other v0.4.x keys
-					// (`code_client_id`, `code_redirect_uri`, `granted_scopes`)
-					// at all anymore — they age out with the session TTL on
-					// rolling-deploy nodes that still have stale values.
+					// Only `code`: stale `code_*` keys nothing reads age out with the
+					// session TTL.
 					clear: ["code"],
 				},
 			};

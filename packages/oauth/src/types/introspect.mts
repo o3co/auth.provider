@@ -14,17 +14,14 @@
 import type { Confirmation } from "@o3co/auth-provider-core";
 
 /**
- * RFC 7662 §2.2 token introspection response. Pulled into a typed
- * interface (was inline JSON) so consumers (e.g. auth.proxy validation
- * layer) can `import type { IntrospectResponse } from "@o3co/auth-
- * provider-oauth"` and so the `cnf` claim has a documented home. See
- * Wave 2 Token-binding Cluster spec §4.6.
+ * RFC 7662 §2.2 token introspection response, typed so consumers (e.g. the
+ * auth.proxy validation layer) can import it and the `cnf` claim has a
+ * documented home.
  *
- * RFC 7662 §2.2 optional members `username` and `nbf` are intentionally
- * omitted: this AS issues `at+jwt` tokens without `nbf` and does not
- * persist a human-readable `username` (auth.provider's scope excludes
- * profile storage — see project scope memory). Add them when a
- * consumer needs them.
+ * The optional members `username` and `nbf` are omitted: this AS issues
+ * `at+jwt` tokens without `nbf` and does not persist a human-readable
+ * `username` (profile storage is out of scope). Add them when a consumer
+ * needs them.
  */
 export interface IntrospectResponse {
 	readonly active: boolean;
@@ -37,14 +34,12 @@ export interface IntrospectResponse {
 	readonly client_id?: string;
 	readonly scope?: string;
 	/**
-	 * Wire-level token type. `"DPoP"` when the introspected token carries
-	 * a `cnf.jkt` claim (per RFC 9449 §5 + RFC 7662 §2.2 consistency).
-	 * `"Bearer"` otherwise — including mTLS-bound tokens, because RFC 8705
-	 * does not redefine the wire-level token type. Adding a new
-	 * `token_type` variant (e.g. for a future sender-constrained scheme
-	 * with its own IANA token-type registration) is a core semver-minor
-	 * change, mirroring the `Confirmation` extension boundary in spec
-	 * §4.3.
+	 * Wire-level token type: `"DPoP"` when the introspected token carries a
+	 * `cnf.jkt` claim (RFC 9449 §5, RFC 7662 §2.2), `"Bearer"` otherwise —
+	 * including mTLS-bound tokens, since RFC 8705 does not redefine the
+	 * wire-level token type. A new variant (a sender-constrained scheme with
+	 * its own IANA token-type registration) is a core semver-minor change,
+	 * like the `Confirmation` extension boundary.
 	 */
 	readonly token_type?: "Bearer" | "DPoP";
 	readonly jti?: string;
@@ -56,10 +51,9 @@ export interface IntrospectResponse {
 }
 
 /**
- * `extractConfirmation` and `isCompoundConfirmation` moved to core in
- * #324 — the raw-cnf shape rules they encode are the same rows
- * `matchConfirmation` evaluates, so they live with the `Confirmation`
- * union (`core/grants/confirmationMatch.mts`). Re-exported here because
- * this package's barrel published them.
+ * `extractConfirmation` and `isCompoundConfirmation` live in core with the
+ * `Confirmation` union (`core/grants/confirmationMatch.mts`): the raw-cnf
+ * shape rules they encode are the rows `matchConfirmation` evaluates.
+ * Re-exported here because this package's barrel publishes them.
  */
 export { extractConfirmation, isCompoundConfirmation } from "@o3co/auth-provider-core";

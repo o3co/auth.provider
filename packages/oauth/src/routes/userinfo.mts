@@ -42,43 +42,38 @@ export interface UserinfoRouterOptions {
 	keyStore: KeyStore;
 	userSessionStore?: UserSessionStore;
 	refreshTokenFamilyRevocation?: RefreshTokenFamilyRevocation;
-	/** Wave 1 — RFC 7009: when wired, verifyJwt consults the denylist so revoked ATs respond 401. */
+	/** RFC 7009: when wired, verifyJwt consults the denylist so revoked ATs respond 401. */
 	accessTokenDenylist?: AccessTokenDenylist;
 	/**
-	 * #296 — when wired, verifyJwt rejects an access token whose `iat` is at or
+	 * When wired, verifyJwt rejects an access token whose `iat` is at or
 	 * before this subject's revocation watermark. The subject-level companion to
 	 * `accessTokenDenylist`: the denylist revokes a named token, this revokes
 	 * every token a subject held as of a credential change.
 	 */
 	subjectRevocation?: SubjectRevocation;
-	/** Configured issuer — pinned by the SF-1 central verifier. */
+	/** Configured issuer — pinned by the central verifier. */
 	issuer?: string;
 	/**
-	 * SF-1 / Phase G / S2: when true, accept tokens whose `typ`
-	 * header is absent (a `jwt_verify_legacy_typ` deprecation warning is
-	 * emitted). the default is `false` (typ-less tokens rejected);
-	 * `true` is an explicit legacy-acceptance opt-in for deployments
-	 * still completing their v0.4.x rollover. The v0.5.x default was
-	 * `true`.
+	 * When true, accept tokens whose `typ` header is absent (a
+	 * `jwt_verify_legacy_typ` deprecation warning is emitted). Default
+	 * `false` (typ-less tokens rejected); `true` is an explicit
+	 * legacy-acceptance opt-in.
 	 */
 	legacyTypAccept?: boolean;
 	logger?: Logger;
 }
 
 /**
- * OIDC Core §5.3 — UserInfo Endpoint.
+ * OIDC Core §5.3 UserInfo Endpoint: accepts Bearer access_token JWTs and
+ * returns scope-filtered claims from the durable UserSession, checking
+ * revocation via family_id (cascade revoke) and sid (session liveness).
  *
- * Accepts Bearer access_token JWTs and returns scope-filtered claims from
- * the durable UserSession. Revocation is checked via family_id (cascade
- * revoke per F-3) and sid (session liveness).
- *
- * A refusal of the token follows Bearer Token Usage (RFC 6750 §3.1): 401
- * `invalid_token` with a `WWW-Authenticate` challenge. A keystore, a
- * revocation store, the refresh-token family store or the session store that
- * cannot answer is `503 temporarily_unavailable` with no challenge: still no
- * claims (fail-closed), but `invalid_token` describes the token — "expired,
- * revoked, malformed, or invalid" — and an outage says none of that, while it
- * sends the client to replace a token that may be perfectly good.
+ * A refused token gets 401 `invalid_token` with a `WWW-Authenticate`
+ * challenge (RFC 6750 §3.1). A keystore, a revocation store, the
+ * refresh-token family store or the session store that cannot answer gets
+ * `503 temporarily_unavailable` with no challenge: still no claims
+ * (fail-closed), but not `invalid_token`, which describes the token and
+ * would send the client to replace one that may be perfectly good.
  */
 export function createRouter(express: ExpressLike, opts: UserinfoRouterOptions): Router {
 	const router = express.Router();
@@ -102,7 +97,7 @@ export function createRouter(express: ExpressLike, opts: UserinfoRouterOptions):
 				.json({ error: "invalid_token", error_description: "missing access token" });
 		}
 
-		// SF-1: alg / iss / typ + signature pinned by the central verifier
+		// alg / iss / typ + signature pinned by the central verifier
 		// (typ: at+jwt is required per RFC 9068 since userinfo is an
 		// access-token resource — OIDC Core §5.3.1). Audience pinning is
 		// deferred: userinfo is bearer-as-credential and the calling-client
@@ -110,13 +105,13 @@ export function createRouter(express: ExpressLike, opts: UserinfoRouterOptions):
 		// records the gap via `jwt_verify_aud_skipped`.
 		let payload: Record<string, unknown>;
 		try {
-			// Wave 1 (C4): denylist consulted so revoked ATs respond 401 invalid_token
-			// rather than serving claims. When denylist is absent, behaviour is unchanged.
+			// Denylist consulted so revoked ATs respond 401 invalid_token
+			// rather than serving claims.
 			const verified = await verifyJwt(token, opts.keyStore, {
 				type: "access_token",
 				expectedIssuer: opts.issuer ?? "",
 				legacyTypAccept: opts.legacyTypAccept ?? false,
-				// #296/#367: token-accepting surface — forward what the composition
+				// Token-accepting surface — forward what the composition
 				// wired, jti denylist and subject watermark both.
 				revocation: {
 					denylist: opts.accessTokenDenylist,
@@ -135,10 +130,9 @@ export function createRouter(express: ExpressLike, opts: UserinfoRouterOptions):
 			return res.status(401).json({ error: "invalid_token", error_description: "invalid token" });
 		}
 
-		// F-3 cascade revoke: check family_id against RefreshTokenStore.
-		// Precondition: only activates when the JWT carries a family_id claim —
-		// tokens minted before F-3 lack this claim and bypass the cascade check
-		// (legacy backward-compat). New tokens always carry family_id per F-3.
+		// Cascade revoke: check family_id against the family store. Only a
+		// token carrying a family_id claim is checked; older tokens without
+		// one bypass the cascade check. New tokens always carry it.
 		const familyId = typeof payload.family_id === "string" ? payload.family_id : null;
 		if (familyId !== null && opts.refreshTokenFamilyRevocation) {
 			let revoked: boolean;
@@ -171,8 +165,7 @@ export function createRouter(express: ExpressLike, opts: UserinfoRouterOptions):
 		// `sid`, on which the session's claims are released, and a derived
 		// token's `liveness_sid` (a token-exchange result), which is checked
 		// for liveness and releases nothing — a downstream holder of an
-		// exchanged token is not the session's client, and is answered `{ sub }`
-		// as before the link existed.
+		// exchanged token is not the session's client, and is answered `{ sub }`.
 		const sub = typeof payload.sub === "string" ? payload.sub : null;
 		const sid = typeof payload.sid === "string" && payload.sid.length > 0 ? payload.sid : null;
 		const livenessSid = livenessSidOf(payload);

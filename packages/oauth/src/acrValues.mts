@@ -16,13 +16,12 @@
 
 /**
  * The acr table `/authorize` answers `acr_values` from and discovery
- * advertises as `acr_values_supported` (the MFA ADR's D15; the
- * session-admission ADR's D6): the configured `oauth.authorize.acrValues`,
- * less every entry nothing this composition installs can satisfy — core's
- * `vouchableAcrTable` over what the composition can produce, the registered
- * session requirements' reach among it. The router and the discovery
- * contribution compute it from the same inputs, so they cannot disagree; the
- * router alone says at boot what it dropped.
+ * advertises as `acr_values_supported`: the configured
+ * `oauth.authorize.acrValues` less every entry nothing this composition
+ * installs can satisfy (see ADRs 2026-09-25-multi-factor-authentication and
+ * 2026-09-28-session-admission). The router and the discovery contribution
+ * compute it from the same inputs, so they cannot disagree; the router alone
+ * logs at boot what it dropped.
  */
 
 import {
@@ -45,23 +44,19 @@ export const ACR_VALUE_UNSATISFIABLE = "acr_value_unsatisfiable";
  *
  * - `pwd` can always be produced; `fed` once a federation is installed, since
  *   only a federation callback records it.
- * - `reach` — the union of every registered session requirement's reach
- *   (core's `stepUpReach` over `sessionRequirementResolver`) — is what a
- *   step-up can add: the second-factor values once the MFA requirement is
- *   registered, `mfa` among them when an enabled factor adds it.
- * - An installed federation whose section is enabled and trusts its
- *   upstream IdP's `amr` (`federations.<name>.trustUpstreamAmr`, D13, read by
- *   core's `federationTrustsUpstreamAmr`, which answers `false` for a
- *   section that is not enabled) makes every entry satisfiable: the federation callback records what that IdP asserts
- *   beside `fed`, where it counts. One that does not adds `fed` alone — the
- *   callback keeps its IdP's values apart, and they meet no `acr`.
+ * - `reach`, the union of every registered session requirement's reach
+ *   (core's `stepUpReach`), is what a step-up can add: the second-factor
+ *   values once the MFA requirement is registered, `mfa` among them when an
+ *   enabled factor adds it.
+ * - An installed federation whose section is enabled and trusts its upstream
+ *   IdP's `amr` (`federations.<name>.trustUpstreamAmr`) makes every entry
+ *   satisfiable: the callback records what that IdP asserts beside `fed`. One
+ *   that does not adds `fed` alone; its IdP's values meet no `acr`.
  *
- * `federations` is the map a composition installed, and `reach` what its
- * requirements reach, both read when this runs: at composition, after every
- * name-keyed contribution has registered. Each federation's switch is read
- * from `config` by the reading the federation callback writes the session
- * by, so the two cannot disagree; a switch that is given but unusable is a
- * `RangeError`, which refuses the composition.
+ * Runs at composition, after every name-keyed contribution has registered.
+ * Each switch is read as the federation callback reads it, so the two cannot
+ * disagree; a switch that is given but unusable is a `RangeError`, which
+ * refuses the composition.
  */
 export const vouchableAcrValues = (
 	configured: AcrTable,
@@ -70,11 +65,10 @@ export const vouchableAcrValues = (
 	reach: ReadonlySet<string>,
 ): { readonly table: AcrTable; readonly dropped: readonly UnsatisfiableAcrValue[] } => {
 	const installed = [...(federations?.keys() ?? [])];
-	// Every installed federation's switch is read, not only up to the first
-	// trusted one: an unusable switch refuses the composition wherever it is.
-	// The reader counts only an enabled section's switch — an installed
-	// federation whose section is switched off signs nobody in — as the
-	// federation callback does.
+	// Every switch is read, not only up to the first trusted one, so an
+	// unusable switch refuses the composition wherever it is. Only an enabled
+	// section's switch counts (a disabled one signs nobody in), as in the
+	// federation callback.
 	const trusted = installed.map((name) => federationTrustsUpstreamAmr(config, name));
 	return vouchableAcrTable(
 		configured,
@@ -87,15 +81,12 @@ export const vouchableAcrValues = (
 };
 
 /**
- * One line per dropped entry, once, at composition: `warn` — the operator
- * configured an `acr` this deployment can never meet — except for an entry
- * that lacks only a second factor while no registered requirement reaches
- * one (D6): without MFA installed that is the operator's choice, said at
- * `info`, so an MFA-off deployment that keeps the template's MFA entries is
- * not warned at every boot. Once a requirement reaches a second factor, an
- * entry still unmet is a factor the operator expects and did not enable:
- * `warn`. `mfa.mode` is read nowhere here. The entry is the operator's
- * text, bounded as a log line bounds text all the same.
+ * One line per dropped entry, once, at composition: `warn` (an `acr` this
+ * deployment can never meet), except `info` for an entry that lacks only a
+ * second factor while no registered requirement reaches one, so an MFA-off
+ * deployment keeping the template's MFA entries is not warned at every boot.
+ * `mfa.mode` is read nowhere here. The entry is operator text, bounded like
+ * any logged text.
  */
 export const logUnsatisfiableAcrValues = (
 	dropped: readonly UnsatisfiableAcrValue[],
