@@ -118,7 +118,7 @@ register/replace pattern A1 §5.6 and A3 §5.6 instantiate.
 
 ### Named artifacts
 
-- **Phase 10 addendum §3 — the "backing client interface" pattern** [verified]: narrow, vendor-agnostic Redis-command client interfaces (`ChallengeStoreClient`, `RateLimiterClient`, …) consumed by adapters so the redis package's main entry never pulls ioredis types; `makeIoredisClients` at the `/ioredis` subpath constructs them. Home: `packages/redis/src/clients.mts` + `ioredis.mts`. The "v0.5.0 pre-tag interface review S3" decision relocated the interfaces out of core.
+- **Phase 10 addendum §3 — the "backing client interface" pattern** [verified]: narrow, vendor-agnostic Redis-command client interfaces (`ChallengeStoreClient`, `RateLimiterClient`, …) consumed by adapters so the redis package's main entry never pulls ioredis types; `makeIoredisClients` at the `/ioredis` subpath constructs them. Home: `packages/redis/src/clients.mts` + `ioredis.mts`.
 - **"the §9.2 matrix"** [verified]: NOT an A-spec section — Wave 2 token-binding spec §9.2. The five-row refresh-time enforcement matrix correlating a bound refresh token's persisted `cnf` claim with the request-time DPoP proof / mTLS certificate in the `refresh_token` grant. Home: `packages/oauth` refresh grant via core's `confirmationMatch.mts`; integration tests in `packages/dpop` / `packages/mtls`. Anchor: v0.8.0 CHANGELOG; ADR `2026-05-20-token-binding-first-class-abstraction.md`.
 - **const-Module pattern (A5 §10.2)** [verified]: a package exports a pre-built `defineModule` **const value** (not a factory); its config arrives through a typed ComponentMap slot listed in `requires`; it contributes the paired `federations.<name>` + `federationRedirectPolicies.<name>`. §10.1/§10.2 are the Google/GitHub instances; webauthn and session cite it as the recommended custom-module shape.
 
@@ -202,7 +202,6 @@ campaign**:
 | S1 | Claude multi-agent review | missing required dep at apply-time must throw [verified] |
 | S2 (a) | Phase G security | flip `legacyTypAccept` default true→false [verified] |
 | S2 (b) | Claude multi-agent review | inconsistent diagnostic in validate-manifests [verified] |
-| S3 | v0.5.0 pre-tag interface review | backing-client interfaces live in `@o3co/auth-provider-redis`, not core (→ Phase 10 addendum §3) [verified] |
 | S7–S12 | webauthn Wave 1 spec / dogfood | see chapter 4 [verified] |
 
 "Codex Delta" tags mark findings from a Codex review pass (e.g. Delta 3:
