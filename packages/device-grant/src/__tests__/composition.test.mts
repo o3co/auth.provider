@@ -15,15 +15,12 @@
  */
 
 /**
- * The device grant booted beside `oauthModule` through core's `createApp` —
- * the composition the package README's Quick start describes.
- *
- * Every other test in this package calls a contribution function directly or
- * boots the module alone, and each of those passed while the composition an
- * operator actually writes could not boot: what this package contributes is
- * only checked for real once core's discovery builder, oauth's token endpoint
- * and oauth's router under the same `/oauth` prefix have all seen it. So
- * nothing here is stubbed except the repositories a deployment supplies.
+ * The device grant booted beside `oauthModule` through core's `createApp`,
+ * the composition the package README's Quick start describes. What this
+ * package contributes is only checked for real once core's discovery builder,
+ * oauth's token endpoint and oauth's router under the same `/oauth` prefix
+ * have all seen it, so nothing here is stubbed except the repositories a
+ * deployment supplies.
  */
 
 import http from "node:http";
@@ -96,7 +93,7 @@ const codeRepository: CodeRepository = {
 
 const USERNAME = "alice";
 const PASSWORD = "correct horse battery staple";
-/** A second user, whose Store has published a verified email (#297). */
+/** A second user, whose Store has published a verified email. */
 const VERIFIED_USERNAME = "bob";
 
 const userRepository: UserRepository = {
@@ -272,9 +269,8 @@ const startDevice = async (app: express.Express): Promise<string> => {
 
 /**
  * Both orders of the two modules that share `/oauth`. Each parses its own
- * body — `oauthModule`'s router only for its own routes — so every case
- * below has to come out the same in either list order; before that, the
- * OAuth router listed first parsed every body under the prefix.
+ * body (`oauthModule`'s router only for its own routes), so every case below
+ * has to come out the same in either list order.
  */
 const orders = [
 	[
@@ -321,7 +317,7 @@ describe("deviceGrantModule beside oauthModule — installed but disabled", () =
 		"does not advertise the grant, and /oauth/token refuses it as unsupported (%s)",
 		async (_label, ordered) => {
 			// `grant_types_supported` is read off the resolver `/oauth/token`
-			// dispatches against (#283), so a grant that is contributed is a grant
+			// dispatches against, so a grant that is contributed is a grant
 			// that is advertised — including a handler whose only job is to
 			// refuse. The document must say what the endpoint does.
 			const config = makeConfig({ enabled: false });
@@ -350,11 +346,9 @@ describe("deviceGrantModule beside oauthModule — installed but disabled", () =
 
 describe("deviceGrantModule beside oauthModule — POST /oauth/device/verification is JSON-only", () => {
 	// A form body is a CORS "simple" request: a browser sends it cross-site,
-	// with the victim's session cookie and no preflight. When `oauthModule`'s
-	// router parsed every body under `/oauth`, a rule that rested on this
-	// package mounting no form parser held only when this package was listed
-	// first. The CSRF token is valid here on purpose: the media type is the
-	// first defence, and it must not depend on the second.
+	// with the victim's session cookie and no preflight. The refusal must hold
+	// in either list order. The CSRF token is valid here on purpose: the media
+	// type is the first defence, and it must not depend on the second.
 	it.each(orders)(
 		"refuses a form-encoded approval carrying a valid CSRF token (%s)",
 		async (_label, ordered) => {
@@ -975,14 +969,11 @@ describe("deviceGrantModule beside oauthModule — a device-code store outage is
 });
 
 describe("deviceGrantModule beside oauthModule — an approval needs the live session behind the cookie", () => {
-	// The verification page runs inside the end-user session, and the cookie
-	// says `isAuthenticated`. That is the browser's claim; the `UserSession`
-	// record its `sid` names is the fact. A logout, a subject-wide revocation
-	// or a record deleted out of band ends the record and leaves the cookie as
-	// it was — and the device token an approval leads to carries no `sid` and
-	// no `family_id`, so nothing revokes it afterwards. The approval is the one
-	// place the session can be asked about, so it is asked there, as
-	// `/authorize`, the session grant and `/oauth/consent` ask it.
+	// The cookie's `isAuthenticated` is the browser's claim; the `UserSession`
+	// its `sid` names is the fact. The device token an approval leads to
+	// carries no `sid` and no `family_id`, so the approval is the one place the
+	// session can be asked about. See the package README, "An approval needs
+	// the live session".
 
 	const [first] = orders;
 	const modulesFor = (config: AppConfig): Module[] => [
@@ -1148,12 +1139,10 @@ describe("deviceGrantModule beside oauthModule — an approval needs the live se
 	});
 
 	it("refuses the device's poll when the subject's sessions were revoked between the approval and the poll", async () => {
-		// The approval was given from a live session. revokeAllForSubject then
-		// lands before the device polls — within the code's lifetime, ten
-		// minutes by default — and the token the poll would mint postdates its
-		// watermark, so nothing downstream would refuse it. A holder of a
-		// stolen live session could approve codes ahead and redeem them after
-		// the victim's credential change.
+		// The token the poll would mint postdates the watermark, so nothing
+		// downstream would refuse it; a stolen live session could approve codes
+		// ahead and redeem them after the victim's credential change. See the
+		// package README, "Polling".
 		const config = makeConfig(ENABLED);
 		const { handle, app } = await bootWith(config, [
 			...modulesFor(config),
@@ -1229,8 +1218,8 @@ describe("deviceGrantModule beside oauthModule — an approval needs the live se
 			});
 			expect(res.headers["cache-control"]).toContain("no-store");
 
-			// Admission's one line (the session-admission ADR's D10): the store
-			// and the action, never the sid.
+			// Admission's one line: the store and the action, never the sid
+			// (ADR 2026-09-28-session-admission).
 			const lines = logger.error.mock.calls.filter(
 				(call) => call[1] === "session_admission_unavailable",
 			);
@@ -1257,7 +1246,7 @@ describe("deviceGrantModule beside oauthModule — an approval needs the live se
 	});
 
 	it("refuses an approval from a user without a verified email when oauth.requireEmailVerified is on, and lets a verified one approve", async () => {
-		// #297: the gate `/authorize` and the session grant hold at issuance.
+		// The gate `/authorize` and the session grant hold at issuance.
 		// An approval is what the device's token is issued from, so it is held
 		// here too — otherwise a deployment requiring a verified email would
 		// find those two gated and this path open.

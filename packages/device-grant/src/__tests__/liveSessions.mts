@@ -15,15 +15,12 @@
  */
 
 /**
- * The `UserSession` records the tests that mount the verification handler
- * behind a fixed cookie session read: `user-1`'s live session under
- * {@link LIVE_SID}, which the fixed cookie session names, and `user-2`'s
- * under `sid-2`, for a cookie that names another subject's session.
- *
- * A store over fixed records rather than a bundled adapter: these tests pin
- * what the endpoint does with the answer, and what the adapters answer is
- * their contract suite's business. The composition tests sign in through
- * `/session/login` against the bundled memory store instead.
+ * The `UserSession` records read by tests that mount the verification handler
+ * behind a fixed cookie session: `user-1`'s live session under
+ * {@link LIVE_SID}, which that cookie names, and `user-2`'s under `sid-2`, for
+ * a cookie that names another subject's session. Fixed records rather than a
+ * bundled adapter: these tests pin what the endpoint does with the answer,
+ * and what the adapters answer is their contract suite's business.
  */
 
 import {
@@ -49,7 +46,7 @@ const sessionRecord = (sid: string, sub: string): UserSession => ({
 	createdAt: new Date(1_800_000_000_000),
 	expiresAt: new Date(1_900_000_000_000),
 	claims: {},
-	// A password login's record (the MFA ADR's D9).
+	// A password login's record.
 	...passwordSessionAuthentication(),
 });
 

@@ -15,16 +15,14 @@
  */
 
 /**
- * Device verification on session admission (the session-admission ADR's D4,
- * D8, and its build-order row A4): the three actions it admits, what it
- * answers for each `Admission`, and each change against develop pinned by
- * name.
+ * Device verification on session admission (ADR 2026-09-28-session-admission):
+ * the three actions it admits, and what it answers for each `Admission`.
  *
  * The handler is mounted by hand, as flow.test.mts mounts it, behind a fixed
  * cookie session and the fixed `UserSession` records of `liveSessions.mts`,
- * with a resolver `resolverForTests` builds over a fixture requirement that
- * answers what a test asks and records what it was asked. With no
- * requirement registered the endpoint answers what flow.test.mts pins.
+ * with a `resolverForTests` resolver over a fixture requirement that answers
+ * what a test asks and records what it was asked. With no requirement
+ * registered the endpoint answers what flow.test.mts pins.
  */
 
 import {
@@ -61,7 +59,8 @@ const ACTIONS = ["lookup", "approve", "deny"] as const;
 /**
  * A requirement that answers `answer` for every input and records each one.
  * Its page is set so a `step_up` is one admission can answer; its reach is
- * empty, as any requirement's but `mfa` must be in this release.
+ * empty, as every requirement's but `mfa` must be for now (see ADR
+ * 2026-09-28-session-admission).
  */
 const fixture = (
 	answer: (input: RequirementInput) => RequirementVerdict,
@@ -221,8 +220,8 @@ describe("device verification on session admission (the session-admission ADR's 
 			error: "step_up_required",
 			error_description: "the session must step up before it can do this",
 			requirement: "fixture",
-			// The requirement's page on the issuer (the ADR's D8): a browser-facing
-			// consumer answers where the step-up starts.
+			// The requirement's page on the issuer: a browser-facing consumer
+			// answers where the step-up starts.
 			page: `${ISSUER}/step-up`,
 		});
 		expect(await undecided()).toBe(true);
@@ -283,8 +282,8 @@ describe("device verification on session admission (the session-admission ADR's 
 	);
 
 	it("refuses a session whose expiresAt is not later than now as one that is no longer active (a pinned change)", async () => {
-		// develop asked the store alone, and a store that does not filter an
-		// expired record on `get` — the port does not promise it — let it approve.
+		// The port does not promise that `get` filters an expired record, so
+		// the store's answer alone is not enough.
 		const expired = await harness({ userSessionStore: expiringAt(NOW) });
 		const res = await expired.verify({ action: "approve", user_code: USER_CODE });
 		expect(res.status).toBe(401);

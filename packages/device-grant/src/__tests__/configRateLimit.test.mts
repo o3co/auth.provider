@@ -15,16 +15,12 @@
  */
 
 /**
- * `oauth.deviceAuthorization.rateLimit` — the budget RFC 8628 §5.1 sizes the
- * user code against, as a config key that actually reaches the limiter.
- *
- * Before this key existed the README documented
- * `rateLimit.adapters.<name>.limits.device_verification`, which nothing reads,
- * and the verification endpoint's `device_verification:` prefix fell through
- * to the adapter's 60/60s default. The tests here pin both ends: the schema
- * boundary (defaults and bounds) and the documented key in `reference.conf`
- * resolving, through the real HOCON parser and the real limiter module, to a
- * budget of five.
+ * `oauth.deviceAuthorization.rateLimit`: the budget RFC 8628 §5.1 sizes the
+ * user code against, as a config key that reaches the limiter (otherwise the
+ * `device_verification:` prefix falls through to the adapter's 60/60s
+ * default). Pins both ends: the schema boundary (defaults and bounds), and the
+ * documented key in `reference.conf` resolving, through the real HOCON parser
+ * and the real limiter module, to a budget of five.
  */
 
 import { fileURLToPath } from "node:url";
@@ -123,11 +119,10 @@ describe("oauth.deviceAuthorization.rateLimit — the documented key resolves", 
 	});
 
 	it("reaches the limiter as a budget of five when the section is omitted entirely", async () => {
-		// #448: the other route into a running deployment — no reference.conf,
-		// no `rateLimit` block, just the schema default — was untested, and it
-		// is the one an embedder who hand-assembles config takes. The default
-		// has to travel the same path as the documented key, or the boot
-		// refusal reasons from five while the limiter applies sixty.
+		// The route an embedder who hand-assembles config takes: no
+		// reference.conf, no `rateLimit` block, just the schema default. It has
+		// to travel the same path as the documented key, or the boot refusal
+		// reasons from five while the limiter applies sixty.
 		const parsed = deviceGrantConfigSchema.parse({ oauth: {} });
 
 		const { advertised, outcomes } = await spendSix(parsed);
