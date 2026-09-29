@@ -111,6 +111,13 @@ export function resolveLayers(
  * that reads its configuration when it is built adds the paths it reads here
  * (or passes them to `readSwitches` as `reads`). Held to what the template
  * reads by `two-phase-config.test.mts`.
+ *
+ * Every path here, and in `reads`, must be one core's transitional base
+ * declares — a section core's schema has, or mirrors for a package — or
+ * `readSwitches` refuses it. A deployment module that reads a key of its own,
+ * one core does not mirror, when it is built reads it as written: raw, an
+ * environment variable's string and all, and with nothing a package's
+ * `reference.conf` alone sets. Parse it in the module, or read it after boot.
  */
 export const SWITCHES: readonly string[] = [
 	"logging",
