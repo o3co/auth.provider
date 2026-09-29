@@ -31,7 +31,7 @@ Multi-factor authentication for [`auth.provider`](../../README.md): a second fac
 
 ## Configuration
 
-The `mfa` section beside core's `mfa.mode`. Core's `AppConfigSchema` passes the rest of the section through, and this package reads it. Layer [`config/reference.conf`](config/reference.conf) between your `application.conf` and core's `reference.conf`, as for the WebAuthn package; it carries the defaults and the environment variables that override them. `mfaModule` and `mfaTotpFactorModule` declare it as their sections' reference, so core's `moduleReferences(modules)` names it among the files to layer (#728).
+The `mfa` section beside core's `mfa.mode`. Core's schema passes the rest of the section through, and this package reads it. Layer [`config/reference.conf`](config/reference.conf) between your `application.conf` and core's `reference.conf`, as for the WebAuthn package; it carries the defaults and the environment variables that override them. `mfaModule` and `mfaTotpFactorModule` declare it as their sections' reference, so core's `moduleReferences(modules)` names it among the files to layer (#728).
 
 | Key | Env | Default | Meaning |
 | --- | --- | --- | --- |

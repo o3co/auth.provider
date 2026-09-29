@@ -266,16 +266,29 @@ Configuration is loaded from `config/application.conf` (HOCON format). Each valu
 
 ### Environment-specific config overlay
 
-`src/app.mts` loads configuration in three layers, highest precedence first:
+`src/app.mts` loads configuration in layers, highest precedence first:
 
 1. **`config/{ENV}.conf`** — overlay for the current environment, where
    `ENV = CONFIG_ENV || NODE_ENV || "development"`.
 2. **`config/application.conf`** — this deployment's settings.
-3. **`reference.conf` of `@o3co/auth-provider-core`** — the library defaults,
-   resolved from the installed package
-   (`import.meta.resolve("@o3co/auth-provider-core/reference.conf")`, in
-   [`src/configPath.mts`](src/configPath.mts)). A key neither file above sets
-   takes its value from here.
+3. **the `reference.conf` of each package the loaded modules come from**, then
+   **`@o3co/auth-provider-core`'s** — the library defaults, resolved from the
+   installed packages: each module declares its package's file, and core's
+   `moduleReferences(modules)` lists them, core's last. A key neither file
+   above sets takes its value from here.
+
+It reads them in two phases ([#728](https://github.com/o3co/auth.provider/issues/728);
+[`src/configPath.mts`](src/configPath.mts)). First, before it knows its
+modules, it reads the switches `buildModules` chooses them by — the adapters,
+the federations, the log level, `mfa.mode` — from the two files above over
+core's `reference.conf` alone (`readSwitches`, with core's transitional
+reader). Then it hands `createApp` the configuration as resolved over every
+loaded module's `reference.conf` (`resolveForBoot`), unparsed: boot parses it
+once, with every loaded module's schema, and strips no module's section. What
+the template reads after boot — `http.trustProxy`, the port, the readiness
+timeout — it reads from the parsed configuration. A top-level section no
+loaded module owns is kept and logged once at boot as
+`config_sections_ignored`: that is where a misspelt section name shows.
 
 Values in the overlay take precedence over `application.conf`. The scaffold
 ships with `development.conf` and `production.conf`. To add another
