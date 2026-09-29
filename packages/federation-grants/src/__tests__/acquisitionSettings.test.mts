@@ -143,6 +143,35 @@ describe("resolveFederationGrantAcquisitionSettings", () => {
 		expect(withEntry(unconfiguredLoginEntry())).toThrow(/endpoints\.login\.url must be configured/);
 	});
 
+	it("keeps what the login entry threw as the refusal's cause", () => {
+		const thrown = new Error("the entry's own reason");
+		const entry = Object.freeze(
+			Object.defineProperties({} as LoginEntry, {
+				url: {
+					get: () => {
+						throw thrown;
+					},
+					enumerable: true,
+				},
+				urlFor: { value: () => "/login", enumerable: true },
+			}),
+		);
+		let refusal: unknown;
+		try {
+			resolveFederationGrantAcquisitionSettings(
+				{ oauth: { jwt: { issuer: ISSUER } }, federationGrants: { consent: { url: "/c" } } },
+				new Map(),
+				entry,
+			);
+		} catch (error) {
+			refusal = error;
+		}
+		expect((refusal as Error | undefined)?.message).toMatch(
+			/endpoints\.login\.url must be configured/,
+		);
+		expect((refusal as Error | undefined)?.cause).toBe(thrown);
+	});
+
 	it("refuses an issuer it cannot take an origin from", () => {
 		// The origin every consent page and callback is held to is the issuer's.
 		expect(() =>
