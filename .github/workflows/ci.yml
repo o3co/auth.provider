@@ -531,8 +531,8 @@ jobs:
         run: |
           set -euo pipefail
           # Simulate the post-publish state by tarballing every package
-          # `pnpm -r publish` would publish, and exercise the standalone
-          # template against the tarballs (rather than the workspace:*
+          # `pnpm -r publish` would publish, and exercise every template
+          # against the tarballs (rather than the workspace:*
           # resolution that local builds use). Catches "template references
           # symbols not in the published tarball" before tag push.
           #
@@ -549,7 +549,7 @@ jobs:
           set -euo pipefail
           # Per CC-4 (SC-1 + SC-2 + SC-M2): compiled test artifacts must not ship
           # in any published tarball. The scope is `dist/__tests__/` — legitimate
-          # scaffold content at `package/templates/standalone/src/__tests__/`
+          # scaffold content at `package/templates/<name>/src/__tests__/`
           # (create-app tarball only) is consumer-facing template source and
           # MUST stay shipped.
           FAILED=0
@@ -649,75 +649,91 @@ jobs:
       - name: Check versions.json sync
         run: node create-app/scripts/check-versions-json.mjs
 
-      - name: Build and test templates/standalone against packed tarballs
+      - name: Build and test every template against packed tarballs
         run: |
           set -euo pipefail
+          # Every directory under templates/ with a package.json is a template:
+          # the set create-app's copy-templates.mjs ships and scaffolds from.
+          # Each one is built and tested here the way a scaffold of it is.
+          TEMPLATES=()
+          for dir in templates/*/; do
+            if [ -f "${dir}package.json" ]; then TEMPLATES+=("$(basename "$dir")"); fi
+          done
+          if [ "${#TEMPLATES[@]}" -eq 0 ]; then
+            echo "::error::no template under templates/"
+            exit 1
+          fi
           SCRATCH=$(mktemp -d)
-          cp -R templates/standalone "$SCRATCH/standalone"
-          pushd "$SCRATCH/standalone" >/dev/null
-          # The workspace copy carries node_modules symlinked to packages/*
-          # source. Drop it so every @o3co package below is the packed
-          # tarball under node_modules — the layout a scaffold runs in, and
-          # the one the shipped suite has to be green in (#512).
-          rm -rf node_modules dist
-          # Rewrite workspace:* in direct deps to file: tarball URLs AND add
-          # an `overrides` block pinning every workspace package to its
-          # tarball. The overrides block is required so transitive workspace
-          # deps (e.g. oauth -> core) resolve from /tmp/tarballs rather than
-          # being fetched from the public npm registry, where these versions
-          # do not exist yet.
-          node -e "
-            const fs = require('fs');
-            const path = require('path');
-            const dir = process.argv[1];
-            const tarballs = fs.readdirSync(dir).filter(f => f.endsWith('.tgz'));
-            const { execSync } = require('child_process');
-            const map = new Map();
-            for (const f of tarballs) {
-              const full = path.join(dir, f);
-              const pkgJson = execSync('tar -xzOf ' + full + ' package/package.json').toString();
-              map.set(JSON.parse(pkgJson).name, 'file:' + full);
-            }
-            const pkg = JSON.parse(fs.readFileSync('package.json', 'utf8'));
-            for (const section of ['dependencies', 'peerDependencies', 'devDependencies']) {
-              if (!pkg[section]) continue;
-              for (const [name, spec] of Object.entries(pkg[section])) {
-                if (map.has(name)) pkg[section][name] = map.get(name);
+          for name in "${TEMPLATES[@]}"; do
+            echo "::group::templates/$name"
+            cp -R "templates/$name" "$SCRATCH/$name"
+            pushd "$SCRATCH/$name" >/dev/null
+            # The workspace copy carries node_modules symlinked to packages/*
+            # source. Drop it so every @o3co package below is the packed
+            # tarball under node_modules — the layout a scaffold runs in, and
+            # the one the shipped suite has to be green in (#512).
+            rm -rf node_modules dist
+            # Rewrite workspace:* in direct deps to file: tarball URLs AND add
+            # an `overrides` block pinning every workspace package to its
+            # tarball. The overrides block is required so transitive workspace
+            # deps (e.g. oauth -> core) resolve from /tmp/tarballs rather than
+            # being fetched from the public npm registry, where these versions
+            # do not exist yet.
+            node -e "
+              const fs = require('fs');
+              const path = require('path');
+              const dir = process.argv[1];
+              const tarballs = fs.readdirSync(dir).filter(f => f.endsWith('.tgz'));
+              const { execSync } = require('child_process');
+              const map = new Map();
+              for (const f of tarballs) {
+                const full = path.join(dir, f);
+                const pkgJson = execSync('tar -xzOf ' + full + ' package/package.json').toString();
+                map.set(JSON.parse(pkgJson).name, 'file:' + full);
               }
-            }
-            pkg.overrides = pkg.overrides || {};
-            for (const [name, spec] of map) pkg.overrides[name] = spec;
-            // pnpm reads its own block, not npm's: the image step below installs
-            // with pnpm, and its transitive @o3co deps must land on the tarballs too.
-            pkg.pnpm = { ...(pkg.pnpm || {}), overrides: Object.fromEntries(map) };
-            fs.writeFileSync('package.json', JSON.stringify(pkg, null, 2) + '\n');
-          " /tmp/tarballs
-          # Use npm rather than pnpm here: pnpm in workspace context would
-          # try to re-resolve; standalone npm install consumes the file:
-          # tarballs straight (with overrides forcing transitives too).
-          # Optional dependencies stay in: vitest's rolldown and esbuild ship
-          # their native bindings as optionalDependencies, and `--omit=optional`
-          # left `npm run test` below unable to start (#512).
-          npm install --no-package-lock
-          npm run build
-          # The suite that ships with a scaffold, run where a scaffold runs it:
-          # published packages under node_modules, project root not at
-          # templates/standalone. Green here means green after
-          # `create-auth-provider` (#512).
-          #
-          # And in the state a fresh clone of a scaffolded project is in (#704):
-          # the scaffold's `.gitignore` keeps `config/clients.yaml` out of that
-          # project's repository, so its CI, its second developer and its `test`
-          # image never have one. The workspace copy carries it; a suite green
-          # only with it is red for every consumer.
-          rm -f config/clients.yaml
-          npm run test
-          popd >/dev/null
-          echo "OK: templates/standalone builds and tests against packed tarballs"
-          # The image step below reuses this tarball-wired copy.
+              const pkg = JSON.parse(fs.readFileSync('package.json', 'utf8'));
+              for (const section of ['dependencies', 'peerDependencies', 'devDependencies']) {
+                if (!pkg[section]) continue;
+                for (const [name, spec] of Object.entries(pkg[section])) {
+                  if (map.has(name)) pkg[section][name] = map.get(name);
+                }
+              }
+              pkg.overrides = pkg.overrides || {};
+              for (const [name, spec] of map) pkg.overrides[name] = spec;
+              // pnpm reads its own block, not npm's: the image step below installs
+              // with pnpm, and its transitive @o3co deps must land on the tarballs too.
+              pkg.pnpm = { ...(pkg.pnpm || {}), overrides: Object.fromEntries(map) };
+              fs.writeFileSync('package.json', JSON.stringify(pkg, null, 2) + '\n');
+            " /tmp/tarballs
+            # Use npm rather than pnpm here: pnpm in workspace context would
+            # try to re-resolve; standalone npm install consumes the file:
+            # tarballs straight (with overrides forcing transitives too).
+            # Optional dependencies stay in: vitest's rolldown and esbuild ship
+            # their native bindings as optionalDependencies, and `--omit=optional`
+            # left `npm run test` below unable to start (#512).
+            npm install --no-package-lock
+            npm run build
+            # The suite that ships with a scaffold, run where a scaffold runs it:
+            # published packages under node_modules, project root not at
+            # templates/<name>. Green here means green after
+            # `create-auth-provider` (#512).
+            #
+            # And in the state a fresh clone of a scaffolded project is in (#704):
+            # the scaffold's `.gitignore` keeps `config/clients.yaml` out of that
+            # project's repository, so its CI, its second developer and its `test`
+            # image never have one. The workspace copy carries it; a suite green
+            # only with it is red for every consumer.
+            rm -f config/clients.yaml
+            npm run test
+            popd >/dev/null
+            echo "OK: templates/$name builds and tests against packed tarballs"
+            echo "::endgroup::"
+          done
+          # The image step below reuses these tarball-wired copies.
           echo "SCRATCH=$SCRATCH" >> "$GITHUB_ENV"
+          echo "TEMPLATES=${TEMPLATES[*]}" >> "$GITHUB_ENV"
 
-      - name: Build the scaffold's base image and install the dependency set on it
+      - name: Build each template's base image and install its dependency set on it
         run: |
           set -euo pipefail
           # Until this step, nothing in CI touched the Dockerfile: the suite ran on
@@ -726,9 +742,9 @@ jobs:
           # Node (#360, and the objection recorded on #388 / #435) surfaced only in
           # an operator's first `docker build`.
           #
-          # The Dockerfile's own first stage, from the pinned digest: base image,
-          # tini, the corepack pin. Built as written — no CI-only Dockerfile.
-          docker build --target node-base -t scaffold-node-base templates/standalone
+          # For each template the previous step built (TEMPLATES), the Dockerfile's
+          # own first stage, from the pinned digest: base image, tini, the corepack
+          # pin. Built as written — no CI-only Dockerfile.
           #
           # Then what its `deps` and `builder` stages do, run inside that image
           # against the tarball-wired scaffold copy the previous step made — the
@@ -744,23 +760,29 @@ jobs:
           # the image's Node and libc, which is the check no runner-side test can
           # make. It is a dependency of core, not of the scaffold, and pnpm does
           # not hoist, so it is resolved from where core resolves it.
-          rm -rf "$SCRATCH/standalone/node_modules" "$SCRATCH/standalone/dist"
-          printf 'onlyBuiltDependencies:\n  - bcrypt\n' > "$SCRATCH/standalone/pnpm-workspace.yaml"
-          cat > "$SCRATCH/standalone/bcrypt-probe.cjs" <<'EOF'
+          cat > "$SCRATCH/bcrypt-probe.cjs" <<'EOF'
           const { createRequire } = require("node:module");
           const core = require("node:fs").realpathSync("node_modules/@o3co/auth-provider-core");
           const bcrypt = createRequire(`${core}/package.json`)("bcrypt");
           if (!bcrypt.compareSync("probe", bcrypt.hashSync("probe", 4))) process.exit(1);
           console.log("bcrypt loads on", process.version, process.platform, process.arch);
           EOF
-          docker run --rm \
-            -v "$SCRATCH/standalone":/work -v /tmp/tarballs:/tmp/tarballs -w /work \
-            -e COREPACK_ENABLE_DOWNLOAD_PROMPT=0 \
-            scaffold-node-base sh -euc '
-              node --version
-              pnpm install --lockfile-only
-              pnpm install --frozen-lockfile
-              pnpm run build
-              node bcrypt-probe.cjs
-            '
-          echo "OK: the scaffold dependency set installs, builds and loads bcrypt on the pinned image"
+          for name in $TEMPLATES; do
+            echo "::group::templates/$name"
+            docker build --target node-base -t "scaffold-node-base-$name" "templates/$name"
+            rm -rf "$SCRATCH/$name/node_modules" "$SCRATCH/$name/dist"
+            printf 'onlyBuiltDependencies:\n  - bcrypt\n' > "$SCRATCH/$name/pnpm-workspace.yaml"
+            cp "$SCRATCH/bcrypt-probe.cjs" "$SCRATCH/$name/bcrypt-probe.cjs"
+            docker run --rm \
+              -v "$SCRATCH/$name":/work -v /tmp/tarballs:/tmp/tarballs -w /work \
+              -e COREPACK_ENABLE_DOWNLOAD_PROMPT=0 \
+              "scaffold-node-base-$name" sh -euc '
+                node --version
+                pnpm install --lockfile-only
+                pnpm install --frozen-lockfile
+                pnpm run build
+                node bcrypt-probe.cjs
+              '
+            echo "OK: templates/$name: the scaffold dependency set installs, builds and loads bcrypt on the pinned image"
+            echo "::endgroup::"
+          done
