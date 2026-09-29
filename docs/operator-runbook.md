@@ -279,9 +279,12 @@ Module-level messages that arrive wrapped in a factory failure:
   must be at most mfa.lockout.hardLimit`, …); `endpoints.mfa.url is not set`
   (`ENDPOINTS_MFA_URL`, `/mfa` in core's reference.conf), the page a step-up
   starts on; and, from its routes' factory once every factor has registered,
-  `the MFA factor of kind "<kind>" cannot be offered` — an enabled factor
+  three `cause`s with a `reason`: `mfa-factor-kind-unhintable`
+  (`the MFA factor of kind "<kind>" cannot be offered`) — an enabled factor
   whose kind is not a hint core admits (`^[a-z][a-z0-9_-]{0,63}$`), which a
-  first binding's answer would list: contribute it under such a kind — and
+  first binding's answer would list: contribute it under such a kind;
+  `mfa-too-many-factors` — more than 16 enabled counting factors, the most a
+  hint list carries: enable fewer; and
   an `MfaNoCountingFactorError` `cause` whose `reason` is
   `mfa-no-counting-factor` — `mfa.mode = "required"` with no counting factor
   enabled, which nobody could meet: turn one on (`mfa.factors.totp.enabled`,
@@ -806,6 +809,8 @@ stream — its level is fixed at `info`.
 | `mfa_transaction_store_lock_evictable` (warn, `store`, `adapter: "redis"`, `maxmemoryPolicy`, once at boot) | same | the MFA transaction store's Redis runs a `volatile-*` policy. A subject's lock and weekly window (`mfat:lock:`, `mfat:week:`) carry a TTL once no run of failures is counted, so at `maxmemory` the server may evict them, and a weekly hold on guessable proofs ends early (D21). Set `maxmemory-policy` to `noeviction`, or give the MFA stores a Redis that never reaches `maxmemory` |
 | `mfa_factor_store_in_memory` (warn, `store`, `adapter`) | `core/src/mfa/factory.mts` (`memoryMfaFactorStoreModule`, the `memory` builder) | enrolled second factors are kept in process: a restart empties them, and every subject then reads as never enrolled (D12). Unlike `replica_unsafe_adapters` it warns under `deployment.mode = "single"` too — the loss is at restart, not across replicas. Development only; nothing installs it while `mfa.mode` is `"off"` |
 | `mfa_development_sample_key_in_use` (warn — `setting: "mfa.encryptionKeys"`, `variable: "MFA_ENCRYPTION_KEY"`; once at boot) | `mfa/src/module.mts` | the MFA key ring carries the published development sample key (`MFA_DEVELOPMENT_SAMPLE_KEY`), which the settings accept only outside production and staging and under one replica: every factor's data is sealed from nobody. Set `MFA_ENCRYPTION_KEY` to a key of your own (`openssl rand -base64 32`) before the deployment leaves development |
+| `mfa_step_up_unsupported` (warn — `store: "userSessionStore"`, `kind` the adapter's; once at boot) | `mfa/src/module.mts` | the user-session store has no `recordSecondFactor` (core's `supportsSecondFactorUpdate`), so a verified step-up could not be written into a session: under `mfa.mode = "required"` the MFA requirement sends a password session to log in again where it would step it up (the MFA ADR's D20). Use a store with the capability — both bundled ones have it — or implement it in yours |
+| `mfa_enrollment_nothing_enrollable` (warn — `kinds`, the counting factors' kinds; once per such login) | `mfa/src/requirement.mts` | a password login under `required` asked a subject with no factor for a first binding, and every counting factor refused that user (`enrollable(user)` — an email factor for an account without an address): the answer lists nothing to enroll, and the user cannot finish. Enable a factor every user can enroll (TOTP), or give the accounts what the factor needs |
 
 ### Data corruption — a stored record could not be read
 
