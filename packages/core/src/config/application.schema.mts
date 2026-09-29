@@ -1250,6 +1250,13 @@ export function readAccessTokenRevocationMode(
  * Composes a config schema by merging module-specific schemas with the CoreConfigSchema.
  * Each module can declare its required config shape; the resulting schema validates
  * the intersection of core + all module schemas.
+ *
+ * @deprecated Boot no longer composes the modules' schemas into one (#728): it
+ * parses the configuration once with core's transitional base, then each
+ * module's `configSchema` over the base's output, and refuses two outputs that
+ * disagree — the intersection parsed every schema over the raw input, so a
+ * module's schema refused the environment strings core's schema coerces.
+ * Kept exported for a caller that still composes a schema of its own.
  */
 export function composeConfigSchema(moduleSchemas: z.ZodObject<z.ZodRawShape>[]): z.ZodType {
 	let schema: z.ZodType = CoreConfigSchema;
@@ -1296,6 +1303,17 @@ const federationEntrySchema = z
 	})
 	.passthrough();
 
+/**
+ * The sections core mirrors for the modules of other packages. Until #728 a
+ * composition root pre-parsed with `AppConfigSchema`, which stripped every
+ * key it did not declare, so each section a module read had to be declared
+ * here to survive — the reason the comments below give for most of them. Boot
+ * no longer strips anything: it parses the configuration once, with these
+ * sections optional in its transitional base (`TransitionalConfigSchema`),
+ * and a mirror stays for the coercions and checks it applies, validated
+ * whenever the configuration carries it, until the move pull request for its
+ * package takes it out.
+ */
 export const fullSectionsSchema = z.object({
 	// #593, D9/D16: the federation-grants section. Declared here for the
 	// reason `deviceAuthorization` above is — this object strips keys it
@@ -1711,10 +1729,10 @@ export const fullSectionsSchema = z.object({
 	// purpose (AUDIT_SINK_ABSENCE_POLICY) — the standalone template registers
 	// no "none" builder, so there the spelling still fails boot.
 	//
-	// This section MUST be declared here regardless: `AppConfigSchema` strips
-	// undeclared top-level keys, so an operator's `audit { … }` block would
-	// vanish between `parseFile` and the composition root — the sink selector
-	// would silently read `undefined` while the configuration sat in the file
+	// Declared here because, before #728, `AppConfigSchema` stripped
+	// undeclared top-level keys, so an operator's `audit { … }` block
+	// vanished between `parseFile` and the composition root — the sink selector
+	// silently read `undefined` while the configuration sat in the file
 	// looking effective.
 	//
 	// `.optional()` because a hand-built config is not forced to restate it;
@@ -1732,8 +1750,9 @@ export const fullSectionsSchema = z.object({
 	// D-2 v2: connection-config for the standalone refresh-token-family
 	// client. Defaults live in HOCON (`reference.conf`) per ADR — no
 	// `.default()` here. Module-internal config (`keyPrefix`, `casRetryLimit`)
-	// is declared on a SEPARATE top-level key below so AppConfigSchema does
-	// not strip it before the boot-time module schema sees it.
+	// is declared on a SEPARATE top-level key below, which (before #728)
+	// kept `AppConfigSchema` from stripping it before the boot-time module
+	// schema saw it.
 	refreshTokenFamilyStore: z
 		.object({
 			redis: z
@@ -1830,14 +1849,14 @@ export const fullSectionsSchema = z.object({
 		.optional(),
 	// #456: module-internal config for `redisFederationTokenStoreModule`.
 	// Presence-only, for the same reason as `redisSessionStores` below: without
-	// a top-level entry `AppConfigSchema.parse(...)` strips the key — and with
-	// it the encryption key the store cannot start without — before the
-	// module's own `configSchema` sees it. Defaults live in `reference.conf`
+	// a top-level entry `AppConfigSchema.parse(...)` stripped the key before
+	// #728 — and with it the encryption key the store cannot start without —
+	// before the module's own `configSchema` saw it. Defaults live in `reference.conf`
 	// and in the module.
 	// #593 slice 7: the two adapter switches a composition like the standalone
 	// installs federation grants from, declared for the reason
-	// `federationTokenStore` above is — undeclared, the operator's choice is
-	// stripped before `buildModules` reads it. Two switches because the grant
+	// `federationTokenStore` above is — undeclared, the operator's choice was
+	// stripped before `buildModules` read it (before #728). Two switches because the grant
 	// store and the intent store are installed independently: grants in Redis
 	// with acquisition in memory is a supported single-replica shape (a restart
 	// loses flows in progress and nothing else). Both `"memory"` modules declare
@@ -1856,8 +1875,8 @@ export const fullSectionsSchema = z.object({
 		.optional(),
 	// The MFA ADR's D19: which store keeps enrolled factors, and which keeps
 	// MFA transactions and the lock state. Declared for the reason the other
-	// switches are — undeclared, an operator's choice is stripped before a
-	// composition root reads it. Read by a composition root that installs
+	// switches are — undeclared, an operator's choice was stripped before a
+	// composition root read it (before #728). Read by a composition root that installs
 	// MFA and picks its stores by name, which none does yet: `tools/composition`
 	// names its MFA store modules itself, and the standalone template wires MFA
 	// from the MFA ADR's build-order step 20, installing it when `mfa.mode` is
@@ -1881,8 +1900,8 @@ export const fullSectionsSchema = z.object({
 	// The MFA ADR's D19: module-internal config for the Redis package's
 	// `redisMfaFactorStoreModule` and `redisMfaTransactionStoreModule`.
 	// Presence-only, for the reason every `redis*` section here is: without a
-	// top-level entry `AppConfigSchema.parse(...)` strips the key before the
-	// module's own `configSchema` sees it. The defaults (`mfaf:`, `mfat:`) live
+	// top-level entry `AppConfigSchema.parse(...)` stripped the key before the
+	// module's own `configSchema` saw it (before #728). The defaults (`mfaf:`, `mfat:`) live
 	// in `reference.conf` and in the modules, which refuse a prefix with a
 	// brace.
 	redisMfaFactorStore: z
@@ -1918,9 +1937,9 @@ export const fullSectionsSchema = z.object({
 		.optional(),
 	// #472: module-internal config for `redisDeviceCodeStoreModule` (#433).
 	// Presence-only, for the same reason as every `redis*` section here:
-	// without a top-level entry `AppConfigSchema.parse(...)` strips the key
-	// before the module's own `configSchema` sees it, and the namespace the
-	// redis README documents is silently the default. The default lives in
+	// without a top-level entry `AppConfigSchema.parse(...)` stripped the key
+	// before the module's own `configSchema` saw it, and the namespace the
+	// redis README documents was silently the default. The default lives in
 	// the module. Since #728 boot's composed parse strips nothing, so the
 	// next section cannot be forgotten this way.
 	redisDeviceCodeStore: z
@@ -1977,9 +1996,9 @@ export const fullSectionsSchema = z.object({
 		.optional(),
 	// #561: module-internal config for `redisConsentStoreModule`. Presence-only,
 	// for the reason every `redis*` section here is: without a top-level entry
-	// `AppConfigSchema.parse(...)` strips the key before the module's own
-	// `configSchema` sees it. The default lives in `reference.conf` and in the
-	// module.
+	// `AppConfigSchema.parse(...)` stripped the key before the module's own
+	// `configSchema` saw it (before #728). The default lives in
+	// `reference.conf` and in the module.
 	redisConsentStore: z
 		.object({
 			keyPrefix: z.string().optional(),
@@ -1987,8 +2006,9 @@ export const fullSectionsSchema = z.object({
 		.optional(),
 	// #277: module-internal config for `redisAccessTokenDenylistModule`.
 	// Declared here for the same reason as `redisRefreshTokenFamilyStore` below:
-	// without a top-level entry, `AppConfigSchema.parse(...)` strips the key
-	// before the module's own `configSchema` ever sees the operator's override.
+	// without a top-level entry, `AppConfigSchema.parse(...)` stripped the key
+	// before the module's own `configSchema` ever saw the operator's override
+	// (before #728).
 	// Presence-only; the default lives in `reference.conf` and in the module.
 	redisAccessTokenDenylist: z
 		.object({
@@ -1997,20 +2017,20 @@ export const fullSectionsSchema = z.object({
 		.optional(),
 	// MIN-3 (v0.5.3): preserve the bundled Redis user-session namespace
 	// override before `redisSessionStoresModule.configSchema` applies its
-	// own defaults. Without this top-level passthrough, AppConfigSchema would
-	// strip `redisSessionStores.keyPrefix` before the module sees it.
+	// own defaults. Without this top-level passthrough, AppConfigSchema
+	// stripped `redisSessionStores.keyPrefix` before the module saw it
+	// (before #728).
 	redisSessionStores: z
 		.object({
 			keyPrefix: z.string().optional(),
 		})
 		.optional(),
 	// D-2 v2: module-internal config for `redisRefreshTokenFamilyStoreModule`.
-	// MUST be declared here (in `fullSectionsSchema`) so `AppConfigSchema.parse(...)`
-	// in `app.mts` preserves operator overrides
+	// Declared here (in `fullSectionsSchema`) so that, before #728,
+	// `AppConfigSchema.parse(...)` in `app.mts` preserved operator overrides
 	// (`REFRESH_TOKEN_FAMILY_STORE_KEY_PREFIX` / `..._CAS_RETRY_LIMIT`) before
-	// the module's `configSchema` runs at boot time. Without this declaration
-	// Zod strips the unknown top-level key and the env-var overrides silently
-	// no-op. The actual defaults still live in `reference.conf`; this entry
+	// the module's `configSchema` ran at boot time: without it Zod stripped
+	// the unknown top-level key and the env-var overrides silently no-oped. The actual defaults still live in `reference.conf`; this entry
 	// is presence-only (both fields optional). The duplicate-source-of-truth
 	// concern is intentional: the module's `configSchema` enforces shape +
 	// defaults, this schema only ensures the keys survive validation.
@@ -2021,10 +2041,10 @@ export const fullSectionsSchema = z.object({
 		})
 		.optional(),
 	// OR-9 (Wave 5d): module-internal config for `redisCodeRepositoryModule`.
-	// MUST be declared here (in `fullSectionsSchema`) so `AppConfigSchema.parse(...)`
-	// in `app.mts` preserves operator overrides
+	// Declared here (in `fullSectionsSchema`) so that, before #728,
+	// `AppConfigSchema.parse(...)` in `app.mts` preserved operator overrides
 	// (`CLIENT_CODE_KEY_PREFIX` / `CLIENT_CODE_DEFAULT_EXPIRES_IN`) before
-	// the module's `configSchema` runs at boot time. Same gotcha as D-2 v2's
+	// the module's `configSchema` ran at boot time. Same gotcha as D-2 v2's
 	// `redisRefreshTokenFamilyStore` block above. Defaults stay in
 	// `reference.conf`; this entry is presence-only (both fields optional).
 	redisCodeRepository: z

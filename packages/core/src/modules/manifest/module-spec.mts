@@ -23,17 +23,17 @@ import type { Provider, ProviderDeps } from "./provider.mjs";
 
 /**
  * Optional Zod schema declaring the slice of application config a module
- * requires. The boot planner composes a single validator across all
- * modules' configSchemas via `composeConfigSchema` (Phase 4 / A2-β §5.1
- * step 13).
+ * requires. Boot's one composed parse (#728; A2-β §5.1 step 13) runs it over
+ * what core's transitional base made of the configuration, and lays its
+ * output over that — a key it does not declare is kept, a value it coerces
+ * arrives coerced. Two modules' schemas that make different values of one key
+ * refuse boot (`config-validation-failed`).
  *
  * Per A2-α §2.1.
  *
- * To be deprecated once the loader layers each package's `reference.conf`
- * (#728): a module then declares its own section instead —
- * {@link ModuleSection}, the manifest's `section` field — and receives it
- * parsed as `deps.section`. Until then a `configSchema` composes with core's
- * schema as before, and is what keeps a section's keys through core's parse.
+ * To be deprecated once each section moves under its module's name (#728): a
+ * module then declares its own section instead — {@link ModuleSection}, the
+ * manifest's `section` field — and receives it parsed as `deps.section`.
  */
 export type ConfigSchema = z.ZodObject<z.ZodRawShape>;
 

@@ -70,9 +70,9 @@ export const oauthSessionModule = (params: { config: AppConfig }): Module => {
 	}
 	// Intentionally no `configSchema`: this module reads only slices already
 	// declared in `CoreConfigSchema` (`oauth.grants.session.enabled`,
-	// `oauth.accessToken`). Adding a symmetric configSchema would
-	// be theatre — `composeConfigSchema` already validates these fields via
-	// the core schema. Declare a configSchema here only if a future change
+	// `oauth.accessToken`). Adding a symmetric configSchema would be
+	// theatre — boot's composed parse (#728) already validates these fields
+	// with core's schema. Declare a configSchema here only if a future change
 	// adds a read of a `config.<full-section>` key that lives in
 	// `fullSectionsSchema` (e.g. `config.session`, `config.endpoints`).
 	return defineModule({

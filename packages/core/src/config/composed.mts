@@ -145,6 +145,10 @@ export function operatorPath(path: readonly PropertyKey[]): string {
  * A read value the schema refuses is a `RangeError` naming each operator path,
  * with the Zod error as its `cause`; so is a path the base does not declare as
  * one schema.
+ *
+ * Typed `AppConfig`, the type the module factories a composition root builds
+ * from it take, though only `reads` is parsed: the transitional base's own
+ * output type, every mirrored section optional, is not one they accept.
  */
 export function readTransitionalConfig(raw: unknown, reads: readonly string[]): AppConfig {
 	const result = pickConfigSchema(TransitionalConfigSchema, reads).safeParse(raw);

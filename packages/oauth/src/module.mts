@@ -49,8 +49,9 @@ import { createOAuthRouter } from "./routes.mjs";
  * sending the user to the preconfigured target, not the one the provider
  * asked for.
  *
- * Composed via `composeConfigSchema` at validate-manifests step 13, so boot
- * fails with `BootError(reason: "config-validation-failed")`, the issue at
+ * Parsed by boot's composed parse (#728; validate-manifests step 13) over
+ * what core's base made of the configuration, so boot fails with
+ * `BootError(reason: "config-validation-failed")`, the issue at
  * `endpoints.login.url`, before any request hits the route.
  */
 const oauthConfigSchema = z.object({
