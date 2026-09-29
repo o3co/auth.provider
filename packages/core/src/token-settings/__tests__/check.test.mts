@@ -96,6 +96,31 @@ describe("checkOAuthTokenSettings (#728)", () => {
 		}
 	});
 
+	it("refuses a value it cannot print as JSON with its RangeError, never a TypeError", () => {
+		const circular: Record<string, unknown> = {};
+		circular.self = circular;
+		const cases: ReadonlyArray<readonly [string, unknown]> = [
+			["oauthTokenSettings.issuer", settingsWith((d) => (d.issuer = 1n))],
+			[
+				"oauthTokenSettings.accessTokenLifetime",
+				settingsWith((d) => (d.accessTokenLifetime = circular)),
+			],
+			[
+				"oauthTokenSettings.refreshTokenExpiresIn",
+				settingsWith((d) => (d.refreshTokenExpiresIn = 1n)),
+			],
+			[
+				"oauthTokenSettings.requireEmailVerified",
+				settingsWith((d) => (d.requireEmailVerified = circular)),
+			],
+			["oauthTokenSettings must be", 1n],
+		];
+		for (const [named, value] of cases) {
+			expect(() => checkOAuthTokenSettings(value), named).toThrow(RangeError);
+			expect(() => checkOAuthTokenSettings(value), named).toThrow(named);
+		}
+	});
+
 	it("leaves alone a member no reader reads", () => {
 		const settings = { ...createTestOAuthTokenSettings(), extra: "ignored" };
 		expect(checkOAuthTokenSettings(settings)).toBe(settings);

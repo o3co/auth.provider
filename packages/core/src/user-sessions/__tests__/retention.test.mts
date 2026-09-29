@@ -150,6 +150,39 @@ describe("resolveSubjectRevocationHorizonMs", () => {
 			expect(horizon).toBeLessThan(86_400_000);
 		});
 
+		it("refuses a slot's value it cannot print as JSON with its RangeError, never a TypeError", () => {
+			const circular: Record<string, unknown> = {};
+			circular.self = circular;
+			const cases: ReadonlyArray<readonly [string, Record<string, unknown>]> = [
+				["sessionCookiePolicy.maxAgeMs", { sessionCookie: sessionCookie(1n) }],
+				["sessionCookiePolicy.maxAgeMs", { sessionCookie: sessionCookie(circular) }],
+				[
+					"oauthTokenSettings.refreshTokenExpiresIn",
+					{ tokenSettings: tokenSettings({ refreshTokenExpiresIn: 1n }) },
+				],
+				[
+					"oauthTokenSettings.accessTokenLifetime.maxExpiresIn",
+					{
+						tokenSettings: tokenSettings({
+							accessTokenLifetime: { defaultExpiresIn: 60, maxExpiresIn: circular },
+						}),
+					},
+				],
+			];
+			for (const [path, from] of cases) {
+				const call = () => resolveSubjectRevocationHorizonMs(config(), from);
+				expect(call, path).toThrow(RangeError);
+				expect(call, path).toThrow(path);
+			}
+			// The configuration's session lifetime, as a configuration built by
+			// hand may carry it.
+			for (const maxAge of [1n, circular]) {
+				const call = () => resolveSubjectRevocationHorizonMs(config({ session: { maxAge } }));
+				expect(call).toThrow(RangeError);
+				expect(call).toThrow("session.maxAge");
+			}
+		});
+
 		it("accepts a session lifetime at the one-year ceiling", () => {
 			expect(
 				resolveSubjectRevocationHorizonMs(config(), {
