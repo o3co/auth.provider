@@ -145,7 +145,7 @@ describe("oauthTokenSettingsFrom answers what the readers resolve for themselves
 		};
 		for (const config of [fixture(), everySwitchOn(), alias()]) {
 			const settings = oauthTokenSettingsFrom(config);
-			expect(checkOAuthTokenSettings(settings, config)).toBe(settings);
+			expect(checkOAuthTokenSettings(settings, config)).toEqual(settings);
 		}
 	});
 

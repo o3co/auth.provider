@@ -74,7 +74,7 @@ describe("checkOAuthTokenSettings (#728)", () => {
 			requireEmailVerified: true,
 		});
 		const config = configWith({ defaultExpiresIn: 60, maxExpiresIn: MAX_DURATION_SECONDS }, 86_400);
-		expect(checkOAuthTokenSettings(settings, config)).toBe(settings);
+		expect(checkOAuthTokenSettings(settings, config)).toEqual(settings);
 	});
 
 	it("refuses a lifetime longer than the one core resolves from the configuration, naming the member and both values", () => {
@@ -100,7 +100,7 @@ describe("checkOAuthTokenSettings (#728)", () => {
 				refreshTokenExpiresIn: 60,
 			}),
 		]) {
-			expect(checkOAuthTokenSettings(settings, CONFIG)).toBe(settings);
+			expect(checkOAuthTokenSettings(settings, CONFIG)).toEqual(settings);
 		}
 	});
 
@@ -171,8 +171,92 @@ describe("checkOAuthTokenSettings (#728)", () => {
 		}
 	});
 
-	it("leaves alone a member no reader reads", () => {
-		const settings = { ...createTestOAuthTokenSettings(), extra: "ignored" };
-		expect(checkOAuthTokenSettings(settings, CONFIG)).toBe(settings);
+	it("reads only the members readers read: one no reader reads is neither refused nor carried", () => {
+		const settings = createTestOAuthTokenSettings();
+		expect(checkOAuthTokenSettings({ ...settings, extra: "ignored" }, CONFIG)).toEqual(settings);
+	});
+
+	describe("answers a snapshot: each member read once, validated, and frozen", () => {
+		/** The double's settings, as a mutable object a host could hold on to. */
+		const mutable = () => {
+			const base = createTestOAuthTokenSettings();
+			return { ...base, accessTokenLifetime: { ...base.accessTokenLifetime } };
+		};
+
+		it("answers what a getter answered when it was read, not what it answers afterwards", () => {
+			let reads = 0;
+			const value = {
+				...mutable(),
+				accessTokenLifetime: {
+					defaultExpiresIn: 60,
+					get maxExpiresIn() {
+						reads += 1;
+						return reads === 1 ? 3600 : 7200;
+					},
+				},
+			};
+			const checked = checkOAuthTokenSettings(value, CONFIG);
+			expect(checked.accessTokenLifetime.maxExpiresIn).toBe(3600);
+			expect(checked.accessTokenLifetime.maxExpiresIn).toBe(3600);
+			expect(reads).toBe(1);
+		});
+
+		it("keeps what it answered when the host changes its object afterwards", () => {
+			const host = mutable();
+			const checked = checkOAuthTokenSettings(host, CONFIG);
+			host.requireEmailVerified = true;
+			host.resourceIndicatorEnabled = true;
+			host.accessTokenLifetime.maxExpiresIn = 7200;
+			host.refreshTokenExpiresIn = 172_800;
+			expect(checked.requireEmailVerified).toBe(false);
+			expect(checked.resourceIndicatorEnabled).toBe(false);
+			expect(checked.accessTokenLifetime.maxExpiresIn).toBe(3600);
+			expect(checked.refreshTokenExpiresIn).toBe(86_400);
+		});
+
+		it("answers a value frozen at every level", () => {
+			const checked = checkOAuthTokenSettings(mutable(), CONFIG);
+			expect(Object.isFrozen(checked)).toBe(true);
+			expect(Object.isFrozen(checked.accessTokenLifetime)).toBe(true);
+		});
+
+		it("refuses a member whose read throws, naming it", () => {
+			const cases: ReadonlyArray<readonly [string, () => unknown]> = [
+				[
+					"oauthTokenSettings.issuer",
+					() => ({
+						...mutable(),
+						get issuer(): string {
+							throw new Error("read me not");
+						},
+					}),
+				],
+				[
+					"oauthTokenSettings.accessTokenLifetime",
+					() => ({
+						...mutable(),
+						accessTokenLifetime: {
+							defaultExpiresIn: 60,
+							get maxExpiresIn(): number {
+								throw new Error("read me not");
+							},
+						},
+					}),
+				],
+				[
+					"oauthTokenSettings.requireEmailVerified",
+					() => ({
+						...mutable(),
+						get requireEmailVerified(): boolean {
+							throw new Error("read me not");
+						},
+					}),
+				],
+			];
+			for (const [member, build] of cases) {
+				expect(() => checkOAuthTokenSettings(build(), CONFIG), member).toThrow(RangeError);
+				expect(() => checkOAuthTokenSettings(build(), CONFIG), member).toThrow(member);
+			}
+		});
 	});
 });
