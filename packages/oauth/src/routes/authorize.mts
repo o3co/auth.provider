@@ -137,14 +137,22 @@ export interface AuthorizeHandlerOptions {
 export const REDIRECT_TO_PARAM = "redirect_to";
 
 /**
- * The login-page redirect with the request to come back to.
- * `endpoints.login.url` may already carry a query string (e.g.
- * `/login?tenant=x`), so `redirect_to` joins with `&` there and `?`
- * otherwise — a second `?` would corrupt both parameters.
+ * The login-page redirect with the request to come back to, `redirect_to`
+ * added to the login URL's query. `endpoints.login.url` may carry a query of
+ * its own (e.g. `/login?tenant=x`), so `redirect_to` joins with `&` there and
+ * `?` otherwise — a second `?` would corrupt both parameters — and may carry
+ * a fragment, which is kept after the query: `/login#x` becomes
+ * `/login?redirect_to=…#x`, where the page reads it (a `?` inside the
+ * fragment is not the query's). The target is encoded whole with
+ * `encodeURIComponent`, not as a form, so nothing of it reads as the page's
+ * query or fragment.
  */
 const loginRedirect = (res: Response, loginUrl: string, target: string): void => {
-	const joiner = loginUrl.includes("?") ? "&" : "?";
-	res.redirect(`${loginUrl}${joiner}${REDIRECT_TO_PARAM}=${encodeURIComponent(target)}`);
+	const fragmentAt = loginUrl.indexOf("#");
+	const page = fragmentAt === -1 ? loginUrl : loginUrl.slice(0, fragmentAt);
+	const fragment = fragmentAt === -1 ? "" : loginUrl.slice(fragmentAt);
+	const joiner = page.includes("?") ? "&" : "?";
+	res.redirect(`${page}${joiner}${REDIRECT_TO_PARAM}=${encodeURIComponent(target)}${fragment}`);
 };
 
 /**
