@@ -24,8 +24,8 @@
  * - Each value is what the readers resolve for themselves today: the
  *   issuer as written, the lifetimes as core's `resolveAccessTokenLifetime` /
  *   `resolveRefreshTokenLifetime` read them (the deprecated `expiresIn`
- *   included), the dispatch policy as core's token-binding middleware reads
- *   it, and every switch on only when it is `true`.
+ *   included), and every switch on only when it is `true`. The token-binding
+ *   dispatch policy is not among them: it is core's, and core reads it.
  * - An issuer that is not canonical is refused, as the oauth router refuses it.
  * - The oauth module provides it eagerly: whenever the module is installed the
  *   slot is filled, whether or not a module requires it, so core's own
@@ -42,7 +42,6 @@ import {
 	memoryAccessTokenDenylistModule,
 	resolveAccessTokenLifetime,
 	resolveRefreshTokenLifetime,
-	resolveTokenBindingDispatchPolicy,
 } from "@o3co/auth-provider-core";
 import {
 	createTestApp,
@@ -88,17 +87,14 @@ describe.each([
 });
 
 describe("oauthTokenSettingsFrom answers what the readers resolve for themselves today", () => {
-	it("over the fixture configuration: its issuer, the deprecated expiresIn as default and max, the intent-explicit policy, every switch off", () => {
+	it("over the fixture configuration: its issuer, the deprecated expiresIn as default and max, every switch off", () => {
 		const config = fixture();
 		expect(oauthTokenSettingsFrom(config)).toEqual({
 			issuer: config.oauth.jwt.issuer,
 			legacyTypAccept: false,
 			accessTokenLifetime: resolveAccessTokenLifetime(config),
 			refreshTokenExpiresIn: resolveRefreshTokenLifetime(config),
-			tokenBinding: {
-				dispatchPolicy: "intent-explicit",
-				bindConfidentialClientRefreshTokens: false,
-			},
+			bindConfidentialClientRefreshTokens: false,
 			resourceIndicatorEnabled: false,
 			requireEmailVerified: false,
 		});
@@ -110,29 +106,17 @@ describe("oauthTokenSettingsFrom answers what the readers resolve for themselves
 			legacyTypAccept: true,
 			accessTokenLifetime: { defaultExpiresIn: 300, maxExpiresIn: 900 },
 			refreshTokenExpiresIn: 7200,
-			tokenBinding: {
-				dispatchPolicy: "strict-mutual-exclusion",
-				bindConfidentialClientRefreshTokens: true,
-			},
+			bindConfidentialClientRefreshTokens: true,
 			resourceIndicatorEnabled: true,
 			requireEmailVerified: true,
 		});
 	});
 
-	it("reads the dispatch policy through core's resolveTokenBindingDispatchPolicy, which boot reads without this module", () => {
-		const base = fixture();
-		for (const policy of ["strict-mutual-exclusion", "intent-explicit", "mutual", undefined]) {
-			const config = {
-				...base,
-				oauth: {
-					...base.oauth,
-					tokenBinding: { ...base.oauth.tokenBinding, "dispatch-policy": policy },
-				},
-			} as unknown as AppConfig;
-			expect(oauthTokenSettingsFrom(config).tokenBinding.dispatchPolicy, String(policy)).toBe(
-				resolveTokenBindingDispatchPolicy(config),
-			);
-		}
+	it("carries no dispatch policy, whatever the configuration says: the policy is core's (#728)", () => {
+		// The strict policy is configured, and nothing of it is provided.
+		const settings = oauthTokenSettingsFrom(everySwitchOn()) as unknown as Record<string, unknown>;
+		expect(Object.keys(settings)).not.toContain("tokenBinding");
+		expect(Object.keys(settings)).not.toContain("dispatchPolicy");
 	});
 
 	it("refuses an issuer that is not canonical, naming the key", () => {
@@ -192,7 +176,6 @@ describe("the oauth module provides oauthTokenSettings", () => {
 			const provided = handle.components.oauthTokenSettings;
 			expect(provided).toEqual(oauthTokenSettingsFrom(config));
 			expect(Object.isFrozen(provided)).toBe(true);
-			expect(Object.isFrozen(provided?.tokenBinding)).toBe(true);
 			expect(Object.isFrozen(provided?.accessTokenLifetime)).toBe(true);
 		} finally {
 			await handle.dispose();

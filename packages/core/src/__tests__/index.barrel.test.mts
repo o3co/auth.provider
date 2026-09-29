@@ -216,7 +216,7 @@ describe("core barrel — the trusted-proxy address vocabulary (#292)", () => {
 		expect(core.MAX_TRUST_PROXY_HOPS).toBe(255);
 	});
 
-	it("re-exports the one reading of the dispatch policy, which the oauth module resolves its settings through (#728)", () => {
+	it("re-exports the one reading of the dispatch policy, which is core's (#728)", () => {
 		expect(typeof core.resolveTokenBindingDispatchPolicy).toBe("function");
 	});
 });

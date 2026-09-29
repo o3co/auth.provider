@@ -18,13 +18,14 @@
  * The `oauthTokenSettings` slot (#728): what other modules read of the oauth
  * module's token settings, its contract suite and the test double. The
  * double keeps every case; each way a value can break the contract fails
- * the case that names it.
+ * the case that names it. The token-binding dispatch policy is not among
+ * the settings: it is core's, the owner of the token-binding extension
+ * point, and core reads it itself.
  */
 
 import { describe, expect, expectTypeOf, it } from "vitest";
 import type { AccessTokenLifetime } from "#/config/application.schema.mjs";
 import { createApp, defineModule, type ProviderDeps } from "#/index.mjs";
-import type { DispatchPolicy } from "#/middleware/tokenBinding.mjs";
 import type { ComponentMap } from "#/modules/manifest/component-map.mjs";
 import { makeValidCoreConfig } from "#/testing/fixtures/valid-config.mjs";
 import {
@@ -53,11 +54,9 @@ const settingsWith = (change: (draft: Record<string, unknown>) => void): OAuthTo
 	const draft: Record<string, unknown> = {
 		...base,
 		accessTokenLifetime: { ...base.accessTokenLifetime },
-		tokenBinding: { ...base.tokenBinding },
 	};
 	change(draft);
 	Object.freeze(draft.accessTokenLifetime);
-	Object.freeze(draft.tokenBinding);
 	return Object.freeze(draft) as unknown as OAuthTokenSettings;
 };
 
@@ -74,11 +73,11 @@ describe("the oauthTokenSettings slot", () => {
 		expectTypeOf<OAuthTokenSettings["accessTokenLifetime"]>().toEqualTypeOf<AccessTokenLifetime>();
 		expectTypeOf<OAuthTokenSettings["refreshTokenExpiresIn"]>().toEqualTypeOf<number>();
 		expectTypeOf<
-			OAuthTokenSettings["tokenBinding"]["dispatchPolicy"]
-		>().toEqualTypeOf<DispatchPolicy>();
-		expectTypeOf<
-			OAuthTokenSettings["tokenBinding"]["bindConfidentialClientRefreshTokens"]
+			OAuthTokenSettings["bindConfidentialClientRefreshTokens"]
 		>().toEqualTypeOf<boolean>();
+		// The dispatch policy is core's (#728): the slot has no member for it.
+		expectTypeOf<OAuthTokenSettings>().not.toHaveProperty("tokenBinding");
+		expectTypeOf<OAuthTokenSettings>().not.toHaveProperty("dispatchPolicy");
 		expectTypeOf<OAuthTokenSettings["resourceIndicatorEnabled"]>().toEqualTypeOf<boolean>();
 		expectTypeOf<OAuthTokenSettings["requireEmailVerified"]>().toEqualTypeOf<boolean>();
 		expect(true).toBe(true);
@@ -130,7 +129,7 @@ describe("oauthTokenSettingsContract — the double", () => {
 			"issuer is a canonical issuer",
 			"the access-token lifetime is a default and a max, each a lifetime, the default not above the max",
 			"the refresh-token lifetime is a lifetime",
-			"the dispatch policy is intent-explicit or strict-mutual-exclusion",
+			"carries no token-binding dispatch policy: the policy is core's",
 			"every switch is true or false",
 			"the settings are frozen, the nested ones too",
 		]);
@@ -148,10 +147,7 @@ describe("oauthTokenSettingsContract — the double", () => {
 					legacyTypAccept: true,
 					accessTokenLifetime: { defaultExpiresIn: 300, maxExpiresIn: 86_400 },
 					refreshTokenExpiresIn: 2_592_000,
-					tokenBinding: {
-						dispatchPolicy: "strict-mutual-exclusion",
-						bindConfidentialClientRefreshTokens: true,
-					},
+					bindConfidentialClientRefreshTokens: true,
 					resourceIndicatorEnabled: true,
 					requireEmailVerified: true,
 				}),
@@ -167,10 +163,7 @@ describe("createTestOAuthTokenSettings", () => {
 			legacyTypAccept: false,
 			accessTokenLifetime: { defaultExpiresIn: 3600, maxExpiresIn: 3600 },
 			refreshTokenExpiresIn: 86_400,
-			tokenBinding: {
-				dispatchPolicy: "intent-explicit",
-				bindConfidentialClientRefreshTokens: false,
-			},
+			bindConfidentialClientRefreshTokens: false,
 			resourceIndicatorEnabled: false,
 			requireEmailVerified: false,
 		});
@@ -179,16 +172,13 @@ describe("createTestOAuthTokenSettings", () => {
 	it("applies an override, a nested one member by member", () => {
 		const settings = createTestOAuthTokenSettings({
 			accessTokenLifetime: { maxExpiresIn: 7200 },
-			tokenBinding: { bindConfidentialClientRefreshTokens: true },
+			bindConfidentialClientRefreshTokens: true,
 		});
 		expect(settings.accessTokenLifetime).toStrictEqual({
 			defaultExpiresIn: 3600,
 			maxExpiresIn: 7200,
 		});
-		expect(settings.tokenBinding).toStrictEqual({
-			dispatchPolicy: "intent-explicit",
-			bindConfidentialClientRefreshTokens: true,
-		});
+		expect(settings.bindConfidentialClientRefreshTokens).toBe(true);
 	});
 
 	it("does not check what it is handed: a test of a broken value builds it here", () => {
@@ -242,14 +232,22 @@ describe("oauthTokenSettingsContract — each way a value can break it", () => {
 		}
 	});
 
-	it("a dispatch policy outside the two", async () => {
+	it("a dispatch policy, nested or not: the policy is core's, and a slot that carried one would be a second source", async () => {
+		const rule = "carries no token-binding dispatch policy: the policy is core's";
 		expect(
 			await failing(() =>
-				createTestOAuthTokenSettings({
-					tokenBinding: { dispatchPolicy: "first-wins" as DispatchPolicy },
+				settingsWith((draft) => {
+					draft.tokenBinding = Object.freeze({ dispatchPolicy: "strict-mutual-exclusion" });
 				}),
 			),
-		).toEqual(["the dispatch policy is intent-explicit or strict-mutual-exclusion"]);
+		).toEqual([rule]);
+		expect(
+			await failing(() =>
+				settingsWith((draft) => {
+					draft.dispatchPolicy = "strict-mutual-exclusion";
+				}),
+			),
+		).toEqual([rule]);
 	});
 
 	it("a switch that is not a boolean: absent, or a string an environment variable left unread", async () => {
@@ -278,10 +276,7 @@ describe("oauthTokenSettingsContract — each way a value can break it", () => {
 		expect(
 			await failing(() =>
 				settingsWith((draft) => {
-					draft.tokenBinding = Object.freeze({
-						dispatchPolicy: "intent-explicit",
-						bindConfidentialClientRefreshTokens: undefined,
-					});
+					draft.bindConfidentialClientRefreshTokens = undefined;
 				}),
 			),
 		).toEqual([rule]);
@@ -291,9 +286,6 @@ describe("oauthTokenSettingsContract — each way a value can break it", () => {
 		const rule = "the settings are frozen, the nested ones too";
 		const base = createTestOAuthTokenSettings();
 		expect(await failing(() => ({ ...base }))).toEqual([rule]);
-		expect(
-			await failing(() => Object.freeze({ ...base, tokenBinding: { ...base.tokenBinding } })),
-		).toEqual([rule]);
 		expect(
 			await failing(() =>
 				Object.freeze({ ...base, accessTokenLifetime: { ...base.accessTokenLifetime } }),

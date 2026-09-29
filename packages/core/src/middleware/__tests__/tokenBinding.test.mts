@@ -581,9 +581,9 @@ describe("tokenBindingMw — response headers a mechanism asks for (#530)", () =
 });
 
 describe("resolveTokenBindingDispatchPolicy (#728)", () => {
-	// The one reading of `oauth.tokenBinding.dispatch-policy`: the oauth module
-	// resolves its oauthTokenSettings through it, and boot reads it through
-	// this in a composition without that module.
+	// The one reading of `oauth.tokenBinding.dispatch-policy`. The policy is
+	// core's, the owner of the token-binding extension point (#728): boot reads
+	// it through this in every composition, and no slot carries it.
 	it("reads strict-mutual-exclusion when the configuration says so", () => {
 		expect(
 			resolveTokenBindingDispatchPolicy({

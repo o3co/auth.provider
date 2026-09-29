@@ -204,60 +204,35 @@ describe("tokenBindingMechanisms — core synthesis", () => {
 		await handle.dispose();
 	});
 
-	it("reads the dispatch policy from the oauthTokenSettings the composition holds, over the configuration (#728)", async () => {
-		// The configuration says intent-explicit; the slot the oauth module
-		// provides says strict-mutual-exclusion, and the slot is what is read.
+	it("reads the dispatch policy from the configuration whatever oauthTokenSettings the composition holds: the policy is core's (#728)", async () => {
+		// The token-binding extension point is core's, and so is the policy that
+		// arbitrates between its mechanisms: the oauth module's slot carries no
+		// policy, and one a host's value carries anyway is not read.
+		const settings = {
+			...createTestOAuthTokenSettings(),
+			tokenBinding: { dispatchPolicy: "strict-mutual-exclusion" },
+		};
+		const received: { binding?: unknown } = {};
 		const handle = await createApp({
 			modules: [
-				contributingModule("dpop", () => dpopMech),
-				contributingModule("mtls", () => mtlsMech),
-				makeObserverModule({}),
+				contributingModule("ambient-mtls", () => mtlsMech),
+				contributingModule("explicit-dpop", () => dpopMech),
+				makeObserverModule(received),
 			],
 			bootstrapComponents: {
 				...makeBoot("intent-explicit"),
-				oauthTokenSettings: createTestOAuthTokenSettings({
-					tokenBinding: { dispatchPolicy: "strict-mutual-exclusion" },
-				}),
-			} as BootstrapMap,
+				oauthTokenSettings: settings,
+			} as unknown as BootstrapMap,
 		});
 		const app = express();
 		app.use(express.json());
 		app.use(handle.router);
 
 		const res = await request(app).post("/oauth/token").send({});
-		expect(res.status).toBe(400);
-		expect(res.body.error).toBe("invalid_request");
+		expect(res.status).toBe(200);
+		expect(received.binding).toEqual({ kind: "dpop", confirmation: { jkt: "fake-jkt" } });
 
 		await handle.dispose();
-	});
-
-	it("refuses an oauthTokenSettings with no dispatch policy, naming the member, rather than reading the configuration's", async () => {
-		// A host that fills the slot itself fills it whole. One without
-		// `tokenBinding` failed on a property read of undefined; one whose
-		// policy is neither of the two would have been handed to the
-		// middleware as if it were one.
-		for (const tokenBinding of [
-			undefined,
-			{ bindConfidentialClientRefreshTokens: false },
-			{ dispatchPolicy: "mutual" },
-		]) {
-			const booting = createApp({
-				modules: [contributingModule("dpop", () => dpopMech), makeObserverModule({})],
-				bootstrapComponents: {
-					...makeBoot("intent-explicit"),
-					oauthTokenSettings: { ...createTestOAuthTokenSettings(), tokenBinding },
-				} as unknown as BootstrapMap,
-			});
-			const caught = await booting.then(
-				async (handle) => {
-					await handle.dispose();
-					return undefined;
-				},
-				(err: unknown) => err,
-			);
-			expect(caught, JSON.stringify(tokenBinding)).toBeInstanceOf(RangeError);
-			expect((caught as Error).message).toMatch(/oauthTokenSettings\.tokenBinding\.dispatchPolicy/);
-		}
 	});
 
 	it("factory returning null is filtered — surrounding mechanisms still mount", async () => {

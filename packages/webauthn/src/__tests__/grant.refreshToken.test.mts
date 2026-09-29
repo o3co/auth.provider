@@ -605,7 +605,7 @@ describe("createWebAuthnGrant — DPoP-bound refresh tokens (#480)", () => {
 			await makeDeps({
 				oauthTokenSettings: createTestOAuthTokenSettings({
 					issuer: ISSUER,
-					tokenBinding: { bindConfidentialClientRefreshTokens: true },
+					bindConfidentialClientRefreshTokens: true,
 				}),
 			}),
 			makeCtx(makeClient({ tokenEndpointAuthMethod: "client_secret_basic" }), {
@@ -624,7 +624,7 @@ describe("createWebAuthnGrant — DPoP-bound refresh tokens (#480)", () => {
 				config: makeConfig({ bindConfidentialClientRefreshTokens: true }),
 				oauthTokenSettings: createTestOAuthTokenSettings({
 					issuer: ISSUER,
-					tokenBinding: { bindConfidentialClientRefreshTokens: false },
+					bindConfidentialClientRefreshTokens: false,
 				}),
 			}),
 			makeCtx(makeClient({ tokenEndpointAuthMethod: "client_secret_basic" }), {
