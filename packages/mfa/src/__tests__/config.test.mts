@@ -549,17 +549,16 @@ describe("the transaction's life and attempts (D8, D21, and step 3's obligations
 		}
 	});
 
-	it("holds mfa.maxAttemptsPerTransaction to a positive whole number, what the store's reserveAttempt takes", () => {
+	it("holds mfa.maxAttemptsPerTransaction to 1-10, a whole number (the owner's bound; the ADR states none)", () => {
 		for (const value of [1, 5, 10]) {
 			expect(
 				readMfaSettings(valid({ maxAttemptsPerTransaction: value })).maxAttemptsPerTransaction,
 			).toBe(value);
 		}
-		for (const value of [0, -1, 1.5, "5", null, undefined, Number.MAX_SAFE_INTEGER + 1]) {
-			expect(
-				refusal(() => readMfaSettings(valid({ maxAttemptsPerTransaction: value }))),
-				String(value),
-			).toContain("mfa.maxAttemptsPerTransaction");
+		for (const value of [0, 11, 100, -1, 1.5, "5", null, undefined, Number.MAX_SAFE_INTEGER + 1]) {
+			const message = refusal(() => readMfaSettings(valid({ maxAttemptsPerTransaction: value })));
+			expect(message, String(value)).toContain("mfa.maxAttemptsPerTransaction");
+			expect(message, String(value)).toContain("1 to 10");
 		}
 	});
 

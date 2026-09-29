@@ -246,6 +246,31 @@ describe("the boot refusals (the MFA ADR's D20; the session-admission ADR's D7)"
 		});
 	});
 
+	it("refuses an enabled factor whose kind a hint cannot carry — core's hint grammar — naming the kind, under either mode", async () => {
+		for (const mode of ["optional", "required"] as const) {
+			for (const kind of ["WebAuthn", "web authn", "9totp", "k".repeat(65)]) {
+				const err = await refusal({
+					config: configFor(mode),
+					extraModules: [contributing(stubFactor(kind, ["hwk"]))],
+				});
+				expect(err.reason, `${mode} ${kind}`).toBe("contribute-factory-failed");
+				expect(err.details, `${mode} ${kind}`).toMatchObject({ module: "mfa", kind: "routes" });
+				const message = (err.cause as Error).message;
+				expect(message, kind).toContain(JSON.stringify(kind));
+				expect(message, kind).toContain("hints.enrollable");
+			}
+		}
+	});
+
+	it("accepts the kinds a hint carries: lower-case, digits, underscores and hyphens after a letter", async () => {
+		await boot({
+			extraModules: [
+				contributing(stubFactor("web-authn_2", ["hwk"])),
+				contributing(stubFactor("recovery_code", ["recovery"], { counting: false })),
+			],
+		});
+	});
+
 	it("boots optional with no counting factor: nobody is asked for one", async () => {
 		const { handle } = await boot({ config: configFor("optional", TOTP_OFF) });
 		expect(handle.components.sessionRequirementResolver?.get("mfa")?.reach.size).toBe(0);
@@ -262,6 +287,7 @@ describe("the boot refusals (the MFA ADR's D20; the session-admission ADR's D7)"
 			[{ transactionTtlSeconds: 59 }, "mfa.transactionTtlSeconds"],
 			[{ transactionTtlSeconds: 1801 }, "mfa.transactionTtlSeconds"],
 			[{ maxAttemptsPerTransaction: 0 }, "mfa.maxAttemptsPerTransaction"],
+			[{ maxAttemptsPerTransaction: 11 }, "mfa.maxAttemptsPerTransaction"],
 			[{ lockout: { ...mfaSection("required").lockout, threshold: 101 } }, "mfa.lockout.threshold"],
 		] as const) {
 			const err = await refusal({ config: configFor("required", mfa) });
