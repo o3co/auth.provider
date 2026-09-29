@@ -15,21 +15,13 @@
  */
 
 /**
- * The built-in audit-event inventory, executable (#369).
+ * The built-in audit-event inventory, executable.
  *
  * `AuditEvent.type` is an open string on purpose (consumers namespace their
- * own events), so nothing in the type system connects the documented
- * inventory to what the bundled packages actually emit — and the two had
- * drifted: the doc comment named events (`"logout"`, `"scope.denied"`,
- * `"login.success"`, `"mfa.challenge.*"`) that no shipped code emits, and
- * omitted most of the seventeen that ARE emitted. A sink implementor or a
- * dashboard author filtering on the documented names would match nothing.
- *
- * `BUILT_IN_AUDIT_EVENT_TYPES` is now the inventory, and this suite pins it
- * against the emission sites in both directions — an event emitted but not
- * listed fails, and an event listed but no longer emitted fails. Same
- * pattern as the #288 env-var drift guards and the #370 design-vocabulary
- * guard: the property is owned by a test, not by a comment.
+ * own events), so the type system does not tie the inventory to what the
+ * bundled packages emit. This suite pins `BUILT_IN_AUDIT_EVENT_TYPES` against
+ * the emission sites in both directions: an event emitted but not listed
+ * fails, and an event listed but no longer emitted fails.
  */
 
 import { type Dirent, readdirSync, readFileSync } from "node:fs";
@@ -68,19 +60,15 @@ function walk(dir: string, out: string[]): void {
 }
 
 /**
- * Every `type: "..."` literal within an emission call's argument window.
- * The window is generous (600 chars) because the event literal is usually
- * the first field but not always the first line.
+ * Every `type: "..."` literal within 600 chars of an emission call (the event
+ * literal is usually the first field but not always on the first line).
  *
- * The receiver pattern is deliberately narrow — `emitAuditEvent(` (the
- * helper every module-side emission goes through), `recordAuditEvent(` (the
- * one an emitter that waits on its sink calls) and `sink.record(` (the direct
- * call inside the audit plumbing itself) — because a bare
- * `\.record\(` also matches `z.record(`, and a schema definition sitting
- * near an unrelated `type: "..."` literal would poison the inventory.
- * A new emission spelled differently shows up as a missing-inventory
- * failure the moment its event is added to the constant, so the narrowness
- * cannot hide events silently.
+ * The receivers are deliberately narrow (`emitAuditEvent(`,
+ * `recordAuditEvent(`, `sink.record(`): a bare `\.record\(` also matches
+ * `z.record(`, and a schema near an unrelated `type: "..."` literal would
+ * poison the inventory. A new emission spelled differently shows up as a
+ * missing-inventory failure the moment its event is added to the constant,
+ * so the narrowness cannot hide events silently.
  */
 function emittedEventTypes(): ReadonlySet<string> {
 	const found = new Set<string>();
@@ -99,22 +87,18 @@ function emittedEventTypes(): ReadonlySet<string> {
 }
 
 /**
- * #593's emissions, which the two receivers above cannot see.
+ * Federation-grant emissions, which the receivers above cannot see.
  *
- * `retrieveFederationGrantToken` does not build an `AuditEvent` and does not
- * know a sink: it calls its own `audit(deps, request, "<type>", outcome, …)`
- * seam, and the branches that audit *after* answering return
- * `audits: [["<type>", outcome]]` tuples for the caller to hand over. The
- * routes package then maps whatever arrives onto `sink.record(mapped)`, with
- * `type` copied from the event — so there is no literal at the sink call
- * either, and both directions of this guard would be blind to the whole
- * family.
+ * `retrieveFederationGrantToken` builds no `AuditEvent` and knows no sink: it
+ * calls its own `audit(deps, request, "<type>", outcome, …)` seam, and the
+ * branches that audit after answering return `audits: [["<type>", outcome]]`
+ * tuples for the caller to hand over. The routes package copies `type` from
+ * the event into `sink.record(mapped)`, so no literal sits at the sink call.
  *
- * Narrow on purpose, and narrow in the same way the receivers above are: a
- * `"federation.grant.*"` literal counts only where it is an argument to that
- * seam or an entry in one of those tuples. The union that declares the seven
- * type names does NOT count — a type nothing emits any more has to fail here,
- * and a declaration is not an emission.
+ * A `"federation.grant.*"` literal counts only as an argument to that seam or
+ * an entry in one of those tuples. The union that declares the seven type
+ * names does NOT count: a declaration is not an emission, and a type nothing
+ * emits any more has to fail here.
  */
 function federationGrantEmissions(source: string): readonly string[] {
 	const found: string[] = [];
@@ -124,12 +108,10 @@ function federationGrantEmissions(source: string): readonly string[] {
 	)) {
 		if (call[1]) found.push(call[1]);
 	}
-	// `routeDeniedEvent({ type: "federation.grant.x", … })` — the routes
-	// package's own builder for a refusal the handler never reached. Its
-	// result is always handed to the sink, so a literal in one of its calls is
-	// an emission. `({` and not `(` on purpose: it matches the CALLS and not
-	// the declaration, whose parameter list is `(input: …)` and whose body
-	// carries the default type — a declaration is not an emission.
+	// `routeDeniedEvent({ type: "federation.grant.x", … })`: the routes
+	// package's builder for a refusal the handler never reached, whose result
+	// always goes to the sink. `({` matches the calls and not the declaration
+	// (`(input: …)`), whose body carries the default type.
 	for (const call of source.matchAll(/\brouteDeniedEvent\(\{/g)) {
 		const windowText = source.slice(call.index, (call.index ?? 0) + 600);
 		const literal = /type:\s*"(federation\.grant\.[\w.]+)"/.exec(windowText);
@@ -146,11 +128,9 @@ function federationGrantEmissions(source: string): readonly string[] {
 }
 
 describe("the federation-grant emission scan (#593)", () => {
-	// The guard's second direction — "lists no event nothing emits any more" —
-	// only means something while a DECLARATION does not count as an emission.
-	// Core declares the seven type names in one union, so a scan wide enough to
-	// see that union would report every one of them as emitted for ever, and
-	// the day an emission site is deleted nothing would notice.
+	// "Lists no event nothing emits any more" holds only while a declaration
+	// does not count as an emission: a scan that saw core's union of the seven
+	// names would report them all as emitted for ever.
 	it("does not count the type union that declares the names", () => {
 		expect(
 			federationGrantEmissions(
@@ -202,31 +182,26 @@ describe("built-in audit event inventory (#369)", () => {
 });
 
 /**
- * One type per `details` key, across every event (#369's inventory, extended).
+ * One type per `details` key, across every event.
  *
- * A sink that fixes a field's type the first time it sees it —
- * Elasticsearch / OpenSearch dynamic mapping, a BigQuery schema, a Datadog
- * facet — rejects every later event that carries the other type, and the
- * events it drops are whichever arrive second. `details.error` is a string
+ * A sink that fixes a field's type the first time it sees it (Elasticsearch /
+ * OpenSearch dynamic mapping, a BigQuery schema, a Datadog facet) rejects
+ * every later event that carries the other type. `details.error` is a string
  * (an OAuth code, a reason) wherever it appears; an error an event reports
  * travels as `details.cause`, always core's `auditedError(…)` projection.
  *
- * Read from the source, at every emission whose event is an object literal
- * (a `details` anywhere inside it, a conditional spread's included):
- * `details.error` has to be written as a string (a literal, a template, a
- * name, or a call to `auditErrorText` / `String`), and `details.cause` as a
- * call to `auditedError`. Where the details are built by a function in the
- * same file (`details: sanitizeAuditDetails(event.details)`, a relaying
- * sink), no `cause` that function writes may be a string: no string or
- * template literal, `String(…)`, `auditErrorText(…)` or `.message` on any
- * arm of `??`, `||` or `?:`, following same-file consts. `AuditEvent`'s type
- * says the same (`audit-details.types.test.mts`); this catches what a cast
- * would let by.
+ * Read from the source at every emission whose event is an object literal (a
+ * `details` anywhere inside it, a conditional spread's included):
+ * `details.error` must be written as a string (a literal, a template, a name,
+ * or an `auditErrorText` / `String` call) and `details.cause` as an
+ * `auditedError` call. Where a same-file function builds the details (a
+ * relaying sink), no `cause` it writes may be a string on any arm of `??`,
+ * `||` or `?:`, following same-file consts. `AuditEvent`'s type says the same
+ * (`audit-details.types.test.mts`); this catches what a cast would let by.
  *
- * The gap: a name or a property access counts as string-shaped whatever it
- * holds, because this reads syntax, not types. An `any`-typed `err` under
- * `details.error` passes this check and `tsc` alike; review is what catches
- * that one.
+ * Gap: this reads syntax, not types, so a name or a property access counts
+ * as string-shaped whatever it holds. An `any`-typed `err` under
+ * `details.error` passes this check and `tsc` alike.
  */
 function detailsShapeViolations(file: string, source: string): string[] {
 	const sf = ts.createSourceFile(file, source, ts.ScriptTarget.Latest, true);

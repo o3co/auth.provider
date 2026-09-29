@@ -19,14 +19,13 @@ import { AppConfigSchema } from "#/config/application.schema.mjs";
 import { makeValidAppConfig } from "#/testing/fixtures/valid-config.mjs";
 
 /**
- * #593 slice 7 — the two adapter switches the standalone template composes
- * federation grants from. Declared here for the reason every switch above
- * them is (`federationTokenStore.type` is the standing example): a key
- * `AppConfigSchema` does not know is stripped before `buildModules` reads it,
- * and the operator's choice silently becomes the default. Two switches, not
- * one, because the grant store and the intent store are installed
- * independently — grants in Redis with acquisition in memory is a supported
- * single-replica shape (a restart loses flows in progress, nothing else).
+ * The two adapter switches the standalone template composes federation
+ * grants from. Declared because a key `AppConfigSchema` does not know is
+ * stripped before `buildModules` reads it, and the operator's choice silently
+ * becomes the default. Two switches, because the grant store and the intent
+ * store are installed independently — grants in Redis with acquisition in
+ * memory is a supported single-replica shape (a restart loses flows in
+ * progress, nothing else).
  */
 const base = makeValidAppConfig();
 

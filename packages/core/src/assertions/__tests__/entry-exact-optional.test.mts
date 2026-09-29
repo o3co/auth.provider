@@ -16,14 +16,11 @@
 
 /**
  * `list()` into `add()` compiles for a consumer who turns on
- * `exactOptionalPropertyTypes`.
- *
- * The stored entry carries `undefined` for a ceiling it does not name, and
- * under that option `a?: T` refuses an explicit `undefined` — so the input's
- * optional fields have to say `?: T | undefined` for the stored form to be
- * accepted back. Without the option the two spellings are the same type, so
- * no ordinary type test can tell them apart; this compiles a probe with the
- * option ON, and a control proves it is on.
+ * `exactOptionalPropertyTypes`. The stored entry carries `undefined` for a
+ * ceiling it does not name, and under that option `a?: T` refuses an explicit
+ * `undefined`, so the input's optional fields say `?: T | undefined`. Without
+ * the option the two spellings are the same type, so this compiles a probe
+ * with the option on, and a control proves it is on.
  */
 
 import path from "node:path";

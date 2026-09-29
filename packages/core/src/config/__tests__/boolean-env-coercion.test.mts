@@ -18,20 +18,16 @@ import { AppConfigSchema } from "#/config/application.schema.mjs";
 import { makeValidAppConfig } from "#/testing/fixtures/valid-config.mjs";
 
 /**
- * #288 — every env-overridable boolean rides ONE coercion path.
+ * Every env-overridable boolean rides ONE coercion path, pinned at the field.
  *
- * HOCON substitutes `${?VAR}` as a **string**, always. Before this suite the
- * schema had two paths: `coerceBooleanFromEnv` on two fields, and a bare
- * `z.boolean()` on the rest that only ever worked because `@o3co/ts.hocon`'s
- * zod bridge coerces a bare boolean leaf **it can reach**. The bridge walks
- * `ZodObject` shapes and unwraps optional/nullable/default/catch/readonly —
- * and stops at anything else. A `z.preprocess(...)` wrapper (a `ZodPipe`) is
- * opaque to it, which is exactly what happened to `oauth.jwt`: the section is
- * wrapped to catch legacy flat fields, so `OAUTH_JWT_LEGACY_TYP_ACCEPT`
- * reached `z.boolean()` as a string and **failed boot**.
- *
- * These tests pin the coercion at the field, not at the bridge, so wrapping a
- * section tomorrow cannot silently take an operator's documented override away.
+ * HOCON substitutes `${?VAR}` as a **string**, always. `@o3co/ts.hocon`'s zod
+ * bridge coerces only a bare boolean leaf **it can reach**: it walks
+ * `ZodObject` shapes and unwraps optional/nullable/default/catch/readonly, and
+ * a `z.preprocess(...)` wrapper (a `ZodPipe`) is opaque to it. `oauth.jwt` is
+ * wrapped to catch legacy flat fields, so a bare `z.boolean()` there would get
+ * `OAUTH_JWT_LEGACY_TYP_ACCEPT` as a string and **fail boot**. Coercing at the
+ * field, not at the bridge, means wrapping a section cannot silently take an
+ * operator's documented override away.
  */
 
 /** Every boolean in `AppConfigSchema` that a `${?VAR}` can reach. */
@@ -88,11 +84,11 @@ const ENV_OVERRIDABLE_BOOLEANS = [
 			).enabled,
 	},
 	{
-		// The MFA ADR's D13: whether a federation's upstream `amr` counts. No
-		// environment variable is wired for it — no bundled adapter surfaces
-		// an upstream `amr`, and it is set in config beside `enabled` — but it
-		// is coerced as every boolean here is, so a `${?VAR}` an operator adds
-		// reads the same way.
+		// Whether a federation's upstream `amr` counts (ADR
+		// 2026-09-25-multi-factor-authentication). No environment variable is
+		// wired for it — no bundled adapter surfaces an upstream `amr`, and it
+		// is set in config beside `enabled` — but it is coerced as every
+		// boolean here is, so a `${?VAR}` an operator adds reads the same way.
 		key: "federations.<name>.trustUpstreamAmr",
 		envVar: "no variable wired; set in config",
 		set: (config: Record<string, unknown>, value: unknown) => {
@@ -111,14 +107,12 @@ const ENV_OVERRIDABLE_BOOLEANS = [
 /**
  * The accepted spellings. Narrow on purpose: an unrecognised string is a
  * misconfiguration, and boot failing on it beats an operator's `enabled=ture`
- * silently reading as `true` (which is what `z.coerce.boolean()` would do —
- * it is `Boolean(value)`, so every non-empty string is `true`, `"false"`
- * included).
+ * silently reading as `true`, as `z.coerce.boolean()` (`Boolean(value)`) reads
+ * every non-empty string, `"false"` included.
  *
- * `""` is the exported-but-empty shape a `.env` file, a compose
- * `environment:` entry or a blank ConfigMap key produces. It reads as `false`,
- * matching what `normalizeTrustProxy` already decided for `HTTP_TRUST_PROXY`
- * in #292.
+ * `""` is the exported-but-empty shape a `.env` file, a compose `environment:`
+ * entry or a blank ConfigMap key produces. It reads as `false`, as
+ * `normalizeTrustProxy` reads it for `HTTP_TRUST_PROXY`.
  */
 const COERCIONS: ReadonlyArray<[unknown, boolean]> = [
 	["true", true],
@@ -178,8 +172,8 @@ describe("#288: every env-overridable boolean uses one coercion path", () => {
 	}
 
 	it("still refuses sameSite=none with a coerced secure=false", () => {
-		// The #282 guard reads the COERCED value, so it has to keep firing for
-		// the string form an env var actually delivers.
+		// The sameSite=none guard reads the COERCED value, so it has to keep
+		// firing for the string form an env var actually delivers.
 		const config = makeValidAppConfig() as unknown as Record<string, unknown>;
 		const session = config.session as Record<string, unknown>;
 		session.secure = "false";

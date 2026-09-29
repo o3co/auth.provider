@@ -25,28 +25,17 @@ const parsedByBase = (raw: unknown): unknown =>
 	overlayConfig(raw, TransitionalConfigSchema.parse(raw));
 
 /**
- * #472 — core's `reference.conf` holds only what core's schema declares.
+ * Core's `reference.conf` holds only what core's schema declares.
  *
- * Core's schema was a strip-mode `z.object` that composition roots parsed
- * with before `createApp`, and a key it did not declare was dropped, silently,
- * before any module's own `configSchema` ran. That bit seven times over —
- * `redisSessionStores` (MIN-3), `redisRefreshTokenFamilyStore` (D-2 v2),
- * `redisCodeRepository` (OR-9), `redisFederationTokenStore` (#456),
- * `redisDeviceCodeStore` and `oauth.deviceAuthorization` (#472),
- * `redisRateLimiter` (#495) and `oauth.mtls` / `oauth.dpop` / `webauthn`
- * (#496) — each found by an operator whose documented override did nothing.
- *
- * Since #728 nothing strips: a composition root hands `createApp` what it
- * resolved, and boot's one composed parse lays each schema's output over
- * what was written, writing every loaded module's section back at its path
- * (`boot/__tests__/composed-parse.test.mts`; across every package, the
- * full-set composition in `tools/composition`). Each package checks its own
- * `reference.conf` against its modules' sections (`packageReferenceProblems`).
- *
- * What stays here is core's own file against core's own schema: resolved and
- * parsed with the transitional base, with nothing laid back over it, any path
- * the file has and the parse lacks is a default core ships that core's
- * schema does not declare — one no reader is sure to see.
+ * Boot's composed parse lays each schema's output over what was written, so
+ * nothing strips at boot (`boot/__tests__/composed-parse.test.mts`; across
+ * every package, the full-set composition in `tools/composition`), and each
+ * package checks its own `reference.conf` against its modules' sections
+ * (`packageReferenceProblems`). What stays here is core's own file against
+ * core's own schema: resolved and parsed with the transitional base, with
+ * nothing laid back over it, any path the file has and the parse lacks is a
+ * default core ships that core's schema does not declare — one no reader is
+ * sure to see.
  */
 
 const REFERENCE_CONF_PATH = fileURLToPath(
@@ -110,10 +99,10 @@ describe("core's reference.conf holds only what core's schema declares (#472)", 
 
 describe("core's reference.conf declares the operator keys a composition layering on it alone needs (#570)", () => {
 	// The drift diff above proves the schema keeps every path the file has; it
-	// cannot notice a path the file should have and does not. These two were
-	// missing: `linkFederatedIdentityUrl` lived only in the standalone template,
-	// so HOCON substituted its variable nowhere else and `?link=1` answered
-	// `link_unsupported`, and `acrValues` appeared in no reference.conf at all.
+	// cannot notice a path the file should have and does not. Declared only in
+	// the standalone template, `linkFederatedIdentityUrl` would have its
+	// variable substituted nowhere else, and `?link=1` would answer
+	// `link_unsupported`.
 
 	it("substitutes CLIENT_USER_LINK_FEDERATED_IDENTITY_URL and keeps it through boot's parse", () => {
 		const raw = parseFile(REFERENCE_CONF_PATH, {

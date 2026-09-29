@@ -37,14 +37,10 @@ const issueMany = async (
 };
 
 /*
- * The in-memory challenge store grew until restart.
- *
- * It reclaimed an expired challenge only when that exact (scope, value) was
- * looked up again, and a challenge nobody finishes is never looked up again:
- * a WebAuthn prompt the user closes, an options request a script repeats. Each
- * left one entry resident for the life of the process. The replay seen-set had
- * the same leak and the same fix (#673); so did the access-token denylist
- * (#293 item 6).
+ * A challenge nobody finishes is never looked up again: a WebAuthn prompt the
+ * user closes, an options request a script repeats. Reclaiming an expired
+ * challenge only when its (scope, value) is looked up again would leave each
+ * one resident for the life of the process, so the store also sweeps.
  */
 describe("createMemoryChallengeStore — bounded growth", () => {
 	it("drops challenges issued and abandoned, and still finds a live one", async () => {
@@ -166,8 +162,8 @@ describe("createMemoryChallengeStore — bounded growth", () => {
 	});
 
 	it("refuses a sweep interval that is not a positive whole number, rather than using another", () => {
-		// It used to fall back to the default: a setting given and unusable was
-		// quietly replaced, which is what a boot refusal exists to prevent.
+		// Falling back to the default would quietly replace a setting given and
+		// unusable, which is what a boot refusal exists to prevent.
 		for (const bad of [0, -1, 1.5, Number.NaN, Number.POSITIVE_INFINITY]) {
 			expect(() => createMemoryChallengeStore({ sweepInterval: bad }), String(bad)).toThrow(
 				new RangeError(
@@ -256,11 +252,10 @@ describe("createMemoryChallengeStore — sweeps are also bounded in time", () =>
 });
 
 /*
- * Nothing bounded the store but time. WebAuthn authentication options are
- * asked for without a credential, and each issues a challenge kept for the
- * ceremony's window, so the request rate decided how much memory the store
- * held — and the window is an operator setting. A cap on the challenges it
- * holds bounds it; at the cap it refuses a new challenge as a store fault —
+ * WebAuthn authentication options are asked for without a credential, and
+ * each issues a challenge kept for the ceremony's window (an operator
+ * setting), so without a cap the request rate would decide how much memory
+ * the store holds. At the cap it refuses a new challenge as a store fault —
  * the ceremony cannot start, and the options route answers 503 — the way a
  * Redis store refuses a write at `maxmemory` under `noeviction`. It never
  * evicts a live challenge, which would fail the ceremony of a user already

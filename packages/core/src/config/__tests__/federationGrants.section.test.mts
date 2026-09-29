@@ -14,20 +14,17 @@
  * limitations under the License.
  */
 
-// The `federationGrants` configuration block (#593, D3, D9, D12, D16).
-//
-// Declared in core rather than in the route package, for a reason the device
-// grant's own comment states: this schema strips keys it does not know, and
-// the standalone validates against it before any module's `configSchema`
-// runs — so a block only the package knew about would vanish at parse time.
-// Here there is a second reason: the Redis grant store reads the same block,
-// and it is installed whether or not the routes are.
+// The `federationGrants` configuration block (ADR
+// 2026-09-17-federation-grants-offline-delegation), declared in core rather
+// than in the route package: this schema strips keys it does not know and the
+// standalone validates against it before any module's `configSchema` runs,
+// and the Redis grant store, installed whether or not the routes are, reads
+// the same block.
 //
 // Presence-and-shape only, but for the one-year ceiling on the tombstone
 // retention, which the stores are handed directly. The real bounds are
 // enforced where the values are used (`assertFederationGrantRetrievalLimits`,
-// the store's constructor), and the defaults live in `config/reference.conf`
-// beside every other section's.
+// the store's constructor); the defaults live in `config/reference.conf`.
 
 import { describe, expect, it } from "vitest";
 import { fullSectionsSchema } from "#/config/application.schema.mjs";
@@ -73,9 +70,10 @@ describe("the federationGrants section (#593)", () => {
 					allowScopeSubsets: true,
 					authorizationParams: { prompt: "consent" },
 					callbackURL: "https://app.example.test/grants/cb",
-					// #611: what check 5's Store matches a person on. Undeclared in
-					// the connection's value schema it would be stripped here, and
-					// check 5 would ask the Store with no evidence at all.
+					// What check 5's Store matches a person on (federation-grants
+					// ADR). Undeclared in the connection's value schema it would be
+					// stripped here, and check 5 would ask the Store with no
+					// evidence at all.
 					identityClaims: ["oid", "tid"],
 				},
 			},
@@ -109,14 +107,12 @@ describe("the federationGrants section (#593)", () => {
 		expect(parse({ maxExpiresIn: "2592000" })?.maxExpiresIn).toBe(2592000);
 		expect(parse({ maxExpiresIn: " 2592000 " })?.maxExpiresIn).toBe(2592000);
 
-		// And nothing else. This block used `z.coerce.number()` first, the way
-		// the sections around it still do, and Copilot named what that costs
-		// HERE: `Number()` reads `null` and `[]` as `0`, `true` as `1` and
-		// `"1e3"` as `1000`, so a malformed duration was NORMALISED at the
-		// schema and the strict reader downstream — which refuses exactly these
-		// — never saw what an operator actually wrote. `tombstoneRetention:
-		// null` disabled tombstones silently; `refreshBuffer: null` handed out
-		// tokens with milliseconds left on them.
+		// And nothing else, unlike the `z.coerce.number()` of the sections
+		// around it: `Number()` reads `null` and `[]` as `0`, `true` as `1` and
+		// `"1e3"` as `1000`, which would NORMALISE a malformed duration before
+		// the strict reader downstream — which refuses exactly these — saw it.
+		// `tombstoneRetention: null` would disable tombstones silently;
+		// `refreshBuffer: null` would hand out tokens with milliseconds left.
 		for (const value of ["thirty", "", "1e3", "0x10", -1, 0, 1.5, null, true, false, [], [45]]) {
 			expect(() => parse({ maxExpiresIn: value }), JSON.stringify(value)).toThrow();
 		}
@@ -150,7 +146,7 @@ describe("the federationGrants section (#593)", () => {
 	it("refuses a connection missing what has no sensible default", () => {
 		// `federation`, `scopes`, `boundary` and `maxAccessTokenLifetime` have
 		// none: a guessed access-token maximum would invent a residual-access
-		// policy (D15), and a guessed boundary would silently share one.
+		// policy, and a guessed boundary would silently share one.
 		const whole = {
 			federation: "entra",
 			scopes: ["openid"],

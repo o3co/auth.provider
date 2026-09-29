@@ -15,19 +15,16 @@
  */
 
 /**
- * Where a package keeps its defaults (#728): every package that ships a
+ * Where a package keeps its defaults: every package that ships a
  * `reference.conf` keeps it at `config/reference.conf`, publishes that
- * directory (`files` lists `config`), and exports the file as
- * `./reference.conf`. One place in every package, so a module's
- * `section.reference` — `new URL("../config/reference.conf",
- * import.meta.url)` from a file under `src/` — names the same file from the
- * source and from the published `dist/`, and a composition root that layers
- * what its modules declare finds it in an installed package.
+ * directory (`files` lists `config`), and exports it as `./reference.conf`,
+ * so a module's `section.reference` (`new URL("../config/reference.conf",
+ * import.meta.url)` from a file under `src/`) names the same file from the
+ * source, from the published `dist/` and in an installed package.
  *
- * And the references are disjoint: no path is set by two of them, so the
- * order a composition layers them in decides nothing — and each package that
- * ships one checks it in its own tests with `packageReferenceProblems` from
- * core's testing entry.
+ * The references are disjoint — no path is set by two of them — so the order
+ * a composition layers them in decides nothing; each package that ships one
+ * checks it in its own tests with `packageReferenceProblems`.
  */
 
 import { mkdtempSync, readdirSync, readFileSync, writeFileSync } from "node:fs";

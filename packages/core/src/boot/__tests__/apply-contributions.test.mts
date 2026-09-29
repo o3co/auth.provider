@@ -34,23 +34,18 @@ import { BootError } from "../types.mjs";
 import { validateManifests } from "../validate-manifests.mjs";
 
 // ---------------------------------------------------------------------------
-// AS-M1 (Phase F F9 PR6): minimal typed fixtures. The contributes-map
-// placeholders for `GrantHandler`, `AuditHook`, `MfaFactor`, and
-// `GrantPolicyHookContribution` were narrowed from `unknown` to concrete
-// same-package types in v0.5.1, so inline-literal stubs no longer satisfy
-// the slot contracts. The boot-pipeline tests verify routing behaviour
-// (registration order, collector dedup, factory error wrapping), not
-// contract semantics, so these stubs are intentionally no-op. Tests that
-// need value-identity (`expect(...).toBe(stub)`) capture the helper output
-// once into a typed `const sharedHook: AuditSink = fakeAuditSink(...)` and
-// reuse the reference inside factory closures (`() => sharedHook`).
+// Minimal typed fixtures. The contributes-map slots for `GrantHandler`,
+// `AuditHook`, `MfaFactor` and `GrantPolicyHookContribution` have concrete
+// types, so inline-literal stubs do not satisfy them. These tests verify
+// routing (registration order, collector dedup, factory error wrapping), not
+// contract semantics, so the stubs are no-ops. A test that needs value
+// identity captures one instance (`const sharedHook = fakeAuditSink(...)`)
+// and returns it from its factory closures.
 // ---------------------------------------------------------------------------
 
-// `tag` is propagated into `GrantSuccess.tokens.access_token` so spy
-// collectors that record values can distinguish stub instances. The shape
-// matches `GrantSuccess` (the success arm of `GrantResult`) — `status: 200`
-// + a minimal `TokenResponse`. Pipeline tests don't exercise the result
-// downstream, so the rest of `TokenResponse` is filled with `as never`.
+// `tag` goes into `tokens.access_token` so spy collectors that record values
+// can tell stub instances apart. Pipeline tests do not read the result
+// downstream, so the rest of `TokenResponse` is `as never`.
 const fakeGrantHandler = (tag = "stub"): GrantHandler => ({
 	handle: async () => ({
 		result: {
@@ -80,10 +75,10 @@ declare module "@o3co/auth-provider-core" {
 // Minimal bootstrap
 // ---------------------------------------------------------------------------
 
-// Per ADR 2026-04-30: schema is a pure type contract; defaults live in
-// hocon. validateAndComposeConfig calls CoreConfigSchema.parse, so the
-// fixture supplies a minimal schema-valid baseline (intentionally
-// diverges from reference.conf — see makeValidCoreConfig docstring).
+// Per ADR 2026-04-30-config-schema-strict-defaults-from-hocon, defaults live
+// in HOCON and validateAndComposeConfig parses CoreConfigSchema, so the
+// fixture supplies a minimal schema-valid baseline (it diverges from
+// reference.conf on purpose; see makeValidCoreConfig).
 const minBoot = {
 	config: makeValidCoreConfig() as never,
 	pathResolver: (s: string) => s,
@@ -250,9 +245,6 @@ describe("applyContributions — step 3: append order = input-array order", () =
 		const appendOrder: string[] = [];
 
 		// Spy collector that records which hook's `kind` was appended.
-		// Pre-AS-M1 the synthetic stubs used a `tag` field; after the
-		// AuditHook narrowing the stubs are real `AuditSink`s so we read
-		// from `kind` (the discriminant on `AuditSink`).
 		const auditCollector: ListCollector<AuditSink> = {
 			kind: "list" as const,
 			append: (v: AuditSink) => {
@@ -461,9 +453,7 @@ describe("applyContributions — step 2: overrides routed via collector.replace"
 
 		const contributionKinds: ContributionCollectorMap = { grants: spyCollector };
 
-		// Typed instance for the identity-equality assertion at line 481.
-		// Pre-AS-M1 this was `{ type: "override_handler" }` (cast `as unknown`);
-		// post-narrow we construct a real `GrantHandler`.
+		// Typed instance for the identity-equality assertion below.
 		const overrideValue: GrantHandler = fakeGrantHandler("override");
 
 		// ModA contributes base_grant via register; ModB overrides it via replace.
@@ -506,7 +496,7 @@ describe("applyContributions — step 3: auditHooks same-instance dedup", () => 
 
 		const contributionKinds: ContributionCollectorMap = { auditHooks: auditCollector };
 
-		// Typed instance for the identity-equality assertion at line 521.
+		// Typed instance for the identity-equality assertion below.
 		const sharedHook: AuditSink = fakeAuditSink("shared_hook");
 
 		const modA = defineModule({
@@ -537,19 +527,15 @@ describe("applyContributions — step 3: auditHooks same-instance dedup", () => 
 });
 
 // ---------------------------------------------------------------------------
-// 9. Consumer-defined kinds — spec §5.4 step 2 + step 3 discriminant routing
-// ---------------------------------------------------------------------------
-
-// ---------------------------------------------------------------------------
-// 11. Defence-in-depth: missing required dep at apply-time throws (Claude S1)
+// 9. Defence-in-depth: missing required dep at apply-time throws
 // ---------------------------------------------------------------------------
 
 describe("applyContributions — defence-in-depth: missing required dep", () => {
 	it("throws an invariant Error when a required dep is absent from the component map", async () => {
-		// validate-manifests step 4 + planBoot's activation closure should make
-		// this unreachable in normal flow. Test deliberately corrupts material
-		// after the upstream stages to assert the apply-time boundary catches
-		// it (mirrors materializeComponents.buildDeps's symmetric throw).
+		// validate-manifests step 4 and planBoot's activation closure should make
+		// this unreachable in normal flow, so the test corrupts material after
+		// them to pin the apply-time boundary (the same throw as
+		// materializeComponents.buildDeps).
 		const modA = defineModule({
 			name: "ModA",
 			requires: ["slotAC"] as never,
@@ -583,11 +569,14 @@ describe("applyContributions — defence-in-depth: missing required dep", () => 
 	});
 });
 
+// ---------------------------------------------------------------------------
+// 10. Consumer-defined kinds: step 2 / step 3 routing by collector.kind
+// ---------------------------------------------------------------------------
+
 describe("applyContributions — consumer-defined kinds (spec §5.4)", () => {
 	it("routes consumer-defined name-keyed kinds to register via collector.kind discriminant", async () => {
-		// Module contributes a kind not in the built-in set.
-		// The "myCustomKind" doesn't appear in the built-in NAME_KEYED_KINDS
-		// set; routing must rely on collector.kind === "name-keyed".
+		// "myCustomKind" is not in the built-in NAME_KEYED_KINDS set, so routing
+		// must rely on collector.kind === "name-keyed".
 		const m = defineModule({
 			name: "consumer-kind-mod",
 			contributes: {

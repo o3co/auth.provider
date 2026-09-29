@@ -14,15 +14,12 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = resolve(HERE, "..", "..", "..", "..");
 
 /**
- * Every non-private package that ships to npm — the eleven `@o3co/auth-provider-*`
- * libraries AND the `@o3co/create-auth-provider` scaffolder (`create-app`). Each
- * published `package.json` must declare the same `engines.node` floor so consumers
- * on an end-of-life Node see at least a warning — and a hard install failure with
- * `engines-strict=true`. The floor is Node 22 LTS: Node 18 (EOL 2025-04) and
- * Node 20 (EOL 2026-04) are past end-of-life, so 22 and 24 are the supported
- * LTS lines. Keep this list COMPLETE: a published package missing here can
- * silently drift to a different floor (as `webauthn` once did at `>=20.0.0`)
- * without this guard catching it.
+ * Every package published to npm (the `@o3co/auth-provider-*` libraries and
+ * the `@o3co/create-auth-provider` scaffolder) declares the same
+ * `engines.node` floor, so consumers on an end-of-life Node get a warning, and
+ * an install failure with `engines-strict=true`. The floor is Node 22 LTS;
+ * Node 18 and 20 are past end-of-life. Keep `PUBLISHED_PACKAGES` complete: a
+ * package missing there can drift to another floor unnoticed.
  */
 const REQUIRED_NODE_ENGINE = ">=22.0.0";
 

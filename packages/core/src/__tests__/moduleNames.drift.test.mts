@@ -15,26 +15,22 @@
  */
 
 /**
- * moduleNames.drift.test.mts — every module this repository ships is named
- * in kebab-case (#728): a module's configuration section is to be named
- * after the module verbatim, so the name must already be one a section can
- * carry — lower-case words of letters and digits joined by single hyphens,
- * `^[a-z][a-z0-9]*(-[a-z0-9]+)*$`.
+ * Every module this repository ships is named in kebab-case,
+ * `^[a-z][a-z0-9]*(-[a-z0-9]+)*$`, so a configuration section can be named
+ * after the module verbatim.
  *
- * What it reads, with TypeScript's parser: every `defineModule({ name })`
- * call in the product sources — outside `__tests__/` and not a `*.test.*`
- * or `*.spec.*` file — of every workspace's `src/`, the standalone template
- * and `tools/` included. A name is a string literal; a `const` in the same
- * file initialised with one; or a template literal, whose static parts must
- * form a kebab-case name with each substitution read as one kebab-case word
- * (`federation-oidc-${name}`: the OIDC module per federation, whose name is
- * the operator's federation name). Any other name is one the scan cannot
+ * Read with TypeScript's parser: every `defineModule({ name })` call in the
+ * product sources (outside `__tests__/`, not a `*.test.*` or `*.spec.*` file)
+ * of every workspace's `src/`, the standalone template and `tools/` included.
+ * A name is a string literal; a `const` in the same file initialised with
+ * one; or a template literal whose static parts must form a kebab-case name
+ * with each substitution read as one kebab-case word
+ * (`federation-oidc-${name}`, named per federation). Any other name cannot be
  * read, and fails as a name that is not kebab-case would.
  *
- * Test fixtures are not read: they never reach a deployment. Boot itself
- * does not refuse a module name that is not kebab-case — an out-of-tree
- * module named otherwise still boots, and a stage-1 refusal would break it —
- * so this holds the repository's own modules alone.
+ * Boot does not refuse a name that is not kebab-case, so an out-of-tree
+ * module named otherwise still boots; this holds the repository's own modules
+ * alone. Test fixtures are not read: they never reach a deployment.
  */
 
 import { type Dirent, readdirSync, readFileSync } from "node:fs";

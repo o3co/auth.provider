@@ -15,20 +15,17 @@
  */
 
 /**
- * An issuer entry's `clockToleranceSeconds` cannot switch its checks off.
- *
- * The tolerance is added to the lifetime ceiling and handed to jose for
- * `exp` / `nbf`. `NaN` and `Infinity` are numbers to both: `NaN` makes every
- * comparison false and `Infinity` makes every bound unreachable, so an entry
- * carrying either admitted an assertion that expired long ago, or one that
- * runs for a year. The string `"30s"` — a jose timespan, and what an untyped
- * store row can hold — concatenated onto the ceiling instead of adding to it.
+ * An issuer entry's `clockToleranceSeconds` cannot switch its checks off. The
+ * tolerance is added to the lifetime ceiling and handed to jose for `exp` /
+ * `nbf`: `NaN` makes every comparison false, `Infinity` makes every bound
+ * unreachable, and the string `"30s"` (a jose timespan, and what an untyped
+ * store row can hold) concatenates onto the ceiling instead of adding to it.
  *
  * So an entry's tolerance is a finite number of seconds from 0 to
  * `MAX_ASSERTION_CLOCK_TOLERANCE_SECONDS`, checked where an entry is
  * validated (`checkAssertionIssuerEntry`) and again when a registry hands one
- * to the verifier — a store-backed registry's rows are not validated on the
- * way out. The lifetime comparison fails closed on anything it cannot
+ * to the verifier, since a store-backed registry's rows are not validated on
+ * the way out. The lifetime comparison fails closed on anything it cannot
  * compare.
  */
 

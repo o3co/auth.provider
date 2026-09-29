@@ -15,18 +15,15 @@
  */
 
 /**
- * An `oauthTokenSettings` a host fills — through `bootstrapComponents` or
- * `overrideComponents` — may not name a token lifetime longer than the one
- * core resolves from the configuration.
- *
- * Retention is sized from the configuration: the default refresh-token family
- * modules keep a revoked family for the configured access-token maximum, and
- * the subject revocation boundary outlasts the configured lifetimes. Those
- * modules cannot read the slot, so a grant minting on a longer slot lifetime
- * would outlive the record that revokes its token. Boot refuses the pair,
- * naming the member and both values; a host map at stage 1, before any
+ * An `oauthTokenSettings` a host fills (through `bootstrapComponents` or
+ * `overrideComponents`) may not name a token lifetime longer than the one
+ * core resolves from the configuration. The default refresh-token family
+ * modules and the subject revocation boundary size their retention from the
+ * configuration and cannot read the slot, so a grant minting on a longer slot
+ * lifetime would outlive the record that revokes its token
+ * (docs/adapter-surface.md, `oauthTokenSettings`). Boot refuses the pair,
+ * naming the member and both values: a host map at stage 1, before any
  * provider runs, and a value a module provides where a reader first reads it.
- * A lifetime no longer than the configuration's boots.
  */
 
 import { describe, expect, it } from "vitest";

@@ -15,23 +15,15 @@
  */
 
 /**
- * What core mounts for the token endpoint applies to `/oauth/token` exactly —
- * in every spelling the token route itself answers (a trailing slash, any
- * letter case) — and to no longer path beneath it.
- *
- * Core mounted the composed `tokenBindingMw` and the `grantMiddleware`
- * contributions with `router.use("/oauth/token", ...)`, which matches every
- * path beneath `/oauth/token` as well: a later module's
- * `POST /oauth/token/custom` got the token endpoint's binding verdict — a
- * DPoP refusal that is none of its business — and ran its grant middleware.
- * The protected-resource sender-constraint check exempted the same sub-tree,
- * so a DPoP-bound access token replayed there as a plain Bearer was admitted.
- *
- * Exact without changing what a contribution sees: the middleware is still a
- * `use` mount, so `req.path`, `req.url` and `req.baseUrl` inside it are what
- * they were. And only for a POST — the token endpoint's one method — so a
- * later module's `GET /oauth/token` is neither judged as the token endpoint
- * nor exempt from the sender-constraint check.
+ * What core mounts for the token endpoint (the composed `tokenBindingMw`, the
+ * `grantMiddleware` contributions, the sender-constraint exemption) applies
+ * to a POST on `/oauth/token` exactly — in every spelling the token route
+ * itself answers (a trailing slash, any letter case) — and to no longer path
+ * beneath it. A later module's `POST /oauth/token/custom` or
+ * `GET /oauth/token` gets no binding verdict and no grant middleware, and is
+ * not exempt: a DPoP-bound access token replayed there as a plain Bearer is
+ * refused. The middleware is still a `use` mount, so `req.path`, `req.url`
+ * and `req.baseUrl` inside it are what such a mount gives.
  */
 
 import express, { type RequestHandler, Router } from "express";
@@ -240,9 +232,9 @@ describe("the token endpoint's middleware matches /oauth/token exactly", () => {
 
 describe("the sender-constraint exemption covers /oauth/token exactly", () => {
 	it("refuses a bound token replayed as a plain Bearer at a later module's POST /oauth/token/custom", async () => {
-		// Exempting the token endpoint's sub-tree left a route there guarded
-		// by neither profile: not the token endpoint's, which no longer runs
-		// beneath it, and not the protected resource's.
+		// Exempting the token endpoint's sub-tree would leave a route there
+		// guarded by neither profile: not the token endpoint's, which does not
+		// run beneath it, and not the protected resource's.
 		const { app } = await bootApp();
 
 		const res = await request(app)

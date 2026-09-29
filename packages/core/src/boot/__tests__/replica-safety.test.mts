@@ -9,16 +9,16 @@
  */
 
 /**
- * Issue #271 — `rateLimiter.adapter` and `userSessionStores.adapter` default
- * to `"memory"`, and nothing noticed when the service was scaled to multiple
- * replicas. User-session state forked per replica, so back-channel logout
- * reached only one of them and a "logged out" session stayed valid on the
- * others; rate limits multiplied by replica count. No boot signal fired.
+ * The replica-safety guard. `rateLimiter.adapter` and
+ * `userSessionStores.adapter` default to `"memory"`, whose state forks per
+ * replica: back-channel logout reaches only one replica and a "logged out"
+ * session stays valid on the others, and rate limits multiply by replica
+ * count.
  *
  * The guard reads the *installed modules* rather than the config: that is what
  * is actually wired, it survives a hand-built config, and it covers stores the
- * config switches do not name — a memory access-token denylist means a revoked
- * token stays valid on every other replica.
+ * config switches do not name (a memory access-token denylist means a revoked
+ * token stays valid on every other replica).
  */
 
 import { describe, expect, it, vi } from "vitest";
@@ -36,8 +36,8 @@ import { memorySessionStoresModule } from "#/user-sessions/modules/memory.mjs";
 const modules = (...names: string[]) => names.map((name) => ({ name }));
 
 /**
- * #455: a module that says so on its own manifest, the way a composition
- * root's module does — the guard has never heard its name.
+ * A module that says so on its own manifest, the way a composition root's
+ * module does: the guard has never heard its name.
  */
 const declaring = (name: string, reason = `${name} forks per replica — a test consequence`) => ({
 	name,
@@ -100,8 +100,8 @@ describe("checkReplicaSafety — multi mode fails closed", () => {
 describe("checkReplicaSafety — three states", () => {
 	it("warns when the mode is unset", () => {
 		// The operator has not said which shape this deployment is. That is the
-		// state the issue's 3am scenario starts from, so it is the one that has
-		// to be loud.
+		// state an unnoticed scale-out starts from, so it is the one that has to
+		// be loud.
 		const { logger: log, warn } = logger();
 		checkReplicaSafety({
 			modules: modules("core-session-stores-memory"),
@@ -176,9 +176,9 @@ describe("checkReplicaSafety — three states", () => {
 
 describe("REPLICA_UNSAFE_MODULES", () => {
 	it("covers the stores whose divergence is a security failure, not just a nuisance", () => {
-		// The issue named the session stores and the rate limiter. These two are
-		// worse and were not named: a revoked access token staying valid on
-		// other replicas, and DPoP proof-replay detection forking per replica.
+		// Worse than the session stores and the rate limiter: a revoked access
+		// token staying valid on other replicas, and DPoP proof-replay detection
+		// forking per replica.
 		expect(REPLICA_UNSAFE_MODULES).toContain("core-access-token-denylist-memory");
 		expect(REPLICA_UNSAFE_MODULES).toContain("core-replay-seen-set-memory");
 	});
@@ -190,14 +190,14 @@ describe("REPLICA_UNSAFE_MODULES", () => {
 });
 
 // ---------------------------------------------------------------------------
-// #455: the declaration lives on the manifest, not in a table of names
+// The declaration lives on the manifest, not in a table of names
 // ---------------------------------------------------------------------------
 
 describe("checkReplicaSafety — modules that declare replicaSafety on their manifest (#455)", () => {
-	// The standalone template wires its own in-memory modules
-	// (`standalone-in-memory-session-stores`, …) under names the core table
-	// had never heard of, so `deployment.mode = "multi"` booted with them.
-	// A module's manifest is where it says what it holds; the guard reads it.
+	// A composition root wires its own in-memory modules (the standalone
+	// template's `standalone-in-memory-session-stores`, …) under names core has
+	// never heard of. A module's manifest is where it says what it holds; the
+	// guard reads it.
 
 	it("refuses a declaring module in multi mode, naming it", () => {
 		const { logger: log } = logger();
@@ -298,7 +298,7 @@ describe("replicaUnsafeReason — reads the manifest (#455)", () => {
 	});
 
 	it("returns the bundled module's own declaration", () => {
-		// The nine bundled modules carry their reason on themselves now, so a
+		// The bundled modules carry their reason on themselves, so a
 		// composition root reusing the wording gets it from the manifest.
 		expect(replicaUnsafeReason(memorySessionStoresModule)).toBe(
 			memorySessionStoresModule.replicaSafety?.reason,
@@ -365,8 +365,8 @@ describe("checkReplicaSafety — wired into boot", () => {
 		);
 	});
 
-	// #455: a composition root's own module, under a name core has never
-	// seen, declaring what it holds. Exactly the shape the standalone's
+	// A composition root's own module, under a name core has never seen,
+	// declaring what it holds. Exactly the shape the standalone's
 	// `standalone-in-memory-session-stores` takes.
 	const holdsStateModule = defineModule({
 		name: "test:holds-state",

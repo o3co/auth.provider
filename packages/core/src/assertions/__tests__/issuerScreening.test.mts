@@ -16,14 +16,13 @@
 
 /**
  * An assertion's `iss` is the client's input, read before any signature is
- * checked, and it is handed to `AssertionIssuerRegistry.findIssuer` — a
- * registry a deployment may back with its own store, one that throws on
- * input it cannot handle. A registry that throws is an outage (`503`), so an
- * `iss` that cannot name an issuer — longer than 256 characters, or carrying
- * a control character: core's identifier rule, the one `client_id` is held
- * to — is refused without a lookup, the way an unknown issuer is. And an
- * issuer registered under such a name could never be reached, so
- * `checkAssertionIssuerEntry` refuses it.
+ * checked, and handed to `AssertionIssuerRegistry.findIssuer`, which a
+ * deployment may back with a store that throws on input it cannot handle. A
+ * registry that throws is an outage (`503`), so an `iss` that cannot name an
+ * issuer (longer than 256 characters, or carrying a control character: core's
+ * identifier rule, the one `client_id` is held to) is refused without a
+ * lookup, the way an unknown issuer is. An issuer registered under such a
+ * name could never be reached, so `checkAssertionIssuerEntry` refuses it.
  */
 
 import { generateKeyPairSync } from "node:crypto";

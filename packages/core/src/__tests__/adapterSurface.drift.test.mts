@@ -15,27 +15,13 @@
  */
 
 /**
- * `docs/adapter-surface.md` vs. the slots that actually exist (#305).
+ * Checks `docs/adapter-surface.md` against the slots that exist. A stale
+ * inventory reads as authoritative while omitting the slot someone needs.
  *
- * The epic's last open item is documenting the adapter surface "so implementers
- * cannot drift across it". A document that lists 49 slots drifts the week after
- * it is written unless something checks it, and a stale inventory is worse than
- * none: it reads as authoritative while omitting the slot someone is looking
- * for.
- *
- * Three directions, each for a way this goes wrong:
- *
- *  1. **Every declared slot is documented.** The new-slot case — added to
- *     `ComponentMap`, never written down.
- *  2. **Every documented slot still exists.** The removal case — the doc keeps
- *     describing a seam that is gone, and someone builds against it.
- *  3. **Every file the doc names is on disk.** The doc points implementers at
- *     conformance suites by path; a path that does not resolve sends them
- *     looking for something that was moved or never landed. This one caught a
- *     real mistake on its first run.
- *
- * Modelled on `campaignVocabulary.drift.test.mts`, which does the same job for
- * the design-campaign index.
+ *  1. Every declared slot is documented (a slot added to `ComponentMap`).
+ *  2. Every documented slot still exists (the doc describes a removed seam).
+ *  3. Every file the doc names is on disk: a conformance-suite path that does
+ *     not resolve sends implementers looking for something moved or missing.
  */
 
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
@@ -127,9 +113,6 @@ describe("adapter-surface inventory (#305)", () => {
 	});
 
 	it("cites only files that exist", () => {
-		// The doc points implementers at conformance suites by path. A path that
-		// does not resolve sends them looking for something that was moved or
-		// never landed.
 		const missing = citedPaths().filter((p) => !existsSync(join(repoRoot, p)));
 		expect(missing).toEqual([]);
 	});
@@ -142,16 +125,13 @@ describe("adapter-surface inventory (#305)", () => {
 });
 
 // ---------------------------------------------------------------------------
-// Absence policies (#458)
+// Absence policies
 //
-// The lifecycle section says which optional slots carry an `AbsencePolicy`.
-// That sentence was written for #363's three and never learned about
-// `deviceCodeStore` (#443) — the same "reads as authoritative while omitting
-// the one you are looking for" failure as a stale slot table, and the slot
-// guard above could not see it because it checks names, not this list. So
-// the list is a table now, checked the same way: one row per `slot: <POLICY>`
-// attachment in a module manifest, quoting the config line each policy's
-// constant names as the declaration.
+// The lifecycle section's table of optional slots that carry an
+// `AbsencePolicy`, checked like the slot table: one row per `slot: <POLICY>`
+// attachment in a module manifest, quoting the config line each policy
+// constant names as the declaration. The slot guard above checks names only
+// and cannot see this table.
 // ---------------------------------------------------------------------------
 
 interface AbsencePolicyInventory {

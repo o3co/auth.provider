@@ -15,21 +15,14 @@
  */
 
 /**
- * The declared-absence guard (#363).
+ * The declared-absence guard: a module attaches an `absencePolicies` entry to
+ * an optional key, and stage 1 refuses boot when the slot is unfilled and the
+ * config does not carry the policy's declared-absent value. Absence of such a
+ * capability has to be declared; it is never a silent no-op.
  *
- * An `optional` manifest key used to mean "absence is indistinguishable from
- * nothing-to-do", and three shipped silent no-ops came from exactly that:
- * revocation with no denylist (#277), a subject-revocation watermark nothing
- * read (#322), and an unwired audit sink discarding every security event
- * (#287). #277 hand-rolled the answer — refuse boot unless the capability is
- * declared absent in config — as a key-specific check. `absencePolicies`
- * makes that answer a manifest vocabulary: a module attaches a policy to an
- * optional key, and stage 1 refuses boot when the slot is unfilled and the
- * config does not carry the policy's declared-absent value.
- *
- * `auditSink` is both the first real policy and the test subject here: the
- * three bundled modules that read it declare `AUDIT_SINK_ABSENCE_POLICY`, so
- * a composition without a sink must say `audit.sink.type = "none"` out loud.
+ * `auditSink` is the test subject: the three bundled modules that read it
+ * declare `AUDIT_SINK_ABSENCE_POLICY`, so a composition without a sink must
+ * say `audit.sink.type = "none"` out loud.
  */
 import { describe, expect, it } from "vitest";
 import { AUDIT_SINK_ABSENCE_POLICY, createApp, defineModule } from "../../index.mjs";
@@ -71,7 +64,7 @@ const auditProviderModule = defineModule({
 });
 
 /**
- * `makeValidAppConfig` deliberately carries `audit.sink.type = "none"` (#363)
+ * `makeValidAppConfig` deliberately carries `audit.sink.type = "none"`
  * so ordinary module tests boot without a sink; the fixture for THIS suite
  * strips that declaration, because the undeclared state is the subject.
  */

@@ -15,24 +15,16 @@
  */
 
 /**
- * `ModuleSpec.authoritative` (#728): the keys a module provides that no
- * composition may substitute while the module is loaded, because other
- * modules read them as that module's own settings, derived from its section.
- * An override is a second source for them by construction, and the module's
- * own code would go on reading the section while every other reader followed
- * the override.
+ * `ModuleSpec.authoritative`: the keys a module provides that no composition
+ * may substitute while the module is loaded (docs/adapter-surface.md, "What
+ * one module owns and others read").
  *
- * - A key a module names authoritative and does not provide refuses boot
- *   (`authoritative-without-provides`), as a lifecycle for an unprovided key
- *   does.
- * - An `overrideComponents` entry for an authoritative key of a loaded module
- *   refuses boot (`authoritative-component-overridden`), naming the module
- *   and the key.
- * - A `bootstrapComponents` entry for it is refused as for any provided key
- *   (`bootstrap-component-collision`).
- * - With the module not loaded, an override of the key is allowed: a
- *   composition without the owner fills the slot itself. And a key the module
- *   provides without naming it authoritative may be overridden, as before.
+ * Boot refuses a named key the module does not provide
+ * (`authoritative-without-provides`), an override of a loaded module's
+ * authoritative key (`authoritative-component-overridden`), and a bootstrap
+ * entry for it, as for any provided key (`bootstrap-component-collision`).
+ * An override is allowed when the module is not loaded, or when the key is
+ * provided without being named authoritative.
  */
 
 import { describe, expect, expectTypeOf, it } from "vitest";

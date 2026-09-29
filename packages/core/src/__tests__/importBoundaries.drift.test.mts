@@ -16,16 +16,12 @@
 
 /**
  * The import edges between core's directories that `src/README.md` states as
- * rules and a test holds.
- *
- * Most of the boundaries that README draws are kept by review. The ones here
- * are kept by this suite because each was an entanglement that was taken
- * apart, and putting it back is one import away and looks harmless in a
- * diff: two directories importing each other's values (`jwks/` and `routes/`
- * did, through the JWKS router), `replay-seen-set/` reaching into
- * `challenges/` for the pieces the two share, instead of both taking them
- * from the `single-use/` leaf, and a leaf taking on a dependency — which
- * makes everything that imports the leaf depend on it too.
+ * rules and a test holds. The README's other boundaries are kept by review;
+ * these are the ones where an entanglement is one import away and looks
+ * harmless in a diff: two directories importing each other's values,
+ * `replay-seen-set/` reaching into `challenges/` for the pieces the two share
+ * instead of both taking them from the `single-use/` leaf, and a leaf taking
+ * on a dependency, which everything that imports the leaf then depends on.
  *
  * Read with TypeScript's parser rather than a pattern, because the rules turn
  * on whether an import is type-only: `import type` / `export type`, a clause
@@ -38,9 +34,8 @@
  * in core's product code" fails on it: core imported by its own package name,
  * an `import()` or `require()` of a computed specifier, a `require()` of a
  * core file, and an `import … = require(…)`. A `require()` is a call through
- * `require` or through a name bound to a call of `createRequire` — imported
- * from `node:module` or `module` by name or aliased, or reached as a member
- * of that module's namespace or default import.
+ * `require` or through a name bound to a call of `createRequire`, however
+ * `node:module` or `module` provides it (see `scanSource`).
  */
 
 import { type Dirent, readdirSync, readFileSync } from "node:fs";
@@ -542,9 +537,8 @@ describe("no two of core's files import each other's values", () => {
 
 describe("no two of core's directories import each other's values", () => {
 	it("finds no value cycle between directories but the ones that stand", () => {
-		// `jwks/module.mts` contributed the router in `routes/Jwks.mts`, which
-		// read the path rule and `Cache-Control` back from `jwks/`. Publishing
-		// the key set is one job, so its router lives in `jwks/`.
+		// Publishing the key set is one job, so its router lives in `jwks/`,
+		// beside the path rule and `Cache-Control` it reads.
 		expect(valueCycles(nodeOf)).toEqual(
 			STANDING_VALUE_CYCLES.map((cycle) => [...cycle.members].sort()).sort((a, b) =>
 				(a[0] ?? "").localeCompare(b[0] ?? ""),

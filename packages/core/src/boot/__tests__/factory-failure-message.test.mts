@@ -15,19 +15,17 @@
  */
 
 /**
- * boot/__tests__/factory-failure-message.test.mts — what a boot failure's
- * message carries of the error a factory threw.
+ * What a boot failure's message carries of the error a factory threw.
  *
- * A boot failure ends the process, and Node prints it — message, fields and
- * cause chain — to stderr, where a deployment's log shipper reads it. The
- * message used to be the factory's error flattened with `String(...)`: a
+ * A boot failure ends the process, and Node prints it (message, fields and
+ * cause chain) to stderr, where a deployment's log shipper reads it. A
  * parser's error quotes its input, and js-yaml's quotes the lines around the
- * fault, so a typo in `clients.yaml` printed the neighbouring clients'
- * secrets at boot. The message now names the error by `loggableError`'s
- * rules — its name and message, nothing of a SyntaxError's text, a Redis
- * reply's echoed arguments cut, only the kind of a value that is not an
- * Error — without a log field's length cap, since a refusal's advice is
- * often longer; the error itself is still the BootError's `cause`.
+ * fault, so flattening it with `String(...)` would print a `clients.yaml`
+ * typo's neighbouring client secrets. The message names the error by
+ * `loggableError`'s rules (its name and message, nothing of a SyntaxError's
+ * text, a Redis reply's echoed arguments cut, only the kind of a value that
+ * is not an Error), without a log field's length cap, since a refusal's
+ * advice is often longer. The error itself is still the BootError's `cause`.
  */
 
 import fs from "node:fs";

@@ -15,22 +15,16 @@
  */
 
 /**
- * Boot-time detection of the v0.7 → v0.8 token-binding migration hazard
- * (#199 I4 / R3).
+ * boot/__tests__/token-binding-surface-overlap.test.mts — the boot warning
+ * for a `grantMiddleware`-mounted `tokenBindingMw` next to contributed
+ * `tokenBindingMechanisms`.
  *
- * A consumer who migrates to `tokenBindingMechanisms` but leaves their v0.7
- * `grantMiddleware`-mounted `tokenBindingMw` in place ends up with BOTH
- * surfaces active. `assembleApp` mounts the composed middleware first and
- * `grantMiddleware` contributions after, and `tokenBindingMw` assigns
- * `req.tokenBinding` unguarded — so the leftover legacy middleware wins on
- * every request and the `dispatch-policy` configured for the new surface is
- * silently inert.
- *
- * The failure mode looks exactly like success: no error, no behavioral
- * signal, and the new surface still appears wired. These tests pin the boot
- * warning that makes it visible, and pin that it does NOT fire for the two
- * legitimate shapes — a non-token-binding `grantMiddleware` alongside
- * mechanisms, and an un-migrated v0.7 deployment with no mechanisms at all.
+ * `assembleApp` mounts the composed middleware first and `grantMiddleware`
+ * contributions after, and `tokenBindingMw` assigns `req.tokenBinding`
+ * unguarded, so the legacy middleware wins on every request and the
+ * configured `dispatch-policy` is silently inert. The warning does not fire
+ * for a non-token-binding `grantMiddleware` alongside mechanisms, nor for a
+ * deployment with no mechanisms at all.
  */
 
 import express, { type Request, type RequestHandler, Router } from "express";
@@ -90,7 +84,7 @@ const mtlsMech: TokenBindingMechanism = {
 	}),
 };
 
-/** Module contributing through the current (v0.8+) surface. */
+/** Module contributing through the `tokenBindingMechanisms` surface. */
 const mechanismModule = (name: string, mechanism: TokenBindingMechanism) =>
 	defineModule({
 		name,
@@ -99,7 +93,7 @@ const mechanismModule = (name: string, mechanism: TokenBindingMechanism) =>
 		contributes: { tokenBindingMechanisms: [() => mechanism] },
 	});
 
-/** Module contributing a pre-composed `tokenBindingMw` the v0.7 way. */
+/** Module contributing a pre-composed `tokenBindingMw` through `grantMiddleware`. */
 const legacyTokenBindingModule = (name: string, mechanism: TokenBindingMechanism) =>
 	defineModule({
 		name,
@@ -263,8 +257,7 @@ describe("token-binding surface overlap — boot warning (#199 I4)", () => {
 	});
 
 	it("does not warn for an un-migrated v0.7 deployment (legacy surface only)", async () => {
-		// Nothing is being overridden here — this is simply the pre-migration
-		// composition still working as it did. Warning would be noise.
+		// With no mechanisms nothing is overridden: a warning would be noise.
 		const warns: CapturedWarn[] = [];
 		const handle = await createApp({
 			modules: [routeModule(), legacyTokenBindingModule("legacy-surface", mtlsMech)],

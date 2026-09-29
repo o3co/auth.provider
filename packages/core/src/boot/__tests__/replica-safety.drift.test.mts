@@ -15,40 +15,26 @@
  */
 
 /**
- * Issue #304 — the replica-safety guard must not fall behind the modules.
+ * The replica-safety guard must not fall behind the modules.
  *
- * #271 shipped the guard: `deployment.mode = "multi"` with an in-process state
- * store wired refuses to boot, naming each offender and what diverges. Until
- * #455 it worked off a hand-maintained table keyed by module name, and
- * hand-maintained was the problem #304 is about: the next in-memory adapter
- * someone adds is replica-unsafe the moment it exists and silent until someone
- * remembers the table. #455 found the other edge of the same gap — a
- * composition root's *own* modules, under names core has never seen, booted
- * under `"multi"` with their state in memory.
- *
- * So the declaration now lives on the manifest (`replicaSafety`), where the
- * module is, and the guard reads it. What this suite checks is that the
- * declaration is actually made: every bundled module whose name marks it as
- * memory-backed must declare `replicaSafety` on itself, or be exempted in
- * `SAFE_MEMORY_MODULES` with a reason. Adding an adapter without doing either
- * fails this test, which is the point at which the decision is cheap.
+ * Under `deployment.mode = "multi"`, a wired in-process state store refuses
+ * boot, naming each offender and what diverges. The guard reads the module's
+ * own manifest declaration (`replicaSafety`), so this suite checks that the
+ * declaration is made: every bundled module whose name marks it as
+ * memory-backed must declare `replicaSafety`, or be exempted in
+ * `SAFE_MEMORY_MODULES` with a reason. Adding an adapter without either fails
+ * here, where the decision is cheap.
  *
  * `REPLICA_UNSAFE_MODULES` stays exported for deployments that assert on the
- * set from their own tests. It is derived from core's bundled modules, so the
- * other check here is that it names exactly the core modules that declare —
- * a declaring module left out of the derived list would still be refused at
- * boot, but the exported set would lie about it.
+ * set. It is derived from core's bundled modules, so this suite also checks
+ * that it names exactly the core modules that declare; otherwise a declaring
+ * module would still be refused at boot, but the exported set would lie.
  *
- * Scanned from source rather than from an import graph on purpose: a module
- * that is not yet wired into any bundle is exactly the one that would slip
- * through, and it is still a module someone can compose.
- *
- * Comments are stripped first. `defineModule` appears inside JSDoc `@example`
- * blocks — `define-module.mts` documents itself with one — and a scan that
- * counts those is picking up names no module has. Harmless today (the example
- * is called `my-module`), a false failure the day someone writes an example
- * with `memory` in the name, and quietly wrong in the other direction too:
- * an inflated list makes the exact-set assertion weaker than it reads.
+ * Scanned from source rather than from an import graph: a module not yet
+ * wired into any bundle is exactly the one that would slip through, and it
+ * can still be composed. Comments are stripped first, because `defineModule`
+ * appears in JSDoc `@example` blocks, and counting those would pick up names
+ * no module has and weaken the exact-set assertion.
  */
 
 import { readdirSync, readFileSync, statSync } from "node:fs";
@@ -65,22 +51,17 @@ import {
 const repoRoot = fileURLToPath(new URL("../../../../..", import.meta.url));
 
 /**
- * Memory-backed modules that are NOT replica-unsafe, with why.
- *
- * Empty today, and that is the honest state: every in-process state store this
- * repository bundles forks per replica. The list exists so a future exemption
- * has to be written down next to its reason rather than argued in a review
- * comment and forgotten.
+ * Memory-backed modules that are NOT replica-unsafe, with why. Empty: every
+ * in-process state store this repository bundles forks per replica. An
+ * exemption has to be written down here next to its reason.
  */
 const SAFE_MEMORY_MODULES: Readonly<Record<string, string>> = {};
 
 /**
  * Remove block and line comments so documentation examples are not read as
  * code. Deliberately not a parser: this only has to be right about `/* … *\/`
- * and `// …`, and pulling a TypeScript AST in to find one call expression
- * would be a heavier dependency than the check is worth. The test below pins
- * that the known doc example is excluded, so a regression in this shows up
- * as a failure rather than as silence.
+ * and `// …`, and a TypeScript AST would be a heavier dependency than the
+ * check is worth. The test below pins that the known doc example is excluded.
  */
 function stripComments(source: string): string {
 	return source.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:])\/\/[^\n]*/g, "$1");
@@ -198,17 +179,14 @@ describe("replica-safety declarations vs. the modules that exist (#304, #455)", 
 		// back with a reason attached.
 		expect(replicaUnsafeReason({ name: "core-rate-limiter-redis" })).toBeUndefined();
 		expect(replicaUnsafeReason({ name: "not-a-module-at-all" })).toBeUndefined();
-		// Prototype keys are not entries — `in` on a table would have said
-		// otherwise, and a manifest read must not either.
+		// Prototype keys are not entries, whatever `in` on a plain object says.
 		expect(replicaUnsafeReason({ name: "toString" })).toBeUndefined();
 		expect(replicaUnsafeReason({ name: "constructor" })).toBeUndefined();
 	});
 
 	it("the operator runbook's table names every core module that declares", () => {
 		// `docs/operator-runbook.md` §1 is where an operator reads what `multi`
-		// refuses, and says the table lists core's declaring modules. It missed
-		// the consent store (#527) for a release (v0.13.0 audit); an operator
-		// reading it was told of nine, and the boot refused ten.
+		// refuses, and it says its table lists core's declaring modules.
 		const runbook = readFileSync(join(repoRoot, "docs/operator-runbook.md"), "utf8");
 		const missing = REPLICA_UNSAFE_MODULES.filter((name) => !runbook.includes(`| \`${name}\``));
 		expect(missing).toEqual([]);
