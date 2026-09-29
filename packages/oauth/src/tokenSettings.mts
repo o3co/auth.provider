@@ -28,10 +28,11 @@
  *   router refuses the same issuer at construction;
  * - the lifetimes through core's `resolveAccessTokenLifetime` (the
  *   deprecated `expiresIn` read in its place) and `resolveRefreshTokenLifetime`;
- * - the dispatch policy through core's `resolveTokenBindingDispatchPolicy`,
- *   the one reading of `oauth.tokenBinding.dispatch-policy`, which boot reads
- *   through in a composition without this module;
  * - every switch on only when it is `true`.
+ *
+ * The token-binding dispatch policy is not among them, though its key sits in
+ * `oauth {}`: it is core's, the owner of the token-binding extension point,
+ * and core reads it itself (#728).
  *
  * The whole is frozen, the nested members too, so no reader can change what
  * the others read.
@@ -44,7 +45,6 @@ import {
 	type OAuthTokenSettings,
 	resolveAccessTokenLifetime,
 	resolveRefreshTokenLifetime,
-	resolveTokenBindingDispatchPolicy,
 } from "@o3co/auth-provider-core";
 
 /** The keys of `oauth {}` the settings are read from, as a configuration may carry them. */
@@ -73,11 +73,8 @@ export function oauthTokenSettingsFrom(config: AppConfig): OAuthTokenSettings {
 		legacyTypAccept: oauth?.jwt?.legacyTypAccept === true,
 		accessTokenLifetime: Object.freeze({ defaultExpiresIn, maxExpiresIn }),
 		refreshTokenExpiresIn: resolveRefreshTokenLifetime(config),
-		tokenBinding: Object.freeze({
-			dispatchPolicy: resolveTokenBindingDispatchPolicy(config),
-			bindConfidentialClientRefreshTokens:
-				oauth?.tokenBinding?.bindConfidentialClientRefreshTokens === true,
-		}),
+		bindConfidentialClientRefreshTokens:
+			oauth?.tokenBinding?.bindConfidentialClientRefreshTokens === true,
 		resourceIndicatorEnabled: oauth?.resourceIndicator?.enabled === true,
 		requireEmailVerified: oauth?.requireEmailVerified === true,
 	});

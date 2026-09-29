@@ -21,8 +21,8 @@
  * when the value breaks the rule. What it holds the settings to is what the
  * configuration schema holds `oauth {}` to, resolved: a canonical issuer,
  * lifetimes within the one-year ceiling with the access-token default not
- * above its max, a dispatch policy of the two, every switch a boolean — and
- * the whole frozen. `createTestOAuthTokenSettings` answers the fixture
+ * above its max, every switch a boolean, no token-binding dispatch policy —
+ * the policy is core's — and the whole frozen. `createTestOAuthTokenSettings` answers the fixture
  * configuration's settings, resolved, with any member replaced; it checks
  * nothing, so a test of a broken value builds it here. Published on
  * `@o3co/auth-provider-core/testing`.
@@ -31,20 +31,14 @@
 import assert from "node:assert/strict";
 import { type AccessTokenLifetime, isLifetimeSeconds } from "../../config/application.schema.mjs";
 import { checkCanonicalIssuer, describeIssuerRejection } from "../../issuer/canonical.mjs";
-import type { DispatchPolicy } from "../../middleware/tokenBinding.mjs";
 import type { ContractCase } from "../../session-admission/testing/requirement.contract.mjs";
-import type { OAuthTokenBindingSettings, OAuthTokenSettings } from "../../token-settings/types.mjs";
+import type { OAuthTokenSettings } from "../../token-settings/types.mjs";
 import { unfrozenPath } from "./shared.mjs";
 
 export interface OAuthTokenSettingsContractInput {
 	/** The settings under test, built afresh for each case: a provider's, over the configuration its test chose. */
 	readonly build: () => OAuthTokenSettings;
 }
-
-const DISPATCH_POLICIES: ReadonlySet<unknown> = new Set<DispatchPolicy>([
-	"intent-explicit",
-	"strict-mutual-exclusion",
-]);
 
 const lifetime = (value: unknown, what: string): void => {
 	assert.ok(
@@ -90,13 +84,15 @@ export function oauthTokenSettingsContract(
 			},
 		},
 		{
-			name: "the dispatch policy is intent-explicit or strict-mutual-exclusion",
+			name: "carries no token-binding dispatch policy: the policy is core's",
 			run: async () => {
-				const policy = build().tokenBinding?.dispatchPolicy;
-				assert.ok(
-					DISPATCH_POLICIES.has(policy),
-					`tokenBinding.dispatchPolicy must be "intent-explicit" or "strict-mutual-exclusion" (got ${String(policy)})`,
-				);
+				const settings = build() as unknown as Record<string, unknown>;
+				for (const member of ["tokenBinding", "dispatchPolicy"]) {
+					assert.ok(
+						!(member in settings),
+						`the settings carry ${member}: the token-binding dispatch policy is core's, the owner of the token-binding extension point, which reads it from its own configuration — a slot that carried it would be a second source (#728)`,
+					);
+				}
 			},
 		},
 		{
@@ -105,8 +101,7 @@ export function oauthTokenSettingsContract(
 				const settings = build();
 				const switches: Record<string, unknown> = {
 					legacyTypAccept: settings.legacyTypAccept,
-					"tokenBinding.bindConfidentialClientRefreshTokens":
-						settings.tokenBinding?.bindConfidentialClientRefreshTokens,
+					bindConfidentialClientRefreshTokens: settings.bindConfidentialClientRefreshTokens,
 					resourceIndicatorEnabled: settings.resourceIndicatorEnabled,
 					requireEmailVerified: settings.requireEmailVerified,
 				};
@@ -139,7 +134,7 @@ export interface TestOAuthTokenSettingsOverrides {
 	readonly legacyTypAccept?: boolean;
 	readonly accessTokenLifetime?: Partial<AccessTokenLifetime>;
 	readonly refreshTokenExpiresIn?: number;
-	readonly tokenBinding?: Partial<OAuthTokenBindingSettings>;
+	readonly bindConfidentialClientRefreshTokens?: boolean;
 	readonly resourceIndicatorEnabled?: boolean;
 	readonly requireEmailVerified?: boolean;
 }
@@ -147,7 +142,7 @@ export interface TestOAuthTokenSettingsOverrides {
 /**
  * The settings of the fixture configuration (`makeValidCoreConfig`),
  * resolved — its issuer, a 3600-second access token, a 86400-second
- * refresh token, the `intent-explicit` policy, every switch off — with
+ * refresh token, every switch off — with
  * `overrides` applied, frozen all the way down.
  */
 export function createTestOAuthTokenSettings(
@@ -161,11 +156,7 @@ export function createTestOAuthTokenSettings(
 			maxExpiresIn: overrides.accessTokenLifetime?.maxExpiresIn ?? 3600,
 		}),
 		refreshTokenExpiresIn: overrides.refreshTokenExpiresIn ?? 86_400,
-		tokenBinding: Object.freeze({
-			dispatchPolicy: overrides.tokenBinding?.dispatchPolicy ?? "intent-explicit",
-			bindConfidentialClientRefreshTokens:
-				overrides.tokenBinding?.bindConfidentialClientRefreshTokens ?? false,
-		}),
+		bindConfidentialClientRefreshTokens: overrides.bindConfidentialClientRefreshTokens ?? false,
 		resourceIndicatorEnabled: overrides.resourceIndicatorEnabled ?? false,
 		requireEmailVerified: overrides.requireEmailVerified ?? false,
 	});

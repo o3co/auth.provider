@@ -40,6 +40,7 @@ import { protectedResourceBindingMw } from "../middleware/protectedResourceBindi
 import { terminalErrorHandler } from "../middleware/terminalError.mjs";
 import {
 	type DispatchPolicy,
+	resolveTokenBindingDispatchPolicy,
 	type TokenBindingMechanism,
 	tokenBindingMw,
 } from "../middleware/tokenBinding.mjs";
@@ -47,7 +48,7 @@ import type { ComponentKey } from "../modules/manifest/component-map.mjs";
 import { normalizeAllowedOrigins } from "../net/origin.mjs";
 import type { InternalReadinessRegistrar } from "../readiness/types.mjs";
 import { failureDetail } from "./failure-summary.mjs";
-import { compositionDispatchPolicy, compositionIssuer } from "./oauth-token-settings.mjs";
+import { compositionIssuer } from "./oauth-token-settings.mjs";
 import type {
 	AppHandle,
 	CleanupRecord,
@@ -783,10 +784,10 @@ export function assembleApp(
 			if (m !== null) mechanisms.push(m);
 		}
 		if (mechanisms.length > 0) {
-			// The oauth module's `oauthTokenSettings` when the composition holds
-			// it (#728), otherwise the configuration's key, read as before.
-			const dispatchPolicy: DispatchPolicy = compositionDispatchPolicy(
-				frozen.components as Record<string, unknown>,
+			// Core's own policy, for core's own extension point (#728): read
+			// from the configuration in every composition, never from a slot.
+			const dispatchPolicy: DispatchPolicy = resolveTokenBindingDispatchPolicy(
+				(frozen.components as Record<string, unknown>).config,
 			);
 			const logger = (frozen.components as Record<string, unknown>).logger as Logger | undefined;
 			const composed = tokenBindingMw({ mechanisms, dispatchPolicy, logger });

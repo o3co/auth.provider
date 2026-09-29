@@ -179,10 +179,11 @@ export type DispatchPolicy = "intent-explicit" | "strict-mutual-exclusion";
  * `strict-mutual-exclusion` when it says so, `intent-explicit` otherwise —
  * an absent key included.
  *
- * The one reading of the key (#728): the oauth module resolves the policy of
- * its `oauthTokenSettings` through it, and boot reads it through this in a
- * composition without that module. Takes any value, since boot holds the
- * configuration as the parsed component and the oauth module as its own.
+ * The one reading of the key. The policy is core's, the owner of the
+ * token-binding extension point it arbitrates (#728): boot reads it through
+ * this in every composition, and no slot carries it — not the oauth module's
+ * `oauthTokenSettings`, though the key sits in `oauth {}` until the
+ * configuration moves. Takes any value, as boot holds the configuration.
  */
 export function resolveTokenBindingDispatchPolicy(config: unknown): DispatchPolicy {
 	const raw = (config as { oauth?: { tokenBinding?: { "dispatch-policy"?: unknown } } } | null)

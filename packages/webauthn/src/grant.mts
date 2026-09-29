@@ -637,7 +637,7 @@ export const createWebAuthnGrant = (deps: WebAuthnGrantDeps): GrantHandler => {
 				// access token, which has no such second credential behind it.
 				const isPublicClient = client.tokenEndpointAuthMethod === "none";
 				const bindConfidentialClients =
-					tokenSettings?.tokenBinding.bindConfidentialClientRefreshTokens ??
+					tokenSettings?.bindConfidentialClientRefreshTokens ??
 					config.oauth.tokenBinding?.bindConfidentialClientRefreshTokens === true;
 				const bindRefreshToken =
 					(bindingIsDpop || bindingIsMtls) && (isPublicClient || bindConfidentialClients);

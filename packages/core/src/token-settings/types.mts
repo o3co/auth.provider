@@ -33,6 +33,14 @@
  * where they live once `oauth {}` is the oauth module's alone is decided
  * with that move.
  *
+ * Nor is the token-binding dispatch policy (`oauth.tokenBinding.dispatch-policy`),
+ * though it sits in `oauth {}` today: it arbitrates between the mechanisms
+ * contributed to core's token-binding extension point, and the extension
+ * point's owner, core, owns the policy (#728). Core reads it with its own
+ * `resolveTokenBindingDispatchPolicy`, in every composition, and a slot that
+ * carried it would be a second source for it; the contract refuses one that
+ * does. Where the key lives is decided with the move of the configuration.
+ *
  * Not every module can read the slot. The boot planner orders modules, not
  * components: a module that reads a key depends on the whole module providing
  * it. So no module in the oauth module's dependency set — the providers of its
@@ -52,22 +60,6 @@
  */
 
 import type { AccessTokenLifetime } from "../config/application.schema.mjs";
-import type { DispatchPolicy } from "../middleware/tokenBinding.mjs";
-
-/** The settings that apply across every token-binding mechanism installed (DPoP, mTLS). */
-export interface OAuthTokenBindingSettings {
-	/**
-	 * `oauth.tokenBinding.dispatch-policy`: how core's token-binding middleware
-	 * arbitrates between the mechanisms contributed as `tokenBindingMechanisms`.
-	 */
-	readonly dispatchPolicy: DispatchPolicy;
-	/**
-	 * `oauth.tokenBinding.bindConfidentialClientRefreshTokens`, `false` when
-	 * unset: whether a confidential client's refresh token is bound to the key
-	 * or certificate presented, as a public client's always is (#275).
-	 */
-	readonly bindConfidentialClientRefreshTokens: boolean;
-}
 
 export interface OAuthTokenSettings {
 	/**
@@ -89,7 +81,12 @@ export interface OAuthTokenSettings {
 	readonly accessTokenLifetime: AccessTokenLifetime;
 	/** `oauth.refreshToken.expiresIn`, in seconds, as `resolveRefreshTokenLifetime` reads it. */
 	readonly refreshTokenExpiresIn: number;
-	readonly tokenBinding: OAuthTokenBindingSettings;
+	/**
+	 * `oauth.tokenBinding.bindConfidentialClientRefreshTokens`, `false` when
+	 * unset: whether a grant binds a confidential client's refresh token to the
+	 * key or certificate presented, as it always binds a public client's (#275).
+	 */
+	readonly bindConfidentialClientRefreshTokens: boolean;
 	/**
 	 * `oauth.resourceIndicator.enabled`, `false` when unset: whether RFC 8707
 	 * resource indicators decide a token's audience.
