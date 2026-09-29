@@ -26,7 +26,8 @@
  *   bytes, with a duplicate id (core's sealing rules, under the key it was
  *   read from), and with the published development sample key wherever the
  *   configuration was selected as production or staging, `NODE_ENV` says so,
- *   or `deployment.mode = "multi"`. No refusal quotes a key or an id.
+ *   or the deployment mode (the `deploymentMode` slot's value, which the MFA
+ *   module passes) is `multi`. No refusal quotes a key or an id.
  * - TOTP's parameters are held to their ranges: digits 6-8, period 15-120 s,
  *   window 0-2, SHA1, SHA256 or SHA512; the issuer defaults to the host
  *   `oauth.jwt.issuer` names.
@@ -80,7 +81,6 @@ const TRANSACTION = {
 /** A configuration as the composition root hands it, with `mfa` as given. */
 const configWith = (mfa: Record<string, unknown>, extra: Record<string, unknown> = {}) => ({
 	oauth: { jwt: { issuer: "https://auth.example" } },
-	deployment: { mode: "single" },
 	...extra,
 	mfa: { mode: "off", ...mfa },
 });
@@ -384,12 +384,30 @@ describe("the development sample key", () => {
 		expect(readMfaSettings(sample(), { environment: "prod" }).encryptionKeys).toHaveLength(1);
 	});
 
-	it("is refused under deployment.mode = multi, in any environment", () => {
+	it('is refused when the deployment mode is "multi", in any environment', () => {
 		vi.stubEnv("NODE_ENV", "development");
 		const message = refusal(() =>
-			readMfaSettings(sample({ deployment: { mode: "multi" } }), { environment: "development" }),
+			readMfaSettings(sample(), { environment: "development", deploymentMode: "multi" }),
 		);
 		expect(message).toContain('deployment.mode is "multi"');
+	});
+
+	it("reads the deployment mode it is given, not the configuration's deployment section", () => {
+		vi.stubEnv("NODE_ENV", "development");
+		for (const deploymentMode of ["single", "unset"] as const) {
+			expect(
+				readMfaSettings(sample({ deployment: { mode: "multi" } }), {
+					environment: "development",
+					deploymentMode,
+				}).developmentSampleKeyAccepted,
+				deploymentMode,
+			).toBe(true);
+		}
+		expect(
+			refusal(() =>
+				readMfaSettings(sample({ deployment: { mode: "single" } }), { deploymentMode: "multi" }),
+			),
+		).toContain('deployment.mode is "multi"');
 	});
 
 	it("is refused wherever it sits in the ring, since every key opens", () => {
