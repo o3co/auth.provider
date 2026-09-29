@@ -74,7 +74,7 @@ describe("TS-3: RedisUserSessionStore.get — corrupt envelope validation", () =
 
 		const result = await store.get("sid-bad");
 		expect(result).toBeNull();
-		// Object-first per the D-4 Logger interface: structured fields are the
+		// Object-first per the Logger interface: structured fields are the
 		// 1st arg, the human-readable message is the 2nd arg.
 		expect(logger.warn).toHaveBeenCalledWith(
 			expect.objectContaining({ sid: "sid-bad", reason: "json_parse" }),
@@ -82,11 +82,10 @@ describe("TS-3: RedisUserSessionStore.get — corrupt envelope validation", () =
 		);
 	});
 
-	// Parametric coverage: each missing/invalid field individually causes
-	// `get()` to return null and emit a `shape_invalid` warn. An
-	// implementation that only validated `expiresAtMs` would still fail
-	// these — preventing the regression where `expiresAtMs: undefined`
-	// silently bypassed the expiry filter.
+	// Each missing or invalid field on its own makes `get()` return null and
+	// emit a `shape_invalid` warn, so an implementation that validated only
+	// `expiresAtMs` would still fail these. `expiresAtMs: undefined` must not
+	// bypass the expiry filter.
 	it.each([
 		["sid missing", { ...validEnvelope, sid: undefined as unknown as string }],
 		["sub missing", { ...validEnvelope, sub: undefined as unknown as string }],
@@ -165,7 +164,7 @@ describe("TS-3: RedisUserSessionStore.get — corrupt envelope validation", () =
 
 		const result = await store.get("sid-corrupt");
 		expect(result).toBeNull();
-		// Object-first per the D-4 Logger interface: structured fields are the
+		// Object-first per the Logger interface: structured fields are the
 		// 1st arg, the human-readable message is the 2nd arg.
 		expect(logger.warn).toHaveBeenCalledWith(
 			expect.objectContaining({ sid: "sid-corrupt", reason: "shape_invalid" }),

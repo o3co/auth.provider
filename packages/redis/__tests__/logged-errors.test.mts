@@ -15,15 +15,13 @@
  */
 
 /**
- * What the Redis adapters write to a log when a stored value cannot be read
- * back or a connection fails, against a real Redis.
- *
- * A value read back from Redis is data this process stored, and a JSON
- * parser quotes the text it could not parse in its message; a reply error
- * ioredis raises carries the command it answered, arguments included, on
- * `command.args`. So a log line carries core's `loggableError` projection of
- * the error, never the error: the logger here serialises every own property
- * of what it is handed, as a deployment's logger may.
+ * What the Redis adapters log when a stored value cannot be read back or a
+ * connection fails, against a real Redis. A JSON parser quotes the stored
+ * text it could not parse in its message, and an ioredis reply error carries
+ * the command it answered, arguments included, on `command.args`. So a log
+ * line carries core's `loggableError` projection of the error, never the
+ * error: the logger here serialises every own property of what it is handed,
+ * as a deployment's logger may.
  */
 
 import { randomUUID } from "node:crypto";

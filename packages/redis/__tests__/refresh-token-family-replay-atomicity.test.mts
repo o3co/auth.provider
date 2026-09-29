@@ -4,21 +4,16 @@
  */
 
 /**
- * Issue #274 — refresh-replay family revocation used to be a SEPARATE write
- * from the compare-and-swap that detected the replay. Between "replay
- * detected, CAS aborted" and "family revoked" a parallel request holding the
- * still-active sibling token could complete its own rotation and receive
- * tokens, which is most of what the RFC 6819 §5.2.2.3 family-revoke defence
- * exists to prevent.
+ * A refresh replay revokes the family in the compare-and-swap that detects
+ * it. As a separate write, a parallel request holding the still-active
+ * sibling token could rotate and receive tokens in between, which is most of
+ * what the RFC 6819 §5.2.2.3 family-revoke defence exists to prevent. Every
+ * case asserts the family is revoked by the time a `replayed` outcome is
+ * observable, never after a later write the caller still has to make.
  *
- * These tests run the real rotation wrapper over the real Redis adapter
- * against a real Redis, because the claim being made is about what Redis
- * serialises. The in-memory adapter cannot falsify it: its read-modify-write
- * is synchronous, so it has no interleaving to lose.
- *
- * The load-bearing assertion in every case is that the family is revoked by
- * the time a `replayed` outcome is observable — never after some later write
- * the caller still has to make.
+ * Real rotation wrapper, real Redis adapter, real Redis: the claim is about
+ * what Redis serialises, and the in-memory adapter's synchronous
+ * read-modify-write has no interleaving to lose.
  */
 
 import {
@@ -39,10 +34,9 @@ const FUTURE = (): number => Date.now() + 60_000;
 
 /**
  * A fresh store per test, key-prefixed so the shared container does not carry
- * state across cases. `casRetryLimit` is generous for the same reason the
- * existing concurrency contract test raises it: under 20-way contention the
- * default budget of 3 is exhausted by losers long before the property under
- * test is exercised.
+ * state across cases. `casRetryLimit` is generous: under 20-way contention
+ * the default budget of 3 is exhausted by losers long before the property
+ * under test is exercised.
  */
 const freshStore = () => {
 	keyCounter++;
@@ -103,7 +97,7 @@ describe("refresh-replay detection and family revocation are one Redis write (#2
 		const after = await store.findFamily("fam-1");
 		expect(after?.revoked).toBe(true);
 		// The revoked family keeps the jti that was active when it died, not
-		// the replayed one (A3 §5.1 audit trail).
+		// the replayed one, for the audit trail.
 		expect(after?.activeJti).toBe("jti-2");
 	});
 
@@ -135,7 +129,7 @@ describe("refresh-replay detection and family revocation are one Redis write (#2
 	});
 
 	it("a sibling redeeming the still-active token never lands between detection and revocation", async () => {
-		// The exact race from the issue: an attacker replays a consumed token
+		// The race: an attacker replays a consumed token
 		// while the honest client redeems the current one, concurrently. There
 		// is no legal interleaving in which BOTH walk away with tokens after a
 		// replay has been classified, and none in which the family is left

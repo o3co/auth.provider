@@ -3,17 +3,14 @@
  * Licensed under the Apache License, Version 2.0 (the "License");
  */
 
-// D-9 regression: lock release MUST be atomic compare-and-delete. Pre-rename,
-// lock.mts release path was GET + DEL, which has a race window during which a
-// TTL-expired holder's DEL evicts a freshly-acquired lock owned by a different
-// process. Post-rename, the release calls `client.compareAndDelete(key, token)`
-// — a single Lua-backed atomic operation that returns `false` when the stored
-// value does not match the caller's token, and `del` is never issued.
+// Lock release MUST be an atomic compare-and-delete. A GET + DEL release has a
+// window in which a TTL-expired holder's DEL evicts a lock another process has
+// just acquired. The release calls `client.compareAndDelete(key, token)`, one
+// Lua-backed operation that returns `false` when the stored value is not the
+// caller's token, and never issues `del`.
 //
-// These tests exercise the release closure produced by `acquireLock` against a
-// fake client whose stored value differs from the caller's acquire token.
-// Pre-fix: `del` is called regardless. Post-fix: `del` is not called when
-// `compareAndDelete` reports no ownership.
+// These tests run the release closure from `acquireLock` against a fake
+// client; `del` is not called when `compareAndDelete` reports no ownership.
 
 import { describe, expect, it, vi } from "vitest";
 import { createRedisLock } from "../src/internal/lock.mjs";
@@ -62,7 +59,7 @@ describe("D-9 — lock release is atomic compare-and-delete (no spurious DEL)", 
 			await result.release();
 		}
 
-		// Post-fix: compareAndDelete called once, returned false; del NOT called.
+		// compareAndDelete called once and returned false; del NOT called.
 		expect(compareAndDeleteSpy).toHaveBeenCalledWith("ftlock:sid-1:google", expect.any(String));
 		expect(delSpy).not.toHaveBeenCalled();
 	});
@@ -101,8 +98,7 @@ describe("D-9 — lock release is atomic compare-and-delete (no spurious DEL)", 
 			await result.release();
 		}
 
-		// Post-fix: compareAndDelete is the sole release primitive. The
-		// pre-fix GET+DEL release would have called both.
+		// compareAndDelete is the sole release primitive: no GET, no DEL.
 		expect(compareAndDeleteSpy).toHaveBeenCalledTimes(1);
 		expect(getSpy).not.toHaveBeenCalled();
 		expect(delSpy).not.toHaveBeenCalled();

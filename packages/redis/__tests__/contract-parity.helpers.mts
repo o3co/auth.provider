@@ -15,14 +15,11 @@
  */
 
 // What the contract parity tests read from a suite file, by its syntax tree
-// rather than its lines (#626).
-//
-// Read line by line, a prologue check accepts any line that starts with
-// `import ` — so `import { it as rawIt } from "vitest"; const it = rawIt.skip;`
-// on one line passes it and skips every case. And a caller found by string
-// search is still found when the call is commented out. The tree has neither
-// problem: a declaration is a statement whatever line it shares, and a
-// comment is not a call.
+// rather than its lines. A line check accepts any line that starts with
+// `import `, so `import { it as rawIt } from "vitest"; const it = rawIt.skip;`
+// passes and skips every case; a string search still finds a commented-out
+// call. In the tree a declaration is a statement whatever line it shares, and
+// a comment is not a call.
 
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";

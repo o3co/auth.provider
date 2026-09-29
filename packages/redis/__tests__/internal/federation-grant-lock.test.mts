@@ -14,7 +14,8 @@
  * limitations under the License.
  */
 
-// The lock a refresh holds, over a connection (#593, D12).
+// The lock a refresh holds, over a connection (ADR
+// 2026-09-17-federation-grants-offline-delegation, D12).
 //
 // Against a stub rather than a container, because what has to be proved here
 // is timing: how long the store says it waited, what it does when an
@@ -35,12 +36,10 @@ afterEach(() => {
  * Runs `body` on vitest's fake clock — `setTimeout` and `performance.now()`
  * both — and drives every timer it sets to completion.
  *
- * What these cases assert is arithmetic on elapsed time: how long the lock
- * says it waited, when it sent each attempt. Measured on the real clock the
- * numbers carried whatever the machine was doing besides — a 5 ms poll that
- * a loaded event loop ran 100 ms late read as a 143 ms wait — so the bounds
- * had to be loose and still failed under load. On the fake clock, time moves
- * only when a timer the lock or the stub set fires, so every number is exact.
+ * These cases assert arithmetic on elapsed time: how long the lock says it
+ * waited, when it sent each attempt. The real clock carries whatever else the
+ * machine is doing; on the fake one, time moves only when a timer the lock or
+ * the stub set fires, so every number is exact.
  */
 const onFakeClock = async <T,>(body: () => Promise<T>): Promise<T> => {
 	vi.useFakeTimers();
@@ -110,7 +109,8 @@ describe("the refresh lock over a connection (#593, D12)", () => {
 	});
 
 	it("says how long it waited before the attempt that took it, and not how long the answer took", async () => {
-		// The lease is spent from when the store took the lock (D12), and the
+		// The lease is spent from when the store took the lock (ADR
+		// 2026-09-17-federation-grants-offline-delegation, D12), and the
 		// acknowledgement's own travel is spent too — core measures that part
 		// itself. A `waitedMs` that included it would say the lease started later
 		// than it did, which is the one direction that is unsafe.

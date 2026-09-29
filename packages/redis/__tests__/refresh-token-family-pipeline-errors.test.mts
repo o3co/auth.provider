@@ -14,24 +14,18 @@
  * limitations under the License.
  */
 
-// `updateFamily`'s CAS reads its `EXEC` reply for `null` — the WATCH-abort
-// signal — and the ioredis wrapper's `exec()` reads it for per-command errors.
-// ioredis reports a failed queued command *inside* the reply and resolves
-// rather than rejecting, because `EXEC` itself succeeded. Without the wrapper's
-// check, a `SET` Redis refused (OOM, a replica gone read-only, a
-// `maxmemory-policy` eviction refusal) would come back as a non-null array,
-// pass the `null` check, and `updateFamily` would return
-// `{ outcome: "committed" }` for a rotation that never landed.
+// `updateFamily`'s CAS reads its `EXEC` reply for `null` (the WATCH abort),
+// and the ioredis wrapper's `exec()` reads it for per-command errors: ioredis
+// reports a failed queued command inside the reply and resolves, since `EXEC`
+// itself succeeded. Unchecked, a `SET` Redis refused (OOM, a read-only
+// replica, a `maxmemory-policy` eviction refusal) passes the `null` check as
+// `{ outcome: "committed" }` for a rotation that never landed: the caller
+// issues a refresh token while Redis still holds the old `activeJti`, and the
+// token's next use reads as replay, revoking the family and logging the user
+// out.
 //
-// That is the worst shape a refresh-token store can fail in: the caller issues
-// the new refresh token believing the family was advanced, while Redis still
-// holds the old `activeJti`. The next use of that token is then indistinguishable
-// from replay, and replay detection revokes the family — logging the user out
-// and, depending on the deployment, raising a security alert for a token theft
-// that never happened.
-//
-// These tests drive the real store through the real ioredis wrapper, with only
-// the driver faked, so removing the reply check in `ioredis.mts` fails them.
+// The real store runs through the real wrapper with only the driver faked, so
+// removing the reply check in `ioredis.mts` fails these tests.
 
 import type { RefreshTokenFamily } from "@o3co/auth-provider-core";
 import type { Redis } from "ioredis";
@@ -106,8 +100,6 @@ describe("#352 regression — updateFamily must not report a rotation Redis refu
 
 		const result = await store.updateFamily("fam-1", commitRotation).catch((err: unknown) => err);
 
-		// Pre-fix this was `{ outcome: "committed", ... }` — a rotation the
-		// store never persisted, reported as durable.
 		expect(result).toBeInstanceOf(Error);
 		expect((result as Error).cause).toMatchObject({ message: expect.stringMatching(/^OOM /) });
 	});

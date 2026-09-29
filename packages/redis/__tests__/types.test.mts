@@ -94,7 +94,7 @@ describe("makeIoredisClients return shape", () => {
 		>().toMatchTypeOf<FederationTokenStoreClient>();
 	});
 
-	// D-9: FederationTokenStoreClient declares atomic compare-and-delete used
+	// FederationTokenStoreClient declares atomic compare-and-delete used
 	// by the federation-tokens advisory lock release path. Custom client
 	// implementations must add this method.
 	it("FederationTokenStoreClient declares compareAndDelete: (key, expected) => Promise<boolean>", () => {
@@ -107,7 +107,7 @@ describe("makeIoredisClients return shape", () => {
 		expectTypeOf<IoredisClientsReturn["rateLimiterClient"]>().toMatchTypeOf<RateLimiterClient>();
 	});
 
-	// #433: the device-code store's client is semantic (create / findPending /
+	// The device-code store's client is semantic (create / findPending /
 	// decide / poll / remove), not a raw `eval` — the Lua stays behind the
 	// interface so a custom client can satisfy it with any atomic primitive.
 	it("deviceCodeStoreClient satisfies DeviceCodeStoreClient", () => {
@@ -116,7 +116,7 @@ describe("makeIoredisClients return shape", () => {
 		>().toMatchTypeOf<DeviceCodeStoreClient>();
 	});
 
-	// #561: the consent stores' clients are semantic too — the union and the
+	// The consent stores' clients are semantic too — the union and the
 	// one-step consume live behind the interface, not in the caller.
 	it("consentStoreClient and pendingConsentStoreClient satisfy their interfaces", () => {
 		expectTypeOf<IoredisClientsReturn["consentStoreClient"]>().toMatchTypeOf<ConsentStoreClient>();

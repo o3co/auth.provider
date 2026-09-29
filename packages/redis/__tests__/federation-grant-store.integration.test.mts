@@ -14,8 +14,8 @@
  * limitations under the License.
  */
 
-// The Redis `FederationGrantStore` against the shared contract (#593, D16),
-// on a real Redis.
+// The Redis `FederationGrantStore` against the shared contract (ADR
+// 2026-09-17-federation-grants-offline-delegation, D16), on a real Redis.
 //
 // Two connections, and the contract alternates between two store instances
 // over them: the races the suite sets up are then races across sockets, which

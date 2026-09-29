@@ -14,13 +14,11 @@
  * limitations under the License.
  */
 
-// #291 — the sid-keyed ZSET is read in rank pages, not `ZRANGE key 0 -1`.
-//
-// `list` used to ask for the whole sorted set in one command; the reply size
-// grew with how many refresh-token families or federations a session had
-// accumulated, and logout reads both. These tests pin the paging and the
-// ordering it must not disturb. Round-trip behaviour against a real Redis is
-// covered in `internalSidSortedSet.test.mts`.
+// The sid-keyed ZSET is read in rank pages, not `ZRANGE key 0 -1`: one reply
+// for the whole set grows with how many refresh-token families or federations
+// a session has accumulated, and logout reads both. These tests pin the
+// paging and the ordering it must not disturb; the round trip against a real
+// Redis is in `internalSidSortedSet.test.mts`.
 
 import { describe, expect, it, vi } from "vitest";
 import type { SessionSidSortedSetClient, SessionSidSortedSetMultiClient } from "../src/clients.mjs";

@@ -15,15 +15,14 @@
  */
 
 /**
- * The Redis `MfaFactorStore` (the MFA ADR's D7) against core's contract, on a
- * real Redis, and what is Redis-specific below it: one hash per subject with a
- * field per factor, no TTL, a compare-and-set that never decodes the JSON, and
- * a stored record this adapter cannot read refused rather than read as no
- * factor (D12, D28).
+ * The Redis `MfaFactorStore` (ADR 2026-09-25-multi-factor-authentication, D7)
+ * against core's contract, on a real Redis, and what is Redis-specific below
+ * it: one hash per subject with a field per factor, no TTL, a compare-and-set
+ * that never decodes the JSON, and a stored record this adapter cannot read
+ * refused rather than read as no factor (same ADR, D12 and D28).
  *
- * Two connections, and the contract's store alternates between them, so the
- * races the suite sets up are races across sockets — what a deployment has —
- * rather than calls queued on one client.
+ * The contract's store alternates between two connections, so the races the
+ * suite sets up are races across sockets, as in a deployment.
  */
 
 import type { MfaFactorRecord, MfaFactorStore } from "@o3co/auth-provider-core";
@@ -116,7 +115,8 @@ describe("createRedisMfaFactorStore — what is Redis-specific (the MFA ADR's D7
 		expect(await first().type(key)).toBe("hash");
 		expect((await first().hkeys(key)).sort()).toEqual([keyPart("a"), keyPart("b")].sort());
 		// No TTL: an enrolled factor does not expire, and a key with one would
-		// be evictable under a volatile-* policy (D12).
+		// be evictable under a volatile-* policy (ADR
+		// 2026-09-25-multi-factor-authentication, D12).
 		expect(await first().pttl(key)).toBe(-1);
 		await store.update("user-1", "a", 1, { data: "v2.x", label: undefined, lastUsedAt: undefined });
 		expect(await first().pttl(key)).toBe(-1);
@@ -164,8 +164,9 @@ describe("createRedisMfaFactorStore — what is Redis-specific (the MFA ADR's D7
 		// list — is refused at the write instead: one bad record written would
 		// make every factor of its subject unreadable. A date that is not one
 		// reads back as no Date; a version that is not a whole number is one no
-		// compare-and-set can match; a binding outside D24's three, or a field
-		// that is not the type the record declares, is not a record.
+		// compare-and-set can match; a binding outside the three of ADR
+		// 2026-09-25-multi-factor-authentication, D24, or a field that is not
+		// the type the record declares, is not a record.
 		const prefix = freshPrefix();
 		const store = storeAt(prefix);
 		for (const [name, overrides] of [
@@ -205,7 +206,8 @@ describe("createRedisMfaFactorStore — what is Redis-specific (the MFA ADR's D7
 	});
 
 	it("refuses to list a subject whose hash holds a record it cannot read: never fewer factors than there are", async () => {
-		// Only zero records open a first binding (F3), so a record read as
+		// Only zero records open a first binding (ADR
+		// 2026-09-25-multi-factor-authentication, F3), so a record read as
 		// absent would downgrade the account. The adapter throws — an outage,
 		// 503 — and quotes nothing it read.
 		const prefix = freshPrefix();

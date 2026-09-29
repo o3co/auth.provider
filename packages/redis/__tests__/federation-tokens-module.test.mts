@@ -276,7 +276,7 @@ describe("every setting the token store is given and cannot use is refused as a 
 	});
 
 	it("through the builder: a configured key that is not canonical base64 of 32 bytes is refused, not tidied up", () => {
-		// `Buffer.from(…, "base64")` read a key with a trailing newline, in the
+		// `Buffer.from(…, "base64")` reads a key with a trailing newline, in the
 		// URL alphabet, or without its padding as the same 32 bytes: a value an
 		// operator has to tidy up to read is not the value they checked. Core's
 		// `decodeSealingKey` is the one rule for a configured key.
@@ -306,9 +306,10 @@ describe("every setting the token store is given and cannot use is refused as a 
 	});
 
 	it("refuses an encryption mode it does not know, rather than reading it as plaintext", () => {
-		// A typo such as "requried" was taken for `allow-plaintext`: stored in
-		// the clear with a warning outside production, and refused in production
-		// with a message about plaintext the operator never asked for.
+		// A typo such as "requried" must not be taken for `allow-plaintext`,
+		// which stores in the clear with a warning outside production, and is
+		// refused in production with a message about plaintext the operator
+		// never asked for.
 		const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
 		try {
 			const message = '[federation-tokens] mode must be "required" or "allow-plaintext"';

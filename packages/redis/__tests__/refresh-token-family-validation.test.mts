@@ -133,11 +133,9 @@ describe("TS-M1: RedisRefreshTokenFamilyStore.findFamily — corrupt-data valida
 	});
 
 	// `expiresAtMs` is `z.number().int().positive().finite()`, so each of
-	// these values surfaces as `corrupt-data`. Note: `Infinity` / `NaN`
-	// cannot survive `JSON.stringify` (they serialize to `null`);
-	// operator-injected raw JSON containing those tokens is invalid JSON and
-	// trips the parse-failure branch. The cases below cover values that DO
-	// JSON-roundtrip.
+	// these values surfaces as `corrupt-data`. `Infinity` / `NaN` serialize to
+	// `null`, and raw JSON holding them fails the parse instead, so only values
+	// that survive a JSON round trip are here.
 	it.each([
 		["expiresAtMs zero", 0],
 		["expiresAtMs negative", -1],

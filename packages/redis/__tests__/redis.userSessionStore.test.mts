@@ -161,7 +161,7 @@ describe("recordSecondFactor on Redis (the MFA ADR's D9)", () => {
 		expect(await raw.pttl(key)).toBeGreaterThan(0);
 		// What a release before `authentication` reads: every field it knows,
 		// as it wrote them, and the split `amr` — `authentication` beside it is
-		// a key it ignores (the ADR's "Rolling back").
+		// a key it ignores (the MFA ADR's "Rolling back").
 		const stored = JSON.parse((await raw.get(key)) as string);
 		expect(stored).toMatchObject({ ...envelope, amr: ["fed", "otp", "mfa"] });
 		expect(stored.authentication).toEqual({

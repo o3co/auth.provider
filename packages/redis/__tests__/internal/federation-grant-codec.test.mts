@@ -14,17 +14,15 @@
  * limitations under the License.
  */
 
-// How a federation grant's authorization and credential are written down
-// (#593, D16).
+// How a federation grant's authorization and credential are written down (ADR
+// 2026-09-17-federation-grants-offline-delegation, D16).
 //
-// Three encodings, and every one of them is a wire format rather than a
-// convenience: the canonical authorization text is what the HASH stores AND
-// what the credential's authenticated data is computed from, so the same
-// authorization has to produce the same bytes in this process, in another
-// replica, and after a restart. That is why it is an array of strings with no
-// property names, why a date is a decimal millisecond string rather than a
-// number, and why nothing is sorted, normalized or re-serialized on the way
-// back out.
+// Every encoding is a wire format: the canonical authorization text is what
+// the HASH stores AND what the credential's authenticated data is computed
+// from, so the same authorization must produce the same bytes in this
+// process, in another replica, and after a restart. Hence an array of strings
+// with no property names, a date as a decimal millisecond string rather than
+// a number, and nothing sorted, normalized or re-serialized on the way out.
 
 import type {
 	FederationGrantAuthorization,
@@ -107,7 +105,7 @@ describe("the canonical authorization text (#593, D16)", () => {
 		const absent = canonicalAuthorization(authorization());
 		const empty = canonicalAuthorization(authorization({ resource: "" }));
 		expect(absent).not.toBe(empty);
-		// Named and `undefined` (#626), where the empty one holds "".
+		// Named and `undefined`, where the empty one holds "".
 		expect(parseCanonicalAuthorization(absent)).toHaveProperty("resource", undefined);
 		expect(parseCanonicalAuthorization(empty)?.resource).toBe("");
 	});
@@ -255,7 +253,7 @@ describe("the credential payload (#593, D16)", () => {
 
 	it("comes back as what went in, with the access token and without it", () => {
 		// With the key named and `undefined`: what the store hands back when
-		// there is no access token (#626).
+		// there is no access token.
 		const refreshOnly = credentials({ accessToken: undefined });
 		for (const input of [credentials(), refreshOnly]) {
 			const text = encodeCredentials(input);

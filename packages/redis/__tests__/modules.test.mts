@@ -26,8 +26,6 @@ describe("redisChallengeStoreModule", () => {
 
 	it("declares a Zod configSchema with module-namespaced 'redisChallengeStore' top-level key only", () => {
 		expect(redisChallengeStoreModule.configSchema).toBeDefined();
-		// Validate parsed shape via direct schema parse with empty input —
-		// default keyPrefix "chal:" should be applied.
 		const parsed = redisChallengeStoreModule.configSchema?.parse({}) as {
 			redisChallengeStore?: { keyPrefix?: string };
 		};

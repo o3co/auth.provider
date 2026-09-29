@@ -3,16 +3,14 @@
  * Licensed under the Apache License, Version 2.0 (the "License");
  */
 
-// Verifies the EVALSHA + EVAL fallback path of
+// The EVALSHA + EVAL fallback of
 // `makeIoredisClients(...).federationTokenStoreClient.compareAndDelete`. The
-// hot path uses `EVALSHA` with a precomputed SHA-1; on `NOSCRIPT` (cold
-// server-side script cache after `SCRIPT FLUSH` or cluster failover) the
-// adapter falls back to `EVAL`, which Redis implicitly loads into its
-// server-side cache so subsequent EVALSHA calls succeed.
+// hot path uses `EVALSHA` with a precomputed SHA-1; on `NOSCRIPT` (a cold
+// script cache after `SCRIPT FLUSH` or cluster failover) it falls back to
+// `EVAL`, which loads the script so later EVALSHA calls succeed.
 //
-// Uses a hand-rolled fake of the ioredis `Redis` shape (not testcontainers)
-// because the goal is to exercise the adapter's branching logic, not the
-// Lua atomicity (which is closed by construction at the Redis server).
+// A hand-rolled fake of the ioredis `Redis` shape, not a container: the
+// subject is the adapter's branching, not the Lua atomicity the server gives.
 
 import { EventEmitter } from "node:events";
 import { DeviceCodeStoreError } from "@o3co/auth-provider-core";
@@ -166,8 +164,7 @@ describe("makeIoredisClients federationTokenStoreClient.compareAndDelete", () =>
 // refresh rotation, and ioredis `duplicate()` copies options but NOT event
 // listeners — a duplicate starts with zero `error` listeners. An EventEmitter
 // `error` with no listener throws, so a socket blip on any of those short-lived
-// connections took the provider down. Same crash class as the node-redis
-// session client, on a much hotter path.
+// connections would take the provider down.
 // ---------------------------------------------------------------------------
 
 describe("makeIoredisClients refreshTokenFamilyClient.duplicate", () => {
@@ -232,17 +229,13 @@ describe("makeIoredisClients refreshTokenFamilyClient.duplicate", () => {
 });
 
 // ---------------------------------------------------------------------------
-// MULTI/EXEC per-command errors must not be swallowed.
-//
-// ioredis resolves `exec()` with a `[error, result]` tuple per queued command
-// and does NOT reject when one of them failed. A pipeline that discards that
-// reply leaves the key with no TTL when an older or misconfigured Redis rejects
-// a `PEXPIRE … NX/GT`, while the caller is told the write succeeded — the exact
-// failure mode the atomic-TTL contract exists to rule out (#269 is the same
-// failure in the rate limiter).
-//
-// `null` is different and must stay: it is the WATCH-abort signal
-// `refresh-token-family`'s CAS loop reads as "conflict, retry".
+// MULTI/EXEC per-command errors must not be swallowed. ioredis resolves
+// `exec()` with a `[error, result]` tuple per queued command and does NOT
+// reject when one failed. A pipeline that discards that reply leaves the key
+// with no TTL when an older or misconfigured Redis rejects a `PEXPIRE … NX/GT`,
+// while the caller is told the write succeeded: what the atomic-TTL contract
+// exists to rule out. `null` is different and must stay: it is the WATCH-abort
+// signal `refresh-token-family`'s CAS loop reads as "conflict, retry".
 // ---------------------------------------------------------------------------
 
 /** A chainable ioredis pipeline stub whose `exec()` resolves to `reply`. */
@@ -378,17 +371,15 @@ describe("makeIoredisClients — MULTI/EXEC reply shapes the check must survive"
 });
 
 describe("makeIoredisClients — one connection in, one connection used", () => {
-	// #286's offline-queue decision rests entirely on this. `enableOfflineQueue`,
-	// `commandTimeout`, `connectTimeout` and `maxRetriesPerRequest` are all
-	// per-CONNECTION ioredis options, so "shed load immediately on the
-	// rate-limiter client, tolerate a reconnect blip everywhere else" is only
-	// expressible if the purposes sit on different sockets. They do not: every
-	// client below issues its commands against the single `Redis` the caller
-	// passed in, and the wrapper opens nothing of its own at construction time.
-	//
-	// If this test has to change, the composition root's timeout comment has to
-	// change with it — that is the whole reason it is pinned here rather than
-	// left as an implementation detail.
+	// The composition root's offline-queue and timeout settings rest on this.
+	// `enableOfflineQueue`, `commandTimeout`, `connectTimeout` and
+	// `maxRetriesPerRequest` are per-CONNECTION ioredis options, so "shed load
+	// immediately on the rate-limiter client, tolerate a reconnect blip
+	// everywhere else" is only expressible if the purposes sit on different
+	// sockets. They do not: every client below issues its commands against the
+	// single `Redis` passed in, and the wrapper opens nothing of its own at
+	// construction. If this test has to change, the composition root's timeout
+	// comment has to change with it.
 	it("routes every purpose's commands to the passed-in Redis and opens no second socket", async () => {
 		const io = makeFakeIoredis({
 			pttl: vi.fn().mockResolvedValue(1),
@@ -398,7 +389,7 @@ describe("makeIoredisClients — one connection in, one connection used", () => 
 			zrange: vi.fn().mockResolvedValue([]),
 			zrem: vi.fn().mockResolvedValue(0),
 			getdel: vi.fn().mockResolvedValue(null),
-			// The increment script answers `{count, pttl}` (#458).
+			// The increment script answers `{count, pttl}`.
 			eval: vi.fn().mockResolvedValue([1, 60_000]),
 		} as never);
 		const c = makeIoredisClients(io);
@@ -450,10 +441,10 @@ describe("makeIoredisClients — one connection in, one connection used", () => 
 });
 
 // ---------------------------------------------------------------------------
-// #433 — the device-code store's scripts take the same EVALSHA-first path as
-// `compareAndDelete`, through one shared runner rather than a fifth inline
-// copy of the NOSCRIPT dance. The runner is what these pin: a cold cache is
-// recovered by EVAL, and anything that is not NOSCRIPT is the caller's error.
+// The device-code store's scripts take the same EVALSHA-first path as
+// `compareAndDelete`, through one shared runner. The runner is what these pin:
+// a cold cache is recovered by EVAL, and anything that is not NOSCRIPT is the
+// caller's error.
 // ---------------------------------------------------------------------------
 
 describe("makeIoredisClients deviceCodeStoreClient — EVALSHA-first with NOSCRIPT fallback (#433)", () => {
@@ -563,10 +554,10 @@ describe("makeIoredisClients deviceCodeStoreClient.create — the script's reply
 	});
 
 	it("throws on any other reply, rather than reading it as a collision", async () => {
-		// `reply === 1` read everything else as "a key already exists": a
-		// proxy's "OK", a nil, a changed script's array — each became a
-		// collision, re-drawn five times and answered 500, when the store had
-		// said something this client does not understand.
+		// Read as "not 1, so a key already exists", a proxy's "OK", a nil or a
+		// changed script's array would each be a collision, re-drawn five times
+		// and answered 500, when the store had said something this client does
+		// not understand.
 		for (const reply of [null, "OK", 2, "1", [1], { ok: 1 }]) {
 			await expect(replying(reply).create(keys, input), JSON.stringify(reply)).rejects.toThrow(
 				/unexpected reply/,
@@ -619,11 +610,11 @@ describe("makeIoredisClients rateLimiterClient (#458)", () => {
 });
 
 // ---------------------------------------------------------------------------
-// #561 — the consent stores' scripts go through the same shared runner. What
-// is pinned here is what a fake can see: which keys each script declares to
+// The consent stores' scripts go through the same shared runner. What is
+// pinned here is what a fake can see: which keys each script declares to
 // Cluster, and that the caller's clock — not the server's — is what it is
-// handed. Atomicity and the scripts' behaviour are pinned against a real
-// Redis in `consent-store.test.mts`.
+// handed. Atomicity and the scripts' behaviour are pinned against a real Redis
+// in `consent-store.test.mts`.
 // ---------------------------------------------------------------------------
 
 describe("makeIoredisClients consent clients — keys declared and the caller's clock (#561)", () => {

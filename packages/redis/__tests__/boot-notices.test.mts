@@ -4,15 +4,14 @@
  */
 
 /**
- * The notices this package writes while a composition is built — the
- * plaintext guard's on the two stores that hold upstream refresh tokens, and
- * the deprecated code-repository builder's. Each is one object-first line
- * with an event name, at the level it always had, on the logger the
- * composition hands the module (or builder, or store); `consoleLogger`
- * writes the same line when none is handed over.
+ * The notices this package writes while a composition is built: the plaintext
+ * guard's, on the two stores that hold upstream refresh tokens, and the
+ * deprecated code-repository builder's. Each is one object-first line with an
+ * event name, on the logger the composition hands the module (or builder, or
+ * store); `consoleLogger` writes the same line when none is handed over.
  *
  * A line that opens with a string is a message, not a structured event: pino
- * treats what follows it as printf arguments, and a query on the event name
+ * treats what follows as printf arguments, and a query on the event name
  * finds nothing.
  */
 

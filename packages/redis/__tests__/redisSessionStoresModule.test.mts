@@ -41,9 +41,9 @@ const minBoot = (extra: Record<string, unknown>) =>
 
 describe("redisSessionStoresModule manifest", () => {
 	it("declares requires: 6 per-purpose client slots + config", () => {
-		// The two subject slots arrived with #321. They are `requires`, not
-		// optional: a deployment on this module that filled neither got
-		// `revokeAllForSubject` answering `unavailable` and revoking nothing.
+		// The two subject slots are `requires`, not optional: filling neither
+		// would leave `revokeAllForSubject` answering `unavailable` and
+		// revoking nothing.
 		expect(new Set(redisSessionStoresModule.requires)).toEqual(
 			new Set([
 				"userSessionStoreClient",

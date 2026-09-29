@@ -3,17 +3,13 @@
  * Licensed under the Apache License, Version 2.0 (the "License");
  */
 
-// #291 — logout must not walk the Redis keyspace.
-//
-// `removeBySid` used to be a `SCAN MATCH ft:<sid>:*` over the whole keyspace:
-// O(number of keys in the database) work triggered by an end-user action, on
-// the connection every other adapter shares. These tests pin the replacement:
-// a per-session key index (`ft:idx:<sid>`) that makes the removal O(that
-// session's federations), read in bounded batches, removed with `UNLINK`.
-//
-// They also pin the migration flag (`scanFallback`), which keeps the old scan
-// as a safety net so that upgrading a live deployment does not orphan
-// federation tokens written before the index existed.
+// Logout must not walk the Redis keyspace: a `SCAN MATCH ft:<sid>:*` is
+// O(keys in the database) work, triggered by an end-user action, on the
+// connection every other adapter shares. `removeBySid` reads a per-session key
+// index (`ft:idx:<sid>`) instead: O(that session's federations), read in
+// bounded batches, removed with `UNLINK`. The migration flag (`scanFallback`)
+// keeps the scan as a safety net for tokens written before the index existed
+// (README, "`scanFallback` — a migration flag, not a tuning knob").
 
 import type { FederationTokens } from "@o3co/auth-provider-core";
 import { describe, expect, it, vi } from "vitest";
@@ -25,7 +21,7 @@ import {
 } from "../src/federation-tokens.mjs";
 
 /**
- * Fake modelling the two Redis types the store now uses: string keys for the
+ * Fake modelling the two Redis types the store uses: string keys for the
  * token envelopes and a SET key for the per-session index.
  */
 function createFakeRedis() {
@@ -255,8 +251,8 @@ describe("#291 — scanFallback migration flag", () => {
 	it("defaults to enabled, so an upgrade still reaches tokens written before the index existed", async () => {
 		const redis = createFakeRedis();
 		const store = createRedisFederationTokenStore({ client: redis, encryption: plaintext });
-		// A pre-upgrade envelope: written by the previous release, so no index
-		// member exists for it.
+		// An envelope written before the index existed: no index member exists
+		// for it.
 		redis.data.set(
 			"ft:legacy-sid:google",
 			JSON.stringify({ accessToken: "at", expiresAtMs: null }),

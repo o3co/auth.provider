@@ -4,16 +4,13 @@
  */
 
 /**
- * `redisConsentStoreModule` through the boot planner (#561).
- *
- * The module exists so a composition serving clients that are not
- * first-party can declare `deployment.mode = "multi"`. Before it, the only
- * provider of the two consent slots was `memoryConsentStoreModule`, which
- * `checkReplicaSafety` refuses under that mode by name — correctly, since
- * consent and parked requests fork per replica. These tests prove the planner
- * accepts the Redis module where it refuses the memory one, that the module
- * fills both slots the consent step needs, and that the configured namespace
- * reaches both adapters.
+ * `redisConsentStoreModule` through the boot planner. With it, a composition
+ * serving clients that are not first-party can declare
+ * `deployment.mode = "multi"`: `checkReplicaSafety` refuses
+ * `memoryConsentStoreModule` under that mode by name, since consent and
+ * parked requests fork per replica. Pinned: the planner accepts the Redis
+ * module where it refuses the memory one, the module fills both slots the
+ * consent step needs, and the configured namespace reaches both adapters.
  */
 
 import {

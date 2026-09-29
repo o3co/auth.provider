@@ -36,11 +36,9 @@ import { redisSessionFederationIndexBuilder } from "../src/sessionFederationInde
 import { redisSessionRPRegistryBuilder } from "../src/sessionRPRegistry.mjs";
 import { redisUserSessionStoreBuilder } from "../src/userSessionStore.mjs";
 
-// TS-M2 (Wave 5g): boot-time guard tests for the builder-pattern entry
-// points used by AdapterFactory wiring. The real factory invokes the
-// builder with the merged config slice; if the slice is missing `client`,
-// the prior behavior was to construct a store and crash on first Redis op
-// with a cryptic `Cannot read properties of undefined`.
+// Boot-time guards on the builders AdapterFactory wiring calls with the merged
+// config slice: a slice without `client` is refused at build, by name, instead
+// of building a store that fails on its first Redis call.
 
 const noopChallengeClient: ChallengeStoreClient = {
 	set: async () => "OK",
@@ -87,11 +85,7 @@ describe("TS-M2: redisReplaySeenSetBuilder — client guard", () => {
 	});
 });
 
-// AS-9 (Wave 5h): Redis session sub-adapter builders. Same boot-time guard
-// pattern as TS-M2 — fail at boot when `client` is missing rather than at
-// first Redis op. The 4 builders complete the tripartite `create* + *Builder
-// + *Module` pattern previously only covered by the bundled
-// `redisSessionStoresModule`.
+// The Redis session sub-adapter builders: the same boot-time guard.
 
 const noopSidSortedSetClient: SessionSidSortedSetClient = {
 	unlink: async () => 0,
@@ -187,9 +181,8 @@ describe("AS-9: redisUserSessionStoreBuilder — client guard", () => {
 	});
 });
 
-// #433: the Redis DeviceCodeStore builder. Same boot-time guard as the
-// builders above — a missing `client` is named at boot, not at the first
-// device poll.
+// The Redis DeviceCodeStore builder: the same guard, so a missing `client` is
+// named at boot, not at the first device poll.
 
 const noopDeviceCodeStoreClient: DeviceCodeStoreClient = {
 	create: async () => true,
@@ -216,9 +209,9 @@ describe("#433: redisDeviceCodeStoreBuilder — client guard", () => {
 	});
 });
 
-// #561: the Redis consent store builders. Same boot-time guard — a missing
-// `client` is named at boot, not at the first `/authorize` for a client that
-// is not first-party.
+// The Redis consent store builders: the same guard, so a missing `client` is
+// named at boot, not at the first `/authorize` for a client that is not
+// first-party.
 
 const noopConsentStoreClient: ConsentStoreClient = {
 	find: async () => null,

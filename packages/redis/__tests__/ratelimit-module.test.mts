@@ -49,7 +49,7 @@ describe("redisRateLimiterModule", () => {
 
 	it("seeds webauthn-authentication-options from webauthn.rateLimit.authenticationOptions", async () => {
 		// The route's budget lives in the WebAuthn section; unseeded, the
-		// unauthenticated options route ran on this adapter's 60 per 60 s.
+		// unauthenticated options route would run on this adapter's 60 per 60 s.
 		const counts = new Map<string, number>();
 		const client = {
 			async incrementWithTtl(key: string, _ttlSeconds: number) {

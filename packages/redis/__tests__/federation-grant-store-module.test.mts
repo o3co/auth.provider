@@ -15,12 +15,11 @@
  */
 
 // What turns the `federationGrants` configuration block into a Redis grant
-// store (#593, D16).
-//
-// The adapter takes options and reads no HOCON, so this module is where
-// seconds become milliseconds, base64 becomes key material, and
-// a configuration that cannot seal is refused at boot rather than at the first
-// grant — which would mean refusing after a user had already consented.
+// store (ADR 2026-09-17-federation-grants-offline-delegation, D16). The
+// adapter takes options and reads no HOCON, so this module is where seconds
+// become milliseconds, base64 becomes key material, and a configuration that
+// cannot seal is refused at boot rather than at the first grant, after a user
+// had already consented.
 
 import { createApp, defineModule } from "@o3co/auth-provider-core";
 import { makeValidCoreConfig } from "@o3co/auth-provider-core/testing";
@@ -171,8 +170,8 @@ describe("the Redis federation grant store module (#593, D16)", () => {
 	});
 
 	it("refuses a key that is not 32 bytes, at boot rather than per grant", () => {
-		// The comment always said "of 32 bytes"; the length was left to the
-		// crypto layer, which finds out once a user has already consented.
+		// Left to the crypto layer, a wrong length is found only once a user has
+		// already consented.
 		for (const bytes of [16, 31, 33, 64]) {
 			expect(
 				() =>
@@ -440,9 +439,9 @@ describe("the Redis federation grant store module (#593, D16)", () => {
 	});
 
 	it("refuses an encryption mode it does not know, rather than reading it as plaintext", () => {
-		// The shared plaintext guard took anything but "required" for
-		// `allow-plaintext`. The module's schema refuses such a value first; a
-		// store built directly met the guard alone.
+		// Anything but "required" must not read as `allow-plaintext`. The
+		// module's schema refuses such a value first; a store built directly
+		// meets only the guard.
 		const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
 		try {
 			expect(() =>
@@ -458,8 +457,8 @@ describe("the Redis federation grant store module (#593, D16)", () => {
 	});
 
 	it("holds the retention and the listing allowance to a year, as core's schema does", () => {
-		// A typo nothing bounded — `tombstoneRetention = 1e18` — became a
-		// deadline Redis refuses after the script has written, and a record
+		// Unbounded, a typo such as `tombstoneRetention = 1e18` becomes a
+		// deadline Redis refuses after the script has written, leaving a record
 		// with no TTL.
 		const resolve = (federationGrants: Record<string, unknown>, redisFederationGrantStore = {}) =>
 			resolveRedisFederationGrantStoreOptions(

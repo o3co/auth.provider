@@ -39,12 +39,10 @@ afterAll(async () => {
 
 describe("A1 wiring — full Redis composition (createApp + redis modules)", () => {
 	it("composes per-purpose clients + redis ChallengeStore + redis ReplaySeenSet + default ceremony into a working AppHandle", async () => {
-		// Activator: a real downstream consumer (e.g. webauthnModule) would naturally
-		// activate `challengeCeremony` and the underlying stores via its own route
-		// handler module that requires them. The boot planner only walks `requires`
-		// for closure roots (modules with `contributes` or `overrides`), so a marker
-		// module that contributes a no-op route AND requires both stores + the
-		// ceremony pulls them all into the activation closure.
+		// The boot planner walks `requires` only from closure roots (modules
+		// with `contributes` or `overrides`), so a marker module that
+		// contributes a no-op route and requires both stores and the ceremony
+		// pulls them into the closure, as a real consumer's route module would.
 		const activatorModule = defineModule({
 			name: "test-activator",
 			requires: ["challengeStore", "replaySeenSet", "challengeCeremony"] as const,
@@ -71,7 +69,7 @@ describe("A1 wiring — full Redis composition (createApp + redis modules)", () 
 		const boot = {
 			config: config as never,
 			pathResolver: (s: string) => s,
-			// Per-purpose client slots — spread all 9 wrappers from makeIoredisClients.
+			// Per-purpose client slots — spread every wrapper from makeIoredisClients.
 			// challengeStoreClient + replaySeenSetClient are the two slots consumed by
 			// redisChallengeStoreModule and redisReplaySeenSetModule respectively.
 			...makeIoredisClients(client),

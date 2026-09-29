@@ -14,7 +14,8 @@
  * limitations under the License.
  */
 
-// What turns configuration into a Redis intent store (#593, D16).
+// What turns configuration into a Redis intent store (ADR
+// 2026-09-17-federation-grants-offline-delegation, D16).
 
 import { describe, expect, it } from "vitest";
 import type { FederationGrantIntentStoreClient } from "../src/clients.mjs";
@@ -38,8 +39,10 @@ describe("the Redis federation grant intent store module", () => {
 	});
 
 	it("reads the grant store's key prefix, so the two namespaces move together", () => {
-		// D16 puts both under one prefix; a deployment that changed it must not
-		// find acquisition's records left in the old one.
+		// Both live under one prefix (ADR
+		// 2026-09-17-federation-grants-offline-delegation, D16); a deployment
+		// that changed it must not find acquisition's records left in the old
+		// one.
 		expect(
 			resolveRedisFederationGrantIntentStoreOptions({
 				redisFederationGrantStore: { keyPrefix: "tenant-a:fg:" },

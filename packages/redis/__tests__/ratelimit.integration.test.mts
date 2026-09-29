@@ -4,14 +4,11 @@
  */
 
 /**
- * #458 — the Redis rate limiter against a real Redis.
- *
- * `ratelimit-atomicity.test.mts` pins the limiter's arithmetic on a fake. This
- * file pins the one thing a fake cannot: that `LUA_INCREMENT_WITH_TTL` really
- * returns the counter key's PTTL, read inside the same script after the
- * increment, and that the limiter turns it into a `resetAt` inside the
- * configured window. Behind Redis the guard's 429 used to carry no
- * `Retry-After` because the adapter reported no reset time at all.
+ * The Redis rate limiter against a real Redis. `ratelimit-atomicity.test.mts`
+ * pins the arithmetic on a fake; this file pins what a fake cannot: that
+ * `LUA_INCREMENT_WITH_TTL` returns the counter key's PTTL, read in the same
+ * script after the increment, and that the limiter turns it into a `resetAt`
+ * inside the configured window, which the guard's 429 needs for `Retry-After`.
  */
 
 import { createMemoryRateLimiter } from "@o3co/auth-provider-core";
@@ -34,14 +31,14 @@ afterAll(async () => {
 
 describe("createRedisRateLimiter on ioredis — a window no key can carry", () => {
 	// 1e13 s is 1e16 ms, past the Date range from any today; 1e17 s is a window
-	// the script's EXPIRE refuses after its INCR has run — the #269 shape, a
-	// counter with no TTL and a client 429'd for ever.
+	// the script's EXPIRE refuses after its INCR has run, leaving a counter
+	// with no TTL and a client 429'd for ever.
 	const PAST_THE_DATE_RANGE = [1e13, 1e17];
 
 	it("is refused when the limiter is built, and never replaced by a looser default", async () => {
-		// Dropping the spec let the default (60 per 60 s) apply where the
-		// operator wrote 5: a budget silently twelve times looser — and on the
-		// device verification route, the budget RFC 8628 §5.1 sizes the user
+		// The default (60 per 60 s) in its place would make a budget the
+		// operator wrote as 5 twelve times looser, and on the device
+		// verification route that is the budget RFC 8628 §5.1 sizes the user
 		// code against. Refused, it fails the composition instead.
 		const client = makeIoredisClients(redis).rateLimiterClient;
 		for (const windowSeconds of PAST_THE_DATE_RANGE) {
@@ -73,8 +70,7 @@ describe("createRedisRateLimiter on ioredis — a window no key can carry", () =
 
 describe("both limiters — a spec neither can apply as written", () => {
 	it("is refused by each when it is built: a zero, NaN, fractional or negative window or limit", () => {
-		// The Redis limiter served its default in such a spec's place and the
-		// in-process one kept it, so one configuration meant two budgets.
+		// One configuration must not mean two budgets, one per adapter.
 		const client = makeIoredisClients(redis).rateLimiterClient;
 		const SANE = { limit: 60, windowSeconds: 60 };
 		for (const bad of [0, Number.NaN, 1.5, -1]) {

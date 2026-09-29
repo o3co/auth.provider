@@ -15,16 +15,13 @@
  */
 
 // Every other contract suite this package copies from core is the same suite
-// as core's (#626).
+// as core's. A contract file cannot be imported across a package boundary, so
+// the Redis package runs copies, and a copy nothing compares drifts: it reads
+// as the same contract while the adapter is held to an older one. The
+// `UserSessionStore`, `FederationGrantStore` and `FederationGrantIntentStore`
+// copies have parity tests of their own.
 //
-// A contract file cannot be imported across a package boundary, so the Redis
-// package runs copies. The `UserSessionStore`, `FederationGrantStore` and
-// `FederationGrantIntentStore` copies each have a parity test of their own;
-// the rest had none, and a copy nothing compares drifts: it reads as the same
-// contract while the Redis adapter is held to an older one. This holds the
-// rest to the same rule.
-//
-// So the only difference allowed is above the first `export`: comments and
+// The only difference allowed is above the first `export`: comments and
 // imports. When a core suite changes, copy it again and re-run.
 
 import { readdirSync, readFileSync } from "node:fs";

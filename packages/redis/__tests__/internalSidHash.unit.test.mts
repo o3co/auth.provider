@@ -14,14 +14,12 @@
  * limitations under the License.
  */
 
-// #291 — the sid-keyed HASH is read with a cursor, not in one reply.
-//
-// `listValues` used to be `HVALS`: one command returning every RP registered
-// against the session, whose reply size is bounded by nothing. A session
-// linked to a large number of relying parties made that a single blocking
-// command on the connection every other adapter shares. These tests pin the
-// cursor-based read and the duplicate handling it requires; the round-trip
-// behaviour against a real Redis is covered in `internalSidHash.test.mts`.
+// The sid-keyed HASH is read with a cursor, not in one reply. One `HVALS`
+// returns every RP registered against the session, a reply bounded by
+// nothing: a single blocking command on the connection every other adapter
+// shares. These tests pin the cursor-based read and the duplicate handling it
+// requires; the round trip against a real Redis is in
+// `internalSidHash.test.mts`.
 
 import { describe, expect, it, vi } from "vitest";
 import type { SessionRPRegistryClient, SessionRPRegistryMultiClient } from "../src/clients.mjs";

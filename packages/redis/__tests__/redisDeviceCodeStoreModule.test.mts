@@ -4,15 +4,12 @@
  */
 
 /**
- * `redisDeviceCodeStoreModule` through the boot planner (#433).
- *
- * The whole point of the module is that a composition running the device
- * grant can declare `deployment.mode = "multi"`. Before it existed, the only
- * store was the in-memory one, which `checkReplicaSafety` refuses under that
- * mode — correctly, since pending authorizations fork per replica — so the
- * grant was single-replica by construction. These tests prove the planner
- * accepts the Redis store where it refuses the memory one, and that the slot
- * it fills is the one `DEVICE_CODE_STORE_ABSENCE_POLICY` guards.
+ * `redisDeviceCodeStoreModule` through the boot planner. With it, a
+ * composition running the device grant can declare `deployment.mode =
+ * "multi"`: `checkReplicaSafety` refuses the in-memory store under that mode,
+ * since pending authorizations fork per replica. Pinned: the planner accepts
+ * the Redis store where it refuses the memory one, and the slot it fills is
+ * the one `DEVICE_CODE_STORE_ABSENCE_POLICY` guards.
  */
 
 import {
@@ -151,8 +148,8 @@ describe("redisDeviceCodeStoreModule wiring", () => {
 	});
 
 	it("throws BootError {missing-required-component} when the client slot is absent", async () => {
-		// The failure #439 paid for in the standalone: a Redis-branch module
-		// whose client slot nothing provides. Named at boot, not at first poll.
+		// A Redis-branch module whose client slot nothing provides is named at
+		// boot, not at first poll.
 		await expect(
 			createApp({
 				modules: [redisDeviceCodeStoreModule, deviceGrantStandIn],

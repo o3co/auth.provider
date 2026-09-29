@@ -28,10 +28,9 @@ import type { CodeRepositoryClient } from "../src/clients.mjs";
 import { RedisCodeRepository } from "../src/code-repository.mjs";
 import { makeIoredisClients } from "../src/ioredis.mjs";
 
-// OR-9: the public `RedisCodeRepository` constructor accepts a typed
-// `CodeRepositoryClient` wrapper, not a node-redis client. The mock satisfies
-// only that interface — `set/get/getDel/del` — and ignores the `mode`/`ttlMs`
-// arguments which the in-memory store doesn't honor.
+// `RedisCodeRepository` takes a typed `CodeRepositoryClient`. The mock
+// implements only that interface (`set/get/getDel/del`) and ignores the
+// `mode`/`ttlMs` arguments.
 const createMockClient = (): CodeRepositoryClient => ({
 	set: vi.fn().mockImplementation((key: string, value: string) => {
 		store.set(key, value);
@@ -51,8 +50,8 @@ const createMockClient = (): CodeRepositoryClient => ({
 	}),
 });
 
-// Minimal valid params for v0.5.1+ (D-1: client_id and redirect_uri
-// required); every other field named, unset (#626).
+// Minimal valid params: client_id and redirect_uri are required; every other
+// field named, unset.
 const minimalParams: CreateCodeInput = {
 	client_id: "test-client",
 	redirect_uri: "https://rp.example/cb",
@@ -148,11 +147,9 @@ describe("RedisCodeRepository", () => {
 			expect(result).toBeNull();
 		});
 
-		// D-1: pre-v0.5.1 records persisted via the old createCode path lacked
-		// `client_id` / `redirect_uri` because RedisCodeRepository.createCode
-		// silently dropped both. parseCodeValue treats such records as corrupt
-		// (returns null + structured error log) so the strict identity gates
-		// in /token never see `client_id: undefined` or `redirect_uri: undefined`.
+		// A record without `client_id` / `redirect_uri` is corrupt: parseCodeValue
+		// returns null (and logs a structured error), so the strict identity
+		// gates in /token never see either as undefined.
 		it("treats pre-v0.5.1 records lacking client_id and redirect_uri as corrupt", async () => {
 			store.set(`${KEY_PREFIX}legacy-1`, JSON.stringify({ code_challenge: "x" }));
 			expect(await repo.findByCode("legacy-1")).toBeNull();
@@ -217,10 +214,9 @@ describe("RedisCodeRepository", () => {
 		});
 	});
 
-	// OR-9 (Wave 5d): external client + ioredis migration. The constructor
-	// accepts a `CodeRepositoryClient` typed wrapper instead of constructing
-	// its own node-redis client. PX expiry is in milliseconds; keyPrefix and
-	// defaultExpiresIn flow through the options object.
+	// The repository writes through the `CodeRepositoryClient` it is given. PX
+	// expiry is in milliseconds; keyPrefix and defaultExpiresIn come through
+	// the options object.
 	describe("OR-9 external client", () => {
 		it("calls client.set with PX mode and ttlMs = expiresIn * 1000", async () => {
 			await repo.createCode({ ...minimalParams, expiresIn: 300 });
@@ -268,11 +264,9 @@ describe("RedisCodeRepository", () => {
 		});
 
 		it("has no dispose / [Symbol.asyncDispose] method (consumer manages client lifecycle, D-5 v2)", () => {
-			// Regression guard: the consumer (composition root) owns the
-			// ioredis socket via `standaloneRedisClientsModule` and registers
-			// its own `lifecycleRegistrar.register(io.quit)`. The repository
-			// is purely a typed wrapper; introducing a dispose() here would
-			// double-quit the shared socket.
+			// The composition root owns the ioredis socket
+			// (`standaloneRedisClientsModule`) and registers its own quit; a
+			// dispose() here would quit the shared socket twice.
 			const r = repo as unknown as Record<string, unknown>;
 			expect(r.dispose).toBeUndefined();
 			expect(r[Symbol.asyncDispose as unknown as string]).toBeUndefined();
@@ -300,12 +294,9 @@ describe("RedisCodeRepository", () => {
 		});
 	});
 
-	// D-1 / TD-1 / IH-2 / TS-1: extended-fields round-trip
-	// Pre-fix RedisCodeRepository.createCode silently drops every field except
-	// code_challenge / code_challenge_method / expiresIn (sid / nonce / redirect_uri /
-	// grantedScope / grantedAudience). Production deployments using Redis +
-	// userSessionStore could not complete a single authorization-code exchange
-	// because codeData.sid was always undefined.
+	// Every field of the code record round-trips, not just code_challenge,
+	// code_challenge_method and expiresIn: a code exchange with a user session
+	// store needs `sid` back.
 	describe("D-1 extended fields round-trip", () => {
 		it("persists and returns client_id, redirect_uri via consumeByCode", async () => {
 			const result = await repo.createCode({
@@ -434,8 +425,7 @@ describe("RedisCodeRepository", () => {
 	});
 });
 
-// On the run's shared Redis (`support/redis.mts`), in every run: it used to be
-// gated on an environment variable nothing set, so it never ran in CI.
+// On the run's shared Redis (`support/redis.mts`), in every run.
 describe("RedisCodeRepository with real Redis", () => {
 	let raw: Redis | undefined;
 

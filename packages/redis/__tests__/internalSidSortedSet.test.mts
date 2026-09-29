@@ -49,8 +49,8 @@ describe("createRedisSidSortedSet", () => {
 	it("add preserves insertion order across distinct members", async () => {
 		const z = createRedisSidSortedSet({ client, keyPrefix: prefix("order") });
 		// Insertion order is guaranteed by the module-level monotonic counter
-		// in createRedisSidSortedSet (per A4 §5.4 — see internal/redisSidSortedSet.mts);
-		// no inter-add sleep is needed.
+		// in createRedisSidSortedSet (see internal/redisSidSortedSet.mts); no
+		// inter-add sleep is needed.
 		await z.add("sid-1", "google", FUTURE());
 		await z.add("sid-1", "github", FUTURE());
 		await z.add("sid-1", "gitlab", FUTURE());
@@ -60,8 +60,8 @@ describe("createRedisSidSortedSet", () => {
 	it("re-add of existing member does NOT promote position (ZADD NX)", async () => {
 		const z = createRedisSidSortedSet({ client, keyPrefix: prefix("nx") });
 		// Insertion order is guaranteed by the module-level monotonic counter
-		// in createRedisSidSortedSet (per A4 §5.4 — see internal/redisSidSortedSet.mts);
-		// no inter-add sleep is needed.
+		// in createRedisSidSortedSet (see internal/redisSidSortedSet.mts); no
+		// inter-add sleep is needed.
 		await z.add("sid-1", "google", FUTURE());
 		await z.add("sid-1", "github", FUTURE());
 		await z.add("sid-1", "google", FUTURE()); // re-add: must NOT move to end
@@ -78,8 +78,7 @@ describe("createRedisSidSortedSet", () => {
 
 	it("PEXPIREAT applied: key disappears after expiresAt", async () => {
 		// Dated from, and waited out on, the server's clock — the one a
-		// PEXPIREAT deadline is judged by — not a 200 ms expiry and a 250 ms
-		// host sleep, which a loaded run or a lagging server clock defeats.
+		// PEXPIREAT deadline is judged by — not the host's.
 		const z = createRedisSidSortedSet({ client, keyPrefix: prefix("ttl") });
 		const soon = await aheadOfServer(() => raw)();
 		await z.add("sid-1", "google", soon);
@@ -88,9 +87,9 @@ describe("createRedisSidSortedSet", () => {
 		expect(await z.list("sid-1")).toEqual([]);
 	});
 
-	// D-10 / CR-3: a stale-`expiresAt` race with a shorter TTL must NOT
-	// truncate the key's existing TTL. The `pExpireGT` (NX + GT pair) prevents
-	// the write from clobbering a longer existing TTL with a shorter one.
+	// A stale-`expiresAt` race with a shorter TTL must NOT truncate the key's
+	// existing TTL. The `pExpireGT` (NX + GT pair) prevents the write from
+	// clobbering a longer existing TTL with a shorter one.
 	it("does NOT truncate the key TTL on a stale-shorter-expiresAt write (CR-3)", async () => {
 		const z = createRedisSidSortedSet({ client, keyPrefix: prefix("ttl-trunc") });
 		const longExpiry = FUTURE(); // first writer
@@ -108,16 +107,16 @@ describe("createRedisSidSortedSet", () => {
 		expect(await z.list("sid-1")).toEqual(["google", "github"]);
 	});
 
-	// D-10 bootstrap test: the very first write must set the TTL even though
-	// the key has no prior TTL. A bare `PEXPIREAT … GT` would silently no-op
-	// here (Redis treats no-TTL as infinite TTL for the GT flag), leaving the
-	// key persistent. The NX clause in `pExpireGT` covers this bootstrap gap.
+	// The very first write must set the TTL even though the key has no prior
+	// TTL. A bare `PEXPIREAT … GT` would silently no-op here (Redis treats
+	// no-TTL as infinite TTL for the GT flag), leaving the key persistent. The
+	// NX clause in `pExpireGT` covers this bootstrap gap.
 	it("first write to a fresh sid sets a TTL (no infinite-TTL bootstrap leak)", async () => {
 		const z = createRedisSidSortedSet({ client, keyPrefix: prefix("ttl-boot") });
 		await z.add("sid-fresh", "google", FUTURE());
 		const pttl = await raw.pttl(`${prefix("ttl-boot")}sid-fresh`);
-		// PTTL returns -1 for a key with no TTL (the bug case) and -2 if the
-		// key is missing. A positive value means the TTL is set as expected.
+		// PTTL returns -1 for a key with no TTL and -2 if the key is missing.
+		// A positive value means the TTL is set.
 		expect(pttl).toBeGreaterThan(0);
 	});
 
@@ -155,8 +154,8 @@ describe("createRedisSidSortedSet", () => {
 		expect(await z.list("sid-conc-same")).toEqual(["m-shared"]);
 	});
 
-	// #291: `list` pages by rank instead of `ZRANGE key 0 -1`. Insertion order
-	// is the load-bearing part (A4 §5.4) and must survive the page boundaries.
+	// `list` pages by rank instead of `ZRANGE key 0 -1`. Insertion order is
+	// the load-bearing part and must survive the page boundaries.
 	it("list returns every member, in insertion order, across several rank pages", async () => {
 		const z = createRedisSidSortedSet({ client, keyPrefix: prefix("paged"), pageSize: 25 });
 		const expiresAt = FUTURE();
@@ -165,16 +164,14 @@ describe("createRedisSidSortedSet", () => {
 		expect(await z.list("sid-paged")).toEqual(members);
 	});
 
-	// OR-8: `_insertionCounter` is monotonic across restart.
+	// `_insertionCounter` is monotonic across restart.
 	describe("OR-8: _insertionCounter restart-monotonicity", () => {
 		it("two add() calls with same expiresAt — second member sorts after first in list()", async () => {
 			const z = createRedisSidSortedSet({ client, keyPrefix: prefix("or8-same-exp") });
 			const sharedExp = FUTURE();
 			await z.add("sid-or8-1", "first", sharedExp);
 			await z.add("sid-or8-1", "second", sharedExp);
-			// Insertion order preserved even when expiresAt is identical (the
-			// pre-fix score formula depended on the counter alone, so this case
-			// tests the same-millisecond invariant).
+			// Insertion order holds even when expiresAt is identical.
 			expect(await z.list("sid-or8-1")).toEqual(["first", "second"]);
 		});
 
@@ -184,15 +181,11 @@ describe("createRedisSidSortedSet", () => {
 			// counter whatever it started at. `vi.resetModules()` + a dynamic
 			// re-import re-initialise the counter (to `Date.now()`), and the
 			// injected pre-crash score is HIGH enough that only the Date.now()
-			// baseline beats it: `100_000` is well above any counter a start at
-			// `0` would reach (this whole test file performs ~10 adds) and well
-			// below `Date.now()` (~1.75×10^12 in 2026). A raw `zscore` asserts
-			// that the new module's first add scores above the injected
-			// baseline.
+			// baseline beats it: `100_000` is well above any counter this file
+			// could advance from `0`, and well below `Date.now()`.
 			//
-			// NX semantics: pre-crash members must use DIFFERENT names from
-			// the post-restart member; ZADD NX would otherwise keep the
-			// pre-existing low score and hide a regression.
+			// The pre-crash member has a DIFFERENT name from the post-restart
+			// one: ZADD NX would otherwise keep the pre-existing low score.
 			const sid = "sid-or8-restart-v2";
 			const key = `${prefix("or8-restart-v2")}${sid}`;
 			const PRE_CRASH_HIGH = 100_000;
@@ -208,9 +201,8 @@ describe("createRedisSidSortedSet", () => {
 			const score = await raw.zscore(key, "post-restart-fresh");
 			expect(score).not.toBeNull();
 			expect(Number(score)).toBeGreaterThan(PRE_CRASH_HIGH);
-			// Order assertion: the high-but-pre-fix-unreachable injected
-			// score is itself > 0 yet < Date.now(), so post-fix the new
-			// member sorts AFTER the pre-crash member.
+			// The injected score is > 0 yet < Date.now(), so the new member
+			// sorts AFTER the pre-crash member.
 			expect(await z.list(sid)).toEqual(["pre-crash-high", "post-restart-fresh"]);
 		});
 

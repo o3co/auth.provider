@@ -14,13 +14,12 @@
  * limitations under the License.
  */
 
-// The indivisible steps the Redis federation grant store is built from
-// (#593, D16), against a real Redis: what one script does, what it refuses,
-// what a key's own deadline becomes, and what the subject index holds.
-//
-// These are the rules the shared contract suite cannot reach. It holds both
-// adapters to the same answers; it cannot see a key TTL, a member's score, or
-// what happens when two writers interleave inside one millisecond.
+// The indivisible steps the Redis federation grant store is built from (ADR
+// 2026-09-17-federation-grants-offline-delegation, D16), against a real Redis:
+// what one script does, what it refuses, what a key's own deadline becomes,
+// and what the subject index holds. The shared contract suite cannot see a
+// key TTL, a member's score, or two writers interleaving inside one
+// millisecond.
 
 import { Redis } from "ioredis";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
@@ -77,8 +76,8 @@ const pending = (
 	});
 
 /**
- * An `active` record, written field by field. The transitions that produce one
- * land in the next commit; what `touch` does to one is a rule of its own.
+ * An `active` record, written field by field rather than through the
+ * transitions; what `touch` does to one is a rule of its own.
  */
 const active = async (id = "g-1"): Promise<void> => {
 	await redis.hset(grantKey(id), {
@@ -255,7 +254,8 @@ describe("the intent pointer of an authorized grant (#593, D2)", () => {
 			JSON.stringify("h-re"),
 		);
 		// Without a handle, whichever is current — a subject-wide revocation ends
-		// every renewal in flight (D13).
+		// every renewal in flight (ADR
+		// 2026-09-17-federation-grants-offline-delegation, D13).
 		const retired = await client.retireIntent(grantKey("g-1"), { nowMs: at(DAY + MIN) });
 		expect(retired?.intentHandle).toBeUndefined();
 	});
@@ -724,7 +724,8 @@ describe("noteRefreshFailure (#593, D12)", () => {
 		// A stamp that took ten minutes to arrive is still one failure after the
 		// last: the row is the distance between the two FAILURES. Measured from
 		// the caller's clock instead, a slow report would start the count again
-		// and the backoff a run of failures earns would never be reached (D12).
+		// and the backoff a run of failures earns would never be reached (ADR
+		// 2026-09-17-federation-grants-offline-delegation, D12).
 		await activeWithCredential();
 		await stamp({ atMs: at(DAY) });
 		const late = await stamp({ atMs: at(DAY + 1_000), nowMs: at(DAY + 600_000) });

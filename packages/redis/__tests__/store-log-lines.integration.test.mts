@@ -6,15 +6,8 @@
 /**
  * What the Redis stores that log write, against a real Redis, when they are
  * built the way a composition builds them: by their module, with the
- * `logger` the composition fills.
- *
- * Every line is object-first, under a snake_case event name, with the
- * projection of the error behind it as `err`. Before, the session-store and
- * code-repository modules never handed their store the logger slot, so the
- * user-session store and the RP registry wrote nothing at all and the code
- * repository wrote to `consoleLogger` — and the lines they wrote were named
- * in prose ("RedisCodeRepository: corrupted data for code",
- * "user_session_corrupt_envelope: JSON.parse failed").
+ * `logger` the composition fills. Every line is object-first, under a
+ * snake_case event name, with the projection of the error behind it as `err`.
  */
 
 import { randomUUID } from "node:crypto";

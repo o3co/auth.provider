@@ -14,7 +14,8 @@
  * limitations under the License.
  */
 
-// The order the store sends its calls in (#593, D16).
+// The order the store sends its calls in (ADR
+// 2026-09-17-federation-grants-offline-delegation, D16).
 //
 // Against a stub, because the rule is about *ordering* and a real Redis shows
 // it only in a window a test cannot open reliably: the index member is

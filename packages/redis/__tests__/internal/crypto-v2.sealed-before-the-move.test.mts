@@ -14,17 +14,15 @@
  * limitations under the License.
  */
 
-// Every federation grant credential at rest was sealed by the `v2` envelope
-// code as it stood before that code moved into core's `sealing/` leaf. A
-// deployment upgrades with those records in Redis, and during a rolling
-// upgrade a replica still on the old code reads what an upgraded one seals.
-//
-// So both directions are pinned: the envelopes in the fixture were sealed by
-// `sealCredential` in `src/internal/crypto.mts` at d3d9c8f2 (the ciphertext is
-// fixed, since the IV is random and cannot be reproduced) and must open with
-// the code as it is now; and what the code seals now must open with the
-// reader as it was then, restated below from the format — the header, the
-// key ID and the record's own bytes, each after the first length-prefixed.
+// Federation grant credentials at rest may have been sealed by the `v2`
+// envelope code as it stood before it moved into core's `sealing/` leaf, and
+// during a rolling upgrade a replica still on that code reads what an upgraded
+// one seals. So both directions are pinned: the fixture's envelopes, sealed by
+// `sealCredential` in `src/internal/crypto.mts` at the commit
+// `fixture.sealedAt` names (fixed ciphertext: the IV is random), must open with
+// the current code; and what the current code seals must open with that
+// reader, restated below from the format: the header, the key ID and the
+// record's own bytes, each after the first length-prefixed.
 
 import { createDecipheriv } from "node:crypto";
 import { readFileSync } from "node:fs";
