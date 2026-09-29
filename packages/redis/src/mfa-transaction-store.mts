@@ -132,7 +132,7 @@ function fieldsOf(record: MfaTransaction, incarnation: string): Record<string, s
 		// What never changes after `create`, as one JSON document; absent is null.
 		record: JSON.stringify({
 			purpose: record.purpose,
-			sessionId: record.sessionId,
+			binding: record.binding,
 			subject: record.subject,
 			sid: record.sid ?? null,
 			continuation: record.continuation ?? null,
@@ -183,7 +183,7 @@ function transactionOf(
 		const record = newMfaTransactionRecord({
 			id,
 			purpose: fixed.purpose,
-			sessionId: fixed.sessionId,
+			binding: fixed.binding,
 			subject: fixed.subject,
 			sid: fixed.sid ?? undefined,
 			continuation: fixed.continuation ?? undefined,

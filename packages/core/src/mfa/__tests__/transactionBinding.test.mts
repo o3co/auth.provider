@@ -83,4 +83,10 @@ describe("isMfaTransactionBoundTo", () => {
 		expect(isMfaTransactionBoundTo(bound(binding), session)).toBe(false);
 		expect(isMfaTransactionBoundTo(bound(binding), binding as MfaTransactionBinding)).toBe(false);
 	});
+
+	it("does not hold for something that is not a transaction", () => {
+		for (const tx of [null, undefined, "express-session-1"]) {
+			expect(isMfaTransactionBoundTo(tx as never, session)).toBe(false);
+		}
+	});
 });
