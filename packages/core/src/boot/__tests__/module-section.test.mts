@@ -26,7 +26,7 @@
 
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
-import { defineModule, type Module } from "../../modules/manifest/index.mjs";
+import { defineModule } from "../../modules/manifest/index.mjs";
 import { makeValidCoreConfig } from "../../testing/fixtures/valid-config.mjs";
 import { createApp } from "../create-app.mjs";
 import type { BootstrapMap } from "../types.mjs";
@@ -654,52 +654,60 @@ describe("a module's section — manifest refusals", () => {
 		});
 	});
 
+	it.each<[string, unknown]>([
+		["a bigint", 1n],
+		[
+			"a cyclic object",
+			(() => {
+				const cyclic: Record<string, unknown> = {};
+				cyclic.self = cyclic;
+				return cyclic;
+			})(),
+		],
+		["a number", 7],
+	])(
+		"refuses `at` that is not a string — %s — naming its type, the value kept in details",
+		async (_label, at) => {
+			const sectioned = defineModule({
+				name: "fixture-section",
+				section: { schema: RetrySection, at: at as never },
+			});
+
+			const err = await refusal(
+				createApp({ modules: [sectioned], bootstrapComponents: bootWith({}) }),
+			);
+
+			expect(err.reason).toBe("module-section-path-invalid");
+			expect(err.message).toContain(`a ${typeof at}`);
+			expect(err.details).toEqual({
+				reason: "module-section-path-invalid",
+				module: "fixture-section",
+				at,
+			});
+			expect((err.details as { at: unknown }).at).toBe(at);
+		},
+	);
+
 	const noop = { grantMiddleware: [() => null] };
 
-	/** Where `section` is named as a slot: in a module, or by the host. */
-	interface Given {
-		readonly modules?: Module[];
-		readonly bootstrap?: Record<string, unknown>;
-		readonly override?: Record<string, unknown>;
-	}
-
-	it.each<[string, Given, Record<string, string>]>([
-		[
-			"a module provides it",
-			{
-				modules: [defineModule({ name: "fixture-slot", provides: { section: () => 1 } as never })],
-			},
-			{ source: "module-provides", module: "fixture-slot" },
-		],
-		[
-			"a module requires it",
-			{
-				modules: [
-					defineModule({ name: "fixture-slot", requires: ["section"] as never, contributes: noop }),
-				],
-			},
-			{ source: "module-requires", module: "fixture-slot" },
-		],
-		[
-			"a module reads it optionally",
-			{
-				modules: [
-					defineModule({ name: "fixture-slot", optional: ["section"] as never, contributes: noop }),
-				],
-			},
-			{ source: "module-optional", module: "fixture-slot" },
-		],
-		["the host bootstraps it", { bootstrap: { section: 1 } }, { source: "bootstrapComponents" }],
-		["the host overrides it", { override: { section: 1 } }, { source: "overrideComponents" }],
+	it.each([
+		["requires", { requires: ["section"] as never }, "module-requires"],
+		["optionally reads", { optional: ["section"] as never }, "module-optional"],
 	])(
-		"reserves `section` for the deps' section: refused when %s",
-		async (_label, given, expected) => {
+		"refuses a sectioned module that %s a component named `section`: its deps would carry both under one key",
+		async (_label, reads, source) => {
+			const sectioned = defineModule({
+				name: "fixture-section",
+				section: { schema: RetrySection },
+				contributes: noop,
+				...reads,
+			});
+			const slot = defineModule({ name: "fixture-slot", provides: { section: () => 1 } as never });
+
 			const err = await refusal(
 				createApp({
-					modules: given.modules ?? [],
-					// A bootstrap component beside `config`, not a key inside it.
-					bootstrapComponents: { ...bootWith({}), ...given.bootstrap } as BootstrapMap,
-					...(given.override === undefined ? {} : { overrideComponents: given.override as never }),
+					modules: [slot, sectioned],
+					bootstrapComponents: bootWith({ "fixture-section": { retries: 1 } }),
 				}),
 			);
 
@@ -708,8 +716,51 @@ describe("a module's section — manifest refusals", () => {
 			expect(err.details).toEqual({
 				reason: "reserved-component-key",
 				componentKey: "section",
-				...expected,
+				source,
+				module: "fixture-section",
 			});
 		},
 	);
+
+	it("boots a component named `section` that no sectioned module reads — provided, required, bootstrapped and overridden", async () => {
+		let read: unknown;
+		const provider = defineModule({
+			name: "fixture-slot",
+			provides: { section: () => "provided" } as never,
+		});
+		const reader = defineModule({
+			name: "fixture-reader",
+			requires: ["section"] as never,
+			contributes: {
+				grantMiddleware: [
+					(deps: Record<string, unknown>) => {
+						read = deps.section;
+						return null;
+					},
+				],
+			} as never,
+		});
+		const sectioned = defineModule({
+			name: "fixture-section",
+			section: { schema: RetrySection },
+			contributes: noop,
+		});
+
+		const handle = await createApp({
+			modules: [provider, reader, sectioned],
+			bootstrapComponents: bootWith({ "fixture-section": { retries: 1 } }),
+			overrideComponents: { section: "overridden" } as never,
+		});
+
+		// The reader declares no section, so its `section` is the slot's value.
+		expect(read).toBe("overridden");
+		await handle.dispose();
+
+		const bootstrapped = await createApp({
+			modules: [reader],
+			bootstrapComponents: { ...bootWith({}), section: "bootstrapped" } as BootstrapMap,
+		});
+		expect(read).toBe("bootstrapped");
+		await bootstrapped.dispose();
+	});
 });
