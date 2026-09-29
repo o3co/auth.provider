@@ -39,6 +39,7 @@ import { describe, expect, it } from "vitest";
 import { createApp } from "../../index.mjs";
 import { defineModule, type Module } from "../../modules/manifest/index.mjs";
 import { makeValidCoreConfig } from "../../testing/fixtures/valid-config.mjs";
+import { createTestHttpSettings } from "../../testing/slots/httpSettings.mjs";
 import { createTestOAuthTokenSettings } from "../../testing/slots/oauthTokenSettings.mjs";
 import type { OAuthTokenSettings } from "../../token-settings/types.mjs";
 import { BootError } from "../types.mjs";
@@ -262,6 +263,88 @@ describe("ModuleSpec.authoritative (#728)", () => {
 			await handle.dispose();
 		}
 	});
+});
+
+describe("ModuleSpec.authoritative — every module, every key, the keys materialize reads", () => {
+	const HTTP = createTestHttpSettings();
+
+	it("refuses the override when the owner is listed after its reader", async () => {
+		const err = await refusal(
+			createApp({
+				modules: [reader({}), owner],
+				bootstrapComponents: bootstrap(),
+				overrideComponents: { oauthTokenSettings: SECOND },
+			}),
+		);
+		expect(err.details).toEqual({
+			reason: "authoritative-component-overridden",
+			module: "test:owner",
+			componentKey: "oauthTokenSettings",
+		});
+	});
+
+	it("refuses an override of the second of two authoritative keys when the first is not overridden", async () => {
+		const both = defineModule({
+			name: "test:both",
+			provides: { oauthTokenSettings: () => OWNED, httpSettings: () => HTTP },
+			authoritative: ["oauthTokenSettings", "httpSettings"],
+		});
+		const err = await refusal(
+			createApp({
+				modules: [both],
+				bootstrapComponents: bootstrap(),
+				overrideComponents: { httpSettings: createTestHttpSettings({ trustProxy: true }) },
+			}),
+		);
+		expect(err.details).toEqual({
+			reason: "authoritative-component-overridden",
+			module: "test:both",
+			componentKey: "httpSettings",
+		});
+	});
+
+	it("reads every authoritative key: the second, unprovided, is refused though the first is provided", async () => {
+		const err = await refusal(
+			createApp({
+				modules: [
+					defineModule({
+						name: "test:second-unprovided",
+						provides: { oauthTokenSettings: () => OWNED },
+						authoritative: ["oauthTokenSettings", "httpSettings"] as never,
+					}),
+				],
+				bootstrapComponents: bootstrap(),
+			}),
+		);
+		expect(err.details).toEqual({
+			reason: "authoritative-without-provides",
+			module: "test:second-unprovided",
+			componentKey: "httpSettings",
+		});
+	});
+
+	it.each<[string, () => Partial<Record<string, unknown>>]>([
+		["inherited", () => Object.create({ oauthTokenSettings: SECOND })],
+		[
+			"not enumerable",
+			() => Object.defineProperty({}, "oauthTokenSettings", { value: SECOND, enumerable: false }),
+		],
+	])(
+		"does not refuse an override key that is %s: materialize reads own enumerable keys alone, and the owner's value stands",
+		async (_label, make) => {
+			const seen: { settings?: OAuthTokenSettings } = {};
+			const handle = await createApp({
+				modules: [owner, reader(seen)],
+				bootstrapComponents: bootstrap(),
+				overrideComponents: make() as never,
+			});
+			try {
+				expect(seen.settings).toBe(OWNED);
+			} finally {
+				await handle.dispose();
+			}
+		},
+	);
 });
 
 describe("a __proto__ key in a host map", () => {
