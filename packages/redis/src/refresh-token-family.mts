@@ -34,8 +34,7 @@ export interface RedisRefreshTokenFamilyStoreOptions {
 	readonly keyPrefix: string;
 	/**
 	 * Maximum CAS retry attempts before throwing
-	 * RefreshTokenStorageError({ reason: "conflict-exhausted" }). Default 3
-	 * matches A3 §7.2 recommendation.
+	 * RefreshTokenStorageError({ reason: "conflict-exhausted" }). Default 3.
 	 */
 	readonly casRetryLimit?: number;
 }
@@ -51,17 +50,10 @@ const serialize = (fam: RefreshTokenFamily): string =>
 	JSON.stringify(fam satisfies SerializedFamily);
 
 /**
- * A family's expiry as this adapter stores it: refused when it is not a
- * finite number, and otherwise rounded up to a whole epoch millisecond.
- *
- * `PX` takes whole milliseconds and Redis refuses anything else, so a
- * lifetime configured in fractional seconds made every registration fail. Up,
- * never down: the family lives at least until the instant the caller asked
- * for. And the rounded value is what goes into the stored JSON too, because
- * {@link SerializedFamilySchema} reads back whole milliseconds only — a
- * fractional one written there would turn the family into `corrupt-data` on
- * its first read. NaN is never `<= now`, so without the finite check it
- * reached Redis as `PX NaN`.
+ * A family's expiry as stored: refused unless a finite instant, then rounded up
+ * to a whole epoch millisecond, both for `PX` (which takes nothing else) and
+ * for the stored JSON ({@link SerializedFamilySchema} reads integers only). Up,
+ * so the family lives at least as long as asked.
  */
 const storedExpiry = (expiresAtMs: number, operation: string): number => {
 	if (!isStorableExpiry(expiresAtMs)) {
@@ -73,42 +65,27 @@ const storedExpiry = (expiresAtMs: number, operation: string): number => {
 };
 
 /**
- * Runtime schema for `SerializedFamily`. `.strict()` rejects extra fields so
- * a future schema migration that adds keys is detected as `corrupt-data`
- * rather than silently dropped. Forward-compat callers that need to
- * tolerate extra fields across rolling deploys can wrap the store; the
- * default fail-closed posture is the safer choice.
- *
- * Per TS-M1 (Wave 5g): `JSON.parse(raw) as SerializedFamily` is a
- * compile-time cast only. A corrupt or schema-migrated value would
- * silently propagate `undefined` required fields into the rotation logic
- * — `fam.activeJti` comparisons against `undefined` are always false,
- * masking either a crash or a security bypass.
+ * Runtime schema for `SerializedFamily`: a bare cast would let a corrupt value
+ * carry `undefined` into rotation, where `activeJti` comparisons are always
+ * false. `.strict()` makes a record with extra fields (a newer schema)
+ * `corrupt-data` rather than silently truncated; a caller that must tolerate
+ * them across rolling deploys can wrap the store.
  */
 const SerializedFamilySchema = z
 	.object({
 		familyId: z.string(),
 		activeJti: z.string(),
 		revoked: z.boolean(),
-		// `expiresAtMs` is a positive epoch-ms integer. The looser `z.number()`
-		// would have accepted `Infinity` and fractional values, neither of
-		// which is a valid stored epoch — `Infinity` would defeat the
-		// `pttl <= 0` expiry gate (effectively "never expires") and
-		// fractional values cannot survive a `new Date(ms)` round-trip
-		// without precision loss. Tightened so corrupt operator-injected
-		// values trip `corrupt-data` rather than silently passing.
-		// Per Copilot review on PR #123.
+		// A positive integer: `Infinity` would defeat the `pttl <= 0` expiry
+		// gate, and a fraction does not survive a `new Date(ms)` round-trip.
 		expiresAtMs: z.number().int().positive().finite(),
 	})
 	.strict();
 
 /**
- * Parse + validate a stored family JSON. Throws
- * `RefreshTokenStorageError({ reason: "corrupt-data" })` on either parse
- * failure or shape failure — callers (`findFamily`, `updateFamily`)
- * expect either a result or a `RefreshTokenStorageError`, so a raw
- * `ZodError` would be an unexpected generic error type leaking past the
- * adapter contract.
+ * Parse and validate a stored family. Any failure is
+ * `RefreshTokenStorageError({ reason: "corrupt-data" })`, never a raw
+ * `ZodError`: callers expect only that error type from the adapter.
  */
 const deserialize = (raw: string): RefreshTokenFamily => {
 	let parsed: unknown;
@@ -125,56 +102,25 @@ const deserialize = (raw: string): RefreshTokenFamily => {
 };
 
 /**
- * Redis-backed RefreshTokenFamilyStore.
+ * Redis-backed RefreshTokenFamilyStore. Each family is one string key,
+ * `${keyPrefix}${familyId}`, holding the family as JSON (which keeps
+ * `RefreshTokenFamilyClient` narrow) with a `PX` TTL; see `storedExpiry`.
  *
- * Storage shape: each family is stored as a single Redis string key
- * `${keyPrefix}${familyId}` whose value is a JSON serialisation of the
- * RefreshTokenFamily aggregate, with a TTL set via the SET command's PX
- * argument. JSON serialisation (rather than a Redis hash) keeps the
- * RefreshTokenFamilyClient surface narrow (no HSET/HGETALL needed) and
- * matches A1's single-key SET-NX pattern.
+ * - `registerFamily` is `SET key value PX ttlMs NX`: atomic insert-only.
+ * - `updateFamily` is single-key `WATCH`/`GET`/`MULTI`/`SET`/`EXEC`: the
+ *   updater's decision is applied to exactly the state it read, or `EXEC`
+ *   answers `null` and the loop re-reads and re-decides. So a caller can fuse
+ *   "detect a condition" and "write the response" into one operation, as
+ *   refresh-replay detection and family revocation do.
  *
- * Expiry: `PX` is the family's remaining life rounded up to a whole
- * millisecond, and the stored `expiresAtMs` is rounded up with it; a
- * non-finite expiry, registered or committed, is a RangeError before Redis is
- * asked (see `storedExpiry`).
+ * Not Lua: the updater is JavaScript because the rotation ceremony is
+ * classified in the wrapper layer shared with the in-memory adapter, keeping
+ * the store a plain storage primitive; `WATCH`/`MULTI`/`EXEC` gives the same
+ * indivisibility for a decision made in the client.
  *
- * Atomicity:
- *   - registerFamily uses `SET key value PX ttlMs NX` — atomic insert-only,
- *     same primitive as A1's ChallengeStore.issue.
- *   - updateFamily uses single-key WATCH/GET/MULTI/SET/EXEC — the canonical
- *     Redis CAS primitive. Single-key only (not a multi-key transaction).
- *
- * What that buys the caller (#274): the decision the updater made is applied
- * to EXACTLY the state it inspected, or not at all. If any other connection
- * touches the key between the `WATCH` and the `EXEC`, Redis aborts the
- * transaction, `exec()` answers `null`, and the loop re-reads and re-decides.
- * A caller can therefore fuse "detect a condition" and "write a response to
- * it" into one indivisible operation by having the updater commit rather than
- * abort — which is how refresh-replay detection and family revocation stopped
- * being two racing writes.
- *
- * Why not Lua, when `ratelimit`'s `incrementWithTtl` and the federation lock's
- * compare-and-delete are Lua scripts: those express their whole decision in
- * Redis primitives, so it can run server-side. `updateFamily` takes a
- * JavaScript updater, because A3 §5.1 deliberately keeps the store a dumb
- * storage primitive and classifies the rotation ceremony in the wrapper layer
- * (shared with the in-memory adapter). A Lua rewrite would mean moving that
- * ceremony into every adapter. WATCH/MULTI/EXEC gives the same indivisibility
- * for a decision that has to be made in the client.
- *
- * Connection isolation: WATCH is connection-scoped in Redis, so each
- * `updateFamily` call obtains its own connection via `client.duplicate()`
- * (disposed via `await using` on function exit). Within that connection
- * the CAS retry loop reuses the SAME duplicate across attempts — Redis
- * auto-clears WATCH on every EXEC, so a fresh `WATCH` at the top of
- * each iteration sets up a clean CAS context without churning
- * connections per retry (1 connection per call, not per attempt).
- *
- * The base `client` is used only for non-WATCH ops (registerFamily,
- * findFamily) where command serialisation is sufficient.
- *
- * Per A3 §7.2.
+ * `WATCH` is connection-scoped, so each `updateFamily` call takes its own
+ * `client.duplicate()` and reuses it across retries (`EXEC` clears the watch);
+ * `registerFamily` and `findFamily` use the base client.
  */
 export function createRedisRefreshTokenFamilyStore(
 	opts: RedisRefreshTokenFamilyStoreOptions,
@@ -219,13 +165,8 @@ export function createRedisRefreshTokenFamilyStore(
 		async updateFamily(familyId, updater): Promise<RefreshTokenFamilyUpdateResult> {
 			const key = fullKey(familyId);
 
-			// One isolated connection per call (NOT per retry): WATCH is
-			// connection-scoped in Redis, so concurrent updateFamily calls
-			// would interleave their WATCH contexts on a shared client.
-			// `await using` closes the duplicate on every exit path including
-			// thrown errors. Across retries we reuse this single connection;
-			// Redis auto-clears WATCH on every EXEC, and we re-WATCH at the
-			// top of each iteration.
+			// One connection per call, not per retry (see above); `await using`
+			// closes it on every exit path, thrown errors included.
 			await using conn = client.duplicate();
 
 			for (let attempt = 0; attempt <= casRetryLimit; attempt++) {
@@ -251,11 +192,9 @@ export function createRedisRefreshTokenFamilyStore(
 
 				if (decision.action === "abort") {
 					await conn.unwatch();
-					// #274: `reason` is echoed verbatim and interpreted nowhere in
-					// this adapter — classification belongs to the wrapper layer
-					// (A3 §5.1). `withReason` omits the key when the decision
-					// carried none, so this result is shape-identical to the
-					// in-memory adapter's; see its JSDoc for why that matters.
+					// `reason` is echoed verbatim, never interpreted here. `withReason`
+					// omits the key when there is none, keeping the result
+					// shape-identical to the in-memory adapter's (see its JSDoc).
 					return { outcome: "aborted", ...withReason(decision.reason) };
 				}
 
@@ -269,10 +208,9 @@ export function createRedisRefreshTokenFamilyStore(
 				const next = { ...decision.family, expiresAtMs };
 				const newTtlMs = expiresAtMs - Date.now();
 				if (newTtlMs <= 0) {
-					// Updater returned past expiresAtMs — fail-closed parity with
-					// memory adapter (and symmetric with registerFamily's
-					// expired-at-issue throw). See updateFamily contract bullet
-					// in @o3co/auth-provider-core RefreshTokenFamilyStore.
+					// The updater returned a past expiry: fail closed, as the memory
+					// adapter and `registerFamily` do (see core's
+					// `RefreshTokenFamilyStore.updateFamily`).
 					await conn.unwatch();
 					throw new RefreshTokenStorageError({ reason: "expired-at-issue" });
 				}
@@ -282,33 +220,22 @@ export function createRedisRefreshTokenFamilyStore(
 				const execResult = await multi.exec();
 
 				if (execResult === null) {
-					// CAS conflict — Redis auto-clears WATCH on EXEC; loop and
-					// re-WATCH at the top of the next iteration on the SAME
-					// connection (no per-retry duplicate churn).
+					// CAS conflict: re-WATCH on the same connection next iteration.
 					continue;
 				}
 
-				// Reconstructing expiresAtMs as `Date.now() + newTtlMs` here
-				// (post-EXEC) drifts forward by the EXEC round-trip vs PTTL
-				// reconstruction in findFamily, which counts down from the
-				// SET commit moment. Concretely, `findFamily(...)?.expiresAtMs
-				// <= updateFamily(...).committed.family.expiresAtMs` for the
-				// same write — typically by single-digit ms in healthy
-				// networks. The drift is benign: callers using expiresAtMs
-				// to populate JWT `exp` claims still respect the original
-				// caller-supplied window (TTL never extends beyond what the
-				// updater asked for), and JWT validators tolerate seconds-
-				// scale clock skew. PTTL-after-EXEC reconstruction would
-				// add a redundant round-trip with no security benefit.
+				// Taken after EXEC, this runs up to one round-trip later than what
+				// `findFamily` reconstructs from PTTL for the same write. Benign:
+				// the TTL never exceeds what the updater asked for, and JWT
+				// validators tolerate far more skew; reading PTTL here would add a
+				// round-trip for nothing.
 				const committed = Object.freeze({
 					...next,
 					expiresAtMs: Date.now() + newTtlMs,
 				});
-				// #274: echo the reason from the decision that actually WON the
-				// CAS. On a retry the earlier invocations' reasons are discarded
-				// along with their (failed) commits — which is the whole point of
-				// carrying the reason on the decision instead of in a closure the
-				// caller reads after the fact.
+				// The reason of the decision that won the CAS; earlier attempts'
+				// reasons go with their failed commits, which is why the reason
+				// rides on the decision rather than in a caller's closure.
 				return { outcome: "committed", family: committed, ...withReason(decision.reason) };
 			}
 
@@ -317,13 +244,7 @@ export function createRedisRefreshTokenFamilyStore(
 	};
 }
 
-/**
- * AdapterFactory builder for runtime-config-driven backend selection
- * (composition pattern §8.4). Consumer registers via:
- *   factory.register("redis", redisRefreshTokenFamilyStoreBuilder);
- * Then calls:
- *   factory.create({ type: "redis", client, keyPrefix: "rtfam:", casRetryLimit: 3 });
- */
+/** AdapterFactory builder for runtime-config-driven backend selection. */
 export const redisRefreshTokenFamilyStoreBuilder: AdapterBuilder<RefreshTokenFamilyStore> = (
 	config,
 	_ctx,
@@ -333,12 +254,7 @@ export const redisRefreshTokenFamilyStoreBuilder: AdapterBuilder<RefreshTokenFam
 		keyPrefix?: string;
 		casRetryLimit?: number;
 	};
-	// TS-6 (Wave 5g): structural guard. Without this, a misconfigured DI
-	// graph (`client: undefined`) propagates to first-Redis-call time as a
-	// cryptic `TypeError: Cannot read properties of undefined (reading
-	// 'set')`. Failing fast at builder-invocation makes the boot-time
-	// configuration error obvious and aligns with the
-	// `redisFederationTokenStoreBuilder` precedent.
+	// Fail at boot rather than with a cryptic `TypeError` at the first Redis call.
 	if (!c.client) {
 		throw new Error("redisRefreshTokenFamilyStoreBuilder: 'client' option is required");
 	}
@@ -350,12 +266,9 @@ export const redisRefreshTokenFamilyStoreBuilder: AdapterBuilder<RefreshTokenFam
 };
 
 /**
- * `defineModule` manifest for the Redis RefreshTokenFamilyStore. Static
- * composition path (A3 §8.1). For runtime-config-driven selection use the
- * builder above.
- *
- * configSchema: top-level key `redisRefreshTokenFamilyStore`
- * (module-namespaced per master roadmap §3.5).
+ * `defineModule` manifest for the Redis RefreshTokenFamilyStore (static
+ * composition; the builder above is for runtime selection). Config lives under
+ * `redisRefreshTokenFamilyStore`.
  */
 export const redisRefreshTokenFamilyStoreModule = defineModule({
 	name: "redis-refresh-token-family-store",

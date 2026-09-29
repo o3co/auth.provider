@@ -15,57 +15,42 @@
  */
 
 /**
- * Redis {@link MfaTransactionStore} (the MFA ADR's D8, D21, D25): the
- * single-use record of each second-factor ceremony, the subject lock that
- * bounds guessable proofs, and the email proof an operator reset requires.
+ * Redis {@link MfaTransactionStore}: the single-use record of each
+ * second-factor ceremony, the subject lock that bounds guessable proofs, and
+ * the email proof an operator reset requires (see
+ * packages/core/docs/adr/2026-09-25-multi-factor-authentication.md).
  *
  * ```text
  * <keyPrefix>tx:{<id>}          HASH   one transaction, expiring at its expiresAtMs
- * <keyPrefix>lock:{<subject>}   HASH   D21's run, reservations in flight and trusted browsers
- * <keyPrefix>week:{<subject>}   ZSET   the weekly window: one member per attempt, scored by its time
- * <keyPrefix>proof:{<subject>}  STRING the email-proof requirement (D25), with no TTL
+ * <keyPrefix>lock:{<subject>}   HASH   the lockout run, reservations in flight, trusted browsers
+ * <keyPrefix>week:{<subject>}   ZSET   the weekly window: one member per attempt, scored by time
+ * <keyPrefix>proof:{<subject>}  STRING the email-proof requirement, with no TTL
  * ```
  *
  * `<id>` and `<subject>` are base64url of their JSON (`internal/mfa-keys.mts`).
- * A subject's lock hash and its week share the subject's hash tag, so each
- * operation on the state is one script on one Cluster slot; a transaction is
- * one key, and so is the requirement.
+ * A subject's lock and week share its hash tag, so each operation on them is one
+ * script on one Cluster slot. Every operation a race could split is one script
+ * (`makeIoredisClients`): insert-only create, compare-and-set update,
+ * `reserveAttempt`, `takeChallenge`, `consume`, and each lockout step, which
+ * reads, decides and writes the subject state at once.
  *
- * **Every operation a race could split is one script** (`makeIoredisClients`
- * holds them): create is insert-only, update a compare-and-set on the version,
- * `reserveAttempt` spends an attempt before a proof is checked, `takeChallenge`
- * answers a challenge once, `consume` gives the transaction to one
- * verification, and each of D21's operations reads, decides and writes the
- * subject state in one step. The requirement is one command each way.
+ * A transaction is written and read back through core's
+ * `newMfaTransactionRecord`, so it has the in-process store's shape and rules.
+ * One that does not read back is absent: the user starts again, rather than
+ * getting a 503 for the rest of its lifetime.
  *
- * **What a transaction is.** Core defines it and this adapter reads it back
- * through core: `create` keeps what `newMfaTransactionRecord` answers, and a
- * read rebuilds the record through the same function, so what comes back has
- * the shape and the rules the in-process store's has. The continuation's
- * instants are epoch milliseconds (the session-admission ADR's D5) and the
- * record travels as JSON, as the session envelope's claims and the cookie
- * session's `user` do. A transaction that does not read back is answered as
- * absent: the ceremony fails closed — the user starts again — where an outage
- * would answer 503 for the rest of its ten minutes.
+ * Two clocks: the key expires on the server's clock (`PEXPIREAT`, rounded up),
+ * and every operation also answers a transaction at or past `expiresAtMs` on
+ * this side's clock as absent, so a server running behind cannot let a
+ * ceremony spend an attempt, take a challenge or complete past its deadline.
+ * Lockout answers are judged on the time the caller passes; what the scripts
+ * forget and Redis reclaims is judged no later than the server's clock less
+ * `MFA_CLOCK_SKEW_ALLOWANCE_MS`. While a run is counted (until a success, an
+ * exempt success or `clearSubjectState`) the subject's keys carry no TTL, and a
+ * subject state a script cannot read is refused, never read as empty.
  *
- * **Two clocks.** A transaction's key expires on the server's clock, at its
- * `expiresAtMs` rounded up to a whole millisecond (`PEXPIREAT`); on this
- * side's clock (`now`) `create` refuses one already past, and every other
- * operation answers one at or past its `expiresAtMs` as absent — a read on
- * this side, `reserveAttempt` and `takeChallenge` in their scripts, which
- * are handed the clock — so a server running behind cannot let a ceremony
- * spend an attempt, take a challenge or complete past its deadline. D21's answers are judged on the
- * time the caller passes; what the scripts forget and what Redis reclaims is
- * judged no later than the server's clock, less a day
- * (`MFA_CLOCK_SKEW_ALLOWANCE_MS`). While a run is counted the subject's keys
- * carry no TTL — only a success, an exempt success or `clearSubjectState`
- * ends it — and a subject state a script cannot read is refused, never read as
- * one that holds nothing.
- *
- * **Durability.** The requirement must be kept as the factor store is (D12's
- * step-3 amendment): it has no TTL, and `redisMfaTransactionStoreModule` holds
- * the server to the factor store's boot check — and warns on a `volatile-*`
- * policy, which may evict the lock state once it carries a TTL.
+ * The requirement must last as enrolled factors do: it has no TTL, and the
+ * module runs the factor store's durability check.
  */
 
 import { createHash, randomBytes } from "node:crypto";
@@ -92,7 +77,7 @@ export const DEFAULT_REDIS_MFA_TRANSACTION_STORE_KEY_PREFIX = "mfat:";
 
 export interface RedisMfaTransactionStoreOptions {
 	readonly client: MfaTransactionStoreClient;
-	/** Outer namespace; each key's family and hash tag follow it. Without a brace. Default `mfat:`. */
+	/** Outer namespace; each key's family and hash tag follow it. No brace. Default `mfat:`. */
 	readonly keyPrefix?: string;
 	/**
 	 * The clock a transaction expires by on this side, in epoch milliseconds:
@@ -123,11 +108,10 @@ function fieldsOf(record: MfaTransaction, incarnation: string): Record<string, s
 		sends: String(record.sends),
 		enrollment: record.enrollment,
 		emailProof: JSON.stringify(record.emailProof),
-		// The deadline again, on its own, as the text the reservation and take
-		// scripts read with `tonumber`: they never decode `record`, since
-		// `cjson` refuses what `JSON.parse` accepts (a lone-surrogate escape,
-		// nesting past a thousand levels). `String` of a number reads back as
-		// the same double.
+		// The deadline again, for the reserve and take scripts to read with
+		// `tonumber` (it reads back as the same double): they never decode
+		// `record`, since `cjson` refuses what `JSON.parse` accepts (a
+		// lone-surrogate escape, deep nesting).
 		expiresAtMs: String(record.expiresAtMs),
 		// What never changes after `create`, as one JSON document; absent is null.
 		record: JSON.stringify({
@@ -162,11 +146,9 @@ const isObject = (value: unknown): value is Record<string, unknown> =>
 
 /**
  * The transaction `fields` hold, rebuilt through `newMfaTransactionRecord` as
- * the in-process store keeps it — every field named, sub-objects to their
- * known fields, plain data — or `null` when they hold nothing, hold another
- * id's, hold what that function refuses, or hold a transaction at or past its
- * `expiresAtMs` at `nowMs`: a server whose clock runs behind still holds the
- * key, and must not let a ceremony complete past its deadline.
+ * plain data, or `null` when they hold nothing, another id's, what that
+ * function refuses, or a transaction at or past its `expiresAtMs` at `nowMs`
+ * (a server whose clock runs behind still holds the key).
  */
 function transactionOf(
 	fields: Readonly<Record<string, string>>,
@@ -384,25 +366,20 @@ const moduleConfigSchema = z.object({
 });
 
 /**
- * `defineModule` manifest for the Redis {@link MfaTransactionStore} (the MFA
- * ADR's D8, D10, D12, D19): `mfaTransactionStore` off the
- * `mfaTransactionStoreClient` slot, with its keys under
- * `redisMfaTransactionStore.keyPrefix` (`mfat:`).
+ * `defineModule` manifest for the Redis {@link MfaTransactionStore}, off the
+ * `mfaTransactionStoreClient` slot, keys under
+ * `redisMfaTransactionStore.keyPrefix` (`mfat:`). Declares no `replicaSafety`:
+ * transactions, attempt limits and the lock are shared by every replica.
  *
- * Declares no `replicaSafety`: a transaction started on one replica is
- * verified on another, and the attempt limits and the lock are counted once
- * for all of them. It holds the email-proof requirement an operator reset
- * records, which must last as the enrolled factors do (D12's step-3
- * amendment), so before it provides the store it runs the factor store's
- * durability check: an `allkeys-*` eviction policy refuses the boot
- * (`mfa-transaction-store-evictable`); RDB snapshots without AOF
- * (`mfa_transaction_store_lossy`), no persistence
- * (`mfa_transaction_store_volatile`) and a server that refuses `CONFIG`
- * (`mfa_transaction_store_durability_unchecked`) are each one warning on the
- * `logger` slot, or on `consoleLogger`. So is a `volatile-*` policy
- * (`mfa_transaction_store_lock_evictable`), which the factor store does not
- * mind: the subject lock and weekly window carry a TTL once no run is
- * counted, and an evicted one lifts a D21 hold early.
+ * The email-proof requirement must last as enrolled factors do, so before
+ * providing the store it runs the factor store's durability check: an
+ * `allkeys-*` eviction policy refuses the boot (`mfa-transaction-store-evictable`);
+ * RDB without AOF (`mfa_transaction_store_lossy`), no persistence
+ * (`mfa_transaction_store_volatile`) and a server refusing `CONFIG`
+ * (`mfa_transaction_store_durability_unchecked`) each warn on the `logger` slot
+ * (or `consoleLogger`). So does a `volatile-*` policy
+ * (`mfa_transaction_store_lock_evictable`): the lock state carries a TTL once no
+ * run is counted, and evicting it lifts a lockout hold early.
  */
 export const redisMfaTransactionStoreModule = defineModule({
 	name: "redis-mfa-transaction-store",
