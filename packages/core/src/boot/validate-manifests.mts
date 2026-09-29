@@ -1701,8 +1701,9 @@ function validateAndComposeConfig(modules: readonly Module[], bootstrap: Bootstr
  * disagreement would otherwise go to whichever module is listed later: the
  * refusal Zod's intersection gave (`Unmergable intersection`) when the
  * schemas were composed into one. A leaf is a value that is not a plain
- * object (a list is one value); a leaf one output holds where another holds
- * keys under it disagrees too. Equal values (`isDeepStrictEqual`) agree.
+ * object (a list is one value); an empty object holds none. A leaf one output
+ * holds where another holds keys under it disagrees too. Equal values
+ * (`isDeepStrictEqual`) agree.
  */
 function conflictingOutputs(
 	outputs: readonly { readonly module: string; readonly data: unknown }[],
@@ -1720,7 +1721,9 @@ function conflictingOutputs(
 	};
 	const walk = (module: string, value: unknown, path: readonly string[]) => {
 		const key = JSON.stringify(path);
-		if (isPlainConfigObject(value) && Object.keys(value).length > 0) {
+		if (isPlainConfigObject(value)) {
+			// An empty object holds no value: a schema that declares no key there.
+			if (Object.keys(value).length === 0) return;
 			const leaf = leaves.get(key);
 			if (leaf !== undefined) conflict(path, leaf.module, module);
 			if (!branches.has(key)) branches.set(key, module);
