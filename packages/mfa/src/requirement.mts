@@ -38,7 +38,10 @@
  *   otherwise no session is re-authenticated, `device.lookup` and
  *   `device.deny` are met on any live session, `fed` is met, a primary the
  *   baseline does not know is re-authenticated, `mfaAt` is met, and a
- *   password without it steps up — or is unmet when nothing is reached.
+ *   password without it steps up — or is unmet when nothing is reached, and
+ *   is sent to log in again when the session store cannot record a step-up
+ *   (no `recordSecondFactor`, D9, D20): a login records the second factor
+ *   from the start.
  *   `credential_change` is held to the same baseline until the recent-MFA
  *   rule arrives (build-order steps 12 and 14; the step-8 owner decision 1).
  * - **`admitPrimary`** is `decideAfterPrimary` behind one interruption: after
@@ -90,6 +93,12 @@ export interface MfaRequirementOptions {
 	readonly transactions: LoginTransactions;
 	/** `endpoints.mfa.url`, as the page a step-up starts on. */
 	readonly stepUpPage: StepUpPage;
+	/**
+	 * Whether the session store can record a step-up (core's
+	 * `supportsSecondFactorUpdate`): without it a session stepped up could
+	 * never be written, so the baseline sends it to log in instead (D20).
+	 */
+	readonly stepUpRecordable: boolean;
 }
 
 const MET: RequirementVerdict = Object.freeze({ outcome: "met" });
@@ -116,7 +125,7 @@ function reachOf(factors: MfaFactorResolver): ReadonlySet<string> {
 
 /** The `mfa` requirement over `options` (see this file's header). */
 export function createMfaRequirement(options: MfaRequirementOptions): SessionRequirement {
-	const { mode, factors, factorStore, transactions, stepUpPage } = options;
+	const { mode, factors, factorStore, transactions, stepUpPage, stepUpRecordable } = options;
 
 	/**
 	 * The reach of the first read — boot's, at the end of the name-keyed pass,
@@ -158,7 +167,8 @@ export function createMfaRequirement(options: MfaRequirementOptions): SessionReq
 		if (recorded?.primary === FEDERATED_AMR) return MET;
 		if (recorded?.primary !== PASSWORD_AMR) return REAUTHENTICATE;
 		if (recorded.mfaAt !== undefined) return MET;
-		return reach().size > 0 ? STEP_UP : UNMET;
+		if (reach().size === 0) return UNMET;
+		return stepUpRecordable ? STEP_UP : REAUTHENTICATE;
 	};
 
 	/** The interruption that opens the login's transaction with `interruption`'s answer. */

@@ -38,7 +38,11 @@
  *   requirement, and keeps both, with the object it returned — the one core
  *   issues `mfa.step_up` to (build-order step 11) — for the routes of the
  *   same boot (`mfaBootState`). When the ring carries the development sample
- *   key, which the settings accepted, it says so once, at warn.
+ *   key, which the settings accepted, it says so once, at warn; so it does
+ *   when the user-session store cannot record a step-up
+ *   (`mfa_step_up_unsupported`, core's `supportsSecondFactorUpdate`, D20),
+ *   and the requirement then sends a session to log in where it would step
+ *   it up.
  * - **The routes' mount.** Contributes the route `mfa-routes` at
  *   `/session/mfa`, after the session middleware. Its factory runs after
  *   every name-keyed contribution has registered, so it is where the
@@ -66,6 +70,7 @@ import {
 	readMfaMode,
 	type SessionRequirement,
 	type StepUpPage,
+	supportsSecondFactorUpdate,
 } from "@o3co/auth-provider-core";
 import { type MfaSettings, readMfaSettings } from "./config.mjs";
 import { createMfaRequirement, type MfaRequirementMode } from "./requirement.mjs";
@@ -211,6 +216,16 @@ export function mfaModule(options: MfaModuleOptions = {}): Module {
 							"mfa_development_sample_key_in_use",
 						);
 					}
+					// D20: a session store that cannot record a step-up is said once;
+					// the requirement then sends a session to log in where it would
+					// step it up.
+					const stepUpRecordable = supportsSecondFactorUpdate(deps.userSessionStore);
+					if (!stepUpRecordable) {
+						logger.warn(
+							{ store: "userSessionStore", kind: deps.userSessionStore.kind },
+							"mfa_step_up_unsupported",
+						);
+					}
 					const requirement = createMfaRequirement({
 						mode,
 						factors: deps.mfaFactorResolver,
@@ -220,6 +235,7 @@ export function mfaModule(options: MfaModuleOptions = {}): Module {
 							ttlSeconds: settings.transactionTtlSeconds,
 						}),
 						stepUpPage,
+						stepUpRecordable,
 					});
 					bootStates.set(deps.mfaFactorResolver, {
 						mode,
