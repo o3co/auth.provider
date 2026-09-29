@@ -394,6 +394,17 @@ describe("the boot refusals (the MFA ADR's D20; the session-admission ADR's D7)"
 		expect(message).toContain("endpoints.mfa.url");
 		expect(message).toContain("ENDPOINTS_MFA_URL");
 	});
+
+	it("refuses an empty endpoints.mfa.url as unset, naming it — before core would refuse the page for its own reason", async () => {
+		const config = configFor("required");
+		const err = await refusal({
+			config: { ...config, endpoints: { ...config.endpoints, mfa: { url: "" } } } as never,
+		});
+		expect(err.reason).toBe("contribute-factory-failed");
+		const message = (err.cause as Error).message;
+		expect(message).toContain("endpoints.mfa.url");
+		expect(message).toContain("ENDPOINTS_MFA_URL");
+	});
 });
 
 // ---------------------------------------------------------------------------

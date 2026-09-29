@@ -728,11 +728,16 @@ describe("admitPrimary — after a password login (F1 step 1, F3; owner decision
 		});
 	});
 
-	it("throws when the store answers a list that is not one: never read as no factor", async () => {
-		const { requirement } = build("optional", {
-			factorStore: { ...factorStoreHolding(), list: async () => null as never },
-		});
-		await expect(requirement.admitPrimary?.(primaryOf("u-alice"))).rejects.toThrow(TypeError);
+	it("throws when the store answers a list that is not one — even one with no length, or a length of 0 — never read as no factor", async () => {
+		for (const answer of [null, {}, { length: 0 }, ""]) {
+			const { requirement } = build("optional", {
+				factorStore: { ...factorStoreHolding(), list: async () => answer as never },
+			});
+			await expect(
+				requirement.admitPrimary?.(primaryOf("u-alice")),
+				JSON.stringify(answer),
+			).rejects.toThrow(TypeError);
+		}
 	});
 
 	it("establishes a primary that is not a password login without reading the factors: the baseline applies after pwd only (D13)", async () => {

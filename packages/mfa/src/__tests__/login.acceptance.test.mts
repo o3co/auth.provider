@@ -182,6 +182,20 @@ describe("session fixation, end to end (the MFA ADR's D27)", () => {
 	});
 });
 
+describe("the transaction's life, as configured (D8)", () => {
+	it("lives mfa.transactionTtlSeconds: the 403's expires_in and the transaction's expiry are the setting's, not the default's", async () => {
+		const { app, transactionStore } = await boot({
+			config: configFor("required", { transactionTtlSeconds: 120 }),
+			factorStore: await aliceEnrolled(),
+		});
+		const { res } = await login(app);
+		expect(res.status).toBe(403);
+		expect(res.body.expires_in).toBe(120);
+		const transaction = await transactionStore.get(res.body.transaction as string);
+		expect((transaction?.expiresAtMs ?? 0) - (transaction?.createdAtMs ?? 0)).toBe(120_000);
+	});
+});
+
 describe("a password login under required, the subject holding no record (F3 step 1; owner decision 2)", () => {
 	it("is answered 403 mfa_enrollment_required with the kinds that may be enrolled and whether an email proof comes first, and no UserSession written", async () => {
 		const { app, userSessionStore, transactionStore } = await boot({
