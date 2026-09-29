@@ -36,15 +36,20 @@
 
 import {
 	ADMISSION_ACTIONS,
+	admitPrimary,
 	createInMemoryUserSessionStore,
 	defineModule,
 	issuedRemediationActions,
 	type MfaFactor,
+	passwordPrimary,
 	passwordSessionAuthentication,
+	readAcrTable,
 	requirementSession,
+	type SessionRequirement,
 	type UserSession,
 	type UserSessionStore,
 } from "@o3co/auth-provider-core";
+import { resolverForTests } from "@o3co/auth-provider-core/testing";
 import { afterEach, describe, expect, it } from "vitest";
 import { MFA_DEVELOPMENT_SAMPLE_KEY } from "#/config.mjs";
 import { MFA_ROUTES_ID, mfaBootState, mfaModule, mfaModules } from "#/module.mjs";
@@ -265,11 +270,84 @@ describe("the boot refusals (the MFA ADR's D20; the session-admission ADR's D7)"
 				});
 				expect(err.reason, `${mode} ${kind}`).toBe("contribute-factory-failed");
 				expect(err.details, `${mode} ${kind}`).toMatchObject({ module: "mfa", kind: "routes" });
+				expect(err.cause, kind).toMatchObject({ reason: "mfa-factor-kind-unhintable" });
 				const message = (err.cause as Error).message;
 				expect(message, kind).toContain(JSON.stringify(kind));
 				expect(message, kind).toContain("hints.enrollable");
 			}
 		}
+	});
+
+	/** `count` counting factors of other packages', kinds `extra-1`… */
+	const counting = (count: number) =>
+		Array.from({ length: count }, (_, i) => contributing(stubFactor(`extra-${i + 1}`, ["hwk"])));
+
+	it("refuses more enabled counting factors than a hint list carries — core's cap, 16 — as mfa-too-many-factors, under either mode", async () => {
+		for (const mode of ["optional", "required"] as const) {
+			// TOTP and 16 more: 17.
+			const err = await refusal({ config: configFor(mode), extraModules: counting(16) });
+			expect(err.reason, mode).toBe("contribute-factory-failed");
+			expect(err.details, mode).toMatchObject({ module: "mfa", kind: "routes" });
+			expect(err.cause, mode).toMatchObject({ reason: "mfa-too-many-factors" });
+			const message = (err.cause as Error).message;
+			expect(message).toContain("17");
+			expect(message).toContain("16");
+			expect(message).toContain("hints.enrollable");
+		}
+	});
+
+	it("boots with 16 enabled counting factors, and counts only those that count", async () => {
+		await boot({ extraModules: counting(15) });
+		await boot({
+			extraModules: [
+				...counting(15),
+				contributing(stubFactor("recovery_code", ["recovery"], { counting: false })),
+			],
+		});
+	});
+
+	it("holds its cap to core's: a first binding's hint list of 16 kinds is answered, one of 17 refused", async () => {
+		const answering = (count: number): SessionRequirement => ({
+			name: "mfa",
+			reach: new Set(["otp", "mfa"]),
+			stepUpPage: { url: "/mfa", params: {} },
+			remediations: ["mfa.step_up"],
+			hintKeys: ["enrollable"],
+			admit: async () => ({ outcome: "met" }),
+			admitPrimary: async () => ({
+				open: async () => ({
+					status: 403,
+					body: {
+						error: "mfa_enrollment_required",
+						hints: { enrollable: Array.from({ length: count }, (_, i) => `k${i}`) },
+					},
+				}),
+			}),
+		});
+		const open = async (count: number) => {
+			const admission = await admitPrimary(
+				{
+					userSessionStore: undefined,
+					subjectRevocation: undefined,
+					requirements: resolverForTests([answering(count)]),
+					acrTable: readAcrTable({}),
+					logger: undefined,
+					auditSink: undefined,
+				},
+				passwordPrimary({
+					subject: "u-alice",
+					user: { id: "u-alice" },
+					claims: {},
+					authTime: new Date(),
+					redirectTo: undefined,
+					request: {},
+				}),
+			);
+			if (admission.outcome !== "interrupt") throw new Error("not interrupted");
+			return admission.open("sess-1");
+		};
+		await expect(open(16)).resolves.toMatchObject({ status: 403 });
+		await expect(open(17)).rejects.toThrow(RangeError);
 	});
 
 	it("accepts the kinds a hint carries: lower-case, digits, underscores and hyphens after a letter", async () => {
