@@ -13,12 +13,12 @@ describe("FederationTokenStore.removeBySid (in-memory store, no deleteBySession)
 		expect("removeBySid" in store).toBe(true);
 	});
 
-	it("in-memory store no longer exposes deleteBySession", () => {
+	it("in-memory store does not expose deleteBySession", () => {
 		const store = createInMemoryFederationTokenStore();
 		expect("deleteBySession" in store).toBe(false);
 	});
 
-	it("removeBySid removes all federation entries for sid (functional parity with old deleteBySession)", async () => {
+	it("removeBySid removes all federation entries for sid", async () => {
 		const store = createInMemoryFederationTokenStore();
 		const tokens: FederationTokens = {
 			accessToken: "at",

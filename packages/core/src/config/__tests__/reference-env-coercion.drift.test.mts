@@ -83,7 +83,7 @@ describe("every leaf core's schema declares reads the string an environment vari
 	});
 });
 
-describe("the two leaves the bridge used to coerce, read from the strings an operator's variables carry", () => {
+describe("oauth.jwt.jwksCacheMaxAge and redisFederationTokenStore.scanFallback, read from the strings an operator's variables carry", () => {
 	const base = makeValidCoreConfig();
 
 	const withMaxAge = (jwksCacheMaxAge: unknown) =>
