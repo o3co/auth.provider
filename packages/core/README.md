@@ -1,6 +1,6 @@
 # @o3co/auth-provider-core
 
-Last updated: 2026-09-29
+Last updated: 2026-09-30
 
 ## Responsibility
 
@@ -8,7 +8,7 @@ Last updated: 2026-09-29
 
 It owns no grant type and no `/oauth/*` endpoint (`@o3co/auth-provider-oauth` and the grant packages): the only route core mounts itself is the discovery document, and its JWKS, health and readiness routers are installed by a composition root. It owns no durable adapter (`@o3co/auth-provider-redis`), no federation adapter (the `@o3co/auth-provider-federation-*` packages), no login or browser session (`@o3co/auth-provider-session`) and no Store client (`@o3co/auth-provider-foundation`). Which directory inside owns what, and why each is separate, is [src/README.md](src/README.md).
 
-Vocabulary: **the Store** is auth.provider's term for the consumer's upstream user service — the system of record for identity, credentials, and email-verification state. Defined on the `User` doc in [`src/repositories/types.mts`](src/repositories/types.mts); auth.provider reads Store-published state, and causes a write there only through the two optional relays its own flows need (`linkFederatedIdentity`, and `markMfaEnrolled`, the MFA enrollment witness). Design-campaign identifiers cited in this package's sources resolve in [docs/design-campaign-index.md](../../docs/design-campaign-index.md).
+Vocabulary: **the Store** is auth.provider's term for the consumer's upstream user service — the system of record for identity, credentials, and email-verification state. Defined on the `User` doc in [`src/repositories/types.mts`](src/repositories/types.mts); auth.provider reads Store-published state, and causes a write there only through the two optional relays its own flows need (`linkFederatedIdentity`, and `markMfaEnrolled`, the MFA enrollment witness).
 
 ## Install
 
