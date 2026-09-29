@@ -131,10 +131,12 @@ export interface CsrfGuard {
  * The key has one owner — the module that owns the session cookie's secret
  * (`session.secret`: the session store's) — which derives it from that secret
  * for this purpose alone, so a token's signature is never a session cookie's
- * signature, nor an oracle for one: the session package's derivation today is
- * HKDF-SHA256 over the secret, no salt, info
- * `o3co.auth.provider/session-csrf/v1`, 32 bytes. Neither the secret nor the
- * derived key leaves the signer: a plain object, its prototype
+ * signature, nor an oracle for one. How it derives the key is the owner's, not
+ * this contract's: two providers that derive it differently do not verify each
+ * other's tokens, so switching between them invalidates the tokens outstanding
+ * (short-lived, and issued afresh), and a provider that must keep verifying
+ * what an earlier one issued pins that derivation in its own tests. Neither
+ * the secret nor the derived key leaves the signer: a plain object, its prototype
  * `Object.prototype` or `null`, that carries `sign` and `verify` alone, own or
  * inherited, and is frozen.
  */

@@ -32,7 +32,10 @@
  * the secret the signer was built from, the suite also checks that the key
  * was derived for this purpose: a signature is not an HMAC-SHA256 of the
  * payload under the secret itself, in any encoding a cookie signature is
- * written in, and the secret does not show when the signer is printed.
+ * written in, and the secret does not show when the signer is printed. Which
+ * derivation is not checked: it is the owner's (`CsrfTokenSigner`), and a
+ * provider that must verify tokens an earlier one issued pins it in its own
+ * tests.
  *
  * That `verify` compares in constant time is the contract too, and is not
  * checked: a timing difference is not something a unit suite can measure
