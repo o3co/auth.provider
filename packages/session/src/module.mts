@@ -23,6 +23,11 @@ import {
 	SUBJECT_REVOCATION_ABSENCE_POLICY,
 } from "@o3co/auth-provider-core";
 import express from "express";
+import {
+	createCsrfProtectionFromConfig,
+	createSessionCsrfGuard,
+	type SessionCsrfConfigSlice,
+} from "./csrf.mjs";
 import { extractFederationSection } from "./federations/extract-federation-section.mjs";
 import { deriveFederationTransactionCookieName } from "./federations/transaction.mjs";
 import * as federationRoutes from "./routes/Federation.mjs";
@@ -161,6 +166,26 @@ export const sessionModule = defineModule<
 		auditSink: AUDIT_SINK_ABSENCE_POLICY,
 		subjectSessionIndex: SUBJECT_REVOCATION_ABSENCE_POLICY,
 		subjectRevocation: SUBJECT_REVOCATION_ABSENCE_POLICY,
+	},
+	// What this module owns of the browser session that other packages use,
+	// as slots whose contracts are core's (#728): a package imports only core,
+	// and requires the slot instead of rebuilding the policy from the session
+	// configuration.
+	provides: {
+		// The one CSRF policy (#710 C4): the guard `/session/login` runs, over
+		// the same key, cookie and trust list — so a token `GET /session/csrf`
+		// hands out is accepted wherever the slot is mounted. The key is derived
+		// from `session.secret`, as the session routes derive theirs; it is to
+		// come from the session store's `csrfTokenSigner` slot before the
+		// session store's configuration becomes a section of its own.
+		csrfGuard: (deps) => {
+			const session = (deps.config as AppConfig).session as unknown as SessionCsrfConfigSlice;
+			return createSessionCsrfGuard({
+				csrf: createCsrfProtectionFromConfig(session),
+				trustedOrigins: session.csrf?.trustedOrigins ?? [],
+				logger: deps.logger ?? consoleLogger,
+			});
+		},
 	},
 	contributes: {
 		routes: [

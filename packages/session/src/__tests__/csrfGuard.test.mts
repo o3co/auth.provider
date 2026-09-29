@@ -55,6 +55,7 @@ import {
 	type SessionCsrfConfigSlice,
 } from "#/csrf.mjs";
 import { sessionModule } from "#/module.mjs";
+import { sessionStoreModuleFor } from "#/modules/sessionStoreModule.mjs";
 
 const TRUSTED = "https://app.contract.test";
 
@@ -137,12 +138,12 @@ describe("the guard's middleware answers and logs as createCsrfGuard does", () =
 	it.each(cases)("%s: the same status, body and warn line", async (_what, headers) => {
 		const session = sessionSlice();
 		const csrf = createCsrfProtectionFromConfig(session);
-		const sloted = spyLogger();
+		const slotLogger = spyLogger();
 		const direct = spyLogger();
 		const guard = createSessionCsrfGuard({
 			csrf,
 			trustedOrigins: [TRUSTED],
-			logger: sloted as unknown as Logger,
+			logger: slotLogger as unknown as Logger,
 		});
 		const before = createCsrfGuard({
 			csrf,
@@ -154,8 +155,8 @@ describe("the guard's middleware answers and logs as createCsrfGuard does", () =
 		expect(viaSlot.status).toBe(403);
 		expect(viaSlot.status).toBe(viaGuard.status);
 		expect(viaSlot.body).toEqual(viaGuard.body);
-		expect(sloted.warn.mock.calls).toEqual(direct.warn.mock.calls);
-		expect(sloted.warn).toHaveBeenCalledTimes(1);
+		expect(slotLogger.warn.mock.calls).toEqual(direct.warn.mock.calls);
+		expect(slotLogger.warn).toHaveBeenCalledTimes(1);
 	});
 });
 
@@ -235,7 +236,8 @@ const boot = async (seen: { guard?: CsrfGuard }): Promise<express.Express> => {
 		session: { ...base.session, name: "auth.session", secure: false },
 	} as AppConfig;
 	const handle = await createTestApp({
-		modules: [sessionModule, ...stores, probe(seen)],
+		// The session store's middleware first, as every composition lists it.
+		modules: [sessionStoreModuleFor(config), sessionModule, ...stores, probe(seen)],
 		bootstrapComponents: { config, pathResolver: (s: string) => s },
 	});
 	handles.push(handle);
