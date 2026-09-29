@@ -17,10 +17,10 @@ export interface ReplaySeenSetContractFactory {
  * An in-process store judges expiry on this process's clock. A Redis key
  * expires on the server's, which sits to either side of the host's, and a
  * relative `PX` runs from when the command reached the server; a loaded run
- * also reaches its next line late. A fixed sleep after a short expiry therefore
- * either read an entry the store had already dropped, or checked one it had
- * not dropped yet. The default is this process's clock; a Redis runner passes
- * one that reads the server's `TIME`, or waits for the keys to be gone.
+ * also reaches its next line late. So a fixed sleep after a short expiry can
+ * read an entry the store already dropped, or check one it has not dropped
+ * yet. The default is this process's clock; a Redis runner passes one that
+ * reads the server's `TIME`, or waits for the keys to be gone.
  */
 export interface ExpiryClock {
 	/** Epoch milliseconds on the clock the store expires entries by. */
@@ -47,18 +47,12 @@ const aheadOf = async (clock: ExpiryClock): Promise<Date> =>
 	new Date(Math.max(Date.now(), await clock.now()) + 1_000);
 
 /**
- * Adapter contract suite for ReplaySeenSet. Memory + Redis adapters both
- * call this and MUST pass identically.
- *
- * Per A1 §13.1 + master roadmap §3.6.
- */
-/**
  * Expiries no store may be handed: not finite (NaN, from an Invalid Date or an
  * unset setting; ±Infinity), or outside ECMAScript's Date range (±8.64e15 ms).
- * NaN is never `<= now`, so it slipped past every past-expiry check; one past
- * the Date range is a number Redis cannot take as a deadline (`1e21` is sent
- * as `1e+21`) and a Date cannot hold, and a script that writes its record
- * before setting the deadline left the record with no TTL at all.
+ * NaN is never `<= now`, so it would slip past every past-expiry check; one
+ * past the Date range is a number Redis cannot take as a deadline (`1e21` is
+ * sent as `1e+21`) and a Date cannot hold, and a script that writes its record
+ * before setting the deadline would leave the record with no TTL at all.
  */
 const UNSTORABLE_EXPIRIES = [
 	Number.NaN,
@@ -69,6 +63,10 @@ const UNSTORABLE_EXPIRIES = [
 	-1e21,
 ];
 
+/**
+ * Adapter contract suite for ReplaySeenSet. Memory + Redis adapters both
+ * call this and MUST pass identically.
+ */
 export function runReplaySeenSetContract(
 	factoryName: string,
 	factory: ReplaySeenSetContractFactory,
@@ -112,11 +110,11 @@ export function runReplaySeenSetContract(
 		});
 
 		it("markSeen refuses an expiry that is not a finite number within the Date range, and records nothing", async () => {
-			// A NaN expiry is never `<= now`, so it slipped past the expired-at-issue
-			// check: the memory adapter kept the record forever and Redis was sent
-			// `PX NaN`. A non-finite expiry is a caller fault, not the timing race
-			// `expired-at-issue` names, so it is a RangeError — which the challenge
-			// ceremony, swallowing `expired-at-issue`, does not swallow.
+			// A NaN expiry is never `<= now`, so it would pass the expired-at-issue
+			// check: the memory adapter would keep the record forever and Redis
+			// would be sent `PX NaN`. A non-finite expiry is a caller fault, not the
+			// timing race `expired-at-issue` names, so it is a RangeError — which
+			// the challenge ceremony, swallowing `expired-at-issue`, does not swallow.
 			await withSet(async (set) => {
 				for (const bad of UNSTORABLE_EXPIRIES) {
 					await expect(set.markSeen("scope-A", "k-bad", bad)).rejects.toThrow(RangeError);
@@ -138,8 +136,7 @@ export function runReplaySeenSetContract(
 		});
 
 		it("expired entries treated as absent (contains=false after TTL)", async () => {
-			// Dated from, and waited out on, the set's own clock (see
-			// `ExpiryClock`), not a 50 ms expiry and a 100 ms sleep.
+			// Dated from, and waited out on, the set's own clock (see `ExpiryClock`).
 			const expiry = options.expiry ?? hostExpiry;
 			await withSet(async (set) => {
 				const soon = await aheadOf(expiry);
@@ -164,8 +161,7 @@ export function runReplaySeenSetContract(
 		});
 
 		it("ChallengeStorageError type-import unused-warning guard", () => {
-			// Placeholder to anchor the import; vitest will complain if the import
-			// is unused above (it's used in the toMatchObject above, kept by ts).
+			// Anchors the ChallengeStorageError import, which nothing else here uses.
 			expect(ChallengeStorageError.name).toBe("ChallengeStorageError");
 		});
 	});

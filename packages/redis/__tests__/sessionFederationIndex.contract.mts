@@ -23,15 +23,14 @@ const FUTURE = () => new Date(Date.now() + 60_000);
 const PAST = () => new Date(Date.now() - 1);
 
 /**
- * How a test reaches an entry's expiry on the store's own terms.
- *
- * An in-process store judges expiry on this process's clock. A Redis key
- * expires on the server's, which sits to either side of the host's, and a
- * relative `PX` runs from when the command reached the server; a loaded run
- * also reaches its next line late. A fixed sleep after a short expiry therefore
- * either read an entry the store had already dropped, or checked one it had
- * not dropped yet. The default is this process's clock; a Redis runner passes
- * one that reads the server's `TIME`, or waits for the keys to be gone.
+ * How a test reaches an entry's expiry on the store's own terms. An
+ * in-process store judges expiry on this process's clock. A Redis key expires
+ * on the server's, which sits to either side of the host's, and a relative
+ * `PX` runs from when the command reached the server; a loaded run also
+ * reaches its next line late. So a fixed sleep after a short expiry may read
+ * an entry the store has already dropped, or one it has not dropped yet. The
+ * default is this process's clock; a Redis runner passes one that reads the
+ * server's `TIME`, or waits for the keys to be gone.
  */
 export interface ExpiryClock {
 	/** Epoch milliseconds on the clock the store expires entries by. */
@@ -131,8 +130,9 @@ export function runSessionFederationIndexContract(
 
 		it("addFederation refuses an expiresAt that is not a valid date, and records nothing", async () => {
 			// An Invalid Date's time is NaN, which is never `<= now`: the memory
-			// store kept such an entry for ever, and Redis wrote the entry and then
-			// refused `PEXPIREAT NaN`, leaving the key with no TTL. A caller fault.
+			// store would keep such an entry for ever, and Redis would write the
+			// entry, then refuse `PEXPIREAT NaN` and leave the key with no TTL.
+			// A caller fault.
 			const idx = await factory();
 			await expect(idx.addFederation("sid-1", "google", new Date(Number.NaN))).rejects.toThrow(
 				RangeError,
@@ -142,9 +142,7 @@ export function runSessionFederationIndexContract(
 
 		it("listFederations returns empty after expiresAt elapsed", async () => {
 			// Dated from, and waited out on, the store's own clock (see
-			// `ExpiryClock`): a fixed 50 ms expiry and a 100 ms sleep on the host
-			// read a Redis key after the server had already expired it on a
-			// loaded run — or before, when the server's clock lagged the host's.
+			// `ExpiryClock`).
 			const idx = await factory();
 			const expiresAt = await aheadOf(expiry);
 			await idx.addFederation("sid-1", "google", expiresAt);

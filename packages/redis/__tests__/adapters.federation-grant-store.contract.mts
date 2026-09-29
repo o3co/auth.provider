@@ -64,32 +64,21 @@ const MIN = 60_000;
 const DAY = 86_400_000;
 
 /**
- * The real clock, and not a fixed date. Every rule below is judged against the
- * `now` a test passes in, but an adapter also hangs a key TTL on the stored
- * `expiresAt` as a safety net, and a fixture dated in the past would have a
- * real store expire the record before the test reads it.
+ * The test's clock. Every rule below is judged against the `now` a test
+ * passes in, and this clock is:
  *
- * Not on a whole second: an adapter that truncates an instant to seconds when
- * it stores it would otherwise hand every fixture back unchanged.
- *
- * Taken per test, and not once at import: a fixture's intent lapses ten
- * minutes after this instant, and a suite that runs against a real store —
- * a container to start, connections to open, locks that wait on real timers —
- * takes long enough for a clock fixed at import to put that lapse in the
- * past. The record would then be reclaimed by the store's own clock partway
- * through the suite, which reads as a failure of whatever test looked next.
- *
- * Not set until the first test starts, and read only through `T0()` — `at`
- * included — which refuses to read it before then: a date taken while the
- * suite is collected — in a `describe` body rather than a test — is dated
- * from the import, not from the test that uses it, and next to that test's
- * own dates it is off by however long the suite took to get there. A stamp
- * "a minute later" would then be dated before the one it follows, and be
- * refused as stale, only on a slow enough run.
- *
- * Handed out as a copy each time, never the clock itself: a store that wrote
- * to the `now` it was given would otherwise move every date the test takes
- * after it.
+ * - real time, not a fixed date: an adapter also hangs a key TTL on the
+ *   stored `expiresAt`, and a past-dated fixture would expire before it is read;
+ * - off the whole second, so an adapter that truncates instants to seconds
+ *   cannot hand every fixture back unchanged;
+ * - set per test, not at import: against a real store the suite runs long
+ *   enough for a fixture's ten-minute intent, dated from import, to lapse and
+ *   be reclaimed midway, failing whichever test looks next;
+ * - read only through `T0()` (and `at`), which throws before the first test:
+ *   a date taken in a `describe` body is dated from import, so a stamp "a
+ *   minute later" could predate the one it follows and be refused as stale;
+ * - handed out as a copy, so a store that writes to its `now` cannot move the
+ *   dates the test takes after it.
  */
 let testClock = new Date(Number.NaN);
 const T0 = (): Date => {
@@ -157,24 +146,20 @@ const renewal = (over: Partial<FederationGrantAuthorization> = {}) =>
 
 /**
  * The usage fields of a grant with none recorded, named as a store hands them
- * back (#626): an authorized grant carries each key, `undefined` or not.
+ * back: an authorized grant carries each key, `undefined` or not.
  */
 const noUsage = { lastUsedAt: undefined, ineligible: undefined, refreshFailure: undefined };
 
 /**
- * A field's value on a record that has to be there, with the key held to the
- * shape the port promises (#626): an authorized grant, and a failure stamp,
- * NAME every field — `undefined` when there is none — and a grant never
- * authorized has none of the authorization or usage keys at all. So a store
- * that left a key out of an authorized grant fails here even when the value
- * it would have held is `undefined`. A missing record is a failure, not a
- * pass.
+ * A field's value on a record that must exist, with the key held to the shape
+ * the port promises: an authorized grant, and a failure stamp, NAME every field
+ * (`undefined` when there is none), and a grant never authorized has none of
+ * the authorization or usage keys. A missing record fails.
  *
- * Which shape applies is read from the status — `pending` never authorized,
- * `active` and `reauthorization_required` authorized — and never from the
- * fields under test: an authorized grant a store broke badly enough to lose
- * `consent` must still be held to naming every key. A revoked grant can be
- * either, so the caller, who made the fixture, says which.
+ * The shape is read from the status (`pending` never authorized; `active` and
+ * `reauthorization_required` authorized), never from the fields under test, so
+ * an authorized grant that lost `consent` is still held to naming every key. A
+ * revoked grant can be either, so the caller says which.
  */
 const fieldOf = (
 	record: object | null | undefined,
@@ -198,19 +183,19 @@ const fieldOf = (
 
 const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
 
-/** Long enough that a stalled test process (#357) does not read as an expired lock. */
+/** Long enough that a stalled test process does not read as an expired lock. */
 const HELD = { ttlMs: 120_000, waitForMs: 0 };
 
 /**
- * The behaviour every {@link FederationGrantStore} adapter shares (#593, D2,
- * D16). The memory adapter runs this in-tree; the Redis adapter runs the same
- * suite against a real Redis, so the two cannot disagree about what a grant
- * is, or about which write wins.
+ * The behaviour every {@link FederationGrantStore} adapter shares
+ * (federation-grants ADR, D2, D16; bare D-numbers below refer to it). The
+ * memory adapter runs this in-tree and the Redis adapter against a real Redis,
+ * so the two cannot disagree about what a grant is or which write wins.
  *
- * Time is passed in, never faked: the port takes it from its caller. The lock
- * is the exception — its TTL is real time in any adapter — and its tests use
- * real, short waits; so does the one case that waits for the store's own
- * clock to reclaim a credential, which is real time in any adapter too.
+ * Time is passed in, never faked: the port takes it from its caller. The
+ * lock's tests, and the one case that waits for the store's own clock to
+ * reclaim a credential, use real, short waits: both are real time in any
+ * adapter.
  */
 export function runFederationGrantStoreContract<S extends FederationGrantStore>(
 	name: string,
@@ -1909,7 +1894,7 @@ export function runFederationGrantStoreContract<S extends FederationGrantStore>(
 				const grant = await activated();
 				await note(grant.version);
 				// Every field named, and compared strictly: a read that left out an
-				// `undefined` one would pass a looser comparison (#626).
+				// `undefined` one would pass a looser comparison.
 				const stamp = {
 					at: at(DAY),
 					kind: "unavailable",
