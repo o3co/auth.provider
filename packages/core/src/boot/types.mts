@@ -167,7 +167,12 @@ export interface NormalisedModule {
 	readonly requires: readonly ComponentKey[];
 	readonly optional: readonly ComponentKey[];
 	readonly providesKeys: readonly ComponentKey[];
-	/** `authoritative` when it is a list (#728); empty otherwise — stage 1 refuses one that is not. */
+	/**
+	 * The manifest's `authoritative` as it was read, once (#728): stage 1
+	 * refuses a value that is not a list, and names it by what it is.
+	 */
+	readonly authoritativeDeclared: unknown;
+	/** `authoritativeDeclared`'s entries when it is a list; empty otherwise. */
 	readonly authoritativeKeys: readonly ComponentKey[];
 	readonly contributesEntries: readonly ContributionEntry[];
 	readonly overridesEntries: readonly ContributionEntry[];
@@ -918,14 +923,22 @@ export interface LifecycleWithoutProvidesDetails {
 
 /**
  * A module names in `authoritative` a key it does not provide, or declares
- * `authoritative` as something other than a list (#728). `componentKey` is
- * the key named — for a value that is not a list, that value, as a string.
+ * `authoritative` as something other than a list (#728). For a key,
+ * `componentKey` names it — a key that is not a string described, never
+ * rendered. For a value that is not a list, `declared` says what it is
+ * (`the string "…"`, `null`, `the number 5`, `a Set`), and no key is named.
  */
-export interface AuthoritativeWithoutProvidesDetails {
-	readonly reason: "authoritative-without-provides";
-	readonly module: string;
-	readonly componentKey: string;
-}
+export type AuthoritativeWithoutProvidesDetails =
+	| {
+			readonly reason: "authoritative-without-provides";
+			readonly module: string;
+			readonly componentKey: string;
+	  }
+	| {
+			readonly reason: "authoritative-without-provides";
+			readonly module: string;
+			readonly declared: string;
+	  };
 
 /**
  * An `overrideComponents` entry substitutes a key a loaded module provides
@@ -956,12 +969,22 @@ export interface InvalidRouteAdvertisementPathDetails {
  * module without a section may provide or read one, and a host may bootstrap
  * or override one — so only this module is refused.
  */
-export interface ReservedComponentKeyDetails {
-	readonly reason: "reserved-component-key";
-	readonly componentKey: string;
-	readonly source: "module-requires" | "module-optional";
-	readonly module: string;
-}
+export type ReservedComponentKeyDetails =
+	| {
+			readonly reason: "reserved-component-key";
+			readonly componentKey: string;
+			readonly source: "module-requires" | "module-optional";
+			readonly module: string;
+	  }
+	| {
+			readonly reason: "reserved-component-key";
+			/**
+			 * `__proto__`, an own key of a host map: set on the component map it
+			 * would replace the map's prototype, not name a component.
+			 */
+			readonly componentKey: "__proto__";
+			readonly source: "bootstrapComponents" | "overrideComponents";
+	  };
 
 /**
  * A manifest's section path it cannot have written (#728): an `at` that is

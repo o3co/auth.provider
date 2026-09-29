@@ -54,6 +54,7 @@ describe("stage-1 check registries (#368)", () => {
 			"unique-module-names",
 			"provides-closure",
 			"authoritative-closure",
+			"reserved-host-keys",
 			"bootstrap-synthetic-disjointness",
 			"authoritative-overrides",
 			"reserved-component-keys",
