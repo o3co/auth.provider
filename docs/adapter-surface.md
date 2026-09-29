@@ -131,6 +131,22 @@ a composition root. Listed because a module may `require` them.
 | `sessionRequirementResolver` | `SessionRequirementResolver` | optional | `core/modules/manifest/synthetic-keys.mts` | Synthetic key: every session requirement contributed as `contributes.sessionRequirements`, by name, in registration order (the session-admission ADR's D3) — what every consumer of session admission requires, and what `admitSession` reads the requirements through. Branded by the planner: `admitSession` refuses any other object, and `resolverForTests` (`@o3co/auth-provider-core/testing`) is the one other builder. Neither overridable nor replaceable: an `overrides.sessionRequirements` entry, and a host `contributionKinds` collector for it or for `mfaFactors`, are refused at stage 1 (`session-requirement-kind-guarded`). A composition that installs a consumer declares what it expects in `sessionRequirements.expected`, compared as a set with what registered at the end of stage 4. |
 | `tokenExchangeValidatorResolver` | `TokenExchangeValidatorResolver` | optional | `core/modules/manifest/synthetic-keys.mts` | Synthetic key: the assembled RFC 8693 subject/actor token validators. |
 
+## What one module owns and others read
+
+A key several modules read has one owner (#728): the owning module parses its
+own section and provides what the others need through a slot whose contract is
+core's, and they require the slot instead of reading the owner's section — in
+code a package imports only core. Each contract ships a suite and a test double
+on `@o3co/auth-provider-core/testing`: the owner's tests run the suite over what
+it provides, and a reader's tests fill the slot with the double instead of
+importing the owner's package. These slots are declared ahead of their
+providers: no bundled module provides or requires one yet, and today's readers
+still read the configuration.
+
+| Slot | Type | Wiring | Declared in | Purpose |
+| --- | --- | --- | --- | --- |
+| `oauthTokenSettings` | `OAuthTokenSettings` | optional | `core/token-settings/types.mts` | What other modules read of the oauth module's token settings, resolved and frozen: the canonical issuer, `legacyTypAccept`, the access-token default and max, the refresh-token lifetime, the token-binding dispatch policy and `bindConfidentialClientRefreshTokens`, whether resource indicators are enforced, and `requireEmailVerified`. The members are what is read outside `packages/oauth` today — by core (discovery, the CORS routes, a requirement's page, the grant-policy issuer check, the token-binding middleware, the retention horizons), `device-grant`, `federation-grants`, `oauth-token-exchange`, `dpop`, `webauthn` and `mfa`; what only the oauth module reads, the revocation modes and `requireGrantTypeAllowlist`, is not. Suite `oauthTokenSettingsContract`, double `createTestOAuthTokenSettings`. |
+
 ## Component slots
 
 | Slot | Type | Wiring | Declared in | Purpose |
