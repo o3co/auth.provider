@@ -26,11 +26,11 @@
 
 import { existsSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { type AppConfig, AppConfigSchema } from "@o3co/auth-provider-core";
+import { type AppConfig, AppConfigSchema, coreReference } from "@o3co/auth-provider-core";
 import { parseFile } from "@o3co/ts.hocon";
 import { validate } from "@o3co/ts.hocon/zod";
 import { describe, expect, it } from "vitest";
-import { resolveConfigPaths, resolveLibraryReferenceConfPath } from "../configPath.mjs";
+import { resolveConfigPaths } from "../configPath.mjs";
 
 const standaloneDir = fileURLToPath(new URL("../..", import.meta.url));
 const configDir = fileURLToPath(new URL("../../config", import.meta.url));
@@ -73,7 +73,7 @@ function resolveWith(env: Record<string, string>, configEnv = "production"): App
 	return validate(
 		parseFile(envConfPath, { env })
 			.withFallback(parseFile(applicationConfPath, { env }))
-			.withFallback(parseFile(resolveLibraryReferenceConfPath(), { env })),
+			.withFallback(parseFile(fileURLToPath(coreReference()), { env })),
 		AppConfigSchema,
 	);
 }

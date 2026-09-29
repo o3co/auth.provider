@@ -170,7 +170,7 @@ grants); each package's README lists its routes.
 
 ## Configuration
 
-HOCON config file with environment variable overrides. The config schema depends on which modules are registered; `@o3co/auth-provider-core` ships the library defaults in its `reference.conf`, and a composition root layers its own files over them.
+HOCON config file with environment variable overrides. The config schema depends on which modules are registered; `@o3co/auth-provider-core` and each package that ships defaults ship them in a `reference.conf` its modules declare; a composition root layers its own files over the references of the modules it loads (`moduleReferences(modules)`, core's last) and hands `createApp` the result, which boot parses once ([#728](https://github.com/o3co/auth.provider/issues/728)).
 
 **Core (always required):**
 

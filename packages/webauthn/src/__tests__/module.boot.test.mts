@@ -543,7 +543,7 @@ describe("webauthnModule boot integration (Wave 1 T31)", () => {
  * resolves with these variables set: its literals keep their types, every
  * `${?VAR}` arrives as a string. That the section reaches the composition root
  * in exactly this shape — the origin list still one comma-separated string
- * after `AppConfigSchema` — is pinned against the real HOCON resolution in
+ * after core's parse — is pinned against the real HOCON resolution in
  * core's `reference-conf-drift.test.mts`, which has the HOCON library this
  * package does not depend on.
  */

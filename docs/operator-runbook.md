@@ -131,7 +131,8 @@ A deployment that ran `multi` with the default in-memory federation-token store
 before #455/#456 is refused at boot once they land — set the last pair before
 upgrading. `federationTokenStore.type` and `redisFederationTokenStore.*` are
 declared in the standalone's config schema since #456, so the switch and the key
-survive `AppConfigSchema` and reach `buildModules`.
+reach `buildModules` (read in the template's first configuration phase since
+#728) and the modules `createApp` parses them for.
 
 ### The standalone production compose
 

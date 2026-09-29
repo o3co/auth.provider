@@ -497,6 +497,18 @@ describe("oauthModule — the acr table in the served discovery document (the MF
 		return { body, logger, lines };
 	};
 
+	/**
+	 * What an enabled federation needs beside it (boot refuses one without
+	 * them): the session stores, the federation-token store and family
+	 * revocation.
+	 */
+	const federationStores = [
+		memorySessionStoresModule,
+		memoryFederationTokenStoreModule,
+		memoryRefreshTokenFamilyStoreModule,
+		defaultRefreshTokenFamilyRevocationModule,
+	];
+
 	it("advertises only what a login this composition performs can meet, and says once at boot what it dropped", async () => {
 		const { body, logger, lines } = await boot([]);
 		expect(body.acr_values_supported).toEqual(["urn:example:pwd"]);
@@ -510,29 +522,19 @@ describe("oauthModule — the acr table in the served discovery document (the MF
 
 	it("drops what only an upstream IdP could assert while the installed federation does not trust its amr (the MFA ADR's D13)", async () => {
 		// The default: an upstream `mfa` is kept apart from the session's `amr`
-		// and meets no `acr`, so the entry is one nothing installed can meet.
-		// The section as a composition that installs the module itself writes
-		// it: `enabled` is the template's switch, and this composition has none
-		// of the session stores an enabled federation needs.
-		const { body, logger, lines } = await boot([googleFederationModule], { google: {} });
+		// and meets no `acr`, so the entry is one nothing installed can meet —
+		// for an installed, enabled federation that says nothing of its trust.
+		// (Since #728 boot parses the `federations` section core's schema
+		// declares whenever it is present, so an entry states `enabled`.)
+		const { body, logger, lines } = await boot([googleFederationModule, ...federationStores], {
+			google: { enabled: true },
+		});
 		expect(body.acr_values_supported).toEqual(["urn:example:pwd"]);
 		expect(lines(logger.info)).toEqual([
 			[{ acr: "urn:example:mfa", unproducible: ["mfa"] }, "acr_value_unsatisfiable"],
 		]);
 		expect(lines(logger.warn)).toEqual([]);
 	});
-
-	/**
-	 * What an enabled federation needs beside it (boot refuses one without
-	 * them): the session stores, the federation-token store and family
-	 * revocation.
-	 */
-	const federationStores = [
-		memorySessionStoresModule,
-		memoryFederationTokenStoreModule,
-		memoryRefreshTokenFamilyStoreModule,
-		defaultRefreshTokenFamilyRevocationModule,
-	];
 
 	it("advertises every entry, and drops none, while an installed, enabled federation trusts its upstream amr", async () => {
 		const { body, logger, lines } = await boot([googleFederationModule, ...federationStores], {
@@ -554,10 +556,12 @@ describe("oauthModule — the acr table in the served discovery document (the MF
 	});
 
 	it("refuses to compose when a federation's trustUpstreamAmr is given but unusable", async () => {
-		// A hand-built configuration: core's schema refuses it at boot too.
+		// Since #728 boot's parse refuses it by path, before the acr table is
+		// read; the reader's own refusal, for a configuration handed to it
+		// outside boot, is pinned beside it in core.
 		await expect(
-			boot([googleFederationModule], { google: { trustUpstreamAmr: "yes" } }),
-		).rejects.toThrow("federations.google.trustUpstreamAmr must be true or false");
+			boot([googleFederationModule], { google: { enabled: false, trustUpstreamAmr: "yes" } }),
+		).rejects.toThrow(/federations\.google\.trustUpstreamAmr: /);
 	});
 });
 

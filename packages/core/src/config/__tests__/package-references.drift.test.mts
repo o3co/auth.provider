@@ -30,8 +30,9 @@
  * core's testing entry.
  */
 
-import { readdirSync, readFileSync } from "node:fs";
-import { join, relative } from "node:path";
+import { mkdtempSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { basename, join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseFile } from "@o3co/ts.hocon";
 import { describe, expect, it } from "vitest";
@@ -53,12 +54,13 @@ function shippedReferenceConfs(dir: string, found: string[] = []): string[] {
 const REFERENCES = shippedReferenceConfs(PACKAGES);
 
 /**
- * Every path `path`'s reference sets, with each variable it substitutes set:
- * a path only an environment variable fills is one it sets too. A list is one
+ * Every path the reference at `file` sets, parsed on its own as a composition
+ * parses each reference it layers, with each variable it substitutes set: a
+ * path only an environment variable fills is one it sets too. A list is one
  * path.
  */
-function pathsSetBy(path: string): string[] {
-	const text = readFileSync(join(REPO_ROOT, path), "utf8");
+function pathsSetBy(file: string): string[] {
+	const text = readFileSync(file, "utf8");
 	const env = Object.fromEntries(
 		[...text.matchAll(/\$\{\??([A-Za-z0-9_]+)\}/g)].map((match) => [String(match[1]), "set"]),
 	);
@@ -73,7 +75,37 @@ function pathsSetBy(path: string): string[] {
 			: prefix === ""
 				? []
 				: [prefix];
-	return leaves(parseFile(join(REPO_ROOT, path), { env }).toObject(), "");
+	return leaves(parseFile(file, { env }).toObject(), "");
+}
+
+/**
+ * What two of `files` both set, one line each, sorted: a leaf both set, or a
+ * value one sets at a path another sets keys under. Two references may each
+ * hold keys under one section; neither may set what the other sets. Each
+ * file is named by `label`.
+ */
+function overlapsAmong(
+	files: readonly string[],
+	label: (file: string) => string = (file) => file,
+): string[] {
+	const setBy = new Map<string, string[]>();
+	for (const file of files) {
+		for (const path of pathsSetBy(file)) setBy.set(path, [...(setBy.get(path) ?? []), label(file)]);
+	}
+	const paths = [...setBy.keys()];
+	return [
+		...[...setBy]
+			.filter(([, owners]) => owners.length > 1)
+			.map(([path, owners]) => `${path}: set by ${owners.join(" and ")}`),
+		...paths.flatMap((outer) =>
+			paths
+				.filter((inner) => inner.startsWith(`${outer}.`))
+				.map(
+					(inner) =>
+						`${outer}: a value in ${setBy.get(outer)?.join(" and ")}, keys under it (${inner}) in ${setBy.get(inner)?.join(" and ")}`,
+				),
+		),
+	].sort();
 }
 
 /** Every file under `dir`, relative to the repository, skipping build output. */
@@ -128,29 +160,56 @@ describe("every package keeps its defaults at config/reference.conf (#728)", () 
 });
 
 describe("the shipped references are disjoint, and each package checks its own (#728)", () => {
-	const setBy = new Map<string, string[]>();
-	for (const reference of REFERENCES) {
-		for (const path of pathsSetBy(reference))
-			setBy.set(path, [...(setBy.get(path) ?? []), reference]);
-	}
+	const files = REFERENCES.map((path) => join(REPO_ROOT, path));
+	const label = (file: string) => relative(REPO_ROOT, file);
 
-	it("reads every reference's paths (the guard is not vacuous)", () => {
-		expect(setBy.size).toBeGreaterThan(150);
+	it("reads every reference's paths, core's among them (the guard is not vacuous)", () => {
+		expect(REFERENCES).toContain("packages/core/config/reference.conf");
+		expect(new Set(files.flatMap((file) => pathsSetBy(file))).size).toBeGreaterThan(150);
 	});
 
-	it("sets no path in two references, so the order they are layered in decides nothing", () => {
-		expect([...setBy].filter(([, references]) => references.length > 1)).toEqual([]);
+	it("sets no leaf in two references, and no value where another sets keys: the order they are layered in decides nothing", () => {
+		expect(overlapsAmong(files, label)).toEqual([]);
 	});
 
-	it("sets no value at a path another reference sets keys under", () => {
-		const paths = [...setBy.keys()];
-		expect(
-			paths.flatMap((outer) =>
-				paths
-					.filter((inner) => inner.startsWith(`${outer}.`))
-					.map((inner) => `${outer} (${setBy.get(outer)}) holds ${inner} (${setBy.get(inner)})`),
-			),
-		).toEqual([]);
+	describe("finds an overlap between two references", () => {
+		/** Two references written to a directory of their own. */
+		const pair = (first: string, second: string): string[] => {
+			const dir = mkdtempSync(join(tmpdir(), "package-references-"));
+			const a = join(dir, "a.conf");
+			const b = join(dir, "b.conf");
+			writeFileSync(a, first);
+			writeFileSync(b, second);
+			return [a, b];
+		};
+		const named = (file: string) => basename(file);
+
+		it("names a leaf both set", () => {
+			const files = pair(
+				"oauth.widget { enabled = false, size = 1 }\n",
+				"oauth.widget.enabled = true\n",
+			);
+			expect(overlapsAmong(files, named)).toEqual([
+				"oauth.widget.enabled: set by a.conf and b.conf",
+			]);
+		});
+
+		it("names a leaf one sets only from an environment variable", () => {
+			const files = pair(`oauth.widget.size = \${?WIDGET_SIZE}\n`, "oauth.widget.size = 2\n");
+			expect(overlapsAmong(files, named)).toEqual(["oauth.widget.size: set by a.conf and b.conf"]);
+		});
+
+		it("names a value one sets where the other sets keys", () => {
+			const files = pair('oauth.widget = "on"\n', "oauth.widget.enabled = true\n");
+			expect(overlapsAmong(files, named)).toEqual([
+				"oauth.widget: a value in a.conf, keys under it (oauth.widget.enabled) in b.conf",
+			]);
+		});
+
+		it("finds none where both hold keys under one section, but no leaf in common", () => {
+			const files = pair("oauth.widget.size = 1\n", 'oauth.widget.color = "red"\n');
+			expect(overlapsAmong(files, named)).toEqual([]);
+		});
 	});
 
 	it("checks each package's reference in the package's own tests with packageReferenceProblems", () => {

@@ -14,19 +14,19 @@
  * limitations under the License.
  */
 
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
 	type AppConfig,
-	AppConfigSchema,
+	coreReference,
+	createApp,
 	resolveAccessTokenLifetime,
 } from "@o3co/auth-provider-core";
-import { parseFile, parseString } from "@o3co/ts.hocon";
-import { validate } from "@o3co/ts.hocon/zod";
 import { describe, expect, it } from "vitest";
 import { buildModules, withSessionRequirements } from "../buildModules.mjs";
-import { resolveConfigPaths, resolveLibraryReferenceConfPath } from "../configPath.mjs";
+import { readOwnLayers, readSwitches, resolveConfigPaths, resolveForBoot } from "../configPath.mjs";
 
 /**
  * #288 — boot the shipped config with EVERY documented override supplied the
@@ -41,6 +41,13 @@ import { resolveConfigPaths, resolveLibraryReferenceConfPath } from "../configPa
  * optional/nullable/default/catch/readonly wrapper around one), so wrapping a
  * section in `z.preprocess(...)` silently took the override away — which is
  * precisely what had happened to `OAUTH_JWT_LEGACY_TYP_ACCEPT`.
+ *
+ * Since #728 the bridge is on no path: `app.mts` reads its switches with
+ * core's transitional reader and hands `createApp` what it resolved, which
+ * boot parses once with plain Zod. So every leaf must read the string itself,
+ * and this suite reads through that path — `readSwitches` for what is read
+ * before boot, `resolveForBoot` and `createApp` for the configuration boot
+ * parsed.
  *
  * This suite is the thing that stops the two paths diverging again. It is not
  * a sample of interesting variables: `covers every documented override` below
@@ -295,26 +302,62 @@ const UMBRELLA_E2E_ENV: Readonly<Record<string, string>> = {
 	OAUTH_GRANTS_AUTHORIZATION_CODE_PKCE_REQUIRE_S256: "true",
 };
 
+/** The template's own files for `configEnv`, under `operatorLayer` — HOCON an operator adds above them — when given. */
+function ownFiles(configEnv: string, operatorLayer?: string): string[] {
+	const { applicationConfPath, envConfPath } = resolveConfigPaths(configDir, configEnv);
+	if (operatorLayer === undefined) return [envConfPath, applicationConfPath];
+	const file = join(mkdtempSync(join(tmpdir(), "documented-env-overrides-")), "operator.conf");
+	writeFileSync(file, operatorLayer);
+	return [file, envConfPath, applicationConfPath];
+}
+
+/** Phase one, as `app.mts` reads it: the switches, with the posture on session admission. */
+function readShippedSwitches(env: Record<string, string>, configEnv = "production"): AppConfig {
+	return withSessionRequirements(readSwitches(readOwnLayers(ownFiles(configEnv), { env })));
+}
+
 /**
- * The shipped layers under `env`, read the way `app.mts` reads them;
- * `operatorLayer`, HOCON an operator adds above them, when given.
+ * The stores an enabled federation needs beside it, which boot refuses a
+ * composition without (#101). What they hold is not this suite's question.
  */
-function buildResolvedConfig(
+const FEDERATION_STORES = Object.fromEntries(
+	[
+		"userSessionStore",
+		"sessionRPRegistry",
+		"sessionFamilyIndex",
+		"sessionFederationIndex",
+		"federationTokenStore",
+		"refreshTokenFamilyRevocation",
+	].map((key) => [key, {}]),
+);
+
+/**
+ * The shipped layers under `env`, as `app.mts` hands them to boot, and the
+ * configuration boot parsed: phase one for the posture on session admission,
+ * phase two resolved over every loaded package's reference (core's, for the
+ * template's modules) and parsed once by `createApp` — no bridge on the way.
+ * No module is loaded: the parse is what this suite asks about, and each
+ * key it reads is one core's schema declares.
+ */
+async function bootParsed(
 	env: Record<string, string>,
 	configEnv = "production",
 	operatorLayer?: string,
-): AppConfig {
-	const { applicationConfPath, envConfPath } = resolveConfigPaths(configDir, configEnv);
-	const libraryReferencePath = resolveLibraryReferenceConfPath();
-	const shipped = parseFile(envConfPath, { env })
-		.withFallback(parseFile(applicationConfPath, { env }))
-		.withFallback(parseFile(libraryReferencePath, { env }));
-	return validate(
-		operatorLayer === undefined
-			? shipped
-			: parseString(operatorLayer, { env }).withFallback(shipped),
-		AppConfigSchema,
-	);
+): Promise<AppConfig> {
+	const own = readOwnLayers(ownFiles(configEnv, operatorLayer), { env });
+	const switches = withSessionRequirements(readSwitches(own));
+	const handle = await createApp({
+		modules: [],
+		bootstrapComponents: {
+			config: resolveForBoot(own, [], switches.sessionRequirements),
+			pathResolver: (s: string) => s,
+			...FEDERATION_STORES,
+		} as never,
+	});
+	const parsed = handle.components.config;
+	await handle.dispose();
+	if (parsed === undefined) throw new Error("createApp booted without the parsed configuration");
+	return parsed;
 }
 
 /** Every `${?VAR}` in a HOCON layer, ignoring commented-out lines. */
@@ -347,18 +390,18 @@ function documentedInReadme(path: string = readmePath): Set<string> {
 function liveSubstitutions(): Set<string> {
 	const { applicationConfPath } = resolveConfigPaths(configDir, "production");
 	return new Set([
-		...substitutionsIn(resolveLibraryReferenceConfPath()),
+		...substitutionsIn(fileURLToPath(coreReference())),
 		...substitutionsIn(applicationConfPath),
 	]);
 }
 
 describe("#288: the shipped config boots with every documented override supplied as a string", () => {
-	it("parses with every documented environment variable set", () => {
-		expect(() => buildResolvedConfig(DOCUMENTED_ENV)).not.toThrow();
+	it("parses with every documented environment variable set", async () => {
+		await expect(bootParsed(DOCUMENTED_ENV)).resolves.toBeDefined();
 	});
 
-	it("turns every boolean override into an actual boolean", () => {
-		const config = buildResolvedConfig(DOCUMENTED_ENV);
+	it("turns every boolean override into an actual boolean", async () => {
+		const config = await bootParsed(DOCUMENTED_ENV);
 		// Each of these arrives from HOCON as a string. A leftover string is
 		// not a cosmetic defect: `=== true` is how the runtime reads them.
 		expect(config.session.secure).toBe(false);
@@ -373,8 +416,8 @@ describe("#288: the shipped config boots with every documented override supplied
 		expect(config.federationGrants?.enabled).toBe(true);
 	});
 
-	it("turns every non-boolean override into its declared type", () => {
-		const config = buildResolvedConfig(DOCUMENTED_ENV);
+	it("turns every non-boolean override into its declared type", async () => {
+		const config = await bootParsed(DOCUMENTED_ENV);
 		expect(config.http.port).toBe(3000);
 		expect(config.http.readinessTimeoutMs).toBe(1500);
 		expect(config.http.trustProxy).toEqual(["10.0.0.0/8", "loopback"]);
@@ -422,14 +465,14 @@ describe("#288: the shipped config boots with every documented override supplied
 	});
 
 	describe("CORS_ALLOWED_ORIGINS (#500)", () => {
-		it("reads an exported-but-empty variable as no origins, not as an error", () => {
+		it("reads an exported-but-empty variable as no origins, not as an error", async () => {
 			// The .env / compose / ConfigMap shape. "CORS off" is what both the
 			// unset key and the empty string mean, so they must agree.
-			const config = buildResolvedConfig({ ...DOCUMENTED_ENV, CORS_ALLOWED_ORIGINS: "" });
+			const config = await bootParsed({ ...DOCUMENTED_ENV, CORS_ALLOWED_ORIGINS: "" });
 			expect(config.cors?.allowedOrigins).toEqual([]);
 		});
 
-		it("fails boot on an origin that could never match, naming the key", () => {
+		it("fails boot on an origin that could never match, naming the key", async () => {
 			// Every one of these parses as a URL and is a real typo: matching is
 			// exact string equality against the Origin header, so each would be
 			// an allowlist that admits nobody with nothing to say so.
@@ -440,26 +483,26 @@ describe("#288: the shipped config boots with every documented override supplied
 				"http://app.example.com", // plaintext off loopback
 				"https://app.example.com/callback", // a URL, not an origin
 			]) {
-				expect(() => buildResolvedConfig({ ...DOCUMENTED_ENV, CORS_ALLOWED_ORIGINS: bad })).toThrow(
+				await expect(bootParsed({ ...DOCUMENTED_ENV, CORS_ALLOWED_ORIGINS: bad })).rejects.toThrow(
 					/cors\.allowedOrigins/,
 				);
 			}
 		});
 
-		it("fails boot on a value that is neither a list nor a string, naming the key", () => {
+		it("fails boot on a value that is neither a list nor a string, naming the key", async () => {
 			// The variable can only ever carry a string, so this shape comes
 			// from a configuration file — and it used to read as no origins:
 			// CORS silently off for a key someone wrote.
 			for (const value of ["42", "true", '{ origin = "https://app.example.com" }']) {
-				expect(
-					() => buildResolvedConfig(DOCUMENTED_ENV, "production", `cors.allowedOrigins = ${value}`),
+				await expect(
+					bootParsed(DOCUMENTED_ENV, "production", `cors.allowedOrigins = ${value}`),
 					value,
-				).toThrow(/cors\.allowedOrigins/);
+				).rejects.toThrow(/cors\.allowedOrigins/);
 			}
 		});
 
-		it("accepts the loopback http carve-out a dev front-end needs", () => {
-			const config = buildResolvedConfig({
+		it("accepts the loopback http carve-out a dev front-end needs", async () => {
+			const config = await bootParsed({
 				...DOCUMENTED_ENV,
 				CORS_ALLOWED_ORIGINS: "http://localhost:5173,http://127.0.0.1:5173,https://app.example.com",
 			});
@@ -467,7 +510,7 @@ describe("#288: the shipped config boots with every documented override supplied
 		});
 	});
 
-	it("parses the HS256 shape, whose strict union refuses asymmetric key fields", () => {
+	it("parses the HS256 shape, whose strict union refuses asymmetric key fields", async () => {
 		// `OAUTH_JWT_ALGORITHM=HS256` is not a variation on the map above: the
 		// HS256 member of the signingKey union is `.strict()`, so a deployment
 		// that switches algorithm must also stop exporting the key-file
@@ -478,12 +521,12 @@ describe("#288: the shipped config boots with every documented override supplied
 		const { OAUTH_JWT_PUBLIC_KEY, OAUTH_JWT_PUBLIC_KEY_PATH, ...hs256 } = rest;
 		void OAUTH_JWT_PUBLIC_KEY;
 		void OAUTH_JWT_PUBLIC_KEY_PATH;
-		const config = buildResolvedConfig({ ...hs256, OAUTH_JWT_ALGORITHM: "HS256" });
+		const config = await bootParsed({ ...hs256, OAUTH_JWT_ALGORITHM: "HS256" });
 		expect(config.oauth.jwt.signingKey.local?.algorithm).toBe("HS256");
 	});
 
-	it("parses the environment the umbrella E2E boots, with SESSION_SECURE=false as a string", () => {
-		const config = buildResolvedConfig(UMBRELLA_E2E_ENV);
+	it("parses the environment the umbrella E2E boots, with SESSION_SECURE=false as a string", async () => {
+		const config = await bootParsed(UMBRELLA_E2E_ENV);
 		expect(config.session.secure).toBe(false);
 		expect(config.oauth.requireEmailVerified).toBe(true);
 		expect(config.oauth.resourceIndicator?.enabled).toBe(true);
@@ -497,7 +540,7 @@ describe("#288: the shipped config boots with every documented override supplied
 		// name list covers core's modules only, and the template's own memory
 		// modules are precisely the ones it could not see.
 		const { replicaUnsafeReason } = await import("@o3co/auth-provider-core");
-		for (const module of buildModules(buildResolvedConfig(UMBRELLA_E2E_ENV))) {
+		for (const module of buildModules(readShippedSwitches(UMBRELLA_E2E_ENV))) {
 			expect(replicaUnsafeReason(module), module.name).toBeUndefined();
 		}
 	});
@@ -515,8 +558,8 @@ describe("#288: the shipped config boots with every documented override supplied
 		];
 
 		for (const [supplied, expected] of cases) {
-			it(`SESSION_SECURE=${JSON.stringify(supplied)} resolves to ${expected}`, () => {
-				const config = buildResolvedConfig({
+			it(`SESSION_SECURE=${JSON.stringify(supplied)} resolves to ${expected}`, async () => {
+				const config = await bootParsed({
 					...DOCUMENTED_ENV,
 					SESSION_SECURE: supplied,
 					SESSION_SAME_SITE: "lax",
@@ -524,8 +567,8 @@ describe("#288: the shipped config boots with every documented override supplied
 				expect(config.session.secure).toBe(expected);
 			});
 
-			it(`OAUTH_JWT_LEGACY_TYP_ACCEPT=${JSON.stringify(supplied)} resolves to ${expected}`, () => {
-				const config = buildResolvedConfig({
+			it(`OAUTH_JWT_LEGACY_TYP_ACCEPT=${JSON.stringify(supplied)} resolves to ${expected}`, async () => {
+				const config = await bootParsed({
 					...DOCUMENTED_ENV,
 					OAUTH_JWT_LEGACY_TYP_ACCEPT: supplied,
 				});
@@ -533,30 +576,30 @@ describe("#288: the shipped config boots with every documented override supplied
 			});
 		}
 
-		it("fails boot on a spelling it does not recognise rather than guessing", () => {
-			expect(() => buildResolvedConfig({ ...DOCUMENTED_ENV, SESSION_SECURE: "ture" })).toThrow(
+		it("fails boot on a spelling it does not recognise rather than guessing", async () => {
+			await expect(bootParsed({ ...DOCUMENTED_ENV, SESSION_SECURE: "ture" })).rejects.toThrow(
 				/true.*false/s,
 			);
 		});
 
-		it("refuses SESSION_SAME_SITE=none unless SESSION_SECURE is on", () => {
+		it("refuses SESSION_SAME_SITE=none unless SESSION_SECURE is on", async () => {
 			// The #282 guard reads the coerced value, so it has to keep firing
 			// for the string form an environment variable actually delivers.
-			expect(() =>
-				buildResolvedConfig({
+			await expect(
+				bootParsed({
 					...DOCUMENTED_ENV,
 					SESSION_SAME_SITE: "none",
 					SESSION_SECURE: "false",
 				}),
-			).toThrow(/SESSION_SECURE=true/);
-			expect(() =>
-				buildResolvedConfig({
+			).rejects.toThrow(/SESSION_SECURE=true/);
+			await expect(
+				bootParsed({
 					...DOCUMENTED_ENV,
 					SESSION_SAME_SITE: "none",
 					SESSION_SECURE: "true",
 					SESSION_NAME: "auth.session",
 				}),
-			).not.toThrow();
+			).resolves.toBeDefined();
 		});
 	});
 
@@ -596,23 +639,23 @@ describe("#288: the shipped config boots with every documented override supplied
 	});
 
 	describe("variables whose documented behaviour is to fail boot", () => {
-		it("still refuses OAUTH_AUTHORIZE_ALLOW_UNMARKED_CLIENTS (#330 tombstone)", () => {
-			expect(() =>
-				buildResolvedConfig({
+		it("still refuses OAUTH_AUTHORIZE_ALLOW_UNMARKED_CLIENTS (#330 tombstone)", async () => {
+			await expect(
+				bootParsed({
 					...DOCUMENTED_ENV,
 					OAUTH_AUTHORIZE_ALLOW_UNMARKED_CLIENTS: "true",
 				}),
-			).toThrow(/allowUnmarkedClients/);
+			).rejects.toThrow(/allowUnmarkedClients/);
 		});
 
-		it("refuses an access-token default above the max, naming both keys", () => {
-			expect(() =>
-				buildResolvedConfig({
+		it("refuses an access-token default above the max, naming both keys", async () => {
+			await expect(
+				bootParsed({
 					...DOCUMENTED_ENV,
 					OAUTH_ACCESS_TOKEN_DEFAULT_EXPIRES_IN: "7200",
 					OAUTH_ACCESS_TOKEN_MAX_EXPIRES_IN: "3600",
 				}),
-			).toThrow(/defaultExpiresIn.*maxExpiresIn/s);
+			).rejects.toThrow(/defaultExpiresIn.*maxExpiresIn/s);
 		});
 
 		for (const name of [
@@ -620,34 +663,38 @@ describe("#288: the shipped config boots with every documented override supplied
 			"OAUTH_ACCESS_TOKEN_MAX_EXPIRES_IN",
 			"OAUTH_ACCESS_TOKEN_EXPIRES_IN",
 		]) {
-			it(`refuses an empty ${name} rather than minting already-expired tokens`, () => {
-				expect(() => buildResolvedConfig({ ...DOCUMENTED_ENV, [name]: "" })).toThrow();
+			it(`refuses an empty ${name} rather than minting already-expired tokens`, async () => {
+				await expect(bootParsed({ ...DOCUMENTED_ENV, [name]: "" })).rejects.toThrow();
 			});
 		}
 
 		it("parses each MFA_MODE, and derives sessionRequirements.expected from the parsed mode, never from the variable (the session-admission ADR's D7)", () => {
+			// Phase one: the mode is a switch, read before boot, and the posture
+			// is derived from what it parsed.
 			for (const [mode, expected] of [
 				["off", []],
 				["optional", ["mfa"]],
 				["required", ["mfa"]],
 			] as const) {
-				const config = buildResolvedConfig({ ...DOCUMENTED_ENV, MFA_MODE: mode });
-				expect(config.mfa?.mode, mode).toBe(mode);
+				const switches = readSwitches(
+					readOwnLayers(ownFiles("production"), { env: { ...DOCUMENTED_ENV, MFA_MODE: mode } }),
+				);
+				expect(switches.mfa?.mode, mode).toBe(mode);
 				// The key has no default: nothing in the shipped HOCON writes it.
-				expect(config.sessionRequirements, mode).toBeUndefined();
-				expect(withSessionRequirements(config).sessionRequirements, mode).toEqual({
+				expect(switches.sessionRequirements, mode).toBeUndefined();
+				expect(withSessionRequirements(switches).sessionRequirements, mode).toEqual({
 					expected: [...expected],
 				});
 			}
-			expect(() => buildResolvedConfig({ ...DOCUMENTED_ENV, MFA_MODE: "on" })).toThrow(/mfa\.mode/);
+			expect(() => readShippedSwitches({ ...DOCUMENTED_ENV, MFA_MODE: "on" })).toThrow(/mfa\.mode/);
 		});
 
-		it("still refuses an empty SESSION_CSRF_TTL_SECONDS (#272)", () => {
+		it("still refuses an empty SESSION_CSRF_TTL_SECONDS (#272)", async () => {
 			// Pinned alongside the boolean cases because it is the same trap
 			// read from the other side: for a *number*, empty means fail loudly.
-			expect(() =>
-				buildResolvedConfig({ ...DOCUMENTED_ENV, SESSION_CSRF_TTL_SECONDS: "" }),
-			).toThrow();
+			await expect(
+				bootParsed({ ...DOCUMENTED_ENV, SESSION_CSRF_TTL_SECONDS: "" }),
+			).rejects.toThrow();
 		});
 	});
 

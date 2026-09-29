@@ -25,19 +25,38 @@ package depends on `bcrypt`, `jose`, `js-yaml` and `zod`.
 
 ### Configuration
 
-`AppConfigSchema` is a [Zod](https://zod.dev/) schema that validates the full application configuration. `AppConfig` is the inferred TypeScript type.
+A composition root resolves its configuration — its own files over the `reference.conf` of every package it loads, in the order `moduleReferences(modules)` answers them, core's last — and hands `createApp` what it resolved, unparsed. Boot parses it once ([#728](https://github.com/o3co/auth.provider/issues/728)):
+
+1. with core's transitional base: core's own sections, and every section core's schema still mirrors for another package's module, each optional, with the coercions and checks it always applied (an environment variable's string read as a number or a boolean);
+2. laid over what was written, so a key no schema declares is kept — at the top, and under a section core declares;
+3. then with each loaded module's `configSchema`, over the base's output, and with each module's own section at its path, written back there: a loaded module's section is never stripped.
+
+A value any of them refuses refuses boot (`config-validation-failed`), naming each path the operator wrote. A top-level section nothing loaded owns is kept and named once in the log — `config_sections_ignored`, at `warn`, with the names, to the logger bootstrapped beside the configuration — which is where a misspelt section name shows. While core's schema still mirrors other packages' sections (below), it names none of them: a mirrored section counts as owned, loaded module or not. What boot parsed is the `config` slot; read it from the handle.
 
 ```typescript
-import { AppConfigSchema, type AppConfig } from "@o3co/auth-provider-core";
+import { fileURLToPath } from "node:url";
+import { type AppConfig, createApp, moduleReferences } from "@o3co/auth-provider-core";
+import { parseFile } from "@o3co/ts.hocon";
 
-const config: AppConfig = AppConfigSchema.parse(rawConfig);
+// The composition's own file over every loaded package's reference.conf, core's last.
+const resolved = moduleReferences(modules)
+  .reduce(
+    (layered, reference) => layered.withFallback(parseFile(fileURLToPath(reference))),
+    parseFile("config/application.conf"),
+  )
+  .toObject();
+
+const handle = await createApp({
+  modules,
+  // Unparsed: createApp parses it once, with every loaded module's schema.
+  bootstrapComponents: { config: resolved as unknown as AppConfig, pathResolver: import.meta.resolve },
+});
+const config = handle.components.config; // what boot parsed
 ```
 
-The schema **strips keys it does not declare** — that is Zod's default for an object, and it is what makes the parse a validation rather than a passthrough. It matters here because this parse runs *before* `createApp`, which is where each installed module's own `configSchema` is composed and applied: a section this schema does not know about is gone by the time the module that reads it runs, and most module schemas supply a default, so what follows is not an error but a quietly different deployment.
+Until each section moves under its module's name — the move pull requests of #728 — core's schema still mirrors sections other packages own (`oauth.mtls`, `oauth.dpop`, `oauth.deviceAuthorization`, `webauthn`, `memoryRateLimiter` / `redisRateLimiter`, the `redis*` store namespaces), and boot validates each whenever the configuration carries it, whether or not the module that reads it is loaded. What a composition root must read before it knows its modules — the switches it chooses them by, its log level — it resolves from its own files over core's `reference.conf` alone (`coreReference()`: no module, so no package's reference, is known yet) and reads with `readTransitionalConfig(resolved, paths)` ([`src/config/composed.mts`](src/config/composed.mts)): each path it names parsed with the schema core's base declares there, everything else left as written and unchecked — boot checks it. So phase one sees nothing a package's `reference.conf` alone sets, and must not read a section one completes. It is transitional, and goes when those switches move into the composition root's own section. The standalone template's [`app.mts`](../../templates/standalone/src/app.mts) reads its configuration in exactly these two phases.
 
-So the schema declares every configuration section owned by a module in this repository — `oauth.mtls`, `oauth.dpop`, `oauth.deviceAuthorization`, `webauthn`, `memoryRateLimiter` / `redisRateLimiter` and the `redis*` store namespaces included — even though core itself reads none of them. Their bounds and defaults stay with the packages that own them (in each one's `reference.conf` and `configSchema`); the declaration here only keeps the values from being dropped in transit. `module-config-key-parity.test.mts` fails the build if a module declares a key this schema does not.
-
-A module from **outside** this repository is not covered by that check. If one reads its own config section, extend the schema before parsing — `AppConfigSchema.extend({ mySection: … })` — or hand `createApp` the unparsed configuration and let the composed module schemas validate it.
+`AppConfigSchema` is deprecated. Parsing with it before `createApp` strips every section it does not declare — how #472, #495 and #496 lost theirs — so a composition that still does hands boot less than it resolved. It stays exported, and `AppConfig`, its inferred type, is the type of the parsed configuration.
 
 Defaults live in [`config/reference.conf`](config/reference.conf), not in the schema. Top-level fields (the sections every deployment carries; module-owned sections are documented by the package that owns them):
 
@@ -150,7 +169,7 @@ The `"local"` builder has **no fallbacks**:
 - An asymmetric algorithm with no `privateKey`/`privateKeyPath` (or no public half) throws a message naming the exact config keys, the exact environment variables, and the `openssl genpkey -algorithm ed25519` command that produces them.
 - `HS256` requires `secret` to carry at least `MIN_SECRET_ENTROPY_BYTES` (32) of key material, and so does every `previousSecrets[].secret`.
 
-Entropy is measured on the **decoded** value, taking the smallest plausible reading (`measureSecretEntropyBytes`): a 64-character hex string is 32 bytes and passes; a 32-character hex string is 16 bytes and does not. The same floor applies to `session.secret`, enforced by `AppConfigSchema`. `assertSecretEntropy` / `describeWeakSecret` are exported so a composition root that accepts its own operator secrets can apply the identical check.
+Entropy is measured on the **decoded** value, taking the smallest plausible reading (`measureSecretEntropyBytes`): a 64-character hex string is 32 bytes and passes; a 32-character hex string is 16 bytes and does not. The same floor applies to `session.secret`, enforced by core's schema. `assertSecretEntropy` / `describeWeakSecret` are exported so a composition root that accepts its own operator secrets can apply the identical check.
 
 Note that the floor lives in the **builder and the schema** — the config boundaries. `createSymmetricKeyStore` is the low-level primitive and does not enforce it, so a composition root calling it directly owns the check.
 
@@ -229,7 +248,7 @@ Modules extend the app with routes, grant handlers and DI-graph components. A mo
 
 Each mechanism is one axis of the extension surface: a `routes`, `grants` or `federations` contribution adds behaviour (a plugin), a `provides` fills a port's slot (an adapter), an optional method detected by a `supportsX` guard is an adapter's extra (a capability), and a contribution kind core composes changes what a core decision means (an extension). [AGENTS.md](../../AGENTS.md#extension-surface-four-axes) says which one a new policy takes.
 
-A module that reads configuration declares its own section in the manifest ([#728](https://github.com/o3co/auth.provider/issues/728)): `section.schema` is the Zod schema of the one section it owns, and boot parses that section before any factory runs and hands it to every factory as `deps.section`, typed as the schema's output. A value the schema refuses refuses boot (`config-validation-failed`), naming the path the operator wrote. The section is read at the module's name, or at `section.at` while it still sits at an older path; `section.relocatedFrom` names the paths the section moved from: a configuration that still sets a key there refuses boot (`config-path-relocated`), naming the key's new path and the environment variable that binds it, or that the key was removed — a bridge for the 0.x line, removed at the first major release (the relocated-paths drift test fails the cut that forgets). `section.reference` names the package's `config/reference.conf`: boot does not read it, and `moduleReferences(modules)` ([`src/config/references.mts`](src/config/references.mts)) answers the references of the modules a composition loads, each once, with core's own (`coreReference()`) at the bottom, for the composition root to layer beneath its own files; a package checks its reference in its own tests with `packageReferenceProblems` from `@o3co/auth-provider-core/testing`. `configSchema`, which composes with core's schema over the whole configuration, is to be deprecated once the loader layers each package's `reference.conf`; until then it is also what keeps a section's keys through core's parse.
+A module that reads configuration declares its own section in the manifest ([#728](https://github.com/o3co/auth.provider/issues/728)): `section.schema` is the Zod schema of the one section it owns, and boot parses that section before any factory runs and hands it to every factory as `deps.section`, typed as the schema's output. A value the schema refuses refuses boot (`config-validation-failed`), naming the path the operator wrote. The section is read at the module's name, or at `section.at` while it still sits at an older path; `section.relocatedFrom` names the paths the section moved from: a configuration that still sets a key there refuses boot (`config-path-relocated`), naming the key's new path and the environment variable that binds it, or that the key was removed — a bridge for the 0.x line, removed at the first major release (the relocated-paths drift test fails the cut that forgets). `section.reference` names the package's `config/reference.conf`: boot does not read it, and `moduleReferences(modules)` ([`src/config/references.mts`](src/config/references.mts)) answers the references of the modules a composition loads, each once, with core's own (`coreReference()`) at the bottom, for the composition root to layer beneath its own files; a package checks its reference in its own tests with `packageReferenceProblems` from `@o3co/auth-provider-core/testing`. Boot writes each module's parsed section back into the configuration at its path, so a factory reading `config` sees what the section's schema made of it; a section inside another module's (`mfa.factors.totp` inside `mfa`) is written back inside it, and two modules may not declare their sections at the same path (`module-section-path-invalid`). `configSchema`, which boot parses over the whole configuration after core's schema, is to be deprecated once each section moves under its module's name.
 
 A key several modules read has one owner, and the others receive it through a slot whose contract is core's ([#728](https://github.com/o3co/auth.provider/issues/728)): the owner parses its own section and provides the value, and in code a package imports only core. Core declares these slots; the session package's modules provide `loginCompletion`, `loginEntry`, `csrfGuard` and `sessionCookiePolicy`, and the others are declared ahead of their providers:
 
@@ -303,22 +322,24 @@ The two discovery rows are the same document: OIDC Discovery 1.0 appends its suf
 
 Entries are validated at boot by `checkSerializedOrigin` (`src/net/origin.mts`) and refused by index, because matching is exact string equality: a trailing slash, an explicit `:443`, an uppercase host, a path, or a wildcard is an allowlist that admits nobody with nothing anywhere to say so. `https` is required except for a loopback host, through the shared `isLoopbackHostname` home. `corsMw` re-applies the same check and warns on anything it drops, so a hand-built `AppConfig` that never passed the schema cannot install an entry the schema would have refused.
 
-The list takes two spellings. The comma-separated string an environment variable carries (`CORS_ALLOWED_ORIGINS`) is split on commas, each entry trimmed and empty entries dropped, so an empty variable is no list. An array keeps its string entries, trimmed, and an empty one is refused by the check above; a non-string entry is dropped. `null` is no list. Any other shape — a number, an object, a boolean, which only a configuration file can write — is refused at parse, naming `cors.allowedOrigins`; a hand-built configuration that skipped the schema is warned about where the middleware mounts (`cors_allowed_origins_unreadable`, with the shape it `received`), and no middleware is mounted. `normalizeAllowedOrigins` in the same file reads both and is exported; the WebAuthn package reads `WEBAUTHN_ORIGIN` / `WEBAUTHN_TOP_ORIGIN` with it, so every origin list set from the environment is spelled alike.
+The list takes two spellings. The comma-separated string an environment variable carries (`CORS_ALLOWED_ORIGINS`) is split on commas, each entry trimmed and empty entries dropped, so an empty variable is no list. An array keeps its string entries, trimmed, and an empty one is refused by the check above; a non-string entry is dropped. `null` is no list. Any other shape — a number, an object, a boolean, which only a configuration file can write — is refused at parse, naming `cors.allowedOrigins` — through `createApp`, a hand-built configuration's too, since boot parses the section whenever it is present (#728). Where the middleware mounts, a shape that reached it anyway is warned about (`cors_allowed_origins_unreadable`, with the shape it `received`), and no middleware is mounted. `normalizeAllowedOrigins` in the same file reads both and is exported; the WebAuthn package reads `WEBAUTHN_ORIGIN` / `WEBAUTHN_TOP_ORIGIN` with it, so every origin list set from the environment is spelled alike.
 
 ## Usage Example
 
 ```typescript
 import express from "express";
 import {
-  AppConfigSchema,
+  type AppConfig,
   createApp,
   createRepositoryFactories,
   createKeyStoreFactory,
   defineModule,
+  readTransitionalConfig,
   registerBuiltinKeyStores,
 } from "@o3co/auth-provider-core";
 
-const config = AppConfigSchema.parse(rawConfig);
+// What this composition reads before boot. createApp parses rawConfig itself (#728).
+const config = readTransitionalConfig(rawConfig, ["http.port", "oauth.jwt.signingKey", "repositories"]);
 
 // Both repositories.* (uses 'type') and oauth.jwt.signingKey (uses 'provider') follow
 // the same nested adapter sub-section pattern. flatten() normalises either selector
@@ -365,7 +386,7 @@ const handle = await createApp({
     localComponentsModule,
     // additional modules go here
   ],
-  bootstrapComponents: { config, pathResolver: import.meta.resolve },
+  bootstrapComponents: { config: rawConfig as AppConfig, pathResolver: import.meta.resolve },
 });
 
 const server = express();

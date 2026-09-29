@@ -64,6 +64,7 @@ import {
 } from "../net/trusted-proxy.mjs";
 import { MAX_DURATION_MS, MAX_DURATION_SECONDS } from "./durations.mjs";
 import { type RemovedKey, withRemovedKeys } from "./removed-keys.mjs";
+import { environmentCoercer } from "./schema-path.mjs";
 
 /**
  * The one coercion every env-overridable boolean in this file goes through
@@ -125,19 +126,21 @@ import { type RemovedKey, withRemovedKeys } from "./removed-keys.mjs";
  * there is a second vocabulary to drift from this one, and the feature it
  * would drift on is one whose default is off.
  */
-export const coerceBooleanFromEnv = z.preprocess(
-	(val) => {
-		if (typeof val === "boolean") return val;
-		if (typeof val === "string") {
-			const normalized = val.trim().toLowerCase();
-			if (normalized === "true" || normalized === "1") return true;
-			if (normalized === "false" || normalized === "0" || normalized === "") return false;
-		}
-		return val; // rejected below, with a message naming the accepted spellings
-	},
-	z.boolean({
-		error: 'must be one of "true", "false", "1" or "0" (an empty value reads as false)',
-	}),
+export const coerceBooleanFromEnv = environmentCoercer(
+	z.preprocess(
+		(val) => {
+			if (typeof val === "boolean") return val;
+			if (typeof val === "string") {
+				const normalized = val.trim().toLowerCase();
+				if (normalized === "true" || normalized === "1") return true;
+				if (normalized === "false" || normalized === "0" || normalized === "") return false;
+			}
+			return val; // rejected below, with a message naming the accepted spellings
+		},
+		z.boolean({
+			error: 'must be one of "true", "false", "1" or "0" (an empty value reads as false)',
+		}),
+	),
 );
 
 const rateLimitSchema = z.object({
@@ -311,6 +314,32 @@ const REMOVED_DPOP_FIELDS: readonly RemovedKey[] = [
 	},
 ];
 
+/**
+ * A duration an operator wrote, read strictly (#593).
+ *
+ * `z.coerce.number()` is the house default for a value HOCON may substitute as
+ * a string, and for most sections it is right. It is wrong for this block, and
+ * Copilot named why: `Number()` reads `null` and `[]` as `0`, `true` as `1` and
+ * `"1e3"` as `1000`, so a malformed duration was NORMALISED here and the
+ * package's own strict reader — which refuses exactly those — never saw the
+ * value an operator wrote. `tombstoneRetention: null` silently disabled
+ * tombstones; `refreshBuffer: null` handed out tokens with milliseconds left.
+ *
+ * So: a number, or the plain decimal string an environment variable arrives
+ * as. Anything that would have to be converted to be understood was not
+ * written as a duration, and fails boot naming the key.
+ */
+const durationFromEnv = (bounds: z.ZodNumber) =>
+	environmentCoercer(
+		z.preprocess((value) => {
+			if (typeof value === "number") return value;
+			if (typeof value === "string" && /^\d+$/.test(value.trim())) return Number(value.trim());
+			// Handed through unchanged, and refused by `bounds` with a message that
+			// names what is acceptable.
+			return value;
+		}, bounds),
+	);
+
 const jwtSchemaBase = z.object({
 	// The issuer is a property of the deployment, not of a request. It is
 	// REQUIRED: `/oauth/token` used to fall back to `req.get("host")` when this
@@ -342,7 +371,11 @@ const jwtSchemaBase = z.object({
 	// Operator-tunable; defaults to 300 (applied by `resolveJwksCacheMaxAge`).
 	// Keep well below the key-overlap window so a rotated kid propagates to
 	// caching verifiers in time. See `core/src/jwks/cache.mts`.
-	jwksCacheMaxAge: z.number().int().nonnegative().optional(),
+	// Read strictly (`durationFromEnv`): the plain decimal string a `${?VAR}`
+	// an operator's file sets it from arrives as (#728: no bridge coerces it on
+	// the way), and nothing `Number()` would read as 0 or 1 — an empty
+	// variable is refused, not served as `max-age=0`.
+	jwksCacheMaxAge: durationFromEnv(z.number().int().nonnegative()).optional(),
 	// SF-1 (v0.5.1): when true, the central JWT verifier accepts tokens whose
 	// `typ` header is absent and emits a deprecation warning. No schema
 	// default — per the v0.5.1 ADR the literal lives in `reference.conf`,
@@ -1248,6 +1281,13 @@ export function readAccessTokenRevocationMode(
  * Composes a config schema by merging module-specific schemas with the CoreConfigSchema.
  * Each module can declare its required config shape; the resulting schema validates
  * the intersection of core + all module schemas.
+ *
+ * @deprecated Boot no longer composes the modules' schemas into one (#728): it
+ * parses the configuration once with core's transitional base, then each
+ * module's `configSchema` over the base's output, and refuses two outputs that
+ * disagree — the intersection parsed every schema over the raw input, so a
+ * module's schema refused the environment strings core's schema coerces.
+ * Kept exported for a caller that still composes a schema of its own.
  */
 export function composeConfigSchema(moduleSchemas: z.ZodObject<z.ZodRawShape>[]): z.ZodType {
 	let schema: z.ZodType = CoreConfigSchema;
@@ -1256,30 +1296,6 @@ export function composeConfigSchema(moduleSchemas: z.ZodObject<z.ZodRawShape>[])
 	}
 	return schema;
 }
-
-/**
- * A duration an operator wrote, read strictly (#593).
- *
- * `z.coerce.number()` is the house default for a value HOCON may substitute as
- * a string, and for most sections it is right. It is wrong for this block, and
- * Copilot named why: `Number()` reads `null` and `[]` as `0`, `true` as `1` and
- * `"1e3"` as `1000`, so a malformed duration was NORMALISED here and the
- * package's own strict reader — which refuses exactly those — never saw the
- * value an operator wrote. `tombstoneRetention: null` silently disabled
- * tombstones; `refreshBuffer: null` handed out tokens with milliseconds left.
- *
- * So: a number, or the plain decimal string an environment variable arrives
- * as. Anything that would have to be converted to be understood was not
- * written as a duration, and fails boot naming the key.
- */
-const durationFromEnv = (bounds: z.ZodNumber) =>
-	z.preprocess((value) => {
-		if (typeof value === "number") return value;
-		if (typeof value === "string" && /^\d+$/.test(value.trim())) return Number(value.trim());
-		// Handed through unchanged, and refused by `bounds` with a message that
-		// names what is acceptable.
-		return value;
-	}, bounds);
 
 const federationEntrySchema = z
 	.object({
@@ -1294,6 +1310,17 @@ const federationEntrySchema = z
 	})
 	.passthrough();
 
+/**
+ * The sections core mirrors for the modules of other packages. Until #728 a
+ * composition root pre-parsed with `AppConfigSchema`, which stripped every
+ * key it did not declare, so each section a module read had to be declared
+ * here to survive — the reason the comments below give for most of them. Boot
+ * no longer strips anything: it parses the configuration once, with these
+ * sections optional in its transitional base (`TransitionalConfigSchema`),
+ * and a mirror stays for the coercions and checks it applies, validated
+ * whenever the configuration carries it, until the move pull request for its
+ * package takes it out.
+ */
 export const fullSectionsSchema = z.object({
 	// #593, D9/D16: the federation-grants section. Declared here for the
 	// reason `deviceAuthorization` above is — this object strips keys it
@@ -1709,10 +1736,10 @@ export const fullSectionsSchema = z.object({
 	// purpose (AUDIT_SINK_ABSENCE_POLICY) — the standalone template registers
 	// no "none" builder, so there the spelling still fails boot.
 	//
-	// This section MUST be declared here regardless: `AppConfigSchema` strips
-	// undeclared top-level keys, so an operator's `audit { … }` block would
-	// vanish between `parseFile` and the composition root — the sink selector
-	// would silently read `undefined` while the configuration sat in the file
+	// Declared here because, before #728, `AppConfigSchema` stripped
+	// undeclared top-level keys, so an operator's `audit { … }` block
+	// vanished between `parseFile` and the composition root — the sink selector
+	// silently read `undefined` while the configuration sat in the file
 	// looking effective.
 	//
 	// `.optional()` because a hand-built config is not forced to restate it;
@@ -1730,8 +1757,9 @@ export const fullSectionsSchema = z.object({
 	// D-2 v2: connection-config for the standalone refresh-token-family
 	// client. Defaults live in HOCON (`reference.conf`) per ADR — no
 	// `.default()` here. Module-internal config (`keyPrefix`, `casRetryLimit`)
-	// is declared on a SEPARATE top-level key below so AppConfigSchema does
-	// not strip it before the boot-time module schema sees it.
+	// is declared on a SEPARATE top-level key below, which (before #728)
+	// kept `AppConfigSchema` from stripping it before the boot-time module
+	// schema saw it.
 	refreshTokenFamilyStore: z
 		.object({
 			redis: z
@@ -1772,8 +1800,10 @@ export const fullSectionsSchema = z.object({
 		})
 		.optional(),
 	// SF-10 (v0.5.3): module-internal config for `memoryRateLimiterModule`.
-	// Declared here so AppConfigSchema preserves HOCON/env overrides before
-	// module schema validation applies its defaults. Defaults live in HOCON.
+	// Declared here so that, before #728, `AppConfigSchema` preserved HOCON/env
+	// overrides before module schema validation applied its defaults; it stays
+	// for its coercions and bounds, which boot's composed parse applies.
+	// Defaults live in HOCON.
 	memoryRateLimiter: z
 		.object({
 			limits: z.record(z.string(), rateLimitSpecSchema).optional(),
@@ -1828,14 +1858,14 @@ export const fullSectionsSchema = z.object({
 		.optional(),
 	// #456: module-internal config for `redisFederationTokenStoreModule`.
 	// Presence-only, for the same reason as `redisSessionStores` below: without
-	// a top-level entry `AppConfigSchema.parse(...)` strips the key — and with
-	// it the encryption key the store cannot start without — before the
-	// module's own `configSchema` sees it. Defaults live in `reference.conf`
+	// a top-level entry `AppConfigSchema.parse(...)` stripped the key before
+	// #728 — and with it the encryption key the store cannot start without —
+	// before the module's own `configSchema` saw it. Defaults live in `reference.conf`
 	// and in the module.
 	// #593 slice 7: the two adapter switches a composition like the standalone
 	// installs federation grants from, declared for the reason
-	// `federationTokenStore` above is — undeclared, the operator's choice is
-	// stripped before `buildModules` reads it. Two switches because the grant
+	// `federationTokenStore` above is — undeclared, the operator's choice was
+	// stripped before `buildModules` read it (before #728). Two switches because the grant
 	// store and the intent store are installed independently: grants in Redis
 	// with acquisition in memory is a supported single-replica shape (a restart
 	// loses flows in progress and nothing else). Both `"memory"` modules declare
@@ -1854,8 +1884,8 @@ export const fullSectionsSchema = z.object({
 		.optional(),
 	// The MFA ADR's D19: which store keeps enrolled factors, and which keeps
 	// MFA transactions and the lock state. Declared for the reason the other
-	// switches are — undeclared, an operator's choice is stripped before a
-	// composition root reads it. Read by a composition root that installs
+	// switches are — undeclared, an operator's choice was stripped before a
+	// composition root read it (before #728). Read by a composition root that installs
 	// MFA and picks its stores by name, which none does yet: `tools/composition`
 	// names its MFA store modules itself, and the standalone template wires MFA
 	// from the MFA ADR's build-order step 20, installing it when `mfa.mode` is
@@ -1879,8 +1909,8 @@ export const fullSectionsSchema = z.object({
 	// The MFA ADR's D19: module-internal config for the Redis package's
 	// `redisMfaFactorStoreModule` and `redisMfaTransactionStoreModule`.
 	// Presence-only, for the reason every `redis*` section here is: without a
-	// top-level entry `AppConfigSchema.parse(...)` strips the key before the
-	// module's own `configSchema` sees it. The defaults (`mfaf:`, `mfat:`) live
+	// top-level entry `AppConfigSchema.parse(...)` stripped the key before the
+	// module's own `configSchema` saw it (before #728). The defaults (`mfaf:`, `mfat:`) live
 	// in `reference.conf` and in the modules, which refuse a prefix with a
 	// brace.
 	redisMfaFactorStore: z
@@ -1909,16 +1939,22 @@ export const fullSectionsSchema = z.object({
 			ttl: z.coerce.number().int().positive().optional(),
 			encryptionMode: z.enum(["required", "allow-plaintext"]).optional(),
 			encryptionKey: z.string().optional(),
-			scanFallback: z.boolean().optional(),
+			// `coerceBooleanFromEnv` for the #288 reason: a `${?VAR}` an operator's
+			// file sets it from arrives as a string (#728: no bridge coerces it).
+			// Under the house rule an exported-but-empty variable reads as
+			// `false` — which, for this flag, turns off #291's migration safety
+			// net, whose default is `true`. Before #728 the bridge refused an
+			// empty value; set the variable to `true` or `false`, never empty.
+			scanFallback: coerceBooleanFromEnv.optional(),
 		})
 		.optional(),
 	// #472: module-internal config for `redisDeviceCodeStoreModule` (#433).
 	// Presence-only, for the same reason as every `redis*` section here:
-	// without a top-level entry `AppConfigSchema.parse(...)` strips the key
-	// before the module's own `configSchema` sees it, and the namespace the
-	// redis README documents is silently the default. The default lives in
-	// the module. `reference-conf-drift.test.mts` is what keeps the next
-	// section from being forgotten the same way.
+	// without a top-level entry `AppConfigSchema.parse(...)` stripped the key
+	// before the module's own `configSchema` saw it, and the namespace the
+	// redis README documents was silently the default. The default lives in
+	// the module. Since #728 boot's composed parse strips nothing, so the
+	// next section cannot be forgotten this way.
 	redisDeviceCodeStore: z
 		.object({
 			keyPrefix: z.string().optional(),
@@ -1973,9 +2009,9 @@ export const fullSectionsSchema = z.object({
 		.optional(),
 	// #561: module-internal config for `redisConsentStoreModule`. Presence-only,
 	// for the reason every `redis*` section here is: without a top-level entry
-	// `AppConfigSchema.parse(...)` strips the key before the module's own
-	// `configSchema` sees it. The default lives in `reference.conf` and in the
-	// module.
+	// `AppConfigSchema.parse(...)` stripped the key before the module's own
+	// `configSchema` saw it (before #728). The default lives in
+	// `reference.conf` and in the module.
 	redisConsentStore: z
 		.object({
 			keyPrefix: z.string().optional(),
@@ -1983,8 +2019,9 @@ export const fullSectionsSchema = z.object({
 		.optional(),
 	// #277: module-internal config for `redisAccessTokenDenylistModule`.
 	// Declared here for the same reason as `redisRefreshTokenFamilyStore` below:
-	// without a top-level entry, `AppConfigSchema.parse(...)` strips the key
-	// before the module's own `configSchema` ever sees the operator's override.
+	// without a top-level entry, `AppConfigSchema.parse(...)` stripped the key
+	// before the module's own `configSchema` ever saw the operator's override
+	// (before #728).
 	// Presence-only; the default lives in `reference.conf` and in the module.
 	redisAccessTokenDenylist: z
 		.object({
@@ -1993,20 +2030,20 @@ export const fullSectionsSchema = z.object({
 		.optional(),
 	// MIN-3 (v0.5.3): preserve the bundled Redis user-session namespace
 	// override before `redisSessionStoresModule.configSchema` applies its
-	// own defaults. Without this top-level passthrough, AppConfigSchema would
-	// strip `redisSessionStores.keyPrefix` before the module sees it.
+	// own defaults. Without this top-level passthrough, AppConfigSchema
+	// stripped `redisSessionStores.keyPrefix` before the module saw it
+	// (before #728).
 	redisSessionStores: z
 		.object({
 			keyPrefix: z.string().optional(),
 		})
 		.optional(),
 	// D-2 v2: module-internal config for `redisRefreshTokenFamilyStoreModule`.
-	// MUST be declared here (in `fullSectionsSchema`) so `AppConfigSchema.parse(...)`
-	// in `app.mts` preserves operator overrides
+	// Declared here (in `fullSectionsSchema`) so that, before #728,
+	// `AppConfigSchema.parse(...)` in `app.mts` preserved operator overrides
 	// (`REFRESH_TOKEN_FAMILY_STORE_KEY_PREFIX` / `..._CAS_RETRY_LIMIT`) before
-	// the module's `configSchema` runs at boot time. Without this declaration
-	// Zod strips the unknown top-level key and the env-var overrides silently
-	// no-op. The actual defaults still live in `reference.conf`; this entry
+	// the module's `configSchema` ran at boot time: without it Zod stripped
+	// the unknown top-level key and the env-var overrides silently no-oped. The actual defaults still live in `reference.conf`; this entry
 	// is presence-only (both fields optional). The duplicate-source-of-truth
 	// concern is intentional: the module's `configSchema` enforces shape +
 	// defaults, this schema only ensures the keys survive validation.
@@ -2017,10 +2054,10 @@ export const fullSectionsSchema = z.object({
 		})
 		.optional(),
 	// OR-9 (Wave 5d): module-internal config for `redisCodeRepositoryModule`.
-	// MUST be declared here (in `fullSectionsSchema`) so `AppConfigSchema.parse(...)`
-	// in `app.mts` preserves operator overrides
+	// Declared here (in `fullSectionsSchema`) so that, before #728,
+	// `AppConfigSchema.parse(...)` in `app.mts` preserved operator overrides
 	// (`CLIENT_CODE_KEY_PREFIX` / `CLIENT_CODE_DEFAULT_EXPIRES_IN`) before
-	// the module's `configSchema` runs at boot time. Same gotcha as D-2 v2's
+	// the module's `configSchema` ran at boot time. Same gotcha as D-2 v2's
 	// `redisRefreshTokenFamilyStore` block above. Defaults stay in
 	// `reference.conf`; this entry is presence-only (both fields optional).
 	redisCodeRepository: z
@@ -2029,17 +2066,17 @@ export const fullSectionsSchema = z.object({
 			// `defaultExpiresIn` is the Redis PX TTL (seconds) for OAuth
 			// authorization codes. Constrained to a positive integer: a bad
 			// env-var override (`CLIENT_CODE_DEFAULT_EXPIRES_IN=0`, `="-1"`,
-			// non-numeric) fails AppConfigSchema parse at boot rather than
-			// silently propagating to a Redis PX call that errors per
-			// request. Mirrored at the module configSchema level + at the
-			// `RedisCodeRepository` constructor for defense in depth.
+			// non-numeric) fails boot's composed parse (this schema's check,
+			// #728) rather than silently propagating to a Redis PX call that
+			// errors per request. Mirrored at the module configSchema level +
+			// at the `RedisCodeRepository` constructor for defense in depth.
 			// Per Copilot review on PR #122.
 			defaultExpiresIn: z.coerce.number().int().positive().optional(),
 		})
 		.optional(),
 	// #495: the last two `redis*` namespaces without an entry here, found by
-	// `module-config-key-parity.test.mts` rather than by an operator — which
-	// is the point of that test. Presence-only, defaults in the modules.
+	// a guard rather than by an operator. Presence-only, defaults in the
+	// modules.
 	redisChallengeStore: z
 		.object({
 			keyPrefix: z.string().optional(),
@@ -2057,6 +2094,14 @@ export const fullSectionsSchema = z.object({
  * Kept as a plain ZodObject (via .extend) for backward compatibility:
  * - consumers can access .shape (e.g. AppConfigSchema.shape.oauth.shape.jwt)
  * - ts.hocon/zod coercion traverses ZodObject shape, not ZodIntersection
+ *
+ * @deprecated A composition root no longer parses its configuration before
+ * `createApp` (#728): it hands `createApp` the configuration it resolved,
+ * and boot parses it once, with each loaded module's own schema — a parse
+ * with this schema first strips every section it does not declare, which is
+ * how #472, #495 and #496 lost theirs. Read what the root needs before it
+ * knows its modules with `readTransitionalConfig`. `AppConfig`, the type,
+ * stays.
  */
 export const AppConfigSchema = CoreConfigSchema.extend(fullSectionsSchema.shape);
 

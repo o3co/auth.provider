@@ -1007,18 +1007,22 @@ export type ReservedComponentKeyDetails =
 /**
  * A manifest's section path it cannot have written (#728): an `at` that is
  * not a dot-separated path of non-empty keys (`""`, `"a..b"`, `".a"`, `"a."`,
- * or not a string at all) — `at` names it — or a `relocatedFrom` that is
- * neither a list of such paths nor a map from such paths to paths inside the
- * section (`""` for the section itself), or whose old path is, or holds, a
- * loaded module's section — `relocatedFrom` names the entry, or the value
- * when it is neither form, and `problem` says what is wrong with it.
+ * or not a string at all) — `at` names it — or a path another loaded module's
+ * section is read at too — a section has one owner — where `at` is the path
+ * and `problem` names the other module; or a `relocatedFrom` that is neither
+ * a list of such paths nor a map from such paths to paths inside the section
+ * (`""` for the section itself), or whose old path is, or holds, a loaded
+ * module's section — `relocatedFrom` names the entry, or the value when it is
+ * neither form, and `problem` says what is wrong with it.
  */
 export type ModuleSectionPathInvalidDetails =
 	| {
 			readonly reason: "module-section-path-invalid";
 			readonly module: string;
-			/** The `at` the manifest wrote. */
+			/** The `at` the manifest wrote, or the path its section is read at when that is shared. */
 			readonly at: unknown;
+			/** What is wrong with the path, when it is well formed but shared. */
+			readonly problem?: string;
 	  }
 	| {
 			readonly reason: "module-section-path-invalid";

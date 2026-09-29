@@ -38,6 +38,7 @@ import { fileURLToPath } from "node:url";
 import {
 	type AppConfig,
 	AppConfigSchema,
+	coreReference,
 	createApp,
 	createKeyStoreFactory,
 	defineModule,
@@ -57,7 +58,7 @@ import express from "express";
 import request from "supertest";
 import { afterEach, describe, expect, it } from "vitest";
 import { buildModules, withSessionRequirements } from "../buildModules.mjs";
-import { resolveConfigPaths, resolveLibraryReferenceConfPath } from "../configPath.mjs";
+import { resolveConfigPaths } from "../configPath.mjs";
 
 const DAY = 86_400_000;
 const configDir = fileURLToPath(new URL("../../config", import.meta.url));
@@ -120,7 +121,7 @@ function resolveConfig(): AppConfig {
 		validate(
 			parseFile(envConfPath, { env: ENV })
 				.withFallback(parseFile(applicationConfPath, { env: ENV }))
-				.withFallback(parseFile(resolveLibraryReferenceConfPath(), { env: ENV })),
+				.withFallback(parseFile(fileURLToPath(coreReference()), { env: ENV })),
 			AppConfigSchema,
 		),
 	);

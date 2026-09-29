@@ -147,7 +147,7 @@ describe("a module's section — delivered as deps.section", () => {
 		await handle.dispose();
 	});
 
-	it("leaves the config slot as it was: the section is handed over beside it", async () => {
+	it("writes the parsed section back into the config slot, at its path", async () => {
 		let config: unknown;
 		let section: unknown;
 		const sectioned = defineModule({
@@ -171,7 +171,7 @@ describe("a module's section — delivered as deps.section", () => {
 		});
 
 		expect(section).toEqual({ retries: 3 });
-		expect((config as Record<string, unknown>)["fixture-section"]).toEqual({ retries: "3" });
+		expect((config as Record<string, unknown>)["fixture-section"]).toEqual({ retries: 3 });
 		await handle.dispose();
 	});
 
@@ -337,11 +337,12 @@ describe("a module without a section", () => {
 });
 
 describe("a module's section — read from the parsed configuration", () => {
-	it("sees what core's schema made of the path: coerced, and stripped of keys core does not declare", async () => {
-		// The choice pinned: the section is read out of the configuration the
-		// config slot holds, after core's parse. Under a parent core's schema
-		// declares, a key core does not keep is gone and a value core coerces
-		// arrives coerced — so a section read raw would refuse `port: "3000"`.
+	it("sees what core's schema made of the path: coerced, with the keys core does not declare kept", async () => {
+		// The choice pinned: the section is read out of the composed parse's
+		// output — core's schema laid over what was written (#728). Under a
+		// parent core's schema declares, a value core coerces arrives coerced —
+		// so a section read raw would refuse `port: "3000"` — and a key core
+		// does not declare is still there.
 		let seen: unknown;
 		const sectioned = defineModule({
 			name: "fixture-section",
@@ -362,11 +363,11 @@ describe("a module's section — read from the parsed configuration", () => {
 		const handle = await createApp({
 			modules: [sectioned],
 			bootstrapComponents: bootWith({
-				http: { port: "3000", trustProxy: false, readinessTimeoutMs: 1000, extra: "dropped" },
+				http: { port: "3000", trustProxy: false, readinessTimeoutMs: 1000, extra: "kept" },
 			}),
 		});
 
-		expect(seen).toEqual({ port: 3000 });
+		expect(seen).toEqual({ port: 3000, extra: "kept" });
 		await handle.dispose();
 	});
 
