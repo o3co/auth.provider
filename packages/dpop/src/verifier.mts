@@ -17,7 +17,8 @@
 /**
  * DPoP proof verifier — `createDPoPMechanism` factory.
  *
- * Checks, in order:
+ * Checks, in order (RFC 9449 §4.3, then replay; the caller matches the
+ * returned `jkt` against the access token's `cnf`):
  *   1. one `DPoP` header value (`null` when absent)
  *   2. `parseProof`: structure, JWK screening, claims, `jkt` thumbprint
  *   3. alg allowlist, then signature (importJWK + jwtVerify)
@@ -479,7 +480,7 @@ export const createDPoPMechanism = (options: DPoPMechanismOptions): TokenBinding
 				);
 			}
 
-			// The RFC 7800 `cnf.jkt` confirmation; the `proof` object is not
+			// The `cnf.jkt` confirmation (RFC 9449 §6.1); the `proof` object is not
 			// forwarded.
 			return {
 				kind: "dpop",
