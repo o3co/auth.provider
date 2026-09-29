@@ -119,6 +119,10 @@ export {
 	mintFederationTransactionId,
 } from "./federations/transaction.mjs";
 export type { FederationResult } from "./federations/types.mjs";
+// #728 — the login page and its `redirect_to` protocol, the `loginEntry` slot
+// `sessionModule` provides; exported so a composition that provides the slot
+// without the module builds it the same way.
+export { createLoginEntry, loginEntryFromConfig } from "./login-entry.mjs";
 // The federation adapter port — `FederationProvider`, `FederationProfile`,
 // the capability interfaces and their guards, and the response-mode
 // helpers — is exported by `@o3co/auth-provider-core` since #626 P1 and is
