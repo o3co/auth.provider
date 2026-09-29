@@ -111,7 +111,7 @@ describe('every package on, every shared store on Redis, deployment.mode = "mult
 		const names = modules.map((m) => m.name);
 		expect(names).toEqual(
 			expect.arrayContaining([
-				"standalone:redis-clients",
+				"redis-clients",
 				"redis-device-code-store",
 				"redis-challenge-store",
 				"deployment:webauthn-credential-store",

@@ -43,7 +43,7 @@ Core's own in-memory modules declare it as follows
 
 | Module name | What forks per replica |
 | --- | --- |
-| `memorySessionStores` | user sessions, RP registrations, family indexes and the subject-level revocation pair — back-channel logout reaches only the replica that received it; a credential change watermarks only the replica that handled it |
+| `core-session-stores-memory` | user sessions, RP registrations, family indexes and the subject-level revocation pair — back-channel logout reaches only the replica that received it; a credential change watermarks only the replica that handled it |
 | `core-rate-limiter-memory` | rate-limit counters — every limit is multiplied by the replica count and resets on each deploy |
 | `core-access-token-denylist-memory` | access-token revocation — a revoked token keeps working on every replica that did not receive the revocation |
 | `core-replay-seen-set-memory` | single-use records — a `private_key_jwt` client assertion, the `jti` of an ID-JAG (jwt-bearer) assertion, a consumed WebAuthn challenge (the ceremony marks it seen here) or, with DPoP enabled, a DPoP proof captured once can be replayed once against each replica |
@@ -57,7 +57,7 @@ Core's own in-memory modules declare it as follows
 | `core-federation-grant-intent-store-memory` | federation grant acquisition — an intent lodged on one replica is unknown to every other, so the consent page and the upstream callback answer as if the flow had expired whenever they land elsewhere, and the bound on live intents is counted per replica instead of per (client, subject). Established grants and revocations are unaffected, so this adapter beside a durable grant store is a single-replica configuration rather than a broken one |
 | `core-mfa-factor-store-memory` | enrolled second factors — a factor enrolled on one replica is unknown to every other, and a restart empties every replica: each subject then reads as one with nothing enrolled |
 | `core-mfa-transaction-store-memory` | MFA transactions and the lock state — a transaction started on one replica is unknown to the replica that receives the verification, and the attempt limits, the lockout and the trusted browsers are counted per replica. A restart also loses the email proof an operator reset required (`resetMfaForSubject` with `requireEmailProof: true`): beside a durable factor store, a password holder can then bind without it. Do not use it where operator resets are used |
-| `sessionStoreModule` (only with `session.storage.type = "memory"`, `SESSION_STORAGE_TYPE=memory`; #474) | the express-session store — a login served by one replica is unknown to the others, so a browser whose next request lands elsewhere is logged out, and every session is lost on restart |
+| `session-store` (only with `session.storage.type = "memory"`, `SESSION_STORAGE_TYPE=memory`; #474) | the express-session store — a login served by one replica is unknown to the others, so a browser whose next request lands elsewhere is logged out, and every session is lost on restart |
 
 DPoP keeps no store of its own: every accepted proof is recorded in the
 seen-set above (`dpop-proof:<jkt>`), so `core-replay-seen-set-memory` is what
@@ -87,9 +87,9 @@ Three things the guard cannot do:
   see peers. Set `DEPLOYMENT_MODE=multi` as part of scaling, not after
   something breaks.
 - **It only sees modules that declare themselves.** The standalone template's
-  own in-memory modules — `standalone:in-memory-session-stores`,
-  `standalone:in-memory-code-repository` and
-  `standalone:in-memory-federation-token-store`
+  own in-memory modules — `standalone-in-memory-session-stores`,
+  `standalone-in-memory-code-repository` and
+  `standalone-in-memory-federation-token-store`
   (`templates/standalone/src/modules.mts`) — carry the declaration since #455,
   so `multi` refuses them by name; before #455 they booted. Three more joined
   them in #474 and are refused the same way: express-session's own store under
@@ -215,7 +215,7 @@ each names:
 | --- | --- | --- |
 | `module-factory-not-called` | a `modules` entry is a module factory listed without being called — `deviceGrantModule` for `deviceGrantModule({ config })`, `sessionStoreModuleFor` for `sessionStoreModuleFor(config)`. The compiler accepts it (a function has a `name`), and it used to boot as a module that did nothing (`packages/core/src/boot/validate-manifests.mts`) | the message names the entry and its index; call it with its arguments |
 | `config-validation-failed` | a Zod issue from the table above, or a retired key still present (see [§7](#7-upgrading-and-rollback)) | the issue path names the key |
-| `missing-required-component` | a module's `requires` has no provider. The standalone adds `standalone:redis-clients` whenever an adapter switch selects Redis, so there this only arises through `BuildModulesOverrides` (`templates/standalone/src/buildModules.mts`) | the message names the missing slot and the requiring module |
+| `missing-required-component` | a module's `requires` has no provider. The standalone adds `redis-clients` whenever an adapter switch selects Redis, so there this only arises through `BuildModulesOverrides` (`templates/standalone/src/buildModules.mts`) | the message names the missing slot and the requiring module |
 | `component-absence-undeclared` | an optional slot with an `AbsencePolicy` is unfilled and config does not declare it absent (`packages/core/src/modules/manifest/absence-policy.mts`, enforced by `checkDeclaredAbsence` in `boot/validate-manifests.mts`) | wire the component, or write the declaration: `audit.sink.type = "none"` (auditSink), `oauth.revocation.accessToken = "unsupported"` (accessTokenDenylist), `oauth.revocation.subject = "unsupported"` (subjectRevocation + subjectSessionIndex), `oauth.deviceAuthorization.store = "unsupported"` (deviceCodeStore; only with the grant left off — an enabled grant needs a store) — sources: `core/src/audit/types.mts`, `core/src/access-token-denylist/types.mts`, `core/src/user-sessions/types.mts`, `packages/device-grant/src/reference.conf` |
 | `replica-unsafe-adapter` | `deployment.mode = "multi"` with a listed module wired | the message lists every offender; switch the adapter or set `single` |
 | `federation-stores-incomplete` | `federations.<name>.enabled = true` without all of `userSessionStore`, `sessionRPRegistry`, `sessionFamilyIndex`, `sessionFederationIndex`, `federationTokenStore`, `refreshTokenFamilyRevocation` | the message lists the missing slots |

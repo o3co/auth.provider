@@ -17,8 +17,8 @@ import { describe, expect, it } from "vitest";
 import { appleFederationModule } from "../apple.mjs";
 
 describe("appleFederationModule const Module", () => {
-	it("has the canonical module name 'federation:apple'", () => {
-		expect(appleFederationModule.name).toBe("federation:apple");
+	it("has the canonical module name 'federation-apple'", () => {
+		expect(appleFederationModule.name).toBe("federation-apple");
 	});
 
 	it("requires appleFederationConfig", () => {

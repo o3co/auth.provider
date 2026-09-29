@@ -52,7 +52,7 @@ const configWith = (federations: Record<string, unknown>): AppConfig => {
 
 describe("oidcFederationConfigModule (#524)", () => {
 	it("has the scaffold's module name and reads config", () => {
-		expect(oidcFederationConfigModule.name).toBe("standalone:oidc-federation-config");
+		expect(oidcFederationConfigModule.name).toBe("oidc-federation-config");
 		expect(oidcFederationConfigModule.requires).toEqual(["config"]);
 	});
 
@@ -103,7 +103,7 @@ describe("oidcFederationConfigModule (#524)", () => {
 });
 
 describe("buildModules gating for OIDC federations (#524)", () => {
-	it("lists one federation:oidc:<name> per enabled section, plus the bridge once", () => {
+	it("lists one federation-oidc-<name> per enabled section, plus the bridge once", () => {
 		const names = buildModules(
 			configWith({
 				okta: { enabled: true, type: "oidc", ...okta },
@@ -111,10 +111,10 @@ describe("buildModules gating for OIDC federations (#524)", () => {
 				google: { enabled: false },
 			}),
 		).map((m) => m.name);
-		expect(names).toContain("federation:oidc:okta");
-		expect(names).toContain("federation:oidc:keycloak");
-		expect(names.filter((n) => n === "standalone:oidc-federation-config")).toHaveLength(1);
-		expect(names).not.toContain("federation:google");
+		expect(names).toContain("federation-oidc-okta");
+		expect(names).toContain("federation-oidc-keycloak");
+		expect(names.filter((n) => n === "oidc-federation-config")).toHaveLength(1);
+		expect(names).not.toContain("federation-google");
 	});
 
 	it("a google section of type oidc is the generic provider, not the built-in Google pair", () => {
@@ -123,16 +123,16 @@ describe("buildModules gating for OIDC federations (#524)", () => {
 		const names = buildModules(
 			configWith({ google: { enabled: true, type: "oidc", ...okta } }),
 		).map((m) => m.name);
-		expect(names).toContain("federation:oidc:google");
-		expect(names).not.toContain("federation:google");
-		expect(names).not.toContain("standalone:google-federation-config");
+		expect(names).toContain("federation-oidc-google");
+		expect(names).not.toContain("federation-google");
+		expect(names).not.toContain("google-federation-config");
 	});
 
 	it("lists nothing OIDC when no section is enabled (the shipped default)", () => {
 		const names = buildModules(
 			configWith({ google: { enabled: false }, oidc: { enabled: false, type: "oidc" } }),
 		).map((m) => m.name);
-		expect(names.some((n) => n.startsWith("federation:oidc:"))).toBe(false);
-		expect(names).not.toContain("standalone:oidc-federation-config");
+		expect(names.some((n) => n.startsWith("federation-oidc-"))).toBe(false);
+		expect(names).not.toContain("oidc-federation-config");
 	});
 });

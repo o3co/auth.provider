@@ -43,6 +43,7 @@ export type {
 	TokenBindingMechanismFactory,
 } from "./contributes-map.mjs";
 export { defineModule } from "./define-module.mjs";
+export type { ModuleSection, SectionDeps, SectionSchema } from "./module-section.mjs";
 export type {
 	ComponentLifecycle,
 	ConfigSchema,

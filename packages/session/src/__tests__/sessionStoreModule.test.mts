@@ -86,7 +86,7 @@ function makeRegistrar(): LifecycleRegistrar & { calls: Array<() => Promise<void
 describe("sessionStoreModule (D-5)", () => {
 	it("declares lifecycleRegistrar and readinessRegistrar as optional and config as required", () => {
 		const m = sessionStoreModule as unknown as Module;
-		expect(m.name).toBe("sessionStoreModule");
+		expect(m.name).toBe("session-store");
 		expect(m.requires).toContain("config");
 		expect(m.optional).toContain("lifecycleRegistrar");
 		expect(m.optional).toContain("readinessRegistrar");
@@ -288,7 +288,7 @@ describe("sessionStoreModuleFor(config) — replica-safety declaration (#474)", 
 			expect.objectContaining({
 				name: "BootError",
 				reason: "replica-unsafe-adapter",
-				details: { reason: "replica-unsafe-adapter", modules: ["sessionStoreModule"] },
+				details: { reason: "replica-unsafe-adapter", modules: ["session-store"] },
 			}),
 		);
 	});
@@ -308,7 +308,7 @@ describe("sessionStoreModuleFor(config) — replica-safety declaration (#474)", 
 			logger,
 		});
 		expect(warn).toHaveBeenCalledWith(
-			expect.objectContaining({ modules: ["sessionStoreModule"] }),
+			expect.objectContaining({ modules: ["session-store"] }),
 			"replica_unsafe_adapters",
 		);
 	});
@@ -343,7 +343,7 @@ describe("sessionStoreModule (static manifest) — factory-time refusal under mu
 		).rejects.toMatchObject({
 			name: "BootError",
 			reason: "replica-unsafe-adapter",
-			details: { modules: ["sessionStoreModule"] },
+			details: { modules: ["session-store"] },
 		});
 	});
 

@@ -17,8 +17,8 @@ import { describe, expect, it } from "vitest";
 import { githubFederationModule } from "../github.mjs";
 
 describe("githubFederationModule const Module", () => {
-	it("has the canonical module name 'federation:github'", () => {
-		expect(githubFederationModule.name).toBe("federation:github");
+	it("has the canonical module name 'federation-github'", () => {
+		expect(githubFederationModule.name).toBe("federation-github");
 	});
 
 	it("requires githubFederationConfig", () => {

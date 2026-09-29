@@ -31,7 +31,7 @@ import { createInMemoryUserSessionStore } from "../memory/userSessionStore.mjs";
  * override is supplied for K.
  */
 export const memorySessionStoresModule = defineModule({
-	name: "memorySessionStores",
+	name: "core-session-stores-memory",
 	// #455: what forks per replica, quoted into a refused multi-replica boot.
 	replicaSafety: {
 		unsafe: true,

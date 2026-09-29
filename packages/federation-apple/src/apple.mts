@@ -537,7 +537,7 @@ export function createAppleProvider(config: AppleProviderConfig): AppleProvider 
  * modules are: the federation is registered under the name "apple".
  */
 export const appleFederationModule = defineModule({
-	name: "federation:apple",
+	name: "federation-apple",
 	requires: ["appleFederationConfig"] as const,
 	contributes: {
 		federations: {

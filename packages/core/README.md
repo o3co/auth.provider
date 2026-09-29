@@ -229,6 +229,8 @@ Modules extend the app with routes, grant handlers and DI-graph components. A mo
 
 Each mechanism is one axis of the extension surface: a `routes`, `grants` or `federations` contribution adds behaviour (a plugin), a `provides` fills a port's slot (an adapter), an optional method detected by a `supportsX` guard is an adapter's extra (a capability), and a contribution kind core composes changes what a core decision means (an extension). [AGENTS.md](../../AGENTS.md#extension-surface-four-axes) says which one a new policy takes.
 
+A module that reads configuration declares its own section in the manifest ([#728](https://github.com/o3co/auth.provider/issues/728)): `section.schema` is the Zod schema of the one section it owns, and boot parses that section before any factory runs and hands it to every factory as `deps.section`, typed as the schema's output. A value the schema refuses refuses boot (`config-validation-failed`), naming the path the operator wrote. The section is read at the module's name, or at `section.at` while it still sits at an older path; `section.reference` (the package's `config/reference.conf`) and `section.relocatedFrom` (the paths it moves from) are declared and not yet acted on. `configSchema`, which composes with core's schema over the whole configuration, is to be deprecated once the loader layers each package's `reference.conf`; until then it is also what keeps a section's keys through core's parse.
+
 A key several modules read has one owner, and the others receive it through a slot whose contract is core's ([#728](https://github.com/o3co/auth.provider/issues/728)): the owner parses its own section and provides the value, and in code a package imports only core. Core declares these slots ahead of their providers — none is provided or required yet:
 
 - `oauthTokenSettings`, what other modules read of the oauth module's token settings — [`src/token-settings/types.mts`](src/token-settings/types.mts).
@@ -242,10 +244,15 @@ Each has a contract suite on `@o3co/auth-provider-core/testing` that its provide
 ```typescript
 const myModule = defineModule({
   name: "my-module",
-  requires: ["config", "clientRepository"] as const,
+  requires: ["clientRepository"] as const,
+  section: { schema: z.object({ greeting: z.string() }) },
   contributes: {
     routes: [
-      (deps) => ({ id: "my-route", mountPath: "/my", handler: makeRouter(deps) }),
+      (deps) => ({
+        id: "my-route",
+        mountPath: "/my",
+        handler: makeRouter(deps.clientRepository, deps.section.greeting),
+      }),
     ],
   },
 });
