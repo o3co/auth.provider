@@ -190,7 +190,7 @@ describe("createAppleClientSecret — caching and rotation", () => {
 		await expect(resolve()).resolves.toMatch(/^[\w-]+\.[\w-]+\.[\w-]+$/);
 	});
 
-	it("re-imports the key and re-signs when the material is rotated under a valid cache (#498)", async () => {
+	it("re-imports the key and re-signs when the material is rotated under a valid cache", async () => {
 		// The previous case covers broken → repaired. This is valid → rotated: a
 		// leaked .p8 revoked and replaced while the cached secret is still inside
 		// its lifetime. The cache must follow the material, or the deployment
@@ -220,7 +220,7 @@ describe("createAppleClientSecret — caching and rotation", () => {
 		expect(await resolve()).toBe(second);
 	});
 
-	it("neither shares nor commits a signature still in flight under the old key once rotated (#498 review)", async () => {
+	it("neither shares nor commits a signature still in flight under the old key once rotated", async () => {
 		// A caller that arrives after the rotation must not be handed the
 		// signature the previous key is still producing, and that signature
 		// must not land in the cache the new key owns when it completes.

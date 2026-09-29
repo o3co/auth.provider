@@ -64,7 +64,7 @@ const refusedBecause = (reason: RegExp) => ({
 	cause: { message: expect.stringMatching(reason) },
 });
 
-describe("Apple authorization response issuer (RFC 9207, #597)", () => {
+describe("Apple authorization response issuer (RFC 9207)", () => {
 	it("refuses another issuer's iss before any token request", async () => {
 		const { idp, provider } = await build();
 		await expect(exchangeWith(provider, { iss: "https://impostor.test" })).rejects.toMatchObject(
