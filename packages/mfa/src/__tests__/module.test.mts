@@ -236,22 +236,34 @@ describe("the boot refusals (the MFA ADR's D20; the session-admission ADR's D7)"
 		expect((err.cause as Error).message).toMatch(/remove the MFA module/);
 	});
 
-	it("refuses required with no counting factor enabled — mfa-no-counting-factor, once the factors have registered — naming the mfa.factors.*.enabled keys", async () => {
+	it("refuses required with no counting factor enabled — mfa-no-counting-factor, once the factors have registered — telling the operator to enable an installed counting factor's module, the TOTP factor's key second", async () => {
 		const err = await refusal({ config: configFor("required", TOTP_OFF) });
 		expect(err.reason).toBe("contribute-factory-failed");
 		expect(err.details).toMatchObject({ module: "mfa", kind: "routes" });
 		expect(err.cause).toMatchObject({ reason: "mfa-no-counting-factor" });
 		const message = (err.cause as Error).message;
-		expect(message).toContain("mfa.factors.totp.enabled");
-		expect(message).toContain("MFA_TOTP_ENABLED");
+		expect(message).toContain("no factor is enabled");
+		expect(message).toContain("an installed counting factor through its module's `enabled` key");
+		expect(message).toContain(
+			"for the TOTP factor, when mfaTotpFactorModule is installed, mfa.factors.totp.enabled (MFA_TOTP_ENABLED)",
+		);
+		expect(message.indexOf("`enabled` key")).toBeLessThan(message.indexOf("MFA_TOTP_ENABLED"));
 	});
 
-	it("refuses required when every enabled factor is one that does not count", async () => {
-		const err = await refusal({
-			config: configFor("required", TOTP_OFF),
-			extraModules: [contributing(stubFactor("recovery_code", ["recovery"], { counting: false }))],
-		});
-		expect(err.cause).toMatchObject({ reason: "mfa-no-counting-factor" });
+	it("refuses required when every enabled factor is one that does not count, naming the enabled kinds — with the TOTP factor's module or without it", async () => {
+		for (const withoutTotpModule of [false, true]) {
+			const err = await refusal({
+				config: configFor("required", TOTP_OFF),
+				withoutTotpModule,
+				extraModules: [contributing(stubFactor("recovery_code", ["recovery"], { counting: false }))],
+			});
+			expect(err.cause, String(withoutTotpModule)).toMatchObject({
+				reason: "mfa-no-counting-factor",
+			});
+			expect((err.cause as Error).message, String(withoutTotpModule)).toContain(
+				"the enabled factors (recovery_code) do not count",
+			);
+		}
 	});
 
 	it("accepts required when a counting factor of another package's is the one enabled", async () => {
