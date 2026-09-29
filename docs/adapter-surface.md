@@ -6,11 +6,13 @@ composition root and consumed by whichever modules declare it. This document is
 the one place that lists them, says what each is for, and states the boundary
 that decides what may become one.
 
-A slot is one of four ways a package changes the provider: it is the adapter
-axis, beside plugins, capabilities and extensions.
-[AGENTS.md](../AGENTS.md#extension-surface-four-axes) names the four, and the
-rule for which one a new policy takes: a slot for one deployment policy, a
-contribution kind for a decision a deployment adds to.
+A port's slot is one of four ways a package changes the provider — the
+adapter axis, beside plugins, capabilities and extensions. Not every slot below
+is a port's: the boot infrastructure, the synthetic keys the contribution kinds
+are read through, and hook slots such as `grantPolicy` are listed too.
+[AGENTS.md](../AGENTS.md#extension-surface-four-axes) names the four axes, and
+the question that picks one for a new policy: does more than one owner add to
+the same decision?
 
 It is enforced, not aspirational: `packages/core/src/__tests__/adapterSurface.drift.test.mts`
 checks both directions — every slot declared in source appears here, and every

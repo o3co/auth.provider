@@ -43,15 +43,25 @@ A package changes what the provider does in one of four ways, and each has its o
 | **Plugin** | Adds behaviour | A `routes`, `grants` or `federations` contribution | `device-grant`, the `federation-*` packages, `webauthn` |
 | **Adapter** | Implements a port core declares | `provides` of a `ComponentMap` slot | The memory and Redis stores, `foundation`'s `HttpUserRepository` |
 | **Capability** | Lets an adapter opt into more than its port | An optional method, detected by a `supportsX` guard beside the port | `supportsSecondFactorUpdate`, `supportsSessionsOnlyRevocation`, `supportsLogout`, `supportsRefresh`, `supportsClaimMapping`, `supportsDelegatedAuthorization`, `supportsLock`, `supportsMfaEnrollmentWitness` |
-| **Extension** | Changes what an existing core decision means | A contribution kind core composes (a package that owns a decision declares the kind for it, as `session` does for `federationRedirectPolicies`) | `tokenBindingMechanisms` (dpop, mtls), `tokenExchangeValidators`, `federationRedirectPolicies`, `sessionRequirements` (the MFA package's `mfa` requirement); `grantPolicy`, which is still a single slot and so cannot compose (#710) |
+| **Extension** | Changes what an existing core decision means | A contribution kind core composes (a package that owns a decision declares the kind for it, as `session` does for `federationRedirectPolicies`) | `tokenBindingMechanisms` (dpop, mtls), `tokenExchangeValidators`, `federationRedirectPolicies`, `sessionRequirements` (the MFA package's `mfa` requirement) |
 
-Three more things can look like an axis and are not one:
+`grantPolicy` is an extension still shaped as a single slot: a scope policy and an audience policy from different owners cannot both be installed ([#710](https://github.com/o3co/auth.provider/issues/710), C5).
+
+**Choosing the axis for a policy.** A pull request that adds a policy answers one question on purpose: does more than one owner — packages, the deployment, or both — add to the same decision?
+
+- Yes: a contribution kind core composes (an extension).
+- No, one implementation per composition: a port's slot (an adapter).
+- An adapter's optional extra beyond its port: a capability.
+- A pure predicate with one home: a shared helper (below).
+
+Two more things can look like an axis and are not one:
 
 - **A shared helper** is a pure predicate, or the one reading of a value, with one home in [docs/design-vocabulary.md](docs/design-vocabulary.md): `isLoopbackHostname` and `coveredByRevocationBoundary`, for example. It is replaced by editing its home, never by a deployment. A second definition is a defect, not a second implementation, and the vocabulary's drift guard catches it for every row marked guarded.
-- **A package's library export that a peer imports**, such as `packages/session`'s `establishSession` and `answerInterruption`, which the MFA package is to import to finish a login (the session-admission ADR's D5). It has one implementation, tied to that package's runtime (the cookie session it regenerates and saves), and a package imports it through the exporting package's entry after naming that package as a peer. It is not a port, because nothing else implements it and a deployment does not swap it. It is not an extension either, because it changes no decision.
 - **A closed vocabulary core owns**, such as `ADMISSION_ACTIONS`: a closed union of the bundled plugins' action names, each with its grade, so that a requirement's tests can prove its table exhaustive over it (the session-admission ADR's D4). It names plugins, but it is vocabulary, not an extension point. A deployment's own route builds its own `{ name, grade }` and never adds to the union, and a new bundled consumer's action is added in core. `BUILT_IN_AUDIT_EVENT_TYPES` is the same kind of list, for audit events.
 
-So a pull request that adds a policy chooses its axis on purpose: **a slot** for one deployment policy, **a kind** for a decision a deployment adds to, **a capability** for an adapter's extra, and **a helper** for a predicate with one home.
+**Packages depend on core alone** ([#728](https://github.com/o3co/auth.provider/issues/728), its decided B4 and B13). In code, a package imports only `@o3co/auth-provider-core`; at run time, one package depends on another only through a slot whose contract lives in core. Four edges predate the rule and are tolerated on a list that may only shrink, never grow: `device-grant` → `oauth`, `federation-grants` → `oauth`, `device-grant` → `session`, and the federation adapters (`federation-google`, `federation-github`, `federation-apple`, `federation-oidc`) → `session`. #728's parser-based guard holds that list once it lands; until then, review does.
+
+`packages/session` exports `establishSession` and `answerInterruption` today for a peer: the MFA package, which is to finish a login with them. The session-admission ADR planned that as an import (its D5 and §7), which the rule above would count as a new edge. How the MFA package reaches them is an open owner decision; the direction #728 points to is a slot whose contract core declares and the session module provides.
 
 ## Development Process
 
