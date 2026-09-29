@@ -60,6 +60,7 @@ import {
 	type SubjectRevocation,
 	type SubjectSessionIndex,
 	sanitizeErrorText,
+	stepUpPageUrl,
 	supportsClaimMapping,
 	type UserRepository,
 	type UserSessionStore,
@@ -129,13 +130,17 @@ const NO_ACR_TABLE = Object.freeze({});
  * session-admission ADR's D8): `403 step_up_required`, the requirement that
  * asked, and its page — the start is a browser navigation, and the page the
  * link was started from can send the user through the step-up and start it
- * again. The page is as the requirement registered it, validated then.
+ * again. The page is the one every consumer answers (core's
+ * `stepUpPageUrl`): the registered page resolved on `issuer`
+ * (`oauth.jwt.issuer`), not on the account page's origin, its params on the
+ * query, and no return parameter — the page that probed the start knows
+ * where it comes back to.
  */
-const stepUpRequired = (admission: Extract<Admission, { outcome: "step_up" }>) => ({
+const stepUpRequired = (admission: Extract<Admission, { outcome: "step_up" }>, issuer: string) => ({
 	error: "step_up_required",
 	error_description: "Linking a federated identity requires a step-up first",
 	requirement: admission.requirement,
-	page: admission.page,
+	page: stepUpPageUrl(admission.page, issuer),
 });
 
 /**
@@ -1477,7 +1482,7 @@ export const createRouter = (
 					return res.status(503).json(admissionUnavailable(admission.store));
 				}
 				if (admission.outcome === "step_up") {
-					return res.status(403).json(stepUpRequired(admission));
+					return res.status(403).json(stepUpRequired(admission, config.oauth.jwt.issuer));
 				}
 				if (
 					admission.outcome !== "admitted" ||

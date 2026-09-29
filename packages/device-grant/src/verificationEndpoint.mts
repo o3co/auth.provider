@@ -198,7 +198,6 @@ import type {
 	RateLimitFailMode,
 	RateLimitOutageLogger,
 	SessionRequirementResolver,
-	StepUpPage,
 	SubjectRevocation,
 	UserSessionStore,
 } from "@o3co/auth-provider-core";
@@ -216,6 +215,7 @@ import {
 	isEmailVerified,
 	normaliseUserCode,
 	rateLimiterUnavailableEnvelope,
+	stepUpPageUrl,
 } from "@o3co/auth-provider-core";
 import type { Request, RequestHandler, Response } from "express";
 import { DEVICE_CODE_STORE_UNAVAILABLE, reportDeviceCodeStoreOutage } from "./storeOutage.mjs";
@@ -304,18 +304,6 @@ const admissionLogger = (logger: DeviceGrantDependencies["logger"]): Logger => {
 	return adapted;
 };
 
-/**
- * Where the step-up starts, as the page is sent there: the requirement's
- * registered page as an absolute URL on the issuer, its params set on the
- * query (the session-admission ADR's D2, D8). No return parameter: the
- * deployment's verification page knows where it comes back to.
- */
-const stepUpUrl = (page: StepUpPage, issuer: string): string => {
-	const url = new URL(page.url, issuer);
-	for (const [name, value] of Object.entries(page.params)) url.searchParams.set(name, value);
-	return url.href;
-};
-
 /** The three descriptions `401 login_required` had before admission, and the one it adds. */
 const NO_SESSION = "an authenticated end-user session is required to approve a device";
 const NO_SID = "session identifier (sid) is required";
@@ -350,7 +338,10 @@ const refusalOf = (
 					error: "step_up_required",
 					error_description: "the session must step up before it can do this",
 					requirement: admission.requirement,
-					page: stepUpUrl(admission.page, issuer),
+					// Where the step-up starts, as every consumer answers it (core's
+					// `stepUpPageUrl`). No return parameter: the deployment's
+					// verification page knows where it comes back to.
+					page: stepUpPageUrl(admission.page, issuer),
 				},
 			};
 		case "unauthenticated":

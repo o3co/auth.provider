@@ -50,6 +50,7 @@ import {
 	type SessionRequirementResolver,
 	type SubjectRevocation,
 	sanitizeErrorText,
+	stepUpPageUrl,
 	type UserSession,
 	type UserSessionStore,
 	unrepresentedResources,
@@ -1005,10 +1006,11 @@ const refuseUnmet = (
 
 /**
  * A `step_up` admission (the MFA ADR's D17, amended): the browser is sent to
- * the requirement's registered page — built from it with `new URL` and
- * `searchParams`, never by concatenation — with the page's own parameters,
- * the values a step-up can meet as `acr_values` when the request asked for
- * an acr, and `redirect_to` naming this request with the ask recorded.
+ * the requirement's registered page — the URL every consumer answers
+ * (core's `stepUpPageUrl`: resolved on the issuer, the page's own parameters
+ * on the query, never by concatenation) — with this trip's own two: the
+ * values a step-up can meet as `acr_values` when the request asked for an
+ * acr, and `redirect_to` naming this request with the ask recorded.
  *
  * The ask records the trip under the requirement's name. A session that
  * comes back not later than that record was already sent on this trip and
@@ -1064,7 +1066,10 @@ const stepUpTrip = async (
 		);
 		return;
 	}
-	const target = new URL(page.url, ctx.opts.issuer);
+	// The page as every consumer answers it (core's `stepUpPageUrl`): resolved
+	// on the issuer, its params on the query. This trip's own parameters —
+	// the hint and the return — are set on it below.
+	const target = new URL(stepUpPageUrl(page, ctx.opts.issuer));
 	// Registration holds a page to the issuer's origin (core's
 	// `checkStepUpPage`); a resolver built without an issuer does not. The
 	// URL this endpoint is about to send a browser to is checked anyway, and
@@ -1074,7 +1079,6 @@ const stepUpTrip = async (
 		redirectError(ctx, "server_error", "the step-up page is not on this server's origin");
 		return;
 	}
-	for (const [name, value] of Object.entries(page.params)) target.searchParams.set(name, value);
 	if (admission.acrValues.length > 0) {
 		target.searchParams.set("acr_values", admission.acrValues.join(" "));
 	}

@@ -20,7 +20,8 @@
  * what it is about to let the session do (`AdmissionAction`), what admission
  * answers (`Admission`), what a requirement is (`SessionRequirement`) and is
  * asked (`RequirementInput`) and answers (`RequirementVerdict`), the
- * deployment's step-up page as it is validated (`checkStepUpPage`), and the
+ * deployment's step-up page as it is validated (`checkStepUpPage`) and as a
+ * browser is sent to it (`stepUpPageUrl`), and the
  * establishment half: `PrimaryAuthentication`, the `Interruption` a
  * requirement answers a login with, the `PrimaryContinuation` it persists,
  * and the `Establishment` capability `establishSession` requires.
@@ -260,6 +261,24 @@ export function checkStepUpPage(page: unknown, issuer?: string): StepUpPage {
 		}
 	}
 	return Object.freeze({ url, params: Object.freeze(params as Record<string, string>) });
+}
+
+/**
+ * The step-up page as a browser is sent to it (D2, D8): `page.url` resolved
+ * on `issuer` — a path against the issuer's origin, as a browser resolves a
+ * `Location`, an absolute URL as it is — with each of `page.params` set on the
+ * query (`searchParams.set`, never concatenation), as one absolute URL string.
+ * Every consumer that answers a `step_up` with its page answers this one.
+ * No return parameter is added: `/authorize` sets its own trip's
+ * (`redirect_to`, and the `acr_values` hint of its request) on this URL; a
+ * JSON consumer answers it as it is, and the page that called knows where it
+ * comes back to. The page is the registered one, held to the issuer's origin
+ * at registration when boot gave the issuer.
+ */
+export function stepUpPageUrl(page: StepUpPage, issuer: string): string {
+	const url = new URL(page.url, issuer);
+	for (const [name, value] of Object.entries(page.params)) url.searchParams.set(name, value);
+	return url.href;
 }
 
 // ---------------------------------------------------------------------------

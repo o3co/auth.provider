@@ -190,10 +190,7 @@ describe("stepUpPageUrl — the step-up page as a browser is sent to it (D2, D8)
 	});
 
 	it("encodes each param as a query value, never concatenated", () => {
-		const url = stepUpPageUrl(
-			{ url: "/mfa", params: { note: "a b&c=d#e", "k y": "é" } },
-			ISSUER,
-		);
+		const url = stepUpPageUrl({ url: "/mfa", params: { note: "a b&c=d#e", "k y": "é" } }, ISSUER);
 		expect(url).toBe(`${ISSUER}/mfa?note=a+b%26c%3Dd%23e&k+y=%C3%A9`);
 		const read = new URL(url);
 		expect(read.searchParams.get("note")).toBe("a b&c=d#e");
