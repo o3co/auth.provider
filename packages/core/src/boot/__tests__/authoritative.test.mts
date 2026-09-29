@@ -415,3 +415,73 @@ describe("a __proto__ key in a host map", () => {
 		},
 	);
 });
+
+describe("the host maps are read once", () => {
+	// Stage 1 checks a host map, and later stages read it again; a map that
+	// answers differently on a later read — a Proxy, a getter — must not have
+	// one answer checked and another used.
+	it("does not substitute an authoritative key an override hides from its first read", async () => {
+		let reads = 0;
+		const hiding = new Proxy({ oauthTokenSettings: SECOND } as Record<string, unknown>, {
+			ownKeys(target) {
+				reads++;
+				return reads === 1 ? [] : Reflect.ownKeys(target);
+			},
+		});
+		const seen: { settings?: OAuthTokenSettings } = {};
+		const handle = await createApp({
+			modules: [owner, reader(seen)],
+			bootstrapComponents: bootstrap(),
+			overrideComponents: hiding as never,
+		});
+		try {
+			expect(seen.settings).toBe(OWNED);
+			expect(reads).toBe(1);
+		} finally {
+			await handle.dispose();
+		}
+	});
+
+	it("reads an override's value once, however many stages use it", async () => {
+		let reads = 0;
+		const HTTP = createTestHttpSettings();
+		const counting = {};
+		Object.defineProperty(counting, "httpSettings", {
+			enumerable: true,
+			get() {
+				reads++;
+				return HTTP;
+			},
+		});
+		const handle = await createApp({
+			modules: [],
+			bootstrapComponents: bootstrap(),
+			overrideComponents: counting as never,
+		});
+		try {
+			expect(reads).toBe(1);
+		} finally {
+			await handle.dispose();
+		}
+	});
+
+	it("reads a bootstrap map's keys once", async () => {
+		let reads = 0;
+		const host = bootstrap() as Record<string, unknown>;
+		const counted = new Proxy(host, {
+			ownKeys(target) {
+				reads++;
+				return Reflect.ownKeys(target);
+			},
+		});
+		const handle = await createApp({
+			modules: [owner, reader({})],
+			bootstrapComponents: counted as never,
+		});
+		try {
+			expect(reads).toBe(1);
+		} finally {
+			await handle.dispose();
+		}
+	});
+});
