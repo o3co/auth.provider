@@ -41,7 +41,7 @@ import {
 	resolveAccessTokenLifetime,
 	resolveRefreshTokenLifetime,
 } from "../config/application.schema.mjs";
-import { MAX_DURATION_SECONDS } from "../config/durations.mjs";
+import { MAX_DURATION_MS, MAX_DURATION_SECONDS } from "../config/durations.mjs";
 import { FEDERATION_GRANT_LIFETIME_CEILING_MS } from "../federation-grants/lifetime.mjs";
 import { DEFAULT_CLOCK_SKEW_MS, DEFAULT_SUBJECT_REVOCATION_SKEW_MS } from "../jwt/verify.mjs";
 import type { OAuthTokenSettings } from "../token-settings/types.mjs";
@@ -63,8 +63,7 @@ export const SUBJECT_REVOCATION_MIN_RETENTION_MS = FEDERATION_GRANT_LIFETIME_CEI
 /**
  * Milliseconds an operator configured, or a refusal that names the path. The
  * token lifetimes have resolvers of their own in the configuration schema;
- * this reads what has none — `session.maxAge`, and the session lifetime a
- * `sessionCookiePolicy` carries.
+ * this reads what has none, `session.maxAge`.
  */
 const lifetimeMs = (value: unknown, path: string): number => {
 	const raw = typeof value === "number" ? value : Number.NaN;
@@ -77,6 +76,29 @@ const lifetimeMs = (value: unknown, path: string): number => {
 		);
 	}
 	return raw;
+};
+
+/**
+ * The session lifetime a `sessionCookiePolicy` carries, held to the rule the
+ * configuration's `session.maxAge` is held to where it is parsed — whole
+ * milliseconds from 1 to the one-year ceiling, as the schema and the session
+ * store's provider hold it — or a refusal that names the slot's member.
+ */
+const slotLifetimeMs = (value: unknown, path: string): number => {
+	if (
+		typeof value !== "number" ||
+		!Number.isInteger(value) ||
+		value < 1 ||
+		value > MAX_DURATION_MS
+	) {
+		throw new RangeError(
+			`resolveSubjectRevocationHorizonMs: ${path} must be a whole number of milliseconds ` +
+				`from 1 to ${MAX_DURATION_MS}, and was ${JSON.stringify(value)}. ` +
+				"The subject's revocation boundary is sized from it, and one computed from a " +
+				"lifetime that is not one expires while the sessions it covers are still accepted.",
+		);
+	}
+	return value;
 };
 
 /**
@@ -167,7 +189,7 @@ export function resolveSubjectRevocationHorizonMs(
 	const sessionMs =
 		sessionCookie === undefined
 			? lifetimeMs(root?.session?.maxAge, "session.maxAge")
-			: lifetimeMs(sessionCookie.maxAgeMs, "sessionCookiePolicy.maxAgeMs");
+			: slotLifetimeMs(sessionCookie.maxAgeMs, "sessionCookiePolicy.maxAgeMs");
 	const longest = Math.max(
 		sessionMs,
 		refreshMs + DEFAULT_CLOCK_SKEW_MS,
