@@ -38,6 +38,7 @@ import {
 	type RelocatedPath,
 	relocatedKeyMessage,
 } from "../config/removed-keys.mjs";
+import { describeValue } from "../errors/describe-value.mjs";
 import type { ComponentKey, ComponentMap } from "../modules/manifest/component-map.mjs";
 import type {
 	FederationInstance,
@@ -327,33 +328,6 @@ function checkProvidesClosure(modules: readonly NormalisedModule[]): void {
 // ---------------------------------------------------------------------------
 // Authoritative keys (#728) — a module's settings slots have one source
 // ---------------------------------------------------------------------------
-
-/**
- * What `value` is, for a refusal, never rendered — a null-prototype object
- * has no `toString`, and a getter or a proxy trap may throw: `the string
- * "…"`, `the number 5`, `null`, `a Set`, `an Object`, or `an object` when its
- * prototype names no constructor.
- */
-const describeValue = (value: unknown): string => {
-	if (value === null || value === undefined) return String(value);
-	if (typeof value === "string") return `the string ${JSON.stringify(value)}`;
-	if (typeof value === "number" || typeof value === "bigint" || typeof value === "boolean") {
-		return `the ${typeof value} ${String(value)}`;
-	}
-	if (typeof value !== "object") return `a ${typeof value}`;
-	let name: unknown;
-	try {
-		const prototype: unknown = Object.getPrototypeOf(value);
-		name =
-			prototype === null
-				? undefined
-				: (prototype as { constructor?: { name?: unknown } }).constructor?.name;
-	} catch {
-		name = undefined;
-	}
-	if (typeof name !== "string" || name === "") return "an object";
-	return `${/^[AEIOU]/.test(name) ? "an" : "a"} ${name}`;
-};
 
 /**
  * `authoritative` names keys of the module's own `provides`, as a list: a key

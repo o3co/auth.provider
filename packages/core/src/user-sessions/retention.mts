@@ -42,6 +42,7 @@ import {
 	resolveRefreshTokenLifetime,
 } from "../config/application.schema.mjs";
 import { MAX_DURATION_MS, MAX_DURATION_SECONDS } from "../config/durations.mjs";
+import { describeValue } from "../errors/describe-value.mjs";
 import { FEDERATION_GRANT_LIFETIME_CEILING_MS } from "../federation-grants/lifetime.mjs";
 import { DEFAULT_CLOCK_SKEW_MS, DEFAULT_SUBJECT_REVOCATION_SKEW_MS } from "../jwt/verify.mjs";
 import type { OAuthTokenSettings } from "../token-settings/types.mjs";
@@ -70,7 +71,7 @@ const lifetimeMs = (value: unknown, path: string): number => {
 	if (!Number.isFinite(raw) || raw <= 0) {
 		throw new RangeError(
 			`resolveSubjectRevocationHorizonMs: ${path} must be a positive number of ` +
-				`milliseconds, and was ${JSON.stringify(value)}. ` +
+				`milliseconds, and was ${describeValue(value)}. ` +
 				"The subject's revocation boundary is sized from it, and one computed from a " +
 				"missing lifetime expires while the sessions it covers are still being accepted.",
 		);
@@ -93,7 +94,7 @@ const slotLifetimeMs = (value: unknown, path: string): number => {
 	) {
 		throw new RangeError(
 			`resolveSubjectRevocationHorizonMs: ${path} must be a whole number of milliseconds ` +
-				`from 1 to ${MAX_DURATION_MS}, and was ${JSON.stringify(value)}. ` +
+				`from 1 to ${MAX_DURATION_MS}, and was ${describeValue(value)}. ` +
 				"The subject's revocation boundary is sized from it, and one computed from a " +
 				"lifetime that is not one expires while the sessions it covers are still accepted.",
 		);
@@ -110,7 +111,7 @@ const slotLifetimeSeconds = (value: unknown, path: string): number => {
 	if (!isLifetimeSeconds(value)) {
 		throw new RangeError(
 			`resolveSubjectRevocationHorizonMs: ${path} must be a whole number of seconds ` +
-				`from 1 to ${MAX_DURATION_SECONDS}, and was ${JSON.stringify(value)}. ` +
+				`from 1 to ${MAX_DURATION_SECONDS}, and was ${describeValue(value)}. ` +
 				"The subject's revocation boundary is sized from it, and one computed from a " +
 				"lifetime that is not one expires while the tokens it covers are still accepted.",
 		);

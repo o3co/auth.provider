@@ -36,6 +36,7 @@
 
 import { isLifetimeSeconds } from "../config/application.schema.mjs";
 import { MAX_DURATION_SECONDS } from "../config/durations.mjs";
+import { describeValue } from "../errors/describe-value.mjs";
 import { checkCanonicalIssuer, describeIssuerRejection } from "../issuer/canonical.mjs";
 import type { OAuthTokenSettings } from "./types.mjs";
 
@@ -44,8 +45,8 @@ const WHY =
 	"configuration only when it holds none, so a member the slot lacks or gets wrong is refused " +
 	"rather than taken from the configuration beside it (#728).";
 
-const shown = (value: unknown): string =>
-	value === undefined ? "none" : (JSON.stringify(value) ?? String(value));
+/** The value a refusal names: `none` for a member the slot lacks, otherwise its kind. */
+const shown = (value: unknown): string => (value === undefined ? "none" : describeValue(value));
 
 const refuse = (member: string, rule: string, value: unknown): never => {
 	throw new RangeError(
