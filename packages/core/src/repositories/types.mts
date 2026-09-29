@@ -258,7 +258,7 @@ export interface Client {
  * into the artifact (responsibility #4).
  *
  * `mfaEnrolled` is not a claim: it is the MFA enrollment witness, read by the
- * MFA coordinator and never stamped on a token.
+ * MFA package (its `mfa` requirement and routes) and never stamped on a token.
  *
  * The index signature stays: a Store may carry custom claims beyond these, and
  * a consumer may map them through a custom claim filter.
@@ -291,7 +291,7 @@ export interface User {
 	 * as "never enrolled" — which would let whoever holds the password bind
 	 * their own authenticator. Read it through `readMfaEnrollmentWitness`
 	 * only: `true` is a witness; `false` and absence say the subject has not
-	 * enrolled; any other value is malformed, which the coordinator answers
+	 * enrolled; any other value is malformed, which the MFA package answers
 	 * `503` and never reads as "not enrolled". The provider tells the Store
 	 * through `UserRepository.markMfaEnrolled` where the repository has it; a
 	 * Store that answers no field leaves the witness absent.

@@ -231,8 +231,10 @@ export type MfaEnrollmentWitness = "enrolled" | "not_enrolled" | "malformed";
  * is `enrolled`; `false` or absent is `not_enrolled`; any other value — `1`,
  * `"true"`, `null` — is `malformed`. A malformed witness is never read as
  * "not enrolled", which would open a first binding to whoever holds the
- * password: the coordinator answers it `503 temporarily_unavailable`, with one
- * error line (`mfa_enrollment_witness_malformed`), and binds nothing.
+ * password: the MFA package answers it `503 temporarily_unavailable` and binds
+ * nothing — at login its `mfa` requirement records the audit event and throws,
+ * so admission's one `session_admission_unavailable` line carries the cause
+ * (the MFA ADR's D12, as amended); a route that reads it logs its own line.
  */
 export function readMfaEnrollmentWitness(
 	user: Readonly<Record<string, unknown>>,
