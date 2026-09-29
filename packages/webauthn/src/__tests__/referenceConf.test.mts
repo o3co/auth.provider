@@ -18,12 +18,11 @@
  * The package's `config/reference.conf` (#728): the modules that read it
  * declare it as their section's reference, and it holds only their
  * sections, which their section schemas parse without losing a path —
- * core's `referenceConfProblems`, the check every package with defaults
+ * core's `packageReferenceProblems`, the check every package with defaults
  * runs over its own file.
  */
 
-import { fileURLToPath } from "node:url";
-import { referenceConfProblems } from "@o3co/auth-provider-core/testing";
+import { packageReferenceProblems } from "@o3co/auth-provider-core/testing";
 import { parseFile } from "@o3co/ts.hocon";
 import { describe, expect, it } from "vitest";
 import { webauthnModule } from "#/module.mjs";
@@ -34,15 +33,12 @@ const REFERENCE = new URL("../../config/reference.conf", import.meta.url);
 describe("the package's config/reference.conf (#728)", () => {
 	const modules = [webauthnModule];
 
-	it("is the reference each of its modules declares, at the section it reads", () => {
-		for (const module of modules) {
-			expect(module.section?.reference?.href, module.name).toBe(REFERENCE.href);
-		}
+	it("is read at the sections its modules declare", () => {
 		expect(modules.map((module) => module.section?.at)).toEqual(["webauthn"]);
 	});
 
-	it("holds only those modules' sections, which their schemas parse without losing a path", () => {
-		const tree = parseFile(fileURLToPath(REFERENCE), { env: {} }).toObject();
-		expect(referenceConfProblems({ tree, reference: REFERENCE, modules })).toEqual([]);
+	it("is declared by each of them and holds only their sections, which their schemas parse without losing a path", () => {
+		const read = (path: string): unknown => parseFile(path, { env: {} }).toObject();
+		expect(packageReferenceProblems({ reference: REFERENCE, modules, read })).toEqual([]);
 	});
 });

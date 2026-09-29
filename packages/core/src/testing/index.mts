@@ -84,7 +84,12 @@ export {
 	type RecordingMailSender,
 } from "./recordingMailSender.mjs";
 // #728: the check a package runs over its own config/reference.conf.
-export { type ReferenceConfCheck, referenceConfProblems } from "./referenceConf.mjs";
+export {
+	type PackageReferenceCheck,
+	packageReferenceProblems,
+	type ReferenceConfCheck,
+	referenceConfProblems,
+} from "./referenceConf.mjs";
 export {
 	type CsrfGuardContractInput,
 	createTestCsrfGuard,

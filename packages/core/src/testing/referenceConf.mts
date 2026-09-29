@@ -24,9 +24,17 @@
  *
  * It takes the file already resolved — the package's test parses it with
  * the HOCON reader it uses (`@o3co/ts.hocon`) — so core takes no HOCON
- * dependency. Arrays are values, not keys: a list is one path.
+ * dependency. {@link packageReferenceProblems} is the whole check a
+ * package's test runs; {@link referenceConfProblems} is its second half.
+ *
+ * Its limits: a list is one path — arrays are values, not keys, so an
+ * element a schema drops from a list is not reported; a key whose value is
+ * `undefined` is no path at all; and an empty object counts as kept when the
+ * schema's output has keys under it (a schema that fills defaults in), lost
+ * only when the output has nothing there.
  */
 
+import { fileURLToPath } from "node:url";
 import type { Module } from "../modules/manifest/module-spec.mjs";
 
 export interface ReferenceConfCheck {
@@ -41,10 +49,13 @@ export interface ReferenceConfCheck {
 const isPlainObject = (value: unknown): value is Record<string, unknown> =>
 	typeof value === "object" && value !== null && !Array.isArray(value);
 
-/** Every dotted path in `tree` that carries a value (a list is one value). */
+/**
+ * Every dotted path in `tree` that carries a value (a list is one value; an
+ * empty object is a path of its own; a key whose value is `undefined` is none).
+ */
 function leafPaths(tree: unknown, prefix: string): string[] {
 	if (!isPlainObject(tree)) return prefix === "" ? [] : [prefix];
-	const entries = Object.entries(tree);
+	const entries = Object.entries(tree).filter(([, value]) => value !== undefined);
 	if (entries.length === 0) return prefix === "" ? [] : [prefix];
 	return entries.flatMap(([key, value]) =>
 		leafPaths(value, prefix === "" ? key : `${prefix}.${key}`),
@@ -105,12 +116,53 @@ export function referenceConfProblems(check: ReferenceConfCheck): string[] {
 			}
 			continue;
 		}
-		const kept = new Set(leafPaths(parsed.data, section.path));
+		const kept = leafPaths(parsed.data, section.path);
 		for (const path of leafPaths(value, section.path)) {
-			if (!kept.has(path)) {
+			// An empty object the schema filled in is kept: its output has keys under it.
+			if (!kept.some((output) => within(output, path))) {
 				problems.push(`${path}: lost by module "${section.module.name}"'s section schema`);
 			}
 		}
 	}
+	return problems.sort();
+}
+
+export interface PackageReferenceCheck {
+	/** The package's `config/reference.conf`, as its modules declare it. */
+	readonly reference: URL;
+	/** The modules that read the file: each must declare it as its section's reference. */
+	readonly modules: readonly Module[];
+	/**
+	 * Resolves the file at a path to plain data, with the package's HOCON
+	 * reader and no environment variable set — for `@o3co/ts.hocon`,
+	 * `(path) => parseFile(path, { env: {} }).toObject()`.
+	 */
+	readonly read: (path: string) => unknown;
+}
+
+/**
+ * The check a package's own test runs over its `config/reference.conf`, one
+ * line per problem, sorted — `[]` when nothing is: every module in `modules`
+ * declares the file as its section's reference, and
+ * {@link referenceConfProblems} finds nothing wrong with the file as `read`
+ * resolves it. Core's tests require every package that ships a reference to
+ * run it.
+ */
+export function packageReferenceProblems(check: PackageReferenceCheck): string[] {
+	const problems: string[] = [];
+	for (const module of check.modules) {
+		const declared = module.section?.reference;
+		if (declared === undefined) {
+			problems.push(`module "${module.name}": declares no section reference`);
+		} else if (declared.href !== check.reference.href) {
+			problems.push(
+				`module "${module.name}": its section's reference is ${declared.href}, not this file`,
+			);
+		}
+	}
+	const tree = check.read(fileURLToPath(check.reference));
+	problems.push(
+		...referenceConfProblems({ tree, reference: check.reference, modules: check.modules }),
+	);
 	return problems.sort();
 }
