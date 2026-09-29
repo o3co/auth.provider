@@ -27,6 +27,7 @@ import {
 	isMfaTransactionBoundTo,
 	type MfaTransaction,
 	type MfaTransactionBinding,
+	newMfaTransactionRecord,
 } from "#/mfa/transactionStore.mjs";
 
 const bound = (binding: unknown): Pick<MfaTransaction, "binding"> =>
@@ -88,5 +89,157 @@ describe("isMfaTransactionBoundTo", () => {
 		for (const tx of [null, undefined, "express-session-1"]) {
 			expect(isMfaTransactionBoundTo(tx as never, session)).toBe(false);
 		}
+	});
+
+	it.each([
+		["two different lone surrogates", "s\uD800", "s\uDC00"],
+		["a lone surrogate and the replacement character", "s\uDBFF", "s\uFFFD"],
+		["one lone surrogate and itself", "s\uD800", "s\uD800"],
+	])("does not hold for an id that is not well formed: %s", (_label, held, presented) => {
+		// Each lone surrogate encodes as U+FFFD's bytes: compared as bytes, two
+		// different ids would be one.
+		expect(
+			isMfaTransactionBoundTo(bound({ kind: "session", id: held }), {
+				kind: "session",
+				id: presented,
+			}),
+		).toBe(false);
+		expect(
+			isMfaTransactionBoundTo(bound({ kind: "session", id: presented }), {
+				kind: "session",
+				id: held,
+			}),
+		).toBe(false);
+	});
+
+	it("holds for an id with a well-formed surrogate pair", () => {
+		const pair: MfaTransactionBinding = { kind: "session", id: "s\uD83D\uDE00" };
+		expect(isMfaTransactionBoundTo(bound(pair), { kind: "session", id: "s😀" })).toBe(true);
+	});
+
+	it("reads a presented binding's kind and id once, and answers false where reading one throws", () => {
+		let reads = 0;
+		const shifting = {
+			kind: "session",
+			get id() {
+				reads += 1;
+				return reads === 1 ? "express-session-1" : "express-session-2";
+			},
+		};
+		expect(isMfaTransactionBoundTo(bound(session), shifting as MfaTransactionBinding)).toBe(true);
+		expect(reads).toBe(1);
+		for (const throwing of THROWING) {
+			expect(isMfaTransactionBoundTo(bound(session), throwing as MfaTransactionBinding)).toBe(
+				false,
+			);
+			expect(isMfaTransactionBoundTo(bound(throwing), session)).toBe(false);
+		}
+		expect(isMfaTransactionBoundTo(THROWING_HOLDER as never, session)).toBe(false);
+	});
+});
+
+/** Bindings whose every read of `kind` or `id` — or the object itself — throws. */
+const THROWING: readonly unknown[] = [
+	{
+		kind: "session",
+		get id(): string {
+			throw new Error("the id's getter throws");
+		},
+	},
+	{
+		get kind(): string {
+			throw new Error("the kind's getter throws");
+		},
+		id: "express-session-1",
+	},
+	new Proxy(
+		{},
+		{
+			get() {
+				throw new Error("the proxy's get trap throws");
+			},
+		},
+	),
+	(() => {
+		const { proxy, revoke } = Proxy.revocable({ kind: "session", id: "express-session-1" }, {});
+		revoke();
+		return proxy;
+	})(),
+];
+
+/** A transaction whose `binding` getter throws. */
+const THROWING_HOLDER = {
+	get binding(): never {
+		throw new Error("the transaction's binding getter throws");
+	},
+};
+
+/** A step-up transaction every record rule admits, for `newMfaTransactionRecord`. */
+const TX = (binding: unknown): MfaTransaction =>
+	({
+		id: "tx-1",
+		purpose: "step_up",
+		binding,
+		subject: "user-1",
+		sid: "sid-1",
+		continuation: undefined,
+		redirectTo: undefined,
+		enrollment: "none",
+		emailProof: "not_required",
+		acrValues: undefined,
+		challenge: undefined,
+		pendingEnrollment: undefined,
+		attempts: 0,
+		sends: 0,
+		lastSentAtMs: undefined,
+		createdAtMs: 1_767_225_600_000,
+		expiresAtMs: 1_767_226_200_000,
+		version: 1,
+	}) as MfaTransaction;
+
+describe("newMfaTransactionRecord — the binding", () => {
+	it.each([
+		["a lone high surrogate", "s\uD800"],
+		["a lone low surrogate", "s\uDC00"],
+		["half a pair at its end", "s\uDBFF"],
+		["the halves of a pair, reversed", "s\uDE00\uD83D"],
+	])("refuses an id that holds %s", (_label, id) => {
+		expect(() => newMfaTransactionRecord(TX({ kind: "session", id }))).toThrow(RangeError);
+	});
+
+	it("keeps an id with a well-formed surrogate pair", () => {
+		expect(
+			newMfaTransactionRecord(TX({ kind: "session", id: "s\uD83D\uDE00" })).binding,
+		).toStrictEqual({
+			kind: "session",
+			id: "s😀",
+		});
+	});
+
+	it("reads the binding's kind and id once: a getter cannot pass the check and store something else", () => {
+		let reads = 0;
+		const shifting = {
+			kind: "session",
+			get id(): unknown {
+				reads += 1;
+				return reads <= 3 ? "express-session-1" : 7;
+			},
+		};
+		const record = newMfaTransactionRecord(TX(shifting));
+		expect(record.binding).toStrictEqual({ kind: "session", id: "express-session-1" });
+		expect(reads).toBe(1);
+	});
+
+	it("refuses, with a RangeError, a binding whose read throws, rather than letting the throw out", () => {
+		for (const throwing of THROWING) {
+			expect(() => newMfaTransactionRecord(TX(throwing))).toThrow(RangeError);
+		}
+		const holder = TX(undefined);
+		Object.defineProperty(holder, "binding", {
+			get() {
+				throw new Error("the transaction's binding getter throws");
+			},
+		});
+		expect(() => newMfaTransactionRecord(holder)).toThrow(RangeError);
 	});
 });

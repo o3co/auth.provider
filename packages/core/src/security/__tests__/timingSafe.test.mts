@@ -63,4 +63,23 @@ describe("constantTimeStringEqual (SF-3 + MIN-4)", () => {
 		expect(() => constantTimeStringEqual(emoji, ascii)).not.toThrow();
 		expect(constantTimeStringEqual(emoji, ascii)).toBe(false);
 	});
+
+	it("compares a well-formed surrogate pair as itself", () => {
+		expect(constantTimeStringEqual("s\uD83D\uDE00", "s😀")).toBe(true);
+		expect(constantTimeStringEqual("s\uD83D\uDE00", "s\uD83D\uDE01")).toBe(false);
+	});
+
+	it.each([
+		["two different lone surrogates", "s\uD800", "s\uDC00"],
+		["a lone high surrogate and the replacement character", "s\uDBFF", "s\uFFFD"],
+		["a lone low surrogate and the replacement character", "s\uFFFD", "s\uDC00"],
+		["one lone surrogate and itself", "s\uD800", "s\uD800"],
+		["the halves of a pair, apart", "s\uD83D", "s\uDE00"],
+	])("is never equal for a string that is not well formed: %s", (_label, a, b) => {
+		// UTF-8 encoding writes every lone surrogate as EF BF BD (U+FFFD), so
+		// two different strings would encode alike: equal bytes are not equal
+		// strings unless both are well formed.
+		expect(constantTimeStringEqual(a, b)).toBe(false);
+		expect(constantTimeStringEqual(b, a)).toBe(false);
+	});
 });

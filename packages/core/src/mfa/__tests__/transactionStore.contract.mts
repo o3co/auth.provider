@@ -303,6 +303,15 @@ export function runMfaTransactionStoreContract(
 				["binding without a kind", { binding: { id: "express-session-1" } }],
 				["binding whose id is not a string", { binding: { kind: "session", id: 7 } }],
 				["binding whose id is empty", { binding: { kind: "session", id: "" } }],
+				[
+					"binding whose id holds a lone high surrogate",
+					{ binding: { kind: "session", id: "s\uD800" } },
+				],
+				[
+					"binding whose id holds a lone low surrogate",
+					{ binding: { kind: "session", id: "s\uDC00" } },
+				],
+				["binding whose id ends in half a pair", { binding: { kind: "session", id: "s\uDBFF" } }],
 				["subject not a string", { subject: {} }],
 				["sid not a string", { sid: 7 }],
 				["redirectTo not a string", { redirectTo: ["/"] }],
