@@ -2607,6 +2607,38 @@ describe("consent — what an outage logs", () => {
 		},
 	);
 
+	it.each(["GET", "POST"] as const)(
+		"answers a grant store that cannot say whether the question is current on %s as this package's own outage — storage, never admission's wording — and logs it once as the consent's line",
+		async (method) => {
+			const w = world();
+			const { challenge, grantId } = await asked(w);
+			// The session's part is admitted; the judgement's first read of the
+			// flow's own state — is this intent still the grant's? — fails.
+			w.state.faults.set("isCurrentIntent", 0);
+			const response =
+				method === "GET"
+					? await w.page(challenge, "b-1")
+					: await w.answer({ challenge, decision: "accept" }, "b-1");
+			expect(response.status).toBe(503);
+			expect(response.body).toEqual({
+				error: "temporarily_unavailable",
+				error_description: "storage",
+			});
+			expect(written(await settledLines(w))).toEqual([
+				"error federation_grant_consent_unavailable",
+			]);
+			expect(payloadOf(w.lines, "federation_grant_consent_unavailable")).toMatchObject({
+				method,
+				grantId,
+				correlationId: response.headers["x-request-id"],
+				reason: "storage",
+				store: "federation_grant",
+				step: "is_current_intent",
+				err: injected("isCurrentIntent"),
+			});
+		},
+	);
+
 	it("answers a client registry that cannot judge the question as the page's own lookup does, and logs it once", async () => {
 		// The judgement's read fails, on both methods: one answer for one
 		// outage, `/oauth/consent`'s — never `storage`, which names another store.
