@@ -22,7 +22,7 @@
  * `createApp` function. The orchestrator owns no per-call state: it receives
  * inputs, calls each stage function in order, and forwards the output.
  *
- * Built-in defaults for the twelve built-in contribution kinds are seeded by
+ * Built-in defaults for the fourteen built-in contribution kinds are seeded by
  * `mergeWithBuiltins`; consumer-supplied kinds (via `contributionKinds`)
  * overlay on top.
  *
@@ -43,6 +43,7 @@ import type {
 	GrantPolicyHookContribution,
 	MfaFactor,
 } from "../modules/manifest/contributes-map.mjs";
+import type { RateLimitSpec } from "../ratelimit/types.mjs";
 import { createReadinessRegistrar } from "../readiness/registrar.mjs";
 import type { RegisteredRequirement } from "../session-admission/requirement.mjs";
 import { applyContributions } from "./apply-contributions.mjs";
@@ -60,6 +61,7 @@ import type {
 	DefaultBootstrapMap,
 	ListCollector,
 	NameKeyedCollector,
+	RegisteredFederationType,
 	RouteCollector,
 } from "./types.mjs";
 import { refuseGuardedHostKinds, validateManifests } from "./validate-manifests.mjs";
@@ -80,12 +82,14 @@ import { refuseGuardedHostKinds, validateManifests } from "./validate-manifests.
  *   6. assembleApp — mount routes, build AppHandle.
  *
  * Built-in contribution kinds (grants, tokenExchangeValidators, federations,
- * federationRedirectPolicies, mfaFactors, sessionRequirements, auditHooks,
- * routes, grantPolicyHooks, grantMiddleware, tokenBindingMechanisms,
- * discoveryMetadata) are seeded by `mergeWithBuiltins`; consumer-supplied
- * kinds overlay on top — except `sessionRequirements` and `mfaFactors`,
+ * federationRedirectPolicies, mfaFactors, sessionRequirements,
+ * rateLimitBudgets, federationTypes, auditHooks, routes, grantPolicyHooks,
+ * grantMiddleware, tokenBindingMechanisms, discoveryMetadata) are seeded by
+ * `mergeWithBuiltins`; consumer-supplied kinds overlay on top — except
+ * `sessionRequirements` and `mfaFactors` (`session-requirement-kind-guarded`)
+ * and `rateLimitBudgets` and `federationTypes` (`contribution-kind-guarded`),
  * which `createApp` refuses to see replaced before the merge
- * (`refuseGuardedHostKinds`, `session-requirement-kind-guarded`).
+ * (`refuseGuardedHostKinds`).
  *
  * The generic `B` constrains `bootstrapComponents` to a typed subset of
  * `ComponentMap` so downstream stages receive a well-typed config/pathResolver.
@@ -187,7 +191,7 @@ export async function createApp<B extends BootstrapMap = DefaultBootstrapMap>(
 // ---------------------------------------------------------------------------
 
 /**
- * Seed the twelve built-in contribution kinds and overlay any consumer-supplied
+ * Seed the fourteen built-in contribution kinds and overlay any consumer-supplied
  * collectors on top.
  *
  * Built-in defaults:
@@ -195,8 +199,9 @@ export async function createApp<B extends BootstrapMap = DefaultBootstrapMap>(
  *   handlers and answers every call — `register` / `replace` (throwing
  *   `GrantRegistryError`), `freeze`, `get` and `entries`.
  * - tokenExchangeValidators, federations, federationRedirectPolicies,
- *   mfaFactors, sessionRequirements: a Map-backed `NameKeyedCollector`, which
- *   is the only registry of its kind. Token-exchange validators are contributed by modules
+ *   mfaFactors, sessionRequirements, rateLimitBudgets, federationTypes: a
+ *   Map-backed `NameKeyedCollector`, which is the only registry of its kind.
+ *   Token-exchange validators are contributed by modules
  *   (`oauth-token-exchange` contributes the self-issued access-token one) and
  *   read back through the `tokenExchangeValidatorResolver` synthetic key.
  * - auditHooks, grantPolicyHooks, grantMiddleware, tokenBindingMechanisms,
@@ -220,6 +225,8 @@ export function mergeWithBuiltins(
 		federationRedirectPolicies: makeMapNameKeyedCollector<unknown>(),
 		mfaFactors: makeMapNameKeyedCollector<MfaFactor | null>(),
 		sessionRequirements: withoutReplace(makeMapNameKeyedCollector<RegisteredRequirement>()),
+		rateLimitBudgets: makeMapNameKeyedCollector<RateLimitSpec | null>(),
+		federationTypes: makeMapNameKeyedCollector<RegisteredFederationType>(),
 		auditHooks: makeIdentityDedupListCollector<AuditHook>(),
 		routes: makeRouteCollector(),
 		grantPolicyHooks: makeIdentityDedupListCollector<GrantPolicyHookContribution>(),
@@ -272,7 +279,8 @@ function makeGrantCollector(): NameKeyedCollector<GrantHandler> {
  * matches the narrowed `ContributionCollectorMap` slot.
  *
  * Used for `tokenExchangeValidators`, `federations`,
- * `federationRedirectPolicies` and `mfaFactors`. The Map is the only registry
+ * `federationRedirectPolicies`, `mfaFactors`, `sessionRequirements`,
+ * `rateLimitBudgets` and `federationTypes`. The Map is the only registry
  * of each of those kinds, and keeps the whole `NameKeyedCollector` contract:
  * `register` throws on a duplicate and `replace` on an unknown name, both
  * throw after `freeze()`, and `entries()` lists in registration order.

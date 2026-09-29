@@ -126,7 +126,9 @@ export type {
 	ContributeAndOverrideSameKeyDetails,
 	ContributeFactoryFailedDetails,
 	ContributionCollectorMap,
+	ContributionKindGuardedDetails,
 	ContributionKindMap,
+	ContributionMalformedDetails,
 	CreateAppOptions,
 	DefaultBootstrapMap,
 	DuplicateContributeDetails,
@@ -145,6 +147,7 @@ export type {
 	OrderedRouteContribution,
 	OverrideTargetMissingDetails,
 	ProvidesFactoryFailedDetails,
+	RegisteredFederationType,
 	ReservedComponentKeyDetails,
 	RouteCollector,
 	RouteOrderCycleDetails,
@@ -623,7 +626,11 @@ export type {
 	ExchangeTokenValidator,
 	ExchangeTokenValidatorFactory,
 	FederationFactory,
+	// #728: one configured federation as its type's factory receives it, and
+	// what a federation package declares it handles, keyed by type.
+	FederationInstance,
 	FederationProvider,
+	FederationTypeContribution,
 	// GrantFactory, GrantHandler: excluded — names collide with legacy
 	// ./grants/types.mjs exports at this boundary. Import from
 	// @o3co/auth-provider-core/modules/manifest directly.
@@ -649,6 +656,10 @@ export type {
 	PathResolver,
 	Provider,
 	ProviderDeps,
+	// #728: a module's budget for a rate-limit prefix it owns, and the view
+	// core composes the budgets into.
+	RateLimitBudgetFactory,
+	RateLimitBudgetResolver,
 	// #455 / #474: the manifest's replica-safety declaration, so a package
 	// building its manifest from config can type the value it attaches.
 	ReplicaSafetyDeclaration,
@@ -663,7 +674,10 @@ export type {
 	TokenExchangeValidatorResolver,
 } from "./modules/index.mjs";
 export {
+	// #728: the way to author a federationTypes declaration, its entry tied to its schema.
+	defineFederationType,
 	defineModule,
+	type FederationTypeDeclaration,
 	SYNTHETIC_COMPONENT_KEYS,
 } from "./modules/index.mjs";
 // The single loopback-hostname vocabulary (#364) — the predicate behind every

@@ -49,8 +49,11 @@ import type { MfaFactor } from "../modules/manifest/contributes-map.mjs";
 import type {
 	GrantHandlerResolver,
 	MfaFactorResolver,
+	RateLimitBudgetResolver,
 	TokenExchangeValidatorResolver,
 } from "../modules/manifest/synthetic-keys.mjs";
+import type { RateLimitSpec } from "../ratelimit/types.mjs";
+import { isUsableRateLimitSpec, shownConfigValue } from "../ratelimit/usableSpec.mjs";
 import { sessionRequirementResolverOver } from "../session-admission/admit.mjs";
 import {
 	MFA_REQUIREMENT_NAME,
@@ -274,6 +277,28 @@ function makeMfaFactorResolver(collector: NameKeyedCollector<MfaFactor | null>):
 }
 
 /**
+ * Instantiate a stable read-side `RateLimitBudgetResolver` over the
+ * `rateLimitBudgets` collector (#728). A prefix whose factory answered
+ * `null` — switched off by its module's settings — is registered in the
+ * collector, so a second contribution of it is still a duplicate, and is
+ * absent from what the resolver answers. Reads through at call time, like
+ * the other resolvers.
+ * @internal
+ */
+function makeRateLimitBudgetResolver(
+	collector: NameKeyedCollector<RateLimitSpec | null>,
+): RateLimitBudgetResolver {
+	return {
+		get: (prefix: string) => collector.get(prefix) ?? undefined,
+		entries: function* (): IterableIterator<readonly [string, RateLimitSpec]> {
+			for (const [prefix, budget] of collector.entries()) {
+				if (budget !== null) yield [prefix, budget] as const;
+			}
+		},
+	};
+}
+
+/**
  * Whether the projections of one boot's working map may be read: closed while
  * stage 3 runs the `provides` factories, open from stage 4 on. Keyed by the
  * working map, which stages 3 and 4 share.
@@ -359,6 +384,7 @@ export function prepareSyntheticProjections(
 		federationRedirectPolicies,
 		mfaFactors,
 		sessionRequirements,
+		rateLimitBudgets,
 	} = contributionKinds;
 	if (grants !== undefined) {
 		inject("grantHandlerResolver", () =>
@@ -384,6 +410,9 @@ export function prepareSyntheticProjections(
 	}
 	if (mfaFactors !== undefined) {
 		inject("mfaFactorResolver", () => makeMfaFactorResolver(mfaFactors));
+	}
+	if (rateLimitBudgets !== undefined) {
+		inject("rateLimitBudgetResolver", () => makeRateLimitBudgetResolver(rateLimitBudgets));
 	}
 	// The session-requirement resolver is branded by its home: the object the
 	// planner records is the gated view a consumer is handed, so `admitSession`
@@ -425,7 +454,12 @@ const issuerOf = (config: unknown): string | undefined => {
  *   is not the key; what registers is the copy `registeredRequirement`
  *   makes, its page held to the issuer's origin (the session-admission ADR's
  *   D3). Its `reach` is not read here: the end of the name-keyed pass reads
- *   it once (`checkSessionRequirements`).
+ *   it once (`checkSessionRequirements`);
+ * - a `rateLimitBudgets` budget no limiter can apply as written
+ *   (`isUsableRateLimitSpec`) — a string, `undefined` and fractions included
+ *   (#728). What registers is a frozen copy of the budget's `limit` and
+ *   `windowSeconds`, each read once here — the copy that was validated; `null` (switched off by its module's
+ *   settings) passes, and stays claimed. The prefix was held at stage 1.
  * @internal
  */
 function checkNameKeyedValue(kind: string, name: string, value: unknown, config: unknown): unknown {
@@ -464,6 +498,26 @@ function checkNameKeyedValue(kind: string, name: string, value: unknown, config:
 			addsMfa: (value as { addsMfa?: unknown }).addsMfa === true,
 		});
 		return value;
+	}
+	if (kind === "rateLimitBudgets") {
+		// The prefix itself was held at stage 1 (`contribution-shapes`).
+		if (value === null) return value;
+		// Each field read once, into the one object that is validated, frozen
+		// and registered: a getter or a proxy answering differently on a second
+		// read cannot pass the check with one budget and register another.
+		const read =
+			typeof value === "object"
+				? {
+						limit: (value as { readonly limit?: unknown }).limit,
+						windowSeconds: (value as { readonly windowSeconds?: unknown }).windowSeconds,
+					}
+				: { limit: undefined, windowSeconds: undefined };
+		if (typeof value !== "object" || !isUsableRateLimitSpec(read)) {
+			throw new RangeError(
+				`rateLimitBudgets "${name}": a budget is { limit, windowSeconds }, a positive whole limit and a positive whole number of seconds that ends within the Date range (got limit ${shownConfigValue(read.limit)}, windowSeconds ${shownConfigValue(read.windowSeconds)})`,
+			);
+		}
+		return Object.freeze(read);
 	}
 	if (kind === "sessionRequirements") {
 		if (value === null || value === undefined) {

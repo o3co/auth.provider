@@ -58,6 +58,7 @@ describe("stage-1 check registries (#368)", () => {
 			"session-requirement-kind-guard",
 			"requires-closure",
 			"contribution-kind-coverage",
+			"contribution-shapes",
 			"per-kind-contribute-duplicates",
 			"route-collisions",
 			"federation-redirect-policy-pairing",
