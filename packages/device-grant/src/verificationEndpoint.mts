@@ -203,10 +203,12 @@ import type {
 import {
 	ADMISSION_ACTIONS,
 	admitSession,
+	checkCanonicalIssuer,
 	checkResolver,
 	checkWithFailMode,
 	consoleLogger,
 	cookieClaim,
+	describeIssuerRejection,
 	emitAuditEvent,
 	isEmailVerified,
 	normaliseUserCode,
@@ -387,8 +389,9 @@ export interface DeviceVerificationHandlerOptions extends DeviceGrantDependencie
 	 */
 	readonly requirements: SessionRequirementResolver;
 	/**
-	 * Required: `oauth.jwt.issuer`, an absolute URL — what a step-up page,
-	 * which may be a path, is answered on (see the file header).
+	 * Required: `oauth.jwt.issuer`, held to core's `checkCanonicalIssuer` — an
+	 * absolute `https:` URL (`http:` on a loopback host) — what a step-up
+	 * page, which may be a path, is answered on (see the file header).
 	 */
 	readonly issuer: string;
 	/**
@@ -419,15 +422,20 @@ export const createDeviceVerificationHandler = (
 		);
 	}
 	// Likewise the resolver — missing, or one the planner did not build — and
-	// the issuer: refused here, not answered 500 on every request.
+	// the issuer: refused here, not answered 500 on every request. The issuer
+	// is held to core's canonical rule, the one `oauth.jwt.issuer` is held to:
+	// `URL.canParse` also accepts `mailto:` or `urn:`, on which no page can be
+	// resolved, so the first step-up would throw.
 	const requirements = checkResolver(options.requirements);
-	const issuer = options.issuer;
-	if (typeof issuer !== "string" || !URL.canParse(issuer)) {
+	const issuerRejection = checkCanonicalIssuer(options.issuer);
+	if (issuerRejection !== null) {
 		throw new TypeError(
-			"createDeviceVerificationHandler: issuer is required — an absolute URL (oauth.jwt.issuer), " +
-				"on which a step-up page is answered",
+			`createDeviceVerificationHandler: issuer ${describeIssuerRejection(issuerRejection)} — ` +
+				"it is oauth.jwt.issuer, on which a step-up page is answered",
 		);
 	}
+	// `checkCanonicalIssuer` returned null above, which only a string satisfies.
+	const issuer = options.issuer;
 	const now = options.now ?? Date.now;
 	// Admission's dependencies: this handler's own slots and clock.
 	const admissionDeps: AdmissionDeps = {
