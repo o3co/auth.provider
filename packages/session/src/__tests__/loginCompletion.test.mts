@@ -15,21 +15,14 @@
  */
 
 /**
- * The session package's `loginCompletion` (#728; the session-admission
- * ADR's D5): `establishSession` and `answerInterruption` with what the
- * provider holds — the session stores, the session's lifetime, the CSRF
- * guard — out of their arguments, as the slot a requirement's completion
- * (the MFA package's) requires instead of importing this package.
- *
- * - `createLoginCompletion` keeps core's contract (`loginCompletionContract`)
- *   over a session store that answers and one that is down, with its
- *   records counted and the CSRF token's cookie named.
- * - The login-completion module provides it, over the stores and the
- *   `csrfGuard` it requires: the contract holds of the provided completion,
- *   and an interruption's fresh token is the deployment's guard's — the one
- *   the session module provides, or one a composition put in its place.
- * - The session module does not provide it: a provider there could not read
- *   the `csrfGuard` slot its own module fills.
+ * The session package's `loginCompletion` (see ADR
+ * 2026-09-28-session-admission): `establishSession` and `answerInterruption`
+ * with what the provider holds — the session stores, the session's lifetime,
+ * the CSRF guard — out of their arguments, as the slot a requirement's
+ * completion (the MFA package's) requires instead of importing this package.
+ * The login-completion module provides it, over the stores and the
+ * `csrfGuard` it requires; the session module does not, since a provider
+ * there could not read the `csrfGuard` slot its own module fills.
  */
 
 import {

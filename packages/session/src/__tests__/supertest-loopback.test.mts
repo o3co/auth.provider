@@ -15,21 +15,18 @@
  */
 
 /**
- * #556 — the setup file `templates/standalone/vitest.supertest-loopback.mts`,
- * which every package loads through `WORKSPACE_TEST_SETUP`, makes the server
+ * The setup file `templates/standalone/vitest.supertest-loopback.mts`, which
+ * every package loads through `WORKSPACE_TEST_SETUP`, makes the server
  * supertest starts listen on the address supertest dials.
  *
  * Unpatched, `request(app)` calls `app.listen(0)`, which binds the dual-stack
- * wildcard `[::]:P`, and then dials `127.0.0.1:P`. On macOS the kernel will
- * hand out a `P` that another process already holds as `127.0.0.1:P`, and a
- * connection to `127.0.0.1:P` goes to that more specific socket, not to the
- * test's server. When that process accepts and never answers (observed: an
- * editor helper), the request hangs until the 20 s `testTimeout` — the four
- * unrelated supertest timeouts of #556, each passing on the next run. Linux
- * refuses the conflicting bind, which is why CI never showed one.
+ * wildcard `[::]:P`, and then dials `127.0.0.1:P`. The macOS kernel will hand
+ * out a `P` that another process already holds as `127.0.0.1:P`, and the
+ * connection goes to that more specific socket; if it never answers, the
+ * request hangs until `testTimeout`. Linux refuses the conflicting bind.
  *
- * This file lives in one package, but it exercises the shared setup: a
- * package config that drops `WORKSPACE_TEST_SETUP` fails it.
+ * This file exercises the shared setup: a package config that drops
+ * `WORKSPACE_TEST_SETUP` fails it.
  */
 
 import http from "node:http";

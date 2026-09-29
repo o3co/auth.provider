@@ -10,13 +10,11 @@
 
 /**
  * How the Redis session store's library loader tells "this package is not
- * installed" from every other load failure, in-process.
- *
- * Each case hands the loader the rejection an `import()` produces: Node's
- * resolver errors are built here in the shape Node gives them — code and
- * message, as `optionalPeers.test.mts` observes them from the real resolver in
- * a child process. What the loader must never do is report a failure it did
- * not diagnose as a missing package, or lose one it did not report.
+ * installed" from every other load failure, in-process. Each case hands the
+ * loader the rejection an `import()` produces, Node's resolver errors built in
+ * the shape (code and message) `optionalPeers.test.mts` observes from the real
+ * resolver. What the loader must never do is report a failure it did not
+ * diagnose as a missing package, or lose one it did not report.
  */
 
 import { readFileSync } from "node:fs";

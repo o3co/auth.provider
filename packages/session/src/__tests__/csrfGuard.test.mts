@@ -15,19 +15,13 @@
  */
 
 /**
- * The session package's `csrfGuard` (#728, #710 C4): the one CSRF policy the
- * session routes run, as the slot other packages require.
- *
- * - It keeps core's contract (`csrfGuardContract`), built from the session
- *   configuration as the session module builds it: the signed double-submit
- *   token of `createCsrfProtectionFromConfig`, the origin rule over
- *   `session.csrf.trustedOrigins`, and the link start's navigation rule.
- * - Its middleware answers and logs what `createCsrfGuard` does — the
- *   guard device verification ran before the slot, so the move changes no
- *   status, body or log line.
- * - The session module provides it, with the key `GET /session/csrf` signs
- *   with: a token the route hands out is accepted by the slot, and one the
- *   slot issues by the route's guard.
+ * The session package's `csrfGuard`: the one CSRF policy the session routes
+ * run, as the slot other packages require. It is built from the session
+ * configuration as the session module builds it: the signed double-submit
+ * token of `createCsrfProtectionFromConfig`, the origin rule over
+ * `session.csrf.trustedOrigins`, and the link start's navigation rule. Its
+ * middleware answers and logs what `createCsrfGuard` does, and it signs with
+ * the key `GET /session/csrf` signs with.
  */
 
 import {

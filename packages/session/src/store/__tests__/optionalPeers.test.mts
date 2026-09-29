@@ -14,22 +14,17 @@
  * installs neither and boots, and one on `"redis"` that did not install them
  * fails boot with a message naming the missing package and the fix.
  *
- * Each boot runs in a child Node process whose resolver cannot find the
- * packages a case hides (fixtures/hide-packages.mjs): Node's own resolver and
- * its own error, not a mock of either library, over the built package a
- * consumer installs. So a static import of either library, anywhere the
- * package entry reaches, fails the memory case at import time. The package
- * must be built first (`pnpm run build`), as for every test that imports a
- * sibling.
+ * Each boot runs in a child Node process, over the built package a consumer
+ * installs (`pnpm run build` first), whose resolver cannot find the packages a
+ * case hides (fixtures/hide-packages.mjs): Node's own resolver and error, not
+ * a mock, so a static import of either library anywhere the package entry
+ * reaches fails the memory case at import time.
  *
  * The hook needs `module.registerHooks` (Node >= 22.15 or >= 23.5), which the
- * package's `engines` floor (>= 22.0.0) predates. On an older Node the cases
- * that start a process are skipped, and the suite's title says why: the
- * loader's own rules are covered in-process by `redisStoreLibraries.test.mts`,
- * and the manifest case here runs anywhere. CI must not skip them, so under
- * `CI` a case asserts the API is there. Each process-starting case starts a
- * Node process that loads the package graph, so it gets 60 seconds, not the
- * workspace's 20: on a loaded machine the process alone has taken longer.
+ * `engines` floor (>= 22.0.0) predates. On an older Node the process-starting
+ * cases are skipped (`redisStoreLibraries.test.mts` covers the loader's rules
+ * in-process); under `CI` a case asserts the API is there. Each child loads
+ * the package graph, so it gets 60 seconds, not the workspace's 20.
  */
 
 import { execFile } from "node:child_process";

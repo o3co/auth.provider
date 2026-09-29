@@ -16,29 +16,15 @@
 
 /**
  * What the federation transaction's single use does — and does not —
- * guarantee (#502).
- *
- * The transaction is consumed by a read followed by a delete, over the
- * express-session `Store` API. That API is `get` / `set` / `destroy`: there is
- * no compare-and-delete on it, and no atomic read-and-consume can be built out
- * of the three. So the sequential property holds and the concurrent one does
- * not, and this file pins both rather than letting a README claim stand in for
- * either.
+ * guarantee (README, What "single use" guarantees). It is consumed by a read
+ * followed by a delete over the express-session `Store` API, which has no
+ * compare-and-delete, so the sequential property holds and the concurrent one
+ * does not. This file pins both.
  *
  * `MemoryStore` answers synchronously, which serialises the callbacks and
- * hides the difference. A store with latency — any network store, Redis
- * included — does not, so these tests run against one that answers out of
- * band. That is the entire reason the rest of the suite never saw this.
- *
- * The concurrent case does not race for its overlap. The store can hold every
- * read until all of them have arrived, which is what a network hop produces on
- * its own and what no fixed delay can promise on a loaded runner, so the test
- * asserts an exact count rather than a lower bound.
- *
- * What actually bounds a concurrent replay is the IdP: an authorization code
- * is single-use at the IdP, every racing callback necessarily carries the same
- * one, and so at most one `exchangeCode` can succeed. The fake IdP here
- * enforces exactly that, because it is the real guarantee.
+ * hides the difference, so these tests run against a store that answers out
+ * of band, as any network store does. What bounds a concurrent replay is the
+ * IdP's single-use authorization code, which the fake IdP here enforces.
  */
 
 import type { FederationProvider } from "@o3co/auth-provider-core";
@@ -62,23 +48,19 @@ import {
 const CALLBACK_URL = "https://app.example.com/oauth/federation/apple/callback";
 
 /**
- * Round-trip latency to give every store answer.
- *
- * Enough that a store answer is a real async boundary rather than a
- * synchronous return, which is the one thing `MemoryStore` is not.
+ * Round-trip latency for every store answer: enough for a real async
+ * boundary, which `MemoryStore`, answering synchronously, never is.
  */
 const STORE_LATENCY_MS = 25;
 
 /**
- * How long a held read waits before giving up and answering anyway.
- *
- * Only reached if fewer reads arrive than the test asked to hold, which is a
- * broken expectation rather than slowness — releasing turns it into a failed
- * assertion instead of a suite-level timeout.
+ * How long a held read waits before answering anyway. Only reached if fewer
+ * reads arrive than the test asked to hold; releasing turns that into a
+ * failed assertion instead of a suite-level timeout.
  */
 const BARRIER_ESCAPE_MS = 2_000;
 
-/** How many callbacks race. Five is what the #502 reviewer ran. */
+/** How many callbacks race. */
 const RACERS = 5;
 
 /**
@@ -126,12 +108,10 @@ function buildApp() {
 
 	/**
 	 * Reads currently being held, and how many must arrive before they run.
-	 *
-	 * A fixed delay would leave the overlap to the scheduler: every callback
-	 * has to reach `get` before the first `get` returns, which a loaded CI
-	 * runner need not honour. Holding the reads until all of them have arrived
-	 * constructs the same overlap a network store produces, with no timing
-	 * assumption left in the test.
+	 * A fixed delay would leave the overlap to the scheduler, which a loaded CI
+	 * runner need not honour; holding the reads until all have arrived
+	 * constructs the overlap a network store produces, with no timing
+	 * assumption.
 	 */
 	let barrier: { needed: number; held: Array<() => void>; giveUp: NodeJS.Timeout } | null = null;
 
@@ -258,22 +238,12 @@ describe("the federation transaction is single-use in sequence", () => {
 
 describe("the federation transaction is NOT single-use under concurrency", () => {
 	it("lets every racing callback past the transaction, and leaves the IdP to stop them", async () => {
-		// Read this as the specification it is, not as a bug left in place.
-		//
-		// `Federation.mts` reads the record and then deletes it, and there is no
-		// compare-and-delete on the express-session `Store` API to do it in one
-		// step. Racing callbacks therefore all read the record before any of them
-		// deletes it, and all pass the `state` comparison. The consequence is
-		// bounded by the IdP: they all carry the same authorization code, the IdP
-		// spends it once, and the rest get `502 exchange_failed`.
-		//
-		// The overlap is constructed rather than raced for: `holdReads` keeps
-		// every read outstanding until all of them have arrived, which is what a
-		// store with a network hop does on its own and what no delay can promise
-		// on a loaded runner.
-		//
-		// If this ever becomes atomic, this test fails — deliberately, so the
-		// README's account of the guarantee is revisited in the same change.
+		// The specification, not a bug left in place. Racing callbacks all read
+		// the record before any of them deletes it, and all pass the `state`
+		// comparison; they carry the same authorization code, the IdP spends it
+		// once, and the rest get `502 exchange_failed`. `holdReads` constructs
+		// the overlap, so the counts are exact. If this ever becomes atomic, this
+		// test fails, so the README's account is revisited in the same change.
 		const harness = buildApp();
 		const flow = await startFlow(harness);
 		harness.holdReads(RACERS);

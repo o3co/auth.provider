@@ -15,19 +15,13 @@
  */
 
 /**
- * The session package's `loginEntry` (#728): the deployment's login page
+ * The session package's `loginEntry`: the deployment's login page
  * (`endpoints.login.url`) and the `redirect_to` protocol `/authorize` and
- * the federation-grants connect flow send a browser there by.
- *
- * - It keeps core's contract (`loginEntryContract`).
- * - It holds the login page to the rules `/authorize`'s own login redirect
- *   keeps (oauth's configSchema and `loginRedirect`): a page whose query
- *   already carries `redirect_to` is refused when the entry is built, and
- *   `redirect_to` joins the page's query before any fragment.
- * - With no login page configured it is still built — a composition that
- *   installs a consumer and never sends a browser to log in boots as it
- *   did — and fails where the page is read, naming the key.
- * - The session module provides it.
+ * the federation-grants connect flow send a browser there by. It holds the
+ * page to the rules `/authorize`'s own login redirect keeps (oauth's
+ * configSchema and `loginRedirect`). With no login page configured it is
+ * still built, so a composition that installs a consumer and never sends a
+ * browser to log in boots; it fails where the page is read, naming the key.
  */
 
 import {

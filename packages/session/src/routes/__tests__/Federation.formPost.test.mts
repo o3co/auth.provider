@@ -15,22 +15,14 @@
  */
 
 /**
- * `response_mode=form_post` federations (#479).
- *
- * Three properties are under test here, and the third is the reason the other
- * two exist:
- *
- * 1. a provider that declares `responseMode: "form_post"` gets the parameter
- *    on its authorization URL, a POST callback, and a `SameSite=None; Secure`
- *    federation *transaction* cookie of its own — and a provider that declares
- *    nothing gets none of it, nor does the application session cookie change
- *    for either (#494);
- * 2. the POST callback's state / CSRF / PKCE / nonce binding is the GET
- *    callback's, not a second implementation that drifts from it;
- * 3. a fake Apple — form_post, `user` body on first authorization, string
- *    `email_verified`, nonce echoed — logs in end to end and lands its
- *    `email` / `name` in the session's claims envelope under the existing
- *    promotion rules.
+ * `response_mode=form_post` federations. A provider that declares
+ * `responseMode: "form_post"` gets the parameter on its authorization URL, a
+ * POST callback and a `SameSite=None; Secure` federation *transaction* cookie
+ * of its own; a provider that declares nothing gets none of it, and the
+ * application session cookie changes for neither. The POST callback's state /
+ * CSRF / PKCE / nonce binding is the GET callback's, not a second
+ * implementation. A fake Apple logs in end to end and lands its `email` /
+ * `name` in the session's claims envelope under the existing promotion rules.
  */
 
 import type {
@@ -133,12 +125,10 @@ function makeFakeApple(): FederationProvider & {
 }
 
 /**
- * A plain query-mode provider — the shape every pre-#479 federation has.
- *
- * It records its exchange calls the way the fake Apple does, because since
- * #502 the GET callback is *this* provider's surface: a form_post federation
- * answers 405 there, so every assertion about what the GET leg hands an
- * adapter has to be made here.
+ * A plain query-mode provider. It records its exchange calls the way the fake
+ * Apple does because the GET callback is *this* provider's surface: a
+ * form_post federation answers 405 there, so every assertion about what the
+ * GET leg hands an adapter has to be made here.
  */
 function makeQueryProvider(): FederationProvider & { calls: ExchangeCall[] } {
 	const calls: ExchangeCall[] = [];
@@ -229,18 +219,13 @@ function clearedCookie(res: request.Response, name: string): boolean {
 }
 
 /**
- * Drive the start leg and read back the ephemeral state the route persisted.
+ * Drive the start leg and read back the ephemeral state the route persisted:
+ * a `"query"` federation keeps it in the session, a `"form_post"` federation
+ * in a transaction record addressed by a cookie of its own.
  *
- * Where that state lives is the whole of #494: a `"query"` federation still
- * keeps it in the session, while a `"form_post"` federation keeps it in a
- * transaction record addressed by a cookie of its own. This helper reads
- * whichever applies and replays whichever cookies the flow actually needs.
- *
- * The cookies are replayed by hand rather than through a supertest agent: the
- * transaction cookie is `Secure`, and superagent's cookie jar correctly refuses
- * to send a `Secure` cookie back over the plain HTTP the test server speaks.
- * That refusal is the harness being right about the attribute, so the test
- * carries the cookie itself instead of weakening it.
+ * The cookies are replayed by hand, not through a supertest agent: the
+ * transaction cookie is `Secure`, and superagent's cookie jar correctly
+ * refuses to send it over the plain HTTP the test server speaks.
  */
 async function startFlow(
 	harness: ReturnType<typeof buildApp>,
@@ -326,7 +311,7 @@ describe("GET /oauth/federation/:name (start) — response mode", () => {
 	});
 
 	it("leaves the application session cookie exactly as configured for a form_post federation", async () => {
-		// #494: the start route is unauthenticated, so anything it changed about
+		// The start route is unauthenticated, so anything it changed about
 		// the session cookie would be changeable by any third party who could get
 		// a browser to follow a link here.
 		const { app } = buildApp();
@@ -366,7 +351,7 @@ describe("GET /oauth/federation/:name (start) — response mode", () => {
 });
 
 // ---------------------------------------------------------------------------
-// The transaction cookie is what binds the callback to the browser (#494)
+// The transaction cookie is what binds the callback to the browser
 // ---------------------------------------------------------------------------
 
 describe("the federation transaction cookie binds the callback to its browser", () => {
@@ -476,9 +461,9 @@ describe("POST /oauth/federation/:name/callback — surface", () => {
 	});
 
 	it("refuses a POST callback for a federation that did not declare form_post", async () => {
-		// Google and GitHub gain no POST surface from #479: an IdP that returns
-		// its response in the query string has no reason to POST, so a POST here
-		// is either a misconfiguration or someone probing.
+		// An IdP that returns its response in the query string (Google, GitHub)
+		// has no reason to POST, so a POST here is either a misconfiguration or
+		// someone probing.
 		const { app } = buildApp();
 		const res = await request(app)
 			.post("/oauth/federation/query-idp/callback")
@@ -498,19 +483,16 @@ describe("POST /oauth/federation/:name/callback — surface", () => {
 
 // ---------------------------------------------------------------------------
 // A cross-site request must not be able to destroy an in-flight transaction
-// (#502)
 // ---------------------------------------------------------------------------
 
 /**
  * The transaction cookie is `SameSite=None` by necessity, so it accompanies
- * *any* cross-site request to the callback path — including one a third party
- * causes with an `<img>` tag. Before #502 every refusal consumed the
- * transaction, so one parameterless cross-site request deleted the victim's
- * in-flight flow and their genuine Apple callback then failed.
- *
- * Two things close that: a `form_post` federation refuses GET the way a
- * `query` federation already refuses POST, and a callback carrying no `state`
- * is not treated as an attempt on the transaction at all.
+ * *any* cross-site request to the callback path, including one a third party
+ * causes with an `<img>` tag. If every refusal consumed the transaction, one
+ * parameterless cross-site request would delete the victim's in-flight flow.
+ * So a `form_post` federation refuses GET the way a `query` federation
+ * refuses POST, and a callback carrying no `state` is not treated as an
+ * attempt on the transaction at all. See README, When a transaction is spent.
  */
 describe("a cross-site request cannot spend an in-flight transaction (#502)", () => {
 	it("refuses GET on a form_post federation's callback with 405 and Allow: POST", async () => {
@@ -593,11 +575,10 @@ describe("a cross-site request cannot spend an in-flight transaction (#502)", ()
 		// The one place the rule is deliberately asymmetric. `consumeTransaction`
 		// is a no-op for a query federation, whose envelope lives in the session
 		// and is retired only on the path that matched `state`. Spending it on a
-		// mismatch would be a regression, not a tightening: the session cookie is
-		// SameSite=Lax and IS sent on a top-level cross-site GET, so a third party
-		// could then cancel a Google login with one navigation — the very bug
-		// #502 reports against the form_post transaction. `state` is 128 bits, so
-		// unlimited guesses are worth no more than one anyway.
+		// mismatch would let a third party cancel a Google login with one
+		// navigation: the SameSite=Lax session cookie IS sent on a top-level
+		// cross-site GET. `state` is 128 bits, so unlimited guesses are worth no
+		// more than one anyway.
 		const harness = buildApp();
 		const flow = await startFlow(harness, "query-idp");
 
@@ -653,7 +634,7 @@ describe("POST callback binds state / CSRF / PKCE / nonce exactly as GET does", 
 	});
 
 	it("400 invalid_request when the body carries no state at all", async () => {
-		// #502: not `invalid_state`. A callback that carries no `state` has made
+		// Not `invalid_state`: a callback that carries no `state` has made
 		// no claim about the transaction to be judged as a mismatch, and the
 		// difference is load-bearing — see the cross-site section below.
 		const harness = buildApp();
@@ -716,11 +697,9 @@ describe("POST callback binds state / CSRF / PKCE / nonce exactly as GET does", 
 
 	it("produces the same rejection on GET as on POST for every binding failure", async () => {
 		// The two callbacks are one handler over two parameter sources; this is
-		// the assertion that keeps them from becoming two handlers.
-		//
-		// The POST side is the form_post federation and the GET side the query
-		// one, because since #502 each response mode has exactly one method: the
-		// handler is shared, the surfaces are not.
+		// the assertion that keeps them from becoming two handlers. Each response
+		// mode has exactly one method, so the POST side is the form_post
+		// federation and the GET side the query one.
 		const cases: ReadonlyArray<{ params: Record<string, string>; error: string }> = [
 			{ params: { code: "c" }, error: "invalid_request" },
 			{ params: { state: "wrong", code: "c" }, error: "invalid_state" },
@@ -777,7 +756,7 @@ describe("callbackParams excludes the parameters the framework binds", () => {
 	});
 
 	it("keeps code and state out of it on the GET callback too", async () => {
-		// On the query federation, which is where the GET callback lives (#502).
+		// On the query federation, which is where the GET callback lives.
 		const harness = buildApp();
 		const flow = await startFlow(harness, "query-idp");
 		await flow.get({ state: flow.state, code: "idp-code", extra: "kept" });
@@ -840,7 +819,7 @@ describe("fake Apple end-to-end through the federation routes", () => {
 		expect(created.claims.email).toBe("sxyz@privaterelay.appleid.com");
 		expect(created.claims.name).toBe("Ada Lovelace");
 		// `emailVerified` normalised from the string "true" — and namespaced, not
-		// promoted, because it is Store-owned state (#297).
+		// promoted, because it is Store-owned state.
 		expect(created.claims.emailVerified).toBeUndefined();
 		const federated = created.claims.federated as Record<string, Record<string, unknown>>;
 		expect(federated.apple.emailVerified).toBe(true);
