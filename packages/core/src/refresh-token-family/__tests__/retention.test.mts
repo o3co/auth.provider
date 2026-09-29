@@ -46,7 +46,6 @@ import {
 import { createRefreshTokenFamilyRevocation } from "#/refresh-token-family/revocation.mjs";
 import { createRefreshTokenFamilyRotation } from "#/refresh-token-family/rotation.mjs";
 import { makeValidCoreConfig } from "#/testing/fixtures/valid-config.mjs";
-import { createTestOAuthTokenSettings } from "#/testing/slots/oauthTokenSettings.mjs";
 
 const MINUTE = 60_000;
 const HOUR = 60 * MINUTE;
@@ -222,37 +221,24 @@ describe("the default modules size the horizon from the configuration", () => {
 		vi.useRealTimers();
 	});
 
-	it("require config beside the store, and read oauthTokenSettings when the composition holds it (#728)", () => {
+	it("require config beside the store", () => {
 		expect(new Set(defaultRefreshTokenFamilyRevocationModule.requires ?? [])).toEqual(
 			new Set(["refreshTokenFamilyStore", "config"]),
 		);
 		expect(new Set(defaultRefreshTokenFamilyRotationModule.requires ?? [])).toEqual(
 			new Set(["refreshTokenFamilyStore", "config"]),
 		);
-		expect(defaultRefreshTokenFamilyRevocationModule.optional).toEqual(["oauthTokenSettings"]);
-		expect(defaultRefreshTokenFamilyRotationModule.optional).toEqual(["oauthTokenSettings"]);
 	});
 
-	it("keep a revoked record for the access-token maximum of the oauthTokenSettings the composition holds, over the configuration's (#728)", async () => {
-		const store = createMemoryRefreshTokenFamilyStore();
-		const revocation =
-			await defaultRefreshTokenFamilyRevocationModule.provides?.refreshTokenFamilyRevocation?.({
-				refreshTokenFamilyStore: store,
-				config: makeValidCoreConfig(),
-				oauthTokenSettings: createTestOAuthTokenSettings({
-					accessTokenLifetime: { defaultExpiresIn: 600, maxExpiresIn: 7200 },
-				}),
-			} as never);
-		if (!revocation) throw new Error("the module provides no refreshTokenFamilyRevocation");
-		await store.registerFamily({
-			familyId: "fam-1",
-			activeJti: "jti-1",
-			revoked: false,
-			expiresAtMs: Date.now() + 10 * MINUTE,
-		});
-		await revocation.revokeFamily("fam-1");
-		expect((await store.findFamily("fam-1"))?.expiresAtMs).toBe(
-			Date.now() + 2 * HOUR + REVOCATION_RETENTION_ALLOWANCE_MS,
+	it("read no oauthTokenSettings: the oauth module reads what they provide (#728)", () => {
+		// The oauth module reads refreshTokenFamilyRevocation, and its grants the
+		// rotation; reading the slot it provides would make each module depend
+		// on the other, which boot refuses as a cycle. They keep reading config.
+		expect(defaultRefreshTokenFamilyRevocationModule.optional ?? []).not.toContain(
+			"oauthTokenSettings",
+		);
+		expect(defaultRefreshTokenFamilyRotationModule.optional ?? []).not.toContain(
+			"oauthTokenSettings",
 		);
 	});
 

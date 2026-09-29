@@ -62,25 +62,16 @@ import {
 	resolveAccessTokenLifetime,
 } from "../config/application.schema.mjs";
 import { REVOCATION_RETENTION_ALLOWANCE_MS } from "../jwt/verify.mjs";
-import type { OAuthTokenSettings } from "../token-settings/types.mjs";
 import type { RefreshTokenFamily } from "./types.mjs";
 
 /**
  * The longest an access token carrying a family's `family_id` can live, in
- * milliseconds: the access-token maximum of `tokenSettings` — the
- * `oauthTokenSettings` slot the oauth module provides (#728) — when the
- * composition holds it; otherwise `oauth.accessToken.maxExpiresIn`, read
- * through `resolveAccessTokenLifetime`, which refuses a configuration that has
- * no lifetime rather than letting a horizon be computed from nothing.
+ * milliseconds: `oauth.accessToken.maxExpiresIn`, read through
+ * `resolveAccessTokenLifetime`, which refuses a configuration that has no
+ * lifetime rather than letting a horizon be computed from nothing.
  */
-export function resolveFamilyAccessTokenHorizonMs(
-	config: unknown,
-	tokenSettings?: Pick<OAuthTokenSettings, "accessTokenLifetime">,
-): number {
-	const lifetime =
-		tokenSettings?.accessTokenLifetime ??
-		resolveAccessTokenLifetime(config as AccessTokenLifetimeSource);
-	return lifetime.maxExpiresIn * 1000;
+export function resolveFamilyAccessTokenHorizonMs(config: unknown): number {
+	return resolveAccessTokenLifetime(config as AccessTokenLifetimeSource).maxExpiresIn * 1000;
 }
 
 /**
