@@ -190,7 +190,6 @@ const makeHarness = (
 			// No requirement registered: what develop answered, but for the
 			// session-admission ADR's D8 changes (admission.test.mts).
 			requirements: resolverForTests([]),
-			issuer: ISSUER,
 			requireEmailVerified: overrides.requireEmailVerified ?? false,
 			...(overrides.subjectRevocation ? { subjectRevocation: overrides.subjectRevocation } : {}),
 			now: clock.now,

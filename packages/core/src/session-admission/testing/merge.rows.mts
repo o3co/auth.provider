@@ -35,7 +35,7 @@
 import type { MfaMode } from "../../mfa/mode.mjs";
 import type { UserSession } from "../../user-sessions/types.mjs";
 import { type AcrTable, readAcrTable } from "../acr.mjs";
-import type { Admission, StepUpPage } from "../requirement.mjs";
+import type { Admission, RegisteredStepUpPage } from "../requirement.mjs";
 
 const MFA = "urn:o3co:acr:mfa";
 const PHR = "urn:o3co:acr:phr";
@@ -494,7 +494,8 @@ export const MERGE_ROW_GROUPS: readonly MergeRowGroup[] = [
 
 /**
  * D2's stated mapping of a row's decision onto the admission, for the
- * requirement named `mfa` stepping up to `page`: the rule's `requirement:
+ * requirement named `mfa` stepping up to `page` — as registered, its `href`
+ * resolved on the issuer: the rule's `requirement:
  * "acr"` is `"acr"`, its `requirement: "baseline"` is `"mfa"`, and its
  * `step_up.requirement` is `whenStillUnmet` — `"acr"` → `"unmet"`,
  * `"baseline"` → the requirement's own `"reauthenticate"`.
@@ -502,7 +503,7 @@ export const MERGE_ROW_GROUPS: readonly MergeRowGroup[] = [
 export function mergeAdmission(
 	expected: MergeDecision,
 	session: UserSession | null,
-	page: StepUpPage,
+	page: RegisteredStepUpPage,
 ): Admission {
 	switch (expected.outcome) {
 		case "met":

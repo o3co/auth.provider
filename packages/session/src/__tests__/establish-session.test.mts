@@ -53,7 +53,7 @@ const claims = { email: "alice@example.com" };
 const admissionDeps = (requirements: readonly SessionRequirement[] = []): AdmissionDeps => ({
 	userSessionStore: undefined,
 	subjectRevocation: undefined,
-	requirements: resolverForTests(requirements),
+	requirements: resolverForTests(requirements, { issuer: "https://auth.test" }),
 	acrTable: {},
 	logger: undefined,
 	auditSink: undefined,

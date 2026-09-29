@@ -259,7 +259,7 @@ function world(options: WorldOptions = {}) {
 					return state.sessionsBoundary;
 				},
 			},
-			requirements: resolverForTests(options.requirements ?? []),
+			requirements: resolverForTests(options.requirements ?? [], { issuer: ISSUER }),
 			revocationSkewMs: 1000,
 			connections: {
 				get: (name: string) => {

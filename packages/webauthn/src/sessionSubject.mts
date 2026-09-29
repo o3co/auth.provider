@@ -31,8 +31,9 @@
  * once as `webauthn_session_subject_invalid`); `unavailable` is
  * `503 temporarily_unavailable`, described by what failed (core's
  * `describeAdmissionOutage`), logged once by admission; `step_up` is
- * `403 step_up_required` with the requirement and its page — one absolute
- * URL on the issuer, as every consumer answers it (core's `stepUpPageUrl`);
+ * `403 step_up_required` with the requirement and its page — as registered,
+ * one absolute URL resolved on the issuer at registration, as every
+ * consumer answers it;
  * a browser that is not signed in passes on untouched (a bearer bridge's
  * subject stands); every other outcome clears any subject an earlier
  * middleware set, and the route answers its own `401`.
@@ -55,7 +56,6 @@ import {
 	loggableError,
 	type Module,
 	SUBJECT_REVOCATION_ABSENCE_POLICY,
-	stepUpPageUrl,
 	type UserSession,
 } from "@o3co/auth-provider-core";
 import express, { type RequestHandler, type Response } from "express";
@@ -102,9 +102,8 @@ const refuseInvalidSubject = (res: Response): void => {
 };
 
 /**
- * The module (the session-admission ADR's D8): requires the resolver, the
- * user-session store, and the config, whose `oauth.jwt.issuer` a step-up
- * page is resolved on; takes `subjectRevocation`, `auditSink` and
+ * The module (the session-admission ADR's D8): requires the resolver and
+ * the user-session store; takes `subjectRevocation`, `auditSink` and
  * `logger` when they are wired, the first two under their shared absence
  * policies. Throws a `TypeError` when `subjectFor` is not a function.
  */
@@ -116,11 +115,11 @@ export function webauthnSessionSubjectModule(options: WebAuthnSessionSubjectOpti
 	}
 	const { subjectFor } = options;
 	return defineModule<
-		"sessionRequirementResolver" | "userSessionStore" | "config",
+		"sessionRequirementResolver" | "userSessionStore",
 		"subjectRevocation" | "auditSink" | "logger"
 	>({
 		name: "webauthn-session-subject",
-		requires: ["sessionRequirementResolver", "userSessionStore", "config"],
+		requires: ["sessionRequirementResolver", "userSessionStore"],
 		optional: ["subjectRevocation", "auditSink", "logger"],
 		// Optional to wire, not optional to decide — the same constants every
 		// module attaches to these keys, which the declared-absence check
@@ -161,11 +160,10 @@ export function webauthnSessionSubjectModule(options: WebAuthnSessionSubjectOpti
 								error: "step_up_required",
 								error_description: "Registering a passkey requires a step-up first",
 								requirement: admission.requirement,
-								// Where the step-up starts, as every consumer answers it
-								// (core's `stepUpPageUrl`): resolved on `oauth.jwt.issuer`,
-								// not on the account page's origin. No return parameter:
-								// the account page knows where it comes back to.
-								page: stepUpPageUrl(admission.page, deps.config.oauth.jwt.issuer),
+								// Where the step-up starts, as registered — resolved then on
+								// the issuer, not on the account page's origin. No return
+								// parameter: the account page knows where it comes back to.
+								page: admission.page.href,
 							});
 							return;
 						}

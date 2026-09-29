@@ -240,7 +240,9 @@ describe("the registered page — resolved once, at registration, on the issuer 
 		expect(() => registeredRequirement(path)).toThrow(
 			/stepUpPage\.url "\/mfa" is a path, resolved on the issuer: none was given/,
 		);
-		expect(() => resolverForTests([path])).toThrow(/resolverForTests\(requirements, \{ issuer \}\)/);
+		expect(() => resolverForTests([path])).toThrow(
+			/resolverForTests\(requirements, \{ issuer \}\)/,
+		);
 		expect(resolverForTests([path], { issuer: ISSUER }).get("x")?.stepUpPage?.href).toBe(
 			`${ISSUER}/mfa`,
 		);
@@ -387,12 +389,16 @@ describe("resolverForTests — the resolver a test builds (D1)", () => {
 				return { outcome: "met" as const };
 			},
 		} satisfies SessionRequirement;
-		const registered = anyReach([source]).get("x") as SessionRequirement;
+		const registered = anyReach([source], ISSUER).get("x") as SessionRequirement;
 		// Read once, at registration — before any matcher that might read it again.
 		expect(reads).toBe(1);
 		expect(registered === (source as unknown)).toBe(false);
 		expect(Object.isFrozen(registered)).toBe(true);
-		expect(registered.stepUpPage).toEqual({ url: "/x", params: { n: "1" } });
+		expect(registered.stepUpPage).toEqual({
+			url: "/x",
+			params: { n: "1" },
+			href: `${ISSUER}/x?n=1`,
+		});
 		(source.remediations as string[]).push("other");
 		expect(registered.remediations).toEqual(["x.step_up"]);
 		expect(registered.hintKeys).toEqual(["level"]);
@@ -415,10 +421,10 @@ describe("resolverForTests — the resolver a test builds (D1)", () => {
 			hintKeys: [],
 			admit: async () => ({ outcome: "met" as const }),
 		} satisfies SessionRequirement;
-		expect(registeredRequirement(source).name).toBe("x");
+		expect(registeredRequirement(source, ISSUER).name).toBe("x");
 		expect(reads).toBe(0);
 		reach = new Set(["risk-ok"]);
-		const registered = anyReach([source]).get("x") as SessionRequirement;
+		const registered = anyReach([source], ISSUER).get("x") as SessionRequirement;
 		expect(reads).toBe(1);
 		expect([...registered.reach]).toEqual(["risk-ok"]);
 		reach.add("other");
@@ -499,29 +505,36 @@ describe("resolverForTests — the resolver a test builds (D1)", () => {
 
 	it("holds a fixture to boot's rules by default — a non-empty reach under any name but mfa, a reserved value, a reach without a page are refused — and lifts the reach rules under allowAnyReach for the merge-table tests", () => {
 		const page = { url: "/x", params: {} };
+		const onIssuer = { issuer: ISSUER };
 		expect(() =>
-			resolverForTests([requirement("x", { reach: new Set(["risk-ok"]), stepUpPage: page })]),
+			resolverForTests(
+				[requirement("x", { reach: new Set(["risk-ok"]), stepUpPage: page })],
+				onIssuer,
+			),
 		).toThrow(/mfa/);
 		expect(() =>
-			resolverForTests([requirement("x", { reach: new Set(["otp"]), stepUpPage: page })]),
+			resolverForTests([requirement("x", { reach: new Set(["otp"]), stepUpPage: page })], onIssuer),
 		).toThrow(RangeError);
 		expect(() => resolverForTests([requirement("x", { reach: new Set(["risk-ok"]) })])).toThrow(
 			/where the step-up starts/,
 		);
 		expect(
-			resolverForTests([
-				requirement("mfa", {
-					reach: new Set(["otp", "mfa"]),
-					stepUpPage: page,
-					remediations: ["mfa.step_up"],
-				}),
-			])
+			resolverForTests(
+				[
+					requirement("mfa", {
+						reach: new Set(["otp", "mfa"]),
+						stepUpPage: page,
+						remediations: ["mfa.step_up"],
+					}),
+				],
+				onIssuer,
+			)
 				.get("mfa")
 				?.reach.has("otp"),
 		).toBe(true);
 		const lifted = resolverForTests(
 			[requirement("x", { reach: new Set(["risk-ok"]), stepUpPage: page })],
-			{ allowAnyReach: true },
+			{ allowAnyReach: true, ...onIssuer },
 		);
 		expect([...(lifted.get("x")?.reach ?? [])]).toEqual(["risk-ok"]);
 		// Still sealed under the opt-out: a snapshot, not the contributor's Set.
@@ -583,7 +596,7 @@ describe("sealRegisteredReach — a registered reach, read once after the name-k
 			/where the step-up starts/,
 		);
 		// And a registered copy that is refused is not sealed.
-		const registered = registeredRequirement(requirement("risk", new Set(["risk-ok"])));
+		const registered = registeredRequirement(requirement("risk", new Set(["risk-ok"])), ISSUER);
 		expect(() => sealRegisteredReach(registered)).toThrow(RangeError);
 		expect("add" in registered.reach).toBe(true);
 		// The requirement named mfa reaches what its factors do, a value of its own included.
@@ -618,7 +631,7 @@ describe("sealRegisteredReach — a registered reach, read once after the name-k
 			hintKeys: [],
 			admit: async () => ({ outcome: "met" as const }),
 		} satisfies SessionRequirement;
-		const registered = registeredRequirement(source);
+		const registered = registeredRequirement(source, ISSUER);
 		const sealed = sealRegisteredReach(registered);
 		expect(reads).toBe(1);
 		expect([...sealed]).toEqual(["risk-ok"]);
@@ -666,7 +679,7 @@ describe("sealRegisteredReach — a registered reach, read once after the name-k
 		expect([...sealRegisteredReach(requirement("mfa", ["risk-ok", "risk-ok"]))]).toEqual([
 			"risk-ok",
 		]);
-		const registered = registeredRequirement(requirement("mfa", ["risk-ok"]));
+		const registered = registeredRequirement(requirement("mfa", ["risk-ok"]), ISSUER);
 		sealRegisteredReach(registered);
 		expect("add" in registered.reach).toBe(false);
 		expect(registered.reach.has("risk-ok")).toBe(true);
@@ -748,7 +761,8 @@ describe("the refusals and the read-only view, each driven", () => {
 	} satisfies SessionRequirement;
 
 	it("a sealed reach answers the set algebra over a copy of its own — never the private set — and names itself", () => {
-		const reach = resolverForTests([mfa]).get("mfa")?.reach as ReadonlySet<string>;
+		const reach = resolverForTests([mfa], { issuer: ISSUER }).get("mfa")
+			?.reach as ReadonlySet<string>;
 		expect(Object.prototype.toString.call(reach)).toBe("[object SealedReach]");
 		const other = new Set(["hwk", "otp"]);
 		const union = reach.union(other);
@@ -772,6 +786,7 @@ describe("the refusals and the read-only view, each driven", () => {
 				() =>
 					resolverForTests([{ ...mfa, name: "x", remediations: [], reach } as never], {
 						allowAnyReach: true,
+						issuer: ISSUER,
 					}),
 				JSON.stringify(reach),
 			).toThrow(/reach must be a Set of amr values/);

@@ -1497,13 +1497,16 @@ describe("step 6 — acr_values, with the reach of what is registered", () => {
 	it("holds the token's amr in the merge too: a step-up is offered by what the token holds beside the requirement's reach", async () => {
 		const both = readAcrTable({ "urn:example:both": ["kba", "hwk"] });
 		const record = session();
-		const requirements = resolverForTests([
-			met("mfa", {
-				reach: new Set(["hwk"]),
-				stepUpPage: { url: "/mfa", params: {} },
-				remediations: ["mfa.step_up"],
-			}),
-		]);
+		const requirements = resolverForTests(
+			[
+				met("mfa", {
+					reach: new Set(["hwk"]),
+					stepUpPage: { url: "/mfa", params: {} },
+					remediations: ["mfa.step_up"],
+				}),
+			],
+			{ issuer: ISSUER },
+		);
 		expect(
 			await admitSession(
 				deps({ userSessionStore: holding(record), acrTable: both, requirements }),

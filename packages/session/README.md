@@ -619,7 +619,7 @@ if (res.type === "opaqueredirect") {
 }
 ```
 
-The probe runs a start of its own, whose transaction is abandoned and expires (`DEFAULT_FEDERATION_TRANSACTION_TTL_MS`). `page` is one absolute URL, as every consumer answers a step-up (core's `stepUpPageUrl`): the requirement's registered page resolved on the **issuer's** origin (`oauth.jwt.issuer`) — not on the account page's own origin, which may be another host — with its params on the query and no return parameter, so the page navigates to it as it is, adding its own return parameter if it wants one. A navigation-shaped answer — the start itself redirecting to the step-up page and back — is for the MFA work to design; this release answers JSON.
+The probe runs a start of its own, whose transaction is abandoned and expires (`DEFAULT_FEDERATION_TRANSACTION_TTL_MS`). `page` is one absolute URL, as every consumer answers a step-up: the requirement's page as registered, resolved at registration on the **issuer's** origin (`oauth.jwt.issuer`) — not on the account page's own origin, which may be another host — with its params on the query and no return parameter, so the page navigates to it as it is, adding its own return parameter if it wants one. A navigation-shaped answer — the start itself redirecting to the step-up page and back — is for the MFA work to design; this release answers JSON.
 
 ## Driving a federation adapter
 

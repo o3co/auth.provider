@@ -131,7 +131,9 @@ const grant = (opts: {
 	createSessionGrant({
 		config,
 		keyStore,
-		sessionRequirementResolver: resolverForTests(opts.requirements ?? []),
+		sessionRequirementResolver: resolverForTests(opts.requirements ?? [], {
+			issuer: "https://issuer.test",
+		}),
 		...(opts.userSessionStore ? { userSessionStore: opts.userSessionStore } : {}),
 		...(opts.subjectRevocation ? { subjectRevocation: opts.subjectRevocation } : {}),
 		...(opts.logger ? { logger: opts.logger } : {}),
@@ -337,7 +339,9 @@ describe("the step_up member on the wire (/oauth/token)", () => {
 					config,
 					keyStore,
 					userSessionStore: store,
-					sessionRequirementResolver: resolverForTests(requirements),
+					sessionRequirementResolver: resolverForTests(requirements, {
+						issuer: "https://issuer.test",
+					}),
 				}),
 		);
 		const { router } = await createOAuthRouter(express, {
@@ -347,7 +351,7 @@ describe("the step_up member on the wire (/oauth/token)", () => {
 			codeRepository,
 			clientRepository,
 			userSessionStore: store,
-			requirements: resolverForTests(requirements),
+			requirements: resolverForTests(requirements, { issuer: "https://issuer.test" }),
 		});
 		const app = express();
 		app.use((req, _res, next) => {

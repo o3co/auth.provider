@@ -20,8 +20,9 @@
  * what it is about to let the session do (`AdmissionAction`), what admission
  * answers (`Admission`), what a requirement is (`SessionRequirement`) and is
  * asked (`RequirementInput`) and answers (`RequirementVerdict`), the
- * deployment's step-up page as it is validated (`checkStepUpPage`) and as a
- * browser is sent to it (`stepUpPageUrl`), and the
+ * deployment's step-up page as it is validated (`checkStepUpPage`) and
+ * resolved once, at registration, to the URL a browser is sent to
+ * (`stepUpPageUrl`, a registered page's `href`), and the
  * establishment half: `PrimaryAuthentication`, the `Interruption` a
  * requirement answers a login with, the `PrimaryContinuation` it persists,
  * and the `Establishment` capability `establishSession` requires.
@@ -171,6 +172,20 @@ export interface StepUpPage {
 	readonly params: Readonly<Record<string, string>>;
 }
 
+/**
+ * The page as it is registered (D3, D8): validated, copied, and resolved once
+ * on the issuer it was validated on — what a `step_up` admission carries.
+ */
+export interface RegisteredStepUpPage extends StepUpPage {
+	/**
+	 * Where the step-up starts, as a browser is sent there: `url` resolved on
+	 * the issuer, `params` on the query — one absolute URL with no return
+	 * parameter (`stepUpPageUrl`). Every consumer answers or navigates from
+	 * it; none resolves the page itself.
+	 */
+	readonly href: string;
+}
+
 /** The parameter a consumer adds to the page itself, on the way to it (D2): never a page's own. */
 const RESERVED_PAGE_PARAM = "redirect_to";
 
@@ -269,12 +284,13 @@ export function checkStepUpPage(page: unknown, issuer?: string): StepUpPage {
  * on `issuer` — a path against the issuer's origin, as a browser resolves a
  * `Location`, an absolute URL as it is — with each of `page.params` set on the
  * query (`searchParams.set`, never concatenation), as one absolute URL string.
- * Every consumer that answers a `step_up` with its page answers this one.
- * No return parameter is added: `/authorize` sets its own trip's
- * (`redirect_to`, and the `acr_values` hint of its request) on this URL; a
- * JSON consumer answers it as it is, and the page that called knows where it
- * comes back to. The page is the registered one, held to the issuer's origin
- * at registration when boot gave the issuer.
+ * Registration computes it once (`registeredRequirement`), on the issuer the
+ * page was validated on, as the registered page's `href`, which is what
+ * every consumer answers or navigates from. No return parameter is added:
+ * `/authorize` sets its own trip's (`redirect_to`, and the `acr_values` hint
+ * of its request) on the `href`; a JSON consumer answers it as it is, and the
+ * page that called knows where it comes back to.
+ * @internal
  */
 export function stepUpPageUrl(page: StepUpPage, issuer: string): string {
 	const url = new URL(page.url, issuer);
@@ -604,12 +620,39 @@ export const isIssuedAction = (action: unknown): action is AdmissionAction =>
 	typeof action === "object" && action !== null && issuedActions.has(action as AdmissionAction);
 
 /**
- * A requirement as the resolver answers it (D3): the registered copy — the
- * page, the lists and the sealed reach its own — and nothing more: the
- * remediation actions issued to it reach the contributing module through
- * `issuedRemediationActions`, never the resolver (D4).
+ * A requirement's page as it is registered: checked (`checkStepUpPage`, on
+ * `issuer`'s origin when one is given) and resolved on that issuer, once, to
+ * its `href`. A path has nothing to be resolved on without an issuer, and is
+ * refused through `refuse`.
  */
-export type RegisteredRequirement = SessionRequirement;
+function registeredPage(
+	page: unknown,
+	issuer: string | undefined,
+	refuse: (what: string) => never,
+): RegisteredStepUpPage {
+	const checked = checkStepUpPage(page, issuer);
+	if (issuer === undefined && checked.url.startsWith("/")) {
+		refuse(
+			`stepUpPage.url ${JSON.stringify(checked.url)} is a path, resolved on the issuer: none was given to register it on — boot registers on oauth.jwt.issuer; a test passes resolverForTests(requirements, { issuer })`,
+		);
+	}
+	return Object.freeze({
+		url: checked.url,
+		params: checked.params,
+		href: stepUpPageUrl(checked, issuer ?? checked.url),
+	});
+}
+
+/**
+ * A requirement as the resolver answers it (D3): the registered copy — the
+ * page (resolved on the issuer, `href`), the lists and the sealed reach its
+ * own — and nothing more: the remediation actions issued to it reach the
+ * contributing module through `issuedRemediationActions`, never the
+ * resolver (D4).
+ */
+export interface RegisteredRequirement extends SessionRequirement {
+	readonly stepUpPage: RegisteredStepUpPage | undefined;
+}
 
 /**
  * `value` as it is registered (D3): its shape held to the contract — a
@@ -620,7 +663,10 @@ export type RegisteredRequirement = SessionRequirement;
  * own routes
  * (`checkRemediations`: `<name>.<route>`, each once), a `stepUpPage` that
  * is a page when present
- * (`checkStepUpPage`, on `issuer`'s origin when one is given), `hintKeys`
+ * (`checkStepUpPage`, on `issuer`'s origin when one is given) and is
+ * resolved here, once, on that issuer to its `href` (`stepUpPageUrl`; an
+ * absolute page with no issuer resolves on itself, and a path page with no
+ * issuer is refused: nothing could resolve it), `hintKeys`
  * each a hint name (`isHintKey`), `admit` a function, `admitPrimary` one or
  * absent — and copied: the lists and the page are the copy's own, and a
  * getter is read once here, so what the resolver answers at request time is
@@ -660,9 +706,10 @@ export function registeredRequirement(value: unknown, issuer?: string): Register
 			"the name is the one admission gives an outage of its own store (ADMISSION_INFRASTRUCTURE_STORES): a consumer telling an outage by its store would take the requirement's for the store's",
 		);
 	}
-	// A page that fails names what is wrong itself (`checkStepUpPage`).
+	// A page that fails names what is wrong itself (`checkStepUpPage`); one
+	// that passes is resolved here, once, on the issuer it was checked on.
 	const page = value.stepUpPage;
-	const stepUpPage = page === undefined ? undefined : checkStepUpPage(page, issuer);
+	const stepUpPage = page === undefined ? undefined : registeredPage(page, issuer, refuse);
 	const remediationsRead = value.remediations;
 	checkRemediations(name, remediationsRead, refuse);
 	const hintKeysRead = value.hintKeys;
@@ -813,7 +860,8 @@ export type Admission =
 			readonly outcome: "step_up";
 			readonly requirement: string;
 			readonly session: UserSession;
-			readonly page: StepUpPage;
+			/** The requirement's page as registered: `href` is where a consumer sends the browser. */
+			readonly page: RegisteredStepUpPage;
 			readonly acrValues: readonly string[];
 			readonly whenStillUnmet: "reauthenticate" | "unmet";
 	  }

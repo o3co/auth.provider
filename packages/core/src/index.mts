@@ -891,6 +891,7 @@ export {
 	type PrimaryAuthenticationDto,
 	type PrimaryContinuation,
 	type RegisteredRequirement,
+	type RegisteredStepUpPage,
 	type RequirementInput,
 	type RequirementInterruption,
 	type RequirementSession,
@@ -900,7 +901,6 @@ export {
 	type SessionRequirementResolver,
 	type SessionView,
 	type StepUpPage,
-	stepUpPageUrl,
 } from "./session-admission/requirement.mjs";
 // The token-exchange validator port (#626 P1). `ExchangeTokenValidator` is
 // exported with the manifest types below, as the contribution value type.

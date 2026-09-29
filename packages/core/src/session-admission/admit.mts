@@ -103,13 +103,13 @@ import {
 	type PrimaryAuthentication,
 	type PrimaryContinuation,
 	type RegisteredRequirement,
+	type RegisteredStepUpPage,
 	type RequirementInput,
 	type RequirementInterruption,
 	type RequirementVerdict,
 	type SessionClaim,
 	type SessionRequirementResolver,
 	type SessionView,
-	type StepUpPage,
 } from "./requirement.mjs";
 
 // ---------------------------------------------------------------------------
@@ -485,7 +485,7 @@ type RequirementOutcome =
 			readonly requirement: string;
 			readonly stepping: RegisteredRequirement;
 			readonly session: UserSession;
-			readonly page: StepUpPage;
+			readonly page: RegisteredStepUpPage;
 			readonly whenStillUnmet: "reauthenticate" | "unmet";
 	  }
 	| { readonly outcome: "unmet"; readonly requirement: string };

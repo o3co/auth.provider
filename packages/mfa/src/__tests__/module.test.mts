@@ -119,7 +119,12 @@ describe("the requirement it registers (the session-admission ADR's D3, D7)", ()
 		const { handle, logger } = await boot();
 		const registered = handle.components.sessionRequirementResolver?.get("mfa");
 		expect([...(registered?.reach ?? [])].sort()).toEqual(["mfa", "otp"]);
-		expect(registered?.stepUpPage).toEqual({ url: "/mfa", params: {} });
+		// Resolved at registration on the configuration's issuer.
+		expect(registered?.stepUpPage).toEqual({
+			url: "/mfa",
+			params: {},
+			href: "https://auth.example/mfa",
+		});
 		expect(registered?.remediations).toEqual(["mfa.step_up"]);
 		expect(registered?.hintKeys).toEqual(["enrollable", "email_proof"]);
 		const said = logger.info.mock.calls.filter(
@@ -343,7 +348,7 @@ describe("the boot refusals (the MFA ADR's D20; the session-admission ADR's D7)"
 				{
 					userSessionStore: undefined,
 					subjectRevocation: undefined,
-					requirements: resolverForTests([answering(count)]),
+					requirements: resolverForTests([answering(count)], { issuer: "https://auth.test" }),
 					acrTable: readAcrTable({}),
 					logger: undefined,
 					auditSink: undefined,

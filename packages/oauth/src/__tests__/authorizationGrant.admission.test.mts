@@ -174,7 +174,9 @@ const makeGrant = (opts: {
 		clientRepository,
 		sessionFamilyIndex,
 		sessionRPRegistry,
-		sessionRequirementResolver: resolverForTests(opts.requirements ?? []),
+		sessionRequirementResolver: resolverForTests(opts.requirements ?? [], {
+			issuer: "https://issuer.test",
+		}),
 		...(opts.userSessionStore ? { userSessionStore: opts.userSessionStore } : {}),
 		...(opts.subjectRevocation ? { subjectRevocation: opts.subjectRevocation } : {}),
 		...(opts.logger ? { logger: opts.logger } : {}),
