@@ -16,22 +16,16 @@
 
 /*
  * The host's routes, in the order `app.mts` mounts them: liveness, readiness
- * and the metrics scrape ahead of the composed auth router — so they keep
- * answering while the auth pipeline is degraded, which is when an operator
- * needs them — then that router, then core's terminal error handler, last,
+ * and the metrics scrape ahead of the composed auth router, so they keep
+ * answering while the auth pipeline is degraded (which is when an operator
+ * needs them); then that router; then core's terminal error handler, last,
  * because Express hands an error only to handlers mounted after the route
  * that raised it. A function rather than inline in `app.mts`, so the order
  * and the handler can be tested as the process mounts them.
  *
- * The handler is core's `terminalErrorHandler`, the one that already ends
- * the composed router, so an error one of the host's routes lets through
- * is answered as every other route's is: `500 server_error` /
- * `unexpected_error` in the RFC 6749 envelope with `Cache-Control:
- * no-store`, logged once as `unhandled_request_error` with the path through
- * `auditErrorText` and the error's `loggableError` projection; a refusal an
- * `http-errors` error marks as the client's keeps its 4xx; a response whose
- * headers already went out is closed rather than handed to Express's final
- * handler, which would print the stack.
+ * The handler is core's `terminalErrorHandler`, the one that already ends the
+ * composed router, so an error a host route lets through is answered as every
+ * other route's is (see core's `middleware/terminalError.mts`).
  */
 
 import {
@@ -88,7 +82,7 @@ export function mountRoutes(app: Express, options: MountRoutesOptions): void {
 
 	// The composed auth router, which ends in core's terminal handler.
 	app.use(options.router);
-	// Core's terminal handler again, LAST (#293 item 8), for the host routes
+	// Core's terminal handler again, LAST, for the host routes
 	// above: Express routes an error only to handlers registered after the
 	// route that threw it. See the file header.
 	app.use(terminalErrorHandler(options.logger));

@@ -15,55 +15,47 @@
  */
 
 /**
- * vitest setup file (#556): the server supertest starts listens on the
- * address supertest dials.
+ * vitest setup file: the server supertest starts listens on the address
+ * supertest dials.
  *
  * `request(app)` / `request.agent(app)` start a server with `app.listen(0)`
  * and send the request to `127.0.0.1:<port>`. A hostless `listen` binds the
- * dual-stack wildcard `[::]:P`, and on macOS (BSD `SO_REUSEADDR` semantics —
+ * dual-stack wildcard `[::]:P`, and on macOS (BSD `SO_REUSEADDR` semantics;
  * libuv sets it on every TCP listener) the kernel will choose a `P` that
  * another process already holds as `127.0.0.1:P`. The more specific socket
- * wins, so the test's request is delivered to that process. When it accepts
- * and never answers — an editor helper, in the case that was caught — the
- * request hangs until the test timeout, in whichever supertest test drew the
- * port, and passes on the next run. Linux refuses the conflicting bind
- * (EADDRINUSE), so CI does not show it.
+ * wins, so the request goes to that process; if it accepts and never answers,
+ * the test hangs until its timeout and passes on the next run. Linux refuses
+ * the conflicting bind (EADDRINUSE), so CI does not show it.
  *
  * Binding `127.0.0.1` explicitly removes both halves: the kernel will not
  * give out a `127.0.0.1:P` someone else holds, and against a wildcard holder
  * our specific socket is the one that receives. A specific-host `listen` is
- * asynchronous (it goes through `dns.lookup`), and supertest reads the port
+ * asynchronous (it goes through `dns.lookup`) and supertest reads the port
  * synchronously in its constructor, so the URL is completed when the request
  * is sent (`end`, which `then` and `expect(..., fn)` go through). A server the
  * test started itself is never touched.
  *
- * When the server supertest started is closed has changed under this file
- * once (7.3.0). 7.2 closed it after the response of the request whose call
- * bound it — for an agent, whose requests share one server, that is the first
- * request, and any other still on its way has its connection reset (#703:
- * ECONNRESET on Node 26). 7.3 counts the requests on each server it started
- * and closes the server after the last of them settles, but only for servers
- * in its own private registry, and a server this file bound is not in it. So
- * this file keeps that count itself, for either version and without them:
- * every request on a server bound here is counted from `end`, and the last to
- * settle closes the server before its own callback, the order supertest keeps.
- * A request built before that close and sent after it binds the server again.
+ * supertest does not close a server bound here (7.3 counts requests only on
+ * servers in its own registry; 7.2 closed after the response of the request
+ * that bound it, resetting an agent's other requests on the shared server).
+ * So this file counts every request on such a server from `end`, and the last
+ * to settle closes the server before its own callback, the order supertest
+ * keeps. A request built before that close and sent after it binds the server
+ * again.
  *
  * supertest is loaded from the package that owns the running test file (the
  * nearest `package.json` above it), so the patched class is the one that test
- * imports, whatever directory vitest was started from. A package that does
- * not declare supertest is left alone. Everything else this file cannot do —
- * no test path, a declared supertest that does not load, a supertest whose
- * internals no longer look like this — throws, so the guard is never silently
- * off. That load-time check sees only the two methods' presence; a supertest
- * that moved the `listen` out of `serverAddress` would pass it and leave the
- * guard off. The behavioural tests catch that shape of change: this
- * template's `supertest-loopback.test.mts` and its twin in the session
- * package assert the address the server actually bound.
+ * imports. A package that does not declare supertest is left alone. Anything
+ * else this file cannot do (no test path, a declared supertest that does not
+ * load, internals that no longer look like this) throws, so the guard is
+ * never silently off. That load-time check sees only the two methods'
+ * presence; a supertest that moved the `listen` out of `serverAddress` would
+ * pass it, which `supertest-loopback.test.mts` here and its twin in the
+ * session package catch by asserting the address the server actually bound.
  *
- * This file is part of the project template and ships with every scaffold.
- * The auth.provider workspace loads this same file for its packages (see
- * `WORKSPACE_TEST_SETUP` in its `vitest.shared.mts`).
+ * Part of the project template, shipped with every scaffold; the
+ * auth.provider workspace loads it for its packages too
+ * (`WORKSPACE_TEST_SETUP` in its `vitest.shared.mts`).
  */
 
 import { once } from "node:events";
