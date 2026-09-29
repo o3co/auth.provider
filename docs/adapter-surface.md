@@ -182,7 +182,7 @@ still read the configuration.
 | `mfaTransactionStore` | `MfaTransactionStore` | optional | `core/mfa/transactionStore.mts` | MFA transactions and the subject lock (the MFA ADR's D8, D21). A transaction is the single-use record of one second-factor ceremony, bound to the browser session that started it; every operation a race could split is atomic in the store — `reserveAttempt` spends an attempt before a proof is checked, `takeChallenge` answers a challenge once, `consume` gives the transaction to one verification. The subject state bounds guessable proofs across transactions on the time the caller passes: the consecutive run with its short backoff and hard limit, the weekly budget no success refunds, and the browsers an exempt success trusts against the weekly hold. It also keeps the email proof an operator reset requires at the subject's next first binding (D25), which must last as the enrolled factors do. No Store variant: this is verification state. Bundled adapters: memory (`memoryMfaTransactionStoreModule`, single replica) and Redis (`redisMfaTransactionStoreModule`: one script per atomic operation, D21's lock over a hash and a sorted set under the subject's tag, and the factor store's boot check). |
 | `mailSender` | `MailSender` | optional | `core/mail/types.mts` | Where multi-factor authentication's one-time codes and security notices leave the provider (the MFA ADR's D5; the boundary section says why it is here). `send` takes a rendered message and resolves only when the relay accepted it; a rejection is never "sent". In core because its implementer and its consumer must not depend on each other. No bundled adapter; `createRecordingMailSender` (`@o3co/auth-provider-core/testing`) stands in for tests. |
 | `oidcFederationConfigs` | `Readonly<Record<string, OidcProviderConfig>>` | optional | `federation-oidc/module.mts` | Config of every generic OpenID Connect federation instance, keyed by federation name; each `oidcFederationModule(<name>)` reads its own entry. `readOidcFederationConfigs` builds it from `config.federations` (#524). |
-| `rateLimiter` | `RateLimiter` | optional | `core/ratelimit/types.mts` | Shared counters for the OAuth endpoints and the login brute-force guard. |
+| `rateLimiter` | `RateLimiter` | optional | `core/ratelimit/types.mts` | Shared counters for the OAuth endpoints and the login brute-force guard. Its optional `failMode` is the limiter's own outage policy (#728) — `open` or `closed`, what the guard does when `check` throws — owned by the module that builds the limiter; absent on one with no backend to lose. Declared ahead of its readers: the guard and its callers take the policy from `rateLimit.failMode`. Suite `rateLimiterContract`, double `createTestRateLimiter`. |
 | `refreshTokenFamilyRevocation` | `RefreshTokenFamilyRevocation` | optional | `core/refresh-token-family/types.mts` | Family-wide revoke, used on replay detection and on the credential-change cascade. |
 | `refreshTokenFamilyRotation` | `RefreshTokenFamilyRotation` | optional | `core/refresh-token-family/types.mts` | Atomic rotate-or-detect-replay. Wired separately so a deployment can have the store without the CAS path. |
 | `refreshTokenFamilyStore` | `RefreshTokenFamilyStore` | optional | `core/refresh-token-family/types.mts` | Refresh-token family records — the state rotation and replay detection read. |
@@ -297,16 +297,22 @@ out-of-tree adapter can import and run:
 | `SessionRPRegistry` | `packages/core/src/user-sessions/__tests__/sessionRPRegistry.contract.mts` |
 | `SessionFamilyIndex` | `packages/core/src/user-sessions/__tests__/sessionFamilyIndex.contract.mts` |
 | `SessionFederationIndex` | `packages/core/src/user-sessions/__tests__/sessionFederationIndex.contract.mts` |
+| `RateLimiter` (`failMode` included) | `packages/core/src/testing/slots/rateLimiter.mts` (`rateLimiterContract`) |
+| The slots of [what one module owns and others read](#what-one-module-owns-and-others-read) | `packages/core/src/testing/slots/` — one suite per slot, named in its row |
 
 Each is run against every in-repo implementation of its port, which is what
 makes it a description of the contract rather than of one adapter. There is one
 exception: the Redis `AccessTokenDenylist`, whose expiry is Redis's own key TTL
 and cannot follow the suite's fake clock. Its own tests cover the same cases
-against a real Redis. A contract file cannot be imported across a package
-boundary, so `packages/redis/__tests__/` runs copies of the core suites. A copy
-may differ from its core suite only above the first `export`, in comments and
-imports. The `*-parity.test.mts` tests there fail on any other difference, and
-on a copy that no Redis test calls. A new port should gain a suite: "typed and
+against a real Redis. A contract file under `__tests__/` cannot be imported
+across a package boundary, so `packages/redis/__tests__/` runs copies of those
+core suites. A copy may differ from its core suite only above the first
+`export`, in comments and imports. The `*-parity.test.mts` tests there fail on
+any other difference, and on a copy that no Redis test calls. The suites under
+`packages/core/src/testing/slots/` are published on
+`@o3co/auth-provider-core/testing` instead, so another package's tests import
+them: the Redis rate limiter runs `rateLimiterContract` that way. A new port
+should gain a suite: "typed and
 swappable" means an implementer can prove they got it right, not only that they
 read the interface carefully.
 

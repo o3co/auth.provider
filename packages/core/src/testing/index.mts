@@ -124,4 +124,11 @@ export {
 	oauthTokenSettingsContract,
 	type TestOAuthTokenSettingsOverrides,
 } from "./slots/oauthTokenSettings.mjs";
+export {
+	createTestRateLimiter,
+	type RateLimiterContractInput,
+	rateLimiterContract,
+	type TestRateLimiter,
+	type TestRateLimiterOptions,
+} from "./slots/rateLimiter.mjs";
 export type { TestInspect } from "./test-inspect.mjs";
