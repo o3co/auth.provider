@@ -136,6 +136,12 @@ describe("one composed parse over the transitional base", () => {
 		expect(err.message).toMatch(/deployment\.mode: /);
 	});
 
+	it("names the configuration itself when it is not an object", async () => {
+		const err = await bootRefused([], "http.port = 3000" as unknown as Record<string, unknown>);
+		expect(err.reason).toBe("config-validation-failed");
+		expect(err.message).toMatch(/: \(the configuration\): /);
+	});
+
 	it("names every refused path in the message", async () => {
 		const err = await bootRefused(
 			[],
@@ -237,6 +243,24 @@ describe("one composed parse over the transitional base", () => {
 			},
 		);
 
+		it("name each disagreeing key once, with the first two modules that disagree there", async () => {
+			const alsoVerbatim = defineModule({
+				name: "also-verbatim-reader",
+				configSchema: z.object({
+					widget: z.object({ size: z.string().transform((v) => `${v}!`) }),
+				}),
+			});
+			const err = await bootRefused(
+				[coercing, verbatim, alsoVerbatim],
+				resolved({ widget: { size: "3" } }),
+			);
+			const issues = (
+				err.details as unknown as { issues: { path: PropertyKey[]; message: string }[] }
+			).issues;
+			expect(issues.map((issue) => issue.path.join("."))).toEqual(["widget.size"]);
+			expect(issues[0]?.message).toMatch(/"coercing-reader".*"verbatim-reader"/);
+		});
+
 		it("boot when one of them declares nothing: an empty object holds no value", async () => {
 			const empty = defineModule({ name: "empty-reader", configSchema: z.object({}) });
 			const config = await bootAndRead([empty, coercing], resolved({ widget: { size: "3" } }));
@@ -320,6 +344,18 @@ describe("a loaded module's section is never stripped", () => {
 		expect(err.reason).toBe("config-validation-failed");
 		expect(err.message).toMatch(/legacy\.fixture: /);
 		expect(err.message).toMatch(/legacy holds a number, not an object/);
+	});
+
+	it("writes into an object without a prototype, keeping it one", async () => {
+		const fixture = Object.assign(Object.create(null) as Record<string, unknown>, { other: 1 });
+		const config = await bootAndRead(
+			[sectioned("into-null-prototype", RetrySection, "fixture.inner")],
+			resolved({ fixture: Object.assign(fixture, { inner: { retries: "2" } }) }),
+		);
+		const written = config.fixture as Record<string, unknown>;
+		expect(Object.getPrototypeOf(written)).toBeNull();
+		expect(written.other).toBe(1);
+		expect(written.inner).toEqual({ retries: 2 });
 	});
 
 	it.each([

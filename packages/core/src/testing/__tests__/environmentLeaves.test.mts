@@ -71,6 +71,23 @@ describe("unreadableModuleLeaves — what core's base hands a module's leaf", ()
 	});
 });
 
+describe("unreadableModuleLeaves — a module's section, at its path", () => {
+	it("reads a section at its `at`, or at the module's name, and a module with neither schema declares none", () => {
+		const atPath = defineModule({
+			name: "at-path",
+			section: { schema: z.object({ on: z.boolean() }), at: "fixture.atPath" },
+		});
+		const byName = defineModule({
+			name: "by-name",
+			section: { schema: z.object({ n: z.number() }) },
+		});
+		expect(unreadableModuleLeaves([atPath, byName, defineModule({ name: "plain" })])).toEqual([
+			"at-path: fixture.atPath.on",
+			"by-name: by-name.n",
+		]);
+	});
+});
+
 describe("readsEnvironmentString — a literal reads the string only if it is one", () => {
 	it("refuses a boolean or numeric literal, which no string ever equals", () => {
 		expect(readsEnvironmentString(z.literal(true))).toBe(false);

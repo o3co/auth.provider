@@ -44,6 +44,9 @@ interface Def {
 
 const defOf = (schema: z.ZodType): Def => (schema as unknown as { _zod: { def: Def } })._zod.def;
 
+/** A literal's values: every `z.literal` carries at least one. */
+const literalValues = (def: Def): readonly unknown[] => def.values as readonly unknown[];
+
 /** The wrappers that parse a value as their inner schema does, less or more permissively. */
 const WRAPPERS = new Set([
 	"optional",
@@ -117,7 +120,7 @@ export function readsEnvironmentString(schema: z.ZodType): boolean {
 	if (def.type === "number") return def.coerce === true;
 	// No string equals `true` or `1`: a literal reads the string only if one
 	// of its values is a string.
-	if (def.type === "literal") return (def.values ?? []).some((value) => typeof value === "string");
+	if (def.type === "literal") return literalValues(def).some((value) => typeof value === "string");
 	return true;
 }
 
@@ -142,7 +145,7 @@ export function outputKinds(schema: z.ZodType): ReadonlySet<string> | undefined 
 		}
 		return kinds;
 	}
-	if (def.type === "literal") return new Set((def.values ?? []).map((value) => typeof value));
+	if (def.type === "literal") return new Set(literalValues(def).map((value) => typeof value));
 	if (def.type === "enum") return new Set(["string"]);
 	if (["transform", "custom", "any", "unknown", "lazy"].includes(def.type)) return undefined;
 	return new Set([def.type]);
@@ -178,9 +181,8 @@ export function unreadableLeaves(
 		}
 	};
 	walk(schema, prefix);
-	return [...found]
-		.sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
-		.map(([path, leaf]) => ({ path, leaf }));
+	// Each path is a key of `found` once, so no two compare equal.
+	return [...found].sort(([a], [b]) => (a < b ? -1 : 1)).map(([path, leaf]) => ({ path, leaf }));
 }
 
 /** The paths of `unreadableLeaves`. */

@@ -117,6 +117,12 @@ describe("readTransitionalConfig — the switches a composition root reads befor
 		expect((thrown as Error).cause).toBeInstanceOf(z.ZodError);
 	});
 
+	it("refuses a configuration that is not an object, naming the configuration itself", () => {
+		expect(() => readTransitionalConfig("http.port = 3000", ["http.port"])).toThrow(
+			/^Config validation failed — 1 issue\(s\) found: \(the configuration\): /,
+		);
+	});
+
 	it("refuses to read a path the schema does not declare as one schema", () => {
 		expect(() => readTransitionalConfig(resolved(), ["nowhere.at.all"])).toThrow(
 			/cannot read "nowhere\.at\.all"/,

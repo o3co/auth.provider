@@ -1852,10 +1852,12 @@ function conflictingOutputs(
 		string,
 		{ readonly path: readonly string[]; readonly modules: [string, string] }
 	>();
+	// One issue per path, naming the first two modules that disagree there. The
+	// two are always different modules: an output visits each path once, and
+	// module names are unique.
 	const conflict = (path: readonly string[], first: string, second: string) => {
 		const key = JSON.stringify(path);
-		if (first !== second && !conflicts.has(key))
-			conflicts.set(key, { path, modules: [first, second] });
+		if (!conflicts.has(key)) conflicts.set(key, { path, modules: [first, second] });
 	};
 	const walk = (module: string, value: unknown, path: readonly string[]) => {
 		const key = JSON.stringify(path);
@@ -2132,7 +2134,8 @@ function parseModuleSections(
 		issues.push({
 			code: "custom",
 			path: [...segments],
-			message: `module "${module.name}"'s section cannot be written back: ${operatorPath(result.blockedAt) || "the configuration"} holds ${kindOf(result.holding)}, not an object`,
+			// Never the root: boot's parse leaves the configuration a plain object.
+			message: `module "${module.name}"'s section cannot be written back: ${operatorPath(result.blockedAt)} holds ${kindOf(result.holding)}, not an object`,
 		} as z.ZodIssue);
 		refused.push({ module: module.name, schemaPath: sectionPathOf(module) });
 	}

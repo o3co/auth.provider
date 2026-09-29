@@ -52,6 +52,19 @@ describe("schemasAtPath — the schema that parses the value at a path", () => {
 	});
 });
 
+describe("unreadableLeafPaths — each path once, sorted", () => {
+	it("answers the paths sorted, whatever order the schema declares them in", () => {
+		expect(
+			unreadableLeafPaths(z.object({ zeta: z.boolean(), alpha: z.number(), mid: z.boolean() })),
+		).toEqual(["alpha", "mid", "zeta"]);
+	});
+
+	it("names a path two members of a union both declare unreadable once", () => {
+		const either = z.union([z.object({ a: z.boolean() }), z.object({ a: z.number() })]);
+		expect(unreadableLeafPaths(either)).toEqual(["a"]);
+	});
+});
+
 describe("outputKinds — what a schema produces, when it can be told without running it", () => {
 	it("gathers every member's kind in a union", () => {
 		expect(outputKinds(z.union([z.boolean(), z.string()]))).toEqual(new Set(["boolean", "string"]));
@@ -98,6 +111,17 @@ describe("pickConfigSchema — the schema of the paths read alone", () => {
 		expect(picked.parse({ federations: { google: { enabled: "true", clientId: 1 } } })).toEqual({
 			federations: { google: { enabled: true } },
 		});
+	});
+
+	it("refuses a path a union offers several schemas for, naming how many", () => {
+		const either = z.object({
+			a: z.union([z.object({ b: z.string() }), z.object({ b: z.number() })]),
+		});
+		expect(() => pickConfigSchema(either, ["a.b"])).toThrow(
+			new RangeError(
+				'cannot read "a.b": the configuration schema declares 2 schemas there — read a shorter path',
+			),
+		);
 	});
 
 	it("refuses a path with an empty key", () => {
