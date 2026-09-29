@@ -216,6 +216,11 @@ export {
 	resolveAccessTokenLifetime,
 	resolveRefreshTokenLifetime,
 } from "./config/application.schema.mjs";
+// #728, transitional: what a composition root reads before it knows its
+// modules — the switches that choose them — until those switches move into
+// the composition root's own section (#728 B5). `createApp` takes the
+// resolved configuration itself, and parses it once.
+export { readTransitionalConfig } from "./config/composed.mjs";
 export { MAX_DURATION_MS, MAX_DURATION_SECONDS } from "./config/durations.mjs";
 // #728: the reference.conf files a composition layers beneath its own
 // configuration — core's, and each loaded module's package's (`section.reference`).

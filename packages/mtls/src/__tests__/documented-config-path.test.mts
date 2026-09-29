@@ -1,0 +1,138 @@
+/*
+ * Copyright 2026 1o1 Co. Ltd.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+/**
+ * #496 — the boot refusals this package added have to be reachable from the
+ * configuration path `packages/core/README.md` documents.
+ *
+ * That path was two parses: a composition root built its config with
+ * `AppConfigSchema.parse(...)` and handed the result to `createApp`, which
+ * composed every module's own `configSchema` over `CoreConfigSchema` and
+ * parsed again. `AppConfigSchema` stripped what it did not declare, and until
+ * #496 it declared no `oauth.mtls` — so the second parse never saw the
+ * operator's block, `enabled` fell to its `false` default, and the module
+ * contributed nothing. mTLS reported itself as switched off rather than as
+ * misconfigured, and every refusal added that cycle (#431, #469, #470) was
+ * unreachable: the configuration they inspect had been thrown away one step
+ * earlier.
+ *
+ * Since #728 the documented path is one parse: the composition root hands
+ * `createApp` the configuration it resolved, and boot parses it once, laying
+ * every schema's output over what was written. These tests boot `mtlsModule`
+ * that way and ask it what it makes of the result — at boot, where its
+ * refusals are, and of the configuration boot parsed.
+ */
+
+import { type AppConfig, BootError, createApp } from "@o3co/auth-provider-core";
+import { makeValidAppConfig } from "@o3co/auth-provider-core/testing";
+import { describe, expect, it } from "vitest";
+import { mtlsModule } from "#/module.mjs";
+
+/**
+ * The documented composition root: the resolved configuration with the
+ * operator's `oauth.mtls` block, handed to `createApp`. Answers the
+ * configuration boot parsed, or the boot's refusal with every cause it
+ * carries as one text.
+ */
+async function throughDocumentedPath(
+	mtls: Record<string, unknown> | undefined,
+): Promise<{ readonly config: unknown } | { readonly refused: string }> {
+	const base = makeValidAppConfig();
+	const resolved = mtls === undefined ? base : { ...base, oauth: { ...base.oauth, mtls } };
+	try {
+		const handle = await createApp({
+			modules: [mtlsModule],
+			bootstrapComponents: {
+				config: resolved as unknown as AppConfig,
+				pathResolver: (s: string) => s,
+			},
+		});
+		const config = handle.components.config;
+		await handle.dispose();
+		return { config };
+	} catch (err) {
+		expect(err).toBeInstanceOf(BootError);
+		const texts: string[] = [];
+		for (let at: unknown = err; at instanceof Error; at = at.cause) texts.push(at.message);
+		return { refused: texts.join("\n") };
+	}
+}
+
+/** `mtlsModule`'s single `tokenBindingMechanisms` contribution. */
+function contributeMechanism(config: unknown): unknown {
+	const [factory] = mtlsModule.contributes?.tokenBindingMechanisms ?? [];
+	if (!factory) throw new Error("mtlsModule no longer contributes a token-binding mechanism");
+	return (factory as (deps: { config: unknown }) => unknown)({ config });
+}
+
+/** The configuration boot parsed, failing the test when boot refused. */
+async function booted(mtls: Record<string, unknown> | undefined): Promise<unknown> {
+	const result = await throughDocumentedPath(mtls);
+	if (!("config" in result)) return expect.fail(`boot refused: ${result.refused}`);
+	return result.config;
+}
+
+/** The boot's refusal, failing the test when boot succeeded. */
+async function refusedWith(mtls: Record<string, unknown>): Promise<string> {
+	const result = await throughDocumentedPath(mtls);
+	if (!("refused" in result)) return expect.fail("boot should have been refused");
+	return result.refused;
+}
+
+describe("oauth.mtls reaches the module through the documented config path (#496)", () => {
+	it("survives boot's parse instead of arriving as the disabled default", async () => {
+		const config = (await booted({
+			enabled: true,
+			source: "tls-layer",
+			mode: "self-signed",
+		})) as { oauth: { mtls: { enabled: boolean; mode: string } } };
+		expect(config.oauth.mtls.enabled).toBe(true);
+		expect(config.oauth.mtls.mode).toBe("self-signed");
+	});
+
+	it("contributes a mechanism, where a stripped block contributed none", async () => {
+		const config = await booted({ enabled: true, mode: "self-signed" });
+		expect(contributeMechanism(config)).not.toBeNull();
+	});
+
+	it("reaches the empty-allowed-hosts refusal under a fetching revocation mode (#431, #470)", async () => {
+		const refused = await refusedWith({
+			enabled: true,
+			mode: "full-pki",
+			"trusted-cas": ["-----BEGIN CERTIFICATE-----"],
+			"full-pki": { revocation: { mode: "crl", "on-unavailable": "reject" } },
+		});
+		expect(refused).toMatch(/non-empty oauth\.mtls\.full-pki/);
+	});
+
+	it("reaches the undeclared-revocation refusal under full-pki (#341)", async () => {
+		const refused = await refusedWith({
+			enabled: true,
+			mode: "full-pki",
+			"trusted-cas": ["-----BEGIN CERTIFICATE-----"],
+		});
+		expect(refused).toMatch(/requires oauth\.mtls\.full-pki\.revocation/);
+	});
+
+	it("reaches the empty-trusted-proxies refusal under a header source (#280)", async () => {
+		const refused = await refusedWith({ enabled: true, source: "header" });
+		expect(refused).toMatch(/trusted-proxies allowlist/);
+	});
+
+	it("still contributes nothing when the operator leaves mTLS off", async () => {
+		expect(contributeMechanism(await booted(undefined))).toBeNull();
+	});
+});

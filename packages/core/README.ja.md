@@ -25,19 +25,38 @@ optional peer dependency: `express@^5.0.0` — `createApp` を使う場合にの
 
 ### 設定
 
-`AppConfigSchema` はアプリケーション全体の設定を検証する [Zod](https://zod.dev/) スキーマです。`AppConfig` はそこから推論される TypeScript 型です。
+composition root は自分の設定を解決します — 自分のファイルを、読み込むすべてのパッケージの `reference.conf` の上に、`moduleReferences(modules)` が答える順に（core のものを最後に）重ねます — そして解決したものを、パースせずに `createApp` に渡します。boot はそれを一度だけパースします（[#728](https://github.com/o3co/auth.provider/issues/728)）:
+
+1. core の transitional base で: core 自身のセクションと、core のスキーマが他パッケージのモジュールのためにまだミラーしているすべてのセクション。ミラーはどれも省略可能で、これまでどおりの型変換と検査（環境変数の文字列を数値や真偽値として読む）を行います;
+2. 書かれたものの上に重ねるので、どのスキーマも宣言していないキーは残ります — トップレベルでも、core が宣言するセクションの下でも;
+3. そのうえで、読み込まれた各モジュールの `configSchema` で base の出力をパースし、各モジュール自身のセクションをそのパスでパースしてそこに書き戻します: 読み込まれたモジュールのセクションが取り除かれることはありません。
+
+どれかが拒否する値は、オペレーターが書いた各パスを示して boot を拒否します（`config-validation-failed`）。読み込まれたどのモジュールも所有しないトップレベルのセクションは残され、設定と並べて bootstrap したロガーに一度だけ名前が出ます — `config_sections_ignored`（`warn`、名前つき）。セクション名の綴り間違いはここに現れます。core のスキーマが他パッケージのセクションをまだミラーしている間（下記）、それらはどれも名前が出ません: ミラーされたセクションは、モジュールが読み込まれているかどうかにかかわらず所有されているものとして数えます。boot がパースしたものは `config` スロットにあります。ハンドルから読んでください。
 
 ```typescript
-import { AppConfigSchema, type AppConfig } from "@o3co/auth-provider-core";
+import { fileURLToPath } from "node:url";
+import { type AppConfig, createApp, moduleReferences } from "@o3co/auth-provider-core";
+import { parseFile } from "@o3co/ts.hocon";
 
-const config: AppConfig = AppConfigSchema.parse(rawConfig);
+// 構成自身のファイルを、読み込むすべてのパッケージの reference.conf の上に（core のものを最後に）。
+const resolved = moduleReferences(modules)
+  .reduce(
+    (layered, reference) => layered.withFallback(parseFile(fileURLToPath(reference))),
+    parseFile("config/application.conf"),
+  )
+  .toObject();
+
+const handle = await createApp({
+  modules,
+  // パースしないまま: createApp が、読み込まれたすべてのモジュールのスキーマで一度だけパースする。
+  bootstrapComponents: { config: resolved as unknown as AppConfig, pathResolver: import.meta.resolve },
+});
+const config = handle.components.config; // boot がパースしたもの
 ```
 
-このスキーマは**宣言していないキーを取り除きます** — Zod のオブジェクトの既定動作であり、パースを素通しではなく検証にしているのもこの動作です。ここで問題になるのは、このパースが `createApp` の*前*に走るためです。各モジュール自身の `configSchema` が合成・適用されるのは `createApp` の中なので、このスキーマが知らないセクションは、それを読むモジュールが動く時点ではもう消えています。しかも大半のモジュールスキーマはデフォルトを持つため、結果はエラーではなく、黙って別物になったデプロイです。
+各セクションがモジュール名の下に移るまで — #728 の移動 PR — core のスキーマは他パッケージが所有するセクション（`oauth.mtls`、`oauth.dpop`、`oauth.deviceAuthorization`、`webauthn`、`memoryRateLimiter` / `redisRateLimiter`、`redis*` のストア名前空間）をまだミラーしており、boot は設定がそれを持つたびに、それを読むモジュールが読み込まれているかどうかにかかわらず検証します。composition root がモジュールを知る前に読まなければならないもの — モジュールを選ぶスイッチ、ログレベル — は、自分のファイルを core の `reference.conf` だけの上に重ねて解決し（`coreReference()`: まだモジュールを知らないので、どのパッケージの reference も分かりません）、`readTransitionalConfig(resolved, paths)`（[`src/config/composed.mts`](src/config/composed.mts)）で読みます: 指定した各パスを core の base がそこに宣言するスキーマでパースし、それ以外は書かれたまま検査しません — 検査するのは boot です。したがってこの第一段階は、パッケージの `reference.conf` だけが設定するものを見ず、パッケージの reference が補うセクションを読んではいけません。これは過渡的なもので、それらのスイッチが composition root 自身のセクションに移った時点でなくなります。standalone テンプレートの [`app.mts`](../../templates/standalone/src/app.mts) は、ちょうどこの二段階で設定を読みます。
 
-そのためこのスキーマは、core 自身がどれも読まないにもかかわらず、このリポジトリのモジュールが所有するすべての設定セクション — `oauth.mtls`、`oauth.dpop`、`oauth.deviceAuthorization`、`webauthn`、`memoryRateLimiter` / `redisRateLimiter`、`redis*` のストア名前空間を含む — を宣言しています。範囲とデフォルトは所有するパッケージ側（それぞれの `reference.conf` と `configSchema`）に残り、ここでの宣言は値が途中で落ちないようにするだけです。モジュールがこのスキーマにないキーを宣言すると `module-config-key-parity.test.mts` がビルドを失敗させます。
-
-このリポジトリの**外**のモジュールはこの検査の対象外です。そうしたモジュールが自分の設定セクションを読むなら、パース前にスキーマを拡張する（`AppConfigSchema.extend({ mySection: … })`）か、パースしていない設定を `createApp` に渡して、合成されたモジュールスキーマに検証させてください。
+`AppConfigSchema` は非推奨です。`createApp` の前にこれでパースすると、宣言していないセクションがすべて取り除かれ — #472、#495、#496 はそうしてセクションを失いました — それを続ける構成は、解決したものより少ないものを boot に渡すことになります。export は残り、そこから推論される型 `AppConfig` はパース済みの設定の型です。
 
 デフォルトはスキーマではなく [`config/reference.conf`](config/reference.conf) にあります。トップレベルのフィールド（すべてのデプロイが持つセクション。モジュールが所有するセクションは、所有するパッケージが記述します）:
 
@@ -150,7 +169,7 @@ const store = await createRemoteSigningKeyStore({
 - 非対称アルゴリズムで `privateKey`/`privateKeyPath`（または公開鍵側）が無い場合、設定キー名・環境変数名・それらを生成する `openssl genpkey -algorithm ed25519` コマンドを明示したエラーで起動失敗する。
 - `HS256` の `secret` は `MIN_SECRET_ENTROPY_BYTES`（32 バイト）以上が必須。`previousSecrets[].secret` も同じ。
 
-エントロピーは**デコード後**の値で、かつ最も小さく読める解釈で測る（`measureSecretEntropyBytes`）: 64 文字の hex は 32 バイトで通り、32 文字の hex は 16 バイトで落ちる。`session.secret` にも同じ floor が `AppConfigSchema` で適用される。`assertSecretEntropy` / `describeWeakSecret` は export されているので、運用者のシークレットを自前で受け付ける composition root も同じ検査を適用できる。
+エントロピーは**デコード後**の値で、かつ最も小さく読める解釈で測る（`measureSecretEntropyBytes`）: 64 文字の hex は 32 バイトで通り、32 文字の hex は 16 バイトで落ちる。`session.secret` にも同じ floor が core のスキーマで適用される。`assertSecretEntropy` / `describeWeakSecret` は export されているので、運用者のシークレットを自前で受け付ける composition root も同じ検査を適用できる。
 
 floor が置かれているのは **builder と schema**（= config 境界）であることに注意。`createSymmetricKeyStore` は低レベルプリミティブなので強制しない — 直接呼ぶ composition root は自分で検査する責任を持つ。
 
@@ -229,7 +248,7 @@ JWT の `exp`・`iat`・`nbf` は、有限で Date の範囲に収まるとき�
 
 それぞれの仕組みが拡張面の 1 つの軸です: `routes`・`grants`・`federations` への contribution は振る舞いを足し（plugin）、`provides` はポートのスロットを埋め（adapter）、`supportsX` ガードで検出される任意のメソッドはアダプターの追加機能であり（capability）、core が合成する contribution の種別は core の判断の意味を変えます（extension）。新しいポリシーをどの軸に載せるかは [AGENTS.md](../../AGENTS.md#extension-surface-four-axes) の規則です。
 
-設定を読むモジュールは、自分のセクションをマニフェストで宣言します（[#728](https://github.com/o3co/auth.provider/issues/728)）: `section.schema` はモジュールが所有する唯一のセクションの Zod スキーマで、boot はどのファクトリーよりも先にそのセクションをパースし、スキーマの出力の型を持つ `deps.section` としてすべてのファクトリーに渡します。スキーマが拒否する値は、オペレーターが書いたパスを示して boot を拒否します（`config-validation-failed`）。セクションはモジュール名の位置から読まれ、まだ古いパスにある間は `section.at` の位置から読まれます。`section.relocatedFrom` はセクションの移動元のパスを示します。そこにまだキーを設定している設定は、そのキーの新しいパスとそれを束縛する環境変数、またはキーが削除されたことを示して boot を拒否します（`config-path-relocated`）。0.x 系の間の橋渡しで、最初のメジャーリリースで削除されます（削除を忘れたリリースカットは relocated-paths のドリフトテストが失敗させます）。`section.reference` はパッケージの `config/reference.conf` を指します: boot はこれを読まず、`moduleReferences(modules)`（[`src/config/references.mts`](src/config/references.mts)）が、構成が読み込むモジュールの reference を、それぞれ一度ずつ、core 自身のもの（`coreReference()`）を一番下にして答え、composition root はそれを自分のファイルの下に重ねます。パッケージは自分の reference を、自分のテストで `@o3co/auth-provider-core/testing` の `packageReferenceProblems` を使って検査します。core のスキーマと合成されて設定全体をパースする `configSchema` は、ローダーが各パッケージの `reference.conf` を重ねるようになった時点で非推奨になります。それまでは、core のパースを通してセクションのキーを残すものでもあります。
+設定を読むモジュールは、自分のセクションをマニフェストで宣言します（[#728](https://github.com/o3co/auth.provider/issues/728)）: `section.schema` はモジュールが所有する唯一のセクションの Zod スキーマで、boot はどのファクトリーよりも先にそのセクションをパースし、スキーマの出力の型を持つ `deps.section` としてすべてのファクトリーに渡します。スキーマが拒否する値は、オペレーターが書いたパスを示して boot を拒否します（`config-validation-failed`）。セクションはモジュール名の位置から読まれ、まだ古いパスにある間は `section.at` の位置から読まれます。`section.relocatedFrom` はセクションの移動元のパスを示します。そこにまだキーを設定している設定は、そのキーの新しいパスとそれを束縛する環境変数、またはキーが削除されたことを示して boot を拒否します（`config-path-relocated`）。0.x 系の間の橋渡しで、最初のメジャーリリースで削除されます（削除を忘れたリリースカットは relocated-paths のドリフトテストが失敗させます）。`section.reference` はパッケージの `config/reference.conf` を指します: boot はこれを読まず、`moduleReferences(modules)`（[`src/config/references.mts`](src/config/references.mts)）が、構成が読み込むモジュールの reference を、それぞれ一度ずつ、core 自身のもの（`coreReference()`）を一番下にして答え、composition root はそれを自分のファイルの下に重ねます。パッケージは自分の reference を、自分のテストで `@o3co/auth-provider-core/testing` の `packageReferenceProblems` を使って検査します。boot はパースした各モジュールのセクションをそのパスで設定に書き戻すので、`config` を読むファクトリーは、セクションのスキーマがそれをどうしたかを見ます。別のモジュールのセクションの内側にあるセクション（`mfa` の内側の `mfa.factors.totp`）はその内側に書き戻され、二つのモジュールが同じパスにセクションを宣言することはできません（`module-section-path-invalid`）。boot が core のスキーマの後に設定全体をパースする `configSchema` は、各セクションがモジュール名の下に移った時点で非推奨になります。
 
 複数のモジュールが読むキーは所有者が 1 つで、ほかのモジュールは契約が core にあるスロットを通して受け取ります（[#728](https://github.com/o3co/auth.provider/issues/728)）: 所有者が自分のセクションを解釈して値を provide し、コード上パッケージは core だけを import します。core はこれらのスロットを宣言しています。`loginCompletion`、`loginEntry`、`csrfGuard`、`sessionCookiePolicy` は session パッケージのモジュールが、`oauthTokenSettings` は oauth モジュールが provide し、残りは提供者より先に宣言されています:
 
@@ -303,22 +322,24 @@ core が自分でマウントするもの（この順）: `cors.allowedOrigins` 
 
 エントリーは boot 時に `checkSerializedOrigin`（`src/net/origin.mts`）で検証され、インデックスを示して拒否されます。一致判定は文字列の完全一致なので、末尾のスラッシュ、明示的な `:443`、大文字のホスト、パス、ワイルドカードは、誰も通さずそのことをどこにも言わない許可リストになるからです。loopback ホストを除き `https` が必須で、判定は共有の `isLoopbackHostname` に拠ります。`corsMw` は同じ検査をもう一度適用し、落としたものを警告するので、スキーマを通っていない手組みの `AppConfig` でも、スキーマなら拒否したエントリーは入りません。
 
-リストの書き方は 2 通りあります。環境変数が運べる唯一の形であるカンマ区切りの文字列（`CORS_ALLOWED_ORIGINS`）はカンマで分割され、各エントリーは前後の空白を除かれ、空のエントリーは捨てられるので、空の変数はリストなしになります。配列は文字列のエントリーを前後の空白を除いて保ち、空のエントリーは上の検査で拒否され、文字列でないエントリーは捨てられます。`null` はリストなしです。それ以外の形 — 数値、オブジェクト、真偽値。設定ファイルでしか書けない形です — はパース時に `cors.allowedOrigins` を示して拒否されます。スキーマを通らなかった手組みの設定では、ミドルウェアをマウントする箇所で警告され（`cors_allowed_origins_unreadable`、受け取った形を `received` に持つ）、ミドルウェアはマウントされません。両方を読むのは同じファイルの `normalizeAllowedOrigins` で、export されています。WebAuthn パッケージは `WEBAUTHN_ORIGIN` / `WEBAUTHN_TOP_ORIGIN` をこれで読むので、環境変数から設定するオリジンのリストはどれも同じ書き方になります。
+リストの書き方は 2 通りあります。環境変数が運べる唯一の形であるカンマ区切りの文字列（`CORS_ALLOWED_ORIGINS`）はカンマで分割され、各エントリーは前後の空白を除かれ、空のエントリーは捨てられるので、空の変数はリストなしになります。配列は文字列のエントリーを前後の空白を除いて保ち、空のエントリーは上の検査で拒否され、文字列でないエントリーは捨てられます。`null` はリストなしです。それ以外の形 — 数値、オブジェクト、真偽値。設定ファイルでしか書けない形です — はパース時に `cors.allowedOrigins` を示して拒否されます — `createApp` を通るなら手組みの設定も同じです。boot はこのセクションがあればいつでもパースするからです（#728）。それでもミドルウェアをマウントする箇所に届いた形は警告され（`cors_allowed_origins_unreadable`、受け取った形を `received` に持つ）、ミドルウェアはマウントされません。両方を読むのは同じファイルの `normalizeAllowedOrigins` で、export されています。WebAuthn パッケージは `WEBAUTHN_ORIGIN` / `WEBAUTHN_TOP_ORIGIN` をこれで読むので、環境変数から設定するオリジンのリストはどれも同じ書き方になります。
 
 ## 使い方
 
 ```typescript
 import express from "express";
 import {
-  AppConfigSchema,
+  type AppConfig,
   createApp,
   createRepositoryFactories,
   createKeyStoreFactory,
   defineModule,
+  readTransitionalConfig,
   registerBuiltinKeyStores,
 } from "@o3co/auth-provider-core";
 
-const config = AppConfigSchema.parse(rawConfig);
+// boot より前にこの構成が読むもの。rawConfig は createApp 自身がパースする（#728）。
+const config = readTransitionalConfig(rawConfig, ["http.port", "oauth.jwt.signingKey", "repositories"]);
 
 // repositories.*（'type' セレクター）と oauth.jwt.signingKey（'provider' セレクター）は同じ入れ子の
 // アダプターサブセクション形式に従う。flatten() はどちらも { type, ...サブセクションフィールド } に正規化してから factory に渡す:
@@ -364,7 +385,7 @@ const handle = await createApp({
     localComponentsModule,
     // 追加モジュールをここに渡す
   ],
-  bootstrapComponents: { config, pathResolver: import.meta.resolve },
+  bootstrapComponents: { config: rawConfig as AppConfig, pathResolver: import.meta.resolve },
 });
 
 const server = express();

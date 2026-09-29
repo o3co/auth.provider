@@ -105,16 +105,15 @@ export interface ModuleSection<S extends SectionSchema = SectionSchema> {
 	 * never one an object inherits. A transitional field: it goes once every
 	 * section sits under its module's name.
 	 *
-	 * The section is read from the configuration *after* core's schema parsed
-	 * it, the object the `config` slot holds, so a module moved onto
-	 * `deps.section` sees what it read from `config` before. That has a
-	 * consequence for a path under a parent core's schema declares (`oauth`,
-	 * `http`, `redisConsentStore`, …): core's schema strips the keys it does not
-	 * declare there and coerces the ones it does, and a module's `configSchema`
-	 * still composed with it can inject defaults. So a key survives to the
-	 * section only if core's schema — or a `configSchema` still present —
-	 * keeps it. Keep the module's `configSchema`, or core's mirror of the
-	 * section, until the loader parses each section on its own.
+	 * The section is read from boot's composed configuration (#728): core's
+	 * transitional base laid over what was written, then each module's
+	 * `configSchema` over that. Under a parent core's schema declares
+	 * (`oauth`, `http`, `redisConsentStore`, …), a value core's schema coerces
+	 * arrives coerced, a key it does not declare is still there, and a
+	 * `configSchema` still present can inject defaults. The section's parsed
+	 * value is written back at this path, so the `config` slot holds what the
+	 * module is handed; a section inside another module's is written back
+	 * inside it, and no two modules may declare the same path.
 	 */
 	readonly at?: string;
 	/**

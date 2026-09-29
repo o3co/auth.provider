@@ -37,11 +37,12 @@ import {
  * value is refused here, at boot, as config-validation-failed (Copilot
  * review on PR #100, Critical).
  *
- * Composed via `composeConfigSchema` at validate-manifests step 13: the
- * intersection with CoreConfigSchema produces `oauth.jwt.issuer:
- * z.string().min(1)`, so any boot whose configured `issuer` is missing
- * or empty fails with `BootError(reason: "config-validation-failed")`
- * before the validator factory is invoked.
+ * Parsed by boot's composed parse (#728; validate-manifests step 13) over
+ * what core's base made of the configuration, so `oauth.jwt.issuer:
+ * z.string().min(1)` holds on top of the base's schema, and any boot whose
+ * configured `issuer` is missing or empty fails with
+ * `BootError(reason: "config-validation-failed")` before the validator
+ * factory is invoked.
  */
 const tokenExchangeConfigSchema = z.object({
 	oauth: z.object({

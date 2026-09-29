@@ -16,8 +16,10 @@
 
 import { existsSync } from "node:fs";
 import { isAbsolute } from "node:path";
+import { fileURLToPath } from "node:url";
+import { coreReference } from "@o3co/auth-provider-core";
 import { describe, expect, it } from "vitest";
-import { resolveConfigPaths, resolveLibraryReferenceConfPath } from "../configPath.mjs";
+import { resolveConfigPaths } from "../configPath.mjs";
 
 describe("resolveConfigPaths", () => {
 	it("accepts a configDirPath with a trailing slash (regression: fileURLToPath preserves trailing /)", () => {
@@ -51,17 +53,17 @@ describe("resolveConfigPaths", () => {
 	});
 });
 
-describe("resolveLibraryReferenceConfPath", () => {
-	it("returns an absolute path ending in reference.conf", () => {
-		const path = resolveLibraryReferenceConfPath();
-		expect(path.endsWith("reference.conf")).toBe(true);
-		// Use `isAbsolute` rather than `startsWith("/")` so the assertion
-		// holds on Windows (e.g. `C:\...`) as well as POSIX paths.
+describe("core's reference.conf, as the template layers it", () => {
+	// `coreReference()` names the file `@o3co/auth-provider-core` exports as
+	// `./reference.conf`: the one a composition root that installed the
+	// package would resolve, and the bottom of every layering the template
+	// makes (`readSwitches`, `resolveForBoot`).
+	it("is the file the package exports as ./reference.conf, and it exists", () => {
+		const path = fileURLToPath(coreReference());
 		expect(isAbsolute(path)).toBe(true);
-	});
-
-	it("points to a file that exists on disk", () => {
-		const path = resolveLibraryReferenceConfPath();
 		expect(existsSync(path)).toBe(true);
+		expect(path).toBe(
+			fileURLToPath(import.meta.resolve("@o3co/auth-provider-core/reference.conf")),
+		);
 	});
 });

@@ -67,6 +67,8 @@ export {
 } from "../session-admission/testing/requirement.contract.mjs";
 export { resolverForTests } from "../session-admission/testing/resolver.mjs";
 export { createTestApp, type TestAppHandle } from "./create-test-app.mjs";
+// #728: the check a package runs over its own config/reference.conf.
+export { unreadableModuleLeaves } from "./environmentLeaves.mjs";
 export {
 	createFakeIdp,
 	type FakeIdp,
@@ -83,7 +85,6 @@ export {
 	createRecordingMailSender,
 	type RecordingMailSender,
 } from "./recordingMailSender.mjs";
-// #728: the check a package runs over its own config/reference.conf.
 export {
 	type PackageReferenceCheck,
 	packageReferenceProblems,

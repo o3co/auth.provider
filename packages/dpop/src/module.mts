@@ -125,9 +125,11 @@ export const dpopConfigSchema = z.object({
 /**
  * The `oauth.dpop` section as the module declares it (#728): its schema, the
  * package's `config/reference.conf` that holds its defaults, and the path it
- * sits at until it moves under the module's name. `configSchema` keeps
- * composing the same schema with core's until then, so the section is
- * parsed from what it already kept.
+ * sits at until it moves under the module's name. Its `configSchema` still
+ * declares the same path with the same schema until then, so boot parses the
+ * value there twice — the `configSchema` over what core's base made of it,
+ * then the section over that, written back at its path — which is idempotent;
+ * the `configSchema` goes when the section moves.
  */
 const DPOP_SECTION_SCHEMA = dpopConfigSchema.shape.oauth.shape.dpop;
 
@@ -199,8 +201,9 @@ export const dpopModule = defineModule<
 				).oauth?.dpop;
 				if (dpop?.enabled !== true) return {};
 				const algs = dpop["alg-whitelist"];
-				// `oauth.dpop` reaches modules through `composeConfigSchema`, so the
-				// whitelist is normally schema-defaulted. A composition root that
+				// `oauth.dpop` reaches modules through boot's composed parse (#728),
+				// with the package's reference.conf layered, so the whitelist is
+				// normally there. A composition root that
 				// hand-builds its config bypasses that, and an absent whitelist must
 				// not become `dpop_signing_alg_values_supported: undefined` in the
 				// served document.

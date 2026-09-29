@@ -40,9 +40,16 @@
  * token endpoint answers `unsupported_grant_type` as it does for any grant
  * nobody registered — no discovery field, and the two routes answer `404`.
  * The grant, the routes and the discovery field are built from the config
- * `createApp` validated, and a boot where that config disagrees with the
+ * `createApp` parsed, and a boot where that config disagrees with the
  * factory's is refused (`settingsFor`), first of anything each of them
  * checks, so the two cannot split one grant in half.
+ *
+ * Since #728 a composition root hands `createApp` the configuration it
+ * resolved, unparsed, and reads what it needs before boot — this switch among
+ * it — with core's transitional reader (the standalone template's
+ * `readSwitches`, naming `oauth.deviceAuthorization.enabled`), which parses it
+ * as boot does. Read otherwise, an environment variable's `"true"` is on at
+ * boot and off here, and the boot is refused.
  *
  * ### Two settings with no defaults
  *
@@ -346,9 +353,9 @@ const readSettings = (deps: DeviceGrantModuleDeps): DeviceAuthorizationConfigSli
 
 /**
  * The factory's decision: whether the grant is on in the config the
- * composition root holds. `=== true` because `AppConfig` is the parsed shape —
- * core's schema has already turned an environment-variable `"true"` into a
- * boolean — and anything else is off, which is the secure default.
+ * composition root read before boot. `=== true` because that read parses the
+ * switch as boot does — core's schema turns an environment-variable `"true"`
+ * into a boolean — and anything else is off, which is the secure default.
  */
 const isEnabled = (config: AppConfig): boolean =>
 	config.oauth?.deviceAuthorization?.enabled === true;
@@ -358,12 +365,13 @@ const isEnabled = (config: AppConfig): boolean =>
  * grant is off there — held to the factory's own decision.
  *
  * Whether the grant is contributed is decided from the config handed to
- * `deviceGrantModule({ config })`; the routes and the discovery field are
- * built from the one `createApp` validated. A composition root that hands
- * the two different configs would otherwise boot half a grant: one that is
+ * `deviceGrantModule({ config })` — what the composition root read before
+ * boot; the routes and the discovery field are built from the one `createApp`
+ * parsed. Two that disagree would otherwise boot half a grant: one that is
  * registered and advertised while no device can start it, or a flow whose
- * token endpoint refuses the grant. The two are one config in every
- * composition root that follows the pattern, so a disagreement is refused.
+ * token endpoint refuses the grant. Read from the same files and parsed the
+ * same way, they agree, so a disagreement is refused — naming how to read the
+ * switch before boot.
  */
 const settingsFor = (
 	enabled: boolean,
@@ -373,11 +381,14 @@ const settingsFor = (
 	if ((slice !== null) !== enabled) {
 		const [built, booted] = enabled ? ["on", "off"] : ["off", "on"];
 		throw new Error(
-			`deviceGrantModule: built from a config with the grant ${built}, but the config ` +
-				`createApp validated has oauth.deviceAuthorization.enabled ${booted}. Whether the ` +
-				"grant is contributed is decided from the first, its routes and discovery field " +
-				"from the second — hand deviceGrantModule({ config }) the same config as " +
-				"bootstrapComponents.config.",
+			`deviceGrantModule: built from a configuration with the grant ${built}, but the ` +
+				`configuration createApp parsed has oauth.deviceAuthorization.enabled ${booted}. ` +
+				"Whether the grant is contributed is decided from the first — the configuration " +
+				"read before boot — and its routes and discovery field from the second. " +
+				"Read oauth.deviceAuthorization.enabled before boot from the same configuration " +
+				"files, parsed as boot parses it — with core's readTransitionalConfig naming the " +
+				"path (the standalone template: readSwitches, `reads`) — so that an environment " +
+				'variable\'s "true" is on in both.',
 		);
 	}
 	return slice;
@@ -702,9 +713,11 @@ const requireVerificationRateLimit = (slice: DeviceAuthorizationConfigSlice): Ra
 /**
  * The `oauth.deviceAuthorization` section as the module declares it (#728):
  * its schema, the package's `config/reference.conf` that holds its defaults,
- * and the path it sits at until it moves under the module's name.
- * `configSchema` keeps composing the same schema with core's until then, so
- * the section is parsed from what it already kept.
+ * and the path it sits at until it moves under the module's name. Its
+ * `configSchema` still declares the same path with the same schema until then,
+ * so boot parses the value there twice — the `configSchema` over what core's
+ * base made of it, then the section over that, written back at its path —
+ * which is idempotent; the `configSchema` goes when the section moves.
  */
 const DEVICE_GRANT_SECTION_SCHEMA = deviceGrantConfigSchema.shape.oauth.shape.deviceAuthorization;
 

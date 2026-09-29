@@ -19,10 +19,13 @@
  * template can turn on, switched on together from the shipped HOCON, and
  * mounted the way `app.mts` mounts it.
  *
- * What is real: the configuration (`config/*.conf` over core's
- * `reference.conf`, resolved with the environment a deployment would export),
- * `buildModules`, core's `createApp`, every module and store it selects, the
- * key store, the audit sink, `helmet` and the terminal error handler.
+ * What is real: the configuration (`config/*.conf` over the `reference.conf`
+ * of every package the composition loads, core's last, resolved with the
+ * environment a deployment would export) read in `app.mts`'s two phases
+ * (#728) — `readSwitches` for `buildModules`, `resolveForBoot` for
+ * `createApp`, which parses it once — `buildModules`, core's `createApp`,
+ * every module and store it selects, the key store, the audit sink, `helmet`
+ * and the terminal error handler.
  *
  * What is substituted, and why:
  *
@@ -38,24 +41,25 @@
  *   through the template's own bridge (`googleFederationConfigModule`) and the
  *   OIDC package's reader, and only `fetch` is added.
  * - Configuration with no environment form (a map of grant connections, a key
- *   ring, a landing URL): laid over the resolved config, as an operator would
- *   write it in `application.conf`.
+ *   ring, a landing URL): one more HOCON layer above the shipped ones, as an
+ *   operator would write it in their own file.
  *
  * `tools/composition` in the monorepo imports this file and boots the same
  * composition with the workspace's other modules added (`ComposeOptions`'s
- * `referenceConfs`, `extraModules`, `extraOverrides`, `extraClients` and
- * `extraUsers`), so the two suites share one fixture rather than two copies
- * that drift.
+ * `extraModules`, `extraOverrides`, `extraClients` and `extraUsers`) — their
+ * packages' `reference.conf` files layered because the modules declare them
+ * — so the two suites share one fixture rather than two copies that drift.
  */
 
 import { createHash, generateKeyPairSync, randomBytes } from "node:crypto";
-import { readFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import http from "node:http";
 import type { AddressInfo } from "node:net";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
 	type AppConfig,
-	AppConfigSchema,
 	ClientEntrySchema,
 	createApp,
 	defineModule,
@@ -67,14 +71,18 @@ import {
 	terminalErrorHandler,
 } from "@o3co/auth-provider-core";
 import { createFakeIdp, type FakeIdp } from "@o3co/auth-provider-core/testing";
-import { parseFile } from "@o3co/ts.hocon";
-import { validate } from "@o3co/ts.hocon/zod";
 import express from "express";
 import helmet from "helmet";
 import request from "supertest";
 import { beforeAll, describe, expect, it } from "vitest";
 import { buildModules, withSessionRequirements } from "#/buildModules.mjs";
-import { resolveConfigPaths, resolveLibraryReferenceConfPath } from "#/configPath.mjs";
+import {
+	type OwnLayers,
+	readOwnLayers,
+	readSwitches,
+	resolveConfigPaths,
+	resolveForBoot,
+} from "#/configPath.mjs";
 import { googleFederationConfigModule, oidcFederationConfigModule } from "#/modules.mjs";
 
 export const ISSUER = "https://auth.test";
@@ -164,46 +172,53 @@ export const CONNECTION = "calendar";
 const configDir = fileURLToPath(new URL("../../config", import.meta.url));
 
 /**
- * The shipped HOCON under `env`, with what has no environment form laid over
- * it: the federations' landing page, the grant key ring and one grant
- * connection. `referenceConfs` — other packages' `reference.conf` files — are
- * layered between `application.conf` and core's, as a deployment layers them.
+ * What has no environment form — the federations' landing page, the grant
+ * key ring and one grant connection — as an operator writes it: a HOCON
+ * file of their own, the highest layer. Written once per process.
+ */
+const OPERATOR_LAYER: string = (() => {
+	const file = join(mkdtempSync(join(tmpdir(), "all-modules-composition-")), "operator.conf");
+	const quoted = (value: string) => JSON.stringify(value);
+	writeFileSync(
+		file,
+		`federations.google.clientUrl = ${quoted(FEDERATION_LANDING)}
+federations.oidc.clientUrl = ${quoted(FEDERATION_LANDING)}
+federationGrants {
+  encryptionKeys = [{ id = "k-test", key = ${quoted(ENCRYPTION_KEY)} }]
+  connections {
+    ${CONNECTION} {
+      federation = "oidc"
+      scopes = ["openid", "offline_access", "calendar.read"]
+      boundary = "production"
+      maxAccessTokenLifetime = 3600
+      callbackURL = ${quoted(`${ISSUER}/session/federation-grants/callback/${CONNECTION}`)}
+    }
+  }
+}
+`,
+	);
+	return file;
+})();
+
+/** The composition's own files, highest first: the operator's layer, then the shipped production ones. */
+export function ownFiles(): string[] {
+	const { applicationConfPath, envConfPath } = resolveConfigPaths(configDir, "production");
+	return [OPERATOR_LAYER, envConfPath, applicationConfPath];
+}
+
+/**
+ * Phase one, as `app.mts` reads it (#728): the switches `buildModules` chooses
+ * the modules by — and `reads`, what a module added to the composition reads
+ * when it is built — from the composition's own files under `env` over core's
+ * `reference.conf`, with the posture on session admission derived from the
+ * parsed mode.
  */
 export function resolveConfig(
 	env: Readonly<Record<string, string>>,
-	referenceConfs: readonly string[] = [],
+	reads: readonly string[] = [],
+	own: OwnLayers = readOwnLayers(ownFiles(), { env }),
 ): AppConfig {
-	const { applicationConfPath, envConfPath } = resolveConfigPaths(configDir, "production");
-	const read = (path: string) => parseFile(path, { env: { ...env } });
-	const layered = [
-		applicationConfPath,
-		...referenceConfs,
-		resolveLibraryReferenceConfPath(),
-	].reduce((config, path) => config.withFallback(read(path)), read(envConfPath));
-	// As `app.mts` does: the posture on session admission, from the parsed mode.
-	const resolved = withSessionRequirements(validate(layered, AppConfigSchema));
-	const federations = resolved.federations as Record<string, Record<string, unknown>>;
-	return {
-		...resolved,
-		federations: {
-			...federations,
-			google: { ...federations.google, clientUrl: FEDERATION_LANDING },
-			oidc: { ...federations.oidc, clientUrl: FEDERATION_LANDING },
-		},
-		federationGrants: {
-			...resolved.federationGrants,
-			encryptionKeys: [{ id: "k-test", key: ENCRYPTION_KEY }],
-			connections: {
-				[CONNECTION]: {
-					federation: "oidc",
-					scopes: ["openid", "offline_access", "calendar.read"],
-					boundary: "production",
-					maxAccessTokenLifetime: 3600,
-					callbackURL: `${ISSUER}/session/federation-grants/callback/${CONNECTION}`,
-				},
-			},
-		},
-	} as unknown as AppConfig;
+	return withSessionRequirements(readSwitches(own, { reads }));
 }
 
 // ---------------------------------------------------------------------------
@@ -568,8 +583,11 @@ export type ModuleOrder = typeof AS_LISTED | typeof REVERSED;
 
 export interface ComposeOptions {
 	readonly env?: Readonly<Record<string, string>>;
-	/** Other packages' `reference.conf` files, layered above core's (see `resolveConfig`). */
-	readonly referenceConfs?: readonly string[];
+	/**
+	 * Paths read before boot beside the template's switches: what a module
+	 * `extraModules` adds reads when it is built (`readSwitches`'s `reads`).
+	 */
+	readonly reads?: readonly string[];
 	/** Modules added after the template's own, before the order and the outage apply. */
 	readonly extraModules?: (config: AppConfig) => readonly Module[];
 	/** Components laid over the boot's, beside the federation config slots. */
@@ -578,7 +596,11 @@ export interface ComposeOptions {
 	readonly extraClients?: Readonly<Record<string, Record<string, unknown>>>;
 	/** Users beside the fixture's own, keyed by username. */
 	readonly extraUsers?: Readonly<Record<string, Record<string, unknown>>>;
-	/** Adjust the resolved config before anything reads it. */
+	/**
+	 * Adjust the configuration before anything reads it, as an operator's own
+	 * layer would: applied to phase one's switches, and to what `createApp` is
+	 * handed, as resolved.
+	 */
 	readonly config?: (config: AppConfig) => AppConfig;
 	readonly order?: ModuleOrder;
 	readonly outage?: { readonly slot: string; readonly outage: Outage };
@@ -613,7 +635,10 @@ export function composedModules(config: AppConfig, options: ComposeOptions = {})
 export interface Composition {
 	readonly app: express.Express;
 	readonly handle: Awaited<ReturnType<typeof createApp>>;
+	/** The configuration boot parsed: what the handle's `config` slot holds. */
 	readonly config: AppConfig;
+	/** What `createApp` was handed: the configuration as resolved (phase two), unparsed. */
+	readonly resolved: AppConfig;
 	readonly modules: readonly Module[];
 	readonly logger: RecordingLogger;
 	readonly upstreams: Upstreams;
@@ -626,21 +651,35 @@ export interface Composition {
  * boot's `logger` component.
  */
 export async function compose(options: ComposeOptions = {}): Promise<Composition> {
-	const base = resolveConfig(options.env ?? SINGLE_ENV, options.referenceConfs);
-	const config = options.config ? options.config(base) : base;
+	const env = options.env ?? SINGLE_ENV;
+	const adjust = (config: AppConfig) => (options.config ? options.config(config) : config);
+	// The composition's own layers, read once for both phases, as `app.mts`
+	// reads them. Phase one: the switches the modules are chosen by.
+	const own = readOwnLayers(ownFiles(), { env });
+	const switches = resolveConfig(env, options.reads, own);
+	const config = adjust(switches);
 	const fakes = await sharedUpstreams();
 	const modules = composedModules(config, options);
 	const logger = createRecordingLogger();
+	// Phase two: the configuration as resolved over every loaded package's
+	// reference.conf, which createApp parses once.
+	const resolved = adjust(resolveForBoot(own, modules, switches.sessionRequirements));
 	const handle = await createApp({
 		modules,
-		bootstrapComponents: { config, pathResolver: (s) => s, logger },
+		bootstrapComponents: {
+			config: resolved,
+			pathResolver: (s) => s,
+			logger,
+		},
 		overrideComponents: {
 			...(await federationOverrides(config, fakes)),
 			...options.extraOverrides?.(config),
 		} as never,
 	});
+	const parsed = handle.components.config;
+	if (parsed === undefined) throw new Error("createApp booted without the parsed configuration");
 	const app = express();
-	app.set("trust proxy", config.http.trustProxy);
+	app.set("trust proxy", parsed.http.trustProxy);
 	app.use(
 		helmet({
 			contentSecurityPolicy: { directives: { defaultSrc: ["'none'"], frameAncestors: ["'none'"] } },
@@ -648,7 +687,7 @@ export async function compose(options: ComposeOptions = {}): Promise<Composition
 	);
 	app.use(handle.router);
 	if (options.terminalErrorHandler !== false) app.use(terminalErrorHandler(logger));
-	return { app, handle, config, modules, logger, upstreams: fakes };
+	return { app, handle, config: parsed, resolved, modules, logger, upstreams: fakes };
 }
 
 // ---------------------------------------------------------------------------

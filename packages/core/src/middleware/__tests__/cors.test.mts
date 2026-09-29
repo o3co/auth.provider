@@ -439,26 +439,23 @@ describe("assembleApp mounts the CORS middleware from config (#500)", () => {
 		await handle.dispose();
 	});
 
-	it("warns rather than staying silent when the value is a shape nothing can read", async () => {
-		// AppConfigSchema refuses this shape by path; a hand-built composition
-		// that hands createApp its configuration without that parse reaches
-		// the mount site, which warns.
-		const warn = vi.fn();
+	it("refuses to boot on a shape nothing can read, naming the key", async () => {
+		// AppConfigSchema refuses this shape by path, and since #728 boot's
+		// composed parse runs the schema core mirrors for `cors` whenever the
+		// section is present: a hand-built composition that hands createApp
+		// its configuration unparsed is refused too, before the mount site
+		// could only warn about it.
 		const config = makeValidAppConfig() as unknown as Record<string, unknown>;
 		config.cors = { allowedOrigins: 42 };
-		const handle = await createApp({
+		const refused = await createApp({
 			modules: [surfaceModule],
-			bootstrapComponents: {
-				config: config as never,
-				logger: { ...console, warn, child: () => console } as never,
-				pathResolver: (s: string) => s,
-			} as never,
-		});
-		expect(warn).toHaveBeenCalledWith(
-			expect.objectContaining({ received: "number" }),
-			"cors_allowed_origins_unreadable",
+			bootstrapComponents: { config: config as never, pathResolver: (s: string) => s } as never,
+		}).then(
+			() => undefined,
+			(err: unknown) => err,
 		);
-		await handle.dispose();
+		expect(refused).toMatchObject({ reason: "config-validation-failed" });
+		expect((refused as Error).message).toMatch(/cors\.allowedOrigins: /);
 	});
 
 	it("leaves introspection and authorize alone after a real boot", async () => {

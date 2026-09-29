@@ -95,11 +95,11 @@ import { isLoopbackHostname } from "./loopback.mjs";
  *
  * It lives here, beside {@link checkSerializedOrigin}, because the config
  * schema is not the only reader. `assembleApp` decides whether to mount the
- * CORS middleware from `components.config`, and that config has not
- * necessarily been through `AppConfigSchema`: the boot pipeline validates with
- * the core schema and shallow-merges the raw top-level extras back over the
+ * CORS middleware from `components.config`, and until #728 that config had
+ * not been through the `cors` schema: the boot pipeline validated with the
+ * core schema and shallow-merged the raw top-level extras back over the
  * result, so an operator who set the environment variable — the documented way
- * to configure this — would hand the mount site a string. Testing that for
+ * to configure this — handed the mount site a string. Testing that for
  * `Array.isArray` answered "no origins configured" and mounted nothing, with
  * no error and no log: precisely the silent no-op this key was wired up to
  * stop being.

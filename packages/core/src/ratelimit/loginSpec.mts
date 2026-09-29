@@ -40,7 +40,7 @@ const LOGIN_PREFIX = "login";
  * this adapter, and overwriting it would discard what they wrote.
  *
  * A `rateLimit.login` that is not given seeds nothing. One that is given is
- * read as `AppConfigSchema`'s `rateLimit` section coerces it (a numeric
+ * read as core's `rateLimit` section schema coerces it (a numeric
  * string is its number) and judged by the one predicate every limiter uses,
  * after the conversion to whole seconds, and one it refuses is a `RangeError`
  * naming `rateLimit.login` — a hand-built config that never passed that
