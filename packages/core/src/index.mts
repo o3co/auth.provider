@@ -863,6 +863,19 @@ export {
 	type TokenCarrier,
 	tokenClaim,
 } from "./session-admission/admit.mjs";
+// #728: the tail of a login as a contract — what a requirement's completion
+// requires through the `loginCompletion` slot instead of importing the
+// session package.
+export type {
+	LoginCompletion,
+	LoginEstablishmentCall,
+	LoginEstablishmentReporter,
+	LoginEstablishmentResult,
+	LoginInterruptionCall,
+	LoginInterruptionReporter,
+	LoginInterruptionResult,
+	LoginInterruptionStep,
+} from "./session-admission/login-completion.mjs";
 export { checkPrimaryContinuation } from "./session-admission/primary.mjs";
 export {
 	ADMISSION_ACTIONS,

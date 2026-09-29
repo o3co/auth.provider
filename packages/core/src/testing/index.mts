@@ -87,6 +87,12 @@ export {
 // slot's contract suite, and a test double a consumer's tests fill the slot
 // with instead of importing the owner's package.
 export {
+	createRecordingLoginCompletion,
+	type LoginCompletionContractInput,
+	loginCompletionContract,
+	type RecordingLoginCompletion,
+} from "./slots/loginCompletion.mjs";
+export {
 	createTestOAuthTokenSettings,
 	type OAuthTokenSettingsContractInput,
 	oauthTokenSettingsContract,
