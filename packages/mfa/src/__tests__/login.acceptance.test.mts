@@ -29,16 +29,23 @@
  *   `hints.enrollable` and `hints.email_proof`;
  * - `optional`, no record → `200`, the session written as it always was;
  * - the factor store down → `503` once, one error line, nothing written —
- *   no `UserSession`, no transaction.
+ *   no `UserSession`, no transaction;
+ * - the transaction store down at the open → `503`, the regenerated cookie
+ *   session dropped, one error line, no `UserSession`;
+ * - a session id the browser held before the login — planted — is not the
+ *   one the transaction is bound to, and is dead afterwards (D27).
  */
 
 import {
 	createMemoryMfaFactorStore,
 	createMemoryMfaTransactionStore,
+	defineModule,
 	type MfaTransactionStore,
 	passwordSessionAuthentication,
 	type UserSessionStore,
 } from "@o3co/auth-provider-core";
+import type { Request, Response } from "express";
+import request from "supertest";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
 	ALICE,
@@ -52,6 +59,38 @@ import {
 import { factorRecord, unreachableFactorStore } from "./requirementHarness.mjs";
 
 afterEach(disposeAll);
+
+/**
+ * A route that plants a session before the login — what an attacker who
+ * fixes a victim's session id holds — and one that reads it back: GET
+ * `/__test__/plant` writes the session and answers its id; GET
+ * `/__test__/planted` answers what the presented session holds.
+ */
+const plantingModule = defineModule({
+	name: "test:session-planter",
+	contributes: {
+		routes: [
+			() => ({
+				id: "test-session-planter",
+				mountPath: "/__test__",
+				after: ["session-middleware"],
+				handler: ((req: Request, res: Response, next: () => void) => {
+					const session = req.session as unknown as Record<string, unknown>;
+					if (req.method === "GET" && req.path === "/plant") {
+						session.planted = "yes";
+						res.json({ id: req.sessionID });
+						return;
+					}
+					if (req.method === "GET" && req.path === "/planted") {
+						res.json({ planted: session.planted ?? null });
+						return;
+					}
+					next();
+				}) as never,
+			}),
+		],
+	},
+});
 
 const SESSION_STORE_UNAVAILABLE = {
 	error: "temporarily_unavailable",
@@ -113,6 +152,36 @@ describe("a password login under required, the subject holding a factor (F1 step
 	});
 });
 
+describe("session fixation, end to end (the MFA ADR's D27)", () => {
+	it("binds the transaction to a session id the login minted: one the browser held before — planted — is not it, and holds nothing afterwards", async () => {
+		const { app, transactionStore } = await boot({
+			config: configFor("required"),
+			factorStore: await aliceEnrolled(),
+			extraModules: [plantingModule],
+		});
+		const agent = request.agent(app);
+		const planted = await agent.get("/__test__/plant");
+		const plantedId = planted.body.id as string;
+		expect(sessionIdSet(planted)).toBe(plantedId);
+		// The CSRF token is stateless: fetching it touches no session.
+		const csrf = await agent.get("/session/csrf");
+		expect(sessionIdSet(csrf)).toBeUndefined();
+		const res = await agent
+			.post("/session/login")
+			.set(csrf.body.header_name as string, csrf.body.csrf_token as string)
+			.send({ username: ALICE.username, password: ALICE.password });
+		expect(res.status).toBe(403);
+		const transaction = await transactionStore.get(res.body.transaction as string);
+		expect(transaction?.sessionId).toBe(sessionIdSet(res));
+		expect(transaction?.sessionId).not.toBe(plantedId);
+		// The planted id is dead: presented again, it carries nothing.
+		const replanted = await request(app)
+			.get("/__test__/planted")
+			.set("Cookie", (planted.headers["set-cookie"] as unknown as string[])[0] as string);
+		expect(replanted.body).toEqual({ planted: null });
+	});
+});
+
 describe("a password login under required, the subject holding no record (F3 step 1; owner decision 2)", () => {
 	it("is answered 403 mfa_enrollment_required with the kinds that may be enrolled and whether an email proof comes first, and no UserSession written", async () => {
 		const { app, userSessionStore, transactionStore } = await boot({
@@ -163,6 +232,31 @@ describe("a password login under optional, the subject holding no record", () =>
 		const { res } = await login(app);
 		expect(res.status).toBe(403);
 		expect(res.body.error).toBe("mfa_required");
+	});
+});
+
+describe("a password login whose transaction cannot be kept (F1 step 2)", () => {
+	it("is answered 503 after the regeneration, the cookie session dropped, one error line, and no UserSession written", async () => {
+		const store = createMemoryMfaTransactionStore();
+		const { app, userSessionStore, logger } = await boot({
+			config: configFor("required"),
+			factorStore: await aliceEnrolled(),
+			transactionStore: {
+				...store,
+				create: async () => {
+					throw new Error("transaction store unreachable");
+				},
+			},
+		});
+		const create = vi.spyOn(userSessionStore as UserSessionStore, "create");
+		const { res } = await login(app);
+		expect(res.status).toBe(503);
+		expect(res.body).toEqual(SESSION_STORE_UNAVAILABLE);
+		// The regenerated session is abandoned: the browser is handed none.
+		expect(sessionIdSet(res)).toBeUndefined();
+		expect(events(logger, "error")).toEqual(["login_store_unavailable"]);
+		expect(logger.error.mock.calls[0]?.[0]).toMatchObject({ store: "mfa", step: "open" });
+		expect(create).not.toHaveBeenCalled();
 	});
 });
 
