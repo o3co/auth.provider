@@ -26,7 +26,10 @@
  * every workspace but core — a source under `src/` outside `__tests__/` that
  * is not a `*.test.*` or `*.spec.*` file: every `defineModule(…)` call, as
  * the module-name scan anchors on it, and every other object literal with a
- * `name` and a `requires` or an `optional`. A manifest lists `config` when
+ * `name` and a `requires` or an `optional` that is a list (an array literal,
+ * or a `const` bound to one). The workspaces are `pnpm-workspace.yaml`'s:
+ * `dir/*` and a package's own path; any other pattern refuses the scan
+ * rather than letting it walk nothing. A manifest lists `config` when
  * its `requires` or its `optional` does — a factory is handed it either way.
  *
  * The manifest is the call's argument, an object literal or a `const` bound
@@ -110,33 +113,60 @@ const CONFIG_REQUIRERS: readonly string[] = [
 	"templates/standalone -> stores",
 ];
 
-/** The directories `pnpm-workspace.yaml` names, `dir/*` expanded to its children that hold a package.json. */
-function workspaceDirs(): string[] {
-	const text = readFileSync(join(repoRoot, "pnpm-workspace.yaml"), "utf8");
+/** Whether `dir` under `root` holds a package.json. */
+const isPackage = (root: string, dir: string): boolean => {
+	try {
+		readFileSync(join(root, dir, "package.json"));
+		return true;
+	} catch {
+		return false;
+	}
+};
+
+/**
+ * The workspaces a `pnpm-workspace.yaml` (its text) names, under `root`:
+ * each `dir/*` expanded to the children of `dir` that hold a package.json,
+ * and each bare path kept when it holds one. Any other pattern — `**`, a
+ * negation, another glob, a path holding no package — is refused, naming
+ * it, as is a file that names no workspace: the scan would walk nothing
+ * under it and pass.
+ */
+function workspaceDirsIn(text: string, root: string): string[] {
 	const block = text.split(/^packages:\s*$/m)[1]?.split(/^\S/m)[0] ?? "";
-	const globs = [...block.matchAll(/^\s+-\s+["']?([^"'\s]+)["']?\s*$/gm)].map((match) =>
+	const patterns = [...block.matchAll(/^\s+-\s+["']?([^"'\s]+)["']?\s*$/gm)].map((match) =>
 		String(match[1]),
 	);
+	if (patterns.length === 0) {
+		throw new Error("pnpm-workspace.yaml names no workspace under packages:");
+	}
+	const refuse = (pattern: string, why: string): never => {
+		throw new Error(
+			`pnpm-workspace.yaml names ${JSON.stringify(pattern)}, ${why}: the config-requires scan would walk nothing under it and pass`,
+		);
+	};
 	const dirs: string[] = [];
-	for (const glob of globs) {
-		if (!glob.endsWith("/*")) {
-			dirs.push(glob);
+	for (const pattern of patterns) {
+		const parent = pattern.endsWith("/*") ? pattern.slice(0, -2) : pattern;
+		if (/[*?[\]{}!]/.test(parent)) {
+			refuse(pattern, "a pattern the scan does not expand (only dir/* and a package's path)");
+		}
+		if (parent === pattern) {
+			if (!isPackage(root, pattern)) refuse(pattern, "a path that holds no package.json");
+			dirs.push(pattern);
 			continue;
 		}
-		const parent = glob.slice(0, -2);
-		for (const entry of readdirSync(join(repoRoot, parent), { withFileTypes: true })) {
-			if (!entry.isDirectory()) continue;
+		for (const entry of readdirSync(join(root, parent), { withFileTypes: true })) {
 			const dir = `${parent}/${entry.name}`;
-			try {
-				readFileSync(join(repoRoot, dir, "package.json"));
-				dirs.push(dir);
-			} catch {
-				// a directory without a package.json is no workspace
-			}
+			// A directory without a package.json is no workspace.
+			if (entry.isDirectory() && isPackage(root, dir)) dirs.push(dir);
 		}
 	}
 	return dirs.sort();
 }
+
+/** The workspaces this repository's `pnpm-workspace.yaml` names. */
+const workspaceDirs = (): string[] =>
+	workspaceDirsIn(readFileSync(join(repoRoot, "pnpm-workspace.yaml"), "utf8"), repoRoot);
 
 /** Whether `file` is a test: under a `__tests__/` directory, or a `*.test.*` / `*.spec.*` file. */
 const isTest = (file: string): boolean =>
@@ -369,12 +399,19 @@ function manifestsIn(fileName: string, text: string): Manifest[] {
 		ts.forEachChild(node, calls);
 	};
 	calls(source);
+	/** Whether `key` is written with a list: an array literal, or a const bound to one. */
+	const writesList = (object: ts.ObjectLiteralExpression, key: string): boolean => {
+		const slot = slotOf(object, key);
+		if (slot.kind !== "written") return false;
+		const value = writtenValue(slot.property);
+		return value !== undefined && ts.isArrayLiteralExpression(value);
+	};
 	const literals = (node: ts.Node): void => {
 		if (
 			ts.isObjectLiteralExpression(node) &&
 			!consumed.has(node) &&
 			slotOf(node, "name").kind === "written" &&
-			(slotOf(node, "requires").kind === "written" || slotOf(node, "optional").kind === "written")
+			(writesList(node, "requires") || writesList(node, "optional"))
 		) {
 			found.push({ position: node.getStart(source), manifest: read(lineOf(node), node) });
 		}
