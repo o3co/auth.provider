@@ -50,7 +50,7 @@ const WEEK = 7 * DAY;
 const TX = (overrides: Partial<MfaTransaction> = {}): MfaTransaction => ({
 	id: "tx-1",
 	purpose: "login",
-	sessionId: "express-session-1",
+	binding: { kind: "session", id: "express-session-1" },
 	subject: "user-1",
 	sid: undefined,
 	continuation: {

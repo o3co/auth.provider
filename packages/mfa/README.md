@@ -78,7 +78,7 @@ Registered as `sessionRequirements.mfa` ([`src/requirement.mts`](src/requirement
 
 ## The login's interruption
 
-A password login the requirement interrupts is answered `403` once the express session is regenerated — left unauthenticated — and the login's MFA transaction opened, bound to the regenerated session's id; no session is written until the ceremony completes. The body is the closed shape core validates, and the page reads nothing else:
+A password login the requirement interrupts is answered `403` once the express session is regenerated — left unauthenticated — and the login's MFA transaction opened, bound to the regenerated session (`binding: { kind: "session", id }`, which every later use compares whole); no session is written until the ceremony completes. The body is the closed shape core validates, and the page reads nothing else:
 
 ```json
 { "error": "mfa_required", "transaction": "<id>", "expires_in": 600 }

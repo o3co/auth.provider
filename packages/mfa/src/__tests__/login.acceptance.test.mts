@@ -139,7 +139,7 @@ describe("a password login under required, the subject holding a factor (F1 step
 		expect(regenerated).toBeDefined();
 		expect(transaction).toMatchObject({
 			purpose: "login",
-			sessionId: regenerated,
+			binding: { kind: "session", id: regenerated },
 			subject: ALICE.id,
 			redirectTo: "https://app.example/after",
 			enrollment: "none",
@@ -178,8 +178,8 @@ describe("session fixation, end to end (the MFA ADR's D27)", () => {
 			.send({ username: ALICE.username, password: ALICE.password });
 		expect(res.status).toBe(403);
 		const transaction = await transactionStore.get(res.body.transaction as string);
-		expect(transaction?.sessionId).toBe(sessionIdSet(res));
-		expect(transaction?.sessionId).not.toBe(plantedId);
+		expect(transaction?.binding).toStrictEqual({ kind: "session", id: sessionIdSet(res) });
+		expect(transaction?.binding.id).not.toBe(plantedId);
 		// The planted id is dead: presented again, it carries nothing.
 		const replanted = await request(app)
 			.get("/__test__/planted")
@@ -217,7 +217,7 @@ describe("a password login under required, the subject holding no record (F3 ste
 			hints: { enrollable: ["totp"], email_proof: false },
 		});
 		expect(await transactionStore.get(res.body.transaction as string)).toMatchObject({
-			sessionId: sessionIdSet(res),
+			binding: { kind: "session", id: sessionIdSet(res) },
 			enrollment: "required",
 			emailProof: "not_required",
 		});

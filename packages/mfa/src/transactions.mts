@@ -19,14 +19,15 @@
  * 1, as the session-admission ADR's D5 amends them), and the answer the
  * login is interrupted with.
  *
- * - **Opened after the regeneration**, bound to the session id the login
- *   route regenerated, so the browser holding the new cookie is the one that
- *   may continue; the record carries the continuation core built — the
- *   primary and what earlier requirements added — never a `user` or
- *   `primary` field of its own, and the primary's subject and `redirectTo`,
- *   which the store holds it to.
+ * - **Opened after the regeneration**, bound to the session the login route
+ *   regenerated — `binding: { kind: "session", id }` (#742) — so the browser
+ *   holding the new cookie is the one that may continue; the record carries
+ *   the continuation core built — the primary and what earlier requirements
+ *   added — never a `user` or `primary` field of its own, and the primary's
+ *   subject and `redirectTo`, which the store holds it to.
  * - **Its id is 32 bytes from the CSPRNG, base64url** (D22). It is not a
- *   bearer: every later use compares the bound session id.
+ *   bearer: every later use compares the whole binding, kind included
+ *   (core's `isMfaTransactionBoundTo`).
  * - **Its life is `mfa.transactionTtlSeconds`**, from which `expiresAtMs` is
  *   derived and nothing else — the store has no ceiling of its own (step 3's
  *   obligation).
@@ -35,8 +36,9 @@
  *   `hints.enrollable` and `hints.email_proof`.
  *
  * A store that cannot create it rejects the open, which the route answers as
- * an outage. Reading a transaction back — bound to the session, a mismatch
- * read as an unknown id — is the routes' (build-order step 8's third part).
+ * an outage. Reading a transaction back — through the binding, a mismatch
+ * read as an unknown id (core's `getBoundMfaTransaction`) — is the routes'
+ * (build-order step 8's third part).
  */
 
 import { randomBytes } from "node:crypto";
@@ -76,9 +78,9 @@ export type LoginInterruption =
 /** Opens a login's transaction and answers the interruption. */
 export interface LoginTransactions {
 	/**
-	 * Creates the `login` transaction bound to `sessionId`, carrying
-	 * `continuation`, and answers the closed 403 body. Rejects when the store
-	 * cannot keep it.
+	 * Creates the `login` transaction bound to the session `sessionId` names
+	 * (`{ kind: "session", id: sessionId }`), carrying `continuation`, and
+	 * answers the closed 403 body. Rejects when the store cannot keep it.
 	 */
 	open(
 		sessionId: string,
@@ -128,7 +130,7 @@ export function createLoginTransactions({
 			const transaction: MfaTransaction = {
 				id,
 				purpose: "login",
-				sessionId,
+				binding: { kind: "session", id: sessionId },
 				subject: continuation.primary.subject,
 				sid: undefined,
 				continuation,

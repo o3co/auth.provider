@@ -47,19 +47,31 @@ import { timingSafeEqual } from "node:crypto";
  * named/documented as suitable for public-length inputs only; widening
  * its contract is out of scope for v0.5.1.
  *
+ * ## Well-formed strings only
+ *
+ * Equal bytes mean equal strings only when both strings are well formed:
+ * UTF-8 encoding writes every lone surrogate (`\uD800`–`\uDFFF` without its
+ * pair) as EF BF BD, U+FFFD's bytes, so `"s\uD800"`, `"s\uDC00"` and
+ * `"s\uFFFD"` would all encode alike. A string that is not well formed
+ * (`String.prototype.isWellFormed`) therefore never compares equal — not
+ * even to itself — and the answer is `false`, never a throw. Every caller
+ * compares against a value the server made (a digest, a code, a generated
+ * handle) or a well-formed protocol string, so none loses a match it had.
+ *
  * ## Implementation note
  *
  * Codex Delta 3 of SF-3 spec: the buffers are encoded BEFORE the length
  * check. `timingSafeEqual` requires equal-length inputs, and JS string
  * length does not equal UTF-8 byte length for multi-byte code points
  * (`"😀".length === 2` but `Buffer.byteLength("😀") === 4`). Comparing
- * byte-lengths after encoding makes the helper safe for arbitrary
- * Unicode strings and avoids a thrown `RangeError` on the rare non-ASCII
- * input.
+ * byte-lengths after encoding keeps a well-formed non-ASCII input from
+ * throwing a `RangeError`.
  *
  * Per SF-3 + MIN-4 (v0.5.1).
  */
 export function constantTimeStringEqual(a: string, b: string): boolean {
+	// A lone surrogate encodes as U+FFFD's bytes: see § "Well-formed strings only".
+	if (!a.isWellFormed() || !b.isWellFormed()) return false;
 	const bufA = Buffer.from(a, "utf8");
 	const bufB = Buffer.from(b, "utf8");
 	// NOTE: this length check is intentional — `timingSafeEqual` throws on
