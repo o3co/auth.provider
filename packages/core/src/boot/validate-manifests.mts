@@ -1800,10 +1800,12 @@ interface WriteBlocked {
 }
 
 /**
- * `target` with `value` written at `segments`, copied on the way down — no
- * object of `target` is changed, and every object on the path is a new one
- * with the same prototype. A missing object on the path is created; anything
- * else on it — a scalar, a list, an instance — is where the write is blocked.
+ * `target` with `value` laid over what is at `segments` (`overlayConfig`: a
+ * key the value does not hold is kept, one it holds as `undefined` goes),
+ * copied on the way down — no object of `target` is changed, and every object
+ * on the path is a new one with the same prototype. `REMOVED` removes the key
+ * at the path instead. A missing object on the path is created; anything else
+ * on it — a scalar, a list, an instance — is where the write is blocked.
  */
 function writeConfigPath(
 	target: unknown,
@@ -1812,7 +1814,8 @@ function writeConfigPath(
 	walked: readonly string[] = [],
 ): { readonly written: unknown } | WriteBlocked {
 	// `value` may be `REMOVED`: the key at the path goes.
-	if (segments.length === 0) return { written: value };
+	if (segments.length === 0)
+		return { written: value === REMOVED ? value : overlayConfig(target, value) };
 	if (target !== undefined && !isPlainConfigObject(target)) {
 		return { blockedAt: walked, holding: target };
 	}
@@ -1850,8 +1853,9 @@ function kindOf(value: unknown): string {
  *
  * Each module is handed its schema's output as `deps.section`, a deeply
  * frozen copy (`frozenSection`). The `config` slot gets the same output
- * written back at the section's path — a loaded module's section is never
- * stripped — outer sections before inner ones: every section is read before
+ * laid over what is at the section's path (`overlayConfig`), so a section
+ * schema narrower than what is there drops nothing — a loaded module's
+ * section is never stripped — outer sections before inner ones: every section is read before
  * any is written, so an outer schema that keeps only its own keys does not
  * take an inner module's section from it, and an inner section's output
  * lands inside the outer's. A section whose output is `undefined` removes
