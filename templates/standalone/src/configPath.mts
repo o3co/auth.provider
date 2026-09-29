@@ -17,6 +17,14 @@
 import { createRequire } from "node:module";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import {
+	type AppConfig,
+	coreReference,
+	type Module,
+	moduleReferences,
+	readTransitionalConfig,
+} from "@o3co/auth-provider-core";
+import { parseFile } from "@o3co/ts.hocon";
 
 export interface ResolvedConfigPaths {
 	readonly applicationConfPath: string;
@@ -64,4 +72,66 @@ export function resolveConfigPaths(configDirPath: string, env: string): Resolved
 		);
 	}
 	return { applicationConfPath, envConfPath };
+}
+
+export interface ResolveOptions {
+	/**
+	 * The environment `${?VAR}` substitutions read — the process's when
+	 * unset. Tests pass their own.
+	 */
+	readonly env?: Readonly<Record<string, string>>;
+}
+
+/**
+ * The composition's configuration, resolved to plain data and parsed by
+ * nothing (#728): its own files, highest first — `{env}.conf`, then
+ * `application.conf` — over `references`, the `reference.conf` files of the
+ * packages it loads, in the order `moduleReferences` answers them (core's
+ * last). A path set in two layers takes the higher one's value.
+ */
+export function resolveLayers(
+	ownFiles: readonly string[],
+	references: readonly URL[],
+	options: ResolveOptions = {},
+): Record<string, unknown> {
+	const read = (file: string) =>
+		options.env === undefined ? parseFile(file) : parseFile(file, { env: { ...options.env } });
+	const [top, ...below] = [...ownFiles, ...references.map((reference) => fileURLToPath(reference))];
+	if (top === undefined) return {};
+	const layered = below.reduce((config, file) => config.withFallback(read(file)), read(top));
+	return layered.toObject() as Record<string, unknown>;
+}
+
+/**
+ * Phase one, transitional (#728): what the composition reads before it knows
+ * its modules — the switches `buildModules` chooses them by, the log level,
+ * `mfa.mode` — from its own files over core's `reference.conf` alone, read
+ * with `readTransitionalConfig`. Use it for those choices only: it goes when
+ * the switches move into the template's own section, the only one read before
+ * the modules are chosen (#728 B5).
+ */
+export function readSwitches(ownFiles: readonly string[], options: ResolveOptions = {}): AppConfig {
+	return readTransitionalConfig(resolveLayers(ownFiles, [coreReference()], options));
+}
+
+/**
+ * Phase two: the configuration `createApp` parses — once, with every loaded
+ * module's schema (#728) — from the composition's own files over the
+ * `reference.conf` of every package `modules` come from, core's last, as
+ * resolved and unparsed. `sessionRequirements` is the posture on session
+ * admission, derived from the parsed `mfa.mode` in phase one (the
+ * session-admission ADR's D7) and written in beside what was resolved.
+ *
+ * Typed as `AppConfig` because that is the `config` slot's type, which is
+ * what `createApp`'s parse makes of it; read the parsed configuration from
+ * the handle (`handle.components.config`), not from this.
+ */
+export function resolveForBoot(
+	ownFiles: readonly string[],
+	modules: readonly Module[],
+	sessionRequirements: AppConfig["sessionRequirements"],
+	options: ResolveOptions = {},
+): AppConfig {
+	const resolved = resolveLayers(ownFiles, moduleReferences(modules), options);
+	return { ...resolved, sessionRequirements } as unknown as AppConfig;
 }

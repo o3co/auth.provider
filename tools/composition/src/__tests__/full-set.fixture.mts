@@ -25,10 +25,11 @@
  *
  * What the template's fixture substitutes, this one inherits. What it adds:
  *
- * - The five packages' `reference.conf` files, layered above core's as a
- *   deployment layers them, and the settings with no default laid over the
- *   resolved config (each feature's switch, the WebAuthn relying party, the
- *   two federation sections).
+ * - The settings with no default laid over the configuration (each feature's
+ *   switch, the WebAuthn relying party, the two federation sections). The
+ *   added packages' `reference.conf` files are layered because their modules
+ *   declare them (`section.reference`): the template's fixture layers what
+ *   the loaded modules declare, as `app.mts` does (#728).
  * - The small modules each package's README has a deployment write: the
  *   WebAuthn, Apple and GitHub config bridges and a `grantPolicy` (WebAuthn
  *   refuses to boot without one, and no package ships one). The federation
@@ -48,7 +49,6 @@
 
 import { generateKeyPairSync, randomBytes, randomUUID, sign } from "node:crypto";
 import { readFileSync } from "node:fs";
-import { createRequire } from "node:module";
 import {
 	type AdmissionDeps,
 	type AppConfig,
@@ -112,17 +112,6 @@ import {
 	createFakeGithub,
 	type FakeGithub,
 } from "../../../../packages/federation-github/src/__tests__/fake-github.mts";
-
-const require = createRequire(import.meta.url);
-
-/** Each added package's shipped defaults, as a deployment layers them. */
-const REFERENCE_CONFS = [
-	"@o3co/auth-provider-device-grant/reference.conf",
-	"@o3co/auth-provider-dpop/reference.conf",
-	"@o3co/auth-provider-mfa/reference.conf",
-	"@o3co/auth-provider-mtls/reference.conf",
-	"@o3co/auth-provider-webauthn/reference.conf",
-].map((specifier) => require.resolve(specifier));
 
 /** The mTLS package's self-signed client certificate. */
 export const CLIENT_CERTIFICATE = readFileSync(
@@ -775,7 +764,6 @@ export async function fullSetOptions(options: FullSetOptions = {}): Promise<Comp
 	const outage = { once: failAskOnce };
 	return {
 		...compose,
-		referenceConfs: REFERENCE_CONFS,
 		config: (resolved) => {
 			const adjusted = options.config ? options.config(resolved) : resolved;
 			const featured = withFeatures(adjusted, features);
