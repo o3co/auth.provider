@@ -54,7 +54,7 @@ const handle = await createApp({
 const config = handle.components.config; // what boot parsed
 ```
 
-Until each section moves under its module's name — the move pull requests of #728 — core's schema still mirrors sections other packages own (`oauth.mtls`, `oauth.dpop`, `oauth.deviceAuthorization`, `webauthn`, `memoryRateLimiter` / `redisRateLimiter`, the `redis*` store namespaces), and boot validates each whenever the configuration carries it, whether or not the module that reads it is loaded. What a composition root must read before it knows its modules — the switches it chooses them by, its log level — it reads with `readTransitionalConfig(resolved)` ([`src/config/composed.mts`](src/config/composed.mts)): that base alone, laid over what was written. It is transitional, and goes when those switches move into the composition root's own section. The standalone template's [`app.mts`](../../templates/standalone/src/app.mts) reads its configuration in exactly these two phases.
+Until each section moves under its module's name — the move pull requests of #728 — core's schema still mirrors sections other packages own (`oauth.mtls`, `oauth.dpop`, `oauth.deviceAuthorization`, `webauthn`, `memoryRateLimiter` / `redisRateLimiter`, the `redis*` store namespaces), and boot validates each whenever the configuration carries it, whether or not the module that reads it is loaded. What a composition root must read before it knows its modules — the switches it chooses them by, its log level — it resolves from its own files over core's `reference.conf` alone (`coreReference()`: no module, so no package's reference, is known yet) and reads with `readTransitionalConfig(resolved, paths)` ([`src/config/composed.mts`](src/config/composed.mts)): each path it names parsed with the schema core's base declares there, everything else left as written and unchecked — boot checks it. So phase one sees nothing a package's `reference.conf` alone sets, and must not read a section one completes. It is transitional, and goes when those switches move into the composition root's own section. The standalone template's [`app.mts`](../../templates/standalone/src/app.mts) reads its configuration in exactly these two phases.
 
 `AppConfigSchema` is deprecated. Parsing with it before `createApp` strips every section it does not declare — how #472, #495 and #496 lost theirs — so a composition that still does hands boot less than it resolved. It stays exported, and `AppConfig`, its inferred type, is the type of the parsed configuration.
 
@@ -337,7 +337,7 @@ import {
 } from "@o3co/auth-provider-core";
 
 // What this composition reads before boot. createApp parses rawConfig itself (#728).
-const config = readTransitionalConfig(rawConfig);
+const config = readTransitionalConfig(rawConfig, ["http.port", "oauth.jwt.signingKey", "repositories"]);
 
 // Both repositories.* (uses 'type') and oauth.jwt.signingKey (uses 'provider') follow
 // the same nested adapter sub-section pattern. flatten() normalises either selector

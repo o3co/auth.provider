@@ -23,7 +23,7 @@
  * every leaf an environment variable sets reads the string it arrives as.
  */
 
-import type { z } from "zod";
+import { z } from "zod";
 
 /** The definition every Zod v4 schema carries, as far as this file reads it. */
 interface Def {
@@ -142,4 +142,60 @@ export function unreadableLeafPaths(schema: z.ZodType, prefix = ""): string[] {
 	};
 	walk(schema, prefix);
 	return [...found].sort();
+}
+
+/** A node of the tree `pickConfigSchema` builds: a picked leaf, or keys under it. */
+type PickNode = { readonly leaf: z.ZodType } | { readonly children: Map<string, PickNode> };
+
+/**
+ * The schema of `paths` alone inside `schema` (#728, transitional): each path's
+ * own schema, as `schema` declares it at that path — wrappers, coercions and
+ * checks included — under objects that hold only the picked keys, each
+ * optional. What a composition root parses before it knows its modules: the
+ * switches it reads, and nothing a package's `reference.conf` may complete
+ * later. A path under another picked path is covered by it.
+ *
+ * A path `schema` does not declare as one schema — a key no object on the way
+ * declares, or one a union offers several schemas for — is a `RangeError`
+ * naming it: pick a shorter path.
+ */
+export function pickConfigSchema(schema: z.ZodType, paths: readonly string[]): z.ZodObject {
+	const root: Map<string, PickNode> = new Map();
+	const sorted = [...new Set(paths)].sort((a, b) => a.split(".").length - b.split(".").length);
+	for (const path of sorted) {
+		const segments = path.split(".");
+		if (segments.some((key) => key.length === 0)) {
+			throw new RangeError(`cannot read "${path}": not a dot-separated path of non-empty keys`);
+		}
+		const found = schemasAtPath(schema, segments);
+		if (found.length !== 1) {
+			throw new RangeError(
+				found.length === 0
+					? `cannot read "${path}": the configuration schema declares no such key`
+					: `cannot read "${path}": the configuration schema declares ${found.length} schemas there — read a shorter path`,
+			);
+		}
+		const leaf = found[0] as z.ZodType;
+		let children = root;
+		for (const [index, key] of segments.entries()) {
+			const node = children.get(key);
+			// Shorter paths come first: one already picked covers this one.
+			if (node !== undefined && "leaf" in node) break;
+			if (index === segments.length - 1) {
+				children.set(key, { leaf });
+				break;
+			}
+			const next = node ?? { children: new Map<string, PickNode>() };
+			if (node === undefined) children.set(key, next);
+			children = next.children;
+		}
+	}
+	const build = (children: Map<string, PickNode>): Record<string, z.ZodType> =>
+		Object.fromEntries(
+			[...children].map(([key, node]) => [
+				key,
+				"leaf" in node ? node.leaf : z.object(build(node.children)).optional(),
+			]),
+		);
+	return z.object(build(root));
 }

@@ -282,7 +282,10 @@ It reads them in two phases ([#728](https://github.com/o3co/auth.provider/issues
 modules, it reads the switches `buildModules` chooses them by — the adapters,
 the federations, the log level, `mfa.mode` — from the two files above over
 core's `reference.conf` alone (`readSwitches`, with core's transitional
-reader). Then it hands `createApp` the configuration as resolved over every
+reader), parsing those paths (`SWITCHES`) and nothing else. It sees nothing
+a package's `reference.conf` alone sets — none is layered yet — and a module
+you add to `buildModules` that reads its configuration when it is built adds
+the paths it reads to `SWITCHES`. Then it hands `createApp` the configuration as resolved over every
 loaded module's `reference.conf` (`resolveForBoot`), unparsed: boot parses it
 once, with every loaded module's schema, and strips no module's section. What
 the template reads after boot — `http.trustProxy`, the port, the readiness

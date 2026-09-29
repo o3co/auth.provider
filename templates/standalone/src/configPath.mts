@@ -103,15 +103,60 @@ export function resolveLayers(
 }
 
 /**
- * Phase one, transitional (#728): what the composition reads before it knows
- * its modules — the switches `buildModules` chooses them by, the log level,
- * `mfa.mode` — from its own files over core's `reference.conf` alone, read
- * with `readTransitionalConfig`. Use it for those choices only: it goes when
- * the switches move into the template's own section, the only one read before
- * the modules are chosen (#728 B5).
+ * What the template reads before it knows its modules (#728, transitional):
+ * the switches `buildModules` and the module factories it calls choose by,
+ * the log level (`logger.mts`) and `mfa.mode` (the posture on session
+ * admission). Phase one parses these paths and nothing else — boot validates
+ * the whole configuration — so a module a deployment adds to `buildModules`
+ * that reads its configuration when it is built adds the paths it reads here
+ * (or passes them to `readSwitches` as `reads`). Held to what the template
+ * reads by `two-phase-config.test.mts`.
  */
-export function readSwitches(ownFiles: readonly string[], options: ResolveOptions = {}): AppConfig {
-	return readTransitionalConfig(resolveLayers(ownFiles, [coreReference()], options));
+export const SWITCHES: readonly string[] = [
+	"logging",
+	"mfa.mode",
+	"federations",
+	"federationGrants.enabled",
+	"federationGrantStore.adapter",
+	"federationGrantIntentStore.adapter",
+	"federationTokenStore.type",
+	"rateLimiter.adapter",
+	"userSessionStores.adapter",
+	"accessTokenDenylist.adapter",
+	"replaySeenSet.adapter",
+	"consentStore.adapter",
+	"session.storage",
+	"repositories.code",
+	"oauth.code.adapter",
+	"oauth.grants",
+	"oauth.accessToken",
+];
+
+export interface SwitchesOptions extends ResolveOptions {
+	/** Paths read beside `SWITCHES`: what a module a deployment adds reads when it is built. */
+	readonly reads?: readonly string[];
+}
+
+/**
+ * Phase one, transitional (#728): the switches (`SWITCHES`, and `reads`) from
+ * the template's own files over core's `reference.conf` alone, read with core's
+ * `readTransitionalConfig` — each parsed with the schema core declares at its
+ * path, everything else as written. Use it for those choices only.
+ *
+ * Phase one sees nothing a package's `reference.conf` alone sets: before the
+ * modules are known, no package's reference is layered. A switch whose
+ * default only a package ships reads as unset here; set it in the template's
+ * own files. It goes when the switches move into the template's own section,
+ * the only one read before the modules are chosen (#728 B5).
+ */
+export function readSwitches(
+	ownFiles: readonly string[],
+	options: SwitchesOptions = {},
+): AppConfig {
+	return readTransitionalConfig(resolveLayers(ownFiles, [coreReference()], options), [
+		...SWITCHES,
+		...(options.reads ?? []),
+	]);
 }
 
 /**

@@ -368,17 +368,24 @@ describe("the configuration createApp is handed reaches every loaded module whol
 	});
 
 	it("reads the device grant's switch in phase one as the operator wrote it, so the grant registers (#472)", () => {
+		// A deployment that adds the device grant to the template's modules
+		// reads its switch before boot too: `deviceGrantModule({ config })`
+		// decides from it whether the grant exists.
 		const operator = join(mkdtempSync(join(tmpdir(), "full-set-472-")), "device.conf");
 		writeFileSync(
 			operator,
-			`oauth.deviceAuthorization {\n  enabled = true\n  verification-uri = "${ISSUER}/device"\n}\n`,
+			`oauth.deviceAuthorization {\n  enabled = \${?DEVICE_GRANT_ENABLED}\n  verification-uri = "${ISSUER}/device"\n}\n`,
 		);
-		const switches = readSwitches([operator, ...ownFiles()], { env: SINGLE_ENV });
+		const reads = ["oauth.deviceAuthorization.enabled"];
+		const switches = readSwitches([operator, ...ownFiles()], {
+			env: { ...SINGLE_ENV, DEVICE_GRANT_ENABLED: "true" },
+			reads,
+		});
 		expect(contributionNames(deviceGrantModule({ config: switches }), "grants")).toEqual([
 			DEVICE_CODE_GRANT_TYPE,
 		]);
 		// And off where nothing says on: the grant is opt-in.
-		const unset = readSwitches(ownFiles(), { env: SINGLE_ENV });
+		const unset = readSwitches([operator, ...ownFiles()], { env: SINGLE_ENV, reads });
 		expect(contributionNames(deviceGrantModule({ config: unset }), "grants")).toEqual([]);
 	});
 

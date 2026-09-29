@@ -54,7 +54,7 @@ const handle = await createApp({
 const config = handle.components.config; // boot がパースしたもの
 ```
 
-各セクションがモジュール名の下に移るまで — #728 の移動 PR — core のスキーマは他パッケージが所有するセクション（`oauth.mtls`、`oauth.dpop`、`oauth.deviceAuthorization`、`webauthn`、`memoryRateLimiter` / `redisRateLimiter`、`redis*` のストア名前空間）をまだミラーしており、boot は設定がそれを持つたびに、それを読むモジュールが読み込まれているかどうかにかかわらず検証します。composition root がモジュールを知る前に読まなければならないもの — モジュールを選ぶスイッチ、ログレベル — は `readTransitionalConfig(resolved)`（[`src/config/composed.mts`](src/config/composed.mts)）で読みます: その base だけを、書かれたものの上に重ねたものです。これは過渡的なもので、それらのスイッチが composition root 自身のセクションに移った時点でなくなります。standalone テンプレートの [`app.mts`](../../templates/standalone/src/app.mts) は、ちょうどこの二段階で設定を読みます。
+各セクションがモジュール名の下に移るまで — #728 の移動 PR — core のスキーマは他パッケージが所有するセクション（`oauth.mtls`、`oauth.dpop`、`oauth.deviceAuthorization`、`webauthn`、`memoryRateLimiter` / `redisRateLimiter`、`redis*` のストア名前空間）をまだミラーしており、boot は設定がそれを持つたびに、それを読むモジュールが読み込まれているかどうかにかかわらず検証します。composition root がモジュールを知る前に読まなければならないもの — モジュールを選ぶスイッチ、ログレベル — は、自分のファイルを core の `reference.conf` だけの上に重ねて解決し（`coreReference()`: まだモジュールを知らないので、どのパッケージの reference も分かりません）、`readTransitionalConfig(resolved, paths)`（[`src/config/composed.mts`](src/config/composed.mts)）で読みます: 指定した各パスを core の base がそこに宣言するスキーマでパースし、それ以外は書かれたまま検査しません — 検査するのは boot です。したがってこの第一段階は、パッケージの `reference.conf` だけが設定するものを見ず、パッケージの reference が補うセクションを読んではいけません。これは過渡的なもので、それらのスイッチが composition root 自身のセクションに移った時点でなくなります。standalone テンプレートの [`app.mts`](../../templates/standalone/src/app.mts) は、ちょうどこの二段階で設定を読みます。
 
 `AppConfigSchema` は非推奨です。`createApp` の前にこれでパースすると、宣言していないセクションがすべて取り除かれ — #472、#495、#496 はそうしてセクションを失いました — それを続ける構成は、解決したものより少ないものを boot に渡すことになります。export は残り、そこから推論される型 `AppConfig` はパース済みの設定の型です。
 
@@ -337,7 +337,7 @@ import {
 } from "@o3co/auth-provider-core";
 
 // boot より前にこの構成が読むもの。rawConfig は createApp 自身がパースする（#728）。
-const config = readTransitionalConfig(rawConfig);
+const config = readTransitionalConfig(rawConfig, ["http.port", "oauth.jwt.signingKey", "repositories"]);
 
 // repositories.*（'type' セレクター）と oauth.jwt.signingKey（'provider' セレクター）は同じ入れ子の
 // アダプターサブセクション形式に従う。flatten() はどちらも { type, ...サブセクションフィールド } に正規化してから factory に渡す:

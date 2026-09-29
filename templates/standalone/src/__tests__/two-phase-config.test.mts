@@ -161,8 +161,10 @@ describe("phase one reads its switches and nothing else", () => {
 		const { config, reads } = recording(
 			withSessionRequirements(readSwitches(ownFiles("production"), { env })),
 		);
+		// The posture on session admission is derived above, as `app.mts`
+		// derives it; `buildModules` and the logger read the result.
 		createAppLogger(config);
-		buildModules(withSessionRequirements(config), { environment: "production" });
+		buildModules(config, { environment: "production" });
 		const covered = (path: string) =>
 			SWITCHES.some(
 				(switchPath) =>

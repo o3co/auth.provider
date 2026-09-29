@@ -30,14 +30,15 @@
  * 3. then by the modules' own `configSchema`s, and by each module's section
  *    schema at its path, which boot writes back there.
  *
- * {@link readTransitionalConfig} is step 1 and 2 alone, for the one read a
- * composition root still makes before it knows its modules. Both go when the
+ * {@link readTransitionalConfig} is step 1 and 2 over the paths a composition
+ * root reads before it knows its modules, alone. Both go when the
  * move pull requests have taken each mirrored section out of core's schema
  * and the composition root reads only its own section first (#728).
  */
 
 import type { z } from "zod";
 import { type AppConfig, CoreConfigSchema, fullSectionsSchema } from "./application.schema.mjs";
+import { pickConfigSchema } from "./schema-path.mjs";
 
 /**
  * The transitional base of boot's one composed parse (#728): core's own
@@ -122,26 +123,36 @@ export function operatorPath(path: readonly PropertyKey[]): string {
 
 /**
  * What a composition root reads before it knows its modules (#728,
- * transitional): `raw` — the configuration it resolved — parsed with the
- * transitional base and laid over what was written, so it reads every switch
- * with the coercions it always got and a key no schema declares is kept.
+ * transitional): the values at `reads` — the switches it chooses its modules
+ * by, its log level — each parsed with the schema core's transitional base
+ * declares at that path (`pickConfigSchema`), with the coercions it always
+ * got, and laid over `raw`, the configuration it resolved, so every key it
+ * does not read stays as written.
+ *
+ * Only `reads` is parsed. Boot parses the whole configuration once, over
+ * every loaded package's `reference.conf`, and refuses what is wrong there;
+ * before the modules are known, a composition root resolves its own files
+ * over core's `reference.conf` alone, so a default only a package's reference
+ * sets is not in `raw` yet — and a section it completes (an operator's
+ * `rateLimit.limit` whose `windowSeconds` the package ships) would be refused
+ * here, though boot accepts it. Read no such section here.
  *
  * Use its answer to choose the modules, and for what the root needs before
- * boot (the log level); hand `createApp` the resolved configuration itself,
- * which boot parses once with the modules' schemas too. It goes when the
+ * boot; hand `createApp` the resolved configuration itself. It goes when the
  * composition root's switches move into its own section, the only one read
  * before the modules are chosen.
  *
- * A value the base refuses is a `RangeError` naming each operator path, with
- * the Zod error as its `cause`.
+ * A read value the schema refuses is a `RangeError` naming each operator path,
+ * with the Zod error as its `cause`; so is a path the base does not declare as
+ * one schema.
  */
-export function readTransitionalConfig(raw: unknown): AppConfig {
-	const result = TransitionalConfigSchema.safeParse(raw);
+export function readTransitionalConfig(raw: unknown, reads: readonly string[]): AppConfig {
+	const result = pickConfigSchema(TransitionalConfigSchema, reads).safeParse(raw);
 	if (!result.success) {
 		const issues = result.error.issues as readonly z.core.$ZodIssue[];
 		throw new RangeError(
 			`Config validation failed — ${issues.length} issue(s) found: ${issues
-				.map((issue) => `${operatorPath(issue.path)}: ${issue.message}`)
+				.map((issue) => `${operatorPath(issue.path) || "(the configuration)"}: ${issue.message}`)
 				.join("; ")}`,
 			{ cause: result.error },
 		);
