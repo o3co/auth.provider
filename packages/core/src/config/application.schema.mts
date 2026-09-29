@@ -1795,8 +1795,10 @@ export const fullSectionsSchema = z.object({
 		})
 		.optional(),
 	// SF-10 (v0.5.3): module-internal config for `memoryRateLimiterModule`.
-	// Declared here so AppConfigSchema preserves HOCON/env overrides before
-	// module schema validation applies its defaults. Defaults live in HOCON.
+	// Declared here so that, before #728, `AppConfigSchema` preserved HOCON/env
+	// overrides before module schema validation applied its defaults; it stays
+	// for its coercions and bounds, which boot's composed parse applies.
+	// Defaults live in HOCON.
 	memoryRateLimiter: z
 		.object({
 			limits: z.record(z.string(), rateLimitSpecSchema).optional(),
@@ -2059,7 +2061,8 @@ export const fullSectionsSchema = z.object({
 			// `defaultExpiresIn` is the Redis PX TTL (seconds) for OAuth
 			// authorization codes. Constrained to a positive integer: a bad
 			// env-var override (`CLIENT_CODE_DEFAULT_EXPIRES_IN=0`, `="-1"`,
-			// non-numeric) fails AppConfigSchema parse at boot rather than
+			// non-numeric) fails boot's composed parse (this schema's check,
+			// #728) rather than
 			// silently propagating to a Redis PX call that errors per
 			// request. Mirrored at the module configSchema level + at the
 			// `RedisCodeRepository` constructor for defense in depth.
