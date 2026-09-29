@@ -83,6 +83,7 @@ import {
 } from "../federations/transaction.mjs";
 import {
 	abandonCookieSession,
+	admissionUnavailable,
 	SESSION_STORE_UNAVAILABLE,
 	USER_DIRECTORY_UNAVAILABLE,
 } from "../internal/cookieSession.mjs";
@@ -623,7 +624,7 @@ export const createRouter = (
 			log,
 		);
 		if (admission.outcome === "unavailable") {
-			return res.status(503).json(SESSION_STORE_UNAVAILABLE);
+			return res.status(503).json(admissionUnavailable(admission.store));
 		}
 		// Not live, revoked, a requirement not met — or one asking for a
 		// step-up, which the callback has no page to return to.
@@ -1473,7 +1474,7 @@ export const createRouter = (
 					logger.child({ provider: provider.name }),
 				);
 				if (admission.outcome === "unavailable") {
-					return res.status(503).json(SESSION_STORE_UNAVAILABLE);
+					return res.status(503).json(admissionUnavailable(admission.store));
 				}
 				if (admission.outcome === "step_up") {
 					return res.status(403).json(stepUpRequired(admission));

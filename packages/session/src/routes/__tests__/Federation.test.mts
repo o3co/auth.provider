@@ -1106,9 +1106,10 @@ describe("account linking across federations (#482)", () => {
 			});
 			const res = await callback(await plantAndGetAgent(app));
 			expect(res.status).toBe(503);
+			// Admission's read: core's describeAdmissionOutage words it.
 			expect(res.body).toEqual({
 				error: "temporarily_unavailable",
-				error_description: "Session store unavailable",
+				error_description: "session store unavailable",
 			});
 			expect(repo.linkFederatedIdentity).not.toHaveBeenCalled();
 		});

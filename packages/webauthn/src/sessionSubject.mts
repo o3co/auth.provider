@@ -29,7 +29,8 @@
  * record to (the README requires an opaque `userId`; the answer is held to
  * the subject's shape, and one that is not is `500 server_error`, logged
  * once as `webauthn_session_subject_invalid`); `unavailable` is
- * `503 temporarily_unavailable`, logged once by admission; `step_up` is
+ * `503 temporarily_unavailable`, described by what failed (core's
+ * `describeAdmissionOutage`), logged once by admission; `step_up` is
  * `403 step_up_required` with the requirement and its page; a browser that
  * is not signed in passes on untouched (a bearer bridge's subject stands);
  * every other outcome clears any subject an earlier middleware set, and the
@@ -49,6 +50,7 @@ import {
 	consoleLogger,
 	cookieClaim,
 	defineModule,
+	describeAdmissionOutage,
 	loggableError,
 	type Module,
 	SUBJECT_REVOCATION_ABSENCE_POLICY,
@@ -147,7 +149,7 @@ export function webauthnSessionSubjectModule(options: WebAuthnSessionSubjectOpti
 						if (admission.outcome === "unavailable") {
 							res.status(503).json({
 								error: "temporarily_unavailable",
-								error_description: "session store unavailable",
+								error_description: describeAdmissionOutage(admission.store),
 							});
 							return;
 						}

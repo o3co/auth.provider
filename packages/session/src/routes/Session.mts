@@ -63,6 +63,7 @@ import {
 } from "../csrf.mjs";
 import { establishSession } from "../establish-session.mjs";
 import {
+	admissionUnavailable,
 	SESSION_STORE_UNAVAILABLE,
 	USER_DIRECTORY_UNAVAILABLE,
 } from "../internal/cookieSession.mjs";
@@ -508,7 +509,8 @@ export const createRouter = (
 					}),
 				);
 				if (admission.outcome === "unavailable") {
-					return res.status(503).json(SESSION_STORE_UNAVAILABLE);
+					// Only a requirement reports an outage here: the requirement's words.
+					return res.status(503).json(admissionUnavailable(admission.store));
 				}
 				if (admission.outcome === "interrupt") {
 					// A requirement interrupted the login: regenerate, open its
