@@ -135,7 +135,6 @@ were tagged by series; prefix expansions are the campaign's own shorthand,
 
 - **D-1** — Code/CodeData identity binding: identity + grantedScope persist on the authorization-code record; policy evaluated once at `/authorize`; session-side binding removed [verified]
 - **D-2 v2** — standalone ioredis unification: one externally-owned client via `standaloneRedisClientsModule` (supersedes the uncited v1 design; pairs with Wave 5d) [verified]
-- **D-3** — close SF-11 by documentation rather than `Object.freeze()` on AdapterFactory ("wrong-layer framing") [reconstructed — the resolution document was never committed and is lost]
 - **D-4** — structured `Logger` interface + ComponentMap `logger` slot (six levels, consoleLogger fallback) [verified]
 - **D-5** — `BuilderContext.lifecycle`: boot-planner-owned LifecycleRegistrar drives `dispose()`; **D-5 v2** — redis adapters expose no dispose; the consumer owns the client lifecycle [verified / reconstructed]
 - **D-6** — client-authentication redesign (with PB-2): `clientAuthMw` resolves the client via `findById`; no body-spoofable identity; `azp` = authenticated client; RT bound to authorized party [verified]
@@ -157,7 +156,7 @@ OR-1 standalone wires the Redis RT-family store (in-memory broke multi-replica r
 
 ### SF-* — security findings
 
-SF-1 central JWT `typ` enforcement / `legacyTypAccept` (default flipped by Phase G S2) · SF-3 corrupt PKCE code records no longer pass (S256 and plain) · SF-4 advisory-lock check-then-delete race (=OR-13) · SF-5 token-exchange policy scope ⊆ request set · SF-6 RTs lacking jti/family_id no longer skip rotation (replay-detection bypass) · SF-8 `/introspect` returns `token_type: "Bearer"` and accepts access tokens only · SF-10 bounded in-memory rate-limiter bucket map · SF-12 federation refresh post-lock re-read guard (no `?? ""` fallback) · SF-13 federation refresh error mapping for openid-client v6 structured errors — [verified]; SF-11 AdapterFactory returned-object mutability handled by documentation (per D-3) — [reconstructed]
+SF-1 central JWT `typ` enforcement / `legacyTypAccept` (default flipped by Phase G S2) · SF-3 corrupt PKCE code records no longer pass (S256 and plain) · SF-4 advisory-lock check-then-delete race (=OR-13) · SF-5 token-exchange policy scope ⊆ request set · SF-6 RTs lacking jti/family_id no longer skip rotation (replay-detection bypass) · SF-8 `/introspect` returns `token_type: "Bearer"` and accepts access tokens only · SF-10 bounded in-memory rate-limiter bucket map · SF-12 federation refresh post-lock re-read guard (no `?? ""` fallback) · SF-13 federation refresh error mapping for openid-client v6 structured errors — [verified]
 
 ### MIN-* — minor findings
 
