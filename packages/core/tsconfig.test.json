@@ -69,7 +69,8 @@
 		// with vitest.config.mts.
 		"src/token-settings/**/*.mts",
 		"src/browser-session/**/*.mts",
-		"src/deployment/**/*.mts"
+		"src/deployment/**/*.mts",
+		"src/ratelimit/__tests__/rateLimiter.contract.test.mts"
 	],
 	"exclude": ["node_modules", "dist"]
 }
