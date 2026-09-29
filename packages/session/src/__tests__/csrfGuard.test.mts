@@ -49,6 +49,7 @@ import express, { type Request, type Response } from "express";
 import request from "supertest";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
+	type CsrfProtection,
 	createCsrfGuard,
 	createCsrfProtectionFromConfig,
 	createSessionCsrfGuard,
@@ -129,15 +130,26 @@ const run = async (
 };
 
 describe("the guard's middleware answers and logs as createCsrfGuard does", () => {
-	const cases: ReadonlyArray<readonly [string, Record<string, string>]> = [
-		["a foreign Origin", { origin: "https://attacker.example" }],
-		["no origin signal and no token", {}],
-		["a token with no cookie", { "x-csrf-token": "1.aaaaaaaaaaaaaaaaaaaa.bbbbbbbbbbbbbbbbbbbb" }],
-	];
+	/** Each refused request, as the headers it carries, built over the guard's own token mechanism. */
+	const cases: ReadonlyArray<readonly [string, (csrf: CsrfProtection) => Record<string, string>]> =
+		[
+			["a foreign Origin", () => ({ origin: "https://attacker.example" })],
+			["a foreign Referer with no Origin", () => ({ referer: "https://attacker.example/page" })],
+			["no origin signal and no token", () => ({})],
+			[
+				"a token with no cookie",
+				() => ({ "x-csrf-token": "1.aaaaaaaaaaaaaaaaaaaa.bbbbbbbbbbbbbbbbbbbb" }),
+			],
+			[
+				"a cookie and a header carrying two different tokens, each well signed",
+				(csrf) => ({ cookie: `${csrf.cookieName}=${csrf.mint()}`, [csrf.headerName]: csrf.mint() }),
+			],
+		];
 
-	it.each(cases)("%s: the same status, body and warn line", async (_what, headers) => {
+	it.each(cases)("%s: the same status, body and warn line", async (_what, headersFor) => {
 		const session = sessionSlice();
 		const csrf = createCsrfProtectionFromConfig(session);
+		const headers = headersFor(csrf);
 		const slotLogger = spyLogger();
 		const direct = spyLogger();
 		const guard = createSessionCsrfGuard({
