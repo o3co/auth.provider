@@ -129,29 +129,22 @@ function issued(guard: CsrfGuard): {
 }
 
 /**
- * `token` with one letter or digit changed for another of its class — the
- * first found from `from` in the direction `step` — so the token keeps its
- * shape and loses its signature.
+ * The character each letter or digit is changed for: the next of its own
+ * class, hexadecimal digits kept among themselves, so a token keeps its
+ * shape — base64url, hexadecimal, decimal — and loses its signature.
  */
+const NEXT_OF_ITS_CLASS: ReadonlyMap<string, string> = new Map(
+	["0123456789", "abcdef", "ghijklmnopqrstuvwxyz", "ABCDEFGHIJKLMNOPQRSTUVWXYZ"].flatMap((group) =>
+		[...group].map((c, i) => [c, group.charAt((i + 1) % group.length)] as const),
+	),
+);
+
+/** `token` with one letter or digit changed — the first found from `from` in the direction `step`. */
 function tampered(token: string, from: number, step: 1 | -1): string {
-	for (let i = from; i >= 0 && i < token.length; i += step) {
-		const c = token.charAt(i);
-		const swapped = /[0-9]/.test(c)
-			? c === "0"
-				? "1"
-				: "0"
-			: /[a-z]/.test(c)
-				? c === "a"
-					? "b"
-					: "a"
-				: /[A-Z]/.test(c)
-					? c === "A"
-						? "B"
-						: "A"
-					: undefined;
-		if (swapped !== undefined) return `${token.slice(0, i)}${swapped}${token.slice(i + 1)}`;
-	}
-	throw new Error(`the token ${token} has no letter or digit to change`);
+	let at = from;
+	while (at >= 0 && at < token.length && !NEXT_OF_ITS_CLASS.has(token.charAt(at))) at += step;
+	assert.ok(at >= 0 && at < token.length, `the token ${token} has no letter or digit to change`);
+	return `${token.slice(0, at)}${NEXT_OF_ITS_CLASS.get(token.charAt(at))}${token.slice(at + 1)}`;
 }
 
 const refusedFor = (
@@ -528,10 +521,10 @@ const originOf = (raw: string): string | undefined => {
 	}
 };
 
+/** A header as Express reads it (`req.get`), when it carries anything. */
 const headerOf = (req: Request, name: string): string | undefined => {
-	const value = req.headers?.[name];
-	const first = Array.isArray(value) ? value[0] : value;
-	return typeof first === "string" && first.length > 0 ? first : undefined;
+	const value = req.get(name);
+	return typeof value === "string" && value.length > 0 ? value : undefined;
 };
 
 const cookieOf = (req: Request, name: string): string | undefined => {
@@ -582,8 +575,7 @@ export function createTestCsrfGuard(options: TestCsrfGuardOptions = {}): CsrfGua
 	/** Whether `claimed` — an Origin or a Referer — names this origin or a trusted one. */
 	const ownOrTrusted = (req: Request, claimed: string): boolean => {
 		const origin = originOf(claimed);
-		const host = headerOf(req, "host") ?? req.host;
-		const own = host === undefined ? undefined : originOf(`${req.protocol}://${host}`);
+		const own = originOf(`${req.protocol}://${req.host}`);
 		return origin !== undefined && (origin === own || trusted.has(origin));
 	};
 
@@ -595,11 +587,10 @@ export function createTestCsrfGuard(options: TestCsrfGuardOptions = {}): CsrfGua
 				: { outcome: "refused", reason: "foreign_origin" };
 		}
 		const cookie = cookieOf(req, cookieName);
-		const body = (req as { body?: unknown }).body;
-		const fromBody =
-			typeof body === "object" && body !== null
-				? (body as Record<string, unknown>)[BODY_FIELD]
-				: undefined;
+		// `Object(…)` reads an absent body as an empty one.
+		const fromBody = (Object((req as { body?: unknown }).body) as Record<string, unknown>)[
+			BODY_FIELD
+		];
 		const echoed =
 			headerOf(req, HEADER_NAME) ??
 			(typeof fromBody === "string" && fromBody.length > 0 ? fromBody : undefined);

@@ -75,6 +75,8 @@ import type {
 	Establishment,
 	InterruptAdmission,
 	InterruptionAnswer,
+	RequirementInterruption,
+	RequirementVerdict,
 	SessionRequirement,
 } from "../../session-admission/requirement.mjs";
 import type { ContractCase } from "../../session-admission/testing/requirement.contract.mjs";
@@ -136,6 +138,20 @@ async function establishment(): Promise<Establishment> {
 	return (admission as { readonly establishment: Establishment }).establishment;
 }
 
+/** A member of a fixture requirement that answers `value`, whatever it is asked. */
+const answering =
+	<T,>(value: T) =>
+	async (): Promise<T> =>
+		value;
+
+/** A ceremony that answers the requirement's `403` and notes each session id it is opened on. */
+const ceremony =
+	(opened: string[]) =>
+	async (sessionId: string): Promise<InterruptionAnswer> => {
+		opened.push(sessionId);
+		return ANSWER;
+	};
+
 /** A password login a requirement interrupts, the ceremony `open` stands for. */
 async function interruption(
 	open: (sessionId: string) => Promise<InterruptionAnswer>,
@@ -146,8 +162,8 @@ async function interruption(
 		stepUpPage: undefined,
 		remediations: [],
 		hintKeys: [],
-		admit: async () => ({ outcome: "met" }),
-		admitPrimary: async () => ({ open: (sessionId) => open(sessionId) }),
+		admit: answering<RequirementVerdict>({ outcome: "met" }),
+		admitPrimary: answering<RequirementInterruption>({ open: (sessionId) => open(sessionId) }),
 	};
 	const admission = await admitPrimary(admissionDeps([requirement]), primary());
 	assert.equal(admission.outcome, "interrupt", "core did not interrupt the login");
@@ -157,25 +173,40 @@ async function interruption(
 /** The record a reporter for `establishSession` is built for. */
 type ReportedRecord = { readonly sid: string | undefined; readonly sub: string };
 
+/** A report a reporter for `establishSession` was given: an outage, a failed rollback step, or a lost index write. */
+type EstablishmentReport = readonly [
+	kind: "unavailable" | "cleanup" | "index",
+	store: string,
+	step: string,
+];
+
 /** A reporter for `establishSession` that records every record it is built for and every report. */
 function establishmentReporter(): {
 	readonly reporter: (record: ReportedRecord) => LoginEstablishmentReporter;
 	readonly built: ReportedRecord[];
-	readonly unavailable: Array<readonly [string, string]>;
+	readonly reports: EstablishmentReport[];
+	/** The outages reported, as `[store, step]`. */
+	readonly unavailable: () => Array<readonly [string, string]>;
 } {
 	const built: ReportedRecord[] = [];
-	const unavailable: Array<readonly [string, string]> = [];
+	const reports: EstablishmentReport[] = [];
 	return {
 		built,
-		unavailable,
+		reports,
+		unavailable: () =>
+			reports.filter(([kind]) => kind === "unavailable").map(([, store, step]) => [store, step]),
 		reporter: (record) => {
 			built.push({ sid: record?.sid, sub: record?.sub });
 			return {
 				storeUnavailable: (store, step) => {
-					unavailable.push([store, step]);
+					reports.push(["unavailable", store, step]);
 				},
-				cleanupFailed: () => {},
-				subjectIndexWriteFailed: () => {},
+				cleanupFailed: (store, step) => {
+					reports.push(["cleanup", store, step]);
+				},
+				subjectIndexWriteFailed: () => {
+					reports.push(["index", "subject_session_index", "add_sid"]);
+				},
 			};
 		},
 	};
@@ -225,7 +256,7 @@ export function loginCompletionContract(
 					const completion = build();
 					const before = records?.();
 					const { req, session } = fakeRequest();
-					const { reporter, built, unavailable } = establishmentReporter();
+					const { reporter, built, reports } = establishmentReporter();
 					await assert.rejects(
 						completion.establishSession(forged as unknown as Establishment, { req, reporter }),
 						RangeError,
@@ -238,7 +269,7 @@ export function loginCompletionContract(
 					);
 					assert.equal(session.saved, 0, "the session was saved for a forged establishment");
 					assert.deepEqual(
-						unavailable,
+						reports,
 						[],
 						"a forged establishment is the caller's fault, not an outage",
 					);
@@ -257,10 +288,14 @@ export function loginCompletionContract(
 				const held = records?.();
 				const { req, session } = fakeRequest();
 				const before = sessionIdOf(req);
-				const { reporter, built, unavailable } = establishmentReporter();
+				const { reporter, built, reports } = establishmentReporter();
 				const result = await completion.establishSession(await establishment(), { req, reporter });
 				assert.equal(result.outcome, "established", `answered ${result.outcome}`);
-				assert.deepEqual(unavailable, [], "an established login reported an outage");
+				assert.deepEqual(
+					reports,
+					[],
+					"an established login reported an outage, a failed rollback or a lost index write",
+				);
 				assert.equal(
 					session.regenerated,
 					1,
@@ -318,7 +353,11 @@ export function loginCompletionContract(
 						{ outcome: "unavailable", store: "cookie_session", step },
 						`a cookie session whose ${step} fails is answered as its outage`,
 					);
-					assert.deepEqual(unavailable, [["cookie_session", step]], "the outage is reported once");
+					assert.deepEqual(
+						unavailable(),
+						[["cookie_session", step]],
+						"the outage is reported once",
+					);
 					if (records !== undefined) {
 						assert.equal(records(), held, `the ${step} failure left a session record behind`);
 					}
@@ -344,7 +383,11 @@ export function loginCompletionContract(
 					reporter,
 				});
 				assert.deepEqual(result, { outcome: "unavailable", store: "user_session", step: "create" });
-				assert.deepEqual(unavailable, [["user_session", "create"]], "the outage is reported once");
+				assert.deepEqual(
+					unavailable(),
+					[["user_session", "create"]],
+					"the outage is reported once",
+				);
 				if (records !== undefined) {
 					assert.equal(records(), held, "a session-store outage left a session record behind");
 				}
@@ -361,21 +404,11 @@ export function loginCompletionContract(
 		{
 			name: "answerInterruption refuses, before the session is touched, an interruption core did not answer",
 			run: async () => {
-				let opened = 0;
-				const real = await interruption(async () => {
-					opened++;
-					return ANSWER;
-				});
+				const opened: string[] = [];
+				const real = await interruption(ceremony(opened));
 				for (const forged of [
 					{ ...real },
-					{
-						outcome: "interrupt",
-						requirement: REQUIREMENT,
-						open: async () => {
-							opened++;
-							return ANSWER;
-						},
-					},
+					{ outcome: "interrupt", requirement: REQUIREMENT, open: ceremony(opened) },
 				]) {
 					const { req, session } = fakeRequest();
 					const { res, record } = fakeResponse();
@@ -396,7 +429,7 @@ export function loginCompletionContract(
 					);
 					assert.equal(record.ended, false, "a forged interruption was answered");
 					assert.deepEqual(unavailable, []);
-					assert.equal(opened, 0, "a forged interruption's ceremony was opened");
+					assert.deepEqual(opened, [], "a forged interruption's ceremony was opened");
 				}
 			},
 		},
@@ -404,10 +437,7 @@ export function loginCompletionContract(
 			name: "an interruption is answered with the requirement's 403, its ceremony opened on the regenerated session, saved and not signed in",
 			run: async () => {
 				const opened: string[] = [];
-				const admission = await interruption(async (sessionId) => {
-					opened.push(sessionId);
-					return ANSWER;
-				});
+				const admission = await interruption(ceremony(opened));
 				const { req, session } = fakeRequest();
 				const before = sessionIdOf(req);
 				const { res, record } = fakeResponse();
@@ -539,6 +569,12 @@ const UNAVAILABLE = Object.freeze({
 export interface RecordingLoginCompletionOptions {
 	/** The deployment's CSRF guard: `answerInterruption` issues the `403`'s fresh token through it. */
 	readonly csrfGuard?: CsrfGuard;
+	/**
+	 * `false` for a completion over no session store — the session package's
+	 * composition without a `UserSessionStore`: no record is written and no
+	 * `sid` answered. A session record per login by default.
+	 */
+	readonly sessionRecords?: boolean;
 }
 
 /**
@@ -558,6 +594,8 @@ export function createRecordingLoginCompletion(
 	let storeFailure: { readonly error: unknown } | undefined;
 	let records = 0;
 	let made = 0;
+	/** The records a login writes: one, or none over no session store. */
+	const writes = options.sessionRecords === false ? 0 : 1;
 
 	return {
 		get establishments() {
@@ -584,29 +622,29 @@ export function createRecordingLoginCompletion(
 			established = Object.freeze([...established, establishment]);
 			const { subject: sub, user, redirectTo } = establishment.primary;
 			made++;
-			const sid = `recording-sid-${made}`;
+			const sid = writes === 0 ? undefined : `recording-sid-${made}`;
 			const report = reporter({ sid, sub });
 			if (storeFailure !== undefined) {
 				report.storeUnavailable("user_session", "create", storeFailure.error);
 				return { outcome: "unavailable", store: "user_session", step: "create" };
 			}
-			records++;
+			records += writes;
 			const regenerated = await sessionOperation("regenerate", req);
 			if (regenerated.failed) {
 				report.storeUnavailable("cookie_session", "regenerate", regenerated.cause);
-				records--;
+				records -= writes;
 				abandon(req);
 				return { outcome: "unavailable", store: "cookie_session", step: "regenerate" };
 			}
 			const session = cookieSessionOf(req) as CookieSession;
 			session.isAuthenticated = true;
 			session.user = user;
-			session.sid = sid;
+			if (sid !== undefined) session.sid = sid;
 			if (redirectTo) session.redirectTo = redirectTo;
 			const saved = await sessionOperation("save", req);
 			if (saved.failed) {
 				report.storeUnavailable("cookie_session", "save", saved.cause);
-				records--;
+				records -= writes;
 				abandon(req);
 				return { outcome: "unavailable", store: "cookie_session", step: "save" };
 			}

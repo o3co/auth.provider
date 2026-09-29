@@ -17,7 +17,7 @@
 /**
  * The request and response the slot contract suites drive a component over,
  * without a server: the part of Express's a component of these slots is
- * held to. A request carries its headers (`headers`, `get`, `header`), its
+ * held to. A request carries its headers (`headers`, `get`), its
  * own origin (`protocol`, `host`, `hostname`), a path, a parsed body,
  * and an express session — `session` with `regenerate` and `save` as
  * express-session has them, and `sessionID` — whose regenerations and saves
@@ -61,7 +61,6 @@ export interface FakeRequestOptions {
 type FakeSession = Record<string, unknown> & {
 	regenerate(done: (err?: unknown) => void): void;
 	save(done: (err?: unknown) => void): void;
-	destroy(done: (err?: unknown) => void): void;
 };
 
 /** A request with an anonymous express session, as express-session hands every request one. */
@@ -89,11 +88,9 @@ export function fakeRequest(options: FakeRequestOptions = {}): {
 		headers,
 		body: { ...(options.body ?? {}) },
 		query: {},
-		get(name: string): string | undefined {
-			return headers[name.toLowerCase()];
-		},
-		header(name: string): string | undefined {
-			return headers[name.toLowerCase()];
+		/** Express's accessor, over the headers of the object it is called on — a copy's own, when a test copies the request. */
+		get(this: { readonly headers: Record<string, string> }, name: string): string | undefined {
+			return this.headers[name.toLowerCase()];
 		},
 		sessionID: "contract-session-0",
 		session: undefined as FakeSession | undefined,
@@ -122,12 +119,6 @@ export function fakeRequest(options: FakeRequestOptions = {}): {
 					}
 					record.saved++;
 					record.lastSaved = Object.freeze({ ...session });
-					done();
-				},
-			},
-			destroy: {
-				value: (done: (err?: unknown) => void) => {
-					req.session = undefined;
 					done();
 				},
 			},
