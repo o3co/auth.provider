@@ -102,14 +102,34 @@ const TODAY: readonly string[] = [
 	"mfa: MFA_TOTP_ISSUER at mfa.factors.totp.issuer",
 	"webauthn: WEBAUTHN_AUTHENTICATION_OPTIONS_RATE_LIMIT at webauthn.rateLimit.authenticationOptions.limit",
 	"webauthn: WEBAUTHN_AUTHENTICATION_OPTIONS_RATE_WINDOW_SECONDS at webauthn.rateLimit.authenticationOptions.windowSeconds",
+	"template: CLIENT_TYPE at repositories.client.type",
+	"template: CLIENT_PATH at repositories.client.yaml.path",
+	"template: CLIENT_USER_TYPE at repositories.user.type",
+	"template: CLIENT_USER_AUTHENTICATE_URL at repositories.user.http.authenticateUrl",
+	"template: CLIENT_USER_AUTHENTICATE_BY_TOKEN_URL at repositories.user.http.authenticateByTokenUrl",
+	"template: CLIENT_USER_LINK_FEDERATED_IDENTITY_URL at repositories.user.http.linkFederatedIdentityUrl",
+	"template: CLIENT_USER_FIND_SUBJECT_BY_FEDERATED_IDENTITY_URL at repositories.user.http.findSubjectByFederatedIdentityUrl",
+	"template: CLIENT_USER_BEARER_TOKEN at repositories.user.http.bearerToken",
+	"template: CLIENT_USER_TIMEOUT at repositories.user.http.timeout",
+	"template: CLIENT_USER_MAX_RESPONSE_BYTES at repositories.user.http.maxResponseBytes",
+	"template: CLIENT_CODE_TYPE at repositories.code.type",
+	"template: CLIENT_CODE_DEFAULT_EXPIRES_IN at repositories.code.memory.defaultExpiresIn",
+	"template: CLIENT_CODE_DEFAULT_EXPIRES_IN at repositories.code.redis.defaultExpiresIn",
+	"template: CLIENT_CODE_ENDPOINT_URI at repositories.code.redis.endpointUri",
+	"template: CLIENT_CODE_PASSWORD at repositories.code.redis.password",
 ];
 
-/** A path in upper snake case: each key split at its capitals and hyphens, the keys joined by `_`. */
+/**
+ * A path in upper snake case: each key split at its capitals and hyphens — a
+ * run of capitals is one word, split from a capitalised word after it — and
+ * the keys joined by `_`.
+ */
 const upperSnake = (path: string): string =>
 	path
 		.split(".")
 		.map((key) =>
 			key
+				.replace(/([A-Z]+)([A-Z][a-z])/g, "$1_$2")
 				.replace(/([a-z0-9])([A-Z])/g, "$1_$2")
 				.replace(/-/g, "_")
 				.toUpperCase(),
