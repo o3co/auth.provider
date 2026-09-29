@@ -197,3 +197,18 @@ describe("core barrel — the router's terminal error handler", () => {
 		expect(core.terminalErrorHandler(core.consoleLogger)).toHaveLength(4);
 	});
 });
+
+describe("core barrel — the trusted-proxy address vocabulary (#292)", () => {
+	it("re-exports what validates and matches an entry, and not the predicate nothing called", () => {
+		for (const name of [
+			"checkTrustedProxyEntry",
+			"createTrustedProxyMatcher",
+			"describeTrustedProxyEntryRejection",
+		] as const) {
+			expect(typeof (core as Record<string, unknown>)[name], name).toBe("function");
+		}
+		expect(core.TRUSTED_PROXY_NAMED_RANGES.length).toBeGreaterThan(0);
+		// `checkTrustedProxyEntry(value) === null` is the one reading.
+		expect(Object.hasOwn(core, "isTrustedProxyEntry")).toBe(false);
+	});
+});
