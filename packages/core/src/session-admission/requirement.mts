@@ -32,6 +32,7 @@
  */
 
 import type { AuditSink } from "../audit/types.mjs";
+import { isWellFormedErrorCode } from "../errors/envelope.mjs";
 import { FEDERATED_AMR, PASSWORD_AMR } from "../grants/authenticationClaims.mjs";
 import type { Logger } from "../logging/Logger.mjs";
 import type { RecordedAuthentication } from "../user-sessions/authentication.mjs";
@@ -573,8 +574,11 @@ export type RegisteredRequirement = SessionRequirement;
 
 /**
  * `value` as it is registered (D3): its shape held to the contract — a
- * non-empty `name` that is none of {@link ADMISSION_INFRASTRUCTURE_STORES},
- * `remediations` the requirement's own routes
+ * `name` of RFC 6749's error-code characters (`isWellFormedErrorCode`, the
+ * rule `/oauth/token` sends a `step_up` under: printable ASCII without `"`
+ * or `\`, at least one) that is none of
+ * {@link ADMISSION_INFRASTRUCTURE_STORES}, `remediations` the requirement's
+ * own routes
  * (`checkRemediations`: `<name>.<route>`, each once), a `stepUpPage` that
  * is a page when present
  * (`checkStepUpPage`, on `issuer`'s origin when one is given), `hintKeys`
@@ -599,6 +603,15 @@ export function registeredRequirement(value: unknown, issuer?: string): Register
 	const name = value.name;
 	if (!isNonEmptyString(name)) {
 		throw new RangeError("a session requirement's name must be a non-empty string");
+	}
+	// A `step_up` names the requirement on the wire, under RFC 6749's grammar
+	// for an error code: a name outside it would be dropped there, and the
+	// client left without the remediation. Quoted escaped: it may hold a
+	// control character.
+	if (!isWellFormedErrorCode(name)) {
+		throw new RangeError(
+			`session requirement ${JSON.stringify(name)}: the name must be RFC 6749's error-code characters — printable ASCII without " or \\ — the only ones a step_up is sent in`,
+		);
 	}
 	const refuse = (what: string): never => {
 		throw new RangeError(`session requirement "${name}": ${what}`);

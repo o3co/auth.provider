@@ -826,7 +826,9 @@ export const createOAuthRouter = async (
 				// by a step-up names the requirement beside `invalid_grant`, so an
 				// updated client can offer it (the MFA ADR's D16 row) — beside
 				// `invalid_grant` alone, the one error it qualifies. A requirement's
-				// name, held to the same character set as `error`.
+				// name, held to the same character set as `error`: core refuses to
+				// register one outside it (the same `isWellFormedErrorCode`), and a
+				// grant built by hand may set any `step_up`, so it is checked again.
 				const stepUp = error === "invalid_grant" ? stepUpOf(result) : undefined;
 				if (stepUp !== undefined && isWellFormedErrorCode(stepUp)) errorBody.step_up = stepUp;
 				// Copilot review: do NOT inject `WWW-Authenticate: Bearer` here.
