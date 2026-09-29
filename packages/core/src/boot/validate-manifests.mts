@@ -33,6 +33,11 @@
 import { z } from "zod";
 import type { AppConfig } from "../config/application.schema.mjs";
 import { composeConfigSchema } from "../config/application.schema.mjs";
+import {
+	findRelocatedKeys,
+	type RelocatedPath,
+	relocatedKeyMessage,
+} from "../config/removed-keys.mjs";
 import type { ComponentKey, ComponentMap } from "../modules/manifest/component-map.mjs";
 import type {
 	FederationInstance,
@@ -1951,20 +1956,61 @@ function checkReservedComponentKeys(
 	});
 }
 
+/** Whether `value` is a dot-separated path of non-empty keys. */
+const isKeyPath = (value: unknown): value is string =>
+	typeof value === "string" && value.split(".").every((key) => key.length > 0);
+
+/** One old path a module's section moved from, as boot reads its `relocatedFrom`. */
+interface SectionRelocation extends RelocatedPath {
+	readonly module: string;
+	/** The old path as the manifest wrote it. */
+	readonly entry: string;
+}
+
 /**
- * Every `section.at` is a dot-separated path of non-empty keys. `""`,
- * `"a..b"`, `".a"` and `"a."` — or a value that is not a string — name no
- * section anyone wrote. Throws `module-section-path-invalid`: a string is
- * quoted in the message, anything else named by its type — rendering it could
- * throw (a bigint, a cyclic object) before the refusal exists — and the value
- * itself is in `details.at`.
+ * A module's `relocatedFrom` as relocations: each old path, and the path it
+ * moved to — the section's path as it is read today (`sectionSegmentsOf`)
+ * followed by the entry's path inside it (none for a list entry, or a map
+ * entry of `""`). Read after `checkModuleSectionPaths` held its shape.
+ */
+function sectionRelocationsOf(m: Module): readonly SectionRelocation[] {
+	const relocatedFrom = m.section?.relocatedFrom;
+	if (relocatedFrom === undefined) return [];
+	const section = sectionSegmentsOf(m);
+	const entries: readonly (readonly [string, string])[] = Array.isArray(relocatedFrom)
+		? relocatedFrom.map((from: string) => [from, ""] as const)
+		: Object.entries(relocatedFrom as Readonly<Record<string, string>>);
+	return entries.map(([from, inside]) => ({
+		module: m.name,
+		entry: from,
+		from: from.split("."),
+		to: inside === "" ? section : [...section, ...inside.split(".")],
+	}));
+}
+
+/**
+ * Every section path a manifest writes is one it can have written (#728),
+ * for every module:
+ *
+ * - `section.at` is a dot-separated path of non-empty keys. `""`, `"a..b"`,
+ *   `".a"` and `"a."` — or a value that is not a string — name no section
+ *   anyone wrote. A string is quoted in the message, anything else named by
+ *   its type — rendering it could throw (a bigint, a cyclic object) before
+ *   the refusal exists — and the value itself is in `details.at`.
+ * - `section.relocatedFrom` is a list of such paths, or a map from such paths
+ *   to `""` or such a path inside the section; and no old path is, or holds,
+ *   a loaded module's section — its own or another's — which a
+ *   configuration that sets that section would then be refused for.
+ *   `details.relocatedFrom` names the entry, or the value when it is neither
+ *   form, and `details.problem` what is wrong with it.
+ *
+ * Throws `module-section-path-invalid`.
  * @internal
  */
 function checkModuleSectionPaths(rawModules: readonly Module[]): void {
 	for (const m of rawModules) {
 		const at: unknown = m.section?.at;
-		if (at === undefined) continue;
-		if (typeof at === "string" && at.split(".").every((key) => key.length > 0)) continue;
+		if (at === undefined || isKeyPath(at)) continue;
 		const shown = typeof at === "string" ? JSON.stringify(at) : `a ${typeof at}`;
 		throw new BootError({
 			message: `Module "${m.name}" declares its section at ${shown}, which is not a dot-separated path of non-empty keys.`,
@@ -1973,6 +2019,94 @@ function checkModuleSectionPaths(rawModules: readonly Module[]): void {
 			details: { reason: "module-section-path-invalid", module: m.name, at },
 		});
 	}
+	const refusal = (m: Module, relocatedFrom: unknown, problem: string): BootError => {
+		const shown =
+			typeof relocatedFrom === "string"
+				? JSON.stringify(relocatedFrom)
+				: `a ${typeof relocatedFrom}`;
+		return new BootError({
+			message: `Module "${m.name}" declares its section moved from ${shown}: ${problem}.`,
+			reason: "module-section-path-invalid",
+			stage: "validateManifests",
+			details: { reason: "module-section-path-invalid", module: m.name, relocatedFrom, problem },
+		});
+	};
+	const sections = rawModules
+		.filter((m) => m.section !== undefined)
+		.map((m) => ({ module: m.name, path: sectionSegmentsOf(m) }));
+	for (const m of rawModules) {
+		const relocatedFrom: unknown = m.section?.relocatedFrom;
+		if (relocatedFrom === undefined) continue;
+		let entries: readonly (readonly [unknown, unknown])[];
+		if (Array.isArray(relocatedFrom)) {
+			entries = relocatedFrom.map((from: unknown) => [from, ""] as const);
+		} else if (typeof relocatedFrom === "object" && relocatedFrom !== null) {
+			entries = Object.entries(relocatedFrom);
+		} else {
+			throw refusal(
+				m,
+				relocatedFrom,
+				"relocatedFrom is a list of old paths, or a map from each old path to its path in the section",
+			);
+		}
+		for (const [from, inside] of entries) {
+			if (!isKeyPath(from)) {
+				throw refusal(m, from, "an old path is a dot-separated path of non-empty keys");
+			}
+			if (inside !== "" && !isKeyPath(inside)) {
+				throw refusal(
+					m,
+					from,
+					'its new path is "" (the section itself) or a dot-separated path of non-empty keys inside the section',
+				);
+			}
+			const old = from.split(".");
+			const held = sections.find(
+				({ path }) => old.length <= path.length && old.every((key, i) => path[i] === key),
+			);
+			if (held !== undefined) {
+				throw refusal(
+					m,
+					from,
+					held.module === m.name
+						? "it is the path the section is read at, so every configuration that sets the section would be refused"
+						: `it holds the section of module "${held.module}", so every configuration that sets that section would be refused`,
+				);
+			}
+		}
+	}
+}
+
+/**
+ * A configuration still setting a key at or under a path a loaded module's
+ * section moved from refuses boot (#728 B10), before the configuration is
+ * parsed — the old path may be in no section any loaded module reads, and
+ * what a schema would make of its value is beside the point. Reads the
+ * configuration as it was handed to `createApp`. Every such key is named, in
+ * module order, with the path it moved to and the environment variable bound
+ * there (`findRelocatedKeys`, beside the removed-key refusals). Throws
+ * `config-path-relocated`.
+ * @internal
+ */
+function checkRelocatedConfigPaths(rawModules: readonly Module[], bootstrap: BootstrapMap): void {
+	const relocations = rawModules.flatMap(sectionRelocationsOf);
+	if (relocations.length === 0) return;
+	const found = findRelocatedKeys((bootstrap as { readonly config?: unknown }).config, relocations);
+	if (found.length === 0) return;
+	throw new BootError({
+		message: `Configuration sets ${found.length} path(s) that moved: ${found.map(relocatedKeyMessage).join(" ")}`,
+		reason: "config-path-relocated",
+		stage: "validateManifests",
+		details: {
+			reason: "config-path-relocated",
+			relocated: found.map(({ relocation, from, to, environmentVariable }) => ({
+				module: relocation.module,
+				from,
+				to,
+				...(environmentVariable === undefined ? {} : { environmentVariable }),
+			})),
+		},
+	});
 }
 
 // ---------------------------------------------------------------------------
@@ -2124,8 +2258,13 @@ export const STAGE_ONE_PRE_CONFIG_CHECKS: readonly StageOneCheck[] = freezeCheck
 	},
 	{
 		id: "module-section-paths",
-		spec: "issue #728 (a section's transitional path)",
+		spec: "issue #728 (a section's transitional path and the paths it moved from)",
 		run: (ctx) => checkModuleSectionPaths(ctx.rawModules),
+	},
+	{
+		id: "relocated-config-paths",
+		spec: "issue #728 (B10: a relocated path refuses boot)",
+		run: (ctx) => checkRelocatedConfigPaths(ctx.rawModules, ctx.bootstrapComponents),
 	},
 ]);
 

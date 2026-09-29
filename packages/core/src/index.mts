@@ -122,6 +122,7 @@ export type {
 	CircularDependencyDetails,
 	CleanupRecord,
 	CollectedRouteContribution,
+	ConfigPathRelocatedDetails,
 	ConfigValidationFailedDetails,
 	ContributeAndOverrideSameKeyDetails,
 	ContributeFactoryFailedDetails,
