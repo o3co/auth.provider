@@ -55,8 +55,8 @@ export interface FederationGrantAcquisitionSettings {
 	readonly connections: ReadonlyMap<string, FederationGrantAcquisitionConnection>;
 }
 
-const refuse = (message: string): never => {
-	throw new Error(`federationGrantsModule: ${message}`);
+const refuse = (message: string, options?: ErrorOptions): never => {
+	throw new Error(`federationGrantsModule: ${message}`, options);
 };
 
 const issuerOrigin = (config: unknown): string => {
@@ -149,10 +149,11 @@ const loginEntry = (entry: LoginEntry | undefined): LoginEntry => {
 	}
 	try {
 		void entry.url;
-	} catch {
+	} catch (error) {
 		return refuse(
 			"endpoints.login.url must be configured: the connect flow sends a browser that is not " +
 				"signed in to the login page, and back to the link it came from",
+			{ cause: error },
 		);
 	}
 	return entry;
