@@ -34,7 +34,17 @@
  *   `environment` option, and says once at boot when it accepted it.
  */
 
-import { defineModule, issuedRemediationActions, type MfaFactor } from "@o3co/auth-provider-core";
+import {
+	ADMISSION_ACTIONS,
+	createInMemoryUserSessionStore,
+	defineModule,
+	issuedRemediationActions,
+	type MfaFactor,
+	passwordSessionAuthentication,
+	requirementSession,
+	type UserSession,
+	type UserSessionStore,
+} from "@o3co/auth-provider-core";
 import { afterEach, describe, expect, it } from "vitest";
 import { MFA_DEVELOPMENT_SAMPLE_KEY } from "#/config.mjs";
 import { MFA_ROUTES_ID, mfaBootState, mfaModule, mfaModules } from "#/module.mjs";
@@ -336,5 +346,55 @@ describe("the development sample key (D11, #473's rule)", () => {
 	it("is not said for a key of the deployment's own", async () => {
 		const { logger } = await boot();
 		expect(events(logger, "warn")).not.toContain("mfa_development_sample_key_in_use");
+	});
+});
+
+// ---------------------------------------------------------------------------
+// A session store that cannot record a step-up
+// ---------------------------------------------------------------------------
+
+describe("a session store without recordSecondFactor (the MFA ADR's F2, D9, D20)", () => {
+	/** A store of the deployment's own that predates the step-up capability. */
+	const withoutStepUp = (): UserSessionStore => {
+		const { recordSecondFactor: _recordSecondFactor, ...store } = createInMemoryUserSessionStore();
+		return { ...store, kind: "legacy-sessions" };
+	};
+
+	it("is said once at boot — mfa_step_up_unsupported, naming the adapter kind — and a password session is sent to log in again where it would step up", async () => {
+		const { handle, logger } = await boot({ userSessionStore: withoutStepUp() });
+		const said = logger.warn.mock.calls.filter((call) => call[1] === "mfa_step_up_unsupported");
+		expect(said).toHaveLength(1);
+		expect(said[0]?.[0]).toMatchObject({ store: "userSessionStore", kind: "legacy-sessions" });
+		const registered = handle.components.sessionRequirementResolver?.get("mfa");
+		const session: UserSession = {
+			sid: "sid-1",
+			sub: "u-alice",
+			authTime: new Date(),
+			createdAt: new Date(),
+			expiresAt: new Date(Date.now() + 60_000),
+			claims: {},
+			...passwordSessionAuthentication(),
+		};
+		expect(
+			await registered?.admit({
+				session: {
+					sid: session.sid,
+					sub: session.sub,
+					authTime: session.authTime,
+					expiresAt: session.expiresAt,
+				},
+				authentication: requirementSession(session),
+				carrier: "cookie",
+				subject: session.sub,
+				action: ADMISSION_ACTIONS["oauth.authorize"],
+				asks: undefined,
+				now: new Date(),
+			}),
+		).toEqual({ outcome: "reauthenticate" });
+	});
+
+	it("is not said for a store that records a step-up", async () => {
+		const { logger } = await boot();
+		expect(events(logger, "warn")).not.toContain("mfa_step_up_unsupported");
 	});
 });

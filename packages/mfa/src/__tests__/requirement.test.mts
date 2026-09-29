@@ -85,6 +85,8 @@ function build(
 		readonly factors?: MfaFactor[];
 		readonly factorStore?: MfaFactorStore;
 		readonly transactionStore?: MfaTransactionStore;
+		/** Whether the session store can record a step-up (`supportsSecondFactorUpdate`); it can, by default. */
+		readonly stepUpRecordable?: boolean;
 	} = {},
 ): Built {
 	const transactionStore = options.transactionStore ?? createMemoryMfaTransactionStore();
@@ -98,6 +100,7 @@ function build(
 			now: () => NOW,
 		}),
 		stepUpPage: PAGE,
+		stepUpRecordable: options.stepUpRecordable ?? true,
 	});
 	return { requirement, transactionStore };
 }
@@ -538,6 +541,31 @@ describe("admit — D6's table under mfa.mode, with owner decision 1's rows", ()
 	it.each(rows)("$row", async ({ mode, input, factors, expected }) => {
 		const { requirement } = build(mode, factors === undefined ? {} : { factors });
 		expect(await requirement.admit(input)).toEqual(expected);
+	});
+});
+
+describe("admit — a step-up only where the session store can record one (the MFA ADR's F2, D20)", () => {
+	it("sends a password session to log in again, where the table steps it up, when the store cannot record a second factor", async () => {
+		const { requirement } = build("required", { stepUpRecordable: false });
+		expect(await requirement.admit(about(password()))).toEqual(REAUTHENTICATE);
+		expect(await requirement.admit(about(password(), LINK))).toEqual(REAUTHENTICATE);
+		expect(await requirement.admit(about(password(), ADMISSION_ACTIONS["device.approve"]))).toEqual(
+			REAUTHENTICATE,
+		);
+	});
+
+	it("changes nothing else: met stays met, unmet stays unmet, a token is judged as before", async () => {
+		const { requirement } = build("required", { stepUpRecordable: false });
+		expect(await requirement.admit(about(password(["pwd", "otp", "mfa"], minutesAgo(1))))).toEqual(
+			MET,
+		);
+		expect(await requirement.admit(about(federated()))).toEqual(MET);
+		expect(await requirement.admit(about(password(), ADMISSION_ACTIONS["device.deny"]))).toEqual(
+			MET,
+		);
+		expect(await requirement.admit(aboutToken(["pwd"]))).toEqual(UNMET);
+		const nothing = build("required", { stepUpRecordable: false, factors: [] }).requirement;
+		expect(await nothing.admit(about(password()))).toEqual(UNMET);
 	});
 });
 

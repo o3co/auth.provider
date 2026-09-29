@@ -157,6 +157,7 @@ const realRequirement = (
 			ttlSeconds: 600,
 		}),
 		stepUpPage: PAGE,
+		stepUpRecordable: true,
 	});
 
 const storeOf = (session: UserSession): UserSessionStore => ({
