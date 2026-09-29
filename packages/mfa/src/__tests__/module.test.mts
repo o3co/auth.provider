@@ -444,11 +444,15 @@ describe("the factors' sections are the factors' modules' to read (the module re
 			{ totp: { enabled: "yes" } },
 			undefined,
 		]) {
-			await boot({
+			const { handle } = await boot({
 				config: configFor("required", { factors }),
 				withoutTotpModule: true,
 				extraModules: [contributing(stubFactor("webauthn", ["hwk", "swk"]))],
 			});
+			expect(
+				[...(handle.components.sessionRequirementResolver?.get("mfa")?.reach ?? [])].sort(),
+				JSON.stringify(factors),
+			).toEqual(["hwk", "mfa", "swk"]);
 		}
 	});
 
