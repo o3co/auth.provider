@@ -50,8 +50,10 @@ import type {
 import { makeValidCoreConfig } from "#/testing/fixtures/valid-config.mjs";
 import {
 	createRecordingLoginCompletion,
+	createTestCsrfGuard,
 	type LoginCompletionContractInput,
 	loginCompletionContract,
+	type RecordingLoginCompletion,
 	resolverForTests,
 } from "#/testing/index.mjs";
 
@@ -78,13 +80,35 @@ const withOutage = () => {
 	return completion;
 };
 
-/** The names of the cases the completion `build` makes fails. */
-const failing = async (
-	build: LoginCompletionContractInput["build"],
-	outage: LoginCompletionContractInput["withSessionStoreOutage"] = withOutage,
-): Promise<string[]> => {
+/** The deployment's CSRF guard the completions below issue a fresh token through. */
+const GUARD = createTestCsrfGuard();
+
+/**
+ * The suite's whole input over the recording double: its completions issue
+ * a fresh token through `GUARD`, their session records are counted, and
+ * each is `wrap`ped; `over` replaces any of it.
+ */
+const inputOver = (
+	wrap: (original: RecordingLoginCompletion) => LoginCompletion = (completion) => completion,
+	over: Partial<LoginCompletionContractInput> = {},
+): LoginCompletionContractInput => {
+	let last: RecordingLoginCompletion | undefined;
+	return {
+		build: () => {
+			last = createRecordingLoginCompletion({ csrfGuard: GUARD });
+			return wrap(last);
+		},
+		withSessionStoreOutage: withOutage,
+		records: () => last?.records ?? 0,
+		csrfCookieName: GUARD.cookieName,
+		...over,
+	};
+};
+
+/** The names of the cases `input` fails. */
+const failing = async (input: LoginCompletionContractInput): Promise<string[]> => {
 	const failed: string[] = [];
-	for (const { name, run } of loginCompletionContract({ build, withSessionStoreOutage: outage })) {
+	for (const { name, run } of loginCompletionContract(input)) {
 		try {
 			await run();
 		} catch {
@@ -97,11 +121,21 @@ const failing = async (
 /** The double with one of its methods replaced by `change`, which may call the original. */
 const broken = (
 	change: (original: LoginCompletion) => Partial<LoginCompletion>,
-): (() => LoginCompletion) => {
-	return () => {
-		const original = createRecordingLoginCompletion();
-		return { ...original, ...change(original) };
-	};
+): LoginCompletionContractInput => inputOver((original) => ({ ...original, ...change(original) }));
+
+/** `broken`, with `leak` session records counted beside the double's own. */
+const leaking = (
+	change: (original: LoginCompletion, leak: () => void) => Partial<LoginCompletion>,
+): LoginCompletionContractInput => {
+	let leaked = 0;
+	const input = inputOver((original) => ({
+		...original,
+		...change(original, () => {
+			leaked++;
+		}),
+	}));
+	const records = input.records as () => number;
+	return { ...input, records: () => records() + leaked };
 };
 
 const primary = (subject = "user-1") =>
@@ -188,6 +222,13 @@ describe("the loginCompletion slot", () => {
 		// are the provider's.
 		expectTypeOf<keyof LoginEstablishmentCall>().toEqualTypeOf<"req" | "reporter">();
 		expectTypeOf<keyof LoginInterruptionCall>().toEqualTypeOf<"req" | "res" | "reporter">();
+		expectTypeOf<LoginCompletionContractInput["records"]>().toEqualTypeOf<
+			(() => number) | undefined
+		>();
+		expectTypeOf<LoginCompletionContractInput["csrfCookieName"]>().toEqualTypeOf<
+			string | undefined
+		>();
+		expectTypeOf<RecordingLoginCompletion["records"]>().toEqualTypeOf<number>();
 		expect(true).toBe(true);
 	});
 
@@ -230,10 +271,7 @@ describe("the loginCompletion slot", () => {
 });
 
 describe("loginCompletionContract — the recording double", () => {
-	const cases = loginCompletionContract({
-		build: () => createRecordingLoginCompletion(),
-		withSessionStoreOutage: withOutage,
-	});
+	const cases = loginCompletionContract(inputOver());
 
 	it("names every rule", () => {
 		expect(cases.map((c) => c.name)).toEqual([
@@ -255,6 +293,15 @@ describe("loginCompletionContract — the recording double", () => {
 
 	it.each(cases)("$name", async ({ run }) => {
 		await run();
+	});
+
+	it("keeps them with no CSRF guard, and with no records counted", async () => {
+		expect(
+			await failing({
+				build: () => createRecordingLoginCompletion(),
+				withSessionStoreOutage: withOutage,
+			}),
+		).toEqual([]);
 	});
 });
 
@@ -305,6 +352,25 @@ describe("createRecordingLoginCompletion", () => {
 			reporter: { storeUnavailable: () => {} },
 		});
 		expect(completion.interruptions).toEqual([interrupted]);
+	});
+
+	it("holds a session record per login it established, and issues the 403's fresh token through the guard it is given", async () => {
+		const cookies: string[] = [];
+		const guard = { ...GUARD, issue: () => (cookies.push("issued"), "token") };
+		const completion = createRecordingLoginCompletion({ csrfGuard: guard });
+		const admission = await admitPrimary(deps([]), primary());
+		if (admission.outcome !== "establish") throw new Error("nothing interrupts");
+		await completion.establishSession(admission.establishment, {
+			req: requestWithSession(),
+			reporter: silentReporter,
+		});
+		completion.failSessionStore(new Error("down"));
+		await completion.establishSession(admission.establishment, {
+			req: requestWithSession(),
+			reporter: silentReporter,
+		});
+		expect(completion.records).toBe(1);
+		expect(cookies).toEqual([]);
 	});
 
 	it("stands in for a session store that is down until it recovers", async () => {
@@ -446,9 +512,9 @@ describe("loginCompletionContract — each way a completion can break it", () =>
 				},
 			};
 		};
-		expect(await failing(() => createRecordingLoginCompletion(), regeneratingAnyway)).toContain(
-			RULES.storeOutage,
-		);
+		expect(
+			await failing(inputOver(undefined, { withSessionStoreOutage: regeneratingAnyway })),
+		).toContain(RULES.storeOutage);
 	});
 
 	it("accepting an interruption core did not answer", async () => {
@@ -550,5 +616,143 @@ describe("loginCompletionContract — each way a completion can break it", () =>
 				})),
 			),
 		).toContain(RULES.interruptionOutage);
+	});
+	it("a forged establishment that writes a record, or builds a reporter, before it is refused", async () => {
+		expect(
+			await failing(
+				leaking((original, leak) => ({
+					establishSession: async (establishment, call) => {
+						if (!isEstablishment(establishment)) {
+							leak();
+							throw new RangeError("not core's");
+						}
+						return original.establishSession(establishment, call);
+					},
+				})),
+			),
+		).toContain(RULES.forgedEstablishment);
+		expect(
+			await failing(
+				broken((original) => ({
+					establishSession: async (establishment, call) => {
+						call.reporter({ sid: undefined, sub: "forged" });
+						return original.establishSession(establishment, call);
+					},
+				})),
+			),
+		).toContain(RULES.forgedEstablishment);
+	});
+
+	it("an established login that writes no record, or two", async () => {
+		expect(
+			await failing(
+				leaking((original, leak) => ({
+					establishSession: async (establishment, call) => {
+						const result = await original.establishSession(establishment, call);
+						if (result.outcome === "established") leak();
+						return result;
+					},
+				})),
+			),
+		).toContain(RULES.established);
+	});
+
+	it("a reporter built for another record, or more than once", async () => {
+		expect(
+			await failing(
+				broken((original) => ({
+					establishSession: (establishment, call) =>
+						original.establishSession(establishment, {
+							...call,
+							reporter: (record) => call.reporter({ ...record, sid: "another-sid" }),
+						}),
+				})),
+			),
+		).toContain(RULES.established);
+		expect(
+			await failing(
+				broken((original) => ({
+					establishSession: (establishment, call) =>
+						original.establishSession(establishment, {
+							...call,
+							reporter: (record) => {
+								call.reporter(record);
+								return call.reporter(record);
+							},
+						}),
+				})),
+			),
+		).toContain(RULES.established);
+	});
+
+	it("a cookie-session outage that leaves the session record behind", async () => {
+		expect(
+			await failing(
+				leaking((original, leak) => ({
+					establishSession: async (establishment, call) => {
+						const result = await original.establishSession(establishment, call);
+						if (result.outcome === "unavailable" && result.store === "cookie_session") leak();
+						return result;
+					},
+				})),
+			),
+		).toContain(RULES.cookieOutage);
+	});
+
+	it("a forged interruption whose ceremony is opened before it is refused", async () => {
+		expect(
+			await failing(
+				broken((original) => ({
+					answerInterruption: async (admission, call) => {
+						if (!isInterruptAdmission(admission)) {
+							await (admission as InterruptAdmission).open("forged").catch(() => undefined);
+							throw new RangeError("not core's");
+						}
+						return original.answerInterruption(admission, call);
+					},
+				})),
+			),
+		).toContain(RULES.forgedInterruption);
+	});
+
+	it("a 403 without the fresh CSRF token, or a fresh token on a 503", async () => {
+		expect(
+			await failing(
+				inputOver(undefined, {
+					build: () => createRecordingLoginCompletion(),
+					records: undefined,
+				}),
+			),
+		).toContain(RULES.interrupted);
+		expect(
+			await failing(
+				broken((original) => ({
+					answerInterruption: async (admission, call) => {
+						const result = await original.answerInterruption(admission, call);
+						if (result.outcome === "unavailable") GUARD.issue(call.res);
+						return result;
+					},
+				})),
+			),
+		).toContain(RULES.interruptionOutage);
+	});
+
+	it("keeps them when a 503 also clears the token's cookie and marks the response, as Express lets a provider", async () => {
+		expect(
+			await failing(
+				broken((original) => ({
+					answerInterruption: async (admission, call) => {
+						const result = await original.answerInterruption(admission, call);
+						if (result.outcome === "unavailable") {
+							call.res.clearCookie(GUARD.cookieName, { path: "/" });
+							call.res.vary("Cookie");
+							call.res.append("Cache-Control", "no-store");
+							call.res.type("json");
+						}
+						return result;
+					},
+				})),
+			),
+		).toEqual([]);
 	});
 });
