@@ -21,9 +21,11 @@
  * `urlFor` to the protocol `/authorize` and the federation-grants connect
  * flow send a browser by today: `redirect_to` added once to the page's own
  * query, `&`-joined when the page has one, the target encoded whole so that
- * its query and fragment never read as the page's. `createTestLoginEntry`
- * keeps it for the page it is given, `/login` by default. Published on
- * `@o3co/auth-provider-core/testing`.
+ * its query and fragment never read as the page's; for a page with a
+ * fragment, `redirect_to` joins the query before it and the fragment is
+ * kept; and a page whose own query already carries `redirect_to` is refused
+ * when the entry is built. `createTestLoginEntry` keeps it for the page it is
+ * given, `/login` by default. Published on `@o3co/auth-provider-core/testing`.
  */
 
 import assert from "node:assert/strict";
@@ -41,6 +43,33 @@ export interface LoginEntryContractInput {
 const RETURN_PARAMETER = "redirect_to";
 
 const PAGES: readonly string[] = ["/login", "/login?tenant=acme", `${CONTRACT_ORIGIN}/sign-in`];
+
+/** Pages with a fragment of their own — one with a `?` inside the fragment alone. */
+const FRAGMENT_PAGES: readonly string[] = [
+	"/login#x",
+	"/login?tenant=acme#y",
+	`${CONTRACT_ORIGIN}/sign-in#a?b`,
+];
+
+/** Pages whose own query already carries `redirect_to`, as written or percent-encoded, with a value or none. */
+const CARRYING_PAGES: readonly string[] = [
+	"/login?redirect_to=https://x",
+	`${CONTRACT_ORIGIN}/sign-in?tenant=acme&redirect_to`,
+	"/login?redirect%5Fto=x#y",
+];
+
+/** `url` split at its first `#`: the page before it, and the fragment with its `#`. */
+const splitFragment = (url: string): readonly [string, string] => {
+	const at = url.indexOf("#");
+	return at === -1 ? [url, ""] : [url.slice(0, at), url.slice(at)];
+};
+
+/** Whether `url`'s own query, before any fragment, carries `redirect_to`. */
+const carriesReturnParameter = (url: string): boolean => {
+	const [page] = splitFragment(url);
+	const at = page.indexOf("?");
+	return at !== -1 && new URLSearchParams(page.slice(at + 1)).has(RETURN_PARAMETER);
+};
 
 const TARGETS: readonly string[] = [
 	`${CONTRACT_ORIGIN}/oauth/authorize?client_id=a&tenant=evil&scope=openid%20profile&state=x`,
@@ -112,6 +141,53 @@ export function loginEntryContract(input: LoginEntryContractInput): readonly Con
 			},
 		},
 		{
+			name: "urlFor adds redirect_to to a page's query before its fragment, and keeps the fragment",
+			run: async () => {
+				for (const page of FRAGMENT_PAGES) {
+					const entry = build(page);
+					const [before, fragment] = splitFragment(page);
+					const own = parse(before);
+					for (const target of TARGETS) {
+						const sent = entry.urlFor(target);
+						const [sentPage, sentFragment] = splitFragment(sent);
+						assert.equal(
+							sentFragment,
+							fragment,
+							`${sent} does not keep the page's fragment ${fragment}`,
+						);
+						assert.ok(
+							sentPage.startsWith(before),
+							`${sent} does not keep the page ${before} as written`,
+						);
+						const read = parse(sentPage);
+						assert.deepEqual(
+							read.searchParams.getAll(RETURN_PARAMETER),
+							[target],
+							`${sent} does not name ${target} as redirect_to in the page's query, once and whole`,
+						);
+						for (const name of new Set(own.searchParams.keys())) {
+							assert.deepEqual(
+								read.searchParams.getAll(name),
+								own.searchParams.getAll(name),
+								`${sent} changes the page's ${name}`,
+							);
+						}
+					}
+				}
+			},
+		},
+		{
+			name: "a page whose own query already carries redirect_to is refused when the entry is built",
+			run: async () => {
+				for (const page of CARRYING_PAGES) {
+					assert.throws(
+						() => build(page),
+						`an entry was built for ${page}, whose query already carries redirect_to: the page would receive two`,
+					);
+				}
+			},
+		},
+		{
 			name: "the login entry is frozen",
 			run: async () => {
 				const found = unfrozenPath(build(PAGES[0] as string), "the entry");
@@ -128,13 +204,20 @@ export function loginEntryContract(input: LoginEntryContractInput): readonly Con
 /**
  * A `LoginEntry` for `url` — the fixture configuration's `/login` by
  * default — joining `redirect_to` with `?`, or `&` to a page that has a
- * query, the target encoded whole. Frozen.
+ * query, before any fragment, the target encoded whole; a page whose own
+ * query carries `redirect_to` is refused. Frozen.
  */
 export function createTestLoginEntry(url = "/login"): LoginEntry {
-	const joiner = url.includes("?") ? "&" : "?";
+	if (carriesReturnParameter(url)) {
+		throw new TypeError(
+			`createTestLoginEntry: the login page must not carry "${RETURN_PARAMETER}" of its own, and was ${JSON.stringify(url)}`,
+		);
+	}
+	const [page, fragment] = splitFragment(url);
+	const joiner = page.includes("?") ? "&" : "?";
 	return Object.freeze({
 		url,
 		urlFor: (returnTo: string): string =>
-			`${url}${joiner}${RETURN_PARAMETER}=${encodeURIComponent(returnTo)}`,
+			`${page}${joiner}${RETURN_PARAMETER}=${encodeURIComponent(returnTo)}${fragment}`,
 	});
 }
