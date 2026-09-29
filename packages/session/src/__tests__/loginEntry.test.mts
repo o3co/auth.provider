@@ -165,7 +165,8 @@ describe("the session module provides loginEntry", () => {
 	it("boots with no login page configured: the entry fails only where it is read", async () => {
 		const seen: { entry?: LoginEntry } = {};
 		const base = makeValidAppConfig();
-		await boot({ ...base, endpoints: { login: {} } } as AppConfig, seen);
+		// Core's schema takes any string here, the empty one included.
+		await boot({ ...base, endpoints: { login: { url: "" } } } as AppConfig, seen);
 		expect(seen.entry).toBeDefined();
 		expect(() => seen.entry?.url).toThrow(/endpoints\.login\.url/);
 	});

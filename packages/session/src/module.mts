@@ -30,6 +30,7 @@ import {
 } from "./csrf.mjs";
 import { extractFederationSection } from "./federations/extract-federation-section.mjs";
 import { deriveFederationTransactionCookieName } from "./federations/transaction.mjs";
+import { loginEntryFromConfig } from "./login-entry.mjs";
 import * as federationRoutes from "./routes/Federation.mjs";
 import * as sessionRoutes from "./routes/Session.mjs";
 
@@ -186,6 +187,10 @@ export const sessionModule = defineModule<
 				logger: deps.logger ?? consoleLogger,
 			});
 		},
+		// The login page (`endpoints.login.url`) and the `redirect_to` protocol
+		// `/authorize` and the federation-grants connect flow send a browser
+		// there by. Built with no page configured, failing where it is read.
+		loginEntry: (deps) => loginEntryFromConfig(deps.config),
 	},
 	contributes: {
 		routes: [
