@@ -31,7 +31,7 @@ import {
 	type PrimaryContinuation,
 	passwordSessionAuthentication,
 } from "@o3co/auth-provider-core";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { createLoginTransactions } from "#/transactions.mjs";
 
 const NOW = 1_900_000_000_000;
@@ -121,6 +121,31 @@ describe("the login's transaction (D8)", () => {
 			enrollment: "required",
 			emailProof: "not_required",
 		});
+	});
+
+	it("offers no email proof before step 9 can require one: the type admits only false, and anything else is refused before a transaction is stored", async () => {
+		const store = createMemoryMfaTransactionStore();
+		const create = vi.fn(store.create);
+		const { transactions } = opened(600, { ...store, create });
+		const typed = () =>
+			transactions.open("sess-1", CONTINUATION, {
+				error: "mfa_enrollment_required",
+				enrollable: ["totp"],
+				// @ts-expect-error — the account-email proof is step 9's: until then the answer cannot advertise one the transaction does not require
+				emailProof: true,
+			});
+		await expect(typed()).rejects.toThrow(RangeError);
+		for (const emailProof of [true, "false", 0, undefined, null]) {
+			await expect(
+				transactions.open("sess-1", CONTINUATION, {
+					error: "mfa_enrollment_required",
+					enrollable: ["totp"],
+					emailProof: emailProof as never,
+				}),
+				String(emailProof),
+			).rejects.toThrow(/email_proof/);
+		}
+		expect(create).not.toHaveBeenCalled();
 	});
 
 	it("is named by 32 bytes from the CSPRNG, base64url, a new id each time", async () => {
