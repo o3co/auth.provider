@@ -49,6 +49,7 @@ import {
 	AUDIT_SINK_ABSENCE_POLICY,
 	admitSession,
 	type CookieCarrier,
+	checkResolver,
 	consoleLogger,
 	cookieClaim,
 	defineModule,
@@ -105,7 +106,9 @@ const refuseInvalidSubject = (res: Response): void => {
  * The module (the session-admission ADR's D8): requires the resolver and
  * the user-session store; takes `subjectRevocation`, `auditSink` and
  * `logger` when they are wired, the first two under their shared absence
- * policies. Throws a `TypeError` when `subjectFor` is not a function.
+ * policies. Throws a `TypeError` when `subjectFor` is not a function, and
+ * its route factory a `RangeError` for a resolver missing or not the
+ * planner's (core's `checkResolver`).
  */
 export function webauthnSessionSubjectModule(options: WebAuthnSessionSubjectOptions): Module {
 	if (typeof options !== "object" || options === null || typeof options.subjectFor !== "function") {
@@ -131,13 +134,19 @@ export function webauthnSessionSubjectModule(options: WebAuthnSessionSubjectOpti
 		contributes: {
 			routes: [
 				(deps) => {
+					// Refused here, when the route is built — a missing resolver, or
+					// one the planner did not build — not on the first request.
+					const requirements = checkResolver(
+						deps.sessionRequirementResolver,
+						"webauthnSessionSubjectModule",
+					);
 					const logger = deps.logger ?? consoleLogger;
 					const admitRegistration: RequestHandler = async (req, res, next) => {
 						const admission = await admitSession(
 							{
 								userSessionStore: deps.userSessionStore,
 								subjectRevocation: deps.subjectRevocation,
-								requirements: deps.sessionRequirementResolver,
+								requirements,
 								acrTable: NO_ACR_TABLE,
 								logger,
 								auditSink: deps.auditSink,
