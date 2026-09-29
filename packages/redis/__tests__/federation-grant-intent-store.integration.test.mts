@@ -284,7 +284,7 @@ describe("the Redis intent store, where the contract cannot look", () => {
 		await sweep();
 	});
 
-	it("will not re-park a flow whose parked consent was dropped (Codex on slice 6)", async () => {
+	it("will not re-park a flow whose parked consent was dropped", async () => {
 		// The intent's pointer says a challenge was issued; the key it names is
 		// gone. Parking a fresh one would bind the flow to whichever browser
 		// asked next, which the memory adapter refuses and so must this.

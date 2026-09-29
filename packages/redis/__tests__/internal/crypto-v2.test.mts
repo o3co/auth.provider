@@ -99,7 +99,7 @@ describe("the grant store's v2 and the token store's v1 pass each other by", () 
 		expect(openSealedCredential(v1, RING, RECORD)).toStrictEqual({ state: "unreadable" });
 	});
 
-	it("is not read by the v1 reader, which keeps working as it did", () => {
+	it("is not read by the v1 reader, which still opens a v1 envelope", () => {
 		const sealed = sealCredential("rt-1", RING, RECORD);
 		expect(() => decryptTokenField(sealed, key(2), RECORD)).toThrow(/envelope/);
 		// The session-bound store's records were sealed with v1.

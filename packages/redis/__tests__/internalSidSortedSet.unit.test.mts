@@ -77,7 +77,7 @@ describe("#291 — createRedisSidSortedSet.list pages by rank", () => {
 		expect(client.zRange).toHaveBeenCalledTimes(2);
 	});
 
-	it("preserves insertion order across page boundaries (load-bearing for A4 §5.4)", async () => {
+	it("preserves insertion order across page boundaries", async () => {
 		// `SessionFederationIndex.listFederations` order decides which IdP
 		// `routes/logout.mts` redirects to. Paging must not reorder it.
 		const members = Array.from({ length: 150 }, (_, i) => `idp-${i}`);

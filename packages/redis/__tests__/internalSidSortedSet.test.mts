@@ -167,7 +167,7 @@ describe("createRedisSidSortedSet", () => {
 
 	// OR-8: `_insertionCounter` is monotonic across restart.
 	describe("OR-8: _insertionCounter restart-monotonicity", () => {
-		it("RED-1: two add() calls with same expiresAt — second member sorts after first in list()", async () => {
+		it("two add() calls with same expiresAt — second member sorts after first in list()", async () => {
 			const z = createRedisSidSortedSet({ client, keyPrefix: prefix("or8-same-exp") });
 			const sharedExp = FUTURE();
 			await z.add("sid-or8-1", "first", sharedExp);
@@ -178,7 +178,7 @@ describe("createRedisSidSortedSet", () => {
 			expect(await z.list("sid-or8-1")).toEqual(["first", "second"]);
 		});
 
-		it("RED-2: post-restart simulation via fresh module load — first score from a freshly-imported module exceeds an injected high pre-crash baseline", async () => {
+		it("post-restart simulation via fresh module load — first score from a freshly-imported module exceeds an injected high pre-crash baseline", async () => {
 			// Earlier tests in this file advance the module-scoped
 			// `_insertionCounter`, so a low injected score would lose to the
 			// counter whatever it started at. `vi.resetModules()` + a dynamic
@@ -214,7 +214,7 @@ describe("createRedisSidSortedSet", () => {
 			expect(await z.list(sid)).toEqual(["pre-crash-high", "post-restart-fresh"]);
 		});
 
-		it("RED-3: module counter is shared across multiple createRedisSidSortedSet instances — interleaved adds get strictly increasing scores globally", async () => {
+		it("module counter is shared across multiple createRedisSidSortedSet instances — interleaved adds get strictly increasing scores globally", async () => {
 			const za = createRedisSidSortedSet({ client, keyPrefix: prefix("or8-shared-A") });
 			const zb = createRedisSidSortedSet({ client, keyPrefix: prefix("or8-shared-B") });
 			await za.add("sid-X", "a-1", FUTURE());
@@ -237,7 +237,7 @@ describe("createRedisSidSortedSet", () => {
 			expect(Number(scoreA2)).toBeLessThan(Number(scoreB2));
 		});
 
-		it("RED-4: a freshly-loaded module emits a first score that exceeds 10^12 (structural assertion of the Date.now() baseline, not a tautology)", async () => {
+		it("a freshly-loaded module emits a first score that exceeds 10^12 (structural assertion of the Date.now() baseline, not a tautology)", async () => {
 			// Exercises the module's actual init rather than `Date.now()`
 			// itself (`expect(Date.now() > 1e12)` would pass whatever the
 			// module does): `vi.resetModules()` re-evaluates the

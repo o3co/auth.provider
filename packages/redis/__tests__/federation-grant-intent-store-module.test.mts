@@ -25,7 +25,7 @@ import {
 
 const client = {} as FederationGrantIntentStoreClient;
 
-describe("the Redis federation grant intent store module (#593, slice 6)", () => {
+describe("the Redis federation grant intent store module", () => {
 	it("needs the client and the configuration, and says which slot it fills", () => {
 		expect(redisFederationGrantIntentStoreModule.name).toBe("redis-federation-grant-intent-store");
 		expect(redisFederationGrantIntentStoreModule.requires).toStrictEqual([

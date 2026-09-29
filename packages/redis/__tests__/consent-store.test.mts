@@ -325,7 +325,7 @@ describe("createRedisPendingConsentStore — what is Redis-specific (#561)", () 
 	});
 });
 
-describe("corrupt records read as absent, never as a throw or a half-typed record (#561 review)", () => {
+describe("corrupt records read as absent, never as a throw or a half-typed record", () => {
 	// Nothing this package writes is corrupt; a value edited by hand, restored
 	// from a mismatched backup or written by another version is. A record that
 	// is not the shape the port promises must not reach the consent route —
