@@ -48,15 +48,6 @@ import { normalizeAllowedOrigins } from "../net/origin.mjs";
 import type { InternalReadinessRegistrar } from "../readiness/types.mjs";
 import { failureDetail } from "./failure-summary.mjs";
 import { compositionDispatchPolicy, compositionIssuer } from "./oauth-token-settings.mjs";
-
-/** The issuer the CORS table's discovery paths derive from: the composition's, when it is a string. */
-const corsIssuerOptions = (
-	components: Readonly<Record<string, unknown>>,
-): { readonly issuer?: string } => {
-	const issuer = compositionIssuer(components);
-	return typeof issuer === "string" ? { issuer } : {};
-};
-
 import type {
 	AppHandle,
 	CleanupRecord,
@@ -75,6 +66,14 @@ import { BootError } from "./types.mjs";
  * @internal
  */
 type ExpressFactory = (() => Express) & { Router: () => Router };
+
+/** The issuer the CORS table's discovery paths derive from: the composition's, when it is a string. */
+const corsIssuerOptions = (
+	components: Readonly<Record<string, unknown>>,
+): { readonly issuer?: string } => {
+	const issuer = compositionIssuer(components);
+	return typeof issuer === "string" ? { issuer } : {};
+};
 
 // ---------------------------------------------------------------------------
 // Internal: post-apply route collision check (§5.6 pre-pass, MUST-FIX 2)

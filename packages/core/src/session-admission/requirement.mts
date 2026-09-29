@@ -632,7 +632,7 @@ function registeredPage(
 	const checked = checkStepUpPage(page, issuer);
 	if (issuer === undefined && checked.url.startsWith("/")) {
 		refuse(
-			`stepUpPage.url ${JSON.stringify(checked.url)} is a path, resolved on the issuer: none was given to register it on — boot registers on oauth.jwt.issuer; a test passes resolverForTests(requirements, { issuer })`,
+			`stepUpPage.url ${JSON.stringify(checked.url)} is a path, resolved on the issuer: none was given to register it on — boot registers on the oauthTokenSettings slot's issuer, or on oauth.jwt.issuer in a composition without one; a test passes resolverForTests(requirements, { issuer })`,
 		);
 	}
 	return Object.freeze({
