@@ -1652,9 +1652,11 @@ describe("the consent, when the world fails or moves", () => {
 		w.state.sessionsBoundary = new Error("down");
 		const unreadable = await w.page(challenge, "b-1");
 		expect(unreadable.status).toBe(503);
+		// Described by what could not answer, as every consumer of admission
+		// describes it (core's describeAdmissionOutage).
 		expect(unreadable.body).toEqual({
 			error: "temporarily_unavailable",
-			error_description: "storage",
+			error_description: "revocation store unavailable",
 		});
 		w.state.sessionsBoundary = null;
 
@@ -2567,7 +2569,7 @@ describe("consent — what an outage logs", () => {
 			expect(response.status).toBe(503);
 			expect(response.body).toEqual({
 				error: "temporarily_unavailable",
-				error_description: "storage",
+				error_description: "revocation store unavailable",
 			});
 			expect(written(await settledLines(w))).toEqual(["error session_admission_unavailable"]);
 			expect(payloadOf(w.lines, "session_admission_unavailable")).toEqual({
@@ -2577,6 +2579,30 @@ describe("consent — what an outage logs", () => {
 				store: "revocation_boundary",
 				action: "federation_grants.consent",
 				err: expect.objectContaining({ name: "Error", detail: "boundary down" }),
+			});
+		},
+	);
+
+	it.each(["GET", "POST"] as const)(
+		"describes an admission outage on %s by the store that could not answer, as every consumer of admission does — core's describeAdmissionOutage, in this route's envelope",
+		async (method) => {
+			const w = world();
+			const { challenge } = await asked(w);
+			w.state.faults.set("userSessionStore.get", 0);
+			const response =
+				method === "GET"
+					? await w.page(challenge, "b-1")
+					: await w.answer({ challenge, decision: "accept" }, "b-1");
+			expect(response.status).toBe(503);
+			expect(response.body).toEqual({
+				error: "temporarily_unavailable",
+				error_description: "session store unavailable",
+			});
+			expect(written(await settledLines(w))).toEqual(["error session_admission_unavailable"]);
+			expect(payloadOf(w.lines, "session_admission_unavailable")).toMatchObject({
+				method,
+				store: "user_session",
+				action: "federation_grants.consent",
 			});
 		},
 	);
@@ -3169,7 +3195,12 @@ describe("the browser half on session admission (the session-admission ADR's D8)
 		const challenge = await consenting.challengeFor(parked.handle, "b-1");
 		const read = await consenting.page(challenge, "b-1");
 		expect(read.status).toBe(503);
-		expect(read.body).toEqual({ error: "temporarily_unavailable", error_description: "storage" });
+		// A requirement's outage is described as one — never as the session
+		// store's, nor by the requirement's name, which is the operator's.
+		expect(read.body).toEqual({
+			error: "temporarily_unavailable",
+			error_description: "session requirement unavailable",
+		});
 
 		const returning = down("federation_grants.callback");
 		const a = await approved(returning, "b-1");
