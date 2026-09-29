@@ -30,7 +30,7 @@ import type { AppConfig } from "../../config/application.schema.mjs";
 import type { Logger } from "../../logging/Logger.mjs";
 import { defineModule } from "../../modules/manifest/index.mjs";
 import type { Module } from "../../modules/manifest/module-spec.mjs";
-import { makeValidCoreConfig } from "../../testing/fixtures/valid-config.mjs";
+import { makeValidAppConfig, makeValidCoreConfig } from "../../testing/fixtures/valid-config.mjs";
 import { createApp } from "../create-app.mjs";
 import type { BootstrapMap } from "../types.mjs";
 import { BootError } from "../types.mjs";
@@ -217,6 +217,21 @@ describe("a loaded module's section is never stripped", () => {
 			resolved({ "fixture-section": { retries: "3" } }),
 		);
 		expect(config["fixture-section"]).toEqual({ retries: 3 });
+	});
+
+	it("is laid over what is at its path, so a schema narrower than core's copy drops nothing", async () => {
+		// A section schema that reads one key of a section core mirrors whole:
+		// written back in place of the section, it would take every other key
+		// from every module reading `config`.
+		const session = makeValidAppConfig().session;
+		const seen: Record<string, unknown> = {};
+		const config = await bootAndRead(
+			[sectioned("narrow-session", z.object({ name: z.string() }), "session", seen)],
+			resolved({ session }),
+		);
+		expect(seen["narrow-session"]).toEqual({ name: session.name });
+		expect((config.session as Record<string, unknown>).secret).toBe(session.secret);
+		expect(Object.keys(config.session as object).sort()).toEqual(Object.keys(session).sort());
 	});
 
 	it("writes back what the schema makes of an absent section, and nothing when that is undefined", async () => {
