@@ -47,6 +47,28 @@ import { type AcrTable, SECOND_FACTOR_AMR } from "./acr.mjs";
 /** The one requirement that may reach or add a second-factor value, or a verification time (D3). */
 export const MFA_REQUIREMENT_NAME = "mfa";
 
+/**
+ * The stores admission reads itself, by the name an `unavailable` admission
+ * gives each one's outage (D10): the session store and the revocation
+ * boundary's. Every other `Admission.store` is a registered requirement's
+ * name, so no requirement is registered under one of these
+ * (`registeredRequirement`, D3): a consumer that tells an outage by its store
+ * — oauth describes each — never takes a requirement's for a store's.
+ */
+export const ADMISSION_INFRASTRUCTURE_STORES = Object.freeze([
+	"user_session",
+	"revocation_boundary",
+] as const);
+
+/** A store admission reads itself, by the name its outage is given. */
+export type AdmissionInfrastructureStore = (typeof ADMISSION_INFRASTRUCTURE_STORES)[number];
+
+/** Whether `store` names one of admission's own stores — else it is a requirement's name. */
+export const isAdmissionInfrastructureStore = (
+	store: unknown,
+): store is AdmissionInfrastructureStore =>
+	(ADMISSION_INFRASTRUCTURE_STORES as readonly unknown[]).includes(store);
+
 declare const claimBrand: unique symbol;
 declare const resolverBrand: unique symbol;
 declare const establishmentBrand: unique symbol;
@@ -551,7 +573,8 @@ export type RegisteredRequirement = SessionRequirement;
 
 /**
  * `value` as it is registered (D3): its shape held to the contract — a
- * non-empty `name`, `remediations` the requirement's own routes
+ * non-empty `name` that is none of {@link ADMISSION_INFRASTRUCTURE_STORES},
+ * `remediations` the requirement's own routes
  * (`checkRemediations`: `<name>.<route>`, each once), a `stepUpPage` that
  * is a page when present
  * (`checkStepUpPage`, on `issuer`'s origin when one is given), `hintKeys`
@@ -580,6 +603,11 @@ export function registeredRequirement(value: unknown, issuer?: string): Register
 	const refuse = (what: string): never => {
 		throw new RangeError(`session requirement "${name}": ${what}`);
 	};
+	if (isAdmissionInfrastructureStore(name)) {
+		refuse(
+			"the name is the one admission gives an outage of its own store (ADMISSION_INFRASTRUCTURE_STORES): a consumer telling an outage by its store would take the requirement's for the store's",
+		);
+	}
 	// A page that fails names what is wrong itself (`checkStepUpPage`).
 	const page = value.stepUpPage;
 	const stepUpPage = page === undefined ? undefined : checkStepUpPage(page, issuer);
@@ -733,7 +761,11 @@ export type Admission =
 			readonly requirement: string;
 			readonly session: UserSession | null;
 	  }
-	| { readonly outcome: "unavailable"; readonly store: string };
+	| {
+			readonly outcome: "unavailable";
+			/** One of {@link ADMISSION_INFRASTRUCTURE_STORES}, or the name of the requirement that could not answer. */
+			readonly store: string;
+	  };
 
 // ---------------------------------------------------------------------------
 // Establishment (D5)

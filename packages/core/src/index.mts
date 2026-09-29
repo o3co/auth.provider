@@ -871,12 +871,14 @@ export {
 } from "./session-admission/primary.mjs";
 export {
 	ADMISSION_ACTIONS,
+	ADMISSION_INFRASTRUCTURE_STORES,
 	type Admission,
 	type AdmissionAction,
 	type AdmissionActionName,
 	type AdmissionAsks,
 	type AdmissionDeps,
 	type AdmissionGrade,
+	type AdmissionInfrastructureStore,
 	type AdmissionRequest,
 	type CompletedRequirement,
 	type CompletedRequirementDto,
@@ -884,6 +886,7 @@ export {
 	type Establishment,
 	type InterruptAdmission,
 	type InterruptionAnswer,
+	isAdmissionInfrastructureStore,
 	isHintKey,
 	isHintToken,
 	issuedRemediationActions,
