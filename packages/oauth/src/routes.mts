@@ -24,6 +24,7 @@ import {
 	type CodeRepository,
 	type ConsentStore,
 	checkCanonicalIssuer,
+	checkResolver,
 	consoleLogger,
 	createRateLimitGuard,
 	describeIssuerRejection,
@@ -72,7 +73,7 @@ import type { Request, RequestHandler, Response, Router } from "express";
 import type {} from "express-session";
 import { parseAccessTokenHeader } from "./accessTokenHeader.mjs";
 import { logUnsatisfiableAcrValues, vouchableAcrValues } from "./acrValues.mjs";
-import { requireRequirements, stepUpOf } from "./admission.mjs";
+import { stepUpOf } from "./admission.mjs";
 import {
 	type ClientIdMetadataDocumentOptions,
 	withClientIdMetadataDocuments,
@@ -274,14 +275,14 @@ export const createOAuthRouter = async (
 		 * can satisfy (`./acrValues.mts`). `oauthModule` passes the synthetic
 		 * key `sessionRequirementResolver`, which the boot planner has filled
 		 * before any route factory runs. Required: a router built by hand
-		 * without one is refused here, and one handed a resolver the planner
-		 * (or `resolverForTests`) did not build is refused by `admitSession`.
+		 * without one, or with one the planner (or `resolverForTests`) did not
+		 * build, is refused here (core's `checkResolver`).
 		 */
 		requirements: SessionRequirementResolver;
 		logger?: Logger;
 	},
 ): Promise<{ router: Router; registry: Pick<GrantHandlerResolver, "get"> }> => {
-	requireRequirements("createOAuthRouter", requirements);
+	checkResolver(requirements, "createOAuthRouter");
 	const router = express.Router();
 
 	// #328: every `oauth.*` knob this router consumes is resolved exactly once,

@@ -423,7 +423,7 @@ export const createDeviceVerificationHandler = (
 	// is held to core's canonical rule, the one `oauth.jwt.issuer` is held to:
 	// `URL.canParse` also accepts `mailto:` or `urn:`, on which no page can be
 	// resolved, so the first step-up would throw.
-	const requirements = checkResolver(options.requirements);
+	const requirements = checkResolver(options.requirements, "createDeviceVerificationHandler");
 	const issuerRejection = checkCanonicalIssuer(options.issuer);
 	if (issuerRejection !== null) {
 		throw new TypeError(

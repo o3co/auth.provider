@@ -18,6 +18,7 @@ import {
 	type Admission,
 	type AdmissionDeps,
 	admitSession,
+	checkResolver,
 	cookieClaim,
 	describeAdmissionOutage,
 	type GrantContext,
@@ -35,7 +36,7 @@ import {
 	vouchedAmr,
 	wellFormedAmr,
 } from "@o3co/auth-provider-core";
-import { requireRequirements, stepUpRefusal } from "../admission.mjs";
+import { stepUpRefusal } from "../admission.mjs";
 import { resolveOAuthOptions } from "../resolveOAuthOptions.mjs";
 
 /**
@@ -132,7 +133,7 @@ export const createSessionGrant = (deps: SessionGrantDeps): GrantHandler => {
 	const admissionDeps: AdmissionDeps = {
 		userSessionStore: deps.userSessionStore,
 		subjectRevocation: deps.subjectRevocation,
-		requirements: requireRequirements("createSessionGrant", deps.sessionRequirementResolver),
+		requirements: checkResolver(deps.sessionRequirementResolver, "createSessionGrant"),
 		acrTable: {},
 		logger: deps.logger,
 		auditSink: deps.auditSink,

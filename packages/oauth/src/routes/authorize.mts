@@ -27,6 +27,7 @@ import {
 	type ClientRepository,
 	type CodeRepository,
 	type ConsentStore,
+	checkResolver,
 	consentCovers,
 	cookieClaim,
 	deriveAudienceFromResources,
@@ -56,7 +57,6 @@ import {
 	unrepresentedResources,
 } from "@o3co/auth-provider-core";
 import type { Request, RequestHandler, Response } from "express";
-import { requireRequirements } from "../admission.mjs";
 import {
 	PKCE_METHOD_ABSENT_DEFAULT,
 	PKCE_METHOD_S256,
@@ -1796,7 +1796,7 @@ export const createAuthorizeHandler = (opts: AuthorizeHandlerOptions): RequestHa
 	const admissionDeps: AdmissionDeps = {
 		userSessionStore: opts.userSessionStore,
 		subjectRevocation: opts.subjectRevocation,
-		requirements: requireRequirements("createAuthorizeHandler", opts.requirements),
+		requirements: checkResolver(opts.requirements, "createAuthorizeHandler"),
 		acrTable: opts.oauth.acrValues,
 		logger: opts.logger,
 		auditSink: opts.auditSink,

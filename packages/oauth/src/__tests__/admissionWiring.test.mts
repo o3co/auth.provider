@@ -33,8 +33,8 @@ import {
 	type CodeRepository,
 	createSymmetricKeyStore,
 	type GrantDependencies,
-	SUBJECT_REVOCATION_ABSENCE_POLICY,
 	type SessionRequirementResolver,
+	SUBJECT_REVOCATION_ABSENCE_POLICY,
 } from "@o3co/auth-provider-core";
 import { GrantRegistry, resolverForTests } from "@o3co/auth-provider-core/testing";
 import express from "express";

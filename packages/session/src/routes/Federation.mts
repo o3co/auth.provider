@@ -42,6 +42,7 @@ import {
 	type AuditSink,
 	admitSession,
 	auditErrorText,
+	checkResolver,
 	consoleLogger,
 	cookieClaim,
 	emitAuditEvent,
@@ -426,8 +427,9 @@ export const createRouter = (
 		 * The registered session requirements (the session-admission ADR's
 		 * D1): the synthetic key `sessionRequirementResolver`, which
 		 * `sessionModule` passes, or `resolverForTests` in a test. Required:
-		 * the link routes admit their session through it, and admission refuses
-		 * any resolver the boot planner did not build.
+		 * the link routes admit their session through it, and a missing
+		 * resolver, or one the boot planner did not build, is refused here, at
+		 * construction (core's `checkResolver`).
 		 */
 		requirements: SessionRequirementResolver;
 		/**
@@ -438,7 +440,7 @@ export const createRouter = (
 		logger?: Logger;
 	},
 ): Router => {
-	if (!requirements) throw new Error("federation routes require requirements");
+	checkResolver(requirements, "federation routes");
 	if (!userSessionStore) throw new Error("federation routes require userSessionStore");
 	if (!sessionFederationIndex) throw new Error("federation routes require sessionFederationIndex");
 	if (!federationTokenStore) throw new Error("federation routes require federationTokenStore");

@@ -152,14 +152,27 @@ export function sessionRequirementResolverOver(
 const isKnownResolver = (value: unknown): value is SessionRequirementResolver =>
 	typeof value === "object" && value !== null && knownResolvers.has(value);
 
-/** Refuses a resolver the planner or `resolverForTests` did not build: a home-made object or a copy forges nothing. */
-export function checkResolver(value: unknown): SessionRequirementResolver {
-	if (!isKnownResolver(value)) {
+/**
+ * Refuses a resolver the planner or `resolverForTests` did not build: a
+ * home-made object or a copy forges nothing. Also the one construction-time
+ * check every consumer factory a composition can build by hand runs on its
+ * `requirements` (D1), with its own name as `factory`: a missing resolver
+ * (`undefined` or `null`) and a forged one are each a `RangeError` that names
+ * the factory, thrown where the composition is assembled, not answered on
+ * every request. Admission runs it bare, on every call (`admitSession`,
+ * `admitPrimary`, `resumePrimary`).
+ */
+export function checkResolver(value: unknown, factory?: string): SessionRequirementResolver {
+	if (isKnownResolver(value)) return value;
+	const who = factory === undefined ? "" : `${factory}: `;
+	if (value === undefined || value === null) {
 		throw new RangeError(
-			"requirements must be the sessionRequirementResolver the boot planner built (or resolverForTests, in a test)",
+			`${who}requirements is required — the sessionRequirementResolver the boot planner built (the manifests pass it), or resolverForTests from @o3co/auth-provider-core/testing in a test`,
 		);
 	}
-	return value;
+	throw new RangeError(
+		`${who}requirements must be the sessionRequirementResolver the boot planner built (or resolverForTests, in a test)`,
+	);
 }
 
 // ---------------------------------------------------------------------------
