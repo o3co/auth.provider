@@ -64,24 +64,41 @@ describe("readTransitionalConfig — the switches a composition root reads befor
 				http: { port: "8080", trustProxy: "false", readinessTimeoutMs: "1500" },
 				redisRateLimiter: { limits: { token: { limit: "120", windowSeconds: "60" } } },
 			}),
+			["http", "redisRateLimiter"],
 		);
 		expect(config.http.port).toBe(8080);
 		expect(config.http.readinessTimeoutMs).toBe(1500);
 		expect(config.redisRateLimiter?.limits?.token).toEqual({ limit: 120, windowSeconds: 60 });
 	});
 
-	it("keeps what no schema declares, at the top and under a section core declares", () => {
+	it("parses only the paths it reads: every other key stays as written, and is not checked", () => {
 		const config = readTransitionalConfig(
 			resolved({
-				widget: { size: "3" },
-				oauth: { ...makeValidCoreConfig().oauth, fixtureWidget: { enabled: "true" } },
+				http: { port: "8080", trustProxy: false, readinessTimeoutMs: "1500" },
+				deployment: { mode: "several" },
 			}),
-		) as unknown as { widget: unknown; oauth: { fixtureWidget: unknown } };
-		expect(config.widget).toEqual({ size: "3" });
-		expect(config.oauth.fixtureWidget).toEqual({ enabled: "true" });
+			["http.port"],
+		) as unknown as { http: Record<string, unknown>; deployment: unknown };
+		expect(config.http.port).toBe(8080);
+		expect(config.http.readinessTimeoutMs).toBe("1500");
+		expect(config.deployment).toEqual({ mode: "several" });
 	});
 
-	it("refuses a value a section's schema refuses, naming each path the operator wrote", () => {
+	it("does not refuse a section a package's reference completes, unless it reads it", () => {
+		// Before the modules are known, the device grant's reference is not
+		// layered: its `windowSeconds` is missing, and boot, which layers it,
+		// accepts what the operator wrote.
+		const partial = resolved({
+			oauth: {
+				...makeValidCoreConfig().oauth,
+				deviceAuthorization: { rateLimit: { limit: 10 } },
+			},
+		});
+		expect(TransitionalConfigSchema.safeParse(partial).success).toBe(false);
+		expect(() => readTransitionalConfig(partial, ["oauth.code", "oauth.grants"])).not.toThrow();
+	});
+
+	it("refuses a value it reads that the schema refuses, naming each path the operator wrote", () => {
 		let thrown: unknown;
 		try {
 			readTransitionalConfig(
@@ -89,6 +106,7 @@ describe("readTransitionalConfig — the switches a composition root reads befor
 					http: { port: "not-a-port", trustProxy: false, readinessTimeoutMs: 1000 },
 					deployment: { mode: "several" },
 				}),
+				["http.port", "deployment.mode"],
 			);
 		} catch (err) {
 			thrown = err;
@@ -99,10 +117,36 @@ describe("readTransitionalConfig — the switches a composition root reads befor
 		expect((thrown as Error).cause).toBeInstanceOf(z.ZodError);
 	});
 
+	it("refuses to read a path the schema does not declare as one schema", () => {
+		expect(() => readTransitionalConfig(resolved(), ["nowhere.at.all"])).toThrow(
+			/cannot read "nowhere\.at\.all"/,
+		);
+	});
+
+	it("covers a path under another it reads", () => {
+		const config = readTransitionalConfig(
+			resolved({ http: { port: "8080", trustProxy: false, readinessTimeoutMs: "1500" } }),
+			["http", "http.port"],
+		);
+		expect(config.http).toEqual({ port: 8080, trustProxy: false, readinessTimeoutMs: 1500 });
+	});
+
+	it("keeps what no schema declares, at the top and under a section it reads", () => {
+		const config = readTransitionalConfig(
+			resolved({
+				widget: { size: "3" },
+				oauth: { ...makeValidCoreConfig().oauth, fixtureWidget: { enabled: "true" } },
+			}),
+			["oauth"],
+		) as unknown as { widget: unknown; oauth: { fixtureWidget: unknown } };
+		expect(config.widget).toEqual({ size: "3" });
+		expect(config.oauth.fixtureWidget).toEqual({ enabled: "true" });
+	});
+
 	it("changes nothing it was given", () => {
 		const given = deepFreeze(resolved({ widget: { size: "3" }, deployment: { mode: "single" } }));
 		const before = JSON.stringify(given);
-		expect(() => readTransitionalConfig(given)).not.toThrow();
+		expect(() => readTransitionalConfig(given, ["http", "deployment"])).not.toThrow();
 		expect(JSON.stringify(given)).toBe(before);
 	});
 });

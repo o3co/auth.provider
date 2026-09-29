@@ -19,23 +19,25 @@
  * does:
  *
  * 1. `readSwitches` — its own files over core's `reference.conf`, read with
- *    core's transitional reader — for what it needs before it knows its
- *    modules: the switches `buildModules` chooses them by, the log level,
- *    `mfa.mode`;
+ *    core's transitional reader — parses only `SWITCHES`, what the template
+ *    reads before it knows its modules: the switches `buildModules` chooses
+ *    them by, the log level, `mfa.mode`;
  * 2. `resolveForBoot` — its own files over the `reference.conf` of every
  *    package its modules come from, core's last — handed to `createApp`
  *    unparsed, which parses it once with every loaded module's schema.
  *
  * Where the template used to parse with `AppConfigSchema` (through the HOCON
- * library's Zod bridge) before `buildModules`, phase one must read every value
- * that parse did: the template's values are unchanged.
+ * library's Zod bridge) before `buildModules`, phase one must read each switch
+ * as that parse did — the template's values are unchanged — and nothing but
+ * its switches, so that a section a package's reference completes (known only
+ * in phase two) does not refuse it.
  */
 
 import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { AppConfigSchema, type Module } from "@o3co/auth-provider-core";
+import { type AppConfig, AppConfigSchema, type Module } from "@o3co/auth-provider-core";
 import { parseFile } from "@o3co/ts.hocon";
 import { validate } from "@o3co/ts.hocon/zod";
 import { describe, expect, it } from "vitest";
@@ -45,7 +47,9 @@ import {
 	resolveConfigPaths,
 	resolveForBoot,
 	resolveLibraryReferenceConfPath,
+	SWITCHES,
 } from "../configPath.mjs";
+import { createAppLogger } from "../logger.mjs";
 
 const configDir = fileURLToPath(new URL("../../config", import.meta.url));
 
@@ -89,28 +93,95 @@ function preParsed(environment: string, env: Readonly<Record<string, string>>): 
 	);
 }
 
-/** Every leaf of `before` whose value `after` does not hold at the same path. */
-function changedLeaves(before: unknown, after: unknown, path: readonly string[] = []): string[] {
-	const isObject = (value: unknown): value is Record<string, unknown> =>
-		typeof value === "object" && value !== null && !Array.isArray(value);
-	if (isObject(before) && Object.keys(before).length > 0) {
-		return Object.keys(before).flatMap((key) =>
-			changedLeaves(before[key], isObject(after) ? after[key] : undefined, [...path, key]),
-		);
+/** The value at a dotted path, or `undefined`. */
+function valueAt(tree: unknown, path: string): unknown {
+	let cursor: unknown = tree;
+	for (const key of path.split(".")) {
+		if (typeof cursor !== "object" || cursor === null || !Object.hasOwn(cursor, key))
+			return undefined;
+		cursor = (cursor as Record<string, unknown>)[key];
 	}
-	return JSON.stringify(before) === JSON.stringify(after) ? [] : [path.join(".")];
+	return cursor;
 }
 
-describe("phase one reads every value the template's AppConfigSchema pre-parse read", () => {
+/** An operator's own HOCON layer, as a file above the template's. */
+function operatorLayer(text: string): string {
+	const file = join(mkdtempSync(join(tmpdir(), "two-phase-config-")), "operator.conf");
+	writeFileSync(file, text);
+	return file;
+}
+
+/** `config`, recording every dotted path read off it. */
+function recording(config: unknown): { readonly config: AppConfig; readonly reads: Set<string> } {
+	const reads = new Set<string>();
+	const wrap = (target: object, path: string): object =>
+		new Proxy(target, {
+			get(object, key, receiver) {
+				const value: unknown = Reflect.get(object, key, receiver);
+				if (typeof key !== "string" || !Object.hasOwn(object, key)) return value;
+				const at = path === "" ? key : `${path}.${key}`;
+				reads.add(at);
+				return typeof value === "object" && value !== null ? wrap(value, at) : value;
+			},
+		});
+	return { config: wrap(config as object, "") as AppConfig, reads };
+}
+
+describe("phase one reads each switch as the template's AppConfigSchema pre-parse read it", () => {
 	for (const environment of ["development", "production"]) {
 		for (const [name, env] of Object.entries(ENVIRONMENTS)) {
 			it(`${environment}, ${name}`, () => {
 				const before = preParsed(environment, env);
 				const switches = readSwitches(ownFiles(environment), { env });
-				expect(changedLeaves(before, switches)).toEqual([]);
+				const changed = SWITCHES.filter(
+					(path) =>
+						JSON.stringify(valueAt(before, path)) !== JSON.stringify(valueAt(switches, path)),
+				);
+				expect(changed).toEqual([]);
 			});
 		}
 	}
+});
+
+describe("phase one reads its switches and nothing else", () => {
+	const env = ENVIRONMENTS["every adapter on Redis, MFA optional"] as Readonly<
+		Record<string, string>
+	>;
+
+	it("accepts a section a package's reference completes, which only phase two layers", () => {
+		// The device grant's and WebAuthn's references ship `windowSeconds`;
+		// boot layers them, and accepts what the operator wrote.
+		const partial = operatorLayer(
+			"oauth.deviceAuthorization.rateLimit.limit = 10\nwebauthn.rateLimit.authenticationOptions.limit = 10\n",
+		);
+		expect(() => readSwitches([partial, ...ownFiles("production")], { env })).not.toThrow();
+	});
+
+	it("reads, before boot, only paths among its switches", () => {
+		const { config, reads } = recording(
+			withSessionRequirements(readSwitches(ownFiles("production"), { env })),
+		);
+		createAppLogger(config);
+		buildModules(withSessionRequirements(config), { environment: "production" });
+		const covered = (path: string) =>
+			SWITCHES.some(
+				(switchPath) =>
+					path === switchPath ||
+					path.startsWith(`${switchPath}.`) ||
+					switchPath.startsWith(`${path}.`),
+			);
+		expect(reads.size).toBeGreaterThan(10);
+		expect([...reads].filter((path) => !covered(path) && path !== "sessionRequirements")).toEqual(
+			[],
+		);
+	});
+
+	it("still refuses a switch it reads that the schema refuses, naming it", () => {
+		const bad = operatorLayer('rateLimiter.adapter = "carrier-pigeon"\n');
+		expect(() => readSwitches([bad, ...ownFiles("production")], { env })).toThrow(
+			/rateLimiter\.adapter/,
+		);
+	});
 });
 
 describe("phase two: what createApp is handed", () => {

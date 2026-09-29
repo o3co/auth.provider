@@ -18,7 +18,11 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseFile } from "@o3co/ts.hocon";
 import { describe, expect, it } from "vitest";
-import { readTransitionalConfig, TransitionalConfigSchema } from "#/config/composed.mjs";
+import { overlayConfig, TransitionalConfigSchema } from "#/config/composed.mjs";
+
+/** What core's base makes of `raw`, laid over it: boot's first parse. */
+const parsedByBase = (raw: unknown): unknown =>
+	overlayConfig(raw, TransitionalConfigSchema.parse(raw));
 
 /**
  * #472 — core's `reference.conf` holds only what core's schema declares.
@@ -118,7 +122,7 @@ describe("core's reference.conf declares the operator keys a composition layerin
 				CLIENT_USER_LINK_FEDERATED_IDENTITY_URL: "https://store.example/link",
 			},
 		});
-		const parsed = readTransitionalConfig(raw.toObject()) as {
+		const parsed = parsedByBase(raw.toObject()) as {
 			repositories?: { user?: { http?: { linkFederatedIdentityUrl?: unknown } } };
 		};
 		expect(parsed.repositories?.user?.http?.linkFederatedIdentityUrl).toBe(
@@ -127,7 +131,7 @@ describe("core's reference.conf declares the operator keys a composition layerin
 	});
 
 	it("leaves it absent when the variable is unset, so the link seam stays off", () => {
-		const parsed = readTransitionalConfig(
+		const parsed = parsedByBase(
 			parseFile(REFERENCE_CONF_PATH, { env: REQUIRED_ENV }).toObject(),
 		) as {
 			repositories?: { user?: { http?: Record<string, unknown> } };
@@ -142,7 +146,7 @@ describe("core's reference.conf declares the operator keys a composition layerin
 				CLIENT_USER_FIND_SUBJECT_BY_FEDERATED_IDENTITY_URL: "https://store.example/identity",
 			},
 		});
-		const parsed = readTransitionalConfig(raw.toObject()) as {
+		const parsed = parsedByBase(raw.toObject()) as {
 			repositories?: { user?: { http?: { findSubjectByFederatedIdentityUrl?: unknown } } };
 		};
 		expect(parsed.repositories?.user?.http?.findSubjectByFederatedIdentityUrl).toBe(
@@ -156,7 +160,7 @@ describe("core's reference.conf declares the operator keys a composition layerin
 		// operator reads. The coverage list is HOCON's to fill; an empty default
 		// is what a deployment that never declares any gets — and it must reach
 		// the factory as a list, not vanish.
-		const parsed = readTransitionalConfig(
+		const parsed = parsedByBase(
 			parseFile(REFERENCE_CONF_PATH, { env: REQUIRED_ENV }).toObject(),
 		) as {
 			repositories?: { user?: { http?: Record<string, unknown> } };
@@ -170,7 +174,7 @@ describe("core's reference.conf declares the operator keys a composition layerin
 		// here for the reason the link URL is: a composition layering on this
 		// file alone would otherwise export the variable and send nothing.
 		const token = "0328d706529061d93abd6d826e09ef0f0a1e71a12af813b29e5cd2977b7dc63a";
-		const parsed = readTransitionalConfig(
+		const parsed = parsedByBase(
 			parseFile(REFERENCE_CONF_PATH, {
 				env: { ...REQUIRED_ENV, CLIENT_USER_BEARER_TOKEN: token },
 			}).toObject(),
@@ -183,7 +187,7 @@ describe("core's reference.conf declares the operator keys a composition layerin
 	it("leaves the Store credential absent when the variable is unset, so no Authorization is sent", () => {
 		// Absent, not blank: a blank token is refused by the adapter, so an
 		// unset variable must not reach it as "".
-		const parsed = readTransitionalConfig(
+		const parsed = parsedByBase(
 			parseFile(REFERENCE_CONF_PATH, { env: REQUIRED_ENV }).toObject(),
 		) as {
 			repositories?: { user?: { http?: Record<string, unknown> } };
@@ -192,7 +196,7 @@ describe("core's reference.conf declares the operator keys a composition layerin
 	});
 
 	it("declares oauth.authorize.acrValues, empty, so an unset table resolves to no acr values", () => {
-		const parsed = readTransitionalConfig(
+		const parsed = parsedByBase(
 			parseFile(REFERENCE_CONF_PATH, { env: REQUIRED_ENV }).toObject(),
 		) as {
 			oauth?: { authorize?: { acrValues?: unknown } };
@@ -222,7 +226,7 @@ describe("the WebAuthn origin lists reach the composition root as the string the
 		const chained = parseFile(WEBAUTHN_CONF_PATH, { env }).withFallback(
 			parseFile(REFERENCE_CONF_PATH, { env }),
 		);
-		const parsed = readTransitionalConfig(chained.toObject()) as {
+		const parsed = parsedByBase(chained.toObject()) as {
 			webauthn?: Record<string, unknown>;
 		};
 		expect(parsed.webauthn?.origin).toBe("https://a.example,https://b.example");
