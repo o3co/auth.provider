@@ -3,7 +3,7 @@
  * Licensed under the Apache License, Version 2.0 (the "License");
  */
 
-import { createApp, defineModule } from "@o3co/auth-provider-core";
+import { createApp, type DeploymentMode, defineModule } from "@o3co/auth-provider-core";
 import { makeValidCoreConfig } from "@o3co/auth-provider-core/testing";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { FederationTokenStoreClient } from "../src/clients.mjs";
@@ -26,10 +26,10 @@ const fakeClient = () => ({
 	compareAndDelete: async () => false,
 });
 
-/** Runs a module's `federationTokenStore` provider against a plaintext config. */
+/** Runs a module's `federationTokenStore` provider against a plaintext config, with the mode core fills. */
 const provideFrom = (
 	module: { provides?: { federationTokenStore?: unknown } },
-	deployment?: { mode?: string },
+	deploymentMode: DeploymentMode = "unset",
 ) => {
 	const provider = module.provides?.federationTokenStore as (deps: unknown) => unknown;
 	return provider({
@@ -41,12 +41,12 @@ const provideFrom = (
 				encryptionMode: "allow-plaintext",
 				scanFallback: true,
 			},
-			...(deployment ? { deployment } : {}),
 		},
+		deploymentMode,
 	});
 };
 
-describe("the module hands the guard the selected environment and deployment.mode", () => {
+describe("the module hands the guard the selected environment and the deployment mode", () => {
 	let origEnv: string | undefined;
 	let warnSpy: ReturnType<typeof vi.spyOn>;
 
@@ -76,21 +76,20 @@ describe("the module hands the guard the selected environment and deployment.mod
 		).toThrow(/the environment is "production"/);
 	});
 
-	it('refuses plaintext under deployment.mode = "multi" read from config — default module included', () => {
-		expect(() => provideFrom(redisFederationTokenStoreModule, { mode: "multi" })).toThrow(
+	it('refuses plaintext when the deploymentMode slot is "multi" — default module included', () => {
+		expect(() => provideFrom(redisFederationTokenStoreModule, "multi")).toThrow(
 			/deployment\.mode is "multi"/,
 		);
 		expect(() =>
-			provideFrom(redisFederationTokenStoreModuleFor({ environment: "development" }), {
-				mode: "multi",
-			}),
+			provideFrom(redisFederationTokenStoreModuleFor({ environment: "development" }), "multi"),
 		).toThrow(/deployment\.mode is "multi"/);
 	});
 
-	it("warns and builds the store in development with deployment.mode unset or single", () => {
-		const store = provideFrom(redisFederationTokenStoreModuleFor({ environment: "development" }), {
-			mode: "single",
-		}) as { kind: string };
+	it("warns and builds the store in development with the deployment mode unset or single", () => {
+		const store = provideFrom(
+			redisFederationTokenStoreModuleFor({ environment: "development" }),
+			"single",
+		) as { kind: string };
 		expect(store.kind).toBe("redis");
 		expect((provideFrom(redisFederationTokenStoreModuleFor({})) as { kind: string }).kind).toBe(
 			"redis",
@@ -107,10 +106,11 @@ describe("redisFederationTokenStoreModule", () => {
 		expect(redisFederationTokenStoreModule.name).toBe("redis-federation-token-store");
 	});
 
-	it("requires federationTokenStoreClient and config", () => {
+	it("requires federationTokenStoreClient, config and deploymentMode", () => {
 		expect(redisFederationTokenStoreModule.requires).toEqual([
 			"federationTokenStoreClient",
 			"config",
+			"deploymentMode",
 		]);
 	});
 
