@@ -231,3 +231,56 @@ describe("federationTypes — refused", () => {
 		expect(err.details).toEqual({ reason: "contribution-kind-guarded", kind: "federationTypes" });
 	});
 });
+
+describe("federationTypes — read once", () => {
+	it("keeps the schema and factory it registered: a declaration changed after boot changes nothing", async () => {
+		const original = vi.fn((_deps: unknown, instance: { name: string }) =>
+			providerNamed(instance.name),
+		);
+		const declaration: { entrySchema: z.ZodType; factory: typeof original } = {
+			entrySchema: AcmeEntry,
+			factory: original,
+		};
+		const acme = defineModule({
+			name: "federation-acme",
+			contributes: { federationTypes: { acme: declaration } },
+		});
+
+		const types = await registeredTypes([acme]);
+		const replaced = vi.fn(() => providerNamed("replaced"));
+		declaration.factory = replaced as never;
+		declaration.entrySchema = z.object({ other: z.string() });
+
+		const registered = types?.get("acme");
+		expect(registered?.entrySchema).toBe(AcmeEntry);
+		const provider = await registered?.create({ name: "corp", entry: { issuer: "https://corp" } });
+		expect(provider?.name).toBe("corp");
+		expect(original).toHaveBeenCalledOnce();
+		expect(replaced).not.toHaveBeenCalled();
+	});
+});
+
+describe("federationTypes — the kind takes a record keyed by type", () => {
+	it.each<readonly [string, "contributes" | "overrides", unknown]>([
+		["an array", "contributes", [{ entrySchema: AcmeEntry, factory: () => providerNamed("a") }]],
+		["a function", "contributes", () => providerNamed("a")],
+		["null", "overrides", null],
+	])("refuses %s in its place at stage 1", async (_label, channel, container) => {
+		const mod = defineModule({
+			name: "federation-container",
+			[channel]: { federationTypes: container as never },
+		});
+
+		const err = await refusal(createApp({ modules: [mod], bootstrapComponents: bootWith() }));
+
+		expect(err.reason).toBe("contribution-malformed");
+		expect(err.stage).toBe("validateManifests");
+		expect(err.details).toEqual({
+			reason: "contribution-malformed",
+			module: "federation-container",
+			kind: "federationTypes",
+			channel,
+			problem: expect.stringContaining("record keyed by"),
+		});
+	});
+});

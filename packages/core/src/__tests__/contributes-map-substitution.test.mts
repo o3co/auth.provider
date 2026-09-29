@@ -33,6 +33,7 @@ import type {
 	MfaFactorFactory,
 	RateLimitBudgetFactory,
 } from "../modules/manifest/contributes-map.mjs";
+import { defineFederationType } from "../modules/manifest/define-federation-type.mjs";
 import { defineModule } from "../modules/manifest/define-module.mjs";
 import type { GrantPolicyHook } from "../policy/types.mjs";
 import type { RateLimitSpec } from "../ratelimit/types.mjs";
@@ -226,6 +227,66 @@ describe("#728: rate-limit budgets and declared federation contributions", () =>
 				federations: {
 					// @ts-expect-error — `federations` takes the factory; a type is declared under `federationTypes`
 					corp: { type: "acme", entrySchema: AcmeEntry, factory: () => provider },
+				},
+			},
+		});
+		expect(true).toBe(true);
+	});
+
+	it("defineFederationType ties the factory's entry to the schema: E is inferred from entrySchema, Deps given", () => {
+		type AcmeDeps = { readonly tag: string };
+		const declared = defineFederationType<AcmeDeps>()({
+			entrySchema: AcmeEntry,
+			factory: (deps, { name, entry }) => {
+				expectTypeOf(deps).toEqualTypeOf<AcmeDeps>();
+				expectTypeOf(entry).toEqualTypeOf<AcmeEntry>();
+				return { ...provider, name: `${name}:${entry.issuer}` };
+			},
+		});
+		expectTypeOf(declared).toEqualTypeOf<FederationTypeContribution<AcmeDeps, AcmeEntry>>();
+		// The helper answers the declaration it was given, which the kind accepts.
+		defineModule({
+			name: "acme-federation-type-helper",
+			requires: ["config"],
+			contributes: {
+				federationTypes: {
+					acme: defineFederationType<{ readonly config: unknown }>()({
+						entrySchema: AcmeEntry,
+						factory: (_deps, { name }) => ({ ...provider, name }),
+					}),
+				},
+			},
+		});
+		expect(declared.entrySchema).toBe(AcmeEntry);
+	});
+
+	it("defineFederationType refuses a factory whose entry is not what the schema produces", () => {
+		defineFederationType<unknown>()({
+			entrySchema: AcmeEntry,
+			// @ts-expect-error — the schema produces no `tenant`
+			factory: (_deps, { entry }) => ({ ...provider, name: entry.tenant }),
+		});
+		defineFederationType<unknown>()({
+			entrySchema: z.object({ issuer: z.string() }),
+			// @ts-expect-error — an entry annotated as another type does not pair with this schema
+			factory: (_deps, { entry }: FederationInstance<{ tenant: string }>) => ({
+				...provider,
+				name: entry.tenant,
+			}),
+		});
+		// Inline in a module, without the helper, `E` is `unknown`: nothing ties an
+		// annotated entry to the schema — the limitation the helper exists for.
+		defineModule({
+			name: "acme-federation-type-inline",
+			contributes: {
+				federationTypes: {
+					acme: {
+						entrySchema: z.object({ issuer: z.string() }),
+						factory: (_deps, { name }: FederationInstance<{ tenant: string }>) => ({
+							...provider,
+							name,
+						}),
+					},
 				},
 			},
 		});

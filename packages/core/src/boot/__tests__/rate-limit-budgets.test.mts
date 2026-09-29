@@ -355,3 +355,75 @@ describe("rateLimitBudgets — no limiter reads them yet", () => {
 		await handle.dispose();
 	});
 });
+
+describe("rateLimitBudgets — read once", () => {
+	it("registers the budget it validated: a getter that answers differently on a second read changes nothing", async () => {
+		let reads = 0;
+		const shifty = {
+			get limit() {
+				reads += 1;
+				return reads === 1 ? 5 : 1_000_000;
+			},
+			windowSeconds: 60,
+		};
+		const mod = defineModule({
+			name: "budget-shifty",
+			contributes: { rateLimitBudgets: { fixture: () => shifty } },
+		});
+
+		const handle = await createApp({ modules: [mod], bootstrapComponents: bootWith() });
+
+		expect(reads).toBe(1);
+		expect(handle.components.rateLimitBudgetResolver?.get("fixture")).toEqual({
+			limit: 5,
+			windowSeconds: 60,
+		});
+		await handle.dispose();
+	});
+
+	it("refuses the budget it read: a getter that answers a usable limit only on a later read is refused", async () => {
+		let reads = 0;
+		const shifty = {
+			get limit() {
+				reads += 1;
+				return reads === 1 ? 0 : 5;
+			},
+			windowSeconds: 60,
+		};
+		const mod = defineModule({
+			name: "budget-shifty",
+			contributes: { rateLimitBudgets: { fixture: () => shifty } },
+		});
+
+		const err = await refusal(createApp({ modules: [mod], bootstrapComponents: bootWith() }));
+
+		expect(err.reason).toBe("contribute-factory-failed");
+		expect(err.message).toContain("got limit 0");
+	});
+});
+
+describe("rateLimitBudgets — the kind takes a record keyed by prefix", () => {
+	it.each<readonly [string, "contributes" | "overrides", unknown]>([
+		["a function", "contributes", () => ({ limit: 5, windowSeconds: 60 })],
+		["an array", "contributes", [() => ({ limit: 5, windowSeconds: 60 })]],
+		["null", "contributes", null],
+		["an array, in an override", "overrides", [() => null]],
+	])("refuses %s in its place at stage 1", async (_label, channel, container) => {
+		const mod = defineModule({
+			name: "budget-container",
+			[channel]: { rateLimitBudgets: container as never },
+		});
+
+		const err = await refusal(createApp({ modules: [mod], bootstrapComponents: bootWith() }));
+
+		expect(err.reason).toBe("contribution-malformed");
+		expect(err.stage).toBe("validateManifests");
+		expect(err.details).toEqual({
+			reason: "contribution-malformed",
+			module: "budget-container",
+			kind: "rateLimitBudgets",
+			channel,
+			problem: expect.stringContaining("record keyed by"),
+		});
+	});
+});
