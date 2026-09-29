@@ -133,6 +133,20 @@ describe("ModuleSpec.authoritative (#728)", () => {
 		["a number", 5, "the number 5"],
 		["a Set", new Set(["oauthTokenSettings"]), "a Set"],
 		["a plain object", { oauthTokenSettings: true }, "an Object"],
+		["a function", () => ["oauthTokenSettings"], "a function"],
+		["a symbol", Symbol("oauthTokenSettings"), "a symbol"],
+		[
+			"an object whose prototype cannot be read",
+			new Proxy(
+				{},
+				{
+					getPrototypeOf() {
+						throw new Error("the trap ran");
+					},
+				},
+			),
+			"an object",
+		],
 	])(
 		"refuses an authoritative that is %s, not a list of keys, saying what it is",
 		async (_label, declared, described) => {
