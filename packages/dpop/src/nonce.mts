@@ -18,31 +18,15 @@ import { createHmac, timingSafeEqual } from "node:crypto";
 import { MIN_SECRET_ENTROPY_BYTES, measureSecretEntropyBytes } from "@o3co/auth-provider-core";
 
 /**
- * Server-provided DPoP nonces (RFC 9449 §8 / §9, #530).
- *
- * Without a nonce the only freshness control on a proof is `iat` skew, which
- * is weak for a token that lives longer than a few minutes: a proof minted
- * ahead of time stays usable for the whole window. A nonce the server hands
- * out and the client has to echo bounds pre-generation to the nonce's own
- * lifetime instead.
- *
- * ## Stateless by construction
+ * Server-provided DPoP nonces (RFC 9449 §8 / §9); see README, "Server-provided
+ * nonces".
  *
  * A nonce is `<bucket>.<mac>`: the current time bucket and an HMAC over it
- * under a secret every replica shares. Verifying one is recomputing the MAC,
- * so nothing is stored and nothing is looked up — a nonce minted by one
- * replica verifies on every other, and there is no store to be unavailable
- * on the proof path. The cost is that a nonce is not single-use; it is not
- * meant to be — replay of the *proof* is what `jti` and the replay store
- * refuse, and the nonce only says "this proof was made after this instant".
- *
- * ## Rotation
- *
- * The bucket advances every `ttlSeconds`. A nonce from the current bucket or
- * the previous one is accepted, so a client that received a nonce just before
- * the boundary is not refused a moment later; one two buckets old is. Every
- * response carries the current nonce (`DPoP-Nonce`), which is how the client
- * learns of the rotation before its next proof.
+ * under a secret every replica shares. Verifying recomputes the MAC, so
+ * nothing is stored and a nonce minted by one replica verifies on every
+ * other. A nonce is not single-use: replay of the proof is what `jti` and the
+ * replay store refuse. The bucket advances every `ttlSeconds`; a nonce from
+ * the current or the previous bucket is accepted.
  */
 export interface DPoPNonceIssuer {
 	/** The nonce for right now. */
