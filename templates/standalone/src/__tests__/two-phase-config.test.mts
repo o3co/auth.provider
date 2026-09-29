@@ -47,7 +47,14 @@ import { parseFile } from "@o3co/ts.hocon";
 import { validate } from "@o3co/ts.hocon/zod";
 import { describe, expect, it } from "vitest";
 import { buildModules, withSessionRequirements } from "../buildModules.mjs";
-import { readSwitches, resolveConfigPaths, resolveForBoot, SWITCHES } from "../configPath.mjs";
+import {
+	readOwnLayers,
+	readSwitches,
+	resolveConfigPaths,
+	resolveForBoot,
+	resolveLayers,
+	SWITCHES,
+} from "../configPath.mjs";
 import { createAppLogger } from "../logger.mjs";
 
 const configDir = fileURLToPath(new URL("../../config", import.meta.url));
@@ -257,3 +264,75 @@ describe("phase two: what createApp is handed", () => {
 		expect(resolved.sessionRequirements).toEqual({ expected: ["mfa"] });
 	});
 });
+
+describe("both phases read one snapshot of the composition's own layers", () => {
+	const env = ENVIRONMENTS["the secrets alone"] as Readonly<Record<string, string>>;
+
+	it("sees a file's first contents in both phases, though it is replaced between them", () => {
+		// Mounted configuration is commonly replaced atomically: read twice,
+		// boot could parse the Redis limiter while phase one chose the memory
+		// one, and nothing would refuse the disagreement.
+		const operator = operatorLayer('rateLimiter.adapter = "redis"\n');
+		const own = readOwnLayers([operator, ...ownFiles("production")], { env });
+		writeFileSync(operator, 'rateLimiter.adapter = "memory"\n');
+		const switches = withSessionRequirements(readSwitches(own));
+		const resolved = resolveForBoot(own, [], switches.sessionRequirements) as unknown as {
+			rateLimiter: { adapter: unknown };
+		};
+		expect(switches.rateLimiter?.adapter).toBe("redis");
+		expect(resolved.rateLimiter.adapter).toBe("redis");
+	});
+
+	it("substitutes one snapshot of the environment in both phases", () => {
+		const changing: Record<string, string> = { ...env, RATE_LIMITER_ADAPTER: "redis" };
+		const own = readOwnLayers(ownFiles("production"), { env: changing });
+		changing.RATE_LIMITER_ADAPTER = "memory";
+		const switches = withSessionRequirements(readSwitches(own));
+		const resolved = resolveForBoot(own, [], switches.sessionRequirements) as unknown as {
+			rateLimiter: { adapter: unknown };
+		};
+		expect(switches.rateLimiter?.adapter).toBe("redis");
+		expect(resolved.rateLimiter.adapter).toBe("redis");
+	});
+
+	it("reads every switch as boot's parse has it, for the shipped environments", async () => {
+		for (const environment of ["development", "production"]) {
+			for (const [name, variables] of Object.entries(ENVIRONMENTS)) {
+				const own = readOwnLayers(ownFiles(environment), { env: variables });
+				const switches = withSessionRequirements(readSwitches(own));
+				const modules = buildModules(switches, { environment });
+				const handle = await createApp({
+					modules: [],
+					bootstrapComponents: {
+						config: resolveForBoot(own, modules, switches.sessionRequirements),
+						pathResolver: (s: string) => s,
+						...FEDERATION_STORES,
+					} as never,
+				});
+				const parsed = handle.components.config;
+				await handle.dispose();
+				const differing = SWITCHES.filter(
+					(path) =>
+						JSON.stringify(valueAt(switches, path)) !== JSON.stringify(valueAt(parsed, path)),
+				);
+				expect(differing, `${environment}, ${name}`).toEqual([]);
+			}
+		}
+	});
+
+	it("resolves nothing from no files and no references", () => {
+		expect(resolveLayers(readOwnLayers([], { env }), [])).toEqual({});
+	});
+});
+
+/** The stores an enabled federation needs, which boot refuses a composition without (#101). */
+const FEDERATION_STORES = Object.fromEntries(
+	[
+		"userSessionStore",
+		"sessionRPRegistry",
+		"sessionFamilyIndex",
+		"sessionFederationIndex",
+		"federationTokenStore",
+		"refreshTokenFamilyRevocation",
+	].map((key) => [key, {}]),
+);
