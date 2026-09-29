@@ -618,7 +618,7 @@ describe("admitPrimary — after a password login (F1 step 1, F3; owner decision
 			});
 			expect(await transactionStore.get(answer.body.transaction as string), mode).toMatchObject({
 				purpose: "login",
-				sessionId: "sess-regenerated",
+				binding: { kind: "session", id: "sess-regenerated" },
 				subject: "u-alice",
 				continuation: admission.continuation,
 				enrollment: "none",
@@ -661,7 +661,7 @@ describe("admitPrimary — after a password login (F1 step 1, F3; owner decision
 			},
 		});
 		expect(await transactionStore.get(answer.body.transaction as string)).toMatchObject({
-			sessionId: "sess-regenerated",
+			binding: { kind: "session", id: "sess-regenerated" },
 			enrollment: "required",
 			emailProof: "not_required",
 		});

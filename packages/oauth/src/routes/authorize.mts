@@ -130,8 +130,12 @@ export interface AuthorizeHandlerOptions {
 	readonly requirements: SessionRequirementResolver;
 }
 
-/** The parameter this endpoint adds to a page it sends the browser to, naming the request to come back to. */
-const REDIRECT_TO_PARAM = "redirect_to";
+/**
+ * The parameter this endpoint adds to a page it sends the browser to, naming
+ * the request to come back to. The login page's own URL may not carry it
+ * (`oauthModule`'s configSchema refuses one that does).
+ */
+export const REDIRECT_TO_PARAM = "redirect_to";
 
 /**
  * The login trip read from the configuration, for a composition in which no
@@ -140,16 +144,24 @@ const REDIRECT_TO_PARAM = "redirect_to";
  * exactly as the inline handler read `config.endpoints.login.url`, so a
  * hand-built config missing the key fails at the same point (request time) it
  * always did — `oauthModule`'s configSchema is what turns the missing key into
- * a boot failure for schema-validated deployments. The page may already carry
- * a query string (e.g. `/login?tenant=x`), so `redirect_to` joins with `&`
- * there and `?` otherwise — a second `?` would corrupt both parameters. The
- * session module's entry adds it the same way.
+ * a boot failure for schema-validated deployments, and refuses a login URL
+ * that carries `redirect_to` of its own. `redirect_to` is added to the login
+ * URL's query: the page may carry a query of its own (e.g. `/login?tenant=x`),
+ * so `redirect_to` joins with `&` there and `?` otherwise — a second `?` would
+ * corrupt both parameters — and may carry a fragment, which is kept after the
+ * query: `/login#x` becomes `/login?redirect_to=…#x`, where the page reads it
+ * (a `?` inside the fragment is not the query's). The target is encoded whole
+ * with `encodeURIComponent`, not as a form, so nothing of it reads as the
+ * page's query or fragment. The session module's entry adds it the same way.
  */
 export const loginTripFromConfig = (loginUrl: () => string): Pick<LoginEntry, "urlFor"> => ({
 	urlFor: (returnTo: string): string => {
 		const url = loginUrl();
-		const joiner = url.includes("?") ? "&" : "?";
-		return `${url}${joiner}${REDIRECT_TO_PARAM}=${encodeURIComponent(returnTo)}`;
+		const fragmentAt = url.indexOf("#");
+		const page = fragmentAt === -1 ? url : url.slice(0, fragmentAt);
+		const fragment = fragmentAt === -1 ? "" : url.slice(fragmentAt);
+		const joiner = page.includes("?") ? "&" : "?";
+		return `${page}${joiner}${REDIRECT_TO_PARAM}=${encodeURIComponent(returnTo)}${fragment}`;
 	},
 });
 

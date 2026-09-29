@@ -31,34 +31,50 @@ import express from "express";
 import { z } from "zod";
 import { vouchableAcrValues } from "./acrValues.mjs";
 import { CLIENT_ASSERTION_ALGORITHMS } from "./middleware/clientAssertion.mjs";
+import { REDIRECT_TO_PARAM } from "./routes/authorize.mjs";
 import { createOAuthRouter } from "./routes.mjs";
+
+/**
+ * Whether `url` — a path or an absolute URL — carries `redirect_to` in its own
+ * query, read as `/authorize`'s login redirect writes it: the text before any
+ * `#`, after the first `?` — so a fragment is never mistaken for the query,
+ * and a URL `URL` could not parse is held to the rule all the same. The name
+ * is matched as `URLSearchParams.has` matches it — exactly, after decoding, so
+ * `redirect%5Fto` and a `redirect_to` with no value count.
+ */
+const carriesRedirectTo = (url: string): boolean => {
+	const page = url.split("#", 1)[0] ?? "";
+	const queryAt = page.indexOf("?");
+	return queryAt !== -1 && new URLSearchParams(page.slice(queryAt + 1)).has(REDIRECT_TO_PARAM);
+};
 
 /**
  * Config-slice schema for `oauthModule`. The OAuth `/authorize` route
  * reads `config.endpoints.login.url` to build the redirect for
  * unauthenticated requests when no module provides the `loginEntry` slot,
- * and the session module builds that slot from the same key (#728). The base
- * `endpoints.login.url` is `z.string().optional()` in `CoreConfigSchema`
- * (production defaults are supplied via HOCON env-var substitution
- * `${?ENDPOINTS_LOGIN_URL}`), but a config that omits the env var passes
- * the base schema, then produces the literal redirect
- * `undefined?redirect_to=...` at request time.
+ * and the session module builds that slot from the same key (#728). Core's
+ * `CoreConfigSchema` requires a string there; this module additionally
+ * requires it non-empty — an empty one names no page — and keeps both rules
+ * when `loginEntry` is provided, since the slot is built from the same key:
+ * without a `redirect_to` of its own, as `/authorize` adds `redirect_to`,
+ * naming the request to come back to (core's `LoginEntry` contract), and a
+ * login URL that carried one would send two, a page reading the first
+ * sending the user to the preconfigured target, not the one the provider
+ * asked for.
  *
- * Composed via `composeConfigSchema` at validate-manifests step 13:
- * intersection with the base schema yields `endpoints.login.url:
- * z.string().min(1)`, so boot fails with
- * `BootError(reason: "config-validation-failed")` before any request hits
- * the route.
- *
- * Multi-agent review round 2 (Claude + Codex converged): the previous
- * `fullSectionsSchema.pick({ endpoints: true })` only required the
- * `endpoints` and `endpoints.login` *objects* to exist; `url` was still
- * effectively optional. Tightened to `z.string().min(1)` here.
+ * Composed via `composeConfigSchema` at validate-manifests step 13, so boot
+ * fails with `BootError(reason: "config-validation-failed")`, the issue at
+ * `endpoints.login.url`, before any request hits the route.
  */
 const oauthConfigSchema = z.object({
 	endpoints: z.object({
 		login: z.object({
-			url: z.string().min(1),
+			url: z
+				.string()
+				.min(1)
+				.refine((url) => !carriesRedirectTo(url), {
+					message: `endpoints.login.url must not carry a "${REDIRECT_TO_PARAM}" query parameter of its own: the provider adds "${REDIRECT_TO_PARAM}" when it sends a browser to the login page, naming the request to come back to`,
+				}),
 		}),
 	}),
 });

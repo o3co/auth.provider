@@ -8,7 +8,7 @@ on:
   # Daily audit (see the `audit` job). A `schedule` event runs on the
   # repository's default branch — `develop` here — so this is a daily audit of
   # develop only as long as develop stays the default branch. Nothing else runs
-  # on this trigger: build-and-test is gated on the event below.
+  # on this trigger: every job that builds or tests is gated on the event.
   schedule:
     - cron: '17 3 * * *'
 
@@ -21,8 +21,22 @@ on:
 permissions:
   contents: read
 
+# A newer push to a pull request supersedes the run for its older commit:
+# that run is cancelled, which frees the runners it held, and its
+# `build-and-test` fails rather than passes. Every other event gets a group of
+# its own (the run id), so a merge to develop is never cancelled by the next
+# one and every develop commit is tested. Re-running a superseded pull-request
+# run joins the same group and cancels the head's run in turn: re-run the
+# head's instead.
+concurrency:
+  group: ci-${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
-  build-and-test:
+  # Everything the required check asks of a change except its test suites:
+  # the lint, the build, the source guards and the typecheck. The suites run
+  # in `test`, beside this job; `build-and-test` reports both.
+  checks:
     if: github.event_name != 'schedule'
     runs-on: ubuntu-latest
     steps:
@@ -58,9 +72,9 @@ jobs:
         # `workspace:*` devDependency, and never a `dependencies` entry (a second
         # copy of core is one that `declare module` augmentation does not
         # reach). The script says why each rule holds. It runs here, in the
-        # required build-and-test job, so a manifest that breaks the rule cannot
-        # merge; publish-readiness's packed-manifest step asserts what pnpm
-        # rewrote.
+        # checks the required build-and-test job reports, so a manifest that
+        # breaks the rule cannot merge; publish-readiness's packed-manifest step
+        # asserts what pnpm rewrote.
         run: .github/scripts/check-sibling-deps.sh
       - run: pnpm run lint
       - run: pnpm run build
@@ -267,18 +281,123 @@ jobs:
           fi
           echo "OK: no ignoreExpiration: true call sites outside revoke handler or tests"
       - run: pnpm -r --if-present run typecheck
-      # Run each package's suite one package at a time on CI. The runner is
-      # 2-vCPU; running multiple packages' vitest workers (plus redis
-      # testcontainers) concurrently over-subscribes the runner and surfaces
-      # loaded-runner flakes (ephemeral-port pressure, timing-margin misses,
-      # slow container port binding). Serializing packages bounds total
-      # concurrency to one package's worker pool. Local `pnpm run test` stays
-      # fully parallel — this cap is CI-only. Within a package, vitest still
-      # parallelizes test files.
-      - run: pnpm -r --workspace-concurrency=1 run test
-      - run: pnpm -r --filter "./packages/**" --if-present --workspace-concurrency=1 run test:coverage
 
+  # The shards `test` runs, read from .github/scripts/test-shards.sh, where
+  # they are written down once.
+  test-plan:
+    if: github.event_name != 'schedule'
+    runs-on: ubuntu-latest
+    outputs:
+      shards: ${{ steps.plan.outputs.shards }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: .github/scripts
+      - id: plan
+        run: |
+          set -euo pipefail
+          shards="$(.github/scripts/test-shards.sh list)"
+          echo "shards=$shards" >> "$GITHUB_OUTPUT"
+
+  # Every workspace's test suite, once, split across parallel jobs.
+  #
+  # Once: a package's suite runs with coverage when the package wires it, and
+  # that run is its only one (.github/scripts/run-workspace-suite.sh). CI used
+  # to run every package twice, plain and then with coverage.
+  #
+  # Split: the suites grew about fourfold in September, and one job running
+  # them back to back was the long pole of every pull request. Each shard is a
+  # runner of its own. Inside a shard, packages still run one at a time: the
+  # runner is 2-vCPU, and running several packages' vitest workers (plus the
+  # Redis test containers) at once over-subscribes it and surfaces
+  # loaded-runner flakes (ephemeral-port pressure, timing-margin misses, slow
+  # container port binding). Within a package, vitest still parallelizes test
+  # files. Local `pnpm run test` stays fully parallel; both caps are CI-only.
+  test:
+    if: github.event_name != 'schedule'
+    needs: test-plan
+    name: test (${{ matrix.shard }})
+    runs-on: ubuntu-latest
+    # A shard takes two to three minutes. A hung container should fail the
+    # required check, not hold it pending for the runner's six hours.
+    timeout-minutes: 20
+    env:
+      # The packages whose coverage reports are uploaded below. The run step
+      # checks each report exists; codecov.yml's `after_n_builds` counts them.
+      UPLOADED_COVERAGE: core federation-grants foundation oauth session
+    strategy:
+      # Every shard reports, so one red shard does not hide another's result.
+      fail-fast: false
+      matrix:
+        shard: ${{ fromJSON(needs.test-plan.outputs.shards) }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+
+      - name: Get pnpm store path
+        id: pnpm-store
+        shell: bash
+        run: echo "path=$(pnpm store path --silent)" >> "$GITHUB_OUTPUT"
+
+      - name: Cache pnpm store
+        uses: actions/cache@v4
+        with:
+          path: ${{ steps.pnpm-store.outputs.path }}
+          key: pnpm-store-${{ hashFiles('pnpm-lock.yaml') }}
+          restore-keys: pnpm-store-
+
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm run build
+      - name: Run each of the shard's workspaces' suites once
+        env:
+          SHARD: ${{ matrix.shard }}
+        run: |
+          set -euo pipefail
+          # Assigned first, so a failure of the script stops the step: inside
+          # `read … <<< "$(…)"` its exit status would be lost, and an empty
+          # selection would run every workspace.
+          filters="$(.github/scripts/test-shards.sh filters "$SHARD")"
+          read -r -a FILTERS <<< "$filters"
+          (( ${#FILTERS[@]} > 0 )) || { echo "::error::shard '$SHARD' has no pnpm selection"; exit 1; }
+
+          # A named shard finds every package it names. A renamed package is
+          # still tested, in `rest`; this keeps the shard from shrinking unseen.
+          expected="$(.github/scripts/test-shards.sh packages "$SHARD")"
+          names="$(pnpm -r "${FILTERS[@]}" exec node -p 'require("./package.json").name')"
+          for pkg in $expected; do
+            if ! grep -qxF "$pkg" <<< "$names"; then
+              echo "::error::shard '$SHARD' names $pkg, and no workspace has that name"
+              exit 1
+            fi
+          done
+
+          pnpm -r --workspace-concurrency=1 "${FILTERS[@]}" exec "$GITHUB_WORKSPACE/.github/scripts/run-workspace-suite.sh"
+
+          # Every report uploaded below that this shard produced exists. A
+          # missing one would skip its upload without a word, and codecov.yml's
+          # `after_n_builds` would then withhold every Codecov status. Matched
+          # on package names, which the selection above already listed.
+          for pkg in $UPLOADED_COVERAGE; do
+            if grep -qxF "@o3co/auth-provider-$pkg" <<< "$names" \
+              && [ ! -f "packages/$pkg/coverage/coverage-final.json" ]; then
+              echo "::error::packages/$pkg ran in this shard and wrote no coverage/coverage-final.json"
+              exit 1
+            fi
+          done
+
+      # #593: a package whose coverage is never uploaded is a package whose
+      # tests nobody's dashboard can see, and whose diff lines codecov has no
+      # data for. This list is hand-maintained; the other packages' reports are
+      # produced and not uploaded, because turning them on changes the project
+      # ratio for code a change does not touch, which is its own change. Each
+      # step runs in whichever shard produced the report, so moving a package
+      # between shards moves its upload with it. Adding one here also adds it to
+      # the job's UPLOADED_COVERAGE and raises codecov.yml's `after_n_builds`.
       - name: Upload coverage to Codecov (core)
+        if: hashFiles('packages/core/coverage/coverage-final.json') != ''
         uses: codecov/codecov-action@v5
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
@@ -287,14 +406,8 @@ jobs:
           disable_search: true
           fail_ci_if_error: false
 
-      # #593: a package whose coverage is never uploaded is a package whose
-      # tests nobody's dashboard can see, and whose diff lines codecov has no
-      # data for. This list is hand-maintained and only ever had four entries;
-      # the rest of `packages/**` runs `test:coverage` in the step above and
-      # then has its report thrown away. Adding the new one here rather than
-      # all of them: turning the others on changes the project ratio for code
-      # this branch does not touch, which is its own change.
       - name: Upload coverage to Codecov (federation-grants)
+        if: hashFiles('packages/federation-grants/coverage/coverage-final.json') != ''
         uses: codecov/codecov-action@v5
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
@@ -304,6 +417,7 @@ jobs:
           fail_ci_if_error: false
 
       - name: Upload coverage to Codecov (foundation)
+        if: hashFiles('packages/foundation/coverage/coverage-final.json') != ''
         uses: codecov/codecov-action@v5
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
@@ -313,6 +427,7 @@ jobs:
           fail_ci_if_error: false
 
       - name: Upload coverage to Codecov (oauth)
+        if: hashFiles('packages/oauth/coverage/coverage-final.json') != ''
         uses: codecov/codecov-action@v5
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
@@ -322,6 +437,7 @@ jobs:
           fail_ci_if_error: false
 
       - name: Upload coverage to Codecov (session)
+        if: hashFiles('packages/session/coverage/coverage-final.json') != ''
         uses: codecov/codecov-action@v5
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
@@ -329,6 +445,27 @@ jobs:
           flags: session
           disable_search: true
           fail_ci_if_error: false
+
+  # The one required status check. It reports `checks`, the shard plan and
+  # every `test` shard under the name branch protection requires, so the
+  # required-check setting does not change when the shards do. `always()`
+  # matters: a job skipped because something it needs failed would report
+  # "skipped", which a required check accepts as passing. Not `!cancelled()`,
+  # GitHub's usual advice: under it a cancelled run would leave this job
+  # skipped too, and so passing.
+  build-and-test:
+    if: always() && github.event_name != 'schedule'
+    needs: [checks, test-plan, test]
+    runs-on: ubuntu-latest
+    steps:
+      - name: The checks and every test shard passed
+        env:
+          CHECKS: ${{ needs.checks.result }}
+          PLAN: ${{ needs.test-plan.result }}
+          TESTS: ${{ needs.test.result }}
+        run: |
+          echo "checks: $CHECKS; test plan: $PLAN; test shards: $TESTS"
+          [ "$CHECKS" = success ] && [ "$PLAN" = success ] && [ "$TESTS" = success ]
 
   # `pnpm audit --prod --audit-level=low` in its own job (#477). It used to be a
   # step of build-and-test — the one required status check — so an outage of
@@ -364,9 +501,11 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm run audit
 
+  # Beside the other jobs rather than after them: it builds on its own, and
+  # waiting for the tests only lengthened every pull request.
   publish-readiness:
+    if: github.event_name != 'schedule'
     runs-on: ubuntu-latest
-    needs: build-and-test
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4

@@ -103,4 +103,4 @@ pnpm --filter @o3co/auth-provider-composition exec vitest run --maxWorkers=2    
 The real-Redis cases run on the Redis package's shared test container
 ([`redis-container.global.mts`](../../packages/redis/__tests__/support/redis-container.global.mts)),
 so they need a container runtime, as `packages/redis` does. CI runs the suite
-in the `build-and-test` job's workspace test step.
+in the `test` job; `.github/scripts/test-shards.sh` says which shard.

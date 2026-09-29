@@ -440,6 +440,9 @@ describe("assembleApp mounts the CORS middleware from config (#500)", () => {
 	});
 
 	it("warns rather than staying silent when the value is a shape nothing can read", async () => {
+		// AppConfigSchema refuses this shape by path; a hand-built composition
+		// that hands createApp its configuration without that parse reaches
+		// the mount site, which warns.
 		const warn = vi.fn();
 		const config = makeValidAppConfig() as unknown as Record<string, unknown>;
 		config.cors = { allowedOrigins: 42 };

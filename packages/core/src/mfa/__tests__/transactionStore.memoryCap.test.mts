@@ -51,7 +51,7 @@ const T0 = Date.UTC(2026, 8, 1);
 const TX = (id: string, expiresAtMs = T0 + 600_000): MfaTransaction => ({
 	id,
 	purpose: "login",
-	sessionId: `express-session-${id}`,
+	binding: { kind: "session", id: `express-session-${id}` },
 	subject: "user-1",
 	sid: undefined,
 	continuation: {

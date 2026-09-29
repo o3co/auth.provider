@@ -156,8 +156,8 @@ describe("oauthModule — manifest shape", () => {
 		const module = oauthModule({ config });
 		const schema = module.configSchema;
 		if (!schema) throw new Error("configSchema must be defined");
-		// The base schema marks endpoints.login.url optional, but oauthConfigSchema
-		// must tighten it to z.string().min(1) so boot fails before /authorize is hit.
+		// Core's schema requires a string there; oauthConfigSchema requires it
+		// too, non-empty, so boot fails before /authorize is hit.
 		const result = schema.safeParse({ endpoints: { login: {} } });
 		expect(result.success).toBe(false);
 	});
@@ -178,6 +178,45 @@ describe("oauthModule — manifest shape", () => {
 		if (!schema) throw new Error("configSchema must be defined");
 		const result = schema.safeParse({ endpoints: { login: { url: "/login" } } });
 		expect(result.success).toBe(true);
+	});
+
+	it.each([
+		["a path", "/login?redirect_to=https://x"],
+		["an absolute URL", "https://login.example/signin?tenant=x&redirect_to=https%3A%2F%2Fx"],
+		["a name written percent-encoded", "/login?redirect%5Fto=x"],
+		["a name with no value", "/login?tenant=x&redirect_to"],
+		// The rule reads the query as the redirect writes it — the text before
+		// any `#`, after the first `?` — so a URL `URL` cannot parse is held to
+		// it too: the redirect would append a second one all the same.
+		["a URL that does not parse", "http://[::1/login?redirect_to=x"],
+		["a URL that does not parse, with a fragment", "http://[::1/login?tenant=x&redirect_to=y#z"],
+	])(
+		"configSchema refuses %s whose own query carries redirect_to, naming the key: the provider adds it",
+		(_label, url) => {
+			const schema = oauthModule({ config: makeValidAppConfig() }).configSchema;
+			if (!schema) throw new Error("configSchema must be defined");
+			const result = schema.safeParse({ endpoints: { login: { url } } });
+			expect(result.success).toBe(false);
+			const issue = result.error?.issues[0];
+			expect(issue?.path).toEqual(["endpoints", "login", "url"]);
+			expect(issue?.message).toContain('"redirect_to"');
+			expect(issue?.message).toContain("the provider adds");
+		},
+	);
+
+	it.each([
+		["a query of its own", "/login?tenant=x"],
+		["an absolute URL with a query", "https://login.example/signin?tenant=x"],
+		["redirect_to inside the fragment alone", "/login#redirect_to=https://x"],
+		["a query, and redirect_to inside the fragment", "/login?tenant=x#redirect_to=y"],
+		["a name that differs in case", "/login?Redirect_To=x"],
+		["a longer name", "/login?redirect_to_after=x"],
+		["a URL that does not parse, without redirect_to", "http://[::1/login?tenant=x"],
+		["a `?` inside the fragment alone", "/login#a?redirect_to=x"],
+	])("configSchema accepts a login URL with %s", (_label, url) => {
+		const schema = oauthModule({ config: makeValidAppConfig() }).configSchema;
+		if (!schema) throw new Error("configSchema must be defined");
+		expect(schema.safeParse({ endpoints: { login: { url } } }).success).toBe(true);
 	});
 
 	it("includes only oauth-endpoints when issuer is absent (JWKS moved to core jwksModule)", () => {
@@ -248,6 +287,55 @@ describe("oauthModule — createTestApp boot failure", () => {
 			name: "BootError",
 			reason: "config-validation-failed",
 		} satisfies Partial<InstanceType<typeof BootError>>);
+	});
+
+	const bootWithLoginUrl = (url: string) => {
+		const base = makeValidAppConfig();
+		const config = { ...base, endpoints: { ...base.endpoints, login: { url } } };
+		return createTestApp({
+			modules: [
+				oauthModule({ config }),
+				memoryAccessTokenDenylistModule,
+				jwksModule,
+				clientRepositoryModule,
+				codeRepositoryModule,
+				keyStoreModule,
+			],
+			bootstrapComponents: { config, pathResolver: (s) => s },
+		});
+	};
+
+	it.each([
+		["a path", "/login?redirect_to=https://x"],
+		["an absolute URL", "https://login.example/signin?redirect_to=https%3A%2F%2Fx"],
+	])(
+		"fails boot when endpoints.login.url is %s carrying redirect_to, naming the key",
+		async (_label, url) => {
+			let refusal: unknown;
+			try {
+				const handle = await bootWithLoginUrl(url);
+				await handle.dispose();
+			} catch (err) {
+				refusal = err;
+			}
+			expect(refusal).toMatchObject({ name: "BootError", reason: "config-validation-failed" });
+			const issues = (refusal as { details?: { issues?: { path: unknown; message: string }[] } })
+				.details?.issues;
+			expect(issues).toContainEqual(
+				expect.objectContaining({
+					path: ["endpoints", "login", "url"],
+					message: expect.stringMatching(/"redirect_to".*the provider adds/),
+				}),
+			);
+		},
+	);
+
+	it.each([
+		["a query of its own", "/login?tenant=x"],
+		["redirect_to inside the fragment alone", "/login#redirect_to=https://x"],
+	])("boots when endpoints.login.url carries %s", async (_label, url) => {
+		const handle = await bootWithLoginUrl(url);
+		await handle.dispose();
 	});
 });
 
