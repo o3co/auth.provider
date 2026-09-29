@@ -981,6 +981,7 @@ export type {
 } from "./token-exchange/validator.mjs";
 // #728: what other modules read of the oauth module's token settings, through
 // the `oauthTokenSettings` slot rather than the oauth section.
+export { checkOAuthTokenSettings } from "./token-settings/check.mjs";
 export type { OAuthTokenSettings } from "./token-settings/types.mjs";
 // The MFA ADR's D9: how a session was established and what this provider
 // vouches for, read one way by every consumer of a session.

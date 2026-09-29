@@ -29,22 +29,22 @@
  * has run by then (`validate-manifests.mts`, the `grantPolicy` issuer check).
  */
 
-import type { OAuthTokenSettings } from "../token-settings/types.mjs";
+import { checkOAuthTokenSettings } from "../token-settings/check.mjs";
 
 /** The component map as boot holds it. */
 type Components = Readonly<Record<string, unknown>>;
 
-const tokenSettingsOf = (components: Components): OAuthTokenSettings | undefined =>
-	components.oauthTokenSettings as OAuthTokenSettings | undefined;
-
 /**
- * The issuer: the slot's — canonical, as its contract holds it — else
- * `oauth.jwt.issuer` as the configuration carries it, unvalidated, for each
- * reader to hold to its own rule as it always has.
+ * The issuer: the slot's when the composition holds it — read whole, held
+ * first to what its readers read (`checkOAuthTokenSettings`), so a slot
+ * without a canonical issuer refuses rather than the configuration's being
+ * read beside it — else `oauth.jwt.issuer` as the configuration carries it,
+ * unvalidated, for each reader to hold to its own rule as it always has.
  */
 export function compositionIssuer(components: Components): unknown {
-	const fromSlot = tokenSettingsOf(components)?.issuer;
-	if (fromSlot !== undefined) return fromSlot;
+	if (components.oauthTokenSettings !== undefined) {
+		return checkOAuthTokenSettings(components.oauthTokenSettings).issuer;
+	}
 	return (components.config as { oauth?: { jwt?: { issuer?: unknown } } } | undefined)?.oauth?.jwt
 		?.issuer;
 }

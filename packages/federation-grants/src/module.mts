@@ -54,6 +54,7 @@
 
 import {
 	AUDIT_SINK_ABSENCE_POLICY,
+	checkOAuthTokenSettings,
 	defineModule,
 	type FederationGrantConnection,
 	type FederationGrantRefresher,
@@ -142,11 +143,14 @@ export type FederationGrantsModuleDeps = ProviderDeps<Requires, Optional>;
 
 /**
  * The issuer the routes and the acquisition settings are built on: the
- * `oauthTokenSettings` slot's when the composition holds it (#728), otherwise
- * `oauth.jwt.issuer` as the configuration carries it.
+ * `oauthTokenSettings` slot's when the composition holds it (#728), the slot
+ * read whole and checked first, otherwise `oauth.jwt.issuer` as the
+ * configuration carries it.
  */
 const issuerOf = (deps: FederationGrantsModuleDeps): string =>
-	deps.oauthTokenSettings?.issuer ?? deps.config.oauth.jwt.issuer;
+	deps.oauthTokenSettings === undefined
+		? deps.config.oauth.jwt.issuer
+		: checkOAuthTokenSettings(deps.oauthTokenSettings).issuer;
 
 const isEnabled = (deps: FederationGrantsModuleDeps): boolean =>
 	deps.config.federationGrants?.enabled === true;

@@ -31,6 +31,7 @@ import type {
 import {
 	auditErrorList,
 	auditErrorText,
+	checkOAuthTokenSettings,
 	consoleLogger,
 	formatObject,
 	generateToken,
@@ -85,10 +86,13 @@ export function createTokenExchangeGrant(deps: TokenExchangeDependencies): Grant
 	// fault, refused before any request — read per request, it answered every
 	// exchange with a 500, after client authentication had spent whatever it
 	// spends.
-	// The oauth module's settings when the composition holds them (#728);
-	// otherwise the configuration, through core's one reader of the pair.
+	// The oauth module's settings when the composition holds them (#728),
+	// read whole and checked first; otherwise the configuration, through
+	// core's one reader of the pair.
 	const { defaultExpiresIn, maxExpiresIn } =
-		deps.oauthTokenSettings?.accessTokenLifetime ?? resolveAccessTokenLifetime(deps.config);
+		deps.oauthTokenSettings === undefined
+			? resolveAccessTokenLifetime(deps.config)
+			: checkOAuthTokenSettings(deps.oauthTokenSettings).accessTokenLifetime;
 
 	return {
 		// #326 deny-by-absence, the shape `client_credentials` and the WebAuthn

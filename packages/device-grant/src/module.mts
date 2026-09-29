@@ -126,6 +126,7 @@
 import {
 	type AppConfig,
 	AUDIT_SINK_ABSENCE_POLICY,
+	checkOAuthTokenSettings,
 	consoleLogger,
 	createRateLimitGuard,
 	DEVICE_CODE_STORE_ABSENCE_POLICY,
@@ -300,22 +301,40 @@ type Optional = (typeof OPTIONAL)[number];
 export type DeviceGrantModuleDeps = ProviderDeps<Requires, Optional>;
 
 /**
- * What this module reads of `oauth {}`: the `oauthTokenSettings` slot's values
- * when a module provides it (#728), otherwise the configuration read as it
- * always was — the issuer as written, the lifetime through core's
- * `resolveAccessTokenLifetime`, and `requireEmailVerified` on only when `true`.
- * Each is read where it is needed, so a composition that never reaches one
- * never resolves it.
+ * What this module reads of `oauth {}`: the `oauthTokenSettings` slot when a
+ * module provides it (#728) — read whole, held first to what its readers read
+ * (`checkOAuthTokenSettings`), never a member of it beside the configuration —
+ * otherwise the configuration read as it always was: the issuer as written,
+ * the lifetime through core's `resolveAccessTokenLifetime`, and
+ * `requireEmailVerified` on only when `true`. Each is read where it is needed,
+ * so a composition that never reaches one never resolves it.
  */
-const tokenSettings = (deps: DeviceGrantModuleDeps) => ({
-	issuer: (): string => deps.oauthTokenSettings?.issuer ?? deps.config.oauth.jwt.issuer,
-	accessTokenDefaultExpiresIn: (): number =>
-		(deps.oauthTokenSettings?.accessTokenLifetime ?? resolveAccessTokenLifetime(deps.config))
-			.defaultExpiresIn,
-	requireEmailVerified: (): boolean =>
-		deps.oauthTokenSettings?.requireEmailVerified ??
-		deps.config.oauth?.requireEmailVerified === true,
-});
+const tokenSettings = (deps: DeviceGrantModuleDeps) => {
+	const held = () =>
+		deps.oauthTokenSettings === undefined
+			? undefined
+			: checkOAuthTokenSettings(deps.oauthTokenSettings);
+	return {
+		issuer: (): string => {
+			const settings = held();
+			return settings === undefined ? deps.config.oauth.jwt.issuer : settings.issuer;
+		},
+		accessTokenDefaultExpiresIn: (): number => {
+			const settings = held();
+			return (
+				settings === undefined
+					? resolveAccessTokenLifetime(deps.config)
+					: settings.accessTokenLifetime
+			).defaultExpiresIn;
+		},
+		requireEmailVerified: (): boolean => {
+			const settings = held();
+			return settings === undefined
+				? deps.config.oauth?.requireEmailVerified === true
+				: settings.requireEmailVerified;
+		},
+	};
+};
 
 const readSettings = (deps: DeviceGrantModuleDeps): DeviceAuthorizationConfigSlice | null => {
 	const slice = deps.config?.oauth?.deviceAuthorization as

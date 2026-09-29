@@ -54,7 +54,12 @@
  * Per Wave 2 Phase 2 spec §10 (config) + §11.2 (module).
  */
 
-import { assertSecretEntropy, consoleLogger, defineModule } from "@o3co/auth-provider-core";
+import {
+	assertSecretEntropy,
+	checkOAuthTokenSettings,
+	consoleLogger,
+	defineModule,
+} from "@o3co/auth-provider-core";
 import { z } from "zod";
 import { createDPoPNonceIssuer } from "./nonce.mjs";
 import { createDPoPMechanism, type DPoPMechanismOptions } from "./verifier.mjs";
@@ -245,12 +250,15 @@ export const dpopModule = defineModule<
 				// `CoreConfigSchema` since #266/#307, so this is not a second
 				// place to configure an origin — it is the same one, read:
 				// through the `oauthTokenSettings` slot the oauth module
-				// provides (#728), or from the configuration when no module
-				// provides it. The guard exists for a composition root that
-				// hand-builds a config object without core's schema;
-				// `createDPoPMechanism` validates the value itself and produces
-				// the operator-facing message.
-				const issuer = deps.oauthTokenSettings?.issuer ?? typedConfig.oauth.jwt?.issuer;
+				// provides (#728), whole and checked first, or from the
+				// configuration when no module provides it. The guard exists
+				// for a composition root that hand-builds a config object
+				// without core's schema; `createDPoPMechanism` validates the
+				// value itself and produces the operator-facing message.
+				const issuer =
+					deps.oauthTokenSettings === undefined
+						? typedConfig.oauth.jwt?.issuer
+						: checkOAuthTokenSettings(deps.oauthTokenSettings).issuer;
 				if (typeof issuer !== "string" || issuer === "") {
 					throw new Error(
 						"dpopModule: config.oauth.jwt.issuer is required when DPoP is enabled. Its origin " +

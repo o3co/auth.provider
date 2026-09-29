@@ -24,7 +24,7 @@
  * failed contribution, naming the key. Stateless: nothing forks per replica.
  */
 
-import { defineModule } from "@o3co/auth-provider-core";
+import { checkOAuthTokenSettings, defineModule } from "@o3co/auth-provider-core";
 import { z } from "zod";
 import { readMfaTotpSettings } from "../config.mjs";
 import { createTotpFactor, TOTP_FACTOR_KIND } from "./factor.mjs";
@@ -51,7 +51,11 @@ export const mfaTotpFactorModule = defineModule({
 			[TOTP_FACTOR_KIND]: ({ config, oauthTokenSettings }) => {
 				const settings = readMfaTotpSettings(
 					config,
-					oauthTokenSettings === undefined ? {} : { issuer: oauthTokenSettings.issuer },
+					// The slot whole, checked first (#728): its issuer is then
+					// always one, so the configuration's is read only without it.
+					oauthTokenSettings === undefined
+						? {}
+						: { issuer: checkOAuthTokenSettings(oauthTokenSettings).issuer },
 				);
 				return settings.enabled ? createTotpFactor(settings) : null;
 			},

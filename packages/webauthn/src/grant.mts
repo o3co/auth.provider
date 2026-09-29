@@ -117,6 +117,7 @@ import { randomUUID } from "node:crypto";
 import {
 	auditErrorText,
 	boundPolicyAudience,
+	checkOAuthTokenSettings,
 	consoleLogger,
 	evaluateGrantPolicy,
 	extractResourceParam,
@@ -223,14 +224,22 @@ export const createWebAuthnGrant = (deps: WebAuthnGrantDeps): GrantHandler => {
 	// missing refresh lifetime signed a refresh token with no `exp`.
 	//
 	// What it reads of `oauth {}` is the `oauthTokenSettings` slot the oauth
-	// module provides (#728) when the composition holds it; otherwise the
-	// configuration, through core's one reader of each value.
-	const tokenSettings = deps.oauthTokenSettings;
+	// module provides (#728) when the composition holds it — read whole,
+	// checked first, never a member of it beside the configuration; otherwise
+	// the configuration, through core's one reader of each value.
+	const tokenSettings =
+		deps.oauthTokenSettings === undefined
+			? undefined
+			: checkOAuthTokenSettings(deps.oauthTokenSettings);
 	const accessTokenExpiresIn = (
-		tokenSettings?.accessTokenLifetime ?? resolveAccessTokenLifetime(config)
+		tokenSettings === undefined
+			? resolveAccessTokenLifetime(config)
+			: tokenSettings.accessTokenLifetime
 	).defaultExpiresIn;
 	const refreshTokenExpiresIn =
-		tokenSettings?.refreshTokenExpiresIn ?? resolveRefreshTokenLifetime(config);
+		tokenSettings === undefined
+			? resolveRefreshTokenLifetime(config)
+			: tokenSettings.refreshTokenExpiresIn;
 	// One logger for every line this grant writes. The module hands over the
 	// deployment's; a handler built without one still reports its outages.
 	const logger = deps.logger ?? consoleLogger;
@@ -441,7 +450,9 @@ export const createWebAuthnGrant = (deps: WebAuthnGrantDeps): GrantHandler => {
 			// the check keeps the unit-test surface usable.
 			// ------------------------------------------------------------------
 			const resourceIndicatorEnabled =
-				tokenSettings?.resourceIndicatorEnabled ?? config.oauth.resourceIndicator?.enabled === true;
+				tokenSettings === undefined
+					? config.oauth.resourceIndicator?.enabled === true
+					: tokenSettings.resourceIndicatorEnabled;
 
 			let policyGrantedAudience: string | null = null;
 

@@ -16,6 +16,7 @@
 
 import {
 	ACCESS_TOKEN_DENYLIST_ABSENCE_POLICY,
+	checkOAuthTokenSettings,
 	defineModule,
 	type Module,
 	type ProviderDeps,
@@ -160,10 +161,17 @@ export const tokenExchangeModule: Module = defineModule<Requires, Optional>({
 				}),
 		},
 		tokenExchangeValidators: {
-			[ACCESS_TOKEN_TYPE]: (deps: TokenExchangeModuleDeps) =>
-				createSelfIssuedAccessTokenValidator({
+			[ACCESS_TOKEN_TYPE]: (deps: TokenExchangeModuleDeps) => {
+				// The slot whole, checked first, when the composition holds it
+				// (#728); the configuration's keys when not — never one beside
+				// the other.
+				const settings =
+					deps.oauthTokenSettings === undefined
+						? undefined
+						: checkOAuthTokenSettings(deps.oauthTokenSettings);
+				return createSelfIssuedAccessTokenValidator({
 					keyStore: deps.keyStore,
-					issuer: deps.oauthTokenSettings?.issuer ?? deps.config.oauth.jwt.issuer,
+					issuer: settings === undefined ? deps.config.oauth.jwt.issuer : settings.issuer,
 					// No `refreshTokenFamilyRevocation`: the grant owns the family
 					// check — see the optional-keys comment above.
 					// #367: revocation stores, forwarded like every other
@@ -176,9 +184,12 @@ export const tokenExchangeModule: Module = defineModule<Requires, Optional>({
 					// explicit `legacyTypAccept = false` configuration — the
 					// strict mode would not actually engage at this site.
 					legacyTypAccept:
-						deps.oauthTokenSettings?.legacyTypAccept ?? deps.config.oauth.jwt.legacyTypAccept,
+						settings === undefined
+							? deps.config.oauth.jwt.legacyTypAccept
+							: settings.legacyTypAccept,
 					logger: deps.logger,
-				}),
+				});
+			},
 		},
 	},
 });
