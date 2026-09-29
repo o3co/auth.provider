@@ -409,6 +409,34 @@ describe("device verification on session admission (the session-admission ADR's 
 		}
 	});
 
+	it("refuses to be built on an issuer that is not an absolute http(s) URL: a step-up page resolved on mailto:, urn: or data: throws, a 500 where step_up_required belongs", () => {
+		for (const issuer of [
+			"mailto:admin@example.com",
+			"urn:example:issuer",
+			"data:text/plain,issuer",
+			"as.example.test/relative",
+			"/relative",
+		]) {
+			expect(
+				() =>
+					createDeviceVerificationHandler({
+						store: createMemoryDeviceCodeStore(),
+						settings,
+						rateLimiter: createMemoryRateLimiter({
+							limits: { device_verification: { limit: 5, windowSeconds: 300 } },
+							defaultLimit: { limit: 60, windowSeconds: 60 },
+						}),
+						failMode: "closed",
+						userSessionStore: liveSessionStore(),
+						requirements: resolverForTests([]),
+						issuer,
+						requireEmailVerified: false,
+					}),
+				issuer,
+			).toThrow(/issuer/);
+		}
+	});
+
 	it("refuses to be built without requirements, as it refuses to be built without a store", () => {
 		expect(() =>
 			createDeviceVerificationHandler({
