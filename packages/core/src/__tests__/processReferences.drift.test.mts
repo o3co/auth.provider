@@ -30,13 +30,15 @@
  *
  * What counts as a reference (`REFERENCE_PATTERNS`):
  *
- * - an issue or pull request number: `#728`;
+ * - an issue or pull request number, with its repository when it names one:
+ *   `#728`, `auth.proxy#90`;
  * - a pull request by its place in a series: `PR6`;
  * - a plan's phase: `Phase G`, `Phase 9`;
  * - a label made of capitals, an optional digit, a hyphen, then a number or a
- *   Greek letter: `D-6`, `CP-18`, `P1-1`, `AS-M1`, `A2-β`. The names of
- *   algorithms and encodings share the form and are not references
- *   (`STANDARD_NAMES`): `SHA-256`, `UTF-8`, `P-256`.
+ *   Greek letter: `D-6`, `CP-18`, `P1-1`, `AS-M1`, `A2-β`, also when a word is
+ *   joined to it (`pre-D-6`). The names of algorithms, encodings and address
+ *   blocks share the form and are not references (`STANDARD_NAMES`):
+ *   `SHA-256`, `UTF-8`, `P-256`, `ML-DSA-44`, `TEST-NET-1`.
  *
  * The references product code carries are listed, per file and per
  * reference, in `processReferences.baseline.json`. The list may only shrink:
@@ -59,21 +61,29 @@ const repoRoot = resolve(fileURLToPath(import.meta.url), "../../../../..");
 
 const BASELINE = fileURLToPath(new URL("./processReferences.baseline.json", import.meta.url));
 
-/** Each kind of reference, read over a comment whose URLs are blanked out. */
+/**
+ * Each kind of reference, read over a comment whose URLs are blanked out. The
+ * match is the reference, unless the pattern names it `ref`; a label's match
+ * is the whole hyphenated name it ends (`name`), so that `ML-DSA-44` is read
+ * as one name and `pre-D-6` as a word joined to `D-6`.
+ */
 const REFERENCE_PATTERNS: readonly RegExp[] = [
-	// An issue or pull request number; `&#128;` is a character reference.
-	/(?<![\w/&#])#\d{2,}\b/gu,
+	// An issue or pull request number, with the repository it is in when it
+	// names one (`auth.proxy#90`, `o3co/auth#48`). A bare number follows no
+	// letter or digit (`PKCS#11` is a standard's name) and no `&` (`&#128;` is
+	// a character reference).
+	/(?:[\w-]+(?:[./][\w-]+)+|(?<![\w&#]))#\d{2,}\b/gu,
 	// A pull request by its place in a series.
 	/\bPR ?\d+\b/gu,
 	// A plan's phase.
 	/\bPhase [A-Z0-9]{1,2}\b/gu,
 	// A label: `D-6`, `P1-1`, `AS-M1`, `A2-β`.
-	/\b[A-Z]{1,4}\d?-(?:[A-Z]?\d{1,3}[a-z]?\b|[α-ω](?![\p{L}\p{N}]))/gu,
+	/(?<![\w-])(?<name>(?:[A-Za-z]+-)*(?<ref>[A-Z]{1,4}\d?-(?:[A-Z]?\d{1,3}[a-z]?\b|[α-ω](?![\p{L}\p{N}]))))/gu,
 ];
 
-/** Algorithms and encodings whose names have a label's form. */
+/** Algorithms, encodings and address blocks whose names have a label's form. */
 const STANDARD_NAMES =
-	/^(?:SHA-(?:1|224|256|384|512)|UTF-(?:8|16|32)|AES-(?:128|192|256)|P-(?:256|384|521)|DSA-(?:44|65|87)|ECMA-262)$/u;
+	/^(?:SHA-(?:1|224|256|384|512)|UTF-(?:8|16|32)|AES-(?:128|192|256)|P-(?:256|384|521)|ML-(?:DSA|KEM)-\d+|TEST-NET-[1-3]|ECMA-262)$/u;
 
 /** The references in `comment`, each with its offset, in the order they appear. */
 function referencesIn(comment: string): { reference: string; offset: number }[] {
@@ -81,7 +91,10 @@ function referencesIn(comment: string): { reference: string; offset: number }[] 
 	const found: { reference: string; offset: number }[] = [];
 	for (const pattern of REFERENCE_PATTERNS) {
 		for (const match of text.matchAll(pattern)) {
-			if (!STANDARD_NAMES.test(match[0])) found.push({ reference: match[0], offset: match.index });
+			const reference = match.groups?.ref ?? match[0];
+			const name = match.groups?.name ?? match[0];
+			if (STANDARD_NAMES.test(name) || STANDARD_NAMES.test(reference)) continue;
+			found.push({ reference, offset: match.index + match[0].lastIndexOf(reference) });
 		}
 	}
 	return found.sort((a, b) => a.offset - b.offset);
@@ -168,17 +181,32 @@ const ALLOWED: Counts = JSON.parse(readFileSync(BASELINE, "utf8"));
 describe("process references in product-code comments", () => {
 	it("reads each kind of reference, in the order it appears", () => {
 		const comment =
-			"// Since #728 (PR6, PR #185) in Phase G, D-6, CP-18, P1-1, AS-M1 and A2-β §4.1 hold.";
+			"// Since #728 (PR6, PR #185, auth.proxy#90, o3co/auth#48) in Phase G, D-6, DSA-44, CP-18, P1-1, AS-M1 and A2-β §4.1 hold.";
 		expect(referencesIn(comment).map(({ reference }) => reference)).toEqual([
 			"#728",
 			"PR6",
 			"#185",
+			"auth.proxy#90",
+			"o3co/auth#48",
 			"Phase G",
 			"D-6",
+			"DSA-44",
 			"CP-18",
 			"P1-1",
 			"AS-M1",
 			"A2-β",
+		]);
+	});
+
+	it("reads a reference that a word is joined to by a hyphen or a slash", () => {
+		const comment = "// pre-#292 and #266/#307; pre-D-6, Post-SF-3 and TODO-F-4.";
+		expect(referencesIn(comment).map(({ reference }) => reference)).toEqual([
+			"#292",
+			"#266",
+			"#307",
+			"D-6",
+			"SF-3",
+			"F-4",
 		]);
 	});
 
@@ -187,7 +215,8 @@ describe("process references in product-code comments", () => {
 			"// RFC 6749 §4.1.3 and RFC 9207 §2.4;",
 			"// https://github.com/o3co/auth.provider/issues/728#issuecomment-5881889891;",
 			"// https://datatracker.ietf.org/doc/html/rfc6749#section-4.1;",
-			"// SHA-256, SHA-1, UTF-8, UTF-16, AES-256, P-256, ML-DSA-44, ECMA-262;",
+			"// SHA-256, SHA-1, UTF-8, UTF-16, AES-256, P-256, ML-DSA-44, ML-KEM-768, HMAC-SHA-256, ECMA-262;",
+			"// TEST-NET-1 (RFC 5737), PKCS#11 and PKCS#12;",
 			"// &#128; in the two phases of a parse.",
 		].join("\n");
 		expect(referencesIn(comment)).toEqual([]);
