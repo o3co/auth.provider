@@ -1160,25 +1160,19 @@ export const CoreConfigSchema = z.object({
 				.optional(),
 		),
 	}),
-	// The MFA ADR's D19: whether a password login asks for a second factor.
-	// Declared here, in the schema `createApp` parses itself, so a composition
-	// that never ran `AppConfigSchema` is refused too. `"off"` — the reference
-	// default — is the only value this release can honour: no module here asks
-	// for or verifies a second factor, and a mode written but not honoured
-	// would let an operator believe their logins ask for one. The build order's
-	// step 7 or 8, whichever first honours another mode, widens the literal.
-	//
-	// The MFA ADR's D19 and the session-admission ADR's D7: `mfa.mode` admits
-	// its three values, `off` by reference default — core keeps the key and
-	// the default because this schema is strip-mode (a key the MFA package
-	// alone declared would be dropped silently), and whether a mode other than
-	// `off` is honoured is boot's to refuse: `session-requirement-missing`
-	// when no requirement named `mfa` is registered. A value that is none of
-	// the three is refused here, naming the key. A hand-built configuration
-	// that never wrote the key reads as `off`, a deliberate exception to the
-	// 2026-04-30 ADR (defaults live in HOCON): the parsed type always carries
-	// `mfa`. The rest of the section belongs to the package that reads it and
-	// passes through.
+	// The MFA ADR's D19 and the session-admission ADR's D7: whether a password
+	// login asks for a second factor. `mfa.mode` admits its three values, `off`
+	// by reference default — core keeps the key and the default because this
+	// schema is strip-mode (a key the MFA package alone declared would be
+	// dropped silently), and whether a mode other than `off` is honoured is
+	// boot's to refuse: `session-requirement-missing` when no requirement named
+	// `mfa` is registered. A value that is none of the three is refused here,
+	// naming the key — in the schema `createApp` parses itself, so a
+	// composition that never ran `AppConfigSchema` is refused too. A
+	// hand-built configuration that never wrote the key reads as `off`, a
+	// deliberate exception to the 2026-04-30 ADR (defaults live in HOCON): the
+	// parsed type always carries `mfa`. The rest of the section belongs to the
+	// package that reads it and passes through.
 	mfa: z
 		.object({
 			mode: z
@@ -1842,10 +1836,13 @@ export const fullSectionsSchema = z.object({
 	// The MFA ADR's D19: which store keeps enrolled factors, and which keeps
 	// MFA transactions and the lock state. Declared for the reason the other
 	// switches are — undeclared, an operator's choice is stripped before a
-	// composition root reads it. Read only by a composition that installs
-	// MFA, which `mfa.mode = "off"` means none does in this release. The
-	// factor store may be kept in the Store; a transaction is verification
-	// state and has no Store variant. Defaults live in `reference.conf`.
+	// composition root reads it. Read by a composition root that installs
+	// MFA and picks its stores by name, which none does yet: `tools/composition`
+	// names its MFA store modules itself, and the standalone template wires MFA
+	// from the MFA ADR's build-order step 20, installing it when `mfa.mode` is
+	// not `off`. The factor store may be kept in the Store; a transaction is
+	// verification state and has no Store variant. Defaults live in
+	// `reference.conf`.
 	mfaFactorStore: z
 		.object({
 			adapter: z.enum(["memory", "redis", "store"]).optional(),

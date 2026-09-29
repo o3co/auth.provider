@@ -1,6 +1,6 @@
 # user-sessions
 
-Last updated: 2026-09-28
+Last updated: 2026-09-29
 
 ## Responsibility
 
@@ -31,8 +31,8 @@ It is separate because these stores are read by `oauth` (logout, userinfo, the r
 
 ## Dependencies
 
-- Depends on: `federation-grants/` (revocation, the grant lifetime and the store types — for subject-wide revocation and retention), `config/` and `jwt/` (the retention horizon, the clock skew, and the skew tolerated in a verification time, `DEFAULT_CLOCK_SKEW_MS`), `grants/` (the `amr` values `pwd`, `fed` and `mfa`, for reading and recording a session's primary and a factor's event), `mfa/` (the rule's input type, type-only), `modules/manifest/` (the module), `adapters/`, `logging/` (type-only).
-- Depended on by: `grants/` (`UserSessionClaims`, type-only), `mfa/` (`SessionAuthentication`, type-only), `jwt/` (type-only), `boot/` (replica safety), `federation-grants/` (the capability guard in `types.mts`), the root barrel; downstream `packages/oauth` (logout cascade, userinfo, the wired revocation service), `session`, `redis`, `federation-grants`.
+- Depends on: `federation-grants/` (revocation, the grant lifetime and the store types — for subject-wide revocation and retention), `config/` and `jwt/` (the retention horizon, the clock skew, and the skew tolerated in a verification time, `DEFAULT_CLOCK_SKEW_MS`), `grants/` (the `amr` values `pwd`, `fed` and `mfa`, for reading and recording a session's primary and a factor's event), `session-admission/` (`RequirementSession`, the input a session requirement is asked about, type-only), `modules/manifest/` (the module), `adapters/`, `logging/` (the logger type, and `loggableError` for the revocation helpers' failure lines).
+- Depended on by: `session-admission/` (the D9 readers and what each login path records, and the session types), `grants/` (`UserSessionClaims`, type-only), `jwt/` (type-only), `boot/` (replica safety), `federation-grants/` (the capability guard in `types.mts`), the root barrel; downstream `packages/oauth` (logout cascade, userinfo, the wired revocation service), `session`, `redis`, `federation-grants`, and `mfa` (the step-up capability's guard).
 - `federation-grants/` reaches this directory only through `types.mts`, and no import cycle crosses the two directories. Must never import `boot/`, `middleware/`, `routes/`, `packages/oauth` (the cascade is injected), or `testing/`.
 
 ## Invariants

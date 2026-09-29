@@ -702,7 +702,7 @@ describe("admitPrimary — after a password login (F1 step 1, F3; owner decision
 		expect(logger.warn).not.toHaveBeenCalled();
 	});
 
-	it("reads no enrollment witness before step 12: a user the Store says enrolled, with no record, is still asked for a first binding (owner decision 2)", async () => {
+	it("reads no enrollment witness before step 9: a user the Store says enrolled, with no record, is still asked for a first binding (owner decision 2)", async () => {
 		const { requirement } = build("required");
 		const admission = await admitPrimary(
 			depsFor(requirement),
