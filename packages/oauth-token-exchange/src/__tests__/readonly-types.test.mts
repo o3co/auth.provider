@@ -17,7 +17,7 @@
 import type { ExchangeTokenValidationContext, ValidatedToken } from "@o3co/auth-provider-core";
 import { describe, expect, it } from "vitest";
 
-// CC-5 readonly compile-time assertions.
+// Readonly compile-time assertions.
 //
 // These tests verify at compile time that public DTOs are `readonly`. The
 // `@ts-expect-error` directives below cause `tsc --noEmit` to fail (with

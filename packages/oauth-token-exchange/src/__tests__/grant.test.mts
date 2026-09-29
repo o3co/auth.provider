@@ -50,10 +50,10 @@ const mockConfig = {
 const publicClient = (overrides: Partial<PublicClient> = {}): PublicClient => ({
 	clientId: "client-a",
 	allowedRedirectUris: [],
-	// The registration is a ceiling on both axes now: it must name the scopes
+	// The registration is a ceiling on both axes: it must name the scopes
 	// this client may receive (an empty list grants none) and it must name the
-	// exchange grant type itself (#326 deny-by-absence). The fixture declares
-	// what these tests already assumed it had.
+	// exchange grant type itself (deny by absence). The fixture declares
+	// what these tests assume it has.
 	allowedScopes: ["read", "write"],
 	allowedAudiences: [],
 	allowedGrantTypes: [TOKEN_EXCHANGE_GRANT_TYPE],
@@ -1055,11 +1055,10 @@ describe("createTokenExchangeGrant — SF-5 policy subset enforcement", () => {
 });
 
 describe("createTokenExchangeGrant — a malformed policy decision (#521, v0.13.0 audit)", () => {
-	// Every other grant refuses a non-array `grantedScope` / `grantedAudience`
-	// since #521. Token exchange read them on truthiness and then called
-	// `.filter`, so a JS policy returning a string threw a TypeError out of the
-	// handler: an unhandled 500 with no description, where the others answer
-	// `server_error` naming the policy's fault.
+	// Every grant refuses a non-array `grantedScope` / `grantedAudience`. Read
+	// on truthiness and then `.filter`ed, a JS policy returning a string would
+	// throw a TypeError out of the handler: an unhandled 500 with no
+	// description, where `server_error` names the policy's fault.
 	it.each([
 		["grantedScope", { grantedScope: "read" }],
 		["grantedAudience", { grantedAudience: "https://api.example.com" }],
@@ -1714,9 +1713,9 @@ describe("createTokenExchangeGrant — policy hook", () => {
 	});
 });
 
-// D-6 Codex post-review P2: when this grant runs behind `clientAuthMw` on
-// `/oauth/token`, the route already authenticated the client via Basic header
-// or body credentials and populated `ctx.authenticatedClient`. Trusting that
+// When this grant runs behind `clientAuthMw` on `/oauth/token`, the route
+// already authenticated the client via Basic header or body credentials and
+// populated `ctx.authenticatedClient`. Trusting that
 // identity (and falling back to body credentials only when it is null) keeps
 // Basic-authenticated callers working AND retains the body-credential gate
 // for consumers wiring the grant onto a custom route.
@@ -1788,7 +1787,7 @@ describe("createTokenExchangeGrant — D-6 ctx.authenticatedClient route-bound f
 	});
 
 	it("rejects malformed body.client_id (string[]) instead of silently falling back to authenticated client", async () => {
-		// Codex P2: a repeated `client_id` form param produces `string[]`. The
+		// A repeated `client_id` form param produces `string[]`. The
 		// fallback path must NOT treat this as "absent" — otherwise an attacker
 		// could append a bogus client_id alongside a valid Basic header and
 		// bypass the cross-client equality check.

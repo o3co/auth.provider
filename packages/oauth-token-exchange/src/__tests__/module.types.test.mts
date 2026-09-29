@@ -23,10 +23,10 @@ import { describe, expect, expectTypeOf, it } from "vitest";
 import type { createTokenExchangeGrant, TokenExchangeDependencies } from "#/grant.mjs";
 import { type TokenExchangeModuleDeps, tokenExchangeModule } from "#/module.mjs";
 
-// #626 P2 (D4): the manifest's contribution callbacks read only the slots it
-// declares, and the grant factory declares the slots it reads. Compile-time
-// facts: they fire under vitest's typecheck mode only, so this file is in
-// both typecheck lists (vitest.config.mts and tsconfig.test.json).
+// The manifest's contribution callbacks read only the slots it declares, and
+// the grant factory declares the slots it reads. Compile-time facts: they
+// fire under vitest's typecheck mode only, so this file is in both typecheck
+// lists (vitest.config.mts and tsconfig.test.json).
 
 const REQUIRES = [
 	"tokenExchangeValidatorResolver",
@@ -41,7 +41,7 @@ const OPTIONAL = [
 	"accessTokenDenylist",
 	"subjectRevocation",
 	"userSessionStore",
-	// What the oauth module provides of `oauth {}` (#728).
+	// What the oauth module provides of `oauth {}`.
 	"oauthTokenSettings",
 ] as const;
 type Declared = ProviderDeps<(typeof REQUIRES)[number], (typeof OPTIONAL)[number]>;
@@ -96,12 +96,10 @@ describe("createTokenExchangeGrant declares the slots it reads (#626 P2)", () =>
 	});
 
 	it("is satisfied by the module's deps on every slot, the validator resolver included", () => {
-		// `tokenExchangeValidatorResolver` used to be carved out of both sides:
-		// core's `TokenExchangeValidatorResolver.get()` answered `unknown` where
-		// the grant needed the validator, so the module bridged that one slot and
-		// this assertion could not cover it. #626 P1 moved the contract into
-		// core, the bridge is gone, and the carve-out with it — every slot is the
-		// declaration itself now.
+		// `tokenExchangeValidatorResolver` is not carved out of either side:
+		// core's `TokenExchangeValidatorResolver.get()` answers the validator
+		// contract, so no slot needs a bridge and every slot is the declaration
+		// itself.
 		expectTypeOf<TokenExchangeModuleDeps>().toMatchTypeOf<GrantDeps>();
 		// And the grant reads only keys the module declares, optional ones
 		// included — assignability alone would let it read an undeclared
@@ -138,9 +136,9 @@ describe("#626 P1: the validator contract is core's", () => {
 	});
 
 	it("is what the grant's own resolver slot answers with", () => {
-		// The assertion the deferral denied: what `get` hands the grant is the
-		// contract, not `unknown`. Before #626 P1 this was `unknown | undefined`,
-		// which `toEqualTypeOf` reduces to `unknown` — so both lines below failed.
+		// What `get` hands the grant is the contract, not `unknown`. Were it
+		// `unknown | undefined`, `toEqualTypeOf` would reduce it to `unknown`
+		// and both lines below would fail.
 		type Resolved = ReturnType<TokenExchangeDependencies["tokenExchangeValidatorResolver"]["get"]>;
 		expectTypeOf<Resolved>().toEqualTypeOf<ExchangeTokenValidator | undefined>();
 		expectTypeOf<Resolved>().not.toEqualTypeOf<unknown>();

@@ -21,8 +21,7 @@ export {
 	type TokenExchangeDependencies,
 } from "./grant.mjs";
 export { tokenExchangeModule } from "./module.mjs";
-// No validator registry is exported, and none exists here (the v0.4.x
-// mutable ExchangeTokenValidatorRegistry went with A2-γ §3.3). At runtime
+// No validator registry is exported, and none exists here. At runtime
 // the resolver is built by core's boot planner from every module's
 // contributes.tokenExchangeValidators; consumers read it via
 // deps.tokenExchangeValidatorResolver (TokenExchangeValidatorResolver) and
@@ -32,7 +31,6 @@ export {
 	createSelfIssuedAccessTokenValidator,
 } from "./validator/selfIssuedAccessToken.mjs";
 // `ExchangeTokenValidationContext`, `ExchangeTokenValidator` and
-// `ValidatedToken` are not re-exported: the contract moved to
-// `@o3co/auth-provider-core` with #626 P1, and a second export path for one
-// type is the thing that made the contribution type `unknown` in the first
-// place. Import them from core.
+// `ValidatedToken` are not re-exported: the contract lives in
+// `@o3co/auth-provider-core`, and a second export path for one type could
+// leave the contribution type `unknown`. Import them from core.
