@@ -15,21 +15,26 @@
  */
 
 /**
- * The package's entry: what a composition root imports. The TOTP factor's
- * module, the schema of the `mfa` keys this package reads, and the published
- * development sample key a development configuration may carry (the MFA ADR's
- * D11, and the step-8 plan's public exports). The coordinator's sealing, the
- * TOTP primitive and the settings reader are the package's own.
+ * The package's entry: what a composition root imports. The MFA module and
+ * `mfaModules` — the TOTP factor's module beside it — with the id of the MFA
+ * routes' contribution, the TOTP factor's module on its own, the schema of
+ * the `mfa` keys this package reads, and the published development sample
+ * key a development configuration may carry (the MFA ADR's D1, D11, and the
+ * step-8 plan's public exports). The requirement, the transactions, the
+ * sealing, the TOTP primitive and the settings reader are the package's own.
  */
 
 import { describe, expect, it } from "vitest";
 import * as entry from "#/index.mjs";
 
 describe("@o3co/auth-provider-mfa's entry", () => {
-	it("exports the TOTP factor's module, the MFA config schema and the development sample key, and nothing else", () => {
+	it("exports the MFA module, mfaModules, the routes' id, the TOTP factor's module, the MFA config schema and the development sample key, and nothing else", () => {
 		expect(Object.keys(entry).sort()).toEqual([
 			"MFA_DEVELOPMENT_SAMPLE_KEY",
+			"MFA_ROUTES_ID",
 			"mfaConfigSchema",
+			"mfaModule",
+			"mfaModules",
 			"mfaTotpFactorModule",
 		]);
 	});

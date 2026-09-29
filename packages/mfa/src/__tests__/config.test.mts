@@ -28,6 +28,14 @@
  * - TOTP's parameters are held to their ranges: digits 6-8, period 15-120 s,
  *   window 0-2 (D22 states the window's), SHA1, SHA256 or SHA512; the issuer
  *   defaults to the host `oauth.jwt.issuer` names.
+ * - A transaction's life, `mfa.transactionTtlSeconds`, is held to 60-1800
+ *   seconds (the step-8 owner decision; the ADR states no bounds), its
+ *   attempts, `mfa.maxAttemptsPerTransaction`, to 1-10 (the owner's bound;
+ *   the ADR states none), and the subject lock,
+ *   `mfa.lockout`, to core's `checkMfaLockoutPolicy` under that key — the
+ *   step-3 obligations the MFA module refuses a boot for (D8, D21).
+ * - The settings say whether the development sample key was accepted, so the
+ *   MFA module can say so once at boot.
  */
 
 import { createHmac, randomBytes } from "node:crypto";
@@ -50,6 +58,25 @@ const TOTP = {
 	window: 1,
 } as const;
 
+/** D21's lock as D19 defaults it. */
+const LOCKOUT = {
+	threshold: 5,
+	baseSeconds: 900,
+	maxSeconds: 86_400,
+	memorySeconds: 86_400,
+	weeklyBudget: 10,
+	hardLimit: 100,
+	trustedBrowsers: 5,
+	trustedBrowserDays: 30,
+} as const;
+
+/** The transaction's keys (D8, D19, D21), as `reference.conf` defaults them. */
+const TRANSACTION = {
+	transactionTtlSeconds: 600,
+	maxAttemptsPerTransaction: 5,
+	lockout: { ...LOCKOUT },
+} as const;
+
 /** A configuration as the composition root hands it, with `mfa` as given. */
 const configWith = (mfa: Record<string, unknown>, extra: Record<string, unknown> = {}) => ({
 	oauth: { jwt: { issuer: "https://auth.example" } },
@@ -62,6 +89,7 @@ const valid = (overrides: Record<string, unknown> = {}) =>
 	configWith({
 		encryptionKeys: [{ id: "k1", key: KEY_A }],
 		factors: { totp: { ...TOTP } },
+		...TRANSACTION,
 		...overrides,
 	});
 
@@ -104,6 +132,10 @@ describe("the MFA settings this package reads", () => {
 			window: 1,
 			issuer: "auth.example",
 		});
+		expect(settings.transactionTtlSeconds).toBe(600);
+		expect(settings.maxAttemptsPerTransaction).toBe(5);
+		expect(settings.lockout).toEqual(LOCKOUT);
+		expect(settings.developmentSampleKeyAccepted).toBe(false);
 	});
 
 	it("refuses a configuration without an mfa section, naming it", () => {
@@ -216,6 +248,37 @@ describe("the key ring (D11, D20)", () => {
 		).toContain("duplicate");
 	});
 
+	it("refuses one key under two written ids — one AES key cannot be two rotation generations — naming the later entry and quoting neither key nor id (retro review of #721)", () => {
+		const message = refusal(() =>
+			readMfaSettings(
+				valid({
+					encryptionKeys: [
+						{ id: "gen-old", key: KEY_A },
+						{ id: "gen-mid", key: KEY_B },
+						{ id: "gen-new", key: KEY_A },
+					],
+				}),
+			),
+		);
+		expect(message).toContain("mfa.encryptionKeys[2].key");
+		expect(message).toContain("mfa.encryptionKeys[0]");
+		expect(message).toContain("duplicate");
+		for (const secret of [KEY_A, KEY_B, "gen-old", "gen-new"]) {
+			expect(message).not.toContain(secret);
+		}
+		// Two keys of their own, under two ids, are two generations.
+		expect(
+			readMfaSettings(
+				valid({
+					encryptionKeys: [
+						{ id: "gen-old", key: KEY_A },
+						{ id: "gen-new", key: KEY_B },
+					],
+				}),
+			).encryptionKeys.map((entry) => entry.id),
+		).toEqual(["gen-old", "gen-new"]);
+	});
+
 	it("refuses a ring that is not a list of { id?, key }", () => {
 		for (const encryptionKeys of [
 			undefined,
@@ -242,6 +305,7 @@ describe("the development sample key (D11, #473's rule)", () => {
 						]
 					: [{ id: "sample", key: MFA_DEVELOPMENT_SAMPLE_KEY }],
 				factors: { totp: { ...TOTP } },
+				...TRANSACTION,
 			},
 			extra,
 		);
@@ -305,6 +369,13 @@ describe("the development sample key (D11, #473's rule)", () => {
 				JSON.stringify(nodeEnv),
 			).toMatch(/the environment is "(production|staging)"/);
 		}
+	});
+
+	it("says it was accepted, wherever it sits in the ring, so the MFA module can say so at boot", () => {
+		vi.stubEnv("NODE_ENV", "development");
+		expect(readMfaSettings(sample()).developmentSampleKeyAccepted).toBe(true);
+		expect(readMfaSettings(sample({}, true)).developmentSampleKeyAccepted).toBe(true);
+		expect(readMfaSettings(valid()).developmentSampleKeyAccepted).toBe(false);
 	});
 
 	it("keeps #473's two names: an alias such as prod is not one of them", () => {
@@ -451,7 +522,7 @@ describe("the TOTP factor's parameters (D19, D22)", () => {
 		}
 	});
 
-	it("reads the factor's section without the key ring, which the factor never holds", () => {
+	it("reads the factor's section without the key ring, the transaction's keys or the lock, which the factor never reads", () => {
 		expect(readMfaTotpSettings(configWith({ factors: { totp: { ...TOTP } } })).algorithm).toBe(
 			"SHA1",
 		);
@@ -461,5 +532,58 @@ describe("the TOTP factor's parameters (D19, D22)", () => {
 		expect(refusal(() => readMfaSettings(withTotp({ digits: 9 })))).toContain(
 			"mfa.factors.totp.digits",
 		);
+	});
+});
+
+describe("the transaction's life and attempts (D8, D21, and step 3's obligations)", () => {
+	it("holds mfa.transactionTtlSeconds to 60-1800 seconds, a whole number", () => {
+		for (const value of [60, 600, 1800]) {
+			expect(readMfaSettings(valid({ transactionTtlSeconds: value })).transactionTtlSeconds).toBe(
+				value,
+			);
+		}
+		for (const value of [59, 1801, 0, -600, 600.5, "600", null, undefined]) {
+			const message = refusal(() => readMfaSettings(valid({ transactionTtlSeconds: value })));
+			expect(message, String(value)).toContain("mfa.transactionTtlSeconds");
+			expect(message, String(value)).toContain("60 to 1800 seconds");
+		}
+	});
+
+	it("holds mfa.maxAttemptsPerTransaction to 1-10, a whole number (the owner's bound; the ADR states none)", () => {
+		for (const value of [1, 5, 10]) {
+			expect(
+				readMfaSettings(valid({ maxAttemptsPerTransaction: value })).maxAttemptsPerTransaction,
+			).toBe(value);
+		}
+		for (const value of [0, 11, 100, -1, 1.5, "5", null, undefined, Number.MAX_SAFE_INTEGER + 1]) {
+			const message = refusal(() => readMfaSettings(valid({ maxAttemptsPerTransaction: value })));
+			expect(message, String(value)).toContain("mfa.maxAttemptsPerTransaction");
+			expect(message, String(value)).toContain("1 to 10");
+		}
+	});
+
+	it("holds mfa.lockout to core's checkMfaLockoutPolicy, naming the field under mfa.lockout", () => {
+		for (const [lockout, field] of [
+			[{ ...LOCKOUT, threshold: 0 }, "mfa.lockout.threshold"],
+			[{ ...LOCKOUT, weeklyBudget: 2.5 }, "mfa.lockout.weeklyBudget"],
+			[{ ...LOCKOUT, trustedBrowsers: "5" }, "mfa.lockout.trustedBrowsers"],
+			[{ ...LOCKOUT, hardLimit: 101 }, "mfa.lockout.hardLimit"],
+			[{ ...LOCKOUT, threshold: 6, hardLimit: 5 }, "mfa.lockout.threshold"],
+			[{ ...LOCKOUT, maxSeconds: 899 }, "mfa.lockout.maxSeconds"],
+			[{ ...LOCKOUT, memorySeconds: 10 ** 15 }, "mfa.lockout.memorySeconds"],
+			[{ ...LOCKOUT, trustedBrowserDays: undefined }, "mfa.lockout.trustedBrowserDays"],
+		] as const) {
+			expect(
+				refusal(() => readMfaSettings(valid({ lockout }))),
+				JSON.stringify(lockout),
+			).toContain(field);
+		}
+	});
+
+	it("refuses a configuration without the lock's section, naming the reference.conf that carries it", () => {
+		const { lockout: _lockout, ...withoutLockout } = valid().mfa as Record<string, unknown>;
+		const message = refusal(() => readMfaSettings({ ...valid(), mfa: withoutLockout }));
+		expect(message).toContain("mfa.lockout");
+		expect(message).toContain("@o3co/auth-provider-mfa/reference.conf");
 	});
 });

@@ -1,0 +1,529 @@
+/*
+ * Copyright 2026 1o1 Co. Ltd.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+/**
+ * The rows of the session-admission ADR's acceptance criterion 4, as data:
+ * the MFA ADR's step-4 table — its D16 and D17 rows, as
+ * `decideMfaRequirement` decided them — each a request, a session, the
+ * `mfa.mode` and the factors a composition enables, and the decision the rule
+ * answered. Core's merge test runs them against a stand-in written to D6's
+ * table, the MFA package's against the requirement it registers, so the two
+ * are held to one list. Published on `@o3co/auth-provider-core/testing` for
+ * that test alone; nothing here runs a test.
+ *
+ * Four rows' inputs are re-expressed from the rule's: the rule was handed a
+ * session's `amr` and an `authentication`, admission reads a stored record,
+ * so a "primary unknown" row is a record with no primary's marker in its
+ * `amr` and a pre-upgrade row a record without `authentication` — the
+ * expectations are the rows' own. `mergeAdmission` is D2's stated mapping of
+ * a row's decision onto the admission.
+ */
+
+import type { MfaMode } from "../../mfa/mode.mjs";
+import type { UserSession } from "../../user-sessions/types.mjs";
+import { type AcrTable, readAcrTable } from "../acr.mjs";
+import type { Admission, StepUpPage } from "../requirement.mjs";
+
+const MFA = "urn:o3co:acr:mfa";
+const PHR = "urn:o3co:acr:phr";
+const PWD = "urn:example:pwd";
+const KBA = "urn:example:kba";
+
+/** The `acr` values the rows ask for: the template's two (D15, O9), one only a password meets, and one nothing installed produces. */
+export const MERGE_ACR = Object.freeze({ MFA, PHR, PWD, KBA });
+
+/** The template's table (D15), `phr` uncommented, beside one entry only a password meets and one nothing installed produces. */
+export const MERGE_ACR_TABLE: AcrTable = readAcrTable({
+	[MFA]: ["mfa"],
+	[PHR]: [["hwk"], ["swk"]],
+	[PWD]: ["pwd"],
+	[KBA]: ["kba"],
+});
+
+/**
+ * What a step-up through the MFA requirement can add under each row's
+ * factors (its `reach`, the rule's `secondFactorMethods`): each factor's
+ * values, and `mfa` when one of them adds it.
+ */
+export const MERGE_REACH = Object.freeze({
+	/** TOTP, WebAuthn and recovery codes. */
+	installed: new Set(["otp", "hwk", "swk", "recovery", "mfa"]) as ReadonlySet<string>,
+	/** TOTP and recovery codes: no factor adds `hwk` or `swk`. */
+	withoutWebAuthn: new Set(["otp", "recovery", "mfa"]) as ReadonlySet<string>,
+	/** Email codes alone, which do not add `mfa` (O7). */
+	emailOnly: new Set(["email"]) as ReadonlySet<string>,
+	/** The requirement with no factor enabled: nothing can step a session up. */
+	empty: new Set<string>() as ReadonlySet<string>,
+	/** No factor at all (the rule's "no coordinator"): nothing can step a session up. */
+	none: new Set<string>() as ReadonlySet<string>,
+});
+
+/** The factors a row's composition enables, by name. */
+export type MergeFactors = keyof typeof MERGE_REACH;
+
+/** The MFA ADR's step-4 decision, as `decideMfaRequirement` answered it: a row's expectation. */
+export type MergeDecision =
+	| { readonly outcome: "met"; readonly acr: string | undefined }
+	| { readonly outcome: "reauthenticate" }
+	| {
+			readonly outcome: "step_up";
+			readonly requirement: "acr" | "baseline";
+			readonly acrValues: readonly string[];
+	  }
+	| { readonly outcome: "unmet"; readonly requirement: "acr" | "baseline" };
+
+/** One row: what it pins, as the ADR words it; its mode, session, request and factors; and the rule's decision. */
+export interface MergeRow {
+	readonly row: string;
+	readonly mode: MfaMode;
+	/** The record admission reads, `sid-1` of `user-1`; `null` for no store. */
+	readonly session: UserSession | null;
+	readonly acrValues?: readonly string[];
+	readonly factors: MergeFactors;
+	readonly expected: MergeDecision;
+}
+
+/** A group of rows, and the title the tests run it under. */
+export interface MergeRowGroup {
+	readonly title: string;
+	readonly rows: readonly MergeRow[];
+}
+
+const minutesAgo = (minutes: number): Date => new Date(Date.now() - minutes * 60_000);
+
+const record = (
+	amr: readonly string[],
+	authentication: UserSession["authentication"],
+): UserSession => ({
+	sid: "sid-1",
+	sub: "user-1",
+	authTime: minutesAgo(1),
+	createdAt: minutesAgo(1),
+	expiresAt: new Date(Date.now() + 3_600_000),
+	claims: {},
+	amr,
+	authentication,
+});
+
+const passwordSession = (amr: readonly string[], mfaAt?: Date): UserSession =>
+	record(amr, { primary: "pwd", federation: undefined, upstreamAmr: undefined, mfaAt });
+
+const federatedSession = (amr: readonly string[], upstreamAmr?: readonly string[]): UserSession =>
+	record(amr, { primary: "fed", federation: "google", upstreamAmr, mfaAt: undefined });
+
+/**
+ * A record written before `UserSession.authentication` existed: read the one
+ * way every consumer does (D9), split as it is read — `pwd` or `fed` in its
+ * `amr` names the primary, anything else is a primary that cannot be told.
+ */
+const recorded = (amr: readonly string[]): UserSession => record(amr, undefined);
+
+/** A record whose `authentication` names a primary the baseline does not know. */
+const primaryOf = (primary: string, amr: readonly string[]): UserSession =>
+	record(amr, { primary, federation: undefined, upstreamAmr: undefined, mfaAt: undefined });
+
+/** The rows, by group: D17's, the baseline beside `acr_values` (D16), and any-of entries with step-up targets (D15, D16). */
+export const MERGE_ROW_GROUPS: readonly MergeRowGroup[] = [
+	{
+		title: "the merge — D17's rows (acceptance criterion 4)",
+		rows: [
+			{
+				row: "nothing requested · primary pwd, mfaAt set → proceed",
+				mode: "required",
+				session: passwordSession(["pwd", "otp", "mfa"], minutesAgo(1)),
+				factors: "installed",
+				expected: { outcome: "met", acr: undefined },
+			},
+			{
+				row: "nothing requested · primary pwd, no mfaAt, required → step-up",
+				mode: "required",
+				session: passwordSession(["pwd"]),
+				factors: "installed",
+				expected: { outcome: "step_up", requirement: "baseline", acrValues: [] },
+			},
+			{
+				row: "nothing requested · primary fed, any upstream amr → proceed: the baseline does not apply",
+				mode: "required",
+				session: federatedSession(["fed"], ["pwd"]),
+				factors: "installed",
+				expected: { outcome: "met", acr: undefined },
+			},
+			{
+				row: "nothing requested · session: null, required → re-authentication",
+				mode: "required",
+				session: null,
+				factors: "installed",
+				expected: { outcome: "reauthenticate" },
+			},
+			{
+				row: "nothing requested · primary unknown, required → re-authentication",
+				mode: "required",
+				session: recorded(["hwk"]),
+				factors: "installed",
+				expected: { outcome: "reauthenticate" },
+			},
+			{
+				row: 'nothing requested · pre-upgrade, amr ["pwd"] → step-up (primary read as pwd)',
+				mode: "required",
+				session: recorded(["pwd"]),
+				factors: "installed",
+				expected: { outcome: "step_up", requirement: "baseline", acrValues: [] },
+			},
+			{
+				row: "nothing requested · pre-upgrade, holding fed → proceed (primary read as fed)",
+				mode: "required",
+				session: recorded(["hwk", "fed"]),
+				factors: "installed",
+				expected: { outcome: "met", acr: undefined },
+			},
+			{
+				row: "acr_values=phr · pre-upgrade, holding fed and an upstream hwk → the hwk is not vouched for, whatever the federation (D9's split)",
+				mode: "optional",
+				session: recorded(["hwk", "fed"]),
+				acrValues: [PHR],
+				factors: "none",
+				expected: { outcome: "unmet", requirement: "acr" },
+			},
+			{
+				row: "acr_values met · D15's preference order: one the session meets wins over stepping up to an earlier one",
+				mode: "optional",
+				session: passwordSession(["pwd", "otp", "mfa"], minutesAgo(1)),
+				acrValues: [PHR, MFA],
+				factors: "installed",
+				expected: { outcome: "met", acr: MFA },
+			},
+			{
+				row: "acr_values=mfa · fed, upstream mfa, untrusted → step-up if the user holds a factor that adds mfa",
+				mode: "required",
+				session: federatedSession(["fed"], ["mfa"]),
+				acrValues: [MFA],
+				factors: "installed",
+				expected: { outcome: "step_up", requirement: "acr", acrValues: [MFA] },
+			},
+			{
+				row: "acr_values=mfa · fed, upstream mfa, untrusted, nothing to step up with → unmet",
+				mode: "off",
+				session: federatedSession(["fed"], ["mfa"]),
+				acrValues: [MFA],
+				factors: "none",
+				expected: { outcome: "unmet", requirement: "acr" },
+			},
+			{
+				row: "acr_values=mfa · fed, upstream mfa, federation trusted → proceed",
+				mode: "required",
+				session: federatedSession(["mfa", "fed"]),
+				acrValues: [MFA],
+				factors: "installed",
+				expected: { outcome: "met", acr: MFA },
+			},
+			{
+				row: "acr_values=mfa · an email-only login → step-up with a factor that adds mfa",
+				mode: "required",
+				session: passwordSession(["pwd", "email"], minutesAgo(1)),
+				acrValues: [MFA],
+				factors: "installed",
+				expected: { outcome: "step_up", requirement: "acr", acrValues: [MFA] },
+			},
+			{
+				row: "acr_values=mfa · an email-only login, and no installed factor adds mfa → unmet",
+				mode: "required",
+				session: passwordSession(["pwd", "email"], minutesAgo(1)),
+				acrValues: [MFA],
+				factors: "emailOnly",
+				expected: { outcome: "unmet", requirement: "acr" },
+			},
+			{
+				row: "nothing requested · an email-only login meets the baseline (O7)",
+				mode: "required",
+				session: passwordSession(["pwd", "email"], minutesAgo(1)),
+				factors: "installed",
+				expected: { outcome: "met", acr: undefined },
+			},
+			{
+				row: "acr_values a step-up can meet · the user holds a qualifying factor → step-up (the trip learns whether they do)",
+				mode: "optional",
+				session: passwordSession(["pwd"]),
+				acrValues: [PHR],
+				factors: "installed",
+				expected: { outcome: "step_up", requirement: "acr", acrValues: [PHR] },
+			},
+			{
+				row: "acr_values nothing can meet · any → unmet",
+				mode: "required",
+				session: passwordSession(["pwd", "otp", "mfa"], minutesAgo(1)),
+				acrValues: [KBA],
+				factors: "installed",
+				expected: { outcome: "unmet", requirement: "acr" },
+			},
+			{
+				row: "acr_values nothing can meet · a value the table does not carry → unmet",
+				mode: "required",
+				session: passwordSession(["pwd", "otp", "mfa"], minutesAgo(1)),
+				acrValues: ["urn:nope"],
+				factors: "installed",
+				expected: { outcome: "unmet", requirement: "acr" },
+			},
+			{
+				row: "max_age within bounds · older mfaAt → proceed: acr_values is about methods, not age",
+				mode: "required",
+				session: passwordSession(["pwd", "otp", "mfa"], minutesAgo(24 * 60)),
+				acrValues: [MFA],
+				factors: "installed",
+				expected: { outcome: "met", acr: MFA },
+			},
+		],
+	},
+	{
+		title: "the merge — the baseline beside acr_values (D16)",
+		rows: [
+			{
+				row: "a met acr does not meet the baseline: step up for the baseline alone",
+				mode: "required",
+				session: passwordSession(["pwd"]),
+				acrValues: [PWD],
+				factors: "installed",
+				expected: { outcome: "step_up", requirement: "baseline", acrValues: [] },
+			},
+			{
+				row: "one step-up meets both: the acr a step-up can meet is the hint",
+				mode: "required",
+				session: passwordSession(["pwd"]),
+				acrValues: [PHR],
+				factors: "installed",
+				expected: { outcome: "step_up", requirement: "acr", acrValues: [PHR] },
+			},
+			{
+				row: "an acr nothing can meet is unmet, whatever the baseline needs",
+				mode: "required",
+				session: passwordSession(["pwd"]),
+				acrValues: [KBA],
+				factors: "installed",
+				expected: { outcome: "unmet", requirement: "acr" },
+			},
+			{
+				row: "the baseline with nothing to step up with is unmet",
+				mode: "required",
+				session: passwordSession(["pwd"]),
+				factors: "none",
+				expected: { outcome: "unmet", requirement: "baseline" },
+			},
+			{
+				row: "the baseline with a coordinator but no factor enabled is unmet, never a step-up nothing can finish",
+				mode: "required",
+				session: passwordSession(["pwd"]),
+				factors: "empty",
+				expected: { outcome: "unmet", requirement: "baseline" },
+			},
+			{
+				row: "a session of unknown primary is re-authenticated before any acr in the table is weighed",
+				mode: "required",
+				session: recorded(["hwk"]),
+				acrValues: [PHR],
+				factors: "installed",
+				expected: { outcome: "reauthenticate" },
+			},
+			...["PWD", "", "magiclink", "hwk"].map(
+				(primary): MergeRow => ({
+					row: `a primary the baseline does not know (${JSON.stringify(primary)}) is re-authenticated, never met`,
+					mode: "required",
+					session: primaryOf(primary, ["pwd"]),
+					factors: "installed",
+					expected: { outcome: "reauthenticate" },
+				}),
+			),
+			{
+				row: "a request no value of which the table carries is unmet before a missing session is re-authenticated",
+				mode: "required",
+				session: null,
+				acrValues: ["urn:nope", "constructor"],
+				factors: "installed",
+				expected: { outcome: "unmet", requirement: "acr" },
+			},
+			{
+				// The rule's row read `{ authentication: undefined, amr: ["pwd"] }`,
+				// an input no record makes (D9 reads `pwd` as the primary): a record
+				// whose primary cannot be told carries no primary's marker.
+				row: "a request no value of which the table carries is unmet before an unknown primary is re-authenticated",
+				mode: "required",
+				session: recorded(["hwk"]),
+				acrValues: ["urn:nope"],
+				factors: "installed",
+				expected: { outcome: "unmet", requirement: "acr" },
+			},
+			{
+				row: "one value the table carries is enough to re-authenticate a missing session: a new login may meet it",
+				mode: "required",
+				session: null,
+				acrValues: ["urn:nope", PWD],
+				factors: "installed",
+				expected: { outcome: "reauthenticate" },
+			},
+			{
+				row: "optional has no baseline: a password session proceeds",
+				mode: "optional",
+				session: passwordSession(["pwd"]),
+				factors: "installed",
+				expected: { outcome: "met", acr: undefined },
+			},
+			{
+				row: "off has no baseline: a password session proceeds (D20)",
+				mode: "off",
+				session: passwordSession(["pwd"]),
+				factors: "none",
+				expected: { outcome: "met", acr: undefined },
+			},
+			{
+				row: "off answers acr_values needing a second factor unmet (D20)",
+				mode: "off",
+				session: passwordSession(["pwd"]),
+				acrValues: [MFA],
+				factors: "none",
+				expected: { outcome: "unmet", requirement: "acr" },
+			},
+			{
+				row: "off still meets an acr the session holds",
+				mode: "off",
+				session: recorded(["pwd"]),
+				acrValues: [MFA, PWD],
+				factors: "none",
+				expected: { outcome: "met", acr: PWD },
+			},
+			{
+				row: "session: null outside required is no baseline, and nothing to step up: an acr is unmet",
+				mode: "optional",
+				session: null,
+				acrValues: [MFA],
+				factors: "installed",
+				expected: { outcome: "unmet", requirement: "acr" },
+			},
+			{
+				row: "session: null outside required, nothing requested → proceed",
+				mode: "off",
+				session: null,
+				factors: "none",
+				expected: { outcome: "met", acr: undefined },
+			},
+			{
+				// The rule's row read `{ authentication: undefined, amr: ["pwd", "hwk"] }`
+				// (see above): a record whose primary cannot be told carries no
+				// primary's marker, and its `amr` is weighed as it is.
+				row: "an unknown primary outside required is weighed on its amr alone",
+				mode: "optional",
+				session: recorded(["kba", "hwk"]),
+				acrValues: [PHR],
+				factors: "installed",
+				expected: { outcome: "met", acr: PHR },
+			},
+		],
+	},
+	{
+		title: "the merge — any-of entries and step-up targets (D15, D16)",
+		rows: [
+			{
+				row: "one alternative of an any-of entry meets it: a synced passkey meets phr",
+				mode: "optional",
+				session: passwordSession(["pwd", "swk", "mfa"], minutesAgo(1)),
+				acrValues: [PHR],
+				factors: "installed",
+				expected: { outcome: "met", acr: PHR },
+			},
+			{
+				row: "an entry is a step-up target when one alternative lacks only values a step-up adds",
+				mode: "optional",
+				session: passwordSession(["pwd", "otp", "mfa"], minutesAgo(1)),
+				acrValues: [PHR],
+				factors: "installed",
+				expected: { outcome: "step_up", requirement: "acr", acrValues: [PHR] },
+			},
+			{
+				row: "no alternative a step-up can reach: unmet",
+				mode: "optional",
+				session: passwordSession(["pwd", "otp", "mfa"], minutesAgo(1)),
+				acrValues: [PHR],
+				factors: "withoutWebAuthn",
+				expected: { outcome: "unmet", requirement: "acr" },
+			},
+			{
+				row: "every requested value a step-up can meet is the hint, in the request's order",
+				mode: "optional",
+				session: passwordSession(["pwd"]),
+				acrValues: [KBA, PHR, "urn:nope", MFA],
+				factors: "installed",
+				expected: { outcome: "step_up", requirement: "acr", acrValues: [PHR, MFA] },
+			},
+			{
+				row: "mfa is within a step-up's reach when an installed factor adds it",
+				mode: "optional",
+				session: passwordSession(["pwd"]),
+				acrValues: [MFA],
+				factors: "withoutWebAuthn",
+				expected: { outcome: "step_up", requirement: "acr", acrValues: [MFA] },
+			},
+			{
+				row: "mfa is out of reach when no installed factor adds it, coordinator or not",
+				mode: "optional",
+				session: passwordSession(["pwd"]),
+				acrValues: [MFA],
+				factors: "emailOnly",
+				expected: { outcome: "unmet", requirement: "acr" },
+			},
+			{
+				row: "a value the step-up cannot add keeps an entry out of reach: pwd is the primary's",
+				mode: "optional",
+				session: federatedSession(["fed"]),
+				acrValues: [PWD],
+				factors: "installed",
+				expected: { outcome: "unmet", requirement: "acr" },
+			},
+		],
+	},
+];
+
+/**
+ * D2's stated mapping of a row's decision onto the admission, for the
+ * requirement named `mfa` stepping up to `page`: the rule's `requirement:
+ * "acr"` is `"acr"`, its `requirement: "baseline"` is `"mfa"`, and its
+ * `step_up.requirement` is `whenStillUnmet` — `"acr"` → `"unmet"`,
+ * `"baseline"` → the requirement's own `"reauthenticate"`.
+ */
+export function mergeAdmission(
+	expected: MergeDecision,
+	session: UserSession | null,
+	page: StepUpPage,
+): Admission {
+	switch (expected.outcome) {
+		case "met":
+			return { outcome: "admitted", session, acr: expected.acr };
+		case "reauthenticate":
+			return { outcome: "reauthenticate", requirement: "mfa", session };
+		case "step_up":
+			if (session === null) throw new Error("a step-up needs a session");
+			return {
+				outcome: "step_up",
+				requirement: "mfa",
+				session,
+				page,
+				acrValues: expected.acrValues,
+				whenStillUnmet: expected.requirement === "acr" ? "unmet" : "reauthenticate",
+			};
+		case "unmet":
+			return {
+				outcome: "unmet",
+				requirement: expected.requirement === "acr" ? "acr" : "mfa",
+				session,
+			};
+	}
+}

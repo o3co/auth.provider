@@ -28,7 +28,8 @@
  *   boot, by name;
  * - the state really is shared: two replicas booted on the one database, a
  *   flow started on one finishes on the other — a login and an authorization
- *   code, a device authorization, a DPoP proof's single use.
+ *   code, a device authorization, a DPoP proof's single use, a login's MFA
+ *   transaction.
  *
  * The WebAuthn credential store is the one exception: no package ships a
  * shared one, and the WebAuthn README has a production deployment wire its own
@@ -36,7 +37,11 @@
  * what `multi` refuses is the bundled memory module, and that is checked here.
  */
 
-import { replicaUnsafeReason } from "@o3co/auth-provider-core";
+import {
+	type MfaFactorStore,
+	type MfaTransactionStore,
+	replicaUnsafeReason,
+} from "@o3co/auth-provider-core";
 import { DEVICE_CODE_GRANT_TYPE } from "@o3co/auth-provider-device-grant";
 import {
 	ALICE,
@@ -110,6 +115,8 @@ describe('every package on, every shared store on Redis, deployment.mode = "mult
 				"redis-device-code-store",
 				"redis-challenge-store",
 				"deployment:webauthn-credential-store",
+				"redis-mfa-factor-store",
+				"redis-mfa-transaction-store",
 			]),
 		);
 		for (const module of modules) expect(replicaUnsafeReason(module), module.name).toBeUndefined();
@@ -143,6 +150,19 @@ describe('every package on, every shared store on Redis, deployment.mode = "mult
 			});
 		},
 	);
+
+	it("the MFA stores in memory are refused at boot, naming both", async () => {
+		await expect(replica({ mfaStores: "memory" })).rejects.toMatchObject({
+			name: "BootError",
+			reason: "replica-unsafe-adapter",
+			details: {
+				modules: expect.arrayContaining([
+					"core-mfa-factor-store-memory",
+					"core-mfa-transaction-store-memory",
+				]),
+			},
+		});
+	});
 });
 
 describe("two replicas on one Redis database share every flow's state", () => {
@@ -208,6 +228,43 @@ describe("two replicas on one Redis database share every flow's state", () => {
 		const replayed = await token(b.app);
 		expect(replayed.status).toBe(400);
 		expect(replayed.body.error).toBe("invalid_dpop_proof");
+	});
+
+	it("a login the mfa requirement interrupts on one replica is bound to a transaction the other reads, kept in Redis", async () => {
+		const a = await replica();
+		const b = await replica();
+		const components = (set: FullSet) =>
+			set.handle.components as unknown as {
+				mfaFactorStore: MfaFactorStore;
+				mfaTransactionStore: MfaTransactionStore;
+			};
+		// A factor enrolled through one replica's store is the other's too.
+		await components(a).mfaFactorStore.create({
+			id: "f-alice",
+			subject: ALICE.sub,
+			kind: "totp",
+			label: undefined,
+			binding: "password",
+			createdAt: new Date(),
+			lastUsedAt: undefined,
+			version: 0,
+			data: "sealed",
+		});
+		const transactions = () => inspect.keys("mfat:tx:*");
+		const before = await transactions();
+		const agent = request.agent(b.app);
+		const csrf = await agent.get("/session/csrf");
+		const signIn = await agent
+			.post("/session/login")
+			.set(csrf.body.header_name as string, csrf.body.csrf_token as string)
+			.type("form")
+			.send({ username: ALICE.username, password: ALICE.password });
+		expect(signIn.status).toBe(403);
+		expect(signIn.body.error).toBe("mfa_required");
+		expect((await transactions()).filter((key) => !before.includes(key))).toHaveLength(1);
+		expect(
+			await components(a).mfaTransactionStore.get(signIn.body.transaction as string),
+		).toMatchObject({ purpose: "login", subject: ALICE.sub });
 	});
 
 	it("keeps the state in Redis: a WebAuthn challenge and a federation grant intent land in the database", async () => {

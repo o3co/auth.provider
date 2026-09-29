@@ -19,7 +19,8 @@
  * `all-modules-composition.fixture.mts`, imported whole) with every workspace
  * package the template does not depend on added the way a deployment adds
  * them to that manifest — the device grant, DPoP, mTLS, token exchange,
- * WebAuthn, the MFA package's TOTP factor, and the Apple and GitHub
+ * WebAuthn, the MFA package (`mfaModules` over the MFA stores, `mfa.mode =
+ * "optional"`, a key of the deployment's own), and the Apple and GitHub
  * federations.
  *
  * What the template's fixture substitutes, this one inherits. What it adds:
@@ -45,7 +46,7 @@
  * before each one (`resettable`, from the template's fixture).
  */
 
-import { generateKeyPairSync, randomUUID, sign } from "node:crypto";
+import { generateKeyPairSync, randomBytes, randomUUID, sign } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import {
@@ -61,6 +62,8 @@ import {
 	type Module,
 	memoryChallengeStoreModule,
 	memoryDeviceCodeStoreModule,
+	memoryMfaFactorStoreModule,
+	memoryMfaTransactionStoreModule,
 	memoryWebAuthnCredentialStoreModule,
 	type PrimaryAuthentication,
 	type PrimaryContinuation,
@@ -74,13 +77,18 @@ import { DEVICE_CODE_GRANT_TYPE, deviceGrantModule } from "@o3co/auth-provider-d
 import { dpopModule } from "@o3co/auth-provider-dpop";
 import { appleFederationModule } from "@o3co/auth-provider-federation-apple";
 import { githubFederationModule } from "@o3co/auth-provider-federation-github";
-import { mfaTotpFactorModule } from "@o3co/auth-provider-mfa";
+import { mfaModules } from "@o3co/auth-provider-mfa";
 import { mtlsModule } from "@o3co/auth-provider-mtls";
 import {
 	TOKEN_EXCHANGE_GRANT_TYPE,
 	tokenExchangeModule,
 } from "@o3co/auth-provider-oauth-token-exchange";
-import { redisChallengeStoreModule, redisDeviceCodeStoreModule } from "@o3co/auth-provider-redis";
+import {
+	redisChallengeStoreModule,
+	redisDeviceCodeStoreModule,
+	redisMfaFactorStoreModule,
+	redisMfaTransactionStoreModule,
+} from "@o3co/auth-provider-redis";
 import {
 	answerInterruption,
 	createCsrfProtectionFromConfig,
@@ -142,6 +150,12 @@ export interface Features {
 	readonly webauthn: boolean;
 	readonly apple: boolean;
 	readonly github: boolean;
+	/**
+	 * The MFA package: installed is on (the session-admission ADR's D7), so
+	 * its switch is its modules' presence — with `mfa.mode = "optional"` and
+	 * `mfa` declared — or their absence with `mfa.mode = "off"`.
+	 */
+	readonly mfa: boolean;
 }
 
 export const ALL_ON: Features = {
@@ -152,7 +166,15 @@ export const ALL_ON: Features = {
 	webauthn: true,
 	apple: true,
 	github: true,
+	mfa: true,
 };
+
+/**
+ * The deployment's own MFA key (canonical base64 of 32 bytes), one per test
+ * file, so every replica a file boots shares it — never the development
+ * sample key: the full set boots as `production` does.
+ */
+export const MFA_KEY = randomBytes(32).toString("base64");
 
 /** Which store backs each added feature: memory on one replica, Redis on several. */
 export type Stores = "memory" | "redis";
@@ -167,11 +189,21 @@ function withFeatures(config: AppConfig, features: Features): AppConfig {
 	};
 	return {
 		...config,
-		// The session-admission ADR's D7: a deployment that adds a requirement
-		// declares it beside what the template derived from `mfa.mode`.
+		// The session-admission ADR's D7: a deployment that installs MFA declares
+		// it — as the template derives it from a mode other than `off` — and one
+		// that adds requirements of its own declares them beside it.
 		sessionRequirements: {
-			expected: [...(c.sessionRequirements?.expected ?? []), ...FIXTURE_REQUIREMENTS],
+			expected: [
+				...(c.sessionRequirements?.expected ?? []),
+				...(features.mfa ? ["mfa"] : []),
+				...FIXTURE_REQUIREMENTS,
+			],
 		},
+		// The MFA package on, as a deployment turns it on: `optional` — users
+		// with a factor are challenged, nobody is forced — and a key of its own.
+		mfa: features.mfa
+			? { ...config.mfa, mode: "optional", encryptionKeys: [{ key: MFA_KEY }] }
+			: { ...config.mfa, mode: "off" },
 		oauth: {
 			...c.oauth,
 			deviceAuthorization: {
@@ -577,6 +609,7 @@ interface AddedStores {
 	readonly deviceCode: Stores;
 	readonly challenge: Stores;
 	readonly credential: Module;
+	readonly mfa: Stores;
 }
 
 /** Every module the template does not compose, as a deployment adds them to its manifest. */
@@ -605,10 +638,17 @@ function addedModules(
 					defaultChallengeCeremonyModule,
 				]
 			: []),
-		// The MFA package's TOTP factor, on by its reference.conf. Its MFA
-		// module, which registers the requirement named mfa, is not installed:
-		// mfa.mode stays off (the MFA ADR's build-order step 8).
-		mfaTotpFactorModule,
+		// The MFA package: the TOTP factor, on by its reference.conf, and the
+		// MFA module, which registers the requirement named mfa, over the two
+		// MFA stores. The environment is the one the template composes as.
+		...(features.mfa
+			? [
+					...mfaModules({ environment: "production" }),
+					...(stores.mfa === "redis"
+						? [redisMfaFactorStoreModule, redisMfaTransactionStoreModule]
+						: [memoryMfaFactorStoreModule, memoryMfaTransactionStoreModule]),
+				]
+			: []),
 		grantPolicyModule,
 		...requirementModules(interrupt, ceremonies, outage),
 		...federationBridges(config, features, f),
@@ -682,6 +722,8 @@ export interface FullSetOptions extends Omit<ComposeOptions, "extraModules" | "r
 	/** One store's adapter against the rest (a replica-safety case). */
 	readonly deviceCodeStore?: Stores;
 	readonly challengeStore?: Stores;
+	/** The two MFA stores' adapter against the rest. */
+	readonly mfaStores?: Stores;
 	/**
 	 * The WebAuthn credential store module. Default: core's memory module on
 	 * memory stores, the deployment's own on Redis (no package ships a shared
@@ -710,6 +752,7 @@ export async function fullSetOptions(options: FullSetOptions = {}): Promise<Comp
 	const added: AddedStores = {
 		deviceCode: options.deviceCodeStore ?? stores,
 		challenge: options.challengeStore ?? stores,
+		mfa: options.mfaStores ?? stores,
 		credential:
 			options.credentialStore ??
 			(stores === "redis" ? deploymentCredentialStoreModule : memoryWebAuthnCredentialStoreModule),
@@ -719,6 +762,7 @@ export async function fullSetOptions(options: FullSetOptions = {}): Promise<Comp
 		stores: _stores,
 		deviceCodeStore: _deviceCodeStore,
 		challengeStore: _challengeStore,
+		mfaStores: _mfaStores,
 		credentialStore: _credentialStore,
 		adjust: _adjust,
 		interruptLogins,

@@ -430,6 +430,66 @@ describe("what is sealed is what opening gives back", () => {
 		}
 	});
 
+	it("refuses an accessor anywhere in the value — a getter can answer the check one thing and JSON another — and anything but a plain object or a real array (retro review of #721)", () => {
+		const sealing = sealingOver([K1]);
+		/** A getter that answers "checked" to its first read and the secret to every later one. */
+		const shifting = () => {
+			let reads = 0;
+			return () => {
+				reads += 1;
+				return reads === 1 ? "checked" : SECRET_TEXT;
+			};
+		};
+		const withGetter = <T extends object>(target: T, key: string): T =>
+			Object.defineProperty(target, key, { get: shifting(), enumerable: true });
+		const listWithGetter = (): unknown[] => {
+			const list: unknown[] = ["a", "b"];
+			Object.defineProperty(list, 1, { get: shifting(), enumerable: true });
+			return list;
+		};
+		class Listish extends Array<number> {}
+		for (const [label, value] of [
+			["a getter at the top", withGetter({ lastUsedStep: 1 }, "secret")],
+			["a getter nested", { outer: withGetter({ lastUsedStep: 1 }, "secret") }],
+			["a getter in a list", { list: listWithGetter() }],
+			["a getter in an object in a list", { list: [withGetter({}, "secret")] }],
+			["a setter alone", Object.defineProperty({}, "secret", { set: () => {}, enumerable: true })],
+			["a list that is not an Array", { list: Listish.from([1, 2]) }],
+			["an object over another prototype", { nested: Object.create({ inherited: 1 }) }],
+		] as const) {
+			for (const seal of [
+				() => sealing.sealFactorData(RECORD, value as never),
+				() =>
+					sealing.sealState(
+						{ transactionId: "tx-1", kind: "totp", use: "enrollment" },
+						value as never,
+					),
+			]) {
+				let thrown: unknown;
+				try {
+					seal();
+				} catch (error) {
+					thrown = error;
+				}
+				expect(thrown, label).toBeInstanceOf(RangeError);
+				expect((thrown as Error).message, label).not.toContain(SECRET_TEXT);
+			}
+		}
+	});
+
+	it("seals an object without a prototype as the plain object it is", () => {
+		const sealing = sealingOver([K1]);
+		const value = Object.assign(Object.create(null) as Record<string, unknown>, {
+			lastUsedStep: 7,
+			nested: Object.assign(Object.create(null) as Record<string, unknown>, { a: [1] }),
+		});
+		expect(sealing.openFactorData(RECORD, sealing.sealFactorData(RECORD, value))).toEqual({
+			state: "ok",
+			value: { lastUsedStep: 7, nested: { a: [1] } },
+			keyId: "k1",
+		});
+	});
+
 	it("seals nested JSON, and leaves out a property whose value is undefined, as JSON does", () => {
 		const sealing = sealingOver([K1]);
 		const value = { a: undefined, b: [1, "x", null, { c: true, d: -0.5 }], e: {} };

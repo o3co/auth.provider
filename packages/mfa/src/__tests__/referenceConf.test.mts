@@ -19,7 +19,9 @@
  * keys this package reads, layered as a composition root layers it — over
  * core's `reference.conf`, through core's `AppConfigSchema` — and the
  * variables that reach them: `MFA_ENCRYPTION_KEY` (the first key of the ring,
- * which has no default), `MFA_TOTP_ENABLED` and `MFA_TOTP_ISSUER`.
+ * which has no default), `MFA_TOTP_ENABLED` and `MFA_TOTP_ISSUER`; and the
+ * transaction's life, its attempts and the subject lock, which have no
+ * variable (D19).
  */
 
 import { randomBytes } from "node:crypto";
@@ -96,6 +98,24 @@ describe("the package's reference.conf (D19)", () => {
 		expect(readMfaSettings(resolve({ MFA_ENCRYPTION_KEY: oldKey })).encryptionKeys[0]?.id).toBe(
 			before[0]?.id,
 		);
+	});
+
+	it("defaults a transaction to 600 seconds and 5 attempts, and the lock to D19's numbers", () => {
+		const settings = readMfaSettings(
+			resolve({ MFA_ENCRYPTION_KEY: randomBytes(32).toString("base64") }),
+		);
+		expect(settings.transactionTtlSeconds).toBe(600);
+		expect(settings.maxAttemptsPerTransaction).toBe(5);
+		expect(settings.lockout).toEqual({
+			threshold: 5,
+			baseSeconds: 900,
+			maxSeconds: 86_400,
+			memorySeconds: 86_400,
+			weeklyBudget: 10,
+			hardLimit: 100,
+			trustedBrowsers: 5,
+			trustedBrowserDays: 30,
+		});
 	});
 
 	it("reads MFA_TOTP_ENABLED and MFA_TOTP_ISSUER", () => {

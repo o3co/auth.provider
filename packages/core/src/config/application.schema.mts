@@ -1590,9 +1590,10 @@ export const fullSectionsSchema = z.object({
 		// `/consent` is the default, from HOCON — the deployment's page, not the
 		// `/oauth/consent` JSON API that page calls.
 		consent: z.object({ url: z.string() }).optional(),
-		// The MFA ADR's D6: the deployment's page `/authorize` sends a browser
-		// to for a step-up, `/mfa` by default, from HOCON. Nothing sends a
-		// browser there in this release.
+		// The MFA ADR's D6: the deployment's page a browser is sent to for a
+		// step-up, `/mfa` by default, from HOCON. The MFA package's `mfa`
+		// requirement registers it as its step-up page: once that package is
+		// installed, its `step_up` verdicts send a browser there.
 		mfa: z.object({ url: z.string() }).optional(),
 		// IH-10: `client` / `authCallback` removed — no production consumer
 		// reads them. The pre-fix env-var-only HOCON lines silently leaked
