@@ -1,6 +1,6 @@
 # @o3co/auth-provider-standalone
 
-最終更新: 2026-09-28
+最終更新: 2026-09-29
 
 auth.provider のデプロイ可能なサーバーテンプレート。これは composition root であり、設定を読み込み、モジュールをロードし、Express サーバーを起動する。`@o3co/create-auth-provider` で生成される。
 
@@ -320,7 +320,7 @@ cors {
 }
 ```
 
-または `CORS_ALLOWED_ORIGINS=https://app.example.com,http://localhost:5173`。
+または `CORS_ALLOWED_ORIGINS=https://app.example.com,http://localhost:5173`。書き方はこの 2 通りで、どちらでもない値 — 数値、オブジェクト、真偽値。設定ファイルでしか書けない形 — は、origin なしとして読まれるのではなく、`cors.allowedOrigins` を示して起動時に失敗する。
 
 **照合は `Origin` ヘッダーとの文字列の完全一致である**。一致し得ない形はすべて、誰も許可しないまま設定に居座るのではなく、そのインデックスを名指しして起動時に失敗する。つまり: 末尾スラッシュ（`https://app.example.com/`）、明示的なデフォルトポート（`:443`）、パス、大文字のホストはいずれも不可で、**ワイルドカードも不可** — サブドメインの照合は無く、今後も提供しない。loopback ホスト（`localhost`、`127.0.0.0/8`、`[::1]`）を除き `https` が必須で、この例外は、フロントエンドの開発サーバーを証明書なしで動かせるようにするためのものである。
 

@@ -136,3 +136,30 @@ describe("cors.allowedOrigins — the CORS_ALLOWED_ORIGINS shape", () => {
 			expect(result.data.cors.allowedOrigins).toEqual(["https://app.example.com"]);
 	});
 });
+
+describe("cors.allowedOrigins — a shape neither reader reads refuses boot, by path", () => {
+	// The key has two spellings: a list, and the one comma-separated string an
+	// environment variable carries. Anything else — a number, an object, a
+	// boolean, which only a configuration file can write — used to read as
+	// "no origins": CORS silently off for a key someone wrote.
+	it.each([
+		["a number", 42],
+		["an object", { origin: "https://app.example.com" }],
+		["a boolean", true],
+	])("refuses %s, naming the key and both spellings", (_label, value) => {
+		const result = parse(value);
+		expect(result.success).toBe(false);
+		if (result.success) return;
+		expect(result.error.issues.map((issue) => issue.path.join("."))).toEqual([
+			"cors.allowedOrigins",
+		]);
+		expect(messagesOf(result)).toMatch(/list of origins/);
+		expect(messagesOf(result)).toMatch(/comma-separated string/);
+	});
+
+	it("still reads null as no origins, as it always has", () => {
+		const result = parse(null);
+		expect(result.success).toBe(true);
+		if (result.success) expect(result.data.cors.allowedOrigins).toEqual([]);
+	});
+});

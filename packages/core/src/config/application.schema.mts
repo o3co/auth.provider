@@ -1615,6 +1615,11 @@ export const fullSectionsSchema = z.object({
 		 * leaves it can reach and towards a type it can name, and an array of
 		 * strings is neither.
 		 *
+		 * Those are the two spellings, and `null` reads as no list. Any other
+		 * shape — a number, an object, a boolean, which only a configuration
+		 * file can write — is refused here by path: normalised, it read as no
+		 * origins, and CORS was silently off for a key someone wrote.
+		 *
 		 * This list does NOT confer CSRF trust — that is
 		 * `session.csrf.trustedOrigins`, and #272 was filed because one list
 		 * was answering both questions.
@@ -1625,8 +1630,21 @@ export const fullSectionsSchema = z.object({
 				// (`net/origin.mts`), which reads the same key off a config that
 				// has not necessarily been through this schema. A second copy
 				// here is how the two would disagree about what a
-				// comma-separated `CORS_ALLOWED_ORIGINS` means.
-				(raw) => (raw === undefined ? raw : normalizeAllowedOrigins(raw)),
+				// comma-separated `CORS_ALLOWED_ORIGINS` means. A shape neither
+				// reads is refused before it gets there: the mount site, which
+				// sees it only in a configuration that skipped this schema,
+				// warns (`cors_allowed_origins_unreadable`).
+				(raw, ctx) => {
+					if (raw === undefined) return raw;
+					if (raw !== null && typeof raw !== "string" && !Array.isArray(raw)) {
+						ctx.addIssue({
+							code: z.ZodIssueCode.custom,
+							message: `cors.allowedOrigins must be a list of origins, or one comma-separated string of them (CORS_ALLOWED_ORIGINS); got ${typeof raw === "object" ? "an object" : `a ${typeof raw}`}`,
+						});
+						return raw;
+					}
+					return normalizeAllowedOrigins(raw);
+				},
 				z.array(z.string()),
 			)
 			.superRefine((value, ctx) => {

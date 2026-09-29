@@ -22,7 +22,7 @@ import {
 	AppConfigSchema,
 	resolveAccessTokenLifetime,
 } from "@o3co/auth-provider-core";
-import { parseFile } from "@o3co/ts.hocon";
+import { parseFile, parseString } from "@o3co/ts.hocon";
 import { validate } from "@o3co/ts.hocon/zod";
 import { describe, expect, it } from "vitest";
 import { buildModules, withSessionRequirements } from "../buildModules.mjs";
@@ -295,13 +295,24 @@ const UMBRELLA_E2E_ENV: Readonly<Record<string, string>> = {
 	OAUTH_GRANTS_AUTHORIZATION_CODE_PKCE_REQUIRE_S256: "true",
 };
 
-function buildResolvedConfig(env: Record<string, string>, configEnv = "production"): AppConfig {
+/**
+ * The shipped layers under `env`, read the way `app.mts` reads them;
+ * `operatorLayer`, HOCON an operator adds above them, when given.
+ */
+function buildResolvedConfig(
+	env: Record<string, string>,
+	configEnv = "production",
+	operatorLayer?: string,
+): AppConfig {
 	const { applicationConfPath, envConfPath } = resolveConfigPaths(configDir, configEnv);
 	const libraryReferencePath = resolveLibraryReferenceConfPath();
+	const shipped = parseFile(envConfPath, { env })
+		.withFallback(parseFile(applicationConfPath, { env }))
+		.withFallback(parseFile(libraryReferencePath, { env }));
 	return validate(
-		parseFile(envConfPath, { env })
-			.withFallback(parseFile(applicationConfPath, { env }))
-			.withFallback(parseFile(libraryReferencePath, { env })),
+		operatorLayer === undefined
+			? shipped
+			: parseString(operatorLayer, { env }).withFallback(shipped),
 		AppConfigSchema,
 	);
 }
@@ -432,6 +443,18 @@ describe("#288: the shipped config boots with every documented override supplied
 				expect(() => buildResolvedConfig({ ...DOCUMENTED_ENV, CORS_ALLOWED_ORIGINS: bad })).toThrow(
 					/cors\.allowedOrigins/,
 				);
+			}
+		});
+
+		it("fails boot on a value that is neither a list nor a string, naming the key", () => {
+			// The variable can only ever carry a string, so this shape comes
+			// from a configuration file — and it used to read as no origins:
+			// CORS silently off for a key someone wrote.
+			for (const value of ["42", "true", '{ origin = "https://app.example.com" }']) {
+				expect(
+					() => buildResolvedConfig(DOCUMENTED_ENV, "production", `cors.allowedOrigins = ${value}`),
+					value,
+				).toThrow(/cors\.allowedOrigins/);
 			}
 		});
 
