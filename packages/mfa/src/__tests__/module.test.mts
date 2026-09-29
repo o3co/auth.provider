@@ -49,7 +49,7 @@ import {
 	type UserSession,
 	type UserSessionStore,
 } from "@o3co/auth-provider-core";
-import { resolverForTests } from "@o3co/auth-provider-core/testing";
+import { createTestOAuthTokenSettings, resolverForTests } from "@o3co/auth-provider-core/testing";
 import { afterEach, describe, expect, it } from "vitest";
 import { MFA_DEVELOPMENT_SAMPLE_KEY } from "#/config.mjs";
 import { MFA_ROUTES_ID, mfaBootState, mfaModule, mfaModules } from "#/module.mjs";
@@ -473,6 +473,25 @@ describe("the factors' sections are the factors' modules' to read (the module re
 				JSON.stringify(factors),
 			).toEqual(["hwk", "mfa", "swk"]);
 		}
+	});
+
+	it("defaults the TOTP issuer to the host of the oauthTokenSettings issuer the composition holds, over the configuration's (#728)", async () => {
+		// The configuration's issuer names no host a TOTP issuer could default
+		// to; the slot's does, so the factor's module boots.
+		expect(mfaTotpFactorModule.optional).toContain("oauthTokenSettings");
+		const { handle } = await boot({
+			config: withIssuer(configFor("required"), NO_TOTP_HOST),
+			extraModules: [
+				defineModule({
+					name: "test:oauth-token-settings",
+					provides: {
+						oauthTokenSettings: () =>
+							createTestOAuthTokenSettings({ issuer: "https://login.example.org" }),
+					},
+				}),
+			],
+		});
+		expect(handle.components.mfaFactorResolver?.get("totp")).toBeDefined();
 	});
 
 	it("leaves the refusal to the TOTP factor's module when it is installed: the same issuer refuses the boot there, naming MFA_TOTP_ISSUER", async () => {

@@ -461,6 +461,16 @@ describe("the TOTP factor's parameters (D19, D22)", () => {
 		expect(readMfaTotpSettings(withTotp({ issuer: "Example Co" })).issuer).toBe("Example Co");
 	});
 
+	it("defaults the issuer to the host of the issuer it is handed — the oauthTokenSettings slot's — over the configuration's (#728)", () => {
+		expect(
+			readMfaTotpSettings(withTotp({}), { issuer: "https://login.example.org:8443/tenant" }).issuer,
+		).toBe("login.example.org");
+		expect(
+			readMfaTotpSettings(withTotp({ issuer: "Example Co" }), { issuer: "https://x.example" })
+				.issuer,
+		).toBe("Example Co");
+	});
+
 	it("refuses an issuer the otpauth label cannot carry, and a default it cannot find", () => {
 		for (const issuer of ["", "Example:Co", 1]) {
 			expect(refusal(() => readMfaTotpSettings(withTotp({ issuer })))).toContain(
