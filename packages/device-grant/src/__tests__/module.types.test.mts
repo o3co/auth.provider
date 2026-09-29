@@ -48,7 +48,7 @@ const OPTIONAL = [
 ] as const;
 type Declared = ProviderDeps<(typeof REQUIRES)[number], (typeof OPTIONAL)[number]>;
 
-describe("deviceGrantModule's deps are the slots it declares (#626 P2)", () => {
+describe("deviceGrantModule's deps are the slots it declares", () => {
 	it("types every contribution callback as ProviderDeps of `requires` / `optional`", () => {
 		expectTypeOf<DeviceGrantModuleDeps>().branded.toEqualTypeOf<Declared>();
 		const installed = deviceGrantModule({ config: makeValidAppConfig() });

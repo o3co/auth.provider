@@ -150,7 +150,7 @@ const expiringAt = (expiresAt: number): UserSessionStore => {
 	return store;
 };
 
-describe("device verification on session admission (the session-admission ADR's D8)", () => {
+describe("device verification on session admission", () => {
 	it("parses the body first: an action it does not implement is 400 before the 401 of a signed-out cookie and the 503 of a store outage (a pinned change)", async () => {
 		const asked: RequirementInput[] = [];
 		const signedOut = await harness({

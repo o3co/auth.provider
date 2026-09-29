@@ -362,7 +362,7 @@ describe("device authorization request (RFC 8628 §3.1–§3.2)", () => {
 		);
 	});
 
-	it("refuses a client with no allowedGrantTypes at all (#326: never acquired by omission)", async () => {
+	it("refuses a client with no allowedGrantTypes at all (never acquired by omission)", async () => {
 		// The grant declares requiresExplicitGrantAllowlist, so the token
 		// endpoint denies by absence for it. The authorization endpoint
 		// applies the same rule, or the two disagree about who may start
@@ -741,7 +741,7 @@ describe("audit trail for the human's decision", () => {
 	});
 });
 
-describe("limiter outage — rateLimit.failMode applies here too (#457)", () => {
+describe("limiter outage — rateLimit.failMode applies here too", () => {
 	// This endpoint runs the limiter itself rather than through
 	// `createRateLimitGuard`, so a limiter-backend outage must still follow
 	// `failMode` and raise the `rate_limit.unavailable` event the alert
@@ -990,7 +990,7 @@ describe("polling (RFC 8628 §3.5)", () => {
 		expect((await poll("")).result).toMatchObject({ status: 400, error: "invalid_request" });
 	});
 
-	it("declares that it must never be acquired by omission (#326)", () => {
+	it("declares that it must never be acquired by omission", () => {
 		const { grant } = makeHarness();
 		expect(grant.requiresExplicitGrantAllowlist).toBe(true);
 	});
@@ -1131,7 +1131,7 @@ describe("code generation", () => {
 	});
 });
 
-describe("store capacity (#445)", () => {
+describe("store capacity", () => {
 	afterEach(() => {
 		vi.restoreAllMocks();
 	});

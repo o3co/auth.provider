@@ -584,7 +584,7 @@ describe("deviceGrantModule — the route it actually contributes", () => {
 		);
 	});
 
-	it("refuses to mount device/verification without the outage policy, rateLimit.failMode (#457)", () => {
+	it("refuses to mount device/verification without the outage policy, rateLimit.failMode", () => {
 		// The verification endpoint applies the same policy from the same key.
 		// A composition that enables the grant with no `failMode` is
 		// refused for this route too, not only for device_authorization — or
@@ -612,7 +612,7 @@ describe("deviceGrantModule — the route it actually contributes", () => {
 		return app;
 	};
 
-	it("runs the csrfGuard it is handed in front of the whole route, and reads no session.* (#728)", async () => {
+	it("runs the csrfGuard it is handed in front of the whole route, with no session.* in the configuration", async () => {
 		// The guard is the slot's, not one rebuilt from the session's
 		// configuration: `enabledDeps` carries no `session` section, and a
 		// guard that refuses everything refuses a request the handler would
@@ -635,7 +635,7 @@ describe("deviceGrantModule — the route it actually contributes", () => {
 		}
 	});
 
-	it("holds an approval to requireEmailVerified of the oauthTokenSettings a module provides, over the configuration's (#728)", async () => {
+	it("holds an approval to requireEmailVerified of the oauthTokenSettings a module provides, over the configuration's", async () => {
 		// The configuration leaves it off; the slot turns it on, and the
 		// signed-in user-1 has no verified email.
 		const app = mountVerificationRoute({
@@ -657,7 +657,7 @@ describe("deviceGrantModule — the route it actually contributes", () => {
 		});
 	});
 
-	it("reads requireEmailVerified off the oauthTokenSettings a module provides when the configuration turns it on (#728)", async () => {
+	it("reads requireEmailVerified off the oauthTokenSettings a module provides when the configuration turns it on", async () => {
 		// The other way round: the slot says false, and a reader that took
 		// `false` for "unset" would fall through to the configuration's `true`.
 		const approve = (deps: TestDeps) =>
@@ -704,7 +704,7 @@ describe("deviceGrantModule — the route it actually contributes", () => {
 		["closed", 503, "service_unavailable"],
 		["open", 404, "invalid_user_code"],
 	] as const)(
-		"applies rateLimit.failMode = %s from config on the mounted device/verification route (#457)",
+		"applies rateLimit.failMode = %s from config on the mounted device/verification route",
 		async (failMode, status, error) => {
 			// What no test of the handler alone can observe: that the module
 			// reads `rateLimit.failMode` and hands it to this route.
@@ -1536,7 +1536,7 @@ describe("deviceGrantModule — the access-token lifetime", () => {
 		expect((payload.exp as number) - (payload.iat as number)).toBe(600);
 	});
 
-	it("mints the default lifetime of the oauthTokenSettings a module provides, over the configuration's (#728)", async () => {
+	it("mints the default lifetime of the oauthTokenSettings a module provides, over the configuration's", async () => {
 		// The oauth module owns `oauth {}` and provides what others read of it;
 		// a composition without it reads the configuration as before (above).
 		const store = {
@@ -1585,7 +1585,7 @@ describe("deviceGrantModule — the access-token lifetime", () => {
 	});
 });
 
-describe("deviceGrantModule — private_key_jwt on the mounted route (#484)", () => {
+describe("deviceGrantModule — private_key_jwt on the mounted route", () => {
 	const ISSUER = "https://as.example.test";
 	const JWT_CLIENT = "assertion-app";
 	const JWT_BEARER_CLIENT_ASSERTION_TYPE = "urn:ietf:params:oauth:client-assertion-type:jwt-bearer";
@@ -1682,7 +1682,7 @@ describe("deviceGrantModule — private_key_jwt on the mounted route (#484)", ()
 		expect(typeof res.body.device_code).toBe("string");
 	});
 
-	it("authenticates the client against the issuer of the oauthTokenSettings a module provides (#728)", async () => {
+	it("authenticates the client against the issuer of the oauthTokenSettings a module provides", async () => {
 		const SLOT_ISSUER = "https://slot.example.test";
 		const app = mountWith({
 			...depsWith(createMemoryReplaySeenSet()),
