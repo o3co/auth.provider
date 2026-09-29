@@ -102,7 +102,7 @@ function buildApp(
 // Tests
 // ---------------------------------------------------------------------------
 
-describe("POST /oauth/webauthn/registration/options (spec §2.4)", () => {
+describe("POST /oauth/webauthn/registration/options", () => {
 	it("401 when no authenticated subject", async () => {
 		const { app } = buildApp(undefined);
 

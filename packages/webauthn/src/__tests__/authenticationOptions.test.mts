@@ -115,7 +115,7 @@ async function seededCredentialStore() {
 // Tests
 // ---------------------------------------------------------------------------
 
-describe("POST /oauth/webauthn/authentication/options (spec §2.4)", () => {
+describe("POST /oauth/webauthn/authentication/options", () => {
 	it("no userId in body → discoverable flow: empty/absent allowCredentials, challenge stored under webauthn:authentication", async () => {
 		const challengeStore = createMemoryChallengeStore();
 		const issueSpy = vi.spyOn(challengeStore, "issue");

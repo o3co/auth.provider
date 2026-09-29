@@ -69,7 +69,7 @@ function makeCredential(overrides?: Partial<WebAuthnCredential>): WebAuthnCreden
 // generateRegistrationOptionsForUser
 // ---------------------------------------------------------------------------
 
-describe("generateRegistrationOptionsForUser (spec §2.4)", () => {
+describe("generateRegistrationOptionsForUser", () => {
 	it("sets rpId and rpName from config", async () => {
 		const result = await generateRegistrationOptionsForUser({
 			config: BASE_CONFIG,
@@ -182,7 +182,7 @@ describe("generateRegistrationOptionsForUser (spec §2.4)", () => {
 // generateAuthenticationOptionsForUser
 // ---------------------------------------------------------------------------
 
-describe("generateAuthenticationOptionsForUser (spec §2.4)", () => {
+describe("generateAuthenticationOptionsForUser", () => {
 	it("sets rpId from config", async () => {
 		const result = await generateAuthenticationOptionsForUser({
 			config: BASE_CONFIG,

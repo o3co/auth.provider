@@ -148,7 +148,7 @@ beforeEach(() => {
 	vi.clearAllMocks();
 });
 
-describe("POST /oauth/webauthn/registration/verify (spec §2.4)", () => {
+describe("POST /oauth/webauthn/registration/verify", () => {
 	// -------------------------------------------------------------------------
 	// 401 when no authenticated subject
 	// -------------------------------------------------------------------------
