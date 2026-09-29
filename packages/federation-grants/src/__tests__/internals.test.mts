@@ -15,14 +15,12 @@
  */
 
 /**
- * The exits a request cannot reach through the chain (#593).
- *
- * Each of these is a composition or programming fault rather than something a
- * caller can do: a handler mounted by hand without the authentication in front
- * of it, a body-parser error that only a chunked request produces, a
- * dependency that throws where nothing is supposed to. They still decide what
- * a caller is told, and what an operator is told, so they are driven directly
- * rather than left to be discovered in production.
+ * The exits a request cannot reach through the chain: composition or
+ * programming faults, not something a caller can do. A handler mounted by hand
+ * without the authentication in front of it, a body-parser error only a
+ * chunked request produces, a dependency that throws where nothing is supposed
+ * to. They still decide what a caller and an operator are told, so they are
+ * driven directly.
  */
 
 import type { FederationGrantConnection, FederationGrantStore } from "@o3co/auth-provider-core";
@@ -116,11 +114,10 @@ describe("a dependency that throws where nothing expects one to", () => {
 	});
 
 	it("is still a typed answer on the token route, because core concludes anyway", async () => {
-		// Worth writing down rather than assuming: core turns EVERY cause it
-		// meets into one of D11's results, including a connection lookup that
-		// throws and a clock that does. So the token handler's own `catch` is a
-		// guard against that contract changing, not a path a caller can take —
-		// which is why it has no test of its own and this does instead.
+		// Core turns EVERY cause it meets into one of its typed results (the
+		// federation-grants ADR, D11), including a connection lookup that throws
+		// and a clock that does. The token handler's own `catch` guards against
+		// that contract changing; it is not a path a caller can take.
 		for (const broken of [
 			{ ...options(throwingConnections) },
 			{

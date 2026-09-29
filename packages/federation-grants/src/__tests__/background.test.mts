@@ -15,19 +15,15 @@
  */
 
 /**
- * The background registry on its own (#593, D12).
- *
- * Core's retrieval hands this everything that may outlive the answer a caller
- * is waiting for: letting go of the refresh lock, telling the audit sink, the
- * record of a use, and — when the caller stopped waiting at the soft deadline
- * — the refresh itself, which goes on holding the lock until its result is
- * persisted. A shutdown that does not wait for those discards a rotated
- * refresh credential that the upstream has already accepted, and the next
- * request presents one the IdP has retired.
- *
- * What this file pins is the registry's own promises. What makes them reach
- * the store's cleanup in the right order is the component wiring, in
- * `lifecycle.test.mts`.
+ * The background registry on its own (the federation-grants ADR, D12). Core's
+ * retrieval hands it everything that may outlive the answer a caller waits
+ * for: releasing the refresh lock, the audit, the record of a use, and, when
+ * the caller stopped waiting at the soft deadline, the refresh itself, which
+ * holds the lock until its result is persisted. A shutdown that does not wait
+ * for those discards a rotated refresh credential the upstream has already
+ * accepted (README, "Shutting down without losing a rotated credential").
+ * This file pins the registry's own promises; their order against the store's
+ * cleanup is the component wiring, in `lifecycle.test.mts`.
  */
 
 import { describe, expect, it } from "vitest";

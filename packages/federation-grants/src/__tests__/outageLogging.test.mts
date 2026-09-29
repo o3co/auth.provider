@@ -16,17 +16,15 @@
 
 /**
  * What the client-authenticated routes log when something they depend on
- * cannot answer — through the real router, the real retrieval and lodging,
- * and the real in-memory stores, with a logger that records every line.
- *
- * - An outage answered `503` is ONE line, at error, object-first, naming what
- *   failed (`store`, `step`, or the `reason` core answered) with the error's
- *   projection (`err`) — never a warn, and never a second line for it.
- * - A failure that changed no answer is one structured warn.
- * - Contention — another replica holds the refresh, or won the write — is a
- *   warn: it answers 503, and nothing is down.
- * - Client authentication and the throttle log through core, with the
- *   deployment's own logger: the projection, not a redaction of it.
+ * cannot answer (README, "What is logged"), through the real router, retrieval,
+ * lodging and in-memory stores, with a logger that records every line. An
+ * outage answered `503` is ONE line, at error, object-first, naming what failed
+ * (`store`, `step`, or the `reason` core answered) with the error's projection
+ * (`err`), never a warn and never a second line. A failure that changed no
+ * answer is one structured warn. Contention (another replica holds the
+ * refresh, or won the write) is a warn: it answers 503, and nothing is down.
+ * Client authentication and the throttle log through core, with the
+ * deployment's own logger: the projection, not a redaction of it.
  */
 
 import type { Request } from "express";
@@ -399,7 +397,7 @@ describe("the lodging routes", () => {
 		// not be closed: the answer is the grant's (410 grant_revoked). The
 		// write's own error, which that answer does not carry, and the intent —
 		// which can activate nothing, and lapses with the flow budget — are one
-		// warn each, where they used to be nothing.
+		// warn each.
 		const h = harness();
 		await h.seed();
 		const revoke = h.store.revoke.bind(h.store);

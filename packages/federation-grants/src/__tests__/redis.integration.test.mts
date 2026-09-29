@@ -15,24 +15,21 @@
  */
 
 /**
- * The routes over a durable store, on a real Redis (#593, D16).
- *
- * Deliberately narrow: **only what the in-memory adapter cannot prove.** The
- * behavioural suites run against memory and the real retrieval function, and
- * duplicating them here would buy nothing but minutes. What memory cannot show
- * is everything that follows from a credential being sealed and a record
- * outliving the process that wrote it:
+ * The routes over a durable store, on a real Redis (the federation-grants ADR,
+ * D16). **Only what the in-memory adapter cannot prove**, which follows from a
+ * credential being sealed and a record outliving the process that wrote it:
  *
  *  - a grant survives the adapter that created it;
  *  - a key that is not in the ring is an outage, and putting it back ends the
- *    outage — nothing was deleted meanwhile;
+ *    outage: nothing was deleted meanwhile;
  *  - key material that is wrong under a known id is not an outage but an
  *    unreadable credential, and the record and the ciphertext are still there;
  *  - a tombstone answers `/status` after the grant has ended;
  *  - two processes sharing one grant refresh it once between them.
  *
- * Slice 3's own suites keep the contract, the key layout, the tampering
- * defences and the parity test. Nothing here reaches into the keyspace.
+ * The Redis adapter's own suites keep the contract, the key layout, the
+ * tampering defences and the parity test. Nothing here reaches into the
+ * keyspace.
  */
 
 import type {
@@ -287,8 +284,9 @@ describe("the routes over a durable store", () => {
 
 		// A process that has never seen the grant still answers about it —
 		// which is what makes "why did this stop working?" answerable at all.
-		// How LONG it answers is the stored retention, and that is slice 3's
-		// test: it cannot be observed here without waiting a month.
+		// How LONG it answers is the stored retention, which the Redis
+		// adapter's suites test: it cannot be observed here without waiting a
+		// month.
 		const later = deployment(prefix, [KEY_ONE], 1);
 		const described = await status(later);
 		expect(described.status).toBe(200);

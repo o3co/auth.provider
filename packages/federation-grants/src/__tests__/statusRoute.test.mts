@@ -15,23 +15,15 @@
  */
 
 /**
- * `POST /oauth/federation-grants/:grantId/status` (#593, D9).
- *
- * Status describes a grant's lifecycle; token answers an issuance request. The
- * two are different questions and the difference runs all the way through:
- *
- *  - **200 for every effective status**, expired and revoked included. A
- *    successful inspection of a grant that has ended is a successful
- *    inspection. Returning the token route's 410 here would make an operator's
- *    dashboard read "this call failed" for a grant that is simply over.
- *  - **`inspect` only.** Never `open`, never a refresh, never the refresh
- *    lock, never `touch`. Calling retrieval from status would rotate a
- *    credential at an upstream because somebody opened a dashboard — and
- *    `lastUsedAt` would say a grant was used when it was only looked at.
- *  - **It is not a health check for `/token`.** An `active` status does not
- *    promise a token: `inspect` reports whether the credential authenticates,
- *    not whether the upstream will issue something usable. The reverse holds
- *    too — a grant reported ineligible can still have a usable cached token.
+ * `POST /oauth/federation-grants/:grantId/status`: describes a grant's
+ * lifecycle, where `/token` answers an issuance request. Pinned: 200 for every
+ * effective status, expired and revoked included; `inspect` only (never
+ * `open`, a refresh, the refresh lock or `touch`: a status call is not a use);
+ * and it is not a health check for `/token`, since `inspect` reports whether
+ * the credential authenticates, not whether the upstream will issue something
+ * usable. Contract and reasons: ADR
+ * 2026-09-17-federation-grants-offline-delegation, "POST-only,
+ * client-authenticated routes in a new package".
  */
 
 import request from "supertest";
@@ -142,7 +134,7 @@ describe("the status route — what it reports", () => {
 	});
 
 	it("reports the expiry as it is computed now, not as it was stored", async () => {
-		// D3: lowering `maxExpiresIn` moves the reported expiry earlier for
+		// Lowering `maxExpiresIn` moves the reported expiry earlier for
 		// grants that already exist, possibly into the past. That is intended —
 		// the stored `expiresAt` never changes, and raising the maximum brings
 		// the reported expiry back, never beyond what the user consented to.
@@ -293,10 +285,10 @@ describe("the status route — who may ask", () => {
 	});
 
 	it("requires the allowlist for a pending grant, which is not a terminal state", async () => {
-		// Found by review. The exemption is for grants that have ENDED — the
-		// answer that lets a client stop asking. A pending one has not started,
-		// and describing it to a client that may no longer use the connection
-		// is the ordinary authorization question.
+		// The exemption is for grants that have ENDED — the answer that lets a
+		// client stop asking. A pending one has not started, and describing it
+		// to a client that may no longer use the connection is the ordinary
+		// authorization question.
 		const h = harness();
 		await h.store.createPending({
 			id: "pending-1",
@@ -315,10 +307,10 @@ describe("the status route — who may ask", () => {
 	});
 
 	it("tells a de-allowlisted client that the grant ended, and nothing more", async () => {
-		// Found by review. Removing a client from the allowlist is an
-		// operator's lever; one that changes the status code but hands back the
-		// same upstream account, the consented scope set and the dates is half
-		// a lever. What survives is what lets the client stop asking.
+		// Removing a client from the allowlist is an operator's lever; one that
+		// changes the status code but hands back the same upstream account, the
+		// consented scope set and the dates is half a lever. What survives is
+		// what lets the client stop asking.
 		const h = harness();
 		await h.seed();
 		await h.store.revoke(GRANT_ID, "operator", h.world.now);
@@ -342,9 +334,8 @@ describe("the status route — who may ask", () => {
 
 	it("reads an allowlist that is not a list as allowing nothing", async () => {
 		// `ClientRepository` is a port, and a deployment's own repository
-		// validates nothing this package can see. Review found what a
-		// comma-joined string does to `.includes`: `"calendar,mail"` would have
-		// allowed `"cal"`.
+		// validates nothing this package can see. On a comma-joined string,
+		// `.includes` would let `"calendar,mail"` allow `"cal"`.
 		const h = harness();
 		await h.seed();
 		h.world.allowedConnections = "calendar,mail" as unknown as readonly string[];
@@ -463,7 +454,7 @@ describe("the status route — the boundary and the backstop", () => {
 		expect(revoked[0]?.details).toMatchObject({
 			outcome: "backstop",
 			operation: "status",
-			// What access ended, and not only which grant (D18).
+			// What access ended, and not only which grant.
 			connection: connection.name,
 			upstream: { issuer: connection.upstreamIssuer, subject: "upstream-subject" },
 			scopes: [...SCOPES],
@@ -471,10 +462,10 @@ describe("the status route — the boundary and the backstop", () => {
 	});
 
 	it("describes the record it ended, not the one it read a moment earlier", async () => {
-		// Found by review. The backstop inspects, decides, and then writes —
-		// and a reauthorization landing between those two replaces the
-		// authorization. An event built from the earlier read would name the
-		// scopes that were NOT the ones taken away.
+		// The backstop inspects, decides, and then writes — and a
+		// reauthorization landing between those two replaces the authorization.
+		// An event built from the earlier read would name the scopes that were
+		// NOT the ones taken away.
 		const h = harness();
 		await h.seed();
 		h.world.boundary = new Date(h.world.now.getTime() + 1000);
@@ -534,10 +525,10 @@ describe("the status route — the boundary and the backstop", () => {
 	});
 
 	it("answers 503 storage when the record itself cannot be read", async () => {
-		// Found by review. A Redis outage on `/token` is 503
-		// `temporarily_unavailable/storage`; the same outage here fell into the
-		// handler's catch and answered 500 `server_error`, which tells a caller
-		// this provider has a bug rather than that it should come back.
+		// A Redis outage is 503 `temporarily_unavailable/storage`, as on
+		// `/token`. The handler's catch would answer 500 `server_error`, which
+		// tells a caller this provider has a bug rather than that it should
+		// come back.
 		const h = harness();
 		await h.seed();
 		vi.spyOn(h.store, "inspect").mockRejectedValue(new Error("store is down"));

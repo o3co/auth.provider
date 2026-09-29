@@ -15,18 +15,15 @@
  */
 
 /**
- * `POST /oauth/federation-grants/:grantId/revoke` (#593, D9, D13).
+ * `POST /oauth/federation-grants/:grantId/revoke`: an owning client ends its
+ * own grant. Ownership is the whole check. Almost everything `/token` consults
+ * decides whether a credential may be *disclosed*, and is deliberately skipped.
+ * Contract: ADR 2026-09-17-federation-grants-offline-delegation, "POST-only,
+ * client-authenticated routes in a new package".
  *
- * The route an owning client calls to end its own grant. What it asks is a
- * different question from `/token`, and almost everything `/token` consults is
- * deliberately not consulted here: ownership is the whole check, and every
- * other rule exists to decide whether a credential may be *disclosed*.
- *
- * The cases that matter are the ones where a grant is hard to use and must
- * still be easy to end — a connection removed from the configuration, a key
- * out of the ring, a grant that expired last week — plus the two that keep a
- * retrying client honest: 204 on the second call, and 404 for a grant that is
- * not both this client's and this subject's.
+ * Pinned: a grant that is hard to use stays easy to end (connection removed
+ * from the configuration, key out of the ring, expired last week); a second
+ * call answers 204; a grant not both this client's and this subject's is 404.
  */
 
 import { createMemoryFederationGrantStore } from "@o3co/auth-provider-core";

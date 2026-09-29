@@ -15,22 +15,21 @@
  */
 
 /**
- * A subject-wide revocation, and what a grant disclosure makes of it (#593, D13).
+ * A subject-wide revocation, and what a grant disclosure makes of it.
  *
- * Three packages have to agree for this to work, and each of them is tested on
- * its own elsewhere: core writes the two boundaries and orchestrates,
- * `@o3co/auth-provider-oauth` wires the service over the session cascade, and
- * this package compares a grant against the boundary on every disclosure.
- * What none of those can show is whether the agreement HOLDS — so these run the
- * real service against the real route, through one composed application.
- *
- * Two claims, and they are the two an operator is actually making:
+ * Core writes the two boundaries and orchestrates, `@o3co/auth-provider-oauth`
+ * wires the service over the session cascade, and this package compares a
+ * grant against the boundary on every disclosure. Each is tested alone
+ * elsewhere; these run the real service against the real route in one composed
+ * application, to show the three agree. Two claims:
  *
  *  - a revocation asked to KEEP this subject's grants leaves an established
  *    grant usable, while their sessions and tokens end;
- *  - a full revocation ends it **even when the explicit grant pass never ran**
- *    — the boundary is a backstop, and a backstop that only works when the
- *    cleanup worked is not one.
+ *  - a full revocation ends it **even when the explicit grant pass never ran**:
+ *    a backstop that only works when the cleanup worked is not one.
+ *
+ * See ADR 2026-09-17-federation-grants-offline-delegation, "Revocation is
+ * persisted on the grant; the watermark is the backstop".
  */
 
 import type {
@@ -240,7 +239,7 @@ const boot = async (allowKeep: boolean, opts: BootOptions = {}) => {
 	const app = express();
 	app.use(handle.router);
 	const service = handle.components.subjectRevocationService as SubjectRevocationService;
-	// What a caller written before #593 sized the watermark to: the longest
+	// The horizon a grant-unaware caller sizes the watermark to: the longest
 	// of the session, refresh-token and access-token lifetimes, plus skew.
 	const horizonMs = resolveSubjectRevocationHorizonMs(config);
 	return { handle, app, service, events, horizonMs, ...components };
@@ -319,10 +318,9 @@ describe("a subject-wide revocation, from the service to the disclosure", () => 
 	});
 
 	it("ends it through the boundary alone, with no grant pass at all", async () => {
-		// The case the backstop exists for. A caller written before #593 passes
-		// no grant store, so nothing enumerates the subject's grants — and the
-		// disclosure must still stop. A backstop that only works when the
-		// cleanup worked is not a backstop.
+		// The case the backstop exists for. A grant-unaware caller passes no
+		// grant store, so nothing enumerates the subject's grants — and the
+		// disclosure must still stop.
 		const { handle, app, subjectRevocation, subjectSessionIndex, federationGrantStore } =
 			await boot(true);
 
@@ -401,19 +399,17 @@ describe("a subject-wide revocation, from the service to the disclosure", () => 
 });
 
 describe("a revocation outlives the watermark retention sized before #593 (review condition 1)", () => {
-	// A caller written before #593 sized the watermark to the longest-lived
-	// refresh token (`revokeAllForSubject` documents it so), and the adapter
-	// treated an expired watermark as absent. A grant lives longer. So a
-	// boundary that lapsed with that horizon would let a revoked grant come
-	// back — comment 3 on #593 asked for exactly this test, and comment 4
-	// accepted it. Every case here ends in a disclosure AFTER that horizon has
+	// A grant-unaware caller sizes the watermark to the longest-lived
+	// refresh token (`revokeAllForSubject` documents it so). A grant lives
+	// longer, so a boundary that lapsed with that horizon would let a revoked
+	// grant come back. Every case here discloses AFTER that horizon has
 	// elapsed, and the answer has to be the revocation and not an expiry: the
 	// grant's own lifetime is thirty days, well past the clock.
 	afterEach(() => {
 		vi.useRealTimers();
 	});
 
-	/** The pre-#593 horizon, and an hour: the watermark a caller of that time wrote has lapsed. */
+	/** Past the grant-unaware horizon by an hour: that caller's watermark has lapsed. */
 	const elapse = (horizonMs: number): void => {
 		vi.useFakeTimers({ toFake: ["Date"] });
 		vi.setSystemTime(new Date(Date.now() + horizonMs + 60 * MIN));

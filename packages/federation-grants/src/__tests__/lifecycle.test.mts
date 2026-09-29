@@ -15,23 +15,19 @@
  */
 
 /**
- * Why the drain is a component and not a `lifecycleRegistrar` callback
- * (#593, D12).
+ * Why the drain is a component and not a `lifecycleRegistrar` callback (the
+ * federation-grants ADR, D12; README, "Shutting down without losing a rotated
+ * credential"). `AppHandle.dispose()` runs component cleanups before registrar
+ * callbacks, so a registrar drain would run after the store's own cleanup. A
+ * component whose dependency edges point at the store, the revocation boundary
+ * and the sink is cleaned up before all three, because cleanups run in reverse
+ * of build order.
  *
- * `AppHandle.dispose()` runs component cleanups first and registrar callbacks
- * afterwards, so a drain registered with the registrar would run *after* the
- * store's own cleanup — an adapter that closes its client there would pull the
- * connection out from under the rotated refresh token the drain is waiting to
- * see persisted. A component whose dependency edges point at the store, the
- * revocation boundary and the sink is ordered before all three, because
- * cleanups run in reverse of the order the components were built in.
- *
- * Those edges are `optional`, not `requires`: a deployment that installs the
- * package and leaves the feature off must still boot with no store at all. An
- * optional key still produces the ordering edge whenever a *module* fills it,
- * which is the case that has anything to close; a slot filled from
- * `bootstrapComponents` is the host's own value, and the boot planner neither
- * orders nor disposes of those.
+ * The edges are `optional`, not `requires`: a deployment that leaves the
+ * feature off must still boot with no store. An optional key still produces
+ * the ordering edge whenever a *module* fills it, the case that has anything
+ * to close; a slot filled from `bootstrapComponents` is the host's own, and the
+ * boot planner neither orders nor disposes of it.
  */
 
 import type { BootstrapMap, FederationGrantStore } from "@o3co/auth-provider-core";

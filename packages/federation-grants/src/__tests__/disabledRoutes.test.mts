@@ -15,15 +15,13 @@
  */
 
 /**
- * What a deployment that has not enabled offline delegation answers (#593).
- *
- * `enabled = false` is the default, and the promise it makes is that the
- * answer names no feature and reads nothing: a 404 with no description, and no
- * dependency on anything the feature would need. A 404 that
- * carried a description naming the feature would tell an unauthenticated
- * caller that this deployment could do offline delegation if someone flipped a
- * key; a 404 that first parsed a body, authenticated a client or read a store
- * would give it a way to measure that.
+ * What a deployment that has not enabled offline delegation answers (README,
+ * "A disabled deployment names no feature and runs nothing"): a 404 with no
+ * description, and no dependency on anything the feature would need. A
+ * description naming the feature would tell an unauthenticated caller this
+ * deployment could do offline delegation if someone flipped a key; a 404 that
+ * first parsed a body, authenticated a client or read a store would give it a
+ * way to measure that.
  */
 
 import type { BootstrapMap, ClientRepository } from "@o3co/auth-provider-core";
@@ -51,9 +49,9 @@ const makeBoot = (federationGrants?: Record<string, unknown>): BootstrapMap =>
 			...(federationGrants === undefined ? {} : { federationGrants }),
 		},
 		pathResolver: (s: string) => s,
-		// Present so that this file keeps saying what it is about once the
-		// token route authenticates: what it asserts is that the disabled path
-		// never reaches them, not that a deployment may omit them.
+		// Present because the enabled routes authenticate: what this file
+		// asserts is that the disabled path never reaches them, not that a
+		// deployment may omit them.
 		clientRepository: refusingClientRepository,
 		keyStore: createSymmetricKeyStore("test-secret-at-least-32-chars!!!"),
 	}) as unknown as BootstrapMap;

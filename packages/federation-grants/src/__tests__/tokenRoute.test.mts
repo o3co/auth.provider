@@ -15,16 +15,13 @@
  */
 
 /**
- * `POST /oauth/federation-grants/:grantId/token` (#593, D9–D12).
- *
- * The route is a shell: transport, authentication, serialization, correlation
- * and audit, around one call to `retrieveFederationGrantToken`. So what these
- * tests are for is the shell — and, in particular, for the mistake this design
- * expects, which is an "obvious" authorization check placed in FRONT of core.
- * Core has settled precedence: a revoked grant answers 410 whether or not the
- * client may use its connection, and a cached token is served even when the
- * grant carries an ineligibility marker. A check here changes both, and every
- * one of those changes looks like a tightening.
+ * `POST /oauth/federation-grants/:grantId/token`: a shell (transport,
+ * authentication, serialization, correlation, audit) around one call to
+ * `retrieveFederationGrantToken`. The mistake these tests guard against is an
+ * "obvious" authorization check in FRONT of core. Core settles precedence: a
+ * revoked grant answers 410 whether or not the client may use its connection,
+ * and a cached token is served even when the grant carries an ineligibility
+ * marker. A check here changes both, and each change looks like a tightening.
  */
 
 import request from "supertest";
@@ -107,7 +104,7 @@ describe("the token route — a disclosed token", () => {
 					tokenType: "Bearer",
 					// Obtained 60 seconds ago of a 100-second lifetime: past half
 					// spent, which is the bound core puts on how often a client
-					// can make it ask the upstream (D5) — before that, `min_ttl`
+					// can make it ask the upstream — before that, `min_ttl`
 					// buys a rotation per request and nothing else.
 					obtainedAt: new Date(h.world.now.getTime() - 60_000),
 					issuedLifetime: 100,
@@ -475,10 +472,9 @@ describe("the token route — what it refuses before core", () => {
 
 describe("the token route — denials decided before the handler", () => {
 	it("audits an authentication failure, without naming the client it refused", async () => {
-		// Found by review: these exits terminate inside middleware, so the
-		// handler — which was the only thing emitting a denial — never ran, and
-		// every refused credential and every throttled attempt was outside the
-		// audit trail.
+		// These exits terminate inside middleware, where the handler never
+		// runs; refused credentials and throttled attempts must still reach
+		// the audit trail.
 		const h = harness();
 		await h.seed();
 
@@ -561,8 +557,8 @@ describe("the token route — denials decided before the handler", () => {
 describe("the token route — how a failure is carried", () => {
 	it("answers 503 storage when the revocation boundary cannot be read", async () => {
 		// Failing closed: without the boundary there is no way to know the
-		// subject's grants were not revoked, and D13 says an unknown answer is
-		// not "no revocation recorded".
+		// subject's grants were not revoked, and an unknown answer is not
+		// "no revocation recorded".
 		const h = harness();
 		await h.seed();
 		h.world.boundary = new Error("boundary is down");
