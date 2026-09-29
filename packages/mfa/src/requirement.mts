@@ -21,9 +21,11 @@
  * reached through `sessionRequirements.mfa` and nothing else.
  *
  * - **`reach`** is the union of the enabled factors' `amrValues`, and `mfa`
- *   when one of them `addsMfa`, read from `mfaFactorResolver` each time it
- *   is asked: boot reads it once, after every factor registered, and refuses
- *   it unless it equals what core recomputes from the same factors (D7).
+ *   when one of them `addsMfa`, read from `mfaFactorResolver` at its first
+ *   read and kept: boot reads it once, after every factor registered, refuses
+ *   it unless it equals what core recomputes from the same factors (D7), and
+ *   merges with that snapshot — which the requirement's own verdicts read
+ *   too, so the two never disagree.
  * - **`stepUpPage`** is the page it is given (`endpoints.mfa.url`);
  *   **`remediations`** `mfa.step_up`, the step-up route; **`hintKeys`**
  *   `enrollable` and `email_proof`, what a first binding's answer carries.
@@ -117,6 +119,17 @@ export function createMfaRequirement(options: MfaRequirementOptions): SessionReq
 	const { mode, factors, factorStore, transactions, stepUpPage } = options;
 
 	/**
+	 * The reach of the first read — boot's, at the end of the name-keyed pass,
+	 * after every factor registered — kept: core seals that read and merges
+	 * with it at every request, so the requirement's own verdicts read it too.
+	 */
+	let reachRead: ReadonlySet<string> | undefined;
+	const reach = (): ReadonlySet<string> => {
+		reachRead ??= reachOf(factors);
+		return reachRead;
+	};
+
+	/**
 	 * A token, judged on its own `amr` (O3; D6's token rows) — the record read
 	 * beside it is only the live view: a federation's is met; one carrying a
 	 * factor's own second-factor value is met, whatever its primary — the
@@ -145,7 +158,7 @@ export function createMfaRequirement(options: MfaRequirementOptions): SessionReq
 		if (recorded?.primary === FEDERATED_AMR) return MET;
 		if (recorded?.primary !== PASSWORD_AMR) return REAUTHENTICATE;
 		if (recorded.mfaAt !== undefined) return MET;
-		return reachOf(factors).size > 0 ? STEP_UP : UNMET;
+		return reach().size > 0 ? STEP_UP : UNMET;
 	};
 
 	/** The interruption that opens the login's transaction with `interruption`'s answer. */
@@ -162,7 +175,7 @@ export function createMfaRequirement(options: MfaRequirementOptions): SessionReq
 	return {
 		name: MFA_REQUIREMENT_NAME,
 		get reach() {
-			return reachOf(factors);
+			return reach();
 		},
 		stepUpPage,
 		remediations: [MFA_STEP_UP_REMEDIATION],
