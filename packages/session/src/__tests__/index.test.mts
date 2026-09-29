@@ -66,6 +66,16 @@ describe("package public surface (@o3co/auth-provider-session)", () => {
 		expect(typeof mod.establishSession).toBe("function");
 	});
 
+	it("exports what a composition needs to provide the csrfGuard and loginEntry slots without sessionModule (#728)", async () => {
+		// device-grant and federation-grants require these slots once enabled; a
+		// composition with a login page of its own and no sessionModule builds
+		// them with the same functions the module does.
+		const mod = (await import("#/index.mjs")) as Record<string, unknown>;
+		for (const name of ["createSessionCsrfGuard", "createLoginEntry", "loginEntryFromConfig"]) {
+			expect(typeof mod[name], name).toBe("function");
+		}
+	});
+
 	it("exports extractFederationSection as a runtime helper", async () => {
 		const mod = await import("#/index.mjs");
 		expect(typeof (mod as { extractFederationSection?: unknown }).extractFederationSection).toBe(
