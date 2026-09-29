@@ -29,7 +29,7 @@
  * unless it is on `TODAY`: the names that predate the rule, which the move
  * pull requests rename. That list may only shrink, and two checks hold it
  * there: an entry that no longer holds fails until it is removed, and the
- * list's length has a ceiling, `TODAY_CEILING`, that a name added to it
+ * list's length has a ceiling, `CEILING`, that a name added to it
  * breaks — each move pull request lowers the ceiling by the names it renames.
  */
 
@@ -48,7 +48,7 @@ const TEMPLATE_CONFIG = fileURLToPath(
  * How long `TODAY` may be: its length today. A move pull request that renames
  * names lowers it by as many; nothing raises it.
  */
-const TODAY_CEILING = 61;
+const CEILING = 61;
 
 /**
  * The names that predate the rule, as `<layer>: <VAR> at <path>` — `<layer>`
@@ -236,14 +236,43 @@ describe("an environment variable is named after the path it sets (#728 B9)", ()
 	});
 
 	it("names every variable after its path, but for the names that predate the rule", () => {
-		expect(MISNAMED.filter((entry) => !TODAY.includes(entry))).toEqual([]);
+		expect(namingProblems(MISNAMED)).toEqual([]);
 	});
 
-	it("keeps no name on the list that is now named after its path: the list only shrinks", () => {
-		expect(TODAY.filter((entry) => !MISNAMED.includes(entry))).toEqual([]);
+	it("holds the ceiling at the number misnamed today: a move pull request lowers it by the names it renames", () => {
+		expect(MISNAMED.length).toBe(CEILING);
 	});
 
-	it("adds no name to the list: its length stays under the ceiling the move pull requests lower", () => {
-		expect(TODAY.length).toBeLessThanOrEqual(TODAY_CEILING);
+	describe("probes: what a change that renames names may do", () => {
+		const [renamed] = MISNAMED as [string, ...string[]];
+		const renaming = MISNAMED.filter((entry) => entry !== renamed);
+
+		it("may rename a legacy name, lowering the ceiling, and leave the list alone", () => {
+			expect(namingProblems(renaming, CEILING - 1)).toEqual([]);
+		});
+
+		it("may not swap: rename a legacy name and misname a new variable", () => {
+			const swapped = [...renaming, "core: NEW_VARIABLE at oauth.newPath"];
+			expect(namingProblems(swapped)).not.toEqual([]);
+			expect(namingProblems(swapped, CEILING - 1)).not.toEqual([]);
+		});
 	});
 });
+
+/**
+ * What the guard finds wrong with `misnamed` — every variable at a path it is
+ * not the upper-snake-case form of — under `ceiling`.
+ */
+function namingProblems(misnamed: readonly string[], ceiling = CEILING): string[] {
+	return [
+		...misnamed
+			.filter((entry) => !TODAY.includes(entry))
+			.map((entry) => `${entry}: not named after its path`),
+		...TODAY.filter((entry) => !misnamed.includes(entry)).map(
+			(entry) => `${entry}: on the list, but named after its path now`,
+		),
+		...(TODAY.length > ceiling
+			? [`the list holds ${TODAY.length}; the ceiling is ${ceiling}`]
+			: []),
+	];
+}
