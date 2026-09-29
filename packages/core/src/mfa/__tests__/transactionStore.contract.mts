@@ -570,6 +570,20 @@ export function runMfaTransactionStoreContract(
 			expect(await store.get("gone")).toBeNull();
 		});
 
+		it("refuses, with a RangeError, an update at Number.MAX_SAFE_INTEGER — the next version would be no safe integer — and changes nothing, whatever the stored version; the update that reaches it passes", async () => {
+			const store = await factory();
+			const max = Number.MAX_SAFE_INTEGER;
+			const tx = TX({ version: max - 1 });
+			await store.create(tx);
+			const reached = await store.update("tx-1", max - 1, { sends: 1 });
+			expect(reached).toStrictEqual({ ...tx, sends: 1, version: max });
+			await expect(store.update("tx-1", max, { sends: 2 })).rejects.toThrow(RangeError);
+			expect(await store.get("tx-1")).toStrictEqual(reached);
+			await expect(store.update("gone", max, { sends: 2 })).rejects.toThrow(RangeError);
+			// The version stays usable for what does not move it.
+			expect(await store.consume("tx-1", max)).toStrictEqual(reached);
+		});
+
 		it("lets exactly one of N concurrent updates at one version win", async () => {
 			const store = await factory();
 			await store.create(TX());
