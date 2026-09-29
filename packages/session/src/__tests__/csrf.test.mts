@@ -33,6 +33,7 @@ import {
 	createCsrfGuard,
 	createCsrfIssueHandler,
 	createCsrfProtection,
+	createCsrfProtectionFromConfig,
 	MAX_CSRF_TTL_SECONDS,
 } from "#/csrf.mjs";
 
@@ -219,6 +220,36 @@ describe("csrf — signed double-submit token", () => {
  * through it; this is the guard for the ones that do not (hand-built objects
  * in tests and embedders, which the schema never sees).
  */
+describe("csrf — the signer at construction", () => {
+	const session = { name: "auth.session", secure: true, sameSite: "lax" as const, domain: null };
+
+	it.each([
+		["no signer", {}],
+		["a secret in place of a signer", { secret: "a-session-secret.at-least-32-bytes.ok" }],
+		["a signer without verify", { signer: { sign: SIGNER.sign } }],
+		["a signer without sign", { signer: { verify: SIGNER.verify } }],
+	])("createCsrfProtection refuses %s, naming the signer", (_what, options) => {
+		expect(() => createCsrfProtection(options as never)).toThrow(
+			"csrf: signer is required: a CsrfTokenSigner with sign and verify",
+		);
+	});
+
+	it("createCsrfProtectionFromConfig refuses a call without a signer, naming it", () => {
+		expect(() => createCsrfProtectionFromConfig(session, undefined as never)).toThrow(
+			"csrf: signer is required: a CsrfTokenSigner with sign and verify",
+		);
+		expect(() => createCsrfProtectionFromConfig(session, {} as never)).toThrow(
+			"csrf: signer is required: a CsrfTokenSigner with sign and verify",
+		);
+	});
+
+	it("mints <expiry>.<nonce>.<signature>, the signature the signer answers for <expiry>.<nonce>", () => {
+		const token = createCsrfProtectionFromConfig(session, { signer: SIGNER }).mint();
+		const [expiry, nonce, signature] = token.split(".");
+		expect(SIGNER.verify(`${expiry}.${nonce}`, signature as string)).toBe(true);
+	});
+});
+
 describe("csrf — ttlSeconds validation at construction", () => {
 	it.each([
 		["a decimal", 7200.5],
