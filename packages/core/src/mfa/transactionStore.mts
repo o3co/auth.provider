@@ -419,6 +419,12 @@ export function newMfaTransactionRecord(tx: MfaTransaction): MfaTransaction {
  * side's kind and id are read once, and the ids compared in constant time.
  * The one comparison every use of a transaction makes;
  * {@link getBoundMfaTransaction} reads through it.
+ *
+ * Constant time holds for ids of one length only (`security/timingSafe.mts`'s
+ * contract): the comparison answers early when the lengths differ. For the
+ * session kind the length is public — an express session id is 32 characters,
+ * and the cookie carries it. A kind whose ids vary in length, and whose
+ * length is secret, must compare fixed-length digests instead.
  */
 export function isMfaTransactionBoundTo(
 	tx: Pick<MfaTransaction, "binding">,
@@ -434,9 +440,17 @@ export function isMfaTransactionBoundTo(
  * The transaction `id` names when it is bound to `binding`, the whole binding
  * compared ({@link isMfaTransactionBoundTo}); `null` otherwise. A transaction
  * bound to anything else is answered as an id the store never held, so a
- * mismatch says nothing of what exists (the MFA ADR's D8 and D27). The read
- * every use of a transaction starts with. A store that cannot answer rejects,
- * as its `get` does.
+ * mismatch says nothing of what exists (the MFA ADR's D8 and D27). A store
+ * that cannot answer rejects, as its `get` does.
+ *
+ * - **It comes first.** Every use of a transaction starts with this read, and
+ *   after it calls only operations that carry the version it read (`update`,
+ *   `takeChallenge`, `consume`) — and `reserveAttempt`, which carries none, only
+ *   once the read held: it deletes the transaction past `max`, so called on an
+ *   id alone it would let anyone holding the id destroy the ceremony.
+ * - **It is necessary, not sufficient.** A `step_up` or `enroll` transaction
+ *   upgrades one `UserSession`: the route also compares `tx.sid` with the
+ *   session's `sid`, outside the binding (the MFA ADR's F2 step 2).
  */
 export async function getBoundMfaTransaction(
 	store: Pick<MfaTransactionStore, "get">,

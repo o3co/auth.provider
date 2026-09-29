@@ -21,10 +21,10 @@
  *
  * - **Opened after the regeneration**, bound to the session the login route
  *   regenerated — `binding: { kind: "session", id }` (#742) — so the browser
- *   holding the new cookie is the one that may continue; the record carries the continuation core built — the
- *   primary and what earlier requirements added — never a `user` or
- *   `primary` field of its own, and the primary's subject and `redirectTo`,
- *   which the store holds it to.
+ *   holding the new cookie is the one that may continue; the record carries
+ *   the continuation core built — the primary and what earlier requirements
+ *   added — never a `user` or `primary` field of its own, and the primary's
+ *   subject and `redirectTo`, which the store holds it to.
  * - **Its id is 32 bytes from the CSPRNG, base64url** (D22). It is not a
  *   bearer: every later use compares the whole binding, kind included
  *   (core's `isMfaTransactionBoundTo`).
