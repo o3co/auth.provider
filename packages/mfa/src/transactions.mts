@@ -63,8 +63,14 @@ export type LoginInterruption =
 			readonly error: "mfa_enrollment_required";
 			/** The kinds this user may enroll, in registration order: `hints.enrollable`. */
 			readonly enrollable: readonly string[];
-			/** Whether the account-email proof comes before the binding (D24): `hints.email_proof`. */
-			readonly emailProof: boolean;
+			/**
+			 * Whether the account-email proof comes before the binding (D24):
+			 * `hints.email_proof`. `false` alone until build-order step 9 can
+			 * require one: the transaction records `emailProof: "not_required"`,
+			 * and the answer must not advertise a proof the server does not
+			 * enforce.
+			 */
+			readonly emailProof: false;
 	  };
 
 /** Opens a login's transaction and answers the interruption. */
@@ -109,6 +115,13 @@ export function createLoginTransactions({
 	}
 	return {
 		async open(sessionId, continuation, interruption) {
+			// The type admits `false` alone; held at run time too, before anything
+			// is stored, so no caller can advertise a proof nothing requires.
+			if (interruption.error === "mfa_enrollment_required" && interruption.emailProof !== false) {
+				throw new RangeError(
+					"a first binding's email_proof must be false until the account-email proof can be required (build-order step 9)",
+				);
+			}
 			const id = newTransactionId();
 			const createdAtMs = now();
 			const firstBinding = interruption.error === "mfa_enrollment_required";
