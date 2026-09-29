@@ -1,3 +1,12 @@
+codecov:
+  notify:
+    # CI uploads five reports (core, federation-grants, foundation, oauth,
+    # session) from parallel test shards that finish minutes apart. Without
+    # this, a status could be computed from the first report alone. Change it
+    # with the upload steps and the `test` job's UPLOADED_COVERAGE in
+    # .github/workflows/ci.yml.
+    after_n_builds: 5
+
 coverage:
   status:
     project:

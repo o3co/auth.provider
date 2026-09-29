@@ -75,9 +75,10 @@ Two more things can look like an axis and are not one:
 
 ## Workspace Scripts
 
-- Every workspace under `packages/**`, `templates/**`, and `create-app` **must** define a `test` script.
-- The root `test` script runs `pnpm -r run test` **without** `--if-present` on purpose: if any workspace lacks `test`, CI fails loudly rather than silently skipping it. Do not add `--if-present` here — see issue #88 for the regression this prevents.
-- Coverage is a per-package concern. Only `packages/**` define `test:coverage`. The root `test:coverage` is filtered to `./packages/**` and keeps `--if-present` so that a future package without coverage wiring does not break CI.
+- Every workspace under `packages/**`, `templates/**`, `tools/**`, and `create-app` **must** define a `test` script.
+- The root `test` and `test:coverage` scripts are the local entry points. `test` carries no `--if-present`; do not add one (#88). pnpm's recursive `run` skips a workspace that lacks the script without failing, so the root script alone does not enforce the rule above — CI does.
+- Coverage is a per-package concern. Only `packages/**` define `test:coverage`; a package without coverage wiring is still tested, without a report.
+- CI runs each workspace's suite once, in parallel shards (`.github/scripts/test-shards.sh`), through `.github/scripts/run-workspace-suite.sh`: `test:coverage` when the workspace defines it, `test` otherwise, and a workspace with neither fails the run (`ERR_PNPM_NO_SCRIPT`). A workspace the named shards do not list runs in the `rest` shard, so a new workspace is tested without editing the shard list. The required check is `build-and-test`, which reports the `checks` job and every shard. Do not move CI back to the root `test` script: it would stop failing on a workspace without `test`.
 
 ## Umbrella E2E
 
