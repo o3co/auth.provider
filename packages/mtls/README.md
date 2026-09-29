@@ -354,7 +354,7 @@ The exports are listed in [`src/index.mts`](src/index.mts), whose header also sa
 - the error type and its codes (`MtlsError`, `MtlsErrorCode` — `invalid_certificate`, or `temporarily_unavailable` for `revocation_unavailable`), the outage refusal's cause (`MtlsRevocationUnavailableError`) and its members (`MtlsRevocationSourceError`), and the diagnostic `ClientCertificate` / `CertHeaderDialect` types;
 - the signature-algorithm vocabulary (`SIGNATURE_ALGORITHM_NAMES`, `DEFAULT_SIGNATURE_ALGORITHMS`, `SignatureAlgorithmName`) — the legal values of `full-pki.signature-algorithms`, exported so that an operator's list can be checked against the one the schema enforces.
 
-The header dialect parsers, the narrow-mode chain walker, the PEM↔DER codec and the `full-pki` validator, CRL and OCSP resolvers and guarded fetch are **internal**: each is reached through configuration (`cert-header-dialect`, `mode`, `full-pki.revocation`), not by import. The package's config defaults ship as HOCON in [`config/reference.conf`](config/reference.conf), exported as `@o3co/auth-provider-mtls/reference.conf`.
+The header dialect parsers, the narrow-mode chain walker, the PEM↔DER codec and the `full-pki` validator, CRL and OCSP resolvers and guarded fetch are **internal**: each is reached through configuration (`cert-header-dialect`, `mode`, `full-pki.revocation`), not by import. The package's config defaults ship as HOCON in [`config/reference.conf`](config/reference.conf), exported as `@o3co/auth-provider-mtls/reference.conf`, which `mtlsModule` declares as its section's reference, so core's `moduleReferences(modules)` names it for a composition root that layers what its modules declare (#728).
 
 ## Source layout
 

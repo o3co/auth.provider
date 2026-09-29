@@ -63,6 +63,12 @@ Peer dependencies: `@o3co/auth-provider-core`, `@o3co/auth-provider-oauth`,
 `@o3co/auth-provider-session` and `express@^5.0.0`. The package depends on
 `zod`.
 
+Its defaults ship as HOCON in [`config/reference.conf`](config/reference.conf)
+(exported as `@o3co/auth-provider-device-grant/reference.conf`). Layer it
+between your `application.conf` and core's `reference.conf`; the module
+declares it as its section's reference, so core's `moduleReferences(modules)`
+names it among the files to layer (#728).
+
 ## Quick start
 
 ```hocon
