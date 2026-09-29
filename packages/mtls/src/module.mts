@@ -15,33 +15,15 @@
  */
 
 /**
- * mTLS module manifest — contributes `createMtlsMechanism` to core's
- * `tokenBindingMechanisms` slot (Wave 2 Token-binding Cluster spec §4.7 /
- * Phase 3 spec §11.1).
+ * mTLS module manifest: contributes the RFC 8705 certificate-binding
+ * mechanism to core's `tokenBindingMechanisms` slot, and
+ * `tls_client_certificate_bound_access_tokens` to discovery, both only while
+ * `oauth.mtls.enabled` (off by default in reference.conf). The settings under
+ * `oauth.tokenBinding`, the dispatch policy among them, are core's.
  *
- * Contributions:
- *   - `tokenBindingMechanisms[0]` — the mTLS mechanism, which core composes
- *     into its single `tokenBindingMw` and its protected-resource check.
- *     Returns `null` (skip) when `config.oauth.mtls.enabled !== true`.
- *   - `discoveryMetadata[0]` — `tls_client_certificate_bound_access_tokens`
- *     while enabled; an empty contribution otherwise.
- *
- * DI requires: `config` (reads `config.oauth.mtls`; the settings under
- * `oauth.tokenBinding` — the dispatch policy among them — are core's, read by
- * core's `resolveTokenBindingSettings` alone, #728).
- * DI optional: `logger` (forwarded to `tokenBindingMw` + `createMtlsMechanism`).
- *
- * No `ComponentMap` augmentation is needed for mTLS — unlike DPoP, the
- * mechanism has no consumer-wired dependencies (no replay store).
- *
- * Secure-default-opt-in: `oauth.mtls.enabled = false` in reference.conf.
- * Operators must explicitly set `enabled = true` to activate mTLS. Since
- * issue #280 the same discipline applies to where the certificate comes from:
- * `oauth.mtls.source` defaults to `"tls-layer"`, and the forwarded-header
- * source additionally requires an explicit `oauth.mtls.trusted-proxies`
- * allowlist.
- *
- * Per Wave 2 Phase 3 spec §10 (config) + §11 (module).
+ * Secure defaults: the certificate comes from the TLS layer
+ * (`source = "tls-layer"`), and the forwarded-header source requires an
+ * explicit `trusted-proxies` allowlist.
  */
 
 import { defineModule } from "@o3co/auth-provider-core";
@@ -62,18 +44,10 @@ import {
 // ---------------------------------------------------------------------------
 
 /**
- * Zod schema for the `oauth.mtls` config slice.
- *
- * Keys use kebab-case to match the HOCON reference.conf keys verbatim.
- * HOCON preserves key names exactly; TypeScript accesses them via bracket
- * notation: `config.oauth.mtls["cert-header"]`.
- *
- * NOTE: `oauth.tokenBinding.dispatch-policy` is declared by core's bundled
- * `CoreConfigSchema` since the cross-mechanism dispatch refactor — it
- * applies across ALL installed binding-mechanism modules (DPoP, mTLS, ...).
- * This package no longer redeclares it.
- *
- * Per Wave 2 Phase 3 spec §10.2.
+ * Zod schema for the `oauth.mtls` config slice. Keys are kebab-case to match
+ * reference.conf verbatim (`config.oauth.mtls["cert-header"]`).
+ * `oauth.tokenBinding.dispatch-policy` belongs to core's schema, since it
+ * spans every binding mechanism.
  */
 export const mtlsConfigSchema = z.object({
 	oauth: z.object({
@@ -82,11 +56,10 @@ export const mtlsConfigSchema = z.object({
 				/** When false (default), mtlsModule contributes null — no mTLS middleware mounted. */
 				enabled: z.boolean().default(false),
 				/**
-				 * Where the leaf cert comes from. Defaults to `"tls-layer"`
-				 * (issue #280): RFC 8705 §3 wants the certificate from the
-				 * transport, and a forwarded header only substitutes for it when
-				 * the forwarding hop is authenticated — which `"header"` now
-				 * requires via `trusted-proxies`.
+				 * Where the leaf cert comes from. Defaults to `"tls-layer"`: RFC 8705
+				 * §3 wants the certificate from the transport, and a forwarded header
+				 * substitutes only when the forwarding hop is authenticated
+				 * (`trusted-proxies`).
 				 */
 				source: z.enum(["header", "tls-layer"]).default("tls-layer"),
 				/** Header name carrying the forwarded leaf cert (header source only). */
@@ -104,22 +77,17 @@ export const mtlsConfigSchema = z.object({
 				/**
 				 * Trust posture. `"self-signed"` accepts any well-formed cert;
 				 * `"pki"` runs the narrow chain walk; `"full-pki"` runs RFC 5280
-				 * path validation with revocation (#341). The latter two require
+				 * path validation with revocation. The latter two require
 				 * `trusted-cas`.
 				 */
 				mode: z.enum(["self-signed", "pki", "full-pki"]).default("self-signed"),
 				/** Trust anchors for mode = "pki" / "full-pki". Each entry: literal PEM or "file:<path>". */
 				"trusted-cas": z.array(z.string()).readonly().default([]),
 				/**
-				 * Settings that apply only to `mode = "full-pki"` (#341).
-				 *
-				 * `revocation.mode` and `revocation.on-unavailable` have **no
-				 * defaults**. Both encode a decision about what a deployment does
-				 * when revocation status cannot be obtained, and there is no
-				 * answer that is right for every deployment — so the schema makes
-				 * the operator write one down rather than inheriting one silently.
-				 * This is #363's absence-policy discipline applied to a config
-				 * value: optional to wire, not optional to decide.
+				 * Settings for `mode = "full-pki"` only. `revocation.mode` and
+				 * `revocation.on-unavailable` have no defaults: what to do when
+				 * revocation status cannot be obtained has no universally right
+				 * answer, so the operator must write one down.
 				 */
 				"full-pki": z
 					.object({
@@ -147,10 +115,9 @@ export const mtlsConfigSchema = z.object({
 								 * `"crl"` fetches distribution points, `"ocsp"` asks the
 								 * responders named in `authorityInfoAccess`, `"both"` asks OCSP
 								 * first and falls back to the CRL when the responder cannot
-								 * answer (#431). An `unknown` is an answer (#471): the CRL is
-								 * asked but may only refuse, never clear.
-								 * `"disabled"` is an explicit statement, not an
-								 * omission — see the boot check below.
+								 * answer; an OCSP `unknown` is an answer, which the CRL may only
+								 * turn into a refusal. `"disabled"` is an explicit statement,
+								 * not an omission — see the boot check below.
 								 */
 								mode: z.enum(["crl", "ocsp", "both", "disabled"]),
 								"on-unavailable": z.enum(["reject", "allow"]),
@@ -161,12 +128,10 @@ export const mtlsConfigSchema = z.object({
 								"max-response-bytes": z.number().int().min(1).default(1_048_576),
 								/**
 								 * Refuse an OCSP response that does not echo the request's
-								 * nonce (RFC 6960 §4.4.1). On by default: without the nonce a
-								 * captured `good` answer replays until its `nextUpdate`, which
-								 * is exactly the window a freshly revoked certificate wants.
-								 * RFC 8954 lets a responder omit it; an operator whose CA does
-								 * says so here, knowingly, and freshness then rests on
-								 * `thisUpdate` / `nextUpdate` alone.
+								 * nonce (RFC 6960 §4.4.1). On by default: without it a captured
+								 * `good` replays until its `nextUpdate`. Turn it off only for a
+								 * responder that omits the nonce (RFC 8954); freshness then
+								 * rests on `thisUpdate` / `nextUpdate` alone.
 								 */
 								"ocsp-require-nonce": z.boolean().default(true),
 							})
@@ -191,57 +156,32 @@ export const mtlsConfigSchema = z.object({
 // ---------------------------------------------------------------------------
 
 /**
- * The `oauth.mtls` section as the module declares it (#728): its schema, the
- * package's `config/reference.conf` that holds its defaults, and the path it
- * sits at until it moves under the module's name. Its `configSchema` still
- * declares the same path with the same schema until then, so boot parses the
- * value there twice — the `configSchema` over what core's base made of it,
- * then the section over that, written back at its path — which is idempotent;
- * the `configSchema` goes when the section moves.
+ * The `oauth.mtls` section: its schema, the package's `config/reference.conf`
+ * holding its defaults, and its path. `configSchema` declares the same path
+ * with the same schema until the section moves under the module's name, so
+ * boot parses the value twice (idempotently).
  */
 const MTLS_SECTION_SCHEMA = mtlsConfigSchema.shape.oauth.shape.mtls;
 
 /**
- * Declarative manifest for the mTLS package.
+ * Declarative manifest for the mTLS package. Disabled (the default), the
+ * mechanism factory returns `null` and core leaves it out; enabled, core
+ * composes it with any other binding mechanisms under
+ * `oauth.tokenBinding.dispatch-policy` (see
+ * `packages/core/docs/adr/2026-05-20-token-binding-first-class-abstraction.md`).
  *
- * When `config.oauth.mtls.enabled` is `false` (the secure default), the
- * mechanism factory returns `null` and core's synthesizer filters it out —
- * no mTLS mechanism is included in the composed `tokenBindingMw`. When
- * `enabled` is `true`, the factory returns the configured mTLS mechanism
- * for core to compose alongside any other binding-mechanism modules
- * (DPoP, future) under the unified `oauth.tokenBinding.dispatch-policy`.
+ * Boot refuses:
+ * - `source = "header"` with no `trusted-proxies`: the forwarded header would
+ *   be the credential, mintable by anyone who can reach this process (RFC 8705
+ *   §3 requires the TLS layer or an authenticated proxy);
+ * - `mode = "pki"` or `"full-pki"` with no `trusted-cas`;
+ * - `mode = "full-pki"` without explicit `revocation.mode` and
+ *   `.on-unavailable`, or with a fetching mode and no `allowed-hosts`;
+ * - `mode = "pki"` with `source = "tls-layer"`: the narrow walk takes its
+ *   intermediates from the XFCC `Chain=` parameter.
  *
- * Boot-time fail-loud invariants (Phase 3 spec §11.2, extended by issue #280):
- *
- *   0. `source === "header"` + empty `trusted-proxies` → throw. A forwarded
- *      certificate header is an assertion made by whoever opened the
- *      connection; without an allowlist naming which peers may make it, the
- *      header is the credential and anyone routable to this process can mint
- *      one. RFC 8705 §3 requires the certificate to come from the TLS layer or
- *      from an authenticated trusted proxy — this is what makes the second
- *      arm true.
- *
- *   1. `mode === "pki"` + empty `trusted-cas` → throw. Without trusted CAs,
- *      chain validation cannot proceed. Failing boot directs the operator
- *      straight to the misconfig instead of either silently failing open
- *      (no validation) or failing closed on every request (no audit signal).
- *
- *   2. `mode === "pki"` + `source === "tls-layer"` → throw (Codex Round 1
- *      Important #1 fix). The narrow PKI mode requires the intermediate
- *      chain (XFCC `Chain=` parameter); TLS-layer full-chain extraction is
- *      deferred to a future phase (§1.3). Rejecting at boot avoids the same
- *      silent-fail ambiguity.
- *
- * `createMtlsMechanism` re-enforces both invariants defensively, but the
- * module fires first and produces operator-friendly error messages.
- *
- * Migrated from the `grantMiddleware` contribution slot (Phase 3 Sub-PR 3b)
- * to `tokenBindingMechanisms` (cross-mechanism dispatch refactor, 2026-05-19)
- * so the `DispatchPolicy` can arbitrate cross-module when both DPoP and
- * mTLS are installed.
- *
- * See ADR `packages/core/docs/adr/2026-05-20-token-binding-first-class-abstraction.md`
- * for the cross-mechanism design rationale.
+ * `createMtlsMechanism` re-checks these defensively; the module fails first,
+ * with operator-friendly messages.
  */
 export const mtlsModule = defineModule<"config", "logger", typeof MTLS_SECTION_SCHEMA>({
 	name: "mtls",
@@ -254,26 +194,13 @@ export const mtlsModule = defineModule<"config", "logger", typeof MTLS_SECTION_S
 	requires: ["config"],
 	optional: ["logger"],
 	contributes: {
-		// RFC 8705 §3.3 authorization-server metadata (#283). When enabled, this
-		// module binds the issued access token to the client certificate
-		// (`cnf["x5t#S256"]`), and a client has no other way to discover that the
-		// AS will do so.
-		//
-		// Not gated on `source`: #280 made the certificate come from the TLS layer
-		// by default and put a trusted-proxy allowlist behind the forwarded-header
-		// path, but both paths produce the same confirmation claim on the same
-		// token. The RFC 8705 §3.3 flag describes the TOKEN, not the transport the
-		// certificate arrived over.
-		//
-		// Absent (rather than `false`) when disabled — RFC 8705 §3.3 already
-		// defines omission as `false`, and an omitted field cannot collide with
-		// another contributor's value in core's aggregator.
-		//
-		// This is deliberately the ONLY field contributed: this package implements
-		// RFC 8705 §3 token binding, NOT §2 mTLS client authentication, so
-		// `tls_client_auth` / `self_signed_tls_client_auth` must never appear in
-		// `token_endpoint_auth_methods_supported` — the token endpoint does not
-		// accept a certificate as a client credential.
+		// RFC 8705 §3.3: a client has no other way to learn that access tokens
+		// are bound to its certificate (`cnf["x5t#S256"]`). Not gated on
+		// `source`: the flag describes the token, not the transport. Omitted
+		// rather than `false` when disabled — omission already means `false`,
+		// and cannot collide in core's aggregator. The only field contributed:
+		// this package implements §3 token binding, not §2 client
+		// authentication, so `tls_client_auth` must never be advertised.
 		discoveryMetadata: [
 			(deps) => {
 				const mtls = (deps.config as { oauth?: { mtls?: { enabled?: unknown } } }).oauth?.mtls;
@@ -321,12 +248,10 @@ export const mtlsModule = defineModule<"config", "logger", typeof MTLS_SECTION_S
 				const cfg = typedConfig.oauth.mtls;
 
 				// --- Boot-time fail-loud check 0: header source requires an
-				// explicit trusted-proxy allowlist (issue #280). ---
+				// explicit trusted-proxy allowlist. ---
 				//
-				// Without it the forwarded header IS the credential: any client
-				// that can open a connection to this process can assert any
-				// certificate. Fail boot rather than run a deployment whose mTLS
-				// binding proves nothing.
+				// Without it the forwarded header IS the credential: anyone who can
+				// connect to this process can assert any certificate.
 				if (cfg.source === "header" && (cfg["trusted-proxies"]?.length ?? 0) === 0) {
 					throw new Error(
 						'mtlsModule: config.oauth.mtls.source = "header" requires a non-empty ' +
@@ -345,14 +270,11 @@ export const mtlsModule = defineModule<"config", "logger", typeof MTLS_SECTION_S
 					);
 				}
 
-				// --- Boot-time fail-loud checks for full-pki (#341). ---
+				// --- Boot-time fail-loud checks for full-pki. ---
 				//
-				// The two revocation settings have no defaults, and this is where
-				// that shows up. "The CRL endpoint is unreachable" and "the
-				// certificate is not revoked" are different facts, and a library
-				// that quietly picks which one a deployment acts on picks wrong
-				// for half of them — invisibly, and only during the outage that
-				// makes it matter.
+				// The revocation settings have no defaults: "the CRL endpoint is
+				// unreachable" and "the certificate is not revoked" are different
+				// facts, and only the operator can decide which one to act on.
 				if (cfg.mode === "full-pki") {
 					const fullPki = cfg["full-pki"];
 					if (fullPki?.revocation === undefined) {
@@ -370,9 +292,8 @@ export const mtlsModule = defineModule<"config", "logger", typeof MTLS_SECTION_S
 						fullPki.revocation.mode !== "disabled" &&
 						fullPki.revocation["allowed-hosts"].length === 0
 					) {
-						// One rule for every fetching mode (#431): an OCSP responder URL
-						// is a destination inside a certificate exactly as a CRL
-						// distribution point is, so the same second layer applies.
+						// An OCSP responder URL is a destination inside a certificate
+						// exactly as a CRL distribution point is: the same layer applies.
 						throw new Error(
 							`mtlsModule: oauth.mtls.full-pki.revocation.mode = "${fullPki.revocation.mode}" requires a ` +
 								"non-empty oauth.mtls.full-pki.revocation.allowed-hosts. A CRL " +
@@ -387,10 +308,9 @@ export const mtlsModule = defineModule<"config", "logger", typeof MTLS_SECTION_S
 
 				// --- Boot-time fail-loud check 2: narrow PKI + tls-layer is not supported. ---
 				//
-				// Unchanged for `mode = "pki"`, whose walk still takes its
-				// intermediates from the XFCC `Chain=` parameter. `full-pki` reads
-				// the chain from the TLS session (`tlsChain.mts`), so it is not
-				// subject to this restriction.
+				// `mode = "pki"` takes its intermediates from the XFCC `Chain=`
+				// parameter; `full-pki` reads the chain from the TLS session
+				// (`tlsChain.mts`) and is not restricted.
 				if (cfg.mode === "pki" && cfg.source === "tls-layer") {
 					throw new Error(
 						'mtlsModule: config.oauth.mtls.mode = "pki" with source = "tls-layer" is not supported in Phase 3. ' +

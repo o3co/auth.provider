@@ -16,150 +16,48 @@
 
 /**
  * OCSP (RFC 6960) status lookup, verification and caching for
- * `mode = "full-pki"` — the item #341 left open, closed by #431.
+ * `mode = "full-pki"`. `pkijs` only encodes the request and decodes the
+ * response; asking the responder (a POST under `fetchGuard.mts`), verifying
+ * who signed the answer, matching the nonce, judging freshness and caching
+ * happen here.
  *
- * `pkijs` can encode an `OCSPRequest` and decode an `OCSPResponse`; it does
- * not go and ask a responder, and what it offers for judging the answer is
- * not used here. Everything between "this certificate names a responder" and
- * "here is a status that responder actually vouched for" lives in this file:
- * reading `authorityInfoAccess`, building the request, POSTing it under the
- * guards in `fetchGuard.mts`, **verifying who signed the answer**, matching
- * the nonce, judging freshness, and caching so a busy token endpoint does not
- * ask per request.
+ * Always a responder fetch: Node exposes no stapled response for a client
+ * certificate, so a certificate demanding must-staple (RFC 7633) is refused
+ * by `checkMustStaple`.
  *
- * ### Responder fetch only
+ * The answer is verified here, not by pkijs: `BasicOCSPResponse.verify`
+ * ignores `id-kp-OCSPSigning` (any certificate the CA issued could vouch for
+ * itself), and `getCertificateStatus` answers `unknown` for a response about
+ * another certificate. Per RFC 6960 §4.2.2.2 a response is believed only when
+ * signed by the issuing CA, or by a certificate that CA issued which carries
+ * `id-kp-OCSPSigning`, is within its validity, has no unprocessed critical
+ * extension, and meets the path's algorithm policy. A delegated responder
+ * without `id-pkix-ocsp-nocheck` (§4.2.2.2.1) is itself checked through
+ * `responderRevocation` (the CRL arm under `mode = "both"`) on every use,
+ * cache hits included; with no source to check it, the answer is taken and
+ * flagged `responderUnchecked` — the local-policy deviation the README states.
  *
- * #341 assumed a stapled response would be the cheap path under the
- * `tls-layer` source. It is not available: `status_request` stapling covers
- * the *server's* certificate, and Node exposes no stapled response for a
- * **client** certificate on the server side. So this arm always asks the
- * responder, with the same two layers CRL fetching has — path validation
- * first, then the host allowlist — because a responder URL is a destination
- * chosen by whoever minted the certificate, exactly as a distribution point
- * is. A certificate that carries OCSP must-staple (RFC 7633) is refused for
- * the same reason, by `checkMustStaple` below: its own requirement cannot be
- * met here, and "unstapled" is not what it asked for.
- *
- * ### Why the answer is verified here and not by pkijs
- *
- * `BasicOCSPResponse.verify` locates the signer among the attached
- * certificates, builds a chain to whatever `trustedCerts` it is given, and
- * checks the signature. It does not check `id-kp-OCSPSigning`, so any
- * certificate the CA ever issued — a client certificate, say — could sign a
- * "good" for itself; and `getCertificateStatus` answers `unknown` for a
- * response that is not about the certificate at all, which is the same
- * answer as a responder that genuinely does not know it. Both are the wrong
- * shape for a decision whose whole point is that "the responder did not
- * vouch for this" and "the responder said good" must never coincide. The
- * rules of RFC 6960 §4.2.2.2 are therefore applied directly: a response is
- * believed only when signed by the issuing CA itself, or by a responder
- * certificate that CA issued which carries `id-kp-OCSPSigning`, is within
- * its validity period, and carries no critical extension this validator
- * does not process. `id-pkix-ocsp-nocheck` (§4.2.2.2.1) is honoured: a
- * responder certificate that carries it is not checked for revocation. One
- * that lacks it is (#468) — through `responderRevocation`, which
- * `validate.mts` wires to the CRL arm under `mode = "both"`, the one
- * source the responder cannot answer for itself; a listed responder is
- * `responder_revoked`, a CRL that could not be had is
- * `responder_status_unavailable`. A responder certificate naming neither
- * `nocheck` nor a CRL — the CA specified no method, §4.2.2.2.1's third
- * option — and every case under `mode = "ocsp"`, where there is no
- * independent source, take the answer and report it as
- * `responderUnchecked` for the caller to log: the deviation the section
- * leaves to local policy, and stated in the README.
- *
- * ### The algorithm policy applies to the answer too (#470)
- *
- * pkijs verifies `sha1WithRSAEncryption` and `ecdsa-with-SHA1` as readily
- * as it verifies SHA-256, so a SHA-1-signed "good" was believed about a
- * certificate that a SHA-1 signature would have refused on the path. The
- * policy `validate.mts` holds the path to is applied here to the two things
- * an answer introduces that the path pass never saw: the response's own
- * `signatureAlgorithm`, checked on the bytes' shape before the signer is
- * even identified, and — for a delegated responder — the responder
- * certificate, held to the full policy (signature algorithm and RSA modulus)
- * once the checks above have established it is this CA's delegate, so that
- * a stranger's certificate is still refused as *not issued*, whatever it was
- * signed with. Either is `algorithm_not_permitted`, and is remembered per
- * certificate for the negative window like `unsupported_critical_extension`,
- * not exempted like `bad_signature`: the decision is on an OID or a key
- * size, not on whether a signature verifies, so an injected response can
- * pin at most a bounded refusal (an injected `unparseable` already can), and
- * the algorithm is a property of the responder's own material, identical on
- * every request until the CA changes it. Per certificate rather than per
- * responder because a responder may sign with more than one key during a
- * rollover, and the answer is remembered at the granularity it was given —
- * as a stale or `unknown` answer is. The CA's own key, when the CA signs the
- * response itself, is on the validated path and was judged there.
- *
- * ### The CertID hash
- *
- * The `CertID` names the certificate by a hash of its issuer's name and key
- * (§4.1.1). SHA-1 is used for it: this is a lookup identifier the responder
- * uses to find a record, not a signature, and responders universally answer
- * it where a SHA-256 `CertID` is often answered `unauthorized`. Nothing
- * about it touches the algorithm policy in `algorithms.mts`, which governs
- * what may *sign* — and a response identifying the certificate by another
- * hash is matched by recomputing, not refused on the OID.
- *
- * ### The nonce
- *
- * Every request carries a 16-byte nonce (§4.4.1; RFC 8954 bounds it to
- * 1..32). A response that echoes a different one is refused and never
- * cached: it is a replay or a broken responder, and either way not this
- * request's answer. A response with no nonce is refused by default — without
- * it, a "good" captured before a revocation replays until its `nextUpdate` —
- * and accepted only when `requireNonce: false` states that the deployment's
- * responder pre-produces answers, in which case the response's own
- * `thisUpdate`/`nextUpdate` window is the only thing binding it in time.
- *
- * ### Freshness
- *
- * `thisUpdate` may lead this process's clock by `OCSP_CLOCK_SKEW_MS`; a
- * `nextUpdate` that has passed is stale with no allowance, as a CRL's is. A
- * response with no `nextUpdate` is, per §4.2.2.1, one whose newer version is
- * "available all the time" — not one that is valid forever — so it is used
- * for `OCSP_UNDATED_RESPONSE_MAX_AGE_MS` from its `thisUpdate` and no longer.
- *
- * ### `unknown` is not `good`
- *
- * §2.2 defines `unknown` as "the responder doesn't know about the certificate
- * being requested". It is reported as unavailable, so that `on-unavailable`
- * applies, rather than read as "not revoked": a responder that lost its
- * database would otherwise un-revoke everything.
- *
- * ### One request per certificate, not one per caller
- *
- * The caching shape is `crl.mts`'s, keyed per certificate rather than per
- * URL because an OCSP answer is about one certificate: concurrent lookups of
- * the same certificate share one in-flight request; a good or revoked answer
- * is kept until its `nextUpdate` or `cache-ttl-seconds`, whichever is
- * sooner; a responder that could not be used is remembered as down for
- * `OCSP_NEGATIVE_CACHE_TTL_MS` (per responder for a transport or
- * responder-level failure, per certificate for an answer that could not be
- * used, `algorithm_not_permitted` included); `bad_signature` and
- * `nonce_mismatch` are never remembered in either direction, for the reason
- * `crl.mts` gives.
- *
- * ### What an unavailability says
- *
- * As in `crl.mts`: a `reason` and a `detail` in this module's own words, and
- * a library error that threw on the way — pkijs parsing the response,
- * WebCrypto checking its signature, the platform fetch — as `cause`, never
- * its text. Summed up over several responders, `reason` and `cause` are the
- * last failure's.
- *
- * An unavailability is marked `outage`, as in `crl.mts`, when the responder
- * did not deliver a usable answer: it could not be fetched for a reason of
- * its own (`isSourceFailure`), it answered with bytes that are not a response
- * or a status (`unparseable`), it refused to answer (`responder_error`), or
- * its answer is out of date (`stale`) — or a delegated responder's own status
- * could not be read for such a reason (`responder_status_unavailable`). Each
- * is a fault of the responder or of this server's configuration, never a
- * verdict on the certificate. `tryLater` and `internalError` clear on retry;
- * `malformedRequest`, `sigRequired` and `unauthorized` need an operator — the
- * responder refuses what this server sends. A lookup over several responders
- * is an outage only when every one of them was.
+ * - As in `crl.mts`, shape checks (the matching `CertID`, critical
+ *   extensions, the response's signature algorithm — pkijs accepts SHA-1)
+ *   run before the signature, can only refuse, and so are remembered.
+ * - The `CertID` hash is SHA-1 (§4.1.1): a lookup key, not a signature, and
+ *   the one responders reliably answer. Another hash in a response is matched
+ *   by recomputing.
+ * - Every request carries a 16-byte nonce (§4.4.1, RFC 8954). A different
+ *   echo is refused; a missing one too unless `requireNonce: false` (a
+ *   pre-producing responder), since otherwise a "good" captured before a
+ *   revocation replays until its `nextUpdate`.
+ * - `unknown` (§2.2) is unavailable, not good: a responder that lost its
+ *   database must not un-revoke everything.
+ * - Caching is keyed per certificate: concurrent lookups share a request;
+ *   answers live until `nextUpdate` or `cache-ttl-seconds`; failures are
+ *   remembered for `OCSP_NEGATIVE_CACHE_TTL_MS` per responder (transport or
+ *   responder-level) or per certificate (an unusable answer); `bad_signature`
+ *   and `nonce_mismatch` are never remembered.
+ * - Unavailabilities carry `reason`, `detail` and `cause` as in `crl.mts`,
+ *   and are an `outage` when the responder did not answer usefully
+ *   (`isSourceFailure`, `unparseable`, `responder_error`, `stale`, or a
+ *   delegated responder's status unreadable for such a reason).
  */
 
 import { createHash, randomBytes, X509Certificate } from "node:crypto";
@@ -235,8 +133,7 @@ export const OCSP_UNDATED_RESPONSE_MAX_AGE_MS = 10 * 60_000;
 /**
  * Why a certificate's status could not be determined by OCSP. Values are
  * stable — audit logs read them. `algorithm_not_permitted` is a response, or
- * a delegated responder's certificate, outside the algorithm policy the path
- * is held to (#470).
+ * a delegated responder's certificate, outside the path's algorithm policy.
  */
 export type OcspUnavailableReason =
 	| "no_responder"
@@ -252,7 +149,7 @@ export type OcspUnavailableReason =
 	| "not_yet_valid"
 	| "stale"
 	| "unknown"
-	// #468: a delegated responder without `nocheck` — listed on the CA's CRL, or uncheckable.
+	// A delegated responder without `nocheck` — listed on the CA's CRL, or uncheckable.
 	| "responder_revoked"
 	| "responder_status_unavailable";
 
@@ -272,10 +169,10 @@ export type OcspLookup =
 			readonly responder: string;
 			readonly status: OcspCertificateStatus;
 			/**
-			 * #468: the answer came from a delegated responder whose certificate
-			 * lacks `id-pkix-ocsp-nocheck`, and no `responderRevocation` source was
-			 * available to check it — RFC 6960 §4.2.2.2.1's local-policy deviation,
-			 * for the caller to log.
+			 * The answer came from a delegated responder whose certificate lacks
+			 * `id-pkix-ocsp-nocheck`, and no `responderRevocation` source could
+			 * check it — RFC 6960 §4.2.2.2.1's local-policy deviation, for the
+			 * caller to log.
 			 */
 			readonly responderUnchecked?: boolean;
 	  }
@@ -336,15 +233,12 @@ export const ocspResponders = (certificate: pkijs.Certificate): OcspResponders =
 };
 
 /**
- * RFC 7633: a certificate carrying the TLS feature extension with
- * `status_request` (or `status_request_v2`) requires a stapled OCSP response
- * in the handshake it is used in. Node presents no stapled response for a
- * client certificate, so the requirement cannot be met by this server, and
- * the certificate is refused — under every revocation mode, `disabled`
- * included, because the demand is the certificate's own, not the
- * operator's. Other feature numbers name nothing this validator can judge
- * and are ignored; a value that cannot be decoded is a demand that cannot
- * be read, and is refused whether or not the extension is critical.
+ * RFC 7633: a certificate whose TLS feature extension names `status_request`
+ * (or `status_request_v2`) demands a stapled OCSP response, which this server
+ * cannot present for a client certificate. It is refused under every
+ * revocation mode, `disabled` included, since the demand is the
+ * certificate's own. Other feature numbers are ignored; an undecodable value
+ * is refused whether or not the extension is critical.
  */
 export const checkMustStaple = (leaf: pkijs.Certificate): CriticalExtensionCheck => {
 	const extension = leaf.extensions?.find((ext) => ext.extnID === OID_TLS_FEATURE);
@@ -446,7 +340,7 @@ type CacheEntry =
 			readonly status: OcspCertificateStatus;
 			/** Epoch millis after which the responder must be asked again. */
 			readonly expiresAt: number;
-			/** #550: the delegated responder to re-check before this entry is believed. */
+			/** The delegated responder to re-check before this entry is believed. */
 			readonly delegate?: pkijs.Certificate;
 	  }
 	| {
@@ -465,13 +359,12 @@ type Answer =
 			readonly ok: true;
 			readonly status: OcspCertificateStatus;
 			readonly expiresAt: number;
-			/** #468: a delegated responder without `nocheck`, taken because no source could check it. */
+			/** A delegated responder without `nocheck`, taken because no source could check it. */
 			readonly responderUnchecked?: boolean;
 			/**
-			 * #550: the delegated responder this answer depended on, when its
-			 * certificate lacks `nocheck`. Remembered with the cached status so a
-			 * later hit re-checks it: the cache outlives the check that admitted
-			 * it, and a responder revoked in between must stop counting.
+			 * The delegated responder this answer depended on, when its certificate
+			 * lacks `nocheck`. Cached with the status so every hit re-checks it: a
+			 * responder revoked after the answer must stop counting.
 			 */
 			readonly delegate?: pkijs.Certificate;
 	  }
@@ -506,16 +399,9 @@ export interface OcspResolverOptions {
 	/**
 	 * The signature-algorithm and key-size policy the validated path is held
 	 * to, applied to the response's signature and to a delegated responder's
-	 * certificate as well (#470). See the module header.
-	 *
-	 * Optional, defaulting to `DEFAULT_ALGORITHM_POLICY` — the same strict
-	 * policy the config resolves to when the operator sets nothing. This is
-	 * a security fix on a public interface, so a consumer who constructs a
-	 * resolver directly and upgrades without touching their code must *get*
-	 * the fix rather than opt into it. The default is fail-closed: omitting
-	 * the field can only make the check stricter, never weaker, so no
-	 * existing caller is silently left unprotected. `validate.mts` passes
-	 * the operator's configured policy explicitly.
+	 * certificate too. Defaults to `DEFAULT_ALGORITHM_POLICY`, the strict
+	 * policy, so omitting it can only make the check stricter; `validate.mts`
+	 * passes the configured policy.
 	 */
 	readonly algorithms?: AlgorithmPolicy;
 	/**
@@ -526,16 +412,16 @@ export interface OcspResolverOptions {
 	/** Bound on cache size. Entries are per certificate, so the default is roomier than the CRL cache's. */
 	readonly maxCacheEntries?: number;
 	/**
-	 * #468: how a delegated responder's own certificate is checked for
-	 * revocation when it lacks `id-pkix-ocsp-nocheck` (RFC 6960 §4.2.2.2.1).
-	 * `validate.mts` wires the CRL arm under `mode = "both"`. Absent, or
-	 * answering `unspecified`, such a responder's answer is taken and flagged
+	 * How a delegated responder's own certificate is checked for revocation
+	 * when it lacks `id-pkix-ocsp-nocheck` (RFC 6960 §4.2.2.2.1); `validate.mts`
+	 * wires the CRL arm under `mode = "both"`. Absent, or answering
+	 * `unspecified`, such a responder's answer is taken and flagged
 	 * `responderUnchecked`.
 	 */
 	readonly responderRevocation?: ResponderRevocationCheck;
 }
 
-/** What {@link ResponderRevocationCheck} learned about a delegated responder's certificate (#468). */
+/** What {@link ResponderRevocationCheck} learned about a delegated responder's certificate. */
 export type ResponderRevocationOutcome =
 	| { readonly kind: "determined" }
 	/** The CA named no source for the responder's certificate (§4.2.2.2.1, third option): local policy decides, which is to take the answer and report `responderUnchecked`. */
@@ -818,11 +704,10 @@ const checkDelegatedResponder = async (
 	}
 
 	// The responder certificate is the one key an answer introduces that the
-	// path pass never saw, so it is held to the policy the path was —
-	// signature algorithm and RSA modulus alike. Last, once the checks above
-	// have established it really is this CA's delegate: a stranger's
-	// certificate is refused as not issued, whatever it was signed with, and
-	// only the CA's own material is remembered under this reason (#470).
+	// path pass never saw, so it is held to the path's policy (signature
+	// algorithm and RSA modulus). Checked last, once it is established as this
+	// CA's delegate: a stranger's certificate is refused as not issued, and only
+	// the CA's own material is remembered under this reason.
 	const algorithm = checkAlgorithmPolicy(
 		toNode(candidate),
 		candidate.signatureAlgorithm.algorithmId,
@@ -836,18 +721,15 @@ const checkDelegatedResponder = async (
 		};
 	}
 
-	// `id-pkix-ocsp-nocheck` (§4.2.2.2.1) is honoured by construction: the
-	// responder certificate's own revocation status is not looked up either
-	// way. See the module header.
+	// The responder certificate's own revocation status is the caller's
+	// (`checkResponder`), skipped only for one carrying `id-pkix-ocsp-nocheck`.
 	return { ok: true };
 };
 
 /**
  * Whether a delegated responder's certificate carries `id-pkix-ocsp-nocheck`
- * (#468) — the extension, and the DER `NULL` RFC 6960 §4.2.2.2.1 specifies
- * as its value. Anything else is a broken or forged certificate, and buys
- * no exemption: the extension is the CA saying "do not check this one",
- * and a value it did not write is not that statement (#550).
+ * with the DER `NULL` value RFC 6960 §4.2.2.2.1 specifies. Any other value
+ * buys no exemption: it is not a statement the CA wrote.
  */
 const hasNoCheck = (certificate: pkijs.Certificate): boolean => {
 	const extension = certificate.extensions?.find((ext) => ext.extnID === OID_OCSP_NOCHECK);
@@ -1061,11 +943,10 @@ export const createOcspResolver = (options: OcspResolverOptions): OcspResolver =
 			return { ok: false, reason: "unsupported_critical_extension", detail: critical.detail };
 		}
 
-		// The response's own signature algorithm, still on shape alone: the
-		// OID it names is judged before its signer is even identified, and
-		// remembered per certificate like the check above (see the module
-		// header, #470). The responder certificate, when there is one, is
-		// held to the full policy inside `identifySigner`.
+		// The response's own signature algorithm, still on shape alone, judged
+		// before its signer is identified and remembered per certificate (see
+		// the module header). A responder certificate is held to the full
+		// policy inside `identifySigner`.
 		const algorithm = checkSignatureAlgorithm(basic.signatureAlgorithm.algorithmId, algorithms);
 		if (!algorithm.ok) {
 			return {
@@ -1086,8 +967,8 @@ export const createOcspResolver = (options: OcspResolverOptions): OcspResolver =
 				...(signature.cause !== undefined ? { cause: signature.cause } : {}),
 			};
 		}
-		// #468 / #550: the delegated responder's own certificate, checked here
-		// and again whenever this answer is served from the cache.
+		// The delegated responder's own certificate, checked here and again
+		// whenever this answer is served from the cache.
 		const delegate =
 			signer.delegate !== undefined && !hasNoCheck(signer.delegate) ? signer.delegate : undefined;
 		let responderUnchecked = false;
@@ -1142,19 +1023,14 @@ export const createOcspResolver = (options: OcspResolverOptions): OcspResolver =
 		};
 	};
 
-	/** `query`, joining a request for the same certificate that is already in flight. */
 	/**
-	 * A delegated responder's own certificate (#468). RFC 6960 §4.2.2.2.1 lets
-	 * a client skip this only for a responder carrying `id-pkix-ocsp-nocheck`;
-	 * without it the responder is checked through the source the caller wired,
-	 * which is the CA's CRL — the one source a responder cannot answer for
-	 * itself. A revoked responder's `good` is worth nothing: a CA that revokes
-	 * a compromised responder key expects its signatures to stop counting then,
-	 * not at the certificate's notAfter. With no source wired, or none the CA
-	 * named, the answer is taken and the deviation is reported to the caller.
-	 *
-	 * Called when the answer is built and again on every cache hit (#550): the
-	 * cached status outlives the check that admitted it.
+	 * A delegated responder's own certificate. RFC 6960 §4.2.2.2.1 lets a
+	 * client skip this only for a responder carrying `id-pkix-ocsp-nocheck`;
+	 * otherwise it is checked through the source the caller wired — the CA's
+	 * CRL, which the responder cannot answer for itself. A revoked responder's
+	 * `good` is worth nothing. With no source wired, or none the CA named, the
+	 * answer is taken and the deviation reported. Called when the answer is
+	 * built and on every cache hit, since the cached status outlives the check.
 	 */
 	const checkResponder = async (
 		delegate: pkijs.Certificate,
@@ -1193,6 +1069,7 @@ export const createOcspResolver = (options: OcspResolverOptions): OcspResolver =
 		return { ok: true, unchecked: own.kind === "unspecified" };
 	};
 
+	/** `query`, joining a request for the same certificate that is already in flight. */
 	const load = (
 		key: string,
 		url: string,
@@ -1221,10 +1098,9 @@ export const createOcspResolver = (options: OcspResolverOptions): OcspResolver =
 		const statusCacheKey = statusKey(url, issuerId, serial);
 		const known = cache.get(statusCacheKey);
 		if (known?.kind === "status" && known.expiresAt > now.getTime()) {
-			// #550: a cached answer from a delegated responder is only as good as
-			// that responder still is. Re-check it — the source behind the hook
-			// has its own cache, so this is cheap — and drop the entry when it
-			// has been revoked since.
+			// A cached answer from a delegated responder is only as good as that
+			// responder still is: re-check it (the source behind the hook caches,
+			// so this is cheap) and drop the entry if it has been revoked since.
 			if (known.delegate !== undefined) {
 				const verdict = await checkResponder(known.delegate, issuer, now);
 				if (!verdict.ok) {
