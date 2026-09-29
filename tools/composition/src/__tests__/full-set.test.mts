@@ -393,7 +393,7 @@ describe("the configuration createApp is handed reaches every loaded module whol
 		// Boot's parse is plain Zod: a bare boolean or number a module reads,
 		// with core's base not coercing the path first, would refuse `"false"`.
 		const options = await fullSetOptions({ stores: "redis" });
-		const switches = resolveConfig(MULTI_ENV);
+		const switches = resolveConfig(MULTI_ENV, options.reads);
 		const modules = composedModules(options.config ? options.config(switches) : switches, {
 			...options,
 			env: MULTI_ENV,

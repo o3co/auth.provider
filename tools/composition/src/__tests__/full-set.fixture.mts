@@ -764,6 +764,9 @@ export async function fullSetOptions(options: FullSetOptions = {}): Promise<Comp
 	const outage = { once: failAskOnce };
 	return {
 		...compose,
+		// `deviceGrantModule({ config })` decides from phase one whether the
+		// grant exists: read its switch there, as a deployment adding it does.
+		reads: [...(compose.reads ?? []), "oauth.deviceAuthorization.enabled"],
 		config: (resolved) => {
 			const adjusted = options.config ? options.config(resolved) : resolved;
 			const featured = withFeatures(adjusted, features);

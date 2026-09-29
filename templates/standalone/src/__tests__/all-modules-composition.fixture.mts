@@ -202,12 +202,16 @@ export function ownFiles(): string[] {
 
 /**
  * Phase one, as `app.mts` reads it (#728): the switches `buildModules` chooses
- * the modules by, from the composition's own files under `env` over core's
+ * the modules by — and `reads`, what a module added to the composition reads
+ * when it is built — from the composition's own files under `env` over core's
  * `reference.conf`, with the posture on session admission derived from the
  * parsed mode.
  */
-export function resolveConfig(env: Readonly<Record<string, string>>): AppConfig {
-	return withSessionRequirements(readSwitches(ownFiles(), { env }));
+export function resolveConfig(
+	env: Readonly<Record<string, string>>,
+	reads: readonly string[] = [],
+): AppConfig {
+	return withSessionRequirements(readSwitches(ownFiles(), { env, reads }));
 }
 
 // ---------------------------------------------------------------------------
@@ -572,6 +576,11 @@ export type ModuleOrder = typeof AS_LISTED | typeof REVERSED;
 
 export interface ComposeOptions {
 	readonly env?: Readonly<Record<string, string>>;
+	/**
+	 * Paths read before boot beside the template's switches: what a module
+	 * `extraModules` adds reads when it is built (`readSwitches`'s `reads`).
+	 */
+	readonly reads?: readonly string[];
 	/** Modules added after the template's own, before the order and the outage apply. */
 	readonly extraModules?: (config: AppConfig) => readonly Module[];
 	/** Components laid over the boot's, beside the federation config slots. */
@@ -638,7 +647,7 @@ export async function compose(options: ComposeOptions = {}): Promise<Composition
 	const env = options.env ?? SINGLE_ENV;
 	const adjust = (config: AppConfig) => (options.config ? options.config(config) : config);
 	// Phase one: the switches the modules are chosen by.
-	const switches = resolveConfig(env);
+	const switches = resolveConfig(env, options.reads);
 	const config = adjust(switches);
 	const fakes = await sharedUpstreams();
 	const modules = composedModules(config, options);
