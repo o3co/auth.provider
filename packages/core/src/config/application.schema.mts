@@ -2062,10 +2062,9 @@ export const fullSectionsSchema = z.object({
 			// authorization codes. Constrained to a positive integer: a bad
 			// env-var override (`CLIENT_CODE_DEFAULT_EXPIRES_IN=0`, `="-1"`,
 			// non-numeric) fails boot's composed parse (this schema's check,
-			// #728) rather than
-			// silently propagating to a Redis PX call that errors per
-			// request. Mirrored at the module configSchema level + at the
-			// `RedisCodeRepository` constructor for defense in depth.
+			// #728) rather than silently propagating to a Redis PX call that
+			// errors per request. Mirrored at the module configSchema level +
+			// at the `RedisCodeRepository` constructor for defense in depth.
 			// Per Copilot review on PR #122.
 			defaultExpiresIn: z.coerce.number().int().positive().optional(),
 		})
