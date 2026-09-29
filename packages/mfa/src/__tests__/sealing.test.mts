@@ -15,22 +15,16 @@
  */
 
 /**
- * Secrets at rest (the MFA ADR's D11), over core's key-ring envelope:
- *
- * - a factor's data is sealed under the purpose `o3co:mfa:factor` with its
- *   record — subject, factor id, kind, length-prefixed — in the authenticated
- *   data, so data copied to another subject, another id or relabelled as
- *   another kind does not open: `unreadable`;
- * - a ceremony's state (a challenge, a pending enrollment) is sealed with the
- *   transaction id in the authenticated data;
- * - a key that has left the ring is `key_unavailable` — never `unreadable`,
- *   which no key would cure — and opening never throws on what it is handed;
- * - opening under a key that is no longer first says so once per key id
- *   (`mfa_factor_sealed_with_retired_key`), so an operator knows the key is
- *   still needed;
- * - codes compared and never recovered are keyed digests (HMAC-SHA-256)
- *   carrying their key id, bound to the factor's kind, compared in constant
- *   time; a digest whose key left the ring cannot be judged.
+ * Secrets at rest, over core's key-ring envelope. A factor's data is sealed
+ * with its record (subject, factor id, kind, length-prefixed) in the
+ * authenticated data, and a ceremony's state with its transaction id. Codes
+ * compared and never recovered are keyed digests (HMAC-SHA-256) that carry
+ * their key id, are bound to the factor's kind and are compared in constant
+ * time. A key that has left the ring is `key_unavailable`, never `unreadable`,
+ * which no key would cure. Opening under a key that is no longer first says so
+ * once per key id (`mfa_factor_sealed_with_retired_key`), so an operator knows
+ * the key is still needed. See ADR 2026-09-25-multi-factor-authentication,
+ * "Secrets at rest".
  */
 
 import { createHmac, hkdfSync, randomBytes } from "node:crypto";
@@ -71,7 +65,7 @@ const sealingOver = (ring: SealingKeyRing, logger?: Logger) =>
 
 const RECORD = { subject: "u-alice", id: "f-1", kind: "totp" } as const;
 
-/** `parts`, each after its UTF-8 length as a 32-bit big-endian number: D11's record. */
+/** `parts`, each after its UTF-8 length as a 32-bit big-endian number: the record's encoding. */
 const lengthPrefixed = (parts: readonly string[]): Buffer =>
 	Buffer.concat(
 		parts.flatMap((part) => {
@@ -106,7 +100,7 @@ describe("a factor's data, sealed to its record (D11)", () => {
 
 	it("seals under the purpose o3co:mfa:factor, with subject, id and kind length-prefixed as the record", () => {
 		expect(MFA_FACTOR_SEALING_PURPOSE).toBe("o3co:mfa:factor");
-		// Sealed by core's envelope directly, as D11 states the binding: it opens.
+		// Sealed by core's envelope directly, with the binding the ADR states: it opens.
 		const sealed = sealedAsFactorData(JSON.stringify(DATA));
 		expect(sealingOver([K1]).openFactorData(RECORD, sealed)).toMatchObject({
 			state: "ok",

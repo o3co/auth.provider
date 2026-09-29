@@ -15,29 +15,25 @@
  */
 
 /**
- * The MFA configuration this package reads (the MFA ADR's D11, D19, D20,
- * D22): the key ring `mfa.encryptionKeys` and the TOTP factor's
- * `mfa.factors.totp`.
+ * The MFA configuration this package reads: the key ring `mfa.encryptionKeys`
+ * and the TOTP factor's `mfa.factors.totp`. See ADR
+ * 2026-09-25-multi-factor-authentication, "Configuration and defaults".
  *
- * - The MFA module's settings (`readMfaSettings`) read no factor's section:
- *   `mfa.factors.totp` is the TOTP factor's module's alone
- *   (`readMfaTotpSettings`), so a composition without that module is never
- *   refused over it.
+ * - `readMfaSettings` reads no factor's section: `mfa.factors.totp` is the
+ *   TOTP factor's module's alone (`readMfaTotpSettings`), so a composition
+ *   without that module is never refused over it.
  * - The ring is refused empty, with a key that is not canonical base64 of 32
  *   bytes, with a duplicate id (core's sealing rules, under the key it was
- *   read from), and — #473's rule — with the published development sample key
- *   wherever the configuration was selected as production or staging,
- *   `NODE_ENV` says so, or `deployment.mode = "multi"`. No refusal quotes a
- *   key or an id.
+ *   read from), and with the published development sample key wherever the
+ *   configuration was selected as production or staging, `NODE_ENV` says so,
+ *   or `deployment.mode = "multi"`. No refusal quotes a key or an id.
  * - TOTP's parameters are held to their ranges: digits 6-8, period 15-120 s,
- *   window 0-2 (D22 states the window's), SHA1, SHA256 or SHA512; the issuer
- *   defaults to the host `oauth.jwt.issuer` names.
- * - A transaction's life, `mfa.transactionTtlSeconds`, is held to 60-1800
- *   seconds (the step-8 owner decision; the ADR states no bounds), its
- *   attempts, `mfa.maxAttemptsPerTransaction`, to 1-10 (the owner's bound;
- *   the ADR states none), and the subject lock,
- *   `mfa.lockout`, to core's `checkMfaLockoutPolicy` under that key — the
- *   step-3 obligations the MFA module refuses a boot for (D8, D21).
+ *   window 0-2, SHA1, SHA256 or SHA512; the issuer defaults to the host
+ *   `oauth.jwt.issuer` names.
+ * - `mfa.transactionTtlSeconds` is held to 60-1800 seconds and
+ *   `mfa.maxAttemptsPerTransaction` to 1-10 (the ADR states neither bound),
+ *   and the subject lock, `mfa.lockout`, to core's `checkMfaLockoutPolicy`
+ *   under that key: obligations the MFA module refuses a boot for.
  * - The settings say whether the development sample key was accepted, so the
  *   MFA module can say so once at boot.
  */
@@ -62,7 +58,7 @@ const TOTP = {
 	window: 1,
 } as const;
 
-/** D21's lock as D19 defaults it. */
+/** The subject lock as `reference.conf` defaults it. */
 const LOCKOUT = {
 	threshold: 5,
 	baseSeconds: 900,
@@ -74,7 +70,7 @@ const LOCKOUT = {
 	trustedBrowserDays: 30,
 } as const;
 
-/** The transaction's keys (D8, D19, D21), as `reference.conf` defaults them. */
+/** The transaction's keys, as `reference.conf` defaults them. */
 const TRANSACTION = {
 	transactionTtlSeconds: 600,
 	maxAttemptsPerTransaction: 5,

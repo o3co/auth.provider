@@ -15,26 +15,16 @@
  */
 
 /**
- * The `mfa` session requirement (the session-admission ADR's D3, D5, D6, D7;
- * the MFA ADR's F1, F3, D13, D16, O3, and the step-8 owner decisions 1–3):
+ * The `mfa` session requirement: core's contract held by the real requirement
+ * (`fixture: false`), what it declares, its reach (the union of the enabled
+ * factors' `amrValues`, and `mfa` when one of them adds it, read from
+ * `mfaFactorResolver` when asked: what boot recomputes and compares), `admit`
+ * and `admitPrimary`. See ADR 2026-09-28-session-admission and ADR
+ * 2026-09-25-multi-factor-authentication.
  *
- * - it holds core's contract as the real requirement (`fixture: false`);
- * - its `reach` is the union of the enabled factors' `amrValues`, and `mfa`
- *   when one of them adds it, read from `mfaFactorResolver` when asked — what
- *   boot recomputes and compares; its page is the one it is given
- *   (`endpoints.mfa.url`), its one remediation `mfa.step_up`, its hints
- *   `enrollable` and `email_proof`;
- * - `admit` is D6's table: the `use` baseline under `mfa.mode`, O3's three
- *   token rows, `device.lookup` / `device.deny` met on any live session —
- *   and `credential_change` held to the baseline until steps 12 and 14 add
- *   recent MFA (owner decision 1);
- * - `admitPrimary` reads the subject's factors after a password login: zero
- *   records under `optional` establish; zero under `required` interrupt for a
- *   first binding in its final shape, with no witness read (owner decision
- *   2); any record — a counting factor, recovery codes alone, a kind no
- *   longer installed — interrupts for a second factor, never a first
- *   binding (F3); a `list` that cannot answer is thrown, which admission
- *   answers `unavailable`.
+ * `admit`'s table: the `use` baseline under `mfa.mode`, three token rows,
+ * `device.lookup` / `device.deny` met on any live session, and
+ * `credential_change` held to the baseline, with no recent-MFA rule.
  */
 
 import {
@@ -227,7 +217,7 @@ describe("what the requirement declares (D3, D6)", () => {
 });
 
 // ---------------------------------------------------------------------------
-// admit: D6's table
+// admit: the requirement's table
 // ---------------------------------------------------------------------------
 
 const minutesAgo = (minutes: number): Date => new Date(Date.now() - minutes * 60_000);
@@ -263,7 +253,7 @@ const untold = (): UserSession => record(["hwk"], undefined);
 const knownNot = (primary: string, mfaAt?: Date): UserSession =>
 	record(["pwd"], { primary, federation: undefined, upstreamAmr: undefined, mfaAt });
 
-/** What admission hands a requirement about a record read by `carrier` (D2, step 5). */
+/** What admission hands a requirement about a record read by `carrier`. */
 const about = (
 	session: UserSession | null,
 	action: AdmissionAction = ADMISSION_ACTIONS["oauth.authorize"],
@@ -286,7 +276,7 @@ const about = (
 	now: new Date(),
 });
 
-/** What admission hands a requirement about a refresh token (D2, step 5; D9): the token's own amr, whatever the record. */
+/** What admission hands a requirement about a refresh token: the token's own amr, whatever the record. */
 const aboutToken = (
 	amr: readonly string[] | undefined,
 	session: UserSession | null = null,
@@ -418,7 +408,7 @@ describe("admit — D6's table under mfa.mode, with owner decision 1's rows", ()
 			input: about(password(), { name: "device.lookup", grade: "credential_change" }),
 			expected: STEP_UP,
 		},
-		// required · credential_change: the baseline until steps 12 and 14 (owner decision 1).
+		// required · credential_change: the baseline, with no recent-MFA rule.
 		{
 			row: "required · credential_change · pwd without mfaAt → step_up: the baseline",
 			mode: "required",
@@ -437,7 +427,7 @@ describe("admit — D6's table under mfa.mode, with owner decision 1's rows", ()
 			input: about(federated(), ADMISSION_ACTIONS["webauthn.register"]),
 			expected: MET,
 		},
-		// required · use, carrier token (O3): judged on the token's own amr.
+		// required · use, carrier token: judged on the token's own amr.
 		{
 			row: "required · token · pwd and no second-factor value → unmet: a password-only refresh token ends at its next refresh",
 			mode: "required",

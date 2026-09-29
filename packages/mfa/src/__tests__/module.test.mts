@@ -15,23 +15,11 @@
  */
 
 /**
- * `mfaModule` and `mfaModules` through `createApp` (the session-admission
- * ADR's D3, D6, D7; the MFA ADR's D11, D20 and step 3's obligations):
- *
- * - the module requires what its requirement is bound to — `config`, core's
- *   three MFA ports, the user-session store and the requirement resolver —
- *   and reads `auditSink` (under its absence policy) and `logger`;
- * - it registers `sessionRequirements.mfa`, whose reach boot compares with
- *   what the enabled factors reach, and refuses a mismatch;
- * - it keeps, per boot, the object its factory returned — the one core
- *   issued `mfa.step_up` to (step 11's) — and one sealing on the
- *   composition's logger;
- * - it refuses the boot for `mfa.mode = "off"` or unset, for `required` with
- *   no counting factor (`mfa-no-counting-factor`, once the factors have
- *   registered), without a user-session store, for an out-of-range
- *   transaction life or an unusable lock, and without `endpoints.mfa.url`;
- * - it refuses the development sample key outside development, through its
- *   `environment` option, and says once at boot when it accepted it.
+ * `mfaModule` and `mfaModules` through `createApp`: what the module requires
+ * and reads, the requirement it registers, what it keeps per boot, the boots
+ * it refuses and the development sample key; each case's name states its
+ * rule. See ADR 2026-09-28-session-admission and ADR
+ * 2026-09-25-multi-factor-authentication.
  */
 
 import {
