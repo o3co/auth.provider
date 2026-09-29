@@ -32,7 +32,7 @@ const _extractCookies = (res) => (res.headers["set-cookie"] ?? []).join("; ");
 /**
  * The server's own origin, as a browser would report it.
  *
- * Since #272 `POST /session/login` and `POST /session/logout` reject a request
+ * `POST /session/login` and `POST /session/logout` reject a request
  * that carries neither a same-origin `Origin`/`Referer` nor a valid
  * double-submit CSRF token. A browser sets `Origin` on its own; a scripted
  * client like this one has to say it.

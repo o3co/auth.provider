@@ -16,10 +16,10 @@
 import type { LifecycleRegistrar } from "@o3co/auth-provider-core";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-// D-2 v2: ioredis Redis constructor capture. The module under test imports
+// ioredis Redis constructor capture. The module under test imports
 // `Redis` from "ioredis"; vi.mock replaces that import so the test never
 // opens a real socket. Captured arguments verify that the validated config
-// reaches the constructor (BLOCKER 1: schema strip closure).
+// reaches the constructor.
 const redisCtorCalls: Array<{ url: string; options: Record<string, unknown> | undefined }> = [];
 const quitSpies: Array<ReturnType<typeof vi.fn>> = [];
 const onSpies: Array<ReturnType<typeof vi.fn>> = [];
@@ -59,10 +59,6 @@ const importModule = async () =>
 	(await import("../modules.mjs")) as typeof import("../modules.mjs") & {
 		standaloneRedisClientsModule: import("@o3co/auth-provider-core").Module;
 	};
-
-// D-1 / D-5 are already merged on develop, so importing `standaloneRedisClientsModule`
-// from `../modules.mjs` is the natural integration point. Pre-fix the export does not
-// exist — TS error → RED.
 
 const baseConfig = {
 	refreshTokenFamilyStore: {
@@ -147,8 +143,9 @@ describe("D-2 / standaloneRedisClientsModule", () => {
 		).provides;
 
 		// Operator deliberately removed the section — must throw instead of
-		// silently falling back to redis://localhost:6379 (which would re-
-		// introduce the OR-1 multi-replica failure mode in production).
+		// silently falling back to redis://localhost:6379, which in production
+		// would leave each replica with refresh-token families the others
+		// cannot see.
 		await expect(provides.refreshTokenFamilyClient({ config: {} })).rejects.toThrow(
 			/refreshTokenFamilyStore\.redis\.url/,
 		);

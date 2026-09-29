@@ -15,11 +15,10 @@
  */
 
 /**
- * #278: the bridge used to return only `{ clientId, clientSecret, callbackURL }`,
- * dropping the four fields the redirect policy reads. Nothing failed — the
- * policy was simply constructed with an empty config, and the generated app
- * silently ran without a redirect allowlist. These tests fail if the bridge
- * stops forwarding any of them.
+ * The bridge forwards, beside `{ clientId, clientSecret, callbackURL }`, the
+ * four fields the redirect policy reads. A field it dropped would fail nothing
+ * at boot: the policy would be built as if the operator had not configured it.
+ * These tests fail if the bridge stops forwarding any of them.
  */
 
 import type { GoogleProviderConfig } from "@o3co/auth-provider-federation-google";

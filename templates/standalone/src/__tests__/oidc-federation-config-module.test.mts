@@ -21,7 +21,7 @@ import { buildModules } from "../buildModules.mjs";
 import { oidcFederationConfigModule } from "../modules.mjs";
 
 /**
- * #524: the scaffold turns every enabled `federations.<name>` of type
+ * The scaffold turns every enabled `federations.<name>` of type
  * `oidc` into one instance of the generic OIDC federation module, fed by a
  * single config bridge. A deployment adds an IdP with configuration only.
  */
