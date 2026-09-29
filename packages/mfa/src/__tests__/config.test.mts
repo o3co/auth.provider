@@ -30,8 +30,8 @@
  *   defaults to the host `oauth.jwt.issuer` names.
  * - A transaction's life, `mfa.transactionTtlSeconds`, is held to 60-1800
  *   seconds (the step-8 owner decision; the ADR states no bounds), its
- *   attempts, `mfa.maxAttemptsPerTransaction`, to a positive whole number
- *   (what the store's `reserveAttempt` takes), and the subject lock,
+ *   attempts, `mfa.maxAttemptsPerTransaction`, to 1-10 (the owner's bound;
+ *   the ADR states none), and the subject lock,
  *   `mfa.lockout`, to core's `checkMfaLockoutPolicy` under that key — the
  *   step-3 obligations the MFA module refuses a boot for (D8, D21).
  * - The settings say whether the development sample key was accepted, so the

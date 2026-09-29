@@ -110,7 +110,12 @@ export interface MfaBootState {
 /**
  * Each boot's state, by that boot's `mfaFactorResolver`: a projection core
  * builds once per boot and hands every factory of it, the requirement's and
- * the routes' alike.
+ * the routes' alike. This relies on core handing that one object — the same
+ * identity — to both factories of a boot (`prepareSyntheticProjections` in
+ * core's `boot/apply-contributions.mts` injects it once into the working
+ * map both passes build their deps from), and a new one to every boot;
+ * `module.test.mts` pins both ("keeps, per boot, …", "keeps each boot's
+ * own …").
  */
 const bootStates = new WeakMap<object, MfaBootState>();
 
