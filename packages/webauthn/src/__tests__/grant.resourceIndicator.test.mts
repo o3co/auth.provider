@@ -206,7 +206,10 @@ async function boot(
 					...(inSlot || slotOff
 						? {
 								oauthTokenSettings: () =>
-									createTestOAuthTokenSettings({ issuer: ISSUER, resourceIndicatorEnabled: inSlot }),
+									createTestOAuthTokenSettings({
+										issuer: ISSUER,
+										resourceIndicatorEnabled: inSlot,
+									}),
 							}
 						: {}),
 				},

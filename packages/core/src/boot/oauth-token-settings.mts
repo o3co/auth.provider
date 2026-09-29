@@ -27,7 +27,10 @@
  * then (`validate-manifests.mts`, the `grantPolicy` issuer check).
  */
 
-import { type DispatchPolicy, resolveTokenBindingDispatchPolicy } from "../middleware/tokenBinding.mjs";
+import {
+	type DispatchPolicy,
+	resolveTokenBindingDispatchPolicy,
+} from "../middleware/tokenBinding.mjs";
 import type { OAuthTokenSettings } from "../token-settings/types.mjs";
 
 /** The component map as boot holds it. */
@@ -65,9 +68,8 @@ const DISPATCH_POLICIES: ReadonlySet<unknown> = new Set<DispatchPolicy>([
 export function compositionDispatchPolicy(components: Components): DispatchPolicy {
 	const settings = tokenSettingsOf(components);
 	if (settings === undefined) return resolveTokenBindingDispatchPolicy(components.config);
-	const fromSlot = (
-		settings as { tokenBinding?: { dispatchPolicy?: unknown } } | null
-	)?.tokenBinding?.dispatchPolicy;
+	const fromSlot = (settings as { tokenBinding?: { dispatchPolicy?: unknown } } | null)
+		?.tokenBinding?.dispatchPolicy;
 	if (!DISPATCH_POLICIES.has(fromSlot)) {
 		throw new RangeError(
 			`oauthTokenSettings.tokenBinding.dispatchPolicy must be "intent-explicit" or ` +

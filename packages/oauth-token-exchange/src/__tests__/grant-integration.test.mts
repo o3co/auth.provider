@@ -1526,10 +1526,11 @@ describe("tokenExchangeModule's contributions read oauthTokenSettings over the c
 	type ValidatorFactory = (deps: unknown) => {
 		validate(token: string, ctx: { role: "subject" }): Promise<unknown>;
 	};
-	const validatorFor = (deps: Record<string, unknown>) =>
-		(tokenExchangeModule.contributes?.tokenExchangeValidators?.[ACCESS_TOKEN_TYPE] as ValidatorFactory)(
-			{ keyStore, ...deps },
-		);
+	const validatorFor = (deps: Record<string, unknown>) => {
+		const factory = tokenExchangeModule.contributes?.tokenExchangeValidators?.[ACCESS_TOKEN_TYPE];
+		if (factory === undefined) throw new Error("the module contributes no access_token validator");
+		return (factory as ValidatorFactory)({ keyStore, ...deps });
+	};
 
 	/** What `signSelfIssuedAccessToken` signs, with no `typ` header. */
 	const untypedToken = async () => {
@@ -1546,7 +1547,9 @@ describe("tokenExchangeModule's contributions read oauthTokenSettings over the c
 			config: configWith(),
 			oauthTokenSettings: settings({ issuer: SLOT_ISSUER }),
 		});
-		expect(await validator.validate(await signSelfIssuedAccessToken({}), { role: "subject" })).toBeNull();
+		expect(
+			await validator.validate(await signSelfIssuedAccessToken({}), { role: "subject" }),
+		).toBeNull();
 		expect(
 			await validator.validate(await signSelfIssuedAccessToken({ iss: SLOT_ISSUER }), {
 				role: "subject",
@@ -1559,10 +1562,10 @@ describe("tokenExchangeModule's contributions read oauthTokenSettings over the c
 		const config = configWith({ legacyTypAccept: false });
 		expect(await validatorFor({ config }).validate(token, { role: "subject" })).toBeNull();
 		expect(
-			await validatorFor({ config, oauthTokenSettings: settings({ legacyTypAccept: true }) }).validate(
-				token,
-				{ role: "subject" },
-			),
+			await validatorFor({
+				config,
+				oauthTokenSettings: settings({ legacyTypAccept: true }),
+			}).validate(token, { role: "subject" }),
 		).not.toBeNull();
 	});
 
@@ -1573,19 +1576,17 @@ describe("tokenExchangeModule's contributions read oauthTokenSettings over the c
 		const config = configWith({ legacyTypAccept: true });
 		expect(await validatorFor({ config }).validate(token, { role: "subject" })).not.toBeNull();
 		expect(
-			await validatorFor({ config, oauthTokenSettings: settings({ legacyTypAccept: false }) }).validate(
-				token,
-				{ role: "subject" },
-			),
+			await validatorFor({
+				config,
+				oauthTokenSettings: settings({ legacyTypAccept: false }),
+			}).validate(token, { role: "subject" }),
 		).toBeNull();
 	});
 
 	it("mints the slot's default lifetime, not the configuration's", async () => {
-		const grant = (
-			tokenExchangeModule.contributes?.grants?.[TOKEN_EXCHANGE_GRANT_TYPE] as (
-				deps: unknown,
-			) => GrantHandler
-		)({
+		const factory = tokenExchangeModule.contributes?.grants?.[TOKEN_EXCHANGE_GRANT_TYPE];
+		if (factory === undefined) throw new Error("the module contributes no token_exchange grant");
+		const grant = (factory as (deps: unknown) => GrantHandler)({
 			config: configWith(),
 			keyStore,
 			clientRepository,

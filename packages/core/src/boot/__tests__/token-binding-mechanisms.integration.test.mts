@@ -236,7 +236,11 @@ describe("tokenBindingMechanisms — core synthesis", () => {
 		// `tokenBinding` failed on a property read of undefined; one whose
 		// policy is neither of the two would have been handed to the
 		// middleware as if it were one.
-		for (const tokenBinding of [undefined, { bindConfidentialClientRefreshTokens: false }, { dispatchPolicy: "mutual" }]) {
+		for (const tokenBinding of [
+			undefined,
+			{ bindConfidentialClientRefreshTokens: false },
+			{ dispatchPolicy: "mutual" },
+		]) {
 			const booting = createApp({
 				modules: [contributingModule("dpop", () => dpopMech), makeObserverModule({})],
 				bootstrapComponents: {
