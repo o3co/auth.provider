@@ -15,7 +15,7 @@
  */
 
 // The two copies of the `FederationGrantIntentStore` contract suite are the
-// same suite (#593, D16, slice 6).
+// same suite (#593, D16).
 //
 // A contract file cannot be imported across a package boundary, so the Redis
 // package runs a copy — and the claim of the port is that the two adapters
@@ -89,8 +89,8 @@ describe("the FederationGrantIntentStore contract suite, in both copies", () => 
 	});
 
 	it("has nothing but comments and imports above that line, in either copy", () => {
-		// Comparing the bodies leaves the prologue out, and the reviewer showed
-		// what fits there: `import { it as rawIt } from "vitest"; const it =
+		// Comparing the bodies leaves the prologue out, and a lot fits there:
+		// `import { it as rawIt } from "vitest"; const it =
 		// rawIt.skip;` leaves the parity test green and skips every case. A
 		// shadowed `expect`, a rebound `describe` or a stale constant do the
 		// same. So the prologue may declare nothing at all.

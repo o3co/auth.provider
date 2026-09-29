@@ -3,7 +3,7 @@
  * Licensed under the Apache License, Version 2.0 (the "License");
  */
 
-// I-3 — Verify the EVALSHA + EVAL fallback path of
+// Verifies the EVALSHA + EVAL fallback path of
 // `makeIoredisClients(...).federationTokenStoreClient.compareAndDelete`. The
 // hot path uses `EVALSHA` with a precomputed SHA-1; on `NOSCRIPT` (cold
 // server-side script cache after `SCRIPT FLUSH` or cluster failover) the
@@ -232,15 +232,14 @@ describe("makeIoredisClients refreshTokenFamilyClient.duplicate", () => {
 });
 
 // ---------------------------------------------------------------------------
-// Copilot review on PR #352 — MULTI/EXEC per-command errors must not be
-// swallowed.
+// MULTI/EXEC per-command errors must not be swallowed.
 //
 // ioredis resolves `exec()` with a `[error, result]` tuple per queued command
-// and does NOT reject when one of them failed. Every pipeline in this file used
-// to discard that reply, so a `PEXPIRE … NX/GT` rejected by an older or
-// misconfigured Redis left the key with no TTL while the caller was told the
-// write succeeded — the exact failure mode the atomic-TTL contract exists to
-// rule out, and the one #269 already paid for once with the rate limiter.
+// and does NOT reject when one of them failed. A pipeline that discards that
+// reply leaves the key with no TTL when an older or misconfigured Redis rejects
+// a `PEXPIRE … NX/GT`, while the caller is told the write succeeded — the exact
+// failure mode the atomic-TTL contract exists to rule out (#269 is the same
+// failure in the rate limiter).
 //
 // `null` is different and must stay: it is the WATCH-abort signal
 // `refresh-token-family`'s CAS loop reads as "conflict, retry".

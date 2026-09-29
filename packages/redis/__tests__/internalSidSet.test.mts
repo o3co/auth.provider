@@ -144,7 +144,7 @@ describe("createRedisSidSet", () => {
 		expect(await collect(s.members("sid-paged"))).toEqual([...expected].sort());
 	});
 
-	// Copilot review on PR #352. The unit tests assert this against a fake, so
+	// The unit tests assert this against a fake, so
 	// they only prove we handle the reply shape we assumed. This proves the
 	// assumption: a real Redis answers EXEC successfully while reporting
 	// WRONGTYPE for the queued SADD, and ioredis resolves rather than rejects.

@@ -14,10 +14,10 @@
  * limitations under the License.
  */
 
-// How acquisition's records are written down (#593, D16, slice 6). Found by the
-// mutation pass: the contract suite writes every record from one fixture
-// object, so nothing in it could notice an encoding that depended on the order
-// a caller built that object in, or a binding compared without its lengths.
+// How acquisition's records are written down (#593, D16). The contract suite
+// writes every record from one fixture object, so nothing in it could notice
+// an encoding that depended on the order a caller built that object in, or a
+// binding compared without its lengths; this file pins both.
 
 import type { FederationGrantIntent } from "@o3co/auth-provider-core";
 import { describe, expect, it } from "vitest";

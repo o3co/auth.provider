@@ -52,7 +52,7 @@ runRefreshTokenFamilyStoreContract(
 	},
 );
 
-// T4 hardening (Claude review I1): RefreshTokenFamilyClient.duplicate() NORMATIVE contract
-// suite, against the shipped client, so a refactor of `makeIoredisClients`
+// RefreshTokenFamilyClient.duplicate() NORMATIVE contract suite, against the
+// shipped client, so a refactor of `makeIoredisClients`
 // keeps the WATCH-isolation guarantee A3 updateFamily depends on.
 runRefreshTokenFamilyClientDuplicateContract(() => real(client), `rtfam-contract-${++keyCounter}:`);

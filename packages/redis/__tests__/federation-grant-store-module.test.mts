@@ -15,10 +15,10 @@
  */
 
 // What turns the `federationGrants` configuration block into a Redis grant
-// store (#593, D16, slice 4).
+// store (#593, D16).
 //
-// Slice 3 built the adapter and left it taking options; nothing read HOCON. So
-// this is where seconds become milliseconds, base64 becomes key material, and
+// The adapter takes options and reads no HOCON, so this module is where
+// seconds become milliseconds, base64 becomes key material, and
 // a configuration that cannot seal is refused at boot rather than at the first
 // grant — which would mean refusing after a user had already consented.
 
@@ -141,7 +141,7 @@ describe("the Redis federation grant store module (#593, D16)", () => {
 	});
 
 	it("refuses a ring it cannot seal with, at boot", () => {
-		// The adapter refuses at construction (slice 3) rather than at the first
+		// The adapter refuses at construction rather than at the first
 		// write; the module's part is not to hide that behind a default.
 		expect(() => build({ encryptionMode: "required", encryptionKeys: [] })).toThrow(
 			/encryption key/i,
@@ -159,11 +159,10 @@ describe("the Redis federation grant store module (#593, D16)", () => {
 	});
 
 	it("refuses a key that has to be tidied up before it can be read", () => {
-		// Copilot's finding. `Buffer.from(…, "base64")` ignores embedded
-		// whitespace, and the canonicality check stripped it before comparing —
-		// so a key pasted out of a file, or wrapped by a secret manager, was
-		// accepted as canonical. A value an operator has to trim is not the
-		// value they checked.
+		// `Buffer.from(…, "base64")` ignores embedded whitespace, so a
+		// canonicality check that stripped it before comparing would accept a
+		// key pasted out of a file, or wrapped by a secret manager. A value an
+		// operator has to trim is not the value they checked.
 		for (const key of [`${KEY}\n`, ` ${KEY}`, `${KEY.slice(0, 20)}\n${KEY.slice(20)}`]) {
 			expect(() =>
 				build({ encryptionMode: "required", encryptionKeys: [{ id: "k", key }] }),
@@ -365,8 +364,8 @@ describe("the Redis federation grant store module (#593, D16)", () => {
 	});
 
 	it("refuses a retention that is not a duration, rather than reading it as none", () => {
-		// Copilot's finding, and the one where the two readings look the same
-		// from outside: `null` coerced to `0` is "keep no tombstones", which is
+		// The two readings look the same from outside: `null` coerced to `0`
+		// is "keep no tombstones", which is
 		// indistinguishable from thirty days of them until somebody asks why a
 		// revoked grant cannot be looked up.
 		for (const tombstoneRetention of [null, true, [], "1e3", "0x10"]) {

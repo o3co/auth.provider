@@ -196,7 +196,7 @@ describe("SubjectRevocation — the two boundaries on one key (#593, D13)", () =
 			"v1:abc:1",
 			"v2:1:2",
 			"v1:1",
-			// Found by review: all digits, and `Number` reads it as Infinity.
+			// All digits, and `Number` reads it as Infinity.
 			// `new Date(Infinity)` is an Invalid Date, every comparison against
 			// it is false, and a boundary that compares false against
 			// everything reads as "nothing was revoked for this subject" —

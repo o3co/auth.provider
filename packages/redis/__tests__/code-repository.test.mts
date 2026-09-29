@@ -281,7 +281,6 @@ describe("RedisCodeRepository", () => {
 		// Defense-in-depth: the module configSchema rejects non-positive
 		// integers at boot, but direct constructor callers must also fail
 		// loudly so the failure mode is identical regardless of wiring path.
-		// Per Copilot review on PR #122.
 		it.each([
 			["zero", 0],
 			["negative", -1],

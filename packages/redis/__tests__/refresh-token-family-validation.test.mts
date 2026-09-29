@@ -132,14 +132,12 @@ describe("TS-M1: RedisRefreshTokenFamilyStore.findFamily — corrupt-data valida
 		expect((err as RefreshTokenStorageError).reason).toBe("corrupt-data");
 	});
 
-	// Per Copilot review on PR #123: `expiresAtMs` is now
-	// `z.number().int().positive().finite()` rather than the looser
-	// `z.number()`. Each of these previously-accepted bad values must now
-	// surface as `corrupt-data`. Note: `Infinity` / `NaN` cannot survive
-	// `JSON.stringify` (they serialize to `null`); operator-injected raw
-	// JSON containing those tokens is invalid JSON and would already trip
-	// the parse-failure branch. The cases below cover values that DO
-	// JSON-roundtrip but were silently accepted by the looser schema.
+	// `expiresAtMs` is `z.number().int().positive().finite()`, so each of
+	// these values surfaces as `corrupt-data`. Note: `Infinity` / `NaN`
+	// cannot survive `JSON.stringify` (they serialize to `null`);
+	// operator-injected raw JSON containing those tokens is invalid JSON and
+	// trips the parse-failure branch. The cases below cover values that DO
+	// JSON-roundtrip.
 	it.each([
 		["expiresAtMs zero", 0],
 		["expiresAtMs negative", -1],

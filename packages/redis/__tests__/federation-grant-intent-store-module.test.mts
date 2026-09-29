@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
-// What turns configuration into a Redis intent store (#593, D16, slice 6).
+// What turns configuration into a Redis intent store (#593, D16).
 
 import { describe, expect, it } from "vitest";
 import type { FederationGrantIntentStoreClient } from "../src/clients.mjs";

@@ -15,7 +15,7 @@
  */
 
 // The Redis `FederationGrantIntentStore` against the shared contract (#593,
-// D16, slice 6), on a real Redis.
+// D16), on a real Redis.
 //
 // Two connections, and the contract alternates between two store instances
 // over them: the races the suite sets up are then races across sockets, which
@@ -173,8 +173,7 @@ describe("the Redis intent store's layout", () => {
 });
 
 // ---------------------------------------------------------------------------
-// What only Redis can get wrong. Found by the mutation pass: each of these
-// survived the shared contract, because the contract cannot reach a server
+// What only Redis can get wrong: the shared contract cannot reach a server
 // clock, a key TTL, a race between an adapter's read and its script, or an
 // eviction policy.
 // ---------------------------------------------------------------------------

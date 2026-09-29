@@ -165,7 +165,7 @@ describe("createRedisSidSortedSet", () => {
 		expect(await z.list("sid-paged")).toEqual(members);
 	});
 
-	// OR-8 RED tests — `_insertionCounter` monotonic across restart.
+	// OR-8: `_insertionCounter` is monotonic across restart.
 	describe("OR-8: _insertionCounter restart-monotonicity", () => {
 		it("RED-1: two add() calls with same expiresAt — second member sorts after first in list()", async () => {
 			const z = createRedisSidSortedSet({ client, keyPrefix: prefix("or8-same-exp") });
@@ -179,24 +179,20 @@ describe("createRedisSidSortedSet", () => {
 		});
 
 		it("RED-2: post-restart simulation via fresh module load — first score from a freshly-imported module exceeds an injected high pre-crash baseline", async () => {
-			// Codex review: the original RED-2 was not a meaningful TDD guard
-			// because earlier tests in this file already advanced the module-
-			// scoped `_insertionCounter` past low injected scores, so pre-fix
-			// the counter would already be high enough to win the order
-			// assertion. Force a true module reset via `vi.resetModules()` +
-			// dynamic re-import so the counter re-initialises (post-fix:
-			// `Date.now()`; pre-fix: `0`). Then inject a pre-crash score that
-			// is HIGH enough to require the Date.now() baseline to beat —
-			// `100_000` is well above any plausible counter value pre-fix
-			// (this whole test file performs ~10 adds total) and well below
-			// `Date.now()` (~1.75×10^12 in 2026). Assert via raw `zscore`
-			// that the new module's first add produces a score greater than
-			// the injected baseline.
+			// Earlier tests in this file advance the module-scoped
+			// `_insertionCounter`, so a low injected score would lose to the
+			// counter whatever it started at. `vi.resetModules()` + a dynamic
+			// re-import re-initialise the counter (to `Date.now()`), and the
+			// injected pre-crash score is HIGH enough that only the Date.now()
+			// baseline beats it: `100_000` is well above any counter a start at
+			// `0` would reach (this whole test file performs ~10 adds) and well
+			// below `Date.now()` (~1.75×10^12 in 2026). A raw `zscore` asserts
+			// that the new module's first add scores above the injected
+			// baseline.
 			//
 			// NX semantics: pre-crash members must use DIFFERENT names from
-			// the post-restart member; ZADD NX would otherwise preserve the
-			// pre-existing low score and the bug would silently mask
-			// (Codex Delta 1).
+			// the post-restart member; ZADD NX would otherwise keep the
+			// pre-existing low score and hide a regression.
 			const sid = "sid-or8-restart-v2";
 			const key = `${prefix("or8-restart-v2")}${sid}`;
 			const PRE_CRASH_HIGH = 100_000;
@@ -242,15 +238,13 @@ describe("createRedisSidSortedSet", () => {
 		});
 
 		it("RED-4: a freshly-loaded module emits a first score that exceeds 10^12 (structural assertion of the Date.now() baseline, not a tautology)", async () => {
-			// Codex review: the previous RED-4 (`expect(Date.now() > 1e12)`)
-			// was tautological — passes through year ~33658 regardless of
-			// production state. Replaced with a structural test that exercises
-			// the module's actual init: `vi.resetModules()` re-evaluates the
+			// Exercises the module's actual init rather than `Date.now()`
+			// itself (`expect(Date.now() > 1e12)` would pass whatever the
+			// module does): `vi.resetModules()` re-evaluates the
 			// `let _insertionCounter = ...` line, then a single add() through
-			// the fresh instance must produce a score above 10^12. Pre-fix
-			// (counter starts at 0) the first score is `1` and this fails;
-			// post-fix (`Date.now()`) the first score is `~1.75×10^12` and
-			// this passes.
+			// the fresh instance must produce a score above 10^12. A counter
+			// starting at 0 would score `1` and fail; `Date.now()` scores
+			// `~1.75×10^12`.
 			const sid = "sid-or8-fresh-baseline";
 			const key = `${prefix("or8-fresh-baseline")}${sid}`;
 

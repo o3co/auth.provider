@@ -103,12 +103,11 @@ describe("TS-3: RedisUserSessionStore.get — corrupt envelope validation", () =
 			"claims is array (not object)",
 			{ ...validEnvelope, claims: [] as unknown as Record<string, unknown> },
 		],
-		// Per Copilot review on PR #123: timestamps must be safe integers in
-		// the JS Date valid range. The previous `Number.isFinite` check
-		// accepted very large finite numbers (`Number.MAX_VALUE`, `2 ** 60`,
-		// fractional ms) that lose precision through `new Date(ms)` and
-		// could either propagate `Invalid Date` or appear effectively-never-
-		// expiring against `expiresAtMs <= Date.now()`.
+		// Timestamps must be safe integers in the JS Date valid range. A finite
+		// number outside it (`Number.MAX_VALUE`, `2 ** 60`, fractional ms)
+		// loses precision through `new Date(ms)` and could either propagate
+		// `Invalid Date` or appear effectively-never-expiring against
+		// `expiresAtMs <= Date.now()`.
 		[
 			"expiresAtMs > MAX_DATE_MS (8.64e15)",
 			{ ...validEnvelope, expiresAtMs: 8_640_000_000_000_001 as unknown as number },

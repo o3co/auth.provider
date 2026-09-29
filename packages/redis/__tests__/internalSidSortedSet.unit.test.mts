@@ -107,11 +107,10 @@ describe("#291 — createRedisSidSortedSet.removeBySid uses UNLINK", () => {
 	});
 });
 
-// Copilot review on PR #352. `list` advances by `pageSize`; a value that does
-// not advance turns the read into an infinite loop — on the logout path, which
-// is worse than the keyspace scan this PR removes. `0` is the sharpest case:
+// `list` advances by `pageSize`; a value that does not advance turns the read
+// into an infinite loop, on the logout path. `0` is the sharpest case:
 // `ZRANGE key 0 -1` returns the whole set, the short-page test never fires, and
-// the same command repeats forever. Reject at construction instead.
+// the same command repeats forever. Rejected at construction instead.
 describe("#291 — createRedisSidSortedSet validates pageSize at construction", () => {
 	it.each([0, -1, 1.5, Number.NaN, Number.POSITIVE_INFINITY])("rejects %p", (pageSize) => {
 		expect(() =>

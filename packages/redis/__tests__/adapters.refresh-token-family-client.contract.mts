@@ -19,7 +19,7 @@ import type { RefreshTokenFamilyClient } from "../src/clients.mjs";
 /**
  * Factory for the contract suite. Returns a freshly-built RefreshTokenFamilyClient
  * that targets a live Redis instance. The contract suite exercises the
- * `duplicate()` NORMATIVE MUSTs (T4 hardening per Claude review I1):
+ * `duplicate()` NORMATIVE MUSTs:
  *
  *   1. Each duplicate is a distinct instance.
  *   2. Each duplicate is bound to a fresh underlying socket — observed

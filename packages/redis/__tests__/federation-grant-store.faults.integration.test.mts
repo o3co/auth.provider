@@ -318,8 +318,7 @@ describe("a field the envelope does not cover (#593, D16, the reviewer)", () => 
 		// reads failing closed is no use if the credential stays at rest with no
 		// way to end it. A revocation has no version to match and always wins,
 		// so a horizon it cannot compute is not a reason to refuse — the record
-		// is broken, and that is exactly when an operator reaches for this
-		// (Copilot).
+		// is broken, and that is exactly when an operator reaches for this.
 		const held = await activated();
 		await redis.hdel(key("g-1", "grant"), "retentionMs");
 		await held.revoke("g-1", "operator", at(DAY));
@@ -396,7 +395,7 @@ describe("a field the envelope does not cover (#593, D16, the reviewer)", () => 
 	});
 
 	it("hides nothing by leaving a member behind: a record it cannot decode answers nothing to `find` either", async () => {
-		// Copilot's inference from the rule above: a pending record revoked
+		// Follows from the rule above: a pending record revoked
 		// without a reservation keeps its old, earlier horizon in the index, so
 		// its member can be pruned while the tombstone's key lives on. It costs
 		// nothing, because the reads that would disagree go through the same

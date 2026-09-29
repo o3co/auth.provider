@@ -129,9 +129,7 @@ describe("how many commands a read is (#593, D16)", () => {
 		// activation can replace both, and the caller would evaluate one
 		// authorization against the other's credential. A client batches the two
 		// closely enough that the window almost never opens, so the test is at
-		// the seam — what went over the wire — and not at the outcome (the
-		// reviewer found the race version of this test proving nothing, over
-		// 2,400 concurrent attempts).
+		// the seam — what went over the wire — and not at the outcome.
 		const sent: string[] = [];
 		const connection = {
 			async evalsha(_sha: string, numkeys: number, ...args: (string | number)[]) {

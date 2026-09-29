@@ -112,10 +112,10 @@ describe("#291 — createRedisSidHash.removeBySid uses UNLINK", () => {
 	});
 });
 
-// Copilot review on PR #352, swept from the `pageSize` hole in the sorted-set
-// helper. `scanCount` cannot loop forever here — it is an `HSCAN COUNT` hint,
-// and Redis rejects a non-positive one — but a command the server refuses on
-// the logout path is no better than a hang. Same construction-time guard.
+// `scanCount` cannot loop forever here — it is an `HSCAN COUNT` hint, and Redis
+// rejects a non-positive one — but a command the server refuses on the logout
+// path is no better than a hang. Same construction-time guard as the sorted-set
+// helper's `pageSize`.
 describe("#291 — createRedisSidHash validates scanCount at construction", () => {
 	it.each([0, -1, 1.5, Number.NaN, Number.POSITIVE_INFINITY])("rejects %p", (scanCount) => {
 		expect(() =>

@@ -14,14 +14,14 @@
  * limitations under the License.
  */
 
-// Regression test for the defect found sweeping PR #352: `updateFamily`'s CAS
-// inspected its `EXEC` reply for `null` — the WATCH-abort signal — but not for
-// per-command errors. ioredis reports a failed queued command *inside* the
-// reply and resolves rather than rejecting, because `EXEC` itself succeeded.
-// So a `SET` Redis refused (OOM, a replica gone read-only, a `maxmemory-policy`
-// eviction refusal) came back as a non-null array, sailed past the `null`
-// check, and `updateFamily` returned `{ outcome: "committed" }` for a rotation
-// that never landed.
+// `updateFamily`'s CAS reads its `EXEC` reply for `null` — the WATCH-abort
+// signal — and the ioredis wrapper's `exec()` reads it for per-command errors.
+// ioredis reports a failed queued command *inside* the reply and resolves
+// rather than rejecting, because `EXEC` itself succeeded. Without the wrapper's
+// check, a `SET` Redis refused (OOM, a replica gone read-only, a
+// `maxmemory-policy` eviction refusal) would come back as a non-null array,
+// pass the `null` check, and `updateFamily` would return
+// `{ outcome: "committed" }` for a rotation that never landed.
 //
 // That is the worst shape a refresh-token store can fail in: the caller issues
 // the new refresh token believing the family was advanced, while Redis still

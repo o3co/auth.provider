@@ -39,6 +39,12 @@ const configSchema = z.object({
  * `subjectRevocationClient` (declared in `@o3co/auth-provider-core`'s
  * `user-sessions/types.mts`).
  *
+ * The subject stores (`subjectSessionIndex`, `subjectRevocation`) carry
+ * subject-level revocation across replicas. Without them `verifyJwt` skips the
+ * subject watermark, so the refresh grant's watermark check does nothing, and
+ * a password reset's `revokeAllForSubject` reports both `unavailable` and ends
+ * no session or access token.
+ *
  * `keyPrefix` is the outer namespace; each store gets a fixed subprefix
  * (`us:` / `rp:` / `fi:` / `fed:` / `sub:` / `rev:`). The subject-keyed stores
  * do not share one with the sid-keyed stores, so a sid cannot collide with a

@@ -29,7 +29,7 @@ beforeAll(async () => {
 	raw = new Redis(at);
 	// The shipped wrapper, not a hand-rolled one: its `exec()` is where the
 	// MULTI/EXEC per-command error check lives, and a local copy would let the
-	// two drift apart exactly where that matters (Copilot review on PR #352).
+	// two drift apart exactly where that matters.
 	client = makeIoredisClients(raw).sessionRPRegistryClient;
 });
 
@@ -147,10 +147,10 @@ describe("createRedisSidHash", () => {
 		expect(out).toHaveLength(1);
 	});
 
-	// Copilot review on PR #352. `setField` awaited `pipeline.exec()` and threw
-	// the reply away; ioredis reports a failed queued command inside that reply
-	// rather than rejecting, so an HSET or PEXPIREAT that Redis refused was
-	// reported to the caller as a successful registration.
+	// ioredis reports a failed queued command inside the `pipeline.exec()`
+	// reply rather than rejecting, so a `setField` that ignored the reply would
+	// report an HSET or PEXPIREAT that Redis refused as a successful
+	// registration.
 	it("setField surfaces a queued command's failure instead of reporting success", async () => {
 		const h = createRedisSidHash({ client, keyPrefix: prefix("wrongtype") });
 		await raw.set(`${prefix("wrongtype")}sid-1`, "not-a-hash");

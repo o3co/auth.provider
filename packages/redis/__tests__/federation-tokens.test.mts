@@ -172,10 +172,9 @@ describe("redis FederationTokenStore (encryption = required)", () => {
 	});
 
 	it("names itself when it refuses plaintext: the guard is shared, the message is not", () => {
-		// The guard moved to `internal/encryption-mode.mts` and the federation
+		// The guard lives in `internal/encryption-mode.mts` and the federation
 		// grant store (#593) uses it too, with its own label. An operator reading
-		// a boot failure has to be told which store refused, and nothing here
-		// said so before (the reviewer).
+		// a boot failure has to be told which store refused.
 		const previous = process.env.NODE_ENV;
 		process.env.NODE_ENV = "production";
 		try {
@@ -537,11 +536,10 @@ describe("OR-12 — redisFederationTokenStoreBuilder env-based encryption guard"
 		expect(errorSpy).not.toHaveBeenCalled();
 	});
 
-	// I-1 (multi-agent-review M2): the lower-level public factory
-	// `createRedisFederationTokenStore` MUST run the same OR-12 production
-	// guard as the builder. Pre-fix the guard only ran in the builder, so a
-	// consumer calling the factory directly with `mode: "allow-plaintext"` in
-	// production shipped unencrypted refresh tokens.
+	// The lower-level public factory `createRedisFederationTokenStore` MUST
+	// run the same OR-12 production guard as the builder: otherwise a consumer
+	// calling the factory directly with `mode: "allow-plaintext"` in
+	// production ships unencrypted refresh tokens.
 	it("createRedisFederationTokenStore (lower-level export) ALSO throws in production+allow-plaintext", () => {
 		process.env.NODE_ENV = "production";
 		delete process.env.FEDERATION_TOKENS_ALLOW_INSECURE;
@@ -711,10 +709,10 @@ describe("#473 — the plaintext guard reads the selected environment and deploy
 });
 
 // ---------------------------------------------------------------------------
-// I-2 (multi-agent-review convergent — Claude + Codex P2): builder structural
-// validator must reject clients missing `compareAndDelete`. Pre-fix a custom
-// client missing this method passed the builder shape check then failed at
-// first lock release with an obscure runtime TypeError.
+// The builder's structural validator must reject clients missing
+// `compareAndDelete`. Otherwise a custom client missing this method passes the
+// builder shape check, then fails at the first lock release with an obscure
+// runtime TypeError.
 // ---------------------------------------------------------------------------
 
 describe("redisFederationTokenStoreBuilder structural validator", () => {
@@ -937,13 +935,14 @@ describe("#293 — mode=allow-plaintext keeps the envelope as plain JSON (develo
 });
 
 // ---------------------------------------------------------------------------
-// #293 (PR #450 review) — the inner envelope is validated, not just the wrapper.
+// #293 — the inner envelope is validated, not just the wrapper.
 //
-// `open()` checked only `{ v: 2, c | p }`. A v2 record whose inner envelope
-// was malformed — an array, no `accessToken`, `expiresAtMs: "soon"` — got past
-// it, and `fromEnvelope()` then returned `{ accessToken: undefined,
+// A check of `{ v: 2, c | p }` alone would pass a v2 record whose inner
+// envelope is malformed — an array, no `accessToken`, `expiresAtMs: "soon"` —
+// and `fromEnvelope()` would return `{ accessToken: undefined,
 // expiresAt: Invalid Date }` instead of throwing, so the self-heal in `get()`
-// never ran and the corrupt record stayed in Redis, returned on every read.
+// would never run and the corrupt record would stay in Redis, returned on
+// every read.
 // Every malformed shape below must take the same path as corrupt JSON: key
 // gone, index member gone, `null` returned — in both modes.
 // ---------------------------------------------------------------------------
