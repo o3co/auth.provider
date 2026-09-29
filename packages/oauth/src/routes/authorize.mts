@@ -129,8 +129,12 @@ export interface AuthorizeHandlerOptions {
 	readonly requirements: SessionRequirementResolver;
 }
 
-/** The parameter this endpoint adds to a page it sends the browser to, naming the request to come back to. */
-const REDIRECT_TO_PARAM = "redirect_to";
+/**
+ * The parameter this endpoint adds to a page it sends the browser to, naming
+ * the request to come back to. The login page's own URL may not carry it
+ * (`oauthModule`'s configSchema refuses one that does).
+ */
+export const REDIRECT_TO_PARAM = "redirect_to";
 
 /**
  * The login-page redirect with the request to come back to.

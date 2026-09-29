@@ -91,7 +91,7 @@ standalone テンプレートの [`buildModules.mts`](../../templates/standalone
 
 各モジュールが要求するもの・読むものはそのマニフェストに宣言されている（上の表のリンク先）。構成が boot 時に決めておくべきこと:
 
-- `oauthModule` は `config`、`clientRepository`、`codeRepository`、`keyStore` と、空でない `endpoints.login.url` を要求する — `/authorize` は未認証のブラウザーをそこへ送るので、無ければ boot が拒否する。
+- `oauthModule` は `config`、`clientRepository`、`codeRepository`、`keyStore` と、空でない `endpoints.login.url` を要求する — `/authorize` は未認証のブラウザーをそこへ送るので、無ければ boot が拒否する。この URL（パスでも絶対 URL でもよい）は自身のクエリを持ってよい（`/login?tenant=x`）が、`redirect_to` は持てない: `/authorize` が戻り先のリクエストを示す `redirect_to` を付け加えるので、既にあれば 2 つ目としてページに届いてしまう。そのため boot が拒否する（`config-validation-failed`、キーを名指しする）。フラグメント内の `redirect_to` はクエリのものではないので受け入れる。
 - `subjectRevocation`、`auditSink`、`accessTokenDenylist` は配線は任意だが決定は任意ではない: 埋めないスロットは不在を宣言すること — `oauth.revocation.subject = "unsupported"`、`audit.sink.type = "none"`、`oauth.revocation.accessToken = "unsupported"` — さもなければ boot が拒否する。
 - `oauthModule` と、グラントを登録するときの `oauthAuthorizationModule` / `oauthSessionModule` は `sessionRequirementResolver` — boot プランナーが埋める core の合成キー — を要求する。したがってそのどれかをインストールする構成は、インストールするセッション要件を `sessionRequirements.expected` で宣言しなければならず（無ければ `[]`）、さもなければ boot が拒否する（core の session-admission ADR、D7）。
 - `oauth.jwt.issuer` が正規の issuer URL でなければルーターの構築が失敗する: `iss` はデプロイの属性であり、リクエストから読むものではない。

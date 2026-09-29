@@ -155,8 +155,8 @@ describe("oauthModule — manifest shape", () => {
 		const module = oauthModule({ config });
 		const schema = module.configSchema;
 		if (!schema) throw new Error("configSchema must be defined");
-		// The base schema marks endpoints.login.url optional, but oauthConfigSchema
-		// must tighten it to z.string().min(1) so boot fails before /authorize is hit.
+		// Core's schema requires a string there; oauthConfigSchema requires it
+		// too, non-empty, so boot fails before /authorize is hit.
 		const result = schema.safeParse({ endpoints: { login: {} } });
 		expect(result.success).toBe(false);
 	});
@@ -205,6 +205,8 @@ describe("oauthModule — manifest shape", () => {
 		["a query, and redirect_to inside the fragment", "/login?tenant=x#redirect_to=y"],
 		["a name that differs in case", "/login?Redirect_To=x"],
 		["a longer name", "/login?redirect_to_after=x"],
+		// Not this rule's to judge: a URL that does not parse carries no query.
+		["no parse as a URL", "http://[::1/login?redirect_to=x"],
 	])("configSchema accepts a login URL with %s", (_label, url) => {
 		const schema = oauthModule({ config: makeValidAppConfig() }).configSchema;
 		if (!schema) throw new Error("configSchema must be defined");
