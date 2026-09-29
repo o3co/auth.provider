@@ -37,7 +37,7 @@
 
 import { describe, expect, it } from "vitest";
 import { createApp } from "../../index.mjs";
-import { defineModule } from "../../modules/manifest/index.mjs";
+import { defineModule, type Module } from "../../modules/manifest/index.mjs";
 import { makeValidCoreConfig } from "../../testing/fixtures/valid-config.mjs";
 import { createTestOAuthTokenSettings } from "../../testing/slots/oauthTokenSettings.mjs";
 import type { OAuthTokenSettings } from "../../token-settings/types.mjs";
@@ -113,27 +113,73 @@ describe("ModuleSpec.authoritative (#728)", () => {
 		});
 	});
 
-	it("refuses an authoritative that is not a list of keys", async () => {
+	it.each<[string, unknown, string]>([
+		["a string", "oauthTokenSettings", 'the string "oauthTokenSettings"'],
+		["null", null, "null"],
+		["a number", 5, "the number 5"],
+		["a Set", new Set(["oauthTokenSettings"]), "a Set"],
+		["a plain object", { oauthTokenSettings: true }, "an Object"],
+	])(
+		"refuses an authoritative that is %s, not a list of keys, saying what it is",
+		async (_label, declared, described) => {
+			const err = await refusal(
+				createApp({
+					modules: [
+						defineModule({
+							name: "test:not-a-list",
+							provides: { oauthTokenSettings: () => OWNED },
+							authoritative: declared as never,
+						}),
+					],
+					bootstrapComponents: bootstrap(),
+				}),
+			);
+			expect(err.reason).toBe("authoritative-without-provides");
+			// Refused as a value, not read character by character as a list of
+			// keys; no key is named, since none was.
+			expect(err.details).toEqual({
+				reason: "authoritative-without-provides",
+				module: "test:not-a-list",
+				declared: described,
+			});
+			expect(err.message).toContain(`declares authoritative as ${described}, not a list`);
+		},
+	);
+
+	it("names a key that is not a string without rendering it: a null-prototype object is described, not thrown on", async () => {
 		const err = await refusal(
 			createApp({
 				modules: [
 					defineModule({
-						name: "test:not-a-list",
+						name: "test:odd-key",
 						provides: { oauthTokenSettings: () => OWNED },
-						authoritative: "oauthTokenSettings" as never,
+						authoritative: [Object.create(null)] as never,
 					}),
 				],
 				bootstrapComponents: bootstrap(),
 			}),
 		);
 		expect(err.reason).toBe("authoritative-without-provides");
-		// Refused as a value, not read character by character as a list of keys.
 		expect(err.details).toEqual({
 			reason: "authoritative-without-provides",
-			module: "test:not-a-list",
-			componentKey: "oauthTokenSettings",
+			module: "test:odd-key",
+			componentKey: "an object",
 		});
-		expect(err.message).toMatch(/not a list/);
+	});
+
+	it("reads a manifest's authoritative once", async () => {
+		let reads = 0;
+		const counted = {
+			name: "test:counted",
+			provides: { oauthTokenSettings: () => OWNED },
+			get authoritative() {
+				reads += 1;
+				return ["oauthTokenSettings"];
+			},
+		} as unknown as Module;
+		const handle = await createApp({ modules: [counted], bootstrapComponents: bootstrap() });
+		await handle.dispose();
+		expect(reads).toBe(1);
 	});
 
 	it("refuses an override of an authoritative key of a loaded module, naming the module and the key", async () => {
@@ -216,4 +262,60 @@ describe("ModuleSpec.authoritative (#728)", () => {
 			await handle.dispose();
 		}
 	});
+});
+
+describe("a __proto__ key in a host map", () => {
+	// `components["__proto__"] = value` in materialize would replace the
+	// working map's prototype: every key of the value would read as a
+	// component, the owner's factory would be skipped, and its readers would
+	// be handed the value — past the authoritative and collision checks, which
+	// read the map's own keys.
+
+	/** A map carrying `__proto__` as its own key, as a computed key or JSON.parse writes it. */
+	const ways: readonly [string, () => Record<string, unknown>][] = [
+		["written as a computed key", () => ({ ["__proto__"]: { oauthTokenSettings: SECOND } })],
+		["parsed from JSON", () => JSON.parse('{"__proto__": {"oauthTokenSettings": {}}}')],
+	];
+
+	it.each(ways)(
+		"refuses overrideComponents carrying __proto__ as its own key, %s",
+		async (_label, make) => {
+			const override = make();
+			expect(Object.hasOwn(override, "__proto__")).toBe(true);
+			const err = await refusal(
+				createApp({
+					modules: [owner, reader({})],
+					bootstrapComponents: bootstrap(),
+					overrideComponents: override as never,
+				}),
+			);
+			expect(err.reason).toBe("reserved-component-key");
+			expect(err.stage).toBe("validateManifests");
+			expect(err.details).toEqual({
+				reason: "reserved-component-key",
+				componentKey: "__proto__",
+				source: "overrideComponents",
+			});
+			expect(err.message).toContain("__proto__");
+		},
+	);
+
+	it.each(ways)(
+		"refuses bootstrapComponents carrying __proto__ as its own key, %s",
+		async (_label, make) => {
+			const host = make();
+			host.config = makeValidCoreConfig();
+			host.pathResolver = (p: string) => p;
+			expect(Object.hasOwn(host, "__proto__")).toBe(true);
+			const err = await refusal(
+				createApp({ modules: [owner, reader({})], bootstrapComponents: host as never }),
+			);
+			expect(err.reason).toBe("reserved-component-key");
+			expect(err.details).toEqual({
+				reason: "reserved-component-key",
+				componentKey: "__proto__",
+				source: "bootstrapComponents",
+			});
+		},
+	);
 });
