@@ -76,6 +76,13 @@ describe("package public surface (@o3co/auth-provider-session)", () => {
 		}
 	});
 
+	it("exports loginCompletionModule, the loginCompletion slot over the deployment's csrfGuard (#728)", async () => {
+		const mod = (await import("#/index.mjs")) as Record<string, unknown>;
+		const loaded = mod.loginCompletionModule as { name?: unknown; provides?: object } | undefined;
+		expect(loaded?.name).toBe("login-completion");
+		expect(Object.keys(loaded?.provides ?? {})).toEqual(["loginCompletion"]);
+	});
+
 	it("exports extractFederationSection as a runtime helper", async () => {
 		const mod = await import("#/index.mjs");
 		expect(typeof (mod as { extractFederationSection?: unknown }).extractFederationSection).toBe(
