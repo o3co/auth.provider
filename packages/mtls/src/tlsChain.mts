@@ -15,29 +15,16 @@
  */
 
 /**
- * Reading the peer's certificate **chain** from the TLS session (#341, the
- * "Related: TLS-layer chains" section).
+ * Reads the peer's certificate chain from the TLS session, for `full-pki`
+ * with `source = "tls-layer"`. `getPeerCertificate(true)` links the chain
+ * through `issuerCertificate`, and that list:
  *
- * Before this, `mode = "pki"` with `source = "tls-layer"` was refused at boot:
- * the narrow walk needed intermediates, and the only place it knew to find
- * them was the Envoy XFCC `Chain=` parameter. That left the RFC 8705 §3 shape
- * — terminate TLS here, take the certificate from the handshake — unable to
- * use PKI validation at all, even though #280 had just made `tls-layer` the
- * default source.
+ *  - is circular at the root (a self-signed anchor is its own issuer), so the
+ *    walk tracks what it has seen;
+ *  - is peer-supplied, so the walk is bounded by depth.
  *
- * `getPeerCertificate(true)` returns the chain as a linked list through
- * `issuerCertificate`. Two things about that list need care:
- *
- *  - **It is circular at the root.** A self-signed anchor's
- *    `issuerCertificate` points at itself, so a walk that only tests for
- *    `undefined` never terminates.
- *  - **It is peer-supplied.** The client chooses what to send, so the walk is
- *    bounded by depth rather than trusted to be short.
- *
- * The anchor the client sent is deliberately kept in the returned chain and
- * *not* treated as trusted. Trust comes from `oauth.mtls.trusted-cas` alone;
- * a chain that terminates in an anchor the operator did not configure fails
- * path validation, which is the whole point of configuring them.
+ * An anchor the client sent stays in the chain and is not trusted: trust
+ * comes from `oauth.mtls.trusted-cas` alone.
  */
 
 /** The shape of `getPeerCertificate(true)` that this module reads. */
@@ -53,11 +40,9 @@ export interface PeerChain {
 }
 
 /**
- * @param maxDepth total certificates to read, leaf included. A peer that
- * sends more has the remainder ignored rather than the request refused: path
- * validation bounds the chain it will accept anyway, and refusing here would
- * turn a verbose-but-valid client into an error at a layer that cannot
- * explain itself.
+ * @param maxDepth total certificates to read, leaf included. The rest of a
+ * longer chain is ignored rather than refused here: path validation bounds
+ * the chain anyway, and can explain its refusal.
  */
 export const peerChainFrom = (
 	peer: DetailedPeerCertificateLike | undefined,

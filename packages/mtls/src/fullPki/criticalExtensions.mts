@@ -15,51 +15,31 @@
  */
 
 /**
- * Critical extension processing (RFC 5280 §6.1.2, #341 item 4).
+ * Critical extension processing (RFC 5280 §6.1.2):
  *
  * > "A certificate using system MUST reject the certificate if it encounters
  * > a critical extension it does not recognize or a critical extension that
  * > contains information that it cannot process."
  *
- * The narrow mode ignored unrecognised critical extensions, which is the
- * exact inversion of what the flag means: the issuer marked the extension as
- * one a validator must understand *before* trusting the certificate, and
- * ignoring it accepts a certificate on terms the issuer explicitly refused.
+ * pkijs applies it to the CA certificates only (`checkForCA`), skipping the
+ * leaf; this module applies it to the whole path (README, "What the library
+ * does, and what this package still owns").
  *
- * ### Why this is not left to pkijs
+ * "Recognised" means only extensions this deployment acts on: listing an OID
+ * nothing processes would turn a refusal into an acceptance.
  *
- * The engine does apply this rule — inside `checkForCA`, which it runs only
- * over the CA certificates in the path. **The leaf is skipped.** So a client
- * certificate carrying a critical extension nobody understands validates
- * cleanly, which is precisely the position a certificate whose issuer
- * constrained it in some way this code has never heard of should not be in.
- * This module closes that, and applies the same rule uniformly to every
- * certificate on the path rather than to some of them.
- *
- * ### What "recognised" means here
- *
- * Only extensions this deployment actually acts on. Listing an OID that
- * nothing processes would be a worse bug than not listing it: it would turn a
- * refusal into an acceptance while looking like diligence.
- *
- * The same rule, with the same listing discipline, is applied to CRLs (RFC
- * 5280 §5.2 and §5.3) on behalf of `crl.mts`, and to OCSP responses (RFC
- * 6960 §4.4) on behalf of `ocsp.mts`, at the bottom of this file.
+ * The same rule and listing discipline apply to CRLs (RFC 5280 §5.2, §5.3)
+ * for `crl.mts` and to OCSP responses (RFC 6960 §4.4) for `ocsp.mts`, below.
  */
 
 import type * as pkijs from "pkijs";
 
 /**
- * Critical extensions processed at any position on the path.
- *
- * - `basicConstraints` — `cA` by the engine, `pathLenConstraint` by
- *   `validate.mts`.
- * - `keyUsage` — `keyCertSign` / `cRLSign` on CAs by the engine,
- *   `digitalSignature` on the leaf by `checkLeafKeyUsage` below.
- * - `nameConstraints`, `certificatePolicies`, `policyMappings`,
- *   `policyConstraints`, `inhibitAnyPolicy` — the engine's RFC 5280 §6.1
- *   name-constraint and policy-tree processing.
- * - `subjectAltName` — the names the engine matches constraints against.
+ * Critical extensions processed at any position on the path: `basicConstraints`
+ * (`cA` by the engine, `pathLenConstraint` by `validate.mts`), `keyUsage` (CA
+ * bits by the engine, `digitalSignature` on the leaf by `checkLeafKeyUsage`),
+ * and `subjectAltName` plus the name-constraint and policy extensions (the
+ * engine's RFC 5280 §6.1 processing).
  */
 const PROCESSED_ANYWHERE: ReadonlySet<string> = new Set([
 	"2.5.29.19", // basicConstraints
@@ -73,16 +53,13 @@ const PROCESSED_ANYWHERE: ReadonlySet<string> = new Set([
 ]);
 
 /**
- * Extensions processed **only on the leaf**.
+ * Extensions processed only on the leaf:
  *
- * - `extendedKeyUsage` — by `checkClientLeafProfile` in `pki.mts`. On a CA
- *   it would mean EKU chaining — constraining what purposes the CA may issue
- *   for — which RFC 5280 does not define and this module does not implement.
- *   A CA that marks it critical is asking for enforcement there is none of,
- *   so it is refused rather than waved through.
- * - `tlsfeature` (RFC 7633) — by `checkMustStaple` in `ocsp.mts`, which
- *   refuses a leaf demanding a stapled OCSP response (#431). Processed by
- *   being refused, as the CRL scope extensions are.
+ * - `extendedKeyUsage`, by `checkClientLeafProfile` in `pki.mts`. On a CA it
+ *   would mean EKU chaining, which RFC 5280 does not define and this module
+ *   does not implement, so a critical one on a CA is refused.
+ * - `tlsfeature` (RFC 7633), by `checkMustStaple` in `ocsp.mts`, which
+ *   refuses a leaf demanding a stapled OCSP response.
  */
 const PROCESSED_ON_LEAF_ONLY: ReadonlySet<string> = new Set([
 	"2.5.29.37", // extKeyUsage
@@ -101,20 +78,15 @@ const PARSED_LOCALLY: ReadonlySet<string> = new Set([
 ]);
 
 /**
- * Critical CRL extensions `crl.mts` processes (RFC 5280 §5.2).
+ * Critical CRL extensions `crl.mts` processes (RFC 5280 §5.2: a CRL with a
+ * critical extension the application cannot process MUST NOT be used). Both
+ * are processed by being refused: `crl.mts` recognises a delta or scoped CRL
+ * and reports it as unsupported.
  *
- * §5.2 is §6.1.2's twin — "if a CRL contains a critical extension that the
- * application cannot process, then the application MUST NOT use that CRL to
- * determine the status of certificates" — and the listing discipline is the
- * same: only what is acted on. Both entries are acted on by being *refused*:
- * `crl.mts` reads them to recognise a delta or a scoped CRL and reports it as
- * unsupported, which is processing the extension, not ignoring it.
- *
- * pkijs applies this rule inside `CertificateRevocationList.verify`, against
- * its own longer list, and answers `false` — the same answer as a forged
+ * pkijs's `CertificateRevocationList.verify` applies the same rule against
+ * its own longer list and answers `false`, indistinguishable from a forged
  * signature. Every OID here is on that list, so a CRL this check passes is
- * never refused by pkijs on this ground, and the two cannot disagree in the
- * direction that would resurrect #447.
+ * never refused by pkijs on this ground.
  */
 const CRL_PROCESSED: ReadonlySet<string> = new Set([
 	"2.5.29.27", // deltaCRLIndicator — recognised, and refused as a delta CRL
@@ -156,13 +128,10 @@ export const checkCriticalExtensions = (
 
 			if (PARSED_LOCALLY.has(extension.extnID)) continue;
 
-			// §6.1.2 has two halves, and the second is easy to lose: the rule
-			// covers an unrecognised critical extension "**or** a critical
-			// extension that contains information that it cannot process". A
-			// recognised OID whose value did not parse is exactly that case —
-			// knowing an extension's name is not the same as having read it, and
-			// treating a restriction we could not decode as satisfied is how an
-			// unparseable `keyUsage` becomes an unconstrained key.
+			// §6.1.2's second half, "a critical extension that contains
+			// information that it cannot process": a recognised OID whose value
+			// did not parse. Treating it as satisfied would turn an unparseable
+			// `keyUsage` into an unconstrained key.
 			if (extension.parsedValue === undefined || extension.parsedValue === null) {
 				return {
 					ok: false,
@@ -179,15 +148,9 @@ export const checkCriticalExtensions = (
 
 /**
  * A client certificate authenticates by signing in the TLS handshake, so a
- * `keyUsage` that excludes `digitalSignature` describes a key that cannot do
- * the thing this certificate is being presented to do.
- *
- * Absence is unconstrained, exactly as for `extendedKeyUsage` — RFC 5280
- * §4.2.1.3 makes the extension a restriction, not a grant.
- *
- * This also earns `keyUsage`'s place in `PROCESSED_ANYWHERE`: without it the
- * extension would be listed as recognised while nothing examined it on a
- * leaf.
+ * leaf `keyUsage` must permit `digitalSignature`. Absence is unconstrained
+ * (RFC 5280 §4.2.1.3: a restriction, not a grant). This check is what
+ * entitles `keyUsage` to its place in `PROCESSED_ANYWHERE` on a leaf.
  */
 export const checkLeafKeyUsage = (leaf: pkijs.Certificate): CriticalExtensionCheck => {
 	const extension = leaf.extensions?.find((ext) => ext.extnID === OID_KEY_USAGE);
@@ -196,12 +159,9 @@ export const checkLeafKeyUsage = (leaf: pkijs.Certificate): CriticalExtensionChe
 		| { valueBlock?: { valueHexView?: Uint8Array } }
 		| undefined;
 	const bytes = parsed?.valueBlock?.valueHexView;
-	// A `keyUsage` that is present but yields no bits is not "unconstrained" —
-	// it is a restriction that could not be read. Absence is unconstrained
-	// (handled above); an unreadable value is a refusal, because the
-	// alternative is treating a stated restriction as satisfied because we
-	// could not decode it. `keyUsage` is usually CRITICAL, which makes this the
-	// §6.1.2 "cannot process" case as well.
+	// Present but yielding no bits is a restriction that could not be read,
+	// not "unconstrained", so it is refused (usually critical, so also the
+	// §6.1.2 "cannot process" case).
 	if (bytes === undefined || bytes.length === 0) {
 		return {
 			ok: false,
@@ -223,14 +183,10 @@ export const checkLeafKeyUsage = (leaf: pkijs.Certificate): CriticalExtensionChe
 };
 
 /**
- * Whether pkijs managed to read the extension's value.
- *
- * pkijs reports failure two ways: `parsedValue` is `undefined` when the value
- * is not valid DER at all, and — for an OID it has a class for — an *empty
- * instance carrying `parsingError`* when the DER did not fit that class. The
- * second is the subtler one: the object is there, every field reads as its
- * default, and a check that only tests for `undefined` treats "could not
- * decode the restriction" as "no restriction".
+ * Whether pkijs read the extension's value. pkijs reports failure as
+ * `parsedValue === undefined` (not DER) or, for an OID it has a class for, as
+ * an empty instance carrying `parsingError`, whose fields all read as
+ * defaults, so a test for `undefined` alone reads it as "no restriction".
  */
 export const extensionValueParsed = (extension: pkijs.Extension): boolean => {
 	const value: unknown = extension.parsedValue;
@@ -247,12 +203,12 @@ export type CrlCriticalExtensionCheck =
 	| { readonly ok: false; readonly detail: string };
 
 /**
- * RFC 5280 §5.2 for the CRL's own extensions and §5.3 for its entries'. The
- * entry half matters because pkijs's `verify` never looks at entry extensions
- * at all: a critical `certificateIssuer` — the marker that an indirect CRL's
- * entries were issued by someone else — would otherwise be ignored, and the
- * serial matched against the wrong issuer. No entry extension is processed
- * here, so any critical one is a refusal.
+ * RFC 5280 §5.2 for the CRL's own extensions and §5.3 for its entries'.
+ * pkijs's `verify` never looks at entry extensions: a critical
+ * `certificateIssuer` (the marker that an indirect CRL's entries were issued
+ * by someone else) would be ignored and the serial matched against the wrong
+ * issuer. No entry extension is processed here, so any critical one is a
+ * refusal.
  */
 export const checkCrlCriticalExtensions = (
 	crl: pkijs.CertificateRevocationList,
@@ -291,13 +247,10 @@ export const checkCrlCriticalExtensions = (
 };
 
 /**
- * Critical OCSP response extensions `ocsp.mts` processes (RFC 6960 §4.4).
- *
- * §4.4: "unrecognized critical extensions in the response MUST be
- * rejected". Only the nonce is acted on — it is compared against the one the
- * request carried. The other extensions the RFC defines for a response
- * (`crlID`, `archiveCutoff`, `serviceLocator`, extended-revoke) are
- * informational and always non-critical; none is read, so none is listed.
+ * Critical OCSP response extensions `ocsp.mts` processes (RFC 6960 §4.4:
+ * "unrecognized critical extensions in the response MUST be rejected"). Only
+ * the nonce is acted on, compared against the request's. The RFC's other
+ * response extensions are informational and non-critical, and none is read.
  */
 const OCSP_PROCESSED: ReadonlySet<string> = new Set([
 	"1.3.6.1.5.5.7.48.1.2", // id-pkix-ocsp-nonce

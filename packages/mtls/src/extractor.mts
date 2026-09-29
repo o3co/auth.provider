@@ -15,24 +15,11 @@
  */
 
 /**
- * `createMtlsMechanism` factory — implements the RFC 8705 §3 client-cert-bound
- * access-token mechanism as a `TokenBindingMechanism`.
- *
- * The returned mechanism's `extract(req)` executes the total-order sequence
- * specified in Wave 2 Phase 3 spec §6, with the source-authentication step
- * added by issue #280:
- *
- *   1. Source resolve  (tls-layer by default, or header)
- *   1b. Proxy authentication — header source only: the peer that opened the
- *       connection must be in the configured trusted-proxy allowlist
- *   2. Dialect parse   (envoy XFCC / plain-PEM) — header source only
- *   3. PEM → DER       (header) / DER pluck (tls-layer)
- *   4. Validity window (notBefore <= now <= notAfter)
- *   5. PKI chain walk  (mode === "pki" only; see pki.mts §7.2)
- *   6. Thumbprint      (RFC 8705 §3.1, computeCertThumbprint)
- *   7. Return          ({ kind: "mtls", confirmation: { "x5t#S256": ... } })
- *
- * Per spec §6 (extraction algorithm) + §8 (factory contract).
+ * `createMtlsMechanism`: the RFC 8705 §3 client-certificate-bound access-token
+ * mechanism as a `TokenBindingMechanism`. `extract(req)` takes the certificate
+ * from the TLS layer (or a header from an allowlisted proxy), checks its
+ * validity window and, in the PKI modes, its chain, and returns its
+ * `x5t#S256` thumbprint (RFC 8705 §3.1). The steps are numbered in the code.
  */
 
 import { X509Certificate } from "node:crypto";
@@ -59,7 +46,7 @@ import { type DetailedPeerCertificateLike, peerChainFrom } from "./tlsChain.mjs"
 // Public type
 // ---------------------------------------------------------------------------
 
-/** Per Wave 2 Phase 3 spec §5.2. */
+/** Options for {@link createMtlsMechanism}. */
 export interface MtlsMechanismOptions {
 	/**
 	 * Where the leaf certificate comes from. Defaults to `"tls-layer"` —
@@ -72,21 +59,18 @@ export interface MtlsMechanismOptions {
 	readonly certHeader?: string;
 	readonly certHeaderDialect?: CertHeaderDialect;
 	/**
-	 * Peer addresses permitted to forward a client certificate header. Entries
-	 * use the shared trusted-proxy vocabulary owned by
-	 * `@o3co/auth-provider-core` — an IP literal, a CIDR range, or one of the
-	 * named ranges (`loopback`, `linklocal`, `uniquelocal`) — which is also
-	 * Express's own `trust proxy` vocabulary (#292). Required (non-empty) when
-	 * `source === "header"`, ignored otherwise.
+	 * Peer addresses permitted to forward a client certificate header, in
+	 * core's trusted-proxy vocabulary (also Express's `trust proxy`): an IP
+	 * literal, a CIDR range, or `loopback` / `linklocal` / `uniquelocal`.
+	 * Required (non-empty) when `source === "header"`, ignored otherwise.
 	 */
 	readonly trustedProxies?: readonly string[];
 	readonly mode: "self-signed" | "pki" | "full-pki";
 	readonly trustedCas?: readonly string[];
 	/**
-	 * Settings for `mode = "full-pki"` (#341). Required when that mode is
-	 * selected; `mtlsModule` refuses boot without the revocation decision, so
-	 * reaching here without it means a hand-built composition root, which is
-	 * caught at construction below.
+	 * Settings for `mode = "full-pki"`, required in that mode. `mtlsModule`
+	 * refuses boot without the revocation decision; a hand-built composition
+	 * root without it is caught at construction.
 	 */
 	readonly fullPki?: {
 		readonly "max-chain-depth"?: number;
@@ -114,15 +98,10 @@ const DEFAULT_CERT_HEADER = "x-forwarded-client-cert";
 const DEFAULT_DIALECT: CertHeaderDialect = "envoy";
 
 /**
- * The certificate comes from the TLS layer unless the operator says otherwise
- * (issue #280).
- *
- * The pre-#280 default was `"header"`, which meant enabling mTLS trusted an
- * `X-Forwarded-Client-Cert` value from whoever opened the connection. Anyone
- * who could reach the process could then assert any client identity — the
- * header is the credential, and nothing proved it came from the proxy. RFC
- * 8705 §3 requires the certificate to come from the TLS layer or from an
- * authenticated trusted proxy, and only one of those two is safe to assume.
+ * The certificate comes from the TLS layer unless the operator says otherwise.
+ * RFC 8705 §3 requires it to come from the TLS layer or from an authenticated
+ * trusted proxy, and only the first is safe to assume: a header trusted from
+ * anyone lets anyone who can reach the process assert any client identity.
  */
 const DEFAULT_SOURCE = "tls-layer" as const;
 
@@ -131,10 +110,8 @@ const DEFAULT_SOURCE = "tls-layer" as const;
 // ---------------------------------------------------------------------------
 
 /**
- * Node's TLSSocket exposes `getPeerCertificate({ raw: Buffer, ... })`. We
- * duck-type the bare minimum we use to keep the type surface small and to
- * avoid pulling in `tls.TLSSocket` (which would force consumers using a
- * non-TLS socket through type narrowing).
+ * The minimum of Node's TLSSocket this file uses, duck-typed so a non-TLS
+ * socket needs no narrowing to `tls.TLSSocket`.
  */
 interface TlsLikeSocket {
 	getPeerCertificate?: (detailed?: boolean) => DetailedPeerCertificateLike | undefined;
@@ -146,13 +123,10 @@ const isTlsLikeSocket = (s: unknown): s is TlsLikeSocket =>
 	typeof (s as { getPeerCertificate?: unknown }).getPeerCertificate === "function";
 
 /**
- * The address of the peer that opened this connection.
- *
- * Deliberately `req.socket.remoteAddress` and never `req.ip`: `req.ip` is
- * rewritten from `X-Forwarded-For` whenever Express `trust proxy` is on, so
- * authenticating the forwarding hop with it would mean authenticating a header
- * with another header. `undefined` (destroyed socket, Unix-domain listener) is
- * carried through and treated as untrusted by the matcher.
+ * The address of the peer that opened this connection. Never `req.ip`, which
+ * Express rewrites from `X-Forwarded-For` under `trust proxy`: that would
+ * authenticate a header with another header. `undefined` (destroyed socket,
+ * Unix-domain listener) is treated as untrusted by the matcher.
  */
 const peerAddressOf = (req: Request): string | undefined =>
 	(req.socket as { remoteAddress?: string } | undefined)?.remoteAddress;
@@ -162,47 +136,20 @@ const peerAddressOf = (req: Request): string | undefined =>
 // ---------------------------------------------------------------------------
 
 /**
- * Create an mTLS `TokenBindingMechanism`. The returned mechanism:
- *
- *   - `kind === "mtls"`.
- *   - `intentExplicit === false` — mTLS cert presentation is ambient at the
- *     transport layer (RFC 8705 §3); even when sourced from a forwarded
- *     header, the underlying signal is not an application-layer artifact.
- *   - `extract(req)` returns `null` when no cert is presented (ambient
- *     dispatch), `TokenBinding` on success, throws `MtlsError` on failure.
- *
- * Boot-time checks (defense-in-depth for programmatic callers that bypass
- * `mtlsModule`):
- *
- *   - `source === "header"` + empty `trustedProxies` → throw at construction
- *     (issue #280 — a forwarded certificate is only evidence of anything when
- *     the forwarding hop is authenticated).
- *   - `mode === "pki"` + empty `trustedCas` → throw at construction.
- *   - `mode === "pki"` + `source === "tls-layer"` → throw at construction
- *     (Codex Round 1 Important #1 fix — TLS-layer full-chain extraction
- *     is deferred to a future phase per spec §1.3).
- *
- * Per spec §8 + §11.2.
- */
-/**
  * Translate the `full-pki` config slice into the validator's options.
  *
- * The revocation block has no defaults by design (see `mtlsModule`'s boot
- * checks), so its absence here means a composition root bypassed the module
- * manifest. Refusing to construct is the only safe reading: silently choosing
- * either policy would be exactly the invisible decision the config surface
- * exists to prevent.
+ * The revocation block has no defaults by design (README, "Revocation has no
+ * defaults, on purpose"), so its absence means a composition root bypassed
+ * the module manifest, and construction is refused rather than choosing
+ * either policy silently.
  */
 const buildFullPkiValidator = (
 	options: MtlsMechanismOptions,
 	trustedCas: readonly X509Certificate[],
 	tuning: FullPkiTuning,
 ): FullPkiValidator => {
-	// `tuning` is resolved by the caller rather than read from `cfg` here, so
-	// the depth the peer-chain walk uses and the depth the validator enforces
-	// cannot come from two different reads of the same optional field. Only
-	// the revocation block is taken straight from config, because it has no
-	// defaults to resolve — its absence is a refusal, not a fallback.
+	// `tuning` comes from the caller so the peer-chain walk and the validator
+	// cannot read the chain depth twice and disagree.
 	const cfg = options.fullPki;
 	if (cfg?.revocation === undefined) {
 		throw new Error(
@@ -237,6 +184,19 @@ const buildFullPkiValidator = (
 	});
 };
 
+/**
+ * Create an mTLS `TokenBindingMechanism`:
+ *
+ *   - `kind === "mtls"`.
+ *   - `intentExplicit === false`: certificate presentation is ambient at the
+ *     transport layer (RFC 8705 §3), even when forwarded in a header.
+ *   - `extract(req)` returns `null` when no certificate is presented, a
+ *     `TokenBinding` on success, and throws `MtlsError` on failure.
+ *
+ * Configuration errors throw at construction, as defense-in-depth for
+ * callers that bypass `mtlsModule` (README, "Boot-time fail-loud
+ * invariants").
+ */
 export const createMtlsMechanism = (options: MtlsMechanismOptions): TokenBindingMechanism => {
 	const certHeader = options.certHeader ?? DEFAULT_CERT_HEADER;
 	const dialect: CertHeaderDialect = options.certHeaderDialect ?? DEFAULT_DIALECT;
@@ -245,10 +205,8 @@ export const createMtlsMechanism = (options: MtlsMechanismOptions): TokenBinding
 
 	// --- Boot-time validation (defense-in-depth; mtlsModule also enforces) ---
 
-	// Issue #280: the header source is an assertion made by whoever opened the
-	// connection. Without an allowlist naming which peers may make it, the
-	// header IS the credential and anyone routable to this process can mint one.
-	// Refuse to construct a mechanism that would accept it from anywhere.
+	// Without an allowlist of peers that may forward it, the header IS the
+	// credential and anyone routable to this process can mint one.
 	if (source === "header" && (options.trustedProxies?.length ?? 0) === 0) {
 		throw new Error(
 			'createMtlsMechanism: source = "header" requires a non-empty trustedProxies allowlist. ' +
@@ -259,12 +217,9 @@ export const createMtlsMechanism = (options: MtlsMechanismOptions): TokenBinding
 		);
 	}
 
-	// Built once at construction so a malformed allowlist entry fails boot
-	// rather than every request. Empty in tls-layer mode, where it is unused.
-	//
-	// The matcher is core's — the single trusted-proxy vocabulary shared with
-	// `http.trustProxy` (#292). Matching happens against the socket peer, never
-	// `req.ip`; see `peerAddressOf` above.
+	// Built once so a malformed allowlist entry fails boot rather than every
+	// request. Core's matcher, the vocabulary shared with `http.trustProxy`;
+	// it is matched against the socket peer (`peerAddressOf`).
 	const isTrustedProxy =
 		source === "header"
 			? createTrustedProxyMatcher(options.trustedProxies ?? [], { label: "trusted-proxies" })
@@ -279,7 +234,7 @@ export const createMtlsMechanism = (options: MtlsMechanismOptions): TokenBinding
 			);
 		}
 		// `full-pki` reads the peer chain from the TLS session (`tlsChain.mts`),
-		// so this restriction is the narrow mode's alone (#341).
+		// so this restriction is the narrow mode's alone.
 		if (mode === "pki" && source === "tls-layer") {
 			throw new Error(
 				'createMtlsMechanism: mode = "pki" with source = "tls-layer" is not supported. ' +
@@ -293,10 +248,7 @@ export const createMtlsMechanism = (options: MtlsMechanismOptions): TokenBinding
 		}
 	}
 
-	// Pre-parse trusted CAs once at construction (PKI mode only). Each entry
-	// is either a literal PEM block or a `file:<path>` reference resolved
-	// synchronously at boot — the latter mirrors the operator-friendly form
-	// documented in reference.conf and spec §7.1.
+	// Parse trusted CAs once at construction (PKI modes only).
 	const trustedCaCerts: readonly X509Certificate[] =
 		mode === "pki" || mode === "full-pki"
 			? // biome-ignore lint/style/noNonNullAssertion: boot-time check above guarantees defined for both PKI modes
@@ -315,14 +267,12 @@ export const createMtlsMechanism = (options: MtlsMechanismOptions): TokenBinding
 
 	// Built once: the CRL cache lives in the validator, so a per-request
 	// validator would re-fetch every distribution point on every token request
-	// — turning revocation checking into an amplifier pointed at the CA.
-	// Resolved once, and used by BOTH the validator and the TLS peer-chain
-	// walk below. They must agree: the walk truncates at its depth, so a walk
-	// bound that was larger than the validator's would make the validator's
-	// refusal unreachable, and one that was smaller would silently drop the
-	// anchor and report "no path to trust anchor" for a chain that was merely
-	// long. A second hardcoded copy of the default is how that divergence
-	// starts.
+	// and amplify traffic at the CA.
+	// `fullPkiTuning` is shared by the validator and the TLS peer-chain walk
+	// below, which must agree on the depth: the walk truncates at its bound, so
+	// a larger walk bound would make the validator's refusal unreachable, and a
+	// smaller one would drop the anchor ("no path to trust anchor" for a chain
+	// that is merely long).
 	const fullPkiTuning = mode === "full-pki" ? resolveFullPkiTuning(options.fullPki) : null;
 	const fullPkiValidator: FullPkiValidator | null =
 		mode === "full-pki"
@@ -344,27 +294,22 @@ export const createMtlsMechanism = (options: MtlsMechanismOptions): TokenBinding
 			if (source === "header") {
 				const headerValue = req.get(certHeader);
 				if (headerValue === undefined) {
-					// Ambient — no cert presented at this hop. Skip downstream dispatch.
-					//
-					// Checked BEFORE the proxy allowlist on purpose: absence is
-					// absence no matter who is connecting, and an ordinary unbound
-					// request from a direct client must not become an error.
+					// Ambient: no cert at this hop. Checked before the proxy
+					// allowlist so an unbound request from a direct client is not
+					// an error.
 					return null;
 				}
 
-				// --- Step 1b: Proxy authentication (issue #280) ---
+				// --- Step 1b: Proxy authentication ---
 				//
 				// RFC 8705 §3 accepts a forwarded certificate only from an
-				// authenticated trusted proxy. The peer address of the open
-				// connection is the one thing on this request the sender cannot
-				// choose, so it is what the allowlist is checked against.
+				// authenticated trusted proxy; the connection's peer address is
+				// the one thing the sender cannot choose.
 				//
-				// This REJECTS rather than returning null. Per CONTRIBUTING.md §4,
-				// `null` means "absent"; a header that is present but came from
-				// somewhere it may not come from is invalid material, and invalid
-				// material fails the request instead of downgrading it to unbound —
-				// otherwise injecting this header would be a way to strip a binding
-				// off someone else's request.
+				// Rejects rather than returning null (CONTRIBUTING.md §4): a
+				// present header from a disallowed peer is invalid material, and
+				// downgrading it to unbound would let an injected header strip a
+				// binding off someone else's request.
 				const remoteAddress = peerAddressOf(req);
 				if (!isTrustedProxy(remoteAddress)) {
 					logger?.warn({ remoteAddress, certHeader }, "mtls_untrusted_proxy_rejected");
@@ -413,12 +358,9 @@ export const createMtlsMechanism = (options: MtlsMechanismOptions): TokenBinding
 					return null;
 				}
 				if (wantsChain) {
-					// One more than the validator's bound, deliberately: the walk
-					// must be able to *present* an over-long chain so the validator
-					// is the thing that refuses it, with a message that says so.
-					// Truncating at exactly the bound would turn "chain too long"
-					// into "no path to trust anchor", which sends the operator
-					// looking at their trust anchors for a depth problem.
+					// One more than the validator's bound, so an over-long chain
+					// reaches the validator and is refused as too long, not as
+					// "no path to trust anchor".
 					const chain = peerChainFrom(peer, (fullPkiTuning?.maxChainDepth ?? 6) + 1);
 					// `peerChainFrom` returns null only for the empty-raw case the
 					// branch above already answered, so this is the same absence.
@@ -441,10 +383,8 @@ export const createMtlsMechanism = (options: MtlsMechanismOptions): TokenBinding
 			// biome-ignore lint/style/noNonNullAssertion: leafDer is set in both branches above
 			const der = leafDer!;
 
-			// Parse to X509Certificate for validity + chain steps. `new X509Certificate(der)`
-			// throws DOMException / Error on malformed DER — wrap to MtlsError so the
-			// audit pipeline gets the structured reason. Every parser's refusal here
-			// is wrapped the same way: fixed text, the parser's error as `cause`.
+			// Every parser's refusal here becomes an MtlsError with fixed text and
+			// the parser's error as `cause`.
 			let x509: X509Certificate;
 			let chainCerts: readonly X509Certificate[] = [];
 			try {
@@ -558,21 +498,11 @@ export const createMtlsMechanism = (options: MtlsMechanismOptions): TokenBinding
 // ---------------------------------------------------------------------------
 
 /**
- * Resolve a single `trustedCas` entry into a PEM string. Supports two forms:
- *
- *   - Literal PEM block (starts with `-----BEGIN CERTIFICATE-----`) — passed
- *     through verbatim.
- *   - `file:<path>` — the file at `<path>` is read synchronously at boot
- *     and its contents returned. The path is taken as-is (absolute or
- *     relative to the auth-provider process's cwd); operators are expected
- *     to provide absolute paths via reference.conf or env-substituted HOCON.
- *
- * Sync I/O is appropriate here because it runs once at module construction
- * (boot time), before any request is served. A file-read failure throws a
- * plain Error with the entry index for operator debugging, the read's error
- * (its `code`, `ENOENT` / `EACCES`) as `cause`.
- *
- * Per Wave 2 Phase 3 spec §7.1.
+ * Resolve a `trustedCas` entry into PEM: a literal PEM block passes through,
+ * and `file:<path>` is read as-is (absolute, or relative to the process cwd).
+ * Sync I/O is fine because this runs once at construction, before any
+ * request. A read failure throws with the entry index and the read's error as
+ * `cause`.
  */
 const resolveTrustedCaEntry = (entry: string, index: number): string => {
 	if (entry.startsWith("file:")) {
@@ -590,12 +520,8 @@ const resolveTrustedCaEntry = (entry: string, index: number): string => {
 };
 
 /**
- * Split a possibly-multi-PEM string into individual PEM blocks. Used for
- * XFCC Chain= which may concatenate multiple intermediate certs.
- *
- * Returns an empty array for empty input. Block ordering is preserved
- * (informational only — `validateCertChain` is order-independent via
- * `find()` lookup, so callers are not required to present leaf-first).
+ * Split XFCC `Chain=`, which may concatenate several PEM certificates, into
+ * PEM blocks in order. Order does not matter to `validateCertChain`.
  */
 const splitPemBlocks = (multiPem: string): readonly string[] => {
 	const BEGIN = "-----BEGIN CERTIFICATE-----";

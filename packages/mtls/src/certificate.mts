@@ -16,17 +16,12 @@
 import { X509Certificate } from "node:crypto";
 
 /**
- * Parsed leaf certificate with DER bytes, optional chain, and diagnostic
- * metadata populated from `node:crypto`'s `X509Certificate`.
+ * Parsed leaf certificate: DER bytes, an optional chain, and diagnostic
+ * metadata from `node:crypto`'s `X509Certificate`.
  *
- * The `der` field is the canonical source of truth for thumbprinting per
- * RFC 8705 §3.1: `SHA-256(der)` → `cnf.x5t#S256`.
- *
- * The `parsed` sub-object is a diagnostic convenience — field names mirror
- * the `X509Certificate` property names, serialized as ISO-8601 / RFC 5280
- * GeneralizedTime strings for logging and audit emission.
- *
- * Per Wave 2 Phase 3 spec §5.3.
+ * `der` is the thumbprint input (RFC 8705 §3.1: `SHA-256(der)` →
+ * `cnf.x5t#S256`). `parsed` is for logging and audit only; its field names
+ * mirror `X509Certificate`'s properties.
  */
 export interface ClientCertificate {
 	/** DER-encoded leaf certificate bytes — the thumbprint input. */
@@ -49,17 +44,12 @@ export interface ClientCertificate {
 }
 
 /**
- * Parse DER bytes into a `ClientCertificate`, optionally attaching intermediate
- * chain DER entries.
+ * Parses DER bytes into a `ClientCertificate`, optionally attaching the
+ * intermediate chain's DER entries. Uses `node:crypto`'s `X509Certificate`:
+ * RFC 8705 §7.5 asks for an established X.509 library, not a custom parser.
  *
- * Uses `new X509Certificate(der)` from `node:crypto` (Node ≥ 15.6) per
- * RFC 8705 §7.5's mandate to use an established X.509 library rather than
- * a custom parser.
- *
- * Throws a plain `Error` on parse failure — the call site (extractor.mts
- * step 3) wraps it into `MtlsError("cert_decode_failed", …)`.
- *
- * Per Wave 2 Phase 3 spec §5.3 + §6.3.
+ * Throws a plain `Error` on parse failure; the call site in `extractor.mts`
+ * wraps it into `MtlsError("cert_decode_failed", …)`.
  */
 export const parseDerToCertificate = (
 	der: Uint8Array,
@@ -70,12 +60,9 @@ export const parseDerToCertificate = (
 	// the correct MtlsReasonCode context.
 	const x509 = new X509Certificate(der);
 
-	// Defense-in-depth: copy DER bytes on construction so a downstream
-	// caller holding a reference to the input buffer cannot tamper with the
-	// thumbprint source after parse (Codex Round 1 Important #4). The
-	// `readonly` modifier on the type only protects the property *assignment*,
-	// not the underlying byte mutation. Realistic cert size is 1-3KB; one
-	// allocation per parse is a free defensive lock-down.
+	// Defense in depth: copy the DER bytes so a caller holding the input
+	// buffer cannot tamper with the thumbprint source after parse. `readonly`
+	// on the type protects the property assignment, not the bytes.
 	const derCopy = new Uint8Array(der);
 	const chainCopy = chain !== undefined ? chain.map((entry) => new Uint8Array(entry)) : undefined;
 

@@ -17,22 +17,17 @@
 /**
  * Signature-algorithm and key-strength policy for `mode = "full-pki"`.
  *
- * RFC 5280 §6.1.4 leaves the acceptable algorithm set to local policy, and
- * without one "acceptable" means "whatever OpenSSL was built to parse". That
- * is not a decision a deployment made; it is a decision its base image made.
- * A certificate signed with SHA-1 still verifies, and a chain is only as
- * strong as its weakest hop — so the policy is applied to **every**
- * certificate on the validated path, anchors included, not just the leaf;
- * and to the revocation material about them — a CRL's signature, an OCSP
- * response's signature, and a delegated responder's certificate — because
- * pkijs verifies `sha1WithRSAEncryption` and `ecdsa-with-SHA1` as readily
- * as it does a certificate's, and a SHA-1-signed "not revoked" is no better
- * evidence than a SHA-1-signed certificate (#470).
+ * RFC 5280 §6.1.4 leaves the algorithm set to local policy; without one it is
+ * whatever OpenSSL in the base image parses, SHA-1 included. A chain is only
+ * as strong as its weakest hop, so the policy applies to every certificate on
+ * the validated path, anchors included, and to the revocation material about
+ * them (CRL and OCSP response signatures, a delegated responder's
+ * certificate): pkijs verifies SHA-1 signatures there too, and a SHA-1-signed
+ * "not revoked" is no better evidence than a SHA-1-signed certificate.
  *
- * Names rather than OIDs in config: an operator reviewing
- * `signature-algorithms` should be able to see what it says. Unknown names
- * fail at boot rather than silently matching nothing, which would leave a
- * deployment believing it had a policy while rejecting every certificate.
+ * Config uses names, not OIDs, so an operator can read it. Unknown names fail
+ * at boot rather than silently matching nothing and rejecting every
+ * certificate.
  */
 
 import type { X509Certificate } from "node:crypto";
@@ -99,12 +94,10 @@ export type SignatureAlgorithmCheck =
 	| { readonly ok: false; readonly detail: string };
 
 /**
- * Whether a signature algorithm is one the policy names — the half of the
- * policy that applies to any signed object, not only to a certificate. A CRL
- * and an OCSP response carry a `signatureAlgorithm` exactly as a certificate
- * does, and are held to the same allowlist (#470). The detail names the
- * algorithm as the config vocabulary does when it can, and by OID when it
- * cannot — SHA-1 has no name here, deliberately.
+ * Whether a signature algorithm is one the policy names: the half of the
+ * policy that applies to any signed object (certificate, CRL, OCSP response).
+ * The detail names the algorithm by its config name when it has one, by OID
+ * otherwise (SHA-1 has no name here, deliberately).
  */
 export const checkSignatureAlgorithm = (
 	signatureAlgorithmOid: string,
