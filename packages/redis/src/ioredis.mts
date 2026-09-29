@@ -2735,7 +2735,10 @@ return 1
  * the incarnation, `ARGV[3]` = how many fields to write (n), then n field,
  * value pairs, then the fields to remove. Returns every field as written, or
  * nil. `HINCRBY` moves the version: Redis's integer arithmetic stays exact
- * where a Lua number's text (14 significant digits) would not.
+ * where a Lua number's text (14 significant digits) would not. It never
+ * leaves the safe integers: the store refuses an update at
+ * `Number.MAX_SAFE_INTEGER` before this runs (core's
+ * `checkMfaVersionAdvances`).
  */
 const LUA_MFA_TX_UPDATE = `
 local held = redis.call('HMGET', KEYS[1], 'version', 'incarnation')

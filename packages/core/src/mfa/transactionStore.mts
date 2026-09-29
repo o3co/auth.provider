@@ -449,7 +449,9 @@ export interface MfaTransactionStore {
 	 * {@link MfaTransactionPatch} and bumps `version` by one, only if the
 	 * transaction is still at `expectedVersion`. Answers the transaction as
 	 * written, or `null` when the version moved or it is gone. A patch value a
-	 * field does not admit is a `RangeError`, whatever the version.
+	 * field does not admit is a `RangeError`, whatever the version; so is an
+	 * `expectedVersion` of `Number.MAX_SAFE_INTEGER`, whose next version would
+	 * be no safe integer (`checkMfaVersionAdvances`).
 	 */
 	update(
 		id: string,

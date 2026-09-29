@@ -72,6 +72,7 @@ import { createHash, randomBytes } from "node:crypto";
 import {
 	checkMfaLockoutPolicy,
 	checkMfaTransactionTransitions,
+	checkMfaVersionAdvances,
 	consoleLogger,
 	defineModule,
 	isStorableExpiry,
@@ -269,6 +270,9 @@ export function createRedisMfaTransactionStore(
 
 		async update(id, expectedVersion, patch) {
 			const writes = mfaTransactionPatchWrites(patch);
+			// Refused before the read: HINCRBY past it would write 2^53, which
+			// `transactionOf` refuses, leaving the transaction unreadable.
+			checkMfaVersionAdvances(expectedVersion, "MfaTransactionStore.update");
 			const key = txKey(id);
 			const fields = await client.read(key);
 			const current = transactionOf(fields, id, clock());

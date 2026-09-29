@@ -562,6 +562,7 @@ export {
 	mfaTransactionPatchWrites,
 	newMfaTransactionRecord,
 } from "./mfa/transactionStore.mjs";
+export { checkMfaVersionAdvances } from "./mfa/version.mjs";
 // Middleware — CORS for the browser-facing OAuth surface (#500)
 export {
 	browserFacingCorsRoutes,
