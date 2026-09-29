@@ -177,7 +177,14 @@ describe("createTestSessionCookiePolicy", () => {
 
 describe("sessionCookiePolicyContract — each way a policy can break it", () => {
 	it("a name that is not a cookie name", async () => {
-		for (const name of ["", "auth session", "auth;session", "auth=session", "sessión"]) {
+		for (const name of [
+			"",
+			"auth session",
+			"auth;session",
+			"auth=session",
+			"sessión",
+			42 as unknown as string,
+		]) {
 			expect(await failing(() => createTestSessionCookiePolicy({ name }))).toEqual([RULES.name]);
 		}
 	});

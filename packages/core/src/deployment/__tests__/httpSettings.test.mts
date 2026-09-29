@@ -169,6 +169,12 @@ describe("httpSettingsContract — each way the settings can break it", () => {
 		}
 	});
 
+	it("an allowed origin that is not a string", async () => {
+		expect(
+			await failing(() => createTestHttpSettings({ allowedOrigins: [42 as unknown as string] })),
+		).toEqual([RULES.cors]);
+	});
+
 	it("an allowed origin that is not one: a trailing slash, a path, a wildcard, a default port", async () => {
 		for (const origin of [
 			"https://app.example.com/",

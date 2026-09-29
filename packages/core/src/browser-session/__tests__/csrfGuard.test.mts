@@ -270,6 +270,31 @@ describe("csrfGuardContract — the double", () => {
 			[],
 		);
 	});
+
+	it("keeps them beside a __Secure- session cookie", async () => {
+		const sessionCookie = createTestSessionCookiePolicy({ name: "__Secure-auth.session" });
+		expect(await failing(() => createTestCsrfGuard({ sessionCookie }), { sessionCookie })).toEqual(
+			[],
+		);
+	});
+
+	it("keeps them when a refusal also marks the response through Express's header setters", async () => {
+		expect(
+			await failing(() => {
+				const original = createTestCsrfGuard({ trustedOrigins: [TRUSTED] });
+				const middleware: RequestHandler = (req, res, next) => {
+					if (original.check(req).outcome === "accepted") return next();
+					res.set("Cache-Control", "no-store").header("Pragma", "no-cache");
+					res.setHeader("X-Content-Type-Options", "nosniff");
+					if (res.get("Cache-Control") !== "no-store" || res.getHeader("Pragma") !== "no-cache") {
+						throw new Error("a header set on the response was lost");
+					}
+					res.status(403).json({ error: "access_denied" });
+				};
+				return Object.freeze({ ...original, middleware });
+			}),
+		).toEqual([]);
+	});
 });
 
 describe("createTestCsrfGuard", () => {
@@ -479,6 +504,51 @@ describe("csrfGuardContract — each way a guard can break it", () => {
 				}),
 			),
 		).toContain(RULES.middleware);
+	});
+
+	it("a refusal with no RFC 6749 body, or a middleware that throws", async () => {
+		const withMiddleware = (middleware: (original: CsrfGuard) => RequestHandler) => () => {
+			const original = createTestCsrfGuard({ trustedOrigins: [TRUSTED] });
+			return Object.freeze({ ...original, middleware: middleware(original) });
+		};
+		const refusing =
+			(refuse: (res: Response) => void) =>
+			(original: CsrfGuard): RequestHandler =>
+			(req, res, next) => {
+				if (original.check(req).outcome === "accepted") return next();
+				refuse(res);
+			};
+		expect(await failing(withMiddleware(refusing((res) => res.sendStatus(403))))).toContain(
+			RULES.middleware,
+		);
+		expect(await failing(withMiddleware(refusing((res) => res.status(403).end())))).toContain(
+			RULES.middleware,
+		);
+		expect(
+			await failing(
+				withMiddleware(() => () => {
+					throw new Error("the guard's own failure");
+				}),
+			),
+		).toContain(RULES.middleware);
+	});
+
+	it("a token cookie set with no attributes, or a SameSite given as Express's boolean", async () => {
+		expect(
+			await failing(() => {
+				const original = createTestCsrfGuard({ trustedOrigins: [TRUSTED] });
+				return Object.freeze({
+					...original,
+					issue: (res: Response) => {
+						const { res: scratch } = scratchResponse();
+						const token = original.issue(scratch);
+						res.cookie(original.cookieName, token);
+						return token;
+					},
+				});
+			}),
+		).toContain(RULES.cookie);
+		expect(await failing(issuingWith({ sameSite: true }))).toContain(RULES.cookie);
 	});
 
 	it("a guard a reader could change under the others", async () => {

@@ -300,6 +300,16 @@ describe("loginCompletionContract — the recording double", () => {
 		await run();
 	});
 
+	it("keeps them over no session store: no sid answered, no record written", async () => {
+		expect(
+			await failing({
+				build: () => createRecordingLoginCompletion({ csrfGuard: GUARD, sessionRecords: false }),
+				records: () => 0,
+				csrfCookieName: GUARD.cookieName,
+			}),
+		).toEqual([]);
+	});
+
 	it("keeps them with no CSRF guard, and with no records counted", async () => {
 		expect(
 			await failing({
@@ -409,6 +419,31 @@ describe("createRecordingLoginCompletion", () => {
 			reporter: { storeUnavailable: () => {} },
 		});
 		expect(issued, "the 403 carries a fresh token").toBe(1);
+	});
+
+	it("keeps the login's redirect_to on the session, and answers a request with no express session as the cookie session's outage", async () => {
+		const completion = createRecordingLoginCompletion();
+		const admission = await admitPrimary(
+			deps([]),
+			passwordPrimary({
+				subject: "user-1",
+				user: { id: "user-1" },
+				claims: {},
+				authTime: new Date(),
+				redirectTo: "https://rp.example.test/after",
+				request: {},
+			}),
+		);
+		if (admission.outcome !== "establish") throw new Error("nothing interrupts");
+		const req = requestWithSession();
+		await completion.establishSession(admission.establishment, { req, reporter: silentReporter });
+		expect(sessionOf(req).redirectTo).toBe("https://rp.example.test/after");
+		expect(
+			await completion.establishSession(admission.establishment, {
+				req: { headers: {} } as unknown as Request,
+				reporter: silentReporter,
+			}),
+		).toEqual({ outcome: "unavailable", store: "cookie_session", step: "regenerate" });
 	});
 
 	it("stands in for a session store that is down until it recovers", async () => {
@@ -695,6 +730,31 @@ describe("loginCompletionContract — each way a completion can break it", () =>
 		).toContain(RULES.established);
 	});
 
+	it("an established login that reports an outage, a failed rollback or a lost index write", async () => {
+		for (const report of [
+			(reporter: ReturnType<LoginEstablishmentCall["reporter"]>) =>
+				reporter.cleanupFailed("user_session", "delete", new Error("x")),
+			(reporter: ReturnType<LoginEstablishmentCall["reporter"]>) =>
+				reporter.subjectIndexWriteFailed(new Error("x")),
+		]) {
+			expect(
+				await failing(
+					broken((original) => ({
+						establishSession: (establishment, call) =>
+							original.establishSession(establishment, {
+								...call,
+								reporter: (record) => {
+									const reporter = call.reporter(record);
+									report(reporter);
+									return reporter;
+								},
+							}),
+					})),
+				),
+			).toContain(RULES.established);
+		}
+	});
+
 	it("a reporter built for another record, or more than once", async () => {
 		expect(
 			await failing(
@@ -798,6 +858,7 @@ describe("loginCompletionContract — each way a completion can break it", () =>
 						if (result.outcome === "unavailable") {
 							call.res.clearCookie(GUARD.cookieName, { path: "/" });
 							call.res.vary("Cookie");
+							call.res.vary("Origin");
 							call.res.append("Cache-Control", "no-store");
 							call.res.type("json");
 						}
