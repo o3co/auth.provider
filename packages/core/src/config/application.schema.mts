@@ -311,6 +311,30 @@ const REMOVED_DPOP_FIELDS: readonly RemovedKey[] = [
 	},
 ];
 
+/**
+ * A duration an operator wrote, read strictly (#593).
+ *
+ * `z.coerce.number()` is the house default for a value HOCON may substitute as
+ * a string, and for most sections it is right. It is wrong for this block, and
+ * Copilot named why: `Number()` reads `null` and `[]` as `0`, `true` as `1` and
+ * `"1e3"` as `1000`, so a malformed duration was NORMALISED here and the
+ * package's own strict reader — which refuses exactly those — never saw the
+ * value an operator wrote. `tombstoneRetention: null` silently disabled
+ * tombstones; `refreshBuffer: null` handed out tokens with milliseconds left.
+ *
+ * So: a number, or the plain decimal string an environment variable arrives
+ * as. Anything that would have to be converted to be understood was not
+ * written as a duration, and fails boot naming the key.
+ */
+const durationFromEnv = (bounds: z.ZodNumber) =>
+	z.preprocess((value) => {
+		if (typeof value === "number") return value;
+		if (typeof value === "string" && /^\d+$/.test(value.trim())) return Number(value.trim());
+		// Handed through unchanged, and refused by `bounds` with a message that
+		// names what is acceptable.
+		return value;
+	}, bounds);
+
 const jwtSchemaBase = z.object({
 	// The issuer is a property of the deployment, not of a request. It is
 	// REQUIRED: `/oauth/token` used to fall back to `req.get("host")` when this
@@ -342,9 +366,11 @@ const jwtSchemaBase = z.object({
 	// Operator-tunable; defaults to 300 (applied by `resolveJwksCacheMaxAge`).
 	// Keep well below the key-overlap window so a rotated kid propagates to
 	// caching verifiers in time. See `core/src/jwks/cache.mts`.
-	// `z.coerce` for the #288 reason: a `${?VAR}` an operator's file sets it
-	// from arrives as a string (#728: no bridge coerces it on the way).
-	jwksCacheMaxAge: z.coerce.number().int().nonnegative().optional(),
+	// Read strictly (`durationFromEnv`): the plain decimal string a `${?VAR}`
+	// an operator's file sets it from arrives as (#728: no bridge coerces it on
+	// the way), and nothing `Number()` would read as 0 or 1 — an empty
+	// variable is refused, not served as `max-age=0`.
+	jwksCacheMaxAge: durationFromEnv(z.number().int().nonnegative()).optional(),
 	// SF-1 (v0.5.1): when true, the central JWT verifier accepts tokens whose
 	// `typ` header is absent and emits a deprecation warning. No schema
 	// default — per the v0.5.1 ADR the literal lives in `reference.conf`,
@@ -1265,30 +1291,6 @@ export function composeConfigSchema(moduleSchemas: z.ZodObject<z.ZodRawShape>[])
 	}
 	return schema;
 }
-
-/**
- * A duration an operator wrote, read strictly (#593).
- *
- * `z.coerce.number()` is the house default for a value HOCON may substitute as
- * a string, and for most sections it is right. It is wrong for this block, and
- * Copilot named why: `Number()` reads `null` and `[]` as `0`, `true` as `1` and
- * `"1e3"` as `1000`, so a malformed duration was NORMALISED here and the
- * package's own strict reader — which refuses exactly those — never saw the
- * value an operator wrote. `tombstoneRetention: null` silently disabled
- * tombstones; `refreshBuffer: null` handed out tokens with milliseconds left.
- *
- * So: a number, or the plain decimal string an environment variable arrives
- * as. Anything that would have to be converted to be understood was not
- * written as a duration, and fails boot naming the key.
- */
-const durationFromEnv = (bounds: z.ZodNumber) =>
-	z.preprocess((value) => {
-		if (typeof value === "number") return value;
-		if (typeof value === "string" && /^\d+$/.test(value.trim())) return Number(value.trim());
-		// Handed through unchanged, and refused by `bounds` with a message that
-		// names what is acceptable.
-		return value;
-	}, bounds);
 
 const federationEntrySchema = z
 	.object({

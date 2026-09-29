@@ -33,7 +33,9 @@ export const DEFAULT_JWKS_CACHE_MAX_AGE = 300;
  * `resolveJwksPath` — it simply centralizes the config key + default.
  *
  * Intentionally lenient: the config schema is the authoritative guard (it
- * rejects negative / non-integer / non-number values at parse time), so at
+ * reads the plain decimal string an environment variable carries, and
+ * rejects negative / non-integer / non-number values — an empty variable
+ * included — at parse time), so at
  * runtime `configured` is either a valid non-negative integer or absent.
  * The defensive check falls back to the default for callers that bypass the
  * schema (hand-built config objects).
