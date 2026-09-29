@@ -15,15 +15,12 @@
  */
 
 /**
- * #542 — the id_token's signature is verified against Google's JWKS.
- *
- * openid-client 6 treats an id_token returned by the token endpoint as
- * delivered over TLS and does not verify its signature on the code flow
- * unless `enableNonRepudiationChecks` is on; a `jwks_uri` in the metadata
- * fetches nothing by itself. The provider's comments said otherwise, and
- * nothing exercised the claim. These cases run the real library against a
- * fake Google that records every request and signs real RS256 tokens, so what
- * is asserted is what the code does.
+ * The id_token's signature is verified against Google's JWKS. openid-client 6
+ * treats an id_token returned by the token endpoint as delivered over TLS and
+ * does not verify its signature on the code flow unless
+ * `enableNonRepudiationChecks` is on; a `jwks_uri` in the metadata fetches
+ * nothing by itself. These cases run the real library against a fake Google
+ * that records every request and signs real RS256 tokens.
  */
 
 import { createFakeIdp } from "@o3co/auth-provider-core/testing";
@@ -57,7 +54,7 @@ const exchange = (provider: GoogleProvider) =>
 		codeVerifier: VERIFIER,
 		redirectUri: CALLBACK,
 		nonce: "nonce-1",
-		// #597: Google always returns `iss`, and the provider now requires it.
+		// Google always returns `iss`, and the provider requires it.
 		callbackParams: { iss: GOOGLE.issuer },
 	});
 
@@ -70,7 +67,7 @@ describe("Google id_token signature verification (#542)", () => {
 		const { idp, provider } = await build();
 		const profile = await exchange(provider);
 		expect(profile.sub).toBe(idp.sub);
-		// Before #542 this was zero: the token was accepted without a key.
+		// Zero would mean the token was accepted without a key.
 		expect(idp.requestsTo(GOOGLE.jwksUri)).toHaveLength(1);
 		expect(idp.requestsTo(GOOGLE.tokenEndpoint)).toHaveLength(1);
 		expect(idp.requestsTo(GOOGLE.userinfoEndpoint)).toHaveLength(1);

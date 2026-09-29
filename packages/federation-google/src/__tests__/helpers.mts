@@ -39,16 +39,11 @@ const DEFAULT_AUD = "test-client-id";
 const DEFAULT_SUB = "google-user-123";
 
 /**
- * Mints a realistic RS256-signed id_token for federation provider tests. Returns
- * the signed JWT, a matching JWKS (mountable on a mock `jwks_uri` endpoint), the
- * resolved `sub`, and the full claim set so that mocks of `tokens.claims()` can
- * mirror the JWT body verbatim.
- *
- * Production providers verify id_tokens via openid-client. Tests in this package
- * mock `oidc.authorizationCodeGrant` directly, so this helper exists to give the
- * mock realistic-shaped inputs (rather than opaque `"it"` placeholders) and to
- * pre-compute the JWKS for any test that inspects the verification pipeline at a
- * future integration tier (msw + real openid-client).
+ * Mints an RS256-signed id_token for federation provider tests. Returns the
+ * signed JWT, a matching JWKS (mountable on a mock `jwks_uri` endpoint), the
+ * resolved `sub`, and the full claim set, so a mock of `tokens.claims()` can
+ * mirror the JWT body verbatim. Tests that mock `oidc.authorizationCodeGrant`
+ * use it for realistic-shaped inputs.
  */
 export async function makeTestGoogleIdToken(
 	overrides: TestIdTokenClaims = {},

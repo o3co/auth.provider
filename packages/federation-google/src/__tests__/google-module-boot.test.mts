@@ -15,23 +15,12 @@
  */
 
 /**
- * End-to-end boot integration test for `googleFederationModule` (Cl-M2).
- *
- * Boots the const-Module through `createApp` together with a small
- * bootstrap module that supplies `googleFederationConfig`, and asserts the
- * pairing invariant materialises both contributions in `handle.components`:
- *
- * - `federationProviders.get("google")` — the upstream OIDC protocol
- *   provider (FederationProvider).
- * - `federationRedirectPolicyResolver.get("google")` — the consumer
- *   redirect-URL policy (FederationRedirectPolicy).
- *
- * Earlier shape tests in `google-module.test.mts` only assert the const
- * Module's static surface; this test exercises the actual planner pipeline
- * (validate-manifests pairing check + applyContributions synthetic
- * projection) end-to-end.
- *
- * Per A5 §10.1 + Cl-M2.
+ * Boots `googleFederationModule` through `createApp` and asserts the pairing
+ * invariant puts both contributions in `handle.components`: the
+ * FederationProvider at `federationProviders.get("google")` and the
+ * FederationRedirectPolicy at `federationRedirectPolicyResolver.get("google")`.
+ * The shape tests in `google-module.test.mts` cover only the static surface;
+ * this runs the planner's pairing check and projection.
  */
 import type { FederationProvider } from "@o3co/auth-provider-core";
 import { createApp, defineModule } from "@o3co/auth-provider-core";
