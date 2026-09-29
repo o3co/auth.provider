@@ -108,6 +108,7 @@ const makeApp = (
 			userRepository,
 			requirements: resolverForTests([]),
 			config: opts.config ?? stubConfig,
+			deploymentMode: "unset",
 			...(opts.rateLimiter ? { rateLimiter: opts.rateLimiter } : {}),
 			...(opts.auditSink ? { auditSink: opts.auditSink } : {}),
 		}),
@@ -246,6 +247,7 @@ describe("/session/login rate limiting — fallback", () => {
 			userRepository,
 			requirements: resolverForTests([]),
 			config: stubConfig,
+			deploymentMode: "unset",
 			logger: { warn, info: vi.fn(), error: vi.fn(), debug: vi.fn() } as never,
 		});
 		expect(warn).toHaveBeenCalled();

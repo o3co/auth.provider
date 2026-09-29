@@ -238,6 +238,7 @@ function setup(options: Setup = {}) {
 		createRouter(express, {
 			userRepository,
 			config,
+			deploymentMode: "unset",
 			userSessionStore,
 			subjectSessionIndex: subjectSessionIndex as never,
 			csrf,
@@ -301,6 +302,7 @@ describe("the session router takes the session requirements", () => {
 			createRouter(express, {
 				userRepository: {} as UserRepository,
 				config,
+				deploymentMode: "unset",
 				csrf,
 				logger: spyLogger() as unknown as Logger,
 				requirements: undefined as never,
@@ -314,6 +316,7 @@ describe("the session router takes the session requirements", () => {
 			createRouter(express, {
 				userRepository: {} as UserRepository,
 				config,
+				deploymentMode: "unset",
 				csrf,
 				logger: spyLogger() as unknown as Logger,
 				requirements: forged as never,

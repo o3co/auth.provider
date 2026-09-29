@@ -1439,7 +1439,7 @@ describe("Session routes — a store that cannot answer is an outage, logged onc
 			destroyError: new Error("cookie store down"),
 			initialSession: { isAuthenticated: true, sid: "sid-1", user: { id: "u-1" } },
 			logger: logger as unknown as Logger,
-			config,
+			deploymentMode,
 		});
 
 		const res = await logoutRequest(app);
@@ -1466,7 +1466,7 @@ describe("Session routes — a store that cannot answer is an outage, logged onc
 				addSid: vi.fn().mockRejectedValue(new Error("subject index down")),
 			}),
 			logger: logger as unknown as Logger,
-			config,
+			deploymentMode,
 		});
 
 		const res = await login(app);
