@@ -19,10 +19,11 @@ import { cpSync, existsSync, mkdirSync, readdirSync, renameSync, rmSync } from "
 import { resolve, sep } from "node:path";
 
 /**
- * A template's name is a CLI argument and, in CI, a Docker image tag, which
- * is lowercase only.
+ * A template's name is a CLI argument and, in CI, part of a Docker image tag,
+ * which is lowercase only and cannot end in a hyphen: lowercase letters and
+ * digits, in parts joined by single hyphens.
  */
-const TEMPLATE_NAME = /^[a-z0-9][a-z0-9-]*$/;
+const TEMPLATE_NAME = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 
 const EXCLUDED_DIRS = new Set(["node_modules", "dist"]);
 

@@ -148,8 +148,9 @@ Both forms must be non-empty, not `.` or `..`, and ≤ 214 characters.
 `--dir <value>` must match the unscoped pattern above (same constraints).
 
 `--template <name>` must be the name of a bundled template, exactly; a path is
-never one. A template's name is lowercase kebab-case (`^[a-z0-9][a-z0-9-]*$`);
-the build refuses a template named otherwise.
+never one. A template's name is lowercase kebab-case,
+`^[a-z0-9]+(?:-[a-z0-9]+)*$` (lowercase letters and digits, in parts joined by
+single hyphens); the build refuses a template named otherwise.
 
 ## Known Limitations
 
