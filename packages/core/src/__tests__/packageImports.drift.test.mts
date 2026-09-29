@@ -55,8 +55,10 @@
  *   the exemption cannot outlive the directory.
  *
  * What it does not follow is left to review: a specifier assembled at run
- * time outside product code, a package reached through a symlink or an
- * absolute path, and a file in a workspace outside its `src/`.
+ * time outside product code; a require function bound under another name
+ * (`const req = createRequire(…)`, which core uses for `express` alone), whose
+ * calls are not read; a package reached through a symlink or an absolute
+ * path; and a file in a workspace outside its `src/`.
  */
 
 import { type Dirent, readdirSync, readFileSync } from "node:fs";
