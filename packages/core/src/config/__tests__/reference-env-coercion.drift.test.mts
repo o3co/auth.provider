@@ -63,12 +63,40 @@ describe("every leaf core's schema declares reads the string an environment vari
 describe("the two leaves the bridge used to coerce, read from the strings an operator's variables carry", () => {
 	const base = makeValidCoreConfig();
 
-	it("oauth.jwt.jwksCacheMaxAge", () => {
-		const parsed = TransitionalConfigSchema.parse({
+	const withMaxAge = (jwksCacheMaxAge: unknown) =>
+		TransitionalConfigSchema.safeParse({
 			...base,
-			oauth: { ...base.oauth, jwt: { ...base.oauth.jwt, jwksCacheMaxAge: "600" } },
+			oauth: { ...base.oauth, jwt: { ...base.oauth.jwt, jwksCacheMaxAge } },
 		});
-		expect(parsed.oauth.jwt.jwksCacheMaxAge).toBe(600);
+
+	it("oauth.jwt.jwksCacheMaxAge, from the plain decimal string a variable carries", () => {
+		for (const [written, read] of [
+			["600", 600],
+			[" 600 ", 600],
+			["0", 0],
+			[300, 300],
+		] as const) {
+			const parsed = withMaxAge(written);
+			expect(parsed.success, JSON.stringify(written)).toBe(true);
+			if (parsed.success)
+				expect(parsed.data.oauth.jwt.jwksCacheMaxAge, JSON.stringify(written)).toBe(read);
+		}
+	});
+
+	it("oauth.jwt.jwksCacheMaxAge refuses what is not a duration, rather than reading it as 0 or 1", () => {
+		// `Number()` reads `""`, `null` and `[]` as 0 and `true` as 1: an
+		// exported-but-empty variable would serve `max-age=0`, and every
+		// verifier would refetch the JWKS on each check.
+		for (const written of ["", null, [], true, "1e3", "-1"]) {
+			const parsed = withMaxAge(written);
+			expect(parsed.success, JSON.stringify(written)).toBe(false);
+			if (!parsed.success) {
+				expect(
+					parsed.error.issues.map((issue) => issue.path.join(".")),
+					JSON.stringify(written),
+				).toEqual(["oauth.jwt.jwksCacheMaxAge"]);
+			}
+		}
 	});
 
 	it("redisFederationTokenStore.scanFallback", () => {
