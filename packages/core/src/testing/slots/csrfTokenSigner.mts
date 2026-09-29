@@ -215,8 +215,8 @@ export function csrfTokenSignerContract(
 				];
 				for (const [what, p, s] of malformed) {
 					const result = verdict(signer, p, s);
-					assert.equal(result.threw, false, `verify threw on ${what}`);
-					assert.equal(result.threw ? undefined : result.value, false, `verify accepted ${what}`);
+					if (result.threw) assert.fail(`verify threw on ${what}`);
+					assert.equal(result.value, false, `verify accepted ${what}`);
 				}
 			},
 		},
@@ -316,11 +316,7 @@ export function createTestCsrfTokenSigner(): CsrfTokenSigner {
 		sign,
 		verify: (payload: string, signature: string): boolean => {
 			if (typeof payload !== "string" || typeof signature !== "string") return false;
-			try {
-				return timingSafeEqual(digestOf(sign(payload)), digestOf(signature));
-			} catch {
-				return false;
-			}
+			return timingSafeEqual(digestOf(sign(payload)), digestOf(signature));
 		},
 	});
 }

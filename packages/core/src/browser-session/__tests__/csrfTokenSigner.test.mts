@@ -191,6 +191,17 @@ describe("csrfTokenSignerContract — each way a signer can break it", () => {
 		expect(await failing({ build, other })).toEqual([RULES.shape]);
 	});
 
+	it("a signer that signs every payload alike", async () => {
+		// A signature of one letter repeated: changing a character must change it to another.
+		const alike = "A".repeat(43);
+		const build = () =>
+			signerOf(
+				() => alike,
+				(payload, signature) => typeof payload === "string" && signature === alike,
+			);
+		expect(await failing({ build, other })).toEqual([RULES.changedPayload]);
+	});
+
 	it("a verify that accepts anything", async () => {
 		const build = doubleWith(() => ({ verify: () => true }));
 		expect(await failing({ build, other })).toEqual([
@@ -250,6 +261,14 @@ describe("csrfTokenSignerContract — each way a signer can break it", () => {
 				return original.verify(payload, signature);
 			},
 		}));
+		expect(await failing({ build, other })).toEqual([RULES.malformed]);
+	});
+
+	it("a verify that coerces what it is given to a string", async () => {
+		const build = doubleWith((original) => ({
+			verify: (payload, signature) => original.verify(String(payload), String(signature)),
+		}));
+		// An object whose toString answers the signature is accepted.
 		expect(await failing({ build, other })).toEqual([RULES.malformed]);
 	});
 
