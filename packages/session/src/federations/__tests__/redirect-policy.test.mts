@@ -63,7 +63,7 @@ describe("createFederationRedirectPolicy — validateRedirect exact-match allowl
 	});
 
 	it("rejects an unlisted subdomain of the session domain", () => {
-		// Pre-#278 this passed: `sessionDomain` alone admitted every subdomain.
+		// `sessionDomain` alone admits no subdomain: this one is inside it, but unlisted.
 		const policy = createFederationRedirectPolicy(baseConfig);
 		const result = policy.validateRedirect("https://other.example.com/page");
 		expect(result.ok).toBe(false);
@@ -398,8 +398,8 @@ describe("describeRedirectRejection", () => {
 	});
 
 	/*
-	 * #405 — the same rule now guards two entry points configured in two
-	 * places, so the two allowlist reasons have to name the caller's own key.
+	 * The same rule guards two entry points configured in two places, so the
+	 * two allowlist reasons have to name the caller's own key.
 	 * A login-flow operator sent to `federations.<name>.redirectAllowlist`
 	 * edits a section that has no effect on the request they are debugging.
 	 */

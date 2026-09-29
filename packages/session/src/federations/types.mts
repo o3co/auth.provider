@@ -18,10 +18,10 @@
  * What the session router answers with internally.
  *
  * The adapter port — `FederationProvider`, `FederationProfile`, the
- * capability interfaces and their guards — moved to
- * `@o3co/auth-provider-core` with #626 P1, so that the type a federation is
- * registered with is the type `oauth` and `federation-grants` read. This
- * result type did not: nothing outside this package returns one.
+ * capability interfaces and their guards — is `@o3co/auth-provider-core`'s,
+ * so that the type a federation is registered with is the type `oauth` and
+ * `federation-grants` read. This result type is not: nothing outside this
+ * package returns one.
  */
 
 export type FederationResult<T> =

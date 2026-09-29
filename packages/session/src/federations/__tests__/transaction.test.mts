@@ -15,8 +15,9 @@
  */
 
 /**
- * The federation transaction: the record and the cookie name that replaced
- * relaxing the application session cookie (#494).
+ * The federation transaction: the record and the cookie name that carry a
+ * `form_post` federation's state, so the application session cookie is never
+ * relaxed.
  */
 
 import { describe, expect, it } from "vitest";

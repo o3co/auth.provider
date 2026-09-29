@@ -36,9 +36,9 @@ describe("mergeFederatedClaims — precedence (#279)", () => {
 		});
 
 		it("excludes every authorization-bearing and verification-bearing claim", () => {
-			// The point of #279: no federated value may reach these, and the set is
-			// the machine-readable statement of that. `emailVerified` is here because
-			// #297 made it a contract-bearing field that can gate token issuance.
+			// No federated value may reach these, and the set is the
+			// machine-readable statement of that. `emailVerified` is here because it
+			// is a contract-bearing field that can gate token issuance.
 			for (const forbidden of ["groups", "roles", "emailVerified", "scope", "permissions"]) {
 				expect(PROMOTABLE_FEDERATED_CLAIMS as readonly string[]).not.toContain(forbidden);
 			}

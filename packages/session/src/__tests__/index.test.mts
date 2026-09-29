@@ -53,10 +53,9 @@ describe("package public surface (@o3co/auth-provider-session)", () => {
 		const mod = await import("#/index.mjs");
 		const sessionModule = (mod as { sessionModule?: unknown }).sessionModule;
 		expect(sessionModule).toBeDefined();
-		// Per A2-γ §3.4: sessionModule is now a const Module — an object with a
-		// `name` field, not a factory function. Asserting object shape (rather
-		// than `typeof === "function"`) pins the v0.5.0 surface against the
-		// deleted v0.4.x factory shape.
+		// sessionModule is a const Module — an object with a `name` field, not a
+		// factory function. Asserting object shape (rather than
+		// `typeof === "function"`) rules out a factory.
 		expect(typeof sessionModule).toBe("object");
 		expect((sessionModule as { name: string }).name).toBe("session");
 	});
@@ -122,21 +121,20 @@ describe("package public surface (@o3co/auth-provider-session)", () => {
 		const mod = (await import("#/index.mjs")) as Record<string, unknown>;
 		// A federation package may hand the route layer a computed client secret,
 		// and the transaction store is this router's. The response-mode vocabulary
-		// it also needs is core's since #626 P1 — asserted absent above.
+		// it also needs is core's — asserted absent above.
 		expect(typeof mod.createFederationTransactionStore).toBe("function");
 		expect(typeof mod.deriveFederationTransactionCookieName).toBe("function");
 		expect(typeof mod.mintFederationTransactionId).toBe("function");
-		// #494: removed from the public surface with the defect it implemented.
+		// Not on the public surface: what it implemented was a defect.
 		expect("applyCrossSiteStateCookie" in mod).toBe(false);
-		// #481: the amr marker a federated login records is part of the contract.
+		// The amr marker a federated login records is part of the contract.
 		expect((mod as { FEDERATED_AMR?: unknown }).FEDERATED_AMR).toBe("fed");
 	});
 
 	it("does NOT export the deleted v0.4.x federation factory surface", async () => {
 		const mod = await import("#/index.mjs");
-		// Per A2-γ §3.4 + Phase 9 issue #98 full removal:
-		// createFederationProviderFactory and FederationProviderFactory are deleted.
-		// Federation consumers now extend via per-federation defineModule
+		// No createFederationProviderFactory / FederationProviderFactory: federation
+		// consumers extend via per-federation defineModule
 		// (see federation-google / federation-github).
 		expect((mod as Record<string, unknown>).createFederationProviderFactory).toBeUndefined();
 	});
@@ -163,7 +161,7 @@ describe("package public surface (@o3co/auth-provider-session)", () => {
 		expect((mod as Record<string, unknown>).SetupPassportContext).toBeUndefined();
 	});
 
-	// #279 — the federated claim precedence rule is part of the public surface so
+	// The federated claim precedence rule is part of the public surface so
 	// a deployment can assert on it (and on the promotable set) from its own tests.
 	it("exports the federated claim precedence surface", async () => {
 		const mod = await import("#/index.mjs");
