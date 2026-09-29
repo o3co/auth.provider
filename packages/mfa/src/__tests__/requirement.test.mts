@@ -407,9 +407,39 @@ describe("admit — D6's table under mfa.mode, with owner decision 1's rows", ()
 			expected: REAUTHENTICATE,
 		},
 		{
-			row: "required · token · an amr with no primary's marker → reauthenticate: its primary cannot be told",
+			row: "required · token · an empty amr → reauthenticate: unknown",
 			mode: "required",
-			input: aboutToken(["otp", "mfa"]),
+			input: aboutToken([]),
+			expected: REAUTHENTICATE,
+		},
+		{
+			row: "required · token · a passkey's hwk alone, no primary's marker (the WebAuthn grant, no sid) → met: a second-factor value is present",
+			mode: "required",
+			input: aboutToken(["hwk"]),
+			expected: MET,
+		},
+		{
+			row: "required · token · a synced passkey's swk alone → met",
+			mode: "required",
+			input: aboutToken(["swk"]),
+			expected: MET,
+		},
+		{
+			row: "required · token · mfa alone, which core never lets stand without a factor's own value → reauthenticate: it names no factor",
+			mode: "required",
+			input: aboutToken(["mfa"]),
+			expected: REAUTHENTICATE,
+		},
+		{
+			row: "required · token · pwd beside mfa alone → unmet: mfa names no factor",
+			mode: "required",
+			input: aboutToken(["pwd", "mfa"]),
+			expected: UNMET,
+		},
+		{
+			row: "required · token · an amr of values the rule does not know → reauthenticate",
+			mode: "required",
+			input: aboutToken(["kba"]),
 			expected: REAUTHENTICATE,
 		},
 		{

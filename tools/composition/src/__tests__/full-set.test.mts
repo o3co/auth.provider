@@ -53,7 +53,7 @@
  * (`describeOutages`, from the template's fixture).
  */
 
-import { createHash, X509Certificate } from "node:crypto";
+import { createHash, generateKeyPairSync, sign, X509Certificate } from "node:crypto";
 import { readdirSync, readFileSync } from "node:fs";
 import {
 	BootError,
@@ -62,6 +62,7 @@ import {
 	passwordSessionAuthentication,
 	type SubjectSessionIndex,
 	type UserSessionStore,
+	type WebAuthnCredentialStore,
 } from "@o3co/auth-provider-core";
 import { DEVICE_CODE_GRANT_TYPE } from "@o3co/auth-provider-device-grant";
 import {
@@ -543,6 +544,115 @@ describe("a password login the mfa requirement interrupts (the MFA ADR's F1 step
 			continuation: { interruptedBy: "mfa", primary: { subject: ALICE.sub } },
 		});
 		expect(create).not.toHaveBeenCalled();
+	});
+});
+
+/** A confidential client that signs users in with a passkey and keeps them signed in with refresh tokens. */
+const PASSKEY_APP = { id: "passkey-app", secret: "passkey-app-secret" } as const;
+
+const b64url = (bytes: Buffer | Uint8Array): string => Buffer.from(bytes).toString("base64url");
+
+/**
+ * A software passkey: a P-256 key whose public half is registered for
+ * `userId` as the WebAuthn package stores it (COSE), and an assertion over
+ * a challenge the provider issued, signed as an authenticator signs one —
+ * authenticator data (the RP id's hash, user present and verified, a
+ * counter) and the client data's hash, ECDSA over SHA-256, DER.
+ */
+function softwarePasskey(rpId: string, origin: string) {
+	const { privateKey, publicKey } = generateKeyPairSync("ec", { namedCurve: "P-256" });
+	const jwk = publicKey.export({ format: "jwk" });
+	const x = Buffer.from(jwk.x as string, "base64url");
+	const y = Buffer.from(jwk.y as string, "base64url");
+	// COSE_Key {1: 2 (EC2), 3: -7 (ES256), -1: 1 (P-256), -2: x, -3: y}, CBOR.
+	const cose = Buffer.concat([
+		Buffer.from([0xa5, 0x01, 0x02, 0x03, 0x26, 0x20, 0x01, 0x21, 0x58, 0x20]),
+		x,
+		Buffer.from([0x22, 0x58, 0x20]),
+		y,
+	]);
+	const credentialId = b64url(createHash("sha256").update(cose).digest().subarray(0, 16));
+	let counter = 0;
+	return {
+		credentialId,
+		publicKey: new Uint8Array(cose),
+		assert(challenge: string) {
+			counter += 1;
+			const clientDataJSON = Buffer.from(
+				JSON.stringify({ type: "webauthn.get", challenge, origin, crossOrigin: false }),
+			);
+			const count = Buffer.alloc(4);
+			count.writeUInt32BE(counter);
+			const authenticatorData = Buffer.concat([
+				createHash("sha256").update(rpId).digest(),
+				Buffer.from([0x05]),
+				count,
+			]);
+			const signature = sign(
+				"sha256",
+				Buffer.concat([authenticatorData, createHash("sha256").update(clientDataJSON).digest()]),
+				privateKey,
+			);
+			return {
+				id: credentialId,
+				rawId: credentialId,
+				type: "public-key",
+				response: {
+					clientDataJSON: b64url(clientDataJSON),
+					authenticatorData: b64url(authenticatorData),
+					signature: b64url(signature),
+				},
+				clientExtensionResults: {},
+			};
+		},
+	};
+}
+
+describe("a passkey sign-in under mfa.mode = required (the MFA ADR's O3; the session-admission ADR's D6 token rows)", () => {
+	it("is kept by its refresh token: the WebAuthn grant's hwk is a second-factor value, so the refresh is met without a sid or a primary's marker", async () => {
+		const { app, handle } = await boot({
+			adjust: (config) => ({ ...config, mfa: { ...config.mfa, mode: "required" } }),
+			extraClients: {
+				[PASSKEY_APP.id]: {
+					tokenEndpointAuthMethod: "client_secret_basic",
+					clientSecret: PASSKEY_APP.secret,
+					allowedScopes: ["openid"],
+					defaultScopes: ["openid"],
+					allowedGrantTypes: [WEBAUTHN_GRANT_TYPE, "refresh_token"],
+				},
+			},
+		});
+		const { webauthnCredentialStore } = handle.components as unknown as {
+			webauthnCredentialStore: WebAuthnCredentialStore;
+		};
+		const passkey = softwarePasskey("auth.test", ISSUER);
+		await webauthnCredentialStore.registerCredential({
+			userId: ALICE.sub,
+			credentialId: passkey.credentialId,
+			publicKey: passkey.publicKey,
+			signCount: 0,
+			backedUp: false,
+			createdAt: new Date(),
+		});
+		const options = await request(app).post("/oauth/webauthn/authentication/options").send({});
+		expect(options.status).toBe(200);
+		const signedIn = await request(app)
+			.post("/oauth/token")
+			.set("Authorization", basic(PASSKEY_APP))
+			.send({
+				grant_type: WEBAUTHN_GRANT_TYPE,
+				assertion: passkey.assert(options.body.challenge as string),
+			});
+		expect(signedIn.status, JSON.stringify(signedIn.body)).toBe(200);
+		expect(typeof signedIn.body.refresh_token).toBe("string");
+
+		const refreshed = await request(app)
+			.post("/oauth/token")
+			.set("Authorization", basic(PASSKEY_APP))
+			.type("form")
+			.send({ grant_type: "refresh_token", refresh_token: signedIn.body.refresh_token });
+		expect(refreshed.status, JSON.stringify(refreshed.body)).toBe(200);
+		expect(typeof refreshed.body.access_token).toBe("string");
 	});
 });
 
