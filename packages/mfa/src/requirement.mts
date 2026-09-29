@@ -51,7 +51,9 @@
  *   record it cannot use is never "none" (F3). Zero records establish under
  *   `optional`, and under `required` interrupt for a first binding
  *   (`mfa_enrollment_required`) with the counting factors the user may
- *   enroll; no enrollment witness is read before step 12 (owner decision 2).
+ *   enroll — none at all, when each refuses the user, is said at warn
+ *   (`mfa_enrollment_nothing_enrollable`, the kinds alone) and answered all
+ *   the same; no enrollment witness is read before step 12 (owner decision 2).
  *   A primary that is not a password login is established without a read:
  *   the baseline applies after `pwd` only (D13).
  *
@@ -61,6 +63,7 @@
 
 import {
 	FEDERATED_AMR,
+	type Logger,
 	MFA_AMR,
 	MFA_REQUIREMENT_NAME,
 	type MfaFactorResolver,
@@ -99,6 +102,8 @@ export interface MfaRequirementOptions {
 	 * never be written, so the baseline sends it to log in instead (D20).
 	 */
 	readonly stepUpRecordable: boolean;
+	/** Where a first binding that offers nothing is said (`mfa_enrollment_nothing_enrollable`). */
+	readonly logger: Logger;
 }
 
 const MET: RequirementVerdict = Object.freeze({ outcome: "met" });
@@ -125,7 +130,8 @@ function reachOf(factors: MfaFactorResolver): ReadonlySet<string> {
 
 /** The `mfa` requirement over `options` (see this file's header). */
 export function createMfaRequirement(options: MfaRequirementOptions): SessionRequirement {
-	const { mode, factors, factorStore, transactions, stepUpPage, stepUpRecordable } = options;
+	const { mode, factors, factorStore, transactions, stepUpPage, stepUpRecordable, logger } =
+		options;
 
 	/**
 	 * The reach of the first read — boot's, at the end of the name-keyed pass,
@@ -176,11 +182,21 @@ export function createMfaRequirement(options: MfaRequirementOptions): SessionReq
 		open: (sessionId, continuation) => transactions.open(sessionId, continuation, interruption),
 	});
 
-	/** The counting factors `user` may enroll, in registration order: what a first binding offers. */
-	const enrollableFor = (user: PrimaryAuthentication["user"]): string[] =>
-		[...factors.entries()]
-			.filter(([, factor]) => factor.counting && (factor.enrollable?.(user) ?? true))
+	/**
+	 * The counting factors `user` may enroll, in registration order: what a
+	 * first binding offers. When every one refuses this user, nothing can be
+	 * bound: said at warn, each time, with the kinds alone — never the subject.
+	 */
+	const enrollableFor = (user: PrimaryAuthentication["user"]): string[] => {
+		const counting = [...factors.entries()].filter(([, factor]) => factor.counting);
+		const enrollable = counting
+			.filter(([, factor]) => factor.enrollable?.(user) ?? true)
 			.map(([kind]) => kind);
+		if (enrollable.length === 0) {
+			logger.warn({ kinds: counting.map(([kind]) => kind) }, "mfa_enrollment_nothing_enrollable");
+		}
+		return enrollable;
+	};
 
 	return {
 		name: MFA_REQUIREMENT_NAME,

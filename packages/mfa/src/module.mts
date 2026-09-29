@@ -277,6 +277,7 @@ export function mfaModule(options: MfaModuleOptions = {}): Module {
 						}),
 						stepUpPage,
 						stepUpRecordable,
+						logger,
 					});
 					bootStates.set(deps.mfaFactorResolver, {
 						mode,
