@@ -179,7 +179,7 @@ export interface WebAuthnGrantDeps
 			GrantDependencies,
 			"config" | "keyStore" | "grantPolicy" | "refreshTokenFamilyRotation" | "logger"
 		>,
-		ProviderDeps<"webauthnCredentialStore" | "challengeCeremony"> {
+		ProviderDeps<"webauthnCredentialStore" | "challengeCeremony", "oauthTokenSettings"> {
 	readonly webauthnConfig: {
 		readonly rpId: string;
 		readonly origin: readonly string[];
@@ -219,8 +219,16 @@ export const createWebAuthnGrant = (deps: WebAuthnGrantDeps): GrantHandler => {
 	// fault, refused before any request reaches the ceremony — read per
 	// request, it was refused only after the challenge was consumed, and a
 	// missing refresh lifetime signed a refresh token with no `exp`.
-	const accessTokenExpiresIn = resolveAccessTokenLifetime(config).defaultExpiresIn;
-	const refreshTokenExpiresIn = resolveRefreshTokenLifetime(config);
+	//
+	// What it reads of `oauth {}` is the `oauthTokenSettings` slot the oauth
+	// module provides (#728) when the composition holds it; otherwise the
+	// configuration, through core's one reader of each value.
+	const tokenSettings = deps.oauthTokenSettings;
+	const accessTokenExpiresIn = (
+		tokenSettings?.accessTokenLifetime ?? resolveAccessTokenLifetime(config)
+	).defaultExpiresIn;
+	const refreshTokenExpiresIn =
+		tokenSettings?.refreshTokenExpiresIn ?? resolveRefreshTokenLifetime(config);
 	// One logger for every line this grant writes. The module hands over the
 	// deployment's; a handler built without one still reports its outages.
 	const logger = deps.logger ?? consoleLogger;
@@ -430,7 +438,8 @@ export const createWebAuthnGrant = (deps: WebAuthnGrantDeps): GrantHandler => {
 			// createWebAuthnGrant directly may still pass deps without grantPolicy;
 			// the check keeps the unit-test surface usable.
 			// ------------------------------------------------------------------
-			const resourceIndicatorEnabled = config.oauth.resourceIndicator?.enabled === true;
+			const resourceIndicatorEnabled =
+				tokenSettings?.resourceIndicatorEnabled ?? config.oauth.resourceIndicator?.enabled === true;
 
 			let policyGrantedAudience: string | null = null;
 
@@ -628,6 +637,7 @@ export const createWebAuthnGrant = (deps: WebAuthnGrantDeps): GrantHandler => {
 				// access token, which has no such second credential behind it.
 				const isPublicClient = client.tokenEndpointAuthMethod === "none";
 				const bindConfidentialClients =
+					tokenSettings?.tokenBinding.bindConfidentialClientRefreshTokens ??
 					config.oauth.tokenBinding?.bindConfidentialClientRefreshTokens === true;
 				const bindRefreshToken =
 					(bindingIsDpop || bindingIsMtls) && (isPublicClient || bindConfidentialClients);

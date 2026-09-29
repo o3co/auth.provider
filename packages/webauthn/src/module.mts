@@ -124,7 +124,12 @@ export const webauthnModule = defineModule<
 	| "challengeCeremony"
 	| "config"
 	| "keyStore",
-	"grantPolicy" | "rateLimiter" | "auditSink" | "logger" | "refreshTokenFamilyRotation",
+	| "grantPolicy"
+	| "rateLimiter"
+	| "auditSink"
+	| "logger"
+	| "refreshTokenFamilyRotation"
+	| "oauthTokenSettings",
 	typeof WEBAUTHN_SECTION_SCHEMA
 >({
 	name: "webauthn",
@@ -163,6 +168,9 @@ export const webauthnModule = defineModule<
 		// a composition that issues no refresh tokens still boots; when it IS
 		// wired, the grant is fail-closed on a store outage.
 		"refreshTokenFamilyRotation",
+		// #728 — what the grant reads of `oauth {}`, which the oauth module
+		// provides; the configuration's values when no module does.
+		"oauthTokenSettings",
 	],
 	// #363: `auditSink` is optional to wire, not optional to decide — an
 	// unfilled slot must be declared with audit.sink.type = "none" or boot
