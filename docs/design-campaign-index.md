@@ -36,7 +36,7 @@ them.
 | Phases 1–9 → v0.5.x | Module-system redesign: `defineModule` manifests, boot planner; Phase 9 = A2-γ caller migration, `LegacyModule` removal | CHANGELOG "Phase 1-9" (incl. the `LegacyModule` deletion); #100 (Phase 9) |
 | Phase 10 | Redis adapter relocation → `@o3co/auth-provider-redis` | CHANGELOG |
 | Wave 5d | Redis adapter switches + external-ioredis migration (OR-9/OR-4/IH-14; pairs with D-2 v2) | `application.schema.mts` redis keys |
-| Wave 5g | "ts-safety-batch" type-safety hardening (TS-2/TS-6) | redis/*, foundation |
+| Wave 5g | "ts-safety-batch" type-safety hardening (TS-6) | redis/*, foundation |
 | Phase F → v0.5.2/0.5.3 (2026-05-09) | Security-audit remediation batches F1–F13: D-* closures, error-envelope unification, TOCTOU re-checks, limiter hardening, OIDC compliance | CHANGELOG "Phase F —" headings |
 | Phase G → v0.6.0 (2026-05-12) | Migration-flag removals M1–M6 + S2 `legacyTypAccept` default flip | CHANGELOG |
 | Wave 1 → v0.7.0 (2026-05-15) | Roadmap wave 1: RFC 7009 revoke + denylist, `client_credentials`, webauthn first slice, RFC 8707 stage 1 | CHANGELOG `[0.7.0]` |
@@ -56,9 +56,6 @@ roadmap waves 1/2 — waves 3/4 and 5a–c/e–f were never used).
 The pre-campaign feature plan. All six items shipped by v0.4.0.
 
 - **F-1** — plumbing: `UserSessionStore` + `FederationTokenStore` optional slots (memory/redis; AES-256-GCM for stored refresh_token); the all-or-none boot guard survives in validate-manifests [verified]
-- **F-3** — cascading revocation: `family_id` + `sid` claims, introspect family-revoke fail-closed cascade, CodeData nonce/sid round-trip [verified]
-- **F-4** — OIDC id_token + `/userinfo` + scope-gated claim filter [verified]
-- **F-5** — logout: `end_session_endpoint`, back/front-channel metadata, logout helpers [verified]
 - **F-6** — `POST /oauth/federation/:name/token` proxy (auto-refresh + advisory lock; client opt-in, deny-by-default) [verified]
 
 ---
@@ -144,7 +141,7 @@ were tagged by series; prefix expansions are the campaign's own shorthand,
 
 ### CP-* — grant/policy contract points
 
-CP-1 grantPolicy receives ctx.ip + userAgent · CP-2 initial rt+jwt family registration, graceful skip when unwired · CP-6 rate-limit hook fails OPEN + `rate_limit.unavailable` audit · CP-10 same normalized IP in limiter key and check context · CP-11 issuer passed to policy is config-only, never Host-derived · CP-12 empty granted-scope → `null` so the token response omits `scope` (never `scope: ""`) · CP-13 policy must not expand the client scope ceiling → `invalid_scope` · CP-14 empty-narrowed grantedScope persisted as `undefined` · CP-15 issued scope ⊆ requested (RFC 6749 §6) · CP-16/CP-17 fail-closed 503 when the family store throws (register / rotate) · CP-18 fail-closed grantPolicy scope/audience validation (granted ⊆ effective request set; audience vs full client ceiling) · CP-20 boot invariant: grantPolicy wired ⇒ non-empty `oauth.jwt.issuer` (`BootError: grant-policy-without-issuer`) — all [verified]
+CP-15 issued scope ⊆ requested (RFC 6749 §6) · CP-18 fail-closed grantPolicy scope/audience validation (granted ⊆ effective request set; audience vs full client ceiling) · CP-20 boot invariant: grantPolicy wired ⇒ non-empty `oauth.jwt.issuer` (`BootError: grant-policy-without-issuer`) — all [verified]
 
 ### IH-* — input hardening (expansion [verified])
 
@@ -156,7 +153,7 @@ OR-1 standalone wires the Redis RT-family store (in-memory broke multi-replica r
 
 ### SF-* — security findings
 
-SF-1 central JWT `typ` enforcement / `legacyTypAccept` (default flipped by Phase G S2) · SF-3 corrupt PKCE code records no longer pass (S256 and plain) · SF-4 advisory-lock check-then-delete race (=OR-13) · SF-5 token-exchange policy scope ⊆ request set · SF-6 RTs lacking jti/family_id no longer skip rotation (replay-detection bypass) · SF-8 `/introspect` returns `token_type: "Bearer"` and accepts access tokens only · SF-10 bounded in-memory rate-limiter bucket map · SF-12 federation refresh post-lock re-read guard (no `?? ""` fallback) · SF-13 federation refresh error mapping for openid-client v6 structured errors — [verified]
+SF-1 central JWT `typ` enforcement / `legacyTypAccept` (default flipped by Phase G S2) · SF-3 corrupt PKCE code records no longer pass (S256 and plain) · SF-4 advisory-lock check-then-delete race (=OR-13) · SF-6 RTs lacking jti/family_id no longer skip rotation (replay-detection bypass) · SF-10 bounded in-memory rate-limiter bucket map — [verified]
 
 ### MIN-* — minor findings
 
@@ -164,7 +161,7 @@ MIN-2 `__Host-` cookie prefix constraints (Secure, Path=/, no Domain) · MIN-3 p
 
 ### PB-* — protocol bugs (expansion [reconstructed], low confidence)
 
-PB-1 RT reuse revokes the whole family (RFC 6819 §5.2.2); fail-closed 503 when the revocation dependency is missing · PB-2 client-authentication redesign (with D-6) · PB-4 Google federation OIDC compliance (nonce binding, jwks_uri, alg pin, fail-closed) · PB-5 UserInfo `sub` must bind to id_token `sub` (OIDC §5.3.2; N/A for GitHub — no claim to bind) — all [verified]
+PB-1 RT reuse revokes the whole family (RFC 6819 §5.2.2); fail-closed 503 when the revocation dependency is missing · PB-2 client-authentication redesign (with D-6) — all [verified]
 
 ### AS-* — API surface
 
@@ -174,9 +171,9 @@ AS-1/AS-2 unified RFC 6749 §5.2 error envelope (+429 body migration) · AS-3 `r
 
 - **CR (concurrency/race)**: CR-1 lock-release race (=OR-13) · CR-2 binding identity persisted onto the code record · CR-3 Redis pipeline TTL truncation under concurrent writes (→ D-10) · CR-4 second-store re-check before `addFamilyId` — all [verified]
 - **CC (config correctness)**: CC-2 `unknownFamilyPolicy` key · CC-3 production misconfiguration hard-fails (warn-only in dev; residual closed by OR-12) · CC-4 compiled test artifacts must not ship (CI guard) · CC-5 readonly public DTOs — all [verified]
-- **TS (type safety, Wave 5g)**: TS-1 code-record payload persistence (=IH-2) · TS-2 runtime validation replaces the `as User` cast in HttpUserRepository · TS-3 corrupt Redis envelope validation replaces `JSON.parse as` · TS-4 `resolvePkceSupportedMethods` per-element narrowing · TS-6 refresh-family builder structural client guard — all [verified]
+- **TS (type safety, Wave 5g)**: TS-1 code-record payload persistence (=IH-2) · TS-3 corrupt Redis envelope validation replaces `JSON.parse as` · TS-4 `resolvePkceSupportedMethods` per-element narrowing · TS-6 refresh-family builder structural client guard — all [verified]
 - **SC (supply chain)**: SC-4 pnpm version pinned in both package.json · SC-5 dependency pin alignment · SC-6 dependency major bump for Express 5 · SC-7 `pnpm audit --prod` CI gate — all [verified]
-- **TD (test debt)**: TD-1 code-persistence tests · TD-2 unknown-family tests · TD-4 TTL/extended-field round-trips · TD-5/TD-10 residual OAuth-route + introspection-cascade tests · TD-6 federation cleanup/replay assertions · TD-7 SF-6 rejection tests — all [verified]
+- **TD (test debt)**: TD-1 code-persistence tests · TD-2 unknown-family tests · TD-4 TTL/extended-field round-trips · TD-5/TD-10 residual OAuth-route + introspection-cascade tests · TD-7 SF-6 rejection tests — all [verified]
 
 Phase G's own items were M1–M6 (migration-flag removals) plus its S2 (the
 `legacyTypAccept` default flip — see the S-series note in chapter 5).
@@ -187,7 +184,7 @@ Phase G's own items were M1–M6 (migration-flag removals) plus its S2 (the
 
 Product roadmap waves, a numbering unrelated to chapter 3's remediation batches.
 
-- **Wave 1 (v0.7.0)** — RFC 7009 revocation + access-token denylist, `client_credentials` grant, the webauthn first slice, RFC 8707 stage 1. Webauthn's plan tasks are the **T-series** (T21–T31): T28 = `POST /oauth/webauthn/registration/verify` route; T31 = `webauthnModule` boot integration. Its spec sections are cited as **S7** (multi-origin `expectedOrigins`), **S9** (Wave 1 spec §4.5: `ignoreExpiration` restricted to the revoke route, with a CI use-site guardrail), **S11** (dogfood baselines: attestation `"none"`, 120s timeout, `"preferred"` UV), **S12** (exact-pin discipline for `@simplewebauthn/server`) — all [verified]. T2 is a review note (widen timing margins against CI flake) [verified].
+- **Wave 1 (v0.7.0)** — RFC 7009 revocation + access-token denylist, `client_credentials` grant, the webauthn first slice, RFC 8707 stage 1. Webauthn's plan tasks are the **T-series** (T21–T31): T28 = `POST /oauth/webauthn/registration/verify` route; T31 = `webauthnModule` boot integration. Its spec sections are cited as **S9** (Wave 1 spec §4.5: `ignoreExpiration` restricted to the revoke route, with a CI use-site guardrail), **S11** (dogfood baselines: attestation `"none"`, 120s timeout, `"preferred"` UV), **S12** (exact-pin discipline for `@simplewebauthn/server`) — all [verified]. T2 is a review note (widen timing margins against CI flake) [verified].
 - **Wave 2 (v0.8.0)** — token-binding cluster: DPoP (RFC 9449), mTLS (RFC 8705), grant-side `cnf` emission, and **the §9.2 matrix** (chapter 2, Named artifacts). Anchored by the token-binding ADR.
 
 ---
@@ -202,7 +199,7 @@ campaign**:
 | S1 | Claude multi-agent review | missing required dep at apply-time must throw [verified] |
 | S2 (a) | Phase G security | flip `legacyTypAccept` default true→false [verified] |
 | S2 (b) | Claude multi-agent review | inconsistent diagnostic in validate-manifests [verified] |
-| S7–S12 | webauthn Wave 1 spec / dogfood | see chapter 4 [verified] |
+| S11–S12 | webauthn Wave 1 spec / dogfood | see chapter 4 [verified] |
 
 "Codex Delta" tags mark findings from a Codex review pass (e.g. Delta 3:
 encode-before-length in MIN-4). A citation of a bare S-number must be read against
