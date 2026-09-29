@@ -53,8 +53,7 @@ describe("resolvePkceOptions (#273)", () => {
 	});
 
 	it("cannot re-admit plain through the global supportedMethods allowlist", () => {
-		// Pre-#273 this list was the operator-facing knob and defaulted to
-		// ["S256","plain"]. `plain` is now reachable ONLY per client.
+		// `plain` is reachable ONLY per client.
 		expect(resolvePkceOptions({ supportedMethods: ["S256", "plain"] }).supportedMethods).toEqual([
 			"S256",
 		]);
@@ -98,11 +97,9 @@ describe("resolvePkceOptions (#273)", () => {
 		expect(logger.warn).not.toHaveBeenCalled();
 	});
 
-	// `resolveOAuthOptions` runs more than once per boot — `createOAuthRouter`
-	// resolves it for the routers and `createAuthorizationGrant` resolves it
-	// again for the token endpoint. That duplication is deliberate (it is what
-	// makes both endpoints read one policy) but it made the "your config is
-	// inert" line fire once per resolution instead of once per deployment.
+	// `resolveOAuthOptions` runs more than once per boot, deliberately
+	// (`createOAuthRouter` for the routers, `createAuthorizationGrant` for the
+	// token endpoint), so both endpoints read one policy.
 	describe("warns once per config, not once per resolution", () => {
 		it("emits a single warning however many times one config is resolved", () => {
 			const logger = makeLogger();
@@ -114,11 +111,10 @@ describe("resolvePkceOptions (#273)", () => {
 		});
 
 		it("still warns for a DIFFERENT config in the same process", () => {
-			// The reason this is not a module-level boolean: a process that
-			// composes several deployments — every test file in this package,
-			// and any embedder building more than one AS — would otherwise warn
-			// for the first stale config and go silent for every later one,
-			// which is worse than warning twice.
+			// Not a module-level boolean: a process that composes several
+			// deployments (every test file in this package, any embedder
+			// building more than one AS) would warn for the first stale config
+			// and go silent for every later one.
 			const logger = makeLogger();
 			resolvePkceOptions({ requireS256: false }, logger);
 			resolvePkceOptions({ defaultMethod: "plain" }, logger);
@@ -220,19 +216,11 @@ describe("PKCE_METHOD_ABSENT_DEFAULT", () => {
 	});
 });
 
-// SF-3 + MIN-4 (v0.5.1) — PKCE timing-safe comparison regression guard.
-//
-// The fix replaces `!==` with `constantTimeStringEqual`. Pure behavioural
-// tests (a "wrong verifier returns 400") cannot detect a regression to
-// `!==` because both implementations are functionally equivalent on a
-// fixed input. ESM-level `vi.spyOn` is unreliable here: the consumer
-// imports `constantTimeStringEqual` from `@o3co/auth-provider-core` and
-// holds its own immutable binding, so a post-hoc spy on the namespace
-// object would not intercept the call. The most reliable guard is a
-// source-level assertion: the production source must reference the
-// helper and must not contain the original `!==` shape against
-// `codeData.code_challenge`. Codex Delta 2 explicitly accepts this
-// "comment-anchored test" alternative.
+// PKCE verifiers are compared in constant time, pinned at the source level:
+// a behavioural test cannot tell `!==` from `constantTimeStringEqual` on a
+// fixed input, and `vi.spyOn` cannot intercept the call, since the consumer
+// holds its own immutable ESM binding of the import from
+// `@o3co/auth-provider-core`.
 describe("SF-3 + MIN-4: authorization.mts uses constantTimeStringEqual (regression guard)", () => {
 	const authorizationSource = readFileSync(
 		resolve(dirname(fileURLToPath(import.meta.url)), "../authorization.mts"),

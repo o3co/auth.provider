@@ -16,14 +16,10 @@
 
 /**
  * `listRPs()` into the logout helpers compiles for a consumer who turns on
- * `exactOptionalPropertyTypes` (#626).
- *
- * A registered RP carries `undefined` for a logout channel it did not
- * register, and under that option `a?: T` refuses an explicit `undefined` —
- * so the helpers' optional fields have to say `?: T | undefined` for a
- * registry's records to be passed on as they are. Without the option the two
- * spellings are the same type, so no ordinary type test can tell them apart;
- * this compiles a probe with the option ON, and a control proves it is on.
+ * `exactOptionalPropertyTypes`: a registered RP carries `undefined` for a
+ * logout channel it did not register, so the helpers' optional fields say
+ * `?: T | undefined`. Without the option the two spellings are the same type,
+ * so this compiles a probe with the option ON, and a control proves it is on.
  */
 
 import path from "node:path";

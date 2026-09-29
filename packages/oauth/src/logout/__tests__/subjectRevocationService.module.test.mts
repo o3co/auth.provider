@@ -15,14 +15,11 @@
  */
 
 /**
- * `subjectRevocationServiceModule` — the wiring, and what it refuses to wire
- * (#593, D13).
- *
- * The service itself is core's and is tested there. What is here is what only
- * this module can get wrong: the cascade closure over `cascadeLogout`, the
- * horizon read off configuration, the allowance read off configuration, and
- * the compositions that would let a subject-wide revocation report success
- * over grants it could not reach.
+ * `subjectRevocationServiceModule`: the wiring, and what it refuses to wire.
+ * The service itself is core's and is tested there. Here is what only this
+ * module can get wrong: the cascade closure over `cascadeLogout`, the horizon
+ * and the allowance read off configuration, and the compositions that would
+ * let a subject-wide revocation report success over grants it could not reach.
  */
 
 import {
@@ -76,7 +73,7 @@ const build = (over: Record<string, unknown> = {}): SubjectRevocationService => 
 	});
 };
 
-/** The single-boundary surface #296 shipped, which a grants deployment may not use. */
+/** An adapter with only the single-boundary surface, which a grants deployment may not use. */
 const olderAdapter = (): SubjectRevocation => ({
 	kind: "redis",
 	revokeBefore: async () => undefined,
@@ -117,9 +114,8 @@ describe("subjectRevocationServiceModule", () => {
 	});
 
 	it("reports an absent boundary rather than refusing to be built", async () => {
-		// #296's behaviour, unchanged: the call answers, says what it could not
-		// do, and `complete` is false. A deployment that declared the
-		// capability absent already lives with exactly this.
+		// The call answers, says what it could not do, and `complete` is false:
+		// what a deployment that declared the capability absent lives with.
 		const { subjectRevocation: _absent, ...withoutBoundary } = {
 			config: config(),
 			...cascadeStores(),

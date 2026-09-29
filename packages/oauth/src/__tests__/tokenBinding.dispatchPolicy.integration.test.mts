@@ -15,29 +15,12 @@
  */
 
 /**
- * Cross-mechanism dispatch policy — Wave 2 Phase 3 §12.3.
- *
- * The cross-mechanism dispatch refactor (PR #188) gave `tokenBindingMw` a
- * single configurable `DispatchPolicy` that arbitrates when more than one
- * mechanism's `extract` succeeds against the same request. This file pins
- * the grant-visible side of that contract:
- *
- *   `intent-explicit` (default) — DPoP wins over mTLS because DPoP is
- *     explicit-intent (the client sent a header on purpose) while mTLS is
- *     ambient (the TLS handshake produces a cert whether the client meant
- *     to bind or not). The grant's AT cnf carries `jkt`, NOT `x5t#S256`.
- *
- *   `strict-mutual-exclusion` — both mechanisms succeeding is treated as
- *     a malformed request (the client is presenting contradictory binding
- *     evidence). The grant never runs; tokenBindingMw rejects with HTTP
- *     400 `invalid_request`.
- *
- * Uses fake mechanisms (no real DPoP proof / cert chain validation) so the
- * test is decoupled from the upstream verifier packages — those have their
- * own dedicated test files. The cross-mechanism plumbing itself was already
- * exercised at the middleware layer in
- * `@o3co/auth-provider-mtls/__tests__/dual-mechanism.integration.test.mts`;
- * this file is the grant-visible regression guard at the HTTP boundary.
+ * The grant-visible side of `tokenBindingMw`'s `DispatchPolicy`, which
+ * arbitrates when more than one mechanism's `extract` succeeds against the
+ * same request (see ADR 2026-05-20-token-binding-first-class-abstraction).
+ * Fake mechanisms keep this decoupled from the verifier packages; the
+ * middleware layer is covered by
+ * `@o3co/auth-provider-mtls/__tests__/dual-mechanism.integration.test.mts`.
  */
 
 import {
@@ -93,7 +76,7 @@ const clientRepo = new InMemoryClientRepository(
 				tokenEndpointAuthMethod: "client_secret_basic" as const,
 				allowedRedirectUris: [],
 				allowedScopes: ["read"],
-				// #396: the old implicit omitted-scope grant, now declared.
+				// What an omitted `scope` grants.
 				defaultScopes: ["read"],
 				allowedAudiences: ["https://api.example"],
 				allowedGrantTypes: ["client_credentials"],

@@ -116,9 +116,8 @@ describe("cascadeLogout (A4 §6.2)", () => {
 		// Step 3: all three reverse-index removeBySid called.
 		expect(sessionRPRegistry.removeBySid).toHaveBeenCalledWith("sid-1");
 		expect(sessionFederationIndex.removeBySid).toHaveBeenCalledWith("sid-1");
-		// CR-4: sessionFamilyIndex.removeBySid is now called twice — once at Step 3
-		// and again as defense-in-depth after Step 4 (see CR-4 invocation-order test
-		// below). Both calls receive the same sid argument.
+		// sessionFamilyIndex.removeBySid runs at Step 3 and again after Step 4
+		// (see the post-step-4 cleanup tests below), with the same sid.
 		expect(sessionFamilyIndex.removeBySid).toHaveBeenCalledWith("sid-1");
 		// Step 4: primary invalidation must succeed.
 		expect(uss.delete).toHaveBeenCalledWith("sid-1");
@@ -258,7 +257,7 @@ describe("cascadeLogout (A4 §6.2)", () => {
 		expect(result.outcome).toBe("failed");
 		if (result.outcome === "failed") expect(result.step).toBe(2);
 
-		// CRITICAL: §6.2 invariant — reverse-index cleanup MUST NOT have run
+		// CRITICAL: reverse-index cleanup MUST NOT have run
 		expect(sessionRPRegistry.removeBySid).not.toHaveBeenCalled();
 		expect(sessionFamilyIndex.removeBySid).not.toHaveBeenCalled();
 		expect(sessionFederationIndex.removeBySid).not.toHaveBeenCalled();
@@ -440,14 +439,13 @@ describe("cascadeLogout (A4 §6.2)", () => {
 	});
 
 	// -------------------------------------------------------------------------
-	// CR-4 — post-step-4 sessionFamilyIndex cleanup
+	// Post-step-4 sessionFamilyIndex cleanup
 	//
-	// Defense-in-depth: any addFamilyId call that raced into the family index
+	// Defense-in-depth: an addFamilyId call that raced into the family index
 	// between Step 3 and Step 4 (the TOCTOU window the authorization grant's
-	// second-check fix narrows but does not fully close) leaves an orphan entry.
-	// A second removeBySid AFTER the session delete clears that orphan. The
-	// invocation order MUST be: Step 3 removeBySid → Step 4 delete → post-step-4
-	// removeBySid. Codex Delta 5: pin the order to catch accidental reshuffling.
+	// second check narrows but does not fully close) leaves an orphan entry,
+	// which a second removeBySid AFTER the session delete clears. The order
+	// MUST be: Step 3 removeBySid → Step 4 delete → post-step-4 removeBySid.
 	// -------------------------------------------------------------------------
 
 	it("CR-4: runs sessionFamilyIndex.removeBySid AFTER userSessionStore.delete (post-step-4 cleanup)", async () => {
@@ -473,9 +471,7 @@ describe("cascadeLogout (A4 §6.2)", () => {
 		expect(sessionFamilyIndex.removeBySid).toHaveBeenNthCalledWith(1, "sid-cr4");
 		expect(sessionFamilyIndex.removeBySid).toHaveBeenNthCalledWith(2, "sid-cr4");
 
-		// Codex Delta 5: pin invocation order.
-		// removeBySid call 1 (Step 3) MUST precede userSessionStore.delete (Step 4).
-		// userSessionStore.delete (Step 4) MUST precede removeBySid call 2 (post-step-4).
+		// removeBySid call 1 (Step 3) < delete (Step 4) < removeBySid call 2.
 		const removeOrders = (sessionFamilyIndex.removeBySid as ReturnType<typeof vi.fn>).mock
 			.invocationCallOrder;
 		const deleteOrder = (uss.delete as ReturnType<typeof vi.fn>).mock.invocationCallOrder[0];

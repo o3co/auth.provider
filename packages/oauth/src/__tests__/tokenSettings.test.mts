@@ -15,26 +15,17 @@
  */
 
 /**
- * The oauth module's `oauthTokenSettings` (#728): what modules outside this
- * package read of `oauth {}`, resolved once from the section this module owns
- * and deeply frozen.
+ * The oauth module's `oauthTokenSettings`: what modules outside this package
+ * read of `oauth {}`, resolved once from the section this module owns and
+ * deeply frozen. Each value is what the readers resolve for themselves: the
+ * issuer as written, the lifetimes as core's `resolveAccessTokenLifetime` /
+ * `resolveRefreshTokenLifetime` read them (the deprecated `expiresIn`
+ * included), and every switch on only when it is `true`.
  *
- * - `oauthTokenSettingsFrom` keeps core's contract (`oauthTokenSettingsContract`)
- *   over the fixture configuration and one with every switch on.
- * - Each value is what the readers resolve for themselves today: the
- *   issuer as written, the lifetimes as core's `resolveAccessTokenLifetime` /
- *   `resolveRefreshTokenLifetime` read them (the deprecated `expiresIn`
- *   included), and every switch on only when it is `true`. The token-binding
- *   settings are not among them: they are core's, and core reads them.
- * - An issuer that is not canonical is refused, as the oauth router refuses it.
- * - The oauth module provides it eagerly: whenever the module is installed the
- *   slot is filled, whether or not a module requires it, so core's own
- *   machinery can read it too.
- * - It names the slot `authoritative`: while the module is loaded no
- *   composition may substitute it, since the module's own code reads
- *   `oauth {}` and a second source would split what the slot's readers see
- *   from what the module does. A composition without the module fills the
- *   slot itself.
+ * The module fills the slot whenever it is installed, whether or not a module
+ * requires it, so core's own machinery can read it too. It names the slot
+ * `authoritative` because its own code reads `oauth {}`: a second source would
+ * split what the slot's readers see from what the module does.
  */
 
 import {

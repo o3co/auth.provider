@@ -15,25 +15,11 @@
  */
 
 /**
- * Wave 2 Phase 4 T4.1 — end-to-end test pairing the issuance side
- * (Phase 2 DPoP / Phase 3 mTLS) with the introspection side (Phase 1
- * typed `IntrospectResponse`).
- *
- * The grant flow runs in full — `tokenBindingMw` extracts a binding
- * from a fake mechanism, the client_credentials grant emits the AT
- * with a `cnf` claim, and the same AT is then introspected via
- * `/oauth/introspect`. The test asserts:
- *
- *   - DPoP-bound AT: introspect `cnf.jkt` matches the issued JKT;
- *     `token_type === "DPoP"` (RFC 9449 §5).
- *   - mTLS-bound AT: introspect `cnf.x5t#S256` matches the issued
- *     thumbprint; `token_type === "Bearer"` (RFC 8705 §3).
- *   - Plain AT: no `cnf` field; `token_type === "Bearer"`.
- *
- * This is the **first** test that exercises BOTH the issuance code
- * path and the introspect code path on the same token. Earlier
- * tests covered each side independently — Phase 2 §9.1 issuance,
- * Phase 1 introspect typing — but never both on a single AT.
+ * Issuance and introspection on the same token: `tokenBindingMw` extracts a
+ * binding from a fake mechanism, the client_credentials grant emits the AT
+ * with a `cnf` claim, and `/oauth/introspect` reports it back — `token_type`
+ * `DPoP` for a DPoP binding (RFC 9449 §5), `Bearer` for an mTLS binding
+ * (RFC 8705 §3) and for a plain AT.
  */
 
 import { createSecretKey } from "node:crypto";
@@ -89,7 +75,7 @@ const clientRepo = new InMemoryClientRepository(
 				tokenEndpointAuthMethod: "client_secret_basic" as const,
 				allowedRedirectUris: [],
 				allowedScopes: ["read"],
-				// #396: the old implicit omitted-scope grant, now declared.
+				// What an omitted `scope` grants.
 				defaultScopes: ["read"],
 				// AT audience defaults to allowedAudiences[0]; introspect's
 				// expectedAudience is the calling client's clientId. Align
@@ -132,13 +118,11 @@ async function buildApp(
 	const keyStore = createSymmetricKeyStore(SECRET);
 
 	if (mechanisms.length > 0) {
-		// Mount path-scoped to mirror production composition
-		// (`assembleApp` mounts `tokenBindingMw` on `/oauth/token` only).
-		// Without the path scope the middleware would also fire on
-		// `/oauth/introspect` and stamp `req.tokenBinding`, which could
-		// mask a future regression where introspect reads `req.tokenBinding`
-		// instead of decoding the AT's `cnf` claim. The introspect handler
-		// MUST derive `cnf` from the JWT payload, not from request state.
+		// Path-scoped to `/oauth/token`, as `assembleApp` mounts it: unscoped,
+		// it would also stamp `req.tokenBinding` on `/oauth/introspect` and
+		// could mask introspect reading it.
+		// The introspect handler MUST derive `cnf` from the JWT payload, not
+		// from request state.
 		app.use(
 			"/oauth/token",
 			tokenBindingMw({
@@ -230,18 +214,15 @@ describe("Phase 4 T4.1 — end-to-end issuance + introspection cnf propagation",
 });
 
 // ---------------------------------------------------------------------------
-// Compound-cnf rejection (#199 I3)
+// Compound-cnf rejection
 // ---------------------------------------------------------------------------
 
 /**
- * Re-signs a genuine AT with an added compound `cnf` claim.
- *
- * This AS cannot mint a compound binding — the grant emits exactly one
- * mechanism's confirmation — so the only way such a token reaches
- * `/introspect` is a forgery (signing-key compromise) or an AS bug. Starting
- * from a real AT and re-signing keeps every other claim and header member
- * exactly as issued, so the token passes verification and the test isolates
- * the cnf shape as the single variable.
+ * Re-signs a genuine AT with an added compound `cnf` claim. The grant emits
+ * exactly one mechanism's confirmation, so such a token at `/introspect` is a
+ * forgery (signing-key compromise) or an AS bug. Every other claim and header
+ * member stays as issued, so the token passes verification and the cnf shape
+ * is the single variable.
  */
 async function forgeCompoundCnfToken(genuineAccessToken: string): Promise<string> {
 	const header = decodeProtectedHeader(genuineAccessToken);
@@ -266,13 +247,10 @@ async function forgeCompoundCnfToken(genuineAccessToken: string): Promise<string
 
 describe("#199 I3 — compound cnf on introspection", () => {
 	it("reports active:false for an AT carrying both cnf.jkt and cnf.x5t#S256", async () => {
-		// The refresh path already rejects a compound cnf outright
-		// (`grants/refreshToken.mts`, invalid_grant). Introspection used to
-		// narrow it to the intent-explicit winner and still vouch for the
-		// token with active:true, which reported a binding the AS never
-		// issued. Fail closed instead: the AS does not vouch for a token it
-		// could not have minted. RFC 7662 §2.2 permits active:false for any
-		// token the AS declines to vouch for.
+		// Fail closed, as the refresh path does (see ADR
+		// 2026-05-20-token-binding-first-class-abstraction, "Compound cnf across
+		// the AS surfaces"). RFC 7662 §2.2 permits active:false for any token
+		// the AS declines to vouch for.
 		const app = await buildApp([makeDpopMechanism("E2E-DPOP-JKT")]);
 		const { accessToken } = await issueAndIntrospect(app);
 		const forged = await forgeCompoundCnfToken(accessToken);
@@ -292,8 +270,7 @@ describe("#199 I3 — compound cnf on introspection", () => {
 	});
 
 	it("does not weaken a genuine single-mechanism binding", async () => {
-		// Regression guard for the fail-open shape that #199's option (a)
-		// would have produced: dropping cnf while keeping active:true would
+		// The fail-open shape: dropping cnf while keeping active:true would
 		// present a DPoP-bound token to the RS as a plain bearer token.
 		const app = await buildApp([makeDpopMechanism("E2E-DPOP-JKT")]);
 
