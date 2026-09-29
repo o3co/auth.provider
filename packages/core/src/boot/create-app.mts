@@ -199,7 +199,7 @@ export async function createApp<B extends BootstrapMap = DefaultBootstrapMap>(
  * A plain copy of a host map's own enumerable keys and their values, each
  * read once. Every key is defined, not assigned, so an own `__proto__` stays a
  * key (stage 1 refuses it, naming the map) rather than becoming the copy's
- * prototype. Anything that is not an object is handed on as it is, for stage
+ * prototype — and its value is not read, so an accessor there never runs. Anything that is not an object is handed on as it is, for stage
  * 1 to judge.
  */
 function snapshotHostMap<T>(map: T): T {
@@ -208,7 +208,9 @@ function snapshotHostMap<T>(map: T): T {
 	const source = map as Record<string, unknown>;
 	for (const key of Object.keys(source)) {
 		Object.defineProperty(copy, key, {
-			value: source[key],
+			// Stage 1 refuses an own `__proto__` whatever it holds, so its value
+			// is never read: an accessor there does not run.
+			value: key === "__proto__" ? undefined : source[key],
 			enumerable: true,
 			writable: true,
 			configurable: true,
