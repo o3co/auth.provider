@@ -70,6 +70,21 @@ describe("what a template is", () => {
 		expect(() => listTemplates(root)).toThrow(/Not_Kebab/);
 	});
 
+	it.each(["trailing-", "double--hyphen", "-leading"])(
+		"refuses %s: a hyphen separates two non-empty parts",
+		(name) => {
+			// `trailing-` would make CI's image tag `scaffold-node-base-trailing-`,
+			// which Docker refuses.
+			template(root, name);
+			expect(() => listTemplates(root)).toThrow(name);
+		},
+	);
+
+	it.each(["m2m", "web-bff", "a1-b2-c3"])("takes %s", (name) => {
+		template(root, name);
+		expect(listTemplates(root)).toContain(name);
+	});
+
 	it("is required: a templates directory holding none refuses the build", () => {
 		const empty = join(root, "empty");
 		mkdirSync(empty);
