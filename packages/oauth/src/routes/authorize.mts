@@ -35,7 +35,6 @@ import {
 	isWellFormedClientId,
 	isWellFormedErrorCode,
 	LOGIN_RETURN_PARAMETER,
-	type LoginEntry,
 	logClientRepositoryUnavailable,
 	logGrantPolicyUnavailable,
 	loggableError,
@@ -54,6 +53,7 @@ import {
 	PKCE_METHOD_S256,
 	pkceMethodsForClient,
 } from "../grants/pkce.mjs";
+import { auditFailure, loginRedirect, redirectError } from "./authorizeAnswers.mjs";
 import {
 	type AuthorizeContext,
 	type AuthorizeHandlerOptions,
@@ -82,41 +82,6 @@ const AUTHORIZE_ACTION = "oauth.authorize" satisfies keyof typeof OAUTH_ROUTER_A
  * URL may not carry it (core's `LoginEntry` contract).
  */
 export const REDIRECT_TO_PARAM = LOGIN_RETURN_PARAMETER;
-
-/** The login-page redirect with the request to come back to. */
-const loginRedirect = (res: Response, login: Pick<LoginEntry, "urlFor">, target: string): void => {
-	res.redirect(login.urlFor(target));
-};
-
-// RFC 6749 §4.1.2.1: errors that prevent redirect (invalid client or
-// redirect_uri) are 400 JSON; the rest redirect with error params. The same
-// section limits `error_description`'s characters, and several descriptions
-// echo client input, so it is sanitised here once.
-const redirectError = (
-	ctx: AuthorizeContext,
-	error: string,
-	errorDescription: string,
-): Response => {
-	const url = new URL(ctx.redirectUri);
-	url.searchParams.append("error", error);
-	url.searchParams.append("error_description", sanitizeErrorText(errorDescription));
-	if (typeof ctx.state === "string") url.searchParams.append("state", ctx.state);
-	return ctx.res.redirect(url.toString()) as unknown as Response;
-};
-
-/**
- * Emits `authorize.rejected`, with the payload shape of the token endpoint's
- * `token.issued.failure`; the success event is `authorize.granted`.
- */
-const auditFailure = (ctx: AuthorizeContext, details: Record<string, unknown>): Promise<void> =>
-	emitAuditEvent(ctx.opts.auditSink, {
-		timestamp: new Date(),
-		type: "authorize.rejected",
-		clientId: ctx.clientId,
-		ip: ctx.req.ip,
-		userAgent: ctx.req.get("user-agent"),
-		details,
-	});
 
 /**
  * RFC 6749 §4.1.1 identification: `client_id`/`redirect_uri` presence, client
