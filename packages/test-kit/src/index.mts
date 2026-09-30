@@ -29,6 +29,11 @@ export {
 	mfaEnrollmentWitnessContract,
 } from "./mfa/enrollmentWitness.contract.mjs";
 export {
+	type MfaFactorStoreContractInput,
+	type MfaFactorStoreHarness,
+	mfaFactorStoreContract,
+} from "./mfa/factorStore.contract.mjs";
+export {
 	type MfaFactorChallenge,
 	type MfaFactorContractInput,
 	type MfaFactorEnrollmentStart,

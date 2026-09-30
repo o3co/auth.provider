@@ -179,7 +179,7 @@ describe("the suite's records", () => {
 			build: async () => ({
 				store: {
 					...store,
-					create: async (record) => {
+					create: async (record: MfaFactorRecord) => {
 						seen.push(record);
 						await store.create(record);
 					},
