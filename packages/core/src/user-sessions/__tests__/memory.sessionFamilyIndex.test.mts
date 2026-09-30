@@ -14,6 +14,10 @@
  * limitations under the License.
  */
 import { createInMemorySessionFamilyIndex } from "../memory/sessionFamilyIndex.mjs";
-import { runSessionFamilyIndexContract } from "./sessionFamilyIndex.contract.mjs";
+import {
+	runSessionEndContract,
+	runSessionFamilyIndexContract,
+} from "./sessionFamilyIndex.contract.mjs";
 
 runSessionFamilyIndexContract(async () => createInMemorySessionFamilyIndex());
+runSessionEndContract(async () => createInMemorySessionFamilyIndex());

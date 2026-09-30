@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 import { describe, expect, it } from "vitest";
-import type { SessionFamilyIndex } from "../types.mjs";
+import { type SessionFamilyIndex, type SupportsSessionEnd, supportsSessionEnd } from "../types.mjs";
 
 export type SessionFamilyIndexFactory = () => Promise<SessionFamilyIndex>;
 
@@ -151,6 +151,135 @@ export function runSessionFamilyIndexContract(
 			const idx = await factory();
 			expect(typeof idx.kind).toBe("string");
 			expect(idx.kind.length).toBeGreaterThan(0);
+		});
+	});
+}
+
+/**
+ * What an index owes once it claims {@link SupportsSessionEnd}: for an add
+ * and an end on the same sid, the end lists the family or the add answers
+ * `"ended"`. Optional on the port, so the suite above does not ask for it,
+ * and this one runs only against an index that claims it.
+ */
+export function runSessionEndContract(
+	factory: SessionFamilyIndexFactory,
+	options: { readonly expiry?: ExpiryClock } = {},
+): void {
+	const expiry = options.expiry ?? hostExpiry;
+	const capable = async (): Promise<SessionFamilyIndex & SupportsSessionEnd> => {
+		const idx = await factory();
+		if (!supportsSessionEnd(idx)) {
+			throw new Error("this adapter does not claim SupportsSessionEnd");
+		}
+		return idx;
+	};
+	/** The guarantee, for one add and one end on the same sid. */
+	const listedOrEnded = (
+		listed: ReadonlyArray<string>,
+		answer: "added" | "ended",
+		familyId: string,
+	): void => {
+		expect(
+			listed.includes(familyId) || answer === "ended",
+			`the end listed ${JSON.stringify(listed)} and the add answered "${answer}"`,
+		).toBe(true);
+	};
+
+	describe("SupportsSessionEnd contract — endSession and addFamilyIdUnlessEnded", () => {
+		it("an add before the end is added, and the end lists its family", async () => {
+			const idx = await capable();
+			const expiresAt = FUTURE();
+			expect(await idx.addFamilyIdUnlessEnded("sid-1", "fam-A", expiresAt)).toBe("added");
+			expect(await idx.endSession("sid-1", expiresAt)).toEqual(["fam-A"]);
+		});
+
+		it("an add after the end answers ended", async () => {
+			const idx = await capable();
+			const expiresAt = FUTURE();
+			expect(await idx.endSession("sid-1", expiresAt)).toEqual([]);
+			expect(await idx.addFamilyIdUnlessEnded("sid-1", "fam-A", expiresAt)).toBe("ended");
+		});
+
+		it("an add started while an end is in flight: the end lists its family, or the add answers ended", async () => {
+			// The end is started first, and the add before the end has answered:
+			// wherever the store lets the add fall, before the end's listing or
+			// after it, one of the two sees the other.
+			const idx = await capable();
+			const expiresAt = FUTURE();
+			const ending = idx.endSession("sid-1", expiresAt);
+			const adding = idx.addFamilyIdUnlessEnded("sid-1", "fam-A", expiresAt);
+			const [listed, answer] = await Promise.all([ending, adding]);
+			listedOrEnded(listed, answer, "fam-A");
+		});
+
+		it("an end started while an add is in flight: the end lists its family, or the add answers ended", async () => {
+			const idx = await capable();
+			const expiresAt = FUTURE();
+			const adding = idx.addFamilyIdUnlessEnded("sid-1", "fam-A", expiresAt);
+			const ending = idx.endSession("sid-1", expiresAt);
+			const [answer, listed] = await Promise.all([adding, ending]);
+			listedOrEnded(listed, answer, "fam-A");
+		});
+
+		it("removeBySid keeps the mark: an add after it still answers ended", async () => {
+			const idx = await capable();
+			const expiresAt = FUTURE();
+			await idx.addFamilyIdUnlessEnded("sid-1", "fam-A", expiresAt);
+			await idx.endSession("sid-1", expiresAt);
+			await idx.removeBySid("sid-1");
+			expect(await idx.listFamilyIds("sid-1")).toEqual([]);
+			expect(await idx.addFamilyIdUnlessEnded("sid-1", "fam-B", expiresAt)).toBe("ended");
+		});
+
+		it("the mark lapses at expiresAt: after it, an add under the sid is added", async () => {
+			// Dated from, and waited out on, the store's own clock (see
+			// `ExpiryClock`). The later add stands for a session that reuses the
+			// sid, so it carries an expiry of its own.
+			const idx = await capable();
+			const expiresAt = await aheadOf(expiry);
+			await idx.endSession("sid-1", expiresAt);
+			expect(await idx.addFamilyIdUnlessEnded("sid-1", "fam-A", expiresAt)).toBe("ended");
+			await expiry.passed(expiresAt);
+			expect(await idx.addFamilyIdUnlessEnded("sid-1", "fam-B", FUTURE())).toBe("added");
+		});
+
+		it("endSession is idempotent: a retry lists the same families, and the mark holds", async () => {
+			const idx = await capable();
+			const expiresAt = FUTURE();
+			await idx.addFamilyIdUnlessEnded("sid-1", "fam-A", expiresAt);
+			await idx.addFamilyIdUnlessEnded("sid-1", "fam-B", expiresAt);
+			const first = await idx.endSession("sid-1", expiresAt);
+			const retry = await idx.endSession("sid-1", expiresAt);
+			expect(first).toEqual(["fam-A", "fam-B"]);
+			expect(retry).toEqual(first);
+			expect(await idx.addFamilyIdUnlessEnded("sid-1", "fam-C", expiresAt)).toBe("ended");
+		});
+
+		it("the mark is the sid's alone: another sid's add is added", async () => {
+			const idx = await capable();
+			await idx.endSession("sid-1", FUTURE());
+			expect(await idx.addFamilyIdUnlessEnded("sid-2", "fam-A", FUTURE())).toBe("added");
+			expect(await idx.listFamilyIds("sid-2")).toEqual(["fam-A"]);
+		});
+
+		it("an add past expiresAt answers ended and records nothing", async () => {
+			const idx = await capable();
+			expect(await idx.addFamilyIdUnlessEnded("sid-1", "fam-A", PAST())).toBe("ended");
+			expect(await idx.listFamilyIds("sid-1")).toEqual([]);
+		});
+
+		it("endSession refuses an expiresAt that is not a valid date, and writes no mark", async () => {
+			const idx = await capable();
+			await expect(idx.endSession("sid-1", new Date(Number.NaN))).rejects.toThrow(RangeError);
+			expect(await idx.addFamilyIdUnlessEnded("sid-1", "fam-A", FUTURE())).toBe("added");
+		});
+
+		it("addFamilyIdUnlessEnded refuses an expiresAt that is not a valid date, and records nothing", async () => {
+			const idx = await capable();
+			await expect(
+				idx.addFamilyIdUnlessEnded("sid-1", "fam-A", new Date(Number.NaN)),
+			).rejects.toThrow(RangeError);
+			expect(await idx.listFamilyIds("sid-1")).toEqual([]);
 		});
 	});
 }
