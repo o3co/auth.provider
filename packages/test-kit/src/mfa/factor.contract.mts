@@ -273,9 +273,22 @@ function checkAddressDigest(
 }
 
 /**
+ * `text` with every run of percent-escapes decoded as UTF-8, as a URI's
+ * reader decodes it; a run that is no UTF-8 is kept as it is.
+ */
+const percentDecoded = (text: string): string =>
+	text.replace(/(?:%[0-9A-Fa-f]{2})+/g, (run) => {
+		try {
+			return decodeURIComponent(run);
+		} catch {
+			return run;
+		}
+	});
+
+/**
  * Refuses `value` when a string it holds carries the account's address,
- * whatever its case: as the account gives it, or as `normaliseMailAddress`
- * spells it — trimmed, NFC, its domain in ASCII.
+ * whatever its case, as it is or percent-decoded: as the account gives it,
+ * or as `normaliseMailAddress` spells it — trimmed, NFC, its domain in ASCII.
  */
 function carriesNoAddress(value: unknown, user: Readonly<Record<string, unknown>>, what: string) {
 	const { email } = user;
@@ -285,7 +298,9 @@ function carriesNoAddress(value: unknown, user: Readonly<Record<string, unknown>
 	);
 	assert.ok(
 		!decodedStrings(value).some((text) =>
-			addresses.some((address) => text.toLowerCase().includes(address)),
+			[text, percentDecoded(text)].some((read) =>
+				addresses.some((address) => read.toLowerCase().includes(address)),
+			),
 		),
 		`${what} carries the account's address, which the provider does not keep and a page does not show`,
 	);
