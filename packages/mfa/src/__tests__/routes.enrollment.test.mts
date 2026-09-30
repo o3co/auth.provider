@@ -32,7 +32,7 @@ import {
 	type MfaFactorRecord,
 	type UserSessionStore,
 } from "@o3co/auth-provider-core";
-import { createTestMfaFactor } from "@o3co/auth-provider-core/testing";
+import { createRecordingMailSender, createTestMfaFactor } from "@o3co/auth-provider-core/testing";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { readLongCode } from "#/codes.mjs";
 import { mfaRecoveryCodeFactorConfigForTests } from "#/testing/index.mjs";
@@ -55,6 +55,7 @@ import {
 	EXTRA_INTERRUPTION,
 	extraRequirement,
 	freezeClock,
+	mfaPost,
 	recordingAuditSink,
 	seedTotp,
 	setsCsrfToken,
@@ -63,6 +64,7 @@ import {
 	T0,
 	thawClock,
 	totpProofOf,
+	verify,
 	wrongCode,
 } from "./routesHarness.mjs";
 
@@ -762,5 +764,52 @@ describe("two transactions of one subject racing the first binding", () => {
 		});
 		expect(await memory.list(ALICE.id)).toEqual([]);
 		expect(create).not.toHaveBeenCalled();
+	});
+});
+
+describe("a first binding whose own factor is gone when it reads the records again", () => {
+	it("does not stand: removed as its own, 401 login_required, mfa.first_binding_conflict removed true — no codes, no witness mark, D25's flag kept, no session", async () => {
+		const memory = createMemoryMfaFactorStore();
+		const transactions = createMemoryMfaTransactionStore();
+		// An operator reset left D25's flag, so the binding is given with the proof and would clear it.
+		await transactions.requireEmailProofAtNextBinding(ALICE.id);
+		const sender = createRecordingMailSender();
+		const audit = recordingAuditSink();
+		const directory = new WitnessingUserRepository();
+		const { app, userSessionStore } = await boot({
+			config: configFor("required", { enrollment: { requireEmailProof: "never" } }),
+			factorStore: {
+				...memory,
+				// The factor is written, and a reset removes the subject's records before the re-read.
+				create: async (record) => {
+					await memory.create(record);
+					if (record.kind === "totp") await memory.removeAllForSubject(record.subject);
+				},
+			},
+			transactionStore: transactions,
+			mailSender: sender,
+			auditSink: audit,
+			userRepository: directory,
+		});
+		const create = vi.spyOn(userSessionStore as UserSessionStore, "create");
+		const { agent, transaction } = await beginFirstBinding(app);
+		await mfaPost(agent, "/challenge", { transaction_id: transaction, factor_id: "account-email" });
+		const code = sender.sent.at(-1)?.code;
+		expect((await verify(agent, transaction, "account-email", code)).status).toBe(200);
+		const begun = await beginEnrollment(agent, transaction, "totp");
+
+		const res = await completeEnrollment(agent, transaction, totpProofOf(begun.body.secret));
+
+		expect(res.status).toBe(401);
+		expect(res.body).toEqual({ error: "login_required", error_description: "Log in again" });
+		expect(await memory.list(ALICE.id)).toEqual([]);
+		expect(directory.marks).toEqual([]);
+		expect(await transactions.emailProofRequiredAtNextBinding(ALICE.id)).toBe(true);
+		expect(create).not.toHaveBeenCalled();
+		expect(audit.of("mfa.first_binding_conflict").map((event) => event.details)).toEqual([
+			{ kind: "totp", removed: true },
+		]);
+		expect(audit.of("mfa.factor.enrolled")).toEqual([]);
+		expect(audit.of("mfa.recovery_codes.generated")).toEqual([]);
 	});
 });
