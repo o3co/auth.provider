@@ -59,6 +59,7 @@ export type {
 	DuplicateOverrideDetails,
 	DuplicateProvidesDetails,
 	DuplicateSecondFactorAuthorityDetails,
+	EnvironmentVariableRenamedDetails,
 	FederationRedirectPolicyUnpairedDetails,
 	FrozenWorld,
 	InvalidRouteAdvertisementPathDetails,

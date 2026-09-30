@@ -742,6 +742,9 @@ importers:
       '@o3co/auth-provider-webauthn':
         specifier: workspace:*
         version: link:../../packages/webauthn
+      '@o3co/ts.hocon':
+        specifier: ^1.13.0
+        version: 1.13.0(yaml@2.9.0)(zod@4.6.5)
       '@types/express':
         specifier: ^5.0.6
         version: 5.0.6
@@ -763,6 +766,9 @@ importers:
       vitest:
         specifier: ^5.0.2
         version: 5.0.2(@opentelemetry/api@1.9.1)(@types/node@26.6.3)(@vitest/coverage-v8@5.0.2)(msw@2.15.0(@types/node@26.6.3)(typescript@6.0.3))(vite@8.0.11(@types/node@26.6.3)(esbuild@0.28.2)(tsx@4.23.15)(yaml@2.9.0))
+      zod:
+        specifier: ^4.6.5
+        version: 4.6.5
 
   tools/live-check:
     devDependencies:

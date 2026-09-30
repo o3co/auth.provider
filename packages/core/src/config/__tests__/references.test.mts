@@ -232,7 +232,7 @@ describe("packageReferenceProblems — the check each package's test runs over i
 	it("reads the file with the reader it is given, and checks what it read", () => {
 		const read = vi.fn((_path: string): unknown => ({ oauth: { dpop: { enabled: false } } }));
 		expect(packageReferenceProblems({ reference: REF_A, modules: [dpopLike], read })).toEqual([]);
-		expect(read).toHaveBeenCalledWith(fileURLToPath(REF_A));
+		expect(read).toHaveBeenCalledWith(fileURLToPath(REF_A), {});
 
 		const lossy = vi.fn((_path: string): unknown => ({
 			oauth: { dpop: { enabled: false, x: 1 } },

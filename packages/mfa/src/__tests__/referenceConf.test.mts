@@ -22,8 +22,9 @@
  * of the ring, which has no default), `MFA_TOTP_FACTOR_ENABLED` and
  * `MFA_TOTP_FACTOR_ISSUER`; `mfa.mode`, `off` unless `MFA_MODE` says
  * otherwise; the transaction's life, its attempts and the
- * subject lock, which have no variable (D19); and the two variables still
- * bound at the TOTP factor's old path, which boot refuses.
+ * subject lock, which have no variable (D19); and the two variables renamed
+ * with the TOTP factor's move, which it binds nowhere and boot holds to their
+ * new names.
  */
 
 import { randomBytes } from "node:crypto";
@@ -205,45 +206,119 @@ describe("the package's reference.conf", () => {
 		});
 	});
 
-	it("binds MFA_TOTP_ENABLED and MFA_TOTP_ISSUER at the old path alone, with no default: they feed mfa-totp-factor nothing", () => {
-		expect(resolve().mfa.factors).toEqual({ totp: {} });
-		const config = resolve({ MFA_TOTP_ENABLED: "false", MFA_TOTP_ISSUER: "Example Co" });
-		expect(config.mfa.factors).toEqual({ totp: { enabled: "false", issuer: "Example Co" } });
-		expect(totpOf(config)).toMatchObject({ enabled: true, issuer: "auth.example" });
+	it("binds MFA_TOTP_ENABLED and MFA_TOTP_ISSUER in their captures alone: set, they change nothing else the file resolves to", () => {
+		const { "renamed-variables": unset, ...rest } = resolve() as unknown as Record<string, unknown>;
+		const { "renamed-variables": set, ...restSet } = resolve({
+			MFA_TOTP_ENABLED: "false",
+			MFA_TOTP_ISSUER: "Example Co",
+		}) as unknown as Record<string, unknown>;
+		expect(resolve().mfa).not.toHaveProperty("factors");
+		expect(restSet).toEqual(rest);
+		expect(unset).toMatchObject({ MFA_TOTP_ENABLED: null, MFA_TOTP_ISSUER: null });
+		expect(set).toMatchObject({ MFA_TOTP_ENABLED: "false", MFA_TOTP_ISSUER: "Example Co" });
 	});
 
-	it("refuses the boot of a composition installing the TOTP factor's module while MFA_TOTP_ENABLED or MFA_TOTP_ISSUER is set, naming the new path and its variable", async () => {
-		for (const [variable, key] of [
-			["MFA_TOTP_ENABLED", "enabled"],
-			["MFA_TOTP_ISSUER", "issuer"],
-		] as const) {
-			let refused: unknown;
-			try {
-				const handle = await createApp({
+	describe.each([
+		{
+			old: "MFA_TOTP_ENABLED",
+			renamed: "MFA_TOTP_FACTOR_ENABLED",
+			key: "enabled",
+			value: "false",
+			read: false,
+		},
+		{
+			old: "MFA_TOTP_ISSUER",
+			renamed: "MFA_TOTP_FACTOR_ISSUER",
+			key: "issuer",
+			value: "Example Co",
+			read: "Example Co",
+		},
+	] as const)(
+		"$old, renamed $renamed with the TOTP factor's move",
+		({ old, renamed, key, value, read }) => {
+			/** Boots the factor's module over this file resolved under `env`. */
+			const boot = (env: Record<string, string>) =>
+				createApp({
 					modules: [mfaTotpFactorModule],
 					bootstrapComponents: {
-						config: resolve({ [variable]: "Example" }),
+						config: resolve(env),
 						pathResolver: (p: string) => p,
 					} as never,
 				});
-				await handle.dispose();
-			} catch (error) {
-				refused = error;
-			}
-			expect(refused, variable).toBeInstanceOf(BootError);
-			expect((refused as BootError).reason, variable).toBe("config-path-relocated");
-			expect((refused as BootError).details, variable).toEqual({
-				reason: "config-path-relocated",
-				relocated: [
+			const refusal = async (env: Record<string, string>): Promise<BootError> => {
+				try {
+					const handle = await boot(env);
+					await handle.dispose();
+				} catch (error) {
+					if (error instanceof BootError) return error;
+					throw error;
+				}
+				throw new Error("the boot was not refused");
+			};
+			const refused = (state: "unset" | "different") => ({
+				reason: "environment-variable-renamed",
+				renamed: [
 					{
 						module: "mfa-totp-factor",
-						from: `mfa.factors.totp.${key}`,
-						to: `mfa-totp-factor.${key}`,
-						environmentVariable: `MFA_TOTP_FACTOR_${key.toUpperCase()}`,
+						from: old,
+						to: renamed,
+						path: `mfa-totp-factor.${key}`,
+						state,
 					},
 				],
 			});
+
+			it("set alone: refused, naming the new path and the new variable", async () => {
+				const err = await refusal({ [old]: value });
+				expect(err.reason).toBe("environment-variable-renamed");
+				expect(err.details).toEqual(refused("unset"));
+			});
+
+			it("set beside the new name at a different value: refused, naming both and neither value", async () => {
+				const err = await refusal({ [old]: "old-value-7c1e", [renamed]: "new-value-2a9f" });
+				expect(err.details).toEqual(refused("different"));
+				expect(err.message).not.toContain("old-value-7c1e");
+				expect(err.message).not.toContain("new-value-2a9f");
+			});
+
+			it("set beside the new name at the same value: boots, and the factor's section reads it", async () => {
+				const handle = await boot({ [old]: value, [renamed]: value });
+				const section = (
+					handle.components.config as unknown as Record<string, Record<string, unknown>>
+				)["mfa-totp-factor"];
+				await handle.dispose();
+				expect(section?.[key]).toBe(read);
+			});
+
+			it("unset, with the new name set: boots, and the factor's section reads it", async () => {
+				const handle = await boot({ [renamed]: value });
+				const section = (
+					handle.components.config as unknown as Record<string, Record<string, unknown>>
+				)["mfa-totp-factor"];
+				await handle.dispose();
+				expect(section?.[key]).toBe(read);
+			});
+		},
+	);
+
+	it("refuses MFA_TOTP_ENABLED=true alone, though mfa-totp-factor.enabled defaults to true: a default is not the new name set", async () => {
+		let refused: unknown;
+		try {
+			const handle = await createApp({
+				modules: [mfaTotpFactorModule],
+				bootstrapComponents: {
+					config: resolve({ MFA_TOTP_ENABLED: "true" }),
+					pathResolver: (p: string) => p,
+				} as never,
+			});
+			await handle.dispose();
+		} catch (error) {
+			refused = error;
 		}
+		expect(refused).toBeInstanceOf(BootError);
+		expect((refused as BootError).details).toMatchObject({
+			renamed: [{ from: "MFA_TOTP_ENABLED", state: "unset" }],
+		});
 	});
 
 	it("defaults mfa.mode to off and reads MFA_MODE: this file binds it, and core's reference.conf does not", () => {

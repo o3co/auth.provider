@@ -137,6 +137,7 @@ export type {
 	DuplicateOverrideDetails,
 	DuplicateProvidesDetails,
 	DuplicateSecondFactorAuthorityDetails,
+	EnvironmentVariableRenamedDetails,
 	FederationRedirectPolicyUnpairedDetails,
 	InvalidRouteAdvertisementPathDetails,
 	LifecycleWithoutProvidesDetails,

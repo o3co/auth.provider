@@ -23,6 +23,8 @@
  * template's configuration layers (`templates/standalone/config/*.conf`):
  * each `${?VAR}` (or `${VAR}`) outside a comment is resolved alone, set to a
  * marker, and the paths the marker lands on are the paths the variable sets.
+ * A capture of a renamed variable (`renamed-variables.<NAME>`) sets no
+ * setting and is not held to the rule.
  *
  * The rule (`namingProblems`): a misnamed variable fails unless it is in
  * `LEGACY`, the names that predated the rule, whatever else a change renames.
@@ -39,6 +41,7 @@ import { fileURLToPath } from "node:url";
 import { parseFile } from "@o3co/ts.hocon";
 import { describe, expect, it } from "vitest";
 import { environmentVariableFor } from "#/config/environment-variable.mjs";
+import { RENAMED_VARIABLES_SECTION } from "#/config/removed-keys.mjs";
 
 const PACKAGES = fileURLToPath(new URL("../../../../", import.meta.url));
 const TEMPLATE_CONFIG = fileURLToPath(
@@ -50,7 +53,7 @@ const TEMPLATE_CONFIG = fileURLToPath(
  * many as are today. A rename lowers it by the names it renames; nothing
  * raises it.
  */
-const CEILING = 61;
+const CEILING = 59;
 
 /** `LEGACY`'s first count: it only ever loses entries. */
 const LEGACY_BASELINE = 61;
@@ -96,8 +99,6 @@ const LEGACY: readonly string[] = [
 	"core: REFRESH_TOKEN_FAMILY_STORE_CAS_RETRY_LIMIT at redisRefreshTokenFamilyStore.casRetryLimit",
 	"core: CLIENT_CODE_KEY_PREFIX at redisCodeRepository.keyPrefix",
 	"mfa: MFA_ENCRYPTION_KEY at mfa.encryptionKeys.0.key",
-	"mfa: MFA_TOTP_ENABLED at mfa.factors.totp.enabled",
-	"mfa: MFA_TOTP_ISSUER at mfa.factors.totp.issuer",
 	"webauthn: WEBAUTHN_AUTHENTICATION_OPTIONS_RATE_LIMIT at webauthn.rateLimit.authenticationOptions.limit",
 	"webauthn: WEBAUTHN_AUTHENTICATION_OPTIONS_RATE_WINDOW_SECONDS at webauthn.rateLimit.authenticationOptions.windowSeconds",
 	"template: LOG_LEVEL at logging.level",
@@ -189,10 +190,17 @@ const FOUND = LAYERS.flatMap(([name, path]) =>
 	})),
 );
 
+/**
+ * Whether `path` is a capture of a renamed variable (`renamed-variables.<NAME>`):
+ * no setting, but what the resolution saw of a declared name, held by the
+ * package's own `packageReferenceProblems`.
+ */
+const isCapture = (path: string): boolean => path.startsWith(`${RENAMED_VARIABLES_SECTION}.`);
+
 /** Each variable at a path it is not the upper-snake-case form of, as `LEGACY` writes it. */
 const MISNAMED: readonly string[] = FOUND.flatMap(({ package: name, variable, paths }) =>
 	paths
-		.filter((path) => upperSnake(path) !== variable)
+		.filter((path) => !isCapture(path) && upperSnake(path) !== variable)
 		.map((path) => `${name}: ${variable} at ${path}`),
 );
 

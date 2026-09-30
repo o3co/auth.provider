@@ -41,12 +41,13 @@ import {
 	type SessionFederationIndex,
 	type UserSessionStore,
 } from "@o3co/auth-provider-core";
-import { makeValidAppConfig } from "@o3co/auth-provider-core/testing";
+import { makeValidAppConfig, renamedVariableCaptures } from "@o3co/auth-provider-core/testing";
 import { sessionModule, sessionStoreModuleFor } from "@o3co/auth-provider-session";
 import express from "express";
 import request from "supertest";
 import { type Mock, vi } from "vitest";
 import { type MfaModuleOptions, mfaModule, mfaModules } from "#/module.mjs";
+import { mfaTotpFactorModule } from "#/totp/module.mjs";
 
 export const ISSUER = "https://auth.example";
 
@@ -125,11 +126,20 @@ export const TOTP_SECTION = {
 } as const;
 
 /**
+ * What a composition layering the package's reference.conf captures of the
+ * TOTP factor's renamed variables under an environment that sets none.
+ */
+export const UNSET_RENAMED_VARIABLES = renamedVariableCaptures({
+	modules: [mfaTotpFactorModule],
+	env: {},
+});
+
+/**
  * The composition's configuration: core's valid fixture, a login over plain
  * HTTP (no `Secure` cookie), `endpoints.mfa.url` as core's reference.conf
  * ships it, `mfa` declared expected, the `mfa` section under `mode`, and the
  * TOTP factor's `mfa-totp-factor` section, each with the keys given laid
- * over it.
+ * over it, and the captures of the TOTP factor's renamed variables, all unset.
  */
 export function configFor(
 	mode: "off" | "optional" | "required",
@@ -150,6 +160,7 @@ export function configFor(
 		sessionRequirements: { expected: ["mfa"] },
 		mfa: { ...mfaSection(mode), ...mfa },
 		"mfa-totp-factor": { ...TOTP_SECTION, ...totp },
+		"renamed-variables": UNSET_RENAMED_VARIABLES,
 	} as unknown as AppConfig;
 }
 
