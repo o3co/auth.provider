@@ -31,7 +31,17 @@ import { AppConfigSchema } from "@o3co/auth-provider-core";
 import { parseFile } from "@o3co/ts.hocon";
 import { validate } from "@o3co/ts.hocon/zod";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { MFA_DEVELOPMENT_SAMPLE_KEY, readMfaSettings, readMfaTotpSettings } from "#/config.mjs";
+import {
+	MFA_DEVELOPMENT_SAMPLE_KEY,
+	type MfaSettingsOptions,
+	readMfaSettings,
+	readMfaTotpSettings,
+} from "#/config.mjs";
+
+/** `readMfaSettings` under the deployment mode a configuration that states none has, unless `options` names one. */
+const readSettings = (config: unknown, options: Partial<MfaSettingsOptions> = {}) =>
+	readMfaSettings(config, { deploymentMode: "unset", ...options });
+
 import { createMfaSealing } from "#/sealing.mjs";
 
 const require = createRequire(import.meta.url);
@@ -59,13 +69,13 @@ afterEach(() => {
 
 describe("the package's reference.conf", () => {
 	it("gives the ring no key: without MFA_ENCRYPTION_KEY, the settings are refused, naming it", () => {
-		expect(() => readMfaSettings(resolve())).toThrow(/MFA_ENCRYPTION_KEY/);
+		expect(() => readSettings(resolve())).toThrow(/MFA_ENCRYPTION_KEY/);
 	});
 
 	it("puts MFA_ENCRYPTION_KEY first in the ring, and defaults TOTP to on, SHA1, 6 digits, 30 s, a window of 1, the issuer's host", () => {
 		const key = randomBytes(32).toString("base64");
 		const config = resolve({ MFA_ENCRYPTION_KEY: key });
-		const settings = readMfaSettings(config);
+		const settings = readSettings(config);
 		expect(settings.encryptionKeys).toHaveLength(1);
 		expect(settings.encryptionKeys[0]?.key.equals(Buffer.from(key, "base64"))).toBe(true);
 		expect(readMfaTotpSettings(config)).toEqual({
@@ -81,9 +91,9 @@ describe("the package's reference.conf", () => {
 	it("names the key MFA_ENCRYPTION_KEY feeds by its fingerprint, so a key changed in place leaves what the old one sealed key_unavailable, naming it", () => {
 		const record = { subject: "u-alice", id: "f-1", kind: "totp" };
 		const oldKey = randomBytes(32).toString("base64");
-		const before = readMfaSettings(resolve({ MFA_ENCRYPTION_KEY: oldKey })).encryptionKeys;
+		const before = readSettings(resolve({ MFA_ENCRYPTION_KEY: oldKey })).encryptionKeys;
 		const sealed = createMfaSealing({ ring: before }).sealFactorData(record, { lastUsedStep: 1 });
-		const after = readMfaSettings(
+		const after = readSettings(
 			resolve({ MFA_ENCRYPTION_KEY: randomBytes(32).toString("base64") }),
 		).encryptionKeys;
 		expect(after[0]?.id).not.toBe(before[0]?.id);
@@ -96,13 +106,13 @@ describe("the package's reference.conf", () => {
 			createMfaSealing({ ring: [...after, ...before] }).openFactorData(record, sealed),
 		).toMatchObject({ state: "ok" });
 		// Read again, the same key has the same name.
-		expect(readMfaSettings(resolve({ MFA_ENCRYPTION_KEY: oldKey })).encryptionKeys[0]?.id).toBe(
+		expect(readSettings(resolve({ MFA_ENCRYPTION_KEY: oldKey })).encryptionKeys[0]?.id).toBe(
 			before[0]?.id,
 		);
 	});
 
 	it("defaults a transaction to 600 seconds and 5 attempts, and the lock to a threshold of 5, 900 s base, 86400 s max and memory, a weekly budget of 10, a hard limit of 100, 5 trusted browsers for 30 days", () => {
-		const settings = readMfaSettings(
+		const settings = readSettings(
 			resolve({ MFA_ENCRYPTION_KEY: randomBytes(32).toString("base64") }),
 		);
 		expect(settings.transactionTtlSeconds).toBe(600);
@@ -135,7 +145,7 @@ describe("the package's reference.conf", () => {
 	it("takes the development sample key through MFA_ENCRYPTION_KEY in development, and refuses it in production", () => {
 		vi.stubEnv("NODE_ENV", "development");
 		const config = resolve({ MFA_ENCRYPTION_KEY: MFA_DEVELOPMENT_SAMPLE_KEY });
-		expect(readMfaSettings(config, { environment: "development" }).encryptionKeys).toHaveLength(1);
-		expect(() => readMfaSettings(config, { environment: "production" })).toThrow(/sample key/);
+		expect(readSettings(config, { environment: "development" }).encryptionKeys).toHaveLength(1);
+		expect(() => readSettings(config, { environment: "production" })).toThrow(/sample key/);
 	});
 });

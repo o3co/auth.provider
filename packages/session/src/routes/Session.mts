@@ -32,10 +32,12 @@ import {
 	admitPrimary,
 	BootError,
 	type CsrfTokenSigner,
+	checkDeploymentMode,
 	checkResolver,
 	consoleLogger,
 	createMemoryRateLimiter,
 	createRateLimitGuard,
+	type DeploymentMode,
 	type FederationTokenStore,
 	type Logger,
 	loggableError,
@@ -84,6 +86,7 @@ export const createRouter = (
 	{
 		userRepository,
 		config,
+		deploymentMode,
 		userSessionStore,
 		subjectSessionIndex,
 		federationTokenStore,
@@ -97,6 +100,13 @@ export const createRouter = (
 	}: {
 		userRepository: UserRepository;
 		config: AppConfig;
+		/**
+		 * The replica count, as core's `deploymentMode` slot holds it: what the
+		 * login throttle's per-process fallback is refused, warned about or
+		 * silent by. Anything but the three values, absence included, is a
+		 * TypeError at construction.
+		 */
+		deploymentMode: DeploymentMode;
 		userSessionStore?: UserSessionStore;
 		/**
 		 * Subject-keyed index of live sessions, written on every login so a
@@ -117,8 +127,8 @@ export const createRouter = (
 		/**
 		 * Shared rate limiter for the login brute-force guard, so the limit holds
 		 * across replicas. Omitted, the router builds a per-process in-memory
-		 * limiter with the same spec and warns (or refuses under
-		 * `deployment.mode = "multi"`).
+		 * limiter with the same spec and warns (or refuses when `deploymentMode`
+		 * is `"multi"`).
 		 */
 		rateLimiter?: RateLimiter;
 		/**
@@ -151,6 +161,7 @@ export const createRouter = (
 			"session routes: csrfTokenSigner is required: pass the csrfTokenSigner slot's signer, or createSessionCsrfTokenSigner(secret)",
 		);
 	}
+	const replicas = checkDeploymentMode(deploymentMode, "session routes: deploymentMode");
 	const router = express.Router();
 
 	/**
@@ -191,10 +202,9 @@ export const createRouter = (
 	if (rateLimiter === undefined) {
 		// The per-process fallback is replica-unsafe state, so the deployment
 		// mode decides: "multi" refuses at boot (the limit would really be
-		// limit × replicas, reset on every deploy), "single" is silent, unset
+		// limit × replicas, reset on every deploy), "single" is silent, "unset"
 		// warns. The planner wraps this throw as `contribute-factory-failed`.
-		const deploymentMode = config.deployment?.mode;
-		if (deploymentMode === "multi") {
+		if (replicas === "multi") {
 			throw new BootError({
 				stage: "applyContributions",
 				reason: "replica-unsafe-adapter",
@@ -202,7 +212,7 @@ export const createRouter = (
 				details: { reason: "replica-unsafe-adapter", modules: ["session"] },
 			});
 		}
-		if (deploymentMode !== "single") {
+		if (replicas !== "single") {
 			logger.warn(
 				{
 					limit: loginLimitSpec.limit,

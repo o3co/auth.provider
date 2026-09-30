@@ -16,9 +16,11 @@
 
 import {
 	type AuthorizedFederationGrant,
+	checkDeploymentMode,
 	checkSealingKeyRing,
 	constantTimeStringEqual,
 	DEFAULT_FEDERATION_GRANT_TOMBSTONE_RETENTION_MS,
+	type DeploymentMode,
 	decodeSealingKey,
 	defineModule,
 	type FederationGrant,
@@ -908,7 +910,6 @@ const moduleConfigSchema = z.object({
 			).optional(),
 		})
 		.default({ keyPrefix: "fg:" }),
-	deployment: z.object({ mode: z.string().optional() }).optional(),
 });
 
 /** What a composition root tells the module that its configuration cannot. */
@@ -939,7 +940,14 @@ const keyMaterial = (index: number, encoded: string): Buffer => {
 };
 
 /**
- * The options the adapter takes, from the configuration an operator wrote.
+ * The options the adapter takes, from the configuration an operator wrote,
+ * and the replica count `deploymentMode` — the `deploymentMode` slot's value,
+ * or `deploymentModeOf(config)` from `@o3co/auth-provider-core` for a
+ * composition root that builds the store itself — which the plaintext guard
+ * refuses plaintext under when it is `multi`. The configuration's own
+ * `deployment` is not read, and a mode that is not `single`, `multi` or
+ * `unset` — none included — is a TypeError: read as none, it would let
+ * plaintext through under `multi`.
  *
  * A function of its own, and exported, because the conversion is where a
  * module goes wrong silently: seconds forwarded as milliseconds keep a
@@ -950,7 +958,12 @@ const keyMaterial = (index: number, encoded: string): Buffer => {
 export function resolveRedisFederationGrantStoreOptions(
 	rawConfig: unknown,
 	moduleOptions: RedisFederationGrantStoreModuleOptions,
+	deploymentMode: DeploymentMode,
 ): Omit<RedisFederationGrantStoreOptions, "client"> {
+	const replicas = checkDeploymentMode(
+		deploymentMode,
+		"resolveRedisFederationGrantStoreOptions: deploymentMode",
+	);
 	const config = moduleConfigSchema.parse(rawConfig);
 	const grants = config.federationGrants;
 	const mode = grants.encryptionMode ?? "required";
@@ -979,7 +992,7 @@ export function resolveRedisFederationGrantStoreOptions(
 			...(moduleOptions.environment !== undefined
 				? { environment: moduleOptions.environment }
 				: {}),
-			...(config.deployment?.mode !== undefined ? { deploymentMode: config.deployment.mode } : {}),
+			deploymentMode: replicas,
 		},
 	};
 }
@@ -990,22 +1003,27 @@ export function resolveRedisFederationGrantStoreOptions(
  * the store whether or not it mounts the routes — `revokeAllForSubject` and
  * a logout reach grants through the port.
  *
- * The plaintext guard reads `deployment.mode` off the configuration and the
- * selected environment off `options`: the module cannot know how a
- * composition root chose its configuration file. Its notice goes to the
- * optional `logger` slot.
+ * The plaintext guard reads the replica count from the `deploymentMode` slot
+ * core fills — required, since `multi` refuses plaintext — and the selected
+ * environment off `options`: the module cannot know how a composition root
+ * chose its configuration file. Its notice goes to the optional `logger`
+ * slot.
  */
 export function redisFederationGrantStoreModuleFor(
 	options: RedisFederationGrantStoreModuleOptions = {},
 ) {
 	return defineModule({
 		name: "redis-federation-grant-store",
-		requires: ["federationGrantStoreClient", "config"] as const,
+		requires: ["federationGrantStoreClient", "config", "deploymentMode"] as const,
 		optional: ["logger"] as const,
 		configSchema: moduleConfigSchema,
 		provides: {
 			federationGrantStore: (deps) => {
-				const resolved = resolveRedisFederationGrantStoreOptions(deps.config, options);
+				const resolved = resolveRedisFederationGrantStoreOptions(
+					deps.config,
+					options,
+					deps.deploymentMode,
+				);
 				return createRedisFederationGrantStore({
 					client: deps.federationGrantStoreClient,
 					...resolved,
@@ -1021,7 +1039,7 @@ export function redisFederationGrantStoreModuleFor(
 
 /**
  * The module with no environment named: the plaintext guard reads `NODE_ENV`
- * and `deployment.mode`. A composition root that selects its
+ * and the `deploymentMode` slot. A composition root that selects its
  * configuration by another name builds its own with
  * {@link redisFederationGrantStoreModuleFor}.
  */

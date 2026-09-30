@@ -21,7 +21,7 @@
 // cannot seal is refused at boot rather than at the first grant, after a user
 // had already consented.
 
-import { createApp, defineModule } from "@o3co/auth-provider-core";
+import { createApp, type DeploymentMode, defineModule } from "@o3co/auth-provider-core";
 import { makeValidCoreConfig } from "@o3co/auth-provider-core/testing";
 import { describe, expect, it, vi } from "vitest";
 import type { FederationGrantStoreClient } from "../src/clients.mjs";
@@ -37,25 +37,20 @@ const client = {} as FederationGrantStoreClient;
 
 const KEY = Buffer.alloc(32, 7).toString("base64");
 
-const config = (
-	federationGrants: Record<string, unknown>,
-	deployment?: Record<string, unknown>,
-) => ({
-	federationGrants,
-	...(deployment ? { deployment } : {}),
-});
+const config = (federationGrants: Record<string, unknown>) => ({ federationGrants });
 
-/** What the module's `provides.federationGrantStore` is handed. */
+/** What the module's `provides.federationGrantStore` is handed, with the mode core fills. */
 const build = (
 	federationGrants: Record<string, unknown>,
 	options: Record<string, unknown> = {},
-	deployment?: Record<string, unknown>,
+	deploymentMode: DeploymentMode = "unset",
 ) => {
 	const module = redisFederationGrantStoreModuleFor(options as never);
 	const provide = module.provides?.federationGrantStore as (deps: unknown) => unknown;
 	return provide({
 		federationGrantStoreClient: client,
-		config: config(federationGrants, deployment),
+		config: config(federationGrants),
+		deploymentMode,
 	});
 };
 
@@ -100,10 +95,14 @@ const bootRefusal = async (extra: Record<string, unknown>): Promise<unknown> => 
 };
 
 describe("the Redis federation grant store module", () => {
-	it("needs the client and the configuration, and says which slot it fills", () => {
+	it("needs the client, the configuration and the deployment mode, and says which slot it fills", () => {
 		const module = redisFederationGrantStoreModuleFor();
 		expect(module.name).toBe("redis-federation-grant-store");
-		expect(module.requires).toStrictEqual(["federationGrantStoreClient", "config"]);
+		expect(module.requires).toStrictEqual([
+			"federationGrantStoreClient",
+			"config",
+			"deploymentMode",
+		]);
 		expect(Object.keys(module.provides ?? {})).toStrictEqual(["federationGrantStore"]);
 	});
 
@@ -123,6 +122,7 @@ describe("the Redis federation grant store module", () => {
 		const resolved = resolveRedisFederationGrantStoreOptions(
 			config({ encryptionKeys: [{ id: "k", key: KEY }], tombstoneRetention: 60 }) as never,
 			{},
+			"unset",
 		);
 		expect(resolved.tombstoneRetentionMs).toBe(60_000);
 		// Zero is a deployment that keeps no tombstones, and is not "unset".
@@ -130,6 +130,7 @@ describe("the Redis federation grant store module", () => {
 			resolveRedisFederationGrantStoreOptions(
 				config({ encryptionKeys: [{ id: "k", key: KEY }], tombstoneRetention: 0 }) as never,
 				{},
+				"unset",
 			).tombstoneRetentionMs,
 		).toBe(0);
 		// The ring arrives as key material, in the order it was written.
@@ -272,6 +273,7 @@ describe("the Redis federation grant store module", () => {
 							],
 						}) as never,
 						{},
+						"unset",
 					),
 				JSON.stringify(key),
 			).toThrow(refusal);
@@ -286,6 +288,7 @@ describe("the Redis federation grant store module", () => {
 			resolveRedisFederationGrantStoreOptions(
 				config({ encryptionMode: "required", encryptionKeys: [{ id: KEY, key: "k-1" }] }) as never,
 				{},
+				"unset",
 			);
 		} catch (err) {
 			thrown = err;
@@ -398,7 +401,7 @@ describe("the Redis federation grant store module", () => {
 			expect(() =>
 				build({ encryptionMode: "allow-plaintext" }, { environment: "production" }),
 			).toThrow(/\[federation-grants\] mode "allow-plaintext" is refused/);
-			expect(() => build({ encryptionMode: "allow-plaintext" }, {}, { mode: "multi" })).toThrow(
+			expect(() => build({ encryptionMode: "allow-plaintext" }, {}, "multi")).toThrow(
 				/\[federation-grants\]/,
 			);
 			// And in development it warns rather than refusing.
@@ -467,6 +470,7 @@ describe("the Redis federation grant store module", () => {
 					redisFederationGrantStore,
 				} as never,
 				{},
+				"unset",
 			);
 		expect(resolve({ tombstoneRetention: 31_536_000 }).tombstoneRetentionMs).toBe(31_536_000_000);
 		expect(resolve({}, { listingAllowanceMs: 31_536_000_000 }).listingAllowanceMs).toBe(
@@ -489,6 +493,7 @@ describe("the Redis federation grant store module", () => {
 				redisFederationGrantStore: { keyPrefix: "t:", listingAllowanceMs: 1_000 },
 			} as never,
 			{},
+			"unset",
 		);
 		expect(resolved.keyPrefix).toBe("t:");
 		expect(resolved.listingAllowanceMs).toBe(1_000);
@@ -497,6 +502,7 @@ describe("the Redis federation grant store module", () => {
 		const defaults = resolveRedisFederationGrantStoreOptions(
 			config({ encryptionKeys: [{ id: "k", key: KEY }] }) as never,
 			{},
+			"unset",
 		);
 		expect(defaults.keyPrefix).toBe("fg:");
 		expect(defaults).not.toHaveProperty("listingAllowanceMs");

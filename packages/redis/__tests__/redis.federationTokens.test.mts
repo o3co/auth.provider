@@ -62,6 +62,7 @@ const makeStore = (
 	return {
 		keyPrefix,
 		store: createRedisFederationTokenStore({
+			deploymentMode: "unset",
 			client: federationTokenStoreClient,
 			encryption,
 			keyPrefix,

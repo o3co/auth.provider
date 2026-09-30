@@ -97,7 +97,9 @@ const csrfGuardOf = (config: AppConfig, signer: CsrfTokenSigner, logger: Logger)
  * session store's module provides it from `session.secret`, which this module
  * never reads); and the planner-derived `federationProviders`,
  * `federationRedirectPolicyResolver` and `sessionRequirementResolver`
- * (password login and the federation link routes go through admission).
+ * (password login and the federation link routes go through admission), and
+ * `deploymentMode` (the login throttle's per-process fallback is refused
+ * under `multi`, so a mode read as absent must not lift that).
  *
  * `provides` what other packages need of the browser session through
  * core-owned slot contracts, so none imports this package: `csrfGuard` and
@@ -114,7 +116,8 @@ export const sessionModule = defineModule<
 	| "csrfTokenSigner"
 	| "federationProviders"
 	| "federationRedirectPolicyResolver"
-	| "sessionRequirementResolver",
+	| "sessionRequirementResolver"
+	| "deploymentMode",
 	"logger" | "rateLimiter" | "auditSink" | "subjectSessionIndex" | "subjectRevocation"
 >({
 	name: "session",
@@ -129,6 +132,7 @@ export const sessionModule = defineModule<
 		"federationProviders",
 		"federationRedirectPolicyResolver",
 		"sessionRequirementResolver",
+		"deploymentMode",
 	],
 	// All optional so a composition without them still boots: without
 	// `rateLimiter` the router uses a per-process in-memory limiter (and
@@ -176,6 +180,7 @@ export const sessionModule = defineModule<
 					handler: sessionRoutes.createRouter(express, {
 						userRepository: deps.userRepository,
 						config,
+						deploymentMode: deps.deploymentMode,
 						userSessionStore: deps.userSessionStore,
 						// `POST /session/logout` invalidates the records the session
 						// owns, not just the cookie. Both stores are already in this
