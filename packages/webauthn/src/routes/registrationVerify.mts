@@ -28,6 +28,10 @@
  *     namespace `webauthn:registration:${userId}`. Any outcome other than "consumed"
  *     (i.e. "unknown" or "replayed") immediately rejects with 400 challenge_invalid —
  *     replay rejection is the redemption primitive; no separate seen-challenge tracking.
+ *   - The challenge consumed is read from the client data as the library decodes it
+ *     (`../internal/clientData.mts`), base64url canonical or not. Client data it cannot
+ *     read as a JSON object with a string challenge is 400 invalid_request, the
+ *     challenge left unconsumed.
  *   - userId is always taken from the authenticated session (req.webauthnSubject.userId),
  *     NOT from the request body — prevents victim-targeted enrollment.
  *   - nickname, when present, is a string of 1–64 characters.
@@ -55,6 +59,7 @@ import {
 import type { Request, RequestHandler, Response } from "express";
 import { z } from "zod";
 import type { WebAuthnConfig } from "../config.mjs";
+import { readClientData } from "../internal/clientData.mjs";
 import { refuseCeremonyStoreUnavailable } from "../internal/storeUnavailable.mjs";
 import { verifyWebAuthnAttestation } from "../internal/verification.mjs";
 
@@ -158,8 +163,7 @@ export function createRegistrationVerifyHandler(deps: RegistrationVerifyDeps): R
 		// needs the value. The options endpoint stored SimpleWebAuthn's base64url
 		// `options.challenge`; the client returns it inside clientDataJSON, which is
 		// base64url-encoded JSON under response.response (RegistrationResponseJSON:
-		// { id, rawId, response: { clientDataJSON, ... }, ... }), so decode it
-		// (base64url → JSON → challenge string).
+		// { id, rawId, response: { clientDataJSON, ... }, ... }).
 		const innerResponse = (response as Record<string, unknown>).response;
 		const clientDataJSONBase64 =
 			innerResponse !== null &&
@@ -174,16 +178,9 @@ export function createRegistrationVerifyHandler(deps: RegistrationVerifyDeps): R
 			return;
 		}
 
-		let challengeValue: string;
-		try {
-			const clientDataJSON = JSON.parse(
-				Buffer.from(clientDataJSONBase64, "base64url").toString("utf8"),
-			) as Record<string, unknown>;
-			if (typeof clientDataJSON.challenge !== "string") {
-				throw new Error("challenge missing");
-			}
-			challengeValue = clientDataJSON.challenge;
-		} catch {
+		// Read as the library decodes it: the challenge consumed is the one it verifies.
+		const challengeValue = readClientData(clientDataJSONBase64)?.challenge;
+		if (typeof challengeValue !== "string") {
 			res
 				.status(400)
 				.json({ error: "invalid_request", details: "response.response.clientDataJSON invalid" });

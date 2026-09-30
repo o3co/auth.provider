@@ -25,8 +25,8 @@
  * A registration's top origin is held to the rule the library holds an assertion's to, which it
  * does not apply to a registration: a top origin the client data reports must be one of the
  * expected top origins, and belong to a cross-origin ceremony. None reported passes, as it does
- * for an assertion (Safari reports none). The client data is read with the library's own decoder,
- * so the text judged is the text it verified.
+ * for an assertion (Safari reports none). The client data is read as the library decodes it
+ * (`./clientData.mts`), so the text judged is the text it verified.
  * - `topOriginAccepted` mirrors `verifyAuthenticationResponse`'s `crossOrigin` branch: recheck it
  *   at every `@simplewebauthn/server` bump.
  * - Once `verifyRegistrationResponse` takes an expected top origin, pass it through and delete
@@ -50,7 +50,7 @@
 import type { AuthenticatorTransport, WebAuthnCredential } from "@o3co/auth-provider-core";
 import type { AuthenticationResponseJSON, RegistrationResponseJSON } from "@simplewebauthn/server";
 import { verifyAuthenticationResponse, verifyRegistrationResponse } from "@simplewebauthn/server";
-import { decodeClientDataJSON } from "@simplewebauthn/server/helpers";
+import { readClientData } from "./clientData.mjs";
 import { WEBAUTHN_ALGORITHM_IDS } from "./options.mjs";
 
 // ---------------------------------------------------------------------------
@@ -189,9 +189,9 @@ function topOriginAccepted(
 	clientDataJSON: string,
 	expected: readonly string[] | undefined,
 ): boolean {
-	const clientData: unknown = decodeClientDataJSON(clientDataJSON);
-	if (typeof clientData !== "object" || clientData === null) return false;
-	const { crossOrigin, topOrigin } = clientData as { crossOrigin?: unknown; topOrigin?: unknown };
+	const clientData = readClientData(clientDataJSON);
+	if (clientData === undefined) return false;
+	const { crossOrigin, topOrigin } = clientData;
 	if (topOrigin === undefined) return true;
 	return crossOrigin === true && typeof topOrigin === "string" && !!expected?.includes(topOrigin);
 }
