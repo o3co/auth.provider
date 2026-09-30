@@ -287,9 +287,9 @@ Module-level messages that arrive wrapped in a factory failure:
   them, `mfa.transactionTtlSeconds` outside 60 to 1800 seconds,
   `mfa.maxAttemptsPerTransaction` outside 1 to 10, and an
   `mfa.lockout` core's `checkMfaLockoutPolicy` refuses (`mfa.lockout.threshold
-  must be at most mfa.lockout.hardLimit`, …); `endpoints.mfa.url is not set`
-  (`ENDPOINTS_MFA_URL`, `/mfa` in core's reference.conf), the page a step-up
-  starts on; and, from its routes' factory once every factor has registered,
+  must be at most mfa.lockout.hardLimit`, …); `mfa.page.url is not set`
+  (`MFA_PAGE_URL`, `/mfa` in the MFA package's reference.conf), the page a
+  step-up starts on; and, from its routes' factory once every factor has registered,
   three `cause`s with a `reason`: `mfa-factor-kind-unhintable`
   (`the MFA factor of kind "<kind>" cannot be offered`) — an enabled factor
   whose kind is not a hint core admits (`^[a-z][a-z0-9_-]{0,63}$`), which a

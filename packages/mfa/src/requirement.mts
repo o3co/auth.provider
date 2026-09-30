@@ -79,7 +79,7 @@ export interface MfaRequirementOptions {
 	readonly factors: MfaFactorResolver;
 	readonly factorStore: MfaFactorStore;
 	readonly transactions: LoginTransactions;
-	/** `endpoints.mfa.url`, as the page a step-up starts on. */
+	/** `mfa.page.url`, as the page a step-up starts on. */
 	readonly stepUpPage: StepUpPage;
 	/**
 	 * Whether the session store can record a step-up (core's
