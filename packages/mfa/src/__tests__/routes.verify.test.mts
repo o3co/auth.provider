@@ -511,6 +511,12 @@ describe("what the routes log", () => {
 });
 
 describe("a refusal that names the factor it concerns: the clone event", () => {
+	/** What a test seeds beside the named factor: bob's factor of the kind, and alice's TOTP factor. */
+	interface Seeded {
+		readonly bobs: MfaFactorRecord;
+		readonly totp: MfaFactorRecord;
+	}
+
 	/** A factor of kind `test` that refuses every proof as a sign count that did not increase, naming what `names` answers. */
 	const naming = (names: () => unknown): MfaFactor => ({
 		...createTestMfaFactor({ kind: "test" }),
@@ -551,33 +557,54 @@ describe("a refusal that names the factor it concerns: the clone event", () => {
 		]);
 	});
 
-	it.each<
-		[
-			string,
-			(seeded: { readonly bobs: MfaFactorRecord; readonly totp: MfaFactorRecord }) => unknown,
-		]
-	>([
-		["another subject's factor of its kind", ({ bobs }) => bobs.id],
-		["a factor of the subject's of another kind", ({ totp }) => totp.id],
-		["a credential id, not a record id", () => "Y3JlZC1h"],
-		["nothing", () => undefined],
-	])("audits the refusal without a factor id when the factor names %s", async (_what, names) => {
+	/**
+	 * A verification naming alice's `test` factor, refused by a factor that names what `names`
+	 * picks among what was seeded: the answer, the audit, the logger, and the value named.
+	 */
+	async function seededRefusal(names: (seeded: Seeded) => unknown) {
 		const factorStore = createMemoryMfaFactorStore();
 		const named = await seedFactor(factorStore, "test", { secret: "a" });
-		const seeded = {
+		const seeded: Seeded = {
 			bobs: await seedFactor(factorStore, "test", { secret: "b" }, BOB.id),
 			totp: (await seedTotp(factorStore)).record,
 		};
 		const audit = recordingAuditSink();
-		const { app } = await boot({
+		const { app, logger } = await boot({
 			config: configFor("required"),
 			factorStore,
 			auditSink: audit,
 			extraModules: [contributing(naming(() => names(seeded)))],
 		});
 		const { agent, transaction } = await beginLogin(app);
-
 		const res = await verify(agent, transaction, named.id, "a");
+		return { res, audit, logger, dropped: names(seeded) };
+	}
+
+	it.each<[string, (seeded: Seeded) => unknown]>([
+		["another subject's factor of its kind", ({ bobs }) => bobs.id],
+		["a factor of the subject's of another kind", ({ totp }) => totp.id],
+		["a credential id, not a record id", () => "Y3JlZC1h"],
+	])(
+		"audits the refusal without a factor id when the factor names %s, and warns once naming the kind alone",
+		async (_what, names) => {
+			const { res, audit, logger, dropped } = await seededRefusal(names);
+
+			expect(res.status).toBe(401);
+			expect(audit.of("mfa.verify.failure")).toEqual([
+				expect.objectContaining({
+					details: { kind: "test", purpose: "login", reason: "sign_count_regression" },
+				}),
+			]);
+			const warned = logger.warn.mock.calls.filter(
+				([, event]) => event === "mfa_refusal_factor_id_dropped",
+			);
+			expect(warned).toEqual([[{ kind: "test" }, "mfa_refusal_factor_id_dropped"]]);
+			expect(loggedText(logger)).not.toContain(String(dropped));
+		},
+	);
+
+	it("audits the refusal without a factor id, and warns of nothing, when the factor names none", async () => {
+		const { res, audit, logger } = await seededRefusal(() => undefined);
 
 		expect(res.status).toBe(401);
 		expect(audit.of("mfa.verify.failure")).toEqual([
@@ -585,5 +612,6 @@ describe("a refusal that names the factor it concerns: the clone event", () => {
 				details: { kind: "test", purpose: "login", reason: "sign_count_regression" },
 			}),
 		]);
+		expect(events(logger, "warn")).not.toContain("mfa_refusal_factor_id_dropped");
 	});
 });
