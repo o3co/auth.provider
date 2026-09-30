@@ -660,7 +660,10 @@ wires it.
   `mfa.email_address_mismatch` when it refuses the factor for it. A user with
   no other factor needs a recovery code or an operator reset. Changing the
   address is the Store's: ask for recent authentication, and tell the old
-  address.
+  address. **The Store must hold one mailbox per account**: the provider
+  reads the address as one addr-spec alone, and an account whose address is
+  a list, an angle address or carries a comment has no address to it — no
+  email factor, no account-email proof.
 - **Notices to the account holder: required, and yours.** The provider sends
   none. It records audit events (`auditSink`), and the deployment reads them
   and tells the account holder — by mail, a chat message, anything — of every
