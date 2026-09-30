@@ -682,6 +682,12 @@ describe("a renamed variable — a manifest that declares one boot cannot hold",
 			"FIXTURE_RENAMING_LABEL",
 			"did not change",
 		],
+		[
+			"the name __proto__, which a plain object cannot hold as a key of its own",
+			JSON.parse('{"__proto__":"legacy.retries"}') as Record<string, unknown>,
+			"__proto__",
+			"__proto__",
+		],
 	] as const)("refuses %s, naming the variable", async (_label, renamedVariables, named, words) => {
 		const err = await refusedAtStageOne([declaring(renamedVariables)]);
 
