@@ -39,6 +39,7 @@ import { resolverForTests } from "@o3co/auth-provider-core/testing";
 import { decodeJwt } from "jose";
 import { describe, expect, it, vi } from "vitest";
 import { createAuthorizationGrant } from "#/grants/authorization.mjs";
+import { OAUTH_ADMISSION_ACTIONS } from "./_helpers/admissionActions.mjs";
 import { codeRecord } from "./_helpers/codeRecord.mjs";
 import {
 	COMPOUND_DPOP_BINDING,
@@ -109,7 +110,7 @@ function makeDeps(
 	options: { readonly bindConfidentialClientRefreshTokens?: boolean } = {},
 ) {
 	return {
-		sessionRequirementResolver: resolverForTests([]),
+		sessionRequirementResolver: resolverForTests([], { actions: OAUTH_ADMISSION_ACTIONS }),
 		config:
 			options.bindConfidentialClientRefreshTokens === undefined
 				? mockConfig

@@ -33,6 +33,7 @@ import { resolverForTests } from "@o3co/auth-provider-core/testing";
 import express from "express";
 import request from "supertest";
 import { describe, expect, it } from "vitest";
+import { SESSION_ADMISSION_ACTIONS } from "#/admissionActions.mjs";
 import { FEDERATION_TRANSACTION_KEY_PREFIX } from "#/federations/transaction.mjs";
 import { createRouter } from "#/routes/Federation.mjs";
 import {
@@ -171,7 +172,7 @@ function buildApp() {
 
 	app.use(
 		createRouter(express, {
-			requirements: resolverForTests([]),
+			requirements: resolverForTests([], { actions: SESSION_ADMISSION_ACTIONS }),
 			config: { session: { name: "harness.session" } } as never,
 			federationProviders: new Map<string, FederationProvider>([["apple", apple]]),
 			federationRedirectPolicyResolver: new Map([["apple", makePermissivePolicy()]]) as never,

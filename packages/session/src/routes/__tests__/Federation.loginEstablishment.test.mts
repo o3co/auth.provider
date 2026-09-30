@@ -32,6 +32,7 @@ import {
 import { resolverForTests } from "@o3co/auth-provider-core/testing";
 import request from "supertest";
 import { describe, expect, it, vi } from "vitest";
+import { SESSION_ADMISSION_ACTIONS } from "#/admissionActions.mjs";
 import { buildFederationApp, makeUserRepository } from "./federation-harness.mjs";
 
 const CALLBACK_URL = "https://app.example.com/session/oauth/federation/test/callback";
@@ -92,7 +93,7 @@ describe("the federation callback's login establishes without asking", () => {
 				username: "alice",
 				email: "alice@example.com",
 			}),
-			requirements: resolverForTests([requirement]),
+			requirements: resolverForTests([requirement], { actions: SESSION_ADMISSION_ACTIONS }),
 		});
 		harness.store.set("browser", {
 			data: { federation: { name: "test", state: "st-1", codeVerifier: "cv-1" } },

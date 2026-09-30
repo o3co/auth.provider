@@ -27,7 +27,6 @@
  */
 
 import {
-	ADMISSION_ACTIONS,
 	type Admission,
 	type AdmissionDeps,
 	admitSession,
@@ -110,7 +109,7 @@ const deps = (row: MergeRow): AdmissionDeps => ({
 	subjectRevocation: undefined,
 	requirements: resolverForTests(
 		row.mode === "off" ? [] : [realRequirement(row.mode, row.factors)],
-		{ issuer: ISSUER },
+		{ issuer: ISSUER, actions: { "test.use": { grade: "use" } } },
 	),
 	acrTable: MERGE_ACR_TABLE,
 	logger: undefined,
@@ -120,7 +119,7 @@ const deps = (row: MergeRow): AdmissionDeps => ({
 const decide = (rowDeps: AdmissionDeps, row: MergeRow): Promise<Admission> =>
 	admitSession(rowDeps, {
 		claim: claim(),
-		action: ADMISSION_ACTIONS["oauth.authorize"],
+		action: "test.use",
 		asks: { acrValues: row.acrValues ?? [] },
 	});
 

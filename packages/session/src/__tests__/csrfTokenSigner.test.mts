@@ -47,6 +47,7 @@ import {
 import express from "express";
 import request from "supertest";
 import { afterEach, describe, expect, it } from "vitest";
+import { SESSION_ADMISSION_ACTIONS } from "#/admissionActions.mjs";
 import { createSessionCsrfTokenSigner } from "#/csrf-token-signer.mjs";
 import { sessionModule } from "#/module.mjs";
 import { sessionStoreModule, sessionStoreModuleFor } from "#/modules/sessionStoreModule.mjs";
@@ -382,7 +383,7 @@ describe("the session module requires csrfTokenSigner", () => {
 			createSessionRouter(express, {
 				userRepository: fakeUserRepository,
 				config: configWith(VECTOR.secret),
-				requirements: resolverForTests([]),
+				requirements: resolverForTests([], { actions: SESSION_ADMISSION_ACTIONS }),
 			} as never),
 		).toThrow(
 			"session routes: csrfTokenSigner is required: pass the csrfTokenSigner slot's signer, or createSessionCsrfTokenSigner(secret)",
@@ -523,7 +524,7 @@ describe("the session module reads no session.secret", () => {
 					},
 				],
 			]),
-			sessionRequirementResolver: resolverForTests([]),
+			sessionRequirementResolver: resolverForTests([], { actions: SESSION_ADMISSION_ACTIONS }),
 		};
 		const provides = sessionModule.provides as Record<string, (d: unknown) => unknown>;
 		for (const provide of Object.values(provides)) provide(deps);

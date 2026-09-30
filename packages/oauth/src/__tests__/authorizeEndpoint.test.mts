@@ -50,6 +50,7 @@ import {
 	vouchableAcrValues,
 } from "#/acrValues.mjs";
 import { createOAuthRouter } from "#/routes.mjs";
+import { OAUTH_ADMISSION_ACTIONS } from "./_helpers/admissionActions.mjs";
 import { authorizationServerRegistry } from "./_helpers/authorizationServerRegistry.mjs";
 import { createMockLogger } from "./_helpers/mockLogger.mjs";
 
@@ -152,7 +153,7 @@ const makeApp = async (opts: {
 	};
 
 	const { router } = await createOAuthRouter(express, {
-		requirements: resolverForTests([]),
+		requirements: resolverForTests([], { actions: OAUTH_ADMISSION_ACTIONS }),
 		registry: authorizationServerRegistry(),
 		config: makeConfig(
 			opts.oauth ?? {},
@@ -2028,7 +2029,7 @@ describe("/authorize — the acr table at boot", () => {
 						admit: async () => ({ outcome: "met" }),
 					},
 				],
-				{ issuer: "https://issuer.example" },
+				{ issuer: "https://issuer.example", actions: OAUTH_ADMISSION_ACTIONS },
 			),
 			clientRepository: { findById: async () => null, authenticate: async () => null },
 			codeRepository: {

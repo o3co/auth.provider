@@ -57,6 +57,7 @@ import request from "supertest";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createRefreshTokenGrant } from "#/grants/refreshToken.mjs";
 import { createOAuthRouter } from "#/routes.mjs";
+import { OAUTH_ADMISSION_ACTIONS } from "./_helpers/admissionActions.mjs";
 import { codeRecord } from "./_helpers/codeRecord.mjs";
 
 const ISSUER = "https://auth.test";
@@ -137,7 +138,7 @@ async function buildApp(): Promise<Harness> {
 	registry.register(
 		"refresh_token",
 		createRefreshTokenGrant({
-			sessionRequirementResolver: resolverForTests([]),
+			sessionRequirementResolver: resolverForTests([], { actions: OAUTH_ADMISSION_ACTIONS }),
 			config,
 			keyStore,
 			refreshTokenFamilyRotation: rotation,
@@ -145,7 +146,7 @@ async function buildApp(): Promise<Harness> {
 		}),
 	);
 	const { router } = await createOAuthRouter(express, {
-		requirements: resolverForTests([]),
+		requirements: resolverForTests([], { actions: OAUTH_ADMISSION_ACTIONS }),
 		registry,
 		config,
 		clientRepository,

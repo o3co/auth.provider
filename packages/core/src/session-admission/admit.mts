@@ -62,6 +62,7 @@ import type {
 	UserSessionStore,
 } from "../user-sessions/types.mjs";
 import { type AcrSelection, type AcrTable, selectAcr, stepUpReach } from "./acr.mjs";
+import type { AdmissionAction } from "./actions.mjs";
 import {
 	additionsFromDto,
 	checkPrimaryAdditions,
@@ -71,12 +72,9 @@ import {
 	primaryFromDto,
 } from "./primary.mjs";
 import {
-	ADMISSION_ACTIONS,
 	type Admission,
-	type AdmissionAction,
 	type AdmissionAsks,
 	type AdmissionDeps,
-	type AdmissionGrade,
 	type AdmissionInfrastructureStore,
 	type AdmissionRequest,
 	type CompletedRequirement,
@@ -109,10 +107,11 @@ const knownClaims = new WeakSet<object>();
 /** The resolvers the boot planner and `resolverForTests` built. */
 const knownResolvers = new WeakSet<object>();
 
-/** What a resolver is built over: the collector's read side, or a test's list. */
+/** What a resolver is built over: the collectors' read side, or a test's lists. */
 export interface SessionRequirementSource {
 	get(name: string): RegisteredRequirement | undefined;
 	entries(): IterableIterator<readonly [string, RegisteredRequirement]>;
+	action(name: string): AdmissionAction | undefined;
 }
 
 /**
@@ -130,6 +129,7 @@ export function sessionRequirementResolverOver(
 		Object.freeze({
 			get: (name: string) => source.get(name),
 			entries: () => source.entries(),
+			action: (name: string) => source.action(name),
 		}),
 	);
 	knownResolvers.add(view);
@@ -142,13 +142,28 @@ const isKnownResolver = (value: unknown): value is SessionRequirementResolver =>
 /**
  * Refuses a resolver the planner or `resolverForTests` did not build; a
  * home-made object or a copy forges nothing. Consumer factories run it on
- * their `requirements` at construction, with their own name as `factory`, so
- * a missing or forged resolver fails where the composition is assembled
- * rather than on every request. Admission also runs it on every call.
+ * their `requirements` at construction, with their own name as `factory` and
+ * the names of the actions they admit as `admits`, so a missing or forged
+ * resolver, or an admitted action no module registers, fails where the
+ * composition is assembled rather than on a request. Admission also runs it
+ * on every call.
  */
-export function checkResolver(value: unknown, factory?: string): SessionRequirementResolver {
-	if (isKnownResolver(value)) return value;
+export function checkResolver(
+	value: unknown,
+	factory?: string,
+	admits: readonly string[] = [],
+): SessionRequirementResolver {
 	const who = factory === undefined ? "" : `${factory}: `;
+	if (isKnownResolver(value)) {
+		for (const name of admits) {
+			if (value.action(name) === undefined) {
+				throw new RangeError(
+					`${who}admits ${JSON.stringify(name)}, which no module registers: the module that installs it registers it under contributes.admissionActions`,
+				);
+			}
+		}
+		return value;
+	}
 	if (value === undefined || value === null) {
 		throw new RangeError(
 			`${who}requirements is required — the sessionRequirementResolver the boot planner built (the manifests pass it), or resolverForTests from @o3co/auth-provider-core/testing in a test`,
@@ -294,19 +309,9 @@ export function tokenClaim(claims: TokenCarrier): SessionClaim {
 }
 
 // ---------------------------------------------------------------------------
-// The actions: `ADMISSION_ACTIONS` lives in `requirement.mts`, beside the
-// remediation rule that reads it.
+// The actions: each a consumer's registration (`actions.mts`) or a
+// remediation core issued to a requirement (`requirement.mts`).
 // ---------------------------------------------------------------------------
-
-const GRADES: ReadonlySet<string> = new Set<AdmissionGrade>([
-	"use",
-	"credential_change",
-	"remediation",
-]);
-
-/** The `action` field of a log line: a bundled action's name, or an issued remediation's, else `custom`. */
-const actionLabel = (action: AdmissionAction): string =>
-	Object.hasOwn(ADMISSION_ACTIONS, action.name) || isIssuedAction(action) ? action.name : "custom";
 
 /** The `remediation` names already said to be undeclared, once per process each, up to the cap; past it, once for all. */
 const undeclaredRemediations = new Set<string>();
@@ -345,6 +350,29 @@ interface CheckedRequest {
 	readonly now: Date;
 }
 
+/**
+ * The action a request names: a registered action by its name — the object
+ * registration made, so the grade is never the caller's to restate — or a
+ * remediation core issued to a requirement, by its identity. Both are core's
+ * vocabulary, so a log line names either.
+ */
+function checkedAction(asked: unknown, requirements: SessionRequirementResolver): AdmissionAction {
+	if (typeof asked === "string") {
+		const registered = requirements.action(asked);
+		if (registered === undefined) {
+			throw new RangeError(
+				`admitSession: ${JSON.stringify(asked)} is not a registered admission action: the module that admits it registers it under contributes.admissionActions`,
+			);
+		}
+		return registered;
+	}
+	// The issued object keeps its identity: that is what step 5 checks.
+	if (isIssuedAction(asked)) return asked;
+	throw new RangeError(
+		"admitSession: the action is a registered action's name, or a remediation core issued to a requirement (issuedRemediationActions)",
+	);
+}
+
 /** A caller's fault is a `RangeError` before anything is read. Answers core's copy of what it read, each input read once. */
 function checkRequest(deps: AdmissionDeps, request: AdmissionRequest): CheckedRequest {
 	if (!isObject(deps)) throw new RangeError("admitSession: deps must be an object");
@@ -375,29 +403,7 @@ function checkRequest(deps: AdmissionDeps, request: AdmissionRequest): CheckedRe
 			? { tokenAmr: Object.freeze([...(presented.tokenAmr as readonly string[])]) }
 			: {}),
 	}) as SessionClaim;
-	const asked = request.action;
-	if (!isObject(asked))
-		throw new RangeError("admitSession: the action must be a name with a grade");
-	const name = asked.name;
-	const grade = asked.grade;
-	if (nonEmptyString(name) === undefined || typeof grade !== "string" || !GRADES.has(grade)) {
-		throw new RangeError("admitSession: the action must be a name with a grade");
-	}
-	// A bundled name is accepted as the bundled entry itself alone: the grade
-	// is not the caller's to restate.
-	if (Object.hasOwn(ADMISSION_ACTIONS, name)) {
-		if (asked !== (ADMISSION_ACTIONS as Record<string, AdmissionAction>)[name]) {
-			throw new RangeError(
-				`admitSession: "${name}" is a bundled action: pass ADMISSION_ACTIONS["${name}"] itself, not a copy or a literal`,
-			);
-		}
-	}
-	// The issued object keeps its identity — that is what step 5 checks — and
-	// so does the bundled entry; anything else is copied.
-	const action: AdmissionAction =
-		isIssuedAction(asked) || Object.hasOwn(ADMISSION_ACTIONS, name)
-			? (asked as AdmissionAction)
-			: Object.freeze({ name, grade: grade as AdmissionGrade });
+	const action = checkedAction(request.action, requirements);
 	const asksRead = request.asks;
 	let asks: AdmissionAsks | undefined;
 	if (asksRead !== undefined) {
@@ -506,7 +512,7 @@ export async function admitSession(
 		now,
 		logger,
 	} = checked;
-	const label = actionLabel(checked.action);
+	const label = checked.action.name;
 	const unavailable = (store: string, err: unknown): Admission => {
 		logger?.error(
 			{ store, action: label, err: loggableError(err) },
@@ -703,11 +709,10 @@ function stepUpVerdict(
 }
 
 /**
- * The action as the requirements see it: `use` and `credential_change`
- * as given; `remediation` only for the object core issued to one of these
- * requirements at registration — a literal, a copy, or `ADMISSION_ACTIONS`'
- * own entry carries no brand — else `credential_change`, the strictest
- * grade, said once per process per name.
+ * The action as the requirements see it: a registered action as registered;
+ * `remediation` only for an object core issued to one of these requirements —
+ * else, one issued to a requirement another composition registered, as
+ * `credential_change`, the strictest grade, said once per process per name.
  */
 function effectiveAction(
 	requirements: readonly (readonly [string, RegisteredRequirement])[],
@@ -722,16 +727,18 @@ function effectiveAction(
 	) {
 		return asked;
 	}
-	// The name is the consumer's own, so the line says `custom`; once per
-	// name, and once for all past the cap, so a route cannot fill the log.
+	// Once per name, and once for all past the cap, so the log stays bounded.
 	if (undeclaredRemediations.size < UNDECLARED_REMEDIATION_CAP) {
 		if (!undeclaredRemediations.has(asked.name)) {
 			undeclaredRemediations.add(asked.name);
-			logger?.warn({ action: "custom" }, "session_admission_remediation_undeclared");
+			logger?.warn({ action: asked.name }, "session_admission_remediation_undeclared");
 		}
 	} else if (!undeclaredRemediations.has(asked.name) && !undeclaredRemediationsOverflowed) {
 		undeclaredRemediationsOverflowed = true;
-		logger?.warn({ action: "custom", overflow: true }, "session_admission_remediation_undeclared");
+		logger?.warn(
+			{ action: asked.name, overflow: true },
+			"session_admission_remediation_undeclared",
+		);
 	}
 	return { name: asked.name, grade: "credential_change" };
 }

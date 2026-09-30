@@ -14,9 +14,7 @@
  * limitations under the License.
  */
 import crypto from "node:crypto";
-
 import {
-	ADMISSION_ACTIONS,
 	type Admission,
 	type AdmissionDeps,
 	admitSession,
@@ -50,6 +48,7 @@ import {
 	wellFormedAmr,
 } from "@o3co/auth-provider-core";
 import { stepUpRefusal } from "../admission.mjs";
+import type { AUTHORIZATION_CODE_GRANT_ADMISSION_ACTIONS } from "../admissionActions.mjs";
 import { resolveOAuthOptions } from "../resolveOAuthOptions.mjs";
 import { PKCE_METHOD_S256, pkceMethodsForClient } from "./pkce.mjs";
 
@@ -445,7 +444,8 @@ export const createAuthorizationGrant = (deps: AuthorizationGrantDeps): GrantHan
 			// second read is compared against it.
 			const firstRead = await admitSession(admissionDeps, {
 				claim: codeClaimFirstRead(codeData),
-				action: ADMISSION_ACTIONS["oauth.code_exchange"],
+				action:
+					"oauth.code_exchange" satisfies keyof typeof AUTHORIZATION_CODE_GRANT_ADMISSION_ACTIONS,
 			});
 			if (firstRead.outcome !== "admitted") {
 				return { result: firstReadRefusal(firstRead) };
@@ -654,7 +654,8 @@ export const createAuthorizationGrant = (deps: AuthorizationGrantDeps): GrantHan
 						// With a store wired and admitted, the subject is the record's
 						// non-empty `sub` (above).
 						claim: codeClaimRevalidation(codeData, subject as string),
-						action: ADMISSION_ACTIONS["oauth.code_exchange"],
+						action:
+							"oauth.code_exchange" satisfies keyof typeof AUTHORIZATION_CODE_GRANT_ADMISSION_ACTIONS,
 					});
 					if (revalidation.outcome !== "admitted" || revalidation.session === null) {
 						return {

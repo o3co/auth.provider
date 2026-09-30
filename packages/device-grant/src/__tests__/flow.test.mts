@@ -49,6 +49,7 @@ import { createClientAuthMiddleware } from "@o3co/auth-provider-oauth";
 import express from "express";
 import request from "supertest";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { DEVICE_GRANT_ADMISSION_ACTIONS } from "#/admissionActions.mjs";
 import { createDeviceAuthorizationHandler } from "#/deviceAuthorizationEndpoint.mjs";
 import { createDeviceCodeGrant } from "#/grant.mjs";
 import { DEVICE_CODE_GRANT_TYPE } from "#/types.mjs";
@@ -186,7 +187,7 @@ const makeHarness = (
 			userSessionStore,
 			// No requirement registered; what admission changes here (the
 			// session-admission ADR's D8) is admission.test.mts's.
-			requirements: resolverForTests([]),
+			requirements: resolverForTests([], { actions: DEVICE_GRANT_ADMISSION_ACTIONS }),
 			requireEmailVerified: overrides.requireEmailVerified ?? false,
 			...(overrides.subjectRevocation ? { subjectRevocation: overrides.subjectRevocation } : {}),
 			now: clock.now,

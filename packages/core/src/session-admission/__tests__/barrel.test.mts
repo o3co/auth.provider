@@ -66,6 +66,16 @@ describe("the barrel's session-admission surface", () => {
 		}
 	});
 
+	it("exports no consumer's action: each is its consumer's to register, and core keeps the grades", () => {
+		expect(Object.hasOwn(core, "ADMISSION_ACTIONS")).toBe(false);
+		expect(core.ADMISSION_GRADES).toEqual([
+			"use",
+			"grants_nothing",
+			"credential_change",
+			"remediation",
+		]);
+	});
+
 	it("does not export MFA_REQUIREMENT_NAME: the name mfa is the MFA package's", () => {
 		expect(Object.hasOwn(core, "MFA_REQUIREMENT_NAME")).toBe(false);
 	});

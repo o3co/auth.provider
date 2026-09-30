@@ -45,6 +45,7 @@ import { resolverForTests } from "@o3co/auth-provider-core/testing";
 import { CompactEncrypt, compactDecrypt, decodeJwt } from "jose";
 import { describe, expect, it, vi } from "vitest";
 import { createAuthorizationGrant } from "#/grants/authorization.mjs";
+import { OAUTH_ADMISSION_ACTIONS } from "./_helpers/admissionActions.mjs";
 import { codeRecord } from "./_helpers/codeRecord.mjs";
 
 const RP_URI = "https://rp.example/cb";
@@ -92,7 +93,7 @@ async function exchangeCode(keyStore: KeyStore) {
 	});
 	const register = vi.fn(rotation.register);
 	const handler = createAuthorizationGrant({
-		sessionRequirementResolver: resolverForTests([]),
+		sessionRequirementResolver: resolverForTests([], { actions: OAUTH_ADMISSION_ACTIONS }),
 		config,
 		keyStore,
 		clientRepository: { findById: async () => null, authenticate: async () => null },
