@@ -126,7 +126,8 @@ export interface TokenBindingRefusal {
  * succeed on a request.
  *
  * `"intent-explicit"` (default): explicit-intent mechanisms (DPoP) win over
- * ambient ones (mTLS); two or more explicit successes → 400 `invalid_request`.
+ * ambient ones (mTLS); two or more explicit successes, or two or more ambient
+ * successes with no explicit one → 400 `invalid_request`.
  *
  * `"strict-mutual-exclusion"`: two or more successes of any kind → 400
  * `invalid_request`.
@@ -303,34 +304,25 @@ export const tokenBindingMw = ({
 			return;
 		}
 
-		// dispatchPolicy === "intent-explicit"
+		// intent-explicit: the explicit successes if any, else the ambient ones. More
+		// than one is refused: picking one would bind the token by registration order.
 		const explicit = successes.filter((s) => s.mechanism.intentExplicit);
-		if (explicit.length >= 2) {
-			const kinds = explicit.map((s) => s.mechanism.kind).join(", ");
+		const contenders = explicit.length > 0 ? explicit : successes;
+		if (contenders.length > 1) {
+			const kinds = contenders.map((s) => s.mechanism.kind).join(", ");
 			res
 				.status(400)
 				.json(
 					errorEnvelope(
 						"invalid_request",
-						`multiple explicit-intent token-binding mechanisms succeeded (${kinds})`,
+						`multiple ${explicit.length > 0 ? "explicit-intent" : "ambient"} token-binding mechanisms succeeded (${kinds})`,
 					),
 				);
 			return;
 		}
-		const [firstExplicit] = explicit;
-		if (firstExplicit) {
-			applyResponseHeaders(res, firstExplicit.binding);
-			req.tokenBinding = firstExplicit.binding;
-			next();
-			return;
-		}
-		// All successes are ambient. With two ambient mechanisms succeeding, the
-		// first-registered wins and the rest are silently discarded, unlike the
-		// explicit branch, which rejects. Only mTLS ships today; whoever adds a
-		// second ambient mechanism must decide whether first-wins is right. The
-		// behaviour is pinned in `__tests__/tokenBinding.test.mts`.
-		applyResponseHeaders(res, firstSuccess.binding);
-		req.tokenBinding = firstSuccess.binding;
+		const chosen = explicit[0] ?? firstSuccess;
+		applyResponseHeaders(res, chosen.binding);
+		req.tokenBinding = chosen.binding;
 		next();
 	};
 	// Non-enumerable so the brand never shows up in middleware introspection,

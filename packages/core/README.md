@@ -1,6 +1,6 @@
 # @o3co/auth-provider-core
 
-Last updated: 2026-09-30
+Last updated: 2026-10-01
 
 ## Responsibility
 
@@ -564,7 +564,7 @@ Both packages contribute via `tokenBindingMechanisms`. Core's `assembleApp` coll
 
 When multiple mechanisms are installed, `core.tokenBinding.dispatchPolicy` (in core's own section — single source of truth) arbitrates:
 
-- `intent-explicit` (default) — prefer explicit-intent mechanisms over ambient.
+- `intent-explicit` (default) — prefer explicit-intent mechanisms over ambient. Two or more explicit successes, or two or more ambient successes with no explicit one, are rejected with `invalid_request`.
 - `strict-mutual-exclusion` — reject `invalid_request` if more than one mechanism's `extract` returns a binding.
 
 Env override: `CORE_TOKEN_BINDING_DISPATCH_POLICY`.
