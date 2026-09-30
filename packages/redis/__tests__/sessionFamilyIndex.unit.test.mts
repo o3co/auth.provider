@@ -78,6 +78,20 @@ describe("createRedisSessionFamilyIndex — the session-end capability", () => {
 		expect(log).toEqual(["zRange t:fi:sid-1 sent", "zRange t:fi:sid-1 replied"]);
 	});
 
+	it("refuses an endedKeyPrefix that overlaps keyPrefix: neither may start with the other", () => {
+		// A mark's `SET` at a family set's key would replace the set.
+		const { client } = recordingClient();
+		for (const [keyPrefix, endedKeyPrefix] of [
+			["t:fi:", "t:fi:"],
+			["t:fi:", "t:fi:ended:"],
+			["t:ended:fi:", "t:ended:"],
+		] as const) {
+			expect(() => createRedisSessionFamilyIndex({ client, keyPrefix, endedKeyPrefix })).toThrow(
+				RangeError,
+			);
+		}
+	});
+
 	it("is not claimed over a client without the mark's methods, or with one of them", () => {
 		const { client } = recordingClient();
 		const { writeEndMark: _write, hasEndMark: _has, ...sortedSetOnly } = client;
