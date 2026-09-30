@@ -29,6 +29,7 @@ import { parseFile } from "@o3co/ts.hocon";
 import { validate } from "@o3co/ts.hocon/zod";
 import { describe, expect, it } from "vitest";
 import { resolveConfigPaths } from "../configPath.mjs";
+import { templateReference } from "../modules.mjs";
 
 const standaloneDir = fileURLToPath(new URL("../..", import.meta.url));
 const configDir = fileURLToPath(new URL("../../config", import.meta.url));
@@ -65,6 +66,7 @@ function resolveWith(env: Record<string, string>, configEnv = "production"): App
 	return validate(
 		parseFile(envConfPath, { env })
 			.withFallback(parseFile(applicationConfPath, { env }))
+			.withFallback(parseFile(fileURLToPath(templateReference()), { env }))
 			.withFallback(parseFile(fileURLToPath(coreReference()), { env })),
 		AppConfigSchema,
 	);

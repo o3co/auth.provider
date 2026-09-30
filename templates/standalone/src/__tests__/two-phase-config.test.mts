@@ -61,6 +61,7 @@ import {
 	resolveLayers,
 	SWITCHES,
 } from "../configPath.mjs";
+import { templateReference } from "../modules.mjs";
 
 const configDir = fileURLToPath(new URL("../../config", import.meta.url));
 
@@ -101,6 +102,7 @@ function preParsed(environment: string, env: Readonly<Record<string, string>>): 
 	return validate(
 		read(top)
 			.withFallback(read(application))
+			.withFallback(read(fileURLToPath(templateReference())))
 			.withFallback(read(fileURLToPath(coreReference()))),
 		AppConfigSchema,
 	);

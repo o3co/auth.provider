@@ -57,6 +57,7 @@ import {
 	readSwitches,
 	resolveConfigPaths,
 	resolveForBoot,
+	resolveLayers,
 	SWITCHES,
 } from "../configPath.mjs";
 import { createAppLogger } from "../logger.mjs";
@@ -402,12 +403,17 @@ describe("cors", () => {
 		],
 		["with CORS_ALLOWED_ORIGINS empty", { CORS_ALLOWED_ORIGINS: "" }],
 	])(
-		"ships the default core's reference ships, which core reads without httpSettings, %s",
+		"resolves its application.conf over its reference as core's reference resolves alone, which core reads without httpSettings, %s",
 		(_name, env) => {
-			const corsIn = (reference: URL) =>
-				(parseFile(fileURLToPath(reference), { env }).toObject() as { cors?: unknown }).cors;
-			expect(corsIn(TEMPLATE_REFERENCE)).toEqual(corsIn(coreReference()));
-			expect(corsIn(TEMPLATE_REFERENCE)).toBeDefined();
+			const { applicationConfPath } = resolveConfigPaths(configDir, "development");
+			const template = resolveLayers(readOwnLayers([applicationConfPath], { env }), [
+				TEMPLATE_REFERENCE,
+			]).cors;
+			const core = (
+				parseFile(fileURLToPath(coreReference()), { env }).toObject() as { cors?: unknown }
+			).cors;
+			expect(template).toEqual(core);
+			expect(template).toBeDefined();
 		},
 	);
 
