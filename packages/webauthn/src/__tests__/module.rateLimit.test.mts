@@ -378,7 +378,7 @@ describe("webauthn authentication/options rate limit — the slot and the contri
 			[
 				{
 					key: "webauthn.rateLimit.authenticationOptions",
-					inForce: null,
+					contributed: null,
 					webauthnConfig: { limit: 2, windowSeconds: 60 },
 				},
 				EVENT,
@@ -401,7 +401,7 @@ describe("webauthn authentication/options rate limit — the slot and the contri
 			[
 				{
 					key: "webauthn.rateLimit.authenticationOptions",
-					inForce: { limit: 5, windowSeconds: 60 },
+					contributed: { limit: 5, windowSeconds: 60 },
 					webauthnConfig: { limit: 2, windowSeconds: 60 },
 				},
 				EVENT,
@@ -428,7 +428,7 @@ describe("webauthn authentication/options rate limit — the slot and the contri
 		}
 	});
 
-	it("warns when a module has set the budget in force apart from the key and the slot, naming it", async () => {
+	it("warns when a module has overridden the contributed budget away from the key and the slot, naming it", async () => {
 		const logger = spyLogger();
 		const tightener = defineModule({
 			name: "test:webauthn-rl-tightener",
@@ -450,7 +450,7 @@ describe("webauthn authentication/options rate limit — the slot and the contri
 			[
 				{
 					key: "webauthn.rateLimit.authenticationOptions",
-					inForce: { limit: 1, windowSeconds: 60 },
+					contributed: { limit: 1, windowSeconds: 60 },
 					webauthnConfig: { limit: 2, windowSeconds: 60 },
 				},
 				EVENT,

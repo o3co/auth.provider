@@ -1421,7 +1421,7 @@ describe("deviceGrantModule — the route it actually contributes", () => {
 		["a budget another module set", { limit: 3, windowSeconds: 600 }],
 		["no budget at all", undefined],
 	])(
-		"refuses to mount device/verification when the device_verification budget in force is %s, not oauth.deviceAuthorization.rateLimit",
+		"refuses to mount device/verification when the contributed device_verification budget is %s, not oauth.deviceAuthorization.rateLimit",
 		(_label, inForce) => {
 			const deps = {
 				...enabledDeps(),
@@ -1431,7 +1431,7 @@ describe("deviceGrantModule — the route it actually contributes", () => {
 				},
 			};
 			const factory = contributionsFor(deps)?.routes?.[1] as (d: unknown) => unknown;
-			expect(() => factory(deps)).toThrow(/device_verification/);
+			expect(() => factory(deps)).toThrow(/contributed device_verification budget/);
 			expect(() => factory(deps)).toThrow(/oauth\.deviceAuthorization\.rateLimit/);
 		},
 	);

@@ -20,7 +20,8 @@
  * prefix's owner contributed, else the limiter's `defaultLimit`.
  */
 
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { MAX_DURATION_SECONDS } from "#/config/durations.mjs";
 import type { RateLimitBudgetResolver } from "#/modules/manifest/index.mjs";
 import { createRateLimitBudgetLookup } from "#/ratelimit/budgetLookup.mjs";
 import type { RateLimitSpec } from "#/ratelimit/types.mjs";
@@ -116,6 +117,67 @@ describe("createRateLimitBudgetLookup", () => {
 			expect(() => lookup("mfa:ip:192.0.2.1")).toThrow(/^createExampleLimiter: .*"mfa"/);
 		},
 	);
+
+	it("throws for a key whose resolver answers a window longer than a year", () => {
+		const lookup = createRateLimitBudgetLookup("createExampleLimiter", {
+			defaultLimit: DEFAULT,
+			budgets: {
+				get: () => ({ limit: 5, windowSeconds: MAX_DURATION_SECONDS + 1 }),
+				entries: () => new Map<string, RateLimitSpec>().entries(),
+			},
+		});
+		expect(() => lookup("mfa:ip:192.0.2.1")).toThrow(/^createExampleLimiter: .*"mfa"/);
+	});
+
+	describe("whatever the clock says", () => {
+		afterEach(() => {
+			vi.useRealTimers();
+		});
+
+		it("applies a contributed budget it applied at boot: its check is not relative to now", () => {
+			const lookup = createRateLimitBudgetLookup("test", {
+				defaultLimit: DEFAULT,
+				budgets: resolverOver({ mfa: { limit: 5, windowSeconds: MAX_DURATION_SECONDS } }),
+			});
+			expect(lookup("mfa:ip:192.0.2.1").spec).toEqual({
+				limit: 5,
+				windowSeconds: MAX_DURATION_SECONDS,
+			});
+			// A minute short of the end of the Date range: a window measured
+			// from now would no longer end inside it.
+			vi.useFakeTimers();
+			vi.setSystemTime(8.64e15 - 60_000);
+			expect(lookup("mfa:ip:192.0.2.1").spec).toEqual({
+				limit: 5,
+				windowSeconds: MAX_DURATION_SECONDS,
+			});
+		});
+	});
+
+	it("reads a contributed budget once, into a frozen copy it checks and hands out", () => {
+		let reads = 0;
+		const answered = {
+			get limit() {
+				reads += 1;
+				return reads === 1 ? 5 : Number.NaN;
+			},
+			windowSeconds: 60,
+		};
+		const lookup = createRateLimitBudgetLookup("test", {
+			defaultLimit: DEFAULT,
+			budgets: {
+				get: () => answered,
+				entries: () => new Map<string, RateLimitSpec>().entries(),
+			},
+		});
+
+		const { spec } = lookup("mfa:ip:192.0.2.1");
+
+		expect(spec).toEqual({ limit: 5, windowSeconds: 60 });
+		expect(Object.isFrozen(spec)).toBe(true);
+		expect(spec).not.toBe(answered);
+		expect(reads).toBe(1);
+	});
 
 	it("takes the prefix up to the first colon, and a key with none whole", () => {
 		const lookup = createRateLimitBudgetLookup("test", {

@@ -23,6 +23,7 @@
  */
 
 import { describe, expect, it, vi } from "vitest";
+import { MAX_DURATION_SECONDS } from "../../config/durations.mjs";
 import { defineModule, type Module } from "../../modules/manifest/index.mjs";
 import { memoryRateLimiterModule } from "../../ratelimit/module.mjs";
 import type { RateLimiter } from "../../ratelimit/types.mjs";
@@ -210,6 +211,19 @@ describe("rateLimitBudgets — an override may only tighten", () => {
 		},
 	);
 
+	it("refuses boot on an override one second over a year, which counts a longer window as tighter", async () => {
+		const err = await refusal(
+			overriding(
+				{ limit: 5, windowSeconds: 300 },
+				{ limit: 5, windowSeconds: MAX_DURATION_SECONDS + 1 },
+				withMemoryLimiter(),
+			),
+		);
+		expect(err.reason).toBe("contribute-factory-failed");
+		expect(err.details).toMatchObject({ module: "budget-replacer", name: "fixture" });
+		expect(err.message).toContain("at most a year");
+	});
+
 	it("registers an override no looser than the budget it replaces", async () => {
 		const handle = await overriding(
 			{ limit: 5, windowSeconds: 300 },
@@ -325,7 +339,9 @@ describe("rateLimitBudgets — the boot line", () => {
 			bootstrapComponents: { ...withMemoryLimiter(), logger: logger as never },
 		});
 
-		expect(logger.info.mock.calls.filter((call) => call[1] === "rate_limits_in_force")).toEqual([
+		expect(
+			logger.info.mock.calls.filter((call) => call[1] === "rate_limit_budgets_registered"),
+		).toEqual([
 			[
 				{
 					limiter: { kind: "memory", failMode: "closed" },
@@ -339,7 +355,7 @@ describe("rateLimitBudgets — the boot line", () => {
 						{ prefix: "fixture-off", budget: null, module: "budget-owner", by: "contribution" },
 					],
 				},
-				"rate_limits_in_force",
+				"rate_limit_budgets_registered",
 			],
 		]);
 		await handle.dispose();
@@ -376,8 +392,13 @@ describe("rateLimitBudgets — the boot line", () => {
 			bootstrapComponents: { ...bootWith(), logger: logger as never },
 		});
 
-		expect(logger.info.mock.calls.filter((call) => call[1] === "rate_limits_in_force")).toEqual([
-			[{ limiter: { kind: "custom", failMode: "invalid" }, budgets: [] }, "rate_limits_in_force"],
+		expect(
+			logger.info.mock.calls.filter((call) => call[1] === "rate_limit_budgets_registered"),
+		).toEqual([
+			[
+				{ limiter: { kind: "custom", failMode: "invalid" }, budgets: [] },
+				"rate_limit_budgets_registered",
+			],
 		]);
 		await handle.dispose();
 	});
@@ -443,6 +464,7 @@ describe("rateLimitBudgets — refused", () => {
 		["a fractional window", { limit: 5, windowSeconds: 1.5 }],
 		["a NaN limit", { limit: Number.NaN, windowSeconds: 60 }],
 		["a window past the Date range", { limit: 5, windowSeconds: Number.MAX_SAFE_INTEGER }],
+		["a window one second over a year", { limit: 5, windowSeconds: MAX_DURATION_SECONDS + 1 }],
 	])(
 		"a budget no limiter can apply as written — %s — refuses boot naming the module and prefix",
 		async (_label, budget) => {
