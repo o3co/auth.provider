@@ -343,7 +343,9 @@ describe("createWebAuthnGrant — the auth_time it stamps", () => {
 	// A signed assertion can be held until its challenge expires, so the time it
 	// reaches the grant says nothing about when the user made the gesture. The
 	// challenge was issued before the gesture, and no assertion arrives more than
-	// one challenge lifetime after it was issued.
+	// one challenge lifetime after it was issued. Whatever the grant spends after
+	// the challenge is consumed (the ceremony's seen-set write, the verification)
+	// must not move `auth_time` later.
 	const TTL_MS = 120_000;
 	const ISSUED_AT_MS = Date.UTC(2026, 8, 30, 12, 0, 0);
 
@@ -351,8 +353,12 @@ describe("createWebAuthnGrant — the auth_time it stamps", () => {
 		vi.useRealTimers();
 	});
 
-	for (const heldMs of [0, TTL_MS - 1_000]) {
-		it(`is no later than the challenge's issuance, and at most one challenge lifetime before it, on both tokens: held ${heldMs / 1000}s`, async () => {
+	for (const [heldMs, afterConsumeMs] of [
+		[0, 0],
+		[TTL_MS - 1_000, 0],
+		[TTL_MS - 1_000, 5_000],
+	] as const) {
+		it(`is no later than the challenge's issuance, and at most one challenge lifetime before it, on both tokens: held ${heldMs / 1000}s, completed ${afterConsumeMs / 1000}s after the consume`, async () => {
 			vi.useFakeTimers({ toFake: ["Date"] });
 			vi.setSystemTime(ISSUED_AT_MS);
 			const challengeStore = createMemoryChallengeStore();
@@ -370,6 +376,11 @@ describe("createWebAuthnGrant — the auth_time it stamps", () => {
 				webauthnConfig: createTestWebAuthnConfig({ origin: [ISSUER], challengeTtlMs: TTL_MS }),
 			});
 
+			// The verification runs after the challenge is consumed; a slow one moves the clock.
+			mockVerifyAssertion.mockImplementationOnce(async () => {
+				vi.setSystemTime(Date.now() + afterConsumeMs);
+				return { ok: true, newSignCount: 6 };
+			});
 			vi.setSystemTime(ISSUED_AT_MS + heldMs);
 			const tokens = await issue(
 				deps,
