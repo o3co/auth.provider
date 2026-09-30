@@ -1,6 +1,6 @@
 # @o3co/auth-provider-redis
 
-Last updated: 2026-09-29
+Last updated: 2026-09-30
 
 Redis-backed implementations of the store ports `@o3co/auth-provider-core`
 declares, a `defineModule` manifest for each, and the wrappers that turn one
@@ -321,9 +321,12 @@ Each adapter ships in up to two forms:
   form, `redisFederationTokenStoreModuleFor` and
   `redisFederationGrantStoreModuleFor`, for a composition root that selects its
   config by a name other than `NODE_ENV` (the standalone's `CONFIG_ENV`): the
-  plaintext guard reads that name in addition to `NODE_ENV`, and
-  `deployment.mode` off the config — `"multi"` refuses plaintext in every
-  environment (#473). Where plaintext goes ahead the guard logs one line on
+  plaintext guard reads that name in addition to `NODE_ENV`, and the
+  replica count from core's `deploymentMode` slot, which both modules require
+  and core fills from `deployment.mode` — `"multi"` refuses plaintext in every
+  environment (#473). A composition root that builds the grant store itself
+  passes the mode to `resolveRedisFederationGrantStoreOptions` as its third
+  argument. Where plaintext goes ahead the guard logs one line on
   the module's optional `logger` slot (`consoleLogger` when it is empty):
   `federation_store_plaintext` (warn, `store`, `mode`) where it is allowed,
   `federation_store_plaintext_override` (error, with the `environment` or
@@ -371,7 +374,7 @@ Each adapter ships in up to two forms:
 | `redisMfaFactorStoreModule` | `mfaFactorStoreClient` | `mfaFactorStore` | `redisMfaFactorStore` (`keyPrefix`, default `mfaf:`) | — |
 | `redisMfaTransactionStoreModule` | `mfaTransactionStoreClient` | `mfaTransactionStore` | `redisMfaTransactionStore` (`keyPrefix`, default `mfat:`) | — |
 
-Every module also requires `config`. Every module whose stores log also reads
+Every module also requires `config`, and the two sealing-store modules `deploymentMode` as well. Every module whose stores log also reads
 the optional `logger` slot: the two sealing-store modules, for the plaintext
 guard's line; `redisSessionStoresModule` and `redisCodeRepositoryModule`, for a
 stored record they cannot read; the two MFA store modules, for their boot

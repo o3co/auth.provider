@@ -1,6 +1,6 @@
 # @o3co/auth-provider-session
 
-Last updated: 2026-09-29
+Last updated: 2026-09-30
 
 Browser login, logout and upstream-IdP federation routes for
 [auth.provider](../../README.md), the redirect policy every federation adapter
@@ -222,7 +222,9 @@ What holds:
   static `sessionStoreModule` cannot know the type, so the guard cannot name it;
   its route factory refuses the same combination when it runs
   (`replica-unsafe-adapter`) and never warns. Prefer `sessionStoreModuleFor`
-  wherever the config is in hand.
+  wherever the config is in hand. Both forms require core's `deploymentMode`
+  slot, which core fills from `deployment.mode`, and read nothing of
+  `deployment` themselves.
 - **The Redis store opens its own connection.** A `redis` (node-redis) client to
   `session.storage.redis.url` (with `password` when set), under `connect-redis`'s
   `RedisStore`. With a readiness registrar wired it registers the probe
@@ -312,8 +314,12 @@ The manifest ([`src/module.mts`](src/module.mts)):
   `sessionRequirements.expected`. A router built by hand
   (`routes/Session.mts`, `routes/Federation.mts`) takes the resolver as the
   required `requirements` option and throws without it; a test builds one with
-  core's `resolverForTests`. `sessionRPRegistry` and
-  `sessionFamilyIndex`, the other two session stores, are `oauth`'s.
+  core's `resolverForTests`. And `deploymentMode`, which core fills from
+  `deployment.mode`: the login throttle's per-process fallback is refused under
+  `multi`, so the mode is required rather than read as absent; the session
+  router built by hand takes it as the required `deploymentMode` option.
+  `sessionRPRegistry` and `sessionFamilyIndex`, the other two session stores,
+  are `oauth`'s.
 - `optional`: `logger`, `rateLimiter`, `auditSink`, `subjectSessionIndex`,
   `subjectRevocation` (the boundary the linking routes' admission reads).
   `auditSink` unwired must be declared with `audit.sink.type = "none"`, and
@@ -365,7 +371,8 @@ The manifest ([`src/module.mts`](src/module.mts)):
   `rateLimiter` wired the route falls back to a per-process limiter: boot is
   refused under `deployment.mode = "multi"`, a `login_rate_limiter_not_shared`
   warning is logged when the mode is unset, and nothing is said under
-  `"single"`.
+  `"single"`. The mode is core's `deploymentMode` slot, which the module
+  requires; the router reads nothing of `deployment` itself.
 
 #### When a requirement interrupts the login
 
