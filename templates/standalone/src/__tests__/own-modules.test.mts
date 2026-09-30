@@ -133,6 +133,8 @@ interface BootOptions {
 	readonly redis?: boolean;
 	/** Changes the resolved configuration before `createApp` parses it, as a hand-built root may. */
 	readonly adjust?: (resolved: Record<string, unknown>) => Record<string, unknown>;
+	/** Components a host lays over the modules' (`overrideComponents`). */
+	readonly overrides?: Record<string, unknown>;
 }
 
 /** The directories the operator layers are written to, removed after the suite. */
@@ -176,6 +178,13 @@ async function bootTemplate(options: BootOptions = {}): Promise<AppHandle> {
 			pathResolver: (s: string) => s,
 			logger: silentLogger(),
 		},
+		...(options.overrides === undefined
+			? {}
+			: {
+					overrideComponents: options.overrides as Parameters<
+						typeof createApp
+					>[0]["overrideComponents"],
+				}),
 	});
 }
 
@@ -416,6 +425,13 @@ describe("cors", () => {
 			expect(template).toBeDefined();
 		},
 	);
+
+	it("names corsAllowedOrigins authoritative: an override of it refuses the boot, as one of httpSettings does", async () => {
+		await expect(
+			bootTemplate({ overrides: { corsAllowedOrigins: ["https://evil.example"] } }),
+		).rejects.toMatchObject({ reason: "authoritative-component-overridden" });
+		expect(corsModule.authoritative).toEqual(["corsAllowedOrigins"]);
+	});
 
 	it("owns cors, and requires nothing", () => {
 		expect(corsModule.name).toBe("cors");
