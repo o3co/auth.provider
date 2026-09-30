@@ -1205,10 +1205,11 @@ export const fullSectionsSchema = z.object({
 	 */
 	rateLimit: z.object({
 		login: rateLimitSchema,
-		// What the OAuth-endpoint limiter does when its backend errors. The
-		// default lives in `reference.conf`: `"closed"` answers 503 and logs.
-		// `"open"` (`RATE_LIMIT_FAIL_MODE=open`) lets traffic through and still
-		// logs at error, so the outage is visible even with the audit sink down.
+		// The outage policy `redisRateLimiterModule` answers for the limiter it
+		// builds; the guard applies the wired limiter's own. The default lives in
+		// `reference.conf`: `"closed"` answers 503 and logs. `"open"`
+		// (`RATE_LIMIT_FAIL_MODE=open`) lets traffic through and still logs at
+		// error, so the outage is visible even with the audit sink down.
 		failMode: z.enum(["open", "closed"]),
 	}),
 	federations: z.record(z.string(), federationEntrySchema),

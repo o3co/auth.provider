@@ -15,9 +15,11 @@ const rateLimitSpecSchema = z.object({
 });
 
 /**
- * In-memory RateLimiter module. Matches the memory branch of
- * `registerBuiltinRateLimiters`. For production multi-instance deployments,
- * use `redisRateLimiterModule` from `@o3co/auth-provider-redis`.
+ * In-memory RateLimiter module: `memoryRateLimiter`'s limits and default, and
+ * the budgets the prefixes' owners contribute (`rateLimitBudgetResolver`),
+ * which the memory branch of `registerBuiltinRateLimiters` does not read. For
+ * production multi-instance deployments, use `redisRateLimiterModule` from
+ * `@o3co/auth-provider-redis`.
  */
 export const memoryRateLimiterModule = defineModule({
 	name: "core-rate-limiter-memory",
@@ -57,8 +59,6 @@ export const memoryRateLimiterModule = defineModule({
 				}
 			).memoryRateLimiter;
 			return createMemoryRateLimiter({
-				// What an operator declared on this limiter wins over the budget a
-				// prefix's owner contributed, which wins over `defaultLimit`.
 				limits: cfg.limits,
 				budgets: deps.rateLimitBudgetResolver,
 				defaultLimit: cfg.defaultLimit,

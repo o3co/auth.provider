@@ -113,7 +113,9 @@ export function createRedisRateLimiter(opts: CreateRedisRateLimiterOptions): Rat
 }
 
 /**
- * AdapterFactory builder. Consumer wires:
+ * AdapterFactory builder, over `client`, `limits`, `defaultLimit` and
+ * `failMode` from its config and no contributed budget: those reach a limiter
+ * through `redisRateLimiterModule`. Consumer wires:
  *   factory.register("redis", redisRateLimiterBuilder);
  */
 export const redisRateLimiterBuilder: AdapterBuilder<RateLimiter> = (config, _ctx) => {
@@ -139,10 +141,11 @@ const rateLimitSpecSchema = z.object({
 
 /**
  * `defineModule` manifest for the redis RateLimiter. Reads `redisRateLimiter`
- * config slice (limits + defaultLimit), and `rateLimit.failMode` as the
- * limiter's own outage policy. The redis client itself comes from the
- * `rateLimiterClient` ComponentMap slot (per-purpose interface declared in
- * `@o3co/auth-provider-core`'s `ratelimit/types.mts`).
+ * config slice (limits + defaultLimit), the contributed budgets
+ * (`rateLimitBudgetResolver`), and `rateLimit.failMode` — a key in core's
+ * `rateLimit` block — as the limiter's own outage policy. The redis client
+ * itself comes from the `rateLimiterClient` ComponentMap slot (per-purpose
+ * interface declared in `@o3co/auth-provider-core`'s `ratelimit/types.mts`).
  */
 export const redisRateLimiterModule = defineModule({
 	name: "redis-rate-limiter",
@@ -168,8 +171,6 @@ export const redisRateLimiterModule = defineModule({
 			return createRedisRateLimiter({
 				failMode: checkedFailMode("", "rateLimit.failMode", config.rateLimit?.failMode),
 				client: deps.rateLimiterClient,
-				// What an operator declared on this limiter wins over the budget a
-				// prefix's owner contributed, which wins over `defaultLimit`.
 				limits: cfg.limits,
 				budgets: deps.rateLimitBudgetResolver,
 				defaultLimit: cfg.defaultLimit,

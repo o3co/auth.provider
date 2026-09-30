@@ -142,7 +142,7 @@ export const webauthnModule = defineModule<
 	absencePolicies: { auditSink: AUDIT_SINK_ABSENCE_POLICY },
 	contributes: {
 		// The options route's budget, for every limiter to read; an operator's
-		// `limits.webauthn-authentication-options` on the limiter still wins.
+		// `limits.webauthn-authentication-options` on the limiter wins.
 		rateLimitBudgets: {
 			[WEBAUTHN_AUTHENTICATION_OPTIONS_RATE_LIMIT_TAG]: (deps) =>
 				authenticationOptionsBudget(deps.section),

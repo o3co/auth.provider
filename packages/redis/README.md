@@ -395,10 +395,18 @@ the first command.
 The rate limiter takes a key's budget from core's one lookup,
 `createRateLimitBudgetLookup`: its own `redisRateLimiter.limits` entry for the
 key's prefix, else the budget the prefix's owning module contributed
-(`rateLimitBudgetResolver`, read at each check), else its `defaultLimit`. It
-answers `rateLimit.failMode` as its own outage policy (`RateLimiter.failMode`),
+(`rateLimitBudgetResolver`, read and checked at each check), else its
+`defaultLimit`, which it declares (`RateLimiter.defaultLimit`).
+`redisRateLimiterModule` answers `rateLimit.failMode` — a key in core's
+`rateLimit` block — as the limiter's outage policy (`RateLimiter.failMode`),
 which the guard applies while Redis cannot answer; a value other than `"open"`
 or `"closed"` refuses boot naming the key, and none given is `closed`.
+`redisRateLimiterBuilder` takes the policy as its config's `failMode`, with
+the same values; it reads no contributed budget, only the `limits` and
+`defaultLimit` it is given. That key governs only a limiter these build: any
+other limiter answers its own policy, and boot warns
+`rate_limit_fail_mode_not_applied` when the key says `"open"` and the wired
+limiter does not.
 
 ## Expiries and key TTLs
 
@@ -435,7 +443,7 @@ give the same answers:
 | `SubjectRevocation.revokeBefore`, `revokeSessionsBefore` | a boundary or `expiresAt` that is an Invalid Date | `PXAT` = the later of the `expiresAt` asked for and the key's current deadline, raised to the grants floor for a full revocation — never lowered |
 | `FederationGrantStore`, `FederationGrantIntentStore` | a caller's clock that is an Invalid Date (`RangeError`); an intent or authorization expiry that is not a date writes nothing (`{ ok: false }`, as the port says); a `tombstoneRetentionMs`, `listingAllowanceMs` or `reservationAllowanceMs` that ends past the Date range, at construction. The scripts set a key's deadline after writing it, so a deadline Redis refused left the key with no TTL, and a retention past 2^53 left records that do not read back. The config schemas hold the retention and the listing allowance to one year | `PEXPIREAT` = the record's expiry plus its retention or listing allowance, rounded up (`math.ceil`) inside the script that writes it |
 | `MfaTransactionStore.create` | an `expiresAtMs` outside the Date range, or not after this process's clock | `PEXPIREAT` = the expiry rounded up, set once; no later write moves it. The subject lock's keys carry no TTL while a run is counted, and otherwise expire a day after the last failure or trust stops counting (see [MFA stores](#mfa-stores)) |
-| `RateLimiter` | at construction, any spec, `defaultLimit` included, that is not a positive whole `limit` and a positive whole `windowSeconds` ending within the Date range: zero, NaN, a fraction, a negative number, or a window past the range. Core's `createRateLimitBudgetLookup` does the check, and the in-process limiter applies the same one. Such a spec is refused, never dropped: the adapter used to serve its default in its place, a looser budget than the operator wrote. Only a `defaultLimit` nobody gave is the built-in 60 per 60 s. The config schemas refuse the same values, and hold a window to one year | `EXPIRE` = `windowSeconds`, set in the same script as the `INCR` |
+| `RateLimiter` | at construction, any spec, `defaultLimit` included, that is not a positive whole `limit` and a positive whole `windowSeconds` ending within the Date range: zero, NaN, a fraction, a negative number, or a window past the range. Core's `createRateLimitBudgetLookup` does the check, and the in-process limiter applies the same one. Such a spec is refused, never dropped and never replaced by the default, a looser budget than the operator wrote. Only a `defaultLimit` nobody gave is the built-in 60 per 60 s. The config schemas refuse the same values, and hold a window to one year | `EXPIRE` = `windowSeconds`, set in the same script as the `INCR` |
 
 [`px-rounding.test.mts`](__tests__/px-rounding.test.mts) pins both halves for
 each adapter with a recording client: the contract suites cannot tell

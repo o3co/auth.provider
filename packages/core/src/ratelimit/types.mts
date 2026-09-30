@@ -41,10 +41,10 @@ export interface RateLimitDecision {
 	readonly reason?: string;
 	/**
 	 * The limit the adapter actually applied to this key. It can differ from
-	 * the caller's: an operator's `limits.login` on the adapter overrides the
-	 * budget the session module contributes from `rateLimit.login`, and a key
-	 * nothing budgets falls to `defaultLimit`. RFC 9239 `RateLimit-*` headers must report what was
-	 * enforced. Optional; callers then fall back to their configured value.
+	 * the caller's: an operator's `limits` entry on the adapter overrides the
+	 * budget a module contributes for the prefix, and a key nothing budgets
+	 * falls to `defaultLimit`. RFC 9239 `RateLimit-*` headers must report what
+	 * was enforced. Optional; callers then fall back to their configured value.
 	 */
 	readonly limit?: number;
 }

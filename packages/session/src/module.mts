@@ -173,7 +173,7 @@ export const sessionModule = defineModule<
 	},
 	contributes: {
 		// `/session/login`'s budget, `rateLimit.login`, for every limiter to
-		// read; an operator's `limits.login` on the limiter still wins.
+		// read; an operator's `limits.login` on the limiter wins.
 		rateLimitBudgets: {
 			[LOGIN_RATE_LIMIT_PREFIX]: (deps) => readLoginRateLimitBudget(deps.config),
 		},

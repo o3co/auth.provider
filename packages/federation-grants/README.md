@@ -177,7 +177,10 @@ say what each one means and what to do.
 - **The throttles** log and audit a limiter outage through core with the
   deployment's own logger and sink — `rate_limiter_failed_closed` /
   `rate_limiter_failed_open` and `rate_limit.unavailable`, tagged
-  `federation_grants` or `federation_grants_browser`.
+  `federation_grants` or `federation_grants_browser`. The module claims both
+  prefixes with no budget of its own (`rateLimitBudgets`), whether or not the
+  feature is enabled: the limiter's `limits` entry or its default applies,
+  and no other module can set a budget for them.
 
 ## Public API
 

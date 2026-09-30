@@ -52,10 +52,8 @@ const described = (spec: unknown): string => {
  * The budget a configuration gives under `key`, or a `RangeError` naming
  * `key` when it is given but is not a spec a limiter can apply.
  *
- * For a module that contributes a budget read from its own config key
- * (`oauth.deviceAuthorization.rateLimit`,
- * `webauthn.rateLimit.authenticationOptions`). Each field is read as the key's
- * schema coerces it. A given key, hand-built config included, is refused
+ * For a module that contributes a budget read from its own config key. Each
+ * field is read as the key's schema coerces it. A given key, hand-built config included, is refused
  * rather than skipped, since skipping it runs the route on the limiter's
  * default. A key not given is the caller's to handle.
  */
