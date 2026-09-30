@@ -55,6 +55,7 @@ import {
 	enrollFromAccount,
 	freezeClock,
 	giveEmailProof,
+	loggedText,
 	mfaPost,
 	readTransaction,
 	recordingAuditSink,
@@ -64,6 +65,8 @@ import {
 	signIn,
 	signInWithTotp,
 	stepUp,
+	storedData,
+	suiteSealing,
 	T0,
 	thawClock,
 	totpProofOf,
@@ -80,6 +83,11 @@ const LOGIN_REQUIRED = { error: "login_required", error_description: "Log in aga
 const UNKNOWN = {
 	error: "invalid_request",
 	error_description: "Unknown or expired MFA transaction",
+};
+/** What an enrollment in a session is answered when the subject's factors changed under it: the session stands. */
+const ENROLLMENT_CONFLICT = {
+	error: "mfa_enrollment_conflict",
+	error_description: "The account's second factors changed while enrolling: start again",
 };
 const FACTOR_LIMIT = {
 	error: "mfa_factor_limit",
@@ -144,6 +152,16 @@ async function composed(setup: Setup = {}) {
 		sender,
 	};
 }
+
+/** `text` with every run of percent-escapes decoded, as a URI's reader decodes it; a run that is no UTF-8 is kept. */
+const percentDecoded = (text: string): string =>
+	text.replace(/(?:%[0-9A-Fa-f]{2})+/g, (run) => {
+		try {
+			return decodeURIComponent(run);
+		} catch {
+			return run;
+		}
+	});
 
 /** Alice's records as the factor store holds them, by kind. */
 const recordsOf = async (store: { list(subject: string): Promise<readonly MfaFactorRecord[]> }) =>
@@ -461,7 +479,7 @@ describe("the enroll transaction", () => {
 		expect(await factorStore.list(ALICE.id)).toEqual([]);
 	});
 
-	it("binds nothing beside a record that appeared once the first binding began: a first binding stands only alone", async () => {
+	it("binds nothing beside a record that appeared once the first binding began: a first binding stands only alone, and the session, which stands, is answered 409", async () => {
 		const { app, factorStore, userSessionStore, audit, users } = await composed();
 		const { agent } = await signIn(app, userSessionStore);
 		const begun = await enrollFromAccount(agent, "totp");
@@ -478,8 +496,8 @@ describe("the enroll transaction", () => {
 			totpProofOf(begun.body.secret),
 		);
 
-		expect(res.status).toBe(401);
-		expect(res.body).toEqual(LOGIN_REQUIRED);
+		expect(res.status).toBe(409);
+		expect(res.body).toEqual(ENROLLMENT_CONFLICT);
 		expect((await factorStore.list(ALICE.id)).map((record) => record.kind)).toEqual(["totp"]);
 		expect(audit.of("mfa.first_binding_conflict")).toEqual([
 			expect.objectContaining({ subject: ALICE.id, details: { kind: "totp", removed: true } }),
@@ -488,7 +506,7 @@ describe("the enroll transaction", () => {
 		expect(users.marks).toEqual([]);
 	});
 
-	it("never binds a first binding's transaction as another factor: a counting record found at its completion, past admission, refuses it with nothing written", async () => {
+	it("never binds a first binding's transaction as another factor: a counting record found at its completion, past admission, refuses it 409 with nothing written", async () => {
 		const { app, factorStore, userSessionStore } = await composed();
 		const { agent } = await signIn(app, userSessionStore);
 		const begun = await enrollFromAccount(agent, "totp");
@@ -507,9 +525,106 @@ describe("the enroll transaction", () => {
 			totpProofOf(begun.body.secret),
 		);
 
-		expect(res.status).toBe(401);
-		expect(res.body).toEqual(LOGIN_REQUIRED);
+		expect(res.status).toBe(409);
+		expect(res.body).toEqual(ENROLLMENT_CONFLICT);
 		expect(create).not.toHaveBeenCalled();
+	});
+
+	it("refuses a first factor 409 to a subject whose only records do not count, opening nothing", async () => {
+		const { app, factorStore, transactionStore, userSessionStore } = await composed();
+		const { agent } = await signIn(app, userSessionStore);
+		await seedFactor(factorStore, "recovery_code", { codes: [] });
+		const create = vi.spyOn(transactionStore, "create");
+
+		const res = await enrollFromAccount(agent, "totp");
+
+		expect(res.status).toBe(409);
+		expect(res.body).toEqual(ENROLLMENT_CONFLICT);
+		expect(create).not.toHaveBeenCalled();
+	});
+
+	it("answers 400 when the body and the MFA-Transaction header name different transactions, opening none", async () => {
+		const { app, transactionStore, userSessionStore } = await composed();
+		const { agent } = await signIn(app, userSessionStore);
+		const begun = await enrollFromAccount(agent, "totp");
+		const create = vi.spyOn(transactionStore, "create");
+
+		const res = await mfaPost(
+			agent,
+			"/enrollment",
+			{ kind: "totp", transaction_id: begun.body.transaction },
+			{ "MFA-Transaction": "B".repeat(43) },
+		);
+
+		expect(res.status).toBe(400);
+		expect(res.body).toEqual(UNKNOWN);
+		expect(create).not.toHaveBeenCalled();
+	});
+
+	it("binds by password where the session's proof reads older than its window — a store answering the epoch — never by email_proof", async () => {
+		const { app, factorStore, transactionStore, userSessionStore } = await composed({
+			requireEmailProof: "never",
+			sender: createRecordingMailSender(),
+		});
+		vi.spyOn(transactionStore, "sessionEmailProofAt").mockResolvedValue(0);
+		const { agent } = await signIn(app, userSessionStore);
+		const begun = await enrollFromAccount(agent, "totp");
+		const done = await completeEnrollment(
+			agent,
+			begun.body.transaction as string,
+			totpProofOf(begun.body.secret),
+		);
+		expect(done.status, JSON.stringify(done.body)).toBe(200);
+		expect((await recordsOf(factorStore)).totp?.binding).toBe("password");
+	});
+
+	it("keeps no address in the pending enrollment, the factor's data, the audit events or the logs — the URI decoded — when the username is the address; the owner's own answer names the account by it", async () => {
+		const address = "alice@example.com";
+		const entries = directoryEntries();
+		entries.delete(ALICE.username);
+		entries.set(address, { password: ALICE.password, id: ALICE.id, email: address });
+		const factorStore = createMemoryMfaFactorStore();
+		const transactionStore = createMemoryMfaTransactionStore();
+		const audit = recordingAuditSink();
+		const booted = await boot({
+			config: configFor("optional"),
+			factorStore,
+			transactionStore,
+			auditSink: audit,
+			userRepository: new WitnessingUserRepository(entries),
+		});
+		const store = booted.userSessionStore as UserSessionStore;
+		const { agent } = await signIn(booted.app, store, {
+			username: address,
+			password: ALICE.password,
+		});
+
+		const begun = await enrollFromAccount(agent, "totp");
+		expect(begun.status, JSON.stringify(begun.body)).toBe(200);
+		expect(decodeURIComponent(begun.body.otpauth_uri as string)).toContain(`:${address}?`);
+		const transaction = begun.body.transaction as string;
+		const pending = (await transactionStore.get(transaction))?.pendingEnrollment;
+		const kept = suiteSealing().openState(
+			{ transactionId: transaction, kind: "totp", use: "enrollment" },
+			pending?.state as string,
+		);
+		expect(kept.state).toBe("ok");
+		const done = await completeEnrollment(agent, transaction, totpProofOf(begun.body.secret));
+		expect(done.status, JSON.stringify(done.body)).toBe(200);
+		const factor = await storedData(factorStore, {
+			subject: ALICE.id,
+			id: done.body.factor.id as string,
+			kind: "totp",
+		});
+
+		for (const [where, value] of [
+			["the pending enrollment", kept],
+			["the factor's data and record", factor],
+			["the audit events", audit.events],
+			["the logs", loggedText(booted.logger)],
+		] as const) {
+			expect(percentDecoded(JSON.stringify(value)).toLowerCase(), where).not.toContain(address);
+		}
 	});
 });
 
@@ -525,7 +640,7 @@ describe("another factor from the account page, for a subject holding a counting
 		expect(res.status).toBe(403);
 		expect(res.body).toEqual({
 			...STEP_UP_REQUIRED,
-			error_description: "Enrolling a second factor requires a step-up first",
+			error_description: "This action requires a step-up first",
 		});
 		expect(create).not.toHaveBeenCalled();
 	});
@@ -544,6 +659,12 @@ describe("another factor from the account page, for a subject holding a counting
 			purpose: "enroll",
 			enrollment: "allowed",
 			sid,
+		});
+		// It verifies no factor of the subject's: it lists none.
+		expect((await readTransaction(agent, transaction)).body).toMatchObject({
+			purpose: "enroll",
+			factors: [],
+			enrollment: "allowed",
 		});
 		const done = await completeEnrollment(
 			agent,
@@ -567,6 +688,42 @@ describe("another factor from the account page, for a subject holding a counting
 			}),
 		]);
 		expect(audit.of("mfa.recovery_codes.generated")).toEqual([]);
+	});
+
+	it("holds concurrent completions to mfa.maxFactorsPerSubject: at most the limit stands, the rest are answered 409 and leave nothing", async () => {
+		const { app, factorStore, userSessionStore } = await composed({ maxFactorsPerSubject: 3 });
+		const seeded = await seedTotp(factorStore);
+		const { agent } = await signInWithTotp(app, userSessionStore, seeded);
+		const begun = [];
+		for (let tab = 0; tab < 5; tab++) {
+			const res = await enrollFromAccount(agent, "totp");
+			expect(res.status, JSON.stringify(res.body)).toBe(200);
+			begun.push(res.body as { transaction: string; secret: string });
+		}
+		// Every read of the records answers late, as a slow store does: each completion reads before the others wrote.
+		const list = factorStore.list.bind(factorStore);
+		vi.spyOn(factorStore, "list").mockImplementation(async (subject) => {
+			const records = await list(subject);
+			await new Promise((resolve) => setTimeout(resolve, 25));
+			return records;
+		});
+
+		const answers = await Promise.all(
+			begun.map(({ transaction, secret }) =>
+				completeEnrollment(agent, transaction, totpProofOf(secret)),
+			),
+		);
+
+		const statuses = answers.map((res) => res.status);
+		for (const res of answers) {
+			expect([200, 409], JSON.stringify(res.body)).toContain(res.status);
+			if (res.status === 409) expect(res.body).toEqual(FACTOR_LIMIT);
+		}
+		const records = await list(ALICE.id);
+		expect(records.length).toBeLessThanOrEqual(3);
+		const bound = answers.filter((res) => res.status === 200).map((res) => res.body.factor.id);
+		expect(records.map((record) => record.id).sort()).toEqual([seeded.record.id, ...bound].sort());
+		expect(statuses.filter((status) => status === 409).length).toBeGreaterThanOrEqual(3);
 	});
 
 	it("answers 409 mfa_factor_limit once the subject holds mfa.maxFactorsPerSubject records, at the start and at the completion", async () => {

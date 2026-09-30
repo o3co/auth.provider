@@ -30,6 +30,7 @@
 import {
 	type AuditEvent,
 	admitSession,
+	DEFAULT_CLOCK_SKEW_MS,
 	cookieClaim,
 	createMemoryMfaTransactionStore,
 	type Logger,
@@ -107,10 +108,21 @@ type Kind = "pwd" | "fed";
 function sessionOf(
 	kind: Kind,
 	recorded: SessionEnrollmentFacts | undefined,
-	options: { readonly ageMs?: number; readonly sid?: string } = {},
+	options: {
+		readonly ageMs?: number;
+		readonly sid?: string;
+		/** A password session's second factor this long ago; its sign-in's age by default, and none when `null`. */
+		readonly mfaAgeMs?: number | null;
+	} = {},
 ): UserSession {
 	const now = Date.now();
 	const authTime = new Date(now - (options.ageMs ?? 60_000));
+	const mfaAt =
+		options.mfaAgeMs === null
+			? undefined
+			: options.mfaAgeMs === undefined
+				? authTime
+				: new Date(now - options.mfaAgeMs);
 	return {
 		sid: options.sid ?? SID,
 		sub: SUBJECT,
@@ -120,12 +132,12 @@ function sessionOf(
 		claims: {},
 		...(kind === "pwd"
 			? {
-					amr: ["pwd", "otp", "mfa"],
+					amr: mfaAt === undefined ? ["pwd"] : ["pwd", "otp", "mfa"],
 					authentication: {
 						primary: "pwd",
 						federation: undefined,
 						upstreamAmr: undefined,
-						mfaAt: authTime,
+						mfaAt,
 					},
 				}
 			: {
@@ -356,7 +368,56 @@ describe("a subject with no counting factor whose primary is older than mfa.mana
 			}
 			expect(flag).not.toHaveBeenCalled();
 		});
+
+		it(`${mode}: is sent to log in again even with a second factor verified in the session inside the window — a first binding needs a recent primary`, async () => {
+			const { requirement } = build({ mode });
+			for (const action of ACTIONS) {
+				const stale = sessionOf("pwd", facts(), { ageMs: 301_000, mfaAgeMs: 60_000 });
+				expect(await requirement.admit(inputFor(stale, action)), action).toEqual(REAUTHENTICATE);
+			}
+		});
+
+		it(`${mode}: is still an outage when its session's witness says it enrolled: the witness is read before the primary's age`, async () => {
+			const events: AuditEvent[] = [];
+			const { requirement } = build({ mode, events });
+			const stale = sessionOf("fed", facts("enrolled"), { ageMs: 301_000 });
+			await expect(requirement.admit(inputFor(stale))).rejects.toMatchObject({
+				reason: "mfa_enrollment_state_inconsistent",
+			});
+			expect(await admit(requirement, stale, "session.link")).toEqual({
+				outcome: "unavailable",
+				store: "mfa",
+			});
+			expect(events).toHaveLength(2);
+		});
 	}
+});
+
+describe("under required, a password session without a second factor whose subject holds no counting factor", () => {
+	it("is sent to log in again for each first binding — the login binds the first factor — asking no gate and reading no proof", async () => {
+		const transactionStore = createMemoryMfaTransactionStore();
+		const flag = vi.spyOn(transactionStore, "emailProofRequiredAtNextBinding");
+		const proof = vi.spyOn(transactionStore, "sessionEmailProofAt");
+		const { requirement } = build({ mode: "required", transactionStore });
+		await proved(transactionStore);
+		const session = sessionOf("pwd", facts(), { mfaAgeMs: null });
+		for (const action of ACTIONS) {
+			expect(await requirement.admit(inputFor(session, action)), action).toEqual(REAUTHENTICATE);
+			expect(await admit(requirement, session, action), action).toMatchObject({
+				outcome: "reauthenticate",
+				requirement: "mfa",
+			});
+		}
+		expect(flag).not.toHaveBeenCalled();
+		expect(proof).not.toHaveBeenCalled();
+	});
+
+	it("is a first binding under optional, and one whose subject holds a counting factor is stepped up under required", async () => {
+		const session = sessionOf("pwd", facts(), { mfaAgeMs: null });
+		expect(await build({ mode: "optional" }).requirement.admit(inputFor(session))).toEqual(STEP_UP);
+		const holding = build({ mode: "required", records: [factorRecord(SUBJECT, "totp")] });
+		expect(await holding.requirement.admit(inputFor(session))).toEqual(STEP_UP);
+	});
 });
 
 describe("the gate over a first binding in a session", () => {
@@ -603,6 +664,20 @@ describe("the gate over a first binding in a session", () => {
 				store: "mfa",
 			});
 		}
+	});
+
+	it("reads a proof older than mfa.manage.maxAgeSeconds and the clock skew as none — the epoch among them — and one inside as standing", async () => {
+		const at = (answer: (now: number) => number) => {
+			const transactionStore = createMemoryMfaTransactionStore();
+			vi.spyOn(transactionStore, "sessionEmailProofAt").mockImplementation(async (_s, _sid, now) =>
+				answer(now),
+			);
+			return build({ transactionStore }).requirement.admit(inputFor(sessionOf("pwd", facts())));
+		};
+		expect(await at(() => 0)).toEqual(STEP_UP);
+		expect(await at((now) => now - 300_000 - DEFAULT_CLOCK_SKEW_MS - 1)).toEqual(STEP_UP);
+		expect(await at((now) => now - 300_000 - DEFAULT_CLOCK_SKEW_MS)).toEqual(MET);
+		expect(await at((now) => now - 1_000)).toEqual(MET);
 	});
 
 	it("throws where the session's proof cannot be read, or reads other than a time or none — never admitted, never stepped up", async () => {

@@ -320,7 +320,7 @@ describe("enrolling a TOTP factor", () => {
 		}
 	});
 
-	it("labels the factor issuer:account, the account its username, each encoded — never its address", async () => {
+	it("labels the factor issuer:account, the account its username as the Store gives it, each encoded — an address only where the username is one", async () => {
 		const spaced = createTotpFactor({ ...SETTINGS, issuer: "Example Co" });
 		const withEmail = await spaced.beginEnrollment(enrollmentContext());
 		const uri = (withEmail.response as { otpauth_uri: string }).otpauth_uri;
@@ -334,6 +334,13 @@ describe("enrolling a TOTP factor", () => {
 		expect((spacedName.response as { otpauth_uri: string }).otpauth_uri).toMatch(
 			/^otpauth:\/\/totp\/Example%20Co:bob%20smith\?/,
 		);
+		const addressName = await spaced.beginEnrollment(
+			enrollmentContext({ id: "u-bob", username: "bob@example.com", email: "bob@example.com" }),
+		);
+		expect((addressName.response as { otpauth_uri: string }).otpauth_uri).toMatch(
+			/^otpauth:\/\/totp\/Example%20Co:bob%40example\.com\?/,
+		);
+		expect(JSON.stringify(addressName.state)).not.toContain("bob");
 	});
 
 	it("refuses, with a RangeError quoting nothing, an account without a username — whatever its address — a User core's type forbids, so a broken Store answer the coordinator reads as an outage", async () => {
@@ -452,5 +459,15 @@ describe("the totp factor under the test kit's factor contract", () => {
 		verificationProof: (enrolled, _challenge, context) => codeFor(enrolled.data, context.nowMs),
 	})) {
 		it(name, run);
+	}
+
+	// An account whose username is its address: the label names it to the owner, and nothing kept carries it.
+	for (const { name, run } of mfaFactorContract({
+		build: () => createTotpFactor(SETTINGS),
+		user: { id: "u-alice", username: USER.email, email: USER.email },
+		enrollmentProof: (start, context) => codeFor(start.state, context.nowMs),
+		verificationProof: (enrolled, _challenge, context) => codeFor(enrolled.data, context.nowMs),
+	})) {
+		it(`${name} — the username an address`, run);
 	}
 });

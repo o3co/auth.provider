@@ -57,7 +57,7 @@ const RULES = {
 	unreadable:
 		"challenge, over data whose address digest is gone or is no digest, still asks for its login code, with a null address digest, and never throws: the coordinator refuses the factor",
 	noAddress:
-		"no answer carries the account's address, whatever its case or escaping: the pending enrollment's state and response, the enrolled data and label, a challenge's state and response, and a verification's next data",
+		"nothing kept carries the account's address, whatever its case or escaping: the pending enrollment's state, the enrolled data and label, a challenge's state, and a verification's next data",
 	verifyMalformed: "verify answers malformed for a proof it cannot read, and never throws for one",
 	verify:
 		"verify takes a valid proof, names a factor the subject holds, and answers next data that survives a JSON round trip",
@@ -433,7 +433,7 @@ describe("mfaFactorContract", () => {
 		]);
 	});
 
-	it("fails an address kept or answered anywhere, in another case or under JSON escaping", async () => {
+	it("fails an address kept anywhere, in another case or under JSON escaping", async () => {
 		const QUOTED = { ...USER, email: '"probe"@example.com' };
 		const answering = (
 			change: (factor: MfaFactor) => Partial<MfaFactor>,
@@ -508,7 +508,7 @@ describe("mfaFactorContract", () => {
 		).toEqual([RULES.noAddress]);
 	});
 
-	it("fails an address answered percent-encoded, as a URI carries it", async () => {
+	it("fails an address kept percent-encoded in the pending enrollment, as a URI would carry it", async () => {
 		const QUOTED = { ...USER, email: '"probe"@example.com' };
 		for (const user of [USER, QUOTED]) {
 			const encoding = inputFor({ mail: true }, (factor) => ({
@@ -517,8 +517,8 @@ describe("mfaFactorContract", () => {
 					const start = await factor.beginEnrollment(ctx);
 					return {
 						...start,
-						response: {
-							...(start.response as Record<string, unknown>),
+						state: {
+							...start.state,
 							uri: `otpauth://totp/Issuer:${encodeURIComponent(String(ctx.user.email))}`,
 						},
 					};
@@ -526,6 +526,31 @@ describe("mfaFactorContract", () => {
 			}));
 			expect(await failing({ ...encoding, user }), user.email).toEqual([RULES.noAddress]);
 		}
+	});
+
+	it("passes a factor whose answers name the account by its address, percent-encoded or not: an answer goes to the account's owner alone", async () => {
+		const naming = inputFor({ challenge: true }, (factor) => ({
+			...factor,
+			beginEnrollment: async (ctx) => {
+				const start = await factor.beginEnrollment(ctx);
+				return {
+					...start,
+					response: {
+						...(start.response as Record<string, unknown>),
+						uri: `otpauth://totp/Issuer:${encodeURIComponent(String(ctx.user.email))}`,
+						account: ctx.user.email,
+					},
+				};
+			},
+			challenge: async (ctx) => {
+				const sent = await (factor.challenge as NonNullable<MfaFactor["challenge"]>)(ctx);
+				return {
+					...sent,
+					response: { ...(sent.response as Record<string, unknown>), account: USER.email },
+				};
+			},
+		}));
+		expect(await failing(naming)).toEqual([]);
 	});
 
 	it("passes text a percent sign cannot decode, searching it as it is", async () => {

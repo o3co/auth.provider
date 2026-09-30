@@ -30,7 +30,10 @@
 import {
 	createMemoryMfaFactorStore,
 	createMemoryMfaTransactionStore,
+	defineModule,
 	type MfaTransactionStore,
+	type Module,
+	type SessionRequirement,
 	type UserSession,
 	type UserSessionStore,
 } from "@o3co/auth-provider-core";
@@ -60,6 +63,7 @@ import {
 	seedFactor,
 	seedTotp,
 	signIn,
+	signInWithTotp,
 	stepUp,
 	T0,
 	thawClock,
@@ -85,9 +89,12 @@ const NOT_FOUND = { error: "not_found", error_description: "Not found" };
 /** Boots `optional` with a recording sender (unless `sender` is `null`) and alice's address. */
 async function composed(
 	options: {
+		readonly mode?: "optional" | "required";
 		readonly sender?: RecordingMailSender | null;
 		readonly transactionStore?: MfaTransactionStore;
 		readonly requireEmailProof?: "when-mail" | "always" | "never";
+		readonly extraModules?: readonly Module[];
+		readonly expected?: readonly string[];
 	} = {},
 ) {
 	const sender = options.sender === undefined ? createRecordingMailSender() : options.sender;
@@ -95,9 +102,13 @@ async function composed(
 	const transactionStore = options.transactionStore ?? createMemoryMfaTransactionStore();
 	const audit = recordingAuditSink();
 	const booted = await boot({
-		config: configFor("optional", {
-			enrollment: { requireEmailProof: options.requireEmailProof ?? "when-mail" },
-		}),
+		config: configFor(
+			options.mode ?? "optional",
+			{ enrollment: { requireEmailProof: options.requireEmailProof ?? "when-mail" } },
+			{},
+			options.expected,
+		),
+		...(options.extraModules === undefined ? {} : { extraModules: options.extraModules }),
 		factorStore,
 		transactionStore,
 		auditSink: audit,
@@ -312,6 +323,98 @@ describe("the step-up of a subject with no counting factor", () => {
 		expect(wrong.status).toBe(401);
 		expect(wrong.body).toMatchObject({ error: "mfa_invalid", attempts_remaining: 4 });
 		expect(reserveSubject).not.toHaveBeenCalled();
+	});
+});
+
+describe("the step-up under required, for a password session without a second factor whose subject holds no counting factor", () => {
+	it("is never reached: the requirement sends the session to log in again, where the login binds the first factor — no transaction, no mail", async () => {
+		const { app, factorStore, transactionStore, userSessionStore, sender } = await composed({
+			mode: "required",
+		});
+		const seeded = await seedTotp(factorStore);
+		const { agent } = await signInWithTotp(app, userSessionStore, seeded);
+		// The session as one written before required was switched on, its subject enrolled in nothing.
+		await factorStore.remove(ALICE.id, seeded.record.id);
+		reading(userSessionStore, (session) => ({
+			...session,
+			amr: ["pwd"],
+			authentication: {
+				...(session.authentication as NonNullable<UserSession["authentication"]>),
+				mfaAt: undefined,
+			},
+		}));
+		const create = vi.spyOn(transactionStore, "create");
+
+		const enrolled = await enrollFromAccount(agent, "totp");
+		expect(enrolled.status).toBe(401);
+		expect(enrolled.body).toEqual(LOGIN_REQUIRED);
+		const stepped = await stepUp(agent);
+		expect(stepped.status).toBe(401);
+		expect(stepped.body).toEqual(LOGIN_REQUIRED);
+		expect(create).not.toHaveBeenCalled();
+		expect(sender?.sent).toEqual([]);
+	});
+});
+
+describe("the step-up's own step-ups", () => {
+	/** A requirement beside mfa that asks every credential_change for a step-up through a page of its own. */
+	const insisting = (): Module =>
+		defineModule({
+			name: "test:insisting-requirement",
+			contributes: {
+				sessionRequirements: {
+					insisting: (): SessionRequirement => ({
+						name: "insisting",
+						reach: new Set<string>(),
+						stepUpPage: { url: "/insist", params: {} },
+						remediations: [],
+						hintKeys: [],
+						admit: async ({ action }) =>
+							action.grade === "credential_change"
+								? { outcome: "step_up", whenStillUnmet: "reauthenticate" }
+								: { outcome: "met" },
+					}),
+				},
+			},
+		});
+
+	it("answers another requirement's step-up as that requirement's, opening no proof", async () => {
+		const { app, transactionStore, userSessionStore } = await composed({
+			sender: null,
+			extraModules: [insisting()],
+			expected: ["mfa", "insisting"],
+		});
+		const { agent } = await signIn(app, userSessionStore);
+		const create = vi.spyOn(transactionStore, "create");
+
+		const res = await stepUp(agent);
+
+		expect(res.status).toBe(403);
+		expect(res.body).toEqual({
+			error: "step_up_required",
+			error_description: "This action requires a step-up first",
+			requirement: "insisting",
+			page: "https://auth.example/insist",
+		});
+		expect(create).not.toHaveBeenCalled();
+	});
+
+	it("answers 400 when the body and the MFA-Transaction header name different transactions, opening none", async () => {
+		const { app, transactionStore, userSessionStore } = await composed();
+		const { agent } = await signIn(app, userSessionStore);
+		const named = (await stepUp(agent)).body.transaction as string;
+		const create = vi.spyOn(transactionStore, "create");
+
+		const res = await mfaPost(
+			agent,
+			"/step-up",
+			{ transaction_id: named },
+			{ "MFA-Transaction": "B".repeat(43) },
+		);
+
+		expect(res.status).toBe(400);
+		expect(res.body).toEqual(UNKNOWN);
+		expect(create).not.toHaveBeenCalled();
 	});
 });
 
