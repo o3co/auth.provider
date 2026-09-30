@@ -24,11 +24,8 @@ export {
 } from "./mail/development/module.mjs";
 // The mail senders (core's `MailSender`, the `mailSender` slot): the text
 // each purpose is rendered as, the SMTP sender's module and the schema of
-// its section, `standard-smtp-mail-sender`, and the development sender.
-export {
-	createStandardDevelopmentMailSender,
-	type StandardDevelopmentMailSenderOptions,
-} from "./mail/development/sender.mjs";
+// its section, `standard-smtp-mail-sender`, and the development sender's
+// module — the sender itself only behind its module's guard.
 export { type RenderedMail, renderStandardMail } from "./mail/render.mjs";
 export {
 	type StandardSmtpMailSenderSettings,

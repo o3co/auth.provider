@@ -37,7 +37,7 @@ import {
 	SINGLE_ENV,
 } from "./all-modules-composition.fixture.mjs";
 
-const DEVELOPMENT = standardDevelopmentMailSenderModule().name;
+const DEVELOPMENT = standardDevelopmentMailSenderModule({ environment: "development" }).name;
 const SMTP = standardSmtpMailSenderModule.name;
 
 /** The mail sender modules `buildModules` lists for `environment`. */

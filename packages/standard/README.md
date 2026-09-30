@@ -11,7 +11,7 @@ Standard, replaceable implementations of the duties outside [`auth.provider`](..
 **Owns:**
 - the text each purpose is rendered as (`renderStandardMail`): a subject line and a plain-text body in English, carrying the code and the minutes it has left, and nothing else of the send — not the account, not the recipient, nothing clickable;
 - `standardSmtpMailSenderModule` and its section, `standard-smtp-mail-sender`, with their defaults in [`config/reference.conf`](config/reference.conf) (exported as `@o3co/auth-provider-standard/reference.conf`);
-- the development sender (`createStandardDevelopmentMailSender`) and its module, `standardDevelopmentMailSenderModule`;
+- the development sender and its module, `standardDevelopmentMailSenderModule`, which alone publishes it;
 - the builders a test assembles this package's configuration with, on `@o3co/auth-provider-standard/testing`.
 
 **Does not own:** the `MailSender` port, `MailSend`, the closed list of purposes and the `mailSender` slot — core's ([`packages/core/src/mail/`](../core/src/mail/types.mts)); the conformance suite a sender runs, `mailSenderContract` — [`@o3co/auth-provider-test-kit`](../test-kit/README.md)'s; which code is issued, when, and to whom — the provider's.
@@ -35,9 +35,9 @@ One section, the module's and named after it: `standard-smtp-mail-sender`. Boot 
 
 ## The development sender
 
-`standardDevelopmentMailSenderModule({ environment })` fills the `mailSender` slot with a sender that delivers nothing: each send is one line at info, `mail_code_issued`, carrying the purpose and the code, so a developer reads the code off the log. It has no settings and no section.
+`standardDevelopmentMailSenderModule({ environment })` fills the `mailSender` slot with a sender that delivers nothing: each send is one line at info, `mail_code_issued`, carrying the purpose and the code, so a developer reads the code off the log. It has no settings and no section, and the sender is published only through it.
 
-A code in a log line is a secret wherever more than the developer reads the log, so the module's factory runs at every boot, whether or not anything reads the slot, and refuses the boot where `environment` (the name the configuration was selected by — the standalone template passes `CONFIG_ENV || NODE_ENV`) or `NODE_ENV` is `production` or `staging`, each read whatever its case and the whitespace around it, and where `core.deployment.mode` is `"multi"`.
+A code in a log line is a secret wherever more than the developer reads the log, so the module lets the sender in only where it should be: an allow-list rather than a list of what to refuse. Its factory runs at every boot, whether or not anything reads the slot, and refuses the boot unless `environment` — the name the configuration was selected by; the standalone template passes `CONFIG_ENV || NODE_ENV || "development"` — reads as `development` or `test`. It refuses too where that name, `CONFIG_ENV` or `NODE_ENV` reads as `production` or `staging` (core's `productionEnvironmentIn`, each read whatever its case and the whitespace around it, none lifting another's), and where `core.deployment.mode` is `"multi"`.
 
 ## API
 
@@ -46,8 +46,7 @@ A code in a log line is a secret wherever more than the developer reads the log,
 | [`renderStandardMail`](src/mail/render.mts) | A send's subject line and body at a given time; a `RangeError` that quotes nothing of the send for one it cannot render |
 | [`standardSmtpMailSenderModule`](src/mail/smtp/module.mts) | The SMTP mail sender's module, `standard-smtp-mail-sender`: its section |
 | [`standardSmtpMailSenderConfigSchema`](src/mail/smtp/config.mts) | The shape and rules of `standard-smtp-mail-sender` |
-| [`createStandardDevelopmentMailSender`](src/mail/development/sender.mts) | The development sender over a logger |
-| [`standardDevelopmentMailSenderModule`](src/mail/development/module.mts) | Its module, for the environment the configuration was selected by |
+| [`standardDevelopmentMailSenderModule`](src/mail/development/module.mts) | The development sender's module, for the environment the configuration was selected by |
 
 On `@o3co/auth-provider-standard/testing`:
 
