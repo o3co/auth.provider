@@ -20,7 +20,8 @@
  * `generateAuthenticationOptions` that
  *   1. take `userId` as bytes, or a string they encode as UTF-8 (WebAuthn
  *      §5.4.3: `user.id` is an opaque byte sequence, no PII; README,
- *      "SECURITY — `userId` opacity");
+ *      "SECURITY — `userId` opacity"), the one rule `userHandleOf` states
+ *      for the user handle an assertion is held to as well;
  *   2. take credentials as descriptors, an id and its transports;
  *   3. pass `undefined` rather than `[]` for an empty `allowCredentials`, the
  *      discoverable-credentials flow;
@@ -62,6 +63,13 @@ import type { WebAuthnConfig } from "../config.mjs";
  * registration outside the set is refused as `algorithm_not_allowed`.
  */
 export const WEBAUTHN_ALGORITHM_IDS: readonly number[] = Object.freeze([-8, -7, -257]);
+
+/**
+ * The user handle `userId` names: bytes as they are, a string's UTF-8 bytes. The `user.id` a
+ * registration presents, and so the handle an assertion by that credential must carry.
+ */
+export const userHandleOf = (userId: string | Uint8Array<ArrayBuffer>): Uint8Array<ArrayBuffer> =>
+	typeof userId === "string" ? new TextEncoder().encode(userId) : userId;
 
 /** A credential as the ceremony options name it: its id, and how a client may reach it when known. */
 export interface WebAuthnCredentialDescriptor {
@@ -123,7 +131,7 @@ export async function generateRegistrationOptionsForUser(args: {
 		supportedAlgorithmIDs: [...WEBAUTHN_ALGORITHM_IDS],
 		// SimpleWebAuthn encodes userID as base64url in the returned
 		// PublicKeyCredentialCreationOptionsJSON.
-		userID: typeof args.userId === "string" ? new TextEncoder().encode(args.userId) : args.userId,
+		userID: userHandleOf(args.userId),
 		userName: args.userName,
 		userDisplayName: args.userDisplayName,
 		attestationType,

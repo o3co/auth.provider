@@ -52,6 +52,7 @@ import {
 	type Token,
 } from "@o3co/auth-provider-core";
 import type { AuthenticationResponseJSON } from "@simplewebauthn/server";
+import { userHandleOf } from "./internal/options.mjs";
 import { storeUnavailableDescription, type WebAuthnStore } from "./internal/storeUnavailable.mjs";
 import { verifyWebAuthnAssertion } from "./internal/verification.mjs";
 
@@ -260,9 +261,9 @@ export const createWebAuthnGrant = (deps: WebAuthnGrantDeps): GrantHandler => {
 				...(deps.webauthnConfig.topOrigin === undefined
 					? {}
 					: { expectedTopOrigins: deps.webauthnConfig.topOrigin }),
-				// The owner's handle, as the registration options named it: `userId`'s UTF-8 bytes. The
-				// relying party's other ceremonies can present this credential under another handle.
-				expectedUserHandle: new TextEncoder().encode(credential.userId),
+				// The owner's handle, as the registration options named it. The relying party's other
+				// ceremonies can present this credential under another handle.
+				expectedUserHandle: userHandleOf(credential.userId),
 				userVerification: deps.webauthnConfig.userVerification,
 			});
 			if (!verificationResult.ok) {
