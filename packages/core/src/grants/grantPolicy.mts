@@ -36,22 +36,13 @@ export type GrantPolicyDeny = Extract<GrantPolicyDecision, { outcome: "deny" }>;
 /**
  * A policy's decision as the provider acts on it ({@link readGrantPolicyDecision}):
  * its `verdict`, `allow` or `deny`, or `invalid` with the answer every caller
- * gives one. `outcome` repeats `verdict` for the callers not yet reading it.
+ * gives one.
  */
 export type GrantPolicyReading =
-	| {
-			readonly verdict: "allow";
-			readonly outcome: "allow";
-			readonly decision: GrantPolicyAllow;
-	  }
-	| {
-			readonly verdict: "deny";
-			readonly outcome: "deny";
-			readonly decision: GrantPolicyDeny;
-	  }
+	| { readonly verdict: "allow"; readonly decision: GrantPolicyAllow }
+	| { readonly verdict: "deny"; readonly decision: GrantPolicyDeny }
 	| {
 			readonly verdict: "invalid";
-			readonly outcome: "invalid";
 			/** `500 server_error` with a fixed description: nothing the policy returned is quoted. */
 			readonly result: GrantError & { readonly errorDescription: string };
 	  };
@@ -125,12 +116,8 @@ export function readGrantPolicyDecision(
 	context: { readonly grantType: string; readonly policy: string; readonly site?: string },
 ): GrantPolicyReading {
 	const outcome = outcomeOf(decision);
-	if (outcome === "allow") {
-		return { verdict: outcome, outcome, decision: decision as GrantPolicyAllow };
-	}
-	if (outcome === "deny") {
-		return { verdict: outcome, outcome, decision: decision as GrantPolicyDeny };
-	}
+	if (outcome === "allow") return { verdict: outcome, decision: decision as GrantPolicyAllow };
+	if (outcome === "deny") return { verdict: outcome, decision: decision as GrantPolicyDeny };
 	logger?.error(
 		{
 			...(context.site !== undefined ? { site: context.site } : {}),
@@ -141,7 +128,6 @@ export function readGrantPolicyDecision(
 	);
 	return {
 		verdict: "invalid",
-		outcome: "invalid",
 		result: { status: 500, error: "server_error", errorDescription: "policy_decision_invalid" },
 	};
 }

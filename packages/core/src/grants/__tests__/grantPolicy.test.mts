@@ -283,12 +283,10 @@ describe("readGrantPolicyDecision", () => {
 		const denied = { outcome: "deny", error: "access_denied" } as const;
 		expect(readGrantPolicyDecision(allowed, logger, site)).toEqual({
 			verdict: "allow",
-			outcome: "allow",
 			decision: allowed,
 		});
 		expect(readGrantPolicyDecision(denied, logger, site)).toEqual({
 			verdict: "deny",
-			outcome: "deny",
 			decision: denied,
 		});
 		expect(logger.error).not.toHaveBeenCalled();
@@ -300,7 +298,6 @@ describe("readGrantPolicyDecision", () => {
 			const logger = { error: vi.fn() };
 			expect(readGrantPolicyDecision(decision, logger, site)).toEqual({
 				verdict: "invalid",
-				outcome: "invalid",
 				result: DECISION_INVALID,
 			});
 			expect(logger.error).toHaveBeenCalledTimes(1);
@@ -320,7 +317,6 @@ describe("readGrantPolicyDecision", () => {
 	it("reads an invalid decision without a logger", () => {
 		expect(readGrantPolicyDecision({}, undefined, site)).toEqual({
 			verdict: "invalid",
-			outcome: "invalid",
 			result: DECISION_INVALID,
 		});
 	});
