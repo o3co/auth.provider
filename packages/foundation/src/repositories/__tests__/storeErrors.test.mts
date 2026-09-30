@@ -145,6 +145,21 @@ describe("the named errors", () => {
 		expect("statusCode" in error).toBe(false);
 	});
 
+	it("a refused credential names the Store client that was refused: the user repository unless told otherwise", () => {
+		const url = "https://store.test/mfa/list?api_key=QUERY";
+		const byDefault = new StoreCredentialRefusedError(url, 401);
+		const named = new StoreCredentialRefusedError(url, 403, "HttpMfaFactorStore");
+		expect(
+			byDefault.message.startsWith("HttpUserRepository: the Store at https://store.test/mfa/list "),
+		).toBe(true);
+		expect(
+			named.message.startsWith("HttpMfaFactorStore: the Store at https://store.test/mfa/list "),
+		).toBe(true);
+		expect(named.message).toContain("CLIENT_USER_BEARER_TOKEN");
+		expect(named.message).not.toContain("QUERY");
+		expect(named.storeStatus).toBe(403);
+	});
+
 	it("a transport failure is a StoreTransportError with a reason, at most a code, and no cause or status", () => {
 		const error = new StoreTransportError(
 			"HttpUserRepository: request to https://store.test/authenticate could not be reached",

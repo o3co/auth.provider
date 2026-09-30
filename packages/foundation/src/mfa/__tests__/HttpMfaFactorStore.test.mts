@@ -525,7 +525,7 @@ describe("nothing the Store sends reaches what it throws", () => {
 		expect(thrown).toBe(9 * calls.length - 2 * 4);
 	});
 
-	it("in a credential refusal", async () => {
+	it("in a credential refusal, which names this store", async () => {
 		const origin = await serve((_request, _body, response) => {
 			response.writeHead(401, MARKER, {
 				"WWW-Authenticate": `Bearer error="invalid_token", error_description="${MARKER}"`,
@@ -534,6 +534,7 @@ describe("nothing the Store sends reaches what it throws", () => {
 		});
 		const error = await rejection(storeAt(origin, TOKEN).list("user-1"));
 		expect(error).toBeInstanceOf(StoreCredentialRefusedError);
+		expect(error.message.startsWith("HttpMfaFactorStore: ")).toBe(true);
 		expect(everyForm(error)).not.toContain(MARKER);
 		expect(everyForm(error)).not.toContain(TOKEN);
 	});
