@@ -371,6 +371,205 @@ describe("a path a store's section moved from, written in the operator's own lay
 	});
 });
 
+describe("federation grants read at their modules' names, through the template's reading", () => {
+	it("the federation-grants module's section, and the in-process grant store's retention", async () => {
+		const composition = await boot({
+			operatorHocon: [
+				"federation-grants { maxExpiresIn = 86400, defaultExpiresIn = 3600 }",
+				"core-federation-grant-store-memory.tombstoneRetention = 600",
+				"",
+			].join("\n"),
+		});
+
+		expect(sectionOf(composition, "federation-grants")).toMatchObject({
+			enabled: true,
+			maxExpiresIn: 86400,
+			defaultExpiresIn: 3600,
+			consent: { url: "/consent/grants" },
+		});
+		expect(sectionOf(composition, "core-federation-grant-store-memory")).toEqual({
+			tombstoneRetention: 600,
+		});
+	});
+
+	it("phase one chooses the feature's modules by federation-grants.enabled", async () => {
+		const { FEDERATION_GRANTS_ENABLED: _enabled, ...unset } = SINGLE_ENV;
+		const on = await boot({ env: unset, operatorHocon: "federation-grants.enabled = true\n" });
+		expect(on.modules.map((module) => module.name)).toContain("federation-grants");
+		await on.handle.dispose();
+		current = undefined;
+
+		const off = await boot({ env: unset });
+		expect(off.modules.map((module) => module.name)).not.toContain("federation-grants");
+	});
+
+	it("the Redis grant stores: each its own prefix, the grant store its key ring, retention and listing allowance", async () => {
+		const composition = await boot(
+			onRedis({
+				operatorHocon: [
+					'redis-federation-grant-store { keyPrefix = "t1:fg:", listingAllowanceMs = 1000, tombstoneRetention = 60 }',
+					'redis-federation-grant-intent-store.keyPrefix = "t1:fgi:"',
+					"",
+				].join("\n"),
+			}),
+		);
+
+		const grants = sectionOf(composition, "redis-federation-grant-store") as {
+			encryptionKeys?: unknown[];
+		};
+		expect(grants).toMatchObject({
+			keyPrefix: "t1:fg:",
+			listingAllowanceMs: 1000,
+			tombstoneRetention: 60,
+			encryptionMode: "required",
+		});
+		expect(grants.encryptionKeys).toHaveLength(1);
+		expect(sectionOf(composition, "redis-federation-grant-intent-store")).toEqual({
+			keyPrefix: "t1:fgi:",
+		});
+	});
+});
+
+describe("a path the federation-grants sections moved from, written in the operator's own layer", () => {
+	const unbound = (module: string, from: string, to: string) => ({ module, from, to });
+	const bound = (module: string, from: string, to: string, environmentVariable: string) => ({
+		module,
+		from,
+		to,
+		environmentVariable,
+	});
+
+	it("federationGrants: each key refused, naming its path under federation-grants, the in-process store's retention under its own section", async () => {
+		const relocated = await relocatedBy({
+			operatorHocon: [
+				"federationGrants {",
+				"  enabled = true",
+				"  maxExpiresIn = 86400",
+				"  allowKeepOnSubjectRevocation = false",
+				'  identityLookup = "unsupported"',
+				'  consent.url = "/consent/old"',
+				"  tombstoneRetention = 600",
+				'  connections.old { federation = "oidc", scopes = ["openid"], boundary = "b", maxAccessTokenLifetime = 60 }',
+				"}",
+				"",
+			].join("\n"),
+		});
+
+		const grants = "federation-grants";
+		expect(relocated).toHaveLength(10);
+		expect(relocated).toEqual(
+			expect.arrayContaining([
+				bound(grants, "federationGrants.enabled", `${grants}.enabled`, "FEDERATION_GRANTS_ENABLED"),
+				unbound(grants, "federationGrants.maxExpiresIn", `${grants}.maxExpiresIn`),
+				bound(
+					grants,
+					"federationGrants.allowKeepOnSubjectRevocation",
+					`${grants}.allowKeepOnSubjectRevocation`,
+					"FEDERATION_GRANTS_ALLOW_KEEP_ON_SUBJECT_REVOCATION",
+				),
+				bound(
+					grants,
+					"federationGrants.identityLookup",
+					`${grants}.identityLookup`,
+					"FEDERATION_GRANTS_IDENTITY_LOOKUP",
+				),
+				bound(
+					grants,
+					"federationGrants.consent.url",
+					`${grants}.consent.url`,
+					"FEDERATION_GRANTS_CONSENT_URL",
+				),
+				unbound(
+					"core-federation-grant-store-memory",
+					"federationGrants.tombstoneRetention",
+					"core-federation-grant-store-memory.tombstoneRetention",
+				),
+				unbound(
+					grants,
+					"federationGrants.connections.old.federation",
+					`${grants}.connections.old.federation`,
+				),
+				unbound(
+					grants,
+					"federationGrants.connections.old.scopes",
+					`${grants}.connections.old.scopes`,
+				),
+				unbound(
+					grants,
+					"federationGrants.connections.old.boundary",
+					`${grants}.connections.old.boundary`,
+				),
+				unbound(
+					grants,
+					"federationGrants.connections.old.maxAccessTokenLifetime",
+					`${grants}.connections.old.maxAccessTokenLifetime`,
+				),
+			]),
+		);
+	});
+
+	it("federationGrants.enabled alone, with the variable unset: refused, not read as off", async () => {
+		const { FEDERATION_GRANTS_ENABLED: _enabled, ...unset } = SINGLE_ENV;
+		const relocated = await relocatedBy({
+			env: unset,
+			operatorHocon: "federationGrants.enabled = true\n",
+		});
+
+		expect(relocated).toEqual([
+			bound(
+				"federation-grants",
+				"federationGrants.enabled",
+				"federation-grants.enabled",
+				"FEDERATION_GRANTS_ENABLED",
+			),
+		]);
+	});
+
+	it("the Redis grant store's keys, under federationGrants and redisFederationGrantStore: refused, naming its own section", async () => {
+		const relocated = await relocatedBy(
+			onRedis({
+				operatorHocon: [
+					"federationGrants {",
+					'  encryptionMode = "required"',
+					'  encryptionKeys = [{ id = "k-old", key = "not-a-key" }]',
+					"  tombstoneRetention = 60",
+					"}",
+					'redisFederationGrantStore { keyPrefix = "t1:fg:", listingAllowanceMs = 1000 }',
+					"",
+				].join("\n"),
+			}),
+		);
+
+		const store = "redis-federation-grant-store";
+		expect(relocated).toHaveLength(6);
+		expect(relocated).toEqual(
+			expect.arrayContaining([
+				bound(
+					store,
+					"federationGrants.encryptionMode",
+					`${store}.encryptionMode`,
+					"REDIS_FEDERATION_GRANT_STORE_ENCRYPTION_MODE",
+				),
+				unbound(store, "federationGrants.encryptionKeys.0.id", `${store}.encryptionKeys.0.id`),
+				unbound(store, "federationGrants.encryptionKeys.0.key", `${store}.encryptionKeys.0.key`),
+				unbound(store, "federationGrants.tombstoneRetention", `${store}.tombstoneRetention`),
+				bound(
+					store,
+					"redisFederationGrantStore.keyPrefix",
+					`${store}.keyPrefix`,
+					"REDIS_FEDERATION_GRANT_STORE_KEY_PREFIX",
+				),
+				unbound(
+					store,
+					"redisFederationGrantStore.listingAllowanceMs",
+					`${store}.listingAllowanceMs`,
+				),
+			]),
+		);
+		expect(JSON.stringify(relocated)).not.toContain("not-a-key");
+	});
+});
+
 describe("a key a store's section does not declare", () => {
 	it.each([
 		["core-rate-limiter-memory.maxBucket = 5", "maxBucket", false],
@@ -385,6 +584,11 @@ describe("a key a store's section does not declare", () => {
 		["redis-refresh-token-family-store.casRetries = 2", "casRetries", true],
 		['redis-federation-token-store.encryptionKeys = ["x"]', "encryptionKeys", true],
 		['redis-session-stores.keyPrefixes = "x:"', "keyPrefixes", true],
+		["federation-grants.maxExpiresInn = 5", "maxExpiresInn", false],
+		['federation-grants.connections.calendar.scope = ["openid"]', "scope", false],
+		["core-federation-grant-store-memory.tombstone = 1", "tombstone", false],
+		['redis-federation-grant-store.keyPrefixes = "x:"', "keyPrefixes", true],
+		['redis-federation-grant-intent-store.prefix = "x:"', "prefix", true],
 	])("%s: refused, naming %s", async (hocon, key, redis) => {
 		const options = redis ? onRedis() : {};
 		const err = await refused({ ...options, operatorHocon: `${hocon}\n` });
@@ -419,6 +623,14 @@ describe("a store variable renamed with the move, through the template's reading
 			module: "redis-refresh-token-family-store",
 			path: "redis-refresh-token-family-store.keyPrefix",
 			value: "t1:rtfam:",
+			options: (): FullSetOptions => onRedis(),
+		},
+		{
+			from: "FEDERATION_GRANTS_ENCRYPTION_MODE",
+			to: "REDIS_FEDERATION_GRANT_STORE_ENCRYPTION_MODE",
+			module: "redis-federation-grant-store",
+			path: "redis-federation-grant-store.encryptionMode",
+			value: "required",
 			options: (): FullSetOptions => onRedis(),
 		},
 		{

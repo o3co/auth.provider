@@ -254,6 +254,9 @@ importers:
       '@o3co/auth-provider-redis':
         specifier: workspace:*
         version: link:../redis
+      '@o3co/ts.hocon':
+        specifier: ^1.13.0
+        version: 1.13.0(yaml@2.9.0)(zod@4.6.5)
       '@types/express':
         specifier: ^5.0.6
         version: 5.0.6

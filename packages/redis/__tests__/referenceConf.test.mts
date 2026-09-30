@@ -23,6 +23,8 @@ import {
 	redisChallengeStoreModule,
 	redisConsentStoreModule,
 	redisDeviceCodeStoreModule,
+	redisFederationGrantIntentStoreModule,
+	redisFederationGrantStoreModule,
 	redisFederationTokenStoreModule,
 	redisMfaFactorStoreModule,
 	redisMfaTransactionStoreModule,
@@ -40,6 +42,8 @@ const MODULES: readonly Module[] = [
 	redisChallengeStoreModule,
 	redisConsentStoreModule,
 	redisDeviceCodeStoreModule,
+	redisFederationGrantIntentStoreModule,
+	redisFederationGrantStoreModule,
 	redisFederationTokenStoreModule,
 	redisMfaFactorStoreModule,
 	redisMfaTransactionStoreModule,
@@ -80,6 +84,9 @@ describe("the package's config/reference.conf", () => {
 			REFRESH_TOKEN_FAMILY_STORE_KEY_PREFIX: "redisRefreshTokenFamilyStore.keyPrefix",
 			REFRESH_TOKEN_FAMILY_STORE_CAS_RETRY_LIMIT: "redisRefreshTokenFamilyStore.casRetryLimit",
 		});
+		expect(redisFederationGrantStoreModule.section?.renamedVariables).toEqual({
+			FEDERATION_GRANTS_ENCRYPTION_MODE: "federationGrants.encryptionMode",
+		});
 	});
 
 	it.each([
@@ -97,6 +104,12 @@ describe("the package's config/reference.conf", () => {
 		["REDIS_FEDERATION_TOKEN_STORE_KEY_PREFIX", "redis-federation-token-store.keyPrefix"],
 		["REDIS_FEDERATION_TOKEN_STORE_ENCRYPTION_MODE", "redis-federation-token-store.encryptionMode"],
 		["REDIS_FEDERATION_TOKEN_STORE_ENCRYPTION_KEY", "redis-federation-token-store.encryptionKey"],
+		["REDIS_FEDERATION_GRANT_STORE_KEY_PREFIX", "redis-federation-grant-store.keyPrefix"],
+		["REDIS_FEDERATION_GRANT_STORE_ENCRYPTION_MODE", "redis-federation-grant-store.encryptionMode"],
+		[
+			"REDIS_FEDERATION_GRANT_INTENT_STORE_KEY_PREFIX",
+			"redis-federation-grant-intent-store.keyPrefix",
+		],
 	])("binds %s at %s", (variable, path) => {
 		expect(resolvedAt(path, { [variable]: "__set__" })).toBe("__set__");
 	});
@@ -118,6 +131,11 @@ describe("the package's config/reference.conf", () => {
 		["redis-federation-token-store.ttl", 86400],
 		["redis-federation-token-store.encryptionMode", "required"],
 		["redis-federation-token-store.scanFallback", true],
+		["redis-federation-grant-store.keyPrefix", "fg:"],
+		["redis-federation-grant-store.listingAllowanceMs", 300000],
+		["redis-federation-grant-store.tombstoneRetention", 2592000],
+		["redis-federation-grant-store.encryptionMode", "required"],
+		["redis-federation-grant-intent-store.keyPrefix", "fg:"],
 	])("ships %s = %s", (path, value) => {
 		expect(resolvedAt(path)).toEqual(value);
 	});

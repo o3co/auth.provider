@@ -136,6 +136,7 @@ describe("core's reference.conf holds the sections of core's own modules to thei
 			expect.arrayContaining([
 				"jwks",
 				"core-challenge-store-memory",
+				"core-federation-grant-store-memory",
 				"core-mfa-transaction-store-memory",
 				"core-rate-limiter-memory",
 				"core-replay-seen-set-memory",
@@ -249,6 +250,8 @@ describe("core's reference.conf binds core's own section and its modules', and n
 			"redisRefreshTokenFamilyStore",
 			"redisSessionStores",
 			"redisFederationTokenStore",
+			"federationGrants",
+			"redisFederationGrantStore",
 		]) {
 			expect(hasPath(tree, path), path).toBe(false);
 		}

@@ -24,12 +24,13 @@
 import { describe, expect, it } from "vitest";
 import { memoryFederationGrantStoreModule } from "#/federation-grants/module.mjs";
 
-const parse = (federationGrants: unknown) =>
+/** The module's own section, `core-federation-grant-store-memory`, parsed with its schema. */
+const parse = (section: unknown) =>
 	(
-		memoryFederationGrantStoreModule.configSchema as unknown as {
-			parse(value: unknown): { federationGrants?: { tombstoneRetention?: number } };
+		memoryFederationGrantStoreModule.section?.schema as unknown as {
+			parse(value: unknown): { tombstoneRetention?: number } | undefined;
 		}
-	).parse({ federationGrants });
+	).parse(section);
 
 describe("memoryFederationGrantStoreModule", () => {
 	it("declares itself unsafe to run on more than one replica, and says what forks", () => {
@@ -37,31 +38,39 @@ describe("memoryFederationGrantStoreModule", () => {
 		expect(memoryFederationGrantStoreModule.replicaSafety?.reason).toMatch(/fork per replica/);
 	});
 
-	it("reads the retention an operator wrote, in seconds", () => {
-		expect(parse({ tombstoneRetention: 60 }).federationGrants?.tombstoneRetention).toBe(60);
-		expect(parse({ tombstoneRetention: "60" }).federationGrants?.tombstoneRetention).toBe(60);
+	it("reads the retention an operator wrote at its own section, in seconds", () => {
+		expect(memoryFederationGrantStoreModule.section?.at).toBeUndefined();
+		expect(memoryFederationGrantStoreModule.configSchema).toBeUndefined();
+		expect(parse({ tombstoneRetention: 60 })?.tombstoneRetention).toBe(60);
+		expect(parse({ tombstoneRetention: "60" })?.tombstoneRetention).toBe(60);
 		// Zero is a deployment that wants no tombstones, and says so.
-		expect(parse({ tombstoneRetention: 0 }).federationGrants?.tombstoneRetention).toBe(0);
+		expect(parse({ tombstoneRetention: 0 })?.tombstoneRetention).toBe(0);
 	});
 
-	it("refuses a retention that is not a duration rather than reading it as zero", () => {
-		for (const tombstoneRetention of [null, true, [], "1e3", "thirty", -1, 1.5]) {
-			expect(() => parse({ tombstoneRetention }), JSON.stringify(tombstoneRetention)).toThrow();
+	it("refuses a retention that is not a duration rather than reading it as zero, and a key it does not declare", () => {
+		for (const section of [
+			...[null, true, [], "1e3", "thirty", -1, 1.5].map((tombstoneRetention) => ({
+				tombstoneRetention,
+			})),
+			{ tombstone: 60 },
+		]) {
+			expect(() => parse(section), JSON.stringify(section)).toThrow();
 		}
 	});
 
 	it("needs no configuration at all to be installed", () => {
 		expect(() => parse(undefined)).not.toThrow();
+		expect(memoryFederationGrantStoreModule.requires ?? []).toEqual([]);
 	});
 
 	it("builds a store, and one with the configured retention when there is one", () => {
 		const provider = memoryFederationGrantStoreModule.provides?.federationGrantStore;
 		expect(typeof provider).toBe("function");
 		const store = (provider as (deps: unknown) => { kind: string })({
-			config: { federationGrants: { tombstoneRetention: 60 } },
+			section: { tombstoneRetention: 60 },
 		});
 		expect(store.kind).toBe("memory");
-		const bare = (provider as (deps: unknown) => { kind: string })({ config: {} });
+		const bare = (provider as (deps: unknown) => { kind: string })({ section: undefined });
 		expect(bare.kind).toBe("memory");
 	});
 });
