@@ -17,9 +17,9 @@
 /**
  * The check a package runs over its own `config/reference.conf`: the file
  * holds only the sections of the modules that declare it
- * (`section.reference`), and the captures of the variables they declare
- * renamed (`renamed-variables`), and each such module's section schema
- * parses its part without losing a path. Another package's section would set that
+ * (`section.reference`) — and the captures of renamed variables
+ * (`renamed-variables`), which `renamedVariableProblems` holds — and each
+ * such module's section schema parses its part without losing a path. Another package's section would set that
  * package's defaults from the wrong place; a dropped path is a default no
  * module reads. The file comes already resolved by the package's own HOCON
  * reader, so core takes no HOCON dependency.
@@ -30,7 +30,6 @@
  */
 
 import { fileURLToPath } from "node:url";
-import { renamedVariablesOf } from "../boot/validate-manifests.mjs";
 import { RENAMED_VARIABLES_SECTION } from "../config/removed-keys.mjs";
 import type { Module } from "../modules/manifest/module-spec.mjs";
 import { renamedVariableProblems } from "./renamedVariables.mjs";
@@ -92,19 +91,9 @@ export function referenceConfProblems(check: ReferenceConfCheck): string[] {
 		const segments = section.at === undefined ? [module.name] : section.at.split(".");
 		return { module, schema: section.schema, path: segments.join("."), segments };
 	});
-	const renamed = new Set(
-		renamedVariablesOf(owners).flatMap(({ from, to }) => (to === null ? [from] : [from, to])),
-	);
 	for (const path of leafPaths(check.tree, "")) {
-		if (within(path, RENAMED_VARIABLES_SECTION)) {
-			const name = path.slice(RENAMED_VARIABLES_SECTION.length + 1);
-			if (!renamed.has(name)) {
-				problems.push(
-					`${path}: no module declaring this reference declares ${name === "" ? "it" : name} renamed`,
-				);
-			}
-			continue;
-		}
+		// The captures are held by `renamedVariableProblems`.
+		if (within(path, RENAMED_VARIABLES_SECTION)) continue;
 		if (!sections.some((section) => within(path, section.path))) {
 			problems.push(`${path}: no module declaring this reference owns it`);
 		}

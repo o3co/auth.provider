@@ -17,15 +17,22 @@
 /**
  * The bindings a declared rename needs across the layers a composition
  * ships, so boot's judgement of what the resolution captured is sound: both
- * names captured in `renamed-variables` (`null` when unset), the new name
- * bound at its path — else a value set under it would be dropped while boot
- * accepts it — and the old name bound nowhere else, else declaring it would
- * refuse every operator who sets it. The layers come resolved by the caller's
- * HOCON reader, so core takes no HOCON dependency.
+ * names captured in `renamed-variables` (`null` when unset) by the declaring
+ * module's own `section.reference` — core's own `reference.conf` for core —
+ * and by no other layer, since a capture written elsewhere by hand would
+ * override what the resolution saw; the new name bound at its path, else a
+ * value set under it would be dropped while boot accepts it; and the old name
+ * bound nowhere else, else declaring it would refuse every operator who sets
+ * it. The layers come resolved by the caller's HOCON reader, so core takes no
+ * HOCON dependency. `renamedVariableCaptures` is what such a resolution
+ * captures, for a configuration built by hand.
  */
 
+import { resolve as resolvePath } from "node:path";
+import { fileURLToPath } from "node:url";
 import { renamedVariablesOf } from "../boot/validate-manifests.mjs";
 import type { CoreRelocations } from "../config/core-relocations.mjs";
+import { coreReference } from "../config/references.mjs";
 import { RENAMED_VARIABLES_SECTION } from "../config/removed-keys.mjs";
 import type { Module } from "../modules/manifest/module-spec.mjs";
 
@@ -58,50 +65,114 @@ function markedPaths(tree: unknown, prefix = ""): string[] {
 	return tree === MARKER ? [prefix] : [];
 }
 
-/** The capture of `name` in `tree`: `undefined` when there is none. */
-const capturedIn = (tree: unknown, name: string): unknown => {
+/** The captures `tree` holds, by name; none when it holds no `renamed-variables`. */
+const capturesIn = (tree: unknown): Readonly<Record<string, unknown>> => {
 	const section = isPlainObject(tree) ? tree[RENAMED_VARIABLES_SECTION] : undefined;
-	return isPlainObject(section) && Object.hasOwn(section, name) ? section[name] : undefined;
+	return isPlainObject(section) ? section : {};
 };
+
+/** The file that captures the renames of the module named `name`: core's own reference for "core". */
+function captureFileOf(name: string, modules: readonly Module[]): string | undefined {
+	if (name === "core") return fileURLToPath(coreReference());
+	const reference = modules.find((module) => module.name === name)?.section?.reference;
+	return reference === undefined ? undefined : fileURLToPath(reference);
+}
 
 /**
  * What is wrong with the bindings of the renames `check.modules` (and
  * `check.core`) declare across `check.layers`, one line per problem, sorted:
- * a name no layer captures as `null` unset and as its value set; a new name
- * bound at its path in no layer; an old name a layer binds anywhere but its
- * capture. `[]` when nothing is.
+ * a declaring module with no `section.reference`; a name its reference does
+ * not capture as `null` unset and as its value set; a layer capturing a name
+ * no module whose reference it is declares; a new name bound at its path in
+ * no layer; an old name a layer binds anywhere but its capture. `[]` when
+ * nothing is.
  */
 export function renamedVariableProblems(check: RenamedVariableCheck): string[] {
-	const problems: string[] = [];
+	const problems = new Set<string>();
+	const layers = check.layers.map((layer) => resolvePath(layer));
 	const resolve = (env: Readonly<Record<string, string>>) =>
-		check.layers.map((layer) => ({ layer, tree: check.read(layer, env) }));
+		layers.map((layer) => ({ layer, tree: check.read(layer, env) }));
 	const unset = resolve({});
-	for (const rename of renamedVariablesOf(check.modules, check.core)) {
+	const renames = renamedVariablesOf(check.modules, check.core);
+	const declaredBy = new Map<string, Set<string>>();
+	for (const rename of renames) {
+		const file = captureFileOf(rename.module, check.modules);
 		const module = `module "${rename.module}"`;
-		for (const name of rename.to === null ? [rename.from] : [rename.from, rename.to]) {
-			const set = resolve({ [name]: MARKER });
-			const captured = check.layers.some(
-				(_layer, index) =>
-					capturedIn(unset[index]?.tree, name) === null &&
-					capturedIn(set[index]?.tree, name) === MARKER,
+		const names = rename.to === null ? [rename.from] : [rename.from, rename.to];
+		if (file === undefined) {
+			problems.add(
+				`${module}: declares renamed variables and no section.reference, whose file captures them`,
 			);
-			if (!captured) {
-				problems.push(
-					`${module}: ${name} is not captured: a layer holds \`${RENAMED_VARIABLES_SECTION}.${name} = null\` then \`${RENAMED_VARIABLES_SECTION}.${name} = \${?${name}}\``,
-				);
+		} else {
+			const declared = declaredBy.get(resolvePath(file)) ?? new Set<string>();
+			for (const name of names) declared.add(name);
+			declaredBy.set(resolvePath(file), declared);
+		}
+		for (const name of names) {
+			const set = resolve({ [name]: MARKER });
+			if (file !== undefined) {
+				const index = layers.indexOf(resolvePath(file));
+				const captured =
+					index !== -1 &&
+					capturesIn(unset[index]?.tree)[name] === null &&
+					capturesIn(set[index]?.tree)[name] === MARKER;
+				if (!captured) {
+					const by =
+						rename.module === "core" ? "core's own reference.conf" : "its section.reference";
+					problems.add(
+						`${module}: ${name} is not captured by ${by} (${file}): it holds \`${RENAMED_VARIABLES_SECTION}.${name} = null\` then \`${RENAMED_VARIABLES_SECTION}.${name} = \${?${name}}\``,
+					);
+				}
 			}
 			const marked = set.map(({ layer, tree }) => ({ layer, paths: markedPaths(tree) }));
 			if (name === rename.from) {
 				for (const { layer, paths } of marked) {
 					for (const path of paths) {
 						if (path === `${RENAMED_VARIABLES_SECTION}.${name}`) continue;
-						problems.push(`${module}: ${name}, declared renamed, is bound at ${path} in ${layer}`);
+						problems.add(`${module}: ${name}, declared renamed, is bound at ${path} in ${layer}`);
 					}
 				}
 			} else if (!marked.some(({ paths }) => paths.includes(rename.path as string))) {
-				problems.push(`${module}: ${name} is bound at ${rename.path} in no layer`);
+				problems.add(`${module}: ${name} is bound at ${rename.path} in no layer`);
 			}
 		}
 	}
-	return problems.sort();
+	for (const { layer, tree } of unset) {
+		const declared = declaredBy.get(layer) ?? new Set<string>();
+		for (const name of Object.keys(capturesIn(tree))) {
+			if (declared.has(name)) continue;
+			problems.add(
+				`${layer}: captures ${name}, which no module whose section.reference it is declares renamed`,
+			);
+		}
+	}
+	return [...problems].sort();
+}
+
+export interface RenamedVariableCaptureInput {
+	/** The modules whose `section.renamedVariables` are captured. */
+	readonly modules: readonly Module[];
+	/** Core's own section's declaration, captured beside theirs. */
+	readonly core?: CoreRelocations;
+	/** The environment the configuration is substituted with. */
+	readonly env: Readonly<Record<string, string | undefined>>;
+}
+
+/**
+ * What a resolution under `env` captures in `renamed-variables` for the
+ * renames `input.modules` (and `input.core`) declare: each old and new name's
+ * value, `null` when unset. For a configuration built by hand, which must
+ * capture every declared name from the environment it is substituted with.
+ */
+export function renamedVariableCaptures(
+	input: RenamedVariableCaptureInput,
+): Record<string, string | null> {
+	const captures: Record<string, string | null> = {};
+	for (const rename of renamedVariablesOf(input.modules, input.core)) {
+		for (const name of rename.to === null ? [rename.from] : [rename.from, rename.to]) {
+			const value = input.env[name];
+			captures[name] = typeof value === "string" ? value : null;
+		}
+	}
+	return captures;
 }

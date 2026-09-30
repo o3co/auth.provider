@@ -71,7 +71,12 @@ export {
 	type ReferenceConfCheck,
 	referenceConfProblems,
 } from "./referenceConf.mjs";
-export { type RenamedVariableCheck, renamedVariableProblems } from "./renamedVariables.mjs";
+export {
+	type RenamedVariableCaptureInput,
+	type RenamedVariableCheck,
+	renamedVariableCaptures,
+	renamedVariableProblems,
+} from "./renamedVariables.mjs";
 export {
 	type CsrfGuardContractInput,
 	createTestCsrfGuard,

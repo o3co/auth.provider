@@ -2257,7 +2257,8 @@ function withCoreRelocations(modules: readonly Module[], core: CoreRelocations):
  * form or has a hole. Only a manifest's `section` declares a path to hold
  * against; a module read through `configSchema` alone declares none. Core's
  * own section's declaration is held with the modules', as module "core"
- * (`relocating`). No section is read at, and no old path lies under,
+ * (`relocating`), so no loaded module is named `core` or reads its section
+ * at or under `core`. No section is read at, and no old path lies under,
  * `renamed-variables`, the section reserved for the captures of renamed
  * variables. Then `declaredRenames` holds the variables renamed with the
  * moves, and `checkModuleSectionOwners` each loaded module's section to one
@@ -2277,6 +2278,26 @@ function checkModuleSectionPaths(
 			reason: "module-section-path-invalid",
 			stage: "validateManifests",
 			details: { reason: "module-section-path-invalid", module: m.name, at },
+		});
+	}
+	for (const m of rawModules) {
+		const core =
+			m.name === "core" || (m.section !== undefined && sectionSegmentsOf(m)[0] === "core");
+		if (!core) continue;
+		const problem =
+			m.name === "core"
+				? `"core" is reserved: core's own section, and the name boot gives core's declarations`
+				: "core is reserved for core's own section";
+		throw new BootError({
+			message: `Module "${m.name}" declares ${m.name === "core" ? "the name core" : `its section at "${sectionPathOf(m)}"`}: ${problem}.`,
+			reason: "module-section-path-invalid",
+			stage: "validateManifests",
+			details: {
+				reason: "module-section-path-invalid",
+				module: m.name,
+				at: m.section === undefined ? undefined : sectionPathOf(m),
+				problem,
+			},
 		});
 	}
 	for (const m of rawModules) {
@@ -2619,10 +2640,12 @@ function checkRenamedEnvironmentVariables(
 ): void {
 	const renames = declaredRenames(relocating);
 	if (renames.length === 0) return;
-	const found = findRenamedVariables((bootstrap as { readonly config?: unknown }).config, renames);
+	const config: unknown = (bootstrap as { readonly config?: unknown }).config;
+	const found = findRenamedVariables(config, renames);
 	if (found.length === 0) return;
+	const configured = typeof config === "object" && config !== null;
 	throw new BootError({
-		message: `Boot refuses ${found.length} variable(s) renamed with a moved key: ${found.map(renamedVariableMessage).join(" ")}`,
+		message: `Boot refuses ${found.length} variable(s) renamed with a moved key: ${found.map((rename) => renamedVariableMessage(rename, configured)).join(" ")}`,
 		reason: "environment-variable-renamed",
 		stage: "validateManifests",
 		details: {

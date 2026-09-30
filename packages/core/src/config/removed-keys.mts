@@ -320,19 +320,30 @@ export function withoutRenamedVariables(config: unknown): unknown {
 /**
  * What to tell the operator whose environment breaks a rename, in the words a
  * relocated key is refused in, or the composition that captures no value for
- * it. Names the variables and the paths, never a value: a variable may carry
- * a secret.
+ * it: that it handed no configuration (`configured` false), or which
+ * `reference.conf` captures the names — core's own for module "core", else
+ * the module's `section.reference`. Names the variables and the paths, never
+ * a value: a variable may carry a secret.
  */
 export function renamedVariableMessage(
 	rename: RenamedVariable & {
 		readonly module: string;
 		readonly state: RenamedVariableState;
 	},
+	configured = true,
 ): string {
 	const names = rename.to === null ? rename.from : `${rename.from} or ${rename.to}`;
 	switch (rename.state) {
-		case "uncaptured":
-			return `${names} is not captured in the configuration's ${RENAMED_VARIABLES_SECTION} section, so whether the environment sets it cannot be told. Layer the reference.conf of the package module "${rename.module}" comes from, which captures it.`;
+		case "uncaptured": {
+			if (!configured) {
+				return `createApp was handed no configuration, so whether the environment sets ${names} cannot be told.`;
+			}
+			const capturing =
+				rename.module === "core"
+					? "core's own reference.conf (coreReference())"
+					: `the reference.conf of the package module "${rename.module}" comes from (its section.reference)`;
+			return `${names} is not captured in the configuration's ${RENAMED_VARIABLES_SECTION} section, so whether the environment sets it cannot be told. Layer ${capturing}, which captures it. Never write ${RENAMED_VARIABLES_SECTION} by hand: a composition that does must capture every declared name from the environment it substitutes the configuration with, null when unset.`;
+		}
 		case "removed":
 			return goneKeyMessage(
 				rename.from,

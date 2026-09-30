@@ -26,5 +26,16 @@ import type { ModuleSection } from "../modules/manifest/module-section.mjs";
 /** Core's declaration: the two fields of a module's `section` that say where it moved from. */
 export type CoreRelocations = Pick<ModuleSection, "relocatedFrom" | "renamedVariables">;
 
-/** Core's shipped declaration. */
-export const CORE_RELOCATIONS: CoreRelocations = Object.freeze({});
+/** `core`, frozen with every map it holds. */
+const frozen = (core: CoreRelocations): CoreRelocations =>
+	Object.freeze({
+		...(core.relocatedFrom === undefined
+			? {}
+			: { relocatedFrom: Object.freeze(core.relocatedFrom) }),
+		...(core.renamedVariables === undefined
+			? {}
+			: { renamedVariables: Object.freeze(core.renamedVariables) }),
+	});
+
+/** Core's shipped declaration, frozen whole. */
+export const CORE_RELOCATIONS: CoreRelocations = frozen({});
