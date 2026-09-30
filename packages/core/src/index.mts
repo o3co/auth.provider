@@ -545,6 +545,7 @@ export {
 	lineSafeText,
 	loggableError,
 } from "./logging/loggableError.mjs";
+export { normaliseMailAddress } from "./mail/address.mjs";
 export { type MailSendOutcome, mailSendOutcome } from "./mail/outcome.mjs";
 // Mail: the port a one-time code the provider issued leaves through
 export {
@@ -572,6 +573,7 @@ export type {
 	MfaFactorMailPurpose,
 	MfaFactorState,
 	MfaKeyedDigest,
+	MfaLoginCodeMail,
 	MfaVerification,
 	MfaVerifyContext,
 } from "./mfa/factor.mjs";

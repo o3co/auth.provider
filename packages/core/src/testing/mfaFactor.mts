@@ -26,6 +26,7 @@
 
 import { createHmac, randomBytes } from "node:crypto";
 import { OTP_AMR } from "../grants/authenticationClaims.mjs";
+import { normaliseMailAddress } from "../mail/address.mjs";
 import type {
 	MfaDigestMatch,
 	MfaDigests,
@@ -106,7 +107,8 @@ export interface TestMfaFactorOptions {
 	 * asks for its code to be mailed (`email_factor_enrollment`) and each
 	 * challenge for another (`login_code`), each expiring ten minutes on, which
 	 * a verification repeats; the latest stands across attempts. Enrollable
-	 * only by an account with an address, which the factor never keeps.
+	 * only by an account with an address. It keeps that address's keyed
+	 * digest, never the address, and mails it with each login code.
 	 */
 	readonly mail?: boolean;
 }
@@ -151,16 +153,22 @@ export function createTestMfaFactor(options: TestMfaFactorOptions = {}): MfaFact
 		completeEnrollment: async (ctx) => {
 			if (typeof ctx.proof !== "string") return { ok: false, reason: "malformed" };
 			if (ctx.proof !== ctx.state.secret) return { ok: false, reason: "invalid" };
-			return { ok: true, data: mails ? {} : { secret: ctx.state.secret } };
+			if (!mails) return { ok: true, data: { secret: ctx.state.secret } };
+			const address = normaliseMailAddress(ctx.user.email);
+			if (address === undefined) return { ok: false, reason: "invalid" };
+			return { ok: true, data: { addressDigest: ctx.digests.digest([address]) } };
 		},
 		verify: async (ctx) => {
 			if (typeof ctx.proof !== "string") return { ok: false, reason: "malformed" };
 			if (mails) {
 				const code = ctx.state?.code;
 				if (typeof code !== "string") return { ok: false, reason: "expired" };
-				return ctx.proof === code
-					? { ok: true, factorId: ctx.factor.id }
-					: { ok: false, reason: "invalid" };
+				if (ctx.proof !== code) return { ok: false, reason: "invalid" };
+				const recorded = ctx.factor.data.addressDigest as MfaKeyedDigest | undefined;
+				// A digest re-made under the ring's first key replaces one under another.
+				return ctx.addressDigest !== undefined && ctx.addressDigest.keyId !== recorded?.keyId
+					? { ok: true, factorId: ctx.factor.id, next: { addressDigest: ctx.addressDigest } }
+					: { ok: true, factorId: ctx.factor.id };
 			}
 			const { secret } = ctx.factor.data;
 			if (options.challenge !== true) {
@@ -184,7 +192,12 @@ export function createTestMfaFactor(options: TestMfaFactorOptions = {}): MfaFact
 						return {
 							state: { code },
 							response: { sent: true },
-							mail: { purpose: "login_code", code, expiresAtMs: ctx.nowMs + MAILED_CODE_TTL_MS },
+							mail: {
+								purpose: "login_code",
+								code,
+								expiresAtMs: ctx.nowMs + MAILED_CODE_TTL_MS,
+								addressDigest: ctx.factor.data.addressDigest as MfaKeyedDigest,
+							},
 						};
 					},
 				}

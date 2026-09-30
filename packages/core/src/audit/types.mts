@@ -85,7 +85,11 @@ export const BUILT_IN_AUDIT_EVENT_TYPES = [
 	// `mfa.locked.first`, the lock that begins an episode, with its `hold`;
 	// and `mfa.reset`, the operator reset, with the `kinds` it removed,
 	// `requireEmailProof` and `revokeSessions`. The event's `timestamp` is when.
+	// `mfa.email_address_mismatch`, the email factor refused because the
+	// account's address no longer matches the one it was enrolled with,
+	// carries the subject and the kind, and never an address.
 	"mfa.challenge.sent",
+	"mfa.email_address_mismatch",
 	"mfa.enrollment_state_inconsistent",
 	"mfa.factor.enrolled",
 	"mfa.factor.removed",

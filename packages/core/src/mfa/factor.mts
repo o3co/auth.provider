@@ -129,6 +129,12 @@ export interface MfaVerifyContext extends MfaCeremonyContext {
 	readonly state: MfaFactorState | undefined;
 	/** The proof as the request carried it. The factor reads it and refuses what it cannot read as `malformed`. */
 	readonly proof: unknown;
+	/**
+	 * After a challenge whose login code went out: the current address's
+	 * digest under the ring's first key. A factor whose recorded digest names
+	 * another key keeps this one in `next`, so that key can leave the ring.
+	 */
+	readonly addressDigest?: MfaKeyedDigest;
 }
 
 /** The start of an enrollment. */
@@ -154,10 +160,16 @@ export type MfaFactorMailPurpose = Exclude<MailPurpose, "account_email_proof">;
  * A code a challenge or an enrollment asks the coordinator to mail: its
  * purpose, the code and, when the factor gives one, when it stops being
  * accepted — never text. The coordinator resolves the recipient, the address
- * on the account's user record at that moment. It keeps the state first,
- * expiring at the earlier of `expiresAtMs` and the transaction's expiry, and
- * sends after with that expiry; a send refused at a limit or failed clears
- * that state, and is never "sent".
+ * on the account's user record at that moment, as `normaliseMailAddress`
+ * spells it. An enrollment code goes to it, and the factor records that
+ * address's keyed digest (`digests.digest([address])`) in its data on
+ * completion, never the address. A login code goes to it only when it matches
+ * the digest the mail carries ({@link MfaLoginCodeMail}); on a mismatch, or
+ * no address, the factor is refused until the user re-enrolls it after recent
+ * MFA, and `key_unavailable` is an outage. The coordinator keeps the state
+ * first, expiring at the earlier of `expiresAtMs` and the transaction's
+ * expiry, and sends after with that expiry; a send refused at a limit or
+ * failed clears that state, and is never "sent".
  */
 export interface MfaFactorMail<P extends MfaFactorMailPurpose = MfaFactorMailPurpose> {
 	readonly purpose: P;
@@ -166,12 +178,18 @@ export interface MfaFactorMail<P extends MfaFactorMailPurpose = MfaFactorMailPur
 	readonly expiresAtMs?: number;
 }
 
+/** A login code to mail, with the keyed digest of the address the factor was enrolled with. */
+export interface MfaLoginCodeMail extends MfaFactorMail<"login_code"> {
+	/** Made with the context's `digests` over `[normaliseMailAddress(address)]`: the digest the factor recorded at enrollment. */
+	readonly addressDigest: MfaKeyedDigest;
+}
+
 /** What a challenge answers: the state the coordinator keeps, if any, the page's response, and a login code to mail. */
 export interface MfaChallenge {
 	readonly state?: MfaFactorState;
 	/** What the page is answered: request options, where a code went. Never the code `mail` carries. */
 	readonly response: unknown;
-	readonly mail?: MfaFactorMail<"login_code">;
+	readonly mail?: MfaLoginCodeMail;
 }
 
 /** What the start of an enrollment answers; `response` as {@link MfaChallenge}'s, `mail` the enrollment's code. */
