@@ -118,8 +118,10 @@ replacing `data`, `label` and `lastUsedAt` and nothing else, at version + 1,
 and clearing what it says `undefined`; `null` for a version that moved or a
 record that is gone, nothing changed; a `RangeError` for an update at
 `Number.MAX_SAFE_INTEGER`; one winner among ten concurrent updates at one
-version; removal of one record and of a subject's records, idempotent and
-no further; and a removed record taken again. Every record id is 22
+version; a successful update reaching no other record — the same id under
+another subject, the subject's other factors; removal of one record and of
+a subject's records, idempotent and no further; and a removed record taken
+again. Every record id is 22
 base64url characters, the shape the provider makes and the Store's wire
 codec requires. Core's in-process store, the Redis store and foundation's
 Store-backed store run it.

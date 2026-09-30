@@ -17,7 +17,7 @@ auth.provider のための「the Store」 — デプロイ自身のユーザー�
 - リクエストの期限とレスポンスサイズの上限。
 - ID の照会が起動時に判定される根拠となるカバレッジ宣言。
 - Store の MFA エンドポイントの契約: 各エンドポイントに何を送り、各応答が何を意味するか、そして Store が送るものが何一つクライアントに届かないこと（[後述](#store-の-mfa-エンドポイント)）。要素のエンドポイントを名指す `foundation-mfa-factor-store` セクション。その失敗が投げる `MfaStoreError`。
-- Store を使う `MfaFactorStore` である `HttpMfaFactorStore`、それを組み込む `foundation-mfa-factor-store` モジュール、そしてそれが Store の外、プロバイダーの `replaySeenSet` に保つバージョンの下限（[後述](#store-を使う要素ストア)）。
+- Store を使う `MfaFactorStore` である `HttpMfaFactorStore` と、それを組み込む `foundation-mfa-factor-store` モジュール（[後述](#store-を使う要素ストア)）。
 
 **持たないもの:** ポートと `User` の形（core）。MFA のポートと MFA エンドポイントの JSON ボディ（core の [`mfa/storeWire.mts`](../core/src/mfa/storeWire.mts)。Store 自身の実装とテストキットの偽の Store もこれを読む）。ユーザーをいつ認証し、ID をいつリンクし、所有者をいつ照会するか — セッションルート（[`@o3co/auth-provider-session`](../session/README.ja.md)）、`oauth` の jwt-bearer グラント（[`@o3co/auth-provider-oauth`](../oauth/README.ja.md)）、federation grants（[`@o3co/auth-provider-federation-grants`](../federation-grants/README.md)）。Store 自体。core の開発用ユーザーアダプター（`yaml` / `static`）。Redis バックエンドのストア（[`@o3co/auth-provider-redis`](../redis/README.md)。Redis の認可コードストアもこちら）。
 
@@ -136,12 +136,13 @@ Store は主体の第二要素（MFA ADR の D7）と登録の証人（D12）を
 | delete（`deleteUrl`） | `{ subject, id }` または `{ subject, all: true }` | `2xx`（`204`）、または何も無かったときの `404`: どちらも完了。他のステータスは throw。 |
 | markMfaEnrolled（`markMfaEnrolledUrl`） | `{ subject, enrolled }` | `204`（すでにその値を保持しているときも）。`404`: Store にその主体が無い — エラー（主体は認証したばかりである）。他のステータスは throw。 |
 
-- **更新は変更だけを書く。** 更新はレコードを `subject` と `id` で名指し、期待するバージョンと、変更として `data`・`label`・`lastUsedAtMs` だけを運ぶ。省いたものは消える。`id`・`subject`・`kind`・`binding`・`createdAtMs` は変更として送られず、Store はそれらを変えてはならない。他のフィールドを持つ変更は拒否する（`400`）。Store は `expectedVersion` で原子的に比較して書き、`version` を一つ上げる。
+- **更新は変更だけを書く。** 更新はレコードを `subject` と `id` で名指し、期待するバージョンと、変更として `data`・`label`・`lastUsedAtMs` だけを運ぶ。省いたものは消える。`id`・`subject`・`kind`・`binding`・`createdAtMs` は変更として送られず、Store はそれらを変えてはならない。他のフィールドを持つ変更は拒否する（`400`）。Store は `expectedVersion` で原子的に比較して書き、`version` を一つ上げる: 同じバージョンへの二つの更新が両方とも成功することは無い。
 - **レコードは常にすべて。** list は Store が主体について保持するすべてのレコードを、Store 自身やプロバイダーが読めないものも含めて、その主体のものだけ返す。プロバイダーは読めないレコード — フィールドの欠落、型違い、範囲外や形の外、`null` — と、別の主体を名指すレコード、一覧にすでにある ID を持つ二つ目のレコードを、存在するが使えないものとして扱う: その主体の一覧は丸ごと拒否され（core の `readMfaStoreListAnswer`）、レコードが少ないとは決して読まれない。だからそのようなレコードで主体が「要素ゼロ」と数えられることも、最初の紐付けが開くことも無い。通信の失敗は障害であり、空の一覧ではない。
 - **更新の応答が `expectedVersion + 1` 以外のバージョン** なら、成功ではなく障害で、主体と要素の ID を名指すエラー行一行になる。
 - **証人** は `authenticate` で `User.mfaEnrolled` として返される: 真偽値で、主体が初めて印を付けられるまでは省かれ、core の `readMfaEnrollmentWitness` を通してだけ読まれる。
+- **要素の完全性と鮮度は Store のもの。** レコードのバージョンは決して戻らず、Store が認めた書き込みは — 復元やフェイルオーバーを挟んでも — 決して失われない。一覧は最新の書き込みを返し、主体の持つすべてのレコードを返し、削除したレコードを返さない。プロバイダーはそのどれも検査できない（[Store が自分で守るべきこと](#store-が自分で守るべきこと)）。
 
-**呼び出しが失敗したとき、Store が送ったものは何一つクライアントに届かない**: ステータスも、エラーの文面も、ヘッダーも、レコードも、レコードが読めなかったかどうかも。これらのエンドポイントの失敗はすべて、プロバイダーの障害の応答 `503 temporarily_unavailable` になる。何が起きたかは運用者のログ行と監査イベントにだけ届き、アダプターが投げる `MfaStoreError`（[`src/mfa/storeFailure.mts`](src/mfa/storeFailure.mts)）を通る。それは操作、エンドポイントのオリジンとパス、数値としてのステータス、そしてバージョンが飛んだとき・巻き戻ったときは主体と要素の ID — ログ行が切り詰めても両方が残るようにメッセージの先頭に置き、それぞれ core の `auditErrorText` を通して最大 64 文字 — から作られ、ボディやステータス文言やヘッダーからは決して作られない。ボディは読まずに解放され、HTTP 層が応答に使ったり表示したりする `status`・`statusCode`・`cause` を持たない。通信の失敗・期限・拒否された資格情報は、ユーザーリポジトリのエラーを投げる。`reason` は `unexpected_status`（表に無いステータス。`storeStatus` に入る）、`unknown_subject`（`markMfaEnrolledUrl` の `404`）、`malformed_answer`（表と違うボディの `2xx`）、`unreadable_record`（読めないレコードを含む一覧）、`version_skipped`（`expectedVersion + 1` 以外のバージョン）、`version_rolled_back`（一覧が、[バージョンの下限](#store-を使う要素ストア)の期間内にこのプロバイダーが書いたものより古いバージョンでレコードを返した: Store が書き込みを失ったか巻き戻した）。
+**呼び出しが失敗したとき、Store が送ったものは何一つクライアントに届かない**: ステータスも、エラーの文面も、ヘッダーも、レコードも、レコードが読めなかったかどうかも。これらのエンドポイントの失敗はすべて、プロバイダーの障害の応答 `503 temporarily_unavailable` になる。何が起きたかは運用者のログ行と監査イベントにだけ届き、アダプターが投げる `MfaStoreError`（[`src/mfa/storeFailure.mts`](src/mfa/storeFailure.mts)）を通る。それは操作、エンドポイントのオリジンとパス、数値としてのステータス、そしてバージョンが飛んだときは主体と要素の ID — ログ行が切り詰めても両方が残るようにメッセージの先頭に置き、それぞれ core の `auditErrorText` を通して最大 64 文字 — から作られ、ボディやステータス文言やヘッダーからは決して作られない。ボディは読まずに解放され、HTTP 層が応答に使ったり表示したりする `status`・`statusCode`・`cause` を持たない。通信の失敗・期限・拒否された資格情報は、ユーザーリポジトリのエラーを投げる。`reason` は `unexpected_status`（表に無いステータス。`storeStatus` に入る）、`unknown_subject`（`markMfaEnrolledUrl` の `404`）、`malformed_answer`（表と違うボディの `2xx`）、`unreadable_record`（読めないレコードを含む一覧）、`version_skipped`（`expectedVersion + 1` 以外のバージョン）。
 
 読めるレコードの `id`・`kind`・`label` は、設計としてクライアントに届く: MFA ADR のページがそれを表示する（アカウントページの要素一覧 F4、最初の紐付けで登録できる種類 F3）。届くのは読み手が保つ形のものだけなので、Store がそこに書いたそれ以外のものは届かない。
 
@@ -154,37 +155,36 @@ Store は主体の第二要素（MFA ADR の D7）と登録の証人（D12）を
 [`HttpMfaFactorStore`](src/mfa/HttpMfaFactorStore.mts) は要素の四つのエンドポイントの上の `MfaFactorStore`（`kind` は `"store"`）で、[`foundationMfaFactorStoreModule`](src/mfa/module.mts) がそれを組み込む:
 
 ```typescript
-import { redisReplaySeenSetModule } from "@o3co/auth-provider-redis";
 import { foundationMfaFactorStoreModule } from "@o3co/auth-provider-foundation";
 
 const modules = [
-  // ユーザーリポジトリの HTTP 設定を、組み立て側がユーザーリポジトリのビルダーに渡すのと同じように渡す。
-  foundationMfaFactorStoreModule({ userRepositoryHttp: config.repositories.user.http }),
-  redisReplaySeenSetModule, // バージョンの下限の seen-set。すべてのレプリカで共有する
+  // Store の通信設定: ユーザーリポジトリの HTTP 設定を、組み立て側がユーザーリポジトリのビルダーに渡すのと同じように渡す。
+  foundationMfaFactorStoreModule({ storeTransport: config.repositories.user.http }),
   // ...MFA パッケージのモジュール、トランザクションストア
 ];
 ```
 
 - モジュールは `mfaFactorStore` を、それを必要とするものがあってもなくても起動時に、先に読むセクションの四つの URL から作って提供する。
-- `replaySeenSet` を必須とし、そこにバージョンの下限を保つ。自分のセクション以外の設定は読まない。Store の資格情報・期限・レスポンス上限はユーザーリポジトリのものである: 組み立て側がユーザーリポジトリの HTTP 設定（`repositories.user.http`）を渡し、その `bearerToken`・`timeout`・`maxResponseBytes` を `"http"` ビルダーと同じように（文字列は数値として）読むので、一つのトークンが Store のすべてのエンドポイントに送られる。渡されなければ資格情報は送らず、期限と上限は 5000 ms と 1 MiB。通信が拒否する設定 — [コンストラクタでの検証](#コンストラクタでの検証)の規則 — は、`HttpMfaFactorStore` を名指して起動を拒否する（`provides-factory-failed`）。
-- レプリカで分岐する状態は宣言しない。渡す seen-set はすべてのレプリカが共有するものでなければならない: レプリカが二つ以上なら Redis のもの（プロセス内のものは `core.deployment.mode = "multi"` で拒否される）。
+- 必須とするスロットは無く、自分のセクション以外の設定は読まない。
+- `storeTransport` は必須である: Store の資格情報・期限・レスポンス上限はユーザーリポジトリのものなので、組み立て側がユーザーリポジトリの HTTP 設定（`repositories.user.http`）を渡す。その `bearerToken`・`timeout`・`maxResponseBytes` を `"http"` ビルダーと同じように（文字列は数値として）読むので、一つのトークンが Store のすべてのエンドポイントに送られる。`{}` は設定が無いことを示す: 資格情報は送らず、期限と上限は 5000 ms と 1 MiB。設定が渡されないとき、またはキーのセクションでないときは、資格情報を送らずに済ませるのではなく起動を拒否する。通信が拒否する設定 — [コンストラクタでの検証](#コンストラクタでの検証)の規則 — も、`HttpMfaFactorStore` を名指して起動を拒否する（`provides-factory-failed`）。
+- レプリカで分岐する状態は宣言しない: 要素は Store のものである。
 
 ポートには[契約](#store-の-mfa-エンドポイント)が各応答に与える意味で答え、それ以外はすべて throw する:
 
 | 操作 | Store の応答 | ポートが受け取るもの |
 | --- | --- | --- |
-| `list` | `200 { factors }` | すべてのレコードを丸ごと読んだもの。読めないレコード、別の主体のレコード、同じ ID の二つ目のレコードは `unreadable_record`、バージョンの下限が拒むレコードは `version_rolled_back` を throw。 |
+| `list` | `200 { factors }` | すべてのレコードを丸ごと読んだもの。読めないレコード、別の主体のレコード、同じ ID の二つ目のレコードは `unreadable_record` を throw。 |
 | `list` | 他のすべてのステータス（リダイレクトも） | `unexpected_status` を throw。決して「要素なし」ではない。 |
 | `create` | `2xx` / `409` / その他 | 完了 / 重複を拒否して throw / `unexpected_status` を throw。 |
-| `update` | `200 { factor }` | 名指したレコードで、送った変更を持ち、`expectedVersion + 1` であればそのレコード。そうでなければ `malformed_answer` か `version_skipped` を throw。 |
+| `update` | `200 { factor }` | 名指したレコードで、送った変更を持ち、`expectedVersion + 1` であればそのレコード。そうでなければ `malformed_answer` か `version_skipped` を throw。その `kind`・`binding`・`createdAtMs` は Store の言うとおりである: ポートは比べる元のレコードをアダプターに渡さない。`kind` は封印に結び付いているので、別の種類として返されたデータは開かない。 |
 | `update` | `409` または `404` / その他 | `null` / `unexpected_status` を throw。 |
 | `remove`・`removeAllForSubject` | `2xx` または `404` / その他 | 完了 / `unexpected_status` を throw。 |
 
 リクエストの前に、ワイヤの変換が読み戻せないレコードや更新 — base64url の 22 文字でない ID、形の外のラベル、`Number.MAX_SAFE_INTEGER` での更新 — は `RangeError` になり、何も送らない。渡された `data` はそのまま送る: 封印したのは MFA パッケージで、ここでは開かない。
 
-**バージョンの下限。** 書き込みを失ったり巻き戻したりする Store — 不具合、バックアップからの復元 — は要素の古いレコードを返し、その封印されたデータは当時のとおりに開く: 使用済みの TOTP のステップが窓の中で再び受け付けられ、使用済みのリカバリーコードが再び使える。レコードの中にそれを示すものは無い。そこでアダプターは Store の外、プロバイダーの `replaySeenSet` に下限を保つ（[`src/mfa/versionFloor.mts`](src/mfa/versionFloor.mts)）: 書かれたものとして応答した更新はそのバージョンを記録し、その後少なくとも 30 分 — どの TOTP コードが再び受け付けられうる時間よりも長い — は、そのレコードを他のバージョンで返す一覧は主体と要素の ID を名指して `version_rolled_back` を throw する。最後の書き込みから遅くとも 1 時間で、どのバージョンも再び受け入れる。時計のずれが 30 分未満のレプリカの間で成り立つ。印は seen-set のスコープ `mfa-factor-version-floor` の下に、主体と要素 ID の SHA-256 をキーとして保つ。seen-set が印を受け付けなければ更新は失敗し — Store では書かれていても、書かれたものとしては応答しない — 読めなければ一覧が失敗する。期間を過ぎれば下限は何も保たない: [Store が自分で守るべきこと](#store-が自分で守るべきこと)を参照。
+**要素は Store に任される。** アダプターは各応答を厳密に読むが、古いレコードと現在のもの、レコードの抜けた一覧と完全な一覧、削除されてから再び返された要素と一度も削除されていない要素を見分けられない: 要素の完全性と鮮度は Store の責任である（[Store が自分で守るべきこと](#store-が自分で守るべきこと)）。
 
-**Store を通して書かれる証人は無い。** `HttpUserRepository` は `markMfaEnrolled` を持たず、ユーザーリポジトリの設定に `markMfaEnrolledUrl` は無い: 要素を何が保持していても、プロバイダーは Store に登録の証人を書かず、`authenticate` で Store が返す `mfaEnrolled` をそのまま読む。そのとき、失われた要素一覧が最初の紐付けを開かないようにするのは Store 自身の耐久性である（MFA ADR の D12）。
+**Store を通して書かれる証人は無い。** `HttpUserRepository` は `markMfaEnrolled` を持たず、ユーザーリポジトリの設定に `markMfaEnrolledUrl` は無い: 要素を何が保持していても、プロバイダーは Store に登録の証人を書かず、`authenticate` で Store が返す `mfaEnrolled` をそのまま読む。書かれた証人が無いあいだ、主体の要素一覧を欠けなく保つのは Store だけである: 主体のレコードを落とした Store は、`mfa.mode = "optional"` ではパスワードだけのログインを通し、`required` ではパスワードを持つ誰にでも最初の紐付けを開く。それを止めるのが登録の証人である（MFA ADR の D12）。
 
 **契約に対するテスト。** [`@o3co/auth-provider-test-kit`](../test-kit/README.md) が、登録の証人の契約スイート、`MfaFactorStore` のスイート（`mfaFactorStoreContract`）、そしてこれらのエンドポイントに表のとおり — 指示すれば壊れた Store のように — 応答する偽の Store を持つ。このパッケージのテストは、要素ストアのスイートを偽の Store の上の `HttpMfaFactorStore` に対して、証人のスイートを `HttpUserRepository.authenticate` で証人を読み戻しながら走らせる。セクションのテスト用ビルダー `foundationMfaFactorStoreConfig` は `@o3co/auth-provider-foundation/testing` にある。
 
@@ -193,8 +193,7 @@ const modules = [
 - **誰が呼べるか。** `authenticateByToken` と紐付けが運ぶものは秘密ではない — フェデレーションのコールバックの `<provider>:<sub>` は識別子である — ので、誰にでも応答する Store では、`authenticateByTokenUrl` に届く者は誰でも既知の ID をそのユーザーに解決でき、開いた `linkFederatedIdentityUrl` に届く者は誰でも任意の ID を任意の `userId` に結びつけられる。MFA のエンドポイントも同じである: 開いた `deleteUrl` や `markMfaEnrolledUrl` に届く者は誰でも主体の要素を消し、証人を外せ、その主体の次のパスワードログインは、パスワードを持つ誰にでも最初の紐付けを開く。`bearerToken`（`CLIENT_USER_BEARER_TOKEN`、`openssl rand -hex 32` で生成）を設定し、Store は auth.provider に提供するすべてのエンドポイント — ユーザーリポジトリの四つも MFA のエンドポイントも — で、`Authorization` が `Bearer <そのトークン>` と正確に一致しない（定数時間で比較する）リクエストを拒否し、そのヘッダーをログに出さない。一つのトークンがそれらの URL すべてに送られるので、それらは一つの信頼境界でなければならない: どれか一つのエンドポイントを運用する者は、他のエンドポイントも受け付ける資格情報を持つことになる。拒否は `401` と `WWW-Authenticate: Bearer error="invalid_token"`（RFC 6750 §3）で返す — 有効だが足りないトークンなら `403` と `error="insufficient_scope"` で。このチャレンジがあれば、Store が受け付けないトークン — 打ち間違い、途中で止まったローテーション — はすべての呼び出しで障害になり、各呼び出し元はそれを下の表のとおり報告する。チャレンジが無ければ `401` や `403` はワイヤ上の意味 — 「ユーザーが居ない」またはリンクの拒否 — を保ち、不一致はすべてのログインの失敗としてしか現れない。同じ理由で、ユーザーのパスワード誤り、未知の ID、ポリシーが拒否するリンクに `Bearer` チャレンジを付けてはならない: その応答は Store が auth.provider を拒否したと読まれ、そのユーザーのログインやリンクの失敗が障害になる。ローテーションは、Store に古いトークンと新しいトークンの両方を受け付けさせ、auth.provider を新しいものに移し、それから古いものを廃止する。`bearerToken` が無ければどのリクエストも `Authorization` ヘッダーを持たないので、Store は別の方法で auth.provider だけを受け入れる: ネットワークポリシーやプライベートネットワーク、または Store の前段でプラットフォームが提供する相互 TLS（ループバックアドレス上のサイドカー。`http` の例外が受け付ける）で。このアダプター自身はクライアント証明書を提供しない: Node の `fetch` がそれを受け取るのは `undici` のディスパッチャー経由だけで、このパッケージはその依存を持たない。`user:password@` を含む URL は拒否される。
 - **URL に秘密を入れない。** クエリ文字列のトークンは秘密のままではいられない: すべてのリクエスト行に載り、Store 自身のアクセスログにも途中のプロキシにも届く。このアダプターが投げるエラー（セッションルートがログに出す）はエンドポイントをオリジンとパスだけで示し、クエリやフラグメントは決して示さないので、少なくともこのデプロイのログにはクエリは届かない。呼び出し元の資格情報は `bearerToken` に置く。このアダプターが投げるものはどれもそれを含まない。
 - **リダイレクトせずに応答する。** どのリクエストもリダイレクトを追わないので、パスワード、トークン、リンクのリクエスト、ID は設定された URL — 下の `https` の規則が検査する URL — にだけ届き、それ以外のどこからの応答もユーザー、リンク、照会の答えとして受け取られない。どのエンドポイントからの `3xx` も、他の想定外のステータスと同じく例外になる（セッションルートと jwt-bearer グラントは `503 temporarily_unavailable`、grants のコールバックは `temporarily_unavailable` を返す）ので、リダイレクトする URL — 正規のホストへリダイレクトするホストの別名、末尾スラッシュの付加、パスの移動 — の背後にある Store はすべての呼び出しで失敗する。各 URL には、リダイレクトするエンドポイントではなく応答するエンドポイントを設定する。
-
-- **認めた要素の書き込みを失わず、自分の書き込みを読む。** 認めた更新を失ったりバックアップを復元したりする Store は要素の古いレコードを返し、プロバイダーの封印されたデータは当時のとおりに開く: 使用済みの TOTP のステップ、使用済みのリカバリーコード、その後に削除された要素。[バージョンの下限](#store-を使う要素ストア)は、プロバイダーがそのレコードに最後に書いてから少なくとも 30 分はそのようなレコードを拒む。それを過ぎればプロバイダーは Store を信頼し、復元したバックアップはそれ以降に書かれた使用済みのリカバリーコードと削除された要素をすべて戻す。MFA ADR の O6 は本番を、Redis の要素と Store の証人の組み合わせへ導く。要素を Store に保持するのは、Store がそれをユーザーと同じだけ耐久的に保つ場合だけにする。一覧は最新の書き込みも返さなければならない: 遅れたレプリカから返した一覧は古いバージョンを返し、下限はそれを巻き戻しとして拒む。
+- **MFA の要素を欠けなく新しく保つ。** MFA の要素を保持する Store は、その完全性と鮮度に責任を持つ: 要素を巻き戻さず、一覧から隠さず、削除を認めたものを返さず、同じバージョンへの二つの更新を両方とも成功させない。バージョンは決して戻らず、認めた書き込みは復元やフェイルオーバーを挟んでも失われず、一覧は最新の書き込みを返す。それが破られてもプロバイダーには分からない: 古いレコードの封印されたデータは当時のとおりに開く — 封印が結び付けるのは主体・要素 ID・種類で、バージョンではない — ので、使用済みの TOTP のステップが窓の中で再び受け付けられ、使用済みのリカバリーコードが再び使え、削除した要素が戻る。主体のレコードを落とした Store は、`mfa.mode = "optional"` ではパスワードだけのログインを通し、`required` ではパスワードを持つ誰にでも最初の紐付けを開く。それを止めるのは要素ストアの外に保つ登録の証人である（MFA ADR の D12）。MFA ADR の O6 は、要素を Redis に、証人を Store に置くことを勧める。両方を一つの Store に置くとこの守りは失われる: 一方を落としたり巻き戻したりするものは、もう一方にも同じことができるからである。フェイルオーバーと復元の手順は運用ランブックの「Keeping MFA factors in the Store」にある。
 
 **拒否されたトークンが呼び出し元ごとにどう見えるか。** どの呼び出し元も `StoreCredentialRefusedError` を他の Store の障害 — `StoreTransportError` や `TimeoutError` も — と同じく扱い、違うのはログに出すものである:
 
@@ -250,12 +249,11 @@ const modules = [
 | [`wwwAuthenticate.test.mts`](src/repositories/__tests__/wwwAuthenticate.test.mts) | どの `WWW-Authenticate` の値が `Bearer` チャレンジを持つか、敵対的な 64 KiB の値を一度の走査で読むこと |
 | [`registerBuiltinAdapters.test.mts`](src/repositories/__tests__/registerBuiltinAdapters.test.mts) | `"http"` のビルダー、そのデフォルトと文字列の変換、組み立て時に拒否される設定 |
 | [`endpointUrl.test.mts`](src/__tests__/endpointUrl.test.mts) | https またはループバックの規則 |
-| [`storeFailure.test.mts`](src/mfa/__tests__/storeFailure.test.mts) | MFA エンドポイントの失敗が投げるもの: Store の書いたものがエラーのどの形にも届かないこと、ボディを読まずに解放すること、応答に使うステータスを持たないこと。飛んだ・巻き戻ったバージョンのログ行が、どれほど長くても主体と要素 ID を無害化し上限をつけて名指すこと |
-| [`section.test.mts`](src/mfa/__tests__/section.test.mts) | `foundation-mfa-factor-store` セクション: スキーマ、読み取り、パッケージのモジュールで `createApp` を通した欠落・不正・未知のキーでの起動拒否（ストアを必要とするものが無い構成も）、seen-set が無いときの起動拒否 |
-| [`module.test.mts`](src/mfa/__tests__/module.test.mts) | `createApp` を通した `foundationMfaFactorStoreModule`: セクションの URL の上に Store を使うストアを提供すること、渡されたユーザーリポジトリのベアラートークン・期限・上限（文字列は数値として読み、通信が拒否するものは起動を拒否）、下限を `replaySeenSet` スロットに保つこと、自分のセクション以外の設定を読まないこと |
+| [`storeFailure.test.mts`](src/mfa/__tests__/storeFailure.test.mts) | MFA エンドポイントの失敗が投げるもの: Store の書いたものがエラーのどの形にも届かないこと、ボディを読まずに解放すること、応答に使うステータスを持たないこと。飛んだバージョンのログ行が、どれほど長くても主体と要素 ID を無害化し上限をつけて名指すこと |
+| [`section.test.mts`](src/mfa/__tests__/section.test.mts) | `foundation-mfa-factor-store` セクション: スキーマ、読み取り、パッケージのモジュールで `createApp` を通した欠落・不正・未知のキーでの起動拒否（モジュールだけを入れた構成も） |
+| [`module.test.mts`](src/mfa/__tests__/module.test.mts) | `createApp` を通した `foundationMfaFactorStoreModule`: 他に何も入れずにセクションの URL の上に Store を使うストアを提供すること。Store の通信設定が必須であること、そこから読むユーザーリポジトリのベアラートークン・期限・上限（文字列は数値として読む）、設定が無いかキーのセクションでないとき、およびユーザーリポジトリも拒否する値のときの起動拒否 |
 | [`HttpMfaFactorStore.contract.test.mts`](src/mfa/__tests__/HttpMfaFactorStore.contract.test.mts) | テストキットの `MfaFactorStore` スイートを、偽の Store の上の `HttpMfaFactorStore` に対して走らせる |
-| [`HttpMfaFactorStore.test.mts`](src/mfa/__tests__/HttpMfaFactorStore.test.mts) | 送るもの — 設定どおりの各 URL、ベアラートークン、バイト単位でそのままの封印されたデータと、その封印元を何も送らないこと、変換が拒否するものを送らないこと。各操作の応答と、契約を破る Store: `404`、`5xx`、リダイレクト、壊れた応答、読めないレコード、別の主体、重複した ID、飛んだバージョン、変更を書かなかった応答、巻き戻ったバージョン。Store が送ったものが投げるものに何も現れないこと。拒否された資格情報、ヘッドまたはボディでの期限切れ、上限、届かない Store。構築 |
-| [`versionFloor.test.mts`](src/mfa/__tests__/versionFloor.test.mts) | バージョンの下限: 最後に書いたバージョンを受け入れ、それ以外を何回前の書き込みでも拒むこと。少なくとも期間のあいだ、長くとも期間の二倍まで、バケットの境界をまたいでも、時計のずれたレプリカの間でも。主体も要素 ID も名指さないキー。記録も応答もできない seen-set |
+| [`HttpMfaFactorStore.test.mts`](src/mfa/__tests__/HttpMfaFactorStore.test.mts) | 送るもの — 設定どおりの各 URL、ベアラートークン、バイト単位でそのままの封印されたデータと、その封印元を何も送らないこと、変換が拒否するものを送らないこと。各操作の応答と、契約を破る Store: `404`、`5xx`、リダイレクト、壊れた応答、読めないレコード、別の主体、重複した ID、飛んだバージョン、変更を書かなかった応答。Store が送ったものが投げるものに何も現れないこと。拒否された資格情報（このストアを名指す）、ヘッドまたはボディでの期限切れ、上限、届かない Store。構築と、ストアを検査したときにトークンもエンドポイントも見えないこと |
 | [`foundationMfaFactorStoreConfig.test.mts`](src/testing/__tests__/foundationMfaFactorStoreConfig.test.mts) | testing 入口のセクションのビルダー |
 | [`referenceConf.test.mts`](src/mfa/__tests__/referenceConf.test.mts) | パッケージの `reference.conf`: そのセクションだけを持ち、各 URL がそのパスから名付けた変数に既定値なしで結ばれること |
 | [`enrollmentWitness.contract.test.mts`](src/mfa/__tests__/enrollmentWitness.contract.test.mts) | テストキットの証人スイートを偽の Store に対して走らせ、`HttpUserRepository.authenticate` で読み戻す。`HttpUserRepository` が `markMfaEnrolled` を持たない間、書き込みはテストの代役が行う |
