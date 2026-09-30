@@ -22,12 +22,17 @@
  */
 
 import type { User, UserRepository } from "@o3co/auth-provider-core";
-import { describe, expect, it } from "vitest";
+import type { ContractCase as CoreContractCase } from "@o3co/auth-provider-core/testing";
+import { describe, expect, expectTypeOf, it } from "vitest";
 import {
+	type ContractCase,
 	type MfaEnrollmentWitnessHarness,
 	mfaEnrollmentWitnessContract,
 	startFakeStore,
 } from "#/index.mjs";
+
+const UNKNOWN_SUBJECT_CASE =
+	"a mark for a subject the backend does not hold throws, whether it marks true or false, and leaves every held witness as it was";
 
 const USERS = [
 	{ subject: "user-1", username: "alice", password: "alice-password" },
@@ -183,9 +188,33 @@ describe("the suite refuses a repository that breaks the contract", () => {
 				witness.set(subject, enrolled);
 			}),
 		);
-		expect(refused).toContain(
-			"a mark for a subject the backend does not hold throws, and marks nobody",
+		expect(refused).toContain(UNKNOWN_SUBJECT_CASE);
+	});
+
+	it("one that erases every witness when it refuses a subject it does not hold", async () => {
+		const refused = await refusedBy(() =>
+			inProcess(async (witness, subject, enrolled) => {
+				if (!USERS.some((user) => user.subject === subject)) {
+					witness.clear();
+					throw new Error("no such subject");
+				}
+				witness.set(subject, enrolled);
+			}),
 		);
+		expect(refused).toContain(UNKNOWN_SUBJECT_CASE);
+	});
+
+	it("one that marks every subject enrolled when it refuses a subject it does not hold", async () => {
+		const refused = await refusedBy(() =>
+			inProcess(async (witness, subject, enrolled) => {
+				if (!USERS.some((user) => user.subject === subject)) {
+					for (const user of USERS) witness.set(user.subject, true);
+					throw new Error("no such subject");
+				}
+				witness.set(subject, enrolled);
+			}),
+		);
+		expect(refused).toContain(UNKNOWN_SUBJECT_CASE);
 	});
 
 	it("one that ignores a clearing mark", async () => {
@@ -222,5 +251,13 @@ describe("the suite's cases", () => {
 			"a mark the backend cannot take throws; it never resolves as done",
 		);
 		expect(names(true).length).toBe(names(false).length + 1);
+	});
+
+	it("are core's ContractCase, which the kit re-exports", () => {
+		expectTypeOf<ContractCase>().toEqualTypeOf<CoreContractCase>();
+		expectTypeOf(
+			mfaEnrollmentWitnessContract({ build: async () => inProcess(), withOutage: false }),
+		).toEqualTypeOf<readonly ContractCase[]>();
+		expect(true).toBe(true);
 	});
 });

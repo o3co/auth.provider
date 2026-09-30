@@ -20,11 +20,14 @@
  * back through. Every record it holds is answered back, readable or not; an
  * update is a compare-and-set that writes the changes and nothing else of
  * the record, at the expected version plus one; the witness mark is `204`,
- * idempotent, and `404` for a subject it does not hold. Told to, it answers
- * an endpoint otherwise, so an adapter's reading of a Store that breaks the
- * contract can be tested.
+ * idempotent, and `404` for a subject it does not hold. It refuses a body
+ * not declared JSON, a request naming another host or an absolute target,
+ * and a body over 1 MiB, before it records the request. Told to, it answers
+ * an endpoint otherwise — later, or never — so an adapter's reading of a
+ * Store that breaks the contract can be tested.
  */
 
+import { request as httpRequest } from "node:http";
 import {
 	type MfaFactorRecord,
 	type MfaStoreFactor,
@@ -34,8 +37,13 @@ import {
 import { afterEach, describe, expect, it } from "vitest";
 import { type FakeStore, startFakeStore } from "#/index.mjs";
 
+/** Factor ids as the provider makes them: 16 random bytes, base64url. */
+const ID_1 = "u1PIlRkb_cy7UmjYUKaL_A";
+const ID_2 = "TO-Ylhtepgp2qoDTXRcOnQ";
+const ID_GONE = "f1G-RUIhmJ-Y4ZanyCo3KA";
+
 const RECORD: MfaFactorRecord = {
-	id: "factor-1",
+	id: ID_1,
 	subject: "user-1",
 	kind: "totp",
 	label: "Phone",
@@ -123,7 +131,7 @@ describe("list", () => {
 
 	it("answers back a record it holds whatever it is, one the provider cannot read included", async () => {
 		const fake = await start();
-		const unreadable = { ...WIRE, id: "factor-2", label: null, createdAtMs: "yesterday" };
+		const unreadable = { ...WIRE, id: ID_2, label: null, createdAtMs: "yesterday" };
 		fake.holdFactor("user-1", WIRE);
 		fake.holdFactor("user-1", unreadable);
 		expect((await post(fake.urls.listUrl, { subject: "user-1" })).body).toEqual({
@@ -145,7 +153,7 @@ describe("create", () => {
 		const fake = await start();
 		const bare = toMfaStoreFactor({
 			...RECORD,
-			id: "factor-2",
+			id: ID_2,
 			label: undefined,
 			binding: undefined,
 			lastUsedAt: undefined,
@@ -192,7 +200,7 @@ describe("update", () => {
 		fake.holdFactor("user-1", WIRE);
 		const answer = await post(
 			fake.urls.updateUrl,
-			toMfaStoreUpdateRequest("user-1", "factor-1", 1, next),
+			toMfaStoreUpdateRequest("user-1", ID_1, 1, next),
 		);
 		const written = {
 			...WIRE,
@@ -210,7 +218,7 @@ describe("update", () => {
 		fake.holdFactor("user-1", WIRE);
 		const answer = await post(
 			fake.urls.updateUrl,
-			toMfaStoreUpdateRequest("user-1", "factor-1", 1, {
+			toMfaStoreUpdateRequest("user-1", ID_1, 1, {
 				data: "v2.x",
 				label: undefined,
 				lastUsedAt: undefined,
@@ -224,15 +232,14 @@ describe("update", () => {
 		const fake = await start();
 		fake.holdFactor("user-1", WIRE);
 		for (const expectedVersion of [0, 2]) {
-			const moved = toMfaStoreUpdateRequest("user-1", "factor-1", expectedVersion, next);
+			const moved = toMfaStoreUpdateRequest("user-1", ID_1, expectedVersion, next);
 			expect((await post(fake.urls.updateUrl, moved)).status).toBe(409);
 		}
 		expect(
-			(await post(fake.urls.updateUrl, toMfaStoreUpdateRequest("user-2", "factor-1", 1, next)))
-				.status,
+			(await post(fake.urls.updateUrl, toMfaStoreUpdateRequest("user-2", ID_1, 1, next))).status,
 		).toBe(404);
 		expect(
-			(await post(fake.urls.updateUrl, toMfaStoreUpdateRequest("user-1", "gone", 1, next))).status,
+			(await post(fake.urls.updateUrl, toMfaStoreUpdateRequest("user-1", ID_GONE, 1, next))).status,
 		).toBe(404);
 		expect(fake.factors("user-1")).toStrictEqual([WIRE]);
 	});
@@ -240,7 +247,7 @@ describe("update", () => {
 	it("answers 400 to changes carrying a field a Store must not change, changing nothing", async () => {
 		const fake = await start();
 		fake.holdFactor("user-1", WIRE);
-		const request = toMfaStoreUpdateRequest("user-1", "factor-1", 1, next);
+		const request = toMfaStoreUpdateRequest("user-1", ID_1, 1, next);
 		for (const field of ["id", "subject", "kind", "binding", "createdAtMs", "version"]) {
 			const forged = { ...request, changes: { ...request.changes, [field]: "forged" } };
 			expect((await post(fake.urls.updateUrl, forged)).status, field).toBe(400);
@@ -261,7 +268,7 @@ describe("update", () => {
 			Array.from({ length: 10 }, (_, i) =>
 				post(
 					fake.urls.updateUrl,
-					toMfaStoreUpdateRequest("user-1", "factor-1", 1, { ...next, data: `v2.writer-${i}` }),
+					toMfaStoreUpdateRequest("user-1", ID_1, 1, { ...next, data: `v2.writer-${i}` }),
 				),
 			),
 		);
@@ -274,15 +281,11 @@ describe("delete", () => {
 	it("answers 204 for one record or every record of a subject, and 404 when it held none", async () => {
 		const fake = await start();
 		fake.holdFactor("user-1", WIRE);
-		fake.holdFactor("user-1", { ...WIRE, id: "factor-2" });
+		fake.holdFactor("user-1", { ...WIRE, id: ID_2 });
 		fake.holdFactor("user-2", WIRE);
-		expect((await post(fake.urls.deleteUrl, { subject: "user-1", id: "factor-1" })).status).toBe(
-			204,
-		);
-		expect((await post(fake.urls.deleteUrl, { subject: "user-1", id: "factor-1" })).status).toBe(
-			404,
-		);
-		expect(fake.factors("user-1")).toStrictEqual([{ ...WIRE, id: "factor-2" }]);
+		expect((await post(fake.urls.deleteUrl, { subject: "user-1", id: ID_1 })).status).toBe(204);
+		expect((await post(fake.urls.deleteUrl, { subject: "user-1", id: ID_1 })).status).toBe(404);
+		expect(fake.factors("user-1")).toStrictEqual([{ ...WIRE, id: ID_2 }]);
 		expect((await post(fake.urls.deleteUrl, { subject: "user-1", all: true })).status).toBe(204);
 		expect((await post(fake.urls.deleteUrl, { subject: "user-1", all: true })).status).toBe(404);
 		expect(fake.factors("user-1")).toEqual([]);
@@ -357,6 +360,80 @@ describe("markMfaEnrolled and the login it is read back through", () => {
 	});
 });
 
+/** A raw request to the fake Store, with the request line and headers as given. */
+function raw(
+	port: number,
+	options: {
+		readonly path: string;
+		readonly headers: Record<string, string>;
+		readonly body?: string;
+	},
+): Promise<number> {
+	return new Promise((resolve, reject) => {
+		const request = httpRequest(
+			{ host: "127.0.0.1", port, method: "POST", path: options.path, headers: options.headers },
+			(response) => {
+				response.resume();
+				resolve(response.statusCode ?? 0);
+			},
+		);
+		request.on("error", reject);
+		request.end(options.body ?? "{}");
+	});
+}
+
+describe("what the fake Store refuses before it reads a request", () => {
+	it("answers 415 to a body that is not declared JSON", async () => {
+		const { urls } = await start();
+		for (const type of ["text/plain", "application/x-www-form-urlencoded", "application/jsonx"]) {
+			const response = await fetch(urls.markMfaEnrolledUrl, {
+				method: "POST",
+				headers: { "Content-Type": type },
+				body: JSON.stringify({ subject: "user-1", enrolled: true }),
+			});
+			expect(response.status, type).toBe(415);
+		}
+		const declared = await fetch(urls.listUrl, {
+			method: "POST",
+			headers: { "Content-Type": "Application/JSON; charset=utf-8" },
+			body: JSON.stringify({ subject: "user-1" }),
+		});
+		expect(declared.status).toBe(200);
+	});
+
+	it("answers 421 to a request naming another host, and 400 to an absolute or odd request target", async () => {
+		const fake = await start();
+		const { port } = new URL(fake.urls.listUrl);
+		const json = { "Content-Type": "application/json" };
+		expect(
+			await raw(Number(port), {
+				path: "/mfa/factors/list",
+				headers: { ...json, Host: "rebind.attacker.example" },
+			}),
+		).toBe(421);
+		expect(
+			await raw(Number(port), {
+				path: "http://other.example/mfa/factors/list",
+				headers: { ...json, Host: `127.0.0.1:${port}` },
+			}),
+		).toBe(400);
+		expect(
+			await raw(Number(port), { path: "//", headers: { ...json, Host: `127.0.0.1:${port}` } }),
+		).toBe(400);
+		expect(fake.requests).toEqual([]);
+	});
+
+	it("answers 413 to a body over 1 MiB, holding none of it", async () => {
+		const fake = await start();
+		const answer = await post(fake.urls.listUrl, {
+			subject: "user-1",
+			pad: "x".repeat(1024 * 1024),
+		});
+		expect(answer.status).toBe(413);
+		expect(fake.requests).toEqual([]);
+	});
+});
+
 describe("the fake Store's credential", () => {
 	it("with a bearer token, answers 401 with a Bearer challenge to a request without it, and serves one with it", async () => {
 		const token = "0328d706529061d93abd6d826e09ef0f0a1e71a12af813b29e5cd2977b7dc63a";
@@ -401,7 +478,7 @@ describe("what the fake Store records and how it can be told to answer", () => {
 			headers: { "Content-Type": "application/json" },
 			body: JSON.stringify({ factor: skipped }),
 		}));
-		const request = toMfaStoreUpdateRequest("user-1", "factor-1", 1, { ...RECORD });
+		const request = toMfaStoreUpdateRequest("user-1", ID_1, 1, { ...RECORD });
 		expect(await post(fake.urls.updateUrl, request)).toMatchObject({
 			status: 200,
 			body: { factor: skipped },
@@ -411,6 +488,24 @@ describe("what the fake Store records and how it can be told to answer", () => {
 		expect((await post(fake.urls.updateUrl, request)).body).toMatchObject({
 			factor: { version: 2 },
 		});
+	});
+
+	it("serves an answer it is told to give later once it comes, and holds a request it is never told to answer", async () => {
+		const fake = await start();
+		fake.answer("list", async () => {
+			await new Promise((resolve) => setTimeout(resolve, 50));
+			return { status: 503 };
+		});
+		expect((await post(fake.urls.listUrl, { subject: "user-1" })).status).toBe(503);
+		fake.answer("list", () => new Promise(() => {}));
+		await expect(
+			fetch(fake.urls.listUrl, {
+				method: "POST",
+				headers: { "Content-Type": "application/json" },
+				body: JSON.stringify({ subject: "user-1" }),
+				signal: AbortSignal.timeout(200),
+			}),
+		).rejects.toMatchObject({ name: "TimeoutError" });
 	});
 
 	it("falls back to the contract when the answer it was told gives none for a request", async () => {
