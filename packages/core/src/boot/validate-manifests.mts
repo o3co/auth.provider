@@ -2489,6 +2489,10 @@ function renameOf(
 				"an old variable name is a letter or underscore followed by letters, digits and underscores",
 		};
 	}
+	// A capture is a key of a plain object; `__proto__` cannot be one of its own.
+	if (from === "__proto__") {
+		return { problem: "an old variable name is not __proto__, which no capture can hold" };
+	}
 	if (!isKeyPath(oldPath)) {
 		return { problem: "its old path is a dot-separated path of non-empty keys" };
 	}
