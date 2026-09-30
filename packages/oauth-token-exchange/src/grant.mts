@@ -291,9 +291,11 @@ async function applyGrantPolicy(
 			// that is empty or not a string is not sent — RFC 6749 A.8 makes
 			// the field 1*NQSCHAR — and the default is.
 			const description = decision.errorDescription;
+			// `400` whatever the code (RFC 6749 §5.2), as core's
+			// `evaluateGrantPolicy` answers the other grants' deny.
 			return {
 				result: {
-					status: error === "access_denied" ? 403 : 400,
+					status: 400,
 					error,
 					errorDescription: (typeof description === "string" && description) || "denied by policy",
 				},
