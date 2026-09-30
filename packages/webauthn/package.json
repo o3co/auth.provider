@@ -51,8 +51,6 @@
 	},
 	"devDependencies": {
 		"@o3co/auth-provider-core": "workspace:*",
-		"@o3co/auth-provider-mfa": "workspace:*",
-		"@o3co/auth-provider-session": "workspace:*",
 		"@o3co/auth-provider-test-kit": "workspace:*",
 		"@o3co/ts.hocon": "^1.13.0",
 		"@types/express": "^5.0.6",

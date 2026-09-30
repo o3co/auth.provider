@@ -15,40 +15,197 @@
  */
 
 /**
- * WebAuthn as a second factor through `createApp`, a seeded factor asserted
- * by a software passkey after a password login (the MFA ADR's F1, F7, D14,
- * D21, D28): the challenge lists every WebAuthn factor of the subject and is
- * kept on the transaction; a verification takes it, finds the credential by
- * its id, and writes the new sign count by compare-and-set; a lost
- * compare-and-set reads the factor again and checks the assertion again; a
- * counter that did not increase is refused and audited; and the factor
- * completes a login while the subject's guessable proofs are held.
+ * WebAuthn as a second factor through the full set's boot (the template's
+ * composition with every package added, `mfa.mode = "required"`, the
+ * WebAuthn factor on): a seeded factor asserted by a software passkey after a
+ * password login (the MFA ADR's F1, F7, D14, D28). The challenge lists every
+ * WebAuthn factor of the subject and is kept on the transaction; a
+ * verification takes it, finds the credential by its id, and writes the new
+ * sign count by compare-and-set; a lost compare-and-set reads the factor
+ * again and checks the assertion again; a counter that did not increase is
+ * refused and audited.
  */
 
-import {
-	createMemoryMfaFactorStore,
-	createMemoryMfaTransactionStore,
-	type MfaFactorStore,
-	type UserSessionStore,
+import type {
+	AppConfig,
+	AuditEvent,
+	AuditSink,
+	MfaFactorData,
+	MfaFactorRecord,
+	MfaFactorStore,
+	MfaTransactionStore,
+	UserSessionStore,
 } from "@o3co/auth-provider-core";
-import { sealMfaFactorDataForTests, seedTotpFactor } from "@o3co/auth-provider-mfa/testing";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { createMemoryMfaFactorStore } from "@o3co/auth-provider-core";
 import {
-	ALICE,
-	beginLogin,
-	boot,
-	CONFIG,
-	challenge,
-	disposeAll,
-	LOCKOUT,
-	passkeyFor,
-	seedPasskey,
-	storedFactor,
-	USER_HANDLE,
-	verify,
-} from "./mfaComposition.mjs";
+	mfaConfigForTests,
+	openMfaFactorDataForTests,
+	sealMfaFactorDataForTests,
+	seedMfaFactor,
+	seedTotpFactor,
+} from "@o3co/auth-provider-mfa/testing";
+import {
+	ISSUER,
+	ALICE as TEMPLATE_ALICE,
+} from "@o3co/auth-provider-standalone/src/__tests__/all-modules-composition.fixture.mts";
+import { webauthnMfaFactorConfigForTests } from "@o3co/auth-provider-webauthn/testing";
+import type { Express } from "express";
+import type request from "supertest";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { browser, composeFullSet, type FullSet, MFA_KEY } from "./full-set.fixture.mts";
+import { type SoftwarePasskey, softwarePasskey } from "./software-passkey.mts";
 
-afterEach(disposeAll);
+// ---------------------------------------------------------------------------
+// The composition
+// ---------------------------------------------------------------------------
+
+/** The template's user, by the subject her factors are kept under. */
+const ALICE = { ...TEMPLATE_ALICE, id: TEMPLATE_ALICE.sub };
+
+/** The MFA section the boot runs on: its key ring seals what is seeded. */
+const CONFIG = mfaConfigForTests({ key: MFA_KEY, mode: "required" });
+
+/** An audit sink that keeps what it is handed. */
+interface RecordingAuditSink extends AuditSink {
+	/** The events of `type`, oldest first. */
+	of(type: string): AuditEvent[];
+}
+
+function recordingAuditSink(): RecordingAuditSink {
+	const events: AuditEvent[] = [];
+	return {
+		kind: "recording",
+		of: (type) => events.filter((event) => event.type === type),
+		async record(event) {
+			events.push(event);
+		},
+	};
+}
+
+let current: FullSet | undefined;
+
+afterEach(async () => {
+	await current?.handle.dispose();
+	current = undefined;
+});
+
+/**
+ * Boots the full set with MFA required and the WebAuthn factor on, over the
+ * factor store given (core's memory store by default) and a recording audit
+ * sink.
+ */
+async function boot(stores: { readonly factorStore?: MfaFactorStore } = {}): Promise<{
+	readonly app: Express;
+	readonly audit: RecordingAuditSink;
+	readonly factorStore: MfaFactorStore;
+	readonly transactionStore: MfaTransactionStore;
+	readonly userSessionStore: UserSessionStore;
+}> {
+	const factorStore = stores.factorStore ?? createMemoryMfaFactorStore();
+	const audit = recordingAuditSink();
+	current = await composeFullSet({
+		adjust: (config) =>
+			({
+				...config,
+				...CONFIG,
+				...webauthnMfaFactorConfigForTests({ enabled: true }),
+			}) as AppConfig,
+		extraOverrides: () => ({ mfaFactorStore: factorStore, auditSink: audit }),
+	});
+	const { mfaTransactionStore, userSessionStore } = current.handle.components as unknown as {
+		readonly mfaTransactionStore: MfaTransactionStore;
+		readonly userSessionStore: UserSessionStore;
+	};
+	return {
+		app: current.app,
+		audit,
+		factorStore,
+		transactionStore: mfaTransactionStore,
+		userSessionStore,
+	};
+}
+
+/** A software passkey for the full set's relying party (`auth.test`, the issuer's origin). */
+const passkeyFor = (
+	options: { readonly backedUp?: boolean; readonly counter?: number | "none" } = {},
+): SoftwarePasskey => softwarePasskey({ rpId: "auth.test", origin: ISSUER, ...options });
+
+/** alice's WebAuthn user handle, which every seeded factor carries. */
+const USER_HANDLE = Buffer.from(crypto.getRandomValues(new Uint8Array(32))).toString("base64url");
+
+/** Seeds `passkey` as one of alice's WebAuthn factors, its data sealed under the boot's key ring, at `signCount`. */
+function seedPasskey(
+	factorStore: MfaFactorStore,
+	passkey: SoftwarePasskey,
+	signCount: number = passkey.counter,
+): Promise<MfaFactorRecord> {
+	return seedMfaFactor({
+		config: CONFIG,
+		factorStore,
+		subject: ALICE.id,
+		kind: "webauthn",
+		data: {
+			credentialId: passkey.credentialId,
+			publicKey: Buffer.from(passkey.publicKey).toString("base64url"),
+			signCount,
+			transports: ["internal"],
+			backedUp: passkey.backedUp,
+			userHandle: USER_HANDLE,
+		},
+	});
+}
+
+/** The record and its opened data, as the factor store now holds them. */
+async function storedFactor(
+	factorStore: MfaFactorStore,
+	record: Pick<MfaFactorRecord, "subject" | "id">,
+): Promise<{ readonly record: MfaFactorRecord; readonly data: MfaFactorData }> {
+	const stored = (await factorStore.list(record.subject)).find((entry) => entry.id === record.id);
+	if (stored === undefined) throw new Error("the factor is gone");
+	return { record: stored, data: openMfaFactorDataForTests(CONFIG, stored) };
+}
+
+/** A browser on `app`: the full set's cookie jar, a fresh CSRF token on every POST. */
+interface Page {
+	get(path: string, headers?: Record<string, string>): Promise<request.Response>;
+	post(path: string, body: Record<string, unknown>): Promise<request.Response>;
+}
+
+/** alice's password login, answered 403 mfa_required: the browser holding the regenerated session, and the transaction. */
+async function beginLogin(
+	app: Express,
+): Promise<{ readonly browser: Page; readonly transaction: string }> {
+	const jar = browser();
+	const page: Page = {
+		get: (path, headers = {}) => jar.get(app, path, headers),
+		post: (path, body) => jar.post(app, path, body),
+	};
+	const res = await page.post("/session/login", {
+		username: ALICE.username,
+		password: ALICE.password,
+	});
+	if (res.status !== 403 || res.body.error !== "mfa_required") {
+		throw new Error(`the login answered ${res.status} ${JSON.stringify(res.body)}`);
+	}
+	return { browser: page, transaction: res.body.transaction as string };
+}
+
+/** `POST /session/mfa/challenge` for `factorId`: the request options it answers. */
+const challenge = (page: Page, transaction: string, factorId: string): Promise<request.Response> =>
+	page.post("/session/mfa/challenge", { transaction_id: transaction, factor_id: factorId });
+
+/** `POST /session/mfa/verify` of `proof` for `factorId`. */
+const verify = (
+	page: Page,
+	transaction: string,
+	factorId: string,
+	proof: unknown,
+): Promise<request.Response> =>
+	page.post("/session/mfa/verify", { transaction_id: transaction, factor_id: factorId, proof });
+
+// ---------------------------------------------------------------------------
+// Flows
+// ---------------------------------------------------------------------------
 
 const NOT_ACCEPTED = {
 	error: "mfa_invalid",
@@ -63,7 +220,7 @@ describe("a WebAuthn login", () => {
 		const record = await seedPasskey(factorStore, passkey);
 		const second = await seedPasskey(factorStore, other);
 		const { app, audit, transactionStore, userSessionStore } = await boot({ factorStore });
-		const create = vi.spyOn(userSessionStore as UserSessionStore, "create");
+		const create = vi.spyOn(userSessionStore, "create");
 		const { browser, transaction } = await beginLogin(app);
 
 		const read = await browser.get("/session/mfa/transaction", { "MFA-Transaction": transaction });
@@ -73,7 +230,7 @@ describe("a WebAuthn login", () => {
 		]);
 		const options = await challenge(browser, transaction, record.id);
 		expect(options.status).toBe(200);
-		expect(options.body.rpId).toBe("test.example");
+		expect(options.body.rpId).toBe("auth.test");
 		expect(options.body.allowCredentials.map((c: { id: string }) => c.id).sort()).toEqual(
 			[passkey.credentialId, other.credentialId].sort(),
 		);
@@ -110,7 +267,7 @@ describe("a WebAuthn login", () => {
 		const passkey = passkeyFor({ backedUp: true, counter: "none" });
 		const record = await seedPasskey(factorStore, passkey);
 		const { app, userSessionStore } = await boot({ factorStore });
-		const create = vi.spyOn(userSessionStore as UserSessionStore, "create");
+		const create = vi.spyOn(userSessionStore, "create");
 		const { browser, transaction } = await beginLogin(app);
 		const options = await challenge(browser, transaction, record.id);
 
@@ -250,7 +407,7 @@ describe("the sign count", () => {
 		const passkey = passkeyFor({ counter: 3 });
 		const record = await seedPasskey(factorStore, passkey, 10);
 		const { app, audit, userSessionStore } = await boot({ factorStore });
-		const create = vi.spyOn(userSessionStore as UserSessionStore, "create");
+		const create = vi.spyOn(userSessionStore, "create");
 		const { browser, transaction } = await beginLogin(app);
 		const options = await challenge(browser, transaction, record.id);
 
@@ -306,7 +463,7 @@ describe("the sign count", () => {
 		const record = await seedPasskey(factorStore, passkey);
 		const losing = losingFirstUpdate(factorStore, (data) => ({ ...data, signCount: 6 }));
 		const { app, audit, userSessionStore } = await boot({ factorStore: losing.store });
-		const create = vi.spyOn(userSessionStore as UserSessionStore, "create");
+		const create = vi.spyOn(userSessionStore, "create");
 		const { browser, transaction } = await beginLogin(app);
 		const options = await challenge(browser, transaction, record.id);
 
@@ -329,27 +486,13 @@ describe("the sign count", () => {
 });
 
 describe("beside TOTP", () => {
-	it("completes a login while alice's guessable proofs are held", async () => {
+	it("WebAuthn completes a login for a subject that also holds TOTP, recording hwk and leaving the TOTP factor as it was", async () => {
 		const factorStore = createMemoryMfaFactorStore();
-		const transactionStore = createMemoryMfaTransactionStore();
-		await seedTotpFactor({ config: CONFIG, factorStore, subject: ALICE.id });
+		const totp = await seedTotpFactor({ config: CONFIG, factorStore, subject: ALICE.id });
 		const passkey = passkeyFor();
 		const record = await seedPasskey(factorStore, passkey);
-		// Failures until the subject lock holds guessable proofs.
-		for (;;) {
-			const reserved = await transactionStore.reserveSubjectAttempt(
-				ALICE.id,
-				Date.now(),
-				LOCKOUT,
-				undefined,
-			);
-			if (!reserved.ok) break;
-			await transactionStore.settleSubjectAttempt(ALICE.id, reserved.reservation, "failure");
-		}
-		expect(
-			await transactionStore.reserveSubjectAttempt(ALICE.id, Date.now(), LOCKOUT, undefined),
-		).toMatchObject({ ok: false, hold: "backoff" });
-		const { app } = await boot({ factorStore, transactionStore });
+		const { app, userSessionStore } = await boot({ factorStore });
+		const create = vi.spyOn(userSessionStore, "create");
 		const { browser, transaction } = await beginLogin(app);
 		const options = await challenge(browser, transaction, record.id);
 
@@ -361,5 +504,7 @@ describe("beside TOTP", () => {
 		);
 
 		expect(res.status, JSON.stringify(res.body)).toBe(200);
+		expect(create.mock.calls[0]?.[0]).toMatchObject({ amr: ["pwd", "hwk", "mfa"] });
+		expect((await storedFactor(factorStore, totp.record)).record.version).toBe(0);
 	});
 });

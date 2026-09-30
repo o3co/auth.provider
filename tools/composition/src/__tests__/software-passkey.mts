@@ -15,10 +15,10 @@
  */
 
 /**
- * A software passkey for the composed tests: a P-256 key whose public half
- * is kept as the WebAuthn factor keeps one (COSE, base64url), and assertions
- * signed as an authenticator signs them — authenticator data (the RP id's
- * hash, the flags, the counter) and the client data's hash, ECDSA over
+ * A software passkey: a P-256 key whose public half is kept as a WebAuthn
+ * store keeps one (COSE), and assertions over a challenge the provider
+ * issued, signed as an authenticator signs them — authenticator data (the RP
+ * id's hash, the flags, the counter) and the client data's hash, ECDSA over
  * SHA-256, DER. Not a test file.
  */
 
@@ -30,13 +30,17 @@ const b64url = (bytes: Uint8Array): string => Buffer.from(bytes).toString("base6
 const FLAGS = { device: 0x05, synced: 0x1d } as const;
 
 export interface SoftwarePasskey {
+	/** Its credential id, base64url. */
 	readonly credentialId: string;
-	/** The COSE public key, base64url. */
-	readonly publicKey: string;
+	/** The COSE public key. */
+	readonly publicKey: Uint8Array;
 	readonly backedUp: boolean;
-	/** The counter the next assertion carries, once incremented; one that keeps none stays at 0. */
+	/** The counter the last assertion carried; each assertion increments it first, unless the passkey keeps none. */
 	counter: number;
-	/** An assertion over `challenge`; `tampered` signs other client data than it sends. */
+	/**
+	 * An assertion over `challenge`. `tampered` signs other client data than
+	 * it sends; `userHandle` is carried when given.
+	 */
 	assert(
 		challenge: string,
 		options?: { readonly tampered?: boolean; readonly userHandle?: string },
@@ -46,6 +50,7 @@ export interface SoftwarePasskey {
 export function softwarePasskey(options: {
 	readonly rpId: string;
 	readonly origin: string;
+	/** Backed up — a synced passkey — rather than bound to one device. */
 	readonly backedUp?: boolean;
 	/** The counter before the first assertion; `"none"` for an authenticator that keeps none. */
 	readonly counter?: number | "none";
@@ -63,7 +68,7 @@ export function softwarePasskey(options: {
 	const backedUp = options.backedUp === true;
 	const passkey: SoftwarePasskey = {
 		credentialId: b64url(randomBytes(16)),
-		publicKey: b64url(cose),
+		publicKey: new Uint8Array(cose),
 		backedUp,
 		counter: options.counter === "none" ? 0 : (options.counter ?? 0),
 		assert(challenge, assertOptions = {}) {

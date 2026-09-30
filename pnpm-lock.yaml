@@ -628,12 +628,6 @@ importers:
       '@o3co/auth-provider-core':
         specifier: workspace:*
         version: link:../core
-      '@o3co/auth-provider-mfa':
-        specifier: workspace:*
-        version: link:../mfa
-      '@o3co/auth-provider-session':
-        specifier: workspace:*
-        version: link:../session
       '@o3co/auth-provider-test-kit':
         specifier: workspace:*
         version: link:../test-kit

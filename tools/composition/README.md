@@ -44,6 +44,12 @@ another's body limit, or a memory store booting under `core.deployment.mode =
   sits behind the session's CSRF guard, projects every error it logs, and
   answers a `RangeError` from `resumePrimary` — a continuation naming a
   requirement a deploy removed, say — as "log in again".
+- **WebAuthn as a second factor**, with `mfa.mode = "required"` and the
+  WebAuthn factor's module on: a password login completed by a software
+  passkey's assertion, its challenge kept on the transaction and taken once,
+  its sign count written by compare-and-set, a lost compare-and-set checked
+  again, and a counter that did not increase refused and audited
+  ([`webauthn-mfa-factor.test.mts`](src/__tests__/webauthn-mfa-factor.test.mts)).
 - **The budget in force for each prefix a package owns, on both bundled
   limiters.** `login`, `device_verification`,
   `webauthn-authentication-options` and `mfa` — each the budget its owning
@@ -88,14 +94,13 @@ package is added to `packages/` without being added here.
 
 ## Known gaps
 
-- **No WebAuthn ceremony.** The WebAuthn grant is advertised and its three
-  routes are mounted, but the suite runs only the options routes
-  (authentication, and registration through the deployment's subject bridge).
-  A registration or an authentication needs an authenticator's signed
-  response, and the repository has no software authenticator: the WebAuthn
-  package's own ceremony tests mock the verification. A helper that produces a
-  real `none`-attestation credential and assertion would let one registration
-  and one authentication run through the composed app.
+- **No WebAuthn registration.** Assertions run through the composed app —
+  a passkey sign-in through the grant, and the second factor's — signed by a
+  software passkey ([`software-passkey.mts`](src/__tests__/software-passkey.mts)),
+  over a credential seeded in its store. A registration needs an attestation,
+  which the helper does not produce: the WebAuthn package's own ceremony tests
+  mock the verification. A `none`-attestation credential from the helper
+  would let one registration run through the composed app.
 - **No mTLS outage.** In `self-signed` mode the mechanism reads no store; the
   `full-pki` revocation outage needs a CRL distribution point or an OCSP
   responder, which the mTLS package tests against its own fakes.
