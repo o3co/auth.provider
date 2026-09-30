@@ -41,7 +41,6 @@ import type {
 	SessionRequirementResolver,
 	StepUpPage,
 } from "#/session-admission/requirement.mjs";
-import { ADMISSION_ACTIONS } from "#/session-admission/requirement.mjs";
 import {
 	MERGE_ACR,
 	MERGE_ACR_TABLE,
@@ -52,6 +51,7 @@ import {
 } from "#/session-admission/testing/merge.rows.mjs";
 import { resolverForTests } from "#/session-admission/testing/resolver.mjs";
 import type { UserSession, UserSessionStore } from "#/user-sessions/types.mjs";
+import { TEST_ACTIONS } from "./actions.fixture.mjs";
 
 const { MFA, PHR, KBA } = MERGE_ACR;
 
@@ -133,7 +133,10 @@ const depsOver = (
  * boot holds a registration to are lifted, the snapshot kept.
  */
 const deps = (session: UserSession | null, requirements: SessionRequirement[]): AdmissionDeps =>
-	depsOver(session, resolverForTests(requirements, { allowAnyReach: true, issuer: ISSUER }));
+	depsOver(
+		session,
+		resolverForTests(requirements, { allowAnyReach: true, issuer: ISSUER, actions: TEST_ACTIONS }),
+	);
 
 /**
  * One row, decided by the stand-in registered as boot registers it (the
@@ -143,13 +146,14 @@ const deps = (session: UserSession | null, requirements: SessionRequirement[]): 
 const decide = async (row: MergeRow): Promise<{ admission: Admission; expected: Admission }> => {
 	const requirements = resolverForTests([authority(row.mode, MERGE_REACH[row.factors])], {
 		issuer: ISSUER,
+		actions: TEST_ACTIONS,
 	});
 	const registered = requirements.get(AUTHORITY);
 	if (registered === undefined) throw new Error("the stand-in did not register");
 	return {
 		admission: await admitSession(depsOver(row.session, requirements), {
 			claim: claim(),
-			action: ADMISSION_ACTIONS["oauth.authorize"],
+			action: "test.use",
 			asks: { acrValues: row.acrValues ?? [] },
 		}),
 		expected: mergeAdmission(row.expected, row.session, registered),
@@ -172,6 +176,7 @@ describe("mergeAdmission — the rows are the declared authority's", () => {
 	it("maps a row onto the registered authority's name and page", () => {
 		const registered = resolverForTests([authority("required", MERGE_REACH.installed)], {
 			issuer: ISSUER,
+			actions: TEST_ACTIONS,
 		}).get(AUTHORITY);
 		expect(mergeAdmission(decision, session, registered as never)).toMatchObject({
 			outcome: "step_up",
@@ -192,7 +197,7 @@ describe("mergeAdmission — the rows are the declared authority's", () => {
 						remediations: [],
 					},
 				],
-				{ issuer: ISSUER },
+				{ issuer: ISSUER, actions: TEST_ACTIONS },
 			).get(name);
 			expect(() => mergeAdmission(decision, session, plain as never), name).toThrow(
 				/does not declare the second-factor authority/,
@@ -236,13 +241,14 @@ describe("mergeAdmission — the rows are the declared authority's", () => {
 					remediations: [],
 				},
 			],
-			{ issuer: ISSUER, allowAnyReach: true },
+			{ issuer: ISSUER, allowAnyReach: true, actions: TEST_ACTIONS },
 		).get(AUTHORITY);
 		expect(() => mergeAdmission(decision, session, pageless as never)).toThrow(
 			/registered no step-up page/,
 		);
 		const registered = resolverForTests([authority("required", MERGE_REACH.installed)], {
 			issuer: ISSUER,
+			actions: TEST_ACTIONS,
 		}).get(AUTHORITY);
 		expect(() => mergeAdmission(decision, null, registered as never)).toThrow(
 			/a step-up needs a session/,
@@ -275,7 +281,7 @@ describe("the merge — the rows the MFA table does not reach", () => {
 	const ask = (requirements: SessionRequirement[], acrValues: readonly string[]) =>
 		admitSession(deps(session, requirements), {
 			claim: claim(),
-			action: ADMISSION_ACTIONS["oauth.authorize"],
+			action: "test.use",
 			asks: { acrValues },
 		});
 
@@ -320,7 +326,7 @@ describe("the merge — the rows the MFA table does not reach", () => {
 			{ ...deps(session, [reaching("a", ["hwk"]), reaching("b", ["swk"])]), acrTable: table },
 			{
 				claim: claim(),
-				action: ADMISSION_ACTIONS["oauth.authorize"],
+				action: "test.use",
 				asks: { acrValues: ["urn:example:both"] },
 			},
 		);
@@ -402,7 +408,7 @@ describe("the merge — the rows the MFA table does not reach", () => {
 		};
 		const admission = await admitSession(deps(null, [stepping]), {
 			claim: claim(),
-			action: ADMISSION_ACTIONS["oauth.authorize"],
+			action: "test.use",
 		});
 		expect(admission).toEqual({ outcome: "reauthenticate", requirement: "first", session: null });
 	});

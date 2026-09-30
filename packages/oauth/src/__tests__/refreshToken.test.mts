@@ -30,6 +30,7 @@ import { resolverForTests } from "@o3co/auth-provider-core/testing";
 import { decodeJwt, SignJWT } from "jose";
 import { describe, expect, it, vi } from "vitest";
 import { createRefreshTokenGrant, type RefreshTokenGrantDeps } from "#/grants/refreshToken.mjs";
+import { OAUTH_ADMISSION_ACTIONS } from "./_helpers/admissionActions.mjs";
 
 // Vitest mock-shaped Logger that satisfies the interface; tests pass a fresh
 // `vi.fn()` for `warn` and inspect its calls. Other levels are vi.fn() so
@@ -74,7 +75,7 @@ const mockConfig = {
 const mockDeps: RefreshTokenGrantDeps = {
 	config: mockConfig,
 	keyStore,
-	sessionRequirementResolver: resolverForTests([]),
+	sessionRequirementResolver: resolverForTests([], { actions: OAUTH_ADMISSION_ACTIONS }),
 };
 
 // Every test that hits the client-binding gate must supply both an `aud`
@@ -1197,7 +1198,7 @@ describe("createRefreshTokenGrant", () => {
 			const warn = vi.fn();
 			const logger = makeStubLogger(warn);
 			const deps: RefreshTokenGrantDeps = {
-				sessionRequirementResolver: resolverForTests([]),
+				sessionRequirementResolver: resolverForTests([], { actions: OAUTH_ADMISSION_ACTIONS }),
 				config: configWithUnknownPolicy("accept"),
 				keyStore: mockDeps.keyStore,
 				refreshTokenFamilyRotation: unknownFamilyRotation,
@@ -1221,7 +1222,7 @@ describe("createRefreshTokenGrant", () => {
 			const warn = vi.fn();
 			const logger = makeStubLogger(warn);
 			const deps: RefreshTokenGrantDeps = {
-				sessionRequirementResolver: resolverForTests([]),
+				sessionRequirementResolver: resolverForTests([], { actions: OAUTH_ADMISSION_ACTIONS }),
 				config: configWithUnknownPolicy("reject"),
 				keyStore: mockDeps.keyStore,
 				refreshTokenFamilyRotation: unknownFamilyRotation,

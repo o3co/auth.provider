@@ -42,6 +42,7 @@ import { describe, expect, it, vi } from "vitest";
 import { type AuthorizationGrantDeps, createAuthorizationGrant } from "#/grants/authorization.mjs";
 import { createClientCredentialsGrant } from "#/grants/clientCredentials.mjs";
 import { createRefreshTokenGrant, type RefreshTokenGrantDeps } from "#/grants/refreshToken.mjs";
+import { OAUTH_ADMISSION_ACTIONS } from "./_helpers/admissionActions.mjs";
 
 // ---------------------------------------------------------------------------
 // Shared setup
@@ -111,7 +112,7 @@ function makeRefreshDeps(
 	enabled = true,
 ): RefreshTokenGrantDeps {
 	return {
-		sessionRequirementResolver: resolverForTests([]),
+		sessionRequirementResolver: resolverForTests([], { actions: OAUTH_ADMISSION_ACTIONS }),
 		config: {
 			oauth: {
 				jwt: { secret: SECRET },
@@ -160,7 +161,7 @@ function makeAuthzDeps(
 	enabled = true,
 ): AuthorizationGrantDeps {
 	return {
-		sessionRequirementResolver: resolverForTests([]),
+		sessionRequirementResolver: resolverForTests([], { actions: OAUTH_ADMISSION_ACTIONS }),
 		config: {
 			oauth: {
 				jwt: { secret: "test-secret" },

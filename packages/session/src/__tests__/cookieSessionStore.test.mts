@@ -43,6 +43,7 @@ import { makeValidAppConfig, resolverForTests } from "@o3co/auth-provider-core/t
 import express, { type Request, type Response } from "express";
 import request from "supertest";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { SESSION_ADMISSION_ACTIONS } from "#/admissionActions.mjs";
 
 /** The fake node-redis client: an in-memory map whose commands can be made to fail. */
 const fake = vi.hoisted(() => {
@@ -206,7 +207,7 @@ async function boot(logger: SpyLogger): Promise<express.Express> {
 					id: "test-session",
 					mountPath: "/session",
 					handler: createSessionRouter(express, {
-						requirements: resolverForTests([]),
+						requirements: resolverForTests([], { actions: SESSION_ADMISSION_ACTIONS }),
 						csrfTokenSigner: deps.csrfTokenSigner,
 						userRepository: {
 							authenticate: vi.fn(async () => alice),
@@ -221,7 +222,7 @@ async function boot(logger: SpyLogger): Promise<express.Express> {
 					id: "test-federation",
 					mountPath: "/session",
 					handler: createFederationRouter(express, {
-						requirements: resolverForTests([]),
+						requirements: resolverForTests([], { actions: SESSION_ADMISSION_ACTIONS }),
 						config: config as never,
 						federationProviders: new Map([
 							[

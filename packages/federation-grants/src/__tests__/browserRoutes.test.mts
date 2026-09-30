@@ -57,6 +57,7 @@ import {
 import express from "express";
 import request from "supertest";
 import { describe, expect, it, vi } from "vitest";
+import { FEDERATION_GRANTS_ADMISSION_ACTIONS } from "#/admissionActions.mjs";
 import { createFederationGrantBackground, type FederationGrantBackground } from "#/background.mjs";
 import {
 	createFederationGrantBrowserRouter,
@@ -292,7 +293,10 @@ function world(options: WorldOptions = {}) {
 					return state.sessionsBoundary;
 				},
 			},
-			requirements: resolverForTests(options.requirements ?? [], { issuer: ISSUER }),
+			requirements: resolverForTests(options.requirements ?? [], {
+				issuer: ISSUER,
+				actions: FEDERATION_GRANTS_ADMISSION_ACTIONS,
+			}),
 			revocationSkewMs: 1000,
 			connections: {
 				get: (name: string) => {
@@ -3759,7 +3763,9 @@ describe("the browser half on session admission", () => {
 
 	it("refuses to be built without the subject revocation it reads the sessions boundary through: no boundary is no backstop", () => {
 		expect(() =>
-			createFederationGrantBrowserRouter({ requirements: resolverForTests([]) } as never),
+			createFederationGrantBrowserRouter({
+				requirements: resolverForTests([], { actions: FEDERATION_GRANTS_ADMISSION_ACTIONS }),
+			} as never),
 		).toThrow(/subjectRevocation/);
 	});
 
@@ -3782,6 +3788,21 @@ describe("the browser half on session admission", () => {
 		const forged = { get: () => undefined, entries: () => [][Symbol.iterator]() };
 		expect(() => createFederationGrantBrowserRouter({ requirements: forged } as never)).toThrow(
 			/^createFederationGrantBrowserRouter: requirements must be the sessionRequirementResolver the boot planner built/,
+		);
+	});
+
+	it("refuses to be built on a resolver on which a step's action is not registered, naming the factory and the action", () => {
+		expect(() =>
+			createFederationGrantBrowserRouter({
+				requirements: resolverForTests([], {
+					actions: {
+						"federation_grants.connect": { grade: "use" },
+						"federation_grants.consent": { grade: "use" },
+					},
+				}),
+			} as never),
+		).toThrow(
+			/^createFederationGrantBrowserRouter: admits "federation_grants\.callback", which no module registers/,
 		);
 	});
 });

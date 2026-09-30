@@ -14,6 +14,7 @@
  * limitations under the License.
  */
 import {
+	type AdmissionActionDeclaration,
 	type AppConfig,
 	AUDIT_SINK_ABSENCE_POLICY,
 	type CodeRepository,
@@ -23,6 +24,10 @@ import {
 	type ProviderDeps,
 	SUBJECT_REVOCATION_ABSENCE_POLICY,
 } from "@o3co/auth-provider-core";
+import {
+	AUTHORIZATION_CODE_GRANT_ADMISSION_ACTIONS,
+	REFRESH_TOKEN_GRANT_ADMISSION_ACTIONS,
+} from "./admissionActions.mjs";
 import { createAuthorizationGrant } from "./grants/authorization.mjs";
 import { createClientCredentialsGrant } from "./grants/clientCredentials.mjs";
 import { createJwtBearerGrant, JWT_BEARER_GRANT_TYPE } from "./grants/jwtBearer.mjs";
@@ -162,6 +167,8 @@ export const oauthAuthorizationModule = (params: { config: AppConfig }): Module 
 	// and this module's typed deps satisfy every pick — so a grant reading a
 	// slot this module never declared is a compile error at its wiring below.
 	const grants: Record<string, (deps: OAuthAuthorizationModuleDeps) => GrantHandler> = {};
+	// Each grant that admits a session registers its action beside it.
+	const admissionActions: Record<string, AdmissionActionDeclaration> = {};
 	// Per the secure-default opt-in discipline: a grant is registered only
 	// when `enabled` is explicitly truthy (boolean `true` or the string `"true"`
 	// from HOCON env-var substitution — see `isExplicitlyEnabled` above).
@@ -171,8 +178,10 @@ export const oauthAuthorizationModule = (params: { config: AppConfig }): Module 
 	if (isExplicitlyEnabled(grantsCfg.authorization_code?.enabled)) {
 		grants.authorization_code = (deps) =>
 			createAuthorizationGrant({ ...deps, codeRepository: requireCodeRepository(deps) });
+		Object.assign(admissionActions, AUTHORIZATION_CODE_GRANT_ADMISSION_ACTIONS);
 	}
 	if (isExplicitlyEnabled(grantsCfg.refresh_token?.enabled)) {
+		Object.assign(admissionActions, REFRESH_TOKEN_GRANT_ADMISSION_ACTIONS);
 		grants.refresh_token = (deps) => {
 			// Refused at boot, not at the first refresh: see the function.
 			requireRefreshTokenFamilies(deps);
@@ -237,6 +246,6 @@ export const oauthAuthorizationModule = (params: { config: AppConfig }): Module 
 			// declared here as `oauthModule` declares it, for the same reason.
 			auditSink: AUDIT_SINK_ABSENCE_POLICY,
 		},
-		contributes: { grants },
+		contributes: { grants, admissionActions },
 	});
 };

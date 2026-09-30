@@ -40,7 +40,6 @@
 
 import { randomBytes, timingSafeEqual } from "node:crypto";
 import {
-	ADMISSION_ACTIONS,
 	type AdmissionDeps,
 	type AuditSink,
 	admitSession,
@@ -60,7 +59,11 @@ import {
 	type UserSessionStore,
 } from "@o3co/auth-provider-core";
 import type { Request, RequestHandler, Response, Router } from "express";
+import type { OAUTH_ROUTER_ADMISSION_ACTIONS } from "../admissionActions.mjs";
 import { isClientIdMetadataDocumentClient } from "../clients/clientIdMetadataDocument.mjs";
+
+/** The action the consent step admits, as `oauthModule` registers it. */
+const CONSENT_ACTION = "oauth.consent" satisfies keyof typeof OAUTH_ROUTER_ADMISSION_ACTIONS;
 
 /**
  * The host a Client ID Metadata Document client's `client_id` names, for the
@@ -145,7 +148,7 @@ export function createConsentRouter(express: ExpressLike, opts: ConsentRouterOpt
 	const admissionDeps: AdmissionDeps = {
 		userSessionStore,
 		subjectRevocation,
-		requirements: checkResolver(opts.requirements, "createConsentRouter"),
+		requirements: checkResolver(opts.requirements, "createConsentRouter", [CONSENT_ACTION]),
 		acrTable: {},
 		logger,
 		auditSink,
@@ -205,7 +208,7 @@ export function createConsentRouter(express: ExpressLike, opts: ConsentRouterOpt
 		const claim = cookieClaim(req);
 		const admission = await admitSession(admissionDeps, {
 			claim,
-			action: ADMISSION_ACTIONS["oauth.consent"],
+			action: CONSENT_ACTION,
 		});
 		switch (admission.outcome) {
 			case "unavailable":

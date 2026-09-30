@@ -42,6 +42,7 @@ import express, { type ErrorRequestHandler, type RequestHandler, type Router } f
 import request from "supertest";
 import { describe, expect, it } from "vitest";
 import { createOAuthRouter, oauthRoutePaths } from "#/routes.mjs";
+import { OAUTH_ADMISSION_ACTIONS } from "./_helpers/admissionActions.mjs";
 import { authorizationServerRegistry } from "./_helpers/authorizationServerRegistry.mjs";
 import { createMockLogger } from "./_helpers/mockLogger.mjs";
 
@@ -79,7 +80,7 @@ const codeRepository: CodeRepository = {
 const routerWith = async (surfaces: "all" | "none"): Promise<Router> => {
 	const unused = {} as never;
 	const { router } = await createOAuthRouter(express, {
-		requirements: resolverForTests([]),
+		requirements: resolverForTests([], { actions: OAUTH_ADMISSION_ACTIONS }),
 		registry: surfaces === "all" ? authorizationServerRegistry() : new GrantRegistry(),
 		config,
 		clientRepository,
@@ -267,7 +268,7 @@ describe("the OAuth router's body parsing", () => {
 		// /consent while the route itself is not mounted, and a deployment's
 		// own /oauth/consent would receive a body the OAuth router had read.
 		const { router } = await createOAuthRouter(express, {
-			requirements: resolverForTests([]),
+			requirements: resolverForTests([], { actions: OAUTH_ADMISSION_ACTIONS }),
 			registry: new GrantRegistry(),
 			config,
 			clientRepository,
