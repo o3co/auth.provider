@@ -27,7 +27,7 @@
 
 import express from "express";
 import request from "supertest";
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it, type Mock, vi } from "vitest";
 import type { AuditEvent, AuditSink } from "#/audit/types.mjs";
 import type { Logger } from "#/logging/Logger.mjs";
 import {
@@ -63,11 +63,15 @@ const scriptedLimiter = (
 	};
 };
 
-const makeLogger = (): Logger & { error: ReturnType<typeof vi.fn> } => ({
+/** `error` accepts both of `Logger.error`'s overloads, and records each call. */
+const makeLogger = (): Logger & { error: Mock<(...args: unknown[]) => void> } => ({
+	trace: vi.fn(),
 	debug: vi.fn(),
 	info: vi.fn(),
 	warn: vi.fn(),
-	error: vi.fn(),
+	error: vi.fn<(...args: unknown[]) => void>(),
+	fatal: vi.fn(),
+	child: vi.fn(),
 });
 
 const spyAuditSink = (): { sink: AuditSink; events: AuditEvent[] } => {
