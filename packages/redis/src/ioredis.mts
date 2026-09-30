@@ -2559,25 +2559,19 @@ end
 -- the last failure to stop counting; nothing left, both keys go.
 local function keep()
   local flat = redis.call('HGETALL', KEYS[1])
-  local running, deadline = false, nil
   for i = 1, #flat, 2 do
-    if string.sub(flat[i], 1, 2) == 'r:' then running = true end
-  end
-  if running then
-    redis.call('PERSIST', KEYS[1])
-    redis.call('PERSIST', KEYS[2])
-    return
+    if string.sub(flat[i], 1, 2) == 'r:' then
+      redis.call('PERSIST', KEYS[1])
+      redis.call('PERSIST', KEYS[2])
+      return
+    end
   end
   local last = redis.call('ZRANGE', KEYS[2], -1, -1, 'WITHSCORES')
-  if last[2] then
-    local e = num(last[2]) + WEEK
-    if deadline == nil or e > deadline then deadline = e end
-  end
-  if deadline == nil then
+  if not last[2] then
     redis.call('DEL', KEYS[1], KEYS[2])
     return
   end
-  local at = string.format('%.0f', math.ceil(deadline + SKEW))
+  local at = string.format('%.0f', math.ceil(num(last[2]) + WEEK + SKEW))
   redis.call('PEXPIREAT', KEYS[1], at)
   redis.call('PEXPIREAT', KEYS[2], at)
 end
