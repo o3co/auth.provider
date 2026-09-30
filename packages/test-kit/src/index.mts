@@ -23,6 +23,13 @@
 /** A suite's case, as core's slot suites give them: run each with any test runner's `it`. */
 export type { ContractCase } from "@o3co/auth-provider-core/testing";
 export {
+	MAIL_RELAY_REFUSALS,
+	type MailRelayRefusal,
+	type MailSenderContractInput,
+	mailSenderContract,
+	type RelayedMail,
+} from "./mail/mailSender.contract.mjs";
+export {
 	type MfaEnrollmentWitnessContractInput,
 	type MfaEnrollmentWitnessHarness,
 	type MfaEnrollmentWitnessUser,

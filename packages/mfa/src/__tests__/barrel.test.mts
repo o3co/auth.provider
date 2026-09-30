@@ -30,13 +30,14 @@ import { describe, expect, it } from "vitest";
 import * as entry from "#/index.mjs";
 
 describe("@o3co/auth-provider-mfa's entry", () => {
-	it("exports the MFA module, mfaModules, the routes' id, budget prefix and admission actions, the TOTP and recovery-code factors' modules, the MFA config schema and the development sample key, and nothing else", () => {
+	it("exports the MFA module, mfaModules, the routes' id, budget prefix and admission actions, the TOTP, recovery-code and email factors' modules, the MFA config schema and the development sample key, and nothing else", () => {
 		expect(Object.keys(entry).sort()).toEqual([
 			"MFA_ADMISSION_ACTIONS",
 			"MFA_DEVELOPMENT_SAMPLE_KEY",
 			"MFA_RATE_LIMIT_PREFIX",
 			"MFA_ROUTES_ID",
 			"mfaConfigSchema",
+			"mfaEmailFactorModule",
 			"mfaModule",
 			"mfaModules",
 			"mfaRecoveryCodeFactorModule",

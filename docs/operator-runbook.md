@@ -61,7 +61,7 @@ Core's own in-memory modules declare it as follows
 | `core-federation-grant-store-memory` | federation grants — a grant lodged or authorized on one replica is unknown to every other, one revoked there still yields upstream tokens here, and a refresh token rotated on one replica leaves every other presenting the old one, which a reuse-detecting IdP answers by revoking the family |
 | `core-federation-grant-intent-store-memory` | federation grant acquisition — an intent lodged on one replica is unknown to every other, so the consent page and the upstream callback answer as if the flow had expired whenever they land elsewhere, and the bound on live intents is counted per replica instead of per (client, subject). Established grants and revocations are unaffected, so this adapter beside a durable grant store is a single-replica configuration rather than a broken one |
 | `core-mfa-factor-store-memory` | enrolled second factors — a factor enrolled on one replica is unknown to every other, and a restart empties every replica: each subject then reads as one with nothing enrolled |
-| `core-mfa-transaction-store-memory` | MFA transactions and the lock state — a transaction started on one replica is unknown to the replica that receives the verification, and the attempt limits, the lockout and the trusted browsers are counted per replica. A restart also loses the email proof an operator reset required (`resetMfaForSubject` with `requireEmailProof: true`): beside a durable factor store, a password holder can then bind without it. Do not use it where operator resets are used |
+| `core-mfa-transaction-store-memory` | MFA transactions and the lock state — a transaction started on one replica is unknown to the replica that receives the verification, and the attempt limits and the lockout are counted per replica. A restart also loses the email proof an operator reset required (`resetMfaForSubject` with `requireEmailProof: true`): beside a durable factor store, a password holder can then bind without it. Do not use it where operator resets are used |
 | `session-store` (only with `session.storage.type = "memory"`, `SESSION_STORAGE_TYPE=memory`; #474) | the express-session store — a login served by one replica is unknown to the others, so a browser whose next request lands elsewhere is logged out, and every session is lost on restart |
 
 DPoP keeps no store of its own: every accepted proof is recorded in the
@@ -641,6 +641,66 @@ upstream `amr` (`profile.amr`); a custom adapter may.
   `federations.<name>.<type>.trustUpstreamAmr` — refuses boot, saying it
   belongs beside `enabled`.
 
+### Multi-factor authentication: the lock, mail and notices
+
+What a composition that installs the MFA package owns beside it (the MFA
+ADR's D5, D21, D24). The package is private until the standalone template
+wires it.
+
+- **The lock on guessable proofs.** Five attempts per transaction. From the
+  fifth consecutive failure a lock of 15 minutes, doubling to 24 hours. Ten
+  failures in any seven days hold guessable proofs (TOTP, an emailed code)
+  for the subject, whatever succeeds between them, from every browser. A
+  hundred consecutive failures hold them until an exempt success, a password
+  change or an operator reset. An exempt proof — a recovery code, WebAuthn,
+  the account-email proof — passes during a lock and ends the consecutive
+  run, and refunds no weekly failure. So a TOTP-only user whose password an
+  attacker holds needs a recovery code at every login until the password
+  changes. Changing the password is the remedy: the Store changes it, and
+  `revokeAllForSubject`, which the Store calls then, clears the lock.
+- **Mail.** The provider hands the `mailSender` slot what a code means — its
+  purpose, the account, the address on the account's user record at that
+  moment, the code and its expiry — and nothing rendered. The text and its
+  language, delivery, and any limit on sending — per recipient, per account
+  or overall — are the sender's: your mail system's, or
+  `@o3co/auth-provider-standard`'s SMTP sender's. A sender answers a refusal
+  at a limit, which the provider answers `429`, apart from an outage, `503`;
+  a delivery that fails leaves the ceremony standing. The package's
+  development sender logs each code, and installs only where the name the
+  configuration was selected by, and `CONFIG_ENV` and `NODE_ENV` wherever
+  they are set, each read `development` or `test`.
+- **The email factor's address.** The factor keeps no address: only a keyed
+  digest of the one its enrollment code went to. A login code goes to the
+  account's current address only while that digest matches, so **a change of
+  the address in the Store makes the email factor unusable until the user
+  enrolls it again**, after recent MFA; the provider records
+  `mfa.email_address_mismatch` when it refuses the factor for it. A user with
+  no other factor needs a recovery code or an operator reset. Changing the
+  address is the Store's: ask for recent authentication, and tell the old
+  address. **The Store must hold one mailbox per account**: the provider
+  reads the address as one addr-spec alone, and an account whose address is
+  a list, an angle address or carries a comment has no address to it. So do
+  some spellings a mail system may deliver to, which the provider refuses on
+  purpose: a zero-width non-joiner or joiner (U+200C, U+200D) in a local
+  part or in a Unicode domain label; an emoji or another symbol beyond ASCII
+  in a local part; a quoted local part with a space in it; and an underscore
+  in a domain. **Such an account has no email factor and no account-email
+  proof.** After an operator reset with `requireEmailProof` (`mfa.reset`), it
+  cannot give the proof its next first binding asks for, and needs another
+  way back — a recovery code, or the operator; give it an address the
+  provider reads before you reset it.
+- **Notices to the account holder: required, and yours.** The provider sends
+  none. It records audit events (`auditSink`), and the deployment reads them
+  and tells the account holder — by mail, a chat message, anything — of every
+  factor enrolled (`mfa.factor.enrolled`) or removed (`mfa.factor.removed`),
+  recovery codes regenerated (`mfa.recovery_codes.generated`,
+  `regenerated: true`), an operator reset (`mfa.reset`), the first lock of
+  an episode (`mfa.locked.first`) and an email factor refused at a changed
+  address (`mfa.email_address_mismatch`). Wire it: it is how a user learns that a
+  leaked password bound a factor first (D24). `auditSink` is one slot; to
+  keep the audit trail and notify at once, wrap both in an `AuditSink` of
+  your own (one method, `record`).
+
 ### Federation grants — what each answer means (#593)
 
 `POST /oauth/federation-grants/:grantId/token` hands a client an **upstream**
@@ -988,9 +1048,11 @@ check this page, so when the two disagree, the constant is right:
 `introspect.family_revoked`, `introspect.session_invalid`,
 `introspect.store_unavailable`,
 `logout.cascade_failed`, `logout.family_revoked`, `logout.success`,
-`mfa.challenge.sent`, `mfa.enrollment_state_inconsistent`,
+`mfa.challenge.sent`, `mfa.email_address_mismatch`,
+`mfa.enrollment_state_inconsistent`,
 `mfa.factor.enrolled`, `mfa.factor.removed`, `mfa.locked`,
-`mfa.recovery_code.used`, `mfa.recovery_codes.generated`, `mfa.verified`,
+`mfa.locked.first`, `mfa.recovery_code.used`,
+`mfa.recovery_codes.generated`, `mfa.reset`, `mfa.verified`,
 `mfa.verify.failure`,
 `rate_limit.unavailable`, `session.admission.subject_mismatch`,
 `token.issued`, `token.issued.failure`.
@@ -1095,8 +1157,8 @@ can share a database (`REDIS_SESSION_STORES_KEY_PREFIX`,
 | `consent:{pending}:ch:<challenge>` | hash `{record (JSON), sessionId, expiresAt}` | the parked request's `expiresAt` (10 minutes, `PENDING_CONSENT_TTL_MS`) plus the same slack; consumed with its index entry in one script | `packages/redis/src/consent-store.mts`, `ioredis.mts` (`LUA_PENDING_CONSENT_*`) |
 | `consent:{pending}:sess:<sessionId>` | sorted set of challenges, score = the order they were parked | raised to its longest-lived member's; at most `PENDING_CONSENT_PER_SESSION_LIMIT` (16) members, the first-parked evicted past it. `{pending}` is a Cluster hash tag: every parked request shares one slot | same |
 | `mfaf:{<subject>}` | hash — one field per enrolled second factor (its id), value `<version>\n<fixed JSON>\n<mutable JSON>`; the factor's `data` sealed by the MFA package before it arrives (D11). `<subject>` and the id are base64url of their JSON | **none**: an enrolled factor does not expire, and losing one lets whoever holds the password bind their own (D12). Keep it where nothing evicts it and a restart keeps it — `noeviction` is recommended for every MFA key family (a `volatile-*` policy never picks this one, which has no TTL), AOF on, preferably a database or instance of its own; the module refuses an `allkeys-*` policy at boot and warns without AOF | `packages/redis/src/mfa-factor-store.mts`, `ioredis.mts` (`LUA_MFA_FACTOR_UPDATE`) |
-| `mfat:tx:{<id>}` | hash — one MFA ceremony: `version`, `attempts`, `sends`, `enrollment`, `emailProof`, `challenge`, `pendingEnrollment` and `lastSentAtMs` when set, `record` (the rest as JSON, the login's continuation among it) and `incarnation` | its `expiresAtMs` (`mfa.transactionTtlSeconds`, 600 s), rounded up, set when it is created and moved by nothing; consumed by one verification | `packages/redis/src/mfa-transaction-store.mts`, `ioredis.mts` (`LUA_MFA_TX_*`) |
-| `mfat:lock:{<subject>}`, `mfat:week:{<subject>}` | hash (the consecutive run of guessable-proof failures, the reservations in flight, the trusted browsers' digests) and sorted set (the weekly window, one member per failure, scored by its time), under one hash tag | **none** while a run is counted — a run ends only at a success, an exempt success, a password change or an operator reset, and D21's hard limit counts it across weeks; otherwise a day past the last failure or trust to stop counting, on the server's clock. A `volatile-*` policy may evict them then, which lifts a weekly hold early — the module warns (`mfa_transaction_store_lock_evictable`); run `noeviction` | same (`LUA_MFA_SUBJECT_*`) |
+| `mfat:tx:{<id>}` | hash — one MFA ceremony: `version`, `attempts`, `enrollment`, `emailProof`, `challenge` and `pendingEnrollment` when set, `record` (the rest as JSON, the login's continuation among it) and `incarnation` | its `expiresAtMs` (`mfa.transactionTtlSeconds`, 600 s), rounded up, set when it is created and moved by nothing; consumed by one verification | `packages/redis/src/mfa-transaction-store.mts`, `ioredis.mts` (`LUA_MFA_TX_*`) |
+| `mfat:lock:{<subject>}`, `mfat:week:{<subject>}` | hash (the consecutive run of guessable-proof failures, the reservations in flight) and sorted set (the weekly window, one member per failure, scored by its time), under one hash tag | **none** while a run is counted — a run ends only at a success, an exempt success, a password change or an operator reset, and D21's hard limit counts it across weeks; otherwise a day past the last failure to stop counting, on the server's clock. A `volatile-*` policy may evict them then, which lifts a weekly hold early — the module warns (`mfa_transaction_store_lock_evictable`); run `noeviction` | same (`LUA_MFA_SUBJECT_*`) |
 | `mfat:proof:{<subject>}` | string `"1"` — an operator reset's `requireEmailProof: true` (D25) | **none**, until the subject's next first binding consumes it; a password change and the reset's own clearing of the lock leave it. As durable as `mfaf:` (D12's step-3 amendment): the transaction store's module runs the same boot check | same |
 
 The MFA transaction store judges when a subject's lock state stops counting
@@ -1136,7 +1198,7 @@ lifetime) per family:
 - **MFA** — only with the MFA stores on Redis. Per enrolled subject, one
   `mfaf:` hash, kept for good. Per second-factor ceremony, one `mfat:tx:` hash
   carrying the login's user snapshot, for at most `mfa.transactionTtlSeconds`.
-  Per subject with guessable-proof failures or a trusted browser, one
+  Per subject with guessable-proof failures, one
   `mfat:lock:` / `mfat:week:` pair; a subject whose run of failures was never
   ended keeps its pair until one is — where the Store lets anyone sign up,
   anyone can mint such subjects (`packages/core/src/mfa/transactionStore.mts`).

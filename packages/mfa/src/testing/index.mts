@@ -16,7 +16,7 @@
 
 /**
  * `@o3co/auth-provider-mfa/testing`: what another package's tests use of this
- * one, so none writes its sections or seals its data by hand. The three
+ * one, so none writes its sections or seals its data by hand. The four
  * sections its modules read, each as a configuration fragment at the
  * section's name with the reference defaults; a TOTP factor stored as an
  * enrollment leaves it, sealed under a configuration's key ring; and the
@@ -71,8 +71,6 @@ export function mfaConfigForTests(options: MfaConfigForTestsOptions) {
 				memorySeconds: 86_400,
 				weeklyBudget: 10,
 				hardLimit: 100,
-				trustedBrowsers: 5,
-				trustedBrowserDays: 30,
 				...lockout,
 			},
 		},
@@ -108,6 +106,20 @@ export function mfaRecoveryCodeFactorConfigForTests(
 	options: { readonly enabled?: boolean; readonly count?: number } = {},
 ) {
 	return { "mfa-recovery-code-factor": { enabled: true, count: 10, ...options } };
+}
+
+/** What {@link mfaEmailFactorConfigForTests} lays over the reference defaults. */
+export interface MfaEmailFactorConfigForTestsOptions {
+	readonly enabled?: boolean;
+	readonly addsMfa?: boolean;
+	readonly codeTtlSeconds?: number;
+}
+
+/** The email factor's section, `mfa-email-factor`, as the package's reference.conf resolves it, with `options` laid over it. */
+export function mfaEmailFactorConfigForTests(options: MfaEmailFactorConfigForTestsOptions = {}) {
+	return {
+		"mfa-email-factor": { enabled: false, addsMfa: false, codeTtlSeconds: 600, ...options },
+	};
 }
 
 /** What {@link seedTotpFactor} stores. */

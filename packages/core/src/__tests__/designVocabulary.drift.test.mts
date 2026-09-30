@@ -519,12 +519,41 @@ const VOCABULARY: readonly VocabularyRow[] = [
 		definition: /(?:function|const)\s+hasControlCharacter\b/,
 	},
 	{
+		concept:
+			"an environment name as a development-only guard reads it — trimmed, lower case, production or staging whichever name says so",
+		home: "packages/core/src/deployment/environment.mts",
+		definition: /(?:function|const)\s+(?:readEnvironmentName|productionEnvironmentIn)\b/,
+	},
+	{
+		concept: "an email address as the provider digests and compares it",
+		home: "packages/core/src/mail/address.mts",
+		definition: /(?:function|const)\s+normaliseMailAddress\b/,
+	},
+	{
+		concept: "what a mail sender answered — delivered, refused at a limit, or else an outage",
+		home: "packages/core/src/mail/outcome.mts",
+		definition: /(?:function|const)\s+mailSendOutcome\b/,
+	},
+	{
 		concept: "recent MFA — the credential_change grade's rule (the MFA ADR's D16)",
 		home: "packages/mfa/src/requirement.mts",
 		definition: /(?:function|const)\s+isRecentMfa\b/,
 	},
 	// Declared before their homes define them: each names the build step of
 	// the MFA ADR that builds it.
+	{
+		concept:
+			"MFA mail — the one place a code the provider issued is handed to the mail sender (the MFA ADR's D5, F5)",
+		home: "packages/mfa/src/mail.mts",
+		definition: /(?:function|const)\s+sendMfaMail\b/,
+		declared: "the MFA ADR's build-order step 9",
+	},
+	{
+		concept: "the masked address a code went to, as a page may show it (the MFA ADR's D23)",
+		home: "packages/mfa/src/mail.mts",
+		definition: /(?:function|const)\s+maskMailAddress\b/,
+		declared: "the MFA ADR's build-order step 9",
+	},
 	{
 		concept: "the long code — made (the MFA ADR's D22)",
 		home: "packages/mfa/src/codes.mts",

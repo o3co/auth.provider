@@ -189,8 +189,6 @@ const TX = (binding: unknown): MfaTransaction =>
 		challenge: undefined,
 		pendingEnrollment: undefined,
 		attempts: 0,
-		sends: 0,
-		lastSentAtMs: undefined,
 		createdAtMs: 1_767_225_600_000,
 		expiresAtMs: 1_767_226_200_000,
 		version: 1,

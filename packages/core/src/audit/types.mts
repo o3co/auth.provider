@@ -76,14 +76,29 @@ export const BUILT_IN_AUDIT_EVENT_TYPES = [
 	// routes'; each carries `subject`, `ip` and `userAgent`, and `kind` and
 	// `purpose` in its details. The MFA package is private until the template
 	// wires it, so no released composition emits them; the inventory's drift
-	// test names the step that emits each.
+	// test names the step that emits each. A deployment notifies the account
+	// holder from six of them, each carrying, beside those, in its details:
+	// `mfa.factor.enrolled` the factor's `binding` (`password`, `email_proof`
+	// or `mfa`) and `by: "user"`; `mfa.factor.removed` its `binding` and `by`
+	// (`user` or `operator`); `mfa.recovery_codes.generated` its `binding`,
+	// `by: "user"` and `regenerated` (false beside the first counting
+	// factor); `mfa.locked.first`, the refusal that begins an episode (the
+	// store's `first`), its `hold` and the refused attempt's factor `binding`;
+	// `mfa.reset`, the operator reset, `by: "operator"`, the `kinds` it
+	// removed, `requireEmailProof` and `revokeSessions`; and
+	// `mfa.email_address_mismatch`, the email factor refused because the
+	// account's address no longer matches the one it was enrolled with,
+	// nothing more — never an address. The event's `timestamp` is when.
 	"mfa.challenge.sent",
+	"mfa.email_address_mismatch",
 	"mfa.enrollment_state_inconsistent",
 	"mfa.factor.enrolled",
 	"mfa.factor.removed",
 	"mfa.locked",
+	"mfa.locked.first",
 	"mfa.recovery_code.used",
 	"mfa.recovery_codes.generated",
+	"mfa.reset",
 	"mfa.verified",
 	"mfa.verify.failure",
 	"rate_limit.unavailable",

@@ -77,8 +77,6 @@ const LOCKOUT = {
 	memorySeconds: 86_400,
 	weeklyBudget: 10,
 	hardLimit: 100,
-	trustedBrowsers: 5,
-	trustedBrowserDays: 30,
 } as const;
 
 /** The transaction's keys and recent MFA's window, as `reference.conf` defaults them. */
@@ -673,12 +671,12 @@ describe("the transaction's life and attempts, and the lock", () => {
 		for (const [lockout, field] of [
 			[{ ...LOCKOUT, threshold: 0 }, "mfa.lockout.threshold"],
 			[{ ...LOCKOUT, weeklyBudget: 2.5 }, "mfa.lockout.weeklyBudget"],
-			[{ ...LOCKOUT, trustedBrowsers: "5" }, "mfa.lockout.trustedBrowsers"],
+			[{ ...LOCKOUT, baseSeconds: "900" }, "mfa.lockout.baseSeconds"],
 			[{ ...LOCKOUT, hardLimit: 101 }, "mfa.lockout.hardLimit"],
 			[{ ...LOCKOUT, threshold: 6, hardLimit: 5 }, "mfa.lockout.threshold"],
 			[{ ...LOCKOUT, maxSeconds: 899 }, "mfa.lockout.maxSeconds"],
 			[{ ...LOCKOUT, memorySeconds: 10 ** 15 }, "mfa.lockout.memorySeconds"],
-			[{ ...LOCKOUT, trustedBrowserDays: undefined }, "mfa.lockout.trustedBrowserDays"],
+			[{ ...LOCKOUT, hardLimit: undefined }, "mfa.lockout.hardLimit"],
 		] as const) {
 			expect(
 				refusal(() => readSettings(valid({ lockout }))),

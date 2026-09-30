@@ -50,6 +50,7 @@ import {
 	registerBuiltinKeyStores,
 	replicaUnsafeReason,
 } from "@o3co/auth-provider-core";
+import { standardSmtpMailSenderConfigForTests } from "@o3co/auth-provider-standard/testing";
 import { parseFile } from "@o3co/ts.hocon";
 import { validate } from "@o3co/ts.hocon/zod";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -479,11 +480,15 @@ describe("the Redis federation store's plaintext guard, booted from the shipped 
 		REDIS_FEDERATION_TOKEN_STORE_ENCRYPTION_MODE: "allow-plaintext",
 	};
 
-	it('is refused under core.deployment.mode = "multi" in a development environment', async () => {
+	it('is refused under core.deployment.mode = "multi" in an environment that is not production', async () => {
 		// The umbrella shape with plaintext. A multi-replica deployment is
-		// never a development box.
-		await expect(boot(resolveConfig(PLAINTEXT_ENV), "development")).rejects.toSatisfy(
-			(err: unknown) => /core\.deployment\.mode is "multi"/.test(messageChain(err)),
+		// never a development box. A development configuration under multi is
+		// refused by the development mail sender first, so the environment here
+		// is another name that is not production, with the SMTP sender's section.
+		await expect(
+			boot({ ...resolveConfig(PLAINTEXT_ENV), ...standardSmtpMailSenderConfigForTests() }, "test"),
+		).rejects.toSatisfy((err: unknown) =>
+			/allow-plaintext[\s\S]*core\.deployment\.mode is "multi"/.test(messageChain(err)),
 		);
 		expect(errorSpy).not.toHaveBeenCalled();
 	});
@@ -492,9 +497,14 @@ describe("the Redis federation store's plaintext guard, booted from the shipped 
 		// `app.mts` selects `production.conf` by `CONFIG_ENV || NODE_ENV` and
 		// passes that name through `buildModules`; the guard reads that name,
 		// not NODE_ENV alone.
-		const config = resolveConfig({ ...PLAINTEXT_ENV, CORE_DEPLOYMENT_MODE: "single" });
+		// Under production the template installs the SMTP sender's module, whose
+		// section the package's builder carries.
+		const config = {
+			...resolveConfig({ ...PLAINTEXT_ENV, CORE_DEPLOYMENT_MODE: "single" }),
+			...standardSmtpMailSenderConfigForTests(),
+		};
 		await expect(boot(config, "production")).rejects.toSatisfy((err: unknown) =>
-			/the environment is "production"/.test(messageChain(err)),
+			/allow-plaintext[\s\S]*the environment is "production"/.test(messageChain(err)),
 		);
 	});
 
@@ -510,7 +520,13 @@ describe("the Redis federation store's plaintext guard, booted from the shipped 
 
 	it("keeps the FEDERATION_TOKENS_ALLOW_INSECURE=1 escape hatch under multi, logged at error", async () => {
 		process.env.FEDERATION_TOKENS_ALLOW_INSECURE = "1";
-		handleRef = await boot(resolveConfig(PLAINTEXT_ENV), "development");
+		// Under multi the development mail sender refuses a development
+		// configuration, so the environment here is another name that is not
+		// production, with the SMTP sender's section its module reads.
+		handleRef = await boot(
+			{ ...resolveConfig(PLAINTEXT_ENV), ...standardSmtpMailSenderConfigForTests() },
+			"test",
+		);
 		expect(errorSpy).toHaveBeenCalledWith(
 			expect.objectContaining({
 				store: "federation-tokens",

@@ -37,6 +37,7 @@ const PUBLISHED_PACKAGES = [
 	"packages/dpop",
 	"packages/mtls",
 	"packages/test-kit",
+	"packages/standard",
 	"create-app",
 ];
 

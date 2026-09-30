@@ -1,0 +1,60 @@
+{
+	"name": "@o3co/auth-provider-standard",
+	"description": "Standard, replaceable implementations of the duties outside @o3co/auth-provider: mail senders for the one-time codes it issues",
+	"version": "0.0.0",
+	"license": "Apache-2.0",
+	"engines": {
+		"node": ">=22.0.0"
+	},
+	"type": "module",
+	"main": "./dist/index.mjs",
+	"types": "./dist/index.d.mts",
+	"exports": {
+		".": {
+			"import": "./dist/index.mjs",
+			"types": "./dist/index.d.mts"
+		},
+		"./testing": {
+			"import": "./dist/testing/index.mjs",
+			"types": "./dist/testing/index.d.mts"
+		},
+		"./reference.conf": "./config/reference.conf"
+	},
+	"files": [
+		"dist",
+		"config",
+		"README.md"
+	],
+	"repository": {
+		"type": "git",
+		"url": "https://github.com/o3co/auth.provider.git",
+		"directory": "packages/standard"
+	},
+	"scripts": {
+		"prebuild": "rimraf dist",
+		"build": "tsc",
+		"typecheck": "tsc --noEmit && tsc -p tsconfig.test.json",
+		"test": "vitest run",
+		"test:coverage": "vitest run --coverage"
+	},
+	"imports": {
+		"#/*": {
+			"development": "./src/*",
+			"default": "./dist/*"
+		}
+	},
+	"dependencies": {
+		"zod": "^4.6.5"
+	},
+	"peerDependencies": {
+		"@o3co/auth-provider-core": "workspace:^"
+	},
+	"devDependencies": {
+		"@o3co/auth-provider-core": "workspace:*",
+		"@o3co/ts.hocon": "^1.13.0",
+		"@types/node": "^26.6.3",
+		"@vitest/coverage-v8": "^5.0.2",
+		"typescript": "^6.0.3",
+		"vitest": "^5.0.2"
+	}
+}

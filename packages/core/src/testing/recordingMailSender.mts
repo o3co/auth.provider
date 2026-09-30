@@ -15,41 +15,60 @@
  */
 
 /**
- * A `MailSender` for tests: it keeps every message it accepts instead of
- * delivering it, and can stand in for a relay that is down.
+ * A `MailSender` for tests: it keeps every send it delivers instead of
+ * delivering it, and can stand in for a sender at a limit or a relay that is
+ * down. Each instruction holds until the next.
  */
 
-import type { MailMessage, MailSender } from "../mail/types.mjs";
+import type { MailSend, MailSender, MailSendResult } from "../mail/types.mjs";
 
 export interface RecordingMailSender extends MailSender {
 	readonly kind: "recording";
-	/** Every message `send` accepted, oldest first, as frozen copies. */
-	readonly sent: readonly MailMessage[];
-	/** From now on, every `send` rejects with `error` and records nothing — a relay that is down. */
+	/** Every send it delivered, oldest first, as frozen copies. */
+	readonly sent: readonly MailSend[];
+	/** From now on, every send answers `refused_at_limit` and keeps nothing. */
+	refuseAtLimit(): void;
+	/** From now on, every send rejects with `error` and keeps nothing — a relay that is down. */
 	failWith(error: unknown): void;
-	/** Accept messages again. */
+	/** Deliver again. */
 	recover(): void;
 }
 
+type Mode =
+	| { readonly kind: "deliver" }
+	| { readonly kind: "limit" }
+	| { readonly kind: "fail"; readonly error: unknown };
+
 export function createRecordingMailSender(): RecordingMailSender {
-	let sent: readonly MailMessage[] = Object.freeze([]);
-	let failure: { readonly error: unknown } | undefined;
+	let sent: readonly MailSend[] = Object.freeze([]);
+	let mode: Mode = { kind: "deliver" };
 
 	return {
 		kind: "recording",
 		get sent() {
 			return sent;
 		},
-		async send(message: MailMessage): Promise<void> {
-			if (failure !== undefined) throw failure.error;
-			const copy = Object.freeze({ to: message.to, subject: message.subject, text: message.text });
+		async send(mail: MailSend): Promise<MailSendResult> {
+			if (mode.kind === "fail") throw mode.error;
+			if (mode.kind === "limit") return { outcome: "refused_at_limit" };
+			const copy: MailSend = Object.freeze({
+				purpose: mail.purpose,
+				subject: mail.subject,
+				to: mail.to,
+				code: mail.code,
+				expiresAtMs: mail.expiresAtMs,
+			});
 			sent = Object.freeze([...sent, copy]);
+			return { outcome: "delivered" };
+		},
+		refuseAtLimit(): void {
+			mode = { kind: "limit" };
 		},
 		failWith(error: unknown): void {
-			failure = { error };
+			mode = { kind: "fail", error };
 		},
 		recover(): void {
-			failure = undefined;
+			mode = { kind: "deliver" };
 		},
 	};
 }

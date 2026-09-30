@@ -20,8 +20,9 @@
  * the contract fails the case that names it.
  */
 
-import type { MfaFactor } from "@o3co/auth-provider-core";
+import { type MfaFactor, normaliseMailAddress } from "@o3co/auth-provider-core";
 import {
+	createTestMfaDigests,
 	createTestMfaFactor,
 	type TestMfaFactorOptions,
 	testMfaFactorProofs,
@@ -37,12 +38,26 @@ const RULES = {
 		"addsMfa, counting and guessable are true or false, and reusableChallenge true, false or absent",
 	enrollable: "enrollable, when present, answers true for an account that can enroll the factor",
 	begin: "beginEnrollment answers state that survives a JSON round trip",
+	beginMail:
+		"beginEnrollment, when it asks for a code to be mailed, asks for the enrollment code, non-empty, with an expiry after now when it gives one, and its response carries no form of the code",
 	completeMalformed:
 		"completeEnrollment answers malformed for a proof it cannot read, and never throws for one",
 	complete:
 		"completeEnrollment takes the proof of possession, and answers data that survives a JSON round trip, a label that is a string when present, and at least one amr value, each among amrValues",
 	describe: "describe answers a hint that is a string, or none, and never the account's address",
 	challenge: "challenge, when present, answers state that survives a JSON round trip",
+	challengeMail:
+		"challenge, when it asks for a code to be mailed, asks for a login code, non-empty, with an expiry after now when it gives one and the keyed digest of the account's address, another at each challenge, and its response carries no form of the code",
+	handed:
+		"completeEnrollment records exactly the address digest it is handed — of the address its code went to, kept at the send — never one of the address the account answered at the start or answers by the completion",
+	unhanded:
+		"completeEnrollment, after its code was mailed, completes nothing when it is handed no address digest",
+	rotated:
+		"verify, handed the address digest under a newer key than the one recorded, keeps it in its next data, and a later challenge mails it",
+	unreadable:
+		"challenge, over data whose address digest is gone or is no digest, still asks for its login code, with a null address digest, and never throws: the coordinator refuses the factor",
+	noAddress:
+		"no answer carries the account's address, whatever its case or escaping: the pending enrollment's state and response, the enrolled data and label, a challenge's state and response, and a verification's next data",
 	verifyMalformed: "verify answers malformed for a proof it cannot read, and never throws for one",
 	verify:
 		"verify takes a valid proof, names a factor the subject holds, and answers next data that survives a JSON round trip",
@@ -78,9 +93,10 @@ describe("mfaFactorContract", () => {
 		expect(mfaFactorContract(inputFor()).map((c) => c.name)).toEqual(Object.values(RULES));
 	});
 
-	it("passes the double, with and without a challenge", async () => {
+	it("passes the double, with and without a challenge, and with mail", async () => {
 		expect(await failing(inputFor())).toEqual([]);
 		expect(await failing(inputFor({ challenge: true }))).toEqual([]);
+		expect(await failing(inputFor({ mail: true }))).toEqual([]);
 		expect(await failing(inputFor({ kind: "test_2", amrValues: ["hwk", "swk"] }))).toEqual([]);
 	});
 
@@ -277,5 +293,400 @@ describe("mfaFactorContract", () => {
 				})),
 			),
 		).toEqual([RULES.verify]);
+	});
+
+	/** The double with mail, its challenge answer changed by `change`. */
+	const challenging = (
+		change: (
+			sent: Awaited<ReturnType<NonNullable<MfaFactor["challenge"]>>>,
+			ctx: Parameters<NonNullable<MfaFactor["challenge"]>>[0],
+		) => unknown,
+		user: Record<string, unknown> = USER,
+	) => ({
+		...inputFor({ mail: true }, (factor) => ({
+			...factor,
+			challenge: async (ctx) => {
+				const sent = await (factor.challenge as NonNullable<MfaFactor["challenge"]>)(ctx);
+				return change(sent, ctx) as never;
+			},
+		})),
+		user,
+	});
+
+	/** The challenge's code set to `code`, kept and mailed alike, so only the response can break the contract. */
+	const withCode =
+		(code: string, response: (code: string) => unknown): Parameters<typeof challenging>[0] =>
+		(sent) => ({
+			...sent,
+			state: { code },
+			mail: { ...sent.mail, code },
+			response: response(code),
+		});
+
+	it("fails an enrollment or a challenge whose response carries the code it asks to be mailed", async () => {
+		expect(
+			await failing(
+				inputFor({ mail: true }, (factor) => ({
+					...factor,
+					beginEnrollment: async (ctx) => {
+						const start = await factor.beginEnrollment(ctx);
+						return { ...start, response: { sent: true, code: start.mail?.code } };
+					},
+				})),
+			),
+		).toEqual([RULES.beginMail]);
+		expect(
+			await failing(
+				challenging((sent) => ({ ...sent, response: `sent ${sent.mail?.code} to your mailbox` })),
+			),
+		).toEqual([RULES.challengeMail]);
+	});
+
+	it("fails a response carrying the code escaped, in another case or spacing, as a number or as a key", async () => {
+		for (const [code, response] of [
+			['ab"cd123', (c: string) => ({ code: c })],
+			["ab\\cd123", (c: string) => ({ code: c })],
+			["ab12cd34", (c: string) => ({ hint: c.toUpperCase().replace(/(....)/, "$1-") })],
+			["482913", (c: string) => ({ code: Number(c) })],
+			["482913", (c: string) => ({ codes: { [c]: true } })],
+			["482913", (c: string) => [`${c.slice(0, 3)} ${c.slice(3)}`]],
+		] as const) {
+			expect(await failing(challenging(withCode(code, response))), code).toEqual([
+				RULES.challengeMail,
+			]);
+		}
+	});
+
+	it("fails a mail whose purpose is not the call's, or whose code is empty or no string", async () => {
+		for (const purpose of [
+			"email_factor_enrollment",
+			"account_email_proof",
+			"security_notice",
+			"LOGIN_CODE",
+			undefined,
+		]) {
+			expect(
+				await failing(challenging((sent) => ({ ...sent, mail: { ...sent.mail, purpose } }))),
+				String(purpose),
+			).toEqual([RULES.challengeMail]);
+		}
+		// A code that is not the one kept is no proof either: verification fails beside it.
+		for (const code of ["", 123456, undefined]) {
+			expect(
+				await failing(challenging((sent) => ({ ...sent, mail: { ...sent.mail, code } }))),
+				String(code),
+			).toContain(RULES.challengeMail);
+		}
+		expect(await failing(challenging((sent) => ({ ...sent, mail: sent.mail?.code })))).toContain(
+			RULES.challengeMail,
+		);
+		for (const purpose of ["login_code", "account_email_proof", "notice"]) {
+			expect(
+				await failing(
+					inputFor({ mail: true }, (factor) => ({
+						...factor,
+						beginEnrollment: async (ctx) => {
+							const start = await factor.beginEnrollment(ctx);
+							return { ...start, mail: { ...start.mail, purpose } as never };
+						},
+					})),
+				),
+				purpose,
+			).toEqual([RULES.beginMail]);
+		}
+	});
+
+	it("fails a mailed code whose expiry is not after now, and a challenge that mails the same code twice", async () => {
+		for (const expiry of [
+			(now: number) => now,
+			(now: number) => now - 1,
+			() => Number.NaN,
+			() => "soon",
+		]) {
+			expect(
+				await failing(
+					challenging((sent, ctx) => ({
+						...sent,
+						mail: { ...sent.mail, expiresAtMs: expiry(ctx.nowMs) },
+					})),
+				),
+				String(expiry),
+			).toEqual([RULES.challengeMail]);
+			expect(
+				await failing(
+					inputFor({ mail: true }, (factor) => ({
+						...factor,
+						beginEnrollment: async (ctx) => {
+							const start = await factor.beginEnrollment(ctx);
+							return {
+								...start,
+								mail: { ...start.mail, expiresAtMs: expiry(ctx.nowMs) } as never,
+							};
+						},
+					})),
+				),
+				String(expiry),
+			).toEqual([RULES.beginMail]);
+		}
+		expect(await failing(challenging(withCode("482913", () => ({ sent: true }))))).toEqual([
+			RULES.challengeMail,
+		]);
+	});
+
+	it("fails an address kept or answered anywhere, in another case or under JSON escaping", async () => {
+		const QUOTED = { ...USER, email: '"probe"@example.com' };
+		const answering = (
+			change: (factor: MfaFactor) => Partial<MfaFactor>,
+			user: Record<string, unknown> = USER,
+		) => ({ ...inputFor({ mail: true }, (factor) => ({ ...factor, ...change(factor) })), user });
+		const cases = (email: string): [string, (factor: MfaFactor) => Partial<MfaFactor>][] => [
+			[
+				"the enrolled data",
+				(factor) => ({
+					completeEnrollment: async (ctx) => {
+						const done = await factor.completeEnrollment(ctx);
+						return done.ok ? { ...done, data: { ...done.data, to: ctx.user.email } } : done;
+					},
+				}),
+			],
+			[
+				"the label",
+				(factor) => ({
+					completeEnrollment: async (ctx) => {
+						const done = await factor.completeEnrollment(ctx);
+						return done.ok ? { ...done, label: `mail to ${String(ctx.user.email)}` } : done;
+					},
+				}),
+			],
+			[
+				"the pending enrollment's state and response",
+				(factor) => ({
+					beginEnrollment: async (ctx) => {
+						const start = await factor.beginEnrollment(ctx);
+						return {
+							...start,
+							state: { ...start.state, to: ctx.user.email },
+							response: { sentTo: ctx.user.email },
+						};
+					},
+				}),
+			],
+			[
+				"a challenge's state",
+				(factor) => ({
+					challenge: async (ctx) => {
+						const sent = await (factor.challenge as NonNullable<MfaFactor["challenge"]>)(ctx);
+						return { ...sent, state: { ...sent.state, to: email.toUpperCase() } };
+					},
+				}),
+			],
+		];
+		for (const user of [USER, QUOTED]) {
+			for (const [where, change] of cases(user.email)) {
+				expect(await failing(answering(change, user)), `${where}, ${user.email}`).toEqual([
+					RULES.noAddress,
+				]);
+			}
+		}
+		expect(
+			await failing(
+				answering(
+					(factor) => ({
+						verify: async (ctx) => {
+							const verdict = await factor.verify(ctx);
+							return verdict.ok
+								? {
+										...verdict,
+										next: { ...(verdict.next ?? ctx.factor.data), lastTo: QUOTED.email },
+									}
+								: verdict;
+						},
+					}),
+					QUOTED,
+				),
+			),
+		).toEqual([RULES.noAddress]);
+	});
+
+	it("fails a login code mailed with no address digest, one that is no digest, or the digest of another address", async () => {
+		for (const addressDigest of [
+			undefined,
+			"digest",
+			{ keyId: "test-key" },
+			createTestMfaDigests("test").digest(["someone@example.com"]),
+			createTestMfaDigests("another-kind").digest([USER.email]),
+		]) {
+			expect(
+				await failing(challenging((sent) => ({ ...sent, mail: { ...sent.mail, addressDigest } }))),
+				JSON.stringify(addressDigest),
+			).toEqual([RULES.challengeMail, RULES.rotated]);
+		}
+		// Null is for data that holds no digest, never for data that does. Each is
+		// mailed at every challenge, the one after a rotation too.
+		expect(
+			await failing(
+				challenging((sent) => ({ ...sent, mail: { ...sent.mail, addressDigest: null } })),
+			),
+		).toEqual([RULES.challengeMail, RULES.rotated]);
+	});
+
+	it("fails a factor that records a digest of the account's address as it reads at completion, or at a verification anything but the digest it was handed", async () => {
+		const digestOf = (email: unknown) =>
+			createTestMfaDigests("test").digest([normaliseMailAddress(email) as string]);
+		expect(
+			await failing(
+				inputFor({ mail: true }, (factor) => ({
+					...factor,
+					completeEnrollment: async (ctx) => {
+						const done = await factor.completeEnrollment(ctx);
+						return done.ok ? { ...done, data: { addressDigest: digestOf(ctx.user.email) } } : done;
+					},
+				})),
+			),
+		).toEqual([RULES.handed]);
+		for (const next of [
+			{ addressDigest: digestOf("someone@attacker.example") },
+			{ addressDigest: null },
+			{},
+		]) {
+			expect(
+				await failing(
+					inputFor({ mail: true }, (factor) => ({
+						...factor,
+						verify: async (ctx) => {
+							const verdict = await factor.verify(ctx);
+							return verdict.ok && ctx.addressDigest !== undefined ? { ...verdict, next } : verdict;
+						},
+					})),
+				),
+				JSON.stringify(next),
+			).toEqual([RULES.rotated]);
+		}
+	});
+
+	it("fails a challenge that, over data holding no readable address digest, throws, asks for no login code, or mails one with a digest that is none", async () => {
+		const unreadable = (data: Record<string, unknown>) =>
+			typeof data.addressDigest !== "object" ||
+			data.addressDigest === null ||
+			typeof (data.addressDigest as { digest?: unknown }).digest !== "string";
+		for (const change of [
+			() => {
+				throw new Error("no address digest");
+			},
+			(sent: Awaited<ReturnType<NonNullable<MfaFactor["challenge"]>>>) => ({
+				...sent,
+				mail: undefined,
+			}),
+			(sent: Awaited<ReturnType<NonNullable<MfaFactor["challenge"]>>>) => ({
+				...sent,
+				mail: { ...sent.mail, addressDigest: undefined },
+			}),
+			(sent: Awaited<ReturnType<NonNullable<MfaFactor["challenge"]>>>) => ({
+				...sent,
+				mail: { ...sent.mail, addressDigest: "digest" },
+			}),
+		]) {
+			expect(
+				await failing(
+					challenging((sent, ctx) =>
+						unreadable(ctx.factor.data) ? (change as (s: typeof sent) => unknown)(sent) : sent,
+					),
+				),
+				change.toString(),
+			).toEqual([RULES.unreadable]);
+		}
+	});
+
+	it("passes the double over an account whose address is padded, in another case, internationalised or decomposed, and fails a factor keeping it as normaliseMailAddress spells it", async () => {
+		for (const email of [
+			" Contract@Example.COM ",
+			"contract@b\u00fccher.example",
+			"jose\u0301@example.com",
+			"Jos\u00e9@B\u00fccher.example",
+		]) {
+			const user = { ...USER, email };
+			expect(await failing({ ...inputFor({ mail: true }), user }), email).toEqual([]);
+			expect(
+				await failing({
+					...inputFor({ mail: true }, (factor) => ({
+						...factor,
+						completeEnrollment: async (ctx) => {
+							const done = await factor.completeEnrollment(ctx);
+							return done.ok
+								? { ...done, data: { ...done.data, kept: normaliseMailAddress(ctx.user.email) } }
+								: done;
+						},
+					})),
+					user,
+				}),
+				email,
+			).toEqual([RULES.noAddress]);
+		}
+	});
+
+	it("passes a factor that keeps the keyed digest of the address it confirmed, spelled any way, and fails one that keeps the address", async () => {
+		expect(
+			await failing({
+				...inputFor({ mail: true }),
+				user: { ...USER, email: " Contract@EXAMPLE.com " },
+			}),
+		).toEqual([]);
+		expect(
+			await failing(
+				inputFor({ mail: true }, (factor) => ({
+					...factor,
+					completeEnrollment: async (ctx) => {
+						const done = await factor.completeEnrollment(ctx);
+						return done.ok ? { ...done, data: { ...done.data, address: ctx.user.email } } : done;
+					},
+				})),
+			),
+		).toEqual([RULES.noAddress]);
+	});
+	it("fails a factor that records a digest it made of the account's address itself: at the start, or when none is handed", async () => {
+		const digestOf = (email: unknown) =>
+			createTestMfaDigests("test").digest([normaliseMailAddress(email) as string]);
+		// Kept from the start, and recorded in place of the one handed.
+		const fromTheStart = (factor: MfaFactor): MfaFactor => ({
+			...factor,
+			beginEnrollment: async (ctx) => {
+				const start = await factor.beginEnrollment(ctx);
+				return { ...start, state: { ...start.state, mine: digestOf(ctx.user.email) } };
+			},
+			completeEnrollment: async (ctx) =>
+				factor.completeEnrollment({ ...ctx, addressDigest: ctx.state.mine as never }),
+		});
+		expect(await failing(inputFor({ mail: true }, fromTheStart))).toEqual([
+			RULES.handed,
+			RULES.unhanded,
+		]);
+		// Its own, when none is handed.
+		const fallingBack = (factor: MfaFactor): MfaFactor => ({
+			...factor,
+			completeEnrollment: async (ctx) =>
+				factor.completeEnrollment({
+					...ctx,
+					addressDigest: ctx.addressDigest ?? digestOf(ctx.user.email),
+				}),
+		});
+		expect(await failing(inputFor({ mail: true }, fallingBack))).toEqual([RULES.unhanded]);
+	});
+
+	it("fails a factor that keeps no digest it is handed under a newer key, or keeps the old one", async () => {
+		const rewrapping = (next: (ctx: Parameters<MfaFactor["verify"]>[0]) => unknown) =>
+			inputFor({ mail: true }, (factor) => ({
+				...factor,
+				verify: async (ctx) => {
+					const verdict = await factor.verify(ctx);
+					if (!verdict.ok) return verdict;
+					const { next: _dropped, ...kept } = verdict;
+					const changed = next(ctx);
+					return changed === undefined ? kept : { ...kept, next: changed as never };
+				},
+			}));
+		// Every rotation write removed.
+		expect(await failing(rewrapping(() => undefined))).toEqual([RULES.rotated]);
+		// The recorded digest kept, not the one handed.
+		expect(await failing(rewrapping((ctx) => ctx.factor.data))).toEqual([RULES.rotated]);
 	});
 });
