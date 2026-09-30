@@ -32,7 +32,9 @@
  *   MFA credential by its id alone must refuse such a duplicate first.
  * - An assertion's challenge lists every WebAuthn factor of the subject.
  *   Verification finds the credential by its id among them and verifies the
- *   assertion against the challenge the coordinator took; its next data is
+ *   assertion against the challenge the coordinator took, and a user handle
+ *   the response carries against the subject's (WebAuthn §7.2 step 6), once
+ *   the signature verified: another is `invalid`. Its next data is
  *   the new sign count and the backup state (BS) the assertion reports. A
  *   counter that did not increase over the stored one — judged only once
  *   the signature verified — is `sign_count_regression`, naming the record
@@ -338,11 +340,6 @@ export function createWebAuthnMfaFactor(settings: WebAuthnMfaFactorSettings): Mf
 			const found = readable(ctx.factors).find(({ data }) => data.credentialId === assertion.id);
 			if (found === undefined) return { ok: false, reason: "invalid" };
 			const { data } = found;
-			// WebAuthn §7.2 step 6: a user handle the response carries must be the credential's.
-			const presented = assertion.response.userHandle;
-			if (presented !== undefined && presented !== data.userHandle) {
-				return { ok: false, reason: "invalid" };
-			}
 			const verified = await verifyWebAuthnAssertionWithBackupState({
 				credential: {
 					credentialId: data.credentialId,
@@ -358,8 +355,11 @@ export function createWebAuthnMfaFactor(settings: WebAuthnMfaFactorSettings): Mf
 					? {}
 					: { expectedTopOrigins: relyingParty.topOrigin }),
 				userVerification,
+				// WebAuthn §7.2 step 6: a user handle the response carries must be the subject's.
+				expectedUserHandle: bytesOf(data.userHandle),
 			});
 			if (!verified.ok) {
+				// Any other refusal, `user_handle_mismatch` included, is the contract's `invalid`.
 				return verified.reason === "sign_count_regression"
 					? { ok: false, reason: "sign_count_regression", factorId: found.factor.id }
 					: { ok: false, reason: "invalid" };
