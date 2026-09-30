@@ -127,9 +127,7 @@ change observable behavior for traffic that works today?*
   previously-admitted clients start being refused at request time.
 - **No (behavior becomes strictly stronger, requests keep working) →
   warn once at composition and ignore the key.** Taking a deployment down
-  over a key that is now harmless is worse than the stale line. Example:
-  the retired PKCE knobs (#273) — every value they could carry only ever
-  weakened the policy, so ignoring them is the strong reading.
+  over a key that is now harmless is worse than the stale line.
 
 **Mechanism — pick by what happened to the key:**
 
@@ -139,7 +137,7 @@ change observable behavior for traffic that works today?*
 | Key moved to another path (#728) | the owning module's `section.relocatedFrom` (a switch that decides whether a module is loaded: a module that is always loaded) — `config-path-relocated` fails boot naming the old path, the new one and the environment variable bound to it — none for an entry written `{ to, environmentVariable: null }`, a new path no variable binds — or, mapped to `null`, that the key was removed; the path's defaults and its `${?VAR}` binding move with it, and nothing stays bound at the old path; a variable whose name changed — or whose key was removed — is declared beside it (`section.renamedVariables`: the old name → the old path it was bound to; the new name is the one the new path is bound to; the old path may lie outside the module's section, or stay in place inside it; core's own section declares its renames the same way, its in-place renames limited to paths under `core`), and the declaring module's own `section.reference` — core's own `reference.conf` for core, and for a composition root's own module the root's `config/reference.conf`, never its `application.conf` — captures each declared name in the reserved `renamed-variables` section (`NAME = null`, then `NAME = ${?NAME}`), which no other layer writes (a composition that builds its configuration by hand captures every declared name from the environment it substitutes with, `null` when unset: `renamedVariableCaptures`); from what the resolution captured, `environment-variable-renamed` fails boot while the old name is set unless the new name is set to the same string, while a removed key's variable is set at all, and when a name is not captured, naming the variables and the new path and never a value; a rename carries the value unchanged — a move that changes a value's meaning is not declared as one; an old path the root's schema must keep for the pre-parse is presence-only (no `.default()`, preferably `z.unknown()`) | the module's manifest; detection and message in `core/src/config/removed-keys.mts` |
 | A VALUE removed from a live key | shrink the `z.enum` — Zod's `invalid_enum_value` names the survivors | in place (e.g. `legacyRtPolicy`) |
 | Key moved to a new shape | bespoke preprocess with a migration pointer, not a removal notice | `LEGACY_JWT_FIELDS` |
-| Key ignored (warn path) | warn-once keyed on the config object | `INERT_PKCE_KEYS` (`@o3co/auth-provider-oauth`) |
+| Key ignored (warn path) | warn-once keyed on the config object | none: no key takes this path today |
 
 A moved key always fails boot: ignoring it drops the operator's setting for the default at the new path. So does a renamed variable set alone, or set to a value its new name does not carry, and a removed key's variable set at all; one set to the same value as its new name boots, so a deployment can export both names while it moves. The relocation rows are a bridge for the 0.x line and are removed at the first major release — `relocatedPaths.drift.test.mts` fails the cut that forgets.
 

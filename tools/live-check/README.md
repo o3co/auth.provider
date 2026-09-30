@@ -118,7 +118,7 @@ browser ──▶ :3210  live-check front (proxy.mjs)  ──▶ :3000  standalo
              │  /__live-check/*   the record                  │    callbackURL → :3210, clientUrl → :3210/
              │  /__store/*        a user Store that accepts   │  repositories.user.http → :3210/__store/*
              │                    every <federation>:<sub>    │  Redis: :6379 (docker or yours)
-             └─ everything else   relayed to :3000            │  session cookie: SESSION_SECURE=false, non-__Host-
+             └─ everything else   relayed to :3000            │  session cookie: SESSION_STORE_SECURE=false, non-__Host-
 ```
 
 - The front is the only process that sees the raw callback URL; it relays the

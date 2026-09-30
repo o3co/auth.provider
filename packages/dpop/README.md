@@ -36,10 +36,10 @@ contributes the DPoP mechanism to both.
 **Does not own:**
 
 - which mechanism wins when mTLS is installed too, and the error that answers
-  a conflict — core's dispatch policy (`oauth.tokenBinding.dispatch-policy`);
+  a conflict — core's dispatch policy (`core.tokenBinding.dispatchPolicy`);
 - whether a grant stamps the binding on the tokens it mints, and which refresh
   tokens are bound — the grants, on core's rules
-  (`oauth.tokenBinding.bindConfidentialClientRefreshTokens`);
+  (`core.tokenBinding.bindConfidentialClientRefreshTokens`);
 - matching a presented proof against a refresh token's stored binding — core's
   refresh-time matrix, [`core/src/grants/confirmationMatch.mts`](../core/src/grants/confirmationMatch.mts);
 - where the replay records are kept. That is core's `ReplaySeenSet` port, the
@@ -104,8 +104,8 @@ dpop {
   replayStoreTtlSeconds = 300   # at least 2 × iatWindowSeconds + 1
 }
 # Cross-mechanism dispatch policy (owned by core):
-oauth.tokenBinding {
-  dispatch-policy = "intent-explicit"   # or "strict-mutual-exclusion"
+core.tokenBinding {
+  dispatchPolicy = "intent-explicit"   # or "strict-mutual-exclusion"
 }
 ```
 
@@ -131,13 +131,13 @@ boot.
 both carry `cnf.jkt`. A confidential client's access token is bound and its
 refresh token is not by default — its client secret is the refresh-time
 authenticator (RFC 9449 §5) — unless the deployment sets
-`oauth.tokenBinding.bindConfidentialClientRefreshTokens = true`. At refresh,
+`core.tokenBinding.bindConfidentialClientRefreshTokens = true`. At refresh,
 core's matrix ([`confirmationMatch.mts`](../core/src/grants/confirmationMatch.mts))
 requires the presented proof to match the refresh token's stored binding.
 
 ## Cross-mechanism dispatch (DPoP + mTLS)
 
-When both `dpopModule` and `mtlsModule` are installed, the `oauth.tokenBinding.dispatch-policy` config key (declared by core's config schema) decides what happens when both mechanisms succeed on the same request:
+When both `dpopModule` and `mtlsModule` are installed, the `core.tokenBinding.dispatchPolicy` config key (declared by core's config schema) decides what happens when both mechanisms succeed on the same request:
 
 - `intent-explicit` (default) — DPoP wins because the DPoP header is explicit-intent; mTLS cert is ambient.
 - `strict-mutual-exclusion` — both succeeding is rejected with HTTP 400 `invalid_request`.

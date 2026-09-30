@@ -58,7 +58,7 @@ Around it:
   through that service's API (core's YAML user repository is a development and
   test adapter);
 - the login and consent pages: the deployment serves its own, and the provider
-  redirects to them (`endpoints.login.url`, `endpoints.consent.url`);
+  redirects to them (`session.loginPage.url`, `oauth.consentPage.url`);
 - signup, account recovery and email.
 
 **Why a separate service.** It holds the signing key and the session state.
@@ -210,14 +210,14 @@ oauth {
 }
 ```
 
-**Grants.** Every built-in grant is off in the library defaults; a deployment turns on the ones it serves:
+**Grants.** Every built-in grant is off in the library defaults; a deployment turns on the ones it serves, each in the section of the module that installs it:
 
 ```hocon
-oauth.grants {
-  authorization_code { enabled = true }   # PKCE is mandatory; S256 unless a client allows plain
-  refresh_token      { enabled = true }
-  session            { enabled = true }
+oauth-authorization.grants {
+  authorizationCode { enabled = true }   # PKCE is mandatory; S256 unless a client allows plain
+  refreshToken      { enabled = true }
 }
+oauth-session.enabled = true
 ```
 
 **Session (when `sessionModule` is registered):**
@@ -225,7 +225,7 @@ oauth.grants {
 ```hocon
 # `secret` signs the cookie that IS the authenticated session: at least
 # 32 bytes (256 bits), e.g. `openssl rand -hex 32`.
-session { secret = ${SESSION_SECRET} }
+session-store { secret = ${SESSION_STORE_SECRET} }
 
 # One section per federation. `type` names the adapter package and defaults
 # to the section's name; each adapter's README lists its settings.

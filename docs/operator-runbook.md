@@ -62,7 +62,7 @@ Core's own in-memory modules declare it as follows
 | `core-federation-grant-intent-store-memory` | federation grant acquisition — an intent lodged on one replica is unknown to every other, so the consent page and the upstream callback answer as if the flow had expired whenever they land elsewhere, and the bound on live intents is counted per replica instead of per (client, subject). Established grants and revocations are unaffected, so this adapter beside a durable grant store is a single-replica configuration rather than a broken one |
 | `core-mfa-factor-store-memory` | enrolled second factors — a factor enrolled on one replica is unknown to every other, and a restart empties every replica: each subject then reads as one with nothing enrolled |
 | `core-mfa-transaction-store-memory` | MFA transactions and the lock state — a transaction started on one replica is unknown to the replica that receives the verification, and the attempt limits, the lockout and the trusted browsers are counted per replica. A restart also loses the email proof an operator reset required (`resetMfaForSubject` with `requireEmailProof: true`): beside a durable factor store, a password holder can then bind without it. Do not use it where operator resets are used |
-| `session-store` (only with `session.storage.type = "memory"`, `SESSION_STORAGE_TYPE=memory`; #474) | the express-session store — a login served by one replica is unknown to the others, so a browser whose next request lands elsewhere is logged out, and every session is lost on restart |
+| `session-store` (only with `session-store.storage.type = "memory"`, `SESSION_STORE_STORAGE_TYPE=memory`; #474) | the express-session store — a login served by one replica is unknown to the others, so a browser whose next request lands elsewhere is logged out, and every session is lost on restart |
 
 DPoP keeps no store of its own: every accepted proof is recorded in the
 seen-set above (`dpop-proof:<jkt>`), so `core-replay-seen-set-memory` is what
@@ -98,7 +98,7 @@ Three things the guard cannot do:
   (`templates/standalone/src/modules.mts`) — carry the declaration since #455,
   so `multi` refuses them by name; before #455 they booted. Three more joined
   them in #474 and are refused the same way: express-session's own store under
-  `SESSION_STORAGE_TYPE=memory`, and the login and WebAuthn-options rate
+  `SESSION_STORE_STORAGE_TYPE=memory`, and the login and WebAuthn-options rate
   limiters when no shared `rateLimiter` is wired, and so is the MFA routes'
   limiter when the MFA module is installed. With the mode **unset**
   express-session's store joins the single `replica_unsafe_adapters` warning,
@@ -124,7 +124,7 @@ Three things the guard cannot do:
 In the standalone, `CORE_DEPLOYMENT_MODE=multi` therefore boots only once every
 store is on Redis: `USER_SESSION_STORES_ADAPTER=redis`,
 `OAUTH_CODE_ADAPTER=redis`, `RATE_LIMITER_ADAPTER=redis`,
-`ACCESS_TOKEN_DENYLIST_ADAPTER=redis`, `SESSION_STORAGE_TYPE=redis`, and
+`ACCESS_TOKEN_DENYLIST_ADAPTER=redis`, `SESSION_STORE_STORAGE_TYPE=redis`, and
 `FEDERATION_TOKEN_STORE_TYPE=redis` together with
 `REDIS_FEDERATION_TOKEN_STORE_ENCRYPTION_KEY` (canonical base64 of exactly 32
 bytes — the AES-256 key, e.g. `openssl rand -base64 32`; the builder refuses
@@ -148,8 +148,8 @@ Redis reachable only on the compose network and persisting to a volume
 (`--appendonly yes`), a **required** `.env`, and the signing-key pair mounted as
 compose secrets at `/run/secrets/jwt_private_key` / `jwt_public_key`. Its
 `environment:` block pins `NODE_ENV=production`, `CORE_DEPLOYMENT_MODE=single`,
-`SESSION_SECURE=true`, `SESSION_NAME=__Host-auth.session`,
-`SESSION_STORAGE_TYPE=redis`, `USER_SESSION_STORES_ADAPTER=redis`,
+`SESSION_STORE_SECURE=true`, `SESSION_STORE_NAME=__Host-auth.session`,
+`SESSION_STORE_STORAGE_TYPE=redis`, `USER_SESSION_STORES_ADAPTER=redis`,
 `RATE_LIMITER_ADAPTER=redis`, and both Redis URLs to `redis://redis:6379`. The
 app port is published on loopback only (`127.0.0.1:3000:3000`).
 
@@ -175,7 +175,7 @@ you never chose. Put it in `.env` (there is an empty `HTTP_TRUST_PROXY=` in
 It also leaves you the **trust boundary of the auth host's registrable
 domain**. `__Host-auth.session` cannot be set by any other host, but a
 `form_post` federation (Sign in with Apple) additionally issues a path-scoped
-transaction cookie — `session.name` with any `__Host-` / `__Secure-` prefix
+transaction cookie — `session-store.name` with any `__Host-` / `__Secure-` prefix
 stripped, then `__Secure-` and `.federation` applied, so the default
 `__Host-auth.session` yields `__Secure-auth.session.federation` — and
 `__Secure-` does not stop another host under the same registrable domain (for
@@ -185,7 +185,7 @@ dangling DNS record, XSS on a lower-trust app next door — can use that to log 
 victim's browser into the attacker's own federated account. It reaches no
 session and no credential, and there is nothing to configure: the mitigation is
 that no untrusted content runs on any host under the auth host's registrable
-domain. `session.domain = null` protects the session cookie, not this one.
+domain. `session-store.domain = null` protects the session cookie, not this one.
 Stated in full, with what the attacker needs and what it gets them, in
 [`packages/session/README.md`](../packages/session/README.md#every-host-on-the-auth-hosts-registrable-domain-is-inside-the-trust-boundary)
 (#502).
@@ -200,16 +200,16 @@ config-parse time unless noted.
 | `oauth.jwt.issuer` (`OAUTH_JWT_ISSUER`) | absolute `https` URL (`http` only for a loopback host), no query or fragment; never derived from `Host` | `packages/core/src/config/application.schema.mts` via `packages/core/src/issuer/canonical.mts` |
 | Signing key material (`OAUTH_JWT_PRIVATE_KEY_PATH` + `OAUTH_JWT_PUBLIC_KEY_PATH`, or the inline `OAUTH_JWT_PRIVATE_KEY` / `OAUTH_JWT_PUBLIC_KEY`) | required for `EdDSA` (the default), `ES256`, `RS256`; the boot error prints the `openssl` commands | `packages/core/src/keys/factory.mts` |
 | `OAUTH_JWT_SECRET` (only with `OAUTH_JWT_ALGORITHM=HS256`) | at least 32 bytes of key material, measured on the *decoded* length of hex/base64 | `packages/core/src/keys/secretEntropy.mts`, applied in `keys/factory.mts` |
-| `session.secret` (`SESSION_SECRET`) | same 32-byte floor | `application.schema.mts` (`fullSectionsSchema.session.secret`) |
-| `session.name` / `session.secure` / `session.domain` / `session.sameSite` (`SESSION_NAME`, `SESSION_SECURE`, `SESSION_DOMAIN`, `SESSION_SAME_SITE`) | a `__Host-` cookie name (the default) requires `secure = true` and `domain = null`, and a `__Secure-` name `secure = true` (either prefix in any case); the name must be an RFC 6265 token — no space, `;` or other separator, not empty; `domain` must be a host name, one leading dot allowed — no scheme, port or path; `sameSite = "none"` requires `secure = true`. The session store's rules apply where its module is installed; the issue names the key | `packages/session/src/session-cookie-policy.mts`, the session store's `configSchema` (`packages/session/src/modules/sessionStoreModule.mts`); `application.schema.mts` |
+| `session-store.secret` (`SESSION_STORE_SECRET`) | same 32-byte floor; no default, so the session store's module refuses to build without it, naming the variable | the session store's section schema (`sessionStoreConfigSchema`, `packages/session/src/modules/sessionStoreModule.mts`) |
+| `session-store.name` / `session-store.secure` / `session-store.domain` / `session-store.sameSite` (`SESSION_STORE_NAME`, `SESSION_STORE_SECURE`, `SESSION_STORE_DOMAIN`, `SESSION_STORE_SAME_SITE`) | a `__Host-` cookie name (the default) requires `secure = true` and `domain = null`, and a `__Secure-` name `secure = true` (either prefix in any case); the name must be an RFC 6265 token — no space, `;` or other separator, not empty; `domain` must be a host name, one leading dot allowed — no scheme, port or path; `sameSite = "none"` requires `secure = true`. The session store's rules apply where its module is installed; the issue names the key | `packages/session/src/session-cookie-policy.mts`, the session store's section schema (`packages/session/src/modules/sessionStoreModule.mts`) |
 | `repositories.user.http.authenticateUrl` / `authenticateByTokenUrl` (`CLIENT_USER_AUTHENTICATE_URL`, `CLIENT_USER_AUTHENTICATE_BY_TOKEN_URL`) | absolute `https` (loopback `http` only); `timeout` a positive integer ≤ 2147483647 ms. Whether an endpoint redirects cannot be checked at construction, so it is required all the same: each URL is the endpoint that answers — a `3xx` is not followed, so a URL that redirects fails every call ([foundation README](../packages/foundation/README.md#what-the-store-must-enforce-itself)) | `packages/foundation/src/repositories/HttpUserRepository.mts` |
-| `repositories.user.http.bearerToken` (`CLIENT_USER_BEARER_TOKEN`) | optional — unset sends the Store no `Authorization` header. Set, including exported but empty, and `repositories.user.type = "http"` (`CLIENT_USER_TYPE`; the standalone's default — core's `reference.conf` defaults to `yaml`, which never reads the `http` block): a bare RFC 6750 token (no `Bearer ` prefix, no whitespace) with at least 32 bytes of key material, measured like `SESSION_SECRET`; the message never quotes the value. One token goes to all four Store URLs, so they must be one trust domain. The Store should refuse every request without it, with `401` (or `403`) and a `Bearer` challenge; a token it refuses is not a boot failure but an outage on every Store call (see the Store row in [§3](#3-what-fail-closed-looks-like-on-each-path); [foundation README](../packages/foundation/README.md#what-the-store-must-enforce-itself)) | `packages/foundation/src/repositories/HttpUserRepository.mts`, with core's `keys/secretEntropy.mts` |
+| `repositories.user.http.bearerToken` (`CLIENT_USER_BEARER_TOKEN`) | optional — unset sends the Store no `Authorization` header. Set, including exported but empty, and `repositories.user.type = "http"` (`CLIENT_USER_TYPE`; the standalone's default — core's `reference.conf` defaults to `yaml`, which never reads the `http` block): a bare RFC 6750 token (no `Bearer ` prefix, no whitespace) with at least 32 bytes of key material, measured like `SESSION_STORE_SECRET`; the message never quotes the value. One token goes to all four Store URLs, so they must be one trust domain. The Store should refuse every request without it, with `401` (or `403`) and a `Bearer` challenge; a token it refuses is not a boot failure but an outage on every Store call (see the Store row in [§3](#3-what-fail-closed-looks-like-on-each-path); [foundation README](../packages/foundation/README.md#what-the-store-must-enforce-itself)) | `packages/foundation/src/repositories/HttpUserRepository.mts`, with core's `keys/secretEntropy.mts` |
 | `refreshTokenFamilyStore.redis.url` (`REFRESH_TOKEN_FAMILY_STORE_REDIS_URL`) | required whenever any Redis adapter is selected — it is the one shared socket | `templates/standalone/src/modules.mts` (`standaloneRedisClientsModule`) |
 | `redis-rate-limiter.failMode` (`REDIS_RATE_LIMITER_FAIL_MODE`) | `"open"` or `"closed"`; the Redis package's `reference.conf` ships `"closed"`. The outage policy of the limiter `redisRateLimiterModule` builds, which every guarded route applies while Redis cannot answer. It governs no other limiter: the in-process one has no backend to lose, and a limiter of the deployment's own answers its own policy. Its old path, `rateLimit.failMode`, and old variable, `RATE_LIMIT_FAIL_MODE`, refuse boot where the module is installed; elsewhere boot warns `rate_limit_fail_mode_not_applied` when the old path says `"open"` and the wired limiter does not. Written at this path without the module installed, it is reported by nothing: core's schema mirrors the Redis stores' sections, so `config_sections_ignored` counts `redis-rate-limiter` as owned and does not name it, and the warning reads the old path only | the module's section (`packages/redis/src/ratelimit.mts`), which refuses any other value |
 | `audit.sink.type` (`AUDIT_SINK_TYPE`) | a registered sink name. Core accepts `"none"` as a declaration; the standalone registers no `"none"` builder, so there an unknown type (including `none`) fails boot naming the sinks that exist | `packages/core/src/audit/types.mts` (`AUDIT_SINK_ABSENCE_POLICY`); `templates/standalone/src/modules.mts` (`auditSinkModule`) |
 | `device-grant.verificationUri` | required once `device-grant.enabled = true`; the device displays it verbatim | `packages/device-grant/src/module.mts` |
 | `mtls.fullPki.revocation.mode` / `.onUnavailable` / `.allowedHosts` | all three required under `mode = "full-pki"` with `revocation.mode` ∈ `"crl"`, `"ocsp"`, `"both"` (`allowedHosts` covers CRL distribution points and OCSP responders alike); there is no default for what an outage means | `packages/mtls/src/module.mts`, `packages/mtls/config/reference.conf` |
-| `http.readinessTimeoutMs`, `session.csrf.ttlSeconds`, token lifetimes, `session.maxAge` | positive integers. An **exported-but-empty** variable is `""`, which coerces to `0` and is refused — the failure it prevents is a zero lifetime or a probe that always times out | `application.schema.mts` |
+| `http.readinessTimeoutMs`, `session.csrf.ttlSeconds`, token lifetimes, `session-store.maxAge`, `session.rateLimit.login` | positive integers. An **exported-but-empty** variable is `""`, which coerces to `0` and is refused — the failure it prevents is a zero lifetime or a probe that always times out | `application.schema.mts`; the session package's section schemas for `session.*` and `session-store.*` |
 | `oauth.accessToken.defaultExpiresIn` / `maxExpiresIn` (`OAUTH_ACCESS_TOKEN_DEFAULT_EXPIRES_IN` / `OAUTH_ACCESS_TOKEN_MAX_EXPIRES_IN`) | the default must not exceed the max; the message names both keys. An unset max is the default, and an unset default is the deprecated `oauth.accessToken.expiresIn` (shipped `3600`) — so a max below `3600` set on its own fails until the default is lowered too | `application.schema.mts` (`resolveAccessTokenLifetime`) |
 
 ### Boot refusals you will meet
@@ -878,7 +878,6 @@ stream — its level is fixed at `info`.
 | `dpop_replay_ttl_below_window` (warn, `iatWindowSeconds`, `replayTtlSeconds`, `requiredTtlSeconds`) | `dpop/src/verifier.mts` | `dpop.replayStoreTtlSeconds` is below `2 × iatWindowSeconds + 1`: a proof can outlive its replay record and be replayed while still inside its acceptance window. Raise it to `requiredTtlSeconds` or more. It was a sentence, with `reason: "replay_ttl_below_iat_window"` |
 | `login_rate_limiter_not_shared`, `webauthn_authentication_options_rate_limiter_not_shared` (warn) | `session/src/routes/Session.mts`, `webauthn/src/module.mts` | no shared `rateLimiter` and `core.deployment.mode` unset; the guard is per-process (`"multi"` refuses boot instead, `"single"` is silent — #474) |
 | `webauthn_authentication_options_budget_mismatch` (warn — `key`, `contributed`, `webauthnConfig`) | `webauthn/src/module.mts` | a shared `rateLimiter` is wired, and the contributed budget for `webauthn-authentication-options` (`contributed`: the one the module contributes from `webauthn.rateLimit.authenticationOptions`, or an override's; `null` when there is none) differs from the `webauthnConfig` slot (what the per-process fallback is built from, and what backs the `RateLimit-*` headers only for an adapter that reports no `limit`). The route runs on an explicit `limits.webauthn-authentication-options` in the limiter's section if there is one, otherwise on the contributed budget, otherwise on the limiter's default. An explicit `limits` entry is not compared. Set `key` to the slot's values (the line names both), and check `rate_limit_budgets_registered` for a module that overrode it |
-| `pkce_config_ignored_s256_is_mandatory` (warn) | `oauth/src/grants/pkce.mts` | a retired PKCE key (or `OAUTH_GRANTS_AUTHORIZATION_CODE_PKCE_REQUIRE_S256`) is still set; delete it |
 | `jwt_verify_aud_skipped`, `jwt_verify_iss_skipped` (warn, once per logger) | `core/src/jwt/verify.mts` | a verification surface is not pinning `aud`/`iss` |
 | `jwt_verify_legacy_typ` (warn) | `core/src/jwt/verify.mts` | `OAUTH_JWT_LEGACY_TYP_ACCEPT=true` is admitting typ-less tokens; close the window |
 | `federationTokenStore: in-memory adapter is for dev/test only …` (warn) | `core/src/federation-tokens/factory.mts` | the standalone builds this store in memory unless `federationTokenStore.type = "redis"` (`FEDERATION_TOKEN_STORE_TYPE=redis`) is set (#456) |
@@ -1029,7 +1028,7 @@ characters.
 | Connection | Configured by | Serves | Probe name |
 | --- | --- | --- | --- |
 | the shared **ioredis** socket, one per replica | `refreshTokenFamilyStore.redis.url` / `.password` (`REFRESH_TOKEN_FAMILY_STORE_REDIS_URL`, `…_PASSWORD`) | every `makeIoredisClients` purpose: refresh-token families, the six user-session stores, rate limiter, authorization codes, access-token denylist, federation tokens and the consent stores when Redis-backed (`templates/standalone/src/modules.mts`, `packages/redis/src/ioredis.mts`) | `redis` |
-| a **node-redis** client via connect-redis | `session.storage.redis.url` / `.password` (`SESSION_STORAGE_REDIS_URL`, `…_PASSWORD`) | the express-session cookie store only; its key layout and TTL are connect-redis's own — this repo passes it nothing but the client (`packages/session/src/store/factory.mts`) | `session-store` |
+| a **node-redis** client via connect-redis | `session-store.storage.redis.url` / `.password` (`SESSION_STORE_STORAGE_REDIS_URL`, `…_PASSWORD`) | the express-session cookie store only; its key layout and TTL are connect-redis's own — this repo passes it nothing but the client (`packages/session/src/store/factory.mts`) | `session-store` |
 
 Plus one short-lived **duplicate** of the shared socket per refresh rotation:
 `WATCH` is connection-scoped in Redis, so `updateFamily` opens `client.duplicate()`
@@ -1065,7 +1064,7 @@ can share a database (`REDIS_SESSION_STORES_KEY_PREFIX`,
 | `rtfam:<familyId>` | string, JSON `{familyId, activeJti, revoked, expiresAtMs}` | the family's `expiresAtMs` (`oauth.refreshToken.expiresIn`, default 86400 s). Set once at creation; rotation **never extends** it (`Math.min` in `rotate`). Revocation — by `/oauth/revoke`, a logout, or a replay — **does**: a revoked family is kept until the later of that expiry and the revocation plus `oauth.accessToken.maxExpiresIn`, plus about five minutes (the verifier's clock tolerance), so its access tokens cannot outlive it; a family revoked after its key expired gets a revoked key again | `packages/redis/src/refresh-token-family.mts`, `core/src/refresh-token-family/rotation.mts`, `revocation.mts`, `retention.mts` |
 | `oauth:code:<code>` | string, JSON code record | `redisCodeRepository.defaultExpiresIn` (`CLIENT_CODE_DEFAULT_EXPIRES_IN`, default 600 s) or the per-call `expiresIn`; consumed with `GETDEL` | `packages/redis/src/code-repository.mts` |
 | `atdeny:<jti>` | string `"1"` | the revoked access token's **remaining** lifetime plus about five minutes (`REVOCATION_RETENTION_ALLOWANCE_MS` — the verifier accepts a token that long past its `exp`); a token already past that writes nothing | `packages/redis/src/access-token-denylist.mts`, `packages/oauth/src/routes/revoke.mts` |
-| `<tag>:ip:<ip>` — `token`, `authorize`, `introspect`, `login`, `device_authorization`, `webauthn-authentication-options`; `device_verification:user:<subject>` | integer counter | the prefix's `windowSeconds`: `redis-rate-limiter.limits.<prefix>` when declared, else the budget the prefix's owning module contributes — `login` 20 per 900 s from `rateLimit.login` (the session module), `device_verification` 5 per 300 s from `device-grant.rateLimit` (the device grant), `webauthn-authentication-options` 30 per 60 s from `webauthn.rateLimit.authenticationOptions` (WebAuthn), `mfa` 60 per 300 s from `mfa.rateLimit.routes` (the MFA module) — else `defaultLimit` 60/60 s. The expiry is set atomically with the increment and only when missing, so a steady stream cannot hold a window open | `packages/redis/src/ratelimit.mts`, `ioredis.mts` (`LUA_INCREMENT_WITH_TTL`), `core/src/ratelimit/budgetLookup.mts` |
+| `<tag>:ip:<ip>` — `token`, `authorize`, `introspect`, `login`, `device_authorization`, `webauthn-authentication-options`; `device_verification:user:<subject>` | integer counter | the prefix's `windowSeconds`: `redis-rate-limiter.limits.<prefix>` when declared, else the budget the prefix's owning module contributes — `login` 20 per 900 s from `session.rateLimit.login` (the session module), `device_verification` 5 per 300 s from `device-grant.rateLimit` (the device grant), `webauthn-authentication-options` 30 per 60 s from `webauthn.rateLimit.authenticationOptions` (WebAuthn), `mfa` 60 per 300 s from `mfa.rateLimit.routes` (the MFA module) — else `defaultLimit` 60/60 s. The expiry is set atomically with the increment and only when missing, so a steady stream cannot hold a window open | `packages/redis/src/ratelimit.mts`, `ioredis.mts` (`LUA_INCREMENT_WITH_TTL`), `core/src/ratelimit/budgetLookup.mts` |
 | `ss:us:<sid>` | string, JSON `{sid, sub, authTimeMs, createdAtMs, expiresAtMs, claims, amr?, authentication?}` — `amr` (RFC 8176, #481) is left out when the login path recorded none; `authentication` (`{primary, federation?, upstreamAmr?, mfaAtMs?}`, the MFA ADR's D9) is left out by a release before it, and such a session is read as one to split — a federated one vouches for `fed` alone | the session's `expiresAt` (`SET … PX … NX`); a verified second factor rewrites the value with `KEEPTTL` | `packages/redis/src/userSessionStore.mts` |
 | `ss:rp:<sid>` | hash, field = `clientId`, value = RP envelope | `session.expiresAt`, raised but never truncated (`PEXPIREAT NX` + `GT`) | `packages/redis/src/sessionRPRegistry.mts`, `internal/redisSidHash.mts` |
 | `ss:fi:<sid>`, `ss:fed:<sid>` | sorted sets of family ids / federation names | same rule | `packages/redis/src/sessionFamilyIndex.mts`, `sessionFederationIndex.mts`, `internal/redisSidSortedSet.mts` |
@@ -1100,7 +1099,7 @@ lifetime) per family:
 - **Sessions** — per live browser session: one `ss:us:` envelope (the JSON
   above plus your claims), up to three sid-keyed structures, one member in
   the subject's `ss:sub:` set, and one connect-redis record. Lifetime =
-  `session.maxAge` (default 3 600 000 ms).
+  `session-store.maxAge` (default 3 600 000 ms).
 - **Refresh families** — one small JSON string per family for
   `oauth.refreshToken.expiresIn` (default 86 400 s) from first issuance; a
   logged-out or replayed family stays resident, marked `revoked`, until that
@@ -1425,9 +1424,9 @@ before you flip — and a relying party holding the secret can also mint.
 
 ### Two other secrets that do not rotate gracefully
 
-- **`session.secret`** is a single string in the schema and is passed to
+- **`session-store.secret`** is a single string in the schema and is passed to
   express-session as one value (`packages/session/src/modules/sessionStoreModule.mts`),
-  so there is no overlap window: rotating `SESSION_SECRET` invalidates every
+  so there is no overlap window: rotating `SESSION_STORE_SECRET` invalidates every
   browser session at once.
 - **The federation-token encryption key** (`redis-federation-token-store.encryptionKey`
   under `mode = "required"`): an envelope written under the old key fails to
@@ -1460,7 +1459,7 @@ before you flip — and a relying party holding the secret can also mint.
    | `oauth.dpop.replay-store` (any value) | removed | `oauth.dpop.replay-store was removed. …` (`config-path-relocated`, wherever the DPoP module is installed): DPoP records its proofs in the `replaySeenSet` component, whose module chooses the backend (`replaySeenSet.adapter` in the standalone); delete the key. A `dpopReplayStore` bootstrap component is no longer read either — see the DPoP note below |
    | `oauth.refreshToken.legacyRtPolicy = "accept-with-warning"` | enum shrunk to `"reject"` | Zod `invalid_enum_value` naming the survivors |
    | flat `oauth.jwt.algorithm` / `kid` / `secret` / key fields | moved | `oauth.jwt has legacy flat fields (…). Migrate to nested shape: oauth.jwt.signingKey.local.<field>` |
-   | `oauth.grants.authorization_code.pkce.*` (and `OAUTH_GRANTS_AUTHORIZATION_CODE_PKCE_REQUIRE_S256`) | warn and ignore | one `pkce_config_ignored_s256_is_mandatory` line; S256 is mandatory regardless (`packages/oauth/src/grants/pkce.mts`) |
+   | `oauth.grants.authorization_code.pkce.*` (and `OAUTH_GRANTS_AUTHORIZATION_CODE_PKCE_REQUIRE_S256`, any value) | removed | `oauth.grants.authorization_code.pkce.<key> was removed` (`config-path-relocated`), and the variable set at all `environment-variable-renamed`, wherever `oauthAuthorizationModule` is installed: S256 is mandatory regardless (`packages/oauth/src/grants/pkce.mts`); delete the key and the variable |
    | `repositories.code.type = "redis"` | deprecated alias of `oauth.code.adapter` | a `config_key_deprecated` warn at boot, `key = "repositories.code.type"` |
    | `oauth.accessToken.expiresIn` (and `OAUTH_ACCESS_TOKEN_EXPIRES_IN`) | deprecated alias of `oauth.accessToken.defaultExpiresIn`, read only while that key is unset — set both and the new key wins | the standalone logs `config_key_deprecated` (warn, `key = "oauth.accessToken.expiresIn"`) at boot when the old key carries anything but the shipped `3600`; `resolveAccessTokenLifetime` is the reader for every composition |
 

@@ -28,7 +28,7 @@ auth.provider のデプロイ可能なサーバーテンプレート。これは
 - **Node.js** `>=22.0.0`
 - **`bcrypt` のネイティブバイナリ**: このテンプレートは推移的に `bcrypt@6.x` に依存しており、これは `darwin-arm64`、`darwin-x64`、`linux-x64`（glibc と musl）、`linux-arm64`（glibc と musl）、`linux-arm`、`win32-x64`、`win32-arm64` 向けの **prebuild 済み N-API バイナリ**を同梱している。これらのプラットフォームでは `pnpm install` はソースからコンパイルせずに成功し、追加のツールチェーンは不要である（`darwin-*`、`node:*-alpine`、`node:*-bookworm` の各イメージはいずれも同梱の prebuild に一致する）。一致する prebuild の無いプラットフォームや libc/arch の組み合わせでは `pnpm install` がコンパイルにフォールバックし、その場合は C++ コンパイラと Python（Node.js ネイティブアドオンの標準ツールチェーン）が必要になる: Debian/Ubuntu は `apt-get install build-essential python3`、Alpine は `apk add make g++ python3`、macOS は `xcode-select --install`。`bcrypt` 向けの pnpm 10 の `onlyBuiltDependencies` allowlist は `pnpm-workspace.yaml` にある — pnpm ≥10.29 は単一パッケージのプロジェクトでもそこからしか読まない。`create-auth-provider` は scaffold するプロジェクトにこのファイルを書き出す（このモノレポ内では、allowlist はワークスペースルートの `pnpm-workspace.yaml` にある）。これが無いと、新規の `pnpm install` はそれらのプラットフォームで install hook を黙ってスキップする。
 - **Redis 7.2 LTS 以降** — Redis をバックエンドとするアダプター（refresh token family ストア、コードリポジトリ、フェデレーショントークンストア、セッションストア）すべてに必要。複数のアダプターが依存する `pExpireGT` フラグの組は Redis 7.0+ で導入された。7.2 LTS がテスト済みの下限である。AWS ElastiCache for Redis 7.2、Upstash Redis、Redis Cloud 7.2、セルフマネージドの `redis:7.2-alpine` でテストしている。
-- **ioredis** `^6.0.0`（ランタイムの直接依存）。このテンプレートが配線する `@o3co/auth-provider-redis` のアダプター — refresh token family、認可コード、rate limit カウンター、アクセストークン denylist、replay seen-set、ユーザーセッションストア、フェデレーショントークンストア、同意ストア、フェデレーショングラントのストア — はすべて、`standaloneRedisClientsModule` がレプリカごとに開く 1 本の ioredis 接続の上で動く。同じモジュールは Redis パッケージが提供するほかのストア — デバイスコードストアと WebAuthn の challenge ストア — のクライアントも提供するため、デバイスグラントや WebAuthn を Redis のストアとともに `buildModules.mts` に加えるデプロイは、そのクライアントをここで得る。`redis` npm パッケージ（`^6.2.1`）が依存に残っている理由は 1 つだけである: `connect-redis` は node-redis クライアントを受け取るため、`SESSION_STORAGE_TYPE=redis` の背後にある `express-session` ストアは 2 本目の別接続になる（`/readyz` の `session-store` probe）。
+- **ioredis** `^6.0.0`（ランタイムの直接依存）。このテンプレートが配線する `@o3co/auth-provider-redis` のアダプター — refresh token family、認可コード、rate limit カウンター、アクセストークン denylist、replay seen-set、ユーザーセッションストア、フェデレーショントークンストア、同意ストア、フェデレーショングラントのストア — はすべて、`standaloneRedisClientsModule` がレプリカごとに開く 1 本の ioredis 接続の上で動く。同じモジュールは Redis パッケージが提供するほかのストア — デバイスコードストアと WebAuthn の challenge ストア — のクライアントも提供するため、デバイスグラントや WebAuthn を Redis のストアとともに `buildModules.mts` に加えるデプロイは、そのクライアントをここで得る。`redis` npm パッケージ（`^6.2.1`）が依存に残っている理由は 1 つだけである: `connect-redis` は node-redis クライアントを受け取るため、`SESSION_STORE_STORAGE_TYPE=redis` の背後にある `express-session` ストアは 2 本目の別接続になる（`/readyz` の `session-store` probe）。
 
 ## ファーストパーティクライアント
 
@@ -73,7 +73,7 @@ my-app:
 
 allowlist はネットワーク上の制御であって、暗号学的な制御ではない。エッジは受信した `X-Forwarded-*` ヘッダーに追記するのではなく**除去**しなければならず、エッジとこのプロセスの間のホップは、送信元アドレスを偽装できる者から到達できてはならない。
 
-**`rateLimiter.adapter` を Redis に向けること。** デフォルトは `"memory"` でプロセスごとである: N レプリカでは設定したすべての limit が実質 N 倍になり、デプロイのたびにリセットされる。memory アダプターは**バケット枯渇によって回避可能**でもある: バケット数の上限を 10,000 とし、上限に達すると、新しいキーを受け入れる際にリセットが最も近いバケットを追い出す — そのため多数の送信元 IP を提示できる攻撃者（`HTTP_TRUST_PROXY` が実際のホップより広ければ、`req.ip` はクライアントの影響を受ける）は、標的のカウンターが追い出されてやり直しになるまでテーブルをかき回せる。これは開発用の 1 プロセスなら許容できるが、本番の rate limit ではない。ログインガードも同じ共有コンポーネントの上で動くため、1 つの設定で OAuth エンドポイントと `/session/login` の両方がカバーされる。ログインのウィンドウと上限は引き続き `rateLimit.login` で設定する。session モジュールがそれを両アダプターが読む `login` の予算として寄与するため、改めて書き直すものは無い。
+**`rateLimiter.adapter` を Redis に向けること。** デフォルトは `"memory"` でプロセスごとである: N レプリカでは設定したすべての limit が実質 N 倍になり、デプロイのたびにリセットされる。memory アダプターは**バケット枯渇によって回避可能**でもある: バケット数の上限を 10,000 とし、上限に達すると、新しいキーを受け入れる際にリセットが最も近いバケットを追い出す — そのため多数の送信元 IP を提示できる攻撃者（`HTTP_TRUST_PROXY` が実際のホップより広ければ、`req.ip` はクライアントの影響を受ける）は、標的のカウンターが追い出されてやり直しになるまでテーブルをかき回せる。これは開発用の 1 プロセスなら許容できるが、本番の rate limit ではない。ログインガードも同じ共有コンポーネントの上で動くため、1 つの設定で OAuth エンドポイントと `/session/login` の両方がカバーされる。ログインのウィンドウと上限は引き続き `session.rateLimit.login` で設定する。session モジュールがそれを両アダプターが読む `login` の予算として寄与するため、改めて書き直すものは無い。
 
 **BFF の背後では、必要になる前に `limits.token` を上げておくこと。** OAuth エンドポイントの rate limit は `req.ip` をキーにする（`packages/core/src/ratelimit/guard.mts` はバケットキーを `<endpoint>:ip:<req.ip>` として組み立てる）。クライアントがブラウザやネイティブアプリで、このプロバイダーと直接通信しているなら、これは正しい identity である。しかし backend-for-frontend 構成 — サーバー側アプリがセッションを保持し、ユーザーに代わってコード交換と refresh を行う構成 — では誤った identity になる: すべての `/oauth/token` と `/oauth/introspect` の呼び出しが BFF の単一アドレスから届き、デプロイ全体で 1 つのバケットを共有する。デフォルトの 60 秒あたり 60 リクエストでは、**全ユーザー合計で毎分およそ 60 回の session グラント交換**が上限になる — しかもそれは rate limit として表に出てこない。BFF は想定していない `429` を受け取り、それを自分の呼び出し元への `502` に変え、ユーザーが報告する症状は「サインインがときどき壊れる」になる。それは起き始めるトラフィック量に達した時点で現れ、それより前には現れない。
 
@@ -94,7 +94,7 @@ redis-rate-limiter {
 
 デフォルトは意図的に変えていない: 送信元 IP ごとに 60 秒あたり 60 回というのは、クライアントが本当に別々の IP であるデプロイにとって妥当な総当たり対策の上限であり、一方の構成に合わせて全体的に引き上げれば、もう一方の構成での防御が弱まる。BFF *自身の*ユーザーを守るスロットリングは、ユーザーごとの identity がまだ存在する BFF の前段に置くこと。
 
-**2 つ以上のレプリカを動かすようになったら `CORE_DEPLOYMENT_MODE=multi` を設定すること。** すると、共有が必要な in-memory ストアがまだ配線されていれば起動が*失敗*し、該当するものすべてと、それぞれの代償が名指しされる — ユーザーセッションの分岐（back-channel logout が 1 つのレプリカにしか届かず、ログアウトしたセッションが他のレプリカでは有効なまま）、rate limit カウンターの倍増、アクセストークン失効の未伝播、一度きりのクライアントアサーションや WebAuthn チャレンジがレプリカごとに 1 回ずつ再利用できてしまうこと。このチェックはライブラリのモジュール名のリストではなく、インストールされた各モジュールが自身の manifest に持つ宣言を読むため、このテンプレート独自の in-memory モジュール — ユーザーセッションストア（`USER_SESSION_STORES_ADAPTER=memory`）、認可コードリポジトリ（`OAUTH_CODE_ADAPTER=memory`）、フェデレーショントークンストア（`FEDERATION_TOKEN_STORE_TYPE=memory`、デフォルト） — も名指しで拒否される。`SESSION_STORAGE_TYPE=memory` のときの express-session 自身のストア（#474）と、デフォルトの memory の rate limiter（`core-rate-limiter-memory`、`RATE_LIMITER_ADAPTER=memory`）も同様である。モードが未設定なら何も拒否されない: これらはすべて、起動時の 1 件の `replica_unsafe_adapters` 警告に列挙される。（login と WebAuthn-options のルートは、それぞれ個別に警告するプロセス単位のフォールバック limiter を持つが、それが働くのは `rateLimiter` をまったく配線しない構成だけで、このテンプレートは常に配線する。オペレーター runbook を参照。）`CORE_DEPLOYMENT_MODE=single` ではチェックは何も言わない。レプリカは 1 つだと宣言したからである。このテンプレートは DPoP をインストールしない。DPoP を加えた構成では、受け入れた DPoP proof はすべて `private_key_jwt` と同じ replay seen-set（`REPLAY_SEEN_SET_ADAPTER`）に記録されるため、同じ扱いを受ける — `memory` は `CORE_DEPLOYMENT_MODE=multi` のもとで拒否され、モード未設定なら警告に列挙される。同梱の `redis` なら DPoP の記録もレプリカ間で共有される。dpop パッケージの [operator requirements](../../packages/dpop/README.md#operator-requirements) を参照。
+**2 つ以上のレプリカを動かすようになったら `CORE_DEPLOYMENT_MODE=multi` を設定すること。** すると、共有が必要な in-memory ストアがまだ配線されていれば起動が*失敗*し、該当するものすべてと、それぞれの代償が名指しされる — ユーザーセッションの分岐（back-channel logout が 1 つのレプリカにしか届かず、ログアウトしたセッションが他のレプリカでは有効なまま）、rate limit カウンターの倍増、アクセストークン失効の未伝播、一度きりのクライアントアサーションや WebAuthn チャレンジがレプリカごとに 1 回ずつ再利用できてしまうこと。このチェックはライブラリのモジュール名のリストではなく、インストールされた各モジュールが自身の manifest に持つ宣言を読むため、このテンプレート独自の in-memory モジュール — ユーザーセッションストア（`USER_SESSION_STORES_ADAPTER=memory`）、認可コードリポジトリ（`OAUTH_CODE_ADAPTER=memory`）、フェデレーショントークンストア（`FEDERATION_TOKEN_STORE_TYPE=memory`、デフォルト） — も名指しで拒否される。`SESSION_STORE_STORAGE_TYPE=memory` のときの express-session 自身のストア（#474）と、デフォルトの memory の rate limiter（`core-rate-limiter-memory`、`RATE_LIMITER_ADAPTER=memory`）も同様である。モードが未設定なら何も拒否されない: これらはすべて、起動時の 1 件の `replica_unsafe_adapters` 警告に列挙される。（login と WebAuthn-options のルートは、それぞれ個別に警告するプロセス単位のフォールバック limiter を持つが、それが働くのは `rateLimiter` をまったく配線しない構成だけで、このテンプレートは常に配線する。オペレーター runbook を参照。）`CORE_DEPLOYMENT_MODE=single` ではチェックは何も言わない。レプリカは 1 つだと宣言したからである。このテンプレートは DPoP をインストールしない。DPoP を加えた構成では、受け入れた DPoP proof はすべて `private_key_jwt` と同じ replay seen-set（`REPLAY_SEEN_SET_ADAPTER`）に記録されるため、同じ扱いを受ける — `memory` は `CORE_DEPLOYMENT_MODE=multi` のもとで拒否され、モード未設定なら警告に列挙される。同梱の `redis` なら DPoP の記録もレプリカ間で共有される。dpop パッケージの [operator requirements](../../packages/dpop/README.md#operator-requirements) を参照。
 
 この変数は `core.deployment.mode` を設定する。旧名の `DEPLOYMENT_MODE` は、単独で、または `CORE_DEPLOYMENT_MODE` と異なる値で設定されているとブートを拒否し、同じ値で並べて設定されていればブートする。
 
@@ -104,7 +104,7 @@ redis-rate-limiter {
 
 デフォルトのモジュールがカバーする、その他のマルチレプリカ上の考慮点:
 
-- `express-session` のストア（`sessionStoreModule`）は独自の接続である: `SESSION_STORAGE_TYPE=redis` とし、`SESSION_STORAGE_REDIS_URL`（`session.storage.redis.url`）を共有インスタンスに向ける。
+- `express-session` のストア（`sessionStoreModule`）は独自の接続である: `SESSION_STORE_STORAGE_TYPE=redis` とし、`SESSION_STORE_STORAGE_REDIS_URL`（`session-store.storage.redis.url`）を共有インスタンスに向ける。
 - ユーザーセッションストアは `userSessionStores.adapter = "redis"`（`USER_SESSION_STORES_ADAPTER`）で切り替わり、共有の ioredis 接続 — `REFRESH_TOKEN_FAMILY_STORE_REDIS_URL` で設定するもの — の上に `redisSessionStoresModule` を配線する。
 - 認可コードリポジトリは `oauth.code.adapter`（`OAUTH_CODE_ADAPTER`）で切り替わる。テンプレートは同じ接続上の `"redis"` を同梱している。`oauth.code.adapter` が優先される。非推奨の `repositories.code.type`（`CLIENT_CODE_TYPE`）は、`oauth.code.adapter` が未設定のときにだけ、起動時の `config_key_deprecated` 警告付きで読まれる — 同梱の `config/application.conf` がそれを未設定のままにすることはない。`CLIENT_CODE_ENDPOINT_URI`（`repositories.code.redis.endpointUri`）は `config/application.conf` でバインドされているが、それを読むものは何も無い: Redis のコードリポジトリは共有接続の上で動くため、すべてのアダプターで Redis URL は 1 つである。
 - replay seen-set — `private_key_jwt` クライアント認証（#484）の背後にある、`jti` の一回限り使用の記録 — は `replaySeenSet.adapter`（`REPLAY_SEEN_SET_ADAPTER`）で切り替わる。テンプレートは共有接続上の `"redis"` を同梱しており、`memory` は `CORE_DEPLOYMENT_MODE=multi` のもとでは拒否される。捕獲されたクライアントアサーションが、レプリカごとに 1 回ずつリプレイできてしまうためである。
@@ -121,18 +121,18 @@ redis-rate-limiter {
 - `OAUTH_JWT_ISSUER` — このサーバーのオリジン（loopback ホストなら `http` も可）;
 - 署名鍵のペア、`OAUTH_JWT_PRIVATE_KEY_PATH` / `OAUTH_JWT_PUBLIC_KEY_PATH`
   （[OAuth JWT](#oauth-jwt) を参照）;
-- `SESSION_SECRET`、32 バイト以上;
+- `SESSION_STORE_SECRET`、32 バイト以上;
 - `CLIENT_USER_AUTHENTICATE_URL` と `CLIENT_USER_AUTHENTICATE_BY_TOKEN_URL` —
   ユーザーサービス（「the Store」）。`https`、または loopback ホストなら `http`。
   起動時に検査されるのは形式だけで、応答があるかどうかではない。何かが応答する
   までログインは失敗する（[ユーザーリポジトリ](#ユーザーリポジトリ) を参照）;
 - `redis://localhost:6379` で到達できる Redis。同梱の設定は、ブラウザセッションの
-  ストアをそこに置き（`SESSION_STORAGE_REDIS_URL`）、共有の接続を 1 本
+  ストアをそこに置き（`SESSION_STORE_STORAGE_REDIS_URL`）、共有の接続を 1 本
   （`REFRESH_TOKEN_FAMILY_STORE_REDIS_URL`）開いて、refresh token family、
   認可コード、アクセストークン denylist、replay seen-set に使う — 下の設定を
   加えれば、ユーザーセッションストアにも。
 
-平文の HTTP では、さらに `SESSION_SECURE=false` と、`__Host-` プレフィックスを
+平文の HTTP では、さらに `SESSION_STORE_SECURE=false` と、`__Host-` プレフィックスを
 持たないセッション Cookie 名が必要になる（[Session](#session) を参照）。また
 `USER_SESSION_STORES_ADAPTER=redis` を設定すること: ブラウザセッションのストアは
 Redis にあり、ユーザーセッションストアのデフォルトは memory で、`tsx watch` は
@@ -166,8 +166,8 @@ docker run -d --name auth-redis -p 127.0.0.1:6379:6379 redis:7.2-alpine
 export OAUTH_JWT_ISSUER=http://localhost:3000 \
   OAUTH_JWT_PRIVATE_KEY_PATH=./jwt-private.pem \
   OAUTH_JWT_PUBLIC_KEY_PATH=./jwt-public.pem \
-  SESSION_SECRET="$(openssl rand -hex 32)" \
-  SESSION_SECURE=false SESSION_NAME=auth.sid \
+  SESSION_STORE_SECRET="$(openssl rand -hex 32)" \
+  SESSION_STORE_SECURE=false SESSION_STORE_NAME=auth.sid \
   USER_SESSION_STORES_ADAPTER=redis \
   CLIENT_USER_AUTHENTICATE_URL=http://localhost:8080/authenticate \
   CLIENT_USER_AUTHENTICATE_BY_TOKEN_URL=http://localhost:8080/authenticate-by-token
@@ -223,18 +223,18 @@ overlay の値は `application.conf` より優先される。scaffold には `de
 | `OAUTH_JWT_SECRET` | — | 署名シークレット（**HMAC (`HS256`) 専用**）。32 バイト（256 bit）以上のランダム値 — `openssl rand -hex 32`。hex / base64 値は**デコード後**の長さで測るため、32 文字の hex 文字列は 16 バイト扱いで拒否される。 |
 | `OAUTH_JWT_ISSUER` | **（必須）** | すべてのトークンの `iss` に刻まれる canonical issuer URL。絶対 `https` URL（`http` は loopback ホストのみ）で、query / fragment を含まないこと。未設定なら起動に失敗する — `Host` ヘッダーから導出されることはない。 |
 | `OAUTH_REQUIRE_EMAIL_VERIFIED` | `false` | Store が `emailVerified: true` を公開するまで、そのユーザーへのトークン発行を拒否する。`/authorize` と `session` グラントで強制される。検証そのものは Store の仕事で、これは結果を読むだけである。 |
-| `OAUTH_CIMD_ENABLED` | `false` | Client ID Metadata Document を受け付ける（#529）: `client_id` が自身の登録情報の `https` URL であるクライアントで、MCP ホストが使うモデルである。このようなクライアントは public で、決してファーストパーティにはならない — 同意ステップを通るため、`CONSENT_STORE_ADAPTER` を配線すること。 |
-| `OAUTH_CIMD_ALLOWED_SCOPES` | — | カンマ区切り: そのようなクライアントが取得してよいもの（ドキュメントの `scope` はこれとの積集合を取る）。空なら何も許可しない。 |
-| `OAUTH_CIMD_ALLOWED_AUDIENCES` | — | カンマ区切り: そのクライアント向けにトークンを発行してよいリソースサーバー（RFC 8707 の `resource`）。空なら自身の `client_id` だけを許可する。 |
-| `OAUTH_CIMD_ALLOWED_HOSTS` | — | ドキュメントを置いてよいホスト（カンマ区切り）: 完全一致、またはドメインとそのサブドメインを表す `.suffix`。空なら任意の公開ホストを許可する。 |
-| `OAUTH_CIMD_DENIED_HOSTS` | — | 上で許可されていても拒否するホスト（カンマ区切り）。 |
-| `OAUTH_CIMD_MAX_BYTES` | `5120` | ドキュメントのバイト数上限（draft は 5 KB を推奨）。 |
-| `OAUTH_CIMD_TIMEOUT_MS` | `5000` | 取得のタイムアウト。 |
-| `OAUTH_CIMD_CACHE_MAX_AGE_MS` | `600000` | 有効なドキュメントをキャッシュから返す期間の上限。`Cache-Control: max-age` によって短くなることがある。 |
-| `OAUTH_CIMD_MAX_CACHE_ENTRIES` | `256` | 同時に記憶しておくドキュメントの数。キーは未認証の呼び出し元が選ぶため、マップには上限を設けている。 |
-| `OAUTH_CIMD_STALE_IF_ERROR_MS` | `300000` | 検証済みの登録情報を、ドキュメント側に原因の無い理由（DNS の一時的な不調、5xx、タイムアウト）で再検証が失敗した後も返し続ける期間 — 障害で、動いているクライアントを壊すべきではないため。*拒否*されたドキュメントは即座に破棄される。`0` で無効化する。 |
-| `OAUTH_CIMD_NEGATIVE_CACHE_MS` | `60000` | 拒否を記憶しておく期間。同じ `client_id` をリクエストのたびに解決・取得し直さないためである。ドキュメントを修正したクライアントが締め出されないよう、短くしてある。 |
-| `OAUTH_CIMD_MAX_CONCURRENT_FETCHES` | `8` | すべての `client_id` を通じて、同時に取得中にできるドキュメントの数。未認証の呼び出し元がこのサーバーに接続させられる量を制限する。 |
+| `OAUTH_CLIENT_ID_METADATA_DOCUMENTS_ENABLED` | `false` | Client ID Metadata Document を受け付ける（#529）: `client_id` が自身の登録情報の `https` URL であるクライアントで、MCP ホストが使うモデルである。このようなクライアントは public で、決してファーストパーティにはならない — 同意ステップを通るため、`CONSENT_STORE_ADAPTER` を配線すること。 |
+| `OAUTH_CLIENT_ID_METADATA_DOCUMENTS_ALLOWED_SCOPES` | — | カンマ区切り: そのようなクライアントが取得してよいもの（ドキュメントの `scope` はこれとの積集合を取る）。空なら何も許可しない。 |
+| `OAUTH_CLIENT_ID_METADATA_DOCUMENTS_ALLOWED_AUDIENCES` | — | カンマ区切り: そのクライアント向けにトークンを発行してよいリソースサーバー（RFC 8707 の `resource`）。空なら自身の `client_id` だけを許可する。 |
+| `OAUTH_CLIENT_ID_METADATA_DOCUMENTS_ALLOWED_HOSTS` | — | ドキュメントを置いてよいホスト（カンマ区切り）: 完全一致、またはドメインとそのサブドメインを表す `.suffix`。空なら任意の公開ホストを許可する。 |
+| `OAUTH_CLIENT_ID_METADATA_DOCUMENTS_DENIED_HOSTS` | — | 上で許可されていても拒否するホスト（カンマ区切り）。 |
+| `OAUTH_CLIENT_ID_METADATA_DOCUMENTS_MAX_BYTES` | `5120` | ドキュメントのバイト数上限（draft は 5 KB を推奨）。 |
+| `OAUTH_CLIENT_ID_METADATA_DOCUMENTS_TIMEOUT_MS` | `5000` | 取得のタイムアウト。 |
+| `OAUTH_CLIENT_ID_METADATA_DOCUMENTS_CACHE_MAX_AGE_MS` | `600000` | 有効なドキュメントをキャッシュから返す期間の上限。`Cache-Control: max-age` によって短くなることがある。 |
+| `OAUTH_CLIENT_ID_METADATA_DOCUMENTS_MAX_CACHE_ENTRIES` | `256` | 同時に記憶しておくドキュメントの数。キーは未認証の呼び出し元が選ぶため、マップには上限を設けている。 |
+| `OAUTH_CLIENT_ID_METADATA_DOCUMENTS_STALE_IF_ERROR_MS` | `300000` | 検証済みの登録情報を、ドキュメント側に原因の無い理由（DNS の一時的な不調、5xx、タイムアウト）で再検証が失敗した後も返し続ける期間 — 障害で、動いているクライアントを壊すべきではないため。*拒否*されたドキュメントは即座に破棄される。`0` で無効化する。 |
+| `OAUTH_CLIENT_ID_METADATA_DOCUMENTS_NEGATIVE_CACHE_MS` | `60000` | 拒否を記憶しておく期間。同じ `client_id` をリクエストのたびに解決・取得し直さないためである。ドキュメントを修正したクライアントが締め出されないよう、短くしてある。 |
+| `OAUTH_CLIENT_ID_METADATA_DOCUMENTS_MAX_CONCURRENT_FETCHES` | `8` | すべての `client_id` を通じて、同時に取得中にできるドキュメントの数。未認証の呼び出し元がこのサーバーに接続させられる量を制限する。 |
 | `OAUTH_JWT_KID` | `v0` | JWT ヘッダーに含まれる key ID。制御文字を含まない 1〜256 文字。それ以外は起動時に拒否される — export されているが空の変数も含む（以前は kid `""` で署名されていた。そうして発行されたトークンは修正後に拒否されるため、そのユーザーは再ログインになる） |
 | `OAUTH_JWT_PRIVATE_KEY` | — | PEM エンコードされた秘密鍵（非対称アルゴリズム用） |
 | `OAUTH_JWT_PRIVATE_KEY_PATH` | — | PEM 秘密鍵ファイルのパス |
@@ -272,30 +272,36 @@ openssl pkey -in jwt-private.pem -pubout -out jwt-public.pem
 
 | 変数 | デフォルト | 説明 |
 |---|---|---|
-| `OAUTH_GRANTS_SESSION_ENABLED` | `true` | session グラントタイプを有効化 |
-| `OAUTH_GRANTS_AUTHORIZATION_CODE_ENABLED` | `true` | authorization code グラントタイプを有効化 |
-| `OAUTH_GRANTS_REFRESH_TOKEN_ENABLED` | `true` | refresh token グラントタイプを有効化 |
+| `OAUTH_SESSION_ENABLED` | `true` | session グラントタイプを有効化 |
+| `OAUTH_AUTHORIZATION_GRANTS_AUTHORIZATION_CODE_ENABLED` | `true` | authorization code グラントタイプを有効化 |
+| `OAUTH_AUTHORIZATION_GRANTS_REFRESH_TOKEN_ENABLED` | `true` | refresh token グラントタイプを有効化 |
+| `OAUTH_AUTHORIZATION_GRANTS_CLIENT_CREDENTIALS_ENABLED` | `false` | client credentials グラントタイプを有効化 |
+| `OAUTH_AUTHORIZATION_GRANTS_JWT_BEARER_ENABLED` | `false` | jwt-bearer グラントタイプ（RFC 7523）を有効化 |
+
+スイッチはそれぞれモジュールのキー — `oauth-session.enabled`、ほかは `oauth-authorization.grants.<grant>.enabled` — で、テンプレートはモジュールを選ぶために boot の前に自分のファイルと環境変数からこれを読む。旧名の `OAUTH_GRANTS_<GRANT>_ENABLED` は、単独で、または新名と違う値で設定されていると boot を拒否し、同じ値なら boot する。
 
 ### Session
 
 | 変数 | デフォルト | 説明 |
 |---|---|---|
-| `SESSION_SECRET` | — | **必須。** 認証済みセッション*そのもの*である Cookie に署名する鍵で、推測されればログインを偽造できる。32 バイト（256 bit）以上 — `openssl rand -hex 32`。`OAUTH_JWT_SECRET` と同じく**デコード後**の長さで測る。 |
-| `SESSION_NAME` | `__Host-auth.session` | セッション Cookie 名。デフォルトは `__Host-` prefix を使うため、`SESSION_SECURE=true` と、`SESSION_DOMAIN` の未設定が必要になる。 |
-| `SESSION_MAX_AGE` | `3600000` | セッション Cookie の最大有効期間（ミリ秒）。正の整数、上限は 1 年（`31536000000`）。 |
-| `SESSION_SECURE` | `true` | セッション Cookie に `Secure` フラグを設定 |
-| `SESSION_SAME_SITE` | `lax` | `SameSite` 属性（`lax`、`strict`、`none`）。`none` は `SESSION_SECURE=true` が**必須** — ブラウザは `Secure` でない `SameSite=None` Cookie を破棄するため、クライアント側で全ログインが黙って失敗するのを放置せず、起動時にこの組み合わせを拒否する。 |
-| `SESSION_DOMAIN` | — | Cookie ドメイン（デフォルト未設定） |
+| `SESSION_STORE_SECRET` | — | **必須。** 認証済みセッション*そのもの*である Cookie に署名する鍵で、推測されればログインを偽造できる。32 バイト（256 bit）以上 — `openssl rand -hex 32`。`OAUTH_JWT_SECRET` と同じく**デコード後**の長さで測る。 |
+| `SESSION_STORE_NAME` | `__Host-auth.session` | セッション Cookie 名。デフォルトは `__Host-` prefix を使うため、`SESSION_STORE_SECURE=true` と、`SESSION_STORE_DOMAIN` の未設定が必要になる。 |
+| `SESSION_STORE_MAX_AGE` | `3600000` | セッション Cookie の最大有効期間（ミリ秒）。正の整数、上限は 1 年（`31536000000`）。 |
+| `SESSION_STORE_SECURE` | `true` | セッション Cookie に `Secure` フラグを設定 |
+| `SESSION_STORE_SAME_SITE` | `lax` | `SameSite` 属性（`lax`、`strict`、`none`）。`none` は `SESSION_STORE_SECURE=true` が**必須** — ブラウザは `Secure` でない `SameSite=None` Cookie を破棄するため、クライアント側で全ログインが黙って失敗するのを放置せず、起動時にこの組み合わせを拒否する。 |
+| `SESSION_STORE_DOMAIN` | — | Cookie ドメイン（デフォルト未設定） |
 | `SESSION_CSRF_TTL_SECONDS` | `7200` | 発行する CSRF トークンの有効期間（秒）。1〜86400 の整数で、それ以外なら起動に失敗する（*空文字*は `0` に coerce され、トークン側の判定を黙って無効化してしまうため）。 |
-| `SESSION_STORAGE_TYPE` | `redis` | セッションストアのバックエンド: `redis` または `memory`。`memory` はプロセスごとで、他の in-memory ストアと同様に `CORE_DEPLOYMENT_MODE=multi` のもとでは拒否される（#474） |
-| `SESSION_STORAGE_REDIS_URL` | `redis://localhost:6379` | セッションストア用 Redis 接続 URL |
-| `SESSION_STORAGE_REDIS_PASSWORD` | — | セッションストア用 Redis パスワード |
+| `SESSION_STORE_STORAGE_TYPE` | `redis` | セッションストアのバックエンド: `redis` または `memory`。`memory` はプロセスごとで、他の in-memory ストアと同様に `CORE_DEPLOYMENT_MODE=multi` のもとでは拒否される（#474） |
+| `SESSION_STORE_STORAGE_REDIS_URL` | `redis://localhost:6379` | セッションストア用 Redis 接続 URL |
+| `SESSION_STORE_STORAGE_REDIS_PASSWORD` | — | セッションストア用 Redis パスワード |
 
-ローカルの HTTP 開発のために `SESSION_SECURE=false` を設定する場合や、ドメインを共有する Cookie のために `SESSION_DOMAIN` を設定する場合は、`SESSION_NAME` も `auth.sid` のような `__Host-` でない値にすること — `SESSION_SECURE=false` なら接頭辞の無い値にする: `__Secure-` の名前も `SESSION_SECURE=true` を要する。`__Host-` や `__Secure-`（大文字小文字は問わない）の Cookie 名が、ブラウザがその prefix に対して拒否する属性と組み合わされると、`SESSION_NAME` が Cookie の名前（RFC 6265 のトークン: 空白、`;` などの区切り文字を含まない）でないと、また `SESSION_DOMAIN` がホスト名でない（スキーム、ポート、パスを含む）と、サーバーは fail-fast する。
+cookie とそのストアはセッションストアのセクション `session-store` のもので、CSRF トークンの寿命、ログインページ、ログインの予算は session モジュールのセクション `session` のもの。`SESSION_STORE_*` の旧名 `SESSION_<KEY>` は、単独で、または新名と違う値で設定されていると boot を拒否し、同じ値なら boot する。
+
+ローカルの HTTP 開発のために `SESSION_STORE_SECURE=false` を設定する場合や、ドメインを共有する Cookie のために `SESSION_STORE_DOMAIN` を設定する場合は、`SESSION_STORE_NAME` も `auth.sid` のような `__Host-` でない値にすること — `SESSION_STORE_SECURE=false` なら接頭辞の無い値にする: `__Secure-` の名前も `SESSION_STORE_SECURE=true` を要する。`__Host-` や `__Secure-`（大文字小文字は問わない）の Cookie 名が、ブラウザがその prefix に対して拒否する属性と組み合わされると、`SESSION_STORE_NAME` が Cookie の名前（RFC 6265 のトークン: 空白、`;` などの区切り文字を含まない）でないと、また `SESSION_STORE_DOMAIN` がホスト名でない（スキーム、ポート、パスを含む）と、サーバーは fail-fast する。
 
 #### `/session/login` と `/session/logout` の CSRF 対策
 
-どちらのルートも、same-origin（もしくは信頼した）`Origin` / `Referer`、**または**有効な double-submit CSRF トークンの**いずれか**を伴うリクエストを受理し、どちらも伴わないものは拒否する（#272）。ブラウザは自動的にこの条件を満たす。スクリプトのクライアントはまず `GET /session/csrf` を呼び、返ってきた `csrf_token` を `<SESSION_NAME>.csrf` Cookie と `x-csrf-token` ヘッダー（または `csrf_token` フォームフィールド）の両方で送り返す。
+どちらのルートも、same-origin（もしくは信頼した）`Origin` / `Referer`、**または**有効な double-submit CSRF トークンの**いずれか**を伴うリクエストを受理し、どちらも伴わないものは拒否する（#272）。ブラウザは自動的にこの条件を満たす。スクリプトのクライアントはまず `GET /session/csrf` を呼び、返ってきた `csrf_token` を `<SESSION_STORE_NAME>.csrf` Cookie と `x-csrf-token` ヘッダー（または `csrf_token` フォームフィールド）の両方で送り返す。
 
 設定上の注意が 2 点ある:
 
@@ -404,7 +410,7 @@ federations {
 
 各 URL には、リダイレクトするエンドポイントではなく応答するエンドポイントを設定する: どのリクエストも `3xx` を追わないので、リダイレクトする URL ではすべての呼び出しが失敗する — [Store が自分で守るべきこと](../../packages/foundation/README.ja.md#store-が自分で守るべきこと) を参照。
 
-**Store を誰が呼べるか。** トークンによるログインとアカウントリンクが送るものは秘密ではなく識別子なので、誰にでも応答する Store は、そこに届く者なら誰にでも、既知の ID をそのユーザーに解決し — あるいは任意のアカウントにリンクし — てしまう。`CLIENT_USER_BEARER_TOKEN` を設定し、Store は `Authorization` が `Bearer <そのトークン>` と正確に一致しないすべてのリクエストに、`401` と `WWW-Authenticate: Bearer error="invalid_token"`（または `403` と `error="insufficient_scope"`）を返す。一つのトークンが上のすべての Store の URL に送られるので、それらのエンドポイントは一つの信頼境界でなければならない。`CLIENT_USER_TYPE=http` — このテンプレートのデフォルト — のもとでは、トークンが 32 バイトより弱い（`SESSION_SECRET` と同じ測り方）、形が誤っている、または空で export されている場合は起動に失敗する。トークンはこのサーバーが投げるどのエラーにも現れない。そのチャレンジがあれば、Store が受け付けないトークンはすべての Store 呼び出しで障害になる: ログインは `503 temporarily_unavailable` を返し、拒否された資格情報を示すエラーをログに出す（トークンは示さない）。federation-grants の接続も同じエラーを `federation_grant_callback_unavailable` としてログに出す。チャレンジの無い `401` や `403` は従来の意味を保つ — ログインでは「ユーザーが居ない」、`?link=1` のリンクでは拒否、federation-grants の ID の照会では他の `2xx` 以外と同じく障害 — ので、不一致はすべてのログインの失敗とすべてのリンクの拒否としてしか現れない。そして、ユーザーのパスワード誤りや拒否するリンクに `Bearer` チャレンジを付けてはならない。Store に届かない、完全な応答の前に接続を閉じる、または壊れた HTTP の応答を返す場合はそのようにログに出され、運ぶのはせいぜい通信のコード（`ECONNREFUSED`、`UND_ERR_SOCKET`、`ERR_SSL_WRONG_VERSION_NUMBER` など）だけで、通信が引用したものは決して含まない。トークンを使わない場合は、ネットワークポリシーかプラットフォームの相互 TLS で、このサーバーだけが Store に届くようにする。ローテーション、各呼び出し元がログに出すもの、Store が検査することは、同じ foundation README の節にある。
+**Store を誰が呼べるか。** トークンによるログインとアカウントリンクが送るものは秘密ではなく識別子なので、誰にでも応答する Store は、そこに届く者なら誰にでも、既知の ID をそのユーザーに解決し — あるいは任意のアカウントにリンクし — てしまう。`CLIENT_USER_BEARER_TOKEN` を設定し、Store は `Authorization` が `Bearer <そのトークン>` と正確に一致しないすべてのリクエストに、`401` と `WWW-Authenticate: Bearer error="invalid_token"`（または `403` と `error="insufficient_scope"`）を返す。一つのトークンが上のすべての Store の URL に送られるので、それらのエンドポイントは一つの信頼境界でなければならない。`CLIENT_USER_TYPE=http` — このテンプレートのデフォルト — のもとでは、トークンが 32 バイトより弱い（`SESSION_STORE_SECRET` と同じ測り方）、形が誤っている、または空で export されている場合は起動に失敗する。トークンはこのサーバーが投げるどのエラーにも現れない。そのチャレンジがあれば、Store が受け付けないトークンはすべての Store 呼び出しで障害になる: ログインは `503 temporarily_unavailable` を返し、拒否された資格情報を示すエラーをログに出す（トークンは示さない）。federation-grants の接続も同じエラーを `federation_grant_callback_unavailable` としてログに出す。チャレンジの無い `401` や `403` は従来の意味を保つ — ログインでは「ユーザーが居ない」、`?link=1` のリンクでは拒否、federation-grants の ID の照会では他の `2xx` 以外と同じく障害 — ので、不一致はすべてのログインの失敗とすべてのリンクの拒否としてしか現れない。そして、ユーザーのパスワード誤りや拒否するリンクに `Bearer` チャレンジを付けてはならない。Store に届かない、完全な応答の前に接続を閉じる、または壊れた HTTP の応答を返す場合はそのようにログに出され、運ぶのはせいぜい通信のコード（`ECONNREFUSED`、`UND_ERR_SOCKET`、`ERR_SSL_WRONG_VERSION_NUMBER` など）だけで、通信が引用したものは決して含まない。トークンを使わない場合は、ネットワークポリシーかプラットフォームの相互 TLS で、このサーバーだけが Store に届くようにする。ローテーション、各呼び出し元がログに出すもの、Store が検査することは、同じ foundation README の節にある。
 
 ### コードリポジトリ
 
@@ -506,7 +512,7 @@ worker:
 
 **同意ページ**はデプロイ側のもので、プロバイダーと same-origin であり、その契約は `/oauth/consent` のものと同じなので、1 つのページで両方を担える。`GET /session/federation-grants/consent?challenge=…` は JSON を返す: `client_id`、`client_name`、`connection`、`scopes`、`resource`、`grant_expires_in`（承認後の期間であって日付ではない）、`continues_after_logout`（ページが必ず表示すること）、`expires_in`（フローの残り時間）。`challenge` と `decision`（`accept` | `deny`）を付けた `POST` は `303` を返す — 上流へ、またはクライアントへ戻す。取得も更新もすべてここを通る。回答は session モジュールの CSRF ポリシーに照らされる: ページからフォームで POST し、ページは `Referrer-Policy: same-origin` で配信する — `no-referrer` ではない（ヘッダー、`<meta name="referrer">`、フォームの `rel="noreferrer"` のいずれによるものも）。その下ではブラウザが `Origin: null` を送り、回答は拒否される。このアプリの `helmet()` はすべての応答に `no-referrer` を付けるので、このアプリが配信するページは自身のルートで `Referrer-Policy: same-origin` を付ける。プロキシの背後では `HTTP_TRUST_PROXY` がそのプロキシを指し、プロキシは `X-Forwarded-Proto` と `X-Forwarded-Host` を転送する（またはブラウザの `Host` を保つ）。`Origin` も `Referer` も送らないユーザーエージェントは、`POST /session/login` と同じく `GET /session/csrf` が渡すトークンを送り返す。トークンはどちらも送られないときにだけ効くので、ページはいつでもトークンを含めてよい。規則はパッケージの README にある。
 
-**ログインページ**は `ENDPOINTS_LOGIN_URL` が指すもので、`redirect_to=<the connect link>` 付きで到達する。ユーザーをサインインさせ、`/oauth/authorize` の場合と同様に、そのリンクへそのまま戻る。そのリンクを `POST /session/login` の `redirect_to` として送信してはならない: そのルートの完全一致 allowlist はランディングページ用で、フローごとの handle は拒否する。
+**ログインページ**は `SESSION_LOGIN_PAGE_URL` が指すもので、`redirect_to=<the connect link>` 付きで到達する。ユーザーをサインインさせ、`/oauth/authorize` の場合と同様に、そのリンクへそのまま戻る。そのリンクを `POST /session/login` の `redirect_to` として送信してはならない: そのルートの完全一致 allowlist はランディングページ用で、フローごとの handle は拒否する。
 
 **運用。** 鍵リングは [オペレーター runbook](../../docs/operator-runbook.md) の手順でローテーションする — 新しい鍵をまず末尾に、次に先頭に置き、古い鍵は 365 日残す。この機能が有効な間、シャットダウンは cleanup に 45 秒を与え（`upstreamHardTimeoutMs`、`persistRetryBudgetMs`、`lockWaitMs` を上げればそれより長くなる。allowance はそれらの合計に余裕を加えたものだからである）、compose ファイルは 2 つともプロセスに 60 秒を与える。[シャットダウンの保証](#シャットダウンの保証) を参照。機能の無効化は失効ではない: グラントは失効させるまで Redis に残るので、先に終わらせること。また一時的な停止の間も、鍵と失効境界は保持しておくこと。
 
@@ -528,8 +534,8 @@ worker:
 
 | 変数 | デフォルト | 説明 |
 |---|---|---|
-| `ENDPOINTS_LOGIN_URL` | `/login` | ログインページの URL（リダイレクト用） |
-| `ENDPOINTS_CONSENT_URL` | `/consent` | ファーストパーティでないクライアントが経由させられる同意ページの URL。`?challenge=<id>` 付きで遷移する（#527） |
+| `SESSION_LOGIN_PAGE_URL` | `/login` | ログインページの URL（リダイレクト用） |
+| `OAUTH_CONSENT_PAGE_URL` | `/consent` | ファーストパーティでないクライアントが経由させられる同意ページの URL。`?challenge=<id>` 付きで遷移する（#527） |
 
 デプロイ全体で共通のクライアント URL やコールバック URL は無い: フェデレーションのコールバック URL はフェデレーションごとに設定する（`FEDERATIONS_GOOGLE_CALLBACK_URL`、`FEDERATIONS_OIDC_CALLBACK_URL`）。
 
@@ -537,7 +543,7 @@ worker:
 
 どのモジュールをどの順序で合成するかについては、[`src/buildModules.mts`](src/buildModules.mts) が唯一の信頼できる情報源である — そのコピーではなく、それ自体を読むこと。boot planner は `requires` / `provides` をトポロジカルに解決するが、ルートとミドルウェアは、モジュールが `before` / `after` を宣言しない限りリストの順にマウントする — したがって、何かをマウントするモジュールでは位置が意味を持つ。リストを編集するときに守るべきルールは次のとおり:
 
-1. **`sessionStoreModuleFor(config)` は先頭のままにする。** これは `express-session` の middleware をマウントし、`before` / `after` を宣言しないため、`req.session` を読むすべてのルートより前に来るのは、リスト内の位置のおかげである。`config` から組み立てるのは、`session.storage.type = "memory"` が自らを replica-unsafe と宣言するようにするためである。
+1. **`sessionStoreModuleFor(config)` は先頭のままにする。** これは `express-session` の middleware をマウントし、`before` / `after` を宣言しないため、`req.session` を読むすべてのルートより前に来るのは、リスト内の位置のおかげである。`config` から組み立てるのは、`session-store.storage.type = "memory"` が自らを replica-unsafe と宣言するようにするためである。
 2. **`/oauth` の下では順序は関係しない。** `federationGrantsModules`（フェデレーショングラントが有効な間）、`oauthModule`、独自のモジュールは、いずれも `/oauth` の下にルートをマウントしうる。`oauthModule` のルーターが body をパースするのは自身のルートだけなので、各モジュールへのリクエストは、リストの順に関係なくそのモジュール自身の parser に届く — ただし、`/oauth` 配下のどのモジュールも自分の body を自分でパースし、その parser を自分のパスちょうどに限定している場合に限る（同梱のモジュールはそうしている）。限定はルートとして行う（`router.all(path, parser)` か、ルート自身のハンドラ列）。`router.use(path, parser)` は `path` の下のすべてのパスにもマッチする。フェデレーショングラントのブラウザ側の半分は、自身の `after` によってセッション middleware の後ろに自らを並べる。
 3. **ストアスロット 1 つにつきモジュール 1 つ。** 各アダプタースイッチ — `federationTokenStore.type`、`userSessionStores.adapter`、`rateLimiter.adapter`、`oauth.code.adapter`、`accessTokenDenylist.adapter`、`replaySeenSet.adapter`、`consentStore.adapter`、およびフェデレーショングラントの 2 つのストアスイッチ — は、memory / Redis の組から 1 つを選ぶ。両者は同じスロットを提供するため、両方を配線すると起動時のスロット衝突になる。`consentStore.adapter = "none"` はどちらも配線せず、フェデレーショングラントのストアは機能が有効な間だけ配線される。
 4. **共有 Redis 接続は、最初の Redis バックエンドのモジュールとともに加わる。** `standaloneRedisClientsModule` は、ここにあるすべての Redis アダプターが使う 1 本の ioredis 接続を自身のセクション（`refreshTokenFamilyStore.redis`）から開き、合成されたモジュールがそれを必要とするときには必ず追加される。同梱の合成では refresh token family ストアが Redis 上にあるため、デプロイには常にこれがある。in-memory の family ストアはテスト用の override（`overrides.refreshTokenFamilyModules`）である。
@@ -579,11 +585,11 @@ make test
 
 `docker-compose.yml` は認証サーバーと Redis コンテナをまとめて起動する。環境変数は `.env` で設定する。
 
-`docker-compose.yml` は**開発用**のファイルである: `develop` ターゲットをビルドし、`./src` と `./config` を bind-mount するため、そのままデプロイすると working tree を動かす hot-reload サーバーを配信することになる。デプロイ可能な形は [`docker-compose.production.yml`](docker-compose.production.yml) である — `runtime` ターゲット、ソースのマウントなし、restart policy、ネットワーク内部限定の永続 Redis、そして**必須**の `.env`（実際の `SESSION_SECRET` の無い起動ははっきりと失敗しなければならない）。意図的に利用者に委ねている範囲 — 前段での TLS 終端と、`--scale` の前の [マルチレプリカ](#マルチレプリカ構成) 手順 — は、ファイル冒頭のコメントに記載している。
+`docker-compose.yml` は**開発用**のファイルである: `develop` ターゲットをビルドし、`./src` と `./config` を bind-mount するため、そのままデプロイすると working tree を動かす hot-reload サーバーを配信することになる。デプロイ可能な形は [`docker-compose.production.yml`](docker-compose.production.yml) である — `runtime` ターゲット、ソースのマウントなし、restart policy、ネットワーク内部限定の永続 Redis、そして**必須**の `.env`（実際の `SESSION_STORE_SECRET` の無い起動ははっきりと失敗しなければならない）。意図的に利用者に委ねている範囲 — 前段での TLS 終端と、`--scale` の前の [マルチレプリカ](#マルチレプリカ構成) 手順 — は、ファイル冒頭のコメントに記載している。
 
 そこでは `HTTP_TRUST_PROXY` は明示的な `${HTTP_TRUST_PROXY:?…}` エントリになっているため、`.env` でホップを指定するまで `docker compose up` は**起動を拒否する**。これは意図的である: ファイルがデフォルトにできるアドレスで、自分が選んでいないホップを黙って信頼しないものは存在しない。そしてこの変数が無いと、ファイルが固定している Secure Cookie は一度もセットされず、CSRF の origin チェックはブラウザからのすべての POST を 403 にし、IP をキーとするすべての rate limit が 1 つのバケットを共有する。
 
-レコードが 1 プロセスより長く生き残らなければならないストアは、継承に任せるのではなく、すべてそのファイルの `environment:` ブロックで名指しされている — `SESSION_STORAGE_TYPE=redis` と必ずセットで設定しなければならない `USER_SESSION_STORES_ADAPTER=redis` も含めて。両者が揃っていないとき、`CORE_DEPLOYMENT_MODE=single` はそれを教えてくれない: レプリカガードが答えるのは「これらのストアは共有できるか」であって、「この 2 つのストアは同じ寿命を持つか」ではない。両者を分けると、再起動後にすべてのブラウザが、生き残った express-session — 背後に `UserSession` が無いのにまだ `isAuthenticated` と読めるもの — を保持したままになる。`/authorize` はログインへ飛ばし、Cookie がそれを送り返し、このループはユーザーが Cookie を削除するまで解消しない。
+レコードが 1 プロセスより長く生き残らなければならないストアは、継承に任せるのではなく、すべてそのファイルの `environment:` ブロックで名指しされている — `SESSION_STORE_STORAGE_TYPE=redis` と必ずセットで設定しなければならない `USER_SESSION_STORES_ADAPTER=redis` も含めて。両者が揃っていないとき、`CORE_DEPLOYMENT_MODE=single` はそれを教えてくれない: レプリカガードが答えるのは「これらのストアは共有できるか」であって、「この 2 つのストアは同じ寿命を持つか」ではない。両者を分けると、再起動後にすべてのブラウザが、生き残った express-session — 背後に `UserSession` が無いのにまだ `isAuthenticated` と読めるもの — を保持したままになる。`/authorize` はログインへ飛ばし、Cookie がそれを送り返し、このループはユーザーが Cookie を削除するまで解消しない。
 
 ```bash
 # 署名鍵は必須の入力である。デフォルトは EdDSA で鍵素材のデフォルト値は存在しないため、
@@ -602,7 +608,7 @@ docker compose -f docker-compose.production.yml up -d --build
 
 **コンテナ内のクライアントレジストリ。** `config/clients.yaml` も同じ経路で、compose の secret `client_registry` として届き、`CLIENT_PATH` がそこを指す。これはデプロイごとのもので、クライアントのシークレットを含みうるため、`.dockerignore` がビルドコンテキストから外す: どのイメージもレジストリを持たず、作業コピーからビルドしたイメージと clean checkout からビルドしたイメージは同じになる。ファイルが存在するまで compose は起動を拒否する。別の方法でイメージを動かすなら、自分でマウントして `CLIENT_PATH` を設定する。
 
-production ファイルは `environment:` ブロックで `SESSION_SECURE=true` と `__Host-` の Cookie 名も固定しており、これは `env_file` より優先される。`.env.example` は plain-HTTP の compose 実行（`make dev`）が `__Host-` Cookie の検査に引っかからないよう `SESSION_SECURE=false` を同梱しており、このファイルはその同じ `.env` を要求する — このファイルが前提とする TLS の背後では、非 Secure のセッション Cookie は、平文区間を 1 つでも読める相手にセッションを渡すことに等しい。
+production ファイルは `environment:` ブロックで `SESSION_STORE_SECURE=true` と `__Host-` の Cookie 名も固定しており、これは `env_file` より優先される。`.env.example` は plain-HTTP の compose 実行（`make dev`）が `__Host-` Cookie の検査に引っかからないよう `SESSION_STORE_SECURE=false` を同梱しており、このファイルはその同じ `.env` を要求する — このファイルが前提とする TLS の背後では、非 Secure のセッション Cookie は、平文区間を 1 つでも読める相手にセッションを渡すことに等しい。
 
 イメージは `pnpm install --frozen-lockfile` でインストールするため、コミット済みの `pnpm-lock.yaml` がビルドの必須入力である — `create-auth-provider` が scaffold 時に生成する。手元に無い場合は一度 `pnpm install` を実行して結果をコミットすること。これにより、同じソースからのリビルドは同じ依存ツリーを生む。
 

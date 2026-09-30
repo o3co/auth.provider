@@ -14,11 +14,12 @@
 
 **持つもの:**
 
-- `/session` ルートとその応答。それらの CSRF ポリシー（`session.csrf.*`）— 他のパッケージは `csrfGuard` スロットを通してこれを実行する。ログインのレート制限ガードの配線とその予算（`rateLimit.login`。session モジュールがこれを `login` の予算として寄与する）。リダイレクト許可リスト（`session.redirectAllowlist`、`federations.<name>.redirectAllowlist`）。
+- `/session` ルートとその応答。それらの CSRF ポリシー（`session.csrf.*`）— 他のパッケージは `csrfGuard` スロットを通してこれを実行する。ログインのレート制限ガードの配線とその予算（`session.rateLimit.login`。session モジュールがこれを `login` の予算として寄与する）。リダイレクト許可リスト（`session.redirectAllowlist`、`federations.<name>.redirectAllowlist`）。
 - モジュールが、契約が core にあるスロットを通して他のパッケージに提供するもの: `csrfGuard`、`loginEntry`、`loginCompletion`、そして `sessionCookiePolicy` と `csrfTokenSigner` — [後述](#モジュールが他のパッケージに提供するもの)。
 - フェデレーションの駆動方法: `state`・PKCE・`nonce`、`form_post` トランザクションとその cookie、クレームの優先順位、ログインが記録する `amr`、コールバックがストアに書き込む内容。
 - `federationRedirectPolicies` という contribution 種別と、それが core に宣言する `federationRedirectPolicyResolver` スロット（[`src/federations/contributes.mts`](src/federations/contributes.mts)）、および [`FederationResult`](src/federations/types.mts)。
-- express-session ミドルウェア、その cookie、そのストア（`session.*`、`session.storage.*`）。
+- express-session ミドルウェア、その cookie、そのストア（`session-store.*`）。
+- 二つのセクション `session` と `session-store`、およびそのデフォルト値を置く [`config/reference.conf`](config/reference.conf) — [設定](#設定)。
 
 **持たないもの:**
 
@@ -42,15 +43,15 @@
 
 ```sh
 npm install @o3co/auth-provider-session @o3co/auth-provider-core express express-session
-# session.storage.type = "redis"（core の reference.conf のデフォルト）なら、さらに:
+# session-store.storage.type = "redis"（このパッケージの reference.conf のデフォルト）なら、さらに:
 npm install redis@^6.2.1 connect-redis@^10.0.0
 ```
 
 peer dependencies: `@o3co/auth-provider-core`、`express@^5.0.0`、`express-session@^1.17.0`。
 optional peer dependencies: Redis セッションストアのライブラリである `redis@^6.2.1` と `connect-redis@^10.0.0`。
-このパッケージ自身の dependencies は無い。
+このパッケージ自身の dependency は、セクションのスキーマを書く `zod` だけである。
 
-core が peer なのは、このパッケージが core を拡張する（`federationRedirectPolicies` の contribution 種別とそのスロット）からで、拡張は自分が解決した core にしか届かない。peer であれば、それは構成が持つ唯一の core になる。`session.storage.type = "memory"` のデプロイは Redis のライブラリをどちらもインストールしない。Redis ストアを組み立てるまで何もそれらを import しない。`"redis"`（デフォルト）なら両方をインストールする: どちらかが無ければ、無いパッケージとインストールコマンドを示して起動に失敗する。
+core が peer なのは、このパッケージが core を拡張する（`federationRedirectPolicies` の contribution 種別とそのスロット）からで、拡張は自分が解決した core にしか届かない。peer であれば、それは構成が持つ唯一の core になる。`session-store.storage.type = "memory"` のデプロイは Redis のライブラリをどちらもインストールしない。Redis ストアを組み立てるまで何もそれらを import しない。`"redis"`（デフォルト）なら両方をインストールする: どちらかが無ければ、無いパッケージとインストールコマンドを示して起動に失敗する。
 
 ## 組み立て
 
@@ -80,24 +81,45 @@ const handle = await createApp({
 | スロット | 提供者 | 内容 | 読む側 |
 | --- | --- | --- | --- |
 | `csrfGuard` | `sessionModule` | `POST /session/login` が実行する [CSRF ポリシー](#状態変更ルートの-csrf-対策): 状態を変えるリクエストには `middleware` — 同じ `403 access_denied` と同じログ行 — と、その判定だけを返し何も書かない `check`、フローを始めるナビゲーションには `checkNavigation`（[アカウントリンクの開始](#フェデレーション間のアカウントリンク482)の規則）、そして `issue`。トークンのフォームフィールドは `csrf_token`。 | デバイス検証（グラントが有効なとき）、federation-grants の同意の回答（グラントが有効なとき） |
-| `loginEntry` | `sessionModule` | ログインページ `endpoints.login.url` と、ページ自身のクエリの fragment より前に `redirect_to` を加える `urlFor(returnTo)`。クエリに既に `redirect_to` を持つページは、`/authorize` 自身のフォールバックと同じく、エントリの構築時に拒否される。ページが設定されていなくても作られ、ページが読まれる場所で失敗する。 | モジュールが提供していれば `/authorize`。federation-grants の connect フロー（グラントが有効なとき） |
-| `loginCompletion` | `loginCompletionModule` | [`establishSession`](#セッションの確立) と [`answerInterruption`](#requirement-がログインを中断するとき)。モジュールが require するセッションストアと `csrfGuard`、`session.maxAge` の上に作られる。`sessionModule` と並べて読み込む独立したモジュール: 中断の応答のトークンは、誰がスロットを埋めたかによらずデプロイメントの `csrfGuard` のものであり、`sessionModule` は自分が埋めるスロットを require できない。 | requirement の完了処理（MFA パッケージのもの） |
-| `sessionCookiePolicy` | セッションストアのモジュール | セッション cookie の名前、`secure`、`sameSite`、ドメイン、寿命: ストアのルートが cookie をマウントする元の値。core の契約を破るセクションは設定の検証で拒否される（[後述](#ブラウザセッションストア)）。authoritative: ストアのモジュールがロードされている間、このスロットへの `overrideComponents` のエントリは起動を拒否する（`authoritative-component-overridden`）。ストアは `session.*` のとおりの cookie をマウントし続けるからである。モジュールをロードしない組み立ては自分でスロットを埋める。 | subject revocation service が、任意で、horizon の算出に |
-| `csrfTokenSigner` | セッションストアのモジュール | この用途のためだけに `session.secret` から導出した鍵による CSRF トークンの署名: HKDF-SHA256（salt なし、info `o3co.auth.provider/session-csrf/v1`、32 バイト）、続いて HMAC-SHA256、base64url。テストの固定ベクターがこの導出を固定するので、secret を保つ限りトークンは検証を通る。secret も鍵もこの外に出ない。 | `sessionModule`: その `csrfGuard` と `/session` のルート |
+| `loginEntry` | `sessionModule` | ログインページ `session.loginPage.url` と、ページ自身のクエリの fragment より前に `redirect_to` を加える `urlFor(returnTo)`。クエリに既に `redirect_to` を持つページは、エントリの構築時に拒否され、`session.loginPage.url` としては設定の検証で拒否される。ページが設定されていなくても作られ、ページが読まれる場所で失敗する。 | `/authorize`（これを必須とする）。federation-grants の connect フロー（グラントが有効なとき） |
+| `loginCompletion` | `loginCompletionModule` | [`establishSession`](#セッションの確立) と [`answerInterruption`](#requirement-がログインを中断するとき)。モジュールが require するセッションストア、`csrfGuard`、`sessionCookiePolicy`（セッションの寿命はそのポリシーのもの）の上に作られる。`sessionModule` と並べて読み込む独立したモジュール: 中断の応答のトークンは、誰がスロットを埋めたかによらずデプロイメントの `csrfGuard` のものであり、`sessionModule` は自分が埋めるスロットを require できない。 | requirement の完了処理（MFA パッケージのもの） |
+| `sessionCookiePolicy` | セッションストアのモジュール | セッション cookie の名前、`secure`、`sameSite`、ドメイン、寿命: ストアのルートが cookie をマウントする元の値。core の契約を破るセクションは設定の検証で拒否される（[後述](#ブラウザセッションストア)）。authoritative: ストアのモジュールがロードされている間、このスロットへの `overrideComponents` のエントリは起動を拒否する（`authoritative-component-overridden`）。ストアは `session-store.*` のとおりの cookie をマウントし続けるからである。モジュールをロードしない組み立ては自分でスロットを埋める。 | これを require する `sessionModule`（CSRF cookie、セッションの寿命、フェデレーションのトランザクション cookie の名前）と `loginCompletionModule`。subject revocation service が、任意で、horizon の算出に |
+| `csrfTokenSigner` | セッションストアのモジュール | この用途のためだけに `session-store.secret` から導出した鍵による CSRF トークンの署名: HKDF-SHA256（salt なし、info `o3co.auth.provider/session-csrf/v1`、32 バイト）、続いて HMAC-SHA256、base64url。テストの固定ベクターがこの導出を固定するので、secret を保つ限りトークンは検証を通る。secret も鍵もこの外に出ない。 | `sessionModule`: その `csrfGuard` と `/session` のルート |
 
-CSRF トークンの鍵は `session.secret` から導出され、`session.secret` はセッションストアのモジュールが所有する。`sessionModule` は `csrfTokenSigner` を require し、`session.secret` を読まない: その `csrfGuard` とルートは一つの署名器で署名・検査するので、ガードが発行したトークンはルートの検査を通り、ルートが発行したトークンはガードの検査を通る。署名器の導出はテストのリテラルなベクターで固定されているので、secret を保つ限りトークンはデプロイをまたいでどちら向きにも検証を通る: デプロイ前に発行したトークンはデプロイ後に通り、デプロイ後に発行したトークンは置き換えられたリリースの下でも通る。`sessionModule` なしで `csrfGuard` を提供する組み立ては `createSessionCsrfGuard` で作り、セッションストアのモジュールなしで `sessionModule` を読み込む組み立ては `csrfTokenSigner` を `createSessionCsrfTokenSigner` で提供する（[別のストア](#ブラウザセッションストア)）。
+CSRF トークンの鍵は `session-store.secret` から導出され、`session-store.secret` はセッションストアのモジュールが所有する。`sessionModule` は `csrfTokenSigner` を require し、`session-store.secret` を読まない: その `csrfGuard` とルートは一つの署名器で署名・検査するので、ガードが発行したトークンはルートの検査を通り、ルートが発行したトークンはガードの検査を通る。署名器の導出はテストのリテラルなベクターで固定されているので、secret を保つ限りトークンはデプロイをまたいでどちら向きにも検証を通る: デプロイ前に発行したトークンはデプロイ後に通り、デプロイ後に発行したトークンは置き換えられたリリースの下でも通る。`sessionModule` なしで `csrfGuard` を提供する組み立ては `createSessionCsrfGuard` で作り、セッションストアのモジュールなしで `sessionModule` を読み込む組み立ては `csrfTokenSigner` を `createSessionCsrfTokenSigner` で提供する（[別のストア](#ブラウザセッションストア)）。
+
+## 設定
+
+モジュールはそれぞれ自分のセクションを読む。デフォルト値と環境変数はパッケージの [`config/reference.conf`](config/reference.conf) にあり、モジュールがそれを宣言するので composition root が重ねる。
+
+| キー | 環境変数 | デフォルト | |
+| --- | --- | --- | --- |
+| `session-store.secret` | `SESSION_STORE_SECRET` | なし | セッション cookie を署名する: デコード後に測って 32 バイト（256 ビット）以上の乱数。無ければセッションストアのモジュールは変数を名指しして組み立てを拒否する |
+| `session-store.name` | `SESSION_STORE_NAME` | `__Host-auth.session` | セッション cookie の名前（[ブラウザが保持するもの](#ブラウザセッションストア)） |
+| `session-store.maxAge` | `SESSION_STORE_MAX_AGE` | `3600000` | cookie の `Max-Age` とセッションの寿命。ミリ秒で 1 から 1 年 |
+| `session-store.secure` | `SESSION_STORE_SECURE` | `true` | |
+| `session-store.sameSite` | `SESSION_STORE_SAME_SITE` | `lax` | `none` は `secure = true` のときだけ |
+| `session-store.domain` | `SESSION_STORE_DOMAIN` | `null` | `null` か空: ホスト限定の cookie |
+| `session-store.storage.type` | `SESSION_STORE_STORAGE_TYPE` | `redis` | または `memory`（`core.deployment.mode = "multi"` では拒否される） |
+| `session-store.storage.redis.url`、`.password` | `SESSION_STORE_STORAGE_REDIS_URL`、`SESSION_STORE_STORAGE_REDIS_PASSWORD` | `redis://localhost:6379`、なし | Redis ストアの接続先 |
+| `session.redirectAllowlist` | | `[]` | [リダイレクト許可リスト](#リダイレクト許可リスト) |
+| `session.csrf.trustedOrigins`、`.ttlSeconds` | `SESSION_CSRF_TTL_SECONDS`（`ttlSeconds`） | `[]`、`7200` | [CSRF](#状態変更ルートの-csrf-対策) |
+| `session.loginPage.url` | `SESSION_LOGIN_PAGE_URL` | `/login` | `loginEntry` スロットが示すページ: パスか絶対 URL で、自身の `redirect_to` を持たない |
+| `session.rateLimit.login` | | `{ windowMs = 900000, limit = 20 }` | `POST /session/login` の予算。モジュールが `login` として寄与する |
+
+各セクションは厳格: 宣言されていないキーは、キーを名指しして起動を拒否する。これらのキーの移動元のパス — `session` の下の cookie とそのストアの各キー、`endpoints.login.url`、`rateLimit.login` — は、新しいパスとその環境変数を名指しして起動を拒否する（`config-path-relocated`）。一緒に改名された環境変数 — `SESSION_<KEY>` は `SESSION_STORE_<KEY>` へ、`ENDPOINTS_LOGIN_URL` は `SESSION_LOGIN_PAGE_URL` へ — は、旧名だけが設定されているか新名と違う値で設定されていると起動を拒否し（`environment-variable-renamed`）、同じ値ならどちらも起動する。
 
 ## ブラウザセッションストア
 
-`sessionStoreModuleFor(config)`（または静的な `sessionStoreModule`）は `/` にマウントされる `session-middleware` というルートを一つ contribute する。中身は express-session で、cookie は `session.*` から（`HttpOnly`、`Path=/`、`session.secure`、`session.sameSite`、`session.domain`、`Max-Age` = `session.maxAge`）、ストアは `session.storage.*` から組み立てられる。デプロイ内のすべての `req.session` はこれである。デフォルト値と環境変数は [`reference.conf`](../core/config/reference.conf) にある。`session.storage.type` のデフォルトは `redis`、代替は `memory` で、それ以外の値は起動に失敗する。
+`sessionStoreModuleFor(config)`（または静的な `sessionStoreModule`）は `/` にマウントされる `session-middleware` というルートを一つ contribute する。中身は express-session で、cookie は `session-store.*` から（`HttpOnly`、`Path=/`、`session-store.secure`、`session-store.sameSite`、`session-store.domain`、`Max-Age` = `session-store.maxAge`）、ストアは `session-store.storage.*` から組み立てられる。デプロイ内のすべての `req.session` はこれである。デフォルト値と環境変数は [`config/reference.conf`](config/reference.conf) にある。`session-store.storage.type` のデフォルトは `redis`、代替は `memory` で、それ以外の値は起動に失敗する。
 
 成り立つこと:
 
 - **マウント順はリスト順。ただしこのルートを名指しするルートは別。** このルートは `before` / `after` を宣言しない。デプロイが含まないかもしれないルート（`oauth` だけのデプロイには `sessionModule` が無い）を名指しすると `route-order-target-missing` で起動に失敗するからである。したがって **`req.session` を読むすべてのモジュールより前に** 並べる。これより前に並べたモジュールはセッションを読めず、起動時にそれを検査するものは無い。standalone テンプレートはこれを先頭に置いている。例外は逆向きの宣言である: federation grants が有効なとき、そのブラウザ向けルートは `after: ["session-middleware"]` を宣言するので、どちらがどこに並んでいてもこのルートの後にマウントされ、その id のルートが無い組み立ては `route-order-target-missing` で起動に失敗する。
-- **ブラウザが保持しない cookie は設定の検証で拒否される**（`config-validation-failed`、issue がキーを名指しする）: `__Host-` の名前 — デフォルトの `__Host-auth.session` — で `session.secure = true` かつ `session.domain = null` でないもの、`__Secure-` の名前で `session.secure = true` でないもの（どちらの接頭辞も、ブラウザと同じく大文字小文字を問わない）、RFC 6265 のトークンでない `session.name`、ホスト名でない `session.domain`（先頭のドット一つは可。スキーム、ポート、パスは不可）、`session.secure = true` でない `session.sameSite = "none"`、1 ms から 1 年の範囲外の `session.maxAge`。平文 HTTP で動かすときは `session.secure = false` と、接頭辞の無い名前（`auth.sid`）を設定する。
+- **ブラウザが保持しない cookie は設定の検証で拒否される**（`config-validation-failed`、issue がキーを名指しする）: `__Host-` の名前 — デフォルトの `__Host-auth.session` — で `session-store.secure = true` かつ `session-store.domain = null` でないもの、`__Secure-` の名前で `session-store.secure = true` でないもの（どちらの接頭辞も、ブラウザと同じく大文字小文字を問わない）、RFC 6265 のトークンでない `session-store.name`、ホスト名でない `session-store.domain`（先頭のドット一つは可。スキーム、ポート、パスは不可）、`session-store.secure = true` でない `session-store.sameSite = "none"`、1 ms から 1 年の範囲外の `session-store.maxAge`。平文 HTTP で動かすときは `session-store.secure = false` と、接頭辞の無い名前（`auth.sid`）を設定する。
 - **新しいセッションに渡す cookie は `sessionCookiePolicy` のもの:** ルートはスロットが持つポリシーから express-session をマウントする。保存済みのセッションは作られたときの cookie の属性を保つ（express-session はレコードから cookie を組み立て直す）ので、これらの設定を厳しくしたときはセッションストアを空にし、すべてのブラウザに新しい cookie でサインインし直させる。
 - **`memory` は `core.deployment.mode = "multi"` で拒否される。** express-session の `MemoryStore` はレプリカごとに分岐する: あるレプリカが処理したログインは他のレプリカに知られず、ログアウトは到達したレプリカ上しか消さず、再起動ですべてのセッションが失われる。`sessionStoreModuleFor(config)` はストレージ種別を読み、`memory` ならモジュールを replica-unsafe と宣言する。そのため core の replica-safety ガードが起動時に他の違反と並べて名指しで拒否し、`core.deployment.mode` が未設定なら警告し、`"single"` なら何も言わない。静的な `sessionStoreModule` は種別を知り得ないので、ガードは名指しできない。そのルートファクトリーが実行時に同じ組み合わせを拒否し（`replica-unsafe-adapter`）、警告は出さない。設定が手元にあるなら `sessionStoreModuleFor` を使う。どちらの形も core の `deploymentMode` スロット（core が `core.deployment.mode` から埋める）を requires し、`deployment` を自分では読まない。スロットの値が `single`、`multi`、`unset` のどれでもなければ TypeError になる。
-- **Redis ストアは自前の接続を開く。** `session.storage.redis.url`（設定されていれば `password` も）への `redis`（node-redis）クライアントを `connect-redis` の `RedisStore` の下に置く。readiness registrar が配線されていれば probe `session-store`（`PING`）を登録し、Redis を失ったレプリカはトラフィックを受けなくなる。lifecycle registrar が配線されていれば `AppHandle.dispose()` がクライアントを quit する。クライアントの `error` イベントはプロセスを落とさず `session_store_redis_error` としてログに出る。再接続は node-redis の仕事。`url` が無ければ起動に失敗し、`redis` か `connect-redis` のパッケージが無くても起動に失敗する（[インストール](#インストール) を参照）。
+- **Redis ストアは自前の接続を開く。** `session-store.storage.redis.url`（設定されていれば `password` も）への `redis`（node-redis）クライアントを `connect-redis` の `RedisStore` の下に置く。readiness registrar が配線されていれば probe `session-store`（`PING`）を登録し、Redis を失ったレプリカはトラフィックを受けなくなる。lifecycle registrar が配線されていれば `AppHandle.dispose()` がクライアントを quit する。クライアントの `error` イベントはプロセスを落とさず `session_store_redis_error` としてログに出る。再接続は node-redis の仕事。`url` が無ければ起動に失敗し、`redis` か `connect-redis` のパッケージが無くても起動に失敗する（[インストール](#インストール) を参照）。
 - **フェデレーショントランザクションは同じストアを共有する。** キーの接頭辞は `fedtx:` — [トランザクション cookie](#トランザクション-cookie) を参照。
 - **答えられないストアは `500` ではなく障害である。** リクエストのセッションをストアが読み込めない（到達できない、またはタイムアウトする）とき、そのリクエストはどのルートも動く前に `503 temporarily_unavailable` で答えられる。ルートが答えたあとでセッションの保存や有効期限の更新ができないときは、その答えがそのまま残る。どちらも error レベルで 1 行、`session_middleware_store_unavailable`（`store: "cookie_session"`、`step`: `load` または `save`、エラーの射影）としてログに出て、それ以上先へは渡らない — express-session はこれを `next(err)` に渡しており、ルートの前ならターミナルハンドラーの `500`、後なら Express の最終ハンドラーに届いていた（[`src/internal/cookieSession.mts`](src/internal/cookieSession.mts)）。このパッケージのルートは、それが重要な場所 — ログイン、フェデレーションの開始とコールバック — では答える前に自分でセッションを保存するので、そこでの保存の失敗はルート自身の `503` になる。cookie ストアの障害を答えたルートはリクエストのセッションを手放すので、express-session が応答の終わりに失敗中のストアへもう一度書くことはない。
 - **読めないレコードは障害ではなく「無い」ものとして扱う。** Redis ストアが返したレコードが JSON でない、またはセッションのレコード（配列ではないオブジェクトで、その `cookie` も配列ではないオブジェクトであるもの）でないときは、セッションが無いものとして読む: express-session はそのリクエストのために新しいセッションを始める。読むたびに warn 1 行、`session_cookie_record_unreadable`（`store: "cookie_session"`）としてログに出て、レコードのテキストは出さない。レコードは削除されず、ブラウザは cookie を持ったままである — 変更されていない新しいセッションは新しい cookie を設定しない — ので、そのブラウザからのリクエストは、ユーザーがサインインする（新しい cookie が設定される）かレコードの TTL が過ぎるまで、毎回同じレコードを読み直してログに出す: 一つのブラウザから続くこの warn は一つのレコードである。障害として答えれば、それらのリクエストがすべて失敗していた。同じストアにある `form_post` のトランザクション（`fedtx:`）や oauth の再認証の問い合わせ（`reauth:`）も同じように読まれる: 無いものとされ、コールバックは `400 invalid_session` を返し、`/authorize` は改めて問い合わせる（[`src/store/factory.mts`](src/store/factory.mts)）。
@@ -123,7 +145,7 @@ CSRF トークンの鍵は `session.secret` から導出され、`session.secret
 
 マニフェスト（[`src/module.mts`](src/module.mts)）:
 
-- `requires`: `config`、`userRepository`、`userSessionStore`、`federationTokenStore`、`sessionFederationIndex`、`csrfTokenSigner`（CSRF トークンを署名・検査するもの。セッションストアのモジュールが提供する）、そして synthetic な `federationProviders` と `federationRedirectPolicyResolver`。後者二つは per-federation モジュールの `federations.<name>` と `federationRedirectPolicies.<name>` の contribution から boot planner が組み立てる。さらに `sessionRequirementResolver` — パスワードログインは何かを書く前に core の [セッションアドミッション](../core/src/session-admission/README.md) を通して登録済みの requirement に問い合わせ、アカウントリンクのルートはそれを通してセッションを読むので、`sessionModule` を入れる構成は `core.sessionRequirements.expected` を宣言する。手で組み立てるルーター（`routes/Session.mts`、`routes/Federation.mts`）は resolver を必須のオプション `requirements` として受け取り、無ければ例外を投げる。テストは core の `resolverForTests` で作る。そして `deploymentMode` — core が `core.deployment.mode` から埋める。ログインのスロットルのプロセス内フォールバックは `multi` で拒否されるので、モードは未設定として読まれるのではなく必須になっている。手で組み立てるセッションルーターは、署名器も必須のオプション `csrfTokenSigner` として受け取って無ければ例外を投げ、モードを必須のオプション `deploymentMode` として受け取って、三つの値のどれでもない値（無い場合も含む）は構築時に TypeError になる。残り二つのセッションストア `sessionRPRegistry` と `sessionFamilyIndex` は `oauth` のもの。
+- `requires`: `config`、`userRepository`、`userSessionStore`、`federationTokenStore`、`sessionFederationIndex`、`csrfTokenSigner`（CSRF トークンを署名・検査するもの。セッションストアのモジュールが提供する）、`sessionCookiePolicy`（セッション cookie の名前・属性・寿命。これもセッションストアのモジュールが提供する）、そして synthetic な `federationProviders` と `federationRedirectPolicyResolver`。後者二つは per-federation モジュールの `federations.<name>` と `federationRedirectPolicies.<name>` の contribution から boot planner が組み立てる。さらに `sessionRequirementResolver` — パスワードログインは何かを書く前に core の [セッションアドミッション](../core/src/session-admission/README.md) を通して登録済みの requirement に問い合わせ、アカウントリンクのルートはそれを通してセッションを読むので、`sessionModule` を入れる構成は `core.sessionRequirements.expected` を宣言する。手で組み立てるルーター（`routes/Session.mts`、`routes/Federation.mts`）は resolver を必須のオプション `requirements` として受け取り、無ければ例外を投げる。テストは core の `resolverForTests` で作る。そして `deploymentMode` — core が `core.deployment.mode` から埋める。ログインのスロットルのプロセス内フォールバックは `multi` で拒否されるので、モードは未設定として読まれるのではなく必須になっている。手で組み立てるセッションルーターは、署名器も必須のオプション `csrfTokenSigner` として受け取って無ければ例外を投げ、モードを必須のオプション `deploymentMode` として受け取って、三つの値のどれでもない値（無い場合も含む）は構築時に TypeError になる。残り二つのセッションストア `sessionRPRegistry` と `sessionFamilyIndex` は `oauth` のもの。
 - `optional`: `logger`、`rateLimiter`、`auditSink`、`subjectSessionIndex`、`subjectRevocation`（リンクのルートのアドミッションが読む境界）。`auditSink` を配線しないなら `audit.sink.type = "none"`、`subjectSessionIndex` と `subjectRevocation` を配線しないなら `oauth.revocation.subject = "unsupported"` で宣言しなければ起動は拒否される。
 
 ### パスワードログイン
@@ -132,9 +154,9 @@ CSRF トークンの鍵は `session.secret` から導出され、`session.secret
 
 - どちらかが欠けていれば `400 invalid_request`。`UserRepository.authenticate` が `null` を返せば `401 invalid_credentials`。ログインに必要なストアが答えられなければ `503 temporarily_unavailable` — `UserRepository` が例外を投げた、`UserSession` の書き込みが例外を投げた、または express session を再生成（そのストアが古いレコードを破棄できなかった）・保存できなかった場合。いずれも error レベルで 1 行、`login_store_unavailable` として `store`（`user_repository`、`user_session`、`cookie_session`）、`step`（`authenticate`、`create`、`regenerate`、`save`）、エラーの射影とともにログに出る。ユーザー名は出さない。成功時は再生成したセッションを答える前に保存するので、保存できないストアは、次のリクエストが見つけられないセッションへの `200` ではなく `503` になる。再生成または保存に失敗したときは `UserSession` とその subject index のエントリーをベストエフォートでロールバックし、失敗したロールバックの各ステップは `login_cleanup_failed` の warn 1 行になる。この手順は [セッションの確立](#セッションの確立) にある。
 - Store がユーザーを検証したら、何かを書く前に、ルートは core の [セッションアドミッション](../core/src/session-admission/README.md)（`admitPrimary`）に、core がログインから組み立てる primary（`passwordPrimary`: subject、`User`、レコードが持つクレーム、`authTime`、許可リストを通った `redirect_to`、クライアントのアドレスとユーザーエージェント — `amr` と `authentication` は core のもので、ルートのものではない）について問い合わせる。requirement が一つも登録されていなければ、どのログインにも `establish` が返る。requirement の障害は `503 temporarily_unavailable`（"session requirement unavailable"。core の `describeAdmissionOutage`）で何も書かれず、アドミッションが `session_admission_unavailable`（`store` は requirement の名前、`phase: "establishment"`）として一度だけログに出す。requirement による中断は [下](#requirement-がログインを中断するとき) にある。core が primary にコピーできない値（関数）を持つ `User` は、何かを書く前にルートのエラー（`500`）として拒否される。
-- 成功すると — すべての requirement が `establish` と答えたとき — `UserSession`（`amr: ["pwd"]`、`authentication` の primary は `pwd`、寿命 `session.maxAge`）を作り、配線されていれば `subjectSessionIndex` に記録し、express session を再生成し、新しい CSRF cookie と共に `200` を返す。
+- 成功すると — すべての requirement が `establish` と答えたとき — `UserSession`（`amr: ["pwd"]`、`authentication` の primary は `pwd`、寿命 `session-store.maxAge`）を作り、配線されていれば `subjectSessionIndex` に記録し、express session を再生成し、新しい CSRF cookie と共に `200` を返す。
 - `redirect_to` を送るなら `session.redirectAllowlist` に載っていなければならず（[リダイレクト許可リスト](#リダイレクト許可リスト) を参照）、`req.session.redirectTo` に保存される。このパッケージの中にそこへリダイレクトするものは無い。
-- ブルートフォース対策のガードは共有の `rateLimiter`（接頭辞 `login`、クライアント IP ごと）の上で `rateLimit.login` の窓と上限で動き — session モジュールがこれを `login` の予算として寄与し、リミッター自身の `limits.login` がそれを上書きする — 拒否すれば `429`、リミッター自体が失敗すればリミッター自身の `failMode` に従う。`rateLimiter` が配線されていなければルートはプロセス内のリミッターにフォールバックする: `core.deployment.mode = "multi"` では起動が拒否され、未設定なら `login_rate_limiter_not_shared` の警告がログに出て、`"single"` では何も言わない。モードはモジュールが requires する core の `deploymentMode` スロットであり、ルーターは `deployment` を自分では読まない。
+- ブルートフォース対策のガードは共有の `rateLimiter`（接頭辞 `login`、クライアント IP ごと）の上で `session.rateLimit.login` の窓と上限で動き — session モジュールがこれを `login` の予算として寄与し、リミッター自身の `limits.login` がそれを上書きする — 拒否すれば `429`、リミッター自体が失敗すればリミッター自身の `failMode` に従う。`rateLimiter` が配線されていなければルートはプロセス内のリミッターにフォールバックする: `core.deployment.mode = "multi"` では起動が拒否され、未設定なら `login_rate_limiter_not_shared` の警告がログに出て、`"single"` では何も言わない。モードはモジュールが requires する core の `deploymentMode` スロットであり、ルーターは `deployment` を自分では読まない。
 
 #### requirement がログインを中断するとき
 
@@ -150,7 +172,7 @@ CSRF トークンの鍵は `session.secret` から導出され、`session.secret
 
 ### セッションの確立
 
-ログインの末尾 — ユーザーを検証してからセッションを保存するまで — は一つの関数 `establishSession`（[`src/establish-session.mts`](src/establish-session.mts)）で、`POST /session/login` とフェデレーションのコールバックの両方がこれを呼び、requirement の完了（core の `resumePrimary` のあとの MFA パッケージのもの）が同じようにログインを終えられるよう、パッケージは呼び出し側に必要な型とともにこれを export する。core のセッションアドミッションが組み立てた `Establishment` — パスワードログインでは `admitPrimary` の、フェデレーションのコールバックでは `establishWithoutAsking` の、完了では `resumePrimary` のもの — を受け取り、その primary だけから書く: subject、`User`、クレームのエンベロープ、`authTime`、core が組み立てた `amr` / `authentication`、そして `redirectTo`。呼び出し側がその横に渡すものは何も書かない。core が組み立てた `Establishment` でないもの — それに似せたオブジェクト、そのコピー — は何かを書く前に `RangeError` になる。どちらの経路でも core は `User` を `structuredClone` で primary にコピーするので、Store の `toJSON` は適用されず、コピーできない値（関数）はログインを何も書かずに拒否する（`500`）: `UserRepository` はプレーンなデータを返すこと。次を順に行う: `UserSession` レコードの作成（新しい `sid`、有効期限は `authTime` から `session.maxAge` 後）。配線されていれば `subjectSessionIndex` のエントリー（ベストエフォート: 失敗は報告され、ログインは進む）。再生成の前に呼び出し側が渡すステップ。express session の再生成（session fixation 対策）。再生成の後に呼び出し側が渡すステップ。再生成されたセッションへの `isAuthenticated`、`user`、`sid`、primary の `redirectTo`。そしてその保存。答えは `sid` を伴う `established` か、ストアとステップを名指しする `unavailable` で、後者を呼び出し側は `503 temporarily_unavailable` として答える。
+ログインの末尾 — ユーザーを検証してからセッションを保存するまで — は一つの関数 `establishSession`（[`src/establish-session.mts`](src/establish-session.mts)）で、`POST /session/login` とフェデレーションのコールバックの両方がこれを呼び、requirement の完了（core の `resumePrimary` のあとの MFA パッケージのもの）が同じようにログインを終えられるよう、パッケージは呼び出し側に必要な型とともにこれを export する。core のセッションアドミッションが組み立てた `Establishment` — パスワードログインでは `admitPrimary` の、フェデレーションのコールバックでは `establishWithoutAsking` の、完了では `resumePrimary` のもの — を受け取り、その primary だけから書く: subject、`User`、クレームのエンベロープ、`authTime`、core が組み立てた `amr` / `authentication`、そして `redirectTo`。呼び出し側がその横に渡すものは何も書かない。core が組み立てた `Establishment` でないもの — それに似せたオブジェクト、そのコピー — は何かを書く前に `RangeError` になる。どちらの経路でも core は `User` を `structuredClone` で primary にコピーするので、Store の `toJSON` は適用されず、コピーできない値（関数）はログインを何も書かずに拒否する（`500`）: `UserRepository` はプレーンなデータを返すこと。次を順に行う: `UserSession` レコードの作成（新しい `sid`、有効期限は `authTime` から `session-store.maxAge` 後）。配線されていれば `subjectSessionIndex` のエントリー（ベストエフォート: 失敗は報告され、ログインは進む）。再生成の前に呼び出し側が渡すステップ。express session の再生成（session fixation 対策）。再生成の後に呼び出し側が渡すステップ。再生成されたセッションへの `isAuthenticated`、`user`、`sid`、primary の `redirectTo`。そしてその保存。答えは `sid` を伴う `established` か、ストアとステップを名指しする `unavailable` で、後者を呼び出し側は `503 temporarily_unavailable` として答える。
 
 成り立つこと:
 
@@ -187,11 +209,11 @@ CSRF トークンの鍵は `session.secret` から導出され、`session.secret
 `POST /session/login` と `POST /session/logout` は、same-origin（または明示的に信頼した）`Origin` / `Referer` **か**、有効な double-submit CSRF トークン **の** どちらかを持つリクエストを受理する。どちらも持たないリクエストは `403 access_denied` で拒否する。
 
 - **ブラウザ** は何も追加しなくてよい: same-origin の `fetch` / フォーム送信ではブラウザが `Origin` を付け、それだけで検査を通る。
-- **ヘッダーを持たないクライアント**（curl、サーバー側のエージェント、テストハーネス）は `GET /session/csrf` を呼ぶ。JS から読める `<session.name>.csrf` cookie がセットされ、同じ値が `csrf_token` として返る。両方を送り返す: cookie と、`x-csrf-token` ヘッダーまたは `csrf_token` フォームフィールドのどちらか。
+- **ヘッダーを持たないクライアント**（curl、サーバー側のエージェント、テストハーネス）は `GET /session/csrf` を呼ぶ。JS から読める `<session-store.name>.csrf` cookie がセットされ、同じ値が `csrf_token` として返る。両方を送り返す: cookie と、`x-csrf-token` ヘッダーまたは `csrf_token` フォームフィールドのどちらか。
 - **foreign な** `Origin` はトークンがあっても拒否する。クロスサイトリクエストであることの積極的な証拠だから。
 - ログインに成功すると **新しい** CSRF cookie が返るので、続くログアウトに追加の往復は要らない。
 
-トークンは乱数 nonce と有効期限（`session.csrf.ttlSeconds`）に対する署名付きでステートレスな HMAC で、鍵は `session.secret` の HKDF 展開 — 親ドメインの cookie を書けるサブドメインでも偽造できない。ルートはこれを `csrfTokenSigner` スロット（セッションストアのモジュールが埋める）を通して署名・検査し、`session.secret` を読まない。トークンが正しく署名されているとみなすのは署名器の `verify` が `true` を返したときだけで、有効期限が `session.csrf.ttlSeconds` と 60 秒の時計のずれより先にあるトークンは拒否する。ルートが発行するトークンはそれより先に期限切れにならない。クロスオリジンのログイン UI は自身のオリジンを `session.csrf.trustedOrigins` に載せる。`cors.allowedOrigins` は CSRF の信頼を与えない。載せたオリジンはフェデレーショングラントの同意とデバイス検証にも回答できるので、クライアントのオリジンは決して載せない（federation-grants ADR の D7）。
+トークンは乱数 nonce と有効期限（`session.csrf.ttlSeconds`）に対する署名付きでステートレスな HMAC で、鍵は `session-store.secret` の HKDF 展開 — 親ドメインの cookie を書けるサブドメインでも偽造できない。ルートはこれを `csrfTokenSigner` スロット（セッションストアのモジュールが埋める）を通して署名・検査し、`session-store.secret` を読まない。トークンが正しく署名されているとみなすのは署名器の `verify` が `true` を返したときだけで、有効期限が `session.csrf.ttlSeconds` と 60 秒の時計のずれより先にあるトークンは拒否する。ルートが発行するトークンはそれより先に期限切れにならない。クロスオリジンのログイン UI は自身のオリジンを `session.csrf.trustedOrigins` に載せる。`cors.allowedOrigins` は CSRF の信頼を与えない。載せたオリジンはフェデレーショングラントの同意とデバイス検証にも回答できるので、クライアントのオリジンは決して載せない（federation-grants ADR の D7）。
 
 他のパッケージはこのポリシーを import せず、`sessionModule` が提供する `csrfGuard` スロットを通して実行する — デバイス検証はその `middleware` をマウントし、federation-grants の同意の回答はその `check` に問う。`checkRequestOrigin`、`createCsrfProtection`、`createCsrfProtectionFromConfig`、`createCsrfGuard`、`createCsrfIssueHandler`、`createSessionCsrfGuard` は、独自のログインページをマウントしたり独自のルートを保護したりする組み立てのために export されている（[`src/csrf.mts`](src/csrf.mts)）。`createCsrfProtection` と `createCsrfProtectionFromConfig` は署名器（`{ signer }`）— `csrfTokenSigner` スロットのもの、または `createSessionCsrfTokenSigner(sessionSecret)`（[`src/csrf-token-signer.mts`](src/csrf-token-signer.mts)）— を受け取る（`createSessionCsrfTokenSigner` は secret を core のエントロピーの下限に照らす）。署名器なしでは作られず、core の契約を破る署名器でも作られない: 作る前に二つのペイロードに署名させ、その署名と、変えた署名、別のペイロードの署名を検査する。`sign` と `verify` は署名器から一度だけ読むので、作った後に署名器のオブジェクトを変えても、発行するトークンにも受け入れるトークンにも影響しない。
 
@@ -270,7 +292,7 @@ if (res.type === "opaqueredirect") {
 2. **`exchangeCode` が例外を投げると `502 exchange_failed`。** アダプター内のあらゆる拒否 — 誤った `iss`、不正な id_token、UserInfo の不一致 — はこの形で表に出て、Store には届かない。`sub` の無いプロファイルは `400 invalid_profile`。警告 `federation_callback_exchange_failed`（その行にはプロバイダーが束縛される）が運ぶのは core の `loggableError(err)` であり、エラーそのものではない: OAuth ライブラリは拒否したトークン応答を、アクセストークンとリフレッシュトークンを含めてエラーの cause の連鎖に載せるので、エラー全体をシリアライズするロガーはそれを書き出してしまう。これらのルートがログに書く他の失敗 — ストア、リポジトリ、express-session のもの — も同じように射影する（Redis ストアのエラーは拒否されたコマンドの引数を運ぶ。`allow-plaintext` ならトークンレコードである）。
 3. **ID は Store が解決する。** `<name>:<sub>` を `UserRepository.authenticateByToken` に渡し、例外なら `503 temporarily_unavailable`、`null` なら `401 unknown_user`（開始でリンクを求めていない限り）。
 4. **クレーム** はローカルの `User` のものに、`mapClaims` の結果を [クレームの優先順位](#クレームの優先順位-ローカルが勝ちfederated-は名前空間に隔離される) に従って合わせたもの。`amr` は `fed` — 信頼するフェデレーションではその横に `profile.amr`、そうでなければ `profile.amr` は `authentication.upstreamAmr` に保持される（[上](#セッションが認証について記録するもの)）。
-5. **セッション** は新しい `UserSession`（寿命 `session.maxAge`）、配線されていれば `subjectSessionIndex` のエントリー、`sessionFederationIndex` のエントリー、そして再生成された express session — [セッションの確立](#セッションの確立) に、index のエントリーと下のトークンをコールバック自身のステップとして加えたもの。その establishment は core の `establishWithoutAsking` がフェデレーション自身の事実から組み立てるもので、このリリースではフェデレーションのログインでセッション requirement に問い合わせない（そこでの中断はナビゲーションでなければならない）。だからパスワードログインを中断する requirement もこれは中断しない。requirement の利用時のアドミッションは、セッションが使われるたびにそのセッションに適用される。コールバックに欠かせないストアが失敗した場合 — Store の照会、`UserSession` か `sessionFederationIndex` の書き込み、express session の再生成・保存、下のトークンの紐づけ、そしてそれらすべてに先立つ一時状態の破棄（[トランザクションが消費されるとき](#トランザクションが消費されるとき) を参照） — はいずれも `503 temporarily_unavailable` で、error レベルで 1 行、`federation_callback_store_unavailable` として `store`、`step`、エラーの射影とともにログに出る。書き込んだものはベストエフォートで逆順にロールバックされ、失敗したロールバックの各ステップは `federation_cleanup_failed` の warn 1 行になる。`subjectSessionIndex` の書き込みが失敗してもログに出る（`subject_session_index_write_failed`）だけでログインは進む。
+5. **セッション** は新しい `UserSession`（寿命 `session-store.maxAge`）、配線されていれば `subjectSessionIndex` のエントリー、`sessionFederationIndex` のエントリー、そして再生成された express session — [セッションの確立](#セッションの確立) に、index のエントリーと下のトークンをコールバック自身のステップとして加えたもの。その establishment は core の `establishWithoutAsking` がフェデレーション自身の事実から組み立てるもので、このリリースではフェデレーションのログインでセッション requirement に問い合わせない（そこでの中断はナビゲーションでなければならない）。だからパスワードログインを中断する requirement もこれは中断しない。requirement の利用時のアドミッションは、セッションが使われるたびにそのセッションに適用される。コールバックに欠かせないストアが失敗した場合 — Store の照会、`UserSession` か `sessionFederationIndex` の書き込み、express session の再生成・保存、下のトークンの紐づけ、そしてそれらすべてに先立つ一時状態の破棄（[トランザクションが消費されるとき](#トランザクションが消費されるとき) を参照） — はいずれも `503 temporarily_unavailable` で、error レベルで 1 行、`federation_callback_store_unavailable` として `store`、`step`、エラーの射影とともにログに出る。書き込んだものはベストエフォートで逆順にロールバックされ、失敗したロールバックの各ステップは `federation_cleanup_failed` の warn 1 行になる。`subjectSessionIndex` の書き込みが失敗してもログに出る（`subject_session_index_write_failed`）だけでログインは進む。
 6. **トークン** は、プロファイルが `accessToken` を持つときにだけ、新しい `sid` の下で `federationTokenStore` に紐づけられる:
    - `accessToken`、`refreshToken`、`idToken`、`expiresAt` はアダプターが返したまま — `expiresAt: null` は `null`（「リフレッシュしない」）として保存され、ルーターが有効期限をでっち上げることはない。
    - `scope` と `grantedScope`: アダプターが `profile.scope` を返していればそれ（空や使えない文字列は何も表さない）、返していなければプロバイダーが要求した `scope` — RFC 6749 §3.3 は応答の欠落を「要求どおり」と読む（[`src/federations/consented-scope.mts`](src/federations/consented-scope.mts)）。
@@ -295,14 +317,14 @@ if (res.type === "opaqueredirect") {
 
 | | 値 |
 |---|---|
-| cookie 名 | `__Secure-<session.name から接頭辞を除いたもの>.federation` — 例: `__Host-auth.session` も `auth.session` も `__Secure-auth.session.federation` になる |
+| cookie 名 | `__Secure-<session-store.name から接頭辞を除いたもの>.federation` — 例: `__Host-auth.session` も `auth.session` も `__Secure-auth.session.federation` になる |
 | 属性 | `HttpOnly; Secure; SameSite=None`、`Path` はそのプロバイダーのコールバック URL に限定、`Max-Age` はトランザクションの寿命（10 分） |
 | 中身 | 不透明な 256 ビットの ID だけ |
 | レコード | `state`、`codeVerifier`、`nonce`、`redirectTo`、リンクの意図、プロバイダー名。express-session のストアに `fedtx:` というキー接頭辞で置かれる |
 
-名前は CSRF cookie と同じく `session.name` から導かれる。接頭辞だけが例外で、**無条件に** 付けられる: `__Host-` ではなく `__Secure-` なのは、`__Host-` は `Path=/` を要求し、この cookie はコールバックにパスを限定しているので `__Host-` の名前ではどのブラウザにも捨てられるから。無条件なのは、この cookie が `SameSite=None` であり、したがって常に `Secure` だから（`Secure` でない `SameSite=None` の cookie はブラウザが捨てる）。したがって `form_post` フェデレーションを持つデプロイはコールバックを HTTPS で提供する — Apple はいずれにせよ戻り URL に HTTPS を要求する。
+名前は CSRF cookie と同じく `session-store.name` から導かれる。接頭辞だけが例外で、**無条件に** 付けられる: `__Host-` ではなく `__Secure-` なのは、`__Host-` は `Path=/` を要求し、この cookie はコールバックにパスを限定しているので `__Host-` の名前ではどのブラウザにも捨てられるから。無条件なのは、この cookie が `SameSite=None` であり、したがって常に `Secure` だから（`Secure` でない `SameSite=None` の cookie はブラウザが捨てる）。したがって `form_post` フェデレーションを持つデプロイはコールバックを HTTPS で提供する — Apple はいずれにせよ戻り URL に HTTPS を要求する。
 
-**アプリケーションのセッション cookie はデプロイが設定した属性を保つ**。`form_post` フェデレーションを開始したことがあるかどうかにかかわらず、すべてのセッションで。`session.sameSite` に触れることは無い。
+**アプリケーションのセッション cookie はデプロイが設定した属性を保つ**。`form_post` フェデレーションを開始したことがあるかどうかにかかわらず、すべてのセッションで。`session-store.sameSite` に触れることは無い。
 
 トランザクションはコールバックを、それを開始したブラウザに束縛する。`state` の比較は引き続き行われ、トランザクション cookie はそれへの追加であって置き換えではない。盗んだ `state` を対応するトランザクション cookie なしで提示した呼び出しは、`state` を読む前に拒否される（`400 invalid_session`）。
 
@@ -317,7 +339,7 @@ cookie を厳密に一つのホストに固定するのは `__Host-` であり�
 - **攻撃者に必要なもの:** 認証ホストに対する cookie をセットできるホストのどれか一つの制御 — `auth.example.com` なら、その登録可能ドメイン `example.com` 配下のあらゆるホスト: `blog.example.com`、忘れられたステージングホスト、ぶら下がった DNS レコード、隣の低信頼アプリの XSS、共有ホスティングの隣人。このデプロイからは何も要らない: セッションも `state` もアカウントも。
 - **それで得られるもの:** そのホストから被害者のブラウザに `Domain=example.com` で `__Secure-<name>.federation` をセットし、自分のフェデレーションフローを開始し、*自分の* トランザクション ID を仕込み、*自分の* `state` と `code` をコールバックに自動送信する。被害者のブラウザは **攻撃者の** フェデレーションアカウントにログインした状態になり、被害者のその後の操作はそのアカウントに記録される。被害者のセッションを読むことも、資格情報を晒すことも、被害者自身のアカウントに届くこともない — ID の取り違えであって、アカウント乗っ取りではない。
 - **cookie に署名しても防げない理由:** 攻撃者のトランザクションは本当に攻撃者のものであり、サーバーが自分の発行物として受け入れるものは何でも攻撃者が正当に持っている。パスを限定した cookie に固有の性質である。
-- **すべきこと:** 認証ホストの登録可能ドメイン配下のすべてのホスト — `auth.example.com` ならすべての `*.example.com` — をデプロイの信頼境界の内側として扱い、そのどれでも信頼できない・低信頼のコンテンツを動かさない。`session.domain = null`（`__Host-` のデフォルト）が守るのはセッション cookie であってトランザクション cookie ではなく、これに対しては何もしない。ログインルートでは署名付き CSRF トークンがこの規則を補うために存在するが、ここには束縛すべきセッションが無いので、この規則が緩和策のすべてである。
+- **すべきこと:** 認証ホストの登録可能ドメイン配下のすべてのホスト — `auth.example.com` ならすべての `*.example.com` — をデプロイの信頼境界の内側として扱い、そのどれでも信頼できない・低信頼のコンテンツを動かさない。`session-store.domain = null`（`__Host-` のデフォルト）が守るのはセッション cookie であってトランザクション cookie ではなく、これに対しては何もしない。ログインルートでは署名付き CSRF トークンがこの規則を補うために存在するが、ここには束縛すべきセッションが無いので、この規則が緩和策のすべてである。
 
 #### トランザクションが消費されるとき
 
@@ -442,7 +464,7 @@ federations {
 - **照合は完全一致。** スキーム、ホスト、ポート、パス、クエリ、フラグメントのすべてが効く。正規化で消えるのは大文字小文字、デフォルトポート、`..` セグメント、パーセントエンコーディングだけ。ワイルドカード・前方一致・サブドメイン一致は無い — エントリーは自分の兄弟を許さず、動的なクエリパラメーターを持つ行き先は一族としてまとめて列挙できない。固定のパスにし、変わる部分はセッションで運ぶ。
 - **リストが無いか空なら、どの `redirect_to` も `400 invalid_redirect` で拒否する。** パラメーターを使わないデプロイにはそれが正しい設定であり、すべてを許す方法ではない。
 - **ループバック以外は `https` が必須。** `localhost`、`127.0.0.0/8`、`[::1]` は `http://` を使える。これでローカル開発のフロントエンドやネイティブクライアントのループバックリスナーが証明書なしで動く。ポートは照合されるので、クライアントがバインドするポートを列挙する — RFC 8252 §7.3 のポートを問わないループバック比較はここでは実装されていない。
-- **cookie ドメインが設定されていれば、リスト自体を制約する。** ループバックでないエントリーはすべて `sessionDomain`（フェデレーション）または `session.domain`（ログイン）の内側でなければならず、ポリシーを組み立てる時点で検査されるので、外側のエントリーは効いているような顔で設定に残るのではなく起動に失敗する。別ドメインへのリダイレクト先を本当に意図するなら、そのフェデレーションの `sessionDomain` を外す。
+- **cookie ドメインが設定されていれば、リスト自体を制約する。** ループバックでないエントリーはすべて `sessionDomain`（フェデレーション）または `session-store.domain`（ログイン）の内側でなければならず、ポリシーを組み立てる時点で検査されるので、外側のエントリーは効いているような顔で設定に残るのではなく起動に失敗する。別ドメインへのリダイレクト先を本当に意図するなら、そのフェデレーションの `sessionDomain` を外す。
 
 `authCallbackUrl` と `clientUrl` は許可リストではなく `resolveCallbackRedirect` が読む: 前者は `redirect_to` を受け渡すブリッジページ、後者は開始時に `redirect_to` が無かったコールバックの戻り先。どちらかが必要なのに未設定のコールバックは、セッションを保存したあとで `500 misconfiguration` を返し、ポリシーが答える `5xx` がすべてそうであるように error レベルで 1 行、`redirect_policy_server_fault` としてログに出る。したがって、すべての開始が `redirect_to` を持つのでない限りどのフェデレーションにも `clientUrl` が必要で、`redirect_to` を持つ開始には `authCallbackUrl` が必要になる。
 
@@ -494,7 +516,7 @@ export const exampleFederationModule = defineModule({
 | [`src/store/__tests__/factory.test.mts`](src/store/__tests__/factory.test.mts) | 二つの組み込みストア、`session-store` の readiness probe、Redis クライアントのエラーリスナー |
 | [`src/__tests__/cookieSessionStore.test.mts`](src/__tests__/cookieSessionStore.test.mts) | 実際の express-session と connect-redis の下で cookie セッションのストアが失敗するとき: ミドルウェアの `503` とその 1 行、そしてルートが答えた障害が一度だけ答えられ、セッションが書き直されないこと |
 | [`src/__tests__/csrf.test.mts`](src/__tests__/csrf.test.mts) | 署名付きトークン、その有効期限の上限、作るときに拒否される署名器と `verify` が `true` 以外を返せば拒否として読むこと、オリジン検査、ガードの受理規則 |
-| [`src/__tests__/csrfTokenSigner.test.mts`](src/__tests__/csrfTokenSigner.test.mts) | セッションストアの `csrfTokenSigner`: core の契約、固定ベクター、エントロピーの下限、`session.secret` の下で署名したトークンが `/session/*` と `csrfGuard` スロットを通ること、override がそれを置き換えること。`sessionModule` と手で組み立てたルーターが署名器なしでは拒否されること、スロットの署名器で署名すること、トークンがスロットと `/session/*` の間で通ること、どのルートでも `session.secret` を読まないこと |
+| [`src/__tests__/csrfTokenSigner.test.mts`](src/__tests__/csrfTokenSigner.test.mts) | セッションストアの `csrfTokenSigner`: core の契約、固定ベクター、エントロピーの下限、`session-store.secret` の下で署名したトークンが `/session/*` と `csrfGuard` スロットを通ること、override がそれを置き換えること。`sessionModule` と手で組み立てたルーターが署名器なしでは拒否されること、スロットの署名器で署名すること、トークンがスロットと `/session/*` の間で通ること、どのルートでも `session-store.secret` を読まないこと |
 | [`src/__tests__/csrfGuard.test.mts`](src/__tests__/csrfGuard.test.mts)、[`loginEntry.test.mts`](src/__tests__/loginEntry.test.mts)、[`loginCompletion.test.mts`](src/__tests__/loginCompletion.test.mts)、[`sessionCookiePolicy.test.mts`](src/__tests__/sessionCookiePolicy.test.mts) | モジュールが他のパッケージに提供するもの: それぞれ core の契約を守ること、モジュールが提供すること、ガードが `/session/login` のものと同じく応答・ログし `GET /session/csrf` が渡すトークンを受け入れること、ログインエントリがページなしで作られ読まれる場所で失敗すること、cookie ポリシーが契約を破るものを cookie の属性のすべての組み合わせにわたって拒否し、それが拒否する名前とドメインが同じメッセージで検証時に拒否されること。ストアのモジュールと並べたポリシーの override が起動を拒否し、モジュールの無い組み立てはスロットを埋めること |
 | [`src/__tests__/establish-session.test.mts`](src/__tests__/establish-session.test.mts) | ログインの末尾: 書くもの（establishment の primary だけ、そして偽の establishment の拒否）、その手順、各書き込みに渡すもの、失敗しうるあらゆる点でのロールバック |
 | [`src/routes/__tests__/Session.test.mts`](src/routes/__tests__/Session.test.mts)、[`loginRateLimit.test.mts`](src/routes/__tests__/loginRateLimit.test.mts) | ログイン、ログアウトが無効化するものとストア障害が `UserSession` の削除を止めないこと、障害時の応答とそのログ 1 行、ログインのレート制限ガード |

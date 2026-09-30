@@ -54,7 +54,7 @@ OAuth 2.0 / OpenID Connect プロバイダー。ユーザーをサインイン�
   デプロイメントのユーザーサービスにあり、プロバイダーはそのサービスの API を
   通じてのみ扱う（core の YAML ユーザーリポジトリは開発・テスト用のアダプター）;
 - ログインページと同意ページ: デプロイメントが自前で提供し、プロバイダーはそこへ
-  リダイレクトする（`endpoints.login.url`、`endpoints.consent.url`）;
+  リダイレクトする（`session.loginPage.url`、`oauth.consentPage.url`）;
 - サインアップ、アカウント回復、メール。
 
 **独立したサービスである理由。** 署名鍵とセッション状態を保持するのがここだから。
@@ -204,14 +204,14 @@ oauth {
 }
 ```
 
-**グラント。** 組み込みのグラントはライブラリのデフォルトではすべて無効。デプロイメントが提供するものを有効にする:
+**グラント。** 組み込みのグラントはライブラリのデフォルトではすべて無効。デプロイメントが提供するものを、それをインストールするモジュールのセクションで有効にする:
 
 ```hocon
-oauth.grants {
-  authorization_code { enabled = true }   # PKCE is mandatory; S256 unless a client allows plain
-  refresh_token      { enabled = true }
-  session            { enabled = true }
+oauth-authorization.grants {
+  authorizationCode { enabled = true }   # PKCE is mandatory; S256 unless a client allows plain
+  refreshToken      { enabled = true }
 }
+oauth-session.enabled = true
 ```
 
 **セッション (`sessionModule` 登録時):**
@@ -219,7 +219,7 @@ oauth.grants {
 ```hocon
 # `secret` signs the cookie that IS the authenticated session: at least
 # 32 bytes (256 bits), e.g. `openssl rand -hex 32`.
-session { secret = ${SESSION_SECRET} }
+session-store { secret = ${SESSION_STORE_SECRET} }
 
 # One section per federation. `type` names the adapter package and defaults
 # to the section's name; each adapter's README lists its settings.

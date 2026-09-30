@@ -69,16 +69,16 @@ const config = handle.components.config; // boot がパースしたもの
 | `oauth.accessToken.maxExpiresIn` | token exchange の `expires_in` で得られる上限。超えるリクエストはこの値に切り詰められる。未設定ならデフォルトと同じで、明示的に設定しない限り延長されない。デフォルトがこれを超えると両キーを名指しして起動失敗 |
 | `oauth.accessToken.expiresIn` | `defaultExpiresIn` の**非推奨（deprecated）**エイリアス。`defaultExpiresIn` 未設定の間だけ読まれる（`reference.conf` は出荷時の `3600` をこのキーに置いている）。パース後の config はこの名前にも解決済みのデフォルトを持つ |
 | `oauth.refreshToken.expiresIn` | リフレッシュトークンの有効期間（秒）。1 から 1 年までの整数。キーの唯一の読み手である `resolveRefreshTokenLifetime(config)` で読み、それ以外の値（未設定を含む）にはキーを名指しした `RangeError` を投げる。リフレッシュトークンを発行するグラントはすべて構築時に読むので、それが拒否する手組みの config は構築で失敗し、認可コードもチャレンジも消費しない |
-| `oauth.grants` | グラントタイプごとの設定。グラントタイプをキーとする。`oauth` パッケージは自分が登録するグラント — `session`、`authorization_code`、`refresh_token`、`client_credentials`、jwt-bearer の URN — の `enabled` を読み、true のものだけを登録する。他のグラントパッケージはこのキーを読まない: token exchange と WebAuthn はモジュールが組み込まれればグラントを登録し、device grant は `device-grant.enabled` が true のときだけグラントを登録する — 渡された config から `deviceGrantModule({ config })` が決める |
-| `session` | ブラウザーセッションの cookie とそのストア — `secret`、`name`、`maxAge`、`secure`、`sameSite`、`domain`、`redirectAllowlist`、`storage`、`csrf` |
-| `session.csrf` | 状態変更する session ルートの CSRF ポリシー — `trustedOrigins`、`ttlSeconds` |
-| `rateLimit` | `login`: `/session/login` の予算（`windowMs`、`limit`）。session モジュールがこれを `login` の予算として寄与する。Redis リミッターの障害時ポリシーと OAuth エンドポイントの制限値は、リミッターモジュール自身のセクションのもの（`core-rate-limiter-memory.*` / `redis-rate-limiter.*`）。Redis リミッターの旧パス `rateLimit.failMode` は、移動の拒否と boot の `rate_limit_fail_mode_not_applied` 警告のために書かれたまま残す |
+| `oauth.grants` | 存在のみ: グラントのスイッチの移動元のパスで、移動の拒否のために書かれたまま残す。スイッチはそれぞれモジュールのもの: session グラントは `oauth-session.enabled`、ほかは `oauth-authorization.grants.<grant>.enabled`（`oauth` パッケージが文書化する）。他のグラントパッケージのスイッチはここに無い: token exchange と WebAuthn はモジュールが組み込まれればグラントを登録し、device grant は `device-grant.enabled` が true のときだけグラントを登録する — 渡された config から `deviceGrantModule({ config })` が決める |
+| `session`、`session-store` | 存在のみ: session モジュールのセクションとセッションストアのセクションで、それぞれのモジュールが parse する（`session` パッケージが文書化する）。`session` の下はセッションストアのキーの移動元のパスで、移動の拒否のために書かれたまま残す。core が読むのは `session-store.maxAge` だけ — `sessionCookiePolicy` が渡されないときの subject revocation の horizon のため — で、composition root はモジュールを選ぶ前に `session-store.storage` を読む |
+| `rateLimit` | 存在のみ: `login` はログインの予算の移動元のパス（`session.rateLimit.login`、session モジュールのもの）で、移動の拒否のために書かれたまま残す。Redis リミッターの障害時ポリシーと OAuth エンドポイントの制限値は、リミッターモジュール自身のセクションのもの（`core-rate-limiter-memory.*` / `redis-rate-limiter.*`）。Redis リミッターの旧パス `rateLimit.failMode` は、移動の拒否と boot の `rate_limit_fail_mode_not_applied` 警告のために書かれたまま残す |
 | `federations` | フェデレーションプロバイダー。名前をキーとする `{ enabled, type?, … }`。core が読むのは `enabled`（boot 時のフェデレーションストア配線チェック）だけで、`type` とエントリの残りはそれを読むアダプターパッケージのもの — アダプターパッケージは [ルート README](../../README.md) に一覧がある |
 | `repositories` | client、user、code の Repository 設定 — それぞれ `type` とそのサブセクション |
-| `endpoints` | `login.url`: デプロイのログインページ。`consent.url`: first-party でないクライアント向けの同意ページ（デフォルト `/consent`） |
+| `endpoints` | 存在のみ: ログインページと同意ページの移動元のパス（`session.loginPage.url` は session モジュールのもの、`oauth.consentPage.url` は oauth モジュールのもの）で、移動の拒否のために書かれたまま残す |
 | `core` | core 自身のセクションで、厳格: どの階層でも宣言されていないキーはブートを拒否し（`config-validation-failed`）、キーを示し、値は決して示さない |
 | `core.deployment.mode` | オペレーターが述べるレプリカ数: `single`、`multi`、または未設定（`CORE_DEPLOYMENT_MODE`）。既定値は無い: 未設定はそれ自体が一つの状態である。boot はこれから `deploymentMode` スロットを埋め、`multi` のもとではレプリカごとに分岐する状態を宣言するすべてのモジュールを拒否する。`deployment.mode` はこのパスを示して拒否される。`DEPLOYMENT_MODE` は `CORE_DEPLOYMENT_MODE` へ改名されたと宣言されており、単独で、または別の値で設定されているとブートを拒否する |
 | `core.sessionRequirements.expected` | この構成が期待するセッション要件 — 「ログイン済み」の意味を変える拡張で、MFA はその一つ — で、ブート時にインストールされたモジュールが登録したものと比較される（[セッション許可](#セッション許可) を参照）。書かれていれば、セッション許可に問い合わせるモジュールの有無にかかわらず両方向で比較する: インストールされたどのモジュールも登録しない名前はブートを拒否し（`session-requirement-missing`）、登録された要件を書き漏らしても拒否する（`session-requirements-undeclared`）。セッション許可に問い合わせるモジュールがインストールされているときは必須（`oauthModule` はその一つ）で、書かれていなければ拒否する（`session-requirements-undeclared`）。`[]` は「なし」。既定値は無く、構成は自らの姿勢を述べる。`sessionRequirements.expected` はこのパスを示して拒否される |
+| `core.tokenBinding` | すべての機構が共有するトークンバインディングの設定: 機構のあいだを調停する `dispatchPolicy`（`CORE_TOKEN_BINDING_DISPATCH_POLICY`。[トークンバインディング機構](#トークンバインディング機構) を参照）と `bindConfidentialClientRefreshTokens`（`CORE_TOKEN_BINDING_BIND_CONFIDENTIAL_CLIENT_REFRESH_TOKENS`）で、`resolveTokenBindingSettings` が読む。`oauth.tokenBinding` はこれらのパスを示して拒否される |
 | `mfaFactorStore.adapter`、`mfaTransactionStore.adapter` | 登録済みの要素を保持するストア（`memory`、`redis`、`store`）と、MFA のトランザクションとロック状態を保持するストア（`memory`、`redis`）。どちらも既定は `memory`。MFA を組み込み、ストアを名前で選ぶ composition root が読むが、まだそうするものはない: standalone テンプレートは MFA モジュールを組み込まず、`"off"` 以外のモードではブートを拒否する（`mfa` を宣言するが、そこで登録するものは無い） |
 | `cors.allowedOrigins` | token / userinfo / revocation / discovery・JWKS のレスポンスを読める browser origin — [CORS](#cors) を参照。空（既定）なら CORS は無効。`httpSettings` を provide するモジュールがないとき core が読む。standalone テンプレートの `http` モジュールはこのリストをそのスロットで渡す。CSRF の信頼は与えない（`session.csrf.trustedOrigins` を使う） |
 
@@ -92,7 +92,7 @@ const config = handle.components.config; // boot がパースしたもの
 
 #### グラントハンドラーの登録
 
-モジュールはグラントを `contributes.grants` にグラントタイプをキーとして宣言します。そもそもグラントを contribute するかどうかはモジュールが決めます: `oauth` パッケージのモジュールは `oauth.grants.<name>.enabled` が true のグラントだけを contribute し、token exchange と WebAuthn はモジュールが組み込まれれば自分のグラントを contribute し、`deviceGrantModule({ config })` は渡された config で `device-grant.enabled` が true のときだけ device grant を contribute します。boot は各ファクトリーを実行し、ハンドラーをそのグラントタイプで登録し — 2 つのモジュールが同じグラントタイプを contribute すると boot は拒否されます — ステージ 5 でレジストリを freeze するので、boot 後の登録は throw します。コンシューマコードがレジストリを import したり組み立てたりすることはありません: `GrantRegistry` は内部実装で、パッケージルートからは export されていません。
+モジュールはグラントを `contributes.grants` にグラントタイプをキーとして宣言します。そもそもグラントを contribute するかどうかはモジュールが決めます: `oauth` パッケージのモジュールはスイッチ — session グラントは `oauth-session.enabled`、ほかは `oauth-authorization.grants.<grant>.enabled` — が true のグラントだけを contribute し、token exchange と WebAuthn はモジュールが組み込まれれば自分のグラントを contribute し、`deviceGrantModule({ config })` は渡された config で `device-grant.enabled` が true のときだけ device grant を contribute します。boot は各ファクトリーを実行し、ハンドラーをそのグラントタイプで登録し — 2 つのモジュールが同じグラントタイプを contribute すると boot は拒否されます — ステージ 5 でレジストリを freeze するので、boot 後の登録は throw します。コンシューマコードがレジストリを import したり組み立てたりすることはありません: `GrantRegistry` は内部実装で、パッケージルートからは export されていません。
 
 `GrantHandler` には後始末のフックがありません。`AppHandle.dispose()` は、提供された各コンポーネントの `lifecycle[K].cleanup` を reverse-topological 順で実行し、次に宣言を持たないモジュール提供値の `Symbol.asyncDispose` を、最後に `LifecycleRegistrar` の drain を行い — レジストリには触れません。ハンドラーのためにリソースを保持するモジュールは、自分の `lifecycle[K].cleanup` でそれを解放します。[`src/grants/README.md`](src/grants/README.md) を参照してください。
 
@@ -170,7 +170,7 @@ const store = await createRemoteSigningKeyStore({
 - 非対称アルゴリズムで `privateKey`/`privateKeyPath`（または公開鍵側）が無い場合、設定キー名・環境変数名・それらを生成する `openssl genpkey -algorithm ed25519` コマンドを明示したエラーで起動失敗する。
 - `HS256` の `secret` は `MIN_SECRET_ENTROPY_BYTES`（32 バイト）以上が必須。`previousSecrets[].secret` も同じ。
 
-エントロピーは**デコード後**の値で、かつ最も小さく読める解釈で測る（`measureSecretEntropyBytes`）: 64 文字の hex は 32 バイトで通り、32 文字の hex は 16 バイトで落ちる。`session.secret` にも同じ floor が core のスキーマで適用される。`assertSecretEntropy` / `describeWeakSecret` は export されているので、運用者のシークレットを自前で受け付ける composition root も同じ検査を適用できる。
+エントロピーは**デコード後**の値で、かつ最も小さく読める解釈で測る（`measureSecretEntropyBytes`）: 64 文字の hex は 32 バイトで通り、32 文字の hex は 16 バイトで落ちる。`session-store.secret` にも同じ floor がセッションストアのセクションのスキーマで適用される。`assertSecretEntropy` / `describeWeakSecret` は export されているので、運用者のシークレットを自前で受け付ける composition root も同じ検査を適用できる。
 
 floor が置かれているのは **builder と schema**（= config 境界）であることに注意。`createSymmetricKeyStore` は低レベルプリミティブなので強制しない — 直接呼ぶ composition root は自分で検査する責任を持つ。
 
@@ -561,12 +561,12 @@ sender-constrained なトークンバインディングは第一級の拡張面�
 
 #### ディスパッチポリシー
 
-複数の機構が組み込まれたとき、`oauth.tokenBinding.dispatch-policy`（core 同梱の `CoreConfigSchema` にある — single source of truth）が調停します:
+複数の機構が組み込まれたとき、`core.tokenBinding.dispatchPolicy`（core 自身のセクションにある — single source of truth）が調停します:
 
 - `intent-explicit`（既定）— ambient より explicit-intent の機構を優先する。
 - `strict-mutual-exclusion` — 2 つ以上の機構の `extract` がバインディングを返したら `invalid_request` で拒否する。
 
-環境変数での上書き: `OAUTH_TOKEN_BINDING_DISPATCH_POLICY`。
+環境変数での上書き: `CORE_TOKEN_BINDING_DISPATCH_POLICY`。
 
 #### グラント側の許可リスト
 
@@ -635,7 +635,7 @@ OIDC Discovery 1.0 メタデータエンドポイント。`config.oauth.jwt.issu
 - `introspection_endpoint_auth_methods_supported: ["client_secret_basic", "client_secret_post"]`、同じ条件で `private_key_jwt` も加わる — `none` は無い: `/oauth/introspect` は RFC 7662 §2.1 に従い public client を拒否する。メタデータが言えないが運用者に必要なことが 2 つある: (a) RFC 6749 §2.3.1 は `client_secret_basic` で `client_id` と secret を base64 の**前に** form-urlencode することを要求するので、予約文字を含む `client_id` — `:` が Basic のフィールド区切りと読まれてしまうリソース URI — はパーセントエンコードしなければならない（`https%3A%2F%2Fapi.example.com`）。(b) 認証済みの呼び出し側は、`aud` がそのクライアントの `allowedAudiences` ∪ `{client_id}` に含まれるトークンを introspect できる。これにより、リソースサーバーは RFC 8707 のもとで自分のリソース URI 向けに発行されたトークンを introspect できる。どちらも [oauth パッケージの README](../oauth/README.md#introspection-which-tokens-a-caller-may-ask-about) に詳しくある。
 - `revocation_endpoint_auth_methods_supported: ["client_secret_basic", "client_secret_post", "none"]`、同じ条件で `private_key_jwt` も加わる — `revocation_endpoint` と同時に出力。RFC 7009 §2.1 が public client による自身の token の revoke を認めるため `none` を含む
 - `acr_values_supported` — `authorization_code` グラントがあるとき、`oauth.authorize.acrValues` のキー（表が空でないとき）: セッションが保証する `amr` から `/authorize` が満たせる Authentication Context Class Reference。ただし、インストールされたものでは満たせないエントリーは除く（boot で落とす。MFA ADR の D15、oauth パッケージの README を参照）。エントリーが残らなければ省略され、そのとき `acr_values` は `unmet_authentication_requirements` になる。
-- `code_challenge_methods_supported: ["S256"]` — `authorization_code` グラントがあるとき。`S256` のみ。`oauth.grants.authorization_code.pkce.supportedMethods` から導出は**しない**。この配列は server-wide メタデータであり、読んだ client は「このいずれかを使ってよい」と解釈する。`plain` はそれを満たさない（`/authorize` は RFC 9700 §2.1.1 に従い public client には即座に拒否する）ので載せない — client 単位の例外は、どちらの向きであれ server-wide 配列には属さない。
+- `code_challenge_methods_supported: ["S256"]` — `authorization_code` グラントがあるとき。`S256` のみ。意図して固定している: PKCE は設定を取らない。この配列は server-wide メタデータであり、読んだ client は「このいずれかを使ってよい」と解釈する。`plain` はそれを満たさない（`/authorize` は RFC 9700 §2.1.1 に従い public client には即座に拒否する）ので載せない — client 単位の例外は、どちらの向きであれ server-wide 配列には属さない。
 - `dpop_signing_alg_values_supported` — `dpop.enabled = true` のとき `@o3co/auth-provider-dpop` が contribute し、そのモジュールの `algWhitelist` をそのまま載せる（RFC 9449 §5.1）
 - `tls_client_certificate_bound_access_tokens: true` — `mtls.enabled = true` のとき `@o3co/auth-provider-mtls` が contribute する（RFC 8705 §3.3）。それ以外では省略し、RFC はこれを `false` と定義している。`mtls.source` には依存しない: TLS layer 経由でも trusted-proxy header 経由でも token に載る `cnf["x5t#S256"]` は同じで、このフラグは token を説明するものだから。
 - `end_session_endpoint`、および `backchannel_logout_supported`、`backchannel_logout_session_supported`、`frontchannel_logout_supported`、`frontchannel_logout_session_supported`（すべて `true`）— ログアウトの連鎖に必要なすべてのストアが wire されているとき: `userSessionStore`、`sessionRPRegistry`、`sessionFamilyIndex`、`sessionFederationIndex`、`federationTokenStore`、`refreshTokenFamilyRevocation`
