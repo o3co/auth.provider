@@ -47,11 +47,18 @@ const MAX_LOCAL_OCTETS = 64;
 const MAX_LABEL_OCTETS = 63;
 const MAX_DOMAIN_OCTETS = 253;
 
-/** `local` as an addr-spec's local part reads it — a dot-atom or a quoted string — in lower case, or `undefined`. */
+/**
+ * `local` as an addr-spec's local part reads it — a dot-atom or a quoted
+ * string — in lower case, or `undefined`. It is held to the grammar and the
+ * octet limit as it is answered: lower-cased, then in NFC, since lower-casing
+ * can lengthen a character or leave one a precomposed form exists for — so
+ * reading the answer again changes nothing.
+ */
 function localPartOf(local: string): string | undefined {
-	if (Buffer.byteLength(local, "utf8") > MAX_LOCAL_OCTETS) return undefined;
-	const readable = QUOTED.test(local) || local.split(".").every((atom) => ATOM.test(atom));
-	return readable ? local.toLowerCase() : undefined;
+	const lowered = local.toLowerCase().normalize("NFC");
+	if (Buffer.byteLength(lowered, "utf8") > MAX_LOCAL_OCTETS) return undefined;
+	const readable = QUOTED.test(lowered) || lowered.split(".").every((atom) => ATOM.test(atom));
+	return readable ? lowered : undefined;
 }
 
 /**
@@ -80,8 +87,8 @@ function domainOf(domain: string): string | undefined {
  * `address` as {@link normaliseMailAddress} spells it, or `undefined` for a
  * value that is no address: not a string, not well-formed, carrying a
  * control character, a format character or whitespace, or not one addr-spec
- * — a dot-atom or a quoted local part of at most 64 octets, then `@`, then a
- * domain of labels as {@link domainOf} reads them.
+ * — a dot-atom or a quoted local part of at most 64 octets once lower-cased,
+ * then `@`, then a domain of labels as {@link domainOf} reads them.
  */
 export function normaliseMailAddress(address: unknown): string | undefined {
 	if (typeof address !== "string" || !address.isWellFormed()) return undefined;
