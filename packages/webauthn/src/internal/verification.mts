@@ -22,6 +22,11 @@
  * bumped. They reshape registration material for the endpoint layer, and answer the backup
  * eligibility (BE) and backup state (BS) of a verified credential to the caller that asks.
  *
+ * A registration's top origin is held to the rule the library holds an assertion's to, which it
+ * does not apply to a registration: a top origin the client data reports must be one of the
+ * expected top origins, and belong to a cross-origin ceremony. None reported passes, as it does
+ * for an assertion (Safari reports none).
+ *
  * The sign count is judged here, only once the signature verified: the library, which compares
  * the count before it checks the signature, is handed a stored count of 0 and so never judges
  * it. A count that did not increase over the stored one is a regression, but for 0 against a
@@ -52,6 +57,11 @@ export interface AttestationVerificationInput {
 	 * by grant policy.
 	 */
 	readonly userVerification?: "required" | "preferred" | "discouraged";
+	/**
+	 * Origins this RP may be framed by, as {@link AssertionVerificationInput.expectedTopOrigins}.
+	 * Absent, a reported top origin is refused.
+	 */
+	readonly expectedTopOrigins?: readonly string[];
 }
 
 export type AttestationVerificationResult =
@@ -74,6 +84,7 @@ export type AttestationVerificationResult =
 			readonly ok: false;
 			readonly reason:
 				| "origin_mismatch"
+				| "top_origin_mismatch"
 				| "challenge_mismatch"
 				| "attestation_invalid"
 				| "rp_id_mismatch"
@@ -130,6 +141,9 @@ export async function verifyWebAuthnAttestationWithBackupState(
 		if (!verification.verified || !verification.registrationInfo) {
 			return { ok: false, reason: "attestation_invalid" };
 		}
+		if (!topOriginAccepted(input.response.response.clientDataJSON, input.expectedTopOrigins)) {
+			return { ok: false, reason: "top_origin_mismatch" };
+		}
 
 		const info = verification.registrationInfo;
 		return {
@@ -152,6 +166,22 @@ export async function verifyWebAuthnAttestationWithBackupState(
 	} catch (err) {
 		return mapRegistrationError(err);
 	}
+}
+
+/**
+ * Whether the top origin `clientDataJSON` (base64url JSON) reports is one a ceremony may come
+ * from: none reported, or one of `expected` for a cross-origin ceremony. Client data that is not
+ * a JSON object fails.
+ */
+function topOriginAccepted(
+	clientDataJSON: string,
+	expected: readonly string[] | undefined,
+): boolean {
+	const clientData: unknown = JSON.parse(Buffer.from(clientDataJSON, "base64url").toString("utf8"));
+	if (typeof clientData !== "object" || clientData === null) return false;
+	const { crossOrigin, topOrigin } = clientData as { crossOrigin?: unknown; topOrigin?: unknown };
+	if (topOrigin === undefined) return true;
+	return crossOrigin === true && typeof topOrigin === "string" && !!expected?.includes(topOrigin);
 }
 
 /** The library's own message prefixes for a refused registration, each with its reason. */

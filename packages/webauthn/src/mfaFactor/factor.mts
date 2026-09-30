@@ -24,8 +24,9 @@
  *   address, excluding the subject's WebAuthn
  *   credentials, with a resident key discouraged, no attestation,
  *   `WEBAUTHN_ALGORITHM_IDS` and the section's user verification. Completion
- *   verifies the attestation and keeps the credential's backup eligibility
- *   (BE); a credential id the subject holds is `duplicate`.
+ *   verifies the attestation, its top origin held to `webauthn.topOrigin` as
+ *   an assertion's is, and keeps the credential's backup eligibility (BE); a
+ *   credential id the subject holds is `duplicate`.
  * - A credential is only ever looked up among its own subject's factors, so
  *   one id held by two subjects is not refused. Any path that resolves an
  *   MFA credential by its id alone must refuse such a duplicate first.
@@ -405,6 +406,9 @@ export function createWebAuthnMfaFactor(settings: WebAuthnMfaFactorSettings): Mf
 				expectedChallenge: state.challenge,
 				expectedRpId: relyingParty.rpId,
 				expectedOrigins: relyingParty.origin,
+				...(relyingParty.topOrigin === undefined
+					? {}
+					: { expectedTopOrigins: relyingParty.topOrigin }),
 				userVerification,
 			});
 			if (!verified.ok) return { ok: false, reason: "invalid" };

@@ -1,6 +1,6 @@
 # @o3co/auth-provider-webauthn
 
-Last updated: 2026-09-30
+Last updated: 2026-10-01
 
 Passkey (WebAuthn) credential registration and an authentication grant for [`auth.provider`](../../README.md): a user enrolls a passkey from an authenticated session, and later exchanges a passkey assertion for tokens at `/oauth/token`. The package also contributes WebAuthn as a second factor to the MFA package — [WebAuthn as a second factor](#webauthn-as-a-second-factor).
 
@@ -152,8 +152,11 @@ schema refuses at boot.
 
 `origin` is where the ceremony runs. `topOrigin` is the page it runs *inside*,
 when that is a different origin — a passkey prompt in an iframe. The browser
-reports it, and `@simplewebauthn/server` 14 refuses such a response unless the
-deployment named the embedding origins it accepts:
+reports it, and a registration or an authentication that reports one is
+refused unless the deployment named the embedding origins it accepts.
+`@simplewebauthn/server` 14 holds an authentication to that rule and checks no
+top origin at registration, so this package holds a registration to the same
+rule — both the grant's and the second factor's:
 
 ```hocon
 webauthn {
@@ -164,10 +167,12 @@ webauthn {
 From the environment, `WEBAUTHN_TOP_ORIGIN` is comma-separated the same way,
 and an exported-but-empty one reads as unset.
 
-Absent, a reported cross-origin authentication is refused, which is the right
-answer for a deployment that never meant to be embedded — and the refusal is
-`top_origin_mismatch`, not `origin_mismatch`, so it does not send an operator
-to the `origin` list above, which cannot fix it. Same shape rules as `origin`,
+Absent, a reported cross-origin registration or authentication is refused,
+which is the right answer for a deployment that never meant to be embedded —
+and the refusal is `top_origin_mismatch` (`400 {"error":"top_origin_mismatch"}`
+at `registration/verify`), not `origin_mismatch`, so it does not send an
+operator to the `origin` list above, which cannot fix it. A top origin reported
+for a ceremony that is not cross-origin is refused too. Same shape rules as `origin`,
 minus the Android app form: a top origin is a browsing context, and Credential
 Manager's origin has no frame above it.
 
