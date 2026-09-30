@@ -1117,6 +1117,7 @@ export type {
 	SubjectSessionIndex,
 	SubjectSessionIndexFactory,
 	SupportsSecondFactorUpdate,
+	SupportsSessionEnd,
 	UserSession,
 	UserSessionClaims,
 	UserSessionStore,
@@ -1125,6 +1126,7 @@ export type {
 export {
 	SUBJECT_REVOCATION_ABSENCE_POLICY,
 	supportsSecondFactorUpdate,
+	supportsSessionEnd,
 } from "./user-sessions/types.mjs";
 
 // ---------------------------------------------------------------------------

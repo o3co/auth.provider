@@ -281,13 +281,65 @@ export interface SessionRPRegistry {
  * with the whole session (`removeBySid`).
  *
  * Every `addFamilyId` MUST pass the session's `expiresAt`. An Invalid Date is
- * a `RangeError`, and nothing is recorded.
+ * a `RangeError`, and nothing is recorded. An index may add the session-end
+ * capability ({@link SupportsSessionEnd}), which keeps a family added while a
+ * logout is under way from escaping it.
  */
 export interface SessionFamilyIndex {
 	readonly kind: string;
 	addFamilyId(sid: string, familyId: string, expiresAt: Date): Promise<void>;
 	listFamilyIds(sid: string): Promise<ReadonlyArray<string>>;
 	removeBySid(sid: string): Promise<void>;
+}
+
+/**
+ * The session-end capability: a session's end, marked in the index, and an
+ * add that refuses once it is. Detected by method presence
+ * ({@link supportsSessionEnd}); an index without it keeps working. Both
+ * bundled indexes have it, the Redis one over a client that can write the
+ * mark.
+ *
+ * For an `addFamilyIdUnlessEnded` and an `endSession` on the same sid, either
+ * the end's listing includes the family, or the add answers `"ended"`. When
+ * the add answers `"ended"`, the family it wrote may stay unlisted until
+ * `expiresAt`; the caller issues nothing for it.
+ *
+ * This holds while each operation on the index is linearizable: one that has
+ * completed is seen by every one that starts after it. A backend that can
+ * lose a write it acknowledged breaks it, as Redis can when a failover
+ * promotes a replica the write had not reached.
+ *
+ * Both calls MUST pass the session's `expiresAt`. The mark lasts until then,
+ * and `removeBySid` keeps it. An Invalid Date is a `RangeError`, and nothing
+ * is recorded.
+ */
+export interface SupportsSessionEnd {
+	/**
+	 * Mark the session ended, and answer its families. Idempotent: a retry
+	 * marks it again and answers the families again.
+	 */
+	endSession(sid: string, expiresAt: Date): Promise<ReadonlyArray<string>>;
+	/**
+	 * Add the family unless the session is marked ended: `"added"`, or
+	 * `"ended"`. An `expiresAt` already past answers `"ended"`, and records
+	 * nothing.
+	 */
+	addFamilyIdUnlessEnded(sid: string, familyId: string, expiresAt: Date): Promise<"added" | "ended">;
+}
+
+/**
+ * Both methods, or neither: an index with one of them is halfway through an
+ * upgrade. `false` for `null` and `undefined`, so an optional slot's value can
+ * be passed straight in.
+ */
+export function supportsSessionEnd(
+	value: SessionFamilyIndex | null | undefined,
+): value is SessionFamilyIndex & SupportsSessionEnd {
+	const candidate = value as Partial<SupportsSessionEnd> | null | undefined;
+	return (
+		typeof candidate?.endSession === "function" &&
+		typeof candidate?.addFamilyIdUnlessEnded === "function"
+	);
 }
 
 /**
