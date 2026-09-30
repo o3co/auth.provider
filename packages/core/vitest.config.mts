@@ -118,6 +118,9 @@ export default defineConfig({
 				// The outage policy's brand and options (#728). Paired with
 				// tsconfig.test.json.
 				"src/ratelimit/__tests__/policy.types.test.mts",
+				// The rate-limit guard: its fixtures claim the `Logger` and
+				// `RateLimiter` types. Paired with tsconfig.test.json.
+				"src/ratelimit/__tests__/guard.test.mts",
 			],
 			// vitest 5 collects a typecheck-included file's tests from the file
 			// itself, where 4 was content to let an imported helper register
