@@ -625,7 +625,7 @@ describe("boot, over a configuration that captures the modules' renamed variable
 	it.each([
 		["loginPage", "the login page"],
 		["rateLimit", "the login's budget"],
-	] as const)("refuses a session with no %s (%s) at validation, naming the key", async (key) => {
+	] as const)("refuses a session with no %s (%s) at validation, naming the key", async (key, _what) => {
 		const err = await refusal((config) => {
 			const { [key]: _gone, ...section } = config.session as Record<string, unknown>;
 			return { ...config, session: section };
