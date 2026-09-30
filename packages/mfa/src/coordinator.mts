@@ -97,13 +97,15 @@ export interface MfaStoreOutage {
 /**
  * A factor that cannot be used as stored: its data does not open
  * (`unreadable`), or opens under a key the ring lacks (`key_unavailable`,
- * naming it), or the factor threw reading it (`verification`).
+ * naming it), or the factor threw reading it (`verification`); or its
+ * pending challenge's kept state does not open (`challenge`, naming the key
+ * when it is the one missing).
  */
 export interface MfaFactorUnreadable {
 	readonly outcome: "unreadable";
 	readonly kind: string;
 	readonly factorId: string;
-	readonly state: "unreadable" | "key_unavailable" | "verification";
+	readonly state: "unreadable" | "key_unavailable" | "verification" | "challenge";
 	readonly keyId?: string;
 	readonly cause?: unknown;
 }
@@ -325,14 +327,16 @@ export function createMfaCoordinator(options: MfaCoordinatorOptions): MfaCoordin
 	 * The state a verification of `factor` is handed: the pending challenge
 	 * for this factor, taken — or read, for a factor that keeps it across
 	 * attempts — and opened; none when there is none, it is another factor's,
-	 * it has expired or it does not open.
+	 * or it has expired. Kept state that does not open is unreadable.
 	 */
 	const challengeState = async (
 		tx: MfaTransaction,
 		factor: MfaFactor,
 		record: MfaFactorRecord,
 		nowMs: number,
-	): Promise<{ readonly state: MfaFactorState | undefined } | MfaStoreOutage> => {
+	): Promise<
+		{ readonly state: MfaFactorState | undefined } | MfaStoreOutage | MfaFactorUnreadable
+	> => {
 		if (factor.challenge === undefined) return { state: undefined };
 		let pending: MfaTransaction["challenge"] | null;
 		if (factor.reusableChallenge === true) {
@@ -357,7 +361,15 @@ export function createMfaCoordinator(options: MfaCoordinatorOptions): MfaCoordin
 			{ transactionId: tx.id, kind: record.kind, use: "challenge" },
 			pending.state,
 		);
-		return { state: opened.state === "ok" ? opened.value : undefined };
+		if (opened.state === "ok") return { state: opened.value };
+		// Kept state that does not open is an outage, never an absent challenge.
+		return {
+			outcome: "unreadable",
+			kind: record.kind,
+			factorId: record.id,
+			state: "challenge",
+			...(opened.state === "key_unavailable" ? { keyId: opened.keyId } : {}),
+		};
 	};
 
 	return {
