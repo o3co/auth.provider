@@ -144,6 +144,9 @@ export const corsModule = defineModule({
 	provides: {
 		corsAllowedOrigins: ({ section }) => Object.freeze([...section.allowedOrigins]),
 	},
+	// What `httpSettings` carries as its CORS origins: substituting it would
+	// get round `httpSettings` being authoritative.
+	authoritative: ["corsAllowedOrigins"],
 });
 
 /**
