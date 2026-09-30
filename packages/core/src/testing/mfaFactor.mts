@@ -21,11 +21,14 @@
  *
  * `mfaFactorContract(input)` holds a factor to what the coordinator relies on
  * whatever the kind: a kind a hint can carry; `amrValues` it can vouch for and
- * `amrFor` within them; boolean flags; state and data that survive the JSON
- * round trip sealing puts them through, which the suite also hands the factor
- * back after; mail only beside the limits that bound it; a proof the factor
- * cannot read answered `malformed`, never thrown; and a valid proof that
- * completes an enrollment and verifies the factor it enrolled. The suite
+ * `amrFor` within them, never empty; boolean flags; state and data that
+ * survive the JSON round trip sealing puts them through, which the suite also
+ * hands the factor back after; mail only beside the limits that bound it, a
+ * challenge's to the address the enrollment mailed, and the code a message
+ * sends never in the page's response; a hint that never shows the account's
+ * address; a proof the factor cannot read answered `malformed`, never thrown;
+ * and a valid proof that completes an enrollment and verifies the factor it
+ * enrolled. The suite
  * enrolls at one instant and verifies an hour later, so a factor that refuses
  * reuse within a time step is not asked to verify at the step it enrolled.
  *
@@ -96,8 +99,24 @@ function survivesJson(value: unknown, what: string): void {
 /** `value` as the coordinator hands it back after keeping it: through JSON. */
 const reopened = <T,>(value: T): T => JSON.parse(JSON.stringify(value)) as T;
 
-/** A message the coordinator can send: a recipient, a subject and a text. */
-function checkMail(mail: unknown, factor: MfaFactor, what: string): void {
+/** Whether `response` carries `proof`, the code a message sends. */
+function carries(response: unknown, proof: unknown): boolean {
+	if (typeof proof !== "string" || proof.length === 0) return false;
+	return (JSON.stringify(response) ?? "").includes(proof);
+}
+
+/**
+ * A message the coordinator can send — a recipient, a subject and a text —
+ * whose code, `proof`, the page's `response` does not carry: the code
+ * travels only in the message.
+ */
+function checkMail(
+	mail: unknown,
+	factor: MfaFactor,
+	what: string,
+	response: unknown,
+	proof: unknown,
+): void {
 	if (mail === undefined) return;
 	assert.ok(
 		factor.mailLimits !== undefined,
@@ -111,6 +130,10 @@ function checkMail(mail: unknown, factor: MfaFactor, what: string): void {
 	] as const) {
 		assert.ok(typeof value === "string" && value.length > 0, `${what}'s mail has no ${part}`);
 	}
+	assert.ok(
+		!carries(response, proof),
+		`${what}'s response carries the code its mail sends: the page would hold what only the mailbox should`,
+	);
 }
 
 /** Every call's context, at `nowMs`, under the transaction `transactionId`. */
@@ -136,8 +159,10 @@ export function mfaFactorContract(input: MfaFactorContractInput): readonly Contr
 		return { context, start };
 	};
 
-	/** The factor enrolled through its own ceremony, its data as the coordinator opens it. */
-	const enroll = async (factor: MfaFactor): Promise<MfaEnrolledFactor> => {
+	/** The factor enrolled through its own ceremony, its data as the coordinator opens it, and the enrollment's start. */
+	const enroll = async (
+		factor: MfaFactor,
+	): Promise<{ readonly enrolled: MfaEnrolledFactor; readonly start: MfaEnrollmentStart }> => {
 		const { context, start } = await begin(factor);
 		const done = await factor.completeEnrollment({
 			...context,
@@ -151,11 +176,14 @@ export function mfaFactorContract(input: MfaFactorContractInput): readonly Contr
 			`the proof of possession did not complete the enrollment: ${JSON.stringify(done)}`,
 		);
 		return {
-			id: FACTOR_ID,
-			label: done.label,
-			createdAt: new Date(ENROLLED_AT_MS),
-			lastUsedAt: undefined,
-			data: reopened(done.data),
+			enrolled: {
+				id: FACTOR_ID,
+				label: done.label,
+				createdAt: new Date(ENROLLED_AT_MS),
+				lastUsedAt: undefined,
+				data: reopened(done.data),
+			},
+			start,
 		};
 	};
 
@@ -232,12 +260,18 @@ export function mfaFactorContract(input: MfaFactorContractInput): readonly Contr
 			},
 		},
 		{
-			name: "beginEnrollment answers state that survives a JSON round trip, and mail only beside mailLimits, as a message with a recipient, a subject and a text",
+			name: "beginEnrollment answers state that survives a JSON round trip, and mail only beside mailLimits, as a message with a recipient, a subject and a text, whose code the response does not carry",
 			run: async () => {
 				const factor = input.build();
-				const { start } = await begin(factor);
+				const { context, start } = await begin(factor);
 				survivesJson(start.state, "the pending enrollment's state");
-				checkMail(start.mail, factor, "beginEnrollment");
+				checkMail(
+					start.mail,
+					factor,
+					"beginEnrollment",
+					start.response,
+					await input.enrollmentProof(start, context),
+				);
 			},
 		},
 		{
@@ -258,7 +292,7 @@ export function mfaFactorContract(input: MfaFactorContractInput): readonly Contr
 			},
 		},
 		{
-			name: "completeEnrollment takes the proof of possession, and answers data that survives a JSON round trip, a label that is a string when present, and amr values among amrValues",
+			name: "completeEnrollment takes the proof of possession, and answers data that survives a JSON round trip, a label that is a string when present, and at least one amr value, each among amrValues",
 			run: async () => {
 				const factor = input.build();
 				const { context, start } = await begin(factor);
@@ -278,7 +312,9 @@ export function mfaFactorContract(input: MfaFactorContractInput): readonly Contr
 					done.label === undefined || typeof done.label === "string",
 					"the label is not a string",
 				);
-				for (const value of factor.amrFor(reopened(done.data))) {
+				const amr = factor.amrFor(reopened(done.data));
+				assert.ok(amr.length > 0, "amrFor answers no value: a verification would add nothing");
+				for (const value of amr) {
 					assert.ok(
 						factor.amrValues.includes(value),
 						`amrFor answers ${value}, which amrValues does not declare`,
@@ -287,28 +323,47 @@ export function mfaFactorContract(input: MfaFactorContractInput): readonly Contr
 			},
 		},
 		{
-			name: "describe answers a hint that is a string, or none",
+			name: "describe answers a hint that is a string, or none, and never the account's address",
 			run: async () => {
 				const factor = input.build();
-				const { hint } = factor.describe((await enroll(factor)).data);
+				const { hint } = factor.describe((await enroll(factor)).enrolled.data);
 				assert.ok(hint === undefined || typeof hint === "string", "the hint is not a string");
+				const { email } = input.user;
+				assert.ok(
+					typeof email !== "string" || email === "" || !(hint ?? "").includes(email),
+					"the hint shows the account's address, which a page may show to whoever holds the password",
+				);
 			},
 		},
 		{
-			name: "challenge, when present, answers state that survives a JSON round trip, and mail only beside mailLimits, as a message with a recipient, a subject and a text",
+			name: "challenge, when present, answers state that survives a JSON round trip, and mail only beside mailLimits, as a message with a recipient, a subject and a text, to the address the enrollment mailed, whose code the response does not carry",
 			run: async () => {
 				const factor = input.build();
 				if (factor.challenge === undefined) return;
-				const { sent } = await challenge(factor, await enroll(factor));
+				const { enrolled, start } = await enroll(factor);
+				const { context, sent } = await challenge(factor, enrolled);
 				if (sent?.state !== undefined) survivesJson(sent.state, "the challenge's state");
-				checkMail(sent?.mail, factor, "challenge");
+				checkMail(
+					sent?.mail,
+					factor,
+					"challenge",
+					sent?.response,
+					sent === undefined ? undefined : await input.verificationProof(enrolled, sent, context),
+				);
+				if (sent?.mail !== undefined && start.mail !== undefined) {
+					assert.equal(
+						sent.mail.to,
+						start.mail.to,
+						"the challenge mails another address than the one the enrollment proved",
+					);
+				}
 			},
 		},
 		{
 			name: "verify answers malformed for a proof it cannot read, and never throws for one",
 			run: async () => {
 				const factor = input.build();
-				const enrolled = await enroll(factor);
+				const { enrolled } = await enroll(factor);
 				for (const proof of malformed) {
 					const { context, sent } = await challenge(factor, enrolled);
 					const verdict = await factor.verify({
@@ -330,7 +385,7 @@ export function mfaFactorContract(input: MfaFactorContractInput): readonly Contr
 			name: "verify takes a valid proof, names a factor the subject holds, and answers next data that survives a JSON round trip",
 			run: async () => {
 				const factor = input.build();
-				const enrolled = await enroll(factor);
+				const { enrolled } = await enroll(factor);
 				const { context, sent } = await challenge(factor, enrolled);
 				const verdict = await factor.verify({
 					...context,

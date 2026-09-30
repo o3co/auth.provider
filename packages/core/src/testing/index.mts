@@ -121,6 +121,8 @@ export {
 	loginEntryContract,
 } from "./slots/loginEntry.mjs";
 export {
+	MAIL_REFUSALS,
+	type MailRefusal,
 	type MailSenderContractInput,
 	mailSenderContract,
 } from "./slots/mailSender.mjs";

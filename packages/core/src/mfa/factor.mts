@@ -150,8 +150,11 @@ export interface MfaEnrollmentCompletionContext extends MfaEnrollmentContext {
 
 /**
  * What a challenge answers. `mail`, when present, is a message the
- * coordinator sends once it has kept `state`; a delivery that fails is
- * answered as an outage, never as sent, and the pending challenge is cleared.
+ * coordinator sends once it has kept `state`: one versioned write of the
+ * transaction keeps the state and counts the send (`sends` + 1,
+ * `lastSentAtMs`), and only then is the message sent, so two sends in flight
+ * cannot both pass the limits. A delivery that fails is answered as an
+ * outage, never as sent, and the pending challenge is cleared.
  */
 export interface MfaChallenge {
 	readonly state?: MfaFactorState;
@@ -240,8 +243,9 @@ export interface MfaFactor {
 	readonly reusableChallenge?: boolean;
 	/**
 	 * The limits on the mail this factor's challenge and enrollment answer.
-	 * Required of a factor that answers mail: the coordinator sends none for
-	 * a factor that declares none.
+	 * Required of a factor that answers mail: mail from a factor that declares
+	 * none is the factor's fault, which the coordinator answers as an error —
+	 * never as sent — keeping nothing the call answered and sending nothing.
 	 */
 	readonly mailLimits?: MfaMailLimits;
 	/** Prepare a verification: a code to mail, WebAuthn request options. Absent for a factor that needs none. */
