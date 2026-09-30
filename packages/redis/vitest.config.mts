@@ -20,8 +20,9 @@ export default defineConfig({
 		typecheck: {
 			enabled: true,
 			// tsconfig.test.json, not the build config: the build config holds
-			// `src` alone, and a test file outside tsc's program is never
-			// compiled — its assertions pass without being checked (#626).
+			// `src` alone. Its program takes every file under __tests__, and an
+			// error in any of them fails the run; `include` below decides only
+			// which files' errors are reported against their own tests.
 			tsconfig: "./tsconfig.test.json",
 			// Type-level assertions in __tests__/types.test.mts (per-purpose
 			// client shapes + ComponentMap declaration-merge invariants) must
