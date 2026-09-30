@@ -78,12 +78,16 @@ describe("the package's config/reference.conf", () => {
 	});
 
 	it("is declared by each of them and holds only their sections, which their schemas parse without losing a path", () => {
-		const read = (path: string): unknown => parseFile(path, { env: {} }).toObject();
+		const read = (path: string, env: Readonly<Record<string, string>>): unknown =>
+			parseFile(path, { env: { ...env } }).toObject();
 		expect(packageReferenceProblems({ reference: REFERENCE, modules, read })).toEqual([]);
 	});
 
 	it("binds no variable at the TOTP factor's old path, and sets nothing there", () => {
 		expect(bindings().filter((binding) => binding.includes(` at ${OLD_PATH}.`))).toEqual([]);
+		expect(bindings().filter((binding) => binding.startsWith("MFA_TOTP_ENABLED "))).toEqual([
+			"MFA_TOTP_ENABLED at renamed-variables.MFA_TOTP_ENABLED",
+		]);
 		const mfa = (parseFile(fileURLToPath(REFERENCE), { env: {} }).toObject() as { mfa?: object })
 			.mfa;
 		expect(mfa).not.toHaveProperty("factors");

@@ -206,11 +206,16 @@ describe("the package's reference.conf", () => {
 		});
 	});
 
-	it("binds MFA_TOTP_ENABLED and MFA_TOTP_ISSUER nowhere: set, they change nothing the file resolves to", () => {
+	it("binds MFA_TOTP_ENABLED and MFA_TOTP_ISSUER in their captures alone: set, they change nothing else the file resolves to", () => {
+		const { "renamed-variables": unset, ...rest } = resolve() as unknown as Record<string, unknown>;
+		const { "renamed-variables": set, ...restSet } = resolve({
+			MFA_TOTP_ENABLED: "false",
+			MFA_TOTP_ISSUER: "Example Co",
+		}) as unknown as Record<string, unknown>;
 		expect(resolve().mfa).not.toHaveProperty("factors");
-		expect(resolve({ MFA_TOTP_ENABLED: "false", MFA_TOTP_ISSUER: "Example Co" })).toEqual(
-			resolve(),
-		);
+		expect(restSet).toEqual(rest);
+		expect(unset).toMatchObject({ MFA_TOTP_ENABLED: null, MFA_TOTP_ISSUER: null });
+		expect(set).toMatchObject({ MFA_TOTP_ENABLED: "false", MFA_TOTP_ISSUER: "Example Co" });
 	});
 
 	describe.each([
@@ -220,7 +225,6 @@ describe("the package's reference.conf", () => {
 			key: "enabled",
 			value: "false",
 			read: false,
-			other: "true",
 		},
 		{
 			old: "MFA_TOTP_ISSUER",
@@ -228,12 +232,11 @@ describe("the package's reference.conf", () => {
 			key: "issuer",
 			value: "Example Co",
 			read: "Example Co",
-			other: "Other Co",
 		},
 	] as const)(
 		"$old, renamed $renamed with the TOTP factor's move",
-		({ old, renamed, key, value, read, other }) => {
-			/** Boots the factor's module over this file resolved under `env`, with `env` as the environment. */
+		({ old, renamed, key, value, read }) => {
+			/** Boots the factor's module over this file resolved under `env`. */
 			const boot = (env: Record<string, string>) =>
 				createApp({
 					modules: [mfaTotpFactorModule],
@@ -241,7 +244,6 @@ describe("the package's reference.conf", () => {
 						config: resolve(env),
 						pathResolver: (p: string) => p,
 					} as never,
-					environment: { ...REQUIRED_ENV, ...env },
 				});
 			const refusal = async (env: Record<string, string>): Promise<BootError> => {
 				try {
@@ -253,7 +255,7 @@ describe("the package's reference.conf", () => {
 				}
 				throw new Error("the boot was not refused");
 			};
-			const refused = (newVariable: "unset" | "different") => ({
+			const refused = (state: "unset" | "different") => ({
 				reason: "environment-variable-renamed",
 				renamed: [
 					{
@@ -261,7 +263,7 @@ describe("the package's reference.conf", () => {
 						from: old,
 						to: renamed,
 						path: `mfa-totp-factor.${key}`,
-						newVariable,
+						state,
 					},
 				],
 			});
@@ -273,10 +275,10 @@ describe("the package's reference.conf", () => {
 			});
 
 			it("set beside the new name at a different value: refused, naming both and neither value", async () => {
-				const err = await refusal({ [old]: value, [renamed]: other });
+				const err = await refusal({ [old]: "old-value-7c1e", [renamed]: "new-value-2a9f" });
 				expect(err.details).toEqual(refused("different"));
-				expect(err.message).not.toContain(value);
-				expect(err.message).not.toContain(other);
+				expect(err.message).not.toContain("old-value-7c1e");
+				expect(err.message).not.toContain("new-value-2a9f");
 			});
 
 			it("set beside the new name at the same value: boots, and the factor's section reads it", async () => {
@@ -308,7 +310,6 @@ describe("the package's reference.conf", () => {
 					config: resolve({ MFA_TOTP_ENABLED: "true" }),
 					pathResolver: (p: string) => p,
 				} as never,
-				environment: { ...REQUIRED_ENV, MFA_TOTP_ENABLED: "true" },
 			});
 			await handle.dispose();
 		} catch (error) {
@@ -316,7 +317,7 @@ describe("the package's reference.conf", () => {
 		}
 		expect(refused).toBeInstanceOf(BootError);
 		expect((refused as BootError).details).toMatchObject({
-			renamed: [{ from: "MFA_TOTP_ENABLED", newVariable: "unset" }],
+			renamed: [{ from: "MFA_TOTP_ENABLED", state: "unset" }],
 		});
 	});
 

@@ -125,11 +125,22 @@ export const TOTP_SECTION = {
 } as const;
 
 /**
+ * What a composition layering the package's reference.conf captures of the
+ * TOTP factor's renamed variables when none of them is set.
+ */
+export const UNSET_RENAMED_VARIABLES = {
+	MFA_TOTP_ENABLED: null,
+	MFA_TOTP_ISSUER: null,
+	MFA_TOTP_FACTOR_ENABLED: null,
+	MFA_TOTP_FACTOR_ISSUER: null,
+} as const;
+
+/**
  * The composition's configuration: core's valid fixture, a login over plain
  * HTTP (no `Secure` cookie), `endpoints.mfa.url` as core's reference.conf
  * ships it, `mfa` declared expected, the `mfa` section under `mode`, and the
  * TOTP factor's `mfa-totp-factor` section, each with the keys given laid
- * over it.
+ * over it, and the captures of the TOTP factor's renamed variables, all unset.
  */
 export function configFor(
 	mode: "off" | "optional" | "required",
@@ -150,6 +161,7 @@ export function configFor(
 		sessionRequirements: { expected: ["mfa"] },
 		mfa: { ...mfaSection(mode), ...mfa },
 		"mfa-totp-factor": { ...TOTP_SECTION, ...totp },
+		"renamed-variables": UNSET_RENAMED_VARIABLES,
 	} as unknown as AppConfig;
 }
 

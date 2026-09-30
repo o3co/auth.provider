@@ -39,11 +39,12 @@ import { mfaModule } from "#/module.mjs";
 import { encodeBase32 } from "#/totp/base32.mjs";
 import { mfaTotpFactorModule } from "#/totp/module.mjs";
 import { hotp, totpStep } from "#/totp/rfc6238.mjs";
+import { UNSET_RENAMED_VARIABLES } from "./moduleHarness.mjs";
 
 const TOTP = { enabled: true, algorithm: "SHA1", digits: 6, period: 30, window: 1 };
 
 const base = makeValidAppConfig();
-/** A configuration whose `mfa-totp-factor` section is `totp`, or which has none. */
+/** A configuration whose `mfa-totp-factor` section is `totp`, or which has none, capturing no renamed variable set. */
 const configWith = (
 	totp: Record<string, unknown> | undefined,
 	mfa: Record<string, unknown> = {},
@@ -52,6 +53,7 @@ const configWith = (
 	oauth: { ...base.oauth, jwt: { ...base.oauth.jwt, issuer: "https://login.example" } },
 	mfa: { mode: "off", ...mfa },
 	...(totp === undefined ? {} : { "mfa-totp-factor": totp }),
+	"renamed-variables": UNSET_RENAMED_VARIABLES,
 });
 
 /** Reads the resolver as the coordinator will: by requiring it, from a list-shaped contribution. */
