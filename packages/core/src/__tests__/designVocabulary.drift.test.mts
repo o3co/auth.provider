@@ -28,7 +28,7 @@
  * the definition patterns: consumers may re-export the mapped home freely.
  */
 
-import { type Dirent, readdirSync, readFileSync } from "node:fs";
+import { type Dirent, existsSync, readdirSync, readFileSync } from "node:fs";
 import { join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import ts from "typescript";
@@ -59,6 +59,12 @@ interface VocabularyRow {
 	 * added beside the first — in the home — fails too.
 	 */
 	readonly homeMatches?: number;
+	/**
+	 * A row declared before its home defines it: the step that is to build
+	 * it. No file may define it meanwhile, its home included; once the home
+	 * does, the row fails until the step drops the marker.
+	 */
+	readonly declared?: string;
 }
 
 /** The one reading of `core.deployment.mode`; every other module requires the `deploymentMode` slot. */
@@ -482,7 +488,50 @@ const VOCABULARY: readonly VocabularyRow[] = [
 		home: DEPLOYMENT_MODE_HOME,
 		definition: /(?:function|const)\s+checkDeploymentMode\b/,
 	},
+	{
+		concept: "a control character in configured text — C0, DEL or C1, but those a rule allows",
+		home: "packages/core/src/security/controlCharacters.mts",
+		definition: /(?:function|const)\s+hasControlCharacter\b/,
+	},
+	// Declared before their homes define them: each names the build step of
+	// the MFA ADR that builds it.
+	{
+		concept: "the long code — made (the MFA ADR's D22)",
+		home: "packages/mfa/src/codes.mts",
+		definition: /(?:function|const)\s+generateLongCode\b/,
+		declared: "the MFA ADR's build-order step 9",
+	},
+	{
+		concept: "the long code — read as a user types or pastes it (the MFA ADR's D6, D22)",
+		home: "packages/mfa/src/codes.mts",
+		definition: /(?:function|const)\s+readLongCode\b/,
+		declared: "the MFA ADR's build-order step 9",
+	},
+	{
+		concept: "the long code — shown in groups (the MFA ADR's D22)",
+		home: "packages/mfa/src/codes.mts",
+		definition: /(?:function|const)\s+formatLongCode\b/,
+		declared: "the MFA ADR's build-order step 9",
+	},
+	{
+		concept: "recent MFA — the credential_change grade's rule (the MFA ADR's D16)",
+		home: "packages/mfa/src/requirement.mts",
+		definition: /(?:function|const)\s+isRecentMfa\b/,
+		declared: "a convention pull request before the MFA ADR's build-order steps 12 and 14",
+	},
 ];
+
+/**
+ * What is wrong with a declared row given what `homeSource` holds — the
+ * home's text, or `undefined` when the file does not exist: a home that
+ * defines it is built, and the step that built it drops the marker.
+ */
+function declaredRowProblems(row: VocabularyRow, homeSource: string | undefined): string[] {
+	if (row.declared === undefined) return [];
+	return homeSource !== undefined && row.definition.test(homeSource)
+		? [`${row.home} defines ${row.concept}: built — drop its declared marker`]
+		: [];
+}
 
 /** Every shipped source file across the workspace: packages/*\/src\/**\/*.mts, tests excluded. */
 function listShippedSources(): string[] {
@@ -2041,10 +2090,36 @@ describe("design-vocabulary map (docs/design-vocabulary.md)", () => {
 		}
 	});
 
+	it("reads a declared row as built once its home defines it, and not before", () => {
+		const row: VocabularyRow = {
+			concept: "a declared concept",
+			home: "packages/core/src/net/loopback.mts",
+			definition: /(?:function|const)\s+isLoopbackHostname\b/,
+			declared: "a later step",
+		};
+		expect(declaredRowProblems(row, "export function isLoopbackHostname() {}")).toEqual([
+			"packages/core/src/net/loopback.mts defines a declared concept: built — drop its declared marker",
+		]);
+		expect(declaredRowProblems(row, "export function other() {}")).toEqual([]);
+		expect(declaredRowProblems(row, undefined)).toEqual([]);
+		expect(
+			declaredRowProblems({ ...row, declared: undefined }, "function isLoopbackHostname"),
+		).toEqual([]);
+	});
+
 	it.each(VOCABULARY.map((row) => [row.concept, row] as const))(
 		"%s is defined only in its mapped home",
 		(_concept, row) => {
 			const home = join(repoRoot, row.home);
+			if (row.declared !== undefined) {
+				const homeSource = existsSync(home) ? readFileSync(home, "utf8") : undefined;
+				expect(declaredRowProblems(row, homeSource)).toEqual([]);
+				const offenders = sources
+					.filter((file) => row.definition.test(readFileSync(file, "utf8")))
+					.map((file) => relative(repoRoot, file));
+				expect(offenders, `declared for ${row.declared}: defined before its home`).toEqual([]);
+				return;
+			}
 			const homeSource = readFileSync(home, "utf8");
 			expect(
 				(row.homeDefinition ?? row.definition).test(homeSource),

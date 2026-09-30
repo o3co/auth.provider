@@ -16,7 +16,9 @@
 
 /**
  * The configuration this package reads: the MFA module's own section, `mfa`,
- * and the TOTP factor's, `mfa-totp-factor`, each its module's alone. Keys,
+ * and the TOTP factor's, `mfa-totp-factor`, each its module's alone (the
+ * recovery-code factor's section is read beside its module, in `recovery/`,
+ * with the readers shared from here). Keys,
  * ranges, defaults and refusals: see README, Configuration, and ADR
  * 2026-09-25-multi-factor-authentication.
  *
@@ -36,6 +38,7 @@ import {
 	coerceBooleanFromEnv,
 	type DeploymentMode,
 	decodeSealingKey,
+	hasControlCharacter,
 	type MfaLockoutPolicy,
 	SEALING_KEY_BYTES,
 	type SealingKeyRing,
@@ -58,9 +61,28 @@ export const MFA_DEVELOPMENT_SAMPLE_KEY = "bzNjbzptZmE6ZGV2ZWxvcG1lbnQtc2FtcGxlL
 const SECTION_MISSING =
 	"is missing: layer @o3co/auth-provider-mfa/reference.conf beneath the composition's configuration";
 
-/** A section's refusal: missing, or written as a value rather than a section of keys. */
-const sectionError = (issue: { readonly input?: unknown }): string =>
-	issue.input === undefined ? SECTION_MISSING : "must be a section of keys";
+/** The keys an unknown-key issue names, each as written, or quoted when it is not a plain identifier. */
+const unknownKeys = (keys: readonly unknown[] | undefined): string =>
+	(keys ?? [])
+		.map((key) =>
+			typeof key === "string" && /^[A-Za-z0-9_-]+$/.test(key) ? key : JSON.stringify(key),
+		)
+		.join(", ");
+
+/**
+ * A section's refusal: missing, written as a value rather than a section of
+ * keys, or holding a key the section does not know, named.
+ */
+export const sectionError = (issue: {
+	readonly code?: string;
+	readonly input?: unknown;
+	readonly keys?: readonly unknown[];
+}): string =>
+	issue.code === "unrecognized_keys"
+		? `has a key it does not know: ${unknownKeys(issue.keys)}`
+		: issue.input === undefined
+			? SECTION_MISSING
+			: "must be a section of keys";
 
 const wholeNumber = (min: number, max: number, unit: string) => {
 	const error = `must be a whole number from ${min} to ${max}${unit}`;
@@ -73,7 +95,7 @@ const wholeNumber = (min: number, max: number, unit: string) => {
  * section must read. Nothing else is read as a number: not `null`, `true`,
  * `""`, `"0x10"` or `"1e1"`, which `z.coerce.number()` would turn into one.
  */
-const environmentWholeNumber = (min: number, max: number, unit: string) => {
+export const environmentWholeNumber = (min: number, max: number, unit: string) => {
 	const error = `must be a whole number from ${min} to ${max}${unit}`;
 	const bounded = wholeNumber(min, max, unit);
 	return z.union(
@@ -84,15 +106,6 @@ const environmentWholeNumber = (min: number, max: number, unit: string) => {
 
 const ISSUER_RULE =
 	"must be well-formed text, not blank, with no control character and no colon — the otpauth label puts one between the issuer and the account";
-
-/** Whether `text` carries a C0 control character, DEL or a C1 control character. */
-function hasControlCharacter(text: string): boolean {
-	for (let index = 0; index < text.length; index++) {
-		const code = text.charCodeAt(index);
-		if (code <= 0x1f || (code >= 0x7f && code <= 0x9f)) return true;
-	}
-	return false;
-}
 
 /** An issuer the otpauth label can carry, and an authenticator app can show. */
 const isShowableIssuer = (issuer: string): boolean =>
@@ -176,10 +189,29 @@ const mfaPageSchema = z.object(
 	{ error: sectionError },
 );
 
+/** The least and the most time a second factor verified in a session stays recent, in seconds. */
+const MFA_RECENT_WINDOW_SECONDS = { min: 60, max: 3600 } as const;
+
+/**
+ * `mfa.manage`: `maxAgeSeconds`, how long a second factor verified in a
+ * session stays recent — what adding or removing a way into the account asks
+ * of the session.
+ */
+const manageSchema = z.object(
+	{
+		maxAgeSeconds: wholeNumber(
+			MFA_RECENT_WINDOW_SECONDS.min,
+			MFA_RECENT_WINDOW_SECONDS.max,
+			" seconds",
+		),
+	},
+	{ error: sectionError },
+);
+
 /**
  * The MFA module's section, `mfa`: its mode, the page's shape, the key ring,
- * a transaction's life and attempts, and the subject lock, with the
- * transaction's ranges. The page may be left out, and an empty url is
+ * a transaction's life and attempts, the subject lock and recent MFA's
+ * window, with their ranges. The page may be left out, and an empty url is
  * allowed: the module refuses either as unset. The ring's refusals (a key
  * that is not 32 bytes, an empty ring, a duplicate id), the sample key's and
  * how the lock's fields relate are not the schema's: `readMfaSettings` makes
@@ -211,6 +243,7 @@ export const mfaConfigSchema = z.object(
 			"",
 		),
 		lockout: lockoutSchema,
+		manage: manageSchema,
 	},
 	{ error: sectionError },
 );
@@ -260,6 +293,8 @@ export interface MfaSettings {
 	readonly maxAttemptsPerTransaction: number;
 	/** The subject lock, held to core's rule. */
 	readonly lockout: MfaLockoutPolicy;
+	/** Recent MFA: how long, in seconds, a second factor verified in a session stays recent. */
+	readonly manage: { readonly maxAgeSeconds: number };
 }
 
 /** What the settings read beside the `mfa` section. */
@@ -450,7 +485,7 @@ function refuseRepeatedKey(ring: SealingKeyRing): void {
 /**
  * What the MFA module reads from its `mfa` section, `section`: the key ring
  * and whether it carries the development sample key, a transaction's life
- * and attempts, and the subject lock — held to core's
+ * and attempts, recent MFA's window, and the subject lock — held to core's
  * `checkMfaLockoutPolicy` under `mfa.lockout`. Not the mode, which the
  * module's section schema reads, and no factor's section: the TOTP factor's
  * is {@link readMfaTotpSettings}'s. `options.environment` is the name the
@@ -469,5 +504,6 @@ export function readMfaSettings(section: unknown, options: MfaSettingsOptions): 
 		transactionTtlSeconds: settings.transactionTtlSeconds,
 		maxAttemptsPerTransaction: settings.maxAttemptsPerTransaction,
 		lockout: { ...settings.lockout },
+		manage: { maxAgeSeconds: settings.manage.maxAgeSeconds },
 	};
 }

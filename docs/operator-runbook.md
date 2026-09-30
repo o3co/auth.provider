@@ -901,8 +901,16 @@ check this page, so when the two disagree, the constant is right:
 `introspect.family_revoked`, `introspect.session_invalid`,
 `introspect.store_unavailable`,
 `logout.cascade_failed`, `logout.family_revoked`, `logout.success`,
+`mfa.challenge.sent`, `mfa.enrollment_state_inconsistent`,
+`mfa.factor.enrolled`, `mfa.factor.removed`, `mfa.locked`,
+`mfa.recovery_code.used`, `mfa.recovery_codes.generated`, `mfa.verified`,
+`mfa.verify.failure`,
 `rate_limit.unavailable`, `session.admission.subject_mismatch`,
 `token.issued`, `token.issued.failure`.
+
+The `mfa.*` events are the multi-factor authentication package's (the MFA
+ADR's D28). The MFA package is private until the standalone template wires
+it, so no released composition emits them.
 
 None of the device events carries the user code or the device code
 (`packages/device-grant/README.md`).
