@@ -899,6 +899,12 @@ const SESSION_RECORD_READS_ALLOWED: ReadonlyArray<AllowedSessionRecordRead> = [
 		why: "generateIdToken reads its caller's option, which a grant fills with vouchedAmr",
 	},
 	{
+		file: "packages/oauth/src/routes.mts",
+		read: "claims.amr",
+		count: 1,
+		why: "introspection answers the amr claim of an access token this provider signed and verified — a token it vouched for, minted from vouchedAmr, never a session record",
+	},
+	{
 		file: "packages/oauth/src/grants/refreshToken.mts",
 		read: "claims.amr",
 		count: 1,
