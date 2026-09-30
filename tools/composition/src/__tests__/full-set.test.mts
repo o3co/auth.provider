@@ -426,20 +426,40 @@ describe("a setting still written where its section moved from, read as the temp
 		});
 	});
 
-	it("refuses the boot when the environment sets the TOTP factor's old variable, which the MFA package's reference.conf binds at the old path", async () => {
+	it("refuses the boot when the environment sets a TOTP variable renamed with the move, and not its new name", async () => {
 		const err = await refused({ env: { ...SINGLE_ENV, MFA_TOTP_ISSUER: "Example Co" } });
-		expect(err.reason).toBe("config-path-relocated");
+		expect(err.reason).toBe("environment-variable-renamed");
 		expect(err.details).toEqual({
-			reason: "config-path-relocated",
-			relocated: [
+			reason: "environment-variable-renamed",
+			renamed: [
 				{
 					module: "mfa-totp-factor",
-					from: "mfa.factors.totp.issuer",
-					to: "mfa-totp-factor.issuer",
-					environmentVariable: "MFA_TOTP_FACTOR_ISSUER",
+					from: "MFA_TOTP_ISSUER",
+					to: "MFA_TOTP_FACTOR_ISSUER",
+					path: "mfa-totp-factor.issuer",
+					newVariable: "unset",
 				},
 			],
 		});
+	});
+
+	it("refuses the boot when a renamed TOTP variable and its new name are set to different values", async () => {
+		const err = await refused({
+			env: { ...SINGLE_ENV, MFA_TOTP_ENABLED: "false", MFA_TOTP_FACTOR_ENABLED: "true" },
+		});
+		expect(err.reason).toBe("environment-variable-renamed");
+		expect(err.details).toMatchObject({
+			renamed: [
+				{ from: "MFA_TOTP_ENABLED", to: "MFA_TOTP_FACTOR_ENABLED", newVariable: "different" },
+			],
+		});
+	});
+
+	it("boots with a renamed TOTP variable and its new name set to the same value, and the factor reads it", async () => {
+		const { handle } = await boot({
+			env: { ...SINGLE_ENV, MFA_TOTP_ENABLED: "false", MFA_TOTP_FACTOR_ENABLED: "false" },
+		});
+		expect(handle.components.mfaFactorResolver?.get("totp")).toBeUndefined();
 	});
 
 	it("boots with the setting at the new path, through its variable, and the factor reads it", async () => {

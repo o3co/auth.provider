@@ -428,6 +428,18 @@ describe("a renamed variable — a manifest that declares one boot cannot hold",
 		});
 	});
 
+	it("refuses a rename whose old path moved whole as the section: no variable binds a section", async () => {
+		const err = await refusedAtStageOne([
+			declaring({ LEGACY_FIXTURE: "legacy.fixture" }, { relocatedFrom: { "legacy.fixture": "" } }),
+		]);
+
+		expect(err.details).toMatchObject({
+			module: "fixture-renaming",
+			renamedVariable: "LEGACY_FIXTURE",
+			problem: expect.stringContaining("the section itself"),
+		});
+	});
+
 	it("refuses an old name another loaded module declares renamed too, naming both modules", async () => {
 		const first = declaring({ LEGACY_RETRIES: "legacy.retries" });
 		const second = defineModule({
