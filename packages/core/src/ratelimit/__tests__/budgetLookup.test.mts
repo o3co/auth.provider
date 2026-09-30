@@ -207,6 +207,25 @@ describe("createRateLimitBudgetLookup", () => {
 		expect(lookup("login:ip:192.0.2.1").spec).toEqual({ limit: 60, windowSeconds: 60 });
 	});
 
+	it("reads each limits entry and the default once: an accessor that answers another value later changes nothing it checked", () => {
+		const shifting = (good: number): { readonly limit: number; readonly windowSeconds: number } => {
+			let reads = 0;
+			return {
+				get limit(): number {
+					reads += 1;
+					return reads === 1 ? good : Number.NaN;
+				},
+				windowSeconds: 60,
+			};
+		};
+		const lookup = createRateLimitBudgetLookup("probe", {
+			limits: { login: shifting(5) as RateLimitSpec },
+			defaultLimit: shifting(7) as RateLimitSpec,
+		});
+		expect(lookup("login:1.2.3.4").spec).toEqual({ limit: 5, windowSeconds: 60 });
+		expect(lookup("other:1.2.3.4").spec).toEqual({ limit: 7, windowSeconds: 60 });
+	});
+
 	it("hands out specs no caller can change: the next lookup applies the one it checked", () => {
 		const lookup = createRateLimitBudgetLookup("test", {
 			limits: { token: { limit: 5, windowSeconds: 60 } },
