@@ -110,7 +110,7 @@ describe("createClientCredentialsGrant — gates", () => {
 	it("declares requiresExplicitGrantAllowlist: true on the handler contract", () => {
 		// The allowedGrantTypes gate (deny-by-absence included) moved out of
 		// this handler and onto the shared `/token` dispatch: the handler
-		// declares strictness, `routes.mts` enforces it together with the base
+		// declares strictness, `routes/token.mts` enforces it together with the base
 		// rule before `handle` runs. This pin is what keeps the declaration
 		// from silently disappearing; the enforcement itself is pinned at
 		// dispatch level in `allowedGrantTypes.enforcement.test.mts` and, for
