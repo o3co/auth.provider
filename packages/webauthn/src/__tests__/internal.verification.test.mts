@@ -22,11 +22,14 @@
  *
  * The helpers are thin wrappers, and all they add runs against mocked
  * responses and throws:
- *   1. error strings (algorithm/top-origin/origin/challenge/rp_id/counter)
- *      mapped to the typed reason union
+ *   1. the library's own messages (algorithm/top-origin/origin/challenge/rp_id)
+ *      mapped to the typed reason union by their prefixes, never by text the
+ *      client wrote into them
  *   2. material reshaped to credentialId / publicKey / signCount / transports /
- *      backedUp
- *   3. the sign-count corner case (stored=0 && new=0 → allow)
+ *      backedUp, and the backup flags beside it for the caller that asks
+ *   3. the sign count, judged here after the signature verified — the library
+ *      is handed a stored count of 0 — with the corner case stored=0 && new=0
+ *      allowed
  *
  * The real cryptographic path is covered by the library's own suite and by the
  * integration tests that run a real ceremony.
@@ -49,6 +52,7 @@ import {
 	verifyWebAuthnAssertion,
 	verifyWebAuthnAssertionWithBackupState,
 	verifyWebAuthnAttestation,
+	verifyWebAuthnAttestationWithBackupState,
 } from "../internal/verification.mjs";
 
 const mockVerifyRegistration = vi.mocked(verifyRegistrationResponse);
@@ -155,6 +159,24 @@ describe("verifyWebAuthnAttestation", () => {
 			expectedOrigins: ["https://example.com"],
 		});
 		expect(result).toEqual({ ok: false, reason: "algorithm_not_allowed" });
+	});
+
+	it.each([
+		'Unexpected registration response type "origin", expected "webauthn.create"',
+		'Unexpected registration response type "challenge", expected "webauthn.create"',
+		'Unexpected registration response type "public key alg", expected "webauthn.create"',
+		'Unexpected registration response type "rp id", expected "webauthn.create"',
+	])("maps a refusal by the library's own message, never by text the client wrote into it: %s", async (message) => {
+		mockVerifyRegistration.mockRejectedValueOnce(new Error(message));
+
+		const result = await verifyWebAuthnAttestation({
+			response: STUB_REGISTRATION_RESPONSE,
+			expectedChallenge: "some-challenge",
+			expectedRpId: "example.com",
+			expectedOrigins: ["https://example.com"],
+		});
+
+		expect(result).toEqual({ ok: false, reason: "unknown" });
 	});
 
 	it("returns rp_id_mismatch when SimpleWebAuthn throws an RP ID hash error", async () => {
@@ -285,8 +307,26 @@ describe("verifyWebAuthnAssertion", () => {
 		expect(result).toEqual({ ok: false, reason: "challenge_mismatch" });
 	});
 
-	it("returns sign_count_regression when SimpleWebAuthn throws a counter error (stored=5, new=4)", async () => {
-		// SimpleWebAuthn throws when (counter > 0 || credential.counter > 0) && counter <= credential.counter
+	it("hands the library a stored count of 0, so the library never judges the count", async () => {
+		// The library compares the count before it checks the signature: judged
+		// there, an unsigned assertion could report a regression.
+		mockVerifyAuthentication.mockResolvedValueOnce({
+			verified: true,
+			authenticationInfo: { newCounter: 6, credentialBackedUp: false } as never,
+		} as never);
+
+		await verifyWebAuthnAssertion({
+			credential: makeStoredCredential(5),
+			response: STUB_AUTHENTICATION_RESPONSE,
+			expectedChallenge: "some-challenge",
+			expectedRpId: "example.com",
+			expectedOrigins: ["https://example.com"],
+		});
+
+		expect(mockVerifyAuthentication.mock.calls[0]?.[0].credential.counter).toBe(0);
+	});
+
+	it("reads a counter refusal thrown by the library as unknown, never as a regression", async () => {
 		mockVerifyAuthentication.mockRejectedValueOnce(
 			new Error("Response counter value 4 was lower than expected 5"),
 		);
@@ -299,7 +339,75 @@ describe("verifyWebAuthnAssertion", () => {
 			expectedOrigins: ["https://example.com"],
 		});
 
+		expect(result).toEqual({ ok: false, reason: "unknown" });
+	});
+
+	it("refuses a count that did not increase over the stored one, once the signature verified, as sign_count_regression", async () => {
+		mockVerifyAuthentication.mockResolvedValueOnce({
+			verified: true,
+			authenticationInfo: { newCounter: 4, credentialBackedUp: false } as never,
+		} as never);
+
+		const result = await verifyWebAuthnAssertion({
+			credential: makeStoredCredential(5),
+			response: STUB_AUTHENTICATION_RESPONSE,
+			expectedChallenge: "some-challenge",
+			expectedRpId: "example.com",
+			expectedOrigins: ["https://example.com"],
+		});
+
 		expect(result).toEqual({ ok: false, reason: "sign_count_regression" });
+	});
+
+	it("does not judge the count of an assertion whose signature did not verify", async () => {
+		mockVerifyAuthentication.mockResolvedValueOnce({
+			verified: false,
+			authenticationInfo: { newCounter: 0, credentialBackedUp: false } as never,
+		} as never);
+
+		const result = await verifyWebAuthnAssertion({
+			credential: makeStoredCredential(5),
+			response: STUB_AUTHENTICATION_RESPONSE,
+			expectedChallenge: "some-challenge",
+			expectedRpId: "example.com",
+			expectedOrigins: ["https://example.com"],
+		});
+
+		expect(result).toEqual({ ok: false, reason: "signature_invalid" });
+	});
+
+	it.each([
+		'Unexpected authentication response type "counter", expected "webauthn.get"',
+		'Unexpected authentication response type "origin", expected "webauthn.get"',
+		'Unexpected authentication response type "challenge", expected "webauthn.get"',
+		'Unexpected authentication response type "rp id", expected "webauthn.get"',
+		'Unexpected authentication response type "top origin", expected "webauthn.get"',
+	])("maps a refusal by the library's own message, never by text the client wrote into it: %s", async (message) => {
+		mockVerifyAuthentication.mockRejectedValueOnce(new Error(message));
+
+		const result = await verifyWebAuthnAssertion({
+			credential: makeStoredCredential(5),
+			response: STUB_AUTHENTICATION_RESPONSE,
+			expectedChallenge: "some-challenge",
+			expectedRpId: "example.com",
+			expectedOrigins: ["https://example.com"],
+		});
+
+		expect(result).toEqual({ ok: false, reason: "unknown" });
+	});
+
+	it("maps the library's RP ID refusal", async () => {
+		mockVerifyAuthentication.mockRejectedValueOnce(new Error("Unexpected RP ID hash"));
+
+		const result = await verifyWebAuthnAssertion({
+			credential: makeStoredCredential(5),
+			response: STUB_AUTHENTICATION_RESPONSE,
+			expectedChallenge: "some-challenge",
+			expectedRpId: "example.com",
+			expectedOrigins: ["https://example.com"],
+		});
+
+		expect(result).toEqual({ ok: false, reason: "rp_id_mismatch" });
 	});
 
 	it("sign-count corner case: stored=0 and new=0 → ok=true (an authenticator that always reports 0)", async () => {
@@ -788,15 +896,22 @@ describe("cross-origin authentication is the deployment's decision", () => {
 });
 
 describe("verifyWebAuthnAssertionWithBackupState", () => {
-	/** A verified assertion as the library answers one: its counter and its backup state. */
-	const verified = (newCounter: number, credentialBackedUp: boolean) =>
+	/**
+	 * A verified assertion as the library answers one: its counter, and its
+	 * backup eligibility (BE, as the device type) and backup state (BS).
+	 */
+	const verified = (
+		newCounter: number,
+		credentialBackedUp: boolean,
+		backupEligible: boolean = credentialBackedUp,
+	) =>
 		mockVerifyAuthentication.mockResolvedValueOnce({
 			verified: true,
 			authenticationInfo: {
 				newCounter,
 				credentialID: "dGVzdC1jcmVkZW50aWFsLWlk",
 				userVerified: true,
-				credentialDeviceType: credentialBackedUp ? "multiDevice" : "singleDevice",
+				credentialDeviceType: backupEligible ? "multiDevice" : "singleDevice",
 				credentialBackedUp,
 				authenticatorExtensionResults: undefined,
 				origin: "https://example.com",
@@ -818,13 +933,18 @@ describe("verifyWebAuthnAssertionWithBackupState", () => {
 		expectedOrigins: ["https://example.com"],
 	});
 
-	it.each([true, false])(
-		"answers the new count and the backup state the verified authenticator data carries: %s",
-		async (backedUp) => {
-			verified(8, backedUp);
+	it.each([
+		[false, false],
+		[true, false],
+		[true, true],
+	])(
+		"answers the new count, and the backup eligibility (%s) and backup state (%s) the verified authenticator data carries",
+		async (backupEligible, backedUp) => {
+			verified(8, backedUp, backupEligible);
 			expect(await verifyWebAuthnAssertionWithBackupState(input(5))).toEqual({
 				ok: true,
 				newSignCount: 8,
+				backupEligible,
 				backedUp,
 			});
 		},
@@ -835,23 +955,18 @@ describe("verifyWebAuthnAssertionWithBackupState", () => {
 		expect(await verifyWebAuthnAssertionWithBackupState(input(0))).toEqual({
 			ok: true,
 			newSignCount: 0,
+			backupEligible: false,
 			backedUp: false,
 		});
 	});
 
-	it("refuses a count that did not increase over the stored one as sign_count_regression", async () => {
+	it("refuses a count that did not increase over the stored one, once the signature verified, as sign_count_regression", async () => {
 		verified(5, false);
 		expect(await verifyWebAuthnAssertionWithBackupState(input(5))).toEqual({
 			ok: false,
 			reason: "sign_count_regression",
 		});
-		mockVerifyAuthentication.mockRejectedValueOnce(
-			new Error("Response counter value 0 was lower than expected 5"),
-		);
-		expect(await verifyWebAuthnAssertionWithBackupState(input(5))).toEqual({
-			ok: false,
-			reason: "sign_count_regression",
-		});
+		expect(mockVerifyAuthentication.mock.calls[0]?.[0].credential.counter).toBe(0);
 	});
 
 	it("maps the library's refusals as verifyWebAuthnAssertion does", async () => {
@@ -883,3 +998,67 @@ function makeStoredCredentialInput(signCount: number) {
 		expectedOrigins: ["https://example.com"],
 	};
 }
+
+describe("verifyWebAuthnAttestationWithBackupState", () => {
+	const registered = (credentialDeviceType: "singleDevice" | "multiDevice", backedUp: boolean) =>
+		mockVerifyRegistration.mockResolvedValueOnce({
+			verified: true,
+			registrationInfo: {
+				fmt: "none",
+				aaguid: "00000000-0000-0000-0000-000000000000",
+				credential: {
+					id: "dGVzdC1jcmVkZW50aWFsLWlk",
+					publicKey: STUB_PUBLIC_KEY,
+					counter: 0,
+					transports: ["usb"],
+				},
+				credentialType: "public-key",
+				attestationObject: new Uint8Array([]),
+				userVerified: true,
+				credentialDeviceType,
+				credentialBackedUp: backedUp,
+				origin: "https://example.com",
+				rpID: "example.com",
+			},
+		} as never);
+
+	const input = {
+		response: STUB_REGISTRATION_RESPONSE,
+		expectedChallenge: "some-challenge",
+		expectedRpId: "example.com",
+		expectedOrigins: ["https://example.com"],
+	};
+
+	it.each([
+		["singleDevice", false, false],
+		["multiDevice", true, false],
+		["multiDevice", true, true],
+	] as const)(
+		"answers the material with the backup eligibility the device type says (%s: %s) and the backup state (%s)",
+		async (deviceType, backupEligible, backedUp) => {
+			registered(deviceType, backedUp);
+			const result = await verifyWebAuthnAttestationWithBackupState(input);
+			expect(result).toMatchObject({ ok: true, material: { backedUp, backupEligible } });
+		},
+	);
+
+	it("leaves verifyWebAuthnAttestation's material as it is", async () => {
+		registered("multiDevice", true);
+		const result = await verifyWebAuthnAttestation(input);
+		expect(result.ok && Object.keys(result.material).sort()).toEqual([
+			"backedUp",
+			"credentialId",
+			"publicKey",
+			"signCount",
+			"transports",
+		]);
+	});
+
+	it("maps the library's refusals as verifyWebAuthnAttestation does", async () => {
+		mockVerifyRegistration.mockRejectedValueOnce(new Error("Unexpected RP ID hash"));
+		expect(await verifyWebAuthnAttestationWithBackupState(input)).toEqual({
+			ok: false,
+			reason: "rp_id_mismatch",
+		});
+	});
+});

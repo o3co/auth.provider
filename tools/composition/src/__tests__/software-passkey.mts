@@ -26,31 +26,41 @@ import { createHash, generateKeyPairSync, randomBytes, sign } from "node:crypto"
 
 const b64url = (bytes: Uint8Array): string => Buffer.from(bytes).toString("base64url");
 
-/** User present and user verified; backup eligible and backed up for a synced passkey (WebAuthn §6.1). */
-const FLAGS = { device: 0x05, synced: 0x1d } as const;
+/** The authenticator data's flags (WebAuthn §6.1): user present, user verified, backup eligible (BE), backed up (BS). */
+const FLAG = { UP: 0x01, UV: 0x04, BE: 0x08, BS: 0x10 } as const;
 
 export interface SoftwarePasskey {
 	/** Its credential id, base64url. */
 	readonly credentialId: string;
 	/** The COSE public key. */
 	readonly publicKey: Uint8Array;
+	/** Whether it may be backed up (BE): a multi-device credential. */
+	readonly backupEligible: boolean;
+	/** Whether it is backed up (BS). */
 	readonly backedUp: boolean;
 	/** The counter the last assertion carried; each assertion increments it first, unless the passkey keeps none. */
 	counter: number;
 	/**
 	 * An assertion over `challenge`. `tampered` signs other client data than
-	 * it sends; `userHandle` is carried when given.
+	 * it sends; `userHandle` is carried when given; `type` replaces the client
+	 * data's `webauthn.get`.
 	 */
 	assert(
 		challenge: string,
-		options?: { readonly tampered?: boolean; readonly userHandle?: string },
+		options?: {
+			readonly tampered?: boolean;
+			readonly userHandle?: string;
+			readonly type?: string;
+		},
 	): Record<string, unknown>;
 }
 
 export function softwarePasskey(options: {
 	readonly rpId: string;
 	readonly origin: string;
-	/** Backed up — a synced passkey — rather than bound to one device. */
+	/** Backup-eligible (BE): a multi-device credential. Defaults to `backedUp`. */
+	readonly backupEligible?: boolean;
+	/** Backed up (BS): a synced passkey. A backed-up credential is backup-eligible. */
 	readonly backedUp?: boolean;
 	/** The counter before the first assertion; `"none"` for an authenticator that keeps none. */
 	readonly counter?: number | "none";
@@ -66,9 +76,12 @@ export function softwarePasskey(options: {
 	]);
 	const keepsCounter = options.counter !== "none";
 	const backedUp = options.backedUp === true;
+	const backupEligible = options.backupEligible ?? backedUp;
+	const flags = FLAG.UP | FLAG.UV | (backupEligible ? FLAG.BE : 0) | (backedUp ? FLAG.BS : 0);
 	const passkey: SoftwarePasskey = {
 		credentialId: b64url(randomBytes(16)),
 		publicKey: new Uint8Array(cose),
+		backupEligible,
 		backedUp,
 		counter: options.counter === "none" ? 0 : (options.counter ?? 0),
 		assert(challenge, assertOptions = {}) {
@@ -76,7 +89,7 @@ export function softwarePasskey(options: {
 			const clientData = (value: string) =>
 				Buffer.from(
 					JSON.stringify({
-						type: "webauthn.get",
+						type: assertOptions.type ?? "webauthn.get",
 						challenge: value,
 						origin: options.origin,
 						crossOrigin: false,
@@ -88,7 +101,7 @@ export function softwarePasskey(options: {
 			count.writeUInt32BE(passkey.counter);
 			const authenticatorData = Buffer.concat([
 				createHash("sha256").update(options.rpId).digest(),
-				Buffer.from([backedUp ? FLAGS.synced : FLAGS.device]),
+				Buffer.from([flags]),
 				count,
 			]);
 			const signature = sign(

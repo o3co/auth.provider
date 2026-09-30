@@ -23,7 +23,9 @@
  * verification takes it, finds the credential by its id, and writes the new
  * sign count by compare-and-set; a lost compare-and-set reads the factor
  * again and checks the assertion again; a counter that did not increase is
- * refused and audited.
+ * refused and audited, and only an assertion whose signature verified is
+ * judged on its counter; `hwk` or `swk` follows the backup eligibility (BE)
+ * registered, and an assertion reporting another is refused.
  */
 
 import type {
@@ -48,7 +50,10 @@ import {
 	ISSUER,
 	ALICE as TEMPLATE_ALICE,
 } from "@o3co/auth-provider-standalone/src/__tests__/all-modules-composition.fixture.mts";
-import { webauthnMfaFactorConfigForTests } from "@o3co/auth-provider-webauthn/testing";
+import {
+	webauthnMfaFactorConfigForTests,
+	webauthnMfaFactorDataForTests,
+} from "@o3co/auth-provider-webauthn/testing";
 import type { Express } from "express";
 import type request from "supertest";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -127,31 +132,49 @@ async function boot(stores: { readonly factorStore?: MfaFactorStore } = {}): Pro
 
 /** A software passkey for the full set's relying party (`auth.test`, the issuer's origin). */
 const passkeyFor = (
-	options: { readonly backedUp?: boolean; readonly counter?: number | "none" } = {},
+	options: {
+		readonly backupEligible?: boolean;
+		readonly backedUp?: boolean;
+		readonly counter?: number | "none";
+	} = {},
 ): SoftwarePasskey => softwarePasskey({ rpId: "auth.test", origin: ISSUER, ...options });
 
 /** alice's WebAuthn user handle, which every seeded factor carries. */
 const USER_HANDLE = Buffer.from(crypto.getRandomValues(new Uint8Array(32))).toString("base64url");
 
-/** Seeds `passkey` as one of alice's WebAuthn factors, its data sealed under the boot's key ring, at `signCount`. */
+/** What a factor's data is built from beside the passkey: the fields a test sets. */
+type DataOptions = Omit<
+	Parameters<typeof webauthnMfaFactorDataForTests>[0],
+	"credentialId" | "publicKey" | "userHandle"
+>;
+
+/**
+ * `passkey`'s factor as the WebAuthn package's testing entry builds one: its
+ * credential, its count and backup flags as the passkey now has them, alice's
+ * user handle, and `options` laid over them.
+ */
+const factorOf = (passkey: SoftwarePasskey, options: DataOptions = {}) =>
+	webauthnMfaFactorDataForTests({
+		credentialId: passkey.credentialId,
+		publicKey: passkey.publicKey,
+		signCount: passkey.counter,
+		backupEligible: passkey.backupEligible,
+		backedUp: passkey.backedUp,
+		userHandle: USER_HANDLE,
+		...options,
+	});
+
+/** Seeds `passkey` as one of alice's WebAuthn factors, its data sealed under the boot's key ring. */
 function seedPasskey(
 	factorStore: MfaFactorStore,
 	passkey: SoftwarePasskey,
-	signCount: number = passkey.counter,
+	options: DataOptions = {},
 ): Promise<MfaFactorRecord> {
 	return seedMfaFactor({
 		config: CONFIG,
 		factorStore,
 		subject: ALICE.id,
-		kind: "webauthn",
-		data: {
-			credentialId: passkey.credentialId,
-			publicKey: Buffer.from(passkey.publicKey).toString("base64url"),
-			signCount,
-			transports: ["internal"],
-			backedUp: passkey.backedUp,
-			userHandle: USER_HANDLE,
-		},
+		...factorOf(passkey, options),
 	});
 }
 
@@ -249,7 +272,7 @@ describe("a WebAuthn login", () => {
 			amr: ["pwd", "hwk", "mfa"],
 		});
 		const after = await storedFactor(factorStore, record);
-		expect(after.data).toMatchObject({ signCount: 6, backedUp: false, userHandle: USER_HANDLE });
+		expect(after.data).toEqual(factorOf(passkey, { signCount: 6 }).data);
 		expect(after.record.version).toBe(1);
 		expect((await storedFactor(factorStore, second)).record.version).toBe(0);
 		expect(await transactionStore.get(transaction)).toBeNull();
@@ -262,9 +285,12 @@ describe("a WebAuthn login", () => {
 		expect(audit.of("mfa.verify.failure")).toEqual([]);
 	});
 
-	it("records swk for a passkey whose backup state is set: a synced one", async () => {
+	it.each([
+		["backup-eligible and not yet backed up", false],
+		["backup-eligible and backed up, a synced one", true],
+	])("records swk for a passkey %s: its backup eligibility decides", async (_what, backedUp) => {
 		const factorStore = createMemoryMfaFactorStore();
-		const passkey = passkeyFor({ backedUp: true, counter: "none" });
+		const passkey = passkeyFor({ backupEligible: true, backedUp, counter: "none" });
 		const record = await seedPasskey(factorStore, passkey);
 		const { app, userSessionStore } = await boot({ factorStore });
 		const create = vi.spyOn(userSessionStore, "create");
@@ -300,14 +326,16 @@ describe("a WebAuthn login", () => {
 		);
 
 		expect(res.status, JSON.stringify(res.body)).toBe(200);
-		expect((await storedFactor(factorStore, answeringRecord)).data.signCount).toBe(3);
+		expect((await storedFactor(factorStore, answeringRecord)).data).toEqual(
+			factorOf(answering, { signCount: 3 }).data,
+		);
 		expect((await storedFactor(factorStore, namedRecord)).record.version).toBe(0);
 	});
 
 	it("accepts an authenticator that keeps no counter, 0 against a stored 0, and keeps it at 0", async () => {
 		const factorStore = createMemoryMfaFactorStore();
 		const passkey = passkeyFor({ counter: "none" });
-		const record = await seedPasskey(factorStore, passkey, 0);
+		const record = await seedPasskey(factorStore, passkey, { signCount: 0 });
 		const { app } = await boot({ factorStore });
 
 		for (let login = 0; login < 2; login++) {
@@ -322,8 +350,32 @@ describe("a WebAuthn login", () => {
 			expect(res.status, JSON.stringify(res.body)).toBe(200);
 		}
 		const after = await storedFactor(factorStore, record);
-		expect(after.data.signCount).toBe(0);
+		expect(after.data).toEqual(factorOf(passkey, { signCount: 0 }).data);
 		expect(after.record.version).toBe(2);
+	});
+
+	it("refuses as invalid an assertion whose backup eligibility is not the one registered, and does not audit it as a clone", async () => {
+		const factorStore = createMemoryMfaFactorStore();
+		const passkey = passkeyFor({ backupEligible: false, counter: 1 });
+		const record = await seedPasskey(factorStore, passkey, { backupEligible: true });
+		const { app, audit, userSessionStore } = await boot({ factorStore });
+		const create = vi.spyOn(userSessionStore, "create");
+		const { browser, transaction } = await beginLogin(app);
+		const options = await challenge(browser, transaction, record.id);
+
+		const res = await verify(
+			browser,
+			transaction,
+			record.id,
+			passkey.assert(options.body.challenge),
+		);
+
+		expect(res.status).toBe(401);
+		expect(audit.of("mfa.verify.failure").map((event) => event.details?.reason)).toEqual([
+			"invalid",
+		]);
+		expect(create).not.toHaveBeenCalled();
+		expect((await storedFactor(factorStore, record)).record.version).toBe(0);
 	});
 });
 
@@ -370,12 +422,11 @@ describe("the challenge, kept on the transaction", () => {
 
 /**
  * A factor store whose first `update` loses its compare-and-set: another
- * write lands on the record first — `concurrent`'s data, sealed, or the data
- * as it is, relabelled.
+ * write lands on the record first — `concurrent`, sealed, relabelled.
  */
 function losingFirstUpdate(
 	store: MfaFactorStore,
-	concurrent?: (data: Record<string, unknown>) => Record<string, unknown>,
+	concurrent: MfaFactorData,
 ): { readonly store: MfaFactorStore; readonly calls: () => number } {
 	let calls = 0;
 	return {
@@ -385,12 +436,9 @@ function losingFirstUpdate(
 			update: async (subject, id, expectedVersion, next) => {
 				calls++;
 				if (calls === 1) {
-					const { record, data } = await storedFactor(store, { subject, id });
+					const { record } = await storedFactor(store, { subject, id });
 					await store.update(subject, id, record.version, {
-						data:
-							concurrent === undefined
-								? record.data
-								: sealMfaFactorDataForTests(CONFIG, record, concurrent(data)),
+						data: sealMfaFactorDataForTests(CONFIG, record, concurrent),
 						label: "renamed",
 						lastUsedAt: record.lastUsedAt,
 					});
@@ -405,7 +453,7 @@ describe("the sign count", () => {
 	it("refuses a counter that did not increase over the stored one: 401, audited as sign_count_regression, no session, the factor left as it was", async () => {
 		const factorStore = createMemoryMfaFactorStore();
 		const passkey = passkeyFor({ counter: 3 });
-		const record = await seedPasskey(factorStore, passkey, 10);
+		const record = await seedPasskey(factorStore, passkey, { signCount: 10 });
 		const { app, audit, userSessionStore } = await boot({ factorStore });
 		const create = vi.spyOn(userSessionStore, "create");
 		const { browser, transaction } = await beginLogin(app);
@@ -429,15 +477,46 @@ describe("the sign count", () => {
 		expect(audit.of("mfa.verified")).toEqual([]);
 		expect(create).not.toHaveBeenCalled();
 		const after = await storedFactor(factorStore, record);
-		expect(after.data.signCount).toBe(10);
+		expect(after.data).toEqual(factorOf(passkey, { signCount: 10 }).data);
 		expect(after.record.version).toBe(0);
 	});
 
-	it("reads the factor again after a lost compare-and-set and checks the assertion again: after a write that left the count, the login completes", async () => {
+	it.each([
+		["whose signature does not verify", { tampered: true }],
+		['whose client data is of type "counter"', { type: "counter" }],
+	] as const)(
+		"refuses an assertion %s, with a counter below the stored one, as invalid — never audited as sign_count_regression",
+		async (_what, forged) => {
+			const factorStore = createMemoryMfaFactorStore();
+			const passkey = passkeyFor({ counter: 3 });
+			const record = await seedPasskey(factorStore, passkey, { signCount: 10 });
+			const { app, audit } = await boot({ factorStore });
+			const { browser, transaction } = await beginLogin(app);
+			const options = await challenge(browser, transaction, record.id);
+
+			const res = await verify(
+				browser,
+				transaction,
+				record.id,
+				passkey.assert(options.body.challenge, forged),
+			);
+
+			expect(res.status).toBe(401);
+			expect(audit.of("mfa.verify.failure").map((event) => event.details?.reason)).toEqual([
+				"invalid",
+			]);
+			expect((await storedFactor(factorStore, record)).record.version).toBe(0);
+		},
+	);
+
+	it("reads the factor again after a lost compare-and-set: after a write that left the count, the login completes over that write, keeping what it changed", async () => {
 		const factorStore = createMemoryMfaFactorStore();
 		const passkey = passkeyFor({ counter: 5 });
 		const record = await seedPasskey(factorStore, passkey);
-		const losing = losingFirstUpdate(factorStore);
+		const losing = losingFirstUpdate(
+			factorStore,
+			factorOf(passkey, { signCount: 5, transports: ["usb"] }).data,
+		);
 		const { app } = await boot({ factorStore: losing.store });
 		const { browser, transaction } = await beginLogin(app);
 		const options = await challenge(browser, transaction, record.id);
@@ -452,7 +531,7 @@ describe("the sign count", () => {
 		expect(res.status, JSON.stringify(res.body)).toBe(200);
 		expect(losing.calls()).toBe(2);
 		const after = await storedFactor(factorStore, record);
-		expect(after.data.signCount).toBe(6);
+		expect(after.data).toEqual(factorOf(passkey, { signCount: 6, transports: ["usb"] }).data);
 		expect(after.record.label).toBe("renamed");
 		expect(after.record.version).toBe(2);
 	});
@@ -461,7 +540,7 @@ describe("the sign count", () => {
 		const factorStore = createMemoryMfaFactorStore();
 		const passkey = passkeyFor({ counter: 5 });
 		const record = await seedPasskey(factorStore, passkey);
-		const losing = losingFirstUpdate(factorStore, (data) => ({ ...data, signCount: 6 }));
+		const losing = losingFirstUpdate(factorStore, factorOf(passkey, { signCount: 6 }).data);
 		const { app, audit, userSessionStore } = await boot({ factorStore: losing.store });
 		const create = vi.spyOn(userSessionStore, "create");
 		const { browser, transaction } = await beginLogin(app);
@@ -481,7 +560,9 @@ describe("the sign count", () => {
 		expect(audit.of("mfa.verify.failure").map((event) => event.details?.reason)).toEqual([
 			"sign_count_regression",
 		]);
-		expect((await storedFactor(factorStore, record)).data.signCount).toBe(6);
+		expect((await storedFactor(factorStore, record)).data).toEqual(
+			factorOf(passkey, { signCount: 6 }).data,
+		);
 	});
 });
 

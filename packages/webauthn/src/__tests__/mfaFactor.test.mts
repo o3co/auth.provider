@@ -42,6 +42,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("#/internal/verification.mjs", () => ({
 	verifyWebAuthnAttestation: vi.fn(),
+	verifyWebAuthnAttestationWithBackupState: vi.fn(),
 	verifyWebAuthnAssertion: vi.fn(),
 	verifyWebAuthnAssertionWithBackupState: vi.fn(),
 }));
@@ -49,12 +50,12 @@ vi.mock("#/internal/verification.mjs", () => ({
 import { WEBAUTHN_ALGORITHM_IDS } from "#/internal/options.mjs";
 import {
 	verifyWebAuthnAssertionWithBackupState,
-	verifyWebAuthnAttestation,
+	verifyWebAuthnAttestationWithBackupState,
 } from "#/internal/verification.mjs";
 import { createWebAuthnMfaFactor, WEBAUTHN_MFA_FACTOR_KIND } from "#/mfaFactor/factor.mjs";
-import { createTestWebAuthnConfig } from "#/testing/index.mjs";
+import { createTestWebAuthnConfig, webauthnMfaFactorDataForTests } from "#/testing/index.mjs";
 
-const mockAttestation = vi.mocked(verifyWebAuthnAttestation);
+const mockAttestation = vi.mocked(verifyWebAuthnAttestationWithBackupState);
 const mockAssertion = vi.mocked(verifyWebAuthnAssertionWithBackupState);
 
 beforeEach(() => {
@@ -94,6 +95,7 @@ const dataOf = (overrides: Record<string, unknown> = {}): MfaFactorData => ({
 	publicKey: b64url(PUBLIC_KEY),
 	signCount: 5,
 	transports: ["usb"],
+	backupEligible: false,
 	backedUp: false,
 	userHandle: HANDLE,
 	...overrides,
@@ -144,8 +146,8 @@ const assertion = (
 		...overrides,
 	}) as AuthenticationResponseJSON;
 
-/** An attestation the library verified, of `credentialId`. */
-const attested = (credentialId = "bmV3LWNyZWQ", backedUp = false) =>
+/** An attestation the library verified, of `credentialId`, with its backup eligibility (BE) and state (BS). */
+const attested = (credentialId = "bmV3LWNyZWQ", backupEligible = false, backedUp = false) =>
 	mockAttestation.mockResolvedValueOnce({
 		ok: true,
 		material: {
@@ -153,9 +155,14 @@ const attested = (credentialId = "bmV3LWNyZWQ", backedUp = false) =>
 			publicKey: new Uint8Array(PUBLIC_KEY),
 			signCount: 0,
 			transports: ["usb", "nfc"],
+			backupEligible,
 			backedUp,
 		},
 	});
+
+/** An assertion the library verified: its new count, backup eligibility (BE) and state (BS). */
+const asserted = (newSignCount: number, backupEligible = false, backedUp = false) =>
+	mockAssertion.mockResolvedValueOnce({ ok: true, newSignCount, backupEligible, backedUp });
 
 describe("the webauthn factor's contract values", () => {
 	it("is kind webauthn: counting, adding mfa, not guessable, its challenge taken by a verification", () => {
@@ -172,11 +179,16 @@ describe("the webauthn factor's contract values", () => {
 		expect(factorWith().amrValues).toEqual([HARDWARE_KEY_AMR, SOFTWARE_KEY_AMR]);
 	});
 
-	it("adds hwk for a credential whose backup state is clear, and swk for one backed up", () => {
-		const factor = factorWith();
-		expect(factor.amrFor(dataOf({ backedUp: false }))).toEqual([HARDWARE_KEY_AMR]);
-		expect(factor.amrFor(dataOf({ backedUp: true }))).toEqual([SOFTWARE_KEY_AMR]);
-	});
+	it.each([
+		[false, false, HARDWARE_KEY_AMR],
+		[true, false, SOFTWARE_KEY_AMR],
+		[true, true, SOFTWARE_KEY_AMR],
+	])(
+		"adds hwk only for a credential that is not backup-eligible: BE %s, BS %s is %s",
+		(backupEligible, backedUp, amr) => {
+			expect(factorWith().amrFor(dataOf({ backupEligible, backedUp }))).toEqual([amr]);
+		},
+	);
 
 	it("describes a factor with no hint", () => {
 		expect(factorWith().describe(dataOf())).toEqual({});
@@ -186,6 +198,7 @@ describe("the webauthn factor's contract values", () => {
 		const factor = factorWith();
 		for (const [data, field] of [
 			[dataOf({ backedUp: "no" }), "backedUp"],
+			[dataOf({ backupEligible: undefined }), "backupEligible"],
 			[dataOf({ signCount: -1 }), "signCount"],
 			[dataOf({ credentialId: "" }), "credentialId"],
 			[dataOf({ publicKey: "not base64url!" }), "publicKey"],
@@ -194,12 +207,23 @@ describe("the webauthn factor's contract values", () => {
 		] as const) {
 			expect(() => factor.amrFor(data), field).toThrow(new RegExp(field));
 		}
-		try {
-			factor.amrFor(dataOf({ credentialId: "", publicKey: "secret-looking" }));
-		} catch (err) {
-			expect(String(err)).not.toContain("secret-looking");
-		}
 	});
+
+	it.each(["credentialId", "publicKey", "userHandle"])(
+		"quotes nothing of a %s it cannot read",
+		(field) => {
+			const value = "secret-looking value!";
+			let thrown: unknown;
+			try {
+				factorWith().amrFor(dataOf({ [field]: value }));
+			} catch (err) {
+				thrown = err;
+			}
+			expect(thrown).toBeInstanceOf(Error);
+			expect(String(thrown)).toContain(field);
+			expect(String(thrown)).not.toContain(value);
+		},
+	);
 });
 
 describe("registration", () => {
@@ -284,8 +308,8 @@ describe("registration", () => {
 		]);
 	});
 
-	it("completes with the verified attestation's credential, kept with the subject's user handle", async () => {
-		attested("bmV3LWNyZWQ", true);
+	it("completes with the verified attestation's credential, its backup eligibility and state, kept with the subject's user handle", async () => {
+		attested("bmV3LWNyZWQ", true, false);
 		const factor = factorWith("required");
 		const state = { challenge: "Y2hhbGxlbmdl", userHandle: HANDLE, expiresAtMs: NOW_MS + 1 };
 		const done = await factor.completeEnrollment({
@@ -302,7 +326,8 @@ describe("registration", () => {
 				publicKey: b64url(PUBLIC_KEY),
 				signCount: 0,
 				transports: ["usb", "nfc"],
-				backedUp: true,
+				backupEligible: true,
+				backedUp: false,
 				userHandle: HANDLE,
 			},
 		});
@@ -323,6 +348,7 @@ describe("registration", () => {
 				publicKey: new Uint8Array(PUBLIC_KEY),
 				signCount: 0,
 				transports: ["cable", "internal"] as never,
+				backupEligible: false,
 				backedUp: false,
 			},
 		});
@@ -459,7 +485,7 @@ describe("an assertion's verification", () => {
 		});
 
 	it("verifies the credential named by the assertion against the challenge taken, and answers its new count and backup state as its next data", async () => {
-		mockAssertion.mockResolvedValueOnce({ ok: true, newSignCount: 6, backedUp: false });
+		asserted(6);
 		const factor = factorWith("required");
 		expect(await verify(factor, assertion("Y3JlZC1h"))).toEqual({
 			ok: true,
@@ -483,22 +509,41 @@ describe("an assertion's verification", () => {
 	});
 
 	it("finds the credential among the subject's: an assertion by another of its WebAuthn factors verifies that one", async () => {
-		mockAssertion.mockResolvedValueOnce({ ok: true, newSignCount: 0, backedUp: true });
+		asserted(0);
 		const verdict = await verify(factorWith(), assertion("Y3JlZC1i"));
 		expect(verdict).toEqual({
 			ok: true,
 			factorId: "factor-b",
-			next: { ...B.data, signCount: 0, backedUp: true },
+			next: { ...B.data, signCount: 0, backedUp: false },
 		});
 	});
 
-	it("records the backup state the assertion reports, so a credential since synced adds swk", async () => {
-		mockAssertion.mockResolvedValueOnce({ ok: true, newSignCount: 6, backedUp: true });
+	it("records the backup state the assertion reports, and keeps the backup eligibility registered, which alone decides hwk or swk", async () => {
+		asserted(6, true, true);
 		const factor = factorWith();
-		const verdict = await verify(factor, assertion("Y3JlZC1h"));
+		const synced = enrolled("factor-s", dataOf({ backupEligible: true, backedUp: false }));
+		const verdict = await verify(factor, assertion("Y3JlZC1h"), {
+			factor: synced,
+			factors: [synced],
+		});
 		if (!verdict.ok || verdict.next === undefined) throw new Error("not verified");
+		expect(verdict.next).toMatchObject({ backupEligible: true, backedUp: true });
 		expect(factor.amrFor(verdict.next)).toEqual([SOFTWARE_KEY_AMR]);
 	});
+
+	it.each([
+		[false, true],
+		[true, false],
+	])(
+		"refuses as invalid an assertion whose backup eligibility is not the one registered: registered %s, asserted %s",
+		async (registered, reported) => {
+			asserted(6, reported, false);
+			const factor = enrolled("factor-e", dataOf({ backupEligible: registered }));
+			expect(
+				await verify(factorWith(), assertion("Y3JlZC1h"), { factor, factors: [factor] }),
+			).toEqual({ ok: false, reason: "invalid" });
+		},
+	);
 
 	it("refuses as sign_count_regression a counter that did not increase over the stored one", async () => {
 		mockAssertion.mockResolvedValueOnce({ ok: false, reason: "sign_count_regression" });
@@ -544,8 +589,22 @@ describe("an assertion's verification", () => {
 		expect(mockAssertion).not.toHaveBeenCalled();
 	});
 
+	it("reads a user handle of null as none: it verifies, and the library is handed no user handle", async () => {
+		asserted(6);
+		const proof = assertion("Y3JlZC1h", {
+			response: {
+				clientDataJSON: "Y2Q",
+				authenticatorData: "YWQ",
+				signature: "c2ln",
+				userHandle: null,
+			},
+		});
+		expect((await verify(factorWith(), proof)).ok).toBe(true);
+		expect(mockAssertion.mock.calls[0]?.[0].response.response).not.toHaveProperty("userHandle");
+	});
+
 	it("verifies an assertion carrying the credential's user handle", async () => {
-		mockAssertion.mockResolvedValueOnce({ ok: true, newSignCount: 6, backedUp: false });
+		asserted(6);
 		const proof = assertion("Y3JlZC1h", {
 			response: {
 				clientDataJSON: "Y2Q",
@@ -595,7 +654,7 @@ describe("an assertion's verification", () => {
 	});
 
 	it("hands the library only the assertion's own fields", async () => {
-		mockAssertion.mockResolvedValueOnce({ ok: true, newSignCount: 6, backedUp: false });
+		asserted(6);
 		await verify(factorWith(), { ...assertion("Y3JlZC1h"), extra: "dropped" });
 		expect(mockAssertion.mock.calls[0]?.[0].response).toEqual(assertion("Y3JlZC1h"));
 	});
@@ -622,12 +681,14 @@ describe("the factor contract (@o3co/auth-provider-test-kit)", () => {
 				publicKey: new Uint8Array(PUBLIC_KEY),
 				signCount: 0,
 				transports: ["internal"],
+				backupEligible: false,
 				backedUp: false,
 			},
 		}));
 		mockAssertion.mockImplementation(async (input) => ({
 			ok: true,
 			newSignCount: input.credential.signCount + 1,
+			backupEligible: false,
 			backedUp: false,
 		}));
 	});
@@ -641,4 +702,28 @@ describe("the factor contract (@o3co/auth-provider-test-kit)", () => {
 	})) {
 		it(name, run);
 	}
+});
+
+describe("webauthnMfaFactorDataForTests, the testing entry's factor", () => {
+	it("is a factor of the webauthn kind whose data the factor reads, with the reference fields laid over by what the test gives", () => {
+		const built = webauthnMfaFactorDataForTests({
+			credentialId: "Y3JlZC1h",
+			publicKey: PUBLIC_KEY,
+			userHandle: HANDLE,
+			backupEligible: true,
+		});
+		expect(built).toEqual({
+			kind: WEBAUTHN_MFA_FACTOR_KIND,
+			data: {
+				credentialId: "Y3JlZC1h",
+				publicKey: b64url(PUBLIC_KEY),
+				signCount: 0,
+				transports: ["internal"],
+				backupEligible: true,
+				backedUp: false,
+				userHandle: HANDLE,
+			},
+		});
+		expect(factorWith().amrFor(built.data)).toEqual([SOFTWARE_KEY_AMR]);
+	});
 });

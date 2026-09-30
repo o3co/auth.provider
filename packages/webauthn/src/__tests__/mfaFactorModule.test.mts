@@ -20,9 +20,11 @@
  * built from the relying party the `webauthnConfig` slot holds and its own
  * section, `webauthn-mfa-factor`; a factory answering `null` —
  * `webauthn-mfa-factor.enabled = false`, the reference default — leaves the
- * kind absent from the resolver. Without the relying party the boot is
- * refused, naming the slot. The grant installed alone, with the package's
- * reference layered, names no section ignored.
+ * kind absent from the resolver. The relying party is needed only when the
+ * factor is on: on without it, the boot is refused, naming the slot and the
+ * keys it is built from; off, the module boots without it. The grant
+ * installed alone, with the package's reference layered, names no section
+ * ignored.
  */
 
 import { fileURLToPath } from "node:url";
@@ -118,10 +120,10 @@ async function refusal(
 const ON = webauthnMfaFactorConfigForTests({ enabled: true })["webauthn-mfa-factor"];
 
 describe("webauthnMfaFactorModule", () => {
-	it("is a module of its own, stateless, requiring the relying party alone, contributing a factor", () => {
+	it("is a module of its own, stateless, taking the relying party alone, when it is wired, contributing a factor", () => {
 		expect(webauthnMfaFactorModule.name).toBe("webauthn-mfa-factor");
-		expect(webauthnMfaFactorModule.requires).toEqual(["webauthnConfig"]);
-		expect(webauthnMfaFactorModule.optional ?? []).toEqual([]);
+		expect(webauthnMfaFactorModule.requires ?? []).toEqual([]);
+		expect(webauthnMfaFactorModule.optional).toEqual(["webauthnConfig"]);
 		expect(webauthnMfaFactorModule.replicaSafety).toBeUndefined();
 		expect(Object.keys(webauthnMfaFactorModule.contributes ?? {})).toEqual(["mfaFactors"]);
 	});
@@ -174,12 +176,18 @@ describe("webauthnMfaFactorModule", () => {
 		expect([...(resolver?.entries() ?? [])]).toEqual([]);
 	});
 
-	it("refuses the boot without the relying party, naming the webauthnConfig slot, whether the factor is on or off", async () => {
-		for (const enabled of [true, false]) {
-			const refused = await refusal(configWith({ ...ON, enabled }), []);
-			expect(refused.reason).toBe("missing-required-component");
-			expect(refused.details).toMatchObject({ missingKey: "webauthnConfig" });
+	it("refuses the boot when on without the relying party, naming the webauthnConfig slot and the keys it is built from", async () => {
+		const refused = await refusal(configWith(ON), []);
+		expect(refused.reason).toBe("contribute-factory-failed");
+		const said = `${refused.message} ${String((refused as { cause?: unknown }).cause)}`;
+		for (const named of ["webauthnConfig", "webauthn.rpId", "webauthn.rpName", "webauthn.origin"]) {
+			expect(said).toContain(named);
 		}
+	});
+
+	it("boots when off without the relying party, and contributes no factor", async () => {
+		const { resolver } = await boot(configWith({ ...ON, enabled: false }), []);
+		expect(resolver?.get("webauthn")).toBeUndefined();
 	});
 
 	it("refuses the boot for a section its schema refuses, before any factory runs, naming the key", async () => {
