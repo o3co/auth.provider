@@ -58,6 +58,7 @@ export type {
 	DuplicateModuleNameDetails,
 	DuplicateOverrideDetails,
 	DuplicateProvidesDetails,
+	EnvironmentVariableRenamedDetails,
 	FederationRedirectPolicyUnpairedDetails,
 	FrozenWorld,
 	InvalidRouteAdvertisementPathDetails,

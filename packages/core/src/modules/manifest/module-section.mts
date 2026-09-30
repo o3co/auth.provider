@@ -98,14 +98,30 @@ export interface ModuleSection<S extends SectionSchema = SectionSchema> {
 	 *
 	 * A switch that decides whether a module loads (an adapter selection,
 	 * `federations.<name>.enabled`) is relocated by a module that is always
-	 * loaded, since the module it selects may never be. Defaults move with the
-	 * path; tombstone and schema rules are in `docs/release-policy.md` ("Key
-	 * moved to another path").
+	 * loaded, since the module it selects may never be. Defaults and variable
+	 * bindings move with the path, and none stays at the old one; the schema
+	 * rules are in `docs/release-policy.md` ("Key moved to another path").
 	 *
 	 * A bridge for the 0.x line: removed at the first major release; the
 	 * relocated-paths drift test fails the cut that forgets.
 	 */
 	readonly relocatedFrom?: readonly string[] | Readonly<Record<string, string | null>>;
+	/**
+	 * The environment variables whose names changed with the move: each old
+	 * name, mapped to the old path it was bound to (`{ LEGACY_RETRIES:
+	 * "legacy.retries" }`). The new name is the variable the key's new path is
+	 * bound to (`environmentVariableFor`), so no binding stays at the old path.
+	 * While the environment the configuration was resolved with sets an old
+	 * name, boot refuses (`environment-variable-renamed`) unless the new name
+	 * is set to the same string; a default at the new path does not count.
+	 *
+	 * Each old path lies at or under an entry of {@link relocatedFrom} that
+	 * moves it into a section read at its module's name; an old name is not the
+	 * new one, and is renamed by one loaded module and is no rename's new name
+	 * (`module-section-path-invalid`). Removed with `relocatedFrom` at the
+	 * first major release.
+	 */
+	readonly renamedVariables?: Readonly<Record<string, string>>;
 }
 
 /**

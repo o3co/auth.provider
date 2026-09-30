@@ -32,8 +32,12 @@ import {
 } from "../config/composed.mjs";
 import {
 	findRelocatedKeys,
+	findRenamedVariables,
 	type RelocatedPath,
+	type RenamedVariable,
 	relocatedKeyMessage,
+	relocateKey,
+	renamedVariableMessage,
 } from "../config/removed-keys.mjs";
 import { describeValue } from "../errors/describe-value.mjs";
 import type { ComponentKey, ComponentMap } from "../modules/manifest/component-map.mjs";
@@ -77,6 +81,8 @@ export interface ValidateManifestsInput {
 	/** The merged collectors: core's built-ins under the host's. */
 	readonly contributionKinds?: ContributionKindMap;
 	readonly overrideComponents?: Partial<ComponentMap>;
+	/** The environment the configuration was resolved with; none when unset. */
+	readonly environment?: Readonly<Record<string, string | undefined>>;
 }
 
 // ---------------------------------------------------------------------------
@@ -2235,7 +2241,8 @@ function sectionRelocationsOf(m: Module): readonly SectionRelocation[] {
  * `details.relocatedFrom` names the entry, or the value when it is neither
  * form or has a hole. Only a manifest's `section` declares a path to hold
  * against; a module read through `configSchema` alone declares none. Then
- * `checkModuleSectionOwners` holds each section to one owner. Throws
+ * `checkRenamedVariableDeclarations` holds the variables renamed with the
+ * moves, and `checkModuleSectionOwners` each section to one owner. Throws
  * `module-section-path-invalid`.
  * @internal
  */
@@ -2381,7 +2388,129 @@ function checkModuleSectionPaths(rawModules: readonly Module[]): void {
 				: `its new path "${target.join(".")}" holds "${chained.entry}", an old path of module "${chained.module}", so a key moved under it could be refused in turn`,
 		);
 	}
+	checkRenamedVariableDeclarations(rawModules);
 	checkModuleSectionOwners(rawModules);
+}
+
+/** A variable name as an environment carries one: a letter or `_`, then letters, digits and `_`. */
+const VARIABLE_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/;
+
+/** A variable a loaded module declares renamed with its section, as boot reads it. */
+interface SectionRename extends RenamedVariable {
+	readonly module: string;
+}
+
+/**
+ * The rename a `renamedVariables` entry declares — its old name, the variable
+ * its old path's new place is bound to (`relocateKey` over the module's
+ * `relocatedFrom`), and that path — or why boot cannot hold it.
+ */
+function renameOf(
+	from: string,
+	oldPath: unknown,
+	relocations: readonly SectionRelocation[],
+): RenamedVariable | { readonly problem: string } {
+	if (!VARIABLE_NAME.test(from)) {
+		return {
+			problem:
+				"an old variable name is a letter or underscore followed by letters, digits and underscores",
+		};
+	}
+	if (!isKeyPath(oldPath)) {
+		return { problem: "its old path is a dot-separated path of non-empty keys" };
+	}
+	const moved = relocateKey(oldPath.split("."), relocations);
+	if (moved === undefined) {
+		return {
+			problem: `its old path "${oldPath}" lies under none of the paths the section moved from (relocatedFrom)`,
+		};
+	}
+	if (moved.to === null) {
+		return {
+			problem: `its old path "${oldPath}" was removed, not moved, so no new name can carry its value`,
+		};
+	}
+	if (moved.environmentVariable === undefined) {
+		return {
+			problem: `its new path "${moved.to}" lies under the section's transitional path, which no variable binds yet`,
+		};
+	}
+	if (moved.environmentVariable === from) {
+		return {
+			problem: `it is the variable its new path "${moved.to}" is bound to: its name did not change`,
+		};
+	}
+	return { from, to: moved.environmentVariable, path: moved.to };
+}
+
+/** A module's `renamedVariables` as renames, in declaration order. Read after `checkRenamedVariableDeclarations` held them. */
+function sectionRenamesOf(m: Module): readonly SectionRename[] {
+	const declared: unknown = m.section?.renamedVariables;
+	if (!isPlainRecord(declared)) return [];
+	const relocations = sectionRelocationsOf(m);
+	return Object.entries(declared).flatMap(([from, oldPath]) => {
+		const rename = renameOf(from, oldPath, relocations);
+		return "problem" in rename ? [] : [{ module: m.name, ...rename }];
+	});
+}
+
+/**
+ * Every `section.renamedVariables` is one boot can hold: a plain map
+ * (prototype `Object.prototype` or `null`) from variable names to old paths,
+ * each moved — not removed — by the module's own `relocatedFrom` to a path a
+ * variable binds (`renameOf`); no old name that another loaded module declares
+ * too (the later refused), or that is a loaded module's new name, which would
+ * refuse the operator who set it. Throws `module-section-path-invalid`,
+ * `details.renamedVariable` naming the entry, or the value when it is not a
+ * plain map. Read after `relocatedFrom` is held.
+ * @internal
+ */
+function checkRenamedVariableDeclarations(rawModules: readonly Module[]): void {
+	const refusal = (m: Module, renamedVariable: unknown, problem: string): BootError =>
+		new BootError({
+			message:
+				typeof renamedVariable === "string"
+					? `Module "${m.name}" declares the variable ${JSON.stringify(renamedVariable)} renamed with its section: ${problem}.`
+					: `Module "${m.name}" declares renamedVariables as a ${typeof renamedVariable}: ${problem}.`,
+			reason: "module-section-path-invalid",
+			stage: "validateManifests",
+			details: { reason: "module-section-path-invalid", module: m.name, renamedVariable, problem },
+		});
+	const renames: { readonly m: Module; readonly rename: SectionRename }[] = [];
+	for (const m of rawModules) {
+		const declared: unknown = m.section?.renamedVariables;
+		if (declared === undefined) continue;
+		if (!isPlainRecord(declared)) {
+			throw refusal(
+				m,
+				declared,
+				"renamedVariables is a map from each old variable name to the old path it was bound to, whose prototype is Object.prototype or null",
+			);
+		}
+		const relocations = sectionRelocationsOf(m);
+		for (const [from, oldPath] of Object.entries(declared)) {
+			const rename = renameOf(from, oldPath, relocations);
+			if ("problem" in rename) throw refusal(m, from, rename.problem);
+			const other = renames.find((earlier) => earlier.rename.from === from)?.rename;
+			if (other !== undefined) {
+				throw refusal(
+					m,
+					from,
+					`module "${other.module}" and module "${m.name}" both declare it renamed: its value would have two new names`,
+				);
+			}
+			renames.push({ m, rename: { module: m.name, ...rename } });
+		}
+	}
+	for (const { m, rename } of renames) {
+		const chained = renames.find((other) => other.rename.to === rename.from)?.rename;
+		if (chained === undefined) continue;
+		throw refusal(
+			m,
+			rename.from,
+			`it is the new name of "${chained.from}", renamed by module "${chained.module}", so the operator who set it would be refused`,
+		);
+	}
 }
 
 /**
@@ -2409,6 +2538,40 @@ function checkRelocatedConfigPaths(rawModules: readonly Module[], bootstrap: Boo
 				from,
 				to,
 				...(environmentVariable === undefined ? {} : { environmentVariable }),
+			})),
+		},
+	});
+}
+
+/**
+ * An environment variable a loaded module declares renamed
+ * (`section.renamedVariables`) refuses boot (`environment-variable-renamed`)
+ * while `environment` sets its old name and the new name is unset or set to a
+ * different string (`findRenamedVariables`); the two set to the same string
+ * boot. Names every such variable in module order, with its new name and the
+ * path that name is bound to, and no value.
+ * @internal
+ */
+function checkRenamedEnvironmentVariables(
+	rawModules: readonly Module[],
+	environment: Readonly<Record<string, string | undefined>>,
+): void {
+	const renames = rawModules.flatMap(sectionRenamesOf);
+	if (renames.length === 0) return;
+	const found = findRenamedVariables(environment, renames);
+	if (found.length === 0) return;
+	throw new BootError({
+		message: `The environment sets ${found.length} variable(s) that were renamed: ${found.map(renamedVariableMessage).join(" ")}`,
+		reason: "environment-variable-renamed",
+		stage: "validateManifests",
+		details: {
+			reason: "environment-variable-renamed",
+			renamed: found.map(({ module, from, to, path, newVariable }) => ({
+				module,
+				from,
+				to,
+				path,
+				newVariable,
 			})),
 		},
 	});
@@ -2470,6 +2633,8 @@ interface StageOneContext {
 	readonly bootstrapComponents: BootstrapMap;
 	readonly overrideComponents: Partial<ComponentMap> | undefined;
 	readonly contributionKinds: ContributionKindMap | undefined;
+	/** The environment the configuration was resolved with. */
+	readonly environment: Readonly<Record<string, string | undefined>>;
 	readonly parsedConfig: unknown;
 	/**
 	 * Provides ∪ bootstrapComponents ∪ overrideComponents, the three component
@@ -2661,6 +2826,11 @@ export const STAGE_ONE_PRE_CONFIG_CHECKS: readonly StageOneCheck[] = freezeCheck
 		spec: "issue #728 (B10: a relocated path refuses boot)",
 		run: (ctx) => checkRelocatedConfigPaths(ctx.rawModules, ctx.bootstrapComponents),
 	},
+	{
+		id: "renamed-environment-variables",
+		spec: "issue #728 (a variable renamed with a move refuses boot unless its new name carries the same value)",
+		run: (ctx) => checkRenamedEnvironmentVariables(ctx.rawModules, ctx.environment),
+	},
 ]);
 
 /**
@@ -2746,6 +2916,7 @@ export const STAGE_ONE_POST_CONFIG_CHECKS: readonly StageOneCheck[] = freezeChec
  */
 export function validateManifests(input: ValidateManifestsInput): ValidatedManifests {
 	const { modules, bootstrapComponents, contributionKinds, overrideComponents } = input;
+	const environment = input.environment ?? {};
 
 	// Normalise all modules first for efficient lookup across checks
 	const normalisedModules = modules.map(normaliseModule);
@@ -2756,6 +2927,7 @@ export function validateManifests(input: ValidateManifestsInput): ValidatedManif
 		bootstrapComponents,
 		overrideComponents,
 		contributionKinds,
+		environment,
 		parsedConfig: undefined,
 		plannedKeys: new Set<string>([
 			...normalisedModules.flatMap((m) => m.providesKeys as string[]),

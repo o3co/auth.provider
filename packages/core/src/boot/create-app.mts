@@ -108,6 +108,8 @@ export async function createApp<B extends BootstrapMap = DefaultBootstrapMap>(
 		bootstrapComponents,
 		contributionKinds: merged,
 		overrideComponents,
+		// The environment `${?VAR}` resolves against when a composition names none.
+		environment: options.environment ?? process.env,
 	});
 	const validatedBootstrap = validated.bootstrapComponents;
 
