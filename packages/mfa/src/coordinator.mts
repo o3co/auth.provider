@@ -42,6 +42,9 @@
  *   asks to be mailed goes through `sendMfaMail` (`mail.mts`), to the
  *   login's address, and the digest of that address is kept with the pending
  *   challenge and handed back to the verification.
+ * - A refusal carries the factor id the factor named only when it is one of
+ *   the subject's factors of the kind verified: nothing else reaches the audit.
+ *   Another is dropped and flagged, never quoted.
  */
 
 import {
@@ -110,6 +113,12 @@ const declaresEach = (factor: MfaFactor, amr: unknown): amr is readonly string[]
 	Array.isArray(amr) &&
 	amr.length > 0 &&
 	amr.every((value) => typeof value === "string" && factor.amrValues.includes(value));
+
+/** What a refusal says of the factor it concerns, as the `refused` outcome carries it. */
+type RefusalConcerns = Pick<
+	Extract<MfaVerifyOutcome, { outcome: "refused" }>,
+	"factorId" | "factorIdDropped"
+>;
 
 export interface MfaCoordinator {
 	describe(call: MfaCeremonyCall): Promise<MfaDescribeOutcome>;
@@ -617,10 +626,15 @@ export function createMfaCoordinator(options: MfaCoordinatorOptions): MfaCoordin
 				kind: record.kind,
 				purpose: tx.purpose,
 			};
-			const refused = (reason: MfaRefusalReason, attemptsRemaining: number): MfaVerifyOutcome => ({
+			const refused = (
+				reason: MfaRefusalReason,
+				attemptsRemaining: number,
+				concerns: RefusalConcerns = {},
+			): MfaVerifyOutcome => ({
 				outcome: "refused",
 				reason,
 				attemptsRemaining,
+				...concerns,
 				...about,
 			});
 			const unreadable = (cause: unknown): MfaFactorUnreadable => ({
@@ -656,7 +670,7 @@ export function createMfaCoordinator(options: MfaCoordinatorOptions): MfaCoordin
 						/** What the verification adds: the factor's values, as it declares them. */
 						readonly added: readonly string[];
 				  }
-				| { readonly reason: MfaRefusalReason }
+				| ({ readonly reason: MfaRefusalReason } & RefusalConcerns)
 				| MfaFactorUnreadable
 			> => {
 				if ("outcome" in opened) return opened;
@@ -680,7 +694,13 @@ export function createMfaCoordinator(options: MfaCoordinatorOptions): MfaCoordin
 				} catch (cause) {
 					return unreadable(cause);
 				}
-				if (!result.ok) return { reason: result.reason };
+				if (!result.ok) {
+					if (result.factorId === undefined) return { reason: result.reason };
+					const concerned = all.find((candidate) => candidate.id === result.factorId);
+					return concerned === undefined
+						? { reason: result.reason, factorIdDropped: true }
+						: { reason: result.reason, factorId: concerned.id };
+				}
 				const verified = all.find((candidate) => candidate.id === result.factorId);
 				if (verified === undefined) {
 					return unreadable(
@@ -704,7 +724,10 @@ export function createMfaCoordinator(options: MfaCoordinatorOptions): MfaCoordin
 
 			let checked = await check();
 			if ("outcome" in checked) return checked;
-			if ("reason" in checked) return refused(checked.reason, attemptsRemaining);
+			if ("reason" in checked) {
+				const { reason, ...concerns } = checked;
+				return refused(reason, attemptsRemaining, concerns);
+			}
 
 			// F3: under `required`, a factor that does not count completes no login
 			// for a subject left with no counting factor it can use.
@@ -771,7 +794,10 @@ export function createMfaCoordinator(options: MfaCoordinatorOptions): MfaCoordin
 				if ("outcome" in opened) return opened;
 				checked = await check();
 				if ("outcome" in checked) return checked;
-				if ("reason" in checked) return refused(checked.reason, 0);
+				if ("reason" in checked) {
+					const { reason, ...concerns } = checked;
+					return refused(reason, 0, concerns);
+				}
 			}
 
 			// D12: a counting factor verified for a login's `User` that does not

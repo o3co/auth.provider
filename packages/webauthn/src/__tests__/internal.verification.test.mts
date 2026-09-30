@@ -62,14 +62,20 @@ const mockVerifyAuthentication = vi.mocked(verifyAuthenticationResponse);
 // Shared test stubs
 // ---------------------------------------------------------------------------
 
-/** Minimal RegistrationResponseJSON stub — the wrapped function receives this but
- *  passes it straight to SimpleWebAuthn. Its shape doesn't matter for unit tests
- *  since SimpleWebAuthn is mocked. */
+/** Minimal RegistrationResponseJSON stub — the wrapped function passes it to SimpleWebAuthn,
+ *  mocked here, and reads its client data's top origin; that is a same-origin browser's. */
 const STUB_REGISTRATION_RESPONSE: RegistrationResponseJSON = {
 	id: "dGVzdC1jcmVkZW50aWFsLWlk",
 	rawId: "dGVzdC1jcmVkZW50aWFsLWlk",
 	response: {
-		clientDataJSON: "stub",
+		clientDataJSON: Buffer.from(
+			JSON.stringify({
+				type: "webauthn.create",
+				challenge: "some-challenge",
+				origin: "https://example.com",
+				crossOrigin: false,
+			}),
+		).toString("base64url"),
 		attestationObject: "stub",
 	},
 	clientExtensionResults: {},

@@ -78,6 +78,14 @@ describe("the MfaFactor contract", () => {
 		expect(true).toBe(true);
 	});
 
+	it("lets a refusal name, optionally, the factor it concerns", () => {
+		expectTypeOf<Extract<MfaVerification, { ok: false }>["factorId"]>().toEqualTypeOf<
+			string | undefined
+		>();
+		const refusal: MfaVerification = { ok: false, reason: "invalid" };
+		expect(refusal.ok).toBe(false);
+	});
+
 	it("lets a factor opt in to a reusable challenge, and offers no single-use flag", () => {
 		// Fail closed: a contributed WebAuthn-like factor that forgets the flag
 		// gets a challenge that answers one verification. The email factor opts

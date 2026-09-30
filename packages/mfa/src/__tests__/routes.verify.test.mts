@@ -19,8 +19,8 @@
  * composed application, over a seeded TOTP factor: a TOTP login end to end,
  * RFC 6238's rules on the codes it accepts, the transaction's attempts, the
  * binding, the guards every POST sits behind, and what the routes log and
- * audit. See ADR 2026-09-25-multi-factor-authentication, F1, F6, D21, D27
- * and D28.
+ * audit — a refusal's factor id included, over a factor that names one. See
+ * ADR 2026-09-25-multi-factor-authentication, F1, F6, D21, D27 and D28.
  */
 
 import {
@@ -28,14 +28,18 @@ import {
 	createMemoryMfaFactorStore,
 	createMemoryMfaTransactionStore,
 	createMemoryRateLimiter,
+	type MfaFactor,
+	type MfaFactorRecord,
 	type RateLimiter,
 	type UserSessionStore,
 } from "@o3co/auth-provider-core";
+import { createTestMfaFactor } from "@o3co/auth-provider-core/testing";
 import request from "supertest";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { encodeBase32 } from "#/totp/base32.mjs";
 import {
 	ALICE,
+	BOB,
 	boot,
 	configFor,
 	disposeAll,
@@ -45,6 +49,7 @@ import {
 } from "./moduleHarness.mjs";
 import {
 	beginLogin,
+	contributing,
 	csrfOf,
 	freezeClock,
 	loggedText,
@@ -502,5 +507,111 @@ describe("what the routes log", () => {
 			expect(text).not.toContain(secretText);
 		}
 		expect(events(logger, "error")).toEqual([]);
+	});
+});
+
+describe("a refusal that names the factor it concerns: the clone event", () => {
+	/** What a test seeds beside the named factor: bob's factor of the kind, and alice's TOTP factor. */
+	interface Seeded {
+		readonly bobs: MfaFactorRecord;
+		readonly totp: MfaFactorRecord;
+	}
+
+	/** A factor of kind `test` that refuses every proof as a sign count that did not increase, naming what `names` answers. */
+	const naming = (names: () => unknown): MfaFactor => ({
+		...createTestMfaFactor({ kind: "test" }),
+		verify: async () => ({
+			ok: false,
+			reason: "sign_count_regression",
+			factorId: names() as string,
+		}),
+	});
+
+	it("audits the record id of the factor the refusal names, one of the subject's of its kind, not the one the request named", async () => {
+		const factorStore = createMemoryMfaFactorStore();
+		const named = await seedFactor(factorStore, "test", { secret: "a" });
+		const other = await seedFactor(factorStore, "test", { secret: "b" });
+		const audit = recordingAuditSink();
+		const { app } = await boot({
+			config: configFor("required"),
+			factorStore,
+			auditSink: audit,
+			extraModules: [contributing(naming(() => other.id))],
+		});
+		const { agent, transaction } = await beginLogin(app);
+
+		const res = await verify(agent, transaction, named.id, "a");
+
+		expect(res.status).toBe(401);
+		expect(res.body).toEqual(refused(4));
+		expect(audit.of("mfa.verify.failure")).toEqual([
+			expect.objectContaining({
+				subject: ALICE.id,
+				details: {
+					kind: "test",
+					purpose: "login",
+					reason: "sign_count_regression",
+					factorId: other.id,
+				},
+			}),
+		]);
+	});
+
+	/**
+	 * A verification naming alice's `test` factor, refused by a factor that names what `names`
+	 * picks among what was seeded: the answer, the audit, the logger, and the value named.
+	 */
+	async function seededRefusal(names: (seeded: Seeded) => unknown) {
+		const factorStore = createMemoryMfaFactorStore();
+		const named = await seedFactor(factorStore, "test", { secret: "a" });
+		const seeded: Seeded = {
+			bobs: await seedFactor(factorStore, "test", { secret: "b" }, BOB.id),
+			totp: (await seedTotp(factorStore)).record,
+		};
+		const audit = recordingAuditSink();
+		const { app, logger } = await boot({
+			config: configFor("required"),
+			factorStore,
+			auditSink: audit,
+			extraModules: [contributing(naming(() => names(seeded)))],
+		});
+		const { agent, transaction } = await beginLogin(app);
+		const res = await verify(agent, transaction, named.id, "a");
+		return { res, audit, logger, dropped: names(seeded) };
+	}
+
+	it.each<[string, (seeded: Seeded) => unknown]>([
+		["another subject's factor of its kind", ({ bobs }) => bobs.id],
+		["a factor of the subject's of another kind", ({ totp }) => totp.id],
+		["a credential id, not a record id", () => "Y3JlZC1h"],
+	])(
+		"audits the refusal without a factor id when the factor names %s, and warns once naming the kind alone",
+		async (_what, names) => {
+			const { res, audit, logger, dropped } = await seededRefusal(names);
+
+			expect(res.status).toBe(401);
+			expect(audit.of("mfa.verify.failure")).toEqual([
+				expect.objectContaining({
+					details: { kind: "test", purpose: "login", reason: "sign_count_regression" },
+				}),
+			]);
+			const warned = logger.warn.mock.calls.filter(
+				([, event]) => event === "mfa_refusal_factor_id_dropped",
+			);
+			expect(warned).toEqual([[{ kind: "test" }, "mfa_refusal_factor_id_dropped"]]);
+			expect(loggedText(logger)).not.toContain(String(dropped));
+		},
+	);
+
+	it("audits the refusal without a factor id, and warns of nothing, when the factor names none", async () => {
+		const { res, audit, logger } = await seededRefusal(() => undefined);
+
+		expect(res.status).toBe(401);
+		expect(audit.of("mfa.verify.failure")).toEqual([
+			expect.objectContaining({
+				details: { kind: "test", purpose: "login", reason: "sign_count_regression" },
+			}),
+		]);
+		expect(events(logger, "warn")).not.toContain("mfa_refusal_factor_id_dropped");
 	});
 });

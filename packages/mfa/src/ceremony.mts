@@ -153,6 +153,10 @@ export type MfaVerifyOutcome =
 			readonly outcome: "refused";
 			readonly reason: MfaRefusalReason;
 			readonly attemptsRemaining: number;
+			/** The subject's factor the refusal concerns, as the factor named it (a clone's). */
+			readonly factorId?: string;
+			/** The factor named an id that is none of the subject's factors of this kind: left out. */
+			readonly factorIdDropped?: true;
 	  } & MfaCeremonySubject)
 	/** The proof was right, and another verification consumed the transaction first. */
 	| { readonly outcome: "spent" }
