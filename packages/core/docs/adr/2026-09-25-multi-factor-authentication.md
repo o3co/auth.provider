@@ -63,7 +63,7 @@
 - **Step-up**: adding a second factor to an existing, live session without repeating the primary.
 - **Re-authentication**: a new session — primary and second factor again — as `max_age` and `prompt=login` ask.
 - **Baseline**: the deployment's own requirement (`mfa.mode`), as opposed to one a relying party asks for with `acr_values`.
-- **Recent MFA**: a second factor verified in this session within `mfa.manage.maxAgeSeconds`.
+- **Recent MFA**: a second factor verified in this session within `mfa.manage.maxAgeSeconds`. *(2026-09-30: for a subject with no counting factor, a primary that recent instead — D16's alternative; its one reading is the design vocabulary's row "Recent MFA", `isRecentMfa`.)*
 - **The flip**: the release in which MFA becomes on by default (§8, PR 22).
 
 ---

@@ -523,7 +523,9 @@ step-up first — the MFA module does, under `mfa.mode` `optional` and
 `required` alike, unless a second factor was verified in the session within
 `mfa.manage.maxAgeSeconds`; for an account that holds no counting factor it
 asks for a sign-in that recent instead, and answers an older one
-`401 login_required`;
+`401 login_required` (under `required`, only for a session that already
+meets the baseline: a password session without a second factor is stepped up
+first, as every consumer steps it up);
 `409 identity_conflict` when the identity is already another account's (the
 Store is not consulted), `403 link_refused` / `409 identity_conflict` when
 the Store says so, `503 temporarily_unavailable` when the session store, the
@@ -535,6 +537,16 @@ The link is bound to the session that started it — recorded in the
 transaction — so a `form_post` federation (Apple) links the same way as a
 `query` one, and a callback presented by a different authenticated session
 is `401 login_required`.
+Recent MFA bounds the start, not the write: the callback writes the identity
+up to the federation transaction's lifetime (10 minutes) after the start was
+admitted. Hosts' clocks must agree within `DEFAULT_CLOCK_SKEW_MS` (5
+minutes): a session's `mfaAt` carries the clock of the replica that recorded
+it, so a replica whose clock runs ahead stretches recent MFA by its lead.
+Until the MFA page's step-up exists (`POST /session/mfa/step-up` answers
+`404` in this release), a user who holds a counting factor can link an
+identity or register a passkey only within `mfa.manage.maxAgeSeconds` of a
+login's second factor; later the start answers `403 step_up_required` and the
+user signs in again. It fails closed.
 Successes and refusals are audited (`federation.identity.linked`,
 `federation.identity.link_refused`, `subject` = the account,
 `details.reason` on a refusal).
