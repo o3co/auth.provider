@@ -14,6 +14,7 @@
  * limitations under the License.
  */
 import { describe, expect, it } from "vitest";
+import { DEFAULT_CLOCK_SKEW_MS } from "../../jwt/verify.mjs";
 import { type SessionFamilyIndex, type SupportsSessionEnd, supportsSessionEnd } from "../types.mjs";
 
 export type SessionFamilyIndexFactory = () => Promise<SessionFamilyIndex>;
@@ -230,15 +231,17 @@ export function runSessionEndContract(
 			expect(await idx.addFamilyIdUnlessEnded("sid-1", "fam-B", expiresAt)).toBe("ended");
 		});
 
-		it("the mark lapses at expiresAt: after it, an add under the sid is added", async () => {
-			// Dated from, and waited out on, the store's own clock (see
-			// `ExpiryClock`). The later add stands for a session that reuses the
-			// sid, so it carries an expiry of its own.
+		it("an end marks the session even past expiresAt, and the mark lapses once the clock-skew allowance after it has passed", async () => {
+			// The session's life is placed so that the allowance after it ends a
+			// second ahead on the store's clock (see `ExpiryClock`). The adds stand
+			// for a session that reuses the sid, so they carry an expiry of their
+			// own.
 			const idx = await capable();
-			const expiresAt = await aheadOf(expiry);
+			const markLapses = await aheadOf(expiry);
+			const expiresAt = new Date(markLapses.getTime() - DEFAULT_CLOCK_SKEW_MS);
 			await idx.endSession("sid-1", expiresAt);
-			expect(await idx.addFamilyIdUnlessEnded("sid-1", "fam-A", expiresAt)).toBe("ended");
-			await expiry.passed(expiresAt);
+			expect(await idx.addFamilyIdUnlessEnded("sid-1", "fam-A", FUTURE())).toBe("ended");
+			await expiry.passed(markLapses);
 			expect(await idx.addFamilyIdUnlessEnded("sid-1", "fam-B", FUTURE())).toBe("added");
 		});
 

@@ -15,12 +15,13 @@
  */
 
 import {
+	DEFAULT_CLOCK_SKEW_MS,
 	type SessionFamilyIndex,
 	type SupportsSessionEnd,
 	supportsSessionEnd,
 } from "@o3co/auth-provider-core";
 import Redis from "ioredis";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import type { SessionFamilyIndexClient } from "../src/clients.mjs";
 import { makeIoredisClients } from "../src/ioredis.mjs";
 import { createRedisSessionFamilyIndex } from "../src/sessionFamilyIndex.mjs";
@@ -28,7 +29,13 @@ import {
 	runSessionEndContract,
 	runSessionFamilyIndexContract,
 } from "./sessionFamilyIndex.contract.mjs";
-import { serverDeadlines, type TestRedis, testRedis } from "./support/redis.mjs";
+import {
+	aheadOfServer,
+	serverDeadlines,
+	serverPasses,
+	type TestRedis,
+	testRedis,
+} from "./support/redis.mjs";
 
 let at: TestRedis;
 let raw: Redis;
@@ -205,13 +212,15 @@ describe("SessionFamilyIndex concurrency", () => {
 // ---------------------------------------------------------------------------
 
 describe("SessionFamilyIndex — the ended mark's key", () => {
-	it("is a key of its own under endedKeyPrefix, expiring at expiresAt, beside the family set", async () => {
+	it("is a key of its own under endedKeyPrefix, expiring at expiresAt plus the clock-skew allowance, beside the family set", async () => {
 		const idx = capable(makeIoredisClients(raw).sessionFamilyIndexClient, "t16:layout:");
 		const expiresAt = new Date(Date.now() + 60_000);
 		await idx.addFamilyIdUnlessEnded("sid-1", "fam-A", expiresAt);
 		await idx.endSession("sid-1", expiresAt);
 		expect(await raw.type("t16:layout:fi-ended:sid-1")).toBe("string");
-		expect(await raw.pexpiretime("t16:layout:fi-ended:sid-1")).toBe(expiresAt.getTime());
+		expect(await raw.pexpiretime("t16:layout:fi-ended:sid-1")).toBe(
+			expiresAt.getTime() + DEFAULT_CLOCK_SKEW_MS,
+		);
 		expect(await raw.zrange("t16:layout:fi:sid-1", 0, -1)).toEqual(["fam-A"]);
 	});
 
@@ -223,5 +232,41 @@ describe("SessionFamilyIndex — the ended mark's key", () => {
 		await idx.removeBySid("sid-1");
 		expect(await raw.exists("t16:layout2:fi:sid-1")).toBe(0);
 		expect(await raw.exists("t16:layout2:fi-ended:sid-1")).toBe(1);
+	});
+
+	it("stands past expiresAt, written by an end that came after it, and lapses once the allowance has passed on the server", async () => {
+		const idx = capable(makeIoredisClients(raw).sessionFamilyIndexClient, "t16:lapse:");
+		const markLapses = await aheadOfServer(() => raw)();
+		const expiresAt = new Date(markLapses.getTime() - DEFAULT_CLOCK_SKEW_MS);
+		await idx.endSession("sid-1", expiresAt);
+		expect(await raw.exists("t16:lapse:fi-ended:sid-1")).toBe(1);
+		expect(await raw.pexpiretime("t16:lapse:fi-ended:sid-1")).toBe(markLapses.getTime());
+		await serverPasses(() => raw)(markLapses.getTime());
+		expect(await raw.exists("t16:lapse:fi-ended:sid-1")).toBe(0);
+	});
+});
+
+describe("SessionFamilyIndex — two hosts whose clocks disagree about expiresAt", () => {
+	it("an end on a host whose clock is past expiresAt still marks the session: an add on a host whose clock is before it answers ended", async () => {
+		// One index per host over its own connection; each host's clock is
+		// injected in turn. The server's clock is real, and the session's
+		// expiresAt a minute ahead of it.
+		const logoutHost = capable(makeIoredisClients(raw).sessionFamilyIndexClient, "t16:hosts:");
+		const grantConnection = new Redis(at);
+		const grantHost = capable(
+			makeIoredisClients(grantConnection).sessionFamilyIndexClient,
+			"t16:hosts:",
+		);
+		const expiresAt = new Date(Date.now() + 60_000);
+		try {
+			vi.useFakeTimers({ toFake: ["Date"] });
+			vi.setSystemTime(expiresAt.getTime() + 1_000);
+			expect(await logoutHost.endSession("sid-1", expiresAt)).toEqual([]);
+			vi.setSystemTime(expiresAt.getTime() - 1_000);
+			expect(await grantHost.addFamilyIdUnlessEnded("sid-1", "fam-A", expiresAt)).toBe("ended");
+		} finally {
+			vi.useRealTimers();
+			grantConnection.disconnect();
+		}
 	});
 });

@@ -20,8 +20,8 @@
 // contract suite and the concurrency cases against Redis are in
 // `redis.sessionFamilyIndex.test.mts`.
 
-import { supportsSessionEnd } from "@o3co/auth-provider-core";
-import { describe, expect, it } from "vitest";
+import { DEFAULT_CLOCK_SKEW_MS, supportsSessionEnd } from "@o3co/auth-provider-core";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type { SessionFamilyIndexClient, SessionSidSortedSetMultiClient } from "../src/clients.mjs";
 import {
 	createRedisSessionFamilyIndex,
@@ -29,7 +29,9 @@ import {
 } from "../src/sessionFamilyIndex.mjs";
 
 /** A client that logs when each call starts and when its reply is in. */
-const recordingClient = (options: { readonly marked?: boolean } = {}) => {
+const recordingClient = (
+	options: { readonly marked?: boolean; readonly beforeMarkRead?: () => void } = {},
+) => {
 	const log: string[] = [];
 	const reply = async <T,>(name: string, value: T): Promise<T> => {
 		log.push(`${name} sent`);
@@ -52,7 +54,10 @@ const recordingClient = (options: { readonly marked?: boolean } = {}) => {
 		zRange: (key) => reply(`zRange ${key}`, []),
 		zRem: () => reply("zRem", 1),
 		writeEndedMark: (key, msTimestamp) => reply(`writeEndedMark ${key} ${msTimestamp}`, undefined),
-		hasEndedMark: (key) => reply(`hasEndedMark ${key}`, options.marked ?? false),
+		hasEndedMark: (key) => {
+			options.beforeMarkRead?.();
+			return reply(`hasEndedMark ${key}`, options.marked ?? false);
+		},
 	};
 	return { client, log };
 };
@@ -120,13 +125,14 @@ describe("createRedisSessionFamilyIndex — the order of the two operations", ()
 		return { idx, log };
 	};
 
-	it("endSession writes the mark at expiresAt, and lists only once the write is in", async () => {
+	it("endSession writes the mark to last expiresAt plus the clock-skew allowance, and lists only once the write is in", async () => {
 		const { idx, log } = capable();
 		const expiresAt = FUTURE();
+		const until = expiresAt.getTime() + DEFAULT_CLOCK_SKEW_MS;
 		await idx.endSession("sid-1", expiresAt);
 		expect(log).toEqual([
-			`writeEndedMark t:fi-ended:sid-1 ${expiresAt.getTime()} sent`,
-			`writeEndedMark t:fi-ended:sid-1 ${expiresAt.getTime()} replied`,
+			`writeEndedMark t:fi-ended:sid-1 ${until} sent`,
+			`writeEndedMark t:fi-ended:sid-1 ${until} replied`,
 			"zRange t:fi:sid-1 sent",
 			"zRange t:fi:sid-1 replied",
 		]);
@@ -148,9 +154,19 @@ describe("createRedisSessionFamilyIndex — the order of the two operations", ()
 		expect(await idx.addFamilyIdUnlessEnded("sid-1", "fam-A", FUTURE())).toBe("added");
 	});
 
-	it("an end past expiresAt writes no mark, and still lists", async () => {
+	it("an end past expiresAt still writes the mark, to last the clock-skew allowance after it", async () => {
 		const { idx, log } = capable();
-		await idx.endSession("sid-1", new Date(Date.now() - 1));
+		const expiresAt = new Date(Date.now() - 1_000);
+		await idx.endSession("sid-1", expiresAt);
+		expect(log[0]).toBe(
+			`writeEndedMark t:fi-ended:sid-1 ${expiresAt.getTime() + DEFAULT_CLOCK_SKEW_MS} sent`,
+		);
+		expect(log[2]).toBe("zRange t:fi:sid-1 sent");
+	});
+
+	it("an end past expiresAt and the allowance after it writes no mark, and still lists", async () => {
+		const { idx, log } = capable();
+		await idx.endSession("sid-1", new Date(Date.now() - DEFAULT_CLOCK_SKEW_MS - 1_000));
 		expect(log).toEqual(["zRange t:fi:sid-1 sent", "zRange t:fi:sid-1 replied"]);
 	});
 
@@ -160,6 +176,31 @@ describe("createRedisSessionFamilyIndex — the order of the two operations", ()
 			"ended",
 		);
 		expect(log).toEqual([]);
+	});
+
+	describe("on a clock that passes expiresAt while the add waits on Redis", () => {
+		afterEach(() => {
+			vi.useRealTimers();
+		});
+
+		it("answers ended when the mark is gone by the time it is read", async () => {
+			// The add starts inside the session's life, and the clock passes
+			// expiresAt before the mark is read: an absent mark then says nothing.
+			vi.useFakeTimers({ toFake: ["Date"] });
+			const expiresAt = new Date(Date.now() + 60_000);
+			vi.setSystemTime(expiresAt.getTime() - 1);
+			const { client } = recordingClient({
+				marked: false,
+				beforeMarkRead: () => vi.setSystemTime(expiresAt.getTime() + 1),
+			});
+			const idx = createRedisSessionFamilyIndex({
+				client,
+				keyPrefix: "t:fi:",
+				endedKeyPrefix: "t:fi-ended:",
+			});
+			if (!supportsSessionEnd(idx)) throw new Error("the index does not claim SupportsSessionEnd");
+			expect(await idx.addFamilyIdUnlessEnded("sid-1", "fam-A", expiresAt)).toBe("ended");
+		});
 	});
 
 	it("an Invalid Date is refused by both before anything is sent", async () => {
@@ -173,6 +214,32 @@ describe("createRedisSessionFamilyIndex — the order of the two operations", ()
 });
 
 describe("redisSessionFamilyIndexBuilder — the ended mark", () => {
+	it("boots with the keyPrefix it always took, empty or short, over a plain sorted-set client", () => {
+		const { client } = recordingClient();
+		const { writeEndedMark: _write, hasEndedMark: _has, ...sortedSetOnly } = client;
+		for (const keyPrefix of ["", "ss:", "s", "ss:fi"]) {
+			const idx = redisSessionFamilyIndexBuilder(
+				{ client: sortedSetOnly, keyPrefix } as never,
+				{ lifecycle: undefined } as never,
+			);
+			expect(idx.kind).toBe("redis");
+			expect(supportsSessionEnd(idx)).toBe(false);
+		}
+	});
+
+	it("given a keyPrefix of its own and no endedKeyPrefix, has no capability rather than share the bundle's marks", async () => {
+		const { client, log } = recordingClient();
+		for (const keyPrefix of ["", "ss:", "app:fi:"]) {
+			const idx = redisSessionFamilyIndexBuilder(
+				{ client, keyPrefix } as never,
+				{ lifecycle: undefined } as never,
+			);
+			expect(supportsSessionEnd(idx)).toBe(false);
+			await idx.addFamilyId("sid-1", "fam-A", FUTURE());
+		}
+		expect(log.filter((line) => line.includes("EndedMark"))).toEqual([]);
+	});
+
 	it("keeps the mark under the bundle's prefix, ss:fi-ended:, by default", async () => {
 		const { client, log } = recordingClient();
 		const idx = redisSessionFamilyIndexBuilder(
@@ -182,7 +249,9 @@ describe("redisSessionFamilyIndexBuilder — the ended mark", () => {
 		if (!supportsSessionEnd(idx)) throw new Error("the index does not claim SupportsSessionEnd");
 		const expiresAt = FUTURE();
 		await idx.endSession("sid-1", expiresAt);
-		expect(log[0]).toBe(`writeEndedMark ss:fi-ended:sid-1 ${expiresAt.getTime()} sent`);
+		expect(log[0]).toBe(
+			`writeEndedMark ss:fi-ended:sid-1 ${expiresAt.getTime() + DEFAULT_CLOCK_SKEW_MS} sent`,
+		);
 		expect(log[2]).toBe("zRange ss:fi:sid-1 sent");
 	});
 
@@ -195,6 +264,8 @@ describe("redisSessionFamilyIndexBuilder — the ended mark", () => {
 		if (!supportsSessionEnd(idx)) throw new Error("the index does not claim SupportsSessionEnd");
 		const expiresAt = FUTURE();
 		await idx.endSession("sid-1", expiresAt);
-		expect(log[0]).toBe(`writeEndedMark x:fi-ended:sid-1 ${expiresAt.getTime()} sent`);
+		expect(log[0]).toBe(
+			`writeEndedMark x:fi-ended:sid-1 ${expiresAt.getTime() + DEFAULT_CLOCK_SKEW_MS} sent`,
+		);
 	});
 });
