@@ -18,14 +18,17 @@
  * The contract a second factor implements, and what the coordinator hands it
  * (ADR 2026-09-25-multi-factor-authentication).
  *
- * A factor never sees a key, a store or a transaction. The coordinator opens
- * the subject's records, seals and writes what the factor returns, keeps
- * per-ceremony state on the transaction, and digests codes that are compared
- * but never recovered ({@link MfaDigests}). So sealing stays in one place and a
- * factor package need not depend on the coordinator: a factor arrives as an
- * `mfaFactors` contribution keyed by its kind, read back through the synthetic
- * `mfaFactorResolver`.
+ * A factor never sees a key, a store, a transaction or the mail sender. The
+ * coordinator opens the subject's records, seals and writes what the factor
+ * returns, keeps per-ceremony state on the transaction, digests codes that
+ * are compared but never recovered ({@link MfaDigests}), and sends the code a
+ * factor asks to be mailed ({@link MfaFactorMail}). So sealing and sending
+ * stay in one place and a factor package need not depend on the coordinator:
+ * a factor arrives as an `mfaFactors` contribution keyed by its kind, read
+ * back through the synthetic `mfaFactorResolver`.
  */
+
+import type { MailPurpose } from "../mail/types.mjs";
 
 /**
  * A factor's own state, as the coordinator opened it from a record's `data`.
@@ -144,6 +147,33 @@ export interface MfaEnrollmentCompletionContext extends MfaEnrollmentContext {
 	readonly proof: unknown;
 }
 
+/**
+ * A code a challenge or an enrollment asks the coordinator to mail: its
+ * purpose and the code, never text. The coordinator resolves the recipient,
+ * the address on the account's user record at that moment, and the expiry;
+ * it keeps the state first and sends after, and a send that fails clears
+ * that state and is an outage, never "sent".
+ */
+export interface MfaFactorMail {
+	readonly purpose: MailPurpose;
+	readonly code: string;
+}
+
+/** What a challenge answers: the state the coordinator keeps, if any, the page's response, and a code to mail. */
+export interface MfaChallenge {
+	readonly state?: MfaFactorState;
+	/** What the page is answered: request options, where a code went. Never the code `mail` carries. */
+	readonly response: unknown;
+	readonly mail?: MfaFactorMail;
+}
+
+/** What the start of an enrollment answers; `response` and `mail` as {@link MfaChallenge}'s. */
+export interface MfaEnrollmentStart {
+	readonly state: MfaFactorState;
+	readonly response: unknown;
+	readonly mail?: MfaFactorMail;
+}
+
 /** What a verification answers. */
 export type MfaVerification =
 	| {
@@ -203,13 +233,9 @@ export interface MfaFactor {
 	 * fail-closed default, a verification takes it. See {@link MfaVerifyContext.state}.
 	 */
 	readonly reusableChallenge?: boolean;
-	/** Prepare a verification: send a code, answer WebAuthn request options. Absent for a factor that needs none. */
-	challenge?(
-		ctx: MfaChallengeContext,
-	): Promise<{ readonly state?: MfaFactorState; readonly response: unknown }>;
+	/** Prepare a verification: a code to mail, WebAuthn request options. Absent for a factor that needs none. */
+	challenge?(ctx: MfaChallengeContext): Promise<MfaChallenge>;
 	verify(ctx: MfaVerifyContext): Promise<MfaVerification>;
-	beginEnrollment(
-		ctx: MfaEnrollmentContext,
-	): Promise<{ readonly state: MfaFactorState; readonly response: unknown }>;
+	beginEnrollment(ctx: MfaEnrollmentContext): Promise<MfaEnrollmentStart>;
 	completeEnrollment(ctx: MfaEnrollmentCompletionContext): Promise<MfaEnrollmentCompletion>;
 }

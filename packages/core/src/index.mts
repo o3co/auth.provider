@@ -545,12 +545,19 @@ export {
 	lineSafeText,
 	loggableError,
 } from "./logging/loggableError.mjs";
-// Mail: the port MFA codes and notices leave through
-export type { MailMessage, MailSender } from "./mail/types.mjs";
+// Mail: the port a one-time code the provider issued leaves through
+export {
+	MAIL_PURPOSES,
+	type MailPurpose,
+	type MailSend,
+	type MailSender,
+	type MailSendResult,
+} from "./mail/types.mjs";
 // MFA — the second-factor contract (the manifest group below exports its
 // MfaFactor name)
 export type {
 	MfaCeremonyContext,
+	MfaChallenge,
 	MfaChallengeContext,
 	MfaDigestMatch,
 	MfaDigests,
@@ -558,7 +565,9 @@ export type {
 	MfaEnrollmentCompletion,
 	MfaEnrollmentCompletionContext,
 	MfaEnrollmentContext,
+	MfaEnrollmentStart,
 	MfaFactorData,
+	MfaFactorMail,
 	MfaFactorState,
 	MfaKeyedDigest,
 	MfaVerification,
