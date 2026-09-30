@@ -722,12 +722,12 @@ export function mfaFactorContract(input: MfaFactorContractInput): readonly Contr
 			},
 		},
 		{
-			name: "no answer carries the account's address, whatever its case or escaping: the pending enrollment's state and response, the enrolled data and label, a challenge's state and response, and a verification's next data",
+			name: "nothing kept carries the account's address, whatever its case or escaping: the pending enrollment's state, the enrolled data and label, a challenge's state, and a verification's next data",
 			run: async () => {
 				const factor = input.build();
 				const begun = await begin(factor);
+				// A response goes to the account's owner alone, and may name the account as the Store does.
 				carriesNoAddress(begun.start.state, input.user, "the pending enrollment's state");
-				carriesNoAddress(begun.start.response, input.user, "the pending enrollment's response");
 				const done = await complete(
 					factor,
 					begun,
@@ -748,7 +748,6 @@ export function mfaFactorContract(input: MfaFactorContractInput): readonly Contr
 				};
 				const { context: later, sent } = await challenge(factor, enrolled);
 				carriesNoAddress(sent?.state, input.user, "the challenge's state");
-				carriesNoAddress(sent?.response, input.user, "the challenge's response");
 				const verdict = await factor.verify({
 					...later,
 					factor: enrolled,

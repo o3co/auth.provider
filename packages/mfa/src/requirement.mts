@@ -29,7 +29,10 @@
  * `required`, whatever the grade, and met under `optional`. A session a cookie,
  * code or link carries is held, under `required`, to its record's baseline,
  * except that an action graded `grants_nothing` is met on any live record;
- * under `optional` it is met. An action graded `credential_change` adds a way
+ * under `optional` it is met. The baseline steps a password session without a
+ * second factor up only when its subject may hold a counting factor to step
+ * up with; without one it sends the session to log in, where the login's
+ * first binding is made. An action graded `credential_change` adds a way
  * into the account and is held to recent MFA (`isRecentMfa`) over a primary the
  * baseline knows — under `required` on top of the baseline, so it is never
  * looser than `use`: the subject's factor records say whether it may hold a
@@ -39,9 +42,11 @@
  * For a subject that holds none, the action is a first binding (D12, D24):
  * the view's recorded facts are read — none recorded sends the session to
  * log in, and a witness `enrolled` or malformed is recorded and thrown —
- * then a recent primary, then the one gate, whose proof is the one given in
- * that session and still standing (`MfaTransactionStore.sessionEmailProofAt`).
- * A proof nobody can give steps the session up and never admits it.
+ * then a recent primary (`authTime`; a second factor does not stand in for
+ * it), then the one gate, whose proof is the one given in that session and
+ * still standing (`MfaTransactionStore.sessionEmailProofAt`, read no older
+ * than `mfa.manage.maxAgeSeconds` and the clock skew). A proof nobody can
+ * give steps the session up and never admits it.
  *
  * `admitPrimary` interrupts a password login for a second factor when the subject
  * has any factor record: a record it cannot use is never "none", and a `list`
@@ -293,10 +298,8 @@ export function createMfaRequirement(options: MfaRequirementOptions): SessionReq
 		return records;
 	};
 
-	/** Whether a record the subject holds may count (`mayCount`, admission's presumption). */
-	const counts = (record: MfaFactorRecord): boolean => mayCount(factors, record);
 	const mayHoldCountingFactor = async (subject: string): Promise<boolean> =>
-		(await listRecords(subject)).some(counts);
+		(await listRecords(subject)).some((record) => mayCount(factors, record));
 
 	/**
 	 * A witness that says the subject enrolled, or says nothing readable,
@@ -362,7 +365,9 @@ export function createMfaRequirement(options: MfaRequirementOptions): SessionReq
 
 	/**
 	 * Whether the account-email proof given in the session `sid` of `subject`
-	 * stands at `nowMs`; an answer the port does not promise throws.
+	 * stands at `nowMs`: one given longer ago than the window and the clock
+	 * skew is none, whatever the store answered; an answer the port does not
+	 * promise throws.
 	 */
 	const provedInSession = async (subject: string, sid: string, nowMs: number): Promise<boolean> => {
 		const proved = readSessionEmailProof(await sessionEmailProofAt(subject, sid, nowMs), nowMs);
@@ -371,7 +376,9 @@ export function createMfaRequirement(options: MfaRequirementOptions): SessionReq
 				"MfaTransactionStore.sessionEmailProofAt answered something that is not a time or null",
 			);
 		}
-		return proved !== null;
+		return (
+			proved !== null && proved >= nowMs - recentMfaMaxAgeSeconds * 1_000 - DEFAULT_CLOCK_SKEW_MS
+		);
 	};
 
 	/** Where a second factor would meet the rule: a step-up, `unmet` when no factor could finish one, a new login when none could be recorded. */
@@ -380,12 +387,22 @@ export function createMfaRequirement(options: MfaRequirementOptions): SessionReq
 		return stepUpRecordable ? STEP_UP : REAUTHENTICATE;
 	};
 
-	/** The baseline over a record: a federation, or a second factor after a password. */
-	const baseline = (recorded: SessionAuthentication | undefined): RequirementVerdict => {
+	/**
+	 * The baseline over `session`'s record: a federation, or a second factor
+	 * after a password. A password session without one is stepped up only
+	 * when its subject may hold a counting factor to step up with; otherwise
+	 * it logs in again, and the login binds its first factor.
+	 */
+	const baseline = async (
+		session: SessionView,
+		recorded: SessionAuthentication | undefined,
+	): Promise<RequirementVerdict> => {
 		if (recorded?.primary === FEDERATED_AMR) return MET;
 		if (recorded?.primary !== PASSWORD_AMR) return REAUTHENTICATE;
 		if (recorded.mfaAt !== undefined) return MET;
-		return stepUp();
+		const verdict = stepUp();
+		if (verdict.outcome !== "step_up") return verdict;
+		return (await mayHoldCountingFactor(session.sub)) ? verdict : REAUTHENTICATE;
 	};
 
 	/**
@@ -396,7 +413,6 @@ export function createMfaRequirement(options: MfaRequirementOptions): SessionReq
 	 */
 	const firstBindingIn = async (
 		session: SessionView,
-		mfaAt: Date | undefined,
 		action: AdmissionAction,
 		nowMs: number,
 	): Promise<RequirementVerdict> => {
@@ -406,7 +422,7 @@ export function createMfaRequirement(options: MfaRequirementOptions): SessionReq
 			inconsistent(session.sub, facts.witness, { purpose: "session", action: action.name });
 		}
 		const recentPrimary = isRecentMfa(
-			{ authTime: session.authTime, mfaAt },
+			{ authTime: session.authTime, mfaAt: undefined },
 			{ holdsCountingFactor: false },
 			recentMfaMaxAgeSeconds,
 			nowMs,
@@ -432,7 +448,7 @@ export function createMfaRequirement(options: MfaRequirementOptions): SessionReq
 			return REAUTHENTICATE;
 		}
 		if (!(await mayHoldCountingFactor(session.sub))) {
-			return firstBindingIn(session, recorded.mfaAt, action, nowMs);
+			return firstBindingIn(session, action, nowMs);
 		}
 		const recentMfa = isRecentMfa(
 			{ authTime: session.authTime, mfaAt: recorded.mfaAt },
@@ -458,11 +474,11 @@ export function createMfaRequirement(options: MfaRequirementOptions): SessionReq
 			case "live":
 				return MET;
 			case "baseline":
-				return baseline(recorded);
+				return baseline(session, recorded);
 			case "recent":
 				return recent(session, recorded, action, now.getTime());
 			case "baseline+recent": {
-				const verdict = baseline(recorded);
+				const verdict = await baseline(session, recorded);
 				return verdict.outcome === "met"
 					? recent(session, recorded, action, now.getTime())
 					: verdict;
@@ -518,7 +534,7 @@ export function createMfaRequirement(options: MfaRequirementOptions): SessionReq
 		admitPrimary: async (primary) => {
 			if (primary.recorded.authentication.primary !== PASSWORD_AMR) return "establish";
 			const records = await listRecords(primary.subject);
-			if (!records.some(counts)) checkWitness(primary);
+			if (!records.some((record) => mayCount(factors, record))) checkWitness(primary);
 			if (records.length > 0) return interrupt({ error: "mfa_required" });
 			if (mode === "optional") return "establish";
 			const emailProof = await proofAsked(primary);

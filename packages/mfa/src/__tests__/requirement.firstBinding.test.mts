@@ -30,9 +30,9 @@
 import {
 	type AuditEvent,
 	admitSession,
-	DEFAULT_CLOCK_SKEW_MS,
 	cookieClaim,
 	createMemoryMfaTransactionStore,
+	DEFAULT_CLOCK_SKEW_MS,
 	type Logger,
 	type MailAddressFact,
 	type MfaEnrollmentWitness,

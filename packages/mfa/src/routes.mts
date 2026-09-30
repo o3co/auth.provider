@@ -34,7 +34,9 @@
  *   proof; its `User` is the one its cookie holds (`cookieSessionUser`).
  *   The step-up asks the requirement, as `mfa.manage`, what a first binding
  *   in the session is answered, and opens the proof only where it would not
- *   be refused outright.
+ *   be refused outright; another requirement's step-up is answered as its
+ *   own. A binding in a session that the subject's factors no longer allow
+ *   is `409`: the session stands.
  * - Each outage is answered `503` and logged once, at error. A mail the
  *   sender refused at its limit is `429`; a factor whose recorded address no
  *   longer matches the login's is `403`, recorded as
@@ -116,6 +118,10 @@ const FACTOR_LIMIT = errorEnvelope(
 	"The subject holds as many second factors as it may",
 );
 const NOT_FOUND = errorEnvelope("not_found", "Not found");
+const ENROLLMENT_CONFLICT = errorEnvelope(
+	"mfa_enrollment_conflict",
+	"The account's second factors changed while enrolling: start again",
+);
 
 /** What adding a factor from a session is admitted as: it adds a way into the account. */
 const MFA_MANAGE: MfaAdmissionAction = "mfa.manage";
@@ -161,15 +167,22 @@ const headerOf = (req: Request, name: string): string | undefined => {
 };
 
 /**
- * The transaction id a POST names: its body's `transaction_id`, or the
- * header's. Two that disagree name none.
+ * The transaction a POST names: its body's `transaction_id`, or the
+ * header's — `undefined` for none — or `"disagree"` when the two name
+ * different ones.
  */
-const postedTransactionId = (req: Request): string | undefined => {
+const postedTransaction = (req: Request): { readonly id: string | undefined } | "disagree" => {
 	const posted: unknown = (req.body as { transaction_id?: unknown } | undefined)?.transaction_id;
 	const body = typeof posted === "string" && posted !== "" ? posted : undefined;
 	const header = headerOf(req, TRANSACTION_HEADER);
-	if (body !== undefined && header !== undefined && body !== header) return undefined;
-	return body ?? header;
+	if (body !== undefined && header !== undefined && body !== header) return "disagree";
+	return { id: body ?? header };
+};
+
+/** The transaction id a POST names; two that disagree name none, which no transaction matches. */
+const postedTransactionId = (req: Request): string | undefined => {
+	const posted = postedTransaction(req);
+	return posted === "disagree" ? undefined : posted.id;
 };
 
 /** The ceremony call a request makes, naming `transactionId`. */
@@ -213,6 +226,16 @@ export function createMfaRouter(options: MfaRoutesOptions): Router {
 		// express-session's `req.session`, read without its type package.
 		admitSession(admission, { claim: cookieClaim(req as unknown as CookieCarrier), action });
 
+	/**
+	 * A binding the subject's records no longer allow: a login starts again
+	 * (`401 login_required`); a session, which stands, is told the factors
+	 * changed (`409 mfa_enrollment_conflict`).
+	 */
+	const answerClosed = (res: Response, purpose: string): void => {
+		if (purpose === "enroll") res.status(409).json(ENROLLMENT_CONFLICT);
+		else res.status(401).json(LOGIN_REQUIRED);
+	};
+
 	/** An admission that is no session to go on: an outage `503`, anything else `401`. */
 	const answerNoSession = (res: Response, admitted: Admission): void => {
 		if (admitted.outcome === "unavailable") {
@@ -225,11 +248,20 @@ export function createMfaRouter(options: MfaRoutesOptions): Router {
 		res.status(401).json(LOGIN_REQUIRED);
 	};
 
+	/** A requirement's step-up: `403 step_up_required`, naming the requirement and its page. */
+	const answerStepUp = (res: Response, admitted: Extract<Admission, { outcome: "step_up" }>) => {
+		res.status(403).json({
+			error: "step_up_required",
+			error_description: "This action requires a step-up first",
+			requirement: admitted.requirement,
+			page: admitted.page.href,
+		});
+	};
+
 	/**
 	 * The signed-in session the request's cookie carries, admitted for
 	 * `action`, with the `User` its cookie holds; `undefined` once the refusal
-	 * is answered — a step-up `403 step_up_required`, naming the requirement
-	 * and its page.
+	 * is answered — a requirement's step-up among them.
 	 */
 	const sessionFor = async (
 		req: Request,
@@ -238,12 +270,7 @@ export function createMfaRouter(options: MfaRoutesOptions): Router {
 	): Promise<MfaCeremonySession | undefined> => {
 		const admitted = await admitCookie(req, action);
 		if (admitted.outcome === "step_up") {
-			res.status(403).json({
-				error: "step_up_required",
-				error_description: "Enrolling a second factor requires a step-up first",
-				requirement: admitted.requirement,
-				page: admitted.page.href,
-			});
+			answerStepUp(res, admitted);
 			return undefined;
 		}
 		const session = admitted.outcome === "admitted" ? admitted.session : null;
@@ -603,7 +630,12 @@ export function createMfaRouter(options: MfaRoutesOptions): Router {
 
 	router
 		.post("/enrollment", async (req: Request, res: Response) => {
-			const transactionId = postedTransactionId(req);
+			const posted = postedTransaction(req);
+			if (posted === "disagree") {
+				res.status(400).json(UNKNOWN_TRANSACTION);
+				return;
+			}
+			const transactionId = posted.id;
 			// With no transaction named, the enrollment is the signed-in session's own.
 			let call: MfaCeremonyCall | undefined;
 			if (transactionId === undefined) {
@@ -631,7 +663,7 @@ export function createMfaRouter(options: MfaRoutesOptions): Router {
 					res.status(400).json(UNKNOWN_KIND);
 					return;
 				case "first_binding_closed":
-					res.status(401).json(LOGIN_REQUIRED);
+					answerClosed(res, outcome.purpose);
 					return;
 				case "factor_limit":
 					res.status(409).json(FACTOR_LIMIT);
@@ -694,7 +726,7 @@ export function createMfaRouter(options: MfaRoutesOptions): Router {
 					res.status(400).json(INVALID_LABEL);
 					return;
 				case "first_binding_closed":
-					res.status(401).json(LOGIN_REQUIRED);
+					answerClosed(res, outcome.purpose);
 					return;
 				case "factor_limit":
 					res.status(409).json(FACTOR_LIMIT);
@@ -715,7 +747,7 @@ export function createMfaRouter(options: MfaRoutesOptions): Router {
 						res.status(503).json(MFA_UNAVAILABLE);
 						return;
 					}
-					res.status(401).json(LOGIN_REQUIRED);
+					answerClosed(res, outcome.purpose);
 					return;
 				case "first_binding_unchecked":
 					answerOutage("enrollment", res, outcome.listing);
@@ -793,20 +825,27 @@ export function createMfaRouter(options: MfaRoutesOptions): Router {
 			}
 		})
 		.post("/step-up", async (req: Request, res: Response) => {
+			const posted = postedTransaction(req);
+			if (posted === "disagree") {
+				res.status(400).json(UNKNOWN_TRANSACTION);
+				return;
+			}
 			// The trip is admitted as the remediation: a live session, whatever it lacks.
 			const session = await sessionFor(req, res, stepUp);
 			if (session === undefined) return;
 			// What a first binding in this session is answered: an outage, a new
-			// login, or one a proof can meet — or none is owed.
+			// login, another requirement's step-up — answered as its own — or one
+			// this requirement's proof can meet, or none owed.
 			const judged = await admitCookie(req, MFA_MANAGE);
+			if (judged.outcome === "step_up" && judged.requirement !== MFA_REQUIREMENT_NAME) {
+				answerStepUp(res, judged);
+				return;
+			}
 			if (judged.outcome !== "admitted" && judged.outcome !== "step_up") {
 				answerNoSession(res, judged);
 				return;
 			}
-			const outcome = await coordinator.stepUp({
-				...callOf(req, postedTransactionId(req)),
-				session,
-			});
+			const outcome = await coordinator.stepUp({ ...callOf(req, posted.id), session });
 			switch (outcome.outcome) {
 				case "unknown_transaction":
 					res.status(400).json(UNKNOWN_TRANSACTION);

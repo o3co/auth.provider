@@ -30,7 +30,7 @@
  *   spends nothing. An `enroll` transaction verifies the account-email proof
  *   alone.
  * - The step-up of a subject with no record that may count opens, or uses,
- *   an `enroll` transaction owing the account-email proof; a verified proof
+ *   an `enroll` transaction owing the account-email proof (`stepUp.mts`); a verified proof
  *   on one is recorded for its session alone, standing
  *   `mfa.manage.maxAgeSeconds`.
  * - A verification reserves its attempt before the proof is checked, consumes
@@ -56,6 +56,7 @@
  */
 
 import {
+	DEFAULT_CLOCK_SKEW_MS,
 	getBoundMfaTransaction,
 	isConsumedMfaTransaction,
 	isMfaFactorUpdateWritten,
@@ -95,11 +96,11 @@ import {
 	type UnknownTransaction,
 } from "./ceremony.mjs";
 import { createMfaEnrollment } from "./enrollment.mjs";
-import { mayCount } from "./firstBinding.mjs";
 import { keptState, mailRefusalOf, readKeptState, sendMfaMail } from "./mail.mjs";
 import { ACCOUNT_EMAIL_FACTOR_ID, createAccountEmailProof } from "./proof.mjs";
 import type { MfaRequirementMode } from "./requirement.mjs";
 import type { MfaSealing } from "./sealing.mjs";
+import { createMfaStepUp } from "./stepUp.mjs";
 import { openEnrollTransaction } from "./transactions.mjs";
 import { type MfaEnrollmentWitness, reconciles } from "./witness.mjs";
 
@@ -462,9 +463,13 @@ export function createMfaCoordinator(options: MfaCoordinatorOptions): MfaCoordin
 				return outage("mfa_transaction", "sessionEmailProofAt", cause);
 			}
 			const proved = readSessionEmailProof(answer, nowMs);
-			return proved === undefined
-				? outage("mfa_transaction", "sessionEmailProofAt", OUTSIDE_CONTRACT)
-				: proved !== null;
+			if (proved === undefined) {
+				return outage("mfa_transaction", "sessionEmailProofAt", OUTSIDE_CONTRACT);
+			}
+			// One given longer ago than its window and the clock skew is none, whatever the store answered.
+			return (
+				proved !== null && proved >= nowMs - sessionProofSeconds * 1000 - DEFAULT_CLOCK_SKEW_MS
+			);
 		},
 		recordSessionProof: async (subject, sid, provedAtMs) => {
 			try {
@@ -515,12 +520,7 @@ export function createMfaCoordinator(options: MfaCoordinatorOptions): MfaCoordin
 	};
 	const enrollment = createMfaEnrollment(kit);
 	const proof = createAccountEmailProof(kit);
-
-	/** `tx` as the page names it next. */
-	const opened = (tx: MfaTransaction): MfaStepUpOutcome => ({
-		outcome: "opened",
-		transaction: { id: tx.id, expiresIn: Math.max(1, Math.ceil((tx.expiresAtMs - now()) / 1000)) },
-	});
+	const stepUp = createMfaStepUp(kit);
 
 	return {
 		async describe(call) {
@@ -528,7 +528,8 @@ export function createMfaCoordinator(options: MfaCoordinatorOptions): MfaCoordin
 			const tx = await bound(call);
 			if (tx === null) return UNKNOWN_TRANSACTION;
 			if ("outcome" in tx) return tx;
-			const records = await recordsOf(tx.subject);
+			// An enroll transaction verifies the account-email proof alone: it lists no factor.
+			const records = tx.purpose === "enroll" ? [] : await recordsOf(tx.subject);
 			if ("outcome" in records) return records;
 			const listed = records.flatMap((record) => {
 				const factor = factors.get(record.kind);
@@ -915,31 +916,6 @@ export function createMfaCoordinator(options: MfaCoordinatorOptions): MfaCoordin
 		beginEnrollment: (call) => enrollment.begin(call),
 		completeEnrollment: (call) => enrollment.complete(call),
 
-		async stepUp(call) {
-			const session = call.session;
-			if (session === undefined) return UNKNOWN_TRANSACTION;
-			const records = await recordsOf(session.subject);
-			if ("outcome" in records) return records;
-			if (records.some((record) => mayCount(factors, record))) {
-				return { outcome: "counting_factor_held" };
-			}
-			if (call.transactionId !== undefined) {
-				const tx = await bound(call);
-				if (tx === null) return UNKNOWN_TRANSACTION;
-				if ("outcome" in tx) return tx;
-				if (tx.purpose !== "enroll" || tx.enrollment !== "required") return UNKNOWN_TRANSACTION;
-				if (tx.emailProof === "required") return opened(tx);
-				if (tx.emailProof === "not_required") {
-					const owed = await write(tx, { emailProof: "required" });
-					return "outcome" in owed ? owed : opened(owed.written);
-				}
-				// Met on it already: the session's proof it recorded may be lost since, so the proof is given again.
-			}
-			const created = await kit.openEnrollment(call, session, {
-				enrollment: "required",
-				emailProof: "required",
-			});
-			return "outcome" in created ? created : opened(created);
-		},
+		stepUp: (call) => stepUp.open(call),
 	};
 }

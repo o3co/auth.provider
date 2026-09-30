@@ -34,7 +34,9 @@
  *   code went to when it mailed one (`sendMfaMail`).
  * - A completion reserves an attempt before the proof is checked, seals the
  *   factor's data, and then, in this order: consumes the transaction, writes
- *   the factor. A first binding — `binding` `email_proof` when the proof was
+ *   the factor. Another factor then reads the subject's records again, and
+ *   one past `mfa.maxFactorsPerSubject` — bindings made at once — removes
+ *   its own, so the limit holds. A first binding — `binding` `email_proof` when the proof was
  *   given, on the transaction or in the session, else `password` — then
  *   reads the subject's records again: it stands only when they are its own
  *   alone; otherwise another transaction bound one at once, or a reset
@@ -77,7 +79,9 @@ import { issueRecoveryCodes } from "./recovery/issue.mjs";
 const NOT_OPEN = Object.freeze({ outcome: "enrollment_not_open" as const });
 const PROOF_REQUIRED = Object.freeze({ outcome: "email_proof_required" as const });
 const UNKNOWN_KIND = Object.freeze({ outcome: "unknown_kind" as const });
-const CLOSED = Object.freeze({ outcome: "first_binding_closed" as const });
+/** The subject's records no longer allow the binding a transaction of `purpose` was opened for. */
+const closed = (purpose: MfaTransaction["purpose"]) =>
+	({ outcome: "first_binding_closed", purpose }) as const;
 const FACTOR_LIMIT = Object.freeze({ outcome: "factor_limit" as const });
 const NO_PENDING = Object.freeze({ outcome: "no_pending_enrollment" as const });
 
@@ -154,11 +158,12 @@ export function createMfaEnrollment(kit: MfaCeremonyKit): {
 	 * `undefined`.
 	 */
 	const refusedBy = (
+		purpose: MfaTransaction["purpose"],
 		first: boolean,
 		records: readonly MfaFactorRecord[],
 	): MfaEnrollmentRefusal | undefined => {
-		if (first) return records.length === 0 ? undefined : CLOSED;
-		if (!records.some((record) => mayCount(factors, record))) return CLOSED;
+		if (first) return records.length === 0 ? undefined : closed(purpose);
+		if (!records.some((record) => mayCount(factors, record))) return closed(purpose);
 		return records.length < kit.maxFactorsPerSubject ? undefined : FACTOR_LIMIT;
 	};
 
@@ -208,7 +213,7 @@ export function createMfaEnrollment(kit: MfaCeremonyKit): {
 			const records = await kit.recordsOf(session.subject);
 			if ("outcome" in records) return records;
 			const first = !records.some((record) => mayCount(factors, record));
-			const refused = refusedBy(first, records);
+			const refused = refusedBy("enroll", first, records);
 			if (refused !== undefined) return refused;
 			const tx = await kit.openEnrollment(call, session, {
 				enrollment: first ? "required" : "allowed",
@@ -222,8 +227,26 @@ export function createMfaEnrollment(kit: MfaCeremonyKit): {
 		if (factor === undefined) return UNKNOWN_KIND;
 		const records = await kit.recordsOf(open.tx.subject);
 		if ("outcome" in records) return records;
-		const refused = refusedBy(isFirstBinding(open.tx), records);
+		const refused = refusedBy(open.tx.purpose, isFirstBinding(open.tx), records);
 		return refused ?? { ...open, factor, records };
+	};
+
+	/**
+	 * After another factor `id` was written beside the subject's: `undefined`
+	 * while the records read again stay within `mfa.maxFactorsPerSubject`.
+	 * Otherwise — past it, as bindings made at once can be, or unreadable —
+	 * its own is removed, and the answer is the limit or the read's outage;
+	 * one it cannot remove is the removal's outage.
+	 */
+	const pastLimit = async (
+		subject: string,
+		id: string,
+	): Promise<MfaEnrollmentCompleteOutcome | undefined> => {
+		const records = await kit.recordsOf(subject);
+		if (!("outcome" in records) && records.length <= kit.maxFactorsPerSubject) return undefined;
+		const standing = await removeOwn(subject, id);
+		if (standing !== undefined) return outage("mfa_factor", "remove", standing.cause);
+		return "outcome" in records ? records : FACTOR_LIMIT;
 	};
 
 	/** This binding's factor `id` removed, tried {@link REMOVAL_TRIES} times: `undefined` once removed, else the last failure. */
@@ -391,7 +414,7 @@ export function createMfaEnrollment(kit: MfaCeremonyKit): {
 			const records = await kit.recordsOf(tx.subject);
 			if ("outcome" in records) return records;
 			const first = isFirstBinding(tx);
-			const refused = refusedBy(first, records);
+			const refused = refusedBy(tx.purpose, first, records);
 			if (refused !== undefined) return refused;
 			// A first binding in a session is by the proof when one was given there.
 			let proved = typeof tx.emailProof === "object";
@@ -514,6 +537,8 @@ export function createMfaEnrollment(kit: MfaCeremonyKit): {
 				...about,
 			};
 			if (!first) {
+				const over = await pastLimit(tx.subject, id);
+				if (over !== undefined) return over;
 				return {
 					...enrolled,
 					recoveryCodes: undefined,

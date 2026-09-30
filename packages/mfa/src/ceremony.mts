@@ -17,10 +17,10 @@
 /**
  * The contract the MFA ceremonies share: a call, what each ceremony answers,
  * and the kit the coordinator hands the ceremonies beside a verification —
- * an enrollment (`enrollment.mts`) and the account-email proof
- * (`proof.mts`). A leaf: the coordinator and both ceremonies import it, and
- * it imports none of them, so no two of them depend on each other's
- * contracts.
+ * an enrollment (`enrollment.mts`), the account-email proof (`proof.mts`)
+ * and a session's step-up (`stepUp.mts`). A leaf: the coordinator and the
+ * ceremonies import it, and it imports none of them, so no two of them
+ * depend on each other's contracts.
  */
 
 import type {
@@ -200,9 +200,10 @@ export type MfaEnrollmentRefusal =
 	/**
 	 * The subject's records no longer allow the binding: a first binding's
 	 * subject holds a record now, or the factor it would go beside is gone —
-	 * the user signs in again.
+	 * a login starts again; a session, which stands, starts the enrollment
+	 * again.
 	 */
-	| { readonly outcome: "first_binding_closed" }
+	| { readonly outcome: "first_binding_closed"; readonly purpose: MfaTransaction["purpose"] }
 	/** The subject holds `mfa.maxFactorsPerSubject` records. */
 	| { readonly outcome: "factor_limit" };
 

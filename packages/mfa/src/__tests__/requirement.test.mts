@@ -238,7 +238,10 @@ describe("what the requirement declares", () => {
 		expect(await requirement.admit(about(password()))).toEqual(UNMET);
 
 		const later: MfaFactor[] = [FACTORS.totp()];
-		const reaching = build("required", { factors: later }).requirement;
+		const reaching = build("required", {
+			factors: later,
+			factorStore: factorStoreHolding(...HOLDING_TOTP),
+		}).requirement;
 		expect([...reaching.reach].sort()).toEqual(["mfa", "otp"]);
 		later.pop();
 		expect([...reaching.reach].sort()).toEqual(["mfa", "otp"]);
@@ -247,7 +250,10 @@ describe("what the requirement declares", () => {
 
 	it("reads its reach at its first verdict when nothing read it before", async () => {
 		const factors: MfaFactor[] = [FACTORS.totp()];
-		const { requirement } = build("required", { factors });
+		const { requirement } = build("required", {
+			factors,
+			factorStore: factorStoreHolding(...HOLDING_TOTP),
+		});
 		expect(await requirement.admit(about(password()))).toEqual(STEP_UP);
 		factors.pop();
 		expect([...requirement.reach].sort()).toEqual(["mfa", "otp"]);
@@ -508,9 +514,10 @@ describe("admit — its table of verdicts under mfa.mode", () => {
 			expected: MET,
 		},
 		{
-			row: "required · use · an action named device.lookup graded use → step_up: a name admits nothing",
+			row: "required · use · an action named device.lookup graded use, a counting factor held → step_up: a name admits nothing",
 			mode: "required",
 			input: about(password(), { name: "device.lookup", grade: "use" }),
+			records: HOLDING_TOTP,
 			expected: STEP_UP,
 		},
 		{
@@ -969,9 +976,9 @@ describe("admit — credential_change reads the subject's factor records", () =>
 
 	it("reads them for credential_change, and for use only where the baseline would step a password session up: otherwise use and grants_nothing are answered over a store that is down", async () => {
 		const { requirement } = build("required", { factorStore: unreachableFactorStore() });
-		expect(await requirement.admit(about(password(["pwd", "otp", "mfa"], minutesAgo(1)), USE))).toEqual(
-			MET,
-		);
+		expect(
+			await requirement.admit(about(password(["pwd", "otp", "mfa"], minutesAgo(1)), USE)),
+		).toEqual(MET);
 		expect(await requirement.admit(about(federated(), USE))).toEqual(MET);
 		expect(await requirement.admit(about(password(), NOTHING))).toEqual(MET);
 		await expect(requirement.admit(about(password(), USE))).rejects.toThrow();

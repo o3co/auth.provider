@@ -36,6 +36,13 @@
  * a string, a declaration or an object literal's key is not a read, and a
  * name is resolved in its own scope. Tests are left out: they build records
  * by hand on purpose.
+ *
+ * The limits of that reading: a type is matched by its name as written, so
+ * an alias or a local type of the same name passes as core's; and TypeScript
+ * is structural, so a `UserSession` handed to a parameter typed
+ * `SessionView` type-checks and is then read as a copy there. Admission
+ * builds the one view (`viewOf`); a caller that hands a record where a view
+ * is typed goes around this guard, and review catches it.
  */
 
 import { type Dirent, existsSync, readdirSync, readFileSync } from "node:fs";
@@ -253,7 +260,7 @@ describe("a session's stored enrollment facts have one reading", () => {
 		expect(sources.filter((file) => /(^|\/)__tests__\/|\.test\.m?ts$/.test(file))).toEqual([]);
 	});
 
-	it("is not vacuous: each allowed place reads the record raw, and the mfa requirement reads the view's copy and the primary's", () => {
+	it("is not vacuous: each allowed place reads the record raw, and the mfa requirement reads core's copies alone", () => {
 		const reads = productReads();
 		for (const entry of ALLOWED_RAW_READS) {
 			const raw = (reads.get(entry.file) ?? []).filter(
@@ -262,11 +269,8 @@ describe("a session's stored enrollment facts have one reading", () => {
 			expect(raw.length, `${entry.file} — ${entry.why}`).toBeGreaterThan(0);
 		}
 		const requirement = reads.get("packages/mfa/src/requirement.mts") ?? [];
+		expect(requirement.length, "the mfa requirement reads the facts").toBeGreaterThan(0);
 		expect(requirement.filter((read) => !read.copy)).toEqual([]);
-		expect(
-			new Set(requirement.map((read) => read.receiver)),
-			"the requirement reads the facts of the view admission hands it, and of a login's primary",
-		).toEqual(new Set(["session", "primary"]));
 	});
 
 	it("tells core's copy from a record, by the type its receiver is declared with, in the receiver's own scope", () => {
