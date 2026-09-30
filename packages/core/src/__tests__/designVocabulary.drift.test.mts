@@ -459,6 +459,11 @@ const VOCABULARY: readonly VocabularyRow[] = [
 		home: DEPLOYMENT_MODE_HOME,
 		definition: /(?:function|const)\s+deploymentModeOf\b/,
 	},
+	{
+		concept: "deployment.mode as core reads it — the check a reader holds the slot's value to",
+		home: DEPLOYMENT_MODE_HOME,
+		definition: /(?:function|const)\s+checkDeploymentMode\b/,
+	},
 ];
 
 /** Every shipped source file across the workspace: packages/*\/src\/**\/*.mts, tests excluded. */
@@ -514,20 +519,6 @@ const policyEvaluateCalls = (source: string): number =>
 			.replace(/\/\*[\s\S]*?\*\//g, "")
 			.replace(/(^|[^:])\/\/.*$/gm, "$1")
 			.match(/grantPolicy[\s\S]{0,40}?\.evaluate\s*\(/g) ?? []
-	).length;
-
-/**
- * Reads of `deployment.mode` off a configuration in `source` — a member
- * access, `config.deployment?.mode` or `.deployment.mode` — comments removed so
- * a mention is not a read. A message that names the key (`'deployment.mode is
- * "multi"'`) is not a member access and does not count.
- */
-const deploymentModeReads = (source: string): number =>
-	(
-		source
-			.replace(/\/\*[\s\S]*?\*\//g, "")
-			.replace(/(^|[^:])\/\/.*$/gm, "$1")
-			.match(/[.?]\s*deployment\s*\??\.\s*mode\b/g) ?? []
 	).length;
 
 /** Session admission's home: the acr selection is its own step, over the input `requirementSession` builds. */
@@ -1412,6 +1403,224 @@ function sessionRecordReadSites(): Map<string, SessionRecordRead[]> {
 	return sites;
 }
 
+/** Core's configuration schema: the one schema that declares `deployment`. */
+const DEPLOYMENT_SCHEMA_HOME = "packages/core/src/config/application.schema.mts";
+
+/** The literals that name the section or its key, as a helper or a reflection is handed them. */
+const DEPLOYMENT_NAMES: ReadonlySet<string> = new Set(["deployment", "deployment.mode"]);
+
+/** The Zod calls whose object argument names a schema's keys. `omit` names a key to drop, and is not one. */
+const SHAPE_BUILDERS: ReadonlySet<string> = new Set([
+	"object",
+	"strictObject",
+	"looseObject",
+	"extend",
+	"safeExtend",
+	"merge",
+	"pick",
+]);
+
+/** What `deploymentTouches` found: a read of the section, or a schema that declares it. */
+interface DeploymentTouch {
+	readonly line: number;
+	readonly kind: "read" | "schema";
+	readonly text: string;
+}
+
+/**
+ * Where `source` touches the configuration's `deployment` section, each with
+ * its 1-based line and its text (whitespace removed):
+ *
+ * - a read: a property access `.deployment` on any receiver (optional,
+ *   non-null or through a cast alike); a destructuring that names it, by
+ *   declaration, parameter or assignment, flat or nested, renamed or not,
+ *   its key an identifier, a string or a computed string; and a string
+ *   literal `"deployment"` or `"deployment.mode"` anywhere a value goes — an
+ *   element access, `Reflect.get`, a path handed to a helper, an `in` test,
+ *   a type's indexed access. An alias (`const d = config.deployment`) is
+ *   caught at the access that made it.
+ * - a schema: a `deployment` key in the object a Zod shape builder
+ *   ({@link SHAPE_BUILDERS}) is handed.
+ *
+ * Parsed with TypeScript, so a comment, a message that mentions the key
+ * (`'deployment.mode is "multi"'`), an interface member or an object literal
+ * written with the key is neither. Left to review: a key built at run time
+ * (`"deploy" + "ment"`, a template with a substitution), and a schema
+ * assembled other than through a shape builder's object argument.
+ */
+function deploymentTouches(source: string, fileName = "scan.mts"): DeploymentTouch[] {
+	const kind = /\.(?:js|mjs|cjs)$/.test(fileName) ? ts.ScriptKind.JS : ts.ScriptKind.TS;
+	const file = ts.createSourceFile(fileName, source, ts.ScriptTarget.Latest, true, kind);
+	const touches: DeploymentTouch[] = [];
+	const found = (node: ts.Node, touch: DeploymentTouch["kind"]): void => {
+		touches.push({
+			line: file.getLineAndCharacterOfPosition(node.getStart(file)).line + 1,
+			kind: touch,
+			text: node.getText(file).replace(/\s+/g, ""),
+		});
+	};
+	const literalName = (node: ts.Node | undefined): string | undefined => {
+		if (node === undefined) return undefined;
+		if (ts.isIdentifier(node) || ts.isStringLiteralLike(node)) return node.text;
+		if (ts.isComputedPropertyName(node) && ts.isStringLiteralLike(node.expression)) {
+			return node.expression.text;
+		}
+		return undefined;
+	};
+	const namesSection = (node: ts.Node | undefined): boolean => literalName(node) === "deployment";
+	/** Whether a string literal stands where a name goes — a key, a member, a module — rather than a value. */
+	const inNamePosition = (node: ts.Node): boolean => {
+		const parent = node.parent;
+		if (parent === undefined) return false;
+		if (ts.isComputedPropertyName(parent)) return true;
+		if (ts.isBindingElement(parent)) return parent.propertyName === node;
+		if (
+			ts.isImportDeclaration(parent) ||
+			ts.isExportDeclaration(parent) ||
+			ts.isExternalModuleReference(parent)
+		) {
+			return true;
+		}
+		return "name" in parent && (parent as { name?: ts.Node }).name === node;
+	};
+	/** Whether an object literal is a destructuring target: the left of `=`, or a `for…of` / `for…in` head. */
+	const isAssignmentPattern = (node: ts.ObjectLiteralExpression): boolean => {
+		let current: ts.Node = node;
+		for (;;) {
+			const parent: ts.Node | undefined = current.parent;
+			if (parent === undefined) return false;
+			if (ts.isParenthesizedExpression(parent) || ts.isArrayLiteralExpression(parent)) {
+				current = parent;
+				continue;
+			}
+			if (ts.isSpreadElement(parent) || ts.isSpreadAssignment(parent)) {
+				current = parent.parent;
+				continue;
+			}
+			if (
+				ts.isPropertyAssignment(parent) &&
+				parent.initializer === current &&
+				ts.isObjectLiteralExpression(parent.parent)
+			) {
+				current = parent.parent;
+				continue;
+			}
+			if (
+				ts.isBinaryExpression(parent) &&
+				parent.operatorToken.kind === ts.SyntaxKind.EqualsToken &&
+				parent.left === current
+			) {
+				// A default inside a pattern (`{ a: { deployment } = {} } = c`) is one too.
+				const outer = parent.parent;
+				if (outer && ts.isPropertyAssignment(outer) && outer.initializer === parent) {
+					current = outer.parent;
+					continue;
+				}
+				return true;
+			}
+			return (
+				(ts.isForOfStatement(parent) || ts.isForInStatement(parent)) &&
+				parent.initializer === current
+			);
+		}
+	};
+	const calleeName = (node: ts.Expression): string | undefined =>
+		ts.isIdentifier(node)
+			? node.text
+			: ts.isPropertyAccessExpression(node)
+				? node.name.text
+				: undefined;
+	const visit = (node: ts.Node): void => {
+		if (ts.isPropertyAccessExpression(node) && node.name.text === "deployment") {
+			found(node, "read");
+		} else if (
+			ts.isBindingElement(node) &&
+			ts.isObjectBindingPattern(node.parent) &&
+			namesSection(node.propertyName ?? node.name)
+		) {
+			found(node, "read");
+		} else if (
+			ts.isStringLiteralLike(node) &&
+			DEPLOYMENT_NAMES.has(node.text) &&
+			!inNamePosition(node)
+		) {
+			found(node, "read");
+		} else if (ts.isObjectLiteralExpression(node) && isAssignmentPattern(node)) {
+			for (const property of node.properties) {
+				if (
+					(ts.isShorthandPropertyAssignment(property) || ts.isPropertyAssignment(property)) &&
+					namesSection(property.name)
+				) {
+					found(property, "read");
+				}
+			}
+		} else if (ts.isCallExpression(node)) {
+			const name = calleeName(node.expression);
+			if (name !== undefined && SHAPE_BUILDERS.has(name)) {
+				for (const argument of node.arguments) {
+					if (!ts.isObjectLiteralExpression(argument)) continue;
+					for (const property of argument.properties) {
+						if (
+							(ts.isShorthandPropertyAssignment(property) || ts.isPropertyAssignment(property)) &&
+							namesSection(property.name)
+						) {
+							found(property, "schema");
+						}
+					}
+				}
+			}
+		}
+		ts.forEachChild(node, visit);
+	};
+	visit(file);
+	return touches;
+}
+
+/**
+ * The product sources the deployment guard scans, `/`-separated from the
+ * root: every TypeScript and JavaScript source of every package's `src`, of
+ * each template's and of `create-app`'s, no declaration file and no test.
+ */
+function deploymentScope(): string[] {
+	const files: string[] = [];
+	const collect = (dir: string): void => {
+		let entries: Dirent[];
+		try {
+			entries = readdirSync(dir, { withFileTypes: true });
+		} catch {
+			return;
+		}
+		for (const entry of entries) {
+			if (entry.name === "__tests__" || entry.name === "node_modules" || entry.name === "dist") {
+				continue;
+			}
+			const path = join(dir, entry.name);
+			if (entry.isDirectory()) collect(path);
+			else if (isSessionReadSource(entry.name))
+				files.push(relative(repoRoot, path).split(sep).join("/"));
+		}
+	};
+	for (const root of ["packages", "templates"]) {
+		for (const dir of readdirSync(join(repoRoot, root), { withFileTypes: true })) {
+			if (dir.isDirectory()) collect(join(repoRoot, root, dir.name, "src"));
+		}
+	}
+	collect(join(repoRoot, "create-app", "src"));
+	return files.sort();
+}
+
+/** Each scanned file with what it touches of `deployment`, of one kind. */
+function deploymentTouchSites(touch: DeploymentTouch["kind"]): Record<string, string[]> {
+	const sites: Record<string, string[]> = {};
+	for (const rel of deploymentScope()) {
+		const found = deploymentTouches(readFileSync(join(repoRoot, rel), "utf8"), rel).filter(
+			(t) => t.kind === touch,
+		);
+		if (found.length > 0) sites[rel] = found.map((t) => `${t.line}:${t.text}`);
+	}
+	return sites;
+}
+
 describe("design-vocabulary map (docs/design-vocabulary.md)", () => {
 	it("flags a session's amr or authentication read off the record whatever the session is named, and by every shape", () => {
 		// Each of these reads the record's own field, which in a session written
@@ -1683,23 +1892,110 @@ describe("design-vocabulary map (docs/design-vocabulary.md)", () => {
 		);
 	});
 
-	it("reads a member access of deployment.mode as a read, and neither a mention nor a message", () => {
-		expect(deploymentModeReads("const m = config.deployment?.mode;")).toBe(1);
-		expect(deploymentModeReads("if (cfg?.deployment.mode === 'multi') {}")).toBe(1);
-		expect(deploymentModeReads("x.deployment ?. mode")).toBe(1);
-		expect(deploymentModeReads("// config.deployment?.mode\n/* x.deployment.mode */")).toBe(0);
-		expect(deploymentModeReads("throw new Error('deployment.mode is \"multi\"');")).toBe(0);
-		expect(deploymentModeReads('const m = `set deployment.mode = "single"`;')).toBe(0);
+	it("flags a read of the deployment section by every shape: member, element, destructuring, alias, helper, reflection", () => {
+		const reads = (source: string) =>
+			deploymentTouches(source).filter((touch) => touch.kind === "read").length;
+		for (const read of [
+			"const m = config.deployment?.mode;",
+			"const m = cfg?.deployment.mode;",
+			"const m = config.deployment!.mode;",
+			"const m = (config as C).deployment.mode;",
+			"const m = (config.deployment as D).mode;",
+			'const m = config["deployment"]["mode"];',
+			'const m = config?.["deployment"]?.mode;',
+			"const { deployment } = config;",
+			"const { deployment: { mode } } = config;",
+			"const { deployment: d } = config;",
+			'const { "deployment": d } = config;',
+			'const { ["deployment"]: d } = config;',
+			"const read = ({ deployment }: C) => deployment;",
+			"({ deployment } = config);",
+			"({ a: { deployment } } = config);",
+			"({ a: { deployment } = {} } = config);",
+			"for (const { deployment } of configs) use(deployment);",
+			"const d = config.deployment; const m = d.mode;",
+			'const m = get(config, "deployment").mode;',
+			'const m = Reflect.get(config, "deployment");',
+			'const m = at(config, "deployment.mode");',
+			'const m = at(config, ["deployment", "mode"]);',
+			'if ("deployment" in config) use(config);',
+			'type D = AppConfig["deployment"];',
+			'const url = "https://a.example//b", m = config.deployment?.mode;',
+		]) {
+			expect(reads(read), read).toBe(1);
+		}
+		// Naming the key is not reading it: a comment, a message, an interface
+		// member, an object written with it, a variable of that name, the reading
+		// imported.
+		for (const notARead of [
+			"// config.deployment?.mode",
+			"/* x.deployment.mode */",
+			"throw new Error('deployment.mode is \"multi\"');",
+			'const m = `set deployment.mode = "single"`;',
+			"interface C { readonly deployment?: { readonly mode?: string } }",
+			"const input = { deployment: x };",
+			"const [deployment] = modes;",
+			"function f(deployment: string) { return deployment; }",
+			'import { deploymentModeOf } from "@o3co/auth-provider-core";',
+			"const mode = deploymentModeOf(config);",
+			"logger.warn({ deploymentMode }, 'x');",
+		]) {
+			expect(reads(notARead), notARead).toBe(0);
+		}
 	});
 
-	it("reads deployment.mode off a configuration only in its home: every other module requires the deploymentMode slot", () => {
-		const home = join(repoRoot, DEPLOYMENT_MODE_HOME);
-		expect(deploymentModeReads(readFileSync(home, "utf8"))).toBe(1);
-		const offenders = listShippedSources()
-			.filter((file) => file !== home)
-			.filter((file) => deploymentModeReads(readFileSync(file, "utf8")) > 0)
-			.map((file) => relative(repoRoot, file).split(sep).join("/"));
-		expect(offenders, `require the deploymentMode slot (${DEPLOYMENT_MODE_HOME})`).toEqual([]);
+	it("flags a deployment key in the object a Zod shape builder is handed, and nowhere else", () => {
+		const schemas = (source: string) =>
+			deploymentTouches(source).filter((touch) => touch.kind === "schema").length;
+		for (const schema of [
+			"const s = z.object({ deployment: z.object({ mode: z.string() }) });",
+			"const s = z.strictObject({ deployment });",
+			"const s = z.looseObject({ ['deployment']: z.unknown() });",
+			'const s = base.extend({ "deployment": z.unknown() });',
+			"const s = base.safeExtend({ deployment: z.unknown() });",
+			"const s = base.merge(z.object({ deployment: part }));",
+			"const s = fullSectionsSchema.pick({ deployment: true });",
+		]) {
+			expect(schemas(schema), schema).toBe(1);
+		}
+		for (const notASchema of [
+			"const s = base.omit({ deployment: true });",
+			"const s = z.object({ deploymentMode: z.string() });",
+			"logger.warn({ deployment: x }, 'x');",
+		]) {
+			expect(schemas(notASchema), notASchema).toBe(0);
+		}
+	});
+
+	it("scans every package's source, each template's and create-app's", () => {
+		const scope = deploymentScope();
+		for (const file of [
+			DEPLOYMENT_MODE_HOME,
+			"packages/redis/src/federation-grant-store.mts",
+			"templates/standalone/src/buildModules.mts",
+			"create-app/src/cli.mts",
+		]) {
+			expect(scope, file).toContain(file);
+		}
+		expect(scope.some((file) => file.includes("/__tests__/"))).toBe(false);
+	});
+
+	it("reads the deployment section only in its home: every other module requires the deploymentMode slot", () => {
+		const counts = Object.fromEntries(
+			Object.entries(deploymentTouchSites("read")).map(([file, found]) => [file, found.length]),
+		);
+		expect(counts, `require the deploymentMode slot (${DEPLOYMENT_MODE_HOME})`).toEqual({
+			[DEPLOYMENT_MODE_HOME]: 1,
+		});
+	});
+
+	it("declares a deployment key in no schema but core's configuration schema", () => {
+		const counts = Object.fromEntries(
+			Object.entries(deploymentTouchSites("schema")).map(([file, found]) => [file, found.length]),
+		);
+		expect(counts, "the section is core's: a module requires the deploymentMode slot").toEqual({
+			[DEPLOYMENT_SCHEMA_HOME]: 1,
+		});
 	});
 
 	const sources = listShippedSources();
