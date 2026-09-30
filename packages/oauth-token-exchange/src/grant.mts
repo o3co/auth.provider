@@ -51,9 +51,10 @@ import {
 	readTargetParameter,
 	resolveAccessTokenLifetime,
 } from "@o3co/auth-provider-core";
-import { buildActClaim, countActorChainDepth, matchesMayAct, matchesMayActClient } from "./act.mjs";
+import { buildActClaim } from "./act.mjs";
 import { invalidRequest, isRefusal, tokenAnswer } from "./answers.mjs";
 import { authenticateClient } from "./clientAuthentication.mjs";
+import { delegationRefusal } from "./delegation.mjs";
 import { GRANT_TYPE } from "./grantType.mjs";
 import { readTokenRequest } from "./tokenRequest.mjs";
 import {
@@ -157,59 +158,9 @@ export function createTokenExchangeGrant(deps: TokenExchangeDependencies): Grant
 				// not a live delegation either.
 				const actorSessionRefusal = await sessionRefusal(deps, "actor", actorValidated);
 				if (actorSessionRefusal) return actorSessionRefusal;
-
-				const subjectMayAct = subjectValidated.claims.may_act;
-				if (
-					subjectMayAct !== undefined &&
-					subjectMayAct !== null &&
-					!matchesMayAct(actorValidated, subjectMayAct)
-				) {
-					deps.logger?.warn(
-						{
-							subject: subjectValidated.sub,
-							actor: actorValidated.sub,
-						},
-						"token_exchange_may_act_violation",
-					);
-					return invalidRequest("may_act_violation: actor not authorized by subject token");
-				}
-
-				const maxActorChainDepth = getMaxActorChainDepth(deps);
-				const currentActorChainDepth = countActorChainDepth(subjectValidated.act);
-				if (currentActorChainDepth >= maxActorChainDepth) {
-					deps.logger?.warn(
-						{
-							subject: subjectValidated.sub,
-							actor: actorValidated.sub,
-							currentActorChainDepth,
-							maxActorChainDepth,
-						},
-						"token_exchange_actor_chain_too_deep",
-					);
-					return invalidRequest("actor_chain_too_deep: actor chain depth limit exceeded");
-				}
-			} else {
-				// Impersonation: with no actor_token the party acting for the subject is the
-				// calling client, and `may_act` (RFC 8693 §4.4) constrains exactly that party.
-				// It applies whether or not an actor_token was sent, or omitting the parameter
-				// would opt out of it. `matchesMayActClient` compares `sub` with the client id
-				// and refuses any entry pinning `iss` (see its doc comment).
-				const subjectMayAct = subjectValidated.claims.may_act;
-				if (
-					subjectMayAct !== undefined &&
-					subjectMayAct !== null &&
-					!matchesMayActClient(client.clientId, subjectMayAct)
-				) {
-					deps.logger?.warn(
-						{
-							subject: subjectValidated.sub,
-							clientId: client.clientId,
-						},
-						"token_exchange_may_act_violation",
-					);
-					return invalidRequest("may_act_violation: client not authorized by subject token");
-				}
 			}
+			const delegationRefused = delegationRefusal(deps, client, subjectValidated, actorValidated);
+			if (delegationRefused) return delegationRefused;
 
 			// Scope: requested ⊆ subject scope ∩ client.allowedScopes. The registration is a
 			// ceiling on every grant, so a client registered for `read` holding a subject
@@ -595,15 +546,6 @@ export function createTokenExchangeGrant(deps: TokenExchangeDependencies): Grant
 			return tokenAnswer(accessToken);
 		},
 	};
-}
-
-function getMaxActorChainDepth(deps: TokenExchangeDependencies): number {
-	const maxActorChainDepth: unknown = deps.section?.maxActorChainDepth;
-	return typeof maxActorChainDepth === "number" &&
-		Number.isInteger(maxActorChainDepth) &&
-		maxActorChainDepth > 0
-		? maxActorChainDepth
-		: 3;
 }
 
 /**
