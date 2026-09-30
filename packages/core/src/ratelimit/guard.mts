@@ -90,6 +90,40 @@ export type RateLimitPolicyOptions = Pick<
 };
 
 /**
+ * A check's outage policy, built once by {@link createRateLimitPolicy}: the
+ * limiter's `failMode` as it was read then, with the tag and the channels.
+ */
+export interface RateLimitPolicy {
+	readonly limiter: RateLimiter;
+	readonly tag: string;
+	readonly failMode: RateLimitFailMode;
+	readonly logger: RateLimitOutageLogger;
+	readonly auditSink?: AuditSink;
+}
+
+/** The policies {@link createRateLimitPolicy} built: the only ones a check accepts. */
+const builtPolicies = new WeakSet<object>();
+
+/**
+ * The policy {@link checkWithFailMode} applies: the limiter's `failMode` read
+ * and validated once, here (`readRateLimitFailMode`, naming `who`).
+ */
+export function createRateLimitPolicy(
+	options: RateLimitPolicyOptions,
+	who = "createRateLimitPolicy",
+): RateLimitPolicy {
+	const policy: RateLimitPolicy = Object.freeze({
+		limiter: options.limiter,
+		tag: options.tag,
+		failMode: readRateLimitFailMode(options.limiter, who),
+		logger: options.logger ?? consoleLogger,
+		...(options.auditSink === undefined ? {} : { auditSink: options.auditSink }),
+	});
+	builtPolicies.add(policy);
+	return policy;
+}
+
+/**
  * What {@link checkWithFailMode} hands back: the limiter's decision, or the
  * fact that it had none together with the limiter's policy the caller is to
  * apply.
@@ -107,20 +141,26 @@ export type RateLimitCheckOutcome =
  * {@link rateLimiterUnavailableEnvelope} under `"closed"`, proceed under
  * `"open"`), so the policy and its reporting exist once.
  *
- * The policy is the limiter's own `failMode` (only its backend can be down):
- * `"open"` when it says so, `"closed"` otherwise, none declared included.
+ * The policy is the limiter's own `failMode` (only its backend can be down),
+ * as {@link createRateLimitPolicy} read it; a policy it did not build is
+ * refused.
  *
  * The outage report's `ip` / `userAgent` are read from `ctx`.
  */
 export const checkWithFailMode = async (
-	{ limiter, tag, logger = consoleLogger, auditSink }: RateLimitPolicyOptions,
+	policy: RateLimitPolicy,
 	key: string,
 	ctx: RateLimitContext,
 ): Promise<RateLimitCheckOutcome> => {
+	if (!builtPolicies.has(policy)) {
+		throw new TypeError(
+			"checkWithFailMode: the policy must be one createRateLimitPolicy built, which reads the limiter's own failMode",
+		);
+	}
+	const { limiter, tag, failMode, logger, auditSink } = policy;
 	try {
 		return { status: "decided", decision: await limiter.check(key, ctx) };
 	} catch (cause) {
-		const failMode: RateLimitFailMode = limiter.failMode === "open" ? "open" : "closed";
 		// A limiter's error is a store's (a Redis reply echoes the command it
 		// refused), so the log line carries loggableError's projection, and a
 		// thrown non-Error says what kind it was, not what it held. The audit
@@ -199,7 +239,10 @@ export const createRateLimitGuard = ({
 	headerFallback,
 	deniedDescription,
 }: RateLimitGuardOptions): RequestHandler => {
-	const policy: RateLimitPolicyOptions = { limiter, tag, logger, auditSink };
+	const policy = createRateLimitPolicy(
+		{ limiter, tag, logger, ...(auditSink === undefined ? {} : { auditSink }) },
+		"createRateLimitGuard",
+	);
 	return async (req: Request, res: Response, next): Promise<void> => {
 		const ip = req.ip ?? "unknown";
 		// The same ip as the key, so a limiter that reuses ctx.ip for logging

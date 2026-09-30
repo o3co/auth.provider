@@ -62,6 +62,7 @@ import {
 	checkWithFailMode,
 	consoleLogger,
 	cookieClaim,
+	createRateLimitPolicy,
 	describeAdmissionOutage,
 	emitAuditEvent,
 	isEmailVerified,
@@ -267,12 +268,15 @@ export const createDeviceVerificationHandler = (
 		now: () => new Date(now()),
 	};
 	// The guard's check with its outage policy attached — see the file header.
-	const policy = {
-		limiter: options.rateLimiter,
-		tag: DEVICE_VERIFICATION_RATE_LIMIT_PREFIX,
-		logger: hasErrorChannel(options.logger) ? options.logger : undefined,
-		auditSink: options.auditSink,
-	};
+	const policy = createRateLimitPolicy(
+		{
+			limiter: options.rateLimiter,
+			tag: DEVICE_VERIFICATION_RATE_LIMIT_PREFIX,
+			...(hasErrorChannel(options.logger) ? { logger: options.logger } : {}),
+			...(options.auditSink === undefined ? {} : { auditSink: options.auditSink }),
+		},
+		"createDeviceVerificationHandler",
+	);
 
 	return async (req: Request, res: Response): Promise<void> => {
 		// JSON only — see the file header. Checked on the request's media

@@ -783,10 +783,12 @@ export {
 export {
 	checkWithFailMode,
 	createRateLimitGuard,
+	createRateLimitPolicy,
 	type RateLimitCheckOutcome,
 	type RateLimitFailMode,
 	type RateLimitGuardOptions,
 	type RateLimitOutageLogger,
+	type RateLimitPolicy,
 	type RateLimitPolicyOptions,
 	rateLimiterUnavailableEnvelope,
 } from "./ratelimit/guard.mjs";
