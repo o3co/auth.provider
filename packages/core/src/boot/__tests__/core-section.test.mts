@@ -28,6 +28,7 @@
 import { fileURLToPath } from "node:url";
 import { parseFile, parseString } from "@o3co/ts.hocon";
 import { describe, expect, it, vi } from "vitest";
+import { z } from "zod";
 import { createApp } from "#/boot/create-app.mjs";
 import { type AppHandle, BootError, type BootstrapMap } from "#/boot/types.mjs";
 import { AppConfigSchema } from "#/config/application.schema.mjs";
@@ -279,6 +280,48 @@ describe("the federations, under core.federations", () => {
 			],
 		});
 		expect(err.message).not.toContain("old-value-5e2d");
+	});
+});
+
+describe("cors, which core no longer reads", () => {
+	it("refuses a configuration that still writes it, saying core reads its CORS origins from the httpSettings slot alone", async () => {
+		const err = await refusal(boot({}, 'cors.allowedOrigins = ["https://app.example"]\n'));
+
+		expect(err.reason).toBe("config-validation-failed");
+		expect(err.message).toMatch(/cors/);
+		expect(err.message).toContain("httpSettings");
+		// Core's words, not a composition's: no module's path is named.
+		expect(err.message).not.toContain("http.cors");
+		expect(err.message).not.toContain("https://app.example");
+	});
+
+	it("leaves the refusal to a loaded module that relocates cors, in its words", async () => {
+		const relocating = defineModule({
+			name: "fixture-http",
+			section: {
+				schema: z.object({ cors: z.object({ allowedOrigins: z.array(z.string()) }) }).optional(),
+				relocatedFrom: { cors: "cors" },
+			},
+		});
+		const err = await refusal(
+			createApp({
+				modules: [relocating],
+				bootstrapComponents: bootstrap(
+					resolved({}, 'cors.allowedOrigins = ["https://app.example"]\n'),
+				),
+			}),
+		);
+
+		expect(err.reason).toBe("config-path-relocated");
+		expect(err.details).toMatchObject({
+			relocated: [
+				{
+					module: "fixture-http",
+					from: "cors.allowedOrigins",
+					to: "fixture-http.cors.allowedOrigins",
+				},
+			],
+		});
 	});
 });
 

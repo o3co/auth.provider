@@ -1203,6 +1203,35 @@ describe("repositories", () => {
 		expect(referenced().federatedIdentityLookupCoverage).toEqual([]);
 	});
 
+	it("reads the client registry and the users under static, core's alias of yaml, from its own blocks", async () => {
+		const clients = yamlFile(
+			"clients.yaml",
+			"static-client:\n  tokenEndpointAuthMethod: none\n  allowedRedirectUris: []\n",
+		);
+		const users = yamlFile("users.yaml", "");
+		const handle = await bootTemplate({
+			repositories: true,
+			env: { ADAPTERS_CLIENT_REPOSITORY: "static", ADAPTERS_USER_REPOSITORY: "static" },
+			hocon: `repositories.client.static.path = "${clients}"\nrepositories.user.static.path = "${users}"\n`,
+		});
+		try {
+			expect(parsedAt(handle, "repositories.client.static.path")).toBe(clients);
+			expect(await handle.components.clientRepository?.findById("static-client")).toBeDefined();
+			expect(handle.components.userRepository).toBeDefined();
+		} finally {
+			await handle.dispose();
+		}
+	});
+
+	it.each([
+		["ADAPTERS_CLIENT_REPOSITORY", "repositories.client.static.path"],
+		["ADAPTERS_USER_REPOSITORY", "repositories.user.static.path"],
+	])("refuses %s=static without %s, naming it", async (variable, path) => {
+		await expect(
+			bootTemplate({ repositories: true, env: { [variable]: "static" } }),
+		).rejects.toThrow(path);
+	});
+
 	it("refuses a key the section does not declare, naming it", async () => {
 		await expect(
 			bootTemplate({ repositories: true, hocon: 'repositories.user.ldap.url = "ldap://x"\n' }),

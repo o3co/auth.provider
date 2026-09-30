@@ -28,7 +28,9 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { defineModule } from "@o3co/auth-provider-core";
 import { afterAll, describe, expect, it } from "vitest";
+import { z } from "zod";
 import { buildModules } from "#/buildModules.mjs";
 import {
 	expectedSessionRequirements,
@@ -182,6 +184,13 @@ describe("the shipped selections", () => {
 		expect(adaptersFrom({ ADAPTERS_MFA_FACTOR_STORE: "store" }).mfaFactorStore).toBe("store");
 	});
 
+	it.each([
+		["ADAPTERS_CLIENT_REPOSITORY", "clientRepository"],
+		["ADAPTERS_USER_REPOSITORY", "userRepository"],
+	] as const)("reads static, core's alias of yaml, from %s", (variable, key) => {
+		expect(adaptersFrom({ [variable]: "static" })[key]).toBe("static");
+	});
+
 	it("refuses a key the section does not declare, naming it", () => {
 		expect(refusal({}, 'adapters.sessionStore = "redis"\n').message).toMatch(/sessionStore/);
 	});
@@ -283,5 +292,27 @@ describe("boot and the section", () => {
 			expectedSessionRequirements(switches),
 		);
 		expect(resolved).not.toHaveProperty("adapters");
+	});
+
+	it.each([
+		["named adapters", "adapters", undefined],
+		["with its section at adapters.custom", "custom-thing", "adapters.custom"],
+	] as const)("refuses a module %s: its section would never reach boot", (_label, name, at) => {
+		const own = readOwnLayers(ownFiles(), { env: {} });
+		const switches = readSwitches(own);
+		const mine = defineModule({
+			name,
+			section: {
+				schema: z.object({}).passthrough().optional(),
+				...(at === undefined ? {} : { at }),
+			},
+		});
+		expect(() =>
+			resolveForBoot(
+				own,
+				[...buildModules(switches, { environment: "production" }), mine],
+				expectedSessionRequirements(switches),
+			),
+		).toThrow(new RegExp(`"${name}".*adapters`));
 	});
 });

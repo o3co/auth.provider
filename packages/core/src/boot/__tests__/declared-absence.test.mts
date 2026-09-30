@@ -267,6 +267,17 @@ describe("isAbsenceDeclared and describeAbsenceDeclaration — one reading of a 
 		);
 	});
 
+	it("reads a list at a key other than core's list as no declaration", () => {
+		const policy = {
+			configKey: ["oauth", "revocation", "subject"],
+			absentValue: "unsupported",
+			hint: "h",
+		};
+		expect(isAbsenceDeclared({ oauth: { revocation: { subject: ["unsupported"] } } }, policy)).toBe(
+			false,
+		);
+	});
+
 	it("reads own keys only", () => {
 		expect(
 			isAbsenceDeclared(
