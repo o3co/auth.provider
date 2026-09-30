@@ -262,7 +262,7 @@ async function applyGrantPolicy(
 			answer = await deps.grantPolicy.evaluate(policyRequest, policyContext);
 		} catch (err) {
 			logGrantPolicyUnavailable(
-				deps.logger,
+				deps.logger ?? consoleLogger,
 				{ grantType: GRANT_TYPE, policy: deps.grantPolicy.kind },
 				err,
 			);
