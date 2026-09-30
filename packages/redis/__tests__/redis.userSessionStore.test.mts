@@ -109,6 +109,58 @@ describe("a session Redis holds from before sessions carried authentication", ()
 	});
 });
 
+describe("enrollmentFacts in the envelope", () => {
+	it("writes them as the two facts, a witness and an address fact, and leaves the key out when there are none", async () => {
+		const sessions = createRedisUserSessionStore({
+			client: makeIoredisClients(raw).userSessionStoreClient,
+			keyPrefix: "t14:facts:",
+		});
+		const base = {
+			sub: "user-1",
+			authTime: new Date(),
+			expiresAt: new Date(Date.now() + 60_000),
+			claims: {},
+			amr: ["pwd"],
+			authentication: undefined,
+		};
+		await sessions.create({
+			...base,
+			sid: "sid-facts",
+			enrollmentFacts: { witness: "enrolled", mailAddress: "address" },
+		});
+		await sessions.create({ ...base, sid: "sid-none" });
+		const written = JSON.parse((await raw.get("t14:facts:sid-facts")) as string);
+		expect(written.enrollmentFacts).toStrictEqual({ witness: "enrolled", mailAddress: "address" });
+		const none = JSON.parse((await raw.get("t14:facts:sid-none")) as string);
+		expect(none).not.toHaveProperty("enrollmentFacts");
+	});
+
+	it("keeps them through a second factor, as it keeps every field it does not rewrite", async () => {
+		const sessions = createRedisUserSessionStore({
+			client: makeIoredisClients(raw).userSessionStoreClient,
+			keyPrefix: "t14:facts-sf:",
+		});
+		await sessions.create({
+			sid: "sid-facts",
+			sub: "user-1",
+			authTime: new Date(),
+			expiresAt: new Date(Date.now() + 60_000),
+			claims: {},
+			amr: ["pwd"],
+			authentication: {
+				primary: "pwd",
+				federation: undefined,
+				upstreamAmr: undefined,
+				mfaAt: undefined,
+			},
+			enrollmentFacts: { witness: "not_enrolled", mailAddress: "none" },
+		});
+		await sessions.recordSecondFactor("sid-facts", { amr: ["otp", "mfa"], at: new Date() });
+		const written = JSON.parse((await raw.get("t14:facts-sf:sid-facts")) as string);
+		expect(written.enrollmentFacts).toStrictEqual({ witness: "not_enrolled", mailAddress: "none" });
+	});
+});
+
 describe("recordSecondFactor on Redis", () => {
 	const store = (prefix: string) =>
 		createRedisUserSessionStore({

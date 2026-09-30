@@ -83,7 +83,9 @@ export type LinkFederatedIdentityResult =
 	  };
 
 export interface UserRepository {
+	/** The user `username` and `password` authenticate, as plain data (see {@link User}), or `null`. */
 	authenticate(username: string, password: string): Promise<User | null>;
+	/** The user a federated identity token is linked to, as plain data (see {@link User}), or `null`. */
 	authenticateByToken(token: string): Promise<User | null>;
 	/**
 	 * Link a federated identity to an existing user. Optional: without it the

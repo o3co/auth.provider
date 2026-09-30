@@ -639,6 +639,8 @@ export {
 export {
 	checkMfaLockoutPolicy,
 	checkMfaTransactionTransitions,
+	checkSessionEmailProof,
+	checkSessionEmailProofQuestion,
 	getBoundMfaTransaction,
 	isConsumedMfaTransaction,
 	isMfaTransactionBoundTo,
@@ -659,6 +661,9 @@ export {
 	mfaTransactionPatchWrites,
 	newMfaTransactionRecord,
 	readMfaAttemptReservation,
+	readSessionEmailProof,
+	type SessionEmailProof,
+	sessionEmailProofAnswer,
 } from "./mfa/transactionStore.mjs";
 export { checkMfaVersionAdvances } from "./mfa/version.mjs";
 // Middleware — CORS for the browser-facing OAuth surface
@@ -966,6 +971,7 @@ export {
 	codeClaimFirstRead,
 	codeClaimRevalidation,
 	cookieClaim,
+	cookieSessionUser,
 	establishWithoutAsking,
 	type FederatedLogin,
 	isEstablishment,
@@ -1051,6 +1057,11 @@ export {
 	sessionAuthentication,
 	vouchedAmr,
 } from "./user-sessions/authentication.mjs";
+// What a session's enrollment facts may hold, read one way by every store.
+export {
+	readEnrollmentFacts,
+	recordableEnrollmentFacts,
+} from "./user-sessions/enrollmentFacts.mjs";
 export {
 	createSessionFamilyIndexFactory,
 	createSessionFederationIndexFactory,
@@ -1090,9 +1101,11 @@ export {
 // @o3co/auth-provider-redis.
 export type {
 	CreateUserSessionInput,
+	MailAddressFact,
 	RegisteredRP,
 	SecondFactorEvent,
 	SessionAuthentication,
+	SessionEnrollmentFacts,
 	SessionFamilyIndex,
 	SessionFamilyIndexFactory,
 	SessionFederationIndex,

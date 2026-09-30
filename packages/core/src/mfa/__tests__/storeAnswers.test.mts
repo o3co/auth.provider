@@ -16,9 +16,10 @@
 
 /**
  * The MFA stores' answers, read as their ports promise them, beside the
- * bound read: a reservation, a consumed transaction and a factor's
- * compare-and-set. An answer outside the promise is `undefined` or `false`,
- * which a caller answers as the store's outage — never as a verdict.
+ * bound read: a reservation, a consumed transaction, a factor's
+ * compare-and-set and a session's account-email proof. An answer outside the
+ * promise is `undefined` or `false`, which a caller answers as the store's
+ * outage — never as a verdict.
  */
 
 import { describe, expect, it } from "vitest";
@@ -28,6 +29,7 @@ import {
 	isConsumedMfaTransaction,
 	type MfaTransaction,
 	readMfaAttemptReservation,
+	readSessionEmailProof,
 } from "#/mfa/transactionStore.mjs";
 
 describe("readMfaAttemptReservation", () => {
@@ -86,6 +88,31 @@ describe("readMfaAttemptReservation", () => {
 			attempts: 1,
 		};
 		expect(readMfaAttemptReservation(answer, 5)).toBeUndefined();
+	});
+});
+
+describe("readSessionEmailProof", () => {
+	const NOW = 1_800_000_000_000;
+
+	it("reads no proof as no proof, and a proof as when it was given, up to the time asked about", () => {
+		expect(readSessionEmailProof(null, NOW)).toBeNull();
+		expect(readSessionEmailProof(NOW - 60_000, NOW)).toBe(NOW - 60_000);
+		expect(readSessionEmailProof(NOW, NOW)).toBe(NOW);
+		expect(readSessionEmailProof(0, NOW)).toBe(0);
+	});
+
+	it.each<[string, unknown]>([
+		["a time after the one asked about", NOW + 1],
+		["a time before the epoch", -1],
+		["a time that is not a number", Number.NaN],
+		["an infinite time", Number.NEGATIVE_INFINITY],
+		["a time as text", String(NOW)],
+		["a date", new Date(NOW)],
+		["a record", { provedAtMs: NOW }],
+		["a boolean", true],
+		["nothing", undefined],
+	])("reads %s as no answer", (_label, answer) => {
+		expect(readSessionEmailProof(answer, NOW)).toBeUndefined();
 	});
 });
 
@@ -235,9 +262,10 @@ describe("isMfaFactorUpdateWritten", () => {
 });
 
 describe("on the package's root", () => {
-	it("are the three readings", () => {
+	it("are the four readings", () => {
 		expect(core.readMfaAttemptReservation).toBe(readMfaAttemptReservation);
 		expect(core.isConsumedMfaTransaction).toBe(isConsumedMfaTransaction);
 		expect(core.isMfaFactorUpdateWritten).toBe(isMfaFactorUpdateWritten);
+		expect(core.readSessionEmailProof).toBe(readSessionEmailProof);
 	});
 });

@@ -56,6 +56,12 @@ export {
 	type FakeIdpOptions,
 	type FakeIdpRequest,
 } from "./fake-idp.mjs";
+export {
+	type FederationEntryForTests,
+	type FederationForTests,
+	withFederation,
+	withInsecureSessionCookie,
+} from "./fixtures/sessionConfig.mjs";
 export { userRepositoryHttpOf, withUserRepositoryHttp } from "./fixtures/userRepository.mjs";
 export {
 	type CoreConfigForTestsOptions,

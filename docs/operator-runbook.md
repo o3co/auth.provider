@@ -735,7 +735,11 @@ wires it.
   part or in a Unicode domain label; an emoji or another symbol beyond ASCII
   in a local part; a quoted local part with a space in it; and an underscore
   in a domain. **Such an account has no email factor and no account-email
-  proof.** After an operator reset with `requireEmailProof` (`mfa.reset`), it
+  proof.** A login records its address as `unreadable` in the session's
+  enrollment facts (`none` for an account with no address, `address` for one
+  the provider reads): no proof can be sent to it, so it cannot bind a first
+  factor until its address is fixed in the Store, and under
+  `mfa.mode = "required"` it cannot log in. After an operator reset with `requireEmailProof` (`mfa.reset`), it
   cannot give the proof its next first binding asks for, and needs another
   way back — a recovery code, or the operator; give it an address the
   provider reads before you reset it.
@@ -1198,7 +1202,7 @@ can share a database (`REDIS_SESSION_STORES_KEY_PREFIX`,
 | `oauth:code:<code>` | string, JSON code record | `redisCodeRepository.defaultExpiresIn` (`CLIENT_CODE_DEFAULT_EXPIRES_IN`, default 600 s) or the per-call `expiresIn`; consumed with `GETDEL` | `packages/redis/src/code-repository.mts` |
 | `atdeny:<jti>` | string `"1"` | the revoked access token's **remaining** lifetime plus about five minutes (`REVOCATION_RETENTION_ALLOWANCE_MS` — the verifier accepts a token that long past its `exp`); a token already past that writes nothing | `packages/redis/src/access-token-denylist.mts`, `packages/oauth/src/routes/revoke.mts` |
 | `<tag>:ip:<ip>` — `token`, `authorize`, `introspect`, `login`, `device_authorization`, `webauthn-authentication-options`; `device_verification:user:<subject>` | integer counter | the prefix's `windowSeconds`: `redis-rate-limiter.limits.<prefix>` when declared, else the budget the prefix's owning module contributes — `login` 20 per 900 s from `session.rateLimit.login` (the session module), `device_verification` 5 per 300 s from `device-grant.rateLimit` (the device grant), `webauthn-authentication-options` 30 per 60 s from `webauthn.rateLimit.authenticationOptions` (WebAuthn), `mfa` 60 per 300 s from `mfa.rateLimit.routes` (the MFA module) — else `defaultLimit` 60/60 s. The expiry is set atomically with the increment and only when missing, so a steady stream cannot hold a window open | `packages/redis/src/ratelimit.mts`, `ioredis/scripts/rate-limiter.mts` (`LUA_INCREMENT_WITH_TTL`), `core/src/ratelimit/budgetLookup.mts` |
-| `ss:us:<sid>` | string, JSON `{sid, sub, authTimeMs, createdAtMs, expiresAtMs, claims, amr?, authentication?}` — `amr` (RFC 8176, #481) is left out when the login path recorded none; `authentication` (`{primary, federation?, upstreamAmr?, mfaAtMs?}`, the MFA ADR's D9) is left out by a release before it, and such a session is read as one to split — a federated one vouches for `fed` alone | the session's `expiresAt` (`SET … PX … NX`); a verified second factor rewrites the value with `KEEPTTL` | `packages/redis/src/userSessionStore.mts` |
+| `ss:us:<sid>` | string, JSON `{sid, sub, authTimeMs, createdAtMs, expiresAtMs, claims, amr?, authentication?, enrollmentFacts?}` — `amr` (RFC 8176, #481) is left out when the login path recorded none; `authentication` (`{primary, federation?, upstreamAmr?, mfaAtMs?}`, the MFA ADR's D9) is left out by a release before it, and such a session is read as one to split — a federated one vouches for `fed` alone; `enrollmentFacts` (`{witness, mailAddress}`: the login's MFA enrollment witness and what its address is — none, one the provider reads, or one it cannot (`mailAddress`: `none`, `address`, `unreadable`), never the address; the MFA ADR's D12, D24) is left out by a release before it; such a session recorded nothing, which the MFA ADR's D12 has the `mfa` requirement send to log in before a first binding | the session's `expiresAt` (`SET … PX … NX`); a verified second factor rewrites the value with `KEEPTTL` | `packages/redis/src/userSessionStore.mts` |
 | `ss:rp:<sid>` | hash, field = `clientId`, value = RP envelope | `session.expiresAt`, raised but never truncated (`PEXPIREAT NX` + `GT`) | `packages/redis/src/sessionRPRegistry.mts`, `internal/redisSidHash.mts` |
 | `ss:fi:<sid>`, `ss:fed:<sid>` | sorted sets of family ids / federation names | same rule | `packages/redis/src/sessionFamilyIndex.mts`, `sessionFederationIndex.mts`, `internal/redisSidSortedSet.mts` |
 | `ss:sub:<subject>` | sorted set of sids, **score = each session's expiry** | key TTL raised to the latest member expiry; members pruned on read against the server's `TIME` | `packages/redis/src/subjectSessionIndex.mts` |
@@ -1214,6 +1218,7 @@ can share a database (`REDIS_SESSION_STORES_KEY_PREFIX`,
 | `mfat:tx:{<id>}` | hash — one MFA ceremony: `version`, `attempts`, `enrollment`, `emailProof`, `challenge` and `pendingEnrollment` when set, `record` (the rest as JSON, the login's continuation among it) and `incarnation` | its `expiresAtMs` (`mfa.transactionTtlSeconds`, 600 s), rounded up, set when it is created and moved by nothing; consumed by one verification | `packages/redis/src/mfa-transaction-store.mts`, `ioredis/scripts/mfa.mts` (`LUA_MFA_TX_*`) |
 | `mfat:lock:{<subject>}`, `mfat:week:{<subject>}` | hash (the consecutive run of guessable-proof failures, the reservations in flight) and sorted set (the weekly window, one member per failure, scored by its time), under one hash tag | **none** while a run is counted — a run ends only at a success, an exempt success, a password change or an operator reset, and D21's hard limit counts it across weeks; otherwise a day past the last failure to stop counting, on the server's clock. A `volatile-*` policy may evict them then, which lifts a weekly hold early — the module warns (`mfa_transaction_store_lock_evictable`); run `noeviction` | same (`LUA_MFA_SUBJECT_*`) |
 | `mfat:proof:{<subject>}` | string `"1"` — an operator reset's `requireEmailProof: true` (D25) | **none**, until the subject's next first binding consumes it; a password change and the reset's own clearing of the lock leave it. As durable as `mfaf:` (D12's step-3 amendment): the transaction store's module runs the same boot check | same |
+| `mfat:session-proof:{<subject>}:<sid>` | string, JSON `{provedAtMs, untilMs}` — the account-email proof (D24) given in one session of a subject | `untilMs` less the store's clock (`SET … PX`), set when it is recorded; a later proof for the session replaces it. Losing one fails closed — the user proves again — so no durability is required of it, and a `volatile-*` policy evicting one costs only a re-proof | same |
 
 The MFA transaction store judges when a subject's lock state stops counting
 on the time each caller passes, but what it reclaims — the TTL on
@@ -1252,6 +1257,8 @@ lifetime) per family:
 - **MFA** — only with the MFA stores on Redis. Per enrolled subject, one
   `mfaf:` hash, kept for good. Per second-factor ceremony, one `mfat:tx:` hash
   carrying the login's user snapshot, for at most `mfa.transactionTtlSeconds`.
+  Per session whose subject proved the account's address before a first
+  binding, one small `mfat:session-proof:` string until the proof ends.
   Per subject with guessable-proof failures, one
   `mfat:lock:` / `mfat:week:` pair; a subject whose run of failures was never
   ended keeps its pair until one is — where the Store lets anyone sign up,
@@ -1330,14 +1337,17 @@ the WebAuthn options routes answer `503 temporarily_unavailable`, logged as
 Core's in-process MFA transaction store (`memoryMfaTransactionStoreModule`,
 `mfaTransactionStore.adapter = "memory"`; nothing installs it while
 `mfa.mode` is `"off"`) sweeps the same way and is capped at a hundred
-thousand transactions (`core-mfa-transaction-store-memory.maxEntries`;
-`packages/core/src/mfa/memoryTransactionStore.mts`). A transaction carries
+thousand entries — transactions and the account-email proofs sessions gave,
+together (`core-mfa-transaction-store-memory.maxEntries`;
+`packages/core/src/mfa/memoryTransactionStore.mts`). A proof is two numbers,
+far smaller than a transaction. A transaction carries
 the login's user snapshot, so it is larger than a challenge: about 1.1 KB
 with a small `User`, so about 110 MB at the cap, growing with what the
 Store answers on `authenticate`. At the default ten-minute lifetime the cap
 is about 170 new transactions a second on one replica. At the cap it
-reclaims what has expired and otherwise refuses a new transaction with
-`MfaTransactionStoreFullError` rather than end a ceremony in flight. The
+reclaims what has expired and otherwise refuses a new transaction or proof
+with `MfaTransactionStoreFullError` rather than end a ceremony in flight or
+drop a proof a user gave. The
 subject lock state is not counted: it is kept per subject a login created,
 and a subject's consecutive run is kept until a success ends it.
 
