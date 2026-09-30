@@ -222,6 +222,18 @@ describe("isMfaFactorUpdateWritten", () => {
 	])("does not hold for %s", (_label, written) => {
 		expect(isMfaFactorUpdateWritten(written, REQUEST)).toBe(false);
 	});
+
+	it("does not hold for a record whose reading throws", () => {
+		const written = {
+			...RECORD,
+			version: 5,
+			data: "sealed-after",
+			get subject(): string {
+				throw new Error("boom");
+			},
+		};
+		expect(isMfaFactorUpdateWritten(written, REQUEST)).toBe(false);
+	});
 });
 
 describe("on the package's root", () => {
