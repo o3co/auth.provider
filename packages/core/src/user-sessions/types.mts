@@ -324,7 +324,11 @@ export interface SupportsSessionEnd {
 	 * `"ended"`. An `expiresAt` already past answers `"ended"`, and records
 	 * nothing.
 	 */
-	addFamilyIdUnlessEnded(sid: string, familyId: string, expiresAt: Date): Promise<"added" | "ended">;
+	addFamilyIdUnlessEnded(
+		sid: string,
+		familyId: string,
+		expiresAt: Date,
+	): Promise<"added" | "ended">;
 }
 
 /**
