@@ -205,6 +205,41 @@ describe("POST /session/mfa/challenge", () => {
 		expect(audit.of("mfa.challenge.sent")).toEqual([]);
 	});
 
+	it.each<[string, unknown]>([
+		["nothing", undefined],
+		["true", true],
+		["the transaction unmoved", "unmoved"],
+	])(
+		"answers 503 once when the transaction store answers %s for the challenge it keeps, and audits nothing",
+		async (_label, answer) => {
+			const store = createMemoryMfaTransactionStore();
+			const { app, logger, record, audit } = await withChallengedFactor(challenged(), {
+				...store,
+				update: async (...args) => {
+					const written = await store.update(...args);
+					return (
+						answer === "unmoved" ? written && { ...written, version: args[1] } : answer
+					) as never;
+				},
+			});
+			const { agent, transaction } = await beginLogin(app);
+
+			const res = await mfaPost(agent, "/challenge", {
+				transaction_id: transaction,
+				factor_id: record.id,
+			});
+
+			expect(res.status).toBe(503);
+			expect(events(logger, "error")).toEqual(["mfa_store_unavailable"]);
+			expect(logger.error.mock.calls[0]?.[0]).toMatchObject({
+				route: "challenge",
+				store: "mfa_transaction",
+				step: "update",
+			});
+			expect(audit.of("mfa.challenge.sent")).toEqual([]);
+		},
+	);
+
 	it("answers 503 once when the transaction store cannot keep the challenge", async () => {
 		const store = createMemoryMfaTransactionStore();
 		let armed = false;
