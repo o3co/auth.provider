@@ -47,11 +47,9 @@ const smokeKeyPair = generateKeyPairSync("ed25519", {
 const config: AppConfig = {
 	http: { port: 0, trustProxy: false, readinessTimeoutMs: 1000 },
 	logging: { level: "silent" },
-	// The parsed config always carries `mfa`. A composition with a consumer of
-	// session admission states what it expects (ADR
-	// 2026-09-28-session-admission): the shipped `application.conf` expects
-	// none, and so does this hand-built config.
-	mfa: { mode: "off" },
+	// A composition with a consumer of session admission states what it
+	// expects (ADR 2026-09-28-session-admission): the shipped
+	// `application.conf` expects none, and so does this hand-built config.
 	sessionRequirements: { expected: [] },
 	oauth: {
 		jwt: {

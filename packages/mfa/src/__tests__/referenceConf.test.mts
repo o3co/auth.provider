@@ -17,32 +17,39 @@
 /**
  * The package's `reference.conf` (the MFA ADR's D19): the defaults of the
  * keys this package reads, layered as a composition root layers it — over
- * core's `reference.conf`, through core's `AppConfigSchema` — and the
- * variables that reach them: `MFA_ENCRYPTION_KEY` (the first key of the ring,
- * which has no default), `MFA_TOTP_ENABLED` and `MFA_TOTP_ISSUER`; and the
- * transaction's life, its attempts and the subject lock, which have no
- * variable (D19).
+ * core's `reference.conf`, resolved and unparsed, as `createApp` is handed
+ * it — and the variables that reach them: `MFA_ENCRYPTION_KEY` (the first key
+ * of the ring, which has no default), `MFA_TOTP_FACTOR_ENABLED` and
+ * `MFA_TOTP_FACTOR_ISSUER`; `mfa.mode`, `off` unless `MFA_MODE` says
+ * otherwise; the transaction's life, its attempts and the
+ * subject lock, which have no variable (D19); and the two variables still
+ * bound at the TOTP factor's old path, which boot refuses.
  */
 
 import { randomBytes } from "node:crypto";
+import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
-import { AppConfigSchema } from "@o3co/auth-provider-core";
+import { BootError, createApp } from "@o3co/auth-provider-core";
 import { parseFile } from "@o3co/ts.hocon";
-import { validate } from "@o3co/ts.hocon/zod";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
 	MFA_DEVELOPMENT_SAMPLE_KEY,
 	type MfaSettingsOptions,
+	mfaTotpConfigSchema,
 	readMfaSettings,
 	readMfaTotpSettings,
 } from "#/config.mjs";
 
-/** `readMfaSettings` under the deployment mode a configuration that states none has, unless `options` names one. */
+/** `readMfaSettings` over the `mfa` section of `config`, under the deployment mode a configuration that states none has, unless `options` names one. */
 const readSettings = (config: unknown, options: Partial<MfaSettingsOptions> = {}) =>
-	readMfaSettings(config, { deploymentMode: "unset", ...options });
+	readMfaSettings((config as { mfa?: unknown } | undefined)?.mfa, {
+		deploymentMode: "unset",
+		...options,
+	});
 
 import { createMfaSealing } from "#/sealing.mjs";
+import { mfaTotpFactorModule } from "#/totp/module.mjs";
 
 const require = createRequire(import.meta.url);
 const CORE_REFERENCE = require.resolve("@o3co/auth-provider-core/reference.conf");
@@ -55,13 +62,23 @@ const REQUIRED_ENV = {
 	SESSION_SECRET: "mfa-reference-conf-session.at-least-32-bytes.ok",
 };
 
-const resolve = (env: Record<string, string> = {}) => {
+/** What a composition root resolves from the two references, as it hands it to `createApp`. */
+interface Resolved {
+	readonly mfa: { readonly mode?: unknown; readonly factors?: unknown };
+	readonly "mfa-totp-factor": Record<string, unknown>;
+	readonly oauth: { readonly jwt: { readonly issuer: string } };
+}
+
+const resolve = (env: Record<string, string> = {}): Resolved => {
 	const options = { env: { ...REQUIRED_ENV, ...env } };
-	return validate(
-		parseFile(MFA_REFERENCE, options).withFallback(parseFile(CORE_REFERENCE, options)),
-		AppConfigSchema,
-	);
+	return parseFile(MFA_REFERENCE, options)
+		.withFallback(parseFile(CORE_REFERENCE, options))
+		.toObject() as unknown as Resolved;
 };
+
+/** The TOTP settings as the factor's module reads them: its section, and the deployment's issuer. */
+const totpOf = (config: Resolved) =>
+	readMfaTotpSettings(config["mfa-totp-factor"], { issuer: config.oauth.jwt.issuer });
 
 afterEach(() => {
 	vi.unstubAllEnvs();
@@ -78,7 +95,7 @@ describe("the package's reference.conf", () => {
 		const settings = readSettings(config);
 		expect(settings.encryptionKeys).toHaveLength(1);
 		expect(settings.encryptionKeys[0]?.key.equals(Buffer.from(key, "base64"))).toBe(true);
-		expect(readMfaTotpSettings(config)).toEqual({
+		expect(totpOf(config)).toEqual({
 			enabled: true,
 			algorithm: "SHA1",
 			digits: 6,
@@ -129,17 +146,117 @@ describe("the package's reference.conf", () => {
 		});
 	});
 
-	it("reads MFA_TOTP_ENABLED and MFA_TOTP_ISSUER", () => {
-		const totp = readMfaTotpSettings(
-			resolve({ MFA_TOTP_ENABLED: "false", MFA_TOTP_ISSUER: "Example Co" }),
+	it("reads each key of mfa-totp-factor from its variable: MFA_TOTP_FACTOR_ENABLED, _ALGORITHM, _DIGITS, _PERIOD, _WINDOW and _ISSUER", () => {
+		const totp = totpOf(
+			resolve({
+				MFA_TOTP_FACTOR_ENABLED: "false",
+				MFA_TOTP_FACTOR_ALGORITHM: "SHA256",
+				MFA_TOTP_FACTOR_DIGITS: "8",
+				MFA_TOTP_FACTOR_PERIOD: "60",
+				MFA_TOTP_FACTOR_WINDOW: "0",
+				MFA_TOTP_FACTOR_ISSUER: "Example Co",
+			}),
 		);
-		expect(totp.enabled).toBe(false);
-		expect(totp.issuer).toBe("Example Co");
+		expect(totp).toEqual({
+			enabled: false,
+			algorithm: "SHA256",
+			digits: 8,
+			period: 60,
+			window: 0,
+			issuer: "Example Co",
+		});
 	});
 
-	it("keeps core's mfa.mode beside the package's keys", () => {
+	it("binds every variable boot's refusal of the old path names, each at its key's new path; a value written at the old path whole names none", async () => {
+		const refusalOf = async (config: unknown) => {
+			try {
+				const handle = await createApp({
+					modules: [mfaTotpFactorModule],
+					bootstrapComponents: { config, pathResolver: (p: string) => p } as never,
+				});
+				await handle.dispose();
+			} catch (error) {
+				if (error instanceof BootError) return error;
+				throw error;
+			}
+			throw new Error("the boot was not refused");
+		};
+		const text = readFileSync(MFA_REFERENCE, "utf8");
+		for (const key of Object.keys(mfaTotpConfigSchema.shape)) {
+			const refused = await refusalOf({
+				...resolve(),
+				mfa: { factors: { totp: { [key]: "1" } } },
+			});
+			const [relocated] = (
+				refused.details as unknown as { relocated: { to: string; environmentVariable?: string }[] }
+			).relocated;
+			expect(relocated?.to, key).toBe(`mfa-totp-factor.${key}`);
+			const variable = relocated?.environmentVariable ?? "";
+			expect(text, key).toContain(`\${?${variable}}`);
+			const marked = parseFile(MFA_REFERENCE, { env: { [variable]: "__MARKER__" } }).toObject() as {
+				"mfa-totp-factor": Record<string, unknown>;
+			};
+			expect(marked["mfa-totp-factor"][key], key).toBe("__MARKER__");
+		}
+		const whole = await refusalOf({ ...resolve(), mfa: { factors: { totp: null } } });
+		expect(whole.details).toEqual({
+			reason: "config-path-relocated",
+			relocated: [{ module: "mfa-totp-factor", from: "mfa.factors.totp", to: "mfa-totp-factor" }],
+		});
+	});
+
+	it("binds MFA_TOTP_ENABLED and MFA_TOTP_ISSUER at the old path alone, with no default: they feed mfa-totp-factor nothing", () => {
+		expect(resolve().mfa.factors).toEqual({ totp: {} });
+		const config = resolve({ MFA_TOTP_ENABLED: "false", MFA_TOTP_ISSUER: "Example Co" });
+		expect(config.mfa.factors).toEqual({ totp: { enabled: "false", issuer: "Example Co" } });
+		expect(totpOf(config)).toMatchObject({ enabled: true, issuer: "auth.example" });
+	});
+
+	it("refuses the boot of a composition installing the TOTP factor's module while MFA_TOTP_ENABLED or MFA_TOTP_ISSUER is set, naming the new path and its variable", async () => {
+		for (const [variable, key] of [
+			["MFA_TOTP_ENABLED", "enabled"],
+			["MFA_TOTP_ISSUER", "issuer"],
+		] as const) {
+			let refused: unknown;
+			try {
+				const handle = await createApp({
+					modules: [mfaTotpFactorModule],
+					bootstrapComponents: {
+						config: resolve({ [variable]: "Example" }),
+						pathResolver: (p: string) => p,
+					} as never,
+				});
+				await handle.dispose();
+			} catch (error) {
+				refused = error;
+			}
+			expect(refused, variable).toBeInstanceOf(BootError);
+			expect((refused as BootError).reason, variable).toBe("config-path-relocated");
+			expect((refused as BootError).details, variable).toEqual({
+				reason: "config-path-relocated",
+				relocated: [
+					{
+						module: "mfa-totp-factor",
+						from: `mfa.factors.totp.${key}`,
+						to: `mfa-totp-factor.${key}`,
+						environmentVariable: `MFA_TOTP_FACTOR_${key.toUpperCase()}`,
+					},
+				],
+			});
+		}
+	});
+
+	it("defaults mfa.mode to off and reads MFA_MODE: this file binds it, and core's reference.conf does not", () => {
 		expect(resolve().mfa.mode).toBe("off");
 		expect(resolve({ MFA_MODE: "optional" }).mfa.mode).toBe("optional");
+		const alone = (env: Record<string, string>) =>
+			(parseFile(MFA_REFERENCE, { env }).toObject() as { mfa?: { mode?: unknown } }).mfa?.mode;
+		expect(alone({})).toBe("off");
+		expect(alone({ MFA_MODE: "required" })).toBe("required");
+		const core = parseFile(CORE_REFERENCE, {
+			env: { ...REQUIRED_ENV, MFA_MODE: "required" },
+		}).toObject();
+		expect(core).not.toHaveProperty("mfa");
 	});
 
 	it("takes the development sample key through MFA_ENCRYPTION_KEY in development, and refuses it in production", () => {

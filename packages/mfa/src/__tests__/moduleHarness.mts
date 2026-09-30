@@ -110,22 +110,31 @@ export const LOCKOUT = {
 export const mfaSection = (mode: "off" | "optional" | "required") => ({
 	mode,
 	encryptionKeys: [{ key: MFA_KEY }],
-	factors: {
-		totp: { enabled: true, algorithm: "SHA1", digits: 6, period: 30, window: 1 },
-	},
 	transactionTtlSeconds: 600,
 	maxAttemptsPerTransaction: 5,
 	lockout: { ...LOCKOUT },
 });
 
+/** The TOTP factor's `mfa-totp-factor` section as the package's reference.conf resolves it. */
+export const TOTP_SECTION = {
+	enabled: true,
+	algorithm: "SHA1",
+	digits: 6,
+	period: 30,
+	window: 1,
+} as const;
+
 /**
  * The composition's configuration: core's valid fixture, a login over plain
  * HTTP (no `Secure` cookie), `endpoints.mfa.url` as core's reference.conf
- * ships it, `mfa` declared expected, and the `mfa` section under `mode`.
+ * ships it, `mfa` declared expected, the `mfa` section under `mode`, and the
+ * TOTP factor's `mfa-totp-factor` section, each with the keys given laid
+ * over it.
  */
 export function configFor(
 	mode: "off" | "optional" | "required",
 	mfa: Record<string, unknown> = {},
+	totp: Record<string, unknown> = {},
 ): AppConfig {
 	const base = makeValidAppConfig();
 	return {
@@ -140,6 +149,7 @@ export function configFor(
 		endpoints: { ...base.endpoints, mfa: { url: "/mfa" } },
 		sessionRequirements: { expected: ["mfa"] },
 		mfa: { ...mfaSection(mode), ...mfa },
+		"mfa-totp-factor": { ...TOTP_SECTION, ...totp },
 	} as unknown as AppConfig;
 }
 

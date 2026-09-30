@@ -130,8 +130,8 @@ export function operatorPath(path: readonly PropertyKey[]): string {
  * choose the modules and for what the root needs before boot; hand
  * `createApp` the resolved configuration itself.
  *
- * An absent ancestor of a read path reads as the base's default, if any (no
- * `mfa` section: `mfa.mode` reads `"off"`, as boot does). A refused value is
+ * An absent ancestor of a read path reads as the base's default, if any, as
+ * boot's parse does. A refused value is
  * a `RangeError` naming each operator path, with the Zod error as its
  * `cause`; so is a path the base does not declare as one schema, or one
  * beneath a value the base transforms whole (read the shorter path).
