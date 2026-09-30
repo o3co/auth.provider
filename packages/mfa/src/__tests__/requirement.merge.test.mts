@@ -72,7 +72,7 @@ const FACTOR_SETS: Readonly<Record<MergeFactors, () => MfaFactor[]>> = {
 
 /** The issuer each page is registered on, as boot registers it on oauth.jwt.issuer. */
 const ISSUER = "https://auth.test";
-/** `endpoints.mfa.url` as core's reference.conf ships it. */
+/** `mfa.page.url` as the package's reference.conf ships it. */
 const PAGE: StepUpPage = { url: "/mfa", params: {} };
 
 /** The requirement the MFA module registers under `mode`, over the factors of `factors`. */

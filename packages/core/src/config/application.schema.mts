@@ -1148,10 +1148,6 @@ export const fullSectionsSchema = z.object({
 		// `login`. Default `/consent` from HOCON: the deployment's page, not the
 		// `/oauth/consent` JSON API it calls.
 		consent: z.object({ url: z.string() }).optional(),
-		// The deployment's step-up page (`/mfa` by default, from HOCON). The MFA
-		// package's `mfa` requirement registers it, so its `step_up` verdicts
-		// send a browser there.
-		mfa: z.object({ url: z.string() }).optional(),
 	}),
 	cors: z.object({
 		/**

@@ -36,6 +36,7 @@ const PUBLISHED_PACKAGES = [
 	"packages/webauthn",
 	"packages/dpop",
 	"packages/mtls",
+	"packages/test-kit",
 	"create-app",
 ];
 

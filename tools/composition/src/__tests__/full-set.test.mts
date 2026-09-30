@@ -163,6 +163,8 @@ const ADDED: Readonly<Record<string, readonly string[]>> = {
 	],
 	"@o3co/auth-provider-mtls": ["mtls"],
 	"@o3co/auth-provider-oauth-token-exchange": ["oauth-token-exchange"],
+	// No module: contract suites and fakes, for tests.
+	"@o3co/auth-provider-test-kit": [],
 	"@o3co/auth-provider-webauthn": [
 		"webauthn",
 		"webauthn-session-subject",
@@ -499,6 +501,68 @@ describe("a setting still written where its section moved from, read as the temp
 	it("boots with the setting at the new path, through its variable, and the factor reads it", async () => {
 		const { handle } = await boot({ env: { ...SINGLE_ENV, MFA_TOTP_FACTOR_ENABLED: "false" } });
 		expect(handle.components.mfaFactorResolver?.get("totp")).toBeUndefined();
+	});
+
+	/** The page the `mfa` requirement registered as its step-up page. */
+	const stepUpPageOf = ({ handle }: FullSet) =>
+		handle.components.sessionRequirementResolver?.get("mfa")?.stepUpPage?.url;
+
+	it("refuses the boot when the operator's own layer writes the MFA page's old path, naming mfa.page.url and MFA_PAGE_URL", async () => {
+		const err = await refused({ operatorHocon: 'endpoints.mfa.url = "/account/mfa"\n' });
+		expect(err.reason).toBe("config-path-relocated");
+		expect(err.details).toEqual({
+			reason: "config-path-relocated",
+			relocated: [
+				{
+					module: "mfa",
+					from: "endpoints.mfa.url",
+					to: "mfa.page.url",
+					environmentVariable: "MFA_PAGE_URL",
+				},
+			],
+		});
+	});
+
+	it("refuses the boot when the environment sets ENDPOINTS_MFA_URL and not MFA_PAGE_URL, naming the new variable and its path", async () => {
+		const err = await refused({ env: { ...SINGLE_ENV, ENDPOINTS_MFA_URL: "/account/mfa" } });
+		expect(err.reason).toBe("environment-variable-renamed");
+		expect(err.details).toEqual({
+			reason: "environment-variable-renamed",
+			renamed: [
+				{
+					module: "mfa",
+					from: "ENDPOINTS_MFA_URL",
+					to: "MFA_PAGE_URL",
+					path: "mfa.page.url",
+					state: "unset",
+				},
+			],
+		});
+	});
+
+	it("refuses the boot when ENDPOINTS_MFA_URL and MFA_PAGE_URL are set to different values, printing neither", async () => {
+		const err = await refused({
+			env: { ...SINGLE_ENV, ENDPOINTS_MFA_URL: "/old-7c1e", MFA_PAGE_URL: "/new-2a9f" },
+		});
+		expect(err.reason).toBe("environment-variable-renamed");
+		expect(err.details).toMatchObject({
+			renamed: [{ from: "ENDPOINTS_MFA_URL", to: "MFA_PAGE_URL", state: "different" }],
+		});
+		expect(err.message).not.toContain("/old-7c1e");
+		expect(err.message).not.toContain("/new-2a9f");
+	});
+
+	it("boots with ENDPOINTS_MFA_URL and MFA_PAGE_URL set to the same value, and the requirement registers that page", async () => {
+		const set = await boot({
+			env: { ...SINGLE_ENV, ENDPOINTS_MFA_URL: "/account/mfa", MFA_PAGE_URL: "/account/mfa" },
+		});
+		expect(mfaOf(set.config)?.page).toEqual({ url: "/account/mfa" });
+		expect(stepUpPageOf(set)).toBe("/account/mfa");
+	});
+
+	it("boots with MFA_PAGE_URL alone, and the requirement registers that page", async () => {
+		const set = await boot({ env: { ...SINGLE_ENV, MFA_PAGE_URL: "/account/mfa" } });
+		expect(stepUpPageOf(set)).toBe("/account/mfa");
 	});
 });
 

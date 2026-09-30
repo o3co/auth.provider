@@ -1,0 +1,50 @@
+{
+	"name": "@o3co/auth-provider-test-kit",
+	"description": "Contract suites and a fake Store for implementations of auth.provider's ports",
+	"version": "0.0.0",
+	"license": "Apache-2.0",
+	"engines": {
+		"node": ">=22.0.0"
+	},
+	"type": "module",
+	"main": "./dist/index.mjs",
+	"types": "./dist/index.d.mts",
+	"exports": {
+		".": {
+			"import": "./dist/index.mjs",
+			"types": "./dist/index.d.mts"
+		}
+	},
+	"files": [
+		"dist",
+		"README.md"
+	],
+	"repository": {
+		"type": "git",
+		"url": "https://github.com/o3co/auth.provider.git",
+		"directory": "packages/test-kit"
+	},
+	"scripts": {
+		"prebuild": "rimraf dist",
+		"build": "tsc",
+		"typecheck": "tsc --noEmit && tsc -p tsconfig.test.json",
+		"test": "vitest run",
+		"test:coverage": "vitest run --coverage"
+	},
+	"imports": {
+		"#/*": {
+			"development": "./src/*",
+			"default": "./dist/*"
+		}
+	},
+	"peerDependencies": {
+		"@o3co/auth-provider-core": "workspace:^"
+	},
+	"devDependencies": {
+		"@o3co/auth-provider-core": "workspace:*",
+		"@types/node": "^26.6.3",
+		"@vitest/coverage-v8": "^5.0.2",
+		"typescript": "^6.0.3",
+		"vitest": "^5.0.2"
+	}
+}

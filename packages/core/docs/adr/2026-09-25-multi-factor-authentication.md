@@ -6,6 +6,7 @@
 - Written against: `develop` at `d3d9c8f2` (#692). Every "today" below was checked there, and the sibling repositories at their `develop`.
 - Amended 2026-09-28 (session admission): after step 5 (#707), [the session-admission ADR](2026-09-28-session-admission.md) moved the question "may this session proceed?" out of each consumer and into one core decision point, and made MFA the first *requirement* registered with it. D8's coordinator slot, D16's per-consumer wiring, D19/D20's `mfa.mode` in core, build-order steps 7, 13, 14 and 22, and O2 are amended below, each at its place; that record's §7 lists them together. Steps 1–5 stand as built.
 - Amended 2026-09-30 (rate-limit budgets, #782): the bundled limiters no longer seed budgets; the module that keys a prefix contributes its budget (`rateLimitBudgets`). The MFA module contributes `mfa` from `mfa.rateLimit.routes`, and the email factor's module is to contribute its own `mfa-email` from `mfa.factors.email.sendLimit`; where this record says the limiters seed them, or names core's `ratelimit/mfaSpec.mts`, read that.
+- Amended 2026-09-30 (the Store's MFA contract over HTTP, #754): the contract suites of what code outside core implements live in a published package of their own, `@o3co/auth-provider-test-kit`, which depends on core alone — the enrollment witness's is written there, with a fake Store, and D7's factor-store suite and the Redis package's copies follow before 1.0, their parity test going with them. The Store adapter's four URLs are the `foundation-mfa-factor-store` section's (`FOUNDATION_MFA_FACTOR_STORE_*_URL`), not `repositories.user.http`'s, and each is required: a missing one refuses boot (D7's "four optional URLs", D19). An update names the record by `subject` and `id` and carries the expected version and, as its changes, only `data`, `label` and `lastUsedAtMs`; the wire contract is `@o3co/auth-provider-foundation`'s README.
 
 ## Context
 
@@ -179,6 +180,8 @@ Rejected: SMTP on a subpath of `packages/mfa` with an optional peer (it ties a m
 ### D6 — The provider serves JSON; the pages are the deployment's
 
 As for login and consent, the provider owns `/session/mfa/*` (JSON) and redirects to `endpoints.mfa.url` (default `/mfa`) when `/authorize` needs a step-up. The login page continues from the login response without a redirect (F1). The self-service screen is the deployment's account page. The QR code is rendered by the page from the `otpauth://` URI. The page contract is documented in the MFA package README with a worked example, and requires: same origin as the provider (the session cookie is `__Host-`); navigation back to `redirect_to` only when it is on the provider's origin; code inputs with `autocomplete="one-time-code"` and `inputmode="numeric"`, and long codes accepted pasted with or without hyphens; `frame-ancestors 'none'`; and a lock answer (`429 mfa_locked`) shown with the factors that still work (D21).
+
+Amended 2026-09-30 (#803): the MFA page's URL is `mfa.page.url`, the MFA module's key.
 
 Rejected for the first release (O11): provider-served reference pages, and a server-rendered QR image.
 
