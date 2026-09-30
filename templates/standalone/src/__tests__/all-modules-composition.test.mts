@@ -948,7 +948,7 @@ const OUTAGES: readonly OutageCase[] = [
 		event: "authorize_consent_store_unavailable",
 		defects: {
 			"store-field":
-				"packages/oauth `routes/authorize.mts`: `authorize_consent_store_unavailable` carries `clientId` and `err` but no `store` / `step` / `site` field",
+				"packages/oauth `routes/authorizeConsent.mts`: `authorize_consent_store_unavailable` carries `clientId` and `err` but no `store` / `step` / `site` field",
 		},
 	},
 	{
@@ -964,7 +964,7 @@ const OUTAGES: readonly OutageCase[] = [
 		event: "authorize_pending_consent_store_unavailable",
 		defects: {
 			"store-field":
-				"packages/oauth `routes/authorize.mts`: `authorize_pending_consent_store_unavailable` carries `clientId` and `err` but no `store` / `step` / `site` field",
+				"packages/oauth `routes/authorizeConsent.mts`: `authorize_pending_consent_store_unavailable` carries `clientId` and `err` but no `store` / `step` / `site` field",
 		},
 	},
 	{

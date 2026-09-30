@@ -1520,7 +1520,7 @@ describe("createTokenExchangeGrant — happy path", () => {
 });
 
 describe("createTokenExchangeGrant — policy hook", () => {
-	it("rejects with access_denied when policy hook denies", async () => {
+	it("answers a policy's access_denied deny 400 access_denied", async () => {
 		const g = buildGrant({ grantPolicy: denyPolicy });
 		const token = await signSelfIssuedAccessToken({ family_id: "fam-1" });
 		const { result } = await g.handle(
@@ -1531,7 +1531,7 @@ describe("createTokenExchangeGrant — policy hook", () => {
 				subject_token_type: ACCESS_TOKEN_TYPE,
 			}),
 		);
-		expect(result).toMatchObject({ status: 403, error: "access_denied" });
+		expect(result).toMatchObject({ status: 400, error: "access_denied" });
 	});
 
 	it("applies policy hook grantedScope / grantedAudience overrides", async () => {

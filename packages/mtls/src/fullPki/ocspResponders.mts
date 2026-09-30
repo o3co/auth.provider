@@ -21,20 +21,16 @@
  */
 
 import type * as pkijs from "pkijs";
+import { GENERAL_NAME_URI, isHttpUrl } from "./revocationSource.mjs";
 
 /** OID of `authorityInfoAccess` (RFC 5280 §4.2.2.1). */
 const OID_AUTHORITY_INFO_ACCESS = "1.3.6.1.5.5.7.1.1";
 /** `id-ad-ocsp` access method. */
 const OID_AD_OCSP = "1.3.6.1.5.5.7.48.1";
 
-/** `GeneralName` tag for `uniformResourceIdentifier`. */
-const GENERAL_NAME_URI = 6;
-
 export type OcspResponders =
 	| { readonly ok: true; readonly urls: readonly string[] }
 	| { readonly ok: false; readonly reason: "no_responder"; readonly detail: string };
-
-const isHttpUrl = (value: string): boolean => /^https?:\/\//i.test(value);
 
 /**
  * The OCSP responders a certificate advertises, in the order listed. RFC

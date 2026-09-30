@@ -164,7 +164,7 @@ describe("a verified second factor completes the login", () => {
 
 		expect(res.status).toBe(401);
 		expect(res.body).toEqual({ error: "login_required", error_description: "Log in again" });
-		expect(events(logger, "warn").filter((event) => event.startsWith("mfa_"))).toEqual([
+		expect(events(logger, "warn").filter((event) => event.startsWith("mfa_login_"))).toEqual([
 			"mfa_login_not_resumed",
 		]);
 		expect(events(logger, "error")).toEqual([]);

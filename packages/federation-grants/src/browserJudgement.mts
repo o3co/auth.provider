@@ -19,11 +19,13 @@
  * the express session first, then session admission on the cookie's claim as
  * the step's action, then the flow's own conditions. Asked at
  * every step; fails closed, so a store that cannot answer is an outage, never a yes.
+ * The connection pin is defined here once, for the judgement and the callback alike.
  */
 
 import {
 	type AdmissionDeps,
 	admitSession,
+	type FederationGrantAcquisitionConnection,
 	type FederationGrantBrowserBinding,
 	type FederationGrantConnectTransaction,
 	type FederationGrantIntent,
@@ -149,20 +151,29 @@ export async function judge(
 		return { ok: false, status: 503, reason: "unavailable", unanswered: { ...asking, error } };
 	}
 
-	const connection = options.connections.get(intent.connection);
-	if (
-		connection === undefined ||
-		// The revisions pin the issuer and client, not the federation's name; boot
-		// probed the Store under the name the connection has NOW.
-		connection.federation !== intent.federation ||
-		federationGrantIdentityRevision(connection) !== intent.identityRevision ||
-		federationGrantAuthorizationRevision(connection) !== intent.authorizationRevision ||
-		connection.callbackUri !== intent.callbackUri
-	) {
+	if (!pinned(options.connections.get(intent.connection), intent)) {
 		// The user would be shown one thing and the upstream asked for another.
 		return { ok: false, status: 400, reason: "connection_changed" };
 	}
 	return { ok: true, binding: { sessionId, sid: session.sid, subject: session.sub } };
+}
+
+/**
+ * Whether the connection is still the one the intent was lodged against: present,
+ * the same federation entry, both revisions and the callback. The name is pinned
+ * because the revisions do not cover it, and boot probed the Store under the current one.
+ */
+export function pinned(
+	connection: FederationGrantAcquisitionConnection | undefined,
+	intent: FederationGrantIntent,
+): connection is FederationGrantAcquisitionConnection {
+	return (
+		connection !== undefined &&
+		connection.federation === intent.federation &&
+		federationGrantIdentityRevision(connection) === intent.identityRevision &&
+		federationGrantAuthorizationRevision(connection) === intent.authorizationRevision &&
+		connection.callbackUri === intent.callbackUri
+	);
 }
 
 /**

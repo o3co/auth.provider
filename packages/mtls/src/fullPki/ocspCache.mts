@@ -21,7 +21,6 @@
  * `nonce_mismatch`; a cached delegated responder's answer re-checks it on every hit.
  */
 
-import { createHash } from "node:crypto";
 import type * as pkijs from "pkijs";
 import { CRL_NEGATIVE_CACHE_TTL_MS } from "./crl.mjs";
 import { type Answer, markOutage, type OcspCertificateStatus } from "./ocspAnswer.mjs";
@@ -86,11 +85,6 @@ type CacheEntry =
 	  };
 
 export const DEFAULT_MAX_CACHE_ENTRIES = 1024;
-
-export const issuerKeyId = (issuer: pkijs.Certificate): string =>
-	createHash("sha256")
-		.update(new Uint8Array(issuer.subjectPublicKeyInfo.toSchema().toBER(false)))
-		.digest("hex");
 
 export const serialHex = (certificate: pkijs.Certificate): string =>
 	Buffer.from(certificate.serialNumber.valueBlock.valueHexView).toString("hex");

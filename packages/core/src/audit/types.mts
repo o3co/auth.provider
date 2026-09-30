@@ -89,11 +89,16 @@ export const BUILT_IN_AUDIT_EVENT_TYPES = [
 	// `mfa.email_address_mismatch`, the email factor refused because the
 	// account's address no longer matches the one it was enrolled with,
 	// nothing more — never an address. The event's `timestamp` is when.
+	// `mfa.first_binding_conflict` — two logins of one subject bound a first
+	// factor at once, and this one dropped its own: a password holder may be
+	// racing the account's owner — carries the factor's `kind` and `removed`,
+	// false when its factor could not be removed and may still stand.
 	"mfa.challenge.sent",
 	"mfa.email_address_mismatch",
 	"mfa.enrollment_state_inconsistent",
 	"mfa.factor.enrolled",
 	"mfa.factor.removed",
+	"mfa.first_binding_conflict",
 	"mfa.locked",
 	"mfa.locked.first",
 	"mfa.recovery_code.used",

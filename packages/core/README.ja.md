@@ -1,6 +1,6 @@
 # @o3co/auth-provider-core
 
-最終更新: 2026-09-30
+最終更新: 2026-10-01
 
 ## 責務と役割
 
@@ -563,7 +563,7 @@ sender-constrained なトークンバインディングは第一級の拡張面�
 
 複数の機構が組み込まれたとき、`core.tokenBinding.dispatchPolicy`（core 自身のセクションにある — single source of truth）が調停します:
 
-- `intent-explicit`（既定）— ambient より explicit-intent の機構を優先する。
+- `intent-explicit`（既定）— ambient より explicit-intent の機構を優先する。explicit-intent の機構が 2 つ以上成功したとき、または explicit-intent の成功がなく ambient の機構が 2 つ以上成功したときは `invalid_request` で拒否し、warn の 1 行 `token_binding_ambiguous`（`tier` と、成功した `mechanisms`）をログに出す。
 - `strict-mutual-exclusion` — 2 つ以上の機構の `extract` がバインディングを返したら `invalid_request` で拒否する。
 
 環境変数での上書き: `CORE_TOKEN_BINDING_DISPATCH_POLICY`。

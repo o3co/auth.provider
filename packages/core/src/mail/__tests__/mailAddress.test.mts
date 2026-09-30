@@ -47,8 +47,32 @@ describe("normaliseMailAddress", () => {
 		);
 		expect(normaliseMailAddress("alice+mfa@example.com")).toBe("alice+mfa@example.com");
 		expect(normaliseMailAddress("a.lice@example.com")).toBe("a.lice@example.com");
-		// The last `@` splits: a quoted local part may hold one.
-		expect(normaliseMailAddress('"a@b"@Example.com')).toBe('"a@b"@example.com');
+		expect(normaliseMailAddress('"a,b"@Example.com')).toBe('"a,b"@example.com');
+	});
+
+	it("reads no local part a relay could route onward, and no quoted angle bracket: a percent or a bang, a quoted at sign, percent or bang, an encoded word, or a quoted < or > is none", () => {
+		for (const value of [
+			// Routing operators (#844): a relay may forward on them.
+			"victim%evil.example@example.com",
+			"evil.example!victim@example.com",
+			'"victim@evil.example"@example.com',
+			'"victim%evil.example"@example.com',
+			'"evil.example!victim"@example.com',
+			'"bob@evil.example,carol"@example.com',
+			// An encoded word (RFC 2047), which a mail user agent decodes into another address.
+			"=?utf-8?q?victim=40evil.example?=@example.com",
+			'"=?utf-8?b?dmljdGlt?="@example.com',
+			"a=?x?q?y?=b@example.com",
+			// An angle bracket inside a quoted local part (#839), which an SMTP envelope refuses.
+			'"a<b"@example.com',
+			'"a>b"@example.com',
+			'"x>bob@evil.example"@example.com',
+		]) {
+			expect(normaliseMailAddress(value), JSON.stringify(value)).toBeUndefined();
+		}
+		// What stays readable: `=` and `?` alone, and the rest of atext.
+		expect(normaliseMailAddress("a=b?c@example.com")).toBe("a=b?c@example.com");
+		expect(normaliseMailAddress('"a=?b"@example.com')).toBe('"a=?b"@example.com');
 	});
 
 	it("reads one addr-spec alone: a list, an angle address, a comment, a format character, or a domain a URL parser would cut short or decode is none", () => {
@@ -93,10 +117,10 @@ describe("normaliseMailAddress", () => {
 		}
 	});
 
-	it("reads what an addr-spec may hold: every atext character, a quoted local part with an escaped character, UTF-8 letters, and the longest local part and label", () => {
+	it("reads what an addr-spec may hold: every atext character but the routing operators, a quoted local part with an escaped character, UTF-8 letters, and the longest local part and label", () => {
 		expect(normaliseMailAddress("o'Brien+Tag@example.com")).toBe("o'brien+tag@example.com");
-		expect(normaliseMailAddress("a!#$%&'*+-/=?^_`{|}~@example.com")).toBe(
-			"a!#$%&'*+-/=?^_`{|}~@example.com",
+		expect(normaliseMailAddress("a#$&'*+-/=?^_`{|}~@example.com")).toBe(
+			"a#$&'*+-/=?^_`{|}~@example.com",
 		);
 		expect(normaliseMailAddress('"a\\"b"@example.com')).toBe('"a\\"b"@example.com');
 		expect(normaliseMailAddress("\u7528\u6237@b\u00fccher.example")).toBe(

@@ -121,6 +121,15 @@ core's `CoreConfigSchema`) arbitrates across mechanisms:
 - `strict-mutual-exclusion` — reject with `invalid_request` if more
   than one mechanism's `extract` returns a non-null binding.
 
+Amended 2026-10-01. Under `intent-explicit` the tier that decides is the
+explicit-intent successes when any succeeded, else the ambient ones. More
+than one success at that tier answers `400 invalid_request` naming the
+kinds, and is logged once at warn (`token_binding_ambiguous`, with the
+tier and the kinds). The token is never bound by registration order: the
+AS does not choose between two proofs of possession at one tier. An
+ambient success beside a single explicit winner is still set aside, and
+`strict-mutual-exclusion` is unchanged.
+
 ### 5. Grant-side allowlist (oauth)
 
 The Phase 3 §9.1 / §9.2 gate widening uses an explicit allowlist, not

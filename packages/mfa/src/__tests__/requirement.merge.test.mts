@@ -51,7 +51,7 @@ import {
 import { describe, expect, it } from "vitest";
 import { createMfaRequirement } from "#/requirement.mjs";
 import { createLoginTransactions } from "#/transactions.mjs";
-import { FACTORS, resolverOver } from "./requirementHarness.mjs";
+import { FACTORS, resolverOver, WITHOUT_MAIL } from "./requirementHarness.mjs";
 
 /**
  * The factors a composition enables, each declaring its `amrValues`, standing
@@ -92,6 +92,7 @@ const realRequirement = (
 		stepUpRecordable: true,
 		recentMfaMaxAgeSeconds: 300,
 		logger: consoleLogger,
+		...WITHOUT_MAIL,
 	});
 
 const storeOf = (session: UserSession): UserSessionStore => ({
