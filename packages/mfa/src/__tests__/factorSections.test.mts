@@ -259,14 +259,14 @@ describe("the two factors' modules, declared before their factors are built", ()
 		expect([...resolver.entries()]).toEqual([]);
 	});
 
-	it("refuse the boot for a key their sections do not know, naming its path", async () => {
-		for (const [section, value] of [
-			["mfa-email-factor", { ...EMAIL_DEFAULTS, maxSend: 3 }],
-			["mfa-recovery-code-factor", { ...RECOVERY_DEFAULTS, length: 16 }],
+	it("refuse the boot for a key their sections do not know, naming the section and the key", async () => {
+		for (const [section, value, key] of [
+			["mfa-email-factor", { ...EMAIL_DEFAULTS, maxSend: 3 }, "maxSend"],
+			["mfa-recovery-code-factor", { ...RECOVERY_DEFAULTS, length: 16 }, "length"],
 		] as const) {
 			const error = await refusal(configWith({ [section]: value }));
 			expect(error.reason, section).toBe("config-validation-failed");
-			expect(error.message, section).toContain(section);
+			expect(error.message, section).toContain(`${section}: has a key it does not know: ${key}`);
 		}
 	});
 

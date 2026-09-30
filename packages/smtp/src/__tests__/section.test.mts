@@ -88,13 +88,25 @@ describe("smtp-mail-sender, the SMTP mail sender's section", () => {
 		expect(refusedAt({ ...DEFAULTS, secure: "ssl" })).not.toEqual([]);
 	});
 
-	it("refuses plaintext to a host that is not loopback, and takes it to one that is", () => {
-		expect(refusedAt({ ...DEFAULTS, secure: "none", host: "smtp.example.com" })).toEqual([
-			"secure:custom",
-		]);
-		for (const host of ["localhost", "127.0.0.1", "::1"]) {
+	it("takes plaintext only to localhost or a loopback address in its canonical form, and refuses it with no host", () => {
+		for (const host of ["localhost", "127.0.0.1", "127.0.0.2", "::1"]) {
 			expect(refusedAt({ ...DEFAULTS, secure: "none", host }), host).toEqual([]);
 		}
+		// A resolver reads a spelling that is not an address's canonical form
+		// as a name, which may resolve anywhere.
+		for (const host of [
+			"smtp.example.com",
+			"127.0.0.08",
+			"127.0.0.099",
+			"127.000.000.001",
+			"2130706433",
+			"0x7f.0.0.1",
+			"[::1]",
+			"localhost.example.com",
+		]) {
+			expect(refusedAt({ ...DEFAULTS, secure: "none", host }), host).toEqual(["secure:custom"]);
+		}
+		expect(refusedAt({ ...DEFAULTS, secure: "none" })).toEqual(["secure:custom"]);
 	});
 
 	it("refuses a host, an account or a sender address that is blank or carries a control character", () => {
@@ -166,7 +178,9 @@ describe("smtpMailSenderModule, declared before its sender is built", () => {
 		}
 		expect(refused).toBeInstanceOf(BootError);
 		expect((refused as BootError).reason).toBe("config-validation-failed");
-		expect((refused as BootError).message).toContain("smtp-mail-sender");
+		expect((refused as BootError).message).toContain(
+			"smtp-mail-sender: has a key it does not know: hostname",
+		);
 	});
 
 	it("is the package's entry: the module and its section's schema, and nothing else", () => {

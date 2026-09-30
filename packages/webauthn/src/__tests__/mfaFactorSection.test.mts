@@ -47,12 +47,10 @@ describe("webauthn-mfa-factor, the WebAuthn second factor's section", () => {
 
 	it("refuses a key it does not know, and a user verification WebAuthn does not define", () => {
 		expect(
-			webauthnMfaFactorConfigSchema.safeParse({
-				enabled: false,
-				userVerification: "preferred",
-				residentKey: "discouraged",
-			}).success,
-		).toBe(false);
+			webauthnMfaFactorConfigSchema
+				.safeParse({ enabled: false, userVerification: "preferred", residentKey: "discouraged" })
+				.error?.issues.map((issue) => issue.message),
+		).toEqual(["has a key it does not know: residentKey"]);
 		expect(
 			webauthnMfaFactorConfigSchema.safeParse({ enabled: false, userVerification: "always" })
 				.success,
