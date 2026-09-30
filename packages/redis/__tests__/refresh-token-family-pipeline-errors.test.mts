@@ -25,7 +25,7 @@
 // out.
 //
 // The real store runs through the real wrapper with only the driver faked, so
-// removing the reply check in `ioredis.mts` fails these tests.
+// removing the reply check in `ioredis/commands.mts` fails these tests.
 
 import type { RefreshTokenFamily } from "@o3co/auth-provider-core";
 import type { Redis } from "ioredis";
