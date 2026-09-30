@@ -19,6 +19,9 @@
  * signed in sent to login, the judgement as `federation_grants.connect`, and the
  * consent question parked for this browser's binding before the browser is sent
  * to the consent page. Connect never approves or creates an upstream transaction.
+ * An unknown handle, every refusal after the handle is read, and every `503` this
+ * handler answers are audited as `federation.grant.authorization_failed`, with only
+ * what is established by then.
  */
 
 import type { FederationGrantIntent, FederationGrantIntentStore } from "@o3co/auth-provider-core";
@@ -64,6 +67,7 @@ export function createConnectHandler({
 					},
 					error,
 				);
+				failed(req, res, "unavailable");
 				plain(res, 503, "Temporarily unavailable.");
 				return;
 			}
@@ -122,6 +126,7 @@ export function createConnectHandler({
 					},
 					error,
 				);
+				failed(req, res, "unavailable", intent);
 				plain(res, 503, "Temporarily unavailable.");
 				return;
 			}
