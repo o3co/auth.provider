@@ -622,6 +622,9 @@ importers:
       '@vitest/coverage-v8':
         specifier: ^5.0.2
         version: 5.0.2(vitest@5.0.2)
+      testcontainers:
+        specifier: ^12.1.0
+        version: 12.1.0
       typescript:
         specifier: ^6.0.3
         version: 6.0.3
