@@ -27,8 +27,8 @@ import { fileURLToPath } from "node:url";
 import { packageReferenceProblems } from "@o3co/auth-provider-core/testing";
 import { parseFile } from "@o3co/ts.hocon";
 import { describe, expect, it } from "vitest";
+import { foundationMfaFactorStoreModule } from "#/index.mjs";
 import { FOUNDATION_MFA_FACTOR_STORE_SECTION } from "#/mfa/section.mjs";
-import { fixtureModule } from "./fixtureModule.mjs";
 
 const REFERENCE = new URL("../../../config/reference.conf", import.meta.url);
 
@@ -58,7 +58,11 @@ function bindings(): string[] {
 describe("the package's reference.conf", () => {
 	it("holds only the section of the module that declares it, which its schema parses without losing a path", () => {
 		expect(
-			packageReferenceProblems({ reference: REFERENCE, modules: [fixtureModule], read }),
+			packageReferenceProblems({
+				reference: REFERENCE,
+				modules: [foundationMfaFactorStoreModule],
+				read,
+			}),
 		).toEqual([]);
 	});
 
