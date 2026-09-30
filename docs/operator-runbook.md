@@ -577,8 +577,14 @@ without a session, for a `UserSession` that is gone, expired or another
 subject's, and — with `subjectRevocation` wired — for a session the
 subject-revocation boundary covers, so a user whose sessions were revoked
 signs in again before linking; `403 step_up_required` (with `requirement` and
-the requirement's `page`) when a registered session requirement — MFA's
-recent-authentication rule, once installed — asks for a step-up first;
+the requirement's `page`) when a registered session requirement asks for a
+step-up first — the MFA module does, under `mfa.mode` `optional` and
+`required` alike, unless a second factor was verified in the session within
+`mfa.manage.maxAgeSeconds`; for an account that holds no counting factor it
+asks for a sign-in that recent instead, and answers an older one
+`401 login_required` (under `required`, only for a session that already
+meets the baseline: a password session without a second factor is stepped up
+first, as every consumer steps it up);
 `409 identity_conflict` when the identity is already another account's (the
 Store is not consulted), `403 link_refused` / `409 identity_conflict` when
 the Store says so, `503 temporarily_unavailable` when the session store, the
@@ -590,6 +596,16 @@ The link is bound to the session that started it — recorded in the
 transaction — so a `form_post` federation (Apple) links the same way as a
 `query` one, and a callback presented by a different authenticated session
 is `401 login_required`.
+Recent MFA bounds the start, not the write: the callback writes the identity
+up to the federation transaction's lifetime (10 minutes) after the start was
+admitted. Hosts' clocks must agree within `DEFAULT_CLOCK_SKEW_MS` (5
+minutes): a session's `mfaAt` carries the clock of the replica that recorded
+it, so a replica whose clock runs ahead stretches recent MFA by its lead.
+Until the MFA page's step-up exists (`POST /session/mfa/step-up` answers
+`404` in this release), a user who holds a counting factor can link an
+identity or register a passkey only within `mfa.manage.maxAgeSeconds` of a
+login's second factor; later the start answers `403 step_up_required` and the
+user signs in again. It fails closed.
 Successes and refusals are audited (`federation.identity.linked`,
 `federation.identity.link_refused`, `subject` = the account,
 `details.reason` on a refusal).
@@ -833,7 +849,7 @@ stream — its level is fixed at `info`.
 
 | Event | Where | Why it pages |
 | --- | --- | --- |
-| `session_admission_unavailable` (error — `store`, `action` or `phase: "establishment"`, `err`) | `core/src/session-admission/admit.mts` | a consumer of an authenticated session — `/authorize`, consent, the session-bound grants, device verification, the federation-grants browser half, the federation `?link=1` start and callback, WebAuthn registration through `webauthnSessionSubjectModule`, a login — met an outage in the session store, the revocation boundary, or a registered requirement (`store` names which), and answered fail-closed (`503`, or the grant's `temporarily_unavailable`). Never carries the `sid`. `action` names the consumer: from `packages/oauth`, `oauth.authorize` (`/authorize` answers `temporarily_unavailable` at the `redirect_uri`, no code), `oauth.consent` (`/oauth/consent` answers `503`, nothing shown or recorded, the parked request kept for a retry), `oauth.session_grant`, `oauth.code_exchange` and `oauth.refresh` (`503` at `/oauth/token`); it replaced `authorize_session_liveness_unavailable`, `consent_session_liveness_unavailable`, `session_grant_store_unavailable` and the `store: "user_session"` cases of `authorization_grant_store_unavailable` and `refresh_token_store_unavailable` |
+| `session_admission_unavailable` (error — `store`, `action` or `phase: "establishment"`, `err`) | `core/src/session-admission/admit.mts` | a consumer of an authenticated session — `/authorize`, consent, the session-bound grants, device verification, the federation-grants browser half, the federation `?link=1` start and callback, WebAuthn registration through `webauthnSessionSubjectModule`, a login — met an outage in the session store, the revocation boundary, or a registered requirement (`store` names which — `mfa` when the MFA requirement could not list the subject's factor records, at a login or, at any use, for an action that adds a way into the account: the link start, WebAuthn registration), and answered fail-closed (`503`, or the grant's `temporarily_unavailable`). Never carries the `sid`. `action` names the consumer: from `packages/oauth`, `oauth.authorize` (`/authorize` answers `temporarily_unavailable` at the `redirect_uri`, no code), `oauth.consent` (`/oauth/consent` answers `503`, nothing shown or recorded, the parked request kept for a retry), `oauth.session_grant`, `oauth.code_exchange` and `oauth.refresh` (`503` at `/oauth/token`); it replaced `authorize_session_liveness_unavailable`, `consent_session_liveness_unavailable`, `session_grant_store_unavailable` and the `store: "user_session"` cases of `authorization_grant_store_unavailable` and `refresh_token_store_unavailable` |
 | `authorize_cookie_session_unavailable` (error — `store: "cookie_session"`, `step: "regenerate"`, `err`) | `oauth/src/routes/authorize.mts` | `/authorize` refused a session — dead, expired, revoked, or one a requirement sends to log in again — and could not regenerate the cookie session before sending the browser to log in, so it answered `temporarily_unavailable` at the `redirect_uri` rather than leave the refused session's flag behind. The express-session store is failing its writes; logins fail with it |
 | `authorize_step_up_page_off_origin` (error — `requirement`) | `oauth/src/routes/authorize.mts` | a session requirement's step-up page is not on the issuer's origin, so `/authorize` answered `server_error` at the `redirect_uri` instead of sending the browser there. A composition fault: registration refuses such a page when it is given the issuer, so a resolver was built without one — fix the requirement's `stepUpPage` or the resolver's construction |
 | `mfa_store_unavailable`, `mfa_factor_unreadable`, `mfa_factor_challenge_unavailable` (error) | `mfa/src/routes.mts` | a login's second factor could not be read, checked or completed: every such login answers `503` and cannot finish. `mfa_factor_unreadable` with `state: "key_unavailable"` names the `keyId` the ring no longer holds — put that key back (see the MFA package README, "Key ids and rotation"); `state: "unreadable"` is a record no key opens, sealed for another subject, id or kind; `state: "challenge"` is a pending challenge's kept state that does not open (with `keyId` when its key left the ring) — the verification's attempt is spent and the page asks for a new challenge |
@@ -956,7 +972,7 @@ stream — its level is fixed at `info`.
 | `mfa_digest_made_with_retired_key` (info — `keyId`; once per key id per process) | `mfa/src/sealing.mts` | a stored digest (a recovery code's, an email code's) matched under a key that is no longer the ring's first: that key is still needed. Beside `mfa_factor_sealed_with_retired_key`, it is what to count before retiring a key |
 | `mfa_login_not_resumed` (warn — the error's projection; per such verification) | `mfa/src/routes.mts` | a verified second factor's login could not be resumed — its transaction's continuation names a requirement this deployment no longer registers, typically after a deploy removed one mid-login. The user is answered `401 login_required` and logs in again |
 | `mfa_development_sample_key_in_use` (warn — `setting: "mfa.encryptionKeys"`, `variable: "MFA_ENCRYPTION_KEY"`; once at boot) | `mfa/src/module.mts` | the MFA key ring carries the published development sample key (`MFA_DEVELOPMENT_SAMPLE_KEY`), which the settings accept only outside production and staging and under one replica: every factor's data is sealed from nobody. Set `MFA_ENCRYPTION_KEY` to a key of your own (`openssl rand -base64 32`) before the deployment leaves development |
-| `mfa_step_up_unsupported` (warn — `store: "userSessionStore"`, `kind` the adapter's; once at boot) | `mfa/src/module.mts` | the user-session store has no `recordSecondFactor` (core's `supportsSecondFactorUpdate`), so a verified step-up could not be written into a session: under `mfa.mode = "required"` the MFA requirement sends a password session to log in again where it would step it up (the MFA ADR's D20). Use a store with the capability — both bundled ones have it — or implement it in yours |
+| `mfa_step_up_unsupported` (warn — `store: "userSessionStore"`, `kind` the adapter's; once at boot) | `mfa/src/module.mts` | the user-session store has no `recordSecondFactor` (core's `supportsSecondFactorUpdate`), so a verified step-up could not be written into a session: the MFA requirement sends a session to log in again where it would step it up — a password session without a second factor under `mfa.mode = "required"`, and, under either mode, one without recent MFA at an action that adds a way into the account (the link start, WebAuthn registration) (the MFA ADR's D20). Use a store with the capability — both bundled ones have it — or implement it in yours |
 | `mfa_enrollment_nothing_enrollable` (warn — `kinds`, the counting factors' kinds; once per such login) | `mfa/src/requirement.mts` | a password login under `required` asked a subject with no factor for a first binding, and every counting factor refused that user (`enrollable(user)` — an email factor for an account without an address): the answer lists nothing to enroll, and the user cannot finish. Enable a factor every user can enroll (TOTP), or give the accounts what the factor needs |
 
 ### Data corruption — a stored record could not be read
