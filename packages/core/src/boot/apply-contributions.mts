@@ -570,7 +570,9 @@ function limiterInForce(
  * that set it; a limiter's own `limits` entry wins over that budget and is
  * not shown — and `rate_limit_fail_mode_not_applied` at warn when
  * `rateLimit.failMode` says `open` and the wired limiter applies another
- * policy.
+ * policy: the path `redis-rate-limiter.failMode` moved from, which only the
+ * Redis limiter's module refuses, so with any other limiter it would
+ * otherwise be dropped unseen.
  * @internal
  */
 function logRateLimitBudgets(

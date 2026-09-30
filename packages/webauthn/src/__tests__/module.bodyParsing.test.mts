@@ -34,12 +34,12 @@ import {
 	memoryReplaySeenSetModule,
 	memoryWebAuthnCredentialStoreModule,
 } from "@o3co/auth-provider-core";
-import { makeAppConfig } from "./appConfig.fixture.mjs";
 import express, { type RequestHandler } from "express";
 import supertest from "supertest";
 import { describe, expect, it } from "vitest";
 import type { WebAuthnConfig } from "../config.mjs";
 import { webauthnModule } from "../module.mjs";
+import { makeAppConfig } from "./appConfig.fixture.mjs";
 
 const ROUTES = [
 	"/oauth/webauthn/registration/options",

@@ -36,11 +36,11 @@ import {
 	memoryWebAuthnCredentialStoreModule,
 	type UserSessionStore,
 } from "@o3co/auth-provider-core";
-import { makeAppConfig } from "./appConfig.fixture.mjs";
 import { describe, expect, it } from "vitest";
 import type { WebAuthnConfig } from "#/config.mjs";
 import { webauthnModule } from "#/module.mjs";
 import { webauthnSessionSubjectModule } from "#/sessionSubject.mjs";
+import { makeAppConfig } from "./appConfig.fixture.mjs";
 
 const base = makeAppConfig();
 const bootstrapComponents = {

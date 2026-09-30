@@ -58,13 +58,13 @@ import {
 	type PendingConsentRecord,
 	type PendingConsentStore,
 } from "@o3co/auth-provider-core";
-import { z } from "zod";
 import type {
 	ConsentRecordFields,
 	ConsentStoreClient,
 	PendingConsentKeyspace,
 	PendingConsentStoreClient,
 } from "./clients.mjs";
+import { keyPrefixSection, redisReference } from "./internal/section.mjs";
 
 /**
  * How far past a record's `expiresAt` its key's TTL runs: five minutes.
@@ -344,35 +344,30 @@ export const redisPendingConsentStoreBuilder: AdapterBuilder<PendingConsentStore
  * clients, the counterpart of core's `memoryConsentStoreModule`. Declares no
  * `replicaSafety`, so a composition using it may declare
  * `core.deployment.mode = "multi"`. Its client slots come from `makeIoredisClients`
- * (or the standalone's shared clients module); config lives under
- * `redisConsentStore`, never a bare top-level `keyPrefix`.
+ * (or the standalone's shared clients module); its section,
+ * `redis-consent-store`, holds `keyPrefix` (strict).
  */
 export const redisConsentStoreModule = defineModule({
 	name: "redis-consent-store",
-	requires: ["consentStoreClient", "pendingConsentStoreClient", "config"] as const,
-	configSchema: z.object({
-		redisConsentStore: z
-			.object({
-				keyPrefix: z.string().default("consent:"),
-			})
-			.default({ keyPrefix: "consent:" }),
-	}),
+	requires: ["consentStoreClient", "pendingConsentStoreClient"] as const,
+	section: {
+		schema: keyPrefixSection("consent:"),
+		reference: redisReference(),
+		relocatedFrom: {
+			redisConsentStore: { to: "", environmentVariable: null },
+			"redisConsentStore.keyPrefix": "keyPrefix",
+		},
+	},
 	provides: {
-		consentStore: (deps) => {
-			const cfg = (deps.config as unknown as { redisConsentStore: { keyPrefix: string } })
-				.redisConsentStore;
-			return createRedisConsentStore({
-				client: deps.consentStoreClient,
-				keyPrefix: cfg.keyPrefix,
-			});
-		},
-		pendingConsentStore: (deps) => {
-			const cfg = (deps.config as unknown as { redisConsentStore: { keyPrefix: string } })
-				.redisConsentStore;
-			return createRedisPendingConsentStore({
-				client: deps.pendingConsentStoreClient,
-				keyPrefix: cfg.keyPrefix,
-			});
-		},
+		consentStore: ({ section, consentStoreClient }) =>
+			createRedisConsentStore({
+				client: consentStoreClient,
+				keyPrefix: section.keyPrefix,
+			}),
+		pendingConsentStore: ({ section, pendingConsentStoreClient }) =>
+			createRedisPendingConsentStore({
+				client: pendingConsentStoreClient,
+				keyPrefix: section.keyPrefix,
+			}),
 	},
 });

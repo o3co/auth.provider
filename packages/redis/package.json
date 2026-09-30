@@ -15,10 +15,12 @@
 		"./ioredis": {
 			"import": "./dist/ioredis.mjs",
 			"types": "./dist/ioredis.d.mts"
-		}
+		},
+		"./reference.conf": "./config/reference.conf"
 	},
 	"files": [
 		"dist",
+		"config",
 		"README.md"
 	],
 	"repository": {

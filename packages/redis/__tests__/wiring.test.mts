@@ -63,8 +63,8 @@ describe("challenge store and replay seen-set wiring — full Redis composition 
 		// prefixes appended after the core baseline.
 		const config = {
 			...makeValidCoreConfig(),
-			redisChallengeStore: { keyPrefix: `chal:wiring-${Date.now()}:` },
-			redisReplaySeenSet: { keyPrefix: `replay:wiring-${Date.now()}:` },
+			"redis-challenge-store": { keyPrefix: `chal:wiring-${Date.now()}:` },
+			"redis-replay-seen-set": { keyPrefix: `replay:wiring-${Date.now()}:` },
 		};
 		const boot = {
 			config: config as never,

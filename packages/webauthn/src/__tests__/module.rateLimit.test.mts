@@ -43,13 +43,13 @@ import {
 	memoryWebAuthnCredentialStoreModule,
 	type RateLimiter,
 } from "@o3co/auth-provider-core";
-import { makeAppConfig } from "./appConfig.fixture.mjs";
 import express from "express";
 import supertest from "supertest";
 import { describe, expect, it, vi } from "vitest";
 import type { WebAuthnConfig } from "../config.mjs";
 import { webauthnModule } from "../module.mjs";
 import { WEBAUTHN_AUTHENTICATION_OPTIONS_RATE_LIMIT_TAG } from "../routes/authenticationOptions.mjs";
+import { makeAppConfig } from "./appConfig.fixture.mjs";
 
 // ---------------------------------------------------------------------------
 // Fixtures
@@ -257,7 +257,7 @@ describe("webauthn authentication/options rate limit — the configured budget o
 	 */
 	const composed = (explicit: Record<string, unknown> = {}) => ({
 		webauthn: { rateLimit: { authenticationOptions: { limit: 2, windowSeconds: 60 } } },
-		memoryRateLimiter: {
+		"core-rate-limiter-memory": {
 			limits: explicit,
 			defaultLimit: { limit: 60, windowSeconds: 60 },
 			maxBuckets: 10_000,

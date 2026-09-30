@@ -66,7 +66,9 @@ describe("memoryChallengeStoreModule", () => {
 	it("provides challengeStore via factory, reading its cap from its own section", () => {
 		expect(memoryChallengeStoreModule.requires ?? []).toEqual([]);
 		expect(typeof memoryChallengeStoreModule.provides?.challengeStore).toBe("function");
-		const store = memoryChallengeStoreModule.provides?.challengeStore?.({ section: undefined } as never);
+		const store = memoryChallengeStoreModule.provides?.challengeStore?.({
+			section: undefined,
+		} as never);
 		expect((store as { kind: string }).kind).toBe("memory");
 	});
 
@@ -105,7 +107,9 @@ describe("memoryChallengeStoreModule", () => {
 		});
 
 		it("refuses a key its section does not declare", async () => {
-			const err = await refusalOf(bootWith(memoryChallengeStoreModule, { "core-challenge-store-memory": { maxEntry: 5 } }));
+			const err = await refusalOf(
+				bootWith(memoryChallengeStoreModule, { "core-challenge-store-memory": { maxEntry: 5 } }),
+			);
 			expect(err.reason).toBe("config-validation-failed");
 			expect(err.message).toContain('"maxEntry"');
 		});
@@ -115,9 +119,9 @@ describe("memoryChallengeStoreModule", () => {
 		});
 
 		it("takes a number, or the string an environment variable delivers", async () => {
-			expect((await storeOf({ "core-challenge-store-memory": { maxEntries: 5000 } })).maxEntries).toBe(
-				5000,
-			);
+			expect(
+				(await storeOf({ "core-challenge-store-memory": { maxEntries: 5000 } })).maxEntries,
+			).toBe(5000);
 			expect(
 				(await storeOf({ "core-challenge-store-memory": { maxEntries: "7000" } })).maxEntries,
 			).toBe(7000);
@@ -140,7 +144,9 @@ describe("memoryChallengeStoreModule", () => {
 		it("refuses a value it cannot use at boot, naming the key", async () => {
 			for (const bad of [0, -1, 1.5, "lots", "", true, null]) {
 				const err = await refusalOf(
-					bootWith(memoryChallengeStoreModule, { "core-challenge-store-memory": { maxEntries: bad } }),
+					bootWith(memoryChallengeStoreModule, {
+						"core-challenge-store-memory": { maxEntries: bad },
+					}),
 				);
 				expect(err.reason, String(bad)).toBe("provides-factory-failed");
 				expect(err.cause).toBeInstanceOf(RangeError);

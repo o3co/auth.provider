@@ -14,27 +14,22 @@
  * limitations under the License.
  */
 
-
 /**
- * `makeValidAppConfig()` as a resolution of the package's reference under an
- * environment that sets none of its variables would capture it: every name
- * the WebAuthn module and core declare renamed, `null`.
+ * `makeValidAppConfig()` with what a resolution of the package's reference
+ * under an environment that sets none of its variables would capture beside
+ * core's: every name the WebAuthn module declares renamed, `null`.
  */
 
-import {
-	CORE_RELOCATIONS,
-	makeValidAppConfig,
-	renamedVariableCaptures,
-} from "@o3co/auth-provider-core/testing";
+import { makeValidAppConfig, renamedVariableCaptures } from "@o3co/auth-provider-core/testing";
 import { webauthnModule } from "../module.mjs";
 
 export function makeAppConfig(): ReturnType<typeof makeValidAppConfig> {
+	const base = makeValidAppConfig();
 	return {
-		...makeValidAppConfig(),
-		"renamed-variables": renamedVariableCaptures({
-			modules: [webauthnModule],
-			core: CORE_RELOCATIONS,
-			env: {},
-		}),
+		...base,
+		"renamed-variables": {
+			...base["renamed-variables"],
+			...renamedVariableCaptures({ modules: [webauthnModule], env: {} }),
+		},
 	};
 }

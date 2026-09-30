@@ -63,7 +63,9 @@ describe("memoryReplaySeenSetModule", () => {
 	it("provides replaySeenSet via factory, reading its cap from its own section", () => {
 		expect(memoryReplaySeenSetModule.requires ?? []).toEqual([]);
 		expect(typeof memoryReplaySeenSetModule.provides?.replaySeenSet).toBe("function");
-		const set = memoryReplaySeenSetModule.provides?.replaySeenSet?.({ section: undefined } as never);
+		const set = memoryReplaySeenSetModule.provides?.replaySeenSet?.({
+			section: undefined,
+		} as never);
 		expect((set as { kind: string }).kind).toBe("memory");
 	});
 
@@ -102,7 +104,9 @@ describe("memoryReplaySeenSetModule", () => {
 		});
 
 		it("refuses a key its section does not declare", async () => {
-			const err = await refusalOf(bootWith(memoryReplaySeenSetModule, { "core-replay-seen-set-memory": { maxEntry: 5 } }));
+			const err = await refusalOf(
+				bootWith(memoryReplaySeenSetModule, { "core-replay-seen-set-memory": { maxEntry: 5 } }),
+			);
 			expect(err.reason).toBe("config-validation-failed");
 			expect(err.message).toContain('"maxEntry"');
 		});
@@ -137,7 +141,9 @@ describe("memoryReplaySeenSetModule", () => {
 		it("refuses a value it cannot use at boot, naming the key", async () => {
 			for (const bad of [0, -1, 1.5, "lots", "", true, null]) {
 				const err = await refusalOf(
-					bootWith(memoryReplaySeenSetModule, { "core-replay-seen-set-memory": { maxEntries: bad } }),
+					bootWith(memoryReplaySeenSetModule, {
+						"core-replay-seen-set-memory": { maxEntries: bad },
+					}),
 				);
 				expect(err.reason, String(bad)).toBe("provides-factory-failed");
 				expect(err.cause).toBeInstanceOf(RangeError);

@@ -31,6 +31,7 @@ import {
 	redisFederationTokenStoreBuilder,
 	redisFederationTokenStoreModule,
 } from "../src/federation-tokens.mjs";
+import { withSection } from "./support/section.mjs";
 
 const tokenClient = {
 	get: async () => null,
@@ -58,7 +59,7 @@ const STORES = [
 		label: "federation-tokens",
 		module: redisFederationTokenStoreModule,
 		client: { federationTokenStoreClient: tokenClient },
-		plaintext: { redisFederationTokenStore: { encryptionMode: "allow-plaintext" } },
+		plaintext: { "redis-federation-token-store": { encryptionMode: "allow-plaintext" } },
 		provided: "federationTokenStore",
 	},
 	{
@@ -110,7 +111,7 @@ const readerOf = (key: "federationTokenStore" | "federationGrantStore") =>
 
 /** The module's provider, run by hand on the deps given. */
 const provide = (module: Module, key: string, deps: Record<string, unknown>) =>
-	(module.provides as Record<string, (deps: unknown) => unknown>)[key]?.(deps);
+	(module.provides as Record<string, (deps: unknown) => unknown>)[key]?.(withSection(module, deps));
 
 let insecure: string | undefined;
 let nodeEnv: string | undefined;

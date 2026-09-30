@@ -1110,17 +1110,16 @@ export const fullSectionsSchema = z.object({
 	 * the `login` budget, in whole seconds, for every limiter to read.
 	 *
 	 * OAuth endpoint limits (`/token`, `/authorize`) are separate: the
-	 * `rateLimiter` slot's modules take them under `memoryRateLimiter.*` /
-	 * `redisRateLimiter.*` in `windowSeconds` (`ratelimit/types.mts`).
+	 * `rateLimiter` slot's modules take them in their own sections
+	 * (`core-rate-limiter-memory.*` / `redis-rate-limiter.*`) in
+	 * `windowSeconds` (`ratelimit/types.mts`).
 	 */
 	rateLimit: z.object({
 		login: rateLimitSchema,
-		// The outage policy `redisRateLimiterModule` answers for the limiter it
-		// builds; the guard applies the wired limiter's own. The default lives in
-		// `reference.conf`: `"closed"` answers 503 and logs. `"open"`
-		// (`RATE_LIMIT_FAIL_MODE=open`) lets traffic through and still logs at
-		// error, so the outage is visible even with the audit sink down.
-		failMode: z.enum(["open", "closed"]),
+		// Presence-only: the path `redis-rate-limiter.failMode` moved from, kept
+		// for the relocation refusal and for boot's
+		// `rate_limit_fail_mode_not_applied` warning.
+		failMode: z.unknown().optional(),
 	}),
 	federations: z.record(z.string(), federationEntrySchema),
 	repositories: z.object({
@@ -1243,8 +1242,8 @@ export const fullSectionsSchema = z.object({
 		})
 		.optional(),
 	// Connection config for the standalone refresh-token-family client; defaults
-	// in HOCON. Module-internal config (`keyPrefix`, `casRetryLimit`) is on the
-	// separate top-level key `redisRefreshTokenFamilyStore`.
+	// in HOCON. The store's own settings (`keyPrefix`, `casRetryLimit`) are in
+	// its section, `redis-refresh-token-family-store`.
 	refreshTokenFamilyStore: z
 		.object({
 			redis: z
@@ -1263,25 +1262,6 @@ export const fullSectionsSchema = z.object({
 	rateLimiter: z
 		.object({
 			adapter: z.enum(["memory", "redis"]).optional(),
-		})
-		.optional(),
-	// Module-internal config for `memoryRateLimiterModule`, kept for its
-	// coercions and bounds. Defaults live in HOCON.
-	memoryRateLimiter: z
-		.object({
-			limits: z.record(z.string(), rateLimitSpecSchema).optional(),
-			defaultLimit: rateLimitSpecSchema.optional(),
-			maxBuckets: z.coerce.number().int().positive().optional(),
-		})
-		.optional(),
-	// The same section for the Redis adapter, which multi-replica deployments
-	// run. Lost, `redisRateLimiterModule.configSchema` defaults the whole object
-	// to 60 requests / 60 s in place of the operator's per-endpoint budgets.
-	// Presence-only; defaults in `reference.conf` and the module.
-	redisRateLimiter: z
-		.object({
-			limits: z.record(z.string(), rateLimitSpecSchema).optional(),
-			defaultLimit: rateLimitSpecSchema.optional(),
 		})
 		.optional(),
 	// Adapter for the four user-session stores (`userSessionStore`,
@@ -1334,24 +1314,8 @@ export const fullSectionsSchema = z.object({
 	mfaTransactionStore: z
 		.object({
 			adapter: z.enum(["memory", "redis"]).optional(),
-			// The memory store's cap, read by `memoryMfaTransactionStoreModule`
-			// the way `challengeStore.memory.maxEntries` is read. Absent: the
-			// adapter's default.
-			memory: z.object({ maxEntries: z.unknown().optional() }).optional(),
-		})
-		.optional(),
-	// Module-internal config for `redisMfaFactorStoreModule` and
-	// `redisMfaTransactionStoreModule`. Presence-only; the defaults (`mfaf:`,
-	// `mfat:`) live in `reference.conf` and the modules, which refuse a prefix
-	// with a brace.
-	redisMfaFactorStore: z
-		.object({
-			keyPrefix: z.string().optional(),
-		})
-		.optional(),
-	redisMfaTransactionStore: z
-		.object({
-			keyPrefix: z.string().optional(),
+			// Presence-only: the path `core-mfa-transaction-store-memory` moved from.
+			memory: z.unknown().optional(),
 		})
 		.optional(),
 	// This adapter's own layout: where a grant's keys live and how far past a
@@ -1362,28 +1326,6 @@ export const fullSectionsSchema = z.object({
 			keyPrefix: z.string().optional(),
 			// One year at most, as every duration here; see tombstoneRetention.
 			listingAllowanceMs: z.coerce.number().int().nonnegative().max(MAX_DURATION_MS).optional(),
-		})
-		.optional(),
-	// Module-internal config for `redisFederationTokenStoreModule`, including
-	// the encryption key the store cannot start without. Presence-only;
-	// defaults in `reference.conf` and the module.
-	redisFederationTokenStore: z
-		.object({
-			keyPrefix: z.string().optional(),
-			ttl: z.coerce.number().int().positive().optional(),
-			encryptionMode: z.enum(["required", "allow-plaintext"]).optional(),
-			encryptionKey: z.string().optional(),
-			// An exported-but-empty variable reads as `false`, which turns off
-			// this migration safety net (default `true`): set the variable to
-			// `true` or `false`, never empty.
-			scanFallback: coerceBooleanFromEnv.optional(),
-		})
-		.optional(),
-	// Module-internal config for `redisDeviceCodeStoreModule`. Presence-only;
-	// the default lives in the module.
-	redisDeviceCodeStore: z
-		.object({
-			keyPrefix: z.string().optional(),
 		})
 		.optional(),
 	// Adapter for the RFC 7009 access-token denylist; default `"memory"` in
@@ -1403,18 +1345,14 @@ export const fullSectionsSchema = z.object({
 	replaySeenSet: z
 		.object({
 			adapter: z.enum(["memory", "redis"]).optional(),
-			// The memory seen-set's cap, read by `memoryReplaySeenSetModule`,
-			// which refuses at boot anything but a positive whole number (a digit
-			// string from an environment variable is taken). Absent: the
-			// adapter's default.
-			memory: z.object({ maxEntries: z.unknown().optional() }).optional(),
+			// Presence-only: the path `core-replay-seen-set-memory` moved from.
+			memory: z.unknown().optional(),
 		})
 		.optional(),
-	// The memory challenge store's cap, read by `memoryChallengeStoreModule`,
-	// the same way as `replaySeenSet.memory.maxEntries` above.
+	// Presence-only: the path `core-challenge-store-memory` moved from.
 	challengeStore: z
 		.object({
-			memory: z.object({ maxEntries: z.unknown().optional() }).optional(),
+			memory: z.unknown().optional(),
 		})
 		.optional(),
 	// Where consent to a non-first-party client is recorded. `"none"` (the HOCON
@@ -1424,37 +1362,6 @@ export const fullSectionsSchema = z.object({
 	consentStore: z
 		.object({
 			adapter: z.enum(["none", "memory", "redis"]).optional(),
-		})
-		.optional(),
-	// Module-internal config for `redisConsentStoreModule`. Presence-only;
-	// defaults in `reference.conf` and the module.
-	redisConsentStore: z
-		.object({
-			keyPrefix: z.string().optional(),
-		})
-		.optional(),
-	// Module-internal config for `redisAccessTokenDenylistModule`.
-	// Presence-only; defaults in `reference.conf` and the module.
-	redisAccessTokenDenylist: z
-		.object({
-			keyPrefix: z.string().optional(),
-		})
-		.optional(),
-	// Module-internal config for `redisSessionStoresModule` (the bundled Redis
-	// user-session namespace). Presence-only.
-	redisSessionStores: z
-		.object({
-			keyPrefix: z.string().optional(),
-		})
-		.optional(),
-	// Module-internal config for `redisRefreshTokenFamilyStoreModule`
-	// (`REFRESH_TOKEN_FAMILY_STORE_KEY_PREFIX` / `..._CAS_RETRY_LIMIT`).
-	// Presence-only: the module's `configSchema` owns shape and defaults, with
-	// `reference.conf`.
-	redisRefreshTokenFamilyStore: z
-		.object({
-			keyPrefix: z.string().optional(),
-			casRetryLimit: z.coerce.number().optional(),
 		})
 		.optional(),
 	// Module-internal config for `redisCodeRepositoryModule`
@@ -1470,17 +1377,37 @@ export const fullSectionsSchema = z.object({
 			defaultExpiresIn: z.coerce.number().int().positive().optional(),
 		})
 		.optional(),
-	// Presence-only; defaults in the modules.
-	redisChallengeStore: z
-		.object({
-			keyPrefix: z.string().optional(),
-		})
-		.optional(),
-	redisReplaySeenSet: z
-		.object({
-			keyPrefix: z.string().optional(),
-		})
-		.optional(),
+	// Presence-only: the paths the stores' sections moved from, kept so a root
+	// that parses with `AppConfigSchema` before boot still hands them to the
+	// relocation refusal. Nothing reads them.
+	memoryRateLimiter: z.unknown().optional(),
+	redisRateLimiter: z.unknown().optional(),
+	redisAccessTokenDenylist: z.unknown().optional(),
+	redisChallengeStore: z.unknown().optional(),
+	redisConsentStore: z.unknown().optional(),
+	redisDeviceCodeStore: z.unknown().optional(),
+	redisMfaFactorStore: z.unknown().optional(),
+	redisMfaTransactionStore: z.unknown().optional(),
+	redisRefreshTokenFamilyStore: z.unknown().optional(),
+	redisReplaySeenSet: z.unknown().optional(),
+	redisSessionStores: z.unknown().optional(),
+	redisFederationTokenStore: z.unknown().optional(),
+	// Presence-only: the stores' own sections, each parsed by its module. A
+	// package's `reference.conf` is layered whenever any of its modules is
+	// loaded, so it sets these sections while their own module may not be;
+	// declared here, they are not named as ignored at boot.
+	"core-rate-limiter-memory": z.unknown().optional(),
+	"redis-access-token-denylist": z.unknown().optional(),
+	"redis-challenge-store": z.unknown().optional(),
+	"redis-consent-store": z.unknown().optional(),
+	"redis-device-code-store": z.unknown().optional(),
+	"redis-mfa-factor-store": z.unknown().optional(),
+	"redis-mfa-transaction-store": z.unknown().optional(),
+	"redis-rate-limiter": z.unknown().optional(),
+	"redis-refresh-token-family-store": z.unknown().optional(),
+	"redis-replay-seen-set": z.unknown().optional(),
+	"redis-session-stores": z.unknown().optional(),
+	"redis-federation-token-store": z.unknown().optional(),
 });
 
 /**

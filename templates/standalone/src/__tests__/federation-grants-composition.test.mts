@@ -30,7 +30,6 @@ import { fileURLToPath } from "node:url";
 import {
 	type AppConfig,
 	AppConfigSchema,
-	coreReference,
 	createApp,
 	createKeyStoreFactory,
 	defineModule,
@@ -39,7 +38,6 @@ import {
 	memoryRefreshTokenFamilyStoreModule,
 	registerBuiltinKeyStores,
 } from "@o3co/auth-provider-core";
-import { CORE_RELOCATIONS, renamedVariableCaptures } from "@o3co/auth-provider-core/testing";
 import { parseFile } from "@o3co/ts.hocon";
 import { validate } from "@o3co/ts.hocon/zod";
 import express from "express";
@@ -49,6 +47,7 @@ import { buildModules } from "../buildModules.mjs";
 import { resolveConfigPaths } from "../configPath.mjs";
 import { templateReference } from "../modules.mjs";
 import { installGracefulShutdown } from "../shutdown.mjs";
+import { capturedRenames, libraryLayers } from "./library-references.fixture.mjs";
 
 // The same stand-ins `replica-safety.test.mts` boots under: no socket opens,
 // and the shared clients module's readiness probe gets its PONG.
@@ -157,7 +156,7 @@ function resolveConfig(env: Record<string, string>): AppConfig {
 		parseFile(envConfPath, { env })
 			.withFallback(parseFile(applicationConfPath, { env }))
 			.withFallback(parseFile(fileURLToPath(templateReference()), { env }))
-			.withFallback(parseFile(fileURLToPath(coreReference()), { env })),
+			.withFallback(libraryLayers(env)),
 		AppConfigSchema,
 	);
 	// The key ring has no environment form (a list of { id, key } is HOCON's);
@@ -166,7 +165,7 @@ function resolveConfig(env: Record<string, string>): AppConfig {
 		...config,
 		// What the resolution captured of core's renamed variables, which the
 		// schema's parse drops.
-		"renamed-variables": renamedVariableCaptures({ modules: [], core: CORE_RELOCATIONS, env: env }),
+		"renamed-variables": capturedRenames(env),
 		federationGrants: {
 			...config.federationGrants,
 			encryptionKeys: [{ id: "k-test", key: ENCRYPTION_KEY }],

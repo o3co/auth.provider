@@ -37,13 +37,13 @@ import {
 	memoryReplaySeenSetModule,
 	memoryWebAuthnCredentialStoreModule,
 } from "@o3co/auth-provider-core";
-import { makeAppConfig } from "./appConfig.fixture.mjs";
 import express from "express";
 import supertest from "supertest";
 import { describe, expect, it, vi } from "vitest";
 import { type WebAuthnConfig, webauthnConfigSchema } from "../config.mjs";
 import { WEBAUTHN_GRANT_TYPE } from "../grant.mjs";
 import { webauthnModule } from "../module.mjs";
+import { makeAppConfig } from "./appConfig.fixture.mjs";
 
 // ---------------------------------------------------------------------------
 // Shared boot components

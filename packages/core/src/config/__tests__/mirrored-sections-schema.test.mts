@@ -21,8 +21,8 @@ import { makeValidAppConfig } from "#/testing/fixtures/valid-config.mjs";
 
 /**
  * The sections core's schema still mirrors, transitionally, for another
- * package's modules: `redisRateLimiter`, the `redis*` store namespaces,
- * `webauthn`. Boot's composed parse applies each
+ * package's modules: `redisFederationGrantStore`, `webauthn`, and the stores'
+ * sections presence-only. Boot's composed parse applies each
  * mirror whenever the configuration carries the section, the module that
  * reads it loaded or not; a check here goes when its mirror leaves core.
  *
@@ -37,44 +37,32 @@ import { makeValidAppConfig } from "#/testing/fixtures/valid-config.mjs";
 const base = makeValidAppConfig();
 const parse = (config: unknown) => TransitionalConfigSchema.parse(config);
 
-describe("redisRateLimiter's mirror", () => {
-	it("coerces the env-var spelling of a budget, like memoryRateLimiter", () => {
-		const parsed = parse({
-			...base,
-			redisRateLimiter: { limits: { token: { limit: "120", windowSeconds: "60" } } },
-		});
-		expect(parsed.redisRateLimiter?.limits?.token).toEqual({ limit: 120, windowSeconds: 60 });
+describe("the stores' sections, and the paths they moved from", () => {
+	// Each store module's section schema coerces and refuses; core keeps its
+	// section and the path it moved from as written, for the module and for
+	// the relocation refusal.
+	const WRITTEN = { limits: { token: { limit: "0", windowSeconds: 1e13 } }, bogus: true };
+
+	it.each([
+		"core-rate-limiter-memory",
+		"redis-rate-limiter",
+		"redis-consent-store",
+		"memoryRateLimiter",
+		"redisRateLimiter",
+		"redisConsentStore",
+	])("keeps %s as written", (section) => {
+		expect((parse({ ...base, [section]: WRITTEN }) as Record<string, unknown>)[section]).toEqual(
+			WRITTEN,
+		);
+		expect(
+			(AppConfigSchema.parse({ ...base, [section]: WRITTEN }) as Record<string, unknown>)[section],
+		).toEqual(WRITTEN);
 	});
 
-	it("refuses a budget that would read as configured and limit nothing", () => {
-		expect(() =>
-			parse({ ...base, redisRateLimiter: { defaultLimit: { limit: 0, windowSeconds: 60 } } }),
-		).toThrow();
-	});
-
-	it("refuses a window longer than a year, the ceiling of every duration an operator writes", () => {
-		// A typo guard: 1e13 seconds is a window no Redis key can carry and no
-		// Date can end, and the adapter refusing it at boot is the second line.
-		for (const section of ["redisRateLimiter", "memoryRateLimiter"] as const) {
-			for (const spec of [
-				{ defaultLimit: { limit: 5, windowSeconds: 31_536_001 } },
-				{ limits: { token: { limit: 5, windowSeconds: 1e13 } } },
-			]) {
-				expect(
-					() => parse({ ...base, [section]: spec }),
-					`${section} ${JSON.stringify(spec)}`,
-				).toThrow();
-			}
-			expect(
-				parse({ ...base, [section]: { defaultLimit: { limit: 5, windowSeconds: 31_536_000 } } })[
-					section
-				]?.defaultLimit,
-			).toEqual({ limit: 5, windowSeconds: 31_536_000 });
-		}
-	});
-
-	it("is absent when omitted — the default lives in the module", () => {
-		expect(parse(base).redisRateLimiter).toBeUndefined();
+	it("keeps rateLimit.failMode as written, beside the login budget", () => {
+		expect(
+			parse({ ...base, rateLimit: { ...base.rateLimit, failMode: "sometimes" } }).rateLimit,
+		).toMatchObject({ failMode: "sometimes" });
 	});
 });
 

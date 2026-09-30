@@ -43,7 +43,6 @@ import {
 	memoryReplaySeenSetModule,
 } from "@o3co/auth-provider-core";
 import { createTestOAuthTokenSettings } from "@o3co/auth-provider-core/testing";
-import { makeAppConfig } from "./appConfig.fixture.mjs";
 import type { AuthenticationResponseJSON } from "@simplewebauthn/server";
 import express from "express";
 import supertest from "supertest";
@@ -51,6 +50,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { WebAuthnConfig } from "#/config.mjs";
 import { WEBAUTHN_GRANT_TYPE } from "#/grant.mjs";
 import { webauthnModule } from "#/module.mjs";
+import { makeAppConfig } from "./appConfig.fixture.mjs";
 
 const ISSUER = "https://auth.example";
 const RP_ID = "example.com";

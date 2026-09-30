@@ -19,8 +19,8 @@ import {
 	defineModule,
 	isStorableExpiry,
 } from "@o3co/auth-provider-core";
-import { z } from "zod";
 import type { AccessTokenDenylistClient } from "./clients.mjs";
+import { keyPrefixSection, redisReference } from "./internal/section.mjs";
 
 /**
  * Options for {@link createRedisAccessTokenDenylist}.
@@ -114,29 +114,26 @@ export const redisAccessTokenDenylistBuilder: AdapterBuilder<AccessTokenDenylist
  * `defineModule` manifest for the Redis AccessTokenDenylist. Static composition
  * path; for runtime-config-driven selection use the builder above.
  *
- * configSchema: top-level key `redisAccessTokenDenylist` (module-namespaced —
- * NO bare `keyPrefix` top-level key). Multi-tenant deployments override
- * `keyPrefix` so one tenant's revocations cannot mask or be masked by
- * another's.
+ * Its section, `redis-access-token-denylist`, holds `keyPrefix` (strict).
+ * Multi-tenant deployments override it so one tenant's revocations cannot mask
+ * or be masked by another's.
  */
 export const redisAccessTokenDenylistModule = defineModule({
 	name: "redis-access-token-denylist",
-	requires: ["accessTokenDenylistClient", "config"] as const,
-	configSchema: z.object({
-		redisAccessTokenDenylist: z
-			.object({
-				keyPrefix: z.string().default("atdeny:"),
-			})
-			.default({ keyPrefix: "atdeny:" }),
-	}),
-	provides: {
-		accessTokenDenylist: (deps) => {
-			const cfg = (deps.config as unknown as { redisAccessTokenDenylist: { keyPrefix: string } })
-				.redisAccessTokenDenylist;
-			return createRedisAccessTokenDenylist({
-				client: deps.accessTokenDenylistClient,
-				keyPrefix: cfg.keyPrefix,
-			});
+	requires: ["accessTokenDenylistClient"] as const,
+	section: {
+		schema: keyPrefixSection("atdeny:"),
+		reference: redisReference(),
+		relocatedFrom: {
+			redisAccessTokenDenylist: { to: "", environmentVariable: null },
+			"redisAccessTokenDenylist.keyPrefix": "keyPrefix",
 		},
+	},
+	provides: {
+		accessTokenDenylist: ({ section, accessTokenDenylistClient }) =>
+			createRedisAccessTokenDenylist({
+				client: accessTokenDenylistClient,
+				keyPrefix: section.keyPrefix,
+			}),
 	},
 });

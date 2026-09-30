@@ -40,7 +40,7 @@ const minBoot = (extra: Record<string, unknown>) =>
 	}) as never;
 
 describe("redisSessionStoresModule manifest", () => {
-	it("declares requires: 6 per-purpose client slots + config", () => {
+	it("declares requires: 6 per-purpose client slots", () => {
 		// The two subject slots are `requires`, not optional: filling neither
 		// would leave `revokeAllForSubject` answering `unavailable` and
 		// revoking nothing.
@@ -52,7 +52,6 @@ describe("redisSessionStoresModule manifest", () => {
 				"sessionFederationIndexClient",
 				"subjectSessionIndexClient",
 				"subjectRevocationClient",
-				"config",
 			]),
 		);
 	});
@@ -67,11 +66,9 @@ describe("redisSessionStoresModule manifest", () => {
 		expect(typeof provides.subjectRevocation).toBe("function");
 	});
 
-	it("configSchema parses defaults under redisSessionStores key", () => {
-		const parsed = redisSessionStoresModule.configSchema?.parse({});
-		expect(
-			(parsed as { redisSessionStores: { keyPrefix: string } }).redisSessionStores.keyPrefix,
-		).toBe("ss:");
+	it("reads its own section, redis-session-stores, keyPrefix defaulting to ss:", () => {
+		expect(redisSessionStoresModule.configSchema).toBeUndefined();
+		expect(redisSessionStoresModule.section?.schema.parse(undefined)).toEqual({ keyPrefix: "ss:" });
 	});
 });
 
@@ -103,7 +100,7 @@ describe("redisSessionStoresModule wiring", () => {
 		const handle = await createApp({
 			modules: [redisSessionStoresModule, activator],
 			bootstrapComponents: {
-				config: minBoot({ redisSessionStores: { keyPrefix: "wire:" } }),
+				config: minBoot({ "redis-session-stores": { keyPrefix: "wire:" } }),
 				pathResolver: (p: string) => p,
 				// Spread every per-purpose wrapper; the module consumes its 6.
 				...makeIoredisClients(raw),

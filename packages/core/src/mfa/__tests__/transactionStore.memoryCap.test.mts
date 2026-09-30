@@ -287,8 +287,12 @@ describe("core-mfa-transaction-store-memory.maxEntries", () => {
 	it("is read from the module's own section", async () => {
 		expect(memoryMfaTransactionStoreModule.requires ?? []).toEqual([]);
 		expect((await storeOf({})).maxEntries).toBe(DEFAULT_MEMORY_MFA_TRANSACTION_STORE_MAX_ENTRIES);
-		expect((await storeOf({ "core-mfa-transaction-store-memory": { maxEntries: 5000 } })).maxEntries).toBe(5000);
-		expect((await storeOf({ "core-mfa-transaction-store-memory": { maxEntries: "7000" } })).maxEntries).toBe(7000);
+		expect(
+			(await storeOf({ "core-mfa-transaction-store-memory": { maxEntries: 5000 } })).maxEntries,
+		).toBe(5000);
+		expect(
+			(await storeOf({ "core-mfa-transaction-store-memory": { maxEntries: "7000" } })).maxEntries,
+		).toBe(7000);
 	});
 
 	it("refuses mfaTransactionStore.memory.maxEntries at boot, naming core-mfa-transaction-store-memory.maxEntries", async () => {
@@ -314,7 +318,9 @@ describe("core-mfa-transaction-store-memory.maxEntries", () => {
 
 	it("refuses a value it cannot use at boot, naming the key", async () => {
 		for (const bad of [0, 1.5, "lots", null, 2 ** 24 + 1]) {
-			const outcome = await bootWith({ "core-mfa-transaction-store-memory": { maxEntries: bad } }).then(
+			const outcome = await bootWith({
+				"core-mfa-transaction-store-memory": { maxEntries: bad },
+			}).then(
 				async (handle) => {
 					await handle.dispose();
 					return undefined;

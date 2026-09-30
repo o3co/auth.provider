@@ -210,13 +210,12 @@ describe("core's reference.conf binds core's own section and its modules', and n
 		expect(pathsSetBy(variable)).toEqual([path]);
 	});
 
-	it.each([
-		"DEPLOYMENT_MODE",
-		"MEMORY_RATE_LIMITER_MAX_BUCKETS",
-		"RATE_LIMIT_FAIL_MODE",
-	])("binds %s nowhere but its capture", (variable) => {
-		expect(pathsSetBy(variable)).toEqual([]);
-	});
+	it.each(["DEPLOYMENT_MODE", "MEMORY_RATE_LIMITER_MAX_BUCKETS", "RATE_LIMIT_FAIL_MODE"])(
+		"binds %s nowhere but its capture",
+		(variable) => {
+			expect(pathsSetBy(variable)).toEqual([]);
+		},
+	);
 
 	it("captures DEPLOYMENT_MODE and CORE_DEPLOYMENT_MODE as the resolution sees them", () => {
 		const captured = (env: Record<string, string>) =>

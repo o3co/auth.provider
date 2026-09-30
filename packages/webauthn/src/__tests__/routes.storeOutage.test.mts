@@ -39,10 +39,10 @@ import {
 	type Logger,
 	WebAuthnCredentialStorageError,
 } from "@o3co/auth-provider-core";
-import { makeAppConfig } from "./appConfig.fixture.mjs";
 import express from "express";
 import supertest from "supertest";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { makeAppConfig } from "./appConfig.fixture.mjs";
 
 vi.mock("#/internal/verification.mjs", () => ({
 	verifyWebAuthnAttestation: vi.fn(),

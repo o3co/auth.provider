@@ -1039,7 +1039,7 @@ const OUTAGES: readonly OutageCase[] = [
 	{
 		module: "core (rate-limit guard)",
 		slot: "rateLimiter",
-		surface: "/oauth/token (rateLimit.failMode = closed)",
+		surface: "/oauth/token (redis-rate-limiter.failMode = closed)",
 		run: async (app, outage) => {
 			outage.down = true;
 			return tokenRequest(app, M2M).send({ grant_type: "client_credentials", scope: "api.read" });

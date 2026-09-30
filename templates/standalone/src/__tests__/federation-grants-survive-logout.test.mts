@@ -36,7 +36,6 @@ import { fileURLToPath } from "node:url";
 import {
 	type AppConfig,
 	AppConfigSchema,
-	coreReference,
 	createApp,
 	createKeyStoreFactory,
 	defineModule,
@@ -50,7 +49,6 @@ import {
 	registerBuiltinKeyStores,
 	type UserSessionStore,
 } from "@o3co/auth-provider-core";
-import { CORE_RELOCATIONS, renamedVariableCaptures } from "@o3co/auth-provider-core/testing";
 import { parseFile } from "@o3co/ts.hocon";
 import { validate } from "@o3co/ts.hocon/zod";
 import express from "express";
@@ -59,6 +57,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { buildModules } from "../buildModules.mjs";
 import { resolveConfigPaths } from "../configPath.mjs";
 import { templateReference } from "../modules.mjs";
+import { capturedRenames, libraryLayers } from "./library-references.fixture.mjs";
 
 const DAY = 86_400_000;
 const configDir = fileURLToPath(new URL("../../config", import.meta.url));
@@ -121,14 +120,14 @@ function resolveConfig(): AppConfig {
 		parseFile(envConfPath, { env: ENV })
 			.withFallback(parseFile(applicationConfPath, { env: ENV }))
 			.withFallback(parseFile(fileURLToPath(templateReference()), { env: ENV }))
-			.withFallback(parseFile(fileURLToPath(coreReference()), { env: ENV })),
+			.withFallback(libraryLayers(ENV)),
 		AppConfigSchema,
 	);
 	return {
 		...config,
 		// What the resolution captured of core's renamed variables, which the
 		// schema's parse drops.
-		"renamed-variables": renamedVariableCaptures({ modules: [], core: CORE_RELOCATIONS, env: ENV }),
+		"renamed-variables": capturedRenames(ENV),
 		federations: {
 			...config.federations,
 			upstream: {

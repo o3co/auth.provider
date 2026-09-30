@@ -19,17 +19,16 @@ describe("redisChallengeStoreModule", () => {
 		expect(redisChallengeStoreModule.name).toBe("redis-challenge-store");
 	});
 
-	it("requires both 'challengeStoreClient' and 'config'", () => {
-		const reqs = redisChallengeStoreModule.requires ?? [];
-		expect(new Set(reqs)).toEqual(new Set(["challengeStoreClient", "config"]));
+	it("requires 'challengeStoreClient' alone", () => {
+		expect(redisChallengeStoreModule.requires).toEqual(["challengeStoreClient"]);
 	});
 
-	it("declares a Zod configSchema with module-namespaced 'redisChallengeStore' top-level key only", () => {
-		expect(redisChallengeStoreModule.configSchema).toBeDefined();
-		const parsed = redisChallengeStoreModule.configSchema?.parse({}) as {
-			redisChallengeStore?: { keyPrefix?: string };
-		};
-		expect(parsed?.redisChallengeStore?.keyPrefix).toBe("chal:");
+	it("reads its own section, 'redis-challenge-store', whose keyPrefix defaults to 'chal:'", () => {
+		expect(redisChallengeStoreModule.configSchema).toBeUndefined();
+		expect(redisChallengeStoreModule.section?.at).toBeUndefined();
+		expect(redisChallengeStoreModule.section?.schema.parse(undefined)).toEqual({
+			keyPrefix: "chal:",
+		});
 	});
 });
 
@@ -38,17 +37,16 @@ describe("redisReplaySeenSetModule", () => {
 		expect(redisReplaySeenSetModule.name).toBe("redis-replay-seen-set");
 	});
 
-	it("requires both 'replaySeenSetClient' and 'config'", () => {
-		const reqs = redisReplaySeenSetModule.requires ?? [];
-		expect(new Set(reqs)).toEqual(new Set(["replaySeenSetClient", "config"]));
+	it("requires 'replaySeenSetClient' alone", () => {
+		expect(redisReplaySeenSetModule.requires).toEqual(["replaySeenSetClient"]);
 	});
 
-	it("declares a Zod configSchema with module-namespaced 'redisReplaySeenSet' top-level key only", () => {
-		expect(redisReplaySeenSetModule.configSchema).toBeDefined();
-		const parsed = redisReplaySeenSetModule.configSchema?.parse({}) as {
-			redisReplaySeenSet?: { keyPrefix?: string };
-		};
-		expect(parsed?.redisReplaySeenSet?.keyPrefix).toBe("replay:");
+	it("reads its own section, 'redis-replay-seen-set', whose keyPrefix defaults to 'replay:'", () => {
+		expect(redisReplaySeenSetModule.configSchema).toBeUndefined();
+		expect(redisReplaySeenSetModule.section?.at).toBeUndefined();
+		expect(redisReplaySeenSetModule.section?.schema.parse(undefined)).toEqual({
+			keyPrefix: "replay:",
+		});
 	});
 });
 
@@ -57,17 +55,16 @@ describe("redisDeviceCodeStoreModule", () => {
 		expect(redisDeviceCodeStoreModule.name).toBe("redis-device-code-store");
 	});
 
-	it("requires both 'deviceCodeStoreClient' and 'config'", () => {
-		const reqs = redisDeviceCodeStoreModule.requires ?? [];
-		expect(new Set(reqs)).toEqual(new Set(["deviceCodeStoreClient", "config"]));
+	it("requires 'deviceCodeStoreClient' alone", () => {
+		expect(redisDeviceCodeStoreModule.requires).toEqual(["deviceCodeStoreClient"]);
 	});
 
-	it("declares a Zod configSchema with module-namespaced 'redisDeviceCodeStore' top-level key only", () => {
-		expect(redisDeviceCodeStoreModule.configSchema).toBeDefined();
-		const parsed = redisDeviceCodeStoreModule.configSchema?.parse({}) as {
-			redisDeviceCodeStore?: { keyPrefix?: string };
-		};
-		expect(parsed?.redisDeviceCodeStore?.keyPrefix).toBe("devauth:");
+	it("reads its own section, 'redis-device-code-store', whose keyPrefix defaults to 'devauth:'", () => {
+		expect(redisDeviceCodeStoreModule.configSchema).toBeUndefined();
+		expect(redisDeviceCodeStoreModule.section?.at).toBeUndefined();
+		expect(redisDeviceCodeStoreModule.section?.schema.parse(undefined)).toEqual({
+			keyPrefix: "devauth:",
+		});
 	});
 });
 
@@ -76,48 +73,38 @@ describe("redisConsentStoreModule", () => {
 		expect(redisConsentStoreModule.name).toBe("redis-consent-store");
 	});
 
-	it("requires both consent client slots and 'config'", () => {
-		const reqs = redisConsentStoreModule.requires ?? [];
-		expect(new Set(reqs)).toEqual(
-			new Set(["consentStoreClient", "pendingConsentStoreClient", "config"]),
-		);
+	it("requires both consent client slots alone", () => {
+		expect(redisConsentStoreModule.requires).toEqual([
+			"consentStoreClient",
+			"pendingConsentStoreClient",
+		]);
 	});
 
-	it("declares a Zod configSchema with module-namespaced 'redisConsentStore' top-level key only", () => {
-		expect(redisConsentStoreModule.configSchema).toBeDefined();
-		const parsed = redisConsentStoreModule.configSchema?.parse({}) as {
-			redisConsentStore?: { keyPrefix?: string };
-		};
-		expect(parsed?.redisConsentStore?.keyPrefix).toBe("consent:");
+	it("reads its own section, 'redis-consent-store', whose keyPrefix defaults to 'consent:'", () => {
+		expect(redisConsentStoreModule.configSchema).toBeUndefined();
+		expect(redisConsentStoreModule.section?.at).toBeUndefined();
+		expect(redisConsentStoreModule.section?.schema.parse(undefined)).toEqual({
+			keyPrefix: "consent:",
+		});
 	});
 });
 
 describe("the MFA store modules and adapters, from the package's entry", () => {
 	it.each([
-		[
-			redisMfaFactorStoreModule,
-			"redis-mfa-factor-store",
-			"mfaFactorStoreClient",
-			"redisMfaFactorStore",
-			"mfaf:",
-		],
+		[redisMfaFactorStoreModule, "redis-mfa-factor-store", "mfaFactorStoreClient", "mfaf:"],
 		[
 			redisMfaTransactionStoreModule,
 			"redis-mfa-transaction-store",
 			"mfaTransactionStoreClient",
-			"redisMfaTransactionStore",
 			"mfat:",
 		],
 	] as const)(
-		"%s.name is exported with its client slot and its namespaced prefix",
-		(module, name, client, key, prefix) => {
+		"%s.name is exported with its client slot and its own section's prefix",
+		(module, name, client, prefix) => {
 			expect(module.name).toBe(name);
-			expect(new Set(module.requires ?? [])).toEqual(new Set([client, "config"]));
-			const parsed = (module.configSchema?.parse({}) ?? {}) as Record<
-				string,
-				{ keyPrefix?: string }
-			>;
-			expect(parsed[key]?.keyPrefix).toBe(prefix);
+			expect(module.requires).toEqual([client]);
+			expect(module.configSchema).toBeUndefined();
+			expect(module.section?.schema.parse(undefined)).toEqual({ keyPrefix: prefix });
 		},
 	);
 

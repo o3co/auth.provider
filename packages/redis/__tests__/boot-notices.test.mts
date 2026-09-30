@@ -32,6 +32,7 @@ import {
 	redisFederationTokenStoreBuilder,
 	redisFederationTokenStoreModuleFor,
 } from "#/federation-tokens.mjs";
+import { withSection } from "./support/section.mjs";
 
 /** A logger that records what each level is handed. */
 function recordingLogger(): { logger: Logger; calls: Array<{ level: string; args: unknown[] }> } {
@@ -70,7 +71,7 @@ const grantClient = {} as FederationGrantStoreClient;
 const PLAINTEXT = { mode: "allow-plaintext" } as const;
 
 const TOKEN_STORE_CONFIG = {
-	redisFederationTokenStore: {
+	"redis-federation-token-store": {
 		keyPrefix: "ft:",
 		ttl: 86400,
 		encryptionMode: "allow-plaintext",
@@ -185,15 +186,16 @@ describe("the plaintext guard's notices", () => {
 
 	it("each module writes the composition's logger slot, once", () => {
 		const tokens = recordingLogger();
-		const provideTokens = redisFederationTokenStoreModuleFor().provides?.federationTokenStore as (
-			deps: unknown,
-		) => unknown;
-		provideTokens({
-			federationTokenStoreClient: tokenClient,
-			config: TOKEN_STORE_CONFIG,
-			deploymentMode: "unset",
-			logger: tokens.logger,
-		});
+		const tokenModule = redisFederationTokenStoreModuleFor();
+		const provideTokens = tokenModule.provides?.federationTokenStore as (deps: unknown) => unknown;
+		provideTokens(
+			withSection(tokenModule, {
+				federationTokenStoreClient: tokenClient,
+				config: TOKEN_STORE_CONFIG,
+				deploymentMode: "unset",
+				logger: tokens.logger,
+			}),
+		);
 		expect(tokens.calls).toEqual([plaintextWarning("federation-tokens")]);
 
 		const grants = recordingLogger();

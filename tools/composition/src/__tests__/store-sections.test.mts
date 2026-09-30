@@ -374,7 +374,11 @@ describe("a path a store's section moved from, written in the operator's own lay
 describe("a key a store's section does not declare", () => {
 	it.each([
 		["core-rate-limiter-memory.maxBucket = 5", "maxBucket", false],
-		["core-rate-limiter-memory.limits.token { limit = 5, windowSeconds = 60, window = 1 }", "window", false],
+		[
+			"core-rate-limiter-memory.limits.token { limit = 5, windowSeconds = 60, window = 1 }",
+			"window",
+			false,
+		],
 		["core-replay-seen-set-memory.maxEntry = 5", "maxEntry", false],
 		['redis-consent-store.prefix = "x:"', "prefix", true],
 		['redis-rate-limiter.failmode = "open"', "failmode", true],
