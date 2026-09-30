@@ -24,13 +24,16 @@
  * it equals what core recomputes from the same factors, and the requirement's own
  * verdicts read the same snapshot, so the two never disagree.
  *
- * `admit` decides by the action's grade, never its name: under `optional`
- * everything is met; under `required` a token is judged on its own `amr`
- * (`admitToken`) and a session carried by a cookie, code or link on its record's
- * baseline (`admitRecord`), except that an action graded `grants_nothing` is met
- * on any live record. A token is judged on its own `amr` whatever the grade:
- * `grants_nothing` exempts only an admission a record carries. `credential_change`
- * has no recent-MFA rule yet and gets the same baseline.
+ * `admit` decides by the action's grade, never its name (`RECORD_RULE`). A
+ * token is judged on its own `amr` (`admitToken`) under `required`, whatever
+ * the grade, and met under `optional`. A session a cookie, code or link carries
+ * is held, under `required`, to its record's baseline, except that an action
+ * graded `grants_nothing` is met on any live record; under `optional` it is
+ * met. An action graded `credential_change` adds a way into the account and is
+ * held to recent MFA (`isRecentMfa`) under either mode, over a primary the
+ * baseline knows: the subject's factor records say whether it holds a counting
+ * factor — a record of a kind no installed factor declares non-counting counts
+ * — and a list that cannot answer throws.
  *
  * `admitPrimary` interrupts a password login for a second factor when the subject
  * has any factor record: a record it cannot use is never "none", and a `list`
@@ -45,6 +48,7 @@
 
 import {
 	type AdmissionGrade,
+	DEFAULT_CLOCK_SKEW_MS,
 	FEDERATED_AMR,
 	type Logger,
 	MFA_AMR,
@@ -56,7 +60,9 @@ import {
 	type RequirementInterruption,
 	type RequirementVerdict,
 	SECOND_FACTOR_AMR,
+	type SessionAuthentication,
 	type SessionRequirement,
+	type SessionView,
 	type StepUpPage,
 } from "@o3co/auth-provider-core";
 import type { LoginInterruption, LoginTransactions } from "./transactions.mjs";
@@ -87,8 +93,53 @@ export interface MfaRequirementOptions {
 	 * written, so the baseline sends it to log in instead.
 	 */
 	readonly stepUpRecordable: boolean;
+	/** `mfa.manage.maxAgeSeconds`: how long a second factor verified in a session stays recent. */
+	readonly recentMfaMaxAgeSeconds: number;
 	/** Where a first binding that offers nothing is said (`mfa_enrollment_nothing_enrollable`). */
 	readonly logger: Logger;
+}
+
+/** What recent MFA is read from: a live session's primary time and its last second factor. */
+export interface RecentMfaSession {
+	readonly authTime: Date;
+	readonly mfaAt: Date | undefined;
+}
+
+/** What recent MFA is judged by. */
+export interface RecentMfaRule {
+	/** `mfa.manage.maxAgeSeconds`. */
+	readonly maxAgeSeconds: number;
+	/** Whether the subject holds a counting factor: without one, a recent primary stands in. */
+	readonly holdsCountingFactor: boolean;
+}
+
+/**
+ * Whether `at` is at most `maxAgeMs` before `nowMs`. A time up to
+ * `DEFAULT_CLOCK_SKEW_MS` ahead — another replica's clock — reads as now; one
+ * further ahead, or one that is not a valid date, is not recent.
+ */
+function withinWindow(at: Date | undefined, maxAgeMs: number, nowMs: number): boolean {
+	const atMs = at instanceof Date ? at.getTime() : Number.NaN;
+	if (!Number.isFinite(atMs) || !Number.isFinite(nowMs) || !Number.isFinite(maxAgeMs)) {
+		return false;
+	}
+	if (atMs - nowMs > DEFAULT_CLOCK_SKEW_MS) return false;
+	return nowMs - Math.min(atMs, nowMs) <= maxAgeMs;
+}
+
+/**
+ * Whether `session` has recent MFA at `nowMs`: a second factor verified
+ * within `rule.maxAgeSeconds` or, for a subject with no counting factor, a
+ * primary that recent. The window's edge is recent.
+ */
+export function isRecentMfa(
+	session: RecentMfaSession,
+	rule: RecentMfaRule,
+	nowMs: number,
+): boolean {
+	const maxAgeMs = rule.maxAgeSeconds * 1_000;
+	if (withinWindow(session.mfaAt, maxAgeMs, nowMs)) return true;
+	return !rule.holdsCountingFactor && withinWindow(session.authTime, maxAgeMs, nowMs);
 }
 
 const MET: RequirementVerdict = Object.freeze({ outcome: "met" });
@@ -103,12 +154,13 @@ const STEP_UP: RequirementVerdict = Object.freeze({
 /**
  * What a live record is held to, by grade — exhaustive over core's grades. An
  * action that grants nothing is met, so a user can refuse a phished device
- * request without a step-up; core never asks about a remediation.
+ * request without a step-up; one that adds a way into the account needs recent
+ * MFA; core never asks about a remediation.
  */
-const RECORD_RULE: Readonly<Record<AdmissionGrade, "baseline" | "met">> = {
+const RECORD_RULE: Readonly<Record<AdmissionGrade, "baseline" | "met" | "recent">> = {
 	use: "baseline",
 	grants_nothing: "met",
-	credential_change: "baseline",
+	credential_change: "recent",
 	remediation: "baseline",
 };
 
@@ -124,8 +176,16 @@ function reachOf(factors: MfaFactorResolver): ReadonlySet<string> {
 
 /** The `mfa` requirement over `options` (see this file's header). */
 export function createMfaRequirement(options: MfaRequirementOptions): SessionRequirement {
-	const { mode, factors, factorStore, transactions, stepUpPage, stepUpRecordable, logger } =
-		options;
+	const {
+		mode,
+		factors,
+		factorStore,
+		transactions,
+		stepUpPage,
+		stepUpRecordable,
+		recentMfaMaxAgeSeconds,
+		logger,
+	} = options;
 
 	/**
 	 * The reach of the first read (boot's, after every factor registered), kept:
@@ -153,20 +213,68 @@ export function createMfaRequirement(options: MfaRequirementOptions): SessionReq
 		return primary === PASSWORD_AMR ? UNMET : REAUTHENTICATE;
 	};
 
-	/** A session a cookie, a code or a link carries: the baseline over its record. */
-	const admitRecord = ({
-		session,
-		authentication,
-		action,
-	}: RequirementInput): RequirementVerdict => {
-		if (session === null) return REAUTHENTICATE;
-		if (RECORD_RULE[action.grade] === "met") return MET;
-		const recorded = authentication?.authentication;
+	/** The subject's factor records; a store that cannot answer, or answers something other than a list, throws. */
+	const listRecords = async (subject: string): Promise<readonly unknown[]> => {
+		const records: unknown = await factorStore.list(subject);
+		if (!Array.isArray(records)) {
+			throw new TypeError("MfaFactorStore.list answered something that is not a list");
+		}
+		return records;
+	};
+
+	/** Whether any of the subject's records is of a kind that counts: one no installed factor declares non-counting does. */
+	const holdsCountingFactor = async (subject: string): Promise<boolean> =>
+		(await listRecords(subject)).some(
+			(record) => factors.get((record as { kind: string }).kind)?.counting !== false,
+		);
+
+	/** The answer where a second factor would meet the rule: a step-up, where one can finish and be recorded. */
+	const stepUp = (): RequirementVerdict => {
+		if (reach().size === 0) return UNMET;
+		return stepUpRecordable ? STEP_UP : REAUTHENTICATE;
+	};
+
+	/** The baseline over a record: a federation, or a second factor after a password. */
+	const baseline = (recorded: SessionAuthentication | undefined): RequirementVerdict => {
 		if (recorded?.primary === FEDERATED_AMR) return MET;
 		if (recorded?.primary !== PASSWORD_AMR) return REAUTHENTICATE;
 		if (recorded.mfaAt !== undefined) return MET;
-		if (reach().size === 0) return UNMET;
-		return stepUpRecordable ? STEP_UP : REAUTHENTICATE;
+		return stepUp();
+	};
+
+	/**
+	 * Recent MFA over a record whose primary the baseline knows; a subject with
+	 * no counting factor and a stale primary logs in again.
+	 */
+	const recent = async (
+		session: SessionView,
+		recorded: SessionAuthentication | undefined,
+		nowMs: number,
+	): Promise<RequirementVerdict> => {
+		if (recorded?.primary !== PASSWORD_AMR && recorded?.primary !== FEDERATED_AMR) {
+			return REAUTHENTICATE;
+		}
+		const counting = await holdsCountingFactor(session.sub);
+		const rule = { maxAgeSeconds: recentMfaMaxAgeSeconds, holdsCountingFactor: counting };
+		if (isRecentMfa({ authTime: session.authTime, mfaAt: recorded.mfaAt }, rule, nowMs)) {
+			return MET;
+		}
+		return counting ? stepUp() : REAUTHENTICATE;
+	};
+
+	/** A session a cookie, a code or a link carries, held to its grade's rule over its record. */
+	const admitRecord = async ({
+		session,
+		authentication,
+		action,
+		now,
+	}: RequirementInput): Promise<RequirementVerdict> => {
+		const rule = RECORD_RULE[action.grade];
+		if (mode === "optional" && rule !== "recent") return MET;
+		if (session === null) return REAUTHENTICATE;
+		if (rule === "met") return MET;
+		const recorded = authentication?.authentication;
+		return rule === "recent" ? recent(session, recorded, now.getTime()) : baseline(recorded);
 	};
 
 	/** The interruption that opens the login's transaction with `interruption`'s answer. */
@@ -200,15 +308,12 @@ export function createMfaRequirement(options: MfaRequirementOptions): SessionReq
 		remediations: [MFA_STEP_UP_REMEDIATION],
 		hintKeys: [...MFA_HINT_KEYS],
 		admit: async (input) => {
-			if (mode === "optional") return MET;
-			return input.carrier === "token" ? admitToken(input) : admitRecord(input);
+			if (input.carrier === "token") return mode === "optional" ? MET : admitToken(input);
+			return admitRecord(input);
 		},
 		admitPrimary: async (primary) => {
 			if (primary.recorded.authentication.primary !== PASSWORD_AMR) return "establish";
-			const records: unknown = await factorStore.list(primary.subject);
-			if (!Array.isArray(records)) {
-				throw new TypeError("MfaFactorStore.list answered something that is not a list");
-			}
+			const records = await listRecords(primary.subject);
 			if (records.length > 0) return interrupt({ error: "mfa_required" });
 			if (mode === "optional") return "establish";
 			return interrupt({
