@@ -97,13 +97,7 @@ describe("device-grant.rateLimit — the documented key resolves", () => {
 			): Promise<{ allowed: boolean; limit?: number }>;
 		};
 		const limiter = provide({
-			config: {
-				memoryRateLimiter: {
-					limits: {},
-					defaultLimit: { limit: 60, windowSeconds: 60 },
-					maxBuckets: 10_000,
-				},
-			},
+			section: { limits: {}, defaultLimit: { limit: 60, windowSeconds: 60 }, maxBuckets: 10_000 },
 			rateLimitBudgetResolver: {
 				get: (prefix: string) => budgets.get(prefix),
 				entries: () => budgets.entries(),

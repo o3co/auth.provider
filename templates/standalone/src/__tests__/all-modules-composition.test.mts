@@ -109,7 +109,8 @@ const TEMPLATE_PACKAGES: Readonly<Record<string, string>> = {
 	"@o3co/auth-provider-federation-google": "googleFederationModule",
 	"@o3co/auth-provider-federation-grants": "federationGrantsModules",
 	"@o3co/auth-provider-federation-oidc": "oidcFederationModule, one per `oidc` section",
-	"@o3co/auth-provider-foundation": "the HTTP user repository adapter (no module)",
+	"@o3co/auth-provider-foundation":
+		"the HTTP user repository adapter (its MFA factor store module is composed by tools/composition)",
 	"@o3co/auth-provider-oauth":
 		"oauthModule, oauthSessionModule, oauthAuthorizationModule, subjectRevocationServiceModule",
 	"@o3co/auth-provider-redis": "the Redis stores (all-modules-composition.multi.test.mts)",
@@ -381,7 +382,10 @@ describe("discovery", () => {
 
 	/** The grant connections dropped: they name the OIDC federation. */
 	const withoutConnections = (config: AppConfig): AppConfig =>
-		({ ...config, federationGrants: { ...config.federationGrants, connections: {} } }) as AppConfig;
+		({
+			...config,
+			"federation-grants": { ...config["federation-grants"], connections: {} },
+		}) as AppConfig;
 
 	const FEATURE_SWITCHES: ReadonlyArray<
 		readonly [
@@ -1039,7 +1043,7 @@ const OUTAGES: readonly OutageCase[] = [
 	{
 		module: "core (rate-limit guard)",
 		slot: "rateLimiter",
-		surface: "/oauth/token (rateLimit.failMode = closed)",
+		surface: "/oauth/token (redis-rate-limiter.failMode = closed)",
 		run: async (app, outage) => {
 			outage.down = true;
 			return tokenRequest(app, M2M).send({ grant_type: "client_credentials", scope: "api.read" });

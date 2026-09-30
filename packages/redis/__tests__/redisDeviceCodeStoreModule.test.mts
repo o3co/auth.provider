@@ -85,7 +85,7 @@ describe("redisDeviceCodeStoreModule wiring", () => {
 		const handle = await createApp({
 			modules: [redisDeviceCodeStoreModule, deviceGrantStandIn],
 			bootstrapComponents: {
-				config: multiReplicaConfig({ redisDeviceCodeStore: { keyPrefix: "wire:" } }),
+				config: multiReplicaConfig({ "redis-device-code-store": { keyPrefix: "wire:" } }),
 				pathResolver: (p: string) => p,
 				...makeIoredisClients(raw),
 			} as never,

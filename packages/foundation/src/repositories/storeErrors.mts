@@ -15,8 +15,9 @@
  */
 
 /**
- * The failures `HttpUserRepository` throws about the exchange with the Store
- * rather than about a user: the Store refusing this deployment's credential,
+ * The failures the Store clients — `HttpUserRepository` and
+ * `HttpMfaFactorStore` — throw about the exchange with the Store rather than
+ * about what they asked: the Store refusing this deployment's credential,
  * and a transport that failed. Each is built from an allowlist — the
  * endpoint (origin and path), a status, a transport code — and never from
  * what the Store or the transport said, which may quote the request.
@@ -27,11 +28,12 @@ import { endpointForMessage } from "../endpointUrl.mjs";
 /**
  * The Store refused the credential this deployment presented: a `401` or a
  * `403` carrying a `Bearer` challenge (RFC 6750 §3) to a request that sent
- * `bearerToken`. An outage, not an answer about the user. See README, The
- * wire contract.
+ * `bearerToken`. An outage, not an answer about a user or a factor. See
+ * README, The wire contract.
  *
- * `name` and `storeStatus` are part of the contract. The message names the
- * endpoint's origin and path, the status and the option to check; never the
+ * `name` and `storeStatus` are part of the contract. The message leads with
+ * the client that was refused, and names the endpoint's origin and path, the
+ * status and the option to check; never the
  * token, and nothing the Store wrote. Not `status` or `statusCode`: Express's
  * finalhandler, http-errors and the standalone's terminal handler read those
  * as the status to ANSWER with, so the Store's 401 would reach the browser as
@@ -40,9 +42,9 @@ import { endpointForMessage } from "../endpointUrl.mjs";
 export class StoreCredentialRefusedError extends Error {
 	readonly storeStatus: 401 | 403;
 
-	constructor(url: string, status: 401 | 403) {
+	constructor(url: string, status: 401 | 403, owner = "HttpUserRepository") {
 		super(
-			`HttpUserRepository: the Store at ${endpointForMessage(url)} refused this deployment's credential ` +
+			`${owner}: the Store at ${endpointForMessage(url)} refused this deployment's credential ` +
 				`(HTTP ${status} with a Bearer challenge) — bearerToken (CLIENT_USER_BEARER_TOKEN) is ` +
 				"not a token the Store accepts",
 		);

@@ -81,7 +81,7 @@ const olderAdapter = (): SubjectRevocation => ({
 });
 
 const enabled = (over: Record<string, unknown> = {}) =>
-	config({ federationGrants: { enabled: true, ...over } });
+	config({ "federation-grants": { enabled: true, ...over } });
 
 describe("subjectRevocationServiceModule", () => {
 	it("declares the whole cascade, because it cannot run without it", () => {
@@ -200,7 +200,7 @@ describe("subjectRevocationServiceModule", () => {
 	describe("what it refuses when grants are on", () => {
 		it("refuses a deployment with nowhere to read the grants from", () => {
 			expect(() => build({ config: enabled() })).toThrow(
-				/federationGrants\.enabled = true requires a federationGrantStore/,
+				/federation-grants\.enabled = true requires a federationGrantStore/,
 			);
 		});
 
@@ -230,12 +230,12 @@ describe("subjectRevocationServiceModule", () => {
 			expect(() => build({ subjectRevocation: olderAdapter() })).not.toThrow();
 		});
 
-		it("decides by federationGrants.enabled: a grant store wired with the feature off is not read", () => {
+		it("decides by federation-grants.enabled: a grant store wired with the feature off is not read", () => {
 			// Whether grants are on is the flag's to say; a store alone does not
 			// turn the grants' checks on.
 			expect(() =>
 				build({
-					config: config({ federationGrants: { enabled: false } }),
+					config: config({ "federation-grants": { enabled: false } }),
 					federationGrantStore: createMemoryFederationGrantStore(),
 					subjectRevocation: olderAdapter(),
 				}),
@@ -285,7 +285,7 @@ describe("subjectRevocationServiceModule", () => {
 			expect(() =>
 				build({
 					config: config({
-						federationGrants: { enabled: false, allowKeepOnSubjectRevocation: true },
+						"federation-grants": { enabled: false, allowKeepOnSubjectRevocation: true },
 					}),
 					subjectRevocation: olderAdapter(),
 				}),

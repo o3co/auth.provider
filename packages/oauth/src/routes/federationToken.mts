@@ -71,7 +71,7 @@ const isUsableToken = isNonEmptyString;
 
 /**
  * Seconds a caller is asked to wait before retrying a token this route may
- * not hand on — the default of `federationGrants.ineligibleRetryAfter` on the
+ * not hand on — the default of `federation-grants.ineligibleRetryAfter` on the
  * offline-delegation route. A hint against a hot loop: the condition ends
  * only when the upstream's registration changes.
  */

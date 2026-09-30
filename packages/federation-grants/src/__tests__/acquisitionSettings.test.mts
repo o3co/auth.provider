@@ -53,12 +53,10 @@ const resolve = (
 	issuer = ISSUER,
 ) =>
 	resolveFederationGrantAcquisitionSettings(
-		{
-			oauth: { jwt: { issuer } },
-			federationGrants: grants,
-		},
+		grants,
 		new Map(connections.map((entry) => [entry.name, entry])),
 		createTestLoginEntry("/login"),
+		{ issuer },
 	);
 
 /**
@@ -100,9 +98,9 @@ describe("resolveFederationGrantAcquisitionSettings", () => {
 	});
 
 	it("refuses a deployment with no consent page: consent is the provider's own and is never skipped", () => {
-		expect(() => resolve({})).toThrow(/federationGrants\.consent\.url/);
-		expect(() => resolve({ consent: {} })).toThrow(/federationGrants\.consent\.url/);
-		expect(() => resolve({ consent: { url: "" } })).toThrow(/federationGrants\.consent\.url/);
+		expect(() => resolve({})).toThrow(/federation-grants\.consent\.url/);
+		expect(() => resolve({ consent: {} })).toThrow(/federation-grants\.consent\.url/);
+		expect(() => resolve({ consent: { url: "" } })).toThrow(/federation-grants\.consent\.url/);
 	});
 
 	it("takes a consent page on the provider's own origin, and refuses one anywhere else", () => {
@@ -132,11 +130,9 @@ describe("resolveFederationGrantAcquisitionSettings", () => {
 			"/login?redirect_to=%2Fback",
 		);
 		const withEntry = (entry: LoginEntry | undefined) => () =>
-			resolveFederationGrantAcquisitionSettings(
-				{ oauth: { jwt: { issuer: ISSUER } }, federationGrants: { consent: { url: "/c" } } },
-				new Map(),
-				entry,
-			);
+			resolveFederationGrantAcquisitionSettings({ consent: { url: "/c" } }, new Map(), entry, {
+				issuer: ISSUER,
+			});
 		expect(withEntry(undefined)).toThrow(
 			/federation grants are enabled and no loginEntry is installed/,
 		);
@@ -158,11 +154,9 @@ describe("resolveFederationGrantAcquisitionSettings", () => {
 		);
 		let refusal: unknown;
 		try {
-			resolveFederationGrantAcquisitionSettings(
-				{ oauth: { jwt: { issuer: ISSUER } }, federationGrants: { consent: { url: "/c" } } },
-				new Map(),
-				entry,
-			);
+			resolveFederationGrantAcquisitionSettings({ consent: { url: "/c" } }, new Map(), entry, {
+				issuer: ISSUER,
+			});
 		} catch (error) {
 			refusal = error;
 		}
@@ -176,7 +170,7 @@ describe("resolveFederationGrantAcquisitionSettings", () => {
 		// The origin every consent page and callback is held to is the issuer's.
 		expect(() =>
 			resolveFederationGrantAcquisitionSettings(
-				{ oauth: { jwt: {} }, federationGrants: { consent: { url: "/c" } } },
+				{ consent: { url: "/c" } },
 				new Map(),
 				createTestLoginEntry("/login"),
 			),

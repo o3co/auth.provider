@@ -22,8 +22,8 @@ import {
 	defineModule,
 	isStorableExpiry,
 } from "@o3co/auth-provider-core";
-import { z } from "zod";
 import type { ChallengeStoreClient } from "./clients.mjs";
+import { keyPrefixSection, redisReference } from "./internal/section.mjs";
 
 /**
  * Options for createRedisChallengeStore.
@@ -109,27 +109,21 @@ export const redisChallengeStoreBuilder: AdapterBuilder<ChallengeStore> = (confi
  * `defineModule` manifest for the Redis ChallengeStore. Static composition
  * path. For runtime-config-driven selection use the builder above.
  *
- * configSchema: top-level key `redisChallengeStore` (module-namespaced — NO
- * bare `keyPrefix` top-level key).
+ * Its section, `redis-challenge-store`, holds `keyPrefix` (strict).
  */
 export const redisChallengeStoreModule = defineModule({
 	name: "redis-challenge-store",
-	requires: ["challengeStoreClient", "config"] as const,
-	configSchema: z.object({
-		redisChallengeStore: z
-			.object({
-				keyPrefix: z.string().default("chal:"),
-			})
-			.default({ keyPrefix: "chal:" }),
-	}),
+	requires: ["challengeStoreClient"] as const,
+	section: {
+		schema: keyPrefixSection("chal:"),
+		reference: redisReference(),
+		relocatedFrom: { redisChallengeStore: { to: "", environmentVariable: null } },
+	},
 	provides: {
-		challengeStore: (deps) => {
-			const cfg = (deps.config as unknown as { redisChallengeStore: { keyPrefix: string } })
-				.redisChallengeStore;
-			return createRedisChallengeStore({
-				client: deps.challengeStoreClient,
-				keyPrefix: cfg.keyPrefix,
-			});
-		},
+		challengeStore: ({ section, challengeStoreClient }) =>
+			createRedisChallengeStore({
+				client: challengeStoreClient,
+				keyPrefix: section.keyPrefix,
+			}),
 	},
 });

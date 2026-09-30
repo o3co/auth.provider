@@ -87,7 +87,7 @@ describe("redisConsentStoreModule wiring", () => {
 		const handle = await createApp({
 			modules: [redisConsentStoreModule, consentStepStandIn],
 			bootstrapComponents: {
-				config: multiReplicaConfig({ redisConsentStore: { keyPrefix: "wire:" } }),
+				config: multiReplicaConfig({ "redis-consent-store": { keyPrefix: "wire:" } }),
 				pathResolver: (p: string) => p,
 				...makeIoredisClients(raw),
 			} as never,

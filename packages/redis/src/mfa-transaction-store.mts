@@ -67,10 +67,10 @@ import {
 	mfaTransactionPatchWrites,
 	newMfaTransactionRecord,
 } from "@o3co/auth-provider-core";
-import { z } from "zod";
 import type { MfaSubjectKeys, MfaTransactionStoreClient } from "./clients.mjs";
 import { checkRedisMfaStoreDurability } from "./internal/mfa-durability.mjs";
 import { checkMfaKeyPrefix, mfaKeyPart } from "./internal/mfa-keys.mjs";
+import { keyPrefixSection, redisReference } from "./internal/section.mjs";
 
 /** The key namespace `redisMfaTransactionStore.keyPrefix` defaults to. */
 export const DEFAULT_REDIS_MFA_TRANSACTION_STORE_KEY_PREFIX = "mfat:";
@@ -359,16 +359,11 @@ export function createRedisMfaTransactionStore(
 
 // --- the module ------------------------------------------------------------
 
-const moduleConfigSchema = z.object({
-	redisMfaTransactionStore: z
-		.object({ keyPrefix: z.string().default(DEFAULT_REDIS_MFA_TRANSACTION_STORE_KEY_PREFIX) })
-		.default({ keyPrefix: DEFAULT_REDIS_MFA_TRANSACTION_STORE_KEY_PREFIX }),
-});
-
 /**
  * `defineModule` manifest for the Redis {@link MfaTransactionStore}, off the
  * `mfaTransactionStoreClient` slot, keys under
- * `redisMfaTransactionStore.keyPrefix` (`mfat:`). Declares no `replicaSafety`:
+ * `redis-mfa-transaction-store.keyPrefix` (`mfat:`), its own section (strict).
+ * Declares no `replicaSafety`:
  * transactions, attempt limits and the lock are shared by every replica.
  *
  * The email-proof requirement must last as enrolled factors do, so before
@@ -383,16 +378,22 @@ const moduleConfigSchema = z.object({
  */
 export const redisMfaTransactionStoreModule = defineModule({
 	name: "redis-mfa-transaction-store",
-	requires: ["mfaTransactionStoreClient", "config"] as const,
+	section: {
+		schema: keyPrefixSection(DEFAULT_REDIS_MFA_TRANSACTION_STORE_KEY_PREFIX),
+		reference: redisReference(),
+		relocatedFrom: {
+			redisMfaTransactionStore: { to: "", environmentVariable: null },
+			"redisMfaTransactionStore.keyPrefix": "keyPrefix",
+		},
+	},
+	requires: ["mfaTransactionStoreClient"] as const,
 	optional: ["logger"] as const,
-	configSchema: moduleConfigSchema,
 	provides: {
 		mfaTransactionStore: async (deps) => {
-			const { keyPrefix } = moduleConfigSchema.parse(deps.config ?? {}).redisMfaTransactionStore;
 			// Built first, so a prefix it refuses is refused before the server is asked.
 			const store = createRedisMfaTransactionStore({
 				client: deps.mfaTransactionStoreClient,
-				keyPrefix,
+				keyPrefix: deps.section.keyPrefix,
 			});
 			await checkRedisMfaStoreDurability(
 				"mfaTransactionStore",

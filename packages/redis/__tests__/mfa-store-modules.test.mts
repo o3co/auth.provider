@@ -64,6 +64,7 @@ import {
 import { redisMfaFactorStoreModule } from "#/mfa-factor-store.mjs";
 import { redisMfaTransactionStoreModule } from "#/mfa-transaction-store.mjs";
 import { testRedis } from "./support/redis.mjs";
+import { withSection } from "./support/section.mjs";
 
 let at: Awaited<ReturnType<typeof testRedis>>;
 let raw: Redis;
@@ -105,7 +106,7 @@ interface Case {
 	readonly module: Module;
 	readonly slot: "mfaFactorStore" | "mfaTransactionStore";
 	readonly clientSlot: "mfaFactorStoreClient" | "mfaTransactionStoreClient";
-	readonly configKey: "redisMfaFactorStore" | "redisMfaTransactionStore";
+	readonly configKey: "redis-mfa-factor-store" | "redis-mfa-transaction-store";
 	readonly defaultPrefix: string;
 	readonly evictable: string;
 	readonly lossy: string;
@@ -122,7 +123,7 @@ const CASES: readonly Case[] = [
 		module: redisMfaFactorStoreModule,
 		slot: "mfaFactorStore",
 		clientSlot: "mfaFactorStoreClient",
-		configKey: "redisMfaFactorStore",
+		configKey: "redis-mfa-factor-store",
 		defaultPrefix: "mfaf:",
 		evictable: "mfa-factor-store-evictable",
 		lossy: "mfa_factor_store_lossy",
@@ -136,7 +137,7 @@ const CASES: readonly Case[] = [
 		module: redisMfaTransactionStoreModule,
 		slot: "mfaTransactionStore",
 		clientSlot: "mfaTransactionStoreClient",
-		configKey: "redisMfaTransactionStore",
+		configKey: "redis-mfa-transaction-store",
 		defaultPrefix: "mfat:",
 		evictable: "mfa-transaction-store-evictable",
 		lossy: "mfa_transaction_store_lossy",
@@ -172,7 +173,7 @@ const providerOf = (c: Case): ((deps: unknown) => Promise<{ kind: string }>) => 
 };
 
 describe.each(CASES)("$module.name", (c) => {
-	const provide = (deps: Record<string, unknown>) => providerOf(c)(deps);
+	const provide = (deps: Record<string, unknown>) => providerOf(c)(withSection(c.module, deps));
 
 	const boot = (report: RedisDurability | (() => Promise<RedisDurability>), logger?: Logger) =>
 		provide({
@@ -181,19 +182,18 @@ describe.each(CASES)("$module.name", (c) => {
 			...(logger === undefined ? {} : { logger }),
 		});
 
-	it("needs its client and the configuration, reads the logger if there is one, and fills one slot", () => {
-		expect(c.module.requires).toStrictEqual([c.clientSlot, "config"]);
+	it("needs its client, reads the logger if there is one, and fills one slot", () => {
+		expect(c.module.requires).toStrictEqual([c.clientSlot]);
 		expect(c.module.optional).toStrictEqual(["logger"]);
 		expect(Object.keys(c.module.provides ?? {})).toStrictEqual([c.slot]);
 	});
 
-	it(`reads ${c.configKey}.keyPrefix, "${c.defaultPrefix}" when it is not set`, () => {
-		expect(c.module.configSchema?.parse({})).toStrictEqual({
-			[c.configKey]: { keyPrefix: c.defaultPrefix },
+	it(`reads ${c.configKey}.keyPrefix, its own section's, "${c.defaultPrefix}" when it is not set`, () => {
+		expect(c.module.configSchema).toBeUndefined();
+		expect(c.module.section?.schema.parse(undefined)).toStrictEqual({ keyPrefix: c.defaultPrefix });
+		expect(c.module.section?.schema.parse({ keyPrefix: "tenant-a:" })).toStrictEqual({
+			keyPrefix: "tenant-a:",
 		});
-		expect(
-			c.module.configSchema?.parse({ [c.configKey]: { keyPrefix: "tenant-a:" } }),
-		).toStrictEqual({ [c.configKey]: { keyPrefix: "tenant-a:" } });
 	});
 
 	it("declares nothing the replica-safety guard refuses, where the memory module does", () => {
@@ -424,8 +424,8 @@ describe("the MFA store modules booted through createApp", () => {
 			modules: [redisMfaFactorStoreModule, redisMfaTransactionStoreModule, mfaStandIn],
 			bootstrapComponents: {
 				config: multiReplicaConfig({
-					redisMfaFactorStore: { keyPrefix: "boot:mfaf:" },
-					redisMfaTransactionStore: { keyPrefix: "boot:mfat:" },
+					"redis-mfa-factor-store": { keyPrefix: "boot:mfaf:" },
+					"redis-mfa-transaction-store": { keyPrefix: "boot:mfat:" },
 				}),
 				pathResolver: (p: string) => p,
 				logger,
@@ -647,7 +647,7 @@ describe("allkeys-lru set on the real server", () => {
 	const refusesBoth = async (io: Redis): Promise<void> => {
 		for (const c of CASES) {
 			await expect(
-				providerOf(c)({ [c.clientSlot]: c.client(io), config: {} }),
+				providerOf(c)(withSection(c.module, { [c.clientSlot]: c.client(io), config: {} })),
 				c.module.name,
 			).rejects.toMatchObject({ reason: c.evictable, maxmemoryPolicy: "allkeys-lru" });
 		}
@@ -670,11 +670,9 @@ describe("allkeys-lru set on the real server", () => {
 			asUser(["-info", "-config"], async (restricted) => {
 				for (const c of CASES) {
 					const { logger, calls } = recordingLogger();
-					const store = await providerOf(c)({
-						[c.clientSlot]: c.client(restricted),
-						config: {},
-						logger,
-					});
+					const store = await providerOf(c)(
+						withSection(c.module, { [c.clientSlot]: c.client(restricted), config: {}, logger }),
+					);
 					expect(store.kind, c.module.name).toBe("redis");
 					expect(
 						calls.map((call) => call.args[1]),

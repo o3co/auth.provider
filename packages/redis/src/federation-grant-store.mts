@@ -23,6 +23,7 @@ import {
 	type DeploymentMode,
 	decodeSealingKey,
 	defineModule,
+	durationFromEnv,
 	type FederationGrant,
 	type FederationGrantAuthorization,
 	type FederationGrantCredentials,
@@ -61,6 +62,7 @@ import {
 	parseCanonicalAuthorization,
 } from "./internal/federation-grant-codec.mjs";
 import { createFederationGrantLock } from "./internal/federation-grant-lock.mjs";
+import { redisReference } from "./internal/section.mjs";
 
 /**
  * How far past a record's horizon the subject index keeps its member, and how
@@ -867,50 +869,30 @@ export function createRedisFederationGrantStore(
 // --- configuration --------------------------------------------------------
 
 /**
- * A duration an operator wrote, read strictly: `z.coerce.number()` reads
- * `null` and `[]` as `0`, `true` as `1` and `"1e3"` as `1000`, so
- * `tombstoneRetention: null` would silently mean "keep no tombstones". This
- * module resolves the store independently of core's strict reader, so it
- * needs the rule itself.
+ * The schema of `redis-federation-grant-store {}`, the module's own section:
+ * this adapter's layout (`keyPrefix`; `listingAllowanceMs`, in milliseconds),
+ * how long a record answers past the end of what it authorized
+ * (`tombstoneRetention`, in whole seconds), and the key ring its credentials
+ * are sealed under (`encryptionMode`, `encryptionKeys`). Strict at every level.
  */
-const durationFromEnv = (bounds: z.ZodNumber) =>
-	z.preprocess((value) => {
-		if (typeof value === "number") return value;
-		if (typeof value === "string" && /^\d+$/.test(value.trim())) return Number(value.trim());
-		return value;
-	}, bounds);
-
-/**
- * The `federationGrants` block this store reads, and the
- * `redisFederationGrantStore` one beside it. Two sections because what a
- * grant is allowed to be — its retention, its key ring — is grant policy,
- * set whether the store is Redis or not, while a key prefix and a listing
- * allowance are this adapter's layout. Durations are whole seconds in the
- * policy block and milliseconds where the adapter takes them.
- */
-const moduleConfigSchema = z.object({
-	federationGrants: z
-		.object({
-			// One year at most, as core's schema holds every duration an
-			// operator writes; the store's constructor is the second line.
-			tombstoneRetention: durationFromEnv(
-				z.number().int().nonnegative().max(MAX_DURATION_SECONDS),
-			).optional(),
-			encryptionMode: z.enum(["required", "allow-plaintext"]).optional(),
-			encryptionKeys: z
-				.array(z.object({ id: z.string().min(1), key: z.string().min(1) }))
-				.optional(),
-		})
-		.default({}),
-	redisFederationGrantStore: z
-		.object({
-			keyPrefix: z.string().default("fg:"),
-			listingAllowanceMs: durationFromEnv(
-				z.number().int().nonnegative().max(MAX_DURATION_MS),
-			).optional(),
-		})
-		.default({ keyPrefix: "fg:" }),
-});
+export const redisFederationGrantStoreSectionSchema = z
+	.object({
+		keyPrefix: z.string().default("fg:"),
+		listingAllowanceMs: durationFromEnv(
+			z.number().int().nonnegative().max(MAX_DURATION_MS),
+		).optional(),
+		// One year at most, as every duration an operator writes; the store's
+		// constructor is the second line.
+		tombstoneRetention: durationFromEnv(
+			z.number().int().nonnegative().max(MAX_DURATION_SECONDS),
+		).optional(),
+		encryptionMode: z.enum(["required", "allow-plaintext"]).optional(),
+		encryptionKeys: z
+			.array(z.object({ id: z.string().min(1), key: z.string().min(1) }).strict())
+			.optional(),
+	})
+	.strict()
+	.default(() => ({ keyPrefix: "fg:" }));
 
 /** What a composition root tells the module that its configuration cannot. */
 export interface RedisFederationGrantStoreModuleOptions {
@@ -919,7 +901,7 @@ export interface RedisFederationGrantStoreModuleOptions {
 }
 
 /** Where the resolver reads the ring, which is what its refusals name. */
-const KEYS_SETTING = "federationGrants.encryptionKeys";
+const KEYS_SETTING = "redis-federation-grant-store.encryptionKeys";
 
 /**
  * Canonical base64 of exactly 32 bytes, or a RangeError that names the entry
@@ -940,8 +922,9 @@ const keyMaterial = (index: number, encoded: string): Buffer => {
 };
 
 /**
- * The options the adapter takes, from the configuration an operator wrote,
- * and the replica count `deploymentMode` — the `deploymentMode` slot's value,
+ * The options the adapter takes, from its section as an operator wrote it
+ * (`redis-federation-grant-store {}`, parsed here with its schema), and the
+ * replica count `deploymentMode` — the `deploymentMode` slot's value,
  * or `deploymentModeOf(config)` from `@o3co/auth-provider-core` for a
  * composition root that builds the store itself — which the plaintext guard
  * refuses plaintext under when it is `multi`. The configuration's own
@@ -956,7 +939,7 @@ const keyMaterial = (index: number, encoded: string): Buffer => {
  * days of them.
  */
 export function resolveRedisFederationGrantStoreOptions(
-	rawConfig: unknown,
+	section: unknown,
 	moduleOptions: RedisFederationGrantStoreModuleOptions,
 	deploymentMode: DeploymentMode,
 ): Omit<RedisFederationGrantStoreOptions, "client"> {
@@ -964,8 +947,7 @@ export function resolveRedisFederationGrantStoreOptions(
 		deploymentMode,
 		"resolveRedisFederationGrantStoreOptions: deploymentMode",
 	);
-	const config = moduleConfigSchema.parse(rawConfig);
-	const grants = config.federationGrants;
+	const grants = redisFederationGrantStoreSectionSchema.parse(section);
 	const mode = grants.encryptionMode ?? "required";
 	// In the order they were written: the first seals. Checked here, under
 	// the key they were read from, before the store checks them again under
@@ -979,12 +961,12 @@ export function resolveRedisFederationGrantStoreOptions(
 				}));
 	checkSealingKeyRing(keys, `federation grant store: ${KEYS_SETTING}`);
 	return {
-		keyPrefix: config.redisFederationGrantStore.keyPrefix,
+		keyPrefix: grants.keyPrefix,
 		...(grants.tombstoneRetention !== undefined
 			? { tombstoneRetentionMs: grants.tombstoneRetention * 1000 }
 			: {}),
-		...(config.redisFederationGrantStore.listingAllowanceMs !== undefined
-			? { listingAllowanceMs: config.redisFederationGrantStore.listingAllowanceMs }
+		...(grants.listingAllowanceMs !== undefined
+			? { listingAllowanceMs: grants.listingAllowanceMs }
 			: {}),
 		encryption:
 			mode === "allow-plaintext" ? { mode: "allow-plaintext" } : { mode: "required", keys },
@@ -1014,13 +996,30 @@ export function redisFederationGrantStoreModuleFor(
 ) {
 	return defineModule({
 		name: "redis-federation-grant-store",
-		requires: ["federationGrantStoreClient", "config", "deploymentMode"] as const,
+		// Its keys moved from two places: the adapter's own layout from
+		// `redisFederationGrantStore`, and its retention and key ring from
+		// `federationGrants`, whose other keys are the federation-grants module's.
+		section: {
+			schema: redisFederationGrantStoreSectionSchema,
+			reference: redisReference(),
+			relocatedFrom: {
+				redisFederationGrantStore: { to: "", environmentVariable: null },
+				"redisFederationGrantStore.keyPrefix": "keyPrefix",
+				"federationGrants.tombstoneRetention": {
+					to: "tombstoneRetention",
+					environmentVariable: null,
+				},
+				"federationGrants.encryptionMode": "encryptionMode",
+				"federationGrants.encryptionKeys": { to: "encryptionKeys", environmentVariable: null },
+			},
+			renamedVariables: { FEDERATION_GRANTS_ENCRYPTION_MODE: "federationGrants.encryptionMode" },
+		},
+		requires: ["federationGrantStoreClient", "deploymentMode"] as const,
 		optional: ["logger"] as const,
-		configSchema: moduleConfigSchema,
 		provides: {
 			federationGrantStore: (deps) => {
 				const resolved = resolveRedisFederationGrantStoreOptions(
-					deps.config,
+					deps.section,
 					options,
 					deps.deploymentMode,
 				);

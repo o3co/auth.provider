@@ -215,9 +215,11 @@ describe("the shipped references are disjoint, and each package checks its own",
 			// checked against that schema (reference-conf-drift), not a module's.
 			(name) => name !== "core",
 		);
+		// A package keeps its tests under `src/` or, as the Redis package does,
+		// beside it: the whole package is read, build output aside.
 		const unchecked = packages.filter(
 			(name) =>
-				!sourceFiles(join(PACKAGES, name, "src")).some(
+				!sourceFiles(join(PACKAGES, name)).some(
 					(file) =>
 						/\.test\.mts$/.test(file) &&
 						readFileSync(file, "utf8").includes("packageReferenceProblems("),

@@ -10,27 +10,29 @@ describe("redisRefreshTokenFamilyStoreModule", () => {
 		expect(redisRefreshTokenFamilyStoreModule.name).toBe("redis-refresh-token-family-store");
 	});
 
-	it("requires both 'refreshTokenFamilyClient' and 'config'", () => {
-		const reqs = redisRefreshTokenFamilyStoreModule.requires ?? [];
-		expect(new Set(reqs)).toEqual(new Set(["refreshTokenFamilyClient", "config"]));
+	it("requires 'refreshTokenFamilyClient' alone", () => {
+		expect(redisRefreshTokenFamilyStoreModule.requires).toEqual(["refreshTokenFamilyClient"]);
 	});
 
-	it("declares a Zod configSchema with module-namespaced 'redisRefreshTokenFamilyStore' top-level key only", () => {
-		expect(redisRefreshTokenFamilyStoreModule.configSchema).toBeDefined();
-		const parsed = redisRefreshTokenFamilyStoreModule.configSchema?.parse({}) as {
-			redisRefreshTokenFamilyStore?: { keyPrefix?: string; casRetryLimit?: number };
-		};
-		expect(parsed?.redisRefreshTokenFamilyStore?.keyPrefix).toBe("rtfam:");
-		expect(parsed?.redisRefreshTokenFamilyStore?.casRetryLimit).toBe(3);
+	it("reads its own section, 'redis-refresh-token-family-store', with its defaults", () => {
+		expect(redisRefreshTokenFamilyStoreModule.configSchema).toBeUndefined();
+		expect(redisRefreshTokenFamilyStoreModule.section?.schema.parse(undefined)).toEqual({
+			keyPrefix: "rtfam:",
+			casRetryLimit: 3,
+		});
+		expect(
+			redisRefreshTokenFamilyStoreModule.section?.schema.parse({ casRetryLimit: "5" }),
+		).toEqual({ keyPrefix: "rtfam:", casRetryLimit: 5 });
 	});
 
-	it("validates casRetryLimit bounds (>= 1, <= 10)", () => {
-		const schema = redisRefreshTokenFamilyStoreModule.configSchema;
-		expect(() =>
-			schema?.parse({ redisRefreshTokenFamilyStore: { keyPrefix: "k:", casRetryLimit: 0 } }),
-		).toThrow();
-		expect(() =>
-			schema?.parse({ redisRefreshTokenFamilyStore: { keyPrefix: "k:", casRetryLimit: 11 } }),
-		).toThrow();
+	it("validates casRetryLimit bounds (>= 1, <= 10), and refuses a key it does not declare", () => {
+		const schema = redisRefreshTokenFamilyStoreModule.section?.schema;
+		for (const section of [
+			{ keyPrefix: "k:", casRetryLimit: 0 },
+			{ keyPrefix: "k:", casRetryLimit: 11 },
+			{ casRetries: 2 },
+		]) {
+			expect(schema?.safeParse(section).success, JSON.stringify(section)).toBe(false);
+		}
 	});
 });

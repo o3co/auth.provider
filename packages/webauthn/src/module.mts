@@ -48,8 +48,8 @@ import { createRegistrationOptionsHandler } from "./routes/registrationOptions.m
 import { createRegistrationVerifyHandler } from "./routes/registrationVerify.mjs";
 
 /**
- * The `webauthn` section's declaration: the package's `config/reference.conf` (its defaults) and
- * its path. The schema checks nothing: the module reads its settings from the `webauthnConfig`
+ * The `webauthn` section's declaration: the package's `config/reference.conf` (its defaults),
+ * read at the module's name. The schema checks nothing: the module reads its settings from the `webauthnConfig`
  * slot, which the deployment fills (with `webauthnConfigSchema`, or hard-coded), and a check
  * here could refuse at boot what that slot accepts.
  */
@@ -103,7 +103,13 @@ export const webauthnModule = defineModule<
 	section: {
 		schema: WEBAUTHN_SECTION_SCHEMA,
 		reference: new URL("../config/reference.conf", import.meta.url),
-		at: "webauthn",
+		// The two rate-limit variables, named after the paths they set; the
+		// reference captures the old and new names.
+		renamedVariables: {
+			WEBAUTHN_AUTHENTICATION_OPTIONS_RATE_LIMIT: "webauthn.rateLimit.authenticationOptions.limit",
+			WEBAUTHN_AUTHENTICATION_OPTIONS_RATE_WINDOW_SECONDS:
+				"webauthn.rateLimit.authenticationOptions.windowSeconds",
+		},
 	},
 	requires: [
 		"webauthnConfig",

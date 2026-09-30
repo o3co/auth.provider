@@ -102,7 +102,7 @@ export interface UserRepository {
 	 * Whether this Store can answer {@link findSubjectByFederatedIdentity}
 	 * completely for identities issued under `registration`. Synchronous and
 	 * side-effect-free. Asked at boot for every federation-grant connection
-	 * while `federationGrants.identityLookup` is `"required"`; only a literal
+	 * while `federation-grants.identityLookup` is `"required"`; only a literal
 	 * `true` lets the deployment start. Implemented together with the lookup;
 	 * one without the other is refused at boot.
 	 *
@@ -121,7 +121,7 @@ export interface UserRepository {
 	): boolean;
 	/**
 	 * Who an upstream identity belongs to locally. Optional; a deployment says
-	 * whether it has it with `federationGrants.identityLookup`, and one that
+	 * whether it has it with `federation-grants.identityLookup`, and one that
 	 * requires it is refused at boot without it (and without
 	 * {@link supportsFederatedIdentityLookup} answering `true` for every
 	 * connection's registration).

@@ -31,11 +31,16 @@
 import { readdirSync, readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { coreReference } from "@o3co/auth-provider-core";
+import { coreReference, type Module } from "@o3co/auth-provider-core";
 import { CORE_RELOCATIONS, renamedVariableProblems } from "@o3co/auth-provider-core/testing";
+import {
+	composedModules,
+	MULTI_ENV,
+	resolveConfig,
+} from "@o3co/auth-provider-standalone/src/__tests__/all-modules-composition.fixture.mts";
 import { parseFile } from "@o3co/ts.hocon";
 import { afterAll, describe, expect, it } from "vitest";
-import { composeFullSet, type FullSet } from "./full-set.fixture.mts";
+import { composeFullSet, type FullSet, fullSetOptions } from "./full-set.fixture.mts";
 
 const ROOT = fileURLToPath(new URL("../../../../", import.meta.url));
 
@@ -74,6 +79,24 @@ const variables = (path: string): readonly string[] => [
 
 let fullSet: FullSet | undefined;
 
+/**
+ * The modules of the full set as it boots, on memory stores, and as it would
+ * compose on Redis — every Redis store and the shipped refresh-token family
+ * store — each once.
+ */
+async function declaringModules(booted: FullSet): Promise<readonly Module[]> {
+	const options = await fullSetOptions({ stores: "redis" });
+	const switches = resolveConfig(MULTI_ENV, options.reads);
+	const onRedis = composedModules(options.config ? options.config(switches) : switches, {
+		...options,
+		env: MULTI_ENV,
+		shippedRefreshTokenFamilyStore: true,
+	});
+	const byName = new Map<string, Module>();
+	for (const module of [...booted.modules, ...onRedis]) byName.set(module.name, module);
+	return [...byName.values()];
+}
+
 afterAll(async () => {
 	await fullSet?.handle.dispose();
 });
@@ -106,9 +129,11 @@ describe("the variables renamed with a move, across every shipped layer", () => 
 			"OAUTH_DPOP_NONCE_SECRET",
 		]);
 
+		const modules = await declaringModules(fullSet);
+		expect(modules.some((module) => module.name === "redis-rate-limiter")).toBe(true);
 		expect(
 			renamedVariableProblems({
-				modules: fullSet.modules,
+				modules,
 				core: CORE_RELOCATIONS,
 				layers: LAYERS,
 				read,
@@ -143,10 +168,10 @@ describe("the variables renamed with a move, across every shipped layer", () => 
 		expect(binding).toEqual([]);
 	});
 
-	it("finds renamed-variables in no layer but a declaring module's own reference", () => {
+	it("finds renamed-variables in no layer but a declaring module's own reference", async () => {
 		if (fullSet === undefined) throw new Error("the full set did not boot");
 		const declaring = new Set([
-			...fullSet.modules.flatMap((module) =>
+			...(await declaringModules(fullSet)).flatMap((module) =>
 				module.section?.renamedVariables === undefined || module.section.reference === undefined
 					? []
 					: [resolve(fileURLToPath(module.section.reference))],

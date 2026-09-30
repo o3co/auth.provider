@@ -34,7 +34,6 @@ import { fileURLToPath } from "node:url";
 import {
 	type AppConfig,
 	AppConfigSchema,
-	coreReference,
 	createApp,
 	createKeyStoreFactory,
 	defineModule,
@@ -47,7 +46,6 @@ import {
 	type SessionFederationIndex,
 	type UserSessionStore,
 } from "@o3co/auth-provider-core";
-import { CORE_RELOCATIONS, renamedVariableCaptures } from "@o3co/auth-provider-core/testing";
 import {
 	type GoogleProviderConfig,
 	googleFederationModule,
@@ -60,6 +58,7 @@ import { expect } from "vitest";
 import { buildModules } from "#/buildModules.mjs";
 import { resolveConfigPaths } from "#/configPath.mjs";
 import { templateReference } from "../modules.mjs";
+import { capturedRenames, libraryLayers } from "./library-references.fixture.mjs";
 
 const configDir = fileURLToPath(new URL("../../config", import.meta.url));
 
@@ -128,12 +127,12 @@ function resolveConfig(google: GoogleWiring): AppConfig {
 			parseFile(envConfPath, { env })
 				.withFallback(parseFile(applicationConfPath, { env }))
 				.withFallback(parseFile(fileURLToPath(templateReference()), { env }))
-				.withFallback(parseFile(fileURLToPath(coreReference()), { env })),
+				.withFallback(libraryLayers(env)),
 			AppConfigSchema,
 		),
 		// What the resolution captured of core's renamed variables, which the
 		// schema's parse drops.
-		"renamed-variables": renamedVariableCaptures({ modules: [], core: CORE_RELOCATIONS, env: env }),
+		"renamed-variables": capturedRenames(env),
 	} as AppConfig;
 }
 

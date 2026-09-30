@@ -254,6 +254,9 @@ importers:
       '@o3co/auth-provider-redis':
         specifier: workspace:*
         version: link:../redis
+      '@o3co/ts.hocon':
+        specifier: ^1.13.0
+        version: 1.13.0(yaml@2.9.0)(zod@4.6.5)
       '@types/express':
         specifier: ^5.0.6
         version: 5.0.6
@@ -534,6 +537,12 @@ importers:
       '@o3co/auth-provider-core':
         specifier: workspace:*
         version: link:../core
+      '@o3co/auth-provider-test-kit':
+        specifier: workspace:*
+        version: link:../test-kit
+      '@o3co/ts.hocon':
+        specifier: ^1.13.0
+        version: 1.13.0(yaml@2.9.0)(zod@4.6.5)
       '@vitest/coverage-v8':
         specifier: ^5.0.2
         version: 5.0.2(vitest@5.0.2)

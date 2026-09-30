@@ -79,10 +79,10 @@ allowlist はネットワーク上の制御であって、暗号学的な制御�
 
 `HTTP_TRUST_PROXY` はこれを解決しないし、そのためのものでもない。これは `req.ip` に*プロキシ* — 他者のリクエストを転送し、そのことを `X-Forwarded-For` で申告するホップ — の向こうを見通させるものである。BFF は誰のリクエストも転送していない。BFF 自身がクライアントであり、そのアドレスは「誰が呼んだか」への正直な答えである。これらのリクエストには、キーにできるユーザーごとの identity が存在しない。
 
-調整すべきはエンドポイントごとの予算である。どちらの limiter アダプターも、エンドポイントの prefix をキーとする `limits { <prefix> { limit, windowSeconds } }` を受け取る:
+調整すべきはエンドポイントごとの予算である。どちらの limiter アダプターも、自身のセクションで、エンドポイントの prefix をキーとする `limits { <prefix> { limit, windowSeconds } }` を受け取る:
 
 ```hocon
-redisRateLimiter {
+redis-rate-limiter {
   limits {
     token     { limit = 600, windowSeconds = 60 }
     introspect { limit = 600, windowSeconds = 60 }
@@ -90,7 +90,7 @@ redisRateLimiter {
 }
 ```
 
-（memory アダプターでは `memoryRateLimiter.limits` で、形は同じ。）BFF の毎分のサインインと refresh のピークから、余裕を持たせてサイズを決めること。また `rateLimiter.adapter = "redis"` のもとでは予算がレプリカ間で共有されることを覚えておくこと — ここではそれが望ましい挙動であり、それによってこの数値が意味を持つ。
+（memory アダプターでは `core-rate-limiter-memory.limits` で、形は同じ。）BFF の毎分のサインインと refresh のピークから、余裕を持たせてサイズを決めること。また `rateLimiter.adapter = "redis"` のもとでは予算がレプリカ間で共有されることを覚えておくこと — ここではそれが望ましい挙動であり、それによってこの数値が意味を持つ。
 
 デフォルトは意図的に変えていない: 送信元 IP ごとに 60 秒あたり 60 回というのは、クライアントが本当に別々の IP であるデプロイにとって妥当な総当たり対策の上限であり、一方の構成に合わせて全体的に引き上げれば、もう一方の構成での防御が弱まる。BFF *自身の*ユーザーを守るスロットリングは、ユーザーごとの identity がまだ存在する BFF の前段に置くこと。
 
@@ -425,7 +425,7 @@ federations {
 | `REDIS_FEDERATION_TOKEN_STORE_ENCRYPTION_KEY` | — | 保存時のレコード暗号化に使う AES-256-GCM 鍵: 32 バイト、base64 エンコード（`openssl rand -base64 32`）。下のモードが `allow-plaintext` でない限り、`redis` では**必須** |
 | `REDIS_FEDERATION_TOKEN_STORE_ENCRYPTION_MODE` | `required` | `required` または `allow-plaintext`。平文は、config が production/staging 環境（`CONFIG_ENV` または `NODE_ENV`）によって選択された場合と、任意の環境での `CORE_DEPLOYMENT_MODE=multi` のもとでは拒否される。ただし `FEDERATION_TOKENS_ALLOW_INSECURE=1` も設定されている場合を除く — 開発専用 |
 
-`ttl`（秒。上流のリフレッシュトークンの有効期間より大きくしておくこと）と #291 の `scanFallback` 移行フラグは、環境変数ではなく config レイヤーの `redisFederationTokenStore` の下に置く。
+`ttl`（秒。上流のリフレッシュトークンの有効期間より大きくしておくこと）と #291 の `scanFallback` 移行フラグは、環境変数ではなく config レイヤーの `redis-federation-token-store` の下に置く。
 
 ### 同意ストア
 
@@ -446,19 +446,23 @@ federations {
 | `FEDERATION_GRANTS_IDENTITY_LOOKUP` | `required` | connect callback が、既に別のローカルユーザーに紐づいた上流アカウントを拒否するかどうか。`required` には、すべての connection の registration を cover するユーザーリポジトリが必要（下記）。`unsupported` はこの検査を行わないことを記録する |
 | `FEDERATION_GRANT_STORE_ADAPTER` | `redis` | グラントの保存先: `memory`（1 レプリカ。再起動で失われ、全ユーザーが再接続する）または `redis`（共有ソケット） |
 | `FEDERATION_GRANT_INTENT_STORE_ADAPTER` | `redis` | 取得フローの記録 — バックエンドが登録した intent、同意チャレンジ、connect トランザクション — の保存先: `memory`（1 レプリカ。再起動で失うのは進行中のフローだけ）または `redis` |
-| `FEDERATION_GRANTS_ENCRYPTION_MODE` | `required` | `required` または `allow-plaintext`。`FEDERATION_TOKENS_ALLOW_INSECURE=1` でない限り、平文は production/staging と `CORE_DEPLOYMENT_MODE=multi` のもとでは拒否される |
+| `REDIS_FEDERATION_GRANT_STORE_ENCRYPTION_MODE` | `required` | `required` または `allow-plaintext`。`FEDERATION_TOKENS_ALLOW_INSECURE=1` でない限り、平文は production/staging と `CORE_DEPLOYMENT_MODE=multi` のもとでは拒否される |
 | `FEDERATION_GRANTS_ALLOW_KEEP_ON_SUBJECT_REVOCATION` | `false` | subject 全体の失効に、確立済みのグラントを残すよう*求めて*よいかどうか。許可であって指示ではない |
 | `REDIS_FEDERATION_GRANT_STORE_KEY_PREFIX` | `fg:` | Redis グラントストアのキー名前空間 |
+| `REDIS_FEDERATION_GRANT_INTENT_STORE_KEY_PREFIX` | `fg:` | Redis インテントストアのキー名前空間。グラントストアのものと一緒に設定する。グラントストアのものを設定してこちらを既定値のままにすると、テンプレートは起動を拒否する |
 
-**環境変数の形を持たないものが 2 つある** — リストは HOCON のものだからである: connection と、暗号鍵リング。デプロイ側が所有するレイヤー — たとえば `config/production.conf` — に書く:
+機能自身の設定は `federation-grants {}` セクション、Redis グラントストアの設定 — 鍵リング、暗号化モード、prefix — は `redis-federation-grant-store {}` にある。**環境変数の形を持たないものが 2 つある** — リストは HOCON のものだからである: connection と、暗号鍵リング。デプロイ側が所有するレイヤー — たとえば `config/production.conf` — に書く:
 
 ```hocon
-federationGrants {
+redis-federation-grant-store {
   encryptionKeys = [
     # The first key seals; every listed key opens. GRANT_KEY_2026_09 is a name
     # you choose (openssl rand -base64 32), not a template override.
     { id = "2026-09", key = ${GRANT_KEY_2026_09} }
   ]
+}
+
+federation-grants {
   connections {
     files {
       federation = "entra-files"   # an enabled federations.<name> of type "oidc", with an app registration of its own
@@ -513,7 +517,7 @@ worker:
 | 変数 | デフォルト | 説明 |
 |---|---|---|
 | `REDIS_SESSION_STORES_KEY_PREFIX` | `ss:` | ユーザーセッション、RP レジストリ、session-family インデックス、session-federation インデックスの外側の prefix。 |
-| `REFRESH_TOKEN_FAMILY_STORE_KEY_PREFIX` | `rtfam:` | refresh token family レコードの prefix。 |
+| `REDIS_REFRESH_TOKEN_FAMILY_STORE_KEY_PREFIX` | `rtfam:` | refresh token family レコードの prefix。 |
 | `CLIENT_CODE_KEY_PREFIX` | `oauth:code:` | OAuth 認可コードの prefix。 |
 | `REDIS_FEDERATION_TOKEN_STORE_KEY_PREFIX` | `ft:` | フェデレーショントークンのレコード、そのセッションごとのインデックス、およびそのロックキーの prefix。 |
 | `REDIS_CONSENT_STORE_KEY_PREFIX` | `consent:` | 同意レコードと、保留中の同意リクエストおよびそのセッションごとのインデックスの prefix（`CONSENT_STORE_ADAPTER=redis`、#561）。 |
@@ -682,7 +686,7 @@ probe は接続を開いた builder が登録するため、リストはこの�
 4. **deadline を過ぎると残りの接続は切断され、プロセスは非ゼロで終了する。** 常に `0` しか見ない orchestrator には、正常な drain と時間切れになった drain を区別できない。
 5. **`cleanup` は drain の後、終了の前に実行される** — `handle.dispose()`、すなわち逆トポロジカル順のコンポーネント cleanup と Redis／タイマーの drain である。そこでの失敗はこのサービス自身の logger（他のすべての行と同じ NDJSON）で `shutdown_cleanup_failed`（または `shutdown_cleanup_timed_out`）としてログに出力され、終了コードにも反映される。各段階はそれぞれ 1 つのイベントである（下の表を参照）。throw した dispose でもプロセスは終了し、プロセスが固まることはない。その行が運ぶのは失敗の core の [`loggableError`](../../packages/core/README.ja.md#logger) による射影であり、エラーそのものではない: `dispose()` はすべての cleanup 自身のエラーをまとめた AggregateError で reject し、その行はそれぞれをコードとともに名前で示し（`aggregateErrors`、先頭 5 つ）、それが持つものは何も出さない — その中には失敗したストアへの書き込みが、書き込もうとしていた内容ごと含まれうる。
 
-6. **`cleanup` には少なくとも、モジュールが登録した allowance が与えられる**: `handle.cleanupAllowanceMs` — モジュールが cleanup とともに登録した tail のうち最長のもの — を、`src/app.mts` が `installGracefulShutdown` に `cleanupAllowanceMs: () => handle.cleanupAllowanceMs` として渡し、シグナルが届いた時点で読む。cleanup の予算は、それと drain の 10 秒のうち長いほうであり、`shutdown_draining` がそれを `cleanupTimeoutMs` として記録する。1 から 2147483647 までの整数ミリ秒でない allowance は無視される。テンプレートはこれを決めるためにモジュールの設定を読まない。フェデレーショングラントが有効なら、パッケージは自分の drain の tail を `federationGrants.upstreamHardTimeoutMs` + `persistRetryBudgetMs` + `lockWaitMs` + 12 秒として登録し、45 秒を下回ることはない — 同梱の予算（25 + 3 + 5 + 12）ではちょうど 45 秒 — dispose が、ローテーションされた上流資格情報の書き込みを待つためである。予算を上げれば allowance もそれに応じて増えるので、orchestrator の grace もそれに合わせて上げること。無効なら、allowance を登録するものはなく、cleanup の予算は drain のものと同じままである。
+6. **`cleanup` には少なくとも、モジュールが登録した allowance が与えられる**: `handle.cleanupAllowanceMs` — モジュールが cleanup とともに登録した tail のうち最長のもの — を、`src/app.mts` が `installGracefulShutdown` に `cleanupAllowanceMs: () => handle.cleanupAllowanceMs` として渡し、シグナルが届いた時点で読む。cleanup の予算は、それと drain の 10 秒のうち長いほうであり、`shutdown_draining` がそれを `cleanupTimeoutMs` として記録する。1 から 2147483647 までの整数ミリ秒でない allowance は無視される。テンプレートはこれを決めるためにモジュールの設定を読まない。フェデレーショングラントが有効なら、パッケージは自分の drain の tail を `federation-grants.upstreamHardTimeoutMs` + `persistRetryBudgetMs` + `lockWaitMs` + 12 秒として登録し、45 秒を下回ることはない — 同梱の予算（25 + 3 + 5 + 12）ではちょうど 45 秒 — dispose が、ローテーションされた上流資格情報の書き込みを待つためである。予算を上げれば allowance もそれに応じて増えるので、orchestrator の grace もそれに合わせて上げること。無効なら、allowance を登録するものはなく、cleanup の予算は drain のものと同じままである。
 
 各段階はそれぞれ 1 行をログに出す:
 

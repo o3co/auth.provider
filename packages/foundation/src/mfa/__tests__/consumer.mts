@@ -14,39 +14,10 @@
  * limitations under the License.
  */
 
-/**
- * A module that reads `foundation-mfa-factor-store` as a module providing the
- * Store-backed factor store must — the package's schema and reference, its
- * store provided eagerly, its URLs read first — with a memory store in the
- * adapter's place; and a module that requires a factor store.
- */
+/** A module that requires a factor store, and records the one it was handed. */
 
-import {
-	createMemoryMfaFactorStore,
-	defineModule,
-	type MfaFactorStore,
-	type Module,
-} from "@o3co/auth-provider-core";
-import {
-	FOUNDATION_MFA_FACTOR_STORE_SECTION,
-	foundationMfaFactorStoreLifecycle,
-	foundationMfaFactorStoreSection,
-	readFoundationMfaFactorStoreUrls,
-} from "#/mfa/section.mjs";
+import { defineModule, type MfaFactorStore, type Module } from "@o3co/auth-provider-core";
 
-export const fixtureModule = defineModule({
-	name: FOUNDATION_MFA_FACTOR_STORE_SECTION,
-	section: foundationMfaFactorStoreSection,
-	provides: {
-		mfaFactorStore: ({ section }) => {
-			readFoundationMfaFactorStoreUrls(section);
-			return createMemoryMfaFactorStore();
-		},
-	},
-	lifecycle: foundationMfaFactorStoreLifecycle,
-});
-
-/** A module that needs a factor store, and records the one it was handed. */
 export function consumer(seen: { store?: MfaFactorStore }): Module {
 	return defineModule({
 		name: "test-mfa-factor-store-consumer",

@@ -22,6 +22,7 @@ import type {
 } from "../../config/application.schema.mjs";
 import { CORE_RELOCATIONS } from "../../config/core-relocations.mjs";
 import { RENAMED_VARIABLES_SECTION } from "../../config/removed-keys.mjs";
+import { memoryRateLimiterModule } from "../../ratelimit/module.mjs";
 import { renamedVariableCaptures } from "../renamedVariables.mjs";
 
 /**
@@ -45,8 +46,9 @@ import { renamedVariableCaptures } from "../renamedVariables.mjs";
  *   template does.
  *
  * Like a resolution of `reference.conf` under an environment that sets none
- * of them, it captures every variable core's own section declares renamed,
- * `null` (`renamed-variables`), which boot requires of any configuration.
+ * of them, it captures every variable core's own section and core's own
+ * modules declare renamed, `null` (`renamed-variables`), which boot requires
+ * of any configuration.
  *
  * `satisfies CoreConfig` / `AppConfig` type-checks the result while keeping
  * literal types, so tests assign it without casts. Each call returns a fresh,
@@ -83,7 +85,7 @@ export function makeValidCoreConfig() {
 	return {
 		...{
 			[RENAMED_VARIABLES_SECTION]: renamedVariableCaptures({
-				modules: [],
+				modules: [memoryRateLimiterModule],
 				core: CORE_RELOCATIONS,
 				env: {},
 			}),
@@ -151,7 +153,6 @@ export function makeValidFullSections() {
 		},
 		rateLimit: {
 			login: { windowMs: 900000, limit: 20 },
-			failMode: "open",
 		},
 		federations: {},
 		repositories: {

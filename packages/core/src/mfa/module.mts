@@ -20,6 +20,8 @@
  * `core.deployment.mode = "multi"`.
  */
 
+import { z } from "zod";
+import { coreReference } from "../config/references.mjs";
 import { consoleLogger } from "../logging/consoleLogger.mjs";
 import { defineModule } from "../modules/manifest/index.mjs";
 import { configuredMaxEntries } from "../single-use/max-entries.mjs";
@@ -54,25 +56,28 @@ export const memoryMfaFactorStoreModule = defineModule({
  * ceremonies in flight, lifts the subject lock state, and drops the email-proof
  * requirement an operator reset recorded, so beside a durable factor store a
  * password holder could then bind without the proof. Capped at
- * `mfaTransactionStore.memory.maxEntries` (adapter default when unset); a value
- * that is not a positive whole number refuses the boot, naming the key.
+ * `core-mfa-transaction-store-memory.maxEntries`, its own section (adapter
+ * default when unset); a value that is not a positive whole number refuses the
+ * boot, naming the key. The section is strict; `mfaTransactionStore.memory`,
+ * its old path, refuses boot naming it.
  */
 export const memoryMfaTransactionStoreModule = defineModule({
 	name: "core-mfa-transaction-store-memory",
+	section: {
+		schema: z.object({ maxEntries: z.unknown().optional() }).strict().optional(),
+		reference: coreReference(),
+		relocatedFrom: { "mfaTransactionStore.memory": { to: "", environmentVariable: null } },
+	},
 	// What forks per replica, quoted into a refused multi-replica boot.
 	replicaSafety: {
 		unsafe: true,
 		reason:
 			"MFA transactions and attempt limits fork per replica — a transaction started on one replica is unknown to the replica that receives the verification, and the attempt limits, the lockout and the trusted browsers are counted per replica; and a restart loses the email proof an operator reset required, so beside a durable factor store a password holder can then bind without it",
 	},
-	requires: ["config"] as const,
 	provides: {
-		mfaTransactionStore: ({ config }) =>
+		mfaTransactionStore: ({ section }) =>
 			createMemoryMfaTransactionStore(
-				configuredMaxEntries(
-					config?.mfaTransactionStore?.memory?.maxEntries,
-					"mfaTransactionStore.memory.maxEntries",
-				),
+				configuredMaxEntries(section?.maxEntries, "core-mfa-transaction-store-memory.maxEntries"),
 			),
 	},
 });

@@ -149,7 +149,7 @@ const deployment = (
 			connections: new Map([[connection.name, connection]]),
 			refresher: () => ({ refreshDelegatedToken: refresh }),
 			grantsBoundary: async () => null,
-			limits: resolveFederationGrantRetrievalLimits({ federationGrants: {} }),
+			limits: resolveFederationGrantRetrievalLimits({}),
 			background,
 			clientRepository,
 			issuer: "https://auth.test",

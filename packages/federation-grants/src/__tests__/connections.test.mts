@@ -15,7 +15,7 @@
  */
 
 /**
- * `federationGrants.connections.<name>` read into the connections the domain
+ * `federation-grants.connections.<name>` read into the connections the domain
  * rules take (the federation-grants ADR, D4/D6/D15). Everything here is a boot
  * refusal, not a per-request failure: what these values decide (which upstream
  * account a grant is pinned to, how much residual access it may carry, which
@@ -44,7 +44,7 @@ const CONNECTION = {
 };
 
 const resolve = (connections: Record<string, unknown>, federations: unknown = FEDERATIONS) =>
-	resolveFederationGrantConnections({ federations, federationGrants: { connections } });
+	resolveFederationGrantConnections({ connections }, { federations });
 
 describe("resolveFederationGrantConnections", () => {
 	it("joins the entry with the issuer and client id the federation is configured with", () => {
@@ -85,7 +85,7 @@ describe("resolveFederationGrantConnections", () => {
 		// Removing the last one must stay an operable change: a deployment with
 		// no connections issues no new grants and still answers about the ones
 		// it has.
-		expect(resolveFederationGrantConnections({ federations: FEDERATIONS }).size).toBe(0);
+		expect(resolveFederationGrantConnections(undefined, { federations: FEDERATIONS }).size).toBe(0);
 		expect(resolve({}).size).toBe(0);
 	});
 

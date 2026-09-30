@@ -71,7 +71,7 @@ export function createMfaTransactionStoreFactory(): MfaTransactionStoreFactory {
 /**
  * Registers the in-tree builders: `memory`, capped at the adapter config's
  * `maxEntries` (`factory.create({ type: "memory", maxEntries })`, read as
- * `mfaTransactionStore.memory.maxEntries` is: absent means the default, a
+ * `core-mfa-transaction-store-memory.maxEntries` is: absent means the default, a
  * value it cannot use is a `RangeError` naming the key). Throws
  * `AdapterFactoryError` (`duplicate`) when one is already registered.
  */

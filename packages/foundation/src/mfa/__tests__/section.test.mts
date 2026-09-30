@@ -22,19 +22,26 @@
  * printable characters alone. A composition that installs a module reading
  * the section — one that provides its store eagerly and reads the URLs first
  * — refuses the boot with any URL missing, naming each missing key and its
- * variable, whether or not anything requires the store. Here a fixture module
- * reads the section so, providing a memory store.
+ * variable, whether or not anything requires the store. Here the package's
+ * module reads the section, installed alone.
  */
 
 import { BootError, createApp, type MfaFactorStore } from "@o3co/auth-provider-core";
-import { makeValidAppConfig, unreadableModuleLeaves } from "@o3co/auth-provider-core/testing";
+import {
+	makeValidAppConfig,
+	unreadableModuleLeaves,
+	userRepositoryHttpOf,
+	withUserRepositoryHttp,
+} from "@o3co/auth-provider-core/testing";
 import { afterEach, describe, expect, it } from "vitest";
+import { foundationMfaFactorStoreModule } from "#/index.mjs";
 import {
 	FOUNDATION_MFA_FACTOR_STORE_SECTION,
 	foundationMfaFactorStoreSection,
 	readFoundationMfaFactorStoreUrls,
 } from "#/mfa/section.mjs";
-import { consumer, fixtureModule } from "./fixtureModule.mjs";
+import { foundationMfaFactorStoreConfig } from "#/testing/index.mjs";
+import { consumer } from "./consumer.mjs";
 
 const URLS = {
 	listUrl: "https://store.example/mfa/factors/list",
@@ -53,11 +60,14 @@ const VARIABLES = {
 
 const KEYS = Object.keys(URLS) as (keyof typeof URLS)[];
 
-const base = makeValidAppConfig();
-const configWith = (section: unknown) => ({
-	...base,
-	...(section === undefined ? {} : { [FOUNDATION_MFA_FACTOR_STORE_SECTION]: section }),
-});
+const base = withUserRepositoryHttp(makeValidAppConfig(), {});
+/** The module as a composition root builds it, handed the user repository's HTTP settings. */
+const module = () => foundationMfaFactorStoreModule({ storeTransport: userRepositoryHttpOf(base) });
+/** The configuration with the section holding `urls` and `extra`; without the section when `urls` is undefined. */
+const configWith = (
+	urls: Partial<Record<keyof typeof URLS, unknown>> | undefined,
+	extra: Readonly<Record<string, unknown>> = {},
+) => (urls === undefined ? base : { ...base, ...foundationMfaFactorStoreConfig(urls, extra) });
 
 let disposable: { dispose(): Promise<void> } | undefined;
 afterEach(async () => {
@@ -65,21 +75,33 @@ afterEach(async () => {
 	disposable = undefined;
 });
 
-async function boot(section: unknown, options: { readonly alone?: boolean } = {}) {
+interface BootOptions {
+	/** Nothing requires the store: the module alone. */
+	readonly alone?: boolean;
+	readonly extra?: Readonly<Record<string, unknown>>;
+}
+
+async function boot(
+	urls: Partial<Record<keyof typeof URLS, unknown>> | undefined,
+	options: BootOptions = {},
+) {
 	const seen: { store?: MfaFactorStore } = {};
 	disposable = await createApp({
-		modules: options.alone === true ? [fixtureModule] : [fixtureModule, consumer(seen)],
-		bootstrapComponents: { config: configWith(section), pathResolver: (p: string) => p } as never,
+		modules: options.alone === true ? [module()] : [module(), consumer(seen)],
+		bootstrapComponents: {
+			config: configWith(urls, options.extra),
+			pathResolver: (p: string) => p,
+		} as never,
 	});
 	return seen;
 }
 
 async function bootRefusal(
-	section: unknown,
-	options: { readonly alone?: boolean } = {},
+	urls: Partial<Record<keyof typeof URLS, unknown>> | undefined,
+	options: BootOptions = {},
 ): Promise<BootError> {
 	try {
-		await boot(section, options);
+		await boot(urls, options);
 	} catch (error) {
 		expect(error).toBeInstanceOf(BootError);
 		return error as BootError;
@@ -95,7 +117,7 @@ describe("the section's schema", () => {
 		expect(foundationMfaFactorStoreSection.reference.href).toMatch(
 			/\/packages\/foundation\/config\/reference\.conf$/,
 		);
-		expect(unreadableModuleLeaves([fixtureModule])).toEqual([]);
+		expect(unreadableModuleLeaves([module()])).toEqual([]);
 	});
 
 	it("reads the four URLs, https or http to a loopback host", () => {
@@ -212,7 +234,7 @@ describe("a composition that selects the Store for MFA factors", () => {
 		const malformed = await bootRefusal({ ...URLS, deleteUrl: "http://store.internal/delete" });
 		expect(malformed.reason).toBe("config-validation-failed");
 		expect(malformed.message).toContain(`${FOUNDATION_MFA_FACTOR_STORE_SECTION}.deleteUrl`);
-		const unknown = await bootRefusal({ ...URLS, markMfaEnrolledUrl: URLS.listUrl });
+		const unknown = await bootRefusal(URLS, { extra: { markMfaEnrolledUrl: URLS.listUrl } });
 		expect(unknown.reason).toBe("config-validation-failed");
 		expect(unknown.message).toContain("markMfaEnrolledUrl");
 	});

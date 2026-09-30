@@ -16,6 +16,7 @@ import {
 } from "@o3co/auth-provider-core";
 import { z } from "zod";
 import type { RateLimiterClient } from "./clients.mjs";
+import { redisReference } from "./internal/section.mjs";
 
 interface RedisRateLimiterConfig {
 	type?: string;
@@ -133,48 +134,59 @@ export const redisRateLimiterBuilder: AdapterBuilder<RateLimiter> = (config, _ct
 	});
 };
 
-const rateLimitSpecSchema = z.object({
-	limit: z.number().int().positive(),
-	// One year at most, as core's schema holds every duration an operator writes.
-	windowSeconds: z.number().int().positive().max(MAX_DURATION_SECONDS),
-});
+/** A budget as the section writes it; each number read from the string a variable carries. */
+const rateLimitSpecSchema = z
+	.object({
+		limit: z.coerce.number().int().positive(),
+		// One year at most, as core holds every duration an operator writes.
+		windowSeconds: z.coerce.number().int().positive().max(MAX_DURATION_SECONDS),
+	})
+	.strict();
 
 /**
- * `defineModule` manifest for the redis RateLimiter. Reads `redisRateLimiter`
- * config slice (limits + defaultLimit), the contributed budgets
- * (`rateLimitBudgetResolver`), and `rateLimit.failMode` — a key in core's
- * `rateLimit` block — as the limiter's own outage policy. The redis client
- * itself comes from the `rateLimiterClient` ComponentMap slot (per-purpose
- * interface declared in `@o3co/auth-provider-core`'s `ratelimit/types.mts`).
+ * The schema of `redis-rate-limiter {}`, the module's own section: per-prefix
+ * `limits`, the `defaultLimit` a key nothing covers falls to, and `failMode`,
+ * the limiter's outage policy. Strict at every level.
+ */
+export const redisRateLimiterSectionSchema = z
+	.object({
+		limits: z.record(z.string(), rateLimitSpecSchema).default({}),
+		defaultLimit: rateLimitSpecSchema.default(() => ({ ...DEFAULT_LIMIT })),
+		failMode: z.enum(["open", "closed"]).default("closed"),
+	})
+	.strict()
+	.default(() => ({ limits: {}, defaultLimit: { ...DEFAULT_LIMIT }, failMode: "closed" as const }));
+
+/**
+ * `defineModule` manifest for the redis RateLimiter. Reads its own section,
+ * `redis-rate-limiter` (limits, defaultLimit, and `failMode`, the limiter's
+ * outage policy), and the contributed budgets (`rateLimitBudgetResolver`).
+ * `redisRateLimiter` and `rateLimit.failMode`, the paths its keys moved from,
+ * and `RATE_LIMIT_FAIL_MODE`, its variable's old name, refuse boot naming the
+ * new ones. The redis client itself comes from the `rateLimiterClient`
+ * ComponentMap slot (per-purpose interface declared in
+ * `@o3co/auth-provider-core`'s `ratelimit/types.mts`).
  */
 export const redisRateLimiterModule = defineModule({
 	name: "redis-rate-limiter",
-	requires: ["rateLimiterClient", "config", "rateLimitBudgetResolver"] as const,
-	configSchema: z.object({
-		redisRateLimiter: z
-			.object({
-				limits: z.record(z.string(), rateLimitSpecSchema).default({}),
-				defaultLimit: rateLimitSpecSchema.default({ limit: 60, windowSeconds: 60 }),
-			})
-			.default({ limits: {}, defaultLimit: { limit: 60, windowSeconds: 60 } }),
-	}),
-	provides: {
-		rateLimiter: (deps) => {
-			const config = deps.config as unknown as {
-				redisRateLimiter: {
-					limits: Record<string, RateLimitSpec>;
-					defaultLimit: RateLimitSpec;
-				};
-				rateLimit?: { failMode?: unknown };
-			};
-			const cfg = config.redisRateLimiter;
-			return createRedisRateLimiter({
-				failMode: checkedFailMode("", "rateLimit.failMode", config.rateLimit?.failMode),
-				client: deps.rateLimiterClient,
-				limits: cfg.limits,
-				budgets: deps.rateLimitBudgetResolver,
-				defaultLimit: cfg.defaultLimit,
-			});
+	section: {
+		schema: redisRateLimiterSectionSchema,
+		reference: redisReference(),
+		relocatedFrom: {
+			redisRateLimiter: { to: "", environmentVariable: null },
+			"rateLimit.failMode": "failMode",
 		},
+		renamedVariables: { RATE_LIMIT_FAIL_MODE: "rateLimit.failMode" },
+	},
+	requires: ["rateLimiterClient", "rateLimitBudgetResolver"] as const,
+	provides: {
+		rateLimiter: ({ section, rateLimiterClient, rateLimitBudgetResolver }) =>
+			createRedisRateLimiter({
+				failMode: section.failMode,
+				client: rateLimiterClient,
+				limits: section.limits,
+				budgets: rateLimitBudgetResolver,
+				defaultLimit: section.defaultLimit,
+			}),
 	},
 });

@@ -21,7 +21,7 @@
  * The two boundaries are bounded by different things. The grants boundary
  * must outlast every grant it could cover, which
  * `FEDERATION_GRANT_LIFETIME_CEILING_MS` bounds (enforced by `activate`),
- * not `federationGrants.maxExpiresIn`: an operator could lower that, revoke,
+ * not `federation-grants.maxExpiresIn`: an operator could lower that, revoke,
  * and raise it again, resurrecting a grant the revocation meant to end. So
  * its floor is a constant neither configuration nor a caller can shorten.
  * The sessions boundary must outlast the sessions and tokens a cascade

@@ -15,15 +15,14 @@
  */
 
 /**
- * Sections declared by a module rather than by core (`redisRateLimiter`,
+ * Sections declared by a module rather than by core (`redis-rate-limiter`,
  * `mtls`) survive this template's real resolution chain, end to end.
  * Starting from the shipped configuration plus an operator's own layer, the
  * overrides are followed through both configuration phases and `createApp`
- * to the limiter the module builds. Were `redisRateLimiter` stripped, the
- * module's `.default({ limit: 60, windowSeconds: 60 })` would put the
- * deployment `docker-compose.production.yml` ships
- * (`RATE_LIMITER_ADAPTER: redis`) on 60 requests / 60 s whatever the
- * operator wrote.
+ * to the limiter the module builds. Were `redis-rate-limiter` lost, the
+ * module's default of 60 requests / 60 s would apply to the deployment
+ * `docker-compose.production.yml` ships (`RATE_LIMITER_ADAPTER: redis`)
+ * whatever the operator wrote.
  */
 
 import { mkdtempSync, writeFileSync } from "node:fs";
@@ -70,7 +69,7 @@ const ENV = {
  * template ships.
  */
 const OPERATOR_OVERRIDES = `
-redisRateLimiter {
+redis-rate-limiter {
   limits {
     token { limit = 120, windowSeconds = 60 }
     authorize { limit = 30, windowSeconds = 60 }
@@ -167,7 +166,9 @@ describe("the shipped configuration reaches the Redis rate limiter", () => {
 	});
 
 	it("carries the operator's per-endpoint budgets through boot's parse", () => {
-		expect(config.redisRateLimiter?.limits).toEqual({
+		expect(
+			(config as unknown as Record<string, { limits?: unknown }>)["redis-rate-limiter"]?.limits,
+		).toEqual({
 			token: { limit: 120, windowSeconds: 60 },
 			authorize: { limit: 30, windowSeconds: 60 },
 		});

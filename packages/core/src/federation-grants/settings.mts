@@ -15,10 +15,9 @@
  */
 
 /**
- * `federationGrants.*` as an operator writes it, turned into what acquisition
- * and retrieval take. In core because the block is core's (schema,
- * `reference.conf`, and the bundled grant stores read it), so there is one
- * reading of it.
+ * `federation-grants {}`, the federation-grants module's section, as an
+ * operator writes it, turned into what acquisition and retrieval take. Each
+ * function takes the section and nothing else, so there is one reading of it.
  *
  * Named functions guard two silent mistakes: seconds forwarded as
  * milliseconds, and a default substituted for a value written wrongly.
@@ -32,12 +31,13 @@ import {
 } from "./retrieve.mjs";
 
 /**
- * The defaults `config/reference.conf` ships, in the units it writes them.
+ * The defaults the federation-grants package's `config/reference.conf` ships
+ * for its section, in the units it writes them.
  *
  * Exported because a hand-built configuration never passes through that file,
  * and a second copy of these numbers inside a module would be the one that is
- * forgotten. `settings.test.mts` reads the block back out of `reference.conf`
- * and compares it to this, so the two cannot drift.
+ * forgotten. `settings.test.mts` reads the section back out of that file and
+ * compares it to this, so the two cannot drift.
  */
 export const FEDERATION_GRANT_SETTING_DEFAULTS = {
 	/** Seconds. Thirty days: what a new grant gets, reserved for acquisition. */
@@ -65,8 +65,6 @@ export const FEDERATION_GRANT_SETTING_DEFAULTS = {
 	lockWaitMs: 5_000,
 	/** Milliseconds. How long a refresh keeps trying to write down what it got. */
 	persistRetryBudgetMs: 3_000,
-	/** Seconds. How long a record answers past the end of what it authorized. */
-	tombstoneRetention: 2_592_000,
 } as const;
 
 /**
@@ -78,7 +76,15 @@ export const FEDERATION_GRANT_SETTING_DEFAULTS = {
  */
 const FEDERATION_GRANT_REVOCATION_SKEW_MS = DEFAULT_SUBJECT_REVOCATION_SKEW_MS;
 
-type Settings = Partial<Record<keyof typeof FEDERATION_GRANT_SETTING_DEFAULTS, unknown>>;
+/**
+ * The keys of `federation-grants {}` these functions read, each as written.
+ * All optional: an absent key reads as its default.
+ */
+export type FederationGrantSettings = Partial<
+	Record<keyof typeof FEDERATION_GRANT_SETTING_DEFAULTS | "allowKeepOnSubjectRevocation", unknown>
+>;
+
+type Settings = FederationGrantSettings;
 
 /**
  * The largest any of these may be: one year, in the key's unit. Needed
@@ -106,7 +112,7 @@ function setting(settings: Settings, key: keyof typeof FEDERATION_GRANT_SETTING_
 	const unit = key.endsWith("Ms") ? "milliseconds" : "seconds";
 	const refuse = (): never => {
 		throw new RangeError(
-			`federationGrants.${key} must be a whole number of ${unit} no greater than ` +
+			`federation-grants.${key} must be a whole number of ${unit} no greater than ` +
 				`${MAXIMUM[unit]}, and was ${JSON.stringify(written)}`,
 		);
 	};
@@ -123,15 +129,15 @@ function setting(settings: Settings, key: keyof typeof FEDERATION_GRANT_SETTING_
 	return value;
 }
 
-const settingsOf = (config: unknown): Settings =>
-	((config as { federationGrants?: Settings } | undefined)?.federationGrants ?? {}) as Settings;
+/** The section as the functions read it; an absent one reads as every default. */
+const settingsOf = (section: FederationGrantSettings | undefined): Settings => section ?? {};
 
 /** `maxExpiresIn`, in milliseconds, within the ceiling the code enforces above any setting. */
 function resolveMaxExpiresInMs(settings: Settings): number {
 	const maxExpiresInMs = setting(settings, "maxExpiresIn") * 1000;
 	if (maxExpiresInMs <= 0 || maxExpiresInMs > FEDERATION_GRANT_LIFETIME_CEILING_MS) {
 		throw new RangeError(
-			"federationGrants.maxExpiresIn must be a positive number of seconds no greater than " +
+			"federation-grants.maxExpiresIn must be a positive number of seconds no greater than " +
 				`${FEDERATION_GRANT_LIFETIME_CEILING_MS / 1000} (one year), the ceiling the code enforces`,
 		);
 	}
@@ -139,29 +145,31 @@ function resolveMaxExpiresInMs(settings: Settings): number {
 }
 
 /**
- * The lifetimes acquisition offers, from the configuration an operator wrote:
+ * The lifetimes acquisition offers, from the section an operator wrote:
  * what a new grant gets, and the most a client may ask for.
  *
  * A default above the maximum is refused, not clamped: lodging clamps a
  * CLIENT's request and says so, but a silently clamped operator default
  * would give every grant a lifetime nobody wrote.
  */
-export function resolveFederationGrantAcquisitionLimits(config: unknown): {
+export function resolveFederationGrantAcquisitionLimits(
+	section: FederationGrantSettings | undefined,
+): {
 	readonly defaultLifetimeMs: number;
 	readonly maxLifetimeMs: number;
 } {
-	const settings = settingsOf(config);
+	const settings = settingsOf(section);
 	const maxLifetimeMs = resolveMaxExpiresInMs(settings);
 	const defaultLifetimeMs = setting(settings, "defaultExpiresIn") * 1000;
 	if (defaultLifetimeMs <= 0) {
 		throw new RangeError(
-			"federationGrants.defaultExpiresIn must be a positive number of seconds: a grant needs a lifetime",
+			"federation-grants.defaultExpiresIn must be a positive number of seconds: a grant needs a lifetime",
 		);
 	}
 	if (defaultLifetimeMs > maxLifetimeMs) {
 		throw new RangeError(
-			`federationGrants.defaultExpiresIn (${defaultLifetimeMs / 1000}) must not exceed ` +
-				`federationGrants.maxExpiresIn (${maxLifetimeMs / 1000}): a default the maximum cut down ` +
+			`federation-grants.defaultExpiresIn (${defaultLifetimeMs / 1000}) must not exceed ` +
+				`federation-grants.maxExpiresIn (${maxLifetimeMs / 1000}): a default the maximum cut down ` +
 				"would give every grant a lifetime nobody configured",
 		);
 	}
@@ -169,15 +177,15 @@ export function resolveFederationGrantAcquisitionLimits(config: unknown): {
 }
 
 /**
- * The limits `retrieveFederationGrantToken` takes, from the configuration an
+ * The limits `retrieveFederationGrantToken` takes, from the section an
  * operator wrote. Refuses rather than repairs: the timer relationships are
  * checked by `assertFederationGrantRetrievalLimits` (so a hand-built config
  * meets them too), and the lifetime ceiling here.
  */
 export function resolveFederationGrantRetrievalLimits(
-	config: unknown,
+	section: FederationGrantSettings | undefined,
 ): FederationGrantRetrievalLimits {
-	const settings = settingsOf(config);
+	const settings = settingsOf(section);
 	const maxExpiresInMs = resolveMaxExpiresInMs(settings);
 	const limits: FederationGrantRetrievalLimits = {
 		maxExpiresInMs,
@@ -196,16 +204,17 @@ export function resolveFederationGrantRetrievalLimits(
 }
 
 /**
- * `federationGrants.allowKeepOnSubjectRevocation`, from the configuration an
+ * `federation-grants.allowKeepOnSubjectRevocation`, from the section an
  * operator wrote. Read on its own because `setting` handles durations only.
  *
  * Refuses rather than repairs: an unreadable value must never become `true`.
  * `"false"`, `"0"` and an empty string (an unset HOCON `${?VAR}` chain) read
  * as false; anything else is refused by name.
  */
-export function resolveFederationGrantKeepPolicy(config: unknown): boolean {
-	const written = (config as { federationGrants?: { allowKeepOnSubjectRevocation?: unknown } })
-		?.federationGrants?.allowKeepOnSubjectRevocation;
+export function resolveFederationGrantKeepPolicy(
+	section: FederationGrantSettings | undefined,
+): boolean {
+	const written = section?.allowKeepOnSubjectRevocation;
 	if (written === undefined) return false;
 	if (typeof written === "boolean") return written;
 	if (typeof written === "string") {
@@ -214,7 +223,7 @@ export function resolveFederationGrantKeepPolicy(config: unknown): boolean {
 		if (normalized === "false" || normalized === "0" || normalized === "") return false;
 	}
 	throw new RangeError(
-		'federationGrants.allowKeepOnSubjectRevocation must be one of "true", "false", "1" or "0" ' +
+		'federation-grants.allowKeepOnSubjectRevocation must be one of "true", "false", "1" or "0" ' +
 			`(an empty value reads as false), and was ${JSON.stringify(written)}`,
 	);
 }

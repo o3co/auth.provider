@@ -204,7 +204,7 @@ So of two requests carrying one proof, exactly one is accepted.
   `expired-at-issue`) is broken rather than down: the same 503, with reason
   `replay_store_fault`, because the fix is in the composition, not in Redis.
   A seen-set that is full refuses the write the same way. Core's in-process
-  set takes proofs only up to 90% of its cap (`replaySeenSet.memory.maxEntries`,
+  set takes proofs only up to 90% of its cap (`core-replay-seen-set-memory.maxEntries`,
   a million records by default) and keeps the rest for its other consumers,
   so `private_key_jwt` and WebAuthn go on while DPoP is refused; that refusal
   is reason `replay_store_full` (`ReplaySeenSetFullError`, `reason: "full"`).

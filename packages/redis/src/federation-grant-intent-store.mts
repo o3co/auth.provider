@@ -63,7 +63,6 @@ import {
 	federationGrantConsentExpiry,
 	isStorableLifetime,
 } from "@o3co/auth-provider-core";
-import { z } from "zod";
 import type { FederationGrantIntentStoreClient } from "./clients.mjs";
 import {
 	decodeFederationGrantConsent,
@@ -75,6 +74,7 @@ import {
 	federationGrantBindingText,
 	federationGrantIntentPairText,
 } from "./internal/federation-grant-intent-codec.mjs";
+import { keyPrefixSection, redisReference } from "./internal/section.mjs";
 
 /**
  * How long the bound's index outlives its last reservation. It is not a grace
@@ -299,24 +299,18 @@ export function createRedisFederationGrantIntentStore(
 // --- configuration --------------------------------------------------------
 
 /**
- * The one setting this adapter reads is the grant store's own key prefix:
- * acquisition's records live under the same namespace as the grants
- * (`<prefix>{intents}:…` beside `<prefix>{<id>}:…`), so a deployment that
- * moved one must not find the other left behind. The flow budget and the
- * bound are constants on the port.
+ * The schema of `redis-federation-grant-intent-store {}`, the module's own
+ * section: the key prefix acquisition's records live under
+ * (`<prefix>{intents}:…`), strict. The flow budget and the bound are constants
+ * on the port.
  */
-const moduleConfigSchema = z.object({
-	redisFederationGrantStore: z
-		.object({ keyPrefix: z.string().default("fg:") })
-		.default({ keyPrefix: "fg:" }),
-});
+export const redisFederationGrantIntentStoreSectionSchema = keyPrefixSection("fg:");
 
-/** The options the adapter takes, from the configuration an operator wrote. */
+/** The options the adapter takes, from its section as an operator wrote it, parsed here. */
 export function resolveRedisFederationGrantIntentStoreOptions(
-	rawConfig: unknown,
+	section: unknown,
 ): Omit<RedisFederationGrantIntentStoreOptions, "client"> {
-	const config = moduleConfigSchema.parse(rawConfig ?? {});
-	return { keyPrefix: config.redisFederationGrantStore.keyPrefix };
+	return { keyPrefix: redisFederationGrantIntentStoreSectionSchema.parse(section).keyPrefix };
 }
 
 /**
@@ -325,17 +319,23 @@ export function resolveRedisFederationGrantIntentStoreOptions(
  * deployment may keep grants in Redis and acquisition in memory on a single
  * replica — losing flows in progress on a restart and nothing else — and the
  * two are installed independently. The client is the composition root's to
- * provide, as the grant store's is; it may be the same connection.
+ * provide, as the grant store's is; it may be the same connection. Its key
+ * prefix is its own section's, `redis-federation-grant-intent-store.keyPrefix`,
+ * apart from the grant store's: a deployment that moves one moves the other
+ * too.
  */
 export const redisFederationGrantIntentStoreModule = defineModule({
 	name: "redis-federation-grant-intent-store",
-	requires: ["federationGrantIntentStoreClient", "config"] as const,
-	configSchema: moduleConfigSchema,
+	section: {
+		schema: redisFederationGrantIntentStoreSectionSchema,
+		reference: redisReference(),
+	},
+	requires: ["federationGrantIntentStoreClient"] as const,
 	provides: {
-		federationGrantIntentStore: (deps) =>
+		federationGrantIntentStore: ({ section, federationGrantIntentStoreClient }) =>
 			createRedisFederationGrantIntentStore({
-				client: deps.federationGrantIntentStoreClient,
-				...resolveRedisFederationGrantIntentStoreOptions(deps.config),
+				client: federationGrantIntentStoreClient,
+				...resolveRedisFederationGrantIntentStoreOptions(section),
 			}),
 	},
 });

@@ -81,7 +81,7 @@ federations.entra-files {
   clientSecret = ${ENTRA_FILES_CLIENT_SECRET}
   callbackURL = "https://auth.example/session/oauth/federation/entra-files/callback"
 }
-federationGrants.connections.files {
+federation-grants.connections.files {
   federation = "entra-files"
   scopes = ["openid", "profile", "offline_access", "https://graph.microsoft.com/Files.Read"]
   allowScopeSubsets = false

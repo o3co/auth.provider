@@ -146,10 +146,11 @@ its address is the honest answer to "who called". There is no per-user identity
 in these requests to key on.
 
 The knob is the per-endpoint budget. Both limiter adapters take
-`limits { <prefix> { limit, windowSeconds } }`, keyed by the endpoint prefix:
+`limits { <prefix> { limit, windowSeconds } }` in their own sections, keyed by
+the endpoint prefix:
 
 ```hocon
-redisRateLimiter {
+redis-rate-limiter {
   limits {
     token     { limit = 600, windowSeconds = 60 }
     introspect { limit = 600, windowSeconds = 60 }
@@ -157,7 +158,7 @@ redisRateLimiter {
 }
 ```
 
-(`memoryRateLimiter.limits` for the memory adapter, same shape.) Size it from
+(`core-rate-limiter-memory.limits` for the memory adapter, same shape.) Size it from
 your BFF's peak sign-ins and refreshes per minute with headroom, and remember
 that under `rateLimiter.adapter = "redis"` the budget is shared across replicas
 — which is what you want here, and what makes the number mean something.
@@ -661,7 +662,7 @@ needs a key.
 | `REDIS_FEDERATION_TOKEN_STORE_ENCRYPTION_MODE` | `required` | `required` or `allow-plaintext`. Plaintext is refused when the config was selected by a production/staging environment (`CONFIG_ENV` or `NODE_ENV`) and under `CORE_DEPLOYMENT_MODE=multi` in any environment, unless `FEDERATION_TOKENS_ALLOW_INSECURE=1` is also set — development only |
 
 `ttl` (seconds; keep it above the upstream refresh-token lifetime) and the #291
-`scanFallback` migration flag live under `redisFederationTokenStore` in a
+`scanFallback` migration flag live under `redis-federation-token-store` in a
 config layer rather than behind an environment variable.
 
 ### Consent Store
@@ -696,21 +697,27 @@ needs before it issues a refresh token is in
 | `FEDERATION_GRANTS_IDENTITY_LOOKUP` | `required` | Whether the connect callback refuses an upstream account already linked to another local user. `required` needs a user repository that covers every connection's registration (below); `unsupported` records that the check is not made |
 | `FEDERATION_GRANT_STORE_ADAPTER` | `redis` | Where grants live: `memory` (one replica; lost on restart, every user reconnects) or `redis` (the shared socket) |
 | `FEDERATION_GRANT_INTENT_STORE_ADAPTER` | `redis` | Where acquisition's records live — the intent a backend lodged, the consent challenge, the connect transaction: `memory` (one replica; a restart loses flows in progress and nothing else) or `redis` |
-| `FEDERATION_GRANTS_ENCRYPTION_MODE` | `required` | `required` or `allow-plaintext`. Plaintext is refused in production/staging and under `CORE_DEPLOYMENT_MODE=multi` unless `FEDERATION_TOKENS_ALLOW_INSECURE=1` |
+| `REDIS_FEDERATION_GRANT_STORE_ENCRYPTION_MODE` | `required` | `required` or `allow-plaintext`. Plaintext is refused in production/staging and under `CORE_DEPLOYMENT_MODE=multi` unless `FEDERATION_TOKENS_ALLOW_INSECURE=1` |
 | `FEDERATION_GRANTS_ALLOW_KEEP_ON_SUBJECT_REVOCATION` | `false` | Whether a subject-wide revocation may be *asked* to leave established grants standing. An allowance, not an instruction |
 | `REDIS_FEDERATION_GRANT_STORE_KEY_PREFIX` | `fg:` | Key namespace of the Redis grant store |
+| `REDIS_FEDERATION_GRANT_INTENT_STORE_KEY_PREFIX` | `fg:` | Key namespace of the Redis intent store; set it with the grant store's — the template refuses to boot with the grant store's set and this one left at its default |
 
-**Two things have no environment form**, because a list is HOCON's: the
-connections, and the encryption key ring. Write them in a deployment-owned
-layer — `config/production.conf`, say:
+The feature's own settings are the `federation-grants {}` section; the Redis
+grant store's — its key ring, its encryption mode, its prefix — are
+`redis-federation-grant-store {}`. **Two things have no environment form**,
+because a list is HOCON's: the connections, and the encryption key ring.
+Write them in a deployment-owned layer — `config/production.conf`, say:
 
 ```hocon
-federationGrants {
+redis-federation-grant-store {
   encryptionKeys = [
     # The first key seals; every listed key opens. GRANT_KEY_2026_09 is a name
     # you choose (openssl rand -base64 32), not a template override.
     { id = "2026-09", key = ${GRANT_KEY_2026_09} }
   ]
+}
+
+federation-grants {
   connections {
     files {
       federation = "entra-files"   # an enabled federations.<name> of type "oidc", with an app registration of its own
@@ -830,7 +837,7 @@ auth.provider instances cannot collide in the same database:
 | Variable | Default | Description |
 |---|---|---|
 | `REDIS_SESSION_STORES_KEY_PREFIX` | `ss:` | Outer prefix for user sessions, RP registry, session-family index, and session-federation index. |
-| `REFRESH_TOKEN_FAMILY_STORE_KEY_PREFIX` | `rtfam:` | Prefix for refresh-token family records. |
+| `REDIS_REFRESH_TOKEN_FAMILY_STORE_KEY_PREFIX` | `rtfam:` | Prefix for refresh-token family records. |
 | `CLIENT_CODE_KEY_PREFIX` | `oauth:code:` | Prefix for OAuth authorization codes. |
 | `REDIS_FEDERATION_TOKEN_STORE_KEY_PREFIX` | `ft:` | Prefix for federation token records, their per-session index and their lock keys. |
 | `REDIS_CONSENT_STORE_KEY_PREFIX` | `consent:` | Prefix for consent records and for parked consent requests with their per-session index (`CONSENT_STORE_ADAPTER=redis`, #561). |
@@ -1059,7 +1066,7 @@ A module that contributes a session requirement — the MFA package's `mfa`, or 
 4. **Past the deadline the remaining connections are cut and the process exits non-zero.** An orchestrator that only ever sees `0` cannot tell a clean drain from one that ran out of time.
 5. **`cleanup` runs after draining, before exit** — `handle.dispose()`, i.e. reverse-topological component cleanup plus the Redis/timer drain. A failure there is logged through this service's own logger (NDJSON, like every other line) as `shutdown_cleanup_failed` (or `shutdown_cleanup_timed_out`) and reflected in the exit code; every stage is its own event (see the table below). A dispose that throws still exits; it never wedges the process. The line carries core's [`loggableError`](../../packages/core/README.md#logger) projection of the failure, never the error itself: `dispose()` rejects with an AggregateError of every cleanup's own error, and the line names each of them with its code (`aggregateErrors`, the first five) and nothing of what it holds — a store write that failed, with what it was writing, can be one of them.
 
-6. **`cleanup` gets at least the allowance the modules registered**: `handle.cleanupAllowanceMs`, the longest tail a module registered its cleanup with, which `src/app.mts` hands `installGracefulShutdown` as `cleanupAllowanceMs: () => handle.cleanupAllowanceMs`, read when the signal arrives; cleanup's budget is the longer of it and the drain's ten, and `shutdown_draining` logs it as `cleanupTimeoutMs`. An allowance that is not a whole number of milliseconds from 1 to 2147483647 is ignored. The template reads no module's settings to size it. With federation grants on, the package registers its drain's tail as `federationGrants.upstreamHardTimeoutMs` + `persistRetryBudgetMs` + `lockWaitMs` + 12 s, never below 45 s — exactly 45 s under the shipped budgets (25 + 3 + 5 + 12) — because the dispose waits for a rotated upstream credential's write. Raise a budget and the allowance grows with it; raise your orchestrator's grace to match. Off, nothing registers an allowance and the cleanup budget stays the drain's.
+6. **`cleanup` gets at least the allowance the modules registered**: `handle.cleanupAllowanceMs`, the longest tail a module registered its cleanup with, which `src/app.mts` hands `installGracefulShutdown` as `cleanupAllowanceMs: () => handle.cleanupAllowanceMs`, read when the signal arrives; cleanup's budget is the longer of it and the drain's ten, and `shutdown_draining` logs it as `cleanupTimeoutMs`. An allowance that is not a whole number of milliseconds from 1 to 2147483647 is ignored. The template reads no module's settings to size it. With federation grants on, the package registers its drain's tail as `federation-grants.upstreamHardTimeoutMs` + `persistRetryBudgetMs` + `lockWaitMs` + 12 s, never below 45 s — exactly 45 s under the shipped budgets (25 + 3 + 5 + 12) — because the dispose waits for a rotated upstream credential's write. Raise a budget and the allowance grows with it; raise your orchestrator's grace to match. Off, nothing registers an allowance and the cleanup budget stays the drain's.
 
 Each stage logs one line:
 

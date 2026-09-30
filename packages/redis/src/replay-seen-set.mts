@@ -21,8 +21,8 @@ import {
 	isStorableExpiry,
 	type ReplaySeenSet,
 } from "@o3co/auth-provider-core";
-import { z } from "zod";
 import type { ReplaySeenSetClient } from "./clients.mjs";
+import { keyPrefixSection, redisReference } from "./internal/section.mjs";
 
 /**
  * Options for createRedisReplaySeenSet.
@@ -97,27 +97,21 @@ export const redisReplaySeenSetBuilder: AdapterBuilder<ReplaySeenSet> = (config,
 /**
  * `defineModule` manifest for the Redis ReplaySeenSet, for static
  * composition; for runtime-config-driven selection use the builder above.
- * Its config lives under the module's own key, `redisReplaySeenSet`, never a
- * bare top-level `keyPrefix`.
+ * Its section, `redis-replay-seen-set`, holds `keyPrefix` (strict).
  */
 export const redisReplaySeenSetModule = defineModule({
 	name: "redis-replay-seen-set",
-	requires: ["replaySeenSetClient", "config"] as const,
-	configSchema: z.object({
-		redisReplaySeenSet: z
-			.object({
-				keyPrefix: z.string().default("replay:"),
-			})
-			.default({ keyPrefix: "replay:" }),
-	}),
+	requires: ["replaySeenSetClient"] as const,
+	section: {
+		schema: keyPrefixSection("replay:"),
+		reference: redisReference(),
+		relocatedFrom: { redisReplaySeenSet: { to: "", environmentVariable: null } },
+	},
 	provides: {
-		replaySeenSet: (deps) => {
-			const cfg = (deps.config as unknown as { redisReplaySeenSet: { keyPrefix: string } })
-				.redisReplaySeenSet;
-			return createRedisReplaySeenSet({
-				client: deps.replaySeenSetClient,
-				keyPrefix: cfg.keyPrefix,
-			});
-		},
+		replaySeenSet: ({ section, replaySeenSetClient }) =>
+			createRedisReplaySeenSet({
+				client: replaySeenSetClient,
+				keyPrefix: section.keyPrefix,
+			}),
 	},
 });

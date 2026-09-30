@@ -16,27 +16,10 @@
 
 import type { AdapterFactory, UserRepository } from "@o3co/auth-provider-core";
 import {
-	DEFAULT_MAX_RESPONSE_BYTES,
 	type FederatedIdentityLookupCoverage,
 	HttpUserRepository,
 } from "./repositories/HttpUserRepository.mjs";
-
-/** Default request deadline, in milliseconds, when the config names none. */
-const DEFAULT_TIMEOUT_MS = 5000;
-
-/**
- * Coerces a numeric config value that may arrive as a string (HOCON
- * environment substitution yields strings). Only an *absent* key takes
- * `fallback`. Anything present but unreadable becomes `NaN` for the
- * constructor to reject, and a **blank** environment variable, which HOCON
- * substitutes as `""`, becomes `0`: a boot failure too, not a silent default.
- */
-const toNumber = (value: unknown, fallback: number): number => {
-	if (value === undefined || value === null) return fallback;
-	if (typeof value === "number") return value;
-	if (typeof value === "string") return Number(value.trim());
-	return Number.NaN;
-};
+import { readStoreTransportConfig } from "./storeTransport.mjs";
 
 export const registerBuiltinAdapters = (factories: {
 	userFactory: AdapterFactory<UserRepository>;
@@ -73,24 +56,28 @@ export const registerBuiltinAdapters = (factories: {
 							config.federatedIdentityLookupCoverage as readonly FederatedIdentityLookupCoverage[],
 					}
 				: {}),
-			// Optional, and forwarded whenever SET for the lookup URL's reason: a
-			// token that vanished would be a deployment that believes its Store
-			// calls authenticated and sends them bare. The constructor refuses
-			// what is not a string, and what is blank, malformed or too weak.
-			...(config.bearerToken !== undefined ? { bearerToken: config.bearerToken as string } : {}),
-			timeout: toNumber(config.timeout, DEFAULT_TIMEOUT_MS),
-			maxResponseBytes: toNumber(config.maxResponseBytes, DEFAULT_MAX_RESPONSE_BYTES),
+			// The bearer token, the deadline and the response cap. The constructor
+			// refuses a token that is not a string, or is blank, malformed or too
+			// weak, and a deadline or cap that is not a positive integer.
+			...readStoreTransportConfig(config),
 		});
 	});
 };
 
+export {
+	HttpMfaFactorStore,
+	type HttpMfaFactorStoreOptions,
+} from "./mfa/HttpMfaFactorStore.mjs";
+export {
+	type FoundationMfaFactorStoreModuleOptions,
+	foundationMfaFactorStoreModule,
+} from "./mfa/module.mjs";
 export {
 	MfaStoreError,
 	type MfaStoreFailure,
 	type MfaStoreOperation,
 } from "./mfa/storeFailure.mjs";
 export {
-	DEFAULT_MAX_RESPONSE_BYTES,
 	type FederatedIdentityLookupCoverage,
 	HttpUserRepository,
 } from "./repositories/HttpUserRepository.mjs";
@@ -99,3 +86,4 @@ export {
 	StoreTransportError,
 	type StoreTransportFailure,
 } from "./repositories/storeErrors.mjs";
+export { DEFAULT_MAX_RESPONSE_BYTES } from "./storeTransport.mjs";

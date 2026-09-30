@@ -42,7 +42,7 @@ import {
 	memoryChallengeStoreModule,
 	memoryReplaySeenSetModule,
 } from "@o3co/auth-provider-core";
-import { createTestOAuthTokenSettings, makeValidAppConfig } from "@o3co/auth-provider-core/testing";
+import { createTestOAuthTokenSettings } from "@o3co/auth-provider-core/testing";
 import type { AuthenticationResponseJSON } from "@simplewebauthn/server";
 import express from "express";
 import supertest from "supertest";
@@ -50,6 +50,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { WebAuthnConfig } from "#/config.mjs";
 import { WEBAUTHN_GRANT_TYPE } from "#/grant.mjs";
 import { webauthnModule } from "#/module.mjs";
+import { makeAppConfig } from "./appConfig.fixture.mjs";
 
 const ISSUER = "https://auth.example";
 const RP_ID = "example.com";
@@ -166,7 +167,7 @@ async function boot(
 	});
 
 	const evaluate = vi.fn<GrantPolicyHook["evaluate"]>(async () => ({ outcome: "allow" }));
-	const base = makeValidAppConfig();
+	const base = makeAppConfig();
 	const config = {
 		...base,
 		// A single-replica composition: no warning about the per-process limiter.
