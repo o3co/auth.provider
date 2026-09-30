@@ -64,7 +64,7 @@
 - **Step-up**: adding a second factor to an existing, live session without repeating the primary.
 - **Re-authentication**: a new session — primary and second factor again — as `max_age` and `prompt=login` ask.
 - **Baseline**: the deployment's own requirement (`mfa.mode`), as opposed to one a relying party asks for with `acr_values`.
-- **Recent MFA**: a second factor verified in this session within `mfa.manage.maxAgeSeconds`.
+- **Recent MFA**: a second factor verified in this session within `mfa.manage.maxAgeSeconds`. *(2026-09-30: for a subject with no counting factor, a primary that recent instead — D16's alternative; its one reading is the design vocabulary's row "Recent MFA", `isRecentMfa`.)*
 - **The flip**: the release in which MFA becomes on by default (§8, PR 22).
 
 ---
@@ -994,7 +994,7 @@ A follow-up outside this repository: auth.proxy maps `step_up` to a step-up rout
 
 **Amended 2026-09-29 (build-order step 8b): the `mfa` requirement, and what its pull request settled.** The second of step 8's three pull requests adds `mfaModule` and `mfaModules`, the `mfa` requirement and the login's transaction, and wires the package into `tools/composition`'s full set (memory MFA stores, and #720's Redis ones where the full set runs Redis; `mfa.mode = "optional"`; `mfa` declared). The routes, the verification, the completion through `resumePrimary` and audit are the third pull request's. The owner's decisions for step 8 that this pull request carries out, as taken:
 
-- **D6's rows now** (owner decision 1): the requirement's `admit` is the `use` baseline under `mfa.mode`, O3's three token rows, and `device.lookup` / `device.deny` met on any live session — the cookie baseline alone would refuse every refresh of an MFA session, since a token carrier has no `mfaAt`. `credential_change` is held to the same baseline until steps 12 and 14 add recent MFA.
+- **D6's rows now** (owner decision 1): the requirement's `admit` is the `use` baseline under `mfa.mode`, O3's three token rows, and `device.lookup` / `device.deny` met on any live session — the cookie baseline alone would refuse every refresh of an MFA session, since a token carrier has no `mfaAt`. `credential_change` is held to the same baseline until steps 12 and 14 add recent MFA. *(2026-09-30: recent MFA landed before those steps, as the `mfa` requirement's rule for the grade, #823.)*
 - **A first binding's interruption in its final shape** (owner decision 2): zero records under `required` open the `mfa_enrollment_required` transaction (`enrollment: "required"`) with `hints.enrollable` and `hints.email_proof`, and no enrollment witness is read before step 12 *(amended 2026-09-29, module review: before step 9 — the note after this one)*. Nothing can bind before step 9.
 - **The step-up declared before its route** (owner decision 3): the requirement declares `mfa.step_up` and its page, `endpoints.mfa.url`; the page's `POST /session/mfa/step-up` answers `404` until step 11, and the package README says so.
 - **#720 before 8b** (owner decision 5): the Redis MFA stores landed first, so the full set's Redis run uses them.

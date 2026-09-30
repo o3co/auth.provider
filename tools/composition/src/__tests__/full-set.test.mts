@@ -52,6 +52,7 @@ import {
 	type MfaTransactionStore,
 	passwordSessionAuthentication,
 	type SubjectSessionIndex,
+	supportsSecondFactorUpdate,
 	toMfaStoreFactor,
 	type UserSessionStore,
 	type WebAuthnCredentialStore,
@@ -1679,6 +1680,113 @@ describe("session admission at the link start and WebAuthn registration", () => 
 	});
 });
 
+describe("recent MFA at the link start and WebAuthn registration, under mfa.mode = optional", () => {
+	/** The stores the scenarios read and write, as the full set wires them. */
+	const storesOf = ({ handle }: FullSet) =>
+		handle.components as unknown as {
+			mfaFactorStore: MfaFactorStore;
+			userSessionStore: UserSessionStore;
+		};
+
+	/** Alice signed in with no factor, so the login recorded no second factor; the sid of the UserSession it wrote. */
+	const signedInWithSid = async (set: FullSet) => {
+		const create = vi.spyOn(storesOf(set).userSessionStore, "create");
+		const signed = await signedIn(set.app);
+		const sid = (create.mock.calls[0]?.[0] as { sid?: unknown } | undefined)?.sid;
+		expect(typeof sid).toBe("string");
+		create.mockRestore();
+		return { ...signed, sid: sid as string };
+	};
+
+	/** A TOTP factor for alice: a counting factor. */
+	const holdTotp = (set: FullSet) =>
+		storesOf(set).mfaFactorStore.create({
+			id: "f-alice",
+			subject: ALICE.sub,
+			kind: "totp",
+			label: undefined,
+			binding: "password",
+			createdAt: new Date(),
+			lastUsedAt: undefined,
+			version: 0,
+			data: "sealed",
+		});
+
+	/** A step-up recorded in alice's session at `at`, as the MFA page's step-up records a verified TOTP code. */
+	const verifiedSecondFactor = async (set: FullSet, sid: string, at: Date) => {
+		const store = storesOf(set).userSessionStore;
+		if (!supportsSecondFactorUpdate(store))
+			throw new Error("the full set's store records a step-up");
+		expect(await store.recordSecondFactor(sid, { amr: ["otp", "mfa"], at })).not.toBeNull();
+	};
+
+	const registrationOptions = (
+		agent: ReturnType<typeof request.agent>,
+		header: string,
+		token: string,
+	) => agent.post("/oauth/webauthn/registration/options").set(header, token).send({});
+
+	it("steps a subject who holds a counting factor up at both when no second factor was verified in the session: 403 step_up_required, naming mfa and its page", async () => {
+		const set = await boot();
+		const { agent, header, token } = await signedInWithSid(set);
+		await holdTotp(set);
+
+		const page = new URL("/mfa", ISSUER).href;
+		const link = await linkStart(agent);
+		expect(link.status).toBe(403);
+		expect(link.body).toMatchObject({ error: "step_up_required", requirement: "mfa", page });
+		const registration = await registrationOptions(agent, header, token);
+		expect(registration.status).toBe(403);
+		expect(registration.body).toMatchObject({
+			error: "step_up_required",
+			requirement: "mfa",
+			page,
+		});
+	});
+
+	it("steps it up when its second factor was verified before mfa.manage.maxAgeSeconds, five minutes by the reference", async () => {
+		const set = await boot();
+		const { agent, header, token, sid } = await signedInWithSid(set);
+		await holdTotp(set);
+		await verifiedSecondFactor(set, sid, new Date(Date.now() - 6 * 60_000));
+
+		expect((await linkStart(agent)).status).toBe(403);
+		expect((await registrationOptions(agent, header, token)).status).toBe(403);
+	});
+
+	it("admits it at both once a second factor was verified within the window", async () => {
+		const set = await boot();
+		const { agent, header, token, sid } = await signedInWithSid(set);
+		await holdTotp(set);
+		await verifiedSecondFactor(set, sid, new Date());
+
+		expect((await linkStart(agent)).status).toBe(302);
+		expect((await registrationOptions(agent, header, token)).status).toBe(200);
+	});
+
+	it("admits a subject with no counting factor on a recent sign-in, and answers one whose sign-in is older than the window 401 at both: login_required at the link start, the registration route's own unauthorized", async () => {
+		const set = await boot();
+		const { agent, header, token } = await signedInWithSid(set);
+		expect((await linkStart(agent)).status).toBe(302);
+		expect((await registrationOptions(agent, header, token)).status).toBe(200);
+
+		// The same session, read as if its sign-in were ten minutes old.
+		const store = storesOf(set).userSessionStore;
+		const read = store.get.bind(store);
+		vi.spyOn(store, "get").mockImplementation(async (sid) => {
+			const session = await read(sid);
+			return session === null ? null : { ...session, authTime: new Date(Date.now() - 10 * 60_000) };
+		});
+		const link = await linkStart(agent);
+		expect(link.status).toBe(401);
+		expect(link.body.error).toBe("login_required");
+		// No subject reaches the registration route: its own 401.
+		const registration = await registrationOptions(agent, header, token);
+		expect(registration.status).toBe(401);
+		expect(registration.body.error).toBe("unauthorized");
+	});
+});
+
 // ---------------------------------------------------------------------------
 // Token exchange and the session behind the subject token
 // ---------------------------------------------------------------------------
@@ -2066,6 +2174,32 @@ const OUTAGES: readonly OutageCase<FullSet>[] = [
 		module: "webauthn-session-subject",
 		slot: "userSessionStore",
 		surface: "POST /oauth/webauthn/registration/options (the session-subject module's read)",
+		run: async (app, outage) => {
+			const { agent, header, token } = await signedIn(app);
+			outage.down = true;
+			return agent.post("/oauth/webauthn/registration/options").set(header, token).send({});
+		},
+		answer: { status: 503, error: "temporarily_unavailable" },
+		event: "session_admission_unavailable",
+	},
+	{
+		module: "session",
+		slot: "mfaFactorStore",
+		surface:
+			"GET /session/oauth/federation/google?link=1 (the mfa requirement's read of the subject's factors)",
+		run: async (app, outage) => {
+			const { agent } = await signedIn(app);
+			outage.down = true;
+			return linkStart(agent);
+		},
+		answer: { status: 503, error: "temporarily_unavailable" },
+		event: "session_admission_unavailable",
+	},
+	{
+		module: "webauthn-session-subject",
+		slot: "mfaFactorStore",
+		surface:
+			"POST /oauth/webauthn/registration/options (the mfa requirement's read of the subject's factors)",
 		run: async (app, outage) => {
 			const { agent, header, token } = await signedIn(app);
 			outage.down = true;

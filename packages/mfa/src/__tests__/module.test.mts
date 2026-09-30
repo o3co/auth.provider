@@ -52,6 +52,7 @@ import { mfaRecoveryCodeFactorModule } from "#/recovery/module.mjs";
 import { createMfaSealing } from "#/sealing.mjs";
 import { mfaTotpFactorModule } from "#/totp/module.mjs";
 import {
+	ALICE,
 	boot,
 	configFor,
 	disposeAll,
@@ -62,7 +63,7 @@ import {
 	spyLogger,
 	TOTP_SECTION,
 } from "./moduleHarness.mjs";
-import { stubFactor } from "./requirementHarness.mjs";
+import { factorRecord, stubFactor } from "./requirementHarness.mjs";
 import { beginLogin, seedTotp, verify, wrongCode } from "./routesHarness.mjs";
 
 afterEach(disposeAll);
@@ -770,5 +771,62 @@ describe("a session store without recordSecondFactor", () => {
 	it("is not said for a store that records a step-up", async () => {
 		const { logger } = await boot();
 		expect(events(logger, "warn")).not.toContain("mfa_step_up_unsupported");
+	});
+});
+
+// ---------------------------------------------------------------------------
+// Recent MFA's window
+// ---------------------------------------------------------------------------
+
+describe("recent MFA's window", () => {
+	/**
+	 * What admission hands the requirement about alice's password session, signed in two hours ago,
+	 * whose second factor was verified `minutes` ago, for an action that adds a way into the account.
+	 */
+	const credentialChange = (minutes: number) => {
+		const session: UserSession = {
+			sid: "sid-1",
+			sub: ALICE.id,
+			authTime: new Date(Date.now() - 2 * 3_600_000),
+			createdAt: new Date(Date.now() - 2 * 3_600_000),
+			expiresAt: new Date(Date.now() + 3_600_000),
+			claims: {},
+			amr: ["pwd", "otp", "mfa"],
+			authentication: {
+				primary: "pwd",
+				federation: undefined,
+				upstreamAmr: undefined,
+				mfaAt: new Date(Date.now() - minutes * 60_000),
+			},
+		};
+		return {
+			session: {
+				sid: session.sid,
+				sub: session.sub,
+				authTime: session.authTime,
+				expiresAt: session.expiresAt,
+			},
+			authentication: requirementSession(session),
+			carrier: "cookie" as const,
+			subject: session.sub,
+			action: { name: "test.change", grade: "credential_change" as const },
+			asks: undefined,
+			now: new Date(),
+		};
+	};
+
+	it("is the one mfa.manage.maxAgeSeconds sets: a second factor half an hour old is recent under an hour's window, and not under five minutes", async () => {
+		const factorStore = createMemoryMfaFactorStore();
+		await factorStore.create(factorRecord(ALICE.id));
+		const admitted = async (maxAgeSeconds: number) => {
+			// configFor builds the section with mfaConfigForTests, these options laid over it.
+			const { handle } = await boot({
+				config: configFor("optional", { manage: { maxAgeSeconds } }),
+				factorStore,
+			});
+			return handle.components.sessionRequirementResolver?.get("mfa")?.admit(credentialChange(30));
+		};
+		expect(await admitted(3_600)).toEqual({ outcome: "met" });
+		expect(await admitted(300)).toEqual({ outcome: "step_up", whenStillUnmet: "reauthenticate" });
 	});
 });

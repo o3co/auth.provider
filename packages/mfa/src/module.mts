@@ -378,6 +378,7 @@ export function mfaModule(options: MfaModuleOptions = {}): Module {
 						}),
 						stepUpPage,
 						stepUpRecordable,
+						recentMfaMaxAgeSeconds: settings.manage.maxAgeSeconds,
 						logger,
 					});
 					bootStates.set(deps.mfaFactorResolver, {

@@ -518,6 +518,11 @@ const VOCABULARY: readonly VocabularyRow[] = [
 		home: "packages/core/src/security/controlCharacters.mts",
 		definition: /(?:function|const)\s+hasControlCharacter\b/,
 	},
+	{
+		concept: "recent MFA — the credential_change grade's rule (the MFA ADR's D16)",
+		home: "packages/mfa/src/requirement.mts",
+		definition: /(?:function|const)\s+isRecentMfa\b/,
+	},
 	// Declared before their homes define them: each names the build step of
 	// the MFA ADR that builds it.
 	{
@@ -537,12 +542,6 @@ const VOCABULARY: readonly VocabularyRow[] = [
 		home: "packages/mfa/src/codes.mts",
 		definition: /(?:function|const)\s+formatLongCode\b/,
 		declared: "the MFA ADR's build-order step 9",
-	},
-	{
-		concept: "recent MFA — the credential_change grade's rule (the MFA ADR's D16)",
-		home: "packages/mfa/src/requirement.mts",
-		definition: /(?:function|const)\s+isRecentMfa\b/,
-		declared: "a convention pull request before the MFA ADR's build-order steps 12 and 14",
 	},
 ];
 
@@ -886,7 +885,7 @@ const SESSION_RECORD_READS_ALLOWED: ReadonlyArray<AllowedSessionRecordRead> = [
 		file: "packages/mfa/src/requirement.mts",
 		read: "authentication?.authentication",
 		count: 2,
-		why: "that reading's primary and mfaAt, which the baseline is decided on (the MFA ADR's D13, D16)",
+		why: "that reading's primary and mfaAt, which the baseline and recent MFA are decided on (the MFA ADR's D13, D16)",
 	},
 	{
 		file: "packages/mfa/src/requirement.mts",
