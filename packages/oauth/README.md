@@ -1,6 +1,6 @@
 # @o3co/auth-provider-oauth
 
-Last updated: 2026-09-30
+Last updated: 2026-10-01
 
 The OAuth 2.0 / OpenID Connect authorization-server endpoints of [auth.provider](../../README.md): the HTTP surface under `/oauth`, the built-in grant types, client authentication, and the logout cascade.
 
@@ -169,7 +169,7 @@ Each directory under `src/` has one kind of responsibility; what a single file d
 | Directory | Responsibility |
 |---|---|
 | `src/` (root) | Assembly: `oauthModule`, `oauthAuthorizationModule` and `oauthSessionModule` (the fourth, `subjectRevocationServiceModule`, is in `logout/` beside the cascade it wires), `createOAuthRouter` (which composes every route below), option resolution, a re-export of core's access-token header parser, and the one answer every route gives a token it could not verify because a dependency was down (`verificationUnavailable.mts`). |
-| [`routes/`](./src/routes) | One router or handler per endpoint family — authorize, consent, logout, federation token, revoke, userinfo. Routes may use `grants/`, `logout/`, `middleware/` and `clients/`; none of those imports a route. `routes/authorize.mts` also reads one grant helper, the per-client PKCE method rules, because `/authorize` validates PKCE the way `/token` does. The RFC 8707 `resource` rules both read are core's ([`grants/resourceIndicator.mts`](../core/src/grants/resourceIndicator.mts)), shared with the WebAuthn grant. |
+| [`routes/`](./src/routes) | One router or handler per endpoint family — authorize, consent, logout, federation token, revoke, userinfo. Routes may use `grants/`, `logout/`, `middleware/` and `clients/`; none of those imports a route. `routes/authorizeRequest.mts` also reads one grant helper, the per-client PKCE method rules, because `/authorize` validates PKCE the way `/token` does. The RFC 8707 `resource` rules both read are core's ([`grants/resourceIndicator.mts`](../core/src/grants/resourceIndicator.mts)), shared with the WebAuthn grant. |
 | [`grants/`](./src/grants) | The grant handlers: pure request-to-token decisions over core's grant contract, with no HTTP. |
 | [`middleware/`](./src/middleware) | Client authentication, reused by sibling packages. |
 | [`logout/`](./src/logout) | The ordered session cascade (`cascadeLogout`), the outbound back-channel POSTs to relying parties, the front-channel page, and the module that wires the subject revocation service. |
