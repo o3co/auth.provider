@@ -375,6 +375,9 @@ describe("applyContributions — step 2: a grant is a handler", () => {
 		["undefined", undefined],
 		["null", null],
 		["a string", "handler"],
+		["an array", []],
+		["an object with no handle", {}],
+		["an object whose handle is not a function", { handle: "handle" }],
 	])(
 		"refuses a grants factory that answers %s, naming the grant, and registers nothing",
 		async (_label, answer) => {
