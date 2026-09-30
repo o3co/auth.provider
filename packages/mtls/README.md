@@ -1,6 +1,6 @@
 # @o3co/auth-provider-mtls
 
-Last updated: 2026-09-29
+Last updated: 2026-09-30
 
 mTLS ([RFC 8705](https://www.rfc-editor.org/rfc/rfc8705)) sender-constrained tokens for [`auth.provider`](../../README.md): a token issued to a client that presented a certificate is bound to that certificate, and is refused from anyone presenting another.
 
@@ -23,7 +23,7 @@ mTLS ([RFC 8705](https://www.rfc-editor.org/rfc/rfc8705)) sender-constrained tok
 - client authentication by certificate (RFC 8705 §2) — the token endpoint does not accept a certificate as a client credential; see [Discovery metadata](#discovery-metadata);
 - the TLS listener and the proxy: terminating TLS with `requestCert`, and a proxy that strips inbound certificate headers, are the deployment's (see [Trusted-Proxy Security Guidance](#trusted-proxy-security-guidance)).
 
-**Why a separate package.** Sender-constraint mechanisms are plug-ins to one core slot, not part of core: a deployment chooses mTLS by installing it. This one also carries X.509 path validation on `pkijs` / `asn1js` and a component that fetches URLs named inside certificates; a deployment without mTLS installs neither. It is off by default even when installed (`oauth.mtls.enabled = false`).
+**Why a separate package.** Sender-constraint mechanisms are plug-ins to one core slot, not part of core: a deployment chooses mTLS by installing it. This one also carries X.509 path validation on `pkijs` / `asn1js` and a component that fetches URLs named inside certificates; a deployment without mTLS installs neither. It is off by default even when installed (`mtls.enabled = false`).
 
 ## Install
 
@@ -56,7 +56,7 @@ await createApp({
 ```hocon
 # application.conf — opt in to mTLS at the AS.
 # The AS terminates TLS itself: the certificate comes from the handshake.
-oauth.mtls {
+mtls {
   enabled = true
   mode = "self-signed"                           # or "pki" (see PKI Mode Scope)
   # source defaults to "tls-layer" — nothing else to set.
@@ -67,15 +67,24 @@ Behind a TLS-terminating reverse proxy, the certificate arrives in a header
 instead, and the proxy must be named explicitly:
 
 ```hocon
-oauth.mtls {
+mtls {
   enabled = true
   source = "header"
-  cert-header = "x-forwarded-client-cert"
-  cert-header-dialect = "envoy"                  # or "plain-pem"
-  trusted-proxies = ["loopback"]                 # REQUIRED for source = "header"
+  certHeader = "x-forwarded-client-cert"
+  certHeaderDialect = "envoy"                  # or "plain-pem"
+  trustedProxies = ["loopback"]                 # REQUIRED for source = "header"
   mode = "self-signed"
 }
 ```
+
+`mtls` is the module's own section. Its defaults are in the package's
+[`config/reference.conf`](config/reference.conf) (exported as
+`@o3co/auth-provider-mtls/reference.conf`), which `mtlsModule` declares as its
+section's reference, so a composition root that layers what its modules
+declare picks them up. A key the section does not declare refuses boot, and
+no environment variable binds one. The section's old path, `oauth.mtls`,
+refuses boot (`config-path-relocated`) naming each key's new path
+(`oauth.mtls.cert-header` → `mtls.certHeader`).
 
 `oauth.tokenBinding.dispatch-policy` is shared with `dpopModule`:
 
@@ -105,11 +114,11 @@ A refusal is an `MtlsError` (core's `TokenBindingRefusal`): a `reason` from `Mtl
 | `source` | Where the cert comes from | When to use |
 | --- | --- | --- |
 | `"tls-layer"` (default) | `req.socket.getPeerCertificate()` — the live TLS handshake. Requires the auth provider's listener to be TLS-terminated with `requestCert = true`. | The auth provider terminates TLS itself. **This is the RFC 8705 §3 shape**: the certificate is proven by the handshake rather than asserted by a header, so there is nothing to forge. |
-| `"header"` | A forwarded-cert header set by a trusted reverse proxy (Envoy, nginx). Pair with `cert-header`, `cert-header-dialect`, and a **required** `trusted-proxies` allowlist. | The auth provider sits behind a TLS-terminating proxy. Common at scale, and safe only to the extent the proxy hop is. |
+| `"header"` | A forwarded-cert header set by a trusted reverse proxy (Envoy, nginx). Pair with `certHeader`, `certHeaderDialect`, and a **required** `trustedProxies` allowlist. | The auth provider sits behind a TLS-terminating proxy. Common at scale, and safe only to the extent the proxy hop is. |
 
 ## Discovery metadata
 
-When `oauth.mtls.enabled = true`, this module contributes `tls_client_certificate_bound_access_tokens: true` (RFC 8705 §3.3) to `/.well-known/openid-configuration`. While disabled it contributes nothing, and the RFC already reads an omitted flag as `false`.
+When `mtls.enabled = true`, this module contributes `tls_client_certificate_bound_access_tokens: true` (RFC 8705 §3.3) to `/.well-known/openid-configuration`. While disabled it contributes nothing, and the RFC already reads an omitted flag as `false`.
 
 The flag does **not** vary with `source`: both source modes above produce the same `cnf["x5t#S256"]` on the issued token, and §3.3 describes the token, not the transport the certificate arrived over.
 
@@ -119,14 +128,14 @@ This is the only field contributed, on purpose. This package implements RFC 8705
 
 RFC 8705 §3 accepts a client certificate from the TLS layer, or from an **authenticated** trusted proxy. `source = "header"` is the second shape, and the word doing the work is *authenticated*.
 
-### `trusted-proxies` — required, and what it actually proves
+### `trustedProxies` — required, and what it actually proves
 
-`source = "header"` requires a non-empty `oauth.mtls.trusted-proxies`; boot fails otherwise. A forwarded certificate header presented by any other peer is rejected with `400 invalid_certificate` (audit reason `untrusted_proxy`), and the observed peer address is logged as `mtls_untrusted_proxy_rejected` so a missing allowlist entry is distinguishable from an attack.
+`source = "header"` requires a non-empty `mtls.trustedProxies`; boot fails otherwise. A forwarded certificate header presented by any other peer is rejected with `400 invalid_certificate` (audit reason `untrusted_proxy`), and the observed peer address is logged as `mtls_untrusted_proxy_rejected` so a missing allowlist entry is distinguishable from an attack.
 
 ```hocon
-oauth.mtls.trusted-proxies = ["loopback"]        # sidecar proxy on the same host / pod
-oauth.mtls.trusted-proxies = ["10.0.4.7", "10.0.4.8"]
-oauth.mtls.trusted-proxies = ["10.0.0.0/8"]      # a pod network, where the address changes per restart
+mtls.trustedProxies = ["loopback"]        # sidecar proxy on the same host / pod
+mtls.trustedProxies = ["10.0.4.7", "10.0.4.8"]
+mtls.trustedProxies = ["10.0.0.0/8"]      # a pod network, where the address changes per restart
 ```
 
 Entries use the shared trusted-proxy vocabulary owned by `@o3co/auth-provider-core` — which is also Express's own `trust proxy` vocabulary ([#292](https://github.com/o3co/auth.provider/issues/292)):
@@ -153,7 +162,7 @@ An address allowlist is a network-level control, not a cryptographic one. It is 
 
 ### Sample reverse-proxy snippets
 
-**Envoy** — native XFCC dialect (this IS the format `cert-header-dialect = "envoy"` parses):
+**Envoy** — native XFCC dialect (this IS the format `certHeaderDialect = "envoy"` parses):
 
 ```yaml
 http_filters:
@@ -177,11 +186,11 @@ location / {
 }
 ```
 
-`$ssl_client_escaped_cert` is the URL-encoded PEM of the validated client leaf cert. The `cert-header-dialect = "plain-pem"` parser auto-decodes the percent-encoding.
+`$ssl_client_escaped_cert` is the URL-encoded PEM of the validated client leaf cert. The `certHeaderDialect = "plain-pem"` parser auto-decodes the percent-encoding.
 
-Either way, add the address nginx or Envoy reaches the auth provider from to `oauth.mtls.trusted-proxies` — `"loopback"` when they share a host or pod, the pod / instance address otherwise.
+Either way, add the address nginx or Envoy reaches the auth provider from to `mtls.trustedProxies` — `"loopback"` when they share a host or pod, the pod / instance address otherwise.
 
-> **Note:** nginx does not emit Envoy-format XFCC. The `cert-header-dialect` enumeration is `"envoy" | "plain-pem"` — `"plain-pem"` is what nginx + similar minimal proxies should use; there is no nginx-specific XFCC dialect.
+> **Note:** nginx does not emit Envoy-format XFCC. The `certHeaderDialect` enumeration is `"envoy" | "plain-pem"` — `"plain-pem"` is what nginx + similar minimal proxies should use; there is no nginx-specific XFCC dialect.
 >
 > To strip any inbound header before nginx injects its own, add `proxy_set_header X-Forwarded-Client-Cert "";` to a higher-priority location, or use a sanitization filter on the upstream.
 
@@ -219,15 +228,15 @@ Everything in this list is checked by `mode = "full-pki"`, except where noted.
 
 ### Trusted-CA entries (literal PEM or `file:` path)
 
-Each entry in `trusted-cas` is either:
+Each entry in `trustedCas` is either:
 
 - **Literal PEM** — paste the `-----BEGIN CERTIFICATE-----` block directly into HOCON via triple-quoted string.
 - **`file:<path>`** — the file at `<path>` is read synchronously at boot. Use absolute paths or rely on HOCON env-substitution for portability.
 
 ```hocon
-oauth.mtls {
+mtls {
   mode = "pki"
-  trusted-cas = [
+  trustedCas = [
     "file:/etc/auth-provider/ca/private-root.pem",
     """-----BEGIN CERTIFICATE-----
     MIID...
@@ -248,7 +257,7 @@ Deployments requiring regulatory-grade path validation should use `mode = "full-
 
 > "An attacker could try to impersonate a client using a certificate with the same subject … the authorization server SHOULD only accept … a limited number of CAs."
 
-The `trusted-cas` config is a manual allowlist — operators are responsible for sizing it narrowly. Typically **a single private CA** for M2M deployments. A long list of public/commercial CAs would expose the AS to cross-CA cert-forgery attacks (any compromised CA in the list can mint a colliding-subject cert).
+The `trustedCas` config is a manual allowlist — operators are responsible for sizing it narrowly. Typically **a single private CA** for M2M deployments. A long list of public/commercial CAs would expose the AS to cross-CA cert-forgery attacks (any compromised CA in the list can mint a colliding-subject cert).
 
 ### RFC 8705 §7.5 — established X.509 library
 
@@ -260,14 +269,14 @@ In `mode = "pki"` the parsing layer satisfies this SHOULD (everything routes thr
 
 ## `mode = "full-pki"`
 
-RFC 5280 §6 path validation with revocation ([#341](https://github.com/o3co/auth.provider/issues/341)). Requires a non-empty `trusted-cas` and an explicit `full-pki.revocation` block. Works with either `source`; under `tls-layer` the chain is read from the TLS session via `getPeerCertificate(true)`.
+RFC 5280 §6 path validation with revocation ([#341](https://github.com/o3co/auth.provider/issues/341)). Requires a non-empty `trustedCas` and an explicit `fullPki.revocation` block. Works with either `source`; under `tls-layer` the chain is read from the TLS session via `getPeerCertificate(true)`.
 
 ### What the library does, and what this package still owns
 
 `pkijs` performs path building, per-hop signature verification, validity windows, `basicConstraints`, `keyUsage` (`keyCertSign` / `cRLSign`) on CAs, name constraints, and the certificate-policy tree. Four things it does **not** do are implemented here, and it is worth being precise about why:
 
 1. **`pathLenConstraint`** (§4.2.1.9) — not implemented by the engine at all. A CA that published `pathlen:0` precisely to stop sub-CAs being minted under it would otherwise have said so for nothing.
-2. **Algorithm policy** (§6.1.4) — left to local policy by the RFC, which in practice means whatever the OpenSSL build accepts. Applied here to **every** certificate on the path, anchors included, and to the **revocation material** about them — a CRL's signature, an OCSP response's signature, and a delegated OCSP responder's certificate (signature algorithm and RSA key size alike) — because pkijs verifies a SHA-1 signature on those as readily as on a certificate, and a SHA-1-signed "not revoked" is no better evidence than a SHA-1-signed certificate ([#470](https://github.com/o3co/auth.provider/issues/470)). A chain is only as strong as its weakest hop. SHA-1 has no name in the config vocabulary, so no configuration can permit it anywhere; revocation material outside the policy is reported as unavailable under `algorithm_not_permitted`, and `on-unavailable` applies.
+2. **Algorithm policy** (§6.1.4) — left to local policy by the RFC, which in practice means whatever the OpenSSL build accepts. Applied here to **every** certificate on the path, anchors included, and to the **revocation material** about them — a CRL's signature, an OCSP response's signature, and a delegated OCSP responder's certificate (signature algorithm and RSA key size alike) — because pkijs verifies a SHA-1 signature on those as readily as on a certificate, and a SHA-1-signed "not revoked" is no better evidence than a SHA-1-signed certificate ([#470](https://github.com/o3co/auth.provider/issues/470)). A chain is only as strong as its weakest hop. SHA-1 has no name in the config vocabulary, so no configuration can permit it anywhere; revocation material outside the policy is reported as unavailable under `algorithm_not_permitted`, and `onUnavailable` applies.
 3. **Critical extension processing** (§6.1.2) — the engine applies this rule only to the CA certificates in the path. **The leaf is skipped.** So a client certificate carrying a critical extension nobody understands would validate cleanly. This package applies the rule uniformly to the whole path.
 4. **Revocation availability.** The engine skips its revocation block entirely when handed no CRLs, and returns *valid*. "The CRL server is down" and "this certificate is not revoked" therefore reach it as the same input. That is the single most dangerous default in this area, and it is why revocation here is a two-pass affair with the availability decision made **before** the engine is consulted.
 
@@ -275,37 +284,37 @@ The leaf-certificate profile (`CA:FALSE`, and `clientAuth` when `extendedKeyUsag
 
 ### Revocation has no defaults, on purpose
 
-`mode = "full-pki"` **fails boot** unless `full-pki.revocation.mode` and `.on-unavailable` are both set.
+`mode = "full-pki"` **fails boot** unless `fullPki.revocation.mode` and `.onUnavailable` are both set.
 
 "The CRL endpoint is unreachable" and "the certificate is not revoked" are different facts. Whether an outage should block logins or be waved through depends on whether a revoked certificate continuing to work for a while is worse than an availability incident — which only the operator knows. A library that picks silently picks wrong for half its deployments, invisibly, and only during the outage that makes it matter. So it is stated, or boot fails:
 
 ```hocon
-oauth.mtls {
+mtls {
   mode = "full-pki"
-  trusted-cas = ["file:/etc/auth-provider/ca/private-root.pem"]
-  full-pki.revocation {
+  trustedCas = ["file:/etc/auth-provider/ca/private-root.pem"]
+  fullPki.revocation {
     mode = "crl"              # "ocsp", "both", or "disabled" — the last an explicit acceptance of the gap
-    on-unavailable = "reject" # a source that cannot answer is a 503; or "allow", logged at warn on every use
-    allowed-hosts = ["crl.example.com"]   # CRL distribution points and OCSP responders alike
-    # ocsp-require-nonce = true           # refuse responses that do not echo the request nonce
+    onUnavailable = "reject" # a source that cannot answer is a 503; or "allow", logged at warn on every use
+    allowedHosts = ["crl.example.com"]   # CRL distribution points and OCSP responders alike
+    # ocspRequireNonce = true           # refuse responses that do not echo the request nonce
   }
 }
 ```
 
-**OCSP (RFC 6960) is responder-fetch only** ([#431](https://github.com/o3co/auth.provider/issues/431)). Stapling is not an option even in principle: `status_request` stapling covers the *server's* certificate, and Node exposes no stapled response for a **client** certificate on the server side. So `mode = "ocsp"` reads the responder URL from each certificate's `authorityInfoAccess` (`id-ad-ocsp`), POSTs a DER `OCSPRequest` for it — a SHA-1 `CertID`, which is the lookup identifier RFC 6960 §4.1.1 responders universally answer and has nothing to do with the signature-algorithm policy, plus a 16-byte nonce (§4.4.1) — and verifies the answer itself rather than handing it to the engine: the response must be `successful`, signed by the issuing CA or by a responder that CA delegated to (`id-kp-OCSPSigning`, §4.2.2.2 — and the responder's own revocation is checked, [#468](https://github.com/o3co/auth.provider/issues/468): a delegated responder whose certificate carries `id-pkix-ocsp-nocheck` is trusted for its lifetime as §4.2.2.2.1 provides; one that lacks it and names a CRL (`cRLDistributionPoints`) is checked against that CRL under `mode = "both"` — listed, its answer is refused as `responder_revoked` and the CRL decides the certificate; CRL unobtainable, `responder_status_unavailable`. A responder certificate naming neither is the CA specifying no method, which §4.2.2.2.1 leaves to local policy, and under `mode = "ocsp"` there is no independent source at all, since a responder cannot be asked about itself: in both cases the answer is taken and `mtls_ocsp_responder_unchecked` is logged once per responder. A CA that wants its responder checked names the CRL on the responder certificate; one that wants it trusted for its lifetime puts `nocheck` on it, carrying the DER `NULL` §4.2.2.2.1 specifies — any other value is a broken or forged certificate and buys no exemption. The check is not a one-off: a cached OCSP answer that came from such a responder is re-checked on every cache hit, so a responder revoked after the answer was cached stops it counting, and a CRL the resolver could only partly use is not "clean" either), carry the same `CertID`, echo the nonce (`ocsp-require-nonce = true` by default; an operator whose CA answers without one per RFC 8954 says so explicitly, and freshness then rests on `thisUpdate` / `nextUpdate` alone), and be current. A `good` answer is cached per certificate until its `nextUpdate` or `cache-ttl-seconds`, whichever is sooner — an answer with no `nextUpdate` for at most ten minutes — and **`unknown` is unavailable, never good**. `mode = "both"` asks the responder first and falls back to the CRL only when OCSP could not answer — could not, not would not. An `unknown` is the one shape where both sources are consulted. A responder that answers `unknown` has answered: RFC 6960 §2.2 says it does not know the certificate, which for a serial the CA never issued is the whole finding — and a CRL cannot list a never-issued serial, so it cannot clear one ([#471](https://github.com/o3co/auth.provider/issues/471)). It is still asked, because it can still **refuse**: a CRL that lists the certificate decides it, and a combined mode must not refuse fewer certificates than either of its parts. A CRL that does not list it has said nothing, so the status stays unavailable with `reason: "unknown"` and `on-unavailable` decides, as under `mode = "ocsp"`. Both properties hold at once: an unknown never becomes good, and a listed certificate is refused. The fallback covers the transport-, freshness- and signature-shaped reasons (`no_responder`, `fetch_failed`, `unparseable`, `responder_error`, `no_matching_response`, `stale`, `not_yet_valid`, `nonce_missing`, `nonce_mismatch`, `bad_signature`, `algorithm_not_permitted`, `unsupported_critical_extension`), each logged as `mtls_revocation_ocsp_fallback` except `no_responder` — once the CRL has answered and the whole path has passed, so the line marks a certificate the mechanism accepted (its whole path passed) on the fallback; the request can still be refused afterwards — by another mechanism's verdict or `strict-mutual-exclusion`, by the grant, or at a protected resource by `no_matching_binding`. When the CRL cannot answer either, there is no fallback line: the one line is the unavailability's (the dispatcher's outage line under `"reject"`, the allowed line under `"allow"`), whose detail names both sources (`ocsp: … ; crl: …`) and whose error is an `AggregateError` of both sources' errors, OCSP's first. A `revoked` from either source refuses, and the status is unavailable only when both are — or when the responder said `unknown`.
+**OCSP (RFC 6960) is responder-fetch only** ([#431](https://github.com/o3co/auth.provider/issues/431)). Stapling is not an option even in principle: `status_request` stapling covers the *server's* certificate, and Node exposes no stapled response for a **client** certificate on the server side. So `mode = "ocsp"` reads the responder URL from each certificate's `authorityInfoAccess` (`id-ad-ocsp`), POSTs a DER `OCSPRequest` for it — a SHA-1 `CertID`, which is the lookup identifier RFC 6960 §4.1.1 responders universally answer and has nothing to do with the signature-algorithm policy, plus a 16-byte nonce (§4.4.1) — and verifies the answer itself rather than handing it to the engine: the response must be `successful`, signed by the issuing CA or by a responder that CA delegated to (`id-kp-OCSPSigning`, §4.2.2.2 — and the responder's own revocation is checked, [#468](https://github.com/o3co/auth.provider/issues/468): a delegated responder whose certificate carries `id-pkix-ocsp-nocheck` is trusted for its lifetime as §4.2.2.2.1 provides; one that lacks it and names a CRL (`cRLDistributionPoints`) is checked against that CRL under `mode = "both"` — listed, its answer is refused as `responder_revoked` and the CRL decides the certificate; CRL unobtainable, `responder_status_unavailable`. A responder certificate naming neither is the CA specifying no method, which §4.2.2.2.1 leaves to local policy, and under `mode = "ocsp"` there is no independent source at all, since a responder cannot be asked about itself: in both cases the answer is taken and `mtls_ocsp_responder_unchecked` is logged once per responder. A CA that wants its responder checked names the CRL on the responder certificate; one that wants it trusted for its lifetime puts `nocheck` on it, carrying the DER `NULL` §4.2.2.2.1 specifies — any other value is a broken or forged certificate and buys no exemption. The check is not a one-off: a cached OCSP answer that came from such a responder is re-checked on every cache hit, so a responder revoked after the answer was cached stops it counting, and a CRL the resolver could only partly use is not "clean" either), carry the same `CertID`, echo the nonce (`ocspRequireNonce = true` by default; an operator whose CA answers without one per RFC 8954 says so explicitly, and freshness then rests on `thisUpdate` / `nextUpdate` alone), and be current. A `good` answer is cached per certificate until its `nextUpdate` or `cacheTtlSeconds`, whichever is sooner — an answer with no `nextUpdate` for at most ten minutes — and **`unknown` is unavailable, never good**. `mode = "both"` asks the responder first and falls back to the CRL only when OCSP could not answer — could not, not would not. An `unknown` is the one shape where both sources are consulted. A responder that answers `unknown` has answered: RFC 6960 §2.2 says it does not know the certificate, which for a serial the CA never issued is the whole finding — and a CRL cannot list a never-issued serial, so it cannot clear one ([#471](https://github.com/o3co/auth.provider/issues/471)). It is still asked, because it can still **refuse**: a CRL that lists the certificate decides it, and a combined mode must not refuse fewer certificates than either of its parts. A CRL that does not list it has said nothing, so the status stays unavailable with `reason: "unknown"` and `onUnavailable` decides, as under `mode = "ocsp"`. Both properties hold at once: an unknown never becomes good, and a listed certificate is refused. The fallback covers the transport-, freshness- and signature-shaped reasons (`no_responder`, `fetch_failed`, `unparseable`, `responder_error`, `no_matching_response`, `stale`, `not_yet_valid`, `nonce_missing`, `nonce_mismatch`, `bad_signature`, `algorithm_not_permitted`, `unsupported_critical_extension`), each logged as `mtls_revocation_ocsp_fallback` except `no_responder` — once the CRL has answered and the whole path has passed, so the line marks a certificate the mechanism accepted (its whole path passed) on the fallback; the request can still be refused afterwards — by another mechanism's verdict or `strict-mutual-exclusion`, by the grant, or at a protected resource by `no_matching_binding`. When the CRL cannot answer either, there is no fallback line: the one line is the unavailability's (the dispatcher's outage line under `"reject"`, the allowed line under `"allow"`), whose detail names both sources (`ocsp: … ; crl: …`) and whose error is an `AggregateError` of both sources' errors, OCSP's first. A `revoked` from either source refuses, and the status is unavailable only when both are — or when the responder said `unknown`.
 
 **A client certificate that demands stapling is refused.** RFC 7633's `tlsfeature` extension with `status_request` (OCSP must-staple) states a requirement this process cannot meet for a client certificate, and a requirement that cannot be met is a refusal, not "unstapled" — the responder is not even asked.
 
-A certificate is treated as *unavailable* — and therefore subject to `on-unavailable` — when it names no distribution point (or, under `"ocsp"`, no responder), when the CRL or OCSP response cannot be fetched or parsed, when the responder answers anything but `successful` or reports `unknown`, when the response's signature, `CertID` or nonce does not check out, when the CRL has expired, when it carries no `nextUpdate` at all (without one there is no way to distinguish a current CRL from one captured before a revocation and replayed), when its signature does not verify against the issuing CA, when the CRL, the OCSP response or a delegated responder's certificate is signed with an algorithm outside `signature-algorithms` — or the responder's RSA key is below `min-rsa-key-bits` — (`algorithm_not_permitted`, the same policy the path is held to, [#470](https://github.com/o3co/auth.provider/issues/470)), or when it carries a critical extension this validator does not process (RFC 5280 §5.2 forbids using such a CRL, and pkijs would otherwise have reported it as a bad signature — [#447](https://github.com/o3co/auth.provider/issues/447)).
+A certificate is treated as *unavailable* — and therefore subject to `onUnavailable` — when it names no distribution point (or, under `"ocsp"`, no responder), when the CRL or OCSP response cannot be fetched or parsed, when the responder answers anything but `successful` or reports `unknown`, when the response's signature, `CertID` or nonce does not check out, when the CRL has expired, when it carries no `nextUpdate` at all (without one there is no way to distinguish a current CRL from one captured before a revocation and replayed), when its signature does not verify against the issuing CA, when the CRL, the OCSP response or a delegated responder's certificate is signed with an algorithm outside `signatureAlgorithms` — or the responder's RSA key is below `minRsaKeyBits` — (`algorithm_not_permitted`, the same policy the path is held to, [#470](https://github.com/o3co/auth.provider/issues/470)), or when it carries a critical extension this validator does not process (RFC 5280 §5.2 forbids using such a CRL, and pkijs would otherwise have reported it as a bad signature — [#447](https://github.com/o3co/auth.provider/issues/447)).
 
 **What `"reject"` answers.** An unavailable status is one of two things, and `"reject"` answers them differently:
 
-- **An outage of the source** — a CRL distribution point or an OCSP responder that did not answer usefully: unreachable, timed out, an HTTP error, a redirect, an answer too large or of the wrong type (`fetch_failed` for any of those), an answer that is not DER (`unparseable`), a responder that said it cannot answer (`responder_error`), a list or answer past its `nextUpdate` (`stale`), or a delegated responder whose own status could not be read for one of those reasons (`responder_status_unavailable`). The source did not deliver a usable answer — a fault of the source or of this server's configuration, never a verdict on the certificate. Some clear on retry: a refused connection, a timeout, a 5xx, a truncated answer, `tryLater` or `internalError`, a list the CA has not yet republished. Some need an operator: a 404 or 410 (the CA moved or dropped its list), an answer larger than `max-response-bytes`, a redirect (never followed — point the certificate or the CA at the final URL), an answer of the wrong media type (a proxy or captive portal in the path), and a responder answering `malformedRequest`, `sigRequired` or `unauthorized` (it refuses what this server sends). The client can cause none of them, so each is the server's: the refusal is `revocation_unavailable`, answered **`503 temporarily_unavailable`** (no challenge at a protected resource), and logged once, at error, by core's dispatcher — `token_binding_unavailable` or `protected_resource_binding_unavailable`, `reason: "revocation_unavailable"`, `err` the projection of an `MtlsRevocationUnavailableError` for the whole path: a short `detail` naming every certificate whose status could not be determined (`revocation status could not be determined for CN=client; CN=Intermediate`), and one member per source that could not be used, for every one of them — an `MtlsRevocationSourceError` whose `detail` is `<crl|ocsp> <url>: <reason> — <detail>; for <subject>` and whose `cause` is the library's error. One member per source, naming its certificate last, so the cap a projection puts on each message (256 characters) cannot cut a source's URL off behind a long subject or another source. The members are in path order — leaf first, each certificate's OCSP responders before its CRL distribution points — and a line keeps the first five (`aggregateErrors`) and counts the rest (`aggregateErrorsOmitted`), so past five it is the last certificate's last points that are counted rather than shown: the next sources to check once the first five answer. Neither `mtls_revocation_unavailable_rejected` nor `mtls_full_pki_validation_failed` is written for it. Under `"both"` it is an outage only when every source the certificate names failed as one; a certificate with several distribution points only when every point it could not use was one. Under `"both"` the fallback is logged (`mtls_revocation_ocsp_fallback`) only for a certificate the mechanism accepted on it (its whole path passed) — the CRL's answer settled the certificate (determined from every point it names, or a partial answer under `"allow"`) and every other certificate on the path passed; the request can still be refused afterwards. A path refused for another certificate's outage has the failed responder among that outage's members instead, and a certificate the CRL lists is a verdict, with the verdict's lines alone. Under `"reject"` a partial answer is folded together with the OCSP failure, and the one line names both.
-- **The certificate's own shape** — no distribution point or responder, an unsupported one, a URL `allowed-hosts` or the fetch guard will not fetch, a CRL of a shape or algorithm this validator does not accept, a signature that does not verify, a responder's `unknown` — a retry does not change it: a verdict, `400 invalid_certificate`, with `mtls_revocation_unavailable_rejected` at warn as before.
+- **An outage of the source** — a CRL distribution point or an OCSP responder that did not answer usefully: unreachable, timed out, an HTTP error, a redirect, an answer too large or of the wrong type (`fetch_failed` for any of those), an answer that is not DER (`unparseable`), a responder that said it cannot answer (`responder_error`), a list or answer past its `nextUpdate` (`stale`), or a delegated responder whose own status could not be read for one of those reasons (`responder_status_unavailable`). The source did not deliver a usable answer — a fault of the source or of this server's configuration, never a verdict on the certificate. Some clear on retry: a refused connection, a timeout, a 5xx, a truncated answer, `tryLater` or `internalError`, a list the CA has not yet republished. Some need an operator: a 404 or 410 (the CA moved or dropped its list), an answer larger than `maxResponseBytes`, a redirect (never followed — point the certificate or the CA at the final URL), an answer of the wrong media type (a proxy or captive portal in the path), and a responder answering `malformedRequest`, `sigRequired` or `unauthorized` (it refuses what this server sends). The client can cause none of them, so each is the server's: the refusal is `revocation_unavailable`, answered **`503 temporarily_unavailable`** (no challenge at a protected resource), and logged once, at error, by core's dispatcher — `token_binding_unavailable` or `protected_resource_binding_unavailable`, `reason: "revocation_unavailable"`, `err` the projection of an `MtlsRevocationUnavailableError` for the whole path: a short `detail` naming every certificate whose status could not be determined (`revocation status could not be determined for CN=client; CN=Intermediate`), and one member per source that could not be used, for every one of them — an `MtlsRevocationSourceError` whose `detail` is `<crl|ocsp> <url>: <reason> — <detail>; for <subject>` and whose `cause` is the library's error. One member per source, naming its certificate last, so the cap a projection puts on each message (256 characters) cannot cut a source's URL off behind a long subject or another source. The members are in path order — leaf first, each certificate's OCSP responders before its CRL distribution points — and a line keeps the first five (`aggregateErrors`) and counts the rest (`aggregateErrorsOmitted`), so past five it is the last certificate's last points that are counted rather than shown: the next sources to check once the first five answer. Neither `mtls_revocation_unavailable_rejected` nor `mtls_full_pki_validation_failed` is written for it. Under `"both"` it is an outage only when every source the certificate names failed as one; a certificate with several distribution points only when every point it could not use was one. Under `"both"` the fallback is logged (`mtls_revocation_ocsp_fallback`) only for a certificate the mechanism accepted on it (its whole path passed) — the CRL's answer settled the certificate (determined from every point it names, or a partial answer under `"allow"`) and every other certificate on the path passed; the request can still be refused afterwards. A path refused for another certificate's outage has the failed responder among that outage's members instead, and a certificate the CRL lists is a verdict, with the verdict's lines alone. Under `"reject"` a partial answer is folded together with the OCSP failure, and the one line names both.
+- **The certificate's own shape** — no distribution point or responder, an unsupported one, a URL `allowedHosts` or the fetch guard will not fetch, a CRL of a shape or algorithm this validator does not accept, a signature that does not verify, a responder's `unknown` — a retry does not change it: a verdict, `400 invalid_certificate`, with `mtls_revocation_unavailable_rejected` at warn as before.
 
 A verdict anywhere on the path wins: a certificate that is revoked, or whose status is unavailable for its own reason, is refused as such even when another certificate's source is down. Under `"allow"` every unavailable status is waved through and logged once the whole path has passed: each `mtls_revocation_unavailable_allowed` or `mtls_revocation_partially_unavailable_allowed` line is a certificate the mechanism accepted (its whole path passed) on the soft-fail, and the request can still be refused afterwards — by another mechanism's verdict or `strict-mutual-exclusion`, by the grant, or at a protected resource by `no_matching_binding`. A path refused for another certificate (an intermediate that is revoked) accepted nothing on the soft-fail: it has the verdict's lines alone, and no allowed line for the certificate that would have been admitted.
 
-**Partitioned, indirect and delta CRLs are not supported.** RFC 5280 lets a CA split its revocation information — by reason code across several distribution points (`reasons` on the point, `onlySomeReasons` on the CRL), by certificate type or distribution point (`issuingDistributionPoint`), into a base CRL plus deltas (`deltaCRLIndicator`), or by delegating publication to another issuer (`cRLIssuer`, `indirectCRL`). pkijs accepts every one of those extensions as well-known and then ignores them, which would read a CRL scoped to user certificates as the complete list for an intermediate, or a delta as the complete list for anyone. None of them is implemented here. Each is *recognised* and reported as unavailable under its own reason — `unsupported_distribution_point` for a point carrying `reasons` or `cRLIssuer` (nothing is fetched from that point; the certificate's other points are still consulted, see below), `unsupported_crl_scope` for a delta or a CRL whose `issuingDistributionPoint` states any scope — and `on-unavailable` then applies: `"reject"` refuses the certificate, `"allow"` accepts it with the `mtls_revocation_unavailable_allowed` warn line (or `mtls_revocation_partially_unavailable_allowed` when another of its points did produce a CRL). What never happens is such a CRL being read as authoritative. A base CRL that merely points at a delta (`freshestCRL`) is used as the base it is; the delta is not fetched, so a revocation published only in a delta is not seen until the next base CRL ([#446](https://github.com/o3co/auth.provider/issues/446)).
+**Partitioned, indirect and delta CRLs are not supported.** RFC 5280 lets a CA split its revocation information — by reason code across several distribution points (`reasons` on the point, `onlySomeReasons` on the CRL), by certificate type or distribution point (`issuingDistributionPoint`), into a base CRL plus deltas (`deltaCRLIndicator`), or by delegating publication to another issuer (`cRLIssuer`, `indirectCRL`). pkijs accepts every one of those extensions as well-known and then ignores them, which would read a CRL scoped to user certificates as the complete list for an intermediate, or a delta as the complete list for anyone. None of them is implemented here. Each is *recognised* and reported as unavailable under its own reason — `unsupported_distribution_point` for a point carrying `reasons` or `cRLIssuer` (nothing is fetched from that point; the certificate's other points are still consulted, see below), `unsupported_crl_scope` for a delta or a CRL whose `issuingDistributionPoint` states any scope — and `onUnavailable` then applies: `"reject"` refuses the certificate, `"allow"` accepts it with the `mtls_revocation_unavailable_allowed` warn line (or `mtls_revocation_partially_unavailable_allowed` when another of its points did produce a CRL). What never happens is such a CRL being read as authoritative. A base CRL that merely points at a delta (`freshestCRL`) is used as the base it is; the delta is not fetched, so a revocation published only in a delta is not seen until the next base CRL ([#446](https://github.com/o3co/auth.provider/issues/446)).
 
 **Several distribution points.** Names *within* one distribution point are alternative ways to obtain the same CRL (RFC 5280 §4.2.1.13) and are tried in order; separate distribution points are not assumed to be. Under `"reject"`, a certificate is refused when *any* of its distribution points yields no usable CRL, even if another did — this validator cannot tell from one fetched CRL that the CA's other points were redundant, and `"reject"` means not guessing. Under `"allow"`, the CRLs that were obtained are checked and the point that was not is logged as `mtls_revocation_partially_unavailable_allowed`, distinct from the line for a certificate that was not checked at all. A point carrying `reasons` or `cRLIssuer` is handled the same way as a point that is down: it is skipped (nothing is fetched from it) and the plain points beside it are still consulted — a point without `reasons` covers every reason code, so the plain point's CRL is a complete answer on its own, and a revocation it lists refuses the certificate under both policies. Only a certificate none of whose points can be used is `unsupported_distribution_point` as a whole ([#469](https://github.com/o3co/auth.provider/issues/469)). Points that name no HTTP(S) URI (an LDAP URI, a directory name) are outside what this validator speaks and are ignored rather than counted as failed, so a directory-backed CA that lists an LDAP point beside an HTTP one is not refused for it.
 
@@ -314,9 +323,9 @@ A verdict anywhere on the path wins: a certificate that is revoked, or whose sta
 A CRL distribution point is a URL chosen by someone else, and retrieving it makes this process issue a request from inside your network — the classic SSRF shape, with `http://169.254.169.254/…` reachable from most cloud workloads. Two layers bound it:
 
 1. **Path validation runs first.** Distribution points are read only from a path that has already been validated to a configured trust anchor, so an arbitrary client certificate cannot cause an outbound request at all.
-2. **`revocation.allowed-hosts`**, which is **required and non-empty** whenever revocation is fetched (`mode = "crl"`, `"ocsp"` or `"both"`); an OCSP responder URL is a destination inside a certificate exactly as a distribution point is. Layer 1 makes the URL come from a CA you trust; this layer means trusting a CA to *issue certificates* is not the same as trusting it to *name destinations inside your network*. It is the same separation `trusted-proxies` draws for forwarded certificate headers.
+2. **`revocation.allowedHosts`**, which is **required and non-empty** whenever revocation is fetched (`mode = "crl"`, `"ocsp"` or `"both"`); an OCSP responder URL is a destination inside a certificate exactly as a distribution point is. Layer 1 makes the URL come from a CA you trust; this layer means trusting a CA to *issue certificates* is not the same as trusting it to *name destinations inside your network*. It is the same separation `trustedProxies` draws for forwarded certificate headers.
 
-On top of those: redirects are never followed (a redirect names a second destination neither layer vetted; the fetch asks for the redirect to be handed back, and a `301`/`302`/`303`/`307`/`308` is refused as `redirect_refused`, `HTTP <status>`), responses are capped by byte count read incrementally rather than by the responder's `Content-Length` claim, fetches time out, credentials in the URL are refused, and only `http`/`https` are spoken. CRLs are cached until `nextUpdate` or `cache-ttl-seconds`, whichever is sooner; a stale CRL is deliberately not cached, so a responder that has stopped publishing cannot pin us to it. A distribution point that could not be used — unreachable, unparseable, stale, serving a CRL of a shape listed above, or serving one signed outside the algorithm policy — is remembered as unavailable for a 30-second window, so an outage costs one probe per window rather than one per request; a CRL whose signature does not verify is the one outcome never remembered in either direction.
+On top of those: redirects are never followed (a redirect names a second destination neither layer vetted; the fetch asks for the redirect to be handed back, and a `301`/`302`/`303`/`307`/`308` is refused as `redirect_refused`, `HTTP <status>`), responses are capped by byte count read incrementally rather than by the responder's `Content-Length` claim, fetches time out, credentials in the URL are refused, and only `http`/`https` are spoken. CRLs are cached until `nextUpdate` or `cacheTtlSeconds`, whichever is sooner; a stale CRL is deliberately not cached, so a responder that has stopped publishing cannot pin us to it. A distribution point that could not be used — unreachable, unparseable, stale, serving a CRL of a shape listed above, or serving one signed outside the algorithm policy — is remembered as unavailable for a 30-second window, so an outage costs one probe per window rather than one per request; a CRL whose signature does not verify is the one outcome never remembered in either direction.
 
 ### What a refusal line carries
 
@@ -330,15 +339,15 @@ Each line above — `mtls_revocation_unavailable_rejected`, `mtls_revocation_una
 
 `mtlsModule` rejects five specific misconfigurations at boot rather than failing silently at runtime:
 
-1. **`source = "header"` with an empty `trusted-proxies`** — the forwarded header would then be the credential, accepted from anyone routable to the process. There is no safe default here: an empty list cannot mean "trust the usual proxies", and trusting none of them at runtime would fail every request with no boot signal. See [#280](https://github.com/o3co/auth.provider/issues/280).
+1. **`source = "header"` with an empty `trustedProxies`** — the forwarded header would then be the credential, accepted from anyone routable to the process. There is no safe default here: an empty list cannot mean "trust the usual proxies", and trusting none of them at runtime would fail every request with no boot signal. See [#280](https://github.com/o3co/auth.provider/issues/280).
 
-2. **`mode = "pki"` with an empty `trusted-cas`** — without trust anchors, chain validation cannot proceed. Failing boot directs the operator straight to the misconfig instead of either silently failing open (no validation) or failing closed on every request (no audit signal).
+2. **`mode = "pki"` with an empty `trustedCas`** — without trust anchors, chain validation cannot proceed. Failing boot directs the operator straight to the misconfig instead of either silently failing open (no validation) or failing closed on every request (no audit signal).
 
-3. **`mode = "pki"` with `source = "tls-layer"`** — the *narrow* PKI mode requires the intermediate chain (e.g., the Envoy XFCC `Chain=` parameter), and reads it from nowhere else. Use `source = "header"` with `cert-header-dialect = "envoy"` and a `trusted-proxies` allowlist, use `mode = "self-signed"` with the `tls-layer` source, or use **`mode = "full-pki"`, which reads the chain from the TLS session** and is not subject to this restriction (#341).
+3. **`mode = "pki"` with `source = "tls-layer"`** — the *narrow* PKI mode requires the intermediate chain (e.g., the Envoy XFCC `Chain=` parameter), and reads it from nowhere else. Use `source = "header"` with `certHeaderDialect = "envoy"` and a `trustedProxies` allowlist, use `mode = "self-signed"` with the `tls-layer` source, or use **`mode = "full-pki"`, which reads the chain from the TLS session** and is not subject to this restriction (#341).
 
-4. **`mode = "full-pki"` without `full-pki.revocation.mode` and `.on-unavailable`** — see "Revocation has no defaults, on purpose" above.
+4. **`mode = "full-pki"` without `fullPki.revocation.mode` and `.onUnavailable`** — see "Revocation has no defaults, on purpose" above.
 
-5. **`mode = "full-pki"` with `revocation.mode` ∈ `"crl"` / `"ocsp"` / `"both"` and an empty `revocation.allowed-hosts`** — an empty allowlist would mean "fetch from any destination a certificate names", whether that is a CRL distribution point or an OCSP responder.
+5. **`mode = "full-pki"` with `revocation.mode` ∈ `"crl"` / `"ocsp"` / `"both"` and an empty `revocation.allowedHosts`** — an empty allowlist would mean "fetch from any destination a certificate names", whether that is a CRL distribution point or an OCSP responder.
 
 ## Hash algorithm
 
@@ -352,9 +361,9 @@ The exports are listed in [`src/index.mts`](src/index.mts), whose header also sa
 - the mechanism factory (`createMtlsMechanism`) for a composition that builds its mechanisms by hand;
 - `computeCertThumbprint`, the RFC 8705 §3.1 `x5t#S256` value of a DER-encoded certificate;
 - the error type and its codes (`MtlsError`, `MtlsErrorCode` — `invalid_certificate`, or `temporarily_unavailable` for `revocation_unavailable`), the outage refusal's cause (`MtlsRevocationUnavailableError`) and its members (`MtlsRevocationSourceError`), and the diagnostic `ClientCertificate` / `CertHeaderDialect` types;
-- the signature-algorithm vocabulary (`SIGNATURE_ALGORITHM_NAMES`, `DEFAULT_SIGNATURE_ALGORITHMS`, `SignatureAlgorithmName`) — the legal values of `full-pki.signature-algorithms`, exported so that an operator's list can be checked against the one the schema enforces.
+- the signature-algorithm vocabulary (`SIGNATURE_ALGORITHM_NAMES`, `DEFAULT_SIGNATURE_ALGORITHMS`, `SignatureAlgorithmName`) — the legal values of `fullPki.signatureAlgorithms`, exported so that an operator's list can be checked against the one the schema enforces.
 
-The header dialect parsers, the narrow-mode chain walker, the PEM↔DER codec and the `full-pki` validator, CRL and OCSP resolvers and guarded fetch are **internal**: each is reached through configuration (`cert-header-dialect`, `mode`, `full-pki.revocation`), not by import. The package's config defaults ship as HOCON in [`config/reference.conf`](config/reference.conf), exported as `@o3co/auth-provider-mtls/reference.conf`, which `mtlsModule` declares as its section's reference, so core's `moduleReferences(modules)` names it for a composition root that layers what its modules declare (#728).
+The header dialect parsers, the narrow-mode chain walker, the PEM↔DER codec and the `full-pki` validator, CRL and OCSP resolvers and guarded fetch are **internal**: each is reached through configuration (`certHeaderDialect`, `mode`, `fullPki.revocation`), not by import. The package's config defaults ship as HOCON in [`config/reference.conf`](config/reference.conf), exported as `@o3co/auth-provider-mtls/reference.conf`, which `mtlsModule` declares as its section's reference, so core's `moduleReferences(modules)` names it for a composition root that layers what its modules declare (#728).
 
 ## Source layout
 

@@ -29,7 +29,7 @@ contributes the DPoP mechanism to both.
 - the key thumbprint that becomes the token's `cnf.jkt`;
 - server-provided nonces (`use_dpop_nonce`, `DPoP-Nonce`);
 - what a proof's replay record is: its `jti`, under a seen-set scope of its
-  own per key (`dpop-proof:<jkt>`), kept for `replay-store-ttl-seconds`; and
+  own per key (`dpop-proof:<jkt>`), kept for `replayStoreTtlSeconds`; and
   the boot refusal of an enabled mechanism with no seen-set to record in;
 - the `dpop_signing_alg_values_supported` discovery field.
 
@@ -53,7 +53,7 @@ contributes the DPoP mechanism to both.
 **Why a separate package.** Sender-constraint mechanisms are plug-ins to one
 core slot, not part of core: a deployment chooses DPoP by installing it, core
 holds no DPoP vocabulary, and a new mechanism needs no core change. It is off
-by default even when installed (`oauth.dpop.enabled = false`).
+by default even when installed (`dpop.enabled = false`).
 
 ## Status
 
@@ -94,20 +94,18 @@ const handle = await createApp({
 });
 ```
 
-Enable DPoP in your `application.conf`:
+Enable DPoP in your `application.conf`, in the module's own section, `dpop`:
 
 ```hocon
-oauth {
-  dpop {
-    enabled = true                  # default: false (secure-default opt-in)
-    iat-window-seconds = 60
-    alg-whitelist = ["ES256", "ES384", "EdDSA", "RS256"]
-    replay-store-ttl-seconds = 300  # at least 2 × iat-window-seconds + 1
-  }
-  # Cross-mechanism dispatch policy (owned by core):
-  tokenBinding {
-    dispatch-policy = "intent-explicit"   # or "strict-mutual-exclusion"
-  }
+dpop {
+  enabled = true                # default: false (secure-default opt-in)
+  iatWindowSeconds = 60
+  algWhitelist = ["ES256", "ES384", "EdDSA", "RS256"]
+  replayStoreTtlSeconds = 300   # at least 2 × iatWindowSeconds + 1
+}
+# Cross-mechanism dispatch policy (owned by core):
+oauth.tokenBinding {
+  dispatch-policy = "intent-explicit"   # or "strict-mutual-exclusion"
 }
 ```
 
@@ -115,11 +113,18 @@ The defaults are the ones shown; the module's schema applies them, and the
 package ships them as HOCON in [`config/reference.conf`](config/reference.conf)
 (exported as `@o3co/auth-provider-dpop/reference.conf`), which `dpopModule`
 declares as its section's reference, so core's `moduleReferences(modules)`
-names it for a composition root that layers what its modules declare (#728).
-The public exports are
-listed in [`src/index.mts`](src/index.mts). `oauth.dpop.replay-store` is
-retired: the seen-set's own module chooses the backend, and a config that
-still sets the key fails boot naming it.
+names it for a composition root that layers what its modules declare. A key
+the section does not declare refuses boot. The public exports are
+listed in [`src/index.mts`](src/index.mts).
+
+The section's old path, `oauth.dpop`, refuses boot (`config-path-relocated`)
+naming each key's new path, and `oauth.dpop.replay-store` as removed: the
+seen-set's own module chooses the backend. The nonce variables were renamed
+with the move — `OAUTH_DPOP_NONCE_REQUIRED`, `OAUTH_DPOP_NONCE_TTL_SECONDS` and
+`OAUTH_DPOP_NONCE_SECRET` to `DPOP_NONCE_REQUIRED`, `DPOP_NONCE_TTL_SECONDS`
+and `DPOP_NONCE_SECRET`: an old name set alone, or beside its new name at a
+different value, refuses boot (`environment-variable-renamed`, naming no
+value); both set to the same value boot.
 
 **Which tokens are bound.** A public client's access token and refresh token
 both carry `cnf.jkt`. A confidential client's access token is bound and its
@@ -142,19 +147,19 @@ A refused proof is a `DPoPError` with a `reason` (`DPoPReasonCode`) and this pac
 
 ## Discovery metadata
 
-When `oauth.dpop.enabled = true`, this module contributes `dpop_signing_alg_values_supported` (RFC 9449 §5.1) to `/.well-known/openid-configuration`, carrying the configured `alg-whitelist` verbatim. It is the same read the proof verifier is constructed from, so an algorithm a client picks off discovery is one this deployment will accept.
+When `dpop.enabled = true`, this module contributes `dpop_signing_alg_values_supported` (RFC 9449 §5.1) to `/.well-known/openid-configuration`, carrying the configured `algWhitelist` verbatim. It is the same read the proof verifier is constructed from, so an algorithm a client picks off discovery is one this deployment will accept.
 
 Nothing is contributed while DPoP is disabled — a client then has no way to tell this module apart from an uninstalled one, which is accurate.
 
 ## Server-provided nonces (RFC 9449 §8 / §9)
 
-Without a nonce the only freshness control on a proof is `iat` skew, which is weak for tokens that live longer than a few minutes: a proof minted ahead of time stays usable for the whole window. `oauth.dpop.nonce.required` turns nonces on:
+Without a nonce the only freshness control on a proof is `iat` skew, which is weak for tokens that live longer than a few minutes: a proof minted ahead of time stays usable for the whole window. `dpop.nonce.required` (`DPOP_NONCE_REQUIRED`) turns nonces on:
 
 - `"as"` — the token endpoint asks. A proof without a valid `nonce` claim gets `400 use_dpop_nonce` with a `DPoP-Nonce` header, and the client retries with that value in the proof.
 - `"as+rs"` — protected resources (core's `protectedResourceBindingMw`) ask too: `401` with `WWW-Authenticate: DPoP error="use_dpop_nonce"` and the `DPoP-Nonce` header.
 - `"never"` (the default) — no nonce.
 
-The nonce is **stateless**: a time bucket and an HMAC under `oauth.dpop.nonce.secret` (`OAUTH_DPOP_NONCE_SECRET`, at least 32 bytes of key material measured on the decoded value as core's secret floor measures every operator secret — `openssl rand -base64 32`; shared by every replica). Nothing is stored and nothing is looked up on the proof path; a nonce minted by one replica verifies on every other, and the replay store is never consulted for a proof refused on its nonce — the client is about to present the same `jti` again with the nonce filled in. The bucket rotates every `ttl-seconds` (default 300) and the previous bucket stays accepted, so a client that received a nonce just before the boundary is not refused a moment later. Every accepted proof's answer carries the current nonce as well, so a client learns of a rotation before it needs to. A nonce is not single-use — replay of the *proof* is what `jti` and the replay store refuse; the nonce only bounds when the proof could have been made.
+The nonce is **stateless**: a time bucket and an HMAC under `dpop.nonce.secret` (`DPOP_NONCE_SECRET`, at least 32 bytes of key material measured on the decoded value as core's secret floor measures every operator secret — `openssl rand -base64 32`; shared by every replica). Nothing is stored and nothing is looked up on the proof path; a nonce minted by one replica verifies on every other, and the replay store is never consulted for a proof refused on its nonce — the client is about to present the same `jti` again with the nonce filled in. The bucket rotates every `ttlSeconds` (default 300) and the previous bucket stays accepted, so a client that received a nonce just before the boundary is not refused a moment later. Every accepted proof's answer carries the current nonce as well, so a client learns of a rotation before it needs to. A nonce is not single-use — replay of the *proof* is what `jti` and the replay store refuse; the nonce only bounds when the proof could have been made.
 
 Boot refuses `required` without a `secret`: a per-replica random key would mint nonces no other replica could verify. There is no discovery-metadata flag for nonces — RFC 9449 signals the requirement at runtime with `use_dpop_nonce`, and a client that supports DPoP handles it there.
 
@@ -178,13 +183,13 @@ So of two requests carrying one proof, exactly one is accepted.
   `MAX_JTI_LENGTH` / `isRecordableJti`, the bound `private_key_jwt` and ID-JAG
   apply too). The proof is checked before the client is authenticated, so
   whoever sends it chooses the key the seen-set keeps for
-  `replay-store-ttl-seconds`; RFC 9449 §4.2 asks only that a `jti` be unique,
+  `replayStoreTtlSeconds`; RFC 9449 §4.2 asks only that a `jti` be unique,
   which a UUID (36 characters) or 96 random bits (16 in base64url) already is.
   A longer one is `invalid_dpop_proof` (reason `malformed_proof`), refused in
   `parseProof` before the signature is checked and before the seen-set is
   consulted.
-- **How long.** `replay-store-ttl-seconds` from the moment the proof is first
-  accepted, which must be at least `2 × iat-window-seconds + 1` to outlive the
+- **How long.** `replayStoreTtlSeconds` from the moment the proof is first
+  accepted, which must be at least `2 × iatWindowSeconds + 1` to outlive the
   proof's acceptance window; below that the mechanism logs
   `dpop_replay_ttl_below_window` (warn, `iatWindowSeconds`,
   `replayTtlSeconds`, `requiredTtlSeconds`; derivation: `replayTtlSeconds` in
@@ -206,7 +211,7 @@ So of two requests carrying one proof, exactly one is accepted.
   and it refuses every consumer alike. Every proof is recorded before the
   token endpoint's rate limit and before a protected resource verifies the
   access token, so the rate that fills DPoP's share,
-  `0.9 × maxEntries / replay-store-ttl-seconds`, is a rate anyone can send; a
+  `0.9 × maxEntries / replayStoreTtlSeconds`, is a rate anyone can send; a
   longer TTL lowers it in proportion. A Redis whose eviction policy deletes keys
   instead (`allkeys-*`, `volatile-*`) makes room by dropping replay records,
   and a dropped record is a proof that can be replayed within its window

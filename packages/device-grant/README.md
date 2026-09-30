@@ -4,7 +4,7 @@ Last updated: 2026-09-30
 
 OAuth 2.0 Device Authorization Grant ([RFC 8628](https://www.rfc-editor.org/rfc/rfc8628)) for [`auth.provider`](https://github.com/o3co/auth.provider) — the device-code flow for input-constrained clients: TV apps, CLIs, IoT.
 
-Optional, and off until `oauth.deviceAuthorization.enabled = true`: installed but disabled, it registers no grant — `/oauth/token` answers `unsupported_grant_type` for the device-code grant, and the discovery document names neither the grant nor the endpoint — and its two routes answer `404 not_found`.
+Optional, and off until `device-grant.enabled = true`: installed but disabled, it registers no grant — `/oauth/token` answers `unsupported_grant_type` for the device-code grant, and the discovery document names neither the grant nor the endpoint — and its two routes answer `404 not_found`.
 
 ## Responsibility
 
@@ -69,14 +69,18 @@ Its defaults ship as HOCON in [`config/reference.conf`](config/reference.conf)
 (exported as `@o3co/auth-provider-device-grant/reference.conf`). Layer it
 between your `application.conf` and core's `reference.conf`; the module
 declares it as its section's reference, so core's `moduleReferences(modules)`
-names it among the files to layer (#728).
+names it among the files to layer. `device-grant` is the module's own section:
+a key it does not declare refuses boot, and no environment variable binds one.
+The section's old path, `oauth.deviceAuthorization`, refuses boot
+(`config-path-relocated`) naming each key's new path
+(`oauth.deviceAuthorization.verification-uri` → `device-grant.verificationUri`).
 
 ## Quick start
 
 ```hocon
-oauth.deviceAuthorization {
+device-grant {
   enabled = true
-  verification-uri = "https://example.com/device"
+  verificationUri = "https://example.com/device"
 
   # The verification budget — RFC 8628 §5.1's "5 attempts". These are the
   # defaults; see "Rate limiting is half the security argument" below.
@@ -156,7 +160,7 @@ Both routes live under `/oauth`, where `oauthModule` mounts its router. That rou
 
 Exported from [`src/index.mts`](./src/index.mts); the linked file holds each definition:
 
-- `deviceGrantModule`, `deviceGrantConfigSchema` — [`module.mts`](./src/module.mts). The module factory to install — `deviceGrantModule({ config })`, given the config the composition root boots with; a boot whose config disagrees with it about `oauth.deviceAuthorization.enabled` is refused, and so is the factory listed uncalled (`modules: [deviceGrantModule]`, which the compiler accepts) as `module-factory-not-called` — and the `oauth.deviceAuthorization` schema it composes.
+- `deviceGrantModule`, `deviceGrantConfigSchema` — [`module.mts`](./src/module.mts). The module factory to install — `deviceGrantModule({ config })`, given the config the composition root boots with, from which it reads `device-grant.enabled` as the section's schema does (an environment variable's `"true"` is on); a boot whose config disagrees with it about `device-grant.enabled` is refused, and so is the factory listed uncalled (`modules: [deviceGrantModule]`, which the compiler accepts) as `module-factory-not-called` — and the schema of its section, `device-grant`.
 - `createDeviceAuthorizationHandler`, `DeviceAuthorizationEndpointOptions` — [`deviceAuthorizationEndpoint.mts`](./src/deviceAuthorizationEndpoint.mts); `createDeviceVerificationHandler`, `DeviceVerificationHandlerOptions` — [`verificationEndpoint.mts`](./src/verificationEndpoint.mts); `createDeviceCodeGrant`, `DeviceCodeGrantOptions` — [`grant.mts`](./src/grant.mts); its `accessTokenExpiresIn` must be a whole number of seconds from 1 to a year — core's `isLifetimeSeconds`, the rule `oauth.accessToken.*` is held to — or construction throws a `RangeError`. `createDeviceAuthorizationHandler` holds its `settings.codeLifetimeSeconds` and `settings.pollingIntervalSeconds` to the bounds the module's schema holds `code-lifetime-seconds` (30–3600) and `polling-interval-seconds` (1–60) to, and throws a `RangeError` when it is built with anything else. The two handlers and the grant, for a composition root that mounts them itself; it then owns what the module otherwise applies around them — client authentication, the throttle, the CSRF guard and the body parsers. The verification handler's `415` for a body that is not `application/json` is the handler's own and comes with it.
 - `DEVICE_GRANT_ADMISSION_ACTIONS`, `DeviceGrantAdmissionAction` — [`admissionActions.mts`](./src/admissionActions.mts). The actions the verification handler admits, which `deviceGrantModule` registers while the grant is on; a composition root that mounts the handler itself registers them under `contributes.admissionActions`: the handler refuses to be built on a resolver that does not register all three.
 - `DEVICE_CODE_GRANT_TYPE`, `DEVICE_AUTHORIZATION_RATE_LIMIT_PREFIX`, `DEVICE_VERIFICATION_RATE_LIMIT_PREFIX`, `DeviceAuthorizationSettings`, `DeviceGrantDependencies` — [`types.mts`](./src/types.mts) (`DEVICE_VERIFICATION_RATE_LIMIT_PREFIX` is defined in [`verificationBudget.mts`](./src/verificationBudget.mts) and re-exported there).
@@ -166,7 +170,7 @@ The `DeviceCodeStore` port and the code generators are not exported here; they a
 
 ## The library provides the API, the deployment provides the page
 
-There is no HTML in this package, and `verification-uri` is configuration rather than a route it mounts.
+There is no HTML in this package, and `verificationUri` is configuration rather than a route it mounts.
 
 That is the boundary `/authorize` already draws — it redirects to a deployment-configured login URL rather than rendering a login form — and drawing it differently for this one ceremony would mean the library ships a page for one and not the other. What it does ship is the JSON API that page calls.
 
@@ -223,11 +227,11 @@ RFC 8628 §5.1 sizes the user code's entropy *against* a rate limit: an 8-charac
 
 Every attempt counts, malformed codes included: excluding them would hand an attacker an unmetered way to probe which shapes the endpoint accepts. The key is `device_verification:user:<subject>` — keyed on the **authenticated user**, not the code. Keying on the code would spend whichever code the attacker happened to hit, which is nobody's budget; keying on the subject means an attacker needs an account and burns their own.
 
-The budget is `oauth.deviceAuthorization.rateLimit { limit, windowSeconds }`, default `5` / `300`. The module contributes it as the `device_verification` budget (a `rateLimitBudgets` contribution), which both bundled limiters read — the same way the session module contributes `rateLimit.login` as `login` — so the number the boot refusal reasons from is the number the limiter applies, with the grant on or off. Without it, the prefix would fall through to the limiter's 60-per-minute default: twelve times the budget, silently. An operator-declared `memoryRateLimiter.limits.device_verification` (or the Redis equivalent) wins; zero and fractional values, and a window longer than a year, are refused at the config boundary. A hand-built spec that is not a positive whole limit and window, or whose window ends past the Date range, is refused by either limiter when it is built, never replaced by the default.
+The budget is `device-grant.rateLimit { limit, windowSeconds }`, default `5` / `300`. The module contributes it as the `device_verification` budget (a `rateLimitBudgets` contribution), which both bundled limiters read — the same way the session module contributes `rateLimit.login` as `login` — so the number the boot refusal reasons from is the number the limiter applies, with the grant on or off. Without it, the prefix would fall through to the limiter's 60-per-minute default: twelve times the budget, silently. An operator-declared `memoryRateLimiter.limits.device_verification` (or the Redis equivalent) wins; zero and fractional values, and a window longer than a year, are refused at the config boundary. A hand-built spec that is not a positive whole limit and window, or whose window ends past the Date range, is refused by either limiter when it is built, never replaced by the default.
 
-A section that does not give the key contributes no budget. So the module asks for the budget itself — **enabling the grant with no `oauth.deviceAuthorization.rateLimit` fails boot**, naming the key. A config that went through `createApp` always has one, because the schema defaults it. The refusal is for hand-built configs that never passed the schema, where the missing budget would otherwise mean a limiter arguing from five attempts while applying sixty. The key is read as a coercing schema reads it, so the numeric strings an environment substitution produces are their numbers. A key that is given but not usable (zero, NaN, a fraction, a blank or non-numeric string, a window past the Date range) is refused with a `RangeError` naming `oauth.deviceAuthorization.rateLimit`. The contribution and the refusal go through the same core call, `requireUsableConfiguredRateLimitSpec`, so they give one message and never replace the budget with the limiter's default. Both judge a value by core's one definition of "usable", `isUsableRateLimitSpec`, which is also `isDeviceVerificationRateLimitSpec`.
+A section that does not give the key contributes no budget. So the module asks for the budget itself — **enabling the grant with no `device-grant.rateLimit` fails boot**, naming the key. A config that went through `createApp` always has one, because the schema defaults it. The refusal is for hand-built configs that never passed the schema, where the missing budget would otherwise mean a limiter arguing from five attempts while applying sixty. The key is read as a coercing schema reads it, so the numeric strings an environment substitution produces are their numbers. A key that is given but not usable (zero, NaN, a fraction, a blank or non-numeric string, a window past the Date range) is refused with a `RangeError` naming `oauth.deviceAuthorization.rateLimit`. The contribution and the refusal go through the same core call, `requireUsableConfiguredRateLimitSpec`, so they give one message and never replace the budget with the limiter's default. Both judge a value by core's one definition of "usable", `isUsableRateLimitSpec`, which is also `isDeviceVerificationRateLimitSpec`.
 
-**The contributed budget must be the configured one.** The module requires `rateLimitBudgetResolver`, and with the grant enabled the verification route refuses boot unless the contributed `device_verification` budget, after any override, is `oauth.deviceAuthorization.rateLimit` — another module overriding it, even to tighten it, is refused, naming both: the budget the RFC 8628 §5.1 argument rests on is set here, not elsewhere. A limiter's own `limits.device_verification` wins over the contributed budget and is not compared. The module also claims `device_authorization`, with no budget of its own, so no other module can set one for it.
+**The contributed budget must be the configured one.** The module requires `rateLimitBudgetResolver`, and with the grant enabled the verification route refuses boot unless the contributed `device_verification` budget, after any override, is `device-grant.rateLimit` — another module overriding it, even to tighten it, is refused, naming both: the budget the RFC 8628 §5.1 argument rests on is set here, not elsewhere. A limiter's own `limits.device_verification` wins over the contributed budget and is not compared. The module also claims `device_authorization`, with no budget of its own, so no other module can set one for it.
 
 `POST /oauth/device_authorization` is throttled as well, under `device_authorization:ip:<ip>` — the same `createRateLimitGuard` and key shape as `/oauth/token`, mounted **ahead of client authentication** so unauthenticated repeats are bounded before they reach a repository lookup. It uses the limiter's `defaultLimit` unless `memoryRateLimiter.limits.device_authorization` (or the Redis equivalent) declares one, and it honours the limiter's own outage policy, `failMode` — the Redis limiter's is `rateLimit.failMode`.
 
@@ -258,7 +262,7 @@ Codes are drawn with `randomInt`, not `randomBytes() % 20`: 256 is not a multipl
 
 RFC 8628 §3.3.1 defines a URI with the code embedded, so a QR code can carry it. §5.4: with it "it is particularly important to confirm that the device is in the user's possession, as the user no longer has to type in the code".
 
-The typing **is** the proof of proximity. Removing it without replacing that confirmation is what makes remote phishing work, so `verification-uri-complete` defaults to `false`. Turn it on only if the verification page displays the code and asks the user to confirm the device is showing the same one.
+The typing **is** the proof of proximity. Removing it without replacing that confirmation is what makes remote phishing work, so `verificationUriComplete` defaults to `false`. Turn it on only if the verification page displays the code and asks the user to confirm the device is showing the same one.
 
 ## Polling
 
@@ -321,7 +325,7 @@ Two things about the Redis adapter are worth knowing before choosing it:
 
 The standalone template provides `deviceCodeStoreClient` from its shared ioredis connection but does not mount this grant; a deployment that adds `deviceGrantModule({ config })` to that manifest selects `redisDeviceCodeStoreModule` alongside it.
 
-Mounting the module without any store fails boot naming `oauth.deviceAuthorization.store`, which accepts `"unsupported"` as an explicit statement that this deployment knowingly cannot authorize devices (#363) — for a deployment that leaves the grant off; with `enabled = true` the module refuses to boot without a store whatever the declaration says.
+Mounting the module without any store fails boot naming `device-grant.store`, which accepts `"unsupported"` as an explicit statement that this deployment knowingly cannot authorize devices (#363) — for a deployment that leaves the grant off; with `enabled = true` the module refuses to boot without a store whatever the declaration says.
 
 Every field of the `DeviceAuthorization` an adapter hands back is a required key: `requestedScope`, `subject` and `grantedScope` hold `undefined` where there is none, so a read-back that forgets one is a compile error rather than a dropped field; `create`'s `requestedScope` is a required key the same way ([Upgrading: store records name every field](../../docs/upgrading-required-record-keys.md)). The conformance suite compares the whole record with `toStrictEqual`, which also catches the two scope lists swapped.
 
