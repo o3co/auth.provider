@@ -18,11 +18,12 @@
  * The section of the module that keeps a subject's MFA factors in the Store,
  * `foundation-mfa-factor-store`: the Store's four factor endpoints, each
  * https or loopback http, refused at config validation for an unknown key or
- * a URL of the wrong shape, naming the key and quoting no value. A
- * composition that installs a module reading the section with any URL
- * missing refuses the boot, naming each missing key and its variable. The
- * module itself is the Store adapter's; a fixture module reads the section
- * here as it will.
+ * a URL of the wrong shape, naming the key and quoting what it holds in
+ * printable characters alone. A composition that installs a module reading
+ * the section — one that provides its store eagerly and reads the URLs first
+ * — refuses the boot with any URL missing, naming each missing key and its
+ * variable, whether or not anything requires the store. Here a fixture module
+ * reads the section so, providing a memory store.
  */
 
 import { BootError, createApp, type MfaFactorStore } from "@o3co/auth-provider-core";
@@ -64,18 +65,21 @@ afterEach(async () => {
 	disposable = undefined;
 });
 
-async function boot(section: unknown) {
+async function boot(section: unknown, options: { readonly alone?: boolean } = {}) {
 	const seen: { store?: MfaFactorStore } = {};
 	disposable = await createApp({
-		modules: [fixtureModule, consumer(seen)],
+		modules: options.alone === true ? [fixtureModule] : [fixtureModule, consumer(seen)],
 		bootstrapComponents: { config: configWith(section), pathResolver: (p: string) => p } as never,
 	});
 	return seen;
 }
 
-async function bootRefusal(section: unknown): Promise<BootError> {
+async function bootRefusal(
+	section: unknown,
+	options: { readonly alone?: boolean } = {},
+): Promise<BootError> {
 	try {
-		await boot(section);
+		await boot(section, options);
 	} catch (error) {
 		expect(error).toBeInstanceOf(BootError);
 		return error as BootError;
@@ -100,14 +104,25 @@ describe("the section's schema", () => {
 		expect(parse(loopback)).toMatchObject({ success: true, data: loopback });
 	});
 
-	it("reads a section with URLs left out: the module refuses them, not the schema", () => {
-		expect(parse({})).toMatchObject({ success: true, data: {} });
+	it("reads a section with URLs left out, each absent: the module refuses them, not the schema", () => {
+		const parsed = parse({});
+		expect(parsed.success).toBe(true);
+		for (const key of KEYS) expect(parsed.data?.[key], key).toBeUndefined();
+		expect(Object.keys(parsed.data ?? {})).toEqual([]);
 	});
 
 	it("refuses a key it does not know", () => {
 		const parsed = parse({ ...URLS, listURL: URLS.listUrl });
 		expect(parsed.success).toBe(false);
 		expect(JSON.stringify(parsed.error?.issues)).toContain("listURL");
+	});
+
+	it("names a key it does not know in printable characters alone", () => {
+		const key = `list${String.fromCodePoint(0x1b)}[31m${String.fromCodePoint(0x202e)}Url\r\nforged`;
+		const parsed = parse({ ...URLS, [key]: URLS.listUrl });
+		const message = parsed.error?.issues[0]?.message ?? "";
+		expect(message).toContain("list?[31m?Url??forged");
+		expect(message).toMatch(/^[\x20-\x7e]+$/);
 	});
 
 	it("refuses a URL that is not https, or http to a loopback host, naming the key and quoting no value", () => {
@@ -169,6 +184,18 @@ describe("a composition that selects the Store for MFA factors", () => {
 	it("boots with the four URLs set", async () => {
 		const seen = await boot(URLS);
 		expect(seen.store).toBeDefined();
+		await disposable?.dispose();
+		disposable = undefined;
+		await boot(URLS, { alone: true });
+	});
+
+	it("refuses the boot with the module installed alone, nothing requiring its store, and the URLs missing", async () => {
+		const refused = await bootRefusal({}, { alone: true });
+		expect(refused.reason).toBe("provides-factory-failed");
+		for (const key of KEYS) {
+			expect(refused.message).toContain(`${FOUNDATION_MFA_FACTOR_STORE_SECTION}.${key}`);
+			expect(refused.message).toContain(VARIABLES[key]);
+		}
 	});
 
 	it("refuses the boot with any URL missing, naming the key and its variable", async () => {
