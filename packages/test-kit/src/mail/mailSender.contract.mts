@@ -19,16 +19,19 @@
  *
  * `mailSenderContract(input)` holds a sender to what the provider relies on:
  * a `kind` that names it; a send the relay accepted answered `delivered`,
- * the relay, compared whole before and after, then holding one mail more —
- * to the recipient, carrying the code — and nothing else new, for every
- * purpose; a relay refusing at a limit answered `refused_at_limit` and
- * nothing more (the provider's `429`); under each other way a relay refuses
+ * the relay, copied before the send and compared whole after it, then
+ * holding one mail more — its envelope addressed to the recipient alone,
+ * carrying the code — and nothing else new, for every purpose; a relay
+ * refusing at a limit answered `refused_at_limit` (the provider's `429`);
+ * each answer read as the provider reads it, through core's
+ * `mailSendOutcome`; under each other way a relay refuses
  * (`MAIL_RELAY_REFUSALS`), a transient failure among them, a rejection, never
  * an answer (its `503`); and the mail it is handed left as it was. Every text
  * field of the mail but its purpose, a closed list, carries one mark, and so
  * does the relay's reply, which the suite writes. No rejection's loggable
  * projection (`loggableError`, its message and its causes') carries the
- * mark, a field in base64 or the expiry, searched in lower case over letters
+ * mark — in text, or in base64 at any of the three offsets a field may start
+ * at — a field in base64 or the expiry, searched in lower case over letters
  * and digits alone.
  *
  * What it cannot see, and a sender's own tests must: what the sender logs
@@ -43,6 +46,7 @@ import {
 	type MailPurpose,
 	type MailSend,
 	type MailSender,
+	mailSendOutcome,
 } from "@o3co/auth-provider-core";
 import type { ContractCase } from "@o3co/auth-provider-core/testing";
 
@@ -59,9 +63,9 @@ export const MAIL_RELAY_REFUSALS = Object.freeze([
 /** A way a relay refuses a mail: see {@link MAIL_RELAY_REFUSALS}. */
 export type MailRelayRefusal = (typeof MAIL_RELAY_REFUSALS)[number];
 
-/** A mail as the relay holds it: the recipient it was addressed to, and the whole message as text. */
+/** A mail as the relay holds it: the recipients its envelope named, in order, and the whole message as text. */
 export interface RelayedMail {
-	readonly to: string;
+	readonly to: readonly string[];
 	readonly content: string;
 }
 
@@ -130,15 +134,25 @@ const REFUSAL_TEXT: Readonly<Record<Exclude<MailRelayRefusal, "limit">, string>>
 const normalised = (text: string): string => text.toLowerCase().replace(/[^a-z0-9]/g, "");
 
 /**
+ * The base64 characters `text`'s bytes alone decide, when they start
+ * `offset` bytes into what is encoded: a field that opens with the mark
+ * carries these wherever its encoding starts.
+ */
+const base64At = (text: string, offset: number): string => {
+	const bytes = Buffer.from(text);
+	const encoded = Buffer.concat([Buffer.alloc(offset), bytes]).toString("base64");
+	return encoded.slice(Math.ceil((8 * offset) / 6), Math.floor((8 * (offset + bytes.length)) / 6));
+};
+
+/**
  * What a projection must never carry of `mail`, normalised: the mark — in
- * text, and in base64, which starts every field it opens alike, the mark
- * being three bytes twice — each text field in base64, and the expiry as a
- * number and as a date.
+ * text, and in base64 at each of the three offsets a field may start at —
+ * each text field in base64, and the expiry as a number and as a date.
  */
 const neverLogged = (mail: MailSend): string[] =>
 	[
 		MARK,
-		Buffer.from(MARK).toString("base64"),
+		...[0, 1, 2].map((offset) => base64At(MARK, offset)),
 		...[mail.to, mail.code, mail.subject].flatMap((field) => [
 			Buffer.from(field).toString("base64"),
 			Buffer.from(field).toString("base64url"),
@@ -169,26 +183,33 @@ async function answerOf(sending: Promise<unknown>, what: string): Promise<unknow
 	}
 }
 
+/** What the relay holds, copied: records and envelopes a relay goes on changing stay as they were read. */
+const copied = (held: readonly RelayedMail[]): RelayedMail[] =>
+	[...held].map((mail) => ({
+		to: Array.isArray(mail.to) ? [...mail.to] : mail.to,
+		content: mail.content,
+	}));
+
 /** The cases of the `MailSender` contract over the senders `input` builds. */
 export function mailSenderContract(input: MailSenderContractInput): readonly ContractCase[] {
 	/**
 	 * Sends `mail` over a relay that accepts: answered delivered, and the
-	 * relay, compared whole, holding what it held and one mail more, to the
-	 * recipient, carrying the code.
+	 * relay, compared whole, holding what it held and one mail more, its
+	 * envelope to the recipient alone, carrying the code.
 	 */
 	const deliver = async (
 		sender: MailSender,
 		relayed: () => Promise<readonly RelayedMail[]>,
 		mail: MailSend,
 	) => {
-		const before = await relayed();
+		const before = copied(await relayed());
 		const answer = await answerOf(sender.send(mail), "a send the relay accepted");
-		assert.deepEqual(
-			answer,
-			{ outcome: "delivered" },
-			`a send the relay accepted answered ${JSON.stringify(answer)}, not delivered`,
+		assert.equal(
+			mailSendOutcome(answer),
+			"delivered",
+			`a send the relay accepted answered ${JSON.stringify(answer)}, which the provider reads as ${mailSendOutcome(answer)}`,
 		);
-		const after = await relayed();
+		const after = copied(await relayed());
 		assert.equal(
 			after.length,
 			before.length + 1,
@@ -196,7 +217,11 @@ export function mailSenderContract(input: MailSenderContractInput): readonly Con
 		);
 		assert.deepEqual(after.slice(0, before.length), before, "the send changed what the relay held");
 		const added = after[before.length];
-		assert.equal(added?.to, mail.to, "the relay's new mail is addressed to another recipient");
+		assert.deepEqual(
+			added?.to,
+			[mail.to],
+			`the relay's new mail is addressed to ${JSON.stringify(added?.to)}, not to the recipient alone`,
+		);
 		assert.ok(
 			added?.content.includes(mail.code) === true,
 			"the relay's new mail does not carry the code",
@@ -215,7 +240,7 @@ export function mailSenderContract(input: MailSenderContractInput): readonly Con
 			},
 		},
 		{
-			name: "a send the relay accepts answers delivered, and the relay then holds one more mail, to the recipient, carrying the code, and nothing else new",
+			name: "a send the relay accepts answers delivered, and the relay then holds one more mail, to the recipient alone, carrying the code, and nothing else new",
 			run: async () => {
 				const { sender, relayed } = input.build();
 				await deliver(sender, relayed, mailOf(1));
@@ -236,10 +261,10 @@ export function mailSenderContract(input: MailSenderContractInput): readonly Con
 				const mail = mailOf(8);
 				const sender = input.refusing("limit", replyTo("limit", mail));
 				const answer = await answerOf(sender.send(mail), "a send refused at a limit");
-				assert.deepEqual(
-					answer,
-					{ outcome: "refused_at_limit" },
-					`a send refused at a limit answered ${JSON.stringify(answer)}`,
+				assert.equal(
+					mailSendOutcome(answer),
+					"refused_at_limit",
+					`a send refused at a limit answered ${JSON.stringify(answer)}, which the provider reads as ${mailSendOutcome(answer)}`,
 				);
 			},
 		},

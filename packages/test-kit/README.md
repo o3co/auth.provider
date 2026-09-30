@@ -180,21 +180,25 @@ Every call is handed core's test digests for the factor's kind
 
 `mailSenderContract(input)` holds a `MailSender` to what the provider relies
 on: a `kind`; a send the relay accepts answered `{ outcome: "delivered" }`,
-the relay then holding one mail to the recipient that carries the code, for
-every purpose — the relay compared whole before and after, so it then holds
-that one mail more and nothing else new; a relay refusing at a limit answered
-`{ outcome: "refused_at_limit" }` and nothing more; under each other way a
+the relay then holding one mail whose envelope names the recipient alone —
+no Bcc — and that carries the code, for every purpose — the relay copied
+before the send and compared whole after it, so it then holds that one mail
+more and nothing else new; a relay refusing at a limit answered
+`{ outcome: "refused_at_limit" }`; each answer read as the provider reads it,
+through core's `mailSendOutcome`, so an extra key or an accessor is an
+outage and a null-prototype record is an answer; under each other way a
 relay refuses (`MAIL_RELAY_REFUSALS`: the recipient, the message, the relay
 unreachable, the sender's credentials, a transient failure) a rejection,
 never an answer; and the mail left as it was. The suite writes each refusing
 relay's reply; every text field of the mail and the reply carry one mark, and
 no rejection's `loggableError` projection — its message and its causes' —
-carries the mark, a field of the mail in base64 or the expiry, searched in
+carries the mark — in text, or in base64 at any of the three offsets a field
+may start at — a field of the mail in base64 or the expiry, searched in
 lower case over letters and digits alone.
 
 `build()` answers a sender over a relay that accepts, and `relayed()`, what
-that relay holds (`RelayedMail`: the recipient it was addressed to, and the
-whole message as text); `refusing(refusal, reply)` answers a sender over a
+that relay holds (`RelayedMail`: the recipients its envelope named, in
+order, and the whole message as text); `refusing(refusal, reply)` answers a sender over a
 relay that refuses as `refusal` names, answering `reply` as its own text.
 
 What it cannot see, and a sender's own tests must: what the sender logs
