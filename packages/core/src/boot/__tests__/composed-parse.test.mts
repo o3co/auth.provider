@@ -185,7 +185,7 @@ describe("one composed parse over the transitional base", () => {
 		expect(err.message).toMatch(/the port getter broke/);
 	});
 
-	it("names the configuration itself when it is not an object", () => {
+	it("names the configuration itself when it is not an object, when core declares no renamed variable", () => {
 		// Core's own renamed variables are judged before the parse, and a value
 		// that is no object captures none: validated here without them.
 		let err: unknown;
@@ -562,12 +562,16 @@ describe("config_sections_ignored — a top-level section nobody owns", () => {
 		).toEqual([[{ sections: ["typoSection"] }, "config_sections_ignored"]]);
 	});
 
-	it("names a section that holds only an empty section: a key is written there", async () => {
+	it("does not name a section that holds only empty sections: it sets nothing either", async () => {
 		const logger = recordingLogger();
-		await bootAndRead([], resolved({ typoSection: { nested: {} } }), logger);
+		await bootAndRead(
+			[],
+			resolved({ typoSection: { nested: {} }, listSection: [], valueSection: { key: 1 } }),
+			logger,
+		);
 		expect(
 			logger.warn.mock.calls.filter(([, message]) => message === "config_sections_ignored"),
-		).toEqual([[{ sections: ["typoSection"] }, "config_sections_ignored"]]);
+		).toEqual([[{ sections: ["listSection", "valueSection"] }, "config_sections_ignored"]]);
 	});
 
 	it("names the sections of a configuration handed as an object that is not plain data, by its own keys", async () => {

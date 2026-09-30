@@ -194,6 +194,45 @@ describe("jwksModule — its own section, jwks {}", () => {
 	);
 });
 
+describe("jwksModule — the CORS table lists the path its route serves", () => {
+	const ORIGIN = "https://spa.example";
+	const boot = (modules: Parameters<typeof createTestApp>[0]["modules"]) =>
+		createTestApp({
+			modules,
+			bootstrapComponents: {
+				config: {
+					...makeValidAppConfig(),
+					cors: { allowedOrigins: [ORIGIN] },
+					jwks: { path: "/keys/jwks.json" },
+				} as unknown as ReturnType<typeof makeValidAppConfig>,
+				pathResolver: (s) => s,
+			},
+		});
+	const originAllowedOn = async (
+		handle: Awaited<ReturnType<typeof boot>>,
+		path: string,
+	): Promise<unknown> => {
+		const app = express();
+		app.use(handle.router);
+		const res = await request(app).get(path).set("Origin", ORIGIN);
+		return res.headers["access-control-allow-origin"];
+	};
+
+	it("with the module installed: the path jwks.path moves the route to, and not the default", async () => {
+		const handle = await boot([jwksModule, keyStoreModule]);
+		expect(await originAllowedOn(handle, "/keys/jwks.json")).toBe(ORIGIN);
+		expect(await originAllowedOn(handle, "/.well-known/jwks.json")).toBeUndefined();
+		await handle.dispose();
+	});
+
+	it("without the module: no JWKS path, the one jwks.path names or the default", async () => {
+		const handle = await boot([keyStoreModule]);
+		expect(await originAllowedOn(handle, "/keys/jwks.json")).toBeUndefined();
+		expect(await originAllowedOn(handle, "/.well-known/jwks.json")).toBeUndefined();
+		await handle.dispose();
+	});
+});
+
 describe("JWKS_SECTION, the schema of jwks {}", () => {
 	const issuesAt = (value: unknown): string[] => {
 		const result = JWKS_SECTION.safeParse(value);

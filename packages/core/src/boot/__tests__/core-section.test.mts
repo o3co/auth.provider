@@ -29,9 +29,14 @@ import { parseFile, parseString } from "@o3co/ts.hocon";
 import { describe, expect, it, vi } from "vitest";
 import { createApp } from "#/boot/create-app.mjs";
 import { type AppHandle, BootError, type BootstrapMap } from "#/boot/types.mjs";
+import { AppConfigSchema } from "#/config/application.schema.mjs";
+import { CORE_RELOCATIONS } from "#/config/core-relocations.mjs";
 import { coreReference } from "#/config/references.mjs";
+import { RENAMED_VARIABLES_SECTION } from "#/config/removed-keys.mjs";
+import { jwksModule } from "#/jwks/module.mjs";
 import type { Logger } from "#/logging/Logger.mjs";
-import { makeValidCoreConfig } from "#/testing/fixtures/valid-config.mjs";
+import { makeValidAppConfig, makeValidCoreConfig } from "#/testing/fixtures/valid-config.mjs";
+import { renamedVariableCaptures } from "#/testing/renamedVariables.mjs";
 
 /** The sections core's reference sets that these tests read: core's own, the JWKS module's, and the captures. */
 const READ = ["core", "jwks", "renamed-variables"] as const;
@@ -140,7 +145,7 @@ describe("the paths core's settings moved from", () => {
 		});
 	});
 
-	it("refuses sessionRequirements.expected, naming core.sessionRequirements.expected", async () => {
+	it("refuses sessionRequirements.expected, naming core.sessionRequirements.expected and no variable", async () => {
 		const err = await refusal(boot({}, "sessionRequirements.expected = []\n"));
 
 		expect(err.details).toEqual({
@@ -153,8 +158,86 @@ describe("the paths core's settings moved from", () => {
 				},
 			],
 		});
-		expect(err.message).not.toContain("environment variable CORE_SESSION_REQUIREMENTS_EXPECTED");
+		expect(err.message).not.toMatch(/\(environment variable [A-Z0-9_]+\)/);
 	});
+
+	it.each([
+		['deployment = "old-value-5e2d"', "deployment", "core.deployment"],
+		["deployment.other = 1", "deployment.other", "core.deployment.other"],
+	])("refuses %s, naming %s's new path and no variable", async (hocon, from, to) => {
+		const err = await refusal(boot({}, `${hocon}\n`));
+
+		expect(err.details).toEqual({
+			reason: "config-path-relocated",
+			relocated: [{ module: "core", from, to }],
+		});
+		expect(err.message).not.toMatch(/\(environment variable [A-Z0-9_]+\)/);
+		expect(err.message).not.toContain("old-value-5e2d");
+	});
+});
+
+describe("core's own section, strict", () => {
+	it.each([
+		['core.deploymnet.mode = "multi-5e2d"', "deploymnet", "multi-5e2d"],
+		['core.sessionRequirement.expected = ["mfa-7c1b"]', "sessionRequirement", "mfa-7c1b"],
+		['core.deployment.mdoe = "multi-5e2d"', "mdoe", "multi-5e2d"],
+		['core.sessionRequirements.expcted = ["mfa-7c1b"]', "expcted", "mfa-7c1b"],
+	])("refuses %s, naming the key %s and never its value", async (hocon, key, value) => {
+		const err = await refusal(boot({}, `${hocon}\n`));
+
+		expect(err.reason).toBe("config-validation-failed");
+		expect(err.message).toContain(`"${key}"`);
+		expect(err.message).not.toContain(value);
+		expect(JSON.stringify(err.details)).not.toContain(value);
+	});
+});
+
+describe("a root that parses its resolved configuration with AppConfigSchema before boot", () => {
+	/**
+	 * `operator` HOCON over core's own `reference.conf` and the fixture's
+	 * sections, parsed with `AppConfigSchema`, with the captures the
+	 * resolution saw added back, as such a root must.
+	 */
+	const preParsed = (operator: string): Record<string, unknown> => {
+		const own = parseString(operator, {});
+		const layered = own
+			.withFallback(
+				parseFile(fileURLToPath(coreReference()), {
+					env: { OAUTH_JWT_ISSUER: "https://auth.test" },
+				}),
+			)
+			.toObject() as Record<string, unknown>;
+		const sections = [...READ, ...Object.keys(own.toObject() as Record<string, unknown>)];
+		const parsed = AppConfigSchema.parse({
+			...makeValidAppConfig(),
+			...Object.fromEntries(sections.map((section) => [section, layered[section]])),
+		}) as Record<string, unknown>;
+		return {
+			...parsed,
+			[RENAMED_VARIABLES_SECTION]: renamedVariableCaptures({
+				modules: [],
+				core: CORE_RELOCATIONS,
+				env: {},
+			}),
+		};
+	};
+
+	it.each([
+		['deployment.mode = "multi"', [], "deployment.mode"],
+		['sessionRequirements.expected = ["mfa"]', [], "sessionRequirements.expected"],
+		['oauth.jwt.jwksPath = "/keys/jwks.json"', [jwksModule], "oauth.jwt.jwksPath"],
+		["oauth.jwt.jwksCacheMaxAge = 60", [jwksModule], "oauth.jwt.jwksCacheMaxAge"],
+	] as const)(
+		"is refused for %s as relocated, the parse keeping the old path",
+		async (hocon, modules, from) => {
+			const err = await refusal(
+				createApp({ modules, bootstrapComponents: bootstrap(preParsed(`${hocon}\n`)) }),
+			);
+
+			expect(err.reason).toBe("config-path-relocated");
+			expect(err.details).toMatchObject({ relocated: [{ from }] });
+		},
+	);
 });
 
 describe("the JWKS module's section, shipped in core's reference.conf, in a composition without the module", () => {

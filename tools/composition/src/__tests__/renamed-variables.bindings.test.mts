@@ -27,11 +27,15 @@
  * other layer would override what the resolution saw.
  */
 
-import { readdirSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { coreReference } from "@o3co/auth-provider-core";
-import { CORE_RELOCATIONS, renamedVariableProblems } from "@o3co/auth-provider-core/testing";
+import {
+	CORE_RELOCATIONS,
+	relocationBindingProblems,
+	renamedVariableProblems,
+} from "@o3co/auth-provider-core/testing";
 import { parseFile } from "@o3co/ts.hocon";
 import { afterAll, describe, expect, it } from "vitest";
 import { composeFullSet, type FullSet } from "./full-set.fixture.mts";
@@ -57,6 +61,19 @@ const LAYERS: readonly string[] = [
 
 const read = (path: string, env: Readonly<Record<string, string>>): unknown =>
 	parseFile(path, { env: { ...env } }).toObject();
+
+/** The variables a layer substitutes, outside its comments. */
+const variables = (path: string): readonly string[] => [
+	...new Set(
+		[
+			...readFileSync(path, "utf8")
+				.split("\n")
+				.filter((line) => !/^\s*(#|\/\/)/.test(line))
+				.join("\n")
+				.matchAll(/\$\{\??([A-Za-z0-9_]+)\}/g),
+		].map((match) => String(match[1])),
+	),
+];
 
 let fullSet: FullSet | undefined;
 
@@ -84,6 +101,23 @@ describe("the variables renamed with a move, across every shipped layer", () => 
 				core: CORE_RELOCATIONS,
 				layers: LAYERS,
 				read,
+			}),
+		).toEqual([]);
+	});
+
+	it("binds, at each new path a relocation of the full set or core moves a key to, the variable its refusal names, and nothing at a new path declared bound to none", () => {
+		if (fullSet === undefined) throw new Error("the full set did not boot");
+		expect(
+			fullSet.modules.filter((module) => module.section?.relocatedFrom !== undefined).length,
+		).toBeGreaterThan(0);
+
+		expect(
+			relocationBindingProblems({
+				modules: fullSet.modules,
+				core: CORE_RELOCATIONS,
+				layers: LAYERS,
+				read,
+				variables,
 			}),
 		).toEqual([]);
 	});
