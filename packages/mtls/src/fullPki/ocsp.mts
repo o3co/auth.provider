@@ -75,7 +75,7 @@ import {
 } from "./criticalExtensions.mjs";
 import { CRL_NEGATIVE_CACHE_TTL_MS } from "./crl.mjs";
 import { DEFAULT_ALGORITHM_POLICY } from "./defaults.mjs";
-import { type GuardedFetch, isSourceFailure } from "./fetchGuard.mjs";
+import type { GuardedFetch } from "./fetchGuard.mjs";
 import {
 	type Answer,
 	markOutage,
@@ -85,6 +85,7 @@ import {
 	type OcspUnavailableReason,
 } from "./ocspAnswer.mjs";
 import { equalBytes } from "./ocspBytes.mjs";
+import { fetchResponse } from "./ocspFetch.mjs";
 import { buildRequest, checkNonce } from "./ocspRequest.mjs";
 import { ocspResponders } from "./ocspResponders.mjs";
 
@@ -107,9 +108,6 @@ const OID_OCSP_NOCHECK = "1.3.6.1.5.5.7.48.1.5";
 const OID_EXT_KEY_USAGE = "2.5.29.37";
 /** SHA-1, the `CertID` hash. */
 const OID_SHA1 = "1.3.14.3.2.26";
-
-const OCSP_REQUEST_MEDIA_TYPE = "application/ocsp-request";
-const OCSP_RESPONSE_MEDIA_TYPE = "application/ocsp-response";
 
 /**
  * How long a responder that could not be used is remembered, in
@@ -686,22 +684,8 @@ export const createOcspResolver = (options: OcspResolverOptions): OcspResolver =
 	): Promise<Answer> => {
 		const crypto = pkijs.getCrypto(true);
 		const request = await buildRequest(certificate, issuer, crypto);
-		const fetched = await options.fetch(url, {
-			method: "POST",
-			body: request.der,
-			contentType: OCSP_REQUEST_MEDIA_TYPE,
-			accept: OCSP_RESPONSE_MEDIA_TYPE,
-			expectContentType: OCSP_RESPONSE_MEDIA_TYPE,
-		});
-		if (!fetched.ok) {
-			return {
-				ok: false,
-				reason: "fetch_failed",
-				detail: `${fetched.reason} (${fetched.detail})`,
-				...(fetched.cause !== undefined ? { cause: fetched.cause } : {}),
-				...(isSourceFailure(fetched.reason) ? { outage: true } : {}),
-			};
-		}
+		const fetched = await fetchResponse(options, url, request.der);
+		if (!fetched.ok) return fetched;
 
 		const parsed = parseResponse(fetched.bytes);
 		if (!parsed.ok) return parsed;
