@@ -14,6 +14,13 @@
  * limitations under the License.
  */
 
+/**
+ * Builds the `/oauth` router: checks the composition, decides which optional
+ * routes mount, and mounts middleware and routes in an order that is part of
+ * their behaviour. It also answers `/oauth/introspect` on the token itself,
+ * whose session and amr reads core's drift guards pin to this file.
+ */
+
 import {
 	type AccessTokenDenylist,
 	type AppConfig,
@@ -137,6 +144,209 @@ export const oauthRoutePaths = (mounted: {
 	...(mounted.federationToken ? ["/federation/:name/token"] : []),
 	...(mounted.consent ? ["/consent"] : []),
 ];
+
+/**
+ * `/oauth/introspect` once the caller check let the request through: verifies
+ * the token, its audience pinned to the calling client when one authenticated;
+ * `active: false` for a revoked family, an ended session or a compound `cnf`;
+ * otherwise RFC 7662 §2.2's metadata. An outage is `503`, never a verdict.
+ */
+const createIntrospectionHandler = ({
+	keyStore,
+	canonicalIssuer,
+	legacyTypAccept: legacyTypAcceptOpt,
+	accessTokenDenylist,
+	subjectRevocation,
+	refreshTokenFamilyRevocation,
+	userSessionStore,
+	auditSink,
+	logger,
+}: {
+	readonly keyStore: KeyStore;
+	readonly canonicalIssuer: string;
+	readonly legacyTypAccept: boolean | undefined;
+	readonly accessTokenDenylist: AccessTokenDenylist | undefined;
+	readonly subjectRevocation: SubjectRevocation | undefined;
+	readonly refreshTokenFamilyRevocation: RefreshTokenFamilyRevocation | undefined;
+	readonly userSessionStore: UserSessionStore | undefined;
+	readonly auditSink: AuditSink | undefined;
+	readonly logger: Logger;
+}): RequestHandler => {
+	const { answerIntrospectionUnavailable, answerStoreUnavailable } = introspectionOutageAnswers({
+		auditSink,
+		logger,
+	});
+	return async (req: Request, res: Response) => {
+		const { token } = req.body;
+		if (!token) {
+			return res.status(200).json({ active: false });
+		}
+		try {
+			// Bind aud to the calling client when introspectClientAuthMw has
+			// identified it; on the bearer-self-intro fall-through path the
+			// identity is unknown and the verifier records the gap via
+			// `jwt_verify_aud_skipped`. The denylist is consulted so revoked
+			// ATs report active:false.
+			//
+			// The pin is the calling client's `allowedAudiences` ∪
+			// `{clientId}` — the ceiling every issuing grant already derives
+			// an audience within — so a resource server can introspect the
+			// tokens issued FOR it under RFC 8707. See README, "The audience
+			// pin is `allowedAudiences` ∪ `{client_id}`".
+			const expectedAudiences = req.oauthClient
+				? [...(req.oauthClient.allowedAudiences ?? []), req.oauthClient.clientId]
+				: null;
+			const verified = await verifyJwt(token, keyStore, {
+				type: "access_token",
+				expectedIssuer: canonicalIssuer,
+				...(expectedAudiences ? { expectedAudience: expectedAudiences } : {}),
+				legacyTypAccept: legacyTypAcceptOpt ?? false,
+				// Token-accepting surface — forward what the composition
+				// wired, jti denylist and subject watermark both.
+				revocation: { denylist: accessTokenDenylist, subjectRevocation },
+				logger,
+			});
+			const { payload } = verified;
+
+			// Cascading revoke (RFC 7009 §2.1 SHOULD): once a refresh_token family
+			// is revoked, every access_token minted under the same authorization
+			// grant introspects as inactive. family_id is optional — older tokens
+			// without it still succeed (no cascade available).
+			const rawFamilyId = (payload as Record<string, unknown>).family_id;
+			const familyId =
+				typeof rawFamilyId === "string" && rawFamilyId.length > 0 ? rawFamilyId : null;
+			if (familyId !== null && refreshTokenFamilyRevocation) {
+				let revoked: boolean;
+				try {
+					revoked = await refreshTokenFamilyRevocation.isFamilyRevoked(familyId);
+				} catch (cause) {
+					// Fail-closed, as the outage it is: 503, not `active: false`
+					// — see `answerIntrospectionUnavailable` for why a verdict
+					// on the token is the wrong answer to a store that did not
+					// answer.
+					return answerStoreUnavailable(req, res, {
+						store: "refresh_token_family",
+						details: { family_id: familyId },
+						cause,
+					});
+				}
+				if (revoked) {
+					emitAuditEvent(auditSink, {
+						timestamp: new Date(),
+						type: "introspect.family_revoked",
+						ip: req.ip,
+						userAgent: req.get("user-agent"),
+						details: { family_id: familyId },
+					});
+					return res.status(200).json({ active: false });
+				}
+			}
+
+			// Session liveness — the same read `/oauth/userinfo` and the
+			// refresh grant perform. Without it a token whose browser session
+			// was logged out would introspect as `active: true`, and a
+			// resource server that trusts introspection (the BFF / proxy
+			// topology) would honour it for the rest of its lifetime. It
+			// answers for the access token in hand, not for the refresh-token
+			// family behind it. Fail-closed on a store throw: 503, never
+			// `active: false`. See README, "Revoked families and ended
+			// sessions".
+			//
+			// The session is the token's own `sid` or, for a token-exchange
+			// result, its `liveness_sid` (core's `livenessSidOf`): a derived
+			// token ends with the session it came from, as its subject token
+			// does.
+			const sid = livenessSidOf(payload as Record<string, unknown>);
+			if (sid !== null && userSessionStore) {
+				let userSession: Awaited<ReturnType<UserSessionStore["get"]>>;
+				try {
+					userSession = await userSessionStore.get(sid);
+				} catch (cause) {
+					return answerStoreUnavailable(req, res, {
+						store: "user_session",
+						details: { sid },
+						cause,
+					});
+				}
+				if (!userSession) {
+					emitAuditEvent(auditSink, {
+						timestamp: new Date(),
+						type: "introspect.session_invalid",
+						ip: req.ip,
+						userAgent: req.get("user-agent"),
+						details: { sid },
+					});
+					return res.status(200).json({ active: false });
+				}
+			}
+
+			const { exp, iat, iss, aud, sub, jti } = payload;
+			const claims = payload as Record<string, unknown>;
+			const azp = typeof claims.azp === "string" ? claims.azp : undefined;
+			const rawClientId = claims.client_id;
+			const clientId = typeof rawClientId === "string" ? rawClientId : azp;
+			const scope = typeof claims.scope === "string" ? claims.scope : undefined;
+			// token_type follows the confirmation: "DPoP" for cnf.jkt (RFC 9449
+			// §5); "Bearer" for mTLS-bound tokens (RFC 8705 §3: cnf.x5t#S256
+			// does not change the wire-level type) and unbound ones.
+			// `extractConfirmation` validates member types; see
+			// types/introspect.mts.
+			// A compound cnf (both `jkt` and `x5t#S256`) is refused: this AS
+			// cannot mint one, so it signals a forgery or a bug. Reporting
+			// either member would claim a binding never issued, and dropping
+			// the cnf while keeping `active: true` would let the RS treat a
+			// bound token as plain bearer. Fail closed, as the refresh path
+			// does (`grants/refreshToken.mts`); RFC 7662 §2.2 permits
+			// `active: false` for any token the AS declines to vouch for.
+			if (isCompoundConfirmation(claims.cnf)) {
+				logger.warn(
+					{ reason: "compound_cnf", site: "introspect_body", jti },
+					"introspect_compound_cnf_rejected",
+				);
+				return res.status(200).json({ active: false });
+			}
+			const cnf = extractConfirmation(claims.cnf);
+			// Core's one reading, which the token response uses too.
+			const tokenType = tokenTypeForConfirmation(claims.cnf);
+			const response: IntrospectResponse = {
+				active: true,
+				exp,
+				iat,
+				iss,
+				aud,
+				sub,
+				azp,
+				client_id: clientId,
+				scope,
+				token_type: tokenType,
+				jti: typeof jti === "string" ? jti : undefined,
+				cnf,
+				// The authentication event the token carries: RFC 9470 §6.2's `acr`
+				// and `auth_time`, and its `amr`.
+				acr: wellFormedAcr(claims.acr),
+				amr: wellFormedAmr(claims.amr),
+				auth_time: wellFormedAuthTime(claims.auth_time),
+			};
+			return res.status(200).json(formatObject(response));
+		} catch (cause) {
+			if (isVerificationUnavailable(cause)) {
+				return answerIntrospectionUnavailable(req, res, cause);
+			}
+			// Same non-access-token signal as the bearer path (`routes/introspectCaller.mts`):
+			// `active: false` whatever the reason (RFC 7662 §2.2), and only
+			// `reason === "typ"` logs `introspect_non_access_token`; other
+			// reasons already emit `jwt_verify_rejected` from the central
+			// verifier, so SIEM rules should NOT double-count.
+			if (cause instanceof JwtVerificationError && cause.reason === "typ") {
+				logger.warn(
+					{ reason: "non_access_token", site: "introspect_body" },
+					"introspect_non_access_token",
+				);
+			}
+			return res.status(200).json({ active: false });
+		}
+	};
+};
 
 export const createOAuthRouter = async (
 	express: {
@@ -362,11 +572,6 @@ export const createOAuthRouter = async (
 				})
 			: undefined;
 
-	const { answerIntrospectionUnavailable, answerStoreUnavailable } = introspectionOutageAnswers({
-		auditSink,
-		logger,
-	});
-
 	// Federation endpoints — mount conditionally based on available stores and config.
 	// federationTokenStore is required for both POST /oauth/federation/:name/logout and
 	// POST /oauth/federation/:name/token.
@@ -444,185 +649,27 @@ export const createOAuthRouter = async (
 				auditSink,
 				logger,
 			}),
-			async (req: Request, res: Response) => {
-				const { token } = req.body;
-				if (!token) {
-					return res.status(200).json({ active: false });
-				}
-				try {
-					// Bind aud to the calling client when introspectClientAuthMw has
-					// identified it; on the bearer-self-intro fall-through path the
-					// identity is unknown and the verifier records the gap via
-					// `jwt_verify_aud_skipped`. The denylist is consulted so revoked
-					// ATs report active:false.
-					//
-					// The pin is the calling client's `allowedAudiences` ∪
-					// `{clientId}` — the ceiling every issuing grant already derives
-					// an audience within — so a resource server can introspect the
-					// tokens issued FOR it under RFC 8707. See README, "The audience
-					// pin is `allowedAudiences` ∪ `{client_id}`".
-					const expectedAudiences = req.oauthClient
-						? [...(req.oauthClient.allowedAudiences ?? []), req.oauthClient.clientId]
-						: null;
-					const verified = await verifyJwt(token, keyStore, {
-						type: "access_token",
-						expectedIssuer: canonicalIssuer,
-						...(expectedAudiences ? { expectedAudience: expectedAudiences } : {}),
-						legacyTypAccept: legacyTypAcceptOpt ?? false,
-						// Token-accepting surface — forward what the composition
-						// wired, jti denylist and subject watermark both.
-						revocation: { denylist: accessTokenDenylist, subjectRevocation },
-						logger,
-					});
-					const { payload } = verified;
-
-					// Cascading revoke (RFC 7009 §2.1 SHOULD): once a refresh_token family
-					// is revoked, every access_token minted under the same authorization
-					// grant introspects as inactive. family_id is optional — older tokens
-					// without it still succeed (no cascade available).
-					const rawFamilyId = (payload as Record<string, unknown>).family_id;
-					const familyId =
-						typeof rawFamilyId === "string" && rawFamilyId.length > 0 ? rawFamilyId : null;
-					if (familyId !== null && refreshTokenFamilyRevocation) {
-						let revoked: boolean;
-						try {
-							revoked = await refreshTokenFamilyRevocation.isFamilyRevoked(familyId);
-						} catch (cause) {
-							// Fail-closed, as the outage it is: 503, not `active: false`
-							// — see `answerIntrospectionUnavailable` for why a verdict
-							// on the token is the wrong answer to a store that did not
-							// answer.
-							return answerStoreUnavailable(req, res, {
-								store: "refresh_token_family",
-								details: { family_id: familyId },
-								cause,
-							});
-						}
-						if (revoked) {
-							emitAuditEvent(auditSink, {
-								timestamp: new Date(),
-								type: "introspect.family_revoked",
-								ip: req.ip,
-								userAgent: req.get("user-agent"),
-								details: { family_id: familyId },
-							});
-							return res.status(200).json({ active: false });
-						}
-					}
-
-					// Session liveness — the same read `/oauth/userinfo` and the
-					// refresh grant perform. Without it a token whose browser session
-					// was logged out would introspect as `active: true`, and a
-					// resource server that trusts introspection (the BFF / proxy
-					// topology) would honour it for the rest of its lifetime. It
-					// answers for the access token in hand, not for the refresh-token
-					// family behind it. Fail-closed on a store throw: 503, never
-					// `active: false`. See README, "Revoked families and ended
-					// sessions".
-					//
-					// The session is the token's own `sid` or, for a token-exchange
-					// result, its `liveness_sid` (core's `livenessSidOf`): a derived
-					// token ends with the session it came from, as its subject token
-					// does.
-					const sid = livenessSidOf(payload as Record<string, unknown>);
-					if (sid !== null && userSessionStore) {
-						let userSession: Awaited<ReturnType<UserSessionStore["get"]>>;
-						try {
-							userSession = await userSessionStore.get(sid);
-						} catch (cause) {
-							return answerStoreUnavailable(req, res, {
-								store: "user_session",
-								details: { sid },
-								cause,
-							});
-						}
-						if (!userSession) {
-							emitAuditEvent(auditSink, {
-								timestamp: new Date(),
-								type: "introspect.session_invalid",
-								ip: req.ip,
-								userAgent: req.get("user-agent"),
-								details: { sid },
-							});
-							return res.status(200).json({ active: false });
-						}
-					}
-
-					const { exp, iat, iss, aud, sub, jti } = payload;
-					const claims = payload as Record<string, unknown>;
-					const azp = typeof claims.azp === "string" ? claims.azp : undefined;
-					const rawClientId = claims.client_id;
-					const clientId = typeof rawClientId === "string" ? rawClientId : azp;
-					const scope = typeof claims.scope === "string" ? claims.scope : undefined;
-					// token_type follows the confirmation: "DPoP" for cnf.jkt (RFC 9449
-					// §5); "Bearer" for mTLS-bound tokens (RFC 8705 §3: cnf.x5t#S256
-					// does not change the wire-level type) and unbound ones.
-					// `extractConfirmation` validates member types; see
-					// types/introspect.mts.
-					// A compound cnf (both `jkt` and `x5t#S256`) is refused: this AS
-					// cannot mint one, so it signals a forgery or a bug. Reporting
-					// either member would claim a binding never issued, and dropping
-					// the cnf while keeping `active: true` would let the RS treat a
-					// bound token as plain bearer. Fail closed, as the refresh path
-					// does (`grants/refreshToken.mts`); RFC 7662 §2.2 permits
-					// `active: false` for any token the AS declines to vouch for.
-					if (isCompoundConfirmation(claims.cnf)) {
-						logger.warn(
-							{ reason: "compound_cnf", site: "introspect_body", jti },
-							"introspect_compound_cnf_rejected",
-						);
-						return res.status(200).json({ active: false });
-					}
-					const cnf = extractConfirmation(claims.cnf);
-					// Core's one reading, which the token response uses too.
-					const tokenType = tokenTypeForConfirmation(claims.cnf);
-					const response: IntrospectResponse = {
-						active: true,
-						exp,
-						iat,
-						iss,
-						aud,
-						sub,
-						azp,
-						client_id: clientId,
-						scope,
-						token_type: tokenType,
-						jti: typeof jti === "string" ? jti : undefined,
-						cnf,
-						// The authentication event the token carries: RFC 9470 §6.2's `acr`
-						// and `auth_time`, and its `amr`.
-						acr: wellFormedAcr(claims.acr),
-						amr: wellFormedAmr(claims.amr),
-						auth_time: wellFormedAuthTime(claims.auth_time),
-					};
-					return res.status(200).json(formatObject(response));
-				} catch (cause) {
-					if (isVerificationUnavailable(cause)) {
-						return answerIntrospectionUnavailable(req, res, cause);
-					}
-					// Same non-access-token signal as the bearer path above:
-					// `active: false` whatever the reason (RFC 7662 §2.2), and only
-					// `reason === "typ"` logs `introspect_non_access_token`; other
-					// reasons already emit `jwt_verify_rejected` from the central
-					// verifier, so SIEM rules should NOT double-count.
-					if (cause instanceof JwtVerificationError && cause.reason === "typ") {
-						logger.warn(
-							{ reason: "non_access_token", site: "introspect_body" },
-							"introspect_non_access_token",
-						);
-					}
-					return res.status(200).json({ active: false });
-				}
-			},
+			createIntrospectionHandler({
+				keyStore,
+				canonicalIssuer,
+				legacyTypAccept: legacyTypAcceptOpt,
+				accessTokenDenylist,
+				subjectRevocation,
+				refreshTokenFamilyRevocation,
+				userSessionStore,
+				auditSink,
+				logger,
+			}),
 		);
 
-	// /authorize — the RFC 6749 §4.1 authorization-code sequence lives in
-	// routes/authorize.mts, behind the rate-limit guard; the handler consumes
-	// the composition-time `options`, so no request re-reads config. OIDC Core
-	// §3.1.2.1: "Authorization Servers MUST support the use of the HTTP GET and
-	// POST methods". The handler reads its parameters through one accessor
-	// (`authorizeParams`), so both methods run the identical sequence of
-	// checks. Mounted only with the authorization_code grant.
+	// /authorize — the RFC 6749 §4.1 authorization-code sequence is run by
+	// routes/authorize.mts, whose stages are the routes/authorize*.mts files,
+	// behind the rate-limit guard; the handler consumes the composition-time
+	// `options`, so no request re-reads config. OIDC Core §3.1.2.1:
+	// "Authorization Servers MUST support the use of the HTTP GET and POST
+	// methods". The handler and its stages read their parameters through one
+	// accessor (`authorizeParams`), so both methods run the identical sequence
+	// of checks. Mounted only with the authorization_code grant.
 	if (authorizeHandler !== undefined) {
 		router
 			.get("/authorize", rateLimitGuard(OAUTH_RATE_LIMIT_PREFIXES.authorize), authorizeHandler)
