@@ -21,7 +21,9 @@
  * own events), so the type system does not tie the inventory to what the
  * bundled packages emit. This suite pins `BUILT_IN_AUDIT_EVENT_TYPES` against
  * the emission sites in both directions: an event emitted but not listed
- * fails, and an event listed but no longer emitted fails.
+ * fails, and an event listed but no longer emitted fails — unless it is
+ * declared in {@link DECLARED_NOT_EMITTED}, which names the build step that
+ * is to emit it, and which it leaves once something does.
  */
 
 import { type Dirent, readdirSync, readFileSync } from "node:fs";
@@ -32,6 +34,24 @@ import { describe, expect, it } from "vitest";
 import { BUILT_IN_AUDIT_EVENT_TYPES } from "#/audit/types.mjs";
 
 const repoRoot = resolve(fileURLToPath(import.meta.url), "../../../../../..");
+
+/**
+ * Events listed before anything emits them, each with the step that is to:
+ * the MFA ADR's D28 events, emitted by the MFA package's routes from its
+ * build-order step named here. An entry is listed and not emitted; the step
+ * that emits it deletes it here.
+ */
+const DECLARED_NOT_EMITTED: Readonly<Record<string, string>> = {
+	"mfa.challenge.sent": "the MFA ADR's build-order step 8 (its third part)",
+	"mfa.verified": "the MFA ADR's build-order step 8 (its third part)",
+	"mfa.verify.failure": "the MFA ADR's build-order step 8 (its third part)",
+	"mfa.enrollment_state_inconsistent": "the MFA ADR's build-order step 9",
+	"mfa.factor.enrolled": "the MFA ADR's build-order step 9",
+	"mfa.recovery_codes.generated": "the MFA ADR's build-order step 9",
+	"mfa.locked": "the MFA ADR's build-order step 10",
+	"mfa.recovery_code.used": "the MFA ADR's build-order step 10",
+	"mfa.factor.removed": "the MFA ADR's build-order step 12",
+};
 
 /** Shipped sources: packages/*\/src and the standalone template, tests excluded. */
 function listShippedSources(): string[] {
@@ -173,11 +193,39 @@ describe("built-in audit event inventory", () => {
 		expect(unlisted, "emitted but missing from BUILT_IN_AUDIT_EVENT_TYPES").toEqual([]);
 	});
 
-	it("lists no event nothing emits any more", () => {
+	it("lists no event nothing emits any more, but the ones declared before their step", () => {
 		const dead = (BUILT_IN_AUDIT_EVENT_TYPES as readonly string[]).filter(
-			(type) => !emitted.has(type),
+			(type) => !emitted.has(type) && !Object.hasOwn(DECLARED_NOT_EMITTED, type),
 		);
 		expect(dead, "listed but no emission site found").toEqual([]);
+	});
+
+	it("declares as not yet emitted only listed events nothing emits", () => {
+		const declared = Object.keys(DECLARED_NOT_EMITTED);
+		expect(
+			declared.filter((type) => !(BUILT_IN_AUDIT_EVENT_TYPES as readonly string[]).includes(type)),
+			"declared but not listed in BUILT_IN_AUDIT_EVENT_TYPES",
+		).toEqual([]);
+		expect(
+			declared.filter((type) => emitted.has(type)),
+			"emitted now: delete it from DECLARED_NOT_EMITTED",
+		).toEqual([]);
+	});
+
+	it("lists the MFA ADR's D28 events", () => {
+		expect(BUILT_IN_AUDIT_EVENT_TYPES).toEqual(
+			expect.arrayContaining([
+				"mfa.challenge.sent",
+				"mfa.verified",
+				"mfa.verify.failure",
+				"mfa.locked",
+				"mfa.factor.enrolled",
+				"mfa.factor.removed",
+				"mfa.recovery_code.used",
+				"mfa.recovery_codes.generated",
+				"mfa.enrollment_state_inconsistent",
+			]),
+		);
 	});
 });
 
