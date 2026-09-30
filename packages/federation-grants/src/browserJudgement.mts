@@ -15,8 +15,9 @@
  */
 
 /**
- * Whether this browser may go on with this intent now: session admission on the
- * cookie's claim as the step's action, then the flow's own conditions. Asked at
+ * Whether this browser may go on with this intent now: the claim's subject and
+ * the express session first, then session admission on the cookie's claim as
+ * the step's action, then the flow's own conditions. Asked at
  * every step; fails closed, so a store that cannot answer is an outage, never a yes.
  */
 

@@ -17,8 +17,9 @@
 /**
  * The browser flow's one reading of each value it takes from a request: a
  * parameter, the express session id, the cookie's claim, whether it is a
- * prefetch, and the callback's parameters for the adapter. Reads only; a value
- * that is not a non-empty string is absent.
+ * prefetch, and the callback's parameters for the adapter. Reads only. A single
+ * parameter that is not a non-empty string is absent; the callback's parameters
+ * keep every string value, empty ones included, except `code` and `state`.
  */
 
 import { type CookieCarrier, cookieClaim, type SessionClaim } from "@o3co/auth-provider-core";
