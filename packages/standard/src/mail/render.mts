@@ -31,8 +31,8 @@ import {
 
 /** A mail as the standard text renders it. */
 export interface RenderedMail {
-	/** One line, with no control character. */
-	readonly subject: string;
+	/** The mail's subject line: one line, with no control character. */
+	readonly subjectLine: string;
 	readonly text: string;
 }
 
@@ -44,24 +44,24 @@ const TEMPLATES: Readonly<
 	Record<
 		MailPurpose,
 		{
-			readonly subject: string;
+			readonly subjectLine: string;
 			readonly opening: (code: string) => string;
 			readonly closing: string;
 		}
 	>
 > = {
 	login_code: {
-		subject: "Your sign-in code",
+		subjectLine: "Your sign-in code",
 		opening: (code) => `Your sign-in code is ${code}.`,
 		closing: IF_NOT_SIGNING_IN,
 	},
 	account_email_proof: {
-		subject: "Confirm your email address",
+		subjectLine: "Confirm your email address",
 		opening: (code) => `Your code to confirm this email address is ${code}.`,
 		closing: IF_NOT_SIGNING_IN,
 	},
 	email_factor_enrollment: {
-		subject: "Confirm sign-in codes by email",
+		subjectLine: "Confirm sign-in codes by email",
 		opening: (code) => `Your code to receive sign-in codes at this address is ${code}.`,
 		closing: "If you did not ask for this, someone may know your password: change it.",
 	},
@@ -98,7 +98,7 @@ export function renderStandardMail(mail: MailSend, nowMs: number): RenderedMail 
 	const minutes = minutesLeft(expiresAtMs, nowMs);
 	const template = TEMPLATES[purpose];
 	return {
-		subject: template.subject,
+		subjectLine: template.subjectLine,
 		text: `${template.opening(code)}\nIt expires in ${minutes} ${minutes === 1 ? "minute" : "minutes"}.\n\n${template.closing}\n`,
 	};
 }
