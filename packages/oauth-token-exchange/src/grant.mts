@@ -378,12 +378,13 @@ async function familyRefusal(
 ): Promise<GrantHandlerResult | null> {
 	const familyId = reportedFamily(validated);
 	if (familyId === undefined) return null;
-	const forRole = (description: string) =>
-		role === "actor" ? `actor_token ${description}` : description;
 	const revocation = deps.refreshTokenFamilyRevocation;
 	if (!revocation) {
 		return invalidRequest(
-			forRole("refresh token family revocation not configured (revocation cannot be verified)"),
+			forRole(
+				role,
+				"refresh token family revocation not configured (revocation cannot be verified)",
+			),
 		);
 	}
 	let revoked: boolean;
@@ -400,12 +401,12 @@ async function familyRefusal(
 			result: {
 				status: 503,
 				error: "temporarily_unavailable",
-				errorDescription: forRole("refresh token store unavailable"),
+				errorDescription: forRole(role, "refresh token store unavailable"),
 			},
 		};
 	}
 	if (!revoked) return null;
-	return invalidRequest(forRole("family_revoked"));
+	return invalidRequest(forRole(role, "family_revoked"));
 }
 
 /**
@@ -431,8 +432,6 @@ async function sessionRefusal(
 	const sid = validated.sid ? validated.sid : undefined;
 	const store = deps.userSessionStore;
 	if (sid === undefined || store === undefined) return null;
-	const forRole = (description: string) =>
-		role === "actor" ? `actor_token ${description}` : description;
 	let live: boolean;
 	try {
 		// The session grant's rule: the record must be this token's
@@ -448,12 +447,17 @@ async function sessionRefusal(
 			result: {
 				status: 503,
 				error: "temporarily_unavailable",
-				errorDescription: forRole("session store unavailable"),
+				errorDescription: forRole(role, "session store unavailable"),
 			},
 		};
 	}
 	if (live) return null;
-	return invalidRequest(forRole("session_invalid"));
+	return invalidRequest(forRole(role, "session_invalid"));
+}
+
+/** A refusal's description for the token it refuses: the actor's carry the `actor_token ` prefix. */
+function forRole(role: "subject" | "actor", description: string): string {
+	return role === "actor" ? `actor_token ${description}` : description;
 }
 
 export { ACCESS_TOKEN_TYPE } from "./validator/selfIssuedAccessToken.mjs";
