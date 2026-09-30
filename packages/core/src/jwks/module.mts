@@ -16,14 +16,21 @@
 
 import { createRequire } from "node:module";
 import type { Router } from "express";
+import { coreReference } from "../config/references.mjs";
 import { defineModule } from "../modules/index.mjs";
 import { resolveJwksCacheMaxAge } from "./cache.mjs";
 import { resolveJwksPath } from "./path.mjs";
 import { createRouter as createJwksRouter } from "./router.mjs";
+import { JWKS_SECTION } from "./section.mjs";
 
 /**
  * JWKS publishing module: contributes the `/.well-known/jwks.json` route (or
- * `oauth.jwt.jwksPath`) so verifiers (BFFs, RPs) can validate tokens offline.
+ * `jwks.path`) so verifiers (BFFs, RPs) can validate tokens offline.
+ *
+ * Built from its own section, `jwks { path, cacheMaxAge }`, alone; core's own
+ * `reference.conf` binds each key's variable (`JWKS_PATH`,
+ * `JWKS_CACHE_MAX_AGE`). The keys' old paths, `oauth.jwt.jwksPath` and
+ * `oauth.jwt.jwksCacheMaxAge`, refuse boot naming the new ones.
  *
  * Unlike OIDC discovery (issuer-gated, in the oauth module), it depends only
  * on the `keyStore` and is mounted whenever the provider signs tokens. For
@@ -40,26 +47,32 @@ import { createRouter as createJwksRouter } from "./router.mjs";
  */
 export const jwksModule = defineModule({
 	name: "jwks",
-	requires: ["config", "keyStore"] as const,
+	section: {
+		schema: JWKS_SECTION,
+		reference: coreReference(),
+		relocatedFrom: {
+			"oauth.jwt.jwksPath": "path",
+			"oauth.jwt.jwksCacheMaxAge": "cacheMaxAge",
+		},
+	},
+	requires: ["keyStore"] as const,
 	optional: ["logger"] as const,
 	contributes: {
 		routes: [
 			async (deps) => {
 				const require = createRequire(import.meta.url);
 				const express = require("express") as { Router: () => Router };
-				const config = deps.config as {
-					oauth?: { jwt?: { jwksPath?: unknown; jwksCacheMaxAge?: unknown } };
-				};
+				const jwks = { jwks: deps.section ?? {} };
 				// One path for both the router and the route advertisement, so the
 				// boot collision checker catches a second module claiming GET
-				// <jwksPath>, which would otherwise shadow the route `jwks_uri` names.
-				const path = resolveJwksPath(config);
+				// <path>, which would otherwise shadow the route `jwks_uri` names.
+				const path = resolveJwksPath(jwks);
 				return {
 					id: "jwks",
 					mountPath: "/",
 					handler: createJwksRouter(express, deps.keyStore, {
 						path,
-						cacheMaxAgeSeconds: resolveJwksCacheMaxAge(config),
+						cacheMaxAgeSeconds: resolveJwksCacheMaxAge(jwks),
 						...(deps.logger ? { logger: deps.logger } : {}),
 					}),
 					routes: [{ method: "GET", path }],
@@ -70,10 +83,7 @@ export const jwksModule = defineModule({
 		// as the route, so the two cannot drift. The aggregator prefixes it with
 		// the issuer and emits the document only when an issuer is configured.
 		discoveryMetadata: [
-			(deps) => {
-				const config = deps.config as { oauth?: { jwt?: { jwksPath?: unknown } } };
-				return { endpoints: { jwks_uri: resolveJwksPath(config) } };
-			},
+			(deps) => ({ endpoints: { jwks_uri: resolveJwksPath({ jwks: deps.section ?? {} }) } }),
 		],
 	},
 });

@@ -67,8 +67,15 @@ interface VocabularyRow {
 	readonly declared?: string;
 }
 
-/** The one reading of `deployment.mode`; every other module requires the `deploymentMode` slot. */
+/** The one reading of `core.deployment.mode`; every other module requires the `deploymentMode` slot. */
 const DEPLOYMENT_MODE_HOME = "packages/core/src/deployment/mode.mts";
+
+/**
+ * Where core's own section declares the paths it moved from: it names the
+ * section's old path, `deployment`, and `deployment.mode`, the old path of
+ * the key and of its variable, and reads neither.
+ */
+const DEPLOYMENT_RELOCATION_HOME = "packages/core/src/config/core-relocations.mts";
 
 // One row per symbol, so the home has to define each of them: an
 // alternation would pass a home that kept one and lost the others. Two rows
@@ -472,12 +479,12 @@ const VOCABULARY: readonly VocabularyRow[] = [
 		definition: /(?:function|const)\s+getBoundMfaTransaction\b/,
 	},
 	{
-		concept: "deployment.mode as core reads it — the deploymentMode slot's value",
+		concept: "core.deployment.mode as core reads it — the deploymentMode slot's value",
 		home: DEPLOYMENT_MODE_HOME,
 		definition: /(?:function|const)\s+deploymentModeOf\b/,
 	},
 	{
-		concept: "deployment.mode as core reads it — the check a reader holds the slot's value to",
+		concept: "core.deployment.mode as core reads it — the check a reader holds the slot's value to",
 		home: DEPLOYMENT_MODE_HOME,
 		definition: /(?:function|const)\s+checkDeploymentMode\b/,
 	},
@@ -1463,11 +1470,19 @@ function sessionRecordReadSites(): Map<string, SessionRecordRead[]> {
 	return sites;
 }
 
-/** Core's configuration schema: the one schema that declares `deployment`. */
+/**
+ * Core's configuration schema: the one schema that declares `deployment` —
+ * under core's own section, and presence-only at the path it moved from.
+ */
 const DEPLOYMENT_SCHEMA_HOME = "packages/core/src/config/application.schema.mts";
 
 /** The literals that name the section or its key, as a helper or a reflection is handed them. */
-const DEPLOYMENT_NAMES: ReadonlySet<string> = new Set(["deployment", "deployment.mode"]);
+const DEPLOYMENT_NAMES: ReadonlySet<string> = new Set([
+	"deployment",
+	"deployment.mode",
+	"core.deployment",
+	"core.deployment.mode",
+]);
 
 /** The Zod calls whose object argument names a schema's keys. `omit` names a key to drop, and is not one. */
 const SHAPE_BUILDERS: ReadonlySet<string> = new Set([
@@ -1495,7 +1510,8 @@ interface DeploymentTouch {
  *   non-null or through a cast alike); a destructuring that names it, by
  *   declaration, parameter or assignment, flat or nested, renamed or not,
  *   its key an identifier, a string or a computed string; and a string
- *   literal `"deployment"` or `"deployment.mode"` anywhere a value goes — an
+ *   literal `"deployment"`, `"deployment.mode"`, `"core.deployment"` or
+ *   `"core.deployment.mode"` anywhere a value goes — an
  *   element access, `Reflect.get`, a path handed to a helper, an `in` test,
  *   a type's indexed access. An alias (`const d = config.deployment`) is
  *   caught at the access that made it.
@@ -1977,6 +1993,7 @@ describe("design-vocabulary map (docs/design-vocabulary.md)", () => {
 			'const m = get(config, "deployment").mode;',
 			'const m = Reflect.get(config, "deployment");',
 			'const m = at(config, "deployment.mode");',
+			'const m = at(config, "core.deployment.mode");',
 			'const m = at(config, ["deployment", "mode"]);',
 			'if ("deployment" in config) use(config);',
 			'type D = AppConfig["deployment"];',
@@ -2040,12 +2057,13 @@ describe("design-vocabulary map (docs/design-vocabulary.md)", () => {
 		expect(scope.some((file) => file.includes("/__tests__/"))).toBe(false);
 	});
 
-	it("reads the deployment section only in its home: every other module requires the deploymentMode slot", () => {
+	it("reads the deployment section only in its home, and names its old paths only where core declares them: every other module requires the deploymentMode slot", () => {
 		const counts = Object.fromEntries(
 			Object.entries(deploymentTouchSites("read")).map(([file, found]) => [file, found.length]),
 		);
 		expect(counts, `require the deploymentMode slot (${DEPLOYMENT_MODE_HOME})`).toEqual({
 			[DEPLOYMENT_MODE_HOME]: 1,
+			[DEPLOYMENT_RELOCATION_HOME]: 3,
 		});
 	});
 
@@ -2054,7 +2072,7 @@ describe("design-vocabulary map (docs/design-vocabulary.md)", () => {
 			Object.entries(deploymentTouchSites("schema")).map(([file, found]) => [file, found.length]),
 		);
 		expect(counts, "the section is core's: a module requires the deploymentMode slot").toEqual({
-			[DEPLOYMENT_SCHEMA_HOME]: 1,
+			[DEPLOYMENT_SCHEMA_HOME]: 2,
 		});
 	});
 

@@ -35,6 +35,16 @@ import type { z } from "zod";
 export type SectionSchema = z.ZodType;
 
 /**
+ * A `relocatedFrom` map entry whose new path — `to`, inside the section as a
+ * string entry is — no environment variable binds: a key moved there is
+ * refused naming none.
+ */
+export interface RelocationWithoutVariable {
+	readonly to: string;
+	readonly environmentVariable: null;
+}
+
+/**
  * The `section` field of a manifest: the module's own configuration section.
  *
  * At stage 1, before any factory runs, boot reads the value at {@link at},
@@ -90,6 +100,10 @@ export interface ModuleSection<S extends SectionSchema = SectionSchema> {
 	 *   section itself and `null` for a removed key (`{ "oauth.dpop": "",
 	 *   "oauth.dpop.iat-window-seconds": "iatWindowSeconds" }`). The most
 	 *   specific covering entry maps a key; keys below it carry over unchanged.
+	 *   An entry written `{ to, environmentVariable: null }` moves to `to` like
+	 *   a string entry, for a new path no variable binds
+	 *   ({@link RelocationWithoutVariable}): the refusal names none, and no
+	 *   variable may be declared renamed onto it.
 	 *
 	 * An old path may not be or hold a loaded module's section, overlap a new
 	 * path, or overlap another loaded module's old path
@@ -105,7 +119,9 @@ export interface ModuleSection<S extends SectionSchema = SectionSchema> {
 	 * A bridge for the 0.x line: removed at the first major release; the
 	 * relocated-paths drift test fails the cut that forgets.
 	 */
-	readonly relocatedFrom?: readonly string[] | Readonly<Record<string, string | null>>;
+	readonly relocatedFrom?:
+		| readonly string[]
+		| Readonly<Record<string, string | null | RelocationWithoutVariable>>;
 	/**
 	 * The environment variables whose names changed: each old name, mapped to
 	 * the old path it was bound to (`{ LEGACY_RETRIES: "legacy.retries" }`).

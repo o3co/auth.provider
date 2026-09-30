@@ -16,7 +16,7 @@
 
 /**
  * Redis-backed `DeviceCodeStore`, so the device grant can run under
- * `deployment.mode = "multi"`: the user approves on one replica while the device
+ * `core.deployment.mode = "multi"`: the user approves on one replica while the device
  * polls another. Each operation is one Lua script (`makeIoredisClients`), which
  * keeps the port's atomicity; `DeviceCodeStoreClient` states what each must
  * guarantee.
@@ -240,7 +240,7 @@ export const redisDeviceCodeStoreBuilder: AdapterBuilder<DeviceCodeStore> = (con
  * `defineModule` manifest for the Redis DeviceCodeStore (static composition;
  * the builder above is for runtime selection). Declares no `replicaSafety`, so
  * a composition mounting `deviceGrantModule` with it may declare
- * `deployment.mode = "multi"`. The `deviceCodeStoreClient` slot comes from
+ * `core.deployment.mode = "multi"`. The `deviceCodeStoreClient` slot comes from
  * `makeIoredisClients` (or the standalone's shared clients module); config
  * lives under `redisDeviceCodeStore`, never a bare top-level `keyPrefix`.
  */

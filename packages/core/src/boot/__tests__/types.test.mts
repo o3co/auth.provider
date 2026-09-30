@@ -369,10 +369,20 @@ describe("BootError", () => {
 // ---------------------------------------------------------------------------
 
 describe("AppHandle", () => {
-	it("has exactly the six expected keys", () => {
+	it("has exactly the seven expected keys", () => {
 		expectTypeOf<keyof AppHandle>().toEqualTypeOf<
-			"router" | "listen" | "dispose" | "components" | "routes" | "readinessProbes"
+			| "router"
+			| "listen"
+			| "dispose"
+			| "cleanupAllowanceMs"
+			| "components"
+			| "routes"
+			| "readinessProbes"
 		>();
+	});
+
+	it("reports the cleanup allowance as a number of milliseconds, or nothing", () => {
+		expectTypeOf<AppHandle["cleanupAllowanceMs"]>().toEqualTypeOf<number | undefined>();
 	});
 });
 

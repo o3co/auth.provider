@@ -90,7 +90,7 @@ export function validateEncryptionMode(
 	}
 	if (deploymentMode === "multi") {
 		reasons.push(
-			'deployment.mode is "multi" (a multi-replica deployment is never a development box)',
+			'core.deployment.mode is "multi" (a multi-replica deployment is never a development box)',
 		);
 	}
 

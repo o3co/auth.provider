@@ -29,6 +29,7 @@ export {
 	AdapterFactoryError,
 	type BuilderContext,
 	createAdapterFactory,
+	type LifecycleCleanupOptions,
 	type LifecycleRegistrar,
 } from "./adapters/AdapterFactory.mjs";
 export {
@@ -563,11 +564,15 @@ export type {
 	MfaVerification,
 	MfaVerifyContext,
 } from "./mfa/factor.mjs";
-export type {
-	MfaFactorRecord,
-	MfaFactorRecordUpdate,
-	MfaFactorStore,
-	MfaFactorStoreFactory,
+export {
+	isMfaFactorId,
+	isMfaFactorKind,
+	isMfaFactorLabel,
+	MFA_FACTOR_LABEL_MAX_LENGTH,
+	type MfaFactorRecord,
+	type MfaFactorRecordUpdate,
+	type MfaFactorStore,
+	type MfaFactorStoreFactory,
 } from "./mfa/factorStore.mjs";
 export {
 	createMfaFactorStoreFactory,
@@ -588,6 +593,28 @@ export {
 // MFA (the MFA ADR): the stores, their memory adapters, factories and
 // modules
 export { memoryMfaFactorStoreModule, memoryMfaTransactionStoreModule } from "./mfa/module.mjs";
+// The wire format of the Store's MFA endpoints, shared by the Store adapter
+// and a Store's own implementation (or a fake of one)
+export {
+	fromMfaStoreFactor,
+	type MfaStoreCreateRequest,
+	type MfaStoreDeleteRequest,
+	type MfaStoreFactor,
+	type MfaStoreFactorBinding,
+	type MfaStoreFactorChanges,
+	type MfaStoreListAnswer,
+	type MfaStoreListReading,
+	type MfaStoreListRequest,
+	type MfaStoreMarkEnrolledRequest,
+	type MfaStoreUpdateAnswer,
+	type MfaStoreUpdateRequest,
+	readMfaStoreFactor,
+	readMfaStoreFactorChanges,
+	readMfaStoreListAnswer,
+	toMfaStoreFactor,
+	toMfaStoreFactorChanges,
+	toMfaStoreUpdateRequest,
+} from "./mfa/storeWire.mjs";
 export {
 	checkMfaLockoutPolicy,
 	checkMfaTransactionTransitions,
@@ -683,6 +710,8 @@ export type {
 	// core composes the budgets into.
 	RateLimitBudgetFactory,
 	RateLimitBudgetResolver,
+	// A relocatedFrom entry whose new path no environment variable binds.
+	RelocationWithoutVariable,
 	// The manifest's replica-safety declaration, so a package
 	// building its manifest from config can type the value it attaches.
 	ReplicaSafetyDeclaration,

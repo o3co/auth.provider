@@ -26,8 +26,10 @@
  * cleanup is the component wiring, in `lifecycle.test.mts`.
  */
 
+import { FEDERATION_GRANT_SETTING_DEFAULTS } from "@o3co/auth-provider-core";
 import { describe, expect, it } from "vitest";
 import { createFederationGrantBackground } from "#/background.mjs";
+import { federationGrantsCleanupTailMs } from "#/index.mjs";
 
 /** A promise with its resolver, for holding work open across an assertion. */
 function deferred(): { readonly promise: Promise<void>; resolve: () => void } {
@@ -187,5 +189,57 @@ describe("createFederationGrantBackground", () => {
 		background.register(Promise.reject(new Error("tail failed")));
 
 		await expect(background.drain()).resolves.toBeUndefined();
+	});
+});
+
+describe("the tail the drain registers", () => {
+	/** The budgets `reference.conf` ships. */
+	const shipped = {
+		upstreamHardTimeoutMs: FEDERATION_GRANT_SETTING_DEFAULTS.upstreamHardTimeoutMs,
+		persistRetryBudgetMs: FEDERATION_GRANT_SETTING_DEFAULTS.persistRetryBudgetMs,
+		lockWaitMs: FEDERATION_GRANT_SETTING_DEFAULTS.lockWaitMs,
+	};
+
+	it("is 45 seconds under the shipped budgets: one refresh's longest tail (25 s + 3 s + 5 s) plus a 12-second margin", () => {
+		expect(shipped).toEqual({
+			upstreamHardTimeoutMs: 25_000,
+			persistRetryBudgetMs: 3_000,
+			lockWaitMs: 5_000,
+		});
+		expect(federationGrantsCleanupTailMs(shipped)).toBe(45_000);
+	});
+
+	it("grows with each raised budget", () => {
+		expect(federationGrantsCleanupTailMs({ ...shipped, upstreamHardTimeoutMs: 60_000 })).toBe(
+			60_000 + 3_000 + 5_000 + 12_000,
+		);
+		expect(federationGrantsCleanupTailMs({ ...shipped, persistRetryBudgetMs: 10_000 })).toBe(
+			25_000 + 10_000 + 5_000 + 12_000,
+		);
+		expect(federationGrantsCleanupTailMs({ ...shipped, lockWaitMs: 20_000 })).toBe(
+			25_000 + 3_000 + 20_000 + 12_000,
+		);
+	});
+
+	it("never goes below 45 seconds when a budget is lowered", () => {
+		expect(
+			federationGrantsCleanupTailMs({
+				upstreamHardTimeoutMs: 1_000,
+				persistRetryBudgetMs: 1_000,
+				lockWaitMs: 0,
+			}),
+		).toBe(45_000);
+	});
+
+	it("never asks a timer for more than it can count: an oversized sum is capped, not overflowed", () => {
+		// setTimeout takes a 32-bit signed delay; past it the timer fires after
+		// about a millisecond, which would turn a generous allowance into none.
+		expect(
+			federationGrantsCleanupTailMs({
+				upstreamHardTimeoutMs: 2_000_000_000,
+				persistRetryBudgetMs: 2_000_000_000,
+				lockWaitMs: 5_000,
+			}),
+		).toBe(2_147_483_647);
 	});
 });

@@ -1,0 +1,12 @@
+{
+	"extends": "./tsconfig.json",
+	"compilerOptions": {
+		"noEmit": true
+	},
+	// The build config excludes `__tests__`, so a type assertion made in a test
+	// would never be compiled. Paired with vitest.config.mts's `typecheck`
+	// block: vitest decides which test files it collects, this decides what tsc
+	// is given, and a file in only one of the two looks checked but is not.
+	"include": ["src/**/*.mts"],
+	"exclude": ["node_modules", "dist"]
+}

@@ -20,7 +20,7 @@
  * 1. `readSwitches` — its own files over core's `reference.conf`, read with
  *    core's transitional reader — parses only `SWITCHES`, what the template
  *    reads before it knows its modules: the switches `buildModules` chooses
- *    them by, and the configuration's `sessionRequirements`, which
+ *    them by, and the configuration's `core.sessionRequirements`, which
  *    `expectedSessionRequirements` reads beside `mfa.mode` — the one path it
  *    reads raw (`OWN_READS`, `readMfaMode`), until the MFA ADR's build-order
  *    step 20 (the log level is the `logging` module's section, which
@@ -76,7 +76,7 @@ const ENVIRONMENTS: Readonly<Record<string, Readonly<Record<string, string>>>> =
 	"the secrets alone": REQUIRED_ENV,
 	"every adapter on Redis, MFA optional": {
 		...REQUIRED_ENV,
-		DEPLOYMENT_MODE: "multi",
+		CORE_DEPLOYMENT_MODE: "multi",
 		SESSION_STORAGE_TYPE: "redis",
 		SESSION_STORAGE_REDIS_URL: "redis://redis:6379",
 		REFRESH_TOKEN_FAMILY_STORE_REDIS_URL: "redis://redis:6379",
@@ -271,7 +271,7 @@ describe("phase two: what createApp is handed", () => {
 		) as unknown as Record<string, Record<string, unknown>>;
 		// An environment variable's string, as HOCON substituted it: createApp parses it.
 		expect(resolved.http?.port).toBe("8080");
-		expect(resolved.sessionRequirements).toEqual({ expected: ["mfa"] });
+		expect(resolved.core?.sessionRequirements).toEqual({ expected: ["mfa"] });
 	});
 });
 

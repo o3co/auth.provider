@@ -46,6 +46,8 @@ const OPTIONAL = [
 	"csrfGuard",
 	// The issuer the routes and the acquisition settings are built on.
 	"oauthTokenSettings",
+	// Where an enabled deployment registers the drain's tail.
+	"lifecycleRegistrar",
 ] as const;
 type Declared = ProviderDeps<(typeof REQUIRES)[number], (typeof OPTIONAL)[number]>;
 

@@ -668,6 +668,67 @@ describe("createApp — 7b. dispose logs a failed adapter cleanup through the lo
 });
 
 // ---------------------------------------------------------------------------
+// 7c. The cleanup allowance a module's builder declares
+// ---------------------------------------------------------------------------
+
+describe("createApp — 7c. the cleanup allowance a module registers", () => {
+	/** A module whose builder registers one cleanup with `tailMs`, recording that it ran. */
+	const tailedModule = (tailMs: number, ran: string[] = []) =>
+		defineModule<never, "lifecycleRegistrar">({
+			name: "TailedMod",
+			optional: ["lifecycleRegistrar"],
+			provides: {
+				slotCA: (deps) => {
+					deps.lifecycleRegistrar?.register(
+						async () => {
+							ran.push("closed");
+						},
+						{ tailMs },
+					);
+					return 1;
+				},
+			},
+			lifecycle: { slotCA: { eager: true } },
+		});
+
+	it("is the longest tail a module registered through lifecycleRegistrar", async () => {
+		const handle = await createApp({
+			modules: [tailedModule(45_000)],
+			bootstrapComponents: minBoot,
+			contributionKinds: makeStubCollectors(),
+		});
+		expect(handle.cleanupAllowanceMs).toBe(45_000);
+		await handle.dispose();
+	});
+
+	it("is absent when no cleanup declared a tail", async () => {
+		const handle = await createApp({
+			modules: [],
+			bootstrapComponents: minBoot,
+			contributionKinds: makeStubCollectors(),
+		});
+		expect(handle.cleanupAllowanceMs).toBeUndefined();
+		await handle.dispose();
+	});
+
+	it("refuses boot on a tail no timer can wait, and still runs the cleanup registered with it", async () => {
+		const ran: string[] = [];
+		await expect(
+			createApp({
+				modules: [tailedModule(Number.POSITIVE_INFINITY, ran)],
+				bootstrapComponents: minBoot,
+				contributionKinds: makeStubCollectors(),
+			}),
+		).rejects.toMatchObject({
+			name: "BootError",
+			stage: "materializeComponents",
+			cause: expect.objectContaining({ name: "RangeError" }),
+		});
+		expect(ran).toEqual(["closed"]);
+	});
+});
+
+// ---------------------------------------------------------------------------
 // 8. ReadinessRegistrar seeding
 // ---------------------------------------------------------------------------
 

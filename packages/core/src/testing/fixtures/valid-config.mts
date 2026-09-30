@@ -20,6 +20,9 @@ import type {
 	CoreConfig,
 	fullSectionsSchema,
 } from "../../config/application.schema.mjs";
+import { CORE_RELOCATIONS } from "../../config/core-relocations.mjs";
+import { RENAMED_VARIABLES_SECTION } from "../../config/removed-keys.mjs";
+import { renamedVariableCaptures } from "../renamedVariables.mjs";
 
 /**
  * Minimal schema-valid config factories for tests that parse `CoreConfigSchema`
@@ -41,6 +44,10 @@ import type {
  *   `enabled === true`) and omits `client_credentials`, as the standalone
  *   template does.
  *
+ * Like a resolution of `reference.conf` under an environment that sets none
+ * of them, it captures every variable core's own section declares renamed,
+ * `null` (`renamed-variables`), which boot requires of any configuration.
+ *
  * `satisfies CoreConfig` / `AppConfig` type-checks the result while keeping
  * literal types, so tests assign it without casts. Each call returns a fresh,
  * mutable object.
@@ -50,6 +57,13 @@ type FullSectionsConfig = z.infer<typeof fullSectionsSchema>;
 
 export function makeValidCoreConfig() {
 	return {
+		...{
+			[RENAMED_VARIABLES_SECTION]: renamedVariableCaptures({
+				modules: [],
+				core: CORE_RELOCATIONS,
+				env: {},
+			}),
+		},
 		http: { port: 3000, trustProxy: false, readinessTimeoutMs: 1000 },
 		logging: { level: "info" },
 		oauth: {
@@ -95,7 +109,7 @@ export function makeValidCoreConfig() {
 		// This composition expects nothing of session admission, stated because
 		// a createApp test that installs a consumer of admission must state its
 		// posture. A test of the declaration itself removes the key.
-		sessionRequirements: { expected: [] },
+		core: { sessionRequirements: { expected: [] } },
 	} satisfies CoreConfig;
 }
 

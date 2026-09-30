@@ -165,7 +165,7 @@ function withFeatures(config: AppConfig, features: Features): AppConfig {
 		oauth: Record<string, Record<string, unknown>>;
 		federations: Record<string, Record<string, unknown>>;
 		webauthn?: Record<string, unknown>;
-		sessionRequirements?: { expected?: readonly string[] };
+		core?: { sessionRequirements?: { expected?: readonly string[] } };
 	};
 	return {
 		...config,
@@ -174,14 +174,17 @@ function withFeatures(config: AppConfig, features: Features): AppConfig {
 		// own declares them beside it, over the template's `[]`. Applied to
 		// phase one's switches and again to the configuration as resolved, so
 		// each name is kept once.
-		sessionRequirements: {
-			expected: [
-				...new Set([
-					...(c.sessionRequirements?.expected ?? []),
-					...(features.mfa ? ["mfa"] : []),
-					...FIXTURE_REQUIREMENTS,
-				]),
-			],
+		core: {
+			...c.core,
+			sessionRequirements: {
+				expected: [
+					...new Set([
+						...(c.core?.sessionRequirements?.expected ?? []),
+						...(features.mfa ? ["mfa"] : []),
+						...FIXTURE_REQUIREMENTS,
+					]),
+				],
+			},
 		},
 		// The MFA package on, as a deployment turns it on: `optional` — users
 		// with a factor are challenged, nobody is forced — and a key of its own.

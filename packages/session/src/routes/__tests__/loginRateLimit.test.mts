@@ -284,7 +284,7 @@ describe("/session/login rate limiting — fallback", () => {
 
 // ---------------------------------------------------------------------------
 // The per-process fallback under the replica guard, by the `deploymentMode`
-// slot core fills from `deployment.mode`. Under `"multi"` with no shared
+// slot core fills from `core.deployment.mode`. Under `"multi"` with no shared
 // limiter, its buckets would be per replica, so the route refuses to mount;
 // `"single"` is silent, like the guard; `"unset"` keeps the warning. The
 // configuration's own `deployment` is not read.
@@ -292,7 +292,7 @@ describe("/session/login rate limiting — fallback", () => {
 
 describe("/session/login rate limiting — fallback under the deploymentMode slot", () => {
 	const withDeployment = (mode: "single" | "multi"): AppConfig =>
-		({ ...stubConfig, deployment: { mode } }) as unknown as AppConfig;
+		({ ...stubConfig, core: { deployment: { mode } } }) as unknown as AppConfig;
 
 	const build = (
 		deploymentMode: DeploymentMode,

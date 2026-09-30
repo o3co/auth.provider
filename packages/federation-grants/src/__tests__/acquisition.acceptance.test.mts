@@ -270,7 +270,7 @@ const boot = async (
 				...makeValidCoreConfig(),
 				...(requirement === undefined
 					? {}
-					: { sessionRequirements: { expected: [requirement.name] } }),
+					: { core: { sessionRequirements: { expected: [requirement.name] } } }),
 				federations: {
 					upstream: {
 						enabled: true,

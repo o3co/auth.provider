@@ -28,7 +28,7 @@
  *
  * Substituted (the first two are overrides `buildModules` offers):
  * - client and user repositories: in memory, not YAML off disk;
- * - the refresh-token family store under `deployment.mode = "single"`: memory,
+ * - the refresh-token family store under `core.deployment.mode = "single"`: memory,
  *   not the shipped Redis, so the single-replica boot opens no sockets;
  * - upstream identity providers: core's fake OpenID Provider, through the
  *   `fetch` option the Google and OIDC adapters take; the config bridges'
@@ -105,7 +105,7 @@ export const SINGLE_ENV: Readonly<Record<string, string>> = {
 	SESSION_SECRET: "all-modules-composition-session.at-least-32-bytes.ok",
 	SESSION_SECURE: "false",
 	SESSION_NAME: "auth.session",
-	DEPLOYMENT_MODE: "single",
+	CORE_DEPLOYMENT_MODE: "single",
 	SESSION_STORAGE_TYPE: "memory",
 	USER_SESSION_STORES_ADAPTER: "memory",
 	RATE_LIMITER_ADAPTER: "memory",
@@ -144,7 +144,7 @@ export const SINGLE_ENV: Readonly<Record<string, string>> = {
  */
 export const MULTI_ENV: Readonly<Record<string, string>> = {
 	...SINGLE_ENV,
-	DEPLOYMENT_MODE: "multi",
+	CORE_DEPLOYMENT_MODE: "multi",
 	SESSION_STORAGE_TYPE: "redis",
 	SESSION_STORAGE_REDIS_URL: "redis://redis.test:6379",
 	REFRESH_TOKEN_FAMILY_STORE_REDIS_URL: "redis://redis.test:6379",

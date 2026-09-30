@@ -21,7 +21,7 @@
  * verifier, nonce, consent challenge), which another replica cannot see and
  * a restart loses. It loses no established grant, so it is allowed beside a
  * durable grant store on one replica and refused under
- * `deployment.mode = "multi"`.
+ * `core.deployment.mode = "multi"`.
  *
  * Every transition is one synchronous critical section, so the port's
  * atomic operations are atomic here because nothing awaits inside them.

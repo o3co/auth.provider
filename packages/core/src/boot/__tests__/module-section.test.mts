@@ -574,7 +574,7 @@ describe("a module's section — refused, more", () => {
 			createApp({
 				modules: [sectioned],
 				bootstrapComponents: bootWith({
-					deployment: { mode: "multi" },
+					core: { deployment: { mode: "multi" } },
 					"fixture-section": { retries: "x" },
 				}),
 			}),

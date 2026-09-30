@@ -67,18 +67,16 @@ describe("JWKS path resolution", () => {
 	it("defaults to the conventional well-known path", () => {
 		expect(DEFAULT_JWKS_PATH).toBe("/.well-known/jwks.json");
 		expect(resolveJwksPath({})).toBe(DEFAULT_JWKS_PATH);
-		expect(resolveJwksPath({ oauth: { jwt: {} } })).toBe(DEFAULT_JWKS_PATH);
+		expect(resolveJwksPath({ jwks: {} })).toBe(DEFAULT_JWKS_PATH);
 	});
 
-	it("honors a configured oauth.jwt.jwksPath override", () => {
-		expect(resolveJwksPath({ oauth: { jwt: { jwksPath: "/keys/jwks.json" } } })).toBe(
-			"/keys/jwks.json",
-		);
+	it("honors a configured jwks.path", () => {
+		expect(resolveJwksPath({ jwks: { path: "/keys/jwks.json" } })).toBe("/keys/jwks.json");
 	});
 
 	it("falls back to default for an empty/invalid configured value", () => {
-		expect(resolveJwksPath({ oauth: { jwt: { jwksPath: "" } } })).toBe(DEFAULT_JWKS_PATH);
-		expect(resolveJwksPath({ oauth: { jwt: { jwksPath: 123 } } })).toBe(DEFAULT_JWKS_PATH);
+		expect(resolveJwksPath({ jwks: { path: "" } })).toBe(DEFAULT_JWKS_PATH);
+		expect(resolveJwksPath({ jwks: { path: 123 } })).toBe(DEFAULT_JWKS_PATH);
 	});
 
 	it.each([
@@ -98,7 +96,7 @@ describe("JWKS path resolution", () => {
 		// one registered breaks the route ↔ jwks_uri single-source guarantee, so
 		// the resolver rejects it (falls back to the safe default) rather than
 		// publishing keys at — and advertising — a broken/ambiguous path.
-		expect(resolveJwksPath({ oauth: { jwt: { jwksPath } } })).toBe(DEFAULT_JWKS_PATH);
+		expect(resolveJwksPath({ jwks: { path: jwksPath } })).toBe(DEFAULT_JWKS_PATH);
 	});
 
 	it("registers exactly the default path when no path is passed (single source of truth)", () => {
@@ -152,18 +150,18 @@ describe("JWKS cache max-age resolution", () => {
 	it("defaults to 300 seconds", () => {
 		expect(DEFAULT_JWKS_CACHE_MAX_AGE).toBe(300);
 		expect(resolveJwksCacheMaxAge({})).toBe(300);
-		expect(resolveJwksCacheMaxAge({ oauth: { jwt: {} } })).toBe(300);
+		expect(resolveJwksCacheMaxAge({ jwks: {} })).toBe(300);
 	});
 
-	it("honors a configured oauth.jwt.jwksCacheMaxAge override (incl. 0)", () => {
-		expect(resolveJwksCacheMaxAge({ oauth: { jwt: { jwksCacheMaxAge: 3600 } } })).toBe(3600);
-		expect(resolveJwksCacheMaxAge({ oauth: { jwt: { jwksCacheMaxAge: 0 } } })).toBe(0);
+	it("honors a configured jwks.cacheMaxAge (incl. 0)", () => {
+		expect(resolveJwksCacheMaxAge({ jwks: { cacheMaxAge: 3600 } })).toBe(3600);
+		expect(resolveJwksCacheMaxAge({ jwks: { cacheMaxAge: 0 } })).toBe(0);
 	});
 
 	it("falls back to default for negative / non-integer / non-number values", () => {
-		expect(resolveJwksCacheMaxAge({ oauth: { jwt: { jwksCacheMaxAge: -1 } } })).toBe(300);
-		expect(resolveJwksCacheMaxAge({ oauth: { jwt: { jwksCacheMaxAge: 1.5 } } })).toBe(300);
-		expect(resolveJwksCacheMaxAge({ oauth: { jwt: { jwksCacheMaxAge: "60" } } })).toBe(300);
+		expect(resolveJwksCacheMaxAge({ jwks: { cacheMaxAge: -1 } })).toBe(300);
+		expect(resolveJwksCacheMaxAge({ jwks: { cacheMaxAge: 1.5 } })).toBe(300);
+		expect(resolveJwksCacheMaxAge({ jwks: { cacheMaxAge: "60" } })).toBe(300);
 	});
 });
 

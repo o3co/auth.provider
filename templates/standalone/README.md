@@ -168,9 +168,11 @@ raising it globally to accommodate one topology would weaken it for the other.
 Put the throttling that protects the BFF's *own* users in front of the BFF,
 where per-user identity still exists.
 
-**Set `DEPLOYMENT_MODE=multi` once you run more than one replica.** Boot then *fails* if any in-memory store that has to be shared is still wired, naming every offender and what it costs — user sessions forking (back-channel logout reaches one replica, a logged-out session stays valid on the others), rate-limit counters multiplying, access-token revocation not propagating, a single-use client assertion or WebAuthn challenge replayable once per replica. The check reads the declaration each installed module carries on its own manifest rather than a list of library module names, so this template's own in-memory modules — the user-session stores (`USER_SESSION_STORES_ADAPTER=memory`), the authorization-code repository (`OAUTH_CODE_ADAPTER=memory`) and the federation token store (`FEDERATION_TOKEN_STORE_TYPE=memory`, the default) — are refused by name too. So are express-session's own store under `SESSION_STORAGE_TYPE=memory` (#474) and the default memory rate limiter (`core-rate-limiter-memory`, `RATE_LIMITER_ADAPTER=memory`). With the mode unset nothing is refused: every one of them is listed in a single `replica_unsafe_adapters` warning at boot. (The login and WebAuthn-options routes carry per-process fallback limiters that warn on their own, but only in a composition that wires no `rateLimiter` at all, which this template never does; see the operator runbook.) With `DEPLOYMENT_MODE=single` the check is silent, because you have said there is one replica. This template does not install DPoP; a composition that adds it records every accepted proof in the same replay seen-set as `private_key_jwt` (`REPLAY_SEEN_SET_ADAPTER`), so it gets the same answer — `memory` is refused under `DEPLOYMENT_MODE=multi` and listed in the unset-mode warning, and the shipped `redis` shares DPoP's records across replicas — see the dpop package's [operator requirements](../../packages/dpop/README.md#operator-requirements).
+**Set `CORE_DEPLOYMENT_MODE=multi` once you run more than one replica.** Boot then *fails* if any in-memory store that has to be shared is still wired, naming every offender and what it costs — user sessions forking (back-channel logout reaches one replica, a logged-out session stays valid on the others), rate-limit counters multiplying, access-token revocation not propagating, a single-use client assertion or WebAuthn challenge replayable once per replica. The check reads the declaration each installed module carries on its own manifest rather than a list of library module names, so this template's own in-memory modules — the user-session stores (`USER_SESSION_STORES_ADAPTER=memory`), the authorization-code repository (`OAUTH_CODE_ADAPTER=memory`) and the federation token store (`FEDERATION_TOKEN_STORE_TYPE=memory`, the default) — are refused by name too. So are express-session's own store under `SESSION_STORAGE_TYPE=memory` (#474) and the default memory rate limiter (`core-rate-limiter-memory`, `RATE_LIMITER_ADAPTER=memory`). With the mode unset nothing is refused: every one of them is listed in a single `replica_unsafe_adapters` warning at boot. (The login and WebAuthn-options routes carry per-process fallback limiters that warn on their own, but only in a composition that wires no `rateLimiter` at all, which this template never does; see the operator runbook.) With `CORE_DEPLOYMENT_MODE=single` the check is silent, because you have said there is one replica. This template does not install DPoP; a composition that adds it records every accepted proof in the same replay seen-set as `private_key_jwt` (`REPLAY_SEEN_SET_ADAPTER`), so it gets the same answer — `memory` is refused under `CORE_DEPLOYMENT_MODE=multi` and listed in the unset-mode warning, and the shipped `redis` shares DPoP's records across replicas — see the dpop package's [operator requirements](../../packages/dpop/README.md#operator-requirements).
 
-Be aware of what this check *cannot* do: if you scale to N replicas without ever setting `DEPLOYMENT_MODE`, nothing fails. A process holding all its state in its own memory has no shared medium through which to notice peers — the condition is undetectable from inside exactly when it is true. Set the variable as part of scaling, not after something breaks.
+The variable sets `core.deployment.mode`. `DEPLOYMENT_MODE`, its old name, refuses boot set alone or beside `CORE_DEPLOYMENT_MODE` at a different value; beside it at the same value, it boots.
+
+Be aware of what this check *cannot* do: if you scale to N replicas without ever setting `CORE_DEPLOYMENT_MODE`, nothing fails. A process holding all its state in its own memory has no shared medium through which to notice peers — the condition is undetectable from inside exactly when it is true. Set the variable as part of scaling, not after something breaks.
 
 **Access-token revocation needs a denylist, and the template ships one.** `POST /oauth/revoke` revokes an access token by writing its `jti` to the `accessTokenDenylist`, which token verification and introspection consult. Boot *fails* if the endpoint is mounted with no denylist behind it: RFC 7009 obliges the endpoint to answer `200`, so an unwired denylist would tell you a token is revoked while it keeps working until it expires. `accessTokenDenylist.adapter` defaults to `"redis"` here (`ACCESS_TOKEN_DENYLIST_ADAPTER=memory` for single-instance local work) and shares the ioredis socket configured by `REFRESH_TOKEN_FAMILY_STORE_REDIS_URL`, so it costs no extra connection. A deployment that genuinely does not revoke access tokens sets `OAUTH_REVOCATION_ACCESS_TOKEN=unsupported` instead; the endpoint then answers `unsupported_token_type` for `token_type_hint=access_token`. **Refresh-token revocation works in either case and never needed a denylist.**
 
@@ -179,10 +181,10 @@ Other multi-replica considerations covered by the default modules:
 - The `express-session` store (`sessionStoreModule`) is its own connection: `SESSION_STORAGE_TYPE=redis` with `SESSION_STORAGE_REDIS_URL` (`session.storage.redis.url`) pointing at the shared instance.
 - The user-session stores switch on `userSessionStores.adapter = "redis"` (`USER_SESSION_STORES_ADAPTER`), which wires `redisSessionStoresModule` off the shared ioredis connection — the one `REFRESH_TOKEN_FAMILY_STORE_REDIS_URL` configures.
 - The authorization-code repository switches on `oauth.code.adapter` (`OAUTH_CODE_ADAPTER`); the template ships `"redis"`, on that same connection. `oauth.code.adapter` wins; the deprecated `repositories.code.type` (`CLIENT_CODE_TYPE`) is read, with a `config_key_deprecated` warning at boot, only when it is unset — which the shipped `config/application.conf` never leaves it. `CLIENT_CODE_ENDPOINT_URI` (`repositories.code.redis.endpointUri`) is bound by `config/application.conf` but nothing reads it: the Redis code repository runs on the shared connection, so there is one Redis URL for every adapter.
-- The replay seen-set — the `jti` single-use record behind `private_key_jwt` client authentication (#484) — switches on `replaySeenSet.adapter` (`REPLAY_SEEN_SET_ADAPTER`); the template ships `"redis"` on the shared connection, and `memory` is refused under `DEPLOYMENT_MODE=multi` because a captured client assertion would replay once per replica.
-- The consent step for clients that are not first-party (#527) switches on `consentStore.adapter` (`CONSENT_STORE_ADAPTER`). It is off (`none`) by default; `memory` is refused under `DEPLOYMENT_MODE=multi`, because a consent granted on one replica would be asked for again on every other and a consent page's parked request would be unknown to the replica that receives the answer. `redis` (#561) keeps both on the shared connection. See [Consent Store](#consent-store).
+- The replay seen-set — the `jti` single-use record behind `private_key_jwt` client authentication (#484) — switches on `replaySeenSet.adapter` (`REPLAY_SEEN_SET_ADAPTER`); the template ships `"redis"` on the shared connection, and `memory` is refused under `CORE_DEPLOYMENT_MODE=multi` because a captured client assertion would replay once per replica.
+- The consent step for clients that are not first-party (#527) switches on `consentStore.adapter` (`CONSENT_STORE_ADAPTER`). It is off (`none`) by default; `memory` is refused under `CORE_DEPLOYMENT_MODE=multi`, because a consent granted on one replica would be asked for again on every other and a consent page's parked request would be unknown to the replica that receives the answer. `redis` (#561) keeps both on the shared connection. See [Consent Store](#consent-store).
 - The federation token store defaults to memory. Set `FEDERATION_TOKEN_STORE_TYPE=redis` (`federationTokenStore.type = "redis"`) and supply `REDIS_FEDERATION_TOKEN_STORE_ENCRYPTION_KEY` — 32 bytes, base64-encoded (`openssl rand -base64 32`); the store encrypts the upstream refresh tokens it holds. It shares the ioredis socket configured by `REFRESH_TOKEN_FAMILY_STORE_REDIS_URL`. See [Federation Token Store](#federation-token-store).
-- Federation grants (#593), when enabled, keep two more stores: the grants themselves (`FEDERATION_GRANT_STORE_ADAPTER`) and acquisition's records (`FEDERATION_GRANT_INTENT_STORE_ADAPTER`). Both ship `redis` on the shared socket; `memory` for either is refused under `DEPLOYMENT_MODE=multi`, and Redis grants beside memory user-session stores are refused on any replica count, because the grants would outlive the boundary that ends them. See [Federation Grants](#federation-grants).
+- Federation grants (#593), when enabled, keep two more stores: the grants themselves (`FEDERATION_GRANT_STORE_ADAPTER`) and acquisition's records (`FEDERATION_GRANT_INTENT_STORE_ADAPTER`). Both ship `redis` on the shared socket; `memory` for either is refused under `CORE_DEPLOYMENT_MODE=multi`, and Redis grants beside memory user-session stores are refused on any replica count, because the grants would outlive the boundary that ends them. See [Federation Grants](#federation-grants).
 
 ## Usage
 
@@ -365,6 +367,8 @@ fail fast rather than silently falling back to defaults.
 | `OAUTH_JWT_PUBLIC_KEY` | — | PEM-encoded public key |
 | `OAUTH_JWT_PUBLIC_KEY_PATH` | — | Path to PEM public key file |
 | `OAUTH_JWT_LEGACY_TYP_ACCEPT` | `false` | Accept tokens whose `typ` header is absent. `false` rejects them, treating a typ-less token as the misconfiguration or downgrade attempt it usually is. Set `true` only for a bounded migration window while v0.4.x tokens are still in circulation. |
+| `JWKS_PATH` | `/.well-known/jwks.json` | Where the verification keys are published under the issuer, and what discovery advertises as `jwks_uri` (`jwks.path`). An absolute path with no `//`, dot-segment, query, fragment, backslash, percent-encoding or control character. |
+| `JWKS_CACHE_MAX_AGE` | `300` | The JWKS response's `Cache-Control: public, max-age`, in seconds (`jwks.cacheMaxAge`). Keep it well below the key-overlap window, so a rotated key reaches caching verifiers in time. |
 
 **Signing keys are required.** The default algorithm is `EdDSA` and there is no
 key-material default: a deployment that sets none fails at boot naming the keys
@@ -420,7 +424,7 @@ other grant ignores it and mints the default.
 | `SESSION_SAME_SITE` | `lax` | `SameSite` attribute (`lax`, `strict`, `none`). `none` **requires** `SESSION_SECURE=true` — browsers drop a `SameSite=None` cookie that is not `Secure`, so boot refuses the combination rather than letting every login fail silently in the client. |
 | `SESSION_DOMAIN` | — | Cookie domain (unset by default) |
 | `SESSION_CSRF_TTL_SECONDS` | `7200` | Lifetime of an issued CSRF token, in seconds. Integer, 1–86400; boot fails otherwise (an *empty* value coerces to `0` and would silently disable the token arm). |
-| `SESSION_STORAGE_TYPE` | `redis` | Session store backend: `redis` or `memory`. `memory` is per process and is refused under `DEPLOYMENT_MODE=multi` like the other in-memory stores (#474) |
+| `SESSION_STORAGE_TYPE` | `redis` | Session store backend: `redis` or `memory`. `memory` is per process and is refused under `CORE_DEPLOYMENT_MODE=multi` like the other in-memory stores (#474) |
 | `SESSION_STORAGE_REDIS_URL` | `redis://localhost:6379` | Redis connection URL for session storage |
 | `SESSION_STORAGE_REDIS_PASSWORD` | — | Redis password for session storage |
 
@@ -474,7 +478,7 @@ reason to call cross-origin:
 | `/oauth/userinfo` | `GET`, `POST` | OIDC Core §5.3 defines both |
 | `/oauth/revoke` | `POST` | RFC 7009 §2.1 — a public client revoking its own tokens on sign-out |
 | `/.well-known/openid-configuration` | `GET` | Discovery, fetched by browser client libraries |
-| `/.well-known/jwks.json` | `GET` | Same; follows `oauth.jwt.jwksPath` when you override it |
+| `/.well-known/jwks.json` | `GET` | Same; follows `jwks.path` when you override it |
 
 `/oauth/introspect` and `/oauth/authorize` are deliberately **not** included.
 Introspection is server-to-server and already refuses public clients, so no
@@ -646,7 +650,7 @@ what the Store checks are in the same foundation README section.
 
 The upstream IdP tokens (a Google refresh token, say) held on behalf of a
 session. Memory by default, which forks per replica and is refused under
-`DEPLOYMENT_MODE=multi`; the Redis store shares the socket configured by
+`CORE_DEPLOYMENT_MODE=multi`; the Redis store shares the socket configured by
 `REFRESH_TOKEN_FAMILY_STORE_REDIS_URL` and encrypts records at rest, so it
 needs a key.
 
@@ -654,7 +658,7 @@ needs a key.
 |---|---|---|
 | `FEDERATION_TOKEN_STORE_TYPE` | `memory` | Federation token store backend: `memory` or `redis` |
 | `REDIS_FEDERATION_TOKEN_STORE_ENCRYPTION_KEY` | — | AES-256-GCM key for records at rest: 32 bytes, base64-encoded (`openssl rand -base64 32`). **Required** with `redis` unless the mode below is `allow-plaintext` |
-| `REDIS_FEDERATION_TOKEN_STORE_ENCRYPTION_MODE` | `required` | `required` or `allow-plaintext`. Plaintext is refused when the config was selected by a production/staging environment (`CONFIG_ENV` or `NODE_ENV`) and under `DEPLOYMENT_MODE=multi` in any environment, unless `FEDERATION_TOKENS_ALLOW_INSECURE=1` is also set — development only |
+| `REDIS_FEDERATION_TOKEN_STORE_ENCRYPTION_MODE` | `required` | `required` or `allow-plaintext`. Plaintext is refused when the config was selected by a production/staging environment (`CONFIG_ENV` or `NODE_ENV`) and under `CORE_DEPLOYMENT_MODE=multi` in any environment, unless `FEDERATION_TOKENS_ALLOW_INSECURE=1` is also set — development only |
 
 `ttl` (seconds; keep it above the upstream refresh-token lifetime) and the #291
 `scanFallback` migration flag live under `redisFederationTokenStore` in a
@@ -666,7 +670,7 @@ Where an end-user's consent to a client that is not first-party is recorded,
 together with the `/authorize` request parked while the consent page asks
 (#527, #552). One switch wires both. `none` by default: such clients are
 refused and only first-party clients are served. `memory` forks per replica and
-is refused under `DEPLOYMENT_MODE=multi`; `redis` (#561) shares both over the
+is refused under `CORE_DEPLOYMENT_MODE=multi`; `redis` (#561) shares both over the
 socket configured by `REFRESH_TOKEN_FAMILY_STORE_REDIS_URL`.
 
 | Variable | Default | Description |
@@ -692,7 +696,7 @@ needs before it issues a refresh token is in
 | `FEDERATION_GRANTS_IDENTITY_LOOKUP` | `required` | Whether the connect callback refuses an upstream account already linked to another local user. `required` needs a user repository that covers every connection's registration (below); `unsupported` records that the check is not made |
 | `FEDERATION_GRANT_STORE_ADAPTER` | `redis` | Where grants live: `memory` (one replica; lost on restart, every user reconnects) or `redis` (the shared socket) |
 | `FEDERATION_GRANT_INTENT_STORE_ADAPTER` | `redis` | Where acquisition's records live — the intent a backend lodged, the consent challenge, the connect transaction: `memory` (one replica; a restart loses flows in progress and nothing else) or `redis` |
-| `FEDERATION_GRANTS_ENCRYPTION_MODE` | `required` | `required` or `allow-plaintext`. Plaintext is refused in production/staging and under `DEPLOYMENT_MODE=multi` unless `FEDERATION_TOKENS_ALLOW_INSECURE=1` |
+| `FEDERATION_GRANTS_ENCRYPTION_MODE` | `required` | `required` or `allow-plaintext`. Plaintext is refused in production/staging and under `CORE_DEPLOYMENT_MODE=multi` unless `FEDERATION_TOKENS_ALLOW_INSECURE=1` |
 | `FEDERATION_GRANTS_ALLOW_KEEP_ON_SUBJECT_REVOCATION` | `false` | Whether a subject-wide revocation may be *asked* to leave established grants standing. An allowance, not an instruction |
 | `REDIS_FEDERATION_GRANT_STORE_KEY_PREFIX` | `fg:` | Key namespace of the Redis grant store |
 
@@ -732,7 +736,7 @@ connection's registration; Redis grants beside memory user-session stores
 (`USER_SESSION_STORES_ADAPTER=memory` — the grants would outlive the boundary
 that ends them; both compose files set `redis`); the Redis grant store under
 `encryptionMode = "required"` with no key in the ring (the memory store seals
-nothing and needs none); `memory` for either store under `DEPLOYMENT_MODE=multi`.
+nothing and needs none); `memory` for either store under `CORE_DEPLOYMENT_MODE=multi`.
 
 **The user repository.** Under `required`, boot asks the repository whether it
 covers each connection's registration, and the connect callback asks it who
@@ -896,7 +900,7 @@ The `docker-compose.yml` starts the auth server together with a Redis container.
 
 `HTTP_TRUST_PROXY` is an explicit `${HTTP_TRUST_PROXY:?…}` entry there, so `docker compose up` **refuses to start** until you name the hop in `.env`. That is deliberate: there is no address the file could default to that would not silently trust a hop you never chose, and without the variable the Secure cookie the file pins is never set, the CSRF origin check 403s every browser POST, and every IP-keyed rate limit shares one bucket.
 
-Every store whose records must outlive one process is named in that file's `environment:` block rather than inherited — including `USER_SESSION_STORES_ADAPTER=redis`, which has to travel with `SESSION_STORAGE_TYPE=redis`. `DEPLOYMENT_MODE=single` will not tell you when it does not: the replica guard answers "can these stores be shared", not "do these two stores have the same lifetime". Split them and a restart leaves every browser holding a surviving express-session that still reads `isAuthenticated` with no `UserSession` behind it — `/authorize` bounces to login, the cookie bounces it back, and the loop clears only when the user deletes the cookie.
+Every store whose records must outlive one process is named in that file's `environment:` block rather than inherited — including `USER_SESSION_STORES_ADAPTER=redis`, which has to travel with `SESSION_STORAGE_TYPE=redis`. `CORE_DEPLOYMENT_MODE=single` will not tell you when it does not: the replica guard answers "can these stores be shared", not "do these two stores have the same lifetime". Split them and a restart leaves every browser holding a surviving express-session that still reads `isAuthenticated` with no `UserSession` behind it — `/authorize` bounces to login, the cookie bounces it back, and the loop clears only when the user deletes the cookie.
 
 ```bash
 # The signing keys are a required input: EdDSA is the default and there is no
@@ -1043,7 +1047,7 @@ To add a custom module, import it in `src/buildModules.mts` and add it to the ar
 
 Keep the other rules there too: the session store module stays first, and a module that fills a store slot replaces that slot's adapter switch rather than being added beside it. [`src/app.mts`](src/app.mts) needs no change: it passes `buildModules(config, …)` to `createApp`, mounts the router `createApp` returns, and wires the server's lifetime — `installGracefulShutdown` (below) drains it and calls `handle.dispose()`.
 
-A module that contributes a session requirement — the MFA package's `mfa`, or one of your own — changes what "logged in" means, so its name goes in `sessionRequirements.expected`, which `config/application.conf` ships as `[]`: the template installs none. Boot compares the list with what the modules register. A name listed that nothing registers refuses the boot (`session-requirement-missing`), and so does a registered requirement the list leaves out (`session-requirements-undeclared`). When `mfa.mode` (`MFA_MODE`) is not `off`, the template adds `mfa` to the list (`expectedSessionRequirements`, [`src/configPath.mts`](src/configPath.mts)), keeping the names you wrote. It installs no MFA module, so such a mode refuses the boot (`session-requirement-missing`) rather than let logins through on a password alone; a mode that is none of the three is refused before boot, naming `mfa.mode`. The template reads the mode itself, before it chooses its modules, until it installs the MFA module (the MFA ADR's build-order step 20). A module you add that registers `mfa` meets that declaration only if its requirement declares the second-factor authority, as the MFA package's does; otherwise the template refuses the boot before it listens (`MfaRequirementNotAuthorityError`, [`src/secondFactorAuthority.mts`](src/secondFactorAuthority.mts)).
+A module that contributes a session requirement — the MFA package's `mfa`, or one of your own — changes what "logged in" means, so its name goes in `core.sessionRequirements.expected`, which `config/application.conf` ships as `[]`: the template installs none. Boot compares the list with what the modules register. A name listed that nothing registers refuses the boot (`session-requirement-missing`), and so does a registered requirement the list leaves out (`session-requirements-undeclared`). When `mfa.mode` (`MFA_MODE`) is not `off`, the template adds `mfa` to the list (`expectedSessionRequirements`, [`src/configPath.mts`](src/configPath.mts)), keeping the names you wrote. It installs no MFA module, so such a mode refuses the boot (`session-requirement-missing`) rather than let logins through on a password alone; a mode that is none of the three is refused before boot, naming `mfa.mode`. The template reads the mode itself, before it chooses its modules, until it installs the MFA module (the MFA ADR's build-order step 20). A module you add that registers `mfa` meets that declaration only if its requirement declares the second-factor authority, as the MFA package's does; otherwise the template refuses the boot before it listens (`MfaRequirementNotAuthorityError`, [`src/secondFactorAuthority.mts`](src/secondFactorAuthority.mts)).
 
 ### Shutdown guarantees
 
@@ -1055,13 +1059,13 @@ A module that contributes a session requirement — the MFA package's `mfa`, or 
 4. **Past the deadline the remaining connections are cut and the process exits non-zero.** An orchestrator that only ever sees `0` cannot tell a clean drain from one that ran out of time.
 5. **`cleanup` runs after draining, before exit** — `handle.dispose()`, i.e. reverse-topological component cleanup plus the Redis/timer drain. A failure there is logged through this service's own logger (NDJSON, like every other line) as `shutdown_cleanup_failed` (or `shutdown_cleanup_timed_out`) and reflected in the exit code; every stage is its own event (see the table below). A dispose that throws still exits; it never wedges the process. The line carries core's [`loggableError`](../../packages/core/README.md#logger) projection of the failure, never the error itself: `dispose()` rejects with an AggregateError of every cleanup's own error, and the line names each of them with its code (`aggregateErrors`, the first five) and nothing of what it holds — a store write that failed, with what it was writing, can be one of them.
 
-6. **With federation grants on, `cleanup` gets the longest refresh tail plus a margin** (`cleanupAllowanceFor` in `src/shutdown.mts`): `federationGrants.upstreamHardTimeoutMs` + `persistRetryBudgetMs` + `lockWaitMs` + 12 s, never below 45 s — exactly 45 s under the shipped budgets (25 + 3 + 5 + 12) — instead of inheriting the drain's ten, because the dispose waits for a rotated upstream credential's write. Raise a budget and the allowance grows with it; raise your orchestrator's grace to match. Off, the cleanup budget stays the drain's.
+6. **`cleanup` gets at least the allowance the modules registered**: `handle.cleanupAllowanceMs`, the longest tail a module registered its cleanup with, which `src/app.mts` hands `installGracefulShutdown` as `cleanupAllowanceMs: () => handle.cleanupAllowanceMs`, read when the signal arrives; cleanup's budget is the longer of it and the drain's ten, and `shutdown_draining` logs it as `cleanupTimeoutMs`. An allowance that is not a whole number of milliseconds from 1 to 2147483647 is ignored. The template reads no module's settings to size it. With federation grants on, the package registers its drain's tail as `federationGrants.upstreamHardTimeoutMs` + `persistRetryBudgetMs` + `lockWaitMs` + 12 s, never below 45 s — exactly 45 s under the shipped budgets (25 + 3 + 5 + 12) — because the dispose waits for a rotated upstream credential's write. Raise a budget and the allowance grows with it; raise your orchestrator's grace to match. Off, nothing registers an allowance and the cleanup budget stays the drain's.
 
 Each stage logs one line:
 
 | Event | Level | Fields |
 |---|---|---|
-| `shutdown_draining` | info | `drainTimeoutMs` |
+| `shutdown_draining` | info | `drainTimeoutMs`, `cleanupTimeoutMs` |
 | `shutdown_drain_deadline_exceeded` | error | `drainTimeoutMs` |
 | `shutdown_server_close_failed` | error | `err` |
 | `shutdown_cleanup_timed_out` | error | `cleanupTimeoutMs` |

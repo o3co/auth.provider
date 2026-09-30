@@ -156,8 +156,12 @@ const DOCUMENTED_ENV: Readonly<Record<string, string>> = {
 	// out-of-tree sinks need no schema change here.
 	AUDIT_SINK_TYPE: "console",
 
+	// --- JWKS ---------------------------------------------------------
+	JWKS_PATH: "/keys/jwks.json",
+	JWKS_CACHE_MAX_AGE: "600",
+
 	// --- shared stores ------------------------------------------------
-	DEPLOYMENT_MODE: "multi",
+	CORE_DEPLOYMENT_MODE: "multi",
 	USER_SESSION_STORES_ADAPTER: "redis",
 	ACCESS_TOKEN_DENYLIST_ADAPTER: "redis",
 	// The replay seen-set behind private_key_jwt client authentication.
@@ -258,6 +262,8 @@ const DOCUMENTED_ENV: Readonly<Record<string, string>> = {
 const DELIBERATELY_UNSET: Readonly<Record<string, string>> = {
 	OAUTH_AUTHORIZE_ALLOW_UNMARKED_CLIENTS:
 		"#330 tombstone — any value must fail boot with migration instructions",
+	DEPLOYMENT_MODE:
+		"renamed CORE_DEPLOYMENT_MODE, and only captured — set alone, or to another value, it fails boot",
 };
 
 /**
@@ -269,7 +275,7 @@ const DELIBERATELY_UNSET: Readonly<Record<string, string>> = {
  *
  * The two `FEDERATION_TOKEN_STORE` lines are required: the federation token
  * store defaults to memory, the standalone's memory module declares itself
- * replica-unsafe, and `DEPLOYMENT_MODE=multi` refuses it by name unless the
+ * replica-unsafe, and `CORE_DEPLOYMENT_MODE=multi` refuses it by name unless the
  * Redis store is selected with its encryption key.
  */
 const UMBRELLA_E2E_ENV: Readonly<Record<string, string>> = {
@@ -280,6 +286,7 @@ const UMBRELLA_E2E_ENV: Readonly<Record<string, string>> = {
 	SESSION_SECURE: "false",
 	SESSION_NAME: "auth.session",
 	DEPLOYMENT_MODE: "multi",
+	CORE_DEPLOYMENT_MODE: "multi",
 	REFRESH_TOKEN_FAMILY_STORE_REDIS_URL: "redis://redis:6379",
 	SESSION_STORAGE_REDIS_URL: "redis://redis:6379",
 	USER_SESSION_STORES_ADAPTER: "redis",
@@ -528,11 +535,11 @@ describe("the shipped config boots with every documented override supplied as a 
 		expect(config.session.secure).toBe(false);
 		expect(config.oauth.requireEmailVerified).toBe(true);
 		expect(config.oauth.resourceIndicator?.enabled).toBe(true);
-		expect(config.deployment?.mode).toBe("multi");
+		expect(config.core?.deployment?.mode).toBe("multi");
 	});
 
 	it("wires nothing replica-unsafe for the umbrella E2E environment", async () => {
-		// `DEPLOYMENT_MODE=multi` makes the provider audit its own store wiring
+		// `CORE_DEPLOYMENT_MODE=multi` makes the provider audit its own store wiring
 		// at boot, so a config that parses but wires a memory store still fails
 		// there. Ask each manifest, the way the guard does: the exported name
 		// list covers core's modules only, and cannot see the template's own
@@ -546,7 +553,7 @@ describe("the shipped config boots with every documented override supplied as a 
 	it("reads MFA_MODE=off before boot, where the shipped configuration expects no session requirement", async () => {
 		expect(readMfaMode(readShippedSwitches({ ...DOCUMENTED_ENV, MFA_MODE: "off" }))).toBe("off");
 		const parsed = await bootParsed({ ...DOCUMENTED_ENV, MFA_MODE: "off" });
-		expect(parsed.sessionRequirements).toEqual({ expected: [] });
+		expect(parsed.core?.sessionRequirements).toEqual({ expected: [] });
 	});
 
 	describe("boolean overrides accept the spellings an operator writes", () => {
@@ -689,11 +696,18 @@ describe("the shipped config boots with every documented override supplied as a 
 				expect(err).toBeInstanceOf(BootError);
 				expect((err as BootError).reason).toBe("session-requirement-missing");
 				expect((err as BootError).details).toMatchObject({
-					configKey: "sessionRequirements.expected",
+					configKey: "core.sessionRequirements.expected",
 					missing: ["mfa"],
 				});
 			});
 		}
+
+		it("refuses DEPLOYMENT_MODE set alone, naming CORE_DEPLOYMENT_MODE", async () => {
+			const { CORE_DEPLOYMENT_MODE: _new, ...env } = DOCUMENTED_ENV;
+			await expect(bootParsed({ ...env, DEPLOYMENT_MODE: "multi" })).rejects.toThrow(
+				/DEPLOYMENT_MODE was renamed CORE_DEPLOYMENT_MODE/,
+			);
+		});
 
 		it("still refuses an empty SESSION_CSRF_TTL_SECONDS", async () => {
 			// Pinned alongside the boolean cases because it is the same trap

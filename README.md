@@ -112,7 +112,8 @@ core                          contracts, module system, config, tokens, keys
 │   └── federation-*          one package per upstream identity provider
 ├── dpop · mtls · webauthn · oauth-token-exchange
 ├── redis                     (ioredis is an optional peer)
-└── foundation
+├── foundation
+└── test-kit                  contract suites and fakes, for tests only
 templates/standalone          composes the packages above; create-app copies it
 ```
 
@@ -142,6 +143,7 @@ Each package's README states what it owns and why it is separate. In brief:
 | [`packages/federation-grants`](packages/federation-grants/) | `@o3co/auth-provider-federation-grants` | Federation grants (#593): a client obtains upstream access tokens on a user's standing consent, with no session behind the call | Optional; the delegation routes and their consent flow. Needs `federation-oidc`: the generic OpenID Connect adapter is the only one that can delegate |
 | [`packages/redis`](packages/redis/) | `@o3co/auth-provider-redis` | Redis implementations of core's store ports, for a deployment with more than one replica | Keeps a database driver out of core. The standalone template needs it in every deployment (its refresh-token families live in Redis); only a composition root of your own, on one replica, can leave it out |
 | [`packages/foundation`](packages/foundation/) | `@o3co/auth-provider-foundation` | The HTTP user repository — the client of your user service ("the Store") | A production adapter for an external service, kept out of core |
+| [`packages/test-kit`](packages/test-kit/) | `@o3co/auth-provider-test-kit` | Contract suites for what code outside core implements — the MFA enrollment witness's — and the fakes they run against, such as a fake Store | For tests only: an adapter in this repository and a deployment's own implementation import the same suite, depending on core alone |
 | [`templates/standalone`](templates/standalone/) | — | The deployable composition root: module choice, config, logger, shutdown, Docker | Per-deployment choices, copied rather than imported; never published |
 | [`create-app`](create-app/) | `@o3co/create-auth-provider` | The `npx` scaffolder that copies a template (`--template`, default `standalone`) into a new project | Published on its own with a `bin` |
 
@@ -161,7 +163,7 @@ grants); each package's README lists its routes.
 | `GET`, `POST /oauth/userinfo` | oauth | OpenID Connect userinfo |
 | `GET`, `POST /oauth/logout` | oauth | RP-initiated logout, with the back-channel logout cascade |
 | `GET /.well-known/openid-configuration` | core | Discovery, served when `oauthModule` is installed |
-| `GET /.well-known/jwks.json` | core | Verification keys (`oauth.jwt.jwksPath` moves it); under HS256 it answers `404 jwks_not_published` |
+| `GET /.well-known/jwks.json` | core | Verification keys (`jwks.path` moves it); under HS256 it answers `404 jwks_not_published` |
 | `GET /session/csrf` | session | Issue a double-submit CSRF token |
 | `POST /session/login` | session | Local authentication |
 | `POST /session/logout` | session | End the browser session |

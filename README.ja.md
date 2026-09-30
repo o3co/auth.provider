@@ -106,7 +106,8 @@ core                          contracts, module system, config, tokens, keys
 │   └── federation-*          one package per upstream identity provider
 ├── dpop · mtls · webauthn · oauth-token-exchange
 ├── redis                     (ioredis is an optional peer)
-└── foundation
+├── foundation
+└── test-kit                  contract suites and fakes, for tests only
 templates/standalone          composes the packages above; create-app copies it
 ```
 
@@ -136,6 +137,7 @@ templates/standalone          composes the packages above; create-app copies it
 | [`packages/federation-grants`](packages/federation-grants/) | `@o3co/auth-provider-federation-grants` | フェデレーショングラント（#593）: ユーザーの継続的な同意に基づき、セッションなしでクライアントが上流アクセストークンを取得する | 任意。委譲のルートとその同意フロー。`federation-oidc` が必要: 委譲ができるのは汎用 OpenID Connect アダプターだけである |
 | [`packages/redis`](packages/redis/) | `@o3co/auth-provider-redis` | core のストアポートの Redis 実装。複数レプリカのデプロイメント向け | データベースドライバーを core の外に置く。standalone テンプレートはどのデプロイメントでもこれを必要とする（refresh token family が Redis にある）。これなしで済むのは、単一レプリカで動く独自のコンポジションルートだけ |
 | [`packages/foundation`](packages/foundation/) | `@o3co/auth-provider-foundation` | HTTP ユーザーリポジトリ — ユーザーサービス（「the Store」）のクライアント | 外部サービス向けの本番用アダプターを core の外に置く |
+| [`packages/test-kit`](packages/test-kit/) | `@o3co/auth-provider-test-kit` | core の外のコードが実装するものの契約スイート — MFA 登録の証人のもの — と、それを走らせる偽物（偽の Store など） | テスト専用: このリポジトリのアダプターもデプロイ自身の実装も、core だけに依存して同じスイートを import する |
 | [`templates/standalone`](templates/standalone/) | — | デプロイ可能なコンポジションルート: モジュールの選択、設定、ロガー、シャットダウン、Docker | デプロイメントごとの選択。import ではなくコピーされ、公開されない |
 | [`create-app`](create-app/) | `@o3co/create-auth-provider` | テンプレート（`--template`、デフォルト `standalone`）を新しいプロジェクトにコピーする `npx` スキャフォルダー | `bin` 付きで単独公開される |
 
@@ -155,7 +157,7 @@ standalone テンプレートのような構成での主なエンドポイント
 | `GET`, `POST /oauth/userinfo` | oauth | OpenID Connect の userinfo |
 | `GET`, `POST /oauth/logout` | oauth | RP 起点のログアウトと、バックチャネルログアウトのカスケード |
 | `GET /.well-known/openid-configuration` | core | ディスカバリー。`oauthModule` が組み込まれているときに提供される |
-| `GET /.well-known/jwks.json` | core | 検証鍵（`oauth.jwt.jwksPath` で移動できる）。HS256 では `404 jwks_not_published` を返す |
+| `GET /.well-known/jwks.json` | core | 検証鍵（`jwks.path` で移動できる）。HS256 では `404 jwks_not_published` を返す |
 | `GET /session/csrf` | session | double-submit CSRF トークンの発行 |
 | `POST /session/login` | session | ローカル認証 |
 | `POST /session/logout` | session | ブラウザセッションの終了 |

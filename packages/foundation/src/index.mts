@@ -85,6 +85,11 @@ export const registerBuiltinAdapters = (factories: {
 };
 
 export {
+	MfaStoreError,
+	type MfaStoreFailure,
+	type MfaStoreOperation,
+} from "./mfa/storeFailure.mjs";
+export {
 	DEFAULT_MAX_RESPONSE_BYTES,
 	type FederatedIdentityLookupCoverage,
 	HttpUserRepository,

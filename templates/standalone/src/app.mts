@@ -32,7 +32,7 @@ import { createAppLogger } from "./logger.mjs";
 import { createMetrics } from "./metrics.mjs";
 import { mountRoutes } from "./routes.mjs";
 import { requireMfaSecondFactorAuthority } from "./secondFactorAuthority.mjs";
-import { cleanupAllowanceFor, installGracefulShutdown } from "./shutdown.mjs";
+import { installGracefulShutdown } from "./shutdown.mjs";
 
 // Step 1: the configuration, in two phases (`configPath.mts`; template
 // README, "Environment-specific config overlay").
@@ -100,8 +100,6 @@ await (async (): Promise<void> => {
 	});
 	// A second factor asked for needs `mfa` registered as the declared authority.
 	await requireMfaSecondFactorAuthority(mfaMode, handle);
-	const config = handle.components.config;
-	if (config === undefined) throw new Error("createApp booted without the parsed configuration");
 	// The `http` module's settings: core's slot and the host's own.
 	const { httpSettings, httpHostSettings } = handle.components;
 	if (httpSettings === undefined || httpHostSettings === undefined) {
@@ -130,13 +128,14 @@ await (async (): Promise<void> => {
 	const server = await listen(app, httpHostSettings.port, logger);
 
 	// Step 6: graceful shutdown (`shutdown.mts`). Size `drainTimeoutMs` below
-	// your orchestrator's kill grace period. With federation grants on, cleanup
-	// gets the longest refresh tail the configured budgets allow plus a margin
-	// (45 s under the shipped ones) rather than the drain's ten; the template
-	// README, "Shutdown guarantees", sizes the grace period for it.
+	// your orchestrator's kill grace period. Cleanup gets at least the
+	// allowance the modules registered with their cleanups (45 s with
+	// federation grants on under the shipped budgets) rather than only the
+	// drain's ten; the template README, "Shutdown guarantees", sizes the grace
+	// period for it.
 	installGracefulShutdown(server, {
 		logger,
 		cleanup: () => handle.dispose(),
-		...cleanupAllowanceFor(config),
+		cleanupAllowanceMs: () => handle.cleanupAllowanceMs,
 	});
 })();

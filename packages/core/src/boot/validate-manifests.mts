@@ -35,6 +35,8 @@ import { environmentVariableFor } from "../config/environment-variable.mjs";
 import {
 	findRelocatedKeys,
 	findRenamedVariables,
+	type HandedConfiguration,
+	pathsSetBy,
 	RENAMED_VARIABLES_SECTION,
 	type RelocatedPath,
 	type RenamedVariable,
@@ -465,7 +467,7 @@ function checkAuthoritativeOverrides(
  */
 const syntheticKeyRemedy = (key: string): string =>
 	key === "deploymentMode"
-		? " Set deployment.mode in the configuration instead: boot fills deploymentMode from it."
+		? " Set core.deployment.mode in the configuration instead: boot fills deploymentMode from it."
 		: "";
 
 /**
@@ -1844,8 +1846,12 @@ function conflictingOutputs(
  * sorted: not a section core's transitional base declares — its
  * own, or one it mirrors — not a top-level key of a loaded module's
  * `configSchema`, and not the first key of a loaded module's section path.
- * Boot keeps them in the `config` slot and names them once in the log; a
- * misspelt section name is what an operator finds there.
+ * A section that sets nothing (`pathsSetBy`, the walk the relocation refusal
+ * reads a configuration with) is none of them: an empty one, or one holding
+ * only empty ones, as a `reference.conf` leaves a section whose variables are
+ * unset. Boot keeps
+ * them in the `config` slot and names them once in the log; a misspelt
+ * section name is what an operator finds there.
  * @internal
  */
 function ignoredSections(modules: readonly Module[], raw: unknown): readonly string[] {
@@ -1856,8 +1862,9 @@ function ignoredSections(modules: readonly Module[], raw: unknown): readonly str
 		for (const key of Object.keys(m.configSchema?.shape ?? {})) owned.add(key);
 		if (m.section !== undefined) owned.add(sectionSegmentsOf(m)[0] as string);
 	}
-	return Object.keys(raw as object)
-		.filter((key) => !owned.has(key))
+	const sections = raw as Readonly<Record<string, unknown>>;
+	return Object.keys(sections)
+		.filter((key) => !owned.has(key) && pathsSetBy(sections[key]).length > 0)
 		.sort();
 }
 
@@ -2231,6 +2238,31 @@ const isPlainRecord = (value: unknown): value is Readonly<Record<string, unknown
 const isKeyPath = (value: unknown): value is string =>
 	typeof value === "string" && value.split(".").every((key) => key.length > 0);
 
+/**
+ * A `relocatedFrom` entry's value as boot reads it: the new path inside the
+ * section (`""` the section itself, `null` removed), and whether it was
+ * written `{ to, environmentVariable: null }`, for a path no variable binds;
+ * `undefined` for any other value.
+ */
+function relocationEntry(
+	value: unknown,
+): { readonly inside: string | null; readonly withoutVariable: boolean } | undefined {
+	if (value === "" || value === null || isKeyPath(value)) {
+		return { inside: value, withoutVariable: false };
+	}
+	if (
+		isPlainRecord(value) &&
+		Object.keys(value).length === 2 &&
+		Object.hasOwn(value, "to") &&
+		Object.hasOwn(value, "environmentVariable") &&
+		value.environmentVariable === null &&
+		(value.to === "" || isKeyPath(value.to))
+	) {
+		return { inside: value.to, withoutVariable: true };
+	}
+	return undefined;
+}
+
 /** One old path a module's section moved from, as boot reads its `relocatedFrom`. */
 interface SectionRelocation extends RelocatedPath {
 	readonly module: string;
@@ -2253,24 +2285,31 @@ const relocationTarget = (
 /**
  * A module's `relocatedFrom` as relocations: each old path, and where it went
  * (`relocationTarget`). A section still read at a transitional `at` is bound
- * to no environment variable yet, so its relocations name none. Read after
- * `checkModuleSectionPaths` held their shape.
+ * to no environment variable yet, and an entry written `{ to,
+ * environmentVariable: null }` declares its new path bound to none, so their
+ * relocations name none. Read after `checkModuleSectionPaths` held their
+ * shape.
  */
 function sectionRelocationsOf(m: Module): readonly SectionRelocation[] {
 	const relocatedFrom = m.section?.relocatedFrom;
 	if (relocatedFrom === undefined) return [];
 	const section = sectionSegmentsOf(m);
-	const entries: readonly (readonly [string, string | null])[] = Array.isArray(relocatedFrom)
+	const entries: readonly (readonly [string, unknown])[] = Array.isArray(relocatedFrom)
 		? relocatedFrom.map((from: string) => [from, ""] as const)
-		: Object.entries(relocatedFrom as Readonly<Record<string, string | null>>);
-	return entries.map(([from, inside]) => ({
-		module: m.name,
-		entry: from,
-		from: from.split("."),
-		to: relocationTarget(section, inside),
-		...(m.section?.at === undefined ? {} : { unbound: true }),
-		...(inside === "" ? { toSection: true } : {}),
-	}));
+		: Object.entries(relocatedFrom);
+	return entries.map(([from, value]) => {
+		const { inside, withoutVariable } = relocationEntry(value) as NonNullable<
+			ReturnType<typeof relocationEntry>
+		>;
+		return {
+			module: m.name,
+			entry: from,
+			from: from.split("."),
+			to: relocationTarget(section, inside),
+			...(m.section?.at === undefined && !withoutVariable ? {} : { unbound: true }),
+			...(inside === "" ? { toSection: true } : {}),
+		};
+	});
 }
 
 /**
@@ -2292,7 +2331,8 @@ function withCoreRelocations(modules: readonly Module[], core: CoreRelocations):
  * - `section.relocatedFrom` is a list of such paths, read at every index (a
  *   hole is refused, not skipped), or a plain map (prototype
  *   `Object.prototype` or `null`) from such paths to `""`, a path inside the
- *   section, or `null` (removed).
+ *   section, `null` (removed), or `{ to, environmentVariable: null }` with
+ *   `to` either of the first two, for a new path no variable binds.
  * - No old path is or holds a loaded module's section, its own or another's:
  *   a configuration setting that section would then be refused.
  * - No two loaded modules claim overlapping old paths (the same one, or one
@@ -2428,7 +2468,7 @@ function checkModuleSectionPaths(
 		const relocatedFrom: unknown = m.section?.relocatedFrom;
 		if (relocatedFrom === undefined) continue;
 		const entries = entriesOf(m, relocatedFrom);
-		for (const [from, inside] of entries) {
+		for (const [from, value] of entries) {
 			if (!isKeyPath(from)) {
 				throw refusal(m, from, "an old path is a dot-separated path of non-empty keys");
 			}
@@ -2439,11 +2479,12 @@ function checkModuleSectionPaths(
 					`${RENAMED_VARIABLES_SECTION} is reserved for the captures of renamed variables`,
 				);
 			}
-			if (inside !== "" && inside !== null && !isKeyPath(inside)) {
+			const inside = relocationEntry(value)?.inside;
+			if (inside === undefined) {
 				throw refusal(
 					m,
 					from,
-					'its new path is "" (the section itself), a dot-separated path of non-empty keys inside the section, or null (removed)',
+					'its new path is "" (the section itself), a dot-separated path of non-empty keys inside the section, null (removed), or { to, environmentVariable: null } with to one of the first two, for a new path no variable binds',
 				);
 			}
 			const old = from.split(".");
@@ -2458,7 +2499,7 @@ function checkModuleSectionPaths(
 						: `it ${is} the section of module "${held.module}", so every configuration that sets that section would be refused`,
 				);
 			}
-			const target = relocationTarget(sectionSegmentsOf(m), inside as string | null);
+			const target = relocationTarget(sectionSegmentsOf(m), inside);
 			if (target !== null && overlaps(target, old)) {
 				throw refusal(
 					m,
@@ -2560,7 +2601,10 @@ function renameOf(
 	const to = moved === undefined ? environmentVariableFor(old) : moved.environmentVariable;
 	if (unbound === true) {
 		return {
-			problem: `its new path "${path}" lies under the section's transitional path, which no variable binds yet`,
+			problem:
+				m.section?.at === undefined
+					? `its new path "${path}" is declared bound to no variable ({ to, environmentVariable: null }): no variable binds it`
+					: `its new path "${path}" lies under the section's transitional path, which no variable binds yet`,
 		};
 	}
 	if (to === undefined) {
@@ -2698,9 +2742,14 @@ function checkRenamedEnvironmentVariables(
 	const config: unknown = (bootstrap as { readonly config?: unknown }).config;
 	const found = findRenamedVariables(config, renames);
 	if (found.length === 0) return;
-	const configured = typeof config === "object" && config !== null;
+	const handed: HandedConfiguration =
+		config === undefined
+			? "none"
+			: typeof config === "object" && config !== null
+				? "object"
+				: "not-an-object";
 	throw new BootError({
-		message: `Boot refuses ${found.length} variable(s) renamed with a moved key: ${found.map((rename) => renamedVariableMessage(rename, configured)).join(" ")}`,
+		message: `Boot refuses ${found.length} variable(s) renamed with a moved key: ${found.map((rename) => renamedVariableMessage(rename, handed)).join(" ")}`,
 		reason: "environment-variable-renamed",
 		stage: "validateManifests",
 		details: {

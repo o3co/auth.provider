@@ -293,7 +293,7 @@ describe("the compose files put a store and its lifetime-sibling on the same bac
 	// express-session survives a restart and the `UserSession` it points at
 	// does not: every browser comes back `isAuthenticated` with nothing behind
 	// it and /authorize loops until the cookie is deleted by hand.
-	// `DEPLOYMENT_MODE: single` is silent about this on purpose — the replica
+	// `CORE_DEPLOYMENT_MODE: single` is silent about this on purpose — the replica
 	// guard answers "can these stores be shared", not "do these two stores have
 	// the same lifetime" — so nothing but this assertion stands behind it.
 	for (const file of ["/docker-compose.production.yml", "/docker-compose.yml"]) {
