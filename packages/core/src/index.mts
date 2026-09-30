@@ -221,6 +221,9 @@ export {
 // before it knows them. `createApp` takes the resolved configuration itself,
 // and parses it once.
 export { readTransitionalConfig } from "./config/composed.mjs";
+// How a configured value is read where its owning schema did not run, and how
+// a refusal quotes it.
+export { configuredNumber, shownConfigValue } from "./config/configuredValue.mjs";
 export { MAX_DURATION_MS, MAX_DURATION_SECONDS } from "./config/durations.mjs";
 // The reference.conf files a composition layers beneath its own
 // configuration — core's, and each loaded module's package's (`section.reference`).
@@ -785,7 +788,6 @@ export {
 	createRateLimitGuard,
 	createRateLimitPolicy,
 	type RateLimitCheckOutcome,
-	type RateLimitFailMode,
 	type RateLimitGuardOptions,
 	type RateLimitOutageLogger,
 	type RateLimitPolicy,
@@ -805,15 +807,14 @@ export type {
 	RateLimitDecision,
 	RateLimiter,
 	RateLimiterFactory,
+	RateLimitFailMode,
 	RateLimitSpec,
 } from "./ratelimit/types.mjs";
 export {
 	assertUsableRateLimitSpecs,
-	configuredNumber,
 	isUsableRateLimitSpec,
 	readConfiguredRateLimitSpec,
 	requireUsableConfiguredRateLimitSpec,
-	shownConfigValue,
 } from "./ratelimit/usableSpec.mjs";
 export { type RunReadinessOptions, runReadinessProbes } from "./readiness/run.mjs";
 export type {

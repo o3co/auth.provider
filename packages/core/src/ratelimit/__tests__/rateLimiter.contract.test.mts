@@ -22,9 +22,13 @@
  */
 
 import { describe, expect, expectTypeOf, it } from "vitest";
-import type { RateLimitFailMode } from "#/ratelimit/guard.mjs";
 import { createMemoryRateLimiter } from "#/ratelimit/memory.mjs";
-import type { RateLimitDecision, RateLimiter, RateLimitSpec } from "#/ratelimit/types.mjs";
+import type {
+	RateLimitDecision,
+	RateLimiter,
+	RateLimitFailMode,
+	RateLimitSpec,
+} from "#/ratelimit/types.mjs";
 import {
 	createTestRateLimiter,
 	type RateLimiterContractInput,

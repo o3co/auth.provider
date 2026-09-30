@@ -19,13 +19,10 @@
  * configuration is one budget whichever limiter is mounted.
  */
 
+import { shownConfigValue } from "../config/configuredValue.mjs";
 import type { RateLimitBudgetResolver } from "../modules/manifest/synthetic-keys.mjs";
 import type { RateLimitSpec } from "./types.mjs";
-import {
-	assertUsableRateLimitSpecs,
-	isUsableRateLimitSpec,
-	shownConfigValue,
-} from "./usableSpec.mjs";
+import { assertUsableRateLimitSpecs, isUsableRateLimitSpec } from "./usableSpec.mjs";
 
 export interface RateLimitBudgetLookupOptions {
 	/** What an operator declared on this limiter, by prefix; wins over a contributed budget. */

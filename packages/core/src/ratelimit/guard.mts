@@ -18,18 +18,18 @@ import type { Request, RequestHandler, Response } from "express";
 import { auditedError } from "../audit/auditedError.mjs";
 import { emitAuditEvent } from "../audit/factory.mjs";
 import type { AuditSink } from "../audit/types.mjs";
+import { shownConfigValue } from "../config/configuredValue.mjs";
 import { auditErrorText, type ErrorEnvelope, errorEnvelope } from "../errors/envelope.mjs";
 import { consoleLogger } from "../logging/consoleLogger.mjs";
 import type { Logger } from "../logging/Logger.mjs";
 import { loggableError } from "../logging/loggableError.mjs";
-import type { RateLimitContext, RateLimitDecision, RateLimiter, RateLimitSpec } from "./types.mjs";
-import { shownConfigValue } from "./usableSpec.mjs";
-
-/**
- * How the guard behaves when the limiter backend itself errors: the
- * limiter's own `RateLimiter.failMode`. See {@link createRateLimitGuard}.
- */
-export type RateLimitFailMode = "open" | "closed";
+import type {
+	RateLimitContext,
+	RateLimitDecision,
+	RateLimiter,
+	RateLimitFailMode,
+	RateLimitSpec,
+} from "./types.mjs";
 
 export interface RateLimitGuardOptions {
 	/** The shared limiter component the guarded route runs on. */

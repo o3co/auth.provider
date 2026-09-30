@@ -21,6 +21,7 @@
  * {@link applyContributions}.
  */
 
+import { shownConfigValue } from "../config/configuredValue.mjs";
 import { FEDERATED_AMR, MFA_AMR, PASSWORD_AMR } from "../grants/authenticationClaims.mjs";
 import { consoleLogger } from "../logging/consoleLogger.mjs";
 import type { Logger } from "../logging/Logger.mjs";
@@ -35,7 +36,7 @@ import type {
 } from "../modules/manifest/synthetic-keys.mjs";
 import { readRateLimitFailMode } from "../ratelimit/guard.mjs";
 import type { RateLimiter, RateLimitSpec } from "../ratelimit/types.mjs";
-import { isUsableRateLimitSpec, shownConfigValue } from "../ratelimit/usableSpec.mjs";
+import { isUsableRateLimitSpec } from "../ratelimit/usableSpec.mjs";
 import { sessionRequirementResolverOver } from "../session-admission/admit.mjs";
 import {
 	MFA_REQUIREMENT_NAME,

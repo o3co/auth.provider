@@ -32,11 +32,11 @@
  */
 
 import assert from "node:assert/strict";
-import type { RateLimitFailMode } from "../../ratelimit/guard.mjs";
 import type {
 	RateLimitContext,
 	RateLimitDecision,
 	RateLimiter,
+	RateLimitFailMode,
 	RateLimitSpec,
 } from "../../ratelimit/types.mjs";
 import { isUsableRateLimitSpec } from "../../ratelimit/usableSpec.mjs";

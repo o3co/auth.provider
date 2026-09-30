@@ -15,7 +15,12 @@
  */
 
 import type { AdapterFactory } from "../adapters/AdapterFactory.mjs";
-import type { RateLimitFailMode } from "./guard.mjs";
+
+/**
+ * What the guard does when a limiter's backend errors: `"open"` lets the
+ * request through, `"closed"` answers `503`.
+ */
+export type RateLimitFailMode = "open" | "closed";
 
 export interface RateLimitContext {
 	readonly ip?: string;
