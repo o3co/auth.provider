@@ -15,17 +15,18 @@
  */
 
 /**
- * OCSP (RFC 6960) status lookup, verification and caching for
- * `mode = "full-pki"`. `pkijs` only encodes the request and decodes the
- * response; asking the responder (a POST under `fetchGuard.mts`), verifying
- * who signed the answer, matching the nonce, judging freshness and caching
- * happen here.
+ * OCSP (RFC 6960) status lookup for `mode = "full-pki"`: `createOcspResolver` asks the responders
+ * a certificate names, in turn, through the cache in `ocspCache.mts`, and judges each answer in
+ * the order `query` sets out: the request (`ocspRequest.mts`), the fetch (`ocspFetch.mts`), the
+ * parse (`ocspParse.mts`), the shape (`ocspShape.mts`), the signer (`ocspSigner.mts`), a
+ * delegated responder's own status (`ocspDelegate.mts`), the nonce, and the status and its
+ * freshness (`ocspStatus.mts`). `pkijs` only encodes the request and decodes the response.
  *
  * Always a responder fetch: Node exposes no stapled response for a client
  * certificate, so a certificate demanding must-staple (RFC 7633) is refused
  * by `checkMustStaple`.
  *
- * The answer is verified here, not by pkijs: `BasicOCSPResponse.verify`
+ * The answer is verified by these stages, not by pkijs: `BasicOCSPResponse.verify`
  * ignores `id-kp-OCSPSigning` (any certificate the CA issued could vouch for
  * itself), and `getCertificateStatus` answers `unknown` for a response about
  * another certificate. Per RFC 6960 §4.2.2.2 a response is believed only when
@@ -37,42 +38,27 @@
  * cache hits included; with no source to check it, the answer is taken and
  * flagged `responderUnchecked` — the local-policy deviation the README states.
  *
- * - As in `crl.mts`, shape checks (the matching `CertID`, critical
- *   extensions, the response's signature algorithm — pkijs accepts SHA-1)
- *   run before the signature, can only refuse, and so are remembered.
- * - The `CertID` hash is SHA-1 (§4.1.1): a lookup key, not a signature, and
- *   the one responders reliably answer. Another hash in a response is matched
- *   by recomputing.
+ * - Shape checks run before the signature, can only refuse, and so are
+ *   remembered (`ocspShape.mts`).
  * - Every request carries a 16-byte nonce (§4.4.1, RFC 8954). A different
  *   echo is refused; a missing one too unless `requireNonce: false` (a
  *   pre-producing responder), since otherwise a "good" captured before a
  *   revocation replays until its `nextUpdate`.
  * - `unknown` (§2.2) is unavailable, not good: a responder that lost its
  *   database must not un-revoke everything.
- * - Caching is keyed per certificate: concurrent lookups share a request;
- *   answers live until `nextUpdate` or `cache-ttl-seconds`; failures are
- *   remembered for `OCSP_NEGATIVE_CACHE_TTL_MS` per responder (transport or
- *   responder-level) or per certificate (an unusable answer); `bad_signature`
- *   and `nonce_mismatch` are never remembered.
- * - Unavailabilities carry `reason`, `detail` and `cause` as in `crl.mts`,
- *   and are an `outage` when the responder did not answer usefully
- *   (`isSourceFailure`, `unparseable`, `responder_error`, `stale`, or a
- *   delegated responder's status unreadable for such a reason).
  */
 
-import { createHash } from "node:crypto";
 import * as pkijs from "pkijs";
 import type { AlgorithmPolicy } from "./algorithms.mjs";
-import { CRL_NEGATIVE_CACHE_TTL_MS } from "./crl.mjs";
 import { DEFAULT_ALGORITHM_POLICY } from "./defaults.mjs";
 import type { GuardedFetch } from "./fetchGuard.mjs";
+import type { Answer, OcspLookup, OcspResponderUnavailable } from "./ocspAnswer.mjs";
 import {
-	type Answer,
-	markOutage,
-	type OcspCertificateStatus,
-	type OcspLookup,
-	type OcspResponderUnavailable,
-} from "./ocspAnswer.mjs";
+	createOcspCache,
+	DEFAULT_MAX_CACHE_ENTRIES,
+	issuerKeyId,
+	serialHex,
+} from "./ocspCache.mjs";
 import {
 	checkDelegateRevocation,
 	hasNoCheck,
@@ -93,68 +79,11 @@ export type {
 	OcspResponderUnavailable,
 	OcspUnavailableReason,
 } from "./ocspAnswer.mjs";
+export { OCSP_NEGATIVE_CACHE_TTL_MS } from "./ocspCache.mjs";
 export type { ResponderRevocationCheck, ResponderRevocationOutcome } from "./ocspDelegate.mjs";
 export { checkMustStaple } from "./ocspMustStaple.mjs";
 export { type OcspResponders, ocspResponders } from "./ocspResponders.mjs";
 export { OCSP_CLOCK_SKEW_MS, OCSP_UNDATED_RESPONSE_MAX_AGE_MS } from "./ocspStatus.mjs";
-
-/**
- * How long a responder that could not be used is remembered, in
- * milliseconds. The CRL resolver's window, for the CRL resolver's reasons.
- */
-export const OCSP_NEGATIVE_CACHE_TTL_MS = CRL_NEGATIVE_CACHE_TTL_MS;
-
-/** Reasons remembered for the negative window, and at which granularity. */
-type RespondersFailure =
-	| "fetch_failed"
-	| "unparseable"
-	| "responder_error"
-	| "responder_revoked"
-	| "responder_status_unavailable";
-type CertificateFailure =
-	| "no_matching_response"
-	| "unsupported_critical_extension"
-	| "algorithm_not_permitted"
-	| "nonce_missing"
-	| "not_yet_valid"
-	| "stale"
-	| "unknown";
-
-const RESPONDER_FAILURES: ReadonlySet<string> = new Set<RespondersFailure>([
-	"fetch_failed",
-	"unparseable",
-	"responder_error",
-	"responder_revoked",
-	"responder_status_unavailable",
-]);
-const CERTIFICATE_FAILURES: ReadonlySet<string> = new Set<CertificateFailure>([
-	"no_matching_response",
-	"unsupported_critical_extension",
-	"algorithm_not_permitted",
-	"nonce_missing",
-	"not_yet_valid",
-	"stale",
-	"unknown",
-]);
-
-type CacheEntry =
-	| {
-			readonly kind: "status";
-			readonly status: OcspCertificateStatus;
-			/** Epoch millis after which the responder must be asked again. */
-			readonly expiresAt: number;
-			/** The delegated responder to re-check before this entry is believed. */
-			readonly delegate?: pkijs.Certificate;
-	  }
-	| {
-			readonly kind: "unavailable";
-			readonly reason: RespondersFailure | CertificateFailure;
-			readonly detail: string;
-			readonly cause?: unknown;
-			readonly outage?: true;
-			/** Epoch millis after which the responder is tried again. */
-			readonly expiresAt: number;
-	  };
 
 export interface OcspResolverOptions {
 	readonly fetch: GuardedFetch;
@@ -204,54 +133,10 @@ export interface OcspResolver {
 	size(): number;
 }
 
-const DEFAULT_MAX_CACHE_ENTRIES = 1024;
-
-const issuerKeyId = (issuer: pkijs.Certificate): string =>
-	createHash("sha256")
-		.update(new Uint8Array(issuer.subjectPublicKeyInfo.toSchema().toBER(false)))
-		.digest("hex");
-
-const serialHex = (certificate: pkijs.Certificate): string =>
-	Buffer.from(certificate.serialNumber.valueBlock.valueHexView).toString("hex");
-
-const statusKey = (url: string, issuerId: string, serial: string): string =>
-	`ocsp:${url}\n${issuerId}\n${serial}`;
-const responderDownKey = (url: string): string => `down:${url}`;
-const certificateDownKey = (url: string, issuerId: string, serial: string): string =>
-	`down:${url}\n${issuerId}\n${serial}`;
-
 export const createOcspResolver = (options: OcspResolverOptions): OcspResolver => {
-	const cache = new Map<string, CacheEntry>();
 	const maxEntries = options.maxCacheEntries ?? DEFAULT_MAX_CACHE_ENTRIES;
 	const requireNonce = options.requireNonce ?? true;
 	const algorithms = options.algorithms ?? DEFAULT_ALGORITHM_POLICY;
-	/** Requests in progress, so concurrent misses on one certificate issue one request. */
-	const inFlight = new Map<string, Promise<Answer>>();
-
-	const store = (key: string, entry: CacheEntry): void => {
-		if (cache.size >= maxEntries && !cache.has(key)) {
-			// Oldest insertion first, as in `crl.mts`: the bound exists so the
-			// map cannot grow without limit, not to maximise hits.
-			const oldest = cache.keys().next();
-			if (!oldest.done) cache.delete(oldest.value);
-		}
-		cache.set(key, entry);
-	};
-
-	const remember = (
-		key: string,
-		reason: RespondersFailure | CertificateFailure,
-		failure: { readonly detail: string; readonly cause?: unknown; readonly outage?: true },
-		now: Date,
-	): void =>
-		store(key, {
-			kind: "unavailable",
-			reason,
-			detail: failure.detail,
-			...(failure.cause !== undefined ? { cause: failure.cause } : {}),
-			...(failure.outage ? { outage: true } : {}),
-			expiresAt: now.getTime() + OCSP_NEGATIVE_CACHE_TTL_MS,
-		});
 
 	/** Ask `url` about `certificate` and judge the answer. Everything the nonce binds happens here. */
 	const query = async (
@@ -338,93 +223,10 @@ export const createOcspResolver = (options: OcspResolverOptions): OcspResolver =
 		now: Date,
 	): Promise<ResponderVerdict> => checkDelegateRevocation(options, delegate, issuer, now);
 
-	/** `query`, joining a request for the same certificate that is already in flight. */
-	const load = (
-		key: string,
-		url: string,
-		certificate: pkijs.Certificate,
-		issuer: pkijs.Certificate,
-		now: Date,
-	): Promise<Answer> => {
-		const existing = inFlight.get(key);
-		if (existing !== undefined) return existing;
-		const pending = query(url, certificate, issuer, now)
-			.then(markOutage)
-			.finally(() => inFlight.delete(key));
-		inFlight.set(key, pending);
-		return pending;
-	};
-
-	/** What `url` says about `certificate` — from the cache, or by asking now. */
-	const lookup = async (
-		url: string,
-		certificate: pkijs.Certificate,
-		issuer: pkijs.Certificate,
-		issuerId: string,
-		serial: string,
-		now: Date,
-	): Promise<Answer> => {
-		const statusCacheKey = statusKey(url, issuerId, serial);
-		const known = cache.get(statusCacheKey);
-		if (known?.kind === "status" && known.expiresAt > now.getTime()) {
-			// A cached answer from a delegated responder is only as good as that
-			// responder still is: re-check it (the source behind the hook caches,
-			// so this is cheap) and drop the entry if it has been revoked since.
-			if (known.delegate !== undefined) {
-				const verdict = await checkResponder(known.delegate, issuer, now);
-				if (!verdict.ok) {
-					cache.delete(statusCacheKey);
-					return verdict;
-				}
-				return {
-					ok: true,
-					status: known.status,
-					expiresAt: known.expiresAt,
-					responderUnchecked: verdict.unchecked,
-					delegate: known.delegate,
-				};
-			}
-			return { ok: true, status: known.status, expiresAt: known.expiresAt };
-		}
-		for (const key of [responderDownKey(url), certificateDownKey(url, issuerId, serial)]) {
-			const down = cache.get(key);
-			if (down?.kind === "unavailable" && down.expiresAt > now.getTime()) {
-				return {
-					ok: false,
-					reason: down.reason,
-					detail: `${down.detail}; not retried yet`,
-					...(down.cause !== undefined ? { cause: down.cause } : {}),
-					...(down.outage ? { outage: true } : {}),
-				};
-			}
-		}
-
-		const answer = await load(`${url}\n${issuerId}\n${serial}`, url, certificate, issuer, now);
-		if (answer.ok) {
-			store(statusCacheKey, {
-				kind: "status",
-				status: answer.status,
-				expiresAt: answer.expiresAt,
-				...(answer.delegate === undefined ? {} : { delegate: answer.delegate }),
-			});
-			return answer;
-		}
-		if (RESPONDER_FAILURES.has(answer.reason)) {
-			remember(responderDownKey(url), answer.reason as RespondersFailure, answer, now);
-		} else if (CERTIFICATE_FAILURES.has(answer.reason)) {
-			remember(
-				certificateDownKey(url, issuerId, serial),
-				answer.reason as CertificateFailure,
-				answer,
-				now,
-			);
-		}
-		// `bad_signature` and `nonce_mismatch` are left unremembered on purpose.
-		return answer;
-	};
+	const cache = createOcspCache(maxEntries, query, checkResponder);
 
 	return {
-		size: () => cache.size,
+		size: () => cache.size(),
 
 		resolve: async (certificate, issuer, now) => {
 			const responders = ocspResponders(certificate);
@@ -434,7 +236,7 @@ export const createOcspResolver = (options: OcspResolverOptions): OcspResolver =
 			const serial = serialHex(certificate);
 			const failures: OcspResponderUnavailable[] = [];
 			for (const url of responders.urls) {
-				const answer = await lookup(url, certificate, issuer, issuerId, serial, now);
+				const answer = await cache.lookup(url, certificate, issuer, issuerId, serial, now);
 				if (answer.ok) {
 					return {
 						ok: true,
