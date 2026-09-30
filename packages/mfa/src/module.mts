@@ -18,8 +18,8 @@
  * `mfaModule` and `mfaModules`: what a composition installs to turn MFA on
  * (installed is on).
  *
- * Requires `config`, core's three MFA ports (the name `mfa` is accepted only from
- * a module bound to them), `userSessionStore`, `sessionRequirementResolver` and
+ * Requires core's three MFA ports (the name `mfa` is accepted only from a
+ * module bound to them), `userSessionStore`, `sessionRequirementResolver` and
  * `deploymentMode` (the development sample key is refused under `multi`, so a
  * mode read as absent must not lift that); reads `auditSink` (absence declared)
  * and `logger`. Nothing forks per replica.
@@ -239,7 +239,6 @@ const passThrough = (_req: unknown, _res: unknown, next: () => void): void => ne
  */
 export function mfaModule(options: MfaModuleOptions = {}): Module {
 	return defineModule<
-		| "config"
 		| "mfaFactorResolver"
 		| "mfaFactorStore"
 		| "mfaTransactionStore"
@@ -261,7 +260,6 @@ export function mfaModule(options: MfaModuleOptions = {}): Module {
 			renamedVariables: { ENDPOINTS_MFA_URL: "endpoints.mfa.url" },
 		},
 		requires: [
-			"config",
 			"mfaFactorResolver",
 			"mfaFactorStore",
 			"mfaTransactionStore",
