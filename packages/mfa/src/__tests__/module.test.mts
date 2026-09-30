@@ -44,6 +44,7 @@ import { createTestOAuthTokenSettings, resolverForTests } from "@o3co/auth-provi
 import { afterEach, describe, expect, it } from "vitest";
 import { MFA_DEVELOPMENT_SAMPLE_KEY } from "#/config.mjs";
 import { MFA_ROUTES_ID, mfaBootState, mfaModule, mfaModules } from "#/module.mjs";
+import { mfaEmailFactorModule } from "#/email/module.mjs";
 import { mfaRecoveryCodeFactorModule } from "#/recovery/module.mjs";
 import { createMfaSealing } from "#/sealing.mjs";
 import { mfaTotpFactorModule } from "#/totp/module.mjs";
@@ -77,14 +78,16 @@ const TOTP_OFF = { enabled: false };
 // ---------------------------------------------------------------------------
 
 describe("mfaModules", () => {
-	it("is the TOTP factor's module, the recovery-code factor's and the MFA module", () => {
+	it("is the TOTP factor's module, the recovery-code factor's, the email factor's and the MFA module", () => {
 		expect(mfaModules().map((m) => m.name)).toEqual([
 			mfaTotpFactorModule.name,
 			mfaRecoveryCodeFactorModule.name,
+			mfaEmailFactorModule.name,
 			"mfa",
 		]);
 		expect(mfaModules()[0]).toBe(mfaTotpFactorModule);
 		expect(mfaModules()[1]).toBe(mfaRecoveryCodeFactorModule);
+		expect(mfaModules()[2]).toBe(mfaEmailFactorModule);
 	});
 
 	it("requires what the requirement is bound to and not the configuration, and reads the audit sink — its absence declared — and the logger", () => {

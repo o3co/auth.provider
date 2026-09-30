@@ -31,6 +31,7 @@ import { packageReferenceProblems } from "@o3co/auth-provider-core/testing";
 import { parseFile } from "@o3co/ts.hocon";
 import { describe, expect, it } from "vitest";
 import { mfaModule } from "#/module.mjs";
+import { mfaEmailFactorModule } from "#/email/module.mjs";
 import { mfaRecoveryCodeFactorModule } from "#/recovery/module.mjs";
 import { mfaTotpFactorModule } from "#/totp/module.mjs";
 
@@ -71,14 +72,25 @@ function bindings(): string[] {
 }
 
 describe("the package's config/reference.conf", () => {
-	const modules = [mfaModule(), mfaTotpFactorModule, mfaRecoveryCodeFactorModule];
+	const modules = [
+		mfaModule(),
+		mfaTotpFactorModule,
+		mfaRecoveryCodeFactorModule,
+		mfaEmailFactorModule,
+	];
 
-	it("is read at each module's name: mfa, mfa-totp-factor and mfa-recovery-code-factor", () => {
-		expect(modules.map((module) => module.section?.at)).toEqual([undefined, undefined, undefined]);
+	it("is read at each module's name: mfa, mfa-totp-factor, mfa-recovery-code-factor and mfa-email-factor", () => {
+		expect(modules.map((module) => module.section?.at)).toEqual([
+			undefined,
+			undefined,
+			undefined,
+			undefined,
+		]);
 		expect(modules.map((module) => module.name)).toEqual([
 			"mfa",
 			NEW_PATH,
 			"mfa-recovery-code-factor",
+			"mfa-email-factor",
 		]);
 	});
 

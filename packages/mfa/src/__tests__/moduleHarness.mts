@@ -51,6 +51,7 @@ import express from "express";
 import request from "supertest";
 import { type Mock, vi } from "vitest";
 import { type MfaModuleOptions, mfaModule, mfaModules } from "#/module.mjs";
+import { mfaEmailFactorConfig } from "#/testing/index.mjs";
 import { mfaTotpFactorModule } from "#/totp/module.mjs";
 
 export const ISSUER = "https://auth.example";
@@ -147,8 +148,8 @@ export const UNSET_RENAMED_VARIABLES = renamedVariableCaptures({
  * The composition's configuration: core's valid fixture, a login over plain
  * HTTP (no `Secure` cookie), `mfa` declared expected, the `mfa` section under
  * `mode`, and the TOTP factor's `mfa-totp-factor` section, each with the keys
- * given laid over it, the recovery-code factor's section as its defaults, and
- * the captures of the renamed variables, all unset.
+ * given laid over it, the recovery-code and email factors' sections as their
+ * defaults, and the captures of the renamed variables, all unset.
  */
 export function configFor(
 	mode: "off" | "optional" | "required",
@@ -169,6 +170,7 @@ export function configFor(
 		mfa: { ...mfaSection(mode), ...mfa },
 		"mfa-totp-factor": { ...TOTP_SECTION, ...totp },
 		"mfa-recovery-code-factor": RECOVERY_CODE_SECTION,
+		...mfaEmailFactorConfig(),
 		"renamed-variables": UNSET_RENAMED_VARIABLES,
 	} as unknown as AppConfig;
 }
