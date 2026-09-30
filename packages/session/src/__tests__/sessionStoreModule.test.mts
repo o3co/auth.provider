@@ -415,13 +415,13 @@ describe("sessionStoreModule (static manifest) — factory-time refusal under mu
 	});
 
 	it.each([
-		["deployment.mode = multi", { mode: "multi" }, "refused"],
-		["deployment.mode = single", { mode: "single" }, "mounted"],
-		["an empty deployment section", {}, "mounted"],
-		["no deployment section", undefined, "mounted"],
+		["refused", "deployment.mode = multi", { mode: "multi" }],
+		["mounted", "deployment.mode = single", { mode: "single" }],
+		["mounted", "an empty deployment section", {}],
+		["mounted", "no deployment section", undefined],
 	] as const)(
-		"through createApp, decides %s for memory storage as it did when it read the configuration",
-		async (_what, deployment, outcome) => {
+		"through createApp, memory storage is %s under %s",
+		async (outcome, _what, deployment) => {
 			const base = makeValidAppConfig();
 			const boot = createApp({
 				modules: [sessionStoreModule],

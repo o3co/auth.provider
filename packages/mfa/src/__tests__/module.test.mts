@@ -560,13 +560,13 @@ describe("the development sample key", () => {
 	});
 
 	it.each([
-		["deployment.mode = multi", { mode: "multi" }, "refused"],
-		["deployment.mode = single", { mode: "single" }, "accepted"],
-		["an empty deployment section", {}, "accepted"],
-		["no deployment section", undefined, "accepted"],
+		["refused", "deployment.mode = multi", { mode: "multi" }],
+		["accepted with the boot warning", "deployment.mode = single", { mode: "single" }],
+		["accepted with the boot warning", "an empty deployment section", {}],
+		["accepted with the boot warning", "no deployment section", undefined],
 	] as const)(
-		"through createApp, decides %s as it did when it read the configuration",
-		async (_what, deployment, outcome) => {
+		"through createApp, the sample key is %s under %s",
+		async (outcome, _what, deployment) => {
 			const config = {
 				...sample(),
 				...(deployment === undefined ? {} : { deployment }),

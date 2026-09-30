@@ -6,11 +6,10 @@
 /**
  * The two stores that seal upstream refresh tokens read the replica count
  * from core's `deploymentMode` slot, which core fills from the
- * configuration's `deployment.mode`. Each module requires the slot and reads
- * nothing of `deployment` itself, and through `createApp` each refuses
- * plaintext under exactly the configurations it refused it under when it read
- * the configuration: `multi` refuses, `single`, an empty section and none
- * allow it with the warning.
+ * configuration's `deployment.mode`. Each module requires the slot, refuses a
+ * value that is none of its three, and reads nothing of `deployment` itself.
+ * Through `createApp` each refuses plaintext under `multi`, and allows it with
+ * the warning under `single`, an empty section and none.
  */
 
 import {
@@ -67,12 +66,12 @@ const STORES = [
 	},
 ] as const;
 
-/** Every `deployment` core's schema accepts, and whether plaintext is refused under it. */
+/** What becomes of plaintext under every `deployment` core's schema accepts. */
 const ACCEPTED = [
-	["deployment.mode = multi", { mode: "multi" }, "refused"],
-	["deployment.mode = single", { mode: "single" }, "allowed"],
-	["an empty deployment section", {}, "allowed"],
-	["no deployment section", undefined, "allowed"],
+	["refused", "deployment.mode = multi", { mode: "multi" }],
+	["allowed with the warning", "deployment.mode = single", { mode: "single" }],
+	["allowed with the warning", "an empty deployment section", {}],
+	["allowed with the warning", "no deployment section", undefined],
 ] as const;
 
 const recordingLogger = () => {
@@ -178,8 +177,8 @@ describe.each(STORES)("the $label store's module reads the deploymentMode slot",
 	);
 
 	it.each(ACCEPTED)(
-		"through createApp, decides %s as it did when it read the configuration",
-		async (_what, deployment, outcome) => {
+		"through createApp, plaintext is %s under %s",
+		async (outcome, _what, deployment) => {
 			const { logger, warn } = recordingLogger();
 			const boot = createApp({
 				modules: [store.module, readerOf(store.provided)],

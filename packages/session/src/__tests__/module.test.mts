@@ -583,13 +583,13 @@ describe("sessionModule — the login throttle reads the deploymentMode slot", (
 	});
 
 	it.each([
-		["deployment.mode = multi", { mode: "multi" }, "refused"],
-		["deployment.mode = single", { mode: "single" }, "silent"],
-		["an empty deployment section", {}, "warned"],
-		["no deployment section", undefined, "warned"],
+		["refused at boot", "deployment.mode = multi", { mode: "multi" }],
+		["mounted without a warning", "deployment.mode = single", { mode: "single" }],
+		["mounted with the warning", "an empty deployment section", {}],
+		["mounted with the warning", "no deployment section", undefined],
 	] as const)(
-		"through createApp, decides %s as it did when it read the configuration",
-		async (_what, deployment, outcome) => {
+		"through createApp, the per-process login limiter is %s under %s",
+		async (outcome, _what, deployment) => {
 			const { logger, warn } = spyLogger();
 			const base = makeValidAppConfig();
 			const boot = createTestApp({
@@ -600,7 +600,7 @@ describe("sessionModule — the login throttle reads the deploymentMode slot", (
 					logger,
 				} as never,
 			});
-			if (outcome === "refused") {
+			if (outcome === "refused at boot") {
 				await expect(boot).rejects.toMatchObject({
 					reason: "contribute-factory-failed",
 					cause: { reason: "replica-unsafe-adapter", details: { modules: ["session"] } },
@@ -612,7 +612,7 @@ describe("sessionModule — the login throttle reads the deploymentMode slot", (
 				const warned = warn.mock.calls.some(
 					([, event]) => event === "login_rate_limiter_not_shared",
 				);
-				expect(warned).toBe(outcome === "warned");
+				expect(warned).toBe(outcome === "mounted with the warning");
 			} finally {
 				await handle.dispose();
 			}
