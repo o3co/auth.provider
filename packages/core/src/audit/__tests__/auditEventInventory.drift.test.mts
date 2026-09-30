@@ -49,8 +49,10 @@ const DECLARED_NOT_EMITTED: Readonly<Record<string, string>> = {
 	"mfa.factor.enrolled": "the MFA ADR's build-order step 9",
 	"mfa.recovery_codes.generated": "the MFA ADR's build-order step 9",
 	"mfa.locked": "the MFA ADR's build-order step 10",
+	"mfa.locked.first": "the MFA ADR's build-order step 10",
 	"mfa.recovery_code.used": "the MFA ADR's build-order step 10",
 	"mfa.factor.removed": "the MFA ADR's build-order step 12",
+	"mfa.reset": "the MFA ADR's build-order step 12",
 };
 
 /** Shipped sources: packages/*\/src and the standalone template, tests excluded. */
