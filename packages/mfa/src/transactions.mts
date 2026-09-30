@@ -56,12 +56,12 @@ export type LoginInterruption =
 			/** The kinds this user may enroll, in registration order: `hints.enrollable`. */
 			readonly enrollable: readonly string[];
 			/**
-			 * Whether the account-email proof comes before the binding:
-			 * `hints.email_proof`. `false` alone: the transaction records
-			 * `emailProof: "not_required"`, and the answer must not advertise a
-			 * proof the server does not enforce.
+			 * Whether the account-email proof comes before the binding
+			 * (`firstBinding.mts`): `hints.email_proof`, and the transaction's
+			 * `emailProof` — `required` or `not_required` — so the answer
+			 * advertises exactly the proof the transaction enforces.
 			 */
-			readonly emailProof: false;
+			readonly emailProof: boolean;
 	  };
 
 /** Opens a login's transaction and answers the interruption. */
@@ -106,12 +106,13 @@ export function createLoginTransactions({
 	}
 	return {
 		async open(sessionId, continuation, interruption) {
-			// The type admits `false` alone; held at run time too, before anything
-			// is stored, so no caller can advertise a proof nothing requires.
-			if (interruption.error === "mfa_enrollment_required" && interruption.emailProof !== false) {
-				throw new RangeError(
-					"a first binding's email_proof must be false until the account-email proof can be required (build-order step 9)",
-				);
+			// Held at run time too, before anything is stored: the answer and the
+			// transaction say the same.
+			if (
+				interruption.error === "mfa_enrollment_required" &&
+				typeof interruption.emailProof !== "boolean"
+			) {
+				throw new RangeError("a first binding's email_proof must be true or false");
 			}
 			const id = newTransactionId();
 			const createdAtMs = now();
@@ -125,8 +126,7 @@ export function createLoginTransactions({
 				continuation,
 				redirectTo: continuation.primary.redirectTo,
 				enrollment: firstBinding ? "required" : "none",
-				// Never required: no mail is wired for the account-email proof.
-				emailProof: "not_required",
+				emailProof: firstBinding && interruption.emailProof ? "required" : "not_required",
 				acrValues: undefined,
 				challenge: undefined,
 				pendingEnrollment: undefined,

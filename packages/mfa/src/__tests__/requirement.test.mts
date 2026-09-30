@@ -33,6 +33,8 @@ import {
 	type ActionGrade,
 	ADMISSION_GRADES,
 	type AdmissionAction,
+	type AuditEvent,
+	type AuditSink,
 	admitPrimary,
 	admitSession,
 	cookieClaim,
@@ -102,6 +104,11 @@ function build(
 		/** `mfa.manage.maxAgeSeconds`; the package's default, by default. */
 		readonly recentMfaMaxAgeSeconds?: number;
 		readonly logger?: Logger;
+		readonly auditSink?: AuditSink;
+		/** `mfa.enrollment.requireEmailProof`; the package's default, by default. */
+		readonly requireEmailProof?: "when-mail" | "always" | "never";
+		/** Whether a mail sender is wired; none, by default. */
+		readonly mailWired?: boolean;
 	} = {},
 ): Built {
 	const transactionStore = options.transactionStore ?? createMemoryMfaTransactionStore();
@@ -118,6 +125,13 @@ function build(
 		stepUpRecordable: options.stepUpRecordable ?? true,
 		recentMfaMaxAgeSeconds: options.recentMfaMaxAgeSeconds ?? 300,
 		logger: options.logger ?? silentLogger(),
+		auditSink: options.auditSink,
+		firstBinding: {
+			requireEmailProof: options.requireEmailProof ?? "when-mail",
+			mailWired: options.mailWired ?? false,
+		},
+		emailProofRequiredAtNextBinding: (subject) =>
+			transactionStore.emailProofRequiredAtNextBinding(subject),
 	});
 	return { requirement, transactionStore };
 }
@@ -1154,6 +1168,116 @@ describe("admitPrimary — after a password login", () => {
 		expect(JSON.stringify(logger.warn.mock.calls)).not.toContain("u-alice");
 	});
 
+	/** What a first binding under `options` opens for alice, whose account carries `user`. */
+	const firstBinding = async (
+		options: Parameters<typeof build>[1],
+		user: Record<string, unknown> = { email: "alice@example.com" },
+		before?: (store: MfaTransactionStore) => Promise<void>,
+	) => {
+		const built = build("required", options);
+		await before?.(built.transactionStore);
+		const admission = await admitPrimary(depsFor(built.requirement), primaryOf("u-alice", user));
+		if (admission.outcome !== "interrupt") throw new Error("not interrupted");
+		const answer = await admission.open("sess-1");
+		const transaction = await built.transactionStore.get(answer.body.transaction as string);
+		return { hint: answer.body.hints?.email_proof, emailProof: transaction?.emailProof };
+	};
+
+	it("asks for the account-email proof first where a mail sender is wired and the account has an address: the hint says so, and the transaction requires it", async () => {
+		expect(await firstBinding({ mailWired: true })).toEqual({ hint: true, emailProof: "required" });
+		expect(await firstBinding({ mailWired: true, requireEmailProof: "always" })).toEqual({
+			hint: true,
+			emailProof: "required",
+		});
+	});
+
+	it("asks for none without a sender, for an account with no address, or under never", async () => {
+		const none = { hint: false, emailProof: "not_required" };
+		expect(await firstBinding({ mailWired: false })).toEqual(none);
+		expect(await firstBinding({ mailWired: false }, { email: "not an address" })).toEqual(none);
+		for (const email of [undefined, "", null]) {
+			expect(await firstBinding({ mailWired: true }, { email }), String(email)).toEqual(none);
+		}
+		expect(await firstBinding({ mailWired: true, requireEmailProof: "never" })).toEqual(none);
+	});
+
+	it("reads the address as the login's enrollment facts say it: one it cannot read asks for a proof nobody can give under when-mail — refused, never skipped — and changes nothing under never", async () => {
+		const asked = { hint: true, emailProof: "required" };
+		for (const email of ["not an address", "Alice <alice@example.com>", "a%b@example.com", 42]) {
+			expect(await firstBinding({ mailWired: true }, { email }), String(email)).toEqual(asked);
+		}
+		const logger = silentLogger();
+		expect(
+			await firstBinding(
+				{ mailWired: true, requireEmailProof: "never", logger },
+				{ email: "Alice <alice@example.com>" },
+			),
+		).toEqual({ hint: false, emailProof: "not_required" });
+		expect(logger.warn).not.toHaveBeenCalled();
+	});
+
+	it("asks for it under always even where nobody can give it — no sender, no address — never skipped", async () => {
+		const asked = { hint: true, emailProof: "required" };
+		expect(await firstBinding({ mailWired: false, requireEmailProof: "always" })).toEqual(asked);
+		expect(
+			await firstBinding({ mailWired: true, requireEmailProof: "always" }, { email: undefined }),
+		).toEqual(asked);
+	});
+
+	it("says at warn when the proof it asks for cannot be given — no sender, no address, or one it cannot read — naming the subject and why, never the address", async () => {
+		const logger = silentLogger();
+		await firstBinding({ mailWired: false, requireEmailProof: "always", logger });
+		await firstBinding(
+			{ mailWired: true, requireEmailProof: "always", logger },
+			{ email: undefined },
+		);
+		await firstBinding({ mailWired: true, logger }, { email: "Alice <alice@example.com>" });
+		expect(logger.warn.mock.calls).toEqual([
+			[{ sub: "u-alice", reason: "no_sender" }, "mfa_email_proof_unprovable"],
+			[{ sub: "u-alice", reason: "no_address" }, "mfa_email_proof_unprovable"],
+			[{ sub: "u-alice", reason: "unreadable_address" }, "mfa_email_proof_unprovable"],
+		]);
+		expect(JSON.stringify(logger.warn.mock.calls)).not.toContain("alice@example.com");
+		const quiet = silentLogger();
+		await firstBinding({ mailWired: true, logger: quiet });
+		await firstBinding({ mailWired: false, logger: quiet });
+		expect(quiet.warn).not.toHaveBeenCalled();
+	});
+
+	it("asks for it while the operator reset's flag stands, whatever the setting (D25)", async () => {
+		const flagged = (store: MfaTransactionStore) => store.requireEmailProofAtNextBinding("u-alice");
+		const asked = { hint: true, emailProof: "required" };
+		for (const requireEmailProof of ["when-mail", "always", "never"] as const) {
+			expect(
+				await firstBinding({ mailWired: true, requireEmailProof }, undefined, flagged),
+				requireEmailProof,
+			).toEqual(asked);
+		}
+		expect(
+			await firstBinding({ mailWired: false, requireEmailProof: "never" }, undefined, flagged),
+		).toEqual(asked);
+	});
+
+	it("throws when the flag cannot be read, or reads other than a boolean — admission answers unavailable — and opens nothing", async () => {
+		for (const failing of [
+			async () => {
+				throw new Error("transaction store unreachable");
+			},
+			async () => "yes" as never,
+		]) {
+			const transactionStore = createMemoryMfaTransactionStore();
+			const create = vi.spyOn(transactionStore, "create");
+			const { requirement } = build("required", {
+				transactionStore: { ...transactionStore, emailProofRequiredAtNextBinding: failing },
+			});
+			expect(await admitPrimary(depsFor(requirement), primaryOf("u-alice"))).toEqual({
+				outcome: "unavailable",
+				store: "mfa",
+			});
+			expect(create).not.toHaveBeenCalled();
+		}
+	});
+
 	it("says nothing when a first binding offers a kind", async () => {
 		const logger = silentLogger();
 		const { requirement } = build("required", { logger });
@@ -1163,15 +1287,97 @@ describe("admitPrimary — after a password login", () => {
 		expect(logger.warn).not.toHaveBeenCalled();
 	});
 
-	it("reads no enrollment witness before step 9: a user the Store says enrolled, with no record, is still asked for a first binding (owner decision 2)", async () => {
-		const { requirement } = build("required");
+	it("answers a subject the Store says enrolled, holding no record, as an outage under either mode: the event recorded, the cause naming the inconsistency, nothing opened", async () => {
+		for (const mode of ["optional", "required"] as const) {
+			const events: AuditEvent[] = [];
+			const transactionStore = createMemoryMfaTransactionStore();
+			const create = vi.spyOn(transactionStore, "create");
+			const { requirement } = build(mode, {
+				transactionStore,
+				auditSink: { kind: "recording", record: async (event) => void events.push(event) },
+			});
+			const primary = primaryOf("u-alice", { mfaEnrolled: true });
+
+			const thrown = await requirement.admitPrimary?.(primary).catch((err: unknown) => err);
+			expect(thrown, mode).toMatchObject({
+				name: "MfaEnrollmentStateInconsistentError",
+				reason: "mfa_enrollment_state_inconsistent",
+			});
+			expect(await admitPrimary(depsFor(requirement), primary), mode).toEqual({
+				outcome: "unavailable",
+				store: "mfa",
+			});
+			expect(create, mode).not.toHaveBeenCalled();
+			expect(events, mode).toEqual([
+				expect.objectContaining({
+					type: "mfa.enrollment_state_inconsistent",
+					subject: "u-alice",
+					details: { purpose: "login", witness: "enrolled" },
+				}),
+				expect.objectContaining({ type: "mfa.enrollment_state_inconsistent" }),
+			]);
+		}
+	});
+
+	it("answers a witness the Store answered malformed — null, a number, a string, an object — as the same outage, never a first binding", async () => {
+		for (const mfaEnrolled of [null, 1, "true", {}]) {
+			const events: AuditEvent[] = [];
+			const { requirement } = build("required", {
+				auditSink: { kind: "recording", record: async (event) => void events.push(event) },
+			});
+			await expect(
+				requirement.admitPrimary?.(primaryOf("u-alice", { mfaEnrolled })),
+				JSON.stringify(mfaEnrolled),
+			).rejects.toMatchObject({ reason: "mfa_enrollment_state_inconsistent" });
+			expect(
+				events.map((event) => event.details),
+				JSON.stringify(mfaEnrolled),
+			).toEqual([{ purpose: "login", witness: "malformed" }]);
+		}
+	});
+
+	it("compares the witness with the records that count: recovery codes alone beside it are the same outage; a counting record, or one of a kind no longer installed, is asked for", async () => {
+		const enrolled = primaryOf("u-alice", { mfaEnrolled: true });
+		const alone = build("required", {
+			factors: [FACTORS.totp(), FACTORS.recovery()],
+			factorStore: factorStoreHolding(factorRecord("u-alice", "recovery_code")),
+		});
+		await expect(alone.requirement.admitPrimary?.(enrolled)).rejects.toMatchObject({
+			reason: "mfa_enrollment_state_inconsistent",
+		});
+		for (const kind of ["totp", "retired-kind"]) {
+			const { requirement } = build("required", {
+				factors: [FACTORS.totp(), FACTORS.recovery()],
+				factorStore: factorStoreHolding(factorRecord("u-alice", kind)),
+			});
+			const admission = await admitPrimary(depsFor(requirement), enrolled);
+			expect(admission.outcome, kind).toBe("interrupt");
+			if (admission.outcome !== "interrupt") return;
+			expect((await admission.open("sess-1")).body.error, kind).toBe("mfa_required");
+		}
+	});
+
+	it("reads no witness while a counting record stands: a malformed one beside it is asked for the factor", async () => {
+		const { requirement } = build("required", {
+			factorStore: factorStoreHolding(factorRecord("u-alice", "totp")),
+		});
 		const admission = await admitPrimary(
 			depsFor(requirement),
-			primaryOf("u-alice", { mfaEnrolled: true }),
+			primaryOf("u-alice", { mfaEnrolled: "yes" }),
 		);
 		expect(admission.outcome).toBe("interrupt");
 		if (admission.outcome !== "interrupt") return;
-		expect((await admission.open("sess-1")).body.error).toBe("mfa_enrollment_required");
+		expect((await admission.open("sess-1")).body.error).toBe("mfa_required");
+	});
+
+	it("opens a first binding for a subject the Store says is not enrolled — false, or no witness at all", async () => {
+		for (const user of [{ mfaEnrolled: false }, {}]) {
+			const { requirement } = build("required");
+			const admission = await admitPrimary(depsFor(requirement), primaryOf("u-alice", user));
+			expect(admission.outcome, JSON.stringify(user)).toBe("interrupt");
+			if (admission.outcome !== "interrupt") return;
+			expect((await admission.open("sess-1")).body.error).toBe("mfa_enrollment_required");
+		}
 	});
 
 	it("throws when the factors cannot be listed — admission answers unavailable, and nothing is opened", async () => {

@@ -52,6 +52,7 @@ export interface MfaConfigForTestsOptions {
 		readonly routes?: { readonly limit: number; readonly windowSeconds: number };
 	};
 	readonly manage?: { readonly maxAgeSeconds: number };
+	readonly enrollment?: { readonly requireEmailProof: "when-mail" | "always" | "never" };
 }
 
 /**
@@ -68,6 +69,7 @@ export function mfaConfigForTests(options: MfaConfigForTestsOptions) {
 			maxAttemptsPerTransaction: 5,
 			rateLimit: { routes: { limit: 60, windowSeconds: 300 } },
 			manage: { maxAgeSeconds: 300 },
+			enrollment: { requireEmailProof: "when-mail" as "when-mail" | "always" | "never" },
 			...rest,
 			encryptionKeys: encryptionKeys?.map((entry) => ({ ...entry })) ?? [{ key }],
 			lockout: {
