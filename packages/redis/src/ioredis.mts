@@ -2823,6 +2823,12 @@ export function makeIoredisMfaTransactionStoreClient(io: Redis): MfaTransactionS
 		async consumeEmailProof(key) {
 			return (await io.del(key)) === 1;
 		},
+		async recordSessionEmailProof(key, value, ttlMs) {
+			await io.set(key, value, "PX", ttlMs);
+		},
+		async sessionEmailProof(key) {
+			return await io.get(key);
+		},
 		durability: () => redisDurability(io),
 	};
 }

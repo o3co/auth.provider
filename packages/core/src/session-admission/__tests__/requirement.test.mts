@@ -21,6 +21,7 @@
  */
 
 import { describe, expect, expectTypeOf, it } from "vitest";
+import type { MfaEnrollmentWitness } from "#/repositories/UserRepository.mjs";
 import type { AdmissionAction } from "#/session-admission/actions.mjs";
 import type {
 	AdmissionRequest,
@@ -44,7 +45,6 @@ import {
 	stepUpPageUrl,
 } from "#/session-admission/requirement.mjs";
 import { resolverForTests } from "#/session-admission/testing/resolver.mjs";
-import type { MfaEnrollmentWitness } from "#/repositories/UserRepository.mjs";
 import type { RecordedAuthentication } from "#/user-sessions/authentication.mjs";
 import type { SessionEnrollmentFacts, UserSessionClaims } from "#/user-sessions/types.mjs";
 

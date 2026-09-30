@@ -35,11 +35,13 @@ import { describe, expect, it } from "vitest";
  * one winner among verifications in flight. And the subject state, which
  * bounds guessable proofs across transactions: the consecutive run with its
  * short backoff and hard limit, and the weekly budget no success refunds.
+ * Beside them, what a first binding asks of the store: the email proof an
+ * operator reset requires, and the account-email proof given in one session.
  *
  * The subject state is judged on the time its caller passes, so D21's
- * schedule is driven here by an injected clock; a transaction expires on the
- * store's own clock, read through {@link ExpiryClock} as the session-store
- * suite does.
+ * schedule is driven here by an injected clock; a transaction and a
+ * session's proof expire on the store's own clock, read through
+ * {@link ExpiryClock} as the session-store suite does.
  */
 export type MfaTransactionStoreContractFactory = () => Promise<MfaTransactionStore>;
 
@@ -1449,7 +1451,13 @@ export function runMfaTransactionStoreContract(
 				["a proof time as text", "user-1", "sid-1", String(now), later],
 				["an end at the proof's time", "user-1", "sid-1", now, now],
 				["an end before the proof's time", "user-1", "sid-1", now, now - 1],
-				["an end already past on the store's clock", "user-1", "sid-1", now - 2 * MINUTE, now - MINUTE],
+				[
+					"an end already past on the store's clock",
+					"user-1",
+					"sid-1",
+					now - 2 * MINUTE,
+					now - MINUTE,
+				],
 				["an end that is not a number", "user-1", "sid-1", now, Number.NaN],
 				["an end that is not whole", "user-1", "sid-1", now, later + 0.5],
 				["an end past the Date range", "user-1", "sid-1", now, 1e17],

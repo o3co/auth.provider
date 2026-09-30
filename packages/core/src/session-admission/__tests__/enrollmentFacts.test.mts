@@ -139,12 +139,11 @@ describe("the enrollment facts a primary carries — derived from its user by co
 		const handed = { witness: "not_enrolled", mailAddress: true };
 		const derived = { witness: "enrolled", mailAddress: false };
 		expect(
-			passwordPrimary({ ...passwordFacts(user), enrollmentFacts: handed } as never)
-				.enrollmentFacts,
+			passwordPrimary({ ...passwordFacts(user), enrollmentFacts: handed } as never).enrollmentFacts,
 		).toEqual(derived);
 		expect(
-			establishWithoutAsking({ ...federatedLogin(user), enrollmentFacts: handed } as never)
-				.primary.enrollmentFacts,
+			establishWithoutAsking({ ...federatedLogin(user), enrollmentFacts: handed } as never).primary
+				.enrollmentFacts,
 		).toEqual(derived);
 		const built = passwordPrimary(passwordFacts(user));
 		expect(

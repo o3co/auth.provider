@@ -68,6 +68,8 @@ const primary = (over: Record<string, unknown> = {}): PrimaryAuthentication =>
 				mfaAt: undefined,
 			},
 		},
+		// What core derives from that user: no witness, no address.
+		enrollmentFacts: { witness: "not_enrolled", mailAddress: false },
 		authTime: NOW,
 		redirectTo: "/after",
 		request: { ip: "198.51.100.7", userAgent: "test" },
@@ -205,8 +207,9 @@ describe("checkPrimaryAuthentication — a primary as the login route builds it"
 });
 
 /** A primary as a continuation carries it: `authTime` as epoch milliseconds. */
+/** The primary as a continuation carries it: `authTimeMs`, and no enrollment facts, which a rehydration derives again. */
 const dto = () => {
-	const { authTime, ...fields } = primary();
+	const { authTime, enrollmentFacts: _derivedAgain, ...fields } = primary();
 	return { ...fields, authTimeMs: authTime.getTime() };
 };
 
@@ -557,7 +560,7 @@ describe("the refusals each field names", () => {
 	});
 
 	it("checkPrimaryContinuation refuses a done entry that is not an object, and additions that are not one", () => {
-		const { authTime, ...fields } = primary();
+		const { authTime, enrollmentFacts: _derivedAgain, ...fields } = primary();
 		const dto = { ...fields, authTimeMs: authTime.getTime() };
 		expect(() =>
 			checkPrimaryContinuation({ primary: dto, done: ["mfa"], interruptedBy: "mfa" }),

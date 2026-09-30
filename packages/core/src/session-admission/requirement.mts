@@ -31,6 +31,7 @@ import type { Logger } from "../logging/Logger.mjs";
 import type { RecordedAuthentication } from "../user-sessions/authentication.mjs";
 import type {
 	SessionAuthentication,
+	SessionEnrollmentFacts,
 	SubjectRevocation,
 	UserSession,
 	UserSessionClaims,
@@ -284,6 +285,8 @@ export interface SessionView {
 	readonly sub: string;
 	readonly authTime: Date;
 	readonly expiresAt: Date;
+	/** A frozen copy of the record's `enrollmentFacts` when it holds ones the type admits; absent otherwise. Never the `User`. */
+	readonly enrollmentFacts?: SessionEnrollmentFacts;
 }
 
 /**
@@ -865,6 +868,8 @@ export interface PrimaryAuthentication {
 	readonly claims: UserSessionClaims;
 	/** The `amr` and `authentication` the session would be created with. */
 	readonly recorded: RecordedAuthentication;
+	/** What the session will record of `user` for a first binding: derived from `user` by core's builders, never taken from a caller. */
+	readonly enrollmentFacts: SessionEnrollmentFacts;
 	readonly authTime: Date;
 	/** Already held to `session.redirectAllowlist`. */
 	readonly redirectTo: string | undefined;

@@ -1442,6 +1442,10 @@ export interface MfaTransactionStoreClient {
 	emailProofRequired(key: string): Promise<boolean>;
 	/** Remove the requirement at `key` (`DEL`); resolves whether this call removed it. */
 	consumeEmailProof(key: string): Promise<boolean>;
+	/** Write a session's email proof `value` at `key`, replacing any, expiring `ttlMs` from when the server takes it (`SET … PX`). */
+	recordSessionEmailProof(key: string, value: string, ttlMs: number): Promise<void>;
+	/** The session's email proof at `key` (`GET`); `null` when there is none. */
+	sessionEmailProof(key: string): Promise<string | null>;
 	/** As `MfaFactorStoreClient.durability`: the requirement must be kept as the factors are. */
 	durability(): Promise<RedisDurability>;
 }

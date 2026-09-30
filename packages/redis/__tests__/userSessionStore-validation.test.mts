@@ -167,7 +167,10 @@ describe("RedisUserSessionStore.get — corrupt envelope validation", () => {
 			"enrollmentFacts.witness unknown",
 			{ ...validEnvelope, enrollmentFacts: { witness: "yes", mailAddress: true } },
 		],
-		["enrollmentFacts without witness", { ...validEnvelope, enrollmentFacts: { mailAddress: true } }],
+		[
+			"enrollmentFacts without witness",
+			{ ...validEnvelope, enrollmentFacts: { mailAddress: true } },
+		],
 		[
 			"enrollmentFacts without mailAddress",
 			{ ...validEnvelope, enrollmentFacts: { witness: "enrolled" } },

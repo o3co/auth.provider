@@ -185,7 +185,13 @@ const USERS: ReadonlyArray<
 	],
 	[
 		"a witness the Store should not have answered, and an email that is no address",
-		{ id: "user-3", username: "carol", mfaEnrolled: null, email: "carol at example.com" },
+		// What a Store's JSON can carry whatever `User` declares.
+		{
+			id: "user-3",
+			username: "carol",
+			mfaEnrolled: null,
+			email: "carol at example.com",
+		} as unknown as User,
 		{ witness: "malformed", mailAddress: false },
 	],
 ];

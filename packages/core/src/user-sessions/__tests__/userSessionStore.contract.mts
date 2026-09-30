@@ -67,7 +67,9 @@ const INPUT = (overrides: Partial<CreateUserSessionInput> = {}): CreateUserSessi
 	claims: overrides.claims ?? { email: "user@example.com" },
 	amr: overrides.amr,
 	authentication: overrides.authentication,
-	...(overrides.enrollmentFacts === undefined ? {} : { enrollmentFacts: overrides.enrollmentFacts }),
+	...(overrides.enrollmentFacts === undefined
+		? {}
+		: { enrollmentFacts: overrides.enrollmentFacts }),
 });
 
 /** How a password login records itself, every field named. */
@@ -200,7 +202,8 @@ export function runUserSessionStoreContract(
 					store.create(
 						INPUT({
 							sid: "sid-bad-facts",
-							enrollmentFacts: enrollmentFacts as unknown as CreateUserSessionInput["enrollmentFacts"],
+							enrollmentFacts:
+								enrollmentFacts as unknown as CreateUserSessionInput["enrollmentFacts"],
 						}),
 					),
 				).rejects.toThrow(RangeError);

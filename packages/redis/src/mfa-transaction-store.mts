@@ -16,18 +16,20 @@
 
 /**
  * Redis {@link MfaTransactionStore}: the single-use record of each
- * second-factor ceremony, the subject lock that bounds guessable proofs, and
- * the email proof an operator reset requires (see
+ * second-factor ceremony, the subject lock that bounds guessable proofs, the
+ * email proof an operator reset requires, and the account-email proof given
+ * in a session (see
  * packages/core/docs/adr/2026-09-25-multi-factor-authentication.md).
  *
  * ```text
- * <keyPrefix>tx:{<id>}          HASH   one transaction, expiring at its expiresAtMs
- * <keyPrefix>lock:{<subject>}   HASH   the lockout run, reservations in flight
- * <keyPrefix>week:{<subject>}   ZSET   the weekly window: one member per attempt, scored by time
- * <keyPrefix>proof:{<subject>}  STRING the email-proof requirement, with no TTL
+ * <keyPrefix>tx:{<id>}                          HASH   one transaction, expiring at its expiresAtMs
+ * <keyPrefix>lock:{<subject>}                   HASH   the lockout run, reservations in flight
+ * <keyPrefix>week:{<subject>}                   ZSET   the weekly window: one member per attempt, scored by time
+ * <keyPrefix>proof:{<subject>}                  STRING the email-proof requirement, with no TTL
+ * <keyPrefix>session-proof:{<subject>}:<sid>    STRING a session's account-email proof, expiring at its end
  * ```
  *
- * `<id>` and `<subject>` are base64url of their JSON (`internal/mfa-keys.mts`).
+ * `<id>`, `<subject>` and `<sid>` are base64url of their JSON (`internal/mfa-keys.mts`).
  * A subject's lock and week share its hash tag, so each operation on them is one
  * script on one Cluster slot. Every operation a race could split is one script
  * (`makeIoredisClients`): insert-only create, compare-and-set update,
@@ -53,6 +55,11 @@
  *
  * The requirement must last as enrolled factors do: it has no TTL, and the
  * module runs the factor store's durability check.
+ *
+ * A session's proof is JSON `{provedAtMs, untilMs}` written with `PX` on
+ * this side's clock (`untilMs` less `now`, rounded up), and answered absent
+ * at or past `untilMs` on that clock too. One that does not read back is
+ * absent: losing a proof fails closed — the user proves again.
  */
 
 import { randomBytes } from "node:crypto";
@@ -60,6 +67,8 @@ import {
 	checkMfaLockoutPolicy,
 	checkMfaTransactionTransitions,
 	checkMfaVersionAdvances,
+	checkSessionEmailProof,
+	checkSessionEmailProofQuestion,
 	consoleLogger,
 	defineModule,
 	isStorableExpiry,
@@ -202,6 +211,27 @@ function challengeOf(text: string | null): MfaTransaction["challenge"] | null {
 	}
 }
 
+/**
+ * The session proof `text` holds — epoch milliseconds when it was given and
+ * when it ends, as `checkSessionEmailProof` admits them — or `null`.
+ */
+function sessionProofOf(
+	text: string | null,
+	subject: string,
+	sid: string,
+): { readonly provedAtMs: number; readonly untilMs: number } | null {
+	if (text === null) return null;
+	try {
+		const value: unknown = JSON.parse(text);
+		if (!isObject(value)) return null;
+		const { provedAtMs, untilMs } = value;
+		checkSessionEmailProof(subject, sid, provedAtMs, untilMs);
+		return { provedAtMs: provedAtMs as number, untilMs: untilMs as number };
+	} catch {
+		return null;
+	}
+}
+
 function checkInstant(nowMs: number, operation: string): void {
 	if (!isStorableExpiry(nowMs)) {
 		throw new RangeError(
@@ -225,6 +255,8 @@ export function createRedisMfaTransactionStore(
 		return { lock: `${keyPrefix}lock:${tag}`, week: `${keyPrefix}week:${tag}` };
 	};
 	const proofKey = (subject: string): string => `${keyPrefix}proof:{${mfaKeyPart(subject)}}`;
+	const sessionProofKey = (subject: string, sid: string): string =>
+		`${keyPrefix}session-proof:{${mfaKeyPart(subject)}}:${mfaKeyPart(sid)}`;
 
 	return {
 		kind: "redis",
@@ -337,6 +369,32 @@ export function createRedisMfaTransactionStore(
 
 		async consumeEmailProofRequirement(subject) {
 			return client.consumeEmailProof(proofKey(subject));
+		},
+
+		async recordSessionEmailProof(subject, sid, provedAtMs, untilMs) {
+			checkSessionEmailProof(subject, sid, provedAtMs, untilMs);
+			const ttlMs = untilMs - clock();
+			if (!(ttlMs > 0)) {
+				throw new RangeError(
+					"MfaTransactionStore.recordSessionEmailProof: untilMs must be after the store's clock",
+				);
+			}
+			await client.recordSessionEmailProof(
+				sessionProofKey(subject, sid),
+				JSON.stringify({ provedAtMs, untilMs }),
+				Math.ceil(ttlMs),
+			);
+		},
+
+		async sessionEmailProofAt(subject, sid, nowMs) {
+			checkSessionEmailProofQuestion(subject, sid, nowMs);
+			const proof = sessionProofOf(
+				await client.sessionEmailProof(sessionProofKey(subject, sid)),
+				subject,
+				sid,
+			);
+			if (proof === null || proof.untilMs <= clock() || proof.untilMs <= nowMs) return null;
+			return Math.min(proof.provedAtMs, nowMs);
 		},
 	};
 }

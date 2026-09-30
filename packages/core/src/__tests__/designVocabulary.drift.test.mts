@@ -504,6 +504,34 @@ const VOCABULARY: readonly VocabularyRow[] = [
 		definition: /(?:function|const)\s+isMfaFactorUpdateWritten\b/,
 	},
 	{
+		concept:
+			"an MFA store's answer, read as promised — a session's account-email proof (the MFA ADR's D24)",
+		home: "packages/core/src/mfa/transactionStore.mts",
+		definition: /(?:function|const)\s+readSessionEmailProof\b/,
+	},
+	{
+		concept:
+			"a session's enrollment facts — derived from the login's User by core's primary builders (the MFA ADR's D12, D24)",
+		home: "packages/core/src/session-admission/primary.mts",
+		definition: /(?:function|const)\s+enrollmentFactsOf\b/,
+	},
+	{
+		concept: "a session's enrollment facts — what a store may record (the MFA ADR's D12, D24)",
+		home: "packages/core/src/user-sessions/enrollmentFacts.mts",
+		definition: /(?:function|const)\s+recordableEnrollmentFacts\b/,
+	},
+	{
+		concept:
+			"a session's enrollment facts — what a stored value is read back as (the MFA ADR's D12, D24)",
+		home: "packages/core/src/user-sessions/enrollmentFacts.mts",
+		definition: /(?:function|const)\s+readEnrollmentFacts\b/,
+	},
+	{
+		concept: "the cookie session's user, for a route that admitted its subject (the MFA ADR's D24)",
+		home: "packages/core/src/session-admission/admit.mts",
+		definition: /(?:function|const)\s+cookieSessionUser\b/,
+	},
+	{
 		concept: "core.deployment.mode as core reads it — the deploymentMode slot's value",
 		home: DEPLOYMENT_MODE_HOME,
 		definition: /(?:function|const)\s+deploymentModeOf\b/,

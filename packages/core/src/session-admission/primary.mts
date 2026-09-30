@@ -26,6 +26,10 @@
  * Each check answers a frozen deep copy that shares nothing with the
  * caller's object; a value the contract does not admit is a `RangeError`
  * naming what is wrong and quoting nothing but an `amr` value's marker.
+ *
+ * A primary's `enrollmentFacts` are derived here from its copied `user`, as
+ * it is checked and as it is rehydrated, and never read from what a caller
+ * hands in; a continuation carries none.
  */
 
 import {
@@ -34,8 +38,14 @@ import {
 	MFA_AMR,
 	PASSWORD_AMR,
 } from "../grants/authenticationClaims.mjs";
+import { normaliseMailAddress } from "../mail/address.mjs";
+import { readMfaEnrollmentWitness } from "../repositories/UserRepository.mjs";
 import type { RecordedAuthentication } from "../user-sessions/authentication.mjs";
-import type { SessionAuthentication, UserSessionClaims } from "../user-sessions/types.mjs";
+import type {
+	SessionAuthentication,
+	SessionEnrollmentFacts,
+	UserSessionClaims,
+} from "../user-sessions/types.mjs";
 import { SECOND_FACTOR_AMR } from "./acr.mjs";
 import type {
 	CompletedRequirement,
@@ -72,17 +82,36 @@ function deepFreeze<T>(value: T): T {
 	return value;
 }
 
+/** A deep copy of `user` that shares nothing with it, frozen at every depth; `undefined` for a value that is not an object or cannot be copied. */
+export function frozenUserCopy(user: unknown): Readonly<Record<string, unknown>> | undefined {
+	if (!isPlainObject(user)) return undefined;
+	try {
+		const copy: unknown = structuredClone(user);
+		return isPlainObject(copy) ? deepFreeze(copy) : undefined;
+	} catch {
+		return undefined;
+	}
+}
+
 /** A deep copy of `user` that shares nothing with it, frozen at every depth; a value that cannot be copied is refused. */
 function copyUser(
 	user: unknown,
 	refuse: (what: string) => never,
 ): Readonly<Record<string, unknown>> {
 	if (!isPlainObject(user)) return refuse("user must be an object");
-	try {
-		return deepFreeze(structuredClone(user));
-	} catch {
-		return refuse("user holds a value that cannot be copied");
-	}
+	return frozenUserCopy(user) ?? refuse("user holds a value that cannot be copied");
+}
+
+/**
+ * What a session records of its login's `user` for a first binding: the
+ * witness as `readMfaEnrollmentWitness` reads it, and whether `user.email` is
+ * one address `normaliseMailAddress` reads — never the address. Frozen.
+ */
+export function enrollmentFactsOf(user: Readonly<Record<string, unknown>>): SessionEnrollmentFacts {
+	return Object.freeze({
+		witness: readMfaEnrollmentWitness(user),
+		mailAddress: normaliseMailAddress(user.email) !== undefined,
+	});
 }
 
 /** A deep copy of `claims` — the session record's `claims` to be — that shares nothing with it, frozen at every depth. */
@@ -142,11 +171,11 @@ function copyRecorded(value: unknown, refuse: (what: string) => never): Recorded
 	return Object.freeze({ amr: Object.freeze([...amr]), authentication });
 }
 
-/** The fields a primary and its DTO share, checked and copied; `authTime` is the caller's to add. */
+/** The fields a primary and its DTO share, checked and copied; `authTime` is the caller's to add, and the facts a primary's. */
 function copyPrimaryFields(
 	value: Record<string, unknown>,
 	refuse: (what: string) => never,
-): Omit<PrimaryAuthentication, "authTime"> {
+): Omit<PrimaryAuthentication, "authTime" | "enrollmentFacts"> {
 	if (!isNonEmptyString(value.subject)) refuse("subject must be a non-empty string");
 	const user = copyUser(value.user, refuse);
 	const claims = copyClaims(value.claims, refuse);
@@ -176,7 +205,8 @@ function copyPrimaryFields(
 /**
  * `value` as a `PrimaryAuthentication` core's builders make: `recorded` has
  * a non-empty `amr`, no `mfaAt`, and no second-factor value beside a
- * password primary; `user` and `claims` must be copyable. A frozen deep copy.
+ * password primary; `user` and `claims` must be copyable. A frozen deep copy,
+ * its `enrollmentFacts` derived from the copied `user`.
  */
 export function checkPrimaryAuthentication(value: unknown): PrimaryAuthentication {
 	const refuse = (what: string): never => {
@@ -185,7 +215,11 @@ export function checkPrimaryAuthentication(value: unknown): PrimaryAuthenticatio
 	if (!isPlainObject(value)) return refuse("must be an object");
 	const fields = copyPrimaryFields(value, refuse);
 	if (!isValidDate(value.authTime)) refuse("authTime must be a valid date");
-	return Object.freeze({ ...fields, authTime: new Date((value.authTime as Date).getTime()) });
+	return Object.freeze({
+		...fields,
+		enrollmentFacts: enrollmentFactsOf(fields.user),
+		authTime: new Date((value.authTime as Date).getTime()),
+	});
 }
 
 /** `value` as a `PrimaryAuthenticationDto`: the same, with `authTimeMs` epoch milliseconds. A frozen deep copy. */
@@ -199,10 +233,14 @@ function checkPrimaryAuthenticationDto(value: unknown): PrimaryAuthenticationDto
 	return Object.freeze({ ...fields, authTimeMs: value.authTimeMs as number });
 }
 
-/** A primary rehydrated from its DTO: `authTime` a `Date` at `authTimeMs`. Frozen. */
+/** A primary rehydrated from its DTO: `authTime` a `Date` at `authTimeMs`, `enrollmentFacts` derived from its `user`. Frozen. */
 export function primaryFromDto(dto: PrimaryAuthenticationDto): PrimaryAuthentication {
 	const { authTimeMs, ...fields } = dto;
-	return Object.freeze({ ...fields, authTime: new Date(authTimeMs) });
+	return Object.freeze({
+		...fields,
+		enrollmentFacts: enrollmentFactsOf(fields.user),
+		authTime: new Date(authTimeMs),
+	});
 }
 
 /** The completing requirement as registered: its name and its declaration, read once. */
@@ -380,7 +418,8 @@ export function checkPrimaryContinuation(value: unknown): PrimaryContinuation {
 
 /**
  * The continuation admission answers an interruption with: the primary as
- * the route built it and every completed requirement's additions, as the
+ * the route built it — without its `enrollmentFacts`, which a rehydration
+ * derives again — and every completed requirement's additions, as the
  * serialisable DTO. Frozen.
  */
 export function continuationOf(
@@ -388,7 +427,7 @@ export function continuationOf(
 	done: readonly CompletedRequirement[],
 	interruptedBy: string,
 ): PrimaryContinuation {
-	const { authTime, ...fields } = primary;
+	const { authTime, enrollmentFacts: _derivedAgain, ...fields } = primary;
 	return Object.freeze({
 		interruptedBy,
 		primary: Object.freeze({ ...fields, authTimeMs: authTime.getTime() }),
