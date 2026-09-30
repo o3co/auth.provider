@@ -36,16 +36,19 @@ const RULES = {
 	flags:
 		"addsMfa, counting and guessable are true or false, and reusableChallenge true, false or absent",
 	enrollable: "enrollable, when present, answers true for an account that can enroll the factor",
-	begin: "beginEnrollment answers state that survives a JSON round trip",
+	begin:
+		"beginEnrollment answers state that survives a JSON round trip, and, when it asks for a code to be mailed, a purpose from the closed list and a non-empty code its response does not carry",
 	completeMalformed:
 		"completeEnrollment answers malformed for a proof it cannot read, and never throws for one",
 	complete:
 		"completeEnrollment takes the proof of possession, and answers data that survives a JSON round trip, a label that is a string when present, and at least one amr value, each among amrValues",
+	enrolledAddress: "completeEnrollment answers data that never carries the account's address",
 	describe: "describe answers a hint that is a string, or none, and never the account's address",
-	challenge: "challenge, when present, answers state that survives a JSON round trip",
+	challenge:
+		"challenge, when present, answers state that survives a JSON round trip, and, when it asks for a code to be mailed, a purpose from the closed list and a non-empty code its response does not carry",
 	verifyMalformed: "verify answers malformed for a proof it cannot read, and never throws for one",
 	verify:
-		"verify takes a valid proof, names a factor the subject holds, and answers next data that survives a JSON round trip",
+		"verify takes a valid proof, names a factor the subject holds, and answers next data that survives a JSON round trip and never carries the account's address",
 } as const;
 
 const USER = { id: "u-contract", username: "contract", email: "contract@example.com" };
@@ -78,9 +81,10 @@ describe("mfaFactorContract", () => {
 		expect(mfaFactorContract(inputFor()).map((c) => c.name)).toEqual(Object.values(RULES));
 	});
 
-	it("passes the double, with and without a challenge", async () => {
+	it("passes the double, with and without a challenge, and with mail", async () => {
 		expect(await failing(inputFor())).toEqual([]);
 		expect(await failing(inputFor({ challenge: true }))).toEqual([]);
+		expect(await failing(inputFor({ mail: true }))).toEqual([]);
 		expect(await failing(inputFor({ kind: "test_2", amrValues: ["hwk", "swk"] }))).toEqual([]);
 	});
 
@@ -274,6 +278,93 @@ describe("mfaFactorContract", () => {
 						typeof ctx.proof === "string"
 							? { ok: true, factorId: "someone-else's" }
 							: factor.verify(ctx),
+				})),
+			),
+		).toEqual([RULES.verify]);
+	});
+
+	it("fails an enrollment or a challenge whose response carries the code it asks to be mailed", async () => {
+		expect(
+			await failing(
+				inputFor({ mail: true }, (factor) => ({
+					...factor,
+					beginEnrollment: async (ctx) => {
+						const start = await factor.beginEnrollment(ctx);
+						return { ...start, response: { sent: true, code: start.mail?.code } };
+					},
+				})),
+			),
+		).toEqual([RULES.begin]);
+		expect(
+			await failing(
+				inputFor({ mail: true }, (factor) => ({
+					...factor,
+					challenge: async (ctx) => {
+						const sent = await (factor.challenge as NonNullable<MfaFactor["challenge"]>)(ctx);
+						return { ...sent, response: `sent ${sent.mail?.code} to your mailbox` };
+					},
+				})),
+			),
+		).toEqual([RULES.challenge]);
+	});
+
+	it("fails a mail whose purpose is not one of the closed list, or whose code is empty or no string", async () => {
+		for (const mail of [
+			{ purpose: "security_notice", code: "123456" },
+			{ purpose: "LOGIN_CODE", code: "123456" },
+			{ purpose: "login_code", code: "" },
+			{ purpose: "login_code", code: 123456 },
+			{ purpose: "login_code" },
+			"123456",
+		]) {
+			expect(
+				await failing(
+					inputFor({ mail: true }, (factor) => ({
+						...factor,
+						challenge: async (ctx) => {
+							const sent = await (factor.challenge as NonNullable<MfaFactor["challenge"]>)(ctx);
+							return { ...sent, mail: mail as never };
+						},
+					})),
+				),
+				JSON.stringify(mail),
+			).toEqual([RULES.challenge]);
+		}
+		expect(
+			await failing(
+				inputFor({ mail: true }, (factor) => ({
+					...factor,
+					beginEnrollment: async (ctx) => {
+						const start = await factor.beginEnrollment(ctx);
+						return { ...start, mail: { purpose: "notice", code: "1" } as never };
+					},
+				})),
+			),
+		).toEqual([RULES.begin]);
+	});
+
+	it("fails enrolled data, or a verification's next data, that carries the account's address, whatever its letter case", async () => {
+		expect(
+			await failing(
+				inputFor({ mail: true }, (factor) => ({
+					...factor,
+					completeEnrollment: async (ctx) => {
+						const done = await factor.completeEnrollment(ctx);
+						return done.ok
+							? { ...done, data: { ...done.data, to: String(ctx.user.email).toUpperCase() } }
+							: done;
+					},
+				})),
+			),
+		).toEqual([RULES.enrolledAddress]);
+		expect(
+			await failing(
+				inputFor({}, (factor) => ({
+					...factor,
+					verify: async (ctx) => {
+						const verdict = await factor.verify(ctx);
+						return verdict.ok ? { ...verdict, next: { lastTo: USER.email } } : verdict;
+					},
 				})),
 			),
 		).toEqual([RULES.verify]);

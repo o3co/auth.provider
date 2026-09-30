@@ -115,6 +115,70 @@ describe("createTestMfaFactor", () => {
 	});
 });
 
+describe("createTestMfaFactor with mail", () => {
+	const ctx = {
+		subject: USER.id,
+		transactionId: "tx",
+		nowMs: 0,
+		request: {},
+		digests: createTestMfaDigests("test"),
+	};
+
+	it("is enrollable only by an account with an address, and keeps a challenge across attempts", () => {
+		const factor = createTestMfaFactor({ mail: true });
+		expect(factor.enrollable?.(USER)).toBe(true);
+		expect(factor.enrollable?.({ id: "u-2" })).toBe(false);
+		expect(factor.enrollable?.({ id: "u-2", email: "" })).toBe(false);
+		expect(factor.reusableChallenge).toBe(true);
+	});
+
+	it("asks for its enrollment code and each challenge's code to be mailed, never answering them to the page, and verifies the latest", async () => {
+		const factor = createTestMfaFactor({ mail: true });
+		const start = await factor.beginEnrollment({ ...ctx, user: USER, factors: [] });
+		expect(start.mail).toEqual({ purpose: "email_factor_enrollment", code: expect.any(String) });
+		expect(JSON.stringify(start.response)).not.toContain(start.mail?.code);
+		expect(testMfaFactorProofs.enrollmentProof(start)).toBe(start.mail?.code);
+		const done = await factor.completeEnrollment({
+			...ctx,
+			user: USER,
+			factors: [],
+			state: start.state,
+			proof: testMfaFactorProofs.enrollmentProof(start),
+		});
+		if (!done.ok) throw new Error("the mailed code did not complete the enrollment");
+		expect(JSON.stringify(done.data)).not.toContain(USER.email);
+		const enrolled = {
+			id: "f-1",
+			label: undefined,
+			createdAt: new Date(0),
+			lastUsedAt: undefined,
+			data: done.data,
+		};
+		const challenge = factor.challenge as NonNullable<MfaFactor["challenge"]>;
+		const first = await challenge({ ...ctx, factor: enrolled, factors: [enrolled] });
+		const second = await challenge({ ...ctx, factor: enrolled, factors: [enrolled] });
+		expect(second.mail).toEqual({ purpose: "login_code", code: expect.any(String) });
+		expect(JSON.stringify(second.response)).not.toContain(second.mail?.code);
+		const verify = (proof: unknown) =>
+			factor.verify({
+				...ctx,
+				factor: enrolled,
+				factors: [enrolled],
+				state: second.state,
+				proof,
+			});
+		expect(await verify(testMfaFactorProofs.verificationProof(enrolled, second))).toEqual({
+			ok: true,
+			factorId: "f-1",
+		});
+		expect(await verify(testMfaFactorProofs.verificationProof(enrolled, first))).toEqual({
+			ok: false,
+			reason: "invalid",
+		});
+		expect(await verify(7)).toEqual({ ok: false, reason: "malformed" });
+	});
+});
+
 describe("createTestMfaDigests", () => {
 	it("matches what it digested, under its kind and parts alone", () => {
 		const digests = createTestMfaDigests("email");
