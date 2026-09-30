@@ -30,15 +30,17 @@
  * rule the account-link start is (the `csrfGuard`'s `checkNavigation`), and
  * `session.csrf.trustedOrigins` is not widened to client origins; consent is
  * its CSRF defence. The answer is held to the deployment's `csrfGuard`
- * (`check`: the issuer's origin or a trusted one, or, naming no origin, the
- * guard's double-submit token) and needs the challenge AND the exact session
- * binding. That holds only while connect never approves or creates an
- * upstream transaction, every grant and renewal (first-party clients too)
- * goes through consent, the consent data is never readable cross-origin with
- * credentials, the challenge never reaches another origin via a referrer
- * (`Referrer-Policy: no-referrer` on every response here; the deployment's
- * page keeps its own URL on its origin), and the answer re-admits the
- * session. Making consent skippable is a redesign of this exemption.
+ * (`check`: the request's own origin as the provider sees it — `req.protocol`
+ * and `req.host`, forwarded under `trust proxy` — or a trusted one, or,
+ * naming no origin, the guard's double-submit token) and needs the challenge
+ * AND the exact session binding. That holds only while connect never approves
+ * or creates an upstream transaction, every grant and renewal (first-party
+ * clients too) goes through consent, the consent data is never readable
+ * cross-origin with credentials, the challenge never reaches another origin
+ * via a referrer (`Referrer-Policy: no-referrer` on every response here; the
+ * deployment's page keeps its own URL on its origin), and the answer
+ * re-admits the session. Making consent skippable is a redesign of this
+ * exemption.
  *
  * Whether the session may go on is core's `admitSession` on the cookie's claim,
  * as `federation_grants.connect`, `.consent` and `.callback` (the callback asks
@@ -196,17 +198,38 @@ const NO_PENDING =
 const BODY_LIMIT = "8kb";
 
 /**
- * The consent answer's `error_description` for each reason the `csrfGuard`
- * refuses one: an origin it does not accept, or, with none named, a token
- * that is absent or does not check out.
+ * Why the consent answer was refused: the `csrfGuard`'s reason, or
+ * `unrecognized` for a verdict outside its contract.
  */
-const CSRF_REFUSAL: Readonly<
-	Record<Extract<CsrfVerdict, { outcome: "refused" }>["reason"], string>
-> = Object.freeze({
+type CsrfRefusalReason = Extract<CsrfVerdict, { outcome: "refused" }>["reason"] | "unrecognized";
+
+/** The consent answer's `error_description` for each {@link CsrfRefusalReason}. */
+const CSRF_REFUSAL: Readonly<Record<CsrfRefusalReason, string>> = Object.freeze({
 	foreign_origin: "cross-site answer refused",
 	token_absent: "no origin and no valid csrf token",
 	token_invalid: "no origin and no valid csrf token",
+	unrecognized: "cross-site answer refused",
 });
+
+/**
+ * The guard's verdict read fail-closed: `null` for an acceptance, otherwise
+ * why not. Only `{ outcome: "accepted" }` accepts; a promise, another outcome
+ * or an unknown reason refuses, and a promise's rejection is handled here.
+ */
+function csrfRefusal(verdict: unknown): CsrfRefusalReason | null {
+	const read = verdict as { readonly outcome?: unknown; readonly reason?: unknown } | null;
+	if (typeof (verdict as { then?: unknown } | null)?.then === "function") {
+		(verdict as PromiseLike<unknown>).then(undefined, () => undefined);
+		return "unrecognized";
+	}
+	if (read?.outcome === "accepted") return null;
+	const reason = read?.outcome === "refused" ? read.reason : undefined;
+	return typeof reason === "string" &&
+		reason !== "unrecognized" &&
+		Object.hasOwn(CSRF_REFUSAL, reason)
+		? (reason as CsrfRefusalReason)
+		: "unrecognized";
+}
 
 // ---------------------------------------------------------------------------
 // Transport
@@ -869,9 +892,14 @@ export function createFederationGrantBrowserRouter(
 			try {
 				// Asked before the session or the challenge is read, so a refused
 				// answer spends nothing.
-				const verdict = options.csrfGuard.check(req);
-				if (verdict.outcome === "refused") {
-					jsonError(res, 403, "invalid_request", CSRF_REFUSAL[verdict.reason]);
+				const refusal = csrfRefusal(options.csrfGuard.check(req));
+				if (refusal !== null) {
+					log.refused("federation_grant_consent_csrf_refused", {
+						reason: refusal,
+						correlationId: requestIdOf(res),
+						origin: req.get("origin"),
+					});
+					jsonError(res, 403, "invalid_request", CSRF_REFUSAL[refusal]);
 					return;
 				}
 				const body = (req.body ?? {}) as Record<string, unknown>;
