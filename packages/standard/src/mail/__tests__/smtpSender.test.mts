@@ -435,6 +435,46 @@ describe("the SMTP sender's deadline for the whole send", () => {
 	});
 });
 
+describe("a delivery the relay confirmed", () => {
+	// The whole send has 1.7 s; the relay accepts the message about 0.8 s after
+	// the envelope, and the QUIT that follows is bounded by 1 s of its own.
+	const TIMEOUTS = { connectMs: 400, greetingMs: 400, idleMs: 900 };
+	const QUIT_MS = 1_000;
+
+	it("answers delivered though QUIT, sent close to the whole send's deadline, is never answered; the socket is destroyed within QUIT's bound", async () => {
+		const relay = await relayWith({
+			delays: { message: 800 },
+			silent: "quit",
+			allowHalfOpen: true,
+		});
+		const opened: Socket[] = [];
+		const settled = await settledWithin(
+			senderAt(relay.port, {}, { connect: keeping(opened), timeouts: TIMEOUTS }).send(
+				mailTo("alice@example.com"),
+			),
+			5_000,
+		);
+		const settledAt = Date.now();
+		expect(settled.error).toBeUndefined();
+		expect(mailSendOutcome(settled.answer)).toBe("delivered");
+		const quitAt = relay.commands().find(({ line }) => line === "QUIT")?.at;
+		expect(quitAt).toBeDefined();
+		expect(settledAt - (quitAt as number)).toBeLessThan(QUIT_MS + 500);
+		expect(opened.map((socket) => socket.destroyed)).toEqual([true]);
+	});
+
+	it("answers delivered though the relay resets the connection at QUIT", async () => {
+		const relay = await relayWith({ reset: "quit" });
+		const opened: Socket[] = [];
+		const answer = await senderAt(relay.port, {}, { connect: keeping(opened) }).send(
+			mailTo("alice@example.com"),
+		);
+		expect(mailSendOutcome(answer)).toBe("delivered");
+		expect(verbs(relay).at(-1)).toBe("QUIT");
+		expect(opened.map((socket) => socket.destroyed)).toEqual([true]);
+	});
+});
+
 describe("the SMTP sender's connections", () => {
 	it("closes the connection with QUIT after a delivery, and leaves no socket of its own open however a send ends, though the relay keeps its side open", async () => {
 		const cases: [string, ScriptedRelayOptions][] = [

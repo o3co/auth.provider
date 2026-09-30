@@ -20,10 +20,10 @@
  * fixture certificate; offers AUTH PLAIN when asked, and SMTPUTF8 unless
  * told not to; answers each stage as a relay that accepts, or with the reply
  * a test gives it, or not at all, or a byte at a time without ever ending the
- * line, or by resetting the connection; and records every command line with
- * whether the connection was secured when it arrived, and each mail it
- * accepted: the recipients its envelope named, as written between the angle
- * brackets, and the whole message.
+ * line, or by resetting the connection, each after a delay if asked; and
+ * records every command line with when it arrived and whether the connection
+ * was secured then, and each mail it accepted: the recipients its envelope
+ * named, as written between the angle brackets, and the whole message.
  */
 
 import { readFileSync } from "node:fs";
@@ -50,7 +50,8 @@ export type RelayStage =
 	| "mail"
 	| "rcpt"
 	| "data"
-	| "message";
+	| "message"
+	| "quit";
 
 export interface ScriptedRelayOptions {
 	/** Implicit TLS from the first byte, STARTTLS offered, or neither. `starttls` by default. */
@@ -69,15 +70,19 @@ export interface ScriptedRelayOptions {
 	readonly smtputf8?: boolean;
 	/** Whether the relay keeps its side of a connection open once the client has closed its own. */
 	readonly allowHalfOpen?: boolean;
+	/** How long the relay waits before its reply to each stage named, in milliseconds. */
+	readonly delays?: Partial<Record<RelayStage, number>>;
 }
 
 /** What a test may script anew between connections. */
-type Script = Pick<ScriptedRelayOptions, "replies" | "silent" | "trickle" | "reset">;
+type Script = Pick<ScriptedRelayOptions, "replies" | "silent" | "trickle" | "reset" | "delays">;
 
 /** A command line as the relay read it, and whether TLS protected it. */
 export interface RelayCommand {
 	readonly line: string;
 	readonly secure: boolean;
+	/** When the relay read it, in epoch milliseconds. */
+	readonly at: number;
 }
 
 export interface ScriptedRelay {
@@ -101,6 +106,7 @@ const OWN_REPLIES: Readonly<Record<Exclude<RelayStage, "ehlo">, string>> = {
 	rcpt: "250 2.1.5 Ok",
 	data: "354 End data with <CR><LF>.<CR><LF>",
 	message: "250 2.0.0 Ok: queued",
+	quit: "221 2.0.0 Bye",
 };
 
 /** Starts a relay as `options` scripts it. */
@@ -125,7 +131,7 @@ export async function startScriptedRelay(
 		let inData = false;
 		let dataLines: string[] = [];
 		let recipients: string[] = [];
-		const { replies, silent, trickle, reset } = script;
+		const { replies, silent, trickle, reset, delays } = script;
 
 		/** Writes `opening`, then a byte every 20 ms, never ending the line. */
 		const trickling = (opening: string): void => {
@@ -137,15 +143,25 @@ export async function startScriptedRelay(
 			plain.once("close", () => clearInterval(timer));
 		};
 
-		const answer = (stage: RelayStage, own: string): void => {
-			if (reset === stage) {
-				plain.resetAndDestroy();
-				return;
-			}
-			if (silent === stage) return;
-			const reply = replies?.[stage] ?? own;
-			if (trickle === stage) trickling(reply.slice(0, 4));
-			else socket.write(`${reply}\r\n`);
+		/** Answers `stage`, as scripted, after its delay; `then` runs once a whole reply is written. */
+		const answer = (stage: RelayStage, own: string, then?: () => void): void => {
+			const respond = (): void => {
+				if (reset === stage) {
+					plain.resetAndDestroy();
+					return;
+				}
+				if (silent === stage) return;
+				const reply = replies?.[stage] ?? own;
+				if (trickle === stage) {
+					trickling(reply.slice(0, 4));
+					return;
+				}
+				socket.write(`${reply}\r\n`);
+				then?.();
+			};
+			const delay = delays?.[stage];
+			if (delay === undefined) respond();
+			else setTimeout(respond, delay);
 		};
 
 		const ehloReply = (): string => {
@@ -180,7 +196,7 @@ export async function startScriptedRelay(
 		};
 
 		const command = (line: string): void => {
-			commands.push({ line, secure });
+			commands.push({ line, secure, at: Date.now() });
 			const verb = line.split(" ", 1)[0]?.toUpperCase() ?? "";
 			if (verb === "EHLO" || verb === "HELO") answer("ehlo", ehloReply());
 			else if (verb === "STARTTLS") starttls();
@@ -196,8 +212,7 @@ export async function startScriptedRelay(
 			} else if (verb === "DATA") data();
 			else if (verb === "RSET" || verb === "NOOP") socket.write("250 2.0.0 Ok\r\n");
 			else if (verb === "QUIT") {
-				socket.write("221 2.0.0 Bye\r\n");
-				socket.end();
+				answer("quit", OWN_REPLIES.quit, () => socket.end());
 			} else socket.write("502 5.5.2 Command not recognized\r\n");
 		};
 
