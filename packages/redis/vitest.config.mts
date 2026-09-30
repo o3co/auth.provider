@@ -63,6 +63,9 @@ export default defineConfig({
 				"__tests__/mfa-factor-store.test.mts",
 				"__tests__/mfa-transaction-store.test.mts",
 				"__tests__/mfa-store-modules.test.mts",
+				// The federation-token store's module and builder: the builder is
+				// called as `AdapterBuilder` types it. Paired with tsconfig.test.json.
+				"__tests__/federation-tokens-module.test.mts",
 			],
 		},
 	},

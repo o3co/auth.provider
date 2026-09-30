@@ -72,7 +72,9 @@
 		"src/deployment/**/*.mts",
 		"src/ratelimit/__tests__/rateLimiter.contract.test.mts",
 		// The outage policy's brand and options; paired with vitest.config.mts.
-		"src/ratelimit/__tests__/policy.types.test.mts"
+		"src/ratelimit/__tests__/policy.types.test.mts",
+		// The rate-limit guard; paired with vitest.config.mts.
+		"src/ratelimit/__tests__/guard.test.mts"
 	],
 	"exclude": ["node_modules", "dist"]
 }
