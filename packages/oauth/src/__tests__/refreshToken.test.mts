@@ -24,6 +24,7 @@ import {
 	type GrantPolicyHook,
 	type Logger,
 	type RefreshTokenFamilyRotation,
+	type UserSession,
 	type UserSessionStore,
 } from "@o3co/auth-provider-core";
 import { resolverForTests } from "@o3co/auth-provider-core/testing";
@@ -2395,9 +2396,10 @@ describe("refresh carries how the user authenticated", () => {
 			.setJti("old-jti")
 			.sign(new TextEncoder().encode(SECRET));
 
-	const refresh = async (refreshToken: string) => {
+	const refresh = async (refreshToken: string, deps: Partial<RefreshTokenGrantDeps> = {}) => {
 		const handler = createRefreshTokenGrant({
 			...mockDeps,
+			...deps,
 			refreshTokenFamilyRotation: {
 				async register() {},
 				async rotate() {
@@ -2441,6 +2443,86 @@ describe("refresh carries how the user authenticated", () => {
 		expect(at).not.toHaveProperty("amr");
 		expect(at).not.toHaveProperty("acr");
 		expect(rt).not.toHaveProperty("amr");
+	});
+
+	it("carries auth_time from the presented refresh token onto both new tokens", async () => {
+		// RFC 9470 §6.1: the authentication event's values do not change when
+		// the access token is renewed.
+		const { at, rt } = await refresh(await presentedWith({ auth_time: 1_776_729_600 }));
+		expect(at.auth_time).toBe(1_776_729_600);
+		expect(rt.auth_time).toBe(1_776_729_600);
+	});
+
+	it("refreshes a refresh token that carries no auth_time, and takes none from its live session", async () => {
+		const session: UserSession = {
+			sid: "sid-1",
+			sub: "u1",
+			authTime: new Date("2026-04-21T00:00:00Z"),
+			createdAt: new Date("2026-04-21T00:00:00Z"),
+			expiresAt: new Date(Date.now() + 3_600_000),
+			claims: {},
+			amr: ["pwd"],
+			authentication: undefined,
+		};
+		const userSessionStore: UserSessionStore = {
+			kind: "stub",
+			async get(sid) {
+				return sid === session.sid ? session : null;
+			},
+			async create() {},
+			async delete() {},
+		};
+		const { at, rt } = await refresh(await presentedWith({ sid: "sid-1", amr: ["pwd"] }), {
+			userSessionStore,
+		});
+		expect(at.sub).toBe("u1");
+		expect(at).not.toHaveProperty("auth_time");
+		expect(rt).not.toHaveProperty("auth_time");
+	});
+
+	it("does not carry a malformed auth_time forward", async () => {
+		for (const bad of ["1776729600", -1, 1_776_729_600.5, null, true]) {
+			const { at, rt } = await refresh(await presentedWith({ auth_time: bad }));
+			expect(at, JSON.stringify(bad)).not.toHaveProperty("auth_time");
+			expect(rt, JSON.stringify(bad)).not.toHaveProperty("auth_time");
+		}
+	});
+
+	it("keeps auth_time, amr and acr through a chain of rotations", async () => {
+		const refreshTokenFamilyStore = createMemoryRefreshTokenFamilyStore();
+		const accessTokenHorizonMs = 3_600_000;
+		const rotation = createRefreshTokenFamilyRotation({
+			refreshTokenFamilyStore,
+			accessTokenHorizonMs,
+		});
+		const handler = createRefreshTokenGrant({
+			...mockDeps,
+			refreshTokenFamilyRotation: rotation,
+			refreshTokenFamilyRevocation: createRefreshTokenFamilyRevocation({
+				refreshTokenFamilyStore,
+				accessTokenHorizonMs,
+			}),
+		});
+		await rotation.register("old-jti", "fam-1", Date.now() + 86_400_000);
+		const authentication = {
+			auth_time: 1_776_729_600,
+			amr: ["pwd", "otp", "mfa"],
+			acr: "urn:example:mfa",
+		};
+		let presented = await presentedWith(authentication);
+		for (const round of [1, 2, 3]) {
+			const { result } = await handler.handle({
+				body: { refresh_token: presented },
+				session: {},
+				issuer: "localhost",
+				metadata: {},
+				authenticatedClient: DEFAULT_AUTH_CLIENT,
+			} as GrantContext);
+			if (!("tokens" in result)) throw new Error(`round ${round}: ${JSON.stringify(result)}`);
+			expect(decodeJwt(result.tokens.access_token), `round ${round}`).toMatchObject(authentication);
+			presented = result.tokens.refresh_token as string;
+			expect(decodeJwt(presented), `round ${round}`).toMatchObject(authentication);
+		}
 	});
 
 	it("does not carry a malformed amr or acr forward", async () => {

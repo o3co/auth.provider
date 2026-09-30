@@ -29,6 +29,7 @@ import { randomUUID } from "node:crypto";
 
 import {
 	auditErrorText,
+	authTimeClaim,
 	boundPolicyAudience,
 	checkOAuthTokenSettings,
 	consoleLogger,
@@ -96,6 +97,11 @@ export interface WebAuthnGrantDeps
 		 * enforce the UV flag.
 		 */
 		readonly userVerification: "required" | "preferred" | "discouraged";
+		/**
+		 * How long an issued challenge stays redeemable: how long before the grant the gesture
+		 * behind an assertion may have been made, which `auth_time` allows for.
+		 */
+		readonly challengeTtlMs: number;
 	};
 }
 
@@ -218,6 +224,9 @@ export const createWebAuthnGrant = (deps: WebAuthnGrantDeps): GrantHandler => {
 			// spent: the retry of this assertion is then `invalid_grant`, and the
 			// user starts the ceremony again.
 			// ------------------------------------------------------------------
+			// Read before the consume: a challenge still live when consumed, at or after this instant,
+			// was issued after `redeemedAtMs - challengeTtlMs`, and the gesture came after its issuance.
+			const redeemedAtMs = Date.now();
 			let ceremonyOutcome: Awaited<ReturnType<typeof deps.challengeCeremony.consume>>;
 			try {
 				ceremonyOutcome = await deps.challengeCeremony.consume(
@@ -262,6 +271,9 @@ export const createWebAuthnGrant = (deps: WebAuthnGrantDeps): GrantHandler => {
 					},
 				};
 			}
+			// An assertion can be held until its challenge expires, so `auth_time` is the earliest
+			// instant the gesture could have been made: never fresher than it was (RFC 9470 §6.1).
+			const authTime = authTimeClaim(new Date(redeemedAtMs - deps.webauthnConfig.challengeTtlMs));
 
 			// ------------------------------------------------------------------
 			// Step 5: Atomic CAS sign-count update
@@ -426,6 +438,7 @@ export const createWebAuthnGrant = (deps: WebAuthnGrantDeps): GrantHandler => {
 					// RFC 8176 `hwk`: the assertion proved a platform- or hardware-bound key. On the
 					// token itself, since this grant mints no id_token and creates no session.
 					amr: ["hwk"],
+					...(authTime !== undefined ? { auth_time: authTime } : {}),
 				},
 				{
 					expiresIn: accessTokenExpiresIn,
@@ -454,8 +467,13 @@ export const createWebAuthnGrant = (deps: WebAuthnGrantDeps): GrantHandler => {
 					(bindingIsDpop || bindingIsMtls) && (isPublicClient || bindConfidentialClients);
 
 				refreshToken = await generateToken(
-					// The refresh grant copies `amr` from the refresh token, so `hwk` goes here too.
-					{ family_id: refreshReservation.familyId, amr: ["hwk"] },
+					// The refresh grant copies `amr` and `auth_time` from the refresh token, so
+					// they go here too.
+					{
+						family_id: refreshReservation.familyId,
+						amr: ["hwk"],
+						...(authTime !== undefined ? { auth_time: authTime } : {}),
+					},
 					{
 						expiresIn: refreshTokenExpiresIn,
 						keyStore,
