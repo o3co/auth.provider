@@ -58,6 +58,10 @@ export const MFA_DEVELOPMENT_SAMPLE_KEY = "bzNjbzptZmE6ZGV2ZWxvcG1lbnQtc2FtcGxlL
 const SECTION_MISSING =
 	"is missing: layer @o3co/auth-provider-mfa/reference.conf beneath the composition's configuration";
 
+/** A section's refusal: missing, or written as a value rather than a section of keys. */
+const sectionError = (issue: { readonly input?: unknown }): string =>
+	issue.input === undefined ? SECTION_MISSING : "must be a section of keys";
+
 const wholeNumber = (min: number, max: number, unit: string) => {
 	const error = `must be a whole number from ${min} to ${max}${unit}`;
 	return z.number({ error }).int({ error }).min(min, { error }).max(max, { error });
@@ -65,9 +69,9 @@ const wholeNumber = (min: number, max: number, unit: string) => {
 
 /**
  * {@link wholeNumber}, or the decimal digits an environment variable carries
- * as a string, which every leaf of a module's section must read. Nothing
- * else is read as a number: not `null`, `true`, `""`, `"0x10"` or `"1e1"`,
- * which `z.coerce.number()` would turn into one.
+ * as a string, whitespace around them allowed, which every leaf of a module's
+ * section must read. Nothing else is read as a number: not `null`, `true`,
+ * `""`, `"0x10"` or `"1e1"`, which `z.coerce.number()` would turn into one.
  */
 const environmentWholeNumber = (min: number, max: number, unit: string) => {
 	const error = `must be a whole number from ${min} to ${max}${unit}`;
@@ -117,7 +121,7 @@ export const mfaTotpConfigSchema = z.object(
 			.refine(isShowableIssuer, { error: ISSUER_RULE })
 			.optional(),
 	},
-	{ error: SECTION_MISSING },
+	{ error: sectionError },
 );
 
 /**
@@ -163,7 +167,7 @@ const lockoutSchema = z.object(
 		trustedBrowsers: positiveWhole,
 		trustedBrowserDays: positiveWhole,
 	},
-	{ error: SECTION_MISSING },
+	{ error: sectionError },
 );
 
 /**
@@ -199,15 +203,14 @@ export const mfaConfigSchema = z.object(
 		),
 		lockout: lockoutSchema,
 	},
-	{ error: SECTION_MISSING },
+	{ error: sectionError },
 );
 
 /**
  * What the MFA module's section schema checks before any factory runs: the
- * mode, which may be unset — the module refuses that as it refuses `off` —
- * and every other key handed on unread, for {@link readMfaSettings}. The
- * section may be missing: its settings are then refused, naming the
- * `reference.conf` that carries them.
+ * mode, and every other key handed on unread, for {@link readMfaSettings}. A
+ * missing section or mode reads as unset, which the module refuses as it
+ * refuses `off`.
  */
 export const mfaSectionSchema = mfaConfigSchema.pick({ mode: true }).partial().loose().optional();
 

@@ -2208,6 +2208,7 @@ function sectionRelocationsOf(m: Module): readonly SectionRelocation[] {
 		from: from.split("."),
 		to: relocationTarget(section, inside),
 		...(m.section?.at === undefined ? {} : { unbound: true }),
+		...(inside === "" ? { toSection: true } : {}),
 	}));
 }
 

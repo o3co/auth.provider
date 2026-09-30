@@ -173,6 +173,16 @@ export const OWN_READS: readonly string[] = ["mfa.mode"];
 /** The values `mfa.mode` takes. */
 const MFA_MODES = ["off", "optional", "required"] as const;
 
+/** What an `mfa` that is not a section of keys reads as: no mode `readMfaMode` accepts. */
+const REFUSED = Symbol("refused");
+
+/** A section of keys: an object whose prototype is `Object.prototype` or none. */
+function isPlainSection(value: unknown): value is Readonly<Record<string, unknown>> {
+	if (typeof value !== "object" || value === null) return false;
+	const prototype: unknown = Object.getPrototypeOf(value);
+	return prototype === Object.prototype || prototype === null;
+}
+
 /** `mfa.mode`, as `readMfaMode` answers it. */
 export type MfaMode = (typeof MFA_MODES)[number];
 
@@ -190,7 +200,9 @@ export type MfaMode = (typeof MFA_MODES)[number];
  * step 20), which removes this reading.
  */
 export function readMfaMode(switches: unknown): MfaMode {
-	const mode = (switches as { mfa?: { mode?: unknown } } | undefined)?.mfa?.mode;
+	const section = (switches as { mfa?: unknown } | undefined)?.mfa;
+	if (section === undefined) return "off";
+	const mode = isPlainSection(section) ? section.mode : REFUSED;
 	if (mode === undefined) return "off";
 	const known = MFA_MODES.find((value) => value === mode);
 	if (known === undefined) {
@@ -241,11 +253,30 @@ export function expectedSessionRequirements(switches: AppConfig): AppConfig["ses
 	return { expected: declared.includes("mfa") ? declared : [...declared, "mfa"] };
 }
 
-/** Whether a module in `modules` reads the top-level section `name`. */
-const readsSection = (modules: readonly Module[], name: string): boolean =>
-	modules.some(
-		(module) => module.section !== undefined && (module.section.at ?? module.name) === name,
-	);
+/**
+ * Whether a module in `modules` owns the top-level section `name`: its
+ * section sits there or under it, or it moved from there or under it.
+ */
+function ownsSection(modules: readonly Module[], name: string): boolean {
+	const topOf = (path: string): string | undefined => path.split(".")[0];
+	return modules.some((module) => {
+		const section = module.section;
+		if (section === undefined) return false;
+		if ((section.at === undefined ? module.name : topOf(section.at)) === name) return true;
+		const from = section.relocatedFrom;
+		const old = from === undefined ? [] : Array.isArray(from) ? from : Object.keys(from);
+		return old.some((path) => topOf(path) === name);
+	});
+}
+
+/**
+ * Whether `mfa` is only what the template consumed — no key, or the mode
+ * alone — with no loaded module owning the section.
+ */
+const consumedMfa = (mfa: unknown, modules: readonly Module[]): boolean =>
+	isPlainSection(mfa) &&
+	Object.keys(mfa).every((key) => key === "mode") &&
+	!ownsSection(modules, "mfa");
 
 /**
  * Phase two: what `createApp` parses once, with every loaded module's schema:
@@ -253,11 +284,11 @@ const readsSection = (modules: readonly Module[], name: string): boolean =>
  * `reference.conf` of every package `modules` come from, core's last,
  * resolved and unparsed, with `sessionRequirements` — what phase one says the
  * composition expects (`expectedSessionRequirements`) — written over the
- * resolved section when there is one to write. The `mfa` section is left out
- * when no module in `modules` reads it: the template read its mode for itself
- * (`readMfaMode`), and it is no section for boot to name as unowned until
- * the template installs the MFA module (the MFA ADR's build order, step 20),
- * which removes that reading.
+ * resolved section when there is one to write. An `mfa` section holding
+ * nothing but the mode, which the template read for itself (`readMfaMode`),
+ * is left out when no loaded module owns it; anything more reaches boot,
+ * which names an unowned section once. The MFA ADR's build-order step 20
+ * removes this with the template's reading.
  *
  * Typed `AppConfig` because that is the `config` slot's type; read the parsed
  * configuration from `handle.components.config`, not from this.
@@ -267,8 +298,9 @@ export function resolveForBoot(
 	modules: readonly Module[],
 	sessionRequirements: AppConfig["sessionRequirements"],
 ): AppConfig {
-	const { mfa, ...rest } = resolveLayers(own, moduleReferences(modules));
-	const resolved = mfa === undefined || !readsSection(modules, "mfa") ? rest : { ...rest, mfa };
+	const layered = resolveLayers(own, moduleReferences(modules));
+	const { mfa: _consumed, ...withoutMfa } = layered;
+	const resolved = consumedMfa(layered.mfa, modules) ? withoutMfa : layered;
 	return (sessionRequirements === undefined
 		? resolved
 		: { ...resolved, sessionRequirements }) as unknown as AppConfig;

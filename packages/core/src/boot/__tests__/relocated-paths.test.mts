@@ -155,7 +155,7 @@ describe("a relocated path — refused", () => {
 			expect(err.message, String(value)).toContain(
 				"legacy.fixture has moved to fixture-relocating; see CHANGELOG. Write it there and remove",
 			);
-			expect(err.message, String(value)).not.toContain("environment variable");
+			expect(err.message, String(value)).not.toContain("(environment variable");
 		}
 	});
 

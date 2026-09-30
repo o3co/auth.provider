@@ -188,7 +188,7 @@ describe("the package's reference.conf", () => {
 				mfa: { factors: { totp: { [key]: "1" } } },
 			});
 			const [relocated] = (
-				refused.details as { relocated: { to: string; environmentVariable?: string }[] }
+				refused.details as unknown as { relocated: { to: string; environmentVariable?: string }[] }
 			).relocated;
 			expect(relocated?.to, key).toBe(`mfa-totp-factor.${key}`);
 			const variable = relocated?.environmentVariable ?? "";
