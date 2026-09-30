@@ -449,6 +449,11 @@ const VOCABULARY: readonly VocabularyRow[] = [
 		definition: /(?:function|const)\s+policyOutOfBounds\b/,
 	},
 	{
+		concept: "fail-closed grant-policy evaluation — the one reading of a decision",
+		home: "packages/core/src/grants/grantPolicy.mts",
+		definition: /(?:function|const)\s+readGrantPolicyDecision\b/,
+	},
+	{
 		concept: "key-ring sealing envelope — sealing (#593)",
 		home: "packages/core/src/sealing/envelope.mts",
 		definition: /(?:function|const)\s+sealWithKeyRing\b/,
