@@ -125,6 +125,8 @@ interface SubjectState {
 	week: Attempt[];
 	/** Reservations not yet settled, by id, with their order. */
 	readonly pending: Map<string, number>;
+	/** Whether a refusal was answered since an attempt was last let through: an episode is under way. */
+	refusing: boolean;
 }
 
 /** The transaction as plain data, every field named, its nested values copied. */
@@ -273,7 +275,7 @@ export function createMemoryMfaTransactionStore(
 	function stateOf(subject: string): SubjectState {
 		let state = subjects.get(subject);
 		if (state === undefined) {
-			state = { run: [], week: [], pending: new Map() };
+			state = { run: [], week: [], pending: new Map(), refusing: false };
 			subjects.set(subject, state);
 		}
 		return state;
@@ -393,8 +395,10 @@ export function createMemoryMfaTransactionStore(
 				hold: MfaSubjectHold,
 				retryAfterMs: number | null,
 			): MfaSubjectAttemptReservation => {
+				const first = !state.refusing;
+				state.refusing = true;
 				settleEmpty(subject, state);
-				return { ok: false, hold, retryAfterMs };
+				return { ok: false, hold, retryAfterMs, first };
 			};
 
 			if (state.run.length >= policy.hardLimit) return refuse("hard", null);
@@ -416,6 +420,7 @@ export function createMemoryMfaTransactionStore(
 			state.run.push(attempt);
 			state.week.push(attempt);
 			state.pending.set(attempt.id, attempt.seq);
+			state.refusing = false;
 			return { ok: true, reservation: attempt.id };
 		},
 

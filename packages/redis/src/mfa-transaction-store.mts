@@ -305,7 +305,7 @@ export function createRedisMfaTransactionStore(
 			});
 			return reply.ok
 				? { ok: true, reservation }
-				: { ok: false, hold: reply.hold, retryAfterMs: reply.retryAfterMs };
+				: { ok: false, hold: reply.hold, retryAfterMs: reply.retryAfterMs, first: reply.first };
 		},
 
 		async settleSubjectAttempt(subject, reservation, outcome) {

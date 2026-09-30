@@ -77,17 +77,18 @@ export const BUILT_IN_AUDIT_EVENT_TYPES = [
 	// `purpose` in its details. The MFA package is private until the template
 	// wires it, so no released composition emits them; the inventory's drift
 	// test names the step that emits each. A deployment notifies the account
-	// holder from five of them, so each also carries, in its details, the
-	// factor's `binding` (`password`, `email_proof` or `mfa`, where a factor
-	// is named) and `by` (`user`, or `operator` for a removal or a reset):
-	// `mfa.factor.enrolled`; `mfa.factor.removed`; `mfa.recovery_codes.generated`,
-	// with `regenerated` (false beside the first counting factor);
-	// `mfa.locked.first`, the lock that begins an episode, with its `hold`;
-	// and `mfa.reset`, the operator reset, with the `kinds` it removed,
-	// `requireEmailProof` and `revokeSessions`. The event's `timestamp` is when.
+	// holder from six of them, each carrying, beside those, in its details:
+	// `mfa.factor.enrolled` the factor's `binding` (`password`, `email_proof`
+	// or `mfa`) and `by: "user"`; `mfa.factor.removed` its `binding` and `by`
+	// (`user` or `operator`); `mfa.recovery_codes.generated` its `binding`,
+	// `by: "user"` and `regenerated` (false beside the first counting
+	// factor); `mfa.locked.first`, the refusal that begins an episode (the
+	// store's `first`), its `hold` and the refused attempt's factor `binding`;
+	// `mfa.reset`, the operator reset, `by: "operator"`, the `kinds` it
+	// removed, `requireEmailProof` and `revokeSessions`; and
 	// `mfa.email_address_mismatch`, the email factor refused because the
 	// account's address no longer matches the one it was enrolled with,
-	// carries the subject and the kind, and never an address.
+	// nothing more — never an address. The event's `timestamp` is when.
 	"mfa.challenge.sent",
 	"mfa.email_address_mismatch",
 	"mfa.enrollment_state_inconsistent",

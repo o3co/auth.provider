@@ -1327,7 +1327,8 @@ export interface MfaSubjectKeys {
 	/**
 	 * HASH: `seq`, the order counter; `r:<id>` → `<seq>|<atMs>` for each
 	 * attempt in the consecutive run; `p:<id>` → `<seq>` for each reservation
-	 * not yet settled. A field of any other kind is ignored.
+	 * not yet settled; `held` → `1` while an episode of refusals is under way.
+	 * A field of any other kind is ignored.
 	 */
 	readonly lock: string;
 	/** ZSET: the attempts the rolling week counts, each scored by its time. */
@@ -1349,6 +1350,8 @@ export type ReserveMfaSubjectAttemptReply =
 			readonly hold: MfaSubjectHold;
 			/** Milliseconds from `nowMs` until an attempt may be reserved; `null` for the hard hold. */
 			readonly retryAfterMs: number | null;
+			/** Whether this refusal begins an episode, as the port's `first`. */
+			readonly first: boolean;
 	  };
 
 export interface NoteMfaExemptSuccessInput {

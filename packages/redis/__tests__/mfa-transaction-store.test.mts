@@ -614,6 +614,7 @@ describe("createRedisMfaTransactionStore — the subject state", () => {
 			ok: false,
 			hold: "weekly",
 			retryAfterMs: t + WEEK - at,
+			first: true,
 		});
 		await store.noteExemptSuccess("user-1", at);
 		expect(await store.reserveSubjectAttempt("user-1", at + 1, weekOnly)).toMatchObject({

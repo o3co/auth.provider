@@ -2588,7 +2588,8 @@ end
  *
  * `ARGV`: now, threshold, baseSeconds, maxSeconds, memorySeconds,
  * weeklyBudget, hardLimit, the reservation's id. Returns `{'ok'}`, or
- * `{'held', hold, retryAfterMs}` with an empty retry for the hard hold.
+ * `{'held', hold, retryAfterMs, first}` with an empty retry for the hard
+ * hold and `first` `1` for the refusal that begins an episode, `0` after.
  */
 const LUA_MFA_SUBJECT_RESERVE = `${LUA_MFA_SUBJECT_PRELUDE}
 local now = num(ARGV[1])
@@ -2599,11 +2600,19 @@ local run, pending, week = load()
 local forgot
 week, forgot = prune(run, pending, week, math.min(now, server_ms()) - SKEW)
 
--- A refusal writes nothing of its own: the deadlines are set again only when
--- the prune forgot something, so a held subject hammered is no write load.
+-- A refusal writes only the mark that its episode began, once: the deadlines
+-- are set again only then or when the prune forgot something, so a held
+-- subject hammered is no write load.
+local function refuse(hold, retry)
+  local first = redis.call('HSETNX', KEYS[1], 'held', '1') == 1
+  if forgot or first then keep() end
+  local mark = '0'
+  if first then mark = '1' end
+  return {'held', hold, retry, mark}
+end
+
 if #run >= hard then
-  if forgot then keep() end
-  return {'held', 'hard', ''}
+  return refuse('hard', '')
 end
 
 -- The short backoff: the run replayed in time order. A failure memorySeconds
@@ -2642,16 +2651,16 @@ end
 if #counted >= budget then weekly = counted[#counted - budget + 1].at + WEEK end
 
 if backoff ~= nil or weekly ~= nil then
-  if forgot then keep() end
   -- The hold that ends later decides when to come back.
   if (weekly or -math.huge) >= (backoff or -math.huge) then
-    return {'held', 'weekly', fmt(weekly - now)}
+    return refuse('weekly', fmt(weekly - now))
   end
-  return {'held', 'backoff', fmt(backoff - now)}
+  return refuse('backoff', fmt(backoff - now))
 end
 
 local seq = redis.call('HINCRBY', KEYS[1], 'seq', 1)
 redis.call('HSET', KEYS[1], 'r:' .. id, seq .. '|' .. ARGV[1], 'p:' .. id, seq)
+redis.call('HDEL', KEYS[1], 'held')
 redis.call('ZADD', KEYS[2], ARGV[1], id)
 keep()
 return {'ok'}
@@ -2789,12 +2798,13 @@ export function makeIoredisMfaTransactionStoreClient(io: Redis): MfaTransactionS
 				],
 			);
 			if (Array.isArray(reply) && reply[0] === "ok") return { ok: true };
-			const [outcome, hold, retry] = Array.isArray(reply) ? reply : [];
-			if (outcome === "held" && HOLDS.has(hold)) {
+			const [outcome, hold, retry, first] = Array.isArray(reply) ? reply : [];
+			if (outcome === "held" && HOLDS.has(hold) && (first === "1" || first === "0")) {
 				return {
 					ok: false,
 					hold: hold as "backoff" | "weekly" | "hard",
 					retryAfterMs: retry === "" ? null : Number(retry),
+					first: first === "1",
 				};
 			}
 			// A reply this release does not know is not a verdict: refuse the

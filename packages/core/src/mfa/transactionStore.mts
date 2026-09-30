@@ -449,6 +449,12 @@ export type MfaSubjectAttemptReservation =
 			readonly hold: MfaSubjectHold;
 			/** Milliseconds from the time asked about until an attempt may be reserved; `null` for the hard hold. */
 			readonly retryAfterMs: number | null;
+			/**
+			 * Whether this refusal begins an episode: the refusals from the first
+			 * after an attempt was let through, or after `clearSubjectState`, to
+			 * the next attempt let through. One refusal among any in flight is first.
+			 */
+			readonly first: boolean;
 	  };
 
 /**
@@ -515,7 +521,8 @@ export interface MfaTransactionStore {
 	 * Refuse while a hold applies at `nowMs` — the hard limit, the short
 	 * backoff or the weekly budget, for every attempt alike — and otherwise
 	 * count a pending failure, which stands until settled. A refusal records
-	 * nothing.
+	 * only that its episode began (`first`); an attempt let through ends the
+	 * episode.
 	 */
 	reserveSubjectAttempt(
 		subject: string,
