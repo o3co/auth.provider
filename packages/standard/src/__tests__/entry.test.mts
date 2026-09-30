@@ -25,9 +25,8 @@ import * as entry from "#/index.mjs";
 import * as testing from "#/testing/index.mjs";
 
 describe("the package's entries", () => {
-	it("publishes the senders' modules, the development sender, the rendering and the SMTP section's schema, and nothing else", () => {
+	it("publishes the senders' modules, the rendering and the SMTP section's schema, and nothing else: no development sender without its module's guard", () => {
 		expect(Object.keys(entry).sort()).toEqual([
-			"createStandardDevelopmentMailSender",
 			"renderStandardMail",
 			"standardDevelopmentMailSenderModule",
 			"standardSmtpMailSenderConfigSchema",

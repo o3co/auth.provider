@@ -17,9 +17,10 @@
 /**
  * The development mail sender: it delivers nothing and logs, at info, the
  * purpose and the code of each send, nothing else of it. Its module fills
- * the `mailSender` slot, declares no section, and refuses the boot where the
- * configuration was selected as production or staging, where `NODE_ENV` is
- * either, and on a multi-replica deployment.
+ * the `mailSender` slot, declares no section, and is installed only where
+ * the configuration was selected as development or test — an allow-list —
+ * and never where that name, `CONFIG_ENV` or `NODE_ENV` says production or
+ * staging, or on a multi-replica deployment.
  */
 
 import {
@@ -31,8 +32,11 @@ import {
 	type MailSender,
 } from "@o3co/auth-provider-core";
 import { makeValidAppConfig } from "@o3co/auth-provider-core/testing";
-import { afterEach, describe, expect, it, vi } from "vitest";
-import { standardDevelopmentMailSenderModule } from "#/mail/development/module.mjs";
+import { afterEach, describe, expect, expectTypeOf, it, vi } from "vitest";
+import {
+	type StandardDevelopmentMailSenderModuleOptions,
+	standardDevelopmentMailSenderModule,
+} from "#/mail/development/module.mjs";
 import { createStandardDevelopmentMailSender } from "#/mail/development/sender.mjs";
 
 const SEND: MailSend = {
@@ -65,7 +69,7 @@ function recordingLogger(): { readonly logger: Logger; readonly calls: unknown[]
 
 /** The module's `mailSender` factory, called with the slots it reads; a refusal is a rejection. */
 const provide = async (
-	options: { readonly environment?: string },
+	options: StandardDevelopmentMailSenderModuleOptions,
 	deploymentMode: DeploymentMode,
 	logger?: Logger,
 ): Promise<MailSender> =>
@@ -103,7 +107,7 @@ describe("standardDevelopmentMailSenderModule", () => {
 	});
 
 	it("is named after itself, fills the mailSender slot at every boot from the deployment mode and the logger, and declares no section", () => {
-		const module = standardDevelopmentMailSenderModule();
+		const module = standardDevelopmentMailSenderModule({ environment: "development" });
 		expect(module.name).toBe("standard-development-mail-sender");
 		expect(Object.keys(module.provides ?? {})).toEqual(["mailSender"]);
 		expect(module.lifecycle?.mailSender?.eager).toBe(true);
@@ -122,7 +126,48 @@ describe("standardDevelopmentMailSenderModule", () => {
 			await sender.send(SEND);
 		}
 		expect(calls).toHaveLength(2);
-		expect((await provide({}, "single")).kind).toBe("standard-development");
+		expect((await provide({ environment: " Test " }, "single")).kind).toBe("standard-development");
+	});
+
+	it("is told the environment the configuration was selected by, and refuses a name it cannot read", async () => {
+		expectTypeOf<
+			StandardDevelopmentMailSenderModuleOptions["environment"]
+		>().toEqualTypeOf<string>();
+		for (const environment of [undefined, 7, null]) {
+			await expect(
+				provide({ environment } as never, "single"),
+				String(environment),
+			).rejects.toThrow(
+				new TypeError(
+					"standard-development-mail-sender: environment must be the name the configuration was selected by",
+				),
+			);
+		}
+	});
+
+	it("is refused under any environment but development or test: an allow-list, not a list of what to refuse", async () => {
+		for (const [environment, named] of [
+			["qa", "qa"],
+			[" Local ", "local"],
+			["preview", "preview"],
+			["dev", "dev"],
+			["", ""],
+		] as const) {
+			await expect(provide({ environment }, "single"), environment).rejects.toThrow(
+				new RangeError(
+					`standard-development-mail-sender logs every code it is handed, refused because the environment "${named}" is not development or test: install standard-smtp-mail-sender, or a mail sender of your own`,
+				),
+			);
+		}
+	});
+
+	it("is refused where CONFIG_ENV says production or staging, whatever environment it is handed", async () => {
+		for (const configEnv of ["staging", " PRODUCTION "]) {
+			vi.stubEnv("CONFIG_ENV", configEnv);
+			await expect(provide({ environment: "development" }, "single"), configEnv).rejects.toThrow(
+				/refused because the environment is "(production|staging)"/,
+			);
+		}
 	});
 
 	it("is refused where the configuration was selected as production or staging, whatever its case and the whitespace around it, naming the environment", async () => {
@@ -191,5 +236,8 @@ describe("standardDevelopmentMailSenderModule", () => {
 			refused = error;
 		}
 		expect(refused).toBeInstanceOf(BootError);
+		expect((refused as BootError).message).toContain(
+			'standard-development-mail-sender logs every code it is handed, refused because the environment is "production"',
+		);
 	});
 });

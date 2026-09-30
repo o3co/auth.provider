@@ -494,6 +494,12 @@ const VOCABULARY: readonly VocabularyRow[] = [
 		definition: /(?:function|const)\s+hasControlCharacter\b/,
 	},
 	{
+		concept:
+			"an environment name as a development-only guard reads it — trimmed, lower case, production or staging whichever name says so",
+		home: "packages/core/src/deployment/environment.mts",
+		definition: /(?:function|const)\s+(?:readEnvironmentName|productionEnvironmentIn)\b/,
+	},
+	{
 		concept: "an email address as the provider digests and compares it",
 		home: "packages/core/src/mail/address.mts",
 		definition: /(?:function|const)\s+normaliseMailAddress\b/,
