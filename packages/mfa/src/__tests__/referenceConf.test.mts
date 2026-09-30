@@ -65,7 +65,7 @@ const REQUIRED_ENV = {
 
 /** What a composition root resolves from the two references, as it hands it to `createApp`. */
 interface Resolved {
-	readonly mfa: { readonly mode?: unknown; readonly factors?: unknown };
+	readonly mfa: { readonly mode?: unknown; readonly factors?: unknown; readonly page?: unknown };
 	readonly "mfa-totp-factor": Record<string, unknown>;
 	readonly oauth: { readonly jwt: { readonly issuer: string } };
 }
@@ -332,6 +332,15 @@ describe("the package's reference.conf", () => {
 			env: { ...REQUIRED_ENV, MFA_MODE: "required" },
 		}).toObject();
 		expect(core).not.toHaveProperty("mfa");
+	});
+
+	it("defaults mfa.page.url to /mfa and reads MFA_PAGE_URL: this file binds it, and core's reference.conf binds no endpoints.mfa", () => {
+		expect(resolve().mfa.page).toEqual({ url: "/mfa" });
+		expect(resolve({ MFA_PAGE_URL: "/account/mfa" }).mfa.page).toEqual({ url: "/account/mfa" });
+		const core = parseFile(CORE_REFERENCE, {
+			env: { ...REQUIRED_ENV, ENDPOINTS_MFA_URL: "/account/mfa", MFA_PAGE_URL: "/account/mfa" },
+		}).toObject() as { endpoints?: object };
+		expect(core.endpoints).not.toHaveProperty("mfa");
 	});
 
 	it("takes the development sample key through MFA_ENCRYPTION_KEY in development, and refuses it in production", () => {

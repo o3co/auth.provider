@@ -110,6 +110,7 @@ export const LOCKOUT = {
 /** The `mfa` section as the package's reference.conf resolves it, under `mode`, with this suite's key. */
 export const mfaSection = (mode: "off" | "optional" | "required") => ({
 	mode,
+	page: { url: "/mfa" },
 	encryptionKeys: [{ key: MFA_KEY }],
 	transactionTtlSeconds: 600,
 	maxAttemptsPerTransaction: 5,

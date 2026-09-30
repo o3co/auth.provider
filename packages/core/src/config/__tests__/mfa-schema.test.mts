@@ -16,14 +16,14 @@
 
 /**
  * The MFA configuration core owns (ADR 2026-09-25-multi-factor-authentication):
- * the deployment's step-up page at `endpoints.mfa.url`, the two store
- * switches a composition root installs MFA's stores from, and the Redis
- * stores' key prefixes, which the Redis package's modules read.
+ * the two store switches a composition root installs MFA's stores from, and
+ * the Redis stores' key prefixes, which the Redis package's modules read.
  *
- * `mfa.mode` is not core's: it is the MFA module's key, which its section's
- * schema holds to its values and its package's `reference.conf` defaults.
- * Core's schema and `reference.conf` name no `mfa` section, and boot passes
- * one through untouched, to whichever module reads it.
+ * `mfa.mode` and the step-up page, `mfa.page.url`, are not core's: they are
+ * the MFA module's keys, which its package's `reference.conf` defaults. Core's
+ * schema and `reference.conf` name no `mfa` section and no `endpoints.mfa`,
+ * and boot passes an `mfa` section through untouched, to whichever module
+ * reads it.
  */
 
 import { fileURLToPath } from "node:url";
@@ -49,20 +49,17 @@ const issuesAt = (result: { success: boolean; error?: { issues: { path: Property
 	result.success ? [] : (result.error?.issues ?? []).map((issue) => issue.path.join("."));
 
 describe("the MFA configuration core owns", () => {
-	it("resolves from reference.conf: the step-up page at /mfa, both stores in memory", () => {
+	it("resolves from reference.conf: both stores in memory", () => {
 		const config = fromReference();
-		expect(config.endpoints.mfa?.url).toBe("/mfa");
 		expect(config.mfaFactorStore?.adapter).toBe("memory");
 		expect(config.mfaTransactionStore?.adapter).toBe("memory");
 	});
 
 	it("reads each from its environment variable", () => {
 		const config = fromReference({
-			ENDPOINTS_MFA_URL: "/account/mfa",
 			MFA_FACTOR_STORE_ADAPTER: "store",
 			MFA_TRANSACTION_STORE_ADAPTER: "redis",
 		});
-		expect(config.endpoints.mfa?.url).toBe("/account/mfa");
 		expect(config.mfaFactorStore?.adapter).toBe("store");
 		expect(config.mfaTransactionStore?.adapter).toBe("redis");
 	});
@@ -72,6 +69,14 @@ describe("the MFA configuration core owns", () => {
 		expect(Object.keys(AppConfigSchema.shape)).not.toContain("mfa");
 		const raw = parseFile(REFERENCE_CONF, { env: { ...ENV, MFA_MODE: "required" } }).toObject();
 		expect(raw).not.toHaveProperty("mfa");
+	});
+
+	it("names no step-up page: neither core's schema nor its reference.conf, which binds no ENDPOINTS_MFA_URL", () => {
+		expect(Object.keys(AppConfigSchema.shape.endpoints.shape)).not.toContain("mfa");
+		const raw = parseFile(REFERENCE_CONF, {
+			env: { ...ENV, ENDPOINTS_MFA_URL: "/account/mfa" },
+		}).toObject() as { endpoints?: object };
+		expect(raw.endpoints).not.toHaveProperty("mfa");
 	});
 
 	it("boots a configuration whatever its mfa section holds, handing the section on as written", async () => {

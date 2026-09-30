@@ -132,7 +132,7 @@ describe("mfaModules", () => {
 // ---------------------------------------------------------------------------
 
 describe("the requirement it registers", () => {
-	it("registers mfa with the reach boot recomputes from the enabled factors, the page endpoints.mfa.url names and mfa.step_up — said in the boot line", async () => {
+	it("registers mfa with the reach boot recomputes from the enabled factors, the page mfa.page.url names and mfa.step_up — said in the boot line", async () => {
 		const { handle, logger } = await boot();
 		const registered = handle.components.sessionRequirementResolver?.get("mfa");
 		expect([...(registered?.reach ?? [])].sort()).toEqual(["mfa", "otp"]);
@@ -152,6 +152,17 @@ describe("the requirement it registers", () => {
 			requirements: [
 				{ name: "mfa", module: "mfa", remediations: ["mfa.step_up"], secondFactorAuthority: true },
 			],
+		});
+	});
+
+	it("registers as its step-up page the one its own section's mfa.page.url names", async () => {
+		const { handle } = await boot({
+			config: configFor("required", { page: { url: "/account/mfa" } }),
+		});
+		expect(handle.components.sessionRequirementResolver?.get("mfa")?.stepUpPage).toEqual({
+			url: "/account/mfa",
+			params: {},
+			href: "https://auth.example/account/mfa",
 		});
 	});
 
@@ -433,26 +444,20 @@ describe("the boot refusals", () => {
 		}
 	});
 
-	it("refuses a composition without endpoints.mfa.url, the page a step-up starts on, naming it", async () => {
-		const config = configFor("required");
-		const err = await refusal({
-			config: { ...config, endpoints: { ...config.endpoints, mfa: undefined } } as never,
-		});
+	it("refuses a composition without mfa.page.url, the page a step-up starts on, naming it and MFA_PAGE_URL", async () => {
+		const err = await refusal({ config: configFor("required", { page: undefined }) });
 		expect(err.reason).toBe("contribute-factory-failed");
 		const message = (err.cause as Error).message;
-		expect(message).toContain("endpoints.mfa.url");
-		expect(message).toContain("ENDPOINTS_MFA_URL");
+		expect(message).toContain("mfa.page.url");
+		expect(message).toContain("MFA_PAGE_URL");
 	});
 
-	it("refuses an empty endpoints.mfa.url as unset, naming it — before core would refuse the page for its own reason", async () => {
-		const config = configFor("required");
-		const err = await refusal({
-			config: { ...config, endpoints: { ...config.endpoints, mfa: { url: "" } } } as never,
-		});
+	it("refuses an empty mfa.page.url as unset, naming it and MFA_PAGE_URL — before core would refuse the page for its own reason", async () => {
+		const err = await refusal({ config: configFor("required", { page: { url: "" } }) });
 		expect(err.reason).toBe("contribute-factory-failed");
 		const message = (err.cause as Error).message;
-		expect(message).toContain("endpoints.mfa.url");
-		expect(message).toContain("ENDPOINTS_MFA_URL");
+		expect(message).toContain("mfa.page.url");
+		expect(message).toContain("MFA_PAGE_URL");
 	});
 });
 
