@@ -170,6 +170,12 @@ say what each one means and what to do.
   another replica holds the refresh (`lock_timeout`) or won the write
   (`concurrent_update`) is `federation_grant_token_contended`, a warn: nothing
   is down.
+- **A consent answer the CSRF policy refuses** is one warn,
+  `federation_grant_consent_csrf_refused`, with `reason` — the guard's
+  (`foreign_origin`, `token_absent`, `token_invalid`), or `unrecognized` for a
+  verdict outside its contract, which is refused too — the request's
+  `correlationId`, and the `origin` its `Origin` header named, when it named
+  one.
 - **What escaped a handler** is `federation_grants_unexpected_error`, at error,
   with `site` and `err`: the handler that caught it (`token`, `status`,
   `revoke`, `create`, `reauthorize`, `connect`, `consent`, `callback`), or the
@@ -596,8 +602,11 @@ The page's URL carries the challenge, so the page keeps its URL on its own
 origin: it sends `Referrer-Policy: same-origin` on its own responses. The
 provider's `no-referrer` covers only the provider's answers, and an outbound
 link the page renders would otherwise hand the challenge to its target. Not
-`no-referrer`: a form post from a page under it carries `Origin: null`, which
-the answer's CSRF check refuses whatever else the post carries.
+`no-referrer`, however it is set — the header, `<meta name="referrer">`, or
+`rel="noreferrer"` on the form: a form post under it carries `Origin: null`,
+which the answer's CSRF check refuses whatever else the post carries. A host
+that sends `no-referrer` on every response (helmet's default, which the
+standalone template installs) sets `same-origin` on the page's own.
 
 `POST` with `challenge` and `decision` (`accept` or `deny`). Both success paths
 are `303`: an approval to the upstream's authorization endpoint, a refusal
@@ -611,23 +620,34 @@ The answer is held to the deployment's CSRF policy — the `csrfGuard` slot the
 session module provides, the rule `POST /session/login` runs — before the
 session or the challenge is read, so a refused answer spends nothing:
 
-- **The page's form post.** The page posts the answer as a form from its own
-  origin, the provider's. The browser's `Origin` names that origin, which is
-  accepted; so is an origin on `session.csrf.trustedOrigins`, a sibling host
-  sending `Sec-Fetch-Site: same-site` included.
+- **The page's form post.** The page is on the provider's origin
+  (`federationGrants.consent.url` must be) and posts the answer as a form. The
+  browser's `Origin` names that origin, which is accepted.
+- **An origin on `session.csrf.trustedOrigins`** is accepted too, whatever
+  `Sec-Fetch-Site` says, `cross-site` included: the list names who may change
+  state here, so no client's origin belongs on it — connect's exemption
+  depends on that (the federation-grants ADR's D7). It does not make a page on
+  another origin a consent page: such a page cannot read the consent data,
+  and under `same-origin` its cross-origin post carries `Origin: null`.
 - **Any other origin** in the `Origin` — or, without one, the `Referer` — is
   refused whatever else the answer carries: `Origin: null`, which a form post
-  from a page served with `Referrer-Policy: no-referrer` sends, among them.
+  from a page under `no-referrer` sends, among them.
 - **No origin at all** — neither header, as from a client that is not a
   browser: the answer carries the guard's double-submit token, its cookie's
   value echoed in its form field or its header — with the session module's
   guard, the `<session.name>.csrf` cookie, `csrf_token` and `x-csrf-token`.
   `GET /session/csrf` hands one out, as it does for `POST /session/login`.
 
-The origin a request is compared with is the one the provider sees: behind a
-reverse proxy, `http.trustProxy` names the proxy, so that the forwarded
-protocol and host are the ones the browser addressed — as `/session/login`
-needs.
+The origin a request is compared with is the one the provider sees
+(`req.protocol` and `req.host`): behind a reverse proxy, `http.trustProxy`
+names the proxy, and the proxy forwards `X-Forwarded-Proto` and
+`X-Forwarded-Host` — or keeps the browser's `Host` — so that they are the ones
+the browser addressed, as `/session/login` needs. `http.trustProxy` alone
+does not help a proxy that rewrites `Host` and forwards no
+`X-Forwarded-Host`.
+
+A refused answer is logged as one warn line,
+`federation_grant_consent_csrf_refused` ([below](#what-is-logged)).
 
 | Exit | HTTP | `error` | `error_description` |
 |---|---:|---|---|
@@ -639,7 +659,7 @@ needs.
 | `decision` neither `accept` nor `deny` | 400 | `invalid_request` | (nothing is spent) |
 | Session admission does not admit the session: revoked, expired, predating the sessions boundary, or refused by a session requirement (a step-up among them) | 403 | `reauthentication_required` | `sign in again to continue` |
 | The client may no longer use the connection | 403 | `access_denied` | `connection_not_permitted` |
-| The CSRF policy refuses the answer's origin: another origin's, or `Origin: null` | 403 | `invalid_request` | `cross-site answer refused` |
+| The CSRF policy refuses the answer's origin — another origin's, or `Origin: null` — or answers a verdict outside its contract | 403 | `invalid_request` | `cross-site answer refused` |
 | The answer names no origin, and carries no valid CSRF token | 403 | `invalid_request` | `no origin and no valid csrf token` |
 | This deployment's own throttle (`federation_grants_browser`) | 429 | `rate_limited` | `provider` |
 | A store of this package could not answer | 503 | `temporarily_unavailable` | `storage` |

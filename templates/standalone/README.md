@@ -756,9 +756,14 @@ must show), and `expires_in` (what is left of the flow). `POST` with
 or back to the client. Every acquisition and renewal goes through it. The
 answer is held to the session module's CSRF policy: post it as a form from the
 page, and serve the page with `Referrer-Policy: same-origin` — not
-`no-referrer`, under which the browser sends `Origin: null` and the answer is
-refused. A client that sends no `Origin` echoes the token `GET /session/csrf`
-hands out, as for `POST /session/login`; the package README has the rule.
+`no-referrer`, whether by the header, `<meta name="referrer">` or
+`rel="noreferrer"` on the form, under which the browser sends `Origin: null`
+and the answer is refused. This app's `helmet()` sends `no-referrer` on every
+response, so a page it serves sets `Referrer-Policy: same-origin` on its own
+route. Behind a proxy, `HTTP_TRUST_PROXY` names it, and it forwards
+`X-Forwarded-Proto` and `X-Forwarded-Host` (or keeps the browser's `Host`). A
+client that sends no `Origin` echoes the token `GET /session/csrf` hands out,
+as for `POST /session/login`; the package README has the rule.
 
 **The login page** is the one `ENDPOINTS_LOGIN_URL` names, reached with
 `redirect_to=<the connect link>`; it signs the user in and navigates back to
