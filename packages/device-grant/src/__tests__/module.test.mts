@@ -39,6 +39,7 @@ import {
 	createMemoryReplaySeenSet,
 	createSymmetricKeyStore,
 	DeviceCodeStoreError,
+	defineModule,
 } from "@o3co/auth-provider-core";
 import {
 	createTestCsrfGuard,
@@ -124,6 +125,8 @@ interface Overrides {
 	readonly withCsrfGuard?: boolean;
 	/** Drop the `audit.sink.type = "none"` declaration the fixture carries. */
 	readonly withoutAuditDeclaration?: boolean;
+	/** Modules listed after the device grant's. */
+	readonly extraModules?: readonly Module[];
 }
 
 const makeBoot = (overrides: Overrides): BootstrapMap => {
@@ -175,7 +178,10 @@ const makeBoot = (overrides: Overrides): BootstrapMap => {
 const boot = (overrides: Overrides) => {
 	const bootstrapComponents = makeBoot(overrides);
 	return createApp({
-		modules: [deviceGrantModule({ config: bootstrapComponents.config as AppConfig })],
+		modules: [
+			deviceGrantModule({ config: bootstrapComponents.config as AppConfig }),
+			...(overrides.extraModules ?? []),
+		],
 		bootstrapComponents,
 	});
 };
@@ -1403,6 +1409,40 @@ describe("deviceGrantModule — the route it actually contributes", () => {
 		const deps = withVerificationBudget(undefined);
 		const factory = contributionsFor(deps)?.routes?.[1] as (d: unknown) => unknown;
 		expect(() => factory(deps)).toThrow(/oauth\.deviceAuthorization\.rateLimit/);
+	});
+
+	it.each([
+		["a budget another module set", { limit: 3, windowSeconds: 600 }],
+		["no budget at all", undefined],
+	])(
+		"refuses to mount device/verification when the device_verification budget in force is %s, not oauth.deviceAuthorization.rateLimit",
+		(_label, inForce) => {
+			const deps = {
+				...enabledDeps(),
+				rateLimitBudgetResolver: {
+					get: (prefix: string) => (prefix === "device_verification" ? inForce : undefined),
+					entries: () => new Map().entries(),
+				},
+			};
+			const factory = contributionsFor(deps)?.routes?.[1] as (d: unknown) => unknown;
+			expect(() => factory(deps)).toThrow(/device_verification/);
+			expect(() => factory(deps)).toThrow(/oauth\.deviceAuthorization\.rateLimit/);
+		},
+	);
+
+	it("refuses boot when a module overrides the device_verification budget, even to tighten it", async () => {
+		const tightener = defineModule({
+			name: "test:device-verification-tightener",
+			overrides: {
+				rateLimitBudgets: { device_verification: () => ({ limit: 3, windowSeconds: 600 }) },
+			},
+		});
+		const err = await boot({ deviceAuthorization: ENABLED, extraModules: [tightener] }).then(
+			() => undefined,
+			(caught: unknown) => caught as Error,
+		);
+		expect(err?.message).toMatch(/device_verification/);
+		expect(err?.message).toMatch(/oauth\.deviceAuthorization\.rateLimit/);
 	});
 
 	it.each([

@@ -34,6 +34,7 @@ import {
 const RULES = {
 	kind: "kind is a non-empty string",
 	failMode: "failMode, when present, is open or closed",
+	defaultLimit: "defaultLimit, when present, is a budget a limiter can apply as written",
 	decision:
 		"check answers a decision: allowed true or false, and remaining, limit, resetAt and reason well-formed when present",
 	outage: "an outage is thrown, never answered as a decision",
@@ -94,6 +95,7 @@ describe("rateLimiterContract — the double", () => {
 		expect(cases.map((c) => c.name)).toEqual([
 			RULES.kind,
 			RULES.failMode,
+			RULES.defaultLimit,
 			RULES.decision,
 			RULES.outage,
 			RULES.budget,
@@ -103,7 +105,7 @@ describe("rateLimiterContract — the double", () => {
 	it("leaves the outage and budget cases out for a limiter that has neither", () => {
 		expect(
 			rateLimiterContract({ build: () => createTestRateLimiter() }).map((c) => c.name),
-		).toEqual([RULES.kind, RULES.failMode, RULES.decision]);
+		).toEqual([RULES.kind, RULES.failMode, RULES.defaultLimit, RULES.decision]);
 	});
 
 	it.each(cases)("$name", async ({ run }) => {
@@ -134,6 +136,14 @@ describe("rateLimiterContract — core's in-process limiter", () => {
 
 	it("declares no outage policy: it has no backend to lose", () => {
 		expect(createMemoryRateLimiter({ defaultLimit: spec }).failMode).toBeUndefined();
+	});
+
+	it("declares the defaultLimit it was built with, frozen", () => {
+		const defaultLimit = { limit: 7, windowSeconds: 90 };
+		const declared = createMemoryRateLimiter({ defaultLimit }).defaultLimit;
+		defaultLimit.limit = 700;
+		expect(declared).toEqual({ limit: 7, windowSeconds: 90 });
+		expect(Object.isFrozen(declared)).toBe(true);
 	});
 });
 
@@ -185,6 +195,15 @@ describe("rateLimiterContract — each way a limiter can break it", () => {
 			expect(await failing({ build: answering({ allowed: true }, { failMode }) })).toEqual([
 				RULES.failMode,
 			]);
+		}
+	});
+
+	it("a defaultLimit no limiter can apply as written", async () => {
+		for (const defaultLimit of [{ limit: 0, windowSeconds: 60 }, { limit: 5 }, null, "60/60"]) {
+			expect(
+				await failing({ build: answering({ allowed: true }, { defaultLimit }) }),
+				JSON.stringify(defaultLimit),
+			).toEqual([RULES.defaultLimit]);
 		}
 	});
 

@@ -37,11 +37,19 @@
  * entry.
  */
 
-import type { RateLimiter } from "@o3co/auth-provider-core";
-import { SINGLE_ENV } from "@o3co/auth-provider-standalone/src/__tests__/all-modules-composition.fixture.mts";
+import { BootError, defineModule, type RateLimiter } from "@o3co/auth-provider-core";
+import {
+	compose,
+	SINGLE_ENV,
+} from "@o3co/auth-provider-standalone/src/__tests__/all-modules-composition.fixture.mts";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { type TestRedis, testRedis } from "../../../../packages/redis/__tests__/support/redis.mts";
-import { composeFullSet, type FullSet, type FullSetOptions } from "./full-set.fixture.mts";
+import {
+	composeFullSet,
+	type FullSet,
+	type FullSetOptions,
+	fullSetOptions,
+} from "./full-set.fixture.mts";
 
 type Adapter = "memory" | "redis";
 type Cell = "shipped" | "configured" | "declared" | "off";
@@ -175,4 +183,49 @@ describe.each<Adapter>(["memory", "redis"])("the %s limiter", (adapter) => {
 			expect(await applied(limiter, prefix)).toEqual(TABLE[prefix][cell]);
 		});
 	});
+});
+
+/** Every prefix a package keys a limiter under, with the module that owns it. */
+const KEYED = [
+	["token", "oauth"],
+	["authorize", "oauth"],
+	["introspect", "oauth"],
+	["revoke", "oauth"],
+	["login", "session"],
+	["device_authorization", "device-grant"],
+	["device_verification", "device-grant"],
+	["federation_grants", "federation-grants"],
+	["federation_grants_browser", "federation-grants"],
+	["webauthn-authentication-options", "webauthn"],
+	["mfa", "mfa"],
+] as const;
+
+describe("a prefix is its owner's", () => {
+	it.each(KEYED)(
+		"refuses at boot a module that contributes a budget for %s, which %s claims",
+		async (prefix, owner) => {
+			const squatter = defineModule({
+				name: "test:budget-squatter",
+				contributes: {
+					rateLimitBudgets: { [prefix]: () => ({ limit: 1_000_000, windowSeconds: 1 }) },
+				},
+			});
+			const options = await fullSetOptions();
+			const err = await compose({
+				...options,
+				extraModules: (config) => [...(options.extraModules?.(config) ?? []), squatter],
+			}).then(
+				(composition) => composition.handle.dispose().then(() => undefined),
+				(caught: unknown) => caught,
+			);
+
+			expect(err).toBeInstanceOf(BootError);
+			expect((err as BootError).reason).toBe("duplicate-contribute");
+			expect((err as BootError).details).toMatchObject({
+				kind: "rateLimitBudgets",
+				identity: prefix,
+				modules: [owner, "test:budget-squatter"],
+			});
+		},
+	);
 });
