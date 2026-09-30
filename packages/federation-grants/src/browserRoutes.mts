@@ -92,6 +92,7 @@ import {
 	noStoreNoReferrer,
 	plain,
 } from "./browserAnswers.mjs";
+import { createConnectHandler } from "./browserConnect.mjs";
 import {
 	createBrowserFlow,
 	type FederationGrantBrowserRouterOptions,
@@ -102,13 +103,11 @@ import {
 	CALLBACK,
 	CONNECT,
 	CONSENT,
-	type Judgement,
 	judge,
 	judgementUnavailable,
 	sessionHolds,
 } from "./browserJudgement.mjs";
-import { callbackParamsOf, claimOf, isPrefetch, sessionIdOf, single } from "./browserRequest.mjs";
-import { federationGrantConnectUri } from "./lodgeRoute.mjs";
+import { callbackParamsOf, claimOf, sessionIdOf, single } from "./browserRequest.mjs";
 import { createRequestIdMiddleware, requestIdOf } from "./requestId.mjs";
 import { parserRefusals, unexpectedErrors } from "./routes.mjs";
 
@@ -157,16 +156,6 @@ function csrfRefusal(verdict: unknown): CsrfRefusalReason | null {
 		: "unrecognized";
 }
 
-/** The consent page's URL with the challenge on it. */
-function consentLocation(consentUrl: string, issuer: string, challenge: string): string {
-	const url = new URL(consentUrl, issuer);
-	url.searchParams.set("challenge", challenge);
-	// Always absolute on the issuer: a normalised path would turn
-	// `/.//evil.example/consent` into a protocol-relative `//evil.example/consent`
-	// Location carrying the challenge to another host. Boot refuses such a path too.
-	return url.href;
-}
-
 // ---------------------------------------------------------------------------
 // The router
 // ---------------------------------------------------------------------------
@@ -199,11 +188,8 @@ export function createFederationGrantBrowserRouter(
 			`createFederationGrantBrowserRouter: issuer ${describeIssuerRejection(issuerRejection)} — it is oauth.jwt.issuer`,
 		);
 	}
-	const { now, randomId, log, admissionFor, auditFor, failed } = createBrowserFlow(
-		options,
-		requirements,
-		subjectRevocation,
-	);
+	const flow = createBrowserFlow(options, requirements, subjectRevocation);
+	const { now, randomId, log, admissionFor, auditFor, failed } = flow;
 	const router = express.Router();
 
 	// The deployment's own logger and audit sink: a limiter outage here is
@@ -271,106 +257,7 @@ export function createFederationGrantBrowserRouter(
 		throttle((res, status) =>
 			plain(res, status, status === 429 ? "Too many requests." : "Temporarily unavailable."),
 		),
-		admitted(shuttingDownPlain, async (req, res) => {
-			try {
-				// A prefetch is not the user asking: nothing is parked for it.
-				if (isPrefetch(req)) {
-					res.status(204).end();
-					return;
-				}
-				const handle = single(req.query.request);
-				if (handle === undefined) {
-					plain(res, 400, "This link is not valid.");
-					return;
-				}
-				let intent: FederationGrantIntent | null;
-				try {
-					intent = await options.intentStore.getIntent(handle, now());
-				} catch (error) {
-					log.outage(
-						"federation_grant_connect_unavailable",
-						{
-							correlationId: requestIdOf(res),
-							reason: "storage",
-							store: "federation_grant_intent",
-							step: "get_intent",
-						},
-						error,
-					);
-					plain(res, 503, "Temporarily unavailable.");
-					return;
-				}
-				if (intent === null) {
-					failed(req, res, "stale");
-					plain(res, 400, "This link has expired or has already been used. Start again.");
-					return;
-				}
-				// Not signed in: sign in and come back to exactly this link (its handle only).
-				// Read from the claim before the session is asked anything, as `/authorize` does.
-				const claim = claimOf(req);
-				if (!claim.authenticated) {
-					res.redirect(
-						303,
-						options.login.urlFor(federationGrantConnectUri(options.issuer, handle)),
-					);
-					return;
-				}
-				const judged = await judge(
-					options,
-					admissionFor({ grantId: intent.grantId, correlationId: requestIdOf(res) }),
-					req,
-					claim,
-					CONNECT,
-					intent,
-					now,
-				);
-				if (!judged.ok) {
-					if (judged.reason === "unavailable" && judged.unanswered !== undefined) {
-						judgementUnavailable(
-							log,
-							"connect",
-							{ grantId: intent.grantId, correlationId: requestIdOf(res) },
-							intent,
-							judged.unanswered,
-						);
-					}
-					failed(req, res, judged.reason, intent);
-					plain(res, judged.status, messageFor(judged.reason));
-					return;
-				}
-				let parked: Awaited<ReturnType<FederationGrantIntentStore["parkConsent"]>>;
-				try {
-					parked = await options.intentStore.parkConsent({
-						handle,
-						challenge: randomId(),
-						binding: judged.binding,
-						now: now(),
-					});
-				} catch (error) {
-					log.outage(
-						"federation_grant_connect_unavailable",
-						{
-							grantId: intent.grantId,
-							correlationId: requestIdOf(res),
-							reason: "storage",
-							store: "federation_grant_intent",
-							step: "park_consent",
-						},
-						error,
-					);
-					plain(res, 503, "Temporarily unavailable.");
-					return;
-				}
-				if (parked === null) {
-					plain(res, 400, "This link has expired or has already been used. Start again.");
-					return;
-				}
-				res.redirect(303, consentLocation(options.consentUrl, options.issuer, parked.challenge));
-			} catch (error) {
-				log.unexpected("connect", { correlationId: requestIdOf(res) }, error);
-				plain(res, 500, "Something went wrong.");
-			}
-		}),
+		admitted(shuttingDownPlain, createConnectHandler(flow)),
 	);
 
 	// --- GET / POST /consent -------------------------------------------------
@@ -1312,23 +1199,6 @@ function pinned(
 		federationGrantAuthorizationRevision(connection) === intent.authorizationRevision &&
 		connection.callbackUri === intent.callbackUri
 	);
-}
-
-function messageFor(reason: Exclude<Judgement, { ok: true }>["reason"]): string {
-	switch (reason) {
-		case "subject_mismatch":
-			return "This request was made for another account.";
-		case "reauthentication_required":
-			return "Sign in again to continue.";
-		case "stale":
-			return "This request was replaced by a newer one. Start again.";
-		case "connection_not_permitted":
-			return "This application may no longer use this connection.";
-		case "connection_changed":
-			return "The connection has changed since this request was made. Start again.";
-		case "unavailable":
-			return "Temporarily unavailable.";
-	}
 }
 
 /** What a disabled deployment mounts here: a plain 404 that names no feature. */
