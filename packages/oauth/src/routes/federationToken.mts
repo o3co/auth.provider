@@ -22,7 +22,6 @@ import {
 	canonicalTokenType,
 	classifyFederationRefreshError,
 	emitAuditEvent,
-	isBearerTokenType,
 	logClientRepositoryUnavailable,
 	loggableError,
 	parseScopeTokens,
@@ -37,6 +36,10 @@ import {
 	type FederationTokenContext,
 	type FederationTokenRouterOptions,
 } from "./federationTokenContext.mjs";
+import {
+	mayDiscloseTokenType,
+	refuseUndisclosableTokenType,
+} from "./federationTokenDisclosure.mjs";
 
 export type { FederationTokenRouterOptions } from "./federationTokenContext.mjs";
 
@@ -58,31 +61,6 @@ const isNonEmptyString = (value: unknown): value is string =>
 
 /** Alias at the call sites where the string is a token rather than a scope. */
 const isUsableToken = isNonEmptyString;
-
-/**
- * Seconds a caller is asked to wait before retrying a token this route may
- * not hand on — the default of `federation-grants.ineligibleRetryAfter` on the
- * offline-delegation route. A hint against a hot loop: the condition ends
- * only when the upstream's registration changes.
- */
-const UPSTREAM_INELIGIBLE_RETRY_AFTER_SECONDS = 300;
-
-/**
- * Whether a stored upstream token may be handed to the caller. This route
- * delegates the token by value to a caller holding no proof key, so only
- * `Bearer` qualifies: every other IANA access token type is sender-constrained
- * (`PoP`, `DPoP`) or not an access token (`N_A`), as core's
- * `federation-grants/eligibility.mts` also judges.
- *
- * Only an absent field is admitted unread (RFC 6749 §5.1 requires
- * `token_type`, so silence means an adapter or record that predates carrying
- * it). Anything present is read — `null`, `""` or a number included — so a
- * malformed record never answers `Bearer`.
- */
-const mayDiscloseTokenType = (stored: unknown): boolean => {
-	if (stored === undefined) return true;
-	return isBearerTokenType(stored);
-};
 
 /** Seconds a token has left: finite and in the future. `NaN` and `-5` are neither. */
 const isUsableLifetime = (value: unknown): value is number =>
@@ -218,33 +196,6 @@ export function createRouter(express: ExpressLike, opts: FederationTokenRouterOp
 		const caller = await identifyCaller(ctx);
 		if (caller === null) return;
 		const { familyId, sid, azp, sub } = caller;
-
-		/**
-		 * Refuses a token whose type this route may not delegate. `502`: what
-		 * came back from the upstream cannot be handed on, through no fault of
-		 * the caller or this provider (the offline-delegation route answers the
-		 * same). The named type goes to the audit sink, sanitised, not to the
-		 * caller. `Retry-After` because the condition is not transient.
-		 */
-		const refuseUndisclosableTokenType = (res: Response, named: unknown): Response => {
-			emitAuditEvent(opts.auditSink, {
-				timestamp: new Date(),
-				type: "federation.token.upstream_ineligible",
-				subject: sub ?? undefined,
-				ip: req.ip,
-				userAgent: req.get("user-agent"),
-				details: {
-					federation,
-					reason: "token_type_unsupported",
-					tokenType: typeof named === "string" ? auditErrorText(named) : null,
-				},
-			});
-			res.setHeader("Retry-After", String(UPSTREAM_INELIGIBLE_RETRY_AFTER_SECONDS));
-			return res.status(502).json({
-				error: "upstream_token_ineligible",
-				error_description: "token_type_unsupported",
-			});
-		};
 
 		// Step 5: family revocation, fail-closed. A throw is `503`, never `401
 		// invalid_token`, which would send the client to replace a token nobody
@@ -393,7 +344,7 @@ export function createRouter(express: ExpressLike, opts: FederationTokenRouterOp
 			// The type is judged before the token is read and before the success
 			// is audited, so a refused disclosure is not counted as one.
 			if (!mayDiscloseTokenType(tokens.tokenType)) {
-				return refuseUndisclosableTokenType(res, tokens.tokenType);
+				return refuseUndisclosableTokenType(ctx, caller, tokens.tokenType);
 			}
 			emitAuditEvent(opts.auditSink, {
 				timestamp: new Date(),
@@ -494,7 +445,7 @@ export function createRouter(express: ExpressLike, opts: FederationTokenRouterOp
 					// the stored token without calling the IdP, judging its type as on
 					// the fast path.
 					if (!mayDiscloseTokenType(freshTokens.tokenType)) {
-						return refuseUndisclosableTokenType(res, freshTokens.tokenType);
+						return refuseUndisclosableTokenType(ctx, caller, freshTokens.tokenType);
 					}
 					const expiresIn =
 						freshTokens.expiresAt === null
@@ -789,7 +740,7 @@ export function createRouter(express: ExpressLike, opts: FederationTokenRouterOp
 			// rotated refresh token so fixing the upstream needs no re-consent.
 			if (!mayDiscloseTokenType(nextTokenType)) {
 				await keepRotatedRefreshToken();
-				return refuseUndisclosableTokenType(res, nextTokenType);
+				return refuseUndisclosableTokenType(ctx, caller, nextTokenType);
 			}
 
 			// 11f: store the refreshed tokens, falling back to the post-lock
