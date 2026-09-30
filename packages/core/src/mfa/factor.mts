@@ -147,31 +147,38 @@ export interface MfaEnrollmentCompletionContext extends MfaEnrollmentContext {
 	readonly proof: unknown;
 }
 
+/** What a factor may ask a code to be mailed for; the account-email proof is the coordinator's own. */
+export type MfaFactorMailPurpose = Exclude<MailPurpose, "account_email_proof">;
+
 /**
  * A code a challenge or an enrollment asks the coordinator to mail: its
- * purpose and the code, never text. The coordinator resolves the recipient,
- * the address on the account's user record at that moment, and the expiry;
- * it keeps the state first and sends after, and a send that fails clears
- * that state and is an outage, never "sent".
+ * purpose, the code and, when the factor gives one, when it stops being
+ * accepted — never text. The coordinator resolves the recipient, the address
+ * on the account's user record at that moment. It keeps the state first,
+ * expiring at the earlier of `expiresAtMs` and the transaction's expiry, and
+ * sends after with that expiry; a send refused at a limit or failed clears
+ * that state, and is never "sent".
  */
-export interface MfaFactorMail {
-	readonly purpose: MailPurpose;
+export interface MfaFactorMail<P extends MfaFactorMailPurpose = MfaFactorMailPurpose> {
+	readonly purpose: P;
 	readonly code: string;
+	/** Epoch milliseconds, after the call's `nowMs`; absent, the transaction's expiry. */
+	readonly expiresAtMs?: number;
 }
 
-/** What a challenge answers: the state the coordinator keeps, if any, the page's response, and a code to mail. */
+/** What a challenge answers: the state the coordinator keeps, if any, the page's response, and a login code to mail. */
 export interface MfaChallenge {
 	readonly state?: MfaFactorState;
 	/** What the page is answered: request options, where a code went. Never the code `mail` carries. */
 	readonly response: unknown;
-	readonly mail?: MfaFactorMail;
+	readonly mail?: MfaFactorMail<"login_code">;
 }
 
-/** What the start of an enrollment answers; `response` and `mail` as {@link MfaChallenge}'s. */
+/** What the start of an enrollment answers; `response` as {@link MfaChallenge}'s, `mail` the enrollment's code. */
 export interface MfaEnrollmentStart {
 	readonly state: MfaFactorState;
 	readonly response: unknown;
-	readonly mail?: MfaFactorMail;
+	readonly mail?: MfaFactorMail<"email_factor_enrollment">;
 }
 
 /** What a verification answers. */

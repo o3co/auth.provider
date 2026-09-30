@@ -569,6 +569,7 @@ export type {
 	MfaEnrollmentStart,
 	MfaFactorData,
 	MfaFactorMail,
+	MfaFactorMailPurpose,
 	MfaFactorState,
 	MfaKeyedDigest,
 	MfaVerification,
