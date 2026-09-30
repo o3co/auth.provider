@@ -30,10 +30,11 @@
  * + 1, and clearing what it says `undefined`; `null` for a version that moved
  * or a record that is gone, nothing changed; a `RangeError` for an update at
  * `Number.MAX_SAFE_INTEGER`; one winner among N concurrent updates at one
- * version; removal of one record and of a subject's records, idempotent and
- * no further; and a removed record taken again. Every record id is 22
- * base64url characters, as the provider makes one. Each case builds a fresh
- * harness and closes it.
+ * version; a successful update reaching no other record — the same id under
+ * another subject, the subject's other factors; removal of one record and of
+ * a subject's records, idempotent and no further; and a removed record taken
+ * again. Every record id is 22 base64url characters, as the provider makes
+ * one. Each case builds a fresh harness and closes it.
  */
 
 import assert from "node:assert/strict";
@@ -237,6 +238,19 @@ export function mfaFactorStoreContract(
 			assert.equal(winners.length, 1);
 			assert.deepStrictEqual(await store.list("user-1"), winners);
 			assert.equal(winners[0]?.version, 2);
+		}),
+
+		test("a successful update writes its own record alone: the same id under another subject, and the subject's other factors, stay as they were", async (store) => {
+			const sibling = { id: FACTOR_2, data: "v2.sibling" };
+			const theirs = { subject: "user-2", data: "v2.theirs" };
+			await store.create(RECORD());
+			await store.create(RECORD(sibling));
+			await store.create(RECORD(theirs));
+			const next = { data: "v2.re-sealed", label: "Work phone", lastUsedAt: undefined };
+			const updated = await store.update("user-1", FACTOR_1, 1, next);
+			assert.deepStrictEqual(updated, { ...RECORD(), ...next, version: 2 });
+			assert.deepStrictEqual(byId(await store.list("user-1")), [updated, RECORD(sibling)]);
+			assert.deepStrictEqual(await store.list("user-2"), [RECORD(theirs)]);
 		}),
 
 		test("never reaches another subject's record through update", async (store) => {
