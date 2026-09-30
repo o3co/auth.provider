@@ -84,7 +84,6 @@ const applyGrantPolicy = async (
 		/** The client's full allowlist — the policy's `originalScope`. */
 		originalScope: readonly string[];
 		/**
-		/**
 		 * The audiences this grant may mint for: the client's `allowedAudiences`,
 		 * or empty. Policy may narrow within it, never originate outside it.
 		 */
