@@ -154,8 +154,11 @@ const mfaModeSchema = z.enum(MFA_MODES, { error: 'must be "off", "optional" or "
 
 const RING_SHAPE = "must be a list of { id?, key } entries";
 
-/** The fewest and the most attempts one transaction may allow. */
-const MFA_MAX_ATTEMPTS_PER_TRANSACTION = { min: 1, max: 10 } as const;
+/**
+ * The fewest and the most attempts one transaction may allow: an email-proof
+ * first binding spends one on the proof and one on the binding.
+ */
+const MFA_MAX_ATTEMPTS_PER_TRANSACTION = { min: 2, max: 10 } as const;
 
 const POSITIVE_WHOLE = "must be a positive whole number";
 const positiveWhole = z

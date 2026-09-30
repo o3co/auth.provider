@@ -62,7 +62,6 @@ import {
 	type MfaFactorRecord,
 	type MfaFactorResolver,
 	type MfaFactorStore,
-	normaliseMailAddress,
 	PASSWORD_AMR,
 	type PrimaryAuthentication,
 	type RequirementInput,
@@ -365,8 +364,9 @@ export function createMfaRequirement(options: MfaRequirementOptions): SessionReq
 
 	/**
 	 * Whether the account-email proof comes before `primary`'s first binding:
-	 * the gate over the setting, the sender, the login's address and D25's
-	 * flag. A flag that cannot be read, or reads other than a boolean, throws.
+	 * the gate over the setting, the sender, the login's address fact (core's
+	 * reading, in its enrollment facts) and D25's flag. A flag that cannot be
+	 * read, or reads other than a boolean, throws.
 	 */
 	const proofAsked = async (primary: PrimaryAuthentication): Promise<boolean> => {
 		const flagged: unknown = await emailProofRequiredAtNextBinding(primary.subject);
@@ -378,18 +378,15 @@ export function createMfaRequirement(options: MfaRequirementOptions): SessionReq
 		const gate = firstBindingGate({
 			requireEmailProof: firstBinding.requireEmailProof,
 			mailWired: firstBinding.mailWired,
-			hasAddress: normaliseMailAddress(primary.user.email) !== undefined,
+			mailAddress: primary.enrollmentFacts.mailAddress,
 			requiredAtNextBinding: flagged,
 		});
 		// `unprovable` asks for a proof nobody can give: the binding is refused,
 		// never skipped, and said — the subject and why, never the address.
-		if (gate === "unprovable") {
-			logger.warn(
-				{ sub: primary.subject, reason: firstBinding.mailWired ? "no_address" : "no_sender" },
-				"mfa_email_proof_unprovable",
-			);
+		if (gate.outcome === "unprovable") {
+			logger.warn({ sub: primary.subject, reason: gate.reason }, "mfa_email_proof_unprovable");
 		}
-		return gate !== "bind";
+		return gate.outcome !== "bind";
 	};
 
 	/** The interruption that opens the login's transaction with `interruption`'s answer. */

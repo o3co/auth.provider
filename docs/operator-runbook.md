@@ -312,7 +312,7 @@ Module-level messages that arrive wrapped in a factory failure:
   it; the package's settings, each a `RangeError` `cause` naming its key — the
   key ring and the development sample key as `packages/mfa/README.md` lists
   them, `mfa.transactionTtlSeconds` outside 60 to 1800 seconds,
-  `mfa.maxAttemptsPerTransaction` outside 1 to 10, an
+  `mfa.maxAttemptsPerTransaction` outside 2 to 10, an
   `mfa.lockout` core's `checkMfaLockoutPolicy` refuses (`mfa.lockout.threshold
   must be at most mfa.lockout.hardLimit`, …), and an
   `mfa.enrollment.requireEmailProof` other than `when-mail`, `always` or
@@ -747,13 +747,21 @@ wires it.
   some spellings a mail system may deliver to, which the provider refuses on
   purpose: a zero-width non-joiner or joiner (U+200C, U+200D) in a local
   part or in a Unicode domain label; an emoji or another symbol beyond ASCII
-  in a local part; a quoted local part with a space in it; and an underscore
-  in a domain. **Such an account has no email factor and no account-email
+  in a local part; a quoted local part with a space in it; an underscore in
+  a domain; a local part a relay could route onward — a `%` or a `!`, or a
+  quoted local part holding an `@`, a `%` or a `!` (`"a@b"@example.com`); an
+  encoded word (`=?utf-8?q?…?=`), which a mail program decodes into other
+  text; and a `<` or `>` in a quoted local part, which an SMTP envelope
+  refuses. **Such an account has no email factor and no account-email
   proof.** A login records its address as `unreadable` in the session's
   enrollment facts (`none` for an account with no address, `address` for one
-  the provider reads): no proof can be sent to it, so it cannot bind a first
-  factor until its address is fixed in the Store, and under
-  `mfa.mode = "required"` it cannot log in. After an operator reset with `requireEmailProof` (`mfa.reset`), it
+  the provider reads): no proof can be sent to it, so wherever a first
+  binding asks for the proof — `mfa.enrollment.requireEmailProof` `always`,
+  `when-mail` with a mail sender wired, or an operator reset's flag — it is
+  refused (`mfa_email_proof_unprovable`, `reason: "unreadable_address"`) and
+  cannot bind a first factor until its address is fixed in the Store, and
+  under `mfa.mode = "required"` it cannot log in. Under `never` it binds
+  without the proof. After an operator reset with `requireEmailProof` (`mfa.reset`), it
   cannot give the proof its next first binding asks for, and needs another
   way back — a recovery code, or the operator; give it an address the
   provider reads before you reset it.
@@ -1012,7 +1020,7 @@ stream — its level is fixed at `info`.
 | `session_admission_no_subject` (warn — `action`) | `core/src/session-admission/admit.mts` | a cookie session says it is authenticated and names no user: not a session this provider wrote. Answered `not_live`, nothing read, nothing audited |
 | `mfa_enrollment_witness_unwritten` (warn — `sub`, the error's projection) | `mfa/src/routes.mts` | the Store could not write the enrollment witness after a counting factor was bound or verified: the login completed, and the next password login that verifies a counting factor marks it again. Sustained, the Store's `markMfaEnrolledUrl` is failing, and a lost factor store would read those accounts as never enrolled |
 | audit `mfa.first_binding_conflict` (`subject`, `details.kind`) | `mfa/src/routes.mts` | two logins of one subject bound a first factor at once, and this one's was removed: both may be, each answered `401 login_required`. Once is a user with two tabs; a run for one `subject` is whoever holds that user's password racing the owner's first binding. It gains no way in, but it hinders the owner's: the remedy is a password change, which is the Store's |
-| `mfa_email_proof_unprovable` (warn — `sub`, `reason`: `no_sender` or `no_address`; per such login) | `mfa/src/requirement.mts` | a first binding asks the account-email proof and nobody can give it — no mail sender (D25's flag), or an account without an address the provider reads (`always`, or the flag): the user cannot bind and cannot sign in under `required`. Give the account an address, or wire a mail sender |
+| `mfa_email_proof_unprovable` (warn — `sub`, `reason`: `no_sender`, `no_address` or `unreadable_address`; per such login) | `mfa/src/requirement.mts` | a first binding asks the account-email proof and nobody can give it — no mail sender (`always`, or D25's flag), an account without an address (`always`, or the flag), or one whose address the provider cannot read (any of those, or `when-mail` with a sender; see the spellings refused on purpose, under "The email factor's address"): the user cannot bind and cannot sign in under `required`. Fix the account's address in the Store, or wire a mail sender |
 | `mfa_mail_refused_at_limit` (warn — `route`, `purpose`, `kind`, `cleared`) | `mfa/src/routes.mts` | the mail sender refused a code at its limit, and the user was answered `429`. A run for one account, or overall, is the limit working — or a user resending — and the sender's to tune |
 | `mfa_email_proof_flag_uncleared` (warn — `sub`, the error's projection) | `mfa/src/routes.mts` | a first binding given with the account-email proof could not clear the operator reset's flag (`requireEmailProof`): the binding stands, and the flag asks for the proof at that subject's next first binding too |
 | audit `device.rate_limited`; log `device_verification_rate_limited` (warn) | `device-grant/src/verificationEndpoint.mts` | an **account** (the key is the authenticated subject) is guessing device codes |

@@ -22,11 +22,20 @@
  *
  * Every input is handed in, so each caller decides in the same place over
  * what it can read: `mfa.enrollment.requireEmailProof`, whether a mail sender
- * is wired, whether the account has an address `normaliseMailAddress` reads,
- * and D25's flag. The flag asks for the proof whatever the setting. A proof
- * asked for that nobody can give — no sender, no address — is `unprovable`:
- * the binding is refused, never let through without it.
+ * is wired, the account's address as the session's enrollment facts say it
+ * (core's one reading: `none`, `address` or `unreadable`), and D25's flag.
+ *
+ * - `never` asks for nothing, whatever the address; D25's flag asks whatever
+ *   the setting; `always` asks always; `when-mail` asks when a sender is
+ *   wired and the account has an address — or one it cannot read, which
+ *   nobody can send the proof to.
+ * - A proof asked for that nobody can give is `unprovable`, with why: the
+ *   binding is refused, never let through without it.
  */
+
+import type { MailAddressFact } from "@o3co/auth-provider-core";
+
+export type { MailAddressFact };
 
 /** `mfa.enrollment.requireEmailProof`. */
 export const REQUIRE_EMAIL_PROOF = ["when-mail", "always", "never"] as const;
@@ -40,25 +49,40 @@ export interface FirstBindingGateInput {
 	readonly requireEmailProof: RequireEmailProof;
 	/** Whether a mail sender is wired. */
 	readonly mailWired: boolean;
-	/** Whether the account has an address `normaliseMailAddress` reads. */
-	readonly hasAddress: boolean;
+	/** The account's address as the session's enrollment facts say it (`SessionEnrollmentFacts.mailAddress`). */
+	readonly mailAddress: MailAddressFact;
 	/** D25's flag: an operator reset asked for the proof at the subject's next first binding. */
 	readonly requiredAtNextBinding: boolean;
 }
+
+/** Why a proof asked for cannot be given: no sender, no address, or one no proof can be sent to. */
+export type UnprovableReason = "no_sender" | "no_address" | "unreadable_address";
 
 /**
  * `bind`: no proof is asked. `prove`: the account-email proof comes first,
  * and can be given. `unprovable`: a proof is asked that nobody can give.
  */
-export type FirstBindingGate = "bind" | "prove" | "unprovable";
+export type FirstBindingGate =
+	| { readonly outcome: "bind" }
+	| { readonly outcome: "prove" }
+	| { readonly outcome: "unprovable"; readonly reason: UnprovableReason };
+
+const BIND: FirstBindingGate = Object.freeze({ outcome: "bind" });
+const PROVE: FirstBindingGate = Object.freeze({ outcome: "prove" });
 
 /** The gate over `input` (see this file's header). */
 export function firstBindingGate(input: FirstBindingGateInput): FirstBindingGate {
-	const { requireEmailProof, mailWired, hasAddress, requiredAtNextBinding } = input;
-	const givable = mailWired && hasAddress;
-	if (requiredAtNextBinding || requireEmailProof === "always") {
-		return givable ? "prove" : "unprovable";
-	}
-	if (requireEmailProof === "never") return "bind";
-	return givable ? "prove" : "bind";
+	const { requireEmailProof, mailWired, mailAddress, requiredAtNextBinding } = input;
+	/** The proof asked for: given where it can be, else unprovable, with why. */
+	const asked = (): FirstBindingGate => {
+		if (!mailWired) return { outcome: "unprovable", reason: "no_sender" };
+		if (mailAddress === "address") return PROVE;
+		return {
+			outcome: "unprovable",
+			reason: mailAddress === "unreadable" ? "unreadable_address" : "no_address",
+		};
+	};
+	if (requiredAtNextBinding || requireEmailProof === "always") return asked();
+	if (requireEmailProof === "never" || !mailWired || mailAddress === "none") return BIND;
+	return asked();
 }
