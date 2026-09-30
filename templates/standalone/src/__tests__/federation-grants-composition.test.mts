@@ -338,36 +338,72 @@ describe("the standalone composes federation grants from its config", () => {
 	it.each([
 		[
 			"a __Secure- name that is not secure",
+			"name",
 			{ SESSION_NAME: "__Secure-auth.session", SESSION_SECURE: "false" },
 			/__Secure- prefix requires session\.secure=true/,
 		],
 		[
 			"a name that is not an RFC 6265 token",
+			"name",
 			{ SESSION_NAME: "auth session" },
 			/is not a cookie name \(an RFC 6265 token\)/,
 		],
+		[
+			"a domain that is a URL",
+			"domain",
+			{ SESSION_NAME: "auth.session", SESSION_DOMAIN: "https://auth.example.com" },
+			/is not a cookie domain/,
+		],
 	])(
-		"refuses at boot a session cookie no browser keeps, %s, once the subject revocation service is installed",
-		async (_what, cookie, refusal) => {
-			// The service lists the session store's sessionCookiePolicy to size
-			// its horizon, and it is eager, so the store's provider runs at boot
-			// with it — and with it the refusals of a cookie the store would
-			// otherwise mount: one a browser drops, or a name `cookie` throws on
-			// for every response. Without the service nothing reads the slot,
-			// and the same cookie boots.
-			handleRef = await boot(resolveConfig({ ...BASE_ENV, ...cookie }), true);
-			await handleRef.dispose();
-			handleRef = undefined;
+		"refuses at validation a session cookie no browser keeps, %s, naming session.%s, with or without the subject revocation service",
+		async (_what, key, cookie, refusal) => {
+			for (const grants of [{}, GRANTS_ON]) {
+				const caught = await boot(resolveConfig({ ...BASE_ENV, ...grants, ...cookie }), true).then(
+					async (handle) => {
+						await handle.dispose();
+						return undefined;
+					},
+					(err: unknown) => err,
+				);
+				expect(caught).toMatchObject({
+					name: "BootError",
+					reason: "config-validation-failed",
+					stage: "validateManifests",
+					details: {
+						issues: [expect.objectContaining({ path: ["session", key] })],
+					},
+				});
+				expect(messageChain(caught)).toMatch(refusal);
+			}
+		},
+	);
 
-			const caught = await boot(resolveConfig({ ...BASE_ENV, ...GRANTS_ON, ...cookie }), true).then(
-				async (handle) => {
-					await handle.dispose();
-					return undefined;
-				},
-				(err: unknown) => err,
-			);
-			expect(caught).toMatchObject({ name: "BootError", reason: "provides-factory-failed" });
-			expect(messageChain(caught)).toMatch(refusal);
+	it.each([
+		// `config/application.conf`'s own cookie: `__Host-`, secure, host-only.
+		["the template's default", { SESSION_NAME: undefined, SESSION_SECURE: undefined }],
+		// `.env.example`'s plain-HTTP pair, which `make dev` runs with.
+		[".env.example's", { SESSION_NAME: "auth.sid", SESSION_SECURE: "false" }],
+		// `docker-compose.production.yml` restores the default name, secure.
+		[
+			"the production compose file's",
+			{ SESSION_NAME: "__Host-auth.session", SESSION_SECURE: "true" },
+		],
+		// o3co/auth's `tests/docker-compose.yml`, which the umbrella E2E boots.
+		["the umbrella E2E's", { SESSION_NAME: "auth.session", SESSION_SECURE: "false" }],
+	])(
+		"boots %s session cookie, with or without the subject revocation service",
+		async (_what, cookie) => {
+			const env: Record<string, string> = { ...BASE_ENV };
+			for (const [name, value] of Object.entries(cookie)) {
+				if (value === undefined) delete env[name];
+				else env[name] = value;
+			}
+			for (const grants of [{}, GRANTS_ON]) {
+				handleRef = await boot(resolveConfig({ ...env, ...grants }), true);
+				expect(handleRef.routes.map((r) => r.contribution.id)).toContain("session-middleware");
+				await handleRef.dispose();
+				handleRef = undefined;
+			}
 		},
 	);
 
