@@ -22,14 +22,20 @@
  * - The envelope names one recipient, `mail.to` as written, and the `To`
  *   header carries it alone in angle brackets, written here rather than by
  *   an address parser. A recipient that is not one addr-spec in its
- *   normalised spelling, or that the envelope cannot carry as written (a
- *   quoted local part holding `<` or `>`), is refused before any connection.
+ *   normalised spelling is a `RangeError`; one the transport cannot send to
+ *   as written — a quoted local part holding `<` or `>`, or an address
+ *   beyond ASCII to a relay that does not offer SMTPUTF8 — is `rejected`
+ *   before the envelope is sent.
  * - `tls` is TLS from the first byte; `starttls` requires STARTTLS and sends
  *   nothing more if it fails; `none` is plaintext, and only where the
  *   connected socket's address is loopback. The relay's certificate is
- *   always verified, against the configured host. The account signs in only
- *   once the connection is secured as `secure` says.
- * - Connecting, the greeting and each answer have a deadline.
+ *   always verified, against the configured host, whatever the process
+ *   environment says. The account signs in only once the connection is
+ *   secured as `secure` says.
+ * - The TCP connection, implicit TLS's handshake, the greeting and each
+ *   answer have a deadline, and so does the whole send, which nothing the
+ *   relay sends extends.
+ * - A delivery ends with QUIT; every send ends with its socket destroyed.
  * - A limit is answered `refused_at_limit`; anything else rejects with a
  *   `MailTransportError` (see `failure.mts`). The sender logs nothing.
  */
@@ -48,21 +54,27 @@ import MailComposer from "nodemailer/lib/mail-composer";
 import SMTPConnection from "nodemailer/lib/smtp-connection";
 import { renderStandardMail } from "../render.mjs";
 import type { StandardSmtpMailSenderSettings } from "./config.mjs";
-import { MailTransportError, readSendFailure } from "./failure.mjs";
+import { MailTransportError, readSendFailure, transportCodeOf } from "./failure.mjs";
 
 const SECTION = "standard-smtp-mail-sender";
 
-/** How long a send waits for each step, in milliseconds. */
+/**
+ * How long a send waits, in milliseconds. The whole send has these three
+ * together, however the relay spaces what it sends.
+ */
 export interface SmtpTimeouts {
-	/** For the connection, and implicit TLS's handshake. */
+	/** For the TCP connection; implicit TLS's handshake then has as long again. */
 	readonly connectMs: number;
 	/** For the relay's greeting. */
 	readonly greetingMs: number;
-	/** For any answer once connected. */
+	/** For any answer once connected: the longest silence taken. */
 	readonly idleMs: number;
 }
 
 const TIMEOUTS: SmtpTimeouts = { connectMs: 10_000, greetingMs: 10_000, idleMs: 20_000 };
+
+/** How long a delivered send waits for the relay to answer QUIT before closing anyway. */
+const QUIT_MS = 1_000;
 
 /** What the sender takes from outside its section. */
 export interface StandardSmtpMailSenderDependencies {
@@ -97,24 +109,31 @@ function senderOf(from: string | undefined): { readonly name: string; readonly a
 	return { name: mailbox.name, address: mailbox.address };
 }
 
-/** The account the relay is signed in with, or none: a user and a password together. */
+/**
+ * The account the relay is signed in with, or none: a user and a password
+ * together. An empty password is no password.
+ */
 function credentialsOf(
 	user: string | undefined,
 	password: string | undefined,
 ): { readonly user: string; readonly pass: string } | undefined {
-	if (user === undefined && password === undefined) return undefined;
+	const pass = password === "" ? undefined : password;
+	if (user === undefined && pass === undefined) return undefined;
 	if (user === undefined) throw unsendable("user", "is not set, and a password is");
-	if (password === undefined) throw unsendable("password", "is not set, and a user is");
-	return { user, pass: password };
+	if (pass === undefined) throw unsendable("password", "is not set, and a user is");
+	return { user, pass };
 }
 
 /** Whether a connected socket's peer is on the loopback interface, IPv4-mapped included. */
 const isLoopbackPeer = createTrustedProxyMatcher(["loopback"], { label: SECTION });
 
+/** Whether an address needs SMTPUTF8 (RFC 6531): it holds a character beyond ASCII. */
+const beyondAscii = (address: string): boolean => /[^\p{ASCII}]/u.test(address);
+
 /**
- * `mail.to` as the envelope carries it, or a refusal naming nothing of it:
- * one addr-spec in its normalised spelling, with no angle bracket the
- * transport would refuse or rewrite.
+ * `mail.to` as the envelope carries it: one addr-spec in its normalised
+ * spelling (else a `RangeError`), with no angle bracket, which the transport
+ * refuses in an envelope address (else `rejected`). Neither quotes it.
  */
 function recipientOf(mail: MailSend): string {
 	const to: unknown = mail.to;
@@ -122,8 +141,9 @@ function recipientOf(mail: MailSend): string {
 		throw new RangeError(`${SECTION}: the recipient is not one address in its normalised spelling`);
 	}
 	if (/[<>]/.test(to)) {
-		throw new RangeError(
-			`${SECTION}: the recipient's quoted local part holds an angle bracket, which an SMTP envelope cannot carry as written`,
+		throw new MailTransportError(
+			'the recipient\'s quoted local part holds "<" or ">", which the SMTP transport refuses in an envelope address',
+			"rejected",
 		);
 	}
 	return to;
@@ -149,28 +169,43 @@ async function messageOf(
 	return Buffer.concat([Buffer.from(`To: <${to}>\r\n`), composed]);
 }
 
+/** The socket and the SMTP connection of one send, as far as it got: what its end tears down. */
+interface Attempt {
+	socket?: Socket;
+	connection?: SMTPConnection;
+}
+
 /**
- * A connection to the relay, open within `connectMs`; under `none`, only to
- * a loopback address.
+ * A connection to the relay, open within `connectMs`, kept in `attempt` from
+ * the start; under `none`, only to a loopback address.
  */
 function openConnection(
 	target: { readonly host: string; readonly port: number },
 	plaintext: boolean,
 	connectMs: number,
 	connect: NonNullable<StandardSmtpMailSenderDependencies["connect"]>,
+	attempt: Attempt,
 ): Promise<Socket> {
 	return new Promise((resolve, reject) => {
 		const socket = connect(target);
+		attempt.socket = socket;
 		const fail = (error: MailTransportError): void => {
 			clearTimeout(deadline);
 			socket.removeListener("connect", connected);
 			socket.removeListener("error", refused);
+			socket.removeListener("close", closed);
 			// A late error from the discarded socket is not this send's.
 			socket.on("error", () => {});
 			socket.destroy();
 			reject(error);
 		};
-		const refused = (): void =>
+		const refused = (error: unknown): void =>
+			fail(
+				new MailTransportError("the relay could not be reached", "unreachable", {
+					code: transportCodeOf(error),
+				}),
+			);
+		const closed = (): void =>
 			fail(new MailTransportError("the relay could not be reached", "unreachable"));
 		const connected = (): void => {
 			if (plaintext && !isLoopbackPeer(socket.remoteAddress)) {
@@ -184,6 +219,7 @@ function openConnection(
 			}
 			clearTimeout(deadline);
 			socket.removeListener("error", refused);
+			socket.removeListener("close", closed);
 			resolve(socket);
 		};
 		const deadline = setTimeout(
@@ -191,29 +227,50 @@ function openConnection(
 			connectMs,
 		);
 		socket.once("error", refused);
+		socket.once("close", closed);
 		socket.once("connect", connected);
 	});
 }
 
-/** Greets, signs in where an account is set, and sends one message; closes the connection whatever came of it. */
+/**
+ * Greets, signs in where an account is set, and sends one message: the
+ * send's answer, or the `MailTransportError` it rejects with. An envelope
+ * beyond ASCII goes only to a relay whose EHLO offered SMTPUTF8.
+ */
 function exchange(
 	connection: SMTPConnection,
 	credentials: { readonly user: string; readonly pass: string } | undefined,
 	envelope: { readonly from: string; readonly to: readonly string[] },
 	message: Buffer,
-): Promise<void> {
+): Promise<MailSendResult> {
+	const needsSmtpUtf8 = [envelope.from, ...envelope.to].some(beyondAscii);
 	return new Promise((resolve, reject) => {
 		let settled = false;
 		const finish = (failure?: unknown): void => {
 			if (settled) return;
 			settled = true;
-			connection.close();
-			if (failure === undefined || failure === null) resolve();
-			else reject(failure);
+			if (failure === undefined || failure === null) {
+				resolve({ outcome: "delivered" });
+				return;
+			}
+			const read =
+				failure instanceof MailTransportError
+					? failure
+					: readSendFailure(failure, connection.upgrading === true);
+			if (read === "refused_at_limit") resolve({ outcome: "refused_at_limit" });
+			else reject(read);
 		};
 		connection.on("error", finish);
 		connection.connect((failure) => {
 			if (failure) return finish(failure);
+			if (needsSmtpUtf8 && !/[ -]SMTPUTF8\b/im.test(String(connection.lastServerResponse))) {
+				return finish(
+					new MailTransportError(
+						"the relay does not offer SMTPUTF8, which an address beyond ASCII needs: nothing was sent",
+						"rejected",
+					),
+				);
+			}
 			const deliver = (): void =>
 				connection.send({ from: envelope.from, to: [...envelope.to] }, message, (sent) =>
 					finish(sent ?? undefined),
@@ -221,6 +278,22 @@ function exchange(
 			if (credentials === undefined) return deliver();
 			connection.login({ credentials }, (refused) => (refused ? finish(refused) : deliver()));
 		});
+	});
+}
+
+/** Sends QUIT and waits, `QUIT_MS` at most, for the relay to answer it. */
+function quit(connection: SMTPConnection): Promise<void> {
+	return new Promise((resolve) => {
+		if (connection.destroyed) {
+			resolve();
+			return;
+		}
+		const timer = setTimeout(resolve, QUIT_MS);
+		connection.once("end", () => {
+			clearTimeout(timer);
+			resolve();
+		});
+		connection.quit();
 	});
 }
 
@@ -239,11 +312,48 @@ export function createStandardSmtpMailSender(
 	const sender = senderOf(settings.from);
 	const credentials = credentialsOf(settings.user, settings.password);
 	const timeouts = { ...TIMEOUTS, ...dependencies.timeouts };
+	const wholeMs = timeouts.connectMs + timeouts.greetingMs + timeouts.idleMs;
 	const connect = dependencies.connect ?? ((target) => netConnect(target));
 	const now = dependencies.now ?? Date.now;
 	const tls = {
 		minVersion: "TLSv1.2" as const,
+		rejectUnauthorized: true,
 		...(dependencies.ca === undefined ? {} : { ca: dependencies.ca }),
+	};
+
+	/** One send over one connection, from its opening to its answer. */
+	const converse = async (attempt: Attempt, to: string, message: Buffer) => {
+		const socket = await openConnection(
+			{ host, port },
+			secure === "none",
+			timeouts.connectMs,
+			connect,
+			attempt,
+		);
+		const connection = new SMTPConnection({
+			connection: socket,
+			host,
+			port,
+			secure: secure === "tls",
+			requireTLS: secure === "starttls",
+			ignoreTLS: secure === "none",
+			tls,
+			connectionTimeout: timeouts.connectMs,
+			greetingTimeout: timeouts.greetingMs,
+			socketTimeout: timeouts.idleMs,
+			logger: false,
+			debug: false,
+			transactionLog: false,
+		});
+		attempt.connection = connection;
+		const answer = await exchange(
+			connection,
+			credentials,
+			{ from: sender.address, to: [to] },
+			message,
+		);
+		if (answer.outcome === "delivered") await quit(connection);
+		return answer;
 	};
 
 	return {
@@ -252,35 +362,21 @@ export function createStandardSmtpMailSender(
 			const to = recipientOf(mail);
 			const { subjectLine, text } = renderStandardMail(mail, now());
 			const message = await messageOf(to, sender, subjectLine, text);
-			const socket = await openConnection(
-				{ host, port },
-				secure === "none",
-				timeouts.connectMs,
-				connect,
-			);
-			const connection = new SMTPConnection({
-				connection: socket,
-				host,
-				port,
-				secure: secure === "tls",
-				requireTLS: secure === "starttls",
-				ignoreTLS: secure === "none",
-				tls,
-				connectionTimeout: timeouts.connectMs,
-				greetingTimeout: timeouts.greetingMs,
-				socketTimeout: timeouts.idleMs,
-				logger: false,
-				debug: false,
-				transactionLog: false,
+			const attempt: Attempt = {};
+			let deadline: NodeJS.Timeout | undefined;
+			const expired = new Promise<never>((_, reject) => {
+				deadline = setTimeout(
+					() => reject(new MailTransportError("the send did not finish in time", "timeout")),
+					wholeMs,
+				);
 			});
 			try {
-				await exchange(connection, credentials, { from: sender.address, to: [to] }, message);
-			} catch (failure) {
-				const read = readSendFailure(failure);
-				if (read === "refused_at_limit") return { outcome: "refused_at_limit" };
-				throw read;
+				return await Promise.race([converse(attempt, to, message), expired]);
+			} finally {
+				clearTimeout(deadline);
+				attempt.connection?.close();
+				attempt.socket?.destroy();
 			}
-			return { outcome: "delivered" };
 		},
 	};
 }

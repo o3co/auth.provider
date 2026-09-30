@@ -20,11 +20,11 @@ Standard, replaceable implementations of the duties outside [`auth.provider`](..
 
 ## The SMTP sender
 
-`standardSmtpMailSenderModule` fills the `mailSender` slot with the SMTP sender (kind `standard-smtp`). The sender is built only where something reads the slot: a composition that sends nothing boots with the section as the reference defaults it, and one that sends refuses the boot when the section cannot send — no `host`, no `from` naming one address (alone, or after a display name), or a `user` without a `password` or the other way round — naming the key and its variable, and quoting no value.
+`standardSmtpMailSenderModule` fills the `mailSender` slot with the SMTP sender (kind `standard-smtp`). The sender is built only where something reads the slot: a composition that sends nothing boots with the section as the reference defaults it, and one that sends refuses the boot when the section cannot send — no `host`, no `from` naming one address (alone, or after a display name), or a `user` without a `password` or the other way round (an empty password is none) — naming the key and its variable, and quoting no value.
 
-**Delivery.** Each send is one connection to the relay, over nodemailer's SMTP connection, carrying `renderStandardMail`'s text of the mail from `from`. **One mailbox per send:** the envelope names one recipient, the send's `to` exactly as written, and the `To` header carries it alone in angle brackets, written by the sender rather than by an address parser, so nothing in the address can add or change a recipient. A `to` that is not one address in the spelling core's `normaliseMailAddress` gives it, or whose quoted local part holds `<` or `>`, which the transport would refuse or rewrite, is refused before any connection (a `RangeError` quoting nothing of it). The sender logs nothing, and holds no connection between sends.
+**Delivery.** Each send is one connection to the relay, over nodemailer's SMTP connection, carrying `renderStandardMail`'s text of the mail from `from`. **One mailbox per send:** the envelope names one recipient, the send's `to` exactly as written, and the `To` header carries it alone in angle brackets, written by the sender rather than by an address parser, so nothing in the address can add or change a recipient. A `to` that is not one address in the spelling core's `normaliseMailAddress` gives it is refused before any connection (a `RangeError` quoting nothing of it). So is one whose quoted local part holds `<` or `>`, which nodemailer's SMTP connection refuses in an envelope address and its other paths rewrite (`rejected`). An address beyond ASCII goes only to a relay whose EHLO offers SMTPUTF8 (RFC 6531); to any other it is `rejected` before the envelope is sent. A delivery ends with `QUIT`, and every send, however it ends, with its socket destroyed: the sender logs nothing, and holds no connection between sends.
 
-**TLS.** The relay's certificate is always verified — against the platform's CAs, and those `NODE_EXTRA_CA_CERTS` adds — for the configured `host`.
+**TLS.** The relay's certificate is always verified — against the platform's CAs, and those `NODE_EXTRA_CA_CERTS` adds — for the configured `host`; `NODE_TLS_REJECT_UNAUTHORIZED=0` does not turn it off.
 
 | `secure` | The connection |
 | --- | --- |
@@ -32,7 +32,9 @@ Standard, replaceable implementations of the duties outside [`auth.provider`](..
 | `tls` | TLS from the first byte (port 465, usually) |
 | `none` | Plaintext, taken by the section only to `localhost` or a canonical loopback address; the sender also checks the address the connection reached, and sends nothing unless it is loopback, so a name that resolves elsewhere is refused |
 
-The account signs in only once the connection is secured as `secure` says. Connecting (with implicit TLS's handshake) has 10 seconds, the greeting 10 seconds, and each answer 20 seconds.
+The account signs in only once the connection is secured as `secure` says.
+
+**Deadlines.** The TCP connection has 10 seconds, and implicit TLS's handshake another 10; the greeting has 10 seconds; each answer, 20 seconds of silence at most. The whole send has 40 seconds — the three together — which nothing the relay sends extends, so a relay that trickles a reply byte by byte, before STARTTLS or after it, is given up on too (`timeout`).
 
 **Answers.** What the relay replies to the sender (`MAIL FROM`), the recipient (`RCPT TO`) or the message decides the answer:
 
@@ -42,7 +44,7 @@ The account signs in only once the connection is secured as `secure` says. Conne
 | replies `421`, `450`, `451` or `452` with the enhanced status code (RFC 3463) `4.7.1`, `4.7.28` (mail flood) or `4.5.3` (too many recipients), to the sender, the recipient or the message | resolves `{ outcome: "refused_at_limit" }`: the provider answers `429` |
 | any other reply — a transient one without one of those codes, `4.3.2` or `4.4.5` among them, a reply with no enhanced code, any permanent one — or no answer | rejects with a `MailTransportError`: the provider answers `503` |
 
-A reply at the connection, the greeting, EHLO, STARTTLS or AUTH is never a limit. `MailTransportError`'s `reason` is `unreachable` (no connection the sender may deliver over: the name did not resolve, the connection was refused, closed or turned away, or it could not be secured as `secure` requires), `auth_failed` (the relay refused the account), `rejected` (it refused the sender, the recipient or the message, or put it off with a reply that is not a limit) or `timeout`. Its message names the stage and the reply's codes (`replyCode`, `enhancedCode`), never the reply's text or the transport's, which can quote the recipient, the code or the credentials, and it carries no `cause`.
+A reply at the connection, the greeting, EHLO, STARTTLS or AUTH is never a limit. `MailTransportError`'s `reason` is `unreachable` (no connection the sender may deliver over: the name did not resolve, the connection was refused, reset, closed or turned away, or it could not be secured as `secure` requires — the message says which), `auth_failed` (the relay refused the account), `rejected` (it refused the sender, the recipient or the message, or put it off with a reply that is not a limit; or the recipient is one the transport cannot send to as written) or `timeout`. Its message names the stage, the reply's codes (`replyCode`, `enhancedCode`) and the connection's failure where it is one of `ECONNREFUSED`, `ENOTFOUND`, `EAI_AGAIN`, `EHOSTUNREACH`, `ENETUNREACH` or `ECONNRESET` (`code`), never the reply's text or the transport's, which can quote the recipient, the code or the credentials, and it carries no `cause`.
 
 The rules are pinned against a relay a test scripts ([`smtpSender.test.mts`](src/mail/__tests__/smtpSender.test.mts), [`smtpFailure.test.mts`](src/mail/__tests__/smtpFailure.test.mts)), and the test kit's `mailSenderContract` runs over it and over Mailpit in a container ([`smtpSender.contract.test.mts`](src/mail/__tests__/smtpSender.contract.test.mts), [`smtpSender.mailpit.test.mts`](src/mail/__tests__/smtpSender.mailpit.test.mts)), which needs a container runtime.
 
@@ -54,7 +56,7 @@ One section, the module's and named after it: `standard-smtp-mail-sender`. Boot 
 | `standard-smtp-mail-sender.port` | `STANDARD_SMTP_MAIL_SENDER_PORT` | `587` | 1 to 65535 |
 | `standard-smtp-mail-sender.secure` | `STANDARD_SMTP_MAIL_SENDER_SECURE` | `starttls` | `starttls` (upgrade a plain connection), `tls` (implicit TLS) or `none` — plaintext, taken only to `localhost` or a loopback address written in its canonical form (`127.0.0.1`, `::1`), and refused with no host: another spelling of an address (`127.0.0.08`, `2130706433`) is a name a resolver may send anywhere |
 | `standard-smtp-mail-sender.user` | `STANDARD_SMTP_MAIL_SENDER_USER` | none | The account the relay is signed in with; none, and the sender signs in to nothing. Set with `password` or not at all |
-| `standard-smtp-mail-sender.password` | `STANDARD_SMTP_MAIL_SENDER_PASSWORD` | none | Its password, from the environment |
+| `standard-smtp-mail-sender.password` | `STANDARD_SMTP_MAIL_SENDER_PASSWORD` | none | Its password, from the environment; empty is none |
 | `standard-smtp-mail-sender.from` | `STANDARD_SMTP_MAIL_SENDER_FROM` | none | The sender: one address, alone or after a display name (`Sign-in <no-reply@example.com>`), on one line; the envelope's sender is the address. Required to send |
 
 ## The development sender
@@ -70,7 +72,7 @@ A code in a log line is a secret wherever more than the developer reads the log,
 | [`renderStandardMail`](src/mail/render.mts) | A send's subject line and body at a given time; a `RangeError` that quotes nothing of the send for one it cannot render |
 | [`standardSmtpMailSenderModule`](src/mail/smtp/module.mts) | The SMTP mail sender's module, `standard-smtp-mail-sender`: its section, and the sender over it |
 | [`standardSmtpMailSenderConfigSchema`](src/mail/smtp/config.mts) | The shape and rules of `standard-smtp-mail-sender` |
-| [`MailTransportError`](src/mail/smtp/failure.mts) | What the SMTP sender rejects with: `reason`, `replyCode`, `enhancedCode` |
+| [`MailTransportError`](src/mail/smtp/failure.mts) | What the SMTP sender rejects with: `reason`, `replyCode`, `enhancedCode`, `code` |
 | [`standardDevelopmentMailSenderModule`](src/mail/development/module.mts) | The development sender's module, for the environment the configuration was selected by |
 
 On `@o3co/auth-provider-standard/testing`:

@@ -888,7 +888,8 @@ export async function fullSetOptions(
 			return options.adjust ? options.adjust(stored) : stored;
 		},
 		extraModules: (config) => addedModules(config, features, added, f, interrupt, opened, outage),
-		extraOverrides: (config) => ({ ...options.extraOverrides?.(config), mailSender: mail }),
+		// The caller's own overrides win, its own mail sender included.
+		extraOverrides: (config) => ({ mailSender: mail, ...options.extraOverrides?.(config) }),
 		extraClients: { ...EXTRA_CLIENTS, ...options.extraClients },
 		extraUsers: { ...EXTRA_USERS, ...options.extraUsers },
 	};

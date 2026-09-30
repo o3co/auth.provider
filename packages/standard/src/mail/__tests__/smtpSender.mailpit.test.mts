@@ -30,7 +30,16 @@
  * holds is every mailbox its record of a mail names: the `Received` line's
  * recipient, and its `To`, `Cc` and `Bcc`, where it lists an envelope
  * recipient the headers do not.
+ *
+ * It assumes the container runtime publishes the containers' ports on
+ * loopback, as a local one does: `getHost()` must be `localhost` or a
+ * loopback address, the names the fixture certificate carries and the only
+ * hosts the section takes plaintext to. A container that fails
+ * Testcontainers' port-binding wait is removed and started once more; any
+ * other failure is reported as it is.
  */
+
+import { randomUUID } from "node:crypto";
 
 import { fileURLToPath } from "node:url";
 import type { MailSend, MailSender } from "@o3co/auth-provider-core";
@@ -40,7 +49,12 @@ import {
 	mailSenderContract,
 	type RelayedMail,
 } from "@o3co/auth-provider-test-kit";
-import { GenericContainer, type StartedTestContainer, Wait } from "testcontainers";
+import {
+	GenericContainer,
+	getContainerRuntimeClient,
+	type StartedTestContainer,
+	Wait,
+} from "testcontainers";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { standardSmtpMailSenderConfigSchema } from "#/mail/smtp/config.mjs";
 import { MailTransportError } from "#/mail/smtp/failure.mjs";
@@ -67,9 +81,47 @@ interface Mailpit {
 	readonly api: string;
 }
 
-/** A Mailpit container with `flags`, serving once its API and SMTP server have started. */
+/** The label each start's container carries, so a failed one can be found and removed. */
+const ATTEMPT_LABEL = "o3co.auth-provider.test-mailpit.attempt";
+const PORTS_NOT_BOUND = /while waiting for container ports to be bound/;
+
+/** Force-removes every container, running or not, that carries this attempt's label. */
+async function discardAttempt(label: string): Promise<void> {
+	const { container } = await getContainerRuntimeClient();
+	const found = await container.dockerode.listContainers({
+		all: true,
+		filters: { label: [`${ATTEMPT_LABEL}=${label}`] },
+	});
+	await Promise.all(
+		found.map((info) => container.dockerode.getContainer(info.Id).remove({ force: true, v: true })),
+	);
+}
+
+/**
+ * A Mailpit container with `flags`, serving once its API and SMTP server
+ * have started; started once more, after the failed one is removed, when
+ * the first start misses Testcontainers' port-binding wait.
+ */
 async function startMailpit(flags: readonly string[], certificates: boolean): Promise<Mailpit> {
+	for (let attempt = 1; ; attempt += 1) {
+		const label = randomUUID();
+		try {
+			return await startMailpitOnce(flags, certificates, label);
+		} catch (error) {
+			await discardAttempt(label).catch(() => undefined);
+			if (attempt < 2 && error instanceof Error && PORTS_NOT_BOUND.test(error.message)) continue;
+			throw error;
+		}
+	}
+}
+
+async function startMailpitOnce(
+	flags: readonly string[],
+	certificates: boolean,
+	label: string,
+): Promise<Mailpit> {
 	const container = await new GenericContainer(IMAGE)
+		.withLabels({ [ATTEMPT_LABEL]: label })
 		.withExposedPorts(1025, 8025)
 		.withCopyFilesToContainer(
 			certificates
@@ -102,7 +154,8 @@ let plain: Mailpit;
 let scripted: ScriptedRelay;
 
 beforeAll(async () => {
-	[tls, plain, scripted] = await Promise.all([
+	// Each start is kept as it lands, so afterAll stops what started even when another start failed.
+	const [started, startedPlain, startedScripted] = await Promise.allSettled([
 		startMailpit(
 			[
 				"--smtp-tls-cert",
@@ -117,6 +170,12 @@ beforeAll(async () => {
 		startMailpit([], false),
 		startScriptedRelay({ security: "starttls", auth: true }),
 	]);
+	if (started.status === "fulfilled") tls = started.value;
+	if (startedPlain.status === "fulfilled") plain = startedPlain.value;
+	if (startedScripted.status === "fulfilled") scripted = startedScripted.value;
+	for (const outcome of [started, startedPlain, startedScripted]) {
+		if (outcome.status === "rejected") throw outcome.reason;
+	}
 }, 180_000);
 
 afterAll(async () => {
