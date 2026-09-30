@@ -282,10 +282,12 @@ Configuration is loaded from `config/application.conf` (HOCON format), over the 
    sections they own: `logging`, `http`, `cors`, the key store's
    `oauth.jwt.signingKey` and the shared Redis connection's
    `refreshTokenFamilyStore.redis`. Set a deployment's own value in the two
-   files above, not there. `application.conf` binds `HTTP_PORT`,
-   `HTTP_TRUST_PROXY`, `CORS_ALLOWED_ORIGINS` and
-   `REFRESH_TOKEN_FAMILY_STORE_REDIS_URL` / `_PASSWORD` itself, in its last
-   lines, so each variable wins over a value that file sets. A key neither
+   files above, not there. `config/reference.conf` binds each of these keys'
+   variables beside its default, so a value either file above sets wins over
+   the variable, except for `HTTP_PORT`, `HTTP_TRUST_PROXY`,
+   `CORS_ALLOWED_ORIGINS` and `REFRESH_TOKEN_FAMILY_STORE_REDIS_URL` /
+   `_PASSWORD`, which `application.conf` binds again in its last lines, so
+   each of those wins over a value that file sets above them. A key neither
    file above sets takes its value from here.
 
 It reads the two files above once, under one snapshot of the environment
