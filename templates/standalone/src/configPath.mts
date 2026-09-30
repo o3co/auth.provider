@@ -20,12 +20,12 @@
  * one snapshot of the environment, and what is built from that read: the two
  * phases, `readSwitches` and `resolveForBoot`, and the `logging` module's
  * section the logger is built from, `readLogging` (template README,
- * "Environment-specific config overlay"). So a file or variable changed during startup cannot split
- * a switch phase one reads from the value boot's parse has, which matters
- * because adapter selections have no disagreement guard at boot;
- * `two-phase-config.test.mts` pins this for the shipped environments. A
- * loaded module's own schema may still make something else of a switch at
- * boot.
+ * "Environment-specific config overlay"). So a file or variable changed
+ * during startup cannot split a switch phase one reads from the value boot's
+ * parse has, which matters because adapter selections have no disagreement
+ * guard at boot; `two-phase-config.test.mts` pins this for the shipped
+ * environments. A loaded module's own schema may still make something else of
+ * a switch at boot.
  */
 
 import path from "node:path";

@@ -101,8 +101,9 @@ export function templateReference(): URL {
  * The schemas the template's modules parse their sections with: core's
  * declarations of those paths, which core's schema still mirrors, so each
  * rule (the log levels, the trusted-proxy forms, the serialized-origin rule,
- * the signing-key union, the Redis connection's shape) has one definition. A section refused here refuses the boot naming the operator's
- * path.
+ * the signing-key union, the Redis connection's shape) has one definition. A
+ * section refused here refuses the boot naming the operator's path.
+ * `readLogging` reads the `logging` section before boot with the same schema.
  */
 export const LOGGING_SECTION = CoreConfigSchema.shape.logging.unwrap();
 const HTTP_SECTION = CoreConfigSchema.shape.http.unwrap();
