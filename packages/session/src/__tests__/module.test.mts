@@ -552,7 +552,7 @@ describe("sessionModule — the login throttle reads the deploymentMode slot", (
 			id: string;
 		};
 		return factory({
-			config: { ...base, deployment },
+			config: { ...base, core: { ...base.core, deployment } },
 			deploymentMode,
 			csrfTokenSigner: createTestCsrfTokenSigner(),
 			logger,
@@ -603,7 +603,10 @@ describe("sessionModule — the login throttle reads the deploymentMode slot", (
 			const boot = createTestApp({
 				modules: baseTestModules,
 				bootstrapComponents: {
-					config: { ...base, ...(deployment === undefined ? {} : { deployment }) },
+					config: {
+						...base,
+						...(deployment === undefined ? {} : { core: { ...base.core, deployment } }),
+					},
 					pathResolver: (s: string) => s,
 					logger,
 				} as never,

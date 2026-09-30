@@ -623,7 +623,7 @@ export function assembleApp(
 	{
 		const components = frozen.components as Record<string, unknown>;
 		const config = components.config as
-			| { cors?: { allowedOrigins?: unknown }; oauth?: { jwt?: { jwksPath?: unknown } } }
+			| { cors?: { allowedOrigins?: unknown }; jwks?: { path?: unknown } }
 			| undefined;
 		const fromSlot = Object.hasOwn(components, "httpSettings");
 		const configured = fromSlot ? undefined : config?.cors?.allowedOrigins;

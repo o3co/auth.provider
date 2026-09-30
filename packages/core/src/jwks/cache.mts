@@ -16,7 +16,7 @@
 
 /**
  * Default JWKS `Cache-Control: public, max-age` (seconds) when
- * `oauth.jwt.jwksCacheMaxAge` is unset. Non-zero because JWKS is the
+ * `jwks.cacheMaxAge` is unset. Non-zero because JWKS is the
  * most-polled verifier endpoint; 5 minutes so a rotated key propagates
  * quickly. `max-age` should stay well below the key-overlap window, so a token
  * signed with a newly rotated kid is not rejected longer than the cache
@@ -25,14 +25,13 @@
 export const DEFAULT_JWKS_CACHE_MAX_AGE = 300;
 
 /**
- * Resolves the JWKS `Cache-Control` max-age (seconds). Lenient: the config
- * schema already rejects anything but a non-negative integer, so the default
- * here only catches callers that bypass the schema (hand-built config).
+ * Resolves the JWKS `Cache-Control` max-age (seconds), `jwks.cacheMaxAge`.
+ * Lenient: the module's section schema already rejects anything but a
+ * non-negative integer, so the default here only catches callers that bypass
+ * the schema (hand-built config).
  */
-export const resolveJwksCacheMaxAge = (config: {
-	oauth?: { jwt?: { jwksCacheMaxAge?: unknown } };
-}): number => {
-	const configured = config.oauth?.jwt?.jwksCacheMaxAge;
+export const resolveJwksCacheMaxAge = (config: { jwks?: { cacheMaxAge?: unknown } }): number => {
+	const configured = config.jwks?.cacheMaxAge;
 	return typeof configured === "number" && Number.isInteger(configured) && configured >= 0
 		? configured
 		: DEFAULT_JWKS_CACHE_MAX_AGE;

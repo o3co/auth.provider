@@ -413,7 +413,7 @@ const mfaStandIn = defineModule({
 const multiReplicaConfig = (extra: Record<string, unknown> = {}): AppConfig =>
 	({
 		...makeValidCoreConfig(),
-		deployment: { mode: "multi" },
+		core: { deployment: { mode: "multi" } },
 		...extra,
 	}) as never;
 

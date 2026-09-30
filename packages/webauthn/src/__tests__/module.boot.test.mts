@@ -493,7 +493,12 @@ describe("webauthnConfig from the environment (WEBAUTHN_ORIGIN / WEBAUTHN_TOP_OR
 				noopGrantPolicyModule,
 				activatorModule,
 			],
-			bootstrapComponents: { config, pathResolver: (p: string) => p } as never,
+			// The parse drops what the resolution captured of core's renamed
+			// variables; boot reads them beside the parsed sections.
+			bootstrapComponents: {
+				config: { ...config, "renamed-variables": coreConfig["renamed-variables"] },
+				pathResolver: (p: string) => p,
+			} as never,
 		});
 		const resolved = (handle.components as Record<string, unknown>).webauthnConfig as
 			| WebAuthnConfig

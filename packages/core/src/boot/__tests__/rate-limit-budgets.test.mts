@@ -338,7 +338,7 @@ describe("rateLimitBudgets — no limiter reads them yet", () => {
 		const handle = await createApp({
 			modules: [memoryRateLimiterModule, owner, limiterUser],
 			bootstrapComponents: bootWith({
-				deployment: { mode: "single" },
+				core: { deployment: { mode: "single" } },
 				memoryRateLimiter: {
 					limits: {},
 					defaultLimit: { limit: 60, windowSeconds: 60 },

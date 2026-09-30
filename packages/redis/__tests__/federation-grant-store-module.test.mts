@@ -432,7 +432,7 @@ describe("the Redis federation grant store module", () => {
 			).toThrow(new RangeError(message));
 			const cause = await bootRefusal({
 				federationGrants: { encryptionMode: "allow-plaintext" },
-				deployment: { mode: "multi" },
+				core: { deployment: { mode: "multi" } },
 			});
 			expect(cause).toStrictEqual(new RangeError(message));
 			expect(cause).toBeInstanceOf(RangeError);

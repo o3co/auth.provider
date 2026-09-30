@@ -181,7 +181,7 @@ describe("three-tier HOCON resolution (env → application.conf → reference.co
 	});
 
 	// The shape the umbrella E2E (o3co/auth) boots: the shipped
-	// application.conf, `DEPLOYMENT_MODE=multi`, and one shared ioredis socket.
+	// application.conf, `CORE_DEPLOYMENT_MODE=multi`, and one shared ioredis socket.
 	// A memory denylist under `multi` is refused by the replica-safety guard,
 	// and NO denylist by core's denylist boot guard, so the template has to
 	// land on "redis" without the deployment naming it.
@@ -204,7 +204,7 @@ describe("three-tier HOCON resolution (env → application.conf → reference.co
 
 		it("leaves nothing replica-unsafe under the umbrella E2E's environment", async () => {
 			// The environment `o3co/auth`'s tests/docker-compose.yml sets. Under
-			// `DEPLOYMENT_MODE=multi` the replica-safety guard fails boot naming
+			// `CORE_DEPLOYMENT_MODE=multi` the replica-safety guard fails boot naming
 			// every in-memory shared store, so the denylist has to come out as
 			// the Redis one from the template's own config: the compose file
 			// names no denylist variable. Asked of each manifest, as the guard

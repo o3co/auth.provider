@@ -77,10 +77,16 @@ describe("core's own settings and the JWKS module's, as the template reads them"
 		expect(composition.handle.components.deploymentMode).toBe("single");
 	});
 
-	it("serves the JWKS at the path JWKS_PATH sets, and advertises it as jwks_uri", async () => {
-		const composition = await boot({ CORE_DEPLOYMENT_MODE: "single", JWKS_PATH: "/keys/jwks.json" });
+	it("serves the JWKS at the path JWKS_PATH sets, for the max-age JWKS_CACHE_MAX_AGE sets, and advertises it as jwks_uri", async () => {
+		const composition = await boot({
+			CORE_DEPLOYMENT_MODE: "single",
+			JWKS_PATH: "/keys/jwks.json",
+			JWKS_CACHE_MAX_AGE: "600",
+		});
 
-		expect((await request(composition.app).get("/keys/jwks.json")).status).toBe(200);
+		const jwks = await request(composition.app).get("/keys/jwks.json");
+		expect(jwks.status).toBe(200);
+		expect(jwks.headers["cache-control"]).toBe("public, max-age=600");
 		const discovery = await request(composition.app).get("/.well-known/openid-configuration");
 		expect(discovery.body.jwks_uri).toBe(`${ISSUER}/keys/jwks.json`);
 	});

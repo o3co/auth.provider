@@ -77,14 +77,28 @@ const renaming = (seen?: (section: z.output<typeof RetrySection>) => void) =>
 		},
 	});
 
-/** Core's valid configuration, with `operator` HOCON over `reference`, resolved under `env`. */
+/** What core's own `reference.conf` captures of the variables core's section renamed, none set. */
+const CORE_CAPTURES = makeValidCoreConfig()["renamed-variables"];
+
+/**
+ * Core's valid configuration, with `operator` HOCON over `reference`, resolved
+ * under `env`, beside what core's own `reference.conf` captures.
+ */
 function resolved(
 	env: Record<string, string>,
 	operator = "",
 	reference = REFERENCE,
 ): Record<string, unknown> {
 	const layered = parseString(operator, { env }).withFallback(parseString(reference, { env }));
-	return { ...makeValidCoreConfig(), ...(layered.toObject() as Record<string, unknown>) };
+	const layers = layered.toObject() as Record<string, unknown>;
+	return {
+		...makeValidCoreConfig(),
+		...layers,
+		"renamed-variables": {
+			...CORE_CAPTURES,
+			...(layers["renamed-variables"] as Record<string, unknown> | undefined),
+		},
+	};
 }
 
 const bootstrap = (config: Record<string, unknown>, extra: Record<string, unknown> = {}) =>
@@ -313,7 +327,11 @@ describe("a renamed variable — the capture", () => {
 
 		expect(err.reason).toBe("environment-variable-renamed");
 		expect(err.details).toMatchObject({
-			renamed: [{ state: "uncaptured" }, { state: "uncaptured" }],
+			renamed: [
+				{ module: "core", state: "uncaptured" },
+				{ module: "fixture-renaming", state: "uncaptured" },
+				{ module: "fixture-renaming", state: "uncaptured" },
+			],
 		});
 		expect(err.message).toContain("no configuration");
 		expect(err.message).not.toContain("Layer the reference.conf");
@@ -348,7 +366,7 @@ describe("a renamed variable — the capture", () => {
 			bootstrapComponents: bootstrap({
 				...makeValidCoreConfig(),
 				"fixture-unrelated": { retries: 1 },
-				"renamed-variables": { LEGACY_RETRIES: "5" },
+				"renamed-variables": { ...CORE_CAPTURES, LEGACY_RETRIES: "5" },
 			}),
 		});
 		const config = handle.components.config as unknown as Record<string, unknown>;
@@ -516,14 +534,9 @@ describe("a renamed variable — a key that was removed", () => {
 	});
 });
 
-describe("a renamed variable — core's own section", () => {
-	/** The next move's shape: `deployment.mode` into core's section, `DEPLOYMENT_MODE` renamed with it. */
-	const core = {
-		relocatedFrom: { deployment: "deployment" },
-		renamedVariables: { DEPLOYMENT_MODE: "deployment.mode" },
-	} as const;
+describe("a renamed variable — core's own section, as it ships", () => {
 	const validate = (config: Record<string, unknown>) =>
-		validateManifests({ modules: [], bootstrapComponents: bootstrap(config), core });
+		validateManifests({ modules: [], bootstrapComponents: bootstrap(config) });
 	const refusedBy = (config: Record<string, unknown>): BootError => {
 		try {
 			validate(config);
@@ -578,7 +591,8 @@ describe("a renamed variable — core's own section", () => {
 	});
 
 	it("names core's own reference.conf when the configuration does not capture its names", () => {
-		const err = refusedBy({ ...makeValidCoreConfig() });
+		const { "renamed-variables": _captures, ...uncaptured } = makeValidCoreConfig();
+		const err = refusedBy(uncaptured);
 
 		expect(err.details).toMatchObject({ renamed: [{ module: "core", state: "uncaptured" }] });
 		expect(err.message).toContain("core's own reference.conf");
@@ -826,7 +840,11 @@ describe("a renamed variable — a manifest that declares one boot cannot hold",
 				bootstrapComponents: bootstrap({
 					...makeValidCoreConfig(),
 					"fixture-renaming": { retries: 1 },
-					"renamed-variables": { LEGACY_RETRIES: "5", FIXTURE_RENAMING_RETRIES: null },
+					"renamed-variables": {
+						...CORE_CAPTURES,
+						LEGACY_RETRIES: "5",
+						FIXTURE_RENAMING_RETRIES: null,
+					},
 				}),
 			}),
 		);

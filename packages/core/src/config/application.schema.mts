@@ -38,7 +38,6 @@ const commaList = z.union([z.array(z.string()), z.string()]).transform((value) =
 );
 
 import { checkCanonicalIssuer, describeIssuerRejection } from "../issuer/canonical.mjs";
-import { isValidJwksPath } from "../jwks/path.mjs";
 import { isWellFormedKid, MAX_KID_LENGTH } from "../keys/kid.mjs";
 import {
 	describeWeakSecret,
@@ -229,7 +228,7 @@ const REMOVED_DPOP_FIELDS: readonly RemovedKey[] = [
 			"seen-set private_key_jwt client authentication and WebAuthn record in — and the " +
 			"dpopReplayStore slot is gone. Choose the backend there: redisReplaySeenSetModule " +
 			'shares it across replicas (replaySeenSet.adapter = "redis" in the standalone ' +
-			'template), and deployment.mode = "multi" refuses the memory one.',
+			'template), and core.deployment.mode = "multi" refuses the memory one.',
 	},
 ];
 
@@ -239,8 +238,9 @@ const REMOVED_DPOP_FIELDS: readonly RemovedKey[] = [
  * and `[]` as 0, `true` as 1 and `"1e3"` as 1000: a malformed duration would be
  * normalised (`tombstoneRetention: null` disabling tombstones) instead of
  * failing boot naming the key.
+ * @internal
  */
-const durationFromEnv = (bounds: z.ZodNumber) =>
+export const durationFromEnv = (bounds: z.ZodNumber) =>
 	environmentCoercer(
 		z.preprocess((value) => {
 			if (typeof value === "number") return value;
@@ -267,23 +267,6 @@ const jwtSchemaBase = z.object({
 	// The section of the module that provides `keyStore`; core reads none of it
 	// and ships no default.
 	signingKey: signingKeySchema.optional(),
-	// JWKS publishing path (OIDC `jwks_uri`). Operator-choosable per OIDC
-	// Discovery; defaults to `/.well-known/jwks.json` when unset (applied by
-	// `resolveJwksPath`). Must be an absolute path so the JWKS route and the
-	// advertised `jwks_uri` agree. See `core/src/jwks/path.mts`.
-	jwksPath: z
-		.string()
-		.refine(isValidJwksPath, {
-			message:
-				"oauth.jwt.jwksPath must be an absolute path beginning with '/' with no '//', " +
-				"dot-segments, query/fragment, backslash, percent-encoding, or control characters",
-		})
-		.optional(),
-	// JWKS `Cache-Control: public, max-age=<N>` in seconds (default 300, applied
-	// by `resolveJwksCacheMaxAge`). Keep well below the key-overlap window so a
-	// rotated kid reaches caching verifiers in time (`core/src/jwks/cache.mts`).
-	// Read strictly: an empty variable is refused, not served as `max-age=0`.
-	jwksCacheMaxAge: durationFromEnv(z.number().int().nonnegative()).optional(),
 	// When true, the JWT verifier accepts tokens with no `typ` header and warns.
 	// No schema default: `reference.conf` ships `false` (a typ-less token is a
 	// misconfiguration or downgrade signal); `OAUTH_JWT_LEGACY_TYP_ACCEPT=true`
@@ -924,16 +907,38 @@ export const CoreConfigSchema = z.object({
 				.optional(),
 		),
 	}),
-	// The requirement names a composition expects (session-admission ADR),
-	// compared at the end of boot's stage 4 with what registered, both ways
-	// once written. Required whenever a consumer of admission is installed,
-	// `[]` allowed, and no default anywhere: every composition states its
-	// posture.
-	sessionRequirements: z
+	// Core's own section.
+	core: z
 		.object({
-			expected: z.array(
-				z.string().min(1, { error: "sessionRequirements.expected names each requirement" }),
-			),
+			// How many replicas this deployment runs, read by core alone
+			// (`deployment/mode.mts`): the boot replica-safety guard
+			// (`checkReplicaSafety`) decides by it, and boot fills the
+			// `deploymentMode` slot with it for every module that refuses or warns
+			// by it. Optional with no HOCON literal, because unset is a meaningful
+			// third state:
+			//   - `"multi"`  → boot fails if any in-memory shared store is wired
+			//   - `"single"` → the operator has declared one replica; silent
+			//   - unset      → one consolidated warning naming what is in memory
+			//                  and what it costs when scaled
+			deployment: z
+				.object({
+					mode: z.enum(["single", "multi"]).optional(),
+				})
+				.optional(),
+			// The requirement names a composition expects (session-admission ADR),
+			// compared at the end of boot's stage 4 with what registered, both ways
+			// once written. Required whenever a consumer of admission is installed,
+			// `[]` allowed, and no default anywhere: every composition states its
+			// posture.
+			sessionRequirements: z
+				.object({
+					expected: z.array(
+						z.string().min(1, {
+							error: "core.sessionRequirements.expected names each requirement",
+						}),
+					),
+				})
+				.optional(),
 		})
 		.optional(),
 });
@@ -1343,20 +1348,6 @@ export const fullSectionsSchema = z.object({
 				.optional(),
 		})
 		.optional(),
-	// How many replicas this deployment runs, read by core alone
-	// (`deployment/mode.mts`): the boot replica-safety guard
-	// (`checkReplicaSafety`) decides by it, and boot fills the `deploymentMode`
-	// slot with it for every module that refuses or warns by it. Optional with
-	// no HOCON literal, because unset is a meaningful third state:
-	//   - `"multi"`  → boot fails if any in-memory shared store is wired
-	//   - `"single"` → the operator has declared one replica; silent
-	//   - unset      → one consolidated warning naming what is in memory and
-	//                  what it costs when scaled
-	deployment: z
-		.object({
-			mode: z.enum(["single", "multi"]).optional(),
-		})
-		.optional(),
 	// Adapter for the rate limiter, which serves both the OAuth endpoints and
 	// `/session/login`, so `"redis"` is what makes either safe across replicas.
 	// Default `"memory"` in HOCON. `rateLimit.login` still configures the login
@@ -1397,7 +1388,7 @@ export const fullSectionsSchema = z.object({
 		.optional(),
 	// Adapter for the federation token store (upstream IdP tokens held for a
 	// session); default `"memory"` in HOCON. Memory forks per replica and its
-	// module declares `replicaSafety`, so `deployment.mode = "multi"` refuses it
+	// module declares `replicaSafety`, so `core.deployment.mode = "multi"` refuses it
 	// by name. `"redis"` mounts `redisFederationTokenStoreModule`, configured
 	// under `redisFederationTokenStore`.
 	federationTokenStore: z
@@ -1409,7 +1400,7 @@ export const fullSectionsSchema = z.object({
 	// intent store are installed independently: grants in Redis with
 	// acquisition in memory is a supported single-replica shape (a restart
 	// loses only flows in progress). Both memory modules declare
-	// `replicaSafety` and are refused by name under `deployment.mode = "multi"`;
+	// `replicaSafety` and are refused by name under `core.deployment.mode = "multi"`;
 	// a Redis grant store beside a memory subject revocation is refused by the
 	// routes module. Defaults in `reference.conf`.
 	federationGrantStore: z
@@ -1490,7 +1481,7 @@ export const fullSectionsSchema = z.object({
 	// Adapter for the RFC 7009 access-token denylist; default `"memory"` in
 	// HOCON. Memory forks per replica (a revocation on one leaves the token
 	// working on the others), so `core-access-token-denylist-memory` is in the
-	// replica-safety guard's refused set under `deployment.mode = "multi"`.
+	// replica-safety guard's refused set under `core.deployment.mode = "multi"`.
 	accessTokenDenylist: z
 		.object({
 			adapter: z.enum(["memory", "redis"]).optional(),
@@ -1520,7 +1511,7 @@ export const fullSectionsSchema = z.object({
 		.optional(),
 	// Where consent to a non-first-party client is recorded. `"none"` (the HOCON
 	// default) wires nothing, so such clients are refused; `"memory"` forks per
-	// replica and is refused under `deployment.mode = "multi"`; `"redis"` shares
+	// replica and is refused under `core.deployment.mode = "multi"`; `"redis"` shares
 	// consent records and parked requests across replicas.
 	consentStore: z
 		.object({

@@ -61,8 +61,15 @@ interface VocabularyRow {
 	readonly homeMatches?: number;
 }
 
-/** The one reading of `deployment.mode`; every other module requires the `deploymentMode` slot. */
+/** The one reading of `core.deployment.mode`; every other module requires the `deploymentMode` slot. */
 const DEPLOYMENT_MODE_HOME = "packages/core/src/deployment/mode.mts";
+
+/**
+ * Where core's own section declares the paths it moved from: it names the
+ * section's old path, `deployment`, and the old path of its variable,
+ * `deployment.mode`, and reads neither.
+ */
+const DEPLOYMENT_RELOCATION_HOME = "packages/core/src/config/core-relocations.mts";
 
 // One row per symbol, so the home has to define each of them: an
 // alternation would pass a home that kept one and lost the others. Two rows
@@ -1407,7 +1414,12 @@ function sessionRecordReadSites(): Map<string, SessionRecordRead[]> {
 const DEPLOYMENT_SCHEMA_HOME = "packages/core/src/config/application.schema.mts";
 
 /** The literals that name the section or its key, as a helper or a reflection is handed them. */
-const DEPLOYMENT_NAMES: ReadonlySet<string> = new Set(["deployment", "deployment.mode"]);
+const DEPLOYMENT_NAMES: ReadonlySet<string> = new Set([
+	"deployment",
+	"deployment.mode",
+	"core.deployment",
+	"core.deployment.mode",
+]);
 
 /** The Zod calls whose object argument names a schema's keys. `omit` names a key to drop, and is not one. */
 const SHAPE_BUILDERS: ReadonlySet<string> = new Set([
@@ -1917,6 +1929,7 @@ describe("design-vocabulary map (docs/design-vocabulary.md)", () => {
 			'const m = get(config, "deployment").mode;',
 			'const m = Reflect.get(config, "deployment");',
 			'const m = at(config, "deployment.mode");',
+			'const m = at(config, "core.deployment.mode");',
 			'const m = at(config, ["deployment", "mode"]);',
 			'if ("deployment" in config) use(config);',
 			'type D = AppConfig["deployment"];',
@@ -1980,12 +1993,13 @@ describe("design-vocabulary map (docs/design-vocabulary.md)", () => {
 		expect(scope.some((file) => file.includes("/__tests__/"))).toBe(false);
 	});
 
-	it("reads the deployment section only in its home: every other module requires the deploymentMode slot", () => {
+	it("reads the deployment section only in its home, and names its old paths only where core declares them: every other module requires the deploymentMode slot", () => {
 		const counts = Object.fromEntries(
 			Object.entries(deploymentTouchSites("read")).map(([file, found]) => [file, found.length]),
 		);
 		expect(counts, `require the deploymentMode slot (${DEPLOYMENT_MODE_HOME})`).toEqual({
 			[DEPLOYMENT_MODE_HOME]: 1,
+			[DEPLOYMENT_RELOCATION_HOME]: 2,
 		});
 	});
 

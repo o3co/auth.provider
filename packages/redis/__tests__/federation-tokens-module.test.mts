@@ -377,7 +377,7 @@ describe("every setting the token store is given and cannot use is refused as a 
 			'plaintext under deployment.mode = "multi"',
 			{
 				redisFederationTokenStore: { encryptionMode: "allow-plaintext" },
-				deployment: { mode: "multi" },
+				core: { deployment: { mode: "multi" } },
 			},
 			PLAINTEXT_UNDER_MULTI,
 		],

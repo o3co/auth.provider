@@ -38,7 +38,7 @@ import { BootError } from "./types.mjs";
  * Boot guard for in-process state that must be shared across replicas.
  *
  * Shared/durable stores never silently fall back to memory:
- * `deployment.mode = "multi"` with a replica-unsafe module refuses boot,
+ * `core.deployment.mode = "multi"` with a replica-unsafe module refuses boot,
  * `"single"` is silent, unset warns (see {@link checkReplicaSafety}).
  * Node-local storage (LocalFile/SQLite) is no safe default either: it diverges
  * across replicas and is ephemeral in a container.
@@ -109,7 +109,7 @@ export function replicaUnsafeReason(module: ReplicaSafetyModuleRef): string | un
 export interface CheckReplicaSafetyInput {
 	readonly modules: readonly ReplicaSafetyModuleRef[];
 	/**
-	 * Parsed application config; only `deployment.mode` is read, with
+	 * Parsed application config; only `core.deployment.mode` is read, with
 	 * `deploymentModeOf` — the reading boot fills the `deploymentMode` slot
 	 * with.
 	 */
@@ -118,14 +118,14 @@ export interface CheckReplicaSafetyInput {
 }
 
 /**
- * Composition-root guard for replica-unsafe state, keyed on `deployment.mode`
+ * Composition-root guard for replica-unsafe state, keyed on `core.deployment.mode`
  * as the `deploymentMode` slot holds it:
  *   - `multi`: boot fails naming every offender.
  *   - `single`: silent. Warning here would fire on every local run and train
  *     people to ignore the warning that matters.
  *   - `unset`: one consolidated warning naming each in-memory store and its cost.
  *
- * `deployment.mode` therefore has no HOCON default; one would make the unset
+ * `core.deployment.mode` therefore has no HOCON default; one would make the unset
  * state unreachable. An operator who scales without setting the mode cannot be
  * detected: a process whose state is all in its own memory cannot see peers.
  */
@@ -144,7 +144,7 @@ export function checkReplicaSafety({ modules, config, logger }: CheckReplicaSafe
 		throw new BootError({
 			stage: "validateManifests",
 			reason: "replica-unsafe-adapter",
-			message: `deployment.mode is "multi" but ${offenders.length === 1 ? "an in-memory store is" : `${offenders.length} in-memory stores are`} wired, which cannot be shared across replicas. Wire the Redis-backed equivalents, or set deployment.mode = "single". Offenders — ${reasons.join("; ")}`,
+			message: `core.deployment.mode is "multi" but ${offenders.length === 1 ? "an in-memory store is" : `${offenders.length} in-memory stores are`} wired, which cannot be shared across replicas. Wire the Redis-backed equivalents, or set core.deployment.mode = "single". Offenders — ${reasons.join("; ")}`,
 			details: { reason: "replica-unsafe-adapter", modules: names },
 		});
 	}

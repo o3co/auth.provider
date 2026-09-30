@@ -55,7 +55,7 @@ describe("checkReplicaSafety — multi mode fails closed", () => {
 		expect(() =>
 			checkReplicaSafety({
 				modules: modules("core-session-stores-memory", "oauth"),
-				config: { deployment: { mode: "multi" } },
+				config: { core: { deployment: { mode: "multi" } } },
 				logger: log,
 			}),
 		).toThrow(BootError);
@@ -66,7 +66,7 @@ describe("checkReplicaSafety — multi mode fails closed", () => {
 		try {
 			checkReplicaSafety({
 				modules: modules("core-session-stores-memory", "core-rate-limiter-memory", "oauth"),
-				config: { deployment: { mode: "multi" } },
+				config: { core: { deployment: { mode: "multi" } } },
 				logger: log,
 			});
 			expect.unreachable("should have thrown");
@@ -89,7 +89,7 @@ describe("checkReplicaSafety — multi mode fails closed", () => {
 		expect(() =>
 			checkReplicaSafety({
 				modules: modules("redis-session-stores", "redis-rate-limiter", "oauth"),
-				config: { deployment: { mode: "multi" } },
+				config: { core: { deployment: { mode: "multi" } } },
 				logger: log,
 			}),
 		).not.toThrow();
@@ -119,7 +119,7 @@ describe("checkReplicaSafety — three states", () => {
 		const { logger: log, warn } = logger();
 		checkReplicaSafety({
 			modules: modules("core-session-stores-memory"),
-			config: { deployment: { mode: "single" } },
+			config: { core: { deployment: { mode: "single" } } },
 			logger: log,
 		});
 		expect(warn).not.toHaveBeenCalled();
@@ -161,7 +161,7 @@ describe("checkReplicaSafety — three states", () => {
 		expect(() =>
 			checkReplicaSafety({
 				modules: modules("toString"),
-				config: { deployment: { mode: "multi" } },
+				config: { core: { deployment: { mode: "multi" } } },
 				logger: log,
 			}),
 		).not.toThrow();
@@ -204,7 +204,7 @@ describe("checkReplicaSafety — modules that declare replicaSafety on their man
 		try {
 			checkReplicaSafety({
 				modules: [declaring("standalone-in-memory-session-stores"), ...modules("oauth")],
-				config: { deployment: { mode: "multi" } },
+				config: { core: { deployment: { mode: "multi" } } },
 				logger: log,
 			});
 			expect.unreachable("should have thrown");
@@ -221,7 +221,7 @@ describe("checkReplicaSafety — modules that declare replicaSafety on their man
 		expect(() =>
 			checkReplicaSafety({
 				modules: [declaring("test:holds-state", "authorization codes are not shared")],
-				config: { deployment: { mode: "multi" } },
+				config: { core: { deployment: { mode: "multi" } } },
 				logger: log,
 			}),
 		).toThrow(/test:holds-state: authorization codes are not shared/);
@@ -248,7 +248,7 @@ describe("checkReplicaSafety — modules that declare replicaSafety on their man
 		const { logger: log, warn } = logger();
 		checkReplicaSafety({
 			modules: [declaring("test:holds-state")],
-			config: { deployment: { mode: "single" } },
+			config: { core: { deployment: { mode: "single" } } },
 			logger: log,
 		});
 		expect(warn).not.toHaveBeenCalled();
@@ -263,7 +263,7 @@ describe("checkReplicaSafety — modules that declare replicaSafety on their man
 					declaring("standalone-in-memory-code-repository"),
 					...modules("oauth"),
 				],
-				config: { deployment: { mode: "multi" } },
+				config: { core: { deployment: { mode: "multi" } } },
 				logger: log,
 			});
 			expect.unreachable("should have thrown");
@@ -282,7 +282,7 @@ describe("checkReplicaSafety — modules that declare replicaSafety on their man
 		expect(() =>
 			checkReplicaSafety({
 				modules: [{ name: "redis-federation-token-store" }],
-				config: { deployment: { mode: "multi" } },
+				config: { core: { deployment: { mode: "multi" } } },
 				logger: log,
 			}),
 		).not.toThrow();
@@ -321,7 +321,7 @@ describe("checkReplicaSafety — wired into boot", () => {
 		({
 			config: {
 				...makeValidCoreConfig(),
-				...(mode === undefined ? {} : { deployment: { mode } }),
+				...(mode === undefined ? {} : { core: { deployment: { mode } } }),
 			} as never,
 			pathResolver: (s: string) => s,
 			...(logger === undefined ? {} : { logger }),

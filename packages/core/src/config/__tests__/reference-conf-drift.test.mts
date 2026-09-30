@@ -20,7 +20,11 @@ import { parseFile } from "@o3co/ts.hocon";
 import { describe, expect, it } from "vitest";
 import { overlayConfig, TransitionalConfigSchema } from "#/config/composed.mjs";
 import { CORE_RELOCATIONS } from "#/config/core-relocations.mjs";
+import { coreReference } from "#/config/references.mjs";
 import { RENAMED_VARIABLES_SECTION } from "#/config/removed-keys.mjs";
+import * as coreExports from "#/index.mjs";
+import type { Module } from "#/modules/manifest/module-spec.mjs";
+import { referenceConfProblems } from "#/testing/referenceConf.mjs";
 import { renamedVariableProblems } from "#/testing/renamedVariables.mjs";
 
 /** What core's base makes of `raw`, laid over it: boot's first parse. */
@@ -28,7 +32,8 @@ const parsedByBase = (raw: unknown): unknown =>
 	overlayConfig(raw, TransitionalConfigSchema.parse(raw));
 
 /**
- * Core's `reference.conf` holds only what core's schema declares.
+ * Core's `reference.conf` holds only what core's schema declares, and the
+ * sections of core's own modules that declare it as their reference.
  *
  * Boot's composed parse lays each schema's output over what was written, so
  * nothing strips at boot (`boot/__tests__/composed-parse.test.mts`; across
@@ -38,7 +43,9 @@ const parsedByBase = (raw: unknown): unknown =>
  * core's own schema: resolved and parsed with the transitional base, with
  * nothing laid back over it, any path the file has and the parse lacks is a
  * default core ships that core's schema does not declare — one no reader is
- * sure to see. The captures of the variables core's own section declares
+ * sure to see — unless it lies in the section of one of core's own modules
+ * that declares this file, whose schema holds it instead. The captures of
+ * the variables core's own section declares
  * renamed (`renamed-variables`) are no setting: boot removes them before its
  * parse, and the file captures exactly the names `CORE_RELOCATIONS` declares.
  */
@@ -75,6 +82,21 @@ function collectPaths(tree: unknown, prefix = ""): string[] {
 const isCapture = (path: string): boolean =>
 	path === RENAMED_VARIABLES_SECTION || path.startsWith(`${RENAMED_VARIABLES_SECTION}.`);
 
+/** Core's exported modules that declare core's own `reference.conf` as their section's reference. */
+const CORE_MODULES: readonly Module[] = Object.values(coreExports).filter(
+	(value): value is Module =>
+		typeof value === "object" &&
+		value !== null &&
+		(value as Module).section?.reference?.href === coreReference().href,
+);
+
+/** The top-level sections `CORE_MODULES` read. */
+const CORE_MODULE_SECTIONS: readonly string[] = CORE_MODULES.map((module) => module.name);
+
+/** Whether `path` lies in the section of one of core's own modules. */
+const inCoreModuleSection = (path: string): boolean =>
+	CORE_MODULE_SECTIONS.some((section) => path === section || path.startsWith(`${section}.`));
+
 function hasPath(tree: unknown, path: string): boolean {
 	let cursor: unknown = tree;
 	for (const segment of path.split(".")) {
@@ -96,15 +118,37 @@ describe("core's reference.conf holds only what core's schema declares", () => {
 		expect(paths).toContain("redisFederationTokenStore.keyPrefix");
 	});
 
-	it("ships no path core's schema does not declare", () => {
+	it("ships no path core's schema does not declare, outside its own modules' sections", () => {
 		const stripped = collectPaths(resolved).filter(
-			(path) => !isCapture(path) && !hasPath(parsed, path),
+			(path) => !isCapture(path) && !inCoreModuleSection(path) && !hasPath(parsed, path),
 		);
 		// A path listed here is a section core's `reference.conf` ships that
 		// core's schema does not declare. Declare it where it belongs, or move
 		// the default to the package that owns the section, rather than adding
 		// it to an allowlist here.
 		expect(stripped).toEqual([]);
+	});
+});
+
+describe("core's reference.conf holds the sections of core's own modules to their schemas", () => {
+	it("finds them: the JWKS module's among them (the guard is not vacuous)", () => {
+		expect(CORE_MODULE_SECTIONS).toContain("jwks");
+	});
+
+	it.each([
+		["with no variable set", {}],
+		["with each variable set", { JWKS_PATH: "/keys/jwks.json", JWKS_CACHE_MAX_AGE: "60" }],
+	])("parses each without losing a path, %s", (_label, env) => {
+		const tree = parseFile(REFERENCE_CONF_PATH, {
+			env: { ...REQUIRED_ENV, ...env },
+		}).toObject() as Record<string, unknown>;
+		expect(
+			referenceConfProblems({
+				tree: Object.fromEntries(CORE_MODULE_SECTIONS.map((section) => [section, tree[section]])),
+				reference: coreReference(),
+				modules: CORE_MODULES,
+			}),
+		).toEqual([]);
 	});
 });
 

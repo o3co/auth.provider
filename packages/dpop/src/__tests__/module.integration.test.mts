@@ -394,7 +394,10 @@ describe("dpopModule — integration via createApp", () => {
 			const config = withoutSeenSet.config as unknown as Record<string, unknown>;
 			const boot = {
 				...withoutSeenSet,
-				config: { ...config, ...(mode === undefined ? {} : { deployment: { mode } }) } as never,
+				config: {
+					...config,
+					...(mode === undefined ? {} : { core: { deployment: { mode } } }),
+				} as never,
 			} satisfies BootstrapMap;
 			const refusal = await createApp({ modules: [dpopModule], bootstrapComponents: boot }).then(
 				async (handle) => {
@@ -760,7 +763,7 @@ const bootReplica = async (opts: ReplicaBootOptions) => {
 	const bootstrapComponents = {
 		config: {
 			...base,
-			...(opts.mode === undefined ? {} : { deployment: { mode: opts.mode } }),
+			...(opts.mode === undefined ? {} : { core: { deployment: { mode: opts.mode } } }),
 			oauth: {
 				...base.oauth,
 				dpop: {

@@ -95,7 +95,8 @@ const PREFLIGHT_MAX_AGE_SECONDS = 600;
  */
 export function browserFacingCorsRoutes(
 	config: {
-		oauth?: { jwt?: { jwksPath?: unknown; issuer?: unknown } };
+		jwks?: { path?: unknown };
+		oauth?: { jwt?: { issuer?: unknown } };
 	},
 	/**
 	 * The issuer the discovery paths derive from, when the caller holds it apart

@@ -437,7 +437,7 @@ describe("the development sample key", () => {
 		vi.stubEnv("NODE_ENV", "development");
 		for (const deploymentMode of ["single", "unset"] as const) {
 			expect(
-				readSettings(sample({ deployment: { mode: "multi" } }), {
+				readSettings(sample({ core: { deployment: { mode: "multi" } } }), {
 					environment: "development",
 					deploymentMode,
 				}).developmentSampleKeyAccepted,
@@ -446,7 +446,9 @@ describe("the development sample key", () => {
 		}
 		expect(
 			refusal(() =>
-				readSettings(sample({ deployment: { mode: "single" } }), { deploymentMode: "multi" }),
+				readSettings(sample({ core: { deployment: { mode: "single" } } }), {
+					deploymentMode: "multi",
+				}),
 			),
 		).toContain('deployment.mode is "multi"');
 	});

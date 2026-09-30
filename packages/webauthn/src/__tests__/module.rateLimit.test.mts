@@ -139,7 +139,9 @@ async function bootApp(
 ) {
 	const config = {
 		...makeCoreConfig(failMode),
-		...(deploymentMode === undefined ? {} : { deployment: { mode: deploymentMode } }),
+		...(deploymentMode === undefined
+			? {}
+			: { core: { ...makeCoreConfig().core, deployment: { mode: deploymentMode } } }),
 		...extraConfig,
 	};
 	// With a deployment mode declared, the memory stores this fixture wires
@@ -605,7 +607,7 @@ describe("webauthn authentication/options rate limit — the deploymentMode slot
 			challengeStore: {},
 			challengeCeremony: {},
 			keyStore: {},
-			config: { ...makeCoreConfig(), deployment },
+			config: { ...makeCoreConfig(), core: { deployment } },
 			deploymentMode,
 			logger,
 		};
@@ -670,7 +672,7 @@ describe("webauthn authentication/options rate limit — the deploymentMode slot
 			[defineModule({ name: "test:webauthn-rl-logger-6", provides: { logger: () => logger } })],
 			"open",
 			undefined,
-			{ deployment: {} },
+			{ core: { ...makeCoreConfig().core, deployment: {} } },
 		);
 		expect(logger.warn).toHaveBeenCalledWith(
 			expect.objectContaining({ limit: 7, windowSeconds: 60 }),

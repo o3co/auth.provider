@@ -37,5 +37,12 @@ const frozen = (core: CoreRelocations): CoreRelocations =>
 			: { renamedVariables: Object.freeze(core.renamedVariables) }),
 	});
 
-/** Core's shipped declaration, frozen whole. */
-export const CORE_RELOCATIONS: CoreRelocations = frozen({});
+/**
+ * Core's shipped declaration, frozen whole: the replica count and the
+ * expected session requirements moved into `core`, and `DEPLOYMENT_MODE`
+ * renamed with the first.
+ */
+export const CORE_RELOCATIONS: CoreRelocations = frozen({
+	relocatedFrom: { deployment: "deployment", sessionRequirements: "sessionRequirements" },
+	renamedVariables: { DEPLOYMENT_MODE: "deployment.mode" },
+});

@@ -61,7 +61,7 @@ const deviceGrantStandIn = defineModule({
 const multiReplicaConfig = (extra: Record<string, unknown> = {}) =>
 	({
 		...makeValidCoreConfig(),
-		deployment: { mode: "multi" },
+		core: { deployment: { mode: "multi" } },
 		...extra,
 	}) as never;
 

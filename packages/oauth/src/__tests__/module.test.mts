@@ -572,8 +572,7 @@ describe("oauthModule — the acr table in the served discovery document", () =>
 // advertises `jwks_uri`) by oauth, so an issuer-enabled composition MUST
 // co-install both or discovery publishes a dangling `jwks_uri`. The
 // advertised `jwks_uri` must resolve to a mounted JWKS route, including under
-// an `oauth.jwt.jwksPath` override (both resolve it via the shared
-// `resolveJwksPath`).
+// a `jwks.path` override (both resolve it via the shared `resolveJwksPath`).
 // ---------------------------------------------------------------------------
 
 describe("oauthModule + jwksModule — discovery/JWKS path agreement", () => {
@@ -768,8 +767,8 @@ describe("oauthModule + jwksModule — discovery/JWKS path agreement", () => {
 		await handle.dispose();
 	});
 
-	it("honors oauth.jwt.jwksPath for BOTH the advertised jwks_uri and the mounted route", async () => {
-		const config = issuerConfig({ jwksPath: "/keys/jwks.json" });
+	it("honors jwks.path for BOTH the advertised jwks_uri and the mounted route", async () => {
+		const config = { ...issuerConfig(), jwks: { path: "/keys/jwks.json" } };
 		const handle = await createTestApp({
 			modules: [
 				oauthModule({ config }),

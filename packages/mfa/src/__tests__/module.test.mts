@@ -566,7 +566,7 @@ describe("the development sample key", () => {
 	const mfaFactory = (deploymentMode: DeploymentMode, deployment: Record<string, unknown>) => {
 		const factory = mfaModule({ environment: "development" }).contributes?.sessionRequirements
 			?.mfa as unknown as (deps: unknown) => unknown;
-		const config = { ...sample(), deployment };
+		const config = { ...sample(), core: { deployment } };
 		return factory({
 			config,
 			section: (config as { mfa?: unknown }).mfa,
@@ -608,7 +608,7 @@ describe("the development sample key", () => {
 		async (outcome, _what, deployment) => {
 			const config = {
 				...sample(),
-				...(deployment === undefined ? {} : { deployment }),
+				...(deployment === undefined ? {} : { core: { ...sample().core, deployment } }),
 			} as unknown as AppConfig;
 			const options = { environment: "development" };
 			if (outcome === "refused") {

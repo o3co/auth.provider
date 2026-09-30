@@ -141,7 +141,7 @@ describe.each(STORES)("the $label store's module reads the deploymentMode slot",
 				() =>
 					provide(store.module, store.provided, {
 						...store.client,
-						config: { ...store.plaintext, deployment: { mode: "multi" } },
+						config: { ...store.plaintext, core: { deployment: { mode: "multi" } } },
 						...(deploymentMode === undefined ? {} : { deploymentMode }),
 						logger,
 					}),
@@ -155,7 +155,7 @@ describe.each(STORES)("the $label store's module reads the deploymentMode slot",
 		expect(() =>
 			provide(store.module, store.provided, {
 				...store.client,
-				config: { ...store.plaintext, deployment: { mode: "single" } },
+				config: { ...store.plaintext, core: { deployment: { mode: "single" } } },
 				deploymentMode: "multi",
 				logger,
 			}),
@@ -168,7 +168,7 @@ describe.each(STORES)("the $label store's module reads the deploymentMode slot",
 			const { logger, warn } = recordingLogger();
 			const built = provide(store.module, store.provided, {
 				...store.client,
-				config: { ...store.plaintext, deployment: { mode: "multi" } },
+				config: { ...store.plaintext, core: { deployment: { mode: "multi" } } },
 				deploymentMode,
 				logger,
 			}) as { kind: string };
@@ -190,7 +190,7 @@ describe.each(STORES)("the $label store's module reads the deploymentMode slot",
 					config: {
 						...makeValidCoreConfig(),
 						...store.plaintext,
-						...(deployment === undefined ? {} : { deployment }),
+						...(deployment === undefined ? {} : { core: { deployment } }),
 					},
 					pathResolver: (p: string) => p,
 					logger,
@@ -226,7 +226,7 @@ describe("the grant store's configuration", () => {
 	it("declares no deployment section: the module's parse leaves it to core", () => {
 		const parsed = redisFederationGrantStoreModule.configSchema?.parse({
 			...grants,
-			deployment: { mode: "multi" },
+			core: { deployment: { mode: "multi" } },
 		});
 		expect(parsed).not.toHaveProperty("deployment");
 	});
@@ -237,7 +237,7 @@ describe("the grant store's configuration", () => {
 		);
 		const plaintextUnderMulti = {
 			federationGrants: { encryptionMode: "allow-plaintext" },
-			deployment: { mode: "multi" },
+			core: { deployment: { mode: "multi" } },
 		};
 		const resolve = resolveRedisFederationGrantStoreOptions as (...args: unknown[]) => unknown;
 		expect(() => resolve(plaintextUnderMulti, {})).toThrow(refusal);
@@ -252,7 +252,7 @@ describe("the grant store's configuration", () => {
 	it("hands the plaintext guard the mode it is given, not the configuration's", () => {
 		expect(
 			resolveRedisFederationGrantStoreOptions(
-				{ ...grants, deployment: { mode: "multi" } },
+				{ ...grants, core: { deployment: { mode: "multi" } } },
 				{},
 				"single",
 			).guard,

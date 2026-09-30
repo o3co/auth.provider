@@ -92,7 +92,7 @@ const BASE_ENV: Readonly<Record<string, string>> = {
 	SESSION_NAME: "auth.session",
 	SESSION_STORAGE_TYPE: "memory",
 	CLIENT_USER_TYPE: "yaml",
-	DEPLOYMENT_MODE: "single",
+	CORE_DEPLOYMENT_MODE: "single",
 	OAUTH_CODE_ADAPTER: "memory",
 	ACCESS_TOKEN_DENYLIST_ADAPTER: "memory",
 	REPLAY_SEEN_SET_ADAPTER: "memory",

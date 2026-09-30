@@ -42,6 +42,7 @@ import {
 	memoryRefreshTokenFamilyStoreModule,
 	registerBuiltinKeyStores,
 } from "@o3co/auth-provider-core";
+import { CORE_RELOCATIONS, renamedVariableCaptures } from "@o3co/auth-provider-core/testing";
 import express from "express";
 import request from "supertest";
 import { afterEach, describe, expect, it } from "vitest";
@@ -62,11 +63,16 @@ const PASSWORD = "correct-horse-battery-staple";
 const HTTP = { port: 0, trustProxy: false, readinessTimeoutMs: 1000 };
 
 const config: AppConfig = {
+	// What a resolution under an environment that sets none captures of
+	// core's renamed variables.
+	...{
+		"renamed-variables": renamedVariableCaptures({ modules: [], core: CORE_RELOCATIONS, env: {} }),
+	},
 	http: HTTP,
 	logging: { level: "silent" },
 	// The session requirements this composition expects, as the shipped
 	// `application.conf` does (ADR 2026-09-28-session-admission): none.
-	sessionRequirements: { expected: [] },
+	core: { sessionRequirements: { expected: [] } },
 	oauth: {
 		jwt: {
 			issuer: "https://auth.test",

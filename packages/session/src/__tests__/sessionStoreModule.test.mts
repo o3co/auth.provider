@@ -295,7 +295,7 @@ describe("sessionStoreModuleFor(config) — replica-safety declaration", () => {
 		expect(() =>
 			checkReplicaSafety({
 				modules: [sessionStoreModuleFor(memoryConfig as never)],
-				config: { deployment: { mode: "multi" } },
+				config: { core: { deployment: { mode: "multi" } } },
 			}),
 		).toThrow(
 			expect.objectContaining({
@@ -311,7 +311,7 @@ describe("sessionStoreModuleFor(config) — replica-safety declaration", () => {
 		const logger = { warn, info: vi.fn(), error: vi.fn(), debug: vi.fn() } as never;
 		checkReplicaSafety({
 			modules: [sessionStoreModuleFor(memoryConfig as never)],
-			config: { deployment: { mode: "single" } },
+			config: { core: { deployment: { mode: "single" } } },
 			logger,
 		});
 		expect(warn).not.toHaveBeenCalled();
@@ -330,7 +330,7 @@ describe("sessionStoreModuleFor(config) — replica-safety declaration", () => {
 		expect(() =>
 			checkReplicaSafety({
 				modules: [sessionStoreModuleFor(redisConfig as never)],
-				config: { deployment: { mode: "multi" } },
+				config: { core: { deployment: { mode: "multi" } } },
 			}),
 		).not.toThrow();
 	});
@@ -406,13 +406,13 @@ describe("sessionStoreModule (static manifest) — factory-time refusal under mu
 	it("decides by the slot, whatever the configuration's deployment says", async () => {
 		await expect(
 			factoryOf(sessionStoreModule)({
-				config: { ...memoryConfig, deployment: { mode: "single" } } as never,
+				config: { ...memoryConfig, core: { deployment: { mode: "single" } } } as never,
 				deploymentMode: "multi",
 				lifecycleRegistrar: undefined,
 			} as never),
 		).rejects.toMatchObject({ reason: "replica-unsafe-adapter" });
 		const route = await factoryOf(sessionStoreModule)({
-			config: { ...memoryConfig, deployment: { mode: "multi" } } as never,
+			config: { ...memoryConfig, core: { deployment: { mode: "multi" } } } as never,
 			deploymentMode: "single",
 			lifecycleRegistrar: undefined,
 		} as never);
@@ -434,7 +434,7 @@ describe("sessionStoreModule (static manifest) — factory-time refusal under mu
 					config: {
 						...base,
 						session: { ...base.session, storage: { type: "memory" } },
-						...(deployment === undefined ? {} : { deployment }),
+						...(deployment === undefined ? {} : { core: { ...base.core, deployment } }),
 					},
 					pathResolver: (p: string) => p,
 				} as never,

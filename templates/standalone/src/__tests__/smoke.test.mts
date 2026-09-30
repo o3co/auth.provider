@@ -29,6 +29,7 @@ import {
 	memoryRefreshTokenFamilyStoreModule,
 	registerBuiltinKeyStores,
 } from "@o3co/auth-provider-core";
+import { CORE_RELOCATIONS, renamedVariableCaptures } from "@o3co/auth-provider-core/testing";
 import express from "express";
 import request from "supertest";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -48,12 +49,17 @@ const smokeKeyPair = generateKeyPairSync("ed25519", {
 const HTTP = { port: 0, trustProxy: false, readinessTimeoutMs: 1000 };
 
 const config: AppConfig = {
+	// What a resolution under an environment that sets none captures of
+	// core's renamed variables.
+	...{
+		"renamed-variables": renamedVariableCaptures({ modules: [], core: CORE_RELOCATIONS, env: {} }),
+	},
 	http: HTTP,
 	logging: { level: "silent" },
 	// A composition with a consumer of session admission states what it
 	// expects (ADR 2026-09-28-session-admission): the shipped
 	// `application.conf` expects none, and so does this hand-built config.
-	sessionRequirements: { expected: [] },
+	core: { sessionRequirements: { expected: [] } },
 	oauth: {
 		jwt: {
 			issuer: "https://auth.test",

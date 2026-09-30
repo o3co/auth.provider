@@ -270,7 +270,7 @@ describe("/session/login rate limiting — fallback", () => {
 
 describe("/session/login rate limiting — fallback under the deploymentMode slot", () => {
 	const withDeployment = (mode: "single" | "multi"): AppConfig =>
-		({ ...stubConfig, deployment: { mode } }) as unknown as AppConfig;
+		({ ...stubConfig, core: { deployment: { mode } } }) as unknown as AppConfig;
 
 	const build = (
 		deploymentMode: DeploymentMode,

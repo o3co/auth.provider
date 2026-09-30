@@ -16,7 +16,7 @@
 
 /**
  * The all-modules composition of `all-modules-composition.test.mts` on more
- * than one replica: every shared store on Redis, `deployment.mode = "multi"`,
+ * than one replica: every shared store on Redis, `core.deployment.mode = "multi"`,
  * every module the template can turn on switched on together.
  *
  * With every module on, the all-Redis composition boots with nothing declaring
@@ -141,7 +141,7 @@ const ALL_ON_REDIS_MODULES = [
 	"subject-revocation-service",
 ];
 
-describe('every module on, every shared store on Redis, deployment.mode = "multi"', () => {
+describe('every module on, every shared store on Redis, core.deployment.mode = "multi"', () => {
 	it("lists every module, none declaring replica-unsafe state, and boots", async () => {
 		const modules = composedModules(resolveConfig(MULTI_ENV), MULTI);
 		expect(modules.map((m) => m.name)).toEqual(ALL_ON_REDIS_MODULES);
@@ -167,8 +167,9 @@ describe('every module on, every shared store on Redis, deployment.mode = "multi
 	});
 
 	it("boots as multi on CORE_DEPLOYMENT_MODE=multi alone", async () => {
-		const { DEPLOYMENT_MODE: _old, ...env } = MULTI_ENV;
-		current = await compose({ ...MULTI, env: { ...env, CORE_DEPLOYMENT_MODE: "multi" } });
+		expect(MULTI_ENV).toMatchObject({ CORE_DEPLOYMENT_MODE: "multi" });
+		expect(MULTI_ENV).not.toHaveProperty("DEPLOYMENT_MODE");
+		current = await compose(MULTI);
 		expect(current.handle.components.deploymentMode).toBe("multi");
 	});
 

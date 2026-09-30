@@ -52,7 +52,7 @@ const UNGUARDED_PATHS = ["/oauth/introspect", "/oauth/authorize"] as const;
  */
 function buildApp(
 	allowedOrigins: readonly string[],
-	config: { oauth?: { jwt?: { jwksPath?: unknown } } } = {},
+	config: { jwks?: { path?: unknown } } = {},
 	logger?: { warn: (m: string) => void },
 ): Express {
 	const app = express();
@@ -237,16 +237,10 @@ describe("corsMw — an exact-match allowlist on the browser-facing surface", ()
 			expect(res.headers["access-control-allow-origin"]).toBeUndefined();
 		});
 
-		it("follows oauth.jwt.jwksPath rather than assuming the default", async () => {
-			const app = buildApp([ALLOWED], { oauth: { jwt: { jwksPath: "/keys.json" } } });
+		it("follows jwks.path rather than assuming the default", async () => {
+			const app = buildApp([ALLOWED], { jwks: { path: "/keys.json" } });
 			// The route table is resolved through the same `resolveJwksPath` the
 			// route registration and the advertised `jwks_uri` use.
-			const moved = await request(app).get("/.well-known/jwks.json").set("Origin", ALLOWED);
-			expect(moved.headers["access-control-allow-origin"]).toBeUndefined();
-		});
-
-		it("follows jwks.path rather than assuming the default", async () => {
-			const app = buildApp([ALLOWED], { jwks: { path: "/keys.json" } } as never);
 			const moved = await request(app).get("/.well-known/jwks.json").set("Origin", ALLOWED);
 			expect(moved.headers["access-control-allow-origin"]).toBeUndefined();
 		});
