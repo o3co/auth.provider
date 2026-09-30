@@ -14,6 +14,7 @@
  * limitations under the License.
  */
 
+import { consoleLogger } from "../logging/consoleLogger.mjs";
 import type { Logger } from "../logging/Logger.mjs";
 import { loggableError } from "../logging/loggableError.mjs";
 import type {
@@ -29,6 +30,23 @@ import type { GrantError } from "./types.mjs";
  * can read `grantedAudience` after the scope step has been applied.
  */
 export type GrantPolicyAllow = Extract<GrantPolicyDecision, { outcome: "allow" }>;
+
+/** The `deny` half of a {@link GrantPolicyDecision}. */
+export type GrantPolicyDeny = Extract<GrantPolicyDecision, { outcome: "deny" }>;
+
+/**
+ * A policy's decision as the provider acts on it ({@link readGrantPolicyDecision}):
+ * its `verdict`, `allow` or `deny`, or `invalid` with the answer every caller
+ * gives one.
+ */
+export type GrantPolicyReading =
+	| { readonly verdict: "allow"; readonly decision: GrantPolicyAllow }
+	| { readonly verdict: "deny"; readonly decision: GrantPolicyDeny }
+	| {
+			readonly verdict: "invalid";
+			/** `500 server_error` with a fixed description: nothing the policy returned is quoted. */
+			readonly result: GrantError & { readonly errorDescription: string };
+	  };
 
 /** The scopes a policy's `grantedScope` may reach, and what to call them in a refusal. */
 export interface PolicyScopeCeiling {
@@ -61,16 +79,16 @@ export function policyOutOfBounds(errorDescription: string): GrantError {
  * Logs a grant policy that threw — it could not answer, and the request is
  * refused `503 temporarily_unavailable` — as `grant_policy_unavailable` at
  * error level, with the grant type, the policy's `kind`, the caller's `site`
- * when it is not a token grant, and the error's projection. A policy that
- * calls out to a decision service fails the way a store does, and is answered
- * and logged the same way.
+ * when it is not a token grant, and the error's projection — on core's console
+ * logger when `logger` is absent. A policy that calls out to a decision
+ * service fails the way a store does, and is answered and logged the same way.
  */
 export function logGrantPolicyUnavailable(
 	logger: Pick<Logger, "error"> | undefined,
 	context: { readonly grantType: string; readonly policy: string; readonly site?: string },
 	cause: unknown,
 ): void {
-	logger?.error(
+	(logger ?? consoleLogger).error(
 		{
 			...(context.site !== undefined ? { site: context.site } : {}),
 			grantType: context.grantType,
@@ -81,15 +99,61 @@ export function logGrantPolicyUnavailable(
 	);
 }
 
+/**
+ * The one reading of what a grant policy returned. Only an `outcome` that is
+ * exactly `"allow"` allows, and only one that is exactly `"deny"` refuses;
+ * anything else — another string or case, no `outcome`, a value that is not
+ * an object, an `outcome` that throws when read — is `invalid`, never allow.
+ *
+ * An invalid decision is the deployment's policy at fault, not the caller, and
+ * not an outage: `500 server_error`, as {@link policyOutOfBounds} answers.
+ * It is logged once as `grant_policy_decision_invalid` at error level, with
+ * the grant type, the policy's `kind` and the caller's `site` when it is not
+ * a token grant — never the decision itself — on core's console logger when
+ * `logger` is absent.
+ */
+export function readGrantPolicyDecision(
+	decision: unknown,
+	logger: Pick<Logger, "error"> | undefined,
+	context: { readonly grantType: string; readonly policy: string; readonly site?: string },
+): GrantPolicyReading {
+	const outcome = outcomeOf(decision);
+	if (outcome === "allow") return { verdict: outcome, decision: decision as GrantPolicyAllow };
+	if (outcome === "deny") return { verdict: outcome, decision: decision as GrantPolicyDeny };
+	(logger ?? consoleLogger).error(
+		{
+			...(context.site !== undefined ? { site: context.site } : {}),
+			grantType: context.grantType,
+			policy: context.policy,
+		},
+		"grant_policy_decision_invalid",
+	);
+	return {
+		verdict: "invalid",
+		result: { status: 500, error: "server_error", errorDescription: "policy_decision_invalid" },
+	};
+}
+
+/** `decision.outcome`, read once; `undefined` when there is none to read. */
+function outcomeOf(decision: unknown): unknown {
+	if (typeof decision !== "object" || decision === null) return undefined;
+	try {
+		return (decision as { readonly outcome?: unknown }).outcome;
+	} catch {
+		return undefined;
+	}
+}
+
 /** The rest of {@link evaluateGrantPolicy}'s inputs. */
 export interface EvaluateGrantPolicyOptions {
 	/** A ceiling wider than `effectiveScopes` (the refresh grant's original grant). */
 	readonly scopeCeiling?: PolicyScopeCeiling;
 	/**
-	 * Where a policy that throws is logged (`grant_policy_unavailable`).
-	 * Required as a key, not as a value: a grant that has no logger passes
-	 * `undefined` and says so, and one that forgets fails to compile rather
-	 * than staying silent.
+	 * Where a policy that throws (`grant_policy_unavailable`) or returns an
+	 * invalid decision (`grant_policy_decision_invalid`) is logged. Required
+	 * as a key, not as a value: a grant that has no logger passes `undefined`
+	 * and says so, and one that forgets fails to compile. `undefined` writes
+	 * both lines to core's console logger.
 	 */
 	readonly logger: Pick<Logger, "error"> | undefined;
 }
@@ -103,6 +167,8 @@ export interface EvaluateGrantPolicyOptions {
  *   failing open would grant the pre-policy ceiling the policy exists to
  *   narrow. Logged as `grant_policy_unavailable`
  *   ({@link logGrantPolicyUnavailable}).
+ * - **A decision that is neither `allow` nor `deny` is `500 server_error`**,
+ *   never allow ({@link readGrantPolicyDecision}).
  * - **`deny` is `400` with the policy's own error** and description.
  * - **`grantedScope` may only narrow.** It is checked against the ceiling
  *   (by default `effectiveScopes`, the request already narrowed to every
@@ -127,9 +193,9 @@ export async function evaluateGrantPolicy(
 		scopes: effectiveScopes,
 		name: "requested scope",
 	};
-	let decision: GrantPolicyDecision;
+	let answer: unknown;
 	try {
-		decision = await grantPolicy.evaluate(request, context);
+		answer = await grantPolicy.evaluate(request, context);
 	} catch (err) {
 		logGrantPolicyUnavailable(
 			logger,
@@ -145,16 +211,22 @@ export async function evaluateGrantPolicy(
 			},
 		};
 	}
-	if (decision.outcome === "deny") {
+	const reading = readGrantPolicyDecision(answer, logger, {
+		grantType: request.grantType,
+		policy: grantPolicy.kind,
+	});
+	if (reading.verdict === "invalid") return { ok: false, result: reading.result };
+	if (reading.verdict === "deny") {
 		return {
 			ok: false,
 			result: {
 				status: 400,
-				error: decision.error,
-				errorDescription: decision.errorDescription,
+				error: reading.decision.error,
+				errorDescription: reading.decision.errorDescription,
 			},
 		};
 	}
+	const { decision } = reading;
 	if (decision.grantedScope === undefined) {
 		return { ok: true, scopes: effectiveScopes, decision };
 	}
