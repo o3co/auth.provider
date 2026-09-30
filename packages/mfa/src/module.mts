@@ -19,10 +19,14 @@
  * (installed is on).
  *
  * Requires core's three MFA ports (the name `mfa` is accepted only from a
- * module bound to them), `userSessionStore`, `sessionRequirementResolver` and
- * `deploymentMode` (the development sample key is refused under `multi`, so a
- * mode read as absent must not lift that); reads `auditSink` (absence declared)
- * and `logger`. Nothing forks per replica.
+ * module bound to them), `userSessionStore`, `sessionRequirementResolver`,
+ * `csrfGuard` (every MFA POST runs it), `loginCompletion` (a verified second
+ * factor finishes the login through it) and `deploymentMode` (the development
+ * sample key and the routes' per-process limiter are refused under `multi`,
+ * so a mode read as absent must not lift that); reads `rateLimiter`,
+ * `auditSink` (absence declared) and `logger`. Nothing it keeps forks per
+ * replica; without a shared `rateLimiter` its routes' limiter does, refused
+ * under `multi`, warned about when the mode is unset.
  *
  * Reads its own section, `mfa` — the mode, its settings and the step-up
  * page, `mfa.page.url` — and the deployment mode from the `deploymentMode`
@@ -44,29 +48,38 @@
  * `/session/mfa` POST limits under, for every limiter to read; none when the
  * section gives none.
  *
- * Contributes the `mfa-routes` mount at `/session/mfa`, after the session
- * middleware. Its factory runs after every factor has registered, so it checks
- * the installed factors (`checkInstalledFactors`). The routes themselves are not
- * implemented yet: the mount passes every request through.
+ * Contributes the MFA routes (`routes.mts`) at `/session/mfa`, after the
+ * session middleware. Their factory runs after every factor has registered,
+ * so it checks the installed factors (`checkInstalledFactors`) first.
  */
 
 import {
 	AUDIT_SINK_ABSENCE_POLICY,
+	type AuditSink,
+	BootError,
+	checkDeploymentMode,
 	consoleLogger,
+	createMemoryRateLimiter,
+	createRateLimitGuard,
+	type DeploymentMode,
 	defineModule,
 	isHintToken,
 	type Logger,
 	type MfaFactorResolver,
 	type Module,
+	type RateLimiter,
 	type RateLimitSpec,
 	requireUsableConfiguredRateLimitSpec,
 	type SessionRequirement,
 	type StepUpPage,
 	supportsSecondFactorUpdate,
 } from "@o3co/auth-provider-core";
+import type { RequestHandler } from "express";
 import { type MfaMode, type MfaSettings, mfaSectionSchema, readMfaSettings } from "./config.mjs";
+import { createMfaCoordinator } from "./coordinator.mjs";
 import { mfaRecoveryCodeFactorModule } from "./recovery/module.mjs";
 import { createMfaRequirement, type MfaRequirementMode } from "./requirement.mjs";
+import { createMfaRouter } from "./routes.mjs";
 import { createMfaSealing, type MfaSealing } from "./sealing.mjs";
 import { mfaTotpFactorModule } from "./totp/module.mjs";
 import { createLoginTransactions } from "./transactions.mjs";
@@ -230,8 +243,55 @@ function stepUpPageOf(section: unknown): StepUpPage {
 	return { url, params: {} };
 }
 
-/** A route that answers nothing: every request passes through. */
-const passThrough = (_req: unknown, _res: unknown, next: () => void): void => next();
+/**
+ * The guard every MFA POST runs, under the `mfa` prefix: over the shared
+ * `rateLimiter`, or — with none wired — a per-process limiter over `budget`,
+ * which several replicas would each count apart: refused under `multi`,
+ * said once at warn when the mode is unset.
+ */
+function mfaFloodGuard(options: {
+	readonly rateLimiter: RateLimiter | undefined;
+	readonly budget: RateLimitSpec | null;
+	readonly deploymentMode: DeploymentMode;
+	readonly logger: Logger;
+	readonly auditSink: AuditSink | undefined;
+}): RequestHandler {
+	const { budget, logger, auditSink } = options;
+	let limiter = options.rateLimiter;
+	if (limiter === undefined) {
+		if (budget === null) {
+			throw new RangeError(
+				"mfa.rateLimit.routes is not set and no rateLimiter is wired: the MFA routes would run unlimited (the package's reference.conf ships 60 per 300 s)",
+			);
+		}
+		const replicas = checkDeploymentMode(options.deploymentMode, "mfa routes: deploymentMode");
+		if (replicas === "multi") {
+			throw new BootError({
+				stage: "applyContributions",
+				reason: "replica-unsafe-adapter",
+				message: `core.deployment.mode is "multi" but no shared rateLimiter is wired for the MFA routes: each replica would count ${budget.limit} per ${budget.windowSeconds}s apart, so the limit is really ${budget.limit} times the replicas. Wire a rateLimiter (rateLimiter.adapter = "redis"), or set core.deployment.mode = "single".`,
+				details: { reason: "replica-unsafe-adapter", modules: ["mfa"] },
+			});
+		}
+		if (replicas !== "single") {
+			logger.warn(
+				{ limit: budget.limit, windowSeconds: budget.windowSeconds },
+				"mfa_rate_limiter_not_shared",
+			);
+		}
+		limiter = createMemoryRateLimiter({
+			limits: { [MFA_RATE_LIMIT_PREFIX]: budget },
+			defaultLimit: budget,
+		});
+	}
+	return createRateLimitGuard({
+		limiter,
+		tag: MFA_RATE_LIMIT_PREFIX,
+		logger,
+		...(auditSink === undefined ? {} : { auditSink }),
+		...(budget === null ? {} : { headerFallback: budget }),
+	});
+}
 
 /**
  * The MFA module (see this file's header): the `mfa` session requirement and
@@ -245,8 +305,10 @@ export function mfaModule(options: MfaModuleOptions = {}): Module {
 		| "mfaTransactionStore"
 		| "userSessionStore"
 		| "sessionRequirementResolver"
+		| "csrfGuard"
+		| "loginCompletion"
 		| "deploymentMode",
-		"auditSink" | "logger",
+		"rateLimiter" | "auditSink" | "logger",
 		typeof mfaSectionSchema
 	>({
 		name: "mfa",
@@ -267,9 +329,11 @@ export function mfaModule(options: MfaModuleOptions = {}): Module {
 			"mfaTransactionStore",
 			"userSessionStore",
 			"sessionRequirementResolver",
+			"csrfGuard",
+			"loginCompletion",
 			"deploymentMode",
 		],
-		optional: ["auditSink", "logger"],
+		optional: ["rateLimiter", "auditSink", "logger"],
 		absencePolicies: { auditSink: AUDIT_SINK_ABSENCE_POLICY },
 		contributes: {
 			rateLimitBudgets: {
@@ -328,13 +392,41 @@ export function mfaModule(options: MfaModuleOptions = {}): Module {
 			},
 			routes: [
 				(deps) => {
-					const { mode } = mfaBootState(deps.mfaFactorResolver);
+					const { mode, settings, sealing, logger } = mfaBootState(deps.mfaFactorResolver);
 					checkInstalledFactors(deps.mfaFactorResolver, mode);
 					return {
 						id: MFA_ROUTES_ID,
 						mountPath: MFA_ROUTES_MOUNT_PATH,
 						after: ["session-middleware"],
-						handler: passThrough,
+						handler: createMfaRouter({
+							coordinator: createMfaCoordinator({
+								factors: deps.mfaFactorResolver,
+								factorStore: deps.mfaFactorStore,
+								transactions: deps.mfaTransactionStore,
+								sealing,
+								maxAttemptsPerTransaction: settings.maxAttemptsPerTransaction,
+								mode,
+							}),
+							admission: {
+								userSessionStore: deps.userSessionStore,
+								subjectRevocation: undefined,
+								requirements: deps.sessionRequirementResolver,
+								acrTable: {},
+								logger,
+								auditSink: deps.auditSink,
+							},
+							loginCompletion: deps.loginCompletion,
+							csrfGuard: deps.csrfGuard,
+							floodGuard: mfaFloodGuard({
+								rateLimiter: deps.rateLimiter,
+								budget: routesBudget(deps.section),
+								deploymentMode: deps.deploymentMode,
+								logger,
+								auditSink: deps.auditSink,
+							}),
+							logger,
+							auditSink: deps.auditSink,
+						}),
 					};
 				},
 			],

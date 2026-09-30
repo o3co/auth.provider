@@ -156,6 +156,16 @@ const VOCABULARY: readonly VocabularyRow[] = [
 		definition: /(?:function|const)\s+wellFormedAcr\b/,
 	},
 	{
+		concept: "authentication claims a token may carry — auth_time (the MFA ADR's D18, RFC 9470 §6)",
+		home: "packages/core/src/grants/authenticationClaims.mts",
+		definition: /(?:function|const)\s+wellFormedAuthTime\b/,
+	},
+	{
+		concept: "an authentication instant as the auth_time claim (the MFA ADR's D18)",
+		home: "packages/core/src/grants/authenticationClaims.mts",
+		definition: /(?:function|const)\s+authTimeClaim\b/,
+	},
+	{
 		concept: "the amr a federated login records — fed (#481, the MFA ADR's D13)",
 		home: "packages/core/src/grants/authenticationClaims.mts",
 		definition: /(?:function|const)\s+FEDERATED_AMR\b/,
@@ -477,6 +487,21 @@ const VOCABULARY: readonly VocabularyRow[] = [
 		concept: "an MFA transaction's binding — the bound read (#742)",
 		home: "packages/core/src/mfa/transactionStore.mts",
 		definition: /(?:function|const)\s+getBoundMfaTransaction\b/,
+	},
+	{
+		concept: "an MFA store's answer, read as promised — a reservation (#809)",
+		home: "packages/core/src/mfa/transactionStore.mts",
+		definition: /(?:function|const)\s+readMfaAttemptReservation\b/,
+	},
+	{
+		concept: "an MFA store's answer, read as promised — a consumed transaction (#809)",
+		home: "packages/core/src/mfa/transactionStore.mts",
+		definition: /(?:function|const)\s+isConsumedMfaTransaction\b/,
+	},
+	{
+		concept: "an MFA store's answer, read as promised — a factor's compare-and-set (#809)",
+		home: "packages/core/src/mfa/factorStore.mts",
+		definition: /(?:function|const)\s+isMfaFactorUpdateWritten\b/,
 	},
 	{
 		concept: "core.deployment.mode as core reads it — the deploymentMode slot's value",
@@ -889,6 +914,12 @@ const SESSION_RECORD_READS_ALLOWED: ReadonlyArray<AllowedSessionRecordRead> = [
 		why: "generateIdToken reads its caller's option, which a grant fills with vouchedAmr",
 	},
 	{
+		file: "packages/oauth/src/routes.mts",
+		read: "claims.amr",
+		count: 1,
+		why: "introspection answers the amr claim of an access token this provider signed and verified — a token it vouched for, minted from vouchedAmr, never a session record",
+	},
+	{
 		file: "packages/oauth/src/grants/refreshToken.mts",
 		read: "claims.amr",
 		count: 1,
@@ -898,7 +929,7 @@ const SESSION_RECORD_READS_ALLOWED: ReadonlyArray<AllowedSessionRecordRead> = [
 		file: "packages/oauth/src/grants/refreshToken.mts",
 		read: "...authenticationClaims",
 		count: 2,
-		why: "the amr and acr the presented refresh token carries, read above as claims.amr and wellFormedAcr",
+		why: "the amr, acr and auth_time the presented refresh token carries, read above as claims.amr, wellFormedAcr and wellFormedAuthTime",
 	},
 	{
 		file: "packages/session/src/routes/Federation.mts",

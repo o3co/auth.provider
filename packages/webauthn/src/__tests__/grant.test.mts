@@ -53,6 +53,8 @@ vi.mock("../internal/verification.mjs", () => ({
 	verifyWebAuthnAttestation: vi.fn(),
 }));
 
+import type { WebAuthnConfig } from "#/config.mjs";
+import { createTestWebAuthnConfig } from "#/testing/index.mjs";
 import { createWebAuthnGrant, WEBAUTHN_GRANT_TYPE } from "../grant.mjs";
 import { verifyWebAuthnAssertion } from "../internal/verification.mjs";
 import { webauthnModule } from "../module.mjs";
@@ -107,11 +109,7 @@ function makeBaseDeps(
 ): GrantDependencies & {
 	webauthnCredentialStore: ReturnType<typeof createMemoryWebAuthnCredentialStore>;
 	challengeCeremony: ChallengeCeremony;
-	webauthnConfig: {
-		rpId: string;
-		origin: string[];
-		userVerification: "required" | "preferred" | "discouraged";
-	};
+	webauthnConfig: WebAuthnConfig;
 } {
 	return {
 		config: {
@@ -124,11 +122,7 @@ function makeBaseDeps(
 		keyStore,
 		webauthnCredentialStore: credentialStore,
 		challengeCeremony: ceremony,
-		webauthnConfig: {
-			rpId: "test.example",
-			origin: ["https://test.example"],
-			userVerification: "preferred" as const,
-		},
+		webauthnConfig: createTestWebAuthnConfig(),
 	} as ReturnType<typeof makeBaseDeps>;
 }
 

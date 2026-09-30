@@ -17,6 +17,7 @@ import {
 	type Admission,
 	type AdmissionDeps,
 	admitSession,
+	authTimeClaim,
 	checkResolver,
 	cookieClaim,
 	describeAdmissionOutage,
@@ -162,6 +163,8 @@ export const createSessionGrant = (deps: SessionGrantDeps): GrantHandler => {
 			// (as in the authorization_code grant), never the record's raw `amr`;
 			// an untracked browser session is not a source.
 			const trackedAmr = tracked === null ? undefined : wellFormedAmr(vouchedAmr(tracked));
+			// The primary authentication's time, which a step-up never moves (RFC 9470 §6.1).
+			const trackedAuthTime = tracked === null ? undefined : authTimeClaim(tracked.authTime);
 
 			// The email gate covers every path that mints for a user.
 			// `invalid_grant`, not `access_denied`: RFC 6749 §5.2 does not define
@@ -245,7 +248,11 @@ export const createSessionGrant = (deps: SessionGrantDeps): GrantHandler => {
 					status: 200,
 					tokens: generateTokenResponse({
 						accessToken: await generateToken(
-							{ ...(sid ? { sid } : {}), ...(trackedAmr ? { amr: trackedAmr } : {}) },
+							{
+								...(sid ? { sid } : {}),
+								...(trackedAmr ? { amr: trackedAmr } : {}),
+								...(trackedAuthTime !== undefined ? { auth_time: trackedAuthTime } : {}),
+							},
 							{
 								keyStore,
 								expiresIn: accessTokenExpiresIn,
