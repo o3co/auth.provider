@@ -202,13 +202,20 @@ export type MfaEnrollmentCompleteOutcome =
 			readonly attemptsRemaining: number;
 	  } & MfaCeremonySubject)
 	/**
-	 * Another record stood beside this binding's own once it was written: its
-	 * own was removed — or, `removal`, could not be — and the login starts
-	 * again.
+	 * Once this binding's factor was written, another record stood beside it
+	 * (`first_binding_conflict`), or the records could not be read again to
+	 * tell (`first_binding_unchecked`, with that outage). Its own was removed
+	 * — or, `standing` saying why, still stands after every try — and the
+	 * login starts again.
 	 */
 	| ({
 			readonly outcome: "first_binding_conflict";
-			readonly removal: MfaStoreOutage | undefined;
+			readonly standing: { readonly cause: unknown } | undefined;
+	  } & MfaCeremonySubject)
+	| ({
+			readonly outcome: "first_binding_unchecked";
+			readonly listing: MfaStoreOutage;
+			readonly standing: { readonly cause: unknown } | undefined;
 	  } & MfaCeremonySubject)
 	| ({
 			readonly outcome: "enrolled";

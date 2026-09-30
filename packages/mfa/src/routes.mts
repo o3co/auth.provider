@@ -205,6 +205,15 @@ export function createMfaRouter(options: MfaRoutesOptions): Router {
 		res.status(503).json(MFA_UNAVAILABLE);
 	};
 
+	/**
+	 * A first binding that could not stand and whose factor could not be
+	 * removed: the factor may be a password holder's, so it is said at error
+	 * — the subject and the kind, never the factor's data.
+	 */
+	const factorStanding = (sub: string, kind: string, cause: unknown): void => {
+		logger.error({ sub, kind, err: loggableError(cause) }, "mfa_first_binding_factor_standing");
+	};
+
 	/** A witness mark that failed: once at warn; what it followed stands, and the next login heals it. */
 	const witnessUnwritten = (sub: string, mark: MfaWitnessMark | undefined): void => {
 		if (mark?.outcome !== "unwritten") return;
@@ -550,13 +559,20 @@ export function createMfaRouter(options: MfaRoutesOptions): Router {
 						subject: outcome.subject,
 						ip: call.request.ip,
 						userAgent: call.request.userAgent,
-						details: { kind: outcome.kind },
+						details: { kind: outcome.kind, removed: outcome.standing === undefined },
 					});
-					if (outcome.removal !== undefined) {
-						answerOutage("enrollment", res, outcome.removal);
+					if (outcome.standing !== undefined) {
+						factorStanding(outcome.subject, outcome.kind, outcome.standing.cause);
+						res.status(503).json(MFA_UNAVAILABLE);
 						return;
 					}
 					res.status(401).json(LOGIN_REQUIRED);
+					return;
+				case "first_binding_unchecked":
+					answerOutage("enrollment", res, outcome.listing);
+					if (outcome.standing !== undefined) {
+						factorStanding(outcome.subject, outcome.kind, outcome.standing.cause);
+					}
 					return;
 				case "unavailable":
 				case "unreadable":

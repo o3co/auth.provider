@@ -31,8 +31,9 @@
  *   factor's data, and then, in this order: consumes the transaction, writes
  *   the factor (`binding` `email_proof` when the proof was given, else
  *   `password`), reads the subject's records again — another beside its own
- *   means another transaction bound one at once, so it removes its own and
- *   the login starts again — clears D25's flag where the proof was given,
+ *   means another transaction bound one at once, so it removes its own,
+ *   trying three times, and the login starts again; one it cannot remove is
+ *   reported standing — clears D25's flag where the proof was given,
  *   issues the recovery codes, marks the witness. So at most one first
  *   binding stands, and a lost race spends the transaction, never a factor.
  *   The caller resumes the login.
@@ -68,6 +69,9 @@ const PROOF_REQUIRED = Object.freeze({ outcome: "email_proof_required" as const 
 const UNKNOWN_KIND = Object.freeze({ outcome: "unknown_kind" as const });
 const CLOSED = Object.freeze({ outcome: "first_binding_closed" as const });
 const NO_PENDING = Object.freeze({ outcome: "no_pending_enrollment" as const });
+
+/** How many times a binding that cannot stand tries to remove its own factor before it says the factor stands. */
+const REMOVAL_TRIES = 3;
 const INVALID_LABEL = Object.freeze({ outcome: "invalid_label" as const });
 
 /** A login's first binding over the coordinator's `kit` (see this file's header). */
@@ -129,11 +133,28 @@ export function createMfaEnrollment(kit: MfaCeremonyKit): {
 		return "outcome" in records ? records : records.length === 0;
 	};
 
+	/** This binding's factor `id` removed, tried {@link REMOVAL_TRIES} times: `undefined` once removed, else the last failure. */
+	const removeOwn = async (
+		subject: string,
+		id: string,
+	): Promise<{ readonly cause: unknown } | undefined> => {
+		let standing: { readonly cause: unknown } | undefined;
+		for (let tried = 0; tried < REMOVAL_TRIES; tried++) {
+			try {
+				await factorStore.remove(subject, id);
+				return undefined;
+			} catch (cause) {
+				standing = { cause };
+			}
+		}
+		return standing;
+	};
+
 	/**
 	 * After this binding's factor `id` was written: its own record removed when
 	 * another stands beside it — another transaction bound one at once — or
 	 * when the records cannot be read to tell; `undefined` when it stands
-	 * alone.
+	 * alone. A factor that cannot be removed is reported standing.
 	 */
 	const conflict = async (
 		about: MfaCeremonySubject,
@@ -142,15 +163,11 @@ export function createMfaEnrollment(kit: MfaCeremonyKit): {
 		const records = await kit.recordsOf(about.subject);
 		const alone = !("outcome" in records) && records.every((record) => record.id === id);
 		if (alone) return undefined;
-		let removal: ReturnType<typeof outage> | undefined;
-		try {
-			await factorStore.remove(about.subject, id);
-		} catch (cause) {
-			removal = outage("mfa_factor", "remove", cause);
+		const standing = await removeOwn(about.subject, id);
+		if ("outcome" in records) {
+			return { outcome: "first_binding_unchecked", listing: records, standing, ...about };
 		}
-		// A binding it could not check is an outage; one it saw beside another, a conflict.
-		if ("outcome" in records) return records;
-		return { outcome: "first_binding_conflict", removal, ...about };
+		return { outcome: "first_binding_conflict", standing, ...about };
 	};
 
 	return {
