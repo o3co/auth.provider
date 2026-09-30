@@ -320,6 +320,16 @@ describe("/session/login rate limiting — fallback under the deploymentMode slo
 		expect(warn).toHaveBeenCalledWith(expect.anything(), "login_rate_limiter_not_shared");
 	});
 
+	it("refuses a mode it cannot read, absent included, as a TypeError naming it — a shared limiter wired or not", () => {
+		for (const rateLimiter of [undefined, scriptedLimiter(() => ({ allowed: true }))]) {
+			for (const deploymentMode of [undefined, "MULTI", null]) {
+				expect(build(deploymentMode as never, rateLimiter).router, String(deploymentMode)).toThrow(
+					new TypeError('session routes: deploymentMode must be "single", "multi" or "unset"'),
+				);
+			}
+		}
+	});
+
 	it("decides by the slot, whatever the configuration's deployment says", () => {
 		expect(build("multi", undefined, withDeployment("single")).router).toThrow(
 			expect.objectContaining({ reason: "replica-unsafe-adapter" }),

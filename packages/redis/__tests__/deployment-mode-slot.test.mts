@@ -131,6 +131,22 @@ describe.each(STORES)("the $label store's module reads the deploymentMode slot",
 		expect(store.module.requires).toContain("deploymentMode");
 	});
 
+	it("refuses a slot it cannot read, absent included, as a TypeError naming it", () => {
+		const { logger } = recordingLogger();
+		for (const deploymentMode of [undefined, "MULTI", null, 1]) {
+			expect(
+				() =>
+					provide(store.module, store.provided, {
+						...store.client,
+						config: { ...store.plaintext, deployment: { mode: "multi" } },
+						...(deploymentMode === undefined ? {} : { deploymentMode }),
+						logger,
+					}),
+				String(deploymentMode),
+			).toThrow(TypeError);
+		}
+	});
+
 	it("refuses plaintext when the slot says multi, whatever the configuration's deployment says", () => {
 		const { logger } = recordingLogger();
 		expect(() =>
@@ -210,6 +226,24 @@ describe("the grant store's configuration", () => {
 			deployment: { mode: "multi" },
 		});
 		expect(parsed).not.toHaveProperty("deployment");
+	});
+
+	it("refuses a deployment mode it cannot read — none, MULTI, null, 1 — as a TypeError naming the argument, never building a guard without it", () => {
+		const refusal = new TypeError(
+			'resolveRedisFederationGrantStoreOptions: deploymentMode must be "single", "multi" or "unset"',
+		);
+		const plaintextUnderMulti = {
+			federationGrants: { encryptionMode: "allow-plaintext" },
+			deployment: { mode: "multi" },
+		};
+		const resolve = resolveRedisFederationGrantStoreOptions as (...args: unknown[]) => unknown;
+		expect(() => resolve(plaintextUnderMulti, {})).toThrow(refusal);
+		for (const deploymentMode of ["MULTI", null, 1]) {
+			expect(
+				() => resolve(plaintextUnderMulti, {}, deploymentMode),
+				String(deploymentMode),
+			).toThrow(refusal);
+		}
 	});
 
 	it("hands the plaintext guard the mode it is given, not the configuration's", () => {

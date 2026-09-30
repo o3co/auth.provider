@@ -103,6 +103,7 @@ describe("sessionStoreModule", () => {
 		}
 		const route = await factory({
 			config: baseConfig as never,
+			deploymentMode: "unset",
 			lifecycleRegistrar: undefined,
 		} as never);
 		expect(route.id).toBe("session-middleware");
@@ -118,6 +119,7 @@ describe("sessionStoreModule", () => {
 		if (typeof factory !== "function") throw new Error("not a factory");
 		const route = await factory({
 			config: baseConfig as never,
+			deploymentMode: "unset",
 			lifecycleRegistrar: undefined,
 		} as never);
 		// express middleware signature: (req, res, next) => void; verify it's a 3-arg function.
@@ -132,6 +134,7 @@ describe("sessionStoreModule", () => {
 		const reg = makeRegistrar();
 		const route = await factory({
 			config: baseConfig as never,
+			deploymentMode: "unset",
 			lifecycleRegistrar: reg,
 		} as never);
 		// Route is constructed successfully even with a registrar present; the
@@ -161,6 +164,7 @@ describe("sessionStoreModule", () => {
 					storage: { type: "redis", redis: { url: "redis://localhost:6379" } },
 				},
 			} as never,
+			deploymentMode: "unset",
 			lifecycleRegistrar: makeRegistrar(),
 			readinessRegistrar: { register: (probe: (typeof probes)[number]) => probes.push(probe) },
 		} as never);
@@ -182,6 +186,7 @@ describe("sessionStoreModule", () => {
 					domain: null,
 				},
 			} as never,
+			deploymentMode: "unset",
 			lifecycleRegistrar: undefined,
 		} as never);
 		const app = express();
@@ -212,6 +217,7 @@ describe("sessionStoreModule", () => {
 						domain: null,
 					},
 				} as never,
+				deploymentMode: "unset",
 				lifecycleRegistrar: undefined,
 			} as never),
 		).rejects.toThrow(/__Host-/);
@@ -226,6 +232,7 @@ describe("sessionStoreModule", () => {
 						domain: "example.com",
 					},
 				} as never,
+				deploymentMode: "unset",
 				lifecycleRegistrar: undefined,
 			} as never),
 		).rejects.toThrow(/__Host-/);
@@ -374,6 +381,21 @@ describe("sessionStoreModule (static manifest) — factory-time refusal under mu
 			lifecycleRegistrar: undefined,
 		} as never);
 		expect(route.id).toBe("session-middleware");
+	});
+
+	it("refuses a slot it cannot read, absent included, as a TypeError naming it", async () => {
+		for (const deploymentMode of [undefined, "MULTI", null]) {
+			await expect(
+				factoryOf(sessionStoreModule)({
+					config: redisConfig as never,
+					deploymentMode,
+					lifecycleRegistrar: undefined,
+				} as never),
+				String(deploymentMode),
+			).rejects.toThrow(
+				new TypeError('session-store: deploymentMode must be "single", "multi" or "unset"'),
+			);
+		}
 	});
 
 	it("decides by the slot, whatever the configuration's deployment says", async () => {

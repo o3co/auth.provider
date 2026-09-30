@@ -545,6 +545,14 @@ describe("the development sample key", () => {
 		expect(() => mfaFactory("multi", { mode: "single" })).toThrow(/deployment\.mode is "multi"/);
 	});
 
+	it("refuses a slot it cannot read, absent included, as a TypeError naming it", () => {
+		for (const deploymentMode of [undefined, "MULTI"]) {
+			expect(() => mfaFactory(deploymentMode as never, {}), String(deploymentMode)).toThrow(
+				new TypeError('mfa settings: deploymentMode must be "single", "multi" or "unset"'),
+			);
+		}
+	});
+
 	it("is accepted when the slot says single or unset, whatever the configuration's deployment says", () => {
 		for (const deploymentMode of ["single", "unset"] as const) {
 			expect(mfaFactory(deploymentMode, { mode: "multi" }), deploymentMode).toBeDefined();

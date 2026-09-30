@@ -596,8 +596,10 @@ describe("webauthn authentication/options rate limit — the deploymentMode slot
 		deploymentMode: DeploymentMode,
 		deployment: Record<string, unknown>,
 		logger: Logger,
+		rateLimiter?: RateLimiter,
 	) => {
 		const deps = {
+			...(rateLimiter === undefined ? {} : { rateLimiter }),
 			webauthnConfig: makeWebAuthnConfig(7),
 			webauthnCredentialStore: {},
 			challengeStore: {},
@@ -617,6 +619,21 @@ describe("webauthn authentication/options rate limit — the deploymentMode slot
 
 	it("requires the slot", () => {
 		expect(webauthnModule.requires).toContain("deploymentMode");
+	});
+
+	it("refuses a slot it cannot read, absent included, as a TypeError naming it — a shared limiter wired or not", () => {
+		const shared = createMemoryRateLimiter({
+			limits: {},
+			defaultLimit: { limit: 100, windowSeconds: 60 },
+		});
+		for (const rateLimiter of [undefined, shared]) {
+			for (const deploymentMode of [undefined, "MULTI", null]) {
+				expect(
+					() => buildOptionsRoute(deploymentMode as never, {}, spyLogger(), rateLimiter),
+					String(deploymentMode),
+				).toThrow(new TypeError('webauthn: deploymentMode must be "single", "multi" or "unset"'));
+			}
+		}
 	});
 
 	it('refuses the per-process fallback when the slot says "multi", whatever the configuration\'s deployment says', () => {

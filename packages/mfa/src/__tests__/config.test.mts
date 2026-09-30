@@ -43,10 +43,15 @@ import { createHmac, randomBytes } from "node:crypto";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
 	MFA_DEVELOPMENT_SAMPLE_KEY,
+	type MfaSettingsOptions,
 	mfaConfigSchema,
 	readMfaSettings,
 	readMfaTotpSettings,
 } from "#/config.mjs";
+
+/** `readMfaSettings` under the deployment mode a configuration that states none has, unless `options` names one. */
+const readSettings = (config: unknown, options: Partial<MfaSettingsOptions> = {}) =>
+	readMfaSettings(config, { deploymentMode: "unset", ...options });
 
 const KEY_A = randomBytes(32).toString("base64");
 const KEY_B = randomBytes(32).toString("base64");
@@ -113,7 +118,7 @@ afterEach(() => {
 
 describe("the MFA settings this package reads", () => {
 	it("reads the ring in order — the first seals — the transaction's keys and the lock, and no factor's section", () => {
-		const settings = readMfaSettings(
+		const settings = readSettings(
 			valid({
 				encryptionKeys: [
 					{ id: "k2", key: KEY_B },
@@ -141,7 +146,7 @@ describe("the MFA settings this package reads", () => {
 
 	it("refuses a configuration without an mfa section, naming it", () => {
 		for (const config of [undefined, {}]) {
-			expect(refusal(() => readMfaSettings(config))).toMatch(/^mfa /);
+			expect(refusal(() => readSettings(config))).toMatch(/^mfa /);
 			expect(refusal(() => readMfaTotpSettings(config))).toMatch(/^mfa /);
 		}
 	});
@@ -154,17 +159,17 @@ describe("the MFA settings this package reads", () => {
 
 describe("the key ring", () => {
 	it("refuses an empty ring, naming MFA_ENCRYPTION_KEY", () => {
-		const message = refusal(() => readMfaSettings(valid({ encryptionKeys: [] })));
+		const message = refusal(() => readSettings(valid({ encryptionKeys: [] })));
 		expect(message).toContain("mfa.encryptionKeys");
 		expect(message).toContain("MFA_ENCRYPTION_KEY");
 	});
 
 	it("refuses an entry whose key is not set — the first names MFA_ENCRYPTION_KEY, which feeds it", () => {
-		const first = refusal(() => readMfaSettings(valid({ encryptionKeys: [{ id: "k1" }] })));
+		const first = refusal(() => readSettings(valid({ encryptionKeys: [{ id: "k1" }] })));
 		expect(first).toContain("mfa.encryptionKeys[0].key");
 		expect(first).toContain("MFA_ENCRYPTION_KEY");
 		const second = refusal(() =>
-			readMfaSettings(
+			readSettings(
 				valid({
 					encryptionKeys: [{ id: "k1", key: KEY_A }, { id: "k2" }],
 				}),
@@ -184,9 +189,7 @@ describe("the key ring", () => {
 			randomBytes(32).toString("hex"),
 			"",
 		]) {
-			const message = refusal(() =>
-				readMfaSettings(valid({ encryptionKeys: [{ id: "k1", key }] })),
-			);
+			const message = refusal(() => readSettings(valid({ encryptionKeys: [{ id: "k1", key }] })));
 			expect(message, key).toContain("mfa.encryptionKeys[0].key");
 			expect(message, key).toContain("32 bytes");
 			if (key.trim() !== "") expect(message).not.toContain(key.trim());
@@ -195,7 +198,7 @@ describe("the key ring", () => {
 
 	it("refuses a duplicate id and an id outside the rule, naming the index and never the id", () => {
 		const duplicate = refusal(() =>
-			readMfaSettings(
+			readSettings(
 				valid({
 					encryptionKeys: [
 						{ id: "same-id", key: KEY_A },
@@ -209,7 +212,7 @@ describe("the key ring", () => {
 		expect(duplicate).toContain("index 1");
 		expect(duplicate).not.toContain("same-id");
 		const badId = refusal(() =>
-			readMfaSettings(valid({ encryptionKeys: [{ id: "has space", key: KEY_A }] })),
+			readSettings(valid({ encryptionKeys: [{ id: "has space", key: KEY_A }] })),
 		);
 		expect(badId).toContain("mfa.encryptionKeys");
 		expect(badId).not.toContain("has space");
@@ -218,24 +221,24 @@ describe("the key ring", () => {
 	it("names an entry written without an id by its key's fingerprint: k and 16 characters of HMAC-SHA-256(key, o3co:mfa:key-id), base64url", () => {
 		const fingerprint = (key: string) =>
 			`k${createHmac("sha256", Buffer.from(key, "base64")).update("o3co:mfa:key-id").digest("base64url").slice(0, 16)}`;
-		const ring = readMfaSettings(
+		const ring = readSettings(
 			valid({ encryptionKeys: [{ key: KEY_A }, { id: "named", key: KEY_B }] }),
 		).encryptionKeys;
 		// A written id is honoured; a missing one is the fingerprint.
 		expect(ring.map((entry) => entry.id)).toEqual([fingerprint(KEY_A), "named"]);
 		expect(ring[0]?.id).toMatch(/^k[A-Za-z0-9_-]{16}$/);
 		// The same key is always named the same; another key otherwise.
-		expect(readMfaSettings(valid({ encryptionKeys: [{ key: KEY_A }] })).encryptionKeys[0]?.id).toBe(
+		expect(readSettings(valid({ encryptionKeys: [{ key: KEY_A }] })).encryptionKeys[0]?.id).toBe(
 			fingerprint(KEY_A),
 		);
 		expect(fingerprint(KEY_B)).not.toBe(fingerprint(KEY_A));
 	});
 
 	it("refuses a fingerprint that collides with a written id, and the same key listed twice, as duplicates", () => {
-		const derived = readMfaSettings(valid({ encryptionKeys: [{ key: KEY_A }] })).encryptionKeys[0]
+		const derived = readSettings(valid({ encryptionKeys: [{ key: KEY_A }] })).encryptionKeys[0]
 			?.id as string;
 		const collision = refusal(() =>
-			readMfaSettings(
+			readSettings(
 				valid({
 					encryptionKeys: [{ id: derived, key: KEY_B }, { key: KEY_A }],
 				}),
@@ -245,13 +248,13 @@ describe("the key ring", () => {
 		expect(collision).toContain("index 1");
 		expect(collision).not.toContain(derived);
 		expect(
-			refusal(() => readMfaSettings(valid({ encryptionKeys: [{ key: KEY_A }, { key: KEY_A }] }))),
+			refusal(() => readSettings(valid({ encryptionKeys: [{ key: KEY_A }, { key: KEY_A }] }))),
 		).toContain("duplicate");
 	});
 
 	it("refuses one key under two written ids — one AES key cannot be two rotation generations — naming the later entry and quoting neither key nor id", () => {
 		const message = refusal(() =>
-			readMfaSettings(
+			readSettings(
 				valid({
 					encryptionKeys: [
 						{ id: "gen-old", key: KEY_A },
@@ -269,7 +272,7 @@ describe("the key ring", () => {
 		}
 		// Two keys of their own, under two ids, are two generations.
 		expect(
-			readMfaSettings(
+			readSettings(
 				valid({
 					encryptionKeys: [
 						{ id: "gen-old", key: KEY_A },
@@ -288,7 +291,7 @@ describe("the key ring", () => {
 			[{ id: 1, key: KEY_A }],
 			[{ id: "k1", key: 1 }],
 		]) {
-			const message = refusal(() => readMfaSettings(valid({ encryptionKeys })));
+			const message = refusal(() => readSettings(valid({ encryptionKeys })));
 			expect(message, JSON.stringify(encryptionKeys)).toContain("mfa.encryptionKeys");
 			expect(message).not.toContain(KEY_A);
 		}
@@ -321,7 +324,7 @@ describe("the development sample key", () => {
 	it("is accepted in development: an environment and NODE_ENV that are neither production nor staging, one replica", () => {
 		vi.stubEnv("NODE_ENV", "development");
 		for (const environment of [undefined, "development", "test", "local"]) {
-			const settings = readMfaSettings(sample(), environment === undefined ? {} : { environment });
+			const settings = readSettings(sample(), environment === undefined ? {} : { environment });
 			expect(settings.encryptionKeys[0]?.id, String(environment)).toBe("sample");
 		}
 	});
@@ -329,7 +332,7 @@ describe("the development sample key", () => {
 	it("is refused where the configuration was selected as production or staging", () => {
 		vi.stubEnv("NODE_ENV", "development");
 		for (const environment of ["production", "staging"]) {
-			const message = refusal(() => readMfaSettings(sample(), { environment }));
+			const message = refusal(() => readSettings(sample(), { environment }));
 			expect(message).toContain("mfa.encryptionKeys[0].key");
 			expect(message).toContain("sample key");
 			expect(message).toContain(`the environment is "${environment}"`);
@@ -342,7 +345,7 @@ describe("the development sample key", () => {
 		for (const nodeEnv of ["production", "staging"]) {
 			vi.stubEnv("NODE_ENV", nodeEnv);
 			for (const options of [{}, { environment: "development" }]) {
-				const message = refusal(() => readMfaSettings(sample(), options));
+				const message = refusal(() => readSettings(sample(), options));
 				expect(message).toContain(`the environment is "${nodeEnv}"`);
 			}
 		}
@@ -358,7 +361,7 @@ describe("the development sample key", () => {
 			"STAGING",
 			"\tstaging ",
 		]) {
-			const message = refusal(() => readMfaSettings(sample(), { environment }));
+			const message = refusal(() => readSettings(sample(), { environment }));
 			expect(message, JSON.stringify(environment)).toMatch(
 				/sample key.*the environment is "(production|staging)"/,
 			);
@@ -366,7 +369,7 @@ describe("the development sample key", () => {
 		for (const nodeEnv of ["Production", " staging\n"]) {
 			vi.stubEnv("NODE_ENV", nodeEnv);
 			expect(
-				refusal(() => readMfaSettings(sample())),
+				refusal(() => readSettings(sample())),
 				JSON.stringify(nodeEnv),
 			).toMatch(/the environment is "(production|staging)"/);
 		}
@@ -374,29 +377,42 @@ describe("the development sample key", () => {
 
 	it("says it was accepted, wherever it sits in the ring, so the MFA module can say so at boot", () => {
 		vi.stubEnv("NODE_ENV", "development");
-		expect(readMfaSettings(sample()).developmentSampleKeyAccepted).toBe(true);
-		expect(readMfaSettings(sample({}, true)).developmentSampleKeyAccepted).toBe(true);
-		expect(readMfaSettings(valid()).developmentSampleKeyAccepted).toBe(false);
+		expect(readSettings(sample()).developmentSampleKeyAccepted).toBe(true);
+		expect(readSettings(sample({}, true)).developmentSampleKeyAccepted).toBe(true);
+		expect(readSettings(valid()).developmentSampleKeyAccepted).toBe(false);
 	});
 
 	it("is accepted where the environment is named prod: an alias does not count as production", () => {
 		vi.stubEnv("NODE_ENV", "development");
-		expect(readMfaSettings(sample(), { environment: "prod" }).encryptionKeys).toHaveLength(1);
+		expect(readSettings(sample(), { environment: "prod" }).encryptionKeys).toHaveLength(1);
 	});
 
 	it('is refused when the deployment mode is "multi", in any environment', () => {
 		vi.stubEnv("NODE_ENV", "development");
 		const message = refusal(() =>
-			readMfaSettings(sample(), { environment: "development", deploymentMode: "multi" }),
+			readSettings(sample(), { environment: "development", deploymentMode: "multi" }),
 		);
 		expect(message).toContain('deployment.mode is "multi"');
+	});
+
+	it("refuses a deployment mode it cannot read, absent included, as a TypeError naming it", () => {
+		for (const deploymentMode of [undefined, null, "MULTI", 1]) {
+			expect(
+				() =>
+					readMfaSettings(valid(), {
+						environment: "development",
+						deploymentMode: deploymentMode as never,
+					}),
+				String(deploymentMode),
+			).toThrow(new TypeError('mfa settings: deploymentMode must be "single", "multi" or "unset"'));
+		}
 	});
 
 	it("reads the deployment mode it is given, not the configuration's deployment section", () => {
 		vi.stubEnv("NODE_ENV", "development");
 		for (const deploymentMode of ["single", "unset"] as const) {
 			expect(
-				readMfaSettings(sample({ deployment: { mode: "multi" } }), {
+				readSettings(sample({ deployment: { mode: "multi" } }), {
 					environment: "development",
 					deploymentMode,
 				}).developmentSampleKeyAccepted,
@@ -405,14 +421,14 @@ describe("the development sample key", () => {
 		}
 		expect(
 			refusal(() =>
-				readMfaSettings(sample({ deployment: { mode: "single" } }), { deploymentMode: "multi" }),
+				readSettings(sample({ deployment: { mode: "single" } }), { deploymentMode: "multi" }),
 			),
 		).toContain('deployment.mode is "multi"');
 	});
 
 	it("is refused wherever it sits in the ring, since every key opens", () => {
 		vi.stubEnv("NODE_ENV", "development");
-		const message = refusal(() => readMfaSettings(sample({}, true), { environment: "production" }));
+		const message = refusal(() => readSettings(sample({}, true), { environment: "production" }));
 		expect(message).toContain("mfa.encryptionKeys[1].key");
 	});
 });
@@ -563,7 +579,7 @@ describe("the TOTP factor's parameters", () => {
 			{ ...withTotp({}), oauth: noHost },
 			valid({ factors: undefined }),
 		]) {
-			const settings = readMfaSettings(config);
+			const settings = readSettings(config);
 			expect(settings, JSON.stringify(config.mfa)).not.toHaveProperty("totp");
 			expect(settings.encryptionKeys).toHaveLength(1);
 		}
@@ -573,12 +589,12 @@ describe("the TOTP factor's parameters", () => {
 describe("the transaction's life and attempts, and the lock", () => {
 	it("holds mfa.transactionTtlSeconds to 60-1800 seconds, a whole number", () => {
 		for (const value of [60, 600, 1800]) {
-			expect(readMfaSettings(valid({ transactionTtlSeconds: value })).transactionTtlSeconds).toBe(
+			expect(readSettings(valid({ transactionTtlSeconds: value })).transactionTtlSeconds).toBe(
 				value,
 			);
 		}
 		for (const value of [59, 1801, 0, -600, 600.5, "600", null, undefined]) {
-			const message = refusal(() => readMfaSettings(valid({ transactionTtlSeconds: value })));
+			const message = refusal(() => readSettings(valid({ transactionTtlSeconds: value })));
 			expect(message, String(value)).toContain("mfa.transactionTtlSeconds");
 			expect(message, String(value)).toContain("60 to 1800 seconds");
 		}
@@ -587,11 +603,11 @@ describe("the transaction's life and attempts, and the lock", () => {
 	it("holds mfa.maxAttemptsPerTransaction to 1-10, a whole number (the owner's bound; the ADR states none)", () => {
 		for (const value of [1, 5, 10]) {
 			expect(
-				readMfaSettings(valid({ maxAttemptsPerTransaction: value })).maxAttemptsPerTransaction,
+				readSettings(valid({ maxAttemptsPerTransaction: value })).maxAttemptsPerTransaction,
 			).toBe(value);
 		}
 		for (const value of [0, 11, 100, -1, 1.5, "5", null, undefined, Number.MAX_SAFE_INTEGER + 1]) {
-			const message = refusal(() => readMfaSettings(valid({ maxAttemptsPerTransaction: value })));
+			const message = refusal(() => readSettings(valid({ maxAttemptsPerTransaction: value })));
 			expect(message, String(value)).toContain("mfa.maxAttemptsPerTransaction");
 			expect(message, String(value)).toContain("1 to 10");
 		}
@@ -609,7 +625,7 @@ describe("the transaction's life and attempts, and the lock", () => {
 			[{ ...LOCKOUT, trustedBrowserDays: undefined }, "mfa.lockout.trustedBrowserDays"],
 		] as const) {
 			expect(
-				refusal(() => readMfaSettings(valid({ lockout }))),
+				refusal(() => readSettings(valid({ lockout }))),
 				JSON.stringify(lockout),
 			).toContain(field);
 		}
@@ -617,7 +633,7 @@ describe("the transaction's life and attempts, and the lock", () => {
 
 	it("refuses a configuration without the lock's section, naming the reference.conf that carries it", () => {
 		const { lockout: _lockout, ...withoutLockout } = valid().mfa as Record<string, unknown>;
-		const message = refusal(() => readMfaSettings({ ...valid(), mfa: withoutLockout }));
+		const message = refusal(() => readSettings({ ...valid(), mfa: withoutLockout }));
 		expect(message).toContain("mfa.lockout");
 		expect(message).toContain("@o3co/auth-provider-mfa/reference.conf");
 	});
