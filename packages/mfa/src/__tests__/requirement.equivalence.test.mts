@@ -92,6 +92,7 @@ const SESSIONS: Readonly<Record<(typeof SESSION_SITUATIONS)[number], UserSession
 		upstreamAmr: undefined,
 		mfaAt: minutesAgo(1),
 	}),
+	"pwd, stale": { ...password(), authTime: minutesAgo(24 * 60) },
 };
 
 const CODE: Readonly<Record<RequirementVerdict["outcome"], string>> = {
