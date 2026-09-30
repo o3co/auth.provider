@@ -24,8 +24,11 @@
  * answers `null` when `webauthn-mfa-factor.enabled` is false, which leaves
  * the kind claimed and absent from the resolver. The relying party is taken
  * when wired: off, the module boots without it; on without it, the factory
- * refuses, naming the slot and the keys it is built from. Stateless: nothing
- * forks per replica.
+ * refuses, naming the slot and the keys it is built from. Installed while the
+ * relying party has `allowCredentialsForKnownUser` on, on or off, the factory
+ * refuses: a second factor's credential that returns no user handle could
+ * then sign its owner in, through the grant, as another account that
+ * registered it. Stateless: nothing forks per replica.
  */
 
 import { defineModule } from "@o3co/auth-provider-core";
@@ -45,6 +48,16 @@ export const webauthnMfaFactorModule = defineModule({
 	contributes: {
 		mfaFactors: {
 			[WEBAUTHN_MFA_FACTOR_KIND]: ({ webauthnConfig, section }) => {
+				if (webauthnConfig?.allowCredentialsForKnownUser === true) {
+					throw new Error(
+						"webauthnMfaFactorModule: webauthn.allowCredentialsForKnownUser " +
+							"(WEBAUTHN_ALLOW_CREDENTIALS_FOR_KNOWN_USER) is on while the WebAuthn second " +
+							"factor is installed. With both, a second factor's credential that returns no " +
+							"user handle can be registered by another account as its passkey, and then sign " +
+							"its owner in as that account through the passwordless grant. Turn " +
+							"allowCredentialsForKnownUser off, or remove webauthnMfaFactorModule.",
+					);
+				}
 				if (!section.enabled) return null;
 				if (webauthnConfig === undefined) {
 					throw new Error(

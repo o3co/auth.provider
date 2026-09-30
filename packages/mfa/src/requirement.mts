@@ -38,10 +38,14 @@
  *
  * `admitPrimary` interrupts a password login for a second factor when the subject
  * has any factor record: a record it cannot use is never "none", and a `list`
- * that cannot answer throws, which admission answers `unavailable`. With no
- * records, `optional` establishes and `required` interrupts for a first binding
- * offering the counting factors the user may enroll. Other primaries establish
- * without a read: the baseline applies after `pwd` only.
+ * that cannot answer throws, which admission answers `unavailable`. When no
+ * record that may count stands, the login's `User` must not say the subject
+ * enrolled: a witness `true` or malformed is recorded and thrown, under either
+ * mode (D12). With no records, `optional` establishes and `required` interrupts
+ * for a first binding offering the counting factors the user may enroll, the
+ * account-email proof first where the one gate (`firstBinding.mts`) asks for
+ * it. Other primaries establish without a read: the baseline applies after
+ * `pwd` only.
  *
  * Every method is a closure: core calls them on a registered copy, and the
  * contract suite on a spread of the object.
@@ -49,7 +53,9 @@
 
 import {
 	type AdmissionGrade,
+	type AuditSink,
 	DEFAULT_CLOCK_SKEW_MS,
+	emitAuditEvent,
 	FEDERATED_AMR,
 	type Logger,
 	MFA_AMR,
@@ -61,13 +67,16 @@ import {
 	type RequirementInput,
 	type RequirementInterruption,
 	type RequirementVerdict,
+	readMfaEnrollmentWitness,
 	SECOND_FACTOR_AMR,
 	type SessionAuthentication,
 	type SessionRequirement,
 	type SessionView,
 	type StepUpPage,
 } from "@o3co/auth-provider-core";
+import { firstBindingGate, type RequireEmailProof } from "./firstBinding.mjs";
 import type { LoginInterruption, LoginTransactions } from "./transactions.mjs";
+import { MfaEnrollmentStateInconsistentError } from "./witness.mjs";
 
 /** The name the requirement is registered under: `sessionRequirements.mfa`. */
 export const MFA_REQUIREMENT_NAME = "mfa";
@@ -97,8 +106,17 @@ export interface MfaRequirementOptions {
 	readonly stepUpRecordable: boolean;
 	/** `mfa.manage.maxAgeSeconds`: how long a second factor verified in a session stays recent. */
 	readonly recentMfaMaxAgeSeconds: number;
-	/** Where a first binding that offers nothing is said (`mfa_enrollment_nothing_enrollable`). */
+	/** Where a first binding that offers nothing, or asks a proof nobody can give, is said. */
 	readonly logger: Logger;
+	/** Where `mfa.enrollment_state_inconsistent` is recorded; none, it is not. */
+	readonly auditSink?: AuditSink;
+	/** What the first-binding gate reads of the composition: `mfa.enrollment.requireEmailProof`, and whether a mail sender is wired. */
+	readonly firstBinding: {
+		readonly requireEmailProof: RequireEmailProof;
+		readonly mailWired: boolean;
+	};
+	/** D25's flag for `subject` (`MfaTransactionStore.emailProofRequiredAtNextBinding`); rejects on an outage. */
+	readonly emailProofRequiredAtNextBinding: (subject: string) => Promise<boolean>;
 }
 
 /** What recent MFA is read from: a live session's primary time and its last second factor. */
@@ -209,6 +227,9 @@ export function createMfaRequirement(options: MfaRequirementOptions): SessionReq
 		stepUpRecordable,
 		recentMfaMaxAgeSeconds,
 		logger,
+		auditSink,
+		firstBinding,
+		emailProofRequiredAtNextBinding,
 	} = options;
 
 	/**
@@ -253,8 +274,29 @@ export function createMfaRequirement(options: MfaRequirementOptions): SessionReq
 	 * password never stands in for a factor it cannot see — and is the wrong
 	 * answer for a last-factor check or clearing the witness.
 	 */
+	const mayCount = (record: MfaFactorRecord): boolean =>
+		factors.get(record.kind)?.counting !== false;
 	const mayHoldCountingFactor = async (subject: string): Promise<boolean> =>
-		(await listRecords(subject)).some((record) => factors.get(record.kind)?.counting !== false);
+		(await listRecords(subject)).some(mayCount);
+
+	/**
+	 * The witness the login's `User` carries, read when no record that may
+	 * count stands: `true` or malformed is an outage — recorded, then thrown —
+	 * never a first binding (D12).
+	 */
+	const checkWitness = (primary: PrimaryAuthentication): void => {
+		const witness = readMfaEnrollmentWitness(primary.user);
+		if (witness === "not_enrolled") return;
+		emitAuditEvent(auditSink, {
+			timestamp: new Date(),
+			type: "mfa.enrollment_state_inconsistent",
+			subject: primary.subject,
+			ip: primary.request.ip,
+			userAgent: primary.request.userAgent,
+			details: { purpose: "login", witness },
+		});
+		throw new MfaEnrollmentStateInconsistentError(witness);
+	};
 
 	/** Where a second factor would meet the rule: a step-up, `unmet` when no factor could finish one, a new login when none could be recorded. */
 	const stepUp = (): RequirementVerdict => {
@@ -320,6 +362,33 @@ export function createMfaRequirement(options: MfaRequirementOptions): SessionReq
 		}
 	};
 
+	/**
+	 * Whether the account-email proof comes before `primary`'s first binding:
+	 * the gate over the setting, the sender, the login's address fact (core's
+	 * reading, in its enrollment facts) and D25's flag. A flag that cannot be
+	 * read, or reads other than a boolean, throws.
+	 */
+	const proofAsked = async (primary: PrimaryAuthentication): Promise<boolean> => {
+		const flagged: unknown = await emailProofRequiredAtNextBinding(primary.subject);
+		if (typeof flagged !== "boolean") {
+			throw new TypeError(
+				"MfaTransactionStore.emailProofRequiredAtNextBinding answered something that is not a boolean",
+			);
+		}
+		const gate = firstBindingGate({
+			requireEmailProof: firstBinding.requireEmailProof,
+			mailWired: firstBinding.mailWired,
+			mailAddress: primary.enrollmentFacts.mailAddress,
+			requiredAtNextBinding: flagged,
+		});
+		// `unprovable` asks for a proof nobody can give: the binding is refused,
+		// never skipped, and said — the subject and why, never the address.
+		if (gate.outcome === "unprovable") {
+			logger.warn({ sub: primary.subject, reason: gate.reason }, "mfa_email_proof_unprovable");
+		}
+		return gate.outcome !== "bind";
+	};
+
 	/** The interruption that opens the login's transaction with `interruption`'s answer. */
 	const interrupt = (interruption: LoginInterruption): RequirementInterruption => ({
 		open: (sessionId, continuation) => transactions.open(sessionId, continuation, interruption),
@@ -357,13 +426,14 @@ export function createMfaRequirement(options: MfaRequirementOptions): SessionReq
 		admitPrimary: async (primary) => {
 			if (primary.recorded.authentication.primary !== PASSWORD_AMR) return "establish";
 			const records = await listRecords(primary.subject);
+			if (!records.some(mayCount)) checkWitness(primary);
 			if (records.length > 0) return interrupt({ error: "mfa_required" });
 			if (mode === "optional") return "establish";
+			const emailProof = await proofAsked(primary);
 			return interrupt({
 				error: "mfa_enrollment_required",
 				enrollable: enrollableFor(primary.user),
-				// No account-email proof before a first binding yet: no mail is wired.
-				emailProof: false,
+				emailProof,
 			});
 		},
 	};

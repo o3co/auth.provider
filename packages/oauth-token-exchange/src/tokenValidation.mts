@@ -138,9 +138,7 @@ export async function validateSubject(
 	if (match.status === "compound") {
 		// This AS stamps one mechanism's confirmation per token, so a compound cnf is
 		// forged or a bug: refused, as the refresh grant and introspection do.
-		return invalidRequest(
-			"subject_token has compound cnf binding which is not supported (Stage 1)",
-		);
+		return invalidRequest("subject_token has compound cnf binding which is not supported");
 	}
 	if (match.status === "no-proof") {
 		return invalidRequest(
@@ -204,9 +202,7 @@ export async function validateActor(
 	if (actorValidated) {
 		const actorMatch = matchConfirmation(actorValidated.claims.cnf, ctx.tokenBinding);
 		if (actorMatch.status === "compound") {
-			return invalidRequest(
-				"actor_token has compound cnf binding which is not supported (Stage 1)",
-			);
+			return invalidRequest("actor_token has compound cnf binding which is not supported");
 		}
 		if (actorMatch.status === "no-proof") {
 			return invalidRequest(

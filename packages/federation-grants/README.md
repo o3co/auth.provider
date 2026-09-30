@@ -1,6 +1,6 @@
 # @o3co/auth-provider-federation-grants
 
-Last updated: 2026-09-30
+Last updated: 2026-10-01
 
 Federation grants for [`auth.provider`](https://github.com/o3co/auth.provider) — offline delegation of upstream access tokens (#593). A user consents once that a client may reach one upstream connection on their behalf; the client then obtains upstream access tokens over HTTP, later, with the user nowhere near a browser.
 
@@ -572,7 +572,9 @@ and plain text, never a JSON body.
    `403`, plain.
 7. Otherwise one consent challenge is parked for this browser — a reload gets
    the same one — and the browser is sent to `federation-grants.consent.url`
-   with `?challenge=`.
+   with `?challenge=`. A question already parked for another browser, or a
+   flow that ended meanwhile, is answered as step 2 is: `400`, plain, and
+   `federation.grant.authorization_failed` with the outcome `stale`.
 
 It is not held to the navigation rule the account-link start is (the
 `csrfGuard`'s `checkNavigation`, which refuses `Sec-Fetch-Site: cross-site`):

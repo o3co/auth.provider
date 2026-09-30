@@ -227,11 +227,11 @@ export interface ContributesMap<Deps = ProviderDeps<never, never>> {
 	 * first `:` (`login` for `login:ip:<ip>`). Core composes every module's
 	 * budgets into the synthetic key `rateLimitBudgetResolver`, read at request
 	 * time. A prefix contributed twice refuses boot (`duplicate-contribute`); an
-	 * empty prefix or one holding `:` refuses it at stage 1
-	 * (`contribution-malformed`); an unusable budget fails its contribution, and
-	 * so does an override that loosens the budget it replaces (a `null` side
-	 * counts as the wired limiter's `defaultLimit`); a host may not supply the
-	 * collector (`contribution-kind-guarded`).
+	 * empty prefix, one holding `:` or one naming an `Object.prototype` member
+	 * refuses it at stage 1 (`contribution-malformed`); an unusable budget fails
+	 * its contribution, and so does an override that loosens the budget it
+	 * replaces (a `null` side counts as the wired limiter's `defaultLimit`); a
+	 * host may not supply the collector (`contribution-kind-guarded`).
 	 */
 	readonly rateLimitBudgets?: {
 		readonly [prefix: string]: RateLimitBudgetFactory<Deps>;

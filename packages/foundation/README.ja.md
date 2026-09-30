@@ -1,6 +1,6 @@
 # @o3co/auth-provider-foundation
 
-最終更新: 2026-09-30
+最終更新: 2026-10-01
 
 auth.provider のための「the Store」 — デプロイ自身のユーザーサービス — の HTTP クライアント。`HttpUserRepository` は core の `UserRepository` ポートを HTTPS で実装する: ユーザーを認証し、フェデレーション ID をリンクし、federation grants が求める ID の照会に答える。`registerBuiltinAdapters` はそれを `"http"` ユーザーアダプターとして登録する。このパッケージはまた、Store の MFA エンドポイント — Store が主体の第二要素と登録の証人を保持する場所 — の契約を、それを名指す設定セクションと、その失敗が投げるものとともに定める。`HttpMfaFactorStore` は要素のエンドポイントの上に core の `MfaFactorStore` を実装し、`foundationMfaFactorStoreModule` がそれを組み込む。
 
@@ -73,9 +73,9 @@ const userRepo = await userFactory.create({
 
 **`authenticate`** は `authenticateUrl` に `{ email, password }` を送る（ユーザー名は `email` として届く）。**`authenticateByToken`** は `authenticateByTokenUrl` に `{ token }` を送る。`token` は Store がユーザーに解決する不透明なハンドル — フェデレーションのコールバックからは `<provider>:<sub>`、`oauth` の jwt-bearer グラントからは検証済みアサーションの subject ハンドル。どちらも:
 
-- ボディが JSON の `User`（`{ id: string, username: string, … }`）である `2xx` はそのユーザー。
+- ボディが JSON の `User`（`{ id: string, username: string, … }`、どちらも空でない）である `2xx` はそのユーザー。
 - `401` または `403` は `null` — ユーザーが居ない、または資格情報が誤り。
-- `User` でないボディの `2xx` は例外 — 「ユーザーが見つからない」ではなく上流の障害。
+- `User` でないボディの `2xx` は例外 — 「ユーザーが見つからない」ではなく上流の障害。空の `id` や `username` は `User` ではない: 空の `id` は誰も指さず、OpenID Connect Core §2 はそれがなる `sub` にローカルに一意な識別子を求める。ユーザー名の無いユーザーには、Store は安定したラベル — たとえばメールアドレス — を `username` として送る。セッションのルートと jwt-bearer グラントはこの例外を、Store の他の障害と同じく `503 temporarily_unavailable` で返す（それぞれが出すログは [Store が自分で守るべきこと](#store-が自分で守るべきこと) の表にある）。
 - それ以外のステータスは例外。
 
 `2xx` 以外の応答のボディは、これらでもリンクでも読まずに捨てる。ID の照会を含め、どのリクエストもリダイレクトを追わない: `3xx` は例外になるステータスの一つにすぎず、その `Location` には一切接続しない。
@@ -93,7 +93,7 @@ const userRepo = await userFactory.create({
 
 どれも運ぶのはせいぜいオペレーターが対処できる通信のコード（メッセージの中と `code` として）だけ: `ECONNREFUSED`、`ENOTFOUND`、`ECONNRESET`、`EPROTO`、`UND_ERR_*`（`UND_ERR_HEADERS_OVERFLOW`、`UND_ERR_SOCKET` など）、ランタイムが設定する場合の `HPE_*`（Node 26 の undici はパーサーのエラーにコードを設定しない）、`ERR_SSL_*`（`ERR_SSL_WRONG_VERSION_NUMBER` は平文の HTTP を話すポートを指す https の URL、`ERR_SSL_SSL/TLS_ALERT_HANDSHAKE_FAILURE` は Store が拒否した TLS 1.2 のハンドシェイク — クライアント証明書を求める相互 TLS、または共通の暗号スイートが無い）、証明書のコード。通信自身のエラーや `cause` は決して運ばない: undici のパーサーのエラーは拒否したバイト列をそのまま引用し、リクエストを反射する相手 — 壊れたプロキシ、デバッグ用のエコー — はその中に `Authorization` ヘッダーやパスワードを置く。期限を超えたリクエストはこれではなく `TimeoutError` になる（コンストラクタでの検証を参照）。
 
-**`linkFederatedIdentity`** は `linkFederatedIdentityUrl` に `{ userId, provider, sub, token, claims }` を送る: `2xx` の `User` は `{ ok: true, user }`、`401` / `403` は `{ ok: false, reason: "refused" }`、`409` は `{ ok: false, reason: "conflict" }`、それ以外は例外。拒否のボディは読まれないので、拒否が Store からの説明を運ぶことはない。`linkFederatedIdentityUrl` が設定されていなければこのメソッドは存在せず、フェデレーションのルートはそれで `?link=1` を最初から拒否すると分かる。`2xx` を返す前に Store が検査すべきこと — 未検証やリレーのアドレスでは決してリンクしない、メールアドレスだけで決してリンクしない — は [セッションパッケージの README](../session/README.ja.md#フェデレーション間のアカウントリンク482) にある。
+**`linkFederatedIdentity`** は `linkFederatedIdentityUrl` に `{ userId, provider, sub, token, claims }` を送る: `2xx` の `User` は `{ ok: true, user }`、`401` / `403` は `{ ok: false, reason: "refused" }`、`409` は `{ ok: false, reason: "conflict" }`、それ以外は例外。ボディが `User` でない `2xx` も例外になるが、そのとき Store はすでにリンクを作っている: 呼び出し元は `503` を返してリンクを監査しないので、そのリンクは Store の側で整合させる。拒否のボディは読まれないので、拒否が Store からの説明を運ぶことはない。`linkFederatedIdentityUrl` が設定されていなければこのメソッドは存在せず、フェデレーションのルートはそれで `?link=1` を最初から拒否すると分かる。`2xx` を返す前に Store が検査すべきこと — 未検証やリレーのアドレスでは決してリンクしない、メールアドレスだけで決してリンクしない — は [セッションパッケージの README](../session/README.ja.md#フェデレーション間のアカウントリンク482) にある。
 
 #### ID の照会（#613）
 

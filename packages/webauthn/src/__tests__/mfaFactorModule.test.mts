@@ -209,6 +209,75 @@ describe("webauthnMfaFactorModule", () => {
 	});
 });
 
+describe("the factor installed beside the grant's allowCredentialsForKnownUser", () => {
+	/** The relying party the grant and the factor share, `allowCredentialsForKnownUser` as given. */
+	const relyingPartyWith = (allowCredentialsForKnownUser: boolean): Module =>
+		defineModule({
+			name: "test:webauthn-config",
+			provides: {
+				webauthnConfig: () =>
+					createTestWebAuthnConfig({
+						rpId: "login.example",
+						rpName: "Login",
+						allowCredentialsForKnownUser,
+					}),
+			},
+		});
+
+	/** The grant's module and what it requires beside the relying party. */
+	const grant: readonly Module[] = [
+		webauthnModule,
+		defineModule({
+			name: "test:key-store",
+			provides: { keyStore: () => createSymmetricKeyStore("test-secret-at-least-32-chars!!") },
+		}),
+		defineModule({
+			name: "test:grant-policy",
+			provides: {
+				grantPolicy: (): GrantPolicyHook => ({
+					kind: "test",
+					evaluate: async () => ({ outcome: "allow" }) as const,
+				}),
+			},
+		}),
+		memoryChallengeStoreModule,
+		memoryReplaySeenSetModule,
+		defaultChallengeCeremonyModule,
+		memoryWebAuthnCredentialStoreModule,
+	];
+
+	it.each([true, false])(
+		"refuses the boot with the flag on, the factor enabled: %s, naming the setting and its variable and quoting no value",
+		async (enabled) => {
+			const refused = await refusal(configWith({ ...ON, enabled }), [
+				relyingPartyWith(true),
+				...grant,
+			]);
+			expect(refused.reason).toBe("contribute-factory-failed");
+			const said = `${refused.message} ${String((refused as { cause?: unknown }).cause)}`;
+			expect(said).toContain("webauthn.allowCredentialsForKnownUser");
+			expect(said).toContain("WEBAUTHN_ALLOW_CREDENTIALS_FOR_KNOWN_USER");
+			expect(said).not.toContain("login.example");
+		},
+	);
+
+	it("boots the grant with the flag on when the factor is not installed", async () => {
+		disposable = await createApp({
+			modules: [relyingPartyWith(true), ...grant],
+			bootstrapComponents: {
+				config: configWith(undefined),
+				pathResolver: (p: string) => p,
+			} as never,
+		});
+		expect(disposable).toBeDefined();
+	});
+
+	it("boots the factor beside the grant with the flag off, and contributes it", async () => {
+		const { resolver } = await boot(configWith(ON), [relyingPartyWith(false), ...grant]);
+		expect(resolver?.get("webauthn")).toBeDefined();
+	});
+});
+
 describe("the grant installed without the factor", () => {
 	it("names no section ignored when the package's reference.conf is layered: the factor's section is declared", async () => {
 		const reference = parseFile(REFERENCE, { env: {} }).toObject() as Record<string, unknown>;

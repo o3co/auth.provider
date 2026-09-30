@@ -37,6 +37,12 @@
  * it. A count that did not increase over the stored one is a regression, but for 0 against a
  * stored 0 — an authenticator that keeps no counter (WebAuthn §6.1.1).
  *
+ * An assertion's user handle, which the library does not compare, is held here to the one the
+ * caller expects (WebAuthn §7.2 step 6), once the signature verified and before the count: one
+ * carried must be the expected bytes' unpadded base64url, and no other spelling of them — padded,
+ * the standard alphabet, the handle read as text — is accepted. None carried (`null` is none)
+ * passes: a non-discoverable credential may return none.
+ *
  * Attestation chain failures ("x5c could not be chained to any specified trust anchor") match no
  * prefix and read as "unknown"; there is no dedicated reason for them.
  */
@@ -255,6 +261,12 @@ export interface AssertionVerificationInput {
 	 * default).
 	 */
 	readonly expectedTopOrigins?: readonly string[];
+	/**
+	 * The user handle of the account the credential belongs to. Given, a response carrying
+	 * another is refused as `user_handle_mismatch`; absent, the response's user handle is not
+	 * read.
+	 */
+	readonly expectedUserHandle?: Uint8Array;
 }
 
 export type AssertionVerificationResult =
@@ -267,6 +279,7 @@ export type AssertionVerificationResult =
 				| "challenge_mismatch"
 				| "rp_id_mismatch"
 				| "signature_invalid"
+				| "user_handle_mismatch"
 				| "sign_count_regression"
 				| "unknown";
 	  };
@@ -334,6 +347,9 @@ export async function verifyWebAuthnAssertionWithBackupState(
 		if (!verification.verified) {
 			return { ok: false, reason: "signature_invalid" };
 		}
+		if (!userHandleAccepted(input.response.response.userHandle, input.expectedUserHandle)) {
+			return { ok: false, reason: "user_handle_mismatch" };
+		}
 
 		const { newCounter, credentialBackedUp, credentialDeviceType } =
 			verification.authenticationInfo;
@@ -357,6 +373,15 @@ export async function verifyWebAuthnAssertionWithBackupState(
 	} catch (err) {
 		return mapAuthenticationError(err);
 	}
+}
+
+/**
+ * Whether the user handle a response carries may stand for the account whose handle is
+ * `expected`: none expected, none carried, or `expected`'s unpadded base64url.
+ */
+function userHandleAccepted(presented: unknown, expected: Uint8Array | undefined): boolean {
+	if (expected === undefined || presented === undefined || presented === null) return true;
+	return presented === Buffer.from(expected).toString("base64url");
 }
 
 function mapAuthenticationError(err: unknown): Extract<AssertionVerificationResult, { ok: false }> {

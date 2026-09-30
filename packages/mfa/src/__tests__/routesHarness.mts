@@ -49,6 +49,7 @@ import {
 	seedTotpFactor,
 	totpCodeForTests,
 } from "#/testing/index.mjs";
+import { decodeBase32 } from "#/totp/base32.mjs";
 import { totpStep } from "#/totp/rfc6238.mjs";
 import {
 	ALICE,
@@ -208,6 +209,52 @@ export async function beginLogin(
 	const boundTo = sessionIdSet(res);
 	if (boundTo === undefined) throw new Error("the login's 403 set no session");
 	return { agent, transaction: res.body.transaction as string, boundTo };
+}
+
+/** `POST /session/login` answered `403 mfa_enrollment_required`, as the page receives it: a first binding begun. */
+export async function beginFirstBinding(
+	app: express.Express,
+	user: { readonly username: string; readonly password: string } = ALICE,
+): Promise<BegunLogin & { readonly hints: Record<string, unknown> }> {
+	const { agent, res } = await login(app, { username: user.username, password: user.password });
+	expect(res.status, JSON.stringify(res.body)).toBe(403);
+	expect(res.body.error).toBe("mfa_enrollment_required");
+	const boundTo = sessionIdSet(res);
+	if (boundTo === undefined) throw new Error("the login's 403 set no session");
+	return {
+		agent,
+		transaction: res.body.transaction as string,
+		boundTo,
+		hints: res.body.hints as Record<string, unknown>,
+	};
+}
+
+/** `POST /session/mfa/enrollment` for `kind` on `transaction`. */
+export const beginEnrollment = (
+	agent: Agent,
+	transaction: string,
+	kind: unknown,
+): Promise<request.Response> =>
+	mfaPost(agent, "/enrollment", { transaction_id: transaction, kind });
+
+/** `POST /session/mfa/enrollment/complete` with `proof` on `transaction`, and a `label` when given. */
+export const completeEnrollment = (
+	agent: Agent,
+	transaction: string,
+	proof: unknown,
+	label?: unknown,
+): Promise<request.Response> =>
+	mfaPost(agent, "/enrollment/complete", {
+		transaction_id: transaction,
+		proof,
+		...(label === undefined ? {} : { label }),
+	});
+
+/** The code a TOTP enrollment's `secret` (base32, SHA1, 6 digits, 30 s) takes now. */
+export function totpProofOf(secret: unknown): string {
+	const key = typeof secret === "string" ? decodeBase32(secret) : undefined;
+	if (key === undefined) throw new Error("the enrollment answered no secret");
+	return totpCode(key);
 }
 
 /** An audit sink that keeps what it is handed. */

@@ -87,7 +87,11 @@ export function createRateLimitBudgetLookup(
 			: options.limits;
 	const readDefault = snapshotSpec(options.defaultLimit);
 	assertUsableRateLimitSpecs(who, { limits: readLimits, defaultLimit: readDefault });
-	const limits = (readLimits ?? {}) as Readonly<Record<string, RateLimitSpec>>;
+	// A Map: a prefix finds only an entry declared under it, never a member a
+	// plain object inherits (`constructor`, `__proto__`).
+	const limits: ReadonlyMap<string, RateLimitSpec> = new Map(
+		Object.entries((readLimits ?? {}) as Readonly<Record<string, RateLimitSpec>>),
+	);
 	const defaultLimit = readDefault as RateLimitSpec;
 	const { budgets } = options;
 	const contributed = (prefix: string): RateLimitSpec | undefined => {
@@ -101,7 +105,7 @@ export function createRateLimitBudgetLookup(
 	};
 	const lookup = (key: string): RateLimitBudget => {
 		const prefix = prefixOf(key);
-		return { prefix, spec: limits[prefix] ?? contributed(prefix) ?? defaultLimit };
+		return { prefix, spec: limits.get(prefix) ?? contributed(prefix) ?? defaultLimit };
 	};
 	return Object.assign(lookup, { defaultLimit });
 }
