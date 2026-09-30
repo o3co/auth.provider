@@ -17,7 +17,6 @@
 import {
 	auditErrorText,
 	BEARER_TOKEN_TYPE,
-	canonicalScope,
 	emitAuditEvent,
 	logClientRepositoryUnavailable,
 	loggableError,
@@ -36,13 +35,9 @@ import {
 	mayDiscloseTokenType,
 	refuseUndisclosableTokenType,
 } from "./federationTokenDisclosure.mjs";
-import {
-	classifyAnsweredScope,
-	isUsableToken,
-	narrowedScope,
-	readRefreshAnswer,
-} from "./federationTokenRefreshAnswer.mjs";
+import { readRefreshAnswer } from "./federationTokenRefreshAnswer.mjs";
 import { answerRefreshFailure } from "./federationTokenRefreshFailure.mjs";
+import { recordRefresh } from "./federationTokenRefreshRecord.mjs";
 import { answerStoredToken, readStoredTokens } from "./federationTokenStored.mjs";
 
 export type { FederationTokenRouterOptions } from "./federationTokenContext.mjs";
@@ -340,164 +335,13 @@ export function createRouter(express: ExpressLike, opts: FederationTokenRouterOp
 				return await answerRefreshFailure(ctx, caller, error);
 			}
 
-			const {
-				answer,
-				unreadable,
-				derivedExpiry,
-				lifetimeIsBroken,
-				tokenTypeIsBroken,
-				nextTokenType,
-			} = readRefreshAnswer(refreshed, currentTokens);
-
-			/**
-			 * Keeps a rotated refresh token even when this refresh brought
-			 * nothing that can be handed on: the upstream invalidated the old one
-			 * (RFC 6749 §6), so dropping it would strand the connection until
-			 * re-consent. Best effort, logged as `federation_token_keep_rotated_*`;
-			 * the route still answers its refusal, not a 503.
-			 */
-			const keepRotatedRefreshToken = async (): Promise<void> => {
-				if (
-					isUsableToken(answer.refreshToken) &&
-					answer.refreshToken !== currentTokens.refreshToken
-				) {
-					let step: "get" | "update" = "get";
-					try {
-						// `currentTokens` may be stale (the lock TTL can lapse during the
-						// upstream call), so re-read: if the stored refresh token changed,
-						// another request rotated the chain and its record wins;
-						// otherwise merge onto what is stored now.
-						const latest = await opts.federationTokenStore.get(sid, name);
-						if (latest === null) {
-							// A concurrent logout unlinked this federation: writing would
-							// restore credentials the user asked to drop.
-							logger.warn(
-								{ federation, store: "federation_token", reason: "record_gone" },
-								"federation_token_keep_rotated_skipped",
-							);
-						} else if (latest.refreshToken !== currentTokens.refreshToken) {
-							// Another request rotated the chain: its record is newer.
-							logger.warn(
-								{ federation, store: "federation_token", reason: "rotated_concurrently" },
-								"federation_token_keep_rotated_skipped",
-							);
-						} else {
-							step = "update";
-							await opts.federationTokenStore.update(sid, name, {
-								...latest,
-								refreshToken: answer.refreshToken,
-								// Rotated alongside it, and worth the same: the stored
-								// `id_token` is what logout sends as `id_token_hint`.
-								idToken: isUsableToken(answer.idToken) ? answer.idToken : latest.idToken,
-							});
-						}
-					} catch (error) {
-						logger.warn(
-							{ federation, store: "federation_token", step, err: loggableError(error) },
-							"federation_token_keep_rotated_failed",
-						);
-					}
-				}
-			};
-
-			// The adapter answered something this route cannot read as a token.
-			if (!isUsableToken(answer.accessToken) || lifetimeIsBroken || tokenTypeIsBroken) {
-				await keepRotatedRefreshToken();
-				emitAuditEvent(opts.auditSink, {
-					timestamp: new Date(),
-					type: "federation.token.refresh_failed",
-					subject: sub ?? undefined,
-					ip: req.ip,
-					userAgent: req.get("user-agent"),
-					details: {
-						federation,
-						reason: lifetimeIsBroken
-							? "invalid_expiry"
-							: !isUsableToken(answer.accessToken)
-								? "no_access_token"
-								: "invalid_token_type",
-					},
-				});
-				return res.status(500).json({
-					error: "refresh_failed",
-					error_description: "federation token refresh failed",
-				});
-			}
-
-			// The refresh worked but its token may not be handed on. Keep the
-			// rotated refresh token so fixing the upstream needs no re-consent.
-			if (!mayDiscloseTokenType(nextTokenType)) {
-				await keepRotatedRefreshToken();
-				return refuseUndisclosableTokenType(ctx, caller, nextTokenType);
-			}
-
-			// 11f: store the refreshed tokens, falling back to the post-lock
-			// snapshot for fields the IdP did not rotate. The expiry comes only
-			// from this answer (`derivedExpiry`): the stored one belongs to the
-			// expired token, and copying it forward would refresh on every
-			// request. `null` omits `expires_in` (optional in RFC 6749 §5.1).
-			const nextExpiresAt = derivedExpiry;
-			const updatedTokens = {
-				accessToken: answer.accessToken,
-				// `??` would let `""` through, and an empty string overwriting a
-				// usable stored token strands the connection at the next request.
-				refreshToken: isUsableToken(answer.refreshToken)
-					? answer.refreshToken
-					: currentTokens.refreshToken,
-				// IdPs like Google/GitHub typically return no new id_token on refresh;
-				// keep the stored one, which logout sends as `id_token_hint`.
-				idToken: isUsableToken(answer.idToken) ? answer.idToken : currentTokens.idToken,
-				expiresAt: nextExpiresAt,
-				// What the upstream last named, else what the record carried; judged
-				// above, so the write and the response agree.
-				tokenType: nextTokenType,
-				// The three readings and the bound they are judged against are
-				// `narrowedScope`'s, next to its own reasoning. Nothing about the
-				// rule is restated here, so the two cannot drift apart.
-				scope: narrowedScope(
-					classifyAnsweredScope(answer, unreadable),
-					currentTokens.scope,
-					currentTokens.grantedScope,
-				),
-				// The ceiling itself never moves: a refresh is bounded by the grant,
-				// not by the token it replaces (RFC 6749 §6). Parsed on the way back
-				// out as well — it came from a store, and a store is another thing
-				// this route does not own.
-				grantedScope: canonicalScope(currentTokens.grantedScope),
-			};
-			try {
-				await opts.federationTokenStore.update(sid, name, updatedTokens);
-			} catch (error) {
-				storeUnavailable(federation, "federation_token", "update", error);
-				return res.status(503).json({
-					error: "temporarily_unavailable",
-					error_description: "federation token store unavailable",
-				});
-			}
-
-			// 11h: return the refreshed token; `expires_in` is omitted when there is
-			// no finite expiry.
-			const expiresIn =
-				nextExpiresAt === null
-					? undefined
-					: Math.max(0, Math.floor((nextExpiresAt.getTime() - Date.now()) / 1000));
-			emitAuditEvent(opts.auditSink, {
-				timestamp: new Date(),
-				type: "federation.token.success",
-				subject: sub ?? undefined,
-				ip: req.ip,
-				userAgent: req.get("user-agent"),
-				details: { federation, refreshed: true },
-			});
-			return res.status(200).json({
-				// `updatedTokens`, not the adapter's object: the answer was read once,
-				// and a getter read a second time may answer differently from what was
-				// just written to the store.
-				access_token: updatedTokens.accessToken,
-				token_type: BEARER_TOKEN_TYPE,
-				...(expiresIn !== undefined ? { expires_in: expiresIn } : {}),
-				...(updatedTokens.scope ? { scope: updatedTokens.scope } : {}),
-			});
+			// Awaited inside the `try`, so the lock is released after the answer.
+			return await recordRefresh(
+				ctx,
+				caller,
+				currentTokens,
+				readRefreshAnswer(refreshed, currentTokens),
+			);
 		} finally {
 			// 11g: Release lock if acquired.
 			if (release !== undefined) {
