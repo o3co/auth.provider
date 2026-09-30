@@ -50,6 +50,11 @@ export function invalidRequest(errorDescription: string): GrantHandlerResult {
 	return { result: { status: 400, error: "invalid_request", errorDescription } };
 }
 
+/** Whether a stage refused the request, rather than answering its own output. */
+export const isRefusal = <T extends object>(
+	outcome: T | GrantHandlerResult,
+): outcome is GrantHandlerResult => "result" in outcome;
+
 /** The issued token, as RFC 8693 §2.2.1 answers it. */
 export function tokenAnswer(accessToken: Token): GrantHandlerResult {
 	// RFC 9449 §5: a DPoP-bound token is `token_type: "DPoP"`; mTLS keeps "Bearer"
