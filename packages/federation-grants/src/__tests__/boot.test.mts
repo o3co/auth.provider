@@ -181,8 +181,11 @@ interface Setup {
 	 * provides when `endpoints.login.url` names no page.
 	 */
 	readonly withLoginEntry?: boolean | "unconfigured";
-	/** The CSRF policy the consent answer is held to — the `csrfGuard` slot. */
-	readonly withCsrfGuard?: boolean;
+	/**
+	 * The CSRF policy the consent answer is held to — the `csrfGuard` slot;
+	 * `"without-check"`, a guard with no `check` to ask.
+	 */
+	readonly withCsrfGuard?: boolean | "without-check";
 	/** The oauthTokenSettings the composition holds; none by default. */
 	readonly tokenSettingsIssuer?: string;
 }
@@ -250,7 +253,14 @@ const boot = (setup: Setup) => {
 					acquisitionComponents();
 				return {
 					...(setup.withIntentStore === false ? {} : { federationGrantIntentStore }),
-					...(setup.withCsrfGuard === false ? {} : { csrfGuard }),
+					...(setup.withCsrfGuard === false
+						? {}
+						: {
+								csrfGuard:
+									setup.withCsrfGuard === "without-check"
+										? { ...csrfGuard, check: undefined }
+										: csrfGuard,
+							}),
 					...(setup.withLoginEntry === false
 						? {}
 						: {
@@ -508,6 +518,12 @@ describe("what creating a grant needs", () => {
 		// answer would have no request-origin check at all.
 		await expect(boot({ withCsrfGuard: false })).rejects.toThrow(
 			/federation grants are enabled and no csrfGuard is installed/,
+		);
+	});
+
+	it("refuses a csrfGuard with no check to ask, naming it", async () => {
+		await expect(boot({ withCsrfGuard: "without-check" })).rejects.toThrow(
+			/the csrfGuard installed has no check/,
 		);
 	});
 

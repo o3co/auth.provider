@@ -30,6 +30,7 @@
 import { randomUUID } from "node:crypto";
 import {
 	type AuditEvent,
+	auditErrorText,
 	type CsrfGuard,
 	createMemoryFederationGrantIntentStore,
 	createMemoryFederationGrantStore,
@@ -1012,6 +1013,91 @@ describe("POST /session/federation-grants/consent — held to the deployment's c
 		expect(refused.body).toEqual(CROSS_SITE_ANSWER);
 		const unauthenticated = await w.answer({ challenge: "c", decision: "accept" }, "nobody");
 		expect(unauthenticated.status).toBe(401);
+	});
+
+	it("asks the guard before the intent store: a refused answer is 403 while the store is down", async () => {
+		const { w, challenge } = await parked();
+		w.state.faults.set("getConsent", 0);
+		const refused = await w.answer({ challenge, decision: "accept" }, "b-1", { Origin: "null" });
+		expect(refused.status).toBe(403);
+		expect(refused.body).toEqual(CROSS_SITE_ANSWER);
+		expect((await w.answer({ challenge, decision: "accept" }, "b-1")).status).toBe(503);
+	});
+
+	it("accepts the issuer's Origin whatever Sec-Fetch-Site says, cross-site included", async () => {
+		const { w, challenge } = await parked();
+		const response = await w.answer({ challenge, decision: "accept" }, "b-1", {
+			Origin: ISSUER,
+			"Sec-Fetch-Site": "cross-site",
+		});
+		expect(response.status).toBe(303);
+	});
+
+	it("accepts an origin on the guard's trusted list whatever Sec-Fetch-Site says, cross-site included", async () => {
+		const { w, challenge } = await parked();
+		const response = await w.answer({ challenge, decision: "accept" }, "b-1", {
+			Origin: TRUSTED_SIBLING,
+			"Sec-Fetch-Site": "cross-site",
+		});
+		expect(response.status).toBe(303);
+	});
+
+	it.each([
+		["a promise of acceptance", () => Promise.resolve({ outcome: "accepted" })],
+		["a promise that rejects", () => Promise.reject(new Error("injected: async guard"))],
+		["another outcome", () => ({ outcome: "reject" })],
+		["a refusal with a reason outside the contract", () => ({ outcome: "refused", reason: "nope" })],
+		["nothing", () => undefined],
+	])(
+		"refuses the answer when the guard's verdict is %s, as cross-site, and spends nothing",
+		async (_label, verdict) => {
+			const { w, challenge } = await parked({
+				csrfGuard: Object.freeze({
+					...createTestCsrfGuard(),
+					check: verdict as unknown as CsrfGuard["check"],
+				}),
+			});
+			const refused = await w.answer({ challenge, decision: "accept" }, "b-1");
+			expect(refused.status).toBe(403);
+			expect(refused.body).toEqual(CROSS_SITE_ANSWER);
+			expect(payloadOf(w.lines, "federation_grant_consent_csrf_refused")).toMatchObject({
+				reason: "unrecognized",
+			});
+			expect(await w.intents.getConsent(challenge, w.state.now)).not.toBeNull();
+		},
+	);
+
+	it("logs a refused answer as one warn line with the guard's reason, the request's id and the Origin it named", async () => {
+		const { w, challenge } = await parked();
+		const foreign = await w.answer({ challenge, decision: "accept" }, "b-1", {
+			Origin: "https://evil.test",
+			"Sec-Fetch-Site": "cross-site",
+		});
+		expect(foreign.status).toBe(403);
+		expect(written(w.lines)).toEqual(["warn federation_grant_consent_csrf_refused"]);
+		expect(payloadOf(w.lines, "federation_grant_consent_csrf_refused")).toEqual({
+			reason: "foreign_origin",
+			correlationId: foreign.headers["x-request-id"],
+			origin: "https://evil.test",
+		});
+
+		w.lines.length = 0;
+		const bare = await w.answer({ challenge, decision: "accept" }, "b-1", {});
+		expect(bare.status).toBe(403);
+		expect(payloadOf(w.lines, "federation_grant_consent_csrf_refused")).toEqual({
+			reason: "token_absent",
+			correlationId: bare.headers["x-request-id"],
+		});
+	});
+
+	it("logs the Origin a refused answer named sanitised and capped", async () => {
+		const { w, challenge } = await parked();
+		const hostile = `https://evil.test/\t${"h".repeat(10_000)}`;
+		const refused = await w.answer({ challenge, decision: "accept" }, "b-1", { Origin: hostile });
+		expect(refused.status).toBe(403);
+		expect(payloadOf(w.lines, "federation_grant_consent_csrf_refused").origin).toBe(
+			auditErrorText(hostile),
+		);
 	});
 });
 

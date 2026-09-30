@@ -571,6 +571,23 @@ describe("the grants consent answer is held to the session module's CSRF guard",
 		expect(accepted.body.error).toBe("login_required");
 	});
 
+	it("accepts an answer with no Origin that echoes the token GET /session/csrf hands out in the x-csrf-token header", async () => {
+		const app = await bootTrustingSibling();
+		const { token, cookie } = await tokenFrom(app);
+		const res = await answer(app, { Cookie: cookie, "x-csrf-token": token });
+		expect(res.status).toBe(401);
+		expect(res.body.error).toBe("login_required");
+	});
+
+	it("refuses an answer with no Origin whose token is not its cookie's", async () => {
+		const app = await bootTrustingSibling();
+		const first = await tokenFrom(app);
+		const second = await tokenFrom(app);
+		const res = await answer(app, { Cookie: first.cookie }, { csrf_token: second.token });
+		expect(res.status).toBe(403);
+		expect(res.body).toEqual(NO_ORIGIN);
+	});
+
 	it("accepts an origin on session.csrf.trustedOrigins sending Sec-Fetch-Site: same-site", async () => {
 		const app = await bootTrustingSibling();
 		const res = await answer(app, { Origin: SIBLING, "Sec-Fetch-Site": "same-site" });
