@@ -16,23 +16,24 @@
 
 /**
  * The template's own modules: each owns a section of the configuration, at
- * the path it is read at today, with its defaults in the template's
+ * the path it declares, with its defaults in the template's
  * `config/reference.conf`, and reads it through `deps.section`, never the
- * whole configuration. What each section sets reaches the process as it did,
- * for the shipped configuration and for an operator's environment and HOCON
+ * whole configuration. What each section sets reaches the process, for the
+ * shipped configuration and for an operator's environment and HOCON
  * overrides, through the template's real path: `readOwnLayers`, then
  * `resolveForBoot` over every loaded module's reference, then `createApp`.
  */
 
 import { generateKeyPairSync } from "node:crypto";
 import { once } from "node:events";
-import { mkdtempSync, writeFileSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { type AddressInfo, createServer, type Socket } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
 	type AppHandle,
+	coreReference,
 	createApp,
 	DEFAULT_SIGNING_ALGORITHM,
 	defineModule,
@@ -47,7 +48,7 @@ import { httpSettingsContract, packageReferenceProblems } from "@o3co/auth-provi
 import { parseFile } from "@o3co/ts.hocon";
 import express from "express";
 import request from "supertest";
-import { describe, expect, it, vi } from "vitest";
+import { afterAll, describe, expect, it, vi } from "vitest";
 import { buildModules } from "../buildModules.mjs";
 import {
 	expectedSessionRequirements,
@@ -127,13 +128,23 @@ interface BootOptions {
 	readonly hocon?: string;
 	/** Keep the shipped Redis refresh-token family store, and with it the shared Redis clients. */
 	readonly redis?: boolean;
+	/** Changes the resolved configuration before `createApp` parses it, as a hand-built root may. */
+	readonly adjust?: (resolved: Record<string, unknown>) => Record<string, unknown>;
 }
+
+/** The directories the operator layers are written to, removed after the suite. */
+const operatorDirs: string[] = [];
+afterAll(() => {
+	for (const dir of operatorDirs) rmSync(dir, { recursive: true, force: true });
+});
 
 /** The template's own files for the development environment, under an operator's layer when given. */
 function ownFiles(hocon?: string): string[] {
 	const { applicationConfPath, envConfPath } = resolveConfigPaths(configDir, "development");
 	if (hocon === undefined) return [envConfPath, applicationConfPath];
-	const file = join(mkdtempSync(join(tmpdir(), "own-modules-")), "operator.conf");
+	const dir = mkdtempSync(join(tmpdir(), "own-modules-"));
+	operatorDirs.push(dir);
+	const file = join(dir, "operator.conf");
 	writeFileSync(file, hocon);
 	return [file, envConfPath, applicationConfPath];
 }
@@ -152,10 +163,13 @@ async function bootTemplate(options: BootOptions = {}): Promise<AppHandle> {
 		repositoriesModule: testRepositoriesModule,
 		...(options.redis ? {} : { refreshTokenFamilyModules: [memoryRefreshTokenFamilyStoreModule] }),
 	});
+	const resolved = resolveForBoot(own, modules, expectedSessionRequirements(switches));
 	return createApp({
 		modules,
 		bootstrapComponents: {
-			config: resolveForBoot(own, modules, expectedSessionRequirements(switches)),
+			config: (options.adjust
+				? options.adjust({ ...(resolved as unknown as Record<string, unknown>) })
+				: resolved) as typeof resolved,
 			pathResolver: (s: string) => s,
 			logger: silentLogger(),
 		},
@@ -208,7 +222,7 @@ describe("logging", () => {
 		expect(named(modules, "logging")).toBe(loggingModule);
 	});
 
-	it("is read before boot apart from the switches, which no longer list it", () => {
+	it("is not among SWITCHES", () => {
 		expect(SWITCHES).not.toContain("logging");
 	});
 
@@ -370,7 +384,7 @@ describe("http", () => {
 		}
 	});
 
-	it("refuses a trust proxy entry that is not an address, a range or a named range at boot, naming it", async () => {
+	it("refuses a trust proxy entry that is not an address, a range or a named range at boot, naming http.trustProxy", async () => {
 		await expect(bootTemplate({ env: { HTTP_TRUST_PROXY: "proxy.internal" } })).rejects.toThrow(
 			/http\.trustProxy/,
 		);
@@ -378,6 +392,23 @@ describe("http", () => {
 });
 
 describe("cors", () => {
+	it.each([
+		["with CORS_ALLOWED_ORIGINS unset", {}],
+		[
+			"with a list in CORS_ALLOWED_ORIGINS",
+			{ CORS_ALLOWED_ORIGINS: "https://a.example,https://b.example" },
+		],
+		["with CORS_ALLOWED_ORIGINS empty", { CORS_ALLOWED_ORIGINS: "" }],
+	])(
+		"ships the default core's reference ships, which core reads without httpSettings, %s",
+		(_name, env) => {
+			const corsIn = (reference: URL) =>
+				(parseFile(fileURLToPath(reference), { env }).toObject() as { cors?: unknown }).cors;
+			expect(corsIn(TEMPLATE_REFERENCE)).toEqual(corsIn(coreReference()));
+			expect(corsIn(TEMPLATE_REFERENCE)).toBeDefined();
+		},
+	);
+
 	it("owns cors, and requires nothing", () => {
 		expect(corsModule.name).toBe("cors");
 		expect(corsModule.section?.at).toBeUndefined();
@@ -600,10 +631,19 @@ describe("redis-clients", () => {
 		}
 	});
 
-	it("refuses a section with no URL at boot, naming the key", async () => {
+	it("refuses a null URL at boot, naming the key", async () => {
 		await expect(
 			bootTemplate({ redis: true, hocon: "refreshTokenFamilyStore.redis.url = null\n" }),
 		).rejects.toThrow(/refreshTokenFamilyStore\.redis\.url/);
+	});
+
+	it("refuses a configuration without its section at boot, naming the section: its own parse", async () => {
+		await expect(
+			bootTemplate({
+				redis: true,
+				adjust: ({ refreshTokenFamilyStore: _dropped, ...rest }) => rest,
+			}),
+		).rejects.toThrow(/refreshTokenFamilyStore\.redis/);
 	});
 
 	it("refuses an empty URL when a client is built, naming the key and its variable", async () => {
