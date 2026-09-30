@@ -565,8 +565,9 @@ export interface AppHandle {
 
 	/**
 	 * The longest `tailMs` a cleanup was registered with through
-	 * `lifecycleRegistrar`, or `undefined` when none declared one. A host that
-	 * bounds `dispose()` allows it at least this long.
+	 * `lifecycleRegistrar`, or `undefined` when none declared one: the least
+	 * a host that bounds `dispose()` allows the whole of it. Tails do not add.
+	 * Read when asked, so a cleanup registered after boot counts.
 	 */
 	readonly cleanupAllowanceMs: number | undefined;
 

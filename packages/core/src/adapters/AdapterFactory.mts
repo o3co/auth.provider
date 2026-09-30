@@ -42,11 +42,12 @@ export interface LifecycleRegistrar {
 /** What a cleanup is registered with besides its callback. */
 export interface LifecycleCleanupOptions {
 	/**
-	 * How long the cleanup may take to settle, in milliseconds: a whole number
-	 * from 1 to 2147483647, the longest delay a timer takes. A host that bounds
-	 * `dispose()` allows at least the longest tail registered
-	 * (`AppHandle.cleanupAllowanceMs`), so a tail leaves room for the cleanups
-	 * that run beside it.
+	 * The least time, in milliseconds, a host that bounds `dispose()` must
+	 * allow the whole of `dispose()` for this cleanup's work to settle,
+	 * including the cleanups around it. Hosts take the longest tail
+	 * registered (`AppHandle.cleanupAllowanceMs`), so tails do not add: a
+	 * cleanup sizes its tail with room for the others. A whole number from 1
+	 * to 2147483647, the longest delay a timer takes.
 	 */
 	readonly tailMs?: number;
 }

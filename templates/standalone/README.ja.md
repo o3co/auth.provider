@@ -678,13 +678,13 @@ probe は接続を開いた builder が登録するため、リストはこの�
 4. **deadline を過ぎると残りの接続は切断され、プロセスは非ゼロで終了する。** 常に `0` しか見ない orchestrator には、正常な drain と時間切れになった drain を区別できない。
 5. **`cleanup` は drain の後、終了の前に実行される** — `handle.dispose()`、すなわち逆トポロジカル順のコンポーネント cleanup と Redis／タイマーの drain である。そこでの失敗はこのサービス自身の logger（他のすべての行と同じ NDJSON）で `shutdown_cleanup_failed`（または `shutdown_cleanup_timed_out`）としてログに出力され、終了コードにも反映される。各段階はそれぞれ 1 つのイベントである（下の表を参照）。throw した dispose でもプロセスは終了し、プロセスが固まることはない。その行が運ぶのは失敗の core の [`loggableError`](../../packages/core/README.ja.md#logger) による射影であり、エラーそのものではない: `dispose()` はすべての cleanup 自身のエラーをまとめた AggregateError で reject し、その行はそれぞれをコードとともに名前で示し（`aggregateErrors`、先頭 5 つ）、それが持つものは何も出さない — その中には失敗したストアへの書き込みが、書き込もうとしていた内容ごと含まれうる。
 
-6. **`cleanup` には少なくとも、モジュールが登録した allowance が与えられる**: `handle.cleanupAllowanceMs` — モジュールが cleanup とともに登録した tail のうち最長のもの — を、`src/app.mts` が `installGracefulShutdown` に `cleanupAllowanceMs` として渡す。cleanup の予算は、それと drain の 10 秒のうち長いほうである。テンプレートはこれを決めるためにモジュールの設定を読まない。フェデレーショングラントが有効なら、パッケージは自分の drain を `federationGrants.upstreamHardTimeoutMs` + `persistRetryBudgetMs` + `lockWaitMs` + 12 秒で登録し、45 秒を下回ることはない — 同梱の予算（25 + 3 + 5 + 12）ではちょうど 45 秒 — dispose が、ローテーションされた上流資格情報の書き込みを待つためである。予算を上げれば allowance もそれに応じて増えるので、orchestrator の grace もそれに合わせて上げること。無効なら、allowance を登録するものはなく、cleanup の予算は drain のものと同じままである。
+6. **`cleanup` には少なくとも、モジュールが登録した allowance が与えられる**: `handle.cleanupAllowanceMs` — モジュールが cleanup とともに登録した tail のうち最長のもの — を、`src/app.mts` が `installGracefulShutdown` に `cleanupAllowanceMs: () => handle.cleanupAllowanceMs` として渡し、シグナルが届いた時点で読む。cleanup の予算は、それと drain の 10 秒のうち長いほうであり、`shutdown_draining` がそれを `cleanupTimeoutMs` として記録する。1 から 2147483647 までの整数ミリ秒でない allowance は無視される。テンプレートはこれを決めるためにモジュールの設定を読まない。フェデレーショングラントが有効なら、パッケージは自分の drain の tail を `federationGrants.upstreamHardTimeoutMs` + `persistRetryBudgetMs` + `lockWaitMs` + 12 秒として登録し、45 秒を下回ることはない — 同梱の予算（25 + 3 + 5 + 12）ではちょうど 45 秒 — dispose が、ローテーションされた上流資格情報の書き込みを待つためである。予算を上げれば allowance もそれに応じて増えるので、orchestrator の grace もそれに合わせて上げること。無効なら、allowance を登録するものはなく、cleanup の予算は drain のものと同じままである。
 
 各段階はそれぞれ 1 行をログに出す:
 
 | イベント | レベル | フィールド |
 |---|---|---|
-| `shutdown_draining` | info | `drainTimeoutMs` |
+| `shutdown_draining` | info | `drainTimeoutMs`, `cleanupTimeoutMs` |
 | `shutdown_drain_deadline_exceeded` | error | `drainTimeoutMs` |
 | `shutdown_server_close_failed` | error | `err` |
 | `shutdown_cleanup_timed_out` | error | `cleanupTimeoutMs` |
