@@ -619,9 +619,10 @@ function addedModules(
 					defaultChallengeCeremonyModule,
 				]
 			: []),
-		// The MFA package: the TOTP factor, on by its reference.conf, and the
-		// MFA module, which registers the requirement named mfa, over the two
-		// MFA stores. The environment is the one the template composes as.
+		// The MFA package: the TOTP factor, on by its reference.conf, the
+		// recovery-code factor's module, and the MFA module, which registers
+		// the requirement named mfa, over the two MFA stores. The environment
+		// is the one the template composes as.
 		...(features.mfa
 			? [
 					...mfaModules({ environment: "production" }),

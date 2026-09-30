@@ -72,6 +72,20 @@ export const BUILT_IN_AUDIT_EVENT_TYPES = [
 	"logout.cascade_failed",
 	"logout.family_revoked",
 	"logout.success",
+	// Multi-factor authentication (the MFA ADR's D28), the MFA package's
+	// routes'; each carries `subject`, `ip` and `userAgent`, and `kind` and
+	// `purpose` in its details. The MFA package is private until the template
+	// wires it, so no released composition emits them; the inventory's drift
+	// test names the step that emits each.
+	"mfa.challenge.sent",
+	"mfa.enrollment_state_inconsistent",
+	"mfa.factor.enrolled",
+	"mfa.factor.removed",
+	"mfa.locked",
+	"mfa.recovery_code.used",
+	"mfa.recovery_codes.generated",
+	"mfa.verified",
+	"mfa.verify.failure",
 	"rate_limit.unavailable",
 	// A claim's subject that is not the record's, at any consumer of an
 	// authenticated browser session (ADR 2026-09-28-session-admission).

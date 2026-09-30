@@ -327,6 +327,7 @@ out-of-tree adapter can import and run:
 | `SessionFamilyIndex` | `packages/core/src/user-sessions/__tests__/sessionFamilyIndex.contract.mts` |
 | `SessionFederationIndex` | `packages/core/src/user-sessions/__tests__/sessionFederationIndex.contract.mts` |
 | `RateLimiter` (`failMode` included) | `packages/core/src/testing/slots/rateLimiter.mts` (`rateLimiterContract`) |
+| `MfaFactor` (a second factor contributed as `mfaFactors`; a contribution, not a slot) | `packages/test-kit/src/mfa/factor.contract.mts` (`mfaFactorContract`), over core's doubles `createTestMfaFactor` and `createTestMfaDigests` |
 | The slots of [what one module owns and others read](#what-one-module-owns-and-others-read) | `packages/core/src/testing/slots/` — one suite per slot, named in its row |
 
 Each is run against every in-repo implementation of its port, which is what
@@ -343,7 +344,9 @@ any other difference, and on a copy that no Redis test calls. The suites under
 them: the Redis rate limiter runs `rateLimiterContract` that way.
 `@o3co/auth-provider-test-kit` is a published package of suites of its own,
 which depends on core alone: the enrollment witness's suite is there, with a
-fake Store it runs against, and foundation's tests run it. A new port
+fake Store it runs against, and foundation's tests run it; so is a second
+factor's, `mfaFactorContract`, which the MFA package's TOTP factor runs over
+core's doubles. A new port
 should gain a suite: "typed and swappable" means an implementer can prove they
 got it right, not only that they read the interface carefully.
 

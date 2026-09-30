@@ -61,6 +61,15 @@ export {
 	makeValidCoreConfig,
 	makeValidFullSections,
 } from "./fixtures/valid-config.mjs";
+// The doubles a second factor's tests use: a factor with a trivial protocol,
+// its proofs, and the keyed digests a factor is handed. The factor's
+// conformance suite is the test kit's.
+export {
+	createTestMfaDigests,
+	createTestMfaFactor,
+	type TestMfaFactorOptions,
+	testMfaFactorProofs,
+} from "./mfaFactor.mjs";
 export {
 	createRecordingMailSender,
 	type RecordingMailSender,

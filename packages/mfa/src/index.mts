@@ -19,6 +19,9 @@
 // Private until the standalone template wires it (the ADR's build-order
 // step 20).
 
+// The admission actions the package's routes admit, with their grades:
+// declared, and registered by the module whose route admits one.
+export { MFA_ADMISSION_ACTIONS, type MfaAdmissionAction } from "./admissionActions.mjs";
 // The `mfa` keys this package reads, and the published development key a
 // development configuration may carry (the MFA ADR's D11, D19).
 export { MFA_DEVELOPMENT_SAMPLE_KEY, mfaConfigSchema } from "./config.mjs";
@@ -32,5 +35,7 @@ export {
 	mfaModule,
 	mfaModules,
 } from "./module.mjs";
+// The recovery-code factor's module (the MFA ADR's D25), with its section.
+export { mfaRecoveryCodeFactorModule } from "./recovery/module.mjs";
 // The TOTP factor, contributed as `mfaFactors.totp` (the MFA ADR's F6).
 export { mfaTotpFactorModule } from "./totp/module.mjs";

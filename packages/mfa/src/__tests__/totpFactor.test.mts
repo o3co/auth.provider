@@ -37,6 +37,7 @@ import {
 	type MfaVerifyContext,
 	OTP_AMR,
 } from "@o3co/auth-provider-core";
+import { mfaFactorContract } from "@o3co/auth-provider-test-kit";
 import { describe, expect, it } from "vitest";
 import { decodeBase32, encodeBase32 } from "#/totp/base32.mjs";
 import { createTotpFactor, type TotpFactorSettings } from "#/totp/factor.mjs";
@@ -426,4 +427,23 @@ describe("enrolling a TOTP factor", () => {
 			).rejects.toThrow(/TOTP/);
 		}
 	});
+});
+
+describe("the totp factor under the test kit's factor contract", () => {
+	/** The code a TOTP app shows for `state` or `data` at `nowMs`. */
+	const codeFor = (parameters: Readonly<Record<string, unknown>>, nowMs: number): string =>
+		hotp(
+			decodeBase32(String(parameters.secret)) as Buffer,
+			totpStep(nowMs, Number(parameters.period)),
+			{ algorithm: parameters.algorithm as TotpAlgorithm, digits: Number(parameters.digits) },
+		);
+
+	for (const { name, run } of mfaFactorContract({
+		build: () => createTotpFactor(SETTINGS),
+		user: USER,
+		enrollmentProof: (start, context) => codeFor(start.state, context.nowMs),
+		verificationProof: (enrolled, _challenge, context) => codeFor(enrolled.data, context.nowMs),
+	})) {
+		it(name, run);
+	}
 });

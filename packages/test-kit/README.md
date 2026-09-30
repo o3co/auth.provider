@@ -22,13 +22,19 @@ devDependencies.
   answers it back on `authenticate` as `User.mfaEnrolled` (the MFA ADR's
   D12) — in [`src/mfa/enrollmentWitness.contract.mts`](src/mfa/enrollmentWitness.contract.mts);
 - `startFakeStore`, a fake Store that answers the Store's MFA endpoints and
-  its two login endpoints over HTTP, in [`src/mfa/fakeStore.mts`](src/mfa/fakeStore.mts).
+  its two login endpoints over HTTP, in [`src/mfa/fakeStore.mts`](src/mfa/fakeStore.mts);
+- `mfaFactorContract`, the conformance suite of a second factor — a value of
+  core's `mfaFactors` contribution kind — in
+  [`src/mfa/factor.contract.mts`](src/mfa/factor.contract.mts).
 
 **Does not own:** the ports, their types and the reading of the witness
 (core); the wire format of the Store's MFA endpoints (core's
 [`mfa/storeWire.mts`](../core/src/mfa/storeWire.mts)) and what each answer
 means ([`@o3co/auth-provider-foundation`](../foundation/README.md#the-stores-mfa-endpoints));
-any adapter. The other ports' suites are core's, on
+any adapter; the doubles a factor's tests use — `createTestMfaFactor`,
+`testMfaFactorProofs` and `createTestMfaDigests` — which stay on
+`@o3co/auth-provider-core/testing`, since core's own tests use them and core
+cannot depend on this package. The other ports' suites are core's, on
 `@o3co/auth-provider-core/testing` and in core's own tests.
 
 **Why a separate package.** Core's tests test core. A contract suite is the
@@ -79,6 +85,39 @@ witness is read as the provider reads it, through core's
 `readMfaEnrollmentWitness`, so a backend answering anything but a boolean
 fails.
 
+## A second factor's contract suite
+
+`mfaFactorContract(input)` holds a factor, whatever its kind, to what the
+MFA coordinator relies on: a kind a hint can carry; `amrValues` it can vouch
+for — no primary's marker, no `mfa` — and `amrFor` answering at least one of
+them; boolean flags; state and data that survive the JSON round trip sealing
+puts them through, and are handed back after it; a hint that never shows the
+account's address; a proof the factor cannot read answered `malformed`,
+never thrown; and a valid proof that completes an enrollment and verifies the
+factor it enrolled. It enrolls at one instant and verifies an hour later,
+every call made for the account's `User.id` as its subject; state and data
+are held to the rule the coordinator seals them by — JSON values JSON gives
+back as they are, in plain or null-prototype objects.
+
+```typescript
+import { mfaFactorContract } from "@o3co/auth-provider-test-kit";
+import { describe, it } from "vitest";
+
+describe("my factor keeps the MFA factor contract", () => {
+  for (const contractCase of mfaFactorContract({
+    build: () => createMyFactor(settings),
+    user: { id: "u-1", username: "alice", email: "alice@example.com" },
+    enrollmentProof: (start, context) => proofOfPossession(start, context.nowMs),
+    verificationProof: (enrolled, challenge, context) => proofFor(enrolled, challenge, context.nowMs),
+  })) {
+    it(contractCase.name, contractCase.run);
+  }
+});
+```
+
+Every call is handed core's test digests for the factor's kind
+(`createTestMfaDigests`). The MFA package's TOTP factor runs it.
+
 ## The fake Store
 
 `startFakeStore({ users, bearerToken })` starts an in-memory HTTP server on
@@ -123,6 +162,8 @@ Exported from [`src/index.mts`](src/index.mts):
 - `ContractCase`, core's type of a suite's case;
 - `mfaEnrollmentWitnessContract`, with `MfaEnrollmentWitnessContractInput`,
   `MfaEnrollmentWitnessHarness` and `MfaEnrollmentWitnessUser`;
+- `mfaFactorContract`, with `MfaFactorContractInput`,
+  `MfaFactorEnrollmentStart` and `MfaFactorChallenge`;
 - `startFakeStore`, with `FAKE_STORE_MAX_BODY_BYTES`, `FakeStore`,
   `FakeStoreOptions`, `FakeStoreUser`, `FakeStoreUrls`, `FakeStoreEndpoint`,
   `FakeStoreRequest`, `FakeStoreAnswer` and `FakeStoreAnswerer`.
@@ -132,6 +173,7 @@ Exported from [`src/index.mts`](src/index.mts):
 | Test file | Pins |
 | --- | --- |
 | [`enrollmentWitness.contract.test.mts`](src/mfa/__tests__/enrollmentWitness.contract.test.mts) | the witness's suite over an in-process repository and over the fake Store; each broken repository — one that erases or sets every witness when it refuses a subject among them — refused by the case that names what it breaks; the outage case present only with `withOutage`; the kit's `ContractCase` core's |
+| [`factor.contract.test.mts`](src/mfa/__tests__/factor.contract.test.mts) | the factor suite over core's double, with and without a challenge; each broken factor refused by the case that names what it breaks |
 | [`fakeStore.test.mts`](src/mfa/__tests__/fakeStore.test.mts) | each endpoint's answers over real HTTP: every record answered back, the update's compare-and-set and what it writes, `409` / `404`, changes carrying another field refused, the witness mark's `204` / `404` and idempotence, the credential, what it refuses before it records a request, what it records, and an endpoint answered as told — at once, later, or never |
 
 ## See also

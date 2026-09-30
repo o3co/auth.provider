@@ -157,6 +157,7 @@ const ADDED: Readonly<Record<string, readonly string[]>> = {
 	// mfaModules, over core's memory MFA stores.
 	"@o3co/auth-provider-mfa": [
 		"mfa-totp-factor",
+		"mfa-recovery-code-factor",
 		"mfa",
 		"core-mfa-factor-store-memory",
 		"core-mfa-transaction-store-memory",
