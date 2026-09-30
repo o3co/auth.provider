@@ -122,6 +122,25 @@ describe("expectedSessionRequirements", () => {
 		expect(of({ mfa: { mode: "required" } })).toEqual({ expected: ["mfa"] });
 	});
 
+	it("keeps the configuration's list as written, repeats included, and adds mfa only when it is absent", () => {
+		const of = (config: unknown) => expectedSessionRequirements(config as never);
+		expect(
+			of({ mfa: { mode: "required" }, sessionRequirements: { expected: ["risk", "risk"] } }),
+		).toEqual({
+			expected: ["risk", "risk", "mfa"],
+		});
+		expect(
+			of({ mfa: { mode: "required" }, sessionRequirements: { expected: ["mfa", "risk", "mfa"] } }),
+		).toEqual({
+			expected: ["mfa", "risk", "mfa"],
+		});
+		expect(
+			of({ mfa: { mode: "off" }, sessionRequirements: { expected: ["risk", "risk"] } }),
+		).toEqual({
+			expected: ["risk", "risk"],
+		});
+	});
+
 	it("declares nothing when the configuration writes no list and the mode is off, so boot's own rule for an unwritten key applies", () => {
 		expect(expectedSessionRequirements({ mfa: { mode: "off" } } as never)).toBeUndefined();
 		expect(expectedSessionRequirements({} as never)).toBeUndefined();
