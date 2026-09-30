@@ -73,6 +73,7 @@ import {
 	checkWithFailMode,
 	cookieClaim,
 	coveredByRevocationBoundary,
+	createRateLimitPolicy,
 	describeAdmissionOutage,
 	describeIssuerRejection,
 	type FederatedIdentityLookupResult,
@@ -92,7 +93,6 @@ import {
 	type LoginEntry,
 	parseScopeTokens,
 	type RateLimiter,
-	type RateLimitFailMode,
 	recordAuditEvent,
 	type SessionClaim,
 	type SessionRequirementResolver,
@@ -161,8 +161,8 @@ export interface FederationGrantBrowserRouterOptions {
 	readonly csrfGuard: Pick<CsrfGuard, "check">;
 	/** `oauth.jwt.issuer`, held to core's `checkCanonicalIssuer`: every URL this router builds is built on it. */
 	readonly issuer: string;
+	/** The browser budget; its own `failMode` is the outage policy. */
 	readonly rateLimiter: RateLimiter;
-	readonly failMode: RateLimitFailMode;
 	readonly background: FederationGrantBackground;
 	/**
 	 * The subject's GRANTS boundary: what the callback's backstop and re-read
@@ -562,21 +562,24 @@ export function createFederationGrantBrowserRouter(
 		);
 	};
 
+	// The deployment's own logger and audit sink: a limiter outage here is
+	// logged and audited as on every other throttled route.
+	const throttlePolicy = createRateLimitPolicy(
+		{
+			limiter: options.rateLimiter,
+			tag: FEDERATION_GRANTS_BROWSER_RATE_LIMIT_PREFIX,
+			...(options.logger === undefined ? {} : { logger: options.logger }),
+			...(options.auditSink === undefined ? {} : { auditSink: options.auditSink }),
+		},
+		"createFederationGrantBrowserRouter",
+	);
 	/** The browser budget: the outage policy is core's, the rendering is the transport's. */
 	const throttle =
 		(render: (res: Response, status: number) => void): RequestHandler =>
 		async (req, res, next) => {
 			const ip = req.ip ?? "unknown";
-			// The deployment's own logger and audit sink: a limiter outage here
-			// is logged and audited as on every other throttled route.
 			const outcome = await checkWithFailMode(
-				{
-					limiter: options.rateLimiter,
-					tag: FEDERATION_GRANTS_BROWSER_RATE_LIMIT_PREFIX,
-					failMode: options.failMode,
-					...(options.logger === undefined ? {} : { logger: options.logger }),
-					...(options.auditSink === undefined ? {} : { auditSink: options.auditSink }),
-				},
+				throttlePolicy,
 				`${FEDERATION_GRANTS_BROWSER_RATE_LIMIT_PREFIX}:ip:${ip}`,
 				{
 					ip,

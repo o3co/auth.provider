@@ -23,11 +23,14 @@
  * template's configuration layers (`templates/standalone/config/*.conf`):
  * each `${?VAR}` (or `${VAR}`) outside a comment is resolved alone, set to a
  * marker, and the paths the marker lands on are the paths the variable sets.
+ * A capture of a renamed variable (`renamed-variables.<NAME>`) sets no
+ * setting and is not held to the rule.
  *
  * The rule (`namingProblems`): a misnamed variable fails unless it is in
  * `LEGACY`, the names that predated the rule, whatever else a change renames.
  * `LEGACY` only loses entries, and may keep a name that has since been
- * renamed. How many variables are misnamed is held at exactly `CEILING`: a
+ * renamed; an entry whose binding moves to another layer follows it, its
+ * layer changed and its name and path not. How many variables are misnamed is held at exactly `CEILING`: a
  * rename fails until `CEILING` is lowered by the names it renames. Nothing
  * raises it.
  */
@@ -38,6 +41,7 @@ import { fileURLToPath } from "node:url";
 import { parseFile } from "@o3co/ts.hocon";
 import { describe, expect, it } from "vitest";
 import { environmentVariableFor } from "#/config/environment-variable.mjs";
+import { RENAMED_VARIABLES_SECTION } from "#/config/removed-keys.mjs";
 
 const PACKAGES = fileURLToPath(new URL("../../../../", import.meta.url));
 const TEMPLATE_CONFIG = fileURLToPath(
@@ -49,7 +53,7 @@ const TEMPLATE_CONFIG = fileURLToPath(
  * many as are today. A rename lowers it by the names it renames; nothing
  * raises it.
  */
-const CEILING = 61;
+const CEILING = 59;
 
 /** `LEGACY`'s first count: it only ever loses entries. */
 const LEGACY_BASELINE = 61;
@@ -57,17 +61,10 @@ const LEGACY_BASELINE = 61;
 /**
  * The names that predated the rule, as `<layer>: <VAR> at <path>`, where
  * `<layer>` is a package's directory name, or `template` for the standalone
- * template's layers. Entries are deleted, never added (see the file header).
+ * template's layers. Entries are deleted, never added; one follows its
+ * binding to another layer (see the file header).
  */
 const LEGACY: readonly string[] = [
-	"core: LOG_LEVEL at logging.level",
-	"core: OAUTH_JWT_ALGORITHM at oauth.jwt.signingKey.local.algorithm",
-	"core: OAUTH_JWT_KID at oauth.jwt.signingKey.local.kid",
-	"core: OAUTH_JWT_SECRET at oauth.jwt.signingKey.local.secret",
-	"core: OAUTH_JWT_PRIVATE_KEY_PATH at oauth.jwt.signingKey.local.privateKeyPath",
-	"core: OAUTH_JWT_PUBLIC_KEY_PATH at oauth.jwt.signingKey.local.publicKeyPath",
-	"core: OAUTH_JWT_PRIVATE_KEY at oauth.jwt.signingKey.local.privateKey",
-	"core: OAUTH_JWT_PUBLIC_KEY at oauth.jwt.signingKey.local.publicKey",
 	"core: OAUTH_GRANTS_JWT_BEARER_ENABLED at oauth.grants.urn:ietf:params:oauth:grant-type:jwt-bearer.enabled",
 	"core: OAUTH_CIMD_ENABLED at oauth.clientIdMetadataDocuments.enabled",
 	"core: OAUTH_CIMD_ALLOWED_SCOPES at oauth.clientIdMetadataDocuments.allowedScopes",
@@ -102,10 +99,16 @@ const LEGACY: readonly string[] = [
 	"core: REFRESH_TOKEN_FAMILY_STORE_CAS_RETRY_LIMIT at redisRefreshTokenFamilyStore.casRetryLimit",
 	"core: CLIENT_CODE_KEY_PREFIX at redisCodeRepository.keyPrefix",
 	"mfa: MFA_ENCRYPTION_KEY at mfa.encryptionKeys.0.key",
-	"mfa: MFA_TOTP_ENABLED at mfa.factors.totp.enabled",
-	"mfa: MFA_TOTP_ISSUER at mfa.factors.totp.issuer",
 	"webauthn: WEBAUTHN_AUTHENTICATION_OPTIONS_RATE_LIMIT at webauthn.rateLimit.authenticationOptions.limit",
 	"webauthn: WEBAUTHN_AUTHENTICATION_OPTIONS_RATE_WINDOW_SECONDS at webauthn.rateLimit.authenticationOptions.windowSeconds",
+	"template: LOG_LEVEL at logging.level",
+	"template: OAUTH_JWT_ALGORITHM at oauth.jwt.signingKey.local.algorithm",
+	"template: OAUTH_JWT_KID at oauth.jwt.signingKey.local.kid",
+	"template: OAUTH_JWT_SECRET at oauth.jwt.signingKey.local.secret",
+	"template: OAUTH_JWT_PRIVATE_KEY_PATH at oauth.jwt.signingKey.local.privateKeyPath",
+	"template: OAUTH_JWT_PUBLIC_KEY_PATH at oauth.jwt.signingKey.local.publicKeyPath",
+	"template: OAUTH_JWT_PRIVATE_KEY at oauth.jwt.signingKey.local.privateKey",
+	"template: OAUTH_JWT_PUBLIC_KEY at oauth.jwt.signingKey.local.publicKey",
 	"template: CLIENT_TYPE at repositories.client.type",
 	"template: CLIENT_PATH at repositories.client.yaml.path",
 	"template: CLIENT_USER_TYPE at repositories.user.type",
@@ -187,10 +190,17 @@ const FOUND = LAYERS.flatMap(([name, path]) =>
 	})),
 );
 
+/**
+ * Whether `path` is a capture of a renamed variable (`renamed-variables.<NAME>`):
+ * no setting, but what the resolution saw of a declared name, held by the
+ * package's own `packageReferenceProblems`.
+ */
+const isCapture = (path: string): boolean => path.startsWith(`${RENAMED_VARIABLES_SECTION}.`);
+
 /** Each variable at a path it is not the upper-snake-case form of, as `LEGACY` writes it. */
 const MISNAMED: readonly string[] = FOUND.flatMap(({ package: name, variable, paths }) =>
 	paths
-		.filter((path) => upperSnake(path) !== variable)
+		.filter((path) => !isCapture(path) && upperSnake(path) !== variable)
 		.map((path) => `${name}: ${variable} at ${path}`),
 );
 

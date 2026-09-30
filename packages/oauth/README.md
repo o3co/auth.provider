@@ -88,7 +88,7 @@ const handle = await createApp({
 
 const server = express();
 server.use(handle.router);
-server.listen(config.http.port);
+server.listen(port); // the composition's own setting; the standalone template's `http` module owns it
 // on shutdown
 await handle.dispose();
 ```
@@ -128,7 +128,7 @@ The six slots are `userSessionStore`, `sessionRPRegistry`, `sessionFamilyIndex`,
 
 **Space-delimited values.** A `scope`, `prompt` or `acr_values` a client sends is read by RFC 6749 §3.3's grammar, strictly (core's `readSpaceDelimitedParameter`): the space is the only delimiter, and an entry that is not a scope-token — a tab, a newline, a quote, a backslash, anything outside printable ASCII — makes the whole value malformed. A malformed `scope` is `invalid_scope` with `scope is not a space-delimited list of scope-tokens`, on `/oauth/token` for every grant here and at `/oauth/authorize` — never narrowed, and never checked against an allowlist as if it named a scope. Spaces alone are an omitted scope, as an empty value is; a tab alone is malformed. A malformed `prompt` or `acr_values` is `invalid_request`. A repeated `scope` — or any present value that is not a string — is `invalid_request`, while a JSON body's `"scope": null` is an omitted scope, as `scope=` is in a form body (RFC 6749 §3.2). The `scope` claim of this package's own access and refresh tokens (at `/oauth/userinfo`, on refresh) is read so it never widens (`readIssuedScope`): split on the space alone, and an entry that is not a scope-token is dropped — a token minted before requests were read strictly can carry `openid<TAB>email` as one entry, which named no scope and releases no claim now. A refresh carries the token's scope on in canonical form. What a third party wrote — a client metadata document's `scope`, an upstream's answer — is read tolerantly (`parseScopeTokens`): split on any whitespace, keeping the scope-tokens.
 
-`/token`, `/introspect`, `/authorize` and `/revoke` are throttled by the composition's `rateLimiter` when one is wired, ahead of client authentication, under the product's `rateLimit.failMode`; without one they are not throttled.
+`/token`, `/introspect`, `/authorize` and `/revoke` are throttled by the composition's `rateLimiter` when one is wired, ahead of client authentication, under the limiter's own outage policy (`RateLimiter.failMode`; the Redis limiter's is `rateLimit.failMode`); without one they are not throttled. They limit under the prefixes `token`, `introspect`, `authorize` and `revoke`, which the oauth module claims with no budget of its own (`rateLimitBudgets`): the limiter's `limits` entry or its default applies, and no other module can set a budget for them.
 
 The router refuses to be built — which through `createApp` is a boot failure — when `consentStore` is wired without `pendingConsentStore` or the reverse, and when `oauth.revocation.accessToken = "denylist"` is declared with no `accessTokenDenylist`.
 

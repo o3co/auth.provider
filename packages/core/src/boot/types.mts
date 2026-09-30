@@ -204,9 +204,9 @@ export interface ProviderActivation {
 	readonly module: string;
 	readonly componentKey: ComponentKey;
 	/**
-	 * True when this entry is in the activation closure only because
-	 * `lifecycle[componentKey].eager === true`. Used by diagnostics; does not
-	 * change runtime behaviour.
+	 * True when this entry is in the activation closure only as a seed:
+	 * `lifecycle[componentKey].eager === true`, or a slot core reads. Used by
+	 * diagnostics; does not change runtime behaviour.
 	 */
 	readonly eager: boolean;
 }
@@ -609,12 +609,12 @@ export type BootStage =
 	| "assembleApp";
 
 // ---------------------------------------------------------------------------
-// BootErrorReason — 38 literals
+// BootErrorReason — 39 literals
 // ---------------------------------------------------------------------------
 
 /**
  * Every reason a BootError can carry: one literal per validation or runtime
- * failure the boot planner detects, 38 in all.
+ * failure the boot planner detects, 39 in all.
  */
 export type BootErrorReason =
 	| "module-factory-not-called"
@@ -652,12 +652,13 @@ export type BootErrorReason =
 	| "contribution-kind-guarded"
 	| "contribution-malformed"
 	| "config-path-relocated"
+	| "environment-variable-renamed"
 	| "authoritative-without-provides"
 	| "authoritative-component-overridden"
 	| "token-settings-lifetime-exceeds-configuration";
 
 // ---------------------------------------------------------------------------
-// Per-reason *Details interfaces — one per BootErrorReason, 38 in all
+// Per-reason *Details interfaces — one per BootErrorReason, 39 in all
 // ---------------------------------------------------------------------------
 
 /**
@@ -903,7 +904,8 @@ export type ReservedComponentKeyDetails =
  * (`problem` names that module); or a `relocatedFrom` that is neither a list
  * of such paths nor a map from them to paths inside the section (`""` for the
  * section itself), or whose old path is or holds a loaded module's section
- * (`problem` says what is wrong).
+ * (`problem` says what is wrong); or a `renamedVariables` entry boot cannot
+ * hold (`problem` says why).
  */
 export type ModuleSectionPathInvalidDetails =
 	| {
@@ -919,6 +921,13 @@ export type ModuleSectionPathInvalidDetails =
 			readonly module: string;
 			/** The old path (a list entry or a map key), or the whole value when it is neither form. */
 			readonly relocatedFrom: unknown;
+			readonly problem: string;
+	  }
+	| {
+			readonly reason: "module-section-path-invalid";
+			readonly module: string;
+			/** The old variable name (a map key), or the whole value when it is not a plain map. */
+			readonly renamedVariable: unknown;
 			readonly problem: string;
 	  };
 
@@ -940,6 +949,28 @@ export interface ConfigPathRelocatedDetails {
 		/** The dot path it moved to; `null` for a key removed rather than moved. */
 		readonly to: string | null;
 		readonly environmentVariable?: string;
+	}[];
+}
+
+/**
+ * What the resolution captured of a variable a loaded module — or core, for
+ * its own section — declares renamed (`section.renamedVariables`) refuses
+ * boot. Each entry: the declaring module (`"core"` for core), the old name,
+ * the new name and the dot path it is bound to (both `null` for a removed
+ * key), and why (`state`): the new name `unset` or set to a `different`
+ * string while the old one is set, a `removed` key's variable set, or a name
+ * the configuration does not capture (`uncaptured`). No value is carried: a
+ * variable may hold a secret. A bridge for the 0.x line, removed at the first
+ * major release with `config-path-relocated`.
+ */
+export interface EnvironmentVariableRenamedDetails {
+	readonly reason: "environment-variable-renamed";
+	readonly renamed: readonly {
+		readonly module: string;
+		readonly from: string;
+		readonly to: string | null;
+		readonly path: string | null;
+		readonly state: "unset" | "different" | "removed" | "uncaptured";
 	}[];
 }
 
@@ -1239,7 +1270,7 @@ export interface DuplicateSecondFactorAuthorityDetails {
 
 /**
  * Discriminated union (on `reason`) of the per-reason details: one member
- * per `BootErrorReason`, 38 in all.
+ * per `BootErrorReason`, 39 in all.
  */
 export type BootErrorDetails =
 	| ModuleFactoryNotCalledDetails
@@ -1277,6 +1308,7 @@ export type BootErrorDetails =
 	| ContributionKindGuardedDetails
 	| ContributionMalformedDetails
 	| ConfigPathRelocatedDetails
+	| EnvironmentVariableRenamedDetails
 	| AuthoritativeWithoutProvidesDetails
 	| AuthoritativeComponentOverriddenDetails
 	| TokenSettingsLifetimeExceedsConfigurationDetails;

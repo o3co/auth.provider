@@ -50,6 +50,7 @@ import request from "supertest";
 import { afterEach, describe, expect, it } from "vitest";
 import { buildModules } from "#/buildModules.mjs";
 import { resolveConfigPaths } from "#/configPath.mjs";
+import { templateReference } from "../modules.mjs";
 
 const configDir = fileURLToPath(new URL("../../config", import.meta.url));
 
@@ -90,6 +91,7 @@ function resolveConfig(trustUpstreamAmr: boolean | undefined): AppConfig {
 	const shipped = validate(
 		parseFile(envConfPath, { env: ENV })
 			.withFallback(parseFile(applicationConfPath, { env: ENV }))
+			.withFallback(parseFile(fileURLToPath(templateReference()), { env: ENV }))
 			.withFallback(parseFile(fileURLToPath(coreReference()), { env: ENV })),
 		AppConfigSchema,
 	) as AppConfig;
@@ -185,7 +187,7 @@ const testKeyStoreModule = defineModule({
 			registerBuiltinKeyStores(factory);
 			return factory.create({
 				type: "local",
-				...((c as AppConfig).oauth.jwt.signingKey.local ?? {}),
+				...((c as AppConfig).oauth.jwt.signingKey?.local ?? {}),
 			});
 		},
 	},

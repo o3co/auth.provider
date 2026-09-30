@@ -34,6 +34,7 @@ import { z } from "zod";
 import { vouchableAcrValues } from "./acrValues.mjs";
 import { OAUTH_ROUTER_ADMISSION_ACTIONS } from "./admissionActions.mjs";
 import { CLIENT_ASSERTION_ALGORITHMS } from "./middleware/clientAssertion.mjs";
+import { OAUTH_RATE_LIMIT_PREFIXES } from "./rateLimitPrefixes.mjs";
 import { createOAuthRouter } from "./routes.mjs";
 import { oauthTokenSettingsFrom } from "./tokenSettings.mjs";
 
@@ -179,6 +180,11 @@ export const oauthModule = (_params: { config: AppConfig }): Module => {
 		contributes: {
 			// What the router's /authorize and consent step admit.
 			admissionActions: OAUTH_ROUTER_ADMISSION_ACTIONS,
+			// The prefixes the endpoints limit under, claimed with no budget of
+			// their own: the limiter's `limits` entry or its default applies.
+			rateLimitBudgets: Object.fromEntries(
+				Object.values(OAUTH_RATE_LIMIT_PREFIXES).map((prefix) => [prefix, () => null]),
+			),
 			routes: [
 				// oauth-endpoints — always contributed.
 				async (deps) => {

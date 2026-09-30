@@ -18,13 +18,16 @@ the Google and generic OpenID Connect federation adapters, `-federation-grants`,
 - which modules are composed, in what order, and which adapter fills each
   store slot — [`src/buildModules.mts`](src/buildModules.mts) (see
   [Module Composition Order](#module-composition-order));
-- the modules only this scaffold has — the signing key store, the client and
-  user repositories, the audit sink, the one shared Redis connection, the
-  in-memory user-session stores, code repository and federation token store,
-  and the federation config bridges — [`src/modules.mts`](src/modules.mts).
-  They are the scaffold's rather than a package's because each builds its
-  component from this template's configuration sections; a deployment that
-  wants another source wires its own module of the same shape;
+- the modules only this scaffold has — `logging`, `http` and `cors` (the
+  host process's own settings, and core's `httpSettings` slot), the signing
+  key store, the client and user repositories, the audit sink, the one shared
+  Redis connection, the in-memory user-session stores, code repository and
+  federation token store, and the federation config bridges —
+  [`src/modules.mts`](src/modules.mts), with the defaults of the sections they
+  own in [`config/reference.conf`](config/reference.conf). They are the
+  scaffold's rather than a package's because each builds its component from
+  this template's configuration sections; a deployment that wants another
+  source wires its own module of the same shape;
 - where configuration comes from and how its layers stack —
   [`src/configPath.mts`](src/configPath.mts) and [`config/`](config/);
 - the host process: the Express app, its security headers and startup —
@@ -120,7 +123,7 @@ It takes four shapes, all of them Express's own:
 
 An allowlist is a network control, not a cryptographic one. The edge must also **strip** inbound `X-Forwarded-*` headers rather than appending to them, and the hop between it and this process must not be reachable by anyone able to spoof a source address.
 
-**Point `rateLimiter.adapter` at Redis.** It defaults to `"memory"`, which is per-process: with N replicas every configured limit is effectively N times larger and resets on every deploy. The memory adapter is also **evadable under bucket exhaustion**: it caps itself at 10,000 buckets and, at the cap, admitting a new key evicts the bucket closest to reset — so an attacker who can present many source IPs (and `req.ip` is client-influenced whenever `HTTP_TRUST_PROXY` is broader than your actual hops) can churn the table until a target's counter is evicted and starts over. That is acceptable for one dev process; it is not a production rate limit. The login guard runs on this same shared component, so one setting covers both the OAuth endpoints and `/session/login`. The login window and limit stay configured at `rateLimit.login`; both adapters seed their own `limits.login` from it, so there is nothing to restate.
+**Point `rateLimiter.adapter` at Redis.** It defaults to `"memory"`, which is per-process: with N replicas every configured limit is effectively N times larger and resets on every deploy. The memory adapter is also **evadable under bucket exhaustion**: it caps itself at 10,000 buckets and, at the cap, admitting a new key evicts the bucket closest to reset — so an attacker who can present many source IPs (and `req.ip` is client-influenced whenever `HTTP_TRUST_PROXY` is broader than your actual hops) can churn the table until a target's counter is evicted and starts over. That is acceptable for one dev process; it is not a production rate limit. The login guard runs on this same shared component, so one setting covers both the OAuth endpoints and `/session/login`. The login window and limit stay configured at `rateLimit.login`; the session module contributes them as the `login` budget both adapters read, so there is nothing to restate.
 
 **Behind a BFF, raise `limits.token` before you need to.** The OAuth-endpoint
 rate limits key on `req.ip` (`packages/core/src/ratelimit/guard.mts` builds the
@@ -262,7 +265,7 @@ image and its compose file are under [Docker](#docker).
 
 ## Configuration
 
-Configuration is loaded from `config/application.conf` (HOCON format). Each value can be overridden with the corresponding environment variable.
+Configuration is loaded from `config/application.conf` (HOCON format), over the defaults in the packages' `reference.conf` files and the template's own `config/reference.conf`. Each value can be overridden with the corresponding environment variable.
 
 ### Environment-specific config overlay
 
@@ -272,10 +275,20 @@ Configuration is loaded from `config/application.conf` (HOCON format). Each valu
    `ENV = CONFIG_ENV || NODE_ENV || "development"`.
 2. **`config/application.conf`** — this deployment's settings.
 3. **the `reference.conf` of each package the loaded modules come from**, then
-   **`@o3co/auth-provider-core`'s** — the library defaults, resolved from the
+   **`@o3co/auth-provider-core`'s** — the defaults, resolved from the
    installed packages: each module declares its package's file, and core's
-   `moduleReferences(modules)` lists them, core's last. A key neither file
-   above sets takes its value from here.
+   `moduleReferences(modules)` lists them, core's last. The template's own
+   modules declare `config/reference.conf`, which holds the defaults of the
+   sections they own: `logging`, `http`, `cors`, the key store's
+   `oauth.jwt.signingKey` and the shared Redis connection's
+   `refreshTokenFamilyStore.redis`. Set a deployment's own value in the two
+   files above, not there. `config/reference.conf` binds each of these keys'
+   variables beside its default, so a value either file above sets wins over
+   the variable, except for `HTTP_PORT`, `HTTP_TRUST_PROXY`,
+   `CORS_ALLOWED_ORIGINS` and `REFRESH_TOKEN_FAMILY_STORE_REDIS_URL` /
+   `_PASSWORD`, which `application.conf` binds again in its last lines, so
+   each of those wins over a value that file sets above them. A key neither
+   file above sets takes its value from here.
 
 It reads the two files above once, under one snapshot of the environment
 (`readOwnLayers`), and builds two phases from that one read
@@ -284,8 +297,8 @@ It reads the two files above once, under one snapshot of the environment
 variable changed, while the process starts cannot make boot parse something
 other than what the modules were chosen by. First, before it knows its
 modules, it reads the switches `buildModules` chooses them by — the adapters,
-the federations, the log level — and the `sessionRequirements` it derives the
-session requirements it expects from, from the two files above over core's
+the federations — and the `sessionRequirements` it derives the session
+requirements it expects from, from the two files above over core's
 `reference.conf` alone (`readSwitches`, with core's transitional reader),
 parsing those paths (`SWITCHES`) and nothing else. Beside them it reads
 `mfa.mode` itself (`readMfaMode`): the MFA module's key, which a composition
@@ -296,13 +309,17 @@ it installs the MFA module, at the MFA ADR's build-order step 20, which
 removes the reading. It sees nothing
 a package's `reference.conf` alone sets — none is layered yet — and a module
 you add to `buildModules` that reads its configuration when it is built adds
-the paths it reads to `SWITCHES`. Then it hands `createApp` the configuration as resolved over every
+the paths it reads to `SWITCHES`. The log level is read before boot too, as
+the `logging` module's section, with that module's schema, over the template's
+`reference.conf` (`readLogging`): the logger exists before boot, since the
+template logs while it reads its configuration and chooses its modules. Then it hands `createApp` the configuration as resolved over every
 loaded module's `reference.conf` (`resolveForBoot`), unparsed, with the session
 requirements phase one derived written in, and without the `mfa` section
 unless a loaded module reads it: boot parses it once, with every loaded
 module's schema, and strips no module's section. What
-the template reads after boot — `http.trustProxy`, the port, the readiness
-timeout — it reads from the parsed configuration. A top-level section no
+the template reads after boot — the trusted hops, the port, the readiness
+deadline — it reads from the `http` module: core's `httpSettings` slot and the
+template's `httpHostSettings`. A top-level section no
 loaded module owns is kept and logged once at boot as
 `config_sections_ignored`: that is where a misspelt section name shows.
 
@@ -474,6 +491,11 @@ or `CORS_ALLOWED_ORIGINS=https://app.example.com,http://localhost:5173`.
 Those are the two spellings; a value that is neither — a number, an
 object, a boolean, which only a configuration file can write — fails boot
 naming `cors.allowedOrigins` rather than reading as no origins.
+
+The list is the `cors` module's section, with its default in
+`config/reference.conf`. The `http` module hands it to core's CORS middleware
+in the `httpSettings` slot, beside the trusted hops, and core reads the slot,
+not the configuration.
 
 **Matching is exact string equality against the `Origin` header**, and every
 shape that could not match fails at boot naming its index rather than sitting
@@ -830,8 +852,9 @@ are configured per federation (`FEDERATIONS_GOOGLE_CALLBACK_URL`,
 1. **`sessionStoreModuleFor(config)` stays first.** It mounts the `express-session` middleware and declares no `before` / `after`, so its position in the list is what puts it ahead of every route that reads `req.session`. It is built from `config` so that `session.storage.type = "memory"` declares itself replica-unsafe.
 2. **Under `/oauth`, the order does not matter.** `federationGrantsModules` (while federation grants are enabled), `oauthModule` and any module of your own may all mount routes under `/oauth`. `oauthModule`'s router parses the bodies of its own routes only, so each module's requests reach its own parsers whatever the list order — provided every module under `/oauth` parses its own body and scopes its parsers to exactly its own paths, as the shipped ones do — a route (`router.all(path, parser)` or the route's own handler list), not `router.use(path, parser)`, which matches every path beneath `path` as well. The federation grants browser half orders itself after the session middleware with its own `after`.
 3. **One module per store slot.** Each adapter switch — `federationTokenStore.type`, `userSessionStores.adapter`, `rateLimiter.adapter`, `oauth.code.adapter`, `accessTokenDenylist.adapter`, `replaySeenSet.adapter`, `consentStore.adapter`, and the two federation-grant store switches — picks one of a memory / Redis pair. Both provide the same slot, so wiring both is a boot-time slot collision. `consentStore.adapter = "none"` wires neither, and the federation-grant stores are wired only while the feature is enabled.
-4. **The shared Redis connection comes with the first Redis-backed module.** `standaloneRedisClientsModule` opens the one ioredis connection every Redis adapter here uses, and is added whenever a composed module needs one. The refresh-token family store is on Redis in the shipped composition, so a deployment always has it; the in-memory family store is a test override (`overrides.refreshTokenFamilyModules`).
-5. **A federation adapter comes with its config bridge.** `googleFederationModule` with `googleFederationConfigModule` — only for an enabled `federations.google` section whose `type` is `google`, so a `type = "oidc"` section named `google` is not composed twice — and one `oidcFederationModule(name)` per enabled `type = "oidc"` section, with the one `oidcFederationConfigModule` they share. A bridge's provider throws when its section is absent, so the pair is included at composition time rather than gated inside it.
+4. **The shared Redis connection comes with the first Redis-backed module.** `standaloneRedisClientsModule` opens the one ioredis connection every Redis adapter here uses, from its own section (`refreshTokenFamilyStore.redis`), and is added whenever a composed module needs one. The refresh-token family store is on Redis in the shipped composition, so a deployment always has it; the in-memory family store is a test override (`overrides.refreshTokenFamilyModules`).
+5. **The template's own settings modules are always composed.** `loggingModule`, `httpModule` and `corsModule` own `logging {}`, `http {}` and `cors {}`. `httpModule` requires the CORS list `corsModule` provides (`corsAllowedOrigins`, a slot of the template's own), and provides core's `httpSettings`. Both slots are authoritative, so no `overrideComponents` entry replaces either while its module is loaded; `httpModule` also provides the template's `httpHostSettings`, which `app.mts` reads after boot for the port and the readiness deadline. The logger is built before boot from the `logging` section (`readLogging`), not by a module, and handed to boot as the `logger` component.
+6. **A federation adapter comes with its config bridge.** `googleFederationModule` with `googleFederationConfigModule` — only for an enabled `federations.google` section whose `type` is `google`, so a `type = "oidc"` section named `google` is not composed twice — and one `oidcFederationModule(name)` per enabled `type = "oidc"` section, with the one `oidcFederationConfigModule` they share. A bridge's provider throws when its section is absent, so the pair is included at composition time rather than gated inside it.
 
 `jwksModule` (from core) is always composed: a provider that signs tokens publishes its verification keys whether or not an issuer is configured. What each route module mounts is in its package's README. One behaviour to know when composing: `sessionModule`'s `POST /session/logout` deletes the `UserSession` record (so `/oauth/introspect` and `/oauth/userinfo` stop honouring tokens minted from that session), the subject index and the federation entries — but it does **not** revoke refresh-token families; `POST /oauth/logout` is the endpoint that runs the full cascade. See [Which logout endpoint invalidates what](../../docs/operator-runbook.md#which-logout-endpoint-invalidates-what).
 
@@ -1073,7 +1096,8 @@ Each stage logs one line:
 
 The provider logs newline-delimited JSON on stdout via [pino](https://getpino.io),
 which is what a log aggregator ingests without a parser. `LOG_LEVEL` (HOCON
-`logging.level`) sets the threshold; `trace` and `debug` carry request-shaped
+`logging.level`, the `logging` module's section, read before boot with that
+module's schema) sets the threshold; `trace` and `debug` carry request-shaped
 detail and are off by default, and pino drops sub-threshold calls before
 formatting, so they cost nothing in production rather than being emitted and
 filtered downstream.

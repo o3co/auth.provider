@@ -382,11 +382,19 @@ function closureKey(module: string, componentKey: ComponentKey): string {
 }
 
 /**
+ * Slots core's own machinery reads after stage 3 (the CORS origins, the
+ * issuer): a provider of one is always built, so core reads the slot, not the
+ * configuration, whenever a module provides it.
+ */
+const CORE_READ_SLOTS: readonly ComponentKey[] = ["httpSettings", "oauthTokenSettings"];
+
+/**
  * Computes the per-component activation closure. Its roots are the modules
- * with any `contributes` or `overrides` entry, and its eager seeds the
- * components with `lifecycle[K].eager === true`; from each, the module's
- * `requires` and `optional` edges are walked recursively. A module is not
- * all-or-nothing: each (module, key) pair is decided on its own.
+ * with any `contributes` or `overrides` entry, and its seeds the components
+ * with `lifecycle[K].eager === true` and the providers of `CORE_READ_SLOTS`
+ * no host map fills; from each, the module's `requires` and `optional` edges
+ * are walked recursively. A module is not all-or-nothing: each (module, key)
+ * pair is decided on its own.
  * @internal
  */
 function computeActivationClosure(
@@ -454,6 +462,13 @@ function computeActivationClosure(
 				addToClosureAndWalk(vm, key, "eager");
 			}
 		}
+	}
+
+	// --- Core-read seeds: every provider of a slot core reads, unless a host fills it ---
+	for (const key of CORE_READ_SLOTS) {
+		if (virtualKeys.has(key)) continue;
+		const provider = validated.providers.get(key);
+		if (provider) addToClosureAndWalk(provider, key, "eager");
 	}
 
 	// --- Compute eagerOnlyKeys: in viaEagerSeed but NOT in viaRequireChain ---
@@ -531,7 +546,8 @@ function buildPlanOutputs(
  *    `reason: "circular-dependency"`, `stage: "planBoot"`.
  * 3. Topological sort (Kahn's), ties broken by declaration order.
  * 4. Per-component activation closure from the contribute/override roots and
- *    the eager seeds; non-eager siblings do not come along.
+ *    the seeds (eager components, providers of slots core reads); other
+ *    siblings do not come along.
  * 5. `providerActivations` (per component, not per module) and
  *    `depsBlueprint` (lookup keys, not values).
  */

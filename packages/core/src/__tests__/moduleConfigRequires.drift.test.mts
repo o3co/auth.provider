@@ -98,9 +98,7 @@ const CONFIG_REQUIRERS: readonly string[] = [
 	// settings and the adapter selection.
 	"templates/standalone -> audit-sink",
 	"templates/standalone -> google-federation-config",
-	"templates/standalone -> key-store",
 	"templates/standalone -> oidc-federation-config",
-	"templates/standalone -> redis-clients",
 	"templates/standalone -> repositories",
 	"templates/standalone -> standalone-in-memory-code-repository",
 	"templates/standalone -> stores",

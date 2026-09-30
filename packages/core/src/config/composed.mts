@@ -36,6 +36,7 @@
 
 import type { z } from "zod";
 import { type AppConfig, CoreConfigSchema, fullSectionsSchema } from "./application.schema.mjs";
+import { withoutRenamedVariables } from "./removed-keys.mjs";
 import { pickConfigSchema } from "./schema-path.mjs";
 
 /**
@@ -117,10 +118,10 @@ export function operatorPath(path: readonly PropertyKey[]): string {
 
 /**
  * What a composition root reads before it knows its modules (transitional):
- * the values at `reads` (the switches it chooses its modules by, its log
- * level), each parsed with the schema the transitional base declares at that
- * path (`pickConfigSchema`) and laid over `raw`, so every key it does not
- * read stays as written.
+ * the values at `reads` (the switches it chooses its modules by), each parsed
+ * with the schema the transitional base declares at that path
+ * (`pickConfigSchema`) and laid over `raw`, so every key it does not read
+ * stays as written.
  *
  * Only `reads` is parsed. Before the modules are known, `raw` is resolved
  * over core's `reference.conf` alone, so a default only a package's
@@ -136,15 +137,19 @@ export function operatorPath(path: readonly PropertyKey[]): string {
  * `cause`; so is a path the base does not declare as one schema, or one
  * beneath a value the base transforms whole (read the shorter path).
  *
+ * The captures of renamed variables (`renamed-variables`) are left out, as
+ * boot leaves them out of its parse: they are no setting.
+ *
  * Typed `AppConfig`, the type the module factories take, though only `reads`
  * is parsed: the base's own output type, every mirrored section optional, is
  * not one they accept.
  */
 export function readTransitionalConfig(raw: unknown, reads: readonly string[]): AppConfig {
+	const written = withoutRenamedVariables(raw);
 	const picked = pickConfigSchema(TransitionalConfigSchema, reads);
 	let result: ReturnType<typeof picked.safeParse>;
 	try {
-		result = picked.safeParse(raw);
+		result = picked.safeParse(written);
 	} catch (thrown) {
 		// A read that throws — a getter on a hand-built configuration — is a
 		// refusal like any other, not an error escaping the reader.
@@ -162,5 +167,5 @@ export function readTransitionalConfig(raw: unknown, reads: readonly string[]): 
 			{ cause: result.error },
 		);
 	}
-	return overlayConfig(raw, result.data) as AppConfig;
+	return overlayConfig(written, result.data) as AppConfig;
 }

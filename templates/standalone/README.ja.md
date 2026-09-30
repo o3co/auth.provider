@@ -11,7 +11,7 @@ auth.provider のデプロイ可能なサーバーテンプレート。これは
 **所有する**のは、1 つのデプロイに固有の選択である:
 
 - どのモジュールをどの順序で合成し、各ストアスロットをどのアダプターで埋めるか — [`src/buildModules.mts`](src/buildModules.mts)（[モジュール合成順序](#モジュール合成順序) を参照）
-- この scaffold だけが持つモジュール — 署名鍵ストア、クライアントリポジトリとユーザーリポジトリ、監査 sink、共有される唯一の Redis 接続、in-memory のユーザーセッションストア・コードリポジトリ・フェデレーショントークンストア、そしてフェデレーションの config bridge — [`src/modules.mts`](src/modules.mts)。これらがパッケージではなく scaffold 側にあるのは、どれもこのテンプレートの設定セクションから自分のコンポーネントを組み立てるためである。別のソースを使いたいデプロイは、同じ形のモジュールを自前で配線する
+- この scaffold だけが持つモジュール — `logging`、`http`、`cors`（ホストプロセス自身の設定と、core の `httpSettings` スロット）、署名鍵ストア、クライアントリポジトリとユーザーリポジトリ、監査 sink、共有される唯一の Redis 接続、in-memory のユーザーセッションストア・コードリポジトリ・フェデレーショントークンストア、そしてフェデレーションの config bridge — [`src/modules.mts`](src/modules.mts)。それらが所有するセクションのデフォルトは [`config/reference.conf`](config/reference.conf) にある。これらがパッケージではなく scaffold 側にあるのは、どれもこのテンプレートの設定セクションから自分のコンポーネントを組み立てるためである。別のソースを使いたいデプロイは、同じ形のモジュールを自前で配線する
 - 設定をどこから読み、そのレイヤーをどう重ねるか — [`src/configPath.mts`](src/configPath.mts) と [`config/`](config/)
 - ホストプロセス: Express アプリ、そのセキュリティヘッダー、起動処理 — [`src/app.mts`](src/app.mts)。health / readiness / metrics の各ルート、合成されたルーター、その後ろの core の終端のエラーハンドラーを、マウントする順に — [`src/routes.mts`](src/routes.mts)。リスナーはソケットが bind されたときに `server_listening`（info、`port`）を 1 行ログに出し、bind できなければその bind のエラーで起動を失敗させ、その後のサーバーのエラーは `server_error`（error）としてログに出す — [`src/listen.mts`](src/listen.mts)。このコードがログに出すエラー — 処理されなかったリクエストのエラー、共有 Redis 接続の `error` イベント、失敗したシャットダウン — はすべて core の [`loggableError`](../../packages/core/README.ja.md#logger) による射影としてログに出し、エラーそのものは出さない。エラーは上流や Redis が言ったことを運びうるためである（サーバーが接続を拒否したとき、接続のエラーは `AUTH` のハンドシェイクをパスワードごと運ぶ）
 - 具体的な logger と監査ストリーム（pino） — [`src/logger.mts`](src/logger.mts) — およびメトリクス（[`src/metrics.mts`](src/metrics.mts)）
@@ -73,7 +73,7 @@ my-app:
 
 allowlist はネットワーク上の制御であって、暗号学的な制御ではない。エッジは受信した `X-Forwarded-*` ヘッダーに追記するのではなく**除去**しなければならず、エッジとこのプロセスの間のホップは、送信元アドレスを偽装できる者から到達できてはならない。
 
-**`rateLimiter.adapter` を Redis に向けること。** デフォルトは `"memory"` でプロセスごとである: N レプリカでは設定したすべての limit が実質 N 倍になり、デプロイのたびにリセットされる。memory アダプターは**バケット枯渇によって回避可能**でもある: バケット数の上限を 10,000 とし、上限に達すると、新しいキーを受け入れる際にリセットが最も近いバケットを追い出す — そのため多数の送信元 IP を提示できる攻撃者（`HTTP_TRUST_PROXY` が実際のホップより広ければ、`req.ip` はクライアントの影響を受ける）は、標的のカウンターが追い出されてやり直しになるまでテーブルをかき回せる。これは開発用の 1 プロセスなら許容できるが、本番の rate limit ではない。ログインガードも同じ共有コンポーネントの上で動くため、1 つの設定で OAuth エンドポイントと `/session/login` の両方がカバーされる。ログインのウィンドウと上限は引き続き `rateLimit.login` で設定する。どちらのアダプターもそこから自分の `limits.login` を初期化するため、改めて書き直すものは無い。
+**`rateLimiter.adapter` を Redis に向けること。** デフォルトは `"memory"` でプロセスごとである: N レプリカでは設定したすべての limit が実質 N 倍になり、デプロイのたびにリセットされる。memory アダプターは**バケット枯渇によって回避可能**でもある: バケット数の上限を 10,000 とし、上限に達すると、新しいキーを受け入れる際にリセットが最も近いバケットを追い出す — そのため多数の送信元 IP を提示できる攻撃者（`HTTP_TRUST_PROXY` が実際のホップより広ければ、`req.ip` はクライアントの影響を受ける）は、標的のカウンターが追い出されてやり直しになるまでテーブルをかき回せる。これは開発用の 1 プロセスなら許容できるが、本番の rate limit ではない。ログインガードも同じ共有コンポーネントの上で動くため、1 つの設定で OAuth エンドポイントと `/session/login` の両方がカバーされる。ログインのウィンドウと上限は引き続き `rateLimit.login` で設定する。session モジュールがそれを両アダプターが読む `login` の予算として寄与するため、改めて書き直すものは無い。
 
 **BFF の背後では、必要になる前に `limits.token` を上げておくこと。** OAuth エンドポイントの rate limit は `req.ip` をキーにする（`packages/core/src/ratelimit/guard.mts` はバケットキーを `<endpoint>:ip:<req.ip>` として組み立てる）。クライアントがブラウザやネイティブアプリで、このプロバイダーと直接通信しているなら、これは正しい identity である。しかし backend-for-frontend 構成 — サーバー側アプリがセッションを保持し、ユーザーに代わってコード交換と refresh を行う構成 — では誤った identity になる: すべての `/oauth/token` と `/oauth/introspect` の呼び出しが BFF の単一アドレスから届き、デプロイ全体で 1 つのバケットを共有する。デフォルトの 60 秒あたり 60 リクエストでは、**全ユーザー合計で毎分およそ 60 回の session グラント交換**が上限になる — しかもそれは rate limit として表に出てこない。BFF は想定していない `429` を受け取り、それを自分の呼び出し元への `502` に変え、ユーザーが報告する症状は「サインインがときどき壊れる」になる。それは起き始めるトラフィック量に達した時点で現れ、それより前には現れない。
 
@@ -189,7 +189,7 @@ pnpm run start
 
 ## 設定
 
-設定は `config/application.conf`（HOCON 形式）から読み込まれる。各値は対応する環境変数で上書きできる。
+設定は `config/application.conf`（HOCON 形式）から、パッケージ群の `reference.conf` とテンプレート自身の `config/reference.conf` のデフォルトの上に読み込まれる。各値は対応する環境変数で上書きできる。
 
 ### 環境別コンフィグ overlay
 
@@ -197,9 +197,9 @@ pnpm run start
 
 1. **`config/{ENV}.conf`** — 現在の環境の overlay。`ENV = CONFIG_ENV || NODE_ENV || "development"` で決まる。
 2. **`config/application.conf`** — このデプロイの設定。
-3. **読み込むモジュールの各パッケージの `reference.conf`**、その次に **`@o3co/auth-provider-core` のもの** — ライブラリのデフォルト。インストール済みパッケージから解決される: 各モジュールが自分のパッケージのファイルを宣言し、core の `moduleReferences(modules)` がそれを core のものを最後にして列挙する。上の 2 ファイルのどちらも設定していないキーは、ここから値を得る。
+3. **読み込むモジュールの各パッケージの `reference.conf`**、その次に **`@o3co/auth-provider-core` のもの** — デフォルト。インストール済みパッケージから解決される: 各モジュールが自分のパッケージのファイルを宣言し、core の `moduleReferences(modules)` がそれを core のものを最後にして列挙する。テンプレート自身のモジュールは `config/reference.conf` を宣言し、そこには自身が所有するセクションのデフォルトがある: `logging`、`http`、`cors`、鍵ストアの `oauth.jwt.signingKey`、共有 Redis 接続の `refreshTokenFamilyStore.redis`。デプロイ固有の値はそこではなく上の 2 ファイルに書く。`config/reference.conf` はこれらのキーの変数をデフォルトの横で束縛するので、上の 2 ファイルのどちらかが設定する値は変数に勝つ。ただし `HTTP_PORT`、`HTTP_TRUST_PROXY`、`CORS_ALLOWED_ORIGINS`、`REFRESH_TOKEN_FAMILY_STORE_REDIS_URL` / `_PASSWORD` は `application.conf` が末尾の行でもう一度束縛するので、それぞれ、そのファイルがそれより上で設定する値に勝つ。上の 2 ファイルのどちらも設定していないキーは、ここから値を得る。
 
-上の 2 ファイルは、環境変数の一つのスナップショットのもとで一度だけ読み（`readOwnLayers`）、その一度の読み込みから二つの段階を組み立てる — 起動中にファイルが置き換えられても、変数が変わっても、boot がモジュールを選んだものと違うものをパースすることはない。読み込みは二段階で行う（[#728](https://github.com/o3co/auth.provider/issues/728)、[`src/configPath.mts`](src/configPath.mts)）。まず、モジュールを知る前に、`buildModules` がモジュールを選ぶスイッチ — アダプター、フェデレーション、ログレベル — と、期待するセッション要件を導く元の `sessionRequirements` を、上の 2 ファイルを core の `reference.conf` だけの上に重ねて読む（`readSwitches`、core の transitional reader で読む）。パースするのはそれらのパス（`SWITCHES`）だけである。それと並んで `mfa.mode` をテンプレート自身が読む（`readMfaMode`）: composition root が読まない MFA モジュールのキーを、テンプレート自身のレイヤーから生のまま — `application.conf` が既定値なしで `MFA_MODE` を束縛する — 読み、`off`・`optional`・`required` に限り、無いときは `off` とする。このキーを読むのは MFA モジュールを組み込むまでで、MFA ADR のビルド順のステップ 20 がこの読み込みを取り除く。パッケージの `reference.conf` だけが設定するものはこの段階では見えない — まだどれも重ねていない — ので、組み立て時に設定を読むモジュールを `buildModules` に加えるなら、そのモジュールが読むパスを `SWITCHES` に加える。次に、読み込むすべてのモジュールの `reference.conf` の上に解決した設定を、第一段階で導いたセッション要件を書き込み、読み込むモジュールが読まない限り `mfa` セクションを除いて、パースせずに `createApp` に渡す（`resolveForBoot`）: boot はそれを、読み込まれたすべてのモジュールのスキーマで一度だけパースし、どのモジュールのセクションも取り除かない。boot の後にテンプレートが読むもの — `http.trustProxy`、ポート、readiness のタイムアウト — は、パース済みの設定から読む。読み込まれたどのモジュールも所有しないトップレベルのセクションは残され、boot 時に `config_sections_ignored` として一度だけログに出る: セクション名の綴り間違いはここに現れる。
+上の 2 ファイルは、環境変数の一つのスナップショットのもとで一度だけ読み（`readOwnLayers`）、その一度の読み込みから二つの段階を組み立てる — 起動中にファイルが置き換えられても、変数が変わっても、boot がモジュールを選んだものと違うものをパースすることはない。読み込みは二段階で行う（[#728](https://github.com/o3co/auth.provider/issues/728)、[`src/configPath.mts`](src/configPath.mts)）。まず、モジュールを知る前に、`buildModules` がモジュールを選ぶスイッチ — アダプター、フェデレーション — と、期待するセッション要件を導く元の `sessionRequirements` を、上の 2 ファイルを core の `reference.conf` だけの上に重ねて読む（`readSwitches`、core の transitional reader で読む）。パースするのはそれらのパス（`SWITCHES`）だけである。それと並んで `mfa.mode` をテンプレート自身が読む（`readMfaMode`）: composition root が読まない MFA モジュールのキーを、テンプレート自身のレイヤーから生のまま — `application.conf` が既定値なしで `MFA_MODE` を束縛する — 読み、`off`・`optional`・`required` に限り、無いときは `off` とする。このキーを読むのは MFA モジュールを組み込むまでで、MFA ADR のビルド順のステップ 20 がこの読み込みを取り除く。パッケージの `reference.conf` だけが設定するものはこの段階では見えない — まだどれも重ねていない — ので、組み立て時に設定を読むモジュールを `buildModules` に加えるなら、そのモジュールが読むパスを `SWITCHES` に加える。ログレベルも boot の前に読むが、それは `logging` モジュールのセクションとして、そのモジュールのスキーマで、テンプレートの `reference.conf` の上に読む（`readLogging`）: テンプレートは設定を読みモジュールを選ぶ間もログを出すので、logger は boot の前に存在する。次に、読み込むすべてのモジュールの `reference.conf` の上に解決した設定を、第一段階で導いたセッション要件を書き込み、読み込むモジュールが読まない限り `mfa` セクションを除いて、パースせずに `createApp` に渡す（`resolveForBoot`）: boot はそれを、読み込まれたすべてのモジュールのスキーマで一度だけパースし、どのモジュールのセクションも取り除かない。boot の後にテンプレートが読むもの — 信頼するホップ、ポート、readiness の期限 — は、`http` モジュールから読む: core の `httpSettings` スロットと、テンプレートの `httpHostSettings` である。読み込まれたどのモジュールも所有しないトップレベルのセクションは残され、boot 時に `config_sections_ignored` として一度だけログに出る: セクション名の綴り間違いはここに現れる。
 
 overlay の値は `application.conf` より優先される。scaffold には `development.conf` と `production.conf` が同梱されている。別の環境（例: `staging`）を追加するときは `config/staging.conf` を作成し、`CONFIG_ENV=staging` を設定する。`{ENV}.conf` が存在しない場合は起動時エラーになる — タイポは黙ってデフォルトにフォールバックせず、fail-fast する。
 
@@ -323,6 +323,8 @@ cors {
 ```
 
 または `CORS_ALLOWED_ORIGINS=https://app.example.com,http://localhost:5173`。書き方はこの 2 通りで、どちらでもない値 — 数値、オブジェクト、真偽値。設定ファイルでしか書けない形 — は、origin なしとして読まれるのではなく、`cors.allowedOrigins` を示して起動時に失敗する。
+
+このリストは `cors` モジュールのセクションで、デフォルトは `config/reference.conf` にある。`http` モジュールがそれを、信頼するホップとともに `httpSettings` スロットで core の CORS middleware に渡し、core は設定ではなくスロットを読む。
 
 **照合は `Origin` ヘッダーとの文字列の完全一致である**。一致し得ない形はすべて、誰も許可しないまま設定に居座るのではなく、そのインデックスを名指しして起動時に失敗する。つまり: 末尾スラッシュ（`https://app.example.com/`）、明示的なデフォルトポート（`:443`）、パス、大文字のホストはいずれも不可で、**ワイルドカードも不可** — サブドメインの照合は無く、今後も提供しない。loopback ホスト（`localhost`、`127.0.0.0/8`、`[::1]`）を除き `https` が必須で、この例外は、フロントエンドの開発サーバーを証明書なしで動かせるようにするためのものである。
 
@@ -530,8 +532,9 @@ worker:
 1. **`sessionStoreModuleFor(config)` は先頭のままにする。** これは `express-session` の middleware をマウントし、`before` / `after` を宣言しないため、`req.session` を読むすべてのルートより前に来るのは、リスト内の位置のおかげである。`config` から組み立てるのは、`session.storage.type = "memory"` が自らを replica-unsafe と宣言するようにするためである。
 2. **`/oauth` の下では順序は関係しない。** `federationGrantsModules`（フェデレーショングラントが有効な間）、`oauthModule`、独自のモジュールは、いずれも `/oauth` の下にルートをマウントしうる。`oauthModule` のルーターが body をパースするのは自身のルートだけなので、各モジュールへのリクエストは、リストの順に関係なくそのモジュール自身の parser に届く — ただし、`/oauth` 配下のどのモジュールも自分の body を自分でパースし、その parser を自分のパスちょうどに限定している場合に限る（同梱のモジュールはそうしている）。限定はルートとして行う（`router.all(path, parser)` か、ルート自身のハンドラ列）。`router.use(path, parser)` は `path` の下のすべてのパスにもマッチする。フェデレーショングラントのブラウザ側の半分は、自身の `after` によってセッション middleware の後ろに自らを並べる。
 3. **ストアスロット 1 つにつきモジュール 1 つ。** 各アダプタースイッチ — `federationTokenStore.type`、`userSessionStores.adapter`、`rateLimiter.adapter`、`oauth.code.adapter`、`accessTokenDenylist.adapter`、`replaySeenSet.adapter`、`consentStore.adapter`、およびフェデレーショングラントの 2 つのストアスイッチ — は、memory / Redis の組から 1 つを選ぶ。両者は同じスロットを提供するため、両方を配線すると起動時のスロット衝突になる。`consentStore.adapter = "none"` はどちらも配線せず、フェデレーショングラントのストアは機能が有効な間だけ配線される。
-4. **共有 Redis 接続は、最初の Redis バックエンドのモジュールとともに加わる。** `standaloneRedisClientsModule` は、ここにあるすべての Redis アダプターが使う 1 本の ioredis 接続を開き、合成されたモジュールがそれを必要とするときには必ず追加される。同梱の合成では refresh token family ストアが Redis 上にあるため、デプロイには常にこれがある。in-memory の family ストアはテスト用の override（`overrides.refreshTokenFamilyModules`）である。
-5. **フェデレーションアダプターは、その config bridge とともに加わる。** `googleFederationModule` には `googleFederationConfigModule` が伴い — これは有効化され、かつ `type` が `google` である `federations.google` セクションに対してのみで、そのため `google` という名前の `type = "oidc"` セクションが二重に合成されることはない — 有効化された `type = "oidc"` のセクションごとに 1 つずつの `oidcFederationModule(name)` には、それらが共有する 1 つの `oidcFederationConfigModule` が伴う。bridge の provider は対応するセクションが無いと throw するため、この組は内部でゲートされるのではなく、合成時に含めるかどうかが決まる。
+4. **共有 Redis 接続は、最初の Redis バックエンドのモジュールとともに加わる。** `standaloneRedisClientsModule` は、ここにあるすべての Redis アダプターが使う 1 本の ioredis 接続を自身のセクション（`refreshTokenFamilyStore.redis`）から開き、合成されたモジュールがそれを必要とするときには必ず追加される。同梱の合成では refresh token family ストアが Redis 上にあるため、デプロイには常にこれがある。in-memory の family ストアはテスト用の override（`overrides.refreshTokenFamilyModules`）である。
+5. **テンプレート自身の設定モジュールは常に合成される。** `loggingModule`、`httpModule`、`corsModule` は `logging {}`、`http {}`、`cors {}` を所有する。`httpModule` は `corsModule` が提供する CORS のリスト（`corsAllowedOrigins`、テンプレート自身のスロット）を要求し、core の `httpSettings` を提供する。両スロットとも authoritative なので、それぞれのモジュールが読み込まれている間は `overrideComponents` のエントリで置き換えられない。`httpModule` はさらに、`app.mts` が boot の後にポートと readiness の期限を読むテンプレートの `httpHostSettings` を提供する。logger はモジュールではなく、boot の前に `logging` セクションから作られ（`readLogging`）、`logger` コンポーネントとして boot に渡される。
+6. **フェデレーションアダプターは、その config bridge とともに加わる。** `googleFederationModule` には `googleFederationConfigModule` が伴い — これは有効化され、かつ `type` が `google` である `federations.google` セクションに対してのみで、そのため `google` という名前の `type = "oidc"` セクションが二重に合成されることはない — 有効化された `type = "oidc"` のセクションごとに 1 つずつの `oidcFederationModule(name)` には、それらが共有する 1 つの `oidcFederationConfigModule` が伴う。bridge の provider は対応するセクションが無いと throw するため、この組は内部でゲートされるのではなく、合成時に含めるかどうかが決まる。
 
 `jwksModule`（core 由来）は常に合成される: トークンに署名するプロバイダーは、issuer が設定されているかどうかにかかわらず検証鍵を公開する。各ルートモジュールが何をマウントするかは、それぞれのパッケージの README にある。合成時に知っておくべき振る舞いが 1 つある: `sessionModule` の `POST /session/logout` は `UserSession` レコード（これにより `/oauth/introspect` と `/oauth/userinfo` はそのセッションから発行されたトークンを受け付けなくなる）、subject インデックス、フェデレーションのエントリを削除する — しかし refresh token family は失効させ**ない**。完全なカスケードを実行するエンドポイントは `POST /oauth/logout` である。[どのログアウトエンドポイントが何を無効化するか](../../docs/operator-runbook.md#which-logout-endpoint-invalidates-what) を参照。
 
@@ -714,7 +717,7 @@ probe は接続を開いた builder が登録するため、リストはこの�
 
 ### ログ
 
-プロバイダーは [pino](https://getpino.io) を通じて stdout に改行区切りの JSON をログ出力する。これはログアグリゲーターがパーサーなしで取り込める形式である。`LOG_LEVEL`（HOCON では `logging.level`）が閾値を設定する。`trace` と `debug` はリクエスト単位の詳細を含み、デフォルトではオフである。pino は閾値未満の呼び出しをフォーマット前に捨てるため、出力されてから下流でフィルタされるのではなく、本番環境ではコストがかからない。
+プロバイダーは [pino](https://getpino.io) を通じて stdout に改行区切りの JSON をログ出力する。これはログアグリゲーターがパーサーなしで取り込める形式である。`LOG_LEVEL`（HOCON では `logging.level`。`logging` モジュールのセクションで、boot の前にそのモジュールのスキーマで読む）が閾値を設定する。`trace` と `debug` はリクエスト単位の詳細を含み、デフォルトではオフである。pino は閾値未満の呼び出しをフォーマット前に捨てるため、出力されてから下流でフィルタされるのではなく、本番環境ではコストがかからない。
 
 logger は boot planner の `logger` コンポーネントスロットに配線されるため、`optional: ["logger"]` を宣言するすべてのモジュール — oauth、session、dpop、mtls、token-exchange — はこの 1 つのインスタンスを通じてログを出す。`LOG_LEVEL` がそれらに届くのは、このスロットを埋めているからである。スロットを空のままにした composition root では、代わりに各モジュール自身のデフォルトの `consoleLogger` が使われ、レベルを設定しても何も変わらない。
 

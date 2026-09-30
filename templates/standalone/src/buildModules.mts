@@ -56,11 +56,14 @@ import {
 } from "@o3co/auth-provider-session";
 import {
 	auditSinkModule,
+	corsModule,
 	googleFederationConfigModule,
+	httpModule,
 	inMemoryCodeRepositoryModule,
 	inMemoryFederationTokenStoreModule,
 	inMemorySessionStoresModule,
 	keyStoreModule,
+	loggingModule,
 	oidcFederationConfigModule,
 	repositoriesModule,
 	standaloneRedisClientsModule,
@@ -336,6 +339,10 @@ export function buildModules(config: AppConfig, overrides: BuildModulesOverrides
 		...(oidcFederations.length > 0
 			? [oidcFederationConfigModule, ...oidcFederations.map((name) => oidcFederationModule(name))]
 			: []),
+		// The template's own settings: `logging {}`, `http {}` and `cors {}`.
+		loggingModule,
+		httpModule,
+		corsModule,
 		overrides.keyStoreModule ?? keyStoreModule,
 		overrides.repositoriesModule ?? repositoriesModule,
 		// The audit sink, always wired: `emitAuditEvent` no-ops on an empty slot,

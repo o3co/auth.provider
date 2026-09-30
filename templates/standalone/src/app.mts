@@ -20,6 +20,7 @@ import helmet from "helmet";
 import { buildModules } from "./buildModules.mjs";
 import {
 	expectedSessionRequirements,
+	readLogging,
 	readMfaMode,
 	readOwnLayers,
 	readSwitches,
@@ -51,15 +52,15 @@ const switches: AppConfig = readSwitches(own);
 // `mfa.mode`, read once, for the second-factor authority's guard.
 const mfaMode = readMfaMode(switches);
 
-// Built from config so its level is operator-controlled, and wired into
-// `bootstrapComponents` so every module that declares `optional: ["logger"]`
-// logs through it rather than its own default (template README, "Logging").
-const logger = createAppLogger(switches);
+// From the `logging` module's section, so the level holds from the first line;
+// wired into `bootstrapComponents` so every module logs through it (template
+// README, "Logging").
+const logger = createAppLogger(readLogging(own));
 
 await (async (): Promise<void> => {
 	// Step 2: Create the Express app and apply base security middleware.
-	// `trust proxy` is set from the parsed configuration once boot has it
-	// (step 3), before a request can arrive.
+	// `trust proxy` is set from the `http` module's `httpSettings` once boot
+	// has it (step 3), before a request can arrive.
 	const app = express();
 	app.use(
 		helmet({
@@ -101,13 +102,18 @@ await (async (): Promise<void> => {
 	await requireMfaSecondFactorAuthority(mfaMode, handle);
 	const config = handle.components.config;
 	if (config === undefined) throw new Error("createApp booted without the parsed configuration");
+	// The `http` module's settings: core's slot and the host's own.
+	const { httpSettings, httpHostSettings } = handle.components;
+	if (httpSettings === undefined || httpHostSettings === undefined) {
+		throw new Error("createApp booted without the http module's settings");
+	}
 	// `false` | `true` | a hop count | a list of IPs / CIDR ranges / named
 	// ranges: the shapes `trust proxy` understands, validated at boot so a
 	// typo'd range fails there rather than silently never matching. Prefer
 	// naming the proxy: `true` believes a forwarded client address from anyone
 	// who can reach this process, and every IP-keyed rate limit buckets on
 	// `req.ip`.
-	app.set("trust proxy", config.http.trustProxy);
+	app.set("trust proxy", httpSettings.trustProxy);
 
 	// Step 4: the host routes (liveness, readiness, metrics), then the composed
 	// auth router, then the terminal error handler; `routes.mts` says why in
@@ -115,13 +121,13 @@ await (async (): Promise<void> => {
 	mountRoutes(app, {
 		router: handle.router,
 		probes: handle.readinessProbes,
-		readinessTimeoutMs: config.http.readinessTimeoutMs,
+		readinessTimeoutMs: httpHostSettings.readinessTimeoutMs,
 		metrics,
 		logger,
 	});
 	// Step 5: start the HTTP server. A port that cannot be bound fails boot
 	// with that error (`listen.mts`).
-	const server = await listen(app, config.http.port, logger);
+	const server = await listen(app, httpHostSettings.port, logger);
 
 	// Step 6: graceful shutdown (`shutdown.mts`). Size `drainTimeoutMs` below
 	// your orchestrator's kill grace period. With federation grants on, cleanup

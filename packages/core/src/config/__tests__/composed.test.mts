@@ -66,8 +66,8 @@ describe("readTransitionalConfig — the switches a composition root reads befor
 			}),
 			["http", "redisRateLimiter"],
 		);
-		expect(config.http.port).toBe(8080);
-		expect(config.http.readinessTimeoutMs).toBe(1500);
+		expect(config.http?.port).toBe(8080);
+		expect(config.http?.readinessTimeoutMs).toBe(1500);
 		expect(config.redisRateLimiter?.limits?.token).toEqual({ limit: 120, windowSeconds: 60 });
 	});
 
@@ -79,9 +79,17 @@ describe("readTransitionalConfig — the switches a composition root reads befor
 			}),
 			["http.port"],
 		) as unknown as { http: Record<string, unknown>; deployment: unknown };
-		expect(config.http.port).toBe(8080);
-		expect(config.http.readinessTimeoutMs).toBe("1500");
+		expect(config.http?.port).toBe(8080);
+		expect(config.http?.readinessTimeoutMs).toBe("1500");
 		expect(config.deployment).toEqual({ mode: "several" });
+	});
+
+	it("leaves out the captures of renamed variables: they reach no switch and no module factory", () => {
+		const config = readTransitionalConfig(
+			resolved({ "renamed-variables": { LEGACY_RETRIES: "5", FIXTURE_RENAMING_RETRIES: null } }),
+			["http.port"],
+		);
+		expect(config).not.toHaveProperty("renamed-variables");
 	});
 
 	it("does not refuse a section a package's reference completes, unless it reads it", () => {

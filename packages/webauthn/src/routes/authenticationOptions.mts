@@ -29,12 +29,7 @@
  * without the caller's `userId`.
  */
 
-import {
-	type ChallengeStore,
-	type Logger,
-	WEBAUTHN_AUTHENTICATION_OPTIONS_RATE_LIMIT_PREFIX,
-	type WebAuthnCredentialStore,
-} from "@o3co/auth-provider-core";
+import type { ChallengeStore, Logger, WebAuthnCredentialStore } from "@o3co/auth-provider-core";
 import type { Request, RequestHandler, Response } from "express";
 import { z } from "zod";
 import type { WebAuthnConfig } from "../config.mjs";
@@ -46,14 +41,13 @@ import { refuseCeremonyStoreUnavailable } from "../internal/storeUnavailable.mjs
 // ---------------------------------------------------------------------------
 
 /**
- * Endpoint tag for `createRateLimitGuard`: the `<tag>:ip:<ip>` key prefix an adapter resolves this
- * route's spec by, and the `tag` on the guard's log and audit events. Operators use it as the key
- * in `memoryRateLimiter.limits` / `redisRateLimiter.limits` to override the spec. Contains no `:`,
- * since the memory adapter splits the spec key on the first colon. It is core's constant, which
- * both bundled limiter modules seed from `webauthn.rateLimit.authenticationOptions`.
+ * Endpoint tag for `createRateLimitGuard`: the `<tag>:ip:<ip>` key prefix a limiter resolves this
+ * route's budget by, and the `tag` on the guard's log and audit events. The module contributes
+ * `webauthn.rateLimit.authenticationOptions` as the budget under it; operators use it as the key
+ * in `memoryRateLimiter.limits` / `redisRateLimiter.limits` to override that. Contains no `:`,
+ * since a limiter takes the prefix up to the first colon.
  */
-export const WEBAUTHN_AUTHENTICATION_OPTIONS_RATE_LIMIT_TAG =
-	WEBAUTHN_AUTHENTICATION_OPTIONS_RATE_LIMIT_PREFIX;
+export const WEBAUTHN_AUTHENTICATION_OPTIONS_RATE_LIMIT_TAG = "webauthn-authentication-options";
 
 // ---------------------------------------------------------------------------
 // Body schema

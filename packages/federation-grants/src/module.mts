@@ -40,7 +40,6 @@ import {
 	type FederationGrantRefresher,
 	fullSectionsSchema,
 	type ProviderDeps,
-	type RateLimitFailMode,
 	requireFederationGrantSubjectRevocation,
 	resolveFederationGrantAcquisitionLimits,
 	resolveFederationGrantRetrievalLimits,
@@ -60,10 +59,15 @@ import {
 	createDisabledFederationGrantBrowserRouter,
 	createFederationGrantBrowserRouter,
 	FEDERATION_GRANTS_BROWSER_MOUNT_PATH,
+	FEDERATION_GRANTS_BROWSER_RATE_LIMIT_PREFIX,
 	type FederationGrantDelegatedAuthorizer,
 } from "./browserRoutes.mjs";
 import { resolveFederationGrantConnections } from "./connections.mjs";
-import { createDisabledFederationGrantRouter, createFederationGrantRouter } from "./routes.mjs";
+import {
+	createDisabledFederationGrantRouter,
+	createFederationGrantRouter,
+	FEDERATION_GRANTS_RATE_LIMIT_PREFIX,
+} from "./routes.mjs";
 import { FEDERATION_GRANTS_MOUNT_PATH } from "./types.mjs";
 
 /**
@@ -162,7 +166,7 @@ const requireStore = (
  * Both routes are throttled before client authentication, so
  * that repeated unauthenticated hits are bounded before they reach a
  * repository lookup — and what happens when the limiter backend is down is the
- * product's decision (`rateLimit.failMode`), not this module's to default.
+ * limiter's own policy (`RateLimiter.failMode`), not this module's to choose.
  */
 const requireLimiter = (
 	deps: FederationGrantsModuleDeps,
@@ -176,18 +180,6 @@ const requireLimiter = (
 		);
 	}
 	return deps.rateLimiter;
-};
-
-const requireFailMode = (deps: FederationGrantsModuleDeps): RateLimitFailMode => {
-	const failMode = deps.config?.rateLimit?.failMode;
-	if (failMode !== "open" && failMode !== "closed") {
-		throw new Error(
-			'federationGrantsModule: federationGrants.enabled = true requires rateLimit.failMode ("open" | "closed"). ' +
-				"It is the product's one policy for a limiter-backend outage, and these routes " +
-				"apply it like every other throttled route rather than choosing for themselves.",
-		);
-	}
-	return failMode;
 };
 
 /**
@@ -392,6 +384,12 @@ export const federationGrantsModule = defineModule<Requires, Optional>({
 	contributes: {
 		// What the browser half admits.
 		admissionActions: FEDERATION_GRANTS_ADMISSION_ACTIONS,
+		// The prefixes both routers limit under, claimed with no budget of their
+		// own, whether or not the feature is enabled.
+		rateLimitBudgets: {
+			[FEDERATION_GRANTS_RATE_LIMIT_PREFIX]: () => null,
+			[FEDERATION_GRANTS_BROWSER_RATE_LIMIT_PREFIX]: () => null,
+		},
 		routes: [
 			(deps: FederationGrantsModuleDeps) => {
 				if (!isEnabled(deps)) {
@@ -419,7 +417,6 @@ export const federationGrantsModule = defineModule<Requires, Optional>({
 					federationGrantStore: store,
 				});
 				const rateLimiter = requireLimiter(deps);
-				const failMode = requireFailMode(deps);
 				const limits = resolveFederationGrantRetrievalLimits(deps.config);
 				const connections = resolveFederationGrantConnections(deps.config);
 				requireDelegatedCapability(deps, connections);
@@ -459,7 +456,6 @@ export const federationGrantsModule = defineModule<Requires, Optional>({
 						clientRepository: deps.clientRepository,
 						issuer: issuerOf(deps),
 						rateLimiter,
-						failMode,
 						...(deps.replaySeenSet === undefined ? {} : { replaySeenSet: deps.replaySeenSet }),
 						...(deps.auditSink === undefined ? {} : { auditSink: deps.auditSink }),
 						...(deps.logger === undefined ? {} : { logger: deps.logger }),
@@ -521,7 +517,6 @@ export const federationGrantsModule = defineModule<Requires, Optional>({
 						csrfGuard: requireCsrfGuard(deps),
 						issuer: issuerOf(deps),
 						rateLimiter: requireLimiter(deps),
-						failMode: requireFailMode(deps),
 						background: deps.federationGrantBackground,
 						// The GRANTS boundary, for the callback's backstop and re-read.
 						grantsBoundary: boundaryFor(revocation),

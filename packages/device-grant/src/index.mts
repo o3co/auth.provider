@@ -43,6 +43,7 @@ export {
 	type DeviceAuthorizationSettings,
 	type DeviceGrantDependencies,
 } from "./types.mjs";
+export { isDeviceVerificationRateLimitSpec } from "./verificationBudget.mjs";
 export {
 	createDeviceVerificationHandler,
 	type DeviceVerificationHandlerOptions,

@@ -225,6 +225,29 @@ test("a section declares its reference.conf, a transitional path and the paths i
 	>();
 });
 
+test("renamedVariables maps each old variable name to the old path it was bound to", () => {
+	defineModule({
+		name: "renaming",
+		section: {
+			schema: RetrySection,
+			relocatedFrom: ["older.renaming"],
+			renamedVariables: { OLDER_RENAMING_RETRY_COUNT: "older.renaming.retries" },
+		},
+	});
+	defineModule({
+		name: "renaming-bad",
+		section: {
+			schema: RetrySection,
+			relocatedFrom: ["older.renaming"],
+			// @ts-expect-error — an old path is a string of keys
+			renamedVariables: { OLDER_RENAMING_RETRY_COUNT: null },
+		},
+	});
+	expectTypeOf<ModuleSection["renamedVariables"]>().toEqualTypeOf<
+		Readonly<Record<string, string>> | undefined
+	>();
+});
+
 test("relocatedFrom is a list of old paths moved whole, or a map from each old path to its path in the section", () => {
 	defineModule({
 		name: "relocating-map",

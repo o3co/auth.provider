@@ -23,4 +23,34 @@ describe("redisRateLimiterBuilder", () => {
 		const limiter = redisRateLimiterBuilder({ client: fakeRedis }, {});
 		expect(limiter.kind).toBe("redis");
 	});
+
+	it("declares the defaultLimit it applies, the built-in 60 per 60 s when none is given", () => {
+		const client = { incrementWithTtl: async () => 1 };
+		expect(redisRateLimiterBuilder({ client }, {}).defaultLimit).toEqual({
+			limit: 60,
+			windowSeconds: 60,
+		});
+		expect(
+			redisRateLimiterBuilder({ client, defaultLimit: { limit: 7, windowSeconds: 90 } }, {})
+				.defaultLimit,
+		).toEqual({ limit: 7, windowSeconds: 90 });
+	});
+
+	it("answers the outage policy it was configured with", () => {
+		const client = { incrementWithTtl: async () => 1 };
+		expect(redisRateLimiterBuilder({ client, failMode: "open" }, {}).failMode).toBe("open");
+		expect(redisRateLimiterBuilder({ client }, {}).failMode).toBeUndefined();
+		expect(() => redisRateLimiterBuilder({ client, failMode: "maybe" }, {})).toThrow(
+			/^createRedisRateLimiter: failMode must be "open" or "closed"/,
+		);
+	});
+
+	it("refuses a failMode JSON cannot write — a BigInt, a circular object — with its RangeError", () => {
+		const client = { incrementWithTtl: async () => 1 };
+		const circular: Record<string, unknown> = {};
+		circular.self = circular;
+		for (const failMode of [1n, circular]) {
+			expect(() => redisRateLimiterBuilder({ client, failMode }, {})).toThrow(RangeError);
+		}
+	});
 });

@@ -5,6 +5,7 @@
 - Replaces: the MFA extension surface added by #69 (2026-04-21) in `packages/core/src/mfa/`, which no product code has ever called (D3)
 - Written against: `develop` at `d3d9c8f2` (#692). Every "today" below was checked there, and the sibling repositories at their `develop`.
 - Amended 2026-09-28 (session admission): after step 5 (#707), [the session-admission ADR](2026-09-28-session-admission.md) moved the question "may this session proceed?" out of each consumer and into one core decision point, and made MFA the first *requirement* registered with it. D8's coordinator slot, D16's per-consumer wiring, D19/D20's `mfa.mode` in core, build-order steps 7, 13, 14 and 22, and O2 are amended below, each at its place; that record's §7 lists them together. Steps 1–5 stand as built.
+- Amended 2026-09-30 (rate-limit budgets, #782): the bundled limiters no longer seed budgets; the module that keys a prefix contributes its budget (`rateLimitBudgets`). The MFA module contributes `mfa` from `mfa.rateLimit.routes`, and the email factor's module is to contribute its own `mfa-email` from `mfa.factors.email.sendLimit`; where this record says the limiters seed them, or names core's `ratelimit/mfaSpec.mts`, read that.
 
 ## Context
 

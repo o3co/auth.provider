@@ -19,8 +19,8 @@
  * outage policy, shared by the oauth and session routes.
  *
  * These tests pin the contract both consumers rely on: the key shape, the
- * check context, the 429 envelope, the `failMode` outage policy with its
- * paired `logger.error` + `rate_limit.unavailable` audit emission, and the
+ * check context, the 429 envelope, the limiter's own `failMode` outage policy
+ * with its paired `logger.error` + `rate_limit.unavailable` audit emission, and the
  * RFC RateLimit-* / Retry-After header emission with its
  * decision-over-configuration precedence.
  */
@@ -33,18 +33,24 @@ import type { Logger } from "#/logging/Logger.mjs";
 import {
 	checkWithFailMode,
 	createRateLimitGuard,
+	createRateLimitPolicy,
 	rateLimiterUnavailableEnvelope,
 } from "#/ratelimit/guard.mjs";
-import type { RateLimitDecision, RateLimiter } from "#/ratelimit/types.mjs";
+import type { RateLimitDecision, RateLimiter, RateLimitFailMode } from "#/ratelimit/types.mjs";
 
-/** A limiter that records every key/ctx it is asked about and answers to script. */
+/**
+ * A limiter that records every key/ctx it is asked about and answers to
+ * script, with `failMode` as its own outage policy when given.
+ */
 const scriptedLimiter = (
 	answer: (key: string, callIndex: number) => RateLimitDecision | Error,
+	failMode?: RateLimitFailMode,
 ): RateLimiter & { keys: string[]; contexts: unknown[] } => {
 	const keys: string[] = [];
 	const contexts: unknown[] = [];
 	return {
 		kind: "scripted",
+		...(failMode === undefined ? {} : { failMode }),
 		keys,
 		contexts,
 		async check(key, ctx) {
@@ -94,23 +100,21 @@ const settleAudit = () => new Promise((r) => setImmediate(r));
 describe("createRateLimitGuard — allow path", () => {
 	it("calls through to the route when the limiter allows", async () => {
 		const limiter = scriptedLimiter(() => ({ allowed: true }));
-		const res = await hit(
-			makeApp(createRateLimitGuard({ limiter, tag: "token", failMode: "open" })),
-		);
+		const res = await hit(makeApp(createRateLimitGuard({ limiter, tag: "token" })));
 		expect(res.status).toBe(200);
 		expect(res.body).toEqual({ ok: true });
 	});
 
 	it("keys by the tag prefix and the client IP", async () => {
 		const limiter = scriptedLimiter(() => ({ allowed: true }));
-		await hit(makeApp(createRateLimitGuard({ limiter, tag: "token", failMode: "open" })));
+		await hit(makeApp(createRateLimitGuard({ limiter, tag: "token" })));
 		expect(limiter.keys).toHaveLength(1);
 		expect(limiter.keys[0]).toMatch(/^token:ip:.+/);
 	});
 
 	it("passes the same ip into the check context as the key uses", async () => {
 		const limiter = scriptedLimiter(() => ({ allowed: true }));
-		await hit(makeApp(createRateLimitGuard({ limiter, tag: "login", failMode: "open" })));
+		await hit(makeApp(createRateLimitGuard({ limiter, tag: "login" })));
 		const ctx = limiter.contexts[0] as { ip?: string; userAgent?: string };
 		expect(limiter.keys[0]).toBe(`login:ip:${ctx.ip}`);
 		expect(ctx.userAgent).toBe("guard-test/1.0");
@@ -125,7 +129,6 @@ describe("createRateLimitGuard — allow path", () => {
 				createRateLimitGuard({
 					limiter,
 					tag: "token",
-					failMode: "closed",
 					logger,
 					auditSink: sink,
 				}),
@@ -140,9 +143,7 @@ describe("createRateLimitGuard — allow path", () => {
 describe("createRateLimitGuard — deny path", () => {
 	it("returns 429 with the RFC 6749 §5.2 envelope carrying decision.reason", async () => {
 		const limiter = scriptedLimiter(() => ({ allowed: false, reason: "limit:token" }));
-		const res = await hit(
-			makeApp(createRateLimitGuard({ limiter, tag: "token", failMode: "open" })),
-		);
+		const res = await hit(makeApp(createRateLimitGuard({ limiter, tag: "token" })));
 		expect(res.status).toBe(429);
 		expect(res.body).toEqual({ error: "rate_limited", error_description: "limit:token" });
 	});
@@ -159,7 +160,6 @@ describe("createRateLimitGuard — deny path", () => {
 				createRateLimitGuard({
 					limiter,
 					tag: "federation_grants",
-					failMode: "open",
 					deniedDescription: "provider",
 				}),
 			),
@@ -170,9 +170,7 @@ describe("createRateLimitGuard — deny path", () => {
 
 	it("falls back to the stock description when reason is empty", async () => {
 		const limiter = scriptedLimiter(() => ({ allowed: false, reason: "" }));
-		const res = await hit(
-			makeApp(createRateLimitGuard({ limiter, tag: "token", failMode: "open" })),
-		);
+		const res = await hit(makeApp(createRateLimitGuard({ limiter, tag: "token" })));
 		expect(res.status).toBe(429);
 		expect(res.body.error_description).toBe("Rate limit exceeded");
 	});
@@ -180,18 +178,14 @@ describe("createRateLimitGuard — deny path", () => {
 	it("sets Retry-After from decision.resetAt on a denial", async () => {
 		const resetAt = new Date(Date.now() + 30_000);
 		const limiter = scriptedLimiter(() => ({ allowed: false, resetAt }));
-		const res = await hit(
-			makeApp(createRateLimitGuard({ limiter, tag: "token", failMode: "open" })),
-		);
+		const res = await hit(makeApp(createRateLimitGuard({ limiter, tag: "token" })));
 		expect(res.status).toBe(429);
 		expect(Number(res.headers["retry-after"])).toBeGreaterThan(0);
 	});
 
 	it("omits Retry-After when the decision carries no reset time", async () => {
 		const limiter = scriptedLimiter(() => ({ allowed: false }));
-		const res = await hit(
-			makeApp(createRateLimitGuard({ limiter, tag: "token", failMode: "open" })),
-		);
+		const res = await hit(makeApp(createRateLimitGuard({ limiter, tag: "token" })));
 		expect(res.status).toBe(429);
 		expect(res.headers["retry-after"]).toBeUndefined();
 	});
@@ -201,9 +195,7 @@ describe("createRateLimitGuard — RateLimit-* headers", () => {
 	it("emits RateLimit-* from the decision on the allow path", async () => {
 		const resetAt = new Date(Date.now() + 60_000);
 		const limiter = scriptedLimiter(() => ({ allowed: true, remaining: 7, limit: 20, resetAt }));
-		const res = await hit(
-			makeApp(createRateLimitGuard({ limiter, tag: "token", failMode: "open" })),
-		);
+		const res = await hit(makeApp(createRateLimitGuard({ limiter, tag: "token" })));
 		expect(res.headers["ratelimit-limit"]).toBe("20");
 		expect(res.headers["ratelimit-remaining"]).toBe("7");
 		expect(Number(res.headers["ratelimit-reset"])).toBeGreaterThan(0);
@@ -212,9 +204,7 @@ describe("createRateLimitGuard — RateLimit-* headers", () => {
 	it("emits RateLimit-* on the deny path too", async () => {
 		const resetAt = new Date(Date.now() + 60_000);
 		const limiter = scriptedLimiter(() => ({ allowed: false, remaining: 0, limit: 20, resetAt }));
-		const res = await hit(
-			makeApp(createRateLimitGuard({ limiter, tag: "token", failMode: "open" })),
-		);
+		const res = await hit(makeApp(createRateLimitGuard({ limiter, tag: "token" })));
 		expect(res.status).toBe(429);
 		expect(res.headers["ratelimit-limit"]).toBe("20");
 		expect(res.headers["ratelimit-remaining"]).toBe("0");
@@ -230,7 +220,6 @@ describe("createRateLimitGuard — RateLimit-* headers", () => {
 				createRateLimitGuard({
 					limiter,
 					tag: "login",
-					failMode: "open",
 					headerFallback: { limit: 20, windowSeconds: 900 },
 				}),
 			),
@@ -245,7 +234,6 @@ describe("createRateLimitGuard — RateLimit-* headers", () => {
 				createRateLimitGuard({
 					limiter,
 					tag: "login",
-					failMode: "open",
 					headerFallback: { limit: 20, windowSeconds: 900 },
 				}),
 			),
@@ -258,9 +246,7 @@ describe("createRateLimitGuard — RateLimit-* headers", () => {
 		// A guard with no configured spec (the oauth endpoints) only advertises
 		// what the adapter actually reported.
 		const limiter = scriptedLimiter(() => ({ allowed: true }));
-		const res = await hit(
-			makeApp(createRateLimitGuard({ limiter, tag: "token", failMode: "open" })),
-		);
+		const res = await hit(makeApp(createRateLimitGuard({ limiter, tag: "token" })));
 		expect(res.headers["ratelimit-limit"]).toBeUndefined();
 		expect(res.headers["ratelimit-reset"]).toBeUndefined();
 		expect(res.headers["ratelimit-remaining"]).toBeUndefined();
@@ -268,20 +254,16 @@ describe("createRateLimitGuard — RateLimit-* headers", () => {
 
 	it("clamps a negative remaining to 0", async () => {
 		const limiter = scriptedLimiter(() => ({ allowed: false, remaining: -3 }));
-		const res = await hit(
-			makeApp(createRateLimitGuard({ limiter, tag: "token", failMode: "open" })),
-		);
+		const res = await hit(makeApp(createRateLimitGuard({ limiter, tag: "token" })));
 		expect(res.headers["ratelimit-remaining"]).toBe("0");
 	});
 });
 
-describe("createRateLimitGuard — limiter outage (failMode policy)", () => {
+describe("createRateLimitGuard — limiter outage (the limiter's failMode)", () => {
 	it("failMode='open': lets the request through and logs rate_limiter_failed_open", async () => {
 		const logger = makeLogger();
-		const limiter = scriptedLimiter(() => new Error("redis down"));
-		const res = await hit(
-			makeApp(createRateLimitGuard({ limiter, tag: "token", failMode: "open", logger })),
-		);
+		const limiter = scriptedLimiter(() => new Error("redis down"), "open");
+		const res = await hit(makeApp(createRateLimitGuard({ limiter, tag: "token", logger })));
 		expect(res.status).toBe(200);
 		expect(logger.error).toHaveBeenCalledWith(
 			expect.objectContaining({
@@ -295,10 +277,8 @@ describe("createRateLimitGuard — limiter outage (failMode policy)", () => {
 
 	it("failMode='closed': returns 503 service_unavailable and logs rate_limiter_failed_closed", async () => {
 		const logger = makeLogger();
-		const limiter = scriptedLimiter(() => new Error("redis down"));
-		const res = await hit(
-			makeApp(createRateLimitGuard({ limiter, tag: "login", failMode: "closed", logger })),
-		);
+		const limiter = scriptedLimiter(() => new Error("redis down"), "closed");
+		const res = await hit(makeApp(createRateLimitGuard({ limiter, tag: "login", logger })));
 		expect(res.status).toBe(503);
 		expect(res.body).toEqual({
 			error: "service_unavailable",
@@ -316,10 +296,8 @@ describe("createRateLimitGuard — limiter outage (failMode policy)", () => {
 
 	it("emits the rate_limit.unavailable audit event under failMode='open'", async () => {
 		const { sink, events } = spyAuditSink();
-		const limiter = scriptedLimiter(() => new Error("redis down"));
-		await hit(
-			makeApp(createRateLimitGuard({ limiter, tag: "token", failMode: "open", auditSink: sink })),
-		);
+		const limiter = scriptedLimiter(() => new Error("redis down"), "open");
+		await hit(makeApp(createRateLimitGuard({ limiter, tag: "token", auditSink: sink })));
 		await settleAudit();
 		const ev = events.find((e) => e.type === "rate_limit.unavailable");
 		expect(ev).toBeDefined();
@@ -331,10 +309,8 @@ describe("createRateLimitGuard — limiter outage (failMode policy)", () => {
 
 	it("emits the rate_limit.unavailable audit event under failMode='closed'", async () => {
 		const { sink, events } = spyAuditSink();
-		const limiter = scriptedLimiter(() => new Error("redis down"));
-		await hit(
-			makeApp(createRateLimitGuard({ limiter, tag: "login", failMode: "closed", auditSink: sink })),
-		);
+		const limiter = scriptedLimiter(() => new Error("redis down"), "closed");
+		await hit(makeApp(createRateLimitGuard({ limiter, tag: "login", auditSink: sink })));
 		await settleAudit();
 		expect(events.map((e) => e.type)).toContain("rate_limit.unavailable");
 	});
@@ -346,15 +322,12 @@ describe("createRateLimitGuard — limiter outage (failMode policy)", () => {
 		const { sink, events } = spyAuditSink();
 		const limiter: RateLimiter = {
 			kind: "broken",
+			failMode: "open",
 			async check() {
 				throw "socket hangup";
 			},
 		};
-		await hit(
-			makeApp(
-				createRateLimitGuard({ limiter, tag: "token", failMode: "open", logger, auditSink: sink }),
-			),
-		);
+		await hit(makeApp(createRateLimitGuard({ limiter, tag: "token", logger, auditSink: sink })));
 		await settleAudit();
 		expect(logger.error).toHaveBeenCalledWith(
 			expect.objectContaining({ error: "NonError" }),
@@ -368,28 +341,75 @@ describe("createRateLimitGuard — limiter outage (failMode policy)", () => {
 		// message quotes the command it refused, arguments and all.
 		const token = "devauth:user:BCDFGHJK";
 		const { sink, events } = spyAuditSink();
-		const limiter = scriptedLimiter(() =>
-			Object.assign(
-				new Error(
-					`ERR unknown command 'evalsha', with args beginning with: 'sha' '1' '${token}' 'user-1'`,
+		const limiter = scriptedLimiter(
+			() =>
+				Object.assign(
+					new Error(
+						`ERR unknown command 'evalsha', with args beginning with: 'sha' '1' '${token}' 'user-1'`,
+					),
+					{ name: "ReplyError", command: { name: "evalsha", args: ["sha", "1", token] } },
 				),
-				{ name: "ReplyError", command: { name: "evalsha", args: ["sha", "1", token] } },
-			),
+			"open",
 		);
-		await hit(
-			makeApp(createRateLimitGuard({ limiter, tag: "token", failMode: "open", auditSink: sink })),
-		);
+		await hit(makeApp(createRateLimitGuard({ limiter, tag: "token", auditSink: sink })));
 		await settleAudit();
 		expect(events[0]?.details).toEqual({ tag: "token", cause: { name: "ReplyError" } });
 		expect(JSON.stringify(events)).not.toContain(token);
 	});
 
 	it("survives an outage with no audit sink wired", async () => {
-		const limiter = scriptedLimiter(() => new Error("redis down"));
-		const res = await hit(
-			makeApp(createRateLimitGuard({ limiter, tag: "token", failMode: "open" })),
-		);
+		const limiter = scriptedLimiter(() => new Error("redis down"), "open");
+		const res = await hit(makeApp(createRateLimitGuard({ limiter, tag: "token" })));
 		expect(res.status).toBe(200);
+	});
+
+	it("fails closed for a limiter that declares no outage policy", async () => {
+		const logger = makeLogger();
+		const limiter = scriptedLimiter(() => new Error("redis down"));
+		const res = await hit(makeApp(createRateLimitGuard({ limiter, tag: "token", logger })));
+		expect(res.status).toBe(503);
+		expect(logger.error).toHaveBeenCalledWith(
+			expect.objectContaining({ mode: "closed" }),
+			"rate_limiter_failed_closed",
+		);
+	});
+
+	it("refuses to be built over a limiter whose failMode is neither open nor closed", () => {
+		const limiter = scriptedLimiter(() => new Error("redis down"), "maybe" as RateLimitFailMode);
+		expect(() => createRateLimitGuard({ limiter, tag: "token" })).toThrow(
+			/^createRateLimitGuard: a rate limiter's failMode must be "open" or "closed"/,
+		);
+	});
+
+	it("reads the limiter's failMode once, when it is built", async () => {
+		let reads = 0;
+		const limiter: RateLimiter = {
+			kind: "counted",
+			get failMode() {
+				reads += 1;
+				return "open" as const;
+			},
+			async check() {
+				throw new Error("redis down");
+			},
+		};
+		const app = makeApp(createRateLimitGuard({ limiter, tag: "token" }));
+		await hit(app);
+		await hit(app);
+		expect(reads).toBe(1);
+	});
+
+	it("refuses to be built over a limiter whose failMode cannot be read", () => {
+		const limiter: RateLimiter = {
+			kind: "broken",
+			get failMode(): RateLimitFailMode {
+				throw new Error("getter down");
+			},
+			async check() {
+				return { allowed: true };
+			},
+		};
+		expect(() => createRateLimitGuard({ limiter, tag: "token" })).toThrow("getter down");
 	});
 });
 
@@ -402,7 +422,7 @@ describe("checkWithFailMode — the guard's check + outage policy, for a route t
 	it("hands back the limiter's decision when the backend answers", async () => {
 		const limiter = scriptedLimiter(() => ({ allowed: false, remaining: 0, reason: "spent" }));
 		const outcome = await checkWithFailMode(
-			{ limiter, tag: "device_verification", failMode: "closed" },
+			createRateLimitPolicy({ limiter, tag: "device_verification" }),
 			"device_verification:user:user-1",
 			{ userId: "user-1", ip: "203.0.113.9" },
 		);
@@ -419,10 +439,10 @@ describe("checkWithFailMode — the guard's check + outage policy, for a route t
 		async (failMode) => {
 			const logger = makeLogger();
 			const { sink, events } = spyAuditSink();
-			const limiter = scriptedLimiter(() => new Error("redis down"));
+			const limiter = scriptedLimiter(() => new Error("redis down"), failMode);
 
 			const outcome = await checkWithFailMode(
-				{ limiter, tag: "device_verification", failMode, logger, auditSink: sink },
+				createRateLimitPolicy({ limiter, tag: "device_verification", logger, auditSink: sink }),
 				"device_verification:user:user-1",
 				{ userId: "user-1", ip: "203.0.113.9", userAgent: "guard-test/1.0" },
 			);
@@ -443,12 +463,38 @@ describe("checkWithFailMode — the guard's check + outage policy, for a route t
 		},
 	);
 
+	it("reads the limiter's failMode once, when the policy is built", async () => {
+		let reads = 0;
+		const limiter: RateLimiter = {
+			kind: "counted",
+			get failMode() {
+				reads += 1;
+				return "closed" as const;
+			},
+			async check() {
+				throw new Error("redis down");
+			},
+		};
+		const policy = createRateLimitPolicy({ limiter, tag: "device_verification" });
+		await checkWithFailMode(policy, "device_verification:user:a", {});
+		await checkWithFailMode(policy, "device_verification:user:b", {});
+		expect(reads).toBe(1);
+	});
+
+	it("refuses a policy it did not build: the outage policy is the limiter's alone", async () => {
+		const limiter = scriptedLimiter(() => new Error("redis down"), "closed");
+		const handBuilt = { limiter, tag: "device_verification", failMode: "open" } as never;
+		await expect(checkWithFailMode(handBuilt, "device_verification:user:a", {})).rejects.toThrow(
+			/createRateLimitPolicy/,
+		);
+	});
+
 	it("normalises a missing ip to 'unknown' on the outage line, and audits no ip", async () => {
 		const logger = makeLogger();
 		const { sink, events } = spyAuditSink();
-		const limiter = scriptedLimiter(() => new Error("redis down"));
+		const limiter = scriptedLimiter(() => new Error("redis down"), "open");
 		await checkWithFailMode(
-			{ limiter, tag: "device_verification", failMode: "open", logger, auditSink: sink },
+			createRateLimitPolicy({ limiter, tag: "device_verification", logger, auditSink: sink }),
 			"device_verification:user:user-1",
 			{ userId: "user-1" },
 		);
@@ -465,10 +511,8 @@ describe("checkWithFailMode — the guard's check + outage policy, for a route t
 	it("rateLimiterUnavailableEnvelope() is the body the guard answers under failMode='closed'", async () => {
 		// The point of sharing: a caller that renders the 503 itself answers
 		// the same envelope the guard does, so a client sees one outage shape.
-		const limiter = scriptedLimiter(() => new Error("redis down"));
-		const res = await hit(
-			makeApp(createRateLimitGuard({ limiter, tag: "login", failMode: "closed" })),
-		);
+		const limiter = scriptedLimiter(() => new Error("redis down"), "closed");
+		const res = await hit(makeApp(createRateLimitGuard({ limiter, tag: "login" })));
 		expect(res.status).toBe(503);
 		expect(res.body).toEqual(rateLimiterUnavailableEnvelope());
 		expect(rateLimiterUnavailableEnvelope()).toEqual({
@@ -502,9 +546,8 @@ describe("createRateLimitGuard — an outage's report of the caller's ip and use
 		app.get(
 			"/guarded",
 			createRateLimitGuard({
-				limiter: scriptedLimiter(() => new Error("redis down")),
+				limiter: scriptedLimiter(() => new Error("redis down"), "closed"),
 				tag: "token",
-				failMode: "closed",
 				logger,
 				auditSink: sink,
 			}),

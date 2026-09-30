@@ -35,7 +35,7 @@ import {
 	defineModule,
 	type RateLimiter,
 	type RateLimitSpec,
-	readConfiguredRateLimitSpec,
+	requireUsableConfiguredRateLimitSpec,
 } from "@o3co/auth-provider-core";
 import express from "express";
 import { z } from "zod";
@@ -56,6 +56,18 @@ import { createRegistrationVerifyHandler } from "./routes/registrationVerify.mjs
 const WEBAUTHN_SECTION_SCHEMA = z.unknown();
 
 /**
+ * `webauthn.rateLimit.authenticationOptions` as the options route's budget, `null` when not given;
+ * read as `webauthnConfigSchema` coerces it, and a `RangeError` naming the key when no limiter can
+ * apply it.
+ */
+const authenticationOptionsBudget = (section: unknown): RateLimitSpec | null => {
+	const given = (section as { rateLimit?: { authenticationOptions?: unknown } } | null | undefined)
+		?.rateLimit?.authenticationOptions;
+	if (given === undefined) return null;
+	return requireUsableConfiguredRateLimitSpec("webauthn.rateLimit.authenticationOptions", given);
+};
+
+/**
  * Declarative manifest for the WebAuthn passkey module.
  *
  * Settings come from the `webauthnConfig` slot, which a bootstrap module fills from application
@@ -65,9 +77,10 @@ const WEBAUTHN_SECTION_SCHEMA = z.unknown();
  * `POST /oauth/webauthn/authentication/options` is rate-limited by the module itself: core's
  * `createRateLimitGuard` under the `webauthn-authentication-options` tag, on the wired
  * `rateLimiter` or else a per-process memory limiter, which the `deploymentMode` slot decides
- * about (refused under `multi`, a warning when `unset`). The budget is
- * `webauthnConfig.rateLimit.authenticationOptions`; the outage policy is
- * `config.rateLimit.failMode`, as for the OAuth endpoints and `/session/login`.
+ * about (refused under `multi`, a warning when `unset`). The module contributes
+ * `webauthn.rateLimit.authenticationOptions` as the tag's budget, which a wired limiter applies;
+ * the fallback limiter applies `webauthnConfig.rateLimit.authenticationOptions`. The outage
+ * policy is the limiter's own `failMode`, as for the OAuth endpoints and `/session/login`.
  */
 export const webauthnModule = defineModule<
 	| "webauthnConfig"
@@ -76,7 +89,8 @@ export const webauthnModule = defineModule<
 	| "challengeCeremony"
 	| "config"
 	| "keyStore"
-	| "deploymentMode",
+	| "deploymentMode"
+	| "rateLimitBudgetResolver",
 	| "grantPolicy"
 	| "rateLimiter"
 	| "auditSink"
@@ -101,6 +115,8 @@ export const webauthnModule = defineModule<
 		// The replica count core fills: the authentication/options route's per-process fallback
 		// is refused under `multi`. Required, so a mode read as absent cannot lift that refusal.
 		"deploymentMode",
+		// The contributed budgets, which the mismatch warning compares with the slot.
+		"rateLimitBudgetResolver",
 	],
 	optional: [
 		// Required by the grant factory, which throws at boot without it; optional here only so
@@ -125,6 +141,12 @@ export const webauthnModule = defineModule<
 	// audit.sink.type = "none" or boot refuses (the policy the oauth and session modules share).
 	absencePolicies: { auditSink: AUDIT_SINK_ABSENCE_POLICY },
 	contributes: {
+		// The options route's budget, for every limiter to read; an operator's
+		// `limits.webauthn-authentication-options` on the limiter wins.
+		rateLimitBudgets: {
+			[WEBAUTHN_AUTHENTICATION_OPTIONS_RATE_LIMIT_TAG]: (deps) =>
+				authenticationOptionsBudget(deps.section),
+		},
 		grants: {
 			[WEBAUTHN_GRANT_TYPE]: (deps) => {
 				// grantPolicy is this grant's only scope bound; booting without it would accept
@@ -235,28 +257,20 @@ export const webauthnModule = defineModule<
 						);
 					}
 				} else {
-					// A shared limiter applies the budget its module seeded from the app config's
-					// `webauthn.rateLimit.authenticationOptions`, not this slot (which may be
-					// hard-coded). When the key is missing or differs, the budget in force is not
-					// the one this slot states, so boot warns once with both values. The key is
-					// read as the seed reads it (numeric strings equal numbers). An explicit
-					// `limits.webauthn-authentication-options` in the limiter's own section
-					// overrides both and is not visible here.
-					const configured = (
-						deps.config as {
-							webauthn?: { rateLimit?: { authenticationOptions?: unknown } };
-						}
-					).webauthn?.rateLimit?.authenticationOptions;
-					const seeded = readConfiguredRateLimitSpec(configured);
+					// A shared limiter applies the contributed budget for the tag, not this
+					// slot; boot warns once when they differ. A limiter's own `limits` entry
+					// for the tag overrides both and is not visible here.
+					const contributed = deps.rateLimitBudgetResolver.get(
+						WEBAUTHN_AUTHENTICATION_OPTIONS_RATE_LIMIT_TAG,
+					);
 					if (
-						seeded === undefined ||
-						seeded.limit !== spec.limit ||
-						seeded.windowSeconds !== spec.windowSeconds
+						contributed?.limit !== spec.limit ||
+						contributed.windowSeconds !== spec.windowSeconds
 					) {
 						logger.warn(
 							{
 								key: "webauthn.rateLimit.authenticationOptions",
-								configured: configured ?? null,
+								contributed: contributed === undefined ? null : { ...contributed },
 								webauthnConfig: spec,
 							},
 							"webauthn_authentication_options_budget_mismatch",
@@ -275,14 +289,13 @@ export const webauthnModule = defineModule<
 
 				router.post(
 					"/",
-					// `failMode` is read from the same product-wide config key the
-					// OAuth endpoints and `/session/login` read: a limiter outage
-					// must not mean "shed load" on one surface and "let everything
-					// through" on another.
+					// The outage policy is the limiter's own `failMode`, the one the
+					// OAuth endpoints and `/session/login` apply on the same limiter:
+					// an outage must not mean "shed load" on one surface and "let
+					// everything through" on another.
 					createRateLimitGuard({
 						limiter,
 						tag: WEBAUTHN_AUTHENTICATION_OPTIONS_RATE_LIMIT_TAG,
-						failMode: deps.config.rateLimit.failMode,
 						logger,
 						auditSink: deps.auditSink,
 						// This endpoint HAS a documented per-endpoint spec, so the

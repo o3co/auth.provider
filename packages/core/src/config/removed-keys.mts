@@ -30,8 +30,12 @@
  * configuration still setting a key there (`config-path-relocated`), naming the
  * new path and its environment variable. Boot reads the rows off the loaded
  * modules' manifests, since an old path may sit in no section any of them
- * parses. The refusal is removed at the first major release;
- * `relocatedPaths.drift.test.mts` fails the cut that forgets.
+ * parses. A variable renamed with the move is declared beside them
+ * (`section.renamedVariables`) and captured by the declaring package's
+ * `reference.conf` (`RENAMED_VARIABLES_SECTION`): while the resolution saw its
+ * old name set, boot refuses unless it saw the new name set to the same string
+ * (`environment-variable-renamed`). Both refusals are removed at the first
+ * major release; `relocatedPaths.drift.test.mts` fails the cut that forgets.
  *
  * `z.preprocess` compiles to a pipe the `@o3co/ts.hocon` zod bridge does not
  * descend into, so every field under a wrapped section must coerce on its own
@@ -162,14 +166,45 @@ const startsWith = (path: readonly string[], prefix: readonly string[]): boolean
 	prefix.every((key, index) => path[index] === key);
 
 /**
+ * Where the key at `path` moved: the most specific relocation covering it
+ * (longest `from`, first on a tie), the key's new path (`null` when removed)
+ * and the variable bound there (none under a transitional section path, or
+ * for the section itself); `undefined` when no relocation covers it.
+ */
+export function relocateKey<R extends RelocatedPath>(
+	path: readonly string[],
+	relocations: readonly R[],
+): (RelocatedKey & { readonly relocation: R }) | undefined {
+	let mapping: R | undefined;
+	for (const relocation of relocations) {
+		if (!startsWith(path, relocation.from)) continue;
+		if (mapping === undefined || relocation.from.length > mapping.from.length) {
+			mapping = relocation;
+		}
+	}
+	if (mapping === undefined) return undefined;
+	const from = path.join(".");
+	if (mapping.to === null) return { from, to: null, relocation: mapping };
+	const to = [...mapping.to, ...path.slice(mapping.from.length)];
+	const named =
+		mapping.unbound !== true &&
+		!(mapping.toSection === true && path.length === mapping.from.length);
+	return {
+		from,
+		to: to.join("."),
+		...(named ? { environmentVariable: environmentVariableFor(to) } : {}),
+		relocation: mapping,
+	};
+}
+
+/**
  * Every key `config` sets at or under a relocated path, each once, in
  * relocation order and then configuration key order; each result carries the
- * relocation that mapped it. A value, a list of values (an environment variable
- * carries it whole) and non-plain data (a Date, a URL) are one key each; a
- * subtree and a list of objects (each index a key) are walked, and an empty one
- * sets nothing (HOCON leaves `{}` for an unset `${?VARIABLE}`). The most
- * specific relocation wins (longest `from`, first on a tie). Keys are read as
- * own properties.
+ * relocation that mapped it (`relocateKey`). A value, a list of values (an
+ * environment variable carries it whole) and non-plain data (a Date, a URL)
+ * are one key each; a subtree and a list of objects (each index a key) are
+ * walked, and an empty one sets nothing (HOCON leaves `{}` for an unset
+ * `${?VARIABLE}`). Keys are read as own properties.
  */
 export function findRelocatedKeys<R extends RelocatedPath>(
 	config: unknown,
@@ -177,29 +212,8 @@ export function findRelocatedKeys<R extends RelocatedPath>(
 ): (RelocatedKey & { readonly relocation: R })[] {
 	const found = new Map<string, RelocatedKey & { readonly relocation: R }>();
 	const add = (path: readonly string[]): void => {
-		let mapping: R | undefined;
-		for (const relocation of relocations) {
-			if (!startsWith(path, relocation.from)) continue;
-			if (mapping === undefined || relocation.from.length > mapping.from.length) {
-				mapping = relocation;
-			}
-		}
-		if (mapping === undefined) return;
-		const from = path.join(".");
-		if (mapping.to === null) {
-			found.set(from, { from, to: null, relocation: mapping });
-			return;
-		}
-		const to = [...mapping.to, ...path.slice(mapping.from.length)];
-		const named =
-			mapping.unbound !== true &&
-			!(mapping.toSection === true && path.length === mapping.from.length);
-		found.set(from, {
-			from,
-			to: to.join("."),
-			...(named ? { environmentVariable: environmentVariableFor(to) } : {}),
-			relocation: mapping,
-		});
+		const key = relocateKey(path, relocations);
+		if (key !== undefined) found.set(key.from, key);
 	};
 	const walk = (path: readonly string[], value: unknown): void => {
 		if (isPlainObject(value)) {
@@ -236,4 +250,117 @@ export function relocatedKeyMessage(key: RelocatedKey): string {
 		`has moved to ${key.to}`,
 		`Write it there${variable} and remove ${THIS_FIELD}`,
 	);
+}
+
+/**
+ * The reserved top-level section a configuration captures renamed variables
+ * in: each declared name `null`, then `${?NAME}`, in the `reference.conf` of
+ * the package that declares it, so it holds what the resolution saw — `null`
+ * for a name unset, the raw string for one set. Boot judges it and removes it
+ * before the configuration is parsed; no module's section may be read there.
+ */
+export const RENAMED_VARIABLES_SECTION = "renamed-variables";
+
+/**
+ * An environment variable whose name changed: its old name and the old path
+ * it was bound to, and its name now with the path that name is bound to —
+ * both `null` for a key removed rather than moved.
+ */
+export interface RenamedVariable {
+	readonly from: string;
+	readonly oldPath: string;
+	readonly to: string | null;
+	readonly path: string | null;
+}
+
+/**
+ * Why a rename refuses boot: the old name set and the new one `unset`, or set
+ * to a `different` string; the variable of a `removed` key set; or a name the
+ * configuration does not capture (`uncaptured`), which cannot be told apart
+ * from one set. No value is carried.
+ */
+export type RenamedVariableState = "unset" | "different" | "removed" | "uncaptured";
+
+/** What the configuration captured of `name`: `null` unset, a string set; `undefined` when it holds no capture of it. */
+const capturedIn = (section: unknown, name: string): string | null | undefined => {
+	if (!isPlainObject(section) || !Object.hasOwn(section, name)) return undefined;
+	const value: unknown = section[name];
+	return value === null || typeof value === "string" ? value : undefined;
+};
+
+/**
+ * Every rename `config`'s captures break, in `renames` order: a name not
+ * captured; a removed key's variable set (the empty string included); the old
+ * name set while the new one is unset or set to a different string. The two
+ * set to the same string, or the old name unset, break nothing. A default at
+ * the new path is not the new name set.
+ */
+export function findRenamedVariables<V extends RenamedVariable>(
+	config: unknown,
+	renames: readonly V[],
+): (V & { readonly state: RenamedVariableState })[] {
+	const section = readOwn(config, [RENAMED_VARIABLES_SECTION]);
+	return renames.flatMap((rename): (V & { readonly state: RenamedVariableState })[] => {
+		const old = capturedIn(section, rename.from);
+		const current = rename.to === null ? null : capturedIn(section, rename.to);
+		if (old === undefined || current === undefined) return [{ ...rename, state: "uncaptured" }];
+		if (old === null || current === old) return [];
+		if (rename.to === null) return [{ ...rename, state: "removed" }];
+		return [{ ...rename, state: current === null ? "unset" : "different" }];
+	});
+}
+
+/** `config` without the reserved `renamed-variables` section; `config` itself when it has none. */
+export function withoutRenamedVariables(config: unknown): unknown {
+	if (!isPlainObject(config) || !Object.hasOwn(config, RENAMED_VARIABLES_SECTION)) return config;
+	const { [RENAMED_VARIABLES_SECTION]: _captured, ...rest } = config;
+	return rest;
+}
+
+/**
+ * What to tell the operator whose environment breaks a rename, in the words a
+ * relocated key is refused in, or the composition that captures no value for
+ * it: that it handed no configuration (`configured` false), or which
+ * `reference.conf` captures the names — core's own for module "core", else
+ * the module's `section.reference`. Names the variables and the paths, never
+ * a value: a variable may carry a secret.
+ */
+export function renamedVariableMessage(
+	rename: RenamedVariable & {
+		readonly module: string;
+		readonly state: RenamedVariableState;
+	},
+	configured = true,
+): string {
+	const names = rename.to === null ? rename.from : `${rename.from} or ${rename.to}`;
+	switch (rename.state) {
+		case "uncaptured": {
+			if (!configured) {
+				return `createApp was handed no configuration, so whether the environment sets ${names} cannot be told.`;
+			}
+			const capturing =
+				rename.module === "core"
+					? "core's own reference.conf (coreReference())"
+					: `the reference.conf of the package module "${rename.module}" comes from (its section.reference)`;
+			return `${names} is not captured in the configuration's ${RENAMED_VARIABLES_SECTION} section, so whether the environment sets it cannot be told. Layer ${capturing}, which captures it. Never write ${RENAMED_VARIABLES_SECTION} by hand: a composition that does must capture every declared name from the environment it substitutes the configuration with, null when unset.`;
+		}
+		case "removed":
+			return goneKeyMessage(
+				rename.from,
+				`sets ${rename.oldPath}, which was removed`,
+				`Unset ${rename.from}.`,
+			);
+		case "unset":
+			return goneKeyMessage(
+				rename.from,
+				`was renamed ${rename.to}, the variable ${rename.path} is bound to`,
+				`Set ${rename.to} instead and unset ${rename.from}.`,
+			);
+		case "different":
+			return goneKeyMessage(
+				rename.from,
+				`was renamed ${rename.to}, the variable ${rename.path} is bound to`,
+				`${rename.to} is set to a different value: keep the one you mean in ${rename.to} and unset ${rename.from}.`,
+			);
+	}
 }

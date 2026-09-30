@@ -272,6 +272,46 @@ describe("discoveryMetadata — core aggregation in assembleApp", () => {
 		await handle.dispose();
 	});
 
+	it("builds a provider of oauthTokenSettings that nothing requires, and serves the document on its issuer", async () => {
+		const lazySettings = defineModule({
+			name: "test:lazy-token-settings",
+			provides: {
+				oauthTokenSettings: () =>
+					createTestOAuthTokenSettings({ issuer: "https://auth.example.com/tenant-a" }),
+			},
+		});
+		const handle = await createTestApp({
+			modules: [oauthLikeModule, jwksLikeModule, keyStoreModule, lazySettings],
+			bootstrapComponents: {
+				config: withIssuer("https://auth.example.com"),
+				pathResolver: (s) => s,
+			},
+		});
+		const app = express();
+		app.use(handle.router);
+
+		const inserted = await request(app).get("/.well-known/oauth-authorization-server/tenant-a");
+		expect(inserted.status).toBe(200);
+		expect(inserted.body.issuer).toBe("https://auth.example.com/tenant-a");
+
+		await handle.dispose();
+	});
+
+	it("refuses a provider of oauthTokenSettings that answers undefined, naming the slot, rather than serving on the configuration's issuer", async () => {
+		const undefinedSettings = defineModule({
+			name: "test:undefined-token-settings",
+			provides: { oauthTokenSettings: () => undefined as never },
+		});
+		const booting = createTestApp({
+			modules: [oauthLikeModule, jwksLikeModule, keyStoreModule, undefinedSettings],
+			bootstrapComponents: {
+				config: withIssuer("https://auth.example.com"),
+				pathResolver: (s) => s,
+			},
+		});
+		await expect(booting).rejects.toThrow(/oauthTokenSettings/);
+	});
+
 	it("refuses an oauthTokenSettings without an issuer, naming the member, rather than serving on the configuration's", async () => {
 		// A slot the composition holds is read whole: a member it lacks is not
 		// taken from the configuration beside it.
