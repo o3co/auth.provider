@@ -327,7 +327,8 @@ describe("a renamed variable — the capture", () => {
 		);
 
 		expect(err.reason).toBe("environment-variable-renamed");
-		const renamed = (err.details as unknown as { renamed: { module: string; state: string }[] }).renamed;
+		const renamed = (err.details as unknown as { renamed: { module: string; state: string }[] })
+			.renamed;
 		expect(renamed.filter(({ module }) => module === "fixture-renaming")).toMatchObject([
 			{ state: "uncaptured" },
 			{ state: "uncaptured" },
@@ -620,7 +621,8 @@ describe("a renamed variable — core's own section, as it ships", () => {
 		const { "renamed-variables": _captures, ...uncaptured } = makeValidCoreConfig();
 		const err = refusedBy(uncaptured);
 
-		const renamed = (err.details as unknown as { renamed: { module: string; state: string }[] }).renamed;
+		const renamed = (err.details as unknown as { renamed: { module: string; state: string }[] })
+			.renamed;
 		expect(renamed).not.toHaveLength(0);
 		expect(renamed.every(({ module, state }) => module === "core" && state === "uncaptured")).toBe(
 			true,

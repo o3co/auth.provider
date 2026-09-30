@@ -32,7 +32,11 @@ import {
 	type SessionRPRegistry,
 	type UserSessionStore,
 } from "@o3co/auth-provider-core";
-import { createTestLoginEntry, GrantRegistry, resolverForTests } from "@o3co/auth-provider-core/testing";
+import {
+	createTestLoginEntry,
+	GrantRegistry,
+	resolverForTests,
+} from "@o3co/auth-provider-core/testing";
 import express, { type Router } from "express";
 import request from "supertest";
 import { describe, expect, it, vi } from "vitest";

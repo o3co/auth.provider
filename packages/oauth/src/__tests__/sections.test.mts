@@ -112,9 +112,9 @@ describe("the package's config/reference.conf", () => {
 	it("is declared by each of them and holds only their sections, which their schemas parse without losing a path", () => {
 		const read = (path: string, env: Readonly<Record<string, string>>): unknown =>
 			parseFile(path, { env: { ...env } }).toObject();
-		expect(packageReferenceProblems({ reference: REFERENCE, modules: everyModule(), read })).toEqual(
-			[],
-		);
+		expect(
+			packageReferenceProblems({ reference: REFERENCE, modules: everyModule(), read }),
+		).toEqual([]);
 	});
 
 	it("ships every grant off and the consent page at /consent", () => {
@@ -151,10 +151,7 @@ describe("the package's config/reference.conf", () => {
 			"oauth-authorization.grants.jwtBearer.enabled",
 		],
 		["OAUTH_CONSENT_PAGE_URL", "oauth.consentPage.url"],
-		[
-			"OAUTH_CLIENT_ID_METADATA_DOCUMENTS_ENABLED",
-			"oauth.clientIdMetadataDocuments.enabled",
-		],
+		["OAUTH_CLIENT_ID_METADATA_DOCUMENTS_ENABLED", "oauth.clientIdMetadataDocuments.enabled"],
 		[
 			"OAUTH_CLIENT_ID_METADATA_DOCUMENTS_MAX_CONCURRENT_FETCHES",
 			"oauth.clientIdMetadataDocuments.maxConcurrentFetches",
@@ -432,7 +429,7 @@ describe("boot, over a configuration that captures the modules' renamed variable
 	});
 
 	it.each([
-		['oauth-session', { enabeld: true }, "enabeld"],
+		["oauth-session", { enabeld: true }, "enabeld"],
 		["oauth-authorization", { grants: { authorizationCode: { enable: true } } }, "enable"],
 		["oauth-authorization", { grant: {} }, "grant"],
 	] as const)("refuses a key %s does not declare, naming it", async (section, value, key) => {

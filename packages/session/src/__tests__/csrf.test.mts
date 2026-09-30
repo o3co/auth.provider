@@ -28,7 +28,6 @@ import express, { type NextFunction, type Request, type Response } from "express
 import request from "supertest";
 import { describe, expect, it, vi } from "vitest";
 import type { CsrfProtectionOptions } from "#/csrf.mjs";
-import { sessionSectionSchema } from "#/module.mjs";
 import {
 	checkRequestOrigin,
 	createCsrfGuard,
@@ -38,6 +37,7 @@ import {
 	createSessionCsrfGuard,
 	MAX_CSRF_TTL_SECONDS,
 } from "#/csrf.mjs";
+import { sessionSectionSchema } from "#/module.mjs";
 
 /** What the tokens are signed with: the `csrfTokenSigner` slot's double. */
 const SIGNER = createTestCsrfTokenSigner();

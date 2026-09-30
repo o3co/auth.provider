@@ -32,7 +32,11 @@ import {
 	type GrantHandler,
 	type PublicClient,
 } from "@o3co/auth-provider-core";
-import { createTestLoginEntry, GrantRegistry, resolverForTests } from "@o3co/auth-provider-core/testing";
+import {
+	createTestLoginEntry,
+	GrantRegistry,
+	resolverForTests,
+} from "@o3co/auth-provider-core/testing";
 import express from "express";
 import request from "supertest";
 import { describe, expect, it } from "vitest";

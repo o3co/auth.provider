@@ -38,7 +38,11 @@ import {
 	type SessionRequirementResolver,
 	SUBJECT_REVOCATION_ABSENCE_POLICY,
 } from "@o3co/auth-provider-core";
-import { createTestLoginEntry, GrantRegistry, resolverForTests } from "@o3co/auth-provider-core/testing";
+import {
+	createTestLoginEntry,
+	GrantRegistry,
+	resolverForTests,
+} from "@o3co/auth-provider-core/testing";
 import express from "express";
 import { describe, expect, it } from "vitest";
 import { OAUTH_ROUTER_ADMISSION_ACTIONS } from "#/admissionActions.mjs";

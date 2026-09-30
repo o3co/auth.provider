@@ -42,7 +42,11 @@ import {
 	loadYamlMap,
 	type PublicClient,
 } from "@o3co/auth-provider-core";
-import { createTestLoginEntry, GrantRegistry, resolverForTests } from "@o3co/auth-provider-core/testing";
+import {
+	createTestLoginEntry,
+	GrantRegistry,
+	resolverForTests,
+} from "@o3co/auth-provider-core/testing";
 import express from "express";
 import request from "supertest";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";

@@ -278,9 +278,7 @@ describe("a path the settings moved from, written in the operator's own layer", 
 	});
 
 	it("oauth.grants.authorization_code.pkce: refused as removed", async () => {
-		expect(
-			await relocatedBy("oauth.grants.authorization_code.pkce.requireS256 = true\n"),
-		).toEqual([
+		expect(await relocatedBy("oauth.grants.authorization_code.pkce.requireS256 = true\n")).toEqual([
 			{
 				module: "oauth-authorization",
 				from: "oauth.grants.authorization_code.pkce.requireS256",

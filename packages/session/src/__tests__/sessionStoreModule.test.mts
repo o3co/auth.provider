@@ -669,8 +669,9 @@ describe("the session store refuses the cookie its sessionCookiePolicy refuses",
 					contributes: {
 						routes: [
 							(deps) => {
-								(deps.config as unknown as { "session-store": { name: string } })["session-store"].name =
-									"auth.other";
+								(deps.config as unknown as { "session-store": { name: string } })[
+									"session-store"
+								].name = "auth.other";
 								return { id: "test:mutator", mountPath: "/mutator", handler: express.Router() };
 							},
 						],

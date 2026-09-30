@@ -20,7 +20,6 @@ import {
 	AppConfigSchema,
 	CoreConfigSchema,
 	composeConfigSchema,
-	fullSectionsSchema,
 } from "#/config/application.schema.mjs";
 import { createKeyStoreFactory, registerBuiltinKeyStores } from "#/keys/factory.mjs";
 

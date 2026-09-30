@@ -27,7 +27,6 @@
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import {
-	type AppConfig,
 	BootError,
 	createApp,
 	defineModule,
@@ -159,20 +158,23 @@ describe("the package's config/reference.conf", () => {
 		expect(shipped["session-store"]).not.toHaveProperty("secret");
 	});
 
-	it.each(RENAMED)("binds %s's new name, %s, at %s's new path %s and in its capture", (from, to, _old, path) => {
-		expect(bindings().filter((binding) => binding.startsWith(`${to} `))).toEqual([
-			`${to} at ${path}`,
-			`${to} at renamed-variables.${to}`,
-		]);
-		expect(bindings().filter((binding) => binding.startsWith(`${from} `))).toEqual([
-			`${from} at renamed-variables.${from}`,
-		]);
-	});
+	it.each(RENAMED)(
+		"binds %s's new name, %s, at %s's new path %s and in its capture",
+		(from, to, _old, path) => {
+			expect(bindings().filter((binding) => binding.startsWith(`${to} `))).toEqual([
+				`${to} at ${path}`,
+				`${to} at renamed-variables.${to}`,
+			]);
+			expect(bindings().filter((binding) => binding.startsWith(`${from} `))).toEqual([
+				`${from} at renamed-variables.${from}`,
+			]);
+		},
+	);
 
 	it("binds SESSION_CSRF_TTL_SECONDS at session.csrf.ttlSeconds alone: it was not renamed", () => {
-		expect(
-			bindings().filter((binding) => binding.startsWith("SESSION_CSRF_TTL_SECONDS ")),
-		).toEqual(["SESSION_CSRF_TTL_SECONDS at session.csrf.ttlSeconds"]);
+		expect(bindings().filter((binding) => binding.startsWith("SESSION_CSRF_TTL_SECONDS "))).toEqual(
+			["SESSION_CSRF_TTL_SECONDS at session.csrf.ttlSeconds"],
+		);
 	});
 });
 
@@ -191,7 +193,9 @@ describe("the paths the settings moved from, on the manifests", () => {
 		const forms = [
 			sessionStoreModule,
 			sessionStoreModuleFor(makeValidAppConfig() as never),
-			sessionStoreModuleFor(withStore(makeValidAppConfig(), { storage: { type: "redis" } }) as never),
+			sessionStoreModuleFor(
+				withStore(makeValidAppConfig(), { storage: { type: "redis" } }) as never,
+			),
 		];
 		for (const module of forms) {
 			expect(module.section?.relocatedFrom).toEqual({
@@ -234,13 +238,16 @@ describe("session-store's schema", () => {
 		["a one-character secret", "#"],
 		["a short passphrase", "correct horse battery staple"],
 		["a 32-character hex secret, 16 bytes decoded", "0123456789abcdef0123456789abcdef"],
-	])("refuses %s, naming session-store.secret and SESSION_STORE_SECRET, never the value", (_what, secret) => {
-		const result = parse({ secret });
-		expect(paths(result)).toEqual(["secret"]);
-		expect(messages(result)).toContain("session-store.secret");
-		expect(messages(result)).toContain("SESSION_STORE_SECRET");
-		expect(messages(result)).not.toContain(secret);
-	});
+	])(
+		"refuses %s, naming session-store.secret and SESSION_STORE_SECRET, never the value",
+		(_what, secret) => {
+			const result = parse({ secret });
+			expect(paths(result)).toEqual(["secret"]);
+			expect(messages(result)).toContain("session-store.secret");
+			expect(messages(result)).toContain("SESSION_STORE_SECRET");
+			expect(messages(result)).not.toContain(secret);
+		},
+	);
 
 	it("accepts a 64-character hex secret", () => {
 		expect(parse({ secret: "0123456789abcdef".repeat(4) }).success).toBe(true);
@@ -331,9 +338,7 @@ describe("session's schema", () => {
 	});
 
 	it.each([0, -1, "", 7200.5, 86_401])("refuses a csrf.ttlSeconds of %j", (ttlSeconds) => {
-		expect(paths(parse({ csrf: { trustedOrigins: [], ttlSeconds } }))).toEqual([
-			"csrf.ttlSeconds",
-		]);
+		expect(paths(parse({ csrf: { trustedOrigins: [], ttlSeconds } }))).toEqual(["csrf.ttlSeconds"]);
 	});
 
 	it("accepts a csrf.ttlSeconds at the 86400 ceiling", () => {
@@ -341,8 +346,16 @@ describe("session's schema", () => {
 	});
 
 	it.each([
-		["a zero window, which turns the guard off", { windowMs: 0, limit: 20 }, "rateLimit.login.windowMs"],
-		["a window above the ceiling", { windowMs: MAX_DURATION_MS + 1, limit: 20 }, "rateLimit.login.windowMs"],
+		[
+			"a zero window, which turns the guard off",
+			{ windowMs: 0, limit: 20 },
+			"rateLimit.login.windowMs",
+		],
+		[
+			"a window above the ceiling",
+			{ windowMs: MAX_DURATION_MS + 1, limit: 20 },
+			"rateLimit.login.windowMs",
+		],
 		["a zero limit", { windowMs: 900_000, limit: 0 }, "rateLimit.login.limit"],
 	])("refuses rateLimit.login with %s", (_what, login, path) => {
 		expect(paths(parse({ rateLimit: { login } }))).toEqual([path]);
@@ -367,14 +380,17 @@ describe("session's schema", () => {
 		// it too: the redirect would append a second one all the same.
 		["a URL that does not parse", "http://[::1/login?redirect_to=x"],
 		["a URL that does not parse, with a fragment", "http://[::1/login?tenant=x&redirect_to=y#z"],
-	])("refuses a loginPage.url that is %s whose own query carries redirect_to, naming the key", (_what, url) => {
-		const result = parse({ loginPage: { url } });
-		expect(paths(result)).toEqual(["loginPage.url"]);
-		const message = result.error?.issues[0]?.message;
-		expect(message).toContain("session.loginPage.url");
-		expect(message).toContain('"redirect_to"');
-		expect(message).toContain("the provider adds");
-	});
+	])(
+		"refuses a loginPage.url that is %s whose own query carries redirect_to, naming the key",
+		(_what, url) => {
+			const result = parse({ loginPage: { url } });
+			expect(paths(result)).toEqual(["loginPage.url"]);
+			const message = result.error?.issues[0]?.message;
+			expect(message).toContain("session.loginPage.url");
+			expect(message).toContain('"redirect_to"');
+			expect(message).toContain("the provider adds");
+		},
+	);
 
 	it.each([
 		["a query of its own", "/login?tenant=x"],
@@ -507,17 +523,20 @@ describe("boot, over a configuration that captures the modules' renamed variable
 			"session-store.storage.redis.url",
 			"SESSION_STORE_STORAGE_REDIS_URL",
 		],
-	])("refuses session %j, naming the key's path under session-store and its variable", async (keys, module, from, to, variable) => {
-		const err = await refusal((config) => withSession(config, keys));
+	])(
+		"refuses session %j, naming the key's path under session-store and its variable",
+		async (keys, module, from, to, variable) => {
+			const err = await refusal((config) => withSession(config, keys));
 
-		expect(err.reason).toBe("config-path-relocated");
-		expect((err.details as unknown as { relocated: unknown[] }).relocated).toContainEqual({
-			module,
-			from,
-			to,
-			environmentVariable: variable,
-		});
-	});
+			expect(err.reason).toBe("config-path-relocated");
+			expect((err.details as unknown as { relocated: unknown[] }).relocated).toContainEqual({
+				module,
+				from,
+				to,
+				environmentVariable: variable,
+			});
+		},
+	);
 
 	it("refuses endpoints.login.url, naming session.loginPage.url and SESSION_LOGIN_PAGE_URL", async () => {
 		const err = await refusal((config) => ({ ...config, endpoints: { login: { url: "/login" } } }));
@@ -610,17 +629,20 @@ describe("boot, over a configuration that captures the modules' renamed variable
 	it.each([
 		["a path", "/login?redirect_to=https://x"],
 		["an absolute URL", "https://login.example/signin?redirect_to=https%3A%2F%2Fx"],
-	])("refuses a session.loginPage.url that is %s carrying redirect_to, naming the key", async (_what, url) => {
-		const err = await refusal((config) => withSession(config, { loginPage: { url } }));
+	])(
+		"refuses a session.loginPage.url that is %s carrying redirect_to, naming the key",
+		async (_what, url) => {
+			const err = await refusal((config) => withSession(config, { loginPage: { url } }));
 
-		expect(err.reason).toBe("config-validation-failed");
-		expect((err.details as unknown as { issues: unknown[] }).issues).toContainEqual(
-			expect.objectContaining({
-				path: ["session", "loginPage", "url"],
-				message: expect.stringMatching(/"redirect_to".*the provider adds/),
-			}),
-		);
-	});
+			expect(err.reason).toBe("config-validation-failed");
+			expect((err.details as unknown as { issues: unknown[] }).issues).toContainEqual(
+				expect.objectContaining({
+					path: ["session", "loginPage", "url"],
+					message: expect.stringMatching(/"redirect_to".*the provider adds/),
+				}),
+			);
+		},
+	);
 
 	it("boots a session.loginPage.url with a query of its own", async () => {
 		const handle = await boot((config) =>

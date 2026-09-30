@@ -37,7 +37,10 @@ import {
 import express from "express";
 import { afterEach, describe, expect, it } from "vitest";
 import { sessionStoreModule, sessionStoreModuleFor } from "#/modules/sessionStoreModule.mjs";
-import { type SessionCookieConfigSlice, sessionCookiePolicyFrom } from "#/session-cookie-policy.mjs";
+import {
+	type SessionCookieConfigSlice,
+	sessionCookiePolicyFrom,
+} from "#/session-cookie-policy.mjs";
 import { withSessionCaptures, withStore } from "./_helpers/sections.mjs";
 
 type SessionSlice = SessionCookieConfigSlice;
@@ -199,14 +202,11 @@ describe("sessionCookiePolicyFrom", () => {
 		).toThrow('session-store.sameSite = "none" requires session-store.secure = true');
 	});
 
-	it.each([0, -1, 1.5, MAX_DURATION_MS + 1, Number.NaN])(
-		"refuses a lifetime of %s",
-		(maxAge) => {
-			expect(() => sessionCookiePolicyFrom({ ...fixture(), maxAge })).toThrow(
-				`session-store.maxAge must be a whole number of milliseconds from 1 to ${MAX_DURATION_MS}`,
-			);
-		},
-	);
+	it.each([0, -1, 1.5, MAX_DURATION_MS + 1, Number.NaN])("refuses a lifetime of %s", (maxAge) => {
+		expect(() => sessionCookiePolicyFrom({ ...fixture(), maxAge })).toThrow(
+			`session-store.maxAge must be a whole number of milliseconds from 1 to ${MAX_DURATION_MS}`,
+		);
+	});
 
 	it("builds a lifetime of 1 and of the ceiling", () => {
 		expect(sessionCookiePolicyFrom({ ...fixture(), maxAge: 1 }).maxAgeMs).toBe(1);
@@ -324,8 +324,7 @@ describe("the session store module provides sessionCookiePolicy", () => {
 		async (_form, form) => {
 			const base = makeValidAppConfig() as AppConfig;
 			const config = withSessionCaptures(withStore(base, { name: "auth session" })) as AppConfig;
-			const message =
-				'session-store.name "auth session" is not a cookie name (an RFC 6265 token)';
+			const message = 'session-store.name "auth session" is not a cookie name (an RFC 6265 token)';
 			for (const readers of [[], [consumer({})]]) {
 				expect(
 					await settled(

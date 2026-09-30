@@ -34,7 +34,7 @@ import {
 	checkTrustedProxyEntry,
 	describeTrustedProxyEntryRejection,
 } from "../net/trusted-proxy.mjs";
-import { MAX_DURATION_MS, MAX_DURATION_SECONDS } from "./durations.mjs";
+import { MAX_DURATION_SECONDS } from "./durations.mjs";
 import { type RemovedKey, withRemovedKeys } from "./removed-keys.mjs";
 import { environmentCoercer } from "./schema-path.mjs";
 

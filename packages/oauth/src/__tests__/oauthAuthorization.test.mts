@@ -428,7 +428,10 @@ describe("oauthAuthorizationModule — the authorization_code grant needs a code
 		});
 
 	it("refuses to boot with the grant on and no code repository, naming the slot and the switch", async () => {
-		const refusal = await boot(withGrants(makeValidAppConfig(), { authorizationCode: true }), []).then(
+		const refusal = await boot(
+			withGrants(makeValidAppConfig(), { authorizationCode: true }),
+			[],
+		).then(
 			async (handle) => {
 				await handle.dispose();
 				return undefined;

@@ -762,7 +762,9 @@ describe("a password login both requirements interrupt, resumed through each", (
 		expect(first.body).toEqual(FIXTURE_INTERRUPTION.bare.body);
 		// Answered as the login answers an interruption (the session package's
 		// answerInterruption): a fresh CSRF token beside the 403.
-		expect(cookiesOf(first).some((c) => c.startsWith(`${sessionCookieName(config)}.csrf=`))).toBe(true);
+		expect(cookiesOf(first).some((c) => c.startsWith(`${sessionCookieName(config)}.csrf=`))).toBe(
+			true,
+		);
 		expect(ceremonies.map((c) => c.requirement)).toEqual(["fixture-page", "fixture-bare"]);
 		const atFirst = ceremonies[1];
 		expect(atFirst?.continuation).toMatchObject({

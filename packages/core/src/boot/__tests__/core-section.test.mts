@@ -37,8 +37,8 @@ import { RENAMED_VARIABLES_SECTION } from "#/config/removed-keys.mjs";
 import { jwksModule } from "#/jwks/module.mjs";
 import { createSymmetricKeyStore } from "#/keys/KeyStore.mjs";
 import type { Logger } from "#/logging/Logger.mjs";
-import { defineModule } from "#/modules/manifest/index.mjs";
 import { resolveTokenBindingSettings } from "#/middleware/tokenBinding.mjs";
+import { defineModule } from "#/modules/manifest/index.mjs";
 import { makeValidAppConfig, makeValidCoreConfig } from "#/testing/fixtures/valid-config.mjs";
 import { renamedVariableCaptures } from "#/testing/renamedVariables.mjs";
 

@@ -173,7 +173,8 @@ describe("resolveSubjectRevocationHorizonMs", () => {
 			// The configuration's session lifetime, as a configuration built by
 			// hand may carry it.
 			for (const maxAge of [1n, circular]) {
-				const call = () => resolveSubjectRevocationHorizonMs(config({ "session-store": { maxAge } }));
+				const call = () =>
+					resolveSubjectRevocationHorizonMs(config({ "session-store": { maxAge } }));
 				expect(call).toThrow(RangeError);
 				expect(call).toThrow("session-store.maxAge");
 			}

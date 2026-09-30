@@ -75,7 +75,12 @@ const configWith = (settings: {
 const cookieOf = (config: AppConfig) => {
 	const cookie = (config as unknown as { "session-store": Record<string, unknown> })[
 		"session-store"
-	] as { name: string; secure: boolean; sameSite: "lax" | "strict" | "none"; domain: string | null };
+	] as {
+		name: string;
+		secure: boolean;
+		sameSite: "lax" | "strict" | "none";
+		domain: string | null;
+	};
 	return {
 		name: cookie.name,
 		secure: cookie.secure,

@@ -39,8 +39,8 @@ import {
 	createTestApp,
 	createTestCsrfGuard,
 	createTestCsrfTokenSigner,
-	loginCompletionContract,
 	createTestSessionCookiePolicy,
+	loginCompletionContract,
 	makeValidAppConfig,
 } from "@o3co/auth-provider-core/testing";
 import express from "express";

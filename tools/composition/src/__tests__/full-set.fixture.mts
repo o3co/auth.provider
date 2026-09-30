@@ -437,10 +437,7 @@ function requirementModules(
 			},
 		};
 		return defineModule<
-			| "sessionCookiePolicy"
-			| "userSessionStore"
-			| "sessionRequirementResolver"
-			| "csrfGuard",
+			"sessionCookiePolicy" | "userSessionStore" | "sessionRequirementResolver" | "csrfGuard",
 			"subjectSessionIndex" | "logger"
 		>({
 			name: spec.module,

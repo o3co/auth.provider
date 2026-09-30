@@ -281,7 +281,10 @@ describe("sessionModule (boot integration)", () => {
 		await expect(
 			createTestApp({
 				modules: [...baseTestModules, stubFederationModule],
-				bootstrapComponents: { config: withSessionCaptures(config), pathResolver: (s: string) => s },
+				bootstrapComponents: {
+					config: withSessionCaptures(config),
+					pathResolver: (s: string) => s,
+				},
 			}),
 		).rejects.toThrow(/callbackURL is required/);
 	});
