@@ -117,30 +117,33 @@ describe("the transaction store down", () => {
 	it.each(["transaction", "challenge"] as const)(
 		"at get: the %s route is answered 503 once",
 		async (route) => {
-		const factorStore = createMemoryMfaFactorStore();
-		const { record } = await seedTotp(factorStore);
-		const failing = downWhenArmed<MfaTransactionStore>(createMemoryMfaTransactionStore(), "get");
-		const { app, logger } = await boot({
-			config: configFor("required"),
-			factorStore,
-			transactionStore: failing.store,
-		});
-		const { agent, transaction } = await beginLogin(app);
-		failing.arm();
+			const factorStore = createMemoryMfaFactorStore();
+			const { record } = await seedTotp(factorStore);
+			const failing = downWhenArmed<MfaTransactionStore>(createMemoryMfaTransactionStore(), "get");
+			const { app, logger } = await boot({
+				config: configFor("required"),
+				factorStore,
+				transactionStore: failing.store,
+			});
+			const { agent, transaction } = await beginLogin(app);
+			failing.arm();
 
-		const res =
-			route === "transaction"
-				? await readTransaction(agent, transaction)
-				: await mfaPost(agent, "/challenge", { transaction_id: transaction, factor_id: record.id });
+			const res =
+				route === "transaction"
+					? await readTransaction(agent, transaction)
+					: await mfaPost(agent, "/challenge", {
+							transaction_id: transaction,
+							factor_id: record.id,
+						});
 
-		expect(res.status).toBe(503);
-		expect(res.body).toEqual(MFA_UNAVAILABLE);
-		expect(events(logger, "error")).toEqual(["mfa_store_unavailable"]);
-		expect(logger.error.mock.calls[0]?.[0]).toMatchObject({
-			route,
-			store: "mfa_transaction",
-			step: "get",
-		});
+			expect(res.status).toBe(503);
+			expect(res.body).toEqual(MFA_UNAVAILABLE);
+			expect(events(logger, "error")).toEqual(["mfa_store_unavailable"]);
+			expect(logger.error.mock.calls[0]?.[0]).toMatchObject({
+				route,
+				store: "mfa_transaction",
+				step: "get",
+			});
 		},
 	);
 });

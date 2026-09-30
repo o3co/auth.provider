@@ -34,7 +34,15 @@ import {
 import request from "supertest";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { encodeBase32 } from "#/totp/base32.mjs";
-import { ALICE, boot, configFor, disposeAll, events, login, sessionIdSet } from "./moduleHarness.mjs";
+import {
+	ALICE,
+	boot,
+	configFor,
+	disposeAll,
+	events,
+	login,
+	sessionIdSet,
+} from "./moduleHarness.mjs";
 import {
 	beginLogin,
 	csrfOf,
@@ -183,16 +191,19 @@ describe("the codes a verification accepts (RFC 6238)", () => {
 		[+1, 200],
 		[-2, 401],
 		[+2, 401],
-	] as const)("at a window of 1, a code %i steps from now is answered %i", async (offset, status) => {
-		const factorStore = createMemoryMfaFactorStore();
-		const { record, secret } = await seedTotp(factorStore);
-		const { app } = await boot({ config: configFor("required"), factorStore });
-		const { agent, transaction } = await beginLogin(app);
+	] as const)(
+		"at a window of 1, a code %i steps from now is answered %i",
+		async (offset, status) => {
+			const factorStore = createMemoryMfaFactorStore();
+			const { record, secret } = await seedTotp(factorStore);
+			const { app } = await boot({ config: configFor("required"), factorStore });
+			const { agent, transaction } = await beginLogin(app);
 
-		const res = await verify(agent, transaction, record.id, totpCode(secret, offset));
+			const res = await verify(agent, transaction, record.id, totpCode(secret, offset));
 
-		expect(res.status).toBe(status);
-	});
+			expect(res.status).toBe(status);
+		},
+	);
 
 	it("holds the window at the very first and the very last millisecond of the current step", async () => {
 		for (const at of [STEP0 * 30_000, STEP0 * 30_000 + 29_999]) {
@@ -251,9 +262,12 @@ describe("a transaction's attempts (D21)", () => {
 		expect(await transactionStore.get(transaction)).toBeNull();
 		expect(create).not.toHaveBeenCalled();
 		expect((await storedData(factorStore, record)).record.version).toBe(0);
-		expect(
-			audit.of("mfa.verify.failure").map((event) => event.details?.reason),
-		).toEqual(["invalid", "invalid", "invalid", "exhausted"]);
+		expect(audit.of("mfa.verify.failure").map((event) => event.details?.reason)).toEqual([
+			"invalid",
+			"invalid",
+			"invalid",
+			"exhausted",
+		]);
 	});
 
 	it("spends an attempt on a proof that is not a code, and answers it as any refused proof", async () => {

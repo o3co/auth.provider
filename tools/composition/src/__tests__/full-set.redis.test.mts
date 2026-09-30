@@ -41,6 +41,7 @@ import {
 	replicaUnsafeReason,
 } from "@o3co/auth-provider-core";
 import { DEVICE_CODE_GRANT_TYPE } from "@o3co/auth-provider-device-grant";
+import { totpCodeForTests } from "@o3co/auth-provider-mfa/testing";
 import {
 	ALICE,
 	authorize,
@@ -52,13 +53,13 @@ import {
 	MULTI_ENV,
 	redeem,
 } from "@o3co/auth-provider-standalone/src/__tests__/all-modules-composition.fixture.mts";
-import { totpCodeForTests } from "@o3co/auth-provider-mfa/testing";
 import { Redis } from "ioredis";
 import request from "supertest";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import { type TestRedis, testRedis } from "../../../../packages/redis/__tests__/support/redis.mts";
 import {
 	BINDER,
+	browser,
 	composeFullSet,
 	dpopProof,
 	type FullSet,
@@ -271,42 +272,26 @@ describe("two replicas on one Redis database share every flow's state", () => {
 		const a = await replica();
 		const b = await replica();
 		const { factorId, secret } = await seedTotp(a.handle.components, a.config, ALICE.sub);
-		// One browser, its cookies carried between the two replicas.
-		const jar = new Map<string, string>();
-		const keep = (res: request.Response): request.Response => {
-			for (const line of ([] as string[]).concat(res.headers["set-cookie"] ?? [])) {
-				const pair = line.split(";")[0] ?? "";
-				jar.set(pair.slice(0, pair.indexOf("=")), pair);
-			}
-			return res;
-		};
-		const cookies = () => [...jar.values()].join("; ");
-		const csrf = async (app: FullSet["app"]) => {
-			const res = keep(await request(app).get("/session/csrf").set("Cookie", cookies()));
-			return [res.body.header_name as string, res.body.csrf_token as string] as const;
-		};
+		const page = browser();
 
-		const signIn = keep(
-			await request(a.app)
-				.post("/session/login")
-				.set("Cookie", cookies())
-				.set(...(await csrf(a.app)))
-				.type("form")
-				.send({ username: ALICE.username, password: ALICE.password }),
+		const signIn = await page.post(
+			a.app,
+			"/session/login",
+			{ username: ALICE.username, password: ALICE.password },
+			{ form: true },
 		);
 		expect(signIn.status).toBe(403);
+		expect(signIn.body.error).toBe("mfa_required");
 		const transaction = signIn.body.transaction as string;
-		const verified = keep(
-			await request(b.app)
-				.post("/session/mfa/verify")
-				.set("Cookie", cookies())
-				.set(...(await csrf(b.app)))
-				.send({ transaction_id: transaction, factor_id: factorId, proof: totpCodeForTests(secret) }),
-		);
-		expect(verified.status).toBe(200);
+		const verified = await page.post(b.app, "/session/mfa/verify", {
+			transaction_id: transaction,
+			factor_id: factorId,
+			proof: totpCodeForTests(secret),
+		});
+		expect(verified.status, JSON.stringify(verified.body)).toBe(200);
 		expect(await a.handle.components.mfaTransactionStore?.get(transaction)).toBeNull();
 
-		const authorized = await authorize(a.app, [...jar.values()]);
+		const authorized = await authorize(a.app, page.cookies());
 		expect(authorized.status).toBe(302);
 		expect((await redeem(b.app, codeFrom(authorized))).status).toBe(200);
 	});

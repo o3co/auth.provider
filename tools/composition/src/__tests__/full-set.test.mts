@@ -57,10 +57,12 @@ import {
 } from "@o3co/auth-provider-core";
 import { unreadableModuleLeaves } from "@o3co/auth-provider-core/testing";
 import { DEVICE_CODE_GRANT_TYPE, deviceGrantModule } from "@o3co/auth-provider-device-grant";
+import { mfaConfigForTests, totpCodeForTests } from "@o3co/auth-provider-mfa/testing";
 import {
 	ACCESS_TOKEN_TYPE,
 	TOKEN_EXCHANGE_GRANT_TYPE,
 } from "@o3co/auth-provider-oauth-token-exchange";
+import { loginCompletionModule } from "@o3co/auth-provider-session";
 import {
 	ALICE,
 	AS_LISTED,
@@ -95,8 +97,6 @@ import {
 	webTokens,
 } from "@o3co/auth-provider-standalone/src/__tests__/all-modules-composition.fixture.mts";
 import { readOwnLayers, readSwitches } from "@o3co/auth-provider-standalone/src/configPath.mts";
-import { mfaConfigForTests, totpCodeForTests } from "@o3co/auth-provider-mfa/testing";
-import { loginCompletionModule } from "@o3co/auth-provider-session";
 import { WEBAUTHN_GRANT_TYPE } from "@o3co/auth-provider-webauthn";
 import type { Express } from "express";
 import request from "supertest";
@@ -105,6 +105,7 @@ import { BUNDLED_ACTIONS } from "../../../../packages/mfa/src/__tests__/bundled-
 import {
 	APPLE_LANDING,
 	BINDER,
+	browser,
 	CLIENT_CERTIFICATE,
 	composeFullSet,
 	DPOP_JWK,
@@ -118,8 +119,8 @@ import {
 	fullSetOptions,
 	GATEWAY,
 	GITHUB_LANDING,
-	REQUIRED_BINDER,
 	MFA_KEY,
+	REQUIRED_BINDER,
 	seedTotp,
 	TV,
 } from "./full-set.fixture.mts";
@@ -227,7 +228,11 @@ describe("what the full set covers", () => {
 	it("adds every package the template does not compose, and nothing the template already does", async () => {
 		const { modules } = await boot();
 		const names = modules.map((m) => m.name);
-		const added = [...Object.values(ADDED).flat(), ...FROM_TEMPLATE_PACKAGES, ...DEPLOYMENT_MODULES];
+		const added = [
+			...Object.values(ADDED).flat(),
+			...FROM_TEMPLATE_PACKAGES,
+			...DEPLOYMENT_MODULES,
+		];
 		for (const name of added) expect(names, name).toContain(name);
 		expect(new Set(names).size, "a module listed twice").toBe(names.length);
 		// The template's list, then the added modules: nothing between.
@@ -874,35 +879,35 @@ describe("a TOTP login, through the template's boot", () => {
 				adjust: (resolved) => ({ ...resolved, ...mfaConfigForTests({ key: MFA_KEY, mode }) }),
 			});
 			const { factorId, secret } = await seedTotp(handle.components, config, ALICE.sub);
-			const agent = request.agent(app);
-			const csrf = async () => {
-				const res = await agent.get("/session/csrf");
-				return [res.body.header_name as string, res.body.csrf_token as string] as const;
-			};
+			const page = browser();
 
-			const signIn = await agent
-				.post("/session/login")
-				.set(...(await csrf()))
-				.type("form")
-				.send({ username: ALICE.username, password: ALICE.password });
+			const signIn = await page.post(
+				app,
+				"/session/login",
+				{ username: ALICE.username, password: ALICE.password },
+				{ form: true },
+			);
 			expect(signIn.status).toBe(403);
 			expect(signIn.body.error).toBe("mfa_required");
 			const transaction = signIn.body.transaction as string;
-			const read = await agent.get("/session/mfa/transaction").set("MFA-Transaction", transaction);
+			const read = await page.get(app, "/session/mfa/transaction", {
+				"MFA-Transaction": transaction,
+			});
 			expect(read.status).toBe(200);
 			expect(read.body.factors).toEqual([{ id: factorId, kind: "totp" }]);
-			const challenge = await agent
-				.post("/session/mfa/challenge")
-				.set(...(await csrf()))
-				.send({ transaction_id: transaction, factor_id: factorId });
+			const challenge = await page.post(app, "/session/mfa/challenge", {
+				transaction_id: transaction,
+				factor_id: factorId,
+			});
 			expect(challenge.status).toBe(200);
-			const verified = await agent
-				.post("/session/mfa/verify")
-				.set(...(await csrf()))
-				.send({ transaction_id: transaction, factor_id: factorId, proof: totpCodeForTests(secret) });
+			const verified = await page.post(app, "/session/mfa/verify", {
+				transaction_id: transaction,
+				factor_id: factorId,
+				proof: totpCodeForTests(secret),
+			});
 			expect(verified.status).toBe(200);
 
-			const authorized = await agent.get("/oauth/authorize").query({
+			const query = new URLSearchParams({
 				response_type: "code",
 				client_id: WEB.id,
 				redirect_uri: WEB.redirectUri,
@@ -912,6 +917,7 @@ describe("a TOTP login, through the template's boot", () => {
 				code_challenge: TOTP_PKCE.challenge,
 				code_challenge_method: "S256",
 			});
+			const authorized = await page.get(app, `/oauth/authorize?${query}`);
 			expect(authorized.status).toBe(302);
 			const code = codeFrom(authorized);
 			const tokens = await request(app)

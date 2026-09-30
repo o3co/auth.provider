@@ -39,7 +39,7 @@ import type {
 } from "@o3co/auth-provider-core";
 import { defineModule } from "@o3co/auth-provider-core";
 import type express from "express";
-import request from "supertest";
+import type request from "supertest";
 import { expect, vi } from "vitest";
 import { readMfaSettings } from "#/config.mjs";
 import { createMfaSealing, type MfaSealing } from "#/sealing.mjs";
@@ -50,7 +50,14 @@ import {
 	totpCodeForTests,
 } from "#/testing/index.mjs";
 import { totpStep } from "#/totp/rfc6238.mjs";
-import { ALICE, login, MFA_KEY, mfaSection, type SpyLogger, sessionIdSet } from "./moduleHarness.mjs";
+import {
+	ALICE,
+	login,
+	MFA_KEY,
+	mfaSection,
+	type SpyLogger,
+	sessionIdSet,
+} from "./moduleHarness.mjs";
 
 /** The instant every suite freezes the clock at: 10 s into TOTP step 60 000 000 (30 s steps). */
 export const T0 = 1_800_000_010_000;
@@ -60,7 +67,7 @@ export const STEP0 = totpStep(T0, 30);
 
 /** Freezes `Date` at {@link T0}, leaving the timers real, so supertest still runs. */
 export function freezeClock(at: number = T0): void {
-	vi.useFakeTimers({ toFake: ["Date"] });
+	if (!vi.isFakeTimers()) vi.useFakeTimers({ toFake: ["Date"] });
 	vi.setSystemTime(at);
 }
 
@@ -294,7 +301,10 @@ export function extraRequirement(
 }
 
 /** Whether `res` hands the browser a fresh CSRF token: a cookie named as the composition's CSRF guard names it. */
-export const setsCsrfToken = (res: request.Response, guard: { readonly cookieName: string }): boolean =>
+export const setsCsrfToken = (
+	res: request.Response,
+	guard: { readonly cookieName: string },
+): boolean =>
 	([] as string[])
 		.concat(res.headers["set-cookie"] ?? [])
 		.some((line) => line.startsWith(`${guard.cookieName}=`));

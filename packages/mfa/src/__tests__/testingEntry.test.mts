@@ -90,7 +90,12 @@ describe("seedTotpFactor", () => {
 		expect(opened.state).toBe("ok");
 		if (opened.state !== "ok") return;
 		expect(decodeBase32(opened.value.secret as string)?.equals(secret)).toBe(true);
-		expect(opened.value).toMatchObject({ algorithm: "SHA1", digits: 6, period: 30, lastUsedStep: 0 });
+		expect(opened.value).toMatchObject({
+			algorithm: "SHA1",
+			digits: 6,
+			period: 30,
+			lastUsedStep: 0,
+		});
 	});
 
 	it("seals the data to another subject's record when told to, as data copied from it would be", async () => {
@@ -105,9 +110,7 @@ describe("seedTotpFactor", () => {
 		const ring = readMfaSettings(config.mfa, { deploymentMode: "unset" }).encryptionKeys;
 		const sealing = createMfaSealing({ ring });
 		expect(sealing.openFactorData(record, record.data)).toEqual({ state: "unreadable" });
-		expect(
-			sealing.openFactorData({ ...record, subject: "u-alice" }, record.data).state,
-		).toBe("ok");
+		expect(sealing.openFactorData({ ...record, subject: "u-alice" }, record.data).state).toBe("ok");
 	});
 });
 

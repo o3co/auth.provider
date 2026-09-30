@@ -84,11 +84,16 @@ describe("N verifications at once", () => {
 			Array.from({ length: 6 }, () => verify(agent, transaction, record.id, wrongCode(secret))),
 		);
 
-		expect(answers.map((res) => res.status)).toEqual(Array(6).fill(401));
-		expect(await transactionStore.get(transaction)).toBeNull();
+		// Three are checked and refused; each of the rest finds the attempts spent
+		// (401, exhausted), or the transaction the first of those ended gone (400).
 		const reasons = audit.of("mfa.verify.failure").map((event) => event.details?.reason);
 		expect(reasons.filter((reason) => reason === "invalid")).toHaveLength(3);
-		expect(reasons.filter((reason) => reason === "exhausted")).toHaveLength(3);
+		const exhausted = reasons.filter((reason) => reason === "exhausted").length;
+		const gone = answers.filter((res) => res.status === 400);
+		expect(answers.filter((res) => res.status === 401)).toHaveLength(3 + exhausted);
+		expect(exhausted + gone.length).toBe(3);
+		expect(gone.every((res) => res.body.error === "invalid_request")).toBe(true);
+		expect(await transactionStore.get(transaction)).toBeNull();
 	});
 
 	it("establishes one session from N right codes sent at once: one verification consumes the transaction, the rest find it spent", async () => {

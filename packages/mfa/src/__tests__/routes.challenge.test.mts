@@ -219,7 +219,12 @@ describe("a verification against a challenge", () => {
 			transaction_id: transaction,
 			factor_id: record.id,
 		});
-		const res = await verify(agent, transaction, record.id, `s3cret:${second.body.nonce as string}`);
+		const res = await verify(
+			agent,
+			transaction,
+			record.id,
+			`s3cret:${second.body.nonce as string}`,
+		);
 		expect(res.status).toBe(200);
 		expect(audit.of("mfa.verify.failure").map((event) => event.details?.reason)).toEqual([
 			"invalid",

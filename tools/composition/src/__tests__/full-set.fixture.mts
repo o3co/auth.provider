@@ -54,13 +54,13 @@ import {
 	type GrantPolicyHook,
 	type InterruptionAnswer,
 	loggableError,
+	type MfaFactorStore,
 	type Module,
 	memoryChallengeStoreModule,
 	memoryDeviceCodeStoreModule,
 	memoryMfaFactorStoreModule,
 	memoryMfaTransactionStoreModule,
 	memoryWebAuthnCredentialStoreModule,
-	type MfaFactorStore,
 	type PrimaryAuthentication,
 	type PrimaryContinuation,
 	type RequirementInterruption,
@@ -103,12 +103,12 @@ import {
 	webauthnModule,
 	webauthnSessionSubjectModule,
 } from "@o3co/auth-provider-webauthn";
-import type { RequestHandler } from "express";
+import type { Express, RequestHandler } from "express";
+import request from "supertest";
 import {
 	createFakeGithub,
 	type FakeGithub,
 } from "../../../../packages/federation-github/src/__tests__/fake-github.mts";
-
 
 /** The mTLS package's self-signed client certificate. */
 export const CLIENT_CERTIFICATE = readFileSync(
@@ -176,6 +176,47 @@ export async function seedTotp(
 	if (factorStore === undefined) throw new Error("the composition holds no MFA factor store");
 	const { record, secret } = await seedTotpFactor({ config, factorStore, subject });
 	return { factorId: record.id, secret };
+}
+
+/**
+ * One browser, across the replicas it talks to: every cookie it is handed is
+ * sent back, `Secure` ones too, since supertest speaks plain HTTP to what
+ * the template sets `__Host-` cookies on. A POST first fetches a CSRF token
+ * from the replica it posts to, as the page does.
+ */
+export function browser() {
+	const jar = new Map<string, string>();
+	const keep = (res: request.Response): request.Response => {
+		for (const line of ([] as string[]).concat(res.headers["set-cookie"] ?? [])) {
+			const pair = line.split(";")[0] ?? "";
+			jar.set(pair.slice(0, pair.indexOf("=")), pair);
+		}
+		return res;
+	};
+	const cookies = (): string[] => [...jar.values()];
+	const get = async (
+		app: Express,
+		path: string,
+		headers: Record<string, string> = {},
+	): Promise<request.Response> =>
+		keep(await request(app).get(path).set("Cookie", cookies().join("; ")).set(headers));
+	return {
+		cookies,
+		get,
+		async post(
+			app: Express,
+			path: string,
+			body: Record<string, unknown>,
+			options: { readonly form?: boolean } = {},
+		): Promise<request.Response> {
+			const csrf = await get(app, "/session/csrf");
+			const call = request(app)
+				.post(path)
+				.set("Cookie", cookies().join("; "))
+				.set(csrf.body.header_name as string, csrf.body.csrf_token as string);
+			return keep(await (options.form === true ? call.type("form") : call).send(body));
+		},
+	};
 }
 
 /** Which store backs each added feature: memory on one replica, Redis on several. */

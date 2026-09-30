@@ -580,7 +580,7 @@ describe("the MFA routes' flood guard without a shared rate limiter", () => {
 
 	it("builds a per-process limiter over mfa.rateLimit.routes, and says so once at warn when the deployment mode is unset", async () => {
 		const logger = spyLogger();
-		await boot({ config: underMode(undefined), withoutLogin: true, rateLimiter: null, logger });
+		await boot({ config: underMode(undefined), rateLimiter: null, logger });
 		expect(events(logger, "warn")).toContain("mfa_rate_limiter_not_shared");
 		const call = logger.warn.mock.calls.find((c) => c[1] === "mfa_rate_limiter_not_shared");
 		expect(call?.[0]).toEqual({ limit: 60, windowSeconds: 300 });
@@ -588,12 +588,16 @@ describe("the MFA routes' flood guard without a shared rate limiter", () => {
 
 	it("is silent under a single replica", async () => {
 		const logger = spyLogger();
-		await boot({ config: underMode("single"), withoutLogin: true, rateLimiter: null, logger });
+		await boot({ config: underMode("single"), rateLimiter: null, logger });
 		expect(events(logger, "warn")).not.toContain("mfa_rate_limiter_not_shared");
 	});
 
 	it("refuses the boot under several replicas, where a per-process count is no limit", async () => {
-		const err = await refusal({ config: underMode("multi"), withoutLogin: true, rateLimiter: null });
+		const err = await refusal({
+			config: underMode("multi"),
+			withoutLogin: true,
+			rateLimiter: null,
+		});
 		expect(err.reason).toBe("contribute-factory-failed");
 		expect((err.cause as Error).message).toContain("rateLimiter");
 	});

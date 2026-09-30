@@ -131,7 +131,8 @@ export const mfaSection = (mode: "off" | "optional" | "required") =>
 	mfaConfigForTests({ key: MFA_KEY, mode }).mfa;
 
 /** The recovery-code factor's `mfa-recovery-code-factor` section as the package's reference.conf resolves it. */
-export const RECOVERY_CODE_SECTION = mfaRecoveryCodeFactorConfigForTests()["mfa-recovery-code-factor"];
+export const RECOVERY_CODE_SECTION =
+	mfaRecoveryCodeFactorConfigForTests()["mfa-recovery-code-factor"];
 
 /** The TOTP factor's `mfa-totp-factor` section as the package's reference.conf resolves it. */
 export const TOTP_SECTION = mfaTotpFactorConfigForTests()["mfa-totp-factor"];
@@ -221,7 +222,9 @@ const sessionSupport = (rateLimiter: RateLimiter | null): Module[] => [
 				removeBySid: async () => {},
 			}) as unknown as SessionFederationIndex,
 	}),
-	...(rateLimiter === null ? [] : [providing("test:rate-limiter", { rateLimiter: () => rateLimiter })]),
+	...(rateLimiter === null
+		? []
+		: [providing("test:rate-limiter", { rateLimiter: () => rateLimiter })]),
 ];
 
 /**

@@ -42,7 +42,9 @@ export interface MfaConfigForTestsOptions {
 	readonly transactionTtlSeconds?: number;
 	readonly maxAttemptsPerTransaction?: number;
 	readonly lockout?: Partial<MfaLockoutPolicy>;
-	readonly rateLimit?: { readonly routes?: { readonly limit: number; readonly windowSeconds: number } };
+	readonly rateLimit?: {
+		readonly routes?: { readonly limit: number; readonly windowSeconds: number };
+	};
 	readonly manage?: { readonly maxAgeSeconds: number };
 }
 

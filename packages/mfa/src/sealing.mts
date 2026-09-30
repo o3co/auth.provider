@@ -32,8 +32,9 @@
  *   `key_unavailable` (naming the key) when the sealing key has left the ring.
  *   Callers answer both with a `503`, never "no factor" or a wrong code.
  * - New seals use the ring's first key. Opening a factor's data sealed under
- *   another key logs `mfa_factor_sealed_with_retired_key` once per key id, so an
- *   operator knows that key is still needed.
+ *   another key logs `mfa_factor_sealed_with_retired_key` once per key id, and a
+ *   digest matched under another key `mfa_digest_made_with_retired_key`, so an
+ *   operator counts both before retiring the key.
  * - Keyed digests for codes compared but never recovered: HMAC-SHA-256 over the
  *   kind and parts (length-prefixed), under a key derived by HKDF-SHA-256 (info
  *   `o3co:mfa:digest`) so no key serves two algorithms; stored with the key id and
@@ -249,6 +250,7 @@ export function createMfaSealing({ ring, logger = consoleLogger }: MfaSealingOpt
 	if (first === undefined) throw new RangeError("the MFA key ring has no key to seal with");
 	const keys: SealingKeyRing = [...ring];
 	const retiredSaid = new Set<string>();
+	const retiredDigestSaid = new Set<string>();
 	const digestKeys = new Map<string, Buffer>();
 
 	const seal = (placement: Placement, value: unknown, what: string): string => {
@@ -352,7 +354,12 @@ export function createMfaSealing({ ring, logger = consoleLogger }: MfaSealingOpt
 					const input = digestInput(kind, parts);
 					const entry = keys.find((candidate) => candidate.id === stored.keyId);
 					if (entry === undefined) return "key_unavailable";
-					return constantTimeStringEqual(mac(entry, input), stored.digest) ? "match" : "mismatch";
+					if (!constantTimeStringEqual(mac(entry, input), stored.digest)) return "mismatch";
+					if (entry.id !== first.id && !retiredDigestSaid.has(entry.id)) {
+						retiredDigestSaid.add(entry.id);
+						logger.info({ keyId: entry.id }, "mfa_digest_made_with_retired_key");
+					}
+					return "match";
 				},
 			});
 		},

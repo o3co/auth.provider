@@ -277,22 +277,22 @@ describe("keyed digests", () => {
 		const rotated = sealingOver([K2, K1], logger);
 		expect(rotated.openFactorData(RECORD, sealedUnderK1)).toMatchObject({ state: "ok" });
 		for (let i = 0; i < 3; i++) {
-			expect(
-				rotated.digestsFor("recovery_code").matchesDigest(["ABCD1234EFGH5678"], stored),
-			).toBe("match");
+			expect(rotated.digestsFor("recovery_code").matchesDigest(["ABCD1234EFGH5678"], stored)).toBe(
+				"match",
+			);
 		}
-		expect(
-			rotated.digestsFor("recovery_code").matchesDigest(["ABCD1234EFGH5679"], stored),
-		).toBe("mismatch");
+		expect(rotated.digestsFor("recovery_code").matchesDigest(["ABCD1234EFGH5679"], stored)).toBe(
+			"mismatch",
+		);
 		expect(lines).toEqual([
 			{ level: "info", fields: { keyId: "k1" }, event: "mfa_factor_sealed_with_retired_key" },
 			{ level: "info", fields: { keyId: "k1" }, event: "mfa_digest_made_with_retired_key" },
 		]);
 		// A digest under the first key says nothing.
 		const current = rotated.digestsFor("recovery_code").digest(["ABCD1234EFGH5678"]);
-		expect(
-			rotated.digestsFor("recovery_code").matchesDigest(["ABCD1234EFGH5678"], current),
-		).toBe("match");
+		expect(rotated.digestsFor("recovery_code").matchesDigest(["ABCD1234EFGH5678"], current)).toBe(
+			"match",
+		);
 		expect(lines).toHaveLength(2);
 	});
 

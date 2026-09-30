@@ -35,15 +35,7 @@ import {
 } from "@o3co/auth-provider-core";
 import type { Request, Response } from "express";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import {
-	ALICE,
-	BOB,
-	boot,
-	configFor,
-	disposeAll,
-	events,
-	sessionIdSet,
-} from "./moduleHarness.mjs";
+import { ALICE, BOB, boot, configFor, disposeAll, events, sessionIdSet } from "./moduleHarness.mjs";
 import {
 	beginLogin,
 	EXTRA_INTERRUPTION,
@@ -172,7 +164,9 @@ describe("a verified second factor completes the login", () => {
 
 		expect(res.status).toBe(401);
 		expect(res.body).toEqual({ error: "login_required", error_description: "Log in again" });
-		expect(events(logger, "warn")).toEqual(["mfa_login_not_resumed"]);
+		expect(events(logger, "warn").filter((event) => event.startsWith("mfa_"))).toEqual([
+			"mfa_login_not_resumed",
+		]);
 		expect(events(logger, "error")).toEqual([]);
 		expect(create).not.toHaveBeenCalled();
 	});
