@@ -27,8 +27,10 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import { inspect } from "node:util";
 import {
 	auditedError,
+	createMemoryReplaySeenSet,
 	loggableError,
 	type MfaFactorRecord,
+	type ReplaySeenSet,
 	sealWithKeyRing,
 	toMfaStoreFactor,
 } from "@o3co/auth-provider-core";
@@ -89,6 +91,7 @@ const storeOver = (
 		...urlsOf(fake),
 		bearerToken: TOKEN,
 		timeout: 5000,
+		replaySeenSet: createMemoryReplaySeenSet(),
 		...overrides,
 	});
 
@@ -156,6 +159,7 @@ const storeAt = (origin: string, bearerToken?: string): HttpMfaFactorStore =>
 		deleteUrl: `${origin}/mfa/delete`,
 		...(bearerToken === undefined ? {} : { bearerToken }),
 		timeout: 5000,
+		replaySeenSet: createMemoryReplaySeenSet(),
 	});
 
 describe("what it sends", () => {
@@ -324,9 +328,12 @@ describe("list", () => {
 				held.holdFactor("user-1", toMfaStoreFactor({ ...RECORD, id: OTHER_ID }));
 				held.holdFactor("user-1", record);
 				const error = await rejection(
-					new HttpMfaFactorStore({ ...urlsOf(held), bearerToken: TOKEN, timeout: 5000 }).list(
-						"user-1",
-					),
+					new HttpMfaFactorStore({
+						...urlsOf(held),
+						bearerToken: TOKEN,
+						timeout: 5000,
+						replaySeenSet: createMemoryReplaySeenSet(),
+					}).list("user-1"),
 				);
 				expect(error, what).toBeInstanceOf(MfaStoreError);
 				expect((error as MfaStoreError).reason, what).toBe("unreadable_record");
@@ -475,6 +482,84 @@ describe("delete", () => {
 	});
 });
 
+describe("a Store that lost or rolled back a write", () => {
+	/** The fake Store's list answering `factors` in place of what it holds. */
+	const listAnswers = (...factors: unknown[]) => fake.answer("list", () => json(200, { factors }));
+
+	/** `RECORD` created, then updated `times` times through `store`. */
+	async function written(store: HttpMfaFactorStore, times: number) {
+		const versions = [WIRE];
+		await store.create(RECORD);
+		for (let version = 1; version <= times; version += 1) {
+			const next = await store.update("user-1", ID, version, {
+				...NEXT,
+				data: `v2.write-${version}`,
+			});
+			versions.push(toMfaStoreFactor(next as MfaFactorRecord));
+		}
+		return versions;
+	}
+
+	it("refuses the list when the Store answers a version older than one written through the store, naming the subject and the factor id", async () => {
+		const store = storeOver();
+		const [first] = await written(store, 1);
+		listAnswers(first);
+		const error = await rejection(store.list("user-1"));
+		expect(error).toBeInstanceOf(MfaStoreError);
+		expect((error as MfaStoreError).reason).toBe("version_rolled_back");
+		expect((error as MfaStoreError).operation).toBe("list");
+		expect(error.message.startsWith(`subject user-1, factor ${ID}: `)).toBe(true);
+	});
+
+	it("refuses every version but the last one written, however many writes back", async () => {
+		const store = storeOver();
+		const versions = await written(store, 3);
+		for (const older of versions.slice(0, -1)) {
+			listAnswers(older);
+			const error = await rejection(store.list("user-1"));
+			expect((error as MfaStoreError).reason, String(older.version)).toBe("version_rolled_back");
+		}
+		fake.answer("list", undefined);
+		expect((await store.list("user-1")).map((record) => record.version)).toEqual([4]);
+	});
+
+	it("keeps the floor in the seen-set it is handed, so another replica over the same seen-set refuses too", async () => {
+		const shared = createMemoryReplaySeenSet();
+		const [first] = await written(storeOver({ replaySeenSet: shared }), 1);
+		listAnswers(first);
+		const error = await rejection(storeOver({ replaySeenSet: shared }).list("user-1"));
+		expect((error as MfaStoreError).reason).toBe("version_rolled_back");
+	});
+
+	it("never answers an update as written when the floor cannot record it", async () => {
+		const inner = createMemoryReplaySeenSet();
+		const refusing: ReplaySeenSet = {
+			kind: "refusing",
+			markSeen: async () => {
+				throw new Error("seen-set unavailable");
+			},
+			contains: (scope, key) => inner.contains(scope, key),
+		};
+		const store = storeOver({ replaySeenSet: refusing });
+		await store.create(RECORD);
+		await expect(store.update("user-1", ID, 1, NEXT)).rejects.toThrow("seen-set unavailable");
+	});
+
+	it("answers the list as an outage when the floor cannot be read", async () => {
+		const unreadable: ReplaySeenSet = {
+			kind: "unreadable",
+			markSeen: async () => true,
+			contains: async () => {
+				throw new Error("seen-set unavailable");
+			},
+		};
+		fake.holdFactor("user-1", WIRE);
+		await expect(storeOver({ replaySeenSet: unreadable }).list("user-1")).rejects.toThrow(
+			"seen-set unavailable",
+		);
+	});
+});
+
 describe("nothing the Store sends reaches what it throws", () => {
 	it("in a status line, a header or a body, whatever the operation and the status", async () => {
 		let status = 500;
@@ -541,7 +626,12 @@ describe("the transport", () => {
 	it("throws StoreCredentialRefusedError when the Store refuses the token with a Bearer challenge", async () => {
 		const other = await startFakeStore({ bearerToken: `${TOKEN}ff` });
 		try {
-			const store = new HttpMfaFactorStore({ ...urlsOf(other), bearerToken: TOKEN, timeout: 5000 });
+			const store = new HttpMfaFactorStore({
+				...urlsOf(other),
+				bearerToken: TOKEN,
+				timeout: 5000,
+				replaySeenSet: createMemoryReplaySeenSet(),
+			});
 			for (const call of [
 				() => store.list("user-1"),
 				() => store.create(RECORD),
