@@ -54,7 +54,7 @@ const handle = await createApp({
 const config = handle.components.config; // what boot parsed
 ```
 
-Until each section moves under its module's name — the move pull requests of #728 — core's schema still mirrors sections other packages own (`oauth.mtls`, `oauth.dpop`, `oauth.deviceAuthorization`, `webauthn`, `memoryRateLimiter` / `redisRateLimiter`, the `redis*` store namespaces), and boot validates each whenever the configuration carries it, whether or not the module that reads it is loaded. What a composition root must read before it knows its modules — the switches it chooses them by, its log level — it resolves from its own files over core's `reference.conf` alone (`coreReference()`: no module, so no package's reference, is known yet) and reads with `readTransitionalConfig(resolved, paths)` ([`src/config/composed.mts`](src/config/composed.mts)): each path it names parsed with the schema core's base declares there, everything else left as written and unchecked — boot checks it. So phase one sees nothing a package's `reference.conf` alone sets, and must not read a section one completes. It is transitional, and goes when those switches move into the composition root's own section. The standalone template's [`app.mts`](../../templates/standalone/src/app.mts) reads its configuration in exactly these two phases.
+Until each section moves under its module's name — the move pull requests of #728 — core's schema still mirrors sections other packages own (`oauth.mtls`, `oauth.dpop`, `oauth.deviceAuthorization`, `webauthn`, `memoryRateLimiter` / `redisRateLimiter`, the `redis*` store namespaces), and boot validates each whenever the configuration carries it, whether or not the module that reads it is loaded. What a composition root must read before it knows its modules — the switches it chooses them by — it resolves from its own files over core's `reference.conf` alone (`coreReference()`: no module, so no package's reference, is known yet) and reads with `readTransitionalConfig(resolved, paths)` ([`src/config/composed.mts`](src/config/composed.mts)): each path it names parsed with the schema core's base declares there, everything else left as written and unchecked — boot checks it. So phase one sees nothing a package's `reference.conf` alone sets, and must not read a section one completes. It is transitional, and goes when those switches move into the composition root's own section. The standalone template's [`app.mts`](../../templates/standalone/src/app.mts) reads its configuration in exactly these two phases.
 
 `AppConfigSchema` is deprecated. Parsing with it before `createApp` strips every section it does not declare — how #472, #495 and #496 lost theirs — so a composition that still does hands boot less than it resolved. It stays exported, and `AppConfig`, its inferred type, is the type of the parsed configuration.
 
@@ -62,9 +62,9 @@ Defaults live in [`config/reference.conf`](config/reference.conf), not in the sc
 
 | Field | Description |
 | --- | --- |
-| `http.port` | HTTP listen port |
-| `http.trustProxy` | Express `trust proxy`: `false`, an address list (IPs, CIDR ranges, or the named ranges `loopback` / `linklocal` / `uniquelocal`), a hop count, or `true`. Entries are validated at boot. Prefer naming the proxy over `true`, which believes a forwarded client address from anyone who can reach the process |
-| `oauth.jwt` | JWT signing config — `issuer`, `signingKey` (a `provider` plus its sub-section), `jwksPath`, `jwksCacheMaxAge` |
+| `http` | The host process's HTTP settings — `port`, `trustProxy` (Express `trust proxy`: `false`, an address list of IPs, CIDR ranges or the named ranges `loopback` / `linklocal` / `uniquelocal`, a hop count, or `true`) and `readinessTimeoutMs`. Owned by the module that provides `httpSettings` (the standalone template's `http` module), which ships the defaults; core reads none of it and ships none. Core's schema still declares the section, so its entries are validated at boot whenever a configuration carries it. Prefer naming the proxy over `true`, which believes a forwarded client address from anyone who can reach the process |
+| `logging.level` | The level a composition's logger emits at. Owned by the composition root's logging module (the standalone template's `logging`), which ships the default; core reads none of it, and its schema still declares the vocabulary |
+| `oauth.jwt` | JWT config — `issuer`, `jwksPath`, `jwksCacheMaxAge`, and `signingKey` (a `provider` plus its sub-section): the section of the module that provides `keyStore` (the standalone template's `key-store`), which ships its defaults; core reads none of `signingKey` |
 | `oauth.accessToken.defaultExpiresIn` | Access token lifetime, in seconds, that every grant mints when the request asks for none. Only token exchange lets a request ask (its `expires_in` parameter); every other grant ignores that parameter. Read the lifetime with `resolveAccessTokenLifetime(config)`, which throws a `RangeError` naming the key for a value the schema would refuse (`isLifetimeSeconds` is the rule, exported for a lifetime handed over as a number); every bundled grant reads it when it is built, so a hand-built configuration it refuses fails construction (and boot) rather than a request |
 | `oauth.accessToken.maxExpiresIn` | The most a token-exchange `expires_in` can obtain; a larger request is clamped to it. Unset means the default, so nothing is extended unless you opt in. A default above it fails boot naming both keys |
 | `oauth.accessToken.expiresIn` | **Deprecated** alias of `defaultExpiresIn`, read only while that key is unset (`reference.conf` keeps the shipped `3600` here). The parsed config also carries the resolved default under this name |
@@ -79,7 +79,7 @@ Defaults live in [`config/reference.conf`](config/reference.conf), not in the sc
 | `mfa.mode` | Whether a password login asks for a second factor — see [MFA](#mfa): `"off"` (the default), `"optional"` or `"required"`. Read by the MFA package (`@o3co/auth-provider-mfa`, private until the standalone template wires it), whose module refuses `"off"`. Boot's checks do not act on it; its value is still validated. The standalone template adds `mfa` to `sessionRequirements.expected` when the mode is not `"off"`, so there a mode that asks for a second factor without the MFA package refuses boot (`session-requirement-missing`); a hand-written composition declares `mfa` itself. The rest of the `mfa` section belongs to the package that reads it and passes through |
 | `sessionRequirements.expected` | The session requirements this composition expects — the extensions that change what "logged in" means, MFA among them — compared at boot with what the installed modules register (see [Session admission](#session-admission)). Once written, it is compared both ways, whether or not anything consults session admission: a name no installed module registers refuses boot (`session-requirement-missing`), and so does a registered requirement it leaves out (`session-requirements-undeclared`). Required whenever a module that consults session admission is installed (`oauthModule` is one), and refused unwritten there (`session-requirements-undeclared`); `[]` says "none"; no default, so a composition states its posture |
 | `mfaFactorStore.adapter`, `mfaTransactionStore.adapter` | Which store keeps enrolled factors (`memory`, `redis` or `store`) and which keeps MFA transactions and the lock state (`memory` or `redis`); both `memory` by default. Read by a composition root that installs MFA and picks its stores by name, which none does yet: the standalone template installs no MFA module, and refuses boot under a mode other than `"off"` (it declares `mfa`, which nothing there registers) |
-| `cors.allowedOrigins` | Browser origins allowed to read the token, userinfo, revocation and discovery/JWKS responses — see [CORS](#cors). Empty (the default) means CORS is off. It grants no CSRF trust — use `session.csrf.trustedOrigins` |
+| `cors.allowedOrigins` | Browser origins allowed to read the token, userinfo, revocation and discovery/JWKS responses — see [CORS](#cors). Empty (the default) means CORS is off. Read by core when no module provides `httpSettings`; the standalone template's `http` module hands its list over in that slot. It grants no CSRF trust — use `session.csrf.trustedOrigins` |
 
 ### Grant System
 
@@ -260,7 +260,7 @@ A key several modules read has one owner, and the others receive it through a sl
 
 Each has a contract suite on `@o3co/auth-provider-core/testing` that its provider's tests run, and — but `deploymentMode`, which a test fills with the literal — a test double a reader's tests fill the slot with: `oauthTokenSettingsContract` and `createTestOAuthTokenSettings`, `loginCompletionContract` and `createRecordingLoginCompletion`, `loginEntryContract` and `createTestLoginEntry`, `csrfGuardContract` and `createTestCsrfGuard`, `csrfTokenSignerContract` and `createTestCsrfTokenSigner`, `sessionCookiePolicyContract` and `createTestSessionCookiePolicy`, `httpSettingsContract` and `createTestHttpSettings`, `deploymentModeContract`, `rateLimiterContract` and `createTestRateLimiter`. [docs/adapter-surface.md](../../docs/adapter-surface.md) lists what each slot holds.
 
-A settings slot a module provides — `oauthTokenSettings`, `httpSettings` and `sessionCookiePolicy`, not `deploymentMode`, which core is to fill itself and reserve — has one source while its owner is loaded ([#728](https://github.com/o3co/auth.provider/issues/728)): the owner names it in `authoritative`, a list typed to the keys of its own `provides` (the oauth module names `oauthTokenSettings`; the session store's module provides `sessionCookiePolicy` without naming it yet, and `httpSettings` has no provider). The owner's own code reads its section, so an `overrideComponents` entry for the slot would be a second source — its readers would follow the override while the module went on doing what its section says — and boot refuses it (`authoritative-component-overridden`), as it refuses an authoritative key the module does not provide (`authoritative-without-provides`). A composition that does not load the owner fills the slot itself, override included; any other key a loaded module provides may be overridden, as before.
+A settings slot a module provides — `oauthTokenSettings`, `httpSettings` and `sessionCookiePolicy`, not `deploymentMode`, which core is to fill itself and reserve — has one source while its owner is loaded ([#728](https://github.com/o3co/auth.provider/issues/728)): the owner names it in `authoritative`, a list typed to the keys of its own `provides` (the oauth module names `oauthTokenSettings`; the session store's module provides `sessionCookiePolicy` without naming it yet, and the standalone template's `http` module names `httpSettings`). The owner's own code reads its section, so an `overrideComponents` entry for the slot would be a second source — its readers would follow the override while the module went on doing what its section says — and boot refuses it (`authoritative-component-overridden`), as it refuses an authoritative key the module does not provide (`authoritative-without-provides`). A composition that does not load the owner fills the slot itself, override included; any other key a loaded module provides may be overridden, as before.
 
 ```typescript
 const myModule = defineModule({
@@ -341,6 +341,15 @@ import {
 // What this composition reads before boot. createApp parses rawConfig itself (#728).
 const config = readTransitionalConfig(rawConfig, ["http.port", "oauth.jwt.signingKey", "repositories"]);
 
+// The signing key and the port are this composition's own settings: core ships
+// no default for `oauth.jwt.signingKey` or `http`, so rawConfig carries them (the
+// standalone template keeps them in its `config/reference.conf`).
+const { signingKey } = config.oauth.jwt;
+const port = config.http?.port;
+if (signingKey === undefined || port === undefined) {
+  throw new Error("oauth.jwt.signingKey and http.port are required");
+}
+
 // Both repositories.* (uses 'type') and oauth.jwt.signingKey (uses 'provider') follow
 // the same nested adapter sub-section pattern. flatten() normalises either selector
 // to { type, ...subSectionFields } before forwarding to the factory:
@@ -363,7 +372,7 @@ const flatten = (
 
 const keyStoreFactory = createKeyStoreFactory();
 registerBuiltinKeyStores(keyStoreFactory);
-const keyStore = await keyStoreFactory.create(flatten(config.oauth.jwt.signingKey));
+const keyStore = await keyStoreFactory.create(flatten(signingKey));
 
 const { clientFactory, userFactory, codeFactory } = createRepositoryFactories();
 
@@ -391,7 +400,7 @@ const handle = await createApp({
 
 const server = express();
 server.use(handle.router);
-server.listen(config.http.port);
+server.listen(port);
 ```
 
 ### Implementing a custom grant type

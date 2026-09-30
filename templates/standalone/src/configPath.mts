@@ -17,9 +17,10 @@
 /**
  * Where the template's configuration comes from: the composition's own layers
  * (`{env}.conf` over `application.conf`), read once by `readOwnLayers` under
- * one snapshot of the environment, and the two phases built from that read,
- * `readSwitches` and `resolveForBoot` (template README, "Environment-specific
- * config overlay"). So a file or variable changed during startup cannot split
+ * one snapshot of the environment, and what is built from that read: the two
+ * phases, `readSwitches` and `resolveForBoot`, and the `logging` module's
+ * section the logger is built from, `readLogging` (template README,
+ * "Environment-specific config overlay"). So a file or variable changed during startup cannot split
  * a switch phase one reads from the value boot's parse has, which matters
  * because adapter selections have no disagreement guard at boot;
  * `two-phase-config.test.mts` pins this for the shipped environments. A
