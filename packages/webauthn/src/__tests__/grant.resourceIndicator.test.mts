@@ -42,7 +42,8 @@ import {
 	memoryChallengeStoreModule,
 	memoryReplaySeenSetModule,
 } from "@o3co/auth-provider-core";
-import { createTestOAuthTokenSettings, makeValidAppConfig } from "@o3co/auth-provider-core/testing";
+import { createTestOAuthTokenSettings } from "@o3co/auth-provider-core/testing";
+import { makeAppConfig } from "./appConfig.fixture.mjs";
 import type { AuthenticationResponseJSON } from "@simplewebauthn/server";
 import express from "express";
 import supertest from "supertest";
@@ -166,7 +167,7 @@ async function boot(
 	});
 
 	const evaluate = vi.fn<GrantPolicyHook["evaluate"]>(async () => ({ outcome: "allow" }));
-	const base = makeValidAppConfig();
+	const base = makeAppConfig();
 	const config = {
 		...base,
 		// A single-replica composition: no warning about the per-process limiter.

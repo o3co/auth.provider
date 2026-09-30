@@ -34,7 +34,7 @@ import {
 	memoryReplaySeenSetModule,
 	memoryWebAuthnCredentialStoreModule,
 } from "@o3co/auth-provider-core";
-import { makeValidAppConfig } from "@o3co/auth-provider-core/testing";
+import { makeAppConfig } from "./appConfig.fixture.mjs";
 import express, { type RequestHandler } from "express";
 import supertest from "supertest";
 import { describe, expect, it } from "vitest";
@@ -96,7 +96,7 @@ const beneathModule = defineModule({
 });
 
 const bootApp = async () => {
-	const base = makeValidAppConfig();
+	const base = makeAppConfig();
 	const config = {
 		...base,
 		oauth: { ...base.oauth, jwt: { ...base.oauth.jwt, issuer: "https://test.example" } },

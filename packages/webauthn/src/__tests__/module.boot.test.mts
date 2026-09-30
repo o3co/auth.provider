@@ -37,7 +37,7 @@ import {
 	memoryReplaySeenSetModule,
 	memoryWebAuthnCredentialStoreModule,
 } from "@o3co/auth-provider-core";
-import { makeValidAppConfig } from "@o3co/auth-provider-core/testing";
+import { makeAppConfig } from "./appConfig.fixture.mjs";
 import express from "express";
 import supertest from "supertest";
 import { describe, expect, it, vi } from "vitest";
@@ -49,18 +49,18 @@ import { webauthnModule } from "../module.mjs";
 // Shared boot components
 // ---------------------------------------------------------------------------
 
-// `makeValidAppConfig()`, not `makeValidCoreConfig()`: the `config` slot is
+// `makeAppConfig()`, not `makeValidCoreConfig()`: the `config` slot is
 // typed `AppConfig`, and the webauthn route factory reads
 // `config.rateLimit.failMode`, a section the core-only slice lacks.
 // Captured once and reused: the factory returns a fresh object per call, and
 // separate calls would be fixtures that only happen to agree.
-const baseAppConfig = makeValidAppConfig();
+const baseAppConfig = makeAppConfig();
 const coreConfig = {
 	...baseAppConfig,
 	oauth: {
 		...baseAppConfig.oauth,
 		// A non-empty issuer is required when grantPolicy is wired, and webauthnModule
-		// requires grantPolicy. makeValidAppConfig() defaults it; it is pinned here.
+		// requires grantPolicy. makeAppConfig() defaults it; it is pinned here.
 		jwt: { ...baseAppConfig.oauth.jwt, issuer: "https://test.example" },
 	},
 };

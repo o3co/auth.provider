@@ -43,7 +43,7 @@ import {
 	memoryWebAuthnCredentialStoreModule,
 	type RateLimiter,
 } from "@o3co/auth-provider-core";
-import { makeValidAppConfig } from "@o3co/auth-provider-core/testing";
+import { makeAppConfig } from "./appConfig.fixture.mjs";
 import express from "express";
 import supertest from "supertest";
 import { describe, expect, it, vi } from "vitest";
@@ -58,7 +58,7 @@ import { WEBAUTHN_AUTHENTICATION_OPTIONS_RATE_LIMIT_TAG } from "../routes/authen
 const OPTIONS_PATH = "/oauth/webauthn/authentication/options";
 
 const makeCoreConfig = (failMode: "open" | "closed" = "open") => {
-	const base = makeValidAppConfig();
+	const base = makeAppConfig();
 	return {
 		...base,
 		oauth: { ...base.oauth, jwt: { ...base.oauth.jwt, issuer: "https://test.example" } },
