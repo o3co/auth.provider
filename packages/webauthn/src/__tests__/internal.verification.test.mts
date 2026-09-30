@@ -30,6 +30,8 @@
  *   3. the sign count, judged here after the signature verified — the library
  *      is handed a stored count of 0 — with the corner case stored=0 && new=0
  *      allowed
+ *   4. the user handle a response carries, held to the one the caller
+ *      expects, once the signature verified
  *
  * The real cryptographic path is covered by the library's own suite and by the
  * integration tests that run a real ceremony.
@@ -501,6 +503,103 @@ describe("verifyWebAuthnAssertion", () => {
 		});
 
 		expect(result).toEqual({ ok: false, reason: "signature_invalid" });
+	});
+});
+
+// ---------------------------------------------------------------------------
+// The response's user handle (WebAuthn §7.2 step 6)
+// ---------------------------------------------------------------------------
+
+describe("the user handle an assertion carries", () => {
+	beforeEach(() => vi.clearAllMocks());
+
+	/** The owner's user handle: bytes whose base64url is not a multiple of four characters. */
+	const OWNER = new TextEncoder().encode("user-alice");
+	const OWNER_JSON = Buffer.from(OWNER).toString("base64url");
+	/** Another account's user handle, as the JSON form writes it. */
+	const OTHER_JSON = Buffer.from("user-mallory").toString("base64url");
+
+	/** A verified assertion as the library answers one, its counter increased. */
+	const verified = () =>
+		mockVerifyAuthentication.mockResolvedValueOnce({
+			verified: true,
+			authenticationInfo: {
+				newCounter: 6,
+				credentialID: "dGVzdC1jcmVkZW50aWFsLWlk",
+				userVerified: true,
+				credentialDeviceType: "singleDevice",
+				credentialBackedUp: false,
+				authenticatorExtensionResults: undefined,
+				origin: "https://example.com",
+				rpID: "example.com",
+			},
+		});
+
+	/** An input whose response carries `userHandle` as given (a `null` included), the owner's handle expected unless told otherwise. */
+	const input = (
+		userHandle: unknown,
+		expectedUserHandle: Uint8Array | undefined = OWNER,
+	): Parameters<typeof verifyWebAuthnAssertion>[0] => ({
+		credential: makeStoredCredential(5),
+		response: {
+			...STUB_AUTHENTICATION_RESPONSE,
+			response: {
+				...STUB_AUTHENTICATION_RESPONSE.response,
+				...(userHandle === undefined ? {} : { userHandle: userHandle as string }),
+			},
+		},
+		expectedChallenge: "some-challenge",
+		expectedRpId: "example.com",
+		expectedOrigins: ["https://example.com"],
+		...(expectedUserHandle === undefined ? {} : { expectedUserHandle }),
+	});
+
+	it.each([
+		["another account's", OTHER_JSON],
+		["an empty one", ""],
+		["the owner's, padded", `${OWNER_JSON}==`],
+	])("refuses %s as user_handle_mismatch", async (_what, userHandle) => {
+		verified();
+		expect(await verifyWebAuthnAssertion(input(userHandle))).toEqual({
+			ok: false,
+			reason: "user_handle_mismatch",
+		});
+	});
+
+	it.each([
+		["the owner's", OWNER_JSON],
+		["none", undefined],
+		["null, which is none", null],
+	])("accepts %s", async (_what, userHandle) => {
+		verified();
+		expect(await verifyWebAuthnAssertion(input(userHandle))).toEqual({
+			ok: true,
+			newSignCount: 6,
+		});
+	});
+
+	it("refuses another's with the backup flags asked for too", async () => {
+		verified();
+		expect(await verifyWebAuthnAssertionWithBackupState(input(OTHER_JSON))).toEqual({
+			ok: false,
+			reason: "user_handle_mismatch",
+		});
+	});
+
+	it("does not read it when the caller expects none", async () => {
+		verified();
+		expect(await verifyWebAuthnAssertion(input(OTHER_JSON, undefined))).toEqual({
+			ok: true,
+			newSignCount: 6,
+		});
+	});
+
+	it("judges it only once the signature verified: an unsigned assertion carrying another's is signature_invalid", async () => {
+		mockVerifyAuthentication.mockResolvedValueOnce({ verified: false } as never);
+		expect(await verifyWebAuthnAssertion(input(OTHER_JSON))).toEqual({
+			ok: false,
+			reason: "signature_invalid",
+		});
 	});
 });
 

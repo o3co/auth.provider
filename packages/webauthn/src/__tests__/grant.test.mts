@@ -321,6 +321,19 @@ describe("createWebAuthnGrant — assertion verification", () => {
 			"sign_count_regression",
 		);
 	});
+
+	it("expects the user handle of the credential's owner: the UTF-8 bytes of its userId, as its registration options named it", async () => {
+		const store = createMemoryWebAuthnCredentialStore();
+		await store.registerCredential(makeCredential({ userId: "u-é-1" }));
+		mockVerifyAssertion.mockResolvedValue({ ok: true, newSignCount: 6 });
+
+		await createWebAuthnGrant(makeBaseDeps(store)).handle(
+			makeCtx({ assertion: makeAssertionResponse() }),
+		);
+
+		const expected = mockVerifyAssertion.mock.calls[0]?.[0].expectedUserHandle;
+		expect(expected && Buffer.from(expected).equals(Buffer.from("u-é-1", "utf8"))).toBe(true);
+	});
 });
 
 // ---------------------------------------------------------------------------
