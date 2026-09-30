@@ -18,7 +18,6 @@ import {
 	auditErrorText,
 	BEARER_TOKEN_TYPE,
 	canonicalScope,
-	classifyFederationRefreshError,
 	emitAuditEvent,
 	logClientRepositoryUnavailable,
 	loggableError,
@@ -43,6 +42,7 @@ import {
 	narrowedScope,
 	readRefreshAnswer,
 } from "./federationTokenRefreshAnswer.mjs";
+import { answerRefreshFailure } from "./federationTokenRefreshFailure.mjs";
 import { answerStoredToken, readStoredTokens } from "./federationTokenStored.mjs";
 
 export type { FederationTokenRouterOptions } from "./federationTokenContext.mjs";
@@ -336,101 +336,8 @@ export function createRouter(express: ExpressLike, opts: FederationTokenRouterOp
 			try {
 				refreshed = await provider.refreshToken(currentTokens.refreshToken);
 			} catch (error) {
-				// Core's classifier: an outage (unreachable, timeout, 5xx) is
-				// `network`, a 429 is `rate_limited`, and `invalid_grant` is only
-				// ever the upstream's structured verdict. Stored tokens are ended on
-				// that verdict alone; an outage or rate limit keeps them for a retry.
-				const classified = classifyFederationRefreshError(error);
-				const { reason } = classified;
-				// The projection, never the error: its cause chain can hold the
-				// rotated refresh token. An unreachable upstream is this route's
-				// outage (error); every other refusal is the upstream's (warn).
-				if (reason === "network") {
-					logger.error(
-						{ federation, reason, err: loggableError(error) },
-						"federation_token_upstream_unavailable",
-					);
-				} else {
-					logger.warn(
-						{ federation, reason, err: loggableError(error) },
-						"federation_token_refresh_failed",
-					);
-				}
-
-				if (reason === "invalid_grant") {
-					// Cleanup: delete federation token + remove federation link.
-					try {
-						await opts.federationTokenStore.delete(sid, name);
-					} catch (cleanupErr) {
-						logger.warn(
-							{
-								federation,
-								store: "federation_token",
-								step: "delete",
-								err: loggableError(cleanupErr),
-							},
-							"federation_token_cleanup_failed",
-						);
-					}
-					try {
-						await opts.sessionFederationIndex.removeFederation(sid, name);
-					} catch (cleanupErr) {
-						logger.warn(
-							{
-								federation,
-								store: "session_federation_index",
-								step: "remove",
-								err: loggableError(cleanupErr),
-							},
-							"federation_token_cleanup_failed",
-						);
-					}
-					emitAuditEvent(opts.auditSink, {
-						timestamp: new Date(),
-						type: "federation.token.reauthentication_required",
-						subject: sub ?? undefined,
-						ip: req.ip,
-						userAgent: req.get("user-agent"),
-						details: { federation },
-					});
-					return res.status(410).json({
-						error: "re_authentication_required",
-						error_description: "federation re-authentication required",
-					});
-				}
-
-				if (reason === "rate_limited") {
-					// The upstream's own wait, when it named one in whole seconds
-					// (RFC 9110 §10.2.3); none is invented when it did not.
-					if (classified.retryAfterSeconds !== undefined) {
-						res.setHeader("Retry-After", String(classified.retryAfterSeconds));
-					}
-					return res.status(429).json({
-						error: "rate_limited",
-						error_description: "upstream IdP rate limit exceeded; retry later",
-					});
-				}
-
-				if (reason === "network") {
-					return res.status(503).json({
-						error: "temporarily_unavailable",
-						error_description: "upstream federation provider temporarily unavailable",
-					});
-				}
-
-				// reason === "unknown" — generic 500 + audit with classifier reason for SIEM.
-				emitAuditEvent(opts.auditSink, {
-					timestamp: new Date(),
-					type: "federation.token.refresh_failed",
-					subject: sub ?? undefined,
-					ip: req.ip,
-					userAgent: req.get("user-agent"),
-					details: { federation, reason },
-				});
-				return res.status(500).json({
-					error: "refresh_failed",
-					error_description: "federation token refresh failed",
-				});
+				// Awaited inside the `try`, so the lock is released after the answer.
+				return await answerRefreshFailure(ctx, caller, error);
 			}
 
 			const {
