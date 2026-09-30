@@ -70,6 +70,8 @@ const primary = (over: Partial<PrimaryAuthentication> = {}): PrimaryAuthenticati
 			mfaAt: undefined,
 		},
 	},
+	// What core derives from the facts' user: no witness, no address.
+	enrollmentFacts: { witness: "not_enrolled", mailAddress: "none" },
 	...over,
 });
 
@@ -892,6 +894,7 @@ describe("establishWithoutAsking — a federated login's establishment, from the
 					mfaAt: undefined,
 				},
 			},
+			enrollmentFacts: { witness: "not_enrolled", mailAddress: "none" },
 			authTime: NOW,
 			redirectTo: "/after",
 			request: { ip: "198.51.100.7" },

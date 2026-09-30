@@ -83,7 +83,7 @@ function resolveWith(env: Record<string, string>, configEnv = "production"): App
 function bootableEnv(rel: string): Record<string, string> {
 	const env: Record<string, string> = {
 		OAUTH_JWT_ISSUER: "https://auth.test",
-		SESSION_SECRET: "scaffold-assets-compose-session.at-least-32-bytes.ok",
+		SESSION_STORE_SECRET: "scaffold-assets-compose-session.at-least-32-bytes.ok",
 	};
 	for (const [key, value] of composeAppEnvironment(rel)) {
 		if (value !== null) env[key] = value;
@@ -302,7 +302,7 @@ describe("the compose files put a store and its lifetime-sibling on the same bac
 			// Resolved through the real config layers, not read off the file:
 			// what matters is the value the process ends up with, whether the
 			// compose stated it or `config/application.conf` did.
-			expect(config.session.storage?.type).toBe("redis");
+			expect(config["session-store"]?.storage?.type).toBe("redis");
 			expect(config.userSessionStores?.adapter).toBe("redis");
 		});
 	}
@@ -313,7 +313,7 @@ describe("the compose files put a store and its lifetime-sibling on the same bac
 		// token store is deliberately absent: this template ships every
 		// federation disabled, so nothing writes to it, and turning it on needs
 		// an AES key the compose file must not invent.
-		expect(config.session.storage?.type).toBe("redis");
+		expect(config["session-store"]?.storage?.type).toBe("redis");
 		expect(config.userSessionStores?.adapter).toBe("redis");
 		expect(config.oauth.code?.adapter).toBe("redis");
 		expect(config.accessTokenDenylist?.adapter).toBe("redis");

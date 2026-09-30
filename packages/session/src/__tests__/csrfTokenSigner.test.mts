@@ -16,11 +16,11 @@
 
 /**
  * The session store module's `csrfTokenSigner`: the CSRF token's signature,
- * under a key derived from `session.secret` that never leaves the signer. A
+ * under a key derived from `session-store.secret` that never leaves the signer. A
  * fixed vector pins the derivation, so a token signed under a secret verifies
  * for as long as the deployment keeps that secret. The session module's
  * `csrfGuard` and the session routes sign and verify through the slot and
- * read no `session.secret`; a composition without the session store's module
+ * read no `session-store.secret`; a composition without the session store's module
  * fills the slot itself or is refused at boot.
  */
 
@@ -40,6 +40,7 @@ import {
 import {
 	createTestApp,
 	createTestCsrfTokenSigner,
+	createTestSessionCookiePolicy,
 	csrfTokenSignerContract,
 	makeValidAppConfig,
 	resolverForTests,
@@ -52,6 +53,7 @@ import { createSessionCsrfTokenSigner } from "#/csrf-token-signer.mjs";
 import { sessionModule } from "#/module.mjs";
 import { sessionStoreModule, sessionStoreModuleFor } from "#/modules/sessionStoreModule.mjs";
 import { createRouter as createSessionRouter } from "#/routes/Session.mjs";
+import { withSessionCaptures, withStore } from "./_helpers/sections.mjs";
 
 /**
  * A token's payload (`<expiry-seconds>.<nonce>`) and its signature under
@@ -106,14 +108,11 @@ const derivedSignature = (secret: string, payload: string): string =>
 		.update(payload, "utf8")
 		.digest("base64url");
 
-/** The valid fixture configuration with `session` changed: plain HTTP for supertest, and `secret`. */
-const configWith = (secret: string): AppConfig => {
-	const base = makeValidAppConfig();
-	return {
-		...base,
-		session: { ...base.session, name: "auth.session", secure: false, secret },
-	} as AppConfig;
-};
+/** The valid fixture configuration with the session store's section changed: plain HTTP for supertest, and `secret`. */
+const configWith = (secret: string): AppConfig =>
+	withSessionCaptures(
+		withStore(makeValidAppConfig(), { name: "auth.session", secure: false, secret }),
+	) as AppConfig;
 
 // ---------------------------------------------------------------------------
 // The signer a session secret gives
@@ -152,9 +151,9 @@ describe("the signature a session secret gives", () => {
 		["an empty secret", ""],
 		["a short secret", "short-secret"],
 		["a hex secret of 16 bytes", "00112233445566778899aabbccddeeff"],
-	])("refuses %s: core's entropy floor, naming session.secret", (_what, secret) => {
+	])("refuses %s: core's entropy floor, naming session-store.secret", (_what, secret) => {
 		expect(() => createSessionCsrfTokenSigner(secret)).toThrow(
-			/^session\.secret must carry at least 32 bytes \(256 bits\) of key material; .* SESSION_SECRET\./,
+			/^session-store\.secret must carry at least 32 bytes \(256 bits\) of key material; .* SESSION_STORE_SECRET\./,
 		);
 	});
 
@@ -173,12 +172,14 @@ describe("the signature a session secret gives", () => {
 const providedSigner = (secret: string): CsrfTokenSigner => {
 	const provide = (
 		sessionStoreModule.provides as
-			| { csrfTokenSigner?: (deps: { config: AppConfig }) => CsrfTokenSigner }
+			| { csrfTokenSigner?: (deps: { section: unknown }) => CsrfTokenSigner }
 			| undefined
 	)?.csrfTokenSigner;
 	if (provide === undefined)
 		throw new Error("the session store's module provides no csrfTokenSigner");
-	return provide({ config: configWith(secret) });
+	return provide({
+		section: (configWith(secret) as unknown as { "session-store": unknown })["session-store"],
+	});
 };
 
 describe("the session store module's csrfTokenSigner keeps core's contract", () => {
@@ -199,7 +200,7 @@ afterEach(async () => {
 });
 
 describe("the session store module provides csrfTokenSigner", () => {
-	it("hands a module that requires it the signer of session.secret: the fixed vector's signature", async () => {
+	it("hands a module that requires it the signer of session-store.secret: the fixed vector's signature", async () => {
 		const seen: { signer?: CsrfTokenSigner } = {};
 		const config = configWith(VECTOR.secret);
 		const handle = await createTestApp({
@@ -271,7 +272,13 @@ const fakeSessionFederationIndex = (): SessionFederationIndex =>
 		async removeBySid() {},
 	}) as unknown as SessionFederationIndex;
 
-/** What the session module requires beside the signer. */
+/** The session cookie over plain HTTP, as the `sessionCookiePolicy` slot carries it. */
+const COOKIE = createTestSessionCookiePolicy({ name: "auth.session", secure: false });
+
+/** The `sessionCookiePolicy` slot, where the session store's module is not loaded. */
+const cookiePolicy = () => providing("test:session-cookie-policy", "sessionCookiePolicy", COOKIE);
+
+/** What the session module requires beside the signer and the session cookie. */
 const stores = () => [
 	providing("test:user-repository", "userRepository", fakeUserRepository),
 	providing("test:user-session-store", "userSessionStore", fakeUserSessionStore()),
@@ -370,7 +377,7 @@ describe("the session module requires csrfTokenSigner", () => {
 	it("is refused at boot in a composition that provides no signer, naming the slot", async () => {
 		await expect(
 			createTestApp({
-				modules: [sessionModule, ...stores()],
+				modules: [sessionModule, cookiePolicy(), ...stores()],
 				bootstrapComponents: { config: configWith(VECTOR.secret), pathResolver: (s: string) => s },
 			}),
 		).rejects.toThrow(
@@ -382,7 +389,8 @@ describe("the session module requires csrfTokenSigner", () => {
 		expect(() =>
 			createSessionRouter(express, {
 				userRepository: fakeUserRepository,
-				config: configWith(VECTOR.secret),
+				section: {},
+				sessionCookie: COOKIE,
 				requirements: resolverForTests([], { actions: SESSION_ADMISSION_ACTIONS }),
 			} as never),
 		).toThrow(
@@ -395,7 +403,7 @@ describe("the session module signs and verifies through the signer in the slot, 
 	/**
 	 * The session module without the session store's module, beside a module
 	 * that fills the slot with a signer over a key of its own, not
-	 * `session.secret`'s.
+	 * `session-store.secret`'s.
 	 */
 	const withOwnSigner = async () => {
 		const signer = createTestCsrfTokenSigner();
@@ -403,6 +411,7 @@ describe("the session module signs and verifies through the signer in the slot, 
 			[
 				bareSession(),
 				sessionModule,
+				cookiePolicy(),
 				...stores(),
 				providing("test:csrf-token-signer", "csrfTokenSigner", signer),
 				probe(),
@@ -465,21 +474,21 @@ describe("the session module signs and verifies through the signer in the slot, 
 	});
 });
 
-describe("the session module reads no session.secret", () => {
+describe("the session module reads no session-store.secret", () => {
 	it("neither its providers nor its route factories nor its routes — csrf, login, logout, a federation's start and callback — read it", async () => {
 		const reads: string[] = [];
-		const base = configWith(VECTOR.secret);
-		const session = new Proxy(base.session as object, {
+		const base = configWith(VECTOR.secret) as unknown as Record<string, unknown>;
+		const store = new Proxy(base["session-store"] as object, {
 			get(target, key, receiver) {
-				if (key === "secret") reads.push("session.secret");
+				if (key === "secret") reads.push("session-store.secret");
 				return Reflect.get(target, key, receiver);
 			},
 		});
 		const config = {
 			...base,
-			session,
+			"session-store": store,
 			federations: {
-				...base.federations,
+				...(base.federations as object),
 				stub: {
 					enabled: true,
 					clientId: "id",
@@ -505,6 +514,8 @@ describe("the session module reads no session.secret", () => {
 		// What the planner hands the module's factories.
 		const deps = {
 			config,
+			section: base.session,
+			sessionCookiePolicy: COOKIE,
 			deploymentMode: "single",
 			csrfTokenSigner: createTestCsrfTokenSigner(),
 			userRepository: {
@@ -580,7 +591,7 @@ describe("the session module reads no session.secret", () => {
 // A token signed under the session secret keeps verifying
 // ---------------------------------------------------------------------------
 
-describe("a token signed under session.secret verifies through the session store's signer", () => {
+describe("a token signed under session-store.secret verifies through the session store's signer", () => {
 	it("passes POST /session/logout and the csrfGuard slot in a composition with the session store's module", async () => {
 		const config = configWith(VECTOR.secret);
 		const app = await bootApp(

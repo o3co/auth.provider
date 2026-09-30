@@ -21,8 +21,11 @@ import {
 	consoleLogger,
 	type Logger,
 	loggableError,
+	readEnrollmentFacts,
+	recordableEnrollmentFacts,
 	recordableSessionAuthentication,
 	type SessionAuthentication,
+	type SessionEnrollmentFacts,
 	type SupportsSecondFactorUpdate,
 	sessionAfterSecondFactor,
 	type UserSession,
@@ -76,6 +79,12 @@ interface Envelope {
 	 * `sessionAuthentication` splits as it reads it.
 	 */
 	authentication: EnvelopeAuthentication | undefined;
+	/**
+	 * What the login's `User` said for a first binding, as the two facts.
+	 * Left out when none was recorded, and absent in an envelope an older
+	 * release wrote (which also reads one that has it, ignoring the key).
+	 */
+	enrollmentFacts?: SessionEnrollmentFacts;
 }
 
 /**
@@ -141,7 +150,9 @@ const isValidEnvelope = (v: unknown): v is Envelope => {
 		e.claims !== null &&
 		!Array.isArray(e.claims) &&
 		(e.amr === undefined || isStringList(e.amr)) &&
-		isValidEnvelopeAuthentication(e.authentication)
+		isValidEnvelopeAuthentication(e.authentication) &&
+		// Absent, or the two facts: anything else is corrupt, never read as none.
+		(e.enrollmentFacts === undefined || readEnrollmentFacts(e.enrollmentFacts) !== undefined)
 	);
 };
 
@@ -169,6 +180,14 @@ const toEnvelope = (input: CreateUserSessionInput, createdAtMs: number): Envelop
 	claims: { ...input.claims },
 	amr: input.amr ? [...input.amr] : undefined,
 	authentication: input.authentication ? toEnvelopeAuthentication(input.authentication) : undefined,
+	...(input.enrollmentFacts === undefined
+		? {}
+		: {
+				enrollmentFacts: {
+					witness: input.enrollmentFacts.witness,
+					mailAddress: input.enrollmentFacts.mailAddress,
+				},
+			}),
 });
 
 const fromEnvelope = (e: Envelope): UserSession => ({
@@ -180,6 +199,10 @@ const fromEnvelope = (e: Envelope): UserSession => ({
 	claims: { ...e.claims } as UserSessionClaims,
 	amr: e.amr ? [...e.amr] : undefined,
 	authentication: e.authentication ? fromEnvelopeAuthentication(e.authentication) : undefined,
+	// Checked by `isValidEnvelope`; copied to the two facts.
+	...(e.enrollmentFacts === undefined
+		? {}
+		: { enrollmentFacts: readEnrollmentFacts(e.enrollmentFacts) }),
 });
 
 /**
@@ -286,13 +309,16 @@ export function createRedisUserSessionStore(
 				input.authentication,
 				Date.now(),
 			);
+			// And the enrollment facts: what core's `recordableEnrollmentFacts`
+			// answers, as the memory store records it.
+			const enrollmentFacts = recordableEnrollmentFacts(input.sid, input.enrollmentFacts);
 			const ttlMs = expiresAtMs - Date.now();
 			if (ttlMs <= 0) {
 				throw new Error(`UserSession ${input.sid}: expiresAt is in the past`);
 			}
 			// `authentication` as checked: a copy, its `mfaAt` no later than the
-			// host's clock.
-			const envelope = toEnvelope({ ...input, authentication }, Date.now());
+			// host's clock; the facts as checked.
+			const envelope = toEnvelope({ ...input, authentication, enrollmentFacts }, Date.now());
 			const result = await opts.client.set(
 				k(input.sid),
 				JSON.stringify(envelope),

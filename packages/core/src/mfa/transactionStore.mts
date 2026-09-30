@@ -15,10 +15,10 @@
  */
 
 /**
- * The MFA transaction, the subject lock state that bounds guessable proofs, the
- * port that keeps both, and its `mfaTransactionStore` slot. See ADR
- * 2026-09-25-multi-factor-authentication (the MFA transaction; attempts,
- * lockout and rate limits).
+ * The MFA transaction, the subject lock state that bounds guessable proofs, a
+ * session's account-email proof, the port that keeps them, and its
+ * `mfaTransactionStore` slot. See ADR 2026-09-25-multi-factor-authentication
+ * (the MFA transaction; attempts, lockout and rate limits; D24).
  *
  * A transaction is the short-lived, single-use record of one second-factor
  * ceremony, bound to what started it. Every operation a race could split is
@@ -35,7 +35,7 @@
  */
 
 import type { AdapterFactory } from "../adapters/AdapterFactory.mjs";
-import { isStorableLifetime } from "../adapters/expiry.mjs";
+import { isStorableExpiry, isStorableLifetime } from "../adapters/expiry.mjs";
 import { constantTimeStringEqual } from "../security/timingSafe.mjs";
 import { checkPrimaryContinuation } from "../session-admission/primary.mjs";
 import type { PrimaryContinuation } from "../session-admission/requirement.mjs";
@@ -424,6 +424,106 @@ export function readMfaAttemptReservation(
 }
 
 /**
+ * `answer`, what `sessionEmailProofAt(subject, sid, nowMs)` answered, as the
+ * port promises it: `null` for no proof, or when the proof was given — a
+ * finite instant from the epoch to `nowMs`. `undefined` for anything else,
+ * which the caller answers as the store's outage: a proof it cannot read
+ * admits nothing.
+ */
+export function readSessionEmailProof(answer: unknown, nowMs: number): number | null | undefined {
+	if (answer === null) return null;
+	return typeof answer === "number" && Number.isFinite(answer) && answer >= 0 && answer <= nowMs
+		? answer
+		: undefined;
+}
+
+/** A non-empty string: a session's subject and `sid`, as a proof is kept for them. */
+const isNonEmptyText = (value: unknown): value is string =>
+	typeof value === "string" && value.length > 0;
+
+/** Epoch milliseconds a proof is kept in: a safe integer at or after the epoch. */
+const isEpochMs = (value: unknown): value is number =>
+	typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
+
+/** A session's account-email proof as a store keeps it. */
+export interface SessionEmailProof {
+	readonly provedAtMs: number;
+	readonly untilMs: number;
+}
+
+/**
+ * Refuses, with a `RangeError` naming what is wrong, a session's
+ * account-email proof a store cannot keep, on `storeNowMs`, its clock:
+ * `subject` and `sid` non-empty strings; `provedAtMs` and `untilMs` epoch
+ * milliseconds, `untilMs` after `provedAtMs` and after `storeNowMs`, within
+ * the Date range; `provedAtMs` no further ahead of `storeNowMs` than
+ * {@link MFA_CLOCK_SKEW_ALLOWANCE_MS}. Every adapter runs it before it
+ * records a proof, and on one it reads back.
+ */
+export function checkSessionEmailProof(
+	subject: unknown,
+	sid: unknown,
+	provedAtMs: unknown,
+	untilMs: unknown,
+	storeNowMs: number,
+): void {
+	const refuse = (what: string): never => {
+		throw new RangeError(`MfaTransactionStore.recordSessionEmailProof: ${what}`);
+	};
+	if (!isNonEmptyText(subject) || !isNonEmptyText(sid)) {
+		refuse("subject and sid must be non-empty strings");
+	}
+	if (!isEpochMs(provedAtMs)) refuse("provedAtMs must be epoch milliseconds");
+	if (!isEpochMs(untilMs) || !isStorableExpiry(untilMs)) {
+		refuse("untilMs must be epoch milliseconds within the Date range");
+	}
+	if ((untilMs as number) <= (provedAtMs as number)) refuse("untilMs must be after provedAtMs");
+	if (!((untilMs as number) > storeNowMs)) refuse("untilMs must be after the store's clock");
+	if (!((provedAtMs as number) <= storeNowMs + MFA_CLOCK_SKEW_ALLOWANCE_MS)) {
+		refuse(
+			"provedAtMs must be no further ahead of the store's clock than MFA_CLOCK_SKEW_ALLOWANCE_MS",
+		);
+	}
+}
+
+/**
+ * What a store answers of `proof` asked about at `nowMs`, on `storeNowMs`,
+ * its clock: when it was given, no later than `nowMs`, while its `untilMs`
+ * is after both; else `null`. Every adapter answers through it.
+ */
+export function sessionEmailProofAnswer(
+	proof: SessionEmailProof,
+	nowMs: number,
+	storeNowMs: number,
+): number | null {
+	return proof.untilMs > nowMs && proof.untilMs > storeNowMs
+		? Math.min(proof.provedAtMs, nowMs)
+		: null;
+}
+
+/**
+ * Refuses, with a `RangeError`, a question `sessionEmailProofAt` cannot
+ * answer: `subject` and `sid` non-empty strings, `nowMs` an instant from the
+ * epoch within the Date range. Every adapter runs it first.
+ */
+export function checkSessionEmailProofQuestion(
+	subject: unknown,
+	sid: unknown,
+	nowMs: unknown,
+): void {
+	if (!isNonEmptyText(subject) || !isNonEmptyText(sid)) {
+		throw new RangeError(
+			"MfaTransactionStore.sessionEmailProofAt: subject and sid must be non-empty strings",
+		);
+	}
+	if (typeof nowMs !== "number" || !isStorableExpiry(nowMs) || nowMs < 0) {
+		throw new RangeError(
+			"MfaTransactionStore.sessionEmailProofAt: nowMs must be an instant from the epoch within the Date range",
+		);
+	}
+}
+
+/**
  * Whether `consumed`, what `consume(bound.id, bound.version)` answered other
  * than `null`, is the transaction the bound read returned: the same id,
  * version, purpose, subject and `redirectTo`, bound to the same binding, and
@@ -527,7 +627,8 @@ export type MfaSubjectAttemptReservation =
 export type MfaSubjectAttemptOutcome = "failure" | "success" | "void";
 
 /**
- * Where MFA transactions and the subject lock state are kept.
+ * Where MFA transactions, the subject lock state and a session's
+ * account-email proof are kept.
  *
  * Every operation is atomic on its own. A store that cannot answer throws:
  * an outage is `503`, never a verdict on a proof.
@@ -633,6 +734,29 @@ export interface MfaTransactionStore {
 	 * holder bind without the proof.
 	 */
 	consumeEmailProofRequirement(subject: string): Promise<boolean>;
+
+	// A session's account-email proof: verification state whose loss fails
+	// closed — the user proves again.
+	/**
+	 * Record the account-email proof (D24) given in the session `sid` of
+	 * `subject` at `provedAtMs`, standing until `untilMs`; it replaces an
+	 * earlier one for that session. A `RangeError`, nothing recorded, for what
+	 * {@link checkSessionEmailProof} refuses on the store's clock.
+	 */
+	recordSessionEmailProof(
+		subject: string,
+		sid: string,
+		provedAtMs: number,
+		untilMs: number,
+	): Promise<void>;
+	/**
+	 * What {@link sessionEmailProofAnswer} answers of the proof recorded for
+	 * the session `sid` of `subject`, on the store's clock: when it was given,
+	 * no later than `nowMs`, while it stands; else `null`. Another session's
+	 * proof, or the same `sid` under another subject, never answers. A
+	 * `RangeError` for what {@link checkSessionEmailProofQuestion} refuses.
+	 */
+	sessionEmailProofAt(subject: string, sid: string, nowMs: number): Promise<number | null>;
 }
 
 /** Domain-specific AdapterFactory alias for {@link MfaTransactionStore}. */

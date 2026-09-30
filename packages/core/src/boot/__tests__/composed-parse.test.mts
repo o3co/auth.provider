@@ -379,15 +379,23 @@ describe("a loaded module's section is never stripped", () => {
 		// A section schema that reads one key of a section core mirrors whole:
 		// written back in place of the section, it would take every other key
 		// from every module reading `config`.
-		const session = makeValidAppConfig().session;
+		const repositories = makeValidAppConfig().repositories;
 		const seen: Record<string, unknown> = {};
 		const config = await bootAndRead(
-			[sectioned("narrow-session", z.object({ name: z.string() }), "session", seen)],
-			resolved({ session }),
+			[
+				sectioned(
+					"narrow-repositories",
+					z.object({ code: z.object({ type: z.string() }) }),
+					"repositories",
+					seen,
+				),
+			],
+			resolved({ repositories }),
 		);
-		expect(seen["narrow-session"]).toEqual({ name: session.name });
-		expect((config.session as Record<string, unknown>).secret).toBe(session.secret);
-		expect(Object.keys(config.session as object).sort()).toEqual(Object.keys(session).sort());
+		expect(seen["narrow-repositories"]).toEqual({ code: { type: repositories.code.type } });
+		const written = config.repositories as Record<string, unknown>;
+		expect(written.client).toEqual(repositories.client);
+		expect(Object.keys(written).sort()).toEqual(Object.keys(repositories).sort());
 	});
 
 	it("writes back what the schema makes of an absent section, and nothing when that is undefined", async () => {

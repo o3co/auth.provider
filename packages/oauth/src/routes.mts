@@ -82,7 +82,7 @@ import {
 import { createClientAuthMiddleware, resolveRealm } from "./middleware/clientAuth.mjs";
 import { OAUTH_RATE_LIMIT_PREFIXES } from "./rateLimitPrefixes.mjs";
 import { resolveOAuthOptions } from "./resolveOAuthOptions.mjs";
-import { createAuthorizeHandler, loginTripFromConfig } from "./routes/authorize.mjs";
+import { createAuthorizeHandler } from "./routes/authorize.mjs";
 import { createConsentRouter } from "./routes/consent.mjs";
 import * as federationTokenRoute from "./routes/federationToken.mjs";
 import * as logoutRoute from "./routes/logout.mjs";
@@ -94,6 +94,22 @@ import {
 	isCompoundConfirmation,
 } from "./types/introspect.mjs";
 import { refuseVerificationUnavailable } from "./verificationUnavailable.mjs";
+
+/**
+ * The login page `/authorize` sends a browser that is not signed in to: the
+ * `loginEntry` slot. Required to serve `/authorize`, and read here, when the
+ * endpoint is built, so an entry that names no page refuses boot rather than
+ * the first such browser.
+ */
+const requireLoginEntry = (entry: LoginEntry | undefined): LoginEntry => {
+	if (entry === undefined) {
+		throw new Error(
+			"/authorize sends a browser that is not signed in to the login page, which the loginEntry slot names, and no module provides it: install the session module (sessionModule), which provides it, or a module of your own that does",
+		);
+	}
+	void entry.url;
+	return entry;
+};
 
 /**
  * The `reason` of a grant handler's `token.issued.failure`: its
@@ -247,9 +263,10 @@ export const createOAuthRouter = async (
 		pendingConsentStore?: PendingConsentStore;
 		/**
 		 * The deployment's login page and its `redirect_to` protocol — the
-		 * `loginEntry` slot the session module provides. Optional: the oauth
-		 * module boots without the session module, and `/authorize` then reads
-		 * `endpoints.login.url` per request.
+		 * `loginEntry` slot the session module provides. Required to serve
+		 * `/authorize`, which sends a browser that is not signed in there: the
+		 * router refuses to build that endpoint without one, or with one that
+		 * names no page. Unread without the authorization_code grant.
 		 */
 		loginEntry?: LoginEntry;
 		/**
@@ -302,7 +319,7 @@ export const createOAuthRouter = async (
 	// here, at router composition; see `resolveOAuthOptions` for the defensive
 	// reads and per-field defaults. The /authorize handler receives the whole
 	// object (routes/authorize.mts).
-	const options = resolveOAuthOptions(config, logger);
+	const options = resolveOAuthOptions(config);
 	// `/authorize` answers `acr_values` only from the entries this composition
 	// can satisfy — the same table discovery advertises — and an entry dropped
 	// is said once, here, at composition. With no `/authorize` there is no
@@ -417,12 +434,13 @@ export const createOAuthRouter = async (
 					auditSink,
 					logger,
 					issuer: canonicalIssuer,
-					// The session module's login entry when a module provides it;
-					// otherwise the login page read from the configuration per request.
-					login: loginEntry ?? loginTripFromConfig(() => config.endpoints.login.url),
-					// The consent page, read like the login page. The default lives
-					// in HOCON; a hand-built config without the key falls back the same way.
-					consentUrl: () => config.endpoints.consent?.url ?? "/consent",
+					// The session module's login entry, required here.
+					login: requireLoginEntry(loginEntry),
+					// The consent page, `oauth.consentPage.url`, read per request. The
+					// default lives in the package's reference.conf; a hand-built config
+					// without the key falls back the same way.
+					consentUrl: () =>
+						(config.oauth as { consentPage?: { url?: string } }).consentPage?.url ?? "/consent",
 					consentStore,
 					pendingConsentStore,
 					oauth: { ...options, acrValues: acrTable },

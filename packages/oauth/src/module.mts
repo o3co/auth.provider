@@ -18,10 +18,9 @@ import {
 	ACCESS_TOKEN_DENYLIST_ABSENCE_POLICY,
 	type AppConfig,
 	AUDIT_SINK_ABSENCE_POLICY,
+	coerceBooleanFromEnv,
 	consoleLogger,
 	defineModule,
-	LOGIN_RETURN_PARAMETER,
-	loginPageCarriesReturn,
 	type Module,
 	type ProviderDeps,
 	readAccessTokenRevocationMode,
@@ -39,34 +38,83 @@ import { createOAuthRouter } from "./routes.mjs";
 import { oauthTokenSettingsFrom } from "./tokenSettings.mjs";
 
 /**
- * Config-slice schema for `oauthModule`. `/authorize` redirects an
- * unauthenticated request to `config.endpoints.login.url` when no module
- * provides the `loginEntry` slot, and the session module builds that slot
- * from the same key, so both rules below hold either way:
- *
- * - non-empty (core's `CoreConfigSchema` requires only a string): an empty
- *   URL names no page;
- * - no `redirect_to` of its own: `/authorize` adds one naming the request to
- *   come back to (core's `LoginEntry` contract), and with two a page reading
- *   the first would send the user to the preconfigured target.
- *
- * Parsed by boot's composed parse over what core's base made of the
- * configuration, so boot fails with
- * `BootError(reason: "config-validation-failed")`, the issue at
- * `endpoints.login.url`, before any request hits the route.
+ * A list an environment variable may carry as one comma-separated string:
+ * entries trimmed and empties dropped, so an exported-but-empty variable is
+ * `[]`.
  */
-const oauthConfigSchema = z.object({
-	endpoints: z.object({
-		login: z.object({
-			url: z
-				.string()
-				.min(1)
-				.refine((url) => !loginPageCarriesReturn(url), {
-					message: `endpoints.login.url must not carry a "${LOGIN_RETURN_PARAMETER}" query parameter of its own: the provider adds "${LOGIN_RETURN_PARAMETER}" when it sends a browser to the login page, naming the request to come back to`,
-				}),
-		}),
-	}),
+const commaList = z.union([z.array(z.string()), z.string()]).transform((value) =>
+	Array.isArray(value)
+		? value
+		: value
+				.split(",")
+				.map((entry) => entry.trim())
+				.filter((entry) => entry.length > 0),
+);
+
+/**
+ * The keys of `oauth {}` this module's schema declares: the consent page and
+ * the Client ID Metadata Documents (draft-ietf-oauth-client-id-metadata-document).
+ * The rest of `oauth {}` is still declared by core's schema, so this one keeps
+ * no other key and refuses none; boot lays what it parses over the section.
+ * Each leaf reads the string an environment variable carries.
+ */
+export const oauthSectionSchema = z.object({
+	/**
+	 * The deployment-owned page a client that is not first-party is sent to
+	 * with `?challenge=<id>`: a path or an absolute URL, which may carry a
+	 * query of its own.
+	 */
+	consentPage: z.object({ url: z.string() }).strict().optional(),
+	/**
+	 * A `client_id` that is the https URL of the client's own registration.
+	 * Off by default. The list keys also take a comma-separated string. Every
+	 * ceiling here is the operator's: a document says who a client is, never
+	 * what it may reach.
+	 */
+	clientIdMetadataDocuments: z
+		.object({
+			enabled: coerceBooleanFromEnv,
+			allowedScopes: commaList.optional(),
+			allowedAudiences: commaList.optional(),
+			allowedHosts: commaList.optional(),
+			deniedHosts: commaList.optional(),
+			maxBytes: z.coerce.number().int().positive().optional(),
+			timeoutMs: z.coerce.number().int().positive().optional(),
+			cacheMaxAgeMs: z.coerce.number().int().nonnegative().optional(),
+			maxCacheEntries: z.coerce.number().int().positive().optional(),
+			staleIfErrorMs: z.coerce.number().int().nonnegative().optional(),
+			negativeCacheMs: z.coerce.number().int().nonnegative().optional(),
+			maxConcurrentFetches: z.coerce.number().int().positive().optional(),
+		})
+		.optional(),
 });
+
+/**
+ * The module's section, `oauth`, with the package's defaults: the consent
+ * page moved from `endpoints.consent.url`, and `ENDPOINTS_CONSENT_URL` and the
+ * Client ID Metadata Documents' `OAUTH_CIMD_*` variables renamed after their
+ * paths (`OAUTH_CONSENT_PAGE_URL`, `OAUTH_CLIENT_ID_METADATA_DOCUMENTS_*`).
+ */
+const SECTION = {
+	schema: oauthSectionSchema,
+	reference: new URL("../config/reference.conf", import.meta.url),
+	relocatedFrom: { "endpoints.consent.url": "consentPage.url" },
+	renamedVariables: {
+		ENDPOINTS_CONSENT_URL: "endpoints.consent.url",
+		OAUTH_CIMD_ENABLED: "oauth.clientIdMetadataDocuments.enabled",
+		OAUTH_CIMD_ALLOWED_SCOPES: "oauth.clientIdMetadataDocuments.allowedScopes",
+		OAUTH_CIMD_ALLOWED_AUDIENCES: "oauth.clientIdMetadataDocuments.allowedAudiences",
+		OAUTH_CIMD_ALLOWED_HOSTS: "oauth.clientIdMetadataDocuments.allowedHosts",
+		OAUTH_CIMD_DENIED_HOSTS: "oauth.clientIdMetadataDocuments.deniedHosts",
+		OAUTH_CIMD_MAX_BYTES: "oauth.clientIdMetadataDocuments.maxBytes",
+		OAUTH_CIMD_TIMEOUT_MS: "oauth.clientIdMetadataDocuments.timeoutMs",
+		OAUTH_CIMD_CACHE_MAX_AGE_MS: "oauth.clientIdMetadataDocuments.cacheMaxAgeMs",
+		OAUTH_CIMD_MAX_CACHE_ENTRIES: "oauth.clientIdMetadataDocuments.maxCacheEntries",
+		OAUTH_CIMD_STALE_IF_ERROR_MS: "oauth.clientIdMetadataDocuments.staleIfErrorMs",
+		OAUTH_CIMD_NEGATIVE_CACHE_MS: "oauth.clientIdMetadataDocuments.negativeCacheMs",
+		OAUTH_CIMD_MAX_CONCURRENT_FETCHES: "oauth.clientIdMetadataDocuments.maxConcurrentFetches",
+	},
+} as const;
 
 /**
  * Declarative manifest for the OAuth 2.0 endpoint suite. Every dependency
@@ -91,8 +139,8 @@ export const oauthModule = (_params: { config: AppConfig }): Module => {
 	//
 	// The type arguments are written out, though inference from `requires`,
 	// `optional` and `provides` would give the same. Written, they infer
-	// nothing, so the section schema (none: `never`) and the provided keys
-	// `authoritative` is typed against are written too.
+	// nothing, so the section schema and the provided keys `authoritative` is
+	// typed against are written too.
 	return defineModule<
 		| "config"
 		| "clientRepository"
@@ -117,11 +165,11 @@ export const oauthModule = (_params: { config: AppConfig }): Module => {
 		| "replaySeenSet"
 		| "loginEntry"
 		| "logger",
-		never,
+		typeof oauthSectionSchema,
 		"oauthTokenSettings"
 	>({
 		name: "oauth",
-		configSchema: oauthConfigSchema,
+		section: SECTION,
 		requires: [
 			"config", // createOAuthRouter reads config.oauth.jwt.issuer, accessToken / refreshToken expiry
 			"clientRepository",
@@ -146,7 +194,7 @@ export const oauthModule = (_params: { config: AppConfig }): Module => {
 			"pendingConsentStore", // where the consent step parks a request; the memory consent module provides it with consentStore, and the router refuses one without the other
 			"federationProviders", // synthetic — boot planner injects ReadonlyMap from federation contributions
 			"replaySeenSet", // jti single-use for private_key_jwt client assertions; server_error on that path when absent
-			"loginEntry", // the login page /authorize sends a browser to, which the session module provides; endpoints.login.url is read when absent
+			"loginEntry", // the login page /authorize sends a browser to, which the session module provides; required to serve /authorize
 			"logger", // structured logger; falls back to consoleLogger when absent
 		],
 		// Optional to wire, not optional to decide. `auditSink` absence must

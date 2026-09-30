@@ -130,14 +130,16 @@ function makeConfig(
 			jwt: { issuer: ISSUER },
 			accessToken: { expiresIn: ACCESS_TOKEN_TTL },
 			refreshToken: { expiresIn: REFRESH_TOKEN_TTL },
-			...(overrides.bindConfidentialClientRefreshTokens === undefined
-				? {}
-				: {
+		},
+		...(overrides.bindConfidentialClientRefreshTokens === undefined
+			? {}
+			: {
+					core: {
 						tokenBinding: {
 							bindConfidentialClientRefreshTokens: overrides.bindConfidentialClientRefreshTokens,
 						},
-					}),
-		},
+					},
+				}),
 	} as unknown as GrantDependencies["config"];
 }
 

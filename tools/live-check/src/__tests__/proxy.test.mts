@@ -18,6 +18,7 @@
  * `live-check.sh start` does that, and a person signs in.
  */
 import { type ChildProcess, spawn } from "node:child_process";
+import { readFileSync } from "node:fs";
 import http from "node:http";
 import type { AddressInfo } from "node:net";
 import { fileURLToPath } from "node:url";
@@ -157,7 +158,7 @@ describe("tools/live-check proxy, judging the iss against an expected issuer", (
 			LIVE_CHECK_PROVIDER_PORT: String(providerPort),
 			LIVE_CHECK_FEDERATION: "google",
 			LIVE_CHECK_EXPECTED_ISS: "https://accounts.google.com",
-			SESSION_NAME: "auth.session",
+			SESSION_STORE_NAME: "auth.session",
 		});
 	});
 	afterAll(async () => {
@@ -432,5 +433,31 @@ describe("tools/live-check proxy without an expected issuer", () => {
 		const s = await state(base);
 		expect(s.verdict).toMatchObject({ issJudged: false, loginOk: false, ok: false });
 		expect(s.fragment).toContain("iss absent, but the login failed (HTTP 400)");
+	});
+});
+
+describe("the launcher and the front name the session store's variables", () => {
+	// The provider refuses to boot on an old name set alone: each was renamed
+	// with its key, `session.<key>` to `session-store.<key>`.
+	const OLD = [
+		"SESSION_SECRET",
+		"SESSION_NAME",
+		"SESSION_MAX_AGE",
+		"SESSION_SECURE",
+		"SESSION_SAME_SITE",
+		"SESSION_DOMAIN",
+		"SESSION_STORAGE_TYPE",
+		"SESSION_STORAGE_REDIS_URL",
+		"SESSION_STORAGE_REDIS_PASSWORD",
+		"ENDPOINTS_LOGIN_URL",
+	];
+
+	it.each(["live-check.sh", "proxy.mjs"])("%s sets and reads none of the old names", (file) => {
+		const text = readFileSync(fileURLToPath(new URL(`../../${file}`, import.meta.url)), "utf8");
+		expect(OLD.filter((name) => new RegExp(`\\b${name}\\b`).test(text))).toEqual([]);
+	});
+
+	it("reads the session cookie's name from SESSION_STORE_NAME", () => {
+		expect(readFileSync(PROXY, "utf8")).toContain("process.env.SESSION_STORE_NAME");
 	});
 });

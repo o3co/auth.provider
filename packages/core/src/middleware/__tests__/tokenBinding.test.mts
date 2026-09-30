@@ -572,25 +572,27 @@ describe("tokenBindingMw — response headers a mechanism asks for", () => {
 });
 
 describe("resolveTokenBindingSettings", () => {
-	// The one reading of `oauth.tokenBinding`: the settings that apply across
+	// The one reading of `core.tokenBinding`: the settings that apply across
 	// every mechanism installed at core's token-binding extension point, and so
 	// core's, as the point is. Boot reads the dispatch policy through this and
 	// the grants the refresh-token rule; no slot carries either.
 	const settingsOf = (tokenBinding: unknown) =>
-		resolveTokenBindingSettings({ oauth: { tokenBinding } });
+		resolveTokenBindingSettings({ core: { tokenBinding } });
 
 	it("reads strict-mutual-exclusion when the configuration says so", () => {
-		expect(settingsOf({ "dispatch-policy": "strict-mutual-exclusion" }).dispatchPolicy).toBe(
+		expect(settingsOf({ dispatchPolicy: "strict-mutual-exclusion" }).dispatchPolicy).toBe(
 			"strict-mutual-exclusion",
 		);
 	});
 
 	it("reads intent-explicit otherwise: when it says so, says something else, or says nothing", () => {
 		for (const config of [
-			{ oauth: { tokenBinding: { "dispatch-policy": "intent-explicit" } } },
-			{ oauth: { tokenBinding: { "dispatch-policy": "STRICT-MUTUAL-EXCLUSION" } } },
-			{ oauth: { tokenBinding: {} } },
-			{ oauth: {} },
+			{ core: { tokenBinding: { dispatchPolicy: "intent-explicit" } } },
+			{ core: { tokenBinding: { dispatchPolicy: "STRICT-MUTUAL-EXCLUSION" } } },
+			{ core: { tokenBinding: {} } },
+			{ core: {} },
+			// The path the settings moved from, which boot refuses: never read.
+			{ oauth: { tokenBinding: { "dispatch-policy": "strict-mutual-exclusion" } } },
 			{},
 			undefined,
 			null,
@@ -623,7 +625,7 @@ describe("resolveTokenBindingSettings", () => {
 
 	it("answers the two settings and nothing else, frozen", () => {
 		const settings = settingsOf({
-			"dispatch-policy": "strict-mutual-exclusion",
+			dispatchPolicy: "strict-mutual-exclusion",
 			bindConfidentialClientRefreshTokens: true,
 			unknown: "ignored",
 		});

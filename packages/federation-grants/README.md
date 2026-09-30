@@ -75,7 +75,7 @@ const app = await createApp({
 
 The grant store is a separate module again, because a store is what a deployment installs whether or not it mounts these routes: a subject-wide revocation reaches grants through the same port (an ordinary logout leaves them standing, D14 — a grant is consent to act while the user is away). `memoryFederationGrantStoreModule` is single-replica only; a scaled deployment wires `redisFederationGrantStoreModule` from `@o3co/auth-provider-redis`. The same holds for the intent store: `memoryFederationGrantIntentStoreModule` on one replica, `redisFederationGrantIntentStoreModule` on several — an intent lodged on one replica is otherwise unknown to the one the browser lands on.
 
-Creating grants also needs, each refused at boot when missing rather than met by a user mid-flow: `federation-grants.consent.url` (the deployment's consent page — there is no default), a `callbackURL` on every connection, a `loginEntry` (the session module's, which needs `endpoints.login.url`), a `csrfGuard` (the session module's CSRF policy, which the [consent answer](#get-and-post-sessionfederation-grantsconsent) is held to), a `userSessionStore` (what session admission reads), and, once a connection is configured, either a `userRepository` whose `supportsFederatedIdentityLookup` answers `true` for every connection's registration (with `findSubjectByFederatedIdentity` beside it) or `federation-grants.identityLookup = "unsupported"`. The bundled `InMemoryUserRepository` covers no registration, so a deployment on it with a connection configured must choose the second. Each is described where the flow uses it, below.
+Creating grants also needs, each refused at boot when missing rather than met by a user mid-flow: `federation-grants.consent.url` (the deployment's consent page — there is no default), a `callbackURL` on every connection, a `loginEntry` (the session module's, which needs `session.loginPage.url`), a `csrfGuard` (the session module's CSRF policy, which the [consent answer](#get-and-post-sessionfederation-grantsconsent) is held to), a `userSessionStore` (what session admission reads), and, once a connection is configured, either a `userRepository` whose `supportsFederatedIdentityLookup` answers `true` for every connection's registration (with `findSubjectByFederatedIdentity` beside it) or `federation-grants.identityLookup = "unsupported"`. The bundled `InMemoryUserRepository` covers no registration, so a deployment on it with a connection configured must choose the second. Each is described where the flow uses it, below.
 
 Enabling the feature also requires a `subjectRevocation` component that carries the **grants boundary** — `revokeSessionsBefore` and `grantsRevokedBefore` beside the pair #296 shipped (D13). A grant outlives the session it was agreed through, so that boundary is what reaches one on a replica that never saw the withdrawal, and every disclosure is compared against it. Three compositions are refused at boot rather than per request:
 
@@ -545,7 +545,7 @@ and plain text, never a JSON body.
 
 1. A prefetch parks nothing (`204`).
 2. An unknown, spent or expired handle: `400`, plain.
-3. Not signed in: `303` to `endpoints.login.url?redirect_to=<this link>` —
+3. Not signed in: `303` to `session.loginPage.url?redirect_to=<this link>` —
    the handle and nothing else from the original query — built by the
    `loginEntry` slot the session module provides
    ([#728](https://github.com/o3co/auth.provider/issues/728)). It is
@@ -555,10 +555,10 @@ and plain text, never a JSON body.
    exact-match allowlist names fixed landing pages and would refuse this
    link — as it would refuse an authorize URL — for carrying a per-flow
    handle. The slot is optional in the manifest and required once grants are
-   enabled, and core's schema takes an empty `endpoints.login.url` that only
-   `oauthModule` refuses, so an enabled deployment without the slot, or
-   without a login page, is refused at boot rather than answering this step
-   with a 500.
+   enabled, and an entry that names no login page fails where the page is
+   read, so an enabled deployment without the slot, or with an entry that
+   names no page, is refused at boot rather than answering this step with a
+   500.
 4. Signed in as someone other than the intent's subject: `403`, plain, and no
    redirect anywhere.
 5. Session admission does not admit the session — the durable session is
@@ -647,7 +647,7 @@ throttle run before it, as on every route):
 - **No origin at all** — a user agent that sends neither header: the answer
   carries the guard's double-submit token, its cookie's value echoed in its
   form field or its header — with the session module's guard, the
-  `<session.name>.csrf` cookie, `csrf_token` and `x-csrf-token`.
+  `<session-store.name>.csrf` cookie, `csrf_token` and `x-csrf-token`.
   `GET /session/csrf` hands one out, as it does for `POST /session/login`. A
   page may always include the token: it counts only when the answer names no
   origin.

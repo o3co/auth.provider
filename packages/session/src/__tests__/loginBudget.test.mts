@@ -16,7 +16,7 @@
 
 /**
  * The session module's `login` budget: `/session/login` limits under the
- * `login` prefix, and its window and limit are `rateLimit.login`, in
+ * `login` prefix, and its window and limit are `session.rateLimit.login`, in
  * milliseconds. The module contributes it as a `rateLimitBudgets` entry, in
  * whole seconds, for every limiter to read; without it a shared limiter
  * would serve the endpoint that resists password guessing its
@@ -27,12 +27,12 @@ import type { RateLimitSpec } from "@o3co/auth-provider-core";
 import { describe, expect, it } from "vitest";
 import { sessionModule } from "#/module.mjs";
 
-/** What the module contributes for `login`, from `config`. */
-const loginBudget = async (config: unknown): Promise<RateLimitSpec | null | undefined> =>
-	sessionModule.contributes?.rateLimitBudgets?.login?.({ config } as never);
+/** What the module contributes for `login`, from its section, `session`. */
+const loginBudget = async (section: unknown): Promise<RateLimitSpec | null | undefined> =>
+	sessionModule.contributes?.rateLimitBudgets?.login?.({ section } as never);
 
 describe("the session module's login budget", () => {
-	it("is rateLimit.login, its window in whole seconds", async () => {
+	it("is session.rateLimit.login, its window in whole seconds", async () => {
 		expect(await loginBudget({ rateLimit: { login: { windowMs: 900_000, limit: 20 } } })).toEqual({
 			limit: 20,
 			windowSeconds: 900,
@@ -48,10 +48,9 @@ describe("the session module's login budget", () => {
 		});
 	});
 
-	it("is switched off when the configuration gives no rateLimit.login", async () => {
+	it("is switched off when the section gives no rateLimit.login", async () => {
 		expect(await loginBudget({})).toBeNull();
 		expect(await loginBudget({ rateLimit: {} })).toBeNull();
-		expect(await loginBudget({ rateLimit: { failMode: "open" } })).toBeNull();
 	});
 
 	it("reads the key as its schema does: a numeric string is its number", async () => {
@@ -65,7 +64,7 @@ describe("the session module's login budget", () => {
 		).toEqual({ limit: 20, windowSeconds: 900 });
 	});
 
-	it("refuses a rateLimit.login that is given but unusable, naming the key", async () => {
+	it("refuses a session.rateLimit.login that is given but unusable, naming the key", async () => {
 		for (const login of [
 			{ windowMs: 0, limit: 20 },
 			{ windowMs: 900_000, limit: 0 },
@@ -83,7 +82,7 @@ describe("the session module's login budget", () => {
 			"20/900000",
 		]) {
 			await expect(loginBudget({ rateLimit: { login } }), JSON.stringify(login)).rejects.toThrow(
-				/^rateLimit\.login must be/,
+				/^session\.rateLimit\.login must be/,
 			);
 		}
 	});

@@ -32,7 +32,7 @@ import {
 	type UserSession,
 	type UserSessionStore,
 } from "@o3co/auth-provider-core";
-import { resolverForTests } from "@o3co/auth-provider-core/testing";
+import { createTestLoginEntry, resolverForTests } from "@o3co/auth-provider-core/testing";
 import express from "express";
 import { SignJWT } from "jose";
 import request from "supertest";
@@ -161,6 +161,7 @@ const buildApp = async (requirement: SessionRequirement) => {
 		}),
 	);
 	const { router } = await createOAuthRouter(express, {
+		loginEntry: createTestLoginEntry(),
 		registry,
 		config,
 		clientRepository,

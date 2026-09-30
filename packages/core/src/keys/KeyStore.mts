@@ -228,9 +228,10 @@ export interface SymmetricPreviousSecret {
  * Creates an HS256 KeyStore that resolves the verification key by `kid`.
  *
  * Does not enforce the secret entropy floor: that belongs at the config
- * boundary (the `"local"` builder of `registerBuiltinKeyStores`, and
- * `AppConfigSchema` for `session.secret`). A composition root passing an
- * operator-supplied secret here applies `assertSecretEntropy` itself.
+ * boundary (the `"local"` builder of `registerBuiltinKeyStores`, and the
+ * session store's section schema for `session-store.secret`). A composition
+ * root passing an operator-supplied secret here applies `assertSecretEntropy`
+ * itself.
  *
  * Rotation: `previousSecrets` verify tokens whose `kid` names an older key;
  * issuance always uses the current `secret`/`kid`. Lookup is by `kid`, never

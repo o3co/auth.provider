@@ -32,18 +32,18 @@ import { renamedVariableCaptures } from "../renamedVariables.mjs";
  * this shape. For production defaults, parse `reference.conf` through the test
  * harness.
  *
- * Deliberate divergences from `reference.conf`:
- * - `session.storage.type` is `"memory"` (`"redis"` there);
+ * Deliberate divergences from the `reference.conf` files:
+ * - `session-store.storage.type` is `"memory"` (`"redis"` there);
  * - `federations` is `{}` (no built-in `google` block);
  * - the signing key is HS256 (EdDSA there) with an inline secret that clears
  *   the entropy floor, so the fixture carries no PEM material; tests of JWKS
  *   or asymmetric signing build their own key pair;
  * - `oauth.jwt.issuer` is a fixed test issuer (`${?OAUTH_JWT_ISSUER}` there);
  * - `repositories.*` carry only `type`;
- * - `oauth.grants` enables `session`, `authorization_code` and
- *   `refresh_token` explicitly (`oauthAuthorizationModule` requires
- *   `enabled === true`) and omits `client_credentials`, as the standalone
- *   template does.
+ * - the grant switches, in the oauth package's modules' sections, turn on
+ *   `oauth-session.enabled` and
+ *   `oauth-authorization.grants.{authorizationCode,refreshToken}.enabled`
+ *   (off there) and omit `clientCredentials`, as the standalone template does.
  *
  * Like a resolution of `reference.conf` under an environment that sets none
  * of them, it captures every variable core's own section and core's own
@@ -81,8 +81,27 @@ export function coreConfigForTests(options: CoreConfigForTestsOptions = {}) {
 	} satisfies Pick<CoreConfig, "core">;
 }
 
-export function makeValidCoreConfig() {
+/**
+ * The grant switches the fixture turns on, in the oauth package's modules'
+ * sections: the session, authorization-code and refresh-token grants.
+ */
+function grantSwitchesForTests() {
 	return {
+		"oauth-session": { enabled: true },
+		"oauth-authorization": {
+			grants: {
+				authorizationCode: { enabled: true },
+				refreshToken: { enabled: true },
+				// clientCredentials: deliberately omitted -- the fixture mirrors
+				// the standalone template, where client_credentials remains off
+				// unless the deployment explicitly enables M2M.
+			},
+		},
+	} satisfies Pick<FullSectionsConfig, "oauth-session" | "oauth-authorization">;
+}
+
+export function makeValidCoreConfig() {
+	const core = {
 		...{
 			[RENAMED_VARIABLES_SECTION]: renamedVariableCaptures({
 				modules: [memoryRateLimiterModule],
@@ -117,14 +136,6 @@ export function makeValidCoreConfig() {
 				unknownFamilyPolicy: "reject",
 				legacyRtPolicy: "reject",
 			},
-			grants: {
-				session: { enabled: true },
-				authorization_code: { enabled: true },
-				refresh_token: { enabled: true },
-				// client_credentials: deliberately omitted -- factory mirrors the
-				// standalone template defaults, where client_credentials remains
-				// off unless the deployment explicitly enables M2M.
-			},
 			oidcMode: "oidc-required",
 			// Declares both subject-level revocation slots absent: this fixture
 			// has none, on purpose. A test of the declared-absence guard removes
@@ -137,12 +148,14 @@ export function makeValidCoreConfig() {
 		// posture. A test of the declaration itself removes the key.
 		...coreConfigForTests(),
 	} satisfies CoreConfig;
+	return { ...core, ...grantSwitchesForTests() };
 }
 
 export function makeValidFullSections() {
 	return {
-		session: {
-			// `session.secret` has a 256-bit entropy floor in AppConfigSchema.
+		// The session store's section: the session cookie and its store.
+		"session-store": {
+			// The secret has a 256-bit entropy floor in the store's schema.
 			secret: "test-session-secret.at-least-32-bytes.ok",
 			name: "__Host-auth.session",
 			maxAge: 3600000,
@@ -151,19 +164,17 @@ export function makeValidFullSections() {
 			domain: null,
 			storage: { type: "memory" },
 		},
-		rateLimit: {
-			login: { windowMs: 900000, limit: 20 },
+		// The session module's section: the login page the unauthenticated
+		// /authorize redirect is built from, and the login's budget.
+		session: {
+			loginPage: { url: "/login" },
+			rateLimit: { login: { windowMs: 900000, limit: 20 } },
 		},
 		federations: {},
 		repositories: {
 			client: { type: "yaml" },
 			user: { type: "yaml" },
 			code: { type: "memory" },
-		},
-		endpoints: {
-			// Required by `oauthModule.configSchema`: the unauthenticated
-			// /authorize redirect is built from it.
-			login: { url: "/login" },
 		},
 		// Declares the audit sink absent (this fixture has no audit trail, on
 		// purpose); the bundled modules refuse an unfilled `auditSink` otherwise.

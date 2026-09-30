@@ -42,7 +42,7 @@ import {
 	federationGrantAuthorizationRevision,
 	federationGrantIdentityRevision,
 } from "@o3co/auth-provider-core";
-import { makeValidCoreConfig, makeValidFullSections } from "@o3co/auth-provider-core/testing";
+import { makeValidCoreConfig } from "@o3co/auth-provider-core/testing";
 import express from "express";
 import request from "supertest";
 import { describe, expect, it, vi } from "vitest";
@@ -122,7 +122,6 @@ const SESSION_FEDERATION_STORES = {
 type Boundaries = { grants?: Date | null | "malformed" | "invalid"; sessions?: Date | null };
 
 const boot = async (boundaries: Boundaries = {}, spent = false) => {
-	const full = makeValidFullSections();
 	const handle = await createApp({
 		modules: [federationModule, sessionMiddlewareModule, ...federationGrantsModules, storeModule],
 		bootstrapComponents: {
@@ -137,7 +136,7 @@ const boot = async (boundaries: Boundaries = {}, spent = false) => {
 						clientId: connection.upstreamClientId,
 					},
 				},
-				rateLimit: { ...full.rateLimit, failMode: "closed" },
+				rateLimit: { failMode: "closed" },
 				audit: { sink: { type: "none" } },
 				"federation-grants": {
 					enabled: true,

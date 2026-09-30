@@ -22,30 +22,118 @@ import {
 	consoleLogger,
 	defineModule,
 	fullSectionsSchema,
+	LOGIN_RETURN_PARAMETER,
 	type Logger,
+	loginPageCarriesReturn,
+	MAX_DURATION_MS,
+	type SessionCookiePolicy,
 	SUBJECT_REVOCATION_ABSENCE_POLICY,
 } from "@o3co/auth-provider-core";
 import express from "express";
+import { z } from "zod";
 import { SESSION_ADMISSION_ACTIONS } from "./admissionActions.mjs";
 import {
 	createCsrfProtectionFromConfig,
 	createSessionCsrfGuard,
-	type SessionCsrfConfigSlice,
+	MAX_CSRF_TTL_SECONDS,
+	sessionCsrfSlice,
 } from "./csrf.mjs";
 import { extractFederationSection } from "./federations/extract-federation-section.mjs";
 import { deriveFederationTransactionCookieName } from "./federations/transaction.mjs";
-import { loginEntryFromConfig } from "./login-entry.mjs";
+import { createLoginEntry } from "./login-entry.mjs";
 import { LOGIN_RATE_LIMIT_PREFIX, readLoginRateLimitBudget } from "./loginBudget.mjs";
 import * as federationRoutes from "./routes/Federation.mjs";
 import * as sessionRoutes from "./routes/Session.mjs";
 
 const sessionConfigSchema = fullSectionsSchema.pick({
-	session: true,
-	rateLimit: true,
 	federations: true,
-	endpoints: true,
 	cors: true,
 });
+
+/**
+ * The schema of `session {}`, the module's own section, strict at every
+ * level: where `POST /session/login` may send a browser back to, the CSRF
+ * policy, the login page and the login's rate-limit budget. The session
+ * cookie and its store are the session store's (`session-store {}`), read
+ * here through the `sessionCookiePolicy` slot. Each leaf reads the string an
+ * environment variable carries.
+ */
+export const sessionSectionSchema = z
+	.object({
+		/**
+		 * The exact URLs `POST /session/login` may accept as `redirect_to`,
+		 * matched after `new URL(x).href` normalization, with no wildcard or
+		 * prefix form. Absence fails closed: a missing key refuses the redirect.
+		 */
+		redirectAllowlist: z.array(z.string()).optional(),
+		/**
+		 * CSRF policy for the state-changing session routes. `trustedOrigins` is
+		 * not `cors.allowedOrigins`: "may this origin read my responses" and
+		 * "may it make me change state" are separate questions. The TTL is
+		 * stringified into the token as its expiry, so it is a whole number of
+		 * seconds from 1 to `MAX_CSRF_TTL_SECONDS`.
+		 */
+		csrf: z
+			.object({
+				trustedOrigins: z.array(z.string()),
+				ttlSeconds: z.coerce.number().int().positive().max(MAX_CSRF_TTL_SECONDS),
+			})
+			.strict()
+			.optional(),
+		/**
+		 * The deployment's login page, which the `loginEntry` slot sends a
+		 * browser that is not signed in to: required (the package's reference
+		 * ships `/login`), non-empty, and with no `redirect_to` of its own, as
+		 * the slot adds one naming the request to come back to (core's
+		 * `LoginEntry` contract).
+		 */
+		loginPage: z
+			.object({
+				url: z
+					.string()
+					.min(1)
+					.refine((url) => !loginPageCarriesReturn(url), {
+						message: `session.loginPage.url must not carry a "${LOGIN_RETURN_PARAMETER}" query parameter of its own: the provider adds "${LOGIN_RETURN_PARAMETER}" when it sends a browser to the login page, naming the request to come back to`,
+					}),
+			})
+			.strict(),
+		/**
+		 * `POST /session/login`'s brute-force budget, `windowMs` in
+		 * milliseconds, which the module contributes as the `login` budget
+		 * every limiter reads: required (the package's reference ships 20 per
+		 * 15 minutes). Zero (an exported-but-empty variable) would turn the
+		 * guard into a no-op that still looks configured.
+		 */
+		rateLimit: z
+			.object({
+				login: z
+					.object({
+						windowMs: z.coerce.number().int().positive().max(MAX_DURATION_MS),
+						limit: z.coerce.number().int().positive(),
+					})
+					.strict(),
+			})
+			.strict(),
+	})
+	.strict();
+
+/** `session {}` as its schema leaves it. */
+type SessionSection = z.output<typeof sessionSectionSchema>;
+
+/**
+ * The module's section, with the paths it moved from: the login page from
+ * `endpoints.login.url` (its variable renamed `SESSION_LOGIN_PAGE_URL`) and
+ * the login's budget from `rateLimit.login`, which no variable binds.
+ */
+const SECTION = {
+	schema: sessionSectionSchema,
+	reference: new URL("../config/reference.conf", import.meta.url),
+	relocatedFrom: {
+		"endpoints.login.url": "loginPage.url",
+		"rateLimit.login": { to: "rateLimit.login", environmentVariable: null },
+	},
+	renamedVariables: { ENDPOINTS_LOGIN_URL: "endpoints.login.url" },
+} as const;
 
 /**
  * Boot-time projection of `config.federations` to a `name → callbackURL`
@@ -70,19 +158,23 @@ function deriveProviderCallbackUrls(
 
 /**
  * The `csrfGuard` slot's value: the signed double-submit token of
- * `createCsrfProtectionFromConfig` (cookie `<session.name>.csrf`, signed
- * through `signer`) plus `session.csrf.trustedOrigins`. The session routes
- * build their own `CsrfProtection` over the same signer, so each accepts the
- * other's tokens: the token is signed, not stored.
+ * `createCsrfProtectionFromConfig` (cookie `<session cookie name>.csrf`, with
+ * the session cookie's attributes, signed through `signer`) plus
+ * `session.csrf.trustedOrigins`. The session routes build their own
+ * `CsrfProtection` over the same signer, so each accepts the other's tokens:
+ * the token is signed, not stored.
  */
-const csrfGuardOf = (config: AppConfig, signer: CsrfTokenSigner, logger: Logger): CsrfGuard => {
-	const session = config.session as unknown as SessionCsrfConfigSlice;
-	return createSessionCsrfGuard({
-		csrf: createCsrfProtectionFromConfig(session, { signer }),
-		trustedOrigins: session.csrf?.trustedOrigins ?? [],
+const csrfGuardOf = (
+	section: SessionSection,
+	cookie: SessionCookiePolicy,
+	signer: CsrfTokenSigner,
+	logger: Logger,
+): CsrfGuard =>
+	createSessionCsrfGuard({
+		csrf: createCsrfProtectionFromConfig(sessionCsrfSlice(cookie, section.csrf), { signer }),
+		trustedOrigins: section.csrf?.trustedOrigins ?? [],
 		logger,
 	});
-};
 
 /**
  * The session and federation route surface, as a pre-built `Module` (pass it
@@ -93,11 +185,17 @@ const csrfGuardOf = (config: AppConfig, signer: CsrfTokenSigner, logger: Logger)
  *                           POST /session/logout
  *   - "federation-routes" — GET /session/oauth/federation/:name (+ callback)
  *
+ * Its section is `session {}` (`sessionSectionSchema`); `config` is read for
+ * `federations` and `cors` alone.
+ *
  * `requires`: `config` and `userRepository`; the three stores these routes
  * use (`userSessionStore`, `federationTokenStore`, `sessionFederationIndex`);
  * `csrfTokenSigner`, what the CSRF token is signed and checked with (the
- * session store's module provides it from `session.secret`, which this module
- * never reads); and the planner-derived `federationProviders`,
+ * session store's module provides it from `session-store.secret`, which this
+ * module never reads); `sessionCookiePolicy`, the session cookie's name,
+ * attributes and lifetime (the CSRF cookie's, the session TTL, the federation
+ * transaction cookie's name), which the session store's module owns; and the
+ * planner-derived `federationProviders`,
  * `federationRedirectPolicyResolver` and `sessionRequirementResolver`
  * (password login and the federation link routes go through admission), and
  * `deploymentMode` (the login throttle's per-process fallback is refused
@@ -116,13 +214,16 @@ export const sessionModule = defineModule<
 	| "federationTokenStore"
 	| "sessionFederationIndex"
 	| "csrfTokenSigner"
+	| "sessionCookiePolicy"
 	| "federationProviders"
 	| "federationRedirectPolicyResolver"
 	| "sessionRequirementResolver"
 	| "deploymentMode",
-	"logger" | "rateLimiter" | "auditSink" | "subjectSessionIndex" | "subjectRevocation"
+	"logger" | "rateLimiter" | "auditSink" | "subjectSessionIndex" | "subjectRevocation",
+	typeof sessionSectionSchema
 >({
 	name: "session",
+	section: SECTION,
 	configSchema: sessionConfigSchema,
 	requires: [
 		"config",
@@ -131,6 +232,7 @@ export const sessionModule = defineModule<
 		"federationTokenStore",
 		"sessionFederationIndex",
 		"csrfTokenSigner",
+		"sessionCookiePolicy",
 		"federationProviders",
 		"federationRedirectPolicyResolver",
 		"sessionRequirementResolver",
@@ -162,11 +264,16 @@ export const sessionModule = defineModule<
 		// signer, cookie and trust list, so a token `GET /session/csrf` hands out
 		// is accepted wherever the slot is mounted (`csrfGuardOf`).
 		csrfGuard: (deps) =>
-			csrfGuardOf(deps.config as AppConfig, deps.csrfTokenSigner, deps.logger ?? consoleLogger),
-		// The login page (`endpoints.login.url`) and the `redirect_to` protocol
-		// `/authorize` and the federation-grants connect flow send a browser
-		// there by. Built with no page configured, failing where it is read.
-		loginEntry: (deps) => loginEntryFromConfig(deps.config),
+			csrfGuardOf(
+				deps.section,
+				deps.sessionCookiePolicy,
+				deps.csrfTokenSigner,
+				deps.logger ?? consoleLogger,
+			),
+		// The login page (`session.loginPage.url`) and the `redirect_to`
+		// protocol `/authorize` and the federation-grants connect flow send a
+		// browser there by.
+		loginEntry: (deps) => createLoginEntry(deps.section.loginPage.url),
 		// `loginCompletion` is the login-completion module's
 		// (`modules/loginCompletionModule.mts`): it answers with the
 		// deployment's `csrfGuard`, a slot this module fills and so cannot
@@ -175,20 +282,20 @@ export const sessionModule = defineModule<
 	contributes: {
 		// What the link flow's start and callback admit.
 		admissionActions: SESSION_ADMISSION_ACTIONS,
-		// `/session/login`'s budget, `rateLimit.login`, for every limiter to
-		// read; an operator's `limits.login` on the limiter wins.
+		// `/session/login`'s budget, `session.rateLimit.login`, for every
+		// limiter to read; an operator's `limits.login` on the limiter wins.
 		rateLimitBudgets: {
-			[LOGIN_RATE_LIMIT_PREFIX]: (deps) => readLoginRateLimitBudget(deps.config),
+			[LOGIN_RATE_LIMIT_PREFIX]: (deps) => readLoginRateLimitBudget(deps.section),
 		},
 		routes: [
 			(deps) => {
-				const config = deps.config as AppConfig;
 				return {
 					id: "session-routes",
 					mountPath: "/session",
 					handler: sessionRoutes.createRouter(express, {
 						userRepository: deps.userRepository,
-						config,
+						section: deps.section,
+						sessionCookie: deps.sessionCookiePolicy,
 						deploymentMode: deps.deploymentMode,
 						userSessionStore: deps.userSessionStore,
 						// `POST /session/logout` invalidates the records the session
@@ -202,7 +309,7 @@ export const sessionModule = defineModule<
 						...(deps.rateLimiter ? { rateLimiter: deps.rateLimiter } : {}),
 						...(deps.auditSink ? { auditSink: deps.auditSink } : {}),
 						...(deps.subjectSessionIndex ? { subjectSessionIndex: deps.subjectSessionIndex } : {}),
-						sessionTtlMs: config.session.maxAge,
+						sessionTtlMs: deps.sessionCookiePolicy.maxAgeMs,
 						logger: deps.logger ?? consoleLogger,
 						// A password login asks the registered requirements through
 						// admitPrimary before anything is written; read per request.
@@ -229,11 +336,11 @@ export const sessionModule = defineModule<
 						requirements: deps.sessionRequirementResolver,
 						...(deps.subjectRevocation ? { subjectRevocation: deps.subjectRevocation } : {}),
 						federationTokenStore: deps.federationTokenStore,
-						sessionTtlMs: config.session.maxAge,
+						sessionTtlMs: deps.sessionCookiePolicy.maxAgeMs,
 						// Named after the deployment's session cookie, as the CSRF
 						// cookie is, so an operator reading `Set-Cookie` can tell whose.
 						federationTransactionCookieName: deriveFederationTransactionCookieName(
-							config.session.name,
+							deps.sessionCookiePolicy.name,
 						),
 						...(deps.auditSink ? { auditSink: deps.auditSink } : {}),
 						logger: deps.logger ?? consoleLogger,

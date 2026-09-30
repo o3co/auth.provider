@@ -93,13 +93,13 @@ const config: AppConfig = {
 			unknownFamilyPolicy: "reject" as const,
 			legacyRtPolicy: "reject" as const,
 		},
-		// The grant this whole test is about: it mints straight from an
-		// authenticated browser session, which is the BFF topology.
-		grants: { session: { enabled: true } },
 		oidcMode: "oidc-required",
 		code: { adapter: "memory" as const },
 	},
-	session: {
+	// The grant this whole test is about: it mints straight from an
+	// authenticated browser session, which is the BFF topology.
+	"oauth-session": { enabled: true },
+	"session-store": {
 		secret: "test-session-secret.at-least-32-bytes.ok",
 		name: "auth.sid",
 		maxAge: 3600000,
@@ -108,17 +108,17 @@ const config: AppConfig = {
 		domain: null,
 		storage: { type: "memory", redis: { url: "redis://localhost:6379" } },
 	},
-	rateLimit: {
-		login: { windowMs: 60000, limit: 100 },
-		failMode: "open",
+	session: {
+		loginPage: { url: "/login" },
+		rateLimit: { login: { windowMs: 60000, limit: 100 } },
 	},
+	rateLimit: { failMode: "open" },
 	federations: { google: { enabled: false } },
 	repositories: {
 		client: { type: "yaml", path: "./config/clients.yaml" },
 		user: { type: "yaml", path: "./config/users.yaml", timeout: 5000 },
 		code: { type: "memory", defaultExpiresIn: 600 },
 	},
-	endpoints: { login: { url: "/login" } },
 	cors: { allowedOrigins: [] },
 } as unknown as AppConfig;
 
@@ -221,7 +221,7 @@ describe("POST /session/logout invalidates the session grant's access token", ()
 		// The mechanism is a signed double-submit, so the reissued cookie's
 		// value IS the token the header has to echo; the pre-login token no
 		// longer matches.
-		const csrfCookiePrefix = `${config.session.name}.csrf=`;
+		const csrfCookiePrefix = `${(config["session-store"] as { name: string }).name}.csrf=`;
 		const reissued = loginCookies
 			.find((c) => c.startsWith(csrfCookiePrefix))
 			?.slice(csrfCookiePrefix.length)

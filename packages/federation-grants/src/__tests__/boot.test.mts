@@ -41,7 +41,6 @@ import {
 import {
 	createTestOAuthTokenSettings,
 	makeValidCoreConfig,
-	makeValidFullSections,
 } from "@o3co/auth-provider-core/testing";
 import { describe, expect, it } from "vitest";
 import {
@@ -195,7 +194,7 @@ interface Setup {
 	/**
 	 * Where connect sends a browser that is not signed in — the `loginEntry`
 	 * slot; `"unconfigured"`, the entry the session module
-	 * provides when `endpoints.login.url` names no page.
+	 * provides when `session.loginPage.url` names no page.
 	 */
 	readonly withLoginEntry?: boolean | "unconfigured";
 	/**
@@ -212,20 +211,20 @@ interface Setup {
 }
 
 /**
- * The login entry the session module provides when `endpoints.login.url`
+ * The login entry the session module provides when `session.loginPage.url`
  * names no page: built, and failing where the page is read.
  */
 const UNCONFIGURED_LOGIN_ENTRY: LoginEntry = Object.freeze(
 	Object.defineProperties({} as LoginEntry, {
 		url: {
 			get: () => {
-				throw new Error("endpoints.login.url is not configured");
+				throw new Error("session.loginPage.url is not configured");
 			},
 			enumerable: true,
 		},
 		urlFor: {
 			value: () => {
-				throw new Error("endpoints.login.url is not configured");
+				throw new Error("session.loginPage.url is not configured");
 			},
 			enumerable: true,
 		},
@@ -233,7 +232,6 @@ const UNCONFIGURED_LOGIN_ENTRY: LoginEntry = Object.freeze(
 );
 
 const boot = (setup: Setup) => {
-	const full = makeValidFullSections();
 	const federation =
 		setup.provider === null ? [] : [federationModule("upstream", setup.provider ?? delegated)];
 	const modules = [
@@ -262,7 +260,7 @@ const boot = (setup: Setup) => {
 				federations: {
 					upstream: { enabled: true, issuer: "https://issuer.example", clientId: "cid" },
 				},
-				rateLimit: { ...full.rateLimit, failMode: "closed" },
+				rateLimit: { failMode: "closed" },
 				...(setup.withAudit === false ? {} : { audit: { sink: { type: "none" } } }),
 				"federation-grants": {
 					enabled: setup.enabled ?? true,
@@ -630,7 +628,7 @@ describe("what creating a grant needs", () => {
 		// module's `loginEntry`, which is built without one and fails where it
 		// is read: here, at boot, rather than as a 500 for every such browser.
 		await expect(boot({ withLoginEntry: "unconfigured" })).rejects.toThrow(
-			/endpoints\.login\.url must be configured/,
+			/the loginEntry slot names no login page/,
 		);
 	});
 

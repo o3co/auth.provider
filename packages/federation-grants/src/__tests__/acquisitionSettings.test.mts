@@ -60,7 +60,7 @@ const resolve = (
 	);
 
 /**
- * The login entry the session module provides when `endpoints.login.url`
+ * The login entry the session module provides when `session.loginPage.url`
  * names no page: built, and failing where the page is read.
  */
 const unconfiguredLoginEntry = (): LoginEntry =>
@@ -68,13 +68,13 @@ const unconfiguredLoginEntry = (): LoginEntry =>
 		Object.defineProperties({} as LoginEntry, {
 			url: {
 				get: () => {
-					throw new Error("endpoints.login.url is not configured");
+					throw new Error("session.loginPage.url is not configured");
 				},
 				enumerable: true,
 			},
 			urlFor: {
 				value: () => {
-					throw new Error("endpoints.login.url is not configured");
+					throw new Error("session.loginPage.url is not configured");
 				},
 				enumerable: true,
 			},
@@ -125,7 +125,7 @@ describe("resolveFederationGrantAcquisitionSettings", () => {
 
 	it("refuses a deployment with no login page: connect sends a browser that is not signed in there", () => {
 		// The page is the `loginEntry` slot, which the session module
-		// provides from `endpoints.login.url`.
+		// provides from `session.loginPage.url`.
 		expect(resolve({ consent: { url: "/c" } }).login.urlFor("/back")).toBe(
 			"/login?redirect_to=%2Fback",
 		);
@@ -136,7 +136,7 @@ describe("resolveFederationGrantAcquisitionSettings", () => {
 		expect(withEntry(undefined)).toThrow(
 			/federation grants are enabled and no loginEntry is installed/,
 		);
-		expect(withEntry(unconfiguredLoginEntry())).toThrow(/endpoints\.login\.url must be configured/);
+		expect(withEntry(unconfiguredLoginEntry())).toThrow(/the loginEntry slot names no login page/);
 	});
 
 	it("keeps what the login entry threw as the refusal's cause", () => {
@@ -161,7 +161,7 @@ describe("resolveFederationGrantAcquisitionSettings", () => {
 			refusal = error;
 		}
 		expect((refusal as Error | undefined)?.message).toMatch(
-			/endpoints\.login\.url must be configured/,
+			/the loginEntry slot names no login page/,
 		);
 		expect((refusal as Error | undefined)?.cause).toBe(thrown);
 	});

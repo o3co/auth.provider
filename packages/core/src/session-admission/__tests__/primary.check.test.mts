@@ -57,7 +57,7 @@ describe("CompletingRequirement — what the addition checks read of a requireme
 const primary = (over: Record<string, unknown> = {}): PrimaryAuthentication =>
 	({
 		subject: "user-1",
-		user: { id: "user-1", groups: ["staff"], joined: new Date("2020-01-01T00:00:00Z") },
+		user: { id: "user-1", groups: ["staff"], joined: "2020-01-01T00:00:00Z" },
 		claims: { email: "user-1@example.test", emailVerified: true, groups: ["staff"] },
 		recorded: {
 			amr: ["pwd"],
@@ -68,6 +68,8 @@ const primary = (over: Record<string, unknown> = {}): PrimaryAuthentication =>
 				mfaAt: undefined,
 			},
 		},
+		// What core derives from that user: no witness, no address.
+		enrollmentFacts: { witness: "not_enrolled", mailAddress: "none" },
 		authTime: NOW,
 		redirectTo: "/after",
 		request: { ip: "198.51.100.7", userAgent: "test" },
@@ -106,7 +108,7 @@ describe("checkPrimaryAuthentication — a primary as the login route builds it"
 		(source.recorded.amr as string[]).push("otp");
 		expect(checked.user.id).toBe("user-1");
 		expect(checked.recorded.amr).toEqual(["pwd"]);
-		expect(checked.user.joined).toBeInstanceOf(Date);
+		expect(Object.isFrozen(checked.user.groups)).toBe(true);
 	});
 
 	it("keeps a federated primary's upstream values, trusted or kept apart", () => {
@@ -151,6 +153,20 @@ describe("checkPrimaryAuthentication — a primary as the login route builds it"
 		["no subject", { subject: "" }],
 		["a user that is not an object", { user: "alice" }],
 		["a user that cannot be copied", { user: { f: () => 1 } }],
+		["a user holding a Date", { user: { id: "user-1", joined: new Date(0) } }],
+		["a user holding a Map", { user: { id: "user-1", roles: new Map() } }],
+		[
+			"a user that is a class instance",
+			{
+				user: new (class User {
+					id = "user-1";
+				})(),
+			},
+		],
+		[
+			"a user with a field it does not enumerate",
+			{ user: Object.defineProperty({ id: "user-1" }, "mfaEnrolled", { value: true }) },
+		],
 		["no recorded", { recorded: undefined }],
 		["an empty amr", { recorded: { amr: [], authentication: primary().recorded.authentication } }],
 		[
@@ -204,9 +220,9 @@ describe("checkPrimaryAuthentication — a primary as the login route builds it"
 	});
 });
 
-/** A primary as a continuation carries it: `authTime` as epoch milliseconds. */
+/** The primary as a continuation carries it: `authTimeMs`, and no enrollment facts, which a rehydration derives again. */
 const dto = () => {
-	const { authTime, ...fields } = primary();
+	const { authTime, enrollmentFacts: _derivedAgain, ...fields } = primary();
 	return { ...fields, authTimeMs: authTime.getTime() };
 };
 
@@ -557,7 +573,7 @@ describe("the refusals each field names", () => {
 	});
 
 	it("checkPrimaryContinuation refuses a done entry that is not an object, and additions that are not one", () => {
-		const { authTime, ...fields } = primary();
+		const { authTime, enrollmentFacts: _derivedAgain, ...fields } = primary();
 		const dto = { ...fields, authTimeMs: authTime.getTime() };
 		expect(() =>
 			checkPrimaryContinuation({ primary: dto, done: ["mfa"], interruptedBy: "mfa" }),

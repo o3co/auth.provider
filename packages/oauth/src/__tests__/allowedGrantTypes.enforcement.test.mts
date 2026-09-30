@@ -29,7 +29,11 @@ import {
 	type GrantHandler,
 	type PublicClient,
 } from "@o3co/auth-provider-core";
-import { GrantRegistry, resolverForTests } from "@o3co/auth-provider-core/testing";
+import {
+	createTestLoginEntry,
+	GrantRegistry,
+	resolverForTests,
+} from "@o3co/auth-provider-core/testing";
 import express from "express";
 import request from "supertest";
 import { describe, expect, it } from "vitest";
@@ -114,6 +118,7 @@ const makeApp = async (
 	registry.register(STRICT_GRANT_TYPE, strictGrant());
 
 	const { router } = await createOAuthRouter(express, {
+		loginEntry: createTestLoginEntry(),
 		requirements: resolverForTests([], { actions: OAUTH_ADMISSION_ACTIONS }),
 		registry,
 		config:

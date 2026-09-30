@@ -30,6 +30,7 @@ import { fileURLToPath } from "node:url";
 import { parseFile } from "@o3co/ts.hocon";
 import { validate } from "@o3co/ts.hocon/zod";
 import { describe, expect, it } from "vitest";
+import { z } from "zod";
 import { AppConfigSchema, CoreConfigSchema } from "#/config/application.schema.mjs";
 import { createApp } from "#/index.mjs";
 import { makeValidAppConfig, makeValidCoreConfig } from "#/testing/fixtures/valid-config.mjs";
@@ -39,7 +40,6 @@ const REFERENCE_CONF = fileURLToPath(new URL("../../../config/reference.conf", i
 const ENV = {
 	OAUTH_JWT_SECRET: "mfa-schema-test.at-least-32-bytes.ok",
 	OAUTH_JWT_ISSUER: "https://auth.test",
-	SESSION_SECRET: "mfa-schema-test-session.at-least-32-bytes.ok",
 };
 
 const fromReference = (env: Record<string, string> = {}) =>
@@ -71,12 +71,12 @@ describe("the MFA configuration core owns", () => {
 		expect(raw).not.toHaveProperty("mfa");
 	});
 
-	it("names no step-up page: neither core's schema nor its reference.conf, which binds no ENDPOINTS_MFA_URL", () => {
-		expect(Object.keys(AppConfigSchema.shape.endpoints.shape)).not.toContain("mfa");
+	it("names no step-up page: core's schema declares nothing under endpoints, and its reference.conf, which binds no ENDPOINTS_MFA_URL, has no endpoints", () => {
+		expect(AppConfigSchema.shape.endpoints.unwrap()).toBeInstanceOf(z.ZodUnknown);
 		const raw = parseFile(REFERENCE_CONF, {
 			env: { ...ENV, ENDPOINTS_MFA_URL: "/account/mfa" },
-		}).toObject() as { endpoints?: object };
-		expect(raw.endpoints).not.toHaveProperty("mfa");
+		}).toObject();
+		expect(raw).not.toHaveProperty("endpoints");
 	});
 
 	it("boots a configuration whatever its mfa section holds, handing the section on as written", async () => {

@@ -27,7 +27,6 @@
 
 import {
 	type AdmissionDeps,
-	type AppConfig,
 	type AuditSink,
 	admitPrimary,
 	BootError,
@@ -43,6 +42,7 @@ import {
 	loggableError,
 	passwordPrimary,
 	type RateLimiter,
+	type SessionCookiePolicy,
 	type SessionFederationIndex,
 	type SessionRequirementResolver,
 	type SubjectSessionIndex,
@@ -57,6 +57,7 @@ import {
 	createCsrfIssueHandler,
 	createCsrfProtectionFromConfig,
 	type SessionCsrfConfigSlice,
+	sessionCsrfSlice,
 } from "../csrf.mjs";
 import { establishSession } from "../establish-session.mjs";
 import {
@@ -86,7 +87,8 @@ export const createRouter = (
 	},
 	{
 		userRepository,
-		config,
+		section,
+		sessionCookie,
 		deploymentMode,
 		userSessionStore,
 		subjectSessionIndex,
@@ -100,7 +102,21 @@ export const createRouter = (
 		requirements,
 	}: {
 		userRepository: UserRepository;
-		config: AppConfig;
+		/**
+		 * The session module's own section, as its schema parsed it: the
+		 * redirect allowlist, the CSRF settings and the login's budget.
+		 */
+		section: {
+			readonly redirectAllowlist?: readonly string[] | undefined;
+			readonly csrf?: SessionCsrfConfigSlice["csrf"];
+			readonly rateLimit?: { readonly login?: unknown } | undefined;
+		};
+		/**
+		 * The session cookie's name and attributes, as the `sessionCookiePolicy`
+		 * slot carries them: the CSRF cookie is named after it and given its
+		 * attributes, and a `redirect_to` is held to its domain.
+		 */
+		sessionCookie: Pick<SessionCookiePolicy, "name" | "secure" | "sameSite" | "domain">;
 		/**
 		 * The replica count, as core's `deploymentMode` slot holds it: what the
 		 * login throttle's per-process fallback is refused, warned about or
@@ -184,7 +200,7 @@ export const createRouter = (
 	// and a missing `Origin` must not bypass the check. CSRF trust is
 	// `session.csrf.trustedOrigins`, not `cors.allowedOrigins`; the acceptance
 	// rule is in `../csrf.mjs`.
-	const sessionSlice = config.session as unknown as SessionCsrfConfigSlice;
+	const sessionSlice = sessionCsrfSlice(sessionCookie, section.csrf);
 	const csrfProtection = createCsrfProtectionFromConfig(sessionSlice, { signer: csrfTokenSigner });
 	const verifyCsrf = createCsrfGuard({
 		csrf: csrfProtection,
@@ -194,10 +210,10 @@ export const createRouter = (
 
 	// The login guard runs on the same `RateLimiter` as the OAuth endpoints,
 	// keyed under the prefix the session module contributes this budget for.
-	const loginLimitSpec = readLoginRateLimitBudget(config);
+	const loginLimitSpec = readLoginRateLimitBudget(section);
 	if (loginLimitSpec === null) {
 		throw new Error(
-			"createRouter: POST /session/login requires rateLimit.login { windowMs, limit }",
+			"createRouter: POST /session/login requires session.rateLimit.login { windowMs, limit }",
 		);
 	}
 	if (rateLimiter === undefined) {
@@ -251,8 +267,8 @@ export const createRouter = (
 	// to pages (e.g. `MfaTransaction.redirectTo`), so it must be a value the
 	// deployment named. Built once so a dead allowlist entry fails boot.
 	const redirectPolicy = createRedirectAllowlistValidator({
-		redirectAllowlist: config.session.redirectAllowlist,
-		sessionDomain: config.session.domain,
+		redirectAllowlist: section.redirectAllowlist,
+		sessionDomain: sessionCookie.domain,
 		allowlistConfigKey: "session.redirectAllowlist",
 		factoryName: "createRouter",
 	});

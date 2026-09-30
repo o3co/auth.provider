@@ -28,13 +28,13 @@ import { templateReference } from "../modules.mjs";
 const configDir = fileURLToPath(new URL("../../config", import.meta.url));
 
 // Provide required secrets so AppConfigSchema parse succeeds. These are
-// test-only values — no real keys are embedded here. SESSION_SECRET
+// test-only values — no real keys are embedded here. SESSION_STORE_SECRET
 // carries a 256-bit entropy floor, so these clear it (the '.' characters keep
 // them outside the base64 alphabet, so the UTF-8 length is what counts).
 const testEnv = {
 	OAUTH_JWT_SECRET: "test-secret-three-tier.at-least-32-bytes.ok",
 	OAUTH_JWT_ISSUER: "https://auth.test",
-	SESSION_SECRET: "test-session-secret-three-tier.at-least-32-bytes.ok",
+	SESSION_STORE_SECRET: "test-session-secret-three-tier.at-least-32-bytes.ok",
 };
 
 function buildResolvedConfig(env: string, extraEnv: Record<string, string> = {}): AppConfig {
@@ -50,21 +50,21 @@ function buildResolvedConfig(env: string, extraEnv: Record<string, string> = {})
 	);
 }
 
-// `oauth.grants` is declared as `z.object({}).passthrough()` in the schema,
-// so the inferred TS type is `{}` per entry and accessing `.enabled` doesn't
-// compile under `tsc --strict`. Tests assert against the resolved runtime
-// shape (string from env substitution, boolean from literal), so the cast
-// is intentional and well-bounded.
+// The oauth-authorization module's section, which core mirrors for the one
+// key read before the modules are chosen (`grants`), kept as written: the
+// runtime shape is a string from env substitution, a boolean from a literal.
 type GrantEntry = { enabled?: unknown };
 const grants = (config: AppConfig) =>
-	(config.oauth.grants as unknown as Record<string, GrantEntry | undefined>) ?? {};
+	((config["oauth-authorization"] as { grants?: unknown } | undefined)?.grants as
+		| Record<string, GrantEntry | undefined>
+		| undefined) ?? {};
 
 describe("three-tier HOCON resolution (env → application.conf → reference.conf)", () => {
 	it("template application.conf wins over reference.conf for grant.enabled", () => {
 		const config = buildResolvedConfig("development");
-		// Template's application.conf sets authorization_code.enabled = true,
+		// Template's application.conf sets authorizationCode.enabled = true,
 		// so the resolved value is true whatever reference.conf says.
-		expect(grants(config).authorization_code?.enabled).toBe(true);
+		expect(grants(config).authorizationCode?.enabled).toBe(true);
 	});
 
 	it("reference.conf default reaches resolved config when template omits the key", () => {
@@ -76,18 +76,14 @@ describe("three-tier HOCON resolution (env → application.conf → reference.co
 
 	it("env var at template layer can disable a template-enabled grant (precedence: env-override line must be repeated)", () => {
 		// The env-override line is repeated at the template layer alongside
-		// `enabled = true`; without it, reference.conf's substitution is
+		// `enabled = true`; without it, the package reference's substitution is
 		// shadowed by the template's literal `true`. The value stays a string:
-		// `oauth.grants` is `z.object({}).passthrough()` (each grant module's
-		// own `configSchema` validates it), so no coercion reaches this leaf.
-		// That is deliberate: every consumer of a grant's `enabled`
-		// (`GrantRegistry.isEnabled`, `oauthAuthorization`, `oauthSession`)
-		// reads `true` and `"true"` as enabled and everything else, `"false"`
-		// included, as not-enabled.
+		// core mirrors the section as written, and the module reads the switch
+		// with its own schema, `"false"` as off.
 		const config = buildResolvedConfig("development", {
-			OAUTH_GRANTS_AUTHORIZATION_CODE_ENABLED: "false",
+			OAUTH_AUTHORIZATION_GRANTS_AUTHORIZATION_CODE_ENABLED: "false",
 		});
-		expect(grants(config).authorization_code?.enabled).toBe("false");
+		expect(grants(config).authorizationCode?.enabled).toBe("false");
 	});
 
 	it("reads mfa.mode as off where MFA_MODE is unset, and the template installs no MFA module", () => {
@@ -114,13 +110,14 @@ describe("three-tier HOCON resolution (env → application.conf → reference.co
 
 	it("core's reference.conf ships no rateLimit.failMode: it is the Redis limiter's own key", () => {
 		const config = buildResolvedConfig("development");
-		expect(config.rateLimit).not.toHaveProperty("failMode");
+		expect(config).not.toHaveProperty("rateLimit.failMode");
 	});
 
-	it("reference.conf default for client_credentials.enabled is false", () => {
-		// Template doesn't enable client_credentials. Reference default propagates.
+	it("template application.conf ships clientCredentials.enabled off", () => {
+		// The template writes every grant switch it reads before boot, so the
+		// value phase one reads is the one boot parses.
 		const config = buildResolvedConfig("development");
-		expect(grants(config).client_credentials?.enabled).toBe(false);
+		expect(grants(config).clientCredentials?.enabled).toBe(false);
 	});
 
 	it("reference.conf default for oauth.resourceIndicator.enabled is false", () => {

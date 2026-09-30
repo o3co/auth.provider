@@ -39,6 +39,7 @@ import {
 	createTestApp,
 	createTestCsrfGuard,
 	createTestCsrfTokenSigner,
+	createTestSessionCookiePolicy,
 	loginCompletionContract,
 	makeValidAppConfig,
 } from "@o3co/auth-provider-core/testing";
@@ -47,6 +48,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createLoginCompletion } from "#/login-completion.mjs";
 import { sessionModule } from "#/module.mjs";
 import { loginCompletionModule } from "#/modules/loginCompletionModule.mjs";
+import { withSessionCaptures } from "./_helpers/sections.mjs";
 
 /** A memory session store that counts the records it holds. */
 const countingStore = (): { readonly store: UserSessionStore; readonly records: () => number } => {
@@ -148,8 +150,9 @@ const stores = [
 		async removeFederation() {},
 		async removeBySid() {},
 	} as unknown as SessionFederationIndex),
-	// Where the session store's module is loaded, it provides this.
+	// Where the session store's module is loaded, it provides these.
 	providing("test:csrf-token-signer", "csrfTokenSigner", createTestCsrfTokenSigner()),
+	providing("test:session-cookie-policy", "sessionCookiePolicy", createTestSessionCookiePolicy()),
 ];
 
 /** A module that hands the test the `loginCompletion` it requires. */
@@ -184,7 +187,7 @@ const disposers: (() => Promise<void>)[] = [];
 
 beforeAll(async () => {
 	const bootstrapComponents = {
-		config: makeValidAppConfig() as AppConfig,
+		config: withSessionCaptures(makeValidAppConfig()) as AppConfig,
 		pathResolver: (s: string) => s,
 	};
 	const handle = await createTestApp({
@@ -210,11 +213,12 @@ describe("the login-completion module provides loginCompletion", () => {
 		expect(Object.isFrozen(provided.completion)).toBe(true);
 	});
 
-	it("requires the csrfGuard slot and the session stores, and provides loginCompletion alone", () => {
+	it("requires the csrfGuard slot, the session cookie's policy and the session stores, and provides loginCompletion alone", () => {
 		expect(loginCompletionModule.name).toBe("login-completion");
 		expect(loginCompletionModule.requires).toEqual(
-			expect.arrayContaining(["config", "userSessionStore", "csrfGuard"]),
+			expect.arrayContaining(["sessionCookiePolicy", "userSessionStore", "csrfGuard"]),
 		);
+		expect(loginCompletionModule.requires).not.toContain("config");
 		expect(Object.keys(loginCompletionModule.provides ?? {})).toEqual(["loginCompletion"]);
 	});
 

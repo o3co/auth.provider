@@ -26,7 +26,7 @@ import {
 	memoryRefreshTokenFamilyStoreModule,
 	memorySessionStoresModule,
 } from "@o3co/auth-provider-core";
-import { makeValidAppConfig } from "@o3co/auth-provider-core/testing";
+import { makeValidAppConfig, renamedVariableCaptures } from "@o3co/auth-provider-core/testing";
 import { sessionModule, sessionStoreModuleFor } from "@o3co/auth-provider-session";
 import express from "express";
 import request from "supertest";
@@ -50,7 +50,7 @@ function buildConfig(): AppConfig {
 	return {
 		...base,
 		// supertest speaks plain http; a Secure cookie would never come back.
-		session: { ...base.session, name: "auth.sid", secure: false },
+		"session-store": { ...base["session-store"], name: "auth.sid", secure: false },
 		federations: {
 			"idp-a": {
 				enabled: true,
@@ -106,21 +106,33 @@ async function boot(
 		provides: { userRepository: () => repo } as never,
 	});
 
+	const modules = [
+		sessionStoreModuleFor(config),
+		sessionModule,
+		memorySessionStoresModule,
+		memoryFederationTokenStoreModule,
+		memoryRefreshTokenFamilyStoreModule,
+		defaultRefreshTokenFamilyRevocationModule,
+		repositoryModule,
+		configsModule,
+		oidcFederationModule("idp-a"),
+		oidcFederationModule("idp-b"),
+		...extraModules,
+	];
 	const handle = await createApp({
-		modules: [
-			sessionStoreModuleFor(config),
-			sessionModule,
-			memorySessionStoresModule,
-			memoryFederationTokenStoreModule,
-			memoryRefreshTokenFamilyStoreModule,
-			defaultRefreshTokenFamilyRevocationModule,
-			repositoryModule,
-			configsModule,
-			oidcFederationModule("idp-a"),
-			oidcFederationModule("idp-b"),
-			...extraModules,
-		],
-		bootstrapComponents: { config, pathResolver: (s: string) => s },
+		modules,
+		bootstrapComponents: {
+			// What a resolution of the modules' references under an empty
+			// environment captures of the variables they declare renamed.
+			config: {
+				...config,
+				"renamed-variables": {
+					...(config as { "renamed-variables"?: object })["renamed-variables"],
+					...renamedVariableCaptures({ modules, env: {} }),
+				},
+			},
+			pathResolver: (s: string) => s,
+		},
 	});
 	const app = express();
 	app.use(handle.router);

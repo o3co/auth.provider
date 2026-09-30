@@ -25,13 +25,13 @@
  *
  * - shipped: every package on, as the full set boots it;
  * - configured: each owner's own key set by an operator
- *   (`rateLimit.login`, `device-grant.rateLimit`,
+ *   (`session.rateLimit.login`, `device-grant.rateLimit`,
  *   `webauthn.rateLimit.authenticationOptions`, `mfa.rateLimit.routes`);
  * - declared: the same, and every prefix also declared in the limiter's own
  *   `limits`, which wins;
  * - off: the owners switched off — the device grant disabled, WebAuthn and
  *   the MFA package not installed. The session module is the template's and
- *   always installed, and its schema requires `rateLimit.login`;
+ *   always installed, and its reference ships `session.rateLimit.login`;
  * - off, keys set: the same, with each owner's key set. A key whose owner is
  *   not installed sets no budget; the disabled device grant is installed, and
  *   its key does.
@@ -117,7 +117,7 @@ const TABLE: Readonly<Record<Prefix, Readonly<Record<Cell, Applied>>>> = {
 
 /** Each owner's own key, as an operator's layer sets it. */
 const OWNERS_KEYS = `
-rateLimit.login { windowMs = 60000, limit = 7 }
+session.rateLimit.login { windowMs = 60000, limit = 7 }
 device-grant.rateLimit { limit = 3, windowSeconds = 120 }
 webauthn.rateLimit.authenticationOptions { limit = 11, windowSeconds = 30 }
 mfa.rateLimit.routes { limit = 13, windowSeconds = 240 }
@@ -247,9 +247,9 @@ describe("a prefix is its owner's", () => {
 });
 
 describe("the login budget at /session/login", () => {
-	it("advertises rateLimit.login's limit on a shared in-process limiter", async () => {
+	it("advertises session.rateLimit.login's limit on a shared in-process limiter", async () => {
 		const composition = await composeFullSet({
-			operatorHocon: "rateLimit.login { windowMs = 60000, limit = 7 }",
+			operatorHocon: "session.rateLimit.login { windowMs = 60000, limit = 7 }",
 		});
 		try {
 			const { res } = await login(composition.app);

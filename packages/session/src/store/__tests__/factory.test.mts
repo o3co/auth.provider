@@ -169,7 +169,7 @@ describe("redis session client error handling", () => {
 	it("survives an error event instead of taking the process down", async () => {
 		// node-redis emits `error` on socket failures even while it is
 		// auto-reconnecting. With no listener the EventEmitter throws, which
-		// crashes the provider — and since `session.storage.type = "redis"` is
+		// crashes the provider — and since `session-store.storage.type = "redis"` is
 		// the shipped default, a Redis failover blip did exactly that.
 		const factory = createSessionStoreFactory();
 		registerBuiltinSessionStores(factory);

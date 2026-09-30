@@ -27,6 +27,10 @@
  * path recorded nothing. See ADR 2026-09-25-multi-factor-authentication, "What
  * the session records".
  *
+ * `enrollmentFacts` alone is optional: a session without it — written before
+ * the key, or by a store that drops it — says nothing, and its reader fails
+ * closed on that; the contract suite holds a store to round-tripping it.
+ *
  * Asserted with conditional types rather than `@ts-expect-error`. This file
  * proves anything only under the TypeScript checker; `user-sessions/__tests__`
  * is on BOTH of core's typecheck lists.
@@ -36,6 +40,7 @@ import { describe, expectTypeOf, it } from "vitest";
 import type {
 	CreateUserSessionInput,
 	SessionAuthentication,
+	SessionEnrollmentFacts,
 	UserSession,
 } from "#/user-sessions/types.mjs";
 
@@ -46,8 +51,11 @@ type IsRequiredKey<T, K extends keyof T> = Record<never, never> extends Pick<T, 
 type OptionalKeys<T> = { [K in keyof T]-?: IsRequiredKey<T, K> extends true ? never : K }[keyof T];
 
 describe("UserSession — what a session store answers with", () => {
-	it("has no optional key", () => {
-		expectTypeOf<OptionalKeys<UserSession>>().toEqualTypeOf<never>();
+	it("has no optional key but enrollmentFacts", () => {
+		expectTypeOf<OptionalKeys<UserSession>>().toEqualTypeOf<"enrollmentFacts">();
+		expectTypeOf<UserSession["enrollmentFacts"]>().toEqualTypeOf<
+			SessionEnrollmentFacts | undefined
+		>();
 	});
 
 	it("names amr, and still lets it be absent in value", () => {
@@ -73,8 +81,8 @@ describe("SessionAuthentication — how a session was established", () => {
 });
 
 describe("CreateUserSessionInput — what a login path writes", () => {
-	it("has no optional key: a login path says what it knows of how the user authenticated", () => {
-		expectTypeOf<OptionalKeys<CreateUserSessionInput>>().toEqualTypeOf<never>();
+	it("has no optional key but enrollmentFacts: a login path says what it knows of how the user authenticated", () => {
+		expectTypeOf<OptionalKeys<CreateUserSessionInput>>().toEqualTypeOf<"enrollmentFacts">();
 		expectTypeOf<IsRequiredKey<CreateUserSessionInput, "amr">>().toEqualTypeOf<true>();
 		expectTypeOf<IsRequiredKey<CreateUserSessionInput, "authentication">>().toEqualTypeOf<true>();
 		expectTypeOf<CreateUserSessionInput["authentication"]>().toEqualTypeOf<

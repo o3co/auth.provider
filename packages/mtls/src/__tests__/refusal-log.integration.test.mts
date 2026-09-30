@@ -83,9 +83,9 @@ const boot = async (dialect: "envoy" | "plain-pem") => {
 	const bootstrap = {
 		config: {
 			...makeValidCoreConfig(),
-			oauth: {
-				...makeValidCoreConfig().oauth,
-				tokenBinding: { "dispatch-policy": "intent-explicit" },
+			core: {
+				...makeValidCoreConfig().core,
+				tokenBinding: { dispatchPolicy: "intent-explicit" },
 			},
 			mtls: {
 				enabled: true,

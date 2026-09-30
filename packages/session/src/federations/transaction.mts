@@ -53,7 +53,7 @@ export const DEFAULT_FEDERATION_TRANSACTION_TTL_MS = 600_000; // 10 min
  */
 export const FEDERATION_TRANSACTION_KEY_PREFIX = "fedtx:";
 
-/** Appended to the deployment's session cookie name — cf. `<session.name>.csrf`. */
+/** Appended to the deployment's session cookie name — cf. `<session-store.name>.csrf`. */
 export const FEDERATION_TRANSACTION_COOKIE_SUFFIX = ".federation";
 
 /** The ephemeral state a federation callback needs to complete the flow. */

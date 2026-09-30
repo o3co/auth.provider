@@ -17,8 +17,8 @@ mTLS ([RFC 8705](https://www.rfc-editor.org/rfc/rfc8705)) sender-constrained tok
 
 **Does not own:**
 
-- which mechanism wins when DPoP is installed too — core's dispatch policy (`oauth.tokenBinding.dispatch-policy`);
-- whether a grant stamps the binding on the tokens it mints, and which refresh tokens are bound — the grants, on core's rules. A public client's refresh token is bound (RFC 8705 §4); a confidential client's is not, unless `oauth.tokenBinding.bindConfidentialClientRefreshTokens = true`;
+- which mechanism wins when DPoP is installed too — core's dispatch policy (`core.tokenBinding.dispatchPolicy`);
+- whether a grant stamps the binding on the tokens it mints, and which refresh tokens are bound — the grants, on core's rules. A public client's refresh token is bound (RFC 8705 §4); a confidential client's is not, unless `core.tokenBinding.bindConfidentialClientRefreshTokens = true`;
 - matching a presented certificate against a refresh token's stored binding — core's refresh-time matrix, [`core/src/grants/confirmationMatch.mts`](../core/src/grants/confirmationMatch.mts);
 - client authentication by certificate (RFC 8705 §2) — the token endpoint does not accept a certificate as a client credential; see [Discovery metadata](#discovery-metadata);
 - the TLS listener and the proxy: terminating TLS with `requestCert`, and a proxy that strips inbound certificate headers, are the deployment's (see [Trusted-Proxy Security Guidance](#trusted-proxy-security-guidance)).
@@ -86,15 +86,15 @@ no environment variable binds one. The section's old path, `oauth.mtls`,
 refuses boot (`config-path-relocated`) naming each key's new path
 (`oauth.mtls.cert-header` → `mtls.certHeader`).
 
-`oauth.tokenBinding.dispatch-policy` is shared with `dpopModule`:
+`core.tokenBinding.dispatchPolicy` is shared with `dpopModule`:
 
 ```hocon
-oauth.tokenBinding.dispatch-policy = "intent-explicit"   # or "strict-mutual-exclusion"
+core.tokenBinding.dispatchPolicy = "intent-explicit"   # or "strict-mutual-exclusion"
 ```
 
 ## Cross-mechanism dispatch (DPoP + mTLS)
 
-When both `@o3co/auth-provider-dpop` and `@o3co/auth-provider-mtls` are installed, core composes a **single** `tokenBindingMw` from both modules' contributions. The configured `oauth.tokenBinding.dispatch-policy` arbitrates cross-mechanism:
+When both `@o3co/auth-provider-dpop` and `@o3co/auth-provider-mtls` are installed, core composes a **single** `tokenBindingMw` from both modules' contributions. The configured `core.tokenBinding.dispatchPolicy` arbitrates cross-mechanism:
 
 - `"intent-explicit"` (default): explicit-intent mechanisms (DPoP) win over ambient mechanisms (mTLS) on a single request. ≥2 explicit-intent mechanisms succeeding → 400 `invalid_request`.
 - `"strict-mutual-exclusion"`: any 2+ mechanisms succeeding → 400 `invalid_request`.
@@ -102,7 +102,7 @@ When both `@o3co/auth-provider-dpop` and `@o3co/auth-provider-mtls` are installe
 Set it once at the application layer:
 
 ```hocon
-oauth.tokenBinding.dispatch-policy = "intent-explicit"   # or "strict-mutual-exclusion"
+core.tokenBinding.dispatchPolicy = "intent-explicit"   # or "strict-mutual-exclusion"
 ```
 
 The key is declared by core's bundled config schema (single source of truth). It applies across all installed binding-mechanism modules.

@@ -19,37 +19,20 @@ describe("provider config", () => {
 		const raw = parseFile(new URL("../../config/reference.conf", import.meta.url).pathname, {
 			env: {
 				OAUTH_JWT_ISSUER: "https://auth.test",
-				SESSION_SECRET: "test-session-secret.at-least-32-bytes.ok",
 			},
 		});
 		const config = validate(raw, AppConfigSchema);
 
-		// The signing key, the log level, the HTTP settings and the Redis stores'
-		// settings are the sections of the modules that own them, with their
-		// defaults in those modules' package: core ships none.
+		// The signing key, the log level, the HTTP settings, the Redis stores'
+		// settings and the session's are the sections of the modules that own
+		// them, with their defaults in those modules' package: core ships none.
 		expect(config.oauth.jwt.signingKey).toBeUndefined();
 		expect(config.logging).toBeUndefined();
 		expect(config.http).toBeUndefined();
 		expect(config["redis-session-stores"]).toBeUndefined();
 		expect(config.oauth.oidcMode).toBe("oidc-required");
-		expect(config.session.name).toBe("__Host-auth.session");
-		// `session` is wrapped in a cross-field refinement (SameSite/Secure), and
-		// `session.csrf` sits inside the same object. Resolve the real
-		// reference.conf and assert the sub-section still arrives COERCED — a
-		// wrapper that broke ts.hocon's shape traversal would leave `ttlSeconds`
-		// as the string "7200" and fail only once the CSRF arithmetic ran.
-		expect(config.session.csrf?.ttlSeconds).toBe(7200);
-		expect(config.session.csrf?.trustedOrigins).toEqual([]);
-	});
-
-	it("rejects a SESSION_SECRET below the 256-bit floor", () => {
-		const raw = parseFile(new URL("../../config/reference.conf", import.meta.url).pathname, {
-			env: {
-				OAUTH_JWT_ISSUER: "https://auth.test",
-				SESSION_SECRET: "too-short",
-			},
-		});
-		expect(() => validate(raw, AppConfigSchema)).toThrow(/at least 32 bytes/i);
+		expect(config.session).toBeUndefined();
+		expect(config["session-store"]).toBeUndefined();
 	});
 
 	it("fails validation when required fields are missing", () => {
@@ -72,7 +55,6 @@ describe("provider config", () => {
 				OAUTH_JWT_SECRET: "test-jwt-secret.at-least-32-bytes.ok",
 				OAUTH_JWT_ISSUER: "https://auth.test",
 				OAUTH_AUTHORIZE_ALLOW_UNMARKED_CLIENTS: "false",
-				SESSION_SECRET: "test-session-secret.at-least-32-bytes.ok",
 			},
 		});
 		expect(() => validate(raw, AppConfigSchema)).toThrow(/allowUnmarkedClients was removed/);
@@ -83,19 +65,14 @@ describe("provider config", () => {
 			env: {
 				OAUTH_JWT_SECRET: "test-jwt-secret.at-least-32-bytes.ok",
 				OAUTH_JWT_ISSUER: "https://auth.test",
-				SESSION_SECRET: "test-session-secret.at-least-32-bytes.ok",
 				CLIENT_USER_BASE_URL: "http://localhost:8080",
 				CLIENT_APP_BASE_URL: "http://localhost:8080",
 				CLIENT_CODE_ENDPOINT_URI: "redis://localhost:6379",
-				SESSION_SECURE: "false",
-				SESSION_NAME: "auth.sid",
 				OAUTH_OIDC_MODE: "dual",
 			},
 		});
 		const config = validate(raw, AppConfigSchema);
 
-		expect(config.session.secure).toBe(false);
-		expect(config.session.name).toBe("auth.sid");
 		expect(config.oauth.oidcMode).toBe("dual");
 		// federations.google.enabled env-var coercion is covered by the
 		// HOCON reference.conf wiring; schema-level boolean coercion for
@@ -107,7 +84,6 @@ describe("provider config", () => {
 			env: {
 				OAUTH_JWT_SECRET: "test-jwt-secret.at-least-32-bytes.ok",
 				OAUTH_JWT_ISSUER: "https://auth.test",
-				SESSION_SECRET: "test-session-secret.at-least-32-bytes.ok",
 				CLIENT_USER_BASE_URL: "http://localhost:8080",
 				CLIENT_CODE_ENDPOINT_URI: "redis://localhost:6379",
 			},
@@ -121,7 +97,6 @@ describe("provider config", () => {
 			env: {
 				OAUTH_JWT_SECRET: "test-jwt-secret.at-least-32-bytes.ok",
 				OAUTH_JWT_ISSUER: "https://auth.test",
-				SESSION_SECRET: "test-session-secret.at-least-32-bytes.ok",
 			},
 		});
 		const config = validate(raw, AppConfigSchema);
@@ -133,7 +108,6 @@ describe("provider config", () => {
 			env: {
 				OAUTH_JWT_SECRET: "test-jwt-secret.at-least-32-bytes.ok",
 				OAUTH_JWT_ISSUER: "https://auth.test",
-				SESSION_SECRET: "test-session-secret.at-least-32-bytes.ok",
 			},
 		});
 		const config = validate(raw, AppConfigSchema);
@@ -147,7 +121,6 @@ describe("provider config", () => {
 				env: {
 					OAUTH_JWT_SECRET: "test-jwt-secret.at-least-32-bytes.ok",
 					OAUTH_JWT_ISSUER: "https://auth.test",
-					SESSION_SECRET: "test-session-secret.at-least-32-bytes.ok",
 				},
 			}),
 			AppConfigSchema,
@@ -160,7 +133,6 @@ describe("provider config", () => {
 				env: {
 					OAUTH_JWT_SECRET: "test-jwt-secret.at-least-32-bytes.ok",
 					OAUTH_JWT_ISSUER: "https://auth.test",
-					SESSION_SECRET: "test-session-secret.at-least-32-bytes.ok",
 					CORE_RATE_LIMITER_MEMORY_MAX_BUCKETS: "123",
 				},
 			}),

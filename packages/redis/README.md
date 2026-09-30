@@ -157,7 +157,12 @@ Each one implements a port core declares; the slot name is in parentheses.
   or inside them survives a step-up on a replica not yet upgraded. A custom
   `UserSessionStoreClient` implements `replaceIfUnchanged`
   (`makeIoredisClients` does); `createRedisUserSessionStore` refuses a client
-  without it when the store is built, naming the method.
+  without it when the store is built, naming the method. The envelope carries
+  `enrollmentFacts` (`{witness, mailAddress}`, what the login's `User` said for
+  a first binding) as a key of its own, left out when the session recorded
+  none: an envelope without it reads as a session with none, a malformed one
+  is refused as corrupt, and a release before this one ignores the key. A
+  step-up keeps it as it was.
 - `FederationTokenStore` (`federationTokenStore`) — the upstream IdP tokens
   held for a session. See [Federation-token keys and logout](#federation-token-keys-and-logout).
 - `FederationGrantStore` (`federationGrantStore`) and
@@ -197,7 +202,8 @@ The exports are listed in [`src/index.mts`](src/index.mts) and
 
 ## Backing-client contract
 
-Each adapter consumes a **per-purpose backing-client interface** declared in
+Each adapter consumes a **per-purpose backing-client interface**, declared in
+[`src/clients/`](src/clients/), one file per store family, and exported from
 [`src/clients.mts`](src/clients.mts) — `ChallengeStoreClient`,
 `FederationTokenStoreClient`, `RateLimiterClient` and so on. Core does not
 declare them: they are expressed in Redis-command terms, so they belong to the
@@ -664,6 +670,7 @@ slot and prefix, so a deployment can put the factors on a Redis of their own.
 | `mfat:lock:{<subject>}` | hash | D21's consecutive run, the reservations in flight, and whether a hold's first refusal was answered (`held`) |
 | `mfat:week:{<subject>}` | sorted set | the weekly window: one member per failure, scored by its time |
 | `mfat:proof:{<subject>}` | string | the email proof an operator reset requires at the next first binding |
+| `mfat:session-proof:{<subject>}:<sid>` | string | the account-email proof given in one session, JSON `{provedAtMs, untilMs}`, expiring at `untilMs` |
 
 Subjects and ids are base64url of their JSON, as the federation grant store
 spells its ids, so no brace moves a hash tag and no two values share a key.
@@ -727,6 +734,14 @@ a transaction hash's `sends` and `lastSentAtMs`, where present, are not read:
 neither loosens a limit the store keeps. The email-proof requirement is a key of
 its own with no TTL: `clearSubjectState` leaves it, and consuming it is one
 `DEL`.
+
+**A session's account-email proof.** One string per session of a subject,
+written with one `SET … PX`, whose lifetime is `untilMs` less the store's own
+clock (`now`), so a later proof for the session replaces the earlier one and
+its end. A read answers it absent at or past `untilMs` on that clock or at the
+time asked about, and absent when it does not read back as a proof: losing
+one fails closed, and the user proves again. The factor store's durability
+check does not cover it.
 
 **Durability at boot (D12).** Before providing its store each module asks the
 server, through its client's `durability()`, each part on its own: the policy

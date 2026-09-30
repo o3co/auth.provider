@@ -57,7 +57,10 @@ import {
 	type UserSessionStore,
 	type WebAuthnCredentialStore,
 } from "@o3co/auth-provider-core";
-import { unreadableModuleLeaves } from "@o3co/auth-provider-core/testing";
+import {
+	createRecordingMailSender,
+	unreadableModuleLeaves,
+} from "@o3co/auth-provider-core/testing";
 import { DEVICE_CODE_GRANT_TYPE, deviceGrantModule } from "@o3co/auth-provider-device-grant";
 import { mfaConfigForTests, totpCodeForTests } from "@o3co/auth-provider-mfa/testing";
 import {
@@ -99,6 +102,7 @@ import {
 	webTokens,
 } from "@o3co/auth-provider-standalone/src/__tests__/all-modules-composition.fixture.mts";
 import { readOwnLayers, readSwitches } from "@o3co/auth-provider-standalone/src/configPath.mts";
+import { standardSmtpMailSenderModule } from "@o3co/auth-provider-standard";
 import { type FakeStore, startFakeStore } from "@o3co/auth-provider-test-kit";
 import { WEBAUTHN_GRANT_TYPE } from "@o3co/auth-provider-webauthn";
 import type { Express } from "express";
@@ -135,6 +139,10 @@ afterEach(async () => {
 	await current?.handle.dispose();
 	current = undefined;
 });
+
+/** The session cookie's name: the session store's `session-store.name`, which core's type does not name. */
+const sessionCookieName = (config: unknown): string =>
+	(config as { "session-store": { name: string } })["session-store"].name;
 
 /** The `mfa` section a configuration carries: the MFA module's, which core's type does not name. */
 const mfaOf = (config: unknown): Record<string, unknown> | undefined =>
@@ -201,7 +209,6 @@ const DEPLOYMENT_MODULES = [
 	"deployment:github-federation-config",
 	"deployment:requirement-page",
 	"deployment:requirement-bare",
-	"deployment:mail-sender",
 ];
 
 describe("what the full set covers", () => {
@@ -266,6 +273,21 @@ describe("the full set's mail sender", () => {
 		expect(handle.components.mailSender).toBe(mail);
 		expect(mail.kind).toBe("recording");
 		expect(mail.sent).toEqual([]);
+	});
+
+	it("keeps the template's SMTP sender's module, whose sender the recording one stands in for, and no other mail sender", async () => {
+		const { modules } = await boot();
+		const providers = modules
+			.filter((module) => module.provides !== undefined && "mailSender" in module.provides)
+			.map((module) => module.name);
+		expect(providers).toEqual([standardSmtpMailSenderModule.name]);
+	});
+
+	it("gives the slot to a caller's own mailSender override, over the recording sender", async () => {
+		const own = createRecordingMailSender();
+		const { handle, mail } = await boot({ extraOverrides: () => ({ mailSender: own }) });
+		expect(handle.components.mailSender).toBe(own);
+		expect(handle.components.mailSender).not.toBe(mail);
 	});
 });
 
@@ -786,7 +808,9 @@ describe("a password login both requirements interrupt, resumed through each", (
 		expect(first.body).toEqual(FIXTURE_INTERRUPTION.bare.body);
 		// Answered as the login answers an interruption (the session package's
 		// answerInterruption): a fresh CSRF token beside the 403.
-		expect(cookiesOf(first).some((c) => c.startsWith(`${config.session.name}.csrf=`))).toBe(true);
+		expect(cookiesOf(first).some((c) => c.startsWith(`${sessionCookieName(config)}.csrf=`))).toBe(
+			true,
+		);
 		expect(ceremonies.map((c) => c.requirement)).toEqual(["fixture-page", "fixture-bare"]);
 		const atFirst = ceremonies[1];
 		expect(atFirst?.continuation).toMatchObject({
@@ -886,7 +910,7 @@ describe("a password login the mfa requirement interrupts, through the template'
 		});
 		const transaction = await mfaTransactionStore.get(login.body.transaction as string);
 		// The session the browser now holds: express-session signs it `s:<id>.<signature>`.
-		const cookie = cookiesOf(login).find((c) => c.startsWith(`${config.session.name}=`));
+		const cookie = cookiesOf(login).find((c) => c.startsWith(`${sessionCookieName(config)}=`));
 		const signed = decodeURIComponent((cookie ?? "").split(";")[0]?.split("=")[1] ?? "");
 		expect(signed.startsWith("s:")).toBe(true);
 		expect(transaction).toMatchObject({

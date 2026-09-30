@@ -214,7 +214,7 @@ const createdSid = (h: ReturnType<typeof harness>): string =>
 
 describe("establishSession", () => {
 	describe("what it writes: the establishment's primary, and nothing beside it", () => {
-		it("writes the record and the session from the primary — its subject, user, claims, authTime, recorded and redirectTo — whatever the caller hands beside it", async () => {
+		it("writes the record and the session from the primary — its subject, user, claims, authTime, recorded, enrollment facts and redirectTo — whatever the caller hands beside it", async () => {
 			const h = harness();
 			const fedAuthTime = new Date("2026-09-28T08:00:00.000Z");
 			const establishment = establishWithoutAsking({
@@ -238,6 +238,7 @@ describe("establishSession", () => {
 				},
 				authTime: new Date(0),
 				redirectTo: "https://evil.example.com/",
+				enrollmentFacts: { witness: "enrolled", mailAddress: "address" },
 			};
 
 			const result = await establishSession(establishment, {
@@ -265,6 +266,7 @@ describe("establishSession", () => {
 					upstreamAmr: undefined,
 					mfaAt: undefined,
 				},
+				enrollmentFacts: { witness: "not_enrolled", mailAddress: "none" },
 			});
 			expect(h.subjectSessionIndex.addSid).toHaveBeenCalledWith("u-9", sid, expiresAt);
 			expect(h.reporterFactory).toHaveBeenCalledWith({ sid, sub: "u-9" });
@@ -329,6 +331,68 @@ describe("establishSession", () => {
 			);
 		});
 
+		it("writes the enrollment facts the primary carries, read from its user: a password login's, and a resumed one's", async () => {
+			const enrolled: User = { ...user, mfaEnrolled: true };
+			const direct = harness({}, { steps: false });
+			const admitted = await admitPrimary(
+				admissionDeps(),
+				passwordPrimary({
+					subject: user.id,
+					user: enrolled,
+					claims,
+					authTime,
+					redirectTo: undefined,
+					request: {},
+				}),
+			);
+			if (admitted.outcome !== "establish") throw new Error("expected an establishment");
+			await direct.establish(admitted.establishment);
+			expect(direct.userSessionStore.create).toHaveBeenCalledWith(
+				expect.objectContaining({
+					enrollmentFacts: { witness: "enrolled", mailAddress: "address" },
+				}),
+			);
+
+			const mfa: SessionRequirement = {
+				name: "mfa",
+				secondFactorAuthority: true,
+				reach: new Set(["otp", "mfa"]),
+				stepUpPage: { url: "/mfa", params: {} },
+				remediations: ["mfa.step_up"],
+				hintKeys: [],
+				admit: async () => ({ outcome: "met" }),
+				admitPrimary: async (primary) =>
+					primary.recorded.authentication.mfaAt === undefined
+						? { open: async () => ({ status: 403, body: { error: "mfa_required" } }) }
+						: "establish",
+			};
+			const deps = admissionDeps([mfa]);
+			const interrupted = await admitPrimary(
+				deps,
+				passwordPrimary({
+					subject: user.id,
+					user: { ...enrolled, email: "not an address" },
+					claims,
+					authTime,
+					redirectTo: undefined,
+					request: {},
+				}),
+			);
+			if (interrupted.outcome !== "interrupt") throw new Error("expected an interruption");
+			const resumed = await resumePrimary(deps, interrupted.continuation, {
+				requirement: "mfa",
+				adds: { amr: ["otp", "mfa"], mfaAt: new Date("2026-09-28T09:01:00.000Z") },
+			});
+			if (resumed.outcome !== "establish") throw new Error("expected an establishment");
+			const after = harness({}, { steps: false });
+			await after.establish(resumed.establishment);
+			expect(after.userSessionStore.create).toHaveBeenCalledWith(
+				expect.objectContaining({
+					enrollmentFacts: { witness: "enrolled", mailAddress: "unreadable" },
+				}),
+			);
+		});
+
 		it("refuses what is not an Establishment core built — an object shaped like one, a copy of one — with a RangeError, before anything is written", async () => {
 			const genuine = await passwordEstablishment();
 			for (const forged of [
@@ -382,6 +446,7 @@ describe("establishSession", () => {
 				expiresAt,
 				claims,
 				...passwordSessionAuthentication(),
+				enrollmentFacts: { witness: "not_enrolled", mailAddress: "address" },
 			});
 			expect(h.subjectSessionIndex.addSid).toHaveBeenCalledWith("u-1", sid, expiresAt);
 			expect(h.before.run).toHaveBeenCalledWith({ sid, sub: "u-1", expiresAt });

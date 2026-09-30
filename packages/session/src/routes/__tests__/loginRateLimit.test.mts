@@ -39,17 +39,18 @@ import { describe, expect, it, vi } from "vitest";
 import { createCsrfProtection } from "../../csrf.mjs";
 import { createRouter } from "../Session.mjs";
 
+/** The session module's section, as the router receives it: the login's budget. */
 const stubConfig = {
 	cors: { allowedOrigins: [] },
-	session: {
-		name: "auth.session",
-		secure: false,
-		sameSite: "lax",
-		domain: null,
-		maxAge: 86400_000,
-	},
-	rateLimit: { login: { windowMs: 900_000, limit: 20 }, failMode: "closed" },
+	session: { rateLimit: { login: { windowMs: 900_000, limit: 20 } } },
 } as unknown as AppConfig;
+
+/** The session cookie, as the `sessionCookiePolicy` slot carries it. */
+const COOKIE = { name: "auth.session", secure: false, sameSite: "lax", domain: undefined } as const;
+
+/** The session module's section of a configuration. */
+const sectionOf = (config: AppConfig) =>
+	(config as unknown as { session: Record<string, unknown> }).session;
 
 /**
  * The CSRF guard runs ahead of the rate-limit guard, so every
@@ -114,7 +115,8 @@ const makeApp = (
 			csrfTokenSigner: SIGNER,
 			userRepository,
 			requirements: resolverForTests([]),
-			config: opts.config ?? stubConfig,
+			section: sectionOf(opts.config ?? stubConfig),
+			sessionCookie: COOKIE,
 			deploymentMode: "unset",
 			...(opts.rateLimiter ? { rateLimiter: opts.rateLimiter } : {}),
 			...(opts.auditSink ? { auditSink: opts.auditSink } : {}),
@@ -164,7 +166,7 @@ describe("/session/login rate limiting — shared limiter", () => {
 
 	it("advertises the limit the adapter enforced, not the one configured here", async () => {
 		// An operator who declares `limits.login` on the adapter overrides the
-		// budget contributed from `rateLimit.login`. A header advertising a limit
+		// budget contributed from `session.rateLimit.login`. A header advertising a limit
 		// no request is measured against is worse than no header at all.
 		const limiter = scriptedLimiter(() => ({ allowed: true, remaining: 4, limit: 5 }));
 		const res = await login(makeApp({ rateLimiter: limiter }));
@@ -191,11 +193,11 @@ describe("/session/login rate limiting — shared limiter", () => {
 describe("/session/login rate limiting — limiter failure", () => {
 	it("fails closed with 503 when the limiter throws and its failMode is closed", async () => {
 		// Parity with the OAuth endpoints: the limiter's one outage policy, not
-		// one per router. The configuration's `rateLimit.failMode` is not read.
+		// one per router.
 		const limiter = scriptedLimiter(() => new Error("redis down"), "closed");
 		const config = {
 			...stubConfig,
-			rateLimit: { login: { windowMs: 900_000, limit: 20 }, failMode: "open" },
+			session: { rateLimit: { login: { windowMs: 900_000, limit: 20 } } },
 		} as unknown as AppConfig;
 		const res = await login(makeApp({ rateLimiter: limiter, config }));
 		expect(res.status).toBe(503);
@@ -211,7 +213,7 @@ describe("/session/login rate limiting — limiter failure", () => {
 		const limiter = scriptedLimiter(() => new Error("redis down"));
 		const config = {
 			...stubConfig,
-			rateLimit: { login: { windowMs: 900_000, limit: 20 }, failMode: "open" },
+			session: { rateLimit: { login: { windowMs: 900_000, limit: 20 } } },
 		} as unknown as AppConfig;
 		const res = await login(makeApp({ rateLimiter: limiter, config }));
 		expect(res.status).toBe(503);
@@ -240,9 +242,9 @@ describe("/session/login rate limiting — limiter failure", () => {
 });
 
 describe("/session/login rate limiting — the budget", () => {
-	it("refuses to build the router over a configuration with no rateLimit.login", () => {
-		const config = { ...stubConfig, rateLimit: { failMode: "closed" } } as unknown as AppConfig;
-		expect(() => makeApp({ config })).toThrow(/rateLimit\.login/);
+	it("refuses to build the router over a section with no rateLimit.login", () => {
+		const config = { ...stubConfig, session: {} } as unknown as AppConfig;
+		expect(() => makeApp({ config })).toThrow(/session\.rateLimit\.login/);
 	});
 });
 
@@ -252,7 +254,7 @@ describe("/session/login rate limiting — fallback", () => {
 		// the one endpoint that exists to resist password guessing.
 		const config = {
 			...stubConfig,
-			rateLimit: { login: { windowMs: 900_000, limit: 2 }, failMode: "closed" },
+			session: { rateLimit: { login: { windowMs: 900_000, limit: 2 } } },
 		} as unknown as AppConfig;
 		const app = makeApp({ config });
 		expect((await login(app)).status).not.toBe(429);
@@ -271,7 +273,8 @@ describe("/session/login rate limiting — fallback", () => {
 			csrfTokenSigner: SIGNER,
 			userRepository,
 			requirements: resolverForTests([]),
-			config: stubConfig,
+			section: sectionOf(stubConfig),
+			sessionCookie: COOKIE,
 			deploymentMode: "unset",
 			logger: { warn, info: vi.fn(), error: vi.fn(), debug: vi.fn() } as never,
 		});
@@ -305,7 +308,8 @@ describe("/session/login rate limiting — fallback under the deploymentMode slo
 				csrfTokenSigner: SIGNER,
 				userRepository,
 				requirements: resolverForTests([]),
-				config,
+				section: sectionOf(config),
+				sessionCookie: COOKIE,
 				deploymentMode,
 				...(rateLimiter ? { rateLimiter } : {}),
 				logger: { warn, info: vi.fn(), error: vi.fn(), debug: vi.fn() } as never,

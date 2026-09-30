@@ -136,7 +136,6 @@ const makeBoot = (overrides: Overrides): BootstrapMap => {
 	return {
 		config: {
 			...core,
-			rateLimit: full.rateLimit,
 			// The module attaches AUDIT_SINK_ABSENCE_POLICY, so a boot
 			// with no sink must say so — which is what this fixture is.
 			...(overrides.withoutAuditDeclaration === true ? {} : { audit: full.audit }),
@@ -549,7 +548,6 @@ describe("deviceGrantModule — the route it actually contributes", () => {
 				pollingIntervalSeconds: 5,
 				rateLimit: { limit: 5, windowSeconds: 300 },
 			},
-			rateLimit: makeValidFullSections().rateLimit,
 		},
 		clientRepository: confidentialRepository,
 		deviceCodeStore: createMemoryDeviceCodeStore(),
@@ -1765,7 +1763,6 @@ describe("deviceGrantModule — private_key_jwt on the mounted route", () => {
 				pollingIntervalSeconds: 5,
 				rateLimit: { limit: 5, windowSeconds: 300 },
 			},
-			rateLimit: makeValidFullSections().rateLimit,
 		},
 		clientRepository: jwtRepository,
 		deviceCodeStore: createMemoryDeviceCodeStore(),

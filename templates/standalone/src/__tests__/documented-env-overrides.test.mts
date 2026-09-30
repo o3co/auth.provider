@@ -25,6 +25,8 @@ import {
 	moduleReferences,
 	resolveAccessTokenLifetime,
 } from "@o3co/auth-provider-core";
+import { oauthModule } from "@o3co/auth-provider-oauth";
+import { sessionModule, sessionStoreModule } from "@o3co/auth-provider-session";
 import { describe, expect, it } from "vitest";
 import { buildModules } from "../buildModules.mjs";
 import {
@@ -103,44 +105,43 @@ const DOCUMENTED_ENV: Readonly<Record<string, string>> = {
 	OAUTH_REVOCATION_SUBJECT: "unsupported",
 	OAUTH_REQUIRE_EMAIL_VERIFIED: "true",
 	OAUTH_REQUIRE_GRANT_TYPE_ALLOWLIST: "true",
-	OAUTH_GRANTS_JWT_BEARER_ENABLED: "false",
 	OAUTH_NONCE_MAX_LENGTH: "256",
 	OAUTH_RESOURCE_INDICATOR_ENABLED: "true",
-	OAUTH_CIMD_ENABLED: "true",
-	OAUTH_CIMD_ALLOWED_SCOPES: "read, write",
-	OAUTH_CIMD_ALLOWED_AUDIENCES: "https://mcp.example",
-	OAUTH_CIMD_ALLOWED_HOSTS: "client.example, .trusted.example",
-	OAUTH_CIMD_DENIED_HOSTS: "evil.example",
-	OAUTH_CIMD_MAX_BYTES: "8192",
-	OAUTH_CIMD_TIMEOUT_MS: "3000",
-	OAUTH_CIMD_CACHE_MAX_AGE_MS: "60000",
-	OAUTH_CIMD_MAX_CACHE_ENTRIES: "128",
-	OAUTH_CIMD_STALE_IF_ERROR_MS: "120000",
-	OAUTH_CIMD_NEGATIVE_CACHE_MS: "30000",
-	OAUTH_CIMD_MAX_CONCURRENT_FETCHES: "4",
-	OAUTH_TOKEN_BINDING_DISPATCH_POLICY: "intent-explicit",
-	OAUTH_TOKEN_BINDING_BIND_CONFIDENTIAL_CLIENT_REFRESH_TOKENS: "true",
+	OAUTH_CLIENT_ID_METADATA_DOCUMENTS_ENABLED: "true",
+	OAUTH_CLIENT_ID_METADATA_DOCUMENTS_ALLOWED_SCOPES: "read, write",
+	OAUTH_CLIENT_ID_METADATA_DOCUMENTS_ALLOWED_AUDIENCES: "https://mcp.example",
+	OAUTH_CLIENT_ID_METADATA_DOCUMENTS_ALLOWED_HOSTS: "client.example, .trusted.example",
+	OAUTH_CLIENT_ID_METADATA_DOCUMENTS_DENIED_HOSTS: "evil.example",
+	OAUTH_CLIENT_ID_METADATA_DOCUMENTS_MAX_BYTES: "8192",
+	OAUTH_CLIENT_ID_METADATA_DOCUMENTS_TIMEOUT_MS: "3000",
+	OAUTH_CLIENT_ID_METADATA_DOCUMENTS_CACHE_MAX_AGE_MS: "60000",
+	OAUTH_CLIENT_ID_METADATA_DOCUMENTS_MAX_CACHE_ENTRIES: "128",
+	OAUTH_CLIENT_ID_METADATA_DOCUMENTS_STALE_IF_ERROR_MS: "120000",
+	OAUTH_CLIENT_ID_METADATA_DOCUMENTS_NEGATIVE_CACHE_MS: "30000",
+	OAUTH_CLIENT_ID_METADATA_DOCUMENTS_MAX_CONCURRENT_FETCHES: "4",
+	CORE_TOKEN_BINDING_DISPATCH_POLICY: "intent-explicit",
+	CORE_TOKEN_BINDING_BIND_CONFIDENTIAL_CLIENT_REFRESH_TOKENS: "true",
 
-	// --- oauth.grants -------------------------------------------------
-	OAUTH_GRANTS_SESSION_ENABLED: "false",
-	OAUTH_GRANTS_AUTHORIZATION_CODE_ENABLED: "true",
-	OAUTH_GRANTS_REFRESH_TOKEN_ENABLED: "true",
-	OAUTH_GRANTS_CLIENT_CREDENTIALS_ENABLED: "true",
-	// Tombstone: inert, but a still-exported value must reach the boot
-	// warning rather than failing parse.
-	OAUTH_GRANTS_AUTHORIZATION_CODE_PKCE_REQUIRE_S256: "true",
+	// --- the grant switches ------------------------------------------
+	OAUTH_SESSION_ENABLED: "false",
+	OAUTH_AUTHORIZATION_GRANTS_AUTHORIZATION_CODE_ENABLED: "true",
+	OAUTH_AUTHORIZATION_GRANTS_REFRESH_TOKEN_ENABLED: "true",
+	OAUTH_AUTHORIZATION_GRANTS_CLIENT_CREDENTIALS_ENABLED: "true",
+	OAUTH_AUTHORIZATION_GRANTS_JWT_BEARER_ENABLED: "false",
 
-	// --- session ------------------------------------------------------
-	SESSION_SECRET: "documented-env-session-secret.at-least-32-bytes.ok",
-	SESSION_NAME: "auth.session",
-	SESSION_MAX_AGE: "3600000",
-	SESSION_SECURE: "false",
-	SESSION_SAME_SITE: "lax",
-	SESSION_DOMAIN: "auth.example.com",
+	// --- session: the login routes -------------------------------------
 	SESSION_CSRF_TTL_SECONDS: "7200",
-	SESSION_STORAGE_TYPE: "redis",
-	SESSION_STORAGE_REDIS_URL: "redis://redis:6379",
-	SESSION_STORAGE_REDIS_PASSWORD: "session-store-password",
+
+	// --- session-store: the session cookie and its store ---------------
+	SESSION_STORE_SECRET: "documented-env-session-secret.at-least-32-bytes.ok",
+	SESSION_STORE_NAME: "auth.session",
+	SESSION_STORE_MAX_AGE: "3600000",
+	SESSION_STORE_SECURE: "false",
+	SESSION_STORE_SAME_SITE: "lax",
+	SESSION_STORE_DOMAIN: "auth.example.com",
+	SESSION_STORE_STORAGE_TYPE: "redis",
+	SESSION_STORE_STORAGE_REDIS_URL: "redis://redis:6379",
+	SESSION_STORE_STORAGE_REDIS_PASSWORD: "session-store-password",
 
 	// --- rate limiting ------------------------------------------------
 	REDIS_RATE_LIMITER_FAIL_MODE: "open",
@@ -243,9 +244,9 @@ const DOCUMENTED_ENV: Readonly<Record<string, string>> = {
 	CLIENT_CODE_PASSWORD: "code-store-password",
 	CLIENT_CODE_KEY_PREFIX: "oauth:code:",
 
-	// --- endpoints ----------------------------------------------------
-	ENDPOINTS_LOGIN_URL: "/login",
-	ENDPOINTS_CONSENT_URL: "/consent",
+	// --- the login and consent pages ----------------------------------
+	SESSION_LOGIN_PAGE_URL: "/login",
+	OAUTH_CONSENT_PAGE_URL: "/consent",
 
 	// --- cors ---------------------------------------------------------
 	// A list, in the only shape an environment variable can carry one.
@@ -274,14 +275,77 @@ const DELIBERATELY_UNSET: Readonly<Record<string, string>> = {
 		"renamed REDIS_REFRESH_TOKEN_FAMILY_STORE_CAS_RETRY_LIMIT, and only captured — set alone, or to another value, it fails boot",
 	FEDERATION_GRANTS_ENCRYPTION_MODE:
 		"renamed REDIS_FEDERATION_GRANT_STORE_ENCRYPTION_MODE, and only captured — set alone, or to another value, it fails boot",
+	OAUTH_TOKEN_BINDING_DISPATCH_POLICY:
+		"renamed CORE_TOKEN_BINDING_DISPATCH_POLICY, and only captured — set alone, or to another value, it fails boot",
+	OAUTH_TOKEN_BINDING_BIND_CONFIDENTIAL_CLIENT_REFRESH_TOKENS:
+		"renamed CORE_TOKEN_BINDING_BIND_CONFIDENTIAL_CLIENT_REFRESH_TOKENS, and only captured — set alone, or to another value, it fails boot",
+	OAUTH_GRANTS_SESSION_ENABLED:
+		"renamed OAUTH_SESSION_ENABLED, and only captured — set alone, or to another value, it fails boot",
+	OAUTH_GRANTS_AUTHORIZATION_CODE_ENABLED:
+		"renamed OAUTH_AUTHORIZATION_GRANTS_AUTHORIZATION_CODE_ENABLED, and only captured — set alone, or to another value, it fails boot",
+	OAUTH_GRANTS_REFRESH_TOKEN_ENABLED:
+		"renamed OAUTH_AUTHORIZATION_GRANTS_REFRESH_TOKEN_ENABLED, and only captured — set alone, or to another value, it fails boot",
+	OAUTH_GRANTS_CLIENT_CREDENTIALS_ENABLED:
+		"renamed OAUTH_AUTHORIZATION_GRANTS_CLIENT_CREDENTIALS_ENABLED, and only captured — set alone, or to another value, it fails boot",
+	OAUTH_GRANTS_JWT_BEARER_ENABLED:
+		"renamed OAUTH_AUTHORIZATION_GRANTS_JWT_BEARER_ENABLED, and only captured — set alone, or to another value, it fails boot",
+	ENDPOINTS_CONSENT_URL:
+		"renamed OAUTH_CONSENT_PAGE_URL, and only captured — set alone, or to another value, it fails boot",
+	OAUTH_CIMD_ENABLED:
+		"renamed OAUTH_CLIENT_ID_METADATA_DOCUMENTS_ENABLED, and only captured — set alone, or to another value, it fails boot",
+	OAUTH_CIMD_ALLOWED_SCOPES:
+		"renamed OAUTH_CLIENT_ID_METADATA_DOCUMENTS_ALLOWED_SCOPES, and only captured — set alone, or to another value, it fails boot",
+	OAUTH_CIMD_ALLOWED_AUDIENCES:
+		"renamed OAUTH_CLIENT_ID_METADATA_DOCUMENTS_ALLOWED_AUDIENCES, and only captured — set alone, or to another value, it fails boot",
+	OAUTH_CIMD_ALLOWED_HOSTS:
+		"renamed OAUTH_CLIENT_ID_METADATA_DOCUMENTS_ALLOWED_HOSTS, and only captured — set alone, or to another value, it fails boot",
+	OAUTH_CIMD_DENIED_HOSTS:
+		"renamed OAUTH_CLIENT_ID_METADATA_DOCUMENTS_DENIED_HOSTS, and only captured — set alone, or to another value, it fails boot",
+	OAUTH_CIMD_MAX_BYTES:
+		"renamed OAUTH_CLIENT_ID_METADATA_DOCUMENTS_MAX_BYTES, and only captured — set alone, or to another value, it fails boot",
+	OAUTH_CIMD_TIMEOUT_MS:
+		"renamed OAUTH_CLIENT_ID_METADATA_DOCUMENTS_TIMEOUT_MS, and only captured — set alone, or to another value, it fails boot",
+	OAUTH_CIMD_CACHE_MAX_AGE_MS:
+		"renamed OAUTH_CLIENT_ID_METADATA_DOCUMENTS_CACHE_MAX_AGE_MS, and only captured — set alone, or to another value, it fails boot",
+	OAUTH_CIMD_MAX_CACHE_ENTRIES:
+		"renamed OAUTH_CLIENT_ID_METADATA_DOCUMENTS_MAX_CACHE_ENTRIES, and only captured — set alone, or to another value, it fails boot",
+	OAUTH_CIMD_STALE_IF_ERROR_MS:
+		"renamed OAUTH_CLIENT_ID_METADATA_DOCUMENTS_STALE_IF_ERROR_MS, and only captured — set alone, or to another value, it fails boot",
+	OAUTH_CIMD_NEGATIVE_CACHE_MS:
+		"renamed OAUTH_CLIENT_ID_METADATA_DOCUMENTS_NEGATIVE_CACHE_MS, and only captured — set alone, or to another value, it fails boot",
+	OAUTH_CIMD_MAX_CONCURRENT_FETCHES:
+		"renamed OAUTH_CLIENT_ID_METADATA_DOCUMENTS_MAX_CONCURRENT_FETCHES, and only captured — set alone, or to another value, it fails boot",
+	OAUTH_GRANTS_AUTHORIZATION_CODE_PKCE_REQUIRE_S256:
+		"the authorization-code grant's pkce block was removed, and this is only captured — set at all, it fails boot",
+	ENDPOINTS_LOGIN_URL:
+		"renamed SESSION_LOGIN_PAGE_URL, and only captured — set alone, or to another value, it fails boot",
+	SESSION_SECRET:
+		"renamed SESSION_STORE_SECRET, and only captured — set alone, or to another value, it fails boot",
+	SESSION_NAME:
+		"renamed SESSION_STORE_NAME, and only captured — set alone, or to another value, it fails boot",
+	SESSION_MAX_AGE:
+		"renamed SESSION_STORE_MAX_AGE, and only captured — set alone, or to another value, it fails boot",
+	SESSION_SECURE:
+		"renamed SESSION_STORE_SECURE, and only captured — set alone, or to another value, it fails boot",
+	SESSION_SAME_SITE:
+		"renamed SESSION_STORE_SAME_SITE, and only captured — set alone, or to another value, it fails boot",
+	SESSION_DOMAIN:
+		"renamed SESSION_STORE_DOMAIN, and only captured — set alone, or to another value, it fails boot",
+	SESSION_STORAGE_TYPE:
+		"renamed SESSION_STORE_STORAGE_TYPE, and only captured — set alone, or to another value, it fails boot",
+	SESSION_STORAGE_REDIS_URL:
+		"renamed SESSION_STORE_STORAGE_REDIS_URL, and only captured — set alone, or to another value, it fails boot",
+	SESSION_STORAGE_REDIS_PASSWORD:
+		"renamed SESSION_STORE_STORAGE_REDIS_PASSWORD, and only captured — set alone, or to another value, it fails boot",
 };
 
 /**
  * The provider environment `o3co/auth`'s `tests/docker-compose.yml` sets,
- * transcribed. The umbrella E2E boots the shipped template with exactly this,
+ * transcribed: each renamed variable under its old and its new name, the two
+ * at one value. The umbrella E2E boots the shipped template with exactly this,
  * so a parse failure here is a red umbrella build that this repository can see
- * first. `SESSION_SECURE=false` is the one it cannot run without: the suite
- * speaks plain HTTP.
+ * first. `SESSION_STORE_SECURE=false` is the one it cannot run without: the
+ * suite speaks plain HTTP.
  *
  * The two `FEDERATION_TOKEN_STORE` lines are required: the federation token
  * store defaults to memory, the standalone's memory module declares itself
@@ -290,24 +354,37 @@ const DELIBERATELY_UNSET: Readonly<Record<string, string>> = {
  */
 const UMBRELLA_E2E_ENV: Readonly<Record<string, string>> = {
 	OAUTH_JWT_ALGORITHM: "HS256",
+	KEY_STORE_LOCAL_ALGORITHM: "HS256",
 	OAUTH_JWT_SECRET: "e2e-shared-hs256-secret.at-least-32-bytes.ok",
+	KEY_STORE_LOCAL_SECRET: "e2e-shared-hs256-secret.at-least-32-bytes.ok",
 	OAUTH_JWT_ISSUER: "https://auth.e2e.test",
 	SESSION_SECRET: "lO0QH09fuKSGuViZ9myJbH3jsgai99A2GpC3RYRuy6Y=",
+	SESSION_STORE_SECRET: "lO0QH09fuKSGuViZ9myJbH3jsgai99A2GpC3RYRuy6Y=",
 	SESSION_SECURE: "false",
+	SESSION_STORE_SECURE: "false",
 	SESSION_NAME: "auth.session",
+	SESSION_STORE_NAME: "auth.session",
 	DEPLOYMENT_MODE: "multi",
 	CORE_DEPLOYMENT_MODE: "multi",
 	REFRESH_TOKEN_FAMILY_STORE_REDIS_URL: "redis://redis:6379",
+	REDIS_CLIENTS_URL: "redis://redis:6379",
 	SESSION_STORAGE_REDIS_URL: "redis://redis:6379",
+	SESSION_STORE_STORAGE_REDIS_URL: "redis://redis:6379",
 	USER_SESSION_STORES_ADAPTER: "redis",
+	STANDALONE_ADAPTERS_USER_SESSION_STORES: "redis",
 	RATE_LIMITER_ADAPTER: "redis",
+	STANDALONE_ADAPTERS_RATE_LIMITER: "redis",
 	OAUTH_CODE_ADAPTER: "redis",
+	STANDALONE_ADAPTERS_CODE_REPOSITORY: "redis",
 	FEDERATION_TOKEN_STORE_TYPE: "redis",
+	STANDALONE_ADAPTERS_FEDERATION_TOKEN_STORE: "redis",
 	REDIS_FEDERATION_TOKEN_STORE_ENCRYPTION_KEY: "BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc=",
 	CLIENT_USER_TYPE: "yaml",
+	STANDALONE_ADAPTERS_USER_REPOSITORY: "yaml",
 	OAUTH_RESOURCE_INDICATOR_ENABLED: "true",
 	OAUTH_REQUIRE_EMAIL_VERIFIED: "true",
-	OAUTH_GRANTS_AUTHORIZATION_CODE_PKCE_REQUIRE_S256: "true",
+	OAUTH_GRANTS_SESSION_ENABLED: "true",
+	OAUTH_SESSION_ENABLED: "true",
 };
 
 /** The template's own files for `configEnv`, under `operatorLayer` — HOCON an operator adds above them — when given. */
@@ -373,6 +450,36 @@ async function bootParsed(
 	return parsed;
 }
 
+/** `session-store {}` as the session store's module parses it. */
+function sessionStoreSection(config: AppConfig): {
+	readonly secure: boolean;
+	readonly sameSite: string;
+	readonly maxAge: number;
+} {
+	const schema = sessionStoreModule.section?.schema;
+	if (schema === undefined) throw new Error("the session store's module declares no section");
+	return schema.parse((config as Record<string, unknown>)["session-store"]) as ReturnType<
+		typeof sessionStoreSection
+	>;
+}
+
+/** `session {}` as the session module parses it. */
+function sessionSection(config: AppConfig): { readonly csrf?: { readonly ttlSeconds: number } } {
+	const schema = sessionModule.section?.schema;
+	if (schema === undefined) throw new Error("the session module declares no section");
+	return schema.parse(config.session) as ReturnType<typeof sessionSection>;
+}
+
+/** `oauth {}` as the oauth module's own schema parses it. */
+function oauthSection(config: AppConfig): {
+	readonly consentPage?: { readonly url: string };
+	readonly clientIdMetadataDocuments?: Readonly<Record<string, unknown>>;
+} {
+	const schema = oauthModule({ config }).section?.schema;
+	if (schema === undefined) throw new Error("the oauth module declares no section");
+	return schema.parse(config.oauth) as ReturnType<typeof oauthSection>;
+}
+
 /** Every `${?VAR}` in a HOCON layer, ignoring commented-out lines. */
 function substitutionsIn(path: string): Set<string> {
 	const found = new Set<string>();
@@ -424,7 +531,7 @@ describe("the shipped config boots with every documented override supplied as a 
 		const config = await bootParsed(DOCUMENTED_ENV);
 		// Each of these arrives from HOCON as a string. A leftover string is
 		// not a cosmetic defect: `=== true` is how the runtime reads them.
-		expect(config.session.secure).toBe(false);
+		expect(sessionStoreSection(config).secure).toBe(false);
 		expect(config.oauth.jwt.legacyTypAccept).toBe(true);
 		expect(config.oauth.requireEmailVerified).toBe(true);
 		expect(config.oauth.resourceIndicator?.enabled).toBe(true);
@@ -449,15 +556,16 @@ describe("the shipped config boots with every documented override supplied as a 
 		});
 		expect(config.oauth.accessToken.expiresIn).toBe(900);
 		expect(config.oauth.refreshToken.expiresIn).toBe(86400);
-		expect(config.session.maxAge).toBe(3600000);
-		expect(config.session.csrf?.ttlSeconds).toBe(7200);
+		expect(sessionStoreSection(config).maxAge).toBe(3600000);
+		expect(sessionSection(config).csrf?.ttlSeconds).toBe(7200);
 		expect(config.oauth.nonce?.maxLength).toBe(256);
 		expect(config.consentStore?.adapter).toBe("redis");
 		// A Redis store's section, which its module (not loaded here) parses.
 		const sections = config as unknown as Record<string, { keyPrefix?: unknown } | undefined>;
 		expect(sections["redis-consent-store"]?.keyPrefix).toBe("tenant-a:consent:");
-		// The comma-separated lists become lists, trimmed; the numbers, numbers.
-		expect(config.oauth.clientIdMetadataDocuments).toEqual({
+		// The comma-separated lists become lists, trimmed; the numbers, numbers:
+		// the oauth module's schema reads them (the module is not loaded here).
+		expect(oauthSection(config).clientIdMetadataDocuments).toEqual({
 			enabled: true,
 			allowedScopes: ["read", "write"],
 			allowedAudiences: ["https://mcp.example"],
@@ -475,7 +583,7 @@ describe("the shipped config boots with every documented override supplied as a 
 		// boot, by the template, and handed to no module here.
 		expect(readMfaMode(readShippedSwitches(DOCUMENTED_ENV))).toBe("off");
 		expect(config).not.toHaveProperty("mfa");
-		expect(config.endpoints).not.toHaveProperty("mfa");
+		expect(config).not.toHaveProperty("endpoints.mfa");
 		expect(config.mfaFactorStore?.adapter).toBe("redis");
 		expect(config.mfaTransactionStore?.adapter).toBe("redis");
 		expect(sections["redis-mfa-factor-store"]?.keyPrefix).toBe("tenant-a:mfaf:");
@@ -548,9 +656,9 @@ describe("the shipped config boots with every documented override supplied as a 
 		expect(config.oauth.jwt.signingKey?.local?.algorithm).toBe("HS256");
 	});
 
-	it("parses the environment the umbrella E2E boots, with SESSION_SECURE=false as a string", async () => {
+	it("parses the environment the umbrella E2E boots, with SESSION_STORE_SECURE=false as a string", async () => {
 		const config = await bootParsed(UMBRELLA_E2E_ENV);
-		expect(config.session.secure).toBe(false);
+		expect(sessionStoreSection(config).secure).toBe(false);
 		expect(config.oauth.requireEmailVerified).toBe(true);
 		expect(config.oauth.resourceIndicator?.enabled).toBe(true);
 		expect(config.core?.deployment?.mode).toBe("multi");
@@ -587,13 +695,13 @@ describe("the shipped config boots with every documented override supplied as a 
 		];
 
 		for (const [supplied, expected] of cases) {
-			it(`SESSION_SECURE=${JSON.stringify(supplied)} resolves to ${expected}`, async () => {
+			it(`SESSION_STORE_SECURE=${JSON.stringify(supplied)} resolves to ${expected}`, async () => {
 				const config = await bootParsed({
 					...DOCUMENTED_ENV,
-					SESSION_SECURE: supplied,
-					SESSION_SAME_SITE: "lax",
+					SESSION_STORE_SECURE: supplied,
+					SESSION_STORE_SAME_SITE: "lax",
 				});
-				expect(config.session.secure).toBe(expected);
+				expect(sessionStoreSection(config).secure).toBe(expected);
 			});
 
 			it(`OAUTH_JWT_LEGACY_TYP_ACCEPT=${JSON.stringify(supplied)} resolves to ${expected}`, async () => {
@@ -605,30 +713,27 @@ describe("the shipped config boots with every documented override supplied as a 
 			});
 		}
 
-		it("fails boot on a spelling it does not recognise rather than guessing", async () => {
-			await expect(bootParsed({ ...DOCUMENTED_ENV, SESSION_SECURE: "ture" })).rejects.toThrow(
-				/true.*false/s,
-			);
+		it("refuses a spelling it does not recognise rather than guessing", async () => {
+			const config = await bootParsed({ ...DOCUMENTED_ENV, SESSION_STORE_SECURE: "ture" });
+			expect(() => sessionStoreSection(config)).toThrow(/true.*false/s);
 		});
 
-		it("refuses SESSION_SAME_SITE=none unless SESSION_SECURE is on", async () => {
+		it("refuses SESSION_STORE_SAME_SITE=none unless SESSION_STORE_SECURE is on", async () => {
 			// The SameSite=None guard reads the coerced value, so it has to keep firing
 			// for the string form an environment variable actually delivers.
-			await expect(
-				bootParsed({
-					...DOCUMENTED_ENV,
-					SESSION_SAME_SITE: "none",
-					SESSION_SECURE: "false",
-				}),
-			).rejects.toThrow(/SESSION_SECURE=true/);
-			await expect(
-				bootParsed({
-					...DOCUMENTED_ENV,
-					SESSION_SAME_SITE: "none",
-					SESSION_SECURE: "true",
-					SESSION_NAME: "auth.session",
-				}),
-			).resolves.toBeDefined();
+			const insecure = await bootParsed({
+				...DOCUMENTED_ENV,
+				SESSION_STORE_SAME_SITE: "none",
+				SESSION_STORE_SECURE: "false",
+			});
+			expect(() => sessionStoreSection(insecure)).toThrow(/SESSION_STORE_SECURE=true/);
+			const secure = await bootParsed({
+				...DOCUMENTED_ENV,
+				SESSION_STORE_SAME_SITE: "none",
+				SESSION_STORE_SECURE: "true",
+				SESSION_STORE_NAME: "auth.session",
+			});
+			expect(sessionStoreSection(secure).sameSite).toBe("none");
 		});
 	});
 
@@ -730,9 +835,8 @@ describe("the shipped config boots with every documented override supplied as a 
 		it("still refuses an empty SESSION_CSRF_TTL_SECONDS", async () => {
 			// Pinned alongside the boolean cases because it is the same trap
 			// read from the other side: for a *number*, empty means fail loudly.
-			await expect(
-				bootParsed({ ...DOCUMENTED_ENV, SESSION_CSRF_TTL_SECONDS: "" }),
-			).rejects.toThrow();
+			const config = await bootParsed({ ...DOCUMENTED_ENV, SESSION_CSRF_TTL_SECONDS: "" });
+			expect(() => sessionSection(config)).toThrow(/ttlSeconds/);
 		});
 	});
 

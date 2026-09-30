@@ -15,6 +15,7 @@
  */
 
 import type { AdapterFactory } from "../adapters/AdapterFactory.mjs";
+import type { MfaEnrollmentWitness } from "../repositories/UserRepository.mjs";
 
 // ---------------------------------------------------------------------------
 // Value types (structurally immutable)
@@ -88,7 +89,34 @@ export interface UserSession {
 	 * second factor.
 	 */
 	readonly authentication: SessionAuthentication | undefined;
+	/**
+	 * What the login's `User` said that a first binding is decided on (the MFA
+	 * ADR's D12, D24), recorded when the session was established. Optional: a
+	 * session without it — written before the key, or by a store that drops
+	 * it — says nothing, and a reader decides what that means. A store
+	 * round-trips it.
+	 */
+	readonly enrollmentFacts?: SessionEnrollmentFacts;
 }
+
+/**
+ * What the login's `User` said that a first binding is decided on (the MFA
+ * ADR's D12, D24), as core's primary builders derive it: never the `User`,
+ * and never its address.
+ */
+export interface SessionEnrollmentFacts {
+	/** The enrollment witness, as `readMfaEnrollmentWitness(user)` reads it. */
+	readonly witness: MfaEnrollmentWitness;
+	/** What `user.email` is: see {@link MailAddressFact}. */
+	readonly mailAddress: MailAddressFact;
+}
+
+/**
+ * What a `User`'s `email` is, as a first binding is decided on it: `none` —
+ * absent, `null` or empty; `address` — one address `normaliseMailAddress`
+ * reads; `unreadable` — anything else, which no proof can be sent to.
+ */
+export type MailAddressFact = "none" | "address" | "unreadable";
 
 /**
  * How a session was established: the primary authentication, which
@@ -139,6 +167,13 @@ export interface CreateUserSessionInput {
 	 * date at or after the epoch: a `RangeError` otherwise, nothing recorded.
 	 */
 	readonly authentication: SessionAuthentication | undefined;
+	/**
+	 * What the login's `User` said for a first binding (see
+	 * {@link UserSession.enrollmentFacts}); absent writes a session that says
+	 * nothing of it. A value `SessionEnrollmentFacts` does not admit is a
+	 * `RangeError`, nothing recorded.
+	 */
+	readonly enrollmentFacts?: SessionEnrollmentFacts;
 }
 
 // ---------------------------------------------------------------------------
@@ -160,8 +195,9 @@ export interface UserSessionStore {
 	/**
 	 * Record a new session. Rejects when `sid` already has one, when
 	 * `expiresAt` is already past, and — with a `RangeError`, recording
-	 * nothing — when `expiresAt` is an Invalid Date, or `authTime` or
-	 * `authentication.mfaAt` is an Invalid Date or before the epoch.
+	 * nothing — when `expiresAt` is an Invalid Date, `authTime` or
+	 * `authentication.mfaAt` is an Invalid Date or before the epoch, or
+	 * `enrollmentFacts` is not what `SessionEnrollmentFacts` admits.
 	 */
 	create(input: CreateUserSessionInput): Promise<void>;
 	get(sid: string): Promise<UserSession | null>;

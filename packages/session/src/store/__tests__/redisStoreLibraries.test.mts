@@ -93,7 +93,7 @@ describe("loadRedisStoreLibraries", () => {
 		])("missing: %s", async (_missing, over, missing) => {
 			const err = (await failure(over)) as Error;
 			expect(err.message.startsWith(`${missing}: run ${INSTALL} (`)).toBe(true);
-			expect(err.message).toContain('session.storage.type is "redis"');
+			expect(err.message).toContain('session-store.storage.type is "redis"');
 			expect(err.message).toContain(
 				"optional peer dependencies of @o3co/auth-provider-session, which does not install them",
 			);

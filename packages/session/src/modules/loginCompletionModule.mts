@@ -29,16 +29,18 @@
  * requirements complete a login.
  */
 
-import { type AppConfig, type CsrfGuard, defineModule } from "@o3co/auth-provider-core";
+import { type CsrfGuard, defineModule } from "@o3co/auth-provider-core";
 
 import { createLoginCompletion } from "../login-completion.mjs";
 
 export const loginCompletionModule = defineModule<
-	"config" | "userSessionStore" | "csrfGuard",
+	"sessionCookiePolicy" | "userSessionStore" | "csrfGuard",
 	"subjectSessionIndex"
 >({
 	name: "login-completion",
-	requires: ["config", "userSessionStore", "csrfGuard"],
+	// `sessionCookiePolicy`: the session's lifetime, which the session store's
+	// module owns.
+	requires: ["sessionCookiePolicy", "userSessionStore", "csrfGuard"],
 	// A composition without subject-level revocation has no index to record
 	// the session in, as for the session routes.
 	optional: ["subjectSessionIndex"],
@@ -47,7 +49,7 @@ export const loginCompletionModule = defineModule<
 			createLoginCompletion({
 				userSessionStore: deps.userSessionStore,
 				...(deps.subjectSessionIndex ? { subjectSessionIndex: deps.subjectSessionIndex } : {}),
-				sessionTtlMs: (deps.config as AppConfig).session.maxAge,
+				sessionTtlMs: deps.sessionCookiePolicy.maxAgeMs,
 				csrf: deps.csrfGuard as CsrfGuard,
 			}),
 	},

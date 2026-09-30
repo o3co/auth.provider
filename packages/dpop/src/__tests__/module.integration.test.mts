@@ -64,11 +64,9 @@ const makeBoot = (dpopEnabled: boolean): BootstrapMap =>
 	({
 		config: {
 			...makeValidCoreConfig(),
-			oauth: {
-				...makeValidCoreConfig().oauth,
-				tokenBinding: {
-					"dispatch-policy": "intent-explicit",
-				},
+			core: {
+				...makeValidCoreConfig().core,
+				tokenBinding: { dispatchPolicy: "intent-explicit" },
 			},
 			dpop: {
 				enabled: dpopEnabled,
@@ -774,10 +772,10 @@ const bootReplica = async (opts: ReplicaBootOptions) => {
 	const bootstrapComponents = {
 		config: {
 			...base,
-			...(opts.mode === undefined ? {} : { core: { deployment: { mode: opts.mode } } }),
-			oauth: {
-				...base.oauth,
-				tokenBinding: { "dispatch-policy": "intent-explicit" },
+			core: {
+				...base.core,
+				...(opts.mode === undefined ? {} : { deployment: { mode: opts.mode } }),
+				tokenBinding: { dispatchPolicy: "intent-explicit" },
 			},
 			dpop: {
 				enabled: opts.enabled ?? true,
