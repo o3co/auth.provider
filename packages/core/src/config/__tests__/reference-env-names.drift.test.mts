@@ -23,6 +23,8 @@
  * template's configuration layers (`templates/standalone/config/*.conf`):
  * each `${?VAR}` (or `${VAR}`) outside a comment is resolved alone, set to a
  * marker, and the paths the marker lands on are the paths the variable sets.
+ * A capture of a renamed variable (`renamed-variables.<NAME>`) sets no
+ * setting and is not held to the rule.
  *
  * The rule (`namingProblems`): a misnamed variable fails unless it is in
  * `LEGACY`, the names that predated the rule, whatever else a change renames.
@@ -38,6 +40,7 @@ import { fileURLToPath } from "node:url";
 import { parseFile } from "@o3co/ts.hocon";
 import { describe, expect, it } from "vitest";
 import { environmentVariableFor } from "#/config/environment-variable.mjs";
+import { RENAMED_VARIABLES_SECTION } from "#/config/removed-keys.mjs";
 
 const PACKAGES = fileURLToPath(new URL("../../../../", import.meta.url));
 const TEMPLATE_CONFIG = fileURLToPath(
@@ -185,10 +188,17 @@ const FOUND = LAYERS.flatMap(([name, path]) =>
 	})),
 );
 
+/**
+ * Whether `path` is a capture of a renamed variable (`renamed-variables.<NAME>`):
+ * no setting, but what the resolution saw of a declared name, held by the
+ * package's own `packageReferenceProblems`.
+ */
+const isCapture = (path: string): boolean => path.startsWith(`${RENAMED_VARIABLES_SECTION}.`);
+
 /** Each variable at a path it is not the upper-snake-case form of, as `LEGACY` writes it. */
 const MISNAMED: readonly string[] = FOUND.flatMap(({ package: name, variable, paths }) =>
 	paths
-		.filter((path) => upperSnake(path) !== variable)
+		.filter((path) => !isCapture(path) && upperSnake(path) !== variable)
 		.map((path) => `${name}: ${variable} at ${path}`),
 );
 

@@ -92,9 +92,6 @@ await (async (): Promise<void> => {
 			pathResolver: import.meta.resolve,
 			logger,
 		},
-		// The environment the layers were resolved with, which boot holds
-		// renamed variables against.
-		environment: own.env,
 	});
 	const config = handle.components.config;
 	if (config === undefined) throw new Error("createApp booted without the parsed configuration");

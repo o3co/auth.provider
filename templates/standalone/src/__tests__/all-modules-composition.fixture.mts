@@ -677,7 +677,6 @@ export async function compose(options: ComposeOptions = {}): Promise<Composition
 			pathResolver: (s) => s,
 			logger,
 		},
-		environment: own.env,
 		overrideComponents: {
 			...(await federationOverrides(config, fakes)),
 			...options.extraOverrides?.(config),

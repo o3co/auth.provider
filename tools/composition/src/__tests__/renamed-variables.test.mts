@@ -16,11 +16,12 @@
 
 /**
  * A variable renamed with a move, through the template's own reading: its
- * layers read once under one environment (`readOwnLayers`), resolved over
- * every loaded module's `reference.conf`, and that same environment handed to
- * `createApp`. A fixture module moved two keys out of `legacy`, outside its
- * own section, and renamed their variables (`section.renamedVariables`); its
- * `reference.conf` binds only the new names, at the new paths. For each
+ * layers read once under one environment (`readOwnLayers`) and resolved over
+ * every loaded module's `reference.conf`, which captures what that
+ * resolution saw of each renamed name. A fixture module moved two keys out of
+ * `legacy`, outside its own section, and renamed their variables
+ * (`section.renamedVariables`); its `reference.conf` binds only the new
+ * names, at the new paths, and captures the old and new ones. For each
  * rename: the old name alone refuses boot, naming the new path and the new
  * variable; old and new at different values refuse; at the same value, the
  * composition boots and reads it; the new name alone boots as usual.
@@ -49,6 +50,16 @@ const REFERENCE: URL = (() => {
   retries = 3
   retries = \${?FIXTURE_RENAMING_RETRIES}
   label = \${?FIXTURE_RENAMING_LABEL}
+}
+renamed-variables {
+  LEGACY_RETRIES = null
+  LEGACY_RETRIES = \${?LEGACY_RETRIES}
+  FIXTURE_RENAMING_RETRIES = null
+  FIXTURE_RENAMING_RETRIES = \${?FIXTURE_RENAMING_RETRIES}
+  LEGACY_LABEL = null
+  LEGACY_LABEL = \${?LEGACY_LABEL}
+  FIXTURE_RENAMING_LABEL = null
+  FIXTURE_RENAMING_LABEL = \${?FIXTURE_RENAMING_LABEL}
 }
 `,
 	);
@@ -109,7 +120,6 @@ const RENAMES = [
 		key: "retries",
 		value: "5",
 		read: 5,
-		other: "7",
 	},
 	{
 		old: "LEGACY_LABEL",
@@ -118,40 +128,35 @@ const RENAMES = [
 		key: "label",
 		value: "blue",
 		read: "blue",
-		other: "green",
 	},
 ] as const;
 
 describe.each(RENAMES)(
 	"$old, renamed $renamed with a key moved in from outside its module's section",
-	({ old, renamed, path, key, value, read, other }) => {
+	({ old, renamed, path, key, value, read }) => {
 		it("set alone: refused, naming the new path and the new variable", async () => {
 			const err = await refused({ [old]: value });
 
 			expect(err.reason).toBe("environment-variable-renamed");
 			expect(err.details).toEqual({
 				reason: "environment-variable-renamed",
-				renamed: [
-					{ module: "fixture-renaming", from: old, to: renamed, path, newVariable: "unset" },
-				],
+				renamed: [{ module: "fixture-renaming", from: old, to: renamed, path, state: "unset" }],
 			});
 			for (const named of [old, renamed, path]) expect(err.message).toContain(named);
 		});
 
 		it("set beside the new name at a different value: refused, naming both variables and neither value", async () => {
-			const err = await refused({ [old]: value, [renamed]: other });
+			const err = await refused({ [old]: "old-value-5e2d", [renamed]: "new-value-c81a" });
 
 			expect(err.reason).toBe("environment-variable-renamed");
 			expect(err.details).toEqual({
 				reason: "environment-variable-renamed",
-				renamed: [
-					{ module: "fixture-renaming", from: old, to: renamed, path, newVariable: "different" },
-				],
+				renamed: [{ module: "fixture-renaming", from: old, to: renamed, path, state: "different" }],
 			});
 			expect(err.message).toContain(old);
 			expect(err.message).toContain(renamed);
-			expect(err.message).not.toContain(`${value}`);
-			expect(err.message).not.toContain(other);
+			expect(err.message).not.toContain("old-value-5e2d");
+			expect(err.message).not.toContain("new-value-c81a");
 		});
 
 		it("set beside the new name at the same value: boots, and the module reads it at the new path", async () => {
@@ -174,7 +179,7 @@ describe("a renamed variable, through the template's reading — more", () => {
 
 		expect(err.reason).toBe("environment-variable-renamed");
 		expect(err.details).toMatchObject({
-			renamed: [{ from: "LEGACY_RETRIES", newVariable: "unset" }],
+			renamed: [{ from: "LEGACY_RETRIES", state: "unset" }],
 		});
 	});
 
@@ -182,7 +187,7 @@ describe("a renamed variable, through the template's reading — more", () => {
 		const err = await refused({ LEGACY_LABEL: "" });
 
 		expect(err.details).toMatchObject({
-			renamed: [{ from: "LEGACY_LABEL", newVariable: "unset" }],
+			renamed: [{ from: "LEGACY_LABEL", state: "unset" }],
 		});
 	});
 
@@ -202,8 +207,8 @@ describe("a renamed variable, through the template's reading — more", () => {
 		expect(err.details).toEqual({
 			reason: "environment-variable-renamed",
 			renamed: [
-				expect.objectContaining({ from: "LEGACY_RETRIES", newVariable: "unset" }),
-				expect.objectContaining({ from: "LEGACY_LABEL", newVariable: "different" }),
+				expect.objectContaining({ from: "LEGACY_RETRIES", state: "unset" }),
+				expect.objectContaining({ from: "LEGACY_LABEL", state: "different" }),
 			],
 		});
 	});

@@ -340,11 +340,16 @@ describe("the configuration createApp is handed reaches every loaded module whol
 		}
 	});
 
-	it("strips no path of what createApp was handed", async () => {
+	it("strips no path of what createApp was handed but the captures of renamed variables, which boot judges and removes", async () => {
 		const { resolved, config } = await boot();
 		const paths = leafPaths(resolved);
 		expect(paths.length).toBeGreaterThan(150);
-		expect(paths.filter((path) => valueAt(config, path) === undefined)).toEqual([]);
+		const captures = (path: string) => path.startsWith("renamed-variables.");
+		expect(paths.filter(captures).length).toBeGreaterThan(0);
+		expect(valueAt(config, "renamed-variables")).toBeUndefined();
+		expect(paths.filter((path) => !captures(path) && valueAt(config, path) === undefined)).toEqual(
+			[],
+		);
 	});
 
 	it("keeps each added package's switch as the deployment wrote it", async () => {
@@ -437,7 +442,7 @@ describe("a setting still written where its section moved from, read as the temp
 					from: "MFA_TOTP_ISSUER",
 					to: "MFA_TOTP_FACTOR_ISSUER",
 					path: "mfa-totp-factor.issuer",
-					newVariable: "unset",
+					state: "unset",
 				},
 			],
 		});
@@ -449,9 +454,7 @@ describe("a setting still written where its section moved from, read as the temp
 		});
 		expect(err.reason).toBe("environment-variable-renamed");
 		expect(err.details).toMatchObject({
-			renamed: [
-				{ from: "MFA_TOTP_ENABLED", to: "MFA_TOTP_FACTOR_ENABLED", newVariable: "different" },
-			],
+			renamed: [{ from: "MFA_TOTP_ENABLED", to: "MFA_TOTP_FACTOR_ENABLED", state: "different" }],
 		});
 	});
 

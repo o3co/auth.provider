@@ -70,6 +70,7 @@ export {
 	type ReferenceConfCheck,
 	referenceConfProblems,
 } from "./referenceConf.mjs";
+export { CORE_RELOCATIONS, type CoreRelocations } from "../config/core-relocations.mjs";
 export { type RenamedVariableCheck, renamedVariableProblems } from "./renamedVariables.mjs";
 export {
 	type CsrfGuardContractInput,

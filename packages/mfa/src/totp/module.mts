@@ -42,8 +42,9 @@ const configuredIssuer = (config: unknown): unknown =>
 /** The TOTP factor, contributed as `mfaFactors.totp`; `null` when switched off by its configuration. */
 export const mfaTotpFactorModule = defineModule({
 	name: "mfa-totp-factor",
-	// The package's `config/reference.conf` holds this section's defaults and
-	// binds each key's variable at its new path, and nothing at the old one.
+	// The package's `config/reference.conf` holds this section's defaults,
+	// binds each key's variable at its new path and nothing at the old one,
+	// and captures the renamed variables' old and new names.
 	section: {
 		schema: mfaTotpConfigSchema,
 		reference: new URL("../../config/reference.conf", import.meta.url),
