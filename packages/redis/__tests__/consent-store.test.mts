@@ -17,7 +17,7 @@
 
 import type { PendingConsentRecord } from "@o3co/auth-provider-core";
 import { PENDING_CONSENT_PER_SESSION_LIMIT } from "@o3co/auth-provider-core";
-import Redis from "ioredis";
+import { Redis } from "ioredis";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
 	CONSENT_EXPIRY_SLACK_MS,
