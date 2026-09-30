@@ -796,7 +796,10 @@ wires it.
   not round-trip them, is sent to log in again for any first binding.
   A subject holds at most `mfa.maxFactorsPerSubject` records (10; its
   recovery codes are one): an enrollment from its session past that is
-  `409 mfa_factor_limit`.
+  `409 mfa_factor_limit`, enrollments made at once included. After
+  switching `mfa.mode` from `optional` to `required`, a live password
+  session of a user not yet enrolled is asked to log in again at its next
+  action, and binds its first factor at that login.
 - **Notices to the account holder: required, and yours.** The provider sends
   none. It records audit events (`auditSink`), and the deployment reads them
   and tells the account holder — by mail, a chat message, anything — of every
