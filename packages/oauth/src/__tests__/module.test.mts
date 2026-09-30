@@ -118,7 +118,15 @@ const keyStoreModule = defineModule({
  */
 const authorizationCodeGrantModule = defineModule({
 	name: "test:authorization-code-grant",
-	contributes: { grants: { authorization_code: () => ({}) as GrantHandler } },
+	contributes: {
+		grants: {
+			authorization_code: (): GrantHandler => ({
+				handle: async () => {
+					throw new Error("the stand-in grant is never dispatched to");
+				},
+			}),
+		},
+	},
 });
 
 // The JWKS route refuses to publish an empty key set, so the

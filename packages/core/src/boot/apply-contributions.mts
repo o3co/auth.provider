@@ -400,8 +400,9 @@ const issuerOf = (components: Readonly<Record<string, unknown>>): string | undef
  * as a failed contribution factory) for one its kind's projection could not
  * answer for:
  *
- * - a `grants` value that is not an object: the grant resolver would list the
- *   name as registered while `get` answered no handler for it;
+ * - a `grants` value that is not an object with a callable `handle`: the
+ *   grant resolver would list the name as registered while `/oauth/token`
+ *   could not call it;
  * - an `mfaFactors` factor whose `kind` is not its key: the resolver answers
  *   by key and a record's kind is read back through it, so a misfiled factor
  *   would verify another kind's records;
@@ -424,11 +425,16 @@ function checkNameKeyedValue(
 	issuer: string | undefined,
 ): unknown {
 	if (kind === "grants") {
-		// What `/oauth/token` dispatches to, and what the resolver lists as
-		// registered: one answer to both only when the value is a handler.
-		if (typeof value !== "object" || value === null) {
+		// What `/oauth/token` dispatches to, calling `handle`, and what the
+		// resolver lists as registered: one answer to both only when the value
+		// is a handler.
+		const handle =
+			typeof value === "object" && value !== null && !Array.isArray(value)
+				? (value as { handle?: unknown }).handle
+				: undefined;
+		if (typeof handle !== "function") {
 			throw new RangeError(
-				`grants "${name}": the factory must answer a grant handler, not ${value === null ? "null" : typeof value}`,
+				`grants "${name}": the factory must answer a grant handler, an object whose handle is a function`,
 			);
 		}
 		return value;
