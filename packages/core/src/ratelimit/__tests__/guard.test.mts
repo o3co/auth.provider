@@ -33,6 +33,7 @@ import type { Logger } from "#/logging/Logger.mjs";
 import {
 	checkWithFailMode,
 	createRateLimitGuard,
+	createRateLimitPolicy,
 	type RateLimitFailMode,
 	type RateLimitGuardOptions,
 	type RateLimitPolicyOptions,
@@ -376,10 +377,42 @@ describe("createRateLimitGuard — limiter outage (the limiter's failMode)", () 
 		);
 	});
 
-	it("fails closed for a limiter whose outage policy is neither open nor closed", async () => {
+	it("refuses to be built over a limiter whose failMode is neither open nor closed", () => {
 		const limiter = scriptedLimiter(() => new Error("redis down"), "maybe" as RateLimitFailMode);
-		const res = await hit(makeApp(createRateLimitGuard({ limiter, tag: "token" })));
-		expect(res.status).toBe(503);
+		expect(() => createRateLimitGuard({ limiter, tag: "token" })).toThrow(
+			/^createRateLimitGuard: a rate limiter's failMode must be "open" or "closed"/,
+		);
+	});
+
+	it("reads the limiter's failMode once, when it is built", async () => {
+		let reads = 0;
+		const limiter: RateLimiter = {
+			kind: "counted",
+			get failMode() {
+				reads += 1;
+				return "open" as const;
+			},
+			async check() {
+				throw new Error("redis down");
+			},
+		};
+		const app = makeApp(createRateLimitGuard({ limiter, tag: "token" }));
+		await hit(app);
+		await hit(app);
+		expect(reads).toBe(1);
+	});
+
+	it("refuses to be built over a limiter whose failMode cannot be read", () => {
+		const limiter: RateLimiter = {
+			kind: "broken",
+			get failMode(): RateLimitFailMode {
+				throw new Error("getter down");
+			},
+			async check() {
+				return { allowed: true };
+			},
+		};
+		expect(() => createRateLimitGuard({ limiter, tag: "token" })).toThrow("getter down");
 	});
 
 	it("takes the outage policy from the limiter alone: its options carry none", () => {
@@ -397,7 +430,7 @@ describe("checkWithFailMode — the guard's check + outage policy, for a route t
 	it("hands back the limiter's decision when the backend answers", async () => {
 		const limiter = scriptedLimiter(() => ({ allowed: false, remaining: 0, reason: "spent" }));
 		const outcome = await checkWithFailMode(
-			{ limiter, tag: "device_verification" },
+			createRateLimitPolicy({ limiter, tag: "device_verification" }),
 			"device_verification:user:user-1",
 			{ userId: "user-1", ip: "203.0.113.9" },
 		);
@@ -417,7 +450,7 @@ describe("checkWithFailMode — the guard's check + outage policy, for a route t
 			const limiter = scriptedLimiter(() => new Error("redis down"), failMode);
 
 			const outcome = await checkWithFailMode(
-				{ limiter, tag: "device_verification", logger, auditSink: sink },
+				createRateLimitPolicy({ limiter, tag: "device_verification", logger, auditSink: sink }),
 				"device_verification:user:user-1",
 				{ userId: "user-1", ip: "203.0.113.9", userAgent: "guard-test/1.0" },
 			);
@@ -438,12 +471,38 @@ describe("checkWithFailMode — the guard's check + outage policy, for a route t
 		},
 	);
 
+	it("reads the limiter's failMode once, when the policy is built", async () => {
+		let reads = 0;
+		const limiter: RateLimiter = {
+			kind: "counted",
+			get failMode() {
+				reads += 1;
+				return "closed" as const;
+			},
+			async check() {
+				throw new Error("redis down");
+			},
+		};
+		const policy = createRateLimitPolicy({ limiter, tag: "device_verification" });
+		await checkWithFailMode(policy, "device_verification:user:a", {});
+		await checkWithFailMode(policy, "device_verification:user:b", {});
+		expect(reads).toBe(1);
+	});
+
+	it("refuses a policy it did not build: the outage policy is the limiter's alone", async () => {
+		const limiter = scriptedLimiter(() => new Error("redis down"), "closed");
+		const handBuilt = { limiter, tag: "device_verification", failMode: "open" } as never;
+		await expect(checkWithFailMode(handBuilt, "device_verification:user:a", {})).rejects.toThrow(
+			/createRateLimitPolicy/,
+		);
+	});
+
 	it("normalises a missing ip to 'unknown' on the outage line, and audits no ip", async () => {
 		const logger = makeLogger();
 		const { sink, events } = spyAuditSink();
 		const limiter = scriptedLimiter(() => new Error("redis down"), "open");
 		await checkWithFailMode(
-			{ limiter, tag: "device_verification", logger, auditSink: sink },
+			createRateLimitPolicy({ limiter, tag: "device_verification", logger, auditSink: sink }),
 			"device_verification:user:user-1",
 			{ userId: "user-1" },
 		);
