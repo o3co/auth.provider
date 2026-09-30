@@ -674,8 +674,8 @@ const PLANNER_OWNED_KINDS = ["rateLimitBudgets", "federationTypes"] as const;
  * A requirement is switched off by not installing it, never removed from
  * behind its consumers: a module's `overrides.sessionRequirements` is refused
  * here (`session-requirement-kind-guarded`). A host collector for
- * `sessionRequirements`, or for `mfaFactors` (the MFA requirement's reach is
- * recomputed from its projection), is refused for the same reason by
+ * `sessionRequirements`, or for `mfaFactors` (the second-factor authority's
+ * reach is recomputed from its projection), is refused for the same reason by
  * `refuseGuardedHostKinds`, in `createApp` before the kinds are merged.
  * @internal
  */

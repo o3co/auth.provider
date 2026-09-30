@@ -372,7 +372,7 @@ describe("acr_values_supported", () => {
 
 	it("advertises an entry a registered requirement's reach can meet", async () => {
 		// The union of every requirement's reach is what a step-up can add;
-		// `otp` and `mfa` through the requirement named mfa, so its entry is
+		// `otp` and `mfa` through the second-factor authority, so its entry is
 		// advertised, while `phr` still needs a key nothing reaches.
 		const meta = await discoveryContribution(
 			{
@@ -380,6 +380,7 @@ describe("acr_values_supported", () => {
 					[
 						{
 							name: "mfa",
+							secondFactorAuthority: true,
 							reach: new Set(["otp", "mfa"]),
 							stepUpPage: { url: "/mfa", params: {} },
 							remediations: ["mfa.step_up"],

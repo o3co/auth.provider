@@ -601,12 +601,12 @@ export type BootStage =
 	| "assembleApp";
 
 // ---------------------------------------------------------------------------
-// BootErrorReason — 37 literals
+// BootErrorReason — 38 literals
 // ---------------------------------------------------------------------------
 
 /**
  * Every reason a BootError can carry: one literal per validation or runtime
- * failure the boot planner detects, 37 in all.
+ * failure the boot planner detects, 38 in all.
  */
 export type BootErrorReason =
 	| "module-factory-not-called"
@@ -638,6 +638,7 @@ export type BootErrorReason =
 	| "session-requirement-kind-guarded"
 	| "session-requirements-undeclared"
 	| "session-requirement-missing"
+	| "duplicate-second-factor-authority"
 	| "reserved-component-key"
 	| "module-section-path-invalid"
 	| "contribution-kind-guarded"
@@ -648,7 +649,7 @@ export type BootErrorReason =
 	| "token-settings-lifetime-exceeds-configuration";
 
 // ---------------------------------------------------------------------------
-// Per-reason *Details interfaces — one per BootErrorReason, 37 in all
+// Per-reason *Details interfaces — one per BootErrorReason, 38 in all
 // ---------------------------------------------------------------------------
 
 /**
@@ -1211,8 +1212,23 @@ export interface SessionRequirementMissingDetails {
 }
 
 /**
+ * More than one registered session requirement declares the second-factor
+ * authority (`SessionRequirement.secondFactorAuthority`); at most one may.
+ * `requirements` names each, with its module, in registration order.
+ */
+export interface DuplicateSecondFactorAuthorityDetails {
+	readonly reason: "duplicate-second-factor-authority";
+	readonly requirements: readonly { readonly name: string; readonly module: string }[];
+	readonly cleanupErrors?: readonly {
+		readonly module: string;
+		readonly componentKey: ComponentKey;
+		readonly error: unknown;
+	}[];
+}
+
+/**
  * Discriminated union (on `reason`) of the per-reason details: one member
- * per `BootErrorReason`, 37 in all.
+ * per `BootErrorReason`, 38 in all.
  */
 export type BootErrorDetails =
 	| ModuleFactoryNotCalledDetails
@@ -1244,6 +1260,7 @@ export type BootErrorDetails =
 	| SessionRequirementKindGuardedDetails
 	| SessionRequirementsUndeclaredDetails
 	| SessionRequirementMissingDetails
+	| DuplicateSecondFactorAuthorityDetails
 	| ReservedComponentKeyDetails
 	| ModuleSectionPathInvalidDetails
 	| ContributionKindGuardedDetails

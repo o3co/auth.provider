@@ -2020,6 +2020,7 @@ describe("/authorize — the acr table at boot", () => {
 				[
 					{
 						name: "mfa",
+						secondFactorAuthority: true,
 						reach: new Set(["otp", "mfa"]),
 						stepUpPage: { url: "/mfa", params: {} },
 						remediations: ["mfa.step_up"],

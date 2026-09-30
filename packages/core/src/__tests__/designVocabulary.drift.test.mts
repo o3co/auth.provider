@@ -682,8 +682,8 @@ const SESSION_RECORD_READS_ALLOWED: ReadonlyArray<AllowedSessionRecordRead> = [
 	{
 		file: "packages/core/src/session-admission/primary.mts",
 		read: "entry.adds.amr",
-		count: 1,
-		why: "continuationOf copies what a completed requirement added into the DTO — never a session record",
+		count: 2,
+		why: "continuationOf copies what a completed requirement added into the DTO, and checkPrimaryContinuation counts the completions that add a second factor — a continuation, never a session record",
 	},
 	{
 		file: "packages/core/src/session-admission/primary.mts",

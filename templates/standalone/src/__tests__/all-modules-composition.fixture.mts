@@ -70,12 +70,14 @@ import { buildModules } from "#/buildModules.mjs";
 import {
 	expectedSessionRequirements,
 	type OwnLayers,
+	readMfaMode,
 	readOwnLayers,
 	readSwitches,
 	resolveConfigPaths,
 	resolveForBoot,
 } from "#/configPath.mjs";
 import { googleFederationConfigModule, oidcFederationConfigModule } from "#/modules.mjs";
+import { requireMfaSecondFactorAuthority } from "#/secondFactorAuthority.mjs";
 
 export const ISSUER = "https://auth.test";
 const OIDC_ISSUER = "https://idp.test";
@@ -664,6 +666,8 @@ export async function compose(options: ComposeOptions = {}): Promise<Composition
 	);
 	const switches = resolveConfig(env, options.reads, own);
 	const config = adjust(switches);
+	// `mfa.mode`, read once, as `app.mts` reads it.
+	const mfaMode = readMfaMode(config);
 	const fakes = await sharedUpstreams();
 	const modules = composedModules(config, options);
 	const logger = createRecordingLogger();
@@ -682,6 +686,8 @@ export async function compose(options: ComposeOptions = {}): Promise<Composition
 			...options.extraOverrides?.(config),
 		} as never,
 	});
+	// As app.mts does, before anything listens.
+	await requireMfaSecondFactorAuthority(mfaMode, handle);
 	const parsed = handle.components.config;
 	if (parsed === undefined) throw new Error("createApp booted without the parsed configuration");
 	const httpSettings = handle.components.httpSettings;

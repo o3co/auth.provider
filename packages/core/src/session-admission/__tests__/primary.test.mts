@@ -116,11 +116,13 @@ const asking = (
 ): SessionRequirement & { readonly asked: PrimaryAuthentication[] } => {
 	const asked: PrimaryAuthentication[] = [];
 	// What a fixture may add at completion is within its reach (the
-	// session-admission ADR's D5): the MFA one reaches the second-factor
+	// session-admission ADR's D5): the one that declares the second-factor
+	// authority — under a name that is not `mfa` — reaches the second-factor
 	// values, the risk one its own.
-	const reach = { mfa: ["otp", "hwk", "mfa"], risk: ["risk-ok"] }[name] ?? [];
+	const reach = { verifier: ["otp", "hwk", "mfa"], risk: ["risk-ok"] }[name] ?? [];
 	return {
 		name,
+		secondFactorAuthority: name === "verifier",
 		reach: new Set(reach),
 		stepUpPage: reach.length === 0 ? undefined : { url: `/${name}`, params: {} },
 		remediations: [],
@@ -295,7 +297,7 @@ describe("the interruption's answer — validated before the route sees it", () 
 		open: RequirementInterruption["open"],
 		hintKeys: readonly string[] = ["enrollable", "email_proof"],
 	): Promise<Extract<PrimaryAdmission, { outcome: "interrupt" }>> => {
-		const requirement = asking("mfa", () => interrupting(open), { hintKeys });
+		const requirement = asking("verifier", () => interrupting(open), { hintKeys });
 		const admission = await admitPrimary(deps([requirement]), passwordPrimary(facts()));
 		if (admission.outcome !== "interrupt") throw new Error("expected an interruption");
 		return admission;
@@ -312,7 +314,7 @@ describe("the interruption's answer — validated before the route sees it", () 
 		const result = await admission.open("express-1");
 		expect(opened).toEqual(["express-1"]);
 		expect(received).toBe(admission.continuation);
-		expect(received).toEqual(continuationOf(primary(), [], "mfa"));
+		expect(received).toEqual(continuationOf(primary(), [], "verifier"));
 		expect(result).toEqual({
 			status: 403,
 			body: {
@@ -377,7 +379,7 @@ describe("the interruption's answer — validated before the route sees it", () 
 		for (const value of ["403", null, 7]) {
 			const admission = await interrupt(async () => value as never);
 			await expect(admission.open("s"), String(value)).rejects.toThrow(
-				/requirement "mfa" answered an interruption that is not an object/,
+				/requirement "verifier" answered an interruption that is not an object/,
 			);
 		}
 	});
@@ -455,26 +457,26 @@ describe("the interruption's answer — validated before the route sees it", () 
 
 describe("resumePrimary — after a ceremony completes", () => {
 	const continuation = (over: Partial<PrimaryContinuation> = {}): PrimaryContinuation => ({
-		...continuationOf(primary(), [], "mfa"),
+		...continuationOf(primary(), [], "verifier"),
 		...over,
 	});
 
 	it("records who interrupted in the continuation, and resumes only by that requirement's completion", async () => {
-		const mfa = asking("mfa", () => interrupting());
+		const verifier = asking("verifier", () => interrupting());
 		const risk = asking("risk", () => "establish");
-		const first = await admitPrimary(deps([mfa, risk]), passwordPrimary(facts()));
+		const first = await admitPrimary(deps([verifier, risk]), passwordPrimary(facts()));
 		if (first.outcome !== "interrupt") throw new Error("expected an interruption");
-		expect(first.continuation.interruptedBy).toBe("mfa");
+		expect(first.continuation.interruptedBy).toBe("verifier");
 		await expect(
-			resumePrimary(deps([mfa, risk]), first.continuation, {
+			resumePrimary(deps([verifier, risk]), first.continuation, {
 				requirement: "risk",
 				adds: { amr: ["risk-ok"] },
 			}),
 		).rejects.toThrow(RangeError);
 		for (const interruptedBy of [undefined, "", 7, "other"]) {
 			await expect(
-				resumePrimary(deps([mfa, risk]), { ...first.continuation, interruptedBy } as never, {
-					requirement: "mfa",
+				resumePrimary(deps([verifier, risk]), { ...first.continuation, interruptedBy } as never, {
+					requirement: "verifier",
 					adds: { amr: ["otp", "mfa"], mfaAt: NOW },
 				}),
 				JSON.stringify(interruptedBy),
@@ -483,7 +485,7 @@ describe("resumePrimary — after a ceremony completes", () => {
 	});
 
 	it("recomposes recorded from the primary's kind — a password login, the only one interrupted in this release — never from the persisted DTO, and refuses any other kind", async () => {
-		const mfa = asking("mfa", () => "establish");
+		const verifier = asking("verifier", () => "establish");
 		const tampered = {
 			...continuation(),
 			primary: {
@@ -499,8 +501,8 @@ describe("resumePrimary — after a ceremony completes", () => {
 				},
 			},
 		};
-		const admission = await resumePrimary(deps([mfa]), tampered, {
-			requirement: "mfa",
+		const admission = await resumePrimary(deps([verifier]), tampered, {
+			requirement: "verifier",
 			adds: { amr: ["otp", "mfa"], mfaAt: NOW },
 		});
 		expect(admission.outcome).toBe("establish");
@@ -522,20 +524,20 @@ describe("resumePrimary — after a ceremony completes", () => {
 			},
 		};
 		await expect(
-			resumePrimary(deps([mfa]), federated, {
-				requirement: "mfa",
+			resumePrimary(deps([verifier]), federated, {
+				requirement: "verifier",
 				adds: { amr: ["otp", "mfa"], mfaAt: NOW },
 			}),
 		).rejects.toThrow(RangeError);
 	});
 
 	it("composes the session's recorded from the primary and every completed requirement's additions, and asks every requirement not yet done over it", async () => {
-		const mfa = asking("mfa", (p) =>
+		const verifier = asking("verifier", (p) =>
 			p.recorded.authentication.mfaAt === undefined ? interrupting() : "establish",
 		);
 		const risk = asking("risk", () => "establish");
-		const admission = await resumePrimary(deps([mfa, risk]), continuation(), {
-			requirement: "mfa",
+		const admission = await resumePrimary(deps([verifier, risk]), continuation(), {
+			requirement: "verifier",
 			adds: { amr: ["otp", "mfa"], mfaAt: NOW },
 		});
 		expect(admission.outcome).toBe("establish");
@@ -547,7 +549,7 @@ describe("resumePrimary — after a ceremony completes", () => {
 		expect(isEstablishment(admission.establishment)).toBe(true);
 		// The completed one is done for this login and is not asked again; the
 		// other is asked over the composed result.
-		expect(mfa.asked).toEqual([]);
+		expect(verifier.asked).toEqual([]);
 		expect(risk.asked.map((p) => p.recorded.authentication.mfaAt)).toEqual([NOW]);
 	});
 
@@ -590,14 +592,14 @@ describe("resumePrimary — after a ceremony completes", () => {
 	});
 
 	it("interrupts again with the updated continuation, the first completion's additions still in it", async () => {
-		const mfa = asking("mfa", (p) =>
+		const verifier = asking("verifier", (p) =>
 			p.recorded.authentication.mfaAt === undefined ? interrupting() : "establish",
 		);
 		const risk = asking("risk", (p) =>
 			p.recorded.amr.includes("risk-ok") ? "establish" : interrupting(),
 		);
-		const first = await resumePrimary(deps([mfa, risk]), continuation(), {
-			requirement: "mfa",
+		const first = await resumePrimary(deps([verifier, risk]), continuation(), {
+			requirement: "verifier",
 			adds: { amr: ["otp", "mfa"], mfaAt: NOW },
 		});
 		expect(first).toMatchObject({
@@ -605,7 +607,7 @@ describe("resumePrimary — after a ceremony completes", () => {
 			requirement: "risk",
 			continuation: continuationOf(
 				primary(),
-				[{ requirement: "mfa", adds: { amr: ["otp", "mfa"], mfaAt: NOW } }],
+				[{ requirement: "verifier", adds: { amr: ["otp", "mfa"], mfaAt: NOW } }],
 				"risk",
 			),
 		});
@@ -614,7 +616,7 @@ describe("resumePrimary — after a ceremony completes", () => {
 		// the claims with it.
 		const persisted = JSON.parse(JSON.stringify(first.continuation)) as PrimaryContinuation;
 		expect(persisted.primary.claims).toEqual(facts().claims);
-		const second = await resumePrimary(deps([mfa, risk]), persisted, {
+		const second = await resumePrimary(deps([verifier, risk]), persisted, {
 			requirement: "risk",
 			adds: { amr: ["risk-ok"] },
 		});
@@ -628,7 +630,7 @@ describe("resumePrimary — after a ceremony completes", () => {
 	});
 
 	it("refuses, before asking anything, a completion by a requirement that is not registered with admitPrimary, a continuation it cannot read, and what the name may not add", async () => {
-		const mfa = asking("mfa", () => "establish");
+		const verifier = asking("verifier", () => "establish");
 		const plain: SessionRequirement = {
 			name: "plain",
 			reach: new Set(),
@@ -638,7 +640,7 @@ describe("resumePrimary — after a ceremony completes", () => {
 			admit: async () => ({ outcome: "met" }),
 		};
 		const risk = asking("risk", () => "establish");
-		const all = deps([mfa, plain, risk]);
+		const all = deps([verifier, plain, risk]);
 		const cases: [
 			string,
 			PrimaryContinuation,
@@ -660,41 +662,45 @@ describe("resumePrimary — after a ceremony completes", () => {
 				continuation(),
 				{ requirement: "risk", adds: { amr: ["risk-ok"], mfaAt: NOW } },
 			],
-			["a primary's marker", continuation(), { requirement: "mfa", adds: { amr: ["pwd"] } }],
-			["mfa alone", continuation(), { requirement: "mfa", adds: { amr: ["mfa"] } }],
+			["a primary's marker", continuation(), { requirement: "verifier", adds: { amr: ["pwd"] } }],
+			["mfa alone", continuation(), { requirement: "verifier", adds: { amr: ["mfa"] } }],
 			[
 				"a value outside the completing requirement's reach",
 				continuation(),
 				{ requirement: "risk", adds: { amr: ["risk-other"] } },
 			],
 			[
-				"a second-factor value the mfa requirement's reach does not name",
+				"a second-factor value the authority's reach does not name",
 				continuation(),
-				{ requirement: "mfa", adds: { amr: ["swk", "mfa"], mfaAt: NOW } },
+				{ requirement: "verifier", adds: { amr: ["swk", "mfa"], mfaAt: NOW } },
 			],
 			[
 				"an earlier completion, read back, outside its requirement's reach",
-				continuationOf(primary(), [{ requirement: "risk", adds: { amr: ["risk-other"] } }], "mfa"),
-				{ requirement: "mfa", adds: { amr: ["otp", "mfa"], mfaAt: NOW } },
+				continuationOf(
+					primary(),
+					[{ requirement: "risk", adds: { amr: ["risk-other"] } }],
+					"verifier",
+				),
+				{ requirement: "verifier", adds: { amr: ["otp", "mfa"], mfaAt: NOW } },
 			],
 			[
 				"a name completing twice",
 				continuationOf(
 					primary(),
-					[{ requirement: "mfa", adds: { amr: ["otp", "mfa"], mfaAt: NOW } }],
-					"mfa",
+					[{ requirement: "verifier", adds: { amr: ["otp", "mfa"], mfaAt: NOW } }],
+					"verifier",
 				),
-				{ requirement: "mfa", adds: { amr: ["hwk", "mfa"], mfaAt: NOW } },
+				{ requirement: "verifier", adds: { amr: ["hwk", "mfa"], mfaAt: NOW } },
 			],
 			[
 				"a continuation carrying a date where milliseconds belong",
 				{ primary: primary(), done: [] } as never,
-				{ requirement: "mfa", adds: { amr: ["otp", "mfa"] } },
+				{ requirement: "verifier", adds: { amr: ["otp", "mfa"] } },
 			],
 			[
 				"a continuation without a primary",
 				{ done: [] } as never,
-				{ requirement: "mfa", adds: { amr: ["otp", "mfa"] } },
+				{ requirement: "verifier", adds: { amr: ["otp", "mfa"] } },
 			],
 		];
 		for (const [label, cont, completed] of cases) {
@@ -702,16 +708,16 @@ describe("resumePrimary — after a ceremony completes", () => {
 		}
 		await expect(
 			resumePrimary({ ...all, requirements: {} as never }, continuation(), {
-				requirement: "mfa",
+				requirement: "verifier",
 				adds: { amr: ["otp", "mfa"] },
 			}),
 		).rejects.toThrow(RangeError);
-		expect(mfa.asked).toEqual([]);
+		expect(verifier.asked).toEqual([]);
 		expect(risk.asked).toEqual([]);
 	});
 
 	it("hands the next ceremony the updated continuation, the first completion in it", async () => {
-		const mfa = asking("mfa", () => "establish");
+		const verifier = asking("verifier", () => "establish");
 		let received: unknown;
 		const risk = asking("risk", (p) =>
 			p.recorded.amr.includes("risk-ok")
@@ -721,8 +727,8 @@ describe("resumePrimary — after a ceremony completes", () => {
 						return answer();
 					}),
 		);
-		const second = await resumePrimary(deps([mfa, risk]), continuation(), {
-			requirement: "mfa",
+		const second = await resumePrimary(deps([verifier, risk]), continuation(), {
+			requirement: "verifier",
 			adds: { amr: ["otp", "mfa"], mfaAt: NOW },
 		});
 		if (second.outcome !== "interrupt") throw new Error("expected an interruption");
@@ -731,71 +737,126 @@ describe("resumePrimary — after a ceremony completes", () => {
 		expect(received).toEqual(
 			continuationOf(
 				primary(),
-				[{ requirement: "mfa", adds: { amr: ["otp", "mfa"], mfaAt: NOW } }],
+				[{ requirement: "verifier", adds: { amr: ["otp", "mfa"], mfaAt: NOW } }],
 				"risk",
 			),
 		);
 	});
 
-	it("refuses, before asking anything, an mfa completion that is not a verified second factor — nothing added, no mfaAt, no mfa beside a factor that adds it — presented or read back from done", async () => {
-		const mfa = asking("mfa", () => interrupting());
+	it("refuses, before asking anything, a completion by the second-factor authority that is not a verified second factor — nothing added, no mfaAt, no mfa beside a factor that adds it — presented or read back from done", async () => {
+		const verifier = asking("verifier", () => interrupting());
 		const risk = asking("risk", () => interrupting());
-		const all = deps([mfa, risk]);
+		const all = deps([verifier, risk]);
 		for (const adds of [{ amr: [] }, { amr: ["otp", "mfa"] }, { amr: ["otp"], mfaAt: NOW }]) {
 			await expect(
-				resumePrimary(all, continuation(), { requirement: "mfa", adds }),
+				resumePrimary(all, continuation(), { requirement: "verifier", adds }),
 				JSON.stringify(adds),
 			).rejects.toThrow(RangeError);
 			await expect(
-				resumePrimary(all, continuationOf(primary(), [{ requirement: "mfa", adds }], "risk"), {
+				resumePrimary(all, continuationOf(primary(), [{ requirement: "verifier", adds }], "risk"), {
 					requirement: "risk",
 					adds: { amr: ["risk-ok"] },
 				}),
 				`done: ${JSON.stringify(adds)}`,
 			).rejects.toThrow(RangeError);
 		}
-		expect(mfa.asked).toEqual([]);
+		expect(verifier.asked).toEqual([]);
 		expect(risk.asked).toEqual([]);
 		const verified = await resumePrimary(all, continuation(), {
-			requirement: "mfa",
+			requirement: "verifier",
 			adds: { amr: ["otp", "mfa"], mfaAt: NOW },
 		});
 		expect(verified.outcome).toBe("interrupt");
 		expect(risk.asked).toHaveLength(1);
 	});
 
+	it("holds a requirement named mfa that does not declare the second-factor authority to what any other may add: a verified second factor is refused, presented or read back, even with a reach that names it", async () => {
+		// The reach rules are lifted here, so only the missing declaration sets
+		// it apart from the authority.
+		const named = asking("mfa", () => interrupting(), {
+			reach: new Set(["otp", "mfa"]),
+			stepUpPage: { url: "/mfa", params: {} },
+		});
+		const risk = asking("risk", () => interrupting());
+		const all = deps([named, risk]);
+		const verified = { amr: ["otp", "mfa"], mfaAt: NOW };
+		await expect(
+			resumePrimary(all, continuationOf(primary(), [], "mfa"), {
+				requirement: "mfa",
+				adds: verified,
+			}),
+		).rejects.toThrow(/only the second-factor authority may add/);
+		await expect(
+			resumePrimary(
+				all,
+				continuationOf(primary(), [{ requirement: "mfa", adds: verified }], "risk"),
+				{
+					requirement: "risk",
+					adds: { amr: ["risk-ok"] },
+				},
+			),
+		).rejects.toThrow(/only the second-factor authority may add/);
+		expect(named.asked).toEqual([]);
+		expect(risk.asked).toEqual([]);
+		// What it may add, it completes with.
+		expect(
+			(
+				await resumePrimary(all, continuationOf(primary(), [], "mfa"), {
+					requirement: "mfa",
+					adds: { amr: [] },
+				})
+			).outcome,
+		).toBe("interrupt");
+	});
+
+	it("composes the mfaAt the second-factor authority verified at, under a name that is not mfa", async () => {
+		const verifier = asking("verifier", () => "establish");
+		const admission = await resumePrimary(deps([verifier]), continuation(), {
+			requirement: "verifier",
+			adds: { amr: ["hwk", "mfa"], mfaAt: NOW },
+		});
+		if (admission.outcome !== "establish") throw new Error("expected an establishment");
+		expect(admission.establishment.primary.recorded).toEqual({
+			amr: ["pwd", "hwk", "mfa"],
+			authentication: { primary: "pwd", federation: undefined, upstreamAmr: undefined, mfaAt: NOW },
+		});
+	});
+
 	it("refuses deps that are not an object, a completion without a requirement's name, and a done entry naming a requirement that is not registered", async () => {
-		const mfa = asking("mfa", () => "establish");
+		const verifier = asking("verifier", () => "establish");
 		await expect(admitPrimary("deps" as never, passwordPrimary(facts()))).rejects.toThrow(
 			/admitPrimary: deps must be an object/,
 		);
 		await expect(
-			resumePrimary("deps" as never, continuation(), { requirement: "mfa", adds: { amr: [] } }),
+			resumePrimary("deps" as never, continuation(), {
+				requirement: "verifier",
+				adds: { amr: [] },
+			}),
 		).rejects.toThrow(/resumePrimary: deps must be an object/);
 		for (const completed of [null, "mfa", { requirement: "" }, { adds: { amr: [] } }]) {
 			await expect(
-				resumePrimary(deps([mfa]), continuation(), completed as never),
+				resumePrimary(deps([verifier]), continuation(), completed as never),
 				JSON.stringify(completed),
 			).rejects.toThrow(/the completion must name a requirement/);
 		}
 		await expect(
 			resumePrimary(
-				deps([mfa]),
-				continuationOf(primary(), [{ requirement: "gone", adds: { amr: [] } }], "mfa"),
-				{ requirement: "mfa", adds: { amr: ["otp", "mfa"], mfaAt: NOW } },
+				deps([verifier]),
+				continuationOf(primary(), [{ requirement: "gone", adds: { amr: [] } }], "verifier"),
+				{ requirement: "verifier", adds: { amr: ["otp", "mfa"], mfaAt: NOW } },
 			),
 		).rejects.toThrow(/"gone" is not a registered requirement that interrupts a login/);
-		expect(mfa.asked).toEqual([]);
+		expect(verifier.asked).toEqual([]);
 	});
 
 	it("answers unavailable when a requirement throws on the second ask", async () => {
-		const mfa = asking("mfa", () => "establish");
+		const verifier = asking("verifier", () => "establish");
 		const risk = asking("risk", () => {
 			throw new Error("down");
 		});
 		expect(
-			await resumePrimary(deps([mfa, risk]), continuation(), {
-				requirement: "mfa",
+			await resumePrimary(deps([verifier, risk]), continuation(), {
+				requirement: "verifier",
 				adds: { amr: ["otp", "mfa"], mfaAt: NOW },
 			}),
 		).toEqual({ outcome: "unavailable", store: "risk" });
@@ -881,14 +942,14 @@ describe("isEstablishment — the capability to establish", () => {
 
 describe("isInterruptAdmission — an interruption is core's, as an establishment is", () => {
 	it("knows only the interruptions admitPrimary and resumePrimary answered: a copy, or an object shaped like one, forges nothing", async () => {
-		const mfa = asking("mfa", () => interrupting());
+		const verifier = asking("verifier", () => interrupting());
 		const risk = asking("risk", () => interrupting());
-		const all = deps([mfa, risk]);
+		const all = deps([verifier, risk]);
 		const atLogin = await admitPrimary(all, passwordPrimary(facts()));
 		if (atLogin.outcome !== "interrupt") throw new Error("expected an interruption");
 		expect(isInterruptAdmission(atLogin)).toBe(true);
 		const resumed = await resumePrimary(all, atLogin.continuation, {
-			requirement: "mfa",
+			requirement: "verifier",
 			adds: { amr: ["otp", "mfa"], mfaAt: NOW },
 		});
 		if (resumed.outcome !== "interrupt") throw new Error("expected the second to interrupt");
@@ -898,7 +959,7 @@ describe("isInterruptAdmission — an interruption is core's, as an establishmen
 		expect(
 			isInterruptAdmission({
 				outcome: "interrupt",
-				requirement: "mfa",
+				requirement: "verifier",
 				continuation: atLogin.continuation,
 				open: atLogin.open,
 			}),
