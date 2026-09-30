@@ -269,11 +269,11 @@ export const webauthnModule = defineModule<
 							webauthn?: { rateLimit?: { authenticationOptions?: unknown } };
 						}
 					).webauthn?.rateLimit?.authenticationOptions;
-					const seeded = readConfiguredRateLimitSpec(configured);
+					const contributed = readConfiguredRateLimitSpec(configured);
 					if (
-						seeded === undefined ||
-						seeded.limit !== spec.limit ||
-						seeded.windowSeconds !== spec.windowSeconds
+						contributed === undefined ||
+						contributed.limit !== spec.limit ||
+						contributed.windowSeconds !== spec.windowSeconds
 					) {
 						logger.warn(
 							{

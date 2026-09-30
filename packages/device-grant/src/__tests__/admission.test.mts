@@ -86,7 +86,7 @@ interface HarnessOptions {
 	readonly userSessionStore?: UserSessionStore;
 	readonly subjectRevocation?: SubjectRevocation;
 	readonly requireEmailVerified?: boolean;
-	/** The verification budget; five, as the module seeds it, unless a test needs it spent sooner. */
+	/** The verification budget; five, as the module contributes it, unless a test needs it spent sooner. */
 	readonly limit?: number;
 }
 

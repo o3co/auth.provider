@@ -1395,11 +1395,11 @@ describe("deviceGrantModule — the route it actually contributes", () => {
 
 	it("refuses to mount device/verification without the budget, oauth.deviceAuthorization.rateLimit", () => {
 		// The "requires a rateLimiter" refusal reasons from a budget of five,
-		// and the limiter applies five only because its adapter module seeds
-		// `device_verification` from this key. The seed leaves the adapter's
-		// 60/60s default in place when the key is missing, so a hand-built
-		// config that never passed the schema would boot with a refusal that
-		// argued from five while the limiter applied sixty.
+		// and the limiter applies five only because this module contributes
+		// `device_verification` from this key. With the key missing it
+		// contributes none, leaving the limiter's 60/60s default, so a
+		// hand-built config that never passed the schema would boot with a
+		// refusal that argued from five while the limiter applied sixty.
 		const deps = withVerificationBudget(undefined);
 		const factory = contributionsFor(deps)?.routes?.[1] as (d: unknown) => unknown;
 		expect(() => factory(deps)).toThrow(/oauth\.deviceAuthorization\.rateLimit/);
@@ -1414,9 +1414,9 @@ describe("deviceGrantModule — the route it actually contributes", () => {
 		// construction naming its own `limits.device_verification`.
 		["a window past the Date range", { limit: 5, windowSeconds: 1e13 }],
 	])("refuses to mount device/verification with %s as the budget", (_label, rateLimit) => {
-		// The same shapes the seed declines to apply: with one definition of
-		// "usable" shared with core, a budget the module accepts is one the
-		// limiter was seeded from.
+		// The same shapes the contributed budget refuses: with one definition
+		// of "usable" shared with core, a budget the route accepts is the one
+		// the limiter applies.
 		const deps = withVerificationBudget(rateLimit);
 		const factory = contributionsFor(deps)?.routes?.[1] as (d: unknown) => unknown;
 		expect(() => factory(deps)).toThrow(/oauth\.deviceAuthorization\.rateLimit/);
@@ -1428,9 +1428,10 @@ describe("deviceGrantModule — the route it actually contributes", () => {
 		expect(() => factory(deps)).not.toThrow();
 	});
 
-	it("mounts device/verification with the budget as numeric strings, as the seed reads it", () => {
-		// The seed and this refusal read the key the same way — as core's
-		// schema coerces it — so a budget the seed applies is one this accepts.
+	it("mounts device/verification with the budget as numeric strings, as the contributed budget reads it", () => {
+		// The contributed budget and this refusal read the key the same way —
+		// as a coercing schema does — so a budget the limiter applies is one
+		// this accepts.
 		const deps = withVerificationBudget({ limit: "5", windowSeconds: "300" });
 		const factory = contributionsFor(deps)?.routes?.[1] as (d: unknown) => unknown;
 		expect(() => factory(deps)).not.toThrow();
