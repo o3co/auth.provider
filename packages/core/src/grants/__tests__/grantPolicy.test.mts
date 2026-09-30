@@ -282,10 +282,12 @@ describe("readGrantPolicyDecision", () => {
 		const allowed = { outcome: "allow", grantedScope: ["read"] } as const;
 		const denied = { outcome: "deny", error: "access_denied" } as const;
 		expect(readGrantPolicyDecision(allowed, logger, site)).toEqual({
+			verdict: "allow",
 			outcome: "allow",
 			decision: allowed,
 		});
 		expect(readGrantPolicyDecision(denied, logger, site)).toEqual({
+			verdict: "deny",
 			outcome: "deny",
 			decision: denied,
 		});
@@ -297,6 +299,7 @@ describe("readGrantPolicyDecision", () => {
 		(_label, decision) => {
 			const logger = { error: vi.fn() };
 			expect(readGrantPolicyDecision(decision, logger, site)).toEqual({
+				verdict: "invalid",
 				outcome: "invalid",
 				result: DECISION_INVALID,
 			});
@@ -316,6 +319,7 @@ describe("readGrantPolicyDecision", () => {
 
 	it("reads an invalid decision without a logger", () => {
 		expect(readGrantPolicyDecision({}, undefined, site)).toEqual({
+			verdict: "invalid",
 			outcome: "invalid",
 			result: DECISION_INVALID,
 		});
