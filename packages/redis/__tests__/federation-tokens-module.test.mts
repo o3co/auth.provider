@@ -135,7 +135,7 @@ describe("redisFederationTokenStoreModule", () => {
 
 describe("redisFederationTokenStoreBuilder", () => {
 	it("rejects missing client", () => {
-		expect(() => redisFederationTokenStoreBuilder({ deploymentMode: "unset" })).toThrow(
+		expect(() => redisFederationTokenStoreBuilder({ deploymentMode: "unset" }, {})).toThrow(
 			/'client' option is required/,
 		);
 	});
@@ -153,11 +153,14 @@ describe("redisFederationTokenStoreBuilder", () => {
 			compareAndDelete: async () => false,
 		};
 		expect(() =>
-			redisFederationTokenStoreBuilder({
-				deploymentMode: "unset",
-				client: fakeClient,
-				encryption: { mode: "required", key: Buffer.alloc(16) },
-			}),
+			redisFederationTokenStoreBuilder(
+				{
+					deploymentMode: "unset",
+					client: fakeClient,
+					encryption: { mode: "required", key: Buffer.alloc(16) },
+				},
+				{},
+			),
 		).toThrow(/32 bytes/);
 	});
 
@@ -174,11 +177,14 @@ describe("redisFederationTokenStoreBuilder", () => {
 			compareAndDelete: async () => false,
 		};
 		// No throw expected
-		const store = redisFederationTokenStoreBuilder({
-			deploymentMode: "unset",
-			client: fakeClient,
-			encryption: { mode: "allow-plaintext" },
-		});
+		const store = redisFederationTokenStoreBuilder(
+			{
+				deploymentMode: "unset",
+				client: fakeClient,
+				encryption: { mode: "allow-plaintext" },
+			},
+			{},
+		) as { kind: string };
 		expect(store.kind).toBe("redis");
 	});
 });
@@ -296,21 +302,27 @@ describe("every setting the token store is given and cannot use is refused as a 
 		]) {
 			expect(
 				() =>
-					redisFederationTokenStoreBuilder({
-						deploymentMode: "unset",
-						client: fakeClient(),
-						encryption: { mode: "required", key },
-					}),
+					redisFederationTokenStoreBuilder(
+						{
+							deploymentMode: "unset",
+							client: fakeClient(),
+							encryption: { mode: "required", key },
+						},
+						{},
+					),
 				JSON.stringify(key),
 			).toThrow(new RangeError(MESSAGE_KEY));
 		}
 		// The canonical spelling, and 32 bytes handed over as a Buffer, build.
 		for (const key of [KEY_OF_32, Buffer.alloc(32, 0xfb)]) {
-			const store = redisFederationTokenStoreBuilder({
-				deploymentMode: "unset",
-				client: fakeClient(),
-				encryption: { mode: "required", key },
-			}) as { kind: string };
+			const store = redisFederationTokenStoreBuilder(
+				{
+					deploymentMode: "unset",
+					client: fakeClient(),
+					encryption: { mode: "required", key },
+				},
+				{},
+			) as { kind: string };
 			expect(store.kind).toBe("redis");
 		}
 	});
@@ -324,11 +336,14 @@ describe("every setting the token store is given and cannot use is refused as a 
 		try {
 			const message = '[federation-tokens] mode must be "required" or "allow-plaintext"';
 			expect(() =>
-				redisFederationTokenStoreBuilder({
-					deploymentMode: "unset",
-					client: fakeClient(),
-					encryption: { mode: "requried", key: KEY_OF_32 },
-				}),
+				redisFederationTokenStoreBuilder(
+					{
+						deploymentMode: "unset",
+						client: fakeClient(),
+						encryption: { mode: "requried", key: KEY_OF_32 },
+					},
+					{},
+				),
 			).toThrow(new RangeError(message));
 			expect(() =>
 				createRedisFederationTokenStore({
@@ -348,11 +363,14 @@ describe("every setting the token store is given and cannot use is refused as a 
 		for (const key of [KEY_OF_16, Buffer.alloc(16, 7), undefined]) {
 			expect(
 				() =>
-					redisFederationTokenStoreBuilder({
-						deploymentMode: "unset",
-						client: fakeClient(),
-						encryption: { mode: "required", key },
-					}),
+					redisFederationTokenStoreBuilder(
+						{
+							deploymentMode: "unset",
+							client: fakeClient(),
+							encryption: { mode: "required", key },
+						},
+						{},
+					),
 				String(key),
 			).toThrow(new RangeError(message));
 		}
@@ -393,7 +411,7 @@ describe("every setting the token store is given and cannot use is refused as a 
 		// given; the module path never reaches it (`requires` refuses first).
 		let thrown: unknown;
 		try {
-			redisFederationTokenStoreBuilder({ deploymentMode: "unset" });
+			redisFederationTokenStoreBuilder({ deploymentMode: "unset" }, {});
 		} catch (err) {
 			thrown = err;
 		}
