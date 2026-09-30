@@ -73,8 +73,13 @@ import {
 	type OcspCertificateStatus,
 	type OcspLookup,
 	type OcspResponderUnavailable,
-	type OcspUnavailableReason,
 } from "./ocspAnswer.mjs";
+import {
+	checkDelegateRevocation,
+	hasNoCheck,
+	type ResponderRevocationCheck,
+	type ResponderVerdict,
+} from "./ocspDelegate.mjs";
 import { fetchResponse } from "./ocspFetch.mjs";
 import { parseResponse } from "./ocspParse.mjs";
 import { buildRequest, checkNonce } from "./ocspRequest.mjs";
@@ -88,11 +93,9 @@ export type {
 	OcspResponderUnavailable,
 	OcspUnavailableReason,
 } from "./ocspAnswer.mjs";
+export type { ResponderRevocationCheck, ResponderRevocationOutcome } from "./ocspDelegate.mjs";
 export { checkMustStaple } from "./ocspMustStaple.mjs";
 export { type OcspResponders, ocspResponders } from "./ocspResponders.mjs";
-
-/** `id-pkix-ocsp-nocheck` (RFC 6960 §4.2.2.2.1): the CA vouches for the responder for its certificate's lifetime. */
-const OID_OCSP_NOCHECK = "1.3.6.1.5.5.7.48.1.5";
 
 /**
  * How long a responder that could not be used is remembered, in
@@ -215,27 +218,6 @@ export interface OcspResolverOptions {
 	readonly responderRevocation?: ResponderRevocationCheck;
 }
 
-/** What {@link ResponderRevocationCheck} learned about a delegated responder's certificate. */
-export type ResponderRevocationOutcome =
-	| { readonly kind: "determined" }
-	/** The CA named no source for the responder's certificate (§4.2.2.2.1, third option): local policy decides, which is to take the answer and report `responderUnchecked`. */
-	| { readonly kind: "unspecified" }
-	| { readonly kind: "revoked"; readonly detail: string }
-	| {
-			readonly kind: "unavailable";
-			readonly reason: string;
-			readonly detail: string;
-			readonly cause?: unknown;
-			/** The source for the responder's status did not answer usefully. */
-			readonly outage?: true;
-	  };
-
-export type ResponderRevocationCheck = (
-	responder: pkijs.Certificate,
-	issuer: pkijs.Certificate,
-	now: Date,
-) => Promise<ResponderRevocationOutcome>;
-
 export interface OcspResolver {
 	/**
 	 * Ask the responders `certificate` names about it, verifying each answer
@@ -261,18 +243,6 @@ const issuerKeyId = (issuer: pkijs.Certificate): string =>
 
 const serialHex = (certificate: pkijs.Certificate): string =>
 	Buffer.from(certificate.serialNumber.valueBlock.valueHexView).toString("hex");
-
-/**
- * Whether a delegated responder's certificate carries `id-pkix-ocsp-nocheck`
- * with the DER `NULL` value RFC 6960 §4.2.2.2.1 specifies. Any other value
- * buys no exemption: it is not a statement the CA wrote.
- */
-const hasNoCheck = (certificate: pkijs.Certificate): boolean => {
-	const extension = certificate.extensions?.find((ext) => ext.extnID === OID_OCSP_NOCHECK);
-	if (extension === undefined) return false;
-	const bytes = extension.extnValue.valueBlock.valueHexView;
-	return bytes.length === 2 && bytes[0] === 0x05 && bytes[1] === 0x00;
-};
 
 type DecodedStatus =
 	| { readonly ok: true; readonly status: OcspCertificateStatus | "unknown" }
@@ -459,51 +429,12 @@ export const createOcspResolver = (options: OcspResolverOptions): OcspResolver =
 		};
 	};
 
-	/**
-	 * A delegated responder's own certificate. RFC 6960 §4.2.2.2.1 lets a
-	 * client skip this only for a responder carrying `id-pkix-ocsp-nocheck`;
-	 * otherwise it is checked through the source the caller wired — the CA's
-	 * CRL, which the responder cannot answer for itself. A revoked responder's
-	 * `good` is worth nothing. With no source wired, or none the CA named, the
-	 * answer is taken and the deviation reported. Called when the answer is
-	 * built and on every cache hit, since the cached status outlives the check.
-	 */
-	const checkResponder = async (
+	/** The delegated responder's own certificate, through the source the caller wired. */
+	const checkResponder = (
 		delegate: pkijs.Certificate,
 		issuer: pkijs.Certificate,
 		now: Date,
-	): Promise<
-		| { ok: true; unchecked: boolean }
-		| {
-				ok: false;
-				reason: OcspUnavailableReason;
-				detail: string;
-				cause?: unknown;
-				outage?: true;
-		  }
-	> => {
-		if (options.responderRevocation === undefined) return { ok: true, unchecked: true };
-		const own = await options.responderRevocation(delegate, issuer, now);
-		if (own.kind === "revoked") {
-			return {
-				ok: false,
-				reason: "responder_revoked",
-				detail: `the delegated responder's certificate is revoked: ${own.detail}`,
-			};
-		}
-		if (own.kind === "unavailable") {
-			return {
-				ok: false,
-				reason: "responder_status_unavailable",
-				detail:
-					"the delegated responder's own revocation status is unavailable " +
-					`(${own.reason}): ${own.detail}`,
-				...(own.cause !== undefined ? { cause: own.cause } : {}),
-				...(own.outage ? { outage: true } : {}),
-			};
-		}
-		return { ok: true, unchecked: own.kind === "unspecified" };
-	};
+	): Promise<ResponderVerdict> => checkDelegateRevocation(options, delegate, issuer, now);
 
 	/** `query`, joining a request for the same certificate that is already in flight. */
 	const load = (
