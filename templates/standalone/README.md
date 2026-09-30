@@ -299,10 +299,8 @@ you add to `buildModules` that reads its configuration when it is built adds
 the paths it reads to `SWITCHES`. Then it hands `createApp` the configuration as resolved over every
 loaded module's `reference.conf` (`resolveForBoot`), unparsed, with the session
 requirements phase one derived written in, and without the `mfa` section
-unless a loaded module reads it, together with the same environment snapshot
-(`environment`), which boot holds variables renamed with a moved key against:
-boot parses it once, with every loaded module's schema, and strips no
-module's section. What
+unless a loaded module reads it: boot parses it once, with every loaded
+module's schema, and strips no module's section. What
 the template reads after boot — `http.trustProxy`, the port, the readiness
 timeout — it reads from the parsed configuration. A top-level section no
 loaded module owns is kept and logged once at boot as
