@@ -523,8 +523,8 @@ describe("/introspect carries token metadata only", () => {
 	 *   username — see `IntrospectResponse`).
 	 * - `azp` is not a §2.2 member; it mirrors RFC 9068's authorized-party claim.
 	 * - `cnf` is the token-binding confirmation mirror.
-	 * - `acr` and `auth_time` are RFC 9470 §6.2's members: the authentication
-	 *   event the token carries, not the user's claims.
+	 * - `acr` and `auth_time` are RFC 9470 §6.2's members, and `amr` beside
+	 *   them: the authentication event the token carries, not the user's claims.
 	 *
 	 * §2.2 permits both directions: every member is optional, and
 	 * "implementations MAY extend this structure with their own
@@ -544,6 +544,7 @@ describe("/introspect carries token metadata only", () => {
 		"jti",
 		"cnf",
 		"acr",
+		"amr",
 		"auth_time",
 	]);
 
@@ -586,10 +587,11 @@ describe("/introspect carries token metadata only", () => {
 		expect(unexpected).toEqual([]);
 	});
 
-	it("answers the acr and auth_time the token carries (RFC 9470 §6.2)", async () => {
+	it("answers the acr, amr and auth_time the token carries (RFC 9470 §6.2)", async () => {
 		const token = await makeAccessToken({
 			client_id: "client1",
 			acr: "urn:example:mfa",
+			amr: ["pwd", "otp", "mfa"],
 			auth_time: 1_776_729_600,
 		});
 		const app = await buildApp();
@@ -598,29 +600,32 @@ describe("/introspect carries token metadata only", () => {
 		expect(res.status).toBe(200);
 		expect(res.body.active).toBe(true);
 		expect(res.body.acr).toBe("urn:example:mfa");
+		expect(res.body.amr).toEqual(["pwd", "otp", "mfa"]);
 		expect(res.body.auth_time).toBe(1_776_729_600);
 	});
 
-	it("omits acr and auth_time when the token carries none", async () => {
+	it("omits acr, amr and auth_time when the token carries none", async () => {
 		const token = await makeAccessToken({ client_id: "client1" });
 		const app = await buildApp();
 		const res = await introspect(app, token);
 
 		expect(res.body.active).toBe(true);
 		expect(res.body).not.toHaveProperty("acr");
+		expect(res.body).not.toHaveProperty("amr");
 		expect(res.body).not.toHaveProperty("auth_time");
 	});
 
-	it("omits an acr or auth_time that is not well-formed", async () => {
+	it("omits an acr, amr or auth_time that is not well-formed", async () => {
 		const app = await buildApp();
 		for (const bad of [
-			{ acr: "", auth_time: "1776729600" },
-			{ acr: 7, auth_time: -1 },
-			{ acr: ["urn:example:mfa"], auth_time: 1_776_729_600.5 },
+			{ acr: "", amr: [], auth_time: "1776729600" },
+			{ acr: 7, amr: "pwd", auth_time: -1 },
+			{ acr: ["urn:example:mfa"], amr: ["pwd", 7], auth_time: 1_776_729_600.5 },
 		]) {
 			const res = await introspect(app, await makeAccessToken({ client_id: "client1", ...bad }));
 			expect(res.body.active, JSON.stringify(bad)).toBe(true);
 			expect(res.body, JSON.stringify(bad)).not.toHaveProperty("acr");
+			expect(res.body, JSON.stringify(bad)).not.toHaveProperty("amr");
 			expect(res.body, JSON.stringify(bad)).not.toHaveProperty("auth_time");
 		}
 	});
