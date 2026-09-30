@@ -9,7 +9,7 @@
  * `core.deployment.mode = "multi"` refuses it (core's replica-safety guard).
  */
 import type { AccessTokenDenylist } from "@o3co/auth-provider-core";
-import Redis from "ioredis";
+import { Redis } from "ioredis";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
 	createRedisAccessTokenDenylist,
@@ -144,7 +144,7 @@ describe("redisAccessTokenDenylistBuilder", () => {
 		const store = redisAccessTokenDenylistBuilder(
 			{ type: "redis", client: client as unknown as AccessTokenDenylistClient },
 			{},
-		);
+		) as AccessTokenDenylist;
 		expect(store.kind).toBe("redis");
 	});
 });

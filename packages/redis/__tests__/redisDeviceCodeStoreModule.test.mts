@@ -20,7 +20,7 @@ import {
 	REPLICA_UNSAFE_MODULES,
 } from "@o3co/auth-provider-core";
 import { makeValidCoreConfig } from "@o3co/auth-provider-core/testing";
-import Redis from "ioredis";
+import { Redis } from "ioredis";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { redisDeviceCodeStoreModule } from "#/device-code-store.mjs";
 import { makeIoredisClients } from "#/ioredis.mjs";

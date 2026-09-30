@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
-import Redis from "ioredis";
+import { Redis } from "ioredis";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { makeIoredisClients } from "../src/ioredis.mjs";
 import { createRedisSessionFamilyIndex } from "../src/sessionFamilyIndex.mjs";
