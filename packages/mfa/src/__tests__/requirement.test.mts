@@ -801,7 +801,7 @@ describe("admit — credential_change on a token: judged on the token's own amr,
 });
 
 describe("admit — credential_change reads the subject's factor records", () => {
-	it("throws when the records cannot be listed, under either mode — admission answers unavailable", async () => {
+	it("throws when the records cannot be listed, under either mode, even beside a recent second factor", async () => {
 		for (const mode of ["optional", "required"] as const) {
 			const { requirement } = build(mode, { factorStore: unreachableFactorStore() });
 			await expect(requirement.admit(about(password(), CHANGE)), mode).rejects.toThrow(
