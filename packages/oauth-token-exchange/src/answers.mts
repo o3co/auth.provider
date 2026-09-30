@@ -50,8 +50,11 @@ export function invalidRequest(errorDescription: string): GrantHandlerResult {
 	return { result: { status: 400, error: "invalid_request", errorDescription } };
 }
 
-/** Whether a stage refused the request, rather than answering its own output. */
-export const isRefusal = <T extends object>(
+/**
+ * Whether a stage refused the request, rather than answering its own output.
+ * A stage's own output never carries `result`, which the type parameter holds.
+ */
+export const isRefusal = <T extends object & { readonly result?: never }>(
 	outcome: T | GrantHandlerResult,
 ): outcome is GrantHandlerResult => "result" in outcome;
 
