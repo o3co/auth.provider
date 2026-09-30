@@ -15,17 +15,9 @@
  */
 
 /**
- * What boot's own machinery reads of the `http` module's settings: the
- * origins core's CORS middleware lets read. `trustProxy` is the host
- * process's to apply (`app.set("trust proxy", …)`); core reads none of it.
- *
- * The origins are the `httpSettings` slot's when the composition holds it,
- * otherwise the configuration's `cors.allowedOrigins`, since core runs in
- * compositions without the `http` module; never the two mixed. The
- * configuration's list is held to the schema's rule by boot's parse; the
- * slot's to the same rule here, as its contract states it
- * (`httpSettingsContract`), so a slot a host fills by hand is refused rather
- * than read.
+ * The CORS origins of a held `httpSettings` slot, checked: what core's CORS
+ * middleware reads instead of `cors.allowedOrigins` when the composition
+ * holds the slot. Core reads nothing else of it.
  */
 
 import { describeValue } from "../errors/describe-value.mjs";
@@ -52,10 +44,9 @@ const readOnce = (member: string, read: () => unknown): unknown => {
 };
 
 /**
- * The CORS origins of the `httpSettings` a composition holds, as a frozen
- * copy: `cors.allowedOrigins` read once, and each entry held to
- * `checkSerializedOrigin`. What is checked is what is answered: a host
- * changing its object later changes nothing the middleware holds.
+ * The slot's `cors.allowedOrigins`, read once, each entry held to
+ * `checkSerializedOrigin` (the rule the schema holds the configuration's to),
+ * answered as a frozen copy.
  *
  * @throws RangeError naming the member (and the index) that does not hold,
  *   or the slot when it holds no settings object.

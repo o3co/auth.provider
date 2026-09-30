@@ -87,23 +87,16 @@ function flattenAdapterConfig(
 const TEMPLATE_REFERENCE_HREF: string = new URL("../config/reference.conf", import.meta.url).href;
 
 /**
- * The template's own defaults, `config/reference.conf`: every module in this
- * file that owns a section declares it as the section's reference, so
- * `moduleReferences` layers it beneath the template's own files and above
- * core's. A new `URL` on every call, as `coreReference()` answers: one shared
- * object could be changed in place for every holder.
+ * The template's `config/reference.conf`, which every module here that owns a
+ * section declares. A new `URL` per call: a shared one could be changed in place.
  */
 export function templateReference(): URL {
 	return new URL(TEMPLATE_REFERENCE_HREF);
 }
 
 /**
- * The schemas the template's modules parse their sections with: core's
- * declarations of those paths, which core's schema still mirrors, so each
- * rule (the log levels, the trusted-proxy forms, the serialized-origin rule,
- * the signing-key union, the Redis connection's shape) has one definition. A
- * section refused here refuses the boot naming the operator's path.
- * `readLogging` reads the `logging` section before boot with the same schema.
+ * The section schemas: core's declarations of these paths, which core still
+ * mirrors, so each rule has one definition.
  */
 export const LOGGING_SECTION = CoreConfigSchema.shape.logging.unwrap();
 const HTTP_SECTION = CoreConfigSchema.shape.http.unwrap();
@@ -114,13 +107,9 @@ const REDIS_CLIENTS_SECTION = fullSectionsSchema.shape.refreshTokenFamilyStore
 	.shape.redis.unwrap();
 
 /**
- * Logging module: owns `logging {}`, the level the composition's logger
- * emits at, with its default in the template's `config/reference.conf`. It
- * provides nothing. The logger exists before boot — the template writes
- * through it while it reads its configuration and chooses its modules, and
- * boot takes it as the `logger` bootstrap component — so the template reads
- * this section for it with this module's schema (`readLogging`), and boot
- * parses the section again as this module's, naming the operator's path.
+ * Logging module: owns `logging {}`. It provides nothing: the logger is built
+ * before boot from this section (`readLogging`) and handed in as a bootstrap
+ * component, since the template logs while it chooses its modules.
  */
 export const loggingModule = defineModule({
 	name: "logging",
@@ -137,11 +126,7 @@ export interface HttpHostSettings {
 
 declare module "@o3co/auth-provider-core" {
 	interface ComponentMap {
-		/**
-		 * The browser origins `cors {}` lists, parsed and frozen: provided by
-		 * the `cors` module for the `http` module's `httpSettings`, since a
-		 * module owns one section and the list sits beside `http {}`.
-		 */
+		/** The origins `cors {}` lists, parsed and frozen: the `cors` module's, for the `http` module. */
 		readonly corsAllowedOrigins?: readonly string[];
 		/** What the host process reads of `http {}`: provided by the `http` module. */
 		readonly httpHostSettings?: HttpHostSettings;
@@ -149,11 +134,8 @@ declare module "@o3co/auth-provider-core" {
 }
 
 /**
- * CORS module: owns `cors {}`, the browser origins core's CORS middleware
- * lets read the token, userinfo, revocation and discovery/JWKS responses,
- * with its default in the template's `config/reference.conf`. It hands the
- * parsed list to the `http` module, which carries it in core's
- * `httpSettings`; no other module reads it.
+ * CORS module: owns `cors {}`, the origins core's CORS middleware lets read.
+ * Only the `http` module reads what it provides, for core's `httpSettings`.
  */
 export const corsModule = defineModule({
 	name: "cors",
@@ -164,20 +146,9 @@ export const corsModule = defineModule({
 });
 
 /**
- * HTTP module: owns `http {}` — the port, the trusted forwarding hops and the
- * readiness deadline — with its defaults in the template's
- * `config/reference.conf`, and provides:
- *
- * - `httpSettings`, core's slot: the trusted hops and the CORS origins the
- *   `cors` module parsed, which core's CORS middleware reads. Authoritative,
- *   so no composition substitutes it while this module is loaded; eager,
- *   since core's own machinery reads it and no module requires it.
- * - `httpHostSettings`, the template's own: the port and the readiness
- *   deadline, which only the host process reads (`app.mts`). Eager, for the
- *   same reason.
- *
- * `app.mts` applies `trustProxy` to Express from the slot, before a request
- * can arrive.
+ * HTTP module: owns `http {}`, and provides core's `httpSettings` (with the
+ * `cors` module's origins) and the host's `httpHostSettings`. Both eager:
+ * core and `app.mts` read them, and no module requires them.
  */
 export const httpModule = defineModule({
 	name: "http",
@@ -198,10 +169,8 @@ export const httpModule = defineModule({
 
 /**
  * KeyStore module: provides the JWT signing KeyStore from its own section,
- * `oauth.jwt.signingKey`, through the built-in local/jwks adapters. Nothing
- * else reads the signing key: the modules that sign and verify require the
- * `keyStore` slot. Other deployments wire their own KeyStore through a module
- * of the same shape.
+ * `oauth.jwt.signingKey`, through the built-in local/jwks adapters. Other
+ * deployments wire their own KeyStore through a module of the same shape.
  */
 export const keyStoreModule: Module = defineModule({
 	name: "key-store",
@@ -422,13 +391,10 @@ export const storesModule: Module = defineModule({
  * pins that.
  *
  * The connection's URL and password are the module's own section,
- * `refreshTokenFamilyStore.redis { url, password }`, with the template's
- * `config/reference.conf` holding the default URL. Per-store Redis instances
- * belong in a custom composition root. An empty URL throws: the default
- * covers single-instance and dev use, and an operator who blanks it gets an
- * explicit error, not a silent localhost fallback. `io.quit()` is registered
- * once with `lifecycleRegistrar`, so `handle.dispose()` closes the
- * connection.
+ * `refreshTokenFamilyStore.redis`. Per-store Redis instances belong in a
+ * custom composition root. An empty URL throws rather than falling back to
+ * localhost. `io.quit()` is registered once with `lifecycleRegistrar`, so
+ * `handle.dispose()` closes the connection.
  *
  * `buildModules` adds this module only when some composed module needs a
  * Redis client (`usingRedisAnywhere`), so memory-only compositions open no

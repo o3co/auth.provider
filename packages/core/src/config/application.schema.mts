@@ -264,10 +264,8 @@ const jwtSchemaBase = z.object({
 			});
 		}
 	}),
-	// The signing key a composition's key store is built from. Core reads none
-	// of it: the module that provides `keyStore` owns it (the standalone
-	// template's `key-store`), with its defaults. Declared here while `oauth`
-	// is mirrored, so a configuration carrying it is held to its shape.
+	// The section of the module that provides `keyStore`; core reads none of it
+	// and ships no default.
 	signingKey: signingKeySchema.optional(),
 	// JWKS publishing path (OIDC `jwks_uri`). Operator-choosable per OIDC
 	// Discovery; defaults to `/.well-known/jwks.json` when unset (applied by
@@ -686,11 +684,8 @@ const trustProxySchema = z
  * Token-only deployments (no session, no federation) only need these sections.
  */
 export const CoreConfigSchema = z.object({
-	// The host process's HTTP settings. Core reads none of them: the module
-	// that owns them (the standalone template's `http`) ships their defaults,
-	// and hands every module the trusted hops through the `httpSettings` slot.
-	// Declared here while core's schema mirrors them, so a configuration
-	// carrying them is held to these rules.
+	// The section of the module that provides `httpSettings`; core reads none
+	// of it and ships no default.
 	http: z
 		.object({
 			port: z.coerce.number(),
@@ -705,11 +700,8 @@ export const CoreConfigSchema = z.object({
 			readinessTimeoutMs: z.coerce.number().int().positive().max(2_147_483_647),
 		})
 		.optional(),
-	// The level a composition's logger emits at. Core reads none of it: the
-	// module that owns it (the standalone template's `logging`) ships its
-	// default. Declared here while core's schema mirrors it, so a
-	// configuration carrying it is held to this vocabulary. `silent` is a
-	// threshold, not a level anything emits at.
+	// The composition root's logging module's section; core reads none of it
+	// and ships no default. `silent` is a threshold, not a level.
 	logging: z
 		.object({
 			level: z.enum(["trace", "debug", "info", "warn", "error", "fatal", "silent"]),

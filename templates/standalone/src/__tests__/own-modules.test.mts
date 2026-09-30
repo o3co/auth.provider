@@ -78,8 +78,8 @@ const signingKey = generateKeyPairSync("ed25519", {
 
 /**
  * What the shipped configuration needs set to boot, every store in memory
- * but where a test asks for Redis: the issuer, the shipped EdDSA key pair
- * inline, and the session secret.
+ * but where a test asks for Redis: the issuer, an Ed25519 key pair inline for
+ * the shipped algorithm, and the session secret.
  */
 const BASE_ENV: Readonly<Record<string, string>> = {
 	OAUTH_JWT_ISSUER: "https://auth.test",
@@ -96,23 +96,19 @@ const BASE_ENV: Readonly<Record<string, string>> = {
 	REPLAY_SEEN_SET_ADAPTER: "memory",
 };
 
-/** A logger that writes nothing and remembers what it was handed. */
-const recordingLogger = (): Logger & { readonly lines: unknown[][] } => {
-	const lines: unknown[][] = [];
-	const record = (...args: unknown[]) => {
-		lines.push(args);
-	};
+/** A logger that writes nothing. */
+const silentLogger = (): Logger => {
+	const ignore = () => {};
 	const logger = {
-		lines,
-		trace: record,
-		debug: record,
-		info: record,
-		warn: record,
-		error: record,
-		fatal: record,
+		trace: ignore,
+		debug: ignore,
+		info: ignore,
+		warn: ignore,
+		error: ignore,
+		fatal: ignore,
 		child: () => logger,
 	};
-	return logger as unknown as Logger & { readonly lines: unknown[][] };
+	return logger as unknown as Logger;
 };
 
 /** In-memory repositories in place of the YAML files and the Store the shipped ones read. */
@@ -131,7 +127,6 @@ interface BootOptions {
 	readonly hocon?: string;
 	/** Keep the shipped Redis refresh-token family store, and with it the shared Redis clients. */
 	readonly redis?: boolean;
-	readonly logger?: Logger;
 }
 
 /** The template's own files for the development environment, under an operator's layer when given. */
@@ -162,7 +157,7 @@ async function bootTemplate(options: BootOptions = {}): Promise<AppHandle> {
 		bootstrapComponents: {
 			config: resolveForBoot(own, modules, expectedSessionRequirements(switches)),
 			pathResolver: (s: string) => s,
-			logger: options.logger ?? recordingLogger(),
+			logger: silentLogger(),
 		},
 	});
 }

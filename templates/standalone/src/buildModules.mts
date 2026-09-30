@@ -339,12 +339,8 @@ export function buildModules(config: AppConfig, overrides: BuildModulesOverrides
 		...(oidcFederations.length > 0
 			? [oidcFederationConfigModule, ...oidcFederations.map((name) => oidcFederationModule(name))]
 			: []),
-		// Owns `logging {}`: the logger is built from it before boot
-		// (`readLogging`), and boot parses it as this module's section.
+		// The template's own settings: `logging {}`, `http {}` and `cors {}`.
 		loggingModule,
-		// Own `http {}` and `cors {}`: `httpSettings`, which core's CORS
-		// middleware reads, and what the host process reads after boot
-		// (`app.mts`).
 		httpModule,
 		corsModule,
 		overrides.keyStoreModule ?? keyStoreModule,

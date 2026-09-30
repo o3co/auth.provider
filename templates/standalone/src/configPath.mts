@@ -126,10 +126,9 @@ export function resolveLayers(own: OwnLayers, references: readonly URL[]): Recor
  * What the template reads before it knows its modules: the switches
  * `buildModules` and its module factories choose by, and what
  * `expectedSessionRequirements` reads — the configuration's
- * `sessionRequirements` and `mfa.mode`. The log level is the `logging`
- * module's, read with that module's own schema (`readLogging`). A module a
- * deployment adds that reads its configuration when it is built adds those
- * paths here, or passes them to `readSwitches` as `reads`.
+ * `sessionRequirements` and `mfa.mode` (the log level is `readLogging`'s). A
+ * module a deployment adds that reads its configuration when it is built adds
+ * those paths here, or passes them to `readSwitches` as `reads`.
  * `two-phase-config.test.mts` holds the list to what the template reads.
  *
  * Every path here and in `reads` must be one core's transitional base
@@ -180,12 +179,9 @@ export function readSwitches(own: OwnLayers, options: SwitchesOptions = {}): App
 }
 
 /**
- * The `logging` module's section, read before the modules are known, for the
- * logger the template writes through while it reads its configuration and
- * hands boot as the `logger` bootstrap component: the composition's own
- * layers over the module's reference (the template's) and core's, parsed with
- * the module's own schema, as boot parses the section again. A value the
- * schema refuses is a `RangeError` naming each operator path under `logging`.
+ * The `logging` module's section, read before boot for the logger: the own
+ * layers over the module's reference and core's, parsed with the module's
+ * schema. A refused value is a `RangeError` naming its path under `logging`.
  */
 export function readLogging(own: OwnLayers): LoggingSettings {
 	const resolved = resolveLayers(own, moduleReferences([loggingModule]));

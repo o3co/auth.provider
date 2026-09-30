@@ -21,8 +21,8 @@ export type LoggingSettings = NonNullable<AppConfig["logging"]>;
 
 /**
  * The composition root's logger, and the value wired into the `logger` slot
- * every module reads: pino, newline-delimited JSON on stdout, at the level
- * `logging` sets. `Logger` has pino's two-overload call signature, so a pino
+ * every module reads: pino, newline-delimited JSON on stdout, at the
+ * `logging` section's level. `Logger` has pino's two-overload call signature, so a pino
  * instance satisfies it with no adapter, and `silent` is pino's own name for
  * "emit nothing", so the config vocabulary maps across unchanged. See the
  * template README, "Logging".

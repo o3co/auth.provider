@@ -618,9 +618,7 @@ export function assembleApp(
 	// Mounted on an ALLOWLIST of paths, deliberately the opposite polarity to the
 	// sender-constraint mount below (core README, CORS). `corsMw` returns null
 	// for an empty origin list: no CORS headers, not even `Vary`.
-	//
-	// The origins are the `httpSettings` slot's when the composition holds it,
-	// the configuration's `cors.allowedOrigins` otherwise (`http-settings.mts`).
+	// The origins: the `httpSettings` slot's when held, else the configuration's.
 	{
 		const components = frozen.components as Record<string, unknown>;
 		const config = components.config as

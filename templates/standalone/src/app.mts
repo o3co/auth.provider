@@ -47,10 +47,9 @@ const own = readOwnLayers([envConfPath, applicationConfPath]);
 // when the parsed `mfa.mode` asks for a second factor.
 const switches: AppConfig = readSwitches(own);
 
-// Built from the `logging` module's section, read now with that module's
-// schema, so its level is operator-controlled from the first line; wired into
-// `bootstrapComponents` so every module that declares `optional: ["logger"]`
-// logs through it rather than its own default (template README, "Logging").
+// From the `logging` module's section, so the level holds from the first line;
+// wired into `bootstrapComponents` so every module logs through it (template
+// README, "Logging").
 const logger = createAppLogger(readLogging(own));
 
 await (async (): Promise<void> => {
@@ -96,8 +95,7 @@ await (async (): Promise<void> => {
 	});
 	const config = handle.components.config;
 	if (config === undefined) throw new Error("createApp booted without the parsed configuration");
-	// The `http` module's settings (`modules.mts`): core's `httpSettings`,
-	// and what only the host process reads of `http {}`.
+	// The `http` module's settings: core's slot and the host's own.
 	const { httpSettings, httpHostSettings } = handle.components;
 	if (httpSettings === undefined || httpHostSettings === undefined) {
 		throw new Error("createApp booted without the http module's settings");
