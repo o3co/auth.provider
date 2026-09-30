@@ -168,30 +168,40 @@ describe("the other failures of an answer", () => {
 		expect(answerable(error)).toEqual([]);
 	});
 
-	it("a version other than the expected one plus one is one error naming the subject and the factor id", () => {
+	it("a version other than the expected one plus one is one log line naming the subject and the factor id", () => {
 		const error = mfaStoreVersionSkipped("https://store.example/mfa/update", {
 			subject: "user-1",
-			id: "factor-1",
+			id: "u1PIlRkb_cy7UmjYUKaL_A",
 			expectedVersion: 41,
 		});
 		expect(error.reason).toBe("version_skipped");
 		expect(error.operation).toBe("update");
-		expect(error.message).toContain("user-1");
-		expect(error.message).toContain("factor-1");
-		expect(error.message).toContain("42");
-		expect(error.message.split("\n")).toHaveLength(1);
+		const detail = loggableError(error).detail ?? "";
+		expect(detail).toContain("subject user-1, factor u1PIlRkb_cy7UmjYUKaL_A");
+		expect(detail).toContain("42");
+		expect(detail.split("\n")).toHaveLength(1);
 		expect(answerable(error)).toEqual([]);
 	});
 
-	it("sanitises and bounds the subject and factor id it names: one line, printable, at most 200 characters each", () => {
-		const hostile = `a\r\nforged: line\u2028\u202e${"x".repeat(10_000)}`;
-		const error = mfaStoreVersionSkipped("https://store.example/mfa/update", {
-			subject: hostile,
-			id: hostile,
-			expectedVersion: 1,
-		});
-		expect(error.message).not.toMatch(/[\r\n\u2028\u2029\u202e]/);
-		expect(error.message).not.toContain("x".repeat(200));
-		expect(error.message.match(/a\?\?forged: line\?\?x+\.\.\./g)).toHaveLength(2);
+	it("keeps both identifiers in the log line however long they are: each sanitised, printable, at most 64 characters, ahead of the endpoint", () => {
+		const hostile = `a\r\nforged: line${String.fromCodePoint(0x2028, 0x202e)}${"x".repeat(10_000)}`;
+		const bounded = `a??forged: line??${"x".repeat(44)}...`;
+		expect(bounded).toHaveLength(64);
+		for (const [subject, id] of [
+			[hostile, hostile],
+			["s".repeat(200), "u1PIlRkb_cy7UmjYUKaL_A"],
+		] as const) {
+			const error = mfaStoreVersionSkipped(
+				`https://${"store".repeat(20)}.example/${"path/".repeat(20)}update`,
+				{ subject, id, expectedVersion: 1 },
+			);
+			const detail = loggableError(error).detail ?? "";
+			const named = (value: string) =>
+				value === hostile ? bounded : value.length > 64 ? `${value.slice(0, 61)}...` : value;
+			expect(detail.startsWith(`subject ${named(subject)}, factor ${named(id)}: `), detail).toBe(
+				true,
+			);
+			expect(detail).not.toMatch(/[\r\n\u2028\u2029\u202e]/);
+		}
 	});
 });
