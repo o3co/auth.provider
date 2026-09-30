@@ -112,7 +112,9 @@ describe("the suite refuses a store that breaks the contract", () => {
 						const found = await Promise.all(
 							(listed.get(userId) ?? []).map((id) => store.findByCredentialId(id)),
 						);
-						return found.filter((credential): credential is WebAuthnCredential => credential !== null);
+						return found.filter(
+							(credential): credential is WebAuthnCredential => credential !== null,
+						);
 					},
 				};
 			}),

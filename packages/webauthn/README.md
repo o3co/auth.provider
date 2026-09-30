@@ -19,7 +19,7 @@ Passkey (WebAuthn) credential registration and an authentication grant for [`aut
 
 **Does not own:**
 
-- the stores and their contracts — `WebAuthnCredentialStore`, `ChallengeStore` and `ChallengeCeremony` are core's ports (with core's memory implementations); a deployment wires a persistent credential store;
+- the stores and their contracts — `WebAuthnCredentialStore`, `ChallengeStore` and `ChallengeCeremony` are core's ports (with core's memory implementations); a deployment wires a persistent credential store, and holds it to the port with `webAuthnCredentialStoreContract` from `@o3co/auth-provider-test-kit`;
 - the second factor's ceremony — its transaction, its routes under `/session/mfa`, the sealing of what it keeps, the subject lock — and its records (core's `MfaFactorStore`): the MFA package's and core's; this package imports nothing of the MFA package;
 - who the user is at registration: the user handle a session maps to is the deployment's `subjectFor`, and whether that session may proceed is core's session admission; a subject taken from a bearer token, or from a cookie session without a user-session store, is set by middleware the deployment writes;
 - scope decisions — the deployment's `grantPolicy`, which this grant requires;
