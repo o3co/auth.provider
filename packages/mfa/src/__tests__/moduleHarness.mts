@@ -51,7 +51,7 @@ import express from "express";
 import request from "supertest";
 import { type Mock, vi } from "vitest";
 import { type MfaModuleOptions, mfaModule, mfaModules } from "#/module.mjs";
-import { mfaEmailFactorConfig } from "#/testing/index.mjs";
+import { mfaEmailFactorConfigForTests } from "#/testing/index.mjs";
 import { mfaTotpFactorModule } from "#/totp/module.mjs";
 
 export const ISSUER = "https://auth.example";
@@ -170,7 +170,7 @@ export function configFor(
 		mfa: { ...mfaSection(mode), ...mfa },
 		"mfa-totp-factor": { ...TOTP_SECTION, ...totp },
 		"mfa-recovery-code-factor": RECOVERY_CODE_SECTION,
-		...mfaEmailFactorConfig(),
+		...mfaEmailFactorConfigForTests(),
 		"renamed-variables": UNSET_RENAMED_VARIABLES,
 	} as unknown as AppConfig;
 }

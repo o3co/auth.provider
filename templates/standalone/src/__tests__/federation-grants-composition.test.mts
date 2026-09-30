@@ -40,7 +40,7 @@ import {
 	registerBuiltinKeyStores,
 } from "@o3co/auth-provider-core";
 import { CORE_RELOCATIONS, renamedVariableCaptures } from "@o3co/auth-provider-core/testing";
-import { standardSmtpMailSenderConfig } from "@o3co/auth-provider-standard/testing";
+import { standardSmtpMailSenderConfigForTests } from "@o3co/auth-provider-standard/testing";
 import { parseFile } from "@o3co/ts.hocon";
 import { validate } from "@o3co/ts.hocon/zod";
 import express from "express";
@@ -569,7 +569,11 @@ describe("the standalone composes federation grants from its config", () => {
 		try {
 			// Under production the template installs the SMTP sender's module,
 			// whose section the package's builder carries.
-			handleRef = await boot({ ...config, ...standardSmtpMailSenderConfig() }, false, "production");
+			handleRef = await boot(
+				{ ...config, ...standardSmtpMailSenderConfigForTests() },
+				false,
+				"production",
+			);
 		} catch (caught) {
 			error = caught;
 		}

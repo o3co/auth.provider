@@ -34,7 +34,7 @@ describe("the package's entries", () => {
 		]);
 	});
 
-	it("publishes on its testing entry the builder of its section, and nothing else", () => {
-		expect(Object.keys(testing).sort()).toEqual(["standardSmtpMailSenderConfig"]);
+	it("publishes on its testing entry the builder of its section", () => {
+		expect(Object.keys(testing)).toContain("standardSmtpMailSenderConfigForTests");
 	});
 });

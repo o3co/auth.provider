@@ -35,7 +35,7 @@ import { parseFile } from "@o3co/ts.hocon";
 import { afterEach, describe, expect, it } from "vitest";
 import { standardSmtpMailSenderConfigSchema } from "#/mail/smtp/config.mjs";
 import { standardSmtpMailSenderModule } from "#/mail/smtp/module.mjs";
-import { standardSmtpMailSenderConfig } from "#/testing/index.mjs";
+import { standardSmtpMailSenderConfigForTests } from "#/testing/index.mjs";
 
 const REFERENCE = new URL("../../../config/reference.conf", import.meta.url);
 
@@ -152,9 +152,9 @@ describe("standard-smtp-mail-sender, the SMTP mail sender's section", () => {
 	});
 });
 
-describe("standardSmtpMailSenderConfig, the testing entry's builder", () => {
+describe("standardSmtpMailSenderConfigForTests, the testing entry's builder", () => {
 	it("carries the section as the package's reference.conf defaults it, under the module's name", () => {
-		expect(standardSmtpMailSenderConfig()).toEqual({
+		expect(standardSmtpMailSenderConfigForTests()).toEqual({
 			[standardSmtpMailSenderModule.name]: standardSmtpMailSenderConfigSchema.parse(
 				referenceSection(),
 			),
@@ -162,7 +162,7 @@ describe("standardSmtpMailSenderConfig, the testing entry's builder", () => {
 	});
 
 	it("lays the keys it is given over those defaults", () => {
-		expect(standardSmtpMailSenderConfig({ host: "localhost", secure: "none" })).toEqual({
+		expect(standardSmtpMailSenderConfigForTests({ host: "localhost", secure: "none" })).toEqual({
 			[standardSmtpMailSenderModule.name]: { ...DEFAULTS, host: "localhost", secure: "none" },
 		});
 	});
@@ -213,12 +213,12 @@ describe("standardSmtpMailSenderModule, which declares the section", () => {
 	});
 
 	it("boots with the section as the reference defaults it", async () => {
-		expect(await boot(standardSmtpMailSenderConfig())).toBeUndefined();
+		expect(await boot(standardSmtpMailSenderConfigForTests())).toBeUndefined();
 	});
 
 	it("refuses the boot for a key its section does not know, naming the section and the key, and quoting no password", async () => {
 		const refused = await boot(
-			standardSmtpMailSenderConfig({
+			standardSmtpMailSenderConfigForTests({
 				hostname: "smtp.example.com",
 				password: "hunter2-relay-S3CRET",
 				port: 0,

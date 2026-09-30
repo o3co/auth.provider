@@ -52,4 +52,4 @@ On `@o3co/auth-provider-standard/testing`:
 
 | Export | What it is |
 | --- | --- |
-| [`standardSmtpMailSenderConfig`](src/testing/index.mts) | The SMTP sender's section, keyed by its module's name, as the reference defaults it, with the keys a test lays over it |
+| [`standardSmtpMailSenderConfigForTests`](src/testing/index.mts) | The SMTP sender's section, keyed by its module's name, as the reference defaults it, with the keys a test lays over it |

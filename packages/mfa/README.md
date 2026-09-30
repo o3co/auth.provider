@@ -141,4 +141,4 @@ On `@o3co/auth-provider-mfa/testing`, the builders a test assembles this package
 
 | Export | What it is |
 | --- | --- |
-| [`mfaEmailFactorConfig`](src/testing/index.mts) | The email factor's section, keyed by its module's name, as `reference.conf` defaults it, with the keys a test lays over it |
+| [`mfaEmailFactorConfigForTests`](src/testing/index.mts) | The email factor's section, keyed by its module's name, as `reference.conf` defaults it, with the keys a test lays over it |

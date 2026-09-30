@@ -52,7 +52,7 @@ import {
 	replicaUnsafeReason,
 } from "@o3co/auth-provider-core";
 import { CORE_RELOCATIONS, renamedVariableCaptures } from "@o3co/auth-provider-core/testing";
-import { standardSmtpMailSenderConfig } from "@o3co/auth-provider-standard/testing";
+import { standardSmtpMailSenderConfigForTests } from "@o3co/auth-provider-standard/testing";
 import { parseFile } from "@o3co/ts.hocon";
 import { validate } from "@o3co/ts.hocon/zod";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -487,7 +487,7 @@ describe("the Redis federation store's plaintext guard, booted from the shipped 
 		// refused by the development mail sender first, so the environment here
 		// is another name that is not production, with the SMTP sender's section.
 		await expect(
-			boot({ ...resolveConfig(PLAINTEXT_ENV), ...standardSmtpMailSenderConfig() }, "test"),
+			boot({ ...resolveConfig(PLAINTEXT_ENV), ...standardSmtpMailSenderConfigForTests() }, "test"),
 		).rejects.toSatisfy((err: unknown) =>
 			/allow-plaintext[\s\S]*core\.deployment\.mode is "multi"/.test(messageChain(err)),
 		);
@@ -502,7 +502,7 @@ describe("the Redis federation store's plaintext guard, booted from the shipped 
 		// section the package's builder carries.
 		const config = {
 			...resolveConfig({ ...PLAINTEXT_ENV, CORE_DEPLOYMENT_MODE: "single" }),
-			...standardSmtpMailSenderConfig(),
+			...standardSmtpMailSenderConfigForTests(),
 		};
 		await expect(boot(config, "production")).rejects.toSatisfy((err: unknown) =>
 			/allow-plaintext[\s\S]*the environment is "production"/.test(messageChain(err)),
@@ -525,7 +525,7 @@ describe("the Redis federation store's plaintext guard, booted from the shipped 
 		// configuration, so the environment here is another name that is not
 		// production, with the SMTP sender's section its module reads.
 		handleRef = await boot(
-			{ ...resolveConfig(PLAINTEXT_ENV), ...standardSmtpMailSenderConfig() },
+			{ ...resolveConfig(PLAINTEXT_ENV), ...standardSmtpMailSenderConfigForTests() },
 			"test",
 		);
 		expect(errorSpy).toHaveBeenCalledWith(

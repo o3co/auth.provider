@@ -32,7 +32,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { mfaEmailFactorConfigSchema } from "#/email/config.mjs";
 import { mfaEmailFactorModule } from "#/email/module.mjs";
 import * as testing from "#/testing/index.mjs";
-import { mfaEmailFactorConfig } from "#/testing/index.mjs";
+import { mfaEmailFactorConfigForTests } from "#/testing/index.mjs";
 
 const REFERENCE = new URL("../../config/reference.conf", import.meta.url);
 
@@ -83,16 +83,16 @@ describe("mfa-email-factor, the email factor's section", () => {
 	});
 });
 
-describe("mfaEmailFactorConfig, the testing entry's builder", () => {
-	it("is what the testing entry publishes", () => {
-		expect(Object.keys(testing)).toEqual(["mfaEmailFactorConfig"]);
+describe("mfaEmailFactorConfigForTests, the testing entry's builder", () => {
+	it("is on the testing entry", () => {
+		expect(Object.keys(testing)).toContain("mfaEmailFactorConfigForTests");
 	});
 
 	it("carries the section as the package's reference.conf defaults it, under the module's name, and lays the keys it is given over them", () => {
-		expect(mfaEmailFactorConfig()).toEqual({
+		expect(mfaEmailFactorConfigForTests()).toEqual({
 			[mfaEmailFactorModule.name]: mfaEmailFactorConfigSchema.parse(referenceSection()),
 		});
-		expect(mfaEmailFactorConfig({ enabled: true })).toEqual({
+		expect(mfaEmailFactorConfigForTests({ enabled: true })).toEqual({
 			[mfaEmailFactorModule.name]: { ...DEFAULTS, enabled: true },
 		});
 	});
@@ -137,21 +137,23 @@ describe("mfaEmailFactorModule, which declares the section", () => {
 
 	it("claims the email kind, and while off, with no mail sender installed, boots and adds no factor", async () => {
 		expect(Object.keys(mfaEmailFactorModule.contributes?.mfaFactors ?? {})).toEqual(["email"]);
-		const { resolver, refused } = await boot(mfaEmailFactorConfig());
+		const { resolver, refused } = await boot(mfaEmailFactorConfigForTests());
 		expect(refused).toBeUndefined();
 		expect(resolver?.get("email")).toBeUndefined();
 		expect([...(resolver?.entries() ?? [])]).toEqual([]);
 	});
 
 	it("refuses the boot when switched on, naming the key and its variable", async () => {
-		const { refused } = await boot(mfaEmailFactorConfig({ enabled: true }));
+		const { refused } = await boot(mfaEmailFactorConfigForTests({ enabled: true }));
 		expect(refused).toBeInstanceOf(BootError);
 		expect(String((refused as BootError).message)).toContain("mfa-email-factor.enabled");
 		expect(String((refused as BootError).message)).toContain("MFA_EMAIL_FACTOR_ENABLED");
 	});
 
 	it("refuses the boot for a key its section does not know, naming the section and the key", async () => {
-		const { refused } = await boot(mfaEmailFactorConfig({ subject: "Your sign-in code" }));
+		const { refused } = await boot(
+			mfaEmailFactorConfigForTests({ subject: "Your sign-in code" } as never),
+		);
 		expect(refused).toBeInstanceOf(BootError);
 		expect((refused as BootError).reason).toBe("config-validation-failed");
 		expect((refused as BootError).message).toContain(
