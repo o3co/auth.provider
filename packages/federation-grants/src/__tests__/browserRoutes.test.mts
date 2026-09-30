@@ -1542,7 +1542,67 @@ describe("the callback for a renewal", () => {
 	});
 });
 
+/**
+ * Each way the connection can stop being the one an intent was lodged against:
+ * gone, another federation entry, another identity revision, another
+ * authorization revision, or another callback.
+ */
+const CONNECTION_CHANGES: readonly (readonly [
+	string,
+	FederationGrantAcquisitionConnection | undefined,
+])[] = [
+	["removed", undefined],
+	["re-pointed onto another federation", { ...CONNECTION, federation: "upstream-other" }],
+	["moved to another upstream client", { ...CONNECTION, upstreamClientId: "provider-client-2" }],
+	["widened to another scope", { ...CONNECTION, scopes: [...CONNECTION.scopes, "contacts.read"] }],
+	[
+		"given another callback",
+		{ ...CONNECTION, callbackUri: `${ISSUER}/v2/session/federation-grants/callback/calendar` },
+	],
+];
+
+const changeConnection = (
+	w: World,
+	changed: FederationGrantAcquisitionConnection | undefined,
+): void => {
+	if (changed === undefined) w.state.connections.delete(CONNECTION.name);
+	else w.state.connections.set(CONNECTION.name, changed);
+};
+
 describe("what the flow re-checks at each step, and the dates it records", () => {
+	it.each(CONNECTION_CHANGES)(
+		"stops at connect when the connection was %s since the intent was lodged",
+		async (_, changed) => {
+			const w = world();
+			const { handle, grantId } = await w.lodge();
+			w.signIn("b-1");
+			changeConnection(w, changed);
+			const response = await w.connect(handle, "b-1");
+			expect(response.status).toBe(400);
+			isPlain(response);
+			expect(response.text).toBe(
+				"The connection has changed since this request was made. Start again.",
+			);
+			await w.background.drain();
+			expect(
+				w.events.find((e) => e.type === "federation.grant.authorization_failed"),
+			).toMatchObject({ details: { grantId, outcome: "connection_changed" } });
+		},
+	);
+
+	it.each(CONNECTION_CHANGES)(
+		"exchanges no code at the callback when the connection was %s since the flow was approved",
+		async (_, changed) => {
+			const w = world();
+			const a = await approved(w, "b-1");
+			changeConnection(w, changed);
+			expect(returned(await callback(w, { state: a.state, code: "c" }, "b-1")).get("error")).toBe(
+				"grant_not_authorizable",
+			);
+			expect(w.state.exchanged).toHaveLength(0);
+		},
+	);
+
 	it("stops at connect when the client may no longer use the connection, or its callback moved", async () => {
 		const w = world();
 		const { handle } = await w.lodge();
