@@ -141,10 +141,12 @@ challenge asks to be mailed only for the call's purpose —
 never empty, with an expiry after the call's time when it gives one, another
 code at each challenge, and in no form in the page's response; a login code
 with the keyed digest of the account's address, normalised
-(`normaliseMailAddress`); the digest a factor records the one it is handed
-(`addressDigest`) — of the address its code went to, as the coordinator kept
-it at the send — at an enrollment's completion, while the Store already
-answers another address, and at a verification under a newer key; over data
+(`normaliseMailAddress`); the digest a factor records exactly the one it is
+handed (`addressDigest`) — of the address its code went to, as the
+coordinator kept it at the send — never one of the address the account
+answered at the start or answers by the completion, and no completion
+without one; a digest a verification is handed under a newer key kept in
+its next data and mailed by the next challenge; over data
 whose digest is gone or unreadable, a login code still asked for, with a
 `null` digest and no throw, so the coordinator refuses the factor; no
 answer — the pending enrollment's state and response, the enrolled data and
@@ -270,7 +272,7 @@ Exported from [`src/index.mts`](src/index.mts):
 | --- | --- |
 | [`enrollmentWitness.contract.test.mts`](src/mfa/__tests__/enrollmentWitness.contract.test.mts) | the witness's suite over an in-process repository and over the fake Store; each broken repository — one that erases or sets every witness when it refuses a subject among them — refused by the case that names what it breaks; the outage case present only with `withOutage`; the kit's `ContractCase` core's |
 | [`factorStore.contract.test.mts`](src/mfa/__tests__/factorStore.contract.test.mts) | the factor store's suite over core's in-process store; each broken store — one that drops an undefined field, rewrites data, overwrites a duplicate, lets every writer win, changes a field an update does not carry, reaches another subject's record, removes every subject's records, writes the same id under another subject or the subject's other factors on a successful update, or answers an update at `Number.MAX_SAFE_INTEGER` with `null` rather than a `RangeError` — refused by the case that names what it breaks; every record id in the provider's shape; a harness built and closed per case |
-| [`factor.contract.test.mts`](src/mfa/__tests__/factor.contract.test.mts) | the factor suite over core's double, with and without a challenge, and mailing its codes, for accounts whose address is padded, internationalised or decomposed; each broken factor — a code in any spelling or escaping in a response, an address in any case, escaping or normalised spelling in an answer, the address kept where its keyed digest belongs, a digest of the address the Store answers by completion rather than the one handed, a verification keeping a digest it was not handed, a challenge over an unreadable digest that throws or mails no `null`, a code for another purpose, an expiry already past, one code at two challenges — refused by the case that names what it breaks |
+| [`factor.contract.test.mts`](src/mfa/__tests__/factor.contract.test.mts) | the factor suite over core's double, with and without a challenge, and mailing its codes, for accounts whose address is padded, internationalised or decomposed; each broken factor — a code in any spelling or escaping in a response, an address in any case, escaping or normalised spelling in an answer, the address kept where its keyed digest belongs, a digest of the address the account answered at the start or answers by the completion rather than the one handed, a completion that completes with none handed, a verification that keeps no digest handed under a newer key or keeps the old one, a challenge over an unreadable digest that throws or mails no `null`, a code for another purpose, an expiry already past, one code at two challenges — refused by the case that names what it breaks |
 | [`mailSender.contract.test.mts`](src/mail/__tests__/mailSender.contract.test.mts) | the mail sender suite over core's recording sender; each broken sender — an old answer, a lost mail, a mail to another mailbox too, a limit read as an outage, an outage or a transient failure answered, a rejection carrying the mail or the relay's reply in any case or in base64, the mail changed — refused by the case that names what it breaks |
 | [`fakeStore.test.mts`](src/mfa/__tests__/fakeStore.test.mts) | each endpoint's answers over real HTTP: every record answered back, the update's compare-and-set and what it writes, `409` / `404`, changes carrying another field refused, the witness mark's `204` / `404` and idempotence, the credential, what it refuses before it records a request, what it records, and an endpoint answered as told — at once, later, or never |
 
