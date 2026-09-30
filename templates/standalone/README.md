@@ -753,7 +753,12 @@ is `/oauth/consent`'s, so one page can serve both. `GET
 duration after approval, not a date), `continues_after_logout` (which the page
 must show), and `expires_in` (what is left of the flow). `POST` with
 `challenge` and `decision` (`accept` | `deny`) answers `303` — to the upstream,
-or back to the client. Every acquisition and renewal goes through it.
+or back to the client. Every acquisition and renewal goes through it. The
+answer is held to the session module's CSRF policy: post it as a form from the
+page, and serve the page with `Referrer-Policy: same-origin` — not
+`no-referrer`, under which the browser sends `Origin: null` and the answer is
+refused. A client that sends no `Origin` echoes the token `GET /session/csrf`
+hands out, as for `POST /session/login`; the package README has the rule.
 
 **The login page** is the one `ENDPOINTS_LOGIN_URL` names, reached with
 `redirect_to=<the connect link>`; it signs the user in and navigates back to
