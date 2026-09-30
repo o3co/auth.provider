@@ -75,6 +75,20 @@ describe("package public surface (@o3co/auth-provider-session)", () => {
 		}
 	});
 
+	it("exports what a composition needs to provide the csrfTokenSigner slot without the session store's module", async () => {
+		// sessionModule requires the slot; a composition that mounts its own
+		// cookie session signs with the session secret as the store's module does.
+		const mod = (await import("#/index.mjs")) as {
+			createSessionCsrfTokenSigner?: (secret: string) => { sign(payload: string): string };
+		};
+		// The fixed vector of csrfTokenSigner.test.mts: the store module's signature.
+		expect(
+			mod
+				.createSessionCsrfTokenSigner?.("fixed-vector.session-secret.at-least-32-bytes.ok")
+				.sign("4102444800.Zml4ZWQtdmVjdG9yLW5vbmNl"),
+		).toBe("uMTD9J4fNg6OrX38rJXZ9QNr3VIPUxlUSG7yRJ3OLkA");
+	});
+
 	it("exports loginCompletionModule, which provides the loginCompletion slot alone", async () => {
 		const mod = (await import("#/index.mjs")) as Record<string, unknown>;
 		const loaded = mod.loginCompletionModule as { name?: unknown; provides?: object } | undefined;

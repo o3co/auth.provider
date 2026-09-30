@@ -12,12 +12,14 @@ import {
 	type AppConfig,
 	BootError,
 	type BuilderContext,
+	checkDeploymentMode,
 	consoleLogger,
 	defineModule,
 	fullSectionsSchema,
 	type ReplicaSafetyDeclaration,
 } from "@o3co/auth-provider-core";
 import session from "express-session";
+import { createSessionCsrfTokenSigner } from "../csrf-token-signer.mjs";
 import { guardCookieSession } from "../internal/cookieSession.mjs";
 import { assertHostPrefixKept, sessionCookiePolicyFrom } from "../session-cookie-policy.mjs";
 import { createSessionStoreFactory, registerBuiltinSessionStores } from "../store/factory.mjs";
@@ -53,27 +55,41 @@ const storageTypeOf = (config: SessionStoreModuleConfig | undefined): unknown =>
 	config?.session?.storage?.type;
 
 function buildSessionStoreModule(replicaSafety: ReplicaSafetyDeclaration | undefined) {
-	return defineModule<"config", "lifecycleRegistrar" | "readinessRegistrar" | "logger">({
+	return defineModule<
+		"config" | "deploymentMode",
+		"lifecycleRegistrar" | "readinessRegistrar" | "logger"
+	>({
 		name: MODULE_NAME,
 		configSchema: sessionStoreConfigSchema,
-		requires: ["config"],
+		// `deploymentMode`: memory storage is refused under `multi`, so a mode
+		// read as absent must not lift that.
+		requires: ["config", "deploymentMode"],
 		// `logger` is optional: the redis client's error handler, and the
 		// middleware's report of a store that cannot load or save a session,
 		// fall back to consoleLogger when the composition wires no logger slot.
 		optional: ["lifecycleRegistrar", "readinessRegistrar", "logger"],
 		...(replicaSafety === undefined ? {} : { replicaSafety }),
-		// The session cookie's attributes, for a module that sets a cookie of
-		// its own beside the session's or sizes what must outlive a session:
-		// this module owns the cookie, and the others require the slot instead
-		// of reading `session.*`. They are the attributes express-session is
-		// given below; the signing secret is not among them.
 		provides: {
+			// The session cookie's attributes, for a module that sets a cookie of
+			// its own beside the session's or sizes what must outlive a session:
+			// this module owns the cookie, and the others require the slot instead
+			// of reading `session.*`. They are the attributes express-session is
+			// given below; the signing secret is not among them.
 			sessionCookiePolicy: (deps) => sessionCookiePolicyFrom((deps.config as AppConfig).session),
+			// The CSRF token's signature, under a key derived from the secret this
+			// module owns: the session module's guard and routes sign through it,
+			// and neither the secret nor the key leaves the signer.
+			csrfTokenSigner: (deps) =>
+				createSessionCsrfTokenSigner((deps.config as AppConfig).session.secret),
 		},
 		contributes: {
 			routes: [
 				async (deps) => {
 					const config = deps.config as AppConfig;
+					const replicas = checkDeploymentMode(
+						deps.deploymentMode,
+						"session-store: deploymentMode",
+					);
 					const ctx: BuilderContext = {
 						lifecycle: deps.lifecycleRegistrar,
 						readiness: deps.readinessRegistrar,
@@ -87,7 +103,7 @@ function buildSessionStoreModule(replicaSafety: ReplicaSafetyDeclaration | undef
 					// nothing: refuse the combination here, with the same reason,
 					// rather than mount a per-process store. With
 					// `sessionStoreModuleFor(config)` the guard refused before this.
-					if (storageSlice.type === "memory" && config.deployment?.mode === "multi") {
+					if (storageSlice.type === "memory" && replicas === "multi") {
 						throw new BootError({
 							stage: "applyContributions",
 							reason: "replica-unsafe-adapter",
@@ -167,9 +183,9 @@ export function sessionStoreModuleFor(config: SessionStoreModuleConfig) {
  * module in `buildModules(config)` (README, "Browser session store").
  *
  * It does not know the storage type, so it declares no `replicaSafety` and the
- * stage-1 guard cannot name it. The route factory still refuses `memory` under
- * `deployment.mode = "multi"`, but a composition root that has its config
- * should use {@link sessionStoreModuleFor} and get the refusal at stage 1,
- * listed with the other offenders.
+ * stage-1 guard cannot name it. The route factory still refuses `memory` when
+ * the `deploymentMode` slot is `multi`, but a composition root that has its
+ * config should use {@link sessionStoreModuleFor} and get the refusal at stage
+ * 1, listed with the other offenders.
  */
 export const sessionStoreModule = buildSessionStoreModule(undefined);

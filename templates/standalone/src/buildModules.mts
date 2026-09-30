@@ -81,7 +81,8 @@ export interface BuildModulesOverrides {
 	 * NODE_ENV`, computed once in `app.mts`), so the Redis federation-token
 	 * store's `allow-plaintext` guard reads the environment the config came
 	 * from, not `NODE_ENV` alone. Omitted, the guard falls back to `NODE_ENV`
-	 * (and `deployment.mode`, which it reads off the config either way).
+	 * (and the `deploymentMode` slot core fills from `deployment.mode`, which it
+	 * reads either way).
 	 */
 	readonly environment?: string;
 	/**
@@ -288,7 +289,7 @@ export function buildModules(config: AppConfig, overrides: BuildModulesOverrides
 	// declare `replicaSafety` on its manifest and the Redis one can `require`
 	// its client slot. The Redis module is built for this composition root so
 	// its plaintext guard knows which environment selected the config; it
-	// reads `deployment.mode` off the config itself.
+	// reads the replica count from core's `deploymentMode` slot.
 	const federationTokenStoreModules: Module[] =
 		federationTokenStoreAdapter === "redis"
 			? [redisFederationTokenStoreModuleFor({ environment: overrides.environment })]

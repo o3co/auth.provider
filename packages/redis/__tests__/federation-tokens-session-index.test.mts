@@ -116,7 +116,11 @@ const indexMembers = (redis: ReturnType<typeof createFakeRedis>, sid: string): s
 describe("per-session federation key index", () => {
 	it("attach records the federation name in the sid's index SET", async () => {
 		const redis = createFakeRedis();
-		const store = createRedisFederationTokenStore({ client: redis, encryption: plaintext });
+		const store = createRedisFederationTokenStore({
+			deploymentMode: "unset",
+			client: redis,
+			encryption: plaintext,
+		});
 		await store.attach("sid-1", "google", tokens);
 		await store.attach("sid-1", "github", tokens);
 		expect(indexMembers(redis, "sid-1")).toEqual(["github", "google"]);
@@ -124,7 +128,11 @@ describe("per-session federation key index", () => {
 
 	it("update records the federation name too (a store that only ever saw update stays indexed)", async () => {
 		const redis = createFakeRedis();
-		const store = createRedisFederationTokenStore({ client: redis, encryption: plaintext });
+		const store = createRedisFederationTokenStore({
+			deploymentMode: "unset",
+			client: redis,
+			encryption: plaintext,
+		});
 		await store.update("sid-1", "google", tokens);
 		expect(indexMembers(redis, "sid-1")).toEqual(["google"]);
 	});
@@ -132,6 +140,7 @@ describe("per-session federation key index", () => {
 	it("the index key carries the store TTL, not the access-token expiry", async () => {
 		const redis = createFakeRedis();
 		const store = createRedisFederationTokenStore({
+			deploymentMode: "unset",
 			client: redis,
 			encryption: plaintext,
 			ttl: 7200,
@@ -142,7 +151,11 @@ describe("per-session federation key index", () => {
 
 	it("the index key lives in the idx: sub-namespace, clear of the envelope keys", async () => {
 		const redis = createFakeRedis();
-		const store = createRedisFederationTokenStore({ client: redis, encryption: plaintext });
+		const store = createRedisFederationTokenStore({
+			deploymentMode: "unset",
+			client: redis,
+			encryption: plaintext,
+		});
 		await store.attach("sid-1", "google", tokens);
 		expect([...redis.sets.keys()]).toEqual(["ft:idx:sid-1"]);
 		expect([...redis.data.keys()]).toEqual(["ft:sid-1:google"]);
@@ -150,7 +163,11 @@ describe("per-session federation key index", () => {
 
 	it("delete(sid, name) drops the name from the index", async () => {
 		const redis = createFakeRedis();
-		const store = createRedisFederationTokenStore({ client: redis, encryption: plaintext });
+		const store = createRedisFederationTokenStore({
+			deploymentMode: "unset",
+			client: redis,
+			encryption: plaintext,
+		});
 		await store.attach("sid-1", "google", tokens);
 		await store.attach("sid-1", "github", tokens);
 		await store.delete("sid-1", "google");
@@ -159,7 +176,11 @@ describe("per-session federation key index", () => {
 
 	it("get() drops the name from the index when it self-heals a corrupt envelope", async () => {
 		const redis = createFakeRedis();
-		const store = createRedisFederationTokenStore({ client: redis, encryption: plaintext });
+		const store = createRedisFederationTokenStore({
+			deploymentMode: "unset",
+			client: redis,
+			encryption: plaintext,
+		});
 		await store.attach("sid-1", "google", tokens);
 		redis.data.set("ft:sid-1:google", "{not-json");
 		expect(await store.get("sid-1", "google")).toBeNull();
@@ -171,6 +192,7 @@ describe("removeBySid is O(the session's federations)", () => {
 	it("removes every indexed envelope without scanning the keyspace", async () => {
 		const redis = createFakeRedis();
 		const store = createRedisFederationTokenStore({
+			deploymentMode: "unset",
 			client: redis,
 			encryption: plaintext,
 			scanFallback: false,
@@ -190,6 +212,7 @@ describe("removeBySid is O(the session's federations)", () => {
 	it("removes the index key itself", async () => {
 		const redis = createFakeRedis();
 		const store = createRedisFederationTokenStore({
+			deploymentMode: "unset",
 			client: redis,
 			encryption: plaintext,
 			scanFallback: false,
@@ -202,6 +225,7 @@ describe("removeBySid is O(the session's federations)", () => {
 	it("uses UNLINK, never DEL, for the removal", async () => {
 		const redis = createFakeRedis();
 		const store = createRedisFederationTokenStore({
+			deploymentMode: "unset",
 			client: redis,
 			encryption: plaintext,
 			scanFallback: false,
@@ -216,6 +240,7 @@ describe("removeBySid is O(the session's federations)", () => {
 	it("reads the index in bounded batches — no unbounded fan-out on a heavily-linked session", async () => {
 		const redis = createFakeRedis();
 		const store = createRedisFederationTokenStore({
+			deploymentMode: "unset",
 			client: redis,
 			encryption: plaintext,
 			scanFallback: false,
@@ -239,6 +264,7 @@ describe("removeBySid is O(the session's federations)", () => {
 	it("is idempotent on a sid that was never attached", async () => {
 		const redis = createFakeRedis();
 		const store = createRedisFederationTokenStore({
+			deploymentMode: "unset",
 			client: redis,
 			encryption: plaintext,
 			scanFallback: false,
@@ -250,7 +276,11 @@ describe("removeBySid is O(the session's federations)", () => {
 describe("scanFallback migration flag", () => {
 	it("defaults to enabled, so an upgrade still reaches tokens written before the index existed", async () => {
 		const redis = createFakeRedis();
-		const store = createRedisFederationTokenStore({ client: redis, encryption: plaintext });
+		const store = createRedisFederationTokenStore({
+			deploymentMode: "unset",
+			client: redis,
+			encryption: plaintext,
+		});
 		// An envelope written before the index existed: no index member exists
 		// for it.
 		redis.data.set(
@@ -267,6 +297,7 @@ describe("scanFallback migration flag", () => {
 	it("scanFallback: false leaves pre-index envelopes behind — the flag is what makes the upgrade safe", async () => {
 		const redis = createFakeRedis();
 		const store = createRedisFederationTokenStore({
+			deploymentMode: "unset",
 			client: redis,
 			encryption: plaintext,
 			scanFallback: false,
@@ -283,7 +314,11 @@ describe("scanFallback migration flag", () => {
 
 	it("the fallback also unlinks in bounded batches", async () => {
 		const redis = createFakeRedis();
-		const store = createRedisFederationTokenStore({ client: redis, encryption: plaintext });
+		const store = createRedisFederationTokenStore({
+			deploymentMode: "unset",
+			client: redis,
+			encryption: plaintext,
+		});
 		for (let i = 0; i < 250; i++) {
 			redis.data.set(
 				`ft:legacy-sid:idp-${i}`,
@@ -302,7 +337,12 @@ describe("scanFallback migration flag", () => {
 	it("the builder forwards scanFallback", async () => {
 		const redis = createFakeRedis();
 		const store = redisFederationTokenStoreBuilder(
-			{ client: redis, encryption: { mode: "allow-plaintext" }, scanFallback: false },
+			{
+				deploymentMode: "unset",
+				client: redis,
+				encryption: { mode: "allow-plaintext" },
+				scanFallback: false,
+			},
 			{},
 		);
 		await store.attach("sid-1", "google", tokens);
@@ -328,7 +368,10 @@ describe("builder structural validator covers the index methods", () => {
 			const client = createFakeRedis() as unknown as Record<string, unknown>;
 			delete client[method];
 			expect(() =>
-				redisFederationTokenStoreBuilder({ client, encryption: { mode: "allow-plaintext" } }, {}),
+				redisFederationTokenStoreBuilder(
+					{ deploymentMode: "unset", client, encryption: { mode: "allow-plaintext" } },
+					{},
+				),
 			).toThrow(new RegExp(`missing required method.*${method}`));
 		},
 	);

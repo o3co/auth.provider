@@ -26,7 +26,13 @@
 import { createHmac, randomBytes } from "node:crypto";
 import { describe, expect, expectTypeOf, it } from "vitest";
 import type { CsrfTokenSigner } from "#/browser-session/types.mjs";
-import { createApp, defineModule, type ProviderDeps } from "#/index.mjs";
+import {
+	CSRF_SIGNATURE_MAX_LENGTH,
+	CSRF_SIGNATURE_MIN_LENGTH,
+	createApp,
+	defineModule,
+	type ProviderDeps,
+} from "#/index.mjs";
 import type { ComponentMap } from "#/modules/manifest/component-map.mjs";
 import { makeValidCoreConfig } from "#/testing/fixtures/valid-config.mjs";
 import {
@@ -36,7 +42,8 @@ import {
 } from "#/testing/index.mjs";
 
 const RULES = {
-	shape: "sign answers a non-empty base64url signature, the same one for the same payload",
+	shape:
+		"sign answers a base64url signature of 22 to 512 characters, the same one for the same payload",
 	roundTrip: "verify accepts the signature sign answered for the payload",
 	changedSignature: "verify refuses a changed, shortened or lengthened signature",
 	changedPayload: "verify refuses a signature for another payload",
@@ -80,6 +87,23 @@ const doubleWith =
 
 const hmac = (key: string | Buffer, payload: string, encoding: "base64url" | "base64" | "hex") =>
 	createHmac("sha256", key).update(payload, "utf8").digest(encoding);
+
+/** A signer over a random key whose signatures are `length` base64url characters: HMACs joined, then cut. */
+const signerOfLength = (length: number) => (): CsrfTokenSigner => {
+	const key = randomBytes(32);
+	const sign = (payload: string): string => {
+		let joined = "";
+		for (let block = 0; joined.length < length; block++) {
+			joined += hmac(key, `${block}:${payload}`, "base64url");
+		}
+		return joined.slice(0, length);
+	};
+	return signerOf(
+		sign,
+		(payload, signature) =>
+			typeof payload === "string" && typeof signature === "string" && signature === sign(payload),
+	);
+};
 
 describe("the csrfTokenSigner slot", () => {
 	it("is optional, and holds sign and verify", () => {
@@ -125,6 +149,25 @@ describe("the csrfTokenSigner slot", () => {
 		} finally {
 			await handle.dispose();
 		}
+	});
+});
+
+describe("the signature's bounds", () => {
+	it("are 22 characters, at least 128 bits of base64url, and 512, exported from core", () => {
+		expect(CSRF_SIGNATURE_MIN_LENGTH).toBe(22);
+		expect(CSRF_SIGNATURE_MAX_LENGTH).toBe(512);
+	});
+
+	it("keep a signer whose signatures are 22 characters, or 512", async () => {
+		const other = () => createTestCsrfTokenSigner();
+		expect(await failing({ build: signerOfLength(22), other })).toEqual([]);
+		expect(await failing({ build: signerOfLength(512), other })).toEqual([]);
+	});
+
+	it("refuse a signer whose signatures are 21 characters, or 513", async () => {
+		const other = () => createTestCsrfTokenSigner();
+		expect(await failing({ build: signerOfLength(21), other })).toEqual([RULES.shape]);
+		expect(await failing({ build: signerOfLength(513), other })).toEqual([RULES.shape]);
 	});
 });
 
