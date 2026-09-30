@@ -71,8 +71,9 @@ describe("the template's mail sender", () => {
 		);
 	});
 
-	it("boots in production with the SMTP sender's module and no SMTP settings, building no sender where nothing reads the slot", async () => {
+	it("boots in production with the SMTP sender's module installed and no SMTP settings, building no sender where nothing reads the slot", async () => {
 		current = await compose();
+		expect(current.modules.map((module) => module.name)).toContain(SMTP);
 		expect(current.handle.components.mailSender).toBeUndefined();
 	});
 });

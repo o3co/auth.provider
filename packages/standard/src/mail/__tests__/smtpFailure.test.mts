@@ -22,6 +22,7 @@
  * from its text or the transport's.
  */
 
+import { constants } from "node:os";
 import { loggableError } from "@o3co/auth-provider-core";
 import { describe, expect, it } from "vitest";
 import { MailTransportError, readSendFailure } from "#/mail/smtp/failure.mjs";
@@ -98,7 +99,6 @@ describe("readSendFailure: the relay's reply, as the provider answers it", () =>
 			],
 			[failure("ETIMEDOUT", "CONN"), "timeout"],
 			[failure("ETLS", "STARTTLS", "454 4.7.0 zq7kx3 TLS not available"), "unreachable"],
-			[failure("ETLS", "CONN"), "unreachable"],
 			[failure("ECONNECTION", "EHLO", "421 4.3.2 zq7kx3 closing"), "unreachable"],
 			[failure("EPROTOCOL", "CONN", "554 5.3.2 zq7kx3 no service"), "unreachable"],
 			[failure("ESOCKET", "CONN"), "unreachable"],
@@ -136,7 +136,13 @@ describe("readSendFailure: the relay's reply, as the provider answers it", () =>
 			"standard-smtp-mail-sender: the relay refused the recipient (SMTP 550 5.1.1)",
 		);
 		expect(read.cause).toBeUndefined();
-		expect(Object.keys(read).sort()).toEqual(["enhancedCode", "name", "reason", "replyCode"]);
+		expect(Object.keys(read).sort()).toEqual([
+			"code",
+			"enhancedCode",
+			"name",
+			"reason",
+			"replyCode",
+		]);
 		for (const text of [read.message, read.stack ?? "", JSON.stringify(loggableError(read))]) {
 			expect(text.toLowerCase()).not.toContain("zq7kx3");
 			expect(text).not.toContain("transport text");
@@ -155,5 +161,26 @@ describe("readSendFailure: the relay's reply, as the provider answers it", () =>
 		expect(message("RCPT TO", "421 4.3.2 x")).toBe(
 			"standard-smtp-mail-sender: the relay refused the recipient (SMTP 421 4.3.2)",
 		);
+	});
+	it("says a failure could not be secured where STARTTLS was refused, or the connection was being secured when it failed", () => {
+		const refused = readSendFailure(failure("ETLS", "STARTTLS", "454 4.7.0 zq7kx3 no TLS"));
+		const whileSecuring = readSendFailure(failure("ESOCKET", "CONN"), true);
+		const plain = readSendFailure(failure("ESOCKET", "CONN"), false);
+		expect((refused as MailTransportError).message).toContain("could not be secured");
+		expect((whileSecuring as MailTransportError).message).toContain("could not be secured");
+		expect((whileSecuring as MailTransportError).reason).toBe("unreachable");
+		expect((plain as MailTransportError).message).not.toContain("could not be secured");
+	});
+
+	it("keeps the system error code of a socket failure where it is one an operator acts on, and none other", () => {
+		const socketFailure = (name: keyof typeof constants.errno): Error =>
+			Object.assign(failure("ESOCKET", "CONN"), { errno: -constants.errno[name] });
+		const reset = readSendFailure(socketFailure("ECONNRESET")) as MailTransportError;
+		expect(reset.code).toBe("ECONNRESET");
+		expect(reset.message).toMatch(/\(ECONNRESET\)$/);
+		expect((readSendFailure(socketFailure("EPIPE")) as MailTransportError).code).toBeUndefined();
+		expect(
+			(readSendFailure(failure("EENVELOPE", "RCPT TO", "550 5.1.1 x")) as MailTransportError).code,
+		).toBeUndefined();
 	});
 });

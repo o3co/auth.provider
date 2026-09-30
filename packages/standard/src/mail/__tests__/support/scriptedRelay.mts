@@ -17,11 +17,13 @@
 /**
  * An SMTP relay a test scripts, listening on `127.0.0.1`: it secures a
  * connection with implicit TLS, offers STARTTLS, or neither, with the
- * fixture certificate; offers AUTH PLAIN when asked; answers each stage as a
- * relay that accepts, or with the reply a test gives it, or not at all; and
- * records every command line with whether the connection was secured when it
- * arrived, and each mail it accepted: the recipients its envelope named, as
- * written between the angle brackets, and the whole message.
+ * fixture certificate; offers AUTH PLAIN when asked, and SMTPUTF8 unless
+ * told not to; answers each stage as a relay that accepts, or with the reply
+ * a test gives it, or not at all, or a byte at a time without ever ending the
+ * line, or by resetting the connection; and records every command line with
+ * whether the connection was secured when it arrived, and each mail it
+ * accepted: the recipients its envelope named, as written between the angle
+ * brackets, and the whole message.
  */
 
 import { readFileSync } from "node:fs";
@@ -59,7 +61,18 @@ export interface ScriptedRelayOptions {
 	readonly replies?: Partial<Record<RelayStage, string>>;
 	/** The stage the relay never answers, holding the connection open. */
 	readonly silent?: RelayStage;
+	/** The stage whose reply the relay starts and never ends, a byte every 20 ms. */
+	readonly trickle?: RelayStage;
+	/** The stage the relay answers by resetting the connection. */
+	readonly reset?: RelayStage;
+	/** Whether EHLO offers SMTPUTF8; it does unless this is false. */
+	readonly smtputf8?: boolean;
+	/** Whether the relay keeps its side of a connection open once the client has closed its own. */
+	readonly allowHalfOpen?: boolean;
 }
+
+/** What a test may script anew between connections. */
+type Script = Pick<ScriptedRelayOptions, "replies" | "silent" | "trickle" | "reset">;
 
 /** A command line as the relay read it, and whether TLS protected it. */
 export interface RelayCommand {
@@ -76,7 +89,7 @@ export interface ScriptedRelay {
 	/** How many connections it took. */
 	readonly connections: () => number;
 	/** Scripts the replies, and the stage never answered, of every connection from now on. */
-	readonly rescript: (script: Pick<ScriptedRelayOptions, "replies" | "silent">) => void;
+	readonly rescript: (script: Script) => void;
 	readonly close: () => Promise<void>;
 }
 
@@ -99,7 +112,7 @@ export async function startScriptedRelay(
 	const accepted: RelayedMail[] = [];
 	const sockets = new Set<Socket>();
 	let connections = 0;
-	let script: Pick<ScriptedRelayOptions, "replies" | "silent"> = options;
+	let script: Script = options;
 
 	const serve = (plain: Socket): void => {
 		connections += 1;
@@ -112,15 +125,36 @@ export async function startScriptedRelay(
 		let inData = false;
 		let dataLines: string[] = [];
 		let recipients: string[] = [];
-		const { replies, silent } = script;
+		const { replies, silent, trickle, reset } = script;
+
+		/** Writes `opening`, then a byte every 20 ms, never ending the line. */
+		const trickling = (opening: string): void => {
+			socket.write(opening);
+			const timer = setInterval(() => {
+				if (socket.destroyed || !socket.writable) clearInterval(timer);
+				else socket.write("x");
+			}, 20);
+			plain.once("close", () => clearInterval(timer));
+		};
 
 		const answer = (stage: RelayStage, own: string): void => {
+			if (reset === stage) {
+				plain.resetAndDestroy();
+				return;
+			}
 			if (silent === stage) return;
-			socket.write(`${replies?.[stage] ?? own}\r\n`);
+			const reply = replies?.[stage] ?? own;
+			if (trickle === stage) trickling(reply.slice(0, 4));
+			else socket.write(`${reply}\r\n`);
 		};
 
 		const ehloReply = (): string => {
-			const lines = ["relay.test", "8BITMIME", "SMTPUTF8", "ENHANCEDSTATUSCODES"];
+			const lines = [
+				"relay.test",
+				"8BITMIME",
+				...(options.smtputf8 === false ? [] : ["SMTPUTF8"]),
+				"ENHANCEDSTATUSCODES",
+			];
 			if (security === "starttls" && !secure) lines.push("STARTTLS");
 			if (options.auth) lines.push("AUTH PLAIN");
 			return lines.map((line, i) => `250${i === lines.length - 1 ? " " : "-"}${line}`).join("\r\n");
@@ -132,7 +166,9 @@ export async function startScriptedRelay(
 				return;
 			}
 			answer("starttls", OWN_REPLIES.starttls);
-			if (replies?.starttls === undefined && silent !== "starttls") upgrade();
+			if (replies?.starttls === undefined && ![silent, trickle, reset].includes("starttls")) {
+				upgrade();
+			}
 		};
 
 		const data = (): void => {
@@ -169,7 +205,7 @@ export async function startScriptedRelay(
 			inData = false;
 			const content = dataLines.map((l) => (l.startsWith("..") ? l.slice(1) : l)).join("\r\n");
 			const reply = replies?.message ?? OWN_REPLIES.message;
-			if (reply.startsWith("2") && silent !== "message") {
+			if (reply.startsWith("2") && ![silent, trickle, reset].includes("message")) {
 				accepted.push({ to: [...recipients], content });
 			}
 			answer("message", OWN_REPLIES.message);
@@ -218,7 +254,7 @@ export async function startScriptedRelay(
 		answer("greeting", OWN_REPLIES.greeting);
 	};
 
-	const server = createServer(serve);
+	const server = createServer({ allowHalfOpen: options.allowHalfOpen === true }, serve);
 	await new Promise<void>((resolve, reject) => {
 		server.once("error", reject);
 		server.listen(0, "127.0.0.1", () => resolve());

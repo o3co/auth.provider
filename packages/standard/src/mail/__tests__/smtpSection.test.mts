@@ -288,4 +288,20 @@ describe("standardSmtpMailSenderModule, which declares the section", () => {
 		);
 		expect((refused as BootError).message).not.toContain("S3CRET");
 	});
+
+	it("refuses the boot where a module reads the slot and the password is empty, as though it were not set, naming the password's key", async () => {
+		const refused = await boot(
+			standardSmtpMailSenderConfigForTests({
+				host: "smtp.example.com",
+				from: "Sign-in <no-reply@example.com>",
+				user: "mailer",
+				password: "",
+			}),
+			[readerOfTheSlot().module],
+		);
+		expect(refused).toBeInstanceOf(BootError);
+		expect((refused as BootError).message).toContain(
+			"standard-smtp-mail-sender.password (STANDARD_SMTP_MAIL_SENDER_PASSWORD)",
+		);
+	});
 });

@@ -19,11 +19,14 @@
  * rendering to one envelope recipient, the address as written; it secures
  * the connection as `secure` says and never sends a command a secured
  * connection should carry over a plain one; it answers a limit apart from an
- * outage; it gives up on a relay that does not answer in time; and nothing of
- * the password, the address or the code reaches what it throws or writes.
+ * outage; it gives up on a relay that does not answer in time, and on a send
+ * that does not finish in time however the relay trickles; it leaves no
+ * socket open; and nothing of the password, the address or the code reaches
+ * what it throws or writes.
  */
 
 import { connect, Socket } from "node:net";
+import { setTimeout as delay } from "node:timers/promises";
 import {
 	loggableError,
 	type MailPurpose,
@@ -96,6 +99,29 @@ async function rejectionOf(sending: Promise<unknown>): Promise<unknown> {
 	}
 }
 
+/** What `sending` came to within `ms`: its answer, its rejection, or that it was still pending. */
+async function settledWithin(
+	sending: Promise<unknown>,
+	ms: number,
+): Promise<{ readonly answer?: unknown; readonly error?: unknown; readonly pending?: true }> {
+	return Promise.race([
+		sending.then(
+			(answer) => ({ answer }),
+			(error: unknown) => ({ error }),
+		),
+		delay(ms).then(() => ({ pending: true as const })),
+	]);
+}
+
+/** A `connect` that keeps each socket it opens in `opened`. */
+const keeping =
+	(opened: Socket[]) =>
+	({ port }: { readonly port: number }): Socket => {
+		const socket = connect({ host: "127.0.0.1", port });
+		opened.push(socket);
+		return socket;
+	};
+
 /** The verbs of the command lines the relay read. */
 const verbs = (relay: ScriptedRelay): string[] =>
 	relay
@@ -122,6 +148,7 @@ describe("the SMTP sender's delivery", () => {
 			"MAIL FROM",
 			"RCPT TO",
 			"DATA",
+			"QUIT",
 		]);
 		const commands = relay.commands();
 		expect(commands.slice(0, 2).every(({ secure }) => !secure)).toBe(true);
@@ -147,7 +174,7 @@ describe("the SMTP sender's delivery", () => {
 		expect((await relay.relayed()).map(({ to }) => to)).toEqual([["alice@example.com"]]);
 	});
 
-	it("verifies the relay's certificate against its name: localhost over STARTTLS", async () => {
+	it("delivers over STARTTLS where the host is localhost, the name the relay's certificate gives", async () => {
 		const relay = await relayWith({ security: "starttls" });
 		const answer = await senderAt(
 			relay.port,
@@ -222,6 +249,7 @@ describe("the SMTP sender's TLS rules", () => {
 			);
 			const error = await rejectionOf(sender.send(mailTo("alice@example.com")));
 			expect((error as MailTransportError).reason, security).toBe("unreachable");
+			expect((error as MailTransportError).message, security).toContain("could not be secured");
 			expect(
 				relay.commands().some(({ secure }) => secure),
 				security,
@@ -230,6 +258,32 @@ describe("the SMTP sender's TLS rules", () => {
 				verbs(relay).filter((verb) => verb !== "EHLO" && verb !== "STARTTLS"),
 				security,
 			).toEqual([]);
+		}
+	});
+
+	it("refuses a relay it cannot verify though NODE_TLS_REJECT_UNAUTHORIZED is 0, over STARTTLS and over implicit TLS", async () => {
+		vi.stubEnv("NODE_TLS_REJECT_UNAUTHORIZED", "0");
+		try {
+			for (const security of ["starttls", "tls"] as const) {
+				const relay = await relayWith({ security, auth: true });
+				const sender = createStandardSmtpMailSender(
+					settingsFor({
+						host: "127.0.0.1",
+						port: relay.port,
+						secure: security,
+						from: FROM,
+						user: "mailer",
+						password: "relay-password",
+					}),
+					{ now: () => NOW },
+				);
+				const error = await rejectionOf(sender.send(mailTo("alice@example.com")));
+				expect((error as MailTransportError).reason, security).toBe("unreachable");
+				expect(verbs(relay), security).not.toContain("AUTH");
+				expect(await relay.relayed(), security).toEqual([]);
+			}
+		} finally {
+			vi.unstubAllEnvs();
 		}
 	});
 
@@ -324,9 +378,92 @@ describe("the SMTP sender's deadlines", () => {
 		expect(await relay.relayed()).toEqual([]);
 	});
 
-	it("rejects as unreachable where nothing listens", async () => {
+	it("rejects as unreachable where nothing listens, naming the transport's code", async () => {
 		const error = await rejectionOf(senderAt(await closedPort()).send(mailTo("alice@example.com")));
 		expect((error as MailTransportError).reason).toBe("unreachable");
+		expect((error as MailTransportError).code).toBe("ECONNREFUSED");
+		expect((error as MailTransportError).message).toMatch(/\(ECONNREFUSED\)$/);
+	});
+
+	it("keeps a connection failure's code only where it is one an operator acts on", async () => {
+		const failing = (code: string) => (): Socket => {
+			const socket = new Socket();
+			process.nextTick(() => socket.destroy(Object.assign(new Error(`zq7kx3 ${code}`), { code })));
+			return socket;
+		};
+		for (const code of ["ENOTFOUND", "EAI_AGAIN", "EHOSTUNREACH", "ENETUNREACH", "ECONNRESET"]) {
+			const error = await rejectionOf(
+				senderAt(25, {}, { connect: failing(code) }).send(mailTo("alice@example.com")),
+			);
+			expect((error as MailTransportError).code, code).toBe(code);
+		}
+		for (const code of ["EWEIRD", "zq7kx3", "ECONNREFUSED zq7kx3"]) {
+			const error = await rejectionOf(
+				senderAt(25, {}, { connect: failing(code) }).send(mailTo("alice@example.com")),
+			);
+			expect((error as MailTransportError).code, code).toBeUndefined();
+			expect((error as MailTransportError).message, code).not.toContain("zq7kx3");
+		}
+	});
+
+	it("names ECONNRESET for a relay that resets the connection mid-send", async () => {
+		const relay = await relayWith({ reset: "rcpt" });
+		const error = await rejectionOf(senderAt(relay.port).send(mailTo("alice@example.com")));
+		expect((error as MailTransportError).reason).toBe("unreachable");
+		expect((error as MailTransportError).code).toBe("ECONNRESET");
+	});
+});
+
+describe("the SMTP sender's deadline for the whole send", () => {
+	// The whole send has the connection's, the greeting's and an answer's time together.
+	const TIMEOUTS = { connectMs: 300, greetingMs: 300, idleMs: 600 };
+	const WHOLE = 1_200;
+
+	it("gives up, at the latest when the whole send's time is out, on a relay that trickles a reply it never ends: the greeting, EHLO's before STARTTLS, STARTTLS's, or the last one over TLS", async () => {
+		for (const stage of ["greeting", "ehlo", "starttls", "message"] as const) {
+			const relay = await relayWith({ trickle: stage, auth: true });
+			const started = Date.now();
+			const settled = await settledWithin(
+				senderAt(relay.port, {}, { timeouts: TIMEOUTS }).send(mailTo("alice@example.com")),
+				WHOLE + 3_000,
+			);
+			expect(settled.pending, stage).toBeUndefined();
+			expect(settled.error, stage).toBeInstanceOf(MailTransportError);
+			expect((settled.error as MailTransportError).reason, stage).toBe("timeout");
+			expect(Date.now() - started, stage).toBeLessThan(WHOLE + 1_000);
+		}
+	});
+});
+
+describe("the SMTP sender's connections", () => {
+	it("closes the connection with QUIT after a delivery, and leaves no socket of its own open however a send ends, though the relay keeps its side open", async () => {
+		const cases: [string, ScriptedRelayOptions][] = [
+			["delivered", {}],
+			["refused", { replies: { rcpt: "550 5.1.1 unknown" } }],
+			["at a limit", { replies: { rcpt: "451 4.7.1 slow down" } }],
+			["stalled", { silent: "rcpt" }],
+			["trickled", { trickle: "rcpt" }],
+		];
+		for (const [what, script] of cases) {
+			const relay = await relayWith({ ...script, allowHalfOpen: true });
+			const opened: Socket[] = [];
+			await senderAt(
+				relay.port,
+				{},
+				{
+					connect: keeping(opened),
+					timeouts: { connectMs: 300, greetingMs: 300, idleMs: 300 },
+				},
+			)
+				.send(mailTo("alice@example.com"))
+				.catch(() => undefined);
+			expect(opened.length, what).toBe(1);
+			expect(
+				opened.every((socket) => socket.destroyed),
+				what,
+			).toBe(true);
+			if (what === "delivered") expect(verbs(relay).at(-1)).toBe("QUIT");
+		}
 	});
 });
 
@@ -394,7 +531,7 @@ describe("the SMTP sender's envelope", () => {
 		}
 	});
 
-	it("refuses, before any connection, a recipient the envelope cannot carry as written: a quoted local part holding an angle bracket", async () => {
+	it("rejects as rejected, before any connection, a recipient whose quoted local part holds an angle bracket, which the transport refuses in an envelope address", async () => {
 		const relay = await relayWith();
 		for (const to of [
 			'"a<b"@example.com',
@@ -402,10 +539,37 @@ describe("the SMTP sender's envelope", () => {
 			'"x>bob@evil.example"@example.com',
 		]) {
 			const error = await rejectionOf(senderAt(relay.port).send(mailTo(to)));
-			expect(error, to).toBeInstanceOf(RangeError);
+			expect(error, to).toBeInstanceOf(MailTransportError);
+			expect((error as MailTransportError).reason, to).toBe("rejected");
+			expect((error as Error).message, to).toContain("the SMTP transport");
 			expect((error as Error).message, to).not.toContain("example");
 		}
 		expect(relay.connections()).toBe(0);
+	});
+
+	it("rejects as rejected, before signing in or sending the envelope, an address beyond ASCII to a relay that does not offer SMTPUTF8", async () => {
+		const relay = await relayWith({ auth: true, smtputf8: false });
+		const error = await rejectionOf(
+			senderAt(relay.port, { user: "mailer", password: "relay-password" }).send(
+				mailTo("jörg@example.com"),
+			),
+		);
+		expect(error).toBeInstanceOf(MailTransportError);
+		expect((error as MailTransportError).reason).toBe("rejected");
+		expect((error as Error).message).not.toContain("jörg");
+		expect(verbs(relay)).toEqual(["EHLO", "STARTTLS", "EHLO"]);
+	});
+
+	it("sends an address beyond ASCII with SMTPUTF8 to a relay that offers it", async () => {
+		const relay = await relayWith({ auth: true });
+		const answer = await senderAt(relay.port, { user: "mailer", password: "relay-password" }).send(
+			mailTo("jörg@example.com"),
+		);
+		expect(mailSendOutcome(answer)).toBe("delivered");
+		const lines = relay.commands().map(({ line }) => line);
+		expect(lines).toContain("MAIL FROM:<no-reply@example.com> SMTPUTF8");
+		expect(lines).toContain("RCPT TO:<jörg@example.com>");
+		expect((await relay.relayed()).map(({ to }) => to)).toEqual([["jörg@example.com"]]);
 	});
 
 	it("refuses, before any connection, a recipient that is not one addr-spec in its normalised spelling", async () => {
@@ -532,6 +696,10 @@ describe("the SMTP sender's settings", () => {
 			[
 				{ host: "smtp.example.com", from: FROM, password: "Pw-S3ntinel-9f2c" },
 				"standard-smtp-mail-sender.user (STANDARD_SMTP_MAIL_SENDER_USER)",
+			],
+			[
+				{ host: "smtp.example.com", from: FROM, user: "mailer", password: "" },
+				"standard-smtp-mail-sender.password (STANDARD_SMTP_MAIL_SENDER_PASSWORD)",
 			],
 		];
 		for (const [options, named] of refusals) {

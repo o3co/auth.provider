@@ -57,7 +57,10 @@ import {
 	type UserSessionStore,
 	type WebAuthnCredentialStore,
 } from "@o3co/auth-provider-core";
-import { unreadableModuleLeaves } from "@o3co/auth-provider-core/testing";
+import {
+	createRecordingMailSender,
+	unreadableModuleLeaves,
+} from "@o3co/auth-provider-core/testing";
 import { DEVICE_CODE_GRANT_TYPE, deviceGrantModule } from "@o3co/auth-provider-device-grant";
 import { mfaConfigForTests, totpCodeForTests } from "@o3co/auth-provider-mfa/testing";
 import {
@@ -274,6 +277,13 @@ describe("the full set's mail sender", () => {
 			.filter((module) => module.provides !== undefined && "mailSender" in module.provides)
 			.map((module) => module.name);
 		expect(providers).toEqual([standardSmtpMailSenderModule.name]);
+	});
+
+	it("gives the slot to a caller's own mailSender override, over the recording sender", async () => {
+		const own = createRecordingMailSender();
+		const { handle, mail } = await boot({ extraOverrides: () => ({ mailSender: own }) });
+		expect(handle.components.mailSender).toBe(own);
+		expect(handle.components.mailSender).not.toBe(mail);
 	});
 });
 
