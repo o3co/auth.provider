@@ -38,11 +38,14 @@ import {
 	ALICE,
 	boot,
 	configFor,
+	directoryEntries,
 	disposeAll,
 	events,
 	login,
 	sessionIdSet,
+	WitnessingUserRepository,
 } from "./moduleHarness.mjs";
+import { recordingAuditSink } from "./routesHarness.mjs";
 import { factorRecord, unreachableFactorStore } from "./requirementHarness.mjs";
 
 afterEach(disposeAll);
@@ -289,4 +292,40 @@ describe("a password login while the factor store is down", () => {
 		// Nothing was regenerated: the browser is handed no new session.
 		expect(sessionIdSet(res)).toBeUndefined();
 	});
+});
+
+describe("a password login the Store says enrolled while no factor is on record (D12)", () => {
+	for (const mode of ["optional", "required"] as const) {
+		it(`is answered 503 once under ${mode} — admission's line carrying the inconsistency, the event recorded — and nothing written`, async () => {
+			const entries = directoryEntries();
+			const alice = entries.get(ALICE.username);
+			if (alice !== undefined) alice.mfaEnrolled = true;
+			const watched = watchedTransactions();
+			const audit = recordingAuditSink();
+			const { app, userSessionStore, logger } = await boot({
+				config: configFor(mode),
+				transactionStore: watched.store,
+				userRepository: new WitnessingUserRepository(entries),
+				auditSink: audit,
+			});
+			const create = vi.spyOn(userSessionStore as UserSessionStore, "create");
+
+			const { res } = await login(app);
+
+			expect(res.status).toBe(503);
+			expect(res.body).toEqual(REQUIREMENT_UNAVAILABLE);
+			expect(events(logger, "error")).toEqual(["session_admission_unavailable"]);
+			expect(logger.error.mock.calls[0]?.[0]).toMatchObject({
+				store: "mfa",
+				phase: "establishment",
+				err: { name: "MfaEnrollmentStateInconsistentError", reason: "mfa_enrollment_state_inconsistent" },
+			});
+			expect(audit.of("mfa.enrollment_state_inconsistent")).toEqual([
+				expect.objectContaining({ subject: ALICE.id, details: { purpose: "login", witness: "enrolled" } }),
+			]);
+			expect(create).not.toHaveBeenCalled();
+			expect(watched.create).not.toHaveBeenCalled();
+			expect(sessionIdSet(res)).toBeUndefined();
+		});
+	}
 });

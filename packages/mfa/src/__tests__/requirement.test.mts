@@ -33,6 +33,8 @@ import {
 	type ActionGrade,
 	ADMISSION_GRADES,
 	type AdmissionAction,
+	type AuditEvent,
+	type AuditSink,
 	admitPrimary,
 	admitSession,
 	cookieClaim,
@@ -102,6 +104,7 @@ function build(
 		/** `mfa.manage.maxAgeSeconds`; the package's default, by default. */
 		readonly recentMfaMaxAgeSeconds?: number;
 		readonly logger?: Logger;
+		readonly auditSink?: AuditSink;
 	} = {},
 ): Built {
 	const transactionStore = options.transactionStore ?? createMemoryMfaTransactionStore();
@@ -118,6 +121,7 @@ function build(
 		stepUpRecordable: options.stepUpRecordable ?? true,
 		recentMfaMaxAgeSeconds: options.recentMfaMaxAgeSeconds ?? 300,
 		logger: options.logger ?? silentLogger(),
+		auditSink: options.auditSink,
 	});
 	return { requirement, transactionStore };
 }
@@ -1163,15 +1167,96 @@ describe("admitPrimary — after a password login", () => {
 		expect(logger.warn).not.toHaveBeenCalled();
 	});
 
-	it("reads no enrollment witness before step 9: a user the Store says enrolled, with no record, is still asked for a first binding (owner decision 2)", async () => {
-		const { requirement } = build("required");
+	it("answers a subject the Store says enrolled, holding no record, as an outage under either mode: the event recorded, the cause naming the inconsistency, nothing opened", async () => {
+		for (const mode of ["optional", "required"] as const) {
+			const events: AuditEvent[] = [];
+			const transactionStore = createMemoryMfaTransactionStore();
+			const create = vi.spyOn(transactionStore, "create");
+			const { requirement } = build(mode, {
+				transactionStore,
+				auditSink: { kind: "recording", record: async (event) => void events.push(event) },
+			});
+			const primary = primaryOf("u-alice", { mfaEnrolled: true });
+
+			const thrown = await requirement.admitPrimary?.(primary).catch((err: unknown) => err);
+			expect(thrown, mode).toMatchObject({
+				name: "MfaEnrollmentStateInconsistentError",
+				reason: "mfa_enrollment_state_inconsistent",
+			});
+			expect(await admitPrimary(depsFor(requirement), primary), mode).toEqual({
+				outcome: "unavailable",
+				store: "mfa",
+			});
+			expect(create, mode).not.toHaveBeenCalled();
+			expect(events, mode).toEqual([
+				expect.objectContaining({
+					type: "mfa.enrollment_state_inconsistent",
+					subject: "u-alice",
+					details: { purpose: "login", witness: "enrolled" },
+				}),
+				expect.objectContaining({ type: "mfa.enrollment_state_inconsistent" }),
+			]);
+		}
+	});
+
+	it("answers a witness the Store answered malformed — null, a number, a string, an object — as the same outage, never a first binding", async () => {
+		for (const mfaEnrolled of [null, 1, "true", {}]) {
+			const events: AuditEvent[] = [];
+			const { requirement } = build("required", {
+				auditSink: { kind: "recording", record: async (event) => void events.push(event) },
+			});
+			await expect(
+				requirement.admitPrimary?.(primaryOf("u-alice", { mfaEnrolled })),
+				JSON.stringify(mfaEnrolled),
+			).rejects.toMatchObject({ reason: "mfa_enrollment_state_inconsistent" });
+			expect(events.map((event) => event.details), JSON.stringify(mfaEnrolled)).toEqual([
+				{ purpose: "login", witness: "malformed" },
+			]);
+		}
+	});
+
+	it("compares the witness with the records that count: recovery codes alone beside it are the same outage; a counting record, or one of a kind no longer installed, is asked for", async () => {
+		const enrolled = primaryOf("u-alice", { mfaEnrolled: true });
+		const alone = build("required", {
+			factors: [FACTORS.totp(), FACTORS.recovery()],
+			factorStore: factorStoreHolding(factorRecord("u-alice", "recovery_code")),
+		});
+		await expect(alone.requirement.admitPrimary?.(enrolled)).rejects.toMatchObject({
+			reason: "mfa_enrollment_state_inconsistent",
+		});
+		for (const kind of ["totp", "retired-kind"]) {
+			const { requirement } = build("required", {
+				factors: [FACTORS.totp(), FACTORS.recovery()],
+				factorStore: factorStoreHolding(factorRecord("u-alice", kind)),
+			});
+			const admission = await admitPrimary(depsFor(requirement), enrolled);
+			expect(admission.outcome, kind).toBe("interrupt");
+			if (admission.outcome !== "interrupt") return;
+			expect((await admission.open("sess-1")).body.error, kind).toBe("mfa_required");
+		}
+	});
+
+	it("reads no witness while a counting record stands: a malformed one beside it is asked for the factor", async () => {
+		const { requirement } = build("required", {
+			factorStore: factorStoreHolding(factorRecord("u-alice", "totp")),
+		});
 		const admission = await admitPrimary(
 			depsFor(requirement),
-			primaryOf("u-alice", { mfaEnrolled: true }),
+			primaryOf("u-alice", { mfaEnrolled: "yes" }),
 		);
 		expect(admission.outcome).toBe("interrupt");
 		if (admission.outcome !== "interrupt") return;
-		expect((await admission.open("sess-1")).body.error).toBe("mfa_enrollment_required");
+		expect((await admission.open("sess-1")).body.error).toBe("mfa_required");
+	});
+
+	it("opens a first binding for a subject the Store says is not enrolled — false, or no witness at all", async () => {
+		for (const user of [{ mfaEnrolled: false }, {}]) {
+			const { requirement } = build("required");
+			const admission = await admitPrimary(depsFor(requirement), primaryOf("u-alice", user));
+			expect(admission.outcome, JSON.stringify(user)).toBe("interrupt");
+			if (admission.outcome !== "interrupt") return;
+			expect((await admission.open("sess-1")).body.error).toBe("mfa_enrollment_required");
+		}
 	});
 
 	it("throws when the factors cannot be listed — admission answers unavailable, and nothing is opened", async () => {

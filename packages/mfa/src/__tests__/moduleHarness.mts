@@ -202,12 +202,41 @@ export const directoryEntries = () =>
 		[BOB.username, { password: BOB.password, id: BOB.id, email: BOB.email }],
 	]);
 
+/** A directory that writes the enrollment witness: each mark recorded, and answered back by the next `authenticate`. */
+export class WitnessingUserRepository extends InMemoryUserRepository {
+	/** Every mark written, oldest first. */
+	readonly marks: { readonly subject: string; readonly enrolled: boolean }[] = [];
+	private failure: unknown;
+
+	constructor(private readonly entries = directoryEntries()) {
+		super(entries);
+	}
+
+	/** From now on, every mark rejects with `error` and writes nothing. */
+	failWith(error: unknown): void {
+		this.failure = error;
+	}
+
+	/** Write marks again. */
+	recover(): void {
+		this.failure = undefined;
+	}
+
+	async markMfaEnrolled(subject: string, enrolled: boolean): Promise<void> {
+		if (this.failure !== undefined) throw this.failure;
+		this.marks.push({ subject, enrolled });
+		for (const entry of this.entries.values()) {
+			if (entry.id === subject) entry.mfaEnrolled = enrolled;
+		}
+	}
+}
+
 const sessionSupport = (
 	rateLimiter: RateLimiter | null,
 	userRepository: UserRepository | undefined,
 ): Module[] => [
 	providing("test:user-repository", {
-		userRepository: () => userRepository ?? new InMemoryUserRepository(directoryEntries()),
+		userRepository: () => userRepository ?? new WitnessingUserRepository(),
 	}),
 	providing("test:federation-token-store", {
 		federationTokenStore: () =>
@@ -258,7 +287,7 @@ export interface BootOptions {
 	readonly auditSink?: AuditSink;
 	/** The composition's mail sender; none by default. */
 	readonly mailSender?: MailSender;
-	/** The directory the login verifies; alice and bob in memory, without the witness's write, by default. */
+	/** The directory the login verifies; alice and bob in a {@link WitnessingUserRepository} by default. */
 	readonly userRepository?: UserRepository;
 	/** Modules beside the composition's: another factor, say. */
 	readonly extraModules?: readonly Module[];
