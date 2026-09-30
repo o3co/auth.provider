@@ -263,8 +263,9 @@ that safety.
 There is no absence policy for MFA: the `mfaCoordinator` slot and
 `MFA_ABSENCE_POLICY` left with the session-admission ADR (D6, D7). What a
 composition expects of session admission is declared by
-`sessionRequirements.expected` instead, and an `mfa.mode` other than `off`
-without a requirement named `mfa` refuses the boot (`session-requirement-missing`).
+`sessionRequirements.expected` instead: a name there that no module registers
+refuses the boot (`session-requirement-missing`), `mfa` without the MFA
+package among them.
 
 The subject-revocation pair shares one policy on purpose: two components, one
 capability, so a deployment without them has one thing to declare rather than

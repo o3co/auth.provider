@@ -66,8 +66,9 @@ import express from "express";
 import helmet from "helmet";
 import request from "supertest";
 import { beforeAll, describe, expect, it } from "vitest";
-import { buildModules, withSessionRequirements } from "#/buildModules.mjs";
+import { buildModules } from "#/buildModules.mjs";
 import {
+	expectedSessionRequirements,
 	type OwnLayers,
 	readOwnLayers,
 	readSwitches,
@@ -191,6 +192,13 @@ federationGrants {
 	return file;
 })();
 
+/** `text` in a file of its own, for a layer above the composition's files. */
+function hoconFile(text: string): string {
+	const file = join(mkdtempSync(join(tmpdir(), "all-modules-operator-")), "operator.conf");
+	writeFileSync(file, text);
+	return file;
+}
+
 /** The composition's own files, highest first: the operator's layer, then the shipped production ones. */
 export function ownFiles(): string[] {
 	const { applicationConfPath, envConfPath } = resolveConfigPaths(configDir, "production");
@@ -201,15 +209,16 @@ export function ownFiles(): string[] {
  * Phase one, as `app.mts` reads it: the switches `buildModules` chooses
  * the modules by — and `reads`, what a module added to the composition reads
  * when it is built — from the composition's own files under `env` over core's
- * `reference.conf`, with the posture on session admission derived from the
- * parsed mode.
+ * `reference.conf`. What the composition expects of session admission is
+ * derived from it (`expectedSessionRequirements`), after `config` adjusts it
+ * as an operator's layer would.
  */
 export function resolveConfig(
 	env: Readonly<Record<string, string>>,
 	reads: readonly string[] = [],
 	own: OwnLayers = readOwnLayers(ownFiles(), { env }),
 ): AppConfig {
-	return withSessionRequirements(readSwitches(own, { reads }));
+	return readSwitches(own, { reads });
 }
 
 // ---------------------------------------------------------------------------
@@ -573,6 +582,8 @@ export type ModuleOrder = typeof AS_LISTED | typeof REVERSED;
 
 export interface ComposeOptions {
 	readonly env?: Readonly<Record<string, string>>;
+	/** HOCON an operator writes above the composition's own files, read in both phases. */
+	readonly operatorHocon?: string;
 	/**
 	 * Paths read before boot beside the template's switches: what a module
 	 * `extraModules` adds reads when it is built (`readSwitches`'s `reads`).
@@ -645,7 +656,12 @@ export async function compose(options: ComposeOptions = {}): Promise<Composition
 	const adjust = (config: AppConfig) => (options.config ? options.config(config) : config);
 	// The composition's own layers, read once for both phases, as `app.mts`
 	// reads them. Phase one: the switches the modules are chosen by.
-	const own = readOwnLayers(ownFiles(), { env });
+	const own = readOwnLayers(
+		options.operatorHocon === undefined
+			? ownFiles()
+			: [hoconFile(options.operatorHocon), ...ownFiles()],
+		{ env },
+	);
 	const switches = resolveConfig(env, options.reads, own);
 	const config = adjust(switches);
 	const fakes = await sharedUpstreams();
@@ -653,7 +669,7 @@ export async function compose(options: ComposeOptions = {}): Promise<Composition
 	const logger = createRecordingLogger();
 	// Phase two: the configuration as resolved over every loaded package's
 	// reference.conf, which createApp parses once.
-	const resolved = adjust(resolveForBoot(own, modules, switches.sessionRequirements));
+	const resolved = adjust(resolveForBoot(own, modules, expectedSessionRequirements(config)));
 	const handle = await createApp({
 		modules,
 		bootstrapComponents: {

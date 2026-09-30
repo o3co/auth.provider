@@ -61,8 +61,8 @@ const PASSWORD = "correct-horse-battery-staple";
 const config: AppConfig = {
 	http: { port: 0, trustProxy: false, readinessTimeoutMs: 1000 },
 	logging: { level: "silent" },
-	// The posture on session admission `app.mts` derives from `mfa.mode`
-	// (ADR 2026-09-28-session-admission): this composition expects none.
+	// The session requirements this composition expects, as the shipped
+	// `application.conf` does (ADR 2026-09-28-session-admission): none.
 	sessionRequirements: { expected: [] },
 	oauth: {
 		jwt: {

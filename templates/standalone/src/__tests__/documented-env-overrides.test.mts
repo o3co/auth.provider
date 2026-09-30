@@ -20,13 +20,20 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
 	type AppConfig,
+	BootError,
 	coreReference,
 	createApp,
 	resolveAccessTokenLifetime,
 } from "@o3co/auth-provider-core";
 import { describe, expect, it } from "vitest";
-import { buildModules, withSessionRequirements } from "../buildModules.mjs";
-import { readOwnLayers, readSwitches, resolveConfigPaths, resolveForBoot } from "../configPath.mjs";
+import { buildModules } from "../buildModules.mjs";
+import {
+	expectedSessionRequirements,
+	readOwnLayers,
+	readSwitches,
+	resolveConfigPaths,
+	resolveForBoot,
+} from "../configPath.mjs";
 
 /**
  * Boots the shipped config with EVERY documented override supplied the way an
@@ -182,8 +189,8 @@ const DOCUMENTED_ENV: Readonly<Record<string, string>> = {
 	REDIS_FEDERATION_GRANT_STORE_KEY_PREFIX: "fg:",
 
 	// --- multi-factor authentication ----------------------------------
-	// The mode (ADR 2026-09-25-multi-factor-authentication), which
-	// `sessionRequirements.expected` is derived from in TypeScript (ADR
+	// The mode (ADR 2026-09-25-multi-factor-authentication), which the MFA
+	// package reads and the template declares `mfa` from (ADR
 	// 2026-09-28-session-admission), and the two store switches a composition
 	// installs MFA's stores from.
 	MFA_MODE: "off",
@@ -293,9 +300,9 @@ function ownFiles(configEnv: string, operatorLayer?: string): string[] {
 	return [file, envConfPath, applicationConfPath];
 }
 
-/** Phase one, as `app.mts` reads it: the switches, with the posture on session admission. */
+/** Phase one, as `app.mts` reads it: the switches. */
 function readShippedSwitches(env: Record<string, string>, configEnv = "production"): AppConfig {
-	return withSessionRequirements(readSwitches(readOwnLayers(ownFiles(configEnv), { env })));
+	return readSwitches(readOwnLayers(ownFiles(configEnv), { env }));
 }
 
 /**
@@ -315,9 +322,10 @@ const FEDERATION_STORES = Object.fromEntries(
 
 /**
  * The shipped layers under `env`, as `app.mts` hands them to boot, and the
- * configuration boot parsed: phase one for the posture on session admission,
- * phase two resolved over every loaded package's reference (core's, for the
- * template's modules) and parsed once by `createApp` — no bridge on the way.
+ * configuration boot parsed: phase one for what the composition expects of
+ * session admission, phase two resolved over every loaded package's
+ * reference (core's, for the template's modules) and parsed once by
+ * `createApp` — no bridge on the way.
  * No module is loaded: the parse is what this suite asks about, and each
  * key it reads is one core's schema declares.
  */
@@ -327,11 +335,10 @@ async function bootParsed(
 	operatorLayer?: string,
 ): Promise<AppConfig> {
 	const own = readOwnLayers(ownFiles(configEnv, operatorLayer), { env });
-	const switches = withSessionRequirements(readSwitches(own));
 	const handle = await createApp({
 		modules: [],
 		bootstrapComponents: {
-			config: resolveForBoot(own, [], switches.sessionRequirements),
+			config: resolveForBoot(own, [], expectedSessionRequirements(readSwitches(own))),
 			pathResolver: (s: string) => s,
 			...FEDERATION_STORES,
 		} as never,
@@ -526,6 +533,13 @@ describe("the shipped config boots with every documented override supplied as a 
 		}
 	});
 
+	it("parses MFA_MODE=off before boot and at boot, where the shipped configuration expects no session requirement", async () => {
+		expect(readShippedSwitches({ ...DOCUMENTED_ENV, MFA_MODE: "off" }).mfa?.mode).toBe("off");
+		const parsed = await bootParsed({ ...DOCUMENTED_ENV, MFA_MODE: "off" });
+		expect(parsed.mfa.mode).toBe("off");
+		expect(parsed.sessionRequirements).toEqual({ expected: [] });
+	});
+
 	describe("boolean overrides accept the spellings an operator writes", () => {
 		const cases: ReadonlyArray<[string, boolean]> = [
 			["true", true],
@@ -649,26 +663,24 @@ describe("the shipped config boots with every documented override supplied as a 
 			});
 		}
 
-		it("parses each MFA_MODE, and derives sessionRequirements.expected from the parsed mode, never from the variable", () => {
-			// Phase one: the mode is a switch, read before boot, and the posture
-			// is derived from what it parsed.
-			for (const [mode, expected] of [
-				["off", []],
-				["optional", ["mfa"]],
-				["required", ["mfa"]],
-			] as const) {
-				const switches = readSwitches(
-					readOwnLayers(ownFiles("production"), { env: { ...DOCUMENTED_ENV, MFA_MODE: mode } }),
-				);
-				expect(switches.mfa?.mode, mode).toBe(mode);
-				// The key has no default: nothing in the shipped HOCON writes it.
-				expect(switches.sessionRequirements, mode).toBeUndefined();
-				expect(withSessionRequirements(switches).sessionRequirements, mode).toEqual({
-					expected: [...expected],
-				});
-			}
+		it("refuses MFA_MODE that is none of the three before boot, naming mfa.mode", () => {
 			expect(() => readShippedSwitches({ ...DOCUMENTED_ENV, MFA_MODE: "on" })).toThrow(/mfa\.mode/);
 		});
+
+		for (const mode of ["optional", "required"] as const) {
+			it(`refuses MFA_MODE=${mode} at boot, the template installing no MFA module: session-requirement-missing, naming mfa`, async () => {
+				const err = await bootParsed({ ...DOCUMENTED_ENV, MFA_MODE: mode }).then(
+					() => undefined,
+					(caught: unknown) => caught,
+				);
+				expect(err).toBeInstanceOf(BootError);
+				expect((err as BootError).reason).toBe("session-requirement-missing");
+				expect((err as BootError).details).toMatchObject({
+					configKey: "sessionRequirements.expected",
+					missing: ["mfa"],
+				});
+			});
+		}
 
 		it("still refuses an empty SESSION_CSRF_TTL_SECONDS", async () => {
 			// Pinned alongside the boolean cases because it is the same trap

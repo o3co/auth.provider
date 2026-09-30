@@ -56,7 +56,7 @@ import { validate } from "@o3co/ts.hocon/zod";
 import express from "express";
 import request from "supertest";
 import { expect } from "vitest";
-import { buildModules, withSessionRequirements } from "#/buildModules.mjs";
+import { buildModules } from "#/buildModules.mjs";
 import { resolveConfigPaths } from "#/configPath.mjs";
 
 const configDir = fileURLToPath(new URL("../../config", import.meta.url));
@@ -121,13 +121,11 @@ function resolveConfig(google: GoogleWiring): AppConfig {
 				}
 			: { ...ENV };
 	const { applicationConfPath, envConfPath } = resolveConfigPaths(configDir, "production");
-	return withSessionRequirements(
-		validate(
-			parseFile(envConfPath, { env })
-				.withFallback(parseFile(applicationConfPath, { env }))
-				.withFallback(parseFile(fileURLToPath(coreReference()), { env })),
-			AppConfigSchema,
-		),
+	return validate(
+		parseFile(envConfPath, { env })
+			.withFallback(parseFile(applicationConfPath, { env }))
+			.withFallback(parseFile(fileURLToPath(coreReference()), { env })),
+		AppConfigSchema,
 	) as AppConfig;
 }
 
