@@ -37,6 +37,10 @@ import {
 	moduleReferences,
 	readTransitionalConfig,
 } from "@o3co/auth-provider-core";
+import {
+	redisFederationGrantIntentStoreModule,
+	redisFederationGrantStoreModule,
+} from "@o3co/auth-provider-redis";
 import { type Config, empty, parseFile } from "@o3co/ts.hocon";
 import type { LoggingSettings } from "./logger.mjs";
 import { LOGGING_SECTION, loggingModule } from "./modules.mjs";
@@ -303,6 +307,53 @@ const consumedMfa = (mfa: unknown, modules: readonly Module[]): boolean =>
 	Object.keys(mfa).every((key) => key === "mode") &&
 	!ownsSection(modules, "mfa");
 
+/** A section's `keyPrefix`, when the section is one of keys and the prefix a string. */
+function keyPrefixOf(
+	config: Readonly<Record<string, unknown>>,
+	module: Module,
+): string | undefined {
+	const section = config[module.name];
+	const prefix = isPlainSection(section) ? section.keyPrefix : undefined;
+	return typeof prefix === "string" ? prefix : undefined;
+}
+
+/**
+ * Refuses, with a `RangeError`, the Redis federation grant store's key prefix
+ * moved off its default while the Redis intent store's is left at its
+ * default, when `modules` load both. The intent store's prefix is its own key, so a
+ * deployment that moved only the grant store's would keep acquisition's
+ * records in the default namespace, shared with every deployment on the same
+ * Redis database that left it there. The defaults are what the stores'
+ * `reference.conf` sets with no environment. The message names both keys and
+ * both variables, and quotes neither value.
+ */
+function refuseIntentPrefixLeftAtDefault(
+	resolved: Readonly<Record<string, unknown>>,
+	modules: readonly Module[],
+): void {
+	const grantStore = redisFederationGrantStoreModule;
+	const intentStore = redisFederationGrantIntentStoreModule;
+	const loaded = (module: Module) => modules.some((m) => m.name === module.name);
+	const reference = intentStore.section?.reference;
+	if (!loaded(grantStore) || !loaded(intentStore) || reference === undefined) return;
+	const defaults = resolveLayers({ config: empty(), env: {} }, [reference]);
+	const grant = keyPrefixOf(resolved, grantStore);
+	const intent = keyPrefixOf(resolved, intentStore);
+	if (grant === undefined || grant === keyPrefixOf(defaults, grantStore)) return;
+	if (intent === undefined || intent !== keyPrefixOf(defaults, intentStore)) return;
+	const grantKey =
+		"redis-federation-grant-store.keyPrefix (REDIS_FEDERATION_GRANT_STORE_KEY_PREFIX)";
+	const intentKey =
+		"redis-federation-grant-intent-store.keyPrefix (REDIS_FEDERATION_GRANT_INTENT_STORE_KEY_PREFIX)";
+	throw new RangeError(
+		`${grantKey} moves the Redis federation grant store off its default key prefix, and ` +
+			`${intentKey} is left at its default. The intent store's prefix is its own: ` +
+			"acquisition's records would stay in the default namespace, shared with every " +
+			`deployment on the same Redis database that left it there. Set ${intentKey} as well — ` +
+			"to the grant store's prefix to keep the two together, or to one of its own",
+	);
+}
+
 /**
  * Phase two: what `createApp` parses once, with every loaded module's schema:
  * the composition's own layers, the same read phase one had, over the
@@ -315,6 +366,10 @@ const consumedMfa = (mfa: unknown, modules: readonly Module[]): boolean =>
  * which names an unowned section once. The MFA ADR's build-order step 20
  * removes this with the template's reading.
  *
+ * Refuses, with a `RangeError`, the Redis federation grant store's key prefix
+ * moved while the Redis intent store's is left at its default, both loaded
+ * (`refuseIntentPrefixLeftAtDefault`).
+ *
  * Typed `AppConfig` because that is the `config` slot's type; read the parsed
  * configuration from `handle.components.config`, not from this.
  */
@@ -324,6 +379,7 @@ export function resolveForBoot(
 	sessionRequirements: SessionRequirements,
 ): AppConfig {
 	const layered = resolveLayers(own, moduleReferences(modules));
+	refuseIntentPrefixLeftAtDefault(layered, modules);
 	const { mfa: _consumed, ...withoutMfa } = layered;
 	const resolved = consumedMfa(layered.mfa, modules) ? withoutMfa : layered;
 	return (sessionRequirements === undefined
