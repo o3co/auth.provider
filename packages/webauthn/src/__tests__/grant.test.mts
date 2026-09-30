@@ -322,7 +322,7 @@ describe("createWebAuthnGrant — assertion verification", () => {
 		);
 	});
 
-	it("expects the user handle of the credential's owner: the UTF-8 bytes of its userId, as its registration options named it", async () => {
+	it("hands the verifier the credential owner's user handle to expect: the UTF-8 bytes of its userId", async () => {
 		const store = createMemoryWebAuthnCredentialStore();
 		await store.registerCredential(makeCredential({ userId: "u-é-1" }));
 		mockVerifyAssertion.mockResolvedValue({ ok: true, newSignCount: 6 });
