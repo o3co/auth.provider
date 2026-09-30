@@ -15,9 +15,10 @@
  */
 
 /**
- * The package's `config/reference.conf`: the modules that read it
- * declare it as their section's reference, and it holds only their
- * sections, which their section schemas parse without losing a path —
+ * The package's `config/reference.conf`: the modules that read it — the
+ * grant's and the second factor's — declare it as their section's reference,
+ * and it holds only their sections, which their section schemas parse
+ * without losing a path —
  * core's `packageReferenceProblems`, the check every package with defaults
  * runs over its own file. The two rate-limit variables are named after the
  * paths they set; their old names are declared renamed and bound nowhere.
@@ -26,20 +27,24 @@
 import { packageReferenceProblems } from "@o3co/auth-provider-core/testing";
 import { parseFile } from "@o3co/ts.hocon";
 import { describe, expect, it } from "vitest";
+import { webauthnMfaFactorModule } from "#/mfaFactor/module.mjs";
 import { webauthnModule } from "#/module.mjs";
 
 /** The package's defaults, as a composition root finds them. */
 const REFERENCE = new URL("../../config/reference.conf", import.meta.url);
 
 describe("the package's config/reference.conf", () => {
-	const modules = [webauthnModule];
+	const modules = [webauthnModule, webauthnMfaFactorModule];
 	const read = (path: string, env: Readonly<Record<string, string>>): unknown =>
 		parseFile(path, { env: { ...env } }).toObject();
 
 	it("is read at the section named after its module", () => {
 		expect(
 			modules.map((module) => [module.name, module.section !== undefined, module.section?.at]),
-		).toEqual([["webauthn", true, undefined]]);
+		).toEqual([
+			["webauthn", true, undefined],
+			["webauthn-mfa-factor", true, undefined],
+		]);
 	});
 
 	it("is declared by each of them and holds only their sections, which their schemas parse without losing a path", () => {

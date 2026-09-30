@@ -135,6 +135,8 @@ export function createRegistrationOptionsHandler(deps: RegistrationOptionsDeps):
 			userName,
 			userDisplayName,
 			excludeCredentials: existing,
+			// A discoverable credential, preferred: the passkey the grant signs in with.
+			residentKey: "preferred",
 			challenge,
 		});
 
