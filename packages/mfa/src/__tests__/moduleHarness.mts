@@ -36,11 +36,13 @@ import {
 	defineModule,
 	type FederationTokenStore,
 	InMemoryUserRepository,
+	type MailSender,
 	type MfaFactorStore,
 	type MfaTransactionStore,
 	type Module,
 	type RateLimiter,
 	type SessionFederationIndex,
+	type UserRepository,
 	type UserSessionStore,
 } from "@o3co/auth-provider-core";
 import {
@@ -193,15 +195,19 @@ const generousRateLimiter = (): RateLimiter =>
  * user-session store, and the directory; `rateLimiter` is the composition's
  * limiter, none when `null`.
  */
-const sessionSupport = (rateLimiter: RateLimiter | null): Module[] => [
+/** The directory the login verifies: alice and bob, each with an address. */
+export const directoryEntries = () =>
+	new Map<string, Record<string, unknown> & { password: string }>([
+		[ALICE.username, { password: ALICE.password, id: ALICE.id, email: ALICE.email }],
+		[BOB.username, { password: BOB.password, id: BOB.id, email: BOB.email }],
+	]);
+
+const sessionSupport = (
+	rateLimiter: RateLimiter | null,
+	userRepository: UserRepository | undefined,
+): Module[] => [
 	providing("test:user-repository", {
-		userRepository: () =>
-			new InMemoryUserRepository(
-				new Map([
-					[ALICE.username, { password: ALICE.password, id: ALICE.id, email: ALICE.email }],
-					[BOB.username, { password: BOB.password, id: BOB.id, email: BOB.email }],
-				]),
-			),
+		userRepository: () => userRepository ?? new InMemoryUserRepository(directoryEntries()),
 	}),
 	providing("test:federation-token-store", {
 		federationTokenStore: () =>
@@ -250,6 +256,10 @@ export interface BootOptions {
 	readonly rateLimiter?: RateLimiter | null;
 	/** Where the composition's audit events go; the configuration declares none by default. */
 	readonly auditSink?: AuditSink;
+	/** The composition's mail sender; none by default. */
+	readonly mailSender?: MailSender;
+	/** The directory the login verifies; alice and bob in memory, without the witness's write, by default. */
+	readonly userRepository?: UserRepository;
 	/** Modules beside the composition's: another factor, say. */
 	readonly extraModules?: readonly Module[];
 	/** Leave the session package's login out: the MFA modules and their stores alone. */
@@ -294,8 +304,11 @@ export function modulesFor(options: BootOptions = {}): {
 						sessionStoreModuleFor(config as never),
 						sessionModule,
 						...(options.withoutLoginCompletion === true ? [] : [loginCompletionModule]),
-						...sessionSupport(rateLimiter),
+						...sessionSupport(rateLimiter, options.userRepository),
 					]),
+			...(options.mailSender === undefined
+				? []
+				: [providing("test:mail-sender", { mailSender: () => options.mailSender })]),
 			...(userSessionStore === null
 				? []
 				: [providing("test:user-session-store", { userSessionStore: () => userSessionStore })]),
