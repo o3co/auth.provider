@@ -40,6 +40,7 @@ import {
 	mayDiscloseTokenType,
 	refuseUndisclosableTokenType,
 } from "./federationTokenDisclosure.mjs";
+import { answerStoredToken, readStoredTokens } from "./federationTokenStored.mjs";
 
 export type { FederationTokenRouterOptions } from "./federationTokenContext.mjs";
 
@@ -304,66 +305,14 @@ export function createRouter(express: ExpressLike, opts: FederationTokenRouterOp
 			});
 		}
 
-		// Step 9: Get federation tokens. Throw → 503. null → self-heal + 404.
-		let tokens: Awaited<ReturnType<typeof opts.federationTokenStore.get>>;
-		try {
-			tokens = await opts.federationTokenStore.get(sid, name);
-		} catch (error) {
-			storeUnavailable(federation, "federation_token", "get", error);
-			return res.status(503).json({
-				error: "temporarily_unavailable",
-				error_description: "federation token store unavailable",
-			});
-		}
-		if (!tokens) {
-			// Self-heal: federation link is dangling — remove from federation index.
-			try {
-				await opts.sessionFederationIndex.removeFederation(sid, name);
-			} catch (error) {
-				logger.warn(
-					{
-						federation,
-						store: "session_federation_index",
-						step: "remove",
-						err: loggableError(error),
-					},
-					"federation_token_index_self_heal_failed",
-				);
-				// Best-effort: still return 404 regardless
-			}
-			return res.status(404).json({
-				error: "federation_not_linked",
-				error_description: sanitizeErrorText(`federation '${name}' tokens not found`),
-			});
-		}
+		const tokens = await readStoredTokens(ctx, caller);
+		if (tokens === null) return;
 
 		// Step 10: not expiring within the buffer → return the stored token.
 		// `expiresAt === null` is an upstream issuing no finite expiry (e.g.
 		// GitHub OAuth App tokens): never refresh, and omit `expires_in`.
 		if (tokens.expiresAt === null || tokens.expiresAt.getTime() > Date.now() + refreshBufferMs) {
-			// The type is judged before the token is read and before the success
-			// is audited, so a refused disclosure is not counted as one.
-			if (!mayDiscloseTokenType(tokens.tokenType)) {
-				return refuseUndisclosableTokenType(ctx, caller, tokens.tokenType);
-			}
-			emitAuditEvent(opts.auditSink, {
-				timestamp: new Date(),
-				type: "federation.token.success",
-				subject: sub ?? undefined,
-				ip: req.ip,
-				userAgent: req.get("user-agent"),
-				details: { federation, refreshed: false },
-			});
-			const expiresIn =
-				tokens.expiresAt === null
-					? undefined
-					: Math.max(0, Math.floor((tokens.expiresAt.getTime() - Date.now()) / 1000));
-			return res.status(200).json({
-				access_token: tokens.accessToken,
-				token_type: BEARER_TOKEN_TYPE,
-				...(expiresIn !== undefined ? { expires_in: expiresIn } : {}),
-				...(tokens.scope ? { scope: tokens.scope } : {}),
-			});
+			return answerStoredToken(ctx, caller, tokens);
 		}
 
 		// Step 11: Refresh path.
