@@ -1333,6 +1333,10 @@ export const fullSectionsSchema = z.object({
 	"redis-federation-token-store": z.unknown().optional(),
 	"redis-federation-grant-store": z.unknown().optional(),
 	"redis-federation-grant-intent-store": z.unknown().optional(),
+	// Presence-only, for the same reason: the WebAuthn second factor's
+	// section, parsed by its module, set by the webauthn package's
+	// `reference.conf` wherever the grant's module is loaded without it.
+	"webauthn-mfa-factor": z.unknown().optional(),
 });
 
 /**

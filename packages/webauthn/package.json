@@ -1,6 +1,6 @@
 {
 	"name": "@o3co/auth-provider-webauthn",
-	"description": "WebAuthn first slice for @o3co/auth-provider — primary-login passkeys, AS-scope only.",
+	"description": "WebAuthn for @o3co/auth-provider — primary-login passkeys, and WebAuthn as a second factor.",
 	"version": "0.0.0",
 	"license": "Apache-2.0",
 	"engines": {
@@ -51,6 +51,7 @@
 	},
 	"devDependencies": {
 		"@o3co/auth-provider-core": "workspace:*",
+		"@o3co/auth-provider-test-kit": "workspace:*",
 		"@o3co/ts.hocon": "^1.13.0",
 		"@types/express": "^5.0.6",
 		"@types/supertest": "^7.2.1",

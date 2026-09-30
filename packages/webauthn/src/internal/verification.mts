@@ -16,13 +16,19 @@
 
 /**
  * Internal wrappers around `@simplewebauthn/server` verification; not exported from the package
- * barrel. They map the library's thrown errors to a typed `reason` by matching message text
- * (recheck the patterns against the library's messages whenever it is bumped), reshape
- * registration material for the endpoint layer, and allow the sign-count 0/0 case of
- * authenticators that always report 0.
+ * barrel. They map the library's thrown errors to a typed `reason` by the prefixes of the
+ * library's own messages, never by text a client can write into one (the client data's `type`,
+ * `challenge` and `origin` are quoted inside them) — recheck the prefixes whenever the library is
+ * bumped. They reshape registration material for the endpoint layer, and answer the backup
+ * eligibility (BE) and backup state (BS) of a verified credential to the caller that asks.
+ *
+ * The sign count is judged here, only once the signature verified: the library, which compares
+ * the count before it checks the signature, is handed a stored count of 0 and so never judges
+ * it. A count that did not increase over the stored one is a regression, but for 0 against a
+ * stored 0 — an authenticator that keeps no counter (WebAuthn §6.1.1).
  *
  * Attestation chain failures ("x5c could not be chained to any specified trust anchor") match no
- * pattern and read as "unknown"; there is no dedicated reason for them.
+ * prefix and read as "unknown"; there is no dedicated reason for them.
  */
 
 import type { AuthenticatorTransport, WebAuthnCredential } from "@o3co/auth-provider-core";
@@ -77,9 +83,36 @@ export type AttestationVerificationResult =
 				| "unknown";
 	  };
 
+/**
+ * {@link AttestationVerificationResult}, the material also carrying the credential's backup
+ * eligibility (BE): whether it may be backed up — a multi-device credential — as the
+ * authenticator reports it.
+ */
+export type AttestationVerificationWithBackupState =
+	| {
+			readonly ok: true;
+			readonly material: Extract<AttestationVerificationResult, { ok: true }>["material"] & {
+				readonly backupEligible: boolean;
+			};
+	  }
+	| Extract<AttestationVerificationResult, { ok: false }>;
+
 export async function verifyWebAuthnAttestation(
 	input: AttestationVerificationInput,
 ): Promise<AttestationVerificationResult> {
+	const verified = await verifyWebAuthnAttestationWithBackupState(input);
+	if (!verified.ok) return verified;
+	const { backupEligible: _backupEligible, ...material } = verified.material;
+	return { ok: true, material };
+}
+
+/**
+ * Verifies an attestation as {@link verifyWebAuthnAttestation} does, and answers the credential's
+ * backup eligibility beside its material.
+ */
+export async function verifyWebAuthnAttestationWithBackupState(
+	input: AttestationVerificationInput,
+): Promise<AttestationVerificationWithBackupState> {
 	try {
 		const verification = await verifyRegistrationResponse({
 			response: input.response,
@@ -112,6 +145,8 @@ export async function verifyWebAuthnAttestation(
 					| ReadonlyArray<AuthenticatorTransport>
 					| undefined,
 				backedUp: info.credentialBackedUp,
+				// The library reads BE into the device type: `multiDevice` when it is set.
+				backupEligible: info.credentialDeviceType === "multiDevice",
 			},
 		};
 	} catch (err) {
@@ -119,16 +154,47 @@ export async function verifyWebAuthnAttestation(
 	}
 }
 
-function mapRegistrationError(err: unknown): AttestationVerificationResult {
-	if (err instanceof Error) {
-		// `Unexpected public key alg "-48", expected one of "-8,-7,-257"`: a credential outside
-		// `WEBAUTHN_ALGORITHM_IDS`.
-		if (/public key alg/i.test(err.message)) return { ok: false, reason: "algorithm_not_allowed" };
-		if (/origin/i.test(err.message)) return { ok: false, reason: "origin_mismatch" };
-		if (/challenge/i.test(err.message)) return { ok: false, reason: "challenge_mismatch" };
-		if (/rp.?id/i.test(err.message)) return { ok: false, reason: "rp_id_mismatch" };
-	}
-	return { ok: false, reason: "unknown" };
+/** The library's own message prefixes for a refused registration, each with its reason. */
+const REGISTRATION_REFUSALS: readonly (readonly [
+	string,
+	Extract<AttestationVerificationResult, { ok: false }>["reason"],
+])[] = [
+	// A credential outside `WEBAUTHN_ALGORITHM_IDS`.
+	["Unexpected public key alg ", "algorithm_not_allowed"],
+	["Unexpected registration response origin ", "origin_mismatch"],
+	["Unexpected registration response challenge ", "challenge_mismatch"],
+	["Unexpected RP ID hash", "rp_id_mismatch"],
+];
+
+/** The library's own message prefixes for a refused assertion, each with its reason. */
+const AUTHENTICATION_REFUSALS: readonly (readonly [
+	string,
+	Extract<AssertionVerificationResult, { ok: false }>["reason"],
+])[] = [
+	// A cross-origin (framed) ceremony: `webauthn.origin` cannot fix it, `webauthn.topOrigin` can.
+	["Detected cross-origin authentication response from top origin ", "top_origin_mismatch"],
+	["Unexpected cross-origin authentication response top origin ", "top_origin_mismatch"],
+	["Unexpected top origin ", "top_origin_mismatch"],
+	["Unexpected authentication response origin ", "origin_mismatch"],
+	["Unexpected authentication response challenge ", "challenge_mismatch"],
+	["Unexpected RP ID hash", "rp_id_mismatch"],
+];
+
+/**
+ * The reason whose prefix begins `err`'s message; `unknown` for any other
+ * refusal. The message is read to classify the refusal alone, never logged.
+ */
+function refusalOf<R extends string>(
+	err: unknown,
+	refusals: readonly (readonly [string, R])[],
+): R | "unknown" {
+	if (!(err instanceof Error)) return "unknown";
+	const { message } = err;
+	return refusals.find(([prefix]) => message.startsWith(prefix))?.[1] ?? "unknown";
+}
+
+function mapRegistrationError(err: unknown): Extract<AttestationVerificationResult, { ok: false }> {
+	return { ok: false, reason: refusalOf(err, REGISTRATION_REFUSALS) };
 }
 
 // ---------------------------------------------------------------------------
@@ -136,7 +202,11 @@ function mapRegistrationError(err: unknown): AttestationVerificationResult {
 // ---------------------------------------------------------------------------
 
 export interface AssertionVerificationInput {
-	readonly credential: WebAuthnCredential;
+	/** The stored credential: its id, its COSE public key, its sign count and its transports. */
+	readonly credential: Pick<
+		WebAuthnCredential,
+		"credentialId" | "publicKey" | "signCount" | "transports"
+	>;
 	readonly response: AuthenticationResponseJSON;
 	readonly expectedChallenge: string;
 	readonly expectedRpId: string;
@@ -165,9 +235,35 @@ export type AssertionVerificationResult =
 				| "unknown";
 	  };
 
+/**
+ * {@link AssertionVerificationResult}, with the backup flags the verified authenticator data
+ * carries: the backup eligibility (BE) — whether the credential may be backed up, a
+ * multi-device credential — and the backup state (BS) — whether it is backed up at this
+ * assertion.
+ */
+export type AssertionVerificationWithBackupState =
+	| {
+			readonly ok: true;
+			readonly newSignCount: number;
+			readonly backupEligible: boolean;
+			readonly backedUp: boolean;
+	  }
+	| Extract<AssertionVerificationResult, { ok: false }>;
+
 export async function verifyWebAuthnAssertion(
 	input: AssertionVerificationInput,
 ): Promise<AssertionVerificationResult> {
+	const verified = await verifyWebAuthnAssertionWithBackupState(input);
+	return verified.ok ? { ok: true, newSignCount: verified.newSignCount } : verified;
+}
+
+/**
+ * Verifies an assertion as {@link verifyWebAuthnAssertion} does, and answers the backup flags its
+ * authenticator data carries beside the new count.
+ */
+export async function verifyWebAuthnAssertionWithBackupState(
+	input: AssertionVerificationInput,
+): Promise<AssertionVerificationWithBackupState> {
 	try {
 		const verification = await verifyAuthenticationResponse({
 			response: input.response,
@@ -187,7 +283,9 @@ export async function verifyWebAuthnAssertion(
 				// cast could make safe. And the in-process adapter returns its own stored array,
 				// which a third-party library must not hold a live alias of.
 				publicKey: new Uint8Array(input.credential.publicKey),
-				counter: input.credential.signCount,
+				// 0, so the library never judges the count: it compares it before the signature,
+				// and the count is judged below, once the signature verified.
+				counter: 0,
 				// SimpleWebAuthn's AuthenticatorTransportFuture is a superset of ours (adds "cable"
 				// and "smart-card"); stored values are a subset, so the cast is safe.
 				// biome-ignore lint/suspicious/noExplicitAny: transport superset cast — see comment
@@ -201,36 +299,30 @@ export async function verifyWebAuthnAssertion(
 			return { ok: false, reason: "signature_invalid" };
 		}
 
-		const newCounter = verification.authenticationInfo.newCounter;
+		const { newCounter, credentialBackedUp, credentialDeviceType } =
+			verification.authenticationInfo;
 		const stored = input.credential.signCount;
+		const flags = {
+			// The library reads BE into the device type: `multiDevice` when it is set.
+			backupEligible: credentialDeviceType === "multiDevice",
+			backedUp: credentialBackedUp,
+		};
 
-		// Both counters 0 is allowed: some authenticators always report 0 (the library skips its
-		// own counter check in that case too).
+		// Both counters 0: an authenticator that keeps no counter (WebAuthn §6.1.1).
 		if (newCounter === 0 && stored === 0) {
-			return { ok: true, newSignCount: 0 };
+			return { ok: true, newSignCount: 0, ...flags };
 		}
 
-		// The library already throws when the counter did not increase; this guard keeps the
-		// invariant local rather than trusting that.
 		if (newCounter <= stored) {
 			return { ok: false, reason: "sign_count_regression" };
 		}
 
-		return { ok: true, newSignCount: newCounter };
+		return { ok: true, newSignCount: newCounter, ...flags };
 	} catch (err) {
 		return mapAuthenticationError(err);
 	}
 }
 
-function mapAuthenticationError(err: unknown): AssertionVerificationResult {
-	if (err instanceof Error) {
-		// Before the plain-origin arm: the library's cross-origin messages contain "origin" and
-		// would otherwise point an operator at `webauthn.origin`, which cannot fix an embedding.
-		if (/top.?origin/i.test(err.message)) return { ok: false, reason: "top_origin_mismatch" };
-		if (/origin/i.test(err.message)) return { ok: false, reason: "origin_mismatch" };
-		if (/challenge/i.test(err.message)) return { ok: false, reason: "challenge_mismatch" };
-		if (/rp.?id/i.test(err.message)) return { ok: false, reason: "rp_id_mismatch" };
-		if (/counter/i.test(err.message)) return { ok: false, reason: "sign_count_regression" };
-	}
-	return { ok: false, reason: "unknown" };
+function mapAuthenticationError(err: unknown): Extract<AssertionVerificationResult, { ok: false }> {
+	return { ok: false, reason: refusalOf(err, AUTHENTICATION_REFUSALS) };
 }

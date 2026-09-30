@@ -42,7 +42,7 @@
  * only the part of the rule that is broken, and asserts the rest.
  */
 
-import { createHash, generateKeyPairSync, sign, X509Certificate } from "node:crypto";
+import { createHash, X509Certificate } from "node:crypto";
 import { mkdtempSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -128,6 +128,7 @@ import {
 	seedTotp,
 	TV,
 } from "./full-set.fixture.mts";
+import { softwarePasskey } from "./software-passkey.mts";
 
 let current: FullSet | undefined;
 
@@ -179,6 +180,7 @@ const ADDED: Readonly<Record<string, readonly string[]>> = {
 	"@o3co/auth-provider-webauthn": [
 		"webauthn",
 		"webauthn-session-subject",
+		"webauthn-mfa-factor",
 		"core-webauthn-credential-store-memory",
 		"core-challenge-store-memory",
 		"core-default-challenge-ceremony",
@@ -312,6 +314,19 @@ describe("the full set boots together", () => {
 		expect((config as unknown as { mfa: { mode: unknown } }).mfa.mode).toBe("optional");
 	});
 
+	it("installs the WebAuthn second factor's module, off by its reference.conf: no webauthn factor", async () => {
+		const { handle } = await boot();
+		expect(handle.components.mfaFactorResolver?.get("webauthn")).toBeUndefined();
+	});
+
+	it("turns the WebAuthn second factor on through its variable, and the requirement named mfa then reaches hwk and swk beside TOTP's otp", async () => {
+		const { handle } = await boot({ env: { ...SINGLE_ENV, WEBAUTHN_MFA_FACTOR_ENABLED: "true" } });
+		expect(handle.components.mfaFactorResolver?.get("webauthn")?.amrValues).toEqual(["hwk", "swk"]);
+		expect(
+			[...(handle.components.sessionRequirementResolver?.get("mfa")?.reach ?? [])].sort(),
+		).toEqual(["hwk", "mfa", "otp", "swk"]);
+	});
+
 	it("registers exactly the actions the bundled consumers admit, each with the grade the MFA requirement's verdict table is taken over, said at boot with its module", async () => {
 		const { logger } = await boot();
 		const said = logger.lines.filter((line) => line.args[1] === "admission_actions_registered");
@@ -409,6 +424,7 @@ describe("the configuration createApp is handed reaches every loaded module whol
 			"mtls.fullPki.maxChainDepth",
 			"oauth-token-exchange.maxActorChainDepth",
 			"webauthn.rateLimit.authenticationOptions.limit",
+			"webauthn-mfa-factor.userVerification",
 			"mfa-totp-factor.enabled",
 		]) {
 			expect(valueAt(resolved, path), path).toBeDefined();
@@ -1096,64 +1112,6 @@ const TOTP_PKCE = (() => {
 /** A confidential client that signs users in with a passkey and keeps them signed in with refresh tokens. */
 const PASSKEY_APP = { id: "passkey-app", secret: "passkey-app-secret" } as const;
 
-const b64url = (bytes: Buffer | Uint8Array): string => Buffer.from(bytes).toString("base64url");
-
-/**
- * A software passkey: a P-256 key whose public half is registered for
- * `userId` as the WebAuthn package stores it (COSE), and an assertion over
- * a challenge the provider issued, signed as an authenticator signs one —
- * authenticator data (the RP id's hash, user present and verified, a
- * counter) and the client data's hash, ECDSA over SHA-256, DER.
- */
-function softwarePasskey(rpId: string, origin: string) {
-	const { privateKey, publicKey } = generateKeyPairSync("ec", { namedCurve: "P-256" });
-	const jwk = publicKey.export({ format: "jwk" });
-	const x = Buffer.from(jwk.x as string, "base64url");
-	const y = Buffer.from(jwk.y as string, "base64url");
-	// COSE_Key {1: 2 (EC2), 3: -7 (ES256), -1: 1 (P-256), -2: x, -3: y}, CBOR.
-	const cose = Buffer.concat([
-		Buffer.from([0xa5, 0x01, 0x02, 0x03, 0x26, 0x20, 0x01, 0x21, 0x58, 0x20]),
-		x,
-		Buffer.from([0x22, 0x58, 0x20]),
-		y,
-	]);
-	const credentialId = b64url(createHash("sha256").update(cose).digest().subarray(0, 16));
-	let counter = 0;
-	return {
-		credentialId,
-		publicKey: new Uint8Array(cose),
-		assert(challenge: string) {
-			counter += 1;
-			const clientDataJSON = Buffer.from(
-				JSON.stringify({ type: "webauthn.get", challenge, origin, crossOrigin: false }),
-			);
-			const count = Buffer.alloc(4);
-			count.writeUInt32BE(counter);
-			const authenticatorData = Buffer.concat([
-				createHash("sha256").update(rpId).digest(),
-				Buffer.from([0x05]),
-				count,
-			]);
-			const signature = sign(
-				"sha256",
-				Buffer.concat([authenticatorData, createHash("sha256").update(clientDataJSON).digest()]),
-				privateKey,
-			);
-			return {
-				id: credentialId,
-				rawId: credentialId,
-				type: "public-key",
-				response: {
-					clientDataJSON: b64url(clientDataJSON),
-					authenticatorData: b64url(authenticatorData),
-					signature: b64url(signature),
-				},
-				clientExtensionResults: {},
-			};
-		},
-	};
-}
-
 describe("a passkey sign-in under mfa.mode = required", () => {
 	it("is kept by its refresh token: the WebAuthn grant's hwk is a second-factor value, so the refresh is met without a sid or a primary's marker", async () => {
 		const { app, handle } = await boot({
@@ -1171,7 +1129,7 @@ describe("a passkey sign-in under mfa.mode = required", () => {
 		const { webauthnCredentialStore } = handle.components as unknown as {
 			webauthnCredentialStore: WebAuthnCredentialStore;
 		};
-		const passkey = softwarePasskey("auth.test", ISSUER);
+		const passkey = softwarePasskey({ rpId: "auth.test", origin: ISSUER });
 		await webauthnCredentialStore.registerCredential({
 			userId: ALICE.sub,
 			credentialId: passkey.credentialId,
