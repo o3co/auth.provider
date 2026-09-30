@@ -178,8 +178,8 @@ export function readSwitches(own: OwnLayers, options: SwitchesOptions = {}): App
 
 /**
  * What this composition expects of session admission, from phase one: the
- * configuration's `sessionRequirements.expected`, with `mfa` added when the
- * PARSED `mfa.mode` is not `off`. Boot's checks never act on `mfa.mode`, and
+ * configuration's `sessionRequirements.expected` as written, with `mfa` appended
+ * when the PARSED `mfa.mode` is not `off` and the list does not name it. Boot's checks never act on `mfa.mode`, and
  * the template installs no MFA module, so it is here that a mode asking for a
  * second factor becomes a declaration boot refuses
  * (`session-requirement-missing`) rather than a composition that logs users
@@ -193,7 +193,8 @@ export function expectedSessionRequirements(switches: AppConfig): AppConfig["ses
 	const written = switches.sessionRequirements?.expected;
 	const mode = readMfaMode(switches) ?? "off";
 	if (mode === "off") return written === undefined ? undefined : { expected: [...written] };
-	return { expected: [...new Set([...(written ?? []), "mfa"])] };
+	const declared = [...(written ?? [])];
+	return { expected: declared.includes("mfa") ? declared : [...declared, "mfa"] };
 }
 
 /**
