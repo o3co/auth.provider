@@ -71,7 +71,7 @@ describe("stepUpReach — what a step-up through the registered requirements can
 	});
 });
 
-describe("SECOND_FACTOR_AMR — the values reserved to the requirement named mfa", () => {
+describe("SECOND_FACTOR_AMR — the values reserved to the second-factor authority", () => {
 	it("is the six values a second factor adds, and no primary's marker", () => {
 		expect([...SECOND_FACTOR_AMR].sort()).toEqual([
 			"email",
