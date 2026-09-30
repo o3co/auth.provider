@@ -37,6 +37,9 @@ describe("mfaFactorStoreContract over core's in-process store", () => {
 	}
 });
 
+const SUCCESSFUL_UPDATE_ALONE =
+	"a successful update writes its own record alone: the same id under another subject, and the subject's other factors, stay as they were";
+
 /** Core's in-process store with `change` laid over it. */
 function broken(change: (store: MfaFactorStore) => Partial<MfaFactorStore>): MfaFactorStoreHarness {
 	const store = createMemoryMfaFactorStore();
@@ -136,6 +139,39 @@ describe("the suite refuses a store that breaks the contract", () => {
 			})),
 		);
 		expect(refused).toContain("never reaches another subject's record through update");
+	});
+
+	it("one whose successful update also writes the same id under another subject", async () => {
+		const refused = await refusedBy(() =>
+			broken((store) => ({
+				update: async (subject, id, expectedVersion, next) => {
+					const written = await store.update(subject, id, expectedVersion, next);
+					if (written === null) return null;
+					for (const other of ["user-1", "user-2"].filter((name) => name !== subject)) {
+						const theirs = (await store.list(other)).find((record) => record.id === id);
+						if (theirs !== undefined) await store.update(other, id, theirs.version, next);
+					}
+					return written;
+				},
+			})),
+		);
+		expect(refused).toContain(SUCCESSFUL_UPDATE_ALONE);
+	});
+
+	it("one whose successful update also writes the subject's other factors", async () => {
+		const refused = await refusedBy(() =>
+			broken((store) => ({
+				update: async (subject, id, expectedVersion, next) => {
+					const written = await store.update(subject, id, expectedVersion, next);
+					if (written === null) return null;
+					for (const sibling of (await store.list(subject)).filter((record) => record.id !== id)) {
+						await store.update(subject, sibling.id, sibling.version, next);
+					}
+					return written;
+				},
+			})),
+		);
+		expect(refused).toContain(SUCCESSFUL_UPDATE_ALONE);
 	});
 
 	it("one that removes every subject's records", async () => {
