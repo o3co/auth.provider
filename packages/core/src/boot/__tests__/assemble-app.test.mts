@@ -697,15 +697,23 @@ describe("assembleApp — 17. listen() wraps router in Express app", () => {
 			expect(assembleApp(makeFrozenWorld([]), { express }).cleanupAllowanceMs).toBeUndefined();
 		});
 
-		it("counts a tail registered after the handle was built, whose cleanup dispose also drains", () => {
+		it("counts a tail registered after the handle was built, whose cleanup dispose also drains", async () => {
+			const ran: string[] = [];
 			const reg = createLifecycleRegistrar();
 			const handle = assembleApp(makeFrozenWorld([]), {
 				express: { Router: () => makeMockRouter() as never },
 				lifecycleReg: reg,
 			});
 			expect(handle.cleanupAllowanceMs).toBeUndefined();
-			reg.register(async () => {}, { tailMs: 30_000 });
+			reg.register(
+				async () => {
+					ran.push("late cleanup");
+				},
+				{ tailMs: 30_000 },
+			);
 			expect(handle.cleanupAllowanceMs).toBe(30_000);
+			await handle.dispose();
+			expect(ran).toEqual(["late cleanup"]);
 		});
 
 		it("does not give up on a cleanup that outlives its tail", async () => {
