@@ -44,4 +44,13 @@ describe("redisRateLimiterBuilder", () => {
 			/^createRedisRateLimiter: failMode must be "open" or "closed"/,
 		);
 	});
+
+	it("refuses a failMode JSON cannot write — a BigInt, a circular object — with its RangeError", () => {
+		const client = { incrementWithTtl: async () => 1 };
+		const circular: Record<string, unknown> = {};
+		circular.self = circular;
+		for (const failMode of [1n, circular]) {
+			expect(() => redisRateLimiterBuilder({ client, failMode }, {})).toThrow(RangeError);
+		}
+	});
 });
