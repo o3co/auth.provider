@@ -124,6 +124,7 @@ A password login the requirement interrupts is answered `403` once the express s
 | [`MfaModuleOptions`](src/module.mts) | `{ environment? }`: the name the configuration was selected by, for the sample key's refusal |
 | [`MFA_ROUTES_ID`](src/module.mts) | The id of the MFA routes' contribution, `mfa-routes` |
 | [`MFA_RATE_LIMIT_PREFIX`](src/module.mts) | The prefix the MFA routes limit under and the module contributes their budget for, `mfa` |
+| [`MFA_ADMISSION_ACTIONS`](src/admissionActions.mts), `MfaAdmissionAction` | The admission actions the MFA routes admit a browser session for, with their grades: `mfa.manage`, `credential_change` — enrolling a factor outside a login, removing one, regenerating recovery codes. Declared and not registered: no MFA route admits a session yet, and the module whose route first does contributes them as its `admissionActions` |
 | [`mfaTotpFactorModule`](src/totp/module.mts) | The module contributing `mfaFactors.totp` |
 | [`mfaConfigSchema`](src/config.mts) | The shapes and ranges of the MFA module's `mfa` section — the mode, the transaction's life and attempts, the lock's fields — not the ring's, the sample key's or how the lock's fields relate, which reading the settings checks |
 | [`MFA_DEVELOPMENT_SAMPLE_KEY`](src/config.mts) | The published development key, refused outside development |
