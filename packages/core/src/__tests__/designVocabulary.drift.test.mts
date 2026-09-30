@@ -496,7 +496,8 @@ const VOCABULARY: readonly VocabularyRow[] = [
 	// Declared before their homes define them: each names the build step of
 	// the MFA ADR that builds it.
 	{
-		concept: "MFA mail — the one place a code the provider issued is handed to the mail sender (the MFA ADR's D5, F5)",
+		concept:
+			"MFA mail — the one place a code the provider issued is handed to the mail sender (the MFA ADR's D5, F5)",
 		home: "packages/mfa/src/mail.mts",
 		definition: /(?:function|const)\s+sendMfaMail\b/,
 		declared: "the MFA ADR's build-order step 9",
