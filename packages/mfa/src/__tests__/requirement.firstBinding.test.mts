@@ -34,10 +34,10 @@ import {
 	createMemoryMfaTransactionStore,
 	type Logger,
 	type MailAddressFact,
+	type MfaEnrollmentWitness,
 	type MfaFactor,
 	type MfaFactorRecord,
 	type MfaTransactionStore,
-	type MfaEnrollmentWitness,
 	type RequirementVerdict,
 	readAcrTable,
 	requirementSession,
@@ -243,10 +243,14 @@ describe("a subject with no counting factor, in a session that recorded no facts
 				const { requirement } = build({ mode, transactionStore });
 				await proved(transactionStore);
 				for (const action of ACTIONS) {
-					expect(await requirement.admit(inputFor(sessionOf(kind, undefined), action)), action).toEqual(
-						REAUTHENTICATE,
-					);
-					expect(await admit(requirement, sessionOf(kind, undefined), action), action).toMatchObject({
+					expect(
+						await requirement.admit(inputFor(sessionOf(kind, undefined), action)),
+						action,
+					).toEqual(REAUTHENTICATE);
+					expect(
+						await admit(requirement, sessionOf(kind, undefined), action),
+						action,
+					).toMatchObject({
 						outcome: "reauthenticate",
 						requirement: "mfa",
 					});
@@ -270,7 +274,10 @@ describe("a subject with no counting factor whose session recorded a witness tha
 					const { requirement } = build({ mode, transactionStore, events });
 					for (const action of ACTIONS) {
 						const session = sessionOf(kind, facts(witness));
-						await expect(requirement.admit(inputFor(session, action)), action).rejects.toMatchObject({
+						await expect(
+							requirement.admit(inputFor(session, action)),
+							action,
+						).rejects.toMatchObject({
 							name: "MfaEnrollmentStateInconsistentError",
 							reason: "mfa_enrollment_state_inconsistent",
 							witness,
@@ -362,23 +369,125 @@ describe("the gate over a first binding in a session", () => {
 		readonly gate: Gate;
 	}
 	const rows: readonly Row[] = [
-		{ requireEmailProof: "when-mail", mailWired: true, mailAddress: "address", flag: false, gate: "prove" },
-		{ requireEmailProof: "when-mail", mailWired: true, mailAddress: "none", flag: false, gate: "bind" },
-		{ requireEmailProof: "when-mail", mailWired: true, mailAddress: "unreadable", flag: false, gate: "unprovable" },
-		{ requireEmailProof: "when-mail", mailWired: false, mailAddress: "address", flag: false, gate: "bind" },
-		{ requireEmailProof: "when-mail", mailWired: false, mailAddress: "unreadable", flag: false, gate: "bind" },
-		{ requireEmailProof: "always", mailWired: true, mailAddress: "address", flag: false, gate: "prove" },
-		{ requireEmailProof: "always", mailWired: true, mailAddress: "none", flag: false, gate: "unprovable" },
-		{ requireEmailProof: "always", mailWired: true, mailAddress: "unreadable", flag: false, gate: "unprovable" },
-		{ requireEmailProof: "always", mailWired: false, mailAddress: "address", flag: false, gate: "unprovable" },
-		{ requireEmailProof: "never", mailWired: true, mailAddress: "address", flag: false, gate: "bind" },
-		{ requireEmailProof: "never", mailWired: true, mailAddress: "unreadable", flag: false, gate: "bind" },
-		{ requireEmailProof: "never", mailWired: false, mailAddress: "none", flag: false, gate: "bind" },
-		{ requireEmailProof: "never", mailWired: true, mailAddress: "address", flag: true, gate: "prove" },
-		{ requireEmailProof: "never", mailWired: false, mailAddress: "address", flag: true, gate: "unprovable" },
-		{ requireEmailProof: "when-mail", mailWired: true, mailAddress: "none", flag: true, gate: "unprovable" },
-		{ requireEmailProof: "when-mail", mailWired: false, mailAddress: "address", flag: true, gate: "unprovable" },
-		{ requireEmailProof: "when-mail", mailWired: true, mailAddress: "address", flag: true, gate: "prove" },
+		{
+			requireEmailProof: "when-mail",
+			mailWired: true,
+			mailAddress: "address",
+			flag: false,
+			gate: "prove",
+		},
+		{
+			requireEmailProof: "when-mail",
+			mailWired: true,
+			mailAddress: "none",
+			flag: false,
+			gate: "bind",
+		},
+		{
+			requireEmailProof: "when-mail",
+			mailWired: true,
+			mailAddress: "unreadable",
+			flag: false,
+			gate: "unprovable",
+		},
+		{
+			requireEmailProof: "when-mail",
+			mailWired: false,
+			mailAddress: "address",
+			flag: false,
+			gate: "bind",
+		},
+		{
+			requireEmailProof: "when-mail",
+			mailWired: false,
+			mailAddress: "unreadable",
+			flag: false,
+			gate: "bind",
+		},
+		{
+			requireEmailProof: "always",
+			mailWired: true,
+			mailAddress: "address",
+			flag: false,
+			gate: "prove",
+		},
+		{
+			requireEmailProof: "always",
+			mailWired: true,
+			mailAddress: "none",
+			flag: false,
+			gate: "unprovable",
+		},
+		{
+			requireEmailProof: "always",
+			mailWired: true,
+			mailAddress: "unreadable",
+			flag: false,
+			gate: "unprovable",
+		},
+		{
+			requireEmailProof: "always",
+			mailWired: false,
+			mailAddress: "address",
+			flag: false,
+			gate: "unprovable",
+		},
+		{
+			requireEmailProof: "never",
+			mailWired: true,
+			mailAddress: "address",
+			flag: false,
+			gate: "bind",
+		},
+		{
+			requireEmailProof: "never",
+			mailWired: true,
+			mailAddress: "unreadable",
+			flag: false,
+			gate: "bind",
+		},
+		{
+			requireEmailProof: "never",
+			mailWired: false,
+			mailAddress: "none",
+			flag: false,
+			gate: "bind",
+		},
+		{
+			requireEmailProof: "never",
+			mailWired: true,
+			mailAddress: "address",
+			flag: true,
+			gate: "prove",
+		},
+		{
+			requireEmailProof: "never",
+			mailWired: false,
+			mailAddress: "address",
+			flag: true,
+			gate: "unprovable",
+		},
+		{
+			requireEmailProof: "when-mail",
+			mailWired: true,
+			mailAddress: "none",
+			flag: true,
+			gate: "unprovable",
+		},
+		{
+			requireEmailProof: "when-mail",
+			mailWired: false,
+			mailAddress: "address",
+			flag: true,
+			gate: "unprovable",
+		},
+		{
+			requireEmailProof: "when-mail",
+			mailWired: true,
+			mailAddress: "address",
+			flag: true,
+			gate: "prove",
+		},
 	];
 	const name = (row: Row) =>
 		`${row.requireEmailProof}, ${row.mailWired ? "a sender" : "no sender"}, ${row.mailAddress}${row.flag ? ", D25's flag" : ""} → ${row.gate}`;

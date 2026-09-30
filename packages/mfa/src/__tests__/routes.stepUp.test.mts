@@ -117,12 +117,10 @@ async function composed(
 /** `store`'s `get`, answering each session as `change` makes it. */
 const reading = (store: UserSessionStore, change: (session: UserSession) => UserSession) => {
 	const read = store.get.bind(store);
-	return vi
-		.spyOn(store, "get")
-		.mockImplementation(async (sid) => {
-			const session = await read(sid);
-			return session === null ? null : change(session);
-		});
+	return vi.spyOn(store, "get").mockImplementation(async (sid) => {
+		const session = await read(sid);
+		return session === null ? null : change(session);
+	});
 };
 
 describe("the step-up of a subject with no counting factor", () => {
@@ -233,8 +231,13 @@ describe("the step-up of a subject with no counting factor", () => {
 		expect(second.status).toBe(200);
 		expect(second.body.transaction).not.toBe(first);
 		expect(
-			(await giveEmailProof(agent, second.body.transaction as string, sender as RecordingMailSender))
-				.status,
+			(
+				await giveEmailProof(
+					agent,
+					second.body.transaction as string,
+					sender as RecordingMailSender,
+				)
+			).status,
 		).toBe(200);
 		expect((await enrollFromAccount(agent, "totp")).status).toBe(200);
 	});

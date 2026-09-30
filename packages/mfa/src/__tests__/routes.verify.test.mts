@@ -473,12 +473,13 @@ describe("the guards every POST sits behind", () => {
 		for (const res of answers) expect(res.headers["cache-control"]).toBe("no-store");
 	});
 
-	it("answers POST /session/mfa/step-up 404: the step-up is not built", async () => {
+	it("answers POST /session/mfa/step-up 401 login_required to a browser with no signed-in session", async () => {
 		const { app } = await boot({ config: configFor("required") });
 		const agent = request.agent(app);
 		const { header, token } = await csrfOf(agent);
 		const res = await agent.post("/session/mfa/step-up").set(header, token).send({});
-		expect(res.status).toBe(404);
+		expect(res.status).toBe(401);
+		expect(res.body).toEqual({ error: "login_required", error_description: "Log in again" });
 	});
 });
 

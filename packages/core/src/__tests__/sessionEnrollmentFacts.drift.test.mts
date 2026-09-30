@@ -273,15 +273,17 @@ describe("a session's stored enrollment facts have one reading", () => {
 		const copy = (source: string) => factsReads(source).map((read) => read.copy);
 		// Core's copies.
 		expect(copy("const f = (view: SessionView) => view.enrollmentFacts?.witness;")).toEqual([true]);
-		expect(copy("function g(primary: PrimaryAuthentication) { return primary.enrollmentFacts; }")).toEqual([
-			true,
-		]);
 		expect(
-			copy("function h(primary: PrimaryAuthentication) { const { enrollmentFacts: f } = primary; }"),
+			copy("function g(primary: PrimaryAuthentication) { return primary.enrollmentFacts; }"),
 		).toEqual([true]);
-		expect(copy("function k({ enrollmentFacts }: SessionView) { return enrollmentFacts; }")).toEqual([
-			true,
-		]);
+		expect(
+			copy(
+				"function h(primary: PrimaryAuthentication) { const { enrollmentFacts: f } = primary; }",
+			),
+		).toEqual([true]);
+		expect(
+			copy("function k({ enrollmentFacts }: SessionView) { return enrollmentFacts; }"),
+		).toEqual([true]);
 		expect(copy('const v = (view: SessionView) => view["enrollmentFacts"];')).toEqual([true]);
 		// Records, and receivers the guard cannot tell.
 		for (const raw of [
@@ -321,7 +323,9 @@ describe("a session's stored enrollment facts have one reading", () => {
 		const [elsewhere] = factsReads(
 			"function answer(session: UserSession) { return session.enrollmentFacts; }",
 		);
-		expect(allowed("packages/core/src/session-admission/admit.mts", inView as FactsRead)).toBe(true);
+		expect(allowed("packages/core/src/session-admission/admit.mts", inView as FactsRead)).toBe(
+			true,
+		);
 		expect(allowed("packages/core/src/session-admission/admit.mts", elsewhere as FactsRead)).toBe(
 			false,
 		);

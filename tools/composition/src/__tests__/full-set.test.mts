@@ -1810,20 +1810,14 @@ describe("a first passkey and a first link, behind the first-binding gate, under
 		return { link, registration };
 	};
 
-	/** The step-up the MFA page runs for a first binding: the transaction it opens, its account-email proof challenged, and the code the full set's sender was handed verified. */
-	const proveInSession = async (
-		set: FullSet,
-		browser: {
-			readonly agent: ReturnType<typeof request.agent>;
-			readonly header: string;
-			readonly token: string;
-		},
-	) => {
+	/** The step-up the MFA page runs for a first binding: the transaction it opens and its account-email proof challenged, with the page's POST to verify the code. */
+	const proveInSession = async (browser: {
+		readonly agent: ReturnType<typeof request.agent>;
+		readonly header: string;
+		readonly token: string;
+	}) => {
 		const post = (path: string, body: Record<string, unknown>) =>
-			browser.agent
-				.post(`/session/mfa${path}`)
-				.set(browser.header, browser.token)
-				.send(body);
+			browser.agent.post(`/session/mfa${path}`).set(browser.header, browser.token).send(body);
 		const opened = await post("/step-up", {});
 		expect(opened.status, JSON.stringify(opened.body)).toBe(200);
 		const transaction = opened.body.transaction as string;
@@ -1871,7 +1865,7 @@ describe("a first passkey and a first link, behind the first-binding gate, under
 				page,
 			});
 
-			const { transaction, challenged, post } = await proveInSession(set, browser);
+			const { transaction, challenged, post } = await proveInSession(browser);
 			expect(challenged.status, JSON.stringify(challenged.body)).toBe(200);
 			const sent = set.mail.sent.at(-1);
 			expect(sent).toMatchObject({ purpose: "account_email_proof", to: "alice@example.com" });
@@ -1917,7 +1911,7 @@ describe("a first passkey and a first link, behind the first-binding gate, under
 		});
 		const browser = await signedIn(set.app, ERIN);
 		expect((await bothAnswer(browser)).registration.status).toBe(403);
-		const { challenged } = await proveInSession(set, browser);
+		const { challenged } = await proveInSession(browser);
 		expect(challenged.status).toBe(403);
 		expect(challenged.body.error).toBe("mfa_email_proof_unavailable");
 		const after = await bothAnswer(browser);

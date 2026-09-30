@@ -17,7 +17,7 @@
 /**
  * The contract the MFA ceremonies share: a call, what each ceremony answers,
  * and the kit the coordinator hands the ceremonies beside a verification —
- * the first binding (`enrollment.mts`) and the account-email proof
+ * an enrollment (`enrollment.mts`) and the account-email proof
  * (`proof.mts`). A leaf: the coordinator and both ceremonies import it, and
  * it imports none of them, so no two of them depend on each other's
  * contracts.
@@ -95,11 +95,24 @@ export const UNKNOWN_FACTOR = Object.freeze({ outcome: "unknown_factor" as const
 export type UnknownTransaction = typeof UNKNOWN_TRANSACTION;
 export type UnknownFactor = typeof UNKNOWN_FACTOR;
 
+/**
+ * The signed-in session a ceremony outside a login runs in, as the route
+ * admitted it: its `sid`, its subject, and the `User` its cookie holds
+ * (core's `cookieSessionUser`).
+ */
+export interface MfaCeremonySession {
+	readonly sid: string;
+	readonly subject: string;
+	readonly user: Readonly<Record<string, unknown>>;
+}
+
 /** One call's request: the transaction named, the binding the browser presents, and what a factor may read of the request. */
 export interface MfaCeremonyCall {
 	readonly transactionId: string | undefined;
 	readonly binding: MfaTransactionBinding;
 	readonly request: { readonly ip?: string; readonly userAgent?: string };
+	/** The session the call was admitted in; none for a login's ceremony, whose browser holds none yet. */
+	readonly session?: MfaCeremonySession;
 }
 
 /** What a transaction's reader is shown of it. */
@@ -174,7 +187,7 @@ export type MfaVerifyOutcome =
 			readonly witness: MfaWitnessMark | undefined;
 	  } & MfaCeremonySubject);
 
-/** Why a first binding is refused before anything is spent. */
+/** Why an enrollment is refused before anything is spent. */
 export type MfaEnrollmentRefusal =
 	| UnknownTransaction
 	| MfaStoreOutage
@@ -184,15 +197,32 @@ export type MfaEnrollmentRefusal =
 	| { readonly outcome: "email_proof_required" }
 	/** No counting factor of that kind this user may enroll. */
 	| { readonly outcome: "unknown_kind" }
-	/** The subject holds a record now: the login starts again. */
-	| { readonly outcome: "first_binding_closed" };
+	/**
+	 * The subject's records no longer allow the binding: a first binding's
+	 * subject holds a record now, or the factor it would go beside is gone —
+	 * the user signs in again.
+	 */
+	| { readonly outcome: "first_binding_closed" }
+	/** The subject holds `mfa.maxFactorsPerSubject` records. */
+	| { readonly outcome: "factor_limit" };
+
+/** An `enroll` transaction as the page names it next: its id, and the seconds it has left. */
+export interface MfaOpenedTransaction {
+	readonly id: string;
+	readonly expiresIn: number;
+}
 
 export type MfaEnrollmentBeginOutcome =
 	| MfaEnrollmentRefusal
 	| MfaMailRefusal
 	/** The factor could not start its enrollment: an outage, never a refusal. */
 	| { readonly outcome: "enrollment_failed"; readonly kind: string; readonly cause: unknown }
-	| ({ readonly outcome: "begun"; readonly response: object } & MfaCeremonySubject);
+	| ({
+			readonly outcome: "begun";
+			readonly response: object;
+			/** An `enroll` transaction's, which the page completes the enrollment on. */
+			readonly transaction?: MfaOpenedTransaction;
+	  } & MfaCeremonySubject);
 
 export type MfaEnrollmentCompleteOutcome =
 	| MfaEnrollmentRefusal
@@ -230,10 +260,22 @@ export type MfaEnrollmentCompleteOutcome =
 			readonly factor: { readonly id: string; readonly kind: string; readonly label?: string };
 			readonly binding: NonNullable<MfaFactorRecord["binding"]>;
 			readonly recoveryCodes: MfaIssuedRecoveryCodes;
-			readonly witness: MfaWitnessMark;
+			/** The witness marked after a first binding; `undefined` for a factor bound beside another. */
+			readonly witness: MfaWitnessMark | undefined;
 			/** Why D25's flag could not be cleared after the proof was given; `undefined` when it was, or none was due. */
 			readonly flagUncleared: unknown;
 	  } & MfaCeremonySubject);
+
+/**
+ * What the step-up of a subject with no counting factor answers: the
+ * `enroll` transaction the account-email proof is owed on, or why none.
+ */
+export type MfaStepUpOutcome =
+	| UnknownTransaction
+	| MfaStoreOutage
+	/** The subject holds a record that may count: its step-up is a second factor's. */
+	| { readonly outcome: "counting_factor_held" }
+	| { readonly outcome: "opened"; readonly transaction: MfaOpenedTransaction };
 
 /**
  * What the ceremonies beside a verification share of the coordinator: its
@@ -247,8 +289,31 @@ export interface MfaCeremonyKit {
 	readonly mailSender: MailSender | undefined;
 	readonly witness: MfaEnrollmentWitness;
 	readonly now: () => number;
-	/** The login transaction `call` names, bound to its binding; `null` when there is none to use. */
+	/** `mfa.maxFactorsPerSubject`: the records a subject may hold before an enrollment in a session is refused. */
+	readonly maxFactorsPerSubject: number;
+	/**
+	 * The transaction `call` names, bound to its binding: a login's, or an
+	 * `enroll` one whose `sid` and subject are `call.session`'s; `null` when
+	 * there is none to use.
+	 */
 	readonly bound: (call: MfaCeremonyCall) => Promise<MfaTransaction | null | MfaStoreOutage>;
+	/** A new `enroll` transaction for `session`, bound to the browser `call` presents; the outage otherwise. */
+	readonly openEnrollment: (
+		call: MfaCeremonyCall,
+		session: MfaCeremonySession,
+		shape: {
+			readonly enrollment: "required" | "allowed";
+			readonly emailProof: "required" | "not_required";
+		},
+	) => Promise<MfaTransaction | MfaStoreOutage>;
+	/** Whether the account-email proof given in the session `sid` of `subject` stands now; the outage otherwise. */
+	readonly provedInSession: (subject: string, sid: string) => Promise<boolean | MfaStoreOutage>;
+	/** The account-email proof given at `provedAtMs` in the session `sid` of `subject`, recorded to stand `mfa.manage.maxAgeSeconds`; the outage otherwise. */
+	readonly recordSessionProof: (
+		subject: string,
+		sid: string,
+		provedAtMs: number,
+	) => Promise<MfaStoreOutage | undefined>;
 	/** Every record of `subject`, oldest first; an outage is never "none". */
 	readonly recordsOf: (subject: string) => Promise<MfaFactorRecord[] | MfaStoreOutage>;
 	/** One of `tx`'s attempts reserved: the attempts left, `exhausted` past the limit, or why none was. */

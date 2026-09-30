@@ -85,10 +85,6 @@ const FACTOR_LIMIT = {
 	error: "mfa_factor_limit",
 	error_description: "The subject holds as many second factors as it may",
 };
-const PROOF_REQUIRED = {
-	error: "mfa_email_proof_required",
-	error_description: "The account-email proof comes first",
-};
 const PROOF_UNAVAILABLE = {
 	error: "mfa_email_proof_unavailable",
 	error_description: "The account-email proof cannot be given for this account",
@@ -155,8 +151,7 @@ const recordsOf = async (store: { list(subject: string): Promise<readonly MfaFac
 
 describe("a first factor from the account page, where no proof is asked", () => {
 	it("binds TOTP on a recent sign-in: the transaction opened in the session, the factor bound by password with its recovery codes, the witness marked, the session as it was", async () => {
-		const { app, factorStore, transactionStore, userSessionStore, audit, users } =
-			await composed();
+		const { app, factorStore, transactionStore, userSessionStore, audit, users } = await composed();
 		const { agent, sid } = await signIn(app, userSessionStore);
 		const before = await userSessionStore.get(sid);
 
@@ -314,16 +309,40 @@ describe("a first factor from the account page, under the gate", () => {
 		readonly gate: Gate;
 	}
 	const rows: readonly Row[] = [
-		{ requireEmailProof: "when-mail", sender: true, address: "address", flag: false, gate: "prove" },
+		{
+			requireEmailProof: "when-mail",
+			sender: true,
+			address: "address",
+			flag: false,
+			gate: "prove",
+		},
 		{ requireEmailProof: "when-mail", sender: true, address: "none", flag: false, gate: "bind" },
-		{ requireEmailProof: "when-mail", sender: true, address: "unreadable", flag: false, gate: "unprovable" },
-		{ requireEmailProof: "when-mail", sender: false, address: "address", flag: false, gate: "bind" },
+		{
+			requireEmailProof: "when-mail",
+			sender: true,
+			address: "unreadable",
+			flag: false,
+			gate: "unprovable",
+		},
+		{
+			requireEmailProof: "when-mail",
+			sender: false,
+			address: "address",
+			flag: false,
+			gate: "bind",
+		},
 		{ requireEmailProof: "always", sender: true, address: "address", flag: false, gate: "prove" },
 		{ requireEmailProof: "always", sender: true, address: "none", flag: false, gate: "unprovable" },
 		{ requireEmailProof: "never", sender: true, address: "address", flag: false, gate: "bind" },
 		{ requireEmailProof: "never", sender: true, address: "unreadable", flag: false, gate: "bind" },
 		{ requireEmailProof: "never", sender: true, address: "address", flag: true, gate: "prove" },
-		{ requireEmailProof: "when-mail", sender: false, address: "address", flag: true, gate: "unprovable" },
+		{
+			requireEmailProof: "when-mail",
+			sender: false,
+			address: "address",
+			flag: true,
+			gate: "unprovable",
+		},
 	];
 
 	it.each(
@@ -512,8 +531,7 @@ describe("another factor from the account page, for a subject holding a counting
 	});
 
 	it("binds by mfa with a second factor verified in the session: no recovery codes, no witness mark, the session as it was", async () => {
-		const { app, factorStore, transactionStore, userSessionStore, audit, users } =
-			await composed();
+		const { app, factorStore, transactionStore, userSessionStore, audit, users } = await composed();
 		const seeded = await seedTotp(factorStore);
 		const { agent, sid } = await signInWithTotp(app, userSessionStore, seeded);
 		const before = await userSessionStore.get(sid);
@@ -527,7 +545,12 @@ describe("another factor from the account page, for a subject holding a counting
 			enrollment: "allowed",
 			sid,
 		});
-		const done = await completeEnrollment(agent, transaction, totpProofOf(begun.body.secret), "phone");
+		const done = await completeEnrollment(
+			agent,
+			transaction,
+			totpProofOf(begun.body.secret),
+			"phone",
+		);
 
 		expect(done.status, JSON.stringify(done.body)).toBe(200);
 		expect(done.body).toEqual({
@@ -587,7 +610,8 @@ describe("the account page's calls", () => {
 		}
 		const { header, token } = await csrfOf(agent);
 		expect(
-			(await agent.post("/session/mfa/enrollment").set(header, token).send({ kind: "totp" })).status,
+			(await agent.post("/session/mfa/enrollment").set(header, token).send({ kind: "totp" }))
+				.status,
 		).toBe(200);
 	});
 });

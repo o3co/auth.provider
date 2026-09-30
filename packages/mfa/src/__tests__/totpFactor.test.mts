@@ -324,7 +324,9 @@ describe("enrolling a TOTP factor", () => {
 		const spaced = createTotpFactor({ ...SETTINGS, issuer: "Example Co" });
 		const withEmail = await spaced.beginEnrollment(enrollmentContext());
 		const uri = (withEmail.response as { otpauth_uri: string }).otpauth_uri;
-		expect(uri).toMatch(/^otpauth:\/\/totp\/Example%20Co:alice\?secret=[A-Z2-7]+&issuer=Example%20Co&/);
+		expect(uri).toMatch(
+			/^otpauth:\/\/totp\/Example%20Co:alice\?secret=[A-Z2-7]+&issuer=Example%20Co&/,
+		);
 		expect(decodeURIComponent(uri)).not.toContain(USER.email);
 		const spacedName = await spaced.beginEnrollment(
 			enrollmentContext({ id: "u-bob", username: "bob smith", email: "bob@example.com" }),

@@ -36,8 +36,8 @@ import {
 	passwordSessionAuthentication,
 	readAcrTable,
 	requirementSession,
-	SUBJECT_REVOCATION_ABSENCE_POLICY,
 	type SessionRequirement,
+	SUBJECT_REVOCATION_ABSENCE_POLICY,
 	type UserSession,
 	type UserSessionStore,
 } from "@o3co/auth-provider-core";
