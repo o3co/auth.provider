@@ -1632,6 +1632,45 @@ before you flip — and a relying party holding the secret can also mint.
    `"reject"` ends it, and signs out every holder of such a chain at that
    moment — plan it as a forced re-login.
 
+5. **The oauth and session settings at their modules' sections.** Each path
+   and variable that moved refuses boot naming the new one; the paths are in
+   the [oauth](../packages/oauth/README.md#which-grants-are-on) and
+   [session](../packages/session/README.md#configuration) READMEs. Three
+   changes go further than the rename:
+
+   - **The grant switches read the boolean vocabulary every other switch
+     reads. Check the value each grant's `enabled` is set to before
+     upgrading.** `oauth-session.enabled` and
+     `oauth-authorization.grants.<grant>.enabled`, and the variables that set
+     them, go through core's `coerceBooleanFromEnv`, which trims the value and
+     ignores case:
+
+     | Value | Reads as |
+     | --- | --- |
+     | `true`, `"true"`, `"1"` | on |
+     | `false`, `"false"`, `"0"`, `""` (an exported-but-empty variable) | off |
+     | anything else — `"yes"`, `"no"`, `"on"`, `"off"`, `"2"`, a number, `null` | refused: boot fails (`config-validation-failed`, naming the key) |
+
+     Before, a grant was on only for the boolean `true` or the exact string
+     `"true"`, and every other value left it off without a word — `"TRUE"`,
+     `"1"` and `" true "` among them. A grant set to one of those, which you
+     believed was off, comes on after the upgrade.
+   - **A missing `SESSION_STORE_SECRET` is refused by the session store's
+     module**, naming the variable: `provides-factory-failed` where the
+     session module is installed (the standalone template), as the CSRF
+     token's signer is built from the secret, and `contribute-factory-failed`
+     where the session store's module is installed alone. It was
+     `config-validation-failed`, from core's schema. An alert or a runbook
+     step that matches the reason code needs the new one. A secret that is
+     set but below the 256-bit floor is still `config-validation-failed`,
+     naming `session-store.secret`.
+   - **The PKCE key and variable refuse boot.** `oauth.grants.authorization_code.pkce.*`
+     is refused as removed (`config-path-relocated`), and
+     `OAUTH_GRANTS_AUTHORIZATION_CODE_PKCE_REQUIRE_S256`, set to any value, as
+     removed (`environment-variable-renamed`). They used to log
+     `pkce_config_ignored_s256_is_mandatory` once and be ignored. Delete both
+     before you upgrade (the table in step 2).
+
 ### Rolling out
 
 - The image is `node:26-alpine`, digest-pinned, with `tini` and a `runtime`
