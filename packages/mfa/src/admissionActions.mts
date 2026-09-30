@@ -22,9 +22,9 @@ import type { AdmissionActionDeclaration } from "@o3co/auth-provider-core";
  * login, removing one, regenerating recovery codes — changes the ways into
  * the account, so it is a `credential_change`.
  *
- * Declared, not registered: a module registers only what its own code admits,
- * and no MFA route admits a session yet. The module whose route first admits
- * one contributes these as its `admissionActions`.
+ * Declared, and registered by no module: a module registers only what its
+ * own code admits, and the module whose route admits a session contributes
+ * these as its `admissionActions`.
  */
 export const MFA_ADMISSION_ACTIONS = Object.freeze({
 	"mfa.manage": Object.freeze({ grade: "credential_change" }),

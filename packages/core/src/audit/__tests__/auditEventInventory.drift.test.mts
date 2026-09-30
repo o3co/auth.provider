@@ -200,7 +200,7 @@ describe("built-in audit event inventory", () => {
 		expect(dead, "listed but no emission site found").toEqual([]);
 	});
 
-	it("declares as not yet emitted only listed events nothing emits", () => {
+	it("marks as declared, not emitted, only listed events nothing emits", () => {
 		const declared = Object.keys(DECLARED_NOT_EMITTED);
 		expect(
 			declared.filter((type) => !(BUILT_IN_AUDIT_EVENT_TYPES as readonly string[]).includes(type)),

@@ -17,7 +17,7 @@
 /**
  * `mfaEmailFactorModule`: the email factor's module (the MFA ADR's D1, F5),
  * named after its section, `mfa-email-factor`, which boot parses with the
- * module's schema before any factory runs. The factor itself is not built:
+ * module's schema before any factory runs. This build has no email factor:
  * the module claims the `email` kind under `mfaFactors`, answers `null` while
  * `mfa-email-factor.enabled` is false, and refuses the boot when it is true,
  * so switching the factor on never passes for having it. Stateless.
@@ -29,7 +29,7 @@ import { mfaEmailFactorConfigSchema } from "./config.mjs";
 /** The kind an email factor's records carry, and the key it is contributed under. */
 export const EMAIL_FACTOR_KIND = "email";
 
-/** The email factor's module: its section; no factor yet. */
+/** The email factor's module: its section, and the `email` kind claimed. */
 export const mfaEmailFactorModule = defineModule({
 	name: "mfa-email-factor",
 	section: {

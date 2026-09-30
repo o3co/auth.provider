@@ -22,9 +22,10 @@
  * reads the string an environment variable carries: `enabled` through core's
  * `coerceBooleanFromEnv`, from `WEBAUTHN_MFA_FACTOR_ENABLED`, and
  * `userVerification` from `WEBAUTHN_MFA_FACTOR_USER_VERIFICATION`. Its
- * defaults — off, `preferred` — go in the package's reference.conf with the
- * module that reads the section: before that module exists, a section there
- * would be one no installed module owns. Not on the package's entry.
+ * defaults — off, `preferred` — are not in the package's reference.conf: no
+ * module of the package reads the section, and a section there that no
+ * installed module owns is named ignored at every boot. Not on the package's
+ * entry.
  */
 
 import { coerceBooleanFromEnv } from "@o3co/auth-provider-core";

@@ -1,6 +1,6 @@
 {
 	"name": "@o3co/auth-provider-smtp",
-	"description": "An SMTP MailSender for @o3co/auth-provider — how multi-factor authentication's codes and notices leave the provider. Private until its sender is built.",
+	"description": "An SMTP MailSender for @o3co/auth-provider — how multi-factor authentication's codes and notices leave the provider. Its module declares its section and provides no sender.",
 	"version": "0.0.0",
 	"private": true,
 	"license": "Apache-2.0",

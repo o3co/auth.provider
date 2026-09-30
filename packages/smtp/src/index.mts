@@ -16,7 +16,7 @@
 
 // @o3co/auth-provider-smtp — an SMTP MailSender (the MFA ADR,
 // packages/core/docs/adr/2026-09-25-multi-factor-authentication.md, D5).
-// Private until its sender is built.
+// Private: its module declares its section and provides no sender.
 
 // The module and the schema of its section, `smtp-mail-sender`.
 export { smtpMailSenderConfigSchema } from "./config.mjs";

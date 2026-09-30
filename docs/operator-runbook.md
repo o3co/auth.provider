@@ -905,8 +905,8 @@ check this page, so when the two disagree, the constant is right:
 `token.issued`, `token.issued.failure`.
 
 The `mfa.*` events are the multi-factor authentication package's (the MFA
-ADR's D28). Nothing emits them yet: the package is private until the
-standalone template wires it, and its routes are still being built.
+ADR's D28). The MFA package is private until the standalone template wires
+it, so no released composition emits them.
 
 None of the device events carries the user code or the device code
 (`packages/device-grant/README.md`).

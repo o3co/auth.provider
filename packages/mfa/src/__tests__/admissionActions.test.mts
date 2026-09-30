@@ -16,14 +16,15 @@
 
 /**
  * The admission actions the MFA package's routes admit, declared with their
- * grades before those routes exist, and registered by no module until a route
- * admits one: a module registers only what its own code admits.
+ * grades, and registered by no module on the package's entry: a module
+ * registers only what its own code admits.
  */
 
+import type { Module } from "@o3co/auth-provider-core";
 import { resolverForTests } from "@o3co/auth-provider-core/testing";
 import { describe, expect, it } from "vitest";
 import { MFA_ADMISSION_ACTIONS } from "#/admissionActions.mjs";
-import { mfaModule, mfaModules } from "#/module.mjs";
+import * as entry from "#/index.mjs";
 
 describe("the MFA package's admission actions", () => {
 	it("declare mfa.manage, graded credential_change", () => {
@@ -39,8 +40,24 @@ describe("the MFA package's admission actions", () => {
 		});
 	});
 
-	it("are registered by no MFA module yet: no route of the package admits a session", () => {
-		for (const module of [mfaModule(), ...mfaModules()]) {
+	it("are registered by no module on the package's entry", () => {
+		const isModule = (value: unknown): value is Module =>
+			typeof value === "object" && value !== null && typeof (value as Module).name === "string";
+		const modules = [
+			...Object.values(entry).filter(isModule),
+			entry.mfaModule(),
+			...entry.mfaModules(),
+		];
+		expect(modules.map((module) => module.name).sort()).toEqual([
+			"mfa",
+			"mfa",
+			"mfa-email-factor",
+			"mfa-recovery-code-factor",
+			"mfa-recovery-code-factor",
+			"mfa-totp-factor",
+			"mfa-totp-factor",
+		]);
+		for (const module of modules) {
 			expect(module.contributes?.admissionActions, module.name).toBeUndefined();
 		}
 	});

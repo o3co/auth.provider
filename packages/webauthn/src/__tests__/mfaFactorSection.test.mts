@@ -16,12 +16,14 @@
 
 /**
  * The WebAuthn second factor's section, `webauthn-mfa-factor` (the MFA ADR's
- * D19 `mfa.factors.webauthn`, in #728's shape), declared as a schema before
- * its module exists: its switch and the user verification a registration
- * asks for, each read from the string its variable carries, and an unknown
- * key refused. Its defaults are not in the package's reference.conf yet: a
- * section there that no installed module owns is named ignored at every boot
- * of every composition that installs the WebAuthn grant.
+ * D19 `mfa.factors.webauthn`, in the configuration's own shape), declared as
+ * a schema its module is to read: its switch and the user verification a
+ * registration asks for, each read from the string its variable carries, and
+ * an unknown key refused by its name. Its defaults are not in the package's
+ * reference.conf, nor the schema on its entry: no module of the package reads
+ * the section, and a section in reference.conf that no installed module owns
+ * is named ignored at every boot of every composition that installs the
+ * WebAuthn grant.
  */
 
 import { fileURLToPath } from "node:url";
@@ -33,7 +35,7 @@ import { webauthnMfaFactorConfigSchema } from "#/mfaFactor/config.mjs";
 const REFERENCE = fileURLToPath(new URL("../../config/reference.conf", import.meta.url));
 
 describe("webauthn-mfa-factor, the WebAuthn second factor's section", () => {
-	it("reads the MFA ADR's defaults: off, and user verification preferred", () => {
+	it("accepts the MFA ADR's defaults: off, and user verification preferred", () => {
 		expect(
 			webauthnMfaFactorConfigSchema.parse({ enabled: false, userVerification: "preferred" }),
 		).toEqual({ enabled: false, userVerification: "preferred" });
@@ -57,7 +59,7 @@ describe("webauthn-mfa-factor, the WebAuthn second factor's section", () => {
 		).toBe(false);
 	});
 
-	it("is not in the package's reference.conf, nor on its entry, before its module exists", () => {
+	it("is not in the package's reference.conf, nor on its entry", () => {
 		expect(parseFile(REFERENCE, { env: {} }).toObject()).not.toHaveProperty("webauthn-mfa-factor");
 		expect(Object.keys(entry)).not.toContain("webauthnMfaFactorConfigSchema");
 	});

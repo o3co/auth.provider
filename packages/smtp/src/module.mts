@@ -17,15 +17,15 @@
 /**
  * `smtpMailSenderModule`: the SMTP mail sender's module (the MFA ADR's D5),
  * named after its section, `smtp-mail-sender`, which boot parses with the
- * module's schema before any factory runs. The sender is not built: the
- * module provides nothing, so a composition that needs a `mailSender` is
+ * module's schema before any factory runs. This build has no SMTP sender:
+ * the module provides nothing, so a composition that needs a `mailSender` is
  * refused for want of one. Stateless.
  */
 
 import { defineModule } from "@o3co/auth-provider-core";
 import { smtpMailSenderConfigSchema } from "./config.mjs";
 
-/** The SMTP mail sender's module: its section; no sender yet. */
+/** The SMTP mail sender's module: its section alone. */
 export const smtpMailSenderModule = defineModule({
 	name: "smtp-mail-sender",
 	section: {

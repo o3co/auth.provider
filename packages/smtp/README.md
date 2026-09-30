@@ -4,7 +4,7 @@ Last updated: 2026-09-30
 
 An SMTP `MailSender` for [`auth.provider`](../../README.md): how multi-factor authentication's one-time codes and security notices leave the provider — the package [the MFA ADR](../core/docs/adr/2026-09-25-multi-factor-authentication.md) places SMTP in (its D5).
 
-> **Private, and not built.** The package is `"private": true` and its module provides no sender yet: it declares its section, which boot parses and holds to its rules. A composition that needs a `mailSender` is refused for want of one until the sender lands (the ADR's build-order step 17).
+> **Private.** The package is `"private": true`, and its module provides no sender: it declares its section, which boot parses and holds to its rules. A composition that needs a `mailSender` and installs only this is refused for want of one.
 
 ## Responsibility
 
@@ -33,5 +33,5 @@ One section, its module's and named after it: `smtp-mail-sender`. Boot parses it
 
 | Export | What it is |
 | --- | --- |
-| [`smtpMailSenderModule`](src/module.mts) | The SMTP mail sender's module, `smtp-mail-sender`: its section; it provides no sender yet |
+| [`smtpMailSenderModule`](src/module.mts) | The SMTP mail sender's module, `smtp-mail-sender`: its section; it provides no sender |
 | [`smtpMailSenderConfigSchema`](src/config.mts) | The shape and rules of `smtp-mail-sender` |

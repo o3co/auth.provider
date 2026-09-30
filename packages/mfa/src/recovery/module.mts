@@ -18,8 +18,8 @@
  * `mfaRecoveryCodeFactorModule`: the recovery-code factor's module (the MFA
  * ADR's D1, D25), named after its section, `mfa-recovery-code-factor`, which
  * boot parses with the module's schema before any factory runs. It
- * contributes nothing: the recovery codes are not built, and nothing reads
- * the section yet. Stateless.
+ * contributes nothing: this build has no recovery codes, and nothing reads
+ * the section. Stateless.
  */
 
 import { defineModule } from "@o3co/auth-provider-core";

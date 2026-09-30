@@ -17,12 +17,12 @@
 /**
  * The sections of the email factor's module, `mfa-email-factor`, and the
  * recovery-code factor's, `mfa-recovery-code-factor` (the MFA ADR's D19, in
- * #728's shape): each named after its module, its keys camelCase, its
+ * the configuration's own shape): each named after its module, its keys camelCase, its
  * defaults in the package's `reference.conf` alone, each key read from the
- * variable its path names, and an unknown key refused. The modules are
- * declared before their factors are built: the email factor's answers no
- * factor while off and refuses the boot when switched on; the recovery-code
- * factor's contributes nothing.
+ * variable its path names, and an unknown key refused by its name. The
+ * modules declare their sections, and this build has neither factor: the
+ * email factor's module answers no factor while off and refuses the boot when
+ * switched on; the recovery-code factor's contributes nothing.
  */
 
 import { fileURLToPath } from "node:url";
@@ -205,7 +205,7 @@ describe("mfa-recovery-code-factor, the recovery-code factor's section", () => {
 	});
 });
 
-describe("the two factors' modules, declared before their factors are built", () => {
+describe("the two factors' modules, which declare their sections", () => {
 	const base = makeValidAppConfig();
 	const configWith = (sections: Record<string, unknown>) => ({
 		...base,

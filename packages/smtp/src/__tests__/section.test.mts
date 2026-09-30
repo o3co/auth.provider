@@ -16,11 +16,11 @@
 
 /**
  * The SMTP mail sender's section, `smtp-mail-sender` (the MFA ADR's D5, D19
- * and D20, in #728's shape): named after its module, its keys camelCase, its
+ * and D20, in the configuration's own shape): named after its module, its keys camelCase, its
  * defaults in the package's `reference.conf` alone, each key read from the
- * variable its path names, an unknown key refused, and plaintext only to a
- * loopback host. The module is declared before its sender is built: it
- * provides nothing.
+ * variable its path names, an unknown key refused by its name, and plaintext
+ * only to localhost or a loopback address in its canonical form. The module
+ * declares its section and provides nothing: this build has no SMTP sender.
  */
 
 import { fileURLToPath } from "node:url";
@@ -121,7 +121,7 @@ describe("smtp-mail-sender, the SMTP mail sender's section", () => {
 	});
 });
 
-describe("smtpMailSenderModule, declared before its sender is built", () => {
+describe("smtpMailSenderModule, which declares its section", () => {
 	let disposable: { dispose(): Promise<void> } | undefined;
 	afterEach(async () => {
 		await disposable?.dispose();

@@ -72,10 +72,11 @@ export const BUILT_IN_AUDIT_EVENT_TYPES = [
 	"logout.cascade_failed",
 	"logout.family_revoked",
 	"logout.success",
-	// Multi-factor authentication (the MFA ADR's D28), emitted by the MFA
-	// package's routes; each carries `subject`, `ip` and `userAgent`, and
-	// `kind` and `purpose` in its details. Listed before their emitters exist
-	// (the inventory's drift test names each one's build step).
+	// Multi-factor authentication (the MFA ADR's D28), the MFA package's
+	// routes'; each carries `subject`, `ip` and `userAgent`, and `kind` and
+	// `purpose` in its details. The MFA package is private until the template
+	// wires it, so no released composition emits them; the inventory's drift
+	// test names the step that emits each.
 	"mfa.challenge.sent",
 	"mfa.enrollment_state_inconsistent",
 	"mfa.factor.enrolled",

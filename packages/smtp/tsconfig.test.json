@@ -3,7 +3,7 @@
 	"compilerOptions": {
 		"noEmit": true
 	},
-	// #626: the build config excludes `__tests__`, so a type assertion made in
+	// The build config excludes `__tests__`, so a type assertion made in
 	// a test would never be compiled. Paired with vitest.config.mts's
 	// `typecheck` block, as core's tsconfig.test.json requires: vitest decides
 	// which test files it collects, this decides what tsc is given, and a file
