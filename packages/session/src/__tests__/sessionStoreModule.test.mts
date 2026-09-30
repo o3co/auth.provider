@@ -13,11 +13,13 @@ import {
 	checkReplicaSafety,
 	createApp,
 	type LifecycleRegistrar,
+	MAX_DURATION_MS,
 	type Module,
 	replicaUnsafeReason,
 } from "@o3co/auth-provider-core";
 import { makeValidAppConfig } from "@o3co/auth-provider-core/testing";
 import express from "express";
+import { createClient } from "redis";
 import request from "supertest";
 import { describe, expect, it, vi } from "vitest";
 import { sessionStoreModule, sessionStoreModuleFor } from "../modules/sessionStoreModule.mjs";
@@ -449,4 +451,239 @@ describe("sessionStoreModule (static manifest) — factory-time refusal under mu
 			}
 		},
 	);
+});
+
+// ---------------------------------------------------------------------------
+// The cookie the store mounts is the one its `sessionCookiePolicy` describes,
+// so the store refuses at boot every section the policy refuses, whether or
+// not a module requires the slot.
+// ---------------------------------------------------------------------------
+
+describe("the session store refuses the cookie its sessionCookiePolicy refuses", () => {
+	const HOST_PREFIX =
+		"session.name with __Host- prefix requires session.secure=true and session.domain=null";
+	const SECURE_PREFIX = "session.name with __Secure- prefix requires session.secure=true";
+	const NOT_A_TOKEN = 'session.name "auth session" is not a cookie name (an RFC 6265 token)';
+	const CROSS_SITE = 'session.sameSite = "none" requires session.secure = true';
+	const LIFETIME = `session.maxAge must be a whole number of milliseconds from 1 to ${MAX_DURATION_MS}`;
+
+	/** The fixture's configuration with `change` laid over its session section. */
+	const configWith = (change: Record<string, unknown>) => {
+		const base = makeValidAppConfig();
+		return { ...base, session: { ...base.session, ...change } };
+	};
+
+	const FORMS = [
+		["sessionStoreModuleFor(config)", (config: never) => sessionStoreModuleFor(config)],
+		["sessionStoreModule", () => sessionStoreModule],
+	] as const;
+
+	/** Boots the session store's module alone: nothing requires the slot. */
+	const bootAlone = (form: (typeof FORMS)[number][1], change: Record<string, unknown>) => {
+		const config = configWith(change);
+		return createApp({
+			modules: [form(config as never)],
+			bootstrapComponents: { config, pathResolver: (p: string) => p } as never,
+		});
+	};
+
+	/** What a boot settles as: the refusal, or `undefined` once it booted and was disposed. */
+	const settled = (boot: ReturnType<typeof bootAlone>): Promise<unknown> =>
+		boot.then(
+			async (handle) => {
+				await handle.dispose();
+				return undefined;
+			},
+			(err: unknown) => err,
+		);
+
+	/** A refusal the route reaches through createApp: [what, key, change, message]. */
+	const REFUSED_BY_THE_STORE = [
+		["a name that is not an RFC 6265 token", "name", { name: "auth session" }, NOT_A_TOKEN],
+		[
+			"a __Secure- name that is not secure",
+			"name",
+			{ name: "__Secure-auth.session", secure: false },
+			SECURE_PREFIX,
+		],
+		["a __Host- name that is not secure", "name", { secure: false }, HOST_PREFIX],
+		["a __Host- name with a domain", "name", { domain: "example.com" }, HOST_PREFIX],
+	] as const;
+
+	/** A refusal core's schema makes first, at validation: [what, key, change, the store's message]. */
+	const REFUSED_AT_VALIDATION = [
+		[
+			"SameSite=None that is not secure",
+			"secure",
+			{ name: "auth.session", sameSite: "none", secure: false },
+			CROSS_SITE,
+		],
+		["a lifetime of 0", "maxAge", { maxAge: 0 }, LIFETIME],
+		["a fractional lifetime", "maxAge", { maxAge: 1.5 }, LIFETIME],
+		["a lifetime above the ceiling", "maxAge", { maxAge: MAX_DURATION_MS + 1 }, LIFETIME],
+	] as const;
+
+	describe.each(FORMS)("through createApp, with %s installed alone", (_form, form) => {
+		it.each(REFUSED_BY_THE_STORE)(
+			"refuses %s as config-validation-failed naming session.%s, from its route",
+			async (_what, key, change, message) => {
+				expect(await settled(bootAlone(form, change))).toMatchObject({
+					name: "BootError",
+					reason: "contribute-factory-failed",
+					details: { module: "session-store", kind: "routes" },
+					cause: {
+						name: "BootError",
+						reason: "config-validation-failed",
+						stage: "applyContributions",
+						message,
+						details: {
+							reason: "config-validation-failed",
+							issues: [{ code: "custom", path: ["session", key], message }],
+							modules: [{ module: "session-store" }],
+						},
+					},
+				});
+			},
+		);
+
+		it.each(REFUSED_AT_VALIDATION)(
+			"refuses %s at validation, naming session.%s",
+			async (_what, key, change) => {
+				expect(await settled(bootAlone(form, change))).toMatchObject({
+					name: "BootError",
+					reason: "config-validation-failed",
+					stage: "validateManifests",
+					details: {
+						issues: expect.arrayContaining([expect.objectContaining({ path: ["session", key] })]),
+					},
+				});
+			},
+		);
+
+		it.each([
+			["the fixture's __Host- cookie, secure and host-only", {}],
+			[
+				"a __Secure- cookie that is secure and names a domain",
+				{ name: "__Secure-auth.session", secure: true, domain: "example.com" },
+			],
+			["an unprefixed cookie over plain HTTP", { name: "auth.session", secure: false }],
+			[
+				"a cross-site cookie that is secure",
+				{ name: "__Secure-auth.session", sameSite: "none", secure: true },
+			],
+			["a lifetime of 1 ms", { maxAge: 1 }],
+			["a lifetime at the ceiling", { maxAge: MAX_DURATION_MS }],
+		])("mounts %s", async (_what, change) => {
+			const handle = await bootAlone(form, change);
+			try {
+				expect(handle.routes.map((r) => r.contribution.id)).toContain("session-middleware");
+			} finally {
+				await handle.dispose();
+			}
+		});
+	});
+
+	const factoryOf = (m: unknown) => {
+		const factory = (m as Module).contributes?.routes?.[0];
+		if (typeof factory !== "function") throw new Error("not a factory");
+		return factory;
+	};
+
+	it.each([...REFUSED_BY_THE_STORE, ...REFUSED_AT_VALIDATION])(
+		"the route refuses %s itself, naming session.%s, whatever validated the section",
+		async (_what, key, change, message) => {
+			await expect(
+				factoryOf(sessionStoreModule)({
+					config: configWith(change) as never,
+					deploymentMode: "unset",
+					lifecycleRegistrar: undefined,
+				} as never),
+			).rejects.toMatchObject({
+				name: "BootError",
+				reason: "config-validation-failed",
+				stage: "applyContributions",
+				message,
+				details: {
+					reason: "config-validation-failed",
+					issues: [{ code: "custom", path: ["session", key], message }],
+					modules: [{ module: "session-store" }],
+				},
+			});
+		},
+	);
+
+	it("refuses before it opens the store's connection", async () => {
+		const redis = { type: "redis", redis: { url: "redis://localhost:6379" } };
+		vi.mocked(createClient).mockClear();
+		await expect(
+			factoryOf(sessionStoreModule)({
+				config: configWith({ name: "auth session", storage: redis }) as never,
+				deploymentMode: "unset",
+				lifecycleRegistrar: undefined,
+			} as never),
+		).rejects.toMatchObject({ reason: "config-validation-failed" });
+		expect(createClient).not.toHaveBeenCalled();
+
+		await factoryOf(sessionStoreModule)({
+			config: configWith({ storage: redis }) as never,
+			deploymentMode: "unset",
+			lifecycleRegistrar: undefined,
+		} as never);
+		expect(createClient).toHaveBeenCalledTimes(1);
+	});
+
+	it("sets the cookie the section describes: its name, Domain, SameSite and lifetime", async () => {
+		const route = await factoryOf(sessionStoreModule)({
+			config: configWith({
+				name: "auth.session",
+				secure: false,
+				sameSite: "strict",
+				domain: "example.com",
+				maxAge: 60_000,
+			}) as never,
+			deploymentMode: "unset",
+			lifecycleRegistrar: undefined,
+		} as never);
+		const app = express();
+		app.use(route.handler);
+		app.post("/touch", (req, res) => {
+			(req.session as unknown as Record<string, unknown>).touched = true;
+			res.status(200).json({ ok: true });
+		});
+
+		const before = Date.now();
+		const res = await request(app).post("/touch");
+
+		const cookie = res.headers["set-cookie"]?.[0] ?? "";
+		const attributes = cookie.split("; ");
+		expect(attributes[0]).toMatch(/^auth\.session=/);
+		expect(attributes).toEqual(
+			expect.arrayContaining(["Domain=example.com", "Path=/", "HttpOnly", "SameSite=Strict"]),
+		);
+		expect(attributes).not.toContain("Secure");
+		const expires = Date.parse(attributes.find((a) => a.startsWith("Expires="))?.slice(8) ?? "");
+		// `Expires` has whole seconds.
+		expect(expires).toBeGreaterThanOrEqual(Math.floor(before / 1000) * 1000 + 60_000 - 1000);
+		expect(expires).toBeLessThanOrEqual(Date.now() + 60_000);
+	});
+
+	it("sets a host-only cookie for an empty domain", async () => {
+		const route = await factoryOf(sessionStoreModule)({
+			config: configWith({ name: "auth.session", secure: false, domain: "" }) as never,
+			deploymentMode: "unset",
+			lifecycleRegistrar: undefined,
+		} as never);
+		const app = express();
+		app.use(route.handler);
+		app.post("/touch", (req, res) => {
+			(req.session as unknown as Record<string, unknown>).touched = true;
+			res.status(200).json({ ok: true });
+		});
+
+		const res = await request(app).post("/touch");
+
+		const cookie = res.headers["set-cookie"]?.[0] ?? "";
+		expect(cookie).toMatch(/^auth\.session=/);
+		expect(cookie).not.toMatch(/Domain=/);
+	});
 });
