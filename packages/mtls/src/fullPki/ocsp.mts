@@ -63,16 +63,8 @@
 import { createHash, X509Certificate } from "node:crypto";
 import * as asn1js from "asn1js";
 import * as pkijs from "pkijs";
-import {
-	type AlgorithmPolicy,
-	checkAlgorithmPolicy,
-	checkSignatureAlgorithm,
-} from "./algorithms.mjs";
-import {
-	checkCriticalExtensions,
-	checkOcspCriticalExtensions,
-	extensionValueParsed,
-} from "./criticalExtensions.mjs";
+import { type AlgorithmPolicy, checkAlgorithmPolicy } from "./algorithms.mjs";
+import { checkCriticalExtensions, extensionValueParsed } from "./criticalExtensions.mjs";
 import { CRL_NEGATIVE_CACHE_TTL_MS } from "./crl.mjs";
 import { DEFAULT_ALGORITHM_POLICY } from "./defaults.mjs";
 import type { GuardedFetch } from "./fetchGuard.mjs";
@@ -89,6 +81,7 @@ import { fetchResponse } from "./ocspFetch.mjs";
 import { parseResponse } from "./ocspParse.mjs";
 import { buildRequest, checkNonce } from "./ocspRequest.mjs";
 import { ocspResponders } from "./ocspResponders.mjs";
+import { checkResponseShape } from "./ocspShape.mjs";
 
 export type {
 	OcspCertificateStatus,
@@ -105,8 +98,6 @@ const OID_KP_OCSP_SIGNING = "1.3.6.1.5.5.7.3.9";
 const OID_OCSP_NOCHECK = "1.3.6.1.5.5.7.48.1.5";
 /** `extendedKeyUsage` (RFC 5280 §4.2.1.12). */
 const OID_EXT_KEY_USAGE = "2.5.29.37";
-/** SHA-1, the `CertID` hash. */
-const OID_SHA1 = "1.3.14.3.2.26";
 
 /**
  * How long a responder that could not be used is remembered, in
@@ -285,46 +276,6 @@ type SignerRefusal = {
 	readonly ok: false;
 	readonly reason: "bad_signature" | "algorithm_not_permitted";
 	readonly detail: string;
-};
-
-/**
- * The single response about `certificate`, matched by `CertID`. The request
- * asked by SHA-1; a responder that answers by another hash is matched by
- * recomputing the `CertID` with that hash rather than refused on the OID —
- * both name the same issuer and serial.
- */
-const findSingleResponse = async (
-	basic: pkijs.BasicOCSPResponse,
-	certificate: pkijs.Certificate,
-	issuer: pkijs.Certificate,
-	requested: pkijs.CertID,
-	crypto: pkijs.ICryptoEngine,
-): Promise<pkijs.SingleResponse | undefined> => {
-	const byAlgorithm = new Map<string, pkijs.CertID | null>([[OID_SHA1, requested]]);
-	for (const single of basic.tbsResponseData.responses) {
-		const oid = single.certID.hashAlgorithm.algorithmId;
-		let ours = byAlgorithm.get(oid);
-		if (ours === undefined) {
-			ours = null;
-			try {
-				const algorithm = crypto.getAlgorithmByOID<{ name: string }>(
-					oid,
-					true,
-					"CertID.hashAlgorithm",
-				);
-				ours = await pkijs.CertID.create(
-					certificate,
-					{ hashAlgorithm: algorithm.name, issuerCertificate: issuer },
-					crypto,
-				);
-			} catch {
-				// A hash this engine does not speak cannot identify anything here.
-			}
-			byAlgorithm.set(oid, ours);
-		}
-		if (ours !== null && single.certID.isEqual(ours)) return single;
-	}
-	return undefined;
 };
 
 /** Whether `candidate` is the responder `responderID` names — by name, or by SHA-1 of its key. */
@@ -624,34 +575,16 @@ export const createOcspResolver = (options: OcspResolverOptions): OcspResolver =
 		// Shape before signature, as in `crl.mts`: nothing an unverified
 		// response *says* is acted on here, only what it is shaped like, and
 		// the answer is at most "do not use it".
-		const single = await findSingleResponse(basic, certificate, issuer, request.certId, crypto);
-		if (single === undefined) {
-			return {
-				ok: false,
-				reason: "no_matching_response",
-				detail: "the response carries no single response for this certificate's CertID",
-			};
-		}
-		const critical = checkOcspCriticalExtensions(
-			basic.tbsResponseData.responseExtensions ?? [],
-			single.singleExtensions ?? [],
+		const shape = await checkResponseShape(
+			basic,
+			certificate,
+			issuer,
+			request.certId,
+			crypto,
+			algorithms,
 		);
-		if (!critical.ok) {
-			return { ok: false, reason: "unsupported_critical_extension", detail: critical.detail };
-		}
-
-		// The response's own signature algorithm, still on shape alone, judged
-		// before its signer is identified and remembered per certificate (see
-		// the module header). A responder certificate is held to the full
-		// policy inside `identifySigner`.
-		const algorithm = checkSignatureAlgorithm(basic.signatureAlgorithm.algorithmId, algorithms);
-		if (!algorithm.ok) {
-			return {
-				ok: false,
-				reason: "algorithm_not_permitted",
-				detail: `the response's signature algorithm ${algorithm.detail}`,
-			};
-		}
+		if (!shape.ok) return shape;
+		const single = shape.single;
 
 		const signer = await identifySigner(basic, issuer, now, crypto, algorithms);
 		if (!signer.ok) return { ok: false, reason: signer.reason, detail: signer.detail };
