@@ -92,9 +92,6 @@ export function makeValidCoreConfig() {
 			// `"denylist"` is what an omitted key already reads as.
 			revocation: { accessToken: "denylist", subject: "unsupported" },
 		},
-		// MFA off, as `reference.conf` and the schema default give it. A test of
-		// the default removes the key.
-		mfa: { mode: "off" },
 		// This composition expects nothing of session admission, stated because
 		// a createApp test that installs a consumer of admission must state its
 		// posture. A test of the declaration itself removes the key.

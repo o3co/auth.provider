@@ -284,17 +284,25 @@ It reads the two files above once, under one snapshot of the environment
 variable changed, while the process starts cannot make boot parse something
 other than what the modules were chosen by. First, before it knows its
 modules, it reads the switches `buildModules` chooses them by — the adapters,
-the federations, the log level — and what it derives the session requirements
-it expects from (`sessionRequirements`, `mfa.mode`) from the two files above
-over core's `reference.conf` alone (`readSwitches`, with core's transitional
-reader), parsing those paths (`SWITCHES`) and nothing else. It sees nothing
+the federations, the log level — and the `sessionRequirements` it derives the
+session requirements it expects from, from the two files above over core's
+`reference.conf` alone (`readSwitches`, with core's transitional reader),
+parsing those paths (`SWITCHES`) and nothing else. Beside them it reads
+`mfa.mode` itself (`readMfaMode`): the MFA module's key, which a composition
+root does not read, taken raw from the template's own layers — its
+`application.conf` binds `MFA_MODE`, with no default — and held to `off`,
+`optional` and `required`, absent read as `off`. It reads that key only until
+it installs the MFA module, at the MFA ADR's build-order step 20, which
+removes the reading. It sees nothing
 a package's `reference.conf` alone sets — none is layered yet — and a module
 you add to `buildModules` that reads its configuration when it is built adds
 the paths it reads to `SWITCHES`. Then it hands `createApp` the configuration as resolved over every
 loaded module's `reference.conf` (`resolveForBoot`), unparsed, with the session
-requirements phase one derived written in, and the same environment snapshot
-(`environment`), which boot holds variables renamed with a moved key against: boot parses it
-once, with every loaded module's schema, and strips no module's section. What
+requirements phase one derived written in, and without the `mfa` section
+unless a loaded module reads it, together with the same environment snapshot
+(`environment`), which boot holds variables renamed with a moved key against:
+boot parses it once, with every loaded module's schema, and strips no
+module's section. What
 the template reads after boot — `http.trustProxy`, the port, the readiness
 timeout — it reads from the parsed configuration. A top-level section no
 loaded module owns is kept and logged once at boot as
@@ -996,7 +1004,7 @@ To add a custom module, import it in `src/buildModules.mts` and add it to the ar
 
 Keep the other rules there too: the session store module stays first, and a module that fills a store slot replaces that slot's adapter switch rather than being added beside it. [`src/app.mts`](src/app.mts) needs no change: it passes `buildModules(config, …)` to `createApp`, mounts the router `createApp` returns, and wires the server's lifetime — `installGracefulShutdown` (below) drains it and calls `handle.dispose()`.
 
-A module that contributes a session requirement — the MFA package's `mfa`, or one of your own — changes what "logged in" means, so its name goes in `sessionRequirements.expected`, which `config/application.conf` ships as `[]`: the template installs none. Boot compares the list with what the modules register. A name listed that nothing registers refuses the boot (`session-requirement-missing`), and so does a registered requirement the list leaves out (`session-requirements-undeclared`). When `mfa.mode` (`MFA_MODE`) is not `off`, the template adds `mfa` to the list (`expectedSessionRequirements`, [`src/configPath.mts`](src/configPath.mts)), keeping the names you wrote. It installs no MFA module, so such a mode refuses the boot (`session-requirement-missing`) rather than let logins through on a password alone.
+A module that contributes a session requirement — the MFA package's `mfa`, or one of your own — changes what "logged in" means, so its name goes in `sessionRequirements.expected`, which `config/application.conf` ships as `[]`: the template installs none. Boot compares the list with what the modules register. A name listed that nothing registers refuses the boot (`session-requirement-missing`), and so does a registered requirement the list leaves out (`session-requirements-undeclared`). When `mfa.mode` (`MFA_MODE`) is not `off`, the template adds `mfa` to the list (`expectedSessionRequirements`, [`src/configPath.mts`](src/configPath.mts)), keeping the names you wrote. It installs no MFA module, so such a mode refuses the boot (`session-requirement-missing`) rather than let logins through on a password alone; a mode that is none of the three is refused before boot, naming `mfa.mode`. The template reads the mode itself, before it chooses its modules, until it installs the MFA module (the MFA ADR's build-order step 20).
 
 ### Shutdown guarantees
 

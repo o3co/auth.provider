@@ -20,7 +20,7 @@ import { parseFile } from "@o3co/ts.hocon";
 import { validate } from "@o3co/ts.hocon/zod";
 import { describe, expect, it } from "vitest";
 import { buildModules } from "../buildModules.mjs";
-import { resolveConfigPaths } from "../configPath.mjs";
+import { readMfaMode, resolveConfigPaths } from "../configPath.mjs";
 
 // config/ is two levels above this test file:
 //   src/__tests__/ → src/ → standalone/ → config/
@@ -88,11 +88,20 @@ describe("three-tier HOCON resolution (env → application.conf → reference.co
 		expect(grants(config).authorization_code?.enabled).toBe("false");
 	});
 
-	it("reference.conf default for mfa.mode is 'off', and the template installs no MFA module", () => {
-		// Core's reference default (ADR 2026-09-25-multi-factor-authentication);
+	it("reads mfa.mode as off where MFA_MODE is unset, and the template installs no MFA module", () => {
+		// No layer the template loads writes a default: its application.conf
+		// binds MFA_MODE alone (ADR 2026-09-25-multi-factor-authentication), and
 		// the template composes no MFA module under any mode.
+		const { applicationConfPath, envConfPath } = resolveConfigPaths(configDir, "development");
+		const raw = (env: Record<string, string>) =>
+			parseFile(envConfPath, { env })
+				.withFallback(parseFile(applicationConfPath, { env }))
+				.withFallback(parseFile(fileURLToPath(coreReference()), { env }))
+				.toObject();
+		expect(raw(testEnv)).toHaveProperty("mfa", {});
+		expect(readMfaMode(raw(testEnv))).toBe("off");
+		expect(readMfaMode(raw({ ...testEnv, MFA_MODE: "optional" }))).toBe("optional");
 		const config = buildResolvedConfig("development");
-		expect(config.mfa?.mode).toBe("off");
 		expect(
 			buildModules(config)
 				.map((m) => m.name)

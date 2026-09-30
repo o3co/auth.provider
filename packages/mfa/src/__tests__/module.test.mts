@@ -56,6 +56,7 @@ import {
 	mfaSection,
 	refusal,
 	spyLogger,
+	TOTP_SECTION,
 } from "./moduleHarness.mjs";
 import { stubFactor } from "./requirementHarness.mjs";
 
@@ -68,9 +69,8 @@ const contributing = (factor: MfaFactor) =>
 		contributes: { mfaFactors: { [factor.kind]: () => factor } },
 	});
 
-const TOTP_OFF = {
-	factors: { totp: { ...mfaSection("required").factors.totp, enabled: false } },
-};
+/** The TOTP factor's section, switched off. */
+const TOTP_OFF = { enabled: false };
 
 // ---------------------------------------------------------------------------
 // What is installed
@@ -100,6 +100,31 @@ describe("mfaModules", () => {
 			configKey: ["audit", "sink", "type"],
 			absentValue: "none",
 		});
+	});
+
+	it("reads its own section, mfa, at its name: the schema holds mode to off, optional or required and hands every other key on to the settings", () => {
+		const section = mfaModule().section;
+		expect(section?.at).toBeUndefined();
+		expect(section?.reference?.href).toMatch(/\/config\/reference\.conf$/);
+		const schema = section?.schema;
+		if (schema === undefined) throw new Error("mfaModule declares no section");
+		for (const mode of ["off", "optional", "required"]) {
+			expect(schema.parse({ mode, transactionTtlSeconds: 600 }), mode).toEqual({
+				mode,
+				transactionTtlSeconds: 600,
+			});
+		}
+		for (const mode of ["sometimes", "Required", "", null, true]) {
+			const parsed = schema.safeParse({ mode });
+			expect(parsed.success, String(mode)).toBe(false);
+			expect(
+				parsed.error?.issues.map((issue) => issue.path),
+				String(mode),
+			).toEqual([["mode"]]);
+		}
+		// Unset — no mode, or no section — is the factory's to refuse, as off is.
+		expect(schema.parse({})).toEqual({});
+		expect(schema.parse(undefined)).toBeUndefined();
 	});
 });
 
@@ -228,6 +253,13 @@ describe("the boot refusals", () => {
 		expect(message).toMatch(/remove the MFA module, or set mfa\.mode to "required" or "optional"/);
 	});
 
+	it("refuses a mode that is none of the three before any factory runs, naming mfa.mode", async () => {
+		const err = await refusal({ config: configFor("sometimes" as never) });
+		expect(err.reason).toBe("config-validation-failed");
+		expect(err.message).toContain("mfa.mode");
+		expect(err.message).not.toContain("sometimes");
+	});
+
 	it("refuses a mode left unset, which reads as off", async () => {
 		const err = await refusal({ config: configFor("required", { mode: undefined }) });
 		expect(err.reason).toBe("contribute-factory-failed");
@@ -235,7 +267,7 @@ describe("the boot refusals", () => {
 	});
 
 	it("refuses required with no counting factor enabled — mfa-no-counting-factor, once the factors have registered — telling the operator to enable an installed counting factor's module, the TOTP factor's key second", async () => {
-		const err = await refusal({ config: configFor("required", TOTP_OFF) });
+		const err = await refusal({ config: configFor("required", {}, TOTP_OFF) });
 		expect(err.reason).toBe("contribute-factory-failed");
 		expect(err.details).toMatchObject({ module: "mfa", kind: "routes" });
 		expect(err.cause).toMatchObject({ reason: "mfa-no-counting-factor" });
@@ -243,15 +275,18 @@ describe("the boot refusals", () => {
 		expect(message).toContain("no factor is enabled");
 		expect(message).toContain("an installed counting factor through its module's `enabled` key");
 		expect(message).toContain(
-			"for the TOTP factor, when mfaTotpFactorModule is installed, mfa.factors.totp.enabled (MFA_TOTP_ENABLED)",
+			"for the TOTP factor, when mfaTotpFactorModule is installed, mfa-totp-factor.enabled (MFA_TOTP_FACTOR_ENABLED)",
 		);
-		expect(message.indexOf("`enabled` key")).toBeLessThan(message.indexOf("MFA_TOTP_ENABLED"));
+		expect(message).not.toContain("mfa.factors");
+		expect(message.indexOf("`enabled` key")).toBeLessThan(
+			message.indexOf("MFA_TOTP_FACTOR_ENABLED"),
+		);
 	});
 
 	it("refuses required when every enabled factor is one that does not count, naming the enabled kinds — with the TOTP factor's module or without it", async () => {
 		for (const withoutTotpModule of [false, true]) {
 			const err = await refusal({
-				config: configFor("required", TOTP_OFF),
+				config: configFor("required", {}, TOTP_OFF),
 				withoutTotpModule,
 				extraModules: [
 					contributing(stubFactor("recovery_code", ["recovery"], { counting: false })),
@@ -268,7 +303,7 @@ describe("the boot refusals", () => {
 
 	it("accepts required when a counting factor of another package's is the one enabled", async () => {
 		await boot({
-			config: configFor("required", TOTP_OFF),
+			config: configFor("required", {}, TOTP_OFF),
 			extraModules: [contributing(stubFactor("webauthn", ["hwk", "swk"]))],
 		});
 	});
@@ -372,7 +407,7 @@ describe("the boot refusals", () => {
 	});
 
 	it("boots optional with no counting factor: nobody is asked for one", async () => {
-		const { handle } = await boot({ config: configFor("optional", TOTP_OFF) });
+		const { handle } = await boot({ config: configFor("optional", {}, TOTP_OFF) });
 		expect(handle.components.sessionRequirementResolver?.get("mfa")?.reach.size).toBe(0);
 	});
 
@@ -448,22 +483,21 @@ describe("the factors' sections are the factors' modules' to read", () => {
 		expect(handle.components.sessionRequirementResolver?.get("mfa")?.reach.size).toBe(0);
 	});
 
-	it("boots without the TOTP factor's module whatever mfa.factors.totp holds, or without it", async () => {
-		const totp = mfaSection("required").factors.totp;
-		for (const factors of [
-			{ totp: { ...totp, digits: 9 } },
-			{ totp: { ...totp, issuer: "a:b" } },
-			{ totp: { enabled: "yes" } },
+	it("boots without the TOTP factor's module whatever mfa-totp-factor holds, or without it", async () => {
+		for (const section of [
+			{ ...TOTP_SECTION, digits: 9 },
+			{ ...TOTP_SECTION, issuer: "a:b" },
+			{ enabled: "yes" },
 			undefined,
 		]) {
 			const { handle } = await boot({
-				config: configFor("required", { factors }),
+				config: { ...configFor("required"), "mfa-totp-factor": section } as never,
 				withoutTotpModule: true,
 				extraModules: [contributing(stubFactor("webauthn", ["hwk", "swk"]))],
 			});
 			expect(
 				[...(handle.components.sessionRequirementResolver?.get("mfa")?.reach ?? [])].sort(),
-				JSON.stringify(factors),
+				JSON.stringify(section),
 			).toEqual(["hwk", "mfa", "swk"]);
 		}
 	});
@@ -487,7 +521,7 @@ describe("the factors' sections are the factors' modules' to read", () => {
 		expect(handle.components.mfaFactorResolver?.get("totp")).toBeDefined();
 	});
 
-	it("leaves the refusal to the TOTP factor's module when it is installed: the same issuer refuses the boot there, naming MFA_TOTP_ISSUER", async () => {
+	it("leaves the refusal to the TOTP factor's module when it is installed: the same issuer refuses the boot there, naming MFA_TOTP_FACTOR_ISSUER", async () => {
 		const err = await refusal({ config: withIssuer(configFor("required"), NO_TOTP_HOST) });
 		expect(err.reason).toBe("contribute-factory-failed");
 		expect(err.details).toMatchObject({
@@ -495,7 +529,7 @@ describe("the factors' sections are the factors' modules' to read", () => {
 			name: "totp",
 			module: "mfa-totp-factor",
 		});
-		expect((err.cause as Error).message).toContain("MFA_TOTP_ISSUER");
+		expect((err.cause as Error).message).toContain("MFA_TOTP_FACTOR_ISSUER");
 	});
 });
 
@@ -529,8 +563,10 @@ describe("the development sample key", () => {
 	const mfaFactory = (deploymentMode: DeploymentMode, deployment: Record<string, unknown>) => {
 		const factory = mfaModule({ environment: "development" }).contributes?.sessionRequirements
 			?.mfa as unknown as (deps: unknown) => unknown;
+		const config = { ...sample(), deployment };
 		return factory({
-			config: { ...sample(), deployment },
+			config,
+			section: (config as { mfa?: unknown }).mfa,
 			deploymentMode,
 			mfaFactorResolver: { get: () => undefined, entries: () => [][Symbol.iterator]() },
 			mfaFactorStore: createMemoryMfaFactorStore(),

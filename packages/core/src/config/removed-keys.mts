@@ -123,13 +123,19 @@ export interface RelocatedPath {
 	 * section path that is still transitional — so none is named.
 	 */
 	readonly unbound?: boolean;
+	/**
+	 * Whether `to` is the section itself. No variable binds a section, so a
+	 * value written at `from` itself names none.
+	 */
+	readonly toSection?: boolean;
 }
 
 /**
  * A key a configuration still sets at or under a relocated path: where it was
  * written, where it moved (`null` when removed), and the environment variable
  * bound to the new path (`environmentVariableFor`; list-of-object elements are
- * indexed), absent when removed or when nothing binds the new path yet.
+ * indexed), absent when removed, when nothing binds the new path yet, or when
+ * the new path is the section itself.
  */
 export interface RelocatedKey {
 	readonly from: string;
@@ -161,7 +167,8 @@ const startsWith = (path: readonly string[], prefix: readonly string[]): boolean
 /**
  * Where the key at `path` moved: the most specific relocation covering it
  * (longest `from`, first on a tie), the key's new path (`null` when removed)
- * and the variable bound there; `undefined` when no relocation covers it.
+ * and the variable bound there (none under a transitional section path, or
+ * for the section itself); `undefined` when no relocation covers it.
  */
 export function relocateKey<R extends RelocatedPath>(
 	path: readonly string[],
@@ -178,10 +185,13 @@ export function relocateKey<R extends RelocatedPath>(
 	const from = path.join(".");
 	if (mapping.to === null) return { from, to: null, relocation: mapping };
 	const to = [...mapping.to, ...path.slice(mapping.from.length)];
+	const named =
+		mapping.unbound !== true &&
+		!(mapping.toSection === true && path.length === mapping.from.length);
 	return {
 		from,
 		to: to.join("."),
-		...(mapping.unbound === true ? {} : { environmentVariable: environmentVariableFor(to) }),
+		...(named ? { environmentVariable: environmentVariableFor(to) } : {}),
 		relocation: mapping,
 	};
 }

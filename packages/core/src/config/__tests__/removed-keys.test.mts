@@ -150,6 +150,18 @@ describe("findRelocatedKeys — a key that moved", () => {
 		]);
 	});
 
+	it("names no variable for a value written at a path whose relocation moves it whole as a section", () => {
+		expect(
+			findRelocatedKeys({ old: null, other: { value: 1 } }, [
+				{ from: ["old"], to: ["new"], toSection: true },
+				{ from: ["other"], to: ["moved"], toSection: true },
+			]).map(({ relocation: _, ...key }) => key),
+		).toEqual([
+			{ from: "old", to: "new" },
+			{ from: "other.value", to: "moved.value", environmentVariable: "MOVED_VALUE" },
+		]);
+	});
+
 	it("reads an empty subtree as nothing set: HOCON leaves {} where an unset variable was the only binding", () => {
 		expect(findRelocatedKeys({ old: {} }, [{ from: ["old"], to: ["new"] }])).toEqual([]);
 		expect(
