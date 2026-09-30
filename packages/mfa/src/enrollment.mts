@@ -30,10 +30,11 @@
  * - A completion reserves an attempt before the proof is checked, seals the
  *   factor's data, and then, in this order: consumes the transaction, writes
  *   the factor (`binding` `email_proof` when the proof was given, else
- *   `password`), reads the subject's records again — another beside its own
- *   means another transaction bound one at once, so it removes its own,
- *   trying three times, and the login starts again; one it cannot remove is
- *   reported standing — clears D25's flag where the proof was given,
+ *   `password`), reads the subject's records again — it stands only when they
+ *   are its own alone; otherwise another transaction bound one at once, or a
+ *   reset removed its own, so it removes its own, trying three times, and the
+ *   login starts again; one it cannot remove is reported standing — clears
+ *   D25's flag where the proof was given,
  *   issues the recovery codes, marks the witness. So at most one first
  *   binding stands, and a lost race spends the transaction, never a factor.
  *   The caller resumes the login.
@@ -151,17 +152,18 @@ export function createMfaEnrollment(kit: MfaCeremonyKit): {
 	};
 
 	/**
-	 * After this binding's factor `id` was written: its own record removed when
-	 * another stands beside it — another transaction bound one at once — or
-	 * when the records cannot be read to tell; `undefined` when it stands
-	 * alone. A factor that cannot be removed is reported standing.
+	 * After this binding's factor `id` was written: `undefined` only when the
+	 * records read again are its own alone. Otherwise its own is removed —
+	 * another stands beside it (another transaction bound one at once), its
+	 * own is gone (a reset removed it), or the records cannot be read to tell —
+	 * and a factor that cannot be removed is reported standing.
 	 */
 	const conflict = async (
 		about: MfaCeremonySubject,
 		id: string,
 	): Promise<MfaEnrollmentCompleteOutcome | undefined> => {
 		const records = await kit.recordsOf(about.subject);
-		const alone = !("outcome" in records) && records.every((record) => record.id === id);
+		const alone = !("outcome" in records) && records.length === 1 && records[0]?.id === id;
 		if (alone) return undefined;
 		const standing = await removeOwn(about.subject, id);
 		if ("outcome" in records) {
