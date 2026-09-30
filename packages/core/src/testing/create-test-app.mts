@@ -49,6 +49,7 @@ export async function createTestApp<B extends BootstrapMap = DefaultBootstrapMap
 		bootstrapComponents,
 		overrideComponents: options?.overrideComponents,
 		contributionKinds: options?.contributionKinds,
+		environment: options?.environment,
 	} as CreateAppOptions<B>);
 
 	const inspect: TestInspect = projectInspect(handle);
