@@ -19,14 +19,13 @@
  * budget of each rate-limit prefix it owns — the default limit and window it
  * reads from its own settings — name-keyed by the prefix, and core composes
  * them into one view, the synthetic `rateLimitBudgetResolver`, that a limiter
- * reads at request time. Two modules contributing one prefix refuse boot. No
- * limiter reads the view yet: the bundled ones still seed their limits from
- * `resolveSeededLimitSpecs`.
+ * reads at request time. Two modules contributing one prefix refuse boot.
  */
 
 import { describe, expect, it } from "vitest";
-import { defineModule } from "../../modules/manifest/index.mjs";
+import { defineModule, type Module } from "../../modules/manifest/index.mjs";
 import { memoryRateLimiterModule } from "../../ratelimit/module.mjs";
+import type { RateLimiter } from "../../ratelimit/types.mjs";
 import { makeValidCoreConfig } from "../../testing/fixtures/valid-config.mjs";
 import { createApp, mergeWithBuiltins } from "../create-app.mjs";
 import type { BootstrapMap } from "../types.mjs";
@@ -323,35 +322,70 @@ describe("rateLimitBudgets — refused", () => {
 	});
 });
 
-describe("rateLimitBudgets — no limiter reads them yet", () => {
-	it("the memory limiter still limits a contributed prefix by its own limits alone", async () => {
-		const owner = defineModule({
-			name: "budget-owner",
-			contributes: { rateLimitBudgets: { fixture: () => ({ limit: 1, windowSeconds: 60 }) } },
-		});
+describe("rateLimitBudgets — the in-process limiter reads them", () => {
+	/** The limiter a consumer of the slot is handed, after a boot with `modules`. */
+	const limiterAfter = async (modules: readonly Module[]) => {
+		let handed: RateLimiter | undefined;
 		const limiterUser = defineModule({
 			name: "limiter-user",
 			requires: ["rateLimiter"],
-			contributes: { grantMiddleware: [() => null] },
+			contributes: {
+				grantMiddleware: [
+					(deps) => {
+						handed = deps.rateLimiter;
+						return null;
+					},
+				],
+			},
 		});
-
 		const handle = await createApp({
-			modules: [memoryRateLimiterModule, owner, limiterUser],
+			modules: [memoryRateLimiterModule, ...modules, limiterUser],
 			bootstrapComponents: bootWith({
 				deployment: { mode: "single" },
 				memoryRateLimiter: {
-					limits: {},
+					limits: { declared: { limit: 4, windowSeconds: 45 } },
 					defaultLimit: { limit: 60, windowSeconds: 60 },
 					maxBuckets: 100,
 				},
 			}),
 		});
+		if (handed === undefined) throw new Error("no consumer was handed the limiter");
+		return { handle, limiter: handed };
+	};
 
-		const limiter = handle.components.rateLimiter;
-		const first = await limiter?.check("fixture:ip:1.2.3.4", { ip: "1.2.3.4" });
-		const second = await limiter?.check("fixture:ip:1.2.3.4", { ip: "1.2.3.4" });
-		expect(first?.limit).toBe(60);
-		expect(second?.allowed).toBe(true);
+	it("limits a contributed prefix by its budget", async () => {
+		const owner = defineModule({
+			name: "budget-owner",
+			contributes: { rateLimitBudgets: { fixture: () => ({ limit: 1, windowSeconds: 60 }) } },
+		});
+		const { handle, limiter } = await limiterAfter([owner]);
+
+		const first = await limiter.check("fixture:ip:1.2.3.4", { ip: "1.2.3.4" });
+		const second = await limiter.check("fixture:ip:1.2.3.4", { ip: "1.2.3.4" });
+		expect(first.limit).toBe(1);
+		expect(second.allowed).toBe(false);
+		await handle.dispose();
+	});
+
+	it("limits a prefix its own limits declare by that entry, over a contributed budget", async () => {
+		const owner = defineModule({
+			name: "budget-owner",
+			contributes: { rateLimitBudgets: { declared: () => ({ limit: 1, windowSeconds: 60 }) } },
+		});
+		const { handle, limiter } = await limiterAfter([owner]);
+
+		expect((await limiter.check("declared:ip:1.2.3.4", { ip: "1.2.3.4" })).limit).toBe(4);
+		await handle.dispose();
+	});
+
+	it("limits a prefix whose budget is switched off by its defaultLimit", async () => {
+		const owner = defineModule({
+			name: "budget-owner",
+			contributes: { rateLimitBudgets: { fixture: () => null } },
+		});
+		const { handle, limiter } = await limiterAfter([owner]);
+
+		expect((await limiter.check("fixture:ip:1.2.3.4", { ip: "1.2.3.4" })).limit).toBe(60);
 		await handle.dispose();
 	});
 });

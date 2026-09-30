@@ -11,8 +11,8 @@ describe("memoryRateLimiterModule", () => {
 		expect(memoryRateLimiterModule.name).toBe("core-rate-limiter-memory");
 	});
 
-	it("requires config only", () => {
-		expect(memoryRateLimiterModule.requires).toEqual(["config"]);
+	it("requires config and the contributed budgets", () => {
+		expect(memoryRateLimiterModule.requires).toEqual(["config", "rateLimitBudgetResolver"]);
 	});
 
 	it("provides rateLimiter", () => {
@@ -57,6 +57,33 @@ describe("memoryRateLimiterModule", () => {
 		expect(b.allowed).toBe(true);
 		const c = await limiter.check("test.ip:1.2.3.4", { ip: "1.2.3.4" });
 		expect(c.allowed).toBe(false);
+	});
+
+	it("limits a prefix by the budget its owner contributed, read at each check, under its own limits entry", async () => {
+		const budgets = new Map<string, { limit: number; windowSeconds: number }>();
+		const cfg = {
+			memoryRateLimiter: {
+				limits: { login: { limit: 4, windowSeconds: 45 } },
+				defaultLimit: { limit: 60, windowSeconds: 60 },
+				maxBuckets: 10_000,
+			},
+		};
+		const limiter = memoryRateLimiterModule.provides?.rateLimiter?.({
+			config: cfg,
+			rateLimitBudgetResolver: {
+				get: (prefix: string) => budgets.get(prefix),
+				entries: () => budgets.entries(),
+			},
+		} as never);
+		if (!limiter) throw new Error("rateLimiter provider missing");
+		budgets.set("mfa", { limit: 2, windowSeconds: 300 });
+		budgets.set("login", { limit: 20, windowSeconds: 900 });
+
+		expect((await limiter.check("mfa:ip:1.2.3.4", { ip: "1.2.3.4" })).limit).toBe(2);
+		expect((await limiter.check("mfa:ip:1.2.3.4", { ip: "1.2.3.4" })).allowed).toBe(true);
+		expect((await limiter.check("mfa:ip:1.2.3.4", { ip: "1.2.3.4" })).allowed).toBe(false);
+		expect((await limiter.check("login:ip:1.2.3.4", { ip: "1.2.3.4" })).limit).toBe(4);
+		expect((await limiter.check("token:ip:1.2.3.4", { ip: "1.2.3.4" })).limit).toBe(60);
 	});
 
 	it("seeds device_verification from oauth.deviceAuthorization.rateLimit", async () => {

@@ -11,8 +11,49 @@ describe("redisRateLimiterModule", () => {
 		expect(redisRateLimiterModule.name).toBe("redis-rate-limiter");
 	});
 
-	it("requires rateLimiterClient and config", () => {
-		expect(redisRateLimiterModule.requires).toEqual(["rateLimiterClient", "config"]);
+	it("requires rateLimiterClient, config and the contributed budgets", () => {
+		expect(redisRateLimiterModule.requires).toEqual([
+			"rateLimiterClient",
+			"config",
+			"rateLimitBudgetResolver",
+		]);
+	});
+
+	it("limits a prefix by the budget its owner contributed, read at each check, under its own limits entry", async () => {
+		const counts = new Map<string, number>();
+		const windows: number[] = [];
+		const client = {
+			async incrementWithTtl(key: string, ttlSeconds: number) {
+				windows.push(ttlSeconds);
+				const next = (counts.get(key) ?? 0) + 1;
+				counts.set(key, next);
+				return next;
+			},
+		};
+		const budgets = new Map<string, { limit: number; windowSeconds: number }>();
+		const limiter = redisRateLimiterModule.provides?.rateLimiter?.({
+			config: {
+				redisRateLimiter: {
+					limits: { login: { limit: 4, windowSeconds: 45 } },
+					defaultLimit: { limit: 60, windowSeconds: 60 },
+				},
+			},
+			rateLimiterClient: client,
+			rateLimitBudgetResolver: {
+				get: (prefix: string) => budgets.get(prefix),
+				entries: () => budgets.entries(),
+			},
+		} as never);
+		if (!limiter) throw new Error("rateLimiter provider missing");
+		budgets.set("mfa", { limit: 2, windowSeconds: 300 });
+		budgets.set("login", { limit: 20, windowSeconds: 900 });
+
+		expect((await limiter.check("mfa:ip:1.2.3.4", { ip: "1.2.3.4" })).limit).toBe(2);
+		expect((await limiter.check("mfa:ip:1.2.3.4", { ip: "1.2.3.4" })).allowed).toBe(true);
+		expect((await limiter.check("mfa:ip:1.2.3.4", { ip: "1.2.3.4" })).allowed).toBe(false);
+		expect((await limiter.check("login:ip:1.2.3.4", { ip: "1.2.3.4" })).limit).toBe(4);
+		expect((await limiter.check("token:ip:1.2.3.4", { ip: "1.2.3.4" })).limit).toBe(60);
+		expect(windows).toEqual([300, 300, 300, 45, 60]);
 	});
 
 	it("provides rateLimiter", () => {
