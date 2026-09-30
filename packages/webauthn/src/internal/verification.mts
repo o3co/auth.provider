@@ -180,12 +180,16 @@ const AUTHENTICATION_REFUSALS: readonly (readonly [
 	["Unexpected RP ID hash", "rp_id_mismatch"],
 ];
 
-/** The reason whose prefix begins `err`'s message; `unknown` for any other refusal. */
+/**
+ * The reason whose prefix begins `err`'s message; `unknown` for any other
+ * refusal. The message is read to classify the refusal alone, never logged.
+ */
 function refusalOf<R extends string>(
 	err: unknown,
 	refusals: readonly (readonly [string, R])[],
 ): R | "unknown" {
-	const message = err instanceof Error ? err.message : "";
+	if (!(err instanceof Error)) return "unknown";
+	const { message } = err;
 	return refusals.find(([prefix]) => message.startsWith(prefix))?.[1] ?? "unknown";
 }
 
