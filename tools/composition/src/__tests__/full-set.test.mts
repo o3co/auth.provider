@@ -365,6 +365,7 @@ describe("the full set boots together", () => {
 			"session.link": "session",
 			"session.link_callback": "session",
 			"webauthn.register": "webauthn-session-subject",
+			"mfa.manage": "mfa",
 		};
 		expect([...actions].sort((a, b) => a.name.localeCompare(b.name))).toEqual(
 			Object.entries(BUNDLED_ACTIONS)
@@ -1272,15 +1273,24 @@ describe("discovery with every package on", () => {
 // Routes
 // ---------------------------------------------------------------------------
 
-/** Sign in through the session routes on one cookie jar, and hand back the jar and a CSRF pair. */
-async function signedIn(app: Express) {
+/** A user the template's directory holds with no address. */
+const BOB = { username: "bob", password: "bob-password-long" } as const;
+
+/** A user the full set adds, whose address the provider cannot read. */
+const ERIN = { username: "erin", password: "erin-password-long" } as const;
+
+/** Sign in as `user` (alice by default) through the session routes on one cookie jar, and hand back the jar and a CSRF pair. */
+async function signedIn(
+	app: Express,
+	user: { readonly username: string; readonly password: string } = ALICE,
+) {
 	const agent = request.agent(app);
 	const first = await agent.get("/session/csrf");
 	const login = await agent
 		.post("/session/login")
 		.set(first.body.header_name as string, first.body.csrf_token as string)
 		.type("form")
-		.send({ username: ALICE.username, password: ALICE.password });
+		.send({ username: user.username, password: user.password });
 	expect(login.status).toBe(200);
 	const csrf = await agent.get("/session/csrf");
 	return {
@@ -1472,9 +1482,9 @@ describe("every added module's primary route answers in the one app", () => {
 		expect(res.body).toMatchObject({ rpId: "auth.test", challenge: expect.any(String) });
 	});
 
-	it("WebAuthn: registration options for the signed-in user, through the package's session-subject module", async () => {
+	it("WebAuthn: registration options for the signed-in user, through the package's session-subject module — bob, whose first passkey asks no proof: he has no address", async () => {
 		const { app } = await boot();
-		const { agent, header, token } = await signedIn(app);
+		const { agent, header, token } = await signedIn(app, BOB);
 		const res = await agent
 			.post("/oauth/webauthn/registration/options")
 			.set(header, token)
@@ -1643,22 +1653,22 @@ const linkStart = (agent: ReturnType<typeof request.agent>) =>
 	agent.get("/session/oauth/federation/google?link=1").set("Sec-Fetch-Site", "same-origin");
 
 describe("session admission at the link start and WebAuthn registration", () => {
-	/** Stamps the subject-revocation boundary for alice now, as a credential change does. */
-	const revokeAlice = async ({ handle }: FullSet): Promise<void> => {
+	/** Stamps the subject-revocation boundary for bob now, as a credential change does. */
+	const revokeBob = async ({ handle }: FullSet): Promise<void> => {
 		const revocation = handle.components.subjectRevocation;
 		expect(revocation, "the full set wires subject revocation").toBeDefined();
-		await revocation?.revokeBefore(ALICE.sub, new Date(), new Date(Date.now() + 86_400_000));
+		await revocation?.revokeBefore("u-bob", new Date(), new Date(Date.now() + 86_400_000));
 	};
 
-	it("admits a live session at both, and refuses it at both once alice's sessions are revoked", async () => {
+	it("admits a live session at both — bob's, which no first-binding proof holds back — and refuses it at both once his sessions are revoked", async () => {
 		const set = await boot();
-		const { agent, header, token } = await signedIn(set.app);
+		const { agent, header, token } = await signedIn(set.app, BOB);
 		expect((await linkStart(agent)).status).toBe(302);
 		expect(
 			(await agent.post("/oauth/webauthn/registration/options").set(header, token).send({})).status,
 		).toBe(200);
 
-		await revokeAlice(set);
+		await revokeBob(set);
 
 		const link = await linkStart(agent);
 		expect(link.status).toBe(401);
@@ -1757,9 +1767,9 @@ describe("recent MFA at the link start and WebAuthn registration, under mfa.mode
 		expect((await registrationOptions(agent, header, token)).status).toBe(200);
 	});
 
-	it("admits a subject with no counting factor on a recent sign-in, and answers one whose sign-in is older than the window 401 at both: login_required at the link start, the registration route's own unauthorized", async () => {
+	it("admits a subject with no counting factor and no address on a recent sign-in — no proof is asked — and answers one whose sign-in is older than the window 401 at both: login_required at the link start, the registration route's own unauthorized", async () => {
 		const set = await boot();
-		const { agent, header, token } = await signedInWithSid(set);
+		const { agent, header, token } = await signedIn(set.app, BOB);
 		expect((await linkStart(agent)).status).toBe(302);
 		expect((await registrationOptions(agent, header, token)).status).toBe(200);
 
@@ -1777,6 +1787,142 @@ describe("recent MFA at the link start and WebAuthn registration, under mfa.mode
 		const registration = await registrationOptions(agent, header, token);
 		expect(registration.status).toBe(401);
 		expect(registration.body.error).toBe("unauthorized");
+	});
+});
+
+describe("a first passkey and a first link, behind the first-binding gate, under mfa.mode = optional", () => {
+	const page = new URL("/mfa", ISSUER).href;
+
+	const registrationOptions = (
+		agent: ReturnType<typeof request.agent>,
+		header: string,
+		token: string,
+	) => agent.post("/oauth/webauthn/registration/options").set(header, token).send({});
+
+	/** Both first bindings, as the session's page would start them: the link start's status, and the registration options'. */
+	const bothAnswer = async (browser: {
+		readonly agent: ReturnType<typeof request.agent>;
+		readonly header: string;
+		readonly token: string;
+	}) => {
+		const link = await linkStart(browser.agent);
+		const registration = await registrationOptions(browser.agent, browser.header, browser.token);
+		return { link, registration };
+	};
+
+	/** The step-up the MFA page runs for a first binding: the transaction it opens, its account-email proof challenged, and the code the full set's sender was handed verified. */
+	const proveInSession = async (
+		set: FullSet,
+		browser: {
+			readonly agent: ReturnType<typeof request.agent>;
+			readonly header: string;
+			readonly token: string;
+		},
+	) => {
+		const post = (path: string, body: Record<string, unknown>) =>
+			browser.agent
+				.post(`/session/mfa${path}`)
+				.set(browser.header, browser.token)
+				.send(body);
+		const opened = await post("/step-up", {});
+		expect(opened.status, JSON.stringify(opened.body)).toBe(200);
+		const transaction = opened.body.transaction as string;
+		const challenged = await post("/challenge", {
+			transaction_id: transaction,
+			factor_id: "account-email",
+		});
+		return { transaction, challenged, post };
+	};
+
+	/** Alice signed in through the OIDC federation on one cookie jar, and a CSRF pair. */
+	const federatedAlice = async (set: FullSet) => {
+		const agent = request.agent(set.app);
+		const start = await agent.get("/session/oauth/federation/oidc");
+		expect(start.status).toBe(302);
+		const answer = set.upstreams.oidc.authorize(start.headers.location as string);
+		const callback = await agent
+			.get("/session/oauth/federation/oidc/callback")
+			.query({ code: answer.code, state: answer.state ?? "", iss: answer.iss });
+		expect(callback.status).toBe(302);
+		const csrf = await agent.get("/session/csrf");
+		return {
+			agent,
+			header: csrf.body.header_name as string,
+			token: csrf.body.csrf_token as string,
+		};
+	};
+
+	for (const how of ["a password", "a federation"] as const) {
+		it(`steps alice — no counting factor, an address, a mail sender — up at both after ${how} sign-in until the account-email proof is given in that session, then admits her at both`, async () => {
+			const set = await boot();
+			const browser = how === "a password" ? await signedIn(set.app) : await federatedAlice(set);
+
+			const before = await bothAnswer(browser);
+			expect(before.link.status).toBe(403);
+			expect(before.link.body).toMatchObject({
+				error: "step_up_required",
+				requirement: "mfa",
+				page,
+			});
+			expect(before.registration.status).toBe(403);
+			expect(before.registration.body).toMatchObject({
+				error: "step_up_required",
+				requirement: "mfa",
+				page,
+			});
+
+			const { transaction, challenged, post } = await proveInSession(set, browser);
+			expect(challenged.status, JSON.stringify(challenged.body)).toBe(200);
+			const sent = set.mail.sent.at(-1);
+			expect(sent).toMatchObject({ purpose: "account_email_proof", to: "alice@example.com" });
+			const verified = await post("/verify", {
+				transaction_id: transaction,
+				factor_id: "account-email",
+				proof: sent?.code,
+			});
+			expect(verified.status, JSON.stringify(verified.body)).toBe(200);
+
+			const after = await bothAnswer(browser);
+			expect(after.link.status).toBe(302);
+			expect(after.registration.status).toBe(200);
+		});
+	}
+
+	it("admits alice at both with no proof under mfa.enrollment.requireEmailProof = never, and steps her up again while an operator reset's flag stands", async () => {
+		const set = await boot({
+			adjust: (config) =>
+				({
+					...config,
+					mfa: { ...mfaOf(config), enrollment: { requireEmailProof: "never" } },
+				}) as typeof config,
+		});
+		const browser = await signedIn(set.app);
+		const admitted = await bothAnswer(browser);
+		expect(admitted.link.status).toBe(302);
+		expect(admitted.registration.status).toBe(200);
+
+		const store = (set.handle.components as unknown as { mfaTransactionStore: MfaTransactionStore })
+			.mfaTransactionStore;
+		await store.requireEmailProofAtNextBinding(ALICE.sub);
+		const flagged = await bothAnswer(browser);
+		expect(flagged.link.status).toBe(403);
+		expect(flagged.registration.status).toBe(403);
+	});
+
+	it("steps up an account whose address the provider cannot read, and refuses the proof nobody can give: 403 at the challenge, the first bindings still stepped up", async () => {
+		const set = await boot({
+			extraUsers: {
+				erin: { id: "u-erin", password: ERIN.password, email: "Erin <erin@example.com>" },
+			},
+		});
+		const browser = await signedIn(set.app, ERIN);
+		expect((await bothAnswer(browser)).registration.status).toBe(403);
+		const { challenged } = await proveInSession(set, browser);
+		expect(challenged.status).toBe(403);
+		expect(challenged.body.error).toBe("mfa_email_proof_unavailable");
+		const after = await bothAnswer(browser);
+		expect(after.link.status).toBe(403);
+		expect(after.registration.status).toBe(403);
 	});
 });
 
@@ -2142,7 +2288,8 @@ const OUTAGES: readonly OutageCase<FullSet>[] = [
 		slot: "webauthnCredentialStore",
 		surface: "POST /oauth/webauthn/registration/options",
 		run: async (app, outage) => {
-			const { agent, header, token } = await signedIn(app);
+			// Bob: no address, so no first-binding proof holds the registration back before the store is read.
+			const { agent, header, token } = await signedIn(app, BOB);
 			outage.down = true;
 			return agent.post("/oauth/webauthn/registration/options").set(header, token).send({});
 		},

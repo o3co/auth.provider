@@ -65,6 +65,7 @@ import {
 	FACTORS,
 	factorRecord,
 	factorStoreHolding,
+	NOT_ENROLLED_FACTS,
 	resolverOver,
 	stubFactor,
 	unreachableFactorStore,
@@ -132,6 +133,8 @@ function build(
 		},
 		emailProofRequiredAtNextBinding: (subject) =>
 			transactionStore.emailProofRequiredAtNextBinding(subject),
+		sessionEmailProofAt: (subject, sid, nowMs) =>
+			transactionStore.sessionEmailProofAt(subject, sid, nowMs),
 	});
 	return { requirement, transactionStore };
 }
@@ -302,7 +305,7 @@ const USE: AdmissionAction = { name: "test.use", grade: "use" };
 const NOTHING: AdmissionAction = { name: "test.peek", grade: "grants_nothing" };
 const CHANGE: AdmissionAction = { name: "test.change", grade: "credential_change" };
 
-/** What admission hands a requirement about a record read by `carrier`. */
+/** What admission hands a requirement about a record read by `carrier`: the view with what the login recorded of an account that is not enrolled. */
 const about = (
 	session: UserSession | null,
 	action: AdmissionAction = USE,
@@ -316,6 +319,7 @@ const about = (
 					sub: session.sub,
 					authTime: session.authTime,
 					expiresAt: session.expiresAt,
+					enrollmentFacts: NOT_ENROLLED_FACTS,
 				},
 	authentication: requirementSession(session),
 	carrier,

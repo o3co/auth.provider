@@ -36,6 +36,7 @@ import {
 	passwordSessionAuthentication,
 	readAcrTable,
 	requirementSession,
+	SUBJECT_REVOCATION_ABSENCE_POLICY,
 	type SessionRequirement,
 	type UserSession,
 	type UserSessionStore,
@@ -104,7 +105,7 @@ describe("mfaModules", () => {
 		expect(mfaModules()[2]).toBe(mfaEmailFactorModule);
 	});
 
-	it("requires what the requirement is bound to, the CSRF guard its POSTs sit behind and the login's completion, and not the configuration; reads the rate limiter, the audit sink — its absence declared — the logger, the mail sender and the directory the witness is written through", () => {
+	it("requires what the requirement is bound to, the CSRF guard its POSTs sit behind and the login's completion, and not the configuration; reads the rate limiter, the audit sink and the subject's revocation boundary — each absence declared — the logger, the mail sender and the directory the witness is written through", () => {
 		const module = mfaModule();
 		expect([...(module.requires ?? [])].sort()).toEqual(
 			[
@@ -123,11 +124,24 @@ describe("mfaModules", () => {
 			"logger",
 			"mailSender",
 			"rateLimiter",
+			"subjectRevocation",
 			"userRepository",
 		]);
 		expect(module.absencePolicies?.auditSink).toMatchObject({
 			configKey: ["audit", "sink", "type"],
 			absentValue: "none",
+		});
+		expect(module.absencePolicies?.subjectRevocation).toBe(SUBJECT_REVOCATION_ABSENCE_POLICY);
+	});
+
+	it("registers the action its routes admit a session for, mfa.manage, graded credential_change", async () => {
+		expect(mfaModule().contributes?.admissionActions).toEqual({
+			"mfa.manage": { grade: "credential_change" },
+		});
+		const { handle } = await boot();
+		expect(handle.components.sessionRequirementResolver?.action("mfa.manage")).toMatchObject({
+			name: "mfa.manage",
+			grade: "credential_change",
 		});
 	});
 
