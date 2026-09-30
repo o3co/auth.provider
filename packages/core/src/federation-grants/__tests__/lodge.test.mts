@@ -552,20 +552,22 @@ describe("lodging a reauthorization", () => {
 		).toEqual({ ok: false, reason: "grant_revoked", revokedBy: "backstop", revokedNow: false });
 	});
 
+	/** The established grant's store, answering that its credential's key is not in the ring. */
+	const keyless = (): FederationGrantStore => ({
+		...grants,
+		inspect: async (id, when) => {
+			const found = await grants.inspect(id, when);
+			return found === null ? null : { ...found, credentials: "key_unavailable" };
+		},
+	});
+
 	it("answers a key missing from the ring as an outage, not as a reason to consent again", async () => {
 		// Found by mutation. The credential does not open because its key is not
 		// in the ring — an operator's outage — and sending the user through
 		// consent would not bring the key back.
 		await establish();
-		const keyless: FederationGrantStore = {
-			...grants,
-			inspect: async (id, when) => {
-				const found = await grants.inspect(id, when);
-				return found === null ? null : { ...found, credentials: "key_unavailable" };
-			},
-		};
 		expect(
-			await lodgeFederationGrantReauthorization(deps({ grantStore: keyless }), renewal()),
+			await lodgeFederationGrantReauthorization(deps({ grantStore: keyless() }), renewal()),
 		).toEqual({
 			ok: false,
 			reason: "key_unavailable",
@@ -749,7 +751,7 @@ describe("lodging a reauthorization", () => {
 	] as const;
 
 	it.each(UNCONFIGURED)(
-		"tells %s that the grant is over — expired, revoked or pending — before the configuration",
+		"reports a grant that is over — expired, revoked or pending — ahead of %s",
 		async (_, request, over) => {
 			await establish();
 			expect(
@@ -785,15 +787,6 @@ describe("lodging a reauthorization", () => {
 		},
 	);
 
-	/** The established grant's store, answering that its credential's key is not in the ring. */
-	const keyless = (): FederationGrantStore => ({
-		...grants,
-		inspect: async (id, when) => {
-			const found = await grants.inspect(id, when);
-			return found === null ? null : { ...found, credentials: "key_unavailable" };
-		},
-	});
-
 	it.each([
 		[
 			"a changed identity",
@@ -803,6 +796,7 @@ describe("lodging a reauthorization", () => {
 				]),
 			}),
 			{},
+			{ ok: false, reason: "connection_identity_changed" },
 		],
 		[
 			"a maximum no token can satisfy",
@@ -810,14 +804,34 @@ describe("lodging a reauthorization", () => {
 				connections: new Map([[CONNECTION.name, { ...CONNECTION, maxAccessTokenLifetime: 0 }]]),
 			}),
 			{},
+			{ ok: false, reason: "upstream_token_ineligible", ineligibleBy: "lifetime_over_maximum" },
 		],
-		["a key missing from the ring", () => ({ grantStore: keyless() }), {}],
-		["an asserted connection that is not the grant's", () => ({}), { connection: "another" }],
-		["a request it would refuse", () => ({}), { redirectUri: "https://evil.test/" }],
+		[
+			"a key missing from the ring",
+			() => ({ grantStore: keyless() }),
+			{},
+			{ ok: false, reason: "key_unavailable" },
+		],
+		[
+			"an asserted connection that is not the grant's",
+			() => ({}),
+			{ connection: "another" },
+			{ ok: false, reason: "connection_mismatch" },
+		],
+		[
+			"a request it would refuse",
+			() => ({}),
+			{ redirectUri: "https://evil.test/" },
+			{ ok: false, reason: "redirect_uri_not_registered" },
+		],
 	] as const)(
 		"refuses a client that may no longer use the connection before %s",
-		async (_, over, request) => {
+		async (_, over, request, permitted) => {
 			await establish();
+			// The same renewal from a client that may use the connection meets the later refusal.
+			expect(await lodgeFederationGrantReauthorization(deps(over()), renewal(request))).toEqual(
+				permitted,
+			);
 			expect(
 				await lodgeFederationGrantReauthorization(
 					deps(over()),
@@ -835,23 +849,36 @@ describe("lodging a reauthorization", () => {
 				await starved("no_finite_lifetime");
 				return { over: {}, request: {} };
 			},
+			{ ok: false, reason: "upstream_token_ineligible", ineligibleBy: "no_finite_lifetime" },
 		],
-		["a key missing from the ring", async () => ({ over: { grantStore: keyless() }, request: {} })],
+		[
+			"a key missing from the ring",
+			async () => ({ over: { grantStore: keyless() }, request: {} }),
+			{ ok: false, reason: "key_unavailable" },
+		],
 		[
 			"an asserted connection that is not the grant's",
 			async () => ({ over: {}, request: { connection: "another" } }),
+			{ ok: false, reason: "connection_mismatch" },
 		],
-	] as const)("refuses a removed connection as not permitted before %s", async (_, arrange) => {
-		await establish();
-		const { over, request } = await arrange();
-		expect(
-			await lodgeFederationGrantReauthorization(
-				deps({ ...over, connections: new Map() }),
-				renewal(request),
-			),
-		).toEqual({ ok: false, reason: "connection_not_permitted" });
-		expect(intents.size).toBe(0);
-	});
+	] as const)(
+		"refuses a removed connection as not permitted before %s",
+		async (_, arrange, configured) => {
+			await establish();
+			const { over, request } = await arrange();
+			// The same renewal while the connection is still configured meets the later refusal.
+			expect(await lodgeFederationGrantReauthorization(deps(over), renewal(request))).toEqual(
+				configured,
+			);
+			expect(
+				await lodgeFederationGrantReauthorization(
+					deps({ ...over, connections: new Map() }),
+					renewal(request),
+				),
+			).toEqual({ ok: false, reason: "connection_not_permitted" });
+			expect(intents.size).toBe(0);
+		},
+	);
 
 	it("re-reads a connection removed while the pointer write lost as one the client may not use, and closes the intent", async () => {
 		await establish();
