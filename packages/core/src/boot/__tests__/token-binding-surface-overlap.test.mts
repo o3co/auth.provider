@@ -22,7 +22,7 @@
  * `assembleApp` mounts the composed middleware first and `grantMiddleware`
  * contributions after, and `tokenBindingMw` assigns `req.tokenBinding`
  * unguarded, so the legacy middleware wins on every request and the
- * configured `dispatch-policy` is silently inert. The warning does not fire
+ * configured `dispatchPolicy` is silently inert. The warning does not fire
  * for a non-token-binding `grantMiddleware` alongside mechanisms, nor for a
  * deployment with no mechanisms at all.
  */

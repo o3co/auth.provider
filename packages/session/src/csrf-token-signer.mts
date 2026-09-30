@@ -16,7 +16,7 @@
 
 /**
  * The CSRF token's signer over the session secret: the `csrfTokenSigner` slot
- * the session store's module provides from `session.secret`, and what a
+ * the session store's module provides from `session-store.secret`, and what a
  * composition that mounts its own cookie session provides in its place.
  *
  * The key is the HKDF-SHA256 expansion of the secret (no salt, info
@@ -43,12 +43,16 @@ const CSRF_KEY_INFO = "o3co.auth.provider/session-csrf/v1";
  * plain object carrying `sign` and `verify` alone. `verify` compares in
  * constant time and answers `false` for anything that is not a string.
  *
- * The secret is held to the floor core's schema holds `session.secret` to
- * (`assertSecretEntropy`), since a composition without the session store's
- * module calls this with a secret no schema has read.
+ * The secret is held to the floor the session store's schema holds
+ * `session-store.secret` to (`assertSecretEntropy`), since a composition
+ * without the session store's module calls this with a secret no schema has
+ * read.
  */
 export const createSessionCsrfTokenSigner = (secret: string): CsrfTokenSigner => {
-	assertSecretEntropy(secret, { configKey: "session.secret", envVar: "SESSION_SECRET" });
+	assertSecretEntropy(secret, {
+		configKey: "session-store.secret",
+		envVar: "SESSION_STORE_SECRET",
+	});
 	const key = Buffer.from(hkdfSync("sha256", secret, "", CSRF_KEY_INFO, 32));
 	const sign = (payload: string): string =>
 		createHmac("sha256", key).update(payload, "utf8").digest("base64url");

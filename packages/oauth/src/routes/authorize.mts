@@ -44,7 +44,6 @@ import {
 	logClientRepositoryUnavailable,
 	logGrantPolicyUnavailable,
 	loggableError,
-	loginPageUrlFor,
 	matchesRegisteredRedirectUri,
 	type PendingConsentStore,
 	type PublicClient,
@@ -86,8 +85,7 @@ export interface AuthorizeHandlerOptions {
 	readonly issuer: string;
 	/**
 	 * The login trip for a browser that must log in: `urlFor(returnTo)` is the
-	 * login page with the request to come back to. The session module's
-	 * `loginEntry` when provided, else {@link loginTripFromConfig}.
+	 * login page with the request to come back to — the `loginEntry` slot's.
 	 */
 	readonly login: Pick<LoginEntry, "urlFor">;
 	/**
@@ -126,19 +124,9 @@ export interface AuthorizeHandlerOptions {
  * The parameter this endpoint adds to a page it sends the browser to, naming
  * the request to come back to: core's `LOGIN_RETURN_PARAMETER`, which the
  * login page and a requirement's step-up page both read. The login page's own
- * URL may not carry it (`oauthModule`'s configSchema refuses one that does).
+ * URL may not carry it (core's `LoginEntry` contract).
  */
 export const REDIRECT_TO_PARAM = LOGIN_RETURN_PARAMETER;
-
-/**
- * The login trip read from configuration, for a composition where no module
- * provides the `loginEntry` slot (the oauth module without the session
- * module). `loginUrl` is evaluated per request; the URL is built by core's
- * `loginPageUrlFor`, the rule the session module's entry keeps too.
- */
-export const loginTripFromConfig = (loginUrl: () => string): Pick<LoginEntry, "urlFor"> => ({
-	urlFor: (returnTo: string): string => loginPageUrlFor(loginUrl(), returnTo),
-});
 
 /** The login-page redirect with the request to come back to. */
 const loginRedirect = (res: Response, login: Pick<LoginEntry, "urlFor">, target: string): void => {
@@ -476,7 +464,7 @@ const checkConsent = async (
 		redirectError(ctx, "temporarily_unavailable", "consent store unavailable");
 		return false;
 	}
-	// `endpoints.consent.url` may already carry a query string, like the
+	// `oauth.consentPage.url` may already carry a query string, like the
 	// login URL.
 	const consentUrl = ctx.opts.consentUrl();
 	const joiner = consentUrl.includes("?") ? "&" : "?";

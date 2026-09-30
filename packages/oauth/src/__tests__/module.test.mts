@@ -42,7 +42,11 @@ import {
 	type UserSession,
 	type UserSessionStore,
 } from "@o3co/auth-provider-core";
-import { createTestApp, makeValidAppConfig } from "@o3co/auth-provider-core/testing";
+import {
+	createTestApp,
+	createTestLoginEntry,
+	makeValidAppConfig,
+} from "@o3co/auth-provider-core/testing";
 import express from "express";
 import { exportPKCS8, exportSPKI, generateKeyPair, SignJWT } from "jose";
 import request from "supertest";
@@ -51,6 +55,7 @@ import { oauthModule } from "#/module.mjs";
 import { oauthAuthorizationModule } from "#/oauthAuthorization.mjs";
 import { oauthSessionModule } from "#/oauthSession.mjs";
 import { createMockLogger } from "./_helpers/mockLogger.mjs";
+import { withGrants, withOauthCaptures } from "./_helpers/sections.mjs";
 
 /**
  * A federation that satisfies the `FederationProvider` contract, with whatever
@@ -114,6 +119,15 @@ const keyStoreModule = defineModule({
 });
 
 /**
+ * The login page `/authorize` sends a browser that is not signed in to, as
+ * the session module provides it through the `loginEntry` slot.
+ */
+const loginEntryModule = defineModule({
+	name: "test:login-entry",
+	provides: { loginEntry: () => createTestLoginEntry() },
+});
+
+/**
  * A stand-in authorization_code grant: what makes `oauthModule` serve
  * `/authorize` and name it in discovery. Never dispatched to.
  */
@@ -162,78 +176,8 @@ describe("oauthModule — manifest shape", () => {
 		expect(module.name).toBe("oauth");
 	});
 
-	it("declares a configSchema for boot-time config validation", () => {
-		const config = makeValidAppConfig();
-		const module = oauthModule({ config });
-		expect(module.configSchema).toBeDefined();
-	});
-
-	it("configSchema rejects a config missing endpoints.login.url", () => {
-		const config = makeValidAppConfig();
-		const module = oauthModule({ config });
-		const schema = module.configSchema;
-		if (!schema) throw new Error("configSchema must be defined");
-		// Core's schema requires a string there; oauthConfigSchema requires it
-		// too, non-empty, so boot fails before /authorize is hit.
-		const result = schema.safeParse({ endpoints: { login: {} } });
-		expect(result.success).toBe(false);
-	});
-
-	it("configSchema rejects an empty endpoints.login.url", () => {
-		const config = makeValidAppConfig();
-		const module = oauthModule({ config });
-		const schema = module.configSchema;
-		if (!schema) throw new Error("configSchema must be defined");
-		const result = schema.safeParse({ endpoints: { login: { url: "" } } });
-		expect(result.success).toBe(false);
-	});
-
-	it("configSchema accepts a non-empty endpoints.login.url", () => {
-		const config = makeValidAppConfig();
-		const module = oauthModule({ config });
-		const schema = module.configSchema;
-		if (!schema) throw new Error("configSchema must be defined");
-		const result = schema.safeParse({ endpoints: { login: { url: "/login" } } });
-		expect(result.success).toBe(true);
-	});
-
-	it.each([
-		["a path", "/login?redirect_to=https://x"],
-		["an absolute URL", "https://login.example/signin?tenant=x&redirect_to=https%3A%2F%2Fx"],
-		["a name written percent-encoded", "/login?redirect%5Fto=x"],
-		["a name with no value", "/login?tenant=x&redirect_to"],
-		// The rule reads the query as the redirect writes it — the text before
-		// any `#`, after the first `?` — so a URL `URL` cannot parse is held to
-		// it too: the redirect would append a second one all the same.
-		["a URL that does not parse", "http://[::1/login?redirect_to=x"],
-		["a URL that does not parse, with a fragment", "http://[::1/login?tenant=x&redirect_to=y#z"],
-	])(
-		"configSchema refuses %s whose own query carries redirect_to, naming the key: the provider adds it",
-		(_label, url) => {
-			const schema = oauthModule({ config: makeValidAppConfig() }).configSchema;
-			if (!schema) throw new Error("configSchema must be defined");
-			const result = schema.safeParse({ endpoints: { login: { url } } });
-			expect(result.success).toBe(false);
-			const issue = result.error?.issues[0];
-			expect(issue?.path).toEqual(["endpoints", "login", "url"]);
-			expect(issue?.message).toContain('"redirect_to"');
-			expect(issue?.message).toContain("the provider adds");
-		},
-	);
-
-	it.each([
-		["a query of its own", "/login?tenant=x"],
-		["an absolute URL with a query", "https://login.example/signin?tenant=x"],
-		["redirect_to inside the fragment alone", "/login#redirect_to=https://x"],
-		["a query, and redirect_to inside the fragment", "/login?tenant=x#redirect_to=y"],
-		["a name that differs in case", "/login?Redirect_To=x"],
-		["a longer name", "/login?redirect_to_after=x"],
-		["a URL that does not parse, without redirect_to", "http://[::1/login?tenant=x"],
-		["a `?` inside the fragment alone", "/login#a?redirect_to=x"],
-	])("configSchema accepts a login URL with %s", (_label, url) => {
-		const schema = oauthModule({ config: makeValidAppConfig() }).configSchema;
-		if (!schema) throw new Error("configSchema must be defined");
-		expect(schema.safeParse({ endpoints: { login: { url } } }).success).toBe(true);
+	it("declares no configSchema: the login page is the session module's, reached through the loginEntry slot", () => {
+		expect(oauthModule({ config: makeValidAppConfig() }).configSchema).toBeUndefined();
 	});
 
 	it("includes only oauth-endpoints when issuer is absent (JWKS moved to core jwksModule)", () => {
@@ -274,86 +218,6 @@ describe("oauthModule — manifest shape", () => {
 // createTestApp integration tests (boot + inspect)
 // ---------------------------------------------------------------------------
 
-describe("oauthModule — createTestApp boot failure", () => {
-	it("fails boot with config-validation-failed when endpoints.login.url is missing", async () => {
-		const { BootError } = await import("@o3co/auth-provider-core");
-		const base = makeValidAppConfig();
-		const config = {
-			...base,
-			endpoints: {
-				...base.endpoints,
-				login: {}, // tighten path: drop the url that valid-config now provides
-			},
-		};
-		await expect(
-			createTestApp({
-				modules: [
-					oauthModule({ config }),
-					// oauthModule mounts /oauth/revoke, so the boot validator requires a
-					// denylist behind it. Memory is right here — one process, one test.
-					memoryAccessTokenDenylistModule,
-					clientRepositoryModule,
-					codeRepositoryModule,
-					keyStoreModule,
-				],
-				bootstrapComponents: { config, pathResolver: (s) => s },
-			}),
-		).rejects.toMatchObject({
-			name: "BootError",
-			reason: "config-validation-failed",
-		} satisfies Partial<InstanceType<typeof BootError>>);
-	});
-
-	const bootWithLoginUrl = (url: string) => {
-		const base = makeValidAppConfig();
-		const config = { ...base, endpoints: { ...base.endpoints, login: { url } } };
-		return createTestApp({
-			modules: [
-				oauthModule({ config }),
-				memoryAccessTokenDenylistModule,
-				jwksModule,
-				clientRepositoryModule,
-				codeRepositoryModule,
-				keyStoreModule,
-			],
-			bootstrapComponents: { config, pathResolver: (s) => s },
-		});
-	};
-
-	it.each([
-		["a path", "/login?redirect_to=https://x"],
-		["an absolute URL", "https://login.example/signin?redirect_to=https%3A%2F%2Fx"],
-	])(
-		"fails boot when endpoints.login.url is %s carrying redirect_to, naming the key",
-		async (_label, url) => {
-			let refusal: unknown;
-			try {
-				const handle = await bootWithLoginUrl(url);
-				await handle.dispose();
-			} catch (err) {
-				refusal = err;
-			}
-			expect(refusal).toMatchObject({ name: "BootError", reason: "config-validation-failed" });
-			const issues = (refusal as { details?: { issues?: { path: unknown; message: string }[] } })
-				.details?.issues;
-			expect(issues).toContainEqual(
-				expect.objectContaining({
-					path: ["endpoints", "login", "url"],
-					message: expect.stringMatching(/"redirect_to".*the provider adds/),
-				}),
-			);
-		},
-	);
-
-	it.each([
-		["a query of its own", "/login?tenant=x"],
-		["redirect_to inside the fragment alone", "/login#redirect_to=https://x"],
-	])("boots when endpoints.login.url carries %s", async (_label, url) => {
-		const handle = await bootWithLoginUrl(url);
-		await handle.dispose();
-	});
-});
-
 describe("oauthModule — createTestApp route inspection", () => {
 	it("contributes no oidc-discovery route even with an issuer; core mounts discovery from aggregated metadata", async () => {
 		// Core's assembleApp mounts discovery from the aggregated
@@ -376,7 +240,7 @@ describe("oauthModule — createTestApp route inspection", () => {
 				codeRepositoryModule,
 				keyStoreModule,
 			],
-			bootstrapComponents: { config, pathResolver: (s) => s },
+			bootstrapComponents: { config: withOauthCaptures(config), pathResolver: (s) => s },
 		});
 		const routeIds = handle.inspect.routes.map((r) => r.contribution.id);
 		expect(routeIds).toContain("oauth-endpoints");
@@ -399,7 +263,7 @@ describe("oauthModule — createTestApp route inspection", () => {
 				codeRepositoryModule,
 				keyStoreModule,
 			],
-			bootstrapComponents: { config, pathResolver: (s) => s },
+			bootstrapComponents: { config: withOauthCaptures(config), pathResolver: (s) => s },
 		});
 		const oauthRoute = handle.inspect.routes.find((r) => r.contribution.id === "oauth-endpoints");
 		expect(oauthRoute?.contribution.mountPath).toBe("/oauth");
@@ -429,7 +293,7 @@ describe("oauthModule — createTestApp route inspection", () => {
 				codeRepositoryModule,
 				keyStoreModule,
 			],
-			bootstrapComponents: { config, pathResolver: (s) => s },
+			bootstrapComponents: { config: withOauthCaptures(config), pathResolver: (s) => s },
 		});
 		const app = express();
 		app.use(handle.router);
@@ -484,10 +348,11 @@ describe("oauthModule — the acr table in the served discovery document", () =>
 				clientRepositoryModule,
 				codeRepositoryModule,
 				authorizationCodeGrantModule,
+				loginEntryModule,
 				asymmetricKeyStoreModule,
 				...extraModules,
 			],
-			bootstrapComponents: { config, pathResolver: (s) => s, logger },
+			bootstrapComponents: { config: withOauthCaptures(config), pathResolver: (s) => s, logger },
 		});
 		const app = express();
 		app.use(handle.router);
@@ -604,7 +469,7 @@ describe("oauthModule + jwksModule — discovery/JWKS path agreement", () => {
 				// observable with a keystore that has public material.
 				asymmetricKeyStoreModule,
 			],
-			bootstrapComponents: { config, pathResolver: (s) => s },
+			bootstrapComponents: { config: withOauthCaptures(config), pathResolver: (s) => s },
 		});
 		const app = express();
 		app.use(handle.router);
@@ -644,7 +509,7 @@ describe("oauthModule + jwksModule — discovery/JWKS path agreement", () => {
 				codeRepositoryModule,
 				keyStoreModule,
 			],
-			bootstrapComponents: { config, pathResolver: (s) => s },
+			bootstrapComponents: { config: withOauthCaptures(config), pathResolver: (s) => s },
 		});
 		const app = express();
 		app.use(handle.router);
@@ -709,7 +574,7 @@ describe("oauthModule + jwksModule — discovery/JWKS path agreement", () => {
 				codeRepositoryModule,
 				keyStoreModule,
 			],
-			bootstrapComponents: { config, pathResolver: (s) => s },
+			bootstrapComponents: { config: withOauthCaptures(config), pathResolver: (s) => s },
 		});
 		const app = express();
 		app.use(handle.router);
@@ -725,22 +590,14 @@ describe("oauthModule + jwksModule — discovery/JWKS path agreement", () => {
 	it("advertises exactly the grant types the config actually enabled", async () => {
 		// End-to-end guard on the anti-drift property: `grant_types_supported` is
 		// read off the same `grantHandlerResolver` `/oauth/token` dispatches
-		// against, so a grant gated off by `oauth.grants.<name>.enabled` cannot be
-		// advertised, and one gated on cannot be missed.
-		const base = issuerConfig();
-		const config = {
-			...base,
-			oauth: {
-				...base.oauth,
-				grants: {
-					...base.oauth.grants,
-					authorization_code: { enabled: true },
-					refresh_token: { enabled: true },
-					// Left off on purpose — it must not appear below.
-					client_credentials: { enabled: false },
-				},
-			},
-		} as ReturnType<typeof makeValidAppConfig>;
+		// against, so a grant whose switch is off cannot be advertised, and one
+		// switched on cannot be missed.
+		const config = withGrants(issuerConfig(), {
+			authorizationCode: true,
+			refreshToken: true,
+			// Left off on purpose — it must not appear below.
+			clientCredentials: false,
+		}) as ReturnType<typeof makeValidAppConfig>;
 		const handle = await createTestApp({
 			modules: [
 				oauthModule({ config }),
@@ -753,9 +610,10 @@ describe("oauthModule + jwksModule — discovery/JWKS path agreement", () => {
 				jwksModule,
 				clientRepositoryModule,
 				codeRepositoryModule,
+				loginEntryModule,
 				keyStoreModule,
 			],
-			bootstrapComponents: { config, pathResolver: (s) => s },
+			bootstrapComponents: { config: withOauthCaptures(config), pathResolver: (s) => s },
 		});
 		const app = express();
 		app.use(handle.router);
@@ -781,7 +639,7 @@ describe("oauthModule + jwksModule — discovery/JWKS path agreement", () => {
 				codeRepositoryModule,
 				asymmetricKeyStoreModule,
 			],
-			bootstrapComponents: { config, pathResolver: (s) => s },
+			bootstrapComponents: { config: withOauthCaptures(config), pathResolver: (s) => s },
 		});
 		const app = express();
 		app.use(handle.router);
@@ -846,7 +704,7 @@ describe("oauthModule — behavioral: rateLimiter + auditSink forwarding", () =>
 				rateLimiterModule,
 				auditSinkModule,
 			],
-			bootstrapComponents: { config, pathResolver: (s) => s },
+			bootstrapComponents: { config: withOauthCaptures(config), pathResolver: (s) => s },
 		});
 
 		// Mount the routes onto an express app for HTTP probing
@@ -1020,7 +878,7 @@ describe("oauthModule — federation logout via typed deps", () => {
 				refreshTokenFamilyRevocationModule,
 				federationModule,
 			],
-			bootstrapComponents: { config, pathResolver: (s) => s },
+			bootstrapComponents: { config: withOauthCaptures(config), pathResolver: (s) => s },
 		});
 
 		const app = express();
@@ -1130,7 +988,7 @@ describe("oauthModule — federation logout via typed deps", () => {
 				federationTokenStoreModule,
 				refreshTokenFamilyRevocationModule,
 			],
-			bootstrapComponents: { config, pathResolver: (s) => s },
+			bootstrapComponents: { config: withOauthCaptures(config), pathResolver: (s) => s },
 		});
 
 		const app = express();
@@ -1206,7 +1064,7 @@ describe("oauthModule — the login trip is the loginEntry slot when a module pr
 				keyStoreModule,
 				...modules,
 			],
-			bootstrapComponents: { config, pathResolver: (s) => s },
+			bootstrapComponents: { config: withOauthCaptures(config), pathResolver: (s) => s },
 		});
 		try {
 			const app = express();
@@ -1242,9 +1100,55 @@ describe("oauthModule — the login trip is the loginEntry slot when a module pr
 		expect(location).toBe(`/sign-in?back=${encodeURIComponent(asked[0] as string)}`);
 	});
 
-	it("reads endpoints.login.url when no module provides one", async () => {
-		const location = await loginTrip([]);
-		expect(location.startsWith("/login?redirect_to=")).toBe(true);
+	/** What boot refused `/authorize`'s composition with, given `modules`. */
+	const refusal = async (modules: readonly Module[]): Promise<unknown> => {
+		try {
+			await loginTrip(modules);
+		} catch (err) {
+			return err;
+		}
+		return expect.fail("boot should have been refused");
+	};
+
+	it("refuses to serve /authorize when no module provides loginEntry, naming the slot", async () => {
+		const err = await refusal([]);
+		expect(err).toMatchObject({ name: "BootError", reason: "contribute-factory-failed" });
+		expect(String((err as { cause?: { message?: unknown } }).cause?.message)).toContain(
+			"the loginEntry slot names, and no module provides it",
+		);
+	});
+
+	it("refuses to serve /authorize when the entry it is handed names no login page", async () => {
+		const err = await refusal([
+			defineModule({
+				name: "test:login-entry",
+				provides: {
+					loginEntry: () =>
+						Object.freeze(
+							Object.defineProperties(
+								{},
+								{
+									url: {
+										get: () => {
+											throw new Error("no login page is configured");
+										},
+										enumerable: true,
+									},
+									urlFor: {
+										value: () => {
+											throw new Error("no login page is configured");
+										},
+									},
+								},
+							),
+						),
+				},
+			}),
+		]);
+		expect(err).toMatchObject({ name: "BootError", reason: "contribute-factory-failed" });
+		expect(String((err as { cause?: { message?: unknown } }).cause?.message)).toContain(
+			"no login page is configured",
+		);
 	});
 });
 
@@ -1277,19 +1181,11 @@ describe("oauthModule — a consumer of session admission", () => {
 		readonly refresh_token: boolean;
 		readonly session: boolean;
 	}) => {
-		const base = makeValidAppConfig();
-		return {
-			...base,
-			oauth: {
-				...base.oauth,
-				grants: {
-					...base.oauth.grants,
-					authorization_code: { enabled: enabled.authorization_code },
-					refresh_token: { enabled: enabled.refresh_token },
-					session: { enabled: enabled.session },
-				},
-			},
-		} as ReturnType<typeof makeValidAppConfig>;
+		return withGrants(makeValidAppConfig(), {
+			authorizationCode: enabled.authorization_code,
+			refreshToken: enabled.refresh_token,
+			session: enabled.session,
+		}) as ReturnType<typeof makeValidAppConfig>;
 	};
 
 	it("registers each session-bound grant's action beside the grant, graded use", () => {
@@ -1320,19 +1216,13 @@ describe("oauthModule — a composition with no authorization_code grant", () =>
 	 */
 	const headlessConfig = (authorizationCode: boolean) => {
 		const base = makeValidAppConfig();
-		return {
-			...base,
-			oauth: {
-				...base.oauth,
-				jwt: { ...base.oauth.jwt, issuer: "https://auth.example.com" },
-				grants: {
-					...base.oauth.grants,
-					authorization_code: { enabled: authorizationCode },
-					refresh_token: { enabled: false },
-					client_credentials: { enabled: true },
-				},
+		return withGrants(
+			{
+				...base,
+				oauth: { ...base.oauth, jwt: { ...base.oauth.jwt, issuer: "https://auth.example.com" } },
 			},
-		} as ReturnType<typeof makeValidAppConfig>;
+			{ authorizationCode, refreshToken: false, clientCredentials: true },
+		) as ReturnType<typeof makeValidAppConfig>;
 	};
 	const boot = (authorizationCode: boolean, extra: readonly Module[] = []) => {
 		const config = headlessConfig(authorizationCode);
@@ -1346,7 +1236,7 @@ describe("oauthModule — a composition with no authorization_code grant", () =>
 				keyStoreModule,
 				...extra,
 			],
-			bootstrapComponents: { config, pathResolver: (s) => s },
+			bootstrapComponents: { config: withOauthCaptures(config), pathResolver: (s) => s },
 		});
 	};
 
@@ -1398,7 +1288,7 @@ describe("oauthModule — a composition with no authorization_code grant", () =>
 				clientRepositoryModule,
 				keyStoreModule,
 			],
-			bootstrapComponents: { config, pathResolver: (s) => s, logger },
+			bootstrapComponents: { config: withOauthCaptures(config), pathResolver: (s) => s, logger },
 		});
 		const app = express();
 		app.use(handle.router);
@@ -1423,7 +1313,7 @@ describe("oauthModule — a composition with no authorization_code grant", () =>
 				clientRepositoryModule,
 				keyStoreModule,
 			],
-			bootstrapComponents: { config, pathResolver: (s) => s },
+			bootstrapComponents: { config: withOauthCaptures(config), pathResolver: (s) => s },
 		}).then(
 			async (handle) => {
 				await handle.dispose();
@@ -1441,7 +1331,7 @@ describe("oauthModule — a composition with no authorization_code grant", () =>
 	});
 
 	it("with the grant and a code repository, serves /oauth/authorize and names it", async () => {
-		const handle = await boot(true, [codeRepositoryModule]);
+		const handle = await boot(true, [codeRepositoryModule, loginEntryModule]);
 		const app = express();
 		app.use(handle.router);
 

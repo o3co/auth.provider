@@ -53,7 +53,7 @@ const TEMPLATE_CONFIG = fileURLToPath(
  * many as are today. A rename lowers it by the names it renames; nothing
  * raises it.
  */
-const CEILING = 55;
+const CEILING = 42;
 
 /** `LEGACY`'s first count: it only ever loses entries. */
 const LEGACY_BASELINE = 61;
@@ -65,19 +65,6 @@ const LEGACY_BASELINE = 61;
  * binding to another layer (see the file header).
  */
 const LEGACY: readonly string[] = [
-	"core: OAUTH_GRANTS_JWT_BEARER_ENABLED at oauth.grants.urn:ietf:params:oauth:grant-type:jwt-bearer.enabled",
-	"core: OAUTH_CIMD_ENABLED at oauth.clientIdMetadataDocuments.enabled",
-	"core: OAUTH_CIMD_ALLOWED_SCOPES at oauth.clientIdMetadataDocuments.allowedScopes",
-	"core: OAUTH_CIMD_ALLOWED_AUDIENCES at oauth.clientIdMetadataDocuments.allowedAudiences",
-	"core: OAUTH_CIMD_ALLOWED_HOSTS at oauth.clientIdMetadataDocuments.allowedHosts",
-	"core: OAUTH_CIMD_DENIED_HOSTS at oauth.clientIdMetadataDocuments.deniedHosts",
-	"core: OAUTH_CIMD_MAX_BYTES at oauth.clientIdMetadataDocuments.maxBytes",
-	"core: OAUTH_CIMD_TIMEOUT_MS at oauth.clientIdMetadataDocuments.timeoutMs",
-	"core: OAUTH_CIMD_CACHE_MAX_AGE_MS at oauth.clientIdMetadataDocuments.cacheMaxAgeMs",
-	"core: OAUTH_CIMD_MAX_CACHE_ENTRIES at oauth.clientIdMetadataDocuments.maxCacheEntries",
-	"core: OAUTH_CIMD_STALE_IF_ERROR_MS at oauth.clientIdMetadataDocuments.staleIfErrorMs",
-	"core: OAUTH_CIMD_NEGATIVE_CACHE_MS at oauth.clientIdMetadataDocuments.negativeCacheMs",
-	"core: OAUTH_CIMD_MAX_CONCURRENT_FETCHES at oauth.clientIdMetadataDocuments.maxConcurrentFetches",
 	"core: CLIENT_TYPE at repositories.client.type",
 	"core: CLIENT_PATH at repositories.client.yaml.path",
 	"core: CLIENT_USER_TYPE at repositories.user.type",

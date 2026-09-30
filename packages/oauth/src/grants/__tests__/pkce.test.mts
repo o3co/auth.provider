@@ -17,154 +17,25 @@
 import { readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 import {
 	PKCE_METHOD_ABSENT_DEFAULT,
 	pkceMethodsForClient,
 	resolvePkceOptions,
 } from "#/grants/pkce.mjs";
 
-const makeLogger = () => ({
-	trace: vi.fn(),
-	debug: vi.fn(),
-	info: vi.fn(),
-	warn: vi.fn(),
-	error: vi.fn(),
-	fatal: vi.fn(),
-	child: vi.fn(),
-});
-
 describe("resolvePkceOptions", () => {
-	it("resolves to required + S256-only when no pkce block is configured", () => {
-		expect(resolvePkceOptions(undefined)).toEqual({ required: true, supportedMethods: ["S256"] });
-	});
-
-	it("resolves to the same object shape for an empty pkce block", () => {
-		expect(resolvePkceOptions({})).toEqual({ required: true, supportedMethods: ["S256"] });
+	it("resolves to required + S256-only", () => {
+		expect(resolvePkceOptions()).toEqual({ required: true, supportedMethods: ["S256"] });
 	});
 
 	it("returns a frozen supportedMethods list so a consumer cannot widen it in place", () => {
-		const { supportedMethods } = resolvePkceOptions(undefined);
+		const { supportedMethods } = resolvePkceOptions();
 		expect(Object.isFrozen(supportedMethods)).toBe(true);
 	});
 
-	it("cannot be turned off: `required = false` is inert", () => {
-		expect(resolvePkceOptions({ required: false }).required).toBe(true);
-	});
-
-	it("cannot re-admit plain through the global supportedMethods allowlist", () => {
-		// `plain` is reachable ONLY per client.
-		expect(resolvePkceOptions({ supportedMethods: ["S256", "plain"] }).supportedMethods).toEqual([
-			"S256",
-		]);
-		expect(resolvePkceOptions({ supportedMethods: ["plain"] }).supportedMethods).toEqual(["S256"]);
-	});
-
-	it("cannot re-admit plain through the legacy defaultMethod knob", () => {
-		expect(resolvePkceOptions({ defaultMethod: "plain" }).supportedMethods).toEqual(["S256"]);
-	});
-
-	it("ignores the legacy requireS256 boolean in both directions", () => {
-		expect(resolvePkceOptions({ requireS256: false })).toEqual({
-			required: true,
-			supportedMethods: ["S256"],
-		});
-		expect(resolvePkceOptions({ requireS256: true })).toEqual({
-			required: true,
-			supportedMethods: ["S256"],
-		});
-	});
-
-	it("warns once, naming every inert key, so an operator sees the config is dead", () => {
-		const logger = makeLogger();
-		resolvePkceOptions(
-			{ requireS256: false, required: false, defaultMethod: "plain", supportedMethods: ["plain"] },
-			logger,
-		);
-		expect(logger.warn).toHaveBeenCalledTimes(1);
-		expect(logger.warn).toHaveBeenCalledWith(
-			expect.objectContaining({
-				ignoredKeys: ["requireS256", "required", "defaultMethod", "supportedMethods"],
-			}),
-			"pkce_config_ignored_s256_is_mandatory",
-		);
-	});
-
-	it("stays silent when the operator configured nothing", () => {
-		const logger = makeLogger();
-		resolvePkceOptions(undefined, logger);
-		resolvePkceOptions({}, logger);
-		expect(logger.warn).not.toHaveBeenCalled();
-	});
-
-	// `resolveOAuthOptions` runs more than once per boot, deliberately
-	// (`createOAuthRouter` for the routers, `createAuthorizationGrant` for the
-	// token endpoint), so both endpoints read one policy.
-	describe("warns once per config, not once per resolution", () => {
-		it("emits a single warning however many times one config is resolved", () => {
-			const logger = makeLogger();
-			const pkceConfig = { requireS256: false };
-			resolvePkceOptions(pkceConfig, logger);
-			resolvePkceOptions(pkceConfig, logger);
-			resolvePkceOptions(pkceConfig, logger);
-			expect(logger.warn).toHaveBeenCalledTimes(1);
-		});
-
-		it("still warns for a DIFFERENT config in the same process", () => {
-			// Not a module-level boolean: a process that composes several
-			// deployments (every test file in this package, any embedder
-			// building more than one AS) would warn for the first stale config
-			// and go silent for every later one.
-			const logger = makeLogger();
-			resolvePkceOptions({ requireS256: false }, logger);
-			resolvePkceOptions({ defaultMethod: "plain" }, logger);
-			expect(logger.warn).toHaveBeenCalledTimes(2);
-			expect(logger.warn).toHaveBeenNthCalledWith(
-				1,
-				expect.objectContaining({ ignoredKeys: ["requireS256"] }),
-				"pkce_config_ignored_s256_is_mandatory",
-			);
-			expect(logger.warn).toHaveBeenNthCalledWith(
-				2,
-				expect.objectContaining({ ignoredKeys: ["defaultMethod"] }),
-				"pkce_config_ignored_s256_is_mandatory",
-			);
-		});
-
-		it("does not let one logger's suppression hide the config from another", () => {
-			// Two loggers, one config: the second resolution is genuinely the
-			// same deployment being resolved again, so silence is correct —
-			// this pins that the key is the CONFIG, not the logger.
-			const first = makeLogger();
-			const second = makeLogger();
-			const pkceConfig = { supportedMethods: ["plain"] };
-			resolvePkceOptions(pkceConfig, first);
-			resolvePkceOptions(pkceConfig, second);
-			expect(first.warn).toHaveBeenCalledTimes(1);
-			expect(second.warn).not.toHaveBeenCalled();
-		});
-
-		it("does not let a logger-less resolution consume the warning", () => {
-			// `grants/session.mts` resolves the same options object with no
-			// logger. If that call marked the config as reported, whether an
-			// operator ever saw the warning would depend on module construction
-			// order — silence for a real misconfiguration, intermittently.
-			const logger = makeLogger();
-			const pkceConfig = { requireS256: true };
-			resolvePkceOptions(pkceConfig);
-			resolvePkceOptions(pkceConfig, logger);
-			expect(logger.warn).toHaveBeenCalledTimes(1);
-		});
-
-		it("resolves to the same policy whether or not it warned", () => {
-			// The guard must gate the log line and nothing else.
-			const pkceConfig = { requireS256: false };
-			const first = resolvePkceOptions(pkceConfig);
-			const second = resolvePkceOptions(pkceConfig);
-			expect(second).toEqual(first);
-			expect(second.required).toBe(true);
-			expect(second.supportedMethods).toEqual(["S256"]);
-		});
+	it("returns one policy on every resolution", () => {
+		expect(resolvePkceOptions()).toBe(resolvePkceOptions());
 	});
 });
 
@@ -173,7 +44,7 @@ describe("pkceMethodsForClient", () => {
 	// each side. Taking it as a parameter (rather than closing over the
 	// constant) is what makes "/authorize and /token read the same object"
 	// checkable rather than asserted.
-	const policy = resolvePkceOptions(undefined);
+	const policy = resolvePkceOptions();
 
 	it("gives S256 only to a client with no opt-in", () => {
 		expect(pkceMethodsForClient(policy, {})).toEqual(["S256"]);

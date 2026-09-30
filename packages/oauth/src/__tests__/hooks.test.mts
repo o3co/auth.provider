@@ -27,7 +27,7 @@ import {
 	type RateLimitDecision,
 	type RateLimiter,
 } from "@o3co/auth-provider-core";
-import { resolverForTests } from "@o3co/auth-provider-core/testing";
+import { createTestLoginEntry, resolverForTests } from "@o3co/auth-provider-core/testing";
 import express from "express";
 import request from "supertest";
 import { describe, expect, it, vi } from "vitest";
@@ -143,6 +143,7 @@ async function buildApp(overrides: {
 	app.use(express.urlencoded({ extended: false }));
 
 	const { router } = await createOAuthRouter(express, {
+		loginEntry: createTestLoginEntry(),
 		requirements: resolverForTests([], { actions: OAUTH_ADMISSION_ACTIONS }),
 		registry: authorizationServerRegistry(),
 		config: overrides.config ?? mockConfig,
@@ -498,6 +499,7 @@ describe("oauth routes — hooks", () => {
 			};
 
 			const { router } = await createOAuthRouter(express, {
+				loginEntry: createTestLoginEntry(),
 				requirements: resolverForTests([], { actions: OAUTH_ADMISSION_ACTIONS }),
 				registry: authorizationServerRegistry(),
 				config: mockConfig,
@@ -598,6 +600,7 @@ describe("oauth routes — hooks", () => {
 			};
 
 			const { router } = await createOAuthRouter(express, {
+				loginEntry: createTestLoginEntry(),
 				requirements: resolverForTests([], { actions: OAUTH_ADMISSION_ACTIONS }),
 				registry: authorizationServerRegistry(),
 				config: mockConfig,
@@ -636,6 +639,7 @@ describe("oauth routes — hooks", () => {
 				},
 			};
 			const { router } = await createOAuthRouter(express, {
+				loginEntry: createTestLoginEntry(),
 				requirements: resolverForTests([], { actions: OAUTH_ADMISSION_ACTIONS }),
 				registry: authorizationServerRegistry(),
 				config: mockConfig,
@@ -671,6 +675,7 @@ describe("oauth routes — hooks", () => {
 				},
 			};
 			const { router } = await createOAuthRouter(express, {
+				loginEntry: createTestLoginEntry(),
 				requirements: resolverForTests([], { actions: OAUTH_ADMISSION_ACTIONS }),
 				registry: authorizationServerRegistry(),
 				config: mockConfig,
@@ -708,6 +713,7 @@ describe("oauth routes — hooks", () => {
 			};
 
 			const { router } = await createOAuthRouter(express, {
+				loginEntry: createTestLoginEntry(),
 				requirements: resolverForTests([], { actions: OAUTH_ADMISSION_ACTIONS }),
 				registry: authorizationServerRegistry(),
 				config: mockConfig,
@@ -741,6 +747,7 @@ describe("oauth routes — hooks", () => {
 			});
 
 			const { router } = await createOAuthRouter(express, {
+				loginEntry: createTestLoginEntry(),
 				requirements: resolverForTests([], { actions: OAUTH_ADMISSION_ACTIONS }),
 				registry: authorizationServerRegistry(),
 				config: mockConfig,
@@ -779,6 +786,7 @@ describe("oauth routes — hooks", () => {
 			};
 
 			const { router } = await createOAuthRouter(express, {
+				loginEntry: createTestLoginEntry(),
 				requirements: resolverForTests([], { actions: OAUTH_ADMISSION_ACTIONS }),
 				registry: authorizationServerRegistry(),
 				config: mockConfig,
@@ -825,6 +833,7 @@ describe("oauth routes — hooks", () => {
 			};
 
 			const { router } = await createOAuthRouter(express, {
+				loginEntry: createTestLoginEntry(),
 				requirements: resolverForTests([], { actions: OAUTH_ADMISSION_ACTIONS }),
 				registry: authorizationServerRegistry(),
 				config: mockConfig,
@@ -875,6 +884,7 @@ describe("oauth routes — hooks", () => {
 			};
 
 			const { router } = await createOAuthRouter(express, {
+				loginEntry: createTestLoginEntry(),
 				requirements: resolverForTests([], { actions: OAUTH_ADMISSION_ACTIONS }),
 				registry: authorizationServerRegistry(),
 				config: mockConfig,
@@ -968,6 +978,7 @@ describe("oauth routes — hooks", () => {
 			};
 
 			const { router } = await createOAuthRouter(express, {
+				loginEntry: createTestLoginEntry(),
 				requirements: resolverForTests([], { actions: OAUTH_ADMISSION_ACTIONS }),
 				registry: authorizationServerRegistry(),
 				config: mockConfig,

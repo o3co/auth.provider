@@ -75,7 +75,7 @@ repository.
 - **Node.js** `>=22.0.0`
 - **`bcrypt` native binary**: this template depends transitively on `bcrypt@6.x`, which ships **prebuilt N-API binaries** for `darwin-arm64`, `darwin-x64`, `linux-x64` (glibc and musl), `linux-arm64` (glibc and musl), `linux-arm`, `win32-x64`, and `win32-arm64`. On these platforms `pnpm install` succeeds without compiling from source, and no extra toolchain is required (the `darwin-*`, `node:*-alpine`, and `node:*-bookworm` images all match a shipped prebuild). On platforms or libc/arch combinations that have no matching prebuild, `pnpm install` falls back to compiling, which then requires a C++ compiler and Python (the standard Node.js native-addon toolchain): Debian/Ubuntu `apt-get install build-essential python3`, Alpine `apk add make g++ python3`, macOS `xcode-select --install`. The pnpm 10 `onlyBuiltDependencies` allowlist for `bcrypt` lives in `pnpm-workspace.yaml` — pnpm ≥10.29 reads it only from there, in single-package projects too. `create-auth-provider` writes that file into the project it scaffolds (inside this monorepo, the allowlist sits in the workspace root's `pnpm-workspace.yaml`); without it a fresh `pnpm install` silently skips the install hook on those platforms.
 - **Redis 7.2 LTS or later** for any Redis-backed adapter (refresh token family store, code repository, federation token store, session store). The `pExpireGT` flag pair on which several adapters depend was introduced in Redis 7.0+; 7.2 LTS is the tested floor. Tested against AWS ElastiCache for Redis 7.2, Upstash Redis, Redis Cloud 7.2, and self-managed `redis:7.2-alpine`.
-- **ioredis** `^6.0.0` (direct runtime dependency). Every `@o3co/auth-provider-redis` adapter this template wires — refresh-token families, authorization codes, rate-limit counters, the access-token denylist, the replay seen-set, the user-session stores, the federation-token store, the consent stores and the federation-grant stores — runs off the one ioredis connection `standaloneRedisClientsModule` opens per replica. The same module provides the client of every other store the Redis package ships — the device-code store and the WebAuthn challenge store — so a deployment that adds the device grant or WebAuthn to `buildModules.mts` with a Redis store finds its client there. The `redis` npm package (`^6.2.1`) stays a dependency for one thing: `connect-redis` takes a node-redis client, so the `express-session` store behind `SESSION_STORAGE_TYPE=redis` is a second, separate connection (the `session-store` probe in `/readyz`).
+- **ioredis** `^6.0.0` (direct runtime dependency). Every `@o3co/auth-provider-redis` adapter this template wires — refresh-token families, authorization codes, rate-limit counters, the access-token denylist, the replay seen-set, the user-session stores, the federation-token store, the consent stores and the federation-grant stores — runs off the one ioredis connection `standaloneRedisClientsModule` opens per replica. The same module provides the client of every other store the Redis package ships — the device-code store and the WebAuthn challenge store — so a deployment that adds the device grant or WebAuthn to `buildModules.mts` with a Redis store finds its client there. The `redis` npm package (`^6.2.1`) stays a dependency for one thing: `connect-redis` takes a node-redis client, so the `express-session` store behind `SESSION_STORE_STORAGE_TYPE=redis` is a second, separate connection (the `session-store` probe in `/readyz`).
 
 ## First-party clients
 
@@ -124,7 +124,7 @@ It takes four shapes, all of them Express's own:
 
 An allowlist is a network control, not a cryptographic one. The edge must also **strip** inbound `X-Forwarded-*` headers rather than appending to them, and the hop between it and this process must not be reachable by anyone able to spoof a source address.
 
-**Point `rateLimiter.adapter` at Redis.** It defaults to `"memory"`, which is per-process: with N replicas every configured limit is effectively N times larger and resets on every deploy. The memory adapter is also **evadable under bucket exhaustion**: it caps itself at 10,000 buckets and, at the cap, admitting a new key evicts the bucket closest to reset — so an attacker who can present many source IPs (and `req.ip` is client-influenced whenever `HTTP_TRUST_PROXY` is broader than your actual hops) can churn the table until a target's counter is evicted and starts over. That is acceptable for one dev process; it is not a production rate limit. The login guard runs on this same shared component, so one setting covers both the OAuth endpoints and `/session/login`. The login window and limit stay configured at `rateLimit.login`; the session module contributes them as the `login` budget both adapters read, so there is nothing to restate.
+**Point `rateLimiter.adapter` at Redis.** It defaults to `"memory"`, which is per-process: with N replicas every configured limit is effectively N times larger and resets on every deploy. The memory adapter is also **evadable under bucket exhaustion**: it caps itself at 10,000 buckets and, at the cap, admitting a new key evicts the bucket closest to reset — so an attacker who can present many source IPs (and `req.ip` is client-influenced whenever `HTTP_TRUST_PROXY` is broader than your actual hops) can churn the table until a target's counter is evicted and starts over. That is acceptable for one dev process; it is not a production rate limit. The login guard runs on this same shared component, so one setting covers both the OAuth endpoints and `/session/login`. The login window and limit stay configured at `session.rateLimit.login`; the session module contributes them as the `login` budget both adapters read, so there is nothing to restate.
 
 **Behind a BFF, raise `limits.token` before you need to.** The OAuth-endpoint
 rate limits key on `req.ip` (`packages/core/src/ratelimit/guard.mts` builds the
@@ -170,7 +170,7 @@ raising it globally to accommodate one topology would weaken it for the other.
 Put the throttling that protects the BFF's *own* users in front of the BFF,
 where per-user identity still exists.
 
-**Set `CORE_DEPLOYMENT_MODE=multi` once you run more than one replica.** Boot then *fails* if any in-memory store that has to be shared is still wired, naming every offender and what it costs — user sessions forking (back-channel logout reaches one replica, a logged-out session stays valid on the others), rate-limit counters multiplying, access-token revocation not propagating, a single-use client assertion or WebAuthn challenge replayable once per replica. The check reads the declaration each installed module carries on its own manifest rather than a list of library module names, so this template's own in-memory modules — the user-session stores (`USER_SESSION_STORES_ADAPTER=memory`), the authorization-code repository (`OAUTH_CODE_ADAPTER=memory`) and the federation token store (`FEDERATION_TOKEN_STORE_TYPE=memory`, the default) — are refused by name too. So are express-session's own store under `SESSION_STORAGE_TYPE=memory` (#474) and the default memory rate limiter (`core-rate-limiter-memory`, `RATE_LIMITER_ADAPTER=memory`). With the mode unset nothing is refused: every one of them is listed in a single `replica_unsafe_adapters` warning at boot. (The login and WebAuthn-options routes carry per-process fallback limiters that warn on their own, but only in a composition that wires no `rateLimiter` at all, which this template never does; see the operator runbook.) With `CORE_DEPLOYMENT_MODE=single` the check is silent, because you have said there is one replica. This template does not install DPoP; a composition that adds it records every accepted proof in the same replay seen-set as `private_key_jwt` (`REPLAY_SEEN_SET_ADAPTER`), so it gets the same answer — `memory` is refused under `CORE_DEPLOYMENT_MODE=multi` and listed in the unset-mode warning, and the shipped `redis` shares DPoP's records across replicas — see the dpop package's [operator requirements](../../packages/dpop/README.md#operator-requirements).
+**Set `CORE_DEPLOYMENT_MODE=multi` once you run more than one replica.** Boot then *fails* if any in-memory store that has to be shared is still wired, naming every offender and what it costs — user sessions forking (back-channel logout reaches one replica, a logged-out session stays valid on the others), rate-limit counters multiplying, access-token revocation not propagating, a single-use client assertion or WebAuthn challenge replayable once per replica. The check reads the declaration each installed module carries on its own manifest rather than a list of library module names, so this template's own in-memory modules — the user-session stores (`USER_SESSION_STORES_ADAPTER=memory`), the authorization-code repository (`OAUTH_CODE_ADAPTER=memory`) and the federation token store (`FEDERATION_TOKEN_STORE_TYPE=memory`, the default) — are refused by name too. So are express-session's own store under `SESSION_STORE_STORAGE_TYPE=memory` (#474) and the default memory rate limiter (`core-rate-limiter-memory`, `RATE_LIMITER_ADAPTER=memory`). With the mode unset nothing is refused: every one of them is listed in a single `replica_unsafe_adapters` warning at boot. (The login and WebAuthn-options routes carry per-process fallback limiters that warn on their own, but only in a composition that wires no `rateLimiter` at all, which this template never does; see the operator runbook.) With `CORE_DEPLOYMENT_MODE=single` the check is silent, because you have said there is one replica. This template does not install DPoP; a composition that adds it records every accepted proof in the same replay seen-set as `private_key_jwt` (`REPLAY_SEEN_SET_ADAPTER`), so it gets the same answer — `memory` is refused under `CORE_DEPLOYMENT_MODE=multi` and listed in the unset-mode warning, and the shipped `redis` shares DPoP's records across replicas — see the dpop package's [operator requirements](../../packages/dpop/README.md#operator-requirements).
 
 The variable sets `core.deployment.mode`. `DEPLOYMENT_MODE`, its old name, refuses boot set alone or beside `CORE_DEPLOYMENT_MODE` at a different value; beside it at the same value, it boots.
 
@@ -180,7 +180,7 @@ Be aware of what this check *cannot* do: if you scale to N replicas without ever
 
 Other multi-replica considerations covered by the default modules:
 
-- The `express-session` store (`sessionStoreModule`) is its own connection: `SESSION_STORAGE_TYPE=redis` with `SESSION_STORAGE_REDIS_URL` (`session.storage.redis.url`) pointing at the shared instance.
+- The `express-session` store (`sessionStoreModule`) is its own connection: `SESSION_STORE_STORAGE_TYPE=redis` with `SESSION_STORE_STORAGE_REDIS_URL` (`session-store.storage.redis.url`) pointing at the shared instance.
 - The user-session stores switch on `userSessionStores.adapter = "redis"` (`USER_SESSION_STORES_ADAPTER`), which wires `redisSessionStoresModule` off the shared ioredis connection — the one `REFRESH_TOKEN_FAMILY_STORE_REDIS_URL` configures.
 - The authorization-code repository switches on `oauth.code.adapter` (`OAUTH_CODE_ADAPTER`); the template ships `"redis"`, on that same connection. `oauth.code.adapter` wins; the deprecated `repositories.code.type` (`CLIENT_CODE_TYPE`) is read, with a `config_key_deprecated` warning at boot, only when it is unset — which the shipped `config/application.conf` never leaves it. `CLIENT_CODE_ENDPOINT_URI` (`repositories.code.redis.endpointUri`) is bound by `config/application.conf` but nothing reads it: the Redis code repository runs on the shared connection, so there is one Redis URL for every adapter.
 - The replay seen-set — the `jti` single-use record behind `private_key_jwt` client authentication (#484) — switches on `replaySeenSet.adapter` (`REPLAY_SEEN_SET_ADAPTER`); the template ships `"redis"` on the shared connection, and `memory` is refused under `CORE_DEPLOYMENT_MODE=multi` because a captured client assertion would replay once per replica.
@@ -198,19 +198,19 @@ shell that starts it — and it does not boot until that environment supplies:
   host);
 - a signing key pair, `OAUTH_JWT_PRIVATE_KEY_PATH` / `OAUTH_JWT_PUBLIC_KEY_PATH`
   (see [OAuth JWT](#oauth-jwt));
-- `SESSION_SECRET`, at least 32 bytes;
+- `SESSION_STORE_SECRET`, at least 32 bytes;
 - `CLIENT_USER_AUTHENTICATE_URL` and `CLIENT_USER_AUTHENTICATE_BY_TOKEN_URL` —
   your user service ("the Store"), `https`, or `http` on a loopback host. Boot
   checks their form, not that anything answers; logins fail until something
   does (see [User Repository](#user-repository));
 - a Redis it can reach at `redis://localhost:6379`. The shipped configuration
-  keeps the browser session store there (`SESSION_STORAGE_REDIS_URL`), and
+  keeps the browser session store there (`SESSION_STORE_STORAGE_REDIS_URL`), and
   opens one shared connection (`REFRESH_TOKEN_FAMILY_STORE_REDIS_URL`) for the
   refresh-token families, the authorization codes, the access-token denylist
   and the replay seen-set — and for the user-session stores, with the setting
   below.
 
-Plain HTTP also needs `SESSION_SECURE=false` and a session cookie name without
+Plain HTTP also needs `SESSION_STORE_SECURE=false` and a session cookie name without
 the `__Host-` prefix (see [Session](#session)). And set
 `USER_SESSION_STORES_ADAPTER=redis`: the browser session store is in Redis, the
 user-session stores default to memory, and `tsx watch` restarts the process on
@@ -244,8 +244,8 @@ docker run -d --name auth-redis -p 127.0.0.1:6379:6379 redis:7.2-alpine
 export OAUTH_JWT_ISSUER=http://localhost:3000 \
   OAUTH_JWT_PRIVATE_KEY_PATH=./jwt-private.pem \
   OAUTH_JWT_PUBLIC_KEY_PATH=./jwt-public.pem \
-  SESSION_SECRET="$(openssl rand -hex 32)" \
-  SESSION_SECURE=false SESSION_NAME=auth.sid \
+  SESSION_STORE_SECRET="$(openssl rand -hex 32)" \
+  SESSION_STORE_SECURE=false SESSION_STORE_NAME=auth.sid \
   USER_SESSION_STORES_ADAPTER=redis \
   CLIENT_USER_AUTHENTICATE_URL=http://localhost:8080/authenticate \
   CLIENT_USER_AUTHENTICATE_BY_TOKEN_URL=http://localhost:8080/authenticate-by-token
@@ -351,18 +351,18 @@ fail fast rather than silently falling back to defaults.
 | `OAUTH_JWT_SECRET` | — | Signing secret, **HMAC (`HS256`) only**. At least 32 bytes (256 bits) of random material — `openssl rand -hex 32`. Hex/base64 values are measured **decoded**, so a 32-character hex string counts as 16 bytes and is refused. |
 | `OAUTH_JWT_ISSUER` | **(required)** | Canonical issuer URL stamped as `iss` on every token. Must be absolute `https` (`http` only for a loopback host), with no query or fragment. Boot fails when unset — it is never derived from the `Host` header. |
 | `OAUTH_REQUIRE_EMAIL_VERIFIED` | `false` | Refuse to issue tokens for a user until the Store publishes `emailVerified: true`. Enforced at `/authorize` and on the `session` grant. Verification itself is the Store's job — this only reads the result. |
-| `OAUTH_CIMD_ENABLED` | `false` | Accept Client ID Metadata Documents (#529): a client whose `client_id` is the `https` URL of its own registration, the model MCP hosts use. Such a client is public, never first-party — it goes through the consent step, so wire `CONSENT_STORE_ADAPTER`. |
-| `OAUTH_CIMD_ALLOWED_SCOPES` | — | Comma-separated: what any such client may obtain (its document's `scope` is intersected with this). Empty admits none. |
-| `OAUTH_CIMD_ALLOWED_AUDIENCES` | — | Comma-separated: the resource servers it may mint for (RFC 8707 `resource`). Empty admits only its own `client_id`. |
-| `OAUTH_CIMD_ALLOWED_HOSTS` | — | Comma-separated hosts a document may live on: exact, or `.suffix` for a domain and its subdomains. Empty admits any public host. |
-| `OAUTH_CIMD_DENIED_HOSTS` | — | Comma-separated hosts refused even when allowed above. |
-| `OAUTH_CIMD_MAX_BYTES` | `5120` | Byte cap on a document (the draft recommends 5 KB). |
-| `OAUTH_CIMD_TIMEOUT_MS` | `5000` | Fetch timeout. |
-| `OAUTH_CIMD_CACHE_MAX_AGE_MS` | `600000` | Upper bound on how long a valid document is served from cache; `Cache-Control: max-age` may shorten it. |
-| `OAUTH_CIMD_MAX_CACHE_ENTRIES` | `256` | How many documents are remembered at once. The keys are chosen by an unauthenticated caller, so the map is bounded. |
-| `OAUTH_CIMD_STALE_IF_ERROR_MS` | `300000` | How long a registration already validated is still served after a revalidation that failed for a reason that is not the document's (a DNS blip, a 5xx, a timeout) — an outage should not break a working client. A document that was *rejected* is dropped immediately. `0` disables it. |
-| `OAUTH_CIMD_NEGATIVE_CACHE_MS` | `60000` | How long a refusal is remembered, so the same `client_id` is not resolved and fetched again on every request. Short, so a client that fixes its document is not locked out. |
-| `OAUTH_CIMD_MAX_CONCURRENT_FETCHES` | `8` | How many documents may be in flight at once, across every `client_id`. Bounds what an unauthenticated caller can make this server dial. |
+| `OAUTH_CLIENT_ID_METADATA_DOCUMENTS_ENABLED` | `false` | Accept Client ID Metadata Documents (#529): a client whose `client_id` is the `https` URL of its own registration, the model MCP hosts use. Such a client is public, never first-party — it goes through the consent step, so wire `CONSENT_STORE_ADAPTER`. |
+| `OAUTH_CLIENT_ID_METADATA_DOCUMENTS_ALLOWED_SCOPES` | — | Comma-separated: what any such client may obtain (its document's `scope` is intersected with this). Empty admits none. |
+| `OAUTH_CLIENT_ID_METADATA_DOCUMENTS_ALLOWED_AUDIENCES` | — | Comma-separated: the resource servers it may mint for (RFC 8707 `resource`). Empty admits only its own `client_id`. |
+| `OAUTH_CLIENT_ID_METADATA_DOCUMENTS_ALLOWED_HOSTS` | — | Comma-separated hosts a document may live on: exact, or `.suffix` for a domain and its subdomains. Empty admits any public host. |
+| `OAUTH_CLIENT_ID_METADATA_DOCUMENTS_DENIED_HOSTS` | — | Comma-separated hosts refused even when allowed above. |
+| `OAUTH_CLIENT_ID_METADATA_DOCUMENTS_MAX_BYTES` | `5120` | Byte cap on a document (the draft recommends 5 KB). |
+| `OAUTH_CLIENT_ID_METADATA_DOCUMENTS_TIMEOUT_MS` | `5000` | Fetch timeout. |
+| `OAUTH_CLIENT_ID_METADATA_DOCUMENTS_CACHE_MAX_AGE_MS` | `600000` | Upper bound on how long a valid document is served from cache; `Cache-Control: max-age` may shorten it. |
+| `OAUTH_CLIENT_ID_METADATA_DOCUMENTS_MAX_CACHE_ENTRIES` | `256` | How many documents are remembered at once. The keys are chosen by an unauthenticated caller, so the map is bounded. |
+| `OAUTH_CLIENT_ID_METADATA_DOCUMENTS_STALE_IF_ERROR_MS` | `300000` | How long a registration already validated is still served after a revalidation that failed for a reason that is not the document's (a DNS blip, a 5xx, a timeout) — an outage should not break a working client. A document that was *rejected* is dropped immediately. `0` disables it. |
+| `OAUTH_CLIENT_ID_METADATA_DOCUMENTS_NEGATIVE_CACHE_MS` | `60000` | How long a refusal is remembered, so the same `client_id` is not resolved and fetched again on every request. Short, so a client that fixes its document is not locked out. |
+| `OAUTH_CLIENT_ID_METADATA_DOCUMENTS_MAX_CONCURRENT_FETCHES` | `8` | How many documents may be in flight at once, across every `client_id`. Bounds what an unauthenticated caller can make this server dial. |
 | `OAUTH_JWT_KID` | `v0` | Key ID included in the JWT header. 1 to 256 characters with no control character; anything else fails boot, including a variable exported but empty (which used to sign under the kid `""`; tokens issued that way are refused once it is corrected, so their users sign in again) |
 | `OAUTH_JWT_PRIVATE_KEY` | — | PEM-encoded private key (asymmetric algorithms) |
 | `OAUTH_JWT_PRIVATE_KEY_PATH` | — | Path to PEM private key file |
@@ -411,32 +411,47 @@ other grant ignores it and mints the default.
 
 | Variable | Default | Description |
 |---|---|---|
-| `OAUTH_GRANTS_SESSION_ENABLED` | `true` | Enable the session grant type |
-| `OAUTH_GRANTS_AUTHORIZATION_CODE_ENABLED` | `true` | Enable the authorization code grant type |
-| `OAUTH_GRANTS_REFRESH_TOKEN_ENABLED` | `true` | Enable the refresh token grant type |
+| `OAUTH_SESSION_ENABLED` | `true` | Enable the session grant type |
+| `OAUTH_AUTHORIZATION_GRANTS_AUTHORIZATION_CODE_ENABLED` | `true` | Enable the authorization code grant type |
+| `OAUTH_AUTHORIZATION_GRANTS_REFRESH_TOKEN_ENABLED` | `true` | Enable the refresh token grant type |
+| `OAUTH_AUTHORIZATION_GRANTS_CLIENT_CREDENTIALS_ENABLED` | `false` | Enable the client credentials grant type |
+| `OAUTH_AUTHORIZATION_GRANTS_JWT_BEARER_ENABLED` | `false` | Enable the jwt-bearer grant type (RFC 7523) |
+
+Each switch is its module's key — `oauth-session.enabled`, and
+`oauth-authorization.grants.<grant>.enabled` for the others — which the
+template reads before boot, from its own files and the environment, to choose
+the modules. `OAUTH_GRANTS_<GRANT>_ENABLED`, the old names, refuse boot set
+alone or beside the new name at a different value; beside it at the same value,
+they boot.
 
 ### Session
 
 | Variable | Default | Description |
 |---|---|---|
-| `SESSION_SECRET` | — | **Required.** Signs the cookie that *is* the authenticated session, so guessing it forges logins. At least 32 bytes (256 bits) — `openssl rand -hex 32`. Measured **decoded**, same rule as `OAUTH_JWT_SECRET`. |
-| `SESSION_NAME` | `__Host-auth.session` | Session cookie name. The default uses the `__Host-` prefix and therefore requires `SESSION_SECURE=true` and no `SESSION_DOMAIN`. |
-| `SESSION_MAX_AGE` | `3600000` | Session cookie max age in milliseconds. Whole positive number, at most one year (`31536000000`). |
-| `SESSION_SECURE` | `true` | Set `Secure` flag on session cookie |
-| `SESSION_SAME_SITE` | `lax` | `SameSite` attribute (`lax`, `strict`, `none`). `none` **requires** `SESSION_SECURE=true` — browsers drop a `SameSite=None` cookie that is not `Secure`, so boot refuses the combination rather than letting every login fail silently in the client. |
-| `SESSION_DOMAIN` | — | Cookie domain (unset by default) |
+| `SESSION_STORE_SECRET` | — | **Required.** Signs the cookie that *is* the authenticated session, so guessing it forges logins. At least 32 bytes (256 bits) — `openssl rand -hex 32`. Measured **decoded**, same rule as `OAUTH_JWT_SECRET`. |
+| `SESSION_STORE_NAME` | `__Host-auth.session` | Session cookie name. The default uses the `__Host-` prefix and therefore requires `SESSION_STORE_SECURE=true` and no `SESSION_STORE_DOMAIN`. |
+| `SESSION_STORE_MAX_AGE` | `3600000` | Session cookie max age in milliseconds. Whole positive number, at most one year (`31536000000`). |
+| `SESSION_STORE_SECURE` | `true` | Set `Secure` flag on session cookie |
+| `SESSION_STORE_SAME_SITE` | `lax` | `SameSite` attribute (`lax`, `strict`, `none`). `none` **requires** `SESSION_STORE_SECURE=true` — browsers drop a `SameSite=None` cookie that is not `Secure`, so boot refuses the combination rather than letting every login fail silently in the client. |
+| `SESSION_STORE_DOMAIN` | — | Cookie domain (unset by default) |
 | `SESSION_CSRF_TTL_SECONDS` | `7200` | Lifetime of an issued CSRF token, in seconds. Integer, 1–86400; boot fails otherwise (an *empty* value coerces to `0` and would silently disable the token arm). |
-| `SESSION_STORAGE_TYPE` | `redis` | Session store backend: `redis` or `memory`. `memory` is per process and is refused under `CORE_DEPLOYMENT_MODE=multi` like the other in-memory stores (#474) |
-| `SESSION_STORAGE_REDIS_URL` | `redis://localhost:6379` | Redis connection URL for session storage |
-| `SESSION_STORAGE_REDIS_PASSWORD` | — | Redis password for session storage |
+| `SESSION_STORE_STORAGE_TYPE` | `redis` | Session store backend: `redis` or `memory`. `memory` is per process and is refused under `CORE_DEPLOYMENT_MODE=multi` like the other in-memory stores (#474) |
+| `SESSION_STORE_STORAGE_REDIS_URL` | `redis://localhost:6379` | Redis connection URL for session storage |
+| `SESSION_STORE_STORAGE_REDIS_PASSWORD` | — | Redis password for session storage |
 
-If you set `SESSION_SECURE=false` for local HTTP development or set `SESSION_DOMAIN`
-for shared-domain cookies, also set `SESSION_NAME` to a non-`__Host-` value such as
-`auth.sid` — with `SESSION_SECURE=false`, one with no prefix: a `__Secure-` name
-needs `SESSION_SECURE=true` too. The server fails fast when a `__Host-` or
+The cookie and its store are the session store's section, `session-store`; the
+CSRF token's lifetime, the login page and the login's budget are the session
+module's, `session`. `SESSION_<KEY>`, the old names of the `SESSION_STORE_*`
+variables, refuse boot set alone or beside the new name at a different value;
+beside it at the same value, they boot.
+
+If you set `SESSION_STORE_SECURE=false` for local HTTP development or set `SESSION_STORE_DOMAIN`
+for shared-domain cookies, also set `SESSION_STORE_NAME` to a non-`__Host-` value such as
+`auth.sid` — with `SESSION_STORE_SECURE=false`, one with no prefix: a `__Secure-` name
+needs `SESSION_STORE_SECURE=true` too. The server fails fast when a `__Host-` or
 `__Secure-` cookie name is combined with attributes that browsers reject for that
-prefix (in any case), on a `SESSION_NAME` that is not a cookie name (an RFC 6265
-token: no space, `;` or other separator), and on a `SESSION_DOMAIN` that is not a
+prefix (in any case), on a `SESSION_STORE_NAME` that is not a cookie name (an RFC 6265
+token: no space, `;` or other separator), and on a `SESSION_STORE_DOMAIN` that is not a
 host name (a scheme, a port or a path).
 
 #### CSRF on `/session/login` and `/session/logout`
@@ -445,7 +460,7 @@ Both routes accept a request carrying **either** a same-origin (or trusted)
 `Origin` / `Referer`, **or** a valid double-submit CSRF token, and reject one
 carrying neither (#272). Browsers satisfy this automatically; a scripted client
 calls `GET /session/csrf` first and sends the returned `csrf_token` back as
-both the `<SESSION_NAME>.csrf` cookie and an `x-csrf-token` header (or a
+both the `<SESSION_STORE_NAME>.csrf` cookie and an `x-csrf-token` header (or a
 `csrf_token` form field).
 
 Two configuration notes:
@@ -621,7 +636,7 @@ with `401` and `WWW-Authenticate: Bearer error="invalid_token"` (or `403` and
 `error="insufficient_scope"`). The one token goes to every Store URL above, so
 those endpoints must be one trust domain. With `CLIENT_USER_TYPE=http` — this
 template's default — boot fails if the token is weaker than 32 bytes
-(measured like `SESSION_SECRET`), malformed, or exported but empty; it appears
+(measured like `SESSION_STORE_SECRET`), malformed, or exported but empty; it appears
 in no error this server throws. With that challenge, a token the Store does not
 accept is an outage on every Store call: logins answer
 `503 temporarily_unavailable` and log an error naming the refused credential,
@@ -814,7 +829,7 @@ user agent that sends neither `Origin` nor `Referer` echoes the token
 include it, since it counts only when neither is sent. The package README has
 the rule.
 
-**The login page** is the one `ENDPOINTS_LOGIN_URL` names, reached with
+**The login page** is the one `SESSION_LOGIN_PAGE_URL` names, reached with
 `redirect_to=<the connect link>`; it signs the user in and navigates back to
 that link unchanged, as it does for `/oauth/authorize`. Do not submit the link
 to `POST /session/login` as its `redirect_to`: that route's exact-match
@@ -850,8 +865,8 @@ Use values that include the deployment name, for example `tenant-a:ss:`,
 
 | Variable | Default | Description |
 |---|---|---|
-| `ENDPOINTS_LOGIN_URL` | `/login` | URL of the login page (for redirects) |
-| `ENDPOINTS_CONSENT_URL` | `/consent` | URL of the consent page a client that is not first-party is routed through, with `?challenge=<id>` (#527) |
+| `SESSION_LOGIN_PAGE_URL` | `/login` | URL of the login page (for redirects) |
+| `OAUTH_CONSENT_PAGE_URL` | `/consent` | URL of the consent page a client that is not first-party is routed through, with `?challenge=<id>` (#527) |
 
 There is no deployment-wide client or callback URL: federation callback URLs
 are configured per federation (`FEDERATIONS_GOOGLE_CALLBACK_URL`,
@@ -861,7 +876,7 @@ are configured per federation (`FEDERATIONS_GOOGLE_CALLBACK_URL`,
 
 [`src/buildModules.mts`](src/buildModules.mts) is the single source of truth for which modules are composed and in what order — read it rather than a copy of it. The boot planner resolves `requires` / `provides` topologically, but it mounts routes and middleware in list order unless a module declares `before` / `after` — so position matters for anything that mounts. These are the rules to keep when you edit the list:
 
-1. **`sessionStoreModuleFor(config)` stays first.** It mounts the `express-session` middleware and declares no `before` / `after`, so its position in the list is what puts it ahead of every route that reads `req.session`. It is built from `config` so that `session.storage.type = "memory"` declares itself replica-unsafe.
+1. **`sessionStoreModuleFor(config)` stays first.** It mounts the `express-session` middleware and declares no `before` / `after`, so its position in the list is what puts it ahead of every route that reads `req.session`. It is built from `config` so that `session-store.storage.type = "memory"` declares itself replica-unsafe.
 2. **Under `/oauth`, the order does not matter.** `federationGrantsModules` (while federation grants are enabled), `oauthModule` and any module of your own may all mount routes under `/oauth`. `oauthModule`'s router parses the bodies of its own routes only, so each module's requests reach its own parsers whatever the list order — provided every module under `/oauth` parses its own body and scopes its parsers to exactly its own paths, as the shipped ones do — a route (`router.all(path, parser)` or the route's own handler list), not `router.use(path, parser)`, which matches every path beneath `path` as well. The federation grants browser half orders itself after the session middleware with its own `after`.
 3. **One module per store slot.** Each adapter switch — `federationTokenStore.type`, `userSessionStores.adapter`, `rateLimiter.adapter`, `oauth.code.adapter`, `accessTokenDenylist.adapter`, `replaySeenSet.adapter`, `consentStore.adapter`, and the two federation-grant store switches — picks one of a memory / Redis pair. Both provide the same slot, so wiring both is a boot-time slot collision. `consentStore.adapter = "none"` wires neither, and the federation-grant stores are wired only while the feature is enabled.
 4. **The shared Redis connection comes with the first Redis-backed module.** `standaloneRedisClientsModule` opens the one ioredis connection every Redis adapter here uses, from its own section (`refreshTokenFamilyStore.redis`), and is added whenever a composed module needs one. The refresh-token family store is on Redis in the shipped composition, so a deployment always has it; the in-memory family store is a test override (`overrides.refreshTokenFamilyModules`).
@@ -905,11 +920,11 @@ make test
 The `docker-compose.yml` starts the auth server together with a Redis container. Configure environment variables in `.env`.
 
 `docker-compose.yml` is a **development** file: it builds the `develop` target and bind-mounts `./src` and `./config`, so deploying it ships a hot-reload server running your working tree. The deployable shape is
-[`docker-compose.production.yml`](docker-compose.production.yml) — `runtime` target, no source mounts, restart policies, a network-internal persistent Redis, and a **required** `.env` (a boot without a real `SESSION_SECRET` must fail loudly). Its header comments state what it deliberately leaves to you: TLS termination in front, and the [multi-replica](#multi-replica-deployments) steps before any `--scale`.
+[`docker-compose.production.yml`](docker-compose.production.yml) — `runtime` target, no source mounts, restart policies, a network-internal persistent Redis, and a **required** `.env` (a boot without a real `SESSION_STORE_SECRET` must fail loudly). Its header comments state what it deliberately leaves to you: TLS termination in front, and the [multi-replica](#multi-replica-deployments) steps before any `--scale`.
 
 `HTTP_TRUST_PROXY` is an explicit `${HTTP_TRUST_PROXY:?…}` entry there, so `docker compose up` **refuses to start** until you name the hop in `.env`. That is deliberate: there is no address the file could default to that would not silently trust a hop you never chose, and without the variable the Secure cookie the file pins is never set, the CSRF origin check 403s every browser POST, and every IP-keyed rate limit shares one bucket.
 
-Every store whose records must outlive one process is named in that file's `environment:` block rather than inherited — including `USER_SESSION_STORES_ADAPTER=redis`, which has to travel with `SESSION_STORAGE_TYPE=redis`. `CORE_DEPLOYMENT_MODE=single` will not tell you when it does not: the replica guard answers "can these stores be shared", not "do these two stores have the same lifetime". Split them and a restart leaves every browser holding a surviving express-session that still reads `isAuthenticated` with no `UserSession` behind it — `/authorize` bounces to login, the cookie bounces it back, and the loop clears only when the user deletes the cookie.
+Every store whose records must outlive one process is named in that file's `environment:` block rather than inherited — including `USER_SESSION_STORES_ADAPTER=redis`, which has to travel with `SESSION_STORE_STORAGE_TYPE=redis`. `CORE_DEPLOYMENT_MODE=single` will not tell you when it does not: the replica guard answers "can these stores be shared", not "do these two stores have the same lifetime". Split them and a restart leaves every browser holding a surviving express-session that still reads `isAuthenticated` with no `UserSession` behind it — `/authorize` bounces to login, the cookie bounces it back, and the loop clears only when the user deletes the cookie.
 
 ```bash
 # The signing keys are a required input: EdDSA is the default and there is no
@@ -941,9 +956,9 @@ a working copy is the same as one built from a clean checkout. Compose refuses
 to start until the file exists. Run the image some other way and you mount it
 and set `CLIENT_PATH` yourself.
 
-The production file also pins `SESSION_SECURE=true` and the `__Host-` cookie
+The production file also pins `SESSION_STORE_SECURE=true` and the `__Host-` cookie
 name in its `environment:` block, which wins over `env_file`. `.env.example`
-ships `SESSION_SECURE=false` so that a plain-HTTP compose run (`make dev`) does
+ships `SESSION_STORE_SECURE=false` so that a plain-HTTP compose run (`make dev`) does
 not trip the `__Host-` cookie check, and this file requires that same `.env` — behind the TLS it assumes, a non-Secure session
 cookie is the session handed to anyone who can read one plaintext hop.
 

@@ -33,14 +33,6 @@ import { makeValidAppConfig } from "#/testing/fixtures/valid-config.mjs";
 /** Every boolean in `AppConfigSchema` that a `${?VAR}` can reach. */
 const ENV_OVERRIDABLE_BOOLEANS = [
 	{
-		key: "session.secure",
-		envVar: "SESSION_SECURE",
-		set: (config: Record<string, unknown>, value: unknown) => {
-			(config.session as Record<string, unknown>).secure = value;
-		},
-		read: (parsed: Record<string, unknown>) => (parsed.session as Record<string, unknown>).secure,
-	},
-	{
 		key: "oauth.jwt.legacyTypAccept",
 		envVar: "OAUTH_JWT_LEGACY_TYP_ACCEPT",
 		set: (config: Record<string, unknown>, value: unknown) => {
@@ -170,21 +162,6 @@ describe("every env-overridable boolean uses one coercion path", () => {
 			});
 		});
 	}
-
-	it("still refuses sameSite=none with a coerced secure=false", () => {
-		// The sameSite=none guard reads the COERCED value, so it has to keep
-		// firing for the string form an env var actually delivers.
-		const config = makeValidAppConfig() as unknown as Record<string, unknown>;
-		const session = config.session as Record<string, unknown>;
-		session.secure = "false";
-		session.sameSite = "none";
-		const result = AppConfigSchema.safeParse(config);
-		expect(result.success).toBe(false);
-		if (result.success) return;
-		expect(result.error.issues.map((issue) => issue.message).join("\n")).toMatch(
-			/SESSION_SECURE=true/,
-		);
-	});
 
 	it("leaves an omitted optional boolean undefined rather than defaulting it", () => {
 		// The defaults live in reference.conf (ADR 2026-04-30), so the schema

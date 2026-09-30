@@ -140,6 +140,10 @@ afterEach(async () => {
 	current = undefined;
 });
 
+/** The session cookie's name: the session store's `session-store.name`, which core's type does not name. */
+const sessionCookieName = (config: unknown): string =>
+	(config as { "session-store": { name: string } })["session-store"].name;
+
 /** The `mfa` section a configuration carries: the MFA module's, which core's type does not name. */
 const mfaOf = (config: unknown): Record<string, unknown> | undefined =>
 	(config as { mfa?: Record<string, unknown> }).mfa;
@@ -804,7 +808,9 @@ describe("a password login both requirements interrupt, resumed through each", (
 		expect(first.body).toEqual(FIXTURE_INTERRUPTION.bare.body);
 		// Answered as the login answers an interruption (the session package's
 		// answerInterruption): a fresh CSRF token beside the 403.
-		expect(cookiesOf(first).some((c) => c.startsWith(`${config.session.name}.csrf=`))).toBe(true);
+		expect(cookiesOf(first).some((c) => c.startsWith(`${sessionCookieName(config)}.csrf=`))).toBe(
+			true,
+		);
 		expect(ceremonies.map((c) => c.requirement)).toEqual(["fixture-page", "fixture-bare"]);
 		const atFirst = ceremonies[1];
 		expect(atFirst?.continuation).toMatchObject({
@@ -904,7 +910,7 @@ describe("a password login the mfa requirement interrupts, through the template'
 		});
 		const transaction = await mfaTransactionStore.get(login.body.transaction as string);
 		// The session the browser now holds: express-session signs it `s:<id>.<signature>`.
-		const cookie = cookiesOf(login).find((c) => c.startsWith(`${config.session.name}=`));
+		const cookie = cookiesOf(login).find((c) => c.startsWith(`${sessionCookieName(config)}=`));
 		const signed = decodeURIComponent((cookie ?? "").split(";")[0]?.split("=")[1] ?? "");
 		expect(signed.startsWith("s:")).toBe(true);
 		expect(transaction).toMatchObject({

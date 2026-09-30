@@ -116,13 +116,13 @@ function makeDeps(
 				? mockConfig
 				: ({
 						...(mockConfig as unknown as Record<string, unknown>),
-						oauth: {
-							...(mockConfig as unknown as { oauth: Record<string, unknown> }).oauth,
-							// `dispatch-policy` is required by CoreConfigSchema and comes
-							// from reference.conf in a real deployment. Restated here so
-							// the stub stays a shape the schema would accept.
+						core: {
+							...(mockConfig as unknown as { core?: Record<string, unknown> }).core,
+							// `dispatchPolicy` is required by core's schema and comes from
+							// reference.conf in a real deployment. Restated here so the
+							// stub stays a shape the schema would accept.
 							tokenBinding: {
-								"dispatch-policy": "intent-explicit",
+								dispatchPolicy: "intent-explicit",
 								bindConfidentialClientRefreshTokens: options.bindConfidentialClientRefreshTokens,
 							},
 						},
@@ -399,7 +399,7 @@ describe("confidential-client RT binding — opt-in, authorization_code", () => 
 	});
 
 	it("binds exactly when core's resolveTokenBindingSettings says so: the setting is core's", async () => {
-		const base = mockConfig as unknown as { oauth: Record<string, unknown> };
+		const base = mockConfig as unknown as { core?: Record<string, unknown> };
 		for (const tokenBinding of [
 			undefined,
 			{},
@@ -407,11 +407,11 @@ describe("confidential-client RT binding — opt-in, authorization_code", () => 
 			{ bindConfidentialClientRefreshTokens: false },
 			// A configuration built by hand, which no schema coerced.
 			{ bindConfidentialClientRefreshTokens: "true" },
-			{ "dispatch-policy": "strict-mutual-exclusion", bindConfidentialClientRefreshTokens: true },
+			{ dispatchPolicy: "strict-mutual-exclusion", bindConfidentialClientRefreshTokens: true },
 		]) {
 			const config = {
 				...base,
-				oauth: { ...base.oauth, ...(tokenBinding === undefined ? {} : { tokenBinding }) },
+				core: { ...base.core, ...(tokenBinding === undefined ? {} : { tokenBinding }) },
 			} as unknown as GrantDependencies["config"];
 			const { result } = await createAuthorizationGrant({
 				...makeDeps(vi.fn().mockResolvedValue({ ...validCode })),

@@ -28,16 +28,26 @@ export type CoreRelocations = Pick<ModuleSection, "relocatedFrom" | "renamedVari
 
 /**
  * Core's shipped declaration, frozen with every map and entry it holds: the
- * replica count and the expected session requirements moved into `core`, and
- * `DEPLOYMENT_MODE` renamed with the first. A variable binds
- * `core.deployment.mode` alone: the rest of `deployment`, and the expected
- * session requirements, have none.
+ * replica count, the expected session requirements and the token-binding
+ * settings moved into `core`, with the variables bound to them renamed. A
+ * variable binds `core.deployment.mode` and the two token-binding keys alone:
+ * the rest of `deployment` and `tokenBinding`, and the expected session
+ * requirements, have none.
  */
 export const CORE_RELOCATIONS: CoreRelocations = Object.freeze({
 	relocatedFrom: Object.freeze({
 		deployment: Object.freeze({ to: "deployment", environmentVariable: null }),
 		"deployment.mode": "deployment.mode",
 		sessionRequirements: Object.freeze({ to: "sessionRequirements", environmentVariable: null }),
+		"oauth.tokenBinding": Object.freeze({ to: "tokenBinding", environmentVariable: null }),
+		"oauth.tokenBinding.dispatch-policy": "tokenBinding.dispatchPolicy",
+		"oauth.tokenBinding.bindConfidentialClientRefreshTokens":
+			"tokenBinding.bindConfidentialClientRefreshTokens",
 	}),
-	renamedVariables: Object.freeze({ DEPLOYMENT_MODE: "deployment.mode" }),
+	renamedVariables: Object.freeze({
+		DEPLOYMENT_MODE: "deployment.mode",
+		OAUTH_TOKEN_BINDING_DISPATCH_POLICY: "oauth.tokenBinding.dispatch-policy",
+		OAUTH_TOKEN_BINDING_BIND_CONFIDENTIAL_CLIENT_REFRESH_TOKENS:
+			"oauth.tokenBinding.bindConfidentialClientRefreshTokens",
+	}),
 });

@@ -62,7 +62,7 @@ const makeCoreConfig = (failMode: "open" | "closed" = "open") => {
 	return {
 		...base,
 		oauth: { ...base.oauth, jwt: { ...base.oauth.jwt, issuer: "https://test.example" } },
-		rateLimit: { ...base.rateLimit, failMode },
+		rateLimit: { failMode },
 	};
 };
 

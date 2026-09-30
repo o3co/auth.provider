@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
-import { type AcrTable, type Logger, readAcrTable } from "@o3co/auth-provider-core";
+import { type AcrTable, readAcrTable } from "@o3co/auth-provider-core";
 import { type ResolvedPkceOptions, resolvePkceOptions } from "./grants/pkce.mjs";
 
 /**
@@ -108,7 +108,6 @@ type OAuthConfigShape = {
 	requireGrantTypeAllowlist?: boolean;
 	// `authorize` is deliberately absent, so a stale `allowUnmarkedClients`
 	// stays inert; `acrValues` is read through its own cast below.
-	grants?: Record<string, Record<string, unknown> | undefined>;
 	nonce?: { maxLength?: number };
 	resourceIndicator?: { enabled?: boolean };
 	clientIdMetadataDocuments?: {
@@ -160,33 +159,23 @@ const positiveIntOrUndefined = (value: unknown): number | undefined => {
  * - `nonce.maxLength` falls back to `256`;
  * - `legacyTypAccept` stays `undefined` when absent (consumers default it);
  * - `pkce` is fixed policy, not a knob: `resolvePkceOptions` returns
- *   required + S256-only whatever the config says, and warns about the keys
- *   that no longer do anything;
+ *   required + S256-only;
  * - `acrValues` is the configured table, or an empty one, read by core's
  *   `readAcrTable` — the one reading, which discovery shares. It has no
  *   prototype, because an `acr_values` an unauthenticated caller chooses is
  *   used as a key into it: on a plain object a request asking for
  *   `constructor` would read `Object`.
- *
- * The optional `logger` receives the `resolvePkceOptions` inert-config
- * warning, once at boot rather than once per `/authorize` request.
  */
 
-export const resolveOAuthOptions = (config: unknown, logger?: Logger): ResolvedOAuthOptions => {
+export const resolveOAuthOptions = (config: unknown): ResolvedOAuthOptions => {
 	const oauth = (config as { oauth?: OAuthConfigShape } | undefined)?.oauth;
-
-	// Read the pkce block only to report what is now inert in it.
-	// `oauth.grants` is `z.object({}).passthrough()` in the schema, so even a
-	// schema-validated tree is untyped from here down.
-	const authorizationConfig = oauth?.grants?.authorization_code;
-	const pkceConfig = authorizationConfig?.pkce as Record<string, unknown> | undefined;
 
 	return {
 		issuer: oauth?.jwt?.issuer,
 		legacyTypAccept: oauth?.jwt?.legacyTypAccept,
 		oidcMode: oauth?.oidcMode ?? "oidc-required",
 		requireEmailVerified: oauth?.requireEmailVerified === true,
-		pkce: resolvePkceOptions(pkceConfig, logger),
+		pkce: resolvePkceOptions(),
 		nonceMaxLength: oauth?.nonce?.maxLength ?? 256,
 		resourceIndicatorEnabled: oauth?.resourceIndicator?.enabled === true,
 		acrValues: readAcrTable(

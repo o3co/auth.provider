@@ -88,7 +88,7 @@ const baseConfig: AppConfig = {
 		oidcMode: "oidc-required",
 		code: { adapter: "memory" as const },
 	},
-	session: {
+	"session-store": {
 		secret: "test-session-secret.at-least-32-bytes.ok",
 		name: "auth.sid",
 		maxAge: 3600000,
@@ -97,17 +97,17 @@ const baseConfig: AppConfig = {
 		domain: null,
 		storage: { type: "memory", redis: { url: "redis://localhost:6379" } },
 	},
-	rateLimit: {
-		login: { windowMs: 60000, limit: 10 },
-		failMode: "open",
+	session: {
+		loginPage: { url: "/login" },
+		rateLimit: { login: { windowMs: 60000, limit: 10 } },
 	},
+	rateLimit: { failMode: "open" },
 	federations: { google: { enabled: false } },
 	repositories: {
 		client: { type: "yaml", path: "./config/clients.yaml" },
 		user: { type: "yaml", path: "./config/users.yaml", timeout: 5000 },
 		code: { type: "memory", defaultExpiresIn: 600 },
 	},
-	endpoints: { login: { url: "/login" } },
 	cors: { allowedOrigins: [] },
 	audit: { sink: { type: "logger" } },
 };

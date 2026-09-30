@@ -87,8 +87,8 @@ const config: AppConfig = {
 		// fallback would also pick memory, but with a deprecation warning.
 		code: { adapter: "memory" as const },
 	},
-	session: {
-		// `session.secret` carries a 256-bit entropy floor.
+	"session-store": {
+		// `session-store.secret` carries a 256-bit entropy floor.
 		secret: "test-session-secret.at-least-32-bytes.ok",
 		name: "auth.sid",
 		maxAge: 3600000,
@@ -97,10 +97,11 @@ const config: AppConfig = {
 		domain: null,
 		storage: { type: "memory", redis: { url: "redis://localhost:6379" } },
 	},
-	rateLimit: {
-		login: { windowMs: 60000, limit: 10 },
-		failMode: "open",
+	session: {
+		loginPage: { url: "/login" },
+		rateLimit: { login: { windowMs: 60000, limit: 10 } },
 	},
+	rateLimit: { failMode: "open" },
 	federations: {
 		google: { enabled: false },
 	},
@@ -108,9 +109,6 @@ const config: AppConfig = {
 		client: { type: "yaml", path: "./config/clients.yaml" },
 		user: { type: "yaml", path: "./config/users.yaml", timeout: 5000 },
 		code: { type: "memory", defaultExpiresIn: 600 },
-	},
-	endpoints: {
-		login: { url: "/login" },
 	},
 	cors: { allowedOrigins: [] },
 };

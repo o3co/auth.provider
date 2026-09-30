@@ -21,7 +21,7 @@
  * `mtls.enabled` (off by default in reference.conf), built from its own
  * section, `mtls {}`, parsed with {@link mtlsConfigSchema} before any factory
  * runs. A key still written at `oauth.mtls`, the section's old path, refuses
- * boot naming the new one. The settings under `oauth.tokenBinding`, the
+ * boot naming the new one. The settings under `core.tokenBinding`, the
  * dispatch policy among them, are core's.
  *
  * Secure defaults: the certificate comes from the TLS layer
@@ -178,7 +178,7 @@ const fullPkiOption = (
  * Declarative manifest for the mTLS package. Disabled (the default), the
  * mechanism factory returns `null` and core leaves it out; enabled, core
  * composes it with any other binding mechanisms under
- * `oauth.tokenBinding.dispatch-policy` (see
+ * `core.tokenBinding.dispatchPolicy` (see
  * `packages/core/docs/adr/2026-05-20-token-binding-first-class-abstraction.md`).
  *
  * Boot refuses:

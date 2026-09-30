@@ -10,7 +10,7 @@
 
 /**
  * The Redis session store's two libraries, `redis` and `connect-redis`, are
- * optional peer dependencies: a deployment on `session.storage.type = "memory"`
+ * optional peer dependencies: a deployment on `session-store.storage.type = "memory"`
  * installs neither and boots, and one on `"redis"` that did not install them
  * fails boot with a message naming the missing package and the fix.
  *
@@ -67,7 +67,7 @@ async function run<T>(args: readonly string[], env: Record<string, string>): Pro
 }
 
 const boot = (type: "memory" | "redis", hidden: readonly string[]) =>
-	run<Outcome>([BOOT], { SESSION_STORAGE_TYPE: type, HIDE_PACKAGES: hidden.join(",") });
+	run<Outcome>([BOOT], { SESSION_STORE_STORAGE_TYPE: type, HIDE_PACKAGES: hidden.join(",") });
 
 /** How `require` and `import` each fare with `redis` hidden, and with `connect-redis` not. */
 const PROBE = `
@@ -147,7 +147,7 @@ describe("the Redis session store's libraries are optional peers", () => {
 					expect(outcome.booted).toBe(false);
 					if (outcome.booted) return;
 					const missing = hidden.map((name) => `"${name}"`).join(" and ");
-					expect(outcome.message).toContain('session.storage.type is "redis"');
+					expect(outcome.message).toContain('session-store.storage.type is "redis"');
 					expect(outcome.message).toContain(
 						`${missing} ${hidden.length === 1 ? "is" : "are"} not installed`,
 					);

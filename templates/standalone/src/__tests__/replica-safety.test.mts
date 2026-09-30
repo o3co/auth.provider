@@ -137,11 +137,11 @@ const ALL_REDIS_ENV: Readonly<Record<string, string>> = {
 	OAUTH_JWT_ALGORITHM: "HS256",
 	OAUTH_JWT_SECRET: "replica-safety-test-secret.at-least-32-bytes.ok",
 	OAUTH_JWT_ISSUER: "https://auth.test",
-	SESSION_SECRET: "replica-safety-session-secret.at-least-32-bytes.ok",
-	SESSION_SECURE: "false",
-	SESSION_NAME: "auth.session",
-	SESSION_STORAGE_TYPE: "redis",
-	SESSION_STORAGE_REDIS_URL: "redis://redis.test:6379",
+	SESSION_STORE_SECRET: "replica-safety-session-secret.at-least-32-bytes.ok",
+	SESSION_STORE_SECURE: "false",
+	SESSION_STORE_NAME: "auth.session",
+	SESSION_STORE_STORAGE_TYPE: "redis",
+	SESSION_STORE_STORAGE_REDIS_URL: "redis://redis.test:6379",
 	CLIENT_USER_TYPE: "yaml",
 	CORE_DEPLOYMENT_MODE: "multi",
 	REFRESH_TOKEN_FAMILY_STORE_REDIS_URL: "redis://redis.test:6379",
@@ -239,7 +239,7 @@ describe('the standalone\'s memory modules are refused under core.deployment.mod
 		["FEDERATION_TOKEN_STORE_TYPE", "standalone-in-memory-federation-token-store"],
 		// express-session's own store. Not a module of this template but
 		// built here from its config, which is what lets the manifest declare.
-		["SESSION_STORAGE_TYPE", "session-store"],
+		["SESSION_STORE_STORAGE_TYPE", "session-store"],
 		// The consent store, wired only when the switch says so.
 		["CONSENT_STORE_ADAPTER", "core-consent-store-memory"],
 		// Core's, selected by the same kind of switch.
@@ -266,7 +266,7 @@ describe('the standalone\'s memory modules are refused under core.deployment.mod
 			USER_SESSION_STORES_ADAPTER: "memory",
 			OAUTH_CODE_ADAPTER: "memory",
 			FEDERATION_TOKEN_STORE_TYPE: "memory",
-			SESSION_STORAGE_TYPE: "memory",
+			SESSION_STORE_STORAGE_TYPE: "memory",
 			RATE_LIMITER_ADAPTER: "memory",
 			ACCESS_TOKEN_DENYLIST_ADAPTER: "memory",
 			REPLAY_SEEN_SET_ADAPTER: "memory",

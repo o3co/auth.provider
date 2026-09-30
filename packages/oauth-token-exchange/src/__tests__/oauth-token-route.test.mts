@@ -34,7 +34,7 @@ import {
 	memoryRefreshTokenFamilyStoreModule,
 	type PublicClient,
 } from "@o3co/auth-provider-core";
-import { makeValidAppConfig } from "@o3co/auth-provider-core/testing";
+import { makeValidAppConfig, renamedVariableCaptures } from "@o3co/auth-provider-core/testing";
 import { oauthModule } from "@o3co/auth-provider-oauth";
 import express from "express";
 import { decodeJwt } from "jose";
@@ -124,19 +124,31 @@ describe("token exchange through oauthModule's POST /oauth/token", () => {
 		extra: ReadonlyArray<ReturnType<typeof defineModule>> = [],
 	): Promise<express.Express> {
 		const config = makeConfig();
+		const modules = [
+			...extra,
+			oauthModule({ config }),
+			tokenExchangeModule,
+			memoryRefreshTokenFamilyStoreModule,
+			defaultRefreshTokenFamilyRevocationModule,
+			// The exchange requires an issuer, and with one configured the
+			// discovery document needs the `jwks_uri` this module contributes.
+			jwksModule,
+			deploymentProviders,
+		];
 		handle = await createApp({
-			modules: [
-				...extra,
-				oauthModule({ config }),
-				tokenExchangeModule,
-				memoryRefreshTokenFamilyStoreModule,
-				defaultRefreshTokenFamilyRevocationModule,
-				// The exchange requires an issuer, and with one configured the
-				// discovery document needs the `jwks_uri` this module contributes.
-				jwksModule,
-				deploymentProviders,
-			],
-			bootstrapComponents: { config, pathResolver: (s: string) => s },
+			modules,
+			bootstrapComponents: {
+				// What a resolution of the modules' references under an empty
+				// environment captures of the variables they declare renamed.
+				config: {
+					...config,
+					"renamed-variables": {
+						...(config as { "renamed-variables"?: object })["renamed-variables"],
+						...renamedVariableCaptures({ modules, env: {} }),
+					},
+				},
+				pathResolver: (s: string) => s,
+			},
 		});
 		const app = express();
 		app.use(handle.router);

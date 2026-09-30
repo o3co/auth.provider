@@ -16,7 +16,6 @@
 
 import { describe, expect, it } from "vitest";
 import { resolveOAuthOptions } from "#/resolveOAuthOptions.mjs";
-import { createMockLogger } from "./_helpers/mockLogger.mjs";
 
 describe("resolveOAuthOptions", () => {
 	it("carries every knob through from a schema-validated config", () => {
@@ -102,26 +101,18 @@ describe("resolveOAuthOptions", () => {
 		expect(resolveOAuthOptions({ oauth: { jwt: { issuer: "" } } }).issuer).toBe("");
 	});
 
-	it("ignores the legacy pkce knobs requireS256 and supportedMethods and warns through the given logger", () => {
-		const logger = createMockLogger();
-		const options = resolveOAuthOptions(
-			{
-				oauth: {
-					grants: {
-						authorization_code: {
-							pkce: { requireS256: false, supportedMethods: ["S256", "plain"] },
-						},
+	it("resolves PKCE to required and S256 alone, whatever the configuration carries", () => {
+		const options = resolveOAuthOptions({
+			oauth: {
+				grants: {
+					authorization_code: {
+						pkce: { requireS256: false, supportedMethods: ["S256", "plain"] },
 					},
 				},
 			},
-			logger,
-		);
+		});
 
 		expect(options.pkce).toEqual({ required: true, supportedMethods: ["S256"] });
-		expect(logger.warn).toHaveBeenCalledWith(
-			expect.objectContaining({ ignoredKeys: ["requireS256", "supportedMethods"] }),
-			"pkce_config_ignored_s256_is_mandatory",
-		);
 	});
 });
 

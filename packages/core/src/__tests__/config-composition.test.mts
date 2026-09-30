@@ -20,7 +20,6 @@ import {
 	AppConfigSchema,
 	CoreConfigSchema,
 	composeConfigSchema,
-	fullSectionsSchema,
 } from "#/config/application.schema.mjs";
 import { createKeyStoreFactory, registerBuiltinKeyStores } from "#/keys/factory.mjs";
 
@@ -193,55 +192,6 @@ describe("composeConfigSchema", () => {
 	it("returns CoreConfigSchema when no modules are provided", () => {
 		const composed = composeConfigSchema([]);
 		const result = composed.safeParse(minimalCoreConfig);
-		expect(result.success).toBe(true);
-	});
-});
-
-describe("fullSectionsSchema endpoints optionality", () => {
-	it("accepts endpoints with only login (no client or authCallback)", () => {
-		const endpointsOnlyLogin = {
-			endpoints: {
-				login: { url: "/login" },
-			},
-		};
-		const schema = fullSectionsSchema.pick({ endpoints: true });
-		const result = schema.safeParse(endpointsOnlyLogin);
-		expect(result.success).toBe(true);
-	});
-
-	it("strips the endpoints fields the schema does not declare (client / authCallback)", () => {
-		const endpointsWithDeadFields = {
-			endpoints: {
-				login: { url: "/login" },
-				client: { url: "http://localhost:3001" },
-				authCallback: { url: "/auth/callback" },
-			},
-		};
-		const schema = fullSectionsSchema.pick({ endpoints: true });
-		const result = schema.safeParse(endpointsWithDeadFields);
-		expect(result.success).toBe(true);
-		// client/authCallback are not in the schema, so they are stripped.
-		if (result.success) {
-			expect((result.data.endpoints as Record<string, unknown>).client).toBeUndefined();
-			expect((result.data.endpoints as Record<string, unknown>).authCallback).toBeUndefined();
-		}
-	});
-
-	it("accepts rateLimit + endpoints without client or authCallback", () => {
-		const sessionModuleConfig = {
-			rateLimit: {
-				login: { windowMs: 60000, limit: 10 },
-				failMode: "open" as const,
-			},
-			endpoints: {
-				login: { url: "/login" },
-			},
-		};
-		const sessionConfigSchema = fullSectionsSchema.pick({
-			rateLimit: true,
-			endpoints: true,
-		});
-		const result = sessionConfigSchema.safeParse(sessionModuleConfig);
 		expect(result.success).toBe(true);
 	});
 });

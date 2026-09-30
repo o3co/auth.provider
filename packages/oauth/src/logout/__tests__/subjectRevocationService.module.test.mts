@@ -24,6 +24,8 @@
 
 import {
 	type AuditEvent,
+	BootError,
+	createApp,
 	createInMemorySubjectRevocation,
 	createInMemorySubjectSessionIndex,
 	createMemoryFederationGrantStore,
@@ -33,8 +35,11 @@ import {
 	type SubjectRevocationService,
 } from "@o3co/auth-provider-core";
 import {
+	CORE_RELOCATIONS,
 	createTestOAuthTokenSettings,
 	createTestSessionCookiePolicy,
+	makeValidCoreConfig,
+	renamedVariableCaptures,
 } from "@o3co/auth-provider-core/testing";
 import { describe, expect, it, vi } from "vitest";
 import { subjectRevocationServiceModule } from "../subjectRevocationService.mjs";
@@ -43,9 +48,11 @@ const HOUR = 3_600_000;
 
 const config = (over: Record<string, unknown> = {}) => ({
 	oauth: { accessToken: { expiresIn: 300 }, refreshToken: { expiresIn: 86_400 } },
-	session: { maxAge: 24 * HOUR },
 	...over,
 });
+
+/** The session store's slot: a session lives a day. */
+const sessionCookiePolicy = createTestSessionCookiePolicy({ maxAgeMs: 24 * HOUR });
 
 /** Every store `cascadeLogout` fans out to, each one a spy that succeeds. */
 const cascadeStores = () => ({
@@ -66,6 +73,7 @@ const build = (over: Record<string, unknown> = {}): SubjectRevocationService => 
 	};
 	return provides.subjectRevocationService({
 		config: config(),
+		sessionCookiePolicy,
 		...cascadeStores(),
 		subjectSessionIndex: createInMemorySubjectSessionIndex(),
 		subjectRevocation: createInMemorySubjectRevocation(),
@@ -118,6 +126,7 @@ describe("subjectRevocationServiceModule", () => {
 		// what a deployment that declared the capability absent lives with.
 		const { subjectRevocation: _absent, ...withoutBoundary } = {
 			config: config(),
+			sessionCookiePolicy,
 			...cascadeStores(),
 			subjectSessionIndex: createInMemorySubjectSessionIndex(),
 			subjectRevocation: createInMemorySubjectRevocation(),
@@ -137,6 +146,7 @@ describe("subjectRevocationServiceModule", () => {
 	it("refuses a deployment with grants on and no boundary at all", () => {
 		const { subjectRevocation: _absent, ...withoutBoundary } = {
 			config: enabled(),
+			sessionCookiePolicy,
 			...cascadeStores(),
 			subjectSessionIndex: createInMemorySubjectSessionIndex(),
 			subjectRevocation: createInMemorySubjectRevocation(),
@@ -307,21 +317,63 @@ describe("subjectRevocationServiceModule", () => {
 			return { kept, revocation };
 		};
 
-		it("sizes it from the configuration when the composition holds neither slot", async () => {
+		it("sizes it from the configuration's token lifetimes when the composition holds no oauthTokenSettings", async () => {
 			const { kept, revocation } = recording();
 			await build({ subjectRevocation: revocation }).revokeAllForSubject({ subject: "u-1" });
-			expect(kept).toEqual([resolveSubjectRevocationHorizonMs(config())]);
+			expect(kept).toEqual([
+				resolveSubjectRevocationHorizonMs(config(), { sessionCookie: sessionCookiePolicy }),
+			]);
 		});
 
-		it("sizes it from the session lifetime of the sessionCookiePolicy the composition holds, over session.maxAge", async () => {
+		it("refuses to be built when it is handed no sessionCookiePolicy, naming the slot", () => {
+			expect(() => build({ sessionCookiePolicy: undefined })).toThrow(
+				"no sessionCookiePolicy was handed",
+			);
+		});
+
+		it("refuses a composition that holds no sessionCookiePolicy at planning, naming the module and the slot", async () => {
+			const err = await createApp({
+				modules: [subjectRevocationServiceModule],
+				bootstrapComponents: {
+					config: {
+						...makeValidCoreConfig(),
+						audit: { sink: { type: "none" } },
+						"renamed-variables": renamedVariableCaptures({
+							modules: [subjectRevocationServiceModule],
+							core: CORE_RELOCATIONS,
+							env: {},
+						}),
+					},
+					pathResolver: (s: string) => s,
+					...cascadeStores(),
+				} as never,
+			}).then(
+				async (handle) => {
+					await handle.dispose();
+					return expect.fail("boot should have been refused");
+				},
+				(caught: unknown) => caught as BootError,
+			);
+
+			expect(err).toBeInstanceOf(BootError);
+			expect(err.reason).toBe("missing-required-component");
+			expect(err.message).toContain("sessionCookiePolicy");
+			expect(err.message).toContain("subject-revocation-service");
+		});
+
+		it("sizes it from the session lifetime of the sessionCookiePolicy the composition holds", async () => {
 			const { kept, revocation } = recording();
+			const longer = createTestSessionCookiePolicy({ maxAgeMs: 10 * 24 * HOUR });
 			await build({
 				subjectRevocation: revocation,
-				sessionCookiePolicy: createTestSessionCookiePolicy({ maxAgeMs: 10 * 24 * HOUR }),
-			}).revokeAllForSubject({ subject: "u-1" });
+				sessionCookiePolicy: longer,
+			}).revokeAllForSubject({
+				subject: "u-1",
+			});
 			expect(kept).toEqual([
-				resolveSubjectRevocationHorizonMs(config({ session: { maxAge: 10 * 24 * HOUR } })),
+				resolveSubjectRevocationHorizonMs(config(), { sessionCookie: longer }),
 			]);
+			expect(kept[0]).toBeGreaterThan(10 * 24 * HOUR);
 		});
 
 		it("sizes it from the token lifetimes of the oauthTokenSettings the composition holds, over the configuration's", async () => {
@@ -338,6 +390,7 @@ describe("subjectRevocationServiceModule", () => {
 					config({
 						oauth: { accessToken: { expiresIn: 300 }, refreshToken: { expiresIn: 20 * 86_400 } },
 					}),
+					{ sessionCookie: sessionCookiePolicy },
 				),
 			]);
 		});
@@ -361,15 +414,16 @@ describe("subjectRevocationServiceModule", () => {
 							refreshToken: { expiresIn: 86_400 },
 						},
 					}),
+					{ sessionCookie: sessionCookiePolicy },
 				),
 			]);
 			expect(kept[0]).toBeGreaterThan(30 * 86_400_000);
 		});
 
-		it("lists both slots as optional", () => {
-			expect(subjectRevocationServiceModule.optional).toEqual(
-				expect.arrayContaining(["oauthTokenSettings", "sessionCookiePolicy"]),
-			);
+		it("requires the session store's slot, and lists the oauth module's as optional", () => {
+			expect(subjectRevocationServiceModule.requires).toContain("sessionCookiePolicy");
+			expect(subjectRevocationServiceModule.optional).toContain("oauthTokenSettings");
+			expect(subjectRevocationServiceModule.optional).not.toContain("sessionCookiePolicy");
 		});
 	});
 
@@ -450,8 +504,13 @@ describe("subjectRevocationServiceModule", () => {
 		// those credentials live for is configuration only a module can read.
 		const revocation = createInMemorySubjectRevocation();
 		const stamp = vi.spyOn(revocation, "revokeBefore");
-		const deployment = config({ session: { maxAge: 40 * 24 * HOUR } });
-		const service = build({ config: deployment, subjectRevocation: revocation });
+		const deployment = config();
+		const session = createTestSessionCookiePolicy({ maxAgeMs: 40 * 24 * HOUR });
+		const service = build({
+			config: deployment,
+			sessionCookiePolicy: session,
+			subjectRevocation: revocation,
+		});
 
 		await service.revokeAllForSubject({ subject: "u-1" });
 
@@ -461,7 +520,7 @@ describe("subjectRevocationServiceModule", () => {
 		// the function it calls and would pass whatever that function said.
 		// The second is the property itself: the boundary outlasts the
 		// longest-lived thing this deployment is configured to accept.
-		expect(ttl).toBe(resolveSubjectRevocationHorizonMs(deployment));
+		expect(ttl).toBe(resolveSubjectRevocationHorizonMs(deployment, { sessionCookie: session }));
 		expect(ttl).toBeGreaterThan(40 * 24 * HOUR);
 	});
 

@@ -82,18 +82,18 @@ const mockDeps: RefreshTokenGrantDeps = {
 	sessionRequirementResolver: resolverForTests([], { actions: OAUTH_ADMISSION_ACTIONS }),
 };
 
-/** `mockDeps` with the opt-in `oauth.tokenBinding.bindConfidentialClientRefreshTokens` set. */
+/** `mockDeps` with the opt-in `core.tokenBinding.bindConfidentialClientRefreshTokens` set. */
 const depsWithConfidentialBinding = (enabled: boolean): RefreshTokenGrantDeps => ({
 	...mockDeps,
 	config: {
 		...(mockConfig as unknown as Record<string, unknown>),
-		oauth: {
-			...(mockConfig as unknown as { oauth: Record<string, unknown> }).oauth,
-			// `dispatch-policy` is required by CoreConfigSchema and comes from
+		core: {
+			...(mockConfig as unknown as { core?: Record<string, unknown> }).core,
+			// `dispatchPolicy` is required by core's schema and comes from
 			// reference.conf in a real deployment. Restated here so the stub
 			// stays a shape the schema would accept.
 			tokenBinding: {
-				"dispatch-policy": "intent-explicit",
+				dispatchPolicy: "intent-explicit",
 				bindConfidentialClientRefreshTokens: enabled,
 			},
 		},
@@ -483,7 +483,7 @@ describe("confidential-client RT binding — opt-in", () => {
 	});
 
 	it("binds exactly when core's resolveTokenBindingSettings says so: the setting is core's", async () => {
-		const base = mockConfig as unknown as { oauth: Record<string, unknown> };
+		const base = mockConfig as unknown as { core?: Record<string, unknown> };
 		for (const tokenBinding of [
 			undefined,
 			{},
@@ -491,11 +491,11 @@ describe("confidential-client RT binding — opt-in", () => {
 			{ bindConfidentialClientRefreshTokens: false },
 			// A configuration built by hand, which no schema coerced.
 			{ bindConfidentialClientRefreshTokens: "true" },
-			{ "dispatch-policy": "strict-mutual-exclusion", bindConfidentialClientRefreshTokens: true },
+			{ dispatchPolicy: "strict-mutual-exclusion", bindConfidentialClientRefreshTokens: true },
 		]) {
 			const config = {
 				...base,
-				oauth: { ...base.oauth, ...(tokenBinding === undefined ? {} : { tokenBinding }) },
+				core: { ...base.core, ...(tokenBinding === undefined ? {} : { tokenBinding }) },
 			} as unknown as GrantDependencies["config"];
 			const rt = await mintRefreshToken({ clientId: CONFIDENTIAL_CLIENT_ID });
 			const { result } = await createRefreshTokenGrant({ ...mockDeps, config }).handle(

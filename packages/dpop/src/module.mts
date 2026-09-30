@@ -105,7 +105,7 @@ const configuredIssuer = (config: unknown): unknown =>
  * With `dpop.enabled` false (the default) the mechanism factory
  * returns `null` and core leaves DPoP out of the composed `tokenBindingMw`.
  * With it true, core composes the mechanism alongside any other binding
- * mechanism (mTLS) under `oauth.tokenBinding.dispatch-policy`.
+ * mechanism (mTLS) under `core.tokenBinding.dispatchPolicy`.
  *
  * Every accepted proof is recorded in core's `replaySeenSet` slot, which
  * this module reads and does not fill, so the manifest declares no

@@ -139,13 +139,13 @@ export type DispatchPolicy = "intent-explicit" | "strict-mutual-exclusion";
 
 /**
  * Settings across every mechanism at core's token-binding extension point, from
- * the `oauth.tokenBinding` section. They are core's, as the extension point is,
- * and no slot carries them (not the oauth module's `oauthTokenSettings`, though
- * the section sits in `oauth {}`).
+ * core's own section, `core.tokenBinding`. They are core's, as the extension
+ * point is, and no slot carries them (not the oauth module's
+ * `oauthTokenSettings`).
  */
 export interface TokenBindingSettings {
 	/**
-	 * `dispatch-policy`: how `tokenBindingMw` arbitrates between contributed
+	 * `dispatchPolicy`: how `tokenBindingMw` arbitrates between contributed
 	 * `tokenBindingMechanisms`. `intent-explicit` unless the section says
 	 * `strict-mutual-exclusion`.
 	 */
@@ -160,24 +160,24 @@ export interface TokenBindingSettings {
 
 /**
  * The token-binding settings a configuration declares, frozen: the one reader
- * of `oauth.tokenBinding`, for boot (the dispatch policy) and every grant that
+ * of `core.tokenBinding`, for boot (the dispatch policy) and every grant that
  * mints a refresh token (the confidential-client rule). Takes any value, as
  * boot holds the configuration.
  */
 export function resolveTokenBindingSettings(config: unknown): TokenBindingSettings {
 	const section = (
 		config as {
-			oauth?: {
+			core?: {
 				tokenBinding?: {
-					"dispatch-policy"?: unknown;
+					dispatchPolicy?: unknown;
 					bindConfidentialClientRefreshTokens?: unknown;
 				};
 			};
 		} | null
-	)?.oauth?.tokenBinding;
+	)?.core?.tokenBinding;
 	return Object.freeze({
 		dispatchPolicy:
-			section?.["dispatch-policy"] === "strict-mutual-exclusion"
+			section?.dispatchPolicy === "strict-mutual-exclusion"
 				? "strict-mutual-exclusion"
 				: "intent-explicit",
 		bindConfidentialClientRefreshTokens: section?.bindConfidentialClientRefreshTokens === true,

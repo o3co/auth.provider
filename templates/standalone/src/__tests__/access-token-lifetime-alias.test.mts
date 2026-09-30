@@ -44,7 +44,7 @@ const configDir = fileURLToPath(new URL("../../config", import.meta.url));
 const REQUIRED_ENV = {
 	OAUTH_JWT_SECRET: "access-token-alias.at-least-32-bytes.ok",
 	OAUTH_JWT_ISSUER: "https://auth.test",
-	SESSION_SECRET: "access-token-alias-session.at-least-32-bytes.ok",
+	SESSION_STORE_SECRET: "access-token-alias-session.at-least-32-bytes.ok",
 };
 
 /** The shipped layers, resolved the way `app.mts` resolves them. */

@@ -43,9 +43,9 @@ const makeBoot = (overrides: FullPkiOverrides): BootstrapMap =>
 	({
 		config: {
 			...makeValidCoreConfig(),
-			oauth: {
-				...makeValidCoreConfig().oauth,
-				tokenBinding: { "dispatch-policy": "intent-explicit" },
+			core: {
+				...makeValidCoreConfig().core,
+				tokenBinding: { dispatchPolicy: "intent-explicit" },
 			},
 			mtls: {
 				enabled: true,

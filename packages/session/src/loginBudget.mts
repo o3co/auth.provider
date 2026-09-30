@@ -27,13 +27,13 @@ import {
 export const LOGIN_RATE_LIMIT_PREFIX = "login";
 
 /**
- * `rateLimit.login` (`{ windowMs, limit }`) as a budget, the window rounded up
- * to whole seconds (at least one); `null` when not given. Fields read as the
- * schema coerces them; a value no limiter can apply is a `RangeError` naming
- * `rateLimit.login`.
+ * `session.rateLimit.login` (`{ windowMs, limit }`), read off the session
+ * module's section, as a budget, the window rounded up to whole seconds (at
+ * least one); `null` when not given. Fields read as the schema coerces them;
+ * a value no limiter can apply is a `RangeError` naming the key.
  */
-export function readLoginRateLimitBudget(config: unknown): RateLimitSpec | null {
-	const login = (config as { rateLimit?: { login?: unknown } } | undefined)?.rateLimit?.login;
+export function readLoginRateLimitBudget(section: unknown): RateLimitSpec | null {
+	const login = (section as { rateLimit?: { login?: unknown } } | undefined)?.rateLimit?.login;
 	if (login === undefined) return null;
 	const { windowMs, limit } =
 		typeof login === "object" && login !== null
@@ -46,7 +46,7 @@ export function readLoginRateLimitBudget(config: unknown): RateLimitSpec | null 
 	};
 	if (!isUsableRateLimitSpec(spec)) {
 		throw new RangeError(
-			`rateLimit.login must be { windowMs, limit }: windowMs a positive number of milliseconds and limit a positive whole number, with a window that ends within the Date range (got windowMs ${shownConfigValue(windowMs)}, limit ${shownConfigValue(limit)})`,
+			`session.rateLimit.login must be { windowMs, limit }: windowMs a positive number of milliseconds and limit a positive whole number, with a window that ends within the Date range (got windowMs ${shownConfigValue(windowMs)}, limit ${shownConfigValue(limit)})`,
 		);
 	}
 	return { limit: spec.limit, windowSeconds: spec.windowSeconds };

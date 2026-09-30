@@ -960,7 +960,7 @@ function collectorFor(
  * `tokenBindingMechanisms`) on `/oauth/token` before the `grantMiddleware`
  * contributions. `tokenBindingMw` overwrites `req.tokenBinding`, so one
  * arriving through `grantMiddleware` **always** wins and the configured
- * `dispatch-policy` decides nothing, with no error or other signal. This is
+ * `dispatchPolicy` decides nothing, with no error or other signal. This is
  * what a half-finished move to `tokenBindingMechanisms` looks like.
  *
  * Silent when only the `grantMiddleware` surface is present (a working
@@ -996,7 +996,7 @@ function warnOnTokenBindingSurfaceOverlap(
 			modules: [...legacyTokenBindingModules],
 		},
 		"a grantMiddleware-mounted tokenBindingMw runs after the composed one and will override every binding it resolves; " +
-			"migrate these modules to the tokenBindingMechanisms contribution kind, or the configured dispatch-policy stays inert",
+			"migrate these modules to the tokenBindingMechanisms contribution kind, or the configured dispatchPolicy stays inert",
 	);
 }
 

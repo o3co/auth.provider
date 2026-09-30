@@ -29,7 +29,7 @@
  *   deprecated `expiresIn` read in its place) and `resolveRefreshTokenLifetime`;
  * - every switch on only when it is `true`.
  *
- * The token-binding settings under `oauth.tokenBinding` are not among them:
+ * The token-binding settings under `core.tokenBinding` are not among them:
  * they apply across core's token-binding extension point, so core reads them
  * itself (`resolveTokenBindingSettings`).
  *
