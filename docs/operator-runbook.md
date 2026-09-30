@@ -650,8 +650,9 @@ wires it.
   `@o3co/auth-provider-standard`'s SMTP sender's. A sender answers a refusal
   at a limit, which the provider answers `429`, apart from an outage, `503`;
   a delivery that fails leaves the ceremony standing. The package's
-  development sender logs each code, and installs only where the
-  configuration was selected as `development` or `test`.
+  development sender logs each code, and installs only where the name the
+  configuration was selected by, and `CONFIG_ENV` and `NODE_ENV` wherever
+  they are set, each read `development` or `test`.
 - **The email factor's address.** The factor keeps no address: only a keyed
   digest of the one its enrollment code went to. A login code goes to the
   account's current address only while that digest matches, so **a change of

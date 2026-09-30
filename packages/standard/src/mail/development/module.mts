@@ -18,13 +18,15 @@
  * `standardDevelopmentMailSenderModule`: fills the `mailSender` slot with the
  * development sender, over the composition's `logger` (or `consoleLogger`).
  * It has no settings, so no section. Its factory runs at every boot, whether
- * or not anything reads the slot, and lets the sender in only where the
- * environment it is told — the name the configuration was selected by —
- * reads as development or test: an allow-list, since a code in a log line is
- * a secret anywhere else. It refuses too where that name, `CONFIG_ENV` or
- * `NODE_ENV` reads as production or staging (core's `productionEnvironmentIn`),
- * none lifting another's, and where the `deploymentMode` slot says `multi`. A
- * name or a slot it cannot read is a `TypeError`. Stateless.
+ * or not anything reads the slot, and lets the sender in only where every
+ * name it reads says development or test — the environment it is told (the
+ * name the configuration was selected by), and `CONFIG_ENV` and `NODE_ENV`
+ * where they are set: an allow-list over each, since a code in a log line
+ * is a secret anywhere else, and none lifts another's refusal. A name that
+ * says production or staging (core's `productionEnvironmentIn`) is refused
+ * as that; any other as not development or test. It refuses too where the
+ * `deploymentMode` slot says `multi`. A name or a slot it cannot read is a
+ * `TypeError`. Stateless.
  */
 
 import {
@@ -56,20 +58,24 @@ export interface StandardDevelopmentMailSenderModuleOptions {
 	readonly environment: string;
 }
 
-/** Why the development sender may not run here, or none. */
+/** Why `value`, read as `label`, keeps the sender out, or none. */
+function refusalOf(label: string, value: string): string | undefined {
+	const production = productionEnvironmentIn([value]);
+	if (production !== undefined) return `${label} is "${production}"`;
+	const name = readEnvironmentName(value) ?? "";
+	return DEVELOPMENT_NAMES.has(name) ? undefined : `${label} "${name}" is not development or test`;
+}
+
+/** Why the development sender may not run here, or none: each name it reads, then the deployment mode. */
 function refusals(environment: string, deploymentMode: DeploymentMode): string[] {
-	const production = productionEnvironmentIn([
-		environment,
-		process.env.CONFIG_ENV,
-		process.env.NODE_ENV,
-	]);
-	const name = readEnvironmentName(environment) ?? "";
+	const named: [string, string][] = [["the environment", environment]];
+	for (const variable of ["CONFIG_ENV", "NODE_ENV"] as const) {
+		const value = process.env[variable];
+		// A variable that is not set, or empty, names nothing.
+		if (readEnvironmentName(value) !== undefined) named.push([variable, value as string]);
+	}
 	return [
-		...(production !== undefined
-			? [`the environment is "${production}"`]
-			: DEVELOPMENT_NAMES.has(name)
-				? []
-				: [`the environment "${name}" is not development or test`]),
+		...named.flatMap(([label, value]) => refusalOf(label, value) ?? []),
 		...(deploymentMode === "multi" ? ['core.deployment.mode is "multi"'] : []),
 	];
 }
