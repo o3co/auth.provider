@@ -107,8 +107,6 @@ export const LOCKOUT = {
 	memorySeconds: 86_400,
 	weeklyBudget: 10,
 	hardLimit: 100,
-	trustedBrowsers: 5,
-	trustedBrowserDays: 30,
 } as const;
 
 /** The `mfa` section as the package's reference.conf resolves it, under `mode`, with this suite's key. */

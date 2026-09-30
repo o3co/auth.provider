@@ -129,7 +129,7 @@ describe("the package's reference.conf", () => {
 		);
 	});
 
-	it("defaults a transaction to 600 seconds and 5 attempts, and the lock to a threshold of 5, 900 s base, 86400 s max and memory, a weekly budget of 10, a hard limit of 100, 5 trusted browsers for 30 days", () => {
+	it("defaults a transaction to 600 seconds and 5 attempts, and the lock to a threshold of 5, 900 s base, 86400 s max and memory, a weekly budget of 10 and a hard limit of 100, and nothing more", () => {
 		const settings = readSettings(
 			resolve({ MFA_ENCRYPTION_KEY: randomBytes(32).toString("base64") }),
 		);
@@ -142,8 +142,6 @@ describe("the package's reference.conf", () => {
 			memorySeconds: 86_400,
 			weeklyBudget: 10,
 			hardLimit: 100,
-			trustedBrowsers: 5,
-			trustedBrowserDays: 30,
 		});
 	});
 

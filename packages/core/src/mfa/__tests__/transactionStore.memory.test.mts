@@ -39,8 +39,6 @@ const POLICY: MfaLockoutPolicy = {
 	memorySeconds: 86_400,
 	weeklyBudget: 10,
 	hardLimit: 100,
-	trustedBrowsers: 5,
-	trustedBrowserDays: 30,
 };
 
 const T0 = Date.UTC(2026, 8, 1);
@@ -81,8 +79,6 @@ const TX = (overrides: Partial<MfaTransaction> = {}): MfaTransaction => ({
 	challenge: undefined,
 	pendingEnrollment: undefined,
 	attempts: 0,
-	sends: 0,
-	lastSentAtMs: undefined,
 	createdAtMs: T0,
 	expiresAtMs: T0 + 600_000,
 	version: 1,
@@ -133,13 +129,16 @@ describe("the in-process MfaTransactionStore", () => {
 		expect(store.transactions).toBe(2);
 	});
 
-	it("drops a subject's state once nothing in it can matter", async () => {
+	it("drops a subject's state once nothing in it can matter, and an exempt success adds none", async () => {
 		const store = createMemoryMfaTransactionStore();
-		const reserved = await store.reserveSubjectAttempt("user-1", T0, POLICY, undefined);
+		const reserved = await store.reserveSubjectAttempt("user-1", T0, POLICY);
 		expect(store.subjects).toBe(1);
 		if (reserved.ok) await store.settleSubjectAttempt("user-1", reserved.reservation, "void");
 		expect(store.subjects).toBe(0);
-		await store.noteExemptSuccess("user-1", T0, POLICY, undefined);
+		await store.noteExemptSuccess("user-1", T0);
+		expect(store.subjects).toBe(0);
+		const failed = await store.reserveSubjectAttempt("user-1", T0, POLICY);
+		if (failed.ok) await store.settleSubjectAttempt("user-1", failed.reservation, "failure");
 		expect(store.subjects).toBe(1);
 		await store.clearSubjectState("user-1");
 		expect(store.subjects).toBe(0);
@@ -148,7 +147,7 @@ describe("the in-process MfaTransactionStore", () => {
 	it("keeps a subject's state while a failure stands in its run or its week, and drops it once none does", async () => {
 		const store = createMemoryMfaTransactionStore();
 		const settle = async (at: number, outcome: "failure" | "success" | "void") => {
-			const reserved = await store.reserveSubjectAttempt("user-1", at, POLICY, undefined);
+			const reserved = await store.reserveSubjectAttempt("user-1", at, POLICY);
 			if (!reserved.ok) throw new Error("expected a reservation");
 			await store.settleSubjectAttempt("user-1", reserved.reservation, outcome);
 		};
@@ -171,14 +170,14 @@ describe("the in-process MfaTransactionStore", () => {
 		// itself, which takes the reservation out of the run; the week still
 		// counts it until it rolls off, and then nothing does.
 		const store = createMemoryMfaTransactionStore({ now: () => T0 + 3 * WEEK });
-		const abandoned = await store.reserveSubjectAttempt("user-1", T0, POLICY, undefined);
+		const abandoned = await store.reserveSubjectAttempt("user-1", T0, POLICY);
 		if (!abandoned.ok) throw new Error("expected a reservation");
-		const won = await store.reserveSubjectAttempt("user-1", T0 + 1, POLICY, undefined);
+		const won = await store.reserveSubjectAttempt("user-1", T0 + 1, POLICY);
 		if (!won.ok) throw new Error("expected a reservation");
 		await store.settleSubjectAttempt("user-1", won.reservation, "success");
 		expect(store.subjects).toBe(1);
 		// Two weeks on, the week has let it go.
-		const later = await store.reserveSubjectAttempt("user-1", T0 + 2 * WEEK, POLICY, undefined);
+		const later = await store.reserveSubjectAttempt("user-1", T0 + 2 * WEEK, POLICY);
 		if (!later.ok) throw new Error("expected a reservation");
 		await store.settleSubjectAttempt("user-1", later.reservation, "void");
 		expect(store.subjects).toBe(0);
@@ -197,12 +196,12 @@ describe("the in-process MfaTransactionStore", () => {
 			minSweepIntervalMs: 0,
 		});
 		const oneAWeek: MfaLockoutPolicy = { ...POLICY, weeklyBudget: 1 };
-		const reserved = await store.reserveSubjectAttempt("user-1", T0, oneAWeek, undefined);
+		const reserved = await store.reserveSubjectAttempt("user-1", T0, oneAWeek);
 		if (!reserved.ok) throw new Error("expected a reservation");
 		await store.settleSubjectAttempt("user-1", reserved.reservation, "failure");
 		now = T0 + 30 * DAY;
 		await store.create(TX({ id: "sweeps", createdAtMs: now, expiresAtMs: now + 600_000 }));
-		const next = await store.reserveSubjectAttempt("user-1", T0 + 1, oneAWeek, undefined);
+		const next = await store.reserveSubjectAttempt("user-1", T0 + 1, oneAWeek);
 		expect(next).toMatchObject({ ok: false, hold: "weekly" });
 	});
 
@@ -215,7 +214,7 @@ describe("the in-process MfaTransactionStore", () => {
 		});
 		await store.requireEmailProofAtNextBinding("user-1");
 		now = T0 + 400 * DAY;
-		await store.noteExemptSuccess("user-2", now, POLICY, undefined);
+		await store.reserveSubjectAttempt("user-2", now, POLICY);
 		await store.create(TX({ id: "sweeps", createdAtMs: now, expiresAtMs: now + 600_000 }));
 		expect(await store.emailProofRequiredAtNextBinding("user-1")).toBe(true);
 		// Not lock state: the subject count does not include it.
@@ -228,36 +227,19 @@ describe("the in-process MfaTransactionStore", () => {
 		const store = createMemoryMfaTransactionStore({ sweepInterval: 1, minSweepIntervalMs: 0 });
 		const t = Date.now();
 		const oneAWeek: MfaLockoutPolicy = { ...POLICY, weeklyBudget: 1 };
-		const reserved = await store.reserveSubjectAttempt("user-1", t, oneAWeek, undefined);
+		const reserved = await store.reserveSubjectAttempt("user-1", t, oneAWeek);
 		if (!reserved.ok) throw new Error("expected a reservation");
 		await store.settleSubjectAttempt("user-1", reserved.reservation, "failure");
 		for (const ahead of [t + 10 * DAY, 8.64e15]) {
-			await store.reserveSubjectAttempt("user-2", ahead, oneAWeek, undefined);
+			await store.reserveSubjectAttempt("user-2", ahead, oneAWeek);
 			await store.create(
 				TX({ id: `sweeps-${ahead}`, createdAtMs: Date.now(), expiresAtMs: Date.now() + 600_000 }),
 			);
 		}
-		expect(await store.reserveSubjectAttempt("user-1", t + 1, oneAWeek, undefined)).toMatchObject({
+		expect(await store.reserveSubjectAttempt("user-1", t + 1, oneAWeek)).toMatchObject({
 			ok: false,
 			hold: "weekly",
 		});
-	});
-
-	it("drops a subject whose only state is a trust that has ended, in the sweep", async () => {
-		let now = T0;
-		const store = createMemoryMfaTransactionStore({
-			now: () => now,
-			sweepInterval: 1,
-			minSweepIntervalMs: 0,
-		});
-		await store.noteExemptSuccess("user-1", T0, POLICY, undefined);
-		expect(store.subjects).toBe(1);
-		// Another subject's call carries the callers' time past the trust's end
-		// (trustedBrowserDays, with no failure in the week).
-		now = T0 + 31 * DAY;
-		await store.noteExemptSuccess("user-2", now, POLICY, undefined);
-		await store.create(TX({ id: "sweeps", createdAtMs: now, expiresAtMs: now + 600_000 }));
-		expect(store.subjects).toBe(1);
 	});
 });
 

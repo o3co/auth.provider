@@ -29,8 +29,7 @@ import {
  * adapter. Two halves: the transaction, a short-lived single-use record of one
  * second-factor ceremony whose every operation a race could split; and the
  * subject state, which bounds guessable proofs across transactions (the
- * consecutive run, the weekly budget no success refunds, the browsers an
- * exempt success trusts against the weekly hold).
+ * consecutive run, and the weekly budget no success refunds).
  *
  * The subject state is judged on the time its caller passes, so the lockout
  * schedule is driven by an injected clock; a transaction expires on the
@@ -69,8 +68,6 @@ const POLICY: MfaLockoutPolicy = {
 	memorySeconds: 86_400,
 	weeklyBudget: 10,
 	hardLimit: 100,
-	trustedBrowsers: 5,
-	trustedBrowserDays: 30,
 };
 
 /**
@@ -117,8 +114,6 @@ const TX = (overrides: Partial<MfaTransaction> = {}): MfaTransaction => {
 		challenge: undefined,
 		pendingEnrollment: undefined,
 		attempts: 0,
-		sends: 0,
-		lastSentAtMs: undefined,
 		createdAtMs: now,
 		expiresAtMs: now + 10 * MINUTE,
 		version: 1,
@@ -173,8 +168,6 @@ export function runMfaTransactionStoreContract(
 					state: "sealed-pending",
 					expiresAtMs: CHALLENGE.expiresAtMs,
 				},
-				sends: 2,
-				lastSentAtMs: Date.now(),
 				version: 7,
 			});
 			await store.create(login);
@@ -265,9 +258,6 @@ export function runMfaTransactionStoreContract(
 				["version 1.5", { version: 1.5 }],
 				["version NaN", { version: Number.NaN }],
 				["version past 2^53", { version: 2 ** 53 }],
-				["sends -1", { sends: -1 }],
-				["sends 0.5", { sends: 0.5 }],
-				["sends missing", { sends: undefined }],
 			];
 			for (const [name, overrides] of bad) {
 				await expect(store.create(TX(overrides as Partial<MfaTransaction>)), name).rejects.toThrow(
@@ -275,8 +265,8 @@ export function runMfaTransactionStoreContract(
 				);
 			}
 			expect(await store.get("tx-1")).toBeNull();
-			// A fresh record: no attempt reserved, any count of sends, any version.
-			await store.create(TX({ sends: 0, version: 0 }));
+			// A fresh record: no attempt reserved, any version.
+			await store.create(TX({ version: 0 }));
 			expect((await store.get("tx-1"))?.version).toBe(0);
 		});
 
@@ -298,8 +288,6 @@ export function runMfaTransactionStoreContract(
 					"pendingEnrollment missing its state",
 					{ pendingEnrollment: { kind: "totp", expiresAtMs: 9 } },
 				],
-				["lastSentAtMs NaN", { lastSentAtMs: Number.NaN }],
-				["lastSentAtMs text", { lastSentAtMs: "5" }],
 				["id not a string", { id: 7 }],
 				["binding missing", { binding: undefined }],
 				["binding a bare session id", { binding: SESSION_ID }],
@@ -363,6 +351,8 @@ export function runMfaTransactionStoreContract(
 		});
 
 		it("keeps only the fields a transaction has, and only the known fields of each sub-object", async () => {
+			// A send count and a last send are no transaction's fields: a limit on
+			// sending is the mail sender's.
 			const store = await factory();
 			const tx = TX({
 				emailProof: { provedAtMs: 1234 },
@@ -372,6 +362,8 @@ export function runMfaTransactionStoreContract(
 			await store.create({
 				...tx,
 				admin: true,
+				sends: 3,
+				lastSentAtMs: 5,
 				continuation: {
 					...tx.continuation,
 					primary: { ...tx.continuation?.primary, password: "hunter2" },
@@ -409,7 +401,7 @@ export function runMfaTransactionStoreContract(
 			await store.create(TX({ expiresAtMs: at, challenge: CHALLENGE }));
 			await expiry.passed(at);
 			expect(await store.get("tx-1")).toBeNull();
-			expect(await store.update("tx-1", 1, { sends: 1 })).toBeNull();
+			expect(await store.update("tx-1", 1, { enrollment: "allowed" })).toBeNull();
 			expect(await store.reserveAttempt("tx-1", 5)).toEqual({ ok: false, attempts: 0 });
 			expect(await store.takeChallenge("tx-1", 1)).toBeNull();
 			expect(await store.consume("tx-1", 1)).toBeNull();
@@ -420,52 +412,46 @@ export function runMfaTransactionStoreContract(
 
 		it("updates at the current version: a present key sets, null clears, an absent key keeps; version + 1", async () => {
 			const store = await factory();
-			const tx = TX({ challenge: CHALLENGE, sends: 1, lastSentAtMs: 5 });
+			const tx = TX({ challenge: CHALLENGE });
 			await store.create(tx);
 			const updated = await store.update("tx-1", 1, {
 				challenge: null,
 				emailProof: { provedAtMs: 1234 },
 				enrollment: "required",
-				sends: 2,
 			});
 			const expected = {
 				...tx,
 				challenge: undefined,
 				emailProof: { provedAtMs: 1234 },
 				enrollment: "required" as const,
-				sends: 2,
 				version: 2,
 			};
 			expect(updated).toStrictEqual(expected);
 			expect(await store.get("tx-1")).toStrictEqual(expected);
 			const again = await store.update("tx-1", 2, {
 				pendingEnrollment: { kind: "totp", state: "sealed", expiresAtMs: 99 },
-				lastSentAtMs: null,
 			});
 			expect(again).toStrictEqual({
 				...expected,
 				pendingEnrollment: { kind: "totp", state: "sealed", expiresAtMs: 99 },
-				lastSentAtMs: undefined,
 				version: 3,
 			});
 			expect(await store.update("tx-1", 3, { pendingEnrollment: null })).toStrictEqual({
 				...expected,
 				version: 4,
-				lastSentAtMs: undefined,
 			});
 		});
 
-		it("reads a key present with undefined as absent: it keeps the field, and never clears a limit", async () => {
-			// `{ sends: undefined }` compiles, and read as a write it would clear the
-			// send count or the email-proof gate (the MFA ADR's D21 and D24). Only
-			// null clears, and only a field that may be empty.
+		it("reads a key present with undefined as absent: it keeps the field, and never clears a requirement", async () => {
+			// `{ emailProof: undefined }` compiles, and read as a write it would
+			// clear the email-proof gate (the MFA ADR's D24). Only null clears,
+			// and only a field that may be empty.
 			const store = await factory();
 			const tx = TX({
 				challenge: CHALLENGE,
+				pendingEnrollment: { kind: "totp", state: "sealed", expiresAtMs: 99 },
 				emailProof: "required",
 				enrollment: "required",
-				sends: 2,
-				lastSentAtMs: 5,
 			});
 			await store.create(tx);
 			const updated = await store.update("tx-1", 1, {
@@ -473,15 +459,13 @@ export function runMfaTransactionStoreContract(
 				pendingEnrollment: undefined,
 				emailProof: undefined,
 				enrollment: undefined,
-				sends: undefined,
-				lastSentAtMs: undefined,
 			});
 			expect(updated).toStrictEqual({ ...tx, version: 2 });
 		});
 
 		it("refuses, with a RangeError, a value a field does not admit, and changes nothing", async () => {
 			const store = await factory();
-			const tx = TX({ challenge: CHALLENGE, sends: 1 });
+			const tx = TX({ challenge: CHALLENGE });
 			await store.create(tx);
 			const bad: [string, unknown][] = [
 				["enrollment null", { enrollment: null }],
@@ -496,17 +480,13 @@ export function runMfaTransactionStoreContract(
 					"pendingEnrollment missing its kind",
 					{ pendingEnrollment: { state: "s", expiresAtMs: 9 } },
 				],
-				["sends null", { sends: null }],
-				["sends negative", { sends: -1 }],
-				["sends fractional", { sends: 1.5 }],
-				["lastSentAtMs NaN", { lastSentAtMs: Number.NaN }],
-				["lastSentAtMs text", { lastSentAtMs: "5" }],
+				["pendingEnrollment not an enrollment", { pendingEnrollment: "sealed" }],
 			];
 			for (const [name, patch] of bad) {
 				await expect(store.update("tx-1", 1, patch as never), name).rejects.toThrow(RangeError);
 			}
 			// A patch that is no object at all is refused the same way.
-			for (const patch of [null, "sends", 3]) {
+			for (const patch of [null, "enrollment", 3]) {
 				await expect(store.update("tx-1", 1, patch as never), String(patch)).rejects.toThrow(
 					RangeError,
 				);
@@ -514,17 +494,14 @@ export function runMfaTransactionStoreContract(
 			expect(await store.get("tx-1")).toStrictEqual(tx);
 		});
 
-		it("refuses, with a RangeError, a patch that would refund a limit or undo a requirement, and changes nothing", async () => {
-			// Sends only count up (the send limit of the MFA ADR's D21). A
-			// required email proof is only ever met, never waived (the same ADR's
-			// D24), and a met one stays met. An enrollment requirement is never
-			// lowered.
+		it("refuses, with a RangeError, a patch that would undo a requirement, and changes nothing", async () => {
+			// A required email proof is only ever met, never waived (the MFA
+			// ADR's D24), and a met one stays met. An enrollment requirement is
+			// never lowered.
 			const store = await factory();
-			const tx = TX({ sends: 2, emailProof: "required", enrollment: "required", lastSentAtMs: 5 });
+			const tx = TX({ emailProof: "required", enrollment: "required" });
 			await store.create(tx);
 			const bad: [string, unknown][] = [
-				["sends down", { sends: 1 }],
-				["the last send moved back", { lastSentAtMs: 4 }],
 				["email proof waived", { emailProof: "not_required" }],
 				["enrollment lowered to none", { enrollment: "none" }],
 				["enrollment lowered to allowed", { enrollment: "allowed" }],
@@ -533,18 +510,13 @@ export function runMfaTransactionStoreContract(
 				await expect(store.update("tx-1", 1, patch as never), name).rejects.toThrow(RangeError);
 			}
 			expect(await store.get("tx-1")).toStrictEqual(tx);
-			// What may move: sends up, the last send later, the proof met, the
-			// requirements kept.
+			// What may move: the proof met, the requirements kept.
 			const moved = await store.update("tx-1", 1, {
-				sends: 3,
-				lastSentAtMs: 6,
 				emailProof: { provedAtMs: 1234 },
 				enrollment: "required",
 			});
 			expect(moved).toStrictEqual({
 				...tx,
-				sends: 3,
-				lastSentAtMs: 6,
 				emailProof: { provedAtMs: 1234 },
 				version: 2,
 			});
@@ -601,7 +573,9 @@ export function runMfaTransactionStoreContract(
 			await store.create(tx);
 			await store.reserveAttempt("tx-1", 5);
 			const updated = await store.update("tx-1", 1, {
+				enrollment: "allowed",
 				sends: 1,
+				lastSentAtMs: 5,
 				id: "tx-other",
 				purpose: "enroll",
 				attempts: 0,
@@ -614,7 +588,7 @@ export function runMfaTransactionStoreContract(
 				createdAtMs: 0,
 				expiresAtMs: tx.expiresAtMs + 86_400_000,
 			} as never);
-			const expected = { ...tx, attempts: 1, sends: 1, version: 2 };
+			const expected = { ...tx, attempts: 1, enrollment: "allowed" as const, version: 2 };
 			expect(updated).toStrictEqual(expected);
 			expect(await store.get("tx-1")).toStrictEqual(expected);
 			expect(await store.get("tx-other")).toBeNull();
@@ -624,9 +598,9 @@ export function runMfaTransactionStoreContract(
 			const store = await factory();
 			const tx = TX();
 			await store.create(tx);
-			expect(await store.update("tx-1", 2, { sends: 9 })).toBeNull();
-			expect(await store.update("tx-1", 0, { sends: 9 })).toBeNull();
-			expect(await store.update("gone", 1, { sends: 9 })).toBeNull();
+			expect(await store.update("tx-1", 2, { enrollment: "allowed" })).toBeNull();
+			expect(await store.update("tx-1", 0, { enrollment: "allowed" })).toBeNull();
+			expect(await store.update("gone", 1, { enrollment: "allowed" })).toBeNull();
 			expect(await store.get("tx-1")).toStrictEqual(tx);
 			expect(await store.get("gone")).toBeNull();
 		});
@@ -636,11 +610,15 @@ export function runMfaTransactionStoreContract(
 			const max = Number.MAX_SAFE_INTEGER;
 			const tx = TX({ version: max - 1 });
 			await store.create(tx);
-			const reached = await store.update("tx-1", max - 1, { sends: 1 });
-			expect(reached).toStrictEqual({ ...tx, sends: 1, version: max });
-			await expect(store.update("tx-1", max, { sends: 2 })).rejects.toThrow(RangeError);
+			const reached = await store.update("tx-1", max - 1, { enrollment: "allowed" });
+			expect(reached).toStrictEqual({ ...tx, enrollment: "allowed", version: max });
+			await expect(store.update("tx-1", max, { enrollment: "required" })).rejects.toThrow(
+				RangeError,
+			);
 			expect(await store.get("tx-1")).toStrictEqual(reached);
-			await expect(store.update("gone", max, { sends: 2 })).rejects.toThrow(RangeError);
+			await expect(store.update("gone", max, { enrollment: "required" })).rejects.toThrow(
+				RangeError,
+			);
 			// The version stays usable for what does not move it.
 			expect(await store.consume("tx-1", max)).toStrictEqual(reached);
 		});
@@ -649,7 +627,11 @@ export function runMfaTransactionStoreContract(
 			const store = await factory();
 			await store.create(TX());
 			const results = await Promise.all(
-				Array.from({ length: 10 }, (_, i) => store.update("tx-1", 1, { sends: i + 1 })),
+				Array.from({ length: 10 }, (_, i) =>
+					store.update("tx-1", 1, {
+						pendingEnrollment: { kind: "totp", state: `sealed-${i}`, expiresAtMs: 99 },
+					}),
+				),
 			);
 			const winners = results.filter((r) => r !== null);
 			expect(winners).toHaveLength(1);
@@ -725,8 +707,8 @@ export function runMfaTransactionStoreContract(
 			await store.create(TX({ challenge: CHALLENGE }));
 			await store.reserveAttempt("tx-1", 5);
 			expect((await store.get("tx-1"))?.version).toBe(1);
-			expect(await store.update("tx-1", 1, { sends: 1 })).not.toBeNull();
-			expect((await store.update("tx-1", 2, { sends: 2 }))?.attempts).toBe(1);
+			expect(await store.update("tx-1", 1, { enrollment: "allowed" })).not.toBeNull();
+			expect((await store.update("tx-1", 2, { enrollment: "required" }))?.attempts).toBe(1);
 		});
 
 		it("refuses a max that is not a positive whole number with a RangeError", async () => {
@@ -764,7 +746,7 @@ export function runMfaTransactionStoreContract(
 			const store = await factory();
 			await store.create(TX({ challenge: CHALLENGE }));
 			const resent = { ...CHALLENGE, state: "sealed-resent" };
-			await store.update("tx-1", 1, { challenge: resent, sends: 1 });
+			await store.update("tx-1", 1, { challenge: resent });
 			expect(await store.takeChallenge("tx-1", 1)).toBeNull();
 			expect(await store.takeChallenge("tx-1", 2)).toStrictEqual(resent);
 		});
@@ -788,7 +770,7 @@ export function runMfaTransactionStoreContract(
 		it("consumes nothing at a version that moved, and the transaction stays", async () => {
 			const store = await factory();
 			await store.create(TX());
-			await store.update("tx-1", 1, { sends: 1 });
+			await store.update("tx-1", 1, { enrollment: "allowed" });
 			expect(await store.consume("tx-1", 1)).toBeNull();
 			expect((await store.get("tx-1"))?.version).toBe(2);
 			expect(await store.consume("never", 1)).toBeNull();
@@ -814,20 +796,17 @@ export function runMfaTransactionStoreContract(
 		const check = (
 			store: MfaTransactionStore,
 			at: number,
-			browser?: string,
 			policy: MfaLockoutPolicy = POLICY,
 			subject = "user-1",
-		): Promise<MfaSubjectAttemptReservation> =>
-			store.reserveSubjectAttempt(subject, at, policy, browser);
+		): Promise<MfaSubjectAttemptReservation> => store.reserveSubjectAttempt(subject, at, policy);
 
 		async function reserved(
 			store: MfaTransactionStore,
 			at: number,
-			browser?: string,
 			policy: MfaLockoutPolicy = POLICY,
 			subject = "user-1",
 		): Promise<string> {
-			const result = await check(store, at, browser, policy, subject);
+			const result = await check(store, at, policy, subject);
 			if (!result.ok) {
 				throw new Error(`expected a reservation for ${subject}, held: ${result.hold}`);
 			}
@@ -837,11 +816,10 @@ export function runMfaTransactionStoreContract(
 		async function fail(
 			store: MfaTransactionStore,
 			at: number,
-			browser?: string,
 			policy: MfaLockoutPolicy = POLICY,
 			subject = "user-1",
 		): Promise<void> {
-			const reservation = await reserved(store, at, browser, policy, subject);
+			const reservation = await reserved(store, at, policy, subject);
 			await store.settleSubjectAttempt(subject, reservation, "failure");
 		}
 
@@ -849,10 +827,9 @@ export function runMfaTransactionStoreContract(
 			store: MfaTransactionStore,
 			at: number,
 			outcome: "success" | "void",
-			browser?: string,
 			subject = "user-1",
 		): Promise<void> {
-			const reservation = await reserved(store, at, browser, POLICY, subject);
+			const reservation = await reserved(store, at, POLICY, subject);
 			await store.settleSubjectAttempt(subject, reservation, outcome);
 		}
 
@@ -869,10 +846,10 @@ export function runMfaTransactionStoreContract(
 		): Promise<number> {
 			let at = from;
 			for (let i = 1; i <= count; i++) {
-				await fail(store, at, undefined, POLICY, subject);
+				await fail(store, at, POLICY, subject);
 				at += MINUTE;
 				if (i % 4 === 0) {
-					await settled(store, at, "success", undefined, subject);
+					await settled(store, at, "success", subject);
 					at += MINUTE;
 				}
 			}
@@ -904,12 +881,12 @@ export function runMfaTransactionStoreContract(
 		it("doubles the lock with each further failure, up to maxSeconds", async () => {
 			const store = await factory();
 			let at = start();
-			for (let i = 0; i < 4; i++) await fail(store, at + i, undefined, RUN_ONLY);
+			for (let i = 0; i < 4; i++) await fail(store, at + i, RUN_ONLY);
 			at += 4;
 			const seconds: number[] = [];
 			for (let i = 0; i < 9; i++) {
-				await fail(store, at, undefined, RUN_ONLY);
-				const result = await check(store, at + 1, undefined, RUN_ONLY);
+				await fail(store, at, RUN_ONLY);
+				const result = await check(store, at + 1, RUN_ONLY);
 				if (result.ok || result.retryAfterMs === null) throw new Error("expected a backoff lock");
 				expect(result.hold).toBe("backoff");
 				seconds.push((result.retryAfterMs + 1) / 1000);
@@ -921,23 +898,23 @@ export function runMfaTransactionStoreContract(
 		it("forgets the backoff memorySeconds after the last lock ends, and not before", async () => {
 			const store = await factory();
 			const t = start();
-			for (let i = 0; i < 5; i++) await fail(store, t + i, undefined, RUN_ONLY);
+			for (let i = 0; i < 5; i++) await fail(store, t + i, RUN_ONLY);
 			const lockEnds = t + 4 + 900_000;
 			// A day after the lock ends, the next failure is the first of a new
 			// backoff: four pass without a lock, and the fifth locks for
 			// baseSeconds again.
 			const forgotten = lockEnds + DAY;
-			for (let i = 0; i < 5; i++) await fail(store, forgotten + i, undefined, RUN_ONLY);
-			expect(held(await check(store, forgotten + 5, undefined, RUN_ONLY))).toEqual({
+			for (let i = 0; i < 5; i++) await fail(store, forgotten + i, RUN_ONLY);
+			expect(held(await check(store, forgotten + 5, RUN_ONLY))).toEqual({
 				hold: "backoff",
 				retryAfterMs: 900_000 - 1,
 			});
 
 			const other = await factory();
-			for (let i = 0; i < 5; i++) await fail(other, t + i, undefined, RUN_ONLY);
+			for (let i = 0; i < 5; i++) await fail(other, t + i, RUN_ONLY);
 			// A millisecond short of that, the next failure is the sixth.
-			await fail(other, forgotten - 1, undefined, RUN_ONLY);
-			expect(held(await check(other, forgotten, undefined, RUN_ONLY))).toEqual({
+			await fail(other, forgotten - 1, RUN_ONLY);
+			expect(held(await check(other, forgotten, RUN_ONLY))).toEqual({
 				hold: "backoff",
 				retryAfterMs: 1_800_000 - 1,
 			});
@@ -949,16 +926,16 @@ export function runMfaTransactionStoreContract(
 			// failure forgets the failures that did not reach it.
 			const store = await factory();
 			const t = start();
-			for (let i = 0; i < 4; i++) await fail(store, t + i, undefined, RUN_ONLY);
+			for (let i = 0; i < 4; i++) await fail(store, t + i, RUN_ONLY);
 			const quiet = t + 3 + DAY;
-			for (let i = 0; i < 4; i++) await fail(store, quiet + i, undefined, RUN_ONLY);
-			expect((await check(store, quiet + 4, undefined, RUN_ONLY)).ok).toBe(true);
+			for (let i = 0; i < 4; i++) await fail(store, quiet + i, RUN_ONLY);
+			expect((await check(store, quiet + 4, RUN_ONLY)).ok).toBe(true);
 
 			const other = await factory();
-			for (let i = 0; i < 4; i++) await fail(other, t + i, undefined, RUN_ONLY);
+			for (let i = 0; i < 4; i++) await fail(other, t + i, RUN_ONLY);
 			// A millisecond short of that, the next failure is the fifth: a lock.
-			await fail(other, quiet - 1, undefined, RUN_ONLY);
-			expect(held(await check(other, quiet, undefined, RUN_ONLY))).toEqual({
+			await fail(other, quiet - 1, RUN_ONLY);
+			expect(held(await check(other, quiet, RUN_ONLY))).toEqual({
 				hold: "backoff",
 				retryAfterMs: 900_000 - 1,
 			});
@@ -973,8 +950,8 @@ export function runMfaTransactionStoreContract(
 			};
 			const store = await factory();
 			const t = start();
-			for (let i = 0; i < 5; i++) await fail(store, t + i, undefined, long);
-			expect(held(await check(store, t + 5, undefined, long))).toEqual({
+			for (let i = 0; i < 5; i++) await fail(store, t + i, long);
+			expect(held(await check(store, t + 5, long))).toEqual({
 				hold: "backoff",
 				retryAfterMs: 4 + 8 * DAY - 5,
 			});
@@ -1037,7 +1014,7 @@ export function runMfaTransactionStoreContract(
 			const t = start();
 			for (let i = 0; i < 3; i++) await fail(store, t + i);
 			const later = await reserved(store, t + 10);
-			await store.noteExemptSuccess("user-1", t + 5, POLICY, undefined);
+			await store.noteExemptSuccess("user-1", t + 5);
 			await store.settleSubjectAttempt("user-1", later, "failure");
 			for (let i = 0; i < 4; i++) await fail(store, t + 11 + i);
 			expect(held(await check(store, t + 15))).toEqual({
@@ -1104,14 +1081,14 @@ export function runMfaTransactionStoreContract(
 			expect((await check(store, t + 5)).ok).toBe(false);
 		});
 
-		it("holds guessable proofs past weeklyBudget failures in any seven days, and no success refunds one", async () => {
+		it("holds guessable proofs past weeklyBudget failures in any seven days: no success refunds one, and an exempt success lets no attempt through", async () => {
 			const store = await factory();
 			const t = start();
 			const at = await fillTheWeek(store, t);
 			expect(held(await check(store, at))).toEqual({ hold: "weekly", retryAfterMs: t + WEEK - at });
-			// An exempt success does not refund the week either, for any browser
-			// but the one it trusts.
-			await store.noteExemptSuccess("user-1", at + 1, POLICY, undefined);
+			// An exempt success answers nothing, and the week stands for every
+			// guessable attempt after it.
+			expect(await store.noteExemptSuccess("user-1", at + 1)).toBeUndefined();
 			expect(held(await check(store, at + 2))).toEqual({
 				hold: "weekly",
 				retryAfterMs: t + WEEK - (at + 2),
@@ -1147,25 +1124,12 @@ export function runMfaTransactionStoreContract(
 			const t = start();
 			const at = await fillTheWeek(store, t);
 			await fillTheWeek(store, t, "user-2");
-			expect((await check(store, t + 10 * DAY, undefined, POLICY, "user-3")).ok).toBe(true);
+			expect((await check(store, t + 10 * DAY, POLICY, "user-3")).ok).toBe(true);
 			expect((await check(store, t + 10 * DAY)).ok).toBe(true);
 			expect(held(await check(store, at + 1))).toMatchObject({ hold: "weekly" });
-			expect(held(await check(store, at + 1, undefined, POLICY, "user-2"))).toMatchObject({
+			expect(held(await check(store, at + 1, POLICY, "user-2"))).toMatchObject({
 				hold: "weekly",
 			});
-		});
-
-		it("keeps a trust through a caller less than a day ahead of its end", async () => {
-			const store = await factory();
-			const t = start();
-			const at = await fillTheWeek(store, t);
-			const { browser } = await store.noteExemptSuccess("user-1", at, POLICY, undefined);
-			// The trust ends when the week empties, a week after the last failure
-			// (at - 2 minutes); a caller twelve hours past that sees it ended…
-			const ends = at - 2 * MINUTE + WEEK;
-			expect((await check(store, ends + 12 * HOUR)).ok).toBe(true);
-			// …and a caller on time is still let through the weekly hold by it.
-			await settled(store, at + HOUR, "void", browser);
 		});
 
 		it("takes an attempt settled void out of the week", async () => {
@@ -1176,148 +1140,16 @@ export function runMfaTransactionStoreContract(
 			expect((await check(store, at + 1)).ok).toBe(true);
 		});
 
-		it("lets the browser an exempt success trusted through the weekly hold, and no other", async () => {
-			const store = await factory();
-			const t = start();
-			const at = await fillTheWeek(store, t);
-			const { browser } = await store.noteExemptSuccess("user-1", at, POLICY, undefined);
-			expect(browser).toMatch(/^[A-Za-z0-9_-]{43}$/);
-			await settled(store, at + 1, "success", browser);
-			const altered = `${browser.slice(0, -1)}${browser.endsWith("A") ? "B" : "A"}`;
-			for (const other of [undefined, "", altered, "not-a-browser"]) {
-				expect(held(await check(store, at + 2, other)), String(other)).toEqual({
-					hold: "weekly",
-					retryAfterMs: t + WEEK - (at + 2),
-				});
-			}
-		});
-
-		it("holds a trusted browser to the backoff, and counts its failures", async () => {
-			const store = await factory();
-			const t = start();
-			let at = await fillTheWeek(store, t);
-			const { browser } = await store.noteExemptSuccess("user-1", at, POLICY, undefined);
-			for (let i = 0; i < 5; i++) await fail(store, ++at, browser);
-			expect(held(await check(store, at + 1, browser))).toEqual({
-				hold: "backoff",
-				retryAfterMs: 900_000 - 1,
-			});
-			// Its five failures joined the week: fifteen, the oldest ten of which
-			// have to leave before an untrusted browser is let through.
-			const untrusted = await check(store, at + 1);
-			expect(held(untrusted)).toMatchObject({ hold: "weekly" });
-			expect(untrusted.ok ? 0 : untrusted.retryAfterMs).toBeGreaterThan(900_000);
-		});
-
-		it("stops trusting a browser once the weekly window next empties", async () => {
-			const store = await factory();
-			const t = start();
-			const at = await fillTheWeek(store, t);
-			const { browser } = await store.noteExemptSuccess("user-1", at, POLICY, undefined);
-			// Every failure has aged out: the window is empty, and the episode the
-			// trust was for is over.
-			const later = at + WEEK + MINUTE;
-			const next = await fillTheWeek(store, later);
-			expect(held(await check(store, next, browser))).toMatchObject({ hold: "weekly" });
-		});
-
-		it("keeps trusting a browser trusted while the window was empty, until the window fills and empties", async () => {
-			// An exempt login on a quiet account, then someone starts guessing: the
-			// user's browser is trusted through the hold that follows.
-			const store = await factory();
-			const t = start();
-			const { browser } = await store.noteExemptSuccess("user-1", t, POLICY, undefined);
-			const at = await fillTheWeek(store, t + DAY);
-			await settled(store, at, "success", browser);
-			// The guessing stops, the window empties, and a new hold is a new
-			// episode.
-			const later = at + WEEK + MINUTE;
-			const next = await fillTheWeek(store, later);
-			expect(held(await check(store, next, browser))).toMatchObject({ hold: "weekly" });
-		});
-
-		it("trusts a browser for trustedBrowserDays at most, however long the guessing goes on", async () => {
-			const store = await factory();
-			const t = start();
-			const { browser } = await store.noteExemptSuccess("user-1", t, POLICY, undefined);
-			// One failure every five days keeps the window from emptying.
-			for (let day = 1; day <= 26; day += 5) await fail(store, t + day * DAY);
-			// With the one at day 26, nine more fill the week.
-			const at = await failures(store, t + 29 * DAY, 9);
-			expect(at).toBeLessThan(t + 30 * DAY - 1);
-			expect((await check(store, at)).ok).toBe(false);
-			await settled(store, t + 30 * DAY - 1, "success", browser);
-			expect(held(await check(store, t + 30 * DAY, browser))).toMatchObject({ hold: "weekly" });
-		});
-
-		it("trusts at most trustedBrowsers browsers: the oldest gives way", async () => {
-			const store = await factory();
-			const t = start();
-			const at = await fillTheWeek(store, t);
-			const browsers: string[] = [];
-			for (let i = 0; i < 6; i++) {
-				browsers.push((await store.noteExemptSuccess("user-1", at + i, POLICY, undefined)).browser);
-			}
-			expect(new Set(browsers).size).toBe(6);
-			expect(held(await check(store, at + 10, browsers[0]))).toMatchObject({ hold: "weekly" });
-			for (const browser of browsers.slice(1)) await settled(store, at + 10, "void", browser);
-		});
-
-		it("renews the trust of the browser an exempt success came from, rather than trusting one more", async () => {
-			// A user who signs in with WebAuthn every day must not push the other
-			// browsers they trusted out of the list.
-			const store = await factory();
-			const t = start();
-			const at = await fillTheWeek(store, t);
-			const browsers: string[] = [];
-			for (let i = 0; i < 5; i++) {
-				browsers.push((await store.noteExemptSuccess("user-1", at + i, POLICY, undefined)).browser);
-			}
-			let current = browsers[0] as string;
-			for (let i = 0; i < 3; i++) {
-				const { browser } = await store.noteExemptSuccess("user-1", at + 10 + i, POLICY, current);
-				// A fresh value each time: the old one stops being trusted.
-				expect(browser).not.toBe(current);
-				current = browser;
-			}
-			for (const browser of [...browsers.slice(1), current]) {
-				await settled(store, at + 20, "void", browser);
-			}
-			expect(held(await check(store, at + 21, browsers[0]))).toMatchObject({ hold: "weekly" });
-		});
-
-		it("renews only a browser the subject itself trusts: another subject's value, or an unknown one, is a new browser", async () => {
-			const store = await factory();
-			const t = start();
-			const at = await fillTheWeek(store, t);
-			await fillTheWeek(store, t, "user-2");
-			const mine: string[] = [];
-			for (let i = 0; i < 5; i++) {
-				mine.push((await store.noteExemptSuccess("user-1", at + i, POLICY, undefined)).browser);
-			}
-			const { browser: theirs } = await store.noteExemptSuccess("user-2", at, POLICY, undefined);
-			// Neither value is one user-1 trusts: each is a new browser, and the two
-			// oldest of user-1's give way.
-			await store.noteExemptSuccess("user-1", at + 10, POLICY, theirs);
-			await store.noteExemptSuccess("user-1", at + 11, POLICY, "not-a-browser");
-			for (const browser of mine.slice(0, 2)) {
-				expect(held(await check(store, at + 20, browser))).toMatchObject({ hold: "weekly" });
-			}
-			for (const browser of mine.slice(2)) await settled(store, at + 20, "void", browser);
-			// user-2's trust is untouched by user-1's calls.
-			await settled(store, at + 20, "void", theirs, "user-2");
-		});
-
 		it("ends the run and lifts a backoff lock on an exempt success, and the week stands", async () => {
 			const store = await factory();
 			const t = start();
 			for (let i = 0; i < 5; i++) await fail(store, t + i);
 			expect((await check(store, t + 5)).ok).toBe(false);
-			await store.noteExemptSuccess("user-1", t + 6, POLICY, undefined);
+			await store.noteExemptSuccess("user-1", t + 6);
 			// A new run: four failures pass. The week holds the first five, so
 			// the tenth failure is the last it takes.
 			for (let i = 0; i < 4; i++) await fail(store, t + 7 + i);
-			await store.noteExemptSuccess("user-1", t + 11, POLICY, undefined);
+			await store.noteExemptSuccess("user-1", t + 11);
 			await fail(store, t + 12);
 			expect(held(await check(store, t + 13))).toEqual({
 				hold: "weekly",
@@ -1325,7 +1157,7 @@ export function runMfaTransactionStoreContract(
 			});
 		});
 
-		it("holds guessable proofs at hardLimit consecutive failures, for every browser, until an exempt success", async () => {
+		it("holds guessable proofs at hardLimit consecutive failures until an exempt success", async () => {
 			const small: MfaLockoutPolicy = {
 				...POLICY,
 				threshold: 2,
@@ -1336,21 +1168,14 @@ export function runMfaTransactionStoreContract(
 			};
 			const store = await factory();
 			let at = start();
-			const { browser } = await store.noteExemptSuccess("user-1", at, small, undefined);
 			for (let i = 0; i < 6; i++) {
 				at += MINUTE;
-				await fail(store, at, browser, small);
+				await fail(store, at, small);
 			}
 			at += DAY;
-			for (const b of [undefined, browser]) {
-				expect(held(await check(store, at, b, small))).toEqual({
-					hold: "hard",
-					retryAfterMs: null,
-				});
-			}
-			const { browser: next } = await store.noteExemptSuccess("user-1", at, small, undefined);
-			expect(next).not.toBe(browser);
-			expect((await check(store, at + 1, undefined, small)).ok).toBe(true);
+			expect(held(await check(store, at, small))).toEqual({ hold: "hard", retryAfterMs: null });
+			await store.noteExemptSuccess("user-1", at);
+			expect((await check(store, at + 1, small)).ok).toBe(true);
 		});
 
 		it("holds a campaign the victim never interrupts at hardLimit, across weeks and forgotten backoffs", async () => {
@@ -1374,51 +1199,38 @@ export function runMfaTransactionStoreContract(
 			expect(last && held(last)).toEqual({ hold: "hard", retryAfterMs: null });
 		});
 
-		it("clears everything on clearSubjectState: the run, the week and the trusted browsers", async () => {
+		it("clears the run and the week on clearSubjectState", async () => {
 			const store = await factory();
 			const t = start();
 			let at = await fillTheWeek(store, t);
-			const { browser } = await store.noteExemptSuccess("user-1", at, POLICY, undefined);
-			for (let i = 0; i < 5; i++) await fail(store, ++at, browser);
 			await store.clearSubjectState("user-1");
 			await store.clearSubjectState("user-1");
 			await store.clearSubjectState("nobody");
-			await settled(store, ++at, "void");
-			// The week starts empty, and the browser is not trusted any more.
-			at = await fillTheWeek(store, at + MINUTE);
-			expect(held(await check(store, at, browser))).toMatchObject({ hold: "weekly" });
+			// The week starts empty: five failures reach the backoff, not the
+			// weekly hold, and clearing again lifts the backoff.
+			for (let i = 0; i < 5; i++) await fail(store, ++at);
+			expect(held(await check(store, at + 1))).toMatchObject({ hold: "backoff" });
+			await store.clearSubjectState("user-1");
+			await settled(store, at + 1, "void");
 		});
 
 		it("keeps subjects apart", async () => {
 			const store = await factory();
 			const t = start();
 			const at = await fillTheWeek(store, t, "user-1");
-			const { browser } = await store.noteExemptSuccess("user-1", at, POLICY, undefined);
 			// user-1's week is not user-2's.
-			await settled(store, at, "success", undefined, "user-2");
-			// user-1's browser is nobody else's.
-			const next = await fillTheWeek(store, at + MINUTE, "user-2");
-			expect(held(await check(store, next, browser, POLICY, "user-2"))).toMatchObject({
-				hold: "weekly",
+			await settled(store, at, "success", "user-2");
+			// user-2's exempt success ends no run of user-3's.
+			for (let i = 0; i < 5; i++) await fail(store, at + i, RUN_ONLY, "user-3");
+			await store.noteExemptSuccess("user-2", at + 5);
+			expect(held(await check(store, at + 6, RUN_ONLY, "user-3"))).toMatchObject({
+				hold: "backoff",
 			});
 			// Clearing one subject leaves the other held.
+			const next = await fillTheWeek(store, at + MINUTE, "user-2");
 			await store.clearSubjectState("user-2");
-			expect(held(await check(store, next, undefined, POLICY, "user-1"))).toMatchObject({
-				hold: "weekly",
-			});
-			expect((await check(store, next, browser, POLICY, "user-1")).ok).toBe(true);
-		});
-
-		it("answers a fresh browser value on every exempt success: 32 random bytes, base64url", async () => {
-			const store = await factory();
-			const t = start();
-			const seen = new Set<string>();
-			for (let i = 0; i < 5; i++) {
-				const { browser } = await store.noteExemptSuccess("user-1", t + i, POLICY, undefined);
-				expect(browser).toMatch(/^[A-Za-z0-9_-]{43}$/);
-				seen.add(browser);
-			}
-			expect(seen.size).toBe(5);
+			expect(held(await check(store, next, POLICY, "user-1"))).toMatchObject({ hold: "weekly" });
+			await settled(store, next, "void", "user-2");
 		});
 
 		it("refuses a lockout policy it cannot apply, and an instant that is not one, with a RangeError", async () => {
@@ -1432,13 +1244,10 @@ export function runMfaTransactionStoreContract(
 				{ memorySeconds: -1 },
 				{ weeklyBudget: Number.NaN },
 				{ hardLimit: 0 },
-				{ trustedBrowsers: 0 },
-				{ trustedBrowserDays: 0 },
 				{ maxSeconds: 1e17 },
 				// Safe integers whose duration runs past the Date range once in ms.
 				{ maxSeconds: 9e12 },
 				{ memorySeconds: 9e12 },
-				{ trustedBrowserDays: 2e8 },
 				// The backoff would never engage before the hard hold.
 				{ threshold: 10, hardLimit: 6 },
 				// NIST SP 800-63B-4 caps consecutive failures at 100, as the MFA
@@ -1446,24 +1255,16 @@ export function runMfaTransactionStoreContract(
 				{ hardLimit: 101 },
 			] satisfies Partial<MfaLockoutPolicy>[]) {
 				const policy = { ...POLICY, ...bad };
-				await expect(check(store, t, undefined, policy), JSON.stringify(bad)).rejects.toThrow(
-					RangeError,
-				);
-				await expect(
-					store.noteExemptSuccess("user-1", t, policy, undefined),
-					JSON.stringify(bad),
-				).rejects.toThrow(RangeError);
+				await expect(check(store, t, policy), JSON.stringify(bad)).rejects.toThrow(RangeError);
 			}
 			for (const notAPolicy of [null, undefined, "mfa.lockout", 5]) {
 				await expect(
-					store.reserveSubjectAttempt("user-1", t, notAPolicy as never, undefined),
+					store.reserveSubjectAttempt("user-1", t, notAPolicy as never),
 					String(notAPolicy),
 				).rejects.toThrow(RangeError);
 			}
 			await expect(check(store, Number.NaN)).rejects.toThrow(RangeError);
-			await expect(
-				store.noteExemptSuccess("user-1", Number.NaN, POLICY, undefined),
-			).rejects.toThrow(RangeError);
+			await expect(store.noteExemptSuccess("user-1", Number.NaN)).rejects.toThrow(RangeError);
 		});
 	});
 

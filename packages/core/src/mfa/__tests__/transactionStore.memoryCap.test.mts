@@ -81,8 +81,6 @@ const TX = (id: string, expiresAtMs = T0 + 600_000): MfaTransaction => ({
 	challenge: undefined,
 	pendingEnrollment: undefined,
 	attempts: 0,
-	sends: 0,
-	lastSentAtMs: undefined,
 	createdAtMs: T0,
 	expiresAtMs,
 	version: 1,

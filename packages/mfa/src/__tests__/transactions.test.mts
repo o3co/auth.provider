@@ -77,8 +77,6 @@ describe("the login's transaction", () => {
 			challenge: undefined,
 			pendingEnrollment: undefined,
 			attempts: 0,
-			sends: 0,
-			lastSentAtMs: undefined,
 			createdAtMs: NOW,
 			expiresAtMs: NOW + 600_000,
 			version: 0,

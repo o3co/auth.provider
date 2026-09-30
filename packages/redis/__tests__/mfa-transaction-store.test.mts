@@ -86,12 +86,11 @@ const alternating = (keyPrefix: string): MfaTransactionStore => {
 		reserveAttempt: (id, max) => pick().reserveAttempt(id, max),
 		takeChallenge: (id, expectedVersion) => pick().takeChallenge(id, expectedVersion),
 		consume: (id, expectedVersion) => pick().consume(id, expectedVersion),
-		reserveSubjectAttempt: (subject, nowMs, policy, browser) =>
-			pick().reserveSubjectAttempt(subject, nowMs, policy, browser),
+		reserveSubjectAttempt: (subject, nowMs, policy) =>
+			pick().reserveSubjectAttempt(subject, nowMs, policy),
 		settleSubjectAttempt: (subject, reservation, outcome) =>
 			pick().settleSubjectAttempt(subject, reservation, outcome),
-		noteExemptSuccess: (subject, nowMs, policy, browser) =>
-			pick().noteExemptSuccess(subject, nowMs, policy, browser),
+		noteExemptSuccess: (subject, nowMs) => pick().noteExemptSuccess(subject, nowMs),
 		clearSubjectState: (subject) => pick().clearSubjectState(subject),
 		requireEmailProofAtNextBinding: (subject) => pick().requireEmailProofAtNextBinding(subject),
 		emailProofRequiredAtNextBinding: (subject) => pick().emailProofRequiredAtNextBinding(subject),
@@ -114,8 +113,6 @@ const POLICY: MfaLockoutPolicy = {
 	memorySeconds: 86_400,
 	weeklyBudget: 10,
 	hardLimit: 100,
-	trustedBrowsers: 5,
-	trustedBrowserDays: 30,
 };
 
 const TX = (overrides: Partial<MfaTransaction> = {}): MfaTransaction => {
@@ -134,8 +131,6 @@ const TX = (overrides: Partial<MfaTransaction> = {}): MfaTransaction => {
 		challenge: undefined,
 		pendingEnrollment: undefined,
 		attempts: 0,
-		sends: 0,
-		lastSentAtMs: undefined,
 		createdAtMs: now,
 		expiresAtMs: now + 10 * MINUTE,
 		version: 1,
@@ -178,7 +173,7 @@ describe("createRedisMfaTransactionStore — the transaction", () => {
 		// than dying before it.
 		expect(await deadlineOf(key)).toBe(Math.ceil(expiresAtMs));
 		// Neither an update nor a reserved attempt moves the deadline.
-		await store.update("tx-1", 1, { sends: 1 });
+		await store.update("tx-1", 1, { enrollment: "allowed" });
 		await store.reserveAttempt("tx-1", 5);
 		expect(await deadlineOf(key)).toBe(Math.ceil(expiresAtMs));
 	});
@@ -197,7 +192,7 @@ describe("createRedisMfaTransactionStore — the transaction", () => {
 		const tx = TX();
 		await onTime.create(tx);
 		expect(await ahead.get("tx-1")).toBeNull();
-		expect(await ahead.update("tx-1", 1, { sends: 1 })).toBeNull();
+		expect(await ahead.update("tx-1", 1, { enrollment: "allowed" })).toBeNull();
 		expect(await onTime.get("tx-1")).toStrictEqual(tx);
 		expect(await ahead.consume("tx-1", 1)).toBeNull();
 		// …and it refuses to create one whose expiry is already past on that clock.
@@ -320,12 +315,45 @@ describe("createRedisMfaTransactionStore — the transaction", () => {
 			await store.create(TX());
 			await first().hset(key, field, value);
 			expect(await store.get("tx-1"), `${field}=${value}`).toBeNull();
-			expect(await store.update("tx-1", 1, { sends: 1 }), `${field}=${value}`).toBeNull();
+			expect(await store.update("tx-1", 1, { enrollment: "allowed" }), `${field}=${value}`).toBeNull();
 		}
 		await first().del(key);
 		await store.create(TX());
 		await first().hset(key, "record", "not json");
 		expect(await store.consume("tx-1", 1)).toBeNull();
+	});
+
+	it("reads a transaction that still carries a send count or a last send, whatever they hold, and ignores both", async () => {
+		// A transaction written before they left lives ten minutes at most. A
+		// send count and a last send bounded mail, which is the sender's now:
+		// neither holds a limit the store still keeps.
+		const prefix = freshPrefix();
+		const store = storeAt(prefix);
+		const key = `${prefix}tx:{${keyPart("tx-1")}}`;
+		const tx = TX({ challenge: CHALLENGE });
+		for (const [sends, lastSentAtMs] of [
+			["2", "1759200000000"],
+			["-1", "not json"],
+			["two", '"yesterday"'],
+		] as const) {
+			await first().del(key);
+			await store.create(tx);
+			await first().hset(key, "sends", sends, "lastSentAtMs", lastSentAtMs);
+			expect(await store.get("tx-1"), `${sends}, ${lastSentAtMs}`).toStrictEqual(tx);
+			const updated = await store.update("tx-1", 1, { enrollment: "allowed" });
+			expect(updated, `${sends}, ${lastSentAtMs}`).toStrictEqual({
+				...tx,
+				enrollment: "allowed",
+				version: 2,
+			});
+			expect(await store.takeChallenge("tx-1", 2)).toStrictEqual(CHALLENGE);
+			expect(await store.consume("tx-1", 2)).toStrictEqual({
+				...tx,
+				challenge: undefined,
+				enrollment: "allowed",
+				version: 2,
+			});
+		}
 	});
 
 	it("answers a record written before the binding, or bound by a kind it does not know, as absent: no reading of it as a session's", async () => {
@@ -352,7 +380,7 @@ describe("createRedisMfaTransactionStore — the transaction", () => {
 			const fixed = JSON.parse((await first().hget(key, "record")) ?? "null") as Fixed;
 			await first().hset(key, "record", JSON.stringify(rewrite(fixed)));
 			expect(await store.get("tx-1"), what).toBeNull();
-			expect(await store.update("tx-1", 1, { sends: 1 }), what).toBeNull();
+			expect(await store.update("tx-1", 1, { enrollment: "allowed" }), what).toBeNull();
 			expect(await store.consume("tx-1", 1), what).toBeNull();
 		}
 	});
@@ -372,7 +400,7 @@ describe("createRedisMfaTransactionStore — the subject state", () => {
 		const prefix = freshPrefix();
 		const store = storeAt(prefix);
 		const t = start();
-		const reserved = await store.reserveSubjectAttempt("user-1", t, POLICY, undefined);
+		const reserved = await store.reserveSubjectAttempt("user-1", t, POLICY);
 		if (!reserved.ok) throw new Error("expected a reservation");
 		const tag = `{${keyPart("user-1")}}`;
 		expect((await first().keys(`${prefix}*`)).sort()).toEqual(
@@ -387,20 +415,20 @@ describe("createRedisMfaTransactionStore — the subject state", () => {
 
 	it("gives it no TTL while a run is counted, and a deadline a day past the last thing that still counts once none is", async () => {
 		// A run is kept until a success ends it (the hard limit counts it across
-		// weeks); a week's failure and a trust are kept a day past the instant
-		// they stop counting (MFA_CLOCK_SKEW_ALLOWANCE_MS), on the server's
-		// clock — which is what Redis reclaims by.
+		// weeks); a week's failure is kept a day past the instant it stops
+		// counting (MFA_CLOCK_SKEW_ALLOWANCE_MS), on the server's clock — which
+		// is what Redis reclaims by.
 		const prefix = freshPrefix();
 		const store = storeAt(prefix);
 		const t = start();
 		const lock = `${prefix}lock:{${keyPart("user-1")}}`;
 		const week = `${prefix}week:{${keyPart("user-1")}}`;
 
-		await store.noteExemptSuccess("user-1", t, POLICY, undefined);
-		// A trust, nothing else: it ends trustedBrowserDays after it began.
-		expect(await deadlineOf(lock)).toBe(t + 30 * DAY + DAY);
+		// An exempt success on a subject with nothing counted keeps nothing.
+		await store.noteExemptSuccess("user-1", t);
+		expect(await first().exists(lock, week)).toBe(0);
 
-		const failed = await store.reserveSubjectAttempt("user-1", t + MINUTE, POLICY, undefined);
+		const failed = await store.reserveSubjectAttempt("user-1", t + MINUTE, POLICY);
 		if (!failed.ok) throw new Error("expected a reservation");
 		await store.settleSubjectAttempt("user-1", failed.reservation, "failure");
 		expect(await deadlineOf(lock)).toBe(-1);
@@ -409,16 +437,13 @@ describe("createRedisMfaTransactionStore — the subject state", () => {
 		const succeeded = await store.reserveSubjectAttempt(
 			"user-1",
 			t + 2 * MINUTE,
-			POLICY,
-			undefined,
-		);
+			POLICY);
 		if (!succeeded.ok) throw new Error("expected a reservation");
 		await store.settleSubjectAttempt("user-1", succeeded.reservation, "success");
-		// The run is over. The week counts the failure until a week after it;
-		// the trust lasts until the window each reservation extended empties —
-		// a week after the last one — and both keys go a day after the later.
-		expect(await deadlineOf(lock)).toBe(t + 2 * MINUTE + WEEK + DAY);
-		expect(await deadlineOf(week)).toBe(t + 2 * MINUTE + WEEK + DAY);
+		// The run is over. The week counts the failure until a week after it,
+		// and both keys go a day after that.
+		expect(await deadlineOf(lock)).toBe(t + MINUTE + WEEK + DAY);
+		expect(await deadlineOf(week)).toBe(t + MINUTE + WEEK + DAY);
 
 		await store.clearSubjectState("user-1");
 		expect(await first().exists(lock, week)).toBe(0);
@@ -436,7 +461,7 @@ describe("createRedisMfaTransactionStore — the subject state", () => {
 		const week = `${prefix}week:{${keyPart("user-1")}}`;
 		const sentinel = t + 365 * DAY;
 		const fail = async (at: number) => {
-			const r = await store.reserveSubjectAttempt("user-1", at, POLICY, undefined);
+			const r = await store.reserveSubjectAttempt("user-1", at, POLICY);
 			if (!r.ok) throw new Error("expected a reservation");
 			await store.settleSubjectAttempt("user-1", r.reservation, "failure");
 		};
@@ -444,7 +469,7 @@ describe("createRedisMfaTransactionStore — the subject state", () => {
 		for (let i = 0; i < 5; i++) await fail(t + i);
 		await first().pexpireat(lock, sentinel);
 		await first().pexpireat(week, sentinel);
-		expect(await store.reserveSubjectAttempt("user-1", t + 10, POLICY, undefined)).toMatchObject({
+		expect(await store.reserveSubjectAttempt("user-1", t + 10, POLICY)).toMatchObject({
 			ok: false,
 			hold: "backoff",
 		});
@@ -459,17 +484,17 @@ describe("createRedisMfaTransactionStore — the subject state", () => {
 		const weekOnly: MfaLockoutPolicy = { ...POLICY, threshold: 100 };
 		let at = t;
 		for (let i = 1; i <= 10; i++) {
-			const r = await weekly.reserveSubjectAttempt("user-1", at, weekOnly, undefined);
+			const r = await weekly.reserveSubjectAttempt("user-1", at, weekOnly);
 			if (!r.ok) throw new Error("expected a reservation");
 			await weekly.settleSubjectAttempt("user-1", r.reservation, "failure");
 			at += MINUTE;
 		}
-		await weekly.noteExemptSuccess("user-1", at, weekOnly, undefined);
+		await weekly.noteExemptSuccess("user-1", at);
 		expect(await deadlineOf(weeklyLock)).toBeGreaterThan(0);
 		await first().pexpireat(weeklyLock, sentinel);
 		await first().pexpireat(weeklyWeek, sentinel);
 		expect(
-			await weekly.reserveSubjectAttempt("user-1", at + MINUTE, weekOnly, undefined),
+			await weekly.reserveSubjectAttempt("user-1", at + MINUTE, weekOnly),
 		).toMatchObject({ ok: false, hold: "weekly" });
 		expect(await deadlineOf(weeklyLock)).toBe(sentinel);
 		expect(await deadlineOf(weeklyWeek)).toBe(sentinel);
@@ -486,13 +511,13 @@ describe("createRedisMfaTransactionStore — the subject state", () => {
 		const week = `${prefix}week:{${keyPart("user-1")}}`;
 		const long = serverNow - 20 * DAY;
 		for (let i = 0; i < 5; i++) {
-			const r = await store.reserveSubjectAttempt("user-1", long + i, small, undefined);
+			const r = await store.reserveSubjectAttempt("user-1", long + i, small);
 			if (!r.ok) throw new Error("expected a reservation");
 			await store.settleSubjectAttempt("user-1", r.reservation, "failure");
 		}
 		await first().pexpireat(lock, serverNow + 365 * DAY);
 		expect(
-			await store.reserveSubjectAttempt("user-1", serverNow - 5 * DAY, small, undefined),
+			await store.reserveSubjectAttempt("user-1", serverNow - 5 * DAY, small),
 		).toMatchObject({ ok: false, hold: "hard" });
 		// The week's five failures were forgotten; the run, still counted, keeps
 		// the hash without a TTL.
@@ -504,7 +529,7 @@ describe("createRedisMfaTransactionStore — the subject state", () => {
 		const prefix = freshPrefix();
 		const store = storeAt(prefix);
 		const t = start();
-		const reserved = await store.reserveSubjectAttempt("user-1", t, POLICY, undefined);
+		const reserved = await store.reserveSubjectAttempt("user-1", t, POLICY);
 		if (!reserved.ok) throw new Error("expected a reservation");
 		await store.settleSubjectAttempt("user-1", reserved.reservation, "void");
 		expect(await first().keys(`${prefix}*`)).toEqual([]);
@@ -518,7 +543,7 @@ describe("createRedisMfaTransactionStore — the subject state", () => {
 		const t = start();
 		const lock = `${prefix}lock:{${keyPart("user-1")}}`;
 		const week = `${prefix}week:{${keyPart("user-1")}}`;
-		const reserved = await store.reserveSubjectAttempt("user-1", t, POLICY, undefined);
+		const reserved = await store.reserveSubjectAttempt("user-1", t, POLICY);
 		if (!reserved.ok) throw new Error("expected a reservation");
 		await first().hset(lock, "r:x", "garbage");
 		for (const outcome of ["success", "void", "failure"] as const) {
@@ -542,19 +567,50 @@ describe("createRedisMfaTransactionStore — the subject state", () => {
 		const week = `${prefix}week:{${keyPart("user-1")}}`;
 		for (const [key, write] of [
 			[lock, () => first().hset(lock, "r:x", "garbage")],
-			[lock, () => first().hset(lock, "t:x", "1|2")],
 			[week, () => first().zadd(week, "inf", "x")],
 		] as const) {
 			await first().del(lock, week);
 			await write();
 			await expect(
-				store.reserveSubjectAttempt("user-1", t, POLICY, undefined),
+				store.reserveSubjectAttempt("user-1", t, POLICY),
 				key,
 			).rejects.toThrow(/subject state/);
-			await expect(store.noteExemptSuccess("user-1", t, POLICY, undefined), key).rejects.toThrow(
-				/subject state/,
-			);
+			await expect(store.noteExemptSuccess("user-1", t), key).rejects.toThrow(/subject state/);
 		}
+	});
+
+	it("ignores a trusted browser's record the lock still holds, whatever it holds: it lets no attempt through the weekly hold", async () => {
+		// A trust only ever let an attempt through the weekly hold. Read as
+		// nothing, the week holds every attempt, as it holds one from a
+		// browser nobody trusted.
+		const prefix = freshPrefix();
+		const store = storeAt(prefix);
+		const t = start();
+		const lock = `${prefix}lock:{${keyPart("user-1")}}`;
+		const week = `${prefix}week:{${keyPart("user-1")}}`;
+		const weekOnly: MfaLockoutPolicy = { ...POLICY, threshold: 100 };
+		let at = t;
+		for (let i = 1; i <= 10; i++) {
+			const r = await store.reserveSubjectAttempt("user-1", at, weekOnly);
+			if (!r.ok) throw new Error("expected a reservation");
+			await store.settleSubjectAttempt("user-1", r.reservation, "failure");
+			at += MINUTE;
+		}
+		const until = String(t + 30 * DAY);
+		await first().hset(lock, "t:digest-1", `${t}|${until}||1`, "t:digest-2", "1|2");
+		expect(await store.reserveSubjectAttempt("user-1", at, weekOnly)).toEqual({
+			ok: false,
+			hold: "weekly",
+			retryAfterMs: t + WEEK - at,
+		});
+		await store.noteExemptSuccess("user-1", at);
+		expect(await store.reserveSubjectAttempt("user-1", at + 1, weekOnly)).toMatchObject({
+			ok: false,
+			hold: "weekly",
+		});
+		// The keys go with the week, not with the trust.
+		expect(await deadlineOf(lock)).toBe(t + 9 * MINUTE + WEEK + DAY);
+		expect(await deadlineOf(week)).toBe(t + 9 * MINUTE + WEEK + DAY);
 	});
 });
 
@@ -587,8 +643,6 @@ describe("createRedisMfaTransactionStore — the same answers as core's in-proce
 		memorySeconds: 3_600,
 		weeklyBudget: 6,
 		hardLimit: 12,
-		trustedBrowsers: 2,
-		trustedBrowserDays: 3,
 	};
 	const STEPS_MS = [
 		0,
@@ -620,22 +674,13 @@ describe("createRedisMfaTransactionStore — the same answers as core's in-proce
 			let at = start;
 			/** Each reservation in flight, as each store named it. */
 			const pending: Array<readonly [string, string]> = [];
-			/** Each browser an exempt success trusted, as each store named it. */
-			const browsers: Array<readonly [string, string]> = [];
-			const browserPair = (): readonly [string | undefined, string | undefined] => {
-				const roll = random();
-				if (roll < 0.4 || browsers.length === 0) return [undefined, undefined];
-				if (roll < 0.5) return ["not-a-browser", "not-a-browser"];
-				return choose(browsers);
-			};
 
 			for (let step = 0; step < 400; step += 1) {
 				at = Math.max(start, at + choose(STEPS_MS));
 				const roll = random();
 				if (roll < 0.55) {
-					const [mine, theirs] = browserPair();
-					const expected = await memory.reserveSubjectAttempt("user-1", at, SMALL, mine);
-					const actual = await redis.reserveSubjectAttempt("user-1", at, SMALL, theirs);
+					const expected = await memory.reserveSubjectAttempt("user-1", at, SMALL);
+					const actual = await redis.reserveSubjectAttempt("user-1", at, SMALL);
 					const shape = (r: MfaSubjectAttemptReservation) =>
 						r.ok ? "ok" : { hold: r.hold, retryAfterMs: r.retryAfterMs };
 					expect(shape(actual), `step ${step}`).toEqual(shape(expected));
@@ -649,10 +694,8 @@ describe("createRedisMfaTransactionStore — the same answers as core's in-proce
 					await memory.settleSubjectAttempt("user-1", mine, outcome);
 					await redis.settleSubjectAttempt("user-1", theirs, outcome);
 				} else if (roll < 0.97) {
-					const [mine, theirs] = browserPair();
-					const expected = await memory.noteExemptSuccess("user-1", at, SMALL, mine);
-					const actual = await redis.noteExemptSuccess("user-1", at, SMALL, theirs);
-					browsers.push([expected.browser, actual.browser]);
+					await memory.noteExemptSuccess("user-1", at);
+					await redis.noteExemptSuccess("user-1", at);
 				} else {
 					await memory.clearSubjectState("user-1");
 					await redis.clearSubjectState("user-1");
@@ -676,11 +719,11 @@ describe("createRedisMfaTransactionStore — the same answers as core's in-proce
 		const answers: MfaSubjectAttemptReservation[] = [];
 		for (const store of [createMemoryMfaTransactionStore(), storeAt(freshPrefix())]) {
 			for (let i = 0; i < 3; i++) {
-				const reserved = await store.reserveSubjectAttempt("user-1", t, tie, undefined);
+				const reserved = await store.reserveSubjectAttempt("user-1", t, tie);
 				if (!reserved.ok) throw new Error("expected a reservation");
 				await store.settleSubjectAttempt("user-1", reserved.reservation, "failure");
 			}
-			answers.push(await store.reserveSubjectAttempt("user-1", t + 1, tie, undefined));
+			answers.push(await store.reserveSubjectAttempt("user-1", t + 1, tie));
 		}
 		expect(answers[1]).toEqual(answers[0]);
 		expect(answers[0]).toEqual({ ok: false, hold: "weekly", retryAfterMs: WEEK - 1 });
@@ -694,51 +737,19 @@ describe("createRedisMfaTransactionStore — the same answers as core's in-proce
 		const answers: boolean[] = [];
 		for (const store of [createMemoryMfaTransactionStore(), storeAt(freshPrefix())]) {
 			for (let i = 0; i < 4; i++) {
-				const reserved = await store.reserveSubjectAttempt("user-1", t + 10 * i, POLICY, undefined);
+				const reserved = await store.reserveSubjectAttempt("user-1", t + 10 * i, POLICY);
 				if (!reserved.ok) throw new Error("expected a reservation");
 				await store.settleSubjectAttempt("user-1", reserved.reservation, "failure");
 			}
-			await store.noteExemptSuccess("user-1", t + 30, POLICY, undefined);
+			await store.noteExemptSuccess("user-1", t + 30);
 			for (let i = 0; i < 4; i++) {
-				const next = await store.reserveSubjectAttempt("user-1", t + 40 + i, POLICY, undefined);
+				const next = await store.reserveSubjectAttempt("user-1", t + 40 + i, POLICY);
 				if (!next.ok) throw new Error("expected a reservation");
 				await store.settleSubjectAttempt("user-1", next.reservation, "failure");
 			}
-			answers.push((await store.reserveSubjectAttempt("user-1", t + 50, POLICY, undefined)).ok);
+			answers.push((await store.reserveSubjectAttempt("user-1", t + 50, POLICY)).ok);
 		}
 		expect(answers).toEqual([true, true]);
-	});
-
-	it("keeps a trust's window where a later attempt set it when a caller behind extends it, as core's store does", async () => {
-		// An attempt reserved by a caller ahead sets the window of the trust an
-		// exempt success grants; one reserved afterwards by a caller behind
-		// must not pull that window back.
-		const t = Math.floor(Date.now() / 1000) * 1000;
-		const answers: MfaSubjectAttemptReservation[] = [];
-		for (const store of [createMemoryMfaTransactionStore(), storeAt(freshPrefix())]) {
-			const ahead = await store.reserveSubjectAttempt("user-1", t + DAY, POLICY, undefined);
-			if (!ahead.ok) throw new Error("expected a reservation");
-			await store.settleSubjectAttempt("user-1", ahead.reservation, "failure");
-			const { browser } = await store.noteExemptSuccess("user-1", t, POLICY, undefined);
-			const behind = await store.reserveSubjectAttempt("user-1", t + 1, POLICY, browser);
-			if (!behind.ok) throw new Error("expected a reservation");
-			await store.settleSubjectAttempt("user-1", behind.reservation, "success");
-			// Fill the week once the behind caller's window would have emptied and
-			// before the ahead caller's does: only a window kept where the ahead
-			// attempt set it still trusts the browser there.
-			const from = t + 1 + WEEK + MINUTE;
-			for (let i = 0; i < 12; i++) {
-				const r = await store.reserveSubjectAttempt("user-1", from + i, POLICY, undefined);
-				if (!r.ok) break;
-				await store.settleSubjectAttempt(
-					"user-1",
-					r.reservation,
-					i % 4 === 3 ? "success" : "failure",
-				);
-			}
-			answers.push(await store.reserveSubjectAttempt("user-1", from + 20, POLICY, browser));
-		}
-		expect(answers.map((answer) => answer.ok)).toEqual([true, true]);
 	});
 });
 
@@ -749,7 +760,7 @@ describe("createRedisMfaTransactionStore — the email proof at the next first b
 		const key = `${prefix}proof:{${keyPart("user-1")}}`;
 		await store.requireEmailProofAtNextBinding("user-1");
 		expect(await first().pttl(key)).toBe(-1);
-		await store.reserveSubjectAttempt("user-1", Date.now(), POLICY, undefined);
+		await store.reserveSubjectAttempt("user-1", Date.now(), POLICY);
 		await store.clearSubjectState("user-1");
 		expect(await first().keys(`${prefix}*`)).toEqual([key]);
 		expect(await store.consumeEmailProofRequirement("user-1")).toBe(true);
