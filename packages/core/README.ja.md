@@ -72,7 +72,7 @@ const config = handle.components.config; // boot がパースしたもの
 | `oauth.grants` | グラントタイプごとの設定。グラントタイプをキーとする。`oauth` パッケージは自分が登録するグラント — `session`、`authorization_code`、`refresh_token`、`client_credentials`、jwt-bearer の URN — の `enabled` を読み、true のものだけを登録する。他のグラントパッケージはこのキーを読まない: token exchange と WebAuthn はモジュールが組み込まれればグラントを登録し、device grant は `oauth.deviceAuthorization.enabled` が true のときだけグラントを登録する — 渡された config から `deviceGrantModule({ config })` が決める |
 | `session` | ブラウザーセッションの cookie とそのストア — `secret`、`name`、`maxAge`、`secure`、`sameSite`、`domain`、`redirectAllowlist`、`storage`、`csrf` |
 | `session.csrf` | 状態変更する session ルートの CSRF ポリシー — `trustedOrigins`、`ttlSeconds` |
-| `rateLimit` | `login`: 同梱の両リミッターが初期値に使う `/session/login` の予算（`windowMs`、`limit`）。`failMode`: OAuth エンドポイントのリミッターのバックエンドが失敗したときの動作 — `closed` は `503` を返し、`open` はリクエストを通してエラーをログに出す。OAuth エンドポイントの制限値そのものはリミッターモジュールのもの（`memoryRateLimiter.*` / `redisRateLimiter.*`） |
+| `rateLimit` | `login`: `/session/login` の予算（`windowMs`、`limit`）。session モジュールがこれを `login` の予算として寄与する。`failMode`: Redis リミッターの障害時ポリシーで、Redis が応答できないときにスロットリングされる全ルートがとる動作 — `closed` は `503` を返し、`open` はリクエストを通してエラーをログに出す。OAuth エンドポイントの制限値そのものはリミッターモジュールのもの（`memoryRateLimiter.*` / `redisRateLimiter.*`） |
 | `federations` | フェデレーションプロバイダー。名前をキーとする `{ enabled, type?, … }`。core が読むのは `enabled`（boot 時のフェデレーションストア配線チェック）だけで、`type` とエントリの残りはそれを読むアダプターパッケージのもの — アダプターパッケージは [ルート README](../../README.md) に一覧がある |
 | `repositories` | client、user、code の Repository 設定 — それぞれ `type` とそのサブセクション |
 | `endpoints` | `login.url`: デプロイのログインページ。`consent.url`: first-party でないクライアント向けの同意ページ（デフォルト `/consent`）。`mfa.url`: ステップアップのページ（デフォルト `/mfa`）。MFA パッケージの `mfa` 要件がこれをステップアップのページとして登録する。そのパッケージが無ければ、ブラウザーをそこへ送るものはない |
@@ -256,7 +256,7 @@ JWT の `exp`・`iat`・`nbf` は、有限で Date の範囲に収まるとき�
 - `loginCompletion` — 要件の完了処理が session パッケージを import する代わりに使う、ログインの末尾（`establishSession`、`answerInterruption`）— [`src/session-admission/login-completion.mts`](src/session-admission/login-completion.mts)。
 - `loginEntry`、`csrfGuard`、`csrfTokenSigner`、`sessionCookiePolicy`: `redirect_to` のプロトコルを伴うログインページ、ブラウザーが状態を変えてよいかの唯一のポリシー（リクエストと、フローを始めるナビゲーションの両方）、セッションのシークレットの所有者がガードの提供者に渡す CSRF トークンの署名、セッション Cookie の属性 — [`src/browser-session/types.mts`](src/browser-session/types.mts)。
 - `httpSettings`（`trustProxy`、CORS のオリジン）と `deploymentMode`（`single`、`multi`、`unset`。core 自身が埋める予定）— [`src/deployment/types.mts`](src/deployment/types.mts)。
-- `RateLimiter.failMode` — リミッター自身の障害時ポリシー — [`src/ratelimit/types.mts`](src/ratelimit/types.mts)。
+- `RateLimiter.failMode` — リミッター自身の障害時ポリシー。ガードはこれを適用する（宣言がなければ `closed`）— [`src/ratelimit/types.mts`](src/ratelimit/types.mts)。
 
 それぞれ、提供者のテストが実行する契約スイートと、— テストがリテラルで埋める `deploymentMode` を除き — 読む側のテストがスロットを埋めるテストダブルが `@o3co/auth-provider-core/testing` にあります: `oauthTokenSettingsContract` と `createTestOAuthTokenSettings`、`loginCompletionContract` と `createRecordingLoginCompletion`、`loginEntryContract` と `createTestLoginEntry`、`csrfGuardContract` と `createTestCsrfGuard`、`csrfTokenSignerContract` と `createTestCsrfTokenSigner`、`sessionCookiePolicyContract` と `createTestSessionCookiePolicy`、`httpSettingsContract` と `createTestHttpSettings`、`deploymentModeContract`、`rateLimiterContract` と `createTestRateLimiter`。各スロットが持つものは [docs/adapter-surface.md](../../docs/adapter-surface.md) にあります。
 
@@ -508,8 +508,9 @@ const userRepo = new InMemoryUserRepository(users);
 - `RateLimiter.check(key, ctx)` で atomic check + increment
 - Factory: `createRateLimiterFactory()`。`registerBuiltinRateLimiters()` が登録するのは `"memory"` だけ。`"redis"` バックエンドは `@o3co/auth-provider-redis`（`redisRateLimiterBuilder`、または宣言的な `redisRateLimiterModule`）にあり、ここで登録されないことを `ratelimit/__tests__/factory.test.mts` が検査している
 - deny 時には core が 429 + `Retry-After` で応答。判定の `reason` を RFC 6749 の文字の範囲で `error_description` とし、ないとき・空のとき・文字列でないときは `Rate limit exceeded` とする
-- 同梱の 2 つのリミッターは、それぞれの設定セクションにあるエンドポイントごとの予算を seed する（`resolveSeededLimitSpecs`、[`src/ratelimit/seededSpecs.mts`](src/ratelimit/seededSpecs.mts)）。その中に MFA のプレフィックス `mfa`（`MFA_RATE_LIMIT_PREFIX`、`mfa.rateLimit.routes` から）と `mfa-email`（`MFA_EMAIL_RATE_LIMIT_PREFIX`、`mfa.factors.email.sendLimit` から）がある — [`src/ratelimit/mfaSpec.mts`](src/ratelimit/mfaSpec.mts)。プレフィックスに対するオペレーター自身の `limits` の項目が優先する。与えられていないキーは何も seed しない。与えられたが使えないキーは、そのキーを名指しする `RangeError` で起動を拒否する
-- プレフィックスを所有するモジュールは、その予算を `rateLimitBudgets` の contribution として寄与できる（[#728](https://github.com/o3co/auth.provider/issues/728)）。core はそれらを `rateLimitBudgetResolver` のビューに合成し、2 つのモジュールが同じプレフィックスを寄与すること、リミッターのキーが持てないプレフィックス、ホスト独自のコレクターを拒否する。予算はパース済みの数値である（環境変数の文字列は拒否される）。`null` を返した予算のプレフィックスは、リミッターの `defaultLimit` に従う。同梱のどちらのリミッターもまだそのビューを読まず、適用されるのは上の seed のままである
+- プレフィックスを所有するモジュールは、自分の設定から読んだ予算を `rateLimitBudgets` の contribution として寄与する: session モジュールは `login`、device grant は `device_verification`、WebAuthn は `webauthn-authentication-options`、MFA モジュールは `mfa`。core はそれらを `rateLimitBudgetResolver` のビューに合成し、2 つのモジュールが同じプレフィックスを寄与すること、リミッターのキーが持てないプレフィックス、ホスト独自のコレクターを拒否する。予算はパース済みの数値である（環境変数の文字列は拒否される）。`null` を返した予算のプレフィックスは、リミッターの `defaultLimit` に従う。core はどのパッケージの予算も名指しせず、設定から読むこともない
+- 同梱の 2 つのリミッターは、キーの予算を一つのルックアップ `createRateLimitBudgetLookup`（[`src/ratelimit/budgetLookup.mts`](src/ratelimit/budgetLookup.mts)）から得る: キーのプレフィックスに対するリミッター自身の `limits` の項目、なければ寄与された予算（チェックごとに読む）、なければ `defaultLimit`
+- ガードの障害時ポリシーはリミッター自身の `failMode` である（`createRateLimitGuard`、`checkWithFailMode`）: `open` ならリクエストを通し、それ以外（宣言なしを含む）は `503` を返す。プロセス内のリミッターは宣言しない。Redis リミッターは `rateLimit.failMode` を答える
 
 #### リフレッシュトークンファミリー（RFC 6819 §5.2.2.3 の replay 検出）
 

@@ -1,6 +1,6 @@
 # @o3co/auth-provider-federation-grants
 
-Last updated: 2026-09-29
+Last updated: 2026-09-30
 
 Federation grants for [`auth.provider`](https://github.com/o3co/auth.provider) — offline delegation of upstream access tokens (#593). A user consents once that a client may reach one upstream connection on their behalf; the client then obtains upstream access tokens over HTTP, later, with the user nowhere near a browser.
 
@@ -614,7 +614,7 @@ nothing else; the grant keeps working.
 | A store of this package could not answer | 503 | `temporarily_unavailable` | `storage` |
 | Session admission could not answer — the session store, the sessions boundary or a session requirement — described as every consumer of admission describes it (core's `describeAdmissionOutage`) | 503 | `temporarily_unavailable` | `session store unavailable`, `revocation store unavailable` or `session requirement unavailable` |
 | The client registry could not answer — judging the question or describing the client | 503 | `temporarily_unavailable` | `client registry unavailable` |
-| The limiter backend is down, under `rateLimit.failMode = "closed"` | 503 | `temporarily_unavailable` | `rate_limiter` |
+| The limiter backend is down, and the limiter's `failMode` is `"closed"` | 503 | `temporarily_unavailable` | `rate_limiter` |
 | The upstream URL could not be built, or the federation lost the capability (nothing is spent) | 503 | `temporarily_unavailable` | `upstream_unavailable` |
 
 A challenge is not a bearer token: it is answerable only from the browser it
