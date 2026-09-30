@@ -1014,6 +1014,20 @@ describe("/authorize — rejection audit vocabulary (authorize.rejected)", () =>
 			}),
 		);
 	});
+
+	it("emits authorize.rejected when scope is omitted and the client declares no defaultScopes", async () => {
+		const record = vi.fn(async () => {});
+		const { app } = await makeApp({ auditSink: { record }, client: { defaultScopes: undefined } });
+		const res = await authorize(app, baseQuery);
+		expect(redirectParams(res).get("error")).toBe("invalid_scope");
+		expect(record).toHaveBeenCalledWith(
+			expect.objectContaining({
+				type: "authorize.rejected",
+				clientId: CLIENT_ID,
+				details: { reason: "scope_omitted_without_default" },
+			}),
+		);
+	});
 });
 
 /*

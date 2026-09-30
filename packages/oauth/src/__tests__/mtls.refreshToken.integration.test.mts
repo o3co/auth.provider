@@ -317,7 +317,9 @@ describe("mTLS refresh-token compound-cnf rejection", () => {
 		expect(result.status).toBe(400);
 		if (!("error" in result)) expect.fail("Expected error in result");
 		expect(result.error).toBe("invalid_grant");
-		expect(result.errorDescription).toContain("compound cnf binding");
+		expect(result.errorDescription).toBe(
+			"refresh_token has compound cnf binding which is not supported",
+		);
 	});
 
 	it("compound cnf rejected even when no proof presented (defense-in-depth)", async () => {
@@ -341,7 +343,9 @@ describe("mTLS refresh-token compound-cnf rejection", () => {
 		expect(result.status).toBe(400);
 		if (!("error" in result)) expect.fail("Expected error in result");
 		expect(result.error).toBe("invalid_grant");
-		expect(result.errorDescription).toContain("compound cnf binding");
+		expect(result.errorDescription).toBe(
+			"refresh_token has compound cnf binding which is not supported",
+		);
 	});
 });
 
