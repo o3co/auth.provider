@@ -59,6 +59,12 @@ export interface RateLimiter {
 	 */
 	readonly failMode?: RateLimitFailMode;
 	/**
+	 * The budget a key falls to when nothing else covers its prefix. Boot holds
+	 * an override of a switched-off budget to it; a limiter that declares none
+	 * gets no such override.
+	 */
+	readonly defaultLimit?: RateLimitSpec;
+	/**
 	 * Atomic check + increment. Key is endpoint-specific (e.g.,
 	 * "login:ip:1.2.3.4", "token:client:abc").
 	 */

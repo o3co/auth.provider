@@ -489,6 +489,12 @@ describe("deviceGrantModule — the route it actually contributes", () => {
 		csrfGuard: createTestCsrfGuard(),
 		// The synthetic key the planner fills (the session-admission ADR's D1).
 		sessionRequirementResolver: resolverForTests([]),
+		// The budgets in force, as the planner fills them from this module's contribution.
+		rateLimitBudgetResolver: {
+			get: (prefix: string) =>
+				prefix === "device_verification" ? { limit: 5, windowSeconds: 300 } : undefined,
+			entries: () => new Map().entries(),
+		},
 		rateLimiter: createMemoryRateLimiter({
 			limits: {
 				device_verification: { limit: 5, windowSeconds: 300 },

@@ -43,6 +43,9 @@ const REQUIRES = [
 	// The replica count the authentication/options route's fallback limiter is
 	// refused or warned about by; the grant does not read it.
 	"deploymentMode",
+	// The budgets in force, which the options route's mismatch warning reads; the
+	// grant does not read it.
+	"rateLimitBudgetResolver",
 ] as const;
 const OPTIONAL = [
 	"grantPolicy",

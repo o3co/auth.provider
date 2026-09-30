@@ -77,6 +77,7 @@ import {
 	withClientIdMetadataDocuments,
 } from "./clients/clientIdMetadataDocument.mjs";
 import { createClientAuthMiddleware, resolveRealm } from "./middleware/clientAuth.mjs";
+import { OAUTH_RATE_LIMIT_PREFIXES } from "./rateLimitPrefixes.mjs";
 import { resolveOAuthOptions } from "./resolveOAuthOptions.mjs";
 import { createAuthorizeHandler, loginTripFromConfig } from "./routes/authorize.mjs";
 import { createConsentRouter } from "./routes/consent.mjs";
@@ -541,7 +542,7 @@ export const createOAuthRouter = async (
 			// Rate limit BEFORE client auth so repeated unauthenticated
 			// hits cannot escape rate limiting via the clientAuthMw rejection path
 			// (and so DoS amplification through repository lookups is bounded).
-			rateLimitGuard("token"),
+			rateLimitGuard(OAUTH_RATE_LIMIT_PREFIXES.token),
 			tokenClientAuthMw,
 			async (req: Request, res: Response) => {
 				const { grant_type } = req.body;
@@ -858,7 +859,7 @@ export const createOAuthRouter = async (
 				res.set("Pragma", "no-cache");
 				next();
 			},
-			rateLimitGuard("introspect"),
+			rateLimitGuard(OAUTH_RATE_LIMIT_PREFIXES.introspect),
 			async (req: Request, res: Response, next) => {
 				// Bearer (RFC 6750 §2.1) or DPoP (RFC 9449 §7.1) — the caller's own
 				// access token used as the introspection credential. Which scheme a
@@ -1094,8 +1095,8 @@ export const createOAuthRouter = async (
 	// checks. Mounted only with the authorization_code grant.
 	if (authorizeHandler !== undefined) {
 		router
-			.get("/authorize", rateLimitGuard("authorize"), authorizeHandler)
-			.post("/authorize", rateLimitGuard("authorize"), authorizeHandler);
+			.get("/authorize", rateLimitGuard(OAUTH_RATE_LIMIT_PREFIXES.authorize), authorizeHandler)
+			.post("/authorize", rateLimitGuard(OAUTH_RATE_LIMIT_PREFIXES.authorize), authorizeHandler);
 	}
 
 	// OIDC Core §5.3 — UserInfo endpoint
@@ -1183,7 +1184,7 @@ export const createOAuthRouter = async (
 	// ID Metadata Documents on, an outbound fetch). A guard route ahead of
 	// `createRevokeRouter`, which owns the path: `router.all` matches `/revoke`
 	// exactly, where `router.use` would throttle every path beneath it too.
-	router.all("/revoke", rateLimitGuard("revoke"));
+	router.all("/revoke", rateLimitGuard(OAUTH_RATE_LIMIT_PREFIXES.revoke));
 	router.use(
 		createRevokeRouter(express, {
 			clientRepository,

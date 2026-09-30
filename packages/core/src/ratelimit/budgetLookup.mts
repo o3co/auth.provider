@@ -42,7 +42,12 @@ export interface RateLimitBudget {
 	readonly spec: RateLimitSpec;
 }
 
-export type RateLimitBudgetLookup = (key: string) => RateLimitBudget;
+/** A key's budget, and the default it falls to. */
+export interface RateLimitBudgetLookup {
+	(key: string): RateLimitBudget;
+	/** `defaultLimit` as it was checked, frozen. */
+	readonly defaultLimit: RateLimitSpec;
+}
 
 const prefixOf = (key: string): string => {
 	const colon = key.indexOf(":");
@@ -66,13 +71,14 @@ export function createRateLimitBudgetLookup(
 			{ limit: spec.limit, windowSeconds: spec.windowSeconds },
 		]),
 	);
-	const defaultLimit: RateLimitSpec = {
+	const defaultLimit: RateLimitSpec = Object.freeze({
 		limit: options.defaultLimit.limit,
 		windowSeconds: options.defaultLimit.windowSeconds,
-	};
+	});
 	const { budgets } = options;
-	return (key) => {
+	const lookup = (key: string): RateLimitBudget => {
 		const prefix = prefixOf(key);
 		return { prefix, spec: limits[prefix] ?? budgets?.get(prefix) ?? defaultLimit };
 	};
+	return Object.assign(lookup, { defaultLimit });
 }

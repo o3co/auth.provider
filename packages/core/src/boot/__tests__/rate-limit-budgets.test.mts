@@ -332,7 +332,9 @@ describe("rateLimitBudgets — the boot line", () => {
 		const handle = await createApp({
 			modules: [memoryRateLimiterModule, limiterUser],
 			bootstrapComponents: {
-				...withMemoryLimiter({ rateLimit: { failMode: "open" } }),
+				...withMemoryLimiter({
+					rateLimit: { login: { windowMs: 900_000, limit: 20 }, failMode: "open" },
+				}),
 				logger: logger as never,
 			},
 		});

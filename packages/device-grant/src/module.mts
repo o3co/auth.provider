@@ -48,8 +48,6 @@ import {
 	MAX_DURATION_SECONDS,
 	type Module,
 	type ProviderDeps,
-	type RateLimitSpec,
-	requireUsableConfiguredRateLimitSpec,
 	resolveAccessTokenLifetime,
 } from "@o3co/auth-provider-core";
 import { createClientAuthMiddleware } from "@o3co/auth-provider-oauth";
@@ -166,6 +164,9 @@ const REQUIRES = [
 	// Session admission's synthetic key: the verification endpoint admits
 	// each action through it. The planner always fills it.
 	"sessionRequirementResolver",
+	// The budgets in force; the verification route holds its own to its
+	// configuration. The planner always fills it.
+	"rateLimitBudgetResolver",
 ] as const;
 // `replaySeenSet` records a client assertion's single-use `jti`. Optional as
 // on the OAuth router: without it a `private_key_jwt` request is
@@ -502,16 +503,16 @@ const requireUserSessionStore = (
 };
 
 /**
- * The limiter applies this budget to `device_verification` only because this
- * module contributes it, and it contributes none when the key is absent. A
- * hand-built config that skipped the schema default would silently run on the
- * limiter's default budget instead of the one the `rateLimiter` requirement
- * reasons from. An unusable key is refused with the call the contribution
- * makes, so both give the same message.
+ * The `device_verification` budget in force (`rateLimitBudgetResolver`) must be
+ * `oauth.deviceAuthorization.rateLimit`, the budget the `rateLimiter`
+ * requirement's RFC 8628 §5.1 argument rests on; boot is refused otherwise.
  */
-const requireVerificationRateLimit = (slice: DeviceAuthorizationConfigSlice): RateLimitSpec => {
-	const spec = slice.rateLimit;
-	if (spec === undefined) {
+const requireVerificationBudgetInForce = (
+	slice: DeviceAuthorizationConfigSlice,
+	deps: Pick<DeviceGrantModuleDeps, "rateLimitBudgetResolver">,
+): void => {
+	const configured = readVerificationRateLimitBudget(slice);
+	if (configured === null) {
 		throw new Error(
 			"deviceGrantModule: oauth.deviceAuthorization.enabled = true requires " +
 				"oauth.deviceAuthorization.rateLimit { limit, windowSeconds }. It is the budget " +
@@ -521,7 +522,20 @@ const requireVerificationRateLimit = (slice: DeviceAuthorizationConfigSlice): Ra
 				"requirement reasons from.",
 		);
 	}
-	return requireUsableConfiguredRateLimitSpec("oauth.deviceAuthorization.rateLimit", spec);
+	const inForce = deps.rateLimitBudgetResolver.get(DEVICE_VERIFICATION_RATE_LIMIT_PREFIX);
+	if (inForce?.limit !== configured.limit || inForce.windowSeconds !== configured.windowSeconds) {
+		const shown =
+			inForce === undefined
+				? "none"
+				: `limit ${inForce.limit}, windowSeconds ${inForce.windowSeconds}`;
+		throw new Error(
+			`deviceGrantModule: the device_verification budget in force (${shown}) is not ` +
+				`oauth.deviceAuthorization.rateLimit (limit ${configured.limit}, windowSeconds ` +
+				`${configured.windowSeconds}): another module has set it. RFC 8628 §5.1 sizes the ` +
+				"user code against the configured budget; change oauth.deviceAuthorization.rateLimit " +
+				"instead.",
+		);
+	}
 };
 
 /**
@@ -564,6 +578,8 @@ export const deviceGrantModule = (params: { config: AppConfig }): Module => {
 			rateLimitBudgets: {
 				[DEVICE_VERIFICATION_RATE_LIMIT_PREFIX]: (deps) =>
 					readVerificationRateLimitBudget(deps.section),
+				// Keyed by the device_authorization guard, with no budget of its own.
+				[DEVICE_AUTHORIZATION_RATE_LIMIT_PREFIX]: () => null,
 			},
 			// Only when enabled — see the file header. Absent, `/oauth/token`
 			// answers `unsupported_grant_type` for an unregistered grant, and
@@ -677,10 +693,9 @@ export const deviceGrantModule = (params: { config: AppConfig }): Module => {
 					// The session module's CSRF guard, on the whole route rather than
 					// on `approve` / `deny` alone, so no future action can forget it.
 					const csrfGuard = requireCsrfGuard(deps);
-					// Asserted here so the `rateLimiter` requirement really means the
-					// configured budget, which the limiter applies as this module's
-					// contribution.
-					requireVerificationRateLimit(slice);
+					// The `rateLimiter` requirement means the configured budget only
+					// while that budget is the one in force.
+					requireVerificationBudgetInForce(slice, deps);
 					const userSessionStore = requireUserSessionStore(deps);
 					router.post(
 						"/",

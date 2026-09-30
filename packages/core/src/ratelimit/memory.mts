@@ -79,6 +79,7 @@ export function createMemoryRateLimiter(options: MemoryRateLimiterOptions): Rate
 
 	return {
 		kind: "memory",
+		defaultLimit: budgetFor.defaultLimit,
 		async check(key) {
 			const now = Date.now();
 			const { prefix, spec } = budgetFor(key);

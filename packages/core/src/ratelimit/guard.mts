@@ -23,6 +23,7 @@ import { consoleLogger } from "../logging/consoleLogger.mjs";
 import type { Logger } from "../logging/Logger.mjs";
 import { loggableError } from "../logging/loggableError.mjs";
 import type { RateLimitContext, RateLimitDecision, RateLimiter, RateLimitSpec } from "./types.mjs";
+import { shownConfigValue } from "./usableSpec.mjs";
 
 /**
  * How the guard behaves when the limiter backend itself errors: the
@@ -149,6 +150,20 @@ export const checkWithFailMode = async (
 		return { status: "unavailable", failMode };
 	}
 };
+
+/**
+ * The limiter's outage policy, read once: `"closed"` when it declares none.
+ * A declared value other than `"open"` or `"closed"` is a `RangeError` naming
+ * `who`.
+ */
+export function readRateLimitFailMode(limiter: RateLimiter, who: string): RateLimitFailMode {
+	const declared: unknown = limiter.failMode;
+	if (declared === undefined) return "closed";
+	if (declared === "open" || declared === "closed") return declared;
+	throw new RangeError(
+		`${who}: a rate limiter's failMode must be "open" or "closed" when it declares one (got ${shownConfigValue(declared)})`,
+	);
+}
 
 /**
  * The 503 body the guard answers under `failMode = "closed"`, so a caller of

@@ -35,7 +35,6 @@ import {
 	defineModule,
 	type RateLimiter,
 	type RateLimitSpec,
-	readConfiguredRateLimitSpec,
 	requireUsableConfiguredRateLimitSpec,
 } from "@o3co/auth-provider-core";
 import express from "express";
@@ -90,7 +89,8 @@ export const webauthnModule = defineModule<
 	| "challengeCeremony"
 	| "config"
 	| "keyStore"
-	| "deploymentMode",
+	| "deploymentMode"
+	| "rateLimitBudgetResolver",
 	| "grantPolicy"
 	| "rateLimiter"
 	| "auditSink"
@@ -115,6 +115,8 @@ export const webauthnModule = defineModule<
 		// The replica count core fills: the authentication/options route's per-process fallback
 		// is refused under `multi`. Required, so a mode read as absent cannot lift that refusal.
 		"deploymentMode",
+		// The budgets in force, which the mismatch warning compares with the slot.
+		"rateLimitBudgetResolver",
 	],
 	optional: [
 		// Required by the grant factory, which throws at boot without it; optional here only so
@@ -255,28 +257,17 @@ export const webauthnModule = defineModule<
 						);
 					}
 				} else {
-					// A shared limiter applies the budget this module contributes from the app
-					// config's `webauthn.rateLimit.authenticationOptions`, not this slot (which may
-					// be hard-coded). When the key is missing or differs, the budget in force is
-					// not the one this slot states, so boot warns once with both values. The key
-					// is read as the contribution reads it (numeric strings equal numbers). An
-					// explicit `limits.webauthn-authentication-options` in the limiter's own
-					// section overrides both and is not visible here.
-					const configured = (
-						deps.config as {
-							webauthn?: { rateLimit?: { authenticationOptions?: unknown } };
-						}
-					).webauthn?.rateLimit?.authenticationOptions;
-					const contributed = readConfiguredRateLimitSpec(configured);
-					if (
-						contributed === undefined ||
-						contributed.limit !== spec.limit ||
-						contributed.windowSeconds !== spec.windowSeconds
-					) {
+					// A shared limiter applies the budget in force for the tag, not this slot;
+					// boot warns once when they differ. A limiter's own `limits` entry for the
+					// tag overrides both and is not visible here.
+					const inForce = deps.rateLimitBudgetResolver.get(
+						WEBAUTHN_AUTHENTICATION_OPTIONS_RATE_LIMIT_TAG,
+					);
+					if (inForce?.limit !== spec.limit || inForce.windowSeconds !== spec.windowSeconds) {
 						logger.warn(
 							{
 								key: "webauthn.rateLimit.authenticationOptions",
-								configured: configured ?? null,
+								inForce: inForce === undefined ? null : { ...inForce },
 								webauthnConfig: spec,
 							},
 							"webauthn_authentication_options_budget_mismatch",

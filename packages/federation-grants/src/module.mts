@@ -58,10 +58,15 @@ import {
 	createDisabledFederationGrantBrowserRouter,
 	createFederationGrantBrowserRouter,
 	FEDERATION_GRANTS_BROWSER_MOUNT_PATH,
+	FEDERATION_GRANTS_BROWSER_RATE_LIMIT_PREFIX,
 	type FederationGrantDelegatedAuthorizer,
 } from "./browserRoutes.mjs";
 import { resolveFederationGrantConnections } from "./connections.mjs";
-import { createDisabledFederationGrantRouter, createFederationGrantRouter } from "./routes.mjs";
+import {
+	createDisabledFederationGrantRouter,
+	createFederationGrantRouter,
+	FEDERATION_GRANTS_RATE_LIMIT_PREFIX,
+} from "./routes.mjs";
 import { FEDERATION_GRANTS_MOUNT_PATH } from "./types.mjs";
 
 /**
@@ -340,6 +345,12 @@ export const federationGrantsModule = defineModule<Requires, Optional>({
 	requires: REQUIRES,
 	optional: OPTIONAL,
 	contributes: {
+		// The prefixes both routers limit under, claimed with no budget of their
+		// own, whether or not the feature is enabled.
+		rateLimitBudgets: {
+			[FEDERATION_GRANTS_RATE_LIMIT_PREFIX]: () => null,
+			[FEDERATION_GRANTS_BROWSER_RATE_LIMIT_PREFIX]: () => null,
+		},
 		routes: [
 			(deps: FederationGrantsModuleDeps) => {
 				if (!isEnabled(deps)) {

@@ -76,6 +76,7 @@ export function createRedisRateLimiter(opts: CreateRedisRateLimiterOptions): Rat
 
 	return {
 		kind: "redis",
+		defaultLimit: budgetFor.defaultLimit,
 		...(failMode === undefined ? {} : { failMode }),
 		async check(key) {
 			const { prefix, spec } = budgetFor(key);
