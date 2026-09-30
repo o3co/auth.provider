@@ -84,6 +84,53 @@ describe("mfaFactorContract", () => {
 		expect(await failing(inputFor({ kind: "test_2", amrValues: ["hwk", "swk"] }))).toEqual([]);
 	});
 
+	it("passes a factor that holds every call to the account's id as its subject, enrollment and verification alike", async () => {
+		const bound = (factor: MfaFactor): MfaFactor => ({
+			...factor,
+			beginEnrollment: async (ctx) => {
+				if (ctx.subject !== ctx.user.id) throw new Error("the ceremony is not the account's");
+				return factor.beginEnrollment(ctx);
+			},
+			completeEnrollment: async (ctx) => {
+				if (ctx.subject !== ctx.user.id) return { ok: false, reason: "invalid" };
+				const done = await factor.completeEnrollment(ctx);
+				return done.ok ? { ...done, data: { ...done.data, subject: ctx.subject } } : done;
+			},
+			verify: async (ctx) =>
+				ctx.subject === ctx.factor.data.subject
+					? factor.verify(ctx)
+					: { ok: false, reason: "invalid" },
+		});
+		expect(await failing(inputFor({}, bound))).toEqual([]);
+		expect(await failing(inputFor({ challenge: true }, bound))).toEqual([]);
+		expect(await failing({ ...inputFor({}, bound), user: { ...USER, id: "u-another" } })).toEqual(
+			[],
+		);
+	});
+
+	it("passes a factor whose state and data are objects with no prototype, as the coordinator's sealing takes them", async () => {
+		const bare = <T extends object>(value: T): T => Object.assign(Object.create(null), value);
+		expect(
+			await failing(
+				inputFor({ challenge: true }, (factor) => ({
+					...factor,
+					beginEnrollment: async (ctx) => {
+						const start = await factor.beginEnrollment(ctx);
+						return { ...start, state: bare(start.state) };
+					},
+					completeEnrollment: async (ctx) => {
+						const done = await factor.completeEnrollment(ctx);
+						return done.ok ? { ...done, data: bare(done.data) } : done;
+					},
+					challenge: async (ctx) => {
+						const sent = await (factor.challenge as NonNullable<MfaFactor["challenge"]>)(ctx);
+						return { ...sent, state: bare(sent.state ?? {}) };
+					},
+				})),
+			),
+		).toEqual([]);
+	});
+
 	it("fails a kind a hint cannot carry", async () => {
 		expect(await failing(inputFor({ kind: "Test" }))).toEqual([RULES.kind]);
 	});
@@ -187,7 +234,7 @@ describe("mfaFactorContract", () => {
 					...factor,
 					challenge: async (ctx) => {
 						const sent = await (factor.challenge as NonNullable<MfaFactor["challenge"]>)(ctx);
-						return { ...sent, state: { ...sent.state, undefinedMember: undefined } };
+						return { ...sent, state: { ...sent.state, sentAt: new Map([["at", ctx.nowMs]]) } };
 					},
 				})),
 			),
