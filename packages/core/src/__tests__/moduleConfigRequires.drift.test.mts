@@ -68,7 +68,6 @@ const CONFIG_REQUIRERS: readonly string[] = [
 	"packages/dpop -> dpop",
 	"packages/federation-grants -> federation-grants",
 	"packages/mfa -> mfa-totp-factor",
-	"packages/mtls -> mtls",
 	"packages/oauth -> oauth",
 	"packages/oauth -> oauth-authorization",
 	"packages/oauth -> oauth-session",

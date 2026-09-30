@@ -18,7 +18,7 @@
  * trusted-proxy.test.mts — the single trusted-proxy address vocabulary, shared
  * by `http.trustProxy` (this package's config schema validates its entries
  * here, so a typo fails at boot instead of silently never matching) and
- * `oauth.mtls.trusted-proxies` (`@o3co/auth-provider-mtls` matches
+ * `mtls.trustedProxies` (`@o3co/auth-provider-mtls` matches
  * `req.socket.remoteAddress` against them). It is deliberately Express's own
  * `trust proxy` vocabulary, so a value that validates here is one Express accepts.
  */

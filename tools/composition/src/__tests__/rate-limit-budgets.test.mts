@@ -25,7 +25,7 @@
  *
  * - shipped: every package on, as the full set boots it;
  * - configured: each owner's own key set by an operator
- *   (`rateLimit.login`, `oauth.deviceAuthorization.rateLimit`,
+ *   (`rateLimit.login`, `device-grant.rateLimit`,
  *   `webauthn.rateLimit.authenticationOptions`, `mfa.rateLimit.routes`);
  * - declared: the same, and every prefix also declared in the limiter's own
  *   `limits`, which wins;
@@ -118,7 +118,7 @@ const TABLE: Readonly<Record<Prefix, Readonly<Record<Cell, Applied>>>> = {
 /** Each owner's own key, as an operator's layer sets it. */
 const OWNERS_KEYS = `
 rateLimit.login { windowMs = 60000, limit = 7 }
-oauth.deviceAuthorization.rateLimit { limit = 3, windowSeconds = 120 }
+device-grant.rateLimit { limit = 3, windowSeconds = 120 }
 webauthn.rateLimit.authenticationOptions { limit = 11, windowSeconds = 30 }
 mfa.rateLimit.routes { limit = 13, windowSeconds = 240 }
 `;

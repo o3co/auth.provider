@@ -33,7 +33,7 @@ export type MtlsReasonCode =
 	| "tls_peer_unavailable"
 	/**
 	 * A forwarded-certificate header arrived from a peer not in
-	 * `oauth.mtls.trusted-proxies`: either an attacker setting the header
+	 * `mtls.trustedProxies`: either an attacker setting the header
 	 * directly or a proxy missing from the allowlist. The audit record carries
 	 * the observed peer address so the two are separable.
 	 */

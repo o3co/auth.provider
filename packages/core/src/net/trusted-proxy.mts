@@ -21,7 +21,7 @@
  * - `http.trustProxy` goes straight to Express's `trust proxy`, which decides
  *   whether `X-Forwarded-For` / `-Proto` may rewrite `req.ip` / `req.protocol`;
  *   {@link checkTrustedProxyEntry} makes a typo fail at boot.
- * - `oauth.mtls.trusted-proxies` (`@o3co/auth-provider-mtls`) matches
+ * - `mtls.trustedProxies` (`@o3co/auth-provider-mtls`) matches
  *   `req.socket.remoteAddress` with {@link createTrustedProxyMatcher} to decide
  *   whether a forwarded client-certificate header is evidence of anything.
  *

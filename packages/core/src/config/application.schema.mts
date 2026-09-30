@@ -214,25 +214,6 @@ const REMOVED_AUTHORIZE_FIELDS: readonly RemovedKey[] = [
 ];
 
 /**
- * Fields removed from `oauth.dpop`; same mechanism as above. Failed rather than
- * ignored (docs/release-policy.md "Retiring a config key"): a deployment that
- * wired a shared DPoP store beside a memory seen-set would otherwise move its
- * DPoP records into memory silently.
- */
-const REMOVED_DPOP_FIELDS: readonly RemovedKey[] = [
-	{
-		name: "replay-store",
-		removedIn: "v0.16.0 (#673)",
-		note:
-			"Every accepted DPoP proof is now recorded in the replaySeenSet component — the " +
-			"seen-set private_key_jwt client authentication and WebAuthn record in — and the " +
-			"dpopReplayStore slot is gone. Choose the backend there: redisReplaySeenSetModule " +
-			'shares it across replicas (replaySeenSet.adapter = "redis" in the standalone ' +
-			'template), and core.deployment.mode = "multi" refuses the memory one.',
-	},
-];
-
-/**
  * A duration read strictly: a number, or the plain decimal string an
  * environment variable arrives as. Not `z.coerce.number()`, which reads `null`
  * and `[]` as 0, `true` as 1 and `"1e3"` as 1000: a malformed duration would be
@@ -738,41 +719,19 @@ export const CoreConfigSchema = z.object({
 				adapter: z.enum(["memory", "redis"]).optional(),
 			})
 			.optional(),
-		// The RFC 8628 device-grant section `deviceGrantModule` reads, mirrored so
-		// a parse through this strip-mode object keeps it. Presence-only: defaults
-		// and real bounds live in the device-grant package's `reference.conf` and
-		// `deviceGrantConfigSchema`; enum-shaped keys keep their vocabulary so a
-		// typo fails here by name.
-		deviceAuthorization: z
-			.object({
-				enabled: coerceBooleanFromEnv.optional(),
-				"verification-uri": z.string().optional(),
-				"verification-uri-complete": coerceBooleanFromEnv.optional(),
-				"code-lifetime-seconds": z.coerce.number().int().positive().optional(),
-				"polling-interval-seconds": z.coerce.number().int().positive().optional(),
-				rateLimit: z
-					.object({
-						limit: z.coerce.number().int().positive(),
-						windowSeconds: z.coerce.number().int().positive().max(MAX_DURATION_SECONDS),
-					})
-					.optional(),
-				// The declared-absence spelling for the `deviceCodeStore` slot;
-				// `"unsupported"` is the only value the module accepts.
-				store: z.literal("unsupported").optional(),
-			})
-			.optional(),
+		// Presence-only: the paths the device-grant, oauth-token-exchange, mTLS
+		// and DPoP modules' sections moved from, kept so a root that parses with
+		// `AppConfigSchema` before boot still hands them to the relocation
+		// refusal. Nothing reads them.
+		deviceAuthorization: z.unknown().optional(),
+		tokenExchange: z.unknown().optional(),
+		mtls: z.unknown().optional(),
+		dpop: z.unknown().optional(),
 		// Bounds the OIDC `nonce` at /authorize so a malicious RP cannot exhaust
 		// per-request memory or bloat the id_token. Default in HOCON.
 		nonce: z
 			.object({
 				maxLength: z.coerce.number().int().positive(),
-			})
-			.optional(),
-		// Bounds RFC 8693 actor delegation chains so repeated token exchanges
-		// cannot nest `act` claims without limit. Default in HOCON.
-		tokenExchange: z
-			.object({
-				maxActorChainDepth: z.coerce.number().int().positive(),
 			})
 			.optional(),
 		// Opt-in RFC 8707 Resource Indicator enforcement; off in reference.conf
@@ -847,70 +806,6 @@ export const CoreConfigSchema = z.object({
 				bindConfidentialClientRefreshTokens: coerceBooleanFromEnv.optional(),
 			})
 			.optional(),
-		// The two binding-mechanism sections `tokenBinding` dispatches over,
-		// mirrored so a parse through this strip-mode object keeps them. A lost
-		// section is the quietest failure: `enabled` falls to the module's
-		// `false` and the mechanism reads as switched off, not misconfigured, with
-		// its boot refusals never seeing the config. Presence-only: bounds and
-		// defaults stay in `mtlsConfigSchema` / `dpopConfigSchema` and each
-		// package's `reference.conf`; enum-shaped keys keep their vocabulary so a
-		// typo fails here by name.
-		mtls: z
-			.object({
-				enabled: coerceBooleanFromEnv.optional(),
-				source: z.enum(["header", "tls-layer"]).optional(),
-				"cert-header": z.string().optional(),
-				"cert-header-dialect": z.enum(["envoy", "plain-pem"]).optional(),
-				"trusted-proxies": z.array(z.string()).optional(),
-				mode: z.enum(["self-signed", "pki", "full-pki"]).optional(),
-				"trusted-cas": z.array(z.string()).optional(),
-				"full-pki": z
-					.object({
-						"max-chain-depth": z.coerce.number().int().positive().optional(),
-						// Strings, not an enum: the mtls package owns and checks this
-						// vocabulary, and a copy here would drift.
-						"signature-algorithms": z.array(z.string()).optional(),
-						"min-rsa-key-bits": z.coerce.number().int().positive().optional(),
-						// No defaults anywhere: the module refuses boot unless the
-						// operator writes `mode` and `on-unavailable`, and it can only
-						// see what survives this parse.
-						revocation: z
-							.object({
-								mode: z.enum(["crl", "ocsp", "both", "disabled"]).optional(),
-								"on-unavailable": z.enum(["reject", "allow"]).optional(),
-								"allowed-hosts": z.array(z.string()).optional(),
-								"fetch-timeout-ms": z.coerce.number().int().positive().optional(),
-								"cache-ttl-seconds": z.coerce.number().int().nonnegative().optional(),
-								"max-response-bytes": z.coerce.number().int().positive().optional(),
-								"ocsp-require-nonce": coerceBooleanFromEnv.optional(),
-							})
-							.optional(),
-					})
-					.optional(),
-			})
-			.optional(),
-		// `replay-store` is retired loudly (REMOVED_DPOP_FIELDS). Every field
-		// below owns its coercion, which the preprocess wrapper requires.
-		dpop: withRemovedKeys(
-			"oauth.dpop",
-			REMOVED_DPOP_FIELDS,
-			z
-				.object({
-					enabled: coerceBooleanFromEnv.optional(),
-					"iat-window-seconds": z.coerce.number().int().positive().optional(),
-					"alg-whitelist": z.array(z.string()).optional(),
-					"replay-store-ttl-seconds": z.coerce.number().int().positive().optional(),
-					// Server-provided nonce; the module's own schema defaults it.
-					nonce: z
-						.object({
-							required: z.enum(["never", "as", "as+rs"]).optional(),
-							"ttl-seconds": z.coerce.number().int().positive().optional(),
-							secret: z.string().optional(),
-						})
-						.optional(),
-				})
-				.optional(),
-		),
 	}),
 	// Core's own section, strict at every level: an unknown key is refused,
 	// named and never its value.

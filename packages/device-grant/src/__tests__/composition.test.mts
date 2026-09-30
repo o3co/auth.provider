@@ -119,20 +119,20 @@ const deploymentProviders = defineModule({
 	},
 });
 
-const makeConfig = (deviceAuthorization: Record<string, unknown>): AppConfig => {
+const makeConfig = (deviceGrant: Record<string, unknown>): AppConfig => {
 	const base = makeValidAppConfig();
 	return {
 		...base,
 		// supertest speaks plain HTTP, and express-session sets no `Secure`
 		// cookie on it — which also rules out the fixture's `__Host-` name.
 		session: { ...base.session, name: "auth.session", secure: false },
-		oauth: { ...base.oauth, deviceAuthorization },
-	};
+		"device-grant": deviceGrant,
+	} as AppConfig;
 };
 
 const ENABLED = {
 	enabled: true,
-	"verification-uri": `${ISSUER}/device`,
+	verificationUri: `${ISSUER}/device`,
 };
 
 /**

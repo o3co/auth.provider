@@ -515,20 +515,12 @@ describe("full-pki tuning defaults", () => {
 		// Two consumers, one source. Written twice they would eventually
 		// disagree, and only the path nobody tests by default would notice.
 		const parsed = mtlsConfigSchema.parse({
-			oauth: {
-				mtls: {
-					enabled: true,
-					mode: "full-pki",
-					"full-pki": { revocation: { mode: "disabled", "on-unavailable": "reject" } },
-				},
-			},
+			enabled: true,
+			mode: "full-pki",
+			fullPki: { revocation: { mode: "disabled", onUnavailable: "reject" } },
 		});
-		expect(parsed.oauth.mtls["full-pki"]?.["max-chain-depth"]).toBe(
-			FULL_PKI_DEFAULTS.maxChainDepth,
-		);
-		expect(parsed.oauth.mtls["full-pki"]?.["min-rsa-key-bits"]).toBe(
-			FULL_PKI_DEFAULTS.minRsaKeyBits,
-		);
+		expect(parsed.fullPki?.maxChainDepth).toBe(FULL_PKI_DEFAULTS.maxChainDepth);
+		expect(parsed.fullPki?.minRsaKeyBits).toBe(FULL_PKI_DEFAULTS.minRsaKeyBits);
 	});
 });
 

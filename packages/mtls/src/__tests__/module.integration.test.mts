@@ -51,11 +51,11 @@ const EXPECTED_THUMBPRINT = createHash("sha256")
 interface MtlsTestConfig {
 	enabled: boolean;
 	source?: "header" | "tls-layer";
-	"cert-header"?: string;
-	"cert-header-dialect"?: "envoy" | "plain-pem";
+	certHeader?: string;
+	certHeaderDialect?: "envoy" | "plain-pem";
 	mode?: "self-signed" | "pki";
-	"trusted-cas"?: readonly string[];
-	"trusted-proxies"?: readonly string[];
+	trustedCas?: readonly string[];
+	trustedProxies?: readonly string[];
 }
 
 const makeBoot = (mtls: MtlsTestConfig): BootstrapMap =>
@@ -64,20 +64,20 @@ const makeBoot = (mtls: MtlsTestConfig): BootstrapMap =>
 			...makeValidCoreConfig(),
 			oauth: {
 				...makeValidCoreConfig().oauth,
-				mtls: {
-					enabled: mtls.enabled,
-					source: mtls.source ?? "header",
-					"cert-header": mtls["cert-header"] ?? "x-forwarded-client-cert",
-					"cert-header-dialect": mtls["cert-header-dialect"] ?? "envoy",
-					mode: mtls.mode ?? "self-signed",
-					"trusted-cas": mtls["trusted-cas"] ?? [],
-					// supertest dials the ephemeral listener over the loopback
-					// interface, so the app sees `::ffff:127.0.0.1` / `::1`.
-					"trusted-proxies": mtls["trusted-proxies"] ?? ["loopback"],
-				},
 				tokenBinding: {
 					"dispatch-policy": "intent-explicit",
 				},
+			},
+			mtls: {
+				enabled: mtls.enabled,
+				source: mtls.source ?? "header",
+				certHeader: mtls.certHeader ?? "x-forwarded-client-cert",
+				certHeaderDialect: mtls.certHeaderDialect ?? "envoy",
+				mode: mtls.mode ?? "self-signed",
+				trustedCas: mtls.trustedCas ?? [],
+				// supertest dials the ephemeral listener over the loopback
+				// interface, so the app sees `::ffff:127.0.0.1` / `::1`.
+				trustedProxies: mtls.trustedProxies ?? ["loopback"],
 			},
 		} as never,
 		pathResolver: (s: string) => s,
@@ -147,7 +147,7 @@ describe("mtlsModule — integration via createApp", () => {
 		const boot = makeBoot({
 			enabled: true,
 			source: "header",
-			"cert-header-dialect": "plain-pem",
+			certHeaderDialect: "plain-pem",
 			mode: "self-signed",
 		});
 		const received: { tokenBinding?: unknown } = {};
@@ -180,7 +180,7 @@ describe("mtlsModule — integration via createApp", () => {
 		const boot = makeBoot({
 			enabled: true,
 			source: "header",
-			"cert-header-dialect": "envoy",
+			certHeaderDialect: "envoy",
 			mode: "self-signed",
 		});
 		const received: { tokenBinding?: unknown } = {};
@@ -211,7 +211,7 @@ describe("mtlsModule — integration via createApp", () => {
 	it("when enabled + malformed header: HTTP 400 with error=malformed_header", async () => {
 		const boot = makeBoot({
 			enabled: true,
-			"cert-header-dialect": "envoy",
+			certHeaderDialect: "envoy",
 			mode: "self-signed",
 		});
 		const received: { tokenBinding?: unknown } = {};
@@ -243,9 +243,9 @@ describe("mtlsModule — integration via createApp", () => {
 		const boot = makeBoot({
 			enabled: true,
 			source: "header",
-			"cert-header-dialect": "envoy",
+			certHeaderDialect: "envoy",
 			mode: "pki",
-			"trusted-cas": [ROOT_PEM],
+			trustedCas: [ROOT_PEM],
 		});
 		const received: { tokenBinding?: unknown } = {};
 		const handle = await createApp({
@@ -272,11 +272,11 @@ describe("mtlsModule — integration via createApp", () => {
 		await handle.dispose();
 	});
 
-	it("boot fails when source='header' and trusted-proxies is empty", async () => {
+	it("boot fails when source='header' and trustedProxies is empty", async () => {
 		const boot = makeBoot({
 			enabled: true,
 			source: "header",
-			"trusted-proxies": [],
+			trustedProxies: [],
 		});
 
 		await expect(
@@ -284,19 +284,19 @@ describe("mtlsModule — integration via createApp", () => {
 				modules: [mtlsModule],
 				bootstrapComponents: boot,
 			}),
-		).rejects.toThrow(/trusted-proxies/);
+		).rejects.toThrow(/trustedProxies/);
 	});
 
-	it("when enabled + header source + a peer outside trusted-proxies: HTTP 400", async () => {
+	it("when enabled + header source + a peer outside trustedProxies: HTTP 400", async () => {
 		// supertest connects over loopback; the allowlist names a different
 		// address, so the forwarded certificate must be refused: reaching the
 		// app directly must not assert an identity by setting the header.
 		const boot = makeBoot({
 			enabled: true,
 			source: "header",
-			"cert-header-dialect": "plain-pem",
+			certHeaderDialect: "plain-pem",
 			mode: "self-signed",
-			"trusted-proxies": ["10.0.0.7"],
+			trustedProxies: ["10.0.0.7"],
 		});
 		const received: { tokenBinding?: unknown } = {};
 		const handle = await createApp({
@@ -321,11 +321,11 @@ describe("mtlsModule — integration via createApp", () => {
 		await handle.dispose();
 	});
 
-	it("boot fails when mode='pki' and trusted-cas is empty", async () => {
+	it("boot fails when mode='pki' and trustedCas is empty", async () => {
 		const boot = makeBoot({
 			enabled: true,
 			mode: "pki",
-			"trusted-cas": [],
+			trustedCas: [],
 		});
 
 		await expect(
@@ -333,7 +333,7 @@ describe("mtlsModule — integration via createApp", () => {
 				modules: [mtlsModule],
 				bootstrapComponents: boot,
 			}),
-		).rejects.toThrow(/trusted-cas/);
+		).rejects.toThrow(/trustedCas/);
 	});
 
 	it("boot fails when mode='pki' and source='tls-layer'", async () => {
@@ -341,7 +341,7 @@ describe("mtlsModule — integration via createApp", () => {
 			enabled: true,
 			source: "tls-layer",
 			mode: "pki",
-			"trusted-cas": [ROOT_PEM],
+			trustedCas: [ROOT_PEM],
 		});
 
 		await expect(
@@ -363,17 +363,17 @@ describe("mtlsConfigSchema — secure defaults", () => {
 		// X-Forwarded-Client-Cert from whoever opened the connection. The
 		// certificate comes from the transport unless an operator opts out AND
 		// names the proxies allowed to speak for it.
-		const parsed = mtlsConfigSchema.parse({ oauth: {} });
-		expect(parsed.oauth.mtls.source).toBe("tls-layer");
+		const parsed = mtlsConfigSchema.parse(undefined);
+		expect(parsed.source).toBe("tls-layer");
 	});
 
-	it("defaults `trusted-proxies` to an empty list (nothing is trusted implicitly)", () => {
-		const parsed = mtlsConfigSchema.parse({ oauth: {} });
-		expect(parsed.oauth.mtls["trusted-proxies"]).toEqual([]);
+	it("defaults `trustedProxies` to an empty list (nothing is trusted implicitly)", () => {
+		const parsed = mtlsConfigSchema.parse(undefined);
+		expect(parsed.trustedProxies).toEqual([]);
 	});
 
 	it("keeps the module disabled by default", () => {
-		const parsed = mtlsConfigSchema.parse({ oauth: {} });
-		expect(parsed.oauth.mtls.enabled).toBe(false);
+		const parsed = mtlsConfigSchema.parse(undefined);
+		expect(parsed.enabled).toBe(false);
 	});
 });

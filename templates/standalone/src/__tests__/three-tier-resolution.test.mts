@@ -69,9 +69,9 @@ describe("three-tier HOCON resolution (env → application.conf → reference.co
 
 	it("reference.conf default reaches resolved config when template omits the key", () => {
 		const config = buildResolvedConfig("development");
-		// tokenExchange.maxActorChainDepth is library-owned in both layers
-		// (template doesn't override it). Verifies precedence falls through.
-		expect(config.oauth.tokenExchange?.maxActorChainDepth).toBe(3);
+		// nonce.maxLength is library-owned in both layers (template doesn't
+		// override it). Verifies precedence falls through.
+		expect(config.oauth.nonce?.maxLength).toBe(256);
 	});
 
 	it("env var at template layer can disable a template-enabled grant (precedence: env-override line must be repeated)", () => {

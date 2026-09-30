@@ -24,7 +24,7 @@
  *  - is peer-supplied, so the walk is bounded by depth.
  *
  * An anchor the client sent stays in the chain and is not trusted: trust
- * comes from `oauth.mtls.trusted-cas` alone.
+ * comes from `mtls.trustedCas` alone.
  */
 
 /** The shape of `getPeerCertificate(true)` that this module reads. */

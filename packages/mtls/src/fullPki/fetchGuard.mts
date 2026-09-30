@@ -27,7 +27,7 @@
  *    certificate chaining to a configured trust anchor.
  * 2. A required host allowlist, enforced here: trusting a CA to issue
  *    certificates is not trusting it to choose destinations inside the
- *    operator's network (the separation `oauth.mtls.trusted-proxies` draws).
+ *    operator's network (the separation `mtls.trustedProxies` draws).
  *
  * Since the operator names every destination, and internal CAs usually live
  * at private addresses, core's `isSpecialUseAddress` (RFC 6890) is not

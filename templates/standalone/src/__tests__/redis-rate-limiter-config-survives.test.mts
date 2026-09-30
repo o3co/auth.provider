@@ -16,7 +16,7 @@
 
 /**
  * Sections declared by a module rather than by core (`redisRateLimiter`,
- * `oauth.mtls`) survive this template's real resolution chain, end to end.
+ * `mtls`) survive this template's real resolution chain, end to end.
  * Starting from the shipped configuration plus an operator's own layer, the
  * overrides are followed through both configuration phases and `createApp`
  * to the limiter the module builds. Were `redisRateLimiter` stripped, the
@@ -77,15 +77,15 @@ redisRateLimiter {
   }
 }
 
-oauth.mtls {
+mtls {
   enabled = true
   mode = "full-pki"
-  trusted-cas = ["-----BEGIN CERTIFICATE-----"]
-  full-pki {
+  trustedCas = ["-----BEGIN CERTIFICATE-----"]
+  fullPki {
     revocation {
       mode = "crl"
-      on-unavailable = "reject"
-      allowed-hosts = ["crl.example.com"]
+      onUnavailable = "reject"
+      allowedHosts = ["crl.example.com"]
     }
   }
 }
@@ -202,15 +202,15 @@ describe("the shipped configuration reaches the Redis rate limiter", () => {
 
 describe("the shipped configuration carries an mTLS posture through", () => {
 	it("keeps the operator's mTLS block instead of reporting mTLS off", () => {
-		expect(config.oauth.mtls).toEqual({
+		expect((config as unknown as { mtls?: unknown }).mtls).toEqual({
 			enabled: true,
 			mode: "full-pki",
-			"trusted-cas": ["-----BEGIN CERTIFICATE-----"],
-			"full-pki": {
+			trustedCas: ["-----BEGIN CERTIFICATE-----"],
+			fullPki: {
 				revocation: {
 					mode: "crl",
-					"on-unavailable": "reject",
-					"allowed-hosts": ["crl.example.com"],
+					onUnavailable: "reject",
+					allowedHosts: ["crl.example.com"],
 				},
 			},
 		});

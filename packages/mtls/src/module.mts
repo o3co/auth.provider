@@ -18,17 +18,20 @@
  * mTLS module manifest: contributes the RFC 8705 certificate-binding
  * mechanism to core's `tokenBindingMechanisms` slot, and
  * `tls_client_certificate_bound_access_tokens` to discovery, both only while
- * `oauth.mtls.enabled` (off by default in reference.conf). The settings under
- * `oauth.tokenBinding`, the dispatch policy among them, are core's.
+ * `mtls.enabled` (off by default in reference.conf), built from its own
+ * section, `mtls {}`, parsed with {@link mtlsConfigSchema} before any factory
+ * runs. A key still written at `oauth.mtls`, the section's old path, refuses
+ * boot naming the new one. The settings under `oauth.tokenBinding`, the
+ * dispatch policy among them, are core's.
  *
  * Secure defaults: the certificate comes from the TLS layer
  * (`source = "tls-layer"`), and the forwarded-header source requires an
- * explicit `trusted-proxies` allowlist.
+ * explicit `trustedProxies` allowlist.
  */
 
-import { defineModule } from "@o3co/auth-provider-core";
+import { coerceBooleanFromEnv, defineModule } from "@o3co/auth-provider-core";
 import { z } from "zod";
-import { createMtlsMechanism } from "./extractor.mjs";
+import { createMtlsMechanism, type MtlsMechanismOptions } from "./extractor.mjs";
 import {
 	DEFAULT_SIGNATURE_ALGORITHMS,
 	SIGNATURE_ALGORITHM_NAMES,
@@ -44,124 +47,132 @@ import {
 // ---------------------------------------------------------------------------
 
 /**
- * Zod schema for the `oauth.mtls` config slice. Keys are kebab-case to match
- * reference.conf verbatim (`config.oauth.mtls["cert-header"]`).
- * `oauth.tokenBinding.dispatch-policy` belongs to core's schema, since it
- * spans every binding mechanism.
+ * The schema of `mtls {}`, the module's own section. Strict at every level: a
+ * key it does not declare refuses boot. Each scalar leaf reads the string an
+ * environment variable carries.
  */
-export const mtlsConfigSchema = z.object({
-	oauth: z.object({
-		mtls: z
+export const mtlsConfigSchema = z
+	.object({
+		/** When false (default), mtlsModule contributes null — no mTLS middleware mounted. */
+		enabled: coerceBooleanFromEnv.default(false),
+		/**
+		 * Where the leaf cert comes from. Defaults to `"tls-layer"`: RFC 8705 §3
+		 * wants the certificate from the transport, and a forwarded header
+		 * substitutes only when the forwarding hop is authenticated
+		 * (`trustedProxies`).
+		 */
+		source: z.enum(["header", "tls-layer"]).default("tls-layer"),
+		/** Header name carrying the forwarded leaf cert (header source only). */
+		certHeader: z.string().min(1).default("x-forwarded-client-cert"),
+		/** Dialect for the forwarded-cert header (header source only). */
+		certHeaderDialect: z.enum(["envoy", "plain-pem"]).default("envoy"),
+		/**
+		 * Peer addresses allowed to forward a client certificate header (header
+		 * source only). Each entry is an IPv4 / IPv6 literal, a CIDR range or a
+		 * named range. Empty by default — nothing is trusted implicitly — and
+		 * `source = "header"` with an empty list fails boot.
+		 */
+		trustedProxies: z.array(z.string()).readonly().default([]),
+		/**
+		 * Trust posture. `"self-signed"` accepts any well-formed cert; `"pki"`
+		 * runs the narrow chain walk; `"full-pki"` runs RFC 5280 path validation
+		 * with revocation. The latter two require `trustedCas`.
+		 */
+		mode: z.enum(["self-signed", "pki", "full-pki"]).default("self-signed"),
+		/** Trust anchors for mode = "pki" / "full-pki". Each entry: literal PEM or "file:<path>". */
+		trustedCas: z.array(z.string()).readonly().default([]),
+		/**
+		 * Settings for `mode = "full-pki"` only. `revocation.mode` and
+		 * `revocation.onUnavailable` have no defaults: what to do when revocation
+		 * status cannot be obtained has no universally right answer, so the
+		 * operator must write one down.
+		 */
+		fullPki: z
 			.object({
-				/** When false (default), mtlsModule contributes null — no mTLS middleware mounted. */
-				enabled: z.boolean().default(false),
-				/**
-				 * Where the leaf cert comes from. Defaults to `"tls-layer"`: RFC 8705
-				 * §3 wants the certificate from the transport, and a forwarded header
-				 * substitutes only when the forwarding hop is authenticated
-				 * (`trusted-proxies`).
-				 */
-				source: z.enum(["header", "tls-layer"]).default("tls-layer"),
-				/** Header name carrying the forwarded leaf cert (header source only). */
-				"cert-header": z.string().min(1).default("x-forwarded-client-cert"),
-				/** Dialect for the forwarded-cert header (header source only). */
-				"cert-header-dialect": z.enum(["envoy", "plain-pem"]).default("envoy"),
-				/**
-				 * Peer addresses allowed to forward a client certificate header
-				 * (header source only). Each entry is an IPv4 / IPv6 literal or
-				 * the `"loopback"` keyword. Empty by default — nothing is trusted
-				 * implicitly — and `source = "header"` with an empty list fails
-				 * boot.
-				 */
-				"trusted-proxies": z.array(z.string()).readonly().default([]),
-				/**
-				 * Trust posture. `"self-signed"` accepts any well-formed cert;
-				 * `"pki"` runs the narrow chain walk; `"full-pki"` runs RFC 5280
-				 * path validation with revocation. The latter two require
-				 * `trusted-cas`.
-				 */
-				mode: z.enum(["self-signed", "pki", "full-pki"]).default("self-signed"),
-				/** Trust anchors for mode = "pki" / "full-pki". Each entry: literal PEM or "file:<path>". */
-				"trusted-cas": z.array(z.string()).readonly().default([]),
-				/**
-				 * Settings for `mode = "full-pki"` only. `revocation.mode` and
-				 * `revocation.on-unavailable` have no defaults: what to do when
-				 * revocation status cannot be obtained has no universally right
-				 * answer, so the operator must write one down.
-				 */
-				"full-pki": z
+				/** Maximum certificates in a path, leaf and anchor included. */
+				maxChainDepth: z.coerce
+					.number()
+					.int()
+					.min(2)
+					.max(16)
+					.default(FULL_PKI_DEFAULT_MAX_CHAIN_DEPTH),
+				/** Signature algorithms permitted at every hop. */
+				signatureAlgorithms: z
+					.array(z.enum(SIGNATURE_ALGORITHM_NAMES as unknown as [string, ...string[]]))
+					.readonly()
+					.default(DEFAULT_SIGNATURE_ALGORITHMS as unknown as string[]),
+				/** Minimum RSA modulus in bits. Ignored for EC and EdDSA keys. */
+				minRsaKeyBits: z.coerce.number().int().min(1024).default(FULL_PKI_DEFAULT_MIN_RSA_KEY_BITS),
+				revocation: z
 					.object({
-						/** Maximum certificates in a path, leaf and anchor included. */
-						"max-chain-depth": z
-							.number()
-							.int()
-							.min(2)
-							.max(16)
-							.default(FULL_PKI_DEFAULT_MAX_CHAIN_DEPTH),
-						/** Signature algorithms permitted at every hop. */
-						"signature-algorithms": z
-							.array(z.enum(SIGNATURE_ALGORITHM_NAMES as unknown as [string, ...string[]]))
-							.readonly()
-							.default(DEFAULT_SIGNATURE_ALGORITHMS as unknown as string[]),
-						/** Minimum RSA modulus in bits. Ignored for EC and EdDSA keys. */
-						"min-rsa-key-bits": z
-							.number()
-							.int()
-							.min(1024)
-							.default(FULL_PKI_DEFAULT_MIN_RSA_KEY_BITS),
-						revocation: z
-							.object({
-								/**
-								 * `"crl"` fetches distribution points, `"ocsp"` asks the
-								 * responders named in `authorityInfoAccess`, `"both"` asks OCSP
-								 * first and falls back to the CRL when the responder cannot
-								 * answer; an OCSP `unknown` is an answer, which the CRL may only
-								 * turn into a refusal. `"disabled"` is an explicit statement,
-								 * not an omission — see the boot check below.
-								 */
-								mode: z.enum(["crl", "ocsp", "both", "disabled"]),
-								"on-unavailable": z.enum(["reject", "allow"]),
-								/** Hosts revocation material may be fetched from. */
-								"allowed-hosts": z.array(z.string()).readonly().default([]),
-								"fetch-timeout-ms": z.number().int().min(1).default(3000),
-								"cache-ttl-seconds": z.number().int().min(0).default(3600),
-								"max-response-bytes": z.number().int().min(1).default(1_048_576),
-								/**
-								 * Refuse an OCSP response that does not echo the request's
-								 * nonce (RFC 6960 §4.4.1). On by default: without it a captured
-								 * `good` replays until its `nextUpdate`. Turn it off only for a
-								 * responder that omits the nonce (RFC 8954); freshness then
-								 * rests on `thisUpdate` / `nextUpdate` alone.
-								 */
-								"ocsp-require-nonce": z.boolean().default(true),
-							})
-							.optional(),
+						/**
+						 * `"crl"` fetches distribution points, `"ocsp"` asks the responders
+						 * named in `authorityInfoAccess`, `"both"` asks OCSP first and falls
+						 * back to the CRL when the responder cannot answer; an OCSP
+						 * `unknown` is an answer, which the CRL may only turn into a
+						 * refusal. `"disabled"` is an explicit statement, not an omission —
+						 * see the boot check below.
+						 */
+						mode: z.enum(["crl", "ocsp", "both", "disabled"]),
+						onUnavailable: z.enum(["reject", "allow"]),
+						/** Hosts revocation material may be fetched from. */
+						allowedHosts: z.array(z.string()).readonly().default([]),
+						fetchTimeoutMs: z.coerce.number().int().min(1).default(3000),
+						cacheTtlSeconds: z.coerce.number().int().min(0).default(3600),
+						maxResponseBytes: z.coerce.number().int().min(1).default(1_048_576),
+						/**
+						 * Refuse an OCSP response that does not echo the request's nonce
+						 * (RFC 6960 §4.4.1). On by default: without it a captured `good`
+						 * replays until its `nextUpdate`. Turn it off only for a responder
+						 * that omits the nonce (RFC 8954); freshness then rests on
+						 * `thisUpdate` / `nextUpdate` alone.
+						 */
+						ocspRequireNonce: coerceBooleanFromEnv.default(true),
 					})
+					.strict()
 					.optional(),
 			})
-			.default(() => ({
-				enabled: false,
-				source: "tls-layer" as const,
-				"cert-header": "x-forwarded-client-cert",
-				"cert-header-dialect": "envoy" as const,
-				"trusted-proxies": [],
-				mode: "self-signed" as const,
-				"trusted-cas": [],
-			})),
-	}),
+			.strict()
+			.optional(),
+	})
+	.strict()
+	.default(() => ({
+		enabled: false,
+		source: "tls-layer" as const,
+		certHeader: "x-forwarded-client-cert",
+		certHeaderDialect: "envoy" as const,
+		trustedProxies: [],
+		mode: "self-signed" as const,
+		trustedCas: [],
+	}));
+
+/** The `mtls` section as its schema leaves it. */
+type MtlsSection = z.output<typeof mtlsConfigSchema>;
+
+type FullPkiSection = NonNullable<MtlsSection["fullPki"]>;
+
+/** `mtls.fullPki`, its revocation decided, in the shape `createMtlsMechanism` takes it. */
+const fullPkiOption = (
+	fullPki: FullPkiSection,
+	revocation: NonNullable<FullPkiSection["revocation"]>,
+): NonNullable<MtlsMechanismOptions["fullPki"]> => ({
+	"max-chain-depth": fullPki.maxChainDepth,
+	"signature-algorithms": fullPki.signatureAlgorithms as readonly SignatureAlgorithmName[],
+	"min-rsa-key-bits": fullPki.minRsaKeyBits,
+	revocation: {
+		mode: revocation.mode,
+		"on-unavailable": revocation.onUnavailable,
+		"allowed-hosts": revocation.allowedHosts,
+		"fetch-timeout-ms": revocation.fetchTimeoutMs,
+		"cache-ttl-seconds": revocation.cacheTtlSeconds,
+		"max-response-bytes": revocation.maxResponseBytes,
+		"ocsp-require-nonce": revocation.ocspRequireNonce,
+	},
 });
 
 // ---------------------------------------------------------------------------
 // Module manifest
 // ---------------------------------------------------------------------------
-
-/**
- * The `oauth.mtls` section: its schema, the package's `config/reference.conf`
- * holding its defaults, and its path. `configSchema` declares the same path
- * with the same schema until the section moves under the module's name, so
- * boot parses the value twice (idempotently).
- */
-const MTLS_SECTION_SCHEMA = mtlsConfigSchema.shape.oauth.shape.mtls;
 
 /**
  * Declarative manifest for the mTLS package. Disabled (the default), the
@@ -171,27 +182,70 @@ const MTLS_SECTION_SCHEMA = mtlsConfigSchema.shape.oauth.shape.mtls;
  * `packages/core/docs/adr/2026-05-20-token-binding-first-class-abstraction.md`).
  *
  * Boot refuses:
- * - `source = "header"` with no `trusted-proxies`: the forwarded header would
+ * - `source = "header"` with no `trustedProxies`: the forwarded header would
  *   be the credential, mintable by anyone who can reach this process (RFC 8705
  *   §3 requires the TLS layer or an authenticated proxy);
- * - `mode = "pki"` or `"full-pki"` with no `trusted-cas`;
+ * - `mode = "pki"` or `"full-pki"` with no `trustedCas`;
  * - `mode = "full-pki"` without explicit `revocation.mode` and
- *   `.on-unavailable`, or with a fetching mode and no `allowed-hosts`;
+ *   `.onUnavailable`, or with a fetching mode and no `allowedHosts`;
  * - `mode = "pki"` with `source = "tls-layer"`: the narrow walk takes its
  *   intermediates from the XFCC `Chain=` parameter.
  *
  * `createMtlsMechanism` re-checks these defensively; the module fails first,
  * with operator-friendly messages.
  */
-export const mtlsModule = defineModule<"config", "logger", typeof MTLS_SECTION_SCHEMA>({
+export const mtlsModule = defineModule<never, "logger", typeof mtlsConfigSchema>({
 	name: "mtls",
-	configSchema: mtlsConfigSchema,
+	// The package's `config/reference.conf` holds this section's defaults. No
+	// variable binds a key of it, so the refusal of an old path names none.
 	section: {
-		schema: MTLS_SECTION_SCHEMA,
+		schema: mtlsConfigSchema,
 		reference: new URL("../config/reference.conf", import.meta.url),
-		at: "oauth.mtls",
+		relocatedFrom: {
+			"oauth.mtls": { to: "", environmentVariable: null },
+			"oauth.mtls.cert-header": { to: "certHeader", environmentVariable: null },
+			"oauth.mtls.cert-header-dialect": { to: "certHeaderDialect", environmentVariable: null },
+			"oauth.mtls.trusted-proxies": { to: "trustedProxies", environmentVariable: null },
+			"oauth.mtls.trusted-cas": { to: "trustedCas", environmentVariable: null },
+			"oauth.mtls.full-pki": { to: "fullPki", environmentVariable: null },
+			"oauth.mtls.full-pki.max-chain-depth": {
+				to: "fullPki.maxChainDepth",
+				environmentVariable: null,
+			},
+			"oauth.mtls.full-pki.signature-algorithms": {
+				to: "fullPki.signatureAlgorithms",
+				environmentVariable: null,
+			},
+			"oauth.mtls.full-pki.min-rsa-key-bits": {
+				to: "fullPki.minRsaKeyBits",
+				environmentVariable: null,
+			},
+			"oauth.mtls.full-pki.revocation.on-unavailable": {
+				to: "fullPki.revocation.onUnavailable",
+				environmentVariable: null,
+			},
+			"oauth.mtls.full-pki.revocation.allowed-hosts": {
+				to: "fullPki.revocation.allowedHosts",
+				environmentVariable: null,
+			},
+			"oauth.mtls.full-pki.revocation.fetch-timeout-ms": {
+				to: "fullPki.revocation.fetchTimeoutMs",
+				environmentVariable: null,
+			},
+			"oauth.mtls.full-pki.revocation.cache-ttl-seconds": {
+				to: "fullPki.revocation.cacheTtlSeconds",
+				environmentVariable: null,
+			},
+			"oauth.mtls.full-pki.revocation.max-response-bytes": {
+				to: "fullPki.revocation.maxResponseBytes",
+				environmentVariable: null,
+			},
+			"oauth.mtls.full-pki.revocation.ocsp-require-nonce": {
+				to: "fullPki.revocation.ocspRequireNonce",
+				environmentVariable: null,
+			},
+		},
 	},
-	requires: ["config"],
 	optional: ["logger"],
 	contributes: {
 		// RFC 8705 §3.3: a client has no other way to learn that access tokens
@@ -202,70 +256,36 @@ export const mtlsModule = defineModule<"config", "logger", typeof MTLS_SECTION_S
 		// this package implements §3 token binding, not §2 client
 		// authentication, so `tls_client_auth` must never be advertised.
 		discoveryMetadata: [
-			(deps) => {
-				const mtls = (deps.config as { oauth?: { mtls?: { enabled?: unknown } } }).oauth?.mtls;
-				if (mtls?.enabled !== true) return {};
-				return { metadata: { tls_client_certificate_bound_access_tokens: true } };
-			},
+			({ section }) =>
+				section.enabled ? { metadata: { tls_client_certificate_bound_access_tokens: true } } : {},
 		],
 		tokenBindingMechanisms: [
 			(deps) => {
-				const mtlsConfig = (deps.config as { oauth?: { mtls?: { enabled?: unknown } } }).oauth
-					?.mtls;
-				if (mtlsConfig?.enabled !== true) {
+				const cfg = deps.section;
+				if (!cfg.enabled) {
 					// Disabled by config — no mechanism contributed.
 					return null;
 				}
-
-				const typedConfig = deps.config as unknown as {
-					oauth: {
-						mtls: {
-							enabled: boolean;
-							source: "header" | "tls-layer";
-							"cert-header": string;
-							"cert-header-dialect": "envoy" | "plain-pem";
-							"trusted-proxies": readonly string[];
-							mode: "self-signed" | "pki" | "full-pki";
-							"trusted-cas": readonly string[];
-							"full-pki"?: {
-								"max-chain-depth"?: number;
-								"signature-algorithms"?: readonly SignatureAlgorithmName[];
-								"min-rsa-key-bits"?: number;
-								revocation?: {
-									mode: "crl" | "ocsp" | "both" | "disabled";
-									"on-unavailable": "reject" | "allow";
-									"allowed-hosts": readonly string[];
-									"fetch-timeout-ms": number;
-									"cache-ttl-seconds": number;
-									"max-response-bytes": number;
-									"ocsp-require-nonce": boolean;
-								};
-							};
-						};
-					};
-				};
-
-				const cfg = typedConfig.oauth.mtls;
 
 				// --- Boot-time fail-loud check 0: header source requires an
 				// explicit trusted-proxy allowlist. ---
 				//
 				// Without it the forwarded header IS the credential: anyone who can
 				// connect to this process can assert any certificate.
-				if (cfg.source === "header" && (cfg["trusted-proxies"]?.length ?? 0) === 0) {
+				if (cfg.source === "header" && cfg.trustedProxies.length === 0) {
 					throw new Error(
-						'mtlsModule: config.oauth.mtls.source = "header" requires a non-empty ' +
-							"oauth.mtls.trusted-proxies allowlist. A forwarded client-certificate header " +
+						'mtlsModule: mtls.source = "header" requires a non-empty ' +
+							"mtls.trustedProxies allowlist. A forwarded client-certificate header " +
 							"is only evidence of a TLS handshake when the hop that forwarded it is " +
 							'authenticated. List the reverse proxy\'s peer address (or "loopback" for a ' +
 							'sidecar), or use source = "tls-layer" and terminate TLS at this process.',
 					);
 				}
 
-				// --- Boot-time fail-loud check 1: PKI mode requires trusted-cas. ---
-				if ((cfg.mode === "pki" || cfg.mode === "full-pki") && cfg["trusted-cas"].length === 0) {
+				// --- Boot-time fail-loud check 1: PKI mode requires trustedCas. ---
+				if ((cfg.mode === "pki" || cfg.mode === "full-pki") && cfg.trustedCas.length === 0) {
 					throw new Error(
-						`mtlsModule: config.oauth.mtls.mode = "${cfg.mode}" requires a non-empty oauth.mtls.trusted-cas. ` +
+						`mtlsModule: mtls.mode = "${cfg.mode}" requires a non-empty mtls.trustedCas. ` +
 							"Without trusted CAs, chain validation cannot proceed.",
 					);
 				}
@@ -274,13 +294,15 @@ export const mtlsModule = defineModule<"config", "logger", typeof MTLS_SECTION_S
 				//
 				// The revocation settings have no defaults: "the CRL endpoint is
 				// unreachable" and "the certificate is not revoked" are different
-				// facts, and only the operator can decide which one to act on.
+				// facts, and only the operator can decide which one to act on. The
+				// mechanism reads `fullPki` in this mode alone.
+				let fullPkiOptions: MtlsMechanismOptions["fullPki"];
 				if (cfg.mode === "full-pki") {
-					const fullPki = cfg["full-pki"];
+					const fullPki = cfg.fullPki;
 					if (fullPki?.revocation === undefined) {
 						throw new Error(
-							'mtlsModule: config.oauth.mtls.mode = "full-pki" requires ' +
-								"oauth.mtls.full-pki.revocation.mode and .on-unavailable to be set " +
+							'mtlsModule: mtls.mode = "full-pki" requires ' +
+								"mtls.fullPki.revocation.mode and .onUnavailable to be set " +
 								'explicitly. Set mode = "crl", "ocsp" or "both" to check revocation, ' +
 								'or mode = "disabled" ' +
 								"to state that this deployment accepts that a revoked certificate " +
@@ -290,20 +312,21 @@ export const mtlsModule = defineModule<"config", "logger", typeof MTLS_SECTION_S
 					}
 					if (
 						fullPki.revocation.mode !== "disabled" &&
-						fullPki.revocation["allowed-hosts"].length === 0
+						fullPki.revocation.allowedHosts.length === 0
 					) {
 						// An OCSP responder URL is a destination inside a certificate
 						// exactly as a CRL distribution point is: the same layer applies.
 						throw new Error(
-							`mtlsModule: oauth.mtls.full-pki.revocation.mode = "${fullPki.revocation.mode}" requires a ` +
-								"non-empty oauth.mtls.full-pki.revocation.allowed-hosts. A CRL " +
+							`mtlsModule: mtls.fullPki.revocation.mode = "${fullPki.revocation.mode}" requires a ` +
+								"non-empty mtls.fullPki.revocation.allowedHosts. A CRL " +
 								"distribution point or an OCSP responder is a URL inside a " +
 								"certificate, so fetching one makes this process issue a request " +
 								"to a destination someone else chose. List the hosts your CA " +
 								"publishes CRLs on or answers OCSP from — the same separation " +
-								"oauth.mtls.trusted-proxies draws for forwarded headers.",
+								"mtls.trustedProxies draws for forwarded headers.",
 						);
 					}
+					fullPkiOptions = fullPkiOption(fullPki, fullPki.revocation);
 				}
 
 				// --- Boot-time fail-loud check 2: narrow PKI + tls-layer is not supported. ---
@@ -313,22 +336,22 @@ export const mtlsModule = defineModule<"config", "logger", typeof MTLS_SECTION_S
 				// (`tlsChain.mts`) and is not restricted.
 				if (cfg.mode === "pki" && cfg.source === "tls-layer") {
 					throw new Error(
-						'mtlsModule: config.oauth.mtls.mode = "pki" with source = "tls-layer" is not supported in Phase 3. ' +
+						'mtlsModule: mtls.mode = "pki" with source = "tls-layer" is not supported in Phase 3. ' +
 							"The narrow PKI mode requires the intermediate chain (e.g., the Envoy XFCC " +
 							"Chain= parameter); TLS-layer full-chain extraction is deferred to a future " +
-							'phase. Use source = "header" with cert-header-dialect = "envoy" for PKI mode, ' +
+							'phase. Use source = "header" with certHeaderDialect = "envoy" for PKI mode, ' +
 							'or use mode = "self-signed" with TLS-layer source.',
 					);
 				}
 
 				return createMtlsMechanism({
 					source: cfg.source,
-					certHeader: cfg["cert-header"],
-					certHeaderDialect: cfg["cert-header-dialect"],
-					trustedProxies: cfg["trusted-proxies"],
+					certHeader: cfg.certHeader,
+					certHeaderDialect: cfg.certHeaderDialect,
+					trustedProxies: cfg.trustedProxies,
 					mode: cfg.mode,
-					trustedCas: cfg["trusted-cas"],
-					...(cfg["full-pki"] ? { fullPki: cfg["full-pki"] } : {}),
+					trustedCas: cfg.trustedCas,
+					...(fullPkiOptions === undefined ? {} : { fullPki: fullPkiOptions }),
 					logger: deps.logger,
 				});
 			},

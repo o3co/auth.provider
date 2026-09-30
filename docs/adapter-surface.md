@@ -266,7 +266,7 @@ that safety.
 | `accessTokenDenylist` | `ACCESS_TOKEN_DENYLIST_ABSENCE_POLICY` | `oauth.revocation.accessToken = "unsupported"` |
 | `subjectRevocation` | `SUBJECT_REVOCATION_ABSENCE_POLICY` | `oauth.revocation.subject = "unsupported"` |
 | `subjectSessionIndex` | `SUBJECT_REVOCATION_ABSENCE_POLICY` | `oauth.revocation.subject = "unsupported"` |
-| `deviceCodeStore` | `DEVICE_CODE_STORE_ABSENCE_POLICY` | `oauth.deviceAuthorization.store = "unsupported"` |
+| `deviceCodeStore` | `DEVICE_CODE_STORE_ABSENCE_POLICY` | `device-grant.store = "unsupported"` |
 
 There is no absence policy for MFA: the `mfaCoordinator` slot and
 `MFA_ABSENCE_POLICY` left with the session-admission ADR (D6, D7). What a
@@ -282,7 +282,7 @@ still said "three"; the table is now checked against the manifests that attach
 each policy, the same way the slot table is (#458).
 
 A declaration says why a slot is empty; it does not stand in for the component
-where a feature needs it. `oauth.deviceAuthorization.store = "unsupported"` is
+where a feature needs it. `device-grant.store = "unsupported"` is
 for a deployment that leaves the grant off — `deviceGrantModule` with the grant
 enabled refuses to boot without a store, whatever the declaration says (#626).
 

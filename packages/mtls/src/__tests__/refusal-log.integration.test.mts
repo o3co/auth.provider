@@ -85,17 +85,17 @@ const boot = async (dialect: "envoy" | "plain-pem") => {
 			...makeValidCoreConfig(),
 			oauth: {
 				...makeValidCoreConfig().oauth,
-				mtls: {
-					enabled: true,
-					source: "header",
-					"cert-header": "x-forwarded-client-cert",
-					"cert-header-dialect": dialect,
-					mode: "self-signed",
-					"trusted-cas": [],
-					// supertest dials the listener over loopback.
-					"trusted-proxies": ["loopback"],
-				},
 				tokenBinding: { "dispatch-policy": "intent-explicit" },
+			},
+			mtls: {
+				enabled: true,
+				source: "header",
+				certHeader: "x-forwarded-client-cert",
+				certHeaderDialect: dialect,
+				mode: "self-signed",
+				trustedCas: [],
+				// supertest dials the listener over loopback.
+				trustedProxies: ["loopback"],
 			},
 		} as never,
 		pathResolver: (s: string) => s,

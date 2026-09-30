@@ -19,17 +19,13 @@ import { AppConfigSchema } from "#/config/application.schema.mjs";
 import { makeValidAppConfig } from "#/testing/fixtures/valid-config.mjs";
 
 /**
- * The device-grant pair has to *reach* the modules that read it.
- * `AppConfigSchema` is a strip-mode `z.object`, and the standalone validates
- * its HOCON against it before `buildModules` runs, so an undeclared section
- * would be lost before either module's own `configSchema` saw it — here
- * `redisDeviceCodeStore.keyPrefix` (the namespace the redis README documents)
- * and every key under `oauth.deviceAuthorization`, `enabled` above all.
+ * The Redis device-code store's section has to *reach* its module.
+ * `AppConfigSchema` is a strip-mode `z.object`, so a root that parses its
+ * configuration with it before boot would lose an undeclared section — here
+ * `redisDeviceCodeStore.keyPrefix`, the namespace the redis README documents.
  *
- * Presence-only, like the other `redis*` sections: the defaults stay in the
- * device-grant package's `reference.conf` and in the modules' `configSchema`s.
- * The enum-shaped keys keep their vocabulary so a typo fails here, by name,
- * rather than as a silently-absent declaration downstream.
+ * Presence-only, like the other `redis*` sections: the default stays with the
+ * module.
  */
 describe("redisDeviceCodeStore survives AppConfigSchema", () => {
 	it("keeps the Redis module's key namespace", () => {
@@ -42,83 +38,5 @@ describe("redisDeviceCodeStore survives AppConfigSchema", () => {
 
 	it("is absent when omitted — the default lives in the module", () => {
 		expect(AppConfigSchema.parse(makeValidAppConfig()).redisDeviceCodeStore).toBeUndefined();
-	});
-});
-
-describe("oauth.deviceAuthorization survives AppConfigSchema", () => {
-	const base = makeValidAppConfig();
-
-	it("keeps every key the device-grant module reads", () => {
-		const parsed = AppConfigSchema.parse({
-			...base,
-			oauth: {
-				...base.oauth,
-				deviceAuthorization: {
-					enabled: true,
-					"verification-uri": "https://example.com/device",
-					"verification-uri-complete": false,
-					"code-lifetime-seconds": 900,
-					"polling-interval-seconds": 10,
-					rateLimit: { limit: 5, windowSeconds: 300 },
-				},
-			},
-		});
-		expect(parsed.oauth.deviceAuthorization).toEqual({
-			enabled: true,
-			"verification-uri": "https://example.com/device",
-			"verification-uri-complete": false,
-			"code-lifetime-seconds": 900,
-			"polling-interval-seconds": 10,
-			rateLimit: { limit: 5, windowSeconds: 300 },
-		});
-	});
-
-	it("refuses a verification window longer than a year", () => {
-		for (const windowSeconds of [31_536_001, 1e13]) {
-			expect(
-				() =>
-					AppConfigSchema.parse({
-						...base,
-						oauth: {
-							...base.oauth,
-							deviceAuthorization: { rateLimit: { limit: 5, windowSeconds } },
-						},
-					}),
-				String(windowSeconds),
-			).toThrow();
-		}
-	});
-
-	it("keeps the declared-absence spelling for the store slot", () => {
-		const parsed = AppConfigSchema.parse({
-			...base,
-			oauth: { ...base.oauth, deviceAuthorization: { store: "unsupported" } },
-		});
-		expect(parsed.oauth.deviceAuthorization?.store).toBe("unsupported");
-	});
-
-	it("coerces the env-var spelling of the booleans", () => {
-		const parsed = AppConfigSchema.parse({
-			...base,
-			oauth: {
-				...base.oauth,
-				deviceAuthorization: { enabled: "true", "verification-uri-complete": "false" },
-			},
-		});
-		expect(parsed.oauth.deviceAuthorization?.enabled).toBe(true);
-		expect(parsed.oauth.deviceAuthorization?.["verification-uri-complete"]).toBe(false);
-	});
-
-	it("refuses a store declaration the slot does not have", () => {
-		expect(() =>
-			AppConfigSchema.parse({
-				...base,
-				oauth: { ...base.oauth, deviceAuthorization: { store: "memory" } },
-			}),
-		).toThrow();
-	});
-
-	it("is absent when omitted — the defaults live in the device-grant reference.conf", () => {
-		expect(AppConfigSchema.parse(base).oauth.deviceAuthorization).toBeUndefined();
 	});
 });
