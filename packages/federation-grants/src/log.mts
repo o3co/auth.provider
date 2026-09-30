@@ -54,7 +54,11 @@ export interface FederationGrantLog {
 	outage(event: string, fields: LogFields, ...cause: Cause): void;
 	/** A failure that changed no answer, or contention: one line, at warn. */
 	degraded(event: string, fields: LogFields, ...cause: Cause): void;
-	/** A request refused for what it carried: one line, at warn, with no cause. */
+	/**
+	 * A request refused for what it carried, where the deployment's own
+	 * misconfiguration can be the cause, so an operator must see it: one line,
+	 * at warn, with no cause.
+	 */
 	refused(event: string, fields: LogFields): void;
 	/**
 	 * What escaped a handler: `federation_grants_unexpected_error`, at error,

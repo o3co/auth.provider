@@ -224,9 +224,7 @@ function csrfRefusal(verdict: unknown): CsrfRefusalReason | null {
 	}
 	if (read?.outcome === "accepted") return null;
 	const reason = read?.outcome === "refused" ? read.reason : undefined;
-	return typeof reason === "string" &&
-		reason !== "unrecognized" &&
-		Object.hasOwn(CSRF_REFUSAL, reason)
+	return typeof reason === "string" && Object.hasOwn(CSRF_REFUSAL, reason)
 		? (reason as CsrfRefusalReason)
 		: "unrecognized";
 }
