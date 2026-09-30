@@ -14,6 +14,7 @@
  * limitations under the License.
  */
 
+import { consoleLogger } from "../logging/consoleLogger.mjs";
 import type { Logger } from "../logging/Logger.mjs";
 import { loggableError } from "../logging/loggableError.mjs";
 import type {
@@ -78,16 +79,16 @@ export function policyOutOfBounds(errorDescription: string): GrantError {
  * Logs a grant policy that threw — it could not answer, and the request is
  * refused `503 temporarily_unavailable` — as `grant_policy_unavailable` at
  * error level, with the grant type, the policy's `kind`, the caller's `site`
- * when it is not a token grant, and the error's projection. A policy that
- * calls out to a decision service fails the way a store does, and is answered
- * and logged the same way.
+ * when it is not a token grant, and the error's projection — on core's console
+ * logger when `logger` is absent. A policy that calls out to a decision
+ * service fails the way a store does, and is answered and logged the same way.
  */
 export function logGrantPolicyUnavailable(
 	logger: Pick<Logger, "error"> | undefined,
 	context: { readonly grantType: string; readonly policy: string; readonly site?: string },
 	cause: unknown,
 ): void {
-	logger?.error(
+	(logger ?? consoleLogger).error(
 		{
 			...(context.site !== undefined ? { site: context.site } : {}),
 			grantType: context.grantType,
@@ -108,7 +109,8 @@ export function logGrantPolicyUnavailable(
  * not an outage: `500 server_error`, as {@link policyOutOfBounds} answers.
  * It is logged once as `grant_policy_decision_invalid` at error level, with
  * the grant type, the policy's `kind` and the caller's `site` when it is not
- * a token grant — never the decision itself.
+ * a token grant — never the decision itself — on core's console logger when
+ * `logger` is absent.
  */
 export function readGrantPolicyDecision(
 	decision: unknown,
@@ -118,7 +120,7 @@ export function readGrantPolicyDecision(
 	const outcome = outcomeOf(decision);
 	if (outcome === "allow") return { verdict: outcome, decision: decision as GrantPolicyAllow };
 	if (outcome === "deny") return { verdict: outcome, decision: decision as GrantPolicyDeny };
-	logger?.error(
+	(logger ?? consoleLogger).error(
 		{
 			...(context.site !== undefined ? { site: context.site } : {}),
 			grantType: context.grantType,
@@ -150,8 +152,8 @@ export interface EvaluateGrantPolicyOptions {
 	 * Where a policy that throws (`grant_policy_unavailable`) or returns an
 	 * invalid decision (`grant_policy_decision_invalid`) is logged. Required
 	 * as a key, not as a value: a grant that has no logger passes `undefined`
-	 * and says so, and one that forgets fails to compile rather than staying
-	 * silent.
+	 * and says so, and one that forgets fails to compile. `undefined` writes
+	 * both lines to core's console logger.
 	 */
 	readonly logger: Pick<Logger, "error"> | undefined;
 }
