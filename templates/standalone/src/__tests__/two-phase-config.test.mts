@@ -177,7 +177,7 @@ describe("phase one reads its switches and nothing else", () => {
 		// The device grant's and WebAuthn's references ship `windowSeconds`;
 		// boot layers them, and accepts what the operator wrote.
 		const partial = operatorLayer(
-			"oauth.deviceAuthorization.rateLimit.limit = 10\nwebauthn.rateLimit.authenticationOptions.limit = 10\n",
+			"device-grant.rateLimit.limit = 10\nwebauthn.rateLimit.authenticationOptions.limit = 10\n",
 		);
 		expect(() =>
 			readSwitches(readOwnLayers([partial, ...ownFiles("production")], { env })),

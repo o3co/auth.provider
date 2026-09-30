@@ -22,11 +22,14 @@
  * `device_authorization_endpoint` in discovery (RFC 8628 §4), and the three
  * actions verification admits (`DEVICE_GRANT_ADMISSION_ACTIONS`).
  *
- * Off by default. The switch is read from the config handed to
- * `deviceGrantModule({ config })`; disabled, no grant or action is registered
- * (so `grant_types_supported` does not name it), no discovery field is added
- * and both routes answer 404. Routes and discovery use the config `createApp`
- * parsed, and boot is refused if the two disagree (`settingsFor`).
+ * Off by default. The switch, `device-grant.enabled`, is read from the config
+ * handed to `deviceGrantModule({ config })`; disabled, no grant or action is
+ * registered (so `grant_types_supported` does not name it), no discovery
+ * field is added and both routes answer 404. Routes and discovery use the
+ * module's own section, `device-grant {}`, as boot parsed it, and boot is
+ * refused if the two disagree (`settingsFor`). A key still written at
+ * `oauth.deviceAuthorization`, the section's old path, refuses boot naming
+ * the new one.
  *
  * Enabled, boot is refused without each setting and slot the grant needs to
  * be safe; the `require*` helpers below say why. The verification endpoint
@@ -40,6 +43,7 @@ import {
 	type AppConfig,
 	AUDIT_SINK_ABSENCE_POLICY,
 	checkOAuthTokenSettings,
+	coerceBooleanFromEnv,
 	consoleLogger,
 	createRateLimitGuard,
 	DEVICE_CODE_STORE_ABSENCE_POLICY,
@@ -69,95 +73,91 @@ import {
 import { createDeviceVerificationHandler } from "./verificationEndpoint.mjs";
 
 /**
- * `oauth.deviceAuthorization.rateLimit` — the budget RFC 8628 §5.1 sizes the
- * user code against. `.int().positive()` is load-bearing: an empty
- * environment variable coerces to `0`, and a zero budget locks every user out.
+ * `device-grant.rateLimit` — the budget RFC 8628 §5.1 sizes the user code
+ * against. `.int().positive()` is load-bearing: an empty environment variable
+ * coerces to `0`, and a zero budget locks every user out.
  */
-const rateLimitSpecSchema = z.object({
-	limit: z.number().int().positive(),
-	// One year at most, as core's schema holds every duration an operator
-	// writes: a window past the Date range is one the limiter refuses anyway.
-	windowSeconds: z.number().int().positive().max(MAX_DURATION_SECONDS),
-});
+const rateLimitSpecSchema = z
+	.object({
+		limit: z.coerce.number().int().positive(),
+		// One year at most, as core's schema holds every duration an operator
+		// writes: a window past the Date range is one the limiter refuses anyway.
+		windowSeconds: z.coerce.number().int().positive().max(MAX_DURATION_SECONDS),
+	})
+	.strict();
 
 /** §5.1's worked example: "only allow 5 attempts"; five minutes is half the default code lifetime. */
 const DEFAULT_VERIFICATION_RATE_LIMIT = { limit: 5, windowSeconds: 300 } as const;
 
-export const deviceGrantConfigSchema = z.object({
-	oauth: z.object({
-		deviceAuthorization: z
-			.object({
-				/**
-				 * When false (the default), the module contributes no grant and no
-				 * discovery field, and its two routes answer 404.
-				 */
-				enabled: z.boolean().default(false),
-				/**
-				 * The page where the end user types the code. No default: the
-				 * page belongs to the deployment, and a guessed URL is one the
-				 * device would display to users who cannot use it.
-				 */
-				"verification-uri": z.string().url().optional(),
-				/**
-				 * Emit `verification_uri_complete` (RFC 8628 §3.3.1). Off by
-				 * default — §5.4 warns that removing the typing step removes the
-				 * proof that the device is in the user's possession, which is what
-				 * makes remote phishing hard.
-				 */
-				"verification-uri-complete": z.boolean().default(false),
-				/**
-				 * §5.4: "long enough lifetime to be useable ... but sufficiently
-				 * short to limit the usability of a code obtained for phishing".
-				 */
-				"code-lifetime-seconds": z
-					.number()
-					.int()
-					.min(DEVICE_CODE_LIFETIME_SECONDS.min)
-					.max(DEVICE_CODE_LIFETIME_SECONDS.max)
-					.default(600),
-				/** Advertised as `interval`; also what the store enforces. */
-				"polling-interval-seconds": z
-					.number()
-					.int()
-					.min(DEVICE_POLLING_INTERVAL_SECONDS.min)
-					.max(DEVICE_POLLING_INTERVAL_SECONDS.max)
-					.default(5),
-				/**
-				 * The verification endpoint's budget per authenticated subject,
-				 * which the module contributes as the `device_verification`
-				 * budget every limiter reads (a limiter's own
-				 * `limits.device_verification` wins).
-				 */
-				rateLimit: rateLimitSpecSchema.default(DEFAULT_VERIFICATION_RATE_LIMIT),
-				/**
-				 * Declared absence for the `deviceCodeStore` slot.
-				 * `"unsupported"` is the only value; anything else is a typo that
-				 * would otherwise read as a declaration.
-				 */
-				store: z.literal("unsupported").optional(),
-			})
-			.default(() => ({
-				enabled: false,
-				"verification-uri-complete": false,
-				"code-lifetime-seconds": 600,
-				"polling-interval-seconds": 5,
-				rateLimit: DEFAULT_VERIFICATION_RATE_LIMIT,
-			})),
-	}),
-});
+/** `device-grant.enabled`: off unless the operator says so. */
+const ENABLED = coerceBooleanFromEnv.default(false);
 
-interface DeviceAuthorizationConfigSlice {
-	readonly enabled: boolean;
-	readonly "verification-uri"?: string;
-	readonly "verification-uri-complete": boolean;
-	readonly "code-lifetime-seconds": number;
-	readonly "polling-interval-seconds": number;
-	/**
-	 * Contributed as the `device_verification` budget; the verification route
-	 * requires it present and usable.
-	 */
-	readonly rateLimit?: unknown;
-}
+/**
+ * The schema of `device-grant {}`, the module's own section. Strict at every
+ * level: a key it does not declare refuses boot. Each scalar leaf reads the
+ * string an environment variable carries.
+ */
+export const deviceGrantConfigSchema = z
+	.object({
+		/**
+		 * When false (the default), the module contributes no grant and no
+		 * discovery field, and its two routes answer 404.
+		 */
+		enabled: ENABLED,
+		/**
+		 * The page where the end user types the code. No default: the page
+		 * belongs to the deployment, and a guessed URL is one the device would
+		 * display to users who cannot use it.
+		 */
+		verificationUri: z.string().url().optional(),
+		/**
+		 * Emit `verification_uri_complete` (RFC 8628 §3.3.1). Off by default —
+		 * §5.4 warns that removing the typing step removes the proof that the
+		 * device is in the user's possession, which is what makes remote
+		 * phishing hard.
+		 */
+		verificationUriComplete: coerceBooleanFromEnv.default(false),
+		/**
+		 * §5.4: "long enough lifetime to be useable ... but sufficiently short
+		 * to limit the usability of a code obtained for phishing".
+		 */
+		codeLifetimeSeconds: z.coerce
+			.number()
+			.int()
+			.min(DEVICE_CODE_LIFETIME_SECONDS.min)
+			.max(DEVICE_CODE_LIFETIME_SECONDS.max)
+			.default(600),
+		/** Advertised as `interval`; also what the store enforces. */
+		pollingIntervalSeconds: z.coerce
+			.number()
+			.int()
+			.min(DEVICE_POLLING_INTERVAL_SECONDS.min)
+			.max(DEVICE_POLLING_INTERVAL_SECONDS.max)
+			.default(5),
+		/**
+		 * The verification endpoint's budget per authenticated subject, which
+		 * the module contributes as the `device_verification` budget every
+		 * limiter reads (a limiter's own `limits.device_verification` wins).
+		 */
+		rateLimit: rateLimitSpecSchema.default(DEFAULT_VERIFICATION_RATE_LIMIT),
+		/**
+		 * Declared absence for the `deviceCodeStore` slot. `"unsupported"` is
+		 * the only value; anything else is a typo that would otherwise read as a
+		 * declaration.
+		 */
+		store: z.literal("unsupported").optional(),
+	})
+	.strict()
+	.default(() => ({
+		enabled: false,
+		verificationUriComplete: false,
+		codeLifetimeSeconds: 600,
+		pollingIntervalSeconds: 5,
+		rateLimit: DEFAULT_VERIFICATION_RATE_LIMIT,
+	}));
+
+/** The `device-grant` section as its schema leaves it. */
+type DeviceAuthorizationConfigSlice = z.output<typeof deviceGrantConfigSchema>;
 
 const REQUIRES = [
 	"config",
@@ -204,6 +204,11 @@ type Requires = (typeof REQUIRES)[number];
 type Optional = (typeof OPTIONAL)[number];
 export type DeviceGrantModuleDeps = ProviderDeps<Requires, Optional>;
 
+/** What every factory reading the module's own section receives. */
+type DeviceGrantSectionDeps = DeviceGrantModuleDeps & {
+	readonly section: DeviceAuthorizationConfigSlice;
+};
+
 /**
  * What this module reads of `oauth {}`: the `oauthTokenSettings` slot when a
  * module provides it (checked whole by `checkOAuthTokenSettings`), otherwise
@@ -236,22 +241,20 @@ const tokenSettings = (deps: DeviceGrantModuleDeps) => {
 	};
 };
 
-const readSettings = (deps: DeviceGrantModuleDeps): DeviceAuthorizationConfigSlice | null => {
-	const slice = deps.config?.oauth?.deviceAuthorization as
-		| DeviceAuthorizationConfigSlice
-		| undefined;
-	if (slice?.enabled !== true) return null;
-	return slice;
-};
-
 /**
  * The factory's decision: whether the grant is on in the config the
- * composition root read before boot. `=== true` because that read parses the
- * switch as boot does — core's schema turns an environment-variable `"true"`
- * into a boolean — and anything else is off, which is the secure default.
+ * composition root read before boot, `device-grant.enabled` read as the
+ * section's schema reads it — an environment variable's `"true"` is on, as it
+ * is at boot. Anything the schema refuses is off, the secure default, and boot
+ * then refuses the value.
  */
-const isEnabled = (config: AppConfig): boolean =>
-	config.oauth?.deviceAuthorization?.enabled === true;
+const isEnabled = (config: unknown): boolean => {
+	const written = (config as { "device-grant"?: { enabled?: unknown } } | undefined)?.[
+		"device-grant"
+	]?.enabled;
+	const read = ENABLED.safeParse(written);
+	return read.success && read.data;
+};
 
 /**
  * The settings slice from the config `createApp` parsed (`null` when the
@@ -261,31 +264,29 @@ const isEnabled = (config: AppConfig): boolean =>
  */
 const settingsFor = (
 	enabled: boolean,
-	deps: DeviceGrantModuleDeps,
+	deps: DeviceGrantSectionDeps,
 ): DeviceAuthorizationConfigSlice | null => {
-	const slice = readSettings(deps);
+	const slice = deps.section.enabled ? deps.section : null;
 	if ((slice !== null) !== enabled) {
 		const [built, booted] = enabled ? ["on", "off"] : ["off", "on"];
 		throw new Error(
 			`deviceGrantModule: built from a configuration with the grant ${built}, but the ` +
-				`configuration createApp parsed has oauth.deviceAuthorization.enabled ${booted}. ` +
+				`configuration createApp parsed has device-grant.enabled ${booted}. ` +
 				"Whether the grant is contributed is decided from the first — the configuration " +
 				"read before boot — and its routes and discovery field from the second. " +
-				"Read oauth.deviceAuthorization.enabled before boot from the same configuration " +
-				"files, parsed as boot parses it — with core's readTransitionalConfig naming the " +
-				"path (the standalone template: readSwitches, `reads`) — so that an environment " +
-				'variable\'s "true" is on in both.',
+				"Hand deviceGrantModule the configuration read from the same files and " +
+				"environment as the one createApp is handed.",
 		);
 	}
 	return slice;
 };
 
 const requireVerificationUri = (slice: DeviceAuthorizationConfigSlice): string => {
-	const uri = slice["verification-uri"];
+	const uri = slice.verificationUri;
 	if (typeof uri !== "string" || uri === "") {
 		throw new Error(
-			"deviceGrantModule: oauth.deviceAuthorization.enabled = true requires " +
-				"oauth.deviceAuthorization.verification-uri. It is the page this " +
+			"deviceGrantModule: device-grant.enabled = true requires " +
+				"device-grant.verificationUri. It is the page this " +
 				"deployment serves for entering the code, and the device displays it " +
 				"verbatim — there is nothing sensible to default it to.",
 		);
@@ -415,7 +416,7 @@ const disabledRoute = (id: string, mountPath: string) => {
 				error: "not_found",
 				error_description:
 					"the device authorization grant is not enabled on this deployment " +
-					"(oauth.deviceAuthorization.enabled = false)",
+					"(device-grant.enabled = false)",
 			});
 	});
 	return { id, mountPath, handler: router };
@@ -432,7 +433,7 @@ const requireCsrfGuard = (
 ): NonNullable<DeviceGrantModuleDeps["csrfGuard"]> => {
 	if (deps.csrfGuard === undefined) {
 		throw new Error(
-			"deviceGrantModule: oauth.deviceAuthorization.enabled = true requires a " +
+			"deviceGrantModule: device-grant.enabled = true requires a " +
 				"csrfGuard component. POST /oauth/device/verification runs inside the end-user " +
 				"session and is guarded by the same CSRF policy as /session/login — a signed " +
 				"double-submit token, and an Origin/Referer check against " +
@@ -449,7 +450,7 @@ const requireRateLimiter = (
 ): NonNullable<DeviceGrantModuleDeps["rateLimiter"]> => {
 	if (deps.rateLimiter === undefined) {
 		throw new Error(
-			"deviceGrantModule: oauth.deviceAuthorization.enabled = true requires a " +
+			"deviceGrantModule: device-grant.enabled = true requires a " +
 				"rateLimiter component. RFC 8628 §5.1 sizes the user code's entropy " +
 				"against a rate limit — 8 base-20 characters is ~34.5 bits, which is " +
 				"sufficient only because an attacker gets a handful of attempts. " +
@@ -470,10 +471,10 @@ const requireDeviceCodeStore = (
 ): NonNullable<DeviceGrantModuleDeps["deviceCodeStore"]> => {
 	if (deps.deviceCodeStore === undefined) {
 		throw new Error(
-			"deviceGrantModule: oauth.deviceAuthorization.enabled = true requires a " +
+			"deviceGrantModule: device-grant.enabled = true requires a " +
 				"deviceCodeStore component. The grant has nowhere to record a pending " +
 				"authorization, so no device could ever be authorized; declaring the store " +
-				'absent (oauth.deviceAuthorization.store = "unsupported") says why it is ' +
+				'absent (device-grant.store = "unsupported") says why it is ' +
 				"missing and does not make the grant work without one. Install " +
 				"memoryDeviceCodeStoreModule (single replica only) or " +
 				"redisDeviceCodeStoreModule, or leave the grant disabled.",
@@ -492,7 +493,7 @@ const requireUserSessionStore = (
 ): NonNullable<DeviceGrantModuleDeps["userSessionStore"]> => {
 	if (deps.userSessionStore === undefined) {
 		throw new Error(
-			"deviceGrantModule: oauth.deviceAuthorization.enabled = true requires a " +
+			"deviceGrantModule: device-grant.enabled = true requires a " +
 				"userSessionStore component. POST /oauth/device/verification approves only from " +
 				"the live UserSession behind the cookie's sid: the device token an approval leads " +
 				"to carries no sid and no family_id, so no logout reaches it afterwards, and a " +
@@ -506,7 +507,7 @@ const requireUserSessionStore = (
 
 /**
  * The contributed `device_verification` budget (`rateLimitBudgetResolver`,
- * after any override) must be `oauth.deviceAuthorization.rateLimit`, the
+ * after any override) must be `device-grant.rateLimit`, the
  * budget the `rateLimiter` requirement's RFC 8628 §5.1 argument rests on; boot
  * is refused otherwise. A limiter's own `limits.device_verification` wins over
  * it and is not compared.
@@ -518,8 +519,8 @@ const requireContributedVerificationBudget = (
 	const configured = readVerificationRateLimitBudget(slice);
 	if (configured === null) {
 		throw new Error(
-			"deviceGrantModule: oauth.deviceAuthorization.enabled = true requires " +
-				"oauth.deviceAuthorization.rateLimit { limit, windowSeconds }. It is the budget " +
+			"deviceGrantModule: device-grant.enabled = true requires " +
+				"device-grant.rateLimit { limit, windowSeconds }. It is the budget " +
 				"RFC 8628 §5.1 sizes the user code against and the `device_verification` budget " +
 				"this module contributes; without it POST /oauth/device/verification would run " +
 				"on the limiter's default budget, which is not the number the rateLimiter " +
@@ -537,38 +538,50 @@ const requireContributedVerificationBudget = (
 				: `limit ${contributed.limit}, windowSeconds ${contributed.windowSeconds}`;
 		throw new Error(
 			`deviceGrantModule: the contributed device_verification budget (${shown}) is not ` +
-				`oauth.deviceAuthorization.rateLimit (limit ${configured.limit}, windowSeconds ` +
+				`device-grant.rateLimit (limit ${configured.limit}, windowSeconds ` +
 				`${configured.windowSeconds}): another module has overridden it. RFC 8628 §5.1 sizes the ` +
-				"user code against the configured budget; change oauth.deviceAuthorization.rateLimit " +
+				"user code against the configured budget; change device-grant.rateLimit " +
 				"instead.",
 		);
 	}
 };
 
 /**
- * The `oauth.deviceAuthorization` section: its schema, the package's
- * `config/reference.conf` holding its defaults, and its path. `configSchema`
- * declares the same path with the same schema until the section moves under
- * the module's name, so boot parses the value twice (idempotently).
- */
-const DEVICE_GRANT_SECTION_SCHEMA = deviceGrantConfigSchema.shape.oauth.shape.deviceAuthorization;
-
-/**
  * The device grant, built for one config — see the file header for what
- * `oauth.deviceAuthorization.enabled` decides here.
+ * `device-grant.enabled` decides here.
  *
  * Hand it the config the composition root boots with, as `oauthModule({ config })`
  * and `oauthAuthorizationModule({ config })` take theirs.
  */
 export const deviceGrantModule = (params: { config: AppConfig }): Module => {
 	const enabled = isEnabled(params.config);
-	return defineModule<Requires, Optional, typeof DEVICE_GRANT_SECTION_SCHEMA>({
+	return defineModule<Requires, Optional, typeof deviceGrantConfigSchema>({
 		name: "device-grant",
-		configSchema: deviceGrantConfigSchema,
+		// The package's `config/reference.conf` holds this section's defaults.
+		// No variable binds a key of it, so the refusal of an old path names
+		// none.
 		section: {
-			schema: DEVICE_GRANT_SECTION_SCHEMA,
+			schema: deviceGrantConfigSchema,
 			reference: new URL("../config/reference.conf", import.meta.url),
-			at: "oauth.deviceAuthorization",
+			relocatedFrom: {
+				"oauth.deviceAuthorization": { to: "", environmentVariable: null },
+				"oauth.deviceAuthorization.verification-uri": {
+					to: "verificationUri",
+					environmentVariable: null,
+				},
+				"oauth.deviceAuthorization.verification-uri-complete": {
+					to: "verificationUriComplete",
+					environmentVariable: null,
+				},
+				"oauth.deviceAuthorization.code-lifetime-seconds": {
+					to: "codeLifetimeSeconds",
+					environmentVariable: null,
+				},
+				"oauth.deviceAuthorization.polling-interval-seconds": {
+					to: "pollingIntervalSeconds",
+					environmentVariable: null,
+				},
+			},
 		},
 		requires: REQUIRES,
 		optional: OPTIONAL,
@@ -596,7 +609,7 @@ export const deviceGrantModule = (params: { config: AppConfig }): Module => {
 				? {
 						admissionActions: DEVICE_GRANT_ADMISSION_ACTIONS,
 						grants: {
-							[DEVICE_CODE_GRANT_TYPE]: (deps: DeviceGrantModuleDeps) => {
+							[DEVICE_CODE_GRANT_TYPE]: (deps: DeviceGrantSectionDeps) => {
 								// Name-keyed contributions run before the routes, so the
 								// disagreement check comes first here too — ahead of the
 								// store the booted config may rightly say it lacks.
@@ -615,7 +628,7 @@ export const deviceGrantModule = (params: { config: AppConfig }): Module => {
 					}
 				: {}),
 			routes: [
-				(deps: DeviceGrantModuleDeps) => {
+				(deps: DeviceGrantSectionDeps) => {
 					const slice = settingsFor(enabled, deps);
 					if (slice === null) {
 						return disabledRoute("device-authorization", "/oauth/device_authorization");
@@ -671,9 +684,9 @@ export const deviceGrantModule = (params: { config: AppConfig }): Module => {
 							store: requireDeviceCodeStore(deps),
 							settings: {
 								verificationUri: requireVerificationUri(slice),
-								verificationUriComplete: slice["verification-uri-complete"],
-								codeLifetimeSeconds: slice["code-lifetime-seconds"],
-								pollingIntervalSeconds: slice["polling-interval-seconds"],
+								verificationUriComplete: slice.verificationUriComplete,
+								codeLifetimeSeconds: slice.codeLifetimeSeconds,
+								pollingIntervalSeconds: slice.pollingIntervalSeconds,
 							},
 							logger: deps.logger,
 						}),
@@ -685,7 +698,7 @@ export const deviceGrantModule = (params: { config: AppConfig }): Module => {
 						handler: router,
 					};
 				},
-				(deps: DeviceGrantModuleDeps) => {
+				(deps: DeviceGrantSectionDeps) => {
 					const slice = settingsFor(enabled, deps);
 					if (slice === null) {
 						return disabledRoute("device-verification", "/oauth/device/verification");
@@ -726,9 +739,9 @@ export const deviceGrantModule = (params: { config: AppConfig }): Module => {
 							...(deps.subjectRevocation ? { subjectRevocation: deps.subjectRevocation } : {}),
 							settings: {
 								verificationUri: requireVerificationUri(slice),
-								verificationUriComplete: slice["verification-uri-complete"],
-								codeLifetimeSeconds: slice["code-lifetime-seconds"],
-								pollingIntervalSeconds: slice["polling-interval-seconds"],
+								verificationUriComplete: slice.verificationUriComplete,
+								codeLifetimeSeconds: slice.codeLifetimeSeconds,
+								pollingIntervalSeconds: slice.pollingIntervalSeconds,
 							},
 							logger: deps.logger,
 							auditSink: deps.auditSink,
@@ -743,7 +756,7 @@ export const deviceGrantModule = (params: { config: AppConfig }): Module => {
 				},
 			],
 			discoveryMetadata: [
-				(deps: DeviceGrantModuleDeps) => {
+				(deps: DeviceGrantSectionDeps) => {
 					const slice = settingsFor(enabled, deps);
 					if (slice === null) return {};
 					// RFC 8628 §4: a client that cannot discover this endpoint cannot

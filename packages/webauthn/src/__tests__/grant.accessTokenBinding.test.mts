@@ -55,6 +55,7 @@ vi.mock("#/internal/verification.mjs", () => ({
 
 import { createWebAuthnGrant, WEBAUTHN_GRANT_TYPE } from "#/grant.mjs";
 import { verifyWebAuthnAssertion } from "#/internal/verification.mjs";
+import { createTestWebAuthnConfig } from "#/testing/index.mjs";
 
 const mockVerifyAssertion = vi.mocked(verifyWebAuthnAssertion);
 
@@ -130,11 +131,7 @@ async function makeDeps(): Promise<WebAuthnDeps> {
 		keyStore,
 		webauthnCredentialStore: credentialStore,
 		challengeCeremony: makeConsumedCeremony(),
-		webauthnConfig: {
-			rpId: "test.example",
-			origin: [ISSUER],
-			userVerification: "preferred" as const,
-		},
+		webauthnConfig: createTestWebAuthnConfig({ origin: [ISSUER] }),
 	};
 }
 

@@ -21,7 +21,7 @@
  * server metadata. A client cannot otherwise learn that this deployment
  * accepts DPoP proofs at all, let alone which JOSE algorithms it will verify —
  * so the module that owns the mechanism owns the advertisement, and reads the
- * SAME config key the verifier is constructed from.
+ * SAME key of its section the verifier is constructed from.
  */
 
 import {
@@ -32,38 +32,32 @@ import {
 	defineModule,
 	type OidcDiscoveryContribution,
 } from "@o3co/auth-provider-core";
-import { makeValidCoreConfig } from "@o3co/auth-provider-core/testing";
+import {
+	CORE_RELOCATIONS,
+	makeValidCoreConfig,
+	renamedVariableCaptures,
+} from "@o3co/auth-provider-core/testing";
 import express from "express";
 import request from "supertest";
 import { describe, expect, it } from "vitest";
-import { dpopModule } from "#/module.mjs";
+import { dpopConfigSchema, dpopModule } from "#/module.mjs";
 
-/** Build the dpop config slice as `dpopConfigSchema` would leave it. */
-function dpopConfig(overrides: Record<string, unknown> = {}): unknown {
-	return {
-		oauth: {
-			dpop: {
-				enabled: false,
-				"iat-window-seconds": 60,
-				"alg-whitelist": ["ES256", "ES384", "EdDSA", "RS256"],
-				"replay-store-ttl-seconds": 300,
-				...overrides,
-			},
-		},
-	};
+/** The `dpop` section as boot hands it to the module: parsed with `dpopConfigSchema`. */
+function dpopSection(written: Record<string, unknown> | undefined = {}): unknown {
+	return dpopConfigSchema.parse(written);
 }
 
-async function contribution(config: unknown): Promise<OidcDiscoveryContribution> {
+async function contribution(section: unknown): Promise<OidcDiscoveryContribution> {
 	const factory = dpopModule.contributes?.discoveryMetadata?.[0];
 	if (factory === undefined) throw new Error("dpopModule contributes no discoveryMetadata");
 	// Awaited, as the boot planner does: a contribution factory may answer with
 	// a promise, and every kind's declared type says so.
-	return await factory({ config } as never);
+	return await factory({ section } as never);
 }
 
 describe("dpopModule — discoveryMetadata contribution", () => {
 	it("advertises dpop_signing_alg_values_supported when DPoP is enabled", async () => {
-		const meta = await contribution(dpopConfig({ enabled: true }));
+		const meta = await contribution(dpopSection({ enabled: true }));
 		expect(meta.metadata?.dpop_signing_alg_values_supported).toEqual([
 			"ES256",
 			"ES384",
@@ -72,22 +66,28 @@ describe("dpopModule — discoveryMetadata contribution", () => {
 		]);
 	});
 
-	it("advertises exactly the operator's alg-whitelist, not the shipped default", async () => {
+	it("advertises exactly the operator's algWhitelist, not the shipped default", async () => {
 		// The advertised list and the list the verifier enforces are the same
 		// read. A client that picks an algorithm off discovery must not then be
 		// rejected by the proof verifier.
-		const meta = await contribution(dpopConfig({ enabled: true, "alg-whitelist": ["ES256"] }));
+		const meta = await contribution(dpopSection({ enabled: true, algWhitelist: ["ES256"] }));
 		expect(meta.metadata?.dpop_signing_alg_values_supported).toEqual(["ES256"]);
 	});
 
 	it("contributes nothing when DPoP is disabled (the secure default)", async () => {
-		const meta = await contribution(dpopConfig());
+		const meta = await contribution(dpopSection());
 		const all = { ...(meta.endpoints ?? {}), ...(meta.metadata ?? {}) };
 		expect(all).not.toHaveProperty("dpop_signing_alg_values_supported");
 	});
 
-	it("contributes nothing when the oauth.dpop slice is absent entirely", async () => {
-		const meta = await contribution({ oauth: {} });
+	it("contributes nothing when algWhitelist is empty, rather than advertising no algorithm", async () => {
+		const meta = await contribution(dpopSection({ enabled: true, algWhitelist: [] }));
+		const all = { ...(meta.endpoints ?? {}), ...(meta.metadata ?? {}) };
+		expect(all).not.toHaveProperty("dpop_signing_alg_values_supported");
+	});
+
+	it("contributes nothing when the dpop section is absent entirely", async () => {
+		const meta = await contribution(dpopSection(undefined));
 		const all = { ...(meta.endpoints ?? {}), ...(meta.metadata ?? {}) };
 		expect(all).not.toHaveProperty("dpop_signing_alg_values_supported");
 	});
@@ -96,7 +96,7 @@ describe("dpopModule — discoveryMetadata contribution", () => {
 		// Only the module owning the authorization-server surface sets
 		// `providerRoot`; a DPoP-only composition must not cause core to
 		// synthesize a discovery document.
-		const meta = await contribution(dpopConfig({ enabled: true }));
+		const meta = await contribution(dpopSection({ enabled: true }));
 		expect(meta.providerRoot).toBeUndefined();
 	});
 });
@@ -150,7 +150,12 @@ const bootWith = (dpop: Record<string, unknown>): BootstrapMap =>
 	({
 		config: {
 			...makeValidCoreConfig(),
-			oauth: { ...makeValidCoreConfig().oauth, dpop },
+			dpop,
+			"renamed-variables": renamedVariableCaptures({
+				modules: [dpopModule],
+				core: CORE_RELOCATIONS,
+				env: {},
+			}),
 		} as never,
 		pathResolver: (s: string) => s,
 		// An enabled mechanism records every proof in the seen-set.
@@ -163,9 +168,9 @@ describe("dpopModule — discovery metadata in the served document", () => {
 			modules: [dpopModule, keyStoreModule, providerRootModule],
 			bootstrapComponents: bootWith({
 				enabled: true,
-				"iat-window-seconds": 60,
-				"alg-whitelist": ["ES256", "EdDSA"],
-				"replay-store-ttl-seconds": 300,
+				iatWindowSeconds: 60,
+				algWhitelist: ["ES256", "EdDSA"],
+				replayStoreTtlSeconds: 300,
 			}),
 		});
 		const app = express();
@@ -180,9 +185,9 @@ describe("dpopModule — discovery metadata in the served document", () => {
 			modules: [dpopModule, keyStoreModule, providerRootModule],
 			bootstrapComponents: bootWith({
 				enabled: false,
-				"iat-window-seconds": 60,
-				"alg-whitelist": ["ES256", "ES384", "EdDSA", "RS256"],
-				"replay-store-ttl-seconds": 300,
+				iatWindowSeconds: 60,
+				algWhitelist: ["ES256", "ES384", "EdDSA", "RS256"],
+				replayStoreTtlSeconds: 300,
 			}),
 		});
 		const app = express();

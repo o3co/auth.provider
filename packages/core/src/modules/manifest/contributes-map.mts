@@ -151,7 +151,7 @@ export type GrantMiddlewareFactory<Deps> = (deps: Deps) => Contributed<RequestHa
 
 /**
  * Factory for the `tokenBindingMechanisms` kind: a `TokenBindingMechanism`, or
- * `null` when disabled by config (e.g. `oauth.dpop.enabled = false`). Unlike
+ * `null` when disabled by config (e.g. `dpop.enabled = false`). Unlike
  * `grantMiddleware`, core composes ONE `tokenBindingMw` from every module's
  * mechanisms, so the configured `DispatchPolicy` arbitrates across modules.
  * See ADR 2026-05-20-token-binding-first-class-abstraction.

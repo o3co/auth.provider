@@ -22,7 +22,6 @@
  */
 
 import { domainToASCII } from "node:url";
-import { hasControlCharacter } from "../security/controlCharacters.mjs";
 
 /**
  * `address` as {@link normaliseMailAddress} spells it, or `undefined` for a
@@ -33,7 +32,7 @@ import { hasControlCharacter } from "../security/controlCharacters.mjs";
 export function normaliseMailAddress(address: unknown): string | undefined {
 	if (typeof address !== "string" || !address.isWellFormed()) return undefined;
 	const trimmed = address.trim().normalize("NFC");
-	if (hasControlCharacter(trimmed) || /\s/u.test(trimmed)) return undefined;
+	if (/[\p{Cc}\s]/u.test(trimmed)) return undefined;
 	const at = trimmed.lastIndexOf("@");
 	if (at <= 0 || at === trimmed.length - 1) return undefined;
 	const domain = domainToASCII(trimmed.slice(at + 1));

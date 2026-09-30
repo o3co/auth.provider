@@ -82,10 +82,28 @@ export interface TokenExchangeDependencies
 	readonly tokenExchangeValidatorResolver: Pick<TokenExchangeValidatorResolver, "get">;
 	/** What the oauth module provides of `oauth {}`; the configuration is read when absent. */
 	readonly oauthTokenSettings?: OAuthTokenSettings;
+	/**
+	 * The module's own section, `oauth-token-exchange {}`: the deepest actor
+	 * chain accepted before the current actor is added, 3 when unset. Without
+	 * it, a configuration still setting `oauth.tokenExchange` is refused.
+	 */
+	readonly section?: { readonly maxActorChainDepth?: number };
 }
 
 export function createTokenExchangeGrant(deps: TokenExchangeDependencies): GrantHandler {
 	const { tokenExchangeValidatorResolver, clientRepository } = deps;
+	// Fail closed: a bound written at the old path, read as unset, would widen
+	// the actor chain to the default.
+	if (
+		deps.section === undefined &&
+		(deps.config as { oauth?: { tokenExchange?: unknown } }).oauth?.tokenExchange !== undefined
+	) {
+		throw new RangeError(
+			"createTokenExchangeGrant: oauth.tokenExchange has moved to oauth-token-exchange; " +
+				"hand maxActorChainDepth as section.maxActorChainDepth " +
+				"(oauth-token-exchange.maxActorChainDepth), and remove oauth.tokenExchange.",
+		);
+	}
 	// The lifetimes are read once, when the grant is built, so a hand-built
 	// configuration the resolver refuses fails the composition instead of every
 	// request after client authentication. The oauth module's settings when present
@@ -926,10 +944,7 @@ function parseRequestedExpiresIn(value: unknown): number | undefined | typeof MA
 }
 
 function getMaxActorChainDepth(deps: TokenExchangeDependencies): number {
-	const tokenExchange = deps.config.oauth.tokenExchange as
-		| { maxActorChainDepth?: unknown }
-		| undefined;
-	const maxActorChainDepth = tokenExchange?.maxActorChainDepth;
+	const maxActorChainDepth: unknown = deps.section?.maxActorChainDepth;
 	return typeof maxActorChainDepth === "number" &&
 		Number.isInteger(maxActorChainDepth) &&
 		maxActorChainDepth > 0

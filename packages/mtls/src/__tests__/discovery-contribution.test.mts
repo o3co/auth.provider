@@ -34,30 +34,17 @@ import { makeValidCoreConfig } from "@o3co/auth-provider-core/testing";
 import express from "express";
 import request from "supertest";
 import { describe, expect, it } from "vitest";
-import { mtlsModule } from "#/module.mjs";
+import { mtlsConfigSchema, mtlsModule } from "#/module.mjs";
 
-/** Build the mtls config slice as `mtlsConfigSchema` would leave it. */
-function mtlsConfig(overrides: Record<string, unknown> = {}): unknown {
-	return {
-		oauth: {
-			mtls: {
-				enabled: false,
-				source: "tls-layer",
-				"cert-header": "x-forwarded-client-cert",
-				"cert-header-dialect": "envoy",
-				"trusted-proxies": [],
-				mode: "self-signed",
-				"trusted-cas": [],
-				...overrides,
-			},
-		},
-	};
+/** The `mtls` section as boot hands it to the module: parsed with `mtlsConfigSchema`. */
+function mtlsConfig(overrides: Record<string, unknown> | undefined = {}): unknown {
+	return mtlsConfigSchema.parse(overrides);
 }
 
-async function contribution(config: unknown): Promise<OidcDiscoveryContribution> {
+async function contribution(section: unknown): Promise<OidcDiscoveryContribution> {
 	const factory = mtlsModule.contributes?.discoveryMetadata?.[0];
 	if (factory === undefined) throw new Error("mtlsModule contributes no discoveryMetadata");
-	return await factory({ config } as never);
+	return await factory({ section } as never);
 }
 
 describe("mtlsModule — discoveryMetadata contribution", () => {
@@ -72,7 +59,7 @@ describe("mtlsModule — discoveryMetadata contribution", () => {
 		// the same `cnf["x5t#S256"]`, and the RFC 8705 §3.3 flag describes the
 		// token, not the transport the certificate arrived over.
 		const meta = await contribution(
-			mtlsConfig({ enabled: true, source: "header", "trusted-proxies": ["loopback"] }),
+			mtlsConfig({ enabled: true, source: "header", trustedProxies: ["loopback"] }),
 		);
 		expect(meta.metadata?.tls_client_certificate_bound_access_tokens).toBe(true);
 	});
@@ -87,8 +74,8 @@ describe("mtlsModule — discoveryMetadata contribution", () => {
 		expect(all).not.toHaveProperty("tls_client_certificate_bound_access_tokens");
 	});
 
-	it("contributes nothing when the oauth.mtls slice is absent entirely", async () => {
-		const meta = await contribution({ oauth: {} });
+	it("contributes nothing when the mtls section is absent entirely", async () => {
+		const meta = await contribution(mtlsConfig(undefined));
 		const all = { ...(meta.endpoints ?? {}), ...(meta.metadata ?? {}) };
 		expect(all).not.toHaveProperty("tls_client_certificate_bound_access_tokens");
 	});
@@ -156,7 +143,7 @@ const bootWith = (mtls: Record<string, unknown>): BootstrapMap =>
 	({
 		config: {
 			...makeValidCoreConfig(),
-			oauth: { ...makeValidCoreConfig().oauth, mtls },
+			mtls,
 		} as never,
 		pathResolver: (s: string) => s,
 	}) satisfies Record<string, unknown> as BootstrapMap;
@@ -168,11 +155,11 @@ describe("mtlsModule — discovery metadata in the served document", () => {
 			bootstrapComponents: bootWith({
 				enabled: true,
 				source: "tls-layer",
-				"cert-header": "x-forwarded-client-cert",
-				"cert-header-dialect": "envoy",
-				"trusted-proxies": [],
+				certHeader: "x-forwarded-client-cert",
+				certHeaderDialect: "envoy",
+				trustedProxies: [],
 				mode: "self-signed",
-				"trusted-cas": [],
+				trustedCas: [],
 			}),
 		});
 		const app = express();
@@ -188,11 +175,11 @@ describe("mtlsModule — discovery metadata in the served document", () => {
 			bootstrapComponents: bootWith({
 				enabled: false,
 				source: "tls-layer",
-				"cert-header": "x-forwarded-client-cert",
-				"cert-header-dialect": "envoy",
-				"trusted-proxies": [],
+				certHeader: "x-forwarded-client-cert",
+				certHeaderDialect: "envoy",
+				trustedProxies: [],
 				mode: "self-signed",
-				"trusted-cas": [],
+				trustedCas: [],
 			}),
 		});
 		const app = express();

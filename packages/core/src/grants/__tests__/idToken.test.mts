@@ -152,6 +152,33 @@ describe("generateIdToken", () => {
 	});
 });
 
+describe("generateIdToken — auth_time", () => {
+	const keyStore = createSymmetricKeyStore("test-secret-32-chars-xxxxxxxxxxxx");
+
+	it.each([
+		["a Date that is not valid", new Date("not a date")],
+		["an instant before the epoch", new Date(-1_500)],
+	])(
+		"refuses with a RangeError an authentication instant auth_time cannot say: %s",
+		async (_label, authTime) => {
+			// OIDC Core §2 requires `auth_time` when `max_age` was asked, and this
+			// id_token always carries it: one it cannot say is not minted.
+			await expect(
+				generateIdToken({
+					sub: "u-1",
+					aud: "client-1",
+					authTime,
+					sid: "sid-1",
+					scopes: ["openid"],
+					userClaims: {},
+					keyStore,
+					issuer: "https://auth.example.com",
+				}),
+			).rejects.toThrow(RangeError);
+		},
+	);
+});
+
 describe("generateIdToken — amr / acr", () => {
 	const keyStore = createSymmetricKeyStore("test-secret-32-chars-xxxxxxxxxxxx");
 	const base = {

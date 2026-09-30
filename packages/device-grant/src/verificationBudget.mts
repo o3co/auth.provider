@@ -40,7 +40,7 @@ export const isDeviceVerificationRateLimitSpec: (value: unknown) => value is Rat
 	isUsableRateLimitSpec;
 
 /**
- * `oauth.deviceAuthorization.rateLimit` as the budget, `null` when not given;
+ * `device-grant.rateLimit` as the budget, `null` when not given;
  * read as a coercing schema reads it, and a `RangeError` naming the key when
  * no limiter can apply it.
  */
@@ -49,5 +49,5 @@ export function readVerificationRateLimitBudget(
 ): RateLimitSpec | null {
 	const given = section?.rateLimit;
 	if (given === undefined) return null;
-	return requireUsableConfiguredRateLimitSpec("oauth.deviceAuthorization.rateLimit", given);
+	return requireUsableConfiguredRateLimitSpec("device-grant.rateLimit", given);
 }

@@ -1,6 +1,6 @@
 # Multi-factor authentication: a second factor after password login, and step-up at `/authorize`
 
-- Status: accepted (2026-09-25); build-order steps 1–8b implemented, the rest planned. Amended 2026-09-29 (module review): the build order below is the plan at acceptance, amended at its places. Steps 1–6 landed as #693, #695, #702, #706, #707 and #720; step 7 was replaced by the session-admission ADR's series (#709, #715–#719, on #713's extraction of `establishSession`); step 8's first two parts landed as #721 (8a) and #729 (8b). Step 8's third part and steps 9–22 are planned.
+- Status: accepted (2026-09-25); build-order steps 1–8 implemented, the rest planned. Amended 2026-09-29 (module review): the build order below is the plan at acceptance, amended at its places. Steps 1–6 landed as #693, #695, #702, #706, #707 and #720; step 7 was replaced by the session-admission ADR's series (#709, #715–#719, on #713's extraction of `establishSession`); step 8's first two parts landed as #721 (8a) and #729 (8b), and its third as #809 (8c). Steps 9–22 are planned.
 - Date: 2026-09-25
 - Replaces: the MFA extension surface added by #69 (2026-04-21) in `packages/core/src/mfa/`, which no product code has ever called (D3)
 - Written against: `develop` at `d3d9c8f2` (#692). Every "today" below was checked there, and the sibling repositories at their `develop`.

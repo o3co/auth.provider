@@ -49,6 +49,7 @@ const readSettings = (config: unknown, options: Partial<MfaSettingsOptions> = {}
 		...options,
 	});
 
+import { MFA_RATE_LIMIT_PREFIX, mfaModule } from "#/module.mjs";
 import { createMfaSealing } from "#/sealing.mjs";
 import { mfaTotpFactorModule } from "#/totp/module.mjs";
 
@@ -143,6 +144,17 @@ describe("the package's reference.conf", () => {
 			weeklyBudget: 10,
 			hardLimit: 100,
 		});
+	});
+
+	it("defaults the MFA routes' budget, mfa.rateLimit.routes, to 60 requests per 300 seconds, which the module contributes under the mfa prefix", async () => {
+		const config = resolve({ MFA_ENCRYPTION_KEY: randomBytes(32).toString("base64") });
+		const routes = (config.mfa as { rateLimit?: { routes?: unknown } }).rateLimit?.routes;
+		expect(routes).toEqual({ limit: 60, windowSeconds: 300 });
+		expect(
+			await mfaModule().contributes?.rateLimitBudgets?.[MFA_RATE_LIMIT_PREFIX]?.({
+				section: config.mfa,
+			} as never),
+		).toEqual({ limit: 60, windowSeconds: 300 });
 	});
 
 	it("defaults recent MFA's window, mfa.manage.maxAgeSeconds, to 300 seconds", () => {

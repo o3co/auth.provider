@@ -48,6 +48,7 @@ import {
 	verifyJwt,
 	wellFormedAcr,
 	wellFormedAmr,
+	wellFormedAuthTime,
 } from "@o3co/auth-provider-core";
 import type { JWTPayload } from "jose";
 import { stepUpRefusal } from "../admission.mjs";
@@ -233,15 +234,17 @@ export const createRefreshTokenGrant = (deps: RefreshTokenGrantDeps): GrantHandl
 			// §2.2), falling back to `aud` for tokens issued without `azp`.
 			const tokenAud = Array.isArray(tokenPayload.aud) ? tokenPayload.aud[0] : tokenPayload.aud;
 			const claims = tokenPayload as Record<string, unknown>;
-			// A refresh does not repeat authentication, so `amr`/`acr` carry
-			// forward from the presented token (as `auth_time` does, OIDC Core
-			// §12.2). Only well-formed values: a claim copied forward is vouched
-			// for again.
+			// A refresh does not repeat authentication, so `amr`, `acr` and
+			// `auth_time` carry forward from the presented token (OIDC Core §12.2,
+			// RFC 9470 §6.1), and a token that carries none yields none. Only
+			// well-formed values: a claim copied forward is vouched for again.
 			const carriedAmr = wellFormedAmr(claims.amr);
 			const carriedAcr = wellFormedAcr(claims.acr);
+			const carriedAuthTime = wellFormedAuthTime(claims.auth_time);
 			const authenticationClaims = {
 				...(carriedAmr ? { amr: carriedAmr } : {}),
 				...(carriedAcr ? { acr: carriedAcr } : {}),
+				...(carriedAuthTime !== undefined ? { auth_time: carriedAuthTime } : {}),
 			};
 			const tokenAzp =
 				typeof claims.azp === "string" && claims.azp.length > 0 ? claims.azp : tokenAud;

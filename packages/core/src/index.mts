@@ -353,6 +353,7 @@ export {
 } from "./federations/types.mjs";
 // The authentication claims a token may carry
 export {
+	authTimeClaim,
 	composeAmr,
 	EMAIL_OTP_AMR,
 	FEDERATED_AMR,
@@ -364,6 +365,7 @@ export {
 	SOFTWARE_KEY_AMR,
 	wellFormedAcr,
 	wellFormedAmr,
+	wellFormedAuthTime,
 } from "./grants/authenticationClaims.mjs";
 export { filterClaimsByScope } from "./grants/claimFilter.mjs";
 export type { Confirmation } from "./grants/confirmation.mjs";
@@ -582,11 +584,13 @@ export {
 	isMfaFactorId,
 	isMfaFactorKind,
 	isMfaFactorLabel,
+	isMfaFactorUpdateWritten,
 	MFA_FACTOR_LABEL_MAX_LENGTH,
 	type MfaFactorRecord,
 	type MfaFactorRecordUpdate,
 	type MfaFactorStore,
 	type MfaFactorStoreFactory,
+	type MfaFactorUpdateRequest,
 } from "./mfa/factorStore.mjs";
 export {
 	createMfaFactorStoreFactory,
@@ -633,6 +637,7 @@ export {
 	checkMfaLockoutPolicy,
 	checkMfaTransactionTransitions,
 	getBoundMfaTransaction,
+	isConsumedMfaTransaction,
 	isMfaTransactionBoundTo,
 	MFA_CLOCK_SKEW_ALLOWANCE_MS,
 	MFA_LOCKOUT_MAX_HARD_LIMIT,
@@ -650,6 +655,7 @@ export {
 	type MfaTransactionStoreFactory,
 	mfaTransactionPatchWrites,
 	newMfaTransactionRecord,
+	readMfaAttemptReservation,
 } from "./mfa/transactionStore.mjs";
 export { checkMfaVersionAdvances } from "./mfa/version.mjs";
 // Middleware — CORS for the browser-facing OAuth surface

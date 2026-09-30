@@ -57,10 +57,12 @@ import {
 } from "@o3co/auth-provider-core";
 import { unreadableModuleLeaves } from "@o3co/auth-provider-core/testing";
 import { DEVICE_CODE_GRANT_TYPE, deviceGrantModule } from "@o3co/auth-provider-device-grant";
+import { mfaConfigForTests, totpCodeForTests } from "@o3co/auth-provider-mfa/testing";
 import {
 	ACCESS_TOKEN_TYPE,
 	TOKEN_EXCHANGE_GRANT_TYPE,
 } from "@o3co/auth-provider-oauth-token-exchange";
+import { loginCompletionModule } from "@o3co/auth-provider-session";
 import {
 	ALICE,
 	AS_LISTED,
@@ -103,6 +105,7 @@ import { BUNDLED_ACTIONS } from "../../../../packages/mfa/src/__tests__/bundled-
 import {
 	APPLE_LANDING,
 	BINDER,
+	browser,
 	CLIENT_CERTIFICATE,
 	composeFullSet,
 	DPOP_JWK,
@@ -116,7 +119,9 @@ import {
 	fullSetOptions,
 	GATEWAY,
 	GITHUB_LANDING,
+	MFA_KEY,
 	REQUIRED_BINDER,
+	seedTotp,
 	TV,
 } from "./full-set.fixture.mts";
 
@@ -176,6 +181,13 @@ const ADDED: Readonly<Record<string, readonly string[]>> = {
 	],
 };
 
+/**
+ * The modules a composition loads from a package the template composes but
+ * does not load: the session package's login completion, which the MFA
+ * module requires to finish a login.
+ */
+const FROM_TEMPLATE_PACKAGES = [loginCompletionModule.name];
+
 /** The modules a deployment writes itself, beside the packages' (see the fixture). */
 const DEPLOYMENT_MODULES = [
 	"deployment:webauthn-config",
@@ -218,7 +230,11 @@ describe("what the full set covers", () => {
 	it("adds every package the template does not compose, and nothing the template already does", async () => {
 		const { modules } = await boot();
 		const names = modules.map((m) => m.name);
-		const added = [...Object.values(ADDED).flat(), ...DEPLOYMENT_MODULES];
+		const added = [
+			...Object.values(ADDED).flat(),
+			...FROM_TEMPLATE_PACKAGES,
+			...DEPLOYMENT_MODULES,
+		];
 		for (const name of added) expect(names, name).toContain(name);
 		expect(new Set(names).size, "a module listed twice").toBe(names.length);
 		// The template's list, then the added modules: nothing between.
@@ -377,9 +393,10 @@ describe("the configuration createApp is handed reaches every loaded module whol
 		const { resolved } = await boot();
 		// A default each package ships and no layer above it sets.
 		for (const path of [
-			"oauth.deviceAuthorization.rateLimit.windowSeconds",
-			"oauth.dpop.iat-window-seconds",
-			"oauth.mtls.full-pki.max-chain-depth",
+			"device-grant.rateLimit.windowSeconds",
+			"dpop.iatWindowSeconds",
+			"mtls.fullPki.maxChainDepth",
+			"oauth-token-exchange.maxActorChainDepth",
 			"webauthn.rateLimit.authenticationOptions.limit",
 			"mfa-totp-factor.enabled",
 		]) {
@@ -402,36 +419,33 @@ describe("the configuration createApp is handed reaches every loaded module whol
 	it("keeps each added package's switch as the deployment wrote it", async () => {
 		const { config } = await boot();
 		const on = config as unknown as Record<string, unknown>;
-		expect(valueAt(on, "oauth.deviceAuthorization.enabled")).toBe(true);
-		expect(valueAt(on, "oauth.dpop.enabled")).toBe(true);
-		expect(valueAt(on, "oauth.mtls.enabled")).toBe(true);
-		expect(valueAt(on, "oauth.mtls.trusted-proxies")).toEqual(["loopback"]);
+		expect(valueAt(on, "device-grant.enabled")).toBe(true);
+		expect(valueAt(on, "dpop.enabled")).toBe(true);
+		expect(valueAt(on, "mtls.enabled")).toBe(true);
+		expect(valueAt(on, "mtls.trustedProxies")).toEqual(["loopback"]);
 		expect(valueAt(on, "webauthn.rpId")).toBe("auth.test");
 	});
 
 	it("reads the device grant's switch in phase one as the operator wrote it, so the grant registers", () => {
 		// A deployment that adds the device grant to the template's modules
-		// reads its switch before boot too: `deviceGrantModule({ config })`
-		// decides from it whether the grant exists.
+		// hands it phase one's configuration: `deviceGrantModule({ config })`
+		// decides from `device-grant.enabled` there, read as its section's
+		// schema reads it, whether the grant exists.
 		const operator = join(mkdtempSync(join(tmpdir(), "full-set-472-")), "device.conf");
 		writeFileSync(
 			operator,
-			`oauth.deviceAuthorization {\n  enabled = \${?DEVICE_GRANT_ENABLED}\n  verification-uri = "${ISSUER}/device"\n}\n`,
+			`device-grant {\n  enabled = \${?DEVICE_GRANT_ENABLED}\n  verificationUri = "${ISSUER}/device"\n}\n`,
 		);
-		const reads = ["oauth.deviceAuthorization.enabled"];
 		const switches = readSwitches(
 			readOwnLayers([operator, ...ownFiles()], {
 				env: { ...SINGLE_ENV, DEVICE_GRANT_ENABLED: "true" },
 			}),
-			{ reads },
 		);
 		expect(contributionNames(deviceGrantModule({ config: switches }), "grants")).toEqual([
 			DEVICE_CODE_GRANT_TYPE,
 		]);
 		// And off where nothing says on: the grant is opt-in.
-		const unset = readSwitches(readOwnLayers([operator, ...ownFiles()], { env: SINGLE_ENV }), {
-			reads,
-		});
+		const unset = readSwitches(readOwnLayers([operator, ...ownFiles()], { env: SINGLE_ENV }));
 		expect(contributionNames(deviceGrantModule({ config: unset }), "grants")).toEqual([]);
 	});
 
@@ -865,6 +879,83 @@ describe("a password login the mfa requirement interrupts, through the template'
 		expect(create).not.toHaveBeenCalled();
 	});
 });
+
+describe("a TOTP login, through the template's boot", () => {
+	it.each(["optional", "required"] as const)(
+		"under mfa.mode = %s: the password, 403 mfa_required, the transaction, the challenge and the verification — then /authorize passes, and the tokens carry the second factor",
+		async (mode) => {
+			const { app, handle, config } = await boot({
+				adjust: (resolved) => ({ ...resolved, ...mfaConfigForTests({ key: MFA_KEY, mode }) }),
+			});
+			const { factorId, secret } = await seedTotp(handle.components, config, ALICE.sub);
+			const page = browser();
+
+			const signIn = await page.post(
+				app,
+				"/session/login",
+				{ username: ALICE.username, password: ALICE.password },
+				{ form: true },
+			);
+			expect(signIn.status).toBe(403);
+			expect(signIn.body.error).toBe("mfa_required");
+			const transaction = signIn.body.transaction as string;
+			const read = await page.get(app, "/session/mfa/transaction", {
+				"MFA-Transaction": transaction,
+			});
+			expect(read.status).toBe(200);
+			expect(read.body.factors).toEqual([{ id: factorId, kind: "totp" }]);
+			const challenge = await page.post(app, "/session/mfa/challenge", {
+				transaction_id: transaction,
+				factor_id: factorId,
+			});
+			expect(challenge.status).toBe(200);
+			const verified = await page.post(app, "/session/mfa/verify", {
+				transaction_id: transaction,
+				factor_id: factorId,
+				proof: totpCodeForTests(secret),
+			});
+			expect(verified.status).toBe(200);
+
+			const query = new URLSearchParams({
+				response_type: "code",
+				client_id: WEB.id,
+				redirect_uri: WEB.redirectUri,
+				scope: "openid",
+				state: "s-1",
+				nonce: "n-1",
+				code_challenge: TOTP_PKCE.challenge,
+				code_challenge_method: "S256",
+			});
+			const authorized = await page.get(app, `/oauth/authorize?${query}`);
+			expect(authorized.status).toBe(302);
+			const code = codeFrom(authorized);
+			const tokens = await request(app)
+				.post("/oauth/token")
+				.set("Authorization", basic(WEB))
+				.type("form")
+				.send({
+					grant_type: "authorization_code",
+					code,
+					redirect_uri: WEB.redirectUri,
+					code_verifier: TOTP_PKCE.verifier,
+				});
+			expect(tokens.status).toBe(200);
+			const claims = JSON.parse(
+				Buffer.from((tokens.body.id_token as string).split(".")[1] as string, "base64url").toString(
+					"utf8",
+				),
+			) as { sub: string; amr: string[] };
+			expect(claims.sub).toBe(ALICE.sub);
+			expect(claims.amr).toEqual(["pwd", "otp", "mfa"]);
+		},
+	);
+});
+
+/** A PKCE pair for the TOTP login's authorization request. */
+const TOTP_PKCE = (() => {
+	const verifier = "totp-login-verifier-0123456789abcdefghijklmnop";
+	return { verifier, challenge: createHash("sha256").update(verifier).digest("base64url") };
+})();
 
 /** A confidential client that signs users in with a passkey and keeps them signed in with refresh tokens. */
 const PASSKEY_APP = { id: "passkey-app", secret: "passkey-app-secret" } as const;

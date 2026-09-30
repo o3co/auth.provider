@@ -261,6 +261,36 @@ describe("the session grant on admission — what the session and its record dec
 	});
 });
 
+describe("the session grant — the auth_time it stamps", () => {
+	it("stamps the admitted record's primary authentication time, not when a second factor was verified", async () => {
+		const authTime = new Date("2026-04-21T00:00:00.750Z");
+		const { result } = await grant({
+			userSessionStore: storeWith(
+				record({
+					authTime,
+					amr: ["pwd", "otp", "mfa"],
+					authentication: {
+						primary: "pwd",
+						federation: undefined,
+						upstreamAmr: undefined,
+						mfaAt: new Date("2026-04-21T00:10:00Z"),
+					},
+				}),
+			),
+		}).handle(ctx(LIVE_COOKIE));
+		if (!("tokens" in result)) throw new Error("expected tokens");
+		expect(decodeJwt(result.tokens.access_token).auth_time).toBe(
+			Math.floor(authTime.getTime() / 1000),
+		);
+	});
+
+	it("stamps no auth_time without a userSessionStore, which records no authentication", async () => {
+		const { result } = await grant({}).handle(ctx(LIVE_COOKIE));
+		if (!("tokens" in result)) throw new Error("expected tokens");
+		expect(decodeJwt(result.tokens.access_token)).not.toHaveProperty("auth_time");
+	});
+});
+
 describe("the session grant on admission — a requirement's verdicts", () => {
 	it("asks the requirement with oauth.session_grant, graded use, over the cookie carrier", async () => {
 		const requirement = fixture(() => ({ outcome: "met" }));

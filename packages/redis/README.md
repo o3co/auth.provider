@@ -88,7 +88,7 @@ imports (see [Entry points](#entry-points)). The package depends on `zod`.
   The replay seen-set writes a record for every DPoP proof it sees — at the
   token endpoint before its rate limit runs, at a protected resource before
   the access token is verified — and keeps it for
-  `oauth.dpop.replay-store-ttl-seconds` (300 s by default), so its size
+  `dpop.replayStoreTtlSeconds` (300 s by default), so its size
   follows the request rate, whoever sends the requests. Set `maxmemory` so a
   flood cannot take the server's host down, and choose what happens at it.
   Under `noeviction` a full server refuses the write, and every consumer

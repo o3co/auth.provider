@@ -1568,6 +1568,86 @@ describe("createAuthorizationGrant", () => {
 				}
 			});
 
+			/** Redeems the code "c1" bound to "sid-1" against `userSessionStore`, when one is given. */
+			const redeemSessionCode = async (
+				userSessionStore?: ReturnType<typeof makeUserSessionStore>,
+			) => {
+				const deps = {
+					...makeDepsWithIssuer(
+						vi.fn().mockResolvedValue({
+							code: "c1",
+							client_id: "client1",
+							redirect_uri: RP_URI,
+							code_challenge: S256_CHALLENGE,
+							code_challenge_method: "S256",
+							sid: "sid-1",
+							grantedScope: ["openid"],
+						}),
+					),
+					...(userSessionStore
+						? {
+								userSessionStore,
+								sessionFamilyIndex: makeSessionFamilyIndex(),
+								sessionRPRegistry: makeSessionRPRegistry(),
+							}
+						: {}),
+				};
+				const { result } = await createAuthorizationGrant(deps).handle({
+					body: {
+						code: "c1",
+						client_id: "client1",
+						redirect_uri: RP_URI,
+						code_verifier: CODE_VERIFIER,
+					},
+					session: { code: "c1", code_client_id: "client1", user: { id: "u-1" } },
+					issuer: "https://auth.example.com",
+					metadata: { ip: "127.0.0.1" },
+					authenticatedClient: DEFAULT_AUTH_CLIENT,
+				});
+				if (!("tokens" in result))
+					throw new Error(`expected tokens, got ${JSON.stringify(result)}`);
+				return result.tokens;
+			};
+
+			it("stamps the session's auth_time on the access and refresh tokens, as on the id_token", async () => {
+				const authTime = new Date("2026-04-21T00:00:00.750Z");
+				const tokens = await redeemSessionCode(
+					makeUserSessionStore({ sid: "sid-1", sub: "u-1", authTime, claims: {}, amr: ["pwd"] }),
+				);
+				const seconds = Math.floor(authTime.getTime() / 1000);
+				expect(decodeJwt(tokens.id_token as string).auth_time).toBe(seconds);
+				expect(decodeJwt(tokens.access_token).auth_time).toBe(seconds);
+				expect(decodeJwt(tokens.refresh_token as string).auth_time).toBe(seconds);
+			});
+
+			it("stamps the primary authentication's time, not when a second factor was verified", async () => {
+				const authTime = new Date("2026-04-21T00:00:00Z");
+				const tokens = await redeemSessionCode(
+					makeUserSessionStore({
+						sid: "sid-1",
+						sub: "u-1",
+						authTime,
+						claims: {},
+						amr: ["pwd", "otp", "mfa"],
+						authentication: {
+							primary: "pwd",
+							federation: undefined,
+							upstreamAmr: undefined,
+							mfaAt: new Date("2026-04-21T00:10:00Z"),
+						},
+					}),
+				);
+				const seconds = Math.floor(authTime.getTime() / 1000);
+				expect(decodeJwt(tokens.access_token).auth_time).toBe(seconds);
+				expect(decodeJwt(tokens.refresh_token as string).auth_time).toBe(seconds);
+			});
+
+			it("stamps no auth_time without a userSessionStore, which records no authentication", async () => {
+				const tokens = await redeemSessionCode();
+				expect(decodeJwt(tokens.access_token)).not.toHaveProperty("auth_time");
+				expect(decodeJwt(tokens.refresh_token as string)).not.toHaveProperty("auth_time");
+			});
+
 			it("does NOT include id_token when issuer is absent (avoids OIDC-noncompliant iss:'')", async () => {
 				const authTime = new Date("2026-04-21T00:00:00Z");
 				const userSessionStore = makeUserSessionStore({

@@ -28,7 +28,7 @@ import { BlockList, isIP } from "node:net";
  *
  * mtls revocation (`packages/mtls/src/fullPki/fetchGuard.mts`) is a different
  * decision: it fetches URLs a trusted CA wrote into a validated certificate,
- * and only from hosts on `revocation.allowed-hosts`. That allowlist is
+ * and only from hosts on `mtls.fullPki.revocation.allowedHosts`. That allowlist is
  * stricter and must admit private addresses, because an internal CA serves
  * its CRLs and OCSP inside the network. Each home states the other.
  */

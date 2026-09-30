@@ -33,12 +33,15 @@ const REFERENCE = new URL("../../config/reference.conf", import.meta.url);
 describe("the package's config/reference.conf", () => {
 	const modules = [dpopModule];
 
-	it("is read at the sections its modules declare", () => {
-		expect(modules.map((module) => module.section?.at)).toEqual(["oauth.dpop"]);
+	it("is read at the section named after its module", () => {
+		expect(
+			modules.map((module) => [module.name, module.section !== undefined, module.section?.at]),
+		).toEqual([["dpop", true, undefined]]);
 	});
 
 	it("is declared by each of them and holds only their sections, which their schemas parse without losing a path", () => {
-		const read = (path: string): unknown => parseFile(path, { env: {} }).toObject();
+		const read = (path: string, env: Readonly<Record<string, string>>): unknown =>
+			parseFile(path, { env: { ...env } }).toObject();
 		expect(packageReferenceProblems({ reference: REFERENCE, modules, read })).toEqual([]);
 	});
 });

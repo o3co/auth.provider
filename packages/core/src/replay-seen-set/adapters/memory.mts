@@ -42,7 +42,7 @@ export const DEFAULT_MEMORY_REPLAY_SEEN_SET_MIN_SWEEP_INTERVAL_MS = 10_000;
 /**
  * The most records the set holds by default. The set fills at
  * `maxEntries / window` records a second (window: DPoP's
- * `oauth.dpop.replay-store-ttl-seconds`, 300 s by default). At a million that
+ * `dpop.replayStoreTtlSeconds`, 300 s by default). At a million that
  * is ~3,300 signature-verified DPoP proofs a second, about what one process
  * can verify at all, so reaching the cap costs a flooder as much as taking the
  * CPU. A lower cap would let one client fill it idly, and while it is full
