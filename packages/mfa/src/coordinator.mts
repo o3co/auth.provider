@@ -31,6 +31,8 @@
  *   once succeeds once, and a lost race never spends a factor's state.
  * - A store that cannot answer, a factor whose data does not open, and a
  *   factor that throws are outages: never a wrong code, never "no factor".
+ * - A verified counting factor marks the enrollment witness of a login whose
+ *   `User` does not carry it (D12); a mark that fails never fails the login.
  * - A factor is handed its records opened and digests under the ring; it
  *   never sees a key, a store, a transaction or the mail sender. A code it
  *   asks to be mailed goes through `sendMfaMail` (`mail.mts`), to the
@@ -62,6 +64,7 @@ import {
 import { keptState, readKeptState, sendMfaMail } from "./mail.mjs";
 import type { MfaRequirementMode } from "./requirement.mjs";
 import type { MfaSealing } from "./sealing.mjs";
+import { type MfaEnrollmentWitness, type MfaWitnessMark, reconciles } from "./witness.mjs";
 
 /** A transaction id as the login makes one: 32 bytes, base64url. */
 const TRANSACTION_ID = /^[A-Za-z0-9_-]{43}$/;
@@ -207,6 +210,8 @@ export type MfaVerifyOutcome =
 			readonly continuation: PrimaryContinuation | undefined;
 			/** What the verification adds to the login: the factor's `amr`, `mfa` when it adds it, and when. */
 			readonly adds: { readonly amr: readonly string[]; readonly mfaAt: Date };
+			/** The witness marked for a login's `User` that lacked it; `undefined` when none was due. */
+			readonly witness: MfaWitnessMark | undefined;
 	  } & MfaCeremonySubject);
 
 /** One call's request: the transaction named, the binding the browser presents, and what a factor may read of the request. */
@@ -235,6 +240,8 @@ export interface MfaCoordinatorOptions {
 	readonly mode: MfaRequirementMode;
 	/** Where a factor's codes are mailed; none wired, a factor that asks for one is an outage. */
 	readonly mailSender?: MailSender;
+	/** The enrollment witness a verified counting factor reconciles. */
+	readonly witness: MfaEnrollmentWitness;
 	/** The clock, in epoch milliseconds. Defaults to `Date.now`. */
 	readonly now?: () => number;
 }
@@ -267,6 +274,7 @@ export function createMfaCoordinator(options: MfaCoordinatorOptions): MfaCoordin
 		maxAttemptsPerTransaction,
 		mode,
 		mailSender,
+		witness,
 	} = options;
 	const now = options.now ?? (() => Date.now());
 
@@ -816,6 +824,11 @@ export function createMfaCoordinator(options: MfaCoordinatorOptions): MfaCoordin
 				if ("reason" in checked) return refused(checked.reason, 0);
 			}
 
+			// D12: a counting factor verified for a login's `User` that does not
+			// say it enrolled marks it, so a mark that failed heals here.
+			const user = consumed.continuation?.primary.user;
+			const marked = reconciles(factor, user) ? await witness.mark(tx.subject) : undefined;
+
 			return {
 				outcome: "verified",
 				continuation: consumed.continuation,
@@ -823,6 +836,7 @@ export function createMfaCoordinator(options: MfaCoordinatorOptions): MfaCoordin
 					amr: [...new Set([...checked.added, ...(factor.addsMfa ? [MFA_AMR] : [])])],
 					mfaAt: new Date(nowMs),
 				},
+				witness: marked,
 				...about,
 			};
 		},

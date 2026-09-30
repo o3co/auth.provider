@@ -1209,9 +1209,10 @@ describe("admitPrimary — after a password login", () => {
 				requirement.admitPrimary?.(primaryOf("u-alice", { mfaEnrolled })),
 				JSON.stringify(mfaEnrolled),
 			).rejects.toMatchObject({ reason: "mfa_enrollment_state_inconsistent" });
-			expect(events.map((event) => event.details), JSON.stringify(mfaEnrolled)).toEqual([
-				{ purpose: "login", witness: "malformed" },
-			]);
+			expect(
+				events.map((event) => event.details),
+				JSON.stringify(mfaEnrolled),
+			).toEqual([{ purpose: "login", witness: "malformed" }]);
 		}
 	});
 

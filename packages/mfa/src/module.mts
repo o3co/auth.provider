@@ -84,6 +84,7 @@ import { createMfaRouter } from "./routes.mjs";
 import { createMfaSealing, type MfaSealing } from "./sealing.mjs";
 import { mfaTotpFactorModule } from "./totp/module.mjs";
 import { createLoginTransactions } from "./transactions.mjs";
+import { createMfaEnrollmentWitness, type MfaEnrollmentWitness } from "./witness.mjs";
 
 /** The id of the MFA routes' contribution: what another route orders itself against. */
 export const MFA_ROUTES_ID = "mfa-routes";
@@ -127,6 +128,8 @@ export interface MfaBootState {
 	readonly sealing: MfaSealing;
 	/** The object the requirement's factory returned: the one core issued `mfa.step_up` to. */
 	readonly requirement: SessionRequirement;
+	/** The enrollment witness over the composition's directory. */
+	readonly witness: MfaEnrollmentWitness;
 	readonly logger: Logger;
 }
 
@@ -309,7 +312,7 @@ export function mfaModule(options: MfaModuleOptions = {}): Module {
 		| "csrfGuard"
 		| "loginCompletion"
 		| "deploymentMode",
-		"rateLimiter" | "auditSink" | "logger" | "mailSender",
+		"rateLimiter" | "auditSink" | "logger" | "mailSender" | "userRepository",
 		typeof mfaSectionSchema
 	>({
 		name: "mfa",
@@ -334,7 +337,7 @@ export function mfaModule(options: MfaModuleOptions = {}): Module {
 			"loginCompletion",
 			"deploymentMode",
 		],
-		optional: ["rateLimiter", "auditSink", "logger", "mailSender"],
+		optional: ["rateLimiter", "auditSink", "logger", "mailSender", "userRepository"],
 		absencePolicies: { auditSink: AUDIT_SINK_ABSENCE_POLICY },
 		contributes: {
 			rateLimitBudgets: {
@@ -369,6 +372,12 @@ export function mfaModule(options: MfaModuleOptions = {}): Module {
 							"mfa_step_up_unsupported",
 						);
 					}
+					// A directory that cannot write the witness leaves D12's defence to
+					// what the Store answers on authenticate: said once.
+					const witness = createMfaEnrollmentWitness(deps.userRepository);
+					if (!witness.writable) {
+						logger.warn({ slot: "userRepository" }, "mfa_enrollment_witness_unwritable");
+					}
 					const requirement = createMfaRequirement({
 						mode,
 						factors: deps.mfaFactorResolver,
@@ -381,12 +390,14 @@ export function mfaModule(options: MfaModuleOptions = {}): Module {
 						stepUpRecordable,
 						recentMfaMaxAgeSeconds: settings.manage.maxAgeSeconds,
 						logger,
+						auditSink: deps.auditSink,
 					});
 					bootStates.set(deps.mfaFactorResolver, {
 						mode,
 						settings,
 						sealing: createMfaSealing({ ring: settings.encryptionKeys, logger }),
 						requirement,
+						witness,
 						logger,
 					});
 					return requirement;
@@ -394,7 +405,7 @@ export function mfaModule(options: MfaModuleOptions = {}): Module {
 			},
 			routes: [
 				(deps) => {
-					const { mode, settings, sealing, logger } = mfaBootState(deps.mfaFactorResolver);
+					const { mode, settings, sealing, witness, logger } = mfaBootState(deps.mfaFactorResolver);
 					checkInstalledFactors(deps.mfaFactorResolver, mode);
 					return {
 						id: MFA_ROUTES_ID,
@@ -409,6 +420,7 @@ export function mfaModule(options: MfaModuleOptions = {}): Module {
 								maxAttemptsPerTransaction: settings.maxAttemptsPerTransaction,
 								mode,
 								mailSender: deps.mailSender,
+								witness,
 							}),
 							admission: {
 								userSessionStore: deps.userSessionStore,

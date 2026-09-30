@@ -42,7 +42,6 @@ const repoRoot = resolve(fileURLToPath(import.meta.url), "../../../../../..");
  * that emits it deletes it here.
  */
 const DECLARED_NOT_EMITTED: Readonly<Record<string, string>> = {
-	"mfa.enrollment_state_inconsistent": "the MFA ADR's build-order step 9",
 	"mfa.factor.enrolled": "the MFA ADR's build-order step 9",
 	"mfa.recovery_codes.generated": "the MFA ADR's build-order step 9",
 	"mfa.locked": "the MFA ADR's build-order step 10",

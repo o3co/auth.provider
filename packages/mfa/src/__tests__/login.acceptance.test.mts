@@ -45,8 +45,8 @@ import {
 	sessionIdSet,
 	WitnessingUserRepository,
 } from "./moduleHarness.mjs";
-import { recordingAuditSink } from "./routesHarness.mjs";
 import { factorRecord, unreachableFactorStore } from "./requirementHarness.mjs";
+import { recordingAuditSink } from "./routesHarness.mjs";
 
 afterEach(disposeAll);
 
@@ -318,10 +318,16 @@ describe("a password login the Store says enrolled while no factor is on record 
 			expect(logger.error.mock.calls[0]?.[0]).toMatchObject({
 				store: "mfa",
 				phase: "establishment",
-				err: { name: "MfaEnrollmentStateInconsistentError", reason: "mfa_enrollment_state_inconsistent" },
+				err: {
+					name: "MfaEnrollmentStateInconsistentError",
+					reason: "mfa_enrollment_state_inconsistent",
+				},
 			});
 			expect(audit.of("mfa.enrollment_state_inconsistent")).toEqual([
-				expect.objectContaining({ subject: ALICE.id, details: { purpose: "login", witness: "enrolled" } }),
+				expect.objectContaining({
+					subject: ALICE.id,
+					details: { purpose: "login", witness: "enrolled" },
+				}),
 			]);
 			expect(create).not.toHaveBeenCalled();
 			expect(watched.create).not.toHaveBeenCalled();

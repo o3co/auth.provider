@@ -64,7 +64,11 @@ describe("a verified counting factor at a login", () => {
 		const factorStore = createMemoryMfaFactorStore();
 		const { record, secret } = await seedTotp(factorStore);
 		const userRepository = directory();
-		const { app, logger } = await boot({ config: configFor("required"), factorStore, userRepository });
+		const { app, logger } = await boot({
+			config: configFor("required"),
+			factorStore,
+			userRepository,
+		});
 		const { agent, transaction } = await beginLogin(app);
 
 		const res = await verify(agent, transaction, record.id, totpCode(secret));
@@ -90,10 +94,16 @@ describe("a verified counting factor at a login", () => {
 		const { record, secret } = await seedTotp(factorStore);
 		const userRepository = directory();
 		userRepository.failWith(new Error("Store unreachable"));
-		const { app, logger } = await boot({ config: configFor("required"), factorStore, userRepository });
+		const { app, logger } = await boot({
+			config: configFor("required"),
+			factorStore,
+			userRepository,
+		});
 
 		const first = await beginLogin(app);
-		expect((await verify(first.agent, first.transaction, record.id, totpCode(secret))).status).toBe(200);
+		expect((await verify(first.agent, first.transaction, record.id, totpCode(secret))).status).toBe(
+			200,
+		);
 		expect(events(logger, "warn").filter((event) => event.startsWith("mfa_enrollment_"))).toEqual([
 			"mfa_enrollment_witness_unwritten",
 		]);

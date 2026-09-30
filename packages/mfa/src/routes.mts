@@ -56,6 +56,7 @@ import type {
 	MfaVerifyOutcome,
 } from "./coordinator.mjs";
 import { MFA_REQUIREMENT_NAME } from "./requirement.mjs";
+import type { MfaWitnessMark } from "./witness.mjs";
 
 /** The header a transaction id may travel in beside the body. */
 const TRANSACTION_HEADER = "MFA-Transaction";
@@ -184,6 +185,12 @@ export function createMfaRouter(options: MfaRoutesOptions): Router {
 			);
 		}
 		res.status(503).json(MFA_UNAVAILABLE);
+	};
+
+	/** A witness mark that failed: once at warn; what it followed stands, and the next login heals it. */
+	const witnessUnwritten = (sub: string, mark: MfaWitnessMark | undefined): void => {
+		if (mark?.outcome !== "unwritten") return;
+		logger.warn({ sub, err: loggableError(mark.cause) }, "mfa_enrollment_witness_unwritten");
 	};
 
 	/** A mail the ceremony could not send: `429` at the sender's limit; else logged once and `503`. */
@@ -416,6 +423,7 @@ export function createMfaRouter(options: MfaRoutesOptions): Router {
 						userAgent: call.request.userAgent,
 						details: { kind: outcome.kind, purpose: outcome.purpose },
 					});
+					witnessUnwritten(outcome.subject, outcome.witness);
 					await completeLogin(req, res, outcome);
 					return;
 			}
