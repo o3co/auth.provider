@@ -51,6 +51,62 @@ describe("normaliseMailAddress", () => {
 		expect(normaliseMailAddress('"a@b"@Example.com')).toBe('"a@b"@example.com');
 	});
 
+	it("reads one addr-spec alone: a list, an angle address, a comment, a format character, or a domain a URL parser would cut short or decode is none", () => {
+		for (const value of [
+			"attacker@evil.com,victim@example.com",
+			"victim@example.com;attacker@evil.com",
+			"<attacker@evil.com>@example.com",
+			"<victim@example.com>",
+			"Victim<victim@example.com>",
+			"victim(c)@example.com",
+			"victim@example.com(evil.com)",
+			"vic:tim@example.com",
+			"vic[tim]@example.com",
+			"vic\\tim@example.com",
+			"ali\u200Bce@example.com",
+			"alice\u202E@example.com",
+			"alice@exa\u200Bmple.com",
+			"alice@exa\u00ADmple.com",
+			"alice@example.com\uFEFF",
+			"alice@example.com/x",
+			"alice@example.com?x",
+			"alice@example.com#x",
+			"alice@example.com\\x",
+			"alice@ex%61mple.com",
+			"alice@example.com:25",
+			"victim@[127.0.0.1]",
+			"alice@\uFF45\uFF58\uFF41\uFF4D\uFF50\uFF4C\uFF45.com",
+			"alice@example\u3002com",
+			"alice\uFF20example.com",
+			"alice@-example.com",
+			"alice@example-.com",
+			".alice@example.com",
+			"alice.@example.com",
+			"al..ice@example.com",
+			'a"b@example.com',
+			'"a"b@example.com',
+			'"a\\"@example.com',
+			`${"a".repeat(65)}@example.com`,
+			`alice@${"b".repeat(64)}.com`,
+		]) {
+			expect(normaliseMailAddress(value), JSON.stringify(value)).toBeUndefined();
+		}
+	});
+
+	it("reads what an addr-spec may hold: every atext character, a quoted local part with an escaped character, UTF-8 letters, and the longest local part and label", () => {
+		expect(normaliseMailAddress("o'Brien+Tag@example.com")).toBe("o'brien+tag@example.com");
+		expect(normaliseMailAddress("a!#$%&'*+-/=?^_`{|}~@example.com")).toBe(
+			"a!#$%&'*+-/=?^_`{|}~@example.com",
+		);
+		expect(normaliseMailAddress('"a\\"b"@example.com')).toBe('"a\\"b"@example.com');
+		expect(normaliseMailAddress("\u7528\u6237@b\u00fccher.example")).toBe(
+			"\u7528\u6237@xn--bcher-kva.example",
+		);
+		const local = "a".repeat(64);
+		const label = "b".repeat(63);
+		expect(normaliseMailAddress(`${local}@${label}.com`)).toBe(`${local}@${label}.com`);
+	});
+
 	it("reads a value that is no address as none", () => {
 		for (const value of [
 			undefined,
