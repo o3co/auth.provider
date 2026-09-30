@@ -977,6 +977,55 @@ export function runMfaTransactionStoreContract(
 			);
 		});
 
+		/** Whether `result` is a refusal answered as its episode's first. */
+		const first = (result: MfaSubjectAttemptReservation): boolean | "ok" =>
+			result.ok ? "ok" : result.first;
+
+		it("answers the refusal that begins an episode as first, and every later one of it not", async () => {
+			const store = await factory();
+			const t = start();
+			for (let i = 0; i < 5; i++) await fail(store, t + i);
+			expect(first(await check(store, t + 5))).toBe(true);
+			expect(first(await check(store, t + 6))).toBe(false);
+			expect(first(await check(store, t + 7))).toBe(false);
+		});
+
+		it("begins another episode after an attempt is let through, and after clearSubjectState", async () => {
+			const store = await factory();
+			const t = start();
+			for (let i = 0; i < 5; i++) await fail(store, t + i);
+			expect(first(await check(store, t + 5))).toBe(true);
+			// The backoff ends: an attempt is let through, and fails, so the
+			// next lock is a new episode.
+			const after = t + 4 + 900_000;
+			await fail(store, after);
+			expect(first(await check(store, after + 1))).toBe(true);
+			expect(first(await check(store, after + 2))).toBe(false);
+			await store.clearSubjectState("user-1");
+			for (let i = 0; i < 5; i++) await fail(store, after + 10 + i);
+			expect(first(await check(store, after + 15))).toBe(true);
+		});
+
+		it("keeps an episode through an exempt success that lifts no hold, and each subject's apart", async () => {
+			const store = await factory();
+			const t = start();
+			const at = await fillTheWeek(store, t);
+			expect(first(await check(store, at))).toBe(true);
+			await store.noteExemptSuccess("user-1", at + 1);
+			expect(first(await check(store, at + 2))).toBe(false);
+			const other = await fillTheWeek(store, t, "user-2");
+			expect(first(await check(store, other, POLICY, "user-2"))).toBe(true);
+		});
+
+		it("answers one refusal as first among N in flight", async () => {
+			const store = await factory();
+			const t = start();
+			for (let i = 0; i < 5; i++) await fail(store, t + i);
+			const results = await Promise.all(Array.from({ length: 10 }, () => check(store, t + 5)));
+			expect(results.map(first).filter((answer) => answer === true)).toHaveLength(1);
+			expect(results.every((result) => !result.ok)).toBe(true);
+		});
+
 		it("ends the run, and its lock, on a guessable success", async () => {
 			const store = await factory();
 			const t = start();

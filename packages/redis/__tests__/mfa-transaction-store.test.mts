@@ -449,7 +449,7 @@ describe("createRedisMfaTransactionStore — the subject state", () => {
 		expect(await first().exists(lock, week)).toBe(0);
 	});
 
-	it("writes nothing on a refused attempt that forgot nothing: a held subject hammered is no write load", async () => {
+	it("writes nothing on a refused attempt past its episode's first that forgot nothing: a held subject hammered is no write load", async () => {
 		// The deadlines are set as the state changes; a refusal that changed
 		// nothing leaves them where they are: no write to the AOF and every
 		// replica per attempt an attacker sends at a held subject. A sentinel
@@ -467,11 +467,17 @@ describe("createRedisMfaTransactionStore — the subject state", () => {
 		};
 		// The backoff: a run is counted, so the keys carry no TTL.
 		for (let i = 0; i < 5; i++) await fail(t + i);
+		// The episode's first refusal records that it began; the rest write nothing.
+		expect(await store.reserveSubjectAttempt("user-1", t + 9, POLICY)).toMatchObject({
+			ok: false,
+			first: true,
+		});
 		await first().pexpireat(lock, sentinel);
 		await first().pexpireat(week, sentinel);
 		expect(await store.reserveSubjectAttempt("user-1", t + 10, POLICY)).toMatchObject({
 			ok: false,
 			hold: "backoff",
+			first: false,
 		});
 		expect(await deadlineOf(lock)).toBe(sentinel);
 		expect(await deadlineOf(week)).toBe(sentinel);
@@ -490,12 +496,17 @@ describe("createRedisMfaTransactionStore — the subject state", () => {
 			at += MINUTE;
 		}
 		await weekly.noteExemptSuccess("user-1", at);
+		expect(await weekly.reserveSubjectAttempt("user-1", at, weekOnly)).toMatchObject({
+			ok: false,
+			first: true,
+		});
 		expect(await deadlineOf(weeklyLock)).toBeGreaterThan(0);
 		await first().pexpireat(weeklyLock, sentinel);
 		await first().pexpireat(weeklyWeek, sentinel);
 		expect(await weekly.reserveSubjectAttempt("user-1", at + MINUTE, weekOnly)).toMatchObject({
 			ok: false,
 			hold: "weekly",
+			first: false,
 		});
 		expect(await deadlineOf(weeklyLock)).toBe(sentinel);
 		expect(await deadlineOf(weeklyWeek)).toBe(sentinel);
@@ -683,7 +694,7 @@ describe("createRedisMfaTransactionStore — the same answers as core's in-proce
 					const expected = await memory.reserveSubjectAttempt("user-1", at, SMALL);
 					const actual = await redis.reserveSubjectAttempt("user-1", at, SMALL);
 					const shape = (r: MfaSubjectAttemptReservation) =>
-						r.ok ? "ok" : { hold: r.hold, retryAfterMs: r.retryAfterMs };
+						r.ok ? "ok" : { hold: r.hold, retryAfterMs: r.retryAfterMs, first: r.first };
 					expect(shape(actual), `step ${step}`).toEqual(shape(expected));
 					if (expected.ok && actual.ok) pending.push([expected.reservation, actual.reservation]);
 				} else if (roll < 0.85 && pending.length > 0) {
@@ -727,7 +738,7 @@ describe("createRedisMfaTransactionStore — the same answers as core's in-proce
 			answers.push(await store.reserveSubjectAttempt("user-1", t + 1, tie));
 		}
 		expect(answers[1]).toEqual(answers[0]);
-		expect(answers[0]).toEqual({ ok: false, hold: "weekly", retryAfterMs: WEEK - 1 });
+		expect(answers[0]).toEqual({ ok: false, hold: "weekly", retryAfterMs: WEEK - 1, first: true });
 	});
 
 	it("ends an attempt reserved at the very instant of an exempt success, as core's store does", async () => {

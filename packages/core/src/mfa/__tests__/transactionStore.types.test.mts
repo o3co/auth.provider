@@ -27,6 +27,7 @@ import {
 	MFA_TRANSACTION_PATCH_KEYS,
 	type MfaLockoutPolicy,
 	type MfaSubjectAttemptReservation,
+	type MfaSubjectHold,
 	type MfaTransaction,
 	type MfaTransactionPatch,
 	type MfaTransactionStore,
@@ -65,6 +66,16 @@ describe("the MfaTransactionStore port", () => {
 		expectTypeOf<MfaTransactionStore["noteExemptSuccess"]>().toEqualTypeOf<
 			(subject: string, nowMs: number) => Promise<void>
 		>();
+		expect(true).toBe(true);
+	});
+
+	it("answers a refused attempt with the hold, when to come back, and whether the refusal begins an episode", () => {
+		expectTypeOf<Extract<MfaSubjectAttemptReservation, { ok: false }>>().toEqualTypeOf<{
+			readonly ok: false;
+			readonly hold: MfaSubjectHold;
+			readonly retryAfterMs: number | null;
+			readonly first: boolean;
+		}>();
 		expect(true).toBe(true);
 	});
 });
