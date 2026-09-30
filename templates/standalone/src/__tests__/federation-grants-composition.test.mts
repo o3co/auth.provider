@@ -238,7 +238,7 @@ function shutDown(handle: Awaited<ReturnType<typeof boot>>) {
 	installGracefulShutdown(server as never, {
 		logger: logger as never,
 		cleanup: () => handle.dispose(),
-		cleanupAllowanceMs: handle.cleanupAllowanceMs,
+		cleanupAllowanceMs: () => handle.cleanupAllowanceMs,
 		exit,
 		onSignal: (name, handler) => signals.set(name, handler),
 		offSignal: (name) => signals.delete(name),
@@ -410,13 +410,27 @@ describe("the standalone composes federation grants from its config", () => {
 		}
 	});
 
-	it("reports no allowance while the feature is off, so cleanup keeps the drain's budget", async () => {
+	it("reports no allowance while the feature is off, and cleanup's budget is the drain's ten seconds", async () => {
 		handleRef = await boot(resolveConfig(BASE_ENV), true);
 		expect(handleRef.cleanupAllowanceMs).toBeUndefined();
 		const { logger, exit, sigterm } = shutDown(handleRef);
 		sigterm();
 		await vi.waitFor(() => expect(exit).toHaveBeenCalledExactlyOnceWith(0));
-		expect(logger.info).toHaveBeenCalledWith({ drainTimeoutMs: 10_000 }, "shutdown_draining");
+		expect(logger.info).toHaveBeenCalledWith(
+			{ drainTimeoutMs: 10_000, cleanupTimeoutMs: 10_000 },
+			"shutdown_draining",
+		);
+	});
+
+	it("covers a tail registered after the shutdown was installed", async () => {
+		handleRef = await boot(resolveConfig(BASE_ENV), true);
+		const { logger, sigterm } = shutDown(handleRef);
+		handleRef.components.lifecycleRegistrar?.register(async () => {}, { tailMs: 60_000 });
+		sigterm();
+		expect(logger.info).toHaveBeenCalledWith(
+			{ drainTimeoutMs: 10_000, cleanupTimeoutMs: 60_000 },
+			"shutdown_draining",
+		);
 	});
 
 	it("adds the shared Redis client for the grant stores alone", () => {
