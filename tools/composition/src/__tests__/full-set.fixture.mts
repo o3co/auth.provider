@@ -45,6 +45,8 @@
  * - WebAuthn registration reads `req.webauthnSubject`, which the package's
  *   `webauthnSessionSubjectModule` sets from the admitted browser session;
  *   the deployment's mapper here is the session's opaque subject.
+ * - The WebAuthn second factor's module beside the MFA package, off by its
+ *   reference.conf.
  *
  * The fakes are shared by every boot in a file and put back as they were made
  * before each one (`resettable`, from the template's fixture).
@@ -117,6 +119,7 @@ import {
 import type { FakeStoreUrls } from "@o3co/auth-provider-test-kit";
 import {
 	webauthnConfigSchema,
+	webauthnMfaFactorModule,
 	webauthnModule,
 	webauthnSessionSubjectModule,
 } from "@o3co/auth-provider-webauthn";
@@ -741,6 +744,10 @@ function addedModules(
 					...mfaStoreModules(config, stores),
 				]
 			: []),
+		// The WebAuthn second factor, over the relying party the WebAuthn
+		// bootstrap provides: off by its reference.conf, on through
+		// WEBAUTHN_MFA_FACTOR_ENABLED.
+		...(features.webauthn && features.mfa ? [webauthnMfaFactorModule] : []),
 		grantPolicyModule,
 		...requirementModules(interrupt, ceremonies, outage),
 		...federationBridges(config, features, f),

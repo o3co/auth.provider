@@ -16,22 +16,21 @@
 
 /**
  * The section of the WebAuthn second factor's module, `webauthn-mfa-factor`
- * (the MFA ADR's D4, D19, F7): its switch, and the user verification a
- * registration asks for — `required`, `preferred` or `discouraged`, WebAuthn's
+ * (the MFA ADR's D4, D19, F7): its switch, and the user verification its
+ * ceremonies ask for — `required`, `preferred` or `discouraged`, WebAuthn's
  * values. Strict: a key the section does not know is refused. Every leaf
  * reads the string an environment variable carries: `enabled` through core's
  * `coerceBooleanFromEnv`, from `WEBAUTHN_MFA_FACTOR_ENABLED`, and
  * `userVerification` from `WEBAUTHN_MFA_FACTOR_USER_VERIFICATION`. Its
- * defaults — off, `preferred` — are not in the package's reference.conf: no
- * module of the package reads the section, and a section there that no
- * installed module owns is named ignored at every boot. Not on the package's
- * entry.
+ * defaults — off, `preferred` — are the package's reference.conf's; a
+ * composition that does not layer it is refused, naming the file. Not on the
+ * package's entry.
  */
 
 import { coerceBooleanFromEnv } from "@o3co/auth-provider-core";
 import { z } from "zod";
 
-/** The WebAuthn second factor's section, as its module is to parse it before any factory runs. */
+/** The WebAuthn second factor's section, as its module parses it before any factory runs. */
 export const webauthnMfaFactorConfigSchema = z.strictObject(
 	{
 		enabled: coerceBooleanFromEnv,
@@ -43,7 +42,9 @@ export const webauthnMfaFactorConfigSchema = z.strictObject(
 		error: (issue) =>
 			issue.code === "unrecognized_keys"
 				? `has a key it does not know: ${issue.keys.join(", ")}`
-				: "must be a section of keys",
+				: issue.input === undefined
+					? "is missing: layer @o3co/auth-provider-webauthn/reference.conf beneath the composition's configuration"
+					: "must be a section of keys",
 	},
 );
 
