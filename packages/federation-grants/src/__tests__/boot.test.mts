@@ -411,6 +411,50 @@ describe("enabling the feature", () => {
 	});
 });
 
+describe("the actions it registers", () => {
+	it("registers the browser half's three actions, graded use", async () => {
+		const handle = await boot({});
+		try {
+			const resolver = handle.components.sessionRequirementResolver;
+			expect(
+				[
+					"federation_grants.connect",
+					"federation_grants.consent",
+					"federation_grants.callback",
+				].map((name) => resolver?.action(name)),
+			).toEqual([
+				{ name: "federation_grants.connect", grade: "use" },
+				{ name: "federation_grants.consent", grade: "use" },
+				{ name: "federation_grants.callback", grade: "use" },
+			]);
+		} finally {
+			await handle.dispose();
+		}
+	});
+
+	it("registers them while the feature is off too: the switch is read when the routes are built, after the actions register", async () => {
+		const handle = await boot({
+			enabled: false,
+			withStore: false,
+			withLimiter: false,
+			withAudit: false,
+			provider: null,
+		});
+		try {
+			expect(
+				handle.components.sessionRequirementResolver?.action("federation_grants.connect"),
+			).toEqual({ name: "federation_grants.connect", grade: "use" });
+		} finally {
+			await handle.dispose();
+		}
+	});
+
+	it("exports none of them: the router that admits them is mounted by the module alone", async () => {
+		const entry = await import("#/index.mjs");
+		expect(Object.hasOwn(entry, "FEDERATION_GRANTS_ADMISSION_ACTIONS")).toBe(false);
+	});
+});
+
 describe("leaving the feature off", () => {
 	it('reads the spellings an environment variable arrives in, so "true" enables', async () => {
 		// HOCON substitutes `${?FEDERATION_GRANTS_ENABLED}` as a string,

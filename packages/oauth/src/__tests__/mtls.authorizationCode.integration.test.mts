@@ -38,6 +38,7 @@ import { resolverForTests } from "@o3co/auth-provider-core/testing";
 import { decodeJwt } from "jose";
 import { describe, expect, it, vi } from "vitest";
 import { createAuthorizationGrant } from "#/grants/authorization.mjs";
+import { OAUTH_ADMISSION_ACTIONS } from "./_helpers/admissionActions.mjs";
 import { codeRecord } from "./_helpers/codeRecord.mjs";
 
 // ---------------------------------------------------------------------------
@@ -96,7 +97,7 @@ const mockClientRepository: ClientRepository = {
 
 function makeDeps(consumeByCodeImpl: CodeRepository["consumeByCode"]) {
 	return {
-		sessionRequirementResolver: resolverForTests([]),
+		sessionRequirementResolver: resolverForTests([], { actions: OAUTH_ADMISSION_ACTIONS }),
 		config: mockConfig,
 		keyStore: createSymmetricKeyStore("test-secret-mtls-ac"),
 		codeRepository: {

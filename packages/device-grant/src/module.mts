@@ -18,13 +18,14 @@
  * Module factory for the RFC 8628 device authorization grant. Enabled, it
  * contributes the `urn:ietf:params:oauth:grant-type:device_code` grant,
  * `POST /oauth/device_authorization` (where a device starts),
- * `POST /oauth/device/verification` (where the user answers) and
- * `device_authorization_endpoint` in discovery (RFC 8628 §4).
+ * `POST /oauth/device/verification` (where the user answers),
+ * `device_authorization_endpoint` in discovery (RFC 8628 §4), and the three
+ * actions verification admits (`DEVICE_GRANT_ADMISSION_ACTIONS`).
  *
  * Off by default. The switch is read from the config handed to
- * `deviceGrantModule({ config })`; disabled, no grant is registered (so
- * `grant_types_supported` does not name it), no discovery field is added and
- * both routes answer 404. Routes and discovery use the config `createApp`
+ * `deviceGrantModule({ config })`; disabled, no grant or action is registered
+ * (so `grant_types_supported` does not name it), no discovery field is added
+ * and both routes answer 404. Routes and discovery use the config `createApp`
  * parsed, and boot is refused if the two disagree (`settingsFor`).
  *
  * Enabled, boot is refused without each setting and slot the grant needs to
@@ -53,6 +54,7 @@ import {
 import { createClientAuthMiddleware } from "@o3co/auth-provider-oauth";
 import express, { type ErrorRequestHandler, type RequestHandler, type Response } from "express";
 import { z } from "zod";
+import { DEVICE_GRANT_ADMISSION_ACTIONS } from "./admissionActions.mjs";
 import {
 	createDeviceAuthorizationHandler,
 	DEVICE_CODE_LIFETIME_SECONDS,
@@ -592,6 +594,7 @@ export const deviceGrantModule = (params: { config: AppConfig }): Module => {
 			// it: the document and the endpoint say the same thing.
 			...(enabled
 				? {
+						admissionActions: DEVICE_GRANT_ADMISSION_ACTIONS,
 						grants: {
 							[DEVICE_CODE_GRANT_TYPE]: (deps: DeviceGrantModuleDeps) => {
 								// Name-keyed contributions run before the routes, so the

@@ -15,6 +15,7 @@
  */
 import { resolverForTests } from "@o3co/auth-provider-core/testing";
 import { describe, expect, it } from "vitest";
+import { SESSION_ADMISSION_ACTIONS } from "#/admissionActions.mjs";
 import { createRouter } from "../Federation.mjs";
 
 const noop = () => undefined;
@@ -66,7 +67,7 @@ describe("Federation.mts route rewire — federationRedirectPolicyResolver param
 				userSessionStore: {} as never,
 				sessionFederationIndex: stubSessionFederationIndex,
 				federationTokenStore: {} as never,
-				requirements: resolverForTests([]),
+				requirements: resolverForTests([], { actions: SESSION_ADMISSION_ACTIONS }),
 			}),
 		).not.toThrow();
 	});

@@ -23,7 +23,6 @@
  */
 
 import {
-	ADMISSION_ACTIONS,
 	type AppConfig,
 	admitPrimary,
 	createInMemoryUserSessionStore,
@@ -665,7 +664,7 @@ describe("a session store without recordSecondFactor", () => {
 				authentication: requirementSession(session),
 				carrier: "cookie",
 				subject: session.sub,
-				action: ADMISSION_ACTIONS["oauth.authorize"],
+				action: { name: "test.use", grade: "use" },
 				asks: undefined,
 				now: new Date(),
 			}),

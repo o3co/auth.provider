@@ -43,6 +43,7 @@ import {
 import { resolverForTests } from "@o3co/auth-provider-core/testing";
 import request from "supertest";
 import { describe, expect, it, vi } from "vitest";
+import { SESSION_ADMISSION_ACTIONS } from "#/admissionActions.mjs";
 import { FEDERATION_TRANSACTION_KEY_PREFIX } from "#/federations/transaction.mjs";
 import {
 	buildFederationApp,
@@ -195,6 +196,7 @@ function setup(options: Setup = {}): HarnessApp & { repo: LinkableRepo } {
 		userRepository: repo,
 		requirements: resolverForTests(options.requirement ? [options.requirement] : [], {
 			issuer: HARNESS_ISSUER,
+			actions: SESSION_ADMISSION_ACTIONS,
 		}),
 		...(options.subjectRevocation ? { subjectRevocation: options.subjectRevocation } : {}),
 		...(options.logger ? { logger: options.logger } : {}),

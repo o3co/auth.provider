@@ -227,10 +227,15 @@ const VOCABULARY: readonly VocabularyRow[] = [
 		definition: /(?:function|const)\s+checkPrimaryContinuation\b/,
 	},
 	{
+		concept: "session admission — the grades core owns (the session-admission ADR's D4)",
+		home: "packages/core/src/session-admission/actions.mts",
+		definition: /(?:function|const)\s+ADMISSION_GRADES\b/,
+	},
+	{
 		concept:
-			"session admission — the bundled actions and their grades (the session-admission ADR's D4)",
-		home: "packages/core/src/session-admission/requirement.mts",
-		definition: /(?:function|const)\s+ADMISSION_ACTIONS\b/,
+			"session admission — an action's name, as a registration holds it (the session-admission ADR's D4)",
+		home: "packages/core/src/session-admission/actions.mts",
+		definition: /(?:function|const)\s+isAdmissionActionName\b/,
 	},
 	{
 		// Refused under the name device verification's copy had, too.

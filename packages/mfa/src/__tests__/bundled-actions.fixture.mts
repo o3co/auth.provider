@@ -1,0 +1,186 @@
+/*
+ * Copyright 2026 1o1 Co. Ltd.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+/**
+ * The actions the bundled consumers admit, each with the grade its package
+ * registers and the carrier its consumer reads the session by, and the verdicts
+ * the MFA requirement answers for each. The MFA package's equivalence test
+ * holds the requirement to these verdicts over these grades; `tools/composition`
+ * holds the full set's registrations to these grades.
+ */
+
+import type { ActionGrade, SessionClaim } from "@o3co/auth-provider-core";
+
+export interface BundledAction {
+	readonly grade: ActionGrade;
+	readonly carrier: SessionClaim["carrier"];
+}
+
+/** Every action a bundled consumer admits, by name. */
+export const BUNDLED_ACTIONS: Readonly<Record<string, BundledAction>> = {
+	"oauth.authorize": { grade: "use", carrier: "cookie" },
+	"oauth.consent": { grade: "use", carrier: "cookie" },
+	"oauth.session_grant": { grade: "use", carrier: "cookie" },
+	"oauth.code_exchange": { grade: "use", carrier: "code" },
+	"oauth.refresh": { grade: "use", carrier: "token" },
+	"device.lookup": { grade: "grants_nothing", carrier: "cookie" },
+	"device.approve": { grade: "use", carrier: "cookie" },
+	"device.deny": { grade: "grants_nothing", carrier: "cookie" },
+	"federation_grants.connect": { grade: "use", carrier: "cookie" },
+	"federation_grants.consent": { grade: "use", carrier: "cookie" },
+	"federation_grants.callback": { grade: "use", carrier: "cookie" },
+	"session.link": { grade: "credential_change", carrier: "cookie" },
+	"session.link_callback": { grade: "use", carrier: "link" },
+	"webauthn.register": { grade: "credential_change", carrier: "cookie" },
+};
+
+/**
+ * The sessions a cookie, code or link carries, in the order a verdict string
+ * lists them: none, a password login without a second factor, one with
+ * `mfaAt`, a federated one, one whose primary cannot be told, and one whose
+ * primary the baseline does not know.
+ */
+export const SESSION_SITUATIONS = [
+	"none",
+	"pwd",
+	"pwd+mfaAt",
+	"fed",
+	"untold",
+	"unknown primary",
+] as const;
+
+/** The `amr` a token carries, in the order a verdict string lists them. */
+export const TOKEN_SITUATIONS: readonly (readonly string[] | undefined)[] = [
+	["pwd"],
+	undefined,
+	[],
+	["hwk"],
+	["fed"],
+	["pwd", "otp", "mfa"],
+	["mfa"],
+	["pwd", "email"],
+];
+
+/** The factor setups a verdict table is taken under. */
+export const SETUPS = {
+	"totp, recordable": { factors: ["totp"], stepUpRecordable: true },
+	"no factor": { factors: [], stepUpRecordable: true },
+	"totp, not recordable": { factors: ["totp"], stepUpRecordable: false },
+} as const;
+
+/**
+ * The verdicts, one letter per situation — `m` met, `r` reauthenticate, `s`
+ * step_up (sent to log in again when still unmet), `u` unmet — by mode and
+ * setup, then by action.
+ */
+export const VERDICTS: Readonly<Record<string, Readonly<Record<string, string>>>> = {
+	"optional · totp, recordable": {
+		"oauth.authorize": "mmmmmm",
+		"oauth.consent": "mmmmmm",
+		"oauth.session_grant": "mmmmmm",
+		"oauth.code_exchange": "mmmmmm",
+		"oauth.refresh": "mmmmmmmm",
+		"device.lookup": "mmmmmm",
+		"device.approve": "mmmmmm",
+		"device.deny": "mmmmmm",
+		"federation_grants.connect": "mmmmmm",
+		"federation_grants.consent": "mmmmmm",
+		"federation_grants.callback": "mmmmmm",
+		"session.link": "mmmmmm",
+		"session.link_callback": "mmmmmm",
+		"webauthn.register": "mmmmmm",
+	},
+	"optional · no factor": {
+		"oauth.authorize": "mmmmmm",
+		"oauth.consent": "mmmmmm",
+		"oauth.session_grant": "mmmmmm",
+		"oauth.code_exchange": "mmmmmm",
+		"oauth.refresh": "mmmmmmmm",
+		"device.lookup": "mmmmmm",
+		"device.approve": "mmmmmm",
+		"device.deny": "mmmmmm",
+		"federation_grants.connect": "mmmmmm",
+		"federation_grants.consent": "mmmmmm",
+		"federation_grants.callback": "mmmmmm",
+		"session.link": "mmmmmm",
+		"session.link_callback": "mmmmmm",
+		"webauthn.register": "mmmmmm",
+	},
+	"optional · totp, not recordable": {
+		"oauth.authorize": "mmmmmm",
+		"oauth.consent": "mmmmmm",
+		"oauth.session_grant": "mmmmmm",
+		"oauth.code_exchange": "mmmmmm",
+		"oauth.refresh": "mmmmmmmm",
+		"device.lookup": "mmmmmm",
+		"device.approve": "mmmmmm",
+		"device.deny": "mmmmmm",
+		"federation_grants.connect": "mmmmmm",
+		"federation_grants.consent": "mmmmmm",
+		"federation_grants.callback": "mmmmmm",
+		"session.link": "mmmmmm",
+		"session.link_callback": "mmmmmm",
+		"webauthn.register": "mmmmmm",
+	},
+	"required · totp, recordable": {
+		"oauth.authorize": "rsmmrr",
+		"oauth.consent": "rsmmrr",
+		"oauth.session_grant": "rsmmrr",
+		"oauth.code_exchange": "rsmmrr",
+		"oauth.refresh": "urrmmmrm",
+		"device.lookup": "rmmmmm",
+		"device.approve": "rsmmrr",
+		"device.deny": "rmmmmm",
+		"federation_grants.connect": "rsmmrr",
+		"federation_grants.consent": "rsmmrr",
+		"federation_grants.callback": "rsmmrr",
+		"session.link": "rsmmrr",
+		"session.link_callback": "rsmmrr",
+		"webauthn.register": "rsmmrr",
+	},
+	"required · no factor": {
+		"oauth.authorize": "rummrr",
+		"oauth.consent": "rummrr",
+		"oauth.session_grant": "rummrr",
+		"oauth.code_exchange": "rummrr",
+		"oauth.refresh": "urrmmmrm",
+		"device.lookup": "rmmmmm",
+		"device.approve": "rummrr",
+		"device.deny": "rmmmmm",
+		"federation_grants.connect": "rummrr",
+		"federation_grants.consent": "rummrr",
+		"federation_grants.callback": "rummrr",
+		"session.link": "rummrr",
+		"session.link_callback": "rummrr",
+		"webauthn.register": "rummrr",
+	},
+	"required · totp, not recordable": {
+		"oauth.authorize": "rrmmrr",
+		"oauth.consent": "rrmmrr",
+		"oauth.session_grant": "rrmmrr",
+		"oauth.code_exchange": "rrmmrr",
+		"oauth.refresh": "urrmmmrm",
+		"device.lookup": "rmmmmm",
+		"device.approve": "rrmmrr",
+		"device.deny": "rmmmmm",
+		"federation_grants.connect": "rrmmrr",
+		"federation_grants.consent": "rrmmrr",
+		"federation_grants.callback": "rrmmrr",
+		"session.link": "rrmmrr",
+		"session.link_callback": "rrmmrr",
+		"webauthn.register": "rrmmrr",
+	},
+};

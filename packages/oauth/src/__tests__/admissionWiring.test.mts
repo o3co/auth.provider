@@ -31,6 +31,8 @@ import {
 	AUDIT_SINK_ABSENCE_POLICY,
 	type ClientRepository,
 	type CodeRepository,
+	createMemoryConsentStore,
+	createMemoryPendingConsentStore,
 	createSymmetricKeyStore,
 	type GrantDependencies,
 	type SessionRequirementResolver,
@@ -39,6 +41,7 @@ import {
 import { GrantRegistry, resolverForTests } from "@o3co/auth-provider-core/testing";
 import express from "express";
 import { describe, expect, it } from "vitest";
+import { OAUTH_ROUTER_ADMISSION_ACTIONS } from "#/admissionActions.mjs";
 import { createAuthorizationGrant } from "#/grants/authorization.mjs";
 import { createRefreshTokenGrant } from "#/grants/refreshToken.mjs";
 import { createSessionGrant } from "#/grants/session.mjs";
@@ -105,6 +108,33 @@ describe("the consumers' factories refuse to build without the requirements reso
 			requirements: resolverForTests([]),
 		});
 		expect(router).toBeDefined();
+	});
+
+	it("createOAuthRouter refuses, where it is built, a resolver on which /authorize's or the consent step's action is not registered, naming the handler and the action", async () => {
+		const registry = new GrantRegistry();
+		registry.register("authorization_code", {
+			handle: async () => {
+				throw new Error("unused");
+			},
+		} as never);
+		const build = (actions: Readonly<Record<string, { readonly grade: "use" }>>) =>
+			createOAuthRouter(express, {
+				registry,
+				config,
+				clientRepository,
+				codeRepository,
+				keyStore,
+				consentStore: createMemoryConsentStore(),
+				pendingConsentStore: createMemoryPendingConsentStore(),
+				requirements: resolverForTests([], { actions }),
+			});
+		await expect(build({})).rejects.toThrow(
+			/^createAuthorizeHandler: admits "oauth\.authorize", which no module registers/,
+		);
+		await expect(build({ "oauth.authorize": { grade: "use" } })).rejects.toThrow(
+			/^createConsentRouter: admits "oauth\.consent", which no module registers/,
+		);
+		await expect(build(OAUTH_ROUTER_ADMISSION_ACTIONS)).resolves.toBeDefined();
 	});
 
 	it("createSessionGrant throws, naming the option", () => {

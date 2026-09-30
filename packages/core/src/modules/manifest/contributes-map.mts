@@ -24,6 +24,7 @@ import type { MfaFactor as ConcreteMfaFactor } from "../../mfa/factor.mjs";
 import type { TokenBindingMechanism } from "../../middleware/tokenBinding.mjs";
 import type { GrantPolicyHook } from "../../policy/types.mjs";
 import type { RateLimitSpec } from "../../ratelimit/types.mjs";
+import type { AdmissionActionDeclaration } from "../../session-admission/actions.mjs";
 import type { SessionRequirement as ConcreteSessionRequirement } from "../../session-admission/requirement.mjs";
 import type { ExchangeTokenValidator as ConcreteExchangeTokenValidator } from "../../token-exchange/validator.mjs";
 import type { Contributed } from "./contributed.mjs";
@@ -183,7 +184,7 @@ export type RateLimitBudgetFactory<Deps> = (deps: Deps) => Contributed<RateLimit
  * Collisions:
  * - Name-keyed (`grants`, `federations`, `tokenExchangeValidators`,
  *   `mfaFactors`, `sessionRequirements`, `rateLimitBudgets`,
- *   `federationTypes`): a duplicate refuses boot.
+ *   `federationTypes`, `admissionActions`): a duplicate refuses boot.
  * - List-shaped (`auditHooks`, `routes`, `grantPolicyHooks`,
  *   `grantMiddleware`): duplicates allowed; routes still refuse a duplicate
  *   `id` or an undecorated-mountPath collision.
@@ -234,6 +235,19 @@ export interface ContributesMap<Deps = ProviderDeps<never, never>> {
 	 */
 	readonly rateLimitBudgets?: {
 		readonly [prefix: string]: RateLimitBudgetFactory<Deps>;
+	};
+	/**
+	 * The actions this module admits through session admission, keyed by the
+	 * name it passes `admitSession` (`acme.export`), each declaring one of
+	 * core's grades. A declaration, not a factory: boot reads each once, at
+	 * stage 1. A name outside the grammar, a grade outside the grades (or
+	 * `remediation`, a requirement's), a container that is not a record and an
+	 * override refuse it there (`contribution-malformed`); a name two modules
+	 * register refuses it too (`duplicate-contribute`); a host may not supply
+	 * the collector (`contribution-kind-guarded`).
+	 */
+	readonly admissionActions?: {
+		readonly [name: string]: AdmissionActionDeclaration;
 	};
 	readonly auditHooks?: readonly AuditHookFactory<Deps>[];
 	readonly routes?: readonly RouteContributionEntry<Deps>[];

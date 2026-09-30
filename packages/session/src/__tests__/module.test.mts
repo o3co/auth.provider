@@ -36,6 +36,7 @@ import {
 import express from "express";
 import request from "supertest";
 import { describe, expect, it, vi } from "vitest";
+import { SESSION_ADMISSION_ACTIONS } from "#/admissionActions.mjs";
 import { sessionModule } from "#/module.mjs";
 
 // ---------------------------------------------------------------------------
@@ -317,6 +318,13 @@ describe("sessionModule — the link routes are a consumer of session admission"
 		expect(sessionModule.requires).toContain("sessionRequirementResolver");
 	});
 
+	it("registers the link flow's actions: the start adds a way into the account, the callback uses the session the start bound", () => {
+		expect(sessionModule.contributes?.admissionActions).toEqual({
+			"session.link": { grade: "credential_change" },
+			"session.link_callback": { grade: "use" },
+		});
+	});
+
 	it("takes subjectRevocation as an optional slot, under the one subject-revocation policy it attaches for subjectSessionIndex", () => {
 		expect(sessionModule.optional).toContain("subjectRevocation");
 		expect(sessionModule.requires).not.toContain("subjectRevocation");
@@ -389,6 +397,7 @@ describe("sessionModule — the link routes are a consumer of session admission"
 			// Boot registers each page on oauth.jwt.issuer — the valid config's.
 			sessionRequirementResolver: resolverForTests(extra.requirements ?? [], {
 				issuer: "https://auth.test",
+				actions: SESSION_ADMISSION_ACTIONS,
 			}),
 			...(extra.subjectRevocation ? { subjectRevocation: extra.subjectRevocation } : {}),
 		});
@@ -472,7 +481,9 @@ describe("sessionModule — the password login is a consumer of session admissio
 			federationTokenStore: makeFederationTokenStore(),
 			sessionFederationIndex: makeSessionFederationIndex(),
 			csrfTokenSigner: createTestCsrfTokenSigner(),
-			sessionRequirementResolver: resolverForTests(requirements),
+			sessionRequirementResolver: resolverForTests(requirements, {
+				actions: SESSION_ADMISSION_ACTIONS,
+			}),
 		});
 		expect(contribution.id).toBe("session-routes");
 		const app = express();
@@ -560,7 +571,7 @@ describe("sessionModule — the login throttle reads the deploymentMode slot", (
 			userSessionStore: makeUserSessionStore(),
 			federationTokenStore: makeFederationTokenStore(),
 			sessionFederationIndex: makeSessionFederationIndex(),
-			sessionRequirementResolver: resolverForTests([]),
+			sessionRequirementResolver: resolverForTests([], { actions: SESSION_ADMISSION_ACTIONS }),
 		});
 	};
 

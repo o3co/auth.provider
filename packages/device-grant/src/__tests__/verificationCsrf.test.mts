@@ -38,6 +38,7 @@ import {
 import express from "express";
 import request from "supertest";
 import { describe, expect, it, vi } from "vitest";
+import { DEVICE_GRANT_ADMISSION_ACTIONS } from "#/admissionActions.mjs";
 import { deviceGrantModule } from "#/module.mjs";
 import { liveCookieSession, liveSessionStore } from "./liveSessions.mjs";
 
@@ -102,7 +103,7 @@ const makeDeps = (overrides: { csrfGuard?: unknown } = {}) => {
 		clientRepository,
 		deviceCodeStore: store,
 		userSessionStore: liveSessionStore(),
-		sessionRequirementResolver: resolverForTests([]),
+		sessionRequirementResolver: resolverForTests([], { actions: DEVICE_GRANT_ADMISSION_ACTIONS }),
 		rateLimitBudgetResolver: {
 			get: (prefix: string) =>
 				prefix === "device_verification" ? { limit: 50, windowSeconds: 300 } : undefined,

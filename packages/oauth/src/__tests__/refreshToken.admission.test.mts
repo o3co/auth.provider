@@ -27,7 +27,6 @@
 
 import { createSecretKey } from "node:crypto";
 import {
-	ADMISSION_ACTIONS,
 	type AppConfig,
 	createInMemorySubjectRevocation,
 	createSymmetricKeyStore,
@@ -45,6 +44,7 @@ import { resolverForTests } from "@o3co/auth-provider-core/testing";
 import { decodeJwt, SignJWT } from "jose";
 import { describe, expect, it, vi } from "vitest";
 import { createRefreshTokenGrant } from "#/grants/refreshToken.mjs";
+import { OAUTH_ADMISSION_ACTIONS } from "./_helpers/admissionActions.mjs";
 import { createMockLogger, type MockLogger } from "./_helpers/mockLogger.mjs";
 
 const SECRET = "test-secret-at-least-32-chars!!";
@@ -145,6 +145,7 @@ const makeGrant = (opts: {
 		refreshTokenFamilyRevocation: { revokeFamily: vi.fn(async () => {}) } as never,
 		sessionRequirementResolver: resolverForTests(opts.requirements ?? [], {
 			issuer: "https://issuer.test",
+			actions: OAUTH_ADMISSION_ACTIONS,
 		}),
 		...(opts.userSessionStore ? { userSessionStore: opts.userSessionStore } : {}),
 		...(opts.subjectRevocation ? { subjectRevocation: opts.subjectRevocation } : {}),
@@ -249,8 +250,8 @@ describe("the refresh grant on admission — a requirement's verdicts", () => {
 		expect(requirement.inputs).toHaveLength(1);
 		const [input] = requirement.inputs;
 		expect(input?.carrier).toBe("token");
-		// The bundled action, the frozen entry itself.
-		expect(input?.action).toEqual(ADMISSION_ACTIONS["oauth.refresh"]);
+		// The action the refresh grant registers, with its grade.
+		expect(input?.action).toEqual({ name: "oauth.refresh", grade: "use" });
 		expect(input?.action.grade).toBe("use");
 		expect(input?.subject).toBe(SUBJECT);
 		expect(input?.session).toBeNull();

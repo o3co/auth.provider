@@ -115,6 +115,7 @@ const consumer = (
 		name: "test:consumer",
 		[key]: ["sessionRequirementResolver"] as const,
 		contributes: {
+			admissionActions: { "test.use": { grade: "use" } },
 			routes: [
 				(deps: { sessionRequirementResolver?: SessionRequirementResolver }) => {
 					seen.resolver = deps.sessionRequirementResolver;
@@ -255,7 +256,7 @@ describe("the sessionRequirements kind and sessionRequirementResolver", () => {
 					claim: cookieClaim({
 						session: { isAuthenticated: true, sid: "sid-1", user: { id: "user-1" } },
 					}),
-					action: { name: "test.use", grade: "use" },
+					action: "test.use",
 				},
 			);
 			expect(admission).toEqual({ outcome: "admitted", session: null, acr: undefined });
@@ -886,10 +887,14 @@ describe("the reach and the page, checked at the end of stage 4", () => {
 		expect(err.message).toMatch(/oauth\.authorize/);
 	});
 
-	it("refuses a remediation that is a consumer's action even under the requirement's own namespace — a requirement named oauth declaring oauth.authorize — as the contribution's failure", async () => {
+	it("refuses a remediation that is a registered action's name even under the requirement's own namespace — a requirement named oauth declaring oauth.authorize — as the contribution's failure", async () => {
 		const err = await refusal(
 			boot(
 				[
+					defineModule({
+						name: "test:authorize",
+						contributes: { admissionActions: { "oauth.authorize": { grade: "use" } } },
+					}),
 					contributing("test:oauth", {
 						oauth: () => requirement("oauth", { remediations: ["oauth.authorize"] }),
 					}),

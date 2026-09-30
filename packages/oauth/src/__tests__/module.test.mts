@@ -49,6 +49,7 @@ import request from "supertest";
 import { describe, expect, it, vi } from "vitest";
 import { oauthModule } from "#/module.mjs";
 import { oauthAuthorizationModule } from "#/oauthAuthorization.mjs";
+import { oauthSessionModule } from "#/oauthSession.mjs";
 import { createMockLogger } from "./_helpers/mockLogger.mjs";
 
 /**
@@ -1252,6 +1253,62 @@ describe("oauthModule — a consumer of session admission", () => {
 		const module = oauthModule({ config: makeValidAppConfig() as never });
 		expect(module.requires).toContain("sessionRequirementResolver");
 		expect(module.requires).toContain("grantHandlerResolver");
+	});
+
+	it("registers the actions its routes admit, /authorize's and the consent step's, graded use", () => {
+		const module = oauthModule({ config: makeValidAppConfig() as never });
+		expect(module.contributes?.admissionActions).toEqual({
+			"oauth.authorize": { grade: "use" },
+			"oauth.consent": { grade: "use" },
+		});
+	});
+
+	it("exports what createOAuthRouter admits, for a composition that mounts the router itself", async () => {
+		const { OAUTH_ROUTER_ADMISSION_ACTIONS } = await import("#/index.mjs");
+		expect(OAUTH_ROUTER_ADMISSION_ACTIONS).toEqual({
+			"oauth.authorize": { grade: "use" },
+			"oauth.consent": { grade: "use" },
+		});
+	});
+
+	/** The configuration with the three session-bound grants switched as given. */
+	const grantsConfig = (enabled: {
+		readonly authorization_code: boolean;
+		readonly refresh_token: boolean;
+		readonly session: boolean;
+	}) => {
+		const base = makeValidAppConfig();
+		return {
+			...base,
+			oauth: {
+				...base.oauth,
+				grants: {
+					...base.oauth.grants,
+					authorization_code: { enabled: enabled.authorization_code },
+					refresh_token: { enabled: enabled.refresh_token },
+					session: { enabled: enabled.session },
+				},
+			},
+		} as ReturnType<typeof makeValidAppConfig>;
+	};
+
+	it("registers each session-bound grant's action beside the grant, graded use", () => {
+		const config = grantsConfig({ authorization_code: true, refresh_token: true, session: true });
+		expect(oauthAuthorizationModule({ config }).contributes?.admissionActions).toEqual({
+			"oauth.code_exchange": { grade: "use" },
+			"oauth.refresh": { grade: "use" },
+		});
+		expect(oauthSessionModule({ config }).contributes?.admissionActions).toEqual({
+			"oauth.session_grant": { grade: "use" },
+		});
+	});
+
+	it("registers no grant's action while the grant is off: nothing admits it", () => {
+		const config = grantsConfig({ authorization_code: true, refresh_token: false, session: false });
+		expect(oauthAuthorizationModule({ config }).contributes?.admissionActions).toEqual({
+			"oauth.code_exchange": { grade: "use" },
+		});
+		expect(oauthSessionModule({ config }).contributes?.admissionActions).toBeUndefined();
 	});
 });
 

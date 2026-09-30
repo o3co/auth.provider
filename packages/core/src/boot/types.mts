@@ -46,6 +46,7 @@ import type { HttpMethod, RouteContribution } from "../modules/manifest/route-co
 import type { PathResolver } from "../modules/types.mjs";
 import type { RateLimitSpec } from "../ratelimit/types.mjs";
 import type { ReadinessProbe, ReadinessRegistrar } from "../readiness/types.mjs";
+import type { AdmissionAction } from "../session-admission/actions.mjs";
 import type { RegisteredRequirement } from "../session-admission/requirement.mjs";
 
 // ---------------------------------------------------------------------------
@@ -106,6 +107,7 @@ export type ContributionKind =
 	| "discoveryMetadata"
 	| "rateLimitBudgets"
 	| "federationTypes"
+	| "admissionActions"
 	| (string & { readonly __consumerKind?: unique symbol });
 
 // ---------------------------------------------------------------------------
@@ -419,6 +421,12 @@ export interface ContributionCollectorMap {
 	 * dispatches configured entries to it yet.
 	 */
 	readonly federationTypes?: NameKeyedCollector<RegisteredFederationType>;
+	/**
+	 * Collector for `admissionActions` contributions, by action name: the
+	 * frozen `{ name, grade }` registered from each declaration as stage 1
+	 * read it, which `sessionRequirementResolver` answers through `action`.
+	 */
+	readonly admissionActions?: NameKeyedCollector<AdmissionAction>;
 	readonly auditHooks?: ListCollector<AuditHook>;
 	readonly routes?: RouteCollector;
 	readonly grantPolicyHooks?: ListCollector<GrantPolicyHookContribution>;
@@ -1157,28 +1165,36 @@ export interface ComponentAbsenceUndeclaredDetails {
  * A host `contributionKinds` collector for a kind whose collector is the
  * planner's alone: `rateLimitBudgets` — a host collector could answer
  * a looser budget than the owning module contributed, on a prefix such as
- * RFC 8628 §5.1's device verification — and `federationTypes`. Refused in
- * `createApp`, before the kinds are merged.
+ * RFC 8628 §5.1's device verification — `federationTypes`, and
+ * `admissionActions`, whose grades admission hands the requirements. Refused
+ * in `createApp`, before the kinds are merged. Also a module's
+ * `overrides.admissionActions` entry, at stage 1 (`channel: "overrides"`,
+ * naming the module and the action): an action's grade is its registrant's.
  */
 export interface ContributionKindGuardedDetails {
 	readonly reason: "contribution-kind-guarded";
-	readonly kind: "rateLimitBudgets" | "federationTypes";
+	readonly kind: "rateLimitBudgets" | "federationTypes" | "admissionActions";
+	/** Present for a module's override; absent for a host collector. */
+	readonly channel?: "overrides";
+	readonly module?: string;
+	readonly name?: string;
 }
 
 /**
  * A contribution whose container, key or value its kind cannot take, found on
  * the manifest at stage 1, before any factory runs: a
- * `rateLimitBudgets` or `federationTypes` container that is not a record
- * (an array, a function, `null`) — `name` then absent — a `rateLimitBudgets`
- * prefix that is empty or holds `:` — no limiter key carries it — or a
- * `federationTypes` declaration that is not an object with a Zod
- * `entrySchema` and a `factory`. `problem` says which.
+ * `rateLimitBudgets`, `federationTypes` or `admissionActions` container that
+ * is not a record (an array, a function, `null`) — `name` then absent — a
+ * `rateLimitBudgets` prefix that is empty or holds `:` — no limiter key
+ * carries it — a `federationTypes` declaration that is not an object with a
+ * Zod `entrySchema` and a `factory`, or an `admissionActions` entry whose
+ * name, declaration or grade registration refuses. `problem` says which.
  */
 export interface ContributionMalformedDetails {
 	readonly reason: "contribution-malformed";
 	readonly module: string;
-	readonly kind: "rateLimitBudgets" | "federationTypes";
-	/** The prefix or type; absent when the container itself is refused. */
+	readonly kind: "rateLimitBudgets" | "federationTypes" | "admissionActions";
+	/** The prefix, type or action name; absent when the container itself is refused. */
 	readonly name?: string;
 	readonly channel: "contributes" | "overrides";
 	readonly problem: string;

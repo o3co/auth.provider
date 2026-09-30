@@ -24,10 +24,13 @@
  * it equals what core recomputes from the same factors, and the requirement's own
  * verdicts read the same snapshot, so the two never disagree.
  *
- * `admit`: under `optional` everything is met; under `required` a token is judged
- * on its own `amr` (`admitToken`) and a session carried by a cookie, code or link
- * on its record's baseline (`admitRecord`). `credential_change` has no recent-MFA
- * rule yet and gets the same baseline.
+ * `admit` decides by the action's grade, never its name: under `optional`
+ * everything is met; under `required` a token is judged on its own `amr`
+ * (`admitToken`) and a session carried by a cookie, code or link on its record's
+ * baseline (`admitRecord`), except that an action graded `grants_nothing` is met
+ * on any live record. A token is judged on its own `amr` whatever the grade:
+ * `grants_nothing` exempts only an admission a record carries. `credential_change`
+ * has no recent-MFA rule yet and gets the same baseline.
  *
  * `admitPrimary` interrupts a password login for a second factor when the subject
  * has any factor record: a record it cannot use is never "none", and a `list`
@@ -41,6 +44,7 @@
  */
 
 import {
+	type AdmissionGrade,
 	FEDERATED_AMR,
 	type Logger,
 	MFA_AMR,
@@ -97,10 +101,16 @@ const STEP_UP: RequirementVerdict = Object.freeze({
 });
 
 /**
- * The bundled actions that grant nothing, met on any live session: a user can
- * refuse a phished device request without a step-up.
+ * What a live record is held to, by grade — exhaustive over core's grades. An
+ * action that grants nothing is met, so a user can refuse a phished device
+ * request without a step-up; core never asks about a remediation.
  */
-const GRANTS_NOTHING: ReadonlySet<string> = new Set(["device.lookup", "device.deny"]);
+const RECORD_RULE: Readonly<Record<AdmissionGrade, "baseline" | "met">> = {
+	use: "baseline",
+	grants_nothing: "met",
+	credential_change: "baseline",
+	remediation: "baseline",
+};
 
 /** The `amr` values a step-up through the installed factors can add: each one's `amrValues`, and `mfa` when one adds it. */
 function reachOf(factors: MfaFactorResolver): ReadonlySet<string> {
@@ -150,7 +160,7 @@ export function createMfaRequirement(options: MfaRequirementOptions): SessionReq
 		action,
 	}: RequirementInput): RequirementVerdict => {
 		if (session === null) return REAUTHENTICATE;
-		if (action.grade === "use" && GRANTS_NOTHING.has(action.name)) return MET;
+		if (RECORD_RULE[action.grade] === "met") return MET;
 		const recorded = authentication?.authentication;
 		if (recorded?.primary === FEDERATED_AMR) return MET;
 		if (recorded?.primary !== PASSWORD_AMR) return REAUTHENTICATE;

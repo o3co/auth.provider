@@ -14,7 +14,6 @@
  * limitations under the License.
  */
 import {
-	ADMISSION_ACTIONS,
 	type Admission,
 	type AdmissionDeps,
 	admitSession,
@@ -37,6 +36,7 @@ import {
 	wellFormedAmr,
 } from "@o3co/auth-provider-core";
 import { stepUpRefusal } from "../admission.mjs";
+import type { SESSION_GRANT_ADMISSION_ACTIONS } from "../admissionActions.mjs";
 import { resolveOAuthOptions } from "../resolveOAuthOptions.mjs";
 
 /**
@@ -148,7 +148,7 @@ export const createSessionGrant = (deps: SessionGrantDeps): GrantHandler => {
 			const claim = cookieClaim({ session });
 			const admission = await admitSession(admissionDeps, {
 				claim,
-				action: ADMISSION_ACTIONS["oauth.session_grant"],
+				action: "oauth.session_grant" satisfies keyof typeof SESSION_GRANT_ADMISSION_ACTIONS,
 			});
 			const refusal = refusalFor(admission);
 			if (refusal !== undefined) return { result: refusal };

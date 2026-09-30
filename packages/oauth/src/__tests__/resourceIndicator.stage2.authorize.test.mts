@@ -35,6 +35,7 @@ import express from "express";
 import request from "supertest";
 import { describe, expect, it, vi } from "vitest";
 import { createOAuthRouter } from "#/routes.mjs";
+import { OAUTH_ADMISSION_ACTIONS } from "./_helpers/admissionActions.mjs";
 import { authorizationServerRegistry } from "./_helpers/authorizationServerRegistry.mjs";
 
 const CLIENT_ID = "client-1";
@@ -91,7 +92,7 @@ async function buildApp(opts: {
 	} as unknown as AppConfig;
 
 	const { router } = await createOAuthRouter(express, {
-		requirements: resolverForTests([]),
+		requirements: resolverForTests([], { actions: OAUTH_ADMISSION_ACTIONS }),
 		registry: authorizationServerRegistry(),
 		config,
 		clientRepository: clientRepo,
