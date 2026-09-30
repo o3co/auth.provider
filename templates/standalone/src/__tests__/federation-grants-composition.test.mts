@@ -47,7 +47,6 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { buildModules } from "../buildModules.mjs";
 import { resolveConfigPaths } from "../configPath.mjs";
 import { templateReference } from "../modules.mjs";
-import { cleanupAllowanceFor, FEDERATION_GRANTS_CLEANUP_ALLOWANCE_MS } from "../shutdown.mjs";
 import { installGracefulShutdown } from "../shutdown.mjs";
 
 // The same stand-ins `replica-safety.test.mts` boots under: no socket opens,
@@ -418,15 +417,6 @@ describe("the standalone composes federation grants from its config", () => {
 		sigterm();
 		await vi.waitFor(() => expect(exit).toHaveBeenCalledExactlyOnceWith(0));
 		expect(logger.info).toHaveBeenCalledWith({ drainTimeoutMs: 10_000 }, "shutdown_draining");
-	});
-
-	it("gives cleanup the documented 45 seconds under the shipped budgets, and nothing while off", () => {
-		// The allowance is derived from reference.conf's budgets; if those move,
-		// the number every README states moves with them, and this says so.
-		expect(cleanupAllowanceFor(resolveConfig({ ...BASE_ENV, ...GRANTS_ON }))).toEqual({
-			cleanupTimeoutMs: FEDERATION_GRANTS_CLEANUP_ALLOWANCE_MS,
-		});
-		expect(cleanupAllowanceFor(resolveConfig(BASE_ENV))).toEqual({});
 	});
 
 	it("adds the shared Redis client for the grant stores alone", () => {

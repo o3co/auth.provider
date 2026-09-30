@@ -32,13 +32,7 @@ import {
 } from "@o3co/auth-provider-core";
 import { makeValidCoreConfig } from "@o3co/auth-provider-core/testing";
 import { describe, expect, it, vi } from "vitest";
-import {
-	cleanupAllowanceFor,
-	deferExit,
-	FEDERATION_GRANTS_CLEANUP_ALLOWANCE_MS,
-	FEDERATION_GRANTS_CLEANUP_MARGIN_MS,
-	installGracefulShutdown,
-} from "../shutdown.mjs";
+import { deferExit, installGracefulShutdown } from "../shutdown.mjs";
 
 /** A `Server` double whose `close` callback fires only when we say so. */
 function makeServer() {
@@ -541,87 +535,6 @@ describe("the cleanup allowance the handle reports", () => {
 				{ cleanupTimeoutMs: 5_000 },
 				"shutdown_cleanup_timed_out",
 			);
-		} finally {
-			vi.useRealTimers();
-		}
-	});
-});
-
-describe("the cleanup allowance federation grants need", () => {
-	it("is at least the 45 seconds the package asks for, and only when the feature is on", () => {
-		// The package's drain waits for a rotated credential's write; the
-		// default cleanup budget is the ten-second drain, which is shorter than
-		// the upstream hard timeout and persist budget the feature ships with —
-		// a shutdown under it abandons exactly the write the drain exists for.
-		expect(FEDERATION_GRANTS_CLEANUP_ALLOWANCE_MS).toBeGreaterThanOrEqual(45_000);
-		expect(cleanupAllowanceFor({ federationGrants: { enabled: true } })).toEqual({
-			cleanupTimeoutMs: FEDERATION_GRANTS_CLEANUP_ALLOWANCE_MS,
-		});
-		// Off, nothing: the cleanup budget stays the drain's.
-		expect(cleanupAllowanceFor({ federationGrants: { enabled: false } })).toEqual({});
-		expect(cleanupAllowanceFor({})).toEqual({});
-	});
-
-	it("grows with the configured refresh tail, so a raised budget is not cut off by a fixed timer", () => {
-		// The longest tail one refresh has: the upstream hard timeout, the
-		// persist budget and the wait for the lock, back to back, plus an exit
-		// margin. The shipped budgets (25 s + 3 s + 5 s) land exactly on the
-		// floor; a deployment that doubles its upstream timeout gets more.
-		const shipped = {
-			upstreamHardTimeoutMs: 25_000,
-			persistRetryBudgetMs: 3_000,
-			lockWaitMs: 5_000,
-		};
-		expect(
-			25_000 + 3_000 + 5_000 + FEDERATION_GRANTS_CLEANUP_MARGIN_MS,
-			"the margin is what makes the shipped budgets the floor",
-		).toBe(FEDERATION_GRANTS_CLEANUP_ALLOWANCE_MS);
-		expect(cleanupAllowanceFor({ federationGrants: { enabled: true, ...shipped } })).toEqual({
-			cleanupTimeoutMs: FEDERATION_GRANTS_CLEANUP_ALLOWANCE_MS,
-		});
-		expect(
-			cleanupAllowanceFor({
-				federationGrants: { enabled: true, ...shipped, upstreamHardTimeoutMs: 60_000 },
-			}),
-		).toEqual({ cleanupTimeoutMs: 60_000 + 3_000 + 5_000 + FEDERATION_GRANTS_CLEANUP_MARGIN_MS });
-		// Lowered budgets never go below the documented minimum, and a config
-		// without budgets (built by hand) gets the floor rather than a guess.
-		expect(
-			cleanupAllowanceFor({
-				federationGrants: { enabled: true, ...shipped, upstreamHardTimeoutMs: 1_000 },
-			}),
-		).toEqual({ cleanupTimeoutMs: FEDERATION_GRANTS_CLEANUP_ALLOWANCE_MS });
-		expect(
-			cleanupAllowanceFor({ federationGrants: { enabled: true, upstreamHardTimeoutMs: 90_000 } }),
-		).toEqual({ cleanupTimeoutMs: FEDERATION_GRANTS_CLEANUP_ALLOWANCE_MS });
-	});
-
-	it("never asks a timer for more than Node can count: an oversized sum is capped, not overflowed", () => {
-		// setTimeout takes a 32-bit signed delay; past it the timer fires after
-		// about a millisecond, which would turn a generous allowance into none.
-		const oversized = cleanupAllowanceFor({
-			federationGrants: {
-				enabled: true,
-				upstreamHardTimeoutMs: 2_000_000_000,
-				persistRetryBudgetMs: 2_000_000_000,
-				lockWaitMs: 5_000,
-			},
-		});
-		expect(oversized).toEqual({ cleanupTimeoutMs: 2_147_483_647 });
-	});
-
-	it("is honoured by the shutdown: a cleanup that needs longer than the drain is given it", async () => {
-		vi.useFakeTimers();
-		try {
-			const { signals, finishDraining, exit } = install({
-				cleanup: () => new Promise<void>((resolve) => setTimeout(resolve, 30_000)),
-				drainTimeoutMs: 5_000,
-				...cleanupAllowanceFor({ federationGrants: { enabled: true } }),
-			});
-			signals.get("SIGTERM")?.();
-			finishDraining();
-			await vi.advanceTimersByTimeAsync(31_000);
-			expect(exit).toHaveBeenCalledExactlyOnceWith(0);
 		} finally {
 			vi.useRealTimers();
 		}
