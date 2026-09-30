@@ -23,11 +23,9 @@ import {
 	type ClientRepository,
 	type CodeRepository,
 	type ConsentStore,
-	checkCanonicalIssuer,
 	checkResolver,
 	consoleLogger,
 	createRateLimitGuard,
-	describeIssuerRejection,
 	emitAuditEvent,
 	errorEnvelope,
 	type FederationProvider,
@@ -58,7 +56,6 @@ import {
 	type SessionRPRegistry,
 	type SubjectRevocation,
 	sanitizeErrorText,
-	stepUpReach,
 	tokenTypeForConfirmation,
 	type UserSessionStore,
 	verifyJwt,
@@ -73,20 +70,16 @@ import type { Request, RequestHandler, Response, Router } from "express";
 // authorization.mts `sessionMutation.clear`).
 import type {} from "express-session";
 import { parseAccessTokenHeader } from "./accessTokenHeader.mjs";
-import { logUnsatisfiableAcrValues, vouchableAcrValues } from "./acrValues.mjs";
 import { stepUpOf } from "./admission.mjs";
-import {
-	type ClientIdMetadataDocumentOptions,
-	withClientIdMetadataDocuments,
-} from "./clients/clientIdMetadataDocument.mjs";
+import type { ClientIdMetadataDocumentOptions } from "./clients/clientIdMetadataDocument.mjs";
 import { createClientAuthMiddleware, resolveRealm } from "./middleware/clientAuth.mjs";
 import { OAUTH_RATE_LIMIT_PREFIXES } from "./rateLimitPrefixes.mjs";
-import { resolveOAuthOptions } from "./resolveOAuthOptions.mjs";
 import { createAuthorizeHandler } from "./routes/authorize.mjs";
 import { createConsentRouter } from "./routes/consent.mjs";
 import * as federationTokenRoute from "./routes/federationToken.mjs";
 import * as logoutRoute from "./routes/logout.mjs";
 import { createRevokeRouter } from "./routes/revoke.mjs";
+import { resolveRouterSettings } from "./routes/routerSettings.mjs";
 import * as userinfo from "./routes/userinfo.mjs";
 import {
 	extractConfirmation,
@@ -315,75 +308,16 @@ export const createOAuthRouter = async (
 	}
 	const router = express.Router();
 
-	// Every `oauth.*` knob this router consumes is resolved exactly once,
-	// here, at router composition; see `resolveOAuthOptions` for the defensive
-	// reads and per-field defaults. The /authorize handler receives the whole
-	// object (routes/authorize.mts).
-	const options = resolveOAuthOptions(config);
-	// `/authorize` answers `acr_values` only from the entries this composition
-	// can satisfy — the same table discovery advertises — and an entry dropped
-	// is said once, here, at composition. With no `/authorize` there is no
-	// table to answer from, and nothing to say. What the registered
-	// requirements can add to a session by a step-up is read once here, after
-	// every name-keyed contribution registered.
-	let acrTable: ReturnType<typeof vouchableAcrValues>["table"] | undefined;
-	if (authorizationEndpoint) {
-		const reach = stepUpReach(Array.from(requirements.entries(), ([, r]) => r));
-		const acrValues = vouchableAcrValues(
-			options.acrValues,
-			getFederationProviders(),
-			config,
-			reach,
-		);
-		logUnsatisfiableAcrValues(acrValues.dropped, reach, logger);
-		acrTable = acrValues.table;
-	}
-	// `iss` is a property of the deployment, never of a request: a fallback to
-	// the `Host` header would let a caller choose the issuer of its tokens. A
-	// canonical issuer is required and is the only source, resolved once here
-	// so no request path can reach a fallback. It also populates the `realm`
-	// parameter on `WWW-Authenticate: Basic` challenges (RFC 7235 §2.2).
-	const issuerRejection = checkCanonicalIssuer(options.issuer);
-	if (issuerRejection) {
-		throw new Error(
-			`createOAuthRouter: oauth.jwt.issuer ${describeIssuerRejection(issuerRejection)}`,
-		);
-	}
-	// `checkCanonicalIssuer` returned null above, which only a string satisfies.
-	const canonicalIssuer = options.issuer as string;
-	// Client ID Metadata Documents. Pre-registered clients answer first; a
-	// client_id that is an https URL is then resolved from the document it
-	// names, under the operator's ceilings. One repository for every endpoint
-	// below — /authorize, /token, /revoke — so a document client is the same
-	// client everywhere.
-	//
-	// Wired only with a consent store and the authorization_code grant, the
-	// gate discovery applies: a document client is never first-party, so
-	// `/authorize` refuses it without a consent store, and it may use no other
-	// grant. Resolving it anyway would make each request a guarded outbound
-	// HTTPS fetch before the refusal — an amplification surface where no
-	// request can succeed.
-	const cimd = options.clientIdMetadataDocuments;
-	const clientRepository: ClientRepository =
-		cimd.enabled && consentStore !== undefined && authorizationEndpoint
-			? withClientIdMetadataDocuments(registeredClients, {
-					allowedScopes: cimd.allowedScopes,
-					allowedAudiences: cimd.allowedAudiences,
-					allowedHosts: cimd.allowedHosts,
-					deniedHosts: cimd.deniedHosts,
-					...(cimd.maxBytes === undefined ? {} : { maxBytes: cimd.maxBytes }),
-					...(cimd.timeoutMs === undefined ? {} : { timeoutMs: cimd.timeoutMs }),
-					...(cimd.cacheMaxAgeMs === undefined ? {} : { cacheMaxAgeMs: cimd.cacheMaxAgeMs }),
-					...(cimd.maxCacheEntries === undefined ? {} : { maxCacheEntries: cimd.maxCacheEntries }),
-					...(cimd.staleIfErrorMs === undefined ? {} : { staleIfErrorMs: cimd.staleIfErrorMs }),
-					...(cimd.negativeCacheMs === undefined ? {} : { negativeCacheMs: cimd.negativeCacheMs }),
-					...(cimd.maxConcurrentFetches === undefined
-						? {}
-						: { maxConcurrentFetches: cimd.maxConcurrentFetches }),
-					logger,
-					...clientIdMetadataDocumentSeams,
-				})
-			: registeredClients;
+	const { options, acrTable, canonicalIssuer, clientRepository } = resolveRouterSettings({
+		config,
+		authorizationEndpoint,
+		requirements,
+		getFederationProviders,
+		registeredClients,
+		consentStore,
+		clientIdMetadataDocumentSeams,
+		logger,
+	});
 	const legacyTypAcceptOpt = options.legacyTypAccept;
 	// `/oauth/token` MUST accept public clients (`tokenEndpointAuthMethod: "none"`)
 	// because PKCE/S256 at `/oauth/authorize` is their authenticity gate.
