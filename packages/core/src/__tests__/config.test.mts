@@ -26,8 +26,7 @@ describe("provider config", () => {
 
 		// The signing key, the log level and the HTTP settings are the sections
 		// of the modules that own them, with their defaults in those modules'
-		// package (the standalone template's `config/reference.conf`): core
-		// ships none.
+		// package: core ships none.
 		expect(config.oauth.jwt.signingKey).toBeUndefined();
 		expect(config.logging).toBeUndefined();
 		expect(config.http).toBeUndefined();

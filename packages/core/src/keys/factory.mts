@@ -22,8 +22,7 @@ import { assertSecretEntropy } from "./secretEntropy.mjs";
 export type KeyStoreFactory = AdapterFactory<KeyStore>;
 
 /**
- * The algorithm this library defaults to, and the one the standalone
- * template's key store section ships (its `config/reference.conf`).
+ * The algorithm this library defaults to.
  * Asymmetric so a relying party can verify from the published JWKS without
  * holding a key that can also MINT tokens. EdDSA (Ed25519) over RS256: every
  * layer here supports it, its keys and signatures are the smallest, and it
@@ -33,9 +32,9 @@ export const DEFAULT_SIGNING_ALGORITHM = "EdDSA";
 
 const SUPPORTED_ALGORITHMS = ["HS256", "RS256", "ES256", "EdDSA"] as const;
 
-/** The keys that carry the asymmetric key material, with the variables the standalone template binds them to. */
+/** The keys that carry the asymmetric key material, and the variables conventionally bound to them. */
 const ASYMMETRIC_KEY_HELP =
-	"Set BOTH of (env: the standalone template's variables):\n" +
+	"Set BOTH of:\n" +
 	"  oauth.jwt.signingKey.local.privateKeyPath  (env OAUTH_JWT_PRIVATE_KEY_PATH)\n" +
 	"  oauth.jwt.signingKey.local.publicKeyPath   (env OAUTH_JWT_PUBLIC_KEY_PATH)\n" +
 	"or their inline-PEM equivalents oauth.jwt.signingKey.local.privateKey /\n" +
@@ -62,7 +61,7 @@ function describeMissingAsymmetricMaterial(
 	const hs256Note = hasSecret
 		? "\n\noauth.jwt.signingKey.local.secret is set, but a shared secret cannot sign " +
 			`${algorithm}. To keep symmetric signing instead, set ` +
-			'oauth.jwt.signingKey.local.algorithm = "HS256" (env OAUTH_JWT_ALGORITHM=HS256 in the standalone template). ' +
+			'oauth.jwt.signingKey.local.algorithm = "HS256" (env OAUTH_JWT_ALGORITHM=HS256). ' +
 			"Note that HS256 publishes no JWKS, so every relying party must be handed the " +
 			"shared secret — which also lets it mint tokens."
 		: "";
@@ -161,7 +160,7 @@ function narrowPreviousSecretsArray(value: unknown): SymmetricPreviousSecret[] {
 		// secret does and clears exactly the same floor.
 		assertSecretEntropy(raw.secret, {
 			configKey: `oauth.jwt.signingKey.local.previousSecrets[${index}].secret`,
-			envVar: "OAUTH_JWT_SECRET (the standalone template's variable)",
+			envVar: "OAUTH_JWT_SECRET",
 		});
 		if (typeof raw.expiresAt !== "string" || raw.expiresAt.length === 0) {
 			throw new Error(`previousSecrets[${index}].expiresAt must be a non-empty ISO string`);
@@ -192,7 +191,7 @@ export function registerBuiltinKeyStores(factory: KeyStoreFactory): void {
 		// quietly weaker than the operator believes.
 		if (typeof rawAlgorithm !== "string" || rawAlgorithm.length === 0) {
 			throw new Error(
-				"oauth.jwt.signingKey.local.algorithm is not configured (env OAUTH_JWT_ALGORITHM in the standalone template). " +
+				"oauth.jwt.signingKey.local.algorithm is not configured (env OAUTH_JWT_ALGORITHM). " +
 					`Supported values: ${SUPPORTED_ALGORITHMS.join(", ")}. ` +
 					`The shipped default is "${DEFAULT_SIGNING_ALGORITHM}"; there is no implicit fallback.`,
 			);
@@ -213,7 +212,7 @@ export function registerBuiltinKeyStores(factory: KeyStoreFactory): void {
 			if (typeof secret !== "string" || secret.length === 0) {
 				throw new Error(
 					"secret is required for HS256 algorithm. Set " +
-						"oauth.jwt.signingKey.local.secret (env OAUTH_JWT_SECRET in the standalone template) to at least " +
+						"oauth.jwt.signingKey.local.secret (env OAUTH_JWT_SECRET) to at least " +
 						"32 bytes of random material — `openssl rand -hex 32`.",
 				);
 			}
@@ -221,7 +220,7 @@ export function registerBuiltinKeyStores(factory: KeyStoreFactory): void {
 			// so it must clear the entropy floor, not merely be non-empty.
 			assertSecretEntropy(secret, {
 				configKey: "oauth.jwt.signingKey.local.secret",
-				envVar: "OAUTH_JWT_SECRET (the standalone template's variable)",
+				envVar: "OAUTH_JWT_SECRET",
 			});
 			const rawKid = config.kid;
 			const kid = typeof rawKid === "string" && rawKid.length > 0 ? rawKid : "v0";

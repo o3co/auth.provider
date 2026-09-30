@@ -294,9 +294,9 @@ const jwtSchemaBase = z.object({
 
 /**
  * Detects legacy flat `oauth.jwt.*` fields on the raw input: Zod strips unknown
- * keys before `superRefine` runs, so only `z.preprocess` can see them. The
- * standalone template's `key-store` parses its section with this pipe's
- * `out.shape.signingKey`: keep that path, or change the module with it.
+ * keys before `superRefine` runs, so only `z.preprocess` can see them. This
+ * pipe's `out.shape.signingKey` is read as the signing-key section's schema:
+ * keep that path, or change its readers with it.
  */
 const jwtSchema = z.preprocess((raw, ctx) => {
 	if (typeof raw === "object" && raw !== null && !Array.isArray(raw)) {
@@ -684,8 +684,8 @@ const trustProxySchema = z
 /**
  * Minimal always-required config for the auth provider core.
  * Token-only deployments (no session, no federation) only need these sections.
- * The standalone template's `logging`, `http` and `key-store` modules parse
- * their sections with the declarations here until they have schemas of their own.
+ * The modules owning `logging`, `http` and `oauth.jwt.signingKey` parse their
+ * sections with the declarations here until they have schemas of their own.
  */
 export const CoreConfigSchema = z.object({
 	// The section of the module that provides `httpSettings`; core reads none
@@ -1008,10 +1008,9 @@ const federationEntrySchema = z
  * transitional base (`TransitionalConfigSchema`); each mirror stays for the
  * coercions and checks it applies, validated whenever the configuration carries
  * it, until its package owns the section. Mirrors are presence and shape only:
- * bounds and defaults stay with the owning package. The standalone template's
- * `cors` and `redis-clients` modules parse their sections with the `cors` and
- * `refreshTokenFamilyStore.redis` declarations here until they have schemas of
- * their own.
+ * bounds and defaults stay with the owning package. The modules owning `cors`
+ * and `refreshTokenFamilyStore.redis` parse their sections with the
+ * declarations here until they have schemas of their own.
  */
 export const fullSectionsSchema = z.object({
 	// The federation-grants section (see the federation-grants ADR). The bundled
