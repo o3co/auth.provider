@@ -48,6 +48,17 @@ export interface IntrospectResponse {
 	 * token carries a `cnf` claim; absent otherwise.
 	 */
 	readonly cnf?: Confirmation;
+	/**
+	 * RFC 9470 §6.2: the Authentication Context Class Reference the token
+	 * carries, when it carries a non-empty string.
+	 */
+	readonly acr?: string;
+	/**
+	 * RFC 9470 §6.2: when the user authenticated, in seconds since the epoch —
+	 * the primary authentication's time, which a step-up does not move. Absent
+	 * when the token carries none, as one minted before this member existed.
+	 */
+	readonly auth_time?: number;
 }
 
 /**
