@@ -1942,6 +1942,38 @@ describe("connect, when the world fails or moves", () => {
 		expect(response.text).toMatch(/expired or has already been used/);
 	});
 
+	it("audits a connect whose question cannot be parked for this browser as a stale link, with the flow's grant", async () => {
+		// The question already parked for another browser of the same user, and a
+		// flow that finished while this browser was being judged.
+		const arrangements: readonly ((w: World, handle: string) => Promise<void>)[] = [
+			async (w, handle) => {
+				w.signIn("b-2");
+				await w.challengeFor(handle, "b-2");
+			},
+			async (w, handle) => {
+				w.state.before.set("userSessionStore.get", () =>
+					w.intents.finishIntent(handle, w.state.now),
+				);
+			},
+		];
+		for (const arrange of arrangements) {
+			const w = world();
+			const { handle, grantId } = await w.lodge();
+			w.signIn("b-1");
+			await arrange(w, handle);
+			const response = await w.connect(handle, "b-1");
+			expect(response.status).toBe(400);
+			isPlain(response);
+			expect(response.text).toBe("This link has expired or has already been used. Start again.");
+			await w.background.drain();
+			expect(
+				w.events
+					.filter((e) => e.type === "federation.grant.authorization_failed")
+					.map((e) => e.details),
+			).toEqual([expect.objectContaining({ grantId, outcome: "stale", correlationId: "corr-1" })]);
+		}
+	});
+
 	it("asks a browser with no durable session behind its cookie to sign in again", async () => {
 		const w = world();
 		const { handle } = await w.lodge();
@@ -3766,7 +3798,12 @@ describe("the browser half on session admission", () => {
 			createFederationGrantBrowserRouter({
 				requirements: resolverForTests([], { actions: FEDERATION_GRANTS_ADMISSION_ACTIONS }),
 			} as never),
-		).toThrow(/subjectRevocation/);
+		).toThrow(
+			new TypeError(
+				"createFederationGrantBrowserRouter: subjectRevocation is required — the sessions " +
+					"boundary a session must have authenticated after is read through it",
+			),
+		);
 	});
 
 	it("refuses to be built on an issuer that is not an absolute http(s) URL: the consent location and the connect URI are built on it, and on mailto:, urn: or data: each would throw, a 500 on every request", () => {
