@@ -166,18 +166,21 @@ describe("verifyWebAuthnAttestation", () => {
 		'Unexpected registration response type "challenge", expected "webauthn.create"',
 		'Unexpected registration response type "public key alg", expected "webauthn.create"',
 		'Unexpected registration response type "rp id", expected "webauthn.create"',
-	])("maps a refusal by the library's own message, never by text the client wrote into it: %s", async (message) => {
-		mockVerifyRegistration.mockRejectedValueOnce(new Error(message));
+	])(
+		"maps a refusal by the library's own message, never by text the client wrote into it: %s",
+		async (message) => {
+			mockVerifyRegistration.mockRejectedValueOnce(new Error(message));
 
-		const result = await verifyWebAuthnAttestation({
-			response: STUB_REGISTRATION_RESPONSE,
-			expectedChallenge: "some-challenge",
-			expectedRpId: "example.com",
-			expectedOrigins: ["https://example.com"],
-		});
+			const result = await verifyWebAuthnAttestation({
+				response: STUB_REGISTRATION_RESPONSE,
+				expectedChallenge: "some-challenge",
+				expectedRpId: "example.com",
+				expectedOrigins: ["https://example.com"],
+			});
 
-		expect(result).toEqual({ ok: false, reason: "unknown" });
-	});
+			expect(result).toEqual({ ok: false, reason: "unknown" });
+		},
+	);
 
 	it("returns rp_id_mismatch when SimpleWebAuthn throws an RP ID hash error", async () => {
 		mockVerifyRegistration.mockRejectedValueOnce(new Error("Unexpected RP ID hash"));
@@ -382,19 +385,22 @@ describe("verifyWebAuthnAssertion", () => {
 		'Unexpected authentication response type "challenge", expected "webauthn.get"',
 		'Unexpected authentication response type "rp id", expected "webauthn.get"',
 		'Unexpected authentication response type "top origin", expected "webauthn.get"',
-	])("maps a refusal by the library's own message, never by text the client wrote into it: %s", async (message) => {
-		mockVerifyAuthentication.mockRejectedValueOnce(new Error(message));
+	])(
+		"maps a refusal by the library's own message, never by text the client wrote into it: %s",
+		async (message) => {
+			mockVerifyAuthentication.mockRejectedValueOnce(new Error(message));
 
-		const result = await verifyWebAuthnAssertion({
-			credential: makeStoredCredential(5),
-			response: STUB_AUTHENTICATION_RESPONSE,
-			expectedChallenge: "some-challenge",
-			expectedRpId: "example.com",
-			expectedOrigins: ["https://example.com"],
-		});
+			const result = await verifyWebAuthnAssertion({
+				credential: makeStoredCredential(5),
+				response: STUB_AUTHENTICATION_RESPONSE,
+				expectedChallenge: "some-challenge",
+				expectedRpId: "example.com",
+				expectedOrigins: ["https://example.com"],
+			});
 
-		expect(result).toEqual({ ok: false, reason: "unknown" });
-	});
+			expect(result).toEqual({ ok: false, reason: "unknown" });
+		},
+	);
 
 	it("maps the library's RP ID refusal", async () => {
 		mockVerifyAuthentication.mockRejectedValueOnce(new Error("Unexpected RP ID hash"));

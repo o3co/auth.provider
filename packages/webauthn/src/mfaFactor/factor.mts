@@ -23,17 +23,26 @@
  *   in each such factor's data — excluding the subject's WebAuthn
  *   credentials, with a resident key discouraged, no attestation,
  *   `WEBAUTHN_ALGORITHM_IDS` and the section's user verification. Completion
- *   verifies the attestation; a credential id the subject holds is
- *   `duplicate`.
+ *   verifies the attestation and keeps the credential's backup eligibility
+ *   (BE); a credential id the subject holds is `duplicate`.
+ * - A credential is only ever looked up among its own subject's factors, so
+ *   one id held by two subjects is not refused. Any path that resolves an
+ *   MFA credential by its id alone must refuse such a duplicate first.
  * - An assertion's challenge lists every WebAuthn factor of the subject.
  *   Verification finds the credential by its id among them and verifies the
  *   assertion against the challenge the coordinator took; its next data is
- *   the new sign count and the backup state the assertion reports. A counter
- *   that did not increase over the stored one is `sign_count_regression`;
- *   0 against a stored 0 is an authenticator that keeps no counter
- *   (WebAuthn §6.1.1), which passes and stays 0.
- * - `hwk` for a credential whose backup state is clear, `swk` for one backed
- *   up (a synced passkey).
+ *   the new sign count and the backup state (BS) the assertion reports. A
+ *   counter that did not increase over the stored one — judged only once
+ *   the signature verified — is `sign_count_regression`; 0 against a stored
+ *   0 is an authenticator that keeps no counter (WebAuthn §6.1.1), which
+ *   passes and stays 0. An assertion reporting another backup eligibility
+ *   than the one registered is `invalid` (BE is fixed at creation, WebAuthn
+ *   §6.1.3).
+ * - `hwk` for a credential that is not backup-eligible (BE = 0), `swk` for
+ *   one that is, whatever its backup state (the MFA ADR's D14). With
+ *   attestation `none` both flags are what the authenticator reports of
+ *   itself: `hwk` means reported device-bound, not proven hardware. The
+ *   backup state is kept for the record; no decision reads it.
  * - A ceremony's challenge lives until the relying party's
  *   `challengeTtlMs`; the transaction bounds it too.
  * - Data or a pending state that is not a WebAuthn record is thrown (the
@@ -61,7 +70,7 @@ import {
 } from "../internal/options.mjs";
 import {
 	verifyWebAuthnAssertionWithBackupState,
-	verifyWebAuthnAttestation,
+	verifyWebAuthnAttestationWithBackupState,
 } from "../internal/verification.mjs";
 
 /** The kind a WebAuthn factor's records carry, and the key it is contributed under. */
@@ -85,7 +94,9 @@ interface WebAuthnFactorData {
 	readonly publicKey: string;
 	readonly signCount: number;
 	readonly transports: readonly AuthenticatorTransport[];
-	/** The backup state (BS) the credential last reported. */
+	/** Whether the credential may be backed up (BE), as it registered: what `amr` follows. */
+	readonly backupEligible: boolean;
+	/** The backup state (BS) the credential last reported, kept for the record. */
 	readonly backedUp: boolean;
 	/** The subject's WebAuthn user handle, base64url. */
 	readonly userHandle: string;
@@ -123,13 +134,15 @@ const unreadable = (what: string, field: string): Error =>
 function readData(data: unknown): WebAuthnFactorData {
 	const what = "the factor's data";
 	const record = isRecord(data) ? data : {};
-	const { credentialId, publicKey, signCount, transports, backedUp, userHandle } = record;
+	const { credentialId, publicKey, signCount, transports, backupEligible, backedUp, userHandle } =
+		record;
 	if (!isBase64url(credentialId)) throw unreadable(what, "credentialId");
 	if (!isBase64url(publicKey)) throw unreadable(what, "publicKey");
 	if (!isCount(signCount)) throw unreadable(what, "signCount");
 	if (!Array.isArray(transports) || !transports.every((t) => typeof t === "string")) {
 		throw unreadable(what, "transports");
 	}
+	if (typeof backupEligible !== "boolean") throw unreadable(what, "backupEligible");
 	if (typeof backedUp !== "boolean") throw unreadable(what, "backedUp");
 	const handleBytes = isBase64url(userHandle) ? Buffer.from(userHandle, "base64url").length : 0;
 	if (handleBytes < 1 || handleBytes > MAX_USER_HANDLE_BYTES) throw unreadable(what, "userHandle");
@@ -138,6 +151,7 @@ function readData(data: unknown): WebAuthnFactorData {
 		publicKey,
 		signCount,
 		transports: knownTransports(transports),
+		backupEligible,
 		backedUp,
 		userHandle: userHandle as string,
 	};
@@ -231,7 +245,10 @@ function readAssertion(proof: unknown): AuthenticationResponseJSON | undefined {
 	if (!isText(clientDataJSON) || !isText(authenticatorData) || !isText(signature)) {
 		return undefined;
 	}
-	if (userHandle !== undefined && typeof userHandle !== "string") return undefined;
+	// A `null` user handle is none, as the WebAuthn JSON form writes an absent one.
+	if (userHandle !== undefined && userHandle !== null && typeof userHandle !== "string") {
+		return undefined;
+	}
 	return {
 		id,
 		rawId,
@@ -240,7 +257,7 @@ function readAssertion(proof: unknown): AuthenticationResponseJSON | undefined {
 			clientDataJSON,
 			authenticatorData,
 			signature,
-			...(userHandle === undefined ? {} : { userHandle }),
+			...(typeof userHandle === "string" ? { userHandle } : {}),
 		},
 		clientExtensionResults: isRecord(clientExtensionResults) ? clientExtensionResults : {},
 		...(authenticatorAttachment === "platform" || authenticatorAttachment === "cross-platform"
@@ -290,7 +307,7 @@ export function createWebAuthnMfaFactor(settings: WebAuthnMfaFactorSettings): Mf
 	const factor: MfaFactor = {
 		kind: WEBAUTHN_MFA_FACTOR_KIND,
 		amrValues: AMR_VALUES,
-		amrFor: (data) => (readData(data).backedUp ? SWK : HWK),
+		amrFor: (data) => (readData(data).backupEligible ? SWK : HWK),
 		addsMfa: true,
 		counting: true,
 		guessable: false,
@@ -346,6 +363,8 @@ export function createWebAuthnMfaFactor(settings: WebAuthnMfaFactorSettings): Mf
 					reason: verified.reason === "sign_count_regression" ? "sign_count_regression" : "invalid",
 				};
 			}
+			// BE is fixed at creation (WebAuthn §6.1.3): another one is not this credential's word.
+			if (verified.backupEligible !== data.backupEligible) return { ok: false, reason: "invalid" };
 			const next: WebAuthnFactorData = {
 				...data,
 				signCount: verified.newSignCount,
@@ -381,7 +400,7 @@ export function createWebAuthnMfaFactor(settings: WebAuthnMfaFactorSettings): Mf
 			if (registration === undefined) return { ok: false, reason: "malformed" };
 			const state = readEnrollment(ctx.state);
 			if (ctx.nowMs >= state.expiresAtMs) return { ok: false, reason: "expired" };
-			const verified = await verifyWebAuthnAttestation({
+			const verified = await verifyWebAuthnAttestationWithBackupState({
 				response: registration,
 				expectedChallenge: state.challenge,
 				expectedRpId: relyingParty.rpId,
@@ -398,6 +417,7 @@ export function createWebAuthnMfaFactor(settings: WebAuthnMfaFactorSettings): Mf
 				publicKey: Buffer.from(material.publicKey).toString("base64url"),
 				signCount: material.signCount,
 				transports: knownTransports(material.transports ?? []),
+				backupEligible: material.backupEligible,
 				backedUp: material.backedUp,
 				userHandle: state.userHandle,
 			};

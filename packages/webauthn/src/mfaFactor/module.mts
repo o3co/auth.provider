@@ -22,8 +22,10 @@
  * `webauthnConfig` slot holds and its own section, `webauthn-mfa-factor`,
  * which boot parses with the module's schema before any factory runs; it
  * answers `null` when `webauthn-mfa-factor.enabled` is false, which leaves
- * the kind claimed and absent from the resolver. Without the relying party
- * the boot is refused, naming the slot. Stateless: nothing forks per replica.
+ * the kind claimed and absent from the resolver. The relying party is taken
+ * when wired: off, the module boots without it; on without it, the factory
+ * refuses, naming the slot and the keys it is built from. Stateless: nothing
+ * forks per replica.
  */
 
 import { defineModule } from "@o3co/auth-provider-core";
@@ -37,16 +39,27 @@ export const webauthnMfaFactorModule = defineModule({
 		schema: webauthnMfaFactorConfigSchema,
 		reference: new URL("../../config/reference.conf", import.meta.url),
 	},
-	requires: ["webauthnConfig"] as const,
+	// Needed only when the factor is on, so a composition may install the
+	// module and leave the factor off without a relying party.
+	optional: ["webauthnConfig"] as const,
 	contributes: {
 		mfaFactors: {
-			[WEBAUTHN_MFA_FACTOR_KIND]: ({ webauthnConfig, section }) =>
-				section.enabled
-					? createWebAuthnMfaFactor({
-							relyingParty: webauthnConfig,
-							userVerification: section.userVerification,
-						})
-					: null,
+			[WEBAUTHN_MFA_FACTOR_KIND]: ({ webauthnConfig, section }) => {
+				if (!section.enabled) return null;
+				if (webauthnConfig === undefined) {
+					throw new Error(
+						"webauthnMfaFactorModule: webauthn-mfa-factor.enabled = true requires the " +
+							"webauthnConfig component — the relying party, built from webauthn.rpId, " +
+							"webauthn.rpName and webauthn.origin, which the deployment's WebAuthn bootstrap " +
+							"module provides. Provide it, or leave the factor off " +
+							"(WEBAUTHN_MFA_FACTOR_ENABLED).",
+					);
+				}
+				return createWebAuthnMfaFactor({
+					relyingParty: webauthnConfig,
+					userVerification: section.userVerification,
+				});
+			},
 		},
 	},
 });
