@@ -239,48 +239,55 @@ export const redisCodeRepositoryBuilder: AdapterBuilder<CodeRepository> = (confi
 };
 
 /**
+ * The schema of `redis-code-repository {}`, the module's own section, strict:
+ * the key namespace and the default lifetime in seconds, a positive whole
+ * number so a bad variable fails boot rather than every Redis call. Absent,
+ * the repository's own defaults apply (`oauth:code:`, 600).
+ */
+const redisCodeRepositorySectionSchema = z
+	.object({
+		keyPrefix: z.string().optional(),
+		defaultExpiresIn: z.coerce.number().int().positive().optional(),
+	})
+	.strict()
+	.optional();
+
+/**
  * `defineModule` manifest for the Redis CodeRepository: the static
  * composition path, which replaces the deprecated
- * `redisCodeRepositoryBuilder`.
- *
- * configSchema: top-level key `redisCodeRepository` (module-namespaced). No
- * `.default()` (ADR 2026-04-30-config-schema-strict-defaults-from-hocon):
- * defaults live in `application.conf`, and the constructor falls back to its
- * built-in defaults (`oauth:code:` / 600s) when both HOCON and operator
- * overrides omit a field.
+ * `redisCodeRepositoryBuilder`. It reads its own section,
+ * `redis-code-repository`, which moved from `redisCodeRepository`; the
+ * `repositories.code` blocks it and the in-process repository once shared are
+ * removed, and the `CLIENT_CODE_*` variables renamed after the new paths
+ * (`REDIS_CODE_REPOSITORY_*`) or removed with their keys.
  */
 export const redisCodeRepositoryModule = defineModule({
 	name: "redis-code-repository",
-	requires: ["codeRepositoryClient", "config"] as const,
+	section: {
+		schema: redisCodeRepositorySectionSchema,
+		reference: new URL("../config/reference.conf", import.meta.url),
+		relocatedFrom: {
+			redisCodeRepository: "",
+			"repositories.code.redis": null,
+			"repositories.code.memory": null,
+		},
+		renamedVariables: {
+			CLIENT_CODE_KEY_PREFIX: "redisCodeRepository.keyPrefix",
+			CLIENT_CODE_DEFAULT_EXPIRES_IN: "redisCodeRepository.defaultExpiresIn",
+			CLIENT_CODE_ENDPOINT_URI: "repositories.code.redis.endpointUri",
+			CLIENT_CODE_PASSWORD: "repositories.code.redis.password",
+		},
+	},
+	requires: ["codeRepositoryClient"] as const,
 	// Where a stored record that cannot be read is reported
 	// (`authorization_code_corrupt_record`); consoleLogger when empty.
 	optional: ["logger"] as const,
-	configSchema: z.object({
-		redisCodeRepository: z
-			.object({
-				keyPrefix: z.string().optional(),
-				// `defaultExpiresIn` controls the Redis PX TTL (seconds) for
-				// authorization codes. Constrained to a positive integer so a
-				// bad env-var override (`CLIENT_CODE_DEFAULT_EXPIRES_IN=0`,
-				// `="-1"`, or `="abc"`) fails Zod validation at boot rather
-				// than producing a non-positive PX argument that Redis rejects
-				// at first /authorize call.
-				defaultExpiresIn: z.coerce.number().int().positive().optional(),
-			})
-			.optional(),
-	}),
 	provides: {
-		codeRepository: (deps) => {
-			const cfg = (
-				deps.config as {
-					redisCodeRepository?: { keyPrefix?: string; defaultExpiresIn?: number };
-				}
-			).redisCodeRepository;
-			return new RedisCodeRepository(deps.codeRepositoryClient, {
-				keyPrefix: cfg?.keyPrefix,
-				defaultExpiresIn: cfg?.defaultExpiresIn,
-				...(deps.logger !== undefined ? { logger: deps.logger } : {}),
-			});
-		},
+		codeRepository: ({ section, codeRepositoryClient, logger }) =>
+			new RedisCodeRepository(codeRepositoryClient, {
+				keyPrefix: section?.keyPrefix,
+				defaultExpiresIn: section?.defaultExpiresIn,
+				...(logger !== undefined ? { logger } : {}),
+			}),
 	},
 });

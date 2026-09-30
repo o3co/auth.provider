@@ -91,41 +91,6 @@ describe("provider config", () => {
 		// federation entries is tested in federations-schema.test.mts.
 	});
 
-	it("repositories.client.type is yaml when reference.conf is loaded with no override", () => {
-		const raw = parseFile(new URL("../../config/reference.conf", import.meta.url).pathname, {
-			env: {
-				OAUTH_JWT_SECRET: "test-jwt-secret.at-least-32-bytes.ok",
-				OAUTH_JWT_ISSUER: "https://auth.test",
-				CLIENT_USER_BASE_URL: "http://localhost:8080",
-				CLIENT_CODE_ENDPOINT_URI: "redis://localhost:6379",
-			},
-		});
-		const config = validate(raw, AppConfigSchema);
-		expect(config.repositories.client.type).toBe("yaml");
-	});
-
-	it("repositories.user.type is yaml when reference.conf is loaded with no override", () => {
-		const raw = parseFile(new URL("../../config/reference.conf", import.meta.url).pathname, {
-			env: {
-				OAUTH_JWT_SECRET: "test-jwt-secret.at-least-32-bytes.ok",
-				OAUTH_JWT_ISSUER: "https://auth.test",
-			},
-		});
-		const config = validate(raw, AppConfigSchema);
-		expect(config.repositories.user.type).toBe("yaml");
-	});
-
-	it("repositories.code.type is memory when reference.conf is loaded with no override", () => {
-		const raw = parseFile(new URL("../../config/reference.conf", import.meta.url).pathname, {
-			env: {
-				OAUTH_JWT_SECRET: "test-jwt-secret.at-least-32-bytes.ok",
-				OAUTH_JWT_ISSUER: "https://auth.test",
-			},
-		});
-		const config = validate(raw, AppConfigSchema);
-		expect(config.repositories.code.type).toBe("memory");
-	});
-
 	it("loads core-rate-limiter-memory.maxBuckets default and CORE_RATE_LIMITER_MEMORY_MAX_BUCKETS", () => {
 		const path = new URL("../../config/reference.conf", import.meta.url).pathname;
 		const base = validate(

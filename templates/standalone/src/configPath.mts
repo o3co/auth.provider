@@ -43,8 +43,9 @@ import {
 	redisFederationGrantStoreModule,
 } from "@o3co/auth-provider-redis";
 import { type Config, empty, parseFile } from "@o3co/ts.hocon";
+import { ADAPTERS_SECTION, readAdapters } from "./adapters.mjs";
 import { loggingModule, templateReference } from "./modules.mjs";
-import { type LoggingSettings, loggingSectionSchema } from "./sections.mjs";
+import { type Adapters, type LoggingSettings, loggingSectionSchema } from "./sections.mjs";
 
 export interface ResolvedConfigPaths {
 	readonly applicationConfPath: string;
@@ -153,17 +154,7 @@ export const SWITCHES: readonly string[] = [
 	"core.sessionRequirements",
 	"federations",
 	"federation-grants.enabled",
-	"federationGrantStore.adapter",
-	"federationGrantIntentStore.adapter",
-	"federationTokenStore.type",
-	"rateLimiter.adapter",
-	"userSessionStores.adapter",
-	"accessTokenDenylist.adapter",
-	"replaySeenSet.adapter",
-	"consentStore.adapter",
 	"session-store.storage",
-	"repositories.code",
-	"oauth.code.adapter",
 	"oauth-session.enabled",
 	"oauth-authorization.grants",
 	"oauth.accessToken",
@@ -174,7 +165,8 @@ export const SWITCHES: readonly string[] = [
  * `mfa.mode`, the MFA module's key, which core's schema does not declare, read
  * raw from the template's own layers and held to its values by `readMfaMode`.
  * Read only until the template installs the MFA module (the MFA ADR's build
- * order, step 20), which removes this reading.
+ * order, step 20), which removes this reading. (`adapters`, the composition
+ * root's own section, is read with the template's own schema: `readAdapters`.)
  */
 export const OWN_READS: readonly string[] = ["mfa.mode"];
 
@@ -228,18 +220,29 @@ export interface SwitchesOptions {
 }
 
 /**
+ * What phase one answers: the switches core's reader parsed, and the
+ * composition root's own `adapters`, parsed with the template's schema.
+ */
+export type Switches = AppConfig & { readonly adapters: Adapters };
+
+/**
  * Phase one: the switches (`SWITCHES`, and `reads`) from the composition's
  * own layers over core's `reference.conf` alone, read with core's
  * `readTransitionalConfig`: each parsed with the schema core declares at its
- * path, everything else as written. Use it for those choices only. A switch
- * whose default only a package ships reads as unset here; set it in the
- * template's own files.
+ * path, everything else as written; and `adapters`, the composition root's
+ * own section, from its own layers over the template's `config/reference.conf`
+ * (`readAdapters`), which refuses a selection at the path it moved from and a
+ * variable renamed with one. Use it for those choices only. A switch whose
+ * default only a package ships reads as unset here; set it in the template's
+ * own files.
  */
-export function readSwitches(own: OwnLayers, options: SwitchesOptions = {}): AppConfig {
-	return readTransitionalConfig(resolveLayers(own, [coreReference()]), [
+export function readSwitches(own: OwnLayers, options: SwitchesOptions = {}): Switches {
+	const adapters = readAdapters(resolveLayers(own, [templateReference()]), own.env);
+	const switches = readTransitionalConfig(resolveLayers(own, [coreReference()]), [
 		...SWITCHES,
 		...(options.reads ?? []),
 	]);
+	return { ...switches, adapters };
 }
 
 /**
@@ -389,6 +392,7 @@ function unownedTemplateDefaults(
 	return Object.keys(defaults).filter(
 		(name) =>
 			name !== RENAMED_VARIABLES &&
+			name !== ADAPTERS_SECTION &&
 			!ownsSection(modules, name) &&
 			isDeepStrictEqual(resolved[name], defaults[name]),
 	);
@@ -407,9 +411,10 @@ const RENAMED_VARIABLES = "renamed-variables";
  * nothing but the mode, which the template read for itself (`readMfaMode`),
  * is left out when no loaded module owns it; anything more reaches boot,
  * which names an unowned section once. The MFA ADR's build-order step 20
- * removes this with the template's reading. So is a section the template's
- * own `reference.conf` sets for a module the composition does not load, left
- * as that file sets it (`unownedTemplateDefaults`).
+ * removes this with the template's reading. So is `adapters`, the
+ * composition root's own section, which phase one consumed, and a section the
+ * template's own `reference.conf` sets for a module the composition does not
+ * load, left as that file sets it (`unownedTemplateDefaults`).
  *
  * Refuses, with a `RangeError`, the Redis intent store left on its default
  * key prefix where the grant store's was moved
@@ -425,7 +430,7 @@ export function resolveForBoot(
 ): AppConfig {
 	const all = resolveLayers(own, moduleReferences(modules));
 	refuseIntentPrefixLeftAtDefault(all, modules);
-	const unowned = new Set(unownedTemplateDefaults(all, modules));
+	const unowned = new Set([ADAPTERS_SECTION, ...unownedTemplateDefaults(all, modules)]);
 	const layered = Object.fromEntries(Object.entries(all).filter(([name]) => !unowned.has(name)));
 	const { mfa: _consumed, ...withoutMfa } = layered;
 	const resolved = consumedMfa(layered.mfa, modules) ? withoutMfa : layered;

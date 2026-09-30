@@ -14,7 +14,6 @@
  * limitations under the License.
  */
 import {
-	type AppConfig,
 	consoleLogger,
 	defaultRefreshTokenFamilyRevocationModule,
 	defaultRefreshTokenFamilyRotationModule,
@@ -58,8 +57,9 @@ import {
 	standardDevelopmentMailSenderModule,
 	standardSmtpMailSenderModule,
 } from "@o3co/auth-provider-standard";
+import type { Switches } from "./configPath.mjs";
 import {
-	auditSinkModule,
+	auditSinkModuleFor,
 	googleFederationConfigModule,
 	httpModule,
 	inMemoryCodeRepositoryModule,
@@ -68,7 +68,7 @@ import {
 	keyStoreModule,
 	loggingModule,
 	oidcFederationConfigModule,
-	repositoriesModule,
+	repositoriesModuleFor,
 	standaloneRedisClientsModule,
 } from "./modules.mjs";
 
@@ -132,13 +132,15 @@ function setsAnything(value: unknown): boolean {
 }
 
 /**
- * Compose the standalone module list from `config`. Kept out of `app.mts` so
- * a smoke test can check the manifest (that disabling a federation removes
- * its module pair, say) without an HTTP server. The rules for editing the
- * list (order, one module per store slot, federation adapters with their
- * config bridges) are in the template README, "Module Composition Order".
+ * Compose the standalone module list from phase one's `config`: the
+ * composition root's `adapters`, which choose the adapter behind each slot,
+ * and the switches core's reader parsed. Kept out of `app.mts` so a smoke
+ * test can check the manifest (that disabling a federation removes its module
+ * pair, say) without an HTTP server. The rules for editing the list (order,
+ * one module per store slot, federation adapters with their config bridges)
+ * are in the template README, "Module Composition Order".
  */
-export function buildModules(config: AppConfig, overrides: BuildModulesOverrides = {}): Module[] {
+export function buildModules(config: Switches, overrides: BuildModulesOverrides = {}): Module[] {
 	// A section's `type` names the implementation, so the two gates never both
 	// select one section: `federations.google` is the built-in Google
 	// federation only when its type is `google` (that name's default); with
@@ -148,35 +150,14 @@ export function buildModules(config: AppConfig, overrides: BuildModulesOverrides
 		extractFederationSection(config.federations ?? {}, "google")?.type === "google";
 	const oidcFederations = oidcFederationNames(config.federations ?? {});
 	const logger = overrides.logger ?? consoleLogger;
+	const adapters = config.adapters;
 
-	// Adapter switches. When ANY is `"redis"`, or the refresh-token family
-	// modules keep the Redis store (the default), the shared
-	// `standaloneRedisClientsModule` is added once, one ioredis socket per
-	// replica; memory-only deployments open none.
-	const rateLimiterAdapter = config.rateLimiter?.adapter ?? "memory";
-	const userSessionStoresAdapter = config.userSessionStores?.adapter ?? "memory";
-	// The RFC 7009 access-token denylist has no "none" branch: `oauthModule`
-	// mounts `/oauth/revoke` and reads the `accessTokenDenylist` slot, and core's
-	// boot validator refuses a composition that reads the slot with nothing
-	// filling it, since the endpoint would answer 200 while the token kept
-	// working. The switch is only over WHICH denylist.
-	const accessTokenDenylistAdapter = config.accessTokenDenylist?.adapter ?? "memory";
-	// The jti single-use record behind private_key_jwt client auth.
-	const replaySeenSetAdapter = config.replaySeenSet?.adapter ?? "memory";
-	// The consent store behind /authorize for clients that are not first-party.
-	// `"none"` (the default) wires nothing and such clients are refused, so a
-	// first-party-only deployment pays nothing and a multi-replica one is not
-	// handed a memory store it cannot run; that one selects `"redis"`.
-	const consentStoreAdapter = config.consentStore?.adapter ?? "none";
-	// The federation token store: `"memory"` by default, the local-dev shape;
-	// `"redis"` mounts `redisFederationTokenStoreModule` off the shared socket.
-	const federationTokenStoreAdapter = config.federationTokenStore?.type ?? "memory";
 	// Federation grants: a user's standing consent that a client may obtain
 	// upstream tokens with no session behind the call. Off by default, and off
 	// installs nothing: no store, no socket, no boot requirement. On, the routes
 	// and the background registry the shutdown drains come as a pair; each store
-	// follows its own switch (grants in Redis with acquisition in memory is a
-	// supported single-replica shape); and the subject-revocation service is
+	// follows its own selection (grants in Redis with acquisition in memory is
+	// a supported single-replica shape); and the subject-revocation service is
 	// installed, whose `federationGrantStore` edge makes "revoke everything this
 	// subject holds" include the grants. Enabling it also states the deployment
 	// has a consent page, a callback per connection and a user repository
@@ -186,32 +167,6 @@ export function buildModules(config: AppConfig, overrides: BuildModulesOverrides
 	// refuses it naming the new path rather than reading the feature as off.
 	const federationGrantsEnabled =
 		config["federation-grants"]?.enabled === true || setsAnything(config.federationGrants);
-	const federationGrantStoreAdapter = config.federationGrantStore?.adapter ?? "memory";
-	const federationGrantIntentStoreAdapter = config.federationGrantIntentStore?.adapter ?? "memory";
-
-	// `oauth.code.adapter` is authoritative; the deprecated
-	// `repositories.code.type = "redis"` (`CLIENT_CODE_TYPE=redis`) is still
-	// honoured, with a deprecation warning. See CHANGELOG for the removal
-	// version.
-	const oauthCodeAdapter = config.oauth?.code?.adapter;
-	const legacyCodeType = (config.repositories?.code as { type?: string } | undefined)?.type;
-	let codeRepositoryAdapter: "memory" | "redis";
-	if (oauthCodeAdapter !== undefined) {
-		codeRepositoryAdapter = oauthCodeAdapter;
-	} else if (legacyCodeType === "redis") {
-		logger.warn(
-			{
-				key: "repositories.code.type",
-				env: "CLIENT_CODE_TYPE",
-				replacement: "oauth.code.adapter",
-				replacementEnv: "OAUTH_CODE_ADAPTER",
-			},
-			"config_key_deprecated",
-		);
-		codeRepositoryAdapter = "redis";
-	} else {
-		codeRepositoryAdapter = "memory";
-	}
 
 	// The deprecated alias `oauth.accessToken.expiresIn`
 	// (OAUTH_ACCESS_TOKEN_EXPIRES_IN) is still read as the default while
@@ -244,61 +199,73 @@ export function buildModules(config: AppConfig, overrides: BuildModulesOverrides
 	const refreshTokenFamilyUsesRedis = refreshTokenFamilyModules.some(
 		(m) => m.name === "redis-refresh-token-family-store",
 	);
+	// When ANY selection is `"redis"`, or the refresh-token family modules keep
+	// the Redis store (the default), the shared `standaloneRedisClientsModule`
+	// is added once, one ioredis socket per replica; memory-only deployments
+	// open none.
 	const usingRedisAnywhere =
 		refreshTokenFamilyUsesRedis ||
-		rateLimiterAdapter === "redis" ||
-		userSessionStoresAdapter === "redis" ||
-		codeRepositoryAdapter === "redis" ||
-		accessTokenDenylistAdapter === "redis" ||
-		replaySeenSetAdapter === "redis" ||
-		consentStoreAdapter === "redis" ||
-		federationTokenStoreAdapter === "redis" ||
-		// Only while the feature is on: a switch left at "redis" for a feature
-		// that is off must not open a socket.
+		adapters.rateLimiter === "redis" ||
+		adapters.userSessionStores === "redis" ||
+		adapters.codeRepository === "redis" ||
+		adapters.accessTokenDenylist === "redis" ||
+		adapters.replaySeenSet === "redis" ||
+		adapters.consentStore === "redis" ||
+		adapters.federationTokenStore === "redis" ||
+		// Only while the feature is on: a selection left at "redis" for a
+		// feature that is off must not open a socket.
 		(federationGrantsEnabled &&
-			(federationGrantStoreAdapter === "redis" || federationGrantIntentStoreAdapter === "redis"));
+			(adapters.federationGrantStore === "redis" ||
+				adapters.federationGrantIntentStore === "redis"));
 
-	// The four user-session stores switch on `userSessionStores.adapter`; the
-	// federation-token store is always wired and switches on its own key below.
+	// The four user-session stores and the subject-level revocation pair
+	// follow `adapters.userSessionStores`; the federation-token store is always
+	// wired and follows its own selection below.
 	const sessionStoresModules: Module[] =
-		userSessionStoresAdapter === "redis"
+		adapters.userSessionStores === "redis"
 			? [redisSessionStoresModule]
 			: overrides.storesModule
 				? [overrides.storesModule]
 				: [inMemorySessionStoresModule];
 
 	const rateLimiterModules: Module[] =
-		rateLimiterAdapter === "redis" ? [redisRateLimiterModule] : [memoryRateLimiterModule];
+		adapters.rateLimiter === "redis" ? [redisRateLimiterModule] : [memoryRateLimiterModule];
 
 	// Mutually exclusive: both modules provide the `codeRepository` slot, and
 	// including both would be a boot-time slot collision.
 	const codeRepositoryModules: Module[] =
-		codeRepositoryAdapter === "redis"
+		adapters.codeRepository === "redis"
 			? [redisCodeRepositoryModule]
 			: [inMemoryCodeRepositoryModule];
 
-	// The memory denylist is a dev convenience and nothing more: it forks per
-	// replica, so `core.deployment.mode = "multi"` refuses it by name (core's
-	// replica-safety guard). The template's own application.conf ships `"redis"`.
+	// The RFC 7009 access-token denylist has no "none": `oauthModule` mounts
+	// `/oauth/revoke` and reads the `accessTokenDenylist` slot, and core's boot
+	// validator refuses a composition that reads the slot with nothing filling
+	// it, since the endpoint would answer 200 while the token kept working. The
+	// memory denylist is a dev convenience: it forks per replica, so
+	// `core.deployment.mode = "multi"` refuses it by name. The template ships
+	// `"redis"`.
 	const accessTokenDenylistModules: Module[] =
-		accessTokenDenylistAdapter === "redis"
+		adapters.accessTokenDenylist === "redis"
 			? [redisAccessTokenDenylistModule]
 			: [memoryAccessTokenDenylistModule];
 
-	// Opt-in. Each module provides both slots the consent step needs (the
-	// consent records and the requests parked while the page asks), so the two
-	// cannot be wired apart. The memory one declares itself replica-unsafe and
-	// `core.deployment.mode = "multi"` refuses it by name; the Redis one shares both
-	// over the ioredis socket.
+	// Opt-in: `"none"` (the default) wires nothing, and a client that is not
+	// first-party is refused. Each module provides both slots the consent step
+	// needs (the consent records and the requests parked while the page asks),
+	// so the two cannot be wired apart. The memory one declares itself
+	// replica-unsafe and `core.deployment.mode = "multi"` refuses it by name;
+	// the Redis one shares both over the ioredis socket.
 	const consentStoreModules: Module[] =
-		consentStoreAdapter === "redis"
+		adapters.consentStore === "redis"
 			? [redisConsentStoreModule]
-			: consentStoreAdapter === "memory"
+			: adapters.consentStore === "memory"
 				? [memoryConsentStoreModule]
 				: [];
 
+	// The jti single-use record behind private_key_jwt client authentication.
 	const replaySeenSetModules: Module[] =
-		replaySeenSetAdapter === "redis" ? [redisReplaySeenSetModule] : [memoryReplaySeenSetModule];
+		adapters.replaySeenSet === "redis" ? [redisReplaySeenSetModule] : [memoryReplaySeenSetModule];
 
 	// One federation-token-store module per adapter, so the memory one can
 	// declare `replicaSafety` on its manifest and the Redis one can `require`
@@ -306,7 +273,7 @@ export function buildModules(config: AppConfig, overrides: BuildModulesOverrides
 	// its plaintext guard knows which environment selected the config; it
 	// reads the replica count from core's `deploymentMode` slot.
 	const federationTokenStoreModules: Module[] =
-		federationTokenStoreAdapter === "redis"
+		adapters.federationTokenStore === "redis"
 			? [redisFederationTokenStoreModuleFor({ environment: overrides.environment })]
 			: [inMemoryFederationTokenStoreModule];
 
@@ -319,7 +286,7 @@ export function buildModules(config: AppConfig, overrides: BuildModulesOverrides
 	// outlive the boundary that ends them.
 	const federationGrantStoreModules: Module[] = !federationGrantsEnabled
 		? []
-		: federationGrantStoreAdapter === "redis"
+		: adapters.federationGrantStore === "redis"
 			? [
 					overrides.environment === undefined
 						? redisFederationGrantStoreModuleFor()
@@ -328,7 +295,7 @@ export function buildModules(config: AppConfig, overrides: BuildModulesOverrides
 			: [memoryFederationGrantStoreModule];
 	const federationGrantIntentStoreModules: Module[] = !federationGrantsEnabled
 		? []
-		: federationGrantIntentStoreAdapter === "redis"
+		: adapters.federationGrantIntentStore === "redis"
 			? [redisFederationGrantIntentStoreModule]
 			: [memoryFederationGrantIntentStoreModule];
 
@@ -368,13 +335,14 @@ export function buildModules(config: AppConfig, overrides: BuildModulesOverrides
 		loggingModule,
 		httpModule,
 		overrides.keyStoreModule ?? keyStoreModule,
-		overrides.repositoriesModule ?? repositoriesModule,
+		overrides.repositoriesModule ??
+			repositoriesModuleFor({ client: adapters.clientRepository, user: adapters.userRepository }),
 		// The audit sink, always wired: `emitAuditEvent` no-ops on an empty slot,
 		// so the routes' security events (`token.issued.failure`,
 		// `authorize.rejected`, `rate_limit.unavailable`, …) would go nowhere.
-		// Which sink is a config question (`audit.sink.type`); whether there is
-		// one is not.
-		overrides.auditSinkModule ?? auditSinkModule,
+		// Which sink is a selection (`adapters.auditSink`); whether there is one
+		// is not.
+		overrides.auditSinkModule ?? auditSinkModuleFor(adapters.auditSink),
 		...mailSenderModules,
 		...(usingRedisAnywhere ? [standaloneRedisClientsModule] : []),
 		...federationTokenStoreModules,

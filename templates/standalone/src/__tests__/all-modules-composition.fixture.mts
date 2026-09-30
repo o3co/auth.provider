@@ -75,6 +75,7 @@ import {
 	readSwitches,
 	resolveConfigPaths,
 	resolveForBoot,
+	type Switches,
 } from "#/configPath.mjs";
 import { googleFederationConfigModule, oidcFederationConfigModule } from "#/modules.mjs";
 import { requireMfaSecondFactorAuthority } from "#/secondFactorAuthority.mjs";
@@ -107,18 +108,18 @@ export const SINGLE_ENV: Readonly<Record<string, string>> = {
 	SESSION_STORE_NAME: "auth.session",
 	CORE_DEPLOYMENT_MODE: "single",
 	SESSION_STORE_STORAGE_TYPE: "memory",
-	USER_SESSION_STORES_ADAPTER: "memory",
-	RATE_LIMITER_ADAPTER: "memory",
-	OAUTH_CODE_ADAPTER: "memory",
-	ACCESS_TOKEN_DENYLIST_ADAPTER: "memory",
-	REPLAY_SEEN_SET_ADAPTER: "memory",
-	FEDERATION_TOKEN_STORE_TYPE: "memory",
-	CONSENT_STORE_ADAPTER: "memory",
-	FEDERATION_GRANT_STORE_ADAPTER: "memory",
-	FEDERATION_GRANT_INTENT_STORE_ADAPTER: "memory",
+	ADAPTERS_USER_SESSION_STORES: "memory",
+	ADAPTERS_RATE_LIMITER: "memory",
+	ADAPTERS_CODE_REPOSITORY: "memory",
+	ADAPTERS_ACCESS_TOKEN_DENYLIST: "memory",
+	ADAPTERS_REPLAY_SEEN_SET: "memory",
+	ADAPTERS_FEDERATION_TOKEN_STORE: "memory",
+	ADAPTERS_CONSENT_STORE: "memory",
+	ADAPTERS_FEDERATION_GRANT_STORE: "memory",
+	ADAPTERS_FEDERATION_GRANT_INTENT_STORE: "memory",
 	// The user repository is replaced (see the header); `yaml` keeps the
 	// shipped `http` adapter's URL requirements out of config validation.
-	CLIENT_USER_TYPE: "yaml",
+	ADAPTERS_USER_REPOSITORY: "yaml",
 	OAUTH_SESSION_ENABLED: "true",
 	OAUTH_AUTHORIZATION_GRANTS_AUTHORIZATION_CODE_ENABLED: "true",
 	OAUTH_AUTHORIZATION_GRANTS_REFRESH_TOKEN_ENABLED: "true",
@@ -148,16 +149,16 @@ export const MULTI_ENV: Readonly<Record<string, string>> = {
 	SESSION_STORE_STORAGE_TYPE: "redis",
 	SESSION_STORE_STORAGE_REDIS_URL: "redis://redis.test:6379",
 	REDIS_CLIENTS_URL: "redis://redis.test:6379",
-	USER_SESSION_STORES_ADAPTER: "redis",
-	RATE_LIMITER_ADAPTER: "redis",
-	OAUTH_CODE_ADAPTER: "redis",
-	ACCESS_TOKEN_DENYLIST_ADAPTER: "redis",
-	REPLAY_SEEN_SET_ADAPTER: "redis",
-	FEDERATION_TOKEN_STORE_TYPE: "redis",
+	ADAPTERS_USER_SESSION_STORES: "redis",
+	ADAPTERS_RATE_LIMITER: "redis",
+	ADAPTERS_CODE_REPOSITORY: "redis",
+	ADAPTERS_ACCESS_TOKEN_DENYLIST: "redis",
+	ADAPTERS_REPLAY_SEEN_SET: "redis",
+	ADAPTERS_FEDERATION_TOKEN_STORE: "redis",
 	REDIS_FEDERATION_TOKEN_STORE_ENCRYPTION_KEY: ENCRYPTION_KEY,
-	CONSENT_STORE_ADAPTER: "redis",
-	FEDERATION_GRANT_STORE_ADAPTER: "redis",
-	FEDERATION_GRANT_INTENT_STORE_ADAPTER: "redis",
+	ADAPTERS_CONSENT_STORE: "redis",
+	ADAPTERS_FEDERATION_GRANT_STORE: "redis",
+	ADAPTERS_FEDERATION_GRANT_INTENT_STORE: "redis",
 };
 
 /** The grant connection the federation-grant flows use, on the shipped `oidc` federation. */
@@ -219,7 +220,7 @@ export function resolveConfig(
 	env: Readonly<Record<string, string>>,
 	reads: readonly string[] = [],
 	own: OwnLayers = readOwnLayers(ownFiles(), { env }),
-): AppConfig {
+): Switches {
 	return readSwitches(own, { reads });
 }
 
@@ -451,7 +452,7 @@ const bridged = <T,>(module: Module, slot: string, config: AppConfig): T => {
  * config enables — which is when `buildModules` lists the bridges.
  */
 async function federationOverrides(
-	config: AppConfig,
+	config: Switches,
 	upstreams: Upstreams,
 ): Promise<Record<string, unknown>> {
 	const overrides: Record<string, unknown> = {};
@@ -594,9 +595,9 @@ export interface ComposeOptions {
 	 */
 	readonly reads?: readonly string[];
 	/** Modules added after the template's own, before the order and the outage apply. */
-	readonly extraModules?: (config: AppConfig) => readonly Module[];
+	readonly extraModules?: (config: Switches) => readonly Module[];
 	/** Components laid over the boot's, beside the federation config slots. */
-	readonly extraOverrides?: (config: AppConfig) => Record<string, unknown>;
+	readonly extraOverrides?: (config: Switches) => Record<string, unknown>;
 	/** Client registrations beside the fixture's own, as `ClientEntrySchema` input. */
 	readonly extraClients?: Readonly<Record<string, Record<string, unknown>>>;
 	/** Users beside the fixture's own, keyed by username. */
@@ -606,7 +607,7 @@ export interface ComposeOptions {
 	 * layer would: applied to phase one's switches, and to what `createApp` is
 	 * handed, as resolved.
 	 */
-	readonly config?: (config: AppConfig) => AppConfig;
+	readonly config?: (config: Switches) => Switches;
 	readonly order?: ModuleOrder;
 	readonly outage?: { readonly slot: string; readonly outage: Outage };
 	/** Keep the shipped Redis refresh-token family store (the `multi` boot). */
@@ -621,7 +622,7 @@ export interface ComposeOptions {
 }
 
 /** The module list the template boots for `config`, as `app.mts` builds it. */
-export function composedModules(config: AppConfig, options: ComposeOptions = {}): Module[] {
+export function composedModules(config: Switches, options: ComposeOptions = {}): Module[] {
 	let modules = [
 		...buildModules(config, {
 			environment: options.environment ?? "production",
@@ -657,7 +658,8 @@ export interface Composition {
  */
 export async function compose(options: ComposeOptions = {}): Promise<Composition> {
 	const env = options.env ?? SINGLE_ENV;
-	const adjust = (config: AppConfig) => (options.config ? options.config(config) : config);
+	const adjust = <C extends AppConfig>(config: C): C =>
+		options.config ? (options.config(config as unknown as Switches) as unknown as C) : config;
 	// The composition's own layers, read once for both phases, as `app.mts`
 	// reads them. Phase one: the switches the modules are chosen by.
 	const own = readOwnLayers(

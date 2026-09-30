@@ -198,7 +198,7 @@ export const oauthModule = (_params: { config: AppConfig }): Module => {
 			"logger", // structured logger; falls back to consoleLogger when absent
 		],
 		// Optional to wire, not optional to decide. `auditSink` absence must
-		// be declared with audit.sink.type = "none"; `accessTokenDenylist`
+		// be declared in core.declaredAbsent; `accessTokenDenylist`
 		// absence with oauth.revocation.accessToken = "unsupported".
 		absencePolicies: {
 			subjectRevocation: SUBJECT_REVOCATION_ABSENCE_POLICY,

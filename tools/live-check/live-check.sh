@@ -235,9 +235,8 @@ start() {
 		SESSION_STORE_SECRET="$(cat "$STATE/session-secret")"
 		export SESSION_STORE_SECRET
 		export SESSION_STORE_SECURE=false SESSION_STORE_NAME=auth.session
-		export CLIENT_USER_AUTHENTICATE_URL="http://localhost:$PORT/__store/authenticate"
-		export CLIENT_USER_AUTHENTICATE_BY_TOKEN_URL="http://localhost:$PORT/__store/authenticate-by-token"
-		export CLIENT_CODE_ENDPOINT_URI="$REDIS_URL"
+		export REPOSITORIES_USER_HTTP_AUTHENTICATE_URL="http://localhost:$PORT/__store/authenticate"
+		export REPOSITORIES_USER_HTTP_AUTHENTICATE_BY_TOKEN_URL="http://localhost:$PORT/__store/authenticate-by-token"
 		export SESSION_STORE_STORAGE_REDIS_URL="$REDIS_URL"
 		export REDIS_CLIENTS_URL="$REDIS_URL"
 		export NODE_OPTIONS='--conditions=development'

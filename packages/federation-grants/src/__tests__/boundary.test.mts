@@ -137,7 +137,7 @@ const boot = async (boundaries: Boundaries = {}, spent = false) => {
 					},
 				},
 				rateLimit: { failMode: "closed" },
-				audit: { sink: { type: "none" } },
+				core: { ...makeValidCoreConfig().core, declaredAbsent: ["auditSink"] },
 				"federation-grants": {
 					enabled: true,
 					connections: {

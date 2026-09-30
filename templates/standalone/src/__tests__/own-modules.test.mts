@@ -52,6 +52,7 @@ import { parseFile } from "@o3co/ts.hocon";
 import express from "express";
 import request from "supertest";
 import { afterAll, describe, expect, it, vi } from "vitest";
+import { ADAPTERS_SECTION } from "../adapters.mjs";
 import { buildModules } from "../buildModules.mjs";
 import {
 	expectedSessionRequirements,
@@ -64,11 +65,15 @@ import {
 } from "../configPath.mjs";
 import { createAppLogger } from "../logger.mjs";
 import {
+	auditSinkModuleFor,
 	httpModule,
+	inMemoryCodeRepositoryModule,
 	keyStoreModule,
 	loggingModule,
+	repositoriesModuleFor,
 	standaloneRedisClientsModule,
 } from "../modules.mjs";
+import { repositoriesSectionSchema } from "../sections.mjs";
 
 const configDir = fileURLToPath(new URL("../../config", import.meta.url));
 /** The template's own defaults: what its modules declare as their sections' reference. */
@@ -198,23 +203,38 @@ const named = (modules: readonly Module[], name: string): Module => {
 	return found;
 };
 
+/** Every module whose section the template's reference holds. */
+const REFERENCED_MODULES = [
+	loggingModule,
+	httpModule,
+	keyStoreModule,
+	standaloneRedisClientsModule,
+	repositoriesModuleFor({ client: "yaml", user: "http" }),
+	inMemoryCodeRepositoryModule,
+	auditSinkModuleFor("logger"),
+];
+
 describe("the template's config/reference.conf", () => {
-	it("holds only its own modules' sections, each of which parses its part without losing a path", () => {
+	it("holds only its own modules' sections and the composition root's adapters, each module's parsing its part without losing a path", () => {
 		expect(
 			packageReferenceProblems({
 				reference: TEMPLATE_REFERENCE,
-				modules: [loggingModule, httpModule, keyStoreModule, standaloneRedisClientsModule],
-				read: (path, env) => parseFile(path, { env: { ...env } }).toObject(),
+				modules: REFERENCED_MODULES,
+				// `adapters` is the composition root's own section, which phase
+				// one reads with its own schema (`adapters.test.mts`).
+				read: (path, env) => {
+					const { [ADAPTERS_SECTION]: _adapters, ...tree } = parseFile(path, {
+						env: { ...env },
+					}).toObject() as Record<string, unknown>;
+					return tree;
+				},
 			}),
 		).toEqual([]);
 	});
 
-	it.each([loggingModule, httpModule, keyStoreModule, standaloneRedisClientsModule])(
-		"is among the references $name alone brings",
-		(module) => {
-			expect(moduleReferences([module]).map((url) => url.href)).toContain(TEMPLATE_REFERENCE.href);
-		},
-	);
+	it.each(REFERENCED_MODULES)("is among the references $name alone brings", (module) => {
+		expect(moduleReferences([module]).map((url) => url.href)).toContain(TEMPLATE_REFERENCE.href);
+	});
 });
 
 describe("logging", () => {
@@ -1076,7 +1096,11 @@ const REPOSITORY_RENAMES = [
 				"findSubjectByFederatedIdentityUrl",
 				"https://store.example/find",
 			],
-			["BEARER_TOKEN", "bearerToken", "0328d706529061d93abd6d826e09ef0f0a1e71a12af813b29e5cd2977b7dc63a"],
+			[
+				"BEARER_TOKEN",
+				"bearerToken",
+				"0328d706529061d93abd6d826e09ef0f0a1e71a12af813b29e5cd2977b7dc63a",
+			],
 			["TIMEOUT", "timeout", "3000"],
 			["MAX_RESPONSE_BYTES", "maxResponseBytes", "2048"],
 		] as const
@@ -1142,10 +1166,50 @@ describe("repositories", () => {
 		}
 	});
 
+	/** `repositories` as the template's reference resolves it under `env`, parsed with the module's schema. */
+	const referenced = (env: Record<string, string> = {}) =>
+		repositoriesSectionSchema.parse(
+			(parseFile(fileURLToPath(TEMPLATE_REFERENCE), { env }).toObject() as Record<string, unknown>)
+				.repositories,
+		).user.http;
+
+	it.each([
+		[
+			"REPOSITORIES_USER_HTTP_LINK_FEDERATED_IDENTITY_URL",
+			"linkFederatedIdentityUrl",
+			"https://store.example/link",
+		],
+		[
+			"REPOSITORIES_USER_HTTP_FIND_SUBJECT_BY_FEDERATED_IDENTITY_URL",
+			"findSubjectByFederatedIdentityUrl",
+			"https://store.example/identity",
+		],
+		[
+			"REPOSITORIES_USER_HTTP_BEARER_TOKEN",
+			"bearerToken",
+			"0328d706529061d93abd6d826e09ef0f0a1e71a12af813b29e5cd2977b7dc63a",
+		],
+	])(
+		"binds %s at repositories.user.http.%s, and leaves the key absent while it is unset",
+		(variable, key, value) => {
+			// Absent, not blank: the repository defines the seam a URL enables only
+			// when the URL is there, and refuses a blank credential.
+			expect(referenced({ [variable]: value })).toHaveProperty(key, value);
+			expect(referenced()).not.toHaveProperty(key);
+		},
+	);
+
+	it("ships an empty identity-lookup coverage declaration, which reaches the factory as a list", () => {
+		expect(referenced().federatedIdentityLookupCoverage).toEqual([]);
+	});
+
 	it("refuses a key the section does not declare, naming it", async () => {
 		await expect(
 			bootTemplate({ repositories: true, hocon: 'repositories.user.ldap.url = "ldap://x"\n' }),
-		).rejects.toMatchObject({ reason: "config-validation-failed", message: expect.stringContaining('"ldap"') });
+		).rejects.toMatchObject({
+			reason: "config-validation-failed",
+			message: expect.stringContaining('"ldap"'),
+		});
 	});
 
 	it.each(REPOSITORY_RENAMES)(
@@ -1184,7 +1248,8 @@ describe("standalone-in-memory-code-repository", () => {
 	it("has boot refuse repositories.code.memory, the path it moved from, and repositories.code.redis, removed", async () => {
 		await expect(
 			bootTemplate({
-				hocon: "repositories.code { memory.defaultExpiresIn = 900, redis.endpointUri = \"redis://x\" }\n",
+				hocon:
+					'repositories.code { memory.defaultExpiresIn = 900, redis.endpointUri = "redis://x" }\n',
 			}),
 		).rejects.toMatchObject({
 			details: {
@@ -1243,25 +1308,28 @@ describe("audit-sink", () => {
 
 	it("reads its own section, audit-sink, and requires no configuration", () => {
 		const own = readOwnLayers(ownFiles(), { env: BASE_ENV });
-		const sink = named(buildModules(readSwitches(own), { environment: "development" }), "audit-sink");
+		const sink = named(
+			buildModules(readSwitches(own), { environment: "development" }),
+			"audit-sink",
+		);
 		expect(sink.section?.at).toBeUndefined();
 		expect(sink.requires ?? []).not.toContain("config");
 	});
 
 	it("has boot refuse a sink's options at audit.sink, the path they moved from, naming audit-sink", async () => {
-		await expect(bootTemplate({ hocon: "audit.sink.console.pretty = true\n" })).rejects.toMatchObject(
-			{
-				details: {
-					reason: "config-path-relocated",
-					relocated: [
-						{
-							module: "audit-sink",
-							from: "audit.sink.console.pretty",
-							to: "audit-sink.console.pretty",
-						},
-					],
-				},
+		await expect(
+			bootTemplate({ hocon: "audit.sink.console.pretty = true\n" }),
+		).rejects.toMatchObject({
+			details: {
+				reason: "config-path-relocated",
+				relocated: [
+					{
+						module: "audit-sink",
+						from: "audit.sink.console.pretty",
+						to: "audit-sink.console.pretty",
+					},
+				],
 			},
-		);
+		});
 	});
 });

@@ -53,7 +53,7 @@ const TEMPLATE_CONFIG = fileURLToPath(
  * many as are today. A rename lowers it by the names it renames; nothing
  * raises it.
  */
-const CEILING = 34;
+const CEILING = 1;
 
 /** `LEGACY`'s first count: it only ever loses entries. */
 const LEGACY_BASELINE = 61;
@@ -64,42 +64,7 @@ const LEGACY_BASELINE = 61;
  * template's layers. Entries are deleted, never added; one follows its
  * binding to another layer (see the file header).
  */
-const LEGACY: readonly string[] = [
-	"core: CLIENT_TYPE at repositories.client.type",
-	"core: CLIENT_PATH at repositories.client.yaml.path",
-	"core: CLIENT_USER_TYPE at repositories.user.type",
-	"core: CLIENT_USER_PATH at repositories.user.yaml.path",
-	"core: CLIENT_USER_AUTHENTICATE_URL at repositories.user.http.authenticateUrl",
-	"core: CLIENT_USER_AUTHENTICATE_BY_TOKEN_URL at repositories.user.http.authenticateByTokenUrl",
-	"core: CLIENT_USER_LINK_FEDERATED_IDENTITY_URL at repositories.user.http.linkFederatedIdentityUrl",
-	"core: CLIENT_USER_FIND_SUBJECT_BY_FEDERATED_IDENTITY_URL at repositories.user.http.findSubjectByFederatedIdentityUrl",
-	"core: CLIENT_USER_BEARER_TOKEN at repositories.user.http.bearerToken",
-	"core: CLIENT_USER_TIMEOUT at repositories.user.http.timeout",
-	"core: CLIENT_USER_MAX_RESPONSE_BYTES at repositories.user.http.maxResponseBytes",
-	"core: CLIENT_CODE_TYPE at repositories.code.type",
-	"core: CLIENT_CODE_DEFAULT_EXPIRES_IN at repositories.code.memory.defaultExpiresIn",
-	"core: CLIENT_CODE_DEFAULT_EXPIRES_IN at repositories.code.redis.defaultExpiresIn",
-	"core: CLIENT_CODE_DEFAULT_EXPIRES_IN at redisCodeRepository.defaultExpiresIn",
-	"core: CLIENT_CODE_ENDPOINT_URI at repositories.code.redis.endpointUri",
-	"core: CLIENT_CODE_PASSWORD at repositories.code.redis.password",
-	"core: CLIENT_CODE_KEY_PREFIX at redisCodeRepository.keyPrefix",
-	"mfa: MFA_ENCRYPTION_KEY at mfa.encryptionKeys.0.key",
-	"template: CLIENT_TYPE at repositories.client.type",
-	"template: CLIENT_PATH at repositories.client.yaml.path",
-	"template: CLIENT_USER_TYPE at repositories.user.type",
-	"template: CLIENT_USER_AUTHENTICATE_URL at repositories.user.http.authenticateUrl",
-	"template: CLIENT_USER_AUTHENTICATE_BY_TOKEN_URL at repositories.user.http.authenticateByTokenUrl",
-	"template: CLIENT_USER_LINK_FEDERATED_IDENTITY_URL at repositories.user.http.linkFederatedIdentityUrl",
-	"template: CLIENT_USER_FIND_SUBJECT_BY_FEDERATED_IDENTITY_URL at repositories.user.http.findSubjectByFederatedIdentityUrl",
-	"template: CLIENT_USER_BEARER_TOKEN at repositories.user.http.bearerToken",
-	"template: CLIENT_USER_TIMEOUT at repositories.user.http.timeout",
-	"template: CLIENT_USER_MAX_RESPONSE_BYTES at repositories.user.http.maxResponseBytes",
-	"template: CLIENT_CODE_TYPE at repositories.code.type",
-	"template: CLIENT_CODE_DEFAULT_EXPIRES_IN at repositories.code.memory.defaultExpiresIn",
-	"template: CLIENT_CODE_DEFAULT_EXPIRES_IN at repositories.code.redis.defaultExpiresIn",
-	"template: CLIENT_CODE_ENDPOINT_URI at repositories.code.redis.endpointUri",
-	"template: CLIENT_CODE_PASSWORD at repositories.code.redis.password",
-];
+const LEGACY: readonly string[] = ["mfa: MFA_ENCRYPTION_KEY at mfa.encryptionKeys.0.key"];
 
 /**
  * A dotted path in upper snake case, by core's own rule — the one the

@@ -266,9 +266,13 @@ const boot = async (
 		bootstrapComponents: {
 			config: {
 				...makeValidCoreConfig(),
-				...(requirement === undefined
-					? {}
-					: { core: { sessionRequirements: { expected: [requirement.name] } } }),
+				core: {
+					...makeValidCoreConfig().core,
+					...(requirement === undefined
+						? {}
+						: { sessionRequirements: { expected: [requirement.name] } }),
+					declaredAbsent: ["auditSink"],
+				},
 				federations: {
 					upstream: {
 						enabled: true,
@@ -277,7 +281,6 @@ const boot = async (
 					},
 				},
 				rateLimit: { failMode: "closed" },
-				audit: { sink: { type: "none" } },
 				"federation-grants": {
 					enabled: true,
 					consent: { url: "/consent/grants" },

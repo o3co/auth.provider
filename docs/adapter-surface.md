@@ -267,7 +267,7 @@ that safety.
 
 | Slot | Policy | Declared absent by |
 | --- | --- | --- |
-| `auditSink` | `AUDIT_SINK_ABSENCE_POLICY` | `audit.sink.type = "none"` |
+| `auditSink` | `AUDIT_SINK_ABSENCE_POLICY` | `core.declaredAbsent = ["auditSink"]` |
 | `accessTokenDenylist` | `ACCESS_TOKEN_DENYLIST_ABSENCE_POLICY` | `oauth.revocation.accessToken = "unsupported"` |
 | `subjectRevocation` | `SUBJECT_REVOCATION_ABSENCE_POLICY` | `oauth.revocation.subject = "unsupported"` |
 | `subjectSessionIndex` | `SUBJECT_REVOCATION_ABSENCE_POLICY` | `oauth.revocation.subject = "unsupported"` |
@@ -279,6 +279,12 @@ composition expects of session admission is declared by
 `core.sessionRequirements.expected` instead: a name there that no module registers
 refuses the boot (`session-requirement-missing`), `mfa` without the MFA
 package among them.
+
+A declaration is either the one value a key of the feature's own holds, or,
+where the slot is a composition's choice rather than a feature's, the slot's
+name in core's own list, `core.declaredAbsent`, beside the other names it
+holds. `isAbsenceDeclared` is the one reading of a declaration, and
+`describeAbsenceDeclaration` the one way of saying how to write it.
 
 The subject-revocation pair shares one policy on purpose: two components, one
 capability, so a deployment without them has one thing to declare rather than

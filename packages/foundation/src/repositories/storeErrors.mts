@@ -45,7 +45,7 @@ export class StoreCredentialRefusedError extends Error {
 	constructor(url: string, status: 401 | 403, owner = "HttpUserRepository") {
 		super(
 			`${owner}: the Store at ${endpointForMessage(url)} refused this deployment's credential ` +
-				`(HTTP ${status} with a Bearer challenge) — bearerToken (CLIENT_USER_BEARER_TOKEN) is ` +
+				`(HTTP ${status} with a Bearer challenge) — bearerToken (REPOSITORIES_USER_HTTP_BEARER_TOKEN) is ` +
 				"not a token the Store accepts",
 		);
 		this.name = "StoreCredentialRefusedError";

@@ -36,6 +36,7 @@ import {
 	SINGLE_ENV,
 } from "@o3co/auth-provider-standalone/src/__tests__/all-modules-composition.fixture.mts";
 import { afterAll, afterEach, describe, expect, it } from "vitest";
+import { testRedis } from "../../../../packages/redis/__tests__/support/redis.mts";
 import { composeFullSet, type FullSet, type FullSetOptions } from "./full-set.fixture.mts";
 
 let current: FullSet | undefined;
@@ -101,7 +102,10 @@ describe("the template's own modules' sections, read where they now sit", () => 
 
 	it("http.cors.allowedOrigins, which HTTP_CORS_ALLOWED_ORIGINS sets, is what httpSettings carries", async () => {
 		const composition = await boot({
-			env: { ...SINGLE_ENV, HTTP_CORS_ALLOWED_ORIGINS: "https://app.example, http://localhost:5173" },
+			env: {
+				...SINGLE_ENV,
+				HTTP_CORS_ALLOWED_ORIGINS: "https://app.example, http://localhost:5173",
+			},
 		});
 
 		expect(parsedAt(composition, "http.cors.allowedOrigins")).toEqual([
@@ -254,8 +258,18 @@ describe("a variable the template's own modules renamed, through the template's 
 					"local.secret",
 					"template-sections-secret.at-least-32-bytes.ok",
 				],
-				["OAUTH_JWT_PRIVATE_KEY_PATH", "LOCAL_PRIVATE_KEY_PATH", "local.privateKeyPath", PRIVATE_KEY_PATH],
-				["OAUTH_JWT_PUBLIC_KEY_PATH", "LOCAL_PUBLIC_KEY_PATH", "local.publicKeyPath", PUBLIC_KEY_PATH],
+				[
+					"OAUTH_JWT_PRIVATE_KEY_PATH",
+					"LOCAL_PRIVATE_KEY_PATH",
+					"local.privateKeyPath",
+					PRIVATE_KEY_PATH,
+				],
+				[
+					"OAUTH_JWT_PUBLIC_KEY_PATH",
+					"LOCAL_PUBLIC_KEY_PATH",
+					"local.publicKeyPath",
+					PUBLIC_KEY_PATH,
+				],
 				["OAUTH_JWT_PRIVATE_KEY", "LOCAL_PRIVATE_KEY", "local.privateKey", PRIVATE_KEY],
 				["OAUTH_JWT_PUBLIC_KEY", "LOCAL_PUBLIC_KEY", "local.publicKey", PUBLIC_KEY],
 			] as const
@@ -284,8 +298,8 @@ describe("a variable the template's own modules renamed, through the template's 
 	];
 
 	/** The options that load the module a row's variable belongs to. */
-	const loading = (row: { readonly redis?: boolean }): FullSetOptions =>
-		row.redis === true ? { shippedRefreshTokenFamilyStore: true } : {};
+	const loading = (row: object): FullSetOptions =>
+		"redis" in row && row.redis === true ? { shippedRefreshTokenFamilyStore: true } : {};
 
 	it.each(ROWS)("$from set alone: refused, naming $to and $path", async (row) => {
 		const { module, from, to, path, value } = row;
@@ -314,12 +328,18 @@ describe("a variable the template's own modules renamed, through the template's 
 		},
 	);
 
-	it.each(ROWS)("$from set beside $to at the same value: boots, $path parsed from it", async (row) => {
-		const { from, to, path, value, parsed } = row;
-		const composition = await boot({ ...loading(row), env: { ...SINGLE_ENV, [from]: value, [to]: value } });
+	it.each(ROWS)(
+		"$from set beside $to at the same value: boots, $path parsed from it",
+		async (row) => {
+			const { from, to, path, value, parsed } = row;
+			const composition = await boot({
+				...loading(row),
+				env: { ...SINGLE_ENV, [from]: value, [to]: value },
+			});
 
-		expect(parsedAt(composition, path)).toEqual(parsed);
-	});
+			expect(parsedAt(composition, path)).toEqual(parsed);
+		},
+	);
 });
 
 /** What phase one refused the full set with, before any module was chosen. */
@@ -350,15 +370,28 @@ describe("the composition root's adapters, read by phase one alone", () => {
 	});
 
 	it.each([
-		['rateLimiter.adapter = "memory"', "rateLimiter.adapter", "adapters.rateLimiter", "ADAPTERS_RATE_LIMITER"],
-		['oauth.code.adapter = "memory"', "oauth.code.adapter", "adapters.codeRepository", "ADAPTERS_CODE_REPOSITORY"],
+		[
+			'rateLimiter.adapter = "memory"',
+			"rateLimiter.adapter",
+			"adapters.rateLimiter",
+			"ADAPTERS_RATE_LIMITER",
+		],
+		[
+			'oauth.code.adapter = "memory"',
+			"oauth.code.adapter",
+			"adapters.codeRepository",
+			"ADAPTERS_CODE_REPOSITORY",
+		],
 		['audit.sink.type = "logger"', "audit.sink.type", "adapters.auditSink", "ADAPTERS_AUDIT_SINK"],
-	])("%s: refused before boot, naming %s's new path and variable", async (hocon, from, to, variable) => {
-		const err = await phaseOneRefused({ operatorHocon: `${hocon}\n` });
+	])(
+		"%s: refused before boot, naming %s's new path and variable",
+		async (hocon, from, to, variable) => {
+			const err = await phaseOneRefused({ operatorHocon: `${hocon}\n` });
 
-		expect(err.message).toContain(`${from} has moved to ${to}`);
-		expect(err.message).toContain(variable);
-	});
+			expect(err.message).toContain(`${from} has moved to ${to}`);
+			expect(err.message).toContain(variable);
+		},
+	);
 
 	it.each([
 		["RATE_LIMITER_ADAPTER", "ADAPTERS_RATE_LIMITER"],
@@ -384,9 +417,13 @@ describe("the code repositories' own sections", () => {
 	});
 
 	it("redis-code-repository, which REDIS_CODE_REPOSITORY_* set, on the shared socket", async () => {
+		const redis = await testRedis();
+		const url = `redis://${redis.host}:${redis.port}/${redis.db}`;
 		const composition = await boot({
 			env: {
 				...MULTI_ENV,
+				REDIS_CLIENTS_URL: url,
+				SESSION_STORE_STORAGE_REDIS_URL: url,
 				REDIS_CODE_REPOSITORY_KEY_PREFIX: "tenant-a:code:",
 				REDIS_CODE_REPOSITORY_DEFAULT_EXPIRES_IN: "300",
 			},
@@ -413,15 +450,20 @@ describe("the code repositories' own sections", () => {
 			"REDIS_CODE_REPOSITORY_DEFAULT_EXPIRES_IN",
 			"redis-code-repository.defaultExpiresIn",
 		],
-	])("CLIENT_CODE_DEFAULT_EXPIRES_IN set alone: refused, naming %s's new variable", async (env, module, to, path) => {
-		const err = await refused({
-			env: { ...env, CLIENT_CODE_DEFAULT_EXPIRES_IN: "300" },
-			...(env === MULTI_ENV ? { shippedRefreshTokenFamilyStore: true, stores: "redis" as const } : {}),
-		});
+	])(
+		"CLIENT_CODE_DEFAULT_EXPIRES_IN set alone: refused, naming %s's new variable",
+		async (env, module, to, path) => {
+			const err = await refused({
+				env: { ...env, CLIENT_CODE_DEFAULT_EXPIRES_IN: "300" },
+				...(env === MULTI_ENV
+					? { shippedRefreshTokenFamilyStore: true, stores: "redis" as const }
+					: {}),
+			});
 
-		expect(err.details).toEqual({
-			reason: "environment-variable-renamed",
-			renamed: [{ module, from: "CLIENT_CODE_DEFAULT_EXPIRES_IN", to, path, state: "unset" }],
-		});
-	});
+			expect(err.details).toEqual({
+				reason: "environment-variable-renamed",
+				renamed: [{ module, from: "CLIENT_CODE_DEFAULT_EXPIRES_IN", to, path, state: "unset" }],
+			});
+		},
+	);
 });

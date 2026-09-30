@@ -36,7 +36,6 @@ import { renamedVariableCaptures } from "../renamedVariables.mjs";
  * - `session-store.storage.type` is `"memory"` (`"redis"` there);
  * - `federations` is `{}` (no built-in `google` block);
  * - `oauth.jwt.issuer` is a fixed test issuer (`${?OAUTH_JWT_ISSUER}` there);
- * - `repositories.*` carry only `type`;
  * - the grant switches, in the oauth package's modules' sections, turn on
  *   `oauth-session.enabled` and
  *   `oauth-authorization.grants.{authorizationCode,refreshToken}.enabled`
@@ -154,21 +153,20 @@ export function makeValidFullSections() {
 			rateLimit: { login: { windowMs: 900000, limit: 20 } },
 		},
 		federations: {},
-		repositories: {
-			client: { type: "yaml" },
-			user: { type: "yaml" },
-			code: { type: "memory" },
-		},
-		// Declares the audit sink absent (this fixture has no audit trail, on
-		// purpose); the bundled modules refuse an unfilled `auditSink` otherwise.
-		// A test of the declared-absence guard removes the key.
-		audit: { sink: { type: "none" } },
 	} satisfies FullSectionsConfig;
 }
 
 export function makeValidAppConfig() {
+	const core = makeValidCoreConfig();
 	return {
-		...makeValidCoreConfig(),
+		...core,
 		...makeValidFullSections(),
+		core: {
+			...core.core,
+			// Declares the audit sink absent (this fixture has no audit trail, on
+			// purpose); the bundled modules refuse an unfilled `auditSink`
+			// otherwise. A test of the declared-absence guard removes the entry.
+			declaredAbsent: ["auditSink"],
+		},
 	} satisfies AppConfig;
 }

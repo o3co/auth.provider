@@ -755,6 +755,13 @@ export {
 	type FederationTypeDeclaration,
 	SYNTHETIC_COMPONENT_KEYS,
 } from "./modules/index.mjs";
+// The one reading of a declared absence, and the one way of saying how to
+// write it: for a module that checks a policy itself (a feature switched on
+// at stage 4 cannot attach one), so its refusal agrees with boot's.
+export {
+	describeAbsenceDeclaration,
+	isAbsenceDeclared,
+} from "./modules/manifest/absence-policy.mjs";
 // The single loopback-hostname vocabulary — the predicate behind every
 // "http:// is accepted for loopback hosts only" carve-out
 // (`checkSecureEndpoint` in foundation, `checkRedirectShape` in session).

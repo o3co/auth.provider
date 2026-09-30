@@ -45,7 +45,6 @@ import {
 	createTestCsrfGuard,
 	createTestOAuthTokenSettings,
 	makeValidCoreConfig,
-	makeValidFullSections,
 	resolverForTests,
 } from "@o3co/auth-provider-core/testing";
 import express from "express";
@@ -124,7 +123,7 @@ interface Overrides {
 	readonly withRateLimiter?: boolean;
 	readonly withUserSessionStore?: boolean;
 	readonly withCsrfGuard?: boolean;
-	/** Drop the `audit.sink.type = "none"` declaration the fixture carries. */
+	/** Leave the audit sink's absence undeclared: no `auditSink` in `core.declaredAbsent`. */
 	readonly withoutAuditDeclaration?: boolean;
 	/** Modules listed after the device grant's. */
 	readonly extraModules?: readonly Module[];
@@ -132,13 +131,14 @@ interface Overrides {
 
 const makeBoot = (overrides: Overrides): BootstrapMap => {
 	const core = makeValidCoreConfig();
-	const full = makeValidFullSections();
 	return {
 		config: {
 			...core,
 			// The module attaches AUDIT_SINK_ABSENCE_POLICY, so a boot
 			// with no sink must say so — which is what this fixture is.
-			...(overrides.withoutAuditDeclaration === true ? {} : { audit: full.audit }),
+			...(overrides.withoutAuditDeclaration === true
+				? {}
+				: { core: { ...core.core, declaredAbsent: ["auditSink"] } }),
 			oauth: {
 				...core.oauth,
 			},
@@ -432,12 +432,12 @@ describe("deviceGrantModule — boot", () => {
 		).rejects.toThrow(/configuration createApp parsed has device-grant\.enabled/);
 	});
 
-	it('refuses to boot with no audit sink unless audit.sink.type = "none" says so', async () => {
+	it("refuses to boot with no audit sink unless core.declaredAbsent lists it", async () => {
 		// On the decision that turns a code into a token, `auditSink` is
 		// optional to wire, not optional to decide. A composition that
 		// silently discards every device approval must have written that down.
 		await expect(boot({ deviceGrant: ENABLED, withoutAuditDeclaration: true })).rejects.toThrow(
-			/audit\.sink\.type/,
+			/core\.declaredAbsent/,
 		);
 	});
 });

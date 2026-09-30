@@ -28,7 +28,6 @@
 import { generateKeyPairSync } from "node:crypto";
 import { readFileSync } from "node:fs";
 import {
-	type AppConfig,
 	type AuditEvent,
 	type AuditSink,
 	createApp,
@@ -44,9 +43,10 @@ import express from "express";
 import request from "supertest";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { buildModules } from "../buildModules.mjs";
+import type { Switches } from "../configPath.mjs";
 import { createAppLogger, createAuditLogger, createLoggerAuditSink } from "../logger.mjs";
-import { auditSinkModule } from "../modules.mjs";
-import { capturedRenames } from "./library-references.fixture.mjs";
+import { auditSinkModuleFor } from "../modules.mjs";
+import { capturedRenames, shippedAdapters } from "./library-references.fixture.mjs";
 
 const keyPair = generateKeyPairSync("ed25519", {
 	publicKeyEncoding: { type: "spki", format: "pem" },
@@ -54,7 +54,15 @@ const keyPair = generateKeyPairSync("ed25519", {
 });
 
 /** The template modules' sections sit beside core's, so the configuration is wider than `AppConfig`. */
-const baseConfig: AppConfig & Record<string, unknown> = {
+const baseConfig: Switches & Record<string, unknown> = {
+	// The shipped selections, every store in this process.
+	adapters: {
+		...shippedAdapters(),
+		accessTokenDenylist: "memory",
+		replaySeenSet: "memory",
+		codeRepository: "memory",
+		userRepository: "yaml",
+	},
 	// What a resolution under an environment that sets none captures of
 	// core's renamed variables.
 	...{
@@ -87,7 +95,6 @@ const baseConfig: AppConfig & Record<string, unknown> = {
 		},
 		grants: {},
 		oidcMode: "oidc-required",
-		code: { adapter: "memory" as const },
 	},
 	"session-store": {
 		secret: "test-session-secret.at-least-32-bytes.ok",
@@ -104,12 +111,7 @@ const baseConfig: AppConfig & Record<string, unknown> = {
 	},
 	rateLimit: { failMode: "open" },
 	federations: { google: { enabled: false } },
-	repositories: {
-		client: { type: "yaml", path: "./config/clients.yaml" },
-		user: { type: "yaml", path: "./config/users.yaml", timeout: 5000 },
-		code: { type: "memory", defaultExpiresIn: 600 },
-	},
-	audit: { sink: { type: "logger" } },
+	"standalone-in-memory-code-repository": { defaultExpiresIn: 600 },
 };
 
 const CLIENT_ID = "audit-client";
@@ -170,11 +172,11 @@ function fakeLogger(): Logger & { info: ReturnType<typeof vi.fn> } {
 	return self as unknown as Logger & { info: ReturnType<typeof vi.fn> };
 }
 
-/** Resolve `auditSink` the way the boot planner does: call the module's provider. */
-async function resolveSink(config: AppConfig): Promise<AuditSink> {
-	const provider = auditSinkModule.provides?.auditSink;
-	if (!provider) throw new Error("auditSinkModule must provide the auditSink slot");
-	return (await provider({ config } as never)) as AuditSink;
+/** Resolve `auditSink` the way the boot planner does: call the module's provider with its section. */
+async function resolveSink(sink: string, section?: Record<string, unknown>): Promise<AuditSink> {
+	const provider = auditSinkModuleFor(sink).provides?.auditSink;
+	if (!provider) throw new Error("the audit-sink module must provide the auditSink slot");
+	return (await provider({ section } as never)) as AuditSink;
 }
 
 describe("the template's audit sink", () => {
@@ -242,31 +244,24 @@ describe("the template's audit sink", () => {
 		});
 	});
 
-	describe("auditSinkModule — resolves the sink from config", () => {
-		it("resolves the logger sink for the shipped default", async () => {
-			expect((await resolveSink(baseConfig)).kind).toBe("logger");
+	describe("the audit-sink module — builds the sink adapters.auditSink selects", () => {
+		it("builds the logger sink for the shipped selection", async () => {
+			expect((await resolveSink(baseConfig.adapters.auditSink)).kind).toBe("logger");
 		});
 
-		it("resolves core's built-in console sink when selected", async () => {
-			const sink = await resolveSink({ ...baseConfig, audit: { sink: { type: "console" } } });
-			expect(sink.kind).toBe("console");
+		it("builds core's built-in console sink when selected", async () => {
+			expect((await resolveSink("console")).kind).toBe("console");
 		});
 
-		it("still produces a sink when the audit section is absent entirely", async () => {
-			// A config that says nothing about auditing must land on a sink, not
-			// on `undefined`.
-			const { audit: _audit, ...withoutAudit } = baseConfig;
-			const sink = await resolveSink(withoutAudit as AppConfig);
-			expect(sink.kind).toBe("logger");
+		it("builds a sink with no audit-sink section at all", async () => {
+			expect((await resolveSink("logger", undefined)).kind).toBe("logger");
 		});
 
-		it("refuses an unknown sink type at boot, naming what is registered", async () => {
-			// There is no "none" sink. An operator who writes one gets a boot
+		it("refuses a sink no builder is registered under, naming it", async () => {
+			// There is no "none" sink. An operator who selects one gets a boot
 			// failure naming the sinks that exist, not a silent deployment with
 			// no audit trail.
-			await expect(
-				resolveSink({ ...baseConfig, audit: { sink: { type: "none" } } }),
-			).rejects.toThrow(/none/);
+			await expect(resolveSink("none")).rejects.toThrow(/none/);
 		});
 	});
 
@@ -282,10 +277,10 @@ describe("the template's audit sink", () => {
 			expect(providers[0]?.name).toBe("audit-sink");
 		});
 
-		it("the shipped application.conf selects a sink, and never 'none'", () => {
-			const conf = readFileSync(new URL("../../config/application.conf", import.meta.url), "utf8");
-			expect(conf).toMatch(/audit\s*\{[\s\S]*?sink\s*\{[\s\S]*?type\s*=\s*"logger"/);
-			expect(conf).not.toMatch(/type\s*=\s*"none"/);
+		it("the shipped reference.conf selects a sink, and never 'none'", () => {
+			const conf = readFileSync(new URL("../../config/reference.conf", import.meta.url), "utf8");
+			expect(conf).toMatch(/adapters\s*\{[\s\S]*?auditSink\s*=\s*"logger"/);
+			expect(conf).not.toMatch(/auditSink\s*=\s*"none"/);
 		});
 	});
 

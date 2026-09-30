@@ -16,8 +16,8 @@
 
 /**
  * The credential auth.provider presents to the Store, through the shipped
- * composition: `CLIENT_USER_BEARER_TOKEN` in the environment → the HOCON
- * layers → `AppConfigSchema` → the production `repositoriesModule` → the
+ * composition: `REPOSITORIES_USER_HTTP_BEARER_TOKEN` in the environment → the HOCON
+ * layers → the production `repositories` module's section → the
  * `"http"` user adapter → the `Authorization` header a real `node:http` Store
  * receives. Unset, no header is sent; exported but empty, the user repository
  * is refused. From outside the booted app, a Store's `401` with a `Bearer`
@@ -33,7 +33,6 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { inspect } from "node:util";
 import {
-	type AppConfig,
 	AppConfigSchema,
 	createApp,
 	createKeyStoreFactory,
@@ -49,9 +48,11 @@ import express from "express";
 import request from "supertest";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import { buildModules } from "../buildModules.mjs";
-import { resolveConfigPaths } from "../configPath.mjs";
-import { repositoriesModule, templateReference } from "../modules.mjs";
+import { resolveConfigPaths, type Switches } from "../configPath.mjs";
+import { repositoriesModuleFor, templateReference } from "../modules.mjs";
+import { repositoriesSectionSchema } from "../sections.mjs";
 import {
+	adaptersOf,
 	capturedRenames,
 	libraryLayers,
 	sectionsCoreDoesNotDeclare,
@@ -102,7 +103,7 @@ const recordingStore = async (
 };
 
 /** The shipped config for the production overlay, resolved against `env`. */
-const resolve = (env: Record<string, string>): AppConfig => {
+const resolve = (env: Record<string, string>): Switches => {
 	const { applicationConfPath, envConfPath } = resolveConfigPaths(configDir, "production");
 	const layers = parseFile(envConfPath, { env })
 		.withFallback(parseFile(applicationConfPath, { env }))
@@ -110,19 +111,25 @@ const resolve = (env: Record<string, string>): AppConfig => {
 		.withFallback(libraryLayers(env));
 	return {
 		...sectionsCoreDoesNotDeclare(layers),
+		adapters: adaptersOf(layers, env),
 		...validate(layers, AppConfigSchema),
 		// What the resolution captured of core's renamed variables, which the
 		// schema's parse drops.
 		"renamed-variables": capturedRenames(env),
-	} as AppConfig;
+	} as Switches;
 };
 
-/** The user repository the production `repositoriesModule` builds from `config`. */
-const userRepositoryFrom = (config: AppConfig): Promise<UserRepository> =>
+/** The user repository the production `repositories` module builds from `config`'s section. */
+const userRepositoryFrom = (config: Switches): Promise<UserRepository> =>
 	Promise.resolve(
-		repositoriesModule.provides?.userRepository?.({ config } as never) as
-			| UserRepository
-			| Promise<UserRepository>,
+		repositoriesModuleFor({
+			client: config.adapters.clientRepository,
+			user: config.adapters.userRepository,
+		}).provides?.userRepository?.({
+			section: repositoriesSectionSchema.parse(
+				(config as unknown as Record<string, unknown>).repositories,
+			),
+		} as never) as UserRepository | Promise<UserRepository>,
 	);
 
 const envFor = (origin: string): Record<string, string> => ({
@@ -130,16 +137,16 @@ const envFor = (origin: string): Record<string, string> => ({
 	KEY_STORE_LOCAL_SECRET: "store-credential-composition.at-least-32-bytes.ok",
 	OAUTH_JWT_ISSUER: "https://auth.test",
 	SESSION_STORE_SECRET: "store-credential-composition-session.at-least-32-bytes.ok",
-	CLIENT_USER_TYPE: "http",
-	CLIENT_USER_AUTHENTICATE_URL: `${origin}/authenticate`,
-	CLIENT_USER_AUTHENTICATE_BY_TOKEN_URL: `${origin}/authenticate-by-token`,
+	ADAPTERS_USER_REPOSITORY: "http",
+	REPOSITORIES_USER_HTTP_AUTHENTICATE_URL: `${origin}/authenticate`,
+	REPOSITORIES_USER_HTTP_AUTHENTICATE_BY_TOKEN_URL: `${origin}/authenticate-by-token`,
 });
 
-describe("CLIENT_USER_BEARER_TOKEN reaches the Store through the shipped composition", () => {
+describe("REPOSITORIES_USER_HTTP_BEARER_TOKEN reaches the Store through the shipped composition", () => {
 	it("sends Authorization: Bearer <token> on every Store call when the variable is set", async () => {
 		const { origin, heard } = await recordingStore();
 		const repo = await userRepositoryFrom(
-			resolve({ ...envFor(origin), CLIENT_USER_BEARER_TOKEN: TOKEN }),
+			resolve({ ...envFor(origin), REPOSITORIES_USER_HTTP_BEARER_TOKEN: TOKEN }),
 		);
 
 		await repo.authenticate("alice", "pass");
@@ -159,7 +166,7 @@ describe("CLIENT_USER_BEARER_TOKEN reaches the Store through the shipped composi
 
 	it("refuses the user repository when the variable is exported but empty", async () => {
 		const { origin, heard } = await recordingStore();
-		const config = resolve({ ...envFor(origin), CLIENT_USER_BEARER_TOKEN: "" });
+		const config = resolve({ ...envFor(origin), REPOSITORIES_USER_HTTP_BEARER_TOKEN: "" });
 
 		await expect(userRepositoryFrom(config)).rejects.toThrow(/"bearerToken" must not be empty/);
 		expect(heard).toEqual([]);
@@ -172,15 +179,15 @@ describe("a token the Store refuses, seen from outside the booted app", () => {
 		SESSION_STORE_SECURE: "false",
 		SESSION_STORE_NAME: "auth.session",
 		SESSION_STORE_STORAGE_TYPE: "memory",
-		USER_SESSION_STORES_ADAPTER: "memory",
-		RATE_LIMITER_ADAPTER: "memory",
-		OAUTH_CODE_ADAPTER: "memory",
-		ACCESS_TOKEN_DENYLIST_ADAPTER: "memory",
-		REPLAY_SEEN_SET_ADAPTER: "memory",
-		FEDERATION_TOKEN_STORE_TYPE: "memory",
-		CONSENT_STORE_ADAPTER: "none",
-		FEDERATION_GRANT_STORE_ADAPTER: "memory",
-		FEDERATION_GRANT_INTENT_STORE_ADAPTER: "memory",
+		ADAPTERS_USER_SESSION_STORES: "memory",
+		ADAPTERS_RATE_LIMITER: "memory",
+		ADAPTERS_CODE_REPOSITORY: "memory",
+		ADAPTERS_ACCESS_TOKEN_DENYLIST: "memory",
+		ADAPTERS_REPLAY_SEEN_SET: "memory",
+		ADAPTERS_FEDERATION_TOKEN_STORE: "memory",
+		ADAPTERS_CONSENT_STORE: "none",
+		ADAPTERS_FEDERATION_GRANT_STORE: "memory",
+		ADAPTERS_FEDERATION_GRANT_INTENT_STORE: "memory",
 	};
 
 	const testKeyStoreModule = defineModule({
@@ -226,7 +233,7 @@ describe("a token the Store refuses, seen from outside the booted app", () => {
 
 	/**
 	 * The client registry the boot reads, which this test brings itself.
-	 * `CLIENT_PATH`'s default, `./config/clients.yaml`, is per-deployment: the
+	 * `REPOSITORIES_CLIENT_YAML_PATH`'s default, `./config/clients.yaml`, is per-deployment: the
 	 * scaffold's `.gitignore` keeps it out of the project's repository, so a
 	 * fresh clone — a CI runner, the `test` image — has none. The login below
 	 * names no client, so an empty registry is all it needs.
@@ -252,8 +259,8 @@ describe("a token the Store refuses, seen from outside the booted app", () => {
 		const config = resolve({
 			...envFor(origin),
 			...MEMORY_ENV,
-			CLIENT_PATH: clientPath,
-			CLIENT_USER_BEARER_TOKEN: TOKEN,
+			REPOSITORIES_CLIENT_YAML_PATH: clientPath,
+			REPOSITORIES_USER_HTTP_BEARER_TOKEN: TOKEN,
 		});
 		const { logger, lines } = capturingLogger();
 		handleRef = await createApp({

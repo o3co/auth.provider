@@ -56,10 +56,14 @@ import { extractFederationSection } from "@o3co/auth-provider-session";
 import { Redis } from "ioredis";
 import { createAuditLogger, createLoggerAuditSink } from "./logger.mjs";
 import {
+	type Adapters,
+	auditSinkSectionSchema,
 	httpSectionSchema,
+	inMemoryCodeRepositorySectionSchema,
 	keyStoreSectionSchema,
 	loggingSectionSchema,
 	redisClientsSectionSchema,
+	repositoriesSectionSchema,
 } from "./sections.mjs";
 
 /**
@@ -189,75 +193,97 @@ export const keyStoreModule: Module = defineModule({
 	},
 });
 
+/** Which adapter fills each repository slot the `repositories` module provides. */
+export interface RepositorySelection {
+	readonly client: Adapters["clientRepository"];
+	readonly user: Adapters["userRepository"];
+}
+
 /**
- * Repositories module: provides the client and user repositories from the
- * `config.repositories.*` slices through the built-in adapter factories.
- * `codeRepository` comes from `inMemoryCodeRepositoryModule` or
- * `redisCodeRepositoryModule` instead, so the `oauth.code.adapter` switch
- * can wire mutually exclusive providers without a slot collision.
+ * Repositories module: owns `repositories {}` and provides the client and
+ * user repositories the composition root's `adapters` select, through the
+ * built-in adapter factories: the YAML client registry, and the YAML or the
+ * Store's HTTP user repository (`@o3co/auth-provider-foundation`). The
+ * variables bound to its keys are renamed after their paths
+ * (`REPOSITORIES_*`). `codeRepository` comes from the in-process or the Redis
+ * code repository module instead.
  */
-export const repositoriesModule: Module = defineModule({
-	name: "repositories",
-	requires: ["config"] as const,
-	// Forwarded into the repository factories so client/user adapters can
-	// register disposal callbacks (file-watch closers, say). Without it, a
-	// builder's `ctx.lifecycle?.register` is a no-op and those resources leak.
-	optional: ["lifecycleRegistrar"] as const,
-	provides: {
-		clientRepository: async ({ config, lifecycleRegistrar }) => {
-			const ctx = { lifecycle: lifecycleRegistrar };
-			const { clientFactory, userFactory } = createRepositoryFactories(ctx);
-			registerBuiltinAdapters({ userFactory });
-			const slice = flattenAdapterConfig(
-				(config as AppConfig).repositories.client as { type: string } & Record<string, unknown>,
-			);
-			if (typeof slice.path === "string") {
-				slice.path = path.resolve(process.cwd(), slice.path);
-			}
-			return clientFactory.create(slice);
+export function repositoriesModuleFor(selection: RepositorySelection): Module {
+	return defineModule({
+		name: "repositories",
+		section: {
+			schema: repositoriesSectionSchema,
+			reference: templateReference(),
+			renamedVariables: {
+				CLIENT_PATH: "repositories.client.yaml.path",
+				CLIENT_USER_PATH: "repositories.user.yaml.path",
+				CLIENT_USER_AUTHENTICATE_URL: "repositories.user.http.authenticateUrl",
+				CLIENT_USER_AUTHENTICATE_BY_TOKEN_URL: "repositories.user.http.authenticateByTokenUrl",
+				CLIENT_USER_LINK_FEDERATED_IDENTITY_URL: "repositories.user.http.linkFederatedIdentityUrl",
+				CLIENT_USER_FIND_SUBJECT_BY_FEDERATED_IDENTITY_URL:
+					"repositories.user.http.findSubjectByFederatedIdentityUrl",
+				CLIENT_USER_BEARER_TOKEN: "repositories.user.http.bearerToken",
+				CLIENT_USER_TIMEOUT: "repositories.user.http.timeout",
+				CLIENT_USER_MAX_RESPONSE_BYTES: "repositories.user.http.maxResponseBytes",
+			},
 		},
-		userRepository: async ({ config, lifecycleRegistrar }) => {
-			const ctx = { lifecycle: lifecycleRegistrar };
-			const { userFactory } = createRepositoryFactories(ctx);
-			registerBuiltinAdapters({ userFactory });
-			return userFactory.create(
-				flattenAdapterConfig(
-					(config as AppConfig).repositories.user as { type: string } & Record<string, unknown>,
-				),
-			);
+		// Forwarded into the repository factories so client/user adapters can
+		// register disposal callbacks (file-watch closers, say). Without it, a
+		// builder's `ctx.lifecycle?.register` is a no-op and those resources leak.
+		optional: ["lifecycleRegistrar"] as const,
+		provides: {
+			clientRepository: async ({ section, lifecycleRegistrar }) => {
+				const { clientFactory } = createRepositoryFactories({ lifecycle: lifecycleRegistrar });
+				return clientFactory.create({
+					type: selection.client,
+					path: path.resolve(process.cwd(), section.client.yaml.path),
+				});
+			},
+			userRepository: async ({ section, lifecycleRegistrar }) => {
+				const { userFactory } = createRepositoryFactories({ lifecycle: lifecycleRegistrar });
+				registerBuiltinAdapters({ userFactory });
+				return userFactory.create(
+					flattenAdapterConfig({
+						type: selection.user,
+						[selection.user]: section.user[selection.user],
+					}),
+				);
+			},
 		},
-	},
-});
+	});
+}
 
 /**
  * In-memory CodeRepository module, wired by `buildModules` only when
- * `oauth.code.adapter = "memory"`. The redis branch swaps in
+ * `adapters.codeRepository = "memory"`; the Redis choice swaps in
  * `redisCodeRepositoryModule` from `@o3co/auth-provider-redis` (mutually
- * exclusive: both provide the `codeRepository` slot).
+ * exclusive: both provide the `codeRepository` slot). It reads its own
+ * section, which moved from `repositories.code.memory`; the
+ * `repositories.code.redis` block is removed.
  */
 export const inMemoryCodeRepositoryModule: Module = defineModule({
 	name: "standalone-in-memory-code-repository",
+	section: {
+		schema: inMemoryCodeRepositorySectionSchema,
+		reference: templateReference(),
+		relocatedFrom: { "repositories.code.memory": "", "repositories.code.redis": null },
+		renamedVariables: {
+			CLIENT_CODE_DEFAULT_EXPIRES_IN: "repositories.code.memory.defaultExpiresIn",
+			CLIENT_CODE_ENDPOINT_URI: "repositories.code.redis.endpointUri",
+			CLIENT_CODE_PASSWORD: "repositories.code.redis.password",
+		},
+	},
 	// The replica-safety guard reads this off the manifest, not by module name.
 	replicaSafety: {
 		unsafe: true,
 		reason:
 			"authorization codes fork per replica — a code issued by the replica that served /authorize is unknown to the replica that receives the token request, so the exchange fails with invalid_grant everywhere but one replica, and a code redeemed on one replica can be redeemed again on another",
 	},
-	requires: ["config"] as const,
 	optional: ["lifecycleRegistrar"] as const,
 	provides: {
-		codeRepository: async ({ config, lifecycleRegistrar }) => {
-			const ctx = { lifecycle: lifecycleRegistrar };
-			const { codeFactory } = createRepositoryFactories(ctx);
-			// `createRepositoryFactories` registers the "memory" code adapter
-			// itself; `registerBuiltinAdapters` touches only `userFactory`, so it
-			// is not called here. The type is forced to "memory": `buildModules`
-			// already chose memory, but the slice may still say `type = "redis"`
-			// from the deprecated `repositories.code.type`.
-			const slice = flattenAdapterConfig(
-				(config as AppConfig).repositories.code as { type: string } & Record<string, unknown>,
-			);
-			return codeFactory.create({ ...slice, type: "memory" });
+		codeRepository: async ({ section, lifecycleRegistrar }) => {
+			const { codeFactory } = createRepositoryFactories({ lifecycle: lifecycleRegistrar });
+			return codeFactory.create({ type: "memory", defaultExpiresIn: section.defaultExpiresIn });
 		},
 	},
 });
@@ -266,7 +292,7 @@ export const inMemoryCodeRepositoryModule: Module = defineModule({
  * In-memory user-session stores module: the four-store user-session split
  * (userSessionStore, sessionRPRegistry, sessionFamilyIndex,
  * sessionFederationIndex) and the subject-level revocation pair. Wired by
- * `buildModules` only when `userSessionStores.adapter = "memory"`; the Redis
+ * `buildModules` only when `adapters.userSessionStores = "memory"`; the Redis
  * branch swaps in `redisSessionStoresModule` from `@o3co/auth-provider-redis`.
  */
 export const inMemorySessionStoresModule: Module = defineModule({
@@ -294,12 +320,12 @@ export const inMemorySessionStoresModule: Module = defineModule({
 
 /**
  * In-memory federation token store module, wired by `buildModules` only when
- * `federationTokenStore.type = "memory"` (the default). The redis branch
+ * `adapters.federationTokenStore = "memory"` (the default). The redis branch
  * swaps in `redisFederationTokenStoreModule` off the shared ioredis socket
  * (mutually exclusive: both provide the `federationTokenStore` slot). One
  * module per adapter, so the replica-safety guard can tell them apart and the
  * Redis one can require its client. The slot is always wired, independent of
- * the `userSessionStores.adapter` switch.
+ * the `adapters.userSessionStores` selection.
  *
  * The memory adapter comes through core's factory: that is where its
  * "dev/test only" boot warning lives.
@@ -321,14 +347,14 @@ export const inMemoryFederationTokenStoreModule: Module = defineModule({
 });
 
 /**
- * Audit-sink module: fills the `auditSink` slot every route that emits a
- * security event reads. The slot is `optional` on `oauthModule`,
+ * Audit-sink module: owns `audit-sink {}` and fills the `auditSink` slot every
+ * route that emits a security event reads, with the sink the composition
+ * root's `adapters.auditSink` names: the template's `"logger"` (its default)
+ * or one of core's built-ins, with that sink's options from
+ * `audit-sink.<name>`. The slot is `optional` on `oauthModule`,
  * `sessionModule` and `webauthnModule`, and `emitAuditEvent` is a no-op when
- * it is empty, so without a sink the security events are discarded with
- * nothing failing and nothing warning; this module is always in the manifest.
- * It registers the `"logger"` sink (the default) beside core's built-ins. The
- * sink kinds, why there is no `"none"`, and how to register a real sink are in
- * the template README, "Audit trail".
+ * it is empty, so this module is always in the manifest; a name no builder is
+ * registered under refuses boot. The sink's options moved from `audit.sink`.
  *
  * `createAuditSinkFactory()` takes no `BuilderContext`, so a sink builder
  * receives `{}` and the `ctx.lifecycle?.register(…)` /
@@ -336,28 +362,27 @@ export const inMemoryFederationTokenStoreModule: Module = defineModule({
  * opening a connection are silent no-ops: a sink holding a socket must own
  * its cleanup another way.
  */
-export const auditSinkModule: Module = defineModule({
-	name: "audit-sink",
-	requires: ["config"] as const,
-	provides: {
-		auditSink: async ({ config }) => {
-			const factory = createAuditSinkFactory();
-			registerBuiltinAuditSinks(factory);
-			factory.register("logger", () => createLoggerAuditSink(createAuditLogger()));
-			const slice = (config as AppConfig).audit?.sink;
-			// Absence lands on the default sink rather than on `undefined`: a
-			// config that says nothing about auditing is not a config asking for
-			// the events to be dropped. The literal default lives in HOCON
-			// (`reference.conf` / `application.conf`); this is the floor under a
-			// hand-built config that never met either.
-			return factory.create(
-				slice
-					? flattenAdapterConfig(slice as { type: string } & Record<string, unknown>)
-					: { type: "logger" },
-			);
+export function auditSinkModuleFor(sink: string): Module {
+	return defineModule({
+		name: "audit-sink",
+		section: {
+			schema: auditSinkSectionSchema,
+			reference: templateReference(),
+			relocatedFrom: {
+				"audit.sink": { to: "", environmentVariable: null },
+				"audit.sink.type": null,
+			},
 		},
-	},
-});
+		provides: {
+			auditSink: async ({ section }) => {
+				const factory = createAuditSinkFactory();
+				registerBuiltinAuditSinks(factory);
+				factory.register("logger", () => createLoggerAuditSink(createAuditLogger()));
+				return factory.create(flattenAdapterConfig({ type: sink, [sink]: section?.[sink] }));
+			},
+		},
+	});
+}
 
 /**
  * @deprecated Split into `inMemorySessionStoresModule` and
@@ -487,7 +512,7 @@ export const standaloneRedisClientsModule: Module = defineModule({
 				.rateLimiterClient;
 		},
 		// `redisCodeRepositoryModule` consumes this slot when
-		// `oauth.code.adapter = "redis"`.
+		// `adapters.codeRepository = "redis"`.
 		codeRepositoryClient: async ({ section, lifecycleRegistrar, readinessRegistrar, logger }) => {
 			return getOrCreateClients(section, lifecycleRegistrar, readinessRegistrar, logger)
 				.codeRepositoryClient;
@@ -545,7 +570,7 @@ export const standaloneRedisClientsModule: Module = defineModule({
 		},
 		// The consent stores' clients. `redisConsentStoreModule` requires both
 		// (it provides the consent records and the parked requests together),
-		// and `buildModules` selects it under `consentStore.adapter = "redis"`.
+		// and `buildModules` selects it under `adapters.consentStore = "redis"`.
 		consentStoreClient: async ({ section, lifecycleRegistrar, readinessRegistrar, logger }) => {
 			return getOrCreateClients(section, lifecycleRegistrar, readinessRegistrar, logger)
 				.consentStoreClient;

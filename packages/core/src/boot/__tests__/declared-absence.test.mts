@@ -145,7 +145,7 @@ describe("checkDeclaredAbsence", () => {
 		await expect(
 			createApp({
 				modules: [auditConsumerModule],
-				bootstrapComponents: boot(declaring("auditSink")),
+				bootstrapComponents: boot({ audit: { sink: { type: "none" } } }),
 			}),
 		).rejects.toMatchObject({ reason: "component-absence-undeclared" });
 	});
@@ -254,7 +254,11 @@ describe("isAbsenceDeclared and describeAbsenceDeclaration — one reading of a 
 	});
 
 	it("reads a scalar key as declaring it when it holds the absent value", () => {
-		const policy = { configKey: ["oauth", "revocation", "subject"], absentValue: "unsupported", hint: "h" };
+		const policy = {
+			configKey: ["oauth", "revocation", "subject"],
+			absentValue: "unsupported",
+			hint: "h",
+		};
 		expect(isAbsenceDeclared({ oauth: { revocation: { subject: "unsupported" } } }, policy)).toBe(
 			true,
 		);
@@ -265,7 +269,10 @@ describe("isAbsenceDeclared and describeAbsenceDeclaration — one reading of a 
 
 	it("reads own keys only", () => {
 		expect(
-			isAbsenceDeclared(Object.create({ core: { declaredAbsent: ["auditSink"] } }), AUDIT_SINK_ABSENCE_POLICY),
+			isAbsenceDeclared(
+				Object.create({ core: { declaredAbsent: ["auditSink"] } }),
+				AUDIT_SINK_ABSENCE_POLICY,
+			),
 		).toBe(false);
 	});
 

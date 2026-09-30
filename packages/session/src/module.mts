@@ -246,7 +246,7 @@ export const sessionModule = defineModule<
 	// admission reads when wired.
 	optional: ["logger", "rateLimiter", "auditSink", "subjectSessionIndex", "subjectRevocation"],
 	// Optional to wire, not optional to decide: an unfilled `auditSink` must be
-	// declared (`audit.sink.type = "none"`), and absent subject-level
+	// declared (`auditSink` in `core.declaredAbsent`), and absent subject-level
 	// revocation must be declared (`oauth.revocation.subject = "unsupported"`),
 	// or a credential change would silently invalidate nothing. One constant on
 	// both revocation keys: every module's policy on a key must agree, and the

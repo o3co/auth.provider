@@ -30,7 +30,7 @@ import type { AppConfig } from "../../config/application.schema.mjs";
 import type { Logger } from "../../logging/Logger.mjs";
 import { defineModule } from "../../modules/manifest/index.mjs";
 import type { Module } from "../../modules/manifest/module-spec.mjs";
-import { makeValidAppConfig, makeValidCoreConfig } from "../../testing/fixtures/valid-config.mjs";
+import { makeValidCoreConfig } from "../../testing/fixtures/valid-config.mjs";
 import { createApp } from "../create-app.mjs";
 import type { BootstrapMap } from "../types.mjs";
 import { BootError } from "../types.mjs";
@@ -134,9 +134,9 @@ describe("one composed parse over the transitional base", () => {
 	});
 
 	it("refuses a value a mirrored section's schema refuses, naming the operator's path", async () => {
-		const err = await bootRefused([], resolved({ rateLimiter: { adapter: "several" } }));
+		const err = await bootRefused([], resolved({ webauthn: { attestationPreference: "several" } }));
 		expect(err.reason).toBe("config-validation-failed");
-		expect(err.message).toMatch(/rateLimiter\.adapter: /);
+		expect(err.message).toMatch(/webauthn\.attestationPreference: /);
 	});
 
 	it.each([
@@ -384,7 +384,11 @@ describe("a loaded module's section is never stripped", () => {
 		// A section schema that reads one key of a section core mirrors whole:
 		// written back in place of the section, it would take every other key
 		// from every module reading `config`.
-		const repositories = makeValidAppConfig().repositories;
+		const repositories = {
+			client: { type: "yaml" },
+			user: { type: "yaml" },
+			code: { type: "memory" },
+		};
 		const seen: Record<string, unknown> = {};
 		const config = await bootAndRead(
 			[

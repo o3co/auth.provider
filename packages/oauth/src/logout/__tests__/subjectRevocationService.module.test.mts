@@ -337,7 +337,7 @@ describe("subjectRevocationServiceModule", () => {
 				bootstrapComponents: {
 					config: {
 						...makeValidCoreConfig(),
-						audit: { sink: { type: "none" } },
+						core: { ...makeValidCoreConfig().core, declaredAbsent: ["auditSink"] },
 						"renamed-variables": renamedVariableCaptures({
 							modules: [subjectRevocationServiceModule],
 							core: CORE_RELOCATIONS,

@@ -156,7 +156,7 @@ const envFor = (adapter: Adapter): Record<string, string> =>
 		? { ...SINGLE_ENV }
 		: {
 				...SINGLE_ENV,
-				RATE_LIMITER_ADAPTER: "redis",
+				ADAPTERS_RATE_LIMITER: "redis",
 				REDIS_CLIENTS_URL: `redis://${redis.host}:${redis.port}/${redis.db}`,
 			};
 

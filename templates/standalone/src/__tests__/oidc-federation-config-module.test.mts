@@ -14,11 +14,12 @@
  * limitations under the License.
  */
 
-import type { AppConfig } from "@o3co/auth-provider-core";
 import { makeValidAppConfig } from "@o3co/auth-provider-core/testing";
 import { describe, expect, it } from "vitest";
 import { buildModules } from "../buildModules.mjs";
+import type { Switches } from "../configPath.mjs";
 import { oidcFederationConfigModule } from "../modules.mjs";
+import { inProcessAdapters } from "./library-references.fixture.mjs";
 
 /**
  * The scaffold turns every enabled `federations.<name>` of type
@@ -40,15 +41,13 @@ const okta = {
 	callbackURL: "https://auth.test/session/oauth/federation/okta/callback",
 };
 
-/** Core's valid fixture, with the federations under test and every adapter on memory. */
-const configWith = (federations: Record<string, unknown>): AppConfig => {
-	const base = makeValidAppConfig();
-	return {
-		...base,
+/** Core's valid fixture, with the federations under test and every store in process. */
+const configWith = (federations: Record<string, unknown>): Switches =>
+	({
+		...makeValidAppConfig(),
 		federations,
-		oauth: { ...base.oauth, code: { adapter: "memory" } },
-	} as unknown as AppConfig;
-};
+		adapters: inProcessAdapters(),
+	}) as unknown as Switches;
 
 describe("oidcFederationConfigModule", () => {
 	it("has the scaffold's module name and reads config", () => {

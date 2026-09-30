@@ -55,9 +55,10 @@ import express from "express";
 import request from "supertest";
 import { afterEach, describe, expect, it } from "vitest";
 import { buildModules } from "../buildModules.mjs";
-import { resolveConfigPaths } from "../configPath.mjs";
+import { resolveConfigPaths, type Switches } from "../configPath.mjs";
 import { templateReference } from "../modules.mjs";
 import {
+	adaptersOf,
 	capturedRenames,
 	libraryLayers,
 	sectionsCoreDoesNotDeclare,
@@ -94,17 +95,17 @@ const ENV: Readonly<Record<string, string>> = {
 	SESSION_STORE_SECURE: "false",
 	SESSION_STORE_NAME: "auth.session",
 	SESSION_STORE_STORAGE_TYPE: "memory",
-	CLIENT_USER_TYPE: "yaml",
+	ADAPTERS_USER_REPOSITORY: "yaml",
 	REDIS_CLIENTS_URL: "redis://redis.test:6379",
-	USER_SESSION_STORES_ADAPTER: "memory",
-	RATE_LIMITER_ADAPTER: "memory",
-	OAUTH_CODE_ADAPTER: "memory",
-	ACCESS_TOKEN_DENYLIST_ADAPTER: "memory",
-	REPLAY_SEEN_SET_ADAPTER: "memory",
-	FEDERATION_TOKEN_STORE_TYPE: "memory",
-	CONSENT_STORE_ADAPTER: "none",
-	FEDERATION_GRANT_STORE_ADAPTER: "memory",
-	FEDERATION_GRANT_INTENT_STORE_ADAPTER: "memory",
+	ADAPTERS_USER_SESSION_STORES: "memory",
+	ADAPTERS_RATE_LIMITER: "memory",
+	ADAPTERS_CODE_REPOSITORY: "memory",
+	ADAPTERS_ACCESS_TOKEN_DENYLIST: "memory",
+	ADAPTERS_REPLAY_SEEN_SET: "memory",
+	ADAPTERS_FEDERATION_TOKEN_STORE: "memory",
+	ADAPTERS_CONSENT_STORE: "none",
+	ADAPTERS_FEDERATION_GRANT_STORE: "memory",
+	ADAPTERS_FEDERATION_GRANT_INTENT_STORE: "memory",
 	FEDERATION_GRANTS_ENABLED: "true",
 	FEDERATION_GRANTS_CONSENT_URL: "/consent/grants",
 	// The connect flow is not driven here, and the bundled repository has no
@@ -118,7 +119,7 @@ const ENV: Readonly<Record<string, string>> = {
  * that have no environment form written over it: the
  * upstream federation the connection names, and the connection.
  */
-function resolveConfig(): AppConfig {
+function resolveConfig(): Switches {
 	const { applicationConfPath, envConfPath } = resolveConfigPaths(configDir, "production");
 	const layers = parseFile(envConfPath, { env: ENV })
 		.withFallback(parseFile(applicationConfPath, { env: ENV }))
@@ -127,6 +128,7 @@ function resolveConfig(): AppConfig {
 	const config = validate(layers, AppConfigSchema);
 	return {
 		...sectionsCoreDoesNotDeclare(layers),
+		adapters: adaptersOf(layers, ENV),
 		...config,
 		// What the resolution captured of core's renamed variables, which the
 		// schema's parse drops.
@@ -166,7 +168,7 @@ function resolveConfig(): AppConfig {
 				},
 			},
 		},
-	} as AppConfig;
+	} as Switches;
 }
 
 const testRepositoriesModule = defineModule({

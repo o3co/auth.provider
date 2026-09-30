@@ -187,15 +187,15 @@ describe('every module on, every shared store on Redis, core.deployment.mode = "
 	 */
 	const MEMORY_SWITCHES: ReadonlyArray<readonly [variable: string, module: string]> = [
 		["SESSION_STORE_STORAGE_TYPE", "session-store"],
-		["USER_SESSION_STORES_ADAPTER", "standalone-in-memory-session-stores"],
-		["OAUTH_CODE_ADAPTER", "standalone-in-memory-code-repository"],
-		["FEDERATION_TOKEN_STORE_TYPE", "standalone-in-memory-federation-token-store"],
-		["RATE_LIMITER_ADAPTER", "core-rate-limiter-memory"],
-		["ACCESS_TOKEN_DENYLIST_ADAPTER", "core-access-token-denylist-memory"],
-		["REPLAY_SEEN_SET_ADAPTER", "core-replay-seen-set-memory"],
-		["CONSENT_STORE_ADAPTER", "core-consent-store-memory"],
-		["FEDERATION_GRANT_STORE_ADAPTER", "core-federation-grant-store-memory"],
-		["FEDERATION_GRANT_INTENT_STORE_ADAPTER", "core-federation-grant-intent-store-memory"],
+		["ADAPTERS_USER_SESSION_STORES", "standalone-in-memory-session-stores"],
+		["ADAPTERS_CODE_REPOSITORY", "standalone-in-memory-code-repository"],
+		["ADAPTERS_FEDERATION_TOKEN_STORE", "standalone-in-memory-federation-token-store"],
+		["ADAPTERS_RATE_LIMITER", "core-rate-limiter-memory"],
+		["ADAPTERS_ACCESS_TOKEN_DENYLIST", "core-access-token-denylist-memory"],
+		["ADAPTERS_REPLAY_SEEN_SET", "core-replay-seen-set-memory"],
+		["ADAPTERS_CONSENT_STORE", "core-consent-store-memory"],
+		["ADAPTERS_FEDERATION_GRANT_STORE", "core-federation-grant-store-memory"],
+		["ADAPTERS_FEDERATION_GRANT_INTENT_STORE", "core-federation-grant-intent-store-memory"],
 	];
 
 	it.each(MEMORY_SWITCHES)("%s=memory is refused at boot, naming %s", async (variable, module) => {

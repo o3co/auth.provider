@@ -508,17 +508,9 @@ export const CoreConfigSchema = z.object({
 		// and the tombstone for the removed `allowUnmarkedClients` (see
 		// `REMOVED_AUTHORIZE_FIELDS`).
 		authorize: authorizeSchema,
-		// Adapter for the OAuth authorization-code repository. Multi-replica
-		// deployments MUST use `"redis"`: memory loses codes on restart and across
-		// replicas. Optional because HOCON binds it to `${?OAUTH_CODE_ADAPTER}`
-		// with no literal, leaving `oauth.code = {}` when unset, and
-		// `buildModules` falls back to the deprecated `repositories.code.type`
-		// only when `adapter` is undefined.
-		code: z
-			.object({
-				adapter: z.enum(["memory", "redis"]).optional(),
-			})
-			.optional(),
+		// Presence-only: the path the code repository's selection moved from (the
+		// composition root's `adapters.codeRepository`). Nothing reads it.
+		code: z.unknown().optional(),
 		// Presence-only: the paths the device-grant, oauth-token-exchange, mTLS
 		// and DPoP modules' sections moved from, kept so a root that parses with
 		// `AppConfigSchema` before boot still hands them to the relocation
@@ -615,6 +607,14 @@ export const CoreConfigSchema = z.object({
 			// through `resolveTokenBindingSettings` alone, and carried by no
 			// slot. See
 			// `packages/core/docs/adr/2026-05-20-token-binding-first-class-abstraction.md`.
+			// The slots this composition runs without on purpose, each a slot a
+			// module's absence policy names by its key here (`auditSink`): the
+			// declared-absence guard reads the list, and no variable sets it.
+			declaredAbsent: z
+				.array(z.string().min(1, { error: "core.declaredAbsent names each slot" }), {
+					error: "core.declaredAbsent is a list of slot names",
+				})
+				.optional(),
 			tokenBinding: z
 				.object({
 					// How `tokenBindingMw` arbitrates when several mechanisms succeed
@@ -750,23 +750,10 @@ export const fullSectionsSchema = z.object({
 		.passthrough()
 		.optional(),
 	federations: z.record(z.string(), federationEntrySchema),
-	repositories: z.object({
-		client: z
-			.object({
-				type: z.string(),
-			})
-			.passthrough(),
-		user: z
-			.object({
-				type: z.string(),
-			})
-			.passthrough(),
-		code: z
-			.object({
-				type: z.string(),
-			})
-			.passthrough(),
-	}),
+	// Presence-only: the section the repositories' settings sit in (the
+	// standalone template's `repositories` module's), and where the code
+	// repositories' moved from. Nothing in core reads it.
+	repositories: z.unknown().optional(),
 	// Presence-only: the paths the login and consent pages moved from
 	// (`session.loginPage.url`, `oauth.consentPage.url`). Nothing reads them.
 	endpoints: z.unknown().optional(),
@@ -803,140 +790,29 @@ export const fullSectionsSchema = z.object({
 				.optional(),
 		})
 		.optional(),
-	// Where security-relevant audit events go. `type` selects a builder in the
-	// composition root's `AuditSinkFactory`, so it is an open string and
-	// sub-keys pass through: an out-of-tree sink needs no schema change here
-	// (`registerBuiltinAuditSinks` ships `console`). Core reads one value:
-	// `type = "none"`, which the declared-absence guard
-	// (AUDIT_SINK_ABSENCE_POLICY) takes as running sink-less on purpose; the
-	// standalone registers no "none" builder, so there it still fails boot. The
-	// safe default (a sink, never "none") is the composition root's job, and
-	// the literal lives in `reference.conf`.
-	audit: z
-		.object({
-			sink: z
-				.object({
-					type: z.string(),
-				})
-				.passthrough(),
-		})
-		.optional(),
+	// Presence-only: the path the audit sink's selection (the composition
+	// root's `adapters.auditSink`), its options (the `audit-sink` module's) and
+	// its declared absence (`core.declaredAbsent`) moved from.
+	audit: z.unknown().optional(),
 	// Presence-only: the path the shared Redis connection's settings moved from
 	// (`redis-clients`, the standalone template's module's). Nothing reads it.
 	refreshTokenFamilyStore: z.unknown().optional(),
-	// Adapter for the rate limiter, which serves both the OAuth endpoints and
-	// `/session/login`, so `"redis"` is what makes either safe across replicas.
-	// Default `"memory"` in HOCON. `session.rateLimit.login` configures the
-	// login window and limit, which the session module contributes as the
-	// `login` budget.
-	rateLimiter: z
-		.object({
-			adapter: z.enum(["memory", "redis"]).optional(),
-		})
-		.optional(),
-	// Adapter for the four user-session stores (`userSessionStore`,
-	// `sessionRPRegistry`, `sessionFamilyIndex`, `sessionFederationIndex`).
-	// Multi-replica deployments MUST use `"redis"`: memory loses session state
-	// on restart and across replicas. Top-level, not under `session-store`,
-	// which is the express-session cookie and its store.
-	userSessionStores: z
-		.object({
-			adapter: z.enum(["memory", "redis"]).optional(),
-		})
-		.optional(),
-	// Adapter for the federation token store (upstream IdP tokens held for a
-	// session); default `"memory"` in HOCON. Memory forks per replica and its
-	// module declares `replicaSafety`, so `core.deployment.mode = "multi"` refuses it
-	// by name. `"redis"` mounts `redisFederationTokenStoreModule`, configured
-	// under `redis-federation-token-store`.
-	federationTokenStore: z
-		.object({
-			type: z.enum(["memory", "redis"]).optional(),
-		})
-		.optional(),
-	// The two adapter switches for federation grants. The grant store and the
-	// intent store are installed independently: grants in Redis with
-	// acquisition in memory is a supported single-replica shape (a restart
-	// loses only flows in progress). Both memory modules declare
-	// `replicaSafety` and are refused by name under `core.deployment.mode = "multi"`;
-	// a Redis grant store beside a memory subject revocation is refused by the
-	// routes module. Defaults in `reference.conf`.
-	federationGrantStore: z
-		.object({
-			adapter: z.enum(["memory", "redis"]).optional(),
-		})
-		.optional(),
-	federationGrantIntentStore: z
-		.object({
-			adapter: z.enum(["memory", "redis"]).optional(),
-		})
-		.optional(),
-	// Which store keeps enrolled MFA factors, and which keeps MFA transactions
-	// and the lock state (MFA ADR); read by a composition root that picks its
-	// MFA stores by name. The factor store may be kept in the Store; a
-	// transaction is verification state and has no Store variant. Defaults in
-	// `reference.conf`.
-	mfaFactorStore: z
-		.object({
-			adapter: z.enum(["memory", "redis", "store"]).optional(),
-		})
-		.optional(),
-	mfaTransactionStore: z
-		.object({
-			adapter: z.enum(["memory", "redis"]).optional(),
-			// Presence-only: the path `core-mfa-transaction-store-memory` moved from.
-			memory: z.unknown().optional(),
-		})
-		.optional(),
-	// Adapter for the RFC 7009 access-token denylist; default `"memory"` in
-	// HOCON. Memory forks per replica (a revocation on one leaves the token
-	// working on the others), so `core-access-token-denylist-memory` is in the
-	// replica-safety guard's refused set under `core.deployment.mode = "multi"`.
-	accessTokenDenylist: z
-		.object({
-			adapter: z.enum(["memory", "redis"]).optional(),
-		})
-		.optional(),
-	// Backend for the replay seen-set: the single-use `jti` record behind
-	// `private_key_jwt` client authentication (and the WebAuthn challenge
-	// ceremony when installed). `core-replay-seen-set-memory` is in the
-	// replica-safety guard's refused set: a captured assertion would replay
-	// once per replica.
-	replaySeenSet: z
-		.object({
-			adapter: z.enum(["memory", "redis"]).optional(),
-			// Presence-only: the path `core-replay-seen-set-memory` moved from.
-			memory: z.unknown().optional(),
-		})
-		.optional(),
-	// Presence-only: the path `core-challenge-store-memory` moved from.
-	challengeStore: z
-		.object({
-			memory: z.unknown().optional(),
-		})
-		.optional(),
-	// Where consent to a non-first-party client is recorded. `"none"` (the HOCON
-	// default) wires nothing, so such clients are refused; `"memory"` forks per
-	// replica and is refused under `core.deployment.mode = "multi"`; `"redis"` shares
-	// consent records and parked requests across replicas.
-	consentStore: z
-		.object({
-			adapter: z.enum(["none", "memory", "redis"]).optional(),
-		})
-		.optional(),
-	// Module-internal config for `redisCodeRepositoryModule`
-	// (`CLIENT_CODE_KEY_PREFIX` / `CLIENT_CODE_DEFAULT_EXPIRES_IN`).
-	// Presence-only; defaults in `reference.conf`.
-	redisCodeRepository: z
-		.object({
-			keyPrefix: z.string().optional(),
-			// The Redis PX TTL, in seconds, for authorization codes. A positive
-			// integer so a bad env override fails boot instead of erroring on
-			// every Redis call; the module schema and the `RedisCodeRepository`
-			// constructor check it again.
-			defaultExpiresIn: z.coerce.number().int().positive().optional(),
-		})
-		.optional(),
+	// Presence-only: the paths the adapter selections moved from (the
+	// composition root's `adapters`), and the stores' sections moved from with
+	// them, kept so a root that parses with `AppConfigSchema` before boot
+	// still hands them to the relocation refusal. Nothing reads them.
+	rateLimiter: z.unknown().optional(),
+	userSessionStores: z.unknown().optional(),
+	federationTokenStore: z.unknown().optional(),
+	federationGrantStore: z.unknown().optional(),
+	federationGrantIntentStore: z.unknown().optional(),
+	mfaFactorStore: z.unknown().optional(),
+	mfaTransactionStore: z.unknown().optional(),
+	accessTokenDenylist: z.unknown().optional(),
+	replaySeenSet: z.unknown().optional(),
+	challengeStore: z.unknown().optional(),
+	consentStore: z.unknown().optional(),
+	redisCodeRepository: z.unknown().optional(),
 	// Presence-only: the paths the stores' sections moved from, kept so a root
 	// that parses with `AppConfigSchema` before boot still hands them to the
 	// relocation refusal. Nothing reads them.
@@ -961,6 +837,7 @@ export const fullSectionsSchema = z.object({
 	"core-federation-grant-store-memory": z.unknown().optional(),
 	"redis-access-token-denylist": z.unknown().optional(),
 	"redis-challenge-store": z.unknown().optional(),
+	"redis-code-repository": z.unknown().optional(),
 	"redis-consent-store": z.unknown().optional(),
 	"redis-device-code-store": z.unknown().optional(),
 	"redis-mfa-factor-store": z.unknown().optional(),

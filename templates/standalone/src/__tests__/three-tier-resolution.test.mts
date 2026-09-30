@@ -19,8 +19,9 @@ import { type AppConfig, AppConfigSchema, coreReference } from "@o3co/auth-provi
 import { parseFile } from "@o3co/ts.hocon";
 import { validate } from "@o3co/ts.hocon/zod";
 import { describe, expect, it } from "vitest";
+import { readAdapters } from "../adapters.mjs";
 import { buildModules } from "../buildModules.mjs";
-import { readMfaMode, resolveConfigPaths } from "../configPath.mjs";
+import { readMfaMode, resolveConfigPaths, type Switches } from "../configPath.mjs";
 import { templateReference } from "../modules.mjs";
 
 // config/ is two levels above this test file:
@@ -37,17 +38,25 @@ const testEnv = {
 	SESSION_STORE_SECRET: "test-session-secret-three-tier.at-least-32-bytes.ok",
 };
 
-function buildResolvedConfig(env: string, extraEnv: Record<string, string> = {}): AppConfig {
+/**
+ * The three tiers under `env`, parsed with core's schema, beside the
+ * composition root's `adapters` phase one reads from the template's own
+ * layers.
+ */
+function buildResolvedConfig(env: string, extraEnv: Record<string, string> = {}): Switches {
 	const { applicationConfPath, envConfPath } = resolveConfigPaths(configDir, env);
 	const libraryReferencePath = fileURLToPath(coreReference());
 	const resolvedEnv = { ...testEnv, ...extraEnv };
-	return validate(
-		parseFile(envConfPath, { env: resolvedEnv })
-			.withFallback(parseFile(applicationConfPath, { env: resolvedEnv }))
-			.withFallback(parseFile(fileURLToPath(templateReference()), { env: resolvedEnv }))
-			.withFallback(parseFile(libraryReferencePath, { env: resolvedEnv })),
-		AppConfigSchema,
-	);
+	const own = parseFile(envConfPath, { env: resolvedEnv })
+		.withFallback(parseFile(applicationConfPath, { env: resolvedEnv }))
+		.withFallback(parseFile(fileURLToPath(templateReference()), { env: resolvedEnv }));
+	return {
+		...validate(
+			own.withFallback(parseFile(libraryReferencePath, { env: resolvedEnv })),
+			AppConfigSchema,
+		),
+		adapters: readAdapters(own.toObject() as Record<string, unknown>, resolvedEnv),
+	};
 }
 
 // The oauth-authorization module's section, which core mirrors for the one
@@ -139,15 +148,13 @@ describe("three-tier HOCON resolution (env → application.conf → reference.co
 		expect(config.oauth.resourceIndicator?.enabled).toBe(true);
 	});
 
-	// The section must be declared in core's schema: `AppConfigSchema` is a
-	// plain `z.object` and strips what it does not declare, so an undeclared
-	// `audit` block would vanish between `parseFile` and `buildModules` and the
-	// sink selector would read `undefined`. These assertions run the real
-	// three-tier merge, so they fail if either layer stops carrying the key.
+	// The selection is the composition root's own, `adapters.auditSink`,
+	// which phase one reads over the template's own layers. These assertions
+	// run the real merge, so they fail if a layer stops carrying the key.
 	describe("the audit sink as the shipped artifact resolves it", () => {
-		it("resolves audit.sink.type to the template's logger sink with nothing set", () => {
+		it("resolves adapters.auditSink to the template's logger sink with nothing set", () => {
 			const config = buildResolvedConfig("production");
-			expect(config.audit?.sink.type).toBe("logger");
+			expect(config.adapters.auditSink).toBe("logger");
 		});
 
 		it("wires exactly one auditSink provider for that resolved config", () => {
@@ -157,23 +164,18 @@ describe("three-tier HOCON resolution (env → application.conf → reference.co
 		});
 
 		it("lets an operator select core's built-in console sink by env var", () => {
-			// The env-override line has to be repeated at the template layer or
-			// the literal `"logger"` shadows reference.conf's substitution — the
-			// same precedence rule the grant tests above pin.
-			const config = buildResolvedConfig("production", { AUDIT_SINK_TYPE: "console" });
-			expect(config.audit?.sink.type).toBe("console");
+			const config = buildResolvedConfig("production", { ADAPTERS_AUDIT_SINK: "console" });
+			expect(config.adapters.auditSink).toBe("console");
 		});
 
-		it("reference.conf's own default is a sink, not a drop", () => {
-			// A consumer that resolves against reference.conf alone still lands on
-			// a sink. The sink policy is stdout JSON, never "none", and the
-			// library layer has to hold that on its own — a composition root that
-			// forgets to override it must not thereby lose its audit trail.
-			const referenceOnly = validate(
-				parseFile(fileURLToPath(coreReference()), { env: testEnv }),
-				AppConfigSchema,
+		it("the template's reference.conf alone selects a sink, not a drop", () => {
+			// A composition resolved against the template's reference alone
+			// still lands on a sink: an application.conf that forgets the
+			// selection must not thereby lose its audit trail.
+			const referenceOnly = parseFile(fileURLToPath(templateReference()), { env: {} });
+			expect(readAdapters(referenceOnly.toObject() as Record<string, unknown>, {}).auditSink).toBe(
+				"logger",
 			);
-			expect(referenceOnly.audit?.sink.type).toBe("console");
 		});
 	});
 
@@ -183,9 +185,9 @@ describe("three-tier HOCON resolution (env → application.conf → reference.co
 	// and NO denylist by core's denylist boot guard, so the template has to
 	// land on "redis" without the deployment naming it.
 	describe("access-token revocation as the shipped artifact resolves it", () => {
-		it("resolves accessTokenDenylist.adapter to redis with nothing set", () => {
+		it("resolves adapters.accessTokenDenylist to redis with nothing set", () => {
 			const config = buildResolvedConfig("production");
-			expect(config.accessTokenDenylist?.adapter).toBe("redis");
+			expect(config.adapters.accessTokenDenylist).toBe("redis");
 		});
 
 		it("resolves oauth.revocation.accessToken to denylist with nothing set", () => {
@@ -209,12 +211,12 @@ describe("three-tier HOCON resolution (env → application.conf → reference.co
 			// own memory modules count too.
 			const { replicaUnsafeReason } = await import("@o3co/auth-provider-core");
 			const config = buildResolvedConfig("production", {
-				USER_SESSION_STORES_ADAPTER: "redis",
-				RATE_LIMITER_ADAPTER: "redis",
-				OAUTH_CODE_ADAPTER: "redis",
+				ADAPTERS_USER_SESSION_STORES: "redis",
+				ADAPTERS_RATE_LIMITER: "redis",
+				ADAPTERS_CODE_REPOSITORY: "redis",
 				// The federation token store defaults to memory, and the memory
 				// module declares itself replica-unsafe.
-				FEDERATION_TOKEN_STORE_TYPE: "redis",
+				ADAPTERS_FEDERATION_TOKEN_STORE: "redis",
 				REDIS_FEDERATION_TOKEN_STORE_ENCRYPTION_KEY: "BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc=",
 			});
 			const modules = buildModules(config);
@@ -226,9 +228,9 @@ describe("three-tier HOCON resolution (env → application.conf → reference.co
 
 		it("lets a single-instance deployment opt down to memory by env var", () => {
 			const config = buildResolvedConfig("production", {
-				ACCESS_TOKEN_DENYLIST_ADAPTER: "memory",
+				ADAPTERS_ACCESS_TOKEN_DENYLIST: "memory",
 			});
-			expect(config.accessTokenDenylist?.adapter).toBe("memory");
+			expect(config.adapters.accessTokenDenylist).toBe("memory");
 			const names = buildModules(config).map((m) => m.name);
 			expect(names).toContain("core-access-token-denylist-memory");
 		});

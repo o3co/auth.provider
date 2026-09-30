@@ -24,8 +24,11 @@
  * value set under it would be dropped while boot accepts it; and the old name
  * bound nowhere else, else declaring it would refuse every operator who sets
  * it. The layers come resolved by the caller's HOCON reader, so core takes no
- * HOCON dependency. `renamedVariableCaptures` is what such a resolution
- * captures, for a configuration built by hand.
+ * HOCON dependency. Each module's renames are held on their own, so the
+ * modules may include ones a composition installs in place of one another,
+ * each declaring an old name renamed to a name of its own section's: whether
+ * one composition's modules agree is boot's check. `renamedVariableCaptures`
+ * is what such a resolution captures, for a configuration built by hand.
  */
 
 import { resolve as resolvePath } from "node:path";
@@ -37,7 +40,10 @@ import { RENAMED_VARIABLES_SECTION } from "../config/removed-keys.mjs";
 import type { Module } from "../modules/manifest/module-spec.mjs";
 
 export interface RenamedVariableCheck {
-	/** The modules whose `section.renamedVariables` are held. */
+	/**
+	 * The modules whose `section.renamedVariables` are held, each on its own:
+	 * ones installed in place of one another may each declare an old name.
+	 */
 	readonly modules: readonly Module[];
 	/** Core's own section's declaration, held beside theirs, as module "core". */
 	readonly core?: CoreRelocations;
@@ -93,7 +99,10 @@ export function renamedVariableProblems(check: RenamedVariableCheck): string[] {
 	const resolve = (env: Readonly<Record<string, string>>) =>
 		layers.map((layer) => ({ layer, tree: check.read(layer, env) }));
 	const unset = resolve({});
-	const renames = renamedVariablesOf(check.modules, check.core);
+	const renames = [
+		...renamedVariablesOf([], check.core),
+		...check.modules.flatMap((module) => renamedVariablesOf([module])),
+	];
 	const declaredBy = new Map<string, Set<string>>();
 	for (const rename of renames) {
 		const file = captureFileOf(rename.module, check.modules);

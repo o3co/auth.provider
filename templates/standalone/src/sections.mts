@@ -15,12 +15,14 @@
  */
 
 /**
- * The schemas of the template's own modules' sections: `logging`, `http`
- * (with its CORS list), `key-store` and `redis-clients`. Each is strict, a key
- * it does not declare refused; each reads the strings an environment variable
- * carries; none holds a default, which lives in `config/reference.conf`. The
- * rules a value is held to are core's shared vocabulary (trusted-proxy
- * entries, serialized origins, key ids), applied here, never restated.
+ * The schemas of the template's own sections: its modules' — `logging`,
+ * `http` (with its CORS list), `key-store`, `redis-clients`, `repositories`,
+ * the in-process code repository's and `audit-sink` — and the composition
+ * root's own `adapters`. Each is strict, a key it does not declare refused;
+ * each reads the strings an environment variable carries; none holds a
+ * default, which lives in `config/reference.conf`. The rules a value is held
+ * to are core's shared vocabulary (trusted-proxy entries, serialized origins,
+ * key ids), applied here, never restated.
  */
 
 import {
@@ -222,3 +224,79 @@ export const keyStoreSectionSchema = z
 export const redisClientsSectionSchema = z
 	.object({ url: z.string(), password: z.string().optional() })
 	.strict();
+
+/**
+ * `adapters`: which adapter fills each slot, the composition root's own
+ * choice. `userSessionStores` switches the four user-session stores and the
+ * subject-level revocation pair together; `mfaFactorStore` and
+ * `mfaTransactionStore` are read by a composition that installs MFA;
+ * `auditSink` names a sink the audit-sink module's factory registers.
+ */
+export const adaptersSchema = z
+	.object({
+		rateLimiter: z.enum(["memory", "redis"]),
+		userSessionStores: z.enum(["memory", "redis"]),
+		accessTokenDenylist: z.enum(["memory", "redis"]),
+		replaySeenSet: z.enum(["memory", "redis"]),
+		consentStore: z.enum(["none", "memory", "redis"]),
+		federationTokenStore: z.enum(["memory", "redis"]),
+		federationGrantStore: z.enum(["memory", "redis"]),
+		federationGrantIntentStore: z.enum(["memory", "redis"]),
+		mfaFactorStore: z.enum(["memory", "redis", "store"]),
+		mfaTransactionStore: z.enum(["memory", "redis"]),
+		codeRepository: z.enum(["memory", "redis"]),
+		clientRepository: z.enum(["yaml"]),
+		userRepository: z.enum(["yaml", "http"]),
+		auditSink: z.string().min(1),
+	})
+	.strict();
+
+/** The composition root's adapter selections, as `adaptersSchema` reads them. */
+export type Adapters = z.output<typeof adaptersSchema>;
+
+/** A YAML file's path: a repository reads its entries from it when it is built. */
+const yamlSchema = z.object({ path: z.string() }).strict();
+
+/**
+ * `repositories`: the YAML client registry, and the user repository's
+ * settings for each adapter it may be — the YAML directory, or the Store's
+ * HTTP endpoints. The HTTP settings are shape only: the repository holds each
+ * value to its rules (https or loopback, a credential's strength, positive
+ * whole numbers) when it is built, and names what it refuses.
+ */
+export const repositoriesSectionSchema = z
+	.object({
+		client: z.object({ yaml: yamlSchema }).strict(),
+		user: z
+			.object({
+				yaml: yamlSchema,
+				http: z
+					.object({
+						authenticateUrl: z.unknown().optional(),
+						authenticateByTokenUrl: z.unknown().optional(),
+						linkFederatedIdentityUrl: z.unknown().optional(),
+						findSubjectByFederatedIdentityUrl: z.unknown().optional(),
+						federatedIdentityLookupCoverage: z.unknown().optional(),
+						bearerToken: z.unknown().optional(),
+						timeout: z.unknown().optional(),
+						maxResponseBytes: z.unknown().optional(),
+					})
+					.strict(),
+			})
+			.strict(),
+	})
+	.strict();
+
+/** The in-process code repository's section: the default lifetime, in positive whole seconds. */
+export const inMemoryCodeRepositorySectionSchema = z
+	.object({ defaultExpiresIn: z.coerce.number().int().positive() })
+	.strict();
+
+/**
+ * `audit-sink`: each sink's options, keyed by the sink's name, for the sink
+ * `adapters.auditSink` selects. Open: the sinks are the factory's, and each
+ * builder holds its own options to its rules.
+ */
+export const auditSinkSectionSchema = z
+	.record(z.string(), z.record(z.string(), z.unknown()))
+	.optional();

@@ -88,7 +88,13 @@ const SELECTIONS = [
 		"ACCESS_TOKEN_DENYLIST_ADAPTER",
 		"memory",
 	],
-	["replaySeenSet", "REPLAY_SEEN_SET", "replaySeenSet.adapter", "REPLAY_SEEN_SET_ADAPTER", "memory"],
+	[
+		"replaySeenSet",
+		"REPLAY_SEEN_SET",
+		"replaySeenSet.adapter",
+		"REPLAY_SEEN_SET_ADAPTER",
+		"memory",
+	],
 	["consentStore", "CONSENT_STORE", "consentStore.adapter", "CONSENT_STORE_ADAPTER", "memory"],
 	[
 		"federationTokenStore",
@@ -167,6 +173,13 @@ describe("the shipped selections", () => {
 		expect(refusal({ ADAPTERS_RATE_LIMITER: "memcached" }).message).toMatch(
 			/adapters\.rateLimiter/,
 		);
+	});
+
+	it("refuses the Store for the MFA transaction store, which holds verification state, and accepts it for the factor store", () => {
+		expect(refusal({ ADAPTERS_MFA_TRANSACTION_STORE: "store" }).message).toMatch(
+			/adapters\.mfaTransactionStore/,
+		);
+		expect(adaptersFrom({ ADAPTERS_MFA_FACTOR_STORE: "store" }).mfaFactorStore).toBe("store");
 	});
 
 	it("refuses a key the section does not declare, naming it", () => {

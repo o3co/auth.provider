@@ -46,7 +46,8 @@ import express from "express";
 import request from "supertest";
 import { afterEach, describe, expect, it } from "vitest";
 import { buildModules } from "../buildModules.mjs";
-import { capturedRenames } from "./library-references.fixture.mjs";
+import type { Switches } from "../configPath.mjs";
+import { capturedRenames, inProcessAdapters } from "./library-references.fixture.mjs";
 
 const keyPair = generateKeyPairSync("ed25519", {
 	publicKeyEncoding: { type: "spki", format: "pem" },
@@ -100,7 +101,6 @@ const config: AppConfig & Record<string, unknown> = {
 			legacyRtPolicy: "reject" as const,
 		},
 		oidcMode: "oidc-required",
-		code: { adapter: "memory" as const },
 	},
 	// The grant this whole test is about: it mints straight from an
 	// authenticated browser session, which is the BFF topology.
@@ -120,12 +120,11 @@ const config: AppConfig & Record<string, unknown> = {
 	},
 	rateLimit: { failMode: "open" },
 	federations: { google: { enabled: false } },
-	repositories: {
-		client: { type: "yaml", path: "./config/clients.yaml" },
-		user: { type: "yaml", path: "./config/users.yaml", timeout: 5000 },
-		code: { type: "memory", defaultExpiresIn: 600 },
-	},
+	"standalone-in-memory-code-repository": { defaultExpiresIn: 600 },
 } as unknown as AppConfig;
+
+/** What phase one hands `buildModules`: the configuration, and every store in process. */
+const switches = { ...config, adapters: inProcessAdapters() } as unknown as Switches;
 
 const testRepositoriesModule = defineModule({
 	name: "test:repositories",
@@ -181,7 +180,7 @@ describe("POST /session/logout invalidates the session grant's access token", ()
 
 	async function buildApp() {
 		const handle = await createApp({
-			modules: buildModules(config, {
+			modules: buildModules(switches, {
 				keyStoreModule: testKeyStoreModule,
 				repositoriesModule: testRepositoriesModule,
 				refreshTokenFamilyModules: [memoryRefreshTokenFamilyStoreModule],

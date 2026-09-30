@@ -152,7 +152,7 @@ const boot = async (allowKeep: boolean, opts: BootOptions = {}) => {
 			},
 		},
 		rateLimit: { failMode: "closed" },
-		audit: { sink: { type: "none" } },
+		core: { ...makeValidCoreConfig().core, declaredAbsent: ["auditSink"] },
 		"federation-grants": {
 			enabled: true,
 			allowKeepOnSubjectRevocation: allowKeep,

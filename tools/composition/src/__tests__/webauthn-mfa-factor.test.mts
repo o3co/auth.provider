@@ -29,7 +29,6 @@
  */
 
 import type {
-	AppConfig,
 	AuditEvent,
 	AuditSink,
 	MfaFactorData,
@@ -114,7 +113,7 @@ async function boot(stores: { readonly factorStore?: MfaFactorStore } = {}): Pro
 				...config,
 				...CONFIG,
 				...webauthnMfaFactorConfigForTests({ enabled: true }),
-			}) as AppConfig,
+			}) as typeof config,
 		extraOverrides: () => ({ mfaFactorStore: factorStore, auditSink: audit }),
 	});
 	const { mfaTransactionStore, userSessionStore } = current.handle.components as unknown as {

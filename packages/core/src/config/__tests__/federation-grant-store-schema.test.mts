@@ -19,46 +19,24 @@ import { AppConfigSchema } from "#/config/application.schema.mjs";
 import { makeValidAppConfig } from "#/testing/fixtures/valid-config.mjs";
 
 /**
- * The two adapter switches the standalone template composes federation
- * grants from. Declared because a key `AppConfigSchema` does not know is
- * stripped before `buildModules` reads it, and the operator's choice silently
- * becomes the default. Two switches, because the grant store and the intent
- * store are installed independently — grants in Redis with acquisition in
- * memory is a supported single-replica shape (a restart loses flows in
- * progress, nothing else).
+ * Which modules provide the two federation-grant stores is a composition
+ * root's choice, not core's: `federationGrantStore` and
+ * `federationGrantIntentStore`, where the selections were, are presence-only,
+ * kept as written so a root that parses with `AppConfigSchema` before boot
+ * still hands them to the refusal of the paths they moved from.
  */
 const base = makeValidAppConfig();
 
-describe("federationGrantStore.adapter", () => {
-	it.each(["memory", "redis"] as const)("accepts %s", (adapter) => {
-		expect(
-			AppConfigSchema.parse({ ...base, federationGrantStore: { adapter } }).federationGrantStore,
-		).toEqual({ adapter });
-	});
+describe.each(["federationGrantStore", "federationGrantIntentStore"])(
+	"%s, where the selection was",
+	(key) => {
+		it("is kept as written, whatever it holds: core reads nothing of it", () => {
+			const parsed = AppConfigSchema.parse({ ...base, [key]: { adapter: "postgres" } });
+			expect((parsed as Record<string, unknown>)[key]).toEqual({ adapter: "postgres" });
+		});
 
-	it("refuses an adapter it does not know, by name", () => {
-		expect(() =>
-			AppConfigSchema.parse({ ...base, federationGrantStore: { adapter: "postgres" } }),
-		).toThrow(/federationGrantStore/);
-	});
-});
-
-describe("federationGrantIntentStore.adapter", () => {
-	it.each(["memory", "redis"] as const)("accepts %s", (adapter) => {
-		expect(
-			AppConfigSchema.parse({ ...base, federationGrantIntentStore: { adapter } })
-				.federationGrantIntentStore,
-		).toEqual({ adapter });
-	});
-
-	it("refuses an adapter it does not know, by name", () => {
-		expect(() =>
-			AppConfigSchema.parse({ ...base, federationGrantIntentStore: { adapter: "postgres" } }),
-		).toThrow(/federationGrantIntentStore/);
-	});
-
-	it("is absent when omitted — the default lives in reference.conf", () => {
-		expect(AppConfigSchema.parse(base).federationGrantStore).toBeUndefined();
-		expect(AppConfigSchema.parse(base).federationGrantIntentStore).toBeUndefined();
-	});
-});
+		it("is absent when omitted", () => {
+			expect((AppConfigSchema.parse(base) as Record<string, unknown>)[key]).toBeUndefined();
+		});
+	},
+);

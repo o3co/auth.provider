@@ -127,6 +127,7 @@ describe("the package's config/reference.conf", () => {
 	it.each([
 		["redis-access-token-denylist.keyPrefix", "atdeny:"],
 		["redis-challenge-store.keyPrefix", "chal:"],
+		["redis-code-repository.keyPrefix", "oauth:code:"],
 		["redis-code-repository.defaultExpiresIn", 600],
 		["redis-consent-store.keyPrefix", "consent:"],
 		["redis-device-code-store.keyPrefix", "devauth:"],

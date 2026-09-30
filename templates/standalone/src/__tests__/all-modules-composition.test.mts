@@ -34,10 +34,10 @@
  */
 
 import { readdirSync, readFileSync } from "node:fs";
-import type { AppConfig } from "@o3co/auth-provider-core";
 import type express from "express";
 import request from "supertest";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
+import type { Switches } from "#/configPath.mjs";
 import {
 	ALICE,
 	AS_LISTED,
@@ -378,7 +378,7 @@ describe("discovery", () => {
 		await on.handle.dispose();
 		current = undefined;
 
-		const { app } = await boot({ env: { ...SINGLE_ENV, CONSENT_STORE_ADAPTER: "none" } });
+		const { app } = await boot({ env: { ...SINGLE_ENV, ADAPTERS_CONSENT_STORE: "none" } });
 		const doc = (await request(app).get(DISCOVERY_PATHS[0])).body;
 		expectValidMetadata(doc);
 		expect(doc.client_id_metadata_document_supported).toBeUndefined();
@@ -386,18 +386,18 @@ describe("discovery", () => {
 	});
 
 	/** The grant connections dropped: they name the OIDC federation. */
-	const withoutConnections = (config: AppConfig): AppConfig =>
+	const withoutConnections = (config: Switches): Switches =>
 		({
 			...config,
 			"federation-grants": { ...config["federation-grants"], connections: {} },
-		}) as AppConfig;
+		}) as Switches;
 
 	const FEATURE_SWITCHES: ReadonlyArray<
 		readonly [
 			feature: string,
 			variable: string,
 			path: string,
-			config: ((config: AppConfig) => AppConfig) | undefined,
+			config: ((config: Switches) => Switches) | undefined,
 		]
 	> = [
 		["federation grants", "FEDERATION_GRANTS_ENABLED", "/oauth/federation-grants", undefined],
@@ -578,10 +578,10 @@ describe("every module's primary route answers in the one app", () => {
 	knownDefect(
 		"a federation enabled from the documented variables alone either refuses to boot or completes a login",
 		async () => {
-			const withoutLanding = (config: AppConfig): AppConfig => {
+			const withoutLanding = (config: Switches): Switches => {
 				const federations = config.federations as Record<string, Record<string, unknown>>;
 				const { clientUrl: _dropped, ...oidc } = federations.oidc ?? {};
-				return { ...config, federations: { ...federations, oidc } } as unknown as AppConfig;
+				return { ...config, federations: { ...federations, oidc } } as unknown as Switches;
 			};
 			let composed: Composition;
 			try {

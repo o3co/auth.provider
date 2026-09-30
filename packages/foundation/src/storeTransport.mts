@@ -101,7 +101,7 @@ export function bearerAuthorization(value: unknown, owner: string): string | und
 		throw new Error(
 			`${owner}: ${describeWeakSecret(actualBytes, {
 				configKey: "repositories.user.http.bearerToken",
-				envVar: "CLIENT_USER_BEARER_TOKEN",
+				envVar: "REPOSITORIES_USER_HTTP_BEARER_TOKEN",
 			})}`,
 		);
 	}

@@ -46,6 +46,10 @@ import {
 	withoutRenamedVariables,
 } from "../config/removed-keys.mjs";
 import { describeValue } from "../errors/describe-value.mjs";
+import {
+	describeAbsenceDeclaration,
+	isAbsenceDeclared,
+} from "../modules/manifest/absence-policy.mjs";
 import type { ComponentKey, ComponentMap } from "../modules/manifest/component-map.mjs";
 import type {
 	FederationInstance,
@@ -1473,7 +1477,7 @@ function checkDeclaredAbsence(
 
 	for (const [key, { policy }] of byKey) {
 		if (plannedKeys.has(key)) continue;
-		if (readConfigPath(config, policy.configKey) === policy.absentValue) continue;
+		if (isAbsenceDeclared(config, policy)) continue;
 
 		const consumedBy = modules
 			.filter(
@@ -1489,7 +1493,7 @@ function checkDeclaredAbsence(
 				`Component "${key}" is read by ` +
 				`${consumedBy.length === 1 ? `module "${consumedBy[0]}"` : `modules [${consumedBy.join(", ")}]`} ` +
 				"but nothing provides it, and its absence is not declared. " +
-				`Wire a provider, or set ${configKeyDotted} = "${policy.absentValue}" to declare ` +
+				`Wire a provider, or ${describeAbsenceDeclaration(policy)} to declare ` +
 				`the capability absent on purpose. ${policy.hint}`,
 			reason: "component-absence-undeclared",
 			stage: "validateManifests",

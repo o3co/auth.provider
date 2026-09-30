@@ -35,18 +35,24 @@ import {
 	oauthSessionModule,
 } from "@o3co/auth-provider-oauth";
 import {
+	redisCodeRepositoryModule,
 	redisFederationGrantStoreModule,
 	redisRateLimiterModule,
 	redisRefreshTokenFamilyStoreModule,
 } from "@o3co/auth-provider-redis";
 import { sessionModule, sessionStoreModule } from "@o3co/auth-provider-session";
 import { type Config, empty, parseFile } from "@o3co/ts.hocon";
+import { ADAPTERS_SECTION, readAdapters } from "../adapters.mjs";
 import {
 	httpModule,
+	inMemoryCodeRepositoryModule,
 	keyStoreModule,
 	loggingModule,
+	repositoriesModuleFor,
 	standaloneRedisClientsModule,
+	templateReference,
 } from "../modules.mjs";
+import type { Adapters } from "../sections.mjs";
 
 /** The oauth package's modules, whose manifests read nothing of the configuration they are handed but the grant switches. */
 const OAUTH_MODULES = [
@@ -68,6 +74,8 @@ const RENAMING_MODULES = [
 	httpModule,
 	keyStoreModule,
 	standaloneRedisClientsModule,
+	repositoriesModuleFor({ client: "yaml", user: "yaml" }),
+	inMemoryCodeRepositoryModule,
 ];
 
 /** Every package reference the template's modules declare, core's last. */
@@ -91,20 +99,64 @@ export function libraryLayers(env: Readonly<Record<string, string>>): Config {
 /**
  * What a test that parses `layers` with `AppConfigSchema` lays beside that
  * parse: every top-level section core's schema does not declare — the
- * template's own modules' among them — as written, which the parse drops.
+ * template's own modules' among them — as written, which the parse drops;
+ * not the composition root's `adapters`, which boot is never handed
+ * (`adaptersOf`).
  */
 export function sectionsCoreDoesNotDeclare(layers: Config): Record<string, unknown> {
 	const raw = layers.toObject() as Record<string, unknown>;
 	return Object.fromEntries(
 		Object.entries(raw).filter(
-			([key]) => !Object.hasOwn(AppConfigSchema.shape, key) && key !== "renamed-variables",
+			([key]) =>
+				!Object.hasOwn(AppConfigSchema.shape, key) &&
+				key !== "renamed-variables" &&
+				key !== ADAPTERS_SECTION,
 		),
 	);
 }
 
-/** The `renamed-variables` section a resolution under `env` holds. */
+/**
+ * The composition root's `adapters` a resolution holds — `layers`, the
+ * template's `config/reference.conf` among them, under `env` — as phase one
+ * reads them.
+ */
+export function adaptersOf(layers: Config, env: Readonly<Record<string, string>>): Adapters {
+	return readAdapters(layers.toObject() as Record<string, unknown>, env);
+}
+
+/** The adapters the template ships, as its `config/reference.conf` sets them with no environment. */
+export function shippedAdapters(): Adapters {
+	return adaptersOf(parseFile(fileURLToPath(templateReference()), { env: {} }), {});
+}
+
+/** The shipped adapters with every store the template can hold in process there: no Redis connection needed. */
+export function inProcessAdapters(): Adapters {
+	return {
+		...shippedAdapters(),
+		rateLimiter: "memory",
+		userSessionStores: "memory",
+		accessTokenDenylist: "memory",
+		replaySeenSet: "memory",
+		federationTokenStore: "memory",
+		federationGrantStore: "memory",
+		federationGrantIntentStore: "memory",
+		mfaFactorStore: "memory",
+		mfaTransactionStore: "memory",
+		codeRepository: "memory",
+	};
+}
+
+/**
+ * The `renamed-variables` section a resolution under `env` holds: what every
+ * module above captures, and the Redis code repository's, which the
+ * in-process one's excludes from one composition (both declare
+ * CLIENT_CODE_DEFAULT_EXPIRES_IN renamed, each to its own new name).
+ */
 export function capturedRenames(
 	env: Readonly<Record<string, string | undefined>>,
 ): Record<string, string | null> {
-	return renamedVariableCaptures({ modules: RENAMING_MODULES, core: CORE_RELOCATIONS, env });
+	return {
+		...renamedVariableCaptures({ modules: [redisCodeRepositoryModule], env }),
+		...renamedVariableCaptures({ modules: RENAMING_MODULES, core: CORE_RELOCATIONS, env }),
+	};
 }

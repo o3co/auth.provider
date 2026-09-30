@@ -21,7 +21,7 @@
  * overrides are followed through both configuration phases and `createApp`
  * to the limiter the module builds. Were `redis-rate-limiter` lost, the
  * module's default of 60 requests / 60 s would apply to the deployment
- * `docker-compose.production.yml` ships (`RATE_LIMITER_ADAPTER: redis`)
+ * `docker-compose.production.yml` ships (`ADAPTERS_RATE_LIMITER: redis`)
  * whatever the operator wrote.
  */
 
@@ -59,7 +59,7 @@ const ENV = {
 	KEY_STORE_LOCAL_SECRET: "test-secret-rate-limiter-e2e.at-least-32-bytes.ok",
 	OAUTH_JWT_ISSUER: "https://auth.test",
 	SESSION_STORE_SECRET: "test-session-secret-rate-limiter-e2e.at-least-32-bytes.ok",
-	RATE_LIMITER_ADAPTER: "redis",
+	ADAPTERS_RATE_LIMITER: "redis",
 };
 
 /**
@@ -162,7 +162,7 @@ afterAll(async () => {
 
 describe("the shipped configuration reaches the Redis rate limiter", () => {
 	it("selects the Redis adapter the production compose file pins, in phase one", () => {
-		expect(booted.switches.rateLimiter?.adapter).toBe("redis");
+		expect(booted.switches.adapters.rateLimiter).toBe("redis");
 	});
 
 	it("carries the operator's per-endpoint budgets through boot's parse", () => {
