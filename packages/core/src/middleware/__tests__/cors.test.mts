@@ -245,6 +245,12 @@ describe("corsMw — an exact-match allowlist on the browser-facing surface", ()
 			expect(moved.headers["access-control-allow-origin"]).toBeUndefined();
 		});
 
+		it("follows jwks.path rather than assuming the default", async () => {
+			const app = buildApp([ALLOWED], { jwks: { path: "/keys.json" } } as never);
+			const moved = await request(app).get("/.well-known/jwks.json").set("Origin", ALLOWED);
+			expect(moved.headers["access-control-allow-origin"]).toBeUndefined();
+		});
+
 		it("matches the path the way the router does — case and trailing slash", async () => {
 			const app = buildApp([ALLOWED]);
 			for (const path of ["/OAuth/Token", "/oauth/token/"]) {

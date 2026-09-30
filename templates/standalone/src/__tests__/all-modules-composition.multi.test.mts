@@ -166,6 +166,20 @@ describe('every module on, every shared store on Redis, deployment.mode = "multi
 		expect(discovery.body).toEqual(single.discovery);
 	});
 
+	it("boots as multi on CORE_DEPLOYMENT_MODE=multi alone", async () => {
+		const { DEPLOYMENT_MODE: _old, ...env } = MULTI_ENV;
+		current = await compose({ ...MULTI, env: { ...env, CORE_DEPLOYMENT_MODE: "multi" } });
+		expect(current.handle.components.deploymentMode).toBe("multi");
+	});
+
+	it("boots as multi on DEPLOYMENT_MODE=multi beside CORE_DEPLOYMENT_MODE=multi, as the umbrella sets them", async () => {
+		current = await compose({
+			...MULTI,
+			env: { ...MULTI_ENV, DEPLOYMENT_MODE: "multi", CORE_DEPLOYMENT_MODE: "multi" },
+		});
+		expect(current.handle.components.deploymentMode).toBe("multi");
+	});
+
 	/**
 	 * Each store's switch back to memory, alone, with every module on. The
 	 * boot names the module that declared the state it would fork.

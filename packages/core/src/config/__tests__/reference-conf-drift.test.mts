@@ -123,6 +123,65 @@ describe("core's reference.conf captures exactly the variables core's own sectio
 	});
 });
 
+describe("core's reference.conf binds core's own section and the JWKS module's, and nothing at the paths they moved from", () => {
+	const MARKER = "__CORE_SECTION_MARKER__";
+	/** Every dotted path the file sets to `MARKER` with `variable` set to it. */
+	const pathsSetBy = (variable: string): string[] => {
+		const paths: string[] = [];
+		const walk = (tree: unknown, prefix: string): void => {
+			if (tree === MARKER) paths.push(prefix);
+			if (typeof tree !== "object" || tree === null) return;
+			for (const [key, value] of Object.entries(tree)) {
+				walk(value, prefix === "" ? key : `${prefix}.${key}`);
+			}
+		};
+		walk(
+			parseFile(REFERENCE_CONF_PATH, { env: { ...REQUIRED_ENV, [variable]: MARKER } }).toObject(),
+			"",
+		);
+		return paths.filter((path) => !isCapture(path)).sort();
+	};
+
+	it.each([
+		["CORE_DEPLOYMENT_MODE", "core.deployment.mode"],
+		["JWKS_PATH", "jwks.path"],
+		["JWKS_CACHE_MAX_AGE", "jwks.cacheMaxAge"],
+	])("binds %s at %s alone", (variable, path) => {
+		expect(pathsSetBy(variable)).toEqual([path]);
+	});
+
+	it("binds DEPLOYMENT_MODE nowhere but its capture", () => {
+		expect(pathsSetBy("DEPLOYMENT_MODE")).toEqual([]);
+	});
+
+	it("captures DEPLOYMENT_MODE and CORE_DEPLOYMENT_MODE as the resolution sees them", () => {
+		const captured = (env: Record<string, string>) =>
+			(
+				parseFile(REFERENCE_CONF_PATH, { env: { ...REQUIRED_ENV, ...env } }).toObject() as Record<
+					string,
+					unknown
+				>
+			)[RENAMED_VARIABLES_SECTION];
+		expect(captured({})).toEqual({ DEPLOYMENT_MODE: null, CORE_DEPLOYMENT_MODE: null });
+		expect(captured({ DEPLOYMENT_MODE: "multi" })).toEqual({
+			DEPLOYMENT_MODE: "multi",
+			CORE_DEPLOYMENT_MODE: null,
+		});
+	});
+
+	it("sets nothing at deployment, sessionRequirements or oauth.jwt's JWKS keys", () => {
+		const tree = parseFile(REFERENCE_CONF_PATH, { env: REQUIRED_ENV }).toObject();
+		for (const path of [
+			"deployment",
+			"sessionRequirements",
+			"oauth.jwt.jwksPath",
+			"oauth.jwt.jwksCacheMaxAge",
+		]) {
+			expect(hasPath(tree, path), path).toBe(false);
+		}
+	});
+});
+
 describe("core's reference.conf declares the operator keys a composition layering on it alone needs", () => {
 	// The drift diff above proves the schema keeps every path the file has; it
 	// cannot notice a path the file should have and does not. Declared only in

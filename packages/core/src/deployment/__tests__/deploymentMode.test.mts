@@ -355,6 +355,11 @@ describe("the deploymentMode key is reserved", () => {
 // ---------------------------------------------------------------------------
 
 describe("deploymentModeOf, on core's root", () => {
+	it("reads core.deployment.mode, and nothing at deployment.mode, the path it moved from", () => {
+		expect(core.deploymentModeOf({ core: { deployment: { mode: "multi" } } })).toBe("multi");
+		expect(core.deploymentModeOf({ deployment: { mode: "multi" } })).toBe("unset");
+	});
+
 	it("reads single and multi as the configuration states them", () => {
 		expect(core.deploymentModeOf({ deployment: { mode: "single" } })).toBe("single");
 		expect(core.deploymentModeOf({ deployment: { mode: "multi" } })).toBe("multi");
