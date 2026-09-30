@@ -58,6 +58,8 @@ export {
 } from "./fake-idp.mjs";
 export { userRepositoryHttpOf, withUserRepositoryHttp } from "./fixtures/userRepository.mjs";
 export {
+	type CoreConfigForTestsOptions,
+	coreConfigForTests,
 	makeValidAppConfig,
 	makeValidCoreConfig,
 	makeValidFullSections,

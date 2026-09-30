@@ -99,8 +99,8 @@ const TABLE: Readonly<Record<Prefix, Readonly<Record<Cell, Applied>>>> = {
 		offConfigured: spec(60, 60),
 	},
 	mfa: {
-		// No `mfa.rateLimit.routes` ships: the limiter's default.
-		shipped: spec(60, 60),
+		// `mfa.rateLimit.routes` ships 60 per 300 s.
+		shipped: spec(60, 300),
 		configured: spec(13, 240),
 		declared: spec(6, 75),
 		off: spec(60, 60),

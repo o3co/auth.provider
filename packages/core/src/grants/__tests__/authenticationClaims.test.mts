@@ -16,6 +16,7 @@
 
 import { describe, expect, it } from "vitest";
 import {
+	authTimeClaim,
 	composeAmr,
 	EMAIL_OTP_AMR,
 	FEDERATED_AMR,
@@ -27,6 +28,7 @@ import {
 	SOFTWARE_KEY_AMR,
 	wellFormedAcr,
 	wellFormedAmr,
+	wellFormedAuthTime,
 } from "#/grants/authenticationClaims.mjs";
 
 describe("wellFormedAmr — the amr a token may carry", () => {
@@ -62,6 +64,39 @@ describe("wellFormedAcr — the acr a token may carry", () => {
 			expect(wellFormedAcr(value)).toBeUndefined();
 		},
 	);
+});
+
+describe("wellFormedAuthTime — the auth_time a token may carry", () => {
+	it("is a whole number of seconds since the epoch", () => {
+		expect(wellFormedAuthTime(1_776_729_600)).toBe(1_776_729_600);
+		expect(wellFormedAuthTime(0)).toBe(0);
+	});
+
+	it.each([
+		["a fraction", 1_776_729_600.5],
+		["a negative number", -1],
+		["NaN", Number.NaN],
+		["Infinity", Number.POSITIVE_INFINITY],
+		["a number past Number.MAX_SAFE_INTEGER", 2 ** 53],
+		["a numeric string", "1776729600"],
+		["null", null],
+		["undefined", undefined],
+	])("is undefined for %s", (_label, value) => {
+		expect(wellFormedAuthTime(value)).toBeUndefined();
+	});
+});
+
+describe("authTimeClaim — an authentication instant as auth_time", () => {
+	it("is the instant in whole seconds since the epoch, rounded down", () => {
+		expect(authTimeClaim(new Date("2026-04-21T00:00:00.999Z"))).toBe(Date.UTC(2026, 3, 21) / 1000);
+	});
+
+	it.each([
+		["a Date that is not valid", new Date("not a date")],
+		["an instant before the epoch", new Date(-1_500)],
+	])("is undefined for %s", (_label, instant) => {
+		expect(authTimeClaim(instant)).toBeUndefined();
+	});
 });
 
 describe("the amr values this provider records", () => {

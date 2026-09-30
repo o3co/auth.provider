@@ -62,6 +62,9 @@ import {
 	tokenTypeForConfirmation,
 	type UserSessionStore,
 	verifyJwt,
+	wellFormedAcr,
+	wellFormedAmr,
+	wellFormedAuthTime,
 } from "@o3co/auth-provider-core";
 import type { Request, RequestHandler, Response, Router } from "express";
 // Session data type augmentation. /authorize writes no identity binding into
@@ -1064,6 +1067,11 @@ export const createOAuthRouter = async (
 						token_type: tokenType,
 						jti: typeof jti === "string" ? jti : undefined,
 						cnf,
+						// The authentication event the token carries: RFC 9470 §6.2's `acr`
+						// and `auth_time`, and its `amr`.
+						acr: wellFormedAcr(claims.acr),
+						amr: wellFormedAmr(claims.amr),
+						auth_time: wellFormedAuthTime(claims.auth_time),
 					};
 					return res.status(200).json(formatObject(response));
 				} catch (cause) {

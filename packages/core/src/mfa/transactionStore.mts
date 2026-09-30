@@ -429,6 +429,66 @@ export async function getBoundMfaTransaction(
 }
 
 /**
+ * `answer`, what `reserveAttempt(id, max)` answered, as the port promises
+ * it: `ok` the literal boolean, `attempts` a safe integer — from 1 to `max`
+ * when reserved, from 0 when not. `undefined` for anything else, which the
+ * caller answers as the store's outage before any proof is checked: a count
+ * it cannot read limits nothing. Each field is read once.
+ */
+export function readMfaAttemptReservation(
+	answer: unknown,
+	max: number,
+): { readonly ok: boolean; readonly attempts: number } | undefined {
+	try {
+		if (!isRecord(answer)) return undefined;
+		const { ok, attempts } = answer;
+		if (typeof ok !== "boolean" || !isCount(attempts)) return undefined;
+		if (ok && (attempts < 1 || attempts > max)) return undefined;
+		return { ok, attempts };
+	} catch {
+		return undefined;
+	}
+}
+
+/**
+ * Whether `consumed`, what `consume(bound.id, bound.version)` answered other
+ * than `null`, is the transaction the bound read returned: the same id,
+ * version, purpose, subject and `redirectTo`, bound to the same binding, and
+ * a continuation — when the read had one — for the same subject and
+ * redirect. The caller answers anything else as the store's outage and writes
+ * nothing, before a factor moves on or a login resumes.
+ */
+export function isConsumedMfaTransaction(
+	consumed: unknown,
+	bound: MfaTransaction,
+): consumed is MfaTransaction {
+	try {
+		if (!isRecord(consumed)) return false;
+		const { id, version, purpose, subject, redirectTo, continuation } = consumed;
+		if (
+			id !== bound.id ||
+			version !== bound.version ||
+			purpose !== bound.purpose ||
+			subject !== bound.subject ||
+			redirectTo !== bound.redirectTo ||
+			!isMfaTransactionBoundTo(consumed as Pick<MfaTransaction, "binding">, bound.binding)
+		) {
+			return false;
+		}
+		const expected = bound.continuation;
+		if (expected === undefined) return continuation === undefined;
+		if (!isRecord(continuation) || !isRecord(continuation.primary)) return false;
+		const { primary } = continuation;
+		return (
+			primary.subject === expected.primary.subject &&
+			primary.redirectTo === expected.primary.redirectTo
+		);
+	} catch {
+		return false;
+	}
+}
+
+/**
  * The subject lock policy (`mfa.lockout`). Every field is a positive whole
  * number; {@link checkMfaLockoutPolicy} is the rule.
  */

@@ -6,7 +6,7 @@
 import { randomUUID } from "node:crypto";
 import type { JWTPayload, KeyStore } from "../keys/KeyStore.mjs";
 import type { UserSessionClaims } from "../user-sessions/types.mjs";
-import { wellFormedAcr, wellFormedAmr } from "./authenticationClaims.mjs";
+import { authTimeClaim, wellFormedAcr, wellFormedAmr } from "./authenticationClaims.mjs";
 import { filterClaimsByScope } from "./claimFilter.mjs";
 import type { Token } from "./token.mjs";
 
@@ -37,7 +37,9 @@ export interface GenerateIdTokenOptions {
  * Generates a signed id_token JWT (OIDC Core §2): iss, sub, aud, azp (when
  * given), exp, iat, jti, auth_time, sid (for back-channel logout), nonce
  * (when the authorize request sent one), well-formed amr / acr, and the user
- * claims the scopes authorize ({@link filterClaimsByScope}).
+ * claims the scopes authorize ({@link filterClaimsByScope}). An `authTime` that
+ * `authTimeClaim` cannot say — an invalid `Date`, an instant before the epoch —
+ * is a `RangeError`, and nothing is signed.
  *
  * Header `typ: "JWT"` is load-bearing: logout pins `id_token_hint` to it, and
  * every at+jwt-pinned surface (userinfo, introspection, the central verifier)
@@ -46,6 +48,11 @@ export interface GenerateIdTokenOptions {
  * RPs that validate `typ`.
  */
 export async function generateIdToken(opts: GenerateIdTokenOptions): Promise<Token> {
+	// The id_token always carries `auth_time`: an instant it cannot say is refused, never signed.
+	const authTime = authTimeClaim(opts.authTime);
+	if (authTime === undefined) {
+		throw new RangeError("generateIdToken: authTime must be a valid instant at or after the epoch");
+	}
 	const now = Math.floor(Date.now() / 1000);
 	const expiresIn = opts.expiresIn ?? 3600;
 	const amr = wellFormedAmr(opts.amr);
@@ -57,7 +64,7 @@ export async function generateIdToken(opts: GenerateIdTokenOptions): Promise<Tok
 		exp: now + expiresIn,
 		iat: now,
 		jti: randomUUID(),
-		auth_time: Math.floor(opts.authTime.getTime() / 1000),
+		auth_time: authTime,
 		sid: opts.sid,
 		...(opts.azp ? { azp: opts.azp } : {}),
 		...(opts.nonce ? { nonce: opts.nonce } : {}),
