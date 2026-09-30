@@ -482,7 +482,7 @@ Not implemented:
 - [`src/module.mts`](src/module.mts) — the assembly: the manifest, its required and optional slots, the three routes and the grant, the rate-limit guard and its replica-safety refusal.
 - [`src/grant.mts`](src/grant.mts) — the grant: assertion verification, the sign-count update, the policy call, and token minting.
 - `src/routes/` — the three ceremony handlers, one per endpoint.
-- `src/internal/` — the SimpleWebAuthn boundary (options generation and response verification, and the mapping of library failures onto this package's error codes), and the one answer to a store outage the grant and the routes share.
+- `src/internal/` — the SimpleWebAuthn boundary (options generation, response verification, a response's client data read as the library decodes it, and the mapping of library failures onto this package's error codes), and the one answer to a store outage the grant and the routes share.
 - [`src/sessionSubject.mts`](src/sessionSubject.mts) — `webauthnSessionSubjectModule`: the session bridge on core's admission.
 - `src/mfaFactor/` — the second factor: its module, the factor and its section's schema.
 - [`src/config.mts`](src/config.mts) — the config schema and the `webauthnConfig` slot; [`src/request.mts`](src/request.mts) — the `req.webauthnSubject` augmentation.
