@@ -784,27 +784,11 @@ export const CoreConfigSchema = z.object({
 				subject: z.enum(["watermark", "unsupported"]).optional(),
 			})
 			.optional(),
-		// Declared in core because the dispatch policy spans every installed
-		// binding mechanism (DPoP, mTLS, ...). Default in HOCON; `assembleApp`'s
-		// `tokenBindingMw` reads it through `resolveTokenBindingSettings`
-		// (`"intent-explicit"` when absent), and no slot carries it. See
-		// `packages/core/docs/adr/2026-05-20-token-binding-first-class-abstraction.md`.
-		tokenBinding: z
-			.object({
-				"dispatch-policy": z.enum(["intent-explicit", "strict-mutual-exclusion"]),
-				// Bind a confidential client's refresh token to the presented DPoP
-				// key or client certificate, as is always done for public clients.
-				// RFC 9449 §5 and RFC 8705 §7.1 neither require nor forbid it: a
-				// confidential client authenticates on refresh, and this
-				// implementation refuses an unauthenticated caller and an RT whose
-				// `azp` is not that client. Hardening for deployments whose key is
-				// better protected than the client secret (HSM or TPM vs an env var).
-				// Off by default: a bound RT pins the client to one key for its whole
-				// lifetime, so rotating mid-lifetime breaks refresh. Core's, like
-				// `dispatch-policy`, read through `resolveTokenBindingSettings`.
-				bindConfidentialClientRefreshTokens: coerceBooleanFromEnv.optional(),
-			})
-			.optional(),
+		// Presence-only: the path core's token-binding settings moved from
+		// (`core.tokenBinding`), kept so a root that parses with
+		// `AppConfigSchema` before boot still hands it to the relocation
+		// refusal. Nothing reads it.
+		tokenBinding: z.unknown().optional(),
 	}),
 	// Core's own section, strict at every level: an unknown key is refused,
 	// named and never its value.
@@ -838,6 +822,29 @@ export const CoreConfigSchema = z.object({
 							error: "core.sessionRequirements.expected names each requirement",
 						}),
 					),
+				})
+				.strict()
+				.optional(),
+			// The settings across every mechanism at core's token-binding
+			// extension point (DPoP, mTLS, ...), core's as the point is: read
+			// through `resolveTokenBindingSettings` alone, and carried by no
+			// slot. See
+			// `packages/core/docs/adr/2026-05-20-token-binding-first-class-abstraction.md`.
+			tokenBinding: z
+				.object({
+					// How `tokenBindingMw` arbitrates when several mechanisms succeed
+					// on one request.
+					dispatchPolicy: z.enum(["intent-explicit", "strict-mutual-exclusion"]),
+					// Bind a confidential client's refresh token to the presented DPoP
+					// key or client certificate, as is always done for public clients.
+					// RFC 9449 §5 and RFC 8705 §7.1 neither require nor forbid it: a
+					// confidential client authenticates on refresh, and this
+					// implementation refuses an unauthenticated caller and an RT whose
+					// `azp` is not that client. Hardening for deployments whose key is
+					// better protected than the client secret (HSM or TPM vs an env
+					// var). Off by default: a bound RT pins the client to one key for
+					// its whole lifetime, so rotating mid-lifetime breaks refresh.
+					bindConfidentialClientRefreshTokens: coerceBooleanFromEnv.optional(),
 				})
 				.strict()
 				.optional(),
