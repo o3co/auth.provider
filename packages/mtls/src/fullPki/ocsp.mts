@@ -77,6 +77,22 @@ import {
 import { CRL_NEGATIVE_CACHE_TTL_MS } from "./crl.mjs";
 import { DEFAULT_ALGORITHM_POLICY } from "./defaults.mjs";
 import { type GuardedFetch, isSourceFailure } from "./fetchGuard.mjs";
+import {
+	type Answer,
+	markOutage,
+	type OcspCertificateStatus,
+	type OcspLookup,
+	type OcspResponderUnavailable,
+	type OcspUnavailableReason,
+} from "./ocspAnswer.mjs";
+import { equalBytes } from "./ocspBytes.mjs";
+
+export type {
+	OcspCertificateStatus,
+	OcspLookup,
+	OcspResponderUnavailable,
+	OcspUnavailableReason,
+} from "./ocspAnswer.mjs";
 
 /** OID of `authorityInfoAccess` (RFC 5280 §4.2.2.1). */
 const OID_AUTHORITY_INFO_ACCESS = "1.3.6.1.5.5.7.1.1";
@@ -129,77 +145,6 @@ export const OCSP_CLOCK_SKEW_MS = 5 * 60_000;
  * stays in the same order of magnitude as the negative window.
  */
 export const OCSP_UNDATED_RESPONSE_MAX_AGE_MS = 10 * 60_000;
-
-/**
- * Why a certificate's status could not be determined by OCSP. Values are
- * stable — audit logs read them. `algorithm_not_permitted` is a response, or
- * a delegated responder's certificate, outside the path's algorithm policy.
- */
-export type OcspUnavailableReason =
-	| "no_responder"
-	| "fetch_failed"
-	| "unparseable"
-	| "responder_error"
-	| "no_matching_response"
-	| "unsupported_critical_extension"
-	| "algorithm_not_permitted"
-	| "bad_signature"
-	| "nonce_mismatch"
-	| "nonce_missing"
-	| "not_yet_valid"
-	| "stale"
-	| "unknown"
-	// A delegated responder without `nocheck` — listed on the CA's CRL, or uncheckable.
-	| "responder_revoked"
-	| "responder_status_unavailable";
-
-export type OcspCertificateStatus =
-	| { readonly status: "good" }
-	| {
-			readonly status: "revoked";
-			readonly revokedAt: Date;
-			/** The `CRLReason` name, when the responder gave one. */
-			readonly reason: string | undefined;
-	  };
-
-export type OcspLookup =
-	| {
-			readonly ok: true;
-			/** The responder whose answer this is. */
-			readonly responder: string;
-			readonly status: OcspCertificateStatus;
-			/**
-			 * The answer came from a delegated responder whose certificate lacks
-			 * `id-pkix-ocsp-nocheck`, and no `responderRevocation` source could
-			 * check it — RFC 6960 §4.2.2.2.1's local-policy deviation, for the
-			 * caller to log.
-			 */
-			readonly responderUnchecked?: boolean;
-	  }
-	| {
-			readonly ok: false;
-			readonly reason: OcspUnavailableReason;
-			readonly detail: string;
-			/** The last failure's library error, beside its `reason`, when one threw. */
-			readonly cause?: unknown;
-			/** Every responder that was asked failed as an outage (see the module header). */
-			readonly outage?: true;
-			/**
-			 * Each responder that was asked and could not be used, when the
-			 * certificate named any: what a caller that reports every source one
-			 * by one reads.
-			 */
-			readonly responders?: readonly OcspResponderUnavailable[];
-	  };
-
-/** One responder that was asked and could not be used, and why. */
-export interface OcspResponderUnavailable {
-	readonly url: string;
-	readonly reason: OcspUnavailableReason;
-	readonly detail: string;
-	readonly cause?: unknown;
-	readonly outage?: true;
-}
 
 export type OcspResponders =
 	| { readonly ok: true; readonly urls: readonly string[] }
@@ -298,9 +243,6 @@ const RESPONSE_STATUS_NAMES: Readonly<Record<number, string>> = {
 	6: "unauthorized",
 };
 
-const equalBytes = (a: Uint8Array, b: Uint8Array): boolean =>
-	a.byteLength === b.byteLength && a.every((byte, index) => byte === b[index]);
-
 /** Reasons remembered for the negative window, and at which granularity. */
 type RespondersFailure =
 	| "fetch_failed"
@@ -352,42 +294,6 @@ type CacheEntry =
 			/** Epoch millis after which the responder is tried again. */
 			readonly expiresAt: number;
 	  };
-
-/** What one responder produced for one certificate, after every check. */
-type Answer =
-	| {
-			readonly ok: true;
-			readonly status: OcspCertificateStatus;
-			readonly expiresAt: number;
-			/** A delegated responder without `nocheck`, taken because no source could check it. */
-			readonly responderUnchecked?: boolean;
-			/**
-			 * The delegated responder this answer depended on, when its certificate
-			 * lacks `nocheck`. Cached with the status so every hit re-checks it: a
-			 * responder revoked after the answer must stop counting.
-			 */
-			readonly delegate?: pkijs.Certificate;
-	  }
-	| {
-			readonly ok: false;
-			readonly reason: OcspUnavailableReason;
-			readonly detail: string;
-			readonly cause?: unknown;
-			readonly outage?: true;
-	  };
-
-/** The reasons that say a responder did not answer usefully (see the module header). */
-const OUTAGE_REASONS: ReadonlySet<OcspUnavailableReason> = new Set<OcspUnavailableReason>([
-	"unparseable",
-	"responder_error",
-	"stale",
-]);
-
-/** `answer`, marked an outage when its reason says the responder did not answer usefully. */
-const markOutage = (answer: Answer): Answer =>
-	!answer.ok && answer.outage === undefined && OUTAGE_REASONS.has(answer.reason)
-		? { ...answer, outage: true }
-		: answer;
 
 export interface OcspResolverOptions {
 	readonly fetch: GuardedFetch;
