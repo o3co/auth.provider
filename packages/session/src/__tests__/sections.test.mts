@@ -625,17 +625,20 @@ describe("boot, over a configuration that captures the modules' renamed variable
 	it.each([
 		["loginPage", "the login page"],
 		["rateLimit", "the login's budget"],
-	] as const)("refuses a session with no %s (%s) at validation, naming the key", async (key, _what) => {
-		const err = await refusal((config) => {
-			const { [key]: _gone, ...section } = config.session as Record<string, unknown>;
-			return { ...config, session: section };
-		});
+	] as const)(
+		"refuses a session with no %s (%s) at validation, naming the key",
+		async (key, _what) => {
+			const err = await refusal((config) => {
+				const { [key]: _gone, ...section } = config.session as Record<string, unknown>;
+				return { ...config, session: section };
+			});
 
-		expect(err.reason).toBe("config-validation-failed");
-		expect((err.details as unknown as { issues: unknown[] }).issues).toContainEqual(
-			expect.objectContaining({ path: ["session", key] }),
-		);
-	});
+			expect(err.reason).toBe("config-validation-failed");
+			expect((err.details as unknown as { issues: unknown[] }).issues).toContainEqual(
+				expect.objectContaining({ path: ["session", key] }),
+			);
+		},
+	);
 
 	/** The fixture's configuration without `session-store.secret`. */
 	const withoutSecret = (config: Record<string, unknown>) => {
