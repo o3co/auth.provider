@@ -250,9 +250,10 @@ export function mfaModule(options: MfaModuleOptions = {}): Module {
 	>({
 		name: "mfa",
 		// The module's own section, read at its name. Its schema holds the mode
-		// to its three values before any factory runs; the requirement's
-		// factory reads the rest (`readMfaSettings`), and what that refuses
-		// stays the factory's failure.
+		// to its three values and the page to its shape before any factory
+		// runs; the requirement's factory reads the settings (`readMfaSettings`)
+		// and the page (`stepUpPageOf`), and what those refuse stays the
+		// factory's failure.
 		section: {
 			schema: mfaSectionSchema,
 			reference: new URL("../config/reference.conf", import.meta.url),

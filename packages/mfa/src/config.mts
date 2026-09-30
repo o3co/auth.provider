@@ -170,17 +170,26 @@ const lockoutSchema = z.object(
 	{ error: sectionError },
 );
 
+/** `mfa.page`, the MFA page a step-up starts on: a section holding its `url`. */
+const mfaPageSchema = z.object(
+	{ url: z.string({ error: "must be a string" }) },
+	{ error: sectionError },
+);
+
 /**
- * The MFA module's section, `mfa`: its mode, the key ring, a transaction's
- * life and attempts, and the subject lock, with the transaction's ranges. The
- * ring's refusals (a key that is not 32 bytes, an empty ring, a duplicate
- * id), the sample key's and how the lock's fields relate are not the
- * schema's: `readMfaSettings` makes them, where the keys are decoded, the
- * environment is known and core's rule is applied.
+ * The MFA module's section, `mfa`: its mode, the page's shape, the key ring,
+ * a transaction's life and attempts, and the subject lock, with the
+ * transaction's ranges. The page may be left out, and an empty url is
+ * allowed: the module refuses either as unset. The ring's refusals (a key
+ * that is not 32 bytes, an empty ring, a duplicate id), the sample key's and
+ * how the lock's fields relate are not the schema's: `readMfaSettings` makes
+ * them, where the keys are decoded, the environment is known and core's rule
+ * is applied.
  */
 export const mfaConfigSchema = z.object(
 	{
 		mode: mfaModeSchema,
+		page: mfaPageSchema.optional(),
 		encryptionKeys: z.array(
 			z.object(
 				{
@@ -206,28 +215,21 @@ export const mfaConfigSchema = z.object(
 	{ error: sectionError },
 );
 
-/** `mfa.page`, the MFA page a step-up starts on: a section holding its `url`. */
-const mfaPageSchema = z.object(
-	{ url: z.string({ error: "must be a string" }) },
-	{ error: sectionError },
-);
-
 /**
  * What the MFA module's section schema checks before any factory runs: the
- * mode, the page's shape, and every other key handed on unread, for
- * {@link readMfaSettings}. A missing section or mode reads as unset, which
- * the module refuses as it refuses `off`; a missing page or an empty url is
- * the module's to refuse.
+ * mode and the page's shape, as {@link mfaConfigSchema} holds them, and every
+ * other key handed on unread, for {@link readMfaSettings}. A missing section
+ * or mode reads as unset, which the module refuses as it refuses `off`; a
+ * missing page or an empty url is the module's to refuse.
  */
 export const mfaSectionSchema = mfaConfigSchema
-	.pick({ mode: true })
-	.extend({ page: mfaPageSchema })
+	.pick({ mode: true, page: true })
 	.partial()
 	.loose()
 	.optional();
 
-/** What the MFA module's settings parse: every key of {@link mfaConfigSchema} but the mode. */
-const mfaModuleSettingsSchema = mfaConfigSchema.omit({ mode: true });
+/** What the MFA module's settings parse: every key of {@link mfaConfigSchema} but the mode and the page. */
+const mfaModuleSettingsSchema = mfaConfigSchema.omit({ mode: true, page: true });
 
 /**
  * `mfa-totp-factor` as the factor and its module read it: the switch and the
