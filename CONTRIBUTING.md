@@ -96,13 +96,15 @@ appear on a request the client did not deliberately construct?*
 Under the default `intent-explicit` policy an explicit mechanism wins over
 ambient ones, and **two** succeeding explicit mechanisms are a `400
 invalid_request` — the AS refuses to guess which binding the client meant. So
-are two succeeding **ambient** mechanisms when no explicit one succeeded: an
-ambient mechanism that ships beside mTLS makes every request carrying both
-signals a 400, which is why the choice of `intentExplicit` matters.
+are two succeeding **ambient** mechanisms when no explicit one succeeded: a
+request on which your ambient mechanism and mTLS both succeed is answered 400
+unless an explicit proof also succeeds, and the line
+`token_binding_ambiguous` tells the operator.
 
-Get this backwards on an ambient mechanism (marking it explicit) and any
-request carrying both it and a real explicit proof becomes a 400 for
-well-behaved clients.
+Do not mark an ambient mechanism explicit to avoid that 400. Its signal would
+then win over mTLS on every request carrying both, whether or not the client
+meant to bind with it, and any request carrying both it and a real explicit
+proof would become a 400 for well-behaved clients.
 
 ### 4. `extract` must be all-or-nothing
 
@@ -162,6 +164,9 @@ around merging.
       the same PR
 - [ ] Integration test mounting your module alongside `dpopModule` and
       `mtlsModule`, covering both valid and invalid material
+- [ ] If your mechanism is ambient: an integration test presenting its signal
+      together with an mTLS client certificate, answered `400
+      invalid_request`
 
 ### Reference
 
