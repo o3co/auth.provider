@@ -19,7 +19,8 @@
  * when it constructs a consumer by hand. It is registered in the same set as
  * the boot planner's, so the brand stops accidents, not a deployment that
  * imports the testing entry on purpose. Each requirement is registered and
- * its reach sealed as boot does. `allowAnyReach` lifts the reach rules (the
+ * its reach sealed as boot does, and at most one may declare the
+ * second-factor authority. `allowAnyReach` lifts the reach rules (the
  * snapshot stays) for tests of admission's own mechanics that need two
  * reaching requirements; nothing else uses it.
  */
@@ -31,6 +32,7 @@ import {
 	type SessionRequirement,
 	type SessionRequirementResolver,
 	sealRegisteredReach,
+	secondFactorAuthorities,
 	snapshotReach,
 } from "../requirement.mjs";
 
@@ -39,10 +41,11 @@ const ALLOW_ANY_REACH_REMEDY = "pass allowAnyReach for a test of admission's own
 
 /**
  * The resolver a test hands a consumer: `requirements` by their names, in the
- * order given. Two of one name are refused, as boot refuses a duplicate
- * contribution. With `issuer`, each page is held to that origin. Each reach
- * is read once, here, held to boot's rules unless `allowAnyReach`, and the
- * resolver answers that snapshot.
+ * order given. Two of one name, or two that declare the second-factor
+ * authority, are refused before any reach is read, as boot orders them. With
+ * `issuer`, each page is held to that origin. Each reach is read once, here,
+ * held to boot's rules unless `allowAnyReach`, and the resolver answers that
+ * snapshot. The authority's binding to the MFA ports is boot's alone.
  */
 export function resolverForTests(
 	requirements: readonly SessionRequirement[],
@@ -59,6 +62,14 @@ export function resolverForTests(
 			throw new RangeError(`resolverForTests: two requirements are named "${requirement.name}"`);
 		}
 		byName.set(requirement.name, requirement);
+	}
+	const declarers = secondFactorAuthorities(byName.values()).map(({ name }) => `"${name}"`);
+	if (declarers.length > 1) {
+		throw new RangeError(
+			`resolverForTests: ${declarers.slice(0, -1).join(", ")} and ${declarers.at(-1)} ${declarers.length === 2 ? "both" : "all"} declare the second-factor authority, and at most one requirement may`,
+		);
+	}
+	for (const requirement of byName.values()) {
 		if (options.allowAnyReach === true) {
 			snapshotReach(requirement);
 			continue;

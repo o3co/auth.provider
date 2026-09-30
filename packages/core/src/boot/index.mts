@@ -58,6 +58,7 @@ export type {
 	DuplicateModuleNameDetails,
 	DuplicateOverrideDetails,
 	DuplicateProvidesDetails,
+	DuplicateSecondFactorAuthorityDetails,
 	EnvironmentVariableRenamedDetails,
 	FederationRedirectPolicyUnpairedDetails,
 	FrozenWorld,

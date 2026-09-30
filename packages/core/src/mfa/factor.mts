@@ -176,8 +176,8 @@ export interface MfaFactor {
 	readonly kind: string;
 	/**
 	 * Every `amr` value a verification of this factor may add; `amrFor` answers a
-	 * subset. Boot computes the MFA requirement's reach and drops unsatisfiable
-	 * `acr` entries from it (ADR 2026-09-28-session-admission). Non-empty
+	 * subset. Boot computes the second-factor authority's reach and drops
+	 * unsatisfiable `acr` entries from it (ADR 2026-09-28-session-admission). Non-empty
 	 * strings, never a primary's marker, never `mfa` (`addsMfa` says that).
 	 */
 	readonly amrValues: readonly string[];

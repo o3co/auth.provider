@@ -31,6 +31,7 @@ import type {
 	DuplicateModuleNameDetails,
 	DuplicateOverrideDetails,
 	DuplicateProvidesDetails,
+	DuplicateSecondFactorAuthorityDetails,
 	FederationRedirectPolicyUnpairedDetails,
 	FederationStoresIncompleteDetails,
 	GrantPolicyWithoutIssuerDetails,
@@ -70,7 +71,7 @@ describe("BootStage", () => {
 // ---------------------------------------------------------------------------
 
 describe("BootErrorReason", () => {
-	it("contains exactly the 38 reason literals", () => {
+	it("contains exactly the 39 reason literals", () => {
 		expectTypeOf<BootErrorReason>().toEqualTypeOf<
 			| "module-factory-not-called"
 			| "duplicate-module-name"
@@ -101,6 +102,7 @@ describe("BootErrorReason", () => {
 			| "session-requirement-kind-guarded"
 			| "session-requirements-undeclared"
 			| "session-requirement-missing"
+			| "duplicate-second-factor-authority"
 			| "reserved-component-key"
 			| "module-section-path-invalid"
 			| "contribution-kind-guarded"
@@ -243,6 +245,15 @@ describe("per-reason *Details discriminators", () => {
 		expectTypeOf<
 			FederationStoresIncompleteDetails["reason"]
 		>().toEqualTypeOf<"federation-stores-incomplete">();
+	});
+
+	it("DuplicateSecondFactorAuthorityDetails names each requirement that declares it, with its module", () => {
+		expectTypeOf<
+			DuplicateSecondFactorAuthorityDetails["reason"]
+		>().toEqualTypeOf<"duplicate-second-factor-authority">();
+		expectTypeOf<DuplicateSecondFactorAuthorityDetails["requirements"]>().toEqualTypeOf<
+			readonly { readonly name: string; readonly module: string }[]
+		>();
 	});
 });
 

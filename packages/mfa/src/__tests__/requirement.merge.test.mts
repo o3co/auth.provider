@@ -75,8 +75,6 @@ const FACTOR_SETS: Readonly<Record<MergeFactors, () => MfaFactor[]>> = {
 const ISSUER = "https://auth.test";
 /** `endpoints.mfa.url` as core's reference.conf ships it. */
 const PAGE: StepUpPage = { url: "/mfa", params: {} };
-/** The page as registered: what a step_up admission carries. */
-const REGISTERED_PAGE = { ...PAGE, href: `${ISSUER}/mfa` };
 
 /** The requirement the MFA module registers under `mode`, over the factors of `factors`. */
 const realRequirement = (
@@ -119,8 +117,8 @@ const deps = (row: MergeRow): AdmissionDeps => ({
 	auditSink: undefined,
 });
 
-const decide = (row: MergeRow): Promise<Admission> =>
-	admitSession(deps(row), {
+const decide = (rowDeps: AdmissionDeps, row: MergeRow): Promise<Admission> =>
+	admitSession(rowDeps, {
 		claim: claim(),
 		action: ADMISSION_ACTIONS["oauth.authorize"],
 		asks: { acrValues: row.acrValues ?? [] },
@@ -129,7 +127,11 @@ const decide = (row: MergeRow): Promise<Admission> =>
 for (const group of MERGE_ROW_GROUPS) {
 	describe(group.title, () => {
 		it.each(group.rows)("$row", async (row) => {
-			expect(await decide(row)).toEqual(mergeAdmission(row.expected, row.session, REGISTERED_PAGE));
+			// The requirement the row's composition registered: under `off`, none.
+			const rowDeps = deps(row);
+			expect(await decide(rowDeps, row)).toEqual(
+				mergeAdmission(row.expected, row.session, rowDeps.requirements.get("mfa")),
+			);
 		});
 	});
 }
