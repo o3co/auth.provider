@@ -239,6 +239,13 @@ describe("/session/login rate limiting — limiter failure", () => {
 	});
 });
 
+describe("/session/login rate limiting — the budget", () => {
+	it("refuses to build the router over a configuration with no rateLimit.login", () => {
+		const config = { ...stubConfig, rateLimit: { failMode: "closed" } } as unknown as AppConfig;
+		expect(() => makeApp({ config })).toThrow(/rateLimit\.login/);
+	});
+});
+
 describe("/session/login rate limiting — fallback", () => {
 	it("still limits when no RateLimiter is wired", async () => {
 		// Losing the limiter entirely would turn a weak protection into none on

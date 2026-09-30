@@ -251,6 +251,24 @@ describe("rateLimitBudgets — an override may only tighten", () => {
 		await tighter.dispose();
 	});
 
+	it("registers an override that leaves a switched-off budget off, with no limiter to compare it with", async () => {
+		const handle = await createApp({
+			modules: [
+				defineModule({
+					name: "budget-owner",
+					contributes: { rateLimitBudgets: { fixture: () => null } },
+				}),
+				defineModule({
+					name: "budget-replacer",
+					overrides: { rateLimitBudgets: { fixture: () => null } },
+				}),
+			],
+			bootstrapComponents: bootWith(),
+		});
+		expect(handle.components.rateLimitBudgetResolver?.get("fixture")).toBeUndefined();
+		await handle.dispose();
+	});
+
 	it("refuses an override of a switched-off budget when no limiter declares its default", async () => {
 		const err = await refusal(
 			createApp({
@@ -326,6 +344,46 @@ describe("rateLimitBudgets — the boot line", () => {
 		]);
 		await handle.dispose();
 	});
+
+	it.each<readonly [string, () => RateLimiter]>([
+		[
+			"a failMode outside the guard's two",
+			() =>
+				({
+					kind: "custom",
+					failMode: "maybe",
+					check: async () => ({ allowed: true }),
+				}) as unknown as RateLimiter,
+		],
+		[
+			"a failMode that cannot be read",
+			() =>
+				({
+					kind: "custom",
+					get failMode(): never {
+						throw new Error("getter down");
+					},
+					check: async () => ({ allowed: true }),
+				}) as RateLimiter,
+		],
+	])(
+		"reports a wired limiter with %s as an invalid outage policy",
+		async (_label, limiter) => {
+			const logger = spyLogger();
+			const handle = await createApp({
+				modules: [
+					defineModule({ name: "custom-limiter", provides: { rateLimiter: limiter } }),
+					limiterUser,
+				],
+				bootstrapComponents: { ...bootWith(), logger: logger as never },
+			});
+
+			expect(logger.info.mock.calls.filter((call) => call[1] === "rate_limits_in_force")).toEqual([
+				[{ limiter: { kind: "custom", failMode: "invalid" }, budgets: [] }, "rate_limits_in_force"],
+			]);
+			await handle.dispose();
+		},
+	);
 
 	it("warns when rateLimit.failMode says open and the wired limiter answers another policy", async () => {
 		const logger = spyLogger();
