@@ -19,7 +19,9 @@
  * this deployment runs — `single`, `multi`, or `unset` when nothing was
  * said. Core fills it from the configuration's `deployment.mode` before any
  * provider runs, for every composition, and reserves the key; the
- * replica-safety guard reads the same value. Its contract suite, run over
+ * replica-safety guard reads the same value. The one reading
+ * (`deploymentModeOf`) and the check a reader holds a value to
+ * (`checkDeploymentMode`), both on core's root. Its contract suite, run over
  * what core fills; a test fills the slot with the literal, so there is no
  * double.
  */
@@ -27,6 +29,7 @@
 import { describe, expect, expectTypeOf, it, vi } from "vitest";
 import type { BootError, BootstrapMap } from "#/boot/types.mjs";
 import type { DeploymentMode } from "#/deployment/types.mjs";
+import * as core from "#/index.mjs";
 import { createApp, defineModule, type ProviderDeps } from "#/index.mjs";
 import type { ComponentMap } from "#/modules/manifest/component-map.mjs";
 import { makeValidCoreConfig } from "#/testing/fixtures/valid-config.mjs";
@@ -310,5 +313,87 @@ describe("the deploymentMode key is reserved", () => {
 				source: "overrideComponents",
 			},
 		});
+	});
+
+	it("tells whoever set it to set deployment.mode instead, from every source", async () => {
+		const provider = defineModule({
+			name: "test:provides-deployment-mode",
+			provides: { deploymentMode: () => "multi" as const },
+		});
+		for (const boot of [
+			createApp({ modules: [provider], bootstrapComponents: bootstrap({ mode: "single" }) }),
+			createApp({
+				modules: [],
+				bootstrapComponents: bootstrap({ mode: "single" }, { deploymentMode: "multi" }),
+			}),
+			createApp({
+				modules: [],
+				bootstrapComponents: bootstrap({ mode: "single" }),
+				overrideComponents: { deploymentMode: "multi" },
+			}),
+		]) {
+			const err = (await boot.catch((thrown: unknown) => thrown)) as Error;
+			expect(err.message).toContain(
+				"Set deployment.mode in the configuration instead: boot fills deploymentMode from it.",
+			);
+		}
+	});
+
+	it("keeps the other synthetic keys' message as it is", async () => {
+		const err = (await createApp({
+			modules: [],
+			bootstrapComponents: bootstrap({ mode: "single" }, { grantHandlerResolver: {} }),
+		}).catch((thrown: unknown) => thrown)) as Error;
+		expect(err.message).toBe(
+			'bootstrapComponents contains synthetic key "grantHandlerResolver", which is reserved for the boot planner.',
+		);
+	});
+});
+
+// ---------------------------------------------------------------------------
+// The one reading, and the check a reader holds a value to
+// ---------------------------------------------------------------------------
+
+describe("deploymentModeOf, on core's root", () => {
+	it("reads single and multi as the configuration states them", () => {
+		expect(core.deploymentModeOf({ deployment: { mode: "single" } })).toBe("single");
+		expect(core.deploymentModeOf({ deployment: { mode: "multi" } })).toBe("multi");
+	});
+
+	it("reads unset for absence and for every value core's schema refuses, never single or multi", () => {
+		for (const config of [
+			undefined,
+			null,
+			42,
+			"multi",
+			{},
+			{ deployment: null },
+			{ deployment: "multi" },
+			{ deployment: {} },
+			{ deployment: { mode: "MULTI" } },
+			{ deployment: { mode: "Single" } },
+			{ deployment: { mode: 42 } },
+			{ deployment: { mode: null } },
+			{ deployment: { mode: "" } },
+		]) {
+			expect(core.deploymentModeOf(config), JSON.stringify(config)).toBe("unset");
+		}
+	});
+});
+
+describe("checkDeploymentMode, on core's root", () => {
+	it("answers each of the three values as it is given", () => {
+		for (const mode of ["single", "multi", "unset"] as const) {
+			expect(core.checkDeploymentMode(mode, "deploymentMode")).toBe(mode);
+		}
+	});
+
+	it("throws a TypeError naming the value's source for anything else, absence included", () => {
+		for (const value of [undefined, null, "MULTI", "Single", "", 1, {}, ["multi"]]) {
+			expect(
+				() => core.checkDeploymentMode(value, "the routes' deploymentMode"),
+				JSON.stringify(value),
+			).toThrow(new TypeError(`the routes' deploymentMode must be "single", "multi" or "unset"`));
+		}
 	});
 });
