@@ -109,7 +109,8 @@ const TEMPLATE_PACKAGES: Readonly<Record<string, string>> = {
 	"@o3co/auth-provider-federation-google": "googleFederationModule",
 	"@o3co/auth-provider-federation-grants": "federationGrantsModules",
 	"@o3co/auth-provider-federation-oidc": "oidcFederationModule, one per `oidc` section",
-	"@o3co/auth-provider-foundation": "the HTTP user repository adapter (no module)",
+	"@o3co/auth-provider-foundation":
+		"the HTTP user repository adapter (its MFA factor store module is composed by tools/composition)",
 	"@o3co/auth-provider-oauth":
 		"oauthModule, oauthSessionModule, oauthAuthorizationModule, subjectRevocationServiceModule",
 	"@o3co/auth-provider-redis": "the Redis stores (all-modules-composition.multi.test.mts)",
