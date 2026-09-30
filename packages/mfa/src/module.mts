@@ -19,11 +19,14 @@
  * (installed is on).
  *
  * Requires `config`, core's three MFA ports (the name `mfa` is accepted only from
- * a module bound to them), `userSessionStore` and `sessionRequirementResolver`;
- * reads `auditSink` (absence declared) and `logger`. Nothing forks per replica.
+ * a module bound to them), `userSessionStore`, `sessionRequirementResolver` and
+ * `deploymentMode` (the development sample key is refused under `multi`, so a
+ * mode read as absent must not lift that); reads `auditSink` (absence declared)
+ * and `logger`. Nothing forks per replica.
  *
- * Reads its own section, `mfa` — the mode and its settings — and, from the
- * whole configuration, `endpoints.mfa.url` and `deployment.mode`.
+ * Reads its own section, `mfa` — the mode and its settings — the deployment
+ * mode from the `deploymentMode` slot, and, from the whole configuration,
+ * `endpoints.mfa.url`.
  *
  * Contributes `sessionRequirements.mfa`. Its factory refuses the boot when
  * `mfa.mode` is `off` or unset, when the package's settings are unusable (naming
@@ -189,10 +192,6 @@ function checkInstalledFactors(factors: MfaFactorResolver, mode: MfaRequirementM
 	}
 }
 
-/** `deployment.mode` as the configuration carries it: the sample key's refusal reads it. */
-const deploymentModeOf = (config: unknown): unknown =>
-	(config as { deployment?: { mode?: unknown } } | undefined)?.deployment?.mode;
-
 /** The page a step-up starts on: `endpoints.mfa.url`, which core's reference.conf defaults. */
 function stepUpPageOf(config: unknown): StepUpPage {
 	const url = (config as { endpoints?: { mfa?: { url?: unknown } } } | undefined)?.endpoints?.mfa
@@ -220,7 +219,8 @@ export function mfaModule(options: MfaModuleOptions = {}): Module {
 		| "mfaFactorStore"
 		| "mfaTransactionStore"
 		| "userSessionStore"
-		| "sessionRequirementResolver",
+		| "sessionRequirementResolver"
+		| "deploymentMode",
 		"auditSink" | "logger",
 		typeof mfaSectionSchema
 	>({
@@ -240,6 +240,7 @@ export function mfaModule(options: MfaModuleOptions = {}): Module {
 			"mfaTransactionStore",
 			"userSessionStore",
 			"sessionRequirementResolver",
+			"deploymentMode",
 		],
 		optional: ["auditSink", "logger"],
 		absencePolicies: { auditSink: AUDIT_SINK_ABSENCE_POLICY },
@@ -254,7 +255,7 @@ export function mfaModule(options: MfaModuleOptions = {}): Module {
 					}
 					const settings = readMfaSettings(deps.section, {
 						...options,
-						deploymentMode: deploymentModeOf(deps.config),
+						deploymentMode: deps.deploymentMode,
 					});
 					const stepUpPage = stepUpPageOf(deps.config);
 					const logger = deps.logger ?? consoleLogger;

@@ -22,8 +22,9 @@
  * "simple" request sent without a preflight), and the CSRF guard
  * `/session/login` runs, from the `csrfGuard` slot the session module
  * provides. The tests fill the slot with the session package's guard, built
- * as the session module builds it. See the package README, "JSON only, behind
- * the session CSRF guard".
+ * as the session module builds it, over the signer the session store's module
+ * provides. See the package README, "JSON only, behind the session CSRF
+ * guard".
  */
 
 import type { AppConfig, ClientRepository, Logger } from "@o3co/auth-provider-core";
@@ -32,6 +33,7 @@ import { resolverForTests } from "@o3co/auth-provider-core/testing";
 import {
 	createCsrfProtectionFromConfig,
 	createSessionCsrfGuard,
+	createSessionCsrfTokenSigner,
 } from "@o3co/auth-provider-session";
 import express from "express";
 import request from "supertest";
@@ -53,13 +55,15 @@ const clientRepository: ClientRepository = {
 
 /** The `session.*` slice the session module builds the guard from — the same one `/session/login` reads. */
 const SESSION_SLICE = {
-	secret: "test-session-secret.at-least-32-bytes.ok",
 	name: "auth.session",
 	secure: false,
 	sameSite: "lax" as const,
 	domain: null,
 	csrf: { trustedOrigins: [TRUSTED_ORIGIN] },
 };
+
+/** The `csrfTokenSigner` slot's signer, as the session store's module builds it from `session.secret`. */
+const SIGNER = createSessionCsrfTokenSigner("test-session-secret.at-least-32-bytes.ok");
 
 const makeLogger = () => ({
 	warn: vi.fn(),
@@ -73,7 +77,7 @@ const makeDeps = (overrides: { csrfGuard?: unknown } = {}) => {
 	const logger = makeLogger();
 	// The slot's guard, on the logger the route's other lines go to.
 	const csrfGuard = createSessionCsrfGuard({
-		csrf: createCsrfProtectionFromConfig(SESSION_SLICE),
+		csrf: createCsrfProtectionFromConfig(SESSION_SLICE, { signer: SIGNER }),
 		trustedOrigins: SESSION_SLICE.csrf.trustedOrigins,
 		logger: logger as unknown as Logger,
 	});
@@ -256,12 +260,12 @@ describe("device verification — cross-site requests (RFC 8628 §5.4)", () => {
 
 	it("accepts a header-less client that presents the session's double-submit token", async () => {
 		// The other half of that rule: the token minted by `GET /session/csrf`
-		// — derived from the same `session.*` slice — is what a non-browser
-		// client sends instead of an `Origin`.
+		// — over the same slice and signer — is what a non-browser client
+		// sends instead of an `Origin`.
 		const { deps, store } = makeDeps();
 		await seedPending(store);
 		const app = mountVerification(deps);
-		const csrf = createCsrfProtectionFromConfig(SESSION_SLICE);
+		const csrf = createCsrfProtectionFromConfig(SESSION_SLICE, { signer: SIGNER });
 		const token = csrf.mint();
 
 		const res = await request(app)

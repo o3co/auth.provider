@@ -16,11 +16,18 @@
 import { expect, test } from "vitest";
 import { SYNTHETIC_COMPONENT_KEYS } from "../synthetic-keys.mjs";
 
-test("SYNTHETIC_COMPONENT_KEYS has 9 members", () => {
+test("SYNTHETIC_COMPONENT_KEYS has 10 members", () => {
 	// 4 federation and grant keys + lifecycleRegistrar + readinessRegistrar +
 	// mfaFactorResolver (the MFA ADR's D3) + sessionRequirementResolver (the
-	// session-admission ADR's D3) + rateLimitBudgetResolver = 9.
-	expect(SYNTHETIC_COMPONENT_KEYS.size).toBe(9);
+	// session-admission ADR's D3) + rateLimitBudgetResolver + deploymentMode = 10.
+	expect(SYNTHETIC_COMPONENT_KEYS.size).toBe(10);
+});
+
+test("SYNTHETIC_COMPONENT_KEYS includes deploymentMode", () => {
+	// Core fills it from the configuration's deployment.mode: a module or host
+	// that set it would be a second statement of the replica count, beside the
+	// one the replica-safety guard reads.
+	expect(SYNTHETIC_COMPONENT_KEYS.has("deploymentMode")).toBe(true);
 });
 
 test("SYNTHETIC_COMPONENT_KEYS includes readinessRegistrar", () => {

@@ -112,6 +112,7 @@ describe("redis FederationTokenStore (encryption = required)", () => {
 
 	it("kind is 'redis'", () => {
 		const store = createRedisFederationTokenStore({
+			deploymentMode: "unset",
 			client: redis,
 			encryption: { mode: "required", key: encryptionKey },
 		});
@@ -120,6 +121,7 @@ describe("redis FederationTokenStore (encryption = required)", () => {
 
 	it("attach encrypts refreshToken at rest", async () => {
 		const store = createRedisFederationTokenStore({
+			deploymentMode: "unset",
 			client: redis,
 			encryption: { mode: "required", key: encryptionKey },
 		});
@@ -136,6 +138,7 @@ describe("redis FederationTokenStore (encryption = required)", () => {
 		// The ceiling a refresh is bounded by has to survive the store, and a
 		// record written before the field existed has to keep opening.
 		const store = createRedisFederationTokenStore({
+			deploymentMode: "unset",
 			client: redis,
 			encryption: { mode: "required", key: encryptionKey },
 		});
@@ -150,6 +153,7 @@ describe("redis FederationTokenStore (encryption = required)", () => {
 
 	it("removeBySid removes all federations for sid", async () => {
 		const store = createRedisFederationTokenStore({
+			deploymentMode: "unset",
 			client: redis,
 			encryption: { mode: "required", key: encryptionKey },
 		});
@@ -165,6 +169,7 @@ describe("redis FederationTokenStore (encryption = required)", () => {
 	it("missing encryption key throws at construction", () => {
 		expect(() =>
 			createRedisFederationTokenStore({
+				deploymentMode: "unset",
 				client: redis,
 				encryption: { mode: "required", key: Buffer.alloc(0) },
 			}),
@@ -180,6 +185,7 @@ describe("redis FederationTokenStore (encryption = required)", () => {
 		try {
 			expect(() =>
 				createRedisFederationTokenStore({
+					deploymentMode: "unset",
 					client: redis,
 					encryption: { mode: "allow-plaintext" },
 				}),
@@ -195,6 +201,7 @@ describe("redis FederationTokenStore (encryption = required)", () => {
 			expect(
 				() =>
 					createRedisFederationTokenStore({
+						deploymentMode: "unset",
 						client: redis,
 						encryption: { mode: "allow-plaintext" },
 						ttl,
@@ -207,6 +214,7 @@ describe("redis FederationTokenStore (encryption = required)", () => {
 	it("rejects ttl: 0 at construction", () => {
 		expect(() =>
 			createRedisFederationTokenStore({
+				deploymentMode: "unset",
 				client: redis,
 				encryption: { mode: "allow-plaintext" },
 				ttl: 0,
@@ -217,6 +225,7 @@ describe("redis FederationTokenStore (encryption = required)", () => {
 	it("rejects ttl: -1 at construction", () => {
 		expect(() =>
 			createRedisFederationTokenStore({
+				deploymentMode: "unset",
 				client: redis,
 				encryption: { mode: "allow-plaintext" },
 				ttl: -1,
@@ -227,6 +236,7 @@ describe("redis FederationTokenStore (encryption = required)", () => {
 	it("rejects ttl: NaN at construction", () => {
 		expect(() =>
 			createRedisFederationTokenStore({
+				deploymentMode: "unset",
 				client: redis,
 				encryption: { mode: "allow-plaintext" },
 				ttl: Number.NaN,
@@ -237,6 +247,7 @@ describe("redis FederationTokenStore (encryption = required)", () => {
 	it("rejects ttl: Infinity at construction", () => {
 		expect(() =>
 			createRedisFederationTokenStore({
+				deploymentMode: "unset",
 				client: redis,
 				encryption: { mode: "allow-plaintext" },
 				ttl: Number.POSITIVE_INFINITY,
@@ -253,6 +264,7 @@ describe("redis FederationTokenStore (encryption = allow-plaintext)", () => {
 
 	it("attach stores refreshToken in clear (opt-in)", async () => {
 		const store = createRedisFederationTokenStore({
+			deploymentMode: "unset",
 			client: redis,
 			encryption: { mode: "allow-plaintext" },
 		});
@@ -266,6 +278,7 @@ describe("redis FederationTokenStore (encryption = allow-plaintext)", () => {
 
 	it("get() self-heals corrupt JSON by deleting the key", async () => {
 		const store = createRedisFederationTokenStore({
+			deploymentMode: "unset",
 			client: redis,
 			encryption: { mode: "allow-plaintext" },
 		});
@@ -281,6 +294,7 @@ describe("redis FederationTokenStore (encryption = allow-plaintext)", () => {
 		// member: a record that is never served and never reclaimed until the
 		// TTL, and a `removeBySid` that keeps naming it.
 		const store = createRedisFederationTokenStore({
+			deploymentMode: "unset",
 			client: redis,
 			encryption: { mode: "allow-plaintext" },
 		});
@@ -297,11 +311,13 @@ describe("redis FederationTokenStore (encryption = allow-plaintext)", () => {
 		const keyB = Buffer.alloc(32, 2);
 		// Encrypt with keyA, try to read with keyB.
 		const writer = createRedisFederationTokenStore({
+			deploymentMode: "unset",
 			client: redis,
 			encryption: { mode: "required", key: keyA },
 		});
 		await writer.attach("sid-1", "google", tokens);
 		const reader = createRedisFederationTokenStore({
+			deploymentMode: "unset",
 			client: redis,
 			encryption: { mode: "required", key: keyB },
 		});
@@ -315,6 +331,7 @@ describe("redis FederationTokenStore implements SupportsLock", () => {
 	it("supportsLock returns true for the redis store", () => {
 		const redis = createFakeRedis();
 		const store = createRedisFederationTokenStore({
+			deploymentMode: "unset",
 			client: redis,
 			encryption: { mode: "allow-plaintext" },
 		});
@@ -324,6 +341,7 @@ describe("redis FederationTokenStore implements SupportsLock", () => {
 	it("acquireLock returns acquired: true and release cleans up", async () => {
 		const redis = createFakeRedis();
 		const store = createRedisFederationTokenStore({
+			deploymentMode: "unset",
 			client: redis,
 			encryption: { mode: "allow-plaintext" },
 		});
@@ -341,6 +359,7 @@ describe("redis FederationTokenStore implements SupportsLock", () => {
 	it("lock key uses the lock: sub-namespace, not the token envelope namespace", async () => {
 		const redis = createFakeRedis();
 		const store = createRedisFederationTokenStore({
+			deploymentMode: "unset",
 			client: redis,
 			encryption: { mode: "allow-plaintext" },
 		});
@@ -377,6 +396,7 @@ describe("redis FederationTokenStore TTL is independent of access_token expiry",
 
 	it("default TTL (24h) is used regardless of tokens.expiresAt", async () => {
 		const store = createRedisFederationTokenStore({
+			deploymentMode: "unset",
 			client: redis,
 			encryption: { mode: "allow-plaintext" },
 		});
@@ -398,6 +418,7 @@ describe("redis FederationTokenStore TTL is independent of access_token expiry",
 
 	it("custom TTL option is honored", async () => {
 		const store = createRedisFederationTokenStore({
+			deploymentMode: "unset",
 			client: redis,
 			encryption: { mode: "allow-plaintext" },
 			ttl: 7200, // 2h
@@ -408,6 +429,7 @@ describe("redis FederationTokenStore TTL is independent of access_token expiry",
 
 	it("access token expiresAt is preserved in the envelope for consumer refresh decisions", async () => {
 		const store = createRedisFederationTokenStore({
+			deploymentMode: "unset",
 			client: redis,
 			encryption: { mode: "allow-plaintext" },
 		});
@@ -424,6 +446,7 @@ describe("redis FederationTokenStore TTL is independent of access_token expiry",
 		// logic can detect "no finite expiry" rather than get `new Date(null)`,
 		// the epoch.
 		const store = createRedisFederationTokenStore({
+			deploymentMode: "unset",
 			client: redis,
 			encryption: { mode: "allow-plaintext" },
 		});
@@ -466,7 +489,7 @@ describe("redisFederationTokenStoreBuilder env-based encryption guard", () => {
 		delete process.env.FEDERATION_TOKENS_ALLOW_INSECURE;
 		expect(() =>
 			redisFederationTokenStoreBuilder(
-				{ client: mockClient, encryption: { mode: "allow-plaintext" } },
+				{ deploymentMode: "unset", client: mockClient, encryption: { mode: "allow-plaintext" } },
 				{},
 			),
 		).toThrow(/mode "allow-plaintext" is refused because the environment is "production"/);
@@ -477,7 +500,7 @@ describe("redisFederationTokenStoreBuilder env-based encryption guard", () => {
 		delete process.env.FEDERATION_TOKENS_ALLOW_INSECURE;
 		expect(() =>
 			redisFederationTokenStoreBuilder(
-				{ client: mockClient, encryption: { mode: "allow-plaintext" } },
+				{ deploymentMode: "unset", client: mockClient, encryption: { mode: "allow-plaintext" } },
 				{},
 			),
 		).toThrow(/mode "allow-plaintext" is refused because the environment is "staging"/);
@@ -488,7 +511,7 @@ describe("redisFederationTokenStoreBuilder env-based encryption guard", () => {
 		process.env.FEDERATION_TOKENS_ALLOW_INSECURE = "1";
 		expect(() =>
 			redisFederationTokenStoreBuilder(
-				{ client: mockClient, encryption: { mode: "allow-plaintext" } },
+				{ deploymentMode: "unset", client: mockClient, encryption: { mode: "allow-plaintext" } },
 				{},
 			),
 		).not.toThrow();
@@ -509,7 +532,7 @@ describe("redisFederationTokenStoreBuilder env-based encryption guard", () => {
 		delete process.env.FEDERATION_TOKENS_ALLOW_INSECURE;
 		expect(() =>
 			redisFederationTokenStoreBuilder(
-				{ client: mockClient, encryption: { mode: "allow-plaintext" } },
+				{ deploymentMode: "unset", client: mockClient, encryption: { mode: "allow-plaintext" } },
 				{},
 			),
 		).not.toThrow();
@@ -525,6 +548,7 @@ describe("redisFederationTokenStoreBuilder env-based encryption guard", () => {
 		expect(() =>
 			redisFederationTokenStoreBuilder(
 				{
+					deploymentMode: "unset",
 					client: mockClient,
 					encryption: { mode: "required", key: key32 },
 				},
@@ -545,6 +569,7 @@ describe("redisFederationTokenStoreBuilder env-based encryption guard", () => {
 		const fake = createFakeRedis();
 		expect(() =>
 			createRedisFederationTokenStore({
+				deploymentMode: "unset",
 				client: fake,
 				encryption: { mode: "allow-plaintext" },
 			}),
@@ -593,6 +618,7 @@ describe("the plaintext guard reads the selected environment and deployment.mode
 		// CONFIG_ENV=production, and that is the environment that counts.
 		expect(() =>
 			createRedisFederationTokenStore({
+				deploymentMode: "unset",
 				client: createFakeRedis(),
 				encryption: plaintext,
 				environment: "production",
@@ -606,6 +632,7 @@ describe("the plaintext guard reads the selected environment and deployment.mode
 		process.env.NODE_ENV = "production";
 		expect(() =>
 			createRedisFederationTokenStore({
+				deploymentMode: "unset",
 				client: createFakeRedis(),
 				encryption: plaintext,
 				environment: "development",
@@ -616,7 +643,11 @@ describe("the plaintext guard reads the selected environment and deployment.mode
 	it("falls back to NODE_ENV when no environment is passed", () => {
 		process.env.NODE_ENV = "staging";
 		expect(() =>
-			createRedisFederationTokenStore({ client: createFakeRedis(), encryption: plaintext }),
+			createRedisFederationTokenStore({
+				deploymentMode: "unset",
+				client: createFakeRedis(),
+				encryption: plaintext,
+			}),
 		).toThrow(/the environment is "staging"/);
 	});
 
@@ -683,7 +714,7 @@ describe("the plaintext guard reads the selected environment and deployment.mode
 		const client = createFakeRedis() as unknown as FederationTokenStoreClient;
 		expect(() =>
 			redisFederationTokenStoreBuilder(
-				{ client, encryption: plaintext, environment: "production" },
+				{ deploymentMode: "unset", client, encryption: plaintext, environment: "production" },
 				{},
 			),
 		).toThrow(/the environment is "production"/);
@@ -731,7 +762,11 @@ describe("redisFederationTokenStoreBuilder structural validator", () => {
 		};
 		expect(() =>
 			redisFederationTokenStoreBuilder(
-				{ client: oldShapeClient, encryption: { mode: "required", key: encryptionKey } },
+				{
+					deploymentMode: "unset",
+					client: oldShapeClient,
+					encryption: { mode: "required", key: encryptionKey },
+				},
 				{},
 			),
 		).toThrow(/missing required method.*compareAndDelete/);
@@ -768,6 +803,7 @@ describe("mode=required stores one ciphertext over the whole envelope", () => {
 	});
 	const requiredStore = () =>
 		createRedisFederationTokenStore({
+			deploymentMode: "unset",
 			client: redis,
 			encryption: { mode: "required", key: encryptionKey },
 		});
@@ -871,6 +907,7 @@ describe("mode=required stores one ciphertext over the whole envelope", () => {
 		const bytes = redis.data.get("ft:sid-1:google") as string;
 		redis.data.set("other:sid-1:google", bytes);
 		const reader = createRedisFederationTokenStore({
+			deploymentMode: "unset",
 			client: redis,
 			encryption: { mode: "required", key: encryptionKey },
 			keyPrefix: "other:",
@@ -886,7 +923,11 @@ describe("mode=allow-plaintext keeps the envelope as plain JSON (development onl
 		redis = createFakeRedis();
 	});
 	const plaintextStore = () =>
-		createRedisFederationTokenStore({ client: redis, encryption: { mode: "allow-plaintext" } });
+		createRedisFederationTokenStore({
+			deploymentMode: "unset",
+			client: redis,
+			encryption: { mode: "allow-plaintext" },
+		});
 
 	it("round-trips every field, expiresAt: null included", async () => {
 		const store = plaintextStore();
@@ -919,6 +960,7 @@ describe("mode=allow-plaintext keeps the envelope as plain JSON (development onl
 
 	it("refuses a ciphertext record — allow-plaintext has no key to read it with", async () => {
 		const writer = createRedisFederationTokenStore({
+			deploymentMode: "unset",
 			client: redis,
 			encryption: { mode: "required", key: encryptionKey },
 		});
@@ -947,6 +989,7 @@ describe("a v2 record with a malformed inner envelope self-heals like corrupt JS
 	type Mode = "required" | "allow-plaintext";
 	const storeFor = (mode: Mode) =>
 		createRedisFederationTokenStore({
+			deploymentMode: "unset",
 			client: redis,
 			encryption: mode === "required" ? { mode, key: encryptionKey } : { mode: "allow-plaintext" },
 		});

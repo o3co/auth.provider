@@ -30,9 +30,11 @@
 
 import { createHmac } from "node:crypto";
 import {
+	checkDeploymentMode,
 	checkMfaLockoutPolicy,
 	checkSealingKeyRing,
 	coerceBooleanFromEnv,
+	type DeploymentMode,
 	decodeSealingKey,
 	type MfaLockoutPolicy,
 	SEALING_KEY_BYTES,
@@ -49,7 +51,7 @@ import { MFA_TRANSACTION_TTL_SECONDS } from "./transactions.mjs";
  * configuration may carry in place of `MFA_ENCRYPTION_KEY`. Everyone
  * holds it, so data sealed under it is sealed from nobody: the settings
  * refuse it wherever the configuration was selected as production or
- * staging, `NODE_ENV` is either, or `deployment.mode` is `"multi"`.
+ * staging, `NODE_ENV` is either, or the deployment mode is `"multi"`.
  */
 export const MFA_DEVELOPMENT_SAMPLE_KEY = "bzNjbzptZmE6ZGV2ZWxvcG1lbnQtc2FtcGxlLWtleSE=";
 
@@ -252,10 +254,12 @@ export interface MfaSettingsOptions {
 	 */
 	readonly environment?: string;
 	/**
-	 * `deployment.mode` as the configuration carries it — the MFA module
-	 * passes it: `"multi"` refuses the sample key.
+	 * The replica count, as core's `deploymentMode` slot holds it — the MFA
+	 * module passes the slot's value. `multi` refuses the sample key; the
+	 * configuration's own `deployment` is not read. Anything but the three
+	 * values, absence included, is a TypeError.
 	 */
-	readonly deploymentMode?: unknown;
+	readonly deploymentMode: DeploymentMode;
 }
 
 /** The TOTP factor's section: what its refusals name. */
@@ -332,9 +336,9 @@ export function readMfaTotpSettings(
 /**
  * The sample key's refusal: the environment the configuration
  * was selected by, or `NODE_ENV`, is production or staging, or
- * `deployment.mode` is `"multi"`. Every key opens, so it is refused wherever
- * it sits in the ring. Answers whether the ring carries it — accepted, when
- * this did not refuse it.
+ * `options.deploymentMode` is `"multi"`. Every key opens, so it is refused
+ * wherever it sits in the ring. Answers whether the ring carries it —
+ * accepted, when this did not refuse it.
  */
 function refuseSampleKey(ring: SealingKeyRing, options: MfaSettingsOptions): boolean {
 	const sample = decodeSealingKey(MFA_DEVELOPMENT_SAMPLE_KEY);
@@ -433,10 +437,12 @@ function refuseRepeatedKey(ring: SealingKeyRing): void {
  * `checkMfaLockoutPolicy` under `mfa.lockout`. Not the mode, which the
  * module's section schema reads, and no factor's section: the TOTP factor's
  * is {@link readMfaTotpSettings}'s. `options.environment` is the name the
- * composition root selected its configuration by. A refusal is a
+ * composition root selected its configuration by, and
+ * `options.deploymentMode` the `deploymentMode` slot's value. A refusal is a
  * `RangeError` that names the key and quotes no key material.
  */
-export function readMfaSettings(section: unknown, options: MfaSettingsOptions = {}): MfaSettings {
+export function readMfaSettings(section: unknown, options: MfaSettingsOptions): MfaSettings {
+	checkDeploymentMode(options.deploymentMode, "mfa settings: deploymentMode");
 	const settings = parseSection(mfaModuleSettingsSchema, section, "mfa");
 	const { ring, developmentSampleKeyAccepted } = readKeyRing(settings.encryptionKeys, options);
 	checkMfaLockoutPolicy(settings.lockout, "mfa.lockout");

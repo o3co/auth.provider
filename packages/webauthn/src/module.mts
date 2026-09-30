@@ -28,6 +28,7 @@
 import {
 	AUDIT_SINK_ABSENCE_POLICY,
 	BootError,
+	checkDeploymentMode,
 	consoleLogger,
 	createMemoryRateLimiter,
 	createRateLimitGuard,
@@ -63,7 +64,8 @@ const WEBAUTHN_SECTION_SCHEMA = z.unknown();
  *
  * `POST /oauth/webauthn/authentication/options` is rate-limited by the module itself: core's
  * `createRateLimitGuard` under the `webauthn-authentication-options` tag, on the wired
- * `rateLimiter` or else a per-process memory limiter (with a warning). The budget is
+ * `rateLimiter` or else a per-process memory limiter, which the `deploymentMode` slot decides
+ * about (refused under `multi`, a warning when `unset`). The budget is
  * `webauthnConfig.rateLimit.authenticationOptions`; the outage policy is
  * `config.rateLimit.failMode`, as for the OAuth endpoints and `/session/login`.
  */
@@ -73,7 +75,8 @@ export const webauthnModule = defineModule<
 	| "challengeStore"
 	| "challengeCeremony"
 	| "config"
-	| "keyStore",
+	| "keyStore"
+	| "deploymentMode",
 	| "grantPolicy"
 	| "rateLimiter"
 	| "auditSink"
@@ -95,6 +98,9 @@ export const webauthnModule = defineModule<
 		"challengeCeremony",
 		"config",
 		"keyStore",
+		// The replica count core fills: the authentication/options route's per-process fallback
+		// is refused under `multi`. Required, so a mode read as absent cannot lift that refusal.
+		"deploymentMode",
 	],
 	optional: [
 		// Required by the grant factory, which throws at boot without it; optional here only so
@@ -199,17 +205,17 @@ export const webauthnModule = defineModule<
 				router.all("/", express.json({ limit: "100kb" }));
 
 				const logger = deps.logger ?? consoleLogger;
+				const deploymentMode = checkDeploymentMode(deps.deploymentMode, "webauthn: deploymentMode");
 				const spec: RateLimitSpec = {
 					limit: deps.webauthnConfig.rateLimit.authenticationOptions.limit,
 					windowSeconds: deps.webauthnConfig.rateLimit.authenticationOptions.windowSeconds,
 				};
 				if (deps.rateLimiter === undefined) {
 					// The per-process fallback below is replica-unsafe state, built here where the
-					// boot guard does not see it, so it reads `deployment.mode` itself: "multi"
-					// refuses (the budget would multiply by the replica count), "single" is
-					// silent, unset warns. The planner wraps the throw as
+					// boot guard does not see it, so it asks the `deploymentMode` slot itself:
+					// "multi" refuses (the budget would multiply by the replica count), "single"
+					// is silent, "unset" warns. The planner wraps the throw as
 					// `contribute-factory-failed`, with this error as its `cause`.
-					const deploymentMode = deps.config.deployment?.mode;
 					if (deploymentMode === "multi") {
 						throw new BootError({
 							stage: "applyContributions",

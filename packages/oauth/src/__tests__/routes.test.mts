@@ -20,6 +20,8 @@ import {
 	type AuditSink,
 	type ClientRepository,
 	type CodeRepository,
+	createMemoryConsentStore,
+	createMemoryPendingConsentStore,
 	createSymmetricKeyStore,
 	type FederationTokenStore,
 	type GrantHandler,
@@ -35,6 +37,7 @@ import express, { type Router } from "express";
 import request from "supertest";
 import { describe, expect, it, vi } from "vitest";
 import { createOAuthRouter } from "#/routes.mjs";
+import { authorizationServerRegistry } from "./_helpers/authorizationServerRegistry.mjs";
 import { codeRecord } from "./_helpers/codeRecord.mjs";
 import { createMockLogger } from "./_helpers/mockLogger.mjs";
 
@@ -210,12 +213,12 @@ describe("createOAuthRouter", () => {
 		expect(typeof tokenCall[1]).toBe("function");
 	});
 
-	it("registers authorize and UserInfo GET/POST routes", async () => {
+	it("registers authorize and UserInfo GET/POST routes, with the authorization_code grant", async () => {
 		const { calls, expressLike } = createTrackingExpress();
 
 		await createOAuthRouter(expressLike, {
 			requirements: resolverForTests([]),
-			registry: new GrantRegistry(),
+			registry: authorizationServerRegistry(),
 			config: mockConfig,
 			clientRepository: {} as ClientRepository,
 			codeRepository: {} as CodeRepository,
@@ -679,5 +682,68 @@ describe("createOAuthRouter", () => {
 			expect(res.status).toBe(200);
 			expect(res.body).toEqual({ active: false });
 		});
+	});
+});
+
+describe("createOAuthRouter — /authorize is the authorization_code grant's", () => {
+	/** A registry holding stand-ins for the named grants. */
+	const registryOf = (...grantTypes: readonly string[]): GrantRegistry => {
+		const registry = new GrantRegistry();
+		for (const grantType of grantTypes) registry.register(grantType, {} as GrantHandler);
+		return registry;
+	};
+	const build = (
+		registry: GrantRegistry,
+		codeRepository: CodeRepository | undefined,
+		expressLike: Parameters<typeof createOAuthRouter>[0],
+	) =>
+		createOAuthRouter(expressLike, {
+			requirements: resolverForTests([]),
+			registry,
+			config: mockConfig,
+			clientRepository: {} as ClientRepository,
+			...(codeRepository === undefined ? {} : { codeRepository }),
+			keyStore: createSymmetricKeyStore("test-secret"),
+		});
+
+	it("mounts GET and POST /authorize when the registry holds the authorization_code grant", async () => {
+		const { calls, expressLike } = createTrackingExpress();
+		await build(registryOf("authorization_code"), {} as CodeRepository, expressLike);
+
+		expect(calls.get.some((args) => args[0] === "/authorize")).toBe(true);
+		expect(calls.post.some((args) => args[0] === "/authorize")).toBe(true);
+	});
+
+	it("mounts no /authorize without that grant, and builds with no code repository", async () => {
+		const { calls, expressLike } = createTrackingExpress();
+		await build(registryOf("client_credentials"), undefined, expressLike);
+
+		expect(calls.get.some((args) => args[0] === "/authorize")).toBe(false);
+		expect(calls.post.some((args) => args[0] === "/authorize")).toBe(false);
+		expect(calls.post.some((args) => args[0] === "/token")).toBe(true);
+	});
+
+	it("mounts no consent step without that grant: nothing parks a request for it", async () => {
+		const { router } = await createOAuthRouter(express, {
+			requirements: resolverForTests([]),
+			registry: registryOf("client_credentials"),
+			config: mockConfig,
+			clientRepository: {} as ClientRepository,
+			keyStore: createSymmetricKeyStore("test-secret"),
+			consentStore: createMemoryConsentStore(),
+			pendingConsentStore: createMemoryPendingConsentStore(),
+		});
+		const app = express();
+		app.use("/oauth", router);
+
+		expect((await request(app).get("/oauth/consent")).status).toBe(404);
+		expect((await request(app).post("/oauth/consent")).status).toBe(404);
+	});
+
+	it("refuses to build /authorize without a code repository to issue its codes into", async () => {
+		const { expressLike } = createTrackingExpress();
+		await expect(build(registryOf("authorization_code"), undefined, expressLike)).rejects.toThrow(
+			/authorization_code grant is registered but no codeRepository is wired/,
+		);
 	});
 });

@@ -811,12 +811,17 @@ export const DISCOVERY_PATHS = [
 /**
  * What RFC 8414 §2 and OpenID Connect Discovery §3 require of the document
  * this composition serves, and what each advertised URL must be: https, on
- * the issuer's origin.
+ * the issuer's origin. `authorizationCode` says whether the composition
+ * registers that grant (it does unless a test switches it off): with it the
+ * document names the authorization endpoint and lists the code response type
+ * and PKCE; without it, none of them.
  */
-export function expectValidMetadata(doc: Record<string, unknown>): void {
+export function expectValidMetadata(
+	doc: Record<string, unknown>,
+	{ authorizationCode = true }: { readonly authorizationCode?: boolean } = {},
+): void {
 	expect(doc.issuer).toBe(ISSUER);
 	for (const field of [
-		"authorization_endpoint",
 		"token_endpoint",
 		"jwks_uri",
 		"response_types_supported",
@@ -832,13 +837,20 @@ export function expectValidMetadata(doc: Record<string, unknown>): void {
 			expect(url.search + url.hash, field).toBe("");
 		}
 		if (field.endsWith("_supported") && Array.isArray(value)) {
-			expect(value.length, field).toBeGreaterThan(0);
+			if (field !== "response_types_supported") expect(value.length, field).toBeGreaterThan(0);
 			for (const entry of value) expect(typeof entry, field).toBe("string");
 			expect(new Set(value).size, `${field} repeats a value`).toBe(value.length);
 		}
 	}
-	expect(doc.response_types_supported).toEqual(["code"]);
-	expect(doc.code_challenge_methods_supported).toEqual(["S256"]);
+	if (authorizationCode) {
+		expect(doc.authorization_endpoint).toBe(`${ISSUER}/oauth/authorize`);
+		expect(doc.response_types_supported).toEqual(["code"]);
+		expect(doc.code_challenge_methods_supported).toEqual(["S256"]);
+	} else {
+		expect(doc).not.toHaveProperty("authorization_endpoint");
+		expect(doc.response_types_supported).toEqual([]);
+		expect(doc).not.toHaveProperty("code_challenge_methods_supported");
+	}
 }
 
 // ---------------------------------------------------------------------------

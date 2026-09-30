@@ -176,7 +176,10 @@ describe("the plaintext guard's notices", () => {
 
 	it("the token store's builder writes its context's logger, once", () => {
 		const { logger, calls } = recordingLogger();
-		redisFederationTokenStoreBuilder({ client: tokenClient, encryption: PLAINTEXT }, { logger });
+		redisFederationTokenStoreBuilder(
+			{ deploymentMode: "unset", client: tokenClient, encryption: PLAINTEXT },
+			{ logger },
+		);
 		expect(calls).toEqual([plaintextWarning("federation-tokens")]);
 	});
 
@@ -188,6 +191,7 @@ describe("the plaintext guard's notices", () => {
 		provideTokens({
 			federationTokenStoreClient: tokenClient,
 			config: TOKEN_STORE_CONFIG,
+			deploymentMode: "unset",
 			logger: tokens.logger,
 		});
 		expect(tokens.calls).toEqual([plaintextWarning("federation-tokens")]);
@@ -199,6 +203,7 @@ describe("the plaintext guard's notices", () => {
 		provideGrants({
 			federationGrantStoreClient: grantClient,
 			config: { federationGrants: { encryptionMode: "allow-plaintext" } },
+			deploymentMode: "unset",
 			logger: grants.logger,
 		});
 		expect(grants.calls).toEqual([plaintextWarning("federation-grants")]);
@@ -207,7 +212,11 @@ describe("the plaintext guard's notices", () => {
 	it("with no logger handed over, consoleLogger writes the same one line", () => {
 		const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
 		const error = vi.spyOn(console, "error").mockImplementation(() => {});
-		createRedisFederationTokenStore({ client: tokenClient, encryption: PLAINTEXT });
+		createRedisFederationTokenStore({
+			deploymentMode: "unset",
+			client: tokenClient,
+			encryption: PLAINTEXT,
+		});
 		expect(warn.mock.calls).toEqual([
 			[{ store: "federation-tokens", mode: "allow-plaintext" }, "federation_store_plaintext"],
 		]);

@@ -169,6 +169,11 @@ export {
 	type ReplicaSafetyModuleRef,
 	replicaUnsafeReason,
 } from "./boot/index.mjs";
+// The CSRF token's signature bounds, part of the `csrfTokenSigner` contract.
+export {
+	CSRF_SIGNATURE_MAX_LENGTH,
+	CSRF_SIGNATURE_MIN_LENGTH,
+} from "./browser-session/csrf-signature.mjs";
 // The login page's URL rule: the one home of what /authorize's fallback and
 // the session package's loginEntry do to a login page.
 export {
@@ -222,7 +227,11 @@ export { MAX_DURATION_MS, MAX_DURATION_SECONDS } from "./config/durations.mjs";
 export { coreReference, moduleReferences } from "./config/references.mjs";
 // How the deployment runs — what its HTTP behaviour depends on of the
 // `http` module's settings, and how many replicas the operator says run —
-// each through a slot rather than the configuration.
+// each through a slot rather than the configuration. `deploymentModeOf` is
+// the reading boot fills `deploymentMode` with, for a composition root that
+// builds a reader by hand; `checkDeploymentMode` is what every reader holds
+// the value it is handed to.
+export { checkDeploymentMode, deploymentModeOf } from "./deployment/mode.mjs";
 export type { DeploymentMode, HttpSettings } from "./deployment/types.mjs";
 // OIDC discovery aggregation — modules contribute `discoveryMetadata`
 // (OidcDiscoveryContributionFactory above) and core synthesizes the

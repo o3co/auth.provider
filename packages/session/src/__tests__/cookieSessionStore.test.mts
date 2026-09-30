@@ -187,6 +187,8 @@ async function boot(logger: SpyLogger): Promise<express.Express> {
 	};
 	const routes = defineModule({
 		name: "test:cookie-session-routes",
+		// The CSRF token's signer, from the session store's module.
+		requires: ["csrfTokenSigner"],
 		contributes: {
 			routes: [
 				() => {
@@ -200,16 +202,18 @@ async function boot(logger: SpyLogger): Promise<express.Express> {
 					});
 					return { id: "test-probe", mountPath: "/probe", handler: router };
 				},
-				() => ({
+				(deps) => ({
 					id: "test-session",
 					mountPath: "/session",
 					handler: createSessionRouter(express, {
 						requirements: resolverForTests([]),
+						csrfTokenSigner: deps.csrfTokenSigner,
 						userRepository: {
 							authenticate: vi.fn(async () => alice),
 							authenticateByToken: vi.fn(async () => alice),
 						} as unknown as UserRepository,
 						config: config as never,
+						deploymentMode: "single",
 						logger: logger as unknown as Logger,
 					}),
 				}),

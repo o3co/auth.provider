@@ -18,8 +18,9 @@
  * The contract suite of the `csrfTokenSigner` slot and its test double.
  *
  * `csrfTokenSignerContract(input)` holds a signer to what the `csrfGuard`
- * provider relies on: `sign` answers a non-empty base64url signature (it sits
- * between a token's `.` separators), the same for the same payload; `verify`
+ * provider relies on: `sign` answers a base64url signature (it sits between a
+ * token's `.` separators) of `CSRF_SIGNATURE_MIN_LENGTH` to
+ * `CSRF_SIGNATURE_MAX_LENGTH` characters, the same for the same payload; `verify`
  * accepts it and refuses one altered, shortened or lengthened, one for
  * another payload, and one by another key (`input.other`); `verify` never
  * throws, answering `false` for anything malformed; the signer is a frozen
@@ -38,6 +39,10 @@
 import assert from "node:assert/strict";
 import { createHash, createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 import { inspect } from "node:util";
+import {
+	CSRF_SIGNATURE_MAX_LENGTH,
+	CSRF_SIGNATURE_MIN_LENGTH,
+} from "../../browser-session/csrf-signature.mjs";
 import type { CsrfTokenSigner } from "../../browser-session/types.mjs";
 import type { ContractCase } from "../../session-admission/testing/requirement.contract.mjs";
 import { unfrozenPath } from "./shared.mjs";
@@ -56,8 +61,10 @@ export interface CsrfTokenSignerContractInput {
 	readonly sessionSecret?: string;
 }
 
-/** A signature's alphabet: base64url, no padding. */
-const BASE64URL = /^[A-Za-z0-9_-]+$/;
+/** A signature: base64url, no padding, within the contract's bounds. */
+const SIGNATURE = new RegExp(
+	`^[A-Za-z0-9_-]{${CSRF_SIGNATURE_MIN_LENGTH},${CSRF_SIGNATURE_MAX_LENGTH}}$`,
+);
 
 /** Payloads of the shapes a token signs, and the edges: empty, and beyond ASCII. */
 const PAYLOADS: readonly string[] = [
@@ -89,14 +96,14 @@ export function csrfTokenSignerContract(
 	const { build, other, sessionSecret } = input;
 	const cases: ContractCase[] = [
 		{
-			name: "sign answers a non-empty base64url signature, the same one for the same payload",
+			name: `sign answers a base64url signature of ${CSRF_SIGNATURE_MIN_LENGTH} to ${CSRF_SIGNATURE_MAX_LENGTH} characters, the same one for the same payload`,
 			run: async () => {
 				const signer = build();
 				for (const payload of PAYLOADS) {
 					const signature = signer.sign(payload);
 					assert.ok(
-						typeof signature === "string" && BASE64URL.test(signature),
-						`sign(${JSON.stringify(payload)}) answered ${JSON.stringify(signature)}, not a non-empty base64url signature`,
+						typeof signature === "string" && SIGNATURE.test(signature),
+						`sign(${JSON.stringify(payload)}) answered ${JSON.stringify(signature)}, not a base64url signature of ${CSRF_SIGNATURE_MIN_LENGTH} to ${CSRF_SIGNATURE_MAX_LENGTH} characters`,
 					);
 					assert.equal(
 						signer.sign(payload),

@@ -14,6 +14,11 @@ tracks the steps.
 
 - Written against: `develop` at `bb180ae5f`. Every "today" below was checked
   there, and the umbrella repository (o3co/auth) at its `develop`.
+- Amended 2026-09-30 (owner): storage is selected by configuration among the
+  adapters a template's packages provide (D1), and a request for a starting
+  point that needs no Redis and no user service is answered by the
+  standalone's development configuration, not a template (D2, "Not now").
+  Checked at `develop` `f4021b5a3`.
 
 ## Context
 
@@ -88,12 +93,20 @@ cannot be expressed by configuration. Today there are two:
 - **Headless**: tokens for machines, with no browser session, no cookie and no
   `/authorize`.
 
+A template also decides which packages it installs, and so which adapters a
+deployment of it can select: an in-process store or a Redis one, core's
+file-backed users or the user service's client. Configuration selects among
+those. A template may install adapters a given configuration never selects;
+that dependency is the cost accepted instead of a second template of the same
+shape that differs only in what it installs, which would have to be kept in
+step with the first (D4).
+
 What is **not** a template:
 
 | Varies | Where it lives |
 | --- | --- |
 | A feature or grant (device grant, MFA, passkeys, consent, a federation, DPoP, mTLS, JWT bearer, token exchange) | A switch in each template whose shape it belongs to, once that template installs its package (the standalone installs none of the device grant, WebAuthn, DPoP, mTLS and token exchange today) |
-| Scale and storage (one replica or several, memory or Redis) | Configuration: `deployment.mode` and the adapter selection |
+| Scale and storage (one replica or several, memory or Redis) | Configuration, among the adapters the template's packages provide: `deployment.mode` and the adapter selection |
 | The kind of client (web, single-page through a back end, native) | The client registration |
 
 A switch is held to the same rule as a template: every branch of it is booted
@@ -104,16 +117,26 @@ by the template's own suite (the MFA ADR's step 20 tests MFA on and off).
 - **`standalone`** — the browser-facing identity provider. It keeps its name:
   the umbrella E2E builds it by path (`tests/dockerfiles/provider.Dockerfile`
   and `tests/docker-compose.yml` in o3co/auth), and the documentation and
-  `create-app`'s default name it.
+  `create-app`'s default name it. It installs both the in-process and the
+  Redis adapters, and core's file-backed users beside the user service's
+  client. Its development configuration selects the in-process ones, the
+  file-backed users and one replica, so it boots with no Redis and no user
+  service; its production configuration inherits Redis and the user service
+  from `application.conf`. Three things keep the development configuration
+  from doing so at `f4021b5a3`: the refresh-token family store is wired to
+  Redis in `buildModules.mts`, not selected; `config/development.conf` selects
+  nothing; and the file-backed users it would select have no
+  `config/users.yaml` to read
+  ([#778](https://github.com/o3co/auth.provider/issues/778)).
 - **`m2m`** — the headless token service: `client_credentials` with client
   secrets and `private_key_jwt`, RFC 7523 JWT bearer, RFC 8693 token exchange,
   DPoP and mTLS behind switches, introspection, revocation and the JWKS. It has
   no session package, no `express-session`, no login URL and no code store.
   JWT bearer resolves each assertion's subject to a user, so with it switched
-  on `m2m` also needs the user service (`foundation`'s HTTP user repository),
-  as `standalone` does. Its suite asserts the absence as well as the presence:
-  `/oauth/authorize` and `/session/*` answer `404`, and no response sets a
-  cookie.
+  on `m2m` also needs a user repository — the user service's client, or
+  core's file-backed users in development — as `standalone` does. Its suite asserts the
+  absence as well as the presence: `/oauth/authorize` and `/session/*` answer
+  `404`, and no response sets a cookie.
 
 JWT bearer is a switch of both shapes (D1). A browser-facing deployment uses
 it too: auth.proxy's injection mode exchanges an external credential for a
@@ -123,10 +146,13 @@ assertion verifier. The module that builds the verifier over a static issuer
 registry from the configuration is written once and shared by the templates
 (D4).
 
-Two templates asked for by their use — "a simple web deployment", "an admin
-API" — are the same two shapes: the first is `standalone` on one replica with
-in-memory stores; the second is `m2m` when its callers are machines, and
-`standalone` with MFA required and passkeys when they are people.
+Templates asked for by their use — "a simple web deployment", "a minimal
+one", "an admin API" — are these two shapes. A simple web deployment is
+`standalone` on one replica with in-process stores. A minimal one is
+`standalone` under its development configuration: in-process stores,
+file-backed users, one replica, and no Redis or user service to start. An
+admin API is `m2m` when its callers are machines, and `standalone` with MFA
+required and passkeys when they are people.
 
 ### D3. What a template is, and what holds every template to account
 
@@ -200,6 +226,11 @@ browser session; `m2m` has no login for a second factor to interrupt.
   authorization requests required, sender-constrained tokens, `private_key_jwt`
   or mTLS client authentication — but pushed authorization requests (RFC 9126)
   are not implemented. Revisited when they are.
+- **A `minimal` template** — the browser-facing shape without the Redis
+  package or the user service's client. The standalone installs both kinds of
+  adapter, so its development configuration selects the adapters such a
+  template would make available, once #778 lands (D2). What the standalone installs
+  beyond that is the dependency cost D1 accepts.
 - **A leaner browser-facing template** (without federation grants, say): the
   same shape as `standalone`, so a switch, not a template.
 - **Client presets** for web, single-page-through-a-back-end and native clients

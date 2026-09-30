@@ -22,7 +22,8 @@
  * never an implicit pass.
  */
 
-import { fullSectionsSchema, type Logger } from "@o3co/auth-provider-core";
+import { type CsrfTokenSigner, fullSectionsSchema, type Logger } from "@o3co/auth-provider-core";
+import { createTestCsrfTokenSigner } from "@o3co/auth-provider-core/testing";
 import express, { type NextFunction, type Request, type Response } from "express";
 import request from "supertest";
 import { describe, expect, it, vi } from "vitest";
@@ -32,13 +33,16 @@ import {
 	createCsrfGuard,
 	createCsrfIssueHandler,
 	createCsrfProtection,
+	createCsrfProtectionFromConfig,
+	createSessionCsrfGuard,
 	MAX_CSRF_TTL_SECONDS,
 } from "#/csrf.mjs";
 
-const SECRET = "test-session-secret-value";
+/** What the tokens are signed with: the `csrfTokenSigner` slot's double. */
+const SIGNER = createTestCsrfTokenSigner();
 
 const makeCsrf = (overrides: Partial<CsrfProtectionOptions> = {}) =>
-	createCsrfProtection({ secret: SECRET, ...overrides });
+	createCsrfProtection({ signer: SIGNER, ...overrides });
 
 /** Minimal `Request` stand-in — the module reads headers, body and host only. */
 const fakeRequest = (init: {
@@ -161,11 +165,11 @@ describe("csrf — signed double-submit token", () => {
 		expect(verdict).toBe("invalid");
 	});
 
-	it("rejects a well-formed token signed with a different secret", () => {
+	it("rejects a well-formed token signed by another signer", () => {
 		// This is what separates a signed double-submit from a plain one: a
 		// subdomain that can write the parent-domain cookie still cannot forge
 		// material the provider will accept.
-		const attacker = createCsrfProtection({ secret: "some-other-secret" });
+		const attacker = createCsrfProtection({ signer: createTestCsrfTokenSigner() });
 		const csrf = makeCsrf();
 		const forged = attacker.mint();
 
@@ -181,7 +185,7 @@ describe("csrf — signed double-submit token", () => {
 
 	it("rejects an expired token", () => {
 		let now = 1_000_000_000_000;
-		const csrf = createCsrfProtection({ secret: SECRET, ttlSeconds: 60, now: () => now });
+		const csrf = createCsrfProtection({ signer: SIGNER, ttlSeconds: 60, now: () => now });
 		const token = csrf.mint();
 
 		now += 61_000;
@@ -210,6 +214,263 @@ describe("csrf — signed double-submit token", () => {
 	});
 });
 
+/** The refusal of a protection built without a signer, or with one that breaks the contract. */
+const REFUSED = "pass the csrfTokenSigner slot's signer, or createSessionCsrfTokenSigner(secret)";
+
+/** `signature` with its first character changed: every bit of it is signature, never padding. */
+const tampered = (signature: string): string =>
+	`${signature.startsWith("A") ? "B" : "A"}${signature.slice(1)}`;
+
+/** A signer over the double's key whose signatures are `length` characters: its signatures joined, then cut. */
+const signerOfLength = (length: number): CsrfTokenSigner => {
+	const sign = (payload: string): string => {
+		let joined = "";
+		for (let block = 0; joined.length < length; block++) {
+			joined += SIGNER.sign(`${block}:${payload}`);
+		}
+		return joined.slice(0, length);
+	};
+	return {
+		sign,
+		verify: (payload, signature) =>
+			typeof payload === "string" && typeof signature === "string" && signature === sign(payload),
+	};
+};
+
+describe("csrf — the signer at construction", () => {
+	const session = { name: "auth.session", secure: true, sameSite: "lax" as const, domain: null };
+
+	it.each([
+		["no signer", {}],
+		["a secret in place of a signer", { secret: "a-session-secret.at-least-32-bytes.ok" }],
+		["a signer without verify", { signer: { sign: SIGNER.sign } }],
+		["a signer without sign", { signer: { verify: SIGNER.verify } }],
+	])("createCsrfProtection refuses %s, saying what to pass", (_what, options) => {
+		expect(() => createCsrfProtection(options as never)).toThrow(
+			`csrf: signer is required: ${REFUSED}`,
+		);
+	});
+
+	it("createCsrfProtectionFromConfig refuses a call without a signer, saying what to pass", () => {
+		expect(() => createCsrfProtectionFromConfig(session, undefined as never)).toThrow(
+			`csrf: signer is required: ${REFUSED}`,
+		);
+		expect(() => createCsrfProtectionFromConfig(session, {} as never)).toThrow(
+			`csrf: signer is required: ${REFUSED}`,
+		);
+	});
+
+	/** A signer over the double's key whose `sign` and `verify` are replaced by `members`. */
+	const breaking = (members: {
+		sign?: (payload: string) => unknown;
+		verify?: (payload: string, signature: string) => unknown;
+	}): CsrfTokenSigner => ({ ...SIGNER, ...members }) as unknown as CsrfTokenSigner;
+
+	it.each([
+		["one signature for every payload", breaking({ sign: () => SIGNER.sign("constant") })],
+		["a verify that accepts anything", breaking({ verify: () => true })],
+		["a verify that ignores the payload", breaking({ verify: (_p, s) => s.length > 0 })],
+		["a verify that refuses everything", breaking({ verify: () => false })],
+		[
+			"a verify that throws",
+			breaking({
+				verify: () => {
+					throw new Error("verify failed");
+				},
+			}),
+		],
+		["an async verify", breaking({ verify: async (p, s) => SIGNER.verify(p, s) })],
+		["an async sign", breaking({ sign: async (p) => SIGNER.sign(p) })],
+		[
+			"a sign that throws",
+			breaking({
+				sign: () => {
+					throw new Error("sign failed");
+				},
+			}),
+		],
+		["a padded base64url signature", breaking({ sign: (p) => `${SIGNER.sign(p)}=` })],
+		[
+			"a standard base64 signature",
+			breaking({ sign: (p) => Buffer.from(SIGNER.sign(p), "base64url").toString("base64") }),
+		],
+		["a signature of 21 characters, under core's bound", signerOfLength(21)],
+		["a signature of 513 characters, over core's bound", signerOfLength(513)],
+	])("createCsrfProtection refuses a signer with %s, naming the slot", (_what, signer) => {
+		expect(() => createCsrfProtection({ signer })).toThrow(
+			/^csrf: the signer does not keep the csrfTokenSigner contract \(.+\): pass the csrfTokenSigner slot's signer, or createSessionCsrfTokenSigner\(secret\)$/,
+		);
+	});
+
+	it("builds over a signer that keeps the contract", () => {
+		expect(() => createCsrfProtection({ signer: createTestCsrfTokenSigner() })).not.toThrow();
+	});
+
+	it.each([22, 512])(
+		"builds over a signer whose signatures are %i characters, at core's bound, and its tokens verify",
+		(length) => {
+			const csrf = createCsrfProtection({ signer: signerOfLength(length) });
+			const token = csrf.mint();
+			expect(
+				csrf.verify(
+					fakeRequest({
+						cookies: { [csrf.cookieName]: token },
+						headers: { [csrf.headerName]: token },
+					}),
+				),
+			).toBe("valid");
+		},
+	);
+
+	it("mints <expiry>.<nonce>.<signature>, the signature the signer answers for <expiry>.<nonce>", () => {
+		const token = createCsrfProtectionFromConfig(session, { signer: SIGNER }).mint();
+		const [expiry, nonce, signature] = token.split(".");
+		expect(SIGNER.verify(`${expiry}.${nonce}`, signature as string)).toBe(true);
+	});
+});
+
+describe("csrf — what verify answers", () => {
+	/**
+	 * A signer that keeps the contract for every payload but a token's, where
+	 * `verify` answers `answer` for a signature it did not make: what a signer
+	 * past construction could still do.
+	 */
+	const answeringForTokens = (answer: () => unknown): CsrfTokenSigner =>
+		({
+			sign: SIGNER.sign,
+			verify: (payload: string, signature: string) => {
+				if (SIGNER.verify(payload, signature)) return true;
+				return /^\d+\./.test(payload) ? answer() : false;
+			},
+		}) as unknown as CsrfTokenSigner;
+
+	/** A well-formed token whose signature the signer did not make. */
+	const forged = (csrf: ReturnType<typeof makeCsrf>): string => {
+		const [expiry, nonce, signature] = csrf.mint().split(".");
+		return `${expiry}.${nonce}.${tampered(signature as string)}`;
+	};
+
+	const pair = (csrf: ReturnType<typeof makeCsrf>, token: string) =>
+		fakeRequest({
+			cookies: { [csrf.cookieName]: token },
+			headers: { [csrf.headerName]: token },
+		});
+
+	it.each([
+		["a promise", () => Promise.resolve(false)],
+		["a truthy string", () => "false"],
+		["1", () => 1],
+		["an object", () => ({})],
+	])("accepts only true: a verify answering %s for a forged token refuses it", (_what, answer) => {
+		const csrf = makeCsrf({ signer: answeringForTokens(answer) });
+		expect(csrf.verify(pair(csrf, forged(csrf)))).toBe("invalid");
+	});
+
+	it("reads a verify that throws as a refusal: the check answers, and the guard's check never throws", () => {
+		const signer = answeringForTokens(() => {
+			throw new Error("the signing service is down");
+		});
+		const csrf = makeCsrf({ signer });
+		const token = forged(csrf);
+		expect(csrf.verify(pair(csrf, token))).toBe("invalid");
+		const guard = createSessionCsrfGuard({ csrf });
+		expect(guard.check(pair(csrf, token))).toEqual({
+			outcome: "refused",
+			reason: "token_invalid",
+		});
+	});
+});
+
+describe("csrf — the signer after construction", () => {
+	const pair = (csrf: ReturnType<typeof makeCsrf>, token: string) =>
+		fakeRequest({
+			cookies: { [csrf.cookieName]: token },
+			headers: { [csrf.headerName]: token },
+		});
+
+	/** A well-formed token whose signature the signer did not make. */
+	const forged = (csrf: ReturnType<typeof makeCsrf>): string => {
+		const [expiry, nonce, signature] = csrf.mint().split(".");
+		return `${expiry}.${nonce}.${tampered(signature as string)}`;
+	};
+
+	it("checks with the verify it was built over: a verify replaced on the signer afterwards passes no forged token", () => {
+		const signer: { sign: CsrfTokenSigner["sign"]; verify: CsrfTokenSigner["verify"] } = {
+			sign: SIGNER.sign,
+			verify: SIGNER.verify,
+		};
+		const csrf = makeCsrf({ signer });
+		const token = forged(csrf);
+		signer.verify = () => true;
+		expect(csrf.verify(pair(csrf, token))).toBe("invalid");
+		expect(createSessionCsrfGuard({ csrf }).check(pair(csrf, token))).toEqual({
+			outcome: "refused",
+			reason: "token_invalid",
+		});
+	});
+
+	it("signs with the sign it was built over: a sign replaced on the signer afterwards changes no token it mints", () => {
+		const signer: { sign: CsrfTokenSigner["sign"]; verify: CsrfTokenSigner["verify"] } = {
+			sign: SIGNER.sign,
+			verify: SIGNER.verify,
+		};
+		const csrf = makeCsrf({ signer });
+		signer.sign = () => "A".repeat(43);
+		const token = csrf.mint();
+		const [expiry, nonce, signature] = token.split(".");
+		expect(SIGNER.verify(`${expiry}.${nonce}`, signature as string)).toBe(true);
+		expect(csrf.verify(pair(csrf, token))).toBe("valid");
+	});
+
+	it("reads sign and verify off the signer once, so accessors that answer other methods later change nothing", () => {
+		let probed = false;
+		const signer = {
+			get sign() {
+				return probed ? () => "A".repeat(43) : SIGNER.sign;
+			},
+			get verify() {
+				return probed ? () => true : SIGNER.verify;
+			},
+		} as CsrfTokenSigner;
+		const csrf = makeCsrf({ signer });
+		probed = true;
+		expect(csrf.verify(pair(csrf, forged(csrf)))).toBe("invalid");
+		const [expiry, nonce, signature] = csrf.mint().split(".");
+		expect(SIGNER.verify(`${expiry}.${nonce}`, signature as string)).toBe(true);
+	});
+});
+
+describe("csrf — a token's expiry", () => {
+	const NOW_MS = 1_800_000_000_000;
+	const nowSeconds = NOW_MS / 1000;
+
+	/** A token expiring at `expiry`, signed by the protection's signer. */
+	const tokenExpiringAt = (expiry: number): string => {
+		const payload = `${expiry}.ZXhwaXJ5LWJvdW5kLW5vbmNlLXRlc3Q`;
+		return `${payload}.${SIGNER.sign(payload)}`;
+	};
+
+	const verdictFor = (token: string) => {
+		const csrf = createCsrfProtection({ signer: SIGNER, ttlSeconds: 3600, now: () => NOW_MS });
+		return csrf.verify(
+			fakeRequest({
+				cookies: { [csrf.cookieName]: token },
+				headers: { [csrf.headerName]: token },
+			}),
+		);
+	};
+
+	it("accepts a token expiring up to ttlSeconds and 60 seconds of clock skew from now", () => {
+		expect(verdictFor(tokenExpiringAt(nowSeconds + 3600))).toBe("valid");
+		expect(verdictFor(tokenExpiringAt(nowSeconds + 3600 + 60))).toBe("valid");
+	});
+
+	it("refuses a well-signed token expiring later than that, which issue never mints", () => {
+		expect(verdictFor(tokenExpiringAt(nowSeconds + 3600 + 61))).toBe("invalid");
+		expect(verdictFor(tokenExpiringAt(4_102_444_800))).toBe("invalid");
+	});
+});
+
 /**
  * `ttlSeconds` is used in arithmetic *and* stringified into the token, so a
  * value that is not a positive integer does not fail loudly — it silently
@@ -226,19 +487,19 @@ describe("csrf — ttlSeconds validation at construction", () => {
 		["Infinity", Number.POSITIVE_INFINITY],
 		["a value beyond the ceiling", MAX_CSRF_TTL_SECONDS + 1],
 	])("throws on %s", (_label, ttlSeconds) => {
-		expect(() => createCsrfProtection({ secret: SECRET, ttlSeconds })).toThrow(/ttlSeconds/);
+		expect(() => createCsrfProtection({ signer: SIGNER, ttlSeconds })).toThrow(/ttlSeconds/);
 	});
 
 	it("accepts the ceiling itself", () => {
 		expect(() =>
-			createCsrfProtection({ secret: SECRET, ttlSeconds: MAX_CSRF_TTL_SECONDS }),
+			createCsrfProtection({ signer: SIGNER, ttlSeconds: MAX_CSRF_TTL_SECONDS }),
 		).not.toThrow();
 	});
 
 	it("throws rather than silently flooring a decimal", () => {
 		// Rounding would hide an operator's typo behind a working system, and
 		// the value it silently picked would not be the one they wrote.
-		expect(() => createCsrfProtection({ secret: SECRET, ttlSeconds: 7200.5 })).toThrow();
+		expect(() => createCsrfProtection({ signer: SIGNER, ttlSeconds: 7200.5 })).toThrow();
 	});
 
 	it("agrees with the config schema about what is acceptable", () => {
@@ -252,7 +513,7 @@ describe("csrf — ttlSeconds validation at construction", () => {
 			}).success;
 			let constructorAccepts = true;
 			try {
-				createCsrfProtection({ secret: SECRET, ttlSeconds });
+				createCsrfProtection({ signer: SIGNER, ttlSeconds });
 			} catch {
 				constructorAccepts = false;
 			}
@@ -270,7 +531,7 @@ describe("csrf — ttlSeconds validation at construction", () => {
 		// `POST /session/login` then rejects.
 		const wireShape = /^\d{1,15}\.[A-Za-z0-9_-]{16,}\.[A-Za-z0-9_-]{16,}$/;
 		for (const ttlSeconds of [1, 60, 7200, MAX_CSRF_TTL_SECONDS]) {
-			const csrf = createCsrfProtection({ secret: SECRET, ttlSeconds });
+			const csrf = createCsrfProtection({ signer: SIGNER, ttlSeconds });
 			const token = csrf.mint();
 			expect(token).toMatch(wireShape);
 			// And it round-trips, which the shape alone does not prove.
@@ -289,7 +550,7 @@ describe("csrf — ttlSeconds validation at construction", () => {
 		// `Date.now()` is integral in practice, but a seam or a faked clock need
 		// not be — and the expiry is floored, not the raw sum.
 		const csrf = createCsrfProtection({
-			secret: SECRET,
+			signer: SIGNER,
 			ttlSeconds: 7200,
 			now: () => 1_000_000_000_123.7,
 		});
@@ -310,7 +571,7 @@ describe("csrf — ttlSeconds validation at construction", () => {
 describe("csrf — cookie issuance", () => {
 	it("writes a JS-readable cookie mirroring the session cookie's transport attributes", () => {
 		const csrf = createCsrfProtection({
-			secret: SECRET,
+			signer: SIGNER,
 			cookieName: "auth.session.csrf",
 			ttlSeconds: 900,
 			cookie: { secure: true, sameSite: "lax", domain: "example.com" },
@@ -338,7 +599,7 @@ describe("csrf — cookie issuance", () => {
 
 	it("omits the domain attribute when no cookie domain is configured", () => {
 		const csrf = createCsrfProtection({
-			secret: SECRET,
+			signer: SIGNER,
 			cookie: { secure: false, sameSite: "lax" },
 		});
 		const res = fakeResponse();
@@ -407,7 +668,7 @@ describe("csrf — origin / referer check", () => {
 describe("csrf — guard acceptance rule", () => {
 	const buildApp = (opts: { trustedOrigins?: string[] } = {}) => {
 		const csrf = createCsrfProtection({
-			secret: SECRET,
+			signer: SIGNER,
 			cookie: { secure: false, sameSite: "lax" },
 		});
 		const app = express();
@@ -510,7 +771,7 @@ describe("csrf — guard acceptance rule", () => {
 describe("csrf — issue endpoint", () => {
 	it("hands out a token, sets the paired cookie, and forbids caching", async () => {
 		const csrf = createCsrfProtection({
-			secret: SECRET,
+			signer: SIGNER,
 			cookie: { secure: false, sameSite: "lax" },
 		});
 		const app = express();
