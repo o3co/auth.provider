@@ -11,7 +11,7 @@
 // keeps the scan as a safety net for tokens written before the index existed
 // (README, "`scanFallback` — a migration flag, not a tuning knob").
 
-import type { FederationTokens } from "@o3co/auth-provider-core";
+import type { FederationTokenStore, FederationTokens } from "@o3co/auth-provider-core";
 import { describe, expect, it, vi } from "vitest";
 import type { FederationTokenStoreClient } from "../src/clients.mjs";
 import {
@@ -344,7 +344,7 @@ describe("scanFallback migration flag", () => {
 				scanFallback: false,
 			},
 			{},
-		);
+		) as FederationTokenStore;
 		await store.attach("sid-1", "google", tokens);
 		await store.removeBySid("sid-1");
 		expect(redis.scanIterator).not.toHaveBeenCalled();

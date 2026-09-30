@@ -144,7 +144,7 @@ describe("redisAccessTokenDenylistBuilder", () => {
 		const store = redisAccessTokenDenylistBuilder(
 			{ type: "redis", client: client as unknown as AccessTokenDenylistClient },
 			{},
-		);
+		) as AccessTokenDenylist;
 		expect(store.kind).toBe("redis");
 	});
 });
