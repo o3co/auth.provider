@@ -24,7 +24,7 @@ One section, its module's and named after it: `smtp-mail-sender`. Boot parses it
 | --- | --- | --- | --- |
 | `smtp-mail-sender.host` | `SMTP_MAIL_SENDER_HOST` | none | The relay's host: one line of well-formed text, not blank, with no control character |
 | `smtp-mail-sender.port` | `SMTP_MAIL_SENDER_PORT` | `587` | 1 to 65535 |
-| `smtp-mail-sender.secure` | `SMTP_MAIL_SENDER_SECURE` | `starttls` | `starttls` (upgrade a plain connection), `tls` (implicit TLS) or `none` — plaintext, refused to a host that is not loopback |
+| `smtp-mail-sender.secure` | `SMTP_MAIL_SENDER_SECURE` | `starttls` | `starttls` (upgrade a plain connection), `tls` (implicit TLS) or `none` — plaintext, taken only to `localhost` or a loopback address written in its canonical form (`127.0.0.1`, `::1`), and refused with no host: another spelling of an address (`127.0.0.08`, `2130706433`) is a name a resolver may send anywhere |
 | `smtp-mail-sender.user` | `SMTP_MAIL_SENDER_USER` | none | The account the relay is signed in with |
 | `smtp-mail-sender.password` | `SMTP_MAIL_SENDER_PASSWORD` | none | Its password, from the environment |
 | `smtp-mail-sender.from` | `SMTP_MAIL_SENDER_FROM` | none | The sender's address, one line |

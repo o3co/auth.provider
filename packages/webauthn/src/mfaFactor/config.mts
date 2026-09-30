@@ -38,7 +38,12 @@ export const webauthnMfaFactorConfigSchema = z.strictObject(
 			error: 'must be "required", "preferred" or "discouraged"',
 		}),
 	},
-	{ error: "must be a section of keys" },
+	{
+		error: (issue) =>
+			issue.code === "unrecognized_keys"
+				? `has a key it does not know: ${issue.keys.join(", ")}`
+				: "must be a section of keys",
+	},
 );
 
 /** `webauthn-mfa-factor` as its schema reads it. */

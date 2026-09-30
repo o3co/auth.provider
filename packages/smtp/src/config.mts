@@ -21,10 +21,11 @@
  * section does not know is refused. Every leaf reads the string an
  * environment variable carries. `secure` is `starttls` (upgrade a plain
  * connection, port 587 by default), `tls` (implicit TLS) or `none`, which is
- * refused to a host that is not loopback: a code or a notice never crosses a
- * network in the clear. The host, account and address have no default.
+ * refused but to `localhost` or a loopback address in its canonical form,
+ * and with no host: a code or a notice never crosses a network in the clear. The host, account and address have no default.
  */
 
+import { isIP } from "node:net";
 import { isLoopbackHostname } from "@o3co/auth-provider-core";
 import { z } from "zod";
 
@@ -34,9 +35,28 @@ export const SMTP_SECURE_MODES = ["starttls", "tls", "none"] as const;
 const SECTION_MISSING =
 	"is missing: layer @o3co/auth-provider-smtp/reference.conf beneath the composition's configuration";
 
-/** A section's refusal: missing, or written as a value rather than a section of keys. */
-const sectionError = (issue: { readonly input?: unknown }): string =>
-	issue.input === undefined ? SECTION_MISSING : "must be a section of keys";
+/** The keys an unknown-key issue names, each as written, or quoted when it is not a plain identifier. */
+const unknownKeys = (keys: readonly unknown[] | undefined): string =>
+	(keys ?? [])
+		.map((key) =>
+			typeof key === "string" && /^[A-Za-z0-9_-]+$/.test(key) ? key : JSON.stringify(key),
+		)
+		.join(", ");
+
+/**
+ * A section's refusal: missing, written as a value rather than a section of
+ * keys, or holding a key the section does not know, named.
+ */
+const sectionError = (issue: {
+	readonly code?: string;
+	readonly input?: unknown;
+	readonly keys?: readonly unknown[];
+}): string =>
+	issue.code === "unrecognized_keys"
+		? `has a key it does not know: ${unknownKeys(issue.keys)}`
+		: issue.input === undefined
+			? SECTION_MISSING
+			: "must be a section of keys";
 
 const PORT_RULE = "must be a whole number from 1 to 65535";
 const port = z.union(
@@ -76,6 +96,18 @@ const lineOfText = z
 		error: TEXT_RULE,
 	});
 
+/**
+ * Whether plaintext may go to `host`: `localhost`, or an address `net.isIP`
+ * reads — its canonical form — that is loopback. Any other spelling
+ * (`127.0.0.08`, `2130706433`) is a name to a resolver, which may answer
+ * anything; no host at all is refused too.
+ */
+function isCanonicalLoopbackHost(host: string | undefined): boolean {
+	if (host === undefined) return false;
+	if (host.toLowerCase() === "localhost") return true;
+	return isIP(host) !== 0 && isLoopbackHostname(host);
+}
+
 /** The SMTP mail sender's section, as its module parses it before any factory runs. */
 export const smtpMailSenderConfigSchema = z
 	.strictObject(
@@ -90,16 +122,12 @@ export const smtpMailSenderConfigSchema = z
 		{ error: sectionError },
 	)
 	.superRefine((section, context) => {
-		if (
-			section.secure === "none" &&
-			section.host !== undefined &&
-			!isLoopbackHostname(section.host)
-		) {
+		if (section.secure === "none" && !isCanonicalLoopbackHost(section.host)) {
 			context.addIssue({
 				code: "custom",
 				path: ["secure"],
 				message:
-					'is "none" to a host that is not loopback: use "starttls" or "tls", or relay through a loopback host',
+					'is "none" to a host that is not localhost or a loopback address written in its canonical form: use "starttls" or "tls", or relay through a loopback host',
 			});
 		}
 	});

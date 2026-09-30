@@ -60,9 +60,28 @@ export const MFA_DEVELOPMENT_SAMPLE_KEY = "bzNjbzptZmE6ZGV2ZWxvcG1lbnQtc2FtcGxlL
 const SECTION_MISSING =
 	"is missing: layer @o3co/auth-provider-mfa/reference.conf beneath the composition's configuration";
 
-/** A section's refusal: missing, or written as a value rather than a section of keys. */
-export const sectionError = (issue: { readonly input?: unknown }): string =>
-	issue.input === undefined ? SECTION_MISSING : "must be a section of keys";
+/** The keys an unknown-key issue names, each as written, or quoted when it is not a plain identifier. */
+const unknownKeys = (keys: readonly unknown[] | undefined): string =>
+	(keys ?? [])
+		.map((key) =>
+			typeof key === "string" && /^[A-Za-z0-9_-]+$/.test(key) ? key : JSON.stringify(key),
+		)
+		.join(", ");
+
+/**
+ * A section's refusal: missing, written as a value rather than a section of
+ * keys, or holding a key the section does not know, named.
+ */
+export const sectionError = (issue: {
+	readonly code?: string;
+	readonly input?: unknown;
+	readonly keys?: readonly unknown[];
+}): string =>
+	issue.code === "unrecognized_keys"
+		? `has a key it does not know: ${unknownKeys(issue.keys)}`
+		: issue.input === undefined
+			? SECTION_MISSING
+			: "must be a section of keys";
 
 const wholeNumber = (min: number, max: number, unit: string) => {
 	const error = `must be a whole number from ${min} to ${max}${unit}`;
