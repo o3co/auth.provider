@@ -576,6 +576,13 @@ and plain text, never a JSON body.
    flow that ended meanwhile, is answered as step 2 is: `400`, plain, and
    `federation.grant.authorization_failed` with the outcome `stale`.
 
+A `503` at step 2, 5, 6 or 7 — the intent store could not read the handle or
+park the question, or admission, the grant store or the client registry could
+not judge — is audited as a refusal is: `federation.grant.authorization_failed`
+with the outcome `unavailable`, beside its one log line. One whose handle
+could not be read has no flow to name: it carries no grant, client, subject or
+connection, and the request's own correlation id.
+
 It is not held to the navigation rule the account-link start is (the
 `csrfGuard`'s `checkNavigation`, which refuses `Sec-Fetch-Site: cross-site`):
 a client's site sending the browser here is what connect is for. That is
