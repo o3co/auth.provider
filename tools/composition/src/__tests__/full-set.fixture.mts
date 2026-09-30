@@ -32,8 +32,10 @@
  *   refuses to boot without one, and no package ships one). The federation
  *   bridges point each adapter's `fetch` at a fake upstream.
  * - A mail sender, core's recording one, built at every boot and handed to
- *   the tests (`FullSet.mail`): the template's SMTP sender's module provides
- *   none.
+ *   the tests (`FullSet.mail`). It joins the template's SMTP sender's module
+ *   only because that module provides no sender yet: once it does (the MFA
+ *   ADR's build-order step 17), two modules would provide the slot, and this
+ *   one has to take the template's place instead.
  * - mTLS in-process on its `header` source from a loopback peer — the shape
  *   a TLS-terminating proxy gives it — with the mTLS package's test
  *   certificate.
