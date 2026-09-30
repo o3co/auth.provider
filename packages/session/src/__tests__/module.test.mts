@@ -246,14 +246,16 @@ describe("sessionModule (boot integration)", () => {
 		const base = makeValidAppConfig();
 		const config: AppConfig = {
 			...base,
-			federations: {
-				...base.federations,
-				stub: {
-					enabled: true,
-					clientId: "id",
-					clientSecret: "secret",
-					callbackURL: "https://example.com/cb",
-				} as never,
+			core: {
+				...(base.core as object),
+				federations: {
+					stub: {
+						enabled: true,
+						clientId: "id",
+						clientSecret: "secret",
+						callbackURL: "https://example.com/cb",
+					} as never,
+				},
 			},
 		} as AppConfig;
 		const handle = await createTestApp({
@@ -268,14 +270,16 @@ describe("sessionModule (boot integration)", () => {
 		const base = makeValidAppConfig();
 		const config: AppConfig = {
 			...base,
-			federations: {
-				...base.federations,
-				stub: {
-					enabled: true,
-					clientId: "id",
-					clientSecret: "secret",
-					// callbackURL intentionally absent
-				} as never,
+			core: {
+				...(base.core as object),
+				federations: {
+					stub: {
+						enabled: true,
+						clientId: "id",
+						clientSecret: "secret",
+						// callbackURL intentionally absent
+					} as never,
+				},
 			},
 		} as AppConfig;
 		await expect(
@@ -293,12 +297,14 @@ describe("sessionModule (boot integration)", () => {
 		const base = makeValidAppConfig();
 		const config: AppConfig = {
 			...base,
-			federations: {
-				...base.federations,
-				disabledFed: {
-					enabled: false,
-					// no callbackURL — must NOT throw because disabled
-				} as never,
+			core: {
+				...(base.core as object),
+				federations: {
+					disabledFed: {
+						enabled: false,
+						// no callbackURL — must NOT throw because disabled
+					} as never,
+				},
 			},
 		} as AppConfig;
 		const handle = await createTestApp({
@@ -363,13 +369,15 @@ describe("sessionModule — the link routes are a consumer of session admission"
 		const base = makeValidAppConfig();
 		const config = {
 			...base,
-			federations: {
-				...base.federations,
-				stub: {
-					enabled: true,
-					clientId: "id",
-					clientSecret: "secret",
-					callbackURL: "https://example.com/session/oauth/federation/stub/callback",
+			core: {
+				...(base.core as object),
+				federations: {
+					stub: {
+						enabled: true,
+						clientId: "id",
+						clientSecret: "secret",
+						callbackURL: "https://example.com/session/oauth/federation/stub/callback",
+					},
 				},
 			},
 		} as unknown as AppConfig;

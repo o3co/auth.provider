@@ -368,30 +368,32 @@ http.cors {
 
 ### Google フェデレーション
 
+フェデレーションは core のものである: `core.federations`、各フェデレーションに到達する名前（`/session/oauth/federation/<name>`）をキーとする 1 つのマップ。各キーは、そのパスから名付けた変数 `CORE_FEDERATIONS_<NAME>_<KEY>` に束縛される。トップレベルに書いたマップ（`federations { ... }`）は、各キーの `core.federations` の下のパスを名指しして起動を拒否する。`FEDERATIONS_GOOGLE_*` や `FEDERATIONS_OIDC_*` の変数が単独で、または新しい名前と異なる値で設定されていると、どのモジュールを選ぶよりも前に拒否される。
+
 | 変数 | デフォルト | 説明 |
 |---|---|---|
-| `FEDERATIONS_GOOGLE_ENABLED` | `false` | Google OAuth フェデレーションを有効化 |
-| `FEDERATIONS_GOOGLE_CLIENT_ID` | — | Google OAuth クライアント ID |
-| `FEDERATIONS_GOOGLE_CLIENT_SECRET` | — | Google OAuth クライアントシークレット |
-| `FEDERATIONS_GOOGLE_CALLBACK_URL` | `http://localhost:3000/session/oauth/federation/google/callback` | Google OAuth コールバック URL |
-| `FEDERATIONS_GOOGLE_ACCESS_TYPE` | 未設定（`offline`） | `offline`: サインインのたびに Google の同意画面を表示し、すべてのセッションがリフレッシュトークンを得る。`online`: 同意画面は初回のサインインだけで、リフレッシュトークンはまったく得ない。[federation-google](../../packages/federation-google/README.md#refresh-tokens-and-the-consent-screen) を参照 |
+| `CORE_FEDERATIONS_GOOGLE_ENABLED` | `false` | Google OAuth フェデレーションを有効化 |
+| `CORE_FEDERATIONS_GOOGLE_CLIENT_ID` | — | Google OAuth クライアント ID |
+| `CORE_FEDERATIONS_GOOGLE_CLIENT_SECRET` | — | Google OAuth クライアントシークレット |
+| `CORE_FEDERATIONS_GOOGLE_CALLBACK_URL` | `http://localhost:3000/session/oauth/federation/google/callback` | Google OAuth コールバック URL |
+| `CORE_FEDERATIONS_GOOGLE_ACCESS_TYPE` | 未設定（`offline`） | `offline`: サインインのたびに Google の同意画面を表示し、すべてのセッションがリフレッシュトークンを得る。`online`: 同意画面は初回のサインインだけで、リフレッシュトークンはまったく得ない。[federation-google](../../packages/federation-google/README.md#refresh-tokens-and-the-consent-screen) を参照 |
 
 ### OIDC フェデレーション（任意の OpenID Connect プロバイダー）
 
-`config/application.conf` の `federations.oidc` に 1 つのインスタンスが同梱されている（`@o3co/auth-provider-federation-oidc`、#524）: Okta、Entra ID、Auth0、Keycloak、または自前のテナントを issuer で選ぶ。Discovery は起動時に実行され、失敗すれば起動を拒否する。Store に渡される identity は `oidc:<sub>` で、Store が知らない identity は 401 で拒否される — 何もプロビジョニングされない。
+`config/application.conf` の `core.federations.oidc` に 1 つのインスタンスが同梱されている（`@o3co/auth-provider-federation-oidc`、#524）: Okta、Entra ID、Auth0、Keycloak、または自前のテナントを issuer で選ぶ。Discovery は起動時に実行され、失敗すれば起動を拒否する。Store に渡される identity は `oidc:<sub>` で、Store が知らない identity は 401 で拒否される — 何もプロビジョニングされない。
 
 | 変数 | デフォルト | 説明 |
 |---|---|---|
-| `FEDERATIONS_OIDC_ENABLED` | `false` | OIDC フェデレーションを有効化 |
-| `FEDERATIONS_OIDC_ISSUER` | — | issuer 識別子（https）。IdP が `iss` に書くものと完全に同じにする |
-| `FEDERATIONS_OIDC_CLIENT_ID` | — | IdP に登録したクライアント ID |
-| `FEDERATIONS_OIDC_CLIENT_SECRET` | — | クライアントシークレット（`client_secret_basic`）。`private_key_jwt` を使う場合は、代わりに設定ファイルで `privateKey` を設定する |
-| `FEDERATIONS_OIDC_CALLBACK_URL` | `http://localhost:3000/session/oauth/federation/oidc/callback` | IdP がブラウザを戻す先 |
+| `CORE_FEDERATIONS_OIDC_ENABLED` | `false` | OIDC フェデレーションを有効化 |
+| `CORE_FEDERATIONS_OIDC_ISSUER` | — | issuer 識別子（https）。IdP が `iss` に書くものと完全に同じにする |
+| `CORE_FEDERATIONS_OIDC_CLIENT_ID` | — | IdP に登録したクライアント ID |
+| `CORE_FEDERATIONS_OIDC_CLIENT_SECRET` | — | クライアントシークレット（`client_secret_basic`）。`private_key_jwt` を使う場合は、代わりに設定ファイルで `privateKey` を設定する |
+| `CORE_FEDERATIONS_OIDC_CALLBACK_URL` | `http://localhost:3000/session/oauth/federation/oidc/callback` | IdP がブラウザを戻す先 |
 
 2 つ目の IdP は、`type = "oidc"` と独自のコールバックを持つ別のセクションにする:
 
 ```hocon
-federations {
+core.federations {
   okta {
     enabled = true
     type = "oidc"
@@ -404,7 +406,7 @@ federations {
 }
 ```
 
-セクションの `type` が実装を指定する。`type` の無い `federations.google` は組み込みの Google フェデレーションである。`type = "oidc"` を付けると `google` という名前の汎用 OIDC インスタンスになり、組み込みモジュールは合成されない。
+エントリの `type` が実装を指定する。`type` の無い `core.federations.google` は組み込みの Google フェデレーションである。`type = "oidc"` を付けると `google` という名前の汎用 OIDC インスタンスになり、組み込みモジュールは合成されない。
 
 パッケージが受け付けるすべてのフィールド — `scopes`、`discovery` / `endpoints`、`privateKey`、`userInfo`、`idTokenSignedResponseAlg`、`clockToleranceSeconds` — は [パッケージの README](../../packages/federation-oidc/README.md) に記載されている。
 
@@ -499,7 +501,7 @@ redis-federation-grant-store {
 federation-grants {
   connections {
     files {
-      federation = "entra-files"   # an enabled federations.<name> of type "oidc", with an app registration of its own
+      federation = "entra-files"   # an enabled core.federations.<name> of type "oidc", with an app registration of its own
       scopes = ["openid", "profile", "offline_access", "Files.Read"]
       boundary = "production"
       maxAccessTokenLifetime = 3600
@@ -565,7 +567,7 @@ worker:
 | `SESSION_LOGIN_PAGE_URL` | `/login` | ログインページの URL（リダイレクト用） |
 | `OAUTH_CONSENT_PAGE_URL` | `/consent` | ファーストパーティでないクライアントが経由させられる同意ページの URL。`?challenge=<id>` 付きで遷移する（#527） |
 
-デプロイ全体で共通のクライアント URL やコールバック URL は無い: フェデレーションのコールバック URL はフェデレーションごとに設定する（`FEDERATIONS_GOOGLE_CALLBACK_URL`、`FEDERATIONS_OIDC_CALLBACK_URL`）。
+デプロイ全体で共通のクライアント URL やコールバック URL は無い: フェデレーションのコールバック URL はフェデレーションごとに設定する（`CORE_FEDERATIONS_GOOGLE_CALLBACK_URL`、`CORE_FEDERATIONS_OIDC_CALLBACK_URL`）。
 
 ## モジュール合成順序
 
@@ -576,7 +578,7 @@ worker:
 3. **ストアスロット 1 つにつきモジュール 1 つ。** 各アダプタースイッチ — `adapters.federationTokenStore`、`adapters.userSessionStores`、`adapters.rateLimiter`、`adapters.codeRepository`、`adapters.accessTokenDenylist`、`adapters.replaySeenSet`、`adapters.consentStore`、およびフェデレーショングラントの 2 つのストアスイッチ — は、memory / Redis の組から 1 つを選ぶ。両者は同じスロットを提供するため、両方を配線すると起動時のスロット衝突になる。`adapters.consentStore = "none"` はどちらも配線せず、フェデレーショングラントのストアは機能が有効な間だけ配線される。
 4. **共有 Redis 接続は、最初の Redis バックエンドのモジュールとともに加わる。** `standaloneRedisClientsModule` は、ここにあるすべての Redis アダプターが使う 1 本の ioredis 接続を自身のセクション（`redis-clients`）から開き、合成されたモジュールがそれを必要とするときには必ず追加される。同梱の合成では refresh token family ストアが Redis 上にあるため、デプロイには常にこれがある。in-memory の family ストアはテスト用の override（`overrides.refreshTokenFamilyModules`）である。
 5. **テンプレート自身の設定モジュールは常に合成される。** `loggingModule` と `httpModule` は `logging {}` と `http {}` を所有し、CORS のリストは `http` のキーの一つ（`http.cors.allowedOrigins`）である。`httpModule` は core の `httpSettings` を提供する。これは authoritative なので、モジュールが読み込まれている間は `overrideComponents` のエントリで置き換えられない。`httpModule` はさらに、`app.mts` が boot の後にポートと readiness の期限を読むテンプレートの `httpHostSettings` を提供する。logger はモジュールではなく、boot の前に `logging` セクションから作られ（`readLogging`）、`logger` コンポーネントとして boot に渡される。
-6. **フェデレーションアダプターは、その config bridge とともに加わる。** `googleFederationModule` には `googleFederationConfigModule` が伴い — これは有効化され、かつ `type` が `google` である `federations.google` セクションに対してのみで、そのため `google` という名前の `type = "oidc"` セクションが二重に合成されることはない — 有効化された `type = "oidc"` のセクションごとに 1 つずつの `oidcFederationModule(name)` には、それらが共有する 1 つの `oidcFederationConfigModule` が伴う。bridge の provider は対応するセクションが無いと throw するため、この組は内部でゲートされるのではなく、合成時に含めるかどうかが決まる。
+6. **フェデレーションアダプターは、その config bridge とともに加わる。** `googleFederationModule` には `googleFederationConfigModule` が伴い — これは有効化され、かつ `type` が `google` である `core.federations.google` エントリに対してのみで、そのため `google` という名前の `type = "oidc"` セクションが二重に合成されることはない — 有効化された `type = "oidc"` のセクションごとに 1 つずつの `oidcFederationModule(name)` には、それらが共有する 1 つの `oidcFederationConfigModule` が伴う。bridge の provider は対応するセクションが無いと throw するため、この組は内部でゲートされるのではなく、合成時に含めるかどうかが決まる。
 7. **メール送信者は環境に従う。** 設定が `development` として選ばれたところでは `@o3co/auth-provider-standard` の開発用送信者で、これは各コードをログに書く。そのモジュールは、その名前と、設定されていれば `CONFIG_ENV` と `NODE_ENV` のそれぞれが `development` か `test` であるところでだけ入り、それ以外のところ、または `core.deployment.mode` が `multi` のところでは起動を拒否する。それ以外の名前では SMTP 送信者のモジュールで、そのセクションは `standard-smtp-mail-sender`（[パッケージの README](../../packages/standard/README.md)）。その送信者は `mailSender` スロットを何かが読むところでだけ作られ、そこでは起動に `STANDARD_SMTP_MAIL_SENDER_HOST` と `STANDARD_SMTP_MAIL_SENDER_FROM` が要る。このテンプレートが合成するものでメールを送るものは無い: `mailSender` スロットを読むのは MFA パッケージで、テンプレートはそれを入れていないので、それらが無くても起動する。
 
 `jwksModule`（core 由来）は常に合成される: トークンに署名するプロバイダーは、issuer が設定されているかどうかにかかわらず検証鍵を公開する。各ルートモジュールが何をマウントするかは、それぞれのパッケージの README にある。合成時に知っておくべき振る舞いが 1 つある: `sessionModule` の `POST /session/logout` は `UserSession` レコード（これにより `/oauth/introspect` と `/oauth/userinfo` はそのセッションから発行されたトークンを受け付けなくなる）、subject インデックス、フェデレーションのエントリを削除する — しかし refresh token family は失効させ**ない**。完全なカスケードを実行するエンドポイントは `POST /oauth/logout` である。[どのログアウトエンドポイントが何を無効化するか](../../docs/operator-runbook.md#which-logout-endpoint-invalidates-what) を参照。

@@ -223,10 +223,10 @@ describe("core.declaredAbsent, the slots a composition runs without on purpose",
 });
 
 describe("the federations, under core.federations", () => {
-	it("reads each federation written there, its switches as the environment carries them", async () => {
+	it("reads each federation written there, its switches as the strings an environment variable carries", async () => {
 		const handle = await boot(
-			{ CORE_FEDERATIONS_UPSTREAM_ENABLED: "false" },
-			'core.federations.upstream { enabled = ${?CORE_FEDERATIONS_UPSTREAM_ENABLED}, type = "oidc", trustUpstreamAmr = "true" }\n',
+			{},
+			'core.federations.upstream { enabled = "false", type = "oidc", trustUpstreamAmr = "true" }\n',
 		);
 		const config = handle.components.config as {
 			core?: { federations?: Record<string, Record<string, unknown>> };

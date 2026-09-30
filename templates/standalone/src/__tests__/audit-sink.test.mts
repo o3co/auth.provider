@@ -82,7 +82,7 @@ const baseConfig: Switches & Record<string, unknown> = {
 	},
 	// The shipped `application.conf` expects no session requirement (ADR
 	// 2026-09-28-session-admission).
-	core: { sessionRequirements: { expected: [] } },
+	core: { sessionRequirements: { expected: [] }, federations: { google: { enabled: false } } },
 	oauth: {
 		jwt: {
 			issuer: "https://auth.test",
@@ -110,7 +110,6 @@ const baseConfig: Switches & Record<string, unknown> = {
 		rateLimit: { login: { windowMs: 60000, limit: 10 } },
 	},
 	rateLimit: { failMode: "open" },
-	federations: { google: { enabled: false } },
 	"standalone-in-memory-code-repository": { defaultExpiresIn: 600 },
 };
 

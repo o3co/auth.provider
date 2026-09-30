@@ -42,6 +42,7 @@ import {
 	type FederationTokenStore,
 	federationGrantAuthorizationRevision,
 	federationGrantIdentityRevision,
+	federationsOf,
 	InMemoryClientRepository,
 	InMemoryUserRepository,
 	type MemoryFederationGrantStore,
@@ -133,23 +134,26 @@ function resolveConfig(): Switches {
 		// What the resolution captured of core's renamed variables, which the
 		// schema's parse drops.
 		"renamed-variables": capturedRenames(ENV),
-		federations: {
-			...config.federations,
-			upstream: {
-				enabled: true,
-				type: "oidc",
-				issuer: UPSTREAM,
-				clientId: UPSTREAM_CLIENT_ID,
-				clientSecret: "provider-secret",
-				callbackURL: `${ISSUER}/session/oauth/federation/upstream/callback`,
-				scopes: [...SCOPES],
-				discovery: false,
-				endpoints: {
-					authorizationEndpoint: `${UPSTREAM}/authorize`,
-					tokenEndpoint: `${UPSTREAM}/token`,
-					jwksUri: `${UPSTREAM}/jwks`,
+		core: {
+			...config.core,
+			federations: {
+				...federationsOf(config),
+				upstream: {
+					enabled: true,
+					type: "oidc",
+					issuer: UPSTREAM,
+					clientId: UPSTREAM_CLIENT_ID,
+					clientSecret: "provider-secret",
+					callbackURL: `${ISSUER}/session/oauth/federation/upstream/callback`,
+					scopes: [...SCOPES],
+					discovery: false,
+					endpoints: {
+						authorizationEndpoint: `${UPSTREAM}/authorize`,
+						tokenEndpoint: `${UPSTREAM}/token`,
+						jwksUri: `${UPSTREAM}/jwks`,
+					},
+					redirectAllowlist: [],
 				},
-				redirectAllowlist: [],
 			},
 		},
 		"redis-federation-grant-store": {

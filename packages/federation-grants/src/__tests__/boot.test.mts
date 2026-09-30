@@ -61,7 +61,7 @@ const clientRepository: ClientRepository = {
 };
 
 /**
- * What core's federation guard asks for the moment `federations.<name>.enabled`
+ * What core's federation guard asks for the moment `core.federations.<name>.enabled`
  * is true. A consequence worth knowing: a deployment cannot use federation
  * grants without the session-federation wiring, because a connection has to
  * name an enabled federation.
@@ -259,13 +259,14 @@ const boot = (setup: Setup) => {
 		bootstrapComponents: {
 			config: {
 				...makeValidCoreConfig(),
-				federations: {
-					upstream: { enabled: true, issuer: "https://issuer.example", clientId: "cid" },
+				core: {
+					...makeValidCoreConfig().core,
+					federations: {
+						upstream: { enabled: true, issuer: "https://issuer.example", clientId: "cid" },
+					},
+					...(setup.withAudit === false ? {} : { declaredAbsent: ["auditSink"] }),
 				},
 				rateLimit: { failMode: "closed" },
-				...(setup.withAudit === false
-					? {}
-					: { core: { ...makeValidCoreConfig().core, declaredAbsent: ["auditSink"] } }),
 				...(setup.oldAuditDeclaration === true ? { audit: { sink: { type: "none" } } } : {}),
 				"federation-grants": {
 					enabled: setup.enabled ?? true,

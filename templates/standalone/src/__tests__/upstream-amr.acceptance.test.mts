@@ -16,7 +16,7 @@
 
 /**
  * What an upstream IdP asserted about its own login counts only for a
- * federation configured with `federations.<name>.trustUpstreamAmr = true`
+ * federation configured with `core.federations.<name>.trustUpstreamAmr = true`
  * (ADR 2026-09-25-multi-factor-authentication), end to end: a federated login
  * through the session routes, `/oauth/authorize` with `acr_values`, and
  * `/oauth/token`, on the standalone as a deployment composes it
@@ -36,6 +36,7 @@ import {
 	createKeyStoreFactory,
 	defineModule,
 	type FederationProvider,
+	federationsOf,
 	InMemoryClientRepository,
 	InMemoryUserRepository,
 	memoryRefreshTokenFamilyStoreModule,
@@ -100,13 +101,16 @@ function resolveConfig(trustUpstreamAmr: boolean | undefined): Switches {
 	const shipped = validate(layers, AppConfigSchema) as AppConfig;
 	const parsed = AppConfigSchema.parse({
 		...shipped,
-		federations: {
-			...shipped.federations,
-			[FEDERATION]: {
-				enabled: true,
-				type: FEDERATION,
-				callbackURL: CALLBACK_URL,
-				...(trustUpstreamAmr === undefined ? {} : { trustUpstreamAmr }),
+		core: {
+			...shipped.core,
+			federations: {
+				...federationsOf(shipped),
+				[FEDERATION]: {
+					enabled: true,
+					type: FEDERATION,
+					callbackURL: CALLBACK_URL,
+					...(trustUpstreamAmr === undefined ? {} : { trustUpstreamAmr }),
+				},
 			},
 		},
 		oauth: {

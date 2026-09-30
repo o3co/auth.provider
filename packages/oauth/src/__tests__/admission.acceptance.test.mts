@@ -53,7 +53,6 @@ const VERIFIER = "pkce-verifier".padEnd(43, "x");
 const CHALLENGE = crypto.createHash("sha256").update(VERIFIER).digest("base64url");
 
 const config = {
-	federations: {},
 	oauth: {
 		jwt: { issuer: ISSUER, secret: SECRET },
 		accessToken: { expiresIn: 300 },

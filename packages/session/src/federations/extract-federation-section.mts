@@ -29,7 +29,7 @@
  * otherwise the normalized credential object with `type` always set.
  */
 export function extractFederationSection(
-	federations: Record<string, unknown>,
+	federations: Readonly<Record<string, unknown>>,
 	name: string,
 ): { type: string; [key: string]: unknown } | undefined {
 	const raw = federations[name];
@@ -50,7 +50,7 @@ export function extractFederationSection(
 		);
 		if (flatCredentialFields.length > 0) {
 			throw new Error(
-				`federations.${name}: mixed shape — remove top-level ${flatCredentialFields.join("/")} OR the ${type} { ... } sub-section`,
+				`core.federations.${name}: mixed shape — remove top-level ${flatCredentialFields.join("/")} OR the ${type} { ... } sub-section`,
 			);
 		}
 

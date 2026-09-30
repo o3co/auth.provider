@@ -45,6 +45,7 @@ import {
 import { type Config, empty, parseFile } from "@o3co/ts.hocon";
 import { ADAPTERS_SECTION, readAdapters } from "./adapters.mjs";
 import { loggingModule, templateReference } from "./modules.mjs";
+import { refuseRenamedVariables, SHIPPED_FEDERATION_RENAMES } from "./rootRenames.mjs";
 import { type Adapters, type LoggingSettings, loggingSectionSchema } from "./sections.mjs";
 
 export interface ResolvedConfigPaths {
@@ -152,7 +153,7 @@ export function resolveLayers(own: OwnLayers, references: readonly URL[]): Recor
  */
 export const SWITCHES: readonly string[] = [
 	"core.sessionRequirements",
-	"federations",
+	"core.federations",
 	"federation-grants.enabled",
 	"session-store.storage",
 	"oauth-session.enabled",
@@ -232,12 +233,16 @@ export type Switches = AppConfig & { readonly adapters: Adapters };
  * path, everything else as written; and `adapters`, the composition root's
  * own section, from its own layers over the template's `config/reference.conf`
  * (`readAdapters`), which refuses a selection at the path it moved from and a
- * variable renamed with one. Use it for those choices only. A switch whose
+ * variable renamed with one. A variable the template bound for a federation it
+ * ships, renamed after the entry's path under `core.federations`
+ * (`SHIPPED_FEDERATION_RENAMES`), is refused here too. Use it for those
+ * choices only. A switch whose
  * default only a package ships reads as unset here; set it in the template's
  * own files.
  */
 export function readSwitches(own: OwnLayers, options: SwitchesOptions = {}): Switches {
 	const adapters = readAdapters(resolveLayers(own, [templateReference()]), own.env);
+	refuseRenamedVariables(own.env, SHIPPED_FEDERATION_RENAMES);
 	const switches = readTransitionalConfig(resolveLayers(own, [coreReference()]), [
 		...SWITCHES,
 		...(options.reads ?? []),

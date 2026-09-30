@@ -24,6 +24,7 @@
  * refused, naming the variables and never a value.
  */
 
+import { refuseRenamedVariables } from "./rootRenames.mjs";
 import { type Adapters, adaptersSchema } from "./sections.mjs";
 
 /** The composition root's own section. No module may be named after it. */
@@ -85,13 +86,6 @@ const RENAMED: readonly (readonly [string, keyof Adapters])[] = [
 	["AUDIT_SINK_TYPE", "auditSink"],
 ];
 
-/** A variable renamed with a path of the composition root's own: its old name, its new one, and the path the new one binds. */
-export interface RootRename {
-	readonly from: string;
-	readonly to: string;
-	readonly path: string;
-}
-
 /** The value at a dotted `path` of `config`, read as own properties; `undefined` when absent. */
 function valueAt(config: unknown, path: string): unknown {
 	let cursor: unknown = config;
@@ -102,32 +96,6 @@ function valueAt(config: unknown, path: string): unknown {
 		cursor = (cursor as Record<string, unknown>)[key];
 	}
 	return cursor;
-}
-
-/**
- * Refuses, with a `RangeError`, an old name in `env` set alone, or beside its
- * new name at a different value; the two at one value are accepted. Every
- * such rename is named at once; no value is quoted.
- */
-export function refuseRenamedVariables(
-	env: Readonly<Record<string, string>>,
-	renames: readonly RootRename[],
-): void {
-	const refused = renames.flatMap(({ from, to, path }) => {
-		const old = env[from];
-		if (old === undefined || env[to] === old) return [];
-		const renamed = `${from} was renamed ${to}, the variable ${path} is bound to; see CHANGELOG.`;
-		return env[to] === undefined
-			? [`${renamed} Set ${to} instead and unset ${from}.`]
-			: [
-					`${renamed} ${to} is set to a different value: keep the one you mean in ${to} and unset ${from}.`,
-				];
-	});
-	if (refused.length > 0) {
-		throw new RangeError(
-			`The environment sets ${refused.length} variable(s) that were renamed: ${refused.join(" ")}`,
-		);
-	}
 }
 
 /**

@@ -487,13 +487,15 @@ describe("the session module reads no session-store.secret", () => {
 		const config = {
 			...base,
 			"session-store": store,
-			federations: {
-				...(base.federations as object),
-				stub: {
-					enabled: true,
-					clientId: "id",
-					clientSecret: "federation-client-secret",
-					callbackURL: "https://app.example.com/session/oauth/federation/stub/callback",
+			core: {
+				...(base.core as object),
+				federations: {
+					stub: {
+						enabled: true,
+						clientId: "id",
+						clientSecret: "federation-client-secret",
+						callbackURL: "https://app.example.com/session/oauth/federation/stub/callback",
+					},
 				},
 			},
 		} as unknown as AppConfig;

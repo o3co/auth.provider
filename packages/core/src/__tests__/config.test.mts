@@ -86,7 +86,7 @@ describe("provider config", () => {
 		const config = validate(raw, AppConfigSchema);
 
 		expect(config.oauth.oidcMode).toBe("dual");
-		// federations.google.enabled env-var coercion is covered by the
+		// core.federations.google.enabled env-var coercion is covered by the
 		// HOCON reference.conf wiring; schema-level boolean coercion for
 		// federation entries is tested in federations-schema.test.mts.
 	});

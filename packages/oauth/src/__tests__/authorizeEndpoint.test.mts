@@ -68,7 +68,7 @@ const makeConfig = (
 	federations: Record<string, unknown> = {},
 ): AppConfig =>
 	({
-		federations,
+		core: { federations },
 		oauth: {
 			jwt: { issuer: "https://issuer.example" },
 			accessToken: { expiresIn: 300 },
@@ -113,7 +113,7 @@ const makeApp = async (opts: {
 	logger?: Logger;
 	/**
 	 * Install one federation, as a federation module's contribution would —
-	 * `"trusted"` with `federations.google.trustUpstreamAmr = true` (the MFA
+	 * `"trusted"` with `core.federations.google.trustUpstreamAmr = true` (the MFA
 	 * ADR's D13), `"untrusted"` with the switch absent.
 	 */
 	federation?: "trusted" | "untrusted";

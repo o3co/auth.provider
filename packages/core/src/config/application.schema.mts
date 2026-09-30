@@ -471,6 +471,24 @@ const authorizeSchema = withRemovedKeys(
 export const MAX_TRUST_PROXY_HOPS = 255;
 
 /**
+ * One federation in `core.federations`: whether it is on, the package that
+ * handles it (`type`), and whether its upstream IdP's `amr` counts. Every
+ * other key is the handling package's, kept as written.
+ */
+const federationEntrySchema = z
+	.object({
+		enabled: coerceBooleanFromEnv,
+		type: z.string().optional(),
+		// Whether this federation's upstream IdP's `amr` counts (MFA ADR): it is
+		// recorded in the session's `amr` beside `fed`, stamped on tokens and
+		// matched for `acr`. Absent is `false`: the values are kept apart
+		// (`authentication.upstreamAmr`). Beside `enabled` in both shapes, never
+		// inside a type's own section.
+		trustUpstreamAmr: coerceBooleanFromEnv.optional(),
+	})
+	.passthrough();
+
+/**
  * Minimal always-required config for the auth provider core.
  * Token-only deployments (no session, no federation) only need these sections.
  */
@@ -615,6 +633,10 @@ export const CoreConfigSchema = z.object({
 					error: "core.declaredAbsent is a list of slot names",
 				})
 				.optional(),
+			// The federations this deployment runs, keyed by the name each is
+			// reached at (`/session/oauth/federation/<name>`): one map, so a name
+			// is unique across every type. Read through `federationsOf`.
+			federations: z.record(z.string(), federationEntrySchema).optional(),
 			tokenBinding: z
 				.object({
 					// How `tokenBindingMw` arbitrates when several mechanisms succeed
@@ -688,19 +710,6 @@ export function composeConfigSchema(moduleSchemas: z.ZodObject<z.ZodRawShape>[])
 	return schema;
 }
 
-const federationEntrySchema = z
-	.object({
-		enabled: coerceBooleanFromEnv,
-		type: z.string().optional(),
-		// Whether this federation's upstream IdP's `amr` counts (MFA ADR): it is
-		// recorded in the session's `amr` beside `fed`, stamped on tokens and
-		// matched for `acr`. Absent is `false`: the values are kept apart
-		// (`authentication.upstreamAmr`). Beside `enabled` in both shapes, never
-		// inside a type's own section.
-		trustUpstreamAmr: coerceBooleanFromEnv.optional(),
-	})
-	.passthrough();
-
 /**
  * The sections core mirrors for other packages' modules. This object strips
  * undeclared keys, so a section parsed through `AppConfigSchema` survives only
@@ -749,7 +758,10 @@ export const fullSectionsSchema = z.object({
 		})
 		.passthrough()
 		.optional(),
-	federations: z.record(z.string(), federationEntrySchema),
+	// Presence-only: the path the federations' map moved from
+	// (`core.federations`), kept so a root that parses with `AppConfigSchema`
+	// before boot still hands it to the relocation refusal. Nothing reads it.
+	federations: z.unknown().optional(),
 	// Presence-only: the section the repositories' settings sit in (the
 	// standalone template's `repositories` module's), and where the code
 	// repositories' moved from. Nothing in core reads it.

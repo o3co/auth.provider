@@ -144,15 +144,18 @@ const boot = async (allowKeep: boolean, opts: BootOptions = {}) => {
 	const events: { type: string; details?: Record<string, unknown> }[] = [];
 	const config = {
 		...makeValidCoreConfig(),
-		federations: {
-			upstream: {
-				enabled: true,
-				issuer: connection.upstreamIssuer,
-				clientId: connection.upstreamClientId,
+		rateLimit: { failMode: "closed" },
+		core: {
+			...makeValidCoreConfig().core,
+			declaredAbsent: ["auditSink"],
+			federations: {
+				upstream: {
+					enabled: true,
+					issuer: connection.upstreamIssuer,
+					clientId: connection.upstreamClientId,
+				},
 			},
 		},
-		rateLimit: { failMode: "closed" },
-		core: { ...makeValidCoreConfig().core, declaredAbsent: ["auditSink"] },
 		"federation-grants": {
 			enabled: true,
 			allowKeepOnSubjectRevocation: allowKeep,

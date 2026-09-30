@@ -66,7 +66,7 @@ describe("CoreConfigSchema", () => {
 		const result = CoreConfigSchema.safeParse(minimalCoreConfig);
 		expect(result.success).toBe(true);
 		if (result.success) {
-			expect((result.data as Record<string, unknown>).federations).toBeUndefined();
+			expect(result.data.core?.federations).toBeUndefined();
 		}
 	});
 
@@ -208,9 +208,7 @@ describe("AppConfigSchema", () => {
 				login: { windowMs: 60000, limit: 10 },
 				failMode: "open",
 			},
-			federations: {
-				google: { enabled: false },
-			},
+			core: { federations: { google: { enabled: false } } },
 			repositories: {
 				client: { type: "yaml", yaml: { path: "./config/clients.yaml" } },
 				user: { type: "yaml", yaml: { path: "./config/users.yaml" } },

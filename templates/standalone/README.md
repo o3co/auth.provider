@@ -587,17 +587,25 @@ all — no headers, no `Vary`, nothing changed.
 
 ### Google Federation
 
+The federations are core's: `core.federations`, one map keyed by the name
+each is reached at (`/session/oauth/federation/<name>`). A key of one is bound
+to the variable named after its path, `CORE_FEDERATIONS_<NAME>_<KEY>`. The map
+written at the top level (`federations { ... }`) refuses boot, naming each
+key's path under `core.federations`; a `FEDERATIONS_GOOGLE_*` or
+`FEDERATIONS_OIDC_*` variable set alone, or beside its new name at a different
+value, is refused before any module is chosen.
+
 | Variable | Default | Description |
 |---|---|---|
-| `FEDERATIONS_GOOGLE_ENABLED` | `false` | Enable Google OAuth federation |
-| `FEDERATIONS_GOOGLE_CLIENT_ID` | — | Google OAuth client ID |
-| `FEDERATIONS_GOOGLE_CLIENT_SECRET` | — | Google OAuth client secret |
-| `FEDERATIONS_GOOGLE_CALLBACK_URL` | `http://localhost:3000/session/oauth/federation/google/callback` | Google OAuth callback URL |
-| `FEDERATIONS_GOOGLE_ACCESS_TYPE` | unset (`offline`) | `offline`: every sign-in shows Google's consent screen and every session gets a refresh token. `online`: consent on the first sign-in only, and no refresh token at all. See [federation-google](../../packages/federation-google/README.md#refresh-tokens-and-the-consent-screen) |
+| `CORE_FEDERATIONS_GOOGLE_ENABLED` | `false` | Enable Google OAuth federation |
+| `CORE_FEDERATIONS_GOOGLE_CLIENT_ID` | — | Google OAuth client ID |
+| `CORE_FEDERATIONS_GOOGLE_CLIENT_SECRET` | — | Google OAuth client secret |
+| `CORE_FEDERATIONS_GOOGLE_CALLBACK_URL` | `http://localhost:3000/session/oauth/federation/google/callback` | Google OAuth callback URL |
+| `CORE_FEDERATIONS_GOOGLE_ACCESS_TYPE` | unset (`offline`) | `offline`: every sign-in shows Google's consent screen and every session gets a refresh token. `online`: consent on the first sign-in only, and no refresh token at all. See [federation-google](../../packages/federation-google/README.md#refresh-tokens-and-the-consent-screen) |
 
 ### OIDC Federation (any OpenID Connect provider)
 
-One instance ships in `config/application.conf` under `federations.oidc`
+One instance ships in `config/application.conf` under `core.federations.oidc`
 (`@o3co/auth-provider-federation-oidc`, #524): Okta, Entra ID, Auth0, Keycloak
 or your own tenant, selected by issuer. Discovery runs at boot and a failure
 refuses boot. The identity handed to the Store is `oidc:<sub>`; an identity
@@ -605,16 +613,16 @@ the Store does not know is refused with 401 — nothing is provisioned.
 
 | Variable | Default | Description |
 |---|---|---|
-| `FEDERATIONS_OIDC_ENABLED` | `false` | Enable the OIDC federation |
-| `FEDERATIONS_OIDC_ISSUER` | — | Issuer identifier (https), exactly as the IdP writes `iss` |
-| `FEDERATIONS_OIDC_CLIENT_ID` | — | Client ID registered at the IdP |
-| `FEDERATIONS_OIDC_CLIENT_SECRET` | — | Client secret (`client_secret_basic`); set `privateKey` in the config file for `private_key_jwt` instead |
-| `FEDERATIONS_OIDC_CALLBACK_URL` | `http://localhost:3000/session/oauth/federation/oidc/callback` | Where the IdP sends the browser back |
+| `CORE_FEDERATIONS_OIDC_ENABLED` | `false` | Enable the OIDC federation |
+| `CORE_FEDERATIONS_OIDC_ISSUER` | — | Issuer identifier (https), exactly as the IdP writes `iss` |
+| `CORE_FEDERATIONS_OIDC_CLIENT_ID` | — | Client ID registered at the IdP |
+| `CORE_FEDERATIONS_OIDC_CLIENT_SECRET` | — | Client secret (`client_secret_basic`); set `privateKey` in the config file for `private_key_jwt` instead |
+| `CORE_FEDERATIONS_OIDC_CALLBACK_URL` | `http://localhost:3000/session/oauth/federation/oidc/callback` | Where the IdP sends the browser back |
 
 A second IdP is another section with `type = "oidc"` and its own callback:
 
 ```hocon
-federations {
+core.federations {
   okta {
     enabled = true
     type = "oidc"
@@ -627,7 +635,7 @@ federations {
 }
 ```
 
-The section's `type` names the implementation. `federations.google` without a
+The entry's `type` names the implementation. `core.federations.google` without a
 `type` is the built-in Google federation; with `type = "oidc"` it is a generic
 OIDC instance named `google`, and the built-in module is not composed.
 
@@ -791,7 +799,7 @@ redis-federation-grant-store {
 federation-grants {
   connections {
     files {
-      federation = "entra-files"   # an enabled federations.<name> of type "oidc", with an app registration of its own
+      federation = "entra-files"   # an enabled core.federations.<name> of type "oidc", with an app registration of its own
       scopes = ["openid", "profile", "offline_access", "Files.Read"]
       boundary = "production"
       maxAccessTokenLifetime = 3600
@@ -924,8 +932,8 @@ Use values that include the deployment name, for example `tenant-a:ss:`,
 | `OAUTH_CONSENT_PAGE_URL` | `/consent` | URL of the consent page a client that is not first-party is routed through, with `?challenge=<id>` (#527) |
 
 There is no deployment-wide client or callback URL: federation callback URLs
-are configured per federation (`FEDERATIONS_GOOGLE_CALLBACK_URL`,
-`FEDERATIONS_OIDC_CALLBACK_URL`).
+are configured per federation (`CORE_FEDERATIONS_GOOGLE_CALLBACK_URL`,
+`CORE_FEDERATIONS_OIDC_CALLBACK_URL`).
 
 ## Module Composition Order
 
@@ -936,7 +944,7 @@ are configured per federation (`FEDERATIONS_GOOGLE_CALLBACK_URL`,
 3. **One module per store slot.** Each adapter switch — `adapters.federationTokenStore`, `adapters.userSessionStores`, `adapters.rateLimiter`, `adapters.codeRepository`, `adapters.accessTokenDenylist`, `adapters.replaySeenSet`, `adapters.consentStore`, and the two federation-grant store switches — picks one of a memory / Redis pair. Both provide the same slot, so wiring both is a boot-time slot collision. `adapters.consentStore = "none"` wires neither, and the federation-grant stores are wired only while the feature is enabled.
 4. **The shared Redis connection comes with the first Redis-backed module.** `standaloneRedisClientsModule` opens the one ioredis connection every Redis adapter here uses, from its own section (`redis-clients`), and is added whenever a composed module needs one. The refresh-token family store is on Redis in the shipped composition, so a deployment always has it; the in-memory family store is a test override (`overrides.refreshTokenFamilyModules`).
 5. **The template's own settings modules are always composed.** `loggingModule` and `httpModule` own `logging {}` and `http {}`, the CORS list among `http`'s keys (`http.cors.allowedOrigins`). `httpModule` provides core's `httpSettings`, which is authoritative, so no `overrideComponents` entry replaces it while the module is loaded; it also provides the template's `httpHostSettings`, which `app.mts` reads after boot for the port and the readiness deadline. The logger is built before boot from the `logging` section (`readLogging`), not by a module, and handed to boot as the `logger` component.
-6. **A federation adapter comes with its config bridge.** `googleFederationModule` with `googleFederationConfigModule` — only for an enabled `federations.google` section whose `type` is `google`, so a `type = "oidc"` section named `google` is not composed twice — and one `oidcFederationModule(name)` per enabled `type = "oidc"` section, with the one `oidcFederationConfigModule` they share. A bridge's provider throws when its section is absent, so the pair is included at composition time rather than gated inside it.
+6. **A federation adapter comes with its config bridge.** `googleFederationModule` with `googleFederationConfigModule` — only for an enabled `core.federations.google` entry whose `type` is `google`, so a `type = "oidc"` section named `google` is not composed twice — and one `oidcFederationModule(name)` per enabled `type = "oidc"` section, with the one `oidcFederationConfigModule` they share. A bridge's provider throws when its section is absent, so the pair is included at composition time rather than gated inside it.
 7. **The mail sender follows the environment.** `@o3co/auth-provider-standard`'s development sender, which logs each code, where the configuration was selected as `development`; its module installs only where that name, and `CONFIG_ENV` and `NODE_ENV` wherever they are set, each read `development` or `test`, and refuses the boot otherwise, or where `core.deployment.mode` is `multi`. Under any other name, the SMTP sender's module, whose section is `standard-smtp-mail-sender` ([the package's README](../../packages/standard/README.md)); its sender is built only where something reads the `mailSender` slot, and there the boot needs `STANDARD_SMTP_MAIL_SENDER_HOST` and `STANDARD_SMTP_MAIL_SENDER_FROM`. Nothing this template composes sends mail: the MFA package reads the `mailSender` slot, and the template does not install it, so it boots without them.
 
 `jwksModule` (from core) is always composed: a provider that signs tokens publishes its verification keys whether or not an issuer is configured. What each route module mounts is in its package's README. One behaviour to know when composing: `sessionModule`'s `POST /session/logout` deletes the `UserSession` record (so `/oauth/introspect` and `/oauth/userinfo` stop honouring tokens minted from that session), the subject index and the federation entries — but it does **not** revoke refresh-token families; `POST /oauth/logout` is the endpoint that runs the full cascade. See [Which logout endpoint invalidates what](../../docs/operator-runbook.md#which-logout-endpoint-invalidates-what).

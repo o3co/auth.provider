@@ -128,14 +128,16 @@ const config = (): AppConfig => {
 	);
 	return {
 		...base,
-		federations: {
-			...base.federations,
-			stub: {
-				enabled: true,
-				clientId: "id",
-				clientSecret: "secret",
-				callbackURL: "https://as.example/session/oauth/federation/stub/callback",
-			} as never,
+		core: {
+			...(base.core as object),
+			federations: {
+				stub: {
+					enabled: true,
+					clientId: "id",
+					clientSecret: "secret",
+					callbackURL: "https://as.example/session/oauth/federation/stub/callback",
+				} as never,
+			},
 		},
 	} as AppConfig;
 };

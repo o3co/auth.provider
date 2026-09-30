@@ -17,6 +17,7 @@ import {
 	consoleLogger,
 	defaultRefreshTokenFamilyRevocationModule,
 	defaultRefreshTokenFamilyRotationModule,
+	federationsOf,
 	jwksModule,
 	type Logger,
 	type Module,
@@ -141,14 +142,14 @@ function setsAnything(value: unknown): boolean {
  * are in the template README, "Module Composition Order".
  */
 export function buildModules(config: Switches, overrides: BuildModulesOverrides = {}): Module[] {
-	// A section's `type` names the implementation, so the two gates never both
-	// select one section: `federations.google` is the built-in Google
+	// An entry's `type` names the implementation, so the two gates never both
+	// select one entry: `core.federations.google` is the built-in Google
 	// federation only when its type is `google` (that name's default); with
 	// `type = "oidc"` it is a generic OIDC instance, and composing both would
 	// contribute the same federation and redirect-policy keys twice.
-	const googleEnabled =
-		extractFederationSection(config.federations ?? {}, "google")?.type === "google";
-	const oidcFederations = oidcFederationNames(config.federations ?? {});
+	const federations = federationsOf(config);
+	const googleEnabled = extractFederationSection(federations, "google")?.type === "google";
+	const oidcFederations = oidcFederationNames(federations);
 	const logger = overrides.logger ?? consoleLogger;
 	const adapters = config.adapters;
 

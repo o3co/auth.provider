@@ -88,7 +88,7 @@ export interface FederationInstance<E> {
 
 /**
  * A `federationTypes` entry: what one federation package handles, keyed by the
- * `type` a `federations` configuration entry names (`"oidc"`, `"google"`). It
+ * `type` a `core.federations` entry names (`"oidc"`, `"google"`). It
  * holds the schema an entry of that type is parsed with, and the factory that
  * builds a provider from one entry and its name.
  *
@@ -198,7 +198,7 @@ export interface ContributesMap<Deps = ProviderDeps<never, never>> {
 		readonly [name: string]: FederationFactory<Deps>;
 	};
 	/**
-	 * Federation types, keyed by the `type` a `federations` entry names
+	 * Federation types, keyed by the `type` a `core.federations` entry names
 	 * ({@link FederationTypeContribution}). Two packages claiming one type refuse
 	 * boot (`duplicate-contribute`); a declaration without an `entrySchema` and a
 	 * `factory` refuses it at stage 1 (`contribution-malformed`); a host may not

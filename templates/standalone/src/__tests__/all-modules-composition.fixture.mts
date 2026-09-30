@@ -130,13 +130,13 @@ export const SINGLE_ENV: Readonly<Record<string, string>> = {
 	// The in-memory user repository covers no registration; `required` is a
 	// Store's statement that it does (see the federation-grants README).
 	FEDERATION_GRANTS_IDENTITY_LOOKUP: "unsupported",
-	FEDERATIONS_GOOGLE_ENABLED: "true",
-	FEDERATIONS_GOOGLE_CLIENT_ID: "google-client",
-	FEDERATIONS_GOOGLE_CLIENT_SECRET: "google-secret",
-	FEDERATIONS_OIDC_ENABLED: "true",
-	FEDERATIONS_OIDC_ISSUER: OIDC_ISSUER,
-	FEDERATIONS_OIDC_CLIENT_ID: "oidc-client",
-	FEDERATIONS_OIDC_CLIENT_SECRET: "oidc-secret",
+	CORE_FEDERATIONS_GOOGLE_ENABLED: "true",
+	CORE_FEDERATIONS_GOOGLE_CLIENT_ID: "google-client",
+	CORE_FEDERATIONS_GOOGLE_CLIENT_SECRET: "google-secret",
+	CORE_FEDERATIONS_OIDC_ENABLED: "true",
+	CORE_FEDERATIONS_OIDC_ISSUER: OIDC_ISSUER,
+	CORE_FEDERATIONS_OIDC_CLIENT_ID: "oidc-client",
+	CORE_FEDERATIONS_OIDC_CLIENT_SECRET: "oidc-secret",
 };
 
 /**
@@ -176,8 +176,8 @@ const OPERATOR_LAYER: string = (() => {
 	const quoted = (value: string) => JSON.stringify(value);
 	writeFileSync(
 		file,
-		`federations.google.clientUrl = ${quoted(FEDERATION_LANDING)}
-federations.oidc.clientUrl = ${quoted(FEDERATION_LANDING)}
+		`core.federations.google.clientUrl = ${quoted(FEDERATION_LANDING)}
+core.federations.oidc.clientUrl = ${quoted(FEDERATION_LANDING)}
 redis-federation-grant-store.encryptionKeys = [{ id = "k-test", key = ${quoted(ENCRYPTION_KEY)} }]
 federation-grants {
   connections {
@@ -417,7 +417,7 @@ async function createUpstreams(): Promise<Upstreams> {
 		oidc: await createFakeIdp({
 			issuer: OIDC_ISSUER,
 			discovery: true,
-			clientId: SINGLE_ENV.FEDERATIONS_OIDC_CLIENT_ID,
+			clientId: SINGLE_ENV.CORE_FEDERATIONS_OIDC_CLIENT_ID,
 			sub: OIDC_SUB,
 		}),
 		// Google's endpoints are fixed in the adapter, not discovered.
@@ -427,7 +427,7 @@ async function createUpstreams(): Promise<Upstreams> {
 			tokenEndpoint: "https://oauth2.googleapis.com/token",
 			jwksUri: "https://www.googleapis.com/oauth2/v3/certs",
 			userinfoEndpoint: "https://www.googleapis.com/oauth2/v3/userinfo",
-			clientId: SINGLE_ENV.FEDERATIONS_GOOGLE_CLIENT_ID,
+			clientId: SINGLE_ENV.CORE_FEDERATIONS_GOOGLE_CLIENT_ID,
 			sub: GOOGLE_SUB,
 		}),
 	};

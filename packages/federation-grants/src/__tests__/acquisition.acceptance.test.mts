@@ -272,12 +272,12 @@ const boot = async (
 						? {}
 						: { sessionRequirements: { expected: [requirement.name] } }),
 					declaredAbsent: ["auditSink"],
-				},
-				federations: {
-					upstream: {
-						enabled: true,
-						issuer: "https://issuer.example",
-						clientId: "provider-client",
+					federations: {
+						upstream: {
+							enabled: true,
+							issuer: "https://issuer.example",
+							clientId: "provider-client",
+						},
 					},
 				},
 				rateLimit: { failMode: "closed" },

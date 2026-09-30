@@ -61,6 +61,7 @@ import {
 	createMemoryWebAuthnCredentialStore,
 	defaultChallengeCeremonyModule,
 	defineModule,
+	federationsOf,
 	type GrantPolicyHook,
 	type InterruptionAnswer,
 	loggableError,
@@ -257,9 +258,11 @@ function withFeatures<C extends AppConfig>(config: C, features: Features): C {
 		"device-grant"?: Record<string, unknown>;
 		dpop?: Record<string, unknown>;
 		mtls?: Record<string, unknown>;
-		federations: Record<string, Record<string, unknown>>;
 		webauthn?: Record<string, unknown>;
-		core?: { sessionRequirements?: { expected?: readonly string[] } };
+		core?: {
+			sessionRequirements?: { expected?: readonly string[] };
+			federations?: Record<string, Record<string, unknown>>;
+		};
 	};
 	return {
 		...config,
@@ -270,6 +273,25 @@ function withFeatures<C extends AppConfig>(config: C, features: Features): C {
 		// each name is kept once.
 		core: {
 			...c.core,
+			federations: {
+				...c.core?.federations,
+				apple: {
+					enabled: features.apple,
+					type: "apple",
+					clientId: "com.example.composition",
+					clientSecret: "apple-static-client-secret",
+					callbackURL: `${ISSUER}/session/oauth/federation/apple/callback`,
+					clientUrl: APPLE_LANDING,
+				},
+				github: {
+					enabled: features.github,
+					type: "github",
+					clientId: "github-client",
+					clientSecret: "github-secret",
+					callbackURL: `${ISSUER}/session/oauth/federation/github/callback`,
+					clientUrl: GITHUB_LANDING,
+				},
+			},
 			sessionRequirements: {
 				expected: [
 					...new Set([
@@ -307,25 +329,6 @@ function withFeatures<C extends AppConfig>(config: C, features: Features): C {
 			rpId: "auth.test",
 			rpName: "Composition",
 			origin: [ISSUER],
-		},
-		federations: {
-			...c.federations,
-			apple: {
-				enabled: features.apple,
-				type: "apple",
-				clientId: "com.example.composition",
-				clientSecret: "apple-static-client-secret",
-				callbackURL: `${ISSUER}/session/oauth/federation/apple/callback`,
-				clientUrl: APPLE_LANDING,
-			},
-			github: {
-				enabled: features.github,
-				type: "github",
-				clientId: "github-client",
-				clientSecret: "github-secret",
-				callbackURL: `${ISSUER}/session/oauth/federation/github/callback`,
-				clientUrl: GITHUB_LANDING,
-			},
 		},
 	} as unknown as C;
 }
@@ -655,9 +658,9 @@ async function createFakes(): Promise<Fakes> {
 const APPLE_SUB = "000123.apple-composition.0456";
 const GITHUB_ID = 12345;
 
-/** A federation section's fields, as the bridges read them (they check nothing else). */
+/** A federation's fields in `core.federations`, as the bridges read them (they check nothing else). */
 const section = (config: AppConfig, name: string): Record<string, string> =>
-	(config.federations as Record<string, Record<string, string>>)[name] ?? {};
+	(federationsOf(config)[name] as Record<string, string> | undefined) ?? {};
 
 function federationBridges(config: AppConfig, features: Features, f: Fakes): Module[] {
 	const bridge = (name: "apple" | "github", fetch: typeof globalThis.fetch) => {

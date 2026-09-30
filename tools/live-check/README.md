@@ -144,7 +144,7 @@ browser ──▶ :3210  live-check front (proxy.mjs)  ──▶ :3000  standalo
 A profile is an env file in `profiles/`: the federation's name in the
 template (`LIVE_CHECK_FEDERATION`), the `iss` the callback must carry
 (`LIVE_CHECK_EXPECTED_ISS`, empty to record without judging), and the
-template's own `FEDERATIONS_<NAME>_*` switches for the client. `start` adds
+template's own `CORE_FEDERATIONS_<NAME>_*` switches for the client. `start` adds
 `_ENABLED=true` and the `_CALLBACK_URL`.
 
 - **Google** — `google.env.example`; exercised (#600).

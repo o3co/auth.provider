@@ -127,17 +127,20 @@ const boot = async (boundaries: Boundaries = {}, spent = false) => {
 		bootstrapComponents: {
 			config: {
 				...makeValidCoreConfig(),
-				federations: {
-					upstream: {
-						enabled: true,
-						issuer: connection.upstreamIssuer,
-						// The pair the grant's identity is pinned to: a different client id
-						// here is a different upstream account, and the grant is retired.
-						clientId: connection.upstreamClientId,
+				rateLimit: { failMode: "closed" },
+				core: {
+					...makeValidCoreConfig().core,
+					declaredAbsent: ["auditSink"],
+					federations: {
+						upstream: {
+							enabled: true,
+							issuer: connection.upstreamIssuer,
+							// The pair the grant's identity is pinned to: a different client id
+							// here is a different upstream account, and the grant is retired.
+							clientId: connection.upstreamClientId,
+						},
 					},
 				},
-				rateLimit: { failMode: "closed" },
-				core: { ...makeValidCoreConfig().core, declaredAbsent: ["auditSink"] },
 				"federation-grants": {
 					enabled: true,
 					connections: {

@@ -46,8 +46,9 @@ function deepFreeze<T>(value: T): T {
 describe("TransitionalConfigSchema — core's sections, and every mirrored one optional", () => {
 	it("requires none of the sections core mirrors for another package", () => {
 		expect(TransitionalConfigSchema.safeParse(resolved()).success).toBe(true);
-		// The schema a composition root pre-parsed with requires six of them.
-		expect(AppConfigSchema.safeParse(resolved()).success).toBe(false);
+		// Nor does the schema a composition root pre-parsed with: every section
+		// it mirrors is optional.
+		expect(AppConfigSchema.safeParse(resolved()).success).toBe(true);
 	});
 
 	it("declares every section AppConfigSchema declares, with the same schema", () => {

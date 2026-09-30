@@ -15,7 +15,6 @@
  */
 import path from "node:path";
 import {
-	type AppConfig,
 	consoleLogger,
 	createAuditSinkFactory,
 	createFederationTokenStoreFactory,
@@ -28,6 +27,7 @@ import {
 	createKeyStoreFactory,
 	createRepositoryFactories,
 	defineModule,
+	federationsOf,
 	type LifecycleRegistrar,
 	type Logger,
 	loggableError,
@@ -731,13 +731,13 @@ function optionalString(
 	const value = slice[field];
 	if (value === undefined || value === null) return {};
 	if (typeof value !== "string") {
-		throw new Error(`federations.google.${field} must be a string when present`);
+		throw new Error(`core.federations.google.${field} must be a string when present`);
 	}
 	return { [field]: value };
 }
 
 /**
- * An optional boolean from the `federations.google` slice: a HOCON boolean, or
+ * An optional boolean from the `core.federations.google` entry: a HOCON boolean, or
  * from an environment override (`${?VAR}`) a string in the spellings core's
  * `coerceBooleanFromEnv` accepts ("true" / "false" / "1" / "0", trimmed, any
  * case). Unlike that coercion, an empty value is refused, not read as false:
@@ -758,12 +758,12 @@ function optionalBoolean(
 		if (normalized === "false" || normalized === "0") return { [field]: false };
 	}
 	throw new Error(
-		`federations.google.${field} must be one of true, false, "true", "false", "1" or "0" when present`,
+		`core.federations.google.${field} must be one of true, false, "true", "false", "1" or "0" when present`,
 	);
 }
 
 /**
- * `accessType` from the `federations.google` slice: `"offline"` or `"online"`,
+ * `accessType` from the `core.federations.google` entry: `"offline"` or `"online"`,
  * exactly, or absent. `federation-google` refuses any other value too; this
  * refuses it first, naming the key, as the fields above do.
  */
@@ -773,12 +773,12 @@ function optionalAccessType(
 	const value = slice.accessType;
 	if (value === undefined || value === null) return {};
 	if (value === "offline" || value === "online") return { accessType: value };
-	throw new Error('federations.google.accessType must be "offline" or "online" when present');
+	throw new Error('core.federations.google.accessType must be "offline" or "online" when present');
 }
 
 /**
  * Google federation config bridge: supplies the typed `googleFederationConfig`
- * slot from the `config.federations.google` slice. The bridge is the
+ * slot from the `core.federations.google` entry. The bridge is the
  * composition root's responsibility because the slot's content is
  * consumer-specific (see the `@o3co/auth-provider-federation-google` README).
  *
@@ -793,10 +793,10 @@ export const googleFederationConfigModule: Module = defineModule({
 	requires: ["config"] as const,
 	provides: {
 		googleFederationConfig: ({ config }): GoogleProviderConfig => {
-			const slice = extractFederationSection((config as AppConfig).federations, "google");
+			const slice = extractFederationSection(federationsOf(config), "google");
 			if (!slice) {
 				throw new Error(
-					"federations.google must be enabled with credentials when googleFederationModule is in the manifest",
+					"core.federations.google must be enabled with credentials when googleFederationModule is in the manifest",
 				);
 			}
 			const clientId = slice.clientId;
@@ -808,7 +808,7 @@ export const googleFederationConfigModule: Module = defineModule({
 				typeof callbackURL !== "string"
 			) {
 				throw new Error(
-					"federations.google requires clientId, clientSecret, callbackURL when enabled",
+					"core.federations.google requires clientId, clientSecret, callbackURL when enabled",
 				);
 			}
 
@@ -822,7 +822,7 @@ export const googleFederationConfigModule: Module = defineModule({
 			if (rawAllowlist !== undefined && rawAllowlist !== null) {
 				if (!Array.isArray(rawAllowlist) || rawAllowlist.some((e) => typeof e !== "string")) {
 					throw new Error(
-						"federations.google.redirectAllowlist must be a list of URL strings, " +
+						"core.federations.google.redirectAllowlist must be a list of URL strings, " +
 							'e.g. ["https://app.example.com/welcome"]',
 					);
 				}
@@ -851,8 +851,8 @@ export const googleFederationConfigModule: Module = defineModule({
  * OIDC federation config bridge: supplies the `oidcFederationConfigs`
  * slot every `oidcFederationModule(<name>)` in the manifest reads its entry
  * from. One bridge for all instances: `readOidcFederationConfigs` walks
- * `config.federations` and reads every enabled section of type `oidc`,
- * refusing a malformed field by `federations.<name>.<field>` at boot.
+ * `core.federations` and reads every enabled entry of type `oidc`,
+ * refusing a malformed field by `core.federations.<name>.<field>` at boot.
  * `buildModules` lists this module only when at least one such section
  * exists.
  */
@@ -860,7 +860,6 @@ export const oidcFederationConfigModule: Module = defineModule({
 	name: "oidc-federation-config",
 	requires: ["config"] as const,
 	provides: {
-		oidcFederationConfigs: ({ config }) =>
-			readOidcFederationConfigs((config as AppConfig).federations),
+		oidcFederationConfigs: ({ config }) => readOidcFederationConfigs(federationsOf(config)),
 	},
 });

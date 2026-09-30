@@ -89,7 +89,7 @@ const config: AppConfig & Record<string, unknown> = {
 	},
 	// The session requirements this composition expects, as the shipped
 	// `application.conf` does (ADR 2026-09-28-session-admission): none.
-	core: { sessionRequirements: { expected: [] } },
+	core: { sessionRequirements: { expected: [] }, federations: { google: { enabled: false } } },
 	oauth: {
 		jwt: {
 			issuer: "https://auth.test",
@@ -119,7 +119,6 @@ const config: AppConfig & Record<string, unknown> = {
 		rateLimit: { login: { windowMs: 60000, limit: 100 } },
 	},
 	rateLimit: { failMode: "open" },
-	federations: { google: { enabled: false } },
 	"standalone-in-memory-code-repository": { defaultExpiresIn: 600 },
 } as unknown as AppConfig;
 

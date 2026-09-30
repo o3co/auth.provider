@@ -81,7 +81,7 @@ const config: AppConfig & Record<string, unknown> = {
 	// A composition with a consumer of session admission states what it
 	// expects (ADR 2026-09-28-session-admission): the shipped
 	// `application.conf` expects none, and so does this hand-built config.
-	core: { sessionRequirements: { expected: [] } },
+	core: { sessionRequirements: { expected: [] }, federations: { google: { enabled: false } } },
 	oauth: {
 		jwt: {
 			issuer: "https://auth.test",
@@ -111,9 +111,6 @@ const config: AppConfig & Record<string, unknown> = {
 		rateLimit: { login: { windowMs: 60000, limit: 10 } },
 	},
 	rateLimit: { failMode: "open" },
-	federations: {
-		google: { enabled: false },
-	},
 	"standalone-in-memory-code-repository": { defaultExpiresIn: 600 },
 };
 
@@ -366,7 +363,7 @@ describe("standalone smoke test", () => {
 	});
 
 	// A freshly scaffolded app must boot under the default
-	// `federations.google.enabled = false`. `buildModules` includes
+	// `core.federations.google.enabled = false`. `buildModules` includes
 	// `googleFederationModule` and its config bridge only when enabled, since
 	// the bridge throws at boot when `extractFederationSection` returns
 	// undefined. The manifest is asserted directly, so a bypassed gate fails

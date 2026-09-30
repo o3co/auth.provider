@@ -214,17 +214,18 @@ const DOCUMENTED_ENV: Readonly<Record<string, string>> = {
 	REDIS_MFA_TRANSACTION_STORE_KEY_PREFIX: "tenant-a:mfat:",
 
 	// --- federation ---------------------------------------------------
-	FEDERATIONS_GOOGLE_ENABLED: "true",
-	FEDERATIONS_GOOGLE_CLIENT_ID: "google-client-id",
-	FEDERATIONS_GOOGLE_CLIENT_SECRET: "google-client-secret",
-	FEDERATIONS_GOOGLE_CALLBACK_URL: "https://auth.test/session/oauth/federation/google/callback",
-	FEDERATIONS_GOOGLE_ACCESS_TYPE: "online",
+	CORE_FEDERATIONS_GOOGLE_ENABLED: "true",
+	CORE_FEDERATIONS_GOOGLE_CLIENT_ID: "google-client-id",
+	CORE_FEDERATIONS_GOOGLE_CLIENT_SECRET: "google-client-secret",
+	CORE_FEDERATIONS_GOOGLE_CALLBACK_URL:
+		"https://auth.test/session/oauth/federation/google/callback",
+	CORE_FEDERATIONS_GOOGLE_ACCESS_TYPE: "online",
 	// The generic OIDC federation the template ships disabled.
-	FEDERATIONS_OIDC_ENABLED: "true",
-	FEDERATIONS_OIDC_ISSUER: "https://idp.test",
-	FEDERATIONS_OIDC_CLIENT_ID: "oidc-client-id",
-	FEDERATIONS_OIDC_CLIENT_SECRET: "oidc-client-secret",
-	FEDERATIONS_OIDC_CALLBACK_URL: "https://auth.test/session/oauth/federation/oidc/callback",
+	CORE_FEDERATIONS_OIDC_ENABLED: "true",
+	CORE_FEDERATIONS_OIDC_ISSUER: "https://idp.test",
+	CORE_FEDERATIONS_OIDC_CLIENT_ID: "oidc-client-id",
+	CORE_FEDERATIONS_OIDC_CLIENT_SECRET: "oidc-client-secret",
+	CORE_FEDERATIONS_OIDC_CALLBACK_URL: "https://auth.test/session/oauth/federation/oidc/callback",
 
 	// --- repositories -------------------------------------------------
 	REPOSITORIES_CLIENT_YAML_PATH: "./config/clients.yaml",
@@ -602,8 +603,8 @@ describe("the shipped config boots with every documented override supplied as a 
 		expect(config.oauth.jwt.legacyTypAccept).toBe(true);
 		expect(config.oauth.requireEmailVerified).toBe(true);
 		expect(config.oauth.resourceIndicator?.enabled).toBe(true);
-		expect(config.federations.google?.enabled).toBe(true);
-		expect(config.federations.oidc?.enabled).toBe(true);
+		expect(config.core?.federations?.google?.enabled).toBe(true);
+		expect(config.core?.federations?.oidc?.enabled).toBe(true);
 		// A leftover string here would be read as "on" by a truthiness check
 		// and as "off" by `=== true`, for a feature whose whole default is off.
 		expect(config["federation-grants"]?.enabled).toBe(true);
@@ -617,7 +618,7 @@ describe("the shipped config boots with every documented override supplied as a 
 		expect(http.port).toBe(3000);
 		expect(http.readinessTimeoutMs).toBe(1500);
 		expect(http.trustProxy).toEqual(["10.0.0.0/8", "loopback"]);
-		expect(config.federations.google?.accessType).toBe("online");
+		expect(config.core?.federations?.google?.accessType).toBe("online");
 		// The new default wins over the deprecated variable, and the parsed
 		// config mirrors it onto the old key for readers that predate the split.
 		expect(resolveAccessTokenLifetime(config)).toEqual({

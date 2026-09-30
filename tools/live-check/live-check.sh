@@ -226,8 +226,8 @@ start() {
 		# shellcheck disable=SC1090
 		. "$profile_file"
 		set +a
-		export "FEDERATIONS_${FED}_ENABLED=true"
-		export "FEDERATIONS_${FED}_CALLBACK_URL=http://localhost:$PORT/session/oauth/federation/$fed/callback"
+		export "CORE_FEDERATIONS_${FED}_ENABLED=true"
+		export "CORE_FEDERATIONS_${FED}_CALLBACK_URL=http://localhost:$PORT/session/oauth/federation/$fed/callback"
 		export CONFIG_ENV="$OVERLAY_ENV" HTTP_PORT="$PROVIDER_PORT"
 		export OAUTH_JWT_ISSUER="http://localhost:$PROVIDER_PORT"
 		export KEY_STORE_LOCAL_PRIVATE_KEY_PATH="$STATE/keys/jwt-private.pem"

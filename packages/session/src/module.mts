@@ -17,11 +17,12 @@
 import {
 	type AppConfig,
 	AUDIT_SINK_ABSENCE_POLICY,
+	CoreConfigSchema,
 	type CsrfGuard,
 	type CsrfTokenSigner,
 	consoleLogger,
 	defineModule,
-	fullSectionsSchema,
+	federationsOf,
 	LOGIN_RETURN_PARAMETER,
 	type Logger,
 	loginPageCarriesReturn,
@@ -45,10 +46,8 @@ import { LOGIN_RATE_LIMIT_PREFIX, readLoginRateLimitBudget } from "./loginBudget
 import * as federationRoutes from "./routes/Federation.mjs";
 import * as sessionRoutes from "./routes/Session.mjs";
 
-const sessionConfigSchema = fullSectionsSchema.pick({
-	federations: true,
-	cors: true,
-});
+/** What the module reads of the configuration beside its own section: core's, for `core.federations`. */
+const sessionConfigSchema = CoreConfigSchema.pick({ core: true });
 
 /**
  * The schema of `session {}`, the module's own section, strict at every
@@ -136,12 +135,12 @@ const SECTION = {
 } as const;
 
 /**
- * Boot-time projection of `config.federations` to a `name → callbackURL`
+ * Boot-time projection of `core.federations` to a `name → callbackURL`
  * map. Throws when an enabled federation has no `callbackURL`: a deployment
  * misconfiguration fails at boot, not per request.
  */
 function deriveProviderCallbackUrls(
-	federations: Record<string, unknown>,
+	federations: Readonly<Record<string, unknown>>,
 ): ReadonlyMap<string, string> {
 	const out = new Map<string, string>();
 	for (const name of Object.keys(federations)) {
@@ -149,7 +148,9 @@ function deriveProviderCallbackUrls(
 		if (!slice) continue; // disabled or absent — skip
 		const callbackURL = slice.callbackURL;
 		if (typeof callbackURL !== "string" || callbackURL.length === 0) {
-			throw new Error(`federations.${name}: callbackURL is required when federation is enabled`);
+			throw new Error(
+				`core.federations.${name}: callbackURL is required when federation is enabled`,
+			);
 		}
 		out.set(name, callbackURL);
 	}
@@ -186,7 +187,7 @@ const csrfGuardOf = (
  *   - "federation-routes" — GET /session/oauth/federation/:name (+ callback)
  *
  * Its section is `session {}` (`sessionSectionSchema`); `config` is read for
- * `federations` and `cors` alone.
+ * `core.federations` alone.
  *
  * `requires`: `config` and `userRepository`; the three stores these routes
  * use (`userSessionStore`, `federationTokenStore`, `sessionFederationIndex`);
@@ -326,7 +327,7 @@ export const sessionModule = defineModule<
 						config,
 						federationProviders: deps.federationProviders,
 						federationRedirectPolicyResolver: deps.federationRedirectPolicyResolver,
-						providerCallbackUrls: deriveProviderCallbackUrls(config.federations),
+						providerCallbackUrls: deriveProviderCallbackUrls(federationsOf(config)),
 						userRepository: deps.userRepository,
 						userSessionStore: deps.userSessionStore,
 						sessionFederationIndex: deps.sessionFederationIndex,

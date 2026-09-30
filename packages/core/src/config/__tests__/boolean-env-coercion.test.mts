@@ -30,6 +30,11 @@ import { makeValidAppConfig } from "#/testing/fixtures/valid-config.mjs";
  * operator's documented override away.
  */
 
+/** The `google` federation `parsed` holds under `core.federations`. */
+const federationOf = (parsed: Record<string, unknown>): Record<string, unknown> =>
+	((parsed.core as { federations: Record<string, Record<string, unknown>> }).federations
+		.google as Record<string, unknown>) ?? {};
+
 /** Every boolean in `AppConfigSchema` that a `${?VAR}` can reach. */
 const ENV_OVERRIDABLE_BOOLEANS = [
 	{
@@ -62,18 +67,12 @@ const ENV_OVERRIDABLE_BOOLEANS = [
 				?.enabled,
 	},
 	{
-		key: "federations.<name>.enabled",
-		envVar: "FEDERATIONS_GOOGLE_ENABLED",
+		key: "core.federations.<name>.enabled",
+		envVar: "CORE_FEDERATIONS_GOOGLE_ENABLED",
 		set: (config: Record<string, unknown>, value: unknown) => {
-			config.federations = { google: { enabled: value } };
+			config.core = { ...(config.core as object), federations: { google: { enabled: value } } };
 		},
-		read: (parsed: Record<string, unknown>) =>
-			(
-				(parsed.federations as Record<string, Record<string, unknown>>).google as Record<
-					string,
-					unknown
-				>
-			).enabled,
+		read: (parsed: Record<string, unknown>) => federationOf(parsed).enabled,
 	},
 	{
 		// Whether a federation's upstream `amr` counts (ADR
@@ -81,18 +80,15 @@ const ENV_OVERRIDABLE_BOOLEANS = [
 		// wired for it — no bundled adapter surfaces an upstream `amr`, and it
 		// is set in config beside `enabled` — but it is coerced as every
 		// boolean here is, so a `${?VAR}` an operator adds reads the same way.
-		key: "federations.<name>.trustUpstreamAmr",
+		key: "core.federations.<name>.trustUpstreamAmr",
 		envVar: "no variable wired; set in config",
 		set: (config: Record<string, unknown>, value: unknown) => {
-			config.federations = { google: { enabled: true, trustUpstreamAmr: value } };
+			config.core = {
+				...(config.core as object),
+				federations: { google: { enabled: true, trustUpstreamAmr: value } },
+			};
 		},
-		read: (parsed: Record<string, unknown>) =>
-			(
-				(parsed.federations as Record<string, Record<string, unknown>>).google as Record<
-					string,
-					unknown
-				>
-			).trustUpstreamAmr,
+		read: (parsed: Record<string, unknown>) => federationOf(parsed).trustUpstreamAmr,
 	},
 ] as const;
 

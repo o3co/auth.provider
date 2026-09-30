@@ -34,7 +34,6 @@ import { renamedVariableCaptures } from "../renamedVariables.mjs";
  *
  * Deliberate divergences from the `reference.conf` files:
  * - `session-store.storage.type` is `"memory"` (`"redis"` there);
- * - `federations` is `{}` (no built-in `google` block);
  * - `oauth.jwt.issuer` is a fixed test issuer (`${?OAUTH_JWT_ISSUER}` there);
  * - the grant switches, in the oauth package's modules' sections, turn on
  *   `oauth-session.enabled` and
@@ -152,7 +151,6 @@ export function makeValidFullSections() {
 			loginPage: { url: "/login" },
 			rateLimit: { login: { windowMs: 900000, limit: 20 } },
 		},
-		federations: {},
 	} satisfies FullSectionsConfig;
 }
 
