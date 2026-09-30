@@ -44,7 +44,11 @@ import {
 	makeValidFullSections,
 } from "@o3co/auth-provider-core/testing";
 import { describe, expect, it } from "vitest";
-import { federationGrantsModules } from "#/index.mjs";
+import {
+	createFederationGrantBackground,
+	type FederationGrantBackground,
+	federationGrantsModules,
+} from "#/index.mjs";
 import {
 	ACQUISITION_GRANT_SETTINGS,
 	acquisitionComponents,
@@ -204,6 +208,8 @@ interface Setup {
 	readonly tokenSettingsIssuer?: string;
 	/** Where the memory store's cleanup records that it ran; no cleanup by default. */
 	readonly storeClosed?: string[];
+	/** A registry the host supplies through `overrideComponents`, in place of the module's. */
+	readonly background?: FederationGrantBackground;
 }
 
 /**
@@ -248,6 +254,9 @@ const boot = (setup: Setup) => {
 	];
 	return createApp({
 		modules,
+		...(setup.background === undefined
+			? {}
+			: { overrideComponents: { federationGrantBackground: setup.background } }),
 		bootstrapComponents: {
 			config: {
 				...makeValidCoreConfig(),
@@ -460,7 +469,30 @@ describe("the cleanup allowance an enabled deployment registers", () => {
 		await handle.dispose();
 	});
 
-	it("keeps the drain ahead of the store's own cleanup", async () => {
+	it("is registered without draining a host-supplied registry that a failed boot never started", async () => {
+		// The browser half refuses after the JSON half registered the tail.
+		const background = createFederationGrantBackground();
+		await expect(boot({ background, withCsrfGuard: false })).rejects.toThrow(/csrfGuard/);
+		expect(background.closing).toBe(false);
+		expect(background.admit()).toBeTypeOf("function");
+	});
+
+	it("does not make dispose wait on a host-supplied registry that nothing drained", async () => {
+		const background = createFederationGrantBackground();
+		const handle = await boot({ background });
+		expect(handle.cleanupAllowanceMs).toBe(45_000);
+		background.register(new Promise<void>(() => {}));
+		const outcome = await Promise.race([
+			handle.dispose().then(() => "disposed"),
+			new Promise((resolve) => setTimeout(() => resolve("still waiting"), 50)),
+		]);
+		expect(outcome).toBe("disposed");
+		expect(background.closing).toBe(false);
+	});
+});
+
+describe("with the feature on, the drain", () => {
+	it("runs ahead of the store's own cleanup", async () => {
 		const order: string[] = [];
 		const handle = await boot({ storeClosed: order });
 		let persist!: () => void;

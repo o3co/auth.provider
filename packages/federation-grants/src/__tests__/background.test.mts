@@ -28,7 +28,8 @@
 
 import { FEDERATION_GRANT_SETTING_DEFAULTS } from "@o3co/auth-provider-core";
 import { describe, expect, it } from "vitest";
-import { createFederationGrantBackground, federationGrantsCleanupTailMs } from "#/background.mjs";
+import { createFederationGrantBackground } from "#/background.mjs";
+import { federationGrantsCleanupTailMs } from "#/index.mjs";
 
 /** A promise with its resolver, for holding work open across an assertion. */
 function deferred(): { readonly promise: Promise<void>; resolve: () => void } {
@@ -208,7 +209,7 @@ describe("the tail the drain registers", () => {
 		expect(federationGrantsCleanupTailMs(shipped)).toBe(45_000);
 	});
 
-	it("grows with a raised budget, so a longer refresh is not cut off", () => {
+	it("grows with each raised budget", () => {
 		expect(federationGrantsCleanupTailMs({ ...shipped, upstreamHardTimeoutMs: 60_000 })).toBe(
 			60_000 + 3_000 + 5_000 + 12_000,
 		);
