@@ -324,11 +324,13 @@ Each adapter ships in up to two forms:
   plaintext guard reads that name in addition to `NODE_ENV`, and the
   replica count from core's `deploymentMode` slot, which both modules require
   and core fills from `deployment.mode` — `"multi"` refuses plaintext in every
-  environment. A composition root that builds the grant store itself passes
+  environment. A composition root that builds either store itself passes
   `deploymentModeOf(config)` from `@o3co/auth-provider-core` — the reading
   boot fills the slot with — to `resolveRedisFederationGrantStoreOptions` as
-  its third argument; a mode that is not `single`, `multi` or `unset`, none
-  included, is a TypeError naming the argument. Where plaintext goes ahead the guard logs one line on
+  its third argument, and to `createRedisFederationTokenStore` and
+  `redisFederationTokenStoreBuilder` as their required `deploymentMode`
+  option; a mode that is not `single`, `multi` or `unset`, none included, is
+  a TypeError naming the export, before anything is built. Where plaintext goes ahead the guard logs one line on
   the module's optional `logger` slot (`consoleLogger` when it is empty):
   `federation_store_plaintext` (warn, `store`, `mode`) where it is allowed,
   `federation_store_plaintext_override` (error, with the `environment` or
@@ -355,7 +357,11 @@ Each adapter ships in up to two forms:
   backend at runtime through core's `AdapterFactory`:
   `factory.register("redis", redisXxxBuilder)`, then
   `factory.create({ type: "redis", client, ... })`. A builder writes on the
-  logger of the factory's context. `redisCodeRepositoryBuilder` is
+  logger of the factory's context. `redisFederationTokenStoreBuilder` also
+  takes `deploymentMode` in that configuration —
+  `factory.create({ type: "redis", client, deploymentMode, ... })` — since a
+  builder's context carries a lifecycle, readiness and a logger, never the
+  mode. `redisCodeRepositoryBuilder` is
   deprecated and says so on every call: `adapter_builder_deprecated` (warn,
   `builder`, `replacement`).
 

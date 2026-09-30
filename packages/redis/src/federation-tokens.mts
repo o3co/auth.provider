@@ -32,6 +32,7 @@ import {
 	type AdapterBuilder,
 	checkDeploymentMode,
 	coerceBooleanFromEnv,
+	type DeploymentMode,
 	decodeSealingKey,
 	defineModule,
 	type FederationTokenStore,
@@ -93,10 +94,13 @@ export interface RedisFederationTokenStoreOptions {
 	environment?: string;
 	/**
 	 * The replica count, as core's `deploymentMode` slot holds it. `"multi"`
-	 * refuses `allow-plaintext` in every environment; the module passes the
-	 * slot's value, a direct caller passes it here.
+	 * refuses `allow-plaintext` in every environment. The module passes the
+	 * slot's value; a composition root that builds the store by hand passes
+	 * `deploymentModeOf(config)` from `@o3co/auth-provider-core`. Anything but
+	 * the three values, absence included, is a TypeError before the store is
+	 * built: read as absent, it would let plaintext through under `multi`.
 	 */
-	deploymentMode?: string;
+	deploymentMode: DeploymentMode;
 	/**
 	 * Where the `allow-plaintext` guard's notice goes: the module passes its
 	 * optional `logger` slot, the builder its context's. Absent, `consoleLogger`.
@@ -196,12 +200,16 @@ function isEnvelope(value: unknown): value is Envelope {
 export function createRedisFederationTokenStore(
 	opts: RedisFederationTokenStoreOptions,
 ): FederationTokenStore & SupportsLock {
+	const deploymentMode = checkDeploymentMode(
+		opts.deploymentMode,
+		"createRedisFederationTokenStore: deploymentMode",
+	);
 	// The production guard runs before any key parsing, and only here: the
 	// builder and the module reach it through this factory, so every entry
 	// point is gated and its notice is written once per store.
 	validateEncryptionMode("federation-tokens", opts.encryption.mode, {
 		environment: opts.environment,
-		deploymentMode: opts.deploymentMode,
+		deploymentMode,
 		...(opts.logger !== undefined ? { logger: opts.logger } : {}),
 	});
 	// Every setting this store is given and cannot use is refused as a
@@ -420,6 +428,13 @@ export function createRedisFederationTokenStore(
  * any other mode than the two; `allow-plaintext` warns at startup and is for
  * dev/test only. `environment` and `deploymentMode` are what that guard reads
  * ({@link EncryptionGuardContext}).
+ *
+ * `deploymentMode` is required in the adapter configuration — the
+ * `BuilderContext` carries a lifecycle, readiness and a logger, never the
+ * mode — and a composition root passes `deploymentModeOf(config)` from
+ * `@o3co/auth-provider-core`. Anything but `"single"`, `"multi"` or `"unset"`,
+ * absence included, is a TypeError before anything is built, the client
+ * checked or the key read.
  */
 export const redisFederationTokenStoreBuilder: AdapterBuilder<FederationTokenStore> = (
 	config,
@@ -432,8 +447,12 @@ export const redisFederationTokenStoreBuilder: AdapterBuilder<FederationTokenSto
 		ttl?: number;
 		scanFallback?: boolean;
 		environment?: string;
-		deploymentMode?: string;
+		deploymentMode?: unknown;
 	};
+	const deploymentMode = checkDeploymentMode(
+		cfg.deploymentMode,
+		"redisFederationTokenStoreBuilder: deploymentMode",
+	);
 	if (!cfg.client) {
 		throw new Error("federationTokenStore.redis: 'client' option is required");
 	}
@@ -464,9 +483,9 @@ export const redisFederationTokenStoreBuilder: AdapterBuilder<FederationTokenSto
 	// The production guard runs once, in the store factory, with the context's
 	// logger. Nothing here can fail first: it acts only on `allow-plaintext`,
 	// which reads no key.
-	const guard: EncryptionGuardContext = {
+	const guard = {
 		environment: cfg.environment,
-		deploymentMode: cfg.deploymentMode,
+		deploymentMode,
 		...(ctx?.logger !== undefined ? { logger: ctx.logger } : {}),
 	};
 	let encryption: EncryptionConfig;
