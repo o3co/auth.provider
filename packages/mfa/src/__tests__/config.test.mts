@@ -33,7 +33,7 @@
  *   window 0-2, SHA1, SHA256 or SHA512; the issuer defaults to the host of
  *   the deployment's issuer.
  * - `mfa.transactionTtlSeconds` is held to 60-1800 seconds and
- *   `mfa.maxAttemptsPerTransaction` to 1-10 (the ADR states neither bound),
+ *   `mfa.maxAttemptsPerTransaction` to 2-10 (the ADR states neither bound),
  *   and the subject lock, `mfa.lockout`, to core's `checkMfaLockoutPolicy`
  *   under that key: obligations the MFA module refuses a boot for.
  * - The settings say whether the development sample key was accepted, so the
@@ -656,16 +656,27 @@ describe("the transaction's life and attempts, and the lock", () => {
 		}
 	});
 
-	it("holds mfa.maxAttemptsPerTransaction to 1-10, a whole number (the owner's bound; the ADR states none)", () => {
-		for (const value of [1, 5, 10]) {
+	it("holds mfa.maxAttemptsPerTransaction to 2-10, a whole number: an email-proof first binding spends one on the proof and one on the binding", () => {
+		for (const value of [2, 5, 10]) {
 			expect(
 				readSettings(valid({ maxAttemptsPerTransaction: value })).maxAttemptsPerTransaction,
 			).toBe(value);
 		}
-		for (const value of [0, 11, 100, -1, 1.5, "5", null, undefined, Number.MAX_SAFE_INTEGER + 1]) {
+		for (const value of [
+			0,
+			1,
+			11,
+			100,
+			-1,
+			1.5,
+			"5",
+			null,
+			undefined,
+			Number.MAX_SAFE_INTEGER + 1,
+		]) {
 			const message = refusal(() => readSettings(valid({ maxAttemptsPerTransaction: value })));
 			expect(message, String(value)).toContain("mfa.maxAttemptsPerTransaction");
-			expect(message, String(value)).toContain("1 to 10");
+			expect(message, String(value)).toContain("2 to 10");
 		}
 	});
 

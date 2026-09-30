@@ -1191,13 +1191,29 @@ describe("admitPrimary — after a password login", () => {
 		});
 	});
 
-	it("asks for none without a sender, for an account with no address it can read, or under never", async () => {
+	it("asks for none without a sender, for an account with no address, or under never", async () => {
 		const none = { hint: false, emailProof: "not_required" };
 		expect(await firstBinding({ mailWired: false })).toEqual(none);
-		for (const email of [undefined, "", "not an address"]) {
+		expect(await firstBinding({ mailWired: false }, { email: "not an address" })).toEqual(none);
+		for (const email of [undefined, "", null]) {
 			expect(await firstBinding({ mailWired: true }, { email }), String(email)).toEqual(none);
 		}
 		expect(await firstBinding({ mailWired: true, requireEmailProof: "never" })).toEqual(none);
+	});
+
+	it("reads the address as the login's enrollment facts say it: one it cannot read asks for a proof nobody can give under when-mail — refused, never skipped — and changes nothing under never", async () => {
+		const asked = { hint: true, emailProof: "required" };
+		for (const email of ["not an address", "Alice <alice@example.com>", "a%b@example.com", 42]) {
+			expect(await firstBinding({ mailWired: true }, { email }), String(email)).toEqual(asked);
+		}
+		const logger = silentLogger();
+		expect(
+			await firstBinding(
+				{ mailWired: true, requireEmailProof: "never", logger },
+				{ email: "Alice <alice@example.com>" },
+			),
+		).toEqual({ hint: false, emailProof: "not_required" });
+		expect(logger.warn).not.toHaveBeenCalled();
 	});
 
 	it("asks for it under always even where nobody can give it — no sender, no address — never skipped", async () => {
@@ -1208,17 +1224,20 @@ describe("admitPrimary — after a password login", () => {
 		).toEqual(asked);
 	});
 
-	it("says at warn when the proof it asks for cannot be given — no sender, or no address — naming the subject and why, never the address", async () => {
+	it("says at warn when the proof it asks for cannot be given — no sender, no address, or one it cannot read — naming the subject and why, never the address", async () => {
 		const logger = silentLogger();
 		await firstBinding({ mailWired: false, requireEmailProof: "always", logger });
 		await firstBinding(
 			{ mailWired: true, requireEmailProof: "always", logger },
-			{ email: "not an address" },
+			{ email: undefined },
 		);
+		await firstBinding({ mailWired: true, logger }, { email: "Alice <alice@example.com>" });
 		expect(logger.warn.mock.calls).toEqual([
 			[{ sub: "u-alice", reason: "no_sender" }, "mfa_email_proof_unprovable"],
 			[{ sub: "u-alice", reason: "no_address" }, "mfa_email_proof_unprovable"],
+			[{ sub: "u-alice", reason: "unreadable_address" }, "mfa_email_proof_unprovable"],
 		]);
+		expect(JSON.stringify(logger.warn.mock.calls)).not.toContain("alice@example.com");
 		const quiet = silentLogger();
 		await firstBinding({ mailWired: true, logger: quiet });
 		await firstBinding({ mailWired: false, logger: quiet });

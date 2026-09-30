@@ -339,6 +339,87 @@ describe("a proof nobody can give", () => {
 	});
 });
 
+describe("an account whose address cannot be read", () => {
+	/** The directory, alice's address as `email`. */
+	const withEmail = (email: unknown): WitnessingUserRepository => {
+		const entries = directoryEntries();
+		const alice = entries.get(ALICE.username);
+		if (alice !== undefined) alice.email = email;
+		return new WitnessingUserRepository(entries);
+	};
+
+	for (const [label, email] of [
+		["a display-name form", "Alice Example <alice@example.com>"],
+		["an object", { address: "alice@example.com" }],
+		["a zero-width space", "alice@example.com\u200B"],
+		["a routing operator", "alice%evil.example@example.com"],
+	] as const) {
+		it(`is asked for a proof nobody can give under when-mail with a sender — ${label}: 403 at the proof and at the binding, said once, never the address`, async () => {
+			const sender = createRecordingMailSender();
+			const factorStore = createMemoryMfaFactorStore();
+			const { app, logger } = await boot({
+				config: configFor("required"),
+				factorStore,
+				mailSender: sender,
+				userRepository: withEmail(email),
+			});
+			const { agent, transaction, hints } = await beginFirstBinding(app);
+
+			expect(hints.email_proof).toBe(true);
+			const challenged = await challengeProof(agent, transaction);
+			expect(challenged.status).toBe(403);
+			expect(challenged.body).toEqual(PROOF_UNAVAILABLE);
+			expect((await beginEnrollment(agent, transaction, "totp")).body).toEqual(PROOF_REQUIRED);
+			expect(sender.sent).toEqual([]);
+			expect(await factorStore.list(ALICE.id)).toEqual([]);
+			expect(
+				logger.warn.mock.calls.filter((call) => call[1] === "mfa_email_proof_unprovable"),
+			).toEqual([[{ sub: ALICE.id, reason: "unreadable_address" }, "mfa_email_proof_unprovable"]]);
+			expect(loggedText(logger)).not.toContain("alice@example.com");
+		});
+	}
+
+	it("changes nothing under never: the binding proceeds without the proof", async () => {
+		const booted = await boot({
+			config: configFor("required", { enrollment: { requireEmailProof: "never" } }),
+			mailSender: createRecordingMailSender(),
+			userRepository: withEmail("Alice Example <alice@example.com>"),
+		});
+		const { agent, transaction, hints } = await beginFirstBinding(booted.app);
+		expect(hints.email_proof).toBe(false);
+		const begun = await beginEnrollment(agent, transaction, "totp");
+		const done = await completeEnrollment(agent, transaction, totpProofOf(begun.body.secret));
+		expect(done.status).toBe(200);
+		expect(
+			booted.logger.warn.mock.calls.filter((call) => call[1] === "mfa_email_proof_unprovable"),
+		).toEqual([]);
+	});
+});
+
+describe("the fewest attempts a transaction allows", () => {
+	it("still completes an email-proof first binding: one attempt for the proof, one for the binding", async () => {
+		const sender = createRecordingMailSender();
+		const factorStore = createMemoryMfaFactorStore();
+		const { app } = await boot({
+			config: configFor("required", { maxAttemptsPerTransaction: 2 }),
+			factorStore,
+			mailSender: sender,
+			userRepository: directory(),
+		});
+		const { agent, transaction } = await beginFirstBinding(app);
+		await challengeProof(agent, transaction);
+		expect((await verify(agent, transaction, ACCOUNT_EMAIL, lastCode(sender))).status).toBe(200);
+		const begun = await beginEnrollment(agent, transaction, "totp");
+
+		const done = await completeEnrollment(agent, transaction, totpProofOf(begun.body.secret));
+
+		expect(done.status).toBe(200);
+		expect((await factorStore.list(ALICE.id)).find((r) => r.kind === "totp")?.binding).toBe(
+			"email_proof",
+		);
+	});
+});
+
 describe("D25's flag", () => {
 	it("asks for the proof whatever the setting, and is consumed once the first counting factor is written", async () => {
 		const store = createMemoryMfaTransactionStore();

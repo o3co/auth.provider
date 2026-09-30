@@ -24,49 +24,71 @@
  */
 
 import { describe, expect, it } from "vitest";
-import { firstBindingGate, type RequireEmailProof } from "#/firstBinding.mjs";
+import {
+	type FirstBindingGate,
+	firstBindingGate,
+	type MailAddressFact,
+	type RequireEmailProof,
+} from "#/firstBinding.mjs";
 
-type Row = readonly [RequireEmailProof, boolean, boolean, ReturnType<typeof firstBindingGate>];
+type Row = readonly [RequireEmailProof, boolean, MailAddressFact, FirstBindingGate];
 
-/** setting, a sender wired, an address on the account → the gate. */
+const BIND = { outcome: "bind" } as const;
+const PROVE = { outcome: "prove" } as const;
+const unprovable = (reason: "no_sender" | "no_address" | "unreadable_address") =>
+	({ outcome: "unprovable", reason }) as const;
+
+/** setting, a sender wired, the account's address as the session's facts say it → the gate. */
 const TABLE: readonly Row[] = [
-	["when-mail", true, true, "prove"],
-	["when-mail", true, false, "bind"],
-	["when-mail", false, true, "bind"],
-	["when-mail", false, false, "bind"],
-	["always", true, true, "prove"],
-	["always", true, false, "unprovable"],
-	["always", false, true, "unprovable"],
-	["always", false, false, "unprovable"],
-	["never", true, true, "bind"],
-	["never", true, false, "bind"],
-	["never", false, true, "bind"],
-	["never", false, false, "bind"],
+	["when-mail", true, "address", PROVE],
+	["when-mail", true, "none", BIND],
+	["when-mail", true, "unreadable", unprovable("unreadable_address")],
+	["when-mail", false, "address", BIND],
+	["when-mail", false, "none", BIND],
+	["when-mail", false, "unreadable", BIND],
+	["always", true, "address", PROVE],
+	["always", true, "none", unprovable("no_address")],
+	["always", true, "unreadable", unprovable("unreadable_address")],
+	["always", false, "address", unprovable("no_sender")],
+	["always", false, "none", unprovable("no_sender")],
+	["always", false, "unreadable", unprovable("no_sender")],
+	["never", true, "address", BIND],
+	["never", true, "none", BIND],
+	["never", true, "unreadable", BIND],
+	["never", false, "address", BIND],
+	["never", false, "none", BIND],
+	["never", false, "unreadable", BIND],
 ];
 
 describe("firstBindingGate", () => {
 	it.each(TABLE)(
-		"%s, a sender wired: %s, an address: %s → %s",
-		(requireEmailProof, mailWired, hasAddress, expected) => {
+		"%s, a sender wired: %s, the address %s → %o",
+		(requireEmailProof, mailWired, mailAddress, expected) => {
 			expect(
 				firstBindingGate({
 					requireEmailProof,
 					mailWired,
-					hasAddress,
+					mailAddress,
 					requiredAtNextBinding: false,
 				}),
-			).toBe(expected);
+			).toEqual(expected);
 		},
 	);
 
 	it("asks for the proof whatever the setting while D25's flag stands, and never skips one nobody can give", () => {
 		for (const requireEmailProof of ["when-mail", "always", "never"] as const) {
-			const gate = (mailWired: boolean, hasAddress: boolean) =>
-				firstBindingGate({ requireEmailProof, mailWired, hasAddress, requiredAtNextBinding: true });
-			expect(gate(true, true), requireEmailProof).toBe("prove");
-			expect(gate(true, false), requireEmailProof).toBe("unprovable");
-			expect(gate(false, true), requireEmailProof).toBe("unprovable");
-			expect(gate(false, false), requireEmailProof).toBe("unprovable");
+			const gate = (mailWired: boolean, mailAddress: MailAddressFact) =>
+				firstBindingGate({
+					requireEmailProof,
+					mailWired,
+					mailAddress,
+					requiredAtNextBinding: true,
+				});
+			expect(gate(true, "address"), requireEmailProof).toEqual(PROVE);
+			expect(gate(true, "none"), requireEmailProof).toEqual(unprovable("no_address"));
+			expect(gate(true, "unreadable"), requireEmailProof).toEqual(unprovable("unreadable_address"));
+			expect(gate(false, "address"), requireEmailProof).toEqual(unprovable("no_sender"));
+			expect(gate(false, "unreadable"), requireEmailProof).toEqual(unprovable("no_sender"));
 		}
 	});
 });
