@@ -31,6 +31,7 @@ import {
 	type AuditSink,
 	admitPrimary,
 	BootError,
+	type CsrfTokenSigner,
 	checkDeploymentMode,
 	checkResolver,
 	consoleLogger,
@@ -52,7 +53,6 @@ import {
 import type { NextFunction, Request, RequestHandler, Response, Router } from "express";
 import { answerInterruption } from "../answer-interruption.mjs";
 import {
-	type CsrfProtection,
 	createCsrfGuard,
 	createCsrfIssueHandler,
 	createCsrfProtectionFromConfig,
@@ -95,7 +95,7 @@ export const createRouter = (
 		auditSink,
 		sessionTtlMs = DEFAULT_SESSION_TTL_MS,
 		logger = consoleLogger,
-		csrf,
+		csrfTokenSigner,
 		requirements,
 	}: {
 		userRepository: UserRepository;
@@ -140,12 +140,13 @@ export const createRouter = (
 		sessionTtlMs?: number;
 		logger?: Logger;
 		/**
-		 * CSRF mechanism for the state-changing routes; built from the `session`
-		 * config slice when omitted. Tokens are signed, not stored, so instances
-		 * built from one secret accept each other's; inject one so a composition
-		 * root can issue tokens from its own pages.
+		 * What the CSRF token of the state-changing routes is signed and checked
+		 * with: the `csrfTokenSigner` slot's signer. Tokens are signed, not
+		 * stored, so a guard over the same signer (the `csrfGuard` slot) accepts
+		 * the tokens these routes issue, and these routes accept the tokens it
+		 * issues.
 		 */
-		csrf?: CsrfProtection;
+		csrfTokenSigner: CsrfTokenSigner;
 		/**
 		 * The registered session requirements, asked through `admitPrimary`
 		 * before a password login writes anything. Required: a missing resolver,
@@ -155,6 +156,11 @@ export const createRouter = (
 	},
 ): Router => {
 	checkResolver(requirements, "session routes");
+	if (csrfTokenSigner === undefined) {
+		throw new Error(
+			"session routes: csrfTokenSigner is required: pass the csrfTokenSigner slot's signer, or createSessionCsrfTokenSigner(secret)",
+		);
+	}
 	const replicas = checkDeploymentMode(deploymentMode, "session routes: deploymentMode");
 	const router = express.Router();
 
@@ -178,7 +184,7 @@ export const createRouter = (
 	// `session.csrf.trustedOrigins`, not `cors.allowedOrigins`; the acceptance
 	// rule is in `../csrf.mjs`.
 	const sessionSlice = config.session as unknown as SessionCsrfConfigSlice;
-	const csrfProtection = csrf ?? createCsrfProtectionFromConfig(sessionSlice);
+	const csrfProtection = createCsrfProtectionFromConfig(sessionSlice, { signer: csrfTokenSigner });
 	const verifyCsrf = createCsrfGuard({
 		csrf: csrfProtection,
 		trustedOrigins: sessionSlice.csrf?.trustedOrigins ?? [],

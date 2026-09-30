@@ -24,7 +24,7 @@ import type {
 	UserRepository,
 	UserSessionStore,
 } from "@o3co/auth-provider-core";
-import { resolverForTests } from "@o3co/auth-provider-core/testing";
+import { createTestCsrfTokenSigner, resolverForTests } from "@o3co/auth-provider-core/testing";
 import express from "express";
 import request from "supertest";
 import { describe, expect, it, vi } from "vitest";
@@ -38,7 +38,6 @@ const stubConfig: AppConfig = {
 		login: { windowMs: 60_000, limit: 100 },
 	},
 	session: {
-		secret: "test-session-secret",
 		name: "auth.session",
 		secure: false,
 		sameSite: "lax",
@@ -60,14 +59,15 @@ const configWith = (session: {
 	}) as unknown as AppConfig;
 
 /**
- * A double-submit pair minted from the same secret and cookie name the router
- * derives from `stubConfig`. The state-changing session routes reject a
- * request carrying neither an origin signal nor a token, and `supertest`
- * sends no `Origin` — which is exactly the header-less API client the token
- * arm exists to keep working.
+ * A double-submit pair minted with the signer the router is given and the
+ * cookie name it derives from `stubConfig`. The state-changing session routes
+ * reject a request carrying neither an origin signal nor a token, and
+ * `supertest` sends no `Origin` — which is exactly the header-less API client
+ * the token arm exists to keep working.
  */
+const SIGNER = createTestCsrfTokenSigner();
 const csrf = createCsrfProtection({
-	secret: "test-session-secret",
+	signer: SIGNER,
 	cookieName: "auth.session.csrf",
 });
 const csrfToken = csrf.mint();
@@ -228,6 +228,7 @@ function buildApp(
 	});
 
 	const router = createRouter(express, {
+		csrfTokenSigner: SIGNER,
 		userRepository,
 		config,
 		deploymentMode,

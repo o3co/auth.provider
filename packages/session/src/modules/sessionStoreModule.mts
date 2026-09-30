@@ -19,6 +19,7 @@ import {
 	type ReplicaSafetyDeclaration,
 } from "@o3co/auth-provider-core";
 import session from "express-session";
+import { createSessionCsrfTokenSigner } from "../csrf-token-signer.mjs";
 import { guardCookieSession } from "../internal/cookieSession.mjs";
 import { assertHostPrefixKept, sessionCookiePolicyFrom } from "../session-cookie-policy.mjs";
 import { createSessionStoreFactory, registerBuiltinSessionStores } from "../store/factory.mjs";
@@ -68,13 +69,18 @@ function buildSessionStoreModule(replicaSafety: ReplicaSafetyDeclaration | undef
 		// fall back to consoleLogger when the composition wires no logger slot.
 		optional: ["lifecycleRegistrar", "readinessRegistrar", "logger"],
 		...(replicaSafety === undefined ? {} : { replicaSafety }),
-		// The session cookie's attributes, for a module that sets a cookie of
-		// its own beside the session's or sizes what must outlive a session:
-		// this module owns the cookie, and the others require the slot instead
-		// of reading `session.*`. They are the attributes express-session is
-		// given below; the signing secret is not among them.
 		provides: {
+			// The session cookie's attributes, for a module that sets a cookie of
+			// its own beside the session's or sizes what must outlive a session:
+			// this module owns the cookie, and the others require the slot instead
+			// of reading `session.*`. They are the attributes express-session is
+			// given below; the signing secret is not among them.
 			sessionCookiePolicy: (deps) => sessionCookiePolicyFrom((deps.config as AppConfig).session),
+			// The CSRF token's signature, under a key derived from the secret this
+			// module owns: the session module's guard and routes sign through it,
+			// and neither the secret nor the key leaves the signer.
+			csrfTokenSigner: (deps) =>
+				createSessionCsrfTokenSigner((deps.config as AppConfig).session.secret),
 		},
 		contributes: {
 			routes: [

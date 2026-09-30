@@ -35,6 +35,7 @@ import {
 } from "@o3co/auth-provider-core";
 import {
 	createTestApp,
+	createTestCsrfTokenSigner,
 	loginEntryContract,
 	makeValidAppConfig,
 } from "@o3co/auth-provider-core/testing";
@@ -155,6 +156,8 @@ const stores = [
 		async removeFederation() {},
 		async removeBySid() {},
 	} as unknown as SessionFederationIndex),
+	// Where the session store's module is loaded, it provides this.
+	providing("test:csrf-token-signer", "csrfTokenSigner", createTestCsrfTokenSigner()),
 ];
 
 /** A module that requires the entry and keeps what it was handed. */

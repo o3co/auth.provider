@@ -84,12 +84,7 @@ import {
 	redisMfaFactorStoreModule,
 	redisMfaTransactionStoreModule,
 } from "@o3co/auth-provider-redis";
-import {
-	answerInterruption,
-	createCsrfProtectionFromConfig,
-	establishSession,
-	type SessionCsrfConfigSlice,
-} from "@o3co/auth-provider-session";
+import { answerInterruption, establishSession } from "@o3co/auth-provider-session";
 import {
 	type ComposeOptions,
 	type Composition,
@@ -364,11 +359,11 @@ function requirementModules(
 			},
 		};
 		return defineModule<
-			"config" | "userSessionStore" | "sessionRequirementResolver",
+			"config" | "userSessionStore" | "sessionRequirementResolver" | "csrfGuard",
 			"subjectSessionIndex" | "logger"
 		>({
 			name: spec.module,
-			requires: ["config", "userSessionStore", "sessionRequirementResolver"],
+			requires: ["config", "userSessionStore", "sessionRequirementResolver", "csrfGuard"],
 			optional: ["subjectSessionIndex", "logger"],
 			absencePolicies: { subjectSessionIndex: SUBJECT_REVOCATION_ABSENCE_POLICY },
 			contributes: {
@@ -397,12 +392,9 @@ function requirementModules(
 					(deps) => {
 						const config = deps.config as AppConfig;
 						const logger = deps.logger ?? consoleLogger;
-						// The session's own CSRF mechanism, from the same config: the
-						// token is signed, not stored, so this one's and the login
-						// router's accept each other's.
-						const csrf = createCsrfProtectionFromConfig(
-							config.session as unknown as SessionCsrfConfigSlice,
-						);
+						// The deployment's CSRF guard: an interruption's fresh token is
+						// the one the login router and every guarded route accept.
+						const csrf = deps.csrfGuard;
 						const admissionDeps: AdmissionDeps = {
 							userSessionStore: deps.userSessionStore,
 							subjectRevocation: undefined,

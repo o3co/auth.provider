@@ -29,6 +29,7 @@ import {
 } from "@o3co/auth-provider-core";
 import {
 	createTestApp,
+	createTestCsrfTokenSigner,
 	makeValidAppConfig,
 	resolverForTests,
 } from "@o3co/auth-provider-core/testing";
@@ -102,6 +103,12 @@ const sessionFederationIndexModule = defineModule({
 	provides: { sessionFederationIndex: () => makeSessionFederationIndex() },
 });
 
+/** The CSRF token's signer, which the session store's module provides where it is loaded. */
+const csrfTokenSignerModule = defineModule({
+	name: "test:csrf-token-signer",
+	provides: { csrfTokenSigner: () => createTestCsrfTokenSigner() },
+});
+
 /**
  * Stubs for three oauth-package slots that no session-package module
  * provides. The boot-time `federation-stores-incomplete` validator requires
@@ -157,6 +164,7 @@ const baseTestModules = [
 	userSessionStoreModule,
 	federationTokenStoreModule,
 	sessionFederationIndexModule,
+	csrfTokenSignerModule,
 	// Oauth-package stubs for the `federation-stores-incomplete` validator (above).
 	sessionRPRegistryModule,
 	sessionFamilyIndexModule,
@@ -182,6 +190,7 @@ describe("sessionModule (static manifest)", () => {
 				"userSessionStore",
 				"federationTokenStore",
 				"sessionFederationIndex",
+				"csrfTokenSigner",
 				"federationProviders",
 				"federationRedirectPolicyResolver",
 			]),
@@ -447,10 +456,7 @@ describe("sessionModule — the password login is a consumer of session admissio
 	 */
 	async function passwordLogin(requirements: readonly SessionRequirement[]) {
 		const base = makeValidAppConfig();
-		const config = {
-			...base,
-			session: { ...base.session, secret: "module-test-secret" },
-		} as unknown as AppConfig;
+		const config = { ...base } as unknown as AppConfig;
 		const factory = sessionModule.contributes?.routes?.[0] as unknown as (deps: unknown) => {
 			id: string;
 			handler: express.RequestHandler;
@@ -465,6 +471,7 @@ describe("sessionModule — the password login is a consumer of session admissio
 			userSessionStore: makeUserSessionStore(),
 			federationTokenStore: makeFederationTokenStore(),
 			sessionFederationIndex: makeSessionFederationIndex(),
+			csrfTokenSigner: createTestCsrfTokenSigner(),
 			sessionRequirementResolver: resolverForTests(requirements),
 		});
 		expect(contribution.id).toBe("session-routes");
@@ -547,6 +554,7 @@ describe("sessionModule — the login throttle reads the deploymentMode slot", (
 		return factory({
 			config: { ...base, deployment },
 			deploymentMode,
+			csrfTokenSigner: createTestCsrfTokenSigner(),
 			logger,
 			userRepository: fakeUserRepository,
 			userSessionStore: makeUserSessionStore(),
