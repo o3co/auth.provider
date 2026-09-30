@@ -24,6 +24,8 @@
 
 import {
 	type AuditEvent,
+	BootError,
+	createApp,
 	createInMemorySubjectRevocation,
 	createInMemorySubjectSessionIndex,
 	createMemoryFederationGrantStore,
@@ -33,8 +35,11 @@ import {
 	type SubjectRevocationService,
 } from "@o3co/auth-provider-core";
 import {
+	CORE_RELOCATIONS,
 	createTestOAuthTokenSettings,
 	createTestSessionCookiePolicy,
+	makeValidCoreConfig,
+	renamedVariableCaptures,
 } from "@o3co/auth-provider-core/testing";
 import { describe, expect, it, vi } from "vitest";
 import { subjectRevocationServiceModule } from "../subjectRevocationService.mjs";
@@ -320,10 +325,40 @@ describe("subjectRevocationServiceModule", () => {
 			]);
 		});
 
-		it("refuses to be built when the composition holds no sessionCookiePolicy, naming the slot", () => {
+		it("refuses to be built when it is handed no sessionCookiePolicy, naming the slot", () => {
 			expect(() => build({ sessionCookiePolicy: undefined })).toThrow(
 				"no sessionCookiePolicy was handed",
 			);
+		});
+
+		it("refuses a composition that holds no sessionCookiePolicy at planning, naming the module and the slot", async () => {
+			const err = await createApp({
+				modules: [subjectRevocationServiceModule],
+				bootstrapComponents: {
+					config: {
+						...makeValidCoreConfig(),
+						audit: { sink: { type: "none" } },
+						"renamed-variables": renamedVariableCaptures({
+							modules: [subjectRevocationServiceModule],
+							core: CORE_RELOCATIONS,
+							env: {},
+						}),
+					},
+					pathResolver: (s: string) => s,
+					...cascadeStores(),
+				} as never,
+			}).then(
+				async (handle) => {
+					await handle.dispose();
+					return expect.fail("boot should have been refused");
+				},
+				(caught: unknown) => caught as BootError,
+			);
+
+			expect(err).toBeInstanceOf(BootError);
+			expect(err.reason).toBe("missing-required-component");
+			expect(err.message).toContain("sessionCookiePolicy");
+			expect(err.message).toContain("subject-revocation-service");
 		});
 
 		it("sizes it from the session lifetime of the sessionCookiePolicy the composition holds", async () => {
@@ -385,10 +420,10 @@ describe("subjectRevocationServiceModule", () => {
 			expect(kept[0]).toBeGreaterThan(30 * 86_400_000);
 		});
 
-		it("lists both slots as optional", () => {
-			expect(subjectRevocationServiceModule.optional).toEqual(
-				expect.arrayContaining(["oauthTokenSettings", "sessionCookiePolicy"]),
-			);
+		it("requires the session store's slot, and lists the oauth module's as optional", () => {
+			expect(subjectRevocationServiceModule.requires).toContain("sessionCookiePolicy");
+			expect(subjectRevocationServiceModule.optional).toContain("oauthTokenSettings");
+			expect(subjectRevocationServiceModule.optional).not.toContain("sessionCookiePolicy");
 		});
 	});
 
