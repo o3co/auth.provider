@@ -37,6 +37,8 @@
 
 import {
 	getBoundMfaTransaction,
+	isConsumedMfaTransaction,
+	isMfaFactorUpdateWritten,
 	MFA_AMR,
 	type MfaEnrolledFactor,
 	type MfaFactor,
@@ -50,7 +52,9 @@ import {
 	type MfaTransactionStore,
 	type MfaVerification,
 	type PrimaryContinuation,
+	readMfaAttemptReservation,
 } from "@o3co/auth-provider-core";
+import type { MfaRequirementMode } from "./requirement.mjs";
 import type { MfaSealing } from "./sealing.mjs";
 
 /** A transaction id as the login makes one: 32 bytes, base64url. */
@@ -58,6 +62,15 @@ const TRANSACTION_ID = /^[A-Za-z0-9_-]{43}$/;
 
 /** How many times a verification writes a factor whose compare-and-set it keeps losing. */
 const ADVANCE_ROUNDS = 3;
+
+/** Why a store's answer outside its port's promise is an outage: it is never read as a verdict. */
+const OUTSIDE_CONTRACT = new TypeError("the store answered outside its port's contract");
+
+/** Whether `amr`, what a factor's `amrFor` answered, names at least one value, and only values the factor declares. */
+const declaresEach = (factor: MfaFactor, amr: unknown): amr is readonly string[] =>
+	Array.isArray(amr) &&
+	amr.length > 0 &&
+	amr.every((value) => typeof value === "string" && factor.amrValues.includes(value));
 
 /** The MFA store that could not answer. */
 export type MfaStoreName = "mfa_transaction" | "mfa_factor";
@@ -148,6 +161,8 @@ export type MfaVerifyOutcome =
 	  } & MfaCeremonySubject)
 	/** The proof was right, and another verification consumed the transaction first. */
 	| { readonly outcome: "spent" }
+	/** The proof was right, but it does not count and the subject holds no counting factor it can use (F3). */
+	| ({ readonly outcome: "enrollment_required" } & MfaCeremonySubject)
 	| ({
 			readonly outcome: "verified";
 			/** What the login persisted, as the store answered it at consumption. */
@@ -178,6 +193,8 @@ export interface MfaCoordinatorOptions {
 	readonly sealing: MfaSealing;
 	/** `mfa.maxAttemptsPerTransaction`. */
 	readonly maxAttemptsPerTransaction: number;
+	/** `mfa.mode`: under `required` a factor that does not count completes no login for a subject with no counting factor it can use. */
+	readonly mode: MfaRequirementMode;
 	/** The clock, in epoch milliseconds. Defaults to `Date.now`. */
 	readonly now?: () => number;
 }
@@ -202,7 +219,7 @@ const byAge = (a: MfaFactorRecord, b: MfaFactorRecord): number =>
 
 /** The coordinator over `options` (see this file's header). */
 export function createMfaCoordinator(options: MfaCoordinatorOptions): MfaCoordinator {
-	const { factors, factorStore, transactions, sealing, maxAttemptsPerTransaction } = options;
+	const { factors, factorStore, transactions, sealing, maxAttemptsPerTransaction, mode } = options;
 	const now = options.now ?? (() => Date.now());
 
 	/** The login transaction `call` names, bound to its binding; `null` when there is none to use. */
@@ -242,6 +259,15 @@ export function createMfaCoordinator(options: MfaCoordinatorOptions): MfaCoordin
 		const factor = record === undefined ? undefined : factors.get(record.kind);
 		return record === undefined || factor === undefined ? undefined : { record, factor };
 	};
+
+	/** Whether `subject` holds a factor that counts, of an installed kind, whose data opens. */
+	const holdsUsableCounting = (subject: string, records: readonly MfaFactorRecord[]): boolean =>
+		records.some(
+			(candidate) =>
+				factors.get(candidate.kind)?.counting === true &&
+				sealing.openFactorData({ subject, id: candidate.id, kind: candidate.kind }, candidate.data)
+					.state === "ok",
+		);
 
 	/**
 	 * The named record and every record of its kind, opened for `subject`: the
@@ -480,11 +506,15 @@ export function createMfaCoordinator(options: MfaCoordinatorOptions): MfaCoordin
 			let opened = openKind(tx.subject, record, records);
 			if ("outcome" in opened) return opened;
 
-			let reservation: { readonly ok: boolean; readonly attempts: number };
+			let answered: unknown;
 			try {
-				reservation = await transactions.reserveAttempt(tx.id, maxAttemptsPerTransaction);
+				answered = await transactions.reserveAttempt(tx.id, maxAttemptsPerTransaction);
 			} catch (cause) {
 				return outage("mfa_transaction", "reserveAttempt", cause);
+			}
+			const reservation = readMfaAttemptReservation(answered, maxAttemptsPerTransaction);
+			if (reservation === undefined) {
+				return outage("mfa_transaction", "reserveAttempt", OUTSIDE_CONTRACT);
 			}
 			if (!reservation.ok) {
 				// Past the limit the store deleted the transaction; with none reserved, it was gone.
@@ -495,9 +525,16 @@ export function createMfaCoordinator(options: MfaCoordinatorOptions): MfaCoordin
 			const pending = await challengeState(tx, factor, record, nowMs);
 			if ("outcome" in pending) return pending;
 
-			/** The proof checked against the factor as `opened` holds it. */
+			/**
+			 * The proof checked against the factor as `opened` holds it, and what
+			 * the verification adds: non-empty, and only what the factor declares.
+			 */
 			const check = async (): Promise<
-				| { readonly verified: MfaEnrolledFactor; readonly next: MfaEnrolledFactor["data"] }
+				| {
+						readonly verified: MfaEnrolledFactor;
+						readonly next: MfaEnrolledFactor["data"];
+						readonly amr: readonly string[];
+				  }
 				| { readonly reason: MfaRefusalReason }
 				| MfaFactorUnreadable
 			> => {
@@ -526,12 +563,30 @@ export function createMfaCoordinator(options: MfaCoordinatorOptions): MfaCoordin
 						new TypeError("the factor verified a factor id the subject does not hold"),
 					);
 				}
-				return { verified, next: result.next ?? verified.data };
+				const next = result.next ?? verified.data;
+				let amr: unknown;
+				try {
+					amr = factor.amrFor(next);
+				} catch (cause) {
+					return unreadable(cause);
+				}
+				if (!declaresEach(factor, amr)) {
+					return unreadable(
+						new TypeError("the factor's amrFor answered values it does not declare"),
+					);
+				}
+				return { verified, next, amr };
 			};
 
 			let checked = await check();
 			if ("outcome" in checked) return checked;
 			if ("reason" in checked) return refused(checked.reason, attemptsRemaining);
+
+			// F3: under `required`, a factor that does not count completes no login
+			// for a subject left with no counting factor it can use.
+			if (mode === "required" && !factor.counting && !holdsUsableCounting(tx.subject, records)) {
+				return { outcome: "enrollment_required", ...about };
+			}
 
 			// Consumed before the factor moves on: a lost race spends the
 			// transaction, never the factor's state.
@@ -542,6 +597,9 @@ export function createMfaCoordinator(options: MfaCoordinatorOptions): MfaCoordin
 				return outage("mfa_transaction", "consume", cause);
 			}
 			if (consumed === null) return { outcome: "spent" };
+			if (!isConsumedMfaTransaction(consumed, tx)) {
+				return outage("mfa_transaction", "consume", OUTSIDE_CONTRACT);
+			}
 
 			for (let round = 1; ; round++) {
 				const { verified, next } = checked;
@@ -557,7 +615,7 @@ export function createMfaCoordinator(options: MfaCoordinatorOptions): MfaCoordin
 				} catch (cause) {
 					return unreadable(cause);
 				}
-				let written: MfaFactorRecord | null;
+				let written: unknown;
 				try {
 					written = await factorStore.update(tx.subject, target.id, target.version, {
 						data,
@@ -567,7 +625,19 @@ export function createMfaCoordinator(options: MfaCoordinatorOptions): MfaCoordin
 				} catch (cause) {
 					return outage("mfa_factor", "update", cause);
 				}
-				if (written !== null) break;
+				if (written !== null) {
+					if (
+						!isMfaFactorUpdateWritten(written, {
+							subject: tx.subject,
+							id: target.id,
+							expectedVersion: target.version,
+							next: { data },
+						})
+					) {
+						return outage("mfa_factor", "update", OUTSIDE_CONTRACT);
+					}
+					break;
+				}
 				if (round === ADVANCE_ROUNDS) {
 					return outage(
 						"mfa_factor",
@@ -588,17 +658,11 @@ export function createMfaCoordinator(options: MfaCoordinatorOptions): MfaCoordin
 				if ("reason" in checked) return refused(checked.reason, 0);
 			}
 
-			let amr: readonly string[];
-			try {
-				amr = factor.amrFor(checked.next);
-			} catch (cause) {
-				return unreadable(cause);
-			}
 			return {
 				outcome: "verified",
 				continuation: consumed.continuation,
 				adds: {
-					amr: [...new Set([...amr, ...(factor.addsMfa ? [MFA_AMR] : [])])],
+					amr: [...new Set([...checked.amr, ...(factor.addsMfa ? [MFA_AMR] : [])])],
 					mfaAt: new Date(nowMs),
 				},
 				...about,

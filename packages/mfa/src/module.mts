@@ -405,6 +405,7 @@ export function mfaModule(options: MfaModuleOptions = {}): Module {
 								transactions: deps.mfaTransactionStore,
 								sealing,
 								maxAttemptsPerTransaction: settings.maxAttemptsPerTransaction,
+								mode,
 							}),
 							admission: {
 								userSessionStore: deps.userSessionStore,

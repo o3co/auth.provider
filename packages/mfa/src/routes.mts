@@ -64,6 +64,10 @@ const SESSION_STORE_UNAVAILABLE = errorEnvelope(
 	"Session store unavailable",
 );
 const LOGIN_REQUIRED = errorEnvelope("login_required", "Log in again");
+const ENROLLMENT_REQUIRED = errorEnvelope(
+	"mfa_enrollment_required",
+	"A second factor that counts must be enrolled",
+);
 
 /** A refused proof, with the attempts the transaction has left. */
 const notAccepted = (attemptsRemaining: number) => ({
@@ -340,6 +344,9 @@ export function createMfaRouter(options: MfaRoutesOptions): Router {
 					return;
 				case "unknown_factor":
 					res.status(400).json(UNKNOWN_FACTOR);
+					return;
+				case "enrollment_required":
+					res.status(403).json(ENROLLMENT_REQUIRED);
 					return;
 				case "unavailable":
 				case "unreadable":

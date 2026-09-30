@@ -80,6 +80,39 @@ export interface MfaFactorRecordUpdate {
 	readonly lastUsedAt: Date | undefined;
 }
 
+/** What was asked of `update`: the record, the version expected, and the data written. */
+export interface MfaFactorUpdateRequest {
+	readonly subject: string;
+	readonly id: string;
+	readonly expectedVersion: number;
+	readonly next: Pick<MfaFactorRecordUpdate, "data">;
+}
+
+/**
+ * Whether `written`, what `update` answered other than `null`, is the record
+ * as the update wrote it: the same subject and id, the version one past the
+ * one expected, and the data written. The caller answers anything else —
+ * `undefined` among it — as the store's outage, never as a write that
+ * happened. Each field is read once.
+ */
+export function isMfaFactorUpdateWritten(
+	written: unknown,
+	request: MfaFactorUpdateRequest,
+): written is MfaFactorRecord {
+	try {
+		if (typeof written !== "object" || written === null) return false;
+		const { subject, id, version, data } = written as Readonly<Record<string, unknown>>;
+		return (
+			subject === request.subject &&
+			id === request.id &&
+			version === request.expectedVersion + 1 &&
+			data === request.next.data
+		);
+	} catch {
+		return false;
+	}
+}
+
 /**
  * Where a subject's second factors are kept.
  *
