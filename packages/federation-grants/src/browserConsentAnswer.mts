@@ -15,10 +15,10 @@
  */
 
 /**
- * `POST /consent`: the answer, held to the deployment's `csrfGuard` before the
- * session binding, the challenge or the intent store is read, re-read through the
- * pending consent, and recorded under the exact binding. A denial returns the
- * browser to the client; a refused or malformed answer spends no consent.
+ * `POST /consent`: the answer, held to the deployment's `csrfGuard` first, then
+ * re-read through the pending consent and recorded under its exact binding. A
+ * denial returns the browser to the client and an acceptance goes upstream; a
+ * refused or malformed answer spends no consent.
  */
 
 import type { CsrfVerdict, FederationGrantIntentStore } from "@o3co/auth-provider-core";
@@ -26,6 +26,7 @@ import type { RequestHandler } from "express";
 import { clientReturn, jsonError, NO_PENDING } from "./browserAnswers.mjs";
 import type { BrowserFlow } from "./browserFlow.mjs";
 import { pendingFor } from "./browserPendingConsent.mjs";
+import { redirectUpstream } from "./browserUpstreamRedirect.mjs";
 import { requestIdOf } from "./requestId.mjs";
 
 /**
@@ -62,7 +63,7 @@ function csrfRefusal(verdict: unknown): CsrfRefusalReason | null {
 
 /** `POST /consent`: the user's answer. */
 export function createConsentAnswerHandler(flow: BrowserFlow): RequestHandler {
-	const { options, now, randomId, log, failed } = flow;
+	const { options, now, log, failed } = flow;
 	return async (req, res) => {
 		try {
 			// Asked before the route reads the session binding, the challenge or
@@ -161,52 +162,7 @@ export function createConsentAnswerHandler(flow: BrowserFlow): RequestHandler {
 				return;
 			}
 
-			const authorizer = options.authorizerFor(intent.federation);
-			if (authorizer === undefined) {
-				// Boot refuses a connection whose federation lacks the
-				// capability; reaching here is a composition fault, and nothing
-				// has been spent.
-				consentUnavailable("upstream_unavailable", { step: "authorizer" });
-				return;
-			}
-			const state = randomId();
-			const nonce = randomId();
-			const codeVerifier = randomId();
-			let upstream: URL;
-			try {
-				// Built BEFORE the answer is spent: a configuration fault in the
-				// URL must not consume the user's consent.
-				upstream = authorizer.buildDelegatedAuthorizationUrl({
-					redirectUri: intent.callbackUri,
-					state,
-					codeVerifier,
-					nonce,
-					scopes: intent.scopes,
-					...(intent.resource === undefined ? {} : { resource: intent.resource }),
-					authorizationParams: intent.authorizationParams,
-				});
-			} catch (error) {
-				consentUnavailable("upstream_unavailable", { step: "authorization_url" }, error);
-				return;
-			}
-			const answered = await record({ decision: "accept", state, codeVerifier, nonce });
-			if (answered === null) return;
-			if (answered.outcome === "refused") {
-				// A fault on this side, and nothing was thrown: the store names it.
-				consentUnavailable("storage", {
-					store: "federation_grant_intent",
-					step: "answer_consent",
-					refusal: answered.reason,
-				});
-				return;
-			}
-			if (answered.outcome !== "accepted") {
-				jsonError(res, 400, "invalid_request", NO_PENDING);
-				return;
-			}
-			// No transaction-store outage can reach this line: the redirect
-			// upstream happens only once the transaction exists.
-			res.redirect(303, upstream.href);
+			await redirectUpstream(flow, res, intent, record, consentUnavailable);
 		} catch (error) {
 			log.unexpected("consent", { method: req.method, correlationId: requestIdOf(res) }, error);
 			jsonError(res, 500, "server_error", "unexpected_error");
