@@ -66,7 +66,8 @@ const capable = (
 		keyPrefix: `${prefix}fi:`,
 		endedKeyPrefix: `${prefix}fi-ended:`,
 	});
-	if (!supportsSessionEnd(idx)) throw new Error("the Redis index does not claim SupportsSessionEnd");
+	if (!supportsSessionEnd(idx))
+		throw new Error("the Redis index does not claim SupportsSessionEnd");
 	return idx;
 };
 
@@ -150,10 +151,17 @@ describe("SessionFamilyIndex concurrency", () => {
 
 	it("500 interleaved add/end pairs over two connections: in every pair the end lists the family or the add answers ended", async () => {
 		// One connection stands for the replica that serves the logout, the
-		// other for the one that serves the grant; each pair has a sid of its
-		// own, and which side starts first alternates.
+		// other for the one that serves the grant. Each pair has a sid of its
+		// own; which side starts first alternates, and the other starts after a
+		// varying number of event-loop turns, so that pairs land in different
+		// orders: the add wholly before the end, wholly after it, or between the
+		// end's mark and its listing.
 		const logoutConnection = new Redis(at);
 		const grantConnection = new Redis(at);
+		const turns = (n: number): Promise<void> =>
+			n === 0
+				? Promise.resolve()
+				: new Promise((resolve) => setImmediate(() => resolve(turns(n - 1))));
 		try {
 			const logout = capable(
 				makeIoredisClients(logoutConnection).sessionFamilyIndexClient,
@@ -164,23 +172,28 @@ describe("SessionFamilyIndex concurrency", () => {
 				"t16:pairs:",
 			);
 			const expiresAt = new Date(Date.now() + 60_000);
-			const pairs = await Promise.all(
-				Array.from({ length: 500 }, async (_, i) => {
-					const sid = `sid-pair-${i}`;
-					const familyId = `fam-${i}`;
-					if (i % 2 === 0) {
-						const ending = logout.endSession(sid, expiresAt);
-						const answer = await grant.addFamilyIdUnlessEnded(sid, familyId, expiresAt);
-						return { familyId, listed: await ending, answer };
-					}
-					const adding = grant.addFamilyIdUnlessEnded(sid, familyId, expiresAt);
-					const listed = await logout.endSession(sid, expiresAt);
-					return { familyId, listed, answer: await adding };
-				}),
-			);
-			const neither = pairs.filter(
-				(pair) => !pair.listed.includes(pair.familyId) && pair.answer !== "ended",
-			);
+			const pair = async (i: number) => {
+				const sid = `sid-pair-${i}`;
+				const familyId = `fam-${i}`;
+				const lag = turns(Math.floor(i / 2) % 12);
+				if (i % 2 === 0) {
+					const ending = logout.endSession(sid, expiresAt);
+					const adding = lag.then(() => grant.addFamilyIdUnlessEnded(sid, familyId, expiresAt));
+					const [listed, answer] = await Promise.all([ending, adding]);
+					return { familyId, listed, answer };
+				}
+				const adding = grant.addFamilyIdUnlessEnded(sid, familyId, expiresAt);
+				const ending = lag.then(() => logout.endSession(sid, expiresAt));
+				const [answer, listed] = await Promise.all([adding, ending]);
+				return { familyId, listed, answer };
+			};
+			const pairs = [];
+			for (let wave = 0; wave < 20; wave += 1) {
+				pairs.push(
+					...(await Promise.all(Array.from({ length: 25 }, (_, j) => pair(wave * 25 + j)))),
+				);
+			}
+			const neither = pairs.filter((p) => !p.listed.includes(p.familyId) && p.answer !== "ended");
 			expect(neither).toEqual([]);
 		} finally {
 			logoutConnection.disconnect();

@@ -22,6 +22,7 @@
 
 import type { Redis } from "ioredis";
 import type {
+	SessionFamilyIndexClient,
 	SessionRPRegistryClient,
 	SessionRPRegistryMultiClient,
 	SessionSidSortedSetClient,
@@ -158,6 +159,19 @@ export function makeIoredisSessionSidSortedSetClient(io: Redis): SessionSidSorte
 		zRem: (k, m) => io.zrem(k, m) as Promise<number>,
 	};
 	return sortedSetClient;
+}
+
+/** The sorted set of `makeIoredisSessionSidSortedSetClient`, and the session's "ended" mark beside it. */
+export function makeIoredisSessionFamilyIndexClient(io: Redis): SessionFamilyIndexClient {
+	return {
+		...makeIoredisSessionSidSortedSetClient(io),
+		async writeEndMark(key, msTimestamp) {
+			await io.set(key, "1", "PXAT", msTimestamp);
+		},
+		async hasEndMark(key) {
+			return (await io.exists(key)) === 1;
+		},
+	};
 }
 
 export function makeIoredisSubjectSessionIndexClient(io: Redis): SubjectSessionIndexClient {

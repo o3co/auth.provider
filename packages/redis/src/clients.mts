@@ -80,6 +80,7 @@ import type {
 	ReplaySeenSetClient,
 } from "./clients/single-key-stores.mjs";
 import type {
+	SessionFamilyIndexClient,
 	SessionRPRegistryClient,
 	SessionRPRegistryMultiClient,
 	SessionSidSortedSetClient,
@@ -137,6 +138,7 @@ export type {
 	ReserveMfaSubjectAttemptReply,
 	RetireFederationGrantIntentInput,
 	RevokeFederationGrantInput,
+	SessionFamilyIndexClient,
 	SessionRPRegistryClient,
 	SessionRPRegistryMultiClient,
 	SessionSidSortedSetClient,
@@ -160,7 +162,7 @@ declare module "@o3co/auth-provider-core" {
 		readonly refreshTokenFamilyClient?: RefreshTokenFamilyClient;
 		readonly userSessionStoreClient?: UserSessionStoreClient;
 		readonly sessionRPRegistryClient?: SessionRPRegistryClient;
-		readonly sessionFamilyIndexClient?: SessionSidSortedSetClient;
+		readonly sessionFamilyIndexClient?: SessionFamilyIndexClient;
 		readonly sessionFederationIndexClient?: SessionSidSortedSetClient;
 		readonly subjectSessionIndexClient?: SubjectSessionIndexClient;
 		readonly subjectRevocationClient?: SubjectRevocationClient;

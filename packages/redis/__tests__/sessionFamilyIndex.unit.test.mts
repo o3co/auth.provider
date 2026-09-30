@@ -161,9 +161,10 @@ describe("createRedisSessionFamilyIndex — the order of the two operations", ()
 describe("redisSessionFamilyIndexBuilder — the ended mark", () => {
 	it("keeps the mark under the bundle's prefix, ss:fi-ended:, by default", async () => {
 		const { client, log } = recordingClient();
-		const idx = redisSessionFamilyIndexBuilder({ client } as never, {
-			lifecycle: undefined,
-		} as never);
+		const idx = redisSessionFamilyIndexBuilder(
+			{ client } as never,
+			{ lifecycle: undefined } as never,
+		);
 		if (!supportsSessionEnd(idx)) throw new Error("the index does not claim SupportsSessionEnd");
 		const expiresAt = FUTURE();
 		await idx.endSession("sid-1", expiresAt);
