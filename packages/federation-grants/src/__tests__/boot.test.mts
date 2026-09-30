@@ -77,6 +77,20 @@ const storeModule = defineModule({
 	provides: { federationGrantStore: () => createMemoryFederationGrantStore() },
 });
 
+/** The same store, whose cleanup writes to `order`. */
+const storeModuleClosingInto = (order: string[]) =>
+	defineModule({
+		name: "test-federation-grant-store",
+		provides: { federationGrantStore: () => createMemoryFederationGrantStore() },
+		lifecycle: {
+			federationGrantStore: {
+				cleanup: () => {
+					order.push("store closed");
+				},
+			},
+		},
+	});
+
 /**
  * A store that says it keeps grants somewhere they survive a restart. The port
  * exposes `kind` and nothing else about persistence, so that is what the
@@ -188,6 +202,8 @@ interface Setup {
 	readonly withCsrfGuard?: boolean | "without-check";
 	/** The oauthTokenSettings the composition holds; none by default. */
 	readonly tokenSettingsIssuer?: string;
+	/** Where the memory store's cleanup records that it ran; no cleanup by default. */
+	readonly storeClosed?: string[];
 }
 
 /**
@@ -221,7 +237,13 @@ const boot = (setup: Setup) => {
 		...federationGrantsModules,
 		...(setup.withStore === false
 			? []
-			: [setup.store === "durable" ? durableStoreModule : storeModule]),
+			: [
+					setup.store === "durable"
+						? durableStoreModule
+						: setup.storeClosed === undefined
+							? storeModule
+							: storeModuleClosingInto(setup.storeClosed),
+				]),
 		...(setup.federationFirst === false ? federation : []),
 	];
 	return createApp({
@@ -413,6 +435,49 @@ describe("enabling the feature", () => {
 	it("boots with an empty connection map, because removing the last one is operable", async () => {
 		const handle = await boot({ connections: {}, provider: null });
 		await handle.dispose();
+	});
+});
+
+describe("the cleanup allowance an enabled deployment registers", () => {
+	it("is the refresh tail of the shipped budgets plus the margin: 45 seconds", async () => {
+		const handle = await boot({});
+		expect(handle.cleanupAllowanceMs).toBe(45_000);
+		await handle.dispose();
+	});
+
+	it("grows with a raised budget", async () => {
+		// The lock must outlive the raised hard timeout, or boot refuses first.
+		const handle = await boot({
+			grants: { upstreamHardTimeoutMs: 60_000, refreshLockTtlMs: 65_000 },
+		});
+		expect(handle.cleanupAllowanceMs).toBe(60_000 + 3_000 + 5_000 + 12_000);
+		await handle.dispose();
+	});
+
+	it("is absent while the feature is off", async () => {
+		const handle = await boot({ enabled: false });
+		expect(handle.cleanupAllowanceMs).toBeUndefined();
+		await handle.dispose();
+	});
+
+	it("keeps the drain ahead of the store's own cleanup", async () => {
+		const order: string[] = [];
+		const handle = await boot({ storeClosed: order });
+		let persist!: () => void;
+		handle.components.federationGrantBackground?.register(
+			new Promise<void>((resolve) => {
+				persist = () => resolve();
+			}).then(() => {
+				order.push("late write persisted");
+			}),
+		);
+
+		const disposed = handle.dispose();
+		await new Promise((resolve) => setTimeout(resolve, 10));
+		expect(order).toEqual([]);
+		persist();
+		await disposed;
+		expect(order).toEqual(["late write persisted", "store closed"]);
 	});
 });
 
