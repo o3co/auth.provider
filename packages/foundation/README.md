@@ -376,12 +376,13 @@ its variable, whether or not anything requires the store.
 `markMfaEnrolledUrl` is not in this section. The witness is written through
 the user repository whatever keeps the factors — Redis factors with the
 Store's witness among them — so its URL belongs with the user repository's
-settings, where no key names it yet. Its contract: with the URL, the user
+settings, which have no key for it. Its contract: with the URL, the user
 repository writes the witness (`markMfaEnrolled`); without it, the
 repository has no `markMfaEnrolled` — the capability is absent, never a
 refused boot, since the witness is optional (the MFA ADR's D12) — and a
-composition that keeps the factors in the Store while its user repository
-cannot write the witness is warned at boot.
+composition with MFA on whose user repository cannot write the witness is
+warned at boot, whatever keeps the factors: the witness is what keeps a lost
+factor store from opening a first binding.
 
 ### Testing against the contract
 
