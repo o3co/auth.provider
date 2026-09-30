@@ -33,8 +33,8 @@ const REFERENCE = new URL("../../config/reference.conf", import.meta.url);
 describe("the package's config/reference.conf", () => {
 	const modules = [mtlsModule];
 
-	it("is read at the sections its modules declare", () => {
-		expect(modules.map((module) => module.section?.at)).toEqual(["oauth.mtls"]);
+	it("is read at the section named after its module", () => {
+		expect(modules.map((module) => [module.name, module.section !== undefined, module.section?.at])).toEqual([["mtls", true, undefined]]);
 	});
 
 	it("is declared by each of them and holds only their sections, which their schemas parse without losing a path", () => {
