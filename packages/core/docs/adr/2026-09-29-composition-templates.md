@@ -122,10 +122,10 @@ by the template's own suite (the MFA ADR's step 20 tests MFA on and off).
   client. Its development configuration selects the in-process ones, the
   file-backed users and one replica, so it boots with no Redis and no user
   service; its production configuration inherits Redis and the user service
-  from `application.conf`. Two things keep the development configuration from
-  doing so at `f4021b5a3`: the refresh-token family store is wired to Redis in
-  `buildModules.mts`, not selected; and `config/development.conf` selects
-  nothing, while the file-backed users it would select have no
+  from `application.conf`. Three things keep the development configuration
+  from doing so at `f4021b5a3`: the refresh-token family store is wired to
+  Redis in `buildModules.mts`, not selected; `config/development.conf` selects
+  nothing; and the file-backed users it would select have no
   `config/users.yaml` to read
   ([#778](https://github.com/o3co/auth.provider/issues/778)).
 - **`m2m`** — the headless token service: `client_credentials` with client
@@ -228,8 +228,8 @@ browser session; `m2m` has no login for a second factor to interrupt.
   are not implemented. Revisited when they are.
 - **A `minimal` template** — the browser-facing shape without the Redis
   package or the user service's client. The standalone installs both kinds of
-  adapter, so its development configuration selects what such a template
-  would install once #778 lands (D2). What the standalone installs
+  adapter, so its development configuration selects the adapters such a
+  template would make available, once #778 lands (D2). What the standalone installs
   beyond that is the dependency cost D1 accepts.
 - **A leaner browser-facing template** (without federation grants, say): the
   same shape as `standalone`, so a switch, not a template.
