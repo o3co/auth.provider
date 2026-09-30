@@ -66,6 +66,17 @@ const ADVANCE_ROUNDS = 3;
 /** Why a store's answer outside its port's promise is an outage: it is never read as a verdict. */
 const OUTSIDE_CONTRACT = new TypeError("the store answered outside its port's contract");
 
+/** Whether `written`, what a transaction's `update` answered other than `null`, is `tx` at its next version. */
+const isWrittenAt = (written: unknown, tx: MfaTransaction): boolean => {
+	try {
+		if (typeof written !== "object" || written === null) return false;
+		const { id, version } = written as Readonly<Record<string, unknown>>;
+		return id === tx.id && version === tx.version + 1;
+	} catch {
+		return false;
+	}
+};
+
 /** Whether `amr`, what a factor's `amrFor` answered, names at least one value, and only values the factor declares. */
 const declaresEach = (factor: MfaFactor, amr: unknown): amr is readonly string[] =>
 	Array.isArray(amr) &&
@@ -454,12 +465,15 @@ export function createMfaCoordinator(options: MfaCoordinatorOptions): MfaCoordin
 						? { challenge: null }
 						: undefined;
 			if (patch !== undefined) {
+				let written: unknown;
 				try {
-					if ((await transactions.update(tx.id, tx.version, patch)) === null) {
-						return UNKNOWN_TRANSACTION;
-					}
+					written = await transactions.update(tx.id, tx.version, patch);
 				} catch (cause) {
 					return outage("mfa_transaction", "update", cause);
+				}
+				if (written === null) return UNKNOWN_TRANSACTION;
+				if (!isWrittenAt(written, tx)) {
+					return outage("mfa_transaction", "update", OUTSIDE_CONTRACT);
 				}
 			}
 			return {
