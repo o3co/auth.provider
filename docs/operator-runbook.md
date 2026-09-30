@@ -347,7 +347,12 @@ Module-level messages that arrive wrapped in a factory failure:
   naming the key, and the section missing altogether names the package's
   `reference.conf` to layer. Turn the factor on with
   `WEBAUTHN_MFA_FACTOR_ENABLED=true`; installed and off, it contributes no
-  factor.
+  factor. Installed, on or off, while `webauthn.allowCredentialsForKnownUser`
+  (`WEBAUTHN_ALLOW_CREDENTIALS_FOR_KNOWN_USER`) is on:
+  `contribute-factory-failed`, naming both — with the flag on, a second
+  factor's credential that returns no user handle, registered by another
+  account through the grant, could sign its owner in as that account. Turn
+  the flag off, or remove the module.
 - Per-process rate-limit fallbacks under `core.deployment.mode = "multi"` (#474): `core.deployment.mode is "multi" but no shared rateLimiter is wired for POST /session/login`, the same for `POST /oauth/webauthn/authentication/options`, and `… for the MFA routes` — a `replica-unsafe-adapter` BootError as the `cause`. Wire `rateLimiter.adapter = "redis"` or set `single` (`packages/session/src/routes/Session.mts`, `packages/webauthn/src/module.mts`, `packages/mfa/src/module.mts`).
 - DPoP with no seen-set: `dpopModule: dpop.enabled = true requires a replaySeenSet component`, in every `core.deployment.mode`. Install `memoryReplaySeenSetModule` (one replica) or `redisReplaySeenSetModule`, or leave DPoP disabled (`packages/dpop/src/module.mts`). Under `multi` the memory one is then refused by the replica-safety guard, as `core-replay-seen-set-memory`.
 - Device grant: the six refusals for `verificationUri`, the `session` slice, a `rateLimiter` component, a usable `device-grant.rateLimit` budget (#448), and — with the grant enabled — a `deviceCodeStore` component, which `device-grant.store = "unsupported"` does not stand in for (#626), and a `userSessionStore` component (`enabled = true requires a userSessionStore component`: the verification route approves only from the live `UserSession` behind the cookie; install `memorySessionStoresModule` on one replica or `redisSessionStoresModule`); and a seventh, `built from a configuration with the grant on, but the configuration createApp parsed has device-grant.enabled off` (or the reverse) — hand `deviceGrantModule({ config })` the configuration read from the same files and environment as `bootstrapComponents.config` (`packages/device-grant/src/module.mts`). The factory listed uncalled is `module-factory-not-called`, in the table above. There is no refusal for an enabled grant without `oauthModule`: it boots, but nothing can redeem the device codes it hands out, so compose it with the token endpoint.

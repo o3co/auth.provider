@@ -39,8 +39,9 @@
  *
  * An assertion's user handle, which the library does not compare, is held here to the one the
  * caller expects (WebAuthn §7.2 step 6), once the signature verified and before the count: one
- * carried must be the expected bytes' canonical base64url, the form the JSON encoding writes.
- * None carried (`null` is none) passes: a non-discoverable credential may return none.
+ * carried must be the expected bytes' unpadded base64url, and no other spelling of them — padded,
+ * the standard alphabet, the handle read as text — is accepted. None carried (`null` is none)
+ * passes: a non-discoverable credential may return none.
  *
  * Attestation chain failures ("x5c could not be chained to any specified trust anchor") match no
  * prefix and read as "unknown"; there is no dedicated reason for them.
@@ -376,7 +377,7 @@ export async function verifyWebAuthnAssertionWithBackupState(
 
 /**
  * Whether the user handle a response carries may stand for the account whose handle is
- * `expected`: none expected, none carried, or `expected`'s canonical base64url.
+ * `expected`: none expected, none carried, or `expected`'s unpadded base64url.
  */
 function userHandleAccepted(presented: unknown, expected: Uint8Array | undefined): boolean {
 	if (expected === undefined || presented === undefined || presented === null) return true;
