@@ -517,7 +517,7 @@ describe("the TOTP factor's section, mfa-totp-factor", () => {
 			expect(refusal(() => readTotp(withTotp({ issuer })))).toContain("mfa-totp-factor.issuer");
 		}
 		for (const deployment of ["not a url", undefined, 1, "https://[2001:db8::1]"]) {
-			const message = refusal(() => readTotp(withTotp({}), deployment));
+			const message = refusal(() => readMfaTotpSettings(withTotp({}), { issuer: deployment }));
 			expect(message, String(deployment)).toContain("mfa-totp-factor.issuer");
 			expect(message, String(deployment)).toContain("MFA_TOTP_FACTOR_ISSUER");
 		}

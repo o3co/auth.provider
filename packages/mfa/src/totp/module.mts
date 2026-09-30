@@ -17,30 +17,35 @@
 /**
  * `mfaTotpFactorModule` (the MFA ADR's D1, D3, D19): contributes the `totp`
  * factor under core's `mfaFactors` kind, where the coordinator reads it
- * through `mfaFactorResolver`. Built from `mfa.factors.totp` alone — a factor
- * never holds a key, so the ring is not read here — and answering `null`
- * when `mfa.factors.totp.enabled` is false, which leaves the kind claimed and
- * absent from the resolver. A section it cannot read refuses the boot as a
- * failed contribution, naming the key. Stateless: nothing forks per replica.
+ * through `mfaFactorResolver`. Built from its own section, `mfa-totp-factor`,
+ * alone — a factor never holds a key, so the ring is not read here — and
+ * answering `null` when `mfa-totp-factor.enabled` is false, which leaves the
+ * kind claimed and absent from the resolver. Boot parses the section with the
+ * module's schema before any factory runs and refuses what it cannot read,
+ * naming the key; a configuration still setting the section's old path,
+ * `mfa.factors.totp`, is refused naming the new one. From the whole
+ * configuration it reads only the deployment's issuer, when no module
+ * provides `oauthTokenSettings`. Stateless: nothing forks per replica.
  */
 
 import { checkOAuthTokenSettings, defineModule } from "@o3co/auth-provider-core";
-import { z } from "zod";
-import { readMfaTotpSettings } from "../config.mjs";
+import { mfaTotpConfigSchema, readMfaTotpSettings } from "../config.mjs";
 import { createTotpFactor, TOTP_FACTOR_KIND } from "./factor.mjs";
+
+/** `oauth.jwt.issuer` as the configuration carries it. */
+const configuredIssuer = (config: unknown): unknown =>
+	(config as { oauth?: { jwt?: { issuer?: unknown } } } | undefined)?.oauth?.jwt?.issuer;
 
 /** The TOTP factor, contributed as `mfaFactors.totp`; `null` when switched off by its configuration. */
 export const mfaTotpFactorModule = defineModule({
 	name: "mfa-totp-factor",
-	// The package's `config/reference.conf` holds this section's
-	// defaults. Its schema checks nothing yet: the factor's factory reads the
-	// section itself (`readMfaTotpSettings`) and refuses what it cannot use as
-	// that factory's failure; the schema takes over when the section moves
-	// under the module's name.
+	// The package's `config/reference.conf` holds this section's defaults, and
+	// binds the variables of its old path there without one, so an operator
+	// still exporting them is refused rather than ignored.
 	section: {
-		schema: z.unknown(),
+		schema: mfaTotpConfigSchema,
 		reference: new URL("../../config/reference.conf", import.meta.url),
-		at: "mfa.factors.totp",
+		relocatedFrom: ["mfa.factors.totp"],
 	},
 	requires: ["config"] as const,
 	// The issuer an unset TOTP issuer defaults to the host of, which the
@@ -48,15 +53,15 @@ export const mfaTotpFactorModule = defineModule({
 	optional: ["oauthTokenSettings"] as const,
 	contributes: {
 		mfaFactors: {
-			[TOTP_FACTOR_KIND]: ({ config, oauthTokenSettings }) => {
-				const settings = readMfaTotpSettings(
-					config,
+			[TOTP_FACTOR_KIND]: ({ config, oauthTokenSettings, section }) => {
+				const settings = readMfaTotpSettings(section, {
 					// The slot whole, checked first: its issuer is then
 					// always one, so the configuration's is read only without it.
-					oauthTokenSettings === undefined
-						? {}
-						: { issuer: checkOAuthTokenSettings(oauthTokenSettings, config).issuer },
-				);
+					issuer:
+						oauthTokenSettings === undefined
+							? configuredIssuer(config)
+							: checkOAuthTokenSettings(oauthTokenSettings, config).issuer,
+				});
 				return settings.enabled ? createTotpFactor(settings) : null;
 			},
 		},

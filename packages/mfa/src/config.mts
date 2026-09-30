@@ -15,11 +15,12 @@
  */
 
 /**
- * The `mfa` configuration this package reads; `mfa.mode` is core's. Keys,
+ * The configuration this package reads: the MFA module's own section, `mfa`,
+ * and the TOTP factor's, `mfa-totp-factor`, each its module's alone. Keys,
  * ranges, defaults and refusals: see README, Configuration, and ADR
  * 2026-09-25-multi-factor-authentication.
  *
- * `mfa.factors.totp` is read by the TOTP factor's module alone
+ * `mfa-totp-factor` is read by the TOTP factor's module alone
  * (`readMfaTotpSettings`), which never holds a key; the MFA module's settings
  * read no factor's section. The bounds on digits, period, a transaction's
  * life and its attempts are owner decisions, recorded in the ADR's
@@ -60,6 +61,21 @@ const wholeNumber = (min: number, max: number, unit: string) => {
 	return z.number({ error }).int({ error }).min(min, { error }).max(max, { error });
 };
 
+/**
+ * {@link wholeNumber}, or the decimal digits an environment variable carries
+ * as a string, which every leaf of a module's section must read. Nothing
+ * else is read as a number: not `null`, `true`, `""`, `"0x10"` or `"1e1"`,
+ * which `z.coerce.number()` would turn into one.
+ */
+const environmentWholeNumber = (min: number, max: number, unit: string) => {
+	const error = `must be a whole number from ${min} to ${max}${unit}`;
+	const bounded = wholeNumber(min, max, unit);
+	return z.union(
+		[bounded, z.string({ error }).trim().regex(/^\d+$/, { error }).transform(Number).pipe(bounded)],
+		{ error },
+	);
+};
+
 const ISSUER_RULE =
 	"must be well-formed text, not blank, with no control character and no colon — the otpauth label puts one between the issuer and the account";
 
@@ -79,16 +95,21 @@ const isShowableIssuer = (issuer: string): boolean =>
 	!hasControlCharacter(issuer) &&
 	!issuer.includes(":");
 
-/** `mfa.factors.totp`: the TOTP factor's switch and parameters. */
+/**
+ * The TOTP factor's section, `mfa-totp-factor`: its switch and parameters,
+ * and the issuer an authenticator app shows. The TOTP factor's module parses
+ * it with this schema before any factory runs; the issuer's default, which
+ * needs the deployment's issuer, is `readMfaTotpSettings`'s.
+ */
 export const mfaTotpConfigSchema = z.object(
 	{
 		enabled: coerceBooleanFromEnv,
 		algorithm: z.enum(TOTP_ALGORITHMS, {
 			error: `must be one of ${TOTP_ALGORITHMS.map((name) => `"${name}"`).join(", ")}`,
 		}),
-		digits: wholeNumber(6, 8, ""),
-		period: wholeNumber(15, 120, " seconds"),
-		window: wholeNumber(0, 2, " steps"),
+		digits: environmentWholeNumber(6, 8, ""),
+		period: environmentWholeNumber(15, 120, " seconds"),
+		window: environmentWholeNumber(0, 2, " steps"),
 		issuer: z
 			.string({ error: ISSUER_RULE })
 			.refine(isShowableIssuer, { error: ISSUER_RULE })
@@ -97,9 +118,18 @@ export const mfaTotpConfigSchema = z.object(
 	{ error: SECTION_MISSING },
 );
 
-const RING_SHAPE = "must be a list of { id?, key } entries";
+/**
+ * `mfa.mode`: whether a password login asks for a second factor. `required`:
+ * every password login has one and every consumer enforces it. `optional`:
+ * users with factors are challenged, nobody is forced, step-up works. `off`:
+ * the MFA module refuses it — installed is on.
+ */
+export const MFA_MODES = ["off", "optional", "required"] as const;
 
-const factorsSchema = z.object({ totp: mfaTotpConfigSchema }, { error: SECTION_MISSING });
+/** `mfa.mode`, one of {@link MFA_MODES}; anything else is refused, never read as `off`. */
+const mfaModeSchema = z.enum(MFA_MODES, { error: 'must be "off", "optional" or "required"' });
+
+const RING_SHAPE = "must be a list of { id?, key } entries";
 
 /** The fewest and the most attempts one transaction may allow. */
 const MFA_MAX_ATTEMPTS_PER_TRANSACTION = { min: 1, max: 10 } as const;
@@ -132,16 +162,16 @@ const lockoutSchema = z.object(
 );
 
 /**
- * The shapes of the `mfa` keys this package reads (the key ring, the factors,
- * a transaction's life and attempts, and the subject lock) with TOTP's ranges
- * and the transaction's. The ring's refusals (a key that is not 32 bytes, an
- * empty ring, a duplicate id), the sample key's and how the lock's fields
- * relate are not the schema's: `readMfaSettings` makes them, where the keys
- * are decoded, the environment is known and core's rule is applied.
- * `mfa.mode` is core's.
+ * The MFA module's section, `mfa`: its mode, the key ring, a transaction's
+ * life and attempts, and the subject lock, with the transaction's ranges. The
+ * ring's refusals (a key that is not 32 bytes, an empty ring, a duplicate
+ * id), the sample key's and how the lock's fields relate are not the
+ * schema's: `readMfaSettings` makes them, where the keys are decoded, the
+ * environment is known and core's rule is applied.
  */
 export const mfaConfigSchema = z.object(
 	{
+		mode: mfaModeSchema,
 		encryptionKeys: z.array(
 			z.object(
 				{
@@ -152,7 +182,6 @@ export const mfaConfigSchema = z.object(
 			),
 			{ error: RING_SHAPE },
 		),
-		factors: factorsSchema,
 		transactionTtlSeconds: wholeNumber(
 			MFA_TRANSACTION_TTL_SECONDS.min,
 			MFA_TRANSACTION_TTL_SECONDS.max,
@@ -169,15 +198,19 @@ export const mfaConfigSchema = z.object(
 );
 
 /**
- * What the MFA module's settings parse: every key of {@link mfaConfigSchema}
- * but the factors'. A factor's section, `mfa.factors.<kind>`, is its factor
- * module's to read — a composition that does not install a factor is never
- * refused over that factor's section.
+ * What the MFA module's section schema checks before any factory runs: the
+ * mode, which may be unset — the module refuses that as it refuses `off` —
+ * and every other key handed on unread, for {@link readMfaSettings}. The
+ * section may be missing: its settings are then refused, naming the
+ * `reference.conf` that carries them.
  */
-const mfaModuleSettingsSchema = mfaConfigSchema.omit({ factors: true });
+export const mfaSectionSchema = mfaConfigSchema.pick({ mode: true }).partial().loose().optional();
+
+/** What the MFA module's settings parse: every key of {@link mfaConfigSchema} but the mode. */
+const mfaModuleSettingsSchema = mfaConfigSchema.omit({ mode: true });
 
 /**
- * `mfa.factors.totp` as the factor and its module read it: the switch and the
+ * `mfa-totp-factor` as the factor and its module read it: the switch and the
  * parameters, and — for a factor that is on — the issuer resolved. A
  * switched-off factor keeps only an issuer written for it: the default is not
  * derived, so a factor nothing uses never refuses the boot over it.
@@ -189,10 +222,7 @@ export type MfaTotpSettings =
 			readonly issuer: string | undefined;
 	  });
 
-/**
- * What the MFA module reads from the `mfa` section: every key but a factor's
- * own (`mfa.factors.<kind>`), which that factor's module reads.
- */
+/** What the MFA module reads from its `mfa` section, but the mode. */
 export interface MfaSettings {
 	/** The ring, in order: the first key seals, every key opens. */
 	readonly encryptionKeys: SealingKeyRing;
@@ -210,7 +240,7 @@ export interface MfaSettings {
 	readonly lockout: MfaLockoutPolicy;
 }
 
-/** What a composition root tells the settings that its configuration cannot. */
+/** What the settings read beside the `mfa` section. */
 export interface MfaSettingsOptions {
 	/**
 	 * The name the deployment selected its configuration by — the standalone
@@ -218,16 +248,18 @@ export interface MfaSettingsOptions {
 	 * consulted, by the sample-key refusal.
 	 */
 	readonly environment?: string;
+	/**
+	 * `deployment.mode` as the configuration carries it — the MFA module
+	 * passes it: `"multi"` refuses the sample key.
+	 */
+	readonly deploymentMode?: unknown;
 }
+
+/** The TOTP factor's section: what its refusals name. */
+const TOTP_SECTION = "mfa-totp-factor";
 
 const RING = "mfa.encryptionKeys";
 const PRODUCTION_ENVIRONMENTS: ReadonlySet<string> = new Set(["production", "staging"]);
-
-interface ConfigShape {
-	readonly mfa?: unknown;
-	readonly oauth?: { readonly jwt?: { readonly issuer?: unknown } };
-	readonly deployment?: { readonly mode?: unknown };
-}
 
 /** `path` under `prefix`, an array index in brackets. */
 const pathOf = (prefix: string, path: readonly PropertyKey[]): string =>
@@ -247,12 +279,10 @@ function parseSection<T>(schema: z.ZodType<T>, value: unknown, prefix: string): 
 }
 
 /**
- * The host the deployment's issuer names, which the TOTP issuer defaults to:
- * `given` — the `oauthTokenSettings` slot's issuer, when the composition holds
- * it — or `oauth.jwt.issuer` as the configuration carries it.
+ * The host of `issuer`, the deployment's issuer, which the TOTP issuer
+ * defaults to.
  */
-function issuerHost(config: ConfigShape, given: string | undefined): string {
-	const issuer = given ?? config.oauth?.jwt?.issuer;
+function issuerHost(issuer: unknown): string {
 	let host = "";
 	if (typeof issuer === "string") {
 		try {
@@ -264,17 +294,13 @@ function issuerHost(config: ConfigShape, given: string | undefined): string {
 	// A bracketed IPv6 host would carry the colon the label cannot.
 	if (host === "" || host.includes(":")) {
 		throw new RangeError(
-			"mfa.factors.totp.issuer is not set, and oauth.jwt.issuer names no host it could default to: set MFA_TOTP_ISSUER",
+			`${TOTP_SECTION}.issuer is not set, and oauth.jwt.issuer names no host it could default to: set MFA_TOTP_FACTOR_ISSUER`,
 		);
 	}
 	return host;
 }
 
-function totpSettings(
-	totp: z.infer<typeof mfaTotpConfigSchema>,
-	config: ConfigShape,
-	issuer: string | undefined,
-): MfaTotpSettings {
+function totpSettings(totp: z.infer<typeof mfaTotpConfigSchema>, issuer: unknown): MfaTotpSettings {
 	const parameters = {
 		algorithm: totp.algorithm,
 		digits: totp.digits,
@@ -282,27 +308,22 @@ function totpSettings(
 		window: totp.window,
 	};
 	return totp.enabled
-		? { enabled: true, ...parameters, issuer: totp.issuer ?? issuerHost(config, issuer) }
+		? { enabled: true, ...parameters, issuer: totp.issuer ?? issuerHost(issuer) }
 		: { enabled: false, ...parameters, issuer: totp.issuer };
 }
 
 /**
- * `mfa.factors.totp`, read on its own — what the TOTP factor's module reads. A
- * `RangeError` names each key refused. `options.issuer` is the deployment's
- * issuer when the composition holds the `oauthTokenSettings` slot: an
- * unset TOTP issuer defaults to its host rather than `oauth.jwt.issuer`'s.
+ * The TOTP factor's section, `mfa-totp-factor` — what the TOTP factor's
+ * module reads. A `RangeError` names each key refused. `options.issuer` is
+ * the deployment's issuer — the `oauthTokenSettings` slot's when the
+ * composition holds it, `oauth.jwt.issuer` otherwise — whose host an unset
+ * TOTP issuer defaults to.
  */
 export function readMfaTotpSettings(
-	config: unknown,
-	options: { readonly issuer?: string } = {},
+	section: unknown,
+	options: { readonly issuer?: unknown } = {},
 ): MfaTotpSettings {
-	const shape = (config ?? {}) as ConfigShape;
-	const section = parseSection(
-		z.object({ factors: factorsSchema }, { error: SECTION_MISSING }),
-		shape.mfa,
-		"mfa",
-	);
-	return totpSettings(section.factors.totp, shape, options.issuer);
+	return totpSettings(parseSection(mfaTotpConfigSchema, section, TOTP_SECTION), options.issuer);
 }
 
 /**
@@ -312,11 +333,7 @@ export function readMfaTotpSettings(
  * it sits in the ring. Answers whether the ring carries it — accepted, when
  * this did not refuse it.
  */
-function refuseSampleKey(
-	ring: SealingKeyRing,
-	config: ConfigShape,
-	options: MfaSettingsOptions,
-): boolean {
+function refuseSampleKey(ring: SealingKeyRing, options: MfaSettingsOptions): boolean {
 	const sample = decodeSealingKey(MFA_DEVELOPMENT_SAMPLE_KEY);
 	const index = ring.findIndex((entry) => sample !== undefined && entry.key.equals(sample));
 	if (index === -1) return false;
@@ -330,7 +347,7 @@ function refuseSampleKey(
 	if (productionEnvironment !== undefined) {
 		reasons.push(`the environment is "${productionEnvironment}"`);
 	}
-	if (config.deployment?.mode === "multi") {
+	if (options.deploymentMode === "multi") {
 		reasons.push(
 			'deployment.mode is "multi" (a multi-replica deployment is never a development box)',
 		);
@@ -361,7 +378,6 @@ const keyFingerprint = (key: Buffer): string =>
  */
 function readKeyRing(
 	entries: z.infer<typeof mfaConfigSchema>["encryptionKeys"],
-	config: ConfigShape,
 	options: MfaSettingsOptions,
 ): { readonly ring: SealingKeyRing; readonly developmentSampleKeyAccepted: boolean } {
 	if (entries.length === 0) {
@@ -385,7 +401,7 @@ function readKeyRing(
 	});
 	checkSealingKeyRing(ring, RING);
 	refuseRepeatedKey(ring);
-	return { ring, developmentSampleKeyAccepted: refuseSampleKey(ring, config, options) };
+	return { ring, developmentSampleKeyAccepted: refuseSampleKey(ring, options) };
 }
 
 /**
@@ -408,28 +424,24 @@ function refuseRepeatedKey(ring: SealingKeyRing): void {
 }
 
 /**
- * What the MFA module reads from the `mfa` section: the key ring and whether
- * it carries the development sample key, a transaction's life and attempts,
- * and the subject lock — held to core's `checkMfaLockoutPolicy` under
- * `mfa.lockout`. No factor's section: the TOTP factor's is
- * {@link readMfaTotpSettings}'s. `options.environment` is the
- * name the composition root selected its configuration by. A refusal
- * is a `RangeError` that names the key and quotes no key material.
+ * What the MFA module reads from its `mfa` section, `section`: the key ring
+ * and whether it carries the development sample key, a transaction's life
+ * and attempts, and the subject lock — held to core's
+ * `checkMfaLockoutPolicy` under `mfa.lockout`. Not the mode, which the
+ * module's section schema reads, and no factor's section: the TOTP factor's
+ * is {@link readMfaTotpSettings}'s. `options.environment` is the name the
+ * composition root selected its configuration by. A refusal is a
+ * `RangeError` that names the key and quotes no key material.
  */
-export function readMfaSettings(config: unknown, options: MfaSettingsOptions = {}): MfaSettings {
-	const shape = (config ?? {}) as ConfigShape;
-	const section = parseSection(mfaModuleSettingsSchema, shape.mfa, "mfa");
-	const { ring, developmentSampleKeyAccepted } = readKeyRing(
-		section.encryptionKeys,
-		shape,
-		options,
-	);
-	checkMfaLockoutPolicy(section.lockout, "mfa.lockout");
+export function readMfaSettings(section: unknown, options: MfaSettingsOptions = {}): MfaSettings {
+	const settings = parseSection(mfaModuleSettingsSchema, section, "mfa");
+	const { ring, developmentSampleKeyAccepted } = readKeyRing(settings.encryptionKeys, options);
+	checkMfaLockoutPolicy(settings.lockout, "mfa.lockout");
 	return {
 		encryptionKeys: ring,
 		developmentSampleKeyAccepted,
-		transactionTtlSeconds: section.transactionTtlSeconds,
-		maxAttemptsPerTransaction: section.maxAttemptsPerTransaction,
-		lockout: { ...section.lockout },
+		transactionTtlSeconds: settings.transactionTtlSeconds,
+		maxAttemptsPerTransaction: settings.maxAttemptsPerTransaction,
+		lockout: { ...settings.lockout },
 	};
 }

@@ -46,13 +46,11 @@ import {
 	type Logger,
 	type MfaFactorResolver,
 	type Module,
-	readMfaMode,
 	type SessionRequirement,
 	type StepUpPage,
 	supportsSecondFactorUpdate,
 } from "@o3co/auth-provider-core";
-import { z } from "zod";
-import { type MfaSettings, readMfaSettings } from "./config.mjs";
+import { type MfaSettings, mfaSectionSchema, readMfaSettings } from "./config.mjs";
 import { createMfaRequirement, type MfaRequirementMode } from "./requirement.mjs";
 import { createMfaSealing, type MfaSealing } from "./sealing.mjs";
 import { mfaTotpFactorModule } from "./totp/module.mjs";
@@ -125,7 +123,7 @@ export class MfaNoCountingFactorError extends RangeError {
 				? "no factor is enabled"
 				: `the enabled factors (${enabledKinds.join(", ")}) do not count`;
 		super(
-			`mfa.mode is "required", but ${enabled}, so nobody could meet the requirement: enable an installed counting factor through its module's \`enabled\` key — for the TOTP factor, when mfaTotpFactorModule is installed, mfa.factors.totp.enabled (MFA_TOTP_ENABLED) — or set mfa.mode = "optional"`,
+			`mfa.mode is "required", but ${enabled}, so nobody could meet the requirement: enable an installed counting factor through its module's \`enabled\` key — for the TOTP factor, when mfaTotpFactorModule is installed, mfa-totp-factor.enabled (MFA_TOTP_FACTOR_ENABLED) — or set mfa.mode = "optional"`,
 		);
 		this.name = "MfaNoCountingFactorError";
 	}
@@ -188,6 +186,10 @@ function checkInstalledFactors(factors: MfaFactorResolver, mode: MfaRequirementM
 	}
 }
 
+/** `deployment.mode` as the configuration carries it: the sample key's refusal reads it. */
+const deploymentModeOf = (config: unknown): unknown =>
+	(config as { deployment?: { mode?: unknown } } | undefined)?.deployment?.mode;
+
 /** The page a step-up starts on: `endpoints.mfa.url`, which core's reference.conf defaults. */
 function stepUpPageOf(config: unknown): StepUpPage {
 	const url = (config as { endpoints?: { mfa?: { url?: unknown } } } | undefined)?.endpoints?.mfa
@@ -204,14 +206,6 @@ function stepUpPageOf(config: unknown): StepUpPage {
 const passThrough = (_req: unknown, _res: unknown, next: () => void): void => next();
 
 /**
- * The `mfa` section: the package's `config/reference.conf` (its defaults) and its
- * path. The schema checks nothing: the requirement's factory reads the section
- * (`readMfaSettings`), and what it refuses must stay that factory's failure
- * rather than become an earlier-stage refusal.
- */
-const MFA_SECTION_SCHEMA = z.unknown();
-
-/**
  * The MFA module (see this file's header): the `mfa` session requirement and
  * the MFA routes' mount. `options.environment` reaches the development
  * sample key's refusal.
@@ -225,13 +219,16 @@ export function mfaModule(options: MfaModuleOptions = {}): Module {
 		| "userSessionStore"
 		| "sessionRequirementResolver",
 		"auditSink" | "logger",
-		typeof MFA_SECTION_SCHEMA
+		typeof mfaSectionSchema
 	>({
 		name: "mfa",
+		// The module's own section, read at its name. Its schema holds the mode
+		// to its three values before any factory runs; the requirement's
+		// factory reads the rest (`readMfaSettings`), and what that refuses
+		// stays the factory's failure.
 		section: {
-			schema: MFA_SECTION_SCHEMA,
+			schema: mfaSectionSchema,
 			reference: new URL("../config/reference.conf", import.meta.url),
-			at: "mfa",
 		},
 		requires: [
 			"config",
@@ -246,13 +243,16 @@ export function mfaModule(options: MfaModuleOptions = {}): Module {
 		contributes: {
 			sessionRequirements: {
 				mfa: (deps) => {
-					const mode = readMfaMode(deps.config) ?? "off";
+					const mode = deps.section?.mode ?? "off";
 					if (mode === "off") {
 						throw new RangeError(
 							'mfa.mode is "off" (or unset) while the MFA module is installed: remove the MFA module, or set mfa.mode to "required" or "optional"',
 						);
 					}
-					const settings = readMfaSettings(deps.config, options);
+					const settings = readMfaSettings(deps.section, {
+						...options,
+						deploymentMode: deploymentModeOf(deps.config),
+					});
 					const stepUpPage = stepUpPageOf(deps.config);
 					const logger = deps.logger ?? consoleLogger;
 					if (settings.developmentSampleKeyAccepted) {
