@@ -29,17 +29,17 @@ import {
 	checkStoreResponseCap,
 	checkStoreTimeout,
 	DEFAULT_MAX_RESPONSE_BYTES,
-	discardBody,
-	isAbortError,
-	readBodyCapped,
+	postToStore,
+	type StoreRequestSettings,
 } from "../storeTransport.mjs";
-import { readFailure, requestFailure, StoreCredentialRefusedError } from "./storeErrors.mjs";
-import { hasBearerChallenge } from "./wwwAuthenticate.mjs";
 
 export { DEFAULT_MAX_RESPONSE_BYTES };
 
 /** What this repository's messages lead with. */
 const OWNER = "HttpUserRepository";
+
+/** Whether a status is a `2xx`, the answers whose body is read. */
+const isSuccess = (status: number): boolean => status >= 200 && status < 300;
 
 /** The Store answered 409 to a link request: the identity is already someone else's. */
 const CONFLICT = Symbol("conflict");
@@ -201,7 +201,7 @@ function lookupAnswer(value: unknown): FederatedIdentityLookupResult | undefined
  * each is validated at **construction** (`src/endpointUrl.mts`), and no
  * request follows a redirect. With `bearerToken`, every request carries
  * `Authorization: Bearer <token>`, and a `401` or `403` with a `Bearer`
- * challenge throws a {@link StoreCredentialRefusedError}. A transport's own
+ * challenge throws a `StoreCredentialRefusedError`. A transport's own
  * error is never thrown, because it may quote the request: a failure throws a
  * `StoreTransportError` with a fixed message, at most an allowlisted transport
  * code, and no cause. Every message names an endpoint by origin and path
@@ -313,30 +313,20 @@ export class HttpUserRepository implements UserRepository {
 		this.maxResponseBytes = checkStoreResponseCap(maxResponseBytes, OWNER);
 	}
 
-	/** What every request carries: the body's type and, when configured, the credential. */
-	private headers(): Record<string, string> {
-		return this.#authorization === undefined
-			? { "Content-Type": "application/json" }
-			: { "Content-Type": "application/json", Authorization: this.#authorization };
-	}
-
 	/**
-	 * Throws {@link StoreCredentialRefusedError} when a non-`2xx` answer is the
-	 * Store refusing this deployment's credential: a `401` or `403` with a
-	 * `Bearer` challenge, to a request that carried the token. Read before any
-	 * other reading of the status; otherwise a token the Store does not accept
-	 * is every login "no such user" and every link "refused", with nothing
-	 * logged. Without a token sent, a challenge is not about one, and the
-	 * status keeps its usual wire meaning.
+	 * What every request is sent with: the credential, when configured, the
+	 * deadline and the cap. A `401` or `403` with a `Bearer` challenge to a
+	 * request that carried the credential throws `StoreCredentialRefusedError`
+	 * before any other reading of the status (`postToStore`): otherwise a
+	 * token the Store does not accept is every login "no such user" and every
+	 * link "refused", with nothing logged.
 	 */
-	private assertCredentialAccepted(res: Response, endpoint: string): void {
-		if (
-			this.#authorization !== undefined &&
-			(res.status === 401 || res.status === 403) &&
-			hasBearerChallenge(res.headers.get("www-authenticate"))
-		) {
-			throw new StoreCredentialRefusedError(endpoint, res.status);
-		}
+	private settings(): StoreRequestSettings {
+		return {
+			authorization: this.#authorization,
+			timeout: this.timeout,
+			maxResponseBytes: this.maxResponseBytes,
+		};
 	}
 
 	async authenticate(username: string, password: string): Promise<User | null> {
@@ -420,88 +410,38 @@ export class HttpUserRepository implements UserRepository {
 	private async postLookup(url: string, body: unknown): Promise<FederatedIdentityLookupResult> {
 		// What every message names: origin and path, never the query.
 		const endpoint = endpointForMessage(url);
-		const controller = new AbortController();
-		let timedOut = false;
-		const timeoutError = (): Error => {
-			const error = new Error(
-				`HttpUserRepository: request to ${endpoint} timed out after ${this.timeout}ms`,
+		const { response, text } = await postToStore(
+			url,
+			body,
+			this.settings(),
+			{
+				owner: OWNER,
+				unreachable: `HttpUserRepository: identity lookup at ${endpoint} could not be reached`,
+				closed: `HttpUserRepository: identity lookup at ${endpoint}: the connection closed before a complete response arrived`,
+				malformed: `HttpUserRepository: identity lookup at ${endpoint} answered with a malformed HTTP response`,
+				unreadable: `HttpUserRepository: identity lookup at ${endpoint} could not be read`,
+			},
+			isSuccess,
+		);
+		if (text === undefined) {
+			throw new Error(
+				`HttpUserRepository: identity lookup at ${endpoint} answered HTTP ${response.status}`,
 			);
-			error.name = "TimeoutError";
-			return error;
-		};
-		let fireDeadline: () => void = () => {};
-		const deadline = new Promise<never>((_resolve, reject) => {
-			fireDeadline = () => reject(timeoutError());
-		});
-		deadline.catch(() => {});
-		const timer = setTimeout(() => {
-			timedOut = true;
-			controller.abort();
-			fireDeadline();
-		}, this.timeout);
-
-		try {
-			let res: Response;
-			try {
-				res = await fetch(url, {
-					method: "POST",
-					headers: this.headers(),
-					body: JSON.stringify(body),
-					signal: controller.signal,
-					redirect: "manual",
-				});
-			} catch (err) {
-				if (timedOut && isAbortError(err)) throw timeoutError();
-				// A fixed message, without the cause: what a transport reports may
-				// quote what it was sending.
-				throw requestFailure(err, {
-					unreachable: `HttpUserRepository: identity lookup at ${endpoint} could not be reached`,
-					closed: `HttpUserRepository: identity lookup at ${endpoint}: the connection closed before a complete response arrived`,
-					malformed: `HttpUserRepository: identity lookup at ${endpoint} answered with a malformed HTTP response`,
-				});
-			}
-			if (!res.ok) {
-				discardBody(res);
-				this.assertCredentialAccepted(res, endpoint);
-				throw new Error(
-					`HttpUserRepository: identity lookup at ${endpoint} answered HTTP ${res.status}`,
-				);
-			}
-			let raw: string;
-			try {
-				raw = await readBodyCapped(
-					res,
-					this.maxResponseBytes,
-					endpoint,
-					deadline,
-					(err) =>
-						readFailure(
-							err,
-							`HttpUserRepository: identity lookup at ${endpoint} could not be read`,
-						),
-					OWNER,
-				);
-			} catch (err) {
-				if (timedOut) throw timeoutError();
-				throw err;
-			}
-			let parsed: unknown;
-			try {
-				parsed = JSON.parse(raw);
-			} catch {
-				throw new Error(`HttpUserRepository: upstream ${endpoint} returned a non-JSON body`);
-			}
-			const answer = lookupAnswer(parsed);
-			if (answer === undefined) {
-				throw new Error(
-					`HttpUserRepository: identity lookup at ${endpoint} answered a body that is not one of the ` +
-						"port's answers (linked / unlinked / indeterminate)",
-				);
-			}
-			return answer;
-		} finally {
-			clearTimeout(timer);
 		}
+		let parsed: unknown;
+		try {
+			parsed = JSON.parse(text);
+		} catch {
+			throw new Error(`HttpUserRepository: upstream ${endpoint} returned a non-JSON body`);
+		}
+		const answer = lookupAnswer(parsed);
+		if (answer === undefined) {
+			throw new Error(
+				`HttpUserRepository: identity lookup at ${endpoint} answered a body that is not one of the ` +
+					"port's answers (linked / unlinked / indeterminate)",
+			);
+		}
+		return answer;
 	}
 
 	private async post(
@@ -511,116 +451,45 @@ export class HttpUserRepository implements UserRepository {
 	): Promise<User | null | typeof CONFLICT> {
 		// What every message names: origin and path, never the query.
 		const endpoint = endpointForMessage(url);
-		const controller = new AbortController();
-		let timedOut = false;
-
-		// One absolute deadline for the whole exchange, expressed twice: as the
-		// abort signal `fetch` understands, and as a promise the body read can be
-		// raced against. `.catch` is attached up front so an exchange that
-		// finishes first — the overwhelmingly common case, where the timer is
-		// cleared and this never rejects — cannot leave an unhandled rejection.
-		// Named as the lookup's is: a reporter that classifies by `name` —
-		// federation-grants' reads `TimeoutError` as `timeout` — sees one kind
-		// of timeout whichever request it came from.
-		const timeoutError = (): Error => {
-			const error = new Error(
-				`HttpUserRepository: request to ${endpoint} timed out after ${this.timeout}ms`,
-			);
-			error.name = "TimeoutError";
-			return error;
-		};
-		let fireDeadline: () => void = () => {};
-		const deadline = new Promise<never>((_resolve, reject) => {
-			fireDeadline = () => reject(timeoutError());
-		});
-		deadline.catch(() => {});
-
-		const timer = setTimeout(() => {
-			timedOut = true;
-			controller.abort();
-			fireDeadline();
-		}, this.timeout);
-
-		try {
-			let res: Response;
+		// Never follows a redirect (`postToStore`): a 307 or 308 would re-send
+		// the body — a password, a token, a link request — to a `Location` the
+		// https rule never checked, and a 3xx is not a 2xx, 401, 403 or 409, so
+		// it throws below as an unexpected status.
+		const { response, text } = await postToStore(
+			url,
+			body,
+			this.settings(),
+			{
+				owner: OWNER,
+				unreachable: `HttpUserRepository: request to ${endpoint} could not be reached`,
+				closed: `HttpUserRepository: the connection to ${endpoint} closed before a complete response arrived`,
+				malformed: `HttpUserRepository: the Store at ${endpoint} answered with a malformed HTTP response`,
+				unreadable: `HttpUserRepository: response from ${endpoint} could not be read`,
+			},
+			isSuccess,
+		);
+		if (text !== undefined) {
+			let parsed: unknown;
 			try {
-				res = await fetch(url, {
-					method: "POST",
-					headers: this.headers(),
-					body: JSON.stringify(body),
-					signal: controller.signal,
-					// Never followed: a 307 or 308 would re-send the body — a
-					// password, a token, a link request — to a `Location` the https
-					// rule never checked, and after any redirect the answer from
-					// there would be taken as the user. Node's fetch hands the 3xx
-					// back as it is (a browser-spec runtime would hand back an opaque
-					// redirect, status 0); either way it is not a 2xx, 401, 403 or
-					// 409, so it throws below as an unexpected status.
-					redirect: "manual",
-				});
-			} catch (err) {
-				if (timedOut && isAbortError(err)) throw timeoutError();
-				// Never the transport's own error: it may quote what it was
-				// sending — the credential, the password — or what came back.
-				throw requestFailure(err, {
-					unreachable: `HttpUserRepository: request to ${endpoint} could not be reached`,
-					closed: `HttpUserRepository: the connection to ${endpoint} closed before a complete response arrived`,
-					malformed: `HttpUserRepository: the Store at ${endpoint} answered with a malformed HTTP response`,
-				});
+				parsed = JSON.parse(text);
+			} catch {
+				// Same class of failure as the shape check below: the Store is
+				// broken, not the credential.
+				throw new Error(`HttpUserRepository: upstream ${endpoint} returned a non-JSON body`);
 			}
-
-			if (res.ok) {
-				let raw: string;
-				try {
-					raw = await readBodyCapped(
-						res,
-						this.maxResponseBytes,
-						endpoint,
-						deadline,
-						(err) =>
-							readFailure(err, `HttpUserRepository: response from ${endpoint} could not be read`),
-						OWNER,
-					);
-				} catch (err) {
-					// Whatever the deadline interrupted is a timeout; everything
-					// else readBodyCapped throws is already the adapter's own.
-					if (timedOut) throw timeoutError();
-					throw err;
-				}
-				let parsed: unknown;
-				try {
-					parsed = JSON.parse(raw);
-				} catch {
-					// Same class of failure as the shape check below: the Store is
-					// broken, not the credential. Reported as ours rather than as a
-					// bare SyntaxError with no indication of where it came from.
-					throw new Error(`HttpUserRepository: upstream ${endpoint} returned a non-JSON body`);
-				}
-				if (!isUser(parsed)) {
-					// Upstream returned 2xx with an unexpected shape — this is an
-					// "upstream is broken" case, not a "user not found" case, so
-					// throw rather than return null. The thrown error propagates
-					// as a 500 to the client (correct: upstream-service failure).
-					throw new Error(
-						`HttpUserRepository: upstream ${endpoint} returned an invalid User shape`,
-					);
-				}
-				return parsed;
+			if (!isUser(parsed)) {
+				// A 2xx with an unexpected shape is an upstream failure, not "no
+				// such user": thrown rather than answered null.
+				throw new Error(`HttpUserRepository: upstream ${endpoint} returned an invalid User shape`);
 			}
-
-			discardBody(res);
-			this.assertCredentialAccepted(res, endpoint);
-
-			if (options.acceptConflict && res.status === 409) {
-				return CONFLICT;
-			}
-			if (res.status === 401 || res.status === 403) {
-				return null;
-			}
-
-			throw new Error(`Unexpected HTTP status ${res.status} from ${endpoint}`);
-		} finally {
-			clearTimeout(timer);
+			return parsed;
 		}
+		if (options.acceptConflict && response.status === 409) {
+			return CONFLICT;
+		}
+		if (response.status === 401 || response.status === 403) {
+			return null;
+		}
+		throw new Error(`Unexpected HTTP status ${response.status} from ${endpoint}`);
 	}
 }
