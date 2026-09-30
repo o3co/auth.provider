@@ -114,6 +114,34 @@ describe("what the template expects of session admission", () => {
 		expect((err as RangeError).message).not.toContain("sentinel-mode");
 	});
 
+	it("refuses an mfa section written as a value, not a section of keys, before boot, naming mfa.mode, though MFA_MODE says required", async () => {
+		for (const value of ["required", '"required"', "true", "1", "[required]", "null"]) {
+			const err = await refusal(
+				compose({
+					env: { ...SINGLE_ENV, MFA_MODE: "required" },
+					operatorHocon: `mfa = ${value}\n`,
+				}),
+			);
+			expect(err, value).toBeInstanceOf(RangeError);
+			expect(err, value).not.toBeInstanceOf(BootError);
+			expect((err as RangeError).message, value).toContain("mfa.mode");
+		}
+	});
+
+	it("hands boot an mfa section holding more than the mode, which boot names once as a section nothing owns", async () => {
+		for (const hocon of ['mfa.mdoe = "required"\n', "mfa.factors.totp.enabled = false\n"]) {
+			current = await compose({ operatorHocon: hocon });
+			expect(current.resolved, hocon).toHaveProperty("mfa");
+			const ignored = current.logger.lines.filter(
+				(line) => line.args[1] === "config_sections_ignored",
+			);
+			expect(ignored, hocon).toHaveLength(1);
+			expect(ignored[0]?.args[0], hocon).toEqual({ sections: ["mfa"] });
+			await current.handle.dispose();
+			current = undefined;
+		}
+	});
+
 	it("refuses the boot when the configuration expects mfa under mfa.mode = off and no installed module registers it", async () => {
 		const err = await refusal(
 			compose({ operatorHocon: 'sessionRequirements.expected = ["mfa"]\n' }),
@@ -145,6 +173,21 @@ describe("where the template reads mfa.mode from", () => {
 			mode: "off",
 		});
 	});
+
+	it("hands boot the mfa section when a loaded module's section sits under it, or moved from under it", () => {
+		const own = readOwnLayers(ownFiles(), { env: { ...SINGLE_ENV, MFA_MODE: "off" } });
+		const expected = expectedSessionRequirements(readSwitches(own));
+		for (const module of [
+			{ name: "nested", section: { at: "mfa.nested" } },
+			{ name: "fork-totp", section: { relocatedFrom: ["mfa.factors.totp"] } },
+			{ name: "fork-renamed", section: { relocatedFrom: { "mfa.factors.totp.window": "window" } } },
+		]) {
+			expect(
+				(resolveForBoot(own, [module as unknown as Module], expected) as { mfa?: unknown }).mfa,
+				module.name,
+			).toEqual({ mode: "off" });
+		}
+	});
 });
 
 describe("readMfaMode", () => {
@@ -159,6 +202,21 @@ describe("readMfaMode", () => {
 	])("reads %s as off", (_label, config) => {
 		expect(readMfaMode(config)).toBe("off");
 	});
+
+	it.each([
+		["a string", "required"],
+		["a boolean", true],
+		["a number", 1],
+		["a list", ["required"]],
+		["null", null],
+	])(
+		"refuses an mfa section that is %s, not a section of keys, with the RangeError naming mfa.mode",
+		(_label, mfa) => {
+			expect(() => readMfaMode({ mfa })).toThrow(
+				new RangeError('mfa.mode must be "off", "optional" or "required"'),
+			);
+		},
+	);
 
 	it.each([
 		["a mode it does not know", "maybe"],

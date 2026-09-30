@@ -46,6 +46,7 @@ import {
 	MFA_DEVELOPMENT_SAMPLE_KEY,
 	type MfaSettingsOptions,
 	mfaConfigSchema,
+	mfaSectionSchema,
 	readMfaSettings,
 	readMfaTotpSettings,
 } from "#/config.mjs";
@@ -144,6 +145,21 @@ describe("the MFA settings this package reads", () => {
 		expect(settings.maxAttemptsPerTransaction).toBe(5);
 		expect(settings.lockout).toEqual(LOCKOUT);
 		expect(settings.developmentSampleKeyAccepted).toBe(false);
+	});
+
+	it("refuses a section written as a value, not a section of keys, saying so rather than calling it missing", () => {
+		for (const value of ["required", 1, true, ["required"], null]) {
+			const settings = refusal(() => readSettings({ mfa: value }));
+			expect(settings, JSON.stringify(value)).toMatch(/^mfa must be a section of keys/);
+			const totp = refusal(() => readTotp(value));
+			expect(totp, JSON.stringify(value)).toMatch(/^mfa-totp-factor must be a section of keys/);
+			const parsed = mfaSectionSchema.safeParse(value);
+			expect(parsed.success, JSON.stringify(value)).toBe(false);
+			expect(
+				parsed.error?.issues.map((issue) => issue.message),
+				JSON.stringify(value),
+			).toEqual(["must be a section of keys"]);
+		}
 	});
 
 	it("refuses a missing section, naming it", () => {

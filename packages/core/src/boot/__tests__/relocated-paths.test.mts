@@ -134,6 +134,31 @@ describe("a relocated path — refused", () => {
 		});
 	});
 
+	it("a value written at a path moved whole as the section: names the section, and no variable, since a section has none", async () => {
+		const relocating = defineModule({
+			name: "fixture-relocating",
+			section: { schema: RetrySection, relocatedFrom: ["legacy.fixture"] },
+		});
+		for (const value of [null, 5, "on"]) {
+			const err = await refusal(
+				createApp({
+					modules: [relocating],
+					bootstrapComponents: bootWith({ ...current, legacy: { fixture: value } }),
+				}),
+			);
+			expect(err.details, String(value)).toEqual({
+				reason: "config-path-relocated",
+				relocated: [
+					{ module: "fixture-relocating", from: "legacy.fixture", to: "fixture-relocating" },
+				],
+			});
+			expect(err.message, String(value)).toContain(
+				"legacy.fixture has moved to fixture-relocating; see CHANGELOG. Write it there and remove",
+			);
+			expect(err.message, String(value)).not.toContain("environment variable");
+		}
+	});
+
 	it("a subtree whose keys were renamed as it moved: each key at its new name", async () => {
 		const relocating = defineModule({
 			name: "fixture-relocating",

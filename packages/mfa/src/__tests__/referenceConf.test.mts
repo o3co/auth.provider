@@ -27,6 +27,7 @@
  */
 
 import { randomBytes } from "node:crypto";
+import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
 import { BootError, createApp } from "@o3co/auth-provider-core";
@@ -35,6 +36,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
 	MFA_DEVELOPMENT_SAMPLE_KEY,
 	type MfaSettingsOptions,
+	mfaTotpConfigSchema,
 	readMfaSettings,
 	readMfaTotpSettings,
 } from "#/config.mjs";
@@ -144,12 +146,63 @@ describe("the package's reference.conf", () => {
 		});
 	});
 
-	it("reads MFA_TOTP_FACTOR_ENABLED and MFA_TOTP_FACTOR_ISSUER into mfa-totp-factor", () => {
+	it("reads each key of mfa-totp-factor from its variable: MFA_TOTP_FACTOR_ENABLED, _ALGORITHM, _DIGITS, _PERIOD, _WINDOW and _ISSUER", () => {
 		const totp = totpOf(
-			resolve({ MFA_TOTP_FACTOR_ENABLED: "false", MFA_TOTP_FACTOR_ISSUER: "Example Co" }),
+			resolve({
+				MFA_TOTP_FACTOR_ENABLED: "false",
+				MFA_TOTP_FACTOR_ALGORITHM: "SHA256",
+				MFA_TOTP_FACTOR_DIGITS: "8",
+				MFA_TOTP_FACTOR_PERIOD: "60",
+				MFA_TOTP_FACTOR_WINDOW: "0",
+				MFA_TOTP_FACTOR_ISSUER: "Example Co",
+			}),
 		);
-		expect(totp.enabled).toBe(false);
-		expect(totp.issuer).toBe("Example Co");
+		expect(totp).toEqual({
+			enabled: false,
+			algorithm: "SHA256",
+			digits: 8,
+			period: 60,
+			window: 0,
+			issuer: "Example Co",
+		});
+	});
+
+	it("binds every variable boot's refusal of the old path names, each at its key's new path; a value written at the old path whole names none", async () => {
+		const refusalOf = async (config: unknown) => {
+			try {
+				const handle = await createApp({
+					modules: [mfaTotpFactorModule],
+					bootstrapComponents: { config, pathResolver: (p: string) => p } as never,
+				});
+				await handle.dispose();
+			} catch (error) {
+				if (error instanceof BootError) return error;
+				throw error;
+			}
+			throw new Error("the boot was not refused");
+		};
+		const text = readFileSync(MFA_REFERENCE, "utf8");
+		for (const key of Object.keys(mfaTotpConfigSchema.shape)) {
+			const refused = await refusalOf({
+				...resolve(),
+				mfa: { factors: { totp: { [key]: "1" } } },
+			});
+			const [relocated] = (
+				refused.details as { relocated: { to: string; environmentVariable?: string }[] }
+			).relocated;
+			expect(relocated?.to, key).toBe(`mfa-totp-factor.${key}`);
+			const variable = relocated?.environmentVariable ?? "";
+			expect(text, key).toContain(`\${?${variable}}`);
+			const marked = parseFile(MFA_REFERENCE, { env: { [variable]: "__MARKER__" } }).toObject() as {
+				"mfa-totp-factor": Record<string, unknown>;
+			};
+			expect(marked["mfa-totp-factor"][key], key).toBe("__MARKER__");
+		}
+		const whole = await refusalOf({ ...resolve(), mfa: { factors: { totp: null } } });
+		expect(whole.details).toEqual({
+			reason: "config-path-relocated",
+			relocated: [{ module: "mfa-totp-factor", from: "mfa.factors.totp", to: "mfa-totp-factor" }],
+		});
 	});
 
 	it("binds MFA_TOTP_ENABLED and MFA_TOTP_ISSUER at the old path alone, with no default: they feed mfa-totp-factor nothing", () => {
