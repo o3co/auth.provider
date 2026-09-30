@@ -25,6 +25,9 @@ export { MFA_ADMISSION_ACTIONS, type MfaAdmissionAction } from "./admissionActio
 // The `mfa` keys this package reads, and the published development key a
 // development configuration may carry (the MFA ADR's D11, D19).
 export { MFA_DEVELOPMENT_SAMPLE_KEY, mfaConfigSchema } from "./config.mjs";
+// The email factor's module (the MFA ADR's F5), with its section: off by
+// default, and refusing the boot when switched on until the factor is built.
+export { mfaEmailFactorModule } from "./email/module.mjs";
 // The MFA module — the `mfa` session requirement, the MFA routes' mount and
 // their budget's prefix — and what a composition lists to install MFA (the
 // MFA ADR's D1; the session-admission ADR's D6).

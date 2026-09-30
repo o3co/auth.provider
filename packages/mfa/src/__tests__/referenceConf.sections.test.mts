@@ -30,8 +30,8 @@ import { fileURLToPath } from "node:url";
 import { packageReferenceProblems } from "@o3co/auth-provider-core/testing";
 import { parseFile } from "@o3co/ts.hocon";
 import { describe, expect, it } from "vitest";
-import { mfaModule } from "#/module.mjs";
 import { mfaEmailFactorModule } from "#/email/module.mjs";
+import { mfaModule } from "#/module.mjs";
 import { mfaRecoveryCodeFactorModule } from "#/recovery/module.mjs";
 import { mfaTotpFactorModule } from "#/totp/module.mjs";
 

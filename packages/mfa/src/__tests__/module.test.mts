@@ -43,8 +43,8 @@ import {
 import { createTestOAuthTokenSettings, resolverForTests } from "@o3co/auth-provider-core/testing";
 import { afterEach, describe, expect, it } from "vitest";
 import { MFA_DEVELOPMENT_SAMPLE_KEY } from "#/config.mjs";
-import { MFA_ROUTES_ID, mfaBootState, mfaModule, mfaModules } from "#/module.mjs";
 import { mfaEmailFactorModule } from "#/email/module.mjs";
+import { MFA_ROUTES_ID, mfaBootState, mfaModule, mfaModules } from "#/module.mjs";
 import { mfaRecoveryCodeFactorModule } from "#/recovery/module.mjs";
 import { createMfaSealing } from "#/sealing.mjs";
 import { mfaTotpFactorModule } from "#/totp/module.mjs";
