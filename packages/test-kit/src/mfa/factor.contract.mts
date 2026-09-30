@@ -24,7 +24,8 @@
  * survive the JSON round trip sealing puts them through, which the suite also
  * hands the factor back after; a code asked to be mailed only for the call's
  * purpose, with an expiry after now when one is given, another at each
- * challenge, and in no form in the page's response; no answer — state,
+ * challenge, a login code with the keyed digest of the account's address, and
+ * in no form in the page's response; no answer — state,
  * response, data, label — carrying the account's address, which the provider
  * keeps none of and a page does not show; a hint that never shows it; a proof
  * the factor cannot read answered `malformed`, never thrown;
@@ -48,6 +49,8 @@ import {
 	type MfaEnrolledFactor,
 	type MfaFactor,
 	type MfaFactorMailPurpose,
+	type MfaKeyedDigest,
+	normaliseMailAddress,
 	PASSWORD_AMR,
 } from "@o3co/auth-provider-core";
 import { type ContractCase, createTestMfaDigests } from "@o3co/auth-provider-core/testing";
@@ -213,6 +216,33 @@ function checkMail(
 	return code;
 }
 
+/**
+ * Refuses a login code's `addressDigest` unless it is the keyed digest of the
+ * account's address as `normaliseMailAddress` spells it, made for `kind`
+ * under the digests a factor is handed.
+ */
+function checkAddressDigest(
+	addressDigest: unknown,
+	kind: string,
+	user: Readonly<Record<string, unknown>>,
+): void {
+	const address = normaliseMailAddress(user.email);
+	assert.ok(address !== undefined, "a factor mails a login code, and the account has no address");
+	const digest = addressDigest as MfaKeyedDigest;
+	assert.ok(
+		typeof digest === "object" &&
+			digest !== null &&
+			typeof digest.keyId === "string" &&
+			typeof digest.digest === "string",
+		"a login code carries no keyed digest of the address it goes to",
+	);
+	assert.equal(
+		createTestMfaDigests(kind).matchesDigest([address], digest),
+		"match",
+		"a login code carries the digest of another address than the account's",
+	);
+}
+
 /** Refuses `value` when a string it holds carries the account's address, whatever its case. */
 function carriesNoAddress(value: unknown, user: Readonly<Record<string, unknown>>, what: string) {
 	const { email } = user;
@@ -278,18 +308,22 @@ export function mfaFactorContract(input: MfaFactorContractInput): readonly Contr
 		};
 	};
 
-	/** A challenge of `enrolled`, when the factor has one, an hour after the enrollment. */
+	/**
+	 * A challenge of `enrolled`, when the factor has one, an hour after the
+	 * enrollment. After a mailed login code the verification context carries
+	 * the account's address digest, as the coordinator hands it.
+	 */
 	const challenge = async (factor: MfaFactor, enrolled: MfaEnrolledFactor) => {
-		const context = contextAt(
-			factor,
-			subjectOf(input.user),
-			VERIFIED_AT_MS,
-			"contract-verification",
-		);
+		const base = contextAt(factor, subjectOf(input.user), VERIFIED_AT_MS, "contract-verification");
 		const sent =
 			factor.challenge === undefined
 				? undefined
-				: await factor.challenge({ ...context, factor: enrolled, factors: [enrolled] });
+				: await factor.challenge({ ...base, factor: enrolled, factors: [enrolled] });
+		const address = normaliseMailAddress(input.user.email);
+		const context =
+			sent?.mail !== undefined && address !== undefined
+				? { ...base, addressDigest: base.digests.digest([address]) }
+				: base;
 		return { context, sent };
 	};
 
@@ -431,7 +465,7 @@ export function mfaFactorContract(input: MfaFactorContractInput): readonly Contr
 			},
 		},
 		{
-			name: "challenge, when it asks for a code to be mailed, asks for a login code, non-empty, with an expiry after now when it gives one, another at each challenge, and its response carries no form of the code",
+			name: "challenge, when it asks for a code to be mailed, asks for a login code, non-empty, with an expiry after now when it gives one and the keyed digest of the account's address, another at each challenge, and its response carries no form of the code",
 			run: async () => {
 				const factor = input.build();
 				if (factor.challenge === undefined) return;
@@ -446,6 +480,13 @@ export function mfaFactorContract(input: MfaFactorContractInput): readonly Contr
 							what: "challenge",
 						}),
 					);
+					if (sent?.mail !== undefined) {
+						checkAddressDigest(
+							(sent.mail as { readonly addressDigest?: unknown }).addressDigest,
+							factor.kind,
+							input.user,
+						);
+					}
 				}
 				if (codes[0] !== undefined) {
 					assert.notEqual(codes[1], codes[0], "two challenges mail the same code");
