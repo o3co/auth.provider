@@ -835,6 +835,8 @@ A first binding is authorized by the password — and, where mail is wired, by t
 - **Upgrade in two steps.** The upgrade guide tells an existing deployment to go `optional` first — users enroll at their own pace, with notices and email proof where mail is wired — and `required` once most have. New scaffolds start `required`.
 - **The operator reset** (D25) is the remedy for a hijacked first binding.
 
+**Amended 2026-09-30 (build-order step 9, owner decision (d)): one gate for every first binding.** A subject with no counting factor goes through one gate whatever it binds first — a factor, a passkey (`webauthn.register`), a linked identity (`session.link`) — under `mfa.enrollment.requireEmailProof` and D25's flag. At a login the proof is kept on the login's transaction; in a session it is kept for that session alone for `mfa.manage.maxAgeSeconds`, the one window for every first binding in a session, and is given through the MFA page's step-up. Without mail nothing changes.
+
 The honest statement for a deployment without mail: MFA protects every account from the moment its owner enrolls, and does not protect an account whose password an attacker holds before then. Decided in O4.
 
 ### D25 — Recovery when a factor is lost: recovery codes, plus an operator reset

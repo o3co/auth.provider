@@ -605,6 +605,12 @@ const VOCABULARY: readonly VocabularyRow[] = [
 		home: "packages/mfa/src/firstBinding.mts",
 		definition: /(?:function|const)\s+firstBindingGate\b/,
 	},
+	{
+		concept:
+			"whether a factor record may count — admission's presumption, which tells a first binding (the MFA ADR's D12, F3)",
+		home: "packages/mfa/src/firstBinding.mts",
+		definition: /(?:function|const)\s+mayCount\b/,
+	},
 ];
 
 /**
