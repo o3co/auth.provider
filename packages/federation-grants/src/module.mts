@@ -440,12 +440,14 @@ export const federationGrantsModule = defineModule<Requires, Optional>({
 					connections,
 				);
 				const lifetimes = resolveFederationGrantAcquisitionLimits(deps.config);
-				// The drain's allowance, for a host that bounds dispose(). Its component
-				// cleanup runs first and keeps it ahead of the store; a second drain is
-				// the first one.
-				deps.lifecycleRegistrar?.register(() => deps.federationGrantBackground.drain(), {
-					tailMs: federationGrantsCleanupTailMs(limits),
-				});
+				// The drain's allowance, for a host that bounds dispose(). The component
+				// cleanup runs the drain, ahead of the store; this waits only on a drain
+				// already started, never on a registry the host supplied.
+				const background = deps.federationGrantBackground;
+				deps.lifecycleRegistrar?.register(
+					() => (background.closing ? background.drain() : Promise.resolve()),
+					{ tailMs: federationGrantsCleanupTailMs(limits) },
+				);
 				return {
 					id: "federation-grants",
 					mountPath: FEDERATION_GRANTS_MOUNT_PATH,
