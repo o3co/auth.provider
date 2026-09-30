@@ -366,24 +366,21 @@ describe("rateLimitBudgets — the boot line", () => {
 					check: async () => ({ allowed: true }),
 				}) as RateLimiter,
 		],
-	])(
-		"reports a wired limiter with %s as an invalid outage policy",
-		async (_label, limiter) => {
-			const logger = spyLogger();
-			const handle = await createApp({
-				modules: [
-					defineModule({ name: "custom-limiter", provides: { rateLimiter: limiter } }),
-					limiterUser,
-				],
-				bootstrapComponents: { ...bootWith(), logger: logger as never },
-			});
+	])("reports a wired limiter with %s as an invalid outage policy", async (_label, limiter) => {
+		const logger = spyLogger();
+		const handle = await createApp({
+			modules: [
+				defineModule({ name: "custom-limiter", provides: { rateLimiter: limiter } }),
+				limiterUser,
+			],
+			bootstrapComponents: { ...bootWith(), logger: logger as never },
+		});
 
-			expect(logger.info.mock.calls.filter((call) => call[1] === "rate_limits_in_force")).toEqual([
-				[{ limiter: { kind: "custom", failMode: "invalid" }, budgets: [] }, "rate_limits_in_force"],
-			]);
-			await handle.dispose();
-		},
-	);
+		expect(logger.info.mock.calls.filter((call) => call[1] === "rate_limits_in_force")).toEqual([
+			[{ limiter: { kind: "custom", failMode: "invalid" }, budgets: [] }, "rate_limits_in_force"],
+		]);
+		await handle.dispose();
+	});
 
 	it("warns when rateLimit.failMode says open and the wired limiter answers another policy", async () => {
 		const logger = spyLogger();
