@@ -296,6 +296,23 @@ describe("keyed digests", () => {
 		expect(lines).toHaveLength(2);
 	});
 
+	it("says a stored digest names a key that is no longer first before it compares it, so a first comparison that mismatches still counts the key", () => {
+		const stored = sealingOver([K1]).digestsFor("recovery_code").digest(["ABCD1234EFGH5678"]);
+		const { logger, lines } = recordingLogger();
+		const rotated = sealingOver([K2, K1], logger);
+		expect(rotated.digestsFor("recovery_code").matchesDigest(["WRONG0000WRONG00"], stored)).toBe(
+			"mismatch",
+		);
+		expect(lines).toEqual([
+			{ level: "info", fields: { keyId: "k1" }, event: "mfa_digest_made_with_retired_key" },
+		]);
+		// Not said for a key the ring no longer holds: that is key_unavailable's.
+		expect(sealingOver([K2], logger).digestsFor("recovery_code").matchesDigest(["X"], stored)).toBe(
+			"key_unavailable",
+		);
+		expect(lines).toHaveLength(1);
+	});
+
 	it("throws on a stored digest that is not { keyId, digest }: key_unavailable means a key is missing, and a malformed record is never a wrong code", () => {
 		const digests = sealingOver([K1]).digestsFor("email");
 		const good = digests.digest(["a"]);

@@ -63,6 +63,7 @@ import {
 	TOTP_SECTION,
 } from "./moduleHarness.mjs";
 import { stubFactor } from "./requirementHarness.mjs";
+import { beginLogin, seedTotp, verify, wrongCode } from "./routesHarness.mjs";
 
 afterEach(disposeAll);
 
@@ -578,12 +579,24 @@ describe("the MFA routes' flood guard without a shared rate limiter", () => {
 		}),
 	});
 
-	it("builds a per-process limiter over mfa.rateLimit.routes, and says so once at warn when the deployment mode is unset", async () => {
+	it("builds a per-process limiter over mfa.rateLimit.routes, which refuses a POST past the budget, and says so once at warn when the deployment mode is unset", async () => {
 		const logger = spyLogger();
-		await boot({ config: underMode(undefined), rateLimiter: null, logger });
-		expect(events(logger, "warn")).toContain("mfa_rate_limiter_not_shared");
-		const call = logger.warn.mock.calls.find((c) => c[1] === "mfa_rate_limiter_not_shared");
-		expect(call?.[0]).toEqual({ limit: 60, windowSeconds: 300 });
+		const factorStore = createMemoryMfaFactorStore();
+		const { record, secret } = await seedTotp(factorStore);
+		const config = configFor("required", {
+			rateLimit: { routes: { limit: 2, windowSeconds: 300 } },
+		});
+		const { app } = await boot({ config, factorStore, rateLimiter: null, logger });
+		const { agent, transaction } = await beginLogin(app);
+
+		const statuses = [];
+		for (let n = 0; n < 3; n++) {
+			statuses.push((await verify(agent, transaction, record.id, wrongCode(secret))).status);
+		}
+
+		expect(statuses).toEqual([401, 401, 429]);
+		const said = logger.warn.mock.calls.filter((c) => c[1] === "mfa_rate_limiter_not_shared");
+		expect(said).toEqual([[{ limit: 2, windowSeconds: 300 }, "mfa_rate_limiter_not_shared"]]);
 	});
 
 	it("is silent under a single replica", async () => {

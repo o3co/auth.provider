@@ -234,7 +234,7 @@ describe("the codes a verification accepts (RFC 6238)", () => {
 });
 
 describe("a transaction's attempts (D21)", () => {
-	it("answers a wrong code 401 mfa_invalid with the attempts left, and ends the transaction at mfa.maxAttemptsPerTransaction — a right code after that is not checked", async () => {
+	it("answers a wrong code 401 mfa_invalid with the attempts left; once mfa.maxAttemptsPerTransaction are spent the transaction reads with none left, and the next verification — a right code — is refused unchecked and ends it", async () => {
 		const factorStore = createMemoryMfaFactorStore();
 		const { record, secret } = await seedTotp(factorStore);
 		const audit = recordingAuditSink();
@@ -250,6 +250,9 @@ describe("a transaction's attempts (D21)", () => {
 		for (let n = 0; n < 3; n++) {
 			answers.push(await verify(agent, transaction, record.id, wrongCode(secret)));
 		}
+		const spent = await readTransaction(agent, transaction);
+		expect(spent.status).toBe(200);
+		expect(spent.body.attempts_remaining).toBe(0);
 		const last = await verify(agent, transaction, record.id, totpCode(secret));
 
 		expect(answers.map((res) => [res.status, res.body])).toEqual([

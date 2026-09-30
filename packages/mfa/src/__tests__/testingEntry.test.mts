@@ -21,7 +21,9 @@
  */
 
 import { randomBytes } from "node:crypto";
+import { fileURLToPath } from "node:url";
 import { createMemoryMfaFactorStore } from "@o3co/auth-provider-core";
+import { parseFile } from "@o3co/ts.hocon";
 import { describe, expect, it } from "vitest";
 import { mfaConfigSchema, mfaTotpConfigSchema, readMfaSettings } from "#/config.mjs";
 import { mfaRecoveryCodeFactorConfigSchema } from "#/recovery/config.mjs";
@@ -38,8 +40,21 @@ import { hotp, totpStep } from "#/totp/rfc6238.mjs";
 
 const KEY = randomBytes(32).toString("base64");
 
+const MFA_REFERENCE = fileURLToPath(new URL("../../config/reference.conf", import.meta.url));
+
 describe("the section builders", () => {
-	it("builds the MFA module's section at its name: the reference defaults, the key given, the mode and every key laid over them", () => {
+	it("builds each section, given only the key the MFA section has no default for, as the package's reference.conf resolves it", () => {
+		const resolved = parseFile(MFA_REFERENCE, {
+			env: { MFA_ENCRYPTION_KEY: KEY },
+		}).toObject() as Record<string, unknown>;
+		expect(mfaConfigForTests({ key: KEY }).mfa).toEqual(resolved.mfa);
+		expect(mfaTotpFactorConfigForTests()["mfa-totp-factor"]).toEqual(resolved["mfa-totp-factor"]);
+		expect(mfaRecoveryCodeFactorConfigForTests()["mfa-recovery-code-factor"]).toEqual(
+			resolved["mfa-recovery-code-factor"],
+		);
+	});
+
+	it("builds the MFA module's section at its name, with the key given, and the mode and each key laid over it", () => {
 		const fragment = mfaConfigForTests({ key: KEY, mode: "required" });
 		expect(Object.keys(fragment)).toEqual(["mfa"]);
 		expect(mfaConfigSchema.parse(fragment.mfa)).toMatchObject({
