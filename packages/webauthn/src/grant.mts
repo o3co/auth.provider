@@ -29,6 +29,7 @@ import { randomUUID } from "node:crypto";
 
 import {
 	auditErrorText,
+	authTimeClaim,
 	boundPolicyAudience,
 	checkOAuthTokenSettings,
 	consoleLogger,
@@ -262,6 +263,9 @@ export const createWebAuthnGrant = (deps: WebAuthnGrantDeps): GrantHandler => {
 					},
 				};
 			}
+			// The verified assertion is the authentication: its time is both tokens'
+			// `auth_time` (RFC 9470 §6.1).
+			const authTime = authTimeClaim(new Date());
 
 			// ------------------------------------------------------------------
 			// Step 5: Atomic CAS sign-count update
@@ -426,6 +430,7 @@ export const createWebAuthnGrant = (deps: WebAuthnGrantDeps): GrantHandler => {
 					// RFC 8176 `hwk`: the assertion proved a platform- or hardware-bound key. On the
 					// token itself, since this grant mints no id_token and creates no session.
 					amr: ["hwk"],
+					auth_time: authTime,
 				},
 				{
 					expiresIn: accessTokenExpiresIn,
@@ -454,8 +459,9 @@ export const createWebAuthnGrant = (deps: WebAuthnGrantDeps): GrantHandler => {
 					(bindingIsDpop || bindingIsMtls) && (isPublicClient || bindConfidentialClients);
 
 				refreshToken = await generateToken(
-					// The refresh grant copies `amr` from the refresh token, so `hwk` goes here too.
-					{ family_id: refreshReservation.familyId, amr: ["hwk"] },
+					// The refresh grant copies `amr` and `auth_time` from the refresh token, so
+					// they go here too.
+					{ family_id: refreshReservation.familyId, amr: ["hwk"], auth_time: authTime },
 					{
 						expiresIn: refreshTokenExpiresIn,
 						keyStore,
