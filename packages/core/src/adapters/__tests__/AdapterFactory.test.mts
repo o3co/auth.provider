@@ -457,30 +457,25 @@ describe("createLifecycleRegistrar", () => {
 		expect(reg._longestTailMs()).toBe(2_147_483_647);
 	});
 
-	it.each([
-		0,
-		-1,
-		1.5,
-		Number.NaN,
-		Number.POSITIVE_INFINITY,
-		2_147_483_648,
-		"45000",
-	])("refuses a tail of %s, and still drains the cleanup it came with", async (tailMs) => {
-		// A builder that registers its connection's close with a bad tail fails
-		// the boot; the drain that follows still closes the connection.
-		const ran: string[] = [];
-		const reg = createLifecycleRegistrar();
-		expect(() =>
-			reg.register(
-				async () => {
-					ran.push("kept");
-				},
-				{ tailMs: tailMs as number },
-			),
-		).toThrow(RangeError);
-		expect(reg._longestTailMs()).toBeUndefined();
+	it.each([0, -1, 1.5, Number.NaN, Number.POSITIVE_INFINITY, 2_147_483_648, "45000"])(
+		"refuses a tail of %s, and still drains the cleanup it came with",
+		async (tailMs) => {
+			// A builder that registers its connection's close with a bad tail fails
+			// the boot; the drain that follows still closes the connection.
+			const ran: string[] = [];
+			const reg = createLifecycleRegistrar();
+			expect(() =>
+				reg.register(
+					async () => {
+						ran.push("kept");
+					},
+					{ tailMs: tailMs as number },
+				),
+			).toThrow(RangeError);
+			expect(reg._longestTailMs()).toBeUndefined();
 
-		await reg._drain({ error: () => {} }, "boot_failure");
-		expect(ran).toEqual(["kept"]);
-	});
+			await reg._drain({ error: () => {} }, "boot_failure");
+			expect(ran).toEqual(["kept"]);
+		},
+	);
 });
