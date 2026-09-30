@@ -22,7 +22,7 @@
 // the `SSCAN` paging live in the ioredis wrapper, so a fake cannot vouch for
 // them: these run through `makeIoredisClients`.
 
-import Redis from "ioredis";
+import { Redis } from "ioredis";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { RedisSidSetClient } from "../src/internal/redisSidSet.mjs";
 import { createRedisSidSet } from "../src/internal/redisSidSet.mjs";

@@ -20,7 +20,7 @@
 // that reaches records written before the index existed.
 
 import type { FederationTokens } from "@o3co/auth-provider-core";
-import Redis from "ioredis";
+import { Redis } from "ioredis";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { encryptTokenField } from "#/internal/crypto.mjs";
 import {

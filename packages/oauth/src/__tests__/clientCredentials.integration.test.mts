@@ -18,7 +18,7 @@
  * End-to-end coverage for the route → ctx.authenticatedClient propagation of
  * the `client_credentials` grant. The unit tests in `clientCredentials.test.mts`
  * construct `AuthenticatedClient` directly, so they cannot catch a fault in how
- * `routes.mts` maps `req.oauthClient.*` into the handler input; this file
+ * `routes/token.mts` maps `req.oauthClient.*` into the handler input; this file
  * drives the full HTTP path via supertest.
  */
 
@@ -113,7 +113,7 @@ async function buildApp(clientRepo: ClientRepository): Promise<express.Express> 
 
 describe("client_credentials — /oauth/token integration (route → ctx propagation)", () => {
 	it("issues 200 + access_token when the client record surfaces allowedGrantTypes: ['client_credentials']", async () => {
-		// routes.mts copies allowedGrantTypes from req.oauthClient into
+		// routes/token.mts copies allowedGrantTypes from req.oauthClient into
 		// ctx.authenticatedClient; without it this request is 400
 		// unauthorized_client.
 		const app = await buildApp(clientRepoWith({ allowedGrantTypes: ["client_credentials"] }));

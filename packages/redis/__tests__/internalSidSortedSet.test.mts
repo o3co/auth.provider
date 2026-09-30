@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
-import Redis from "ioredis";
+import { Redis } from "ioredis";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import type { SessionSidSortedSetClient } from "../src/clients.mjs";
 import { createRedisSidSortedSet } from "../src/internal/redisSidSortedSet.mjs";
@@ -193,6 +193,7 @@ describe("createRedisSidSortedSet", () => {
 
 			vi.resetModules();
 			const fresh = (await import(
+				// @ts-expect-error tsc resolves no query string; the cast below types the module.
 				"../src/internal/redisSidSortedSet.mjs?freshOR8RED2"
 			)) as typeof import("../src/internal/redisSidSortedSet.mjs");
 			const z = fresh.createRedisSidSortedSet({ client, keyPrefix: prefix("or8-restart-v2") });
@@ -242,6 +243,7 @@ describe("createRedisSidSortedSet", () => {
 
 			vi.resetModules();
 			const fresh = (await import(
+				// @ts-expect-error tsc resolves no query string; the cast below types the module.
 				"../src/internal/redisSidSortedSet.mjs?freshOR8RED4"
 			)) as typeof import("../src/internal/redisSidSortedSet.mjs");
 			const z = fresh.createRedisSidSortedSet({

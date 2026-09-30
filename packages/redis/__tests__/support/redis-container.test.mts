@@ -23,7 +23,7 @@ describe("startDiscardingFailures", () => {
 			if (labels.length < 3) throw portsNotBound();
 			return started;
 		});
-		const discard = vi.fn(async () => {});
+		const discard = vi.fn(async (_label: string) => {});
 
 		expect(await startDiscardingFailures(attempt, discard)).toBe(started);
 		expect(attempt).toHaveBeenCalledTimes(3);

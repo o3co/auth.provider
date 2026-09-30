@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
-import Redis from "ioredis";
+import { Redis } from "ioredis";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { SessionRPRegistryClient } from "../src/clients.mjs";
 import { createRedisSidHash } from "../src/internal/redisSidHash.mjs";
