@@ -466,8 +466,8 @@ the same way. It takes the `Establishment` core's session admission built —
 federation callback, `resumePrimary`'s for a completion — and writes from its
 primary alone: the subject, the `User`, the claims envelope, `authTime`, the
 `amr` / `authentication` core composed, the `enrollmentFacts` core derived
-from the `User` (the MFA enrollment witness and whether the account has an
-address, never the address), and the `redirectTo`; nothing a caller passes
+from the `User` (the MFA enrollment witness and what its address is — none,
+one the provider reads, or one it cannot — never the address), and the `redirectTo`; nothing a caller passes
 beside it. Anything that is not an `Establishment` core built —
 an object shaped like one, a copy of one — is a `RangeError` before anything
 is written. On both paths core copies the `User` into the primary with
