@@ -255,7 +255,9 @@ describe("webauthnSessionSubjectModule — the manifest", () => {
 				sessionRequirementResolver: resolverForTests([]),
 				userSessionStore: {} as never,
 			}),
-		).toThrow(/^webauthnSessionSubjectModule: admits "webauthn\.register", which no module registers/);
+		).toThrow(
+			/^webauthnSessionSubjectModule: admits "webauthn\.register", which no module registers/,
+		);
 	});
 
 	it("refuses a mapper that is not a function when the module is built", () => {

@@ -31,12 +31,6 @@
  * authentication — is the security property.
  */
 
-// What the browser half admits, for a composition that mounts
-// createFederationGrantRouter itself and registers them.
-export {
-	FEDERATION_GRANTS_ADMISSION_ACTIONS,
-	type FederationGrantsAdmissionAction,
-} from "./admissionActions.mjs";
 export {
 	createFederationGrantBackground,
 	type FederationGrantBackground,

@@ -73,6 +73,9 @@ import {
 	reauthAskStoreFor,
 } from "./reauthAsk.mjs";
 
+/** The action /authorize admits, as `oauthModule` registers it. */
+const AUTHORIZE_ACTION = "oauth.authorize" satisfies keyof typeof OAUTH_ROUTER_ADMISSION_ACTIONS;
+
 export interface AuthorizeHandlerOptions {
 	readonly clientRepository: ClientRepository;
 	readonly codeRepository: CodeRepository;
@@ -1495,7 +1498,7 @@ export const createAuthorizeHandler = (opts: AuthorizeHandlerOptions): RequestHa
 	const admissionDeps: AdmissionDeps = {
 		userSessionStore: opts.userSessionStore,
 		subjectRevocation: opts.subjectRevocation,
-		requirements: checkResolver(opts.requirements, "createAuthorizeHandler"),
+		requirements: checkResolver(opts.requirements, "createAuthorizeHandler", [AUTHORIZE_ACTION]),
 		acrTable: opts.oauth.acrValues,
 		logger: opts.logger,
 		auditSink: opts.auditSink,
@@ -1580,7 +1583,7 @@ export const createAuthorizeHandler = (opts: AuthorizeHandlerOptions): RequestHa
 		// validated; what each outcome is answered with is `decideOnAdmission`'s.
 		const admission = await admitSession(admissionDeps, {
 			claim,
-			action: "oauth.authorize" satisfies keyof typeof OAUTH_ROUTER_ADMISSION_ACTIONS,
+			action: AUTHORIZE_ACTION,
 			...(requested.length > 0 ? { asks: { acrValues: requested } } : {}),
 		});
 		const decided = await decideOnAdmission(

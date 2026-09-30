@@ -41,12 +41,12 @@ import {
 import { GrantRegistry, resolverForTests } from "@o3co/auth-provider-core/testing";
 import express from "express";
 import { describe, expect, it } from "vitest";
+import { OAUTH_ROUTER_ADMISSION_ACTIONS } from "#/admissionActions.mjs";
 import { createAuthorizationGrant } from "#/grants/authorization.mjs";
 import { createRefreshTokenGrant } from "#/grants/refreshToken.mjs";
 import { createSessionGrant } from "#/grants/session.mjs";
 import { oauthAuthorizationModule } from "#/oauthAuthorization.mjs";
 import { oauthSessionModule } from "#/oauthSession.mjs";
-import { OAUTH_ROUTER_ADMISSION_ACTIONS } from "#/admissionActions.mjs";
 import { createOAuthRouter } from "#/routes.mjs";
 
 const config = {

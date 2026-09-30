@@ -118,11 +118,13 @@ export function webauthnSessionSubjectModule(options: WebAuthnSessionSubjectOpti
 			admissionActions: SESSION_SUBJECT_ADMISSION_ACTIONS,
 			routes: [
 				(deps) => {
-					// Refused here, when the route is built — a missing resolver, or
-					// one the planner did not build — not on the first request.
+					// Refused here, when the route is built — a missing resolver, one
+					// the planner did not build, or webauthn.register unregistered —
+					// not on the first request.
 					const requirements = checkResolver(
 						deps.sessionRequirementResolver,
 						"webauthnSessionSubjectModule",
+						Object.keys(SESSION_SUBJECT_ADMISSION_ACTIONS),
 					);
 					const logger = deps.logger ?? consoleLogger;
 					const admitRegistration: RequestHandler = async (req, res, next) => {

@@ -254,7 +254,11 @@ export const createDeviceVerificationHandler = (
 	}
 	// Likewise the resolver — missing, or one the planner did not build:
 	// refused here, not answered 500 on every request.
-	const requirements = checkResolver(options.requirements, "createDeviceVerificationHandler");
+	const requirements = checkResolver(
+		options.requirements,
+		"createDeviceVerificationHandler",
+		Object.values(ADMITTED_AS),
+	);
 	const now = options.now ?? Date.now;
 	// Admission's dependencies: this handler's own slots and clock.
 	const admissionDeps: AdmissionDeps = {

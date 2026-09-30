@@ -447,7 +447,11 @@ export function createFederationGrantBrowserRouter(
 ): Router {
 	// Refused where the composition is assembled, not answered 500 on every
 	// request: a missing resolver, or one the planner did not build.
-	const requirements = checkResolver(options.requirements, "createFederationGrantBrowserRouter");
+	const requirements = checkResolver(options.requirements, "createFederationGrantBrowserRouter", [
+		CONNECT,
+		CONSENT,
+		CALLBACK,
+	]);
 	// Admission reads the sessions boundary only when handed one; without it a
 	// session the boundary has ended would be admitted, so a hand-built router
 	// without it is refused.

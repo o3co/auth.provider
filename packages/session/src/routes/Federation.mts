@@ -58,7 +58,7 @@ import {
 	type UserSessionStore,
 } from "@o3co/auth-provider-core";
 import type { Request, RequestHandler, Response, Router } from "express";
-import type { SessionAdmissionAction } from "../admissionActions.mjs";
+import { SESSION_ADMISSION_ACTIONS, type SessionAdmissionAction } from "../admissionActions.mjs";
 import { checkNavigationOrigin } from "../csrf.mjs";
 import { type EstablishSessionStep, establishSession } from "../establish-session.mjs";
 import { mergeFederatedClaims } from "../federations/claim-precedence.mjs";
@@ -373,7 +373,7 @@ export const createRouter = (
 		logger?: Logger;
 	},
 ): Router => {
-	checkResolver(requirements, "federation routes");
+	checkResolver(requirements, "federation routes", Object.keys(SESSION_ADMISSION_ACTIONS));
 	if (!userSessionStore) throw new Error("federation routes require userSessionStore");
 	if (!sessionFederationIndex) throw new Error("federation routes require sessionFederationIndex");
 	if (!federationTokenStore) throw new Error("federation routes require federationTokenStore");

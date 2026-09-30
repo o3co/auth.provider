@@ -443,7 +443,9 @@ describe("device verification on session admission", () => {
 				}),
 				requireEmailVerified: false,
 			} as never),
-		).toThrow(/^createDeviceVerificationHandler: admits "device\.approve", which no module registers/);
+		).toThrow(
+			/^createDeviceVerificationHandler: admits "device\.approve", which no module registers/,
+		);
 	});
 
 	it("reads no issuer: the page it answers is the one registration resolved on the issuer — built without one, it answers that page", async () => {
