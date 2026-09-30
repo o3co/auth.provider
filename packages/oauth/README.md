@@ -367,7 +367,7 @@ The challenge is bound to the session that parked the request and reaches the pa
 
 Register what the page will show: `clientName` (RFC 7591 `client_name`) and `clientUri` (`client_uri`) on the client record. A native client with a loopback `redirect_uri` is the case the MCP authorization spec asks the page to warn about — `redirect_uri` is in the response for exactly that.
 
-**A Client ID Metadata Document client names itself.** Its `client_name` and `client_uri` come from a document whoever controls its host wrote, so "Google Drive" costs nothing to type. The one verified fact is the host its `client_id` URL names, which the response carries as `client_id_host`: show it prominently, as the draft asks, and never let `client_name` stand alone. Serve the page with `Referrer-Policy: no-referrer` (or `strict-origin`) so a `client_uri` link does not hand that host the page URL and its challenge.
+**A Client ID Metadata Document client names itself.** Its `client_name` and `client_uri` come from a document whoever controls its host wrote, so "Google Drive" costs nothing to type. The one verified fact is the host its `client_id` URL names, which the response carries as `client_id_host`: show it prominently, as the draft asks, and never let `client_name` stand alone. Serve the page with `Referrer-Policy: same-origin` (or `strict-origin`) so a `client_uri` link does not hand that host the page URL and its challenge. Not `no-referrer`: a page that also answers federation-grant consents would post that answer with `Origin: null`, which the federation-grants answer refuses ([its README](../federation-grants/README.md#the-answer-and-the-csrf-policy)).
 
 ## Client ID Metadata Documents (#529)
 

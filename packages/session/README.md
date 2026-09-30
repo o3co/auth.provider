@@ -173,7 +173,7 @@ Each provider runs core's contract suite in this package's tests.
 
 | Slot | Provided by | What it is | Read by |
 | --- | --- | --- | --- |
-| `csrfGuard` | `sessionModule` | The [CSRF policy](#csrf-on-the-state-changing-routes) `POST /session/login` runs: `check` and `middleware` for a request that changes state — the same `403 access_denied` and log line — `checkNavigation` for a navigation that starts a flow (the [account-link start](#account-linking-across-federations-482)'s rule), and `issue`. The token's form field is `csrf_token`. | Device verification, once the grant is enabled |
+| `csrfGuard` | `sessionModule` | The [CSRF policy](#csrf-on-the-state-changing-routes) `POST /session/login` runs: `middleware` for a request that changes state — the same `403 access_denied` and log line — and `check`, its verdict, which writes nothing; `checkNavigation` for a navigation that starts a flow (the [account-link start](#account-linking-across-federations-482)'s rule), and `issue`. The token's form field is `csrf_token`. | Device verification, once the grant is enabled; the federation-grants consent answer, once grants are enabled |
 | `loginEntry` | `sessionModule` | The login page, `endpoints.login.url`, and `urlFor(returnTo)`, which adds `redirect_to` to the page's own query, before any fragment. A page whose query already carries `redirect_to` is refused when the entry is built, as `/authorize`'s own fallback refuses it. Built when no page is configured, and failing where the page is read. | `/authorize` when a module provides it; the federation-grants connect flow, once grants are enabled |
 | `loginCompletion` | `loginCompletionModule` | [`establishSession`](#establishing-the-session) and [`answerInterruption`](#when-a-requirement-interrupts-the-login) over the session stores and the `csrfGuard` the module requires, and `session.maxAge`. Its own module, loaded beside `sessionModule`: an interruption's token is the deployment's `csrfGuard`'s, whoever filled the slot, and `sessionModule` cannot require the slot it fills. | A requirement's completion (the MFA package's) |
 | `sessionCookiePolicy` | the session store's module | The session cookie's name, `secure`, `sameSite`, domain and lifetime: the value the store's route mounts its cookie from. A section that would break core's contract is refused at config validation ([below](#browser-session-store)). Authoritative: while the store's module is loaded an `overrideComponents` entry for the slot refuses boot (`authoritative-component-overridden`), since the store would go on mounting the cookie `session.*` describes; a composition without the module fills the slot itself. | The subject revocation service, optionally, to size its horizon |
@@ -582,11 +582,13 @@ when the signer's `verify` answers `true`, and one whose expiry lies more than
 `session.csrf.ttlSeconds` and 60 seconds of clock skew ahead is refused, since
 no token the routes issue expires later.
 Cross-origin login UIs list their origin on `session.csrf.trustedOrigins`;
-`cors.allowedOrigins` grants no CSRF trust.
+`cors.allowedOrigins` grants no CSRF trust. A listed origin can also answer
+federation-grant consents and device verification, so a client's origin is
+never listed (the federation-grants ADR's D7).
 
 Another package runs this policy through the `csrfGuard` slot `sessionModule`
-provides — device verification mounts its `middleware` — rather than importing
-it. `checkRequestOrigin`, `createCsrfProtection`, `createCsrfProtectionFromConfig`,
+provides — device verification mounts its `middleware`, and the
+federation-grants consent answer asks its `check` — rather than importing it. `checkRequestOrigin`, `createCsrfProtection`, `createCsrfProtectionFromConfig`,
 `createCsrfGuard`, `createCsrfIssueHandler` and `createSessionCsrfGuard` are
 exported ([`src/csrf.mts`](src/csrf.mts)) for compositions that mount their own
 login page or protect their own routes. `createCsrfProtection` and
