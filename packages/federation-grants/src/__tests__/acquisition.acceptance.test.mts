@@ -51,6 +51,7 @@ import {
 	passwordSessionAuthentication,
 } from "@o3co/auth-provider-core";
 import {
+	coreConfigForTests,
 	createTestOAuthTokenSettings,
 	makeValidCoreConfig,
 } from "@o3co/auth-provider-core/testing";
@@ -266,11 +267,8 @@ const boot = async (
 		bootstrapComponents: {
 			config: {
 				...makeValidCoreConfig(),
-				core: {
-					...makeValidCoreConfig().core,
-					...(requirement === undefined
-						? {}
-						: { sessionRequirements: { expected: [requirement.name] } }),
+				...coreConfigForTests({
+					...(requirement === undefined ? {} : { expected: [requirement.name] }),
 					declaredAbsent: ["auditSink"],
 					federations: {
 						upstream: {
@@ -279,7 +277,7 @@ const boot = async (
 							clientId: "provider-client",
 						},
 					},
-				},
+				}),
 				rateLimit: { failMode: "closed" },
 				"federation-grants": {
 					enabled: true,

@@ -28,6 +28,7 @@ import {
 	type UserSessionStore,
 } from "@o3co/auth-provider-core";
 import {
+	coreConfigForTests,
 	createTestApp,
 	createTestCsrfTokenSigner,
 	createTestSessionCookiePolicy,
@@ -246,8 +247,8 @@ describe("sessionModule (boot integration)", () => {
 		const base = makeValidAppConfig();
 		const config: AppConfig = {
 			...base,
-			core: {
-				...(base.core as object),
+			...coreConfigForTests({
+				declaredAbsent: ["auditSink"],
 				federations: {
 					stub: {
 						enabled: true,
@@ -256,7 +257,7 @@ describe("sessionModule (boot integration)", () => {
 						callbackURL: "https://example.com/cb",
 					} as never,
 				},
-			},
+			}),
 		} as AppConfig;
 		const handle = await createTestApp({
 			modules: [...baseTestModules, stubFederationModule],
@@ -270,8 +271,8 @@ describe("sessionModule (boot integration)", () => {
 		const base = makeValidAppConfig();
 		const config: AppConfig = {
 			...base,
-			core: {
-				...(base.core as object),
+			...coreConfigForTests({
+				declaredAbsent: ["auditSink"],
 				federations: {
 					stub: {
 						enabled: true,
@@ -280,7 +281,7 @@ describe("sessionModule (boot integration)", () => {
 						// callbackURL intentionally absent
 					} as never,
 				},
-			},
+			}),
 		} as AppConfig;
 		await expect(
 			createTestApp({
@@ -297,15 +298,15 @@ describe("sessionModule (boot integration)", () => {
 		const base = makeValidAppConfig();
 		const config: AppConfig = {
 			...base,
-			core: {
-				...(base.core as object),
+			...coreConfigForTests({
+				declaredAbsent: ["auditSink"],
 				federations: {
 					disabledFed: {
 						enabled: false,
 						// no callbackURL — must NOT throw because disabled
 					} as never,
 				},
-			},
+			}),
 		} as AppConfig;
 		const handle = await createTestApp({
 			modules: baseTestModules,
@@ -369,8 +370,8 @@ describe("sessionModule — the link routes are a consumer of session admission"
 		const base = makeValidAppConfig();
 		const config = {
 			...base,
-			core: {
-				...(base.core as object),
+			...coreConfigForTests({
+				declaredAbsent: ["auditSink"],
 				federations: {
 					stub: {
 						enabled: true,
@@ -379,7 +380,7 @@ describe("sessionModule — the link routes are a consumer of session admission"
 						callbackURL: "https://example.com/session/oauth/federation/stub/callback",
 					},
 				},
-			},
+			}),
 		} as unknown as AppConfig;
 		const record = {
 			sid: "s-1",

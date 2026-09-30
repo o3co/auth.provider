@@ -32,7 +32,7 @@ import {
 	describeAbsenceDeclaration,
 	isAbsenceDeclared,
 } from "../../index.mjs";
-import { makeValidAppConfig } from "../../testing/fixtures/valid-config.mjs";
+import { coreConfigForTests, makeValidAppConfig } from "../../testing/fixtures/valid-config.mjs";
 import { BootError } from "../types.mjs";
 
 /** A module that reads `auditSink` and refuses to be silently sink-less. */
@@ -69,17 +69,8 @@ const auditProviderModule = defineModule({
 	} as never,
 });
 
-/** `makeValidAppConfig`'s core section without the declared absences. */
-function coreWithoutDeclarations(): Record<string, unknown> {
-	const { core } = makeValidAppConfig() as unknown as { core: Record<string, unknown> };
-	const { declaredAbsent: _declared, ...rest } = core;
-	return rest;
-}
-
 /** `core` declaring `names` absent. */
-const declaring = (...names: string[]) => ({
-	core: { ...coreWithoutDeclarations(), declaredAbsent: names },
-});
+const declaring = (...names: string[]) => coreConfigForTests({ declaredAbsent: names });
 
 /**
  * `makeValidAppConfig` deliberately declares the audit sink absent so
@@ -91,7 +82,7 @@ function boot(configOverrides: Record<string, unknown> = {}) {
 		audit?: unknown;
 	};
 	return {
-		config: { ...config, core: coreWithoutDeclarations(), ...configOverrides },
+		config: { ...config, ...coreConfigForTests(), ...configOverrides },
 		pathResolver: (p: string) => p,
 	} as never;
 }

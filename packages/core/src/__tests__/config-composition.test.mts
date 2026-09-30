@@ -219,7 +219,6 @@ describe("AppConfigSchema", () => {
 				// client / authCallback are not in the schema — stripped if present.
 				login: { url: "/login" },
 			},
-			cors: { allowedOrigins: [] },
 		};
 		const result = AppConfigSchema.safeParse(fullConfig);
 		expect(result.success).toBe(true);

@@ -67,7 +67,8 @@ const isDeclaredAbsentList = (configKey: readonly string[]): boolean =>
 /**
  * Whether `config` declares `policy`'s capability absent: the value at its
  * `configKey`, read as own properties (a key an object inherits is not one
- * anyone wrote), is its `absentValue`, or is a list holding it.
+ * anyone wrote), is its `absentValue` — or, at core's own list,
+ * `core.declaredAbsent`, a list holding it.
  */
 export function isAbsenceDeclared(config: unknown, policy: AbsencePolicy): boolean {
 	let value: unknown = config;
@@ -77,7 +78,9 @@ export function isAbsenceDeclared(config: unknown, policy: AbsencePolicy): boole
 		}
 		value = (value as Record<string, unknown>)[segment];
 	}
-	return Array.isArray(value) ? value.includes(policy.absentValue) : value === policy.absentValue;
+	return isDeclaredAbsentList(policy.configKey) && Array.isArray(value)
+		? value.includes(policy.absentValue)
+		: value === policy.absentValue;
 }
 
 /**

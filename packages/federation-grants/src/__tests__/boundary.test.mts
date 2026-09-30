@@ -42,7 +42,7 @@ import {
 	federationGrantAuthorizationRevision,
 	federationGrantIdentityRevision,
 } from "@o3co/auth-provider-core";
-import { makeValidCoreConfig } from "@o3co/auth-provider-core/testing";
+import { coreConfigForTests, makeValidCoreConfig } from "@o3co/auth-provider-core/testing";
 import express from "express";
 import request from "supertest";
 import { describe, expect, it, vi } from "vitest";
@@ -128,8 +128,7 @@ const boot = async (boundaries: Boundaries = {}, spent = false) => {
 			config: {
 				...makeValidCoreConfig(),
 				rateLimit: { failMode: "closed" },
-				core: {
-					...makeValidCoreConfig().core,
+				...coreConfigForTests({
 					declaredAbsent: ["auditSink"],
 					federations: {
 						upstream: {
@@ -140,7 +139,7 @@ const boot = async (boundaries: Boundaries = {}, spent = false) => {
 							clientId: connection.upstreamClientId,
 						},
 					},
-				},
+				}),
 				"federation-grants": {
 					enabled: true,
 					connections: {

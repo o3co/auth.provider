@@ -200,10 +200,25 @@ export interface RepositorySelection {
 }
 
 /**
+ * `block`, the settings `repositories.<repository>.<adapter>` holds, or an
+ * `Error` naming its path when the selected adapter has none: `static` ships
+ * no block.
+ */
+function requiredBlock<B>(block: B | undefined, repository: string, adapter: string): B {
+	if (block === undefined) {
+		throw new Error(
+			`repositories.${repository}.${adapter}.path must be set when adapters.${repository}Repository is "${adapter}"`,
+		);
+	}
+	return block;
+}
+
+/**
  * Repositories module: owns `repositories {}` and provides the client and
  * user repositories the composition root's `adapters` select, through the
  * built-in adapter factories: the YAML client registry, and the YAML or the
- * Store's HTTP user repository (`@o3co/auth-provider-foundation`). The
+ * Store's HTTP user repository (`@o3co/auth-provider-foundation`); core's
+ * `static`, an alias of `yaml`, reads a block of its own. The
  * variables bound to its keys are renamed after their paths
  * (`REPOSITORIES_*`). `codeRepository` comes from the in-process or the Redis
  * code repository module instead.
@@ -234,14 +249,16 @@ export function repositoriesModuleFor(selection: RepositorySelection): Module {
 		provides: {
 			clientRepository: async ({ section, lifecycleRegistrar }) => {
 				const { clientFactory } = createRepositoryFactories({ lifecycle: lifecycleRegistrar });
+				const file = requiredBlock(section.client[selection.client], "client", selection.client);
 				return clientFactory.create({
 					type: selection.client,
-					path: path.resolve(process.cwd(), section.client.yaml.path),
+					path: path.resolve(process.cwd(), file.path),
 				});
 			},
 			userRepository: async ({ section, lifecycleRegistrar }) => {
 				const { userFactory } = createRepositoryFactories({ lifecycle: lifecycleRegistrar });
 				registerBuiltinAdapters({ userFactory });
+				if (selection.user === "static") requiredBlock(section.user.static, "user", "static");
 				return userFactory.create(
 					flattenAdapterConfig({
 						type: selection.user,

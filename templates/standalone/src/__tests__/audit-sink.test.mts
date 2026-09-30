@@ -39,6 +39,7 @@ import {
 	memoryRefreshTokenFamilyStoreModule,
 	registerBuiltinKeyStores,
 } from "@o3co/auth-provider-core";
+import { coreConfigForTests } from "@o3co/auth-provider-core/testing";
 import express from "express";
 import request from "supertest";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -82,7 +83,7 @@ const baseConfig: Switches & Record<string, unknown> = {
 	},
 	// The shipped `application.conf` expects no session requirement (ADR
 	// 2026-09-28-session-admission).
-	core: { sessionRequirements: { expected: [] }, federations: { google: { enabled: false } } },
+	...coreConfigForTests({ federations: { google: { enabled: false } } }),
 	oauth: {
 		jwt: {
 			issuer: "https://auth.test",

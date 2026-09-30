@@ -58,12 +58,17 @@ export interface CoreConfigForTestsOptions {
 	readonly expected?: readonly string[];
 	/** The deployment mode; left unstated by default, which core reads as `unset`. */
 	readonly deploymentMode?: "single" | "multi";
+	/** The federations, keyed by name (`core.federations`); left unstated by default. */
+	readonly federations?: NonNullable<NonNullable<CoreConfig["core"]>["federations"]>;
+	/** The slots this composition runs without on purpose (`core.declaredAbsent`); none by default. */
+	readonly declaredAbsent?: readonly string[];
 }
 
 /**
  * Core's own section, `core`, as a configuration fragment to lay over a
  * configuration: the session requirements the composition expects, and the
- * deployment mode when one is given. A fresh object each call.
+ * deployment mode, the federations and the slots declared absent when given.
+ * A fresh object each call.
  */
 export function coreConfigForTests(options: CoreConfigForTestsOptions = {}) {
 	return {
@@ -72,6 +77,10 @@ export function coreConfigForTests(options: CoreConfigForTestsOptions = {}) {
 			...(options.deploymentMode === undefined
 				? {}
 				: { deployment: { mode: options.deploymentMode } }),
+			...(options.federations === undefined ? {} : { federations: { ...options.federations } }),
+			...(options.declaredAbsent === undefined
+				? {}
+				: { declaredAbsent: [...options.declaredAbsent] }),
 		},
 	} satisfies Pick<CoreConfig, "core">;
 }
@@ -159,12 +168,9 @@ export function makeValidAppConfig() {
 	return {
 		...core,
 		...makeValidFullSections(),
-		core: {
-			...core.core,
-			// Declares the audit sink absent (this fixture has no audit trail, on
-			// purpose); the bundled modules refuse an unfilled `auditSink`
-			// otherwise. A test of the declared-absence guard removes the entry.
-			declaredAbsent: ["auditSink"],
-		},
+		// Declares the audit sink absent (this fixture has no audit trail, on
+		// purpose); the bundled modules refuse an unfilled `auditSink`
+		// otherwise. A test of the declared-absence guard removes the entry.
+		...coreConfigForTests({ declaredAbsent: ["auditSink"] }),
 	} satisfies AppConfig;
 }

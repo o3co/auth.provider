@@ -43,6 +43,7 @@ import {
 	type UserSessionStore,
 } from "@o3co/auth-provider-core";
 import {
+	coreConfigForTests,
 	createTestApp,
 	createTestLoginEntry,
 	makeValidAppConfig,
@@ -318,7 +319,7 @@ describe("oauthModule — the acr table in the served discovery document", () =>
 				jwt: { ...base.oauth.jwt, issuer: "https://auth.example.com" },
 				authorize: { acrValues },
 			},
-			core: { ...base.core, federations },
+			...coreConfigForTests({ declaredAbsent: ["auditSink"], federations: federations as never }),
 		} as ReturnType<typeof makeValidAppConfig>;
 	};
 	/** A federation, contributed as a federation package's module contributes one. */

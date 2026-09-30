@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
-import { makeValidAppConfig } from "@o3co/auth-provider-core/testing";
+import { coreConfigForTests, makeValidAppConfig } from "@o3co/auth-provider-core/testing";
 import { describe, expect, it } from "vitest";
 import { buildModules } from "../buildModules.mjs";
 import type { Switches } from "../configPath.mjs";
@@ -45,7 +45,7 @@ const okta = {
 const configWith = (federations: Record<string, unknown>): Switches =>
 	({
 		...makeValidAppConfig(),
-		core: { ...makeValidAppConfig().core, federations },
+		...coreConfigForTests({ declaredAbsent: ["auditSink"], federations: federations as never }),
 		adapters: inProcessAdapters(),
 	}) as unknown as Switches;
 

@@ -33,7 +33,11 @@ import type {
 	UserSessionStore,
 } from "@o3co/auth-provider-core";
 import { defineModule } from "@o3co/auth-provider-core";
-import { createTestApp, makeValidAppConfig } from "@o3co/auth-provider-core/testing";
+import {
+	coreConfigForTests,
+	createTestApp,
+	makeValidAppConfig,
+} from "@o3co/auth-provider-core/testing";
 import express from "express";
 import request from "supertest";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -128,8 +132,8 @@ const config = (): AppConfig => {
 	);
 	return {
 		...base,
-		core: {
-			...(base.core as object),
+		...coreConfigForTests({
+			declaredAbsent: ["auditSink"],
 			federations: {
 				stub: {
 					enabled: true,
@@ -138,7 +142,7 @@ const config = (): AppConfig => {
 					callbackURL: "https://as.example/session/oauth/federation/stub/callback",
 				} as never,
 			},
-		},
+		}),
 	} as AppConfig;
 };
 

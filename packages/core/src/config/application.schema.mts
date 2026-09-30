@@ -25,7 +25,7 @@ import { z } from "zod";
 
 import { checkCanonicalIssuer, describeIssuerRejection } from "../issuer/canonical.mjs";
 import { MAX_DURATION_SECONDS } from "./durations.mjs";
-import { type RemovedKey, withRemovedKeys } from "./removed-keys.mjs";
+import { type RemovedKey, unreadSection, withRemovedKeys } from "./removed-keys.mjs";
 import { environmentCoercer } from "./schema-path.mjs";
 
 /**
@@ -769,10 +769,14 @@ export const fullSectionsSchema = z.object({
 	// Presence-only: the paths the login and consent pages moved from
 	// (`session.loginPage.url`, `oauth.consentPage.url`). Nothing reads them.
 	endpoints: z.unknown().optional(),
-	// Presence-only: the path the CORS list moved from (`http.cors`, the
-	// `http` module's), kept so a root that parses with `AppConfigSchema` before
-	// boot still hands it to the relocation refusal. Nothing reads it.
-	cors: z.unknown().optional(),
+	// Refused whenever present: core reads a composition's CORS origins from
+	// the `httpSettings` slot alone. A loaded module that relocates `cors` (the
+	// standalone template's `http`) refuses it first, before parse, naming its
+	// own path.
+	cors: unreadSection(
+		"cors",
+		"The CORS origins are handed to core in the httpSettings slot (cors.allowedOrigins), by the module that provides the slot; without the slot, no CORS is mounted.",
+	),
 	// The WebAuthn deployer section, which a composition root's bootstrap
 	// module parses with `webauthnConfigSchema`; lost here, the bootstrap fails
 	// on a missing `rpId` instead of reading the operator's. Presence-only:

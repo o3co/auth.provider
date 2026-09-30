@@ -27,7 +27,11 @@ import {
 	memoryRefreshTokenFamilyStoreModule,
 	memorySessionStoresModule,
 } from "@o3co/auth-provider-core";
-import { makeValidAppConfig, renamedVariableCaptures } from "@o3co/auth-provider-core/testing";
+import {
+	coreConfigForTests,
+	makeValidAppConfig,
+	renamedVariableCaptures,
+} from "@o3co/auth-provider-core/testing";
 import { sessionModule, sessionStoreModuleFor } from "@o3co/auth-provider-session";
 import express from "express";
 import request from "supertest";
@@ -52,8 +56,8 @@ function buildConfig(): AppConfig {
 		...base,
 		// supertest speaks plain http; a Secure cookie would never come back.
 		"session-store": { ...base["session-store"], name: "auth.sid", secure: false },
-		core: {
-			...base.core,
+		...coreConfigForTests({
+			declaredAbsent: ["auditSink"],
 			federations: {
 				"idp-a": {
 					enabled: true,
@@ -76,7 +80,7 @@ function buildConfig(): AppConfig {
 					},
 				},
 			},
-		},
+		}),
 	} as unknown as AppConfig;
 }
 

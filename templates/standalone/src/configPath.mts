@@ -403,6 +403,25 @@ function unownedTemplateDefaults(
 	);
 }
 
+/**
+ * Refuses, with a `RangeError` naming it, a module whose section is at or
+ * under `adapters`, the composition root's own section, which phase one
+ * consumes and boot is never handed: the module would read nothing its
+ * operator wrote.
+ */
+function refuseModuleAtAdapters(modules: readonly Module[]): void {
+	for (const module of modules) {
+		const section = module.section;
+		if (section === undefined) continue;
+		const path = section.at ?? module.name;
+		if (path.split(".")[0] === ADAPTERS_SECTION) {
+			throw new RangeError(
+				`Module "${module.name}" has its section at ${path}, under ${ADAPTERS_SECTION}: the composition root's own section, which boot is not handed. Give the module a section of another name.`,
+			);
+		}
+	}
+}
+
 /** The section a resolution captures renamed variables in: never left out. */
 const RENAMED_VARIABLES = "renamed-variables";
 
@@ -421,7 +440,8 @@ const RENAMED_VARIABLES = "renamed-variables";
  * template's own `reference.conf` sets for a module the composition does not
  * load, left as that file sets it (`unownedTemplateDefaults`).
  *
- * Refuses, with a `RangeError`, the Redis intent store left on its default
+ * Refuses, with a `RangeError`, a module whose section is under `adapters`
+ * (`refuseModuleAtAdapters`), and the Redis intent store left on its default
  * key prefix where the grant store's was moved
  * (`refuseIntentPrefixLeftAtDefault`).
  *
@@ -433,6 +453,7 @@ export function resolveForBoot(
 	modules: readonly Module[],
 	sessionRequirements: SessionRequirements,
 ): AppConfig {
+	refuseModuleAtAdapters(modules);
 	const all = resolveLayers(own, moduleReferences(modules));
 	refuseIntentPrefixLeftAtDefault(all, modules);
 	const unowned = new Set([ADAPTERS_SECTION, ...unownedTemplateDefaults(all, modules)]);

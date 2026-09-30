@@ -42,6 +42,7 @@ import {
 	defineModule,
 } from "@o3co/auth-provider-core";
 import {
+	coreConfigForTests,
 	createTestCsrfGuard,
 	createTestOAuthTokenSettings,
 	makeValidCoreConfig,
@@ -138,7 +139,7 @@ const makeBoot = (overrides: Overrides): BootstrapMap => {
 			// with no sink must say so — which is what this fixture is.
 			...(overrides.withoutAuditDeclaration === true
 				? {}
-				: { core: { ...core.core, declaredAbsent: ["auditSink"] } }),
+				: coreConfigForTests({ declaredAbsent: ["auditSink"] })),
 			oauth: {
 				...core.oauth,
 			},

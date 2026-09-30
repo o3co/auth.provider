@@ -39,6 +39,7 @@ import {
 	InMemoryUserRepository,
 } from "@o3co/auth-provider-core";
 import {
+	coreConfigForTests,
 	createTestOAuthTokenSettings,
 	makeValidCoreConfig,
 } from "@o3co/auth-provider-core/testing";
@@ -259,13 +260,12 @@ const boot = (setup: Setup) => {
 		bootstrapComponents: {
 			config: {
 				...makeValidCoreConfig(),
-				core: {
-					...makeValidCoreConfig().core,
+				...coreConfigForTests({
 					federations: {
 						upstream: { enabled: true, issuer: "https://issuer.example", clientId: "cid" },
 					},
 					...(setup.withAudit === false ? {} : { declaredAbsent: ["auditSink"] }),
-				},
+				}),
 				rateLimit: { failMode: "closed" },
 				...(setup.oldAuditDeclaration === true ? { audit: { sink: { type: "none" } } } : {}),
 				"federation-grants": {

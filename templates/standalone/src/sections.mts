@@ -228,7 +228,8 @@ export const redisClientsSectionSchema = z
 /**
  * `adapters`: which adapter fills each slot, the composition root's own
  * choice. `userSessionStores` switches the four user-session stores and the
- * subject-level revocation pair together; `mfaFactorStore` and
+ * subject-level revocation pair together; the repositories take core's
+ * `static`, an alias of `yaml` with a block of its own; `mfaFactorStore` and
  * `mfaTransactionStore` are read by a composition that installs MFA;
  * `auditSink` names a sink the audit-sink module's factory registers.
  */
@@ -245,8 +246,8 @@ export const adaptersSchema = z
 		mfaFactorStore: z.enum(["memory", "redis", "store"]),
 		mfaTransactionStore: z.enum(["memory", "redis"]),
 		codeRepository: z.enum(["memory", "redis"]),
-		clientRepository: z.enum(["yaml"]),
-		userRepository: z.enum(["yaml", "http"]),
+		clientRepository: z.enum(["yaml", "static"]),
+		userRepository: z.enum(["yaml", "static", "http"]),
 		auditSink: z.string().min(1),
 	})
 	.strict();
@@ -259,17 +260,19 @@ const yamlSchema = z.object({ path: z.string() }).strict();
 
 /**
  * `repositories`: the YAML client registry, and the user repository's
- * settings for each adapter it may be — the YAML directory, or the Store's
- * HTTP endpoints. The HTTP settings are shape only: the repository holds each
+ * settings for each adapter it may be — the YAML file, or the Store's HTTP
+ * endpoints. `static`, core's alias of `yaml`, reads the same shape from a
+ * block of its own, which has no default. The HTTP settings are shape only: the repository holds each
  * value to its rules (https or loopback, a credential's strength, positive
  * whole numbers) when it is built, and names what it refuses.
  */
 export const repositoriesSectionSchema = z
 	.object({
-		client: z.object({ yaml: yamlSchema }).strict(),
+		client: z.object({ yaml: yamlSchema, static: yamlSchema.optional() }).strict(),
 		user: z
 			.object({
 				yaml: yamlSchema,
+				static: yamlSchema.optional(),
 				http: z
 					.object({
 						authenticateUrl: z.unknown().optional(),

@@ -29,7 +29,7 @@
  */
 import { describe, expect, it } from "vitest";
 import { createApp, defineModule } from "../../index.mjs";
-import { makeValidAppConfig } from "../../testing/fixtures/valid-config.mjs";
+import { coreConfigForTests, makeValidAppConfig } from "../../testing/fixtures/valid-config.mjs";
 import { BootError } from "../types.mjs";
 
 /** A bootstrap map with google federation enabled but no stores wired. */
@@ -37,7 +37,10 @@ function makeBootWithFederationEnabled() {
 	return {
 		config: {
 			...makeValidAppConfig(),
-			core: { ...makeValidAppConfig().core, federations: { google: { enabled: true } } },
+			...coreConfigForTests({
+				declaredAbsent: ["auditSink"],
+				federations: { google: { enabled: true } },
+			}),
 		},
 		pathResolver: (p: string) => p,
 	} as never;

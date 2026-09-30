@@ -27,7 +27,7 @@ import { z } from "zod";
 import type { FederationProvider } from "../../federations/types.mjs";
 import type { Module } from "../../modules/manifest/index.mjs";
 import { defineModule } from "../../modules/manifest/index.mjs";
-import { makeValidCoreConfig } from "../../testing/fixtures/valid-config.mjs";
+import { coreConfigForTests, makeValidCoreConfig } from "../../testing/fixtures/valid-config.mjs";
 import { applyContributions } from "../apply-contributions.mjs";
 import { createApp, mergeWithBuiltins } from "../create-app.mjs";
 import { materializeComponents } from "../materialize-components.mjs";
@@ -122,10 +122,9 @@ describe("federationTypes — declared by type", () => {
 		const handle = await createApp({
 			modules: [acme],
 			bootstrapComponents: bootWith({
-				core: {
-					...makeValidCoreConfig().core,
+				...coreConfigForTests({
 					federations: { corp: { enabled: false, type: "acme", issuer: 42 } },
-				},
+				}),
 			}),
 		});
 
