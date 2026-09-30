@@ -105,6 +105,10 @@ function build(
 		readonly recentMfaMaxAgeSeconds?: number;
 		readonly logger?: Logger;
 		readonly auditSink?: AuditSink;
+		/** `mfa.enrollment.requireEmailProof`; the package's default, by default. */
+		readonly requireEmailProof?: "when-mail" | "always" | "never";
+		/** Whether a mail sender is wired; none, by default. */
+		readonly mailWired?: boolean;
 	} = {},
 ): Built {
 	const transactionStore = options.transactionStore ?? createMemoryMfaTransactionStore();
@@ -122,6 +126,12 @@ function build(
 		recentMfaMaxAgeSeconds: options.recentMfaMaxAgeSeconds ?? 300,
 		logger: options.logger ?? silentLogger(),
 		auditSink: options.auditSink,
+		firstBinding: {
+			requireEmailProof: options.requireEmailProof ?? "when-mail",
+			mailWired: options.mailWired ?? false,
+		},
+		emailProofRequiredAtNextBinding: (subject) =>
+			transactionStore.emailProofRequiredAtNextBinding(subject),
 	});
 	return { requirement, transactionStore };
 }
@@ -1156,6 +1166,80 @@ describe("admitPrimary — after a password login", () => {
 			"mfa_enrollment_nothing_enrollable",
 		);
 		expect(JSON.stringify(logger.warn.mock.calls)).not.toContain("u-alice");
+	});
+
+	/** What a first binding under `options` opens for alice, whose account carries `user`. */
+	const firstBinding = async (
+		options: Parameters<typeof build>[1],
+		user: Record<string, unknown> = { email: "alice@example.com" },
+		before?: (store: MfaTransactionStore) => Promise<void>,
+	) => {
+		const built = build("required", options);
+		await before?.(built.transactionStore);
+		const admission = await admitPrimary(depsFor(built.requirement), primaryOf("u-alice", user));
+		if (admission.outcome !== "interrupt") throw new Error("not interrupted");
+		const answer = await admission.open("sess-1");
+		const transaction = await built.transactionStore.get(answer.body.transaction as string);
+		return { hint: answer.body.hints?.email_proof, emailProof: transaction?.emailProof };
+	};
+
+	it("asks for the account-email proof first where a mail sender is wired and the account has an address: the hint says so, and the transaction requires it", async () => {
+		expect(await firstBinding({ mailWired: true })).toEqual({ hint: true, emailProof: "required" });
+		expect(await firstBinding({ mailWired: true, requireEmailProof: "always" })).toEqual({
+			hint: true,
+			emailProof: "required",
+		});
+	});
+
+	it("asks for none without a sender, for an account with no address it can read, or under never", async () => {
+		const none = { hint: false, emailProof: "not_required" };
+		expect(await firstBinding({ mailWired: false })).toEqual(none);
+		for (const email of [undefined, "", "not an address"]) {
+			expect(await firstBinding({ mailWired: true }, { email }), String(email)).toEqual(none);
+		}
+		expect(await firstBinding({ mailWired: true, requireEmailProof: "never" })).toEqual(none);
+	});
+
+	it("asks for it under always even where nobody can give it — no sender, no address — never skipped", async () => {
+		const asked = { hint: true, emailProof: "required" };
+		expect(await firstBinding({ mailWired: false, requireEmailProof: "always" })).toEqual(asked);
+		expect(
+			await firstBinding({ mailWired: true, requireEmailProof: "always" }, { email: undefined }),
+		).toEqual(asked);
+	});
+
+	it("asks for it while the operator reset's flag stands, whatever the setting (D25)", async () => {
+		const flagged = (store: MfaTransactionStore) => store.requireEmailProofAtNextBinding("u-alice");
+		const asked = { hint: true, emailProof: "required" };
+		for (const requireEmailProof of ["when-mail", "always", "never"] as const) {
+			expect(
+				await firstBinding({ mailWired: true, requireEmailProof }, undefined, flagged),
+				requireEmailProof,
+			).toEqual(asked);
+		}
+		expect(
+			await firstBinding({ mailWired: false, requireEmailProof: "never" }, undefined, flagged),
+		).toEqual(asked);
+	});
+
+	it("throws when the flag cannot be read, or reads other than a boolean — admission answers unavailable — and opens nothing", async () => {
+		for (const failing of [
+			async () => {
+				throw new Error("transaction store unreachable");
+			},
+			async () => "yes" as never,
+		]) {
+			const transactionStore = createMemoryMfaTransactionStore();
+			const create = vi.spyOn(transactionStore, "create");
+			const { requirement } = build("required", {
+				transactionStore: { ...transactionStore, emailProofRequiredAtNextBinding: failing },
+			});
+			expect(await admitPrimary(depsFor(requirement), primaryOf("u-alice"))).toEqual({
+				outcome: "unavailable",
+				store: "mfa",
+			});
+			expect(create).not.toHaveBeenCalled();
+		}
 	});
 
 	it("says nothing when a first binding offers a kind", async () => {

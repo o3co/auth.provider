@@ -157,6 +157,18 @@ describe("the package's reference.conf", () => {
 		).toEqual({ limit: 60, windowSeconds: 300 });
 	});
 
+	it("defaults the first binding's proof, mfa.enrollment.requireEmailProof, to when-mail, which MFA_ENROLLMENT_REQUIRE_EMAIL_PROOF sets", () => {
+		const key = randomBytes(32).toString("base64");
+		expect(readSettings(resolve({ MFA_ENCRYPTION_KEY: key })).enrollment).toEqual({
+			requireEmailProof: "when-mail",
+		});
+		expect(
+			readSettings(
+				resolve({ MFA_ENCRYPTION_KEY: key, MFA_ENROLLMENT_REQUIRE_EMAIL_PROOF: "always" }),
+			).enrollment,
+		).toEqual({ requireEmailProof: "always" });
+	});
+
 	it("defaults recent MFA's window, mfa.manage.maxAgeSeconds, to 300 seconds", () => {
 		const settings = readSettings(
 			resolve({ MFA_ENCRYPTION_KEY: randomBytes(32).toString("base64") }),

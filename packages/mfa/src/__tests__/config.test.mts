@@ -79,12 +79,13 @@ const LOCKOUT = {
 	hardLimit: 100,
 } as const;
 
-/** The transaction's keys and recent MFA's window, as `reference.conf` defaults them. */
+/** The transaction's keys, recent MFA's window and the first binding's proof, as `reference.conf` defaults them. */
 const TRANSACTION = {
 	transactionTtlSeconds: 600,
 	maxAttemptsPerTransaction: 5,
 	lockout: { ...LOCKOUT },
 	manage: { maxAgeSeconds: 300 },
+	enrollment: { requireEmailProof: "when-mail" },
 } as const;
 
 /** A configuration as the composition root hands it, with `mfa` as given. */
@@ -168,9 +169,10 @@ describe("the MFA settings this package reads", () => {
 		expect(refusal(() => readTotp(undefined))).toMatch(/^mfa-totp-factor /);
 	});
 
-	it("exports the schema of the mfa section it reads: its mode, the page, the ring, the transaction's keys, the lock and recent MFA's window — no factor's", () => {
+	it("exports the schema of the mfa section it reads: its mode, the page, the ring, the transaction's keys, the lock, recent MFA's window and the first binding's proof — no factor's", () => {
 		expect(Object.keys(mfaConfigSchema.shape).sort()).toEqual([
 			"encryptionKeys",
+			"enrollment",
 			"lockout",
 			"manage",
 			"maxAttemptsPerTransaction",
@@ -683,6 +685,21 @@ describe("the transaction's life and attempts, and the lock", () => {
 				JSON.stringify(lockout),
 			).toContain(field);
 		}
+	});
+
+	it("holds mfa.enrollment.requireEmailProof to when-mail, always or never, naming the key otherwise", () => {
+		for (const requireEmailProof of ["when-mail", "always", "never"]) {
+			expect(readSettings(valid({ enrollment: { requireEmailProof } })).enrollment).toEqual({
+				requireEmailProof,
+			});
+		}
+		for (const requireEmailProof of ["sometimes", "", true, undefined]) {
+			const message = refusal(() => readSettings(valid({ enrollment: { requireEmailProof } })));
+			expect(message, String(requireEmailProof)).toContain("mfa.enrollment.requireEmailProof");
+		}
+		expect(refusal(() => readSettings(valid({ enrollment: undefined })))).toContain(
+			"mfa.enrollment",
+		);
 	});
 
 	it("holds mfa.manage.maxAgeSeconds, recent MFA's window, to 60-3600 seconds, a whole number", () => {
