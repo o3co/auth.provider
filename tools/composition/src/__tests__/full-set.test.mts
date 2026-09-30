@@ -920,6 +920,43 @@ describe("a password login over the Store-backed MFA factor store, through the t
 		]);
 	});
 
+	it("verifies a TOTP login end to end over the factor the Store keeps, advancing it through the Store's update endpoint", async () => {
+		const { app, handle, config } = await boot({
+			mfaFactorStoreAt: store.urls,
+			adjust: (resolved) => ({
+				...resolved,
+				...mfaConfigForTests({ key: MFA_KEY, mode: "required" }),
+			}),
+		});
+		const { factorId, secret } = await seedTotp(handle.components, config, ALICE.sub);
+		const page = browser();
+		const signIn = await page.post(
+			app,
+			"/session/login",
+			{ username: ALICE.username, password: ALICE.password },
+			{ form: true },
+		);
+		expect(signIn.status).toBe(403);
+		expect(signIn.body.error).toBe("mfa_required");
+		const transaction = signIn.body.transaction as string;
+		const challenge = await page.post(app, "/session/mfa/challenge", {
+			transaction_id: transaction,
+			factor_id: factorId,
+		});
+		expect(challenge.status).toBe(200);
+		const verified = await page.post(app, "/session/mfa/verify", {
+			transaction_id: transaction,
+			factor_id: factorId,
+			proof: totpCodeForTests(secret),
+		});
+		expect(verified.status).toBe(200);
+		expect(store.requests.map(({ endpoint }) => endpoint)).toContain("update");
+		// Seeded at version 0; the verification's compare-and-set wrote version 1.
+		expect(store.factors(ALICE.sub)).toEqual([
+			expect.objectContaining({ id: factorId, version: 1, lastUsedAtMs: expect.any(Number) }),
+		]);
+	});
+
 	it("answers 503 temporarily_unavailable, quoting nothing the Store sent, when the Store cannot give the subject's factors — never a login without the second factor", async () => {
 		const { app } = await boot({ mfaFactorStoreAt: store.urls });
 		for (const [what, breakIt] of [
