@@ -63,19 +63,17 @@ function recordingLogger(): { readonly logger: Logger; readonly calls: unknown[]
 	return { logger, calls };
 }
 
-/** The module's `mailSender` factory, called with the slots it reads. */
-const provide = (
+/** The module's `mailSender` factory, called with the slots it reads; a refusal is a rejection. */
+const provide = async (
 	options: { readonly environment?: string },
 	deploymentMode: DeploymentMode,
 	logger?: Logger,
 ): Promise<MailSender> =>
-	Promise.resolve(
-		(
-			standardDevelopmentMailSenderModule(options).provides as {
-				mailSender: (deps: unknown) => MailSender | Promise<MailSender>;
-			}
-		).mailSender({ deploymentMode, logger }),
-	);
+	(
+		standardDevelopmentMailSenderModule(options).provides as {
+			mailSender: (deps: unknown) => MailSender | Promise<MailSender>;
+		}
+	).mailSender({ deploymentMode, logger });
 
 describe("createStandardDevelopmentMailSender", () => {
 	it("logs one line at info per send, the purpose and the code and nothing else of the mail, and answers delivered", async () => {
@@ -104,10 +102,11 @@ describe("standardDevelopmentMailSenderModule", () => {
 		vi.unstubAllEnvs();
 	});
 
-	it("is named after itself, fills the mailSender slot from the deployment mode and the logger, and declares no section", () => {
+	it("is named after itself, fills the mailSender slot at every boot from the deployment mode and the logger, and declares no section", () => {
 		const module = standardDevelopmentMailSenderModule();
 		expect(module.name).toBe("standard-development-mail-sender");
 		expect(Object.keys(module.provides ?? {})).toEqual(["mailSender"]);
+		expect(module.lifecycle?.mailSender?.eager).toBe(true);
 		expect(module.requires).toEqual(["deploymentMode"]);
 		expect(module.optional).toEqual(["logger"]);
 		expect(module.section).toBeUndefined();
@@ -166,7 +165,7 @@ describe("standardDevelopmentMailSenderModule", () => {
 		}
 	});
 
-	it("boots over core's configuration and fills the slot, and a production environment refuses the boot", async () => {
+	it("boots over core's configuration and fills the slot though nothing reads it, and a production environment refuses the boot", async () => {
 		const handle = await createApp({
 			modules: [standardDevelopmentMailSenderModule({ environment: "development" })],
 			bootstrapComponents: {
