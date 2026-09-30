@@ -914,7 +914,7 @@ const SESSION_RECORD_READS_ALLOWED: ReadonlyArray<AllowedSessionRecordRead> = [
 		file: "packages/oauth/src/grants/refreshToken.mts",
 		read: "...authenticationClaims",
 		count: 2,
-		why: "the amr and acr the presented refresh token carries, read above as claims.amr and wellFormedAcr",
+		why: "the amr, acr and auth_time the presented refresh token carries, read above as claims.amr, wellFormedAcr and wellFormedAuthTime",
 	},
 	{
 		file: "packages/session/src/routes/Federation.mts",
