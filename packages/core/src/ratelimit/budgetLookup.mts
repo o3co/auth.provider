@@ -56,11 +56,20 @@ const prefixOf = (key: string): string => {
 	return colon === -1 ? key : key.slice(0, colon);
 };
 
+/** An object spec's two fields, read once, frozen; anything else as given. */
+const snapshotSpec = (spec: unknown): unknown =>
+	typeof spec === "object" && spec !== null
+		? Object.freeze({
+				limit: (spec as { readonly limit?: unknown }).limit,
+				windowSeconds: (spec as { readonly windowSeconds?: unknown }).windowSeconds,
+			})
+		: spec;
+
 /**
  * A key's budget: the limiter's own `limits` entry for its prefix, else the
  * contributed budget, else `defaultLimit` (never no limit). `limits` and
- * `defaultLimit` are refused, naming `who`, unless usable as written, and held
- * as checked, frozen, so no spec a lookup hands out can be changed. A
+ * `defaultLimit` are each read once into a frozen copy, refused, naming `who`,
+ * unless usable, and held as checked, so no spec a lookup hands out can change. A
  * contributed budget is read once into a frozen copy, which is checked and
  * handed out; one that is not a bounded budget throws at its lookup, so the
  * check is an outage, never an unlimited key.
@@ -69,28 +78,22 @@ export function createRateLimitBudgetLookup(
 	who: string,
 	options: RateLimitBudgetLookupOptions,
 ): RateLimitBudgetLookup {
-	assertUsableRateLimitSpecs(who, options);
-	const limits: Readonly<Record<string, RateLimitSpec>> = Object.fromEntries(
-		Object.entries(options.limits ?? {}).map(([prefix, spec]) => [
-			prefix,
-			Object.freeze({ limit: spec.limit, windowSeconds: spec.windowSeconds }),
-		]),
-	);
-	const defaultLimit: RateLimitSpec = Object.freeze({
-		limit: options.defaultLimit.limit,
-		windowSeconds: options.defaultLimit.windowSeconds,
-	});
+	// Each spec is read once into the frozen copy that is checked and held.
+	const readLimits: unknown =
+		typeof options.limits === "object" && options.limits !== null && !Array.isArray(options.limits)
+			? Object.fromEntries(
+					Object.entries(options.limits).map(([prefix, spec]) => [prefix, snapshotSpec(spec)]),
+				)
+			: options.limits;
+	const readDefault = snapshotSpec(options.defaultLimit);
+	assertUsableRateLimitSpecs(who, { limits: readLimits, defaultLimit: readDefault });
+	const limits = (readLimits ?? {}) as Readonly<Record<string, RateLimitSpec>>;
+	const defaultLimit = readDefault as RateLimitSpec;
 	const { budgets } = options;
 	const contributed = (prefix: string): RateLimitSpec | undefined => {
 		const budget: unknown = budgets?.get(prefix);
 		if (budget === undefined) return undefined;
-		const read =
-			typeof budget === "object" && budget !== null
-				? Object.freeze({
-						limit: (budget as { readonly limit?: unknown }).limit,
-						windowSeconds: (budget as { readonly windowSeconds?: unknown }).windowSeconds,
-					})
-				: budget;
+		const read = snapshotSpec(budget);
 		if (isBoundedRateLimitSpec(read)) return read;
 		throw new RangeError(
 			`${who}: the budget contributed for "${prefix}" is not a positive whole limit and a positive whole number of seconds of at most a year (got ${shownConfigValue(read)})`,
