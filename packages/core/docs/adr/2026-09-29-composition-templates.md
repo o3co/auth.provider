@@ -267,3 +267,14 @@ Rejected:
 - **A shared wrapper** (`composition { adapters { … } }`, proposed on #728):
   under B7 a module's `enabled` is its own key, so the composition root owns
   nothing but adapter selection and needs no namespace of its own.
+
+**Amended 2026-09-30: one key outside this section, until the MFA ADR's step
+20.** `standalone` also reads `mfa.mode`, the MFA module's key, before it
+chooses modules: raw from its own layers, where its `application.conf` binds
+`MFA_MODE` with no default, held to `off`, `optional` and `required` by the
+template itself, and absent read as `off`. When the mode is not `off` it adds
+`mfa` to `sessionRequirements.expected`, so that a mode asking for a second
+factor without the MFA module refuses the boot; it hands the `mfa` section to
+boot only when a loaded module reads it. The MFA ADR's build-order step 20,
+which installs the MFA module, removes this reading, and with it the one key
+outside this section a composition root reads before it chooses modules.

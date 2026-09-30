@@ -59,7 +59,6 @@ import {
 	type Logger,
 	type Module,
 	memoryRefreshTokenFamilyStoreModule,
-	readMfaMode,
 	terminalErrorHandler,
 } from "@o3co/auth-provider-core";
 import { createFakeIdp, type FakeIdp } from "@o3co/auth-provider-core/testing";
@@ -71,6 +70,7 @@ import { buildModules } from "#/buildModules.mjs";
 import {
 	expectedSessionRequirements,
 	type OwnLayers,
+	readMfaMode,
 	readOwnLayers,
 	readSwitches,
 	resolveConfigPaths,
@@ -666,8 +666,8 @@ export async function compose(options: ComposeOptions = {}): Promise<Composition
 	);
 	const switches = resolveConfig(env, options.reads, own);
 	const config = adjust(switches);
-	// The parsed `mfa.mode`, read once, as `app.mts` reads it.
-	const mfaMode = readMfaMode(config) ?? "off";
+	// `mfa.mode`, read once, as `app.mts` reads it.
+	const mfaMode = readMfaMode(config);
 	const fakes = await sharedUpstreams();
 	const modules = composedModules(config, options);
 	const logger = createRecordingLogger();

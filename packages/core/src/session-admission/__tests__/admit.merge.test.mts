@@ -32,7 +32,6 @@
  */
 
 import { describe, expect, it } from "vitest";
-import type { MfaMode } from "#/mfa/mode.mjs";
 import { readAcrTable } from "#/session-admission/acr.mjs";
 import { admitSession, cookieClaim } from "#/session-admission/admit.mjs";
 import type {
@@ -83,7 +82,7 @@ const KNOWN_PRIMARIES: ReadonlySet<string> = new Set(["pwd", "fed"]);
  * its table for the `use` grade, under `mode` with `reach`. The MFA package's
  * own requirement runs the same rows in that package.
  */
-const authority = (mode: MfaMode, reach: ReadonlySet<string>): SessionRequirement => ({
+const authority = (mode: MergeRow["mode"], reach: ReadonlySet<string>): SessionRequirement => ({
 	name: AUTHORITY,
 	secondFactorAuthority: true,
 	reach,

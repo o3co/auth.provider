@@ -65,7 +65,7 @@ export const SOFTWARE_KEY_AMR = "swk";
 /**
  * A one-time code mailed to the account's enrolled address. Deployment-defined,
  * as `fed` is: RFC 8176's `otp` would claim a one-time-password device. It
- * does not add `mfa` unless `mfa.factors.email.addsMfa` says so.
+ * does not add `mfa` unless the email factor's own setting says so.
  */
 export const EMAIL_OTP_AMR = "email";
 

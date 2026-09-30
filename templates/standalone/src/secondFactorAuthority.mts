@@ -21,9 +21,7 @@
  */
 
 import type { AppHandle } from "@o3co/auth-provider-core";
-
-/** The parsed `mfa.mode`: its composition root reads it. */
-export type TemplateMfaMode = "off" | "optional" | "required";
+import type { MfaMode } from "./configPath.mjs";
 
 /** The requirement the template declares for MFA: the MFA package's. */
 const MFA_REQUIREMENT = "mfa";
@@ -32,7 +30,7 @@ const MFA_REQUIREMENT = "mfa";
 export class MfaRequirementNotAuthorityError extends Error {
 	readonly reason = "mfa-requirement-not-second-factor-authority";
 
-	constructor(mode: TemplateMfaMode, registered: boolean, options?: ErrorOptions) {
+	constructor(mode: MfaMode, registered: boolean, options?: ErrorOptions) {
 		super(
 			`mfa.mode is "${mode}", and ${registered ? `the session requirement registered as "${MFA_REQUIREMENT}" does not declare the second-factor authority` : `no session requirement is registered as "${MFA_REQUIREMENT}"`}: no login would be asked for a second factor. Install the MFA package's modules (mfaModules), whose requirement declares it, or set mfa.mode = "off" (MFA_MODE)`,
 			options,
@@ -48,7 +46,7 @@ export class MfaRequirementNotAuthorityError extends Error {
  * failed dispose is the refusal's `cause`, never in its place.
  */
 export async function requireMfaSecondFactorAuthority(
-	mode: TemplateMfaMode,
+	mode: MfaMode,
 	handle: Pick<AppHandle, "components" | "dispose">,
 ): Promise<void> {
 	if (mode === "off") return;

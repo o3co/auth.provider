@@ -21,7 +21,7 @@ It is a directory of its own so that the consumers cannot disagree on what a liv
 
 ## Dependencies
 
-- Imports values from `user-sessions/` (how a session was established, what it vouches for, and what each login path records), `federation-grants/` (the subject-revocation boundary reading, kept there because moving it here would close a value cycle through `user-sessions/`), `grants/` (the `amr` values and their composition), `jwt/` (the revocation skew), `audit/`, `errors/` (the RFC 6749 error-code grammar) and `logging/`. The testing entry takes `mfa.mode`'s type from `mfa/`, type-only.
+- Imports values from `user-sessions/` (how a session was established, what it vouches for, and what each login path records), `federation-grants/` (the subject-revocation boundary reading, kept there because moving it here would close a value cycle through `user-sessions/`), `grants/` (the `amr` values and their composition), `jwt/` (the revocation skew), `audit/`, `errors/` (the RFC 6749 error-code grammar) and `logging/`. The testing entry imports nothing from `mfa/`: its merge rows spell the MFA module's modes themselves.
 - Imported by `boot/` (the resolver's builder, the registration and the reach seal), `mfa/` (the continuation check an MFA transaction is held to), `user-sessions/` and `modules/manifest/` (types only), the root barrel and the testing entry. A consumer package reaches it through the package entry alone.
 - Never imports `boot/`, and nothing outside core but Express's request and response types, which the login completion's call carries.
 

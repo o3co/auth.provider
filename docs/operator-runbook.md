@@ -294,8 +294,8 @@ Module-level messages that arrive wrapped in a factory failure:
   `mfa-no-counting-factor` — `mfa.mode = "required"` with no counting factor
   enabled, which nobody could meet: turn on an installed counting factor
   through its module's `enabled` key (for the TOTP factor, when
-  `mfaTotpFactorModule` is installed, `mfa.factors.totp.enabled` /
-  `MFA_TOTP_ENABLED`), or set `optional`. The message names the enabled
+  `mfaTotpFactorModule` is installed, `mfa-totp-factor.enabled` /
+  `MFA_TOTP_FACTOR_ENABLED`), or set `optional`. The message names the enabled
   factor kinds. Without a `userSessionStore` the
   module is refused at the requires-closure (`missing-required-component`),
   naming the slot. The MFA requirement — the second-factor authority —

@@ -14,12 +14,13 @@
  * limitations under the License.
  */
 import { fileURLToPath } from "node:url";
-import { type AppConfig, createApp, readMfaMode } from "@o3co/auth-provider-core";
+import { type AppConfig, createApp } from "@o3co/auth-provider-core";
 import express from "express";
 import helmet from "helmet";
 import { buildModules } from "./buildModules.mjs";
 import {
 	expectedSessionRequirements,
+	readMfaMode,
 	readOwnLayers,
 	readSwitches,
 	resolveConfigPaths,
@@ -44,10 +45,11 @@ const own = readOwnLayers([envConfPath, applicationConfPath]);
 // Phase one: what the template reads before it knows its modules, only for
 // those choices, and for what the composition expects of session admission
 // (`expectedSessionRequirements`): the configuration's list, with `mfa` added
-// when the parsed `mfa.mode` asks for a second factor.
+// when `mfa.mode`, which the template reads itself (`readMfaMode`), asks for a
+// second factor.
 const switches: AppConfig = readSwitches(own);
-// The parsed `mfa.mode`, read once.
-const mfaMode = readMfaMode(switches) ?? "off";
+// `mfa.mode`, read once, for the second-factor authority's guard.
+const mfaMode = readMfaMode(switches);
 
 // Built from config so its level is operator-controlled, and wired into
 // `bootstrapComponents` so every module that declares `optional: ["logger"]`
