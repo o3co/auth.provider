@@ -411,8 +411,12 @@ other grant ignores it and mints the default.
 
 If you set `SESSION_SECURE=false` for local HTTP development or set `SESSION_DOMAIN`
 for shared-domain cookies, also set `SESSION_NAME` to a non-`__Host-` value such as
-`auth.sid`. The server fails fast when a `__Host-` cookie name is combined with
-attributes that browsers reject for that prefix.
+`auth.sid` — with `SESSION_SECURE=false`, one with no prefix: a `__Secure-` name
+needs `SESSION_SECURE=true` too. The server fails fast when a `__Host-` or
+`__Secure-` cookie name is combined with attributes that browsers reject for that
+prefix (in any case), on a `SESSION_NAME` that is not a cookie name (an RFC 6265
+token: no space, `;` or other separator), and on a `SESSION_DOMAIN` that is not a
+host name (a scheme, a port or a path).
 
 #### CSRF on `/session/login` and `/session/logout`
 
@@ -431,7 +435,9 @@ Two configuration notes:
   request.
 - If your login UI is served from a **different origin** than the provider,
   list that origin under `session.csrf.trustedOrigins` in your HOCON config.
-  `cors.allowedOrigins` does not confer CSRF trust — see
+  A listed origin can also answer federation-grant consents and device
+  verification, so a client's origin is never listed (the federation-grants
+  ADR's D7). `cors.allowedOrigins` does not confer CSRF trust — see
   [CORS](#cors) for what it does confer.
 
 ### CORS
@@ -762,7 +768,19 @@ is `/oauth/consent`'s, so one page can serve both. `GET
 duration after approval, not a date), `continues_after_logout` (which the page
 must show), and `expires_in` (what is left of the flow). `POST` with
 `challenge` and `decision` (`accept` | `deny`) answers `303` — to the upstream,
-or back to the client. Every acquisition and renewal goes through it.
+or back to the client. Every acquisition and renewal goes through it. The
+answer is held to the session module's CSRF policy: post it as a form from the
+page, and serve the page with `Referrer-Policy: same-origin` — not
+`no-referrer`, whether by the header, `<meta name="referrer">` or
+`rel="noreferrer"` on the form, under which the browser sends `Origin: null`
+and the answer is refused. This app's `helmet()` sends `no-referrer` on every
+response, so a page it serves sets `Referrer-Policy: same-origin` on its own
+route. Behind a proxy, `HTTP_TRUST_PROXY` names it, and it forwards
+`X-Forwarded-Proto` and `X-Forwarded-Host` (or keeps the browser's `Host`). A
+user agent that sends neither `Origin` nor `Referer` echoes the token
+`GET /session/csrf` hands out, as for `POST /session/login`; a page may always
+include it, since it counts only when neither is sent. The package README has
+the rule.
 
 **The login page** is the one `ENDPOINTS_LOGIN_URL` names, reached with
 `redirect_to=<the connect link>`; it signs the user in and navigates back to

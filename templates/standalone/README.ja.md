@@ -287,7 +287,7 @@ openssl pkey -in jwt-private.pem -pubout -out jwt-public.pem
 | `SESSION_STORAGE_REDIS_URL` | `redis://localhost:6379` | セッションストア用 Redis 接続 URL |
 | `SESSION_STORAGE_REDIS_PASSWORD` | — | セッションストア用 Redis パスワード |
 
-ローカルの HTTP 開発のために `SESSION_SECURE=false` を設定する場合や、ドメインを共有する Cookie のために `SESSION_DOMAIN` を設定する場合は、`SESSION_NAME` も `auth.sid` のような `__Host-` でない値にすること。`__Host-` の Cookie 名が、ブラウザがその prefix に対して拒否する属性と組み合わされると、サーバーは fail-fast する。
+ローカルの HTTP 開発のために `SESSION_SECURE=false` を設定する場合や、ドメインを共有する Cookie のために `SESSION_DOMAIN` を設定する場合は、`SESSION_NAME` も `auth.sid` のような `__Host-` でない値にすること — `SESSION_SECURE=false` なら接頭辞の無い値にする: `__Secure-` の名前も `SESSION_SECURE=true` を要する。`__Host-` や `__Secure-`（大文字小文字は問わない）の Cookie 名が、ブラウザがその prefix に対して拒否する属性と組み合わされると、`SESSION_NAME` が Cookie の名前（RFC 6265 のトークン: 空白、`;` などの区切り文字を含まない）でないと、また `SESSION_DOMAIN` がホスト名でない（スキーム、ポート、パスを含む）と、サーバーは fail-fast する。
 
 #### `/session/login` と `/session/logout` の CSRF 対策
 
@@ -296,7 +296,7 @@ openssl pkey -in jwt-private.pem -pubout -out jwt-public.pem
 設定上の注意が 2 点ある:
 
 - TLS 終端プロキシの背後では `HTTP_TRUST_PROXY` を設定する（`true` ではなく、プロキシのアドレスまたは CIDR レンジに）。設定しないと `req.protocol` は `http` と読まれる一方でブラウザは `Origin: https://…` を送るため、origin 側の判定がすべてのリクエストを拒否する。
-- ログイン UI をプロバイダーと**別 origin** で配信している場合は、その origin を HOCON 設定の `session.csrf.trustedOrigins` に列挙する。`cors.allowedOrigins` は CSRF 上の信頼を与えない — それが何を与えるかは [CORS](#cors) を参照。
+- ログイン UI をプロバイダーと**別 origin** で配信している場合は、その origin を HOCON 設定の `session.csrf.trustedOrigins` に列挙する。列挙した origin はフェデレーショングラントの同意とデバイス検証にも回答できるので、クライアントの origin は決して載せない（federation-grants ADR の D7）。`cors.allowedOrigins` は CSRF 上の信頼を与えない — それが何を与えるかは [CORS](#cors) を参照。
 
 ### CORS
 
@@ -494,7 +494,7 @@ worker:
 
 **クライアント側から見たフロー。** `POST /oauth/federation-grants`（クライアント認証付き）は `sub` に対する intent を登録し、`grant_id` と `connect_uri` を返す。クライアントはユーザーのブラウザをそこへ送る。プロバイダーは必要ならユーザーをサインインさせ、デプロイ側の同意ページを見せ、上流へ送り、`grant_id` と `state` を付けてブラウザをクライアントの `redirect_uri` に戻す — トークンは決して載せない。その後クライアントは、自身の資格情報とユーザーの `sub` を使い、ユーザー不在のまま `/oauth/federation-grants/:grantId/token`、`/status`、`/revoke` を呼ぶ。
 
-**同意ページ**はデプロイ側のもので、プロバイダーと same-origin であり、その契約は `/oauth/consent` のものと同じなので、1 つのページで両方を担える。`GET /session/federation-grants/consent?challenge=…` は JSON を返す: `client_id`、`client_name`、`connection`、`scopes`、`resource`、`grant_expires_in`（承認後の期間であって日付ではない）、`continues_after_logout`（ページが必ず表示すること）、`expires_in`（フローの残り時間）。`challenge` と `decision`（`accept` | `deny`）を付けた `POST` は `303` を返す — 上流へ、またはクライアントへ戻す。取得も更新もすべてここを通る。
+**同意ページ**はデプロイ側のもので、プロバイダーと same-origin であり、その契約は `/oauth/consent` のものと同じなので、1 つのページで両方を担える。`GET /session/federation-grants/consent?challenge=…` は JSON を返す: `client_id`、`client_name`、`connection`、`scopes`、`resource`、`grant_expires_in`（承認後の期間であって日付ではない）、`continues_after_logout`（ページが必ず表示すること）、`expires_in`（フローの残り時間）。`challenge` と `decision`（`accept` | `deny`）を付けた `POST` は `303` を返す — 上流へ、またはクライアントへ戻す。取得も更新もすべてここを通る。回答は session モジュールの CSRF ポリシーに照らされる: ページからフォームで POST し、ページは `Referrer-Policy: same-origin` で配信する — `no-referrer` ではない（ヘッダー、`<meta name="referrer">`、フォームの `rel="noreferrer"` のいずれによるものも）。その下ではブラウザが `Origin: null` を送り、回答は拒否される。このアプリの `helmet()` はすべての応答に `no-referrer` を付けるので、このアプリが配信するページは自身のルートで `Referrer-Policy: same-origin` を付ける。プロキシの背後では `HTTP_TRUST_PROXY` がそのプロキシを指し、プロキシは `X-Forwarded-Proto` と `X-Forwarded-Host` を転送する（またはブラウザの `Host` を保つ）。`Origin` も `Referer` も送らないユーザーエージェントは、`POST /session/login` と同じく `GET /session/csrf` が渡すトークンを送り返す。トークンはどちらも送られないときにだけ効くので、ページはいつでもトークンを含めてよい。規則はパッケージの README にある。
 
 **ログインページ**は `ENDPOINTS_LOGIN_URL` が指すもので、`redirect_to=<the connect link>` 付きで到達する。ユーザーをサインインさせ、`/oauth/authorize` の場合と同様に、そのリンクへそのまま戻る。そのリンクを `POST /session/login` の `redirect_to` として送信してはならない: そのルートの完全一致 allowlist はランディングページ用で、フローごとの handle は拒否する。
 

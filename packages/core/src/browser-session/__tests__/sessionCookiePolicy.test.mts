@@ -37,7 +37,8 @@ import {
 const RULES = {
 	name: "name is a cookie name: a non-empty RFC 6265 token",
 	attributes: "sameSite is lax, strict or none, and secure is true or false",
-	domain: "domain is a non-empty string, or undefined for a host-only cookie",
+	domain:
+		"domain is a cookie domain — a host name, one leading dot allowed — or undefined for a host-only cookie",
 	crossSite: "a cookie sent cross-site (sameSite none) is secure",
 	host: "a __Host- name is secure and host-only, and a __Secure- name secure",
 	maxAge: "maxAgeMs is a whole number of milliseconds from 1 to the one-year ceiling",
@@ -205,6 +206,23 @@ describe("sessionCookiePolicyContract — each way a policy can break it", () =>
 		}
 	});
 
+	it("a domain a cookie cannot carry: a URL, a port, an empty label, a label's edge hyphen, a space", async () => {
+		for (const domain of [
+			"https://auth.example.com",
+			"auth.example.com:8443",
+			"example..com",
+			"..example.com",
+			"-example.com",
+			"example-.com",
+			"exa mple.com",
+			42,
+		]) {
+			expect(await failing(() => policyWith({ domain, name: "auth.session" }))).toEqual([
+				RULES.domain,
+			]);
+		}
+	});
+
 	it("a cookie sent cross-site that is not secure: the browser refuses it", async () => {
 		expect(
 			await failing(() =>
@@ -213,21 +231,27 @@ describe("sessionCookiePolicyContract — each way a policy can break it", () =>
 		).toEqual([RULES.crossSite]);
 	});
 
-	it("a __Secure- name that is not secure", async () => {
-		expect(
-			await failing(() =>
-				createTestSessionCookiePolicy({ name: "__Secure-auth.session", secure: false }),
-			),
-		).toEqual([RULES.host]);
+	it("a __Secure- name, in any case, that is not secure", async () => {
+		for (const name of [
+			"__Secure-auth.session",
+			"__secure-auth.session",
+			"__SECURE-auth.session",
+		]) {
+			expect(await failing(() => createTestSessionCookiePolicy({ name, secure: false }))).toEqual([
+				RULES.host,
+			]);
+		}
 	});
 
-	it("a __Host- name that is not secure, or that names a domain", async () => {
-		expect(await failing(() => createTestSessionCookiePolicy({ secure: false }))).toEqual([
-			RULES.host,
-		]);
-		expect(await failing(() => createTestSessionCookiePolicy({ domain: "example.com" }))).toEqual([
-			RULES.host,
-		]);
+	it("a __Host- name, in any case, that is not secure, or that names a domain", async () => {
+		for (const name of ["__Host-auth.session", "__host-auth.session", "__HOST-auth.session"]) {
+			expect(await failing(() => createTestSessionCookiePolicy({ name, secure: false }))).toEqual([
+				RULES.host,
+			]);
+			expect(
+				await failing(() => createTestSessionCookiePolicy({ name, domain: "example.com" })),
+			).toEqual([RULES.host]);
+		}
 	});
 
 	it("a lifetime that is none, not whole, or past the ceiling", async () => {

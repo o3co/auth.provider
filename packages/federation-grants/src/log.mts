@@ -15,9 +15,9 @@
  */
 
 /**
- * Every line this package writes (README, "What is logged"), in the three
- * kinds {@link FederationGrantLog} names: an outage, a failure that changed no
- * answer, and what escaped a handler.
+ * Every line this package writes (README, "What is logged"), in the kinds
+ * {@link FederationGrantLog} names: an outage, a failure that changed no
+ * answer, a request refused for what it carried, and what escaped a handler.
  *
  * Every line is object-first with an event name as its message and nothing
  * after it: pino drops what follows a string. A caught error goes on it as
@@ -55,6 +55,12 @@ export interface FederationGrantLog {
 	/** A failure that changed no answer, or contention: one line, at warn. */
 	degraded(event: string, fields: LogFields, ...cause: Cause): void;
 	/**
+	 * A request refused for what it carried, where the deployment's own
+	 * misconfiguration can be the cause, so an operator must see it: one line,
+	 * at warn, with no cause.
+	 */
+	refused(event: string, fields: LogFields): void;
+	/**
 	 * What escaped a handler: `federation_grants_unexpected_error`, at error,
 	 * with `site` — the handler that caught it, or the router whose last error
 	 * handler did.
@@ -88,6 +94,7 @@ export function createFederationGrantLog(given: Logger | undefined): FederationG
 	return {
 		outage: (event, fields, ...cause) => logger.error(payload(fields, cause), event),
 		degraded: (event, fields, ...cause) => logger.warn(payload(fields, cause), event),
+		refused: (event, fields) => logger.warn(payload(fields, []), event),
 		unexpected: (site, fields, error) =>
 			logger.error(payload({ site, ...fields }, [error]), "federation_grants_unexpected_error"),
 		clientRepositoryUnavailable: (site, clientId, error) =>
