@@ -558,8 +558,17 @@ export interface AppHandle {
 	 * `lifecycle[K].cleanup` was declared). Errors thrown during individual
 	 * cleanup callbacks are aggregated; the returned Promise rejects with an
 	 * AggregateError whose `errors` field contains every cleanup error.
+	 * Waits for every cleanup, however long it takes: bounding it is the
+	 * host's, sized by {@link AppHandle.cleanupAllowanceMs}.
 	 */
 	dispose(): Promise<void>;
+
+	/**
+	 * The longest `tailMs` a cleanup was registered with through
+	 * `lifecycleRegistrar`, or `undefined` when none declared one. A host that
+	 * bounds `dispose()` allows it at least this long.
+	 */
+	readonly cleanupAllowanceMs: number | undefined;
 
 	/**
 	 * Read-only typed view of the materialised component map, Object.frozen.

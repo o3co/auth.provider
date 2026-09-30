@@ -23,16 +23,32 @@ import type { ReadinessRegistrar } from "../readiness/types.mjs";
  * Builders that create disposable sub-resources (Redis clients, interval
  * timers) SHOULD register a cleanup here.
  *
- * `AppHandle.dispose()` runs cleanups sequentially in LIFO order. A failing
- * cleanup is logged and does not abort the drain; all failures accumulate
- * into the AggregateError `dispose()` may throw.
+ * `AppHandle.dispose()` runs cleanups sequentially in LIFO order and waits
+ * for each, however long it takes. A failing cleanup is logged and does not
+ * abort the drain; all failures accumulate into the AggregateError
+ * `dispose()` may throw.
  */
 export interface LifecycleRegistrar {
 	/**
 	 * Register a cleanup callback. Called in LIFO order during
 	 * `AppHandle.dispose()`. The callback MUST return a Promise.
+	 *
+	 * A `tailMs` out of range throws a `RangeError` once the cleanup is
+	 * registered, so the drain after the boot it fails still runs it.
 	 */
-	register(cleanup: () => Promise<void>): void;
+	register(cleanup: () => Promise<void>, options?: LifecycleCleanupOptions): void;
+}
+
+/** What a cleanup is registered with besides its callback. */
+export interface LifecycleCleanupOptions {
+	/**
+	 * How long the cleanup may take to settle, in milliseconds: a whole number
+	 * from 1 to 2147483647, the longest delay a timer takes. A host that bounds
+	 * `dispose()` allows at least the longest tail registered
+	 * (`AppHandle.cleanupAllowanceMs`), so a tail leaves room for the cleanups
+	 * that run beside it.
+	 */
+	readonly tailMs?: number;
 }
 
 /**
@@ -97,7 +113,17 @@ export interface InternalLifecycleRegistrar extends LifecycleRegistrar {
 		logger: Pick<EventLogger, "error">,
 		phase: "dispose" | "boot_failure",
 	): Promise<readonly unknown[]>;
+	/**
+	 * The longest `tailMs` registered so far, or `undefined` when no cleanup
+	 * declared one.
+	 *
+	 * @internal
+	 */
+	_longestTailMs(): number | undefined;
 }
+
+/** The longest delay a Node timer takes; a larger one fires after about a millisecond. */
+const MAX_TIMER_MS = 2_147_483_647;
 
 /**
  * Create a concrete LifecycleRegistrar backed by an ordered array.
@@ -106,9 +132,26 @@ export interface InternalLifecycleRegistrar extends LifecycleRegistrar {
  */
 export function createLifecycleRegistrar(): InternalLifecycleRegistrar {
 	const cleanups: Array<() => Promise<void>> = [];
+	let longestTailMs: number | undefined;
 	return {
-		register(cleanup: () => Promise<void>): void {
+		register(cleanup: () => Promise<void>, options?: LifecycleCleanupOptions): void {
 			cleanups.push(cleanup);
+			const tailMs: unknown = options?.tailMs;
+			if (tailMs === undefined) return;
+			if (
+				typeof tailMs !== "number" ||
+				!Number.isInteger(tailMs) ||
+				tailMs < 1 ||
+				tailMs > MAX_TIMER_MS
+			) {
+				throw new RangeError(
+					`LifecycleRegistrar.register: tailMs must be a whole number of milliseconds from 1 to ${MAX_TIMER_MS}, and was ${typeof tailMs === "number" ? tailMs : JSON.stringify(tailMs)}`,
+				);
+			}
+			longestTailMs = Math.max(longestTailMs ?? 0, tailMs);
+		},
+		_longestTailMs(): number | undefined {
+			return longestTailMs;
 		},
 		async _drain(
 			logger: Pick<EventLogger, "error">,
