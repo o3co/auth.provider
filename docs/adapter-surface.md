@@ -314,7 +314,7 @@ out-of-tree adapter can import and run:
 | `DeviceCodeStore` | `packages/core/src/device-authorization/__tests__/adapters.contract.mts` |
 | `FederationGrantStore` | `packages/core/src/federation-grants/__tests__/store.contract.mts` |
 | `FederationGrantIntentStore` | `packages/core/src/federation-grants/__tests__/intentStore.contract.mts` |
-| `MfaFactorStore` | `packages/core/src/mfa/__tests__/factorStore.contract.mts` |
+| `MfaFactorStore` | `packages/test-kit/src/mfa/factorStore.contract.mts` (`mfaFactorStoreContract`), published on `@o3co/auth-provider-test-kit` |
 | `MfaTransactionStore` | `packages/core/src/mfa/__tests__/transactionStore.contract.mts` |
 | `PendingConsentStore` | `packages/core/src/consents/__tests__/pending.contract.mts` |
 | `ReplaySeenSet` | `packages/core/src/replay-seen-set/__tests__/adapters.contract.mts` |

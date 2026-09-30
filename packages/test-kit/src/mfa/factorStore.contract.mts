@@ -72,6 +72,14 @@ const RECORD = (overrides: Partial<MfaFactorRecord> = {}): MfaFactorRecord => ({
 	...overrides,
 });
 
+/** A record with none of the optional fields. */
+const BARE = {
+	id: FACTOR_2,
+	label: undefined,
+	binding: undefined,
+	lastUsedAt: undefined,
+} as const;
+
 const byId = (records: readonly MfaFactorRecord[]): MfaFactorRecord[] =>
 	[...records].sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
 
@@ -108,16 +116,9 @@ export function mfaFactorStoreContract(
 		test("returns a created record whole, as plain data, its undefined fields named", async (store) => {
 			// Strictly: a key too many, one left out, or a class instance in place
 			// of plain data fails here.
-			const full = RECORD();
-			const bare = RECORD({
-				id: FACTOR_2,
-				label: undefined,
-				binding: undefined,
-				lastUsedAt: undefined,
-			});
-			await store.create(full);
-			await store.create(bare);
-			assert.deepStrictEqual(byId(await store.list("user-1")), [full, bare]);
+			await store.create(RECORD());
+			await store.create(RECORD(BARE));
+			assert.deepStrictEqual(byId(await store.list("user-1")), [RECORD(), RECORD(BARE)]);
 		}),
 
 		test("keeps data verbatim: the store never reads it", async (store) => {
@@ -159,24 +160,22 @@ export function mfaFactorStoreContract(
 		}),
 
 		test("keeps subjects apart: the same id under another subject is another record", async (store) => {
-			const mine = RECORD();
-			const theirs = RECORD({ subject: "user-2", data: "v2.theirs" });
-			await store.create(mine);
-			await store.create(theirs);
-			assert.deepStrictEqual(await store.list("user-1"), [mine]);
-			assert.deepStrictEqual(await store.list("user-2"), [theirs]);
+			const theirs = { subject: "user-2", data: "v2.theirs" };
+			await store.create(RECORD());
+			await store.create(RECORD(theirs));
+			assert.deepStrictEqual(await store.list("user-1"), [RECORD()]);
+			assert.deepStrictEqual(await store.list("user-2"), [RECORD(theirs)]);
 		}),
 
 		test("updates at the current version: data, label and lastUsedAt replaced, version + 1, nothing else moved", async (store) => {
-			const record = RECORD();
-			await store.create(record);
+			await store.create(RECORD());
 			const next = {
 				data: "v2.re-sealed",
 				label: "Work phone",
 				lastUsedAt: new Date("2026-09-03T00:00:00.000Z"),
 			};
 			const updated = await store.update("user-1", FACTOR_1, 1, next);
-			const expected = { ...record, ...next, version: 2 };
+			const expected = { ...RECORD(), ...next, version: 2 };
 			assert.deepStrictEqual(updated, expected);
 			assert.deepStrictEqual(await store.list("user-1"), [expected]);
 		}),

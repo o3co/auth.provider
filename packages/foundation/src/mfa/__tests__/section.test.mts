@@ -85,7 +85,7 @@ async function boot(
 	options: BootOptions = {},
 ) {
 	const seen: { store?: MfaFactorStore } = {};
-	const installed = [foundationMfaFactorStoreModule, memoryReplaySeenSetModule];
+	const installed = [foundationMfaFactorStoreModule(), memoryReplaySeenSetModule];
 	disposable = await createApp({
 		modules: options.alone === true ? installed : [...installed, consumer(seen)],
 		bootstrapComponents: {
@@ -117,7 +117,7 @@ describe("the section's schema", () => {
 		expect(foundationMfaFactorStoreSection.reference.href).toMatch(
 			/\/packages\/foundation\/config\/reference\.conf$/,
 		);
-		expect(unreadableModuleLeaves([foundationMfaFactorStoreModule])).toEqual([]);
+		expect(unreadableModuleLeaves([foundationMfaFactorStoreModule()])).toEqual([]);
 	});
 
 	it("reads the four URLs, https or http to a loopback host", () => {
@@ -244,7 +244,7 @@ describe("a composition that selects the Store for MFA factors", () => {
 			let refused: unknown;
 			try {
 				disposable = await createApp({
-					modules: [foundationMfaFactorStoreModule],
+					modules: [foundationMfaFactorStoreModule()],
 					bootstrapComponents: {
 						config: configWith(urls),
 						pathResolver: (p: string) => p,

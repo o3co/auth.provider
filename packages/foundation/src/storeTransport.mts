@@ -49,6 +49,9 @@ import { hasBearerChallenge } from "./repositories/wwwAuthenticate.mjs";
  */
 export const DEFAULT_MAX_RESPONSE_BYTES = 1024 * 1024;
 
+/** Default request deadline, in milliseconds, when the configuration names none. */
+const DEFAULT_TIMEOUT_MS = 5000;
+
 /**
  * Largest delay Node's timer subsystem represents. Anything above it is
  * silently clamped to 1ms — so an operator writing a very large number meaning
@@ -127,6 +130,42 @@ export function checkStoreResponseCap(maxResponseBytes: unknown, owner: string):
 		throw new Error(`${owner}: "maxResponseBytes" must be a positive integer`);
 	}
 	return maxResponseBytes;
+}
+
+/**
+ * Coerces a numeric config value that may arrive as a string (HOCON
+ * environment substitution yields strings). Only an *absent* key takes
+ * `fallback`. Anything present but unreadable becomes `NaN` for the
+ * constructor to reject, and a **blank** environment variable, which HOCON
+ * substitutes as `""`, becomes `0`: a boot failure too, not a silent default.
+ */
+const toNumber = (value: unknown, fallback: number): number => {
+	if (value === undefined || value === null) return fallback;
+	if (typeof value === "number") return value;
+	if (typeof value === "string") return Number(value.trim());
+	return Number.NaN;
+};
+
+/**
+ * The transport settings of a Store client's configuration block — the user
+ * repository's `http` block — as a client is built from them: `timeout` and
+ * `maxResponseBytes` read from text too and defaulted only when absent, and
+ * `bearerToken` forwarded whenever set, whatever it holds. The client's
+ * constructor refuses what the transport cannot honour.
+ */
+export function readStoreTransportConfig(block: Readonly<Record<string, unknown>>): {
+	readonly bearerToken?: string;
+	readonly timeout: number;
+	readonly maxResponseBytes: number;
+} {
+	return {
+		// Forwarded whenever SET, not only when well-typed: a token that vanished
+		// would be a deployment that believes its Store calls authenticated and
+		// sends them bare.
+		...(block.bearerToken !== undefined ? { bearerToken: block.bearerToken as string } : {}),
+		timeout: toNumber(block.timeout, DEFAULT_TIMEOUT_MS),
+		maxResponseBytes: toNumber(block.maxResponseBytes, DEFAULT_MAX_RESPONSE_BYTES),
+	};
 }
 
 /**

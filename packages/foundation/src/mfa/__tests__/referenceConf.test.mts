@@ -60,7 +60,7 @@ describe("the package's reference.conf", () => {
 		expect(
 			packageReferenceProblems({
 				reference: REFERENCE,
-				modules: [foundationMfaFactorStoreModule],
+				modules: [foundationMfaFactorStoreModule()],
 				read,
 			}),
 		).toEqual([]);
