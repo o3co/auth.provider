@@ -98,6 +98,17 @@ describe("deriveFederationTransactionCookieName", () => {
 			"__Secure-app.sid.federation",
 		);
 	});
+
+	it("strips a prefix in any case, as browsers match it", () => {
+		for (const name of [
+			"__host-app.sid",
+			"__HOST-app.sid",
+			"__secure-app.sid",
+			"__SECURE-app.sid",
+		]) {
+			expect(deriveFederationTransactionCookieName(name)).toBe("__Secure-app.sid.federation");
+		}
+	});
 });
 
 describe("mintFederationTransactionId", () => {

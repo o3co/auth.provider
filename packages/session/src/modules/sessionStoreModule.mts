@@ -17,21 +17,34 @@ import {
 	defineModule,
 	fullSectionsSchema,
 	type ReplicaSafetyDeclaration,
+	type SessionCookiePolicy,
 } from "@o3co/auth-provider-core";
 import session from "express-session";
 import { createSessionCsrfTokenSigner } from "../csrf-token-signer.mjs";
 import { guardCookieSession } from "../internal/cookieSession.mjs";
-import { assertHostPrefixKept, sessionCookiePolicyFrom } from "../session-cookie-policy.mjs";
+import {
+	type SessionCookieConfigSlice,
+	sessionCookiePolicyFrom,
+	sessionCookieRefusal,
+} from "../session-cookie-policy.mjs";
 import { createSessionStoreFactory, registerBuiltinSessionStores } from "../store/factory.mjs";
 
 /**
  * Module-level config schema: this module owns the `session` config slice via
  * `fullSectionsSchema.pick`. The boot planner composes the manifests'
  * configSchemas into the validated `config` slot before any factory runs.
+ * A section that yields no session cookie is refused there, naming the key.
  */
-const sessionStoreConfigSchema = fullSectionsSchema.pick({
-	session: true,
-});
+const sessionStoreConfigSchema = fullSectionsSchema
+	.pick({
+		session: true,
+	})
+	.superRefine((config, ctx) => {
+		const refusal = sessionCookieRefusal(config.session);
+		if (refusal !== undefined) {
+			ctx.addIssue({ code: "custom", path: ["session", refusal.key], message: refusal.message });
+		}
+	});
 
 const MODULE_NAME = "session-store";
 
@@ -54,10 +67,26 @@ export interface SessionStoreModuleConfig {
 const storageTypeOf = (config: SessionStoreModuleConfig | undefined): unknown =>
 	config?.session?.storage?.type;
 
+/** One policy per `session` section: the route mounts the cookie the slot holds. */
+const policies = new WeakMap<SessionCookieConfigSlice, SessionCookiePolicy>();
+
+function sessionCookieOf(session: SessionCookieConfigSlice): SessionCookiePolicy {
+	let policy = policies.get(session);
+	if (policy === undefined) {
+		policy = sessionCookiePolicyFrom(session);
+		policies.set(session, policy);
+	}
+	return policy;
+}
+
 function buildSessionStoreModule(replicaSafety: ReplicaSafetyDeclaration | undefined) {
+	// Written type arguments infer nothing, so the section schema (none) and
+	// the provided keys `authoritative` is typed against are written too.
 	return defineModule<
 		"config" | "deploymentMode",
-		"lifecycleRegistrar" | "readinessRegistrar" | "logger"
+		"lifecycleRegistrar" | "readinessRegistrar" | "logger",
+		never,
+		"sessionCookiePolicy" | "csrfTokenSigner"
 	>({
 		name: MODULE_NAME,
 		configSchema: sessionStoreConfigSchema,
@@ -75,13 +104,16 @@ function buildSessionStoreModule(replicaSafety: ReplicaSafetyDeclaration | undef
 			// this module owns the cookie, and the others require the slot instead
 			// of reading `session.*`. They are the attributes express-session is
 			// given below; the signing secret is not among them.
-			sessionCookiePolicy: (deps) => sessionCookiePolicyFrom((deps.config as AppConfig).session),
+			sessionCookiePolicy: (deps) => sessionCookieOf((deps.config as AppConfig).session),
 			// The CSRF token's signature, under a key derived from the secret this
 			// module owns: the session module's guard and routes sign through it,
 			// and neither the secret nor the key leaves the signer.
 			csrfTokenSigner: (deps) =>
 				createSessionCsrfTokenSigner((deps.config as AppConfig).session.secret),
 		},
+		// The route mounts the cookie `session.*` describes: an override would
+		// describe a cookie no browser is given.
+		authoritative: ["sessionCookiePolicy"],
 		contributes: {
 			routes: [
 				async (deps) => {
@@ -111,9 +143,8 @@ function buildSessionStoreModule(replicaSafety: ReplicaSafetyDeclaration | undef
 							details: { reason: "replica-unsafe-adapter", modules: [MODULE_NAME] },
 						});
 					}
-					// The cookie's one rule, shared with the sessionCookiePolicy the
-					// module provides, so the two cannot disagree about it.
-					assertHostPrefixKept(config.session);
+					// The slot's cookie, refused before the store opens a connection.
+					const cookie = sessionCookieOf(config.session);
 					const store = await factory.create({
 						type: storageSlice.type,
 						...((storageSlice[storageSlice.type] ?? {}) as Record<string, unknown>),
@@ -122,7 +153,7 @@ function buildSessionStoreModule(replicaSafety: ReplicaSafetyDeclaration | undef
 					// answered by the guard: `503` when the session cannot be loaded,
 					// one error line either way (`../internal/cookieSession.mts`).
 					const middleware = session({
-						name: config.session.name,
+						name: cookie.name,
 						secret: config.session.secret,
 						resave: false,
 						saveUninitialized: false,
@@ -130,10 +161,10 @@ function buildSessionStoreModule(replicaSafety: ReplicaSafetyDeclaration | undef
 						cookie: {
 							path: "/",
 							httpOnly: true,
-							secure: config.session.secure,
-							maxAge: config.session.maxAge,
-							sameSite: config.session.sameSite,
-							domain: config.session.domain || undefined,
+							secure: cookie.secure,
+							maxAge: cookie.maxAgeMs,
+							sameSite: cookie.sameSite,
+							domain: cookie.domain,
 						},
 					});
 					// No `before` clause: see the mount-order contract on
