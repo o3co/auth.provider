@@ -47,6 +47,7 @@ import request from "supertest";
 import { afterEach, describe, expect, it } from "vitest";
 import { sessionModule } from "#/module.mjs";
 import { sessionStoreModuleFor } from "#/modules/sessionStoreModule.mjs";
+import { withSessionCaptures } from "./_helpers/sections.mjs";
 
 const PASSWORD = "correct horse battery staple";
 const CALLBACK_URL = "https://auth.test/session/oauth/federation/stub/callback";
@@ -108,10 +109,13 @@ async function boot(user: User) {
 			username === user.username && password === PASSWORD ? user : null,
 		authenticateByToken: async (token) => (token === "stub:external-1" ? user : null),
 	};
-	// supertest speaks plain HTTP: a cookie that is not `Secure`.
-	const config = withFederation(withInsecureSessionCookie(makeValidAppConfig()), "stub", {
-		callbackURL: CALLBACK_URL,
-	}) as unknown as AppConfig;
+	// supertest speaks plain HTTP: a cookie that is not `Secure`. Captured as
+	// boot requires of the variables the package's modules declare renamed.
+	const config = withSessionCaptures(
+		withFederation(withInsecureSessionCookie(makeValidAppConfig()), "stub", {
+			callbackURL: CALLBACK_URL,
+		}),
+	) as unknown as AppConfig;
 	const handle = await createApp({
 		modules: [
 			// The cookie session's middleware is mounted ahead of the routes that read it.

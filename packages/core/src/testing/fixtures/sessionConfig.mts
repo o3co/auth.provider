@@ -15,23 +15,30 @@
  */
 
 /**
- * The builders a test sets core's `session` and `federations` sections with,
- * so a test that logs in over plain HTTP, or through a federation, writes
- * neither section by hand.
+ * The builders a test sets the session cookie (the session store's section,
+ * `session-store`) and core's `federations` section with, so a test that
+ * logs in over plain HTTP, or through a federation, writes neither by hand.
  */
 
 /** The cookie name a plain-HTTP test client keeps: a `__Host-` name requires `Secure`. */
 const INSECURE_SESSION_COOKIE_NAME = "auth.session";
 
 /**
- * A copy of `config` whose session cookie a plain-HTTP client keeps — not
- * `Secure`, and named without the `__Host-` prefix, which requires it —
- * every other key kept; `config` itself is left as it was.
+ * A copy of `config` whose session cookie (`session-store.name`,
+ * `session-store.secure`) a plain-HTTP client keeps — not `Secure`, and named
+ * without the `__Host-` prefix, which requires it — every other key kept;
+ * `config` itself is left as it was.
  */
-export function withInsecureSessionCookie<C extends { readonly session: object }>(config: C): C {
+export function withInsecureSessionCookie<C extends { readonly "session-store": object }>(
+	config: C,
+): C {
 	return {
 		...config,
-		session: { ...config.session, name: INSECURE_SESSION_COOKIE_NAME, secure: false },
+		"session-store": {
+			...config["session-store"],
+			name: INSECURE_SESSION_COOKIE_NAME,
+			secure: false,
+		},
 	};
 }
 
