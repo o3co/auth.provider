@@ -107,6 +107,34 @@ describe("normaliseMailAddress", () => {
 		expect(normaliseMailAddress(`${local}@${label}.com`)).toBe(`${local}@${label}.com`);
 	});
 
+	it("spells the local part as it reads it after lower-casing: in NFC, and within 64 octets", () => {
+		// A capital with no precomposed form lowers to one that has it.
+		expect(normaliseMailAddress("J\u030C@example.com")).toBe("\u01F0@example.com");
+		expect(normaliseMailAddress("\u01F0@example.com")).toBe("\u01F0@example.com");
+		// Two octets each before lower-casing, three after.
+		expect(normaliseMailAddress(`${"\u0130".repeat(32)}@example.com`)).toBeUndefined();
+		expect(normaliseMailAddress(`${"\u023A".repeat(22)}@example.com`)).toBeUndefined();
+		expect(normaliseMailAddress(`${"\u023A".repeat(21)}@example.com`)).toBe(
+			`${"\u2C65".repeat(21)}@example.com`,
+		);
+	});
+
+	it("reads what it answers as itself: a second pass changes nothing, at the octet limit too", () => {
+		for (const address of [
+			"J\u030C@example.com",
+			"\u01F0@example.com",
+			`${"a".repeat(64)}@example.com`,
+			`${"\u023A".repeat(21)}@example.com`,
+			`${"\u0130".repeat(21)}@example.com`,
+			`"${"A".repeat(62)}"@Example.COM`,
+			`${"b".repeat(63)}@${"c".repeat(63)}.example`,
+		]) {
+			const once = normaliseMailAddress(address);
+			expect(once, JSON.stringify(address)).toBeDefined();
+			expect(normaliseMailAddress(once), JSON.stringify(address)).toBe(once);
+		}
+	});
+
 	it("reads a value that is no address as none", () => {
 		for (const value of [
 			undefined,
