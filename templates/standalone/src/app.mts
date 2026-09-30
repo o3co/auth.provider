@@ -136,6 +136,6 @@ await (async (): Promise<void> => {
 	installGracefulShutdown(server, {
 		logger,
 		cleanup: () => handle.dispose(),
-		cleanupAllowanceMs: handle.cleanupAllowanceMs,
+		cleanupAllowanceMs: () => handle.cleanupAllowanceMs,
 	});
 })();

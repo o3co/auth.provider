@@ -38,11 +38,12 @@ export interface GracefulShutdownOptions {
 	 */
 	readonly cleanupTimeoutMs?: number;
 	/**
-	 * The least `cleanup` gets: normally `handle.cleanupAllowanceMs`, the
-	 * longest tail a module registered its cleanup with. Absent, the budget
-	 * is `cleanupTimeoutMs` alone.
+	 * The least `cleanup` gets, read when the signal arrives: normally
+	 * `() => handle.cleanupAllowanceMs`, the longest tail a module registered
+	 * its cleanup with. Absent, unreadable, or not a whole number of
+	 * milliseconds from 1 to 2147483647, the budget is `cleanupTimeoutMs` alone.
 	 */
-	readonly cleanupAllowanceMs?: number | undefined;
+	readonly cleanupAllowanceMs?: () => number | undefined;
 	/** Injected in tests; defaults to {@link deferExit}. */
 	readonly exit?: (code: number) => void;
 	/** Injected in tests; defaults to `process.on`. */
@@ -67,6 +68,25 @@ export function deferExit(code: number, exitProcess: (code: number) => void = pr
 const DEFAULT_DRAIN_TIMEOUT_MS = 10_000;
 const SIGNALS: readonly NodeJS.Signals[] = ["SIGTERM", "SIGINT"];
 
+/** The longest delay a timer takes; a larger one, or NaN, fires after about a millisecond. */
+const MAX_TIMER_MS = 2_147_483_647;
+
+/** What `read` reports, when it is a delay a timer can wait; otherwise nothing. */
+function allowanceFrom(read: (() => number | undefined) | undefined): number | undefined {
+	let allowance: unknown;
+	try {
+		allowance = read?.();
+	} catch {
+		return undefined;
+	}
+	return typeof allowance === "number" &&
+		Number.isInteger(allowance) &&
+		allowance >= 1 &&
+		allowance <= MAX_TIMER_MS
+		? allowance
+		: undefined;
+}
+
 /**
  * Install the graceful shutdown on `server`. The guarantees (a deadline on the
  * drain, a non-zero exit past it, a bounded `cleanup` that never wedges the
@@ -89,10 +109,8 @@ export function installGracefulShutdown(server: Server, options: GracefulShutdow
 		},
 	} = options;
 
-	const cleanupTimeoutMs = Math.max(
-		options.cleanupTimeoutMs ?? drainTimeoutMs,
-		options.cleanupAllowanceMs ?? 0,
-	);
+	// Settled when the signal arrives, with the allowance as it stands then.
+	let cleanupTimeoutMs = options.cleanupTimeoutMs ?? drainTimeoutMs;
 
 	let shuttingDown = false;
 	let finished = false;
@@ -159,7 +177,8 @@ export function installGracefulShutdown(server: Server, options: GracefulShutdow
 		if (shuttingDown) return;
 		shuttingDown = true;
 		for (const signal of SIGNALS) offSignal(signal, handler);
-		logger.info({ drainTimeoutMs }, "shutdown_draining");
+		cleanupTimeoutMs = Math.max(cleanupTimeoutMs, allowanceFrom(options.cleanupAllowanceMs) ?? 0);
+		logger.info({ drainTimeoutMs, cleanupTimeoutMs }, "shutdown_draining");
 
 		const deadline = setTimeout(() => {
 			logger.error({ drainTimeoutMs }, "shutdown_drain_deadline_exceeded");
