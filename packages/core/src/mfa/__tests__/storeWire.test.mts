@@ -18,10 +18,14 @@
  * The wire format of the Store's MFA endpoints: a factor record and an
  * update's changes as JSON carries them. Times are epoch milliseconds named
  * `…Ms`; an optional field with no value is left out, and `null` is never
- * read as "unset". What a writer makes, the reader reads back whole; what the
- * reader would refuse, the writer refuses with a `RangeError`. An update
- * sends the expected version and `data`, `label` and `lastUsedAtMs`, nothing
- * else of the record.
+ * read as "unset". The fields a page shows are held to the record's shape: an
+ * id of 22 base64url characters, a kind of the hint grammar, a label of 1 to
+ * 64 printable characters; a record breaking one is unreadable. A list is
+ * read whole: one unreadable record, one naming another subject, or two
+ * with one id refuse it. What a writer makes, the reader reads back whole;
+ * what the reader would refuse, the writer refuses with a `RangeError`. An
+ * update names the record by `subject` and `id` and carries the expected
+ * version and, as its changes, only `data`, `label` and `lastUsedAtMs`.
  */
 
 import { describe, expect, expectTypeOf, it } from "vitest";
@@ -33,13 +37,18 @@ import {
 	type MfaStoreUpdateRequest,
 	readMfaStoreFactor,
 	readMfaStoreFactorChanges,
+	readMfaStoreListAnswer,
 	toMfaStoreFactor,
 	toMfaStoreFactorChanges,
 	toMfaStoreUpdateRequest,
 } from "#/mfa/storeWire.mjs";
 
+/** Factor ids as the provider makes them: 16 random bytes, base64url. */
+const ID_1 = "u1PIlRkb_cy7UmjYUKaL_A";
+const ID_2 = "TO-Ylhtepgp2qoDTXRcOnQ";
+
 const FULL: MfaFactorRecord = {
-	id: "factor-1",
+	id: ID_1,
 	subject: "user-1",
 	kind: "totp",
 	label: "Phone",
@@ -52,14 +61,14 @@ const FULL: MfaFactorRecord = {
 
 const BARE: MfaFactorRecord = {
 	...FULL,
-	id: "factor-2",
+	id: ID_2,
 	label: undefined,
 	binding: undefined,
 	lastUsedAt: undefined,
 };
 
 const FULL_WIRE: MfaStoreFactor = {
-	id: "factor-1",
+	id: ID_1,
 	subject: "user-1",
 	kind: "totp",
 	label: "Phone",
@@ -94,7 +103,7 @@ describe("a factor record on the wire", () => {
 		}
 	});
 
-	it("round-trips every binding, any kind, data byte for byte, and the version's bounds", () => {
+	it("round-trips every binding, a contributed kind, data byte for byte, and the version's bounds", () => {
 		const records: MfaFactorRecord[] = [
 			{ ...FULL, binding: "email_proof", kind: "email" },
 			{ ...FULL, binding: "mfa", kind: "acme-contributed" },
@@ -175,6 +184,132 @@ describe("a factor record on the wire", () => {
 	});
 });
 
+/** One character of each code point given. */
+const chars = (...codes: number[]): string => String.fromCodePoint(...codes);
+
+describe("the fields a page shows", () => {
+	it("reads an id of 22 base64url characters, a kind of the hint grammar, and a label of 1 to 64 printable characters", () => {
+		for (const [field, value] of [
+			["id", "AAAAAAAAAAAAAAAAAAAAAA"],
+			["id", "-_-_-_-_-_-_-_-_-_-_-_"],
+			["kind", "totp"],
+			["kind", "recovery_code"],
+			["kind", `a${"b".repeat(63)}`],
+			["label", "x"],
+			["label", "L".repeat(64)],
+			["label", "Téléphone de travail"],
+			["label", chars(0x1f642).repeat(64)],
+			["label", 'tab-free, quotes " and backslash \\'],
+		] as const) {
+			expect(
+				readMfaStoreFactor({ ...FULL_WIRE, [field]: value }),
+				`${field}: ${value}`,
+			).toBeDefined();
+		}
+	});
+
+	it("refuses to read an id that is not 22 base64url characters", () => {
+		for (const id of [
+			"",
+			"factor-1",
+			"A".repeat(21),
+			"A".repeat(23),
+			`${"A".repeat(21)}+`,
+			`${"A".repeat(21)}/`,
+			`${"A".repeat(20)}==`,
+			`${"A".repeat(21)} `,
+		]) {
+			expect(readMfaStoreFactor({ ...FULL_WIRE, id }), JSON.stringify(id)).toBeUndefined();
+		}
+	});
+
+	it("refuses to read a kind outside the hint grammar", () => {
+		for (const kind of ["", "TOTP", "1totp", "totp code", "tötp", `a${"b".repeat(64)}`, "-totp"]) {
+			expect(readMfaStoreFactor({ ...FULL_WIRE, kind }), JSON.stringify(kind)).toBeUndefined();
+		}
+	});
+
+	it("refuses to read a label that is empty, longer than 64 characters, or not printable on one line", () => {
+		for (const [what, label] of [
+			["empty", ""],
+			["65 characters", "L".repeat(65)],
+			["a million characters", "L".repeat(1_000_000)],
+			["a line break", "a\r\nb"],
+			["NUL", `a${chars(0)}b`],
+			["ESC", `a${chars(0x1b)}[31mb`],
+			["a tab", `a${chars(9)}b`],
+			["DEL", `a${chars(0x7f)}b`],
+			["a C1 control", `a${chars(0x85)}b`],
+			["a line separator", `a${chars(0x2028)}b`],
+			["a bidi override", `a${chars(0x202e)}b`],
+			["a directional mark", `a${chars(0x200f)}b`],
+			["a lone surrogate", `a${String.fromCharCode(0xd800)}b`],
+		] as const) {
+			expect(readMfaStoreFactor({ ...FULL_WIRE, label }), what).toBeUndefined();
+		}
+	});
+
+	it("refuses, with a RangeError, to write an id, a kind or a label the reader would refuse", () => {
+		for (const [what, record] of [
+			["an id not of D7's shape", { ...FULL, id: "factor-1" }],
+			["a kind outside the grammar", { ...FULL, kind: "TOTP" }],
+			["a label over 64 characters", { ...FULL, label: "L".repeat(65) }],
+			["a label with a line break", { ...FULL, label: "a\nb" }],
+		] as const) {
+			expect(() => toMfaStoreFactor(record), what).toThrow(RangeError);
+		}
+		expect(() =>
+			toMfaStoreFactorChanges({ data: "v2.x", label: "", lastUsedAt: undefined }),
+		).toThrow(RangeError);
+		expect(() =>
+			toMfaStoreUpdateRequest("user-1", "factor-1", 1, {
+				data: "v2.x",
+				label: undefined,
+				lastUsedAt: undefined,
+			}),
+		).toThrow(RangeError);
+	});
+});
+
+describe("a list answer", () => {
+	const SECOND = { ...FULL_WIRE, id: ID_2, kind: "email" };
+
+	it("reads every record of the subject asked for, each a fresh object of its own fields", () => {
+		const reading = readMfaStoreListAnswer(
+			overJson({ factors: [{ ...FULL_WIRE, storeNote: "x" }, SECOND] }),
+			"user-1",
+		);
+		expect(reading).toStrictEqual({ ok: true, factors: [FULL_WIRE, SECOND] });
+		expect(readMfaStoreListAnswer({ factors: [] }, "user-1")).toStrictEqual({
+			ok: true,
+			factors: [],
+		});
+	});
+
+	it("is malformed when it is not { factors: [...] }", () => {
+		for (const value of [undefined, null, [], "factors", {}, { factors: null }, { factors: {} }]) {
+			expect(readMfaStoreListAnswer(value, "user-1"), JSON.stringify(value)).toStrictEqual({
+				ok: false,
+				reason: "malformed",
+			});
+		}
+	});
+
+	it("is unreadable, whole, when one record is unreadable, names another subject, or repeats an id", () => {
+		for (const [what, factors] of [
+			["an unreadable record", [FULL_WIRE, { ...SECOND, label: null }]],
+			["a record of another subject", [FULL_WIRE, { ...SECOND, subject: "user-2" }]],
+			["two records with one id", [FULL_WIRE, { ...SECOND, id: ID_1 }]],
+			["a record that is no object", [FULL_WIRE, "record"]],
+		] as const) {
+			expect(readMfaStoreListAnswer({ factors }, "user-1"), what).toStrictEqual({
+				ok: false,
+				reason: "unreadable",
+			});
+		}
+	});
+});
+
 describe("an update on the wire", () => {
 	const next: MfaFactorRecordUpdate = {
 		data: "v2.re-sealed",
@@ -182,10 +317,10 @@ describe("an update on the wire", () => {
 		lastUsedAt: new Date("2026-09-03T00:00:00.000Z"),
 	};
 
-	it("sends the expected version and data, label and lastUsedAtMs, nothing else of the record", () => {
-		expect(toMfaStoreUpdateRequest("user-1", "factor-1", 3, next)).toStrictEqual({
+	it("names the record by subject and id, and carries the expected version and, as its changes, only data, label and lastUsedAtMs", () => {
+		expect(toMfaStoreUpdateRequest("user-1", ID_1, 3, next)).toStrictEqual({
 			subject: "user-1",
-			id: "factor-1",
+			id: ID_1,
 			expectedVersion: 3,
 			changes: {
 				data: "v2.re-sealed",
@@ -224,8 +359,14 @@ describe("an update on the wire", () => {
 
 	it("refuses to read changes that carry any field but the three, or null for one", () => {
 		const changes = toMfaStoreFactorChanges(next);
-		for (const field of ["id", "subject", "kind", "binding", "createdAtMs", "version"]) {
+		for (const field of ["id", "subject", "kind", "binding", "createdAtMs", "version", "note"]) {
 			expect(readMfaStoreFactorChanges({ ...changes, [field]: "x" }), field).toBeUndefined();
+		}
+		for (const text of [
+			'{"data":"x","__proto__":{"subject":"victim"}}',
+			'{"data":"x","constructor":{"prototype":{}}}',
+		]) {
+			expect(readMfaStoreFactorChanges(JSON.parse(text)), text).toBeUndefined();
 		}
 		for (const field of ["label", "lastUsedAtMs", "data"]) {
 			expect(readMfaStoreFactorChanges({ ...changes, [field]: null }), field).toBeUndefined();
@@ -238,12 +379,12 @@ describe("an update on the wire", () => {
 	it("refuses, with a RangeError, an update whose version cannot advance or is no version", () => {
 		for (const expectedVersion of [Number.MAX_SAFE_INTEGER, -1, 1.5, Number.NaN]) {
 			expect(
-				() => toMfaStoreUpdateRequest("user-1", "factor-1", expectedVersion, next),
+				() => toMfaStoreUpdateRequest("user-1", ID_1, expectedVersion, next),
 				String(expectedVersion),
 			).toThrow(RangeError);
 		}
 		expect(() =>
-			toMfaStoreUpdateRequest("user-1", "factor-1", 1, {
+			toMfaStoreUpdateRequest("user-1", ID_1, 1, {
 				...next,
 				lastUsedAt: new Date(Number.NaN),
 			}),
