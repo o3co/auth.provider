@@ -147,6 +147,13 @@ describe("the package's reference.conf", () => {
 		});
 	});
 
+	it("defaults recent MFA's window, mfa.manage.maxAgeSeconds, to 300 seconds", () => {
+		const settings = readSettings(
+			resolve({ MFA_ENCRYPTION_KEY: randomBytes(32).toString("base64") }),
+		);
+		expect(settings.manage).toEqual({ maxAgeSeconds: 300 });
+	});
+
 	it("reads each key of mfa-totp-factor from its variable: MFA_TOTP_FACTOR_ENABLED, _ALGORITHM, _DIGITS, _PERIOD, _WINDOW and _ISSUER", () => {
 		const totp = totpOf(
 			resolve({

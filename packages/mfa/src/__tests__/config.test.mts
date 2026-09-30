@@ -81,11 +81,12 @@ const LOCKOUT = {
 	trustedBrowserDays: 30,
 } as const;
 
-/** The transaction's keys, as `reference.conf` defaults them. */
+/** The transaction's keys and recent MFA's window, as `reference.conf` defaults them. */
 const TRANSACTION = {
 	transactionTtlSeconds: 600,
 	maxAttemptsPerTransaction: 5,
 	lockout: { ...LOCKOUT },
+	manage: { maxAgeSeconds: 300 },
 } as const;
 
 /** A configuration as the composition root hands it, with `mfa` as given. */
@@ -169,10 +170,11 @@ describe("the MFA settings this package reads", () => {
 		expect(refusal(() => readTotp(undefined))).toMatch(/^mfa-totp-factor /);
 	});
 
-	it("exports the schema of the mfa section it reads: its mode, the ring, the transaction's keys and the lock — no factor's", () => {
+	it("exports the schema of the mfa section it reads: its mode, the ring, the transaction's keys, the lock and recent MFA's window — no factor's", () => {
 		expect(Object.keys(mfaConfigSchema.shape).sort()).toEqual([
 			"encryptionKeys",
 			"lockout",
+			"manage",
 			"maxAttemptsPerTransaction",
 			"mode",
 			"transactionTtlSeconds",
@@ -663,6 +665,19 @@ describe("the transaction's life and attempts, and the lock", () => {
 				refusal(() => readSettings(valid({ lockout }))),
 				JSON.stringify(lockout),
 			).toContain(field);
+		}
+	});
+
+	it("holds mfa.manage.maxAgeSeconds, recent MFA's window, to 60-3600 seconds, a whole number", () => {
+		for (const value of [60, 300, 3600]) {
+			expect(readSettings(valid({ manage: { maxAgeSeconds: value } })).manage).toEqual({
+				maxAgeSeconds: value,
+			});
+		}
+		for (const value of [59, 3601, 0, 300.5, "300", null, undefined]) {
+			const message = refusal(() => readSettings(valid({ manage: { maxAgeSeconds: value } })));
+			expect(message, String(value)).toContain("mfa.manage.maxAgeSeconds");
+			expect(message, String(value)).toContain("60 to 3600 seconds");
 		}
 	});
 
