@@ -565,6 +565,12 @@ const VOCABULARY: readonly VocabularyRow[] = [
 		home: "packages/mfa/src/codes.mts",
 		definition: /(?:function|const)\s+formatLongCode\b/,
 	},
+	{
+		concept:
+			"a recovery-code set — issued beside a first counting factor, kept as keyed digests (the MFA ADR's D22, D25)",
+		home: "packages/mfa/src/recovery/factor.mts",
+		definition: /(?:function|const)\s+generateRecoveryCodes\b/,
+	},
 ];
 
 /**

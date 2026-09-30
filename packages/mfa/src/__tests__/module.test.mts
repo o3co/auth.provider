@@ -51,6 +51,7 @@ import { mfaEmailFactorModule } from "#/email/module.mjs";
 import { MFA_ROUTES_ID, mfaBootState, mfaModule, mfaModules } from "#/module.mjs";
 import { mfaRecoveryCodeFactorModule } from "#/recovery/module.mjs";
 import { createMfaSealing } from "#/sealing.mjs";
+import { mfaRecoveryCodeFactorConfigForTests } from "#/testing/index.mjs";
 import { mfaTotpFactorModule } from "#/totp/module.mjs";
 import {
 	ALICE,
@@ -78,6 +79,13 @@ const contributing = (factor: MfaFactor) =>
 
 /** The TOTP factor's section, switched off. */
 const TOTP_OFF = { enabled: false };
+
+/** `mode`'s configuration with the package's two factors switched off: no factor is enabled. */
+const noFactorEnabled = (mode: "optional" | "required") =>
+	({
+		...configFor(mode, {}, TOTP_OFF),
+		...mfaRecoveryCodeFactorConfigForTests({ enabled: false }),
+	}) as ReturnType<typeof configFor>;
 
 // ---------------------------------------------------------------------------
 // What is installed
@@ -157,7 +165,7 @@ describe("the requirement it registers", () => {
 	it("registers mfa with the reach boot recomputes from the enabled factors, the page mfa.page.url names and mfa.step_up — said in the boot line", async () => {
 		const { handle, logger } = await boot();
 		const registered = handle.components.sessionRequirementResolver?.get("mfa");
-		expect([...(registered?.reach ?? [])].sort()).toEqual(["mfa", "otp"]);
+		expect([...(registered?.reach ?? [])].sort()).toEqual(["mfa", "otp", "recovery"]);
 		// Resolved at registration on the configuration's issuer.
 		expect(registered?.stepUpPage).toEqual({
 			url: "/mfa",
@@ -194,7 +202,7 @@ describe("the requirement it registers", () => {
 		});
 		expect(
 			[...(handle.components.sessionRequirementResolver?.get("mfa")?.reach ?? [])].sort(),
-		).toEqual(["hwk", "mfa", "otp", "swk"]);
+		).toEqual(["hwk", "mfa", "otp", "recovery", "swk"]);
 	});
 
 	it("is refused when its reach is not what the enabled factors reach: core compares the two at the end of the name-keyed pass", async () => {
@@ -301,7 +309,7 @@ describe("the boot refusals", () => {
 	});
 
 	it("refuses required with no counting factor enabled — mfa-no-counting-factor, once the factors have registered — telling the operator to enable an installed counting factor's module, the TOTP factor's key second", async () => {
-		const err = await refusal({ config: configFor("required", {}, TOTP_OFF) });
+		const err = await refusal({ config: noFactorEnabled("required") });
 		expect(err.reason).toBe("contribute-factory-failed");
 		expect(err.details).toMatchObject({ module: "mfa", kind: "routes" });
 		expect(err.cause).toMatchObject({ reason: "mfa-no-counting-factor" });
@@ -319,12 +327,13 @@ describe("the boot refusals", () => {
 
 	it("refuses required when every enabled factor is one that does not count, naming the enabled kinds — with the TOTP factor's module or without it", async () => {
 		for (const withoutTotpModule of [false, true]) {
+			// The package's recovery-code factor, or another package's under its kind.
 			const err = await refusal({
 				config: configFor("required", {}, TOTP_OFF),
 				withoutTotpModule,
-				extraModules: [
-					contributing(stubFactor("recovery_code", ["recovery"], { counting: false })),
-				],
+				extraModules: withoutTotpModule
+					? [contributing(stubFactor("recovery_code", ["recovery"], { counting: false }))]
+					: [],
 			});
 			expect(err.cause, String(withoutTotpModule)).toMatchObject({
 				reason: "mfa-no-counting-factor",
@@ -377,14 +386,9 @@ describe("the boot refusals", () => {
 		}
 	});
 
-	it("boots with 16 enabled counting factors, and counts only those that count", async () => {
-		await boot({ extraModules: counting(15) });
-		await boot({
-			extraModules: [
-				...counting(15),
-				contributing(stubFactor("recovery_code", ["recovery"], { counting: false })),
-			],
-		});
+	it("boots with 16 enabled counting factors, and counts only those that count: the recovery codes beside them do not", async () => {
+		const { handle } = await boot({ extraModules: counting(15) });
+		expect(handle.components.mfaFactorResolver?.get("recovery_code")?.counting).toBe(false);
 	});
 
 	it("holds its cap to core's: a first binding's hint list of 16 kinds is answered, one of 17 refused", async () => {
@@ -436,13 +440,13 @@ describe("the boot refusals", () => {
 		await boot({
 			extraModules: [
 				contributing(stubFactor("web-authn_2", ["hwk"])),
-				contributing(stubFactor("recovery_code", ["recovery"], { counting: false })),
+				contributing(stubFactor("backup_codes-2", ["recovery"], { counting: false })),
 			],
 		});
 	});
 
 	it("boots optional with no counting factor: nobody is asked for one", async () => {
-		const { handle } = await boot({ config: configFor("optional", {}, TOTP_OFF) });
+		const { handle } = await boot({ config: noFactorEnabled("optional") });
 		expect(handle.components.sessionRequirementResolver?.get("mfa")?.reach.size).toBe(0);
 	});
 

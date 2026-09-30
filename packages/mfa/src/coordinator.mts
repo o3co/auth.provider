@@ -48,6 +48,7 @@ import {
 	MFA_AMR,
 	type MfaEnrolledFactor,
 	type MfaFactor,
+	type MfaFactorData,
 	type MfaFactorRecord,
 	type MfaFactorResolver,
 	type MfaFactorState,
@@ -61,6 +62,11 @@ import {
 	type PrimaryContinuation,
 	readMfaAttemptReservation,
 } from "@o3co/auth-provider-core";
+import {
+	createMfaEnrollment,
+	type MfaEnrollmentBeginOutcome,
+	type MfaEnrollmentCompleteOutcome,
+} from "./enrollment.mjs";
 import { keptState, readKeptState, sendMfaMail } from "./mail.mjs";
 import type { MfaRequirementMode } from "./requirement.mjs";
 import type { MfaSealing } from "./sealing.mjs";
@@ -108,13 +114,14 @@ export interface MfaStoreOutage {
  * (`unreadable`), or opens under a key the ring lacks (`key_unavailable`,
  * naming it), or the factor threw reading it (`verification`); or its
  * pending challenge's kept state does not open (`challenge`, naming the key
- * when it is the one missing).
+ * when it is the one missing); or a first binding's pending enrollment does
+ * not open, or the factor threw completing it (`enrollment`).
  */
 export interface MfaFactorUnreadable {
 	readonly outcome: "unreadable";
 	readonly kind: string;
 	readonly factorId: string;
-	readonly state: "unreadable" | "key_unavailable" | "verification" | "challenge";
+	readonly state: "unreadable" | "key_unavailable" | "verification" | "challenge" | "enrollment";
 	readonly keyId?: string;
 	readonly cause?: unknown;
 }
@@ -131,7 +138,7 @@ const UNKNOWN_TRANSACTION = Object.freeze({ outcome: "unknown_transaction" as co
 /** No factor of the subject's that an installed factor verifies, by the id named. */
 const UNKNOWN_FACTOR = Object.freeze({ outcome: "unknown_factor" as const });
 
-type UnknownTransaction = typeof UNKNOWN_TRANSACTION;
+export type UnknownTransaction = typeof UNKNOWN_TRANSACTION;
 type UnknownFactor = typeof UNKNOWN_FACTOR;
 
 /** What a transaction's reader is shown of it. */
@@ -227,6 +234,56 @@ export interface MfaCoordinator {
 	verify(
 		call: MfaCeremonyCall & { readonly factorId: unknown; readonly proof: unknown },
 	): Promise<MfaVerifyOutcome>;
+	/** A login's first binding begun: the enrollment of the factor of `kind` started (`enrollment.mts`). */
+	beginEnrollment(
+		call: MfaCeremonyCall & { readonly kind: unknown },
+	): Promise<MfaEnrollmentBeginOutcome>;
+	/** A login's first binding completed: the proof taken, the factor bound (`enrollment.mts`). */
+	completeEnrollment(
+		call: MfaCeremonyCall & { readonly proof: unknown; readonly label: unknown },
+	): Promise<MfaEnrollmentCompleteOutcome>;
+}
+
+/**
+ * What the ceremonies beside a verification share of the coordinator: its
+ * stores, and the reads and writes every use of a transaction goes through,
+ * each answering an outage as a verification does.
+ */
+export interface MfaCeremonyKit {
+	readonly factors: MfaFactorResolver;
+	readonly factorStore: MfaFactorStore;
+	readonly transactions: MfaTransactionStore;
+	readonly sealing: MfaSealing;
+	readonly maxAttemptsPerTransaction: number;
+	readonly mailSender: MailSender | undefined;
+	readonly witness: MfaEnrollmentWitness;
+	readonly now: () => number;
+	/** The login transaction `call` names, bound to its binding; `null` when there is none to use. */
+	readonly bound: (call: MfaCeremonyCall) => Promise<MfaTransaction | null | MfaStoreOutage>;
+	/** Every record of `subject`, oldest first; an outage is never "none". */
+	readonly recordsOf: (subject: string) => Promise<MfaFactorRecord[] | MfaStoreOutage>;
+	/** One of `tx`'s attempts reserved: the attempts left, `exhausted` past the limit, or why none was. */
+	readonly reserve: (
+		tx: MfaTransaction,
+	) => Promise<
+		| { readonly attemptsRemaining: number }
+		| { readonly outcome: "exhausted" }
+		| UnknownTransaction
+		| MfaStoreOutage
+	>;
+	/** `tx` consumed at the version read, or `spent`, or the outage. */
+	readonly consume: (
+		tx: MfaTransaction,
+	) => Promise<MfaTransaction | { readonly outcome: "spent" } | MfaStoreOutage>;
+	/** `patch` written at `tx`'s version: `undefined` once written, else why not. */
+	readonly write: (
+		tx: MfaTransaction,
+		patch: MfaTransactionPatch,
+	) => Promise<UnknownTransaction | MfaStoreOutage | undefined>;
+	/** Whether `value` is an object `res.json` answers as built: a plain object. */
+	readonly answerable: (value: unknown) => value is object;
+	/** `factor.amrFor(data)` when it names at least one value and only values the factor declares; else `undefined`. */
+	readonly declaredAmr: (factor: MfaFactor, data: MfaFactorData) => readonly string[] | undefined;
 }
 
 export interface MfaCoordinatorOptions {
@@ -427,6 +484,95 @@ export function createMfaCoordinator(options: MfaCoordinatorOptions): MfaCoordin
 		};
 	};
 
+	/**
+	 * One of `tx`'s attempts reserved, after the bound read held: the
+	 * attempts left; `exhausted` past the limit, which the store answers by
+	 * deleting the transaction; unknown when none was reserved.
+	 */
+	const reserve = async (
+		tx: MfaTransaction,
+	): Promise<
+		| { readonly attemptsRemaining: number }
+		| { readonly outcome: "exhausted" }
+		| UnknownTransaction
+		| MfaStoreOutage
+	> => {
+		let answered: unknown;
+		try {
+			answered = await transactions.reserveAttempt(tx.id, maxAttemptsPerTransaction);
+		} catch (cause) {
+			return outage("mfa_transaction", "reserveAttempt", cause);
+		}
+		const reservation = readMfaAttemptReservation(answered, maxAttemptsPerTransaction);
+		if (reservation === undefined) {
+			return outage("mfa_transaction", "reserveAttempt", OUTSIDE_CONTRACT);
+		}
+		if (!reservation.ok) {
+			// Past the limit the store deleted the transaction; with none reserved, it was gone.
+			return reservation.attempts > 0 ? { outcome: "exhausted" } : UNKNOWN_TRANSACTION;
+		}
+		return { attemptsRemaining: Math.max(0, maxAttemptsPerTransaction - reservation.attempts) };
+	};
+
+	/** `tx` consumed at the version read: the record as the store answered it; `spent` when another consumed it first. */
+	const consume = async (
+		tx: MfaTransaction,
+	): Promise<MfaTransaction | { readonly outcome: "spent" } | MfaStoreOutage> => {
+		let consumed: MfaTransaction | null;
+		try {
+			consumed = await transactions.consume(tx.id, tx.version);
+		} catch (cause) {
+			return outage("mfa_transaction", "consume", cause);
+		}
+		if (consumed === null) return { outcome: "spent" };
+		if (!isConsumedMfaTransaction(consumed, tx)) {
+			return outage("mfa_transaction", "consume", OUTSIDE_CONTRACT);
+		}
+		return consumed;
+	};
+
+	/** `patch` written at `tx`'s version: `undefined` once written, else why not. */
+	const write = async (
+		tx: MfaTransaction,
+		patch: MfaTransactionPatch,
+	): Promise<UnknownTransaction | MfaStoreOutage | undefined> => {
+		let written: unknown;
+		try {
+			written = await transactions.update(tx.id, tx.version, patch);
+		} catch (cause) {
+			return outage("mfa_transaction", "update", cause);
+		}
+		if (written === null) return UNKNOWN_TRANSACTION;
+		if (!isWrittenAt(written, tx)) return outage("mfa_transaction", "update", OUTSIDE_CONTRACT);
+		return undefined;
+	};
+
+	const kit: MfaCeremonyKit = {
+		factors,
+		factorStore,
+		transactions,
+		sealing,
+		maxAttemptsPerTransaction,
+		mailSender,
+		witness,
+		now,
+		bound,
+		recordsOf,
+		reserve,
+		consume,
+		write,
+		answerable: isPlainObject,
+		declaredAmr: (factor, data) => {
+			try {
+				const amr: unknown = factor.amrFor(data);
+				return declaresEach(factor, amr) ? amr : undefined;
+			} catch {
+				return undefined;
+			}
+		},
+	};
+	const enrollment = createMfaEnrollment(kit);
+
 	return {
 		async describe(call) {
 			const nowMs = now();
@@ -518,22 +664,6 @@ export function createMfaCoordinator(options: MfaCoordinatorOptions): MfaCoordin
 				response: issued.response as object,
 				...about,
 			};
-			/** Writes `patch` at the version read: `undefined` once written, else the answer. */
-			const write = async (
-				patch: MfaTransactionPatch,
-			): Promise<MfaChallengeOutcome | undefined> => {
-				let written: unknown;
-				try {
-					written = await transactions.update(tx.id, tx.version, patch);
-				} catch (cause) {
-					return outage("mfa_transaction", "update", cause);
-				}
-				if (written === null) return UNKNOWN_TRANSACTION;
-				if (!isWrittenAt(written, tx)) {
-					return outage("mfa_transaction", "update", OUTSIDE_CONTRACT);
-				}
-				return undefined;
-			};
 			/** The pending challenge, sealed with the address's digest when a code went out, living until `expiresAtMs`. */
 			const pending = (addressDigest: MfaKeyedDigest | undefined, expiresAtMs: number) => ({
 				factorId: record.id,
@@ -562,7 +692,7 @@ export function createMfaCoordinator(options: MfaCoordinatorOptions): MfaCoordin
 						} catch (cause) {
 							return { kept: false, refusal: failed(cause) };
 						}
-						const refused = await write({ challenge });
+						const refused = await write(tx, { challenge });
 						if (refused !== undefined) return { kept: false, refusal: refused };
 						return {
 							kept: true,
@@ -627,7 +757,7 @@ export function createMfaCoordinator(options: MfaCoordinatorOptions): MfaCoordin
 				return failed(cause);
 			}
 			if (patch !== undefined) {
-				const refused = await write(patch);
+				const refused = await write(tx, patch);
 				if (refused !== undefined) return refused;
 			}
 			return sent;
@@ -668,21 +798,11 @@ export function createMfaCoordinator(options: MfaCoordinatorOptions): MfaCoordin
 			let opened = openKind(tx.subject, record, records);
 			if ("outcome" in opened) return opened;
 
-			let answered: unknown;
-			try {
-				answered = await transactions.reserveAttempt(tx.id, maxAttemptsPerTransaction);
-			} catch (cause) {
-				return outage("mfa_transaction", "reserveAttempt", cause);
+			const reserved = await reserve(tx);
+			if ("outcome" in reserved) {
+				return reserved.outcome === "exhausted" ? refused("exhausted", 0) : reserved;
 			}
-			const reservation = readMfaAttemptReservation(answered, maxAttemptsPerTransaction);
-			if (reservation === undefined) {
-				return outage("mfa_transaction", "reserveAttempt", OUTSIDE_CONTRACT);
-			}
-			if (!reservation.ok) {
-				// Past the limit the store deleted the transaction; with none reserved, it was gone.
-				return reservation.attempts > 0 ? refused("exhausted", 0) : UNKNOWN_TRANSACTION;
-			}
-			const attemptsRemaining = Math.max(0, maxAttemptsPerTransaction - reservation.attempts);
+			const { attemptsRemaining } = reserved;
 
 			const pending = await challengeState(tx, factor, record, nowMs);
 			if ("outcome" in pending) return pending;
@@ -756,16 +876,8 @@ export function createMfaCoordinator(options: MfaCoordinatorOptions): MfaCoordin
 
 			// Consumed before the factor moves on: a lost race spends the
 			// transaction, never the factor's state.
-			let consumed: MfaTransaction | null;
-			try {
-				consumed = await transactions.consume(tx.id, tx.version);
-			} catch (cause) {
-				return outage("mfa_transaction", "consume", cause);
-			}
-			if (consumed === null) return { outcome: "spent" };
-			if (!isConsumedMfaTransaction(consumed, tx)) {
-				return outage("mfa_transaction", "consume", OUTSIDE_CONTRACT);
-			}
+			const consumed = await consume(tx);
+			if ("outcome" in consumed) return consumed;
 
 			for (let round = 1; ; round++) {
 				const { verified, next } = checked;
@@ -840,5 +952,8 @@ export function createMfaCoordinator(options: MfaCoordinatorOptions): MfaCoordin
 				...about,
 			};
 		},
+
+		beginEnrollment: (call) => enrollment.begin(call),
+		completeEnrollment: (call) => enrollment.complete(call),
 	};
 }
