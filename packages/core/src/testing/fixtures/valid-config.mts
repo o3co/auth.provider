@@ -55,6 +55,30 @@ import { renamedVariableCaptures } from "../renamedVariables.mjs";
 
 type FullSectionsConfig = z.infer<typeof fullSectionsSchema>;
 
+/** What {@link coreConfigForTests} states in core's own section. */
+export interface CoreConfigForTestsOptions {
+	/** The session requirements the composition expects; none by default. */
+	readonly expected?: readonly string[];
+	/** The deployment mode; left unstated by default, which core reads as `unset`. */
+	readonly deploymentMode?: "single" | "multi";
+}
+
+/**
+ * Core's own section, `core`, as a configuration fragment to lay over a
+ * configuration: the session requirements the composition expects, and the
+ * deployment mode when one is given. A fresh object each call.
+ */
+export function coreConfigForTests(options: CoreConfigForTestsOptions = {}) {
+	return {
+		core: {
+			sessionRequirements: { expected: [...(options.expected ?? [])] },
+			...(options.deploymentMode === undefined
+				? {}
+				: { deployment: { mode: options.deploymentMode } }),
+		},
+	} satisfies Pick<CoreConfig, "core">;
+}
+
 export function makeValidCoreConfig() {
 	return {
 		...{
@@ -109,7 +133,7 @@ export function makeValidCoreConfig() {
 		// This composition expects nothing of session admission, stated because
 		// a createApp test that installs a consumer of admission must state its
 		// posture. A test of the declaration itself removes the key.
-		core: { sessionRequirements: { expected: [] } },
+		...coreConfigForTests(),
 	} satisfies CoreConfig;
 }
 

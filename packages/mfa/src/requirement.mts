@@ -62,7 +62,7 @@ import {
 import type { LoginInterruption, LoginTransactions } from "./transactions.mjs";
 
 /** The name the requirement is registered under: `sessionRequirements.mfa`. */
-const MFA_REQUIREMENT_NAME = "mfa";
+export const MFA_REQUIREMENT_NAME = "mfa";
 
 /** The remediation the MFA page's step-up call (`POST /session/mfa/step-up`) admits with. */
 const MFA_STEP_UP_REMEDIATION = `${MFA_REQUIREMENT_NAME}.step_up`;
