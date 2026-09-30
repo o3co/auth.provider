@@ -262,7 +262,7 @@ async function applyGrantPolicy(
 			answer = await deps.grantPolicy.evaluate(policyRequest, policyContext);
 		} catch (err) {
 			logGrantPolicyUnavailable(
-				deps.logger ?? consoleLogger,
+				deps.logger,
 				{ grantType: GRANT_TYPE, policy: deps.grantPolicy.kind },
 				err,
 			);
@@ -275,7 +275,7 @@ async function applyGrantPolicy(
 			};
 		}
 		// Core's reading: a decision that is neither allow nor deny is its 500.
-		const reading = readGrantPolicyDecision(answer, deps.logger ?? consoleLogger, {
+		const reading = readGrantPolicyDecision(answer, deps.logger, {
 			grantType: GRANT_TYPE,
 			policy: deps.grantPolicy.kind,
 		});
