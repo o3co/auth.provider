@@ -315,7 +315,10 @@ describe("createRedisMfaTransactionStore — the transaction", () => {
 			await store.create(TX());
 			await first().hset(key, field, value);
 			expect(await store.get("tx-1"), `${field}=${value}`).toBeNull();
-			expect(await store.update("tx-1", 1, { enrollment: "allowed" }), `${field}=${value}`).toBeNull();
+			expect(
+				await store.update("tx-1", 1, { enrollment: "allowed" }),
+				`${field}=${value}`,
+			).toBeNull();
 		}
 		await first().del(key);
 		await store.create(TX());
@@ -434,10 +437,7 @@ describe("createRedisMfaTransactionStore — the subject state", () => {
 		expect(await deadlineOf(lock)).toBe(-1);
 		expect(await deadlineOf(week)).toBe(-1);
 
-		const succeeded = await store.reserveSubjectAttempt(
-			"user-1",
-			t + 2 * MINUTE,
-			POLICY);
+		const succeeded = await store.reserveSubjectAttempt("user-1", t + 2 * MINUTE, POLICY);
 		if (!succeeded.ok) throw new Error("expected a reservation");
 		await store.settleSubjectAttempt("user-1", succeeded.reservation, "success");
 		// The run is over. The week counts the failure until a week after it,
@@ -493,9 +493,10 @@ describe("createRedisMfaTransactionStore — the subject state", () => {
 		expect(await deadlineOf(weeklyLock)).toBeGreaterThan(0);
 		await first().pexpireat(weeklyLock, sentinel);
 		await first().pexpireat(weeklyWeek, sentinel);
-		expect(
-			await weekly.reserveSubjectAttempt("user-1", at + MINUTE, weekOnly),
-		).toMatchObject({ ok: false, hold: "weekly" });
+		expect(await weekly.reserveSubjectAttempt("user-1", at + MINUTE, weekOnly)).toMatchObject({
+			ok: false,
+			hold: "weekly",
+		});
 		expect(await deadlineOf(weeklyLock)).toBe(sentinel);
 		expect(await deadlineOf(weeklyWeek)).toBe(sentinel);
 	});
@@ -516,9 +517,10 @@ describe("createRedisMfaTransactionStore — the subject state", () => {
 			await store.settleSubjectAttempt("user-1", r.reservation, "failure");
 		}
 		await first().pexpireat(lock, serverNow + 365 * DAY);
-		expect(
-			await store.reserveSubjectAttempt("user-1", serverNow - 5 * DAY, small),
-		).toMatchObject({ ok: false, hold: "hard" });
+		expect(await store.reserveSubjectAttempt("user-1", serverNow - 5 * DAY, small)).toMatchObject({
+			ok: false,
+			hold: "hard",
+		});
 		// The week's five failures were forgotten; the run, still counted, keeps
 		// the hash without a TTL.
 		expect(await first().exists(week)).toBe(0);
@@ -571,10 +573,9 @@ describe("createRedisMfaTransactionStore — the subject state", () => {
 		] as const) {
 			await first().del(lock, week);
 			await write();
-			await expect(
-				store.reserveSubjectAttempt("user-1", t, POLICY),
-				key,
-			).rejects.toThrow(/subject state/);
+			await expect(store.reserveSubjectAttempt("user-1", t, POLICY), key).rejects.toThrow(
+				/subject state/,
+			);
 			await expect(store.noteExemptSuccess("user-1", t), key).rejects.toThrow(/subject state/);
 		}
 	});
