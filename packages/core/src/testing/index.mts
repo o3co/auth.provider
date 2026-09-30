@@ -33,7 +33,6 @@ export {
 	MERGE_ACR_TABLE,
 	MERGE_REACH,
 	MERGE_ROW_GROUPS,
-	type MergeAuthority,
 	type MergeDecision,
 	type MergeFactors,
 	type MergeRow,

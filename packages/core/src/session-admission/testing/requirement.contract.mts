@@ -153,8 +153,10 @@ export function sessionRequirementContract(
 					"a requirement's name is the key it is contributed under",
 				);
 				if (fixture) {
+					// Read as registration reads it: a declaration that is neither
+					// true, false nor absent does not register.
 					assert.notEqual(
-						requirement.secondFactorAuthority,
+						registeredRequirement(requirement, issuer).secondFactorAuthority,
 						true,
 						"a fixture never declares the second-factor authority: boot binds the authority to core's MFA ports",
 					);

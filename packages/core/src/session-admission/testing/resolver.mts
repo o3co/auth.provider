@@ -57,6 +57,8 @@ export function resolverForTests(
 	}
 	const byName = new Map<string, RegisteredRequirement>();
 	let authority: string | undefined;
+	// Every requirement registered, and the two duplicates boot refuses before
+	// it reads a reach refused here, first, as boot orders them.
 	for (const candidate of requirements) {
 		// What is wrong is named by the registration itself, as boot reports it.
 		const requirement = registeredRequirement(candidate, options.issuer);
@@ -72,6 +74,8 @@ export function resolverForTests(
 			authority = requirement.name;
 		}
 		byName.set(requirement.name, requirement);
+	}
+	for (const requirement of byName.values()) {
 		if (options.allowAnyReach === true) {
 			snapshotReach(requirement);
 			continue;

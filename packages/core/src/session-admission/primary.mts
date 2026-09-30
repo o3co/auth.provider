@@ -45,7 +45,7 @@ import type {
 	PrimaryAuthentication,
 	PrimaryAuthenticationDto,
 	PrimaryContinuation,
-	SessionRequirement,
+	RegisteredRequirement,
 } from "./requirement.mjs";
 
 const isPlainObject = (value: unknown): value is Record<string, unknown> =>
@@ -205,8 +205,12 @@ export function primaryFromDto(dto: PrimaryAuthenticationDto): PrimaryAuthentica
 	return Object.freeze({ ...fields, authTime: new Date(authTimeMs) });
 }
 
-/** The completing requirement, as far as what it may add goes: its name, and whether it declares the second-factor authority. */
-export type CompletingRequirement = Pick<SessionRequirement, "name" | "secondFactorAuthority">;
+/**
+ * The completing requirement, as far as what it may add goes: the registered
+ * copy's name, and its declaration as registration read it — a boolean, never
+ * a field a raw requirement answers.
+ */
+export type CompletingRequirement = Pick<RegisteredRequirement, "name" | "secondFactorAuthority">;
 
 /**
  * What `requirement` may add as it completes: an `amr` of non-empty strings,
@@ -352,10 +356,16 @@ function copyCompleted(value: unknown, refuse: (what: string) => never): Complet
 /**
  * `value` as a `PrimaryContinuation`: a primary DTO and `done`, the
  * completed requirements with what each added — held to what any completion
- * keeps, a second factor a verified one — no name twice, every instant epoch
- * milliseconds. A frozen deep copy: what a requirement's record holds and
- * what `resumePrimary` reads back, holding each entry again to what its
- * requirement may add as registered.
+ * keeps, a second factor a verified one — no name twice, at most one entry
+ * adding a second factor, every instant epoch milliseconds. A frozen deep
+ * copy: what a requirement's record holds and what `resumePrimary` reads
+ * back.
+ *
+ * Which requirement declares the second-factor authority is the
+ * registration's, which this check does not hold. So it accepts an entry
+ * under the authority's name that added nothing, and a verified second factor
+ * under a name that does not declare the authority: `resumePrimary`, the one
+ * check that knows the registration, refuses both before composing.
  */
 export function checkPrimaryContinuation(value: unknown): PrimaryContinuation {
 	const refuse = (what: string): never => {
@@ -367,6 +377,15 @@ export function checkPrimaryContinuation(value: unknown): PrimaryContinuation {
 	const done = value.done.map((entry) => copyCompleted(entry, refuse));
 	const names = new Set(done.map((entry) => entry.requirement));
 	if (names.size !== done.length) refuse("done names a requirement twice");
+	// One requirement may add a second factor, and a name completes once.
+	const adding = done.filter((entry) =>
+		addsSecondFactor(entry.adds.amr, entry.adds.mfaAtMs !== undefined),
+	);
+	if (adding.length > 1) {
+		refuse(
+			"done holds more than one completion that adds a second factor: only the second-factor authority adds one, and it completes once",
+		);
+	}
 	const interruptedBy = value.interruptedBy;
 	if (!isNonEmptyString(interruptedBy)) {
 		refuse("interruptedBy must name the requirement whose ceremony it waits on");

@@ -120,7 +120,12 @@ describe("sessionRequirementContract — each way a requirement can break it", (
 		expect(await failing({ build: () => fixture({ secondFactorAuthority: true }) })).toContain(
 			"name equals its key, and a fixture never declares the second-factor authority",
 		);
-		expect(await failing({ key: "mfa", build: () => fixture({ name: "mfa" }) })).not.toContain(
+		expect(
+			await failing({
+				key: "mfa",
+				build: () => fixture({ name: "mfa", remediations: ["mfa.step_up"] }),
+			}),
+		).not.toContain(
 			"name equals its key, and a fixture never declares the second-factor authority",
 		);
 		// The declaration is read as registration reads it: one that is neither

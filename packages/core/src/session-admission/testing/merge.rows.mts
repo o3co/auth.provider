@@ -18,16 +18,21 @@
  * The rows of the session-admission ADR's acceptance criterion 4 (the MFA
  * ADR's step-4 table), as data: a request, a session, the `mfa.mode` and
  * enabled factors, and the expected decision in the MFA rule's vocabulary,
- * which `mergeAdmission` maps onto an `Admission` for the requirement that
- * declares the second-factor authority, whatever its name. Core's merge test
- * runs them against a stand-in, the MFA package's against the requirement it
- * registers, so both are held to one list. Nothing here runs a test.
+ * which `mergeAdmission` maps onto an `Admission` for the registered
+ * requirement that declares the second-factor authority, whatever its name.
+ * Core's merge test runs them against a stand-in registered as boot registers
+ * it, the MFA package's against the requirement it registers, so both are
+ * held to one list. Nothing here runs a test.
  */
 
 import type { MfaMode } from "../../mfa/mode.mjs";
 import type { UserSession } from "../../user-sessions/types.mjs";
 import { type AcrTable, readAcrTable } from "../acr.mjs";
-import type { Admission, RegisteredStepUpPage } from "../requirement.mjs";
+import {
+	type Admission,
+	isRegisteredRequirement,
+	type RegisteredRequirement,
+} from "../requirement.mjs";
 
 const MFA = "urn:o3co:acr:mfa";
 const PHR = "urn:o3co:acr:phr";
@@ -484,24 +489,29 @@ export const MERGE_ROW_GROUPS: readonly MergeRowGroup[] = [
 	},
 ];
 
-/** The requirement the rows are decided by: the one that declares the second-factor authority, by the name it registered under and its page as registered. */
-export interface MergeAuthority {
-	readonly name: string;
-	readonly page: RegisteredStepUpPage;
-}
-
 /**
- * The ADR's mapping of a row's decision onto the admission, for the
- * second-factor authority `authority` stepping up to its registered page:
- * `requirement: "acr"` stays `"acr"`, `"baseline"` becomes the authority's
- * name, and a `step_up`'s requirement becomes `whenStillUnmet` (`"acr"` →
- * `"unmet"`, `"baseline"` → `"reauthenticate"`).
+ * The ADR's mapping of a row's decision onto the admission, for `authority`,
+ * the registered requirement that declares the second-factor authority,
+ * stepping up to its registered page: `requirement: "acr"` stays `"acr"`,
+ * `"baseline"` becomes the authority's name, and a `step_up`'s requirement
+ * becomes `whenStillUnmet` (`"acr"` → `"unmet"`, `"baseline"` →
+ * `"reauthenticate"`). Throws for anything that is not a registered
+ * requirement, for one that does not declare the authority, and for a
+ * `step_up` from one that registered no page: the rows are the authority's.
  */
 export function mergeAdmission(
 	expected: MergeDecision,
 	session: UserSession | null,
-	authority: MergeAuthority,
+	authority: RegisteredRequirement,
 ): Admission {
+	if (!isRegisteredRequirement(authority)) {
+		throw new Error("mergeAdmission: the authority is not a registered requirement");
+	}
+	if (authority.secondFactorAuthority !== true) {
+		throw new Error(
+			`mergeAdmission: "${authority.name}" does not declare the second-factor authority, whose rows these are`,
+		);
+	}
 	switch (expected.outcome) {
 		case "met":
 			return { outcome: "admitted", session, acr: expected.acr };
@@ -509,11 +519,14 @@ export function mergeAdmission(
 			return { outcome: "reauthenticate", requirement: authority.name, session };
 		case "step_up":
 			if (session === null) throw new Error("a step-up needs a session");
+			if (authority.stepUpPage === undefined) {
+				throw new Error(`mergeAdmission: "${authority.name}" registered no step-up page`);
+			}
 			return {
 				outcome: "step_up",
 				requirement: authority.name,
 				session,
-				page: authority.page,
+				page: authority.stepUpPage,
 				acrValues: expected.acrValues,
 				whenStillUnmet: expected.requirement === "acr" ? "unmet" : "reauthenticate",
 			};

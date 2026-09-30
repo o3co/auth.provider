@@ -617,7 +617,7 @@ async function checkSessionRequirements(
 			message:
 				`${requirements.map(({ name, module }) => `${JSON.stringify(name)} (module ${JSON.stringify(module)})`).join(", ")} ` +
 				"each declare the second-factor authority, and at most one session requirement may: " +
-				"install one of the modules that contribute them.",
+				"install only one of the modules that contribute them.",
 			reason: "duplicate-second-factor-authority",
 			stage: "applyContributions",
 			details: {
@@ -762,6 +762,7 @@ async function checkSessionRequirements(
 					name,
 					module,
 					remediations: [...requirement.remediations],
+					secondFactorAuthority: requirement.secondFactorAuthority,
 				})),
 			},
 			"session_requirements_registered",

@@ -478,6 +478,14 @@ const isIterableOfValues = (value: unknown): value is Iterable<unknown> =>
 /** The copies `registeredRequirement` made: what `sealRegisteredReach` seals. */
 const registeredCopies = new WeakSet<SessionRequirement>();
 
+/**
+ * Whether `value` is a copy `registeredRequirement` made — never the object
+ * a factory returned, nor a copy of a registered one.
+ * @internal
+ */
+export const isRegisteredRequirement = (value: unknown): value is RegisteredRequirement =>
+	typeof value === "object" && value !== null && registeredCopies.has(value as SessionRequirement);
+
 /** Each registered copy's sealed reach: read once at the end of boot's stage 4, answered afterwards. */
 const sealedReach = new WeakMap<SessionRequirement, ReadonlySet<string>>();
 

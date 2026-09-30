@@ -29,6 +29,7 @@ import { listen } from "./listen.mjs";
 import { createAppLogger } from "./logger.mjs";
 import { createMetrics } from "./metrics.mjs";
 import { mountRoutes } from "./routes.mjs";
+import { requireMfaSecondFactorAuthority } from "./secondFactorAuthority.mjs";
 import { cleanupAllowanceFor, installGracefulShutdown } from "./shutdown.mjs";
 
 // Step 1: the configuration, in two phases (`configPath.mts`; template
@@ -92,6 +93,10 @@ await (async (): Promise<void> => {
 			logger,
 		},
 	});
+	// A mode that asks for a second factor needs the requirement it declared,
+	// `mfa`, registered as the declared second-factor authority: else the
+	// handle is disposed and the boot refused, before anything listens.
+	await requireMfaSecondFactorAuthority(switches, handle);
 	const config = handle.components.config;
 	if (config === undefined) throw new Error("createApp booted without the parsed configuration");
 	// `false` | `true` | a hop count | a list of IPs / CIDR ranges / named
