@@ -110,7 +110,7 @@ describe("a session Redis holds from before sessions carried authentication", ()
 });
 
 describe("enrollmentFacts in the envelope", () => {
-	it("writes them as the two facts, a witness and a boolean, and leaves the key out when there are none", async () => {
+	it("writes them as the two facts, a witness and an address fact, and leaves the key out when there are none", async () => {
 		const sessions = createRedisUserSessionStore({
 			client: makeIoredisClients(raw).userSessionStoreClient,
 			keyPrefix: "t14:facts:",
@@ -126,11 +126,11 @@ describe("enrollmentFacts in the envelope", () => {
 		await sessions.create({
 			...base,
 			sid: "sid-facts",
-			enrollmentFacts: { witness: "enrolled", mailAddress: true },
+			enrollmentFacts: { witness: "enrolled", mailAddress: "address" },
 		});
 		await sessions.create({ ...base, sid: "sid-none" });
 		const written = JSON.parse((await raw.get("t14:facts:sid-facts")) as string);
-		expect(written.enrollmentFacts).toStrictEqual({ witness: "enrolled", mailAddress: true });
+		expect(written.enrollmentFacts).toStrictEqual({ witness: "enrolled", mailAddress: "address" });
 		const none = JSON.parse((await raw.get("t14:facts:sid-none")) as string);
 		expect(none).not.toHaveProperty("enrollmentFacts");
 	});
@@ -153,11 +153,11 @@ describe("enrollmentFacts in the envelope", () => {
 				upstreamAmr: undefined,
 				mfaAt: undefined,
 			},
-			enrollmentFacts: { witness: "not_enrolled", mailAddress: false },
+			enrollmentFacts: { witness: "not_enrolled", mailAddress: "none" },
 		});
 		await sessions.recordSecondFactor("sid-facts", { amr: ["otp", "mfa"], at: new Date() });
 		const written = JSON.parse((await raw.get("t14:facts-sf:sid-facts")) as string);
-		expect(written.enrollmentFacts).toStrictEqual({ witness: "not_enrolled", mailAddress: false });
+		expect(written.enrollmentFacts).toStrictEqual({ witness: "not_enrolled", mailAddress: "none" });
 	});
 });
 

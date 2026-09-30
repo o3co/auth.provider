@@ -238,7 +238,7 @@ describe("establishSession", () => {
 				},
 				authTime: new Date(0),
 				redirectTo: "https://evil.example.com/",
-				enrollmentFacts: { witness: "enrolled", mailAddress: true },
+				enrollmentFacts: { witness: "enrolled", mailAddress: "address" },
 			};
 
 			const result = await establishSession(establishment, {
@@ -266,7 +266,7 @@ describe("establishSession", () => {
 					upstreamAmr: undefined,
 					mfaAt: undefined,
 				},
-				enrollmentFacts: { witness: "not_enrolled", mailAddress: false },
+				enrollmentFacts: { witness: "not_enrolled", mailAddress: "none" },
 			});
 			expect(h.subjectSessionIndex.addSid).toHaveBeenCalledWith("u-9", sid, expiresAt);
 			expect(h.reporterFactory).toHaveBeenCalledWith({ sid, sub: "u-9" });
@@ -349,7 +349,7 @@ describe("establishSession", () => {
 			await direct.establish(admitted.establishment);
 			expect(direct.userSessionStore.create).toHaveBeenCalledWith(
 				expect.objectContaining({
-					enrollmentFacts: { witness: "enrolled", mailAddress: true },
+					enrollmentFacts: { witness: "enrolled", mailAddress: "address" },
 				}),
 			);
 
@@ -388,7 +388,7 @@ describe("establishSession", () => {
 			await after.establish(resumed.establishment);
 			expect(after.userSessionStore.create).toHaveBeenCalledWith(
 				expect.objectContaining({
-					enrollmentFacts: { witness: "enrolled", mailAddress: false },
+					enrollmentFacts: { witness: "enrolled", mailAddress: "unreadable" },
 				}),
 			);
 		});
@@ -446,7 +446,7 @@ describe("establishSession", () => {
 				expiresAt,
 				claims,
 				...passwordSessionAuthentication(),
-				enrollmentFacts: { witness: "not_enrolled", mailAddress: true },
+				enrollmentFacts: { witness: "not_enrolled", mailAddress: "address" },
 			});
 			expect(h.subjectSessionIndex.addSid).toHaveBeenCalledWith("u-1", sid, expiresAt);
 			expect(h.before.run).toHaveBeenCalledWith({ sid, sub: "u-1", expiresAt });

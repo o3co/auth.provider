@@ -18,8 +18,9 @@
  * What a session records of its login's `User` for a first binding
  * (`SessionEnrollmentFacts`): derived by core's primary builders from the
  * `User` — the witness as `readMfaEnrollmentWitness` reads it, and whether
- * `user.email` is an address `normaliseMailAddress` reads — never taken from
- * a caller's object; and handed to a requirement as a copy in the view.
+ * `user.email` is none, an address `normaliseMailAddress` reads, or one it
+ * cannot — never taken from a caller's object, and never from a `User` that
+ * is not plain data; and handed to a requirement as a copy in the view.
  */
 
 import { describe, expect, it } from "vitest";
@@ -75,15 +76,22 @@ const WITNESSES: ReadonlyArray<readonly [string, Record<string, unknown>, string
 	['"true"', { mfaEnrolled: "true" }, "malformed"],
 ];
 
-/** `User.email` as the Store answers it, and whether it is an address. */
-const ADDRESSES: ReadonlyArray<readonly [string, Record<string, unknown>, boolean]> = [
-	["an address", { email: "alice@example.com" }, true],
-	["an address in another spelling", { email: " Alice@Example.COM " }, true],
-	["none", {}, false],
-	["an empty one", { email: "" }, false],
-	["a list", { email: "alice@example.com, bob@example.com" }, false],
-	["an angle address", { email: "Alice <alice@example.com>" }, false],
-	["no string", { email: ["alice@example.com"] }, false],
+/** `User.email` as the Store answers it, and what the session records of it. */
+const ADDRESSES: ReadonlyArray<readonly [string, Record<string, unknown>, string]> = [
+	["an address", { email: "alice@example.com" }, "address"],
+	["an address in another spelling", { email: " Alice@Example.COM " }, "address"],
+	["no email", {}, "none"],
+	["an email that is null", { email: null }, "none"],
+	["an empty email", { email: "" }, "none"],
+	["an email of whitespace", { email: "   " }, "unreadable"],
+	["a list", { email: "alice@example.com, bob@example.com" }, "unreadable"],
+	["a display-name form", { email: "Alice Example <alice@example.com>" }, "unreadable"],
+	["a comment", { email: "alice(comment)@example.com" }, "unreadable"],
+	["a domain literal", { email: "alice@[192.0.2.1]" }, "unreadable"],
+	["a 65-octet local part", { email: `${"a".repeat(65)}@example.com` }, "unreadable"],
+	["a zero-width character", { email: "alice@example.com\u200b" }, "unreadable"],
+	["a list of addresses", { email: ["alice@example.com"] }, "unreadable"],
+	["a number", { email: 7 }, "unreadable"],
 ];
 
 describe("the enrollment facts a primary carries — derived from its user by core's builders", () => {
@@ -92,7 +100,7 @@ describe("the enrollment facts a primary carries — derived from its user by co
 		(_label, user, witness) => {
 			expect(passwordPrimary(passwordFacts(user)).enrollmentFacts).toEqual({
 				witness,
-				mailAddress: false,
+				mailAddress: "none",
 			});
 		},
 	);
@@ -102,13 +110,13 @@ describe("the enrollment facts a primary carries — derived from its user by co
 		(_label, user, witness) => {
 			expect(establishWithoutAsking(federatedLogin(user)).primary.enrollmentFacts).toEqual({
 				witness,
-				mailAddress: false,
+				mailAddress: "none",
 			});
 		},
 	);
 
 	it.each(ADDRESSES)(
-		"says whether the user's email is an address, for %s, on both logins",
+		"reads the user's email as none, an address or unreadable — %s is %s — on both logins",
 		(_label, user, mailAddress) => {
 			expect(passwordPrimary(passwordFacts(user)).enrollmentFacts).toEqual({
 				witness: "not_enrolled",
@@ -122,7 +130,7 @@ describe("the enrollment facts a primary carries — derived from its user by co
 	);
 
 	it("reads the user's email, never the claims': claims with an address beside a user without one say none", () => {
-		expect(passwordPrimary(passwordFacts({})).enrollmentFacts.mailAddress).toBe(false);
+		expect(passwordPrimary(passwordFacts({})).enrollmentFacts.mailAddress).toBe("none");
 	});
 
 	it("carries the two facts alone, frozen: no address, and nothing else of the user", () => {
@@ -136,8 +144,8 @@ describe("the enrollment facts a primary carries — derived from its user by co
 
 	it("keeps the derived facts when a caller hands in others that disagree with the user", () => {
 		const user = { mfaEnrolled: true };
-		const handed = { witness: "not_enrolled", mailAddress: true };
-		const derived = { witness: "enrolled", mailAddress: false };
+		const handed = { witness: "not_enrolled", mailAddress: "address" };
+		const derived = { witness: "enrolled", mailAddress: "none" };
 		expect(
 			passwordPrimary({ ...passwordFacts(user), enrollmentFacts: handed } as never).enrollmentFacts,
 		).toEqual(derived);
@@ -149,6 +157,100 @@ describe("the enrollment facts a primary carries — derived from its user by co
 		expect(
 			checkPrimaryAuthentication({ ...built, enrollmentFacts: handed }).enrollmentFacts,
 		).toEqual(derived);
+	});
+});
+
+/** A class whose instances carry their fields as own data, as an ORM row may. */
+class Row {
+	id = "user-1";
+	mfaEnrolled = true;
+}
+
+describe("a user that is not plain data — refused before anything is derived from it", () => {
+	// A copy keeps own enumerable data alone: a field held another way would
+	// be dropped from the copy, and the witness read from it as not enrolled.
+	const NOT_PLAIN: ReadonlyArray<readonly [string, () => unknown]> = [
+		[
+			"a witness it does not enumerate",
+			() => Object.defineProperty({ id: "user-1" }, "mfaEnrolled", { value: true }),
+		],
+		[
+			"an inherited witness",
+			() =>
+				Object.assign(
+					Object.create({
+						get mfaEnrolled() {
+							return true;
+						},
+					}),
+					{ id: "user-1" },
+				),
+		],
+		[
+			"an own accessor",
+			() => ({
+				id: "user-1",
+				get mfaEnrolled() {
+					return true;
+				},
+			}),
+		],
+		["a class instance", () => new Row()],
+		["a symbol key", () => ({ id: "user-1", [Symbol("witness")]: true })],
+		["a nested Date", () => ({ id: "user-1", joined: new Date(0) })],
+		["a nested Map", () => ({ id: "user-1", roles: new Map([["admin", true]]) })],
+		["a nested typed array", () => ({ id: "user-1", key: new Uint8Array(2) })],
+		["a class instance in a list", () => ({ id: "user-1", rows: [new Row()] })],
+		[
+			"a nested field it does not enumerate",
+			() => ({
+				id: "user-1",
+				profile: Object.defineProperty({}, "email", { value: "a@example.com" }),
+			}),
+		],
+		["a function", () => ({ id: "user-1", greet: () => "hi" })],
+	];
+
+	it.each(NOT_PLAIN)(
+		"refuses a user with %s, on both logins, with a RangeError that quotes nothing of it",
+		(_label, userOf) => {
+			for (const build of [
+				() => passwordPrimary({ ...passwordFacts({}), user: userOf() } as never),
+				() => establishWithoutAsking({ ...federatedLogin({}), user: userOf() } as never),
+			]) {
+				let refusal: unknown;
+				try {
+					build();
+				} catch (err) {
+					refusal = err;
+				}
+				expect(refusal).toBeInstanceOf(RangeError);
+				expect((refusal as Error).message).toMatch(/user must be plain data/);
+				expect((refusal as Error).message).not.toContain("user-1");
+			}
+		},
+	);
+
+	it("takes plain data at any depth, a null prototype included, as a copy frozen at every depth", () => {
+		const user = Object.assign(Object.create(null), {
+			id: "user-1",
+			mfaEnrolled: true,
+			email: "alice@example.com",
+			groups: ["staff", { team: "red" }],
+			profile: { nickname: null, age: 30, admin: false },
+		});
+		const primary = passwordPrimary({ ...passwordFacts({}), user } as never);
+		expect(primary.enrollmentFacts).toEqual({ witness: "enrolled", mailAddress: "address" });
+		expect(primary.user).toEqual({
+			id: "user-1",
+			mfaEnrolled: true,
+			email: "alice@example.com",
+			groups: ["staff", { team: "red" }],
+			profile: { nickname: null, age: 30, admin: false },
+		});
+		expect(Object.isFrozen(primary.user.groups)).toBe(true);
+		expect(Object.isFrozen((primary.user.groups as unknown[])[1])).toBe(true);
+		expect(Object.isFrozen(primary.user.profile)).toBe(true);
 	});
 });
 
@@ -198,7 +300,7 @@ describe("the enrollment facts across an interruption — the continuation carri
 		if (resumed.outcome !== "establish") throw new Error("expected an establishment");
 		expect(resumed.establishment.primary.enrollmentFacts).toEqual({
 			witness: "enrolled",
-			mailAddress: true,
+			mailAddress: "address",
 		});
 	});
 
@@ -209,14 +311,14 @@ describe("the enrollment facts across an interruption — the continuation carri
 			...first.continuation,
 			primary: {
 				...first.continuation.primary,
-				enrollmentFacts: { witness: "not_enrolled", mailAddress: true },
+				enrollmentFacts: { witness: "not_enrolled", mailAddress: "address" },
 			},
 		};
 		const resumed = await resumePrimary(deps(), tampered, completion);
 		if (resumed.outcome !== "establish") throw new Error("expected an establishment");
 		expect(resumed.establishment.primary.enrollmentFacts).toEqual({
 			witness: "enrolled",
-			mailAddress: false,
+			mailAddress: "none",
 		});
 	});
 });
@@ -285,7 +387,7 @@ describe("the enrollment facts in the view a requirement is handed", () => {
 	};
 
 	it("carries a frozen copy of the facts the record holds", async () => {
-		const facts = { witness: "enrolled" as const, mailAddress: true };
+		const facts = { witness: "enrolled" as const, mailAddress: "unreadable" as const };
 		const view = await viewOf(session({ enrollmentFacts: facts }));
 		expect(view?.enrollmentFacts).toEqual(facts);
 		expect(view?.enrollmentFacts).not.toBe(facts);
@@ -297,9 +399,11 @@ describe("the enrollment facts in the view a requirement is handed", () => {
 	});
 
 	it.each([
-		["a witness it does not know", { witness: "yes", mailAddress: true }],
-		["no witness", { mailAddress: true }],
-		["an address in place of the flag", { witness: "enrolled", mailAddress: "alice@example.com" }],
+		["a witness it does not know", { witness: "yes", mailAddress: "address" }],
+		["no witness", { mailAddress: "address" }],
+		["an address in place of the fact", { witness: "enrolled", mailAddress: "alice@example.com" }],
+		["a flag in place of the fact", { witness: "enrolled", mailAddress: true }],
+		["no address fact", { witness: "enrolled" }],
 		["null", null],
 	])(
 		"carries none when the record's facts hold %s: a requirement is handed only what the type admits",
@@ -313,9 +417,9 @@ describe("the enrollment facts in the view a requirement is handed", () => {
 	it("carries only the two facts, whatever else the record's facts hold", async () => {
 		const view = await viewOf(
 			session({
-				enrollmentFacts: { witness: "not_enrolled", mailAddress: false, email: "a@b.c" } as never,
+				enrollmentFacts: { witness: "not_enrolled", mailAddress: "none", email: "a@b.c" } as never,
 			}),
 		);
-		expect(view?.enrollmentFacts).toEqual({ witness: "not_enrolled", mailAddress: false });
+		expect(view?.enrollmentFacts).toEqual({ witness: "not_enrolled", mailAddress: "none" });
 	});
 });

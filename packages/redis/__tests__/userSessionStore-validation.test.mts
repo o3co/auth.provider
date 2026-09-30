@@ -165,19 +165,23 @@ describe("RedisUserSessionStore.get — corrupt envelope validation", () => {
 		["enrollmentFacts an array", { ...validEnvelope, enrollmentFacts: [] }],
 		[
 			"enrollmentFacts.witness unknown",
-			{ ...validEnvelope, enrollmentFacts: { witness: "yes", mailAddress: true } },
+			{ ...validEnvelope, enrollmentFacts: { witness: "yes", mailAddress: "address" } },
 		],
 		[
 			"enrollmentFacts without witness",
-			{ ...validEnvelope, enrollmentFacts: { mailAddress: true } },
+			{ ...validEnvelope, enrollmentFacts: { mailAddress: "address" } },
 		],
 		[
 			"enrollmentFacts without mailAddress",
 			{ ...validEnvelope, enrollmentFacts: { witness: "enrolled" } },
 		],
 		[
-			"enrollmentFacts.mailAddress a string",
+			"enrollmentFacts.mailAddress an address",
 			{ ...validEnvelope, enrollmentFacts: { witness: "enrolled", mailAddress: "a@b.example" } },
+		],
+		[
+			"enrollmentFacts.mailAddress a boolean",
+			{ ...validEnvelope, enrollmentFacts: { witness: "enrolled", mailAddress: true } },
 		],
 	])("returns null and logs shape_invalid warn for %s", async (_label, corrupt) => {
 		const logger = { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() };
@@ -235,12 +239,12 @@ describe("RedisUserSessionStore.get — corrupt envelope validation", () => {
 			`${keyPrefix}sid-1`,
 			JSON.stringify({
 				...validEnvelope,
-				enrollmentFacts: { witness: "malformed", mailAddress: false },
+				enrollmentFacts: { witness: "malformed", mailAddress: "unreadable" },
 			}),
 		);
 		expect((await store.get("sid-1"))?.enrollmentFacts).toStrictEqual({
 			witness: "malformed",
-			mailAddress: false,
+			mailAddress: "unreadable",
 		});
 		client.seed(`${keyPrefix}sid-2`, JSON.stringify({ ...validEnvelope, sid: "sid-2" }));
 		expect(await store.get("sid-2")).not.toHaveProperty("enrollmentFacts");

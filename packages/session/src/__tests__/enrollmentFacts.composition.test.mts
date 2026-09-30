@@ -37,7 +37,11 @@ import {
 	type UserRepository,
 	type UserSessionStore,
 } from "@o3co/auth-provider-core";
-import { makeValidAppConfig } from "@o3co/auth-provider-core/testing";
+import {
+	makeValidAppConfig,
+	withFederation,
+	withInsecureSessionCookie,
+} from "@o3co/auth-provider-core/testing";
 import express from "express";
 import request from "supertest";
 import { afterEach, describe, expect, it } from "vitest";
@@ -104,20 +108,10 @@ async function boot(user: User) {
 			username === user.username && password === PASSWORD ? user : null,
 		authenticateByToken: async (token) => (token === "stub:external-1" ? user : null),
 	};
-	const base = makeValidAppConfig();
-	const config = {
-		...base,
-		// supertest speaks plain HTTP: no `Secure` cookie, so no `__Host-` name.
-		session: { ...base.session, name: "auth.session", secure: false },
-		federations: {
-			stub: {
-				enabled: true,
-				clientId: "stub-client",
-				clientSecret: "stub-secret",
-				callbackURL: CALLBACK_URL,
-			},
-		},
-	} as unknown as AppConfig;
+	// supertest speaks plain HTTP: a cookie that is not `Secure`.
+	const config = withFederation(withInsecureSessionCookie(makeValidAppConfig()), "stub", {
+		callbackURL: CALLBACK_URL,
+	}) as unknown as AppConfig;
 	const handle = await createApp({
 		modules: [
 			// The cookie session's middleware is mounted ahead of the routes that read it.
@@ -171,20 +165,20 @@ async function federatedLogin(app: express.Express): Promise<void> {
 
 /** A `User` the Store answers, and the facts the session records of it. */
 const USERS: ReadonlyArray<
-	readonly [string, User, { readonly witness: string; readonly mailAddress: boolean }]
+	readonly [string, User, { readonly witness: string; readonly mailAddress: string }]
 > = [
 	[
 		"enrolled, with an address",
 		{ id: "user-1", username: "alice", mfaEnrolled: true, email: "alice@example.com" },
-		{ witness: "enrolled", mailAddress: true },
+		{ witness: "enrolled", mailAddress: "address" },
 	],
 	[
 		"not enrolled, without an address",
 		{ id: "user-2", username: "bob" },
-		{ witness: "not_enrolled", mailAddress: false },
+		{ witness: "not_enrolled", mailAddress: "none" },
 	],
 	[
-		"a witness the Store should not have answered, and an email that is no address",
+		"a witness the Store should not have answered, and an email the provider cannot read",
 		// What a Store's JSON can carry whatever `User` declares.
 		{
 			id: "user-3",
@@ -192,7 +186,7 @@ const USERS: ReadonlyArray<
 			mfaEnrolled: null,
 			email: "carol at example.com",
 		} as unknown as User,
-		{ witness: "malformed", mailAddress: false },
+		{ witness: "malformed", mailAddress: "unreadable" },
 	],
 ];
 

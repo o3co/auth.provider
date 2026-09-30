@@ -857,6 +857,9 @@ describe("createRedisMfaTransactionStore — a session's account-email proof", (
 		const store = storeAt(prefix);
 		const now = Date.now();
 		await store.recordSessionEmailProof("user-1", "sid-1", now, now + 10 * MINUTE);
+		// A transaction of the same session, created and consumed beside it.
+		await store.create(TX({ sid: "sid-1" }));
+		expect(await store.consume("tx-1", 1)).not.toBeNull();
 		await store.requireEmailProofAtNextBinding("user-1");
 		await store.reserveSubjectAttempt("user-1", now, POLICY);
 		await store.clearSubjectState("user-1");

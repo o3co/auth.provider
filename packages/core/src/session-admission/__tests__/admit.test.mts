@@ -314,6 +314,20 @@ describe("cookieSessionUser — the cookie session's user, for a route that admi
 		["a user that is a list", carrying({ user: [{ id: "user-1" }] })],
 		["a user that is a string", carrying({ user: "user-1" })],
 		["a user that cannot be copied", carrying({ user: { id: "user-1", greet: () => "hi" } })],
+		["a user holding a Date", carrying({ user: { id: "user-1", joined: new Date(0) } })],
+		["a user holding a Map", carrying({ user: { id: "user-1", roles: new Map() } })],
+		[
+			"a user holding a shared buffer",
+			carrying({ user: { id: "user-1", buffer: new SharedArrayBuffer(8) } }),
+		],
+		[
+			"a user that is a class instance",
+			carrying({ user: new (class Account { id = "user-1" })() }),
+		],
+		[
+			"a user whose id it does not enumerate",
+			carrying({ user: Object.defineProperty({}, "id", { value: "user-1" }) }),
+		],
 	])("answers nothing for %s", (_label, req) => {
 		expect(cookieSessionUser(req as never, "user-1")).toBeUndefined();
 	});

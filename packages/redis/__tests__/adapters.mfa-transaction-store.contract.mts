@@ -16,6 +16,7 @@
 
 import {
 	getBoundMfaTransaction,
+	MFA_CLOCK_SKEW_ALLOWANCE_MS,
 	MFA_WEEKLY_WINDOW_MS,
 	type MfaLockoutPolicy,
 	type MfaSubjectAttemptReservation,
@@ -1402,6 +1403,15 @@ export function runMfaTransactionStoreContract(
 			expect(await store.sessionEmailProofAt("user-1", "sid-1", now)).toBeNull();
 		});
 
+		it("records a proof given a little ahead of the store's clock, and answers it no later than the time asked about", async () => {
+			// A caller's clock may run ahead of the store's by up to the skew
+			// allowance; the proof is kept, and never read as still to come.
+			const store = await factory();
+			const now = await nowOnBoth();
+			await store.recordSessionEmailProof("user-1", "sid-1", now + MINUTE, now + 10 * MINUTE);
+			expect(await store.sessionEmailProofAt("user-1", "sid-1", now)).toBe(now);
+		});
+
 		it("answers when a proof was given no later than the time asked about", async () => {
 			// A caller whose clock runs behind the one that recorded it is never
 			// told of a proof still to come.
@@ -1461,6 +1471,13 @@ export function runMfaTransactionStoreContract(
 				["an end that is not a number", "user-1", "sid-1", now, Number.NaN],
 				["an end that is not whole", "user-1", "sid-1", now, later + 0.5],
 				["an end past the Date range", "user-1", "sid-1", now, 1e17],
+				[
+					"a proof time further ahead of the store's clock than the skew allowance",
+					"user-1",
+					"sid-1",
+					now + MFA_CLOCK_SKEW_ALLOWANCE_MS + MINUTE,
+					now + MFA_CLOCK_SKEW_ALLOWANCE_MS + 10 * MINUTE,
+				],
 			] as const) {
 				await expect(
 					store.recordSessionEmailProof(
@@ -1482,6 +1499,7 @@ export function runMfaTransactionStoreContract(
 				["an empty subject", "", "sid-1", now],
 				["an empty sid", "user-1", "", now],
 				["a time that is not a number", "user-1", "sid-1", Number.NaN],
+				["a time before the epoch", "user-1", "sid-1", -1],
 				["a time as text", "user-1", "sid-1", String(now)],
 			] as const) {
 				await expect(
