@@ -31,6 +31,7 @@ import {
 	type AuditSink,
 	admitPrimary,
 	BootError,
+	checkDeploymentMode,
 	checkResolver,
 	consoleLogger,
 	createMemoryRateLimiter,
@@ -102,7 +103,8 @@ export const createRouter = (
 		/**
 		 * The replica count, as core's `deploymentMode` slot holds it: what the
 		 * login throttle's per-process fallback is refused, warned about or
-		 * silent by.
+		 * silent by. Anything but the three values, absence included, is a
+		 * TypeError at construction.
 		 */
 		deploymentMode: DeploymentMode;
 		userSessionStore?: UserSessionStore;
@@ -153,6 +155,7 @@ export const createRouter = (
 	},
 ): Router => {
 	checkResolver(requirements, "session routes");
+	const replicas = checkDeploymentMode(deploymentMode, "session routes: deploymentMode");
 	const router = express.Router();
 
 	/**
@@ -195,7 +198,7 @@ export const createRouter = (
 		// mode decides: "multi" refuses at boot (the limit would really be
 		// limit × replicas, reset on every deploy), "single" is silent, "unset"
 		// warns. The planner wraps this throw as `contribute-factory-failed`.
-		if (deploymentMode === "multi") {
+		if (replicas === "multi") {
 			throw new BootError({
 				stage: "applyContributions",
 				reason: "replica-unsafe-adapter",
@@ -203,7 +206,7 @@ export const createRouter = (
 				details: { reason: "replica-unsafe-adapter", modules: ["session"] },
 			});
 		}
-		if (deploymentMode !== "single") {
+		if (replicas !== "single") {
 			logger.warn(
 				{
 					limit: loginLimitSpec.limit,

@@ -28,6 +28,7 @@
 import {
 	AUDIT_SINK_ABSENCE_POLICY,
 	BootError,
+	checkDeploymentMode,
 	consoleLogger,
 	createMemoryRateLimiter,
 	createRateLimitGuard,
@@ -204,6 +205,7 @@ export const webauthnModule = defineModule<
 				router.all("/", express.json({ limit: "100kb" }));
 
 				const logger = deps.logger ?? consoleLogger;
+				const deploymentMode = checkDeploymentMode(deps.deploymentMode, "webauthn: deploymentMode");
 				const spec: RateLimitSpec = {
 					limit: deps.webauthnConfig.rateLimit.authenticationOptions.limit,
 					windowSeconds: deps.webauthnConfig.rateLimit.authenticationOptions.windowSeconds,
@@ -214,7 +216,6 @@ export const webauthnModule = defineModule<
 					// "multi" refuses (the budget would multiply by the replica count), "single"
 					// is silent, "unset" warns. The planner wraps the throw as
 					// `contribute-factory-failed`, with this error as its `cause`.
-					const { deploymentMode } = deps;
 					if (deploymentMode === "multi") {
 						throw new BootError({
 							stage: "applyContributions",

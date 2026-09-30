@@ -29,6 +29,7 @@
 
 import { createHmac } from "node:crypto";
 import {
+	checkDeploymentMode,
 	checkMfaLockoutPolicy,
 	checkSealingKeyRing,
 	coerceBooleanFromEnv,
@@ -222,9 +223,10 @@ export interface MfaSettingsOptions {
 	/**
 	 * The replica count, as core's `deploymentMode` slot holds it — the MFA
 	 * module passes the slot's value. `multi` refuses the sample key; the
-	 * configuration's own `deployment` is not read.
+	 * configuration's own `deployment` is not read. Anything but the three
+	 * values, absence included, is a TypeError.
 	 */
-	readonly deploymentMode?: DeploymentMode;
+	readonly deploymentMode: DeploymentMode;
 }
 
 const RING = "mfa.encryptionKeys";
@@ -418,7 +420,8 @@ function refuseRepeatedKey(ring: SealingKeyRing): void {
  * `options.deploymentMode` the `deploymentMode` slot's value. A refusal
  * is a `RangeError` that names the key and quotes no key material.
  */
-export function readMfaSettings(config: unknown, options: MfaSettingsOptions = {}): MfaSettings {
+export function readMfaSettings(config: unknown, options: MfaSettingsOptions): MfaSettings {
+	checkDeploymentMode(options.deploymentMode, "mfa settings: deploymentMode");
 	const shape = (config ?? {}) as ConfigShape;
 	const section = parseSection(mfaModuleSettingsSchema, shape.mfa, "mfa");
 	const { ring, developmentSampleKeyAccepted } = readKeyRing(section.encryptionKeys, options);

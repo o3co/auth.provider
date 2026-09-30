@@ -12,6 +12,7 @@ import {
 	type AppConfig,
 	BootError,
 	type BuilderContext,
+	checkDeploymentMode,
 	consoleLogger,
 	defineModule,
 	fullSectionsSchema,
@@ -79,6 +80,10 @@ function buildSessionStoreModule(replicaSafety: ReplicaSafetyDeclaration | undef
 			routes: [
 				async (deps) => {
 					const config = deps.config as AppConfig;
+					const replicas = checkDeploymentMode(
+						deps.deploymentMode,
+						"session-store: deploymentMode",
+					);
 					const ctx: BuilderContext = {
 						lifecycle: deps.lifecycleRegistrar,
 						readiness: deps.readinessRegistrar,
@@ -92,7 +97,7 @@ function buildSessionStoreModule(replicaSafety: ReplicaSafetyDeclaration | undef
 					// nothing: refuse the combination here, with the same reason,
 					// rather than mount a per-process store. With
 					// `sessionStoreModuleFor(config)` the guard refused before this.
-					if (storageSlice.type === "memory" && deps.deploymentMode === "multi") {
+					if (storageSlice.type === "memory" && replicas === "multi") {
 						throw new BootError({
 							stage: "applyContributions",
 							reason: "replica-unsafe-adapter",
