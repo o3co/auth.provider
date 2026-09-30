@@ -27,11 +27,12 @@ import {
 	type RateLimitDecision,
 	type RateLimiter,
 } from "@o3co/auth-provider-core";
-import { GrantRegistry, resolverForTests } from "@o3co/auth-provider-core/testing";
+import { resolverForTests } from "@o3co/auth-provider-core/testing";
 import express from "express";
 import request from "supertest";
 import { describe, expect, it, vi } from "vitest";
 import { createOAuthRouter } from "#/routes.mjs";
+import { authorizationServerRegistry } from "./_helpers/authorizationServerRegistry.mjs";
 
 // `checkRateLimit` reads `config.rateLimit.failMode` in the catch
 // path. The mock config carries `failMode: "open"` to exercise the
@@ -143,7 +144,7 @@ async function buildApp(overrides: {
 
 	const { router } = await createOAuthRouter(express, {
 		requirements: resolverForTests([]),
-		registry: new GrantRegistry(),
+		registry: authorizationServerRegistry(),
 		config: overrides.config ?? mockConfig,
 		clientRepository: mockClientRepository,
 		codeRepository: mockCodeRepository,
@@ -500,7 +501,7 @@ describe("oauth routes — hooks", () => {
 
 			const { router } = await createOAuthRouter(express, {
 				requirements: resolverForTests([]),
-				registry: new GrantRegistry(),
+				registry: authorizationServerRegistry(),
 				config: mockConfig,
 				clientRepository: clientRepo,
 				codeRepository: codeRepo,
@@ -600,7 +601,7 @@ describe("oauth routes — hooks", () => {
 
 			const { router } = await createOAuthRouter(express, {
 				requirements: resolverForTests([]),
-				registry: new GrantRegistry(),
+				registry: authorizationServerRegistry(),
 				config: mockConfig,
 				clientRepository: clientRepo,
 				codeRepository: codeRepo,
@@ -638,7 +639,7 @@ describe("oauth routes — hooks", () => {
 			};
 			const { router } = await createOAuthRouter(express, {
 				requirements: resolverForTests([]),
-				registry: new GrantRegistry(),
+				registry: authorizationServerRegistry(),
 				config: mockConfig,
 				clientRepository: clientRepo,
 				codeRepository: codeRepo,
@@ -673,7 +674,7 @@ describe("oauth routes — hooks", () => {
 			};
 			const { router } = await createOAuthRouter(express, {
 				requirements: resolverForTests([]),
-				registry: new GrantRegistry(),
+				registry: authorizationServerRegistry(),
 				config: mockConfig,
 				clientRepository: clientRepo,
 				codeRepository: codeRepo,
@@ -710,7 +711,7 @@ describe("oauth routes — hooks", () => {
 
 			const { router } = await createOAuthRouter(express, {
 				requirements: resolverForTests([]),
-				registry: new GrantRegistry(),
+				registry: authorizationServerRegistry(),
 				config: mockConfig,
 				clientRepository: clientRepo,
 				codeRepository: codeRepo,
@@ -743,7 +744,7 @@ describe("oauth routes — hooks", () => {
 
 			const { router } = await createOAuthRouter(express, {
 				requirements: resolverForTests([]),
-				registry: new GrantRegistry(),
+				registry: authorizationServerRegistry(),
 				config: mockConfig,
 				clientRepository: clientRepo,
 				codeRepository: codeRepo,
@@ -781,7 +782,7 @@ describe("oauth routes — hooks", () => {
 
 			const { router } = await createOAuthRouter(express, {
 				requirements: resolverForTests([]),
-				registry: new GrantRegistry(),
+				registry: authorizationServerRegistry(),
 				config: mockConfig,
 				clientRepository: clientRepo,
 				codeRepository: codeRepo,
@@ -827,7 +828,7 @@ describe("oauth routes — hooks", () => {
 
 			const { router } = await createOAuthRouter(express, {
 				requirements: resolverForTests([]),
-				registry: new GrantRegistry(),
+				registry: authorizationServerRegistry(),
 				config: mockConfig,
 				clientRepository: clientRepo,
 				codeRepository: codeRepo,
@@ -877,7 +878,7 @@ describe("oauth routes — hooks", () => {
 
 			const { router } = await createOAuthRouter(express, {
 				requirements: resolverForTests([]),
-				registry: new GrantRegistry(),
+				registry: authorizationServerRegistry(),
 				config: mockConfig,
 				clientRepository: clientRepo,
 				codeRepository: codeRepo,
@@ -970,7 +971,7 @@ describe("oauth routes — hooks", () => {
 
 			const { router } = await createOAuthRouter(express, {
 				requirements: resolverForTests([]),
-				registry: new GrantRegistry(),
+				registry: authorizationServerRegistry(),
 				config: mockConfig,
 				clientRepository: clientRepo,
 				codeRepository: codeRepo,

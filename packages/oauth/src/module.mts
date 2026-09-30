@@ -94,10 +94,10 @@ export const oauthModule = (_params: { config: AppConfig }): Module => {
 	return defineModule<
 		| "config"
 		| "clientRepository"
-		| "codeRepository"
 		| "keyStore"
 		| "grantHandlerResolver"
 		| "sessionRequirementResolver",
+		| "codeRepository"
 		| "rateLimiter"
 		| "auditSink"
 		| "grantPolicy"
@@ -123,12 +123,12 @@ export const oauthModule = (_params: { config: AppConfig }): Module => {
 		requires: [
 			"config", // createOAuthRouter reads config.oauth.jwt.issuer, accessToken / refreshToken expiry
 			"clientRepository",
-			"codeRepository",
 			"keyStore",
 			"grantHandlerResolver", // synthetic, auto-injected by boot planner
 			"sessionRequirementResolver", // every consumer of admission takes it (ADR 2026-09-28-session-admission); here it decides the acr drop, and /authorize and the consent step read their sessions through it
 		],
 		optional: [
+			"codeRepository", // where /authorize issues its codes; the router requires it with the authorization_code grant
 			"rateLimiter", // oauth routes degrade gracefully without
 			"auditSink", // no events emitted when absent
 			"grantPolicy", // gates POST /oauth/token; allow-all when absent
@@ -234,10 +234,10 @@ export const oauthModule = (_params: { config: AppConfig }): Module => {
 					deps: ProviderDeps<
 						| "config"
 						| "clientRepository"
-						| "codeRepository"
 						| "keyStore"
 						| "grantHandlerResolver"
 						| "sessionRequirementResolver",
+						| "codeRepository"
 						| "rateLimiter"
 						| "auditSink"
 						| "grantPolicy"
@@ -304,9 +304,18 @@ export const oauthModule = (_params: { config: AppConfig }): Module => {
 					// wired rather than accept an unchecked `jti`, so without a store
 					// all three endpoints would refuse the method.
 					const clientAssertionSupported = deps.replaySeenSet !== undefined;
+					// The authorization endpoint, and what a client sends to it — the
+					// response type, PKCE, request_uri, acr_values — and a document
+					// client, which uses no other grant, exist only with the grant that
+					// redeems what `/authorize` issues. Read off the same resolver as
+					// `grant_types_supported`, as the router reads it to mount `/authorize`.
+					const authorizationEndpoint =
+						deps.grantHandlerResolver.get("authorization_code") !== undefined;
 					const cimdSupported =
+						authorizationEndpoint &&
 						(deps.config as { oauth?: { clientIdMetadataDocuments?: { enabled?: unknown } } }).oauth
-							?.clientIdMetadataDocuments?.enabled === true && deps.consentStore !== undefined;
+							?.clientIdMetadataDocuments?.enabled === true &&
+						deps.consentStore !== undefined;
 					// RFC 8414 §2: an omitted `grant_types_supported` means
 					// `["authorization_code", "implicit"]`, which would advertise an
 					// implicit flow this AS does not implement. Read straight off the
@@ -320,19 +329,21 @@ export const oauthModule = (_params: { config: AppConfig }): Module => {
 					);
 					// The entries `/authorize` answers from: the configured table less
 					// what nothing this composition installs can satisfy, computed as
-					// the router computes it (which says at boot what it dropped). See
-					// ADR 2026-09-25-multi-factor-authentication.
-					const acrValuesSupported = Object.keys(
-						vouchableAcrValues(
-							readAcrTable(
-								(deps.config as { oauth?: { authorize?: { acrValues?: unknown } } }).oauth
-									?.authorize?.acrValues,
-							),
-							deps.federationProviders,
-							deps.config,
-							stepUpReach(Array.from(deps.sessionRequirementResolver.entries(), ([, r]) => r)),
-						).table,
-					);
+					// the router computes it (which says at boot what it dropped). None
+					// without `/authorize`.
+					const acrValuesSupported = !authorizationEndpoint
+						? []
+						: Object.keys(
+								vouchableAcrValues(
+									readAcrTable(
+										(deps.config as { oauth?: { authorize?: { acrValues?: unknown } } }).oauth
+											?.authorize?.acrValues,
+									),
+									deps.federationProviders,
+									deps.config,
+									stepUpReach(Array.from(deps.sessionRequirementResolver.entries(), ([, r]) => r)),
+								).table,
+							);
 					return {
 						// oauth owns the authorization-server surface, so it is the
 						// provider root: this is the explicit signal that core should
@@ -341,7 +352,7 @@ export const oauthModule = (_params: { config: AppConfig }): Module => {
 						// leave it unset.
 						providerRoot: true,
 						endpoints: {
-							authorization_endpoint: "/oauth/authorize",
+							...(authorizationEndpoint ? { authorization_endpoint: "/oauth/authorize" } : {}),
 							token_endpoint: "/oauth/token",
 							userinfo_endpoint: "/oauth/userinfo",
 							introspection_endpoint: "/oauth/introspect",
@@ -349,7 +360,9 @@ export const oauthModule = (_params: { config: AppConfig }): Module => {
 							...(logoutSupported ? { end_session_endpoint: "/oauth/logout" } : {}),
 						},
 						metadata: {
-							response_types_supported: ["code"],
+							// RFC 8414 §2 requires the field; with no authorization
+							// endpoint it lists none.
+							response_types_supported: authorizationEndpoint ? ["code"] : [],
 							// OIDC Discovery defaults this to **true** when omitted,
 							// which would claim `request_uri` support `/authorize`
 							// does not have: an RP that believed it had sent a signed
@@ -358,7 +371,7 @@ export const oauthModule = (_params: { config: AppConfig }): Module => {
 							// `request_uri_not_supported`. `request_parameter_supported`
 							// and `claims_parameter_supported` stay omitted: both
 							// default to `false`.
-							request_uri_parameter_supported: false,
+							...(authorizationEndpoint ? { request_uri_parameter_supported: false } : {}),
 							...(cimdSupported ? { client_id_metadata_document_supported: true } : {}),
 							subject_types_supported: ["public"],
 							// `groups` is supported by filterClaimsByScope (non-standard but opt-in)
@@ -428,7 +441,7 @@ export const oauthModule = (_params: { config: AppConfig }): Module => {
 							// this is server-wide metadata (RFC 8414 §2 / RFC 7636 §4.4)
 							// that every client reads as "I may use any of these", and the
 							// one client the operator named does not need discovery.
-							code_challenge_methods_supported: ["S256"],
+							...(authorizationEndpoint ? { code_challenge_methods_supported: ["S256"] } : {}),
 							// The acr table's keys, when there is one — less the entries
 							// nothing installed can satisfy. Omitted
 							// otherwise — an RP that sends `acr_values` to a server with no

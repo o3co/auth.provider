@@ -60,8 +60,10 @@ export interface CodeRepository {
 // ComponentMap slot declaration
 //
 // `codeRepository` is produced by a composition-root-local module (e.g. the
-// standalone template's `repositoriesModule`). Modules that issue or exchange
-// authorization codes declare `requires: ["codeRepository"]`.
+// standalone template's `repositoriesModule`) or a store package's. The
+// modules that issue or redeem authorization codes list it optional and
+// require it with the authorization_code grant: a composition without that
+// grant wires none.
 // ---------------------------------------------------------------------------
 declare module "@o3co/auth-provider-core" {
 	interface ComponentMap {

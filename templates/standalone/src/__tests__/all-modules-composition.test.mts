@@ -332,7 +332,7 @@ describe("discovery", () => {
 		async (grant, variable) => {
 			const { app } = await boot({ env: { ...SINGLE_ENV, [variable]: "false" } });
 			const doc = (await request(app).get(DISCOVERY_PATHS[0])).body;
-			expectValidMetadata(doc);
+			expectValidMetadata(doc, { authorizationCode: grant !== "authorization_code" });
 			expect([...doc.grant_types_supported].sort()).toEqual(
 				ENABLED_GRANTS.filter((g) => g !== grant),
 			);
@@ -343,6 +343,10 @@ describe("discovery", () => {
 				.send({ grant_type: grant });
 			expect(res.status).toBe(400);
 			expect(res.body.error).toBe("unsupported_grant_type");
+			if (grant === "authorization_code") {
+				// No grant redeems a code, so none is issued: none is served.
+				expect((await request(app).get("/oauth/authorize")).status).toBe(404);
+			}
 		},
 	);
 

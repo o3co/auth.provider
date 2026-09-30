@@ -163,12 +163,12 @@ describe("buildDiscoveryDocument", () => {
 		expect(() => buildDiscoveryDocument(items, OPTS)).toThrow(DiscoveryDocumentError);
 	});
 
-	it("throws when the assembled document is missing an OIDC-required field (presence contract)", () => {
+	it("throws when the assembled document is missing a required field (presence contract)", () => {
 		// jwks-only: no authorization/token endpoints, no response/subject types.
 		const items: OidcDiscoveryContribution[] = [
 			{ endpoints: { jwks_uri: "/.well-known/jwks.json" } },
 		];
-		expect(() => buildDiscoveryDocument(items, OPTS)).toThrow(/missing OIDC-required field/);
+		expect(() => buildDiscoveryDocument(items, OPTS)).toThrow(/missing required field/);
 	});
 
 	it("throws when jwks_uri is absent (the structural anti-dangling guarantee)", () => {
@@ -246,9 +246,9 @@ describe("buildDiscoveryDocument", () => {
 		expect(() => buildDiscoveryDocument(items, OPTS)).toThrow(/issuer-relative|endpoints/);
 	});
 
-	it("throws when a required array field is present but empty (validity, not just presence)", () => {
-		// `response_types_supported: []` is present (passes the REQUIRED_FIELDS
-		// presence check) but OIDC-invalid — an RP cannot use it. Fail fast.
+	it("refuses a document that names authorization_endpoint with no response type", () => {
+		// A client asks for a response type at the authorization endpoint, so
+		// one named with `response_types_supported: []` offers nothing to ask for.
 		const items: OidcDiscoveryContribution[] = [
 			{
 				endpoints: {
@@ -260,5 +260,51 @@ describe("buildDiscoveryDocument", () => {
 			},
 		];
 		expect(() => buildDiscoveryDocument(items, OPTS)).toThrow(/non-empty array/);
+	});
+});
+
+describe("buildDiscoveryDocument — a server with no authorization endpoint (RFC 8414 §2)", () => {
+	/** Token and JWKS endpoints only: what a composition with no grant using /authorize serves. */
+	const tokenOnly = (responseTypes: unknown): OidcDiscoveryContribution[] => [
+		{
+			endpoints: { token_endpoint: "/oauth/token" },
+			metadata: {
+				response_types_supported: responseTypes,
+				subject_types_supported: ["public"],
+			},
+		},
+		{ endpoints: { jwks_uri: "/.well-known/jwks.json" } },
+	];
+
+	it("builds a document that names no authorization endpoint and lists no response type", () => {
+		const doc = buildDiscoveryDocument(tokenOnly([]), OPTS);
+
+		expect(doc).not.toHaveProperty("authorization_endpoint");
+		expect(doc.response_types_supported).toEqual([]);
+		expect(doc.token_endpoint).toBe("https://auth.example.com/oauth/token");
+		expect(doc.jwks_uri).toBe("https://auth.example.com/.well-known/jwks.json");
+	});
+
+	it("refuses a response type with no authorization endpoint to use it at", () => {
+		expect(() => buildDiscoveryDocument(tokenOnly(["code"]), OPTS)).toThrow(
+			/authorization_endpoint/,
+		);
+	});
+
+	it("refuses a document that omits response_types_supported", () => {
+		const items: OidcDiscoveryContribution[] = [
+			{
+				endpoints: { token_endpoint: "/oauth/token" },
+				metadata: { subject_types_supported: ["public"] },
+			},
+			{ endpoints: { jwks_uri: "/.well-known/jwks.json" } },
+		];
+		expect(() => buildDiscoveryDocument(items, OPTS)).toThrow(/response_types_supported/);
+	});
+
+	it("refuses response_types_supported that is not an array", () => {
+		expect(() => buildDiscoveryDocument(tokenOnly("code"), OPTS)).toThrow(
+			/response_types_supported/,
+		);
 	});
 });
