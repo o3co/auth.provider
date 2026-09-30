@@ -89,7 +89,10 @@ export function wellFormedAuthTime(value: unknown): number | undefined {
 	return typeof value === "number" && Number.isSafeInteger(value) && value >= 0 ? value : undefined;
 }
 
-/** An authentication instant as `auth_time`: its whole seconds since the epoch, rounded down; undefined for an invalid `Date`. */
+/**
+ * An authentication instant as `auth_time`: its whole seconds since the epoch, rounded down;
+ * undefined for an invalid `Date` or an instant before the epoch.
+ */
 export function authTimeClaim(instant: Date): number | undefined {
 	return wellFormedAuthTime(Math.floor(instant.getTime() / 1000));
 }
