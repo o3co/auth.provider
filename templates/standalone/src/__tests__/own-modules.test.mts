@@ -212,11 +212,12 @@ describe("the template's config/reference.conf", () => {
 		).toEqual([]);
 	});
 
-	it("is layered beneath the template's own files whenever one of its modules is loaded", () => {
-		const own = readOwnLayers(ownFiles(), { env: BASE_ENV });
-		const modules = buildModules(readSwitches(own), { environment: "development" });
-		expect(moduleReferences(modules).map((url) => url.href)).toContain(TEMPLATE_REFERENCE.href);
-	});
+	it.each([loggingModule, httpModule, corsModule, keyStoreModule, standaloneRedisClientsModule])(
+		"is among the references $name alone brings",
+		(module) => {
+			expect(moduleReferences([module]).map((url) => url.href)).toContain(TEMPLATE_REFERENCE.href);
+		},
+	);
 });
 
 describe("logging", () => {
@@ -228,10 +229,17 @@ describe("logging", () => {
 		expect(loggingModule.optional ?? []).toEqual([]);
 	});
 
-	it("is loaded by the shipped composition, so boot parses its section", () => {
+	it("is loaded by the shipped composition", () => {
 		const own = readOwnLayers(ownFiles(), { env: BASE_ENV });
 		const modules = buildModules(readSwitches(own), { environment: "development" });
 		expect(named(modules, "logging")).toBe(loggingModule);
+	});
+
+	it("has boot refuse a level its schema does not know, naming logging.level", async () => {
+		await expect(bootTemplate({ env: { LOG_LEVEL: "verbose" } })).rejects.toMatchObject({
+			reason: "config-validation-failed",
+			message: expect.stringMatching(/logging\.level/),
+		});
 	});
 
 	it("is not among SWITCHES", () => {
@@ -597,6 +605,39 @@ function withoutApplicationBindings(): string[] {
 	return [development, application];
 }
 
+describe("a value the template's application.conf sets wins over a variable only its reference.conf binds", () => {
+	it("logging.level over LOG_LEVEL", () => {
+		const own = readOwnLayers(withApplicationValues('logging.level = "warn"'), {
+			env: { ...BASE_ENV, LOG_LEVEL: "debug" },
+		});
+		expect(readLogging(own)).toEqual({ level: "warn" });
+	});
+
+	it("http.readinessTimeoutMs over HTTP_READINESS_TIMEOUT_MS", async () => {
+		const handle = await bootTemplate({
+			files: withApplicationValues("http.readinessTimeoutMs = 2500"),
+			env: { HTTP_READINESS_TIMEOUT_MS: "1500" },
+		});
+		try {
+			expect(handle.components.httpHostSettings?.readinessTimeoutMs).toBe(2500);
+		} finally {
+			await handle.dispose();
+		}
+	});
+
+	it("oauth.jwt.signingKey.local.kid over OAUTH_JWT_KID", async () => {
+		const handle = await bootTemplate({
+			files: withApplicationValues('oauth.jwt.signingKey.local.kid = "k-file"'),
+			env: { OAUTH_JWT_KID: "k-env" },
+		});
+		try {
+			expect(handle.components.keyStore?.getSigningKidFallback()).toBe("k-file");
+		} finally {
+			await handle.dispose();
+		}
+	});
+});
+
 describe("an environment variable takes effect though application.conf does not bind it", () => {
 	it("HTTP_PORT and HTTP_TRUST_PROXY", async () => {
 		const handle = await bootTemplate({
@@ -707,6 +748,7 @@ describe("key-store", () => {
 			env: { OAUTH_JWT_PRIVATE_KEY: undefined, OAUTH_JWT_PUBLIC_KEY: undefined },
 		});
 		await expect(booting).rejects.toThrow(/OAUTH_JWT_PRIVATE_KEY_PATH/);
+		await expect(booting).rejects.toThrow(/OAUTH_JWT_PUBLIC_KEY_PATH/);
 		await expect(booting).rejects.toThrow(/openssl genpkey -algorithm ed25519/i);
 	});
 
