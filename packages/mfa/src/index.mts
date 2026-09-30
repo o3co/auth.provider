@@ -25,6 +25,9 @@ export { MFA_ADMISSION_ACTIONS, type MfaAdmissionAction } from "./admissionActio
 // The `mfa` keys this package reads, and the published development key a
 // development configuration may carry (the MFA ADR's D11, D19).
 export { MFA_DEVELOPMENT_SAMPLE_KEY, mfaConfigSchema } from "./config.mjs";
+// The email factor's module (the MFA ADR's F5) and the recovery-code
+// factor's (D25), each with its section: declared before its factor is built.
+export { mfaEmailFactorModule } from "./email/module.mjs";
 // The MFA module — the `mfa` session requirement, the MFA routes' mount and
 // their budget's prefix — and what a composition lists to install MFA (the
 // MFA ADR's D1; the session-admission ADR's D6).
@@ -35,5 +38,6 @@ export {
 	mfaModule,
 	mfaModules,
 } from "./module.mjs";
+export { mfaRecoveryCodeFactorModule } from "./recovery/module.mjs";
 // The TOTP factor, contributed as `mfaFactors.totp` (the MFA ADR's F6).
 export { mfaTotpFactorModule } from "./totp/module.mjs";

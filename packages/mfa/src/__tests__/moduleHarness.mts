@@ -114,7 +114,11 @@ export const mfaSection = (mode: "off" | "optional" | "required") => ({
 	transactionTtlSeconds: 600,
 	maxAttemptsPerTransaction: 5,
 	lockout: { ...LOCKOUT },
+	manage: { maxAgeSeconds: 300 },
 });
+
+/** The recovery-code factor's `mfa-recovery-code-factor` section as the package's reference.conf resolves it. */
+export const RECOVERY_CODE_SECTION = { enabled: true, count: 10 } as const;
 
 /** The TOTP factor's `mfa-totp-factor` section as the package's reference.conf resolves it. */
 export const TOTP_SECTION = {
@@ -139,7 +143,8 @@ export const UNSET_RENAMED_VARIABLES = renamedVariableCaptures({
  * HTTP (no `Secure` cookie), `endpoints.mfa.url` as core's reference.conf
  * ships it, `mfa` declared expected, the `mfa` section under `mode`, and the
  * TOTP factor's `mfa-totp-factor` section, each with the keys given laid
- * over it, and the captures of the TOTP factor's renamed variables, all unset.
+ * over it, the recovery-code factor's section as its defaults, and the
+ * captures of the TOTP factor's renamed variables, all unset.
  */
 export function configFor(
 	mode: "off" | "optional" | "required",
@@ -160,6 +165,7 @@ export function configFor(
 		sessionRequirements: { expected: ["mfa"] },
 		mfa: { ...mfaSection(mode), ...mfa },
 		"mfa-totp-factor": { ...TOTP_SECTION, ...totp },
+		"mfa-recovery-code-factor": RECOVERY_CODE_SECTION,
 		"renamed-variables": UNSET_RENAMED_VARIABLES,
 	} as unknown as AppConfig;
 }

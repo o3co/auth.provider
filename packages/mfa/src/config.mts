@@ -16,7 +16,9 @@
 
 /**
  * The configuration this package reads: the MFA module's own section, `mfa`,
- * and the TOTP factor's, `mfa-totp-factor`, each its module's alone. Keys,
+ * and the TOTP factor's, `mfa-totp-factor`, each its module's alone (the
+ * email and recovery-code factors' sections are read beside their modules,
+ * in `email/` and `recovery/`, with the readers shared from here). Keys,
  * ranges, defaults and refusals: see README, Configuration, and ADR
  * 2026-09-25-multi-factor-authentication.
  *
@@ -59,7 +61,7 @@ const SECTION_MISSING =
 	"is missing: layer @o3co/auth-provider-mfa/reference.conf beneath the composition's configuration";
 
 /** A section's refusal: missing, or written as a value rather than a section of keys. */
-const sectionError = (issue: { readonly input?: unknown }): string =>
+export const sectionError = (issue: { readonly input?: unknown }): string =>
 	issue.input === undefined ? SECTION_MISSING : "must be a section of keys";
 
 const wholeNumber = (min: number, max: number, unit: string) => {
@@ -73,7 +75,7 @@ const wholeNumber = (min: number, max: number, unit: string) => {
  * section must read. Nothing else is read as a number: not `null`, `true`,
  * `""`, `"0x10"` or `"1e1"`, which `z.coerce.number()` would turn into one.
  */
-const environmentWholeNumber = (min: number, max: number, unit: string) => {
+export const environmentWholeNumber = (min: number, max: number, unit: string) => {
 	const error = `must be a whole number from ${min} to ${max}${unit}`;
 	const bounded = wholeNumber(min, max, unit);
 	return z.union(
@@ -85,11 +87,16 @@ const environmentWholeNumber = (min: number, max: number, unit: string) => {
 const ISSUER_RULE =
 	"must be well-formed text, not blank, with no control character and no colon — the otpauth label puts one between the issuer and the account";
 
-/** Whether `text` carries a C0 control character, DEL or a C1 control character. */
-function hasControlCharacter(text: string): boolean {
+/** Whether `text` carries a C0 control character, DEL or a C1 control character, other than one `allowed`. */
+export function hasControlCharacter(
+	text: string,
+	allowed: ReadonlySet<string> = new Set(),
+): boolean {
 	for (let index = 0; index < text.length; index++) {
 		const code = text.charCodeAt(index);
-		if (code <= 0x1f || (code >= 0x7f && code <= 0x9f)) return true;
+		if ((code <= 0x1f || (code >= 0x7f && code <= 0x9f)) && !allowed.has(text.charAt(index))) {
+			return true;
+		}
 	}
 	return false;
 }
@@ -170,9 +177,29 @@ const lockoutSchema = z.object(
 	{ error: sectionError },
 );
 
+/** The least and the most time a second factor verified in a session stays recent, in seconds. */
+const MFA_RECENT_WINDOW_SECONDS = { min: 60, max: 3600 } as const;
+
+/**
+ * `mfa.manage`: `maxAgeSeconds`, how long a second factor verified in a
+ * session stays recent — what adding or removing a way into the account asks
+ * of the session.
+ */
+const manageSchema = z.object(
+	{
+		maxAgeSeconds: wholeNumber(
+			MFA_RECENT_WINDOW_SECONDS.min,
+			MFA_RECENT_WINDOW_SECONDS.max,
+			" seconds",
+		),
+	},
+	{ error: sectionError },
+);
+
 /**
  * The MFA module's section, `mfa`: its mode, the key ring, a transaction's
- * life and attempts, and the subject lock, with the transaction's ranges. The
+ * life and attempts, the subject lock and recent MFA's window, with their
+ * ranges. The
  * ring's refusals (a key that is not 32 bytes, an empty ring, a duplicate
  * id), the sample key's and how the lock's fields relate are not the
  * schema's: `readMfaSettings` makes them, where the keys are decoded, the
@@ -202,6 +229,7 @@ export const mfaConfigSchema = z.object(
 			"",
 		),
 		lockout: lockoutSchema,
+		manage: manageSchema,
 	},
 	{ error: sectionError },
 );
@@ -246,6 +274,8 @@ export interface MfaSettings {
 	readonly maxAttemptsPerTransaction: number;
 	/** The subject lock, held to core's rule. */
 	readonly lockout: MfaLockoutPolicy;
+	/** Recent MFA: how long, in seconds, a second factor verified in a session stays recent. */
+	readonly manage: { readonly maxAgeSeconds: number };
 }
 
 /** What the settings read beside the `mfa` section. */
@@ -436,7 +466,7 @@ function refuseRepeatedKey(ring: SealingKeyRing): void {
 /**
  * What the MFA module reads from its `mfa` section, `section`: the key ring
  * and whether it carries the development sample key, a transaction's life
- * and attempts, and the subject lock — held to core's
+ * and attempts, recent MFA's window, and the subject lock — held to core's
  * `checkMfaLockoutPolicy` under `mfa.lockout`. Not the mode, which the
  * module's section schema reads, and no factor's section: the TOTP factor's
  * is {@link readMfaTotpSettings}'s. `options.environment` is the name the
@@ -455,5 +485,6 @@ export function readMfaSettings(section: unknown, options: MfaSettingsOptions): 
 		transactionTtlSeconds: settings.transactionTtlSeconds,
 		maxAttemptsPerTransaction: settings.maxAttemptsPerTransaction,
 		lockout: { ...settings.lockout },
+		manage: { maxAgeSeconds: settings.manage.maxAgeSeconds },
 	};
 }

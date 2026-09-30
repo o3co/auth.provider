@@ -63,6 +63,7 @@ import {
 	supportsSecondFactorUpdate,
 } from "@o3co/auth-provider-core";
 import { type MfaMode, type MfaSettings, mfaSectionSchema, readMfaSettings } from "./config.mjs";
+import { mfaRecoveryCodeFactorModule } from "./recovery/module.mjs";
 import { createMfaRequirement, type MfaRequirementMode } from "./requirement.mjs";
 import { createMfaSealing, type MfaSealing } from "./sealing.mjs";
 import { mfaTotpFactorModule } from "./totp/module.mjs";
@@ -339,7 +340,10 @@ export function mfaModule(options: MfaModuleOptions = {}): Module {
 	});
 }
 
-/** What a composition lists to install MFA: the TOTP factor's module and the MFA module. */
+/**
+ * What a composition lists to install MFA: the TOTP factor's module, the
+ * recovery-code factor's, and the MFA module.
+ */
 export function mfaModules(options: MfaModuleOptions = {}): readonly Module[] {
-	return [mfaTotpFactorModule, mfaModule(options)];
+	return [mfaTotpFactorModule, mfaRecoveryCodeFactorModule, mfaModule(options)];
 }
