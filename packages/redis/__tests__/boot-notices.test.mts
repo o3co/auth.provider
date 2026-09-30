@@ -188,6 +188,7 @@ describe("the plaintext guard's notices", () => {
 		provideTokens({
 			federationTokenStoreClient: tokenClient,
 			config: TOKEN_STORE_CONFIG,
+			deploymentMode: "unset",
 			logger: tokens.logger,
 		});
 		expect(tokens.calls).toEqual([plaintextWarning("federation-tokens")]);
@@ -199,6 +200,7 @@ describe("the plaintext guard's notices", () => {
 		provideGrants({
 			federationGrantStoreClient: grantClient,
 			config: { federationGrants: { encryptionMode: "allow-plaintext" } },
+			deploymentMode: "unset",
 			logger: grants.logger,
 		});
 		expect(grants.calls).toEqual([plaintextWarning("federation-grants")]);

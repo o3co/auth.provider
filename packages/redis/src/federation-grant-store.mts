@@ -16,6 +16,7 @@
 
 import {
 	type AuthorizedFederationGrant,
+	checkDeploymentMode,
 	checkSealingKeyRing,
 	constantTimeStringEqual,
 	DEFAULT_FEDERATION_GRANT_TOMBSTONE_RETENTION_MS,
@@ -941,8 +942,12 @@ const keyMaterial = (index: number, encoded: string): Buffer => {
 /**
  * The options the adapter takes, from the configuration an operator wrote,
  * and the replica count `deploymentMode` — the `deploymentMode` slot's value,
- * which the plaintext guard refuses plaintext under when it is `multi`. The
- * configuration's own `deployment` is not read.
+ * or `deploymentModeOf(config)` from `@o3co/auth-provider-core` for a
+ * composition root that builds the store itself — which the plaintext guard
+ * refuses plaintext under when it is `multi`. The configuration's own
+ * `deployment` is not read, and a mode that is not `single`, `multi` or
+ * `unset` — none included — is a TypeError: read as none, it would let
+ * plaintext through under `multi`.
  *
  * A function of its own, and exported, because the conversion is where a
  * module goes wrong silently: seconds forwarded as milliseconds keep a
@@ -955,6 +960,10 @@ export function resolveRedisFederationGrantStoreOptions(
 	moduleOptions: RedisFederationGrantStoreModuleOptions,
 	deploymentMode: DeploymentMode,
 ): Omit<RedisFederationGrantStoreOptions, "client"> {
+	const replicas = checkDeploymentMode(
+		deploymentMode,
+		"resolveRedisFederationGrantStoreOptions: deploymentMode",
+	);
 	const config = moduleConfigSchema.parse(rawConfig);
 	const grants = config.federationGrants;
 	const mode = grants.encryptionMode ?? "required";
@@ -983,7 +992,7 @@ export function resolveRedisFederationGrantStoreOptions(
 			...(moduleOptions.environment !== undefined
 				? { environment: moduleOptions.environment }
 				: {}),
-			deploymentMode,
+			deploymentMode: replicas,
 		},
 	};
 }

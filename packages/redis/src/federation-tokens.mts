@@ -30,6 +30,7 @@
 
 import {
 	type AdapterBuilder,
+	checkDeploymentMode,
 	coerceBooleanFromEnv,
 	decodeSealingKey,
 	defineModule,
@@ -541,8 +542,9 @@ export interface RedisFederationTokenStoreModuleOptions {
  * `REDIS_FEDERATION_TOKEN_STORE_ENCRYPTION_KEY`.
  *
  * The `allow-plaintext` guard reads the replica count from the
- * `deploymentMode` slot core fills — required, since `multi` refuses
- * plaintext — and the selected environment off `options`, since only the
+ * `deploymentMode` slot core fills — required, and held to its three values
+ * (a TypeError otherwise), since `multi` refuses plaintext — and the selected
+ * environment off `options`, since only the
  * composition root knows how it chose its config file. Its notice goes to the
  * optional `logger` slot (`consoleLogger` when empty).
  */
@@ -574,7 +576,10 @@ export function redisFederationTokenStoreModuleFor(
 						ttl: cfg.ttl,
 						scanFallback: cfg.scanFallback,
 						environment: options.environment,
-						deploymentMode: deps.deploymentMode,
+						deploymentMode: checkDeploymentMode(
+							deps.deploymentMode,
+							"redis-federation-token-store: deploymentMode",
+						),
 					},
 					deps.logger !== undefined ? { logger: deps.logger } : {},
 				);
