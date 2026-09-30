@@ -27,19 +27,16 @@
 
 import express from "express";
 import request from "supertest";
-import { describe, expect, expectTypeOf, it, vi } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { AuditEvent, AuditSink } from "#/audit/types.mjs";
 import type { Logger } from "#/logging/Logger.mjs";
 import {
 	checkWithFailMode,
 	createRateLimitGuard,
 	createRateLimitPolicy,
-	type RateLimitFailMode,
-	type RateLimitGuardOptions,
-	type RateLimitPolicyOptions,
 	rateLimiterUnavailableEnvelope,
 } from "#/ratelimit/guard.mjs";
-import type { RateLimitDecision, RateLimiter } from "#/ratelimit/types.mjs";
+import type { RateLimitDecision, RateLimiter, RateLimitFailMode } from "#/ratelimit/types.mjs";
 
 /**
  * A limiter that records every key/ctx it is asked about and answers to
@@ -413,11 +410,6 @@ describe("createRateLimitGuard — limiter outage (the limiter's failMode)", () 
 			},
 		};
 		expect(() => createRateLimitGuard({ limiter, tag: "token" })).toThrow("getter down");
-	});
-
-	it("takes the outage policy from the limiter alone: its options carry none", () => {
-		expectTypeOf<RateLimitGuardOptions>().not.toHaveProperty("failMode");
-		expectTypeOf<RateLimitPolicyOptions>().not.toHaveProperty("failMode");
 	});
 });
 

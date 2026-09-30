@@ -89,11 +89,15 @@ export type RateLimitPolicyOptions = Pick<
 	readonly logger?: RateLimitOutageLogger;
 };
 
+declare const policyBrand: unique symbol;
+
 /**
  * A check's outage policy, built once by {@link createRateLimitPolicy}: the
  * limiter's `failMode` as it was read then, with the tag and the channels.
+ * Branded, and checked at runtime: no other value is one.
  */
 export interface RateLimitPolicy {
+	readonly [policyBrand]: true;
 	readonly limiter: RateLimiter;
 	readonly tag: string;
 	readonly failMode: RateLimitFailMode;
@@ -112,13 +116,13 @@ export function createRateLimitPolicy(
 	options: RateLimitPolicyOptions,
 	who = "createRateLimitPolicy",
 ): RateLimitPolicy {
-	const policy: RateLimitPolicy = Object.freeze({
+	const policy = Object.freeze({
 		limiter: options.limiter,
 		tag: options.tag,
 		failMode: readRateLimitFailMode(options.limiter, who),
 		logger: options.logger ?? consoleLogger,
 		...(options.auditSink === undefined ? {} : { auditSink: options.auditSink }),
-	});
+	}) as RateLimitPolicy;
 	builtPolicies.add(policy);
 	return policy;
 }
