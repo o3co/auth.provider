@@ -133,7 +133,7 @@ describe("the SMTP sender's delivery", () => {
 		expect(relayed?.to).toEqual(["alice@example.com"]);
 		const content = relayed?.content ?? "";
 		expect(content).toMatch(/^Subject: Your sign-in code$/m);
-		expect(content).toMatch(/^From: Sign-in <no-reply@example.com>$/m);
+		expect(content).toMatch(/^From: "?Sign-in"? <no-reply@example\.com>$/m);
 		expect(content).toContain(`Your sign-in code is ${CODE}.`);
 		expect(content).toContain("It expires in 10 minutes.");
 		expect(content).not.toContain("u-alice");
@@ -344,10 +344,10 @@ describe("the SMTP sender's answers", () => {
 	it("rejects with the reason for a relay refusing the credentials, the recipient or the message, or failing for now", async () => {
 		const cases: [ScriptedRelayOptions, string][] = [
 			[{ auth: true, replies: { auth: "535 5.7.8 credentials invalid" } }, "auth_failed"],
-			[{ replies: { rcpt: "550 5.1.1 unknown" } }, "rejected"],
-			[{ replies: { message: "554 5.7.1 refused" } }, "rejected"],
-			[{ replies: { rcpt: "421 4.3.2 try later" } }, "rejected"],
-			[{ replies: { mail: "451 4.7.0 temporary" } }, "rejected"],
+			[{ auth: true, replies: { rcpt: "550 5.1.1 unknown" } }, "rejected"],
+			[{ auth: true, replies: { message: "554 5.7.1 refused" } }, "rejected"],
+			[{ auth: true, replies: { rcpt: "421 4.3.2 try later" } }, "rejected"],
+			[{ auth: true, replies: { mail: "451 4.7.0 temporary" } }, "rejected"],
 		];
 		for (const [script, reason] of cases) {
 			const relay = await relayWith(script);

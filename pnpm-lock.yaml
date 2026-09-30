@@ -600,6 +600,9 @@ importers:
 
   packages/standard:
     dependencies:
+      nodemailer:
+        specifier: ^10.0.13
+        version: 10.0.13
       zod:
         specifier: ^4.6.5
         version: 4.6.5
@@ -2424,6 +2427,10 @@ packages:
   node-gyp-build@4.8.4:
     resolution: {integrity: sha512-LA4ZjwlnUblHVgq0oBF3Jl/6h/Nvs5fzBLwdEF4nuxnFdsfajde4WfxtJr3CaiH+F6ewcIB/q4jQ4UzPyid+CQ==}
     hasBin: true
+
+  nodemailer@10.0.13:
+    resolution: {integrity: sha512-SzG86OlvcW/NNhUFC6uROMwRTL4n7MswfQqC/T8mhkmnY1YVa23zUEMYi4ijSeXSl9GLz9ZeTJDUatEDuY5FeQ==}
+    engines: {node: '>=20.0.0'}
 
   normalize-path@3.0.0:
     resolution: {integrity: sha512-6eZs5Ls3WtCisHWp9S2GUy8dqkpGi4BVSz3GaqiE6ezub0512ESztXUwUB6C6IKbQkY2Pnb/mD4WYojCRwcwLA==}
@@ -4515,6 +4522,8 @@ snapshots:
   node-addon-api@8.7.0: {}
 
   node-gyp-build@4.8.4: {}
+
+  nodemailer@10.0.13: {}
 
   normalize-path@3.0.0: {}
 

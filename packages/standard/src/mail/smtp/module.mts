@@ -17,19 +17,25 @@
 /**
  * `standardSmtpMailSenderModule`: the SMTP mail sender's module, named after
  * its section, `standard-smtp-mail-sender`, which boot parses with the
- * module's schema before any factory runs. This build has no SMTP delivery:
- * the module provides no sender, so a composition that needs a `mailSender`
- * and installs only this is refused for want of one. Stateless.
+ * module's schema before any factory runs. It fills the `mailSender` slot
+ * with the SMTP sender, built only where something reads the slot: a
+ * composition that sends refuses the boot when the section cannot send (no
+ * host, no single sender address, a user without a password or the other
+ * way round), and one that sends nothing boots without them. Stateless.
  */
 
 import { defineModule } from "@o3co/auth-provider-core";
 import { standardSmtpMailSenderConfigSchema } from "./config.mjs";
+import { createStandardSmtpMailSender } from "./sender.mjs";
 
-/** The SMTP mail sender's module: its section alone. */
+/** The SMTP mail sender's module: its section, and the sender over it. */
 export const standardSmtpMailSenderModule = defineModule({
 	name: "standard-smtp-mail-sender",
 	section: {
 		schema: standardSmtpMailSenderConfigSchema,
 		reference: new URL("../../../config/reference.conf", import.meta.url),
+	},
+	provides: {
+		mailSender: ({ section }) => createStandardSmtpMailSender(section),
 	},
 });
