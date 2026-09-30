@@ -70,10 +70,17 @@ describe("registeredAdmissionAction — an action as it is registered", () => {
 	it("admits a name of two lower-case identifiers joined by a dot, as every bundled consumer's is", () => {
 		for (const name of [
 			"oauth.authorize",
+			"oauth.consent",
 			"oauth.session_grant",
 			"oauth.code_exchange",
+			"oauth.refresh",
 			"device.lookup",
+			"device.approve",
+			"device.deny",
 			"federation_grants.connect",
+			"federation_grants.consent",
+			"federation_grants.callback",
+			"session.link",
 			"session.link_callback",
 			"webauthn.register",
 			"a1.b2",

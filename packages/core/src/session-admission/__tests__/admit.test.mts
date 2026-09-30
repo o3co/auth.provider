@@ -37,6 +37,7 @@ import {
 } from "#/session-admission/admit.mjs";
 import type {
 	AdmissionDeps,
+	IssuedRemediationAction,
 	AdmissionRequest,
 	RequirementInput,
 	SessionClaim,
@@ -309,6 +310,17 @@ describe("what admitSession refuses before it reads anything (a caller's fault i
 		expect(checkResolver(built, "createThing")).toBe(built);
 	});
 
+	it("checkResolver refuses, by the factory's name, a resolver on which an action the factory admits is not registered, and answers one on which every one is", () => {
+		const built = resolverForTests([], { actions: TEST_ACTIONS });
+		expect(checkResolver(built, "createThing", ["test.use", "test.peek"])).toBe(built);
+		expect(() => checkResolver(built, "createThing", ["test.use", "acme.missing"])).toThrow(
+			/^createThing: admits "acme\.missing", which no module registers/,
+		);
+		expect(() => checkResolver(resolverForTests([]), "createThing", ["test.use"])).toThrow(
+			RangeError,
+		);
+	});
+
 	it("refuses an action that is neither a registered action's name nor a remediation core issued — before a store is read or a requirement asked, never as a skipped requirement", async () => {
 		let asked = 0;
 		let read = 0;
@@ -330,10 +342,18 @@ describe("what admitSession refuses before it reads anything (a caller's fault i
 			},
 			requirements: resolverForTests([counting], { actions: TEST_ACTIONS }),
 		});
+		const registered = with_.requirements.action("test.use");
 		for (const action of [
 			undefined,
 			null,
 			"oauth.authorize",
+			// A registered name with a grade the caller states, even the registered one.
+			{ name: "test.use", grade: "grants_nothing" },
+			{ name: "test.use", grade: "use" },
+			{ name: "acme.x", grade: "use" },
+			// The registered action as the resolver answers it, and a copy of it.
+			registered,
+			{ ...registered },
 			{ name: "", grade: "use" },
 			{ name: "x", grade: "strict" },
 			{ name: "x", grade: "admin" },
@@ -950,8 +970,14 @@ describe("step 5 — the requirements", () => {
 				return { outcome: "met" };
 			},
 		});
-		const requirements = resolverForTests([owner, met("other")], { actions: TEST_ACTIONS });
-		const issued = issuedRemediationActions(owner)?.step_up as AdmissionAction;
+		const other = met("other", {
+			admit: async ({ action }) => {
+				seen.push(`other:${action.name}:${action.grade}`);
+				return { outcome: "met" };
+			},
+		});
+		const requirements = resolverForTests([owner, other], { actions: TEST_ACTIONS });
+		const issued = issuedRemediationActions(owner)?.step_up as IssuedRemediationAction;
 		for (const action of [
 			{ name: "mfa.step_up", grade: "remediation" } as const,
 			{ ...issued },

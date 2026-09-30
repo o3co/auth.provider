@@ -21,7 +21,10 @@
  */
 
 import { describe, expect, expectTypeOf, it } from "vitest";
+import type { AdmissionAction } from "#/session-admission/actions.mjs";
 import type {
+	AdmissionRequest,
+	IssuedRemediationAction,
 	PrimaryAuthentication,
 	RegisteredRequirement,
 	RequirementInput,
@@ -878,6 +881,13 @@ describe("the shapes the contract names", () => {
 			| { readonly outcome: "step_up"; readonly whenStillUnmet: "reauthenticate" | "unmet" }
 			| { readonly outcome: "unmet" }
 		>();
+		expect(true).toBe(true);
+	});
+
+	it("a request's action is a name, or a remediation core issued: a registered action's object is not one", () => {
+		expectTypeOf<AdmissionRequest["action"]>().toEqualTypeOf<string | IssuedRemediationAction>();
+		expectTypeOf<AdmissionAction>().not.toMatchTypeOf<AdmissionRequest["action"]>();
+		expectTypeOf<IssuedRemediationAction>().toMatchTypeOf<AdmissionAction>();
 		expect(true).toBe(true);
 	});
 
