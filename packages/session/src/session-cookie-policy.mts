@@ -26,14 +26,15 @@
  * and `session.maxAge`, the cookie's `Max-Age` and a session record's
  * lifetime. The signing secret is not among them.
  *
- * One rule decides which sections yield a cookie ({@link sessionCookieRefusal}),
- * and the store refuses at boot every section it refuses, so the store mounts
- * no cookie the policy refuses and no section yields a policy that breaks
- * core's contract (`sessionCookiePolicyContract`): a cookie a browser drops (a
- * `__Host-` name that is not secure or that names a domain, a `__Secure-` name
- * or `SameSite=None` without `secure`), a name that is not an RFC 6265 token,
- * and a lifetime outside 1 to `MAX_DURATION_MS` milliseconds. Core's schema
- * already refuses the `SameSite=None` and lifetime cases at validation.
+ * One rule ({@link sessionCookieRefusal}) decides which sections yield a
+ * cookie, and the store refuses at boot every section the rule refuses: the
+ * store mounts no cookie the policy refuses, and no section yields a policy
+ * that breaks core's contract (`sessionCookiePolicyContract`) — a cookie a
+ * browser drops (a `__Host-` name that is not secure or that names a domain, a
+ * `__Secure-` name or `SameSite=None` without `secure`), a name that is not an
+ * RFC 6265 token, a lifetime outside 1 to `MAX_DURATION_MS` milliseconds.
+ * Core's schema already refuses the `SameSite=None` and lifetime cases at
+ * validation.
  */
 
 import { MAX_DURATION_MS, type SessionCookiePolicy } from "@o3co/auth-provider-core";

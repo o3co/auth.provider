@@ -84,6 +84,8 @@ function sessionCookieOf(session: SessionCookieConfigSlice, stage: BootStage): S
 }
 
 function buildSessionStoreModule(replicaSafety: ReplicaSafetyDeclaration | undefined) {
+	// Written type arguments infer nothing, so the section schema (none) and
+	// the provided keys `authoritative` is typed against are written too.
 	return defineModule<
 		"config" | "deploymentMode",
 		"lifecycleRegistrar" | "readinessRegistrar" | "logger",
