@@ -25,7 +25,9 @@
  * with the changes sent, at the expected version plus one; what is thrown is
  * built from an allowlist (`storeFailure.mts`, `storeErrors.mts`) and carries
  * nothing the Store sent; the sealed `data` it is handed is sent as it is,
- * and nothing is sent that the wire codec would not read back.
+ * and nothing is sent that the wire codec would not read back; a record the
+ * version floor refuses (`versionFloor.mts`) refuses the list, and an update
+ * is answered as written only once the floor holds its version.
  */
 
 import {
@@ -38,6 +40,7 @@ import {
 	type MfaStoreFactor,
 	type MfaStoreFactorChanges,
 	type MfaStoreListRequest,
+	type ReplaySeenSet,
 	readMfaStoreFactor,
 	readMfaStoreListAnswer,
 	toMfaStoreFactor,
@@ -58,8 +61,10 @@ import {
 	mfaStoreMalformedAnswer,
 	mfaStoreStatusError,
 	mfaStoreUnreadableRecord,
+	mfaStoreVersionRolledBack,
 	mfaStoreVersionSkipped,
 } from "./storeFailure.mjs";
+import { createMfaFactorVersionFloor, type MfaFactorVersionFloor } from "./versionFloor.mjs";
 
 /** What this adapter's messages lead with. */
 const OWNER = "HttpMfaFactorStore";
@@ -79,6 +84,8 @@ export interface HttpMfaFactorStoreOptions {
 	readonly timeout: number;
 	/** The most bytes of an answer read. Default `DEFAULT_MAX_RESPONSE_BYTES`. */
 	readonly maxResponseBytes?: number;
+	/** Where the version floor is kept: one seen-set every replica shares. */
+	readonly replaySeenSet: ReplaySeenSet;
 }
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
@@ -105,6 +112,7 @@ export class HttpMfaFactorStore implements MfaFactorStore {
 	/** Private fields: `inspect()` and `JSON.stringify` of the store show neither the credential nor the endpoints. */
 	readonly #urls: Readonly<Record<"list" | "create" | "update" | "delete", string>>;
 	readonly #settings: StoreRequestSettings;
+	readonly #floor: MfaFactorVersionFloor;
 
 	constructor({
 		listUrl,
@@ -114,6 +122,7 @@ export class HttpMfaFactorStore implements MfaFactorStore {
 		bearerToken,
 		timeout,
 		maxResponseBytes = DEFAULT_MAX_RESPONSE_BYTES,
+		replaySeenSet,
 	}: HttpMfaFactorStoreOptions) {
 		this.#urls = Object.freeze({
 			list: assertSecureEndpoint(listUrl, "listUrl", OWNER),
@@ -126,6 +135,7 @@ export class HttpMfaFactorStore implements MfaFactorStore {
 			timeout: checkStoreTimeout(timeout, OWNER),
 			maxResponseBytes: checkStoreResponseCap(maxResponseBytes, OWNER),
 		});
+		this.#floor = createMfaFactorVersionFloor(replaySeenSet);
 	}
 
 	async list(subject: string): Promise<readonly MfaFactorRecord[]> {
@@ -138,6 +148,17 @@ export class HttpMfaFactorStore implements MfaFactorStore {
 			throw reading.reason === "malformed"
 				? mfaStoreMalformedAnswer("list", url)
 				: mfaStoreUnreadableRecord(url);
+		}
+		const admitted = await Promise.all(
+			reading.factors.map((factor) => this.#floor.admits(subject, factor.id, factor.version)),
+		);
+		const rolledBack = reading.factors.find((_factor, index) => !admitted[index]);
+		if (rolledBack !== undefined) {
+			throw mfaStoreVersionRolledBack(url, {
+				subject,
+				id: rolledBack.id,
+				version: rolledBack.version,
+			});
 		}
 		return reading.factors.map(fromMfaStoreFactor);
 	}
@@ -177,6 +198,7 @@ export class HttpMfaFactorStore implements MfaFactorStore {
 		if (factor.version !== expectedVersion + 1) {
 			throw mfaStoreVersionSkipped(url, { subject, id, expectedVersion });
 		}
+		await this.#floor.wrote(subject, id, factor.version);
 		return fromMfaStoreFactor(factor);
 	}
 
