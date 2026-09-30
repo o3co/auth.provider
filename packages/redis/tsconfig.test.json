@@ -4,10 +4,12 @@
 		"noEmit": true,
 		"rootDir": "."
 	},
-	// vitest's typecheck runs tsc on this program, and an error in any file of
-	// it fails the run, whether or not `typecheck.include` in vitest.config.mts
-	// names the file. `tsconfig.json` builds `src` alone, so every test file and
-	// helper comes in here by glob: a new one is compiled without being listed.
+	// vitest's typecheck runs tsc on this program in any run that includes one
+	// of the files `typecheck.include` in vitest.config.mts names (a full run,
+	// and CI, always does). An error in any file of the program then fails the
+	// run, whether or not that list names the file. `tsconfig.json` builds `src`
+	// alone, so every test file and helper comes in here by glob: a new one is
+	// compiled without being listed.
 	"include": ["src/**/*.mts", "__tests__/**/*.mts"],
 	"exclude": ["node_modules", "dist"]
 }
