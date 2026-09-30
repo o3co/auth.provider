@@ -318,14 +318,23 @@ function keyPrefixOf(
 }
 
 /**
- * Refuses, with a `RangeError`, the Redis federation grant store's key prefix
- * moved off its default while the Redis intent store's is left at its
- * default, when `modules` load both. The intent store's prefix is its own key, so a
- * deployment that moved only the grant store's would keep acquisition's
- * records in the default namespace, shared with every deployment on the same
- * Redis database that left it there. The defaults are what the stores'
- * `reference.conf` sets with no environment. The message names both keys and
- * both variables, and quotes neither value.
+ * Refuses, with a `RangeError`, a Redis intent store left on the default key
+ * prefix where the grant store's was moved, when `modules` load the Redis
+ * intent store. The intent store's prefix is its own key, so a deployment
+ * that moved only the grant store's would keep acquisition's records in the
+ * default namespace, shared with every deployment on the same Redis database
+ * that left it there. Refused:
+ *
+ * - `redis-federation-grant-store.keyPrefix` off its default while
+ *   `redis-federation-grant-intent-store.keyPrefix` is at its own, whether or
+ *   not the Redis grant store is loaded: the package's `reference.conf`, which
+ *   binds both, is layered with the intent store;
+ * - with the Redis grant store not loaded, `redisFederationGrantStore.keyPrefix`
+ *   written at all: the intent store read that key, and no loaded module
+ *   relocates it.
+ *
+ * The defaults are what the package's `reference.conf` sets with no
+ * environment. The message names the keys and variables, and quotes no value.
  */
 function refuseIntentPrefixLeftAtDefault(
 	resolved: Readonly<Record<string, unknown>>,
@@ -335,7 +344,17 @@ function refuseIntentPrefixLeftAtDefault(
 	const intentStore = redisFederationGrantIntentStoreModule;
 	const loaded = (module: Module) => modules.some((m) => m.name === module.name);
 	const reference = intentStore.section?.reference;
-	if (!loaded(grantStore) || !loaded(intentStore) || reference === undefined) return;
+	if (!loaded(intentStore) || reference === undefined) return;
+	const intentKey =
+		"redis-federation-grant-intent-store.keyPrefix (REDIS_FEDERATION_GRANT_INTENT_STORE_KEY_PREFIX)";
+	const oldSection = resolved.redisFederationGrantStore;
+	if (!loaded(grantStore) && isPlainSection(oldSection) && Object.hasOwn(oldSection, "keyPrefix")) {
+		throw new RangeError(
+			"redisFederationGrantStore.keyPrefix is set, and no installed module reads it: the Redis " +
+				`intent store's prefix is its own key, ${intentKey}. Set that instead, and delete ` +
+				"redisFederationGrantStore.keyPrefix",
+		);
+	}
 	const defaults = resolveLayers({ config: empty(), env: {} }, [reference]);
 	const grant = keyPrefixOf(resolved, grantStore);
 	const intent = keyPrefixOf(resolved, intentStore);
@@ -343,14 +362,12 @@ function refuseIntentPrefixLeftAtDefault(
 	if (intent === undefined || intent !== keyPrefixOf(defaults, intentStore)) return;
 	const grantKey =
 		"redis-federation-grant-store.keyPrefix (REDIS_FEDERATION_GRANT_STORE_KEY_PREFIX)";
-	const intentKey =
-		"redis-federation-grant-intent-store.keyPrefix (REDIS_FEDERATION_GRANT_INTENT_STORE_KEY_PREFIX)";
 	throw new RangeError(
-		`${grantKey} moves the Redis federation grant store off its default key prefix, and ` +
-			`${intentKey} is left at its default. The intent store's prefix is its own: ` +
-			"acquisition's records would stay in the default namespace, shared with every " +
-			`deployment on the same Redis database that left it there. Set ${intentKey} as well — ` +
-			"to the grant store's prefix to keep the two together, or to one of its own",
+		`${grantKey} is set off its default key prefix, and ${intentKey} is left at its ` +
+			"default. The Redis intent store's prefix is its own: acquisition's records would " +
+			"stay in the default namespace, shared with every deployment on the same Redis " +
+			`database that left it there. Set ${intentKey} as well — to the grant store's prefix ` +
+			"to keep the two together, or to one of its own",
 	);
 }
 
@@ -366,8 +383,8 @@ function refuseIntentPrefixLeftAtDefault(
  * which names an unowned section once. The MFA ADR's build-order step 20
  * removes this with the template's reading.
  *
- * Refuses, with a `RangeError`, the Redis federation grant store's key prefix
- * moved while the Redis intent store's is left at its default, both loaded
+ * Refuses, with a `RangeError`, the Redis intent store left on its default
+ * key prefix where the grant store's was moved
  * (`refuseIntentPrefixLeftAtDefault`).
  *
  * Typed `AppConfig` because that is the `config` slot's type; read the parsed
