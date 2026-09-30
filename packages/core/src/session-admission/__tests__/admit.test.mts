@@ -1452,6 +1452,32 @@ describe("an action a consumer registered, passed by its name", () => {
 		expect(reads).toBe(0);
 	});
 
+	it("refuses an action object that is not a remediation core issued — a literal, a copy of a registered action, one shaped like a remediation — before anything is read", async () => {
+		let reads = 0;
+		const store = storeOf(async () => {
+			reads++;
+			return session();
+		});
+		const requirements = resolverForTests([], { actions: ACTIONS });
+		const registered = requirements.action("acme.export");
+		for (const action of [
+			{ name: "acme.export", grade: "credential_change" },
+			{ ...registered },
+			registered,
+			{ name: "acme.unregistered", grade: "use" },
+			{ name: "acme.step_up", grade: "remediation" },
+		]) {
+			await expect(
+				admitSession(
+					deps({ userSessionStore: store, requirements }),
+					request({ action: action as never }),
+				),
+				JSON.stringify(action),
+			).rejects.toThrow(/a registered action's name, or a remediation core issued/);
+		}
+		expect(reads).toBe(0);
+	});
+
 	it("logs the action by its registered name", async () => {
 		const { logger, lines } = recordingLogger();
 		const down = storeOf(async () => {
