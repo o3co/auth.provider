@@ -3091,7 +3091,8 @@ describe("the browser throttle, when the limiter is down — what it logs and au
 /**
  * A requirement that answers `answer` and records what it was asked. Its page
  * is set, so a `step_up` is one admission can answer; its reach is empty, as
- * any requirement's but `mfa` must be in this release.
+ * any requirement's but the second-factor authority's must be in this
+ * release.
  */
 const fixture = (
 	answer: (input: RequirementInput) => RequirementVerdict,

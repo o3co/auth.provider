@@ -770,7 +770,7 @@ describe("resumePrimary — after a ceremony completes", () => {
 		expect(risk.asked).toHaveLength(1);
 	});
 
-	it("holds a requirement named mfa that does not declare the second-factor authority to what any other may add — no second-factor value, no mfaAt — presented or read back, even with a reach that names them", async () => {
+	it("holds a requirement named mfa that does not declare the second-factor authority to what any other may add: a verified second factor is refused, presented or read back, even with a reach that names it", async () => {
 		// The reach rules are lifted here: the name alone is weighed.
 		const named = asking("mfa", () => interrupting(), {
 			reach: new Set(["otp", "mfa"]),

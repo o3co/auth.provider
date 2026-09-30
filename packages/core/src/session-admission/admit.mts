@@ -1099,7 +1099,7 @@ export async function admitPrimary(
  * The session's `recorded` composed from the primary the route built and
  * what every completed requirement added, in order (`composeAmr`: a
  * requirement's `mfa` comes through `addsMfa`); `mfaAt` is what the one
- * completion that may carry one, the requirement named `mfa`, verified at.
+ * completion that may carry one, the second-factor authority's, verified at.
  */
 function composeRecorded(
 	primary: PrimaryAuthentication,
@@ -1131,10 +1131,13 @@ function composeRecorded(
  * Continues a login after a requirement's ceremony completes. Refuses,
  * before asking anything, a continuation `checkPrimaryContinuation` cannot
  * read, a completion by any requirement but the one that interrupted (or
- * one not registered with `admitPrimary`, or already done), and additions
- * that requirement may not make. Then composes `recorded` from the primary
- * and every completion and asks each requirement not yet done; any may
- * interrupt again with the updated continuation.
+ * one not registered with `admitPrimary`, or already done), and additions —
+ * this completion's and each one read back from `done` — that their
+ * requirement may not make as registered: a second factor from the
+ * requirement that declares the second-factor authority alone, and a
+ * verified one from it. Then composes `recorded` from the primary and every
+ * completion and asks each requirement not yet done; any may interrupt again
+ * with the updated continuation.
  */
 export async function resumePrimary(
 	deps: AdmissionDeps,
@@ -1162,19 +1165,25 @@ export async function resumePrimary(
 			`resumePrimary: a continuation's primary is a password login in this release, not "${kind}"`,
 		);
 	}
-	const registeredWithAdmitPrimary = (name: string): boolean =>
-		requirements.get(name)?.admitPrimary !== undefined;
-	for (const entry of [...read.done.map((d) => d.requirement), completed.requirement]) {
-		if (!registeredWithAdmitPrimary(entry)) {
+	/** The registered requirement of `name` that interrupts a login, else a `RangeError`. */
+	const interrupting = (name: string): RegisteredRequirement => {
+		const requirement = requirements.get(name);
+		if (requirement?.admitPrimary === undefined) {
 			throw new RangeError(
-				`resumePrimary: "${entry}" is not a registered requirement that interrupts a login`,
+				`resumePrimary: "${name}" is not a registered requirement that interrupts a login`,
 			);
 		}
-	}
+		return requirement;
+	};
+	const earlier = read.done.map((entry) => ({
+		entry,
+		registered: interrupting(entry.requirement),
+	}));
+	const completing = interrupting(completed.requirement);
 	if (read.done.some((entry) => entry.requirement === completed.requirement)) {
 		throw new RangeError(`resumePrimary: "${completed.requirement}" already completed`);
 	}
-	const adds = checkPrimaryAdditions(completed.requirement, completed.adds);
+	const adds = checkPrimaryAdditions(completing, completed.adds);
 	// Rehydrated: the continuation carries epoch milliseconds; `recorded` is
 	// the password kind's, not the DTO's.
 	const primary: PrimaryAuthentication = Object.freeze({
@@ -1182,8 +1191,14 @@ export async function resumePrimary(
 		recorded: passwordSessionAuthentication(),
 	});
 	const done: readonly CompletedRequirement[] = Object.freeze([
-		...read.done.map((entry) =>
-			Object.freeze({ requirement: entry.requirement, adds: additionsFromDto(entry.adds) }),
+		// Each earlier completion, read back, is held again to what its
+		// requirement may add as registered: which one declares the
+		// second-factor authority is the registration's, not the record's.
+		...earlier.map(({ entry, registered }) =>
+			Object.freeze({
+				requirement: entry.requirement,
+				adds: checkPrimaryAdditions(registered, additionsFromDto(entry.adds)),
+			}),
 		),
 		Object.freeze({ requirement: completed.requirement, adds }),
 	]);

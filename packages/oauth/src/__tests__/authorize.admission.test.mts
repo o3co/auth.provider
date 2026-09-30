@@ -116,8 +116,9 @@ const storeWith = (session: UserSession | null) =>
 /**
  * A fixture requirement: what it answers `/authorize` is a knob the test
  * turns between two requests, as a real step-up changes the session's
- * answer. `reach` is empty (only the requirement named `mfa` may reach), and
- * a page may stand with an empty reach.
+ * answer. `reach` is empty (only the requirement that declares the
+ * second-factor authority may reach), and a page may stand with an empty
+ * reach.
  */
 const fixture = (
 	name: string,
@@ -803,6 +804,7 @@ describe("/authorize on admission — the step-up trip", () => {
 	it("an acr a step-up can meet is a trip through the requirement that reaches it, with the reachable values as the hint", async () => {
 		const mfa: SessionRequirement = {
 			name: "mfa",
+			secondFactorAuthority: true,
 			reach: new Set(["otp", "mfa"]),
 			stepUpPage: { url: "/mfa", params: {} },
 			remediations: ["mfa.step_up"],

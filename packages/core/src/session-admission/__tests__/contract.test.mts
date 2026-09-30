@@ -113,7 +113,7 @@ describe("sessionRequirementContract — a well-formed fixture", () => {
 });
 
 describe("sessionRequirementContract — each way a requirement can break it", () => {
-	it("a name that is not its key, or a fixture that declares the second-factor authority — whatever its name — while a fixture named mfa that does not is only a name", async () => {
+	it("a name that is not its key, or a fixture that declares the second-factor authority; a fixture named mfa that does not declare it, or a requirement under test that is not a fixture and declares it, passes", async () => {
 		expect(await failing({ build: () => fixture({ name: "other" }) })).toContain(
 			"name equals its key, and a fixture never declares the second-factor authority",
 		);

@@ -316,6 +316,7 @@ describe("the boot refusals", () => {
 	it("holds its cap to core's: a first binding's hint list of 16 kinds is answered, one of 17 refused", async () => {
 		const answering = (count: number): SessionRequirement => ({
 			name: "mfa",
+			secondFactorAuthority: true,
 			reach: new Set(["otp", "mfa"]),
 			stepUpPage: { url: "/mfa", params: {} },
 			remediations: ["mfa.step_up"],

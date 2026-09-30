@@ -34,7 +34,6 @@ import {
 	ADMISSION_ACTIONS,
 	isHintKey,
 	issuedRemediationActions,
-	MFA_REQUIREMENT_NAME,
 	type PrimaryAuthentication,
 	type RequirementInput,
 	registeredRequirement,
@@ -52,7 +51,11 @@ export interface ContractCase {
 export interface RequirementContractInput {
 	/** The key the requirement is contributed under. */
 	readonly key: string;
-	/** Whether the requirement under test is a fixture: a fixture is never named `mfa`. */
+	/**
+	 * Whether the requirement under test is a fixture: a fixture never
+	 * declares the second-factor authority, which boot binds to core's MFA
+	 * ports.
+	 */
 	readonly fixture: boolean;
 	/**
 	 * The issuer its page is registered on, as boot registers it on
@@ -141,7 +144,7 @@ export function sessionRequirementContract(
 	};
 	const cases: ContractCase[] = [
 		{
-			name: "name equals its key, and a fixture is never named mfa",
+			name: "name equals its key, and a fixture never declares the second-factor authority",
 			run: async () => {
 				const requirement = build();
 				assert.equal(
@@ -151,15 +154,15 @@ export function sessionRequirementContract(
 				);
 				if (fixture) {
 					assert.notEqual(
-						requirement.name,
-						MFA_REQUIREMENT_NAME,
-						`a fixture is never named "${MFA_REQUIREMENT_NAME}": the name is reserved to the MFA requirement`,
+						requirement.secondFactorAuthority,
+						true,
+						"a fixture never declares the second-factor authority: boot binds the authority to core's MFA ports",
 					);
 				}
 			},
 		},
 		{
-			name: "reach holds non-empty strings, no primary's marker, no second-factor value unless the name is mfa, and — in this release — nothing at all unless the name is mfa; stepUpPage is set when reach is not empty, and is valid when set",
+			name: "reach holds non-empty strings, no primary's marker, no second-factor value unless the requirement declares the second-factor authority, and — in this release — nothing at all unless it does; stepUpPage is set when reach is not empty, and is valid when set",
 			// Registration validates the page; the seal boot runs holds the reach
 			// to its rules.
 			run: async () => {

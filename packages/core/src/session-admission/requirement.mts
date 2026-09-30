@@ -38,9 +38,6 @@ import type {
 } from "../user-sessions/types.mjs";
 import { type AcrTable, SECOND_FACTOR_AMR } from "./acr.mjs";
 
-/** The one requirement that may reach or add a second-factor value, or a verification time. */
-export const MFA_REQUIREMENT_NAME = "mfa";
-
 /**
  * The stores admission reads itself, by the name an `unavailable` admission
  * gives each one's outage. Every other `Admission.store` is a requirement's
@@ -338,6 +335,15 @@ export type RequirementVerdict =
 export interface SessionRequirement {
 	/** The key it is contributed under; refused at boot otherwise (the `mfaFactors` rule). */
 	readonly name: string;
+	/**
+	 * Whether this requirement is the second-factor authority: the one
+	 * requirement that may reach and add a second factor's `amr` values
+	 * (`SECOND_FACTOR_AMR`) and `mfaAt`, whose completion of a login must be a
+	 * verified second factor, and which boot binds to core's MFA ports. At
+	 * most one registered requirement declares it; absent is `false`. Core
+	 * weighs this declaration, never a requirement's name.
+	 */
+	readonly secondFactorAuthority?: boolean;
 	/** The `amr` values a step-up through this requirement can add; empty when it offers none. */
 	readonly reach: ReadonlySet<string>;
 	/** Where that step-up starts: required when `reach` is not empty, allowed when it is (a re-consent). Copied and validated at registration; a `step_up` verdict names no page of its own. */
@@ -627,15 +633,18 @@ function registeredPage(
  */
 export interface RegisteredRequirement extends SessionRequirement {
 	readonly stepUpPage: RegisteredStepUpPage | undefined;
+	/** The declaration as it was read once at registration: `false` when absent. */
+	readonly secondFactorAuthority: boolean;
 }
 
 /**
  * `value` as it is registered: its shape held to the contract and copied,
  * each field read once, so what the resolver answers at request time is
  * what was registered. `name` must be RFC 6749 error-code characters and
- * not one of admission's own store names; `stepUpPage` is checked and
- * resolved once to its `href` on `issuer` (a path page with no issuer is
- * refused); `admit` and `admitPrimary` delegate to the value's.
+ * not one of admission's own store names; `secondFactorAuthority` is `true`,
+ * `false` or absent (read as `false`); `stepUpPage` is checked and resolved
+ * once to its `href` on `issuer` (a path page with no issuer is refused);
+ * `admit` and `admitPrimary` delegate to the value's.
  *
  * `reach` is NOT read here: it may be a getter over what registers in the
  * same pass (MFA's, over `mfaFactorResolver`). `sealRegisteredReach` reads
@@ -669,6 +678,10 @@ export function registeredRequirement(value: unknown, issuer?: string): Register
 			`the name is one admission gives an outage of its own stores (${ADMISSION_INFRASTRUCTURE_STORES.join(", ")}): a consumer telling an outage by its store would take the requirement's for the store's`,
 		);
 	}
+	const declared = value.secondFactorAuthority;
+	if (declared !== undefined && typeof declared !== "boolean") {
+		refuse("secondFactorAuthority must be true, false or absent");
+	}
 	// A page that fails names what is wrong itself (`checkStepUpPage`); one
 	// that passes is resolved here, once, on the issuer it was checked on.
 	const page = value.stepUpPage;
@@ -699,6 +712,7 @@ export function registeredRequirement(value: unknown, issuer?: string): Register
 	}
 	const copy: RegisteredRequirement = Object.freeze({
 		name,
+		secondFactorAuthority: declared === true,
 		get reach() {
 			return sealedReach.get(copy) ?? source.reach;
 		},
@@ -723,13 +737,16 @@ export function registeredRequirement(value: unknown, issuer?: string): Register
 /**
  * A registered requirement's `reach`, read once after the name-keyed pass
  * and held to the one home of these rules: an iterable of non-empty strings,
- * no primary's marker (`pwd`, `fed`), a second-factor value only under
- * `mfa`, a `stepUpPage` when not empty, and empty unless the requirement is
- * named `mfa` (MFA's is the one way a completed step-up is written into a
- * live session, so any other reach could never be met). Boot,
- * `resolverForTests` and the contract suite all run it. Answers a read-only
- * snapshot and seals a registered copy on it; a refused reach is not
- * sealed. `remedy` is appended to the refusal of a non-empty non-`mfa` reach.
+ * no primary's marker (`pwd`, `fed`), a second-factor value only from the
+ * requirement that declares the second-factor authority, a `stepUpPage`
+ * when not empty, and empty unless the requirement declares that authority
+ * (`recordSecondFactor`, which stamps `mfaAt`, is the one way a completed
+ * step-up is written into a live session, so any other reach could never be
+ * met). The name is not weighed. Boot, `resolverForTests` and the contract
+ * suite all run it. Answers a read-only snapshot and seals a registered copy
+ * on it; a refused reach is not sealed. `remedy` is appended to the refusal
+ * of a non-empty reach from a requirement that does not declare the
+ * authority.
  */
 export function sealRegisteredReach(
 	requirement: SessionRequirement,
@@ -738,6 +755,7 @@ export function sealRegisteredReach(
 	const refuse = (what: string): never => {
 		throw new RangeError(`session requirement "${requirement.name}": ${what}`);
 	};
+	const authority = requirement.secondFactorAuthority === true;
 	const reach: unknown = requirement.reach;
 	if (!isIterableOfValues(reach)) return refuse("reach must be a Set of amr values");
 	const read = new Set<string>();
@@ -747,9 +765,9 @@ export function sealRegisteredReach(
 		if (value === PASSWORD_AMR || value === FEDERATED_AMR) {
 			refuse(`reach names "${value}", a primary's marker, which no step-up adds`);
 		}
-		if (requirement.name !== MFA_REQUIREMENT_NAME && SECOND_FACTOR_AMR.has(value)) {
+		if (!authority && SECOND_FACTOR_AMR.has(value)) {
 			refuse(
-				`reach names "${value}", a second-factor value only the requirement named ${MFA_REQUIREMENT_NAME} may reach`,
+				`reach names "${value}", a second-factor value only the second-factor authority may reach`,
 			);
 		}
 		read.add(value);
@@ -757,9 +775,9 @@ export function sealRegisteredReach(
 	if (read.size > 0 && requirement.stepUpPage === undefined) {
 		refuse("a requirement that reaches something must declare where the step-up starts");
 	}
-	if (read.size > 0 && requirement.name !== MFA_REQUIREMENT_NAME) {
+	if (read.size > 0 && !authority) {
 		refuse(
-			`reaches ${[...read].map((value) => `"${value}"`).join(", ")}: in this release only the requirement named "${MFA_REQUIREMENT_NAME}" adds vouched values to a session, so any other reach must be empty${remedy === undefined ? "" : ` — ${remedy}`}`,
+			`reaches ${[...read].map((value) => `"${value}"`).join(", ")}: in this release only the second-factor authority adds vouched values to a session, so any other reach must be empty${remedy === undefined ? "" : ` — ${remedy}`}`,
 		);
 	}
 	return seal(requirement, read);
@@ -855,7 +873,7 @@ export interface PrimaryAuthentication {
 	readonly request: { readonly ip?: string; readonly userAgent?: string };
 }
 
-/** What a completing requirement verified: the `amr` it adds, and when a second factor was verified (the requirement named `mfa` alone). */
+/** What a completing requirement verified: the `amr` it adds, and when a second factor was verified (the second-factor authority alone). */
 export interface PrimaryAdditions {
 	readonly amr: readonly string[];
 	readonly mfaAt?: Date;

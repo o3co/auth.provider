@@ -19,7 +19,8 @@
  * when it constructs a consumer by hand. It is registered in the same set as
  * the boot planner's, so the brand stops accidents, not a deployment that
  * imports the testing entry on purpose. Each requirement is registered and
- * its reach sealed as boot does. `allowAnyReach` lifts the reach rules (the
+ * its reach sealed as boot does, and at most one may declare the
+ * second-factor authority. `allowAnyReach` lifts the reach rules (the
  * snapshot stays) for tests of admission's own mechanics that need two
  * reaching requirements; nothing else uses it.
  */
@@ -40,9 +41,12 @@ const ALLOW_ANY_REACH_REMEDY = "pass allowAnyReach for a test of admission's own
 /**
  * The resolver a test hands a consumer: `requirements` by their names, in the
  * order given. Two of one name are refused, as boot refuses a duplicate
- * contribution. With `issuer`, each page is held to that origin. Each reach
- * is read once, here, held to boot's rules unless `allowAnyReach`, and the
- * resolver answers that snapshot.
+ * contribution, and so are two that declare the second-factor authority, as
+ * boot refuses them (`duplicate-second-factor-authority`), whatever
+ * `allowAnyReach` says. With `issuer`, each page is held to that origin. Each
+ * reach is read once, here, held to boot's rules unless `allowAnyReach`, and
+ * the resolver answers that snapshot. Boot's binding of the authority to the
+ * MFA ports is not checked: a test builds no ports.
  */
 export function resolverForTests(
 	requirements: readonly SessionRequirement[],
@@ -52,11 +56,20 @@ export function resolverForTests(
 		throw new RangeError("resolverForTests: requirements must be a list");
 	}
 	const byName = new Map<string, RegisteredRequirement>();
+	let authority: string | undefined;
 	for (const candidate of requirements) {
 		// What is wrong is named by the registration itself, as boot reports it.
 		const requirement = registeredRequirement(candidate, options.issuer);
 		if (byName.has(requirement.name)) {
 			throw new RangeError(`resolverForTests: two requirements are named "${requirement.name}"`);
+		}
+		if (requirement.secondFactorAuthority) {
+			if (authority !== undefined) {
+				throw new RangeError(
+					`resolverForTests: "${authority}" and "${requirement.name}" both declare the second-factor authority, and at most one requirement may`,
+				);
+			}
+			authority = requirement.name;
 		}
 		byName.set(requirement.name, requirement);
 		if (options.allowAnyReach === true) {

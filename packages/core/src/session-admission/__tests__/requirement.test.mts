@@ -802,7 +802,7 @@ describe("sealRegisteredReach — a registered reach, read once after the name-k
 		expect(() => sealRegisteredReach(requirement("risk", reach))).toThrow(RangeError);
 	});
 
-	it("holds the authority's reach to the rules every reach keeps: no primary's marker, non-empty strings, a page when not empty", () => {
+	it("holds the authority's reach to the rules every reach keeps: an iterable of non-empty strings, no primary's marker, a page when not empty", () => {
 		for (const reach of [new Set(["pwd"]), new Set(["fed"]), new Set([""]), "otp"]) {
 			expect(() => sealRegisteredReach(authority(reach)), String(reach)).toThrow(RangeError);
 		}

@@ -16,7 +16,10 @@
 
 /**
  * The `mfa` session requirement: what MFA means to every consumer of a session,
- * through core's admission, reached through `sessionRequirements.mfa` only.
+ * through core's admission, reached through `sessionRequirements.mfa` only. It
+ * declares the second-factor authority: the one requirement core lets reach and
+ * add a second factor, and binds to its MFA ports at boot. The name is this
+ * package's own; core weighs the declaration.
  *
  * `reach` (the enabled factors' `amrValues`, plus `mfa` when one `addsMfa`) is
  * read once, after every factor has registered, and kept: boot refuses it unless
@@ -43,7 +46,6 @@ import {
 	FEDERATED_AMR,
 	type Logger,
 	MFA_AMR,
-	MFA_REQUIREMENT_NAME,
 	type MfaFactorResolver,
 	type MfaFactorStore,
 	PASSWORD_AMR,
@@ -56,6 +58,9 @@ import {
 	type StepUpPage,
 } from "@o3co/auth-provider-core";
 import type { LoginInterruption, LoginTransactions } from "./transactions.mjs";
+
+/** The name the requirement is registered under: `sessionRequirements.mfa`. */
+const MFA_REQUIREMENT_NAME = "mfa";
 
 /** The remediation the MFA page's step-up call (`POST /session/mfa/step-up`) admits with. */
 const MFA_STEP_UP_REMEDIATION = `${MFA_REQUIREMENT_NAME}.step_up`;
@@ -179,6 +184,7 @@ export function createMfaRequirement(options: MfaRequirementOptions): SessionReq
 
 	return {
 		name: MFA_REQUIREMENT_NAME,
+		secondFactorAuthority: true,
 		get reach() {
 			return reach();
 		},

@@ -325,7 +325,7 @@ describe("checkPrimaryContinuation — a done entry held to what any completion 
 		}
 	});
 
-	it("reads back a verified second factor, and a completion that added nothing, under any name: what its requirement may add is resumePrimary's to hold it to", () => {
+	it("reads back a verified second factor, and a completion that added nothing, under any name", () => {
 		for (const requirement of ["second", "risk", "mfa"]) {
 			expect(
 				readBack({ amr: ["otp", "mfa"], mfaAtMs: NOW.getTime() }, requirement).done,

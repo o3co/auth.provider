@@ -37,7 +37,6 @@ import type { RateLimitSpec } from "../ratelimit/types.mjs";
 import { isUsableRateLimitSpec, shownConfigValue } from "../ratelimit/usableSpec.mjs";
 import { sessionRequirementResolverOver } from "../session-admission/admit.mjs";
 import {
-	MFA_REQUIREMENT_NAME,
 	type RegisteredRequirement,
 	registeredRequirement,
 	sealRegisteredReach,
@@ -427,7 +426,7 @@ function checkNameKeyedValue(
 				`mfaFactors "${name}": the factor's kind must be the key it is contributed under`,
 			);
 		}
-		// The values the MFA requirement's reach is recomputed from: held
+		// The values the second-factor authority's reach is recomputed from: held
 		// here, so a factor written in JavaScript fails as a contribution, not
 		// as a raw TypeError at the end of the pass.
 		const amrValues = (value as { amrValues?: unknown }).amrValues;
@@ -499,10 +498,10 @@ interface RequirementRegistration {
 	readonly requirement: RegisteredRequirement;
 }
 
-/** The three ports an MFA implementation is wired to. */
+/** The three ports the second-factor authority is wired to. */
 const MFA_PORTS = ["mfaFactorResolver", "mfaFactorStore", "mfaTransactionStore"] as const;
-/** The remediation the MFA requirement's step-up route admits with. */
-const MFA_STEP_UP = "mfa.step_up";
+/** The route of the remediation the second-factor authority's step-up admits with: `<name>.step_up`. */
+const STEP_UP_ROUTE = "step_up";
 
 /**
  * What each registered factor said at registration, read once there and
@@ -528,7 +527,7 @@ function reachOfFactors(resolver: MfaFactorResolver): ReadonlySet<string> {
 		// biome-ignore lint/style/noNonNullAssertion: every registered factor was snapshotted at registration
 		const snapshot = factorSnapshots.get(factor as object)!;
 		for (const value of snapshot.amrValues) reach.add(value);
-		if (snapshot.addsMfa) reach.add(MFA_REQUIREMENT_NAME);
+		if (snapshot.addsMfa) reach.add(MFA_AMR);
 	}
 	return reach;
 }
@@ -545,11 +544,16 @@ const sameSet = (a: ReadonlySet<string>, b: ReadonlySet<string>): boolean =>
  * factory reads a reach, check every registered session requirement (see ADR
  * 2026-09-28-session-admission):
  *
+ * - refuse more than one requirement that declares the second-factor
+ *   authority (`duplicate-second-factor-authority`, naming each with its
+ *   module), before anything else is checked;
  * - seal each `reach` with `sealRegisteredReach`, which holds its rules, so
  *   the `acr` drop and admission read what was checked;
- * - accept the reserved name `mfa` only from a module that requires every one
- *   of `MFA_PORTS`, reaches what core recomputes from the enabled factors,
- *   and declares `mfa.step_up` among its remediations;
+ * - accept the second-factor authority, whatever its name, only from a
+ *   module that requires every one of `MFA_PORTS`, reaching what core
+ *   recomputes from the enabled factors, and declaring its own
+ *   `<name>.step_up` among its remediations; a requirement that does not
+ *   declare it is bound to none of this, whatever its name;
  * - once `sessionRequirements.expected` is written, compare it with the
  *   registered names both ways, whether or not anything consults admission:
  *   a name in it that no module registers is `session-requirement-missing`
@@ -585,6 +589,26 @@ async function checkSessionRequirements(
 			registrations.push({ name: entry.key, module: moduleName, requirement });
 		}
 	}
+	const authorities = registrations.filter(
+		(registration) => registration.requirement.secondFactorAuthority,
+	);
+	if (authorities.length > 1) {
+		const cleanupErrors = await runCleanupsReverse(material.cleanups);
+		const requirements = authorities.map(({ name, module }) => ({ name, module }));
+		throw new BootError({
+			message:
+				`${requirements.map(({ name, module }) => `${JSON.stringify(name)} (module ${JSON.stringify(module)})`).join(", ")} ` +
+				"each declare the second-factor authority, and at most one session requirement may: " +
+				"install one of the modules that contribute them.",
+			reason: "duplicate-second-factor-authority",
+			stage: "applyContributions",
+			details: {
+				reason: "duplicate-second-factor-authority",
+				requirements,
+				...(cleanupErrors.length > 0 ? { cleanupErrors } : {}),
+			},
+		});
+	}
 	const failed = async (registration: RequirementRegistration, cause: unknown): Promise<never> => {
 		const cleanupErrors = await runCleanupsReverse(material.cleanups);
 		throw new BootError({
@@ -609,8 +633,9 @@ async function checkSessionRequirements(
 		} catch (cause) {
 			return failed(registration, cause);
 		}
-		// Any other name reaches nothing in this release (the seal refused it).
-		if (registration.name !== MFA_REQUIREMENT_NAME) continue;
+		// A requirement that does not declare the authority reaches nothing in
+		// this release (the seal refused it), and is bound to no port.
+		if (!registration.requirement.secondFactorAuthority) continue;
 		// biome-ignore lint/style/noNonNullAssertion: the plan has a blueprint for every module it planned
 		const blueprint = material.plan.depsBlueprint.get(registration.module)!;
 		const requires = blueprint.requires as readonly string[];
@@ -619,7 +644,7 @@ async function checkSessionRequirements(
 			return failed(
 				registration,
 				new RangeError(
-					`a requirement named "${MFA_REQUIREMENT_NAME}" is accepted only from a module whose requires list ${MFA_PORTS.join(", ")}: it does not require ${missing.join(", ")}`,
+					`the second-factor authority "${registration.name}" is accepted only from a module whose requires list ${MFA_PORTS.join(", ")}: it does not require ${missing.join(", ")}`,
 				),
 			);
 		}
@@ -631,15 +656,16 @@ async function checkSessionRequirements(
 			return failed(
 				registration,
 				new RangeError(
-					`the "${MFA_REQUIREMENT_NAME}" requirement's reach must be what the installed factors reach — [${[...recomputed].join(", ")}] — and is [${[...reach].join(", ")}]`,
+					`the second-factor authority "${registration.name}"'s reach must be what the installed factors reach — [${[...recomputed].join(", ")}] — and is [${[...reach].join(", ")}]`,
 				),
 			);
 		}
-		if (!registration.requirement.remediations.includes(MFA_STEP_UP)) {
+		const stepUp = `${registration.name}.${STEP_UP_ROUTE}`;
+		if (!registration.requirement.remediations.includes(stepUp)) {
 			return failed(
 				registration,
 				new RangeError(
-					`the "${MFA_REQUIREMENT_NAME}" requirement must declare "${MFA_STEP_UP}" among its remediations`,
+					`the second-factor authority "${registration.name}" must declare "${stepUp}" among its remediations: the route its step-up is recorded by`,
 				),
 			);
 		}

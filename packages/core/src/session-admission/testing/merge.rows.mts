@@ -18,8 +18,9 @@
  * The rows of the session-admission ADR's acceptance criterion 4 (the MFA
  * ADR's step-4 table), as data: a request, a session, the `mfa.mode` and
  * enabled factors, and the expected decision in the MFA rule's vocabulary,
- * which `mergeAdmission` maps onto an `Admission`. Core's merge test runs
- * them against a stand-in, the MFA package's against the requirement it
+ * which `mergeAdmission` maps onto an `Admission` for the requirement that
+ * declares the second-factor authority, whatever its name. Core's merge test
+ * runs them against a stand-in, the MFA package's against the requirement it
  * registers, so both are held to one list. Nothing here runs a test.
  */
 
@@ -45,9 +46,9 @@ export const MERGE_ACR_TABLE: AcrTable = readAcrTable({
 });
 
 /**
- * What a step-up through the MFA requirement can add under each row's
- * factors (its `reach`, the rule's `secondFactorMethods`): each factor's
- * values, and `mfa` when one of them adds it.
+ * What a step-up through the second-factor authority can add under each
+ * row's factors (its `reach`, the rule's `secondFactorMethods`): each
+ * factor's values, and `mfa` when one of them adds it.
  */
 export const MERGE_REACH = Object.freeze({
 	/** TOTP, WebAuthn and recovery codes. */
@@ -483,37 +484,43 @@ export const MERGE_ROW_GROUPS: readonly MergeRowGroup[] = [
 	},
 ];
 
+/** The requirement the rows are decided by: the one that declares the second-factor authority, by the name it registered under and its page as registered. */
+export interface MergeAuthority {
+	readonly name: string;
+	readonly page: RegisteredStepUpPage;
+}
+
 /**
  * The ADR's mapping of a row's decision onto the admission, for the
- * requirement named `mfa` stepping up to the registered `page`: `requirement:
- * "acr"` stays `"acr"`, `"baseline"` becomes `"mfa"`, and a `step_up`'s
- * requirement becomes `whenStillUnmet` (`"acr"` → `"unmet"`, `"baseline"` →
- * `"reauthenticate"`).
+ * second-factor authority `authority` stepping up to its registered page:
+ * `requirement: "acr"` stays `"acr"`, `"baseline"` becomes the authority's
+ * name, and a `step_up`'s requirement becomes `whenStillUnmet` (`"acr"` →
+ * `"unmet"`, `"baseline"` → `"reauthenticate"`).
  */
 export function mergeAdmission(
 	expected: MergeDecision,
 	session: UserSession | null,
-	page: RegisteredStepUpPage,
+	authority: MergeAuthority,
 ): Admission {
 	switch (expected.outcome) {
 		case "met":
 			return { outcome: "admitted", session, acr: expected.acr };
 		case "reauthenticate":
-			return { outcome: "reauthenticate", requirement: "mfa", session };
+			return { outcome: "reauthenticate", requirement: authority.name, session };
 		case "step_up":
 			if (session === null) throw new Error("a step-up needs a session");
 			return {
 				outcome: "step_up",
-				requirement: "mfa",
+				requirement: authority.name,
 				session,
-				page,
+				page: authority.page,
 				acrValues: expected.acrValues,
 				whenStillUnmet: expected.requirement === "acr" ? "unmet" : "reauthenticate",
 			};
 		case "unmet":
 			return {
 				outcome: "unmet",
-				requirement: expected.requirement === "acr" ? "acr" : "mfa",
+				requirement: expected.requirement === "acr" ? "acr" : authority.name,
 				session,
 			};
 	}
