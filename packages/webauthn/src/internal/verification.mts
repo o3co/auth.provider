@@ -25,7 +25,12 @@
  * A registration's top origin is held to the rule the library holds an assertion's to, which it
  * does not apply to a registration: a top origin the client data reports must be one of the
  * expected top origins, and belong to a cross-origin ceremony. None reported passes, as it does
- * for an assertion (Safari reports none).
+ * for an assertion (Safari reports none). The client data is read with the library's own decoder,
+ * so the text judged is the text it verified.
+ * - `topOriginAccepted` mirrors `verifyAuthenticationResponse`'s `crossOrigin` branch: recheck it
+ *   at every `@simplewebauthn/server` bump.
+ * - Once `verifyRegistrationResponse` takes an expected top origin, pass it through and delete
+ *   `topOriginAccepted`.
  *
  * The sign count is judged here, only once the signature verified: the library, which compares
  * the count before it checks the signature, is handed a stored count of 0 and so never judges
@@ -39,6 +44,7 @@
 import type { AuthenticatorTransport, WebAuthnCredential } from "@o3co/auth-provider-core";
 import type { AuthenticationResponseJSON, RegistrationResponseJSON } from "@simplewebauthn/server";
 import { verifyAuthenticationResponse, verifyRegistrationResponse } from "@simplewebauthn/server";
+import { decodeClientDataJSON } from "@simplewebauthn/server/helpers";
 import { WEBAUTHN_ALGORITHM_IDS } from "./options.mjs";
 
 // ---------------------------------------------------------------------------
@@ -169,15 +175,15 @@ export async function verifyWebAuthnAttestationWithBackupState(
 }
 
 /**
- * Whether the top origin `clientDataJSON` (base64url JSON) reports is one a ceremony may come
- * from: none reported, or one of `expected` for a cross-origin ceremony. Client data that is not
- * a JSON object fails.
+ * Whether the top origin `clientDataJSON` reports, decoded as the library decodes it, is one a
+ * ceremony may come from: none reported, or one of `expected` for a cross-origin ceremony. Client
+ * data that is not a JSON object fails.
  */
 function topOriginAccepted(
 	clientDataJSON: string,
 	expected: readonly string[] | undefined,
 ): boolean {
-	const clientData: unknown = JSON.parse(Buffer.from(clientDataJSON, "base64url").toString("utf8"));
+	const clientData: unknown = decodeClientDataJSON(clientDataJSON);
 	if (typeof clientData !== "object" || clientData === null) return false;
 	const { crossOrigin, topOrigin } = clientData as { crossOrigin?: unknown; topOrigin?: unknown };
 	if (topOrigin === undefined) return true;

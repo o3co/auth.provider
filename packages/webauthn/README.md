@@ -168,11 +168,13 @@ From the environment, `WEBAUTHN_TOP_ORIGIN` is comma-separated the same way,
 and an exported-but-empty one reads as unset.
 
 Absent, a reported cross-origin registration or authentication is refused,
-which is the right answer for a deployment that never meant to be embedded —
-and the refusal is `top_origin_mismatch` (`400 {"error":"top_origin_mismatch"}`
-at `registration/verify`), not `origin_mismatch`, so it does not send an
-operator to the `origin` list above, which cannot fix it. A top origin reported
-for a ceremony that is not cross-origin is refused too. Same shape rules as `origin`,
+which is the right answer for a deployment that never meant to be embedded. A
+top origin reported for a ceremony that is not cross-origin is refused too. The
+grant's routes answer the refusal as `top_origin_mismatch`
+(`400 {"error":"top_origin_mismatch"}` at `registration/verify`), not
+`origin_mismatch`, so it does not send an operator to the `origin` list above,
+which cannot fix it. The second factor answers it `invalid`, as it answers
+every refusal. Same shape rules as `origin`,
 minus the Android app form: a top origin is a browsing context, and Credential
 Manager's origin has no frame above it.
 
@@ -280,7 +282,7 @@ The defaults are in [`config/reference.conf`](config/reference.conf); a composit
 
 **What it keeps.** Each factor's data is `{credentialId, publicKey, signCount, transports, backupEligible, backedUp, userHandle}`, which the MFA package seals before it reaches the factor store. `backupEligible` (BE) is fixed at registration and decides the `amr`; `backedUp` (BS) is the backup state the credential last reported, kept for the record and read by no decision. Its credentials live in the MFA factor store alone — never in the grant's `WebAuthnCredentialStore` — so a credential enrolled as a second factor, perhaps without user verification, never signs anyone in through the passwordless grant.
 
-**Registration**, which the MFA package's enrollment drives (not yet built there): the options ask for a credential under the subject's WebAuthn user handle — 32 random bytes made at its first WebAuthn enrollment and kept in each such factor's data, never an account name — named for the authenticator by the account's username, never its address (the provider keeps none, and a page shows none), exclude every WebAuthn credential the subject holds, ask for no attestation, offer `WEBAUTHN_ALGORITHM_IDS`, ask for the section's user verification and a resident key `discouraged`. The proof is the `RegistrationResponseJSON`; its attestation is verified, and a credential id the subject already holds is refused as a duplicate. A credential is only ever looked up among its own subject's factors, so one id held by two subjects is not refused.
+**Registration**, which the MFA package's enrollment drives (not yet built there): the options ask for a credential under the subject's WebAuthn user handle — 32 random bytes made at its first WebAuthn enrollment and kept in each such factor's data, never an account name — named for the authenticator by the account's username, never its address (the provider keeps none, and a page shows none), exclude every WebAuthn credential the subject holds, ask for no attestation, offer `WEBAUTHN_ALGORITHM_IDS`, ask for the section's user verification and a resident key `discouraged`. The proof is the `RegistrationResponseJSON`; its attestation is verified, its top origin is held to `webauthn.topOrigin` as an assertion's is ([Being framed](#being-framed-toporigin)), and a credential id the subject already holds is refused as a duplicate. A credential is only ever looked up among its own subject's factors, so one id held by two subjects is not refused.
 
 **`residentKey: "discouraged"` is advisory.** A synced platform passkey is discoverable whatever is asked. It may then appear in the browser's passkey picker for this relying party, where choosing it for the passwordless grant fails as an unknown credential: the grant reads its own credential store, which never holds a second factor. The failure is cosmetic; the credential still works as the second factor.
 
