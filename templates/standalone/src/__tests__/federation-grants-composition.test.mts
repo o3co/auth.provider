@@ -22,7 +22,8 @@
  * require, and that the refusals a wrong pairing earns come from the modules
  * themselves. The flows a connection needs are the package's own tests; a
  * connection here would need a live IdP, because the OIDC federation
- * discovers at boot.
+ * discovers at boot. It also pins what the consent answer accepts under the
+ * session module's own CSRF guard, the one the standalone composes.
  */
 
 import { fileURLToPath } from "node:url";
@@ -541,7 +542,7 @@ describe("the grants consent answer is held to the session module's CSRF guard",
 			.type("form")
 			.send({ challenge: "c", decision: "accept", ...body });
 
-	it("accepts the issuer's own Origin", async () => {
+	it("accepts an Origin that is the request's own, as the proxy forwards it", async () => {
 		const app = await bootTrustingSibling();
 		const res = await answer(app, { Origin: ISSUER_ORIGIN, "Sec-Fetch-Site": "same-origin" });
 		expect(res.status).toBe(401);

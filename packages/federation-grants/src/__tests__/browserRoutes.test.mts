@@ -853,7 +853,7 @@ describe("POST /session/federation-grants/consent — held to the deployment's c
 		expect((await w.answer({ challenge, decision: "accept" }, "b-1")).status).toBe(303);
 	};
 
-	it("accepts the page's answer: its Origin is the issuer's", async () => {
+	it("accepts the page's answer: its Origin is the request's own, as the proxy forwards it", async () => {
 		const { w, challenge } = await parked();
 		const response = await w.answer({ challenge, decision: "accept" }, "b-1");
 		expect(response.status).toBe(303);
@@ -1024,7 +1024,7 @@ describe("POST /session/federation-grants/consent — held to the deployment's c
 		expect((await w.answer({ challenge, decision: "accept" }, "b-1")).status).toBe(503);
 	});
 
-	it("accepts the issuer's Origin whatever Sec-Fetch-Site says, cross-site included", async () => {
+	it("accepts the request's own Origin, as the proxy forwards it, whatever Sec-Fetch-Site says, cross-site included", async () => {
 		const { w, challenge } = await parked();
 		const response = await w.answer({ challenge, decision: "accept" }, "b-1", {
 			Origin: ISSUER,
@@ -1069,6 +1069,25 @@ describe("POST /session/federation-grants/consent — held to the deployment's c
 			expect(await w.intents.getConsent(challenge, w.state.now)).not.toBeNull();
 		},
 	);
+
+	it("answers 500 when the guard's check throws, logged as an unexpected error, and spends nothing", async () => {
+		const { w, challenge } = await parked({
+			csrfGuard: Object.freeze({
+				...createTestCsrfGuard(),
+				check: () => {
+					throw new Error("injected: the guard threw");
+				},
+			}),
+		});
+		const response = await w.answer({ challenge, decision: "accept" }, "b-1");
+		expect(response.status).toBe(500);
+		expect(response.body).toEqual({ error: "server_error", error_description: "unexpected_error" });
+		expect(written(w.lines)).toEqual(["error federation_grants_unexpected_error"]);
+		expect(payloadOf(w.lines, "federation_grants_unexpected_error")).toMatchObject({
+			site: "consent",
+		});
+		expect(await w.intents.getConsent(challenge, w.state.now)).not.toBeNull();
+	});
 
 	it("logs a refused answer as one warn line with the guard's reason, the request's id and the Origin it named", async () => {
 		const { w, challenge } = await parked();
