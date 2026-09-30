@@ -88,9 +88,7 @@ describe("wellFormedAuthTime — the auth_time a token may carry", () => {
 
 describe("authTimeClaim — an authentication instant as auth_time", () => {
 	it("is the instant in whole seconds since the epoch, rounded down", () => {
-		expect(authTimeClaim(new Date("2026-04-21T00:00:00.999Z"))).toBe(
-			Date.UTC(2026, 3, 21) / 1000,
-		);
+		expect(authTimeClaim(new Date("2026-04-21T00:00:00.999Z"))).toBe(Date.UTC(2026, 3, 21) / 1000);
 	});
 
 	it.each([
