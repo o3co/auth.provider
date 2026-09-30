@@ -65,13 +65,11 @@ import {
 	type AuditSink,
 	admitSession,
 	type ClientRepository,
-	type CookieCarrier,
 	type CsrfGuard,
 	type CsrfVerdict,
 	checkCanonicalIssuer,
 	checkResolver,
 	checkWithFailMode,
-	cookieClaim,
 	coveredByRevocationBoundary,
 	createRateLimitPolicy,
 	describeAdmissionOutage,
@@ -107,6 +105,7 @@ import { federationGrantIdentityRegistration } from "./acquisitionSettings.mjs";
 import type { FederationGrantsAdmissionAction } from "./admissionActions.mjs";
 import { createFederationGrantAuditBridge, routeDeniedEvent } from "./audit.mjs";
 import type { FederationGrantBackground } from "./background.mjs";
+import { callbackParamsOf, claimOf, isPrefetch, sessionIdOf, single } from "./browserRequest.mjs";
 import { federationGrantConnectUri } from "./lodgeRoute.mjs";
 import { createFederationGrantLog, type LogFields } from "./log.mjs";
 import { createRequestIdMiddleware, requestIdOf } from "./requestId.mjs";
@@ -248,25 +247,6 @@ const plain = (res: Response, status: number, message: string): void => {
 /** The page's refusal, in `/oauth/consent`'s shape. */
 const jsonError = (res: Response, status: number, error: string, description: string): void => {
 	res.status(status).json({ error, error_description: description });
-};
-
-const single = (value: unknown): string | undefined =>
-	typeof value === "string" && value.length > 0 ? value : undefined;
-
-/** The express session's own id: one half of the browser binding, the durable `sid` the other. */
-const sessionIdOf = (req: Request): string | undefined =>
-	single((req as { sessionID?: unknown }).sessionID);
-
-/**
- * The cookie's claim, core's one reading of it (`cookieClaim`). `req.session`
- * is the session middleware's field, which this package does not type.
- */
-const claimOf = (req: Request): SessionClaim => cookieClaim(req as CookieCarrier);
-
-/** A browser prefetching a link has not asked for it: nothing is parked on its behalf. */
-const isPrefetch = (req: Request): boolean => {
-	const purpose = `${req.get("sec-purpose") ?? ""} ${req.get("purpose") ?? ""}`.toLowerCase();
-	return purpose.includes("prefetch") || purpose.includes("prerender");
 };
 
 // ---------------------------------------------------------------------------
@@ -1713,20 +1693,6 @@ function pinned(
 		federationGrantAuthorizationRevision(connection) === intent.authorizationRevision &&
 		connection.callbackUri === intent.callbackUri
 	);
-}
-
-/**
- * The rest of the callback's parameters, string values only, without `code`
- * and `state` — which the flow binds itself — exactly as `exchangeCode` takes
- * them, so an adapter forwards `iss` (RFC 9207) the one way it knows.
- */
-function callbackParamsOf(req: Request): Readonly<Record<string, string>> {
-	const params: Record<string, string> = {};
-	for (const [key, value] of Object.entries(req.query)) {
-		if (key === "code" || key === "state") continue;
-		if (typeof value === "string") params[key] = value;
-	}
-	return params;
 }
 
 function messageFor(reason: Exclude<Judgement, { ok: true }>["reason"]): string {
