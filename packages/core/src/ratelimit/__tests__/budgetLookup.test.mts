@@ -97,6 +97,26 @@ describe("createRateLimitBudgetLookup", () => {
 		expect(resolver.asked).toEqual(["mfa"]);
 	});
 
+	it.each([
+		["an empty object", {}],
+		["a NaN limit", { limit: Number.NaN, windowSeconds: 60 }],
+		["a zero window", { limit: 5, windowSeconds: 0 }],
+		["a string limit", { limit: "5", windowSeconds: 60 }],
+	])(
+		"throws for a key whose resolver answers %s, naming the caller and the prefix",
+		(_label, answered) => {
+			const lookup = createRateLimitBudgetLookup("createExampleLimiter", {
+				defaultLimit: DEFAULT,
+				budgets: {
+					get: () => answered as RateLimitSpec,
+					entries: () => new Map<string, RateLimitSpec>().entries(),
+				},
+			});
+			expect(() => lookup("mfa:ip:192.0.2.1")).toThrow(RangeError);
+			expect(() => lookup("mfa:ip:192.0.2.1")).toThrow(/^createExampleLimiter: .*"mfa"/);
+		},
+	);
+
 	it("takes the prefix up to the first colon, and a key with none whole", () => {
 		const lookup = createRateLimitBudgetLookup("test", {
 			limits: { plain: { limit: 3, windowSeconds: 30 } },
