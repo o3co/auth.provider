@@ -16,17 +16,21 @@
 import type { AppConfig, AuditSink, Logger } from "@o3co/auth-provider-core";
 import { pino, stdSerializers } from "pino";
 
+/** What the logger is built from: the `logging` module's section. */
+export type LoggingSettings = NonNullable<AppConfig["logging"]>;
+
 /**
  * The composition root's logger, and the value wired into the `logger` slot
- * every module reads: pino, newline-delimited JSON on stdout. `Logger` has
- * pino's two-overload call signature, so a pino instance satisfies it with no
- * adapter, and `silent` is pino's own name for "emit nothing", so the config
- * vocabulary maps across unchanged. See the template README, "Logging".
+ * every module reads: pino, newline-delimited JSON on stdout, at the
+ * `logging` section's level. `Logger` has pino's two-overload call signature, so a pino
+ * instance satisfies it with no adapter, and `silent` is pino's own name for
+ * "emit nothing", so the config vocabulary maps across unchanged. See the
+ * template README, "Logging".
  */
-export function createAppLogger(config: AppConfig): Logger {
+export function createAppLogger(logging: LoggingSettings): Logger {
 	return pino({
 		name: "provider",
-		level: config.logging.level,
+		level: logging.level,
 		// `err` is the key every structured event in this stack uses
 		// (`logger.error({ err: loggableError(err) }, "…_error")`). Core's
 		// projection is plain data with no `message`, so this serialiser hands it

@@ -17,14 +17,15 @@
 /**
  * Where the template's configuration comes from: the composition's own layers
  * (`{env}.conf` over `application.conf`), read once by `readOwnLayers` under
- * one snapshot of the environment, and the two phases built from that read,
- * `readSwitches` and `resolveForBoot` (template README, "Environment-specific
- * config overlay"). So a file or variable changed during startup cannot split
- * a switch phase one reads from the value boot's parse has, which matters
- * because adapter selections have no disagreement guard at boot;
- * `two-phase-config.test.mts` pins this for the shipped environments. A
- * loaded module's own schema may still make something else of a switch at
- * boot.
+ * one snapshot of the environment, and what is built from that read: the two
+ * phases, `readSwitches` and `resolveForBoot`, and the `logging` module's
+ * section the logger is built from, `readLogging` (template README,
+ * "Environment-specific config overlay"). So a file or variable changed
+ * during startup cannot split a switch phase one reads from the value boot's
+ * parse has, which matters because adapter selections have no disagreement
+ * guard at boot; `two-phase-config.test.mts` pins this for the shipped
+ * environments. A loaded module's own schema may still make something else of
+ * a switch at boot.
  */
 
 import path from "node:path";
@@ -37,6 +38,8 @@ import {
 	readTransitionalConfig,
 } from "@o3co/auth-provider-core";
 import { type Config, empty, parseFile } from "@o3co/ts.hocon";
+import type { LoggingSettings } from "./logger.mjs";
+import { LOGGING_SECTION, loggingModule } from "./modules.mjs";
 
 export interface ResolvedConfigPaths {
 	readonly applicationConfPath: string;
@@ -120,11 +123,11 @@ export function resolveLayers(own: OwnLayers, references: readonly URL[]): Recor
 
 /**
  * What the template reads before it knows its modules, through core's
- * reader: the switches `buildModules` and its module factories choose by,
- * the log level (`logger.mts`), and the configuration's
- * `sessionRequirements`, which `expectedSessionRequirements` reads. A module a
- * deployment adds that reads its configuration when it is built adds those
- * paths here, or passes them to `readSwitches` as `reads`.
+ * reader: the switches `buildModules` and its module factories choose by, and
+ * the configuration's `sessionRequirements`, which
+ * `expectedSessionRequirements` reads (the log level is `readLogging`'s). A
+ * module a deployment adds that reads its configuration when it is built adds
+ * those paths here, or passes them to `readSwitches` as `reads`.
  * `two-phase-config.test.mts` holds this list and `OWN_READS` to what the
  * template reads.
  *
@@ -142,7 +145,6 @@ export function resolveLayers(own: OwnLayers, references: readonly URL[]): Recor
  * `reference.conf` sets. Parse it in the module, or read it after boot.
  */
 export const SWITCHES: readonly string[] = [
-	"logging",
 	"sessionRequirements",
 	"federations",
 	"federationGrants.enabled",
@@ -229,6 +231,26 @@ export function readSwitches(own: OwnLayers, options: SwitchesOptions = {}): App
 		...SWITCHES,
 		...(options.reads ?? []),
 	]);
+}
+
+/**
+ * The `logging` module's section, read before boot for the logger: the own
+ * layers over the module's reference and core's, parsed with the module's
+ * schema. A refused value is a `RangeError` naming its path under `logging`.
+ */
+export function readLogging(own: OwnLayers): LoggingSettings {
+	const resolved = resolveLayers(own, moduleReferences([loggingModule]));
+	const result = LOGGING_SECTION.safeParse(resolved.logging);
+	if (!result.success) {
+		const issues = result.error.issues;
+		throw new RangeError(
+			`Config validation failed — ${issues.length} issue(s) found: ${issues
+				.map((issue) => `${["logging", ...issue.path.map(String)].join(".")}: ${issue.message}`)
+				.join("; ")}`,
+			{ cause: result.error },
+		);
+	}
+	return result.data;
 }
 
 /**

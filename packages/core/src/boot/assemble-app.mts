@@ -43,6 +43,7 @@ import type { ComponentKey } from "../modules/manifest/component-map.mjs";
 import { normalizeAllowedOrigins } from "../net/origin.mjs";
 import type { InternalReadinessRegistrar } from "../readiness/types.mjs";
 import { failureDetail } from "./failure-summary.mjs";
+import { httpSettingsCorsOrigins } from "./http-settings.mjs";
 import { compositionIssuer } from "./oauth-token-settings.mjs";
 import type {
 	AppHandle,
@@ -616,20 +617,26 @@ export function assembleApp(
 	//
 	// Mounted on an ALLOWLIST of paths, deliberately the opposite polarity to the
 	// sender-constraint mount below (core README, CORS). `corsMw` returns null
-	// for an empty `cors.allowedOrigins`: no CORS headers, not even `Vary`.
+	// for an empty origin list: no CORS headers, not even `Vary`.
+	// The origins: the `httpSettings` slot's when its key is present (whatever a
+	// provider answered), else the configuration's.
 	{
 		const components = frozen.components as Record<string, unknown>;
 		const config = components.config as
 			| { cors?: { allowedOrigins?: unknown }; oauth?: { jwt?: { jwksPath?: unknown } } }
 			| undefined;
-		const configured = config?.cors?.allowedOrigins;
+		const fromSlot = Object.hasOwn(components, "httpSettings");
+		const configured = fromSlot ? undefined : config?.cors?.allowedOrigins;
 		const logger = components.logger as Logger | undefined;
-		// Read through the shape normaliser the schema shares, rather than testing
-		// for an array, so the two cannot disagree: the documented
-		// `${?CORS_ALLOWED_ORIGINS}` is a comma-separated string (the only way an
-		// environment variable carries a list), and an `Array.isArray` test would
-		// skip the middleware for any config that reaches here unparsed.
-		const allowedOrigins = normalizeAllowedOrigins(configured);
+		// The configuration's list is read through the shape normaliser the
+		// schema shares, rather than tested for an array, so the two cannot
+		// disagree: the documented `${?CORS_ALLOWED_ORIGINS}` is a
+		// comma-separated string (the only way an environment variable carries
+		// a list), and an `Array.isArray` test would skip the middleware for any
+		// config that reaches here unparsed.
+		const allowedOrigins = fromSlot
+			? httpSettingsCorsOrigins(components.httpSettings)
+			: normalizeAllowedOrigins(configured);
 		if (allowedOrigins.length > 0) {
 			const mw = corsMw({
 				allowedOrigins,

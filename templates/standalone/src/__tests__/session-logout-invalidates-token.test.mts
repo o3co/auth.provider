@@ -58,8 +58,11 @@ const BASIC = `Basic ${Buffer.from(`${CLIENT_ID}:${CLIENT_SECRET}`).toString("ba
 const USERNAME = "alice";
 const PASSWORD = "correct-horse-battery-staple";
 
+/** The `http` module's section, as the hand-built configuration below carries it. */
+const HTTP = { port: 0, trustProxy: false, readinessTimeoutMs: 1000 };
+
 const config: AppConfig = {
-	http: { port: 0, trustProxy: false, readinessTimeoutMs: 1000 },
+	http: HTTP,
 	logging: { level: "silent" },
 	// The session requirements this composition expects, as the shipped
 	// `application.conf` does (ADR 2026-09-28-session-admission): none.
@@ -151,7 +154,7 @@ const testKeyStoreModule = defineModule({
 			registerBuiltinKeyStores(factory);
 			return factory.create({
 				type: "local",
-				...((c as AppConfig).oauth.jwt.signingKey.local ?? {}),
+				...((c as AppConfig).oauth.jwt.signingKey?.local ?? {}),
 			});
 		},
 	},
@@ -180,7 +183,7 @@ describe("POST /session/logout invalidates the session grant's access token", ()
 		app.use(
 			createReadinessRouter(express, {
 				probes: handle.readinessProbes,
-				timeoutMs: config.http.readinessTimeoutMs,
+				timeoutMs: HTTP.readinessTimeoutMs,
 			}),
 		);
 		app.use(handle.router);

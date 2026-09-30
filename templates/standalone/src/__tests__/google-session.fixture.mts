@@ -58,6 +58,7 @@ import request from "supertest";
 import { expect } from "vitest";
 import { buildModules } from "#/buildModules.mjs";
 import { resolveConfigPaths } from "#/configPath.mjs";
+import { templateReference } from "../modules.mjs";
 
 const configDir = fileURLToPath(new URL("../../config", import.meta.url));
 
@@ -124,6 +125,7 @@ function resolveConfig(google: GoogleWiring): AppConfig {
 	return validate(
 		parseFile(envConfPath, { env })
 			.withFallback(parseFile(applicationConfPath, { env }))
+			.withFallback(parseFile(fileURLToPath(templateReference()), { env }))
 			.withFallback(parseFile(fileURLToPath(coreReference()), { env })),
 		AppConfigSchema,
 	) as AppConfig;
@@ -168,7 +170,7 @@ const testKeyStoreModule = defineModule({
 			registerBuiltinKeyStores(factory);
 			return factory.create({
 				type: "local",
-				...((c as AppConfig).oauth.jwt.signingKey.local ?? {}),
+				...((c as AppConfig).oauth.jwt.signingKey?.local ?? {}),
 			});
 		},
 	},

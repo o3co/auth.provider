@@ -108,11 +108,7 @@ describe("standaloneRedisClientsModule: the shared connection refused by the ser
 		).provides;
 		try {
 			await provides.refreshTokenFamilyClient({
-				config: {
-					refreshTokenFamilyStore: {
-						redis: { url: `redis://127.0.0.1:${redis.port}`, password: STALE_PASSWORD },
-					},
-				},
+				section: { url: `redis://127.0.0.1:${redis.port}`, password: STALE_PASSWORD },
 				lifecycleRegistrar,
 				logger,
 			});
