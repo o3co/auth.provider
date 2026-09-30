@@ -59,8 +59,9 @@ const prefixOf = (key: string): string => {
  * A key's budget: the limiter's own `limits` entry for its prefix, else the
  * contributed budget, else `defaultLimit` (never no limit). `limits` and
  * `defaultLimit` are refused, naming `who`, unless usable as written, and held
- * as checked; a contributed budget that is not usable throws at its lookup, so
- * the check is an outage, never an unlimited key.
+ * as checked, frozen, so no spec a lookup hands out can be changed; a
+ * contributed budget that is not usable throws at its lookup, so the check is
+ * an outage, never an unlimited key.
  */
 export function createRateLimitBudgetLookup(
 	who: string,
@@ -70,7 +71,7 @@ export function createRateLimitBudgetLookup(
 	const limits: Readonly<Record<string, RateLimitSpec>> = Object.fromEntries(
 		Object.entries(options.limits ?? {}).map(([prefix, spec]) => [
 			prefix,
-			{ limit: spec.limit, windowSeconds: spec.windowSeconds },
+			Object.freeze({ limit: spec.limit, windowSeconds: spec.windowSeconds }),
 		]),
 	);
 	const defaultLimit: RateLimitSpec = Object.freeze({
