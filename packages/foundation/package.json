@@ -13,10 +13,12 @@
 		".": {
 			"import": "./dist/index.mjs",
 			"types": "./dist/index.d.mts"
-		}
+		},
+		"./reference.conf": "./config/reference.conf"
 	},
 	"files": [
 		"dist",
+		"config",
 		"README.md"
 	],
 	"repository": {
@@ -35,6 +37,9 @@
 			"development": "./src/*",
 			"default": "./dist/*"
 		}
+	},
+	"dependencies": {
+		"zod": "^4.6.5"
 	},
 	"peerDependencies": {
 		"@o3co/auth-provider-core": "workspace:^"

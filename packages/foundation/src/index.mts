@@ -85,6 +85,13 @@ export const registerBuiltinAdapters = (factories: {
 };
 
 export {
+	FOUNDATION_MFA_FACTOR_STORE_SECTION,
+	type FoundationMfaFactorStoreSection,
+	type FoundationMfaFactorStoreUrls,
+	foundationMfaFactorStoreSection,
+	readFoundationMfaFactorStoreUrls,
+} from "./mfa/section.mjs";
+export {
 	MfaStoreError,
 	type MfaStoreFailure,
 	type MfaStoreOperation,
