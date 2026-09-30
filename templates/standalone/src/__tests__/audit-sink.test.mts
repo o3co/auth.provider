@@ -56,8 +56,9 @@ const baseConfig: AppConfig = {
 	http: { port: 0, trustProxy: false, readinessTimeoutMs: 1000 },
 	logging: { level: "silent" },
 	// The parsed config always carries `mfa` (ADR
-	// 2026-09-25-multi-factor-authentication) and, as `app.mts` derives from
-	// it, the posture on session admission (ADR 2026-09-28-session-admission).
+	// 2026-09-25-multi-factor-authentication), and the shipped
+	// `application.conf` expects no session requirement (ADR
+	// 2026-09-28-session-admission).
 	mfa: { mode: "off" },
 	sessionRequirements: { expected: [] },
 	oauth: {

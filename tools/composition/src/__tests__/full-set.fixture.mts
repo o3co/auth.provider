@@ -168,14 +168,18 @@ function withFeatures(config: AppConfig, features: Features): AppConfig {
 	};
 	return {
 		...config,
-		// A deployment that installs MFA declares it — as the template derives
-		// it from a mode other than `off` — and one that adds requirements of
-		// its own declares them beside it.
+		// A deployment that installs MFA declares it — as the template does
+		// from a mode other than `off` — and one that adds requirements of its
+		// own declares them beside it, over the template's `[]`. Applied to
+		// phase one's switches and again to the configuration as resolved, so
+		// each name is kept once.
 		sessionRequirements: {
 			expected: [
-				...(c.sessionRequirements?.expected ?? []),
-				...(features.mfa ? ["mfa"] : []),
-				...FIXTURE_REQUIREMENTS,
+				...new Set([
+					...(c.sessionRequirements?.expected ?? []),
+					...(features.mfa ? ["mfa"] : []),
+					...FIXTURE_REQUIREMENTS,
+				]),
 			],
 		},
 		// The MFA package on, as a deployment turns it on: `optional` — users

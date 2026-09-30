@@ -1168,9 +1168,9 @@ export interface SessionRequirementKindGuardedDetails {
 }
 
 /**
- * A consumer of session admission is installed and `sessionRequirements.expected`
- * is not the set of registered requirements: absent, or unequal in either
- * direction. See ADR 2026-09-28-session-admission.
+ * `sessionRequirements.expected` is written and leaves out a registered
+ * requirement, or is not written while a consumer of session admission is
+ * installed. See ADR 2026-09-28-session-admission.
  */
 export interface SessionRequirementsUndeclaredDetails {
 	readonly reason: "session-requirements-undeclared";
@@ -1179,7 +1179,7 @@ export interface SessionRequirementsUndeclaredDetails {
 	readonly declared: readonly string[] | undefined;
 	/** What registered, in registration order. */
 	readonly registered: readonly string[];
-	/** The modules that require or read `sessionRequirementResolver`. */
+	/** The modules that require or read `sessionRequirementResolver`; none when the key is written and nothing consults admission. */
 	readonly consumedBy: readonly string[];
 	readonly cleanupErrors?: readonly {
 		readonly module: string;
@@ -1189,15 +1189,20 @@ export interface SessionRequirementsUndeclaredDetails {
 }
 
 /**
- * `mfa.mode` is not `off` while no requirement named `mfa` is registered:
- * refused rather than left believing logins ask for a second factor. See ADR
+ * `sessionRequirements.expected` names a requirement no installed module
+ * registers: refused, whether or not anything consults session admission,
+ * rather than left believing the requirement is in force. See ADR
  * 2026-09-28-session-admission.
  */
 export interface SessionRequirementMissingDetails {
 	readonly reason: "session-requirement-missing";
-	readonly configKey: "mfa.mode";
-	readonly mode: string;
-	readonly requirement: "mfa";
+	readonly configKey: "sessionRequirements.expected";
+	/** The declared names nothing registers, in declaration order. */
+	readonly missing: readonly string[];
+	/** What the configuration declares. */
+	readonly declared: readonly string[];
+	/** What registered, in registration order. */
+	readonly registered: readonly string[];
 	readonly cleanupErrors?: readonly {
 		readonly module: string;
 		readonly componentKey: ComponentKey;

@@ -90,7 +90,7 @@ describe("three-tier HOCON resolution (env → application.conf → reference.co
 
 	it("reference.conf default for mfa.mode is 'off', and the template installs no MFA module", () => {
 		// Core's reference default (ADR 2026-09-25-multi-factor-authentication);
-		// under `off` the template composes no MFA module.
+		// the template composes no MFA module under any mode.
 		const config = buildResolvedConfig("development");
 		expect(config.mfa?.mode).toBe("off");
 		expect(

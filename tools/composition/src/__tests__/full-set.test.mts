@@ -443,7 +443,7 @@ describe("the session requirements: the MFA package's, and the two a deployment 
 		);
 	});
 
-	it("are declared: the composition's sessionRequirements.expected names exactly them — mfa, as the template derives it from mfa.mode, and the deployment's own", async () => {
+	it("are declared: the composition's sessionRequirements.expected names exactly them — mfa, as a deployment that installs the MFA package declares it, and the deployment's own", async () => {
 		const { config } = await boot();
 		expect([...(config.sessionRequirements?.expected ?? [])].sort()).toEqual(
 			[...REGISTERED].sort(),
@@ -463,15 +463,17 @@ describe("the session requirements: the MFA package's, and the two a deployment 
 		});
 	});
 
-	it("refuse the boot when a name is declared that nothing registers", async () => {
+	it("refuse the boot when a name is declared that nothing registers: session-requirement-missing, naming it", async () => {
 		const err = await refused({
 			adjust: (config) => ({
 				...config,
 				sessionRequirements: { expected: [...REGISTERED, "risk"] },
 			}),
 		});
-		expect(err.reason).toBe("session-requirements-undeclared");
+		expect(err.reason).toBe("session-requirement-missing");
 		expect(err.details).toMatchObject({
+			configKey: "sessionRequirements.expected",
+			missing: ["risk"],
 			declared: [...REGISTERED, "risk"],
 			registered: expect.arrayContaining(REGISTERED),
 		});
@@ -485,16 +487,32 @@ describe("the session requirements: the MFA package's, and the two a deployment 
 		expect(err.details).toMatchObject({ module: "mfa", kind: "sessionRequirements" });
 	});
 
-	it("refuse the boot under mfa.mode other than off while no requirement named mfa is registered, before the declaration is compared", async () => {
+	it("refuse the boot when mfa is declared and the MFA package is not installed: session-requirement-missing, naming the key and mfa", async () => {
+		const err = await refused({
+			features: { mfa: false },
+			adjust: (config) => ({
+				...config,
+				sessionRequirements: { expected: [...(config.sessionRequirements?.expected ?? []), "mfa"] },
+			}),
+		});
+		expect(err.reason).toBe("session-requirement-missing");
+		expect(err.details).toMatchObject({
+			configKey: "sessionRequirements.expected",
+			missing: ["mfa"],
+			registered: [...FIXTURE_REQUIREMENTS],
+		});
+	});
+
+	it("refuse the boot under mfa.mode = required without the MFA package: the template declares mfa from the mode, and nothing registers it", async () => {
 		const err = await refused({
 			features: { mfa: false },
 			adjust: (config) => ({ ...config, mfa: { ...config.mfa, mode: "required" } }),
 		});
 		expect(err.reason).toBe("session-requirement-missing");
 		expect(err.details).toMatchObject({
-			configKey: "mfa.mode",
-			mode: "required",
-			requirement: "mfa",
+			configKey: "sessionRequirements.expected",
+			missing: ["mfa"],
+			registered: [...FIXTURE_REQUIREMENTS],
 		});
 	});
 });

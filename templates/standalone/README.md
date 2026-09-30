@@ -284,13 +284,15 @@ It reads the two files above once, under one snapshot of the environment
 variable changed, while the process starts cannot make boot parse something
 other than what the modules were chosen by. First, before it knows its
 modules, it reads the switches `buildModules` chooses them by — the adapters,
-the federations, the log level, `mfa.mode` — from the two files above over
-core's `reference.conf` alone (`readSwitches`, with core's transitional
+the federations, the log level — and what it derives the session requirements
+it expects from (`sessionRequirements`, `mfa.mode`) from the two files above
+over core's `reference.conf` alone (`readSwitches`, with core's transitional
 reader), parsing those paths (`SWITCHES`) and nothing else. It sees nothing
 a package's `reference.conf` alone sets — none is layered yet — and a module
 you add to `buildModules` that reads its configuration when it is built adds
 the paths it reads to `SWITCHES`. Then it hands `createApp` the configuration as resolved over every
-loaded module's `reference.conf` (`resolveForBoot`), unparsed: boot parses it
+loaded module's `reference.conf` (`resolveForBoot`), unparsed, with the session
+requirements phase one derived written in: boot parses it
 once, with every loaded module's schema, and strips no module's section. What
 the template reads after boot — `http.trustProxy`, the port, the readiness
 timeout — it reads from the parsed configuration. A top-level section no
@@ -992,6 +994,8 @@ To add a custom module, import it in `src/buildModules.mts` and add it to the ar
 ```
 
 Keep the other rules there too: the session store module stays first, and a module that fills a store slot replaces that slot's adapter switch rather than being added beside it. [`src/app.mts`](src/app.mts) needs no change: it passes `buildModules(config, …)` to `createApp`, mounts the router `createApp` returns, and wires the server's lifetime — `installGracefulShutdown` (below) drains it and calls `handle.dispose()`.
+
+A module that contributes a session requirement — the MFA package's `mfa`, or one of your own — changes what "logged in" means, so its name goes in `sessionRequirements.expected`, which `config/application.conf` ships as `[]`: the template installs none. Boot compares the list with what the modules register. A name listed that nothing registers refuses the boot (`session-requirement-missing`), and so does a registered requirement the list leaves out (`session-requirements-undeclared`). When `mfa.mode` (`MFA_MODE`) is not `off`, the template adds `mfa` to the list (`expectedSessionRequirements`, [`src/configPath.mts`](src/configPath.mts)), keeping the names you wrote. It installs no MFA module, so such a mode refuses the boot (`session-requirement-missing`) rather than let logins through on a password alone.
 
 ### Shutdown guarantees
 

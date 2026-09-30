@@ -27,6 +27,7 @@ import {
 	defineModule,
 	type FederationProvider,
 	type FederationTokenStore,
+	type GrantHandler,
 	jwksModule,
 	type Module,
 	memoryAccessTokenDenylistModule,
@@ -108,6 +109,23 @@ const keyStoreModule = defineModule({
 	name: "test:key-store",
 	provides: {
 		keyStore: () => createSymmetricKeyStore("test-secret-for-oauth-module!!!!!"),
+	},
+});
+
+/**
+ * A stand-in authorization_code grant: what makes `oauthModule` serve
+ * `/authorize` and name it in discovery. Never dispatched to.
+ */
+const authorizationCodeGrantModule = defineModule({
+	name: "test:authorization-code-grant",
+	contributes: {
+		grants: {
+			authorization_code: (): GrantHandler => ({
+				handle: async () => {
+					throw new Error("the stand-in grant is never dispatched to");
+				},
+			}),
+		},
 	},
 });
 
@@ -464,6 +482,7 @@ describe("oauthModule — the acr table in the served discovery document", () =>
 				jwksModule,
 				clientRepositoryModule,
 				codeRepositoryModule,
+				authorizationCodeGrantModule,
 				asymmetricKeyStoreModule,
 				...extraModules,
 			],
@@ -610,7 +629,9 @@ describe("oauthModule + jwksModule — discovery/JWKS path agreement", () => {
 		// `grant_types_supported` is `[]` because this composition registers no
 		// grant module: POST /oauth/token answers `unsupported_grant_type` for
 		// every value. Omitting the field would claim `authorization_code` +
-		// `implicit` (RFC 8414 §2's default).
+		// `implicit` (RFC 8414 §2's default). With no authorization_code grant
+		// there is no authorization endpoint: none is named, no response type
+		// is listed, and nothing a client sends to it is advertised.
 		const config = issuerConfig();
 		const handle = await createTestApp({
 			modules: [
@@ -631,7 +652,6 @@ describe("oauthModule + jwksModule — discovery/JWKS path agreement", () => {
 		const iss = "https://auth.example.com";
 		expect(body).toEqual({
 			issuer: iss,
-			authorization_endpoint: `${iss}/oauth/authorize`,
 			token_endpoint: `${iss}/oauth/token`,
 			userinfo_endpoint: `${iss}/oauth/userinfo`,
 			jwks_uri: `${iss}/.well-known/jwks.json`,
@@ -639,12 +659,7 @@ describe("oauthModule + jwksModule — discovery/JWKS path agreement", () => {
 			// /oauth/revoke is always mounted, and this composition wires the
 			// memory denylist, so it can actually revoke something.
 			revocation_endpoint: `${iss}/oauth/revoke`,
-			response_types_supported: ["code"],
-			// Emitted BECAUSE its OIDC Discovery default is `true`: an omitted
-			// field would claim support for `request_uri`, which `/authorize`
-			// refuses. The sibling `*_parameter_supported` fields
-			// default to `false` and stay absent.
-			request_uri_parameter_supported: false,
+			response_types_supported: [],
 			subject_types_supported: ["public"],
 			// keyStoreModule signs HS256, so the aggregator advertises exactly that.
 			id_token_signing_alg_values_supported: ["HS256"],
@@ -661,7 +676,6 @@ describe("oauthModule + jwksModule — discovery/JWKS path agreement", () => {
 				"client_secret_post",
 				"none",
 			],
-			code_challenge_methods_supported: ["S256"],
 		});
 		await handle.dispose();
 	});
@@ -1188,6 +1202,7 @@ describe("oauthModule — the login trip is the loginEntry slot when a module pr
 				jwksModule,
 				clientsWithOne,
 				codeRepositoryModule,
+				authorizationCodeGrantModule,
 				keyStoreModule,
 				...modules,
 			],
@@ -1238,5 +1253,146 @@ describe("oauthModule — a consumer of session admission", () => {
 		const module = oauthModule({ config: makeValidAppConfig() as never });
 		expect(module.requires).toContain("sessionRequirementResolver");
 		expect(module.requires).toContain("grantHandlerResolver");
+	});
+});
+
+describe("oauthModule — a composition with no authorization_code grant", () => {
+	/**
+	 * Tokens for machines only: client_credentials, no code repository, no
+	 * session package. The issuer is set, so core serves the discovery
+	 * document.
+	 */
+	const headlessConfig = (authorizationCode: boolean) => {
+		const base = makeValidAppConfig();
+		return {
+			...base,
+			oauth: {
+				...base.oauth,
+				jwt: { ...base.oauth.jwt, issuer: "https://auth.example.com" },
+				grants: {
+					...base.oauth.grants,
+					authorization_code: { enabled: authorizationCode },
+					refresh_token: { enabled: false },
+					client_credentials: { enabled: true },
+				},
+			},
+		} as ReturnType<typeof makeValidAppConfig>;
+	};
+	const boot = (authorizationCode: boolean, extra: readonly Module[] = []) => {
+		const config = headlessConfig(authorizationCode);
+		return createTestApp({
+			modules: [
+				oauthModule({ config }),
+				oauthAuthorizationModule({ config }),
+				memoryAccessTokenDenylistModule,
+				jwksModule,
+				clientRepositoryModule,
+				keyStoreModule,
+				...extra,
+			],
+			bootstrapComponents: { config, pathResolver: (s) => s },
+		});
+	};
+
+	it("boots with no code repository, and answers /oauth/authorize 404 on GET and POST", async () => {
+		const handle = await boot(false);
+		const app = express();
+		app.use(handle.router);
+
+		expect((await request(app).get("/oauth/authorize")).status).toBe(404);
+		expect((await request(app).post("/oauth/authorize")).status).toBe(404);
+		await handle.dispose();
+	});
+
+	it.each(["/.well-known/openid-configuration", "/.well-known/oauth-authorization-server"])(
+		"serves %s naming no authorization endpoint and no response type",
+		async (path) => {
+			const handle = await boot(false);
+			const app = express();
+			app.use(handle.router);
+
+			const { status, body } = await request(app).get(path);
+			expect(status).toBe(200);
+			expect(body).not.toHaveProperty("authorization_endpoint");
+			expect(body.response_types_supported).toEqual([]);
+			expect(body.grant_types_supported).toEqual(["client_credentials"]);
+			expect(body.token_endpoint).toBe("https://auth.example.com/oauth/token");
+			expect(body).not.toHaveProperty("code_challenge_methods_supported");
+			expect(body).not.toHaveProperty("request_uri_parameter_supported");
+			await handle.dispose();
+		},
+	);
+
+	it("with an acr table configured, advertises none and says nothing of it at boot", async () => {
+		const base = headlessConfig(false);
+		const config = {
+			...base,
+			oauth: {
+				...base.oauth,
+				authorize: { acrValues: { "urn:example:pwd": ["pwd"], "urn:example:mfa": ["pwd", "mfa"] } },
+			},
+		} as ReturnType<typeof makeValidAppConfig>;
+		const logger = createMockLogger();
+		const handle = await createTestApp({
+			modules: [
+				oauthModule({ config }),
+				oauthAuthorizationModule({ config }),
+				memoryAccessTokenDenylistModule,
+				jwksModule,
+				clientRepositoryModule,
+				keyStoreModule,
+			],
+			bootstrapComponents: { config, pathResolver: (s) => s, logger },
+		});
+		const app = express();
+		app.use(handle.router);
+		const { body } = await request(app).get("/.well-known/openid-configuration");
+		await handle.dispose();
+
+		expect(body).not.toHaveProperty("acr_values_supported");
+		const acrLines = [logger.info, logger.warn].flatMap((level) =>
+			level.mock.calls.filter((call) => call[1] === "acr_value_unsatisfiable"),
+		);
+		expect(acrLines).toEqual([]);
+	});
+
+	it("refuses to boot a grant registered with no code repository, from the router", async () => {
+		const config = headlessConfig(false);
+		const refusal = await createTestApp({
+			modules: [
+				oauthModule({ config }),
+				authorizationCodeGrantModule,
+				memoryAccessTokenDenylistModule,
+				jwksModule,
+				clientRepositoryModule,
+				keyStoreModule,
+			],
+			bootstrapComponents: { config, pathResolver: (s) => s },
+		}).then(
+			async (handle) => {
+				await handle.dispose();
+				return undefined;
+			},
+			(err: unknown) => err as { reason?: unknown; cause?: { message?: unknown } },
+		);
+		expect(refusal, "boot must be refused").toMatchObject({
+			name: "BootError",
+			reason: "contribute-factory-failed",
+		});
+		expect(String(refusal?.cause?.message)).toMatch(
+			/authorization_code grant is registered but no codeRepository is wired/,
+		);
+	});
+
+	it("with the grant and a code repository, serves /oauth/authorize and names it", async () => {
+		const handle = await boot(true, [codeRepositoryModule]);
+		const app = express();
+		app.use(handle.router);
+
+		expect((await request(app).get("/oauth/authorize")).status).not.toBe(404);
+		const { body } = await request(app).get("/.well-known/openid-configuration");
+		expect(body.authorization_endpoint).toBe("https://auth.example.com/oauth/authorize");
+		expect(body.response_types_supported).toEqual(["code"]);
+		await handle.dispose();
 	});
 });

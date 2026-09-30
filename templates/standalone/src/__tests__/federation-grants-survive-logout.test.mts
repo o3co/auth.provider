@@ -55,7 +55,7 @@ import { validate } from "@o3co/ts.hocon/zod";
 import express from "express";
 import request from "supertest";
 import { afterEach, describe, expect, it } from "vitest";
-import { buildModules, withSessionRequirements } from "../buildModules.mjs";
+import { buildModules } from "../buildModules.mjs";
 import { resolveConfigPaths } from "../configPath.mjs";
 
 const DAY = 86_400_000;
@@ -115,13 +115,11 @@ const ENV: Readonly<Record<string, string>> = {
  */
 function resolveConfig(): AppConfig {
 	const { applicationConfPath, envConfPath } = resolveConfigPaths(configDir, "production");
-	const config = withSessionRequirements(
-		validate(
-			parseFile(envConfPath, { env: ENV })
-				.withFallback(parseFile(applicationConfPath, { env: ENV }))
-				.withFallback(parseFile(fileURLToPath(coreReference()), { env: ENV })),
-			AppConfigSchema,
-		),
+	const config = validate(
+		parseFile(envConfPath, { env: ENV })
+			.withFallback(parseFile(applicationConfPath, { env: ENV }))
+			.withFallback(parseFile(fileURLToPath(coreReference()), { env: ENV })),
+		AppConfigSchema,
 	);
 	return {
 		...config,

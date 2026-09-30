@@ -514,7 +514,9 @@ describe("the two declaration refusals run the cleanups, and carry what a cleanu
 
 	it("session-requirements-undeclared carries cleanupErrors", async () => {
 		const err = await refusal(
-			boot([closing, consumer({})], { sessionRequirements: { expected: ["ghost"] } }),
+			boot([closing, contributing("test:first", { a: () => requirement("a") }), consumer({})], {
+				sessionRequirements: { expected: [] },
+			}),
 		);
 		expect(err.reason).toBe("session-requirements-undeclared");
 		expect(err.details).toMatchObject({
@@ -523,7 +525,7 @@ describe("the two declaration refusals run the cleanups, and carry what a cleanu
 	});
 
 	it("session-requirement-missing carries cleanupErrors", async () => {
-		const err = await refusal(boot([closing], { mfa: { mode: "required" } }));
+		const err = await refusal(boot([closing], { sessionRequirements: { expected: ["ghost"] } }));
 		expect(err.reason).toBe("session-requirement-missing");
 		expect(err.details).toMatchObject({
 			cleanupErrors: [{ module: "test:closing", componentKey: "closingSlot" }],
@@ -578,7 +580,7 @@ describe("a factor's values are read once, at registration, and the reach is rec
 		mfaModule({ reach: new Set(reach) } as Partial<SessionRequirement>);
 	const factorModule = (value: () => unknown) =>
 		defineModule({ name: "test:factors", contributes: { mfaFactors: { totp: value as never } } });
-	const expected = { sessionRequirements: { expected: ["mfa"] }, mfa: { mode: "required" } };
+	const expected = { sessionRequirements: { expected: ["mfa"] } };
 
 	it("a getter that answers a valid list at registration and another afterwards: the recomputation reads what was validated", async () => {
 		const shifting = (later: readonly string[]) => {
@@ -695,21 +697,11 @@ describe("what could throw raw at the end of stage 4 fails as a BootError", () =
 			},
 		});
 		const err = await refusal(
-			boot([flaky, ...stores, mfaModule()], {
-				sessionRequirements: { expected: ["mfa"] },
-				mfa: { mode: "required" },
-			}),
+			boot([flaky, ...stores, mfaModule()], { sessionRequirements: { expected: ["mfa"] } }),
 		);
 		expect(err).toBeInstanceOf(BootError);
 		expect(err.reason).toBe("contribute-factory-failed");
 		expect(err.details).toMatchObject({ kind: "sessionRequirements", name: "mfa" });
-	});
-
-	it("an mfa.mode that readMfaMode refuses fails as config-validation-failed at mfa.mode, not as a raw RangeError", async () => {
-		const err = await refusal(boot([], { mfa: { mode: 7 } }));
-		expect(err).toBeInstanceOf(BootError);
-		expect(err.reason).toBe("config-validation-failed");
-		expect(err.details).toMatchObject({ issues: [{ path: ["mfa", "mode"] }] });
 	});
 });
 
@@ -903,20 +895,97 @@ describe("the declaration: sessionRequirements.expected", () => {
 		}
 	});
 
-	it("must equal what is registered, in either direction", async () => {
-		const seen = {};
-		const declaredNotRegistered = await refusal(
-			boot([consumer(seen)], { sessionRequirements: { expected: ["a"] } }),
+	it.each([
+		["without a consumer", () => []],
+		["with a consumer", () => [consumer({})]],
+	] as const)(
+		"refuses a name it expects that nothing registers, %s: session-requirement-missing, naming the key, the missing name, what is declared and what is registered",
+		async (_label, modules) => {
+			const err = await refusal(
+				boot([...modules()], { sessionRequirements: { expected: ["ghost"] } }),
+			);
+			expect(err.reason).toBe("session-requirement-missing");
+			expect(err.stage).toBe("applyContributions");
+			expect(err.details).toEqual({
+				reason: "session-requirement-missing",
+				configKey: "sessionRequirements.expected",
+				missing: ["ghost"],
+				declared: ["ghost"],
+				registered: [],
+			});
+			expect(err.message).toMatch(/sessionRequirements\.expected/);
+			expect(err.message).toMatch(/ghost/);
+		},
+	);
+
+	it("names as missing only the expected names nothing registers, in the order they are declared, and says those alone, quoted", async () => {
+		const err = await refusal(
+			boot([contributing("test:first", { a: () => requirement("a") }), consumer({})], {
+				sessionRequirements: { expected: ["mfa", "a", "ghost"] },
+			}),
 		);
-		expect(declaredNotRegistered.reason).toBe("session-requirements-undeclared");
-		expect(declaredNotRegistered.details).toMatchObject({ declared: ["a"], registered: [] });
-		const registeredNotDeclared = await refusal(
-			boot([contributing("test:first", { a: () => requirement("a") }), consumer(seen)], {
+		expect(err.reason).toBe("session-requirement-missing");
+		expect(err.details).toMatchObject({
+			missing: ["mfa", "ghost"],
+			declared: ["mfa", "a", "ghost"],
+			registered: ["a"],
+		});
+		expect(err.message).toContain('sessionRequirements.expected names ["mfa", "ghost"], which');
+	});
+
+	it("names a name declared twice once among the missing", async () => {
+		const err = await refusal(boot([], { sessionRequirements: { expected: ["ghost", "ghost"] } }));
+		expect(err.details).toMatchObject({ missing: ["ghost"], declared: ["ghost", "ghost"] });
+	});
+
+	it("quotes each name it says, so a name with a space in it reads as written", async () => {
+		const err = await refusal(boot([], { sessionRequirements: { expected: ["mfa "] } }));
+		expect(err.reason).toBe("session-requirement-missing");
+		expect(err.details).toMatchObject({ missing: ["mfa "] });
+		expect(err.message).toContain('["mfa "]');
+	});
+
+	it("lists what registered in registration order", async () => {
+		const err = await refusal(
+			boot(
+				[
+					contributing("test:second", { b: () => requirement("b") }),
+					contributing("test:first", { a: () => requirement("a") }),
+				],
+				{ sessionRequirements: { expected: ["b", "a", "ghost"] } },
+			),
+		);
+		expect(err.details).toMatchObject({ missing: ["ghost"], registered: ["b", "a"] });
+	});
+
+	it("is checked for a missing name before a registered one it leaves out: a composition that expects a requirement it did not install is told to install it", async () => {
+		const err = await refusal(
+			boot([contributing("test:first", { a: () => requirement("a") }), consumer({})], {
+				sessionRequirements: { expected: ["mfa"] },
+			}),
+		);
+		expect(err.reason).toBe("session-requirement-missing");
+		expect(err.details).toMatchObject({ missing: ["mfa"], registered: ["a"] });
+	});
+
+	it("refuses a registered requirement it does not name while a consumer is installed: session-requirements-undeclared", async () => {
+		const err = await refusal(
+			boot([contributing("test:first", { a: () => requirement("a") }), consumer({})], {
 				sessionRequirements: { expected: [] },
 			}),
 		);
-		expect(registeredNotDeclared.reason).toBe("session-requirements-undeclared");
-		expect(registeredNotDeclared.details).toMatchObject({ declared: [], registered: ["a"] });
+		expect(err.reason).toBe("session-requirements-undeclared");
+		expect(err.details).toEqual({
+			reason: "session-requirements-undeclared",
+			configKey: "sessionRequirements.expected",
+			declared: [],
+			registered: ["a"],
+			consumedBy: ["test:consumer"],
+		});
+	});
+
+	it("boots when it names exactly what registered, nothing included", async () => {
+		const seen = {};
 		const equal = await boot(
 			[contributing("test:first", { a: () => requirement("a") }), consumer(seen)],
 			{ sessionRequirements: { expected: ["a"] } },
@@ -924,6 +993,23 @@ describe("the declaration: sessionRequirements.expected", () => {
 		await equal.dispose();
 		const none = await boot([consumer(seen)], { sessionRequirements: { expected: [] } });
 		await none.dispose();
+	});
+
+	it("refuses a registered requirement it does not name when no consumer is installed too: once written, the key is compared both ways", async () => {
+		const err = await refusal(
+			boot([contributing("test:first", { a: () => requirement("a") })], {
+				sessionRequirements: { expected: [] },
+			}),
+		);
+		expect(err.reason).toBe("session-requirements-undeclared");
+		expect(err.details).toEqual({
+			reason: "session-requirements-undeclared",
+			configKey: "sessionRequirements.expected",
+			declared: [],
+			registered: ["a"],
+			consumedBy: [],
+		});
+		expect(err.message).toContain('["a"]');
 	});
 
 	it("is not required without a consumer: a composition that installs none boots without the key, registered requirements or not", async () => {
@@ -936,37 +1022,31 @@ describe("the declaration: sessionRequirements.expected", () => {
 	});
 });
 
-describe("mfa.mode asks for a requirement that is not installed", () => {
+describe("boot's checks do not act on mfa.mode", () => {
 	it.each(["required", "optional"] as const)(
-		"refuses mfa.mode = %s with no requirement named mfa: session-requirement-missing",
+		"boots under mfa.mode = %s with no requirement named mfa and no declaration, when nothing consults admission",
 		async (mode) => {
-			const err = await refusal(boot([], { mfa: { mode } }));
-			expect(err.reason).toBe("session-requirement-missing");
-			expect(err.stage).toBe("applyContributions");
-			expect(err.details).toEqual({
-				reason: "session-requirement-missing",
-				configKey: "mfa.mode",
-				mode,
-				requirement: "mfa",
+			const { sessionRequirements: _none, ...undeclared } = config({
+				mfa: { mode },
+			}) as Record<string, unknown>;
+			const handle = await createApp({
+				modules: [],
+				bootstrapComponents: { config: undeclared, pathResolver: (p: string) => p } as never,
 			});
-			expect(err.message).toMatch(/mfa\.mode = "off"/);
+			await handle.dispose();
 		},
 	);
 
-	it("boots under mfa.mode = off with no requirement", async () => {
-		const handle = await boot([], { mfa: { mode: "off" } });
-		await handle.dispose();
-	});
-
-	it("is checked before the declaration: a composition that asks for MFA without the module is told to install it, not to fix the list", async () => {
-		const err = await refusal(
-			boot([consumer({})], {
-				mfa: { mode: "required" },
-				sessionRequirements: { expected: ["mfa"] },
-			}),
-		);
-		expect(err.reason).toBe("session-requirement-missing");
-	});
+	it.each(["required", "optional"] as const)(
+		"boots under mfa.mode = %s with no requirement named mfa beside a consumer, when the declaration expects none",
+		async (mode) => {
+			const handle = await boot([consumer({})], {
+				mfa: { mode },
+				sessionRequirements: { expected: [] },
+			});
+			await handle.dispose();
+		},
+	);
 });
 
 describe("the name mfa is reserved, and bound to core's MFA ports", () => {
@@ -975,7 +1055,7 @@ describe("the name mfa is reserved, and bound to core's MFA ports", () => {
 		name: "test:factors",
 		contributes: { mfaFactors: { totp: () => totp } },
 	});
-	const expected = { sessionRequirements: { expected: ["mfa"] }, mfa: { mode: "required" } };
+	const expected = { sessionRequirements: { expected: ["mfa"] } };
 
 	it("accepts an MFA implementation: the ports required, the reach the factors' union with mfa, mfa.step_up declared", async () => {
 		const seen: { resolver?: SessionRequirementResolver } = {};
@@ -1108,7 +1188,6 @@ describe("stage 4: the reach without mfa, a refusal's cleanups, every consumer n
 		const seen: { resolver?: SessionRequirementResolver } = {};
 		const handle = await boot([plain, ...stores, mfaModule(), consumer(seen)], {
 			sessionRequirements: { expected: ["mfa"] },
-			mfa: { mode: "required" },
 		});
 		try {
 			expect([...(seen.resolver?.get("mfa")?.reach ?? [])]).toEqual(["otp"]);
@@ -1159,7 +1238,9 @@ describe("stage 4: the reach without mfa, a refusal's cleanups, every consumer n
 			requires: ["sessionRequirementResolver"] as never,
 		} as never);
 		const err = await refusal(
-			boot([consumer({}), other], { sessionRequirements: { expected: ["ghost"] } }),
+			boot([contributing("test:first", { a: () => requirement("a") }), consumer({}), other], {
+				sessionRequirements: { expected: [] },
+			}),
 		);
 		expect(err.reason).toBe("session-requirements-undeclared");
 		expect(err.message).toMatch(/modules \[test:consumer, test:consumer-2\]/);

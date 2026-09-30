@@ -39,13 +39,14 @@ import {
 	MAX_CLIENT_ID_LENGTH,
 	type PublicClient,
 } from "@o3co/auth-provider-core";
-import { GrantRegistry, resolverForTests } from "@o3co/auth-provider-core/testing";
+import { resolverForTests } from "@o3co/auth-provider-core/testing";
 import express from "express";
 import { generateKeyPair, SignJWT } from "jose";
 import request from "supertest";
 import { describe, expect, it } from "vitest";
 import { JWT_BEARER_CLIENT_ASSERTION_TYPE } from "#/middleware/clientAssertion.mjs";
 import { createOAuthRouter } from "#/routes.mjs";
+import { authorizationServerRegistry } from "./_helpers/authorizationServerRegistry.mjs";
 import { codeRecord } from "./_helpers/codeRecord.mjs";
 import { createMockLogger, type MockLogger } from "./_helpers/mockLogger.mjs";
 import { storeReplyError } from "./_helpers/projectedLog.mjs";
@@ -94,7 +95,7 @@ async function buildApp(clientRepository: ClientRepository) {
 	const logger = createMockLogger();
 	const { router } = await createOAuthRouter(express, {
 		requirements: resolverForTests([]),
-		registry: new GrantRegistry(),
+		registry: authorizationServerRegistry(),
 		config,
 		clientRepository,
 		codeRepository,

@@ -32,7 +32,7 @@ import {
 	type UserSession,
 	type UserSessionStore,
 } from "@o3co/auth-provider-core";
-import { GrantRegistry, resolverForTests } from "@o3co/auth-provider-core/testing";
+import { resolverForTests } from "@o3co/auth-provider-core/testing";
 import express from "express";
 import { SignJWT } from "jose";
 import request from "supertest";
@@ -40,6 +40,7 @@ import { describe, expect, it, vi } from "vitest";
 import { createRefreshTokenGrant } from "#/grants/refreshToken.mjs";
 import { createSessionGrant } from "#/grants/session.mjs";
 import { createOAuthRouter } from "#/routes.mjs";
+import { authorizationServerRegistry } from "./_helpers/authorizationServerRegistry.mjs";
 
 const ISSUER = "https://issuer.test";
 const SECRET = "acceptance-test-secret-32-bytes-long!";
@@ -136,7 +137,7 @@ const buildApp = async (requirement: SessionRequirement) => {
 		consumeByCode: async () => null,
 		removeByCode: async () => {},
 	} as unknown as CodeRepository;
-	const registry = new GrantRegistry();
+	const registry = authorizationServerRegistry();
 	registry.register(
 		"session",
 		createSessionGrant({
