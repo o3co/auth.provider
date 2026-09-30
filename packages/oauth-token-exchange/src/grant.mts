@@ -270,7 +270,8 @@ async function applyGrantPolicy(
 				result: {
 					status: 503,
 					error: "temporarily_unavailable",
-					// The text core's `evaluateGrantPolicy` sends for a policy that throws.
+					// Core's `evaluateGrantPolicy` text for a policy that throws, repeated
+					// until core exports that answer.
 					errorDescription: "policy evaluation unavailable",
 				},
 			};
