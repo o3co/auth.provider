@@ -50,8 +50,9 @@ function inProcess(mark: Mark = markHonestly): MfaEnrollmentWitnessHarness {
 			const user = USERS.find((u) => u.username === username && u.password === password);
 			if (user === undefined) return null;
 			const answer: User = { id: user.subject, username: user.username };
+			// As a Store answers it: whatever the mark wrote, a broken one's text included.
 			return witness.has(user.subject)
-				? { ...answer, mfaEnrolled: witness.get(user.subject) }
+				? ({ ...answer, mfaEnrolled: witness.get(user.subject) } as User)
 				: answer;
 		},
 		authenticateByToken: async () => null,
