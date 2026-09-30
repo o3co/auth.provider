@@ -63,6 +63,10 @@ import {
 } from "./deviceAuthorizationEndpoint.mjs";
 import { createDeviceCodeGrant } from "./grant.mjs";
 import { DEVICE_AUTHORIZATION_RATE_LIMIT_PREFIX, DEVICE_CODE_GRANT_TYPE } from "./types.mjs";
+import {
+	DEVICE_VERIFICATION_RATE_LIMIT_PREFIX,
+	readVerificationRateLimitBudget,
+} from "./verificationBudget.mjs";
 import { createDeviceVerificationHandler } from "./verificationEndpoint.mjs";
 
 /**
@@ -121,8 +125,9 @@ export const deviceGrantConfigSchema = z.object({
 					.default(5),
 				/**
 				 * The verification endpoint's budget per authenticated subject,
-				 * seeded into the rate limiter under the `device_verification`
-				 * prefix (an adapter's own `limits.device_verification` wins).
+				 * which the module contributes as the `device_verification`
+				 * budget every limiter reads (a limiter's own
+				 * `limits.device_verification` wins).
 				 */
 				rateLimit: rateLimitSpecSchema.default(DEFAULT_VERIFICATION_RATE_LIMIT),
 				/**
@@ -149,8 +154,8 @@ interface DeviceAuthorizationConfigSlice {
 	readonly "code-lifetime-seconds": number;
 	readonly "polling-interval-seconds": number;
 	/**
-	 * Applied by core's limiter modules when they seed `limits`; here it is
-	 * only required to be present and usable.
+	 * Contributed as the `device_verification` budget; the verification route
+	 * requires it present and usable.
 	 */
 	readonly rateLimit?: unknown;
 }
@@ -518,13 +523,12 @@ const requireUserSessionStore = (
 };
 
 /**
- * The limiter applies this budget to `device_verification` only because its
- * adapter module seeds that prefix from `oauth.deviceAuthorization.rateLimit`,
- * and it seeds nothing when the key is absent. A hand-built config that
- * skipped the schema default would silently run on the adapter's default
- * budget instead of the one the `rateLimiter` requirement reasons from. An
- * unusable key is refused with the same call the seed makes, so both give the
- * same message.
+ * The limiter applies this budget to `device_verification` only because this
+ * module contributes it, and it contributes none when the key is absent. A
+ * hand-built config that skipped the schema default would silently run on the
+ * limiter's default budget instead of the one the `rateLimiter` requirement
+ * reasons from. An unusable key is refused with the call the contribution
+ * makes, so both give the same message.
  */
 const requireVerificationRateLimit = (slice: DeviceAuthorizationConfigSlice): RateLimitSpec => {
 	const spec = slice.rateLimit;
@@ -532,10 +536,10 @@ const requireVerificationRateLimit = (slice: DeviceAuthorizationConfigSlice): Ra
 		throw new Error(
 			"deviceGrantModule: oauth.deviceAuthorization.enabled = true requires " +
 				"oauth.deviceAuthorization.rateLimit { limit, windowSeconds }. It is the budget " +
-				"RFC 8628 §5.1 sizes the user code against and the value the limiter adapter " +
-				"seeds `device_verification` from; without it POST /oauth/device/verification " +
-				"would run on the adapter's default budget, which is not the number the " +
-				"rateLimiter requirement reasons from.",
+				"RFC 8628 §5.1 sizes the user code against and the `device_verification` budget " +
+				"this module contributes; without it POST /oauth/device/verification would run " +
+				"on the limiter's default budget, which is not the number the rateLimiter " +
+				"requirement reasons from.",
 		);
 	}
 	return requireUsableConfiguredRateLimitSpec("oauth.deviceAuthorization.rateLimit", spec);
@@ -576,6 +580,12 @@ export const deviceGrantModule = (params: { config: AppConfig }): Module => {
 			auditSink: AUDIT_SINK_ABSENCE_POLICY,
 		},
 		contributes: {
+			// The verification endpoint's budget, for every limiter to read, with
+			// the grant on or off: nothing keys the prefix while it is off.
+			rateLimitBudgets: {
+				[DEVICE_VERIFICATION_RATE_LIMIT_PREFIX]: (deps) =>
+					readVerificationRateLimitBudget(deps.section),
+			},
 			// Only when enabled — see the file header. Absent, `/oauth/token`
 			// answers `unsupported_grant_type` for an unregistered grant, and
 			// `grant_types_supported`, read off the same resolver, does not name
@@ -690,7 +700,8 @@ export const deviceGrantModule = (params: { config: AppConfig }): Module => {
 					// on `approve` / `deny` alone, so no future action can forget it.
 					const csrfGuard = requireCsrfGuard(deps);
 					// Asserted here so the `rateLimiter` requirement really means the
-					// configured budget; the limiter applies it, seeded from config.
+					// configured budget, which the limiter applies as this module's
+					// contribution.
 					requireVerificationRateLimit(slice);
 					const userSessionStore = requireUserSessionStore(deps);
 					router.post(

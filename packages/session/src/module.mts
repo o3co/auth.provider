@@ -33,6 +33,7 @@ import {
 import { extractFederationSection } from "./federations/extract-federation-section.mjs";
 import { deriveFederationTransactionCookieName } from "./federations/transaction.mjs";
 import { loginEntryFromConfig } from "./login-entry.mjs";
+import { LOGIN_RATE_LIMIT_PREFIX, readLoginRateLimitBudget } from "./loginBudget.mjs";
 import * as federationRoutes from "./routes/Federation.mjs";
 import * as sessionRoutes from "./routes/Session.mjs";
 
@@ -164,6 +165,11 @@ export const sessionModule = defineModule<
 		// require.
 	},
 	contributes: {
+		// `/session/login`'s budget, `rateLimit.login`, for every limiter to
+		// read; an operator's `limits.login` on the limiter still wins.
+		rateLimitBudgets: {
+			[LOGIN_RATE_LIMIT_PREFIX]: (deps) => readLoginRateLimitBudget(deps.config),
+		},
 		routes: [
 			(deps) => {
 				const config = deps.config as AppConfig;

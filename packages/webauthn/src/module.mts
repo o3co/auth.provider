@@ -35,6 +35,7 @@ import {
 	type RateLimiter,
 	type RateLimitSpec,
 	readConfiguredRateLimitSpec,
+	requireUsableConfiguredRateLimitSpec,
 } from "@o3co/auth-provider-core";
 import express from "express";
 import { z } from "zod";
@@ -55,6 +56,20 @@ import { createRegistrationVerifyHandler } from "./routes/registrationVerify.mjs
 const WEBAUTHN_SECTION_SCHEMA = z.unknown();
 
 /**
+ * `webauthn.rateLimit.authenticationOptions` as the options route's budget, or `null` when the
+ * section gives none: the prefix then falls to the limiter's `defaultLimit`. Read as
+ * `webauthnConfigSchema` coerces it, since `reference.conf` fills both fields from environment
+ * variables HOCON substitutes as strings and the section's schema checks nothing; a budget given
+ * that no limiter can apply is a `RangeError` naming the key.
+ */
+const authenticationOptionsBudget = (section: unknown): RateLimitSpec | null => {
+	const given = (section as { rateLimit?: { authenticationOptions?: unknown } } | null | undefined)
+		?.rateLimit?.authenticationOptions;
+	if (given === undefined) return null;
+	return requireUsableConfiguredRateLimitSpec("webauthn.rateLimit.authenticationOptions", given);
+};
+
+/**
  * Declarative manifest for the WebAuthn passkey module.
  *
  * Settings come from the `webauthnConfig` slot, which a bootstrap module fills from application
@@ -63,9 +78,10 @@ const WEBAUTHN_SECTION_SCHEMA = z.unknown();
  *
  * `POST /oauth/webauthn/authentication/options` is rate-limited by the module itself: core's
  * `createRateLimitGuard` under the `webauthn-authentication-options` tag, on the wired
- * `rateLimiter` or else a per-process memory limiter (with a warning). The budget is
- * `webauthnConfig.rateLimit.authenticationOptions`; the outage policy is
- * `config.rateLimit.failMode`, as for the OAuth endpoints and `/session/login`.
+ * `rateLimiter` or else a per-process memory limiter (with a warning). The module contributes
+ * `webauthn.rateLimit.authenticationOptions` as the tag's budget, which a wired limiter applies;
+ * the fallback limiter applies `webauthnConfig.rateLimit.authenticationOptions`. The outage
+ * policy is `config.rateLimit.failMode`, as for the OAuth endpoints and `/session/login`.
  */
 export const webauthnModule = defineModule<
 	| "webauthnConfig"
@@ -119,6 +135,12 @@ export const webauthnModule = defineModule<
 	// audit.sink.type = "none" or boot refuses (the policy the oauth and session modules share).
 	absencePolicies: { auditSink: AUDIT_SINK_ABSENCE_POLICY },
 	contributes: {
+		// The options route's budget, for every limiter to read; an operator's
+		// `limits.webauthn-authentication-options` on the limiter still wins.
+		rateLimitBudgets: {
+			[WEBAUTHN_AUTHENTICATION_OPTIONS_RATE_LIMIT_TAG]: (deps) =>
+				authenticationOptionsBudget(deps.section),
+		},
 		grants: {
 			[WEBAUTHN_GRANT_TYPE]: (deps) => {
 				// grantPolicy is this grant's only scope bound; booting without it would accept
@@ -229,13 +251,13 @@ export const webauthnModule = defineModule<
 						);
 					}
 				} else {
-					// A shared limiter applies the budget its module seeded from the app config's
-					// `webauthn.rateLimit.authenticationOptions`, not this slot (which may be
-					// hard-coded). When the key is missing or differs, the budget in force is not
-					// the one this slot states, so boot warns once with both values. The key is
-					// read as the seed reads it (numeric strings equal numbers). An explicit
-					// `limits.webauthn-authentication-options` in the limiter's own section
-					// overrides both and is not visible here.
+					// A shared limiter applies the budget this module contributes from the app
+					// config's `webauthn.rateLimit.authenticationOptions`, not this slot (which may
+					// be hard-coded). When the key is missing or differs, the budget in force is
+					// not the one this slot states, so boot warns once with both values. The key
+					// is read as the contribution reads it (numeric strings equal numbers). An
+					// explicit `limits.webauthn-authentication-options` in the limiter's own
+					// section overrides both and is not visible here.
 					const configured = (
 						deps.config as {
 							webauthn?: { rateLimit?: { authenticationOptions?: unknown } };

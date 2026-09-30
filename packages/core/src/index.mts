@@ -810,9 +810,11 @@ export type {
 } from "./ratelimit/types.mjs";
 export {
 	assertUsableRateLimitSpecs,
+	configuredNumber,
 	isUsableRateLimitSpec,
 	readConfiguredRateLimitSpec,
 	requireUsableConfiguredRateLimitSpec,
+	shownConfigValue,
 } from "./ratelimit/usableSpec.mjs";
 export {
 	resolveWebAuthnAuthenticationOptionsLimitSpec,
