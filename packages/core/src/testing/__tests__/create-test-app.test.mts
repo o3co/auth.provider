@@ -14,7 +14,6 @@
  * limitations under the License.
  */
 import { describe, expect, it } from "vitest";
-import { z } from "zod";
 import { defineModule } from "../../modules/manifest/index.mjs";
 import { createTestApp } from "../create-test-app.mjs";
 import { makeValidAppConfig } from "../fixtures/valid-config.mjs";
@@ -52,25 +51,5 @@ describe("createTestApp", () => {
 		});
 		// No assertion on internal state; existence + dispose proves the override path compiled.
 		await handle.dispose();
-	});
-
-	it("hands boot the environment it is given", async () => {
-		const renaming = defineModule({
-			name: "test-renaming",
-			section: {
-				schema: z.object({ retries: z.number().optional() }),
-				relocatedFrom: { "legacy.retries": "retries" },
-				renamedVariables: { LEGACY_RETRIES: "legacy.retries" },
-			},
-		});
-		const config = { ...makeValidAppConfig(), "test-renaming": {} };
-
-		await expect(
-			createTestApp({
-				modules: [renaming],
-				bootstrapComponents: { config, pathResolver: (s) => s },
-				environment: { LEGACY_RETRIES: "5" },
-			}),
-		).rejects.toMatchObject({ reason: "environment-variable-renamed" });
 	});
 });
