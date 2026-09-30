@@ -309,7 +309,7 @@ export function mfaModule(options: MfaModuleOptions = {}): Module {
 		| "csrfGuard"
 		| "loginCompletion"
 		| "deploymentMode",
-		"rateLimiter" | "auditSink" | "logger",
+		"rateLimiter" | "auditSink" | "logger" | "mailSender",
 		typeof mfaSectionSchema
 	>({
 		name: "mfa",
@@ -334,7 +334,7 @@ export function mfaModule(options: MfaModuleOptions = {}): Module {
 			"loginCompletion",
 			"deploymentMode",
 		],
-		optional: ["rateLimiter", "auditSink", "logger"],
+		optional: ["rateLimiter", "auditSink", "logger", "mailSender"],
 		absencePolicies: { auditSink: AUDIT_SINK_ABSENCE_POLICY },
 		contributes: {
 			rateLimitBudgets: {
@@ -408,6 +408,7 @@ export function mfaModule(options: MfaModuleOptions = {}): Module {
 								sealing,
 								maxAttemptsPerTransaction: settings.maxAttemptsPerTransaction,
 								mode,
+								mailSender: deps.mailSender,
 							}),
 							admission: {
 								userSessionStore: deps.userSessionStore,

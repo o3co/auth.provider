@@ -26,12 +26,15 @@
 import {
 	createMemoryMfaFactorStore,
 	createMemoryMfaTransactionStore,
-	type MailSender,
 	type MfaFactor,
 	type MfaTransactionStore,
 	type MfaVerifyContext,
 } from "@o3co/auth-provider-core";
-import { createRecordingMailSender, createTestMfaFactor } from "@o3co/auth-provider-core/testing";
+import {
+	createRecordingMailSender,
+	createTestMfaFactor,
+	type RecordingMailSender,
+} from "@o3co/auth-provider-core/testing";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ALICE, boot, configFor, disposeAll, events } from "./moduleHarness.mjs";
 import {
@@ -79,7 +82,7 @@ function mailed(): { readonly factor: MfaFactor; readonly verified: MfaVerifyCon
 async function withMailedFactor(
 	options: {
 		readonly data?: Record<string, unknown>;
-		readonly sender?: MailSender;
+		readonly sender?: RecordingMailSender;
 		readonly transactionStore?: MfaTransactionStore;
 	} = {},
 ) {
@@ -241,7 +244,9 @@ describe("a factor's login code", () => {
 		const kept = await transactionStore.get(transaction);
 		expect(kept).not.toBeNull();
 		expect(kept?.challenge).toBeUndefined();
-		const code = (recording.mock.calls[0]?.[0] as { code: string }).code;
+		const code = (recording.mock.calls[0]?.[0] as { code?: string } | undefined)?.code;
+		expect(code).toEqual(expect.any(String));
+		if (code === undefined) return;
 		expect(loggedText(logger)).not.toContain(code);
 		expect(loggedText(logger)).not.toContain(ALICE.email);
 		expect(audit.of("mfa.challenge.sent")).toEqual([]);

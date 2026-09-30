@@ -539,38 +539,31 @@ const VOCABULARY: readonly VocabularyRow[] = [
 		home: "packages/mfa/src/requirement.mts",
 		definition: /(?:function|const)\s+isRecentMfa\b/,
 	},
-	// Declared before their homes define them: each names the build step of
-	// the MFA ADR that builds it.
 	{
 		concept:
 			"MFA mail — the one place a code the provider issued is handed to the mail sender (the MFA ADR's D5, F5)",
 		home: "packages/mfa/src/mail.mts",
 		definition: /(?:function|const)\s+sendMfaMail\b/,
-		declared: "the MFA ADR's build-order step 9",
 	},
 	{
 		concept: "the masked address a code went to, as a page may show it (the MFA ADR's D23)",
 		home: "packages/mfa/src/mail.mts",
 		definition: /(?:function|const)\s+maskMailAddress\b/,
-		declared: "the MFA ADR's build-order step 9",
 	},
 	{
 		concept: "the long code — made (the MFA ADR's D22)",
 		home: "packages/mfa/src/codes.mts",
 		definition: /(?:function|const)\s+generateLongCode\b/,
-		declared: "the MFA ADR's build-order step 9",
 	},
 	{
 		concept: "the long code — read as a user types or pastes it (the MFA ADR's D6, D22)",
 		home: "packages/mfa/src/codes.mts",
 		definition: /(?:function|const)\s+readLongCode\b/,
-		declared: "the MFA ADR's build-order step 9",
 	},
 	{
 		concept: "the long code — shown in groups (the MFA ADR's D22)",
 		home: "packages/mfa/src/codes.mts",
 		definition: /(?:function|const)\s+formatLongCode\b/,
-		declared: "the MFA ADR's build-order step 9",
 	},
 ];
 

@@ -32,13 +32,17 @@
  * - A store that cannot answer, a factor whose data does not open, and a
  *   factor that throws are outages: never a wrong code, never "no factor".
  * - A factor is handed its records opened and digests under the ring; it
- *   never sees a key, a store or a transaction.
+ *   never sees a key, a store, a transaction or the mail sender. A code it
+ *   asks to be mailed goes through `sendMfaMail` (`mail.mts`), to the
+ *   login's address, and the digest of that address is kept with the pending
+ *   challenge and handed back to the verification.
  */
 
 import {
 	getBoundMfaTransaction,
 	isConsumedMfaTransaction,
 	isMfaFactorUpdateWritten,
+	type MailSender,
 	MFA_AMR,
 	type MfaEnrolledFactor,
 	type MfaFactor,
@@ -46,6 +50,7 @@ import {
 	type MfaFactorResolver,
 	type MfaFactorState,
 	type MfaFactorStore,
+	type MfaKeyedDigest,
 	type MfaTransaction,
 	type MfaTransactionBinding,
 	type MfaTransactionPatch,
@@ -54,6 +59,7 @@ import {
 	type PrimaryContinuation,
 	readMfaAttemptReservation,
 } from "@o3co/auth-provider-core";
+import { keptState, readKeptState, sendMfaMail } from "./mail.mjs";
 import type { MfaRequirementMode } from "./requirement.mjs";
 import type { MfaSealing } from "./sealing.mjs";
 
@@ -148,13 +154,32 @@ export type MfaDescribeOutcome =
 	| MfaStoreOutage
 	| { readonly outcome: "described"; readonly view: MfaTransactionView };
 
+/** A mail the ceremony needed and could not send: no sender wired, or the sender's outage. */
+export interface MfaMailUnavailable {
+	readonly outcome: "mail_unavailable";
+	readonly purpose: string;
+	readonly kind: string;
+	readonly reason: "no_sender" | "outage";
+	readonly cleared?: boolean;
+	readonly cause?: unknown;
+}
+
+/** What a mail's refusal answers, whatever the ceremony. */
+export type MfaMailRefusal =
+	| MfaMailUnavailable
+	/** The sender's limit refused it: `429`. */
+	| { readonly outcome: "mail_refused_at_limit" };
+
 export type MfaChallengeOutcome =
 	| UnknownTransaction
 	| UnknownFactor
 	| MfaStoreOutage
 	| MfaFactorUnreadable
+	| MfaMailRefusal
 	| { readonly outcome: "none" }
 	| ({ readonly outcome: "sent"; readonly response: object } & MfaCeremonySubject)
+	/** A login code whose factor recorded another address, or none it can read: the factor is refused. */
+	| ({ readonly outcome: "address_mismatch" } & MfaCeremonySubject)
 	| {
 			readonly outcome: "challenge_failed";
 			readonly kind: string;
@@ -208,6 +233,8 @@ export interface MfaCoordinatorOptions {
 	readonly maxAttemptsPerTransaction: number;
 	/** `mfa.mode`: under `required` a factor that does not count completes no login for a subject with no counting factor it can use. */
 	readonly mode: MfaRequirementMode;
+	/** Where a factor's codes are mailed; none wired, a factor that asks for one is an outage. */
+	readonly mailSender?: MailSender;
 	/** The clock, in epoch milliseconds. Defaults to `Date.now`. */
 	readonly now?: () => number;
 }
@@ -232,7 +259,15 @@ const byAge = (a: MfaFactorRecord, b: MfaFactorRecord): number =>
 
 /** The coordinator over `options` (see this file's header). */
 export function createMfaCoordinator(options: MfaCoordinatorOptions): MfaCoordinator {
-	const { factors, factorStore, transactions, sealing, maxAttemptsPerTransaction, mode } = options;
+	const {
+		factors,
+		factorStore,
+		transactions,
+		sealing,
+		maxAttemptsPerTransaction,
+		mode,
+		mailSender,
+	} = options;
 	const now = options.now ?? (() => Date.now());
 
 	/** The login transaction `call` names, bound to its binding; `null` when there is none to use. */
@@ -326,8 +361,9 @@ export function createMfaCoordinator(options: MfaCoordinatorOptions): MfaCoordin
 	/**
 	 * The state a verification of `factor` is handed: the pending challenge
 	 * for this factor, taken — or read, for a factor that keeps it across
-	 * attempts — and opened; none when there is none, it is another factor's,
-	 * or it has expired. Kept state that does not open is unreadable.
+	 * attempts — and opened, with the digest of the address its code went to;
+	 * none when there is none, it is another factor's, or it has expired. Kept
+	 * state that does not open is unreadable.
 	 */
 	const challengeState = async (
 		tx: MfaTransaction,
@@ -335,7 +371,12 @@ export function createMfaCoordinator(options: MfaCoordinatorOptions): MfaCoordin
 		record: MfaFactorRecord,
 		nowMs: number,
 	): Promise<
-		{ readonly state: MfaFactorState | undefined } | MfaStoreOutage | MfaFactorUnreadable
+		| {
+				readonly state: MfaFactorState | undefined;
+				readonly addressDigest?: MfaKeyedDigest;
+		  }
+		| MfaStoreOutage
+		| MfaFactorUnreadable
 	> => {
 		if (factor.challenge === undefined) return { state: undefined };
 		let pending: MfaTransaction["challenge"] | null;
@@ -361,7 +402,13 @@ export function createMfaCoordinator(options: MfaCoordinatorOptions): MfaCoordin
 			{ transactionId: tx.id, kind: record.kind, use: "challenge" },
 			pending.state,
 		);
-		if (opened.state === "ok") return { state: opened.value };
+		const kept = opened.state === "ok" ? readKeptState(opened.value) : undefined;
+		if (kept !== undefined) {
+			return {
+				state: kept.state,
+				...(kept.addressDigest === undefined ? {} : { addressDigest: kept.addressDigest }),
+			};
+		}
 		// Kept state that does not open is an outage, never an absent challenge.
 		return {
 			outcome: "unreadable",
@@ -437,7 +484,6 @@ export function createMfaCoordinator(options: MfaCoordinatorOptions): MfaCoordin
 				cause,
 			});
 			let issued: Awaited<ReturnType<NonNullable<MfaFactor["challenge"]>>>;
-			let sealed: string | undefined;
 			try {
 				issued = await factor.challenge({
 					subject: tx.subject,
@@ -451,32 +497,23 @@ export function createMfaCoordinator(options: MfaCoordinatorOptions): MfaCoordin
 				if (!isPlainObject(issued?.response)) {
 					throw new TypeError("the factor's challenge answered a response that is not an object");
 				}
-				sealed =
-					issued.state === undefined
-						? undefined
-						: sealing.sealState(
-								{ transactionId: tx.id, kind: record.kind, use: "challenge" },
-								issued.state,
-							);
 			} catch (cause) {
 				return failed(cause);
 			}
-			// The challenge lives no longer than its transaction; one without state
-			// clears a pending one, which answered an earlier challenge.
-			const patch: MfaTransactionPatch | undefined =
-				sealed !== undefined
-					? {
-							challenge: {
-								factorId: record.id,
-								kind: record.kind,
-								state: sealed,
-								expiresAtMs: tx.expiresAtMs,
-							},
-						}
-					: tx.challenge !== undefined
-						? { challenge: null }
-						: undefined;
-			if (patch !== undefined) {
+			const about: MfaCeremonySubject = {
+				subject: tx.subject,
+				kind: record.kind,
+				purpose: tx.purpose,
+			};
+			const sent: MfaChallengeOutcome = {
+				outcome: "sent",
+				response: issued.response as object,
+				...about,
+			};
+			/** Writes `patch` at the version read: `undefined` once written, else the answer. */
+			const write = async (
+				patch: MfaTransactionPatch,
+			): Promise<MfaChallengeOutcome | undefined> => {
 				let written: unknown;
 				try {
 					written = await transactions.update(tx.id, tx.version, patch);
@@ -487,14 +524,105 @@ export function createMfaCoordinator(options: MfaCoordinatorOptions): MfaCoordin
 				if (!isWrittenAt(written, tx)) {
 					return outage("mfa_transaction", "update", OUTSIDE_CONTRACT);
 				}
-			}
-			return {
-				outcome: "sent",
-				response: issued.response as object,
-				subject: tx.subject,
-				kind: record.kind,
-				purpose: tx.purpose,
+				return undefined;
 			};
+			/** The pending challenge, sealed with the address's digest when a code went out, living until `expiresAtMs`. */
+			const pending = (addressDigest: MfaKeyedDigest | undefined, expiresAtMs: number) => ({
+				factorId: record.id,
+				kind: record.kind,
+				state: sealing.sealState(
+					{ transactionId: tx.id, kind: record.kind, use: "challenge" },
+					keptState({ state: issued.state, addressDigest }),
+				),
+				expiresAtMs,
+			});
+
+			if (issued.mail !== undefined) {
+				const mailed = await sendMfaMail<MfaChallengeOutcome>({
+					sender: mailSender,
+					mail: issued.mail,
+					purpose: "login_code",
+					subject: tx.subject,
+					address: tx.continuation?.primary.user.email,
+					nowMs,
+					notAfterMs: tx.expiresAtMs,
+					digests: sealing.digestsFor(record.kind),
+					keep: async (addressDigest, expiresAtMs) => {
+						let challenge: ReturnType<typeof pending>;
+						try {
+							challenge = pending(addressDigest, expiresAtMs);
+						} catch (cause) {
+							return { kept: false, refusal: failed(cause) };
+						}
+						const refused = await write({ challenge });
+						if (refused !== undefined) return { kept: false, refusal: refused };
+						return {
+							kept: true,
+							clear: async () => {
+								await transactions.update(tx.id, tx.version + 1, { challenge: null });
+							},
+						};
+					},
+				});
+				switch (mailed.outcome) {
+					case "sent":
+						return sent;
+					case "not_kept":
+						return mailed.refusal;
+					case "address_mismatch":
+						return { outcome: "address_mismatch", ...about };
+					case "key_unavailable":
+						return {
+							outcome: "unreadable",
+							kind: record.kind,
+							factorId: record.id,
+							state: "key_unavailable",
+							keyId: mailed.keyId,
+						};
+					case "refused_at_limit":
+						return { outcome: "mail_refused_at_limit" };
+					case "no_sender":
+						return {
+							outcome: "mail_unavailable",
+							purpose: "login_code",
+							kind: record.kind,
+							reason: "no_sender",
+						};
+					case "unavailable":
+						return {
+							outcome: "mail_unavailable",
+							purpose: "login_code",
+							kind: record.kind,
+							reason: "outage",
+							cleared: mailed.cleared,
+							cause: mailed.cause,
+						};
+					case "malformed":
+					case "no_address":
+						return failed(
+							new TypeError("the factor's challenge asked for a mail that is not a login code"),
+						);
+				}
+			}
+
+			// The challenge lives no longer than its transaction; one without state
+			// clears a pending one, which answered an earlier challenge.
+			let patch: MfaTransactionPatch | undefined;
+			try {
+				patch =
+					issued.state !== undefined
+						? { challenge: pending(undefined, tx.expiresAtMs) }
+						: tx.challenge !== undefined
+							? { challenge: null }
+							: undefined;
+			} catch (cause) {
+				return failed(cause);
+			}
+			if (patch !== undefined) {
+				const refused = await write(patch);
+				if (refused !== undefined) return refused;
+			}
+			return sent;
 		},
 
 		async verify(call) {
@@ -578,6 +706,9 @@ export function createMfaCoordinator(options: MfaCoordinatorOptions): MfaCoordin
 						factor: self,
 						factors: all,
 						state: pending.state,
+						...(pending.addressDigest === undefined
+							? {}
+							: { addressDigest: pending.addressDigest }),
 						proof: call.proof,
 					});
 				} catch (cause) {

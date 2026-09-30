@@ -96,7 +96,7 @@ describe("mfaModules", () => {
 		expect(mfaModules()[2]).toBe(mfaEmailFactorModule);
 	});
 
-	it("requires what the requirement is bound to, the CSRF guard its POSTs sit behind and the login's completion, and not the configuration; reads the rate limiter, the audit sink — its absence declared — and the logger", () => {
+	it("requires what the requirement is bound to, the CSRF guard its POSTs sit behind and the login's completion, and not the configuration; reads the rate limiter, the audit sink — its absence declared — the logger and the mail sender", () => {
 		const module = mfaModule();
 		expect([...(module.requires ?? [])].sort()).toEqual(
 			[
@@ -110,7 +110,12 @@ describe("mfaModules", () => {
 				"userSessionStore",
 			].sort(),
 		);
-		expect([...(module.optional ?? [])].sort()).toEqual(["auditSink", "logger", "rateLimiter"]);
+		expect([...(module.optional ?? [])].sort()).toEqual([
+			"auditSink",
+			"logger",
+			"mailSender",
+			"rateLimiter",
+		]);
 		expect(module.absencePolicies?.auditSink).toMatchObject({
 			configKey: ["audit", "sink", "type"],
 			absentValue: "none",

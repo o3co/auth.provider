@@ -75,7 +75,7 @@ const send = (
 ) =>
 	sendMfaMail({
 		sender: "sender" in options ? options.sender : createRecordingMailSender(),
-		mail: options.mail ?? loginCode(digests.digest([NORMALISED])),
+		mail: "mail" in options ? options.mail : loginCode(digests.digest([NORMALISED])),
 		purpose: options.purpose ?? "login_code",
 		subject: "u-alice",
 		address: "address" in options ? options.address : ADDRESS,
@@ -269,14 +269,25 @@ describe("sendMfaMail — a code that stands in for a factor", () => {
 				{ addressDigest: digests.digest([NORMALISED]), expiresAtMs: NOT_AFTER },
 			]);
 			expect(sender.sent).toEqual([
-				{ purpose, subject: "u-alice", to: NORMALISED, code: "0123456789ABCDEF", expiresAtMs: NOT_AFTER },
+				{
+					purpose,
+					subject: "u-alice",
+					to: NORMALISED,
+					code: "0123456789ABCDEF",
+					expiresAtMs: NOT_AFTER,
+				},
 			]);
 		});
 
 		it(`answers ${purpose} to an account with no address no_address, keeping nothing`, async () => {
 			const { keep } = keeping();
 			expect(
-				await send({ keep, purpose, address: undefined, mail: { purpose, code: "0123456789ABCDEF" } }),
+				await send({
+					keep,
+					purpose,
+					address: undefined,
+					mail: { purpose, code: "0123456789ABCDEF" },
+				}),
 			).toEqual({ outcome: "no_address" });
 			expect(keep).not.toHaveBeenCalled();
 		});

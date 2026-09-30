@@ -26,7 +26,10 @@
  * - The transaction id is read from the body or the `MFA-Transaction` header,
  *   never from the URL, and never logged; a missing, malformed, foreign,
  *   spent or expired one is answered alike.
- * - Each outage is answered `503` and logged once, at error.
+ * - Each outage is answered `503` and logged once, at error. A mail the
+ *   sender refused at its limit is `429`; a factor whose recorded address no
+ *   longer matches the login's is `403`, recorded as
+ *   `mfa.email_address_mismatch`. Neither the code nor the address is logged.
  */
 
 import {
@@ -48,6 +51,7 @@ import type {
 	MfaCeremonyCall,
 	MfaCoordinator,
 	MfaFactorUnreadable,
+	MfaMailRefusal,
 	MfaStoreOutage,
 	MfaVerifyOutcome,
 } from "./coordinator.mjs";
@@ -68,6 +72,11 @@ const ENROLLMENT_REQUIRED = errorEnvelope(
 	"mfa_enrollment_required",
 	"A second factor that counts must be enrolled",
 );
+const FACTOR_REFUSED = errorEnvelope(
+	"mfa_factor_refused",
+	"This second factor cannot be used: use another",
+);
+const MAIL_LIMITED = errorEnvelope("rate_limited", "Too many codes sent: try again later");
 
 /** A refused proof, with the attempts the transaction has left. */
 const notAccepted = (attemptsRemaining: number) => ({
@@ -174,6 +183,26 @@ export function createMfaRouter(options: MfaRoutesOptions): Router {
 				"mfa_factor_unreadable",
 			);
 		}
+		res.status(503).json(MFA_UNAVAILABLE);
+	};
+
+	/** A mail the ceremony could not send: `429` at the sender's limit; else logged once and `503`. */
+	const answerMail = (route: RouteName, res: Response, refusal: MfaMailRefusal): void => {
+		if (refusal.outcome === "mail_refused_at_limit") {
+			res.status(429).json(MAIL_LIMITED);
+			return;
+		}
+		logger.error(
+			{
+				route,
+				purpose: refusal.purpose,
+				kind: refusal.kind,
+				reason: refusal.reason,
+				...(refusal.cleared === undefined ? {} : { cleared: refusal.cleared }),
+				...(refusal.cause === undefined ? {} : { err: loggableError(refusal.cause) }),
+			},
+			"mfa_mail_unavailable",
+		);
 		res.status(503).json(MFA_UNAVAILABLE);
 	};
 
@@ -312,6 +341,21 @@ export function createMfaRouter(options: MfaRoutesOptions): Router {
 						"mfa_factor_challenge_unavailable",
 					);
 					res.status(503).json(MFA_UNAVAILABLE);
+					return;
+				case "mail_unavailable":
+				case "mail_refused_at_limit":
+					answerMail("challenge", res, outcome);
+					return;
+				case "address_mismatch":
+					emitAuditEvent(auditSink, {
+						timestamp: new Date(),
+						type: "mfa.email_address_mismatch",
+						subject: outcome.subject,
+						ip: call.request.ip,
+						userAgent: call.request.userAgent,
+						details: { kind: outcome.kind, purpose: outcome.purpose },
+					});
+					res.status(403).json(FACTOR_REFUSED);
 					return;
 				case "none":
 					res.status(200).json({});

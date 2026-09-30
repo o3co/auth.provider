@@ -54,7 +54,12 @@ describe("formatLongCode", () => {
 	});
 
 	it("refuses what is not a code as generateLongCode makes one", () => {
-		for (const value of ["0123-4567-89AB-CDEF", "0123456789abcdef", "0123456789ABCDE", "0123456789ABCDEU"]) {
+		for (const value of [
+			"0123-4567-89AB-CDEF",
+			"0123456789abcdef",
+			"0123456789ABCDE",
+			"0123456789ABCDEU",
+		]) {
 			expect(() => formatLongCode(value), value).toThrow(RangeError);
 		}
 	});
