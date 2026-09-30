@@ -80,6 +80,14 @@ declare const claimBrand: unique symbol;
 declare const resolverBrand: unique symbol;
 declare const establishmentBrand: unique symbol;
 declare const interruptionBrand: unique symbol;
+declare const issuedBrand: unique symbol;
+
+/**
+ * A remediation action core issued to a requirement at registration: branded
+ * at the type level, and recognised by identity at run time, so a copy or a
+ * literal is not one.
+ */
+export type IssuedRemediationAction = AdmissionAction & { readonly [issuedBrand]: true };
 
 // ---------------------------------------------------------------------------
 // The claim and the action
@@ -116,7 +124,7 @@ export interface AdmissionRequest {
 	 * the grade it registered, or a remediation action core issued to a
 	 * requirement.
 	 */
-	readonly action: string | AdmissionAction;
+	readonly action: string | IssuedRemediationAction;
 	readonly asks?: AdmissionAsks;
 }
 
@@ -526,13 +534,16 @@ function seal(requirement: SessionRequirement, values: Iterable<string>): Readon
 }
 
 /** The remediation actions core issued: the only ones admission keeps the `remediation` grade for. */
-const issuedActions = new WeakSet<AdmissionAction>();
+const issuedActions = new WeakSet<object>();
 
 /** The issued actions by the ORIGINAL object a factory returned: what `issuedRemediationActions` answers the contributing module. */
-const actionsByOriginal = new WeakMap<object, Readonly<Record<string, AdmissionAction>>>();
+const actionsByOriginal = new WeakMap<object, Readonly<Record<string, IssuedRemediationAction>>>();
 
 /** The issued actions by the registered copy: what admission checks a `remediation` action against. */
-const actionsByCopy = new WeakMap<SessionRequirement, Readonly<Record<string, AdmissionAction>>>();
+const actionsByCopy = new WeakMap<
+	SessionRequirement,
+	Readonly<Record<string, IssuedRemediationAction>>
+>();
 
 /**
  * The remediation actions core issued to a requirement, keyed by route
@@ -544,7 +555,7 @@ const actionsByCopy = new WeakMap<SessionRequirement, Readonly<Record<string, Ad
  */
 export function issuedRemediationActions(
 	requirement: SessionRequirement,
-): Readonly<Record<string, AdmissionAction>> | undefined {
+): Readonly<Record<string, IssuedRemediationAction>> | undefined {
 	return typeof requirement === "object" && requirement !== null
 		? actionsByOriginal.get(requirement)
 		: undefined;
@@ -553,11 +564,11 @@ export function issuedRemediationActions(
 /** The issued actions of a registered copy, for admission's own check. @internal */
 export const issuedActionsOf = (
 	copy: SessionRequirement,
-): Readonly<Record<string, AdmissionAction>> | undefined => actionsByCopy.get(copy);
+): Readonly<Record<string, IssuedRemediationAction>> | undefined => actionsByCopy.get(copy);
 
 /** Whether `action` is one core issued to a registered requirement — never a literal or a copy. */
-export const isIssuedAction = (action: unknown): action is AdmissionAction =>
-	typeof action === "object" && action !== null && issuedActions.has(action as AdmissionAction);
+export const isIssuedAction = (action: unknown): action is IssuedRemediationAction =>
+	typeof action === "object" && action !== null && issuedActions.has(action);
 
 /**
  * A requirement's page as it is registered: checked (`checkStepUpPage`, on
@@ -662,9 +673,12 @@ export function registeredRequirement(value: unknown, issuer?: string): Register
 	const remediations = Object.freeze([...(remediationsRead as readonly string[])]);
 	// The remediation actions, issued here and nowhere else: handed to
 	// the contributing module by the object it returned, never on the copy.
-	const actions: Record<string, AdmissionAction> = {};
+	const actions: Record<string, IssuedRemediationAction> = {};
 	for (const remediation of remediations) {
-		const issued: AdmissionAction = Object.freeze({ name: remediation, grade: "remediation" });
+		const issued = Object.freeze({
+			name: remediation,
+			grade: "remediation",
+		}) as IssuedRemediationAction;
 		issuedActions.add(issued);
 		actions[remediation.slice(name.length + 1)] = issued;
 	}

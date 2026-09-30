@@ -142,13 +142,28 @@ const isKnownResolver = (value: unknown): value is SessionRequirementResolver =>
 /**
  * Refuses a resolver the planner or `resolverForTests` did not build; a
  * home-made object or a copy forges nothing. Consumer factories run it on
- * their `requirements` at construction, with their own name as `factory`, so
- * a missing or forged resolver fails where the composition is assembled
- * rather than on every request. Admission also runs it on every call.
+ * their `requirements` at construction, with their own name as `factory` and
+ * the names of the actions they admit as `admits`, so a missing or forged
+ * resolver, or an admitted action no module registers, fails where the
+ * composition is assembled rather than on a request. Admission also runs it
+ * on every call.
  */
-export function checkResolver(value: unknown, factory?: string): SessionRequirementResolver {
-	if (isKnownResolver(value)) return value;
+export function checkResolver(
+	value: unknown,
+	factory?: string,
+	admits: readonly string[] = [],
+): SessionRequirementResolver {
 	const who = factory === undefined ? "" : `${factory}: `;
+	if (isKnownResolver(value)) {
+		for (const name of admits) {
+			if (value.action(name) === undefined) {
+				throw new RangeError(
+					`${who}admits ${JSON.stringify(name)}, which no module registers: the module that installs it registers it under contributes.admissionActions`,
+				);
+			}
+		}
+		return value;
+	}
 	if (value === undefined || value === null) {
 		throw new RangeError(
 			`${who}requirements is required — the sessionRequirementResolver the boot planner built (the manifests pass it), or resolverForTests from @o3co/auth-provider-core/testing in a test`,

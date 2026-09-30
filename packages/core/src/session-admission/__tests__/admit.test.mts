@@ -37,8 +37,8 @@ import {
 } from "#/session-admission/admit.mjs";
 import type {
 	AdmissionDeps,
-	IssuedRemediationAction,
 	AdmissionRequest,
+	IssuedRemediationAction,
 	RequirementInput,
 	SessionClaim,
 	SessionRequirement,
@@ -956,7 +956,10 @@ describe("step 5 — the requirements", () => {
 		const issued = issuedRemediationActions(owner)?.step_up;
 		expect(issued).toEqual({ name: "mfa.step_up", grade: "remediation" });
 		expect(
-			await admitSession(deps({ requirements }), request({ action: issued as AdmissionAction })),
+			await admitSession(
+				deps({ requirements }),
+				request({ action: issued as IssuedRemediationAction }),
+			),
 		).toMatchObject({ outcome: "admitted" });
 		expect(asked).toBe(0);
 	});
@@ -984,7 +987,7 @@ describe("step 5 — the requirements", () => {
 			Object.freeze({ ...issued }),
 		]) {
 			await expect(
-				admitSession(deps({ requirements }), request({ action })),
+				admitSession(deps({ requirements }), request({ action: action as never })),
 				JSON.stringify(action),
 			).rejects.toThrow(RangeError);
 		}
@@ -1008,7 +1011,7 @@ describe("step 5 — the requirements", () => {
 		// Registered elsewhere — another composition's — so issued, but not to these.
 		const elsewhere = met("elsewhere", { remediations: ["elsewhere.step_up"] });
 		resolverForTests([elsewhere], { actions: TEST_ACTIONS });
-		const undeclared = issuedRemediationActions(elsewhere)?.step_up as AdmissionAction;
+		const undeclared = issuedRemediationActions(elsewhere)?.step_up as IssuedRemediationAction;
 		const first = deps({
 			requirements: resolverForTests([watching("one"), watching("two")], { actions: TEST_ACTIONS }),
 			logger,
@@ -1525,7 +1528,7 @@ describe("an action a consumer registered, passed by its name", () => {
 		);
 		await admitSession(
 			deps({ userSessionStore: down, logger, requirements }),
-			request({ action: issuedRemediationActions(owner)?.step_up as AdmissionAction }),
+			request({ action: issuedRemediationActions(owner)?.step_up as IssuedRemediationAction }),
 		);
 		expect(lines.map((line) => line.fields.action)).toEqual(["acme.peek", "mfa.step_up"]);
 	});
@@ -1541,7 +1544,9 @@ describe("the undeclared-remediation line is capped", () => {
 			resolverForTests([elsewhere], { actions: TEST_ACTIONS });
 			await admitSession(
 				with_,
-				request({ action: issuedRemediationActions(elsewhere)?.step_up as AdmissionAction }),
+				request({
+					action: issuedRemediationActions(elsewhere)?.step_up as IssuedRemediationAction,
+				}),
 			);
 		}
 		expect(lines.length).toBeLessThanOrEqual(257);
@@ -1702,7 +1707,7 @@ describe("the caller's faults admitSession names, each driven", () => {
 		});
 		await admitSession(
 			deps({ requirements: resolverForTests([other], { actions: TEST_ACTIONS }) }),
-			request({ action: issuedRemediationActions(owner)?.step_up as AdmissionAction }),
+			request({ action: issuedRemediationActions(owner)?.step_up as IssuedRemediationAction }),
 		);
 		expect(seen).toEqual(["credential_change"]);
 	});

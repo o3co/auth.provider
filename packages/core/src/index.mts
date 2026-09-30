@@ -953,6 +953,7 @@ export {
 	type Establishment,
 	type InterruptAdmission,
 	type InterruptionAnswer,
+	type IssuedRemediationAction,
 	isHintToken,
 	issuedRemediationActions,
 	type PrimaryAdditions,
