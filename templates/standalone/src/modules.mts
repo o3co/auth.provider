@@ -98,7 +98,8 @@ export function templateReference(): URL {
  * The section schemas: core's declarations of these paths, so each rule has
  * one definition until these modules have schemas of their own.
  */
-export const LOGGING_SECTION = CoreConfigSchema.shape.logging.unwrap();
+export const LOGGING_SECTION: ReturnType<(typeof CoreConfigSchema.shape.logging)["unwrap"]> =
+	CoreConfigSchema.shape.logging.unwrap();
 const HTTP_SECTION = CoreConfigSchema.shape.http.unwrap();
 const CORS_SECTION = fullSectionsSchema.shape.cors;
 const SIGNING_KEY_SECTION = CoreConfigSchema.shape.oauth.shape.jwt.out.shape.signingKey.unwrap();
