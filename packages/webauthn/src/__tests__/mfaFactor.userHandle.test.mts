@@ -18,7 +18,8 @@
  * The user handle a WebAuthn second factor's assertion carries (WebAuthn §7.2 step 6), over
  * `@simplewebauthn/server`'s real verification of a software authenticator: the factor enrolls
  * the credential under the subject's user handle, and a verification holds a handle the
- * response carries to it, whatever the signature.
+ * response carries to it. The signature does not cover the handle, so one signed assertion is
+ * verified carrying each handle.
  */
 
 import { randomBytes } from "node:crypto";
