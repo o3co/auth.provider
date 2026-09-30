@@ -659,7 +659,7 @@ slot and prefix, so a deployment can put the factors on a Redis of their own.
 | --- | --- | --- |
 | `mfaf:{<subject>}` | hash | one field per enrolled factor (its id): `<version>\n<fixed JSON>\n<mutable JSON>` |
 | `mfat:tx:{<id>}` | hash | one MFA transaction, expiring at its `expiresAtMs` |
-| `mfat:lock:{<subject>}` | hash | D21's consecutive run and the reservations in flight |
+| `mfat:lock:{<subject>}` | hash | D21's consecutive run, the reservations in flight, and whether a hold's first refusal was answered (`held`) |
 | `mfat:week:{<subject>}` | sorted set | the weekly window: one member per failure, scored by its time |
 | `mfat:proof:{<subject>}` | string | the email proof an operator reset requires at the next first binding |
 
@@ -714,8 +714,12 @@ operations. What a script forgets, and what Redis reclaims, is judged no
 later than the server's clock less a day. While a run is counted the keys
 carry no TTL — only a success, an exempt success or `clearSubjectState` ends
 one — and once none is they expire a day after the last failure stops
-counting. A state a script cannot read refuses the attempt; it is never
-read as a state that holds nothing. A lock-hash field of a kind the scripts
+counting. A refusal answers whether it is the first since an attempt was
+let through (`first`) from the lock hash's `held` field, which the first
+refusal of a hold writes and an attempt let through deletes, so a subject
+refused again and again costs no write after the first. A state a script
+cannot read refuses the attempt; it is never read as a state that holds
+nothing. A lock-hash field of a kind the scripts
 do not read (`t:<digest>` among them) is ignored and goes with the keys, and
 a transaction hash's `sends` and `lastSentAtMs`, where present, are not read:
 neither loosens a limit the store keeps. The email-proof requirement is a key of

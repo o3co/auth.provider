@@ -591,15 +591,25 @@ wires it.
   `@o3co/auth-provider-standard`'s SMTP sender's. A sender answers a refusal
   at a limit, which the provider answers `429`, apart from an outage, `503`;
   a delivery that fails leaves the ceremony standing. The package's
-  development sender logs each code, and is refused outside a development
-  box.
+  development sender logs each code, and installs only where the
+  configuration was selected as `development` or `test`.
+- **The email factor's address.** The factor keeps no address: only a keyed
+  digest of the one its enrollment code went to. A login code goes to the
+  account's current address only while that digest matches, so **a change of
+  the address in the Store makes the email factor unusable until the user
+  enrolls it again**, after recent MFA; the provider records
+  `mfa.email_address_mismatch` when it refuses the factor for it. A user with
+  no other factor needs a recovery code or an operator reset. Changing the
+  address is the Store's: ask for recent authentication, and tell the old
+  address.
 - **Notices to the account holder: required, and yours.** The provider sends
   none. It records audit events (`auditSink`), and the deployment reads them
   and tells the account holder — by mail, a chat message, anything — of every
   factor enrolled (`mfa.factor.enrolled`) or removed (`mfa.factor.removed`),
   recovery codes regenerated (`mfa.recovery_codes.generated`,
-  `regenerated: true`), an operator reset (`mfa.reset`) and the first lock of
-  an episode (`mfa.locked.first`). Wire it: it is how a user learns that a
+  `regenerated: true`), an operator reset (`mfa.reset`), the first lock of
+  an episode (`mfa.locked.first`) and an email factor refused at a changed
+  address (`mfa.email_address_mismatch`). Wire it: it is how a user learns that a
   leaked password bound a factor first (D24). `auditSink` is one slot; to
   keep the audit trail and notify at once, wrap both in an `AuditSink` of
   your own (one method, `record`).
@@ -948,7 +958,8 @@ check this page, so when the two disagree, the constant is right:
 `introspect.family_revoked`, `introspect.session_invalid`,
 `introspect.store_unavailable`,
 `logout.cascade_failed`, `logout.family_revoked`, `logout.success`,
-`mfa.challenge.sent`, `mfa.enrollment_state_inconsistent`,
+`mfa.challenge.sent`, `mfa.email_address_mismatch`,
+`mfa.enrollment_state_inconsistent`,
 `mfa.factor.enrolled`, `mfa.factor.removed`, `mfa.locked`,
 `mfa.locked.first`, `mfa.recovery_code.used`,
 `mfa.recovery_codes.generated`, `mfa.reset`, `mfa.verified`,
