@@ -17,12 +17,11 @@
 /**
  * The conformance suite every contributed second factor runs, the factor
  * double, and the keyed digests a factor's tests hand it. The suite runs
- * against the double, with and without mail; each way a factor can break
+ * against the double, with and without a challenge; each way a factor can break
  * the contract fails the case that names it.
  */
 
 import { describe, expect, it } from "vitest";
-import type { MailMessage } from "#/mail/types.mjs";
 import type { MfaFactor } from "#/mfa/factor.mjs";
 import {
 	createTestMfaDigests,
@@ -39,18 +38,14 @@ const RULES = {
 		"amrValues is a non-empty list of distinct non-empty strings, with no primary's marker and no mfa",
 	flags:
 		"addsMfa, counting and guessable are true or false, and reusableChallenge true, false or absent",
-	mailLimits:
-		"mailLimits, when declared, allow at least one send, in whole numbers of sends and seconds",
 	enrollable: "enrollable, when present, answers true for an account that can enroll the factor",
-	begin:
-		"beginEnrollment answers state that survives a JSON round trip, and mail only beside mailLimits, as a message with a recipient, a subject and a text, whose code the response does not carry",
+	begin: "beginEnrollment answers state that survives a JSON round trip",
 	completeMalformed:
 		"completeEnrollment answers malformed for a proof it cannot read, and never throws for one",
 	complete:
 		"completeEnrollment takes the proof of possession, and answers data that survives a JSON round trip, a label that is a string when present, and at least one amr value, each among amrValues",
 	describe: "describe answers a hint that is a string, or none, and never the account's address",
-	challenge:
-		"challenge, when present, answers state that survives a JSON round trip, and mail only beside mailLimits, as a message with a recipient, a subject and a text, to the address the enrollment mailed, whose code the response does not carry",
+	challenge: "challenge, when present, answers state that survives a JSON round trip",
 	verifyMalformed: "verify answers malformed for a proof it cannot read, and never throws for one",
 	verify:
 		"verify takes a valid proof, names a factor the subject holds, and answers next data that survives a JSON round trip",
@@ -81,16 +76,14 @@ const failing = async (input: MfaFactorContractInput): Promise<string[]> => {
 	return failed;
 };
 
-const MAIL = { maxSends: 3, resendAfterSeconds: 30 } as const;
-
 describe("mfaFactorContract", () => {
 	it("names every rule it holds a factor to", () => {
 		expect(mfaFactorContract(inputFor()).map((c) => c.name)).toEqual(Object.values(RULES));
 	});
 
-	it("passes the double, with and without mail", async () => {
+	it("passes the double, with and without a challenge", async () => {
 		expect(await failing(inputFor())).toEqual([]);
-		expect(await failing(inputFor({ mail: MAIL }))).toEqual([]);
+		expect(await failing(inputFor({ challenge: true }))).toEqual([]);
 		expect(await failing(inputFor({ kind: "test_2", amrValues: ["hwk", "swk"] }))).toEqual([]);
 	});
 
@@ -117,26 +110,13 @@ describe("mfaFactorContract", () => {
 		).toEqual([RULES.flags]);
 	});
 
-	it("fails mail limits that allow no send, or are not whole numbers", async () => {
-		for (const mailLimits of [
-			{ maxSends: 0, resendAfterSeconds: 30 },
-			{ maxSends: 1.5, resendAfterSeconds: 30 },
-			{ maxSends: 3, resendAfterSeconds: -1 },
-			{ maxSends: 3, resendAfterSeconds: Number.NaN },
-		]) {
-			expect(
-				await failing(inputFor({ mail: MAIL }, (factor) => ({ ...factor, mailLimits }))),
-			).toEqual([RULES.mailLimits]);
-		}
-	});
-
 	it("fails a factor that refuses the account it is handed as enrollable", async () => {
 		expect(
 			await failing(inputFor({}, (factor) => ({ ...factor, enrollable: () => false }))),
 		).toEqual([RULES.enrollable]);
 	});
 
-	it("fails an enrollment whose state does not survive JSON, or whose mail comes without limits", async () => {
+	it("fails an enrollment whose state does not survive JSON", async () => {
 		expect(
 			await failing(
 				inputFor({}, (factor) => ({
@@ -148,61 +128,6 @@ describe("mfaFactorContract", () => {
 				})),
 			),
 		).toEqual([RULES.begin]);
-		const { mailLimits: _dropped, ...withoutLimits } = createTestMfaFactor({ mail: MAIL });
-		expect(await failing({ ...inputFor(), build: () => withoutLimits })).toEqual(
-			expect.arrayContaining([RULES.begin, RULES.challenge]),
-		);
-		expect(
-			await failing(
-				inputFor({ mail: MAIL }, (factor) => ({
-					...factor,
-					beginEnrollment: async (ctx) => {
-						const start = await factor.beginEnrollment(ctx);
-						return { ...start, mail: { ...(start.mail as object), subject: "" } as never };
-					},
-				})),
-			),
-		).toEqual([RULES.begin]);
-	});
-
-	it("fails an enrollment or a challenge whose response carries the code its mail sends", async () => {
-		const codeOf = (mail: { text: string } | undefined) => mail?.text.split(" ").at(-1);
-		expect(
-			await failing(
-				inputFor({ mail: MAIL }, (factor) => ({
-					...factor,
-					beginEnrollment: async (ctx) => {
-						const start = await factor.beginEnrollment(ctx);
-						return { ...start, response: { sent: true, code: codeOf(start.mail) } };
-					},
-				})),
-			),
-		).toEqual([RULES.begin]);
-		expect(
-			await failing(
-				inputFor({ mail: MAIL }, (factor) => ({
-					...factor,
-					challenge: async (ctx) => {
-						const sent = await (factor.challenge as NonNullable<MfaFactor["challenge"]>)(ctx);
-						return { ...sent, response: { echo: `code ${codeOf(sent.mail)}` } };
-					},
-				})),
-			),
-		).toEqual([RULES.challenge]);
-	});
-
-	it("fails a challenge that mails another address than the enrollment did", async () => {
-		expect(
-			await failing(
-				inputFor({ mail: MAIL }, (factor) => ({
-					...factor,
-					challenge: async (ctx) => {
-						const sent = await (factor.challenge as NonNullable<MfaFactor["challenge"]>)(ctx);
-						return { ...sent, mail: { ...(sent.mail as MailMessage), to: "mallory@example.com" } };
-					},
-				})),
-			),
-		).toEqual([RULES.challenge]);
 	});
 
 	it("fails a completion whose data amrFor answers nothing for", async () => {
@@ -261,7 +186,7 @@ describe("mfaFactorContract", () => {
 	it("fails a challenge whose state does not survive JSON", async () => {
 		expect(
 			await failing(
-				inputFor({ mail: MAIL }, (factor) => ({
+				inputFor({ challenge: true }, (factor) => ({
 					...factor,
 					challenge: async (ctx) => {
 						const sent = await (factor.challenge as NonNullable<MfaFactor["challenge"]>)(ctx);
@@ -312,7 +237,7 @@ describe("mfaFactorContract", () => {
 });
 
 describe("createTestMfaFactor", () => {
-	it("is a counting, non-guessable factor of kind test adding otp and mfa, with no challenge unless it mails", () => {
+	it("is a counting, non-guessable factor of kind test adding otp and mfa, with a challenge only when asked for one", () => {
 		const factor = createTestMfaFactor();
 		expect(factor).toMatchObject({
 			kind: "test",
@@ -322,29 +247,43 @@ describe("createTestMfaFactor", () => {
 			guessable: false,
 		});
 		expect(factor.challenge).toBeUndefined();
-		expect(factor.mailLimits).toBeUndefined();
-		const mailing = createTestMfaFactor({ mail: MAIL });
-		expect(mailing.mailLimits).toEqual(MAIL);
-		expect(typeof mailing.challenge).toBe("function");
+		expect(typeof createTestMfaFactor({ challenge: true }).challenge).toBe("function");
 	});
 
-	it("mails the enrollment's code to the account's address, and offers itself only to an account that has one", async () => {
-		const factor = createTestMfaFactor({ mail: MAIL });
-		expect(factor.enrollable?.(USER)).toBe(true);
-		expect(factor.enrollable?.({ id: "u-without" })).toBe(false);
-		const start = await factor.beginEnrollment({
+	it("verifies after a challenge only the secret beside the nonce that challenge answered", async () => {
+		const factor = createTestMfaFactor({ challenge: true });
+		const ctx = {
 			subject: USER.id,
 			transactionId: "tx",
 			nowMs: 0,
 			request: {},
 			digests: createTestMfaDigests("test"),
-			user: USER,
-			factors: [],
-		});
-		expect(start.mail?.to).toBe(USER.email);
-		expect(JSON.stringify(start.response)).not.toContain(
-			String(testMfaFactorProofs.enrollmentProof(start)),
-		);
+		};
+		const enrolled = {
+			id: "f-1",
+			label: undefined,
+			createdAt: new Date(0),
+			lastUsedAt: undefined,
+			data: { secret: "s3cret" },
+		};
+		const challenge = factor.challenge as NonNullable<MfaFactor["challenge"]>;
+		const first = await challenge({ ...ctx, factor: enrolled, factors: [enrolled] });
+		const second = await challenge({ ...ctx, factor: enrolled, factors: [enrolled] });
+		const verify = (state: unknown, proof: unknown) =>
+			factor.verify({
+				...ctx,
+				factor: enrolled,
+				factors: [enrolled],
+				state: state as never,
+				proof,
+			});
+		expect(
+			await verify(second.state, testMfaFactorProofs.verificationProof(enrolled, second)),
+		).toEqual({ ok: true, factorId: "f-1" });
+		expect(
+			await verify(second.state, testMfaFactorProofs.verificationProof(enrolled, first)),
+		).toEqual({ ok: false, reason: "invalid" });
+		expect(await verify(undefined, "s3cret:x")).toEqual({ ok: false, reason: "expired" });
 	});
 });
 

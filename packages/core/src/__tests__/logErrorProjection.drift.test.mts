@@ -116,7 +116,6 @@ const SOURCE_ROOTS: readonly string[] = [
 	"packages/oauth-token-exchange/src",
 	"packages/redis/src",
 	"packages/session/src",
-	"packages/smtp/src",
 	"packages/webauthn/src",
 	"templates/standalone/src",
 ];
@@ -593,7 +592,6 @@ const STRING_FIRST_EVERYWHERE: readonly string[] = [
 	"packages/oauth-token-exchange/src",
 	"packages/redis/src",
 	"packages/session/src",
-	"packages/smtp/src",
 	"packages/webauthn/src",
 	"templates/standalone/src",
 ];

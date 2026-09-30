@@ -17,8 +17,8 @@
 /**
  * The configuration this package reads: the MFA module's own section, `mfa`,
  * and the TOTP factor's, `mfa-totp-factor`, each its module's alone (the
- * email and recovery-code factors' sections are read beside their modules,
- * in `email/` and `recovery/`, with the readers shared from here). Keys,
+ * recovery-code factor's section is read beside its module, in `recovery/`,
+ * with the readers shared from here). Keys,
  * ranges, defaults and refusals: see README, Configuration, and ADR
  * 2026-09-25-multi-factor-authentication.
  *

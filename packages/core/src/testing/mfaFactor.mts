@@ -23,14 +23,12 @@
  * whatever the kind: a kind a hint can carry; `amrValues` it can vouch for and
  * `amrFor` within them, never empty; boolean flags; state and data that
  * survive the JSON round trip sealing puts them through, which the suite also
- * hands the factor back after; mail only beside the limits that bound it, a
- * challenge's to the address the enrollment mailed, and the code a message
- * sends never in the page's response; a hint that never shows the account's
+ * hands the factor back after; a hint that never shows the account's
  * address; a proof the factor cannot read answered `malformed`, never thrown;
  * and a valid proof that completes an enrollment and verifies the factor it
- * enrolled. The suite
- * enrolls at one instant and verifies an hour later, so a factor that refuses
- * reuse within a time step is not asked to verify at the step it enrolled.
+ * enrolled. The suite enrolls at one instant and verifies an hour later, so a
+ * factor that refuses reuse within a time step is not asked to verify at the
+ * step it enrolled.
  *
  * `createTestMfaFactor` is a factor with a trivial protocol; `createTestMfaDigests`
  * digests under a fixed test key. Published on `@o3co/auth-provider-core/testing`;
@@ -40,22 +38,30 @@
 import assert from "node:assert/strict";
 import { createHmac, randomBytes } from "node:crypto";
 import { FEDERATED_AMR, MFA_AMR, OTP_AMR, PASSWORD_AMR } from "../grants/authenticationClaims.mjs";
-import type { MailMessage } from "../mail/types.mjs";
 import type {
 	MfaCeremonyContext,
-	MfaChallenge,
 	MfaDigestMatch,
 	MfaDigests,
 	MfaEnrolledFactor,
-	MfaEnrollmentStart,
 	MfaFactor,
-	MfaFactorData,
+	MfaFactorState,
 	MfaKeyedDigest,
-	MfaMailLimits,
 } from "../mfa/factor.mjs";
 import { constantTimeStringEqual } from "../security/timingSafe.mjs";
 import { isHintToken } from "../session-admission/requirement.mjs";
 import type { ContractCase } from "../session-admission/testing/requirement.contract.mjs";
+
+/** What the start of an enrollment answers: the state the coordinator keeps, and the page's response. */
+export interface MfaFactorEnrollmentStart {
+	readonly state: MfaFactorState;
+	readonly response: unknown;
+}
+
+/** What a challenge answers: the state the coordinator keeps, if any, and the page's response. */
+export interface MfaFactorChallenge {
+	readonly state?: MfaFactorState;
+	readonly response: unknown;
+}
 
 export interface MfaFactorContractInput {
 	/** A fresh factor for each case. */
@@ -63,14 +69,17 @@ export interface MfaFactorContractInput {
 	/** An account the factor can enroll, as the Store answers it (a `User`). */
 	readonly user: Readonly<Record<string, unknown>>;
 	/** The proof of possession that completes the enrollment `start` began, as a request carries it. */
-	readonly enrollmentProof: (start: MfaEnrollmentStart, context: MfaCeremonyContext) => unknown;
+	readonly enrollmentProof: (
+		start: MfaFactorEnrollmentStart,
+		context: MfaCeremonyContext,
+	) => unknown;
 	/**
 	 * A proof that verifies `enrolled` at the context's time — after `challenge`,
 	 * which the suite passes, when the factor has one.
 	 */
 	readonly verificationProof: (
 		enrolled: MfaEnrolledFactor,
-		challenge: MfaChallenge | undefined,
+		challenge: MfaFactorChallenge | undefined,
 		context: MfaCeremonyContext,
 	) => unknown;
 	/** Proofs the factor cannot read. Default: `undefined`, `null`, a number and an empty object. */
@@ -99,43 +108,6 @@ function survivesJson(value: unknown, what: string): void {
 /** `value` as the coordinator hands it back after keeping it: through JSON. */
 const reopened = <T,>(value: T): T => JSON.parse(JSON.stringify(value)) as T;
 
-/** Whether `response` carries `proof`, the code a message sends. */
-function carries(response: unknown, proof: unknown): boolean {
-	if (typeof proof !== "string" || proof.length === 0) return false;
-	return (JSON.stringify(response) ?? "").includes(proof);
-}
-
-/**
- * A message the coordinator can send — a recipient, a subject and a text —
- * whose code, `proof`, the page's `response` does not carry: the code
- * travels only in the message.
- */
-function checkMail(
-	mail: unknown,
-	factor: MfaFactor,
-	what: string,
-	response: unknown,
-	proof: unknown,
-): void {
-	if (mail === undefined) return;
-	assert.ok(
-		factor.mailLimits !== undefined,
-		`${what} answered mail, and the factor declares no mailLimits: the coordinator would send it unbounded`,
-	);
-	const { to, subject, text } = (mail ?? {}) as Partial<MailMessage>;
-	for (const [part, value] of [
-		["recipient", to],
-		["subject", subject],
-		["text", text],
-	] as const) {
-		assert.ok(typeof value === "string" && value.length > 0, `${what}'s mail has no ${part}`);
-	}
-	assert.ok(
-		!carries(response, proof),
-		`${what}'s response carries the code its mail sends: the page would hold what only the mailbox should`,
-	);
-}
-
 /** Every call's context, at `nowMs`, under the transaction `transactionId`. */
 const contextAt = (
 	factor: MfaFactor,
@@ -159,10 +131,8 @@ export function mfaFactorContract(input: MfaFactorContractInput): readonly Contr
 		return { context, start };
 	};
 
-	/** The factor enrolled through its own ceremony, its data as the coordinator opens it, and the enrollment's start. */
-	const enroll = async (
-		factor: MfaFactor,
-	): Promise<{ readonly enrolled: MfaEnrolledFactor; readonly start: MfaEnrollmentStart }> => {
+	/** The factor enrolled through its own ceremony, its data as the coordinator opens it. */
+	const enroll = async (factor: MfaFactor): Promise<MfaEnrolledFactor> => {
 		const { context, start } = await begin(factor);
 		const done = await factor.completeEnrollment({
 			...context,
@@ -176,14 +146,11 @@ export function mfaFactorContract(input: MfaFactorContractInput): readonly Contr
 			`the proof of possession did not complete the enrollment: ${JSON.stringify(done)}`,
 		);
 		return {
-			enrolled: {
-				id: FACTOR_ID,
-				label: done.label,
-				createdAt: new Date(ENROLLED_AT_MS),
-				lastUsedAt: undefined,
-				data: reopened(done.data),
-			},
-			start,
+			id: FACTOR_ID,
+			label: done.label,
+			createdAt: new Date(ENROLLED_AT_MS),
+			lastUsedAt: undefined,
+			data: reopened(done.data),
 		};
 	};
 
@@ -237,21 +204,6 @@ export function mfaFactorContract(input: MfaFactorContractInput): readonly Contr
 			},
 		},
 		{
-			name: "mailLimits, when declared, allow at least one send, in whole numbers of sends and seconds",
-			run: async () => {
-				const { mailLimits } = input.build();
-				if (mailLimits === undefined) return;
-				assert.ok(
-					Number.isSafeInteger(mailLimits.maxSends) && mailLimits.maxSends >= 1,
-					`mailLimits.maxSends ${String(mailLimits.maxSends)} allows no send`,
-				);
-				assert.ok(
-					Number.isSafeInteger(mailLimits.resendAfterSeconds) && mailLimits.resendAfterSeconds >= 0,
-					`mailLimits.resendAfterSeconds ${String(mailLimits.resendAfterSeconds)} is not a whole number of seconds`,
-				);
-			},
-		},
-		{
 			name: "enrollable, when present, answers true for an account that can enroll the factor",
 			run: async () => {
 				const factor = input.build();
@@ -260,18 +212,11 @@ export function mfaFactorContract(input: MfaFactorContractInput): readonly Contr
 			},
 		},
 		{
-			name: "beginEnrollment answers state that survives a JSON round trip, and mail only beside mailLimits, as a message with a recipient, a subject and a text, whose code the response does not carry",
+			name: "beginEnrollment answers state that survives a JSON round trip",
 			run: async () => {
 				const factor = input.build();
-				const { context, start } = await begin(factor);
+				const { start } = await begin(factor);
 				survivesJson(start.state, "the pending enrollment's state");
-				checkMail(
-					start.mail,
-					factor,
-					"beginEnrollment",
-					start.response,
-					await input.enrollmentProof(start, context),
-				);
 			},
 		},
 		{
@@ -326,7 +271,7 @@ export function mfaFactorContract(input: MfaFactorContractInput): readonly Contr
 			name: "describe answers a hint that is a string, or none, and never the account's address",
 			run: async () => {
 				const factor = input.build();
-				const { hint } = factor.describe((await enroll(factor)).enrolled.data);
+				const { hint } = factor.describe((await enroll(factor)).data);
 				assert.ok(hint === undefined || typeof hint === "string", "the hint is not a string");
 				const { email } = input.user;
 				assert.ok(
@@ -336,34 +281,19 @@ export function mfaFactorContract(input: MfaFactorContractInput): readonly Contr
 			},
 		},
 		{
-			name: "challenge, when present, answers state that survives a JSON round trip, and mail only beside mailLimits, as a message with a recipient, a subject and a text, to the address the enrollment mailed, whose code the response does not carry",
+			name: "challenge, when present, answers state that survives a JSON round trip",
 			run: async () => {
 				const factor = input.build();
 				if (factor.challenge === undefined) return;
-				const { enrolled, start } = await enroll(factor);
-				const { context, sent } = await challenge(factor, enrolled);
+				const { sent } = await challenge(factor, await enroll(factor));
 				if (sent?.state !== undefined) survivesJson(sent.state, "the challenge's state");
-				checkMail(
-					sent?.mail,
-					factor,
-					"challenge",
-					sent?.response,
-					sent === undefined ? undefined : await input.verificationProof(enrolled, sent, context),
-				);
-				if (sent?.mail !== undefined && start.mail !== undefined) {
-					assert.equal(
-						sent.mail.to,
-						start.mail.to,
-						"the challenge mails another address than the one the enrollment proved",
-					);
-				}
 			},
 		},
 		{
 			name: "verify answers malformed for a proof it cannot read, and never throws for one",
 			run: async () => {
 				const factor = input.build();
-				const { enrolled } = await enroll(factor);
+				const enrolled = await enroll(factor);
 				for (const proof of malformed) {
 					const { context, sent } = await challenge(factor, enrolled);
 					const verdict = await factor.verify({
@@ -385,7 +315,7 @@ export function mfaFactorContract(input: MfaFactorContractInput): readonly Contr
 			name: "verify takes a valid proof, names a factor the subject holds, and answers next data that survives a JSON round trip",
 			run: async () => {
 				const factor = input.build();
-				const { enrolled } = await enroll(factor);
+				const enrolled = await enroll(factor);
 				const { context, sent } = await challenge(factor, enrolled);
 				const verdict = await factor.verify({
 					...context,
@@ -460,36 +390,24 @@ export interface TestMfaFactorOptions {
 	/** Default false. */
 	readonly guessable?: boolean;
 	/**
-	 * Mail the enrollment's code to the account's `email`, and a code at each
-	 * challenge, under these limits; the factor is then enrollable only by an
-	 * account with an address. Absent: the enrollment answers its secret
-	 * (as an authenticator app's is shown), and there is no challenge.
+	 * Answer a challenge before each verification: a nonce, kept as the
+	 * challenge's state and answered to the page, which the verification must
+	 * repeat beside the secret — as a WebAuthn assertion signs the challenge
+	 * it was handed. Absent: there is no challenge.
 	 */
-	readonly mail?: MfaMailLimits;
+	readonly challenge?: boolean;
 }
 
-/** The code in a message the double sent: its text's last word. */
-const codeIn = (mail: MailMessage | undefined): string | undefined => mail?.text.split(" ").at(-1);
-
 /**
- * A second factor with a trivial protocol, for tests: without `mail`, the
- * enrollment answers a random secret and a verification is that secret;
- * with it, the enrollment mails a code the proof of possession must repeat,
- * each challenge mails another, and a verification is the latest one.
- * {@link testMfaFactorProofs} reads the proofs back. A proof that is not a
- * string is `malformed`.
+ * A second factor with a trivial protocol, for tests: the enrollment answers
+ * a random secret, and a verification is that secret — with `challenge`, the
+ * secret and the nonce the latest challenge answered, as `secret:nonce`.
+ * {@link testMfaFactorProofs} makes the proofs. A proof that is not a string
+ * is `malformed`.
  */
 export function createTestMfaFactor(options: TestMfaFactorOptions = {}): MfaFactor {
 	const amrValues = Object.freeze([...(options.amrValues ?? [OTP_AMR])]);
-	const mailLimits = options.mail === undefined ? undefined : Object.freeze({ ...options.mail });
-	const newCode = (): string => randomBytes(8).toString("hex");
-	const addressOf = (user: Readonly<Record<string, unknown>>): string | undefined =>
-		typeof user.email === "string" && user.email.length > 0 ? user.email : undefined;
-	const message = (to: string, code: string): MailMessage => ({
-		to,
-		subject: "Your test code",
-		text: `Your test code is ${code}`,
-	});
+	const newSecret = (): string => randomBytes(8).toString("hex");
 	const factor: MfaFactor = {
 		kind: options.kind ?? "test",
 		amrValues,
@@ -497,67 +415,59 @@ export function createTestMfaFactor(options: TestMfaFactorOptions = {}): MfaFact
 		addsMfa: options.addsMfa ?? true,
 		counting: options.counting ?? true,
 		guessable: options.guessable ?? false,
-		describe: (data: MfaFactorData) =>
-			typeof data.address === "string" ? { hint: `${data.address.slice(0, 1)}***` } : {},
-		beginEnrollment: async (ctx) => {
-			const secret = newCode();
-			if (mailLimits === undefined) return { state: { secret }, response: { secret } };
-			const address = addressOf(ctx.user);
-			if (address === undefined)
-				throw new RangeError("createTestMfaFactor: the account has no email");
-			return {
-				state: { secret, address },
-				response: { sent: true },
-				mail: message(address, secret),
-			};
+		describe: () => ({}),
+		beginEnrollment: async () => {
+			const secret = newSecret();
+			return { state: { secret }, response: { secret } };
 		},
 		completeEnrollment: async (ctx) => {
 			if (typeof ctx.proof !== "string") return { ok: false, reason: "malformed" };
 			if (ctx.proof !== ctx.state.secret) return { ok: false, reason: "invalid" };
-			const { secret, address } = ctx.state;
-			return { ok: true, data: address === undefined ? { secret } : { secret, address } };
+			return { ok: true, data: { secret: ctx.state.secret } };
 		},
 		verify: async (ctx) => {
 			if (typeof ctx.proof !== "string") return { ok: false, reason: "malformed" };
-			const expected = mailLimits === undefined ? ctx.factor.data.secret : ctx.state?.code;
-			if (expected === undefined) return { ok: false, reason: "expired" };
-			return ctx.proof === expected
+			const { secret } = ctx.factor.data;
+			if (options.challenge !== true) {
+				return ctx.proof === secret
+					? { ok: true, factorId: ctx.factor.id }
+					: { ok: false, reason: "invalid" };
+			}
+			const nonce = ctx.state?.nonce;
+			if (typeof nonce !== "string") return { ok: false, reason: "expired" };
+			return ctx.proof === `${String(secret)}:${nonce}`
 				? { ok: true, factorId: ctx.factor.id }
 				: { ok: false, reason: "invalid" };
 		},
-		...(mailLimits === undefined
-			? {}
-			: {
-					mailLimits,
-					reusableChallenge: true,
-					enrollable: (user: Readonly<Record<string, unknown>>) => addressOf(user) !== undefined,
-					challenge: async (ctx) => {
-						const code = newCode();
-						return {
-							state: { code },
-							response: { sent: true },
-							mail: message(String(ctx.factor.data.address), code),
-						};
+		...(options.challenge === true
+			? {
+					challenge: async () => {
+						const nonce = newSecret();
+						return { state: { nonce }, response: { nonce } };
 					},
-				}),
+				}
+			: {}),
 	};
 	return factor;
 }
 
 /**
- * The proofs of {@link createTestMfaFactor}: the enrollment's secret, or the
- * code its message carried; a verification's secret, or the code the
- * challenge mailed. An input to {@link mfaFactorContract} beside the double.
+ * The proofs of {@link createTestMfaFactor}: the secret its enrollment
+ * answered; for a verification, that secret — and, after a challenge, the
+ * nonce it answered, as `secret:nonce`. An input to {@link mfaFactorContract}
+ * beside the double.
  */
 export const testMfaFactorProofs: {
-	readonly enrollmentProof: (start: MfaEnrollmentStart) => unknown;
+	readonly enrollmentProof: (start: MfaFactorEnrollmentStart) => unknown;
 	readonly verificationProof: (
 		enrolled: MfaEnrolledFactor,
-		challenge: MfaChallenge | undefined,
+		challenge: MfaFactorChallenge | undefined,
 	) => unknown;
 } = Object.freeze({
-	enrollmentProof: (start: MfaEnrollmentStart) =>
-		start.mail === undefined ? (start.response as { secret?: unknown }).secret : codeIn(start.mail),
-	verificationProof: (enrolled: MfaEnrolledFactor, challenge: MfaChallenge | undefined) =>
-		challenge === undefined ? enrolled.data.secret : codeIn(challenge.mail),
+	enrollmentProof: (start: MfaFactorEnrollmentStart) =>
+		(start.response as { secret?: unknown }).secret,
+	verificationProof: (enrolled: MfaEnrolledFactor, challenge: MfaFactorChallenge | undefined) =>
+		challenge === undefined
+			? enrolled.data.secret
+			: `${String(enrolled.data.secret)}:${String((challenge.response as { nonce?: unknown }).nonce)}`,
 });

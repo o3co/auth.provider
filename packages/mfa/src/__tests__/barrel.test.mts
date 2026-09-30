@@ -19,10 +19,8 @@
  * `mfaModules` — the TOTP factor's module beside it — with the id of the MFA
  * routes' contribution and the prefix their budget is keyed by, the
  * admission actions its routes admit, the TOTP factor's module on its own,
- * the email and recovery-code factors' modules (declared before their
- * factors are built),
- * the schema of
- * the `mfa` keys this package reads, and the published development sample
+ * the recovery-code factor's module, the schema of the `mfa` keys this
+ * package reads, and the published development sample
  * key a development configuration may carry (the MFA ADR's D1 and D11). The
  * requirement, the transactions, the sealing, the TOTP primitive and the
  * settings reader are the package's own.
@@ -32,14 +30,13 @@ import { describe, expect, it } from "vitest";
 import * as entry from "#/index.mjs";
 
 describe("@o3co/auth-provider-mfa's entry", () => {
-	it("exports the MFA module, mfaModules, the routes' id, budget prefix and admission actions, the TOTP, email and recovery-code factors' modules, the MFA config schema and the development sample key, and nothing else", () => {
+	it("exports the MFA module, mfaModules, the routes' id, budget prefix and admission actions, the TOTP and recovery-code factors' modules, the MFA config schema and the development sample key, and nothing else", () => {
 		expect(Object.keys(entry).sort()).toEqual([
 			"MFA_ADMISSION_ACTIONS",
 			"MFA_DEVELOPMENT_SAMPLE_KEY",
 			"MFA_RATE_LIMIT_PREFIX",
 			"MFA_ROUTES_ID",
 			"mfaConfigSchema",
-			"mfaEmailFactorModule",
 			"mfaModule",
 			"mfaModules",
 			"mfaRecoveryCodeFactorModule",

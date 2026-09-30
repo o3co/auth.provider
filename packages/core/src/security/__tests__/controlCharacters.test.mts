@@ -16,8 +16,8 @@
 
 /**
  * `hasControlCharacter`: the one reading of "a control character" in text an
- * operator configures — a mail header, an issuer, a relay's host — C0, DEL
- * and C1, but those a rule allows (a message's line breaks).
+ * operator configures — an issuer, a label, a header — C0, DEL and C1, but
+ * those a rule allows (a text's line breaks).
  */
 
 import { describe, expect, it } from "vitest";

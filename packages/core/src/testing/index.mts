@@ -66,7 +66,9 @@ export {
 export {
 	createTestMfaDigests,
 	createTestMfaFactor,
+	type MfaFactorChallenge,
 	type MfaFactorContractInput,
+	type MfaFactorEnrollmentStart,
 	mfaFactorContract,
 	type TestMfaFactorOptions,
 	testMfaFactorProofs,
@@ -120,12 +122,6 @@ export {
 	type LoginEntryContractInput,
 	loginEntryContract,
 } from "./slots/loginEntry.mjs";
-export {
-	MAIL_REFUSALS,
-	type MailRefusal,
-	type MailSenderContractInput,
-	mailSenderContract,
-} from "./slots/mailSender.mjs";
 export {
 	createTestOAuthTokenSettings,
 	type OAuthTokenSettingsContractInput,

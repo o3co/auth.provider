@@ -27,7 +27,6 @@
 		"@o3co/auth-provider-oauth-token-exchange": "workspace:*",
 		"@o3co/auth-provider-redis": "workspace:*",
 		"@o3co/auth-provider-session": "workspace:*",
-		"@o3co/auth-provider-smtp": "workspace:*",
 		"@o3co/auth-provider-standalone": "workspace:*",
 		"@o3co/auth-provider-webauthn": "workspace:*",
 		"@o3co/ts.hocon": "^1.13.0",

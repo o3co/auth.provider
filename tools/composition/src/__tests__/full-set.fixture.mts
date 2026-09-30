@@ -19,18 +19,17 @@
  * `all-modules-composition.fixture.mts`, imported whole) with every workspace
  * package the template does not depend on added the way a deployment adds
  * them to that manifest — the device grant, DPoP, mTLS, token exchange,
- * WebAuthn, the MFA package (`mfaModules` and the email factor's module,
- * switched off, over the MFA stores, `mfa.mode = "optional"`, a key of the
- * deployment's own), and the Apple and GitHub federations. What the template's fixture substitutes, this one inherits.
+ * WebAuthn, the MFA package (`mfaModules` over the MFA stores, `mfa.mode =
+ * "optional"`, a key of the deployment's own), and the Apple and GitHub
+ * federations. What the template's fixture substitutes, this one inherits.
  * What it adds:
  *
  * - The settings with no default laid over the configuration. The added
  *   packages' `reference.conf` files are layered because their modules
  *   declare them (`section.reference`), as `app.mts` does.
  * - The small modules each package's README has a deployment write: the
- *   WebAuthn, Apple and GitHub config bridges, a `grantPolicy` (WebAuthn
- *   refuses to boot without one, and no package ships one) and, beside MFA,
- *   a `mailSender` that records what it is handed in place of a relay. The federation
+ *   WebAuthn, Apple and GitHub config bridges and a `grantPolicy` (WebAuthn
+ *   refuses to boot without one, and no package ships one). The federation
  *   bridges point each adapter's `fetch` at a fake upstream.
  * - mTLS in-process on its `header` source from a loopback peer — the shape
  *   a TLS-terminating proxy gives it — with the mTLS package's test
@@ -68,16 +67,12 @@ import {
 	type SessionRequirement,
 	SUBJECT_REVOCATION_ABSENCE_POLICY,
 } from "@o3co/auth-provider-core";
-import {
-	createFakeIdp,
-	createRecordingMailSender,
-	type FakeIdp,
-} from "@o3co/auth-provider-core/testing";
+import { createFakeIdp, type FakeIdp } from "@o3co/auth-provider-core/testing";
 import { DEVICE_CODE_GRANT_TYPE, deviceGrantModule } from "@o3co/auth-provider-device-grant";
 import { dpopModule } from "@o3co/auth-provider-dpop";
 import { appleFederationModule } from "@o3co/auth-provider-federation-apple";
 import { githubFederationModule } from "@o3co/auth-provider-federation-github";
-import { mfaEmailFactorModule, mfaModules } from "@o3co/auth-provider-mfa";
+import { mfaModules } from "@o3co/auth-provider-mfa";
 import { mtlsModule } from "@o3co/auth-provider-mtls";
 import {
 	TOKEN_EXCHANGE_GRANT_TYPE,
@@ -243,12 +238,6 @@ function withFeatures(config: AppConfig, features: Features): AppConfig {
 // ---------------------------------------------------------------------------
 // The modules a deployment writes
 // ---------------------------------------------------------------------------
-
-/** The deployment's mail sender, in place of an SMTP relay: it records every message it accepts. */
-const mailSenderModule = defineModule({
-	name: "deployment:mail-sender",
-	provides: { mailSender: () => createRecordingMailSender() },
-});
 
 /** The README's WebAuthn bootstrap: the `webauthn` section, through the package's schema. */
 const webauthnConfigModule = defineModule({
@@ -628,15 +617,12 @@ function addedModules(
 				]
 			: []),
 		// The MFA package: the TOTP factor, on by its reference.conf, the
-		// recovery-code and email factors' modules, and the MFA module, which
-		// registers the requirement named mfa, over the two MFA stores, with a
-		// sender that records the mail. The environment is the one the template
-		// composes as.
+		// recovery-code factor's module, and the MFA module, which registers
+		// the requirement named mfa, over the two MFA stores. The environment
+		// is the one the template composes as.
 		...(features.mfa
 			? [
 					...mfaModules({ environment: "production" }),
-					mfaEmailFactorModule,
-					mailSenderModule,
 					...(stores.mfa === "redis"
 						? [redisMfaFactorStoreModule, redisMfaTransactionStoreModule]
 						: [memoryMfaFactorStoreModule, memoryMfaTransactionStoreModule]),

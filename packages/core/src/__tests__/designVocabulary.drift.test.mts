@@ -489,24 +489,6 @@ const VOCABULARY: readonly VocabularyRow[] = [
 	// Declared before their homes define them: each names the build step of
 	// the MFA ADR that builds it.
 	{
-		concept: "MFA mail delivery — the one place a code or a notice is sent (the MFA ADR's D5, F5)",
-		home: "packages/mfa/src/mail.mts",
-		definition: /(?:function|const)\s+sendMfaMail\b/,
-		declared: "the MFA ADR's build-order step 9",
-	},
-	{
-		concept: "the masked address a code is sent to (the MFA ADR's D23)",
-		home: "packages/mfa/src/mail.mts",
-		definition: /(?:function|const)\s+maskMailAddress\b/,
-		declared: "the MFA ADR's build-order step 9",
-	},
-	{
-		concept: "a message rendered from configured text (the MFA ADR's D5)",
-		home: "packages/mfa/src/mail.mts",
-		definition: /(?:function|const)\s+renderMailText\b/,
-		declared: "the MFA ADR's build-order step 9",
-	},
-	{
 		concept: "the long code — made (the MFA ADR's D22)",
 		home: "packages/mfa/src/codes.mts",
 		definition: /(?:function|const)\s+generateLongCode\b/,

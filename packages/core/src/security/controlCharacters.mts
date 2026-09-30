@@ -16,7 +16,7 @@
 
 /**
  * The one reading of "a control character" in text an operator configures —
- * a mail header, an issuer, a relay's host: a C0 control character
+ * an issuer, a label, a header: a C0 control character
  * (U+0000–U+001F), DEL (U+007F) or a C1 control character (U+0080–U+009F),
  * but those a rule allows. Such a character in a header splits it; in a log
  * line or a label it forges another.

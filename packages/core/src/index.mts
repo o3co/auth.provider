@@ -550,7 +550,6 @@ export type { MailMessage, MailSender } from "./mail/types.mjs";
 // MfaFactor name)
 export type {
 	MfaCeremonyContext,
-	MfaChallenge,
 	MfaChallengeContext,
 	MfaDigestMatch,
 	MfaDigests,
@@ -558,11 +557,9 @@ export type {
 	MfaEnrollmentCompletion,
 	MfaEnrollmentCompletionContext,
 	MfaEnrollmentContext,
-	MfaEnrollmentStart,
 	MfaFactorData,
 	MfaFactorState,
 	MfaKeyedDigest,
-	MfaMailLimits,
 	MfaVerification,
 	MfaVerifyContext,
 } from "./mfa/factor.mjs";
