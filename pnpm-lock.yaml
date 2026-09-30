@@ -761,6 +761,9 @@ importers:
       '@o3co/auth-provider-session':
         specifier: workspace:*
         version: link:../../packages/session
+      '@o3co/auth-provider-smtp':
+        specifier: workspace:*
+        version: link:../../packages/smtp
       '@o3co/auth-provider-standalone':
         specifier: workspace:*
         version: link:../../templates/standalone

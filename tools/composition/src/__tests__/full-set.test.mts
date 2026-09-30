@@ -165,6 +165,8 @@ const ADDED: Readonly<Record<string, readonly string[]>> = {
 	],
 	"@o3co/auth-provider-mtls": ["mtls"],
 	"@o3co/auth-provider-oauth-token-exchange": ["oauth-token-exchange"],
+	// Its module provides no sender yet; the full set records mail instead.
+	"@o3co/auth-provider-smtp": [],
 	"@o3co/auth-provider-webauthn": [
 		"webauthn",
 		"webauthn-session-subject",

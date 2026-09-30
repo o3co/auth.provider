@@ -132,6 +132,8 @@ const NOT_IN_TEMPLATE: Readonly<Record<string, string>> = {
 		"mfaModules (mfaTotpFactorModule, mfaRecoveryCodeFactorModule, mfaModule) and mfaEmailFactorModule; private until the MFA ADR's build-order step 20 wires it",
 	"@o3co/auth-provider-mtls": "mtlsModule",
 	"@o3co/auth-provider-oauth-token-exchange": "tokenExchangeModule",
+	"@o3co/auth-provider-smtp":
+		"smtpMailSenderModule, which provides no sender yet; private until the MFA ADR's build-order step 17 builds it",
 	"@o3co/auth-provider-webauthn": "webauthnModule, webauthnSessionSubjectModule",
 };
 
