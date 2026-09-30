@@ -47,7 +47,7 @@ another's body limit, or a memory store booting under `deployment.mode =
 - **The budget in force for each prefix a package owns, on both bundled
   limiters.** `login`, `device_verification`,
   `webauthn-authentication-options` and `mfa` — each the budget its owning
-  module contributes — and `token`, which no module owns, asked of the limiter
+  module contributes — and `token`, which the oauth module claims with no budget of its own (`null`), so it falls to the limiter's `defaultLimit`, asked of the limiter
   the full set hands a consumer, on the in-process limiter and on the Redis
   one: with the shipped configuration, with each owner's own key set, with the
   limiter's own `limits` declaring every prefix (which wins), and with the
