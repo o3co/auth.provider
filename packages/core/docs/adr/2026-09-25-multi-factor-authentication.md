@@ -8,6 +8,7 @@
 - Amended 2026-09-30 (rate-limit budgets, #782): the bundled limiters no longer seed budgets; the module that keys a prefix contributes its budget (`rateLimitBudgets`). The MFA module contributes `mfa` from `mfa.rateLimit.routes`, and the email factor's module is to contribute its own `mfa-email` from `mfa.factors.email.sendLimit`; where this record says the limiters seed them, or names core's `ratelimit/mfaSpec.mts`, read that.
 - Amended 2026-09-30 (the Store's MFA contract over HTTP, #754): the contract suites of what code outside core implements live in a published package of their own, `@o3co/auth-provider-test-kit`, which depends on core alone — the enrollment witness's is written there, with a fake Store, and D7's factor-store suite and the Redis package's copies follow before 1.0, their parity test going with them. The Store adapter's four URLs are the `foundation-mfa-factor-store` section's (`FOUNDATION_MFA_FACTOR_STORE_*_URL`), not `repositories.user.http`'s, and each is required: a missing one refuses boot (D7's "four optional URLs", D19). An update names the record by `subject` and `id` and carries the expected version and, as its changes, only `data`, `label` and `lastUsedAtMs`; the wire contract is `@o3co/auth-provider-foundation`'s README.
 - Amended 2026-09-30 (build-order step 19, first part): the Store-backed factor store trusts the Store with the factors' integrity and freshness (D7's amendment of that date).
+- Amended 2026-09-30 (build-order step 18; owner, provisional): a WebAuthn factor is `hwk` only when it is not backup-eligible (BE = 0), and keeps its BE from registration (D14's amendment of that date).
 
 ## Context
 
@@ -589,6 +590,8 @@ The template's default is decided in O6.
 | Recovery code | `recovery` | yes | deployment-defined |
 
 `mfa` is RFC 8176's "multiple-factor authentication", added by a verification of a factor whose `addsMfa` is true — at a login, a step-up or a first binding alike (D24). A login is `["pwd", "otp", "mfa"]`; a step-up appends (`["pwd", "otp", "mfa", "hwk"]`); an email login is `["pwd", "email"]` — the baseline is met (`mfaAt` is set) but `urn:o3co:acr:mfa` is not. Order is insertion, `mfa` never repeated. The values are core constants (`MFA_AMR`, `EMAIL_OTP_AMR`, `RECOVERY_CODE_AMR`, beside `FEDERATED_AMR`), composed by one function (`composeAmr`) with a design-vocabulary row. The passwordless WebAuthn grant keeps stamping `hwk` for every passkey, synced or not; aligning it is a separate change (Outside the first release, O9).
+
+**Amended 2026-09-30 (build-order step 18; owner, provisional): device-bound is BE = 0.** The table's "device-bound (backup-state flag clear)" reads: not backup-eligible (the BE flag clear). `hwk` only when BE = 0; `swk` when BE = 1, whatever the backup state (BS), which is only the credential's current backup state — a multi-device credential not yet synced is `swk`. The factor keeps `backupEligible` from registration in its sealed data (F7's list gains it) and refuses as `invalid` an assertion reporting another BE (WebAuthn L3 §6.1.3, §7.2), not audited as a clone. With attestation `none`, BE and BS are what the authenticator reports about itself: `hwk` means *reported* device-bound, not proof of hardware; attested hardware stays `phrh` with attestation (Options).
 
 ### D15 — The `acr` scheme, discovery, and the `claims` parameter
 

@@ -48,7 +48,9 @@ another's body limit, or a memory store booting under `core.deployment.mode =
   WebAuthn factor's module on: a password login completed by a software
   passkey's assertion, its challenge kept on the transaction and taken once,
   its sign count written by compare-and-set, a lost compare-and-set checked
-  again, and a counter that did not increase refused and audited
+  again, a signed counter that did not increase refused and audited and an
+  unsigned one refused without the audit, and `hwk` or `swk` by the backup
+  eligibility registered
   ([`webauthn-mfa-factor.test.mts`](src/__tests__/webauthn-mfa-factor.test.mts)).
 - **The budget in force for each prefix a package owns, on both bundled
   limiters.** `login`, `device_verification`,
