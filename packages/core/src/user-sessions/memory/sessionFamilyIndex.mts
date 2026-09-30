@@ -14,19 +14,21 @@
  * limitations under the License.
  */
 
+import { DEFAULT_CLOCK_SKEW_MS } from "../../jwt/verify.mjs";
 import type { SessionFamilyIndex, SupportsSessionEnd } from "../types.mjs";
 import { createMemorySidSortedSet } from "./internalSidSortedSet.mjs";
 
 /**
  * In-memory SessionFamilyIndex, with the session-end capability. Wraps
  * `createMemorySidSortedSet` for insertion-order-preserving, idempotent-add
- * family-id tracking, and keeps each sid's "ended" mark beside it until the
- * mark's `expiresAt`, whatever `removeBySid` does to the families.
+ * family-id tracking, and keeps each sid's "ended" mark beside it until
+ * `expiresAt` plus the clock-skew allowance, whatever `removeBySid` does to
+ * the families.
  *
  * Every call runs with no `await`, so what it writes and what it reads are
  * one step: no other call on the sid falls between them. An end's mark is
  * therefore in place before its listing, and an add's family before it reads
- * the mark.
+ * the mark; an add reads the clock once, for its deadline and the mark's.
  *
  * Insertion order is informational (aids debugging / mirrors Redis ZRANGE
  * output) but NOT load-bearing for cascade revoke — callers iterate
@@ -44,10 +46,10 @@ export function createInMemorySessionFamilyIndex(): SessionFamilyIndex & Support
 		}
 		return expiresAtMs;
 	};
-	const isEnded = (sid: string): boolean => {
+	const isEnded = (sid: string, now: number): boolean => {
 		const until = ended.get(sid);
 		if (until === undefined) return false;
-		if (until <= Date.now()) {
+		if (until <= now) {
 			ended.delete(sid);
 			return false;
 		}
@@ -66,8 +68,8 @@ export function createInMemorySessionFamilyIndex(): SessionFamilyIndex & Support
 			set.removeBySid(sid);
 		},
 		async endSession(sid: string, expiresAt: Date): Promise<ReadonlyArray<string>> {
-			const expiresAtMs = validExpiry(expiresAt);
-			if (expiresAtMs > Date.now()) ended.set(sid, expiresAtMs);
+			const until = validExpiry(expiresAt) + DEFAULT_CLOCK_SKEW_MS;
+			if (until > Date.now()) ended.set(sid, until);
 			return set.list(sid);
 		},
 		async addFamilyIdUnlessEnded(
@@ -75,8 +77,9 @@ export function createInMemorySessionFamilyIndex(): SessionFamilyIndex & Support
 			familyId: string,
 			expiresAt: Date,
 		): Promise<"added" | "ended"> {
-			if (!set.add(sid, familyId, expiresAt)) return "ended";
-			return isEnded(sid) ? "ended" : "added";
+			const now = Date.now();
+			if (validExpiry(expiresAt) <= now || !set.add(sid, familyId, expiresAt)) return "ended";
+			return isEnded(sid, now) ? "ended" : "added";
 		},
 	};
 }

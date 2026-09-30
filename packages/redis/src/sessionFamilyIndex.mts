@@ -14,10 +14,11 @@
  * limitations under the License.
  */
 
-import type {
-	AdapterBuilder,
-	SessionFamilyIndex,
-	SupportsSessionEnd,
+import {
+	type AdapterBuilder,
+	DEFAULT_CLOCK_SKEW_MS,
+	type SessionFamilyIndex,
+	type SupportsSessionEnd,
 } from "@o3co/auth-provider-core";
 import type { SessionFamilyIndexClient } from "./clients.mjs";
 import { createRedisSidSortedSet } from "./internal/redisSidSortedSet.mjs";
@@ -41,11 +42,12 @@ export interface RedisSessionFamilyIndexOptions {
  *
  * Given `endedKeyPrefix` and a client with `writeEndedMark` and `hasEndedMark`, it
  * has core's `SupportsSessionEnd`. The mark is a string at
- * `${endedKeyPrefix}${sid}` expiring at the session's `expiresAt` (`PXAT`),
- * which `removeBySid` leaves. `endSession` writes the mark, then lists;
- * `addFamilyIdUnlessEnded` adds, then reads the mark: each command's reply is
- * in before the next is sent, so on a linearizable server one of the two sees
- * the other. The two keys need not share a Cluster slot.
+ * `${endedKeyPrefix}${sid}` expiring at the session's `expiresAt` plus the
+ * clock-skew allowance (`PXAT`), which `removeBySid` leaves. `endSession`
+ * writes the mark, then lists; `addFamilyIdUnlessEnded` adds, then reads the
+ * mark, then its clock: each command's reply is in before the next is sent,
+ * so on a linearizable server one of the two sees the other. The two keys
+ * need not share a Cluster slot.
  */
 export function createRedisSessionFamilyIndex(
 	opts: RedisSessionFamilyIndexOptions,
@@ -90,12 +92,15 @@ export function createRedisSessionFamilyIndex(
 			if (!Number.isFinite(expiresAtMs)) {
 				throw new RangeError("expiresAt must be a valid date");
 			}
-			if (expiresAtMs > Date.now()) await writeEndedMark(markKey(sid), expiresAtMs);
+			const until = expiresAtMs + DEFAULT_CLOCK_SKEW_MS;
+			if (until > Date.now()) await writeEndedMark(markKey(sid), until);
 			return zset.list(sid);
 		},
 		async addFamilyIdUnlessEnded(sid, familyId, expiresAt) {
 			if (!(await zset.add(sid, familyId, expiresAt))) return "ended";
-			return (await hasEndedMark(markKey(sid))) ? "ended" : "added";
+			if (await hasEndedMark(markKey(sid))) return "ended";
+			// An absent mark read after `expiresAt` says nothing: it may have lapsed.
+			return expiresAt.getTime() > Date.now() ? "added" : "ended";
 		},
 	};
 	return { ...index, ...sessionEnd };
@@ -104,9 +109,12 @@ export function createRedisSessionFamilyIndex(
 /**
  * AdapterFactory builder for the Redis-backed `SessionFamilyIndex`, for
  * per-adapter granularity; the bundled `redisSessionStoresModule` covers the
- * common case. The default `keyPrefix` and `endedKeyPrefix` are the bundle's
- * (`ss:fi:`, `ss:fi-ended:`), so switching between the two keeps the
- * keyspace. A missing `client` throws at boot, as in
+ * common case. The default `keyPrefix` is the bundle's (`ss:fi:`), so
+ * switching between the two keeps the keyspace, and so is the default
+ * `endedKeyPrefix` (`ss:fi-ended:`), but only beside the default `keyPrefix`:
+ * a `keyPrefix` of its own without an `endedKeyPrefix` builds an index
+ * without the capability, rather than one whose marks share the bundle's
+ * namespace. A missing `client` throws at boot, as in
  * `redisChallengeStoreBuilder`, rather than at the first command.
  */
 export const redisSessionFamilyIndexBuilder: AdapterBuilder<SessionFamilyIndex> = (
@@ -124,6 +132,6 @@ export const redisSessionFamilyIndexBuilder: AdapterBuilder<SessionFamilyIndex> 
 	return createRedisSessionFamilyIndex({
 		client: c.client,
 		keyPrefix: c.keyPrefix ?? "ss:fi:",
-		endedKeyPrefix: c.endedKeyPrefix ?? "ss:fi-ended:",
+		endedKeyPrefix: c.endedKeyPrefix ?? (c.keyPrefix === undefined ? "ss:fi-ended:" : undefined),
 	});
 };
