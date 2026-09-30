@@ -52,6 +52,7 @@ import {
 	type MfaTransactionStore,
 	passwordSessionAuthentication,
 	type SubjectSessionIndex,
+	toMfaStoreFactor,
 	type UserSessionStore,
 	type WebAuthnCredentialStore,
 } from "@o3co/auth-provider-core";
@@ -95,10 +96,11 @@ import {
 	webTokens,
 } from "@o3co/auth-provider-standalone/src/__tests__/all-modules-composition.fixture.mts";
 import { readOwnLayers, readSwitches } from "@o3co/auth-provider-standalone/src/configPath.mts";
+import { type FakeStore, startFakeStore } from "@o3co/auth-provider-test-kit";
 import { WEBAUTHN_GRANT_TYPE } from "@o3co/auth-provider-webauthn";
 import type { Express } from "express";
 import request from "supertest";
-import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { BUNDLED_ACTIONS } from "../../../../packages/mfa/src/__tests__/bundled-actions.fixture.mts";
 import {
 	APPLE_LANDING,
@@ -850,6 +852,94 @@ describe("a password login the mfa requirement interrupts, through the template'
 			continuation: { interruptedBy: "mfa", primary: { subject: ALICE.sub } },
 		});
 		expect(create).not.toHaveBeenCalled();
+	});
+});
+
+describe("a password login over the Store-backed MFA factor store, through the template's boot", () => {
+	// The factor store is foundation's module over the test kit's fake Store,
+	// on the user repository's HTTP settings; the enrollment witness is not
+	// written through the Store, so no case here binds a first factor.
+	const MARKER = "STORE-WROTE-THIS";
+	const FACTOR = toMfaStoreFactor({
+		id: "u1PIlRkb_cy7UmjYUKaL_A",
+		subject: ALICE.sub,
+		kind: "totp",
+		label: undefined,
+		binding: "password",
+		createdAt: new Date("2026-09-01T00:00:00.000Z"),
+		lastUsedAt: undefined,
+		version: 1,
+		data: "v2.sealed",
+	});
+
+	let store: FakeStore;
+	beforeEach(async () => {
+		store = await startFakeStore();
+	});
+	afterEach(async () => {
+		await store.close();
+	});
+
+	async function signIn(app: Express) {
+		const csrf = await request(app).get("/session/csrf");
+		return request(app)
+			.post("/session/login")
+			.set("Cookie", cookiesOf(csrf))
+			.set(csrf.body.header_name as string, csrf.body.csrf_token as string)
+			.type("form")
+			.send({ username: ALICE.username, password: ALICE.password });
+	}
+
+	it("asks a subject whose factor the Store keeps for a second factor, reading it through the Store's list endpoint", async () => {
+		store.holdFactor(ALICE.sub, FACTOR);
+		const { app, handle } = await boot({ mfaFactorStoreAt: store.urls });
+		expect((handle.components as { mfaFactorStore?: MfaFactorStore }).mfaFactorStore?.kind).toBe(
+			"store",
+		);
+		const login = await signIn(app);
+		expect(login.status).toBe(403);
+		expect(login.body.error).toBe("mfa_required");
+		expect(store.requests.map(({ endpoint, body }) => [endpoint, body])).toEqual([
+			["list", { subject: ALICE.sub }],
+		]);
+	});
+
+	it("answers 503 temporarily_unavailable, quoting nothing the Store sent, when the Store cannot give the subject's factors — never a login without the second factor", async () => {
+		const { app } = await boot({ mfaFactorStoreAt: store.urls });
+		for (const [what, breakIt] of [
+			[
+				"a 5xx",
+				() =>
+					store.answer("list", () => ({
+						status: 500,
+						headers: { "Content-Type": "application/json", "X-Store-Error": MARKER },
+						body: JSON.stringify({ error: MARKER }),
+					})),
+			],
+			[
+				"a redirect",
+				() =>
+					store.answer("list", () => ({
+						status: 307,
+						headers: { Location: `https://${MARKER}.example/` },
+					})),
+			],
+			[
+				"an unreadable record",
+				() => {
+					store.answer("list", undefined);
+					store.holdFactor(ALICE.sub, { ...FACTOR, label: MARKER.repeat(10) });
+				},
+			],
+		] as const) {
+			breakIt();
+			const login = await signIn(app);
+			expect(login.status, what).toBe(503);
+			expect(login.body.error, what).toBe("temporarily_unavailable");
+			expect(JSON.stringify({ body: login.body, headers: login.headers }), what).not.toContain(
+				MARKER,
+			);
+		}
 	});
 });
 
