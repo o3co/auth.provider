@@ -99,7 +99,7 @@ import {
 	MFA_TX_TAKE_CHALLENGE,
 	MFA_TX_UPDATE,
 } from "./ioredis/scripts/mfa.mjs";
-import { LUA_INCREMENT_WITH_TTL } from "./ioredis/scripts/rate-limit.mjs";
+import { LUA_INCREMENT_WITH_TTL } from "./ioredis/scripts/rate-limiter.mjs";
 import {
 	LUA_PRUNE_AND_LIST,
 	LUA_PRUNE_AND_LIST_SHA,
