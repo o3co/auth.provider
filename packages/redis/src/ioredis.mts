@@ -49,6 +49,7 @@ import {
 	fgWritten,
 	hashFields,
 } from "./ioredis/codec.mjs";
+import { assertPipelineSucceeded, isNoScriptError, runScript } from "./ioredis/commands.mjs";
 import { redisDurability } from "./ioredis/durability.mjs";
 import {
 	CONSENT_FIND,
@@ -57,7 +58,6 @@ import {
 	PENDING_CONSENT_SET,
 	PENDING_CONSENT_TAKE,
 } from "./ioredis/scripts/consent.mjs";
-import type { CachedScript } from "./ioredis/scripts/define.mjs";
 import {
 	DEVICE_CODE_CREATE,
 	DEVICE_CODE_DECIDE,
@@ -115,68 +115,12 @@ let watermarkScriptCached = false;
 let pruneAndListScriptCached = false;
 
 /**
- * Whether `err` is Redis's `NOSCRIPT`, the cold-cache reply to `EVALSHA` after a `SCRIPT FLUSH`
- * or a failover: the signal to fall back to `EVAL` (which reloads the script), not to fail. It
- * reads the message because ioredis's `ReplyError` carries no code (ioredis's own `Script` does
- * the same); the text decides this boolean only and is never logged or thrown.
- */
-function isNoScriptError(err: unknown): boolean {
-	return err instanceof Error && err.message.includes("NOSCRIPT");
-}
-
-/**
- * Run `script` EVALSHA-first, falling back to EVAL — which implicitly loads
- * it server-side — on `NOSCRIPT`. Any other error is the caller's.
- */
-async function runScript(
-	io: Redis,
-	script: CachedScript,
-	keys: readonly string[],
-	args: readonly string[],
-): Promise<unknown> {
-	if (script.cached) {
-		try {
-			return await io.evalsha(script.sha, keys.length, ...keys, ...args);
-		} catch (err) {
-			if (!isNoScriptError(err)) throw err;
-			script.cached = false;
-		}
-	}
-	const reply = await io.eval(script.source, keys.length, ...keys, ...args);
-	script.cached = true;
-	return reply;
-}
-
-/**
  * Whether `LUA_COMPARE_AND_DELETE` is expected in the server's script cache: `true` lets the
  * next call use `EVALSHA`; a `NOSCRIPT` (after `SCRIPT FLUSH` or a failover) clears it, and the
  * `EVAL` fallback reloads the script and sets it again. Module-scoped, like every such flag here,
  * because the script is constant: clients in one process share the server's cache state.
  */
 let scriptCached = false;
-
-/**
- * Surfaces per-command failures from a `MULTI`/`EXEC` reply. ioredis resolves `exec()` with one
- * `[error, result]` per queued command and does not reject when one failed, so a refused
- * `PEXPIRE … NX/GT` would leave a key with no TTL while the caller is told the write worked.
- *
- * `null`, the WATCH abort, passes through: the refresh-token family's CAS loop retries on it.
- * The first failure throws, naming the operation in fixed words with the reply's error as
- * `cause`, never in the message: Redis's reply can quote the command's arguments.
- * `loggableError` projects the cause for the operator without them.
- */
-function assertPipelineSucceeded(reply: unknown[] | null, operation: string): unknown[] | null {
-	if (reply === null) return null;
-	for (const entry of reply) {
-		// ioredis tuple shape; a wrapper returning bare results simply has no
-		// error slot to find, which is correct rather than silently lenient.
-		const err = Array.isArray(entry) ? entry[0] : null;
-		if (err) {
-			throw new Error(`${operation}: a queued command failed inside MULTI/EXEC`, { cause: err });
-		}
-	}
-	return reply;
-}
 
 /** Options for {@link makeIoredisClients}. */
 export interface IoredisClientsOptions {

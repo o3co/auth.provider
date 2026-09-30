@@ -151,7 +151,7 @@ describe("createRedisSidSet", () => {
 	it("add surfaces a queued command's failure instead of reporting success", async () => {
 		const s = createRedisSidSet({ client, keyPrefix: prefix("wrongtype") });
 		await raw.set(`${prefix("wrongtype")}sid-1`, "not-a-set");
-		// Redis's refusal on the cause, not in the message (see ioredis.mts).
+		// Redis's refusal on the cause, not in the message (see ioredis/commands.mts).
 		await expect(s.add("sid-1", "google", HOUR_MS)).rejects.toMatchObject({
 			message: expect.not.stringContaining("WRONGTYPE"),
 			cause: expect.objectContaining({ message: expect.stringMatching(/^WRONGTYPE /) }),
