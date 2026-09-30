@@ -99,7 +99,7 @@ describe("mtls reaches the module through the documented config path", () => {
 		expect(contributeMechanism(config)).not.toBeNull();
 	});
 
-	it("reaches the empty-allowed-hosts refusal under a fetching revocation mode", async () => {
+	it("reaches the empty-allowedHosts refusal under a fetching revocation mode", async () => {
 		const refused = await refusedWith({
 			enabled: true,
 			mode: "full-pki",
@@ -118,7 +118,7 @@ describe("mtls reaches the module through the documented config path", () => {
 		expect(refused).toMatch(/requires mtls\.fullPki\.revocation/);
 	});
 
-	it("reaches the empty-trusted-proxies refusal under a header source", async () => {
+	it("reaches the empty-trustedProxies refusal under a header source", async () => {
 		const refused = await refusedWith({ enabled: true, source: "header" });
 		expect(refused).toMatch(/trustedProxies allowlist/);
 	});

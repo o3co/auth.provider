@@ -21,8 +21,8 @@
  * discovery metadata, both built from its own section, `dpop {}`, parsed
  * with {@link dpopConfigSchema} before any factory runs. DPoP is off unless
  * `dpop.enabled = true`. A key still written at `oauth.dpop`, the section's
- * old path, refuses boot naming the new one, and so does a nonce variable
- * renamed with the move unless its new name carries the same value.
+ * old path, refuses boot naming the new one, and so does a nonce variable's
+ * old name unless its new name carries the same value.
  *
  * DI requires `config`: `oauth.jwt.issuer` when no module provides
  * `oauthTokenSettings` (the issuer's origin is the authority half of every

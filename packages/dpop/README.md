@@ -119,12 +119,13 @@ listed in [`src/index.mts`](src/index.mts).
 
 The section's old path, `oauth.dpop`, refuses boot (`config-path-relocated`)
 naming each key's new path, and `oauth.dpop.replay-store` as removed: the
-seen-set's own module chooses the backend. The nonce variables were renamed
-with the move — `OAUTH_DPOP_NONCE_REQUIRED`, `OAUTH_DPOP_NONCE_TTL_SECONDS` and
-`OAUTH_DPOP_NONCE_SECRET` to `DPOP_NONCE_REQUIRED`, `DPOP_NONCE_TTL_SECONDS`
-and `DPOP_NONCE_SECRET`: an old name set alone, or beside its new name at a
-different value, refuses boot (`environment-variable-renamed`, naming no
-value); both set to the same value boot.
+seen-set's own module chooses the backend. The nonce variables are
+`DPOP_NONCE_REQUIRED`, `DPOP_NONCE_TTL_SECONDS` and `DPOP_NONCE_SECRET`, and
+the module declares `OAUTH_DPOP_NONCE_REQUIRED`, `OAUTH_DPOP_NONCE_TTL_SECONDS`
+and `OAUTH_DPOP_NONCE_SECRET` their old names: an old name set alone, or
+beside its new name at a different value, refuses boot
+(`environment-variable-renamed`, naming no value); both set to the same value
+boot.
 
 **Which tokens are bound.** A public client's access token and refresh token
 both carry `cnf.jkt`. A confidential client's access token is bound and its

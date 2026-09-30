@@ -136,7 +136,7 @@ export const parseProof = async (raw: string): Promise<DPoPProof> => {
 	}
 
 	// The jti is the key the verifier records in the seen-set for
-	// `replay-store-ttl-seconds`, and this runs before the signature is checked
+	// `dpop.replayStoreTtlSeconds`, and this runs before the signature is checked
 	// and, at the token endpoint, before the client is authenticated: whoever
 	// sends the proof chooses it. RFC 9449 §4.2 asks only for uniqueness, which a
 	// UUID (36 characters) already gives, so an over-long one is malformed here

@@ -71,7 +71,7 @@ const FULL_PKI_DEFAULTS = {
 };
 
 describe("mode = full-pki — boot invariants", () => {
-	it("refuses an empty trusted-cas, as the narrow mode does", async () => {
+	it("refuses an empty trustedCas, as the narrow mode does", async () => {
 		await expect(
 			boot({
 				trustedCas: [],
@@ -125,7 +125,7 @@ describe("mode = full-pki — boot invariants", () => {
 		).toThrow(/createMtlsMechanism:[\s\S]*no default/);
 	});
 
-	it("refuses revocation.mode = crl with no allowed-hosts", async () => {
+	it("refuses revocation.mode = crl with no allowedHosts", async () => {
 		await expect(
 			boot({
 				fullPki: {
@@ -262,7 +262,7 @@ describe("mtlsConfigSchema — full-pki", () => {
 		expect(result.success).toBe(false);
 	});
 
-	it("requires on-unavailable for OCSP exactly as for CRL", () => {
+	it("requires onUnavailable for OCSP exactly as for CRL", () => {
 		const result = parse({
 			enabled: true,
 			mode: "full-pki",
