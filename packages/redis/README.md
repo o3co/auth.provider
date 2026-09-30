@@ -442,7 +442,7 @@ give the same answers:
 | `ConsentStore.grant`, `PendingConsentStore.set` | an `expiresAt` outside the Date range (a consent with none is `undefined`, kept until revoked) | `PEXPIRE` = the remaining life, rounded up, plus the five-minute slack |
 | `SubjectRevocation.revokeBefore`, `revokeSessionsBefore` | a boundary or `expiresAt` that is an Invalid Date | `PXAT` = the later of the `expiresAt` asked for and the key's current deadline, raised to the grants floor for a full revocation — never lowered |
 | `FederationGrantStore`, `FederationGrantIntentStore` | a caller's clock that is an Invalid Date (`RangeError`); an intent or authorization expiry that is not a date writes nothing (`{ ok: false }`, as the port says); a `tombstoneRetentionMs`, `listingAllowanceMs` or `reservationAllowanceMs` that ends past the Date range, at construction. The scripts set a key's deadline after writing it, so a deadline Redis refused left the key with no TTL, and a retention past 2^53 left records that do not read back. The config schemas hold the retention and the listing allowance to one year | `PEXPIREAT` = the record's expiry plus its retention or listing allowance, rounded up (`math.ceil`) inside the script that writes it |
-| `MfaTransactionStore.create` | an `expiresAtMs` outside the Date range, or not after this process's clock | `PEXPIREAT` = the expiry rounded up, set once; no later write moves it. The subject lock's keys carry no TTL while a run is counted, and otherwise expire a day after the last failure or trust stops counting (see [MFA stores](#mfa-stores)) |
+| `MfaTransactionStore.create` | an `expiresAtMs` outside the Date range, or not after this process's clock | `PEXPIREAT` = the expiry rounded up, set once; no later write moves it. The subject lock's keys carry no TTL while a run is counted, and otherwise expire a day after the last failure stops counting (see [MFA stores](#mfa-stores)) |
 | `RateLimiter` | at construction, any spec, `defaultLimit` included, that is not a positive whole `limit` and a positive whole `windowSeconds` ending within the Date range: zero, NaN, a fraction, a negative number, or a window past the range. Core's `createRateLimitBudgetLookup` does the check, and the in-process limiter applies the same one. Such a spec is refused, never dropped and never replaced by the default, a looser budget than the operator wrote. Only a `defaultLimit` nobody gave is the built-in 60 per 60 s. The config schemas refuse the same values, and hold a window to one year | `EXPIRE` = `windowSeconds`, set in the same script as the `INCR` |
 
 [`px-rounding.test.mts`](__tests__/px-rounding.test.mts) pins both halves for
@@ -659,7 +659,7 @@ slot and prefix, so a deployment can put the factors on a Redis of their own.
 | --- | --- | --- |
 | `mfaf:{<subject>}` | hash | one field per enrolled factor (its id): `<version>\n<fixed JSON>\n<mutable JSON>` |
 | `mfat:tx:{<id>}` | hash | one MFA transaction, expiring at its `expiresAtMs` |
-| `mfat:lock:{<subject>}` | hash | D21's consecutive run, the reservations in flight, the trusted browsers' digests |
+| `mfat:lock:{<subject>}` | hash | D21's consecutive run and the reservations in flight |
 | `mfat:week:{<subject>}` | sorted set | the weekly window: one member per failure, scored by its time |
 | `mfat:proof:{<subject>}` | string | the email proof an operator reset requires at the next first binding |
 
@@ -707,15 +707,18 @@ in-process store's `structuredClone` keeps both.
 **The subject lock.** `reserveSubjectAttempt`, `settleSubjectAttempt` and
 `noteExemptSuccess` are one script each that applies the port's rules exactly
 as core's in-process store does — the same replay of the run for the backoff,
-the same count of the week, the same trust ends — judged on the time the
+the same count of the week — judged on the time the
 caller passes; [`mfa-transaction-store.test.mts`](__tests__/mfa-transaction-store.test.mts)
 holds the two stores to the same answers over random walks of the
 operations. What a script forgets, and what Redis reclaims, is judged no
 later than the server's clock less a day. While a run is counted the keys
 carry no TTL — only a success, an exempt success or `clearSubjectState` ends
-one — and once none is they expire a day after the last failure or trust
-stops counting. A state a script cannot read refuses the attempt; it is never
-read as a state that holds nothing. The email-proof requirement is a key of
+one — and once none is they expire a day after the last failure stops
+counting. A state a script cannot read refuses the attempt; it is never
+read as a state that holds nothing. A lock-hash field of a kind the scripts
+do not read (`t:<digest>` among them) is ignored and goes with the keys, and
+a transaction hash's `sends` and `lastSentAtMs`, where present, are not read:
+neither loosens a limit the store keeps. The email-proof requirement is a key of
 its own with no TTL: `clearSubjectState` leaves it, and consuming it is one
 `DEL`.
 

@@ -25,7 +25,10 @@ devDependencies.
   its two login endpoints over HTTP, in [`src/mfa/fakeStore.mts`](src/mfa/fakeStore.mts);
 - `mfaFactorContract`, the conformance suite of a second factor — a value of
   core's `mfaFactors` contribution kind — in
-  [`src/mfa/factor.contract.mts`](src/mfa/factor.contract.mts).
+  [`src/mfa/factor.contract.mts`](src/mfa/factor.contract.mts);
+- `mailSenderContract`, the conformance suite of a mail sender — the value of
+  core's `mailSender` slot — in
+  [`src/mail/mailSender.contract.mts`](src/mail/mailSender.contract.mts).
 
 **Does not own:** the ports, their types and the reading of the witness
 (core); the wire format of the Store's MFA endpoints (core's
@@ -91,7 +94,12 @@ fails.
 MFA coordinator relies on: a kind a hint can carry; `amrValues` it can vouch
 for — no primary's marker, no `mfa` — and `amrFor` answering at least one of
 them; boolean flags; state and data that survive the JSON round trip sealing
-puts them through, and are handed back after it; a hint that never shows the
+puts them through, and are handed back after it; a code an enrollment or a
+challenge asks to be mailed only with a purpose from core's `MAIL_PURPOSES`,
+never empty and never in the page's response; data, enrolled or after a
+verification, that never carries the account's address, since the provider
+keeps none and the coordinator mails a code to the address on the user
+record at the time; a hint that never shows the
 account's address; a proof the factor cannot read answered `malformed`,
 never thrown; and a valid proof that completes an enrollment and verifies the
 factor it enrolled. It enrolls at one instant and verifies an hour later,
@@ -117,6 +125,29 @@ describe("my factor keeps the MFA factor contract", () => {
 
 Every call is handed core's test digests for the factor's kind
 (`createTestMfaDigests`). The MFA package's TOTP factor runs it.
+
+## A mail sender's contract suite
+
+`mailSenderContract(input)` holds a `MailSender` to what the provider relies
+on: a `kind`; a send the relay accepts answered `{ outcome: "delivered" }`,
+the relay then holding one mail to the recipient that carries the code, for
+every purpose; a relay refusing at a limit answered
+`{ outcome: "refused_at_limit" }` and nothing more; under each other way a
+relay refuses (`MAIL_RELAY_REFUSALS`: the recipient, the message, the relay
+unreachable, the sender's credentials) a rejection, never an answer; and the
+mail left as it was. The suite writes each refusing relay's reply; every text
+field of the mail and the reply carry one mark, and no rejection's
+`loggableError` projection — its message and its causes' — carries the mark
+or the expiry.
+
+`build()` answers a sender over a relay that accepts, and `relayed()`, what
+that relay holds (`RelayedMail`: the recipient it was addressed to, and the
+whole message as text); `refusing(refusal, reply)` answers a sender over a
+relay that refuses as `refusal` names, answering `reply` as its own text.
+
+What it cannot see, and a sender's own tests must: what the sender logs
+itself (a transport's debug transcript, say), and an error's properties
+outside the projection.
 
 ## The fake Store
 
@@ -173,7 +204,8 @@ Exported from [`src/index.mts`](src/index.mts):
 | Test file | Pins |
 | --- | --- |
 | [`enrollmentWitness.contract.test.mts`](src/mfa/__tests__/enrollmentWitness.contract.test.mts) | the witness's suite over an in-process repository and over the fake Store; each broken repository — one that erases or sets every witness when it refuses a subject among them — refused by the case that names what it breaks; the outage case present only with `withOutage`; the kit's `ContractCase` core's |
-| [`factor.contract.test.mts`](src/mfa/__tests__/factor.contract.test.mts) | the factor suite over core's double, with and without a challenge; each broken factor refused by the case that names what it breaks |
+| [`factor.contract.test.mts`](src/mfa/__tests__/factor.contract.test.mts) | the factor suite over core's double, with and without a challenge, and mailing its codes; each broken factor refused by the case that names what it breaks |
+| [`mailSender.contract.test.mts`](src/mail/__tests__/mailSender.contract.test.mts) | the mail sender suite over core's recording sender; each broken sender — an old answer, a lost mail, a limit read as an outage, an outage answered, a rejection carrying the mail or the relay's reply, the mail changed — refused by the case that names what it breaks |
 | [`fakeStore.test.mts`](src/mfa/__tests__/fakeStore.test.mts) | each endpoint's answers over real HTTP: every record answered back, the update's compare-and-set and what it writes, `409` / `404`, changes carrying another field refused, the witness mark's `204` / `404` and idempotence, the credential, what it refuses before it records a request, what it records, and an endpoint answered as told — at once, later, or never |
 
 ## See also
