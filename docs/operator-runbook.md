@@ -663,8 +663,16 @@ wires it.
   address is the Store's: ask for recent authentication, and tell the old
   address. **The Store must hold one mailbox per account**: the provider
   reads the address as one addr-spec alone, and an account whose address is
-  a list, an angle address or carries a comment has no address to it — no
-  email factor, no account-email proof.
+  a list, an angle address or carries a comment has no address to it. So do
+  some spellings a mail system may deliver to, which the provider refuses on
+  purpose: a zero-width non-joiner or joiner (U+200C, U+200D) in a local
+  part or in a Unicode domain label; an emoji or another symbol beyond ASCII
+  in a local part; a quoted local part with a space in it; and an underscore
+  in a domain. **Such an account has no email factor and no account-email
+  proof.** After an operator reset with `requireEmailProof` (`mfa.reset`), it
+  cannot give the proof its next first binding asks for, and needs another
+  way back — a recovery code, or the operator; give it an address the
+  provider reads before you reset it.
 - **Notices to the account holder: required, and yours.** The provider sends
   none. It records audit events (`auditSink`), and the deployment reads them
   and tells the account holder — by mail, a chat message, anything — of every

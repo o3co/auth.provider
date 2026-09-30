@@ -173,21 +173,28 @@ export type MfaFactorMailPurpose = Exclude<MailPurpose, "account_email_proof">;
  * purpose, the code and, when the factor gives one, when it stops being
  * accepted — never text. The coordinator resolves the recipient when it
  * sends: the address on the account's user record at that moment, as
- * `normaliseMailAddress` spells it. It keeps that address's keyed digest,
- * under the ring's first key, with the pending state, and hands it back to
- * the call that takes the code: an enrollment's completion, which the factor
- * records in its data, never the address and never a digest of its own
+ * `normaliseMailAddress` spells it. In this order:
+ *
+ * 1. A login code: the comparison comes first, before anything is written.
+ *    The address must match the digest the mail carries
+ *    ({@link MfaLoginCodeMail}). On a mismatch, no address, or a digest that
+ *    is `null` or no keyed digest, no code and no digest are kept, the factor
+ *    is refused until the user re-enrolls it after recent MFA,
+ *    `mfa.email_address_mismatch` is recorded, and nothing is sent;
+ *    `key_unavailable` is an outage, and keeps nothing either. An enrollment
+ *    code has nothing to compare.
+ * 2. The state is kept, with the keyed digest of the address, under the
+ *    ring's first key, expiring at the earlier of `expiresAtMs` and the
+ *    transaction's expiry.
+ * 3. The code is sent with that expiry. A send refused at a limit or failed
+ *    clears the state, and is never "sent".
+ *
+ * The kept digest is handed back to the call that takes the code: an
+ * enrollment's completion, which the factor records in its data, never the
+ * address and never a digest of its own
  * ({@link MfaEnrollmentCompletionContext.addressDigest}); a verification
  * ({@link MfaVerifyContext.addressDigest}). So what a factor records is the
- * address the code went to, whatever the Store answers by then. A login code
- * goes only when the address matches the digest the mail carries
- * ({@link MfaLoginCodeMail}). On a mismatch, no address, or a digest that is
- * `null` or no keyed digest, the factor is refused until the user re-enrolls
- * it after recent MFA, `mfa.email_address_mismatch` is recorded, and nothing
- * is sent; `key_unavailable` is an outage. The coordinator keeps the state
- * first, expiring at the earlier of `expiresAtMs` and the transaction's
- * expiry, and sends after with that expiry; a send refused at a limit or
- * failed clears that state, and is never "sent".
+ * address the code went to, whatever the Store answers by then.
  */
 export interface MfaFactorMail<P extends MfaFactorMailPurpose = MfaFactorMailPurpose> {
 	readonly purpose: P;
