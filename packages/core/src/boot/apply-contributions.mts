@@ -36,7 +36,7 @@ import type {
 } from "../modules/manifest/synthetic-keys.mjs";
 import { readRateLimitFailMode } from "../ratelimit/guard.mjs";
 import type { RateLimiter, RateLimitSpec } from "../ratelimit/types.mjs";
-import { isUsableRateLimitSpec } from "../ratelimit/usableSpec.mjs";
+import { isBoundedRateLimitSpec, isUsableRateLimitSpec } from "../ratelimit/usableSpec.mjs";
 import { sessionRequirementResolverOver } from "../session-admission/admit.mjs";
 import {
 	type RegisteredRequirement,
@@ -489,9 +489,9 @@ function checkNameKeyedValue(
 						windowSeconds: (value as { readonly windowSeconds?: unknown }).windowSeconds,
 					}
 				: { limit: undefined, windowSeconds: undefined };
-		if (typeof value !== "object" || !isUsableRateLimitSpec(read)) {
+		if (typeof value !== "object" || !isBoundedRateLimitSpec(read)) {
 			throw new RangeError(
-				`rateLimitBudgets "${name}": a budget is { limit, windowSeconds }, a positive whole limit and a positive whole number of seconds that ends within the Date range (got limit ${shownConfigValue(read.limit)}, windowSeconds ${shownConfigValue(read.windowSeconds)})`,
+				`rateLimitBudgets "${name}": a budget is { limit, windowSeconds }, a positive whole limit and a positive whole number of seconds, at most a year (got limit ${shownConfigValue(read.limit)}, windowSeconds ${shownConfigValue(read.windowSeconds)})`,
 			);
 		}
 		return Object.freeze(read);
@@ -561,13 +561,15 @@ function limiterInForce(
 }
 
 /**
- * Logs `rate_limits_in_force` at info — the wired limiter's kind and outage
- * policy, and each prefix with its budget and the module that set it — and
- * `rate_limit_fail_mode_not_applied` at warn when `rateLimit.failMode` says
- * `open` and the wired limiter applies another policy.
+ * Logs `rate_limit_budgets_registered` at info — the wired limiter's kind and
+ * outage policy, and each prefix with its contributed budget and the module
+ * that set it; a limiter's own `limits` entry wins over that budget and is
+ * not shown — and `rate_limit_fail_mode_not_applied` at warn when
+ * `rateLimit.failMode` says `open` and the wired limiter applies another
+ * policy.
  * @internal
  */
-function logRateLimitsInForce(
+function logRateLimitBudgets(
 	material: ComponentWorld,
 	components: Record<string, unknown>,
 	collector: NameKeyedCollector<RateLimitSpec | null> | undefined,
@@ -603,7 +605,7 @@ function logRateLimitsInForce(
 				};
 			}),
 		},
-		"rate_limits_in_force",
+		"rate_limit_budgets_registered",
 	);
 	const configured = (components.config as { rateLimit?: { failMode?: unknown } } | undefined)
 		?.rateLimit?.failMode;
@@ -1151,7 +1153,7 @@ export async function applyContributions(
 	// ---------------------------------------------------------------------------
 
 	await checkSessionRequirements(material, components, contributionKinds.sessionRequirements);
-	logRateLimitsInForce(material, components, contributionKinds.rateLimitBudgets);
+	logRateLimitBudgets(material, components, contributionKinds.rateLimitBudgets);
 
 	// ---------------------------------------------------------------------------
 	// Step 3: List-shaped pass in INPUT-ARRAY order.

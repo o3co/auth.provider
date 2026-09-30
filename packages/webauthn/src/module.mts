@@ -115,7 +115,7 @@ export const webauthnModule = defineModule<
 		// The replica count core fills: the authentication/options route's per-process fallback
 		// is refused under `multi`. Required, so a mode read as absent cannot lift that refusal.
 		"deploymentMode",
-		// The budgets in force, which the mismatch warning compares with the slot.
+		// The contributed budgets, which the mismatch warning compares with the slot.
 		"rateLimitBudgetResolver",
 	],
 	optional: [
@@ -257,17 +257,20 @@ export const webauthnModule = defineModule<
 						);
 					}
 				} else {
-					// A shared limiter applies the budget in force for the tag, not this slot;
-					// boot warns once when they differ. A limiter's own `limits` entry for the
-					// tag overrides both and is not visible here.
-					const inForce = deps.rateLimitBudgetResolver.get(
+					// A shared limiter applies the contributed budget for the tag, not this
+					// slot; boot warns once when they differ. A limiter's own `limits` entry
+					// for the tag overrides both and is not visible here.
+					const contributed = deps.rateLimitBudgetResolver.get(
 						WEBAUTHN_AUTHENTICATION_OPTIONS_RATE_LIMIT_TAG,
 					);
-					if (inForce?.limit !== spec.limit || inForce.windowSeconds !== spec.windowSeconds) {
+					if (
+						contributed?.limit !== spec.limit ||
+						contributed.windowSeconds !== spec.windowSeconds
+					) {
 						logger.warn(
 							{
 								key: "webauthn.rateLimit.authenticationOptions",
-								inForce: inForce === undefined ? null : { ...inForce },
+								contributed: contributed === undefined ? null : { ...contributed },
 								webauthnConfig: spec,
 							},
 							"webauthn_authentication_options_budget_mismatch",

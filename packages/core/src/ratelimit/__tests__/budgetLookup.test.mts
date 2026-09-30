@@ -172,11 +172,14 @@ describe("createRateLimitBudgetLookup", () => {
 		});
 
 		const { spec } = lookup("mfa:ip:192.0.2.1");
+		// Counted before any assertion touches `answered`: a matcher reads it too.
+		const readsByLookup = reads;
+		const handedOn = spec === (answered as unknown);
 
+		expect(readsByLookup).toBe(1);
+		expect(handedOn).toBe(false);
 		expect(spec).toEqual({ limit: 5, windowSeconds: 60 });
 		expect(Object.isFrozen(spec)).toBe(true);
-		expect(spec).not.toBe(answered);
-		expect(reads).toBe(1);
 	});
 
 	it("takes the prefix up to the first colon, and a key with none whole", () => {

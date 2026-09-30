@@ -164,7 +164,7 @@ const REQUIRES = [
 	// Session admission's synthetic key: the verification endpoint admits
 	// each action through it. The planner always fills it.
 	"sessionRequirementResolver",
-	// The budgets in force; the verification route holds its own to its
+	// The contributed budgets; the verification route holds its own to its
 	// configuration. The planner always fills it.
 	"rateLimitBudgetResolver",
 ] as const;
@@ -503,11 +503,13 @@ const requireUserSessionStore = (
 };
 
 /**
- * The `device_verification` budget in force (`rateLimitBudgetResolver`) must be
- * `oauth.deviceAuthorization.rateLimit`, the budget the `rateLimiter`
- * requirement's RFC 8628 §5.1 argument rests on; boot is refused otherwise.
+ * The contributed `device_verification` budget (`rateLimitBudgetResolver`,
+ * after any override) must be `oauth.deviceAuthorization.rateLimit`, the
+ * budget the `rateLimiter` requirement's RFC 8628 §5.1 argument rests on; boot
+ * is refused otherwise. A limiter's own `limits.device_verification` wins over
+ * it and is not compared.
  */
-const requireVerificationBudgetInForce = (
+const requireContributedVerificationBudget = (
 	slice: DeviceAuthorizationConfigSlice,
 	deps: Pick<DeviceGrantModuleDeps, "rateLimitBudgetResolver">,
 ): void => {
@@ -522,16 +524,19 @@ const requireVerificationBudgetInForce = (
 				"requirement reasons from.",
 		);
 	}
-	const inForce = deps.rateLimitBudgetResolver.get(DEVICE_VERIFICATION_RATE_LIMIT_PREFIX);
-	if (inForce?.limit !== configured.limit || inForce.windowSeconds !== configured.windowSeconds) {
+	const contributed = deps.rateLimitBudgetResolver.get(DEVICE_VERIFICATION_RATE_LIMIT_PREFIX);
+	if (
+		contributed?.limit !== configured.limit ||
+		contributed.windowSeconds !== configured.windowSeconds
+	) {
 		const shown =
-			inForce === undefined
+			contributed === undefined
 				? "none"
-				: `limit ${inForce.limit}, windowSeconds ${inForce.windowSeconds}`;
+				: `limit ${contributed.limit}, windowSeconds ${contributed.windowSeconds}`;
 		throw new Error(
-			`deviceGrantModule: the device_verification budget in force (${shown}) is not ` +
+			`deviceGrantModule: the contributed device_verification budget (${shown}) is not ` +
 				`oauth.deviceAuthorization.rateLimit (limit ${configured.limit}, windowSeconds ` +
-				`${configured.windowSeconds}): another module has set it. RFC 8628 §5.1 sizes the ` +
+				`${configured.windowSeconds}): another module has overridden it. RFC 8628 §5.1 sizes the ` +
 				"user code against the configured budget; change oauth.deviceAuthorization.rateLimit " +
 				"instead.",
 		);
@@ -694,8 +699,8 @@ export const deviceGrantModule = (params: { config: AppConfig }): Module => {
 					// on `approve` / `deny` alone, so no future action can forget it.
 					const csrfGuard = requireCsrfGuard(deps);
 					// The `rateLimiter` requirement means the configured budget only
-					// while that budget is the one in force.
-					requireVerificationBudgetInForce(slice, deps);
+					// while that budget is the one contributed.
+					requireContributedVerificationBudget(slice, deps);
 					const userSessionStore = requireUserSessionStore(deps);
 					router.post(
 						"/",

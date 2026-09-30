@@ -22,7 +22,7 @@
 import { shownConfigValue } from "../config/configuredValue.mjs";
 import type { RateLimitBudgetResolver } from "../modules/manifest/synthetic-keys.mjs";
 import type { RateLimitSpec } from "./types.mjs";
-import { assertUsableRateLimitSpecs, isUsableRateLimitSpec } from "./usableSpec.mjs";
+import { assertUsableRateLimitSpecs, isBoundedRateLimitSpec } from "./usableSpec.mjs";
 
 export interface RateLimitBudgetLookupOptions {
 	/** What an operator declared on this limiter, by prefix; wins over a contributed budget. */
@@ -30,8 +30,9 @@ export interface RateLimitBudgetLookupOptions {
 	/** What a key under a prefix nothing budgets is limited by. */
 	readonly defaultLimit: RateLimitSpec;
 	/**
-	 * The owners' contributed budgets (`rateLimitBudgetResolver`), read and
-	 * checked at each lookup: they register after the limiter is built.
+	 * The owners' contributed budgets (`rateLimitBudgetResolver`), read once
+	 * and checked (`isBoundedRateLimitSpec`) at each lookup: they register
+	 * after the limiter is built.
 	 */
 	readonly budgets?: RateLimitBudgetResolver;
 }
@@ -59,9 +60,10 @@ const prefixOf = (key: string): string => {
  * A key's budget: the limiter's own `limits` entry for its prefix, else the
  * contributed budget, else `defaultLimit` (never no limit). `limits` and
  * `defaultLimit` are refused, naming `who`, unless usable as written, and held
- * as checked, frozen, so no spec a lookup hands out can be changed; a
- * contributed budget that is not usable throws at its lookup, so the check is
- * an outage, never an unlimited key.
+ * as checked, frozen, so no spec a lookup hands out can be changed. A
+ * contributed budget is read once into a frozen copy, which is checked and
+ * handed out; one that is not a bounded budget throws at its lookup, so the
+ * check is an outage, never an unlimited key.
  */
 export function createRateLimitBudgetLookup(
 	who: string,
@@ -80,10 +82,18 @@ export function createRateLimitBudgetLookup(
 	});
 	const { budgets } = options;
 	const contributed = (prefix: string): RateLimitSpec | undefined => {
-		const budget = budgets?.get(prefix);
-		if (budget === undefined || isUsableRateLimitSpec(budget)) return budget;
+		const budget: unknown = budgets?.get(prefix);
+		if (budget === undefined) return undefined;
+		const read =
+			typeof budget === "object" && budget !== null
+				? Object.freeze({
+						limit: (budget as { readonly limit?: unknown }).limit,
+						windowSeconds: (budget as { readonly windowSeconds?: unknown }).windowSeconds,
+					})
+				: budget;
+		if (isBoundedRateLimitSpec(read)) return read;
 		throw new RangeError(
-			`${who}: the budget contributed for "${prefix}" is not one a limiter can apply as written (got ${shownConfigValue(budget)})`,
+			`${who}: the budget contributed for "${prefix}" is not a positive whole limit and a positive whole number of seconds of at most a year (got ${shownConfigValue(read)})`,
 		);
 	};
 	const lookup = (key: string): RateLimitBudget => {

@@ -16,6 +16,7 @@
 
 import { isStorableLifetime } from "../adapters/expiry.mjs";
 import { configuredNumber, shownConfigValue } from "../config/configuredValue.mjs";
+import { MAX_DURATION_SECONDS } from "../config/durations.mjs";
 import type { RateLimitSpec } from "./types.mjs";
 
 const isPositiveInteger = (value: unknown): value is number =>
@@ -46,6 +47,23 @@ const described = (spec: unknown): string => {
 	if (typeof spec !== "object" || spec === null) return shownConfigValue(spec);
 	const { limit, windowSeconds } = spec as { limit?: unknown; windowSeconds?: unknown };
 	return `limit ${shownConfigValue(limit)}, windowSeconds ${shownConfigValue(windowSeconds)}`;
+};
+
+/**
+ * Whether a value is a budget a module may contribute: a positive whole
+ * `limit` and a positive whole `windowSeconds` of at most a year
+ * (`MAX_DURATION_SECONDS`, the cap every config schema holds a duration to).
+ * Unlike {@link isUsableRateLimitSpec} it does not depend on the clock, so a
+ * budget that passes it at boot passes it at every later check.
+ */
+export const isBoundedRateLimitSpec = (value: unknown): value is RateLimitSpec => {
+	if (typeof value !== "object" || value === null) return false;
+	const { limit, windowSeconds } = value as { limit?: unknown; windowSeconds?: unknown };
+	return (
+		isPositiveInteger(limit) &&
+		isPositiveInteger(windowSeconds) &&
+		windowSeconds <= MAX_DURATION_SECONDS
+	);
 };
 
 /**
