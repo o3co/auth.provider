@@ -221,6 +221,22 @@ const REFUSED = "pass the csrfTokenSigner slot's signer, or createSessionCsrfTok
 const tampered = (signature: string): string =>
 	`${signature.startsWith("A") ? "B" : "A"}${signature.slice(1)}`;
 
+/** A signer over the double's key whose signatures are `length` characters: its signatures joined, then cut. */
+const signerOfLength = (length: number): CsrfTokenSigner => {
+	const sign = (payload: string): string => {
+		let joined = "";
+		for (let block = 0; joined.length < length; block++) {
+			joined += SIGNER.sign(`${block}:${payload}`);
+		}
+		return joined.slice(0, length);
+	};
+	return {
+		sign,
+		verify: (payload, signature) =>
+			typeof payload === "string" && typeof signature === "string" && signature === sign(payload),
+	};
+};
+
 describe("csrf — the signer at construction", () => {
 	const session = { name: "auth.session", secure: true, sameSite: "lax" as const, domain: null };
 
@@ -278,8 +294,8 @@ describe("csrf — the signer at construction", () => {
 			"a standard base64 signature",
 			breaking({ sign: (p) => Buffer.from(SIGNER.sign(p), "base64url").toString("base64") }),
 		],
-		["a signature of 8 characters", breaking({ sign: (p) => SIGNER.sign(p).slice(0, 8) })],
-		["a signature of 600 characters", breaking({ sign: (p) => SIGNER.sign(p).repeat(14) })],
+		["a signature of 21 characters, under core's bound", signerOfLength(21)],
+		["a signature of 513 characters, over core's bound", signerOfLength(513)],
 	])("createCsrfProtection refuses a signer with %s, naming the slot", (_what, signer) => {
 		expect(() => createCsrfProtection({ signer })).toThrow(
 			/^csrf: the signer does not keep the csrfTokenSigner contract \(.+\): pass the csrfTokenSigner slot's signer, or createSessionCsrfTokenSigner\(secret\)$/,
@@ -289,6 +305,22 @@ describe("csrf — the signer at construction", () => {
 	it("builds over a signer that keeps the contract", () => {
 		expect(() => createCsrfProtection({ signer: createTestCsrfTokenSigner() })).not.toThrow();
 	});
+
+	it.each([22, 512])(
+		"builds over a signer whose signatures are %i characters, at core's bound, and its tokens verify",
+		(length) => {
+			const csrf = createCsrfProtection({ signer: signerOfLength(length) });
+			const token = csrf.mint();
+			expect(
+				csrf.verify(
+					fakeRequest({
+						cookies: { [csrf.cookieName]: token },
+						headers: { [csrf.headerName]: token },
+					}),
+				),
+			).toBe("valid");
+		},
+	);
 
 	it("mints <expiry>.<nonce>.<signature>, the signature the signer answers for <expiry>.<nonce>", () => {
 		const token = createCsrfProtectionFromConfig(session, { signer: SIGNER }).mint();
