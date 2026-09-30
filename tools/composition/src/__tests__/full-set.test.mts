@@ -200,7 +200,6 @@ const DEPLOYMENT_MODULES = [
 	"deployment:github-federation-config",
 	"deployment:requirement-page",
 	"deployment:requirement-bare",
-	"deployment:mail-sender",
 ];
 
 describe("what the full set covers", () => {
