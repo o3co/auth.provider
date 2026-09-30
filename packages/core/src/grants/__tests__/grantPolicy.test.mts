@@ -19,6 +19,7 @@ import {
 	boundPolicyAudience,
 	evaluateGrantPolicy,
 	policyOutOfBounds,
+	readGrantPolicyDecision,
 } from "#/grants/grantPolicy.mjs";
 import type {
 	GrantPolicyContext,
@@ -38,6 +39,33 @@ const hook = (decide: () => Promise<GrantPolicyDecision>): GrantPolicyHook => ({
 });
 const allow = (extra: Partial<Extract<GrantPolicyDecision, { outcome: "allow" }>> = {}) =>
 	hook(async () => ({ outcome: "allow", ...extra }));
+
+/**
+ * What a JavaScript policy can return that is neither an exact `allow` nor an
+ * exact `deny`.
+ */
+const INVALID_DECISIONS: ReadonlyArray<readonly [string, unknown]> = [
+	["another outcome", { outcome: "denied", error: "access_denied" }],
+	["another case", { outcome: "Deny" }],
+	["no outcome", {}],
+	["null", null],
+	["a bare string", "allow"],
+	[
+		"an outcome that throws when read",
+		Object.defineProperty({}, "outcome", {
+			get() {
+				throw new Error("unreadable");
+			},
+		}),
+	],
+];
+
+/** What an invalid decision is answered with, whatever it held. */
+const DECISION_INVALID = {
+	status: 500,
+	error: "server_error",
+	errorDescription: "policy_decision_invalid",
+};
 
 const request: GrantPolicyRequest = {
 	grantType: "test",
@@ -89,6 +117,26 @@ describe("evaluateGrantPolicy", () => {
 			"grant_policy_unavailable",
 		);
 	});
+
+	it.each(INVALID_DECISIONS)(
+		"refuses a decision with %s as 500 server_error and logs it, never allowing it",
+		async (_label, decision) => {
+			const logger = { error: vi.fn() };
+			const outcome = await evaluateGrantPolicy(
+				hook(async () => decision as GrantPolicyDecision),
+				request,
+				context,
+				["read"],
+				{ logger },
+			);
+			expect(outcome).toEqual({ ok: false, result: DECISION_INVALID });
+			expect(logger.error).toHaveBeenCalledTimes(1);
+			expect(logger.error).toHaveBeenCalledWith(
+				{ grantType: request.grantType, policy: "stub" },
+				"grant_policy_decision_invalid",
+			);
+		},
+	);
 
 	it("passes a deny through as 400 with the policy's own error", async () => {
 		const outcome = await evaluateGrantPolicy(
@@ -222,6 +270,54 @@ describe("evaluateGrantPolicy", () => {
 				error: "server_error",
 				errorDescription: "policy returned a non-array grantedScope",
 			},
+		});
+	});
+});
+
+describe("readGrantPolicyDecision", () => {
+	const site = { grantType: "test", policy: "stub" };
+
+	it("reads an exact allow and an exact deny as themselves, logging nothing", () => {
+		const logger = { error: vi.fn() };
+		const allowed = { outcome: "allow", grantedScope: ["read"] } as const;
+		const denied = { outcome: "deny", error: "access_denied" } as const;
+		expect(readGrantPolicyDecision(allowed, logger, site)).toEqual({
+			outcome: "allow",
+			decision: allowed,
+		});
+		expect(readGrantPolicyDecision(denied, logger, site)).toEqual({
+			outcome: "deny",
+			decision: denied,
+		});
+		expect(logger.error).not.toHaveBeenCalled();
+	});
+
+	it.each(INVALID_DECISIONS)(
+		"reads a decision with %s as invalid, logging the policy and not the decision",
+		(_label, decision) => {
+			const logger = { error: vi.fn() };
+			expect(readGrantPolicyDecision(decision, logger, site)).toEqual({
+				outcome: "invalid",
+				result: DECISION_INVALID,
+			});
+			expect(logger.error).toHaveBeenCalledTimes(1);
+			expect(logger.error).toHaveBeenCalledWith(site, "grant_policy_decision_invalid");
+		},
+	);
+
+	it("names the caller's site in the log line when it has one", () => {
+		const logger = { error: vi.fn() };
+		readGrantPolicyDecision({}, logger, { ...site, site: "authorize" });
+		expect(logger.error).toHaveBeenCalledWith(
+			{ site: "authorize", grantType: "test", policy: "stub" },
+			"grant_policy_decision_invalid",
+		);
+	});
+
+	it("reads an invalid decision without a logger", () => {
+		expect(readGrantPolicyDecision({}, undefined, site)).toEqual({
+			outcome: "invalid",
+			result: DECISION_INVALID,
 		});
 	});
 });
