@@ -227,6 +227,28 @@ describe("mergeAdmission — the rows are the declared authority's", () => {
 		}
 	});
 
+	it("throws for a step-up row when the authority registered no step-up page, or when there is no session", () => {
+		const pageless = resolverForTests(
+			[
+				{
+					...authority("required", MERGE_REACH.installed),
+					stepUpPage: undefined,
+					remediations: [],
+				},
+			],
+			{ issuer: ISSUER, allowAnyReach: true },
+		).get(AUTHORITY);
+		expect(() => mergeAdmission(decision, session, pageless as never)).toThrow(
+			/registered no step-up page/,
+		);
+		const registered = resolverForTests([authority("required", MERGE_REACH.installed)], {
+			issuer: ISSUER,
+		}).get(AUTHORITY);
+		expect(() => mergeAdmission(decision, null, registered as never)).toThrow(
+			/a step-up needs a session/,
+		);
+	});
+
 	it("throws for an object that is not a registered requirement, however it is shaped", () => {
 		const copy = {
 			name: AUTHORITY,
