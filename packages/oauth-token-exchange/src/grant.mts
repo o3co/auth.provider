@@ -31,6 +31,7 @@ import type {
 	GrantPolicyRequest,
 	OAuthTokenSettings,
 	ProviderDeps,
+	PublicClient,
 	TokenExchangeValidatorResolver,
 	ValidatedToken,
 } from "@o3co/auth-provider-core";
@@ -49,8 +50,8 @@ import { authenticateClient } from "./clientAuthentication.mjs";
 import { delegationRefusal } from "./delegation.mjs";
 import { GRANT_TYPE } from "./grantType.mjs";
 import { issueAccessToken } from "./issuance.mjs";
-import { issuedTarget, requestTargets } from "./targetCeilings.mjs";
-import { readTokenRequest } from "./tokenRequest.mjs";
+import { issuedTarget, type RequestTargets, requestTargets } from "./targetCeilings.mjs";
+import { readTokenRequest, type TokenRequest } from "./tokenRequest.mjs";
 import {
 	reportedFamily,
 	resolveValidators,
@@ -119,7 +120,7 @@ export function createTokenExchangeGrant(deps: TokenExchangeDependencies): Grant
 		async handle(ctx: GrantContext): Promise<GrantHandlerResult> {
 			const request = readTokenRequest(ctx);
 			if (isRefusal(request)) return request;
-			const { body, subjectTokenType, requestedExpiresIn, actorTokenType } = request;
+			const { body, requestedExpiresIn } = request;
 
 			const authenticated = await authenticateClient(deps, clientRepository, ctx, request);
 			if (isRefusal(authenticated)) return authenticated;
@@ -158,140 +159,18 @@ export function createTokenExchangeGrant(deps: TokenExchangeDependencies): Grant
 
 			const targets = requestTargets(deps, body, client, subjectValidated);
 			if (isRefusal(targets)) return targets;
-			const {
-				subjectScope,
-				subjectScopeSet,
-				clientScopeSet,
-				requestedScope,
-				clientAudienceSet,
-				subjectAudienceSet,
-				requestedAudience,
-				requestedResource,
-			} = targets;
 
-			// Policy hook: `grantedScope`/`grantedAudience` start as the request's narrowed
-			// values and the policy may narrow them further. An omitted `scope` inherits the
-			// subject token's scope clamped to `allowedScopes` (RFC 8693 §2.1). The sibling
-			// grants instead use `defaultScopes` and refuse when none are declared, so that
-			// "no scope" cannot mean "the whole allowlist"; here the subject token is already
-			// an authorized upper bound, so inheritance cannot over-grant, and narrowing
-			// rather than refusing keeps a subject token wider than the client exchangeable
-			// for less.
-			let grantedScope: readonly string[] | undefined =
-				requestedScope ?? subjectScope.filter((s) => clientScopeSet.has(s));
-			let grantedAudience: readonly string[] | undefined = requestedAudience ?? undefined;
-			if (deps.grantPolicy) {
-				const policyRequest: GrantPolicyRequest = {
-					grantType: GRANT_TYPE,
-					clientId: client.clientId,
-					subject: subjectValidated.sub,
-					requestedScope: requestedScope ?? undefined,
-					requestedAudience: requestedAudience ?? undefined,
-					originalScope: subjectScope.length > 0 ? subjectScope : undefined,
-					subjectTokenType,
-					// Only when an actor_token was validated, so a type header alone cannot satisfy
-					// a policy gating on it.
-					actorTokenType:
-						actorValidated !== null && actorTokenType !== null ? actorTokenType : undefined,
-					resource: requestedResource ?? undefined,
-				};
-				const policyContext: GrantPolicyContext = {
-					ip: ctx.ip,
-					userAgent: ctx.userAgent,
-					issuer: ctx.issuer ?? "",
-				};
-				let decision: GrantPolicyDecision;
-				try {
-					decision = await deps.grantPolicy.evaluate(policyRequest, policyContext);
-				} catch (err) {
-					logGrantPolicyUnavailable(
-						deps.logger,
-						{ grantType: GRANT_TYPE, policy: deps.grantPolicy.kind },
-						err,
-					);
-					return {
-						result: {
-							status: 503,
-							error: "temporarily_unavailable",
-							errorDescription: "grant policy evaluation failed",
-						},
-					};
-				}
-				if (decision.outcome === "deny") {
-					// RFC 6749 §5.2 makes `error` 1*NQSCHAR: a malformed policy code is logged
-					// (sanitised) and replaced by `invalid_request`, RFC 8693 §2.2.2's code for a
-					// request refused by policy. `/oauth/token` checks too; this covers a
-					// composition dispatching the handler from its own route.
-					let error = decision.error;
-					if (!isWellFormedErrorCode(error)) {
-						deps.logger?.warn(
-							{ error: auditErrorText(String(error)) },
-							"token_exchange_policy_deny_error_malformed",
-						);
-						error = "invalid_request";
-					}
-					// A JavaScript policy can return anything as its description; one
-					// that is empty or not a string is not sent — RFC 6749 A.8 makes
-					// the field 1*NQSCHAR — and the default is.
-					const description = decision.errorDescription;
-					return {
-						result: {
-							status: error === "access_denied" ? 403 : 400,
-							error,
-							errorDescription:
-								(typeof description === "string" && description) || "denied by policy",
-						},
-					};
-				}
-				// Presence, not truthiness, and it must be an array (a JS policy returning a
-				// string would throw at `.filter`). The policy may narrow, never widen: its scope
-				// must lie within the subject's scope AND the client's `allowedScopes`, else
-				// core's `policyOutOfBounds` (500: the deployment's policy exceeded its
-				// authority, not the caller). An empty `grantedScope` strips every scope.
-				if (decision.grantedScope !== undefined) {
-					if (!Array.isArray(decision.grantedScope)) {
-						return { result: policyOutOfBounds("policy returned a non-array grantedScope") };
-					}
-					const widenedScopes = decision.grantedScope.filter(
-						(scope) => !subjectScopeSet.has(scope) || !clientScopeSet.has(scope),
-					);
-					if (widenedScopes.length > 0) {
-						deps.logger?.warn(
-							{ subject: subjectValidated.sub, clientId: client.clientId, widenedScopes },
-							"token_exchange_policy_scope_refused",
-						);
-						return {
-							result: policyOutOfBounds(
-								`policy returned scopes exceeding the subject_token scope or client allowedScopes: ${widenedScopes.join(" ")}`,
-							),
-						};
-					}
-					grantedScope = decision.grantedScope;
-				}
-				// The audience likewise, as core's `boundPolicyAudience` does for other grants,
-				// with the subject token's audience as a second bound. An empty
-				// `grantedAudience` is no decision: the request's audience stands.
-				if (decision.grantedAudience !== undefined) {
-					if (!Array.isArray(decision.grantedAudience)) {
-						return { result: policyOutOfBounds("policy returned a non-array grantedAudience") };
-					}
-					const widenedAudiences = decision.grantedAudience.filter(
-						(audience) => !subjectAudienceSet.has(audience) || !clientAudienceSet.has(audience),
-					);
-					if (widenedAudiences.length > 0) {
-						deps.logger?.warn(
-							{ subject: subjectValidated.sub, clientId: client.clientId, widenedAudiences },
-							"token_exchange_policy_audience_refused",
-						);
-						return {
-							result: policyOutOfBounds(
-								`policy returned audiences outside the subject_token audience or client allowedAudiences: ${widenedAudiences.join(" ")}`,
-							),
-						};
-					}
-					if (decision.grantedAudience.length > 0) grantedAudience = decision.grantedAudience;
-				}
-			}
+			const granted = await applyGrantPolicy(
+				deps,
+				ctx,
+				client,
+				request,
+				subjectValidated,
+				actorValidated,
+				targets,
+			);
+			if (isRefusal(granted)) return granted;
+			const { grantedScope, grantedAudience } = granted;
 
 			const issued = issuedTarget(deps, client, subjectValidated, targets, grantedAudience);
 			if (isRefusal(issued)) return issued;
@@ -316,6 +195,160 @@ export function createTokenExchangeGrant(deps: TokenExchangeDependencies): Grant
 			return tokenAnswer(issuedToken.accessToken);
 		},
 	};
+}
+
+/**
+ * The policy hook: the deployment's grant policy, asked with the request as narrowed
+ * so far, may deny it or narrow its scope and audience, never widen them past the
+ * subject token's and the client's ceilings.
+ */
+async function applyGrantPolicy(
+	deps: TokenExchangeDependencies,
+	ctx: GrantContext,
+	client: PublicClient,
+	{ subjectTokenType, actorTokenType }: Pick<TokenRequest, "subjectTokenType" | "actorTokenType">,
+	subjectValidated: ValidatedToken,
+	actorValidated: ValidatedToken | null,
+	{
+		subjectScope,
+		subjectScopeSet,
+		clientScopeSet,
+		requestedScope,
+		clientAudienceSet,
+		subjectAudienceSet,
+		requestedAudience,
+		requestedResource,
+	}: RequestTargets,
+): Promise<
+	| {
+			readonly grantedScope: readonly string[] | undefined;
+			readonly grantedAudience: readonly string[] | undefined;
+	  }
+	| GrantHandlerResult
+> {
+	// Policy hook: `grantedScope`/`grantedAudience` start as the request's narrowed
+	// values and the policy may narrow them further. An omitted `scope` inherits the
+	// subject token's scope clamped to `allowedScopes` (RFC 8693 §2.1). The sibling
+	// grants instead use `defaultScopes` and refuse when none are declared, so that
+	// "no scope" cannot mean "the whole allowlist"; here the subject token is already
+	// an authorized upper bound, so inheritance cannot over-grant, and narrowing
+	// rather than refusing keeps a subject token wider than the client exchangeable
+	// for less.
+	let grantedScope: readonly string[] | undefined =
+		requestedScope ?? subjectScope.filter((s) => clientScopeSet.has(s));
+	let grantedAudience: readonly string[] | undefined = requestedAudience ?? undefined;
+	if (deps.grantPolicy) {
+		const policyRequest: GrantPolicyRequest = {
+			grantType: GRANT_TYPE,
+			clientId: client.clientId,
+			subject: subjectValidated.sub,
+			requestedScope: requestedScope ?? undefined,
+			requestedAudience: requestedAudience ?? undefined,
+			originalScope: subjectScope.length > 0 ? subjectScope : undefined,
+			subjectTokenType,
+			// Only when an actor_token was validated, so a type header alone cannot satisfy
+			// a policy gating on it.
+			actorTokenType:
+				actorValidated !== null && actorTokenType !== null ? actorTokenType : undefined,
+			resource: requestedResource ?? undefined,
+		};
+		const policyContext: GrantPolicyContext = {
+			ip: ctx.ip,
+			userAgent: ctx.userAgent,
+			issuer: ctx.issuer ?? "",
+		};
+		let decision: GrantPolicyDecision;
+		try {
+			decision = await deps.grantPolicy.evaluate(policyRequest, policyContext);
+		} catch (err) {
+			logGrantPolicyUnavailable(
+				deps.logger,
+				{ grantType: GRANT_TYPE, policy: deps.grantPolicy.kind },
+				err,
+			);
+			return {
+				result: {
+					status: 503,
+					error: "temporarily_unavailable",
+					errorDescription: "grant policy evaluation failed",
+				},
+			};
+		}
+		if (decision.outcome === "deny") {
+			// RFC 6749 §5.2 makes `error` 1*NQSCHAR: a malformed policy code is logged
+			// (sanitised) and replaced by `invalid_request`, RFC 8693 §2.2.2's code for a
+			// request refused by policy. `/oauth/token` checks too; this covers a
+			// composition dispatching the handler from its own route.
+			let error = decision.error;
+			if (!isWellFormedErrorCode(error)) {
+				deps.logger?.warn(
+					{ error: auditErrorText(String(error)) },
+					"token_exchange_policy_deny_error_malformed",
+				);
+				error = "invalid_request";
+			}
+			// A JavaScript policy can return anything as its description; one
+			// that is empty or not a string is not sent — RFC 6749 A.8 makes
+			// the field 1*NQSCHAR — and the default is.
+			const description = decision.errorDescription;
+			return {
+				result: {
+					status: error === "access_denied" ? 403 : 400,
+					error,
+					errorDescription: (typeof description === "string" && description) || "denied by policy",
+				},
+			};
+		}
+		// Presence, not truthiness, and it must be an array (a JS policy returning a
+		// string would throw at `.filter`). The policy may narrow, never widen: its scope
+		// must lie within the subject's scope AND the client's `allowedScopes`, else
+		// core's `policyOutOfBounds` (500: the deployment's policy exceeded its
+		// authority, not the caller). An empty `grantedScope` strips every scope.
+		if (decision.grantedScope !== undefined) {
+			if (!Array.isArray(decision.grantedScope)) {
+				return { result: policyOutOfBounds("policy returned a non-array grantedScope") };
+			}
+			const widenedScopes = decision.grantedScope.filter(
+				(scope) => !subjectScopeSet.has(scope) || !clientScopeSet.has(scope),
+			);
+			if (widenedScopes.length > 0) {
+				deps.logger?.warn(
+					{ subject: subjectValidated.sub, clientId: client.clientId, widenedScopes },
+					"token_exchange_policy_scope_refused",
+				);
+				return {
+					result: policyOutOfBounds(
+						`policy returned scopes exceeding the subject_token scope or client allowedScopes: ${widenedScopes.join(" ")}`,
+					),
+				};
+			}
+			grantedScope = decision.grantedScope;
+		}
+		// The audience likewise, as core's `boundPolicyAudience` does for other grants,
+		// with the subject token's audience as a second bound. An empty
+		// `grantedAudience` is no decision: the request's audience stands.
+		if (decision.grantedAudience !== undefined) {
+			if (!Array.isArray(decision.grantedAudience)) {
+				return { result: policyOutOfBounds("policy returned a non-array grantedAudience") };
+			}
+			const widenedAudiences = decision.grantedAudience.filter(
+				(audience) => !subjectAudienceSet.has(audience) || !clientAudienceSet.has(audience),
+			);
+			if (widenedAudiences.length > 0) {
+				deps.logger?.warn(
+					{ subject: subjectValidated.sub, clientId: client.clientId, widenedAudiences },
+					"token_exchange_policy_audience_refused",
+				);
+				return {
+					result: policyOutOfBounds(
+						`policy returned audiences outside the subject_token audience or client allowedAudiences: ${widenedAudiences.join(" ")}`,
+					),
+				};
+			}
+			if (decision.grantedAudience.length > 0) grantedAudience = decision.grantedAudience;
+		}
+	}
+	return { grantedScope, grantedAudience };
 }
 
 /**
