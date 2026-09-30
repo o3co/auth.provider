@@ -53,7 +53,7 @@ const TEMPLATE_CONFIG = fileURLToPath(
  * many as are today. A rename lowers it by the names it renames; nothing
  * raises it.
  */
-const CEILING = 59;
+const CEILING = 57;
 
 /** `LEGACY`'s first count: it only ever loses entries. */
 const LEGACY_BASELINE = 61;
@@ -99,8 +99,6 @@ const LEGACY: readonly string[] = [
 	"core: REFRESH_TOKEN_FAMILY_STORE_CAS_RETRY_LIMIT at redisRefreshTokenFamilyStore.casRetryLimit",
 	"core: CLIENT_CODE_KEY_PREFIX at redisCodeRepository.keyPrefix",
 	"mfa: MFA_ENCRYPTION_KEY at mfa.encryptionKeys.0.key",
-	"webauthn: WEBAUTHN_AUTHENTICATION_OPTIONS_RATE_LIMIT at webauthn.rateLimit.authenticationOptions.limit",
-	"webauthn: WEBAUTHN_AUTHENTICATION_OPTIONS_RATE_WINDOW_SECONDS at webauthn.rateLimit.authenticationOptions.windowSeconds",
 	"template: LOG_LEVEL at logging.level",
 	"template: OAUTH_JWT_ALGORITHM at oauth.jwt.signingKey.local.algorithm",
 	"template: OAUTH_JWT_KID at oauth.jwt.signingKey.local.kid",

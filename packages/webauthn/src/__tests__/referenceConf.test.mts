@@ -19,7 +19,8 @@
  * declare it as their section's reference, and it holds only their
  * sections, which their section schemas parse without losing a path —
  * core's `packageReferenceProblems`, the check every package with defaults
- * runs over its own file.
+ * runs over its own file. The two rate-limit variables are named after the
+ * paths they set; their old names are declared renamed and bound nowhere.
  */
 
 import { packageReferenceProblems } from "@o3co/auth-provider-core/testing";
@@ -32,13 +33,34 @@ const REFERENCE = new URL("../../config/reference.conf", import.meta.url);
 
 describe("the package's config/reference.conf", () => {
 	const modules = [webauthnModule];
+	const read = (path: string, env: Readonly<Record<string, string>>): unknown =>
+		parseFile(path, { env: { ...env } }).toObject();
 
-	it("is read at the sections its modules declare", () => {
-		expect(modules.map((module) => module.section?.at)).toEqual(["webauthn"]);
+	it("is read at the section named after its module", () => {
+		expect(
+			modules.map((module) => [module.name, module.section !== undefined, module.section?.at]),
+		).toEqual([["webauthn", true, undefined]]);
 	});
 
 	it("is declared by each of them and holds only their sections, which their schemas parse without losing a path", () => {
-		const read = (path: string): unknown => parseFile(path, { env: {} }).toObject();
 		expect(packageReferenceProblems({ reference: REFERENCE, modules, read })).toEqual([]);
+	});
+
+	it("declares the two rate-limit variables renamed to the names their paths derive", () => {
+		expect(webauthnModule.section?.renamedVariables).toEqual({
+			WEBAUTHN_AUTHENTICATION_OPTIONS_RATE_LIMIT: "webauthn.rateLimit.authenticationOptions.limit",
+			WEBAUTHN_AUTHENTICATION_OPTIONS_RATE_WINDOW_SECONDS:
+				"webauthn.rateLimit.authenticationOptions.windowSeconds",
+		});
+	});
+
+	it.each([
+		["WEBAUTHN_RATE_LIMIT_AUTHENTICATION_OPTIONS_LIMIT", "limit"],
+		["WEBAUTHN_RATE_LIMIT_AUTHENTICATION_OPTIONS_WINDOW_SECONDS", "windowSeconds"],
+	])("reads %s at webauthn.rateLimit.authenticationOptions.%s", (variable, key) => {
+		const tree = read(new URL(REFERENCE).pathname, { [variable]: "7" }) as {
+			webauthn: { rateLimit: { authenticationOptions: Record<string, unknown> } };
+		};
+		expect(tree.webauthn.rateLimit.authenticationOptions[key]).toBe("7");
 	});
 });
