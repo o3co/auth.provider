@@ -28,12 +28,13 @@ import {
 	type MailRelayRefusal,
 	type MailSenderContractInput,
 	mailSenderContract,
+	type RelayedMail,
 } from "#/index.mjs";
 
 const RULES = {
 	kind: "kind is a non-empty string",
 	delivered:
-		"a send the relay accepts answers delivered, and the relay then holds one more mail, to the recipient, carrying the code, and nothing else new",
+		"a send the relay accepts answers delivered, and the relay then holds one more mail, to the recipient alone, carrying the code, and nothing else new",
 	purposes: "a send of every purpose answers delivered, each relayed alone with its code",
 	limit:
 		"a relay refusing at a limit is answered refused_at_limit, and nothing of the mail or of the relay's reply",
@@ -52,7 +53,7 @@ const RULES = {
 
 /** A relay the recording sender stands in for: what it holds is what the sender delivered. */
 const relayOf = (sender: ReturnType<typeof createRecordingMailSender>) => async () =>
-	sender.sent.map((mail) => ({ to: mail.to, content: `${mail.purpose} ${mail.code}` }));
+	sender.sent.map((mail) => ({ to: [mail.to], content: `${mail.purpose} ${mail.code}` }));
 
 /** The cases of the refusals a sender answers by rejecting. */
 const OUTAGES = [
@@ -172,8 +173,8 @@ describe("mailSenderContract", () => {
 	});
 
 	it("fails a sender that answers delivered with the relay holding nothing, or no code, or the mail to another recipient", async () => {
-		const relaying = (relayed: (mail: MailSend) => { to: string; content: string }[]) => {
-			let held: { to: string; content: string }[] = [];
+		const relaying = (relayed: (mail: MailSend) => RelayedMail[]) => {
+			let held: RelayedMail[] = [];
 			return {
 				build: () => ({
 					sender: {
@@ -189,21 +190,25 @@ describe("mailSenderContract", () => {
 			} satisfies MailSenderContractInput;
 		};
 		expect(await failing(relaying(() => []))).toEqual([RULES.delivered, RULES.purposes]);
-		expect(await failing(relaying((mail) => [{ to: mail.to, content: "your code" }]))).toEqual([
+		expect(await failing(relaying((mail) => [{ to: [mail.to], content: "your code" }]))).toEqual([
 			RULES.delivered,
 			RULES.purposes,
 		]);
 		expect(
-			await failing(relaying((mail) => [{ to: "someone@example.com", content: mail.code }])),
+			await failing(relaying((mail) => [{ to: ["someone@example.com"], content: mail.code }])),
 		).toEqual([RULES.delivered, RULES.purposes]);
 		expect(
 			await failing(
 				relaying((mail) => [
-					{ to: mail.to, content: mail.code },
-					{ to: mail.to, content: mail.code },
+					{ to: [mail.to], content: mail.code },
+					{ to: [mail.to], content: mail.code },
 				]),
 			),
 		).toEqual([RULES.delivered, RULES.purposes]);
+		expect(await failing(relaying((mail) => [{ to: [], content: mail.code }]))).toEqual([
+			RULES.delivered,
+			RULES.purposes,
+		]);
 	});
 
 	it("fails a sender that cannot send a purpose of the closed list", async () => {
@@ -314,14 +319,14 @@ describe("mailSenderContract", () => {
 	});
 
 	it("fails a sender that also delivers the mail to another mailbox, or relays a second mail", async () => {
-		const relaying = (extra: (mail: MailSend) => { to: string; content: string }[]) => {
-			let held: { to: string; content: string }[] = [];
+		const relaying = (extra: (mail: MailSend) => RelayedMail[]) => {
+			let held: RelayedMail[] = [];
 			return {
 				build: () => ({
 					sender: {
 						kind: "test",
 						send: async (mail: MailSend) => {
-							held = [...held, { to: mail.to, content: mail.code }, ...extra(mail)];
+							held = [...held, { to: [mail.to], content: mail.code }, ...extra(mail)];
 							return { outcome: "delivered" } as const;
 						},
 					},
@@ -331,8 +336,8 @@ describe("mailSenderContract", () => {
 			} satisfies MailSenderContractInput;
 		};
 		for (const extra of [
-			(mail: MailSend) => [{ to: "debug@example.com", content: mail.code }],
-			(mail: MailSend) => [{ to: mail.to, content: "a second mail" }],
+			(mail: MailSend) => [{ to: ["debug@example.com"], content: mail.code }],
+			(mail: MailSend) => [{ to: [mail.to], content: "a second mail" }],
 		]) {
 			expect(await failing(relaying(extra)), extra.toString()).toEqual([
 				RULES.delivered,
@@ -351,5 +356,82 @@ describe("mailSenderContract", () => {
 				),
 			),
 		).toEqual([RULES.temporary_failure]);
+	});
+	it("fails a sender whose one mail also goes to a mailbox the envelope adds, as a Bcc would", async () => {
+		let held: RelayedMail[] = [];
+		const bcc: MailSenderContractInput = {
+			build: () => ({
+				sender: {
+					kind: "test",
+					send: async (mail: MailSend) => {
+						held = [...held, { to: [mail.to, "audit@example.com"], content: mail.code }];
+						return { outcome: "delivered" } as const;
+					},
+				},
+				relayed: async () => held,
+			}),
+			refusing: conforming.refusing,
+		};
+		expect(await failing(bcc)).toEqual([RULES.delivered, RULES.purposes]);
+	});
+
+	it("fails a rejection carrying the mark in base64 at any offset a field may start at", async () => {
+		for (const pad of ["", "x", "xy"]) {
+			expect(
+				await failing(
+					changed(
+						rejectingWith(
+							(mail) => new Error(`payload ${Buffer.from(pad + mail.code).toString("base64")}`),
+						),
+					),
+				),
+				pad,
+			).toEqual(OUTAGES);
+		}
+	});
+
+	it("reads an answer as mailSendOutcome does: a null-prototype answer is one, an accessor is none", async () => {
+		const answering = (answer: (outcome: string) => unknown) =>
+			changed((sender, refusal) =>
+				refusal === undefined || refusal === "limit"
+					? {
+							kind: sender.kind,
+							send: async (mail) => {
+								const read = await sender.send(mail);
+								return answer(read.outcome) as never;
+							},
+						}
+					: sender,
+			);
+		expect(
+			await failing(answering((outcome) => Object.assign(Object.create(null), { outcome }))),
+		).toEqual([]);
+		expect(
+			await failing(
+				answering((outcome) => ({
+					get outcome() {
+						return outcome;
+					},
+				})),
+			),
+		).toEqual([RULES.delivered, RULES.purposes, RULES.limit]);
+	});
+
+	it("passes a sender over a relay that answers the array it keeps adding to, and the records in it", async () => {
+		const held: { to: string[]; content: string }[] = [];
+		const live: MailSenderContractInput = {
+			build: () => ({
+				sender: {
+					kind: "test",
+					send: async (mail: MailSend) => {
+						held.push({ to: [mail.to], content: mail.code });
+						return { outcome: "delivered" } as const;
+					},
+				},
+				relayed: async () => held,
+			}),
+			refusing: conforming.refusing,
+		};
+		expect(await failing(live)).toEqual([]);
 	});
 });
