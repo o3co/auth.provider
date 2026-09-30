@@ -130,9 +130,9 @@ describe("oauth.deviceAuthorization.rateLimit — the documented key resolves", 
 	};
 
 	it("reaches the limiter as a budget of five from reference.conf alone", async () => {
-		// End to end through what a deployment actually runs: the shipped
-		// HOCON defaults, the schema, the module's contributed budget and the
-		// memory limiter module.
+		// The shipped HOCON defaults and the schema, the budget the module
+		// contributes from them, handed to the memory limiter module through a
+		// resolver built here (createApp's is pinned by the composition suite).
 		// The sixth attempt under the verification prefix is the one refused.
 		const parsed = validate(parseFile(REFERENCE_CONF), deviceGrantConfigSchema);
 		expect(parsed.oauth.deviceAuthorization.rateLimit).toEqual({ limit: 5, windowSeconds: 300 });

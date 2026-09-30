@@ -110,7 +110,7 @@ describe("redisRateLimiterModule", () => {
 			},
 		);
 
-		it("declares none when the configuration gives none, which the guard reads as closed", () => {
+		it("declares none when the configuration gives none", () => {
 			for (const rateLimit of [undefined, {}]) {
 				expect(provided(rateLimit)?.failMode, JSON.stringify(rateLimit)).toBeUndefined();
 			}

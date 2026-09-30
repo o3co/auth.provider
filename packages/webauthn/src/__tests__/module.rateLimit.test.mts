@@ -27,6 +27,7 @@
 import {
 	type AuditEvent,
 	type AuditSink,
+	type BootError,
 	createApp,
 	createMemoryRateLimiter,
 	createSymmetricKeyStore,
@@ -319,7 +320,7 @@ describe("webauthn authentication/options rate limit — the configured budget o
 		await handle.dispose();
 	});
 
-	it("refuses to boot on a budget no limiter can apply, naming the key and not the limiter", async () => {
+	it("refuses to boot on a budget no limiter can apply: core's composed schema refuses it first, by the key's path", async () => {
 		for (const authenticationOptions of [
 			{ limit: 30, windowSeconds: 0 },
 			{ limit: 1.5, windowSeconds: 60 },
@@ -327,28 +328,19 @@ describe("webauthn authentication/options rate limit — the configured budget o
 			{ limit: "", windowSeconds: 60 },
 			{ limit: 30, windowSeconds: 1e13 },
 		]) {
-			const refusal = await bootApp(
+			const err = await bootApp(
 				makeWebAuthnConfig(2),
 				[memoryRateLimiterModule],
 				undefined,
 				undefined,
-				{
-					...composed(),
-					webauthn: { rateLimit: { authenticationOptions } },
-				},
+				{ ...composed(), webauthn: { rateLimit: { authenticationOptions } } },
 			).then(
-				() => "booted",
-				(err: unknown) => {
-					const texts: string[] = [];
-					for (let at = err; at instanceof Error; at = at.cause) texts.push(at.message);
-					return texts.join("\n");
-				},
+				() => undefined,
+				(caught: unknown) => caught as BootError,
 			);
-			expect(refusal, JSON.stringify(authenticationOptions)).toMatch(
-				/webauthn\.rateLimit\.authenticationOptions/,
-			);
-			expect(refusal, JSON.stringify(authenticationOptions)).not.toMatch(
-				/createMemoryRateLimiter|limits\.webauthn/,
+			expect(err?.reason, JSON.stringify(authenticationOptions)).toBe("config-validation-failed");
+			expect(err?.message, JSON.stringify(authenticationOptions)).toContain(
+				"webauthn.rateLimit.authenticationOptions",
 			);
 		}
 	});
