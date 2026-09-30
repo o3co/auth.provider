@@ -19,8 +19,8 @@
  * composed application, over a seeded TOTP factor: a TOTP login end to end,
  * RFC 6238's rules on the codes it accepts, the transaction's attempts, the
  * binding, the guards every POST sits behind, and what the routes log and
- * audit. See ADR 2026-09-25-multi-factor-authentication, F1, F6, D21, D27
- * and D28.
+ * audit — a refusal's factor id included, over a factor that names one. See
+ * ADR 2026-09-25-multi-factor-authentication, F1, F6, D21, D27 and D28.
  */
 
 import {
@@ -28,14 +28,18 @@ import {
 	createMemoryMfaFactorStore,
 	createMemoryMfaTransactionStore,
 	createMemoryRateLimiter,
+	type MfaFactor,
+	type MfaFactorRecord,
 	type RateLimiter,
 	type UserSessionStore,
 } from "@o3co/auth-provider-core";
+import { createTestMfaFactor } from "@o3co/auth-provider-core/testing";
 import request from "supertest";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { encodeBase32 } from "#/totp/base32.mjs";
 import {
 	ALICE,
+	BOB,
 	boot,
 	configFor,
 	disposeAll,
@@ -45,6 +49,7 @@ import {
 } from "./moduleHarness.mjs";
 import {
 	beginLogin,
+	contributing,
 	csrfOf,
 	freezeClock,
 	loggedText,
@@ -502,5 +507,83 @@ describe("what the routes log", () => {
 			expect(text).not.toContain(secretText);
 		}
 		expect(events(logger, "error")).toEqual([]);
+	});
+});
+
+describe("a refusal that names the factor it concerns: the clone event", () => {
+	/** A factor of kind `test` that refuses every proof as a sign count that did not increase, naming what `names` answers. */
+	const naming = (names: () => unknown): MfaFactor => ({
+		...createTestMfaFactor({ kind: "test" }),
+		verify: async () => ({
+			ok: false,
+			reason: "sign_count_regression",
+			factorId: names() as string,
+		}),
+	});
+
+	it("audits the record id of the factor the refusal names, one of the subject's of its kind, not the one the request named", async () => {
+		const factorStore = createMemoryMfaFactorStore();
+		const named = await seedFactor(factorStore, "test", { secret: "a" });
+		const other = await seedFactor(factorStore, "test", { secret: "b" });
+		const audit = recordingAuditSink();
+		const { app } = await boot({
+			config: configFor("required"),
+			factorStore,
+			auditSink: audit,
+			extraModules: [contributing(naming(() => other.id))],
+		});
+		const { agent, transaction } = await beginLogin(app);
+
+		const res = await verify(agent, transaction, named.id, "a");
+
+		expect(res.status).toBe(401);
+		expect(res.body).toEqual(refused(4));
+		expect(audit.of("mfa.verify.failure")).toEqual([
+			expect.objectContaining({
+				subject: ALICE.id,
+				details: {
+					kind: "test",
+					purpose: "login",
+					reason: "sign_count_regression",
+					factorId: other.id,
+				},
+			}),
+		]);
+	});
+
+	it.each<
+		[
+			string,
+			(seeded: { readonly bobs: MfaFactorRecord; readonly totp: MfaFactorRecord }) => unknown,
+		]
+	>([
+		["another subject's factor of its kind", ({ bobs }) => bobs.id],
+		["a factor of the subject's of another kind", ({ totp }) => totp.id],
+		["a credential id, not a record id", () => "Y3JlZC1h"],
+		["nothing", () => undefined],
+	])("audits the refusal without a factor id when the factor names %s", async (_what, names) => {
+		const factorStore = createMemoryMfaFactorStore();
+		const named = await seedFactor(factorStore, "test", { secret: "a" });
+		const seeded = {
+			bobs: await seedFactor(factorStore, "test", { secret: "b" }, BOB.id),
+			totp: (await seedTotp(factorStore)).record,
+		};
+		const audit = recordingAuditSink();
+		const { app } = await boot({
+			config: configFor("required"),
+			factorStore,
+			auditSink: audit,
+			extraModules: [contributing(naming(() => names(seeded)))],
+		});
+		const { agent, transaction } = await beginLogin(app);
+
+		const res = await verify(agent, transaction, named.id, "a");
+
+		expect(res.status).toBe(401);
+		expect(audit.of("mfa.verify.failure")).toEqual([
+			expect.objectContaining({
+				details: { kind: "test", purpose: "login", reason: "sign_count_regression" },
+			}),
+		]);
 	});
 });

@@ -23,8 +23,9 @@
  * verification takes it, finds the credential by its id, and writes the new
  * sign count by compare-and-set; a lost compare-and-set reads the factor
  * again and checks the assertion again; a counter that did not increase is
- * refused and audited, and only an assertion whose signature verified is
- * judged on its counter; `hwk` or `swk` follows the backup eligibility (BE)
+ * refused and audited, naming the factor's record id, and only an assertion
+ * whose signature verified is judged on its counter; `hwk` or `swk` follows
+ * the backup eligibility (BE)
  * registered, and an assertion reporting another is refused.
  */
 
@@ -450,7 +451,7 @@ function losingFirstUpdate(
 }
 
 describe("the sign count", () => {
-	it("refuses a counter that did not increase over the stored one: 401, audited as sign_count_regression, no session, the factor left as it was", async () => {
+	it("refuses a counter that did not increase over the stored one: 401, audited as sign_count_regression naming the factor's record id, no session, the factor left as it was", async () => {
 		const factorStore = createMemoryMfaFactorStore();
 		const passkey = passkeyFor({ counter: 3 });
 		const record = await seedPasskey(factorStore, passkey, { signCount: 10 });
@@ -471,7 +472,12 @@ describe("the sign count", () => {
 		expect(audit.of("mfa.verify.failure")).toEqual([
 			expect.objectContaining({
 				subject: ALICE.id,
-				details: { kind: "webauthn", purpose: "login", reason: "sign_count_regression" },
+				details: {
+					kind: "webauthn",
+					purpose: "login",
+					reason: "sign_count_regression",
+					factorId: record.id,
+				},
 			}),
 		]);
 		expect(audit.of("mfa.verified")).toEqual([]);
@@ -479,6 +485,23 @@ describe("the sign count", () => {
 		const after = await storedFactor(factorStore, record);
 		expect(after.data).toEqual(factorOf(passkey, { signCount: 10 }).data);
 		expect(after.record.version).toBe(0);
+	});
+
+	it("names, in the clone event, the factor whose credential asserted, not the one the request named", async () => {
+		const factorStore = createMemoryMfaFactorStore();
+		const named = await seedPasskey(factorStore, passkeyFor());
+		const cloned = passkeyFor({ counter: 3 });
+		const record = await seedPasskey(factorStore, cloned, { signCount: 10 });
+		const { app, audit } = await boot({ factorStore });
+		const { browser, transaction } = await beginLogin(app);
+		const options = await challenge(browser, transaction, named.id);
+
+		const res = await verify(browser, transaction, named.id, cloned.assert(options.body.challenge));
+
+		expect(res.status).toBe(401);
+		expect(audit.of("mfa.verify.failure").map((event) => event.details)).toEqual([
+			{ kind: "webauthn", purpose: "login", reason: "sign_count_regression", factorId: record.id },
+		]);
 	});
 
 	it.each([
@@ -502,8 +525,8 @@ describe("the sign count", () => {
 			);
 
 			expect(res.status).toBe(401);
-			expect(audit.of("mfa.verify.failure").map((event) => event.details?.reason)).toEqual([
-				"invalid",
+			expect(audit.of("mfa.verify.failure").map((event) => event.details)).toEqual([
+				{ kind: "webauthn", purpose: "login", reason: "invalid" },
 			]);
 			expect((await storedFactor(factorStore, record)).record.version).toBe(0);
 		},
@@ -536,7 +559,7 @@ describe("the sign count", () => {
 		expect(after.record.version).toBe(2);
 	});
 
-	it("reads the factor again after a lost compare-and-set: after a write that moved the count to the assertion's, the assertion is refused and audited as sign_count_regression", async () => {
+	it("reads the factor again after a lost compare-and-set: after a write that moved the count to the assertion's, the assertion is refused and audited as sign_count_regression, naming the factor", async () => {
 		const factorStore = createMemoryMfaFactorStore();
 		const passkey = passkeyFor({ counter: 5 });
 		const record = await seedPasskey(factorStore, passkey);
@@ -557,8 +580,8 @@ describe("the sign count", () => {
 		expect(res.body.error).toBe("mfa_invalid");
 		expect(losing.calls()).toBe(1);
 		expect(create).not.toHaveBeenCalled();
-		expect(audit.of("mfa.verify.failure").map((event) => event.details?.reason)).toEqual([
-			"sign_count_regression",
+		expect(audit.of("mfa.verify.failure").map((event) => event.details)).toEqual([
+			{ kind: "webauthn", purpose: "login", reason: "sign_count_regression", factorId: record.id },
 		]);
 		expect((await storedFactor(factorStore, record)).data).toEqual(
 			factorOf(passkey, { signCount: 6 }).data,
