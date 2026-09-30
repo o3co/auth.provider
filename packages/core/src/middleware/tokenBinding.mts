@@ -127,7 +127,8 @@ export interface TokenBindingRefusal {
  *
  * `"intent-explicit"` (default): explicit-intent mechanisms (DPoP) win over
  * ambient ones (mTLS); two or more explicit successes, or two or more ambient
- * successes with no explicit one → 400 `invalid_request`.
+ * successes with no explicit one → 400 `invalid_request`, logged at warn as
+ * `token_binding_ambiguous` (`tier`, `mechanisms`).
  *
  * `"strict-mutual-exclusion"`: two or more successes of any kind → 400
  * `invalid_request`.
@@ -309,13 +310,17 @@ export const tokenBindingMw = ({
 		const explicit = successes.filter((s) => s.mechanism.intentExplicit);
 		const contenders = explicit.length > 0 ? explicit : successes;
 		if (contenders.length > 1) {
-			const kinds = contenders.map((s) => s.mechanism.kind).join(", ");
+			const tier = explicit.length > 0 ? "explicit-intent" : "ambient";
+			const kinds = contenders.map((s) => s.mechanism.kind);
+			// An ambient signal is not the client's choice: the operator learns of
+			// overlapping mechanisms from this line, not from clients.
+			logger?.warn({ tier, mechanisms: kinds }, "token_binding_ambiguous");
 			res
 				.status(400)
 				.json(
 					errorEnvelope(
 						"invalid_request",
-						`multiple ${explicit.length > 0 ? "explicit-intent" : "ambient"} token-binding mechanisms succeeded (${kinds})`,
+						`multiple ${tier} token-binding mechanisms succeeded (${kinds.join(", ")})`,
 					),
 				);
 			return;
