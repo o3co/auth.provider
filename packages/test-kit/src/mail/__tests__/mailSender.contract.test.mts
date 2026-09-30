@@ -33,8 +33,8 @@ import {
 const RULES = {
 	kind: "kind is a non-empty string",
 	delivered:
-		"a send the relay accepts answers delivered, and the relay holds one mail to the recipient carrying the code",
-	purposes: "a send of every purpose answers delivered, each relayed with its code",
+		"a send the relay accepts answers delivered, and the relay then holds one more mail, to the recipient, carrying the code, and nothing else new",
+	purposes: "a send of every purpose answers delivered, each relayed alone with its code",
 	limit:
 		"a relay refusing at a limit is answered refused_at_limit, and nothing of the mail or of the relay's reply",
 	recipient_refused:
@@ -45,12 +45,23 @@ const RULES = {
 		"a relay that cannot be reached: send rejects, and the rejection's projection carries nothing of the mail or of the relay's reply",
 	auth_failed:
 		"a relay that refuses the sender's credentials: send rejects, and the rejection's projection carries nothing of the mail or of the relay's reply",
+	temporary_failure:
+		"a relay that fails for now: send rejects, and the rejection's projection carries nothing of the mail or of the relay's reply",
 	unchanged: "send leaves the mail it is handed as it was",
 } as const;
 
 /** A relay the recording sender stands in for: what it holds is what the sender delivered. */
 const relayOf = (sender: ReturnType<typeof createRecordingMailSender>) => async () =>
 	sender.sent.map((mail) => ({ to: mail.to, content: `${mail.purpose} ${mail.code}` }));
+
+/** The cases of the refusals a sender answers by rejecting. */
+const OUTAGES = [
+	RULES.recipient_refused,
+	RULES.message_refused,
+	RULES.unreachable,
+	RULES.auth_failed,
+	RULES.temporary_failure,
+];
 
 /** The recording sender as a conforming sender over each relay the suite asks for. */
 const conforming: MailSenderContractInput = {
@@ -111,6 +122,7 @@ describe("mailSenderContract", () => {
 			"message_refused",
 			"unreachable",
 			"auth_failed",
+			"temporary_failure",
 			"limit",
 		]);
 		expect(mailSenderContract(conforming).map((c) => c.name)).toEqual(Object.values(RULES));
@@ -237,12 +249,7 @@ describe("mailSenderContract", () => {
 					),
 				),
 				JSON.stringify(answer),
-			).toEqual([
-				RULES.recipient_refused,
-				RULES.message_refused,
-				RULES.unreachable,
-				RULES.auth_failed,
-			]);
+			).toEqual(OUTAGES);
 		}
 	});
 
@@ -257,12 +264,7 @@ describe("mailSenderContract", () => {
 			expect(
 				await failing(changed(rejectingWith((mail) => new Error(leak(mail))))),
 				leak.toString(),
-			).toEqual([
-				RULES.recipient_refused,
-				RULES.message_refused,
-				RULES.unreachable,
-				RULES.auth_failed,
-			]);
+			).toEqual(OUTAGES);
 		}
 	});
 
@@ -295,5 +297,59 @@ describe("mailSenderContract", () => {
 				})),
 			),
 		).toContain(RULES.unchanged);
+	});
+
+	it("fails a rejection carrying the mail in another case, split by punctuation, or in base64", async () => {
+		for (const leak of [
+			(mail: MailSend) => `Recipient ${mail.to.toUpperCase()} refused`,
+			(mail: MailSend) => `code ${mail.code.toUpperCase().split("").join("-")}`,
+			(mail: MailSend) => `payload ${Buffer.from(mail.to).toString("base64")}`,
+			(mail: MailSend) => `payload ${Buffer.from(mail.code).toString("base64url")}`,
+		]) {
+			expect(
+				await failing(changed(rejectingWith((mail) => new Error(leak(mail))))),
+				leak.toString(),
+			).toEqual(OUTAGES);
+		}
+	});
+
+	it("fails a sender that also delivers the mail to another mailbox, or relays a second mail", async () => {
+		const relaying = (extra: (mail: MailSend) => { to: string; content: string }[]) => {
+			let held: { to: string; content: string }[] = [];
+			return {
+				build: () => ({
+					sender: {
+						kind: "test",
+						send: async (mail: MailSend) => {
+							held = [...held, { to: mail.to, content: mail.code }, ...extra(mail)];
+							return { outcome: "delivered" } as const;
+						},
+					},
+					relayed: async () => held,
+				}),
+				refusing: conforming.refusing,
+			} satisfies MailSenderContractInput;
+		};
+		for (const extra of [
+			(mail: MailSend) => [{ to: "debug@example.com", content: mail.code }],
+			(mail: MailSend) => [{ to: mail.to, content: "a second mail" }],
+		]) {
+			expect(await failing(relaying(extra)), extra.toString()).toEqual([
+				RULES.delivered,
+				RULES.purposes,
+			]);
+		}
+	});
+
+	it("fails a transient failure answered as a limit: a relay that fails for now is an outage", async () => {
+		expect(
+			await failing(
+				changed((sender, refusal) =>
+					refusal === "temporary_failure"
+						? { kind: sender.kind, send: async () => ({ outcome: "refused_at_limit" }) as const }
+						: sender,
+				),
+			),
+		).toEqual([RULES.temporary_failure]);
 	});
 });
