@@ -1637,7 +1637,7 @@ describe("recent MFA at the link start and WebAuthn registration, under mfa.mode
 		expect((await registrationOptions(agent, header, token)).status).toBe(200);
 	});
 
-	it("admits a subject with no counting factor on a recent sign-in, and sends one whose sign-in is older than the window to log in again", async () => {
+	it("admits a subject with no counting factor on a recent sign-in, and answers one whose sign-in is older than the window 401 at both: login_required at the link start, the registration route's own unauthorized", async () => {
 		const set = await boot();
 		const { agent, header, token } = await signedInWithSid(set);
 		expect((await linkStart(agent)).status).toBe(302);

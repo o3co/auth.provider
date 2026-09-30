@@ -885,7 +885,7 @@ const SESSION_RECORD_READS_ALLOWED: ReadonlyArray<AllowedSessionRecordRead> = [
 		file: "packages/mfa/src/requirement.mts",
 		read: "authentication?.authentication",
 		count: 2,
-		why: "that reading's primary and mfaAt, which the baseline is decided on (the MFA ADR's D13, D16)",
+		why: "that reading's primary and mfaAt, which the baseline and recent MFA are decided on (the MFA ADR's D13, D16)",
 	},
 	{
 		file: "packages/mfa/src/requirement.mts",

@@ -34,19 +34,11 @@ const msAhead = (ms: number): Date => new Date(NOW + ms);
 
 /** Recent MFA for a subject that holds a counting factor, over a primary as old as the window allows twice over. */
 const withFactor = (mfaAt: Date | undefined, authTime: Date = secondsAgo(2 * WINDOW_SECONDS)) =>
-	isRecentMfa(
-		{ authTime, mfaAt },
-		{ maxAgeSeconds: WINDOW_SECONDS, holdsCountingFactor: true },
-		NOW,
-	);
+	isRecentMfa({ authTime, mfaAt }, { holdsCountingFactor: true }, WINDOW_SECONDS, NOW);
 
 /** Recent MFA for a subject that holds no counting factor. */
 const withoutFactor = (authTime: Date, mfaAt?: Date) =>
-	isRecentMfa(
-		{ authTime, mfaAt },
-		{ maxAgeSeconds: WINDOW_SECONDS, holdsCountingFactor: false },
-		NOW,
-	);
+	isRecentMfa({ authTime, mfaAt }, { holdsCountingFactor: false }, WINDOW_SECONDS, NOW);
 
 describe("isRecentMfa — a second factor verified in the session", () => {
 	it("is recent inside the window", () => {
@@ -74,7 +66,7 @@ describe("isRecentMfa — a second factor verified in the session", () => {
 		expect(withFactor(msAhead(24 * 60 * 60 * 1_000))).toBe(false);
 	});
 
-	it("is not recent without an mfaAt, however recent the primary: a subject who holds a counting factor is asked for it", () => {
+	it("is not recent without an mfaAt: for a subject who holds a counting factor, a recent primary does not stand in", () => {
 		expect(withFactor(undefined, new Date(NOW))).toBe(false);
 		expect(withFactor(undefined, secondsAgo(1))).toBe(false);
 	});
@@ -88,11 +80,30 @@ describe("isRecentMfa — a second factor verified in the session", () => {
 		const within = (maxAgeSeconds: number) =>
 			isRecentMfa(
 				{ authTime: secondsAgo(7_200), mfaAt: at },
-				{ maxAgeSeconds, holdsCountingFactor: true },
+				{ holdsCountingFactor: true },
+				maxAgeSeconds,
 				NOW,
 			);
 		expect(within(3_600)).toBe(true);
 		expect(within(60)).toBe(false);
+	});
+
+	it("is not recent when the clock it is asked at is not a finite time", () => {
+		for (const nowMs of [Number.NaN, Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY]) {
+			const recent = { authTime: new Date(NOW), mfaAt: new Date(NOW) };
+			expect(isRecentMfa(recent, { holdsCountingFactor: true }, WINDOW_SECONDS, nowMs)).toBe(false);
+			expect(isRecentMfa(recent, { holdsCountingFactor: false }, WINDOW_SECONDS, nowMs)).toBe(
+				false,
+			);
+		}
+	});
+
+	it("is not recent under a window that is not a finite number of seconds", () => {
+		for (const maxAgeSeconds of [Number.NaN, Number.POSITIVE_INFINITY]) {
+			const recent = { authTime: secondsAgo(1), mfaAt: secondsAgo(1) };
+			expect(isRecentMfa(recent, { holdsCountingFactor: true }, maxAgeSeconds, NOW)).toBe(false);
+			expect(isRecentMfa(recent, { holdsCountingFactor: false }, maxAgeSeconds, NOW)).toBe(false);
+		}
 	});
 });
 

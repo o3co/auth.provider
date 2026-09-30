@@ -107,11 +107,13 @@ export interface RecentMfaSession {
 	readonly mfaAt: Date | undefined;
 }
 
-/** What recent MFA is judged by. */
-export interface RecentMfaRule {
-	/** `mfa.manage.maxAgeSeconds`. */
-	readonly maxAgeSeconds: number;
-	/** Whether the subject holds a counting factor: without one, a recent primary stands in. */
+/** What recent MFA is told of the session's subject. */
+export interface RecentMfaSubject {
+	/**
+	 * Whether the subject holds a counting factor: without one, a recent
+	 * primary stands in for a second factor. Admission answers it with
+	 * `mayHoldCountingFactor`, which presumes a kind it cannot tell counts.
+	 */
 	readonly holdsCountingFactor: boolean;
 }
 
@@ -131,17 +133,19 @@ function withinWindow(at: Date | undefined, maxAgeMs: number, nowMs: number): bo
 
 /**
  * Whether `session` has recent MFA at `nowMs`: a second factor verified
- * within `rule.maxAgeSeconds` or, for a subject with no counting factor, a
- * primary that recent. The window's edge is recent.
+ * within `maxAgeSeconds` (`mfa.manage.maxAgeSeconds`) or, when `subject`
+ * holds no counting factor, a primary that recent. The window's edge is
+ * recent.
  */
 export function isRecentMfa(
 	session: RecentMfaSession,
-	rule: RecentMfaRule,
+	subject: RecentMfaSubject,
+	maxAgeSeconds: number,
 	nowMs: number,
 ): boolean {
-	const maxAgeMs = rule.maxAgeSeconds * 1_000;
+	const maxAgeMs = maxAgeSeconds * 1_000;
 	if (withinWindow(session.mfaAt, maxAgeMs, nowMs)) return true;
-	return !rule.holdsCountingFactor && withinWindow(session.authTime, maxAgeMs, nowMs);
+	return !subject.holdsCountingFactor && withinWindow(session.authTime, maxAgeMs, nowMs);
 }
 
 const MET: RequirementVerdict = Object.freeze({ outcome: "met" });
@@ -243,11 +247,13 @@ export function createMfaRequirement(options: MfaRequirementOptions): SessionReq
 	};
 
 	/**
-	 * Whether the subject holds a counting factor: a record counts unless an
+	 * Whether the subject may hold a counting factor: a record counts unless an
 	 * installed factor of its kind declares it does not, so a kind no longer
-	 * installed counts.
+	 * installed is presumed to count. That fails closed for admission — a
+	 * password never stands in for a factor it cannot see — and is the wrong
+	 * answer for a last-factor check or clearing the witness.
 	 */
-	const holdsCountingFactor = async (subject: string): Promise<boolean> =>
+	const mayHoldCountingFactor = async (subject: string): Promise<boolean> =>
 		(await listRecords(subject)).some((record) => factors.get(record.kind)?.counting !== false);
 
 	/** Where a second factor would meet the rule: a step-up, `unmet` when no factor could finish one, a new login when none could be recorded. */
@@ -276,11 +282,14 @@ export function createMfaRequirement(options: MfaRequirementOptions): SessionReq
 		if (recorded?.primary !== PASSWORD_AMR && recorded?.primary !== FEDERATED_AMR) {
 			return REAUTHENTICATE;
 		}
-		const counting = await holdsCountingFactor(session.sub);
-		const rule = { maxAgeSeconds: recentMfaMaxAgeSeconds, holdsCountingFactor: counting };
-		if (isRecentMfa({ authTime: session.authTime, mfaAt: recorded.mfaAt }, rule, nowMs)) {
-			return MET;
-		}
+		const counting = await mayHoldCountingFactor(session.sub);
+		const recentMfa = isRecentMfa(
+			{ authTime: session.authTime, mfaAt: recorded.mfaAt },
+			{ holdsCountingFactor: counting },
+			recentMfaMaxAgeSeconds,
+			nowMs,
+		);
+		if (recentMfa) return MET;
 		return counting ? stepUp() : REAUTHENTICATE;
 	};
 
