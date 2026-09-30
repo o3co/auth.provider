@@ -161,7 +161,7 @@ export function createClientAuthMiddleware(
 			: (loggerOrOptions as ClientAuthMiddlewareOptions);
 	const logger: Logger = opts.logger ?? consoleLogger;
 	// `resolveRealm` sanitises the issuer. Shared with the sender-constrained
-	// reject path in `routes.mts` so the two emission sites cannot drift.
+	// reject path in `routes/token.mts` so the two emission sites cannot drift.
 	const wwwAuth = `Basic realm="${resolveRealm(opts.issuer)}"`;
 	const allowPublicClients = opts.allowPublicClients === true;
 	// `private_key_jwt`: the verifier owns the trust decision; this middleware
