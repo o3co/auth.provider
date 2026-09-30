@@ -476,7 +476,6 @@ describe("the session module reads no session.secret", () => {
 		});
 		const config = {
 			...base,
-			deployment: { mode: "single" },
 			session,
 			federations: {
 				...base.federations,
@@ -505,6 +504,7 @@ describe("the session module reads no session.secret", () => {
 		// What the planner hands the module's factories.
 		const deps = {
 			config,
+			deploymentMode: "single",
 			csrfTokenSigner: createTestCsrfTokenSigner(),
 			userRepository: {
 				authenticate: async () => ({ id: "user-1", username: "alice" }),

@@ -1348,9 +1348,11 @@ export const fullSectionsSchema = z.object({
 				.optional(),
 		})
 		.optional(),
-	// How many replicas this deployment runs, read only by the boot
-	// replica-safety guard (`checkReplicaSafety`). Optional with no HOCON
-	// literal, because unset is a meaningful third state:
+	// How many replicas this deployment runs, read by core alone
+	// (`deployment/mode.mts`): the boot replica-safety guard
+	// (`checkReplicaSafety`) decides by it, and boot fills the `deploymentMode`
+	// slot with it for every module that refuses or warns by it. Optional with
+	// no HOCON literal, because unset is a meaningful third state:
 	//   - `"multi"`  → boot fails if any in-memory shared store is wired
 	//   - `"single"` → the operator has declared one replica; silent
 	//   - unset      → one consolidated warning naming what is in memory and

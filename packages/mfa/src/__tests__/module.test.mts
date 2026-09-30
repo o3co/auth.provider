@@ -24,8 +24,12 @@
 
 import {
 	ADMISSION_ACTIONS,
+	type AppConfig,
 	admitPrimary,
 	createInMemoryUserSessionStore,
+	createMemoryMfaFactorStore,
+	createMemoryMfaTransactionStore,
+	type DeploymentMode,
 	defineModule,
 	issuedRemediationActions,
 	type MfaFactor,
@@ -83,6 +87,7 @@ describe("mfaModules", () => {
 		expect([...(module.requires ?? [])].sort()).toEqual(
 			[
 				"config",
+				"deploymentMode",
 				"mfaFactorResolver",
 				"mfaFactorStore",
 				"mfaTransactionStore",
@@ -520,6 +525,67 @@ describe("the development sample key", () => {
 		const { logger } = await boot();
 		expect(events(logger, "warn")).not.toContain("mfa_development_sample_key_in_use");
 	});
+
+	/** The requirement's factory, run as the planner runs it, with the slot as given. */
+	const mfaFactory = (deploymentMode: DeploymentMode, deployment: Record<string, unknown>) => {
+		const factory = mfaModule({ environment: "development" }).contributes?.sessionRequirements
+			?.mfa as unknown as (deps: unknown) => unknown;
+		return factory({
+			config: { ...sample(), deployment },
+			deploymentMode,
+			mfaFactorResolver: { get: () => undefined, entries: () => [][Symbol.iterator]() },
+			mfaFactorStore: createMemoryMfaFactorStore(),
+			mfaTransactionStore: createMemoryMfaTransactionStore(),
+			userSessionStore: createInMemoryUserSessionStore(),
+			sessionRequirementResolver: resolverForTests([]),
+			logger: spyLogger(),
+		});
+	};
+
+	it('is refused when the deploymentMode slot says "multi", whatever the configuration\'s deployment says', () => {
+		expect(() => mfaFactory("multi", { mode: "single" })).toThrow(/deployment\.mode is "multi"/);
+	});
+
+	it("refuses a slot it cannot read, absent included, as a TypeError naming it", () => {
+		for (const deploymentMode of [undefined, "MULTI"]) {
+			expect(() => mfaFactory(deploymentMode as never, {}), String(deploymentMode)).toThrow(
+				new TypeError('mfa settings: deploymentMode must be "single", "multi" or "unset"'),
+			);
+		}
+	});
+
+	it("is accepted when the slot says single or unset, whatever the configuration's deployment says", () => {
+		for (const deploymentMode of ["single", "unset"] as const) {
+			expect(mfaFactory(deploymentMode, { mode: "multi" }), deploymentMode).toBeDefined();
+		}
+	});
+
+	it.each([
+		["refused", "deployment.mode = multi", { mode: "multi" }],
+		["accepted with the boot warning", "deployment.mode = single", { mode: "single" }],
+		["accepted with the boot warning", "an empty deployment section", {}],
+		["accepted with the boot warning", "no deployment section", undefined],
+	] as const)(
+		"through createApp, the sample key is %s under %s",
+		async (outcome, _what, deployment) => {
+			const config = {
+				...sample(),
+				...(deployment === undefined ? {} : { deployment }),
+			} as unknown as AppConfig;
+			const options = { environment: "development" };
+			if (outcome === "refused") {
+				// Without the login: under multi the replica-safety guard refuses its
+				// in-memory session store first.
+				const err = await refusal({ config, options, withoutLogin: true });
+				expect(err.reason).toBe("contribute-factory-failed");
+				expect((err.cause as Error).message).toContain('deployment.mode is "multi"');
+				return;
+			}
+			const logger = spyLogger();
+			await boot({ config, options, logger });
+			expect(events(logger, "warn")).toContain("mfa_development_sample_key_in_use");
+		},
+	);
 });
 
 // ---------------------------------------------------------------------------

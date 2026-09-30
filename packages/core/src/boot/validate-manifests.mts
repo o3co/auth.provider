@@ -427,6 +427,16 @@ function checkAuthoritativeOverrides(
 // ---------------------------------------------------------------------------
 
 /**
+ * What a `synthetic-key-collision` message adds for `key`: for
+ * `deploymentMode`, which boot fills from the configuration, where to state
+ * the mode instead.
+ */
+const syntheticKeyRemedy = (key: string): string =>
+	key === "deploymentMode"
+		? " Set deployment.mode in the configuration instead: boot fills deploymentMode from it."
+		: "";
+
+/**
  * Step 3: Check bootstrap/overrideComponents/synthetic-key constraints.
  * @internal
  */
@@ -443,7 +453,7 @@ function checkBootstrapAndSyntheticDisjointness(
 		for (const key of m.providesKeys) {
 			if (SYNTHETIC_COMPONENT_KEYS.has(key)) {
 				throw new BootError({
-					message: `Module "${m.name}" attempts to provide synthetic key "${key}", which is reserved for the boot planner.`,
+					message: `Module "${m.name}" attempts to provide synthetic key "${key}", which is reserved for the boot planner.${syntheticKeyRemedy(key)}`,
 					reason: "synthetic-key-collision",
 					stage: "validateManifests",
 					details: {
@@ -461,7 +471,7 @@ function checkBootstrapAndSyntheticDisjointness(
 	for (const key of bootstrapKeys) {
 		if (SYNTHETIC_COMPONENT_KEYS.has(key)) {
 			throw new BootError({
-				message: `bootstrapComponents contains synthetic key "${key}", which is reserved for the boot planner.`,
+				message: `bootstrapComponents contains synthetic key "${key}", which is reserved for the boot planner.${syntheticKeyRemedy(key)}`,
 				reason: "synthetic-key-collision",
 				stage: "validateManifests",
 				details: {
@@ -477,7 +487,7 @@ function checkBootstrapAndSyntheticDisjointness(
 	for (const key of overrideKeys) {
 		if (SYNTHETIC_COMPONENT_KEYS.has(key)) {
 			throw new BootError({
-				message: `overrideComponents contains synthetic key "${key}", which is reserved for the boot planner.`,
+				message: `overrideComponents contains synthetic key "${key}", which is reserved for the boot planner.${syntheticKeyRemedy(key)}`,
 				reason: "synthetic-key-collision",
 				stage: "validateManifests",
 				details: {

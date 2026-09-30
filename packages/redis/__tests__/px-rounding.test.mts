@@ -350,6 +350,7 @@ describe("the PX an adapter sends is its record's life, rounded up to a whole mi
 		for (const ttl of lifetimes) {
 			const recording = federationTokenRecorder();
 			const store = createRedisFederationTokenStore({
+				deploymentMode: "unset",
 				client: recording.client,
 				encryption: { mode: "required", key: Buffer.alloc(32, 7) },
 				ttl,
@@ -604,6 +605,7 @@ describe("an expiry or lifetime past the Date range is refused before Redis is a
 			);
 			expect(() =>
 				createRedisFederationTokenStore({
+					deploymentMode: "unset",
 					client: federationTokenRecorder().client,
 					encryption: { mode: "required", key: Buffer.alloc(32, 7) },
 					ttl: expiresIn,

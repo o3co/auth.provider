@@ -17,6 +17,7 @@
 import type { FederationProvider } from "@o3co/auth-provider-core";
 import {
 	type AppConfig,
+	type DeploymentMode,
 	defineModule,
 	type FederationTokenStore,
 	type SessionFederationIndex,
@@ -455,16 +456,14 @@ describe("sessionModule — the password login is a consumer of session admissio
 	 */
 	async function passwordLogin(requirements: readonly SessionRequirement[]) {
 		const base = makeValidAppConfig();
-		const config = {
-			...base,
-			deployment: { mode: "single" },
-		} as unknown as AppConfig;
+		const config = { ...base } as unknown as AppConfig;
 		const factory = sessionModule.contributes?.routes?.[0] as unknown as (deps: unknown) => {
 			id: string;
 			handler: express.RequestHandler;
 		};
 		const contribution = factory({
 			config,
+			deploymentMode: "single",
 			userRepository: {
 				authenticate: async () => ({ id: "user-1", username: "alice" }),
 				authenticateByToken: async () => null,
@@ -519,4 +518,112 @@ describe("sessionModule — the password login is a consumer of session admissio
 	it("logs in when no requirement is registered", async () => {
 		expect((await passwordLogin([])).status).toBe(200);
 	});
+});
+
+// ---------------------------------------------------------------------------
+// The login throttle's per-process fallback is decided by core's
+// `deploymentMode` slot, which core fills from `deployment.mode`: the module
+// reads nothing of `deployment` itself.
+// ---------------------------------------------------------------------------
+
+describe("sessionModule — the login throttle reads the deploymentMode slot", () => {
+	const spyLogger = () => {
+		const warn = vi.fn();
+		const logger = {
+			trace: vi.fn(),
+			debug: vi.fn(),
+			info: vi.fn(),
+			warn,
+			error: vi.fn(),
+			fatal: vi.fn(),
+			child: vi.fn(),
+		};
+		return { logger, warn };
+	};
+
+	/** The session-routes factory, called as the planner calls it, with the slot as given. */
+	const sessionRoutes = (
+		deploymentMode: DeploymentMode,
+		deployment: Record<string, unknown>,
+		logger: unknown,
+	) => {
+		const base = makeValidAppConfig();
+		const factory = sessionModule.contributes?.routes?.[0] as unknown as (deps: unknown) => {
+			id: string;
+		};
+		return factory({
+			config: { ...base, deployment },
+			deploymentMode,
+			csrfTokenSigner: createTestCsrfTokenSigner(),
+			logger,
+			userRepository: fakeUserRepository,
+			userSessionStore: makeUserSessionStore(),
+			federationTokenStore: makeFederationTokenStore(),
+			sessionFederationIndex: makeSessionFederationIndex(),
+			sessionRequirementResolver: resolverForTests([]),
+		});
+	};
+
+	it("requires the slot", () => {
+		expect(sessionModule.requires).toContain("deploymentMode");
+	});
+
+	it('refuses the per-process fallback when the slot says "multi", whatever the configuration\'s deployment says', () => {
+		expect(() => sessionRoutes("multi", { mode: "single" }, spyLogger().logger)).toThrow(
+			expect.objectContaining({
+				name: "BootError",
+				reason: "replica-unsafe-adapter",
+				details: { reason: "replica-unsafe-adapter", modules: ["session"] },
+			}),
+		);
+	});
+
+	it('is silent when the slot says "single" and warns when it says "unset", whatever the configuration\'s deployment says', () => {
+		const single = spyLogger();
+		expect(sessionRoutes("single", { mode: "multi" }, single.logger).id).toBe("session-routes");
+		expect(single.warn).not.toHaveBeenCalledWith(
+			expect.anything(),
+			"login_rate_limiter_not_shared",
+		);
+		const unset = spyLogger();
+		sessionRoutes("unset", { mode: "multi" }, unset.logger);
+		expect(unset.warn).toHaveBeenCalledWith(expect.anything(), "login_rate_limiter_not_shared");
+	});
+
+	it.each([
+		["refused at boot", "deployment.mode = multi", { mode: "multi" }],
+		["mounted without a warning", "deployment.mode = single", { mode: "single" }],
+		["mounted with the warning", "an empty deployment section", {}],
+		["mounted with the warning", "no deployment section", undefined],
+	] as const)(
+		"through createApp, the per-process login limiter is %s under %s",
+		async (outcome, _what, deployment) => {
+			const { logger, warn } = spyLogger();
+			const base = makeValidAppConfig();
+			const boot = createTestApp({
+				modules: baseTestModules,
+				bootstrapComponents: {
+					config: { ...base, ...(deployment === undefined ? {} : { deployment }) },
+					pathResolver: (s: string) => s,
+					logger,
+				} as never,
+			});
+			if (outcome === "refused at boot") {
+				await expect(boot).rejects.toMatchObject({
+					reason: "contribute-factory-failed",
+					cause: { reason: "replica-unsafe-adapter", details: { modules: ["session"] } },
+				});
+				return;
+			}
+			const handle = await boot;
+			try {
+				const warned = warn.mock.calls.some(
+					([, event]) => event === "login_rate_limiter_not_shared",
+				);
+				expect(warned).toBe(outcome === "mounted with the warning");
+			} finally {
+				await handle.dispose();
+			}
+		},
+	);
 });
