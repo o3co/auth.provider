@@ -419,7 +419,7 @@ describe("the Redis federation grant store module", () => {
 		delete process.env.FEDERATION_TOKENS_ALLOW_INSECURE;
 		try {
 			const message =
-				'[federation-grants] mode "allow-plaintext" is refused because deployment.mode is "multi" ' +
+				'[federation-grants] mode "allow-plaintext" is refused because core.deployment.mode is "multi" ' +
 				"(a multi-replica deployment is never a development box). " +
 				'Set mode to "required" and provide a 32-byte encryption key, OR set ' +
 				"FEDERATION_TOKENS_ALLOW_INSECURE=1 to override (NOT recommended for production).";

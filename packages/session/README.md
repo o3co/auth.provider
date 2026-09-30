@@ -230,18 +230,18 @@ What holds:
   keeps the cookie attributes it was created with (express-session rebuilds the
   cookie from the record), so when these settings tighten, flush the session
   store to have every browser sign in again under the new cookie.
-- **`memory` is refused under `deployment.mode = "multi"`.** express-session's
+- **`memory` is refused under `core.deployment.mode = "multi"`.** express-session's
   `MemoryStore` forks per replica: a login served by one replica is unknown to
   the others, logout clears only the replica it lands on, and a restart loses
   every session. `sessionStoreModuleFor(config)` reads the storage type and
   declares the module replica-unsafe when it is `memory`, so core's
   replica-safety guard refuses it at boot by name with the other offenders,
-  warns when `deployment.mode` is unset, and says nothing under `"single"`. The
+  warns when `core.deployment.mode` is unset, and says nothing under `"single"`. The
   static `sessionStoreModule` cannot know the type, so the guard cannot name it;
   its route factory refuses the same combination when it runs
   (`replica-unsafe-adapter`) and never warns. Prefer `sessionStoreModuleFor`
   wherever the config is in hand. Both forms require core's `deploymentMode`
-  slot, which core fills from `deployment.mode`, and read nothing of
+  slot, which core fills from `core.deployment.mode`, and read nothing of
   `deployment` themselves; a slot value that is none of `single`, `multi`,
   `unset` is a TypeError.
 - **The Redis store opens its own connection.** A `redis` (node-redis) client to
@@ -335,11 +335,11 @@ The manifest ([`src/module.mts`](src/module.mts)):
   [session admission](../core/src/session-admission/README.md) before anything
   is written, and the account-linking routes read their session through it,
   so a composition installing `sessionModule` declares
-  `sessionRequirements.expected`. A router built by hand
+  `core.sessionRequirements.expected`. A router built by hand
   (`routes/Session.mts`, `routes/Federation.mts`) takes the resolver as the
   required `requirements` option and throws without it; a test builds one with
   core's `resolverForTests`. And `deploymentMode`, which core fills from
-  `deployment.mode`: the login throttle's per-process fallback is refused under
+  `core.deployment.mode`: the login throttle's per-process fallback is refused under
   `multi`, so the mode is required rather than read as absent. The session
   router built by hand also takes the signer as the required `csrfTokenSigner`
   option, and throws without it, and the mode as the required `deploymentMode`
@@ -395,7 +395,7 @@ The manifest ([`src/module.mts`](src/module.mts)):
   by client IP) with `rateLimit.login`'s window and limit, answering `429` when
   it denies and following `rateLimit.failMode` when the limiter fails. With no
   `rateLimiter` wired the route falls back to a per-process limiter: boot is
-  refused under `deployment.mode = "multi"`, a `login_rate_limiter_not_shared`
+  refused under `core.deployment.mode = "multi"`, a `login_rate_limiter_not_shared`
   warning is logged when the mode is unset, and nothing is said under
   `"single"`. The mode is core's `deploymentMode` slot, which the module
   requires; the router reads nothing of `deployment` itself.

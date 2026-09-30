@@ -6,7 +6,7 @@
 /**
  * The two stores that seal upstream refresh tokens read the replica count
  * from core's `deploymentMode` slot, which core fills from the
- * configuration's `deployment.mode`. Each module requires the slot, refuses a
+ * configuration's `core.deployment.mode`. Each module requires the slot, refuses a
  * value that is none of its three, and reads nothing of `deployment` itself.
  * Through `createApp` each refuses plaintext under `multi`, and allows it with
  * the warning under `single`, an empty section and none.
@@ -47,7 +47,7 @@ const tokenClient = {
 const grantClient = {} as FederationGrantStoreClient;
 
 const refusedUnderMulti = (label: string) =>
-	`[${label}] mode "allow-plaintext" is refused because deployment.mode is "multi" ` +
+	`[${label}] mode "allow-plaintext" is refused because core.deployment.mode is "multi" ` +
 	"(a multi-replica deployment is never a development box). " +
 	'Set mode to "required" and provide a 32-byte encryption key, OR set ' +
 	"FEDERATION_TOKENS_ALLOW_INSECURE=1 to override (NOT recommended for production).";
@@ -72,8 +72,8 @@ const STORES = [
 
 /** What becomes of plaintext under every `deployment` core's schema accepts. */
 const ACCEPTED = [
-	["refused", "deployment.mode = multi", { mode: "multi" }],
-	["allowed with the warning", "deployment.mode = single", { mode: "single" }],
+	["refused", "core.deployment.mode = multi", { mode: "multi" }],
+	["allowed with the warning", "core.deployment.mode = single", { mode: "single" }],
 	["allowed with the warning", "an empty deployment section", {}],
 	["allowed with the warning", "no deployment section", undefined],
 ] as const;

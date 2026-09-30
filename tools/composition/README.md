@@ -13,7 +13,7 @@ and replica safety on real Redis.
 **Role.** A safety net for defects no package's own suite can see. Each package
 boots alone or against stand-ins, so a discovery document made invalid by a
 neighbour, a disabled grant still advertised, one module's parser setting
-another's body limit, or a memory store booting under `deployment.mode =
+another's body limit, or a memory store booting under `core.deployment.mode =
 "multi"` went unnoticed until the modules met in a deployment.
 
 **Owns.** The full set and the contracts checked on it
@@ -23,7 +23,7 @@ another's body limit, or a memory store booting under `deployment.mode =
   template does not depend on added the way a deployment adds them to that
   manifest — the device grant, DPoP, mTLS, token exchange, WebAuthn, the MFA
   package (its modules over the MFA stores, `mfa.mode = "optional"`, and
-  `mfa` added to the template's `sessionRequirements.expected`), and the
+  `mfa` added to the template's `core.sessionRequirements.expected`), and the
   Apple and GitHub federations — plus the small modules
   a deployment writes itself (config bridges, a grant policy, a session-to-WebAuthn-subject
   bridge, and two session requirements — each with the completion route a
@@ -44,7 +44,7 @@ another's body limit, or a memory store booting under `deployment.mode =
   sits behind the session's CSRF guard, projects every error it logs, and
   answers a `RangeError` from `resumePrimary` — a continuation naming a
   requirement a deploy removed, say — as "log in again".
-- **What it checks on real Redis, under `deployment.mode = "multi"`.** That
+- **What it checks on real Redis, under `core.deployment.mode = "multi"`.** That
   nothing in the full set declares replica-unsafe state, that each added
   memory store is refused at boot by name, and that two replicas on one
   database finish each other's flows.

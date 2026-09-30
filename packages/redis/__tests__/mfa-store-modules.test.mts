@@ -418,7 +418,7 @@ const multiReplicaConfig = (extra: Record<string, unknown> = {}): AppConfig =>
 	}) as never;
 
 describe("the MFA store modules booted through createApp", () => {
-	it('boot under deployment.mode = "multi" off the shared clients and fill both slots with the Redis adapters', async () => {
+	it('boot under core.deployment.mode = "multi" off the shared clients and fill both slots with the Redis adapters', async () => {
 		const { logger } = recordingLogger();
 		const handle = await createApp({
 			modules: [redisMfaFactorStoreModule, redisMfaTransactionStoreModule, mfaStandIn],

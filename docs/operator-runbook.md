@@ -20,10 +20,14 @@ the same HOCON keys through whatever binding you gave them.
 
 ## 1. Deployment shapes
 
-### `deployment.mode` — say how many replicas you run
+### `core.deployment.mode` — say how many replicas you run
 
-`deployment.mode` (env `DEPLOYMENT_MODE`) has three states and **no default**
-(`packages/core/config/reference.conf`, `packages/core/src/boot/replica-safety.mts`):
+`core.deployment.mode` (env `CORE_DEPLOYMENT_MODE`) has three states and **no default**
+(`packages/core/config/reference.conf`, `packages/core/src/boot/replica-safety.mts`).
+`deployment.mode`, at the top level, refuses boot naming this path
+(`config-path-relocated`). `DEPLOYMENT_MODE` is declared renamed
+`CORE_DEPLOYMENT_MODE`: set alone, or beside it at a different value, it refuses
+boot (`environment-variable-renamed`); set beside it at the same value, it boots.
 
 | Value | What boot does |
 | --- | --- |
@@ -85,7 +89,7 @@ Three things the guard cannot do:
 
 - **It cannot notice that you scaled without setting the mode.** A process
   whose state is all in its own memory has no shared medium through which to
-  see peers. Set `DEPLOYMENT_MODE=multi` as part of scaling, not after
+  see peers. Set `CORE_DEPLOYMENT_MODE=multi` as part of scaling, not after
   something breaks.
 - **It only sees modules that declare themselves.** The standalone template's
   own in-memory modules — `standalone-in-memory-session-stores`,
@@ -115,7 +119,7 @@ Three things the guard cannot do:
   is per-process and boots under `multi` without a word — for every consumer
   of the seen-set, DPoP included.
 
-In the standalone, `DEPLOYMENT_MODE=multi` therefore boots only once every
+In the standalone, `CORE_DEPLOYMENT_MODE=multi` therefore boots only once every
 store is on Redis: `USER_SESSION_STORES_ADAPTER=redis`,
 `OAUTH_CODE_ADAPTER=redis`, `RATE_LIMITER_ADAPTER=redis`,
 `ACCESS_TOKEN_DENYLIST_ADAPTER=redis`, `SESSION_STORAGE_TYPE=redis`, and
@@ -142,14 +146,14 @@ the `runtime` image target, no source mounts, `restart: unless-stopped`, a
 Redis reachable only on the compose network and persisting to a volume
 (`--appendonly yes`), a **required** `.env`, and the signing-key pair mounted as
 compose secrets at `/run/secrets/jwt_private_key` / `jwt_public_key`. Its
-`environment:` block pins `NODE_ENV=production`, `DEPLOYMENT_MODE=single`,
+`environment:` block pins `NODE_ENV=production`, `CORE_DEPLOYMENT_MODE=single`,
 `SESSION_SECURE=true`, `SESSION_NAME=__Host-auth.session`,
 `SESSION_STORAGE_TYPE=redis`, `USER_SESSION_STORES_ADAPTER=redis`,
 `RATE_LIMITER_ADAPTER=redis`, and both Redis URLs to `redis://redis:6379`. The
 app port is published on loopback only (`127.0.0.1:3000:3000`).
 
 The user-session line is there for a reason the replica guard cannot supply.
-Under `DEPLOYMENT_MODE=single` the guard is silent by design — it answers "can
+Under `CORE_DEPLOYMENT_MODE=single` the guard is silent by design — it answers "can
 these stores be shared", not "do these two stores have the same lifetime" — so
 it said nothing when express-session was on Redis and the `UserSession` stores
 were on their `memory` default. A provider restart then left every browser
@@ -221,11 +225,11 @@ each names:
 | `environment-variable-renamed` | the environment the configuration was resolved with sets a variable whose name changed when its key moved (a loaded module's or core's `renamedVariables`) while the new name is unset (`state: "unset"`), or set to a different value (`"different"`); or sets the variable of a key that was removed (`"removed"`); or the configuration does not capture the names at all (`"uncaptured"`: the `reference.conf` of the module's package, which captures them in `renamed-variables`, was not layered). A default at the new path does not count as the new name set: `OLD=true` alone is refused even where the new path defaults to `true` | the message names the old variable, the new one and the path the new one sets, never a value. The old name alone: set the new name instead and unset the old one. Different values: keep the value you mean in the new name and unset the old one. A removed key's variable: unset it. Uncaptured: layer the package's `reference.conf` beneath your own files (core's own for module `core`). Never write `renamed-variables` in your own files: a value written there overrides what the environment says, and the refusal it would have raised is lost. Both names set to the same value boot, so a deployment can export both while it moves; the new name alone boots as usual |
 | `missing-required-component` | a module's `requires` has no provider. The standalone adds `redis-clients` whenever an adapter switch selects Redis, so there this only arises through `BuildModulesOverrides` (`templates/standalone/src/buildModules.mts`) | the message names the missing slot and the requiring module |
 | `component-absence-undeclared` | an optional slot with an `AbsencePolicy` is unfilled and config does not declare it absent (`packages/core/src/modules/manifest/absence-policy.mts`, enforced by `checkDeclaredAbsence` in `boot/validate-manifests.mts`) | wire the component, or write the declaration: `audit.sink.type = "none"` (auditSink), `oauth.revocation.accessToken = "unsupported"` (accessTokenDenylist), `oauth.revocation.subject = "unsupported"` (subjectRevocation + subjectSessionIndex), `oauth.deviceAuthorization.store = "unsupported"` (deviceCodeStore; only with the grant left off — an enabled grant needs a store) — sources: `core/src/audit/types.mts`, `core/src/access-token-denylist/types.mts`, `core/src/user-sessions/types.mts`, `packages/device-grant/config/reference.conf` |
-| `replica-unsafe-adapter` | `deployment.mode = "multi"` with a listed module wired | the message lists every offender; switch the adapter or set `single` |
+| `replica-unsafe-adapter` | `core.deployment.mode = "multi"` with a listed module wired | the message lists every offender; switch the adapter or set `single` |
 | `federation-stores-incomplete` | `federations.<name>.enabled = true` without all of `userSessionStore`, `sessionRPRegistry`, `sessionFamilyIndex`, `sessionFederationIndex`, `federationTokenStore`, `refreshTokenFamilyRevocation` | the message lists the missing slots |
 | `grant-policy-without-issuer` | a `grantPolicy` is wired and `oauth.jwt.issuer` is empty | set the issuer |
-| `session-requirement-missing` | `sessionRequirements.expected` names a session requirement no installed module registers — `mfa` without the MFA package, say — whether or not a module consults session admission (`packages/core/src/boot/apply-contributions.mts`). The standalone template adds `mfa` to the list when `mfa.mode` (`MFA_MODE`) is not `off`, and installs no MFA module, so there `MFA_MODE=optional` or `required` lands here with `missing: ["mfa"]`. | the message names each missing name and what registered: install the module that registers it, or remove the name — for `mfa` under the template, set `MFA_MODE=off` |
-| `session-requirements-undeclared` | `sessionRequirements.expected` is written and leaves out a registered requirement, whether or not a module consults session admission; or it is unset while such a module is installed (`oauth` and `session` are). The standalone template's `config/application.conf` writes `[]`; a deployment that replaces that file rather than layering over it writes the key itself | the message names what is declared, what registered and the modules that consult admission: write the key naming exactly the registered requirements (`[]` for none) |
+| `session-requirement-missing` | `core.sessionRequirements.expected` names a session requirement no installed module registers — `mfa` without the MFA package, say — whether or not a module consults session admission (`packages/core/src/boot/apply-contributions.mts`). The standalone template adds `mfa` to the list when `mfa.mode` (`MFA_MODE`) is not `off`, and installs no MFA module, so there `MFA_MODE=optional` or `required` lands here with `missing: ["mfa"]`. | the message names each missing name and what registered: install the module that registers it, or remove the name — for `mfa` under the template, set `MFA_MODE=off` |
+| `session-requirements-undeclared` | `core.sessionRequirements.expected` is written and leaves out a registered requirement, whether or not a module consults session admission; or it is unset while such a module is installed (`oauth` and `session` are). The standalone template's `config/application.conf` writes `[]`; a deployment that replaces that file rather than layering over it writes the key itself | the message names what is declared, what registered and the modules that consult admission: write the key naming exactly the registered requirements (`[]` for none) |
 | `duplicate-second-factor-authority` | more than one installed session requirement declares the second-factor authority — the one requirement that may vouch for a second factor, the MFA package's `mfa` requirement among them — whatever their names (`packages/core/src/boot/apply-contributions.mts`) | the message and `details.requirements` name each requirement with the module that contributed it: install only one of those modules |
 | `provides-factory-failed` / `contribute-factory-failed` | a module's own check threw; the module's message is the `cause` (`boot/materialize-components.mts`) | see the module messages below |
 
@@ -255,7 +259,7 @@ Module-level messages that arrive wrapped in a factory failure:
   instead. A read never re-seals, so
   dropping the key that sealed a grant makes it read `key_unavailable` until
   it is put back; the rotation procedure below says when a key may leave.
-- Federation tokens: `mode "allow-plaintext" is refused because the environment is "production"` — the environment is the one the config was selected by (`CONFIG_ENV`, or `NODE_ENV`) *or* `NODE_ENV` itself — and `… because deployment.mode is "multi"` in every environment (#473); either way unless `FEDERATION_TOKENS_ALLOW_INSECURE=1`, which then logs `federation_store_plaintext_override` (error) on every boot (`packages/redis/src/internal/encryption-mode.mts`). That refusal, and `federationTokenStore.redis: encryption.key must be canonical base64 of 32 bytes (AES-256), or a Buffer of 32 bytes, when encryption.mode is 'required' (the default)` for a `redisFederationTokenStore.encryptionKey` that is missing, the wrong length or not canonical base64, are the store's own and arrive as a `RangeError` `cause`, as does the same guard's refusal for federation grants; a mode outside the schema's two is `config-validation-failed`.
+- Federation tokens: `mode "allow-plaintext" is refused because the environment is "production"` — the environment is the one the config was selected by (`CONFIG_ENV`, or `NODE_ENV`) *or* `NODE_ENV` itself — and `… because core.deployment.mode is "multi"` in every environment (#473); either way unless `FEDERATION_TOKENS_ALLOW_INSECURE=1`, which then logs `federation_store_plaintext_override` (error) on every boot (`packages/redis/src/internal/encryption-mode.mts`). That refusal, and `federationTokenStore.redis: encryption.key must be canonical base64 of 32 bytes (AES-256), or a Buffer of 32 bytes, when encryption.mode is 'required' (the default)` for a `redisFederationTokenStore.encryptionKey` that is missing, the wrong length or not canonical base64, are the store's own and arrive as a `RangeError` `cause`, as does the same guard's refusal for federation grants; a mode outside the schema's two is `config-validation-failed`.
 - MFA stores on Redis (the MFA ADR's D12): `redisMfaFactorStoreModule` and
   `redisMfaTransactionStoreModule` read the server's `maxmemory-policy` and
   persistence before they provide their stores — the enrolled factors, and the
@@ -303,8 +307,8 @@ Module-level messages that arrive wrapped in a factory failure:
   naming the slot. The MFA requirement — the second-factor authority —
   whose reach is not what the enabled factors reach is core's refusal
   (`contribute-factory-failed`, naming the module).
-- Per-process rate-limit fallbacks under `deployment.mode = "multi"` (#474): `deployment.mode is "multi" but no shared rateLimiter is wired for POST /session/login` and the same for `POST /oauth/webauthn/authentication/options` — a `replica-unsafe-adapter` BootError as the `cause`. Wire `rateLimiter.adapter = "redis"` or set `single` (`packages/session/src/routes/Session.mts`, `packages/webauthn/src/module.mts`).
-- DPoP with no seen-set: `dpopModule: oauth.dpop.enabled = true requires a replaySeenSet component`, in every `deployment.mode`. Install `memoryReplaySeenSetModule` (one replica) or `redisReplaySeenSetModule`, or leave DPoP disabled (`packages/dpop/src/module.mts`). Under `multi` the memory one is then refused by the replica-safety guard, as `core-replay-seen-set-memory`.
+- Per-process rate-limit fallbacks under `core.deployment.mode = "multi"` (#474): `core.deployment.mode is "multi" but no shared rateLimiter is wired for POST /session/login` and the same for `POST /oauth/webauthn/authentication/options` — a `replica-unsafe-adapter` BootError as the `cause`. Wire `rateLimiter.adapter = "redis"` or set `single` (`packages/session/src/routes/Session.mts`, `packages/webauthn/src/module.mts`).
+- DPoP with no seen-set: `dpopModule: oauth.dpop.enabled = true requires a replaySeenSet component`, in every `core.deployment.mode`. Install `memoryReplaySeenSetModule` (one replica) or `redisReplaySeenSetModule`, or leave DPoP disabled (`packages/dpop/src/module.mts`). Under `multi` the memory one is then refused by the replica-safety guard, as `core-replay-seen-set-memory`.
 - Device grant: the seven refusals for `verification-uri`, the `session` slice, `rateLimit.failMode`, a `rateLimiter` component, a usable `oauth.deviceAuthorization.rateLimit` budget (#448), and — with the grant enabled — a `deviceCodeStore` component, which `oauth.deviceAuthorization.store = "unsupported"` does not stand in for (#626), and a `userSessionStore` component (`enabled = true requires a userSessionStore component`: the verification route approves only from the live `UserSession` behind the cookie; install `memorySessionStoresModule` on one replica or `redisSessionStoresModule`); and an eighth, `built from a config with the grant on, but the config createApp validated has oauth.deviceAuthorization.enabled off` (or the reverse) — hand `deviceGrantModule({ config })` the same config as `bootstrapComponents.config` (`packages/device-grant/src/module.mts`). The factory listed uncalled is `module-factory-not-called`, in the table above. There is no refusal for an enabled grant without `oauthModule`: it boots, but nothing can redeem the device codes it hands out, so compose it with the token endpoint.
 - mTLS: `source = "header"` with empty `trusted-proxies`; `mode = "pki"`/`"full-pki"` with empty `trusted-cas`; `mode = "pki"` with `source = "tls-layer"`; `full-pki` without `revocation.mode` + `on-unavailable`; `revocation.mode` ∈ `"crl"` / `"ocsp"` / `"both"` with empty `allowed-hosts` (`packages/mtls/README.md` "Boot-time fail-loud invariants", `packages/mtls/src/module.mts`).
 - Remote signing: `the signer's output does not verify against publicKeyPem for kid "…"` — the boot self-check in `createRemoteSigningKeyStore` (`packages/core/src/keys/remoteSigning.mts`).
@@ -453,7 +457,7 @@ Two cross-cutting facts about these rows:
   With no `rateLimiter` wired they fall back to a per-process memory limiter
   and say so once at boot (`login_rate_limiter_not_shared`,
   `webauthn_authentication_options_rate_limiter_not_shared`) — when
-  `deployment.mode` is unset. Under `"multi"` the fallback is refused at boot
+  `core.deployment.mode` is unset. Under `"multi"` the fallback is refused at boot
   like every other per-process store (#474, see [Boot refusals you will meet](#boot-refusals-you-will-meet)); under
   `"single"` it is silent. The OAuth endpoints, by contrast, run with no
   limiter at all in that case (`packages/oauth/src/routes.mts`).
@@ -801,16 +805,16 @@ stream — its level is fixed at `info`.
 | `session_admission_remediation_undeclared` (warn — `action`; once per process per name) | `core/src/session-admission/admit.mts` | a route presented a `remediation` action that is not the object core issued to a registered requirement (a literal, a copy, or a name no requirement declared); it was treated as `credential_change`, so every requirement was asked. Have the route take its own requirement's `issuedRemediationActions(requirement)[route]` |
 | `session_admission_step_up_without_page` (warn — `requirement`; once per process per name) | `core/src/session-admission/admit.mts` | a requirement answered `step_up` while it registered no `stepUpPage`; taken as `unmet`. Register the page, or answer `unmet` |
 | `session_admission_step_up_without_session` (warn — `requirement`; once per process per name) | `core/src/session-admission/admit.mts` | a requirement answered `step_up` over no live session (no store, or a token without a record); taken as `reauthenticate`. A step-up needs a session to add to |
-| `session_requirements_registered` (info — `requirements: [{ name, module, remediations, secondFactorAuthority }]`, once at boot) | `core/src/boot/apply-contributions.mts` | not drift: the one boot line saying which session requirements this composition registered, in order, and which one is the second-factor authority — the one that vouches for a second factor (`secondFactorAuthority: true`), whatever its name. Compare it with `sessionRequirements.expected` when a boot refuses `session-requirement-missing` or `session-requirements-undeclared` |
-| `replica_unsafe_adapters` (warn) | `core/src/boot/replica-safety.mts` | `deployment.mode` is unset; set it |
+| `session_requirements_registered` (info — `requirements: [{ name, module, remediations, secondFactorAuthority }]`, once at boot) | `core/src/boot/apply-contributions.mts` | not drift: the one boot line saying which session requirements this composition registered, in order, and which one is the second-factor authority — the one that vouches for a second factor (`secondFactorAuthority: true`), whatever its name. Compare it with `core.sessionRequirements.expected` when a boot refuses `session-requirement-missing` or `session-requirements-undeclared` |
+| `replica_unsafe_adapters` (warn) | `core/src/boot/replica-safety.mts` | `core.deployment.mode` is unset; set it |
 | `dpop_replay_ttl_below_window` (warn, `iatWindowSeconds`, `replayTtlSeconds`, `requiredTtlSeconds`) | `dpop/src/verifier.mts` | `oauth.dpop.replay-store-ttl-seconds` is below `2 × iat-window-seconds + 1`: a proof can outlive its replay record and be replayed while still inside its acceptance window. Raise it to `requiredTtlSeconds` or more. It was a sentence, with `reason: "replay_ttl_below_iat_window"` |
-| `login_rate_limiter_not_shared`, `webauthn_authentication_options_rate_limiter_not_shared` (warn) | `session/src/routes/Session.mts`, `webauthn/src/module.mts` | no shared `rateLimiter` and `deployment.mode` unset; the guard is per-process (`"multi"` refuses boot instead, `"single"` is silent — #474) |
+| `login_rate_limiter_not_shared`, `webauthn_authentication_options_rate_limiter_not_shared` (warn) | `session/src/routes/Session.mts`, `webauthn/src/module.mts` | no shared `rateLimiter` and `core.deployment.mode` unset; the guard is per-process (`"multi"` refuses boot instead, `"single"` is silent — #474) |
 | `webauthn_authentication_options_budget_mismatch` (warn) | `webauthn/src/module.mts` | a shared `rateLimiter` is wired, and the app config's `webauthn.rateLimit.authenticationOptions` (what the limiter module seeded) is missing or differs from the `webauthnConfig` slot (what the per-process fallback is built from, and what backs the `RateLimit-*` headers only for an adapter that reports no `limit`). The route runs on an explicit `limits.webauthn-authentication-options` in the limiter's section if there is one, otherwise on the key's values, otherwise on the limiter's default. The warning compares the key with the slot only; an explicit `limits` entry is not compared. Set the key to the slot's values (the line names both) |
 | `pkce_config_ignored_s256_is_mandatory` (warn) | `oauth/src/grants/pkce.mts` | a retired PKCE key (or `OAUTH_GRANTS_AUTHORIZATION_CODE_PKCE_REQUIRE_S256`) is still set; delete it |
 | `jwt_verify_aud_skipped`, `jwt_verify_iss_skipped` (warn, once per logger) | `core/src/jwt/verify.mts` | a verification surface is not pinning `aud`/`iss` |
 | `jwt_verify_legacy_typ` (warn) | `core/src/jwt/verify.mts` | `OAUTH_JWT_LEGACY_TYP_ACCEPT=true` is admitting typ-less tokens; close the window |
 | `federationTokenStore: in-memory adapter is for dev/test only …` (warn) | `core/src/federation-tokens/factory.mts` | the standalone builds this store in memory unless `federationTokenStore.type = "redis"` (`FEDERATION_TOKEN_STORE_TYPE=redis`) is set (#456) |
-| `federation_store_plaintext_override` (error, `store`, `mode`, the `environment` or `deploymentMode` that would have refused it, `override`) | `redis/src/internal/encryption-mode.mts` | `FEDERATION_TOKENS_ALLOW_INSECURE=1` is set where plaintext is refused — a production/staging environment or `deployment.mode = "multi"` (#473); `store` is `federation-tokens` or `federation-grants`. It was a `[federation-tokens] CRITICAL: …` console line |
+| `federation_store_plaintext_override` (error, `store`, `mode`, the `environment` or `deploymentMode` that would have refused it, `override`) | `redis/src/internal/encryption-mode.mts` | `FEDERATION_TOKENS_ALLOW_INSECURE=1` is set where plaintext is refused — a production/staging environment or `core.deployment.mode = "multi"` (#473); `store` is `federation-tokens` or `federation-grants`. It was a `[federation-tokens] CRITICAL: …` console line |
 | `federation_store_plaintext` (warn, `store`, `mode`) | `redis/src/internal/encryption-mode.mts` | a sealing store runs `allow-plaintext` where that is allowed (development); set `mode = "required"` and a key before it leaves development |
 | `config_key_deprecated` (warn, `key`, `env`, `replacement`, `replacementEnv`) | `templates/standalone/src/buildModules.mts` | `key = "repositories.code.type"`: move to `oauth.code.adapter = "redis"` (`OAUTH_CODE_ADAPTER`). `key = "oauth.accessToken.expiresIn"`: the deprecated key decides the access-token default; move the value to `oauth.accessToken.defaultExpiresIn` (`OAUTH_ACCESS_TOKEN_DEFAULT_EXPIRES_IN`). Both were `[buildModules] … is deprecated` console lines |
 | `adapter_builder_deprecated` (warn, `builder`, `replacement`) | `redis/src/code-repository.mts` | a composition registers `redisCodeRepositoryBuilder`; wire `redisCodeRepositoryModule` instead |
@@ -819,7 +823,7 @@ stream — its level is fixed at `info`.
 | `mfa_factor_store_volatile`, `mfa_transaction_store_volatile` (warn, `store`, `adapter: "redis"`, once at boot) | same | the MFA store's Redis has no persistence at all: a restart empties it. Turn AOF on |
 | `mfa_factor_store_durability_unchecked`, `mfa_transaction_store_durability_unchecked` (warn, `store`, `adapter: "redis"`; `unread` — the parts it could not read: `maxmemory-policy`, `appendonly`, `save`; `maxmemoryPolicy` — a policy it does not know, neither `noeviction`, a `volatile-*` nor an `allkeys-*` one; `err` — the first refusal's projection; once at boot) | same | part of the check could not run, and the store booted: the server refused a question — `INFO` or `CONFIG` renamed, disabled, or not permitted to the connection's user — or answered without the value, or reports a policy the check does not know. Confirm the rest where the server is configured (`noeviction`, AOF on), or let the user run `INFO` and `CONFIG GET` |
 | `mfa_transaction_store_lock_evictable` (warn, `store`, `adapter: "redis"`, `maxmemoryPolicy`, once at boot) | same | the MFA transaction store's Redis runs a `volatile-*` policy. A subject's lock and weekly window (`mfat:lock:`, `mfat:week:`) carry a TTL once no run of failures is counted, so at `maxmemory` the server may evict them, and a weekly hold on guessable proofs ends early (D21). Set `maxmemory-policy` to `noeviction`, or give the MFA stores a Redis that never reaches `maxmemory` |
-| `mfa_factor_store_in_memory` (warn, `store`, `adapter`) | `core/src/mfa/factory.mts` (`memoryMfaFactorStoreModule`, the `memory` builder) | enrolled second factors are kept in process: a restart empties them, and every subject then reads as never enrolled (D12). Unlike `replica_unsafe_adapters` it warns under `deployment.mode = "single"` too — the loss is at restart, not across replicas. Development only; the standalone template installs no MFA store |
+| `mfa_factor_store_in_memory` (warn, `store`, `adapter`) | `core/src/mfa/factory.mts` (`memoryMfaFactorStoreModule`, the `memory` builder) | enrolled second factors are kept in process: a restart empties them, and every subject then reads as never enrolled (D12). Unlike `replica_unsafe_adapters` it warns under `core.deployment.mode = "single"` too — the loss is at restart, not across replicas. Development only; the standalone template installs no MFA store |
 | `mfa_development_sample_key_in_use` (warn — `setting: "mfa.encryptionKeys"`, `variable: "MFA_ENCRYPTION_KEY"`; once at boot) | `mfa/src/module.mts` | the MFA key ring carries the published development sample key (`MFA_DEVELOPMENT_SAMPLE_KEY`), which the settings accept only outside production and staging and under one replica: every factor's data is sealed from nobody. Set `MFA_ENCRYPTION_KEY` to a key of your own (`openssl rand -base64 32`) before the deployment leaves development |
 | `mfa_step_up_unsupported` (warn — `store: "userSessionStore"`, `kind` the adapter's; once at boot) | `mfa/src/module.mts` | the user-session store has no `recordSecondFactor` (core's `supportsSecondFactorUpdate`), so a verified step-up could not be written into a session: under `mfa.mode = "required"` the MFA requirement sends a password session to log in again where it would step it up (the MFA ADR's D20). Use a store with the capability — both bundled ones have it — or implement it in yours |
 | `mfa_enrollment_nothing_enrollable` (warn — `kinds`, the counting factors' kinds; once per such login) | `mfa/src/requirement.mts` | a password login under `required` asked a subject with no factor for a first binding, and every counting factor refused that user (`enrollable(user)` — an email factor for an account without an address): the answer lists nothing to enroll, and the user cannot finish. Enable a factor every user can enroll (TOTP), or give the accounts what the factor needs |
@@ -1210,7 +1214,7 @@ is deliberately not offered there.
 
 ### What the JWKS publishes and how it is cached
 
-`GET /.well-known/jwks.json` (`oauth.jwt.jwksPath` to move it) publishes the
+`GET /.well-known/jwks.json` (`jwks.path`, env `JWKS_PATH`, to move it) publishes the
 current key plus every `previousKeys` entry whose `expiresAt` has not passed
 (`getVerificationKeys`, `packages/core/src/keys/KeyStore.mts`). The route
 (`packages/core/src/jwks/router.mts`):
@@ -1218,8 +1222,8 @@ current key plus every `previousKeys` entry whose `expiresAt` has not passed
 - serialises the set **once per key set** and answers with a strong `ETag`
   (SHA-256 of the body); a poller sending `If-None-Match` gets `304` until the
   set changes — which includes a previous key dropping out on its own clock;
-- sets `Cache-Control: public, max-age=<oauth.jwt.jwksCacheMaxAge>`, default
-  **300 s** (`packages/core/src/jwks/cache.mts`);
+- sets `Cache-Control: public, max-age=<jwks.cacheMaxAge>` (env
+  `JWKS_CACHE_MAX_AGE`), default **300 s** (`packages/core/src/jwks/cache.mts`);
 - answers `404 jwks_not_published` for HS256 and `503 jwks_unavailable` when
   an asymmetric store yields nothing exportable — both `no-store`, so a
   misconfiguration is never pinned in a shared cache.
@@ -1250,10 +1254,10 @@ defaults:
   which defaults to `defaultExpiresIn` = 3 600 s — raise the max past the
   refresh token's lifetime and the access token becomes the longest-lived; id
   tokens default to 3 600 s, `packages/core/src/grants/idToken.mts`);
-- provider-side cache: `jwksCacheMaxAge` = 300 s;
+- provider-side cache: `jwks.cacheMaxAge` = 300 s;
 - verifier-side cache: e.g. `jwksCacheMaxAgeMs` = 600 s.
 
-Keep `jwksCacheMaxAge` well below the overlap window
+Keep `jwks.cacheMaxAge` well below the overlap window
 (`packages/core/src/jwks/cache.mts`) — a freshly published kid must reach
 caching verifiers before tokens signed with it arrive.
 
@@ -1287,7 +1291,7 @@ rotation possible on a fleet where replicas restart one at a time.
    ```
 
    Confirm `GET /.well-known/jwks.json` lists both kids and its `ETag`
-   changed, then wait at least `jwksCacheMaxAge` + the largest verifier cache
+   changed, then wait at least `jwks.cacheMaxAge` + the largest verifier cache
    (300 s + 600 s with the defaults) so every verifier has seen `v1`.
    Restarting a replica mid-roll with `v1` signing *before* this step would
    have verifiers fetching the JWKS from a not-yet-restarted replica and
@@ -1458,7 +1462,7 @@ before you flip — and a relying party holding the secret can also mint.
 - A replica drains for `drainTimeoutMs` (default 10 s) on `SIGTERM` and exits
   non-zero if it ran out of time; keep that below the orchestrator's kill grace
   period (`templates/standalone/src/shutdown.mts`).
-- Under `DEPLOYMENT_MODE=multi`, a mixed fleet during the roll is fine for
+- Under `CORE_DEPLOYMENT_MODE=multi`, a mixed fleet during the roll is fine for
   every Redis-backed store — the schemas below are what decide whether the
   *older* release can read what the *newer* one wrote. The one exception is
   v0.16.0, which moves DPoP onto the replay seen-set: its replay records

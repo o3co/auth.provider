@@ -71,7 +71,7 @@ export type { FederationProvider };
  * `overrideComponents` (`synthetic-key-collision`). Each `…Resolver` projects
  * the contribution kind of the same stem; `federationRedirectPolicies` is
  * typed in `@o3co/auth-provider-session`. `deploymentMode` is the
- * configuration's `deployment.mode` (`deployment/mode.mts`), typed with its
+ * configuration's `core.deployment.mode` (`deployment/mode.mts`), typed with its
  * slot in `deployment/types.mts`.
  *
  * Immutability rests on the `ReadonlySet<string>` type. `Object.freeze` does

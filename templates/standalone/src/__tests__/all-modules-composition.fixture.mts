@@ -28,7 +28,7 @@
  *
  * Substituted (the first two are overrides `buildModules` offers):
  * - client and user repositories: in memory, not YAML off disk;
- * - the refresh-token family store under `deployment.mode = "single"`: memory,
+ * - the refresh-token family store under `core.deployment.mode = "single"`: memory,
  *   not the shipped Redis, so the single-replica boot opens no sockets;
  * - upstream identity providers: core's fake OpenID Provider, through the
  *   `fetch` option the Google and OIDC adapters take; the config bridges'

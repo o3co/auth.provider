@@ -6,7 +6,7 @@
 /**
  * Redis-backed AccessTokenDenylist. A revocation on one replica must be
  * visible on the others; the memory denylist forks per replica, so
- * `deployment.mode = "multi"` refuses it (core's replica-safety guard).
+ * `core.deployment.mode = "multi"` refuses it (core's replica-safety guard).
  */
 import type { AccessTokenDenylist } from "@o3co/auth-provider-core";
 import Redis from "ioredis";

@@ -1122,7 +1122,7 @@ export interface DiscoveryDocumentInvalidDetails {
 
 /**
  * A composition holds state in this process's memory that a multi-replica
- * deployment must share, while `deployment.mode` says `"multi"`.
+ * deployment must share, while `core.deployment.mode` says `"multi"`.
  * `modules` names every offending module rather than the first, so one boot
  * attempt tells the operator everything they have to change.
  */

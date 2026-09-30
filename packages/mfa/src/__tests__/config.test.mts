@@ -417,7 +417,7 @@ describe("the development sample key", () => {
 		const message = refusal(() =>
 			readSettings(sample(), { environment: "development", deploymentMode: "multi" }),
 		);
-		expect(message).toContain('deployment.mode is "multi"');
+		expect(message).toContain('core.deployment.mode is "multi"');
 	});
 
 	it("refuses a deployment mode it cannot read, absent included, as a TypeError naming it", () => {
@@ -450,7 +450,7 @@ describe("the development sample key", () => {
 					deploymentMode: "multi",
 				}),
 			),
-		).toContain('deployment.mode is "multi"');
+		).toContain('core.deployment.mode is "multi"');
 	});
 
 	it("is refused wherever it sits in the ring, since every key opens", () => {

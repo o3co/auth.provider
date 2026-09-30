@@ -6,7 +6,7 @@
 /**
  * `redisConsentStoreModule` through the boot planner. With it, a composition
  * serving clients that are not first-party can declare
- * `deployment.mode = "multi"`: `checkReplicaSafety` refuses
+ * `core.deployment.mode = "multi"`: `checkReplicaSafety` refuses
  * `memoryConsentStoreModule` under that mode by name, since consent and
  * parked requests fork per replica. Pinned: the planner accepts the Redis
  * module where it refuses the memory one, the module fills both slots the
@@ -83,7 +83,7 @@ describe("redisConsentStoreModule manifest", () => {
 });
 
 describe("redisConsentStoreModule wiring", () => {
-	it('boots under deployment.mode = "multi" and fills both slots with the Redis adapters', async () => {
+	it('boots under core.deployment.mode = "multi" and fills both slots with the Redis adapters', async () => {
 		const handle = await createApp({
 			modules: [redisConsentStoreModule, consentStepStandIn],
 			bootstrapComponents: {

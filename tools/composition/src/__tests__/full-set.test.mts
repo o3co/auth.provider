@@ -29,7 +29,7 @@
  * modules can change the answer: the token endpoint's body rule, with two
  * more routers beneath `/oauth`, and the logger every module that answers a
  * request must receive. `full-set.redis.test.mts` boots the same set on real
- * Redis under `deployment.mode = "multi"`.
+ * Redis under `core.deployment.mode = "multi"`.
  *
  * The MFA package is installed as a deployment installs it (`mfaModules` over
  * the MFA stores, `mfa.mode = "optional"`, a key of the deployment's own), so

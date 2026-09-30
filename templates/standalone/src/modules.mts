@@ -370,7 +370,7 @@ export const auditSinkModule: Module = defineModule({
 export const storesModule: Module = defineModule({
 	name: "stores",
 	// Everything this bundle provides lives in process memory, so a
-	// composition still on it is refused under `deployment.mode = "multi"`
+	// composition still on it is refused under `core.deployment.mode = "multi"`
 	// like the split modules it stands in for.
 	replicaSafety: {
 		unsafe: true,

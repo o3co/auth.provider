@@ -316,7 +316,7 @@ export function toAssertionIssuerEntry(input: AssertionIssuerEntryInput): Assert
  * Replicas: a static registry is replica-safe, but `add`, `remove` and
  * `setExpiresAt` change this process only. An issuer revoked on one replica
  * stays trusted on the others, and a restart restores it from the
- * composition's entries. `deployment.mode = "multi"` cannot refuse this (the
+ * composition's entries. `core.deployment.mode = "multi"` cannot refuse this (the
  * registry sits inside the `assertionVerifier`, not on a module manifest the
  * boot guard reads), so a multi-replica deployment changes the entry list by
  * redeploying, or keeps it in a shared store.

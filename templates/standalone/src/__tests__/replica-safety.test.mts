@@ -15,7 +15,7 @@
  */
 
 /**
- * The standalone's own store modules under `deployment.mode = "multi"`,
+ * The standalone's own store modules under `core.deployment.mode = "multi"`,
  * booted the way an operator reaches them: from the shipped HOCON with one
  * environment variable flipped.
  *
@@ -28,7 +28,7 @@
  *   `redisFederationTokenStoreModule` off the shared ioredis socket.
  * - The Redis federation store's `allow-plaintext` guard reads the
  *   environment the config was selected by (`CONFIG_ENV || NODE_ENV`, passed
- *   through `buildModules`) and refuses under `deployment.mode = "multi"` in
+ *   through `buildModules`) and refuses under `core.deployment.mode = "multi"` in
  *   every environment.
  *
  * ioredis, node-redis and connect-redis are mocked, as in
@@ -224,7 +224,7 @@ const messageChain = (err: unknown): string => {
 	return `${e.message ?? ""} ${e.cause?.message ?? ""}`;
 };
 
-describe('the standalone\'s memory modules are refused under deployment.mode = "multi"', () => {
+describe('the standalone\'s memory modules are refused under core.deployment.mode = "multi"', () => {
 	let handleRef: Awaited<ReturnType<typeof boot>> | undefined;
 
 	afterEach(async () => {
@@ -480,11 +480,11 @@ describe("the Redis federation store's plaintext guard, booted from the shipped 
 		REDIS_FEDERATION_TOKEN_STORE_ENCRYPTION_MODE: "allow-plaintext",
 	};
 
-	it('is refused under deployment.mode = "multi" in a development environment', async () => {
+	it('is refused under core.deployment.mode = "multi" in a development environment', async () => {
 		// The umbrella shape with plaintext. A multi-replica deployment is
 		// never a development box.
 		await expect(boot(resolveConfig(PLAINTEXT_ENV), "development")).rejects.toSatisfy(
-			(err: unknown) => /deployment\.mode is "multi"/.test(messageChain(err)),
+			(err: unknown) => /core\.deployment\.mode is "multi"/.test(messageChain(err)),
 		);
 		expect(errorSpy).not.toHaveBeenCalled();
 	});

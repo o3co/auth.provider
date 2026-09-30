@@ -18,7 +18,7 @@
  * Built-in module providing the in-process `DeviceCodeStore`.
  *
  * Development and single-replica only: `replicaSafety` makes a
- * `deployment.mode = "multi"` composition refuse to boot with it mounted.
+ * `core.deployment.mode = "multi"` composition refuse to boot with it mounted.
  * `dispose` is registered with the lifecycle registrar so
  * `AppHandle.dispose()` stops the sweep timer; the registrar is optional.
  */

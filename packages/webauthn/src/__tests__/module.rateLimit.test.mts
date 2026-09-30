@@ -123,7 +123,7 @@ const settleAudit = () => new Promise((r) => setImmediate(r));
 /**
  * The same providers under a test name with no `replicaSafety`, so the
  * replica-safety guard has nothing to refuse and the test reaches the route
- * factory under `deployment.mode = "multi"`.
+ * factory under `core.deployment.mode = "multi"`.
  */
 const asSharedStub = (m: Module): Module => {
 	const { replicaSafety: _declared, ...manifest } = m;
@@ -514,7 +514,7 @@ describe("webauthn authentication/options rate limit — limiter outage", () => 
 // `rateLimiter`: `"multi"` refuses to boot, `"single"` is silent, unset warns.
 // ---------------------------------------------------------------------------
 
-describe("webauthn authentication/options rate limit — fallback under deployment.mode", () => {
+describe("webauthn authentication/options rate limit — fallback under core.deployment.mode", () => {
 	it('refuses to boot under "multi" with no shared limiter, naming the route as replica-unsafe', async () => {
 		// The route factory throws; the planner wraps a factory throw as
 		// `contribute-factory-failed` and carries the module's own BootError as
@@ -588,7 +588,7 @@ describe("webauthn authentication/options rate limit — fallback under deployme
 
 // ---------------------------------------------------------------------------
 // The mode comes from core's `deploymentMode` slot, which core fills from the
-// configuration's `deployment.mode`: the module reads nothing of `deployment`
+// configuration's `core.deployment.mode`: the module reads nothing of `deployment`
 // itself.
 // ---------------------------------------------------------------------------
 

@@ -25,7 +25,7 @@ import { createMemoryFederationGrantStore } from "./memory.mjs";
  * {@link FederationGrantIntentStore}: lodged intents, consent challenges and
  * connect transactions.
  *
- * Dev and single-replica only; refused under `deployment.mode = "multi"`.
+ * Dev and single-replica only; refused under `core.deployment.mode = "multi"`.
  * Allowed beside a durable grant store on one replica, since a restart loses
  * only flows in progress. Reads no configuration: the flow budget is set by
  * core per intent and the live-intent bound is a port constant.
@@ -47,7 +47,7 @@ export const memoryFederationGrantIntentStoreModule = defineModule({
  * Built-in module that provides the in-process memory
  * {@link FederationGrantStore}. Dev and single-replica only — no
  * persistence across restarts, which for a grant means every user connects
- * again, and refused by name under `deployment.mode = "multi"`.
+ * again, and refused by name under `core.deployment.mode = "multi"`.
  */
 export const memoryFederationGrantStoreModule = defineModule({
 	name: "core-federation-grant-store-memory",

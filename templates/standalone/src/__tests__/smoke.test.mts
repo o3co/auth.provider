@@ -488,7 +488,7 @@ describe("standalone smoke test", () => {
 	// Without an access-token denylist, `/oauth/revoke` would answer 200 for
 	// an access token and leave the JWT working until expiry. The template
 	// always wires one, and its own application.conf selects the Redis-backed
-	// adapter — the memory one forks per replica and `deployment.mode =
+	// adapter — the memory one forks per replica and `core.deployment.mode =
 	// "multi"` refuses it.
 	describe("access-token denylist wiring", () => {
 		it("always wires a denylist, so /oauth/revoke can keep its promise", () => {
@@ -535,7 +535,7 @@ describe("standalone smoke test", () => {
 
 		it("the shipped application.conf selects the replica-safe adapter", () => {
 			// The template's own config is the artifact operators deploy. It runs
-			// with `deployment.mode = multi` in the umbrella E2E, which refuses
+			// with `core.deployment.mode = multi` in the umbrella E2E, which refuses
 			// every in-memory shared store — so shipping the memory denylist here
 			// would be a boot failure in the very stack that proves the scaffold
 			// works.

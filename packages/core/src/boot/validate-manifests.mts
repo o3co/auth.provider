@@ -443,7 +443,7 @@ function checkAuthoritativeOverrides(
  */
 const syntheticKeyRemedy = (key: string): string =>
 	key === "deploymentMode"
-		? " Set deployment.mode in the configuration instead: boot fills deploymentMode from it."
+		? " Set core.deployment.mode in the configuration instead: boot fills deploymentMode from it."
 		: "";
 
 /**

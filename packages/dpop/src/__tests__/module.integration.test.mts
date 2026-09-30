@@ -22,7 +22,7 @@
  *     `confirmation.jkt`) and an invalid one is `400 invalid_dpop_proof`;
  *   - every accepted proof is recorded in core's `replaySeenSet` slot, and an
  *     enabled mechanism with no seen-set is refused at boot;
- *   - the memory seen-set answers `deployment.mode` through core's
+ *   - the memory seen-set answers `core.deployment.mode` through core's
  *     replica-safety guard, with no check of DPoP's own.
  */
 
@@ -383,7 +383,7 @@ describe("dpopModule — integration via createApp", () => {
 		await handle.dispose();
 	});
 
-	it("when enabled: refuses to boot with no replaySeenSet, in every deployment.mode", async () => {
+	it("when enabled: refuses to boot with no replaySeenSet, in every core.deployment.mode", async () => {
 		// There is no per-process fallback: a mechanism that cannot record a
 		// proof cannot refuse its replay, so boot says what to wire rather than
 		// choosing a store on the composition's behalf.
@@ -812,7 +812,7 @@ const bootReplica = async (opts: ReplicaBootOptions) => {
 	return { handle, app };
 };
 
-describe("dpopModule — replay records under deployment.mode (replica safety)", () => {
+describe("dpopModule — replay records under core.deployment.mode (replica safety)", () => {
 	it('refuses to boot under "multi" with the memory seen-set, naming what a replica fork costs a DPoP proof', async () => {
 		const logger = spyLogger();
 		const refusal = await bootReplica({ mode: "multi", seenSet: "module", logger }).then(
@@ -832,7 +832,7 @@ describe("dpopModule — replay records under deployment.mode (replica safety)",
 			details: { reason: "replica-unsafe-adapter", modules: ["core-replay-seen-set-memory"] },
 		});
 		const message = String(refusal?.message);
-		expect(message).toMatch(/deployment\.mode is "multi"/);
+		expect(message).toMatch(/core\.deployment\.mode is "multi"/);
 		expect(message).toMatch(/core-replay-seen-set-memory: .*a DPoP proof/);
 		expect(message).toMatch(/replayed once against each replica/);
 	});

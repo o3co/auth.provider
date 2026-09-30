@@ -581,7 +581,9 @@ describe("the development sample key", () => {
 	};
 
 	it('is refused when the deploymentMode slot says "multi", whatever the configuration\'s deployment says', () => {
-		expect(() => mfaFactory("multi", { mode: "single" })).toThrow(/deployment\.mode is "multi"/);
+		expect(() => mfaFactory("multi", { mode: "single" })).toThrow(
+			/core\.deployment\.mode is "multi"/,
+		);
 	});
 
 	it("refuses a slot it cannot read, absent included, as a TypeError naming it", () => {
@@ -599,8 +601,8 @@ describe("the development sample key", () => {
 	});
 
 	it.each([
-		["refused", "deployment.mode = multi", { mode: "multi" }],
-		["accepted with the boot warning", "deployment.mode = single", { mode: "single" }],
+		["refused", "core.deployment.mode = multi", { mode: "multi" }],
+		["accepted with the boot warning", "core.deployment.mode = single", { mode: "single" }],
 		["accepted with the boot warning", "an empty deployment section", {}],
 		["accepted with the boot warning", "no deployment section", undefined],
 	] as const)(
@@ -616,7 +618,7 @@ describe("the development sample key", () => {
 				// in-memory session store first.
 				const err = await refusal({ config, options, withoutLogin: true });
 				expect(err.reason).toBe("contribute-factory-failed");
-				expect((err.cause as Error).message).toContain('deployment.mode is "multi"');
+				expect((err.cause as Error).message).toContain('core.deployment.mode is "multi"');
 				return;
 			}
 			const logger = spyLogger();

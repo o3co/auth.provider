@@ -318,7 +318,7 @@ describe("the deploymentMode key is reserved", () => {
 		});
 	});
 
-	it("tells whoever set it to set deployment.mode instead, from every source", async () => {
+	it("tells whoever set it to set core.deployment.mode instead, from every source", async () => {
 		const provider = defineModule({
 			name: "test:provides-deployment-mode",
 			provides: { deploymentMode: () => "multi" as const },
@@ -337,7 +337,7 @@ describe("the deploymentMode key is reserved", () => {
 		]) {
 			const err = (await boot.catch((thrown: unknown) => thrown)) as Error;
 			expect(err.message).toContain(
-				"Set deployment.mode in the configuration instead: boot fills deploymentMode from it.",
+				"Set core.deployment.mode in the configuration instead: boot fills deploymentMode from it.",
 			);
 		}
 	});

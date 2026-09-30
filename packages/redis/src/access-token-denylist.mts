@@ -41,7 +41,7 @@ export interface RedisAccessTokenDenylistOptions {
  * The denylist a multi-replica deployment can wire: the in-process one forks
  * per replica, so a revocation served by one replica leaves the token working
  * on every other, and core's replica-safety guard refuses
- * `core-access-token-denylist-memory` under `deployment.mode = "multi"`.
+ * `core-access-token-denylist-memory` under `core.deployment.mode = "multi"`.
  *
  * **The TTL is the token's own remaining lifetime, and that is the entire GC
  * strategy.** Past `exp` the token fails verification on its own claims, so a

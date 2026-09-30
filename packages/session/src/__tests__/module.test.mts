@@ -522,7 +522,7 @@ describe("sessionModule — the password login is a consumer of session admissio
 
 // ---------------------------------------------------------------------------
 // The login throttle's per-process fallback is decided by core's
-// `deploymentMode` slot, which core fills from `deployment.mode`: the module
+// `deploymentMode` slot, which core fills from `core.deployment.mode`: the module
 // reads nothing of `deployment` itself.
 // ---------------------------------------------------------------------------
 
@@ -591,8 +591,8 @@ describe("sessionModule — the login throttle reads the deploymentMode slot", (
 	});
 
 	it.each([
-		["refused at boot", "deployment.mode = multi", { mode: "multi" }],
-		["mounted without a warning", "deployment.mode = single", { mode: "single" }],
+		["refused at boot", "core.deployment.mode = multi", { mode: "multi" }],
+		["mounted without a warning", "core.deployment.mode = single", { mode: "single" }],
 		["mounted with the warning", "an empty deployment section", {}],
 		["mounted with the warning", "no deployment section", undefined],
 	] as const)(
