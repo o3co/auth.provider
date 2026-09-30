@@ -222,8 +222,8 @@ overlay の値は `application.conf` より優先される。scaffold には `de
 | `ADAPTERS_MFA_FACTOR_STORE` | `memory` | `adapters.mfaFactorStore`: `memory`、`redis` または `store`。MFA を組み込む合成のためのもので、テンプレートは組み込まない |
 | `ADAPTERS_MFA_TRANSACTION_STORE` | `memory` | `adapters.mfaTransactionStore`: `memory` または `redis`。MFA を組み込む合成のためのもの |
 | `ADAPTERS_CODE_REPOSITORY` | `redis` | `adapters.codeRepository`: 認可コードリポジトリ、`memory` または `redis`。[コードリポジトリ](#コードリポジトリ) を参照 |
-| `ADAPTERS_CLIENT_REPOSITORY` | `yaml` | `adapters.clientRepository`: `yaml`。[クライアントリポジトリ](#クライアントリポジトリ) を参照 |
-| `ADAPTERS_USER_REPOSITORY` | `http` | `adapters.userRepository`: `http` または `yaml`。[ユーザーリポジトリ](#ユーザーリポジトリ) を参照 |
+| `ADAPTERS_CLIENT_REPOSITORY` | `yaml` | `adapters.clientRepository`: `yaml`、または `static`（core の `yaml` の別名）。[クライアントリポジトリ](#クライアントリポジトリ) を参照 |
+| `ADAPTERS_USER_REPOSITORY` | `http` | `adapters.userRepository`: `http`、`yaml` または `static`（core の `yaml` の別名）。[ユーザーリポジトリ](#ユーザーリポジトリ) を参照 |
 | `ADAPTERS_AUDIT_SINK` | `logger` | `adapters.auditSink`: セキュリティイベントの送り先、`logger`（stdout への pino エンベロープ付き NDJSON）または `console`（イベントの JSON そのまま）。`none` は存在しない。[監査ログ](#監査ログ) を参照 |
 
 移動する前の場所 — `rateLimiter.adapter`、`oauth.code.adapter`、`audit.sink.type`、`repositories.user.type` など — にまだ書かれた選択や、それとともに改名された変数（`RATE_LIMITER_ADAPTER`、`CLIENT_TYPE` など）が単独で、または別の値で設定されていると、新しいパスと変数を名指しして boot の前に失敗する。古い変数が新しい変数と同じ値で並んでいるなら受け入れる。
@@ -414,7 +414,7 @@ core.federations {
 
 | 変数 | デフォルト | 説明 |
 |---|---|---|
-| `ADAPTERS_CLIENT_REPOSITORY` | `yaml` | クライアントストアのバックエンド: `yaml` |
+| `ADAPTERS_CLIENT_REPOSITORY` | `yaml` | クライアントストアのバックエンド: `yaml`、または core の `yaml` の別名で `repositories.client.static.path`（デフォルトなし）を読む `static` |
 | `REPOSITORIES_CLIENT_YAML_PATH` | `./config/clients.yaml` | YAML クライアントレジストリのパス |
 
 レジストリはデプロイごとの設定である: `.gitignore` は `config/clients.yaml` を git から、`.dockerignore` はイメージから外し、本番の compose ファイルがそれをマウントする（[Docker](#docker) を参照）。
@@ -423,7 +423,7 @@ core.federations {
 
 | 変数 | デフォルト | 説明 |
 |---|---|---|
-| `ADAPTERS_USER_REPOSITORY` | `http` | ユーザーリポジトリのバックエンド: `http`、またはローカル作業用の `yaml` |
+| `ADAPTERS_USER_REPOSITORY` | `http` | ユーザーリポジトリのバックエンド: `http`、またはローカル作業用の `yaml`（core の `yaml` の別名 `static` は `repositories.user.static.path` を読み、デフォルトはない） |
 | `REPOSITORIES_USER_YAML_PATH` | `./config/users.yaml` | `yaml` バックエンドが読む YAML のユーザーファイル |
 | `REPOSITORIES_USER_HTTP_AUTHENTICATE_URL` | — | パスワード認証用のユーザー認証 URL。**https 必須**（下記参照） |
 | `REPOSITORIES_USER_HTTP_AUTHENTICATE_BY_TOKEN_URL` | — | トークン認証用のユーザー認証 URL。**https 必須**（下記参照） |

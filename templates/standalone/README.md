@@ -363,8 +363,8 @@ fails before boot, naming it.
 | `ADAPTERS_MFA_FACTOR_STORE` | `memory` | `adapters.mfaFactorStore`: `memory`, `redis` or `store`, for a composition that installs MFA; the template installs none |
 | `ADAPTERS_MFA_TRANSACTION_STORE` | `memory` | `adapters.mfaTransactionStore`: `memory` or `redis`, for a composition that installs MFA |
 | `ADAPTERS_CODE_REPOSITORY` | `redis` | `adapters.codeRepository`: the authorization-code repository, `memory` or `redis`. See [Code Repository](#code-repository) |
-| `ADAPTERS_CLIENT_REPOSITORY` | `yaml` | `adapters.clientRepository`: `yaml`. See [Client Repository](#client-repository) |
-| `ADAPTERS_USER_REPOSITORY` | `http` | `adapters.userRepository`: `http` or `yaml`. See [User Repository](#user-repository) |
+| `ADAPTERS_CLIENT_REPOSITORY` | `yaml` | `adapters.clientRepository`: `yaml`, or `static` (core's alias of `yaml`). See [Client Repository](#client-repository) |
+| `ADAPTERS_USER_REPOSITORY` | `http` | `adapters.userRepository`: `http`, `yaml` or `static` (core's alias of `yaml`). See [User Repository](#user-repository) |
 | `ADAPTERS_AUDIT_SINK` | `logger` | `adapters.auditSink`: where security events go, `logger` (pino-enveloped NDJSON on stdout) or `console` (bare event JSON). There is no `none`. See [Audit trail](#audit-trail) |
 
 A selection still written where it was — `rateLimiter.adapter`,
@@ -647,7 +647,7 @@ is documented in [its README](../../packages/federation-oidc/README.md).
 
 | Variable | Default | Description |
 |---|---|---|
-| `ADAPTERS_CLIENT_REPOSITORY` | `yaml` | Client store backend: `yaml` |
+| `ADAPTERS_CLIENT_REPOSITORY` | `yaml` | Client store backend: `yaml`, or `static`, core's alias of `yaml`, which reads `repositories.client.static.path` (no default) |
 | `REPOSITORIES_CLIENT_YAML_PATH` | `./config/clients.yaml` | Path to the YAML client registry |
 
 The registry is per-deployment configuration: `.gitignore` keeps
@@ -658,7 +658,7 @@ and the production compose file mounts it (see [Docker](#docker)).
 
 | Variable | Default | Description |
 |---|---|---|
-| `ADAPTERS_USER_REPOSITORY` | `http` | User repository backend: `http`, or `yaml` for local work |
+| `ADAPTERS_USER_REPOSITORY` | `http` | User repository backend: `http`, or `yaml` for local work (`static`, core's alias of `yaml`, reads `repositories.user.static.path`, with no default) |
 | `REPOSITORIES_USER_YAML_PATH` | `./config/users.yaml` | The YAML user file the `yaml` backend reads |
 | `REPOSITORIES_USER_HTTP_AUTHENTICATE_URL` | — | URL for password-based user authentication. **https required** (see below) |
 | `REPOSITORIES_USER_HTTP_AUTHENTICATE_BY_TOKEN_URL` | — | URL for token-based user authentication. **https required** (see below) |

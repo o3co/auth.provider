@@ -1712,8 +1712,14 @@ before you flip — and a relying party holding the secret can also mint.
 6. **The template's own settings, the adapter selections, the repositories,
    the audit sink's declared absence and the federations at their new
    sections.** Each path and variable that moved refuses to start naming the
-   new one, and an old variable beside its new name at the same value is
-   accepted, so a fleet can carry both through a rolling upgrade:
+   new one while the module that owns it is loaded, and an old variable
+   beside its new name at the same value is accepted, so a fleet can carry
+   both through a rolling upgrade. A setting judged by a module is judged
+   only while that module is loaded: `redisCodeRepository.*` and
+   `CLIENT_CODE_KEY_PREFIX` are refused under the Redis code repository and
+   go unread under the in-process one, and `REFRESH_TOKEN_FAMILY_STORE_REDIS_*`
+   likewise without `redis-clients` (a composition with no Redis-backed
+   module):
 
    | Old | New |
    | --- | --- |
@@ -1741,10 +1747,25 @@ before you flip — and a relying party holding the secret can also mint.
    - **`repositories.code.type` (`CLIENT_CODE_TYPE`) is refused.** It used to
      be read with a `config_key_deprecated` warning while `oauth.code.adapter`
      was unset; move the value to `ADAPTERS_CODE_REPOSITORY`.
-   - **The repository adapters are the ones the template registers.**
-     `adapters.clientRepository` takes `yaml`, `adapters.userRepository`
-     `yaml` or `http`; another adapter you registered in the template is added
-     to its schema (`src/sections.mts`) with it.
+   - **The repository selections name the adapters the template's schema
+     lists.** `adapters.clientRepository` takes `yaml` or `static`,
+     `adapters.userRepository` `yaml`, `static` or `http`; `static`, core's
+     alias of `yaml`, reads its path from a block of its own
+     (`repositories.client.static.path`, `repositories.user.static.path`),
+     which has no default. Another adapter you register in the template is
+     added to its schema (`src/sections.mts`) with it.
+   - **`REPOSITORIES_USER_YAML_PATH` is read.** `CLIENT_USER_PATH` was not:
+     the shipped `application.conf` set `repositories.user.yaml.path`
+     literally over it. Following the refusal by moving an old, ignored value
+     to the new name changes the users file the `yaml` user repository reads.
+   - **A bad in-process code-repository lifetime is refused as config.**
+     `standalone-in-memory-code-repository.defaultExpiresIn` that is not a
+     positive whole number fails boot as `config-validation-failed`, naming
+     the path.
+   - **Unset `CLIENT_CODE_ENDPOINT_URI` and `CLIENT_CODE_PASSWORD` first.** A
+     `.env` copied from the old `.env.example` sets `CLIENT_CODE_ENDPOINT_URI`;
+     both were removed, and set at all they refuse to start, even beside the
+     new names.
    - **`audit.sink.type = "none"` no longer declares the audit sink absent.**
      A composition that runs without a sink on purpose lists it in core's own
      section, `core.declaredAbsent = ["auditSink"]`; the standalone template
@@ -1753,10 +1774,14 @@ before you flip — and a relying party holding the secret can also mint.
      `key-store`, `redis-clients`, `repositories`, `adapters` or a code
      repository's section does not declare is refused, naming it — a block
      for a key store of your own beside `key-store.local` among them.
-   - **CORS is read from the `httpSettings` slot alone.** A composition of
-     your own that installs no `http` module mounts no CORS, whatever
-     `http.cors.allowedOrigins` says; the `cors_allowed_origins_unreadable`
-     warning is gone, as the `http` module refuses such a value at boot.
+   - **Core reads no `cors` section.** It reads CORS origins from the
+     `httpSettings` slot alone. A composition of your own that still writes
+     `cors.allowedOrigins` refuses to start, naming `cors` and the slot,
+     unless a loaded module relocates it (the standalone template's `http`
+     module names `http.cors.allowedOrigins`); one with no `httpSettings`
+     provider mounts no CORS. The `cors_allowed_origins_unreadable` warning
+     is gone, as the module that provides the slot refuses such a value at
+     boot.
    - **Messages name the new paths.** `core.federations.<name>…` for the
      federation checks, `key-store.local.*` and `KEY_STORE_LOCAL_*` for the key
      store's, `REPOSITORIES_USER_HTTP_BEARER_TOKEN` for the Store credential's:
