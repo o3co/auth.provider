@@ -29,7 +29,7 @@
  * nothing processes would turn a refusal into an acceptance.
  *
  * The same rule and listing discipline apply to CRLs (RFC 5280 §5.2, §5.3)
- * for `crl.mts` and to OCSP responses (RFC 6960 §4.4) for `ocsp.mts`, below.
+ * for `crl.mts` and to OCSP responses (RFC 6960 §4.4) for `ocspShape.mts`, below.
  */
 
 import type * as pkijs from "pkijs";
@@ -58,7 +58,7 @@ const PROCESSED_ANYWHERE: ReadonlySet<string> = new Set([
  * - `extendedKeyUsage`, by `checkClientLeafProfile` in `pki.mts`. On a CA it
  *   would mean EKU chaining, which RFC 5280 does not define and this module
  *   does not implement, so a critical one on a CA is refused.
- * - `tlsfeature` (RFC 7633), by `checkMustStaple` in `ocsp.mts`, which
+ * - `tlsfeature` (RFC 7633), by `checkMustStaple` in `ocspMustStaple.mts`, which
  *   refuses a leaf demanding a stapled OCSP response.
  */
 const PROCESSED_ON_LEAF_ONLY: ReadonlySet<string> = new Set([
@@ -247,9 +247,10 @@ export const checkCrlCriticalExtensions = (
 };
 
 /**
- * Critical OCSP response extensions `ocsp.mts` processes (RFC 6960 §4.4:
+ * Critical OCSP response extensions the OCSP check processes (RFC 6960 §4.4:
  * "unrecognized critical extensions in the response MUST be rejected"). Only
- * the nonce is acted on, compared against the request's. The RFC's other
+ * the nonce is acted on, compared against the request's by `checkNonce` in
+ * `ocspRequest.mts`. The RFC's other
  * response extensions are informational and non-critical, and none is read.
  */
 const OCSP_PROCESSED: ReadonlySet<string> = new Set([

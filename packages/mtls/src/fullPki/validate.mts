@@ -38,7 +38,7 @@
  * known status is the operator's `on-unavailable`: `"allow"` passes it and
  * logs it once the whole path has passed; `"reject"` refuses it. Under
  * `"reject"`, when every source failed as an outage (see `crl.mts`,
- * `ocsp.mts`) the refusal is the server's: marked `outage`, not logged here,
+ * `ocspAnswer.mts`) the refusal is the server's: marked `outage`, not logged here,
  * answered 503 by core's dispatcher. A verdict anywhere on the path wins over
  * an outage, and an outage refusal names every unusable source on the path.
  *
