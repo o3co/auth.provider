@@ -286,8 +286,7 @@ export const createRefreshTokenGrant = (deps: RefreshTokenGrantDeps): GrantHandl
 					result: {
 						status: 400,
 						error: "invalid_grant",
-						errorDescription:
-							"refresh_token has compound cnf binding which is not supported (Stage 1)",
+						errorDescription: "refresh_token has compound cnf binding which is not supported",
 					},
 				};
 			}

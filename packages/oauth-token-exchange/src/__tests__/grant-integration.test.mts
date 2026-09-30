@@ -1210,22 +1210,26 @@ describe("tokenExchangeModule booted through createApp — revocation", () => {
 		});
 
 		// A JavaScript policy can return anything as its description; one that
-		// is not a non-empty string is not sent — the grant's own default is.
+		// is not a non-empty string is not sent, and nothing is sent in its place.
 		it.each([
-			["a number", 42],
-			["the empty string", ""],
-		])(
-			"answers the default description for a deny description that is %s",
-			async (_label, description) => {
-				const { grant } = await boot([denying("access_denied", description)]);
-				const { result } = await exchange(grant, await body());
-				expect(result).toEqual({
-					status: 400,
-					error: "access_denied",
-					errorDescription: "denied by policy",
-				});
-			},
-		);
+			["a number", { outcome: "deny", error: "access_denied", errorDescription: 42 }],
+			["the empty string", { outcome: "deny", error: "access_denied", errorDescription: "" }],
+			["absent", { outcome: "deny", error: "access_denied" }],
+		])("answers a deny whose description is %s with no description", async (_label, decision) => {
+			const { grant } = await boot([
+				defineModule({
+					name: "test:denying-grant-policy",
+					provides: {
+						grantPolicy: (): GrantPolicyHook => ({
+							kind: "test",
+							evaluate: async () => decision as unknown as GrantPolicyDecision,
+						}),
+					},
+				}),
+			]);
+			const { result } = await exchange(grant, await body());
+			expect(result).toStrictEqual({ status: 400, error: "access_denied" });
+		});
 
 		// The other grants answer a deny through core's `evaluateGrantPolicy`.
 		it.each(["access_denied", "invalid_request", "invalid_scope"])(
@@ -1290,6 +1294,40 @@ describe("tokenExchangeModule booted through createApp — revocation", () => {
 				expect(otherGrants).toEqual({ ok: false, result });
 			},
 		);
+	});
+
+	// A policy that throws is an outage, answered as core answers it for the
+	// other grants.
+	it("answers a policy that throws as core's policy evaluation does: 503 policy evaluation unavailable", async () => {
+		const policy: GrantPolicyHook = {
+			kind: "test",
+			evaluate: async () => {
+				throw new Error("decision service down");
+			},
+		};
+		const { grant } = await boot([
+			defineModule({
+				name: "test:throwing-grant-policy",
+				provides: { grantPolicy: () => policy },
+			}),
+		]);
+		const { result } = await exchange(grant, {
+			subject_token: await signSelfIssuedAccessToken({}),
+			subject_token_type: ACCESS_TOKEN_TYPE,
+		});
+		expect(result).toEqual({
+			status: 503,
+			error: "temporarily_unavailable",
+			errorDescription: "policy evaluation unavailable",
+		});
+		const otherGrants = await evaluateGrantPolicy(
+			policy,
+			{ grantType: TOKEN_EXCHANGE_GRANT_TYPE },
+			{ issuer: ISSUER },
+			[],
+			{ logger: undefined },
+		);
+		expect(otherGrants).toEqual({ ok: false, result });
 	});
 
 	// Core's ExchangeTokenValidator contract: `null` means the token is not

@@ -84,7 +84,6 @@ const applyGrantPolicy = async (
 		/** The client's full allowlist — the policy's `originalScope`. */
 		originalScope: readonly string[];
 		/**
-		/**
 		 * The audiences this grant may mint for: the client's `allowedAudiences`,
 		 * or empty. Policy may narrow within it, never originate outside it.
 		 */
@@ -331,7 +330,7 @@ export const createAuthorizeHandler = (opts: AuthorizeHandlerOptions): RequestHa
 		if (!pkce) return;
 		if (!checkNonce(ctx)) return;
 
-		const scopes = resolveScopes(ctx, scope, client);
+		const scopes = await resolveScopes(ctx, scope, client);
 		if (!scopes) return;
 
 		// A client that is not first-party mints only with the user's recorded

@@ -230,11 +230,11 @@ export const checkNonce = (ctx: AuthorizeContext): boolean => {
  * it is `invalid_scope`, except that a client with an empty allowlist keeps
  * the empty grant.
  */
-export const resolveScopes = (
+export const resolveScopes = async (
 	ctx: AuthorizeContext,
 	scope: unknown,
 	client: PublicClient,
-): { requestedScopes: string[]; allowedFilteredScopes: readonly string[] } | null => {
+): Promise<{ requestedScopes: string[]; allowedFilteredScopes: readonly string[] } | null> => {
 	const allowedScopes = client.allowedScopes;
 	// RFC 6749 §3.3, read strictly: narrowing (below) is the answer to a scope
 	// this client may not have, and a malformed one is a different answer
@@ -255,7 +255,7 @@ export const resolveScopes = (
 	} else if (allowedScopes.length === 0) {
 		allowedFilteredScopes = [];
 	} else {
-		void auditFailure(ctx, { reason: "scope_omitted_without_default" });
+		await auditFailure(ctx, { reason: "scope_omitted_without_default" });
 		redirectError(ctx, "invalid_scope", "scope is required: this client declares no defaultScopes");
 		return null;
 	}
