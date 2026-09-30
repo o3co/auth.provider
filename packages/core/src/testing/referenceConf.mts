@@ -17,8 +17,9 @@
 /**
  * The check a package runs over its own `config/reference.conf`: the file
  * holds only the sections of the modules that declare it
- * (`section.reference`), and each such module's section schema parses its
- * part without losing a path. Another package's section would set that
+ * (`section.reference`), and the captures of the variables they declare
+ * renamed (`renamed-variables`), and each such module's section schema
+ * parses its part without losing a path. Another package's section would set that
  * package's defaults from the wrong place; a dropped path is a default no
  * module reads. The file comes already resolved by the package's own HOCON
  * reader, so core takes no HOCON dependency.
@@ -29,7 +30,10 @@
  */
 
 import { fileURLToPath } from "node:url";
+import { renamedVariablesOf } from "../boot/validate-manifests.mjs";
+import { RENAMED_VARIABLES_SECTION } from "../config/removed-keys.mjs";
 import type { Module } from "../modules/manifest/module-spec.mjs";
+import { renamedVariableProblems } from "./renamedVariables.mjs";
 
 export interface ReferenceConfCheck {
 	/** The package's `config/reference.conf`, resolved to plain data. */
@@ -88,7 +92,19 @@ export function referenceConfProblems(check: ReferenceConfCheck): string[] {
 		const segments = section.at === undefined ? [module.name] : section.at.split(".");
 		return { module, schema: section.schema, path: segments.join("."), segments };
 	});
+	const renamed = new Set(
+		renamedVariablesOf(owners).flatMap(({ from, to }) => (to === null ? [from] : [from, to])),
+	);
 	for (const path of leafPaths(check.tree, "")) {
+		if (within(path, RENAMED_VARIABLES_SECTION)) {
+			const name = path.slice(RENAMED_VARIABLES_SECTION.length + 1);
+			if (!renamed.has(name)) {
+				problems.push(
+					`${path}: no module declaring this reference declares ${name === "" ? "it" : name} renamed`,
+				);
+			}
+			continue;
+		}
 		if (!sections.some((section) => within(path, section.path))) {
 			problems.push(`${path}: no module declaring this reference owns it`);
 		}
@@ -122,20 +138,21 @@ export interface PackageReferenceCheck {
 	/** The modules that read the file: each must declare it as its section's reference. */
 	readonly modules: readonly Module[];
 	/**
-	 * Resolves the file at a path to plain data, with the package's HOCON
-	 * reader and no environment variable set — for `@o3co/ts.hocon`,
-	 * `(path) => parseFile(path, { env: {} }).toObject()`.
+	 * Resolves the file at a path to plain data with the package's HOCON
+	 * reader, under `env` — for `@o3co/ts.hocon`,
+	 * `(path, env) => parseFile(path, { env: { ...env } }).toObject()`.
 	 */
-	readonly read: (path: string) => unknown;
+	readonly read: (path: string, env: Readonly<Record<string, string>>) => unknown;
 }
 
 /**
  * The check a package's own test runs over its `config/reference.conf`, one
  * line per problem, sorted — `[]` when nothing is: every module in `modules`
- * declares the file as its section's reference, and
+ * declares the file as its section's reference,
  * {@link referenceConfProblems} finds nothing wrong with the file as `read`
- * resolves it. Core's tests require every package that ships a reference to
- * run it.
+ * resolves it with no variable set, and `renamedVariableProblems` nothing
+ * wrong with the bindings of the renames the modules declare. Core's tests
+ * require every package that ships a reference to run it.
  */
 export function packageReferenceProblems(check: PackageReferenceCheck): string[] {
 	const problems: string[] = [];
@@ -149,9 +166,11 @@ export function packageReferenceProblems(check: PackageReferenceCheck): string[]
 			);
 		}
 	}
-	const tree = check.read(fileURLToPath(check.reference));
+	const path = fileURLToPath(check.reference);
+	const tree = check.read(path, {});
 	problems.push(
 		...referenceConfProblems({ tree, reference: check.reference, modules: check.modules }),
+		...renamedVariableProblems({ modules: check.modules, layers: [path], read: check.read }),
 	);
 	return problems.sort();
 }

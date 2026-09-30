@@ -2439,7 +2439,7 @@ function checkModuleSectionPaths(
 const VARIABLE_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/;
 
 /** A variable a loaded module declares renamed with its section, as boot reads it. */
-interface SectionRename extends RenamedVariable {
+export interface SectionRename extends RenamedVariable {
 	readonly module: string;
 }
 
@@ -2556,6 +2556,20 @@ function declaredRenames(relocating: readonly Module[]): readonly SectionRename[
 		);
 	}
 	return renames.map(({ rename }) => rename);
+}
+
+/**
+ * The renames `modules` — and `core`, for core's own section — declare, as
+ * boot derives them, in module and declaration order; throws
+ * `module-section-path-invalid` for a declaration boot cannot hold. For the
+ * testing entry's binding checks.
+ * @internal
+ */
+export function renamedVariablesOf(
+	modules: readonly Module[],
+	core: CoreRelocations = {},
+): readonly SectionRename[] {
+	return declaredRenames(withCoreRelocations(modules, core));
 }
 
 /**
