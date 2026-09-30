@@ -202,7 +202,8 @@ The exports are listed in [`src/index.mts`](src/index.mts) and
 
 ## Backing-client contract
 
-Each adapter consumes a **per-purpose backing-client interface** declared in
+Each adapter consumes a **per-purpose backing-client interface**, declared in
+[`src/clients/`](src/clients/), one file per store family, and exported from
 [`src/clients.mts`](src/clients.mts) — `ChallengeStoreClient`,
 `FederationTokenStoreClient`, `RateLimiterClient` and so on. Core does not
 declare them: they are expressed in Redis-command terms, so they belong to the

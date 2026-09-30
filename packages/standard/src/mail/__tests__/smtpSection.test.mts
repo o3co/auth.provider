@@ -20,12 +20,13 @@
  * `reference.conf` alone, each key read from the variable its path names, an
  * unknown key refused by its name, plaintext only to localhost or a loopback
  * address in its canonical form, and no password quoted in any refusal. The
- * module declares the section and provides no sender; the testing entry's
- * builder carries the section as the reference defaults it.
+ * module declares the section and provides the SMTP sender, built only where
+ * a module reads the slot; the testing entry's builder carries the section as
+ * the reference defaults it.
  */
 
 import { fileURLToPath } from "node:url";
-import { BootError, createApp } from "@o3co/auth-provider-core";
+import { BootError, createApp, defineModule, type MailSender } from "@o3co/auth-provider-core";
 import {
 	makeValidAppConfig,
 	packageReferenceProblems,
@@ -175,11 +176,36 @@ describe("standardSmtpMailSenderModule, which declares the section", () => {
 		disposable = undefined;
 	});
 
-	/** Boots the module over core's valid configuration with `section`, answering the refusal if any. */
-	const boot = async (section: Record<string, unknown>): Promise<unknown> => {
+	/** A module that reads the slot, and the sender it was handed once a boot built it. */
+	const readerOfTheSlot = () => {
+		const seen: { sender?: MailSender } = {};
+		const module = defineModule({
+			name: "test:mail-reader",
+			requires: ["mailSender"] as const,
+			contributes: {
+				routes: [
+					(deps) => {
+						seen.sender = deps.mailSender;
+						return {
+							id: "test-mail-reader",
+							mountPath: "/__test_mail_reader__",
+							handler: ((_req: unknown, _res: unknown, next: () => void) => next()) as never,
+						};
+					},
+				],
+			},
+		});
+		return { module, seen };
+	};
+
+	/** Boots the module, and `also`, over core's valid configuration with `section`, answering the refusal if any. */
+	const boot = async (
+		section: Record<string, unknown>,
+		also: readonly ReturnType<typeof defineModule>[] = [],
+	): Promise<unknown> => {
 		try {
 			disposable = await createApp({
-				modules: [standardSmtpMailSenderModule],
+				modules: [standardSmtpMailSenderModule, ...also],
 				bootstrapComponents: {
 					config: { ...makeValidAppConfig(), ...section },
 					pathResolver: (p: string) => p,
@@ -205,15 +231,46 @@ describe("standardSmtpMailSenderModule, which declares the section", () => {
 		expect(unreadableModuleLeaves([standardSmtpMailSenderModule])).toEqual([]);
 	});
 
-	it("provides no sender, requires nothing and holds no state", () => {
-		expect(standardSmtpMailSenderModule.provides).toBeUndefined();
+	it("provides the mail sender, built only where something reads the slot, requires nothing and holds no state", () => {
+		expect(Object.keys(standardSmtpMailSenderModule.provides ?? {})).toEqual(["mailSender"]);
+		expect(standardSmtpMailSenderModule.lifecycle?.mailSender?.eager).not.toBe(true);
 		expect(standardSmtpMailSenderModule.contributes).toBeUndefined();
 		expect(standardSmtpMailSenderModule.requires ?? []).toEqual([]);
 		expect(standardSmtpMailSenderModule.replicaSafety).toBeUndefined();
 	});
 
-	it("boots with the section as the reference defaults it", async () => {
+	it("boots with the section as the reference defaults it where nothing reads the slot", async () => {
 		expect(await boot(standardSmtpMailSenderConfigForTests())).toBeUndefined();
+	});
+
+	it("fills the slot with the SMTP sender where a module reads it", async () => {
+		const reader = readerOfTheSlot();
+		expect(
+			await boot(
+				standardSmtpMailSenderConfigForTests({
+					host: "smtp.example.com",
+					from: "Sign-in <no-reply@example.com>",
+				}),
+				[reader.module],
+			),
+		).toBeUndefined();
+		expect(reader.seen.sender?.kind).toBe("standard-smtp");
+	});
+
+	it("refuses the boot where a module reads the slot and the section cannot send, naming the key and its variable and quoting no password", async () => {
+		const refused = await boot(
+			standardSmtpMailSenderConfigForTests({
+				from: "Sign-in <no-reply@example.com>",
+				user: "mailer",
+				password: "hunter2-relay-S3CRET",
+			}),
+			[readerOfTheSlot().module],
+		);
+		expect(refused).toBeInstanceOf(BootError);
+		expect((refused as BootError).message).toContain(
+			"standard-smtp-mail-sender.host (STANDARD_SMTP_MAIL_SENDER_HOST)",
+		);
+		expect((refused as BootError).message).not.toContain("S3CRET");
 	});
 
 	it("refuses the boot for a key its section does not know, naming the section and the key, and quoting no password", async () => {
@@ -230,5 +287,21 @@ describe("standardSmtpMailSenderModule, which declares the section", () => {
 			"standard-smtp-mail-sender: has a key it does not know: hostname",
 		);
 		expect((refused as BootError).message).not.toContain("S3CRET");
+	});
+
+	it("refuses the boot where a module reads the slot and the password is empty, as though it were not set, naming the password's key", async () => {
+		const refused = await boot(
+			standardSmtpMailSenderConfigForTests({
+				host: "smtp.example.com",
+				from: "Sign-in <no-reply@example.com>",
+				user: "mailer",
+				password: "",
+			}),
+			[readerOfTheSlot().module],
+		);
+		expect(refused).toBeInstanceOf(BootError);
+		expect((refused as BootError).message).toContain(
+			"standard-smtp-mail-sender.password (STANDARD_SMTP_MAIL_SENDER_PASSWORD)",
+		);
 	});
 });

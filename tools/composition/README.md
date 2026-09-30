@@ -29,8 +29,9 @@ another's body limit, or a memory store booting under `core.deployment.mode =
   bridge, and two session requirements — each with the completion route a
   requirement's module contributes, built on the session package's exported
   `establishSession` and `answerInterruption`), and a mail sender — core's
-  recording one, handed to the tests as `mail`, since the template's SMTP
-  sender's module provides none. The composition, the body and outage helpers and the outage runner
+  recording one, handed to the tests as `mail`, filling the slot as an
+  override of the template's SMTP sender's module, which stays installed and
+  whose sender, which needs a relay, is never built. The composition, the body and outage helpers and the outage runner
   are not copied: they are the template suite's, exported by its fixture,
   [`all-modules-composition.fixture.mts`](../../templates/standalone/src/__tests__/all-modules-composition.fixture.mts).
   Upstream identity providers are fakes; nothing reaches the network.

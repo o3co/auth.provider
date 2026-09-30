@@ -459,7 +459,7 @@ const FLATTENING_ALLOWED: ReadonlyArray<{
 		why: "jose's own text about the token, as the verdict's message, through lineSafeText — it quotes an unrecognised crit name the caller wrote; jose's claims ride on the error, not in its message",
 	},
 	{
-		file: "packages/redis/src/ioredis.mts",
+		file: "packages/redis/src/ioredis/commands.mts",
 		sites: 1,
 		why:
 			"the NOSCRIPT classifier: ioredis's ReplyError carries no code, only Redis's reply text, and " +

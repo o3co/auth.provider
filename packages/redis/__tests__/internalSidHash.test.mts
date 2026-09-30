@@ -153,7 +153,7 @@ describe("createRedisSidHash", () => {
 	it("setField surfaces a queued command's failure instead of reporting success", async () => {
 		const h = createRedisSidHash({ client, keyPrefix: prefix("wrongtype") });
 		await raw.set(`${prefix("wrongtype")}sid-1`, "not-a-hash");
-		// Redis's refusal on the cause, not in the message (see ioredis.mts).
+		// Redis's refusal on the cause, not in the message (see ioredis/commands.mts).
 		await expect(
 			h.setField("sid-1", "id-a", JSON.stringify({ x: 1 }), FUTURE()),
 		).rejects.toMatchObject({
