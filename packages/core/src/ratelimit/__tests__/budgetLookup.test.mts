@@ -242,6 +242,45 @@ describe("createRateLimitBudgetLookup", () => {
 		expect(lookup("login:ip:192.0.2.1").spec).toEqual(DEFAULT);
 	});
 
+	describe("a prefix named after an Object.prototype member", () => {
+		const PROTOTYPE_MEMBERS = [
+			"constructor",
+			"__proto__",
+			"toString",
+			"hasOwnProperty",
+			"valueOf",
+		] as const;
+
+		it.each(PROTOTYPE_MEMBERS)("%s: answers defaultLimit when nothing budgets it", (name) => {
+			const lookup = createRateLimitBudgetLookup("test", {
+				limits: { login: { limit: 4, windowSeconds: 45 } },
+				defaultLimit: DEFAULT,
+				budgets: resolverOver({ login: { limit: 20, windowSeconds: 900 } }),
+			});
+
+			expect(lookup(`${name}:ip:192.0.2.1`)).toEqual({ prefix: name, spec: DEFAULT });
+		});
+
+		it.each(PROTOTYPE_MEMBERS)("%s: answers the budget contributed for it", (name) => {
+			const lookup = createRateLimitBudgetLookup("test", {
+				defaultLimit: DEFAULT,
+				budgets: resolverOver({ [name]: { limit: 1, windowSeconds: 60 } }),
+			});
+
+			expect(lookup(`${name}:ip:192.0.2.1`).spec).toEqual({ limit: 1, windowSeconds: 60 });
+		});
+
+		it.each(PROTOTYPE_MEMBERS)("%s: answers the limits entry declared for it", (name) => {
+			const lookup = createRateLimitBudgetLookup("test", {
+				limits: { [name]: { limit: 2, windowSeconds: 30 } },
+				defaultLimit: DEFAULT,
+				budgets: resolverOver({ [name]: { limit: 1, windowSeconds: 60 } }),
+			});
+
+			expect(lookup(`${name}:ip:192.0.2.1`).spec).toEqual({ limit: 2, windowSeconds: 30 });
+		});
+	});
+
 	it("refuses, naming the caller, a limits entry or a default no limiter can apply as written", () => {
 		expect(() =>
 			createRateLimitBudgetLookup("createExampleLimiter", {

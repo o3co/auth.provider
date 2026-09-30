@@ -523,6 +523,40 @@ describe("rateLimitBudgets — refused", () => {
 		},
 	);
 
+	it.each<readonly [string, "contributes" | "overrides"]>([
+		["constructor", "contributes"],
+		["__proto__", "contributes"],
+		["toString", "contributes"],
+		["hasOwnProperty", "overrides"],
+	])(
+		"a prefix named after an Object.prototype member — %s, in %s — refuses boot at stage 1, before any factory runs",
+		async (prefix, channel) => {
+			let ran = false;
+			const factory = (): Budget => {
+				ran = true;
+				return spec();
+			};
+			const mod = defineModule({
+				name: "budget-inherited-name",
+				[channel]: { rateLimitBudgets: { [prefix]: factory } },
+			});
+
+			const err = await refusal(createApp({ modules: [mod], bootstrapComponents: bootWith() }));
+
+			expect(err.reason).toBe("contribution-malformed");
+			expect(err.stage).toBe("validateManifests");
+			expect(err.details).toMatchObject({
+				reason: "contribution-malformed",
+				module: "budget-inherited-name",
+				kind: "rateLimitBudgets",
+				name: prefix,
+				channel,
+			});
+			expect(err.message).toContain("Object.prototype");
+			expect(ran).toBe(false);
+		},
+	);
+
 	it.each([
 		["undefined", undefined],
 		["a string", "5"],
