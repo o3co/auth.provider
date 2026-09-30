@@ -22,6 +22,7 @@
  */
 
 import { describe, expect, it } from "vitest";
+import type { MailMessage } from "#/mail/types.mjs";
 import type { MfaFactor } from "#/mfa/factor.mjs";
 import {
 	createTestMfaDigests,
@@ -42,14 +43,14 @@ const RULES = {
 		"mailLimits, when declared, allow at least one send, in whole numbers of sends and seconds",
 	enrollable: "enrollable, when present, answers true for an account that can enroll the factor",
 	begin:
-		"beginEnrollment answers state that survives a JSON round trip, and mail only beside mailLimits, as a message with a recipient, a subject and a text",
+		"beginEnrollment answers state that survives a JSON round trip, and mail only beside mailLimits, as a message with a recipient, a subject and a text, whose code the response does not carry",
 	completeMalformed:
 		"completeEnrollment answers malformed for a proof it cannot read, and never throws for one",
 	complete:
-		"completeEnrollment takes the proof of possession, and answers data that survives a JSON round trip, a label that is a string when present, and amr values among amrValues",
-	describe: "describe answers a hint that is a string, or none",
+		"completeEnrollment takes the proof of possession, and answers data that survives a JSON round trip, a label that is a string when present, and at least one amr value, each among amrValues",
+	describe: "describe answers a hint that is a string, or none, and never the account's address",
 	challenge:
-		"challenge, when present, answers state that survives a JSON round trip, and mail only beside mailLimits, as a message with a recipient, a subject and a text",
+		"challenge, when present, answers state that survives a JSON round trip, and mail only beside mailLimits, as a message with a recipient, a subject and a text, to the address the enrollment mailed, whose code the response does not carry",
 	verifyMalformed: "verify answers malformed for a proof it cannot read, and never throws for one",
 	verify:
 		"verify takes a valid proof, names a factor the subject holds, and answers next data that survives a JSON round trip",
@@ -162,6 +163,60 @@ describe("mfaFactorContract", () => {
 				})),
 			),
 		).toEqual([RULES.begin]);
+	});
+
+	it("fails an enrollment or a challenge whose response carries the code its mail sends", async () => {
+		const codeOf = (mail: { text: string } | undefined) => mail?.text.split(" ").at(-1);
+		expect(
+			await failing(
+				inputFor({ mail: MAIL }, (factor) => ({
+					...factor,
+					beginEnrollment: async (ctx) => {
+						const start = await factor.beginEnrollment(ctx);
+						return { ...start, response: { sent: true, code: codeOf(start.mail) } };
+					},
+				})),
+			),
+		).toEqual([RULES.begin]);
+		expect(
+			await failing(
+				inputFor({ mail: MAIL }, (factor) => ({
+					...factor,
+					challenge: async (ctx) => {
+						const sent = await (factor.challenge as NonNullable<MfaFactor["challenge"]>)(ctx);
+						return { ...sent, response: { echo: `code ${codeOf(sent.mail)}` } };
+					},
+				})),
+			),
+		).toEqual([RULES.challenge]);
+	});
+
+	it("fails a challenge that mails another address than the enrollment did", async () => {
+		expect(
+			await failing(
+				inputFor({ mail: MAIL }, (factor) => ({
+					...factor,
+					challenge: async (ctx) => {
+						const sent = await (factor.challenge as NonNullable<MfaFactor["challenge"]>)(ctx);
+						return { ...sent, mail: { ...(sent.mail as MailMessage), to: "mallory@example.com" } };
+					},
+				})),
+			),
+		).toEqual([RULES.challenge]);
+	});
+
+	it("fails a completion whose data amrFor answers nothing for", async () => {
+		expect(await failing(inputFor({}, (factor) => ({ ...factor, amrFor: () => [] })))).toEqual([
+			RULES.complete,
+		]);
+	});
+
+	it("fails a hint that shows the account's address", async () => {
+		expect(
+			await failing(
+				inputFor({}, (factor) => ({ ...factor, describe: () => ({ hint: `for ${USER.email}` }) })),
+			),
+		).toEqual([RULES.describe]);
 	});
 
 	it("fails a completion that throws for a proof it cannot read", async () => {
