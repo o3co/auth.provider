@@ -3012,6 +3012,86 @@ describe("connect — what an outage logs", () => {
 	});
 });
 
+describe("connect — what an outage audits", () => {
+	/** Every event written, without its timestamp and request metadata. */
+	const audited = (w: World) =>
+		w.events.map(({ type, clientId, subject, details }) => ({ type, clientId, subject, details }));
+
+	it("audits a handle the intent store cannot read as unavailable, naming no flow, beside its one line", async () => {
+		const w = world();
+		const { handle } = await w.lodge();
+		w.signIn("b-1");
+		w.state.faults.set("getIntent", 0);
+		const response = await w.connect(handle, "b-1");
+		expect(response.status).toBe(503);
+		isPlain(response);
+		expect(response.text).toBe("Temporarily unavailable.");
+		expect(written(await settledLines(w))).toEqual(["error federation_grant_connect_unavailable"]);
+		expect(payloadOf(w.lines, "federation_grant_connect_unavailable")).toEqual({
+			correlationId: response.headers["x-request-id"],
+			reason: "storage",
+			store: "federation_grant_intent",
+			step: "get_intent",
+			err: injected("getIntent"),
+		});
+		expect(audited(w)).toEqual([
+			{
+				type: "federation.grant.authorization_failed",
+				clientId: "",
+				subject: "",
+				details: {
+					correlationId: response.headers["x-request-id"],
+					grantId: "",
+					outcome: "unavailable",
+					operation: "connect",
+				},
+			},
+		]);
+	});
+
+	it.each([
+		["parkConsent", "federation_grant_intent", "park_consent"],
+		["isCurrentIntent", "federation_grant", "is_current_intent"],
+	] as const)(
+		"audits %s failing as unavailable with the flow's grant, client, subject and connection, beside its one line",
+		async (method, store, step) => {
+			const w = world();
+			const { handle, grantId } = await w.lodge();
+			w.signIn("b-1");
+			w.state.faults.set(method, 0);
+			const response = await w.connect(handle, "b-1");
+			expect(response.status).toBe(503);
+			isPlain(response);
+			expect(response.text).toBe("Temporarily unavailable.");
+			expect(written(await settledLines(w))).toEqual([
+				"error federation_grant_connect_unavailable",
+			]);
+			expect(payloadOf(w.lines, "federation_grant_connect_unavailable")).toEqual({
+				grantId,
+				correlationId: response.headers["x-request-id"],
+				reason: "storage",
+				store,
+				step,
+				err: injected(method),
+			});
+			expect(audited(w)).toEqual([
+				{
+					type: "federation.grant.authorization_failed",
+					clientId: CLIENT.clientId,
+					subject: "alice",
+					details: {
+						correlationId: "corr-1",
+						grantId,
+						connection: CONNECTION.name,
+						outcome: "unavailable",
+						operation: "connect",
+					},
+				},
+			]);
+		},
+	);
+});
+
 describe("consent — what an outage logs", () => {
 	/** A question parked for alice's browser `b-1`. */
 	async function asked(w: World) {
