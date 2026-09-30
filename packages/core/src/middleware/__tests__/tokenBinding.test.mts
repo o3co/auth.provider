@@ -61,6 +61,28 @@ const secondAmbient: TokenBindingMechanism = {
 	}),
 };
 
+/** A second explicit-intent mechanism beside DPoP, always succeeding. */
+const secondExplicit: TokenBindingMechanism = {
+	kind: "http-sig",
+	intentExplicit: true,
+	extract: async () => ({
+		kind: "http-sig",
+		confirmation: { jkt: "OTHER" },
+	}),
+};
+
+const spyLogger = () => ({
+	trace: vi.fn(),
+	debug: vi.fn(),
+	info: vi.fn(),
+	warn: vi.fn(),
+	error: vi.fn(),
+	fatal: vi.fn(),
+	child() {
+		return this;
+	},
+});
+
 describe("tokenBindingMw", () => {
 	it("is a no-op when mechanisms is empty", async () => {
 		const mw = tokenBindingMw({ mechanisms: [], dispatchPolicy: "intent-explicit" });
@@ -184,17 +206,9 @@ describe("tokenBindingMw", () => {
 		expect(req.tokenBinding).toEqual(fakeDPoP);
 	});
 
-	it("intent-explicit: rejects when ≥2 explicit mechanisms succeed", async () => {
-		const otherExplicit: TokenBindingMechanism = {
-			kind: "http-sig",
-			intentExplicit: true,
-			extract: async () => ({
-				kind: "http-sig",
-				confirmation: { jkt: "OTHER" },
-			}),
-		};
+	it("intent-explicit: two explicit successes → 400 invalid_request naming both kinds", async () => {
 		const mw = tokenBindingMw({
-			mechanisms: [dpopMechanism(fakeDPoP), otherExplicit],
+			mechanisms: [dpopMechanism(fakeDPoP), secondExplicit],
 			dispatchPolicy: "intent-explicit",
 		});
 		const req = fakeReq();
@@ -203,6 +217,30 @@ describe("tokenBindingMw", () => {
 		await mw(req, res, next);
 		expect(next).not.toHaveBeenCalled();
 		expect(res.status).toHaveBeenCalledWith(400);
+		expect(res.json).toHaveBeenCalledWith({
+			error: "invalid_request",
+			error_description:
+				"multiple explicit-intent token-binding mechanisms succeeded (dpop, http-sig)",
+		});
+	});
+
+	it("intent-explicit: two explicit successes beside an ambient one → 400 naming the explicit kinds alone", async () => {
+		const mw = tokenBindingMw({
+			mechanisms: [dpopMechanism(fakeDPoP), mtlsMechanism(fakeMtls), secondExplicit],
+			dispatchPolicy: "intent-explicit",
+		});
+		const req = fakeReq();
+		const res = fakeRes();
+		const next = vi.fn();
+		await mw(req, res, next);
+		expect(next).not.toHaveBeenCalled();
+		expect(req.tokenBinding).toBeUndefined();
+		expect(res.status).toHaveBeenCalledWith(400);
+		expect(res.json).toHaveBeenCalledWith({
+			error: "invalid_request",
+			error_description:
+				"multiple explicit-intent token-binding mechanisms succeeded (dpop, http-sig)",
+		});
 	});
 
 	it("intent-explicit: ambient-only succeeds with ambient binding", async () => {
@@ -236,6 +274,37 @@ describe("tokenBindingMw", () => {
 				"multiple ambient token-binding mechanisms succeeded (mtls, mtls-secondary)",
 		});
 	});
+
+	it.each([
+		{
+			tier: "explicit-intent",
+			mechanisms: [dpopMechanism(fakeDPoP), mtlsMechanism(fakeMtls), secondExplicit],
+			kinds: ["dpop", "http-sig"],
+		},
+		{
+			tier: "ambient",
+			mechanisms: [mtlsMechanism(fakeMtls), secondAmbient],
+			kinds: ["mtls", "mtls-secondary"],
+		},
+	])(
+		"intent-explicit: a refusal at the $tier tier is one warn line, token_binding_ambiguous, with the tier and the kinds",
+		async ({ tier, mechanisms, kinds }) => {
+			const logger = spyLogger();
+			const mw = tokenBindingMw({
+				mechanisms,
+				dispatchPolicy: "intent-explicit",
+				logger: logger as never,
+			});
+			await mw(fakeReq(), fakeRes(), vi.fn());
+			expect(logger.warn).toHaveBeenCalledTimes(1);
+			expect(logger.warn).toHaveBeenCalledWith(
+				{ tier, mechanisms: kinds },
+				"token_binding_ambiguous",
+			);
+			expect(logger.error).not.toHaveBeenCalled();
+			expect(logger.info).not.toHaveBeenCalled();
+		},
+	);
 
 	it("intent-explicit: one explicit success wins over two ambient successes", async () => {
 		const mw = tokenBindingMw({
@@ -345,18 +414,6 @@ describe("a server-side outage is the mechanism's to state, and answers 503", ()
 			code: "temporarily_unavailable",
 			unavailable: "the replay store cannot be read; retry later",
 		});
-	const spyLogger = () => ({
-		trace: vi.fn(),
-		debug: vi.fn(),
-		info: vi.fn(),
-		warn: vi.fn(),
-		error: vi.fn(),
-		fatal: vi.fn(),
-		child() {
-			return this;
-		},
-	});
-
 	it("answers 503 with the code and description the refusal carries", async () => {
 		const logger = spyLogger();
 		const mw = tokenBindingMw({
