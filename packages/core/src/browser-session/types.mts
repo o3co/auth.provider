@@ -136,9 +136,11 @@ export interface CsrfGuard {
  */
 export interface CsrfTokenSigner {
 	/**
-	 * The signature of `payload` under this signer's key: a non-empty
-	 * base64url string without padding — it sits between a token's `.`
-	 * separators — and the same one for the same payload.
+	 * The signature of `payload` under this signer's key: base64url without
+	 * padding — it sits between a token's `.` separators — of
+	 * `CSRF_SIGNATURE_MIN_LENGTH` (22) to `CSRF_SIGNATURE_MAX_LENGTH` (512)
+	 * characters (`./csrf-signature.mts`), and the same one for the same
+	 * payload.
 	 */
 	sign(payload: string): string;
 	/**

@@ -41,6 +41,8 @@
 import { randomBytes } from "node:crypto";
 import {
 	auditErrorText,
+	CSRF_SIGNATURE_MAX_LENGTH,
+	CSRF_SIGNATURE_MIN_LENGTH,
 	type CsrfGuard,
 	type CsrfTokenSigner,
 	type CsrfVerdict,
@@ -119,8 +121,11 @@ export interface CsrfProtection {
 	verify(req: Request): CsrfTokenVerdict;
 }
 
+/** A signature the token can carry: base64url without padding, within the `csrfTokenSigner` contract's bounds. */
+const SIGNATURE = `[A-Za-z0-9_-]{${CSRF_SIGNATURE_MIN_LENGTH},${CSRF_SIGNATURE_MAX_LENGTH}}`;
+
 /** `<expiry-seconds>.<nonce>.<signature>` */
-const TOKEN_SHAPE = /^(\d{1,15})\.([A-Za-z0-9_-]{16,})\.([A-Za-z0-9_-]{16,})$/;
+const TOKEN_SHAPE = new RegExp(`^(\\d{1,15})\\.([A-Za-z0-9_-]{16,})\\.(${SIGNATURE})$`);
 
 /**
  * How far a token's expiry may lie past the latest one `issue` mints
@@ -130,8 +135,8 @@ const TOKEN_SHAPE = /^(\d{1,15})\.([A-Za-z0-9_-]{16,})\.([A-Za-z0-9_-]{16,})$/;
  */
 const EXPIRY_SKEW_SECONDS = 60;
 
-/** A signature the token can carry: base64url without padding, of a length a cookie holds. */
-const SIGNATURE_SHAPE = /^[A-Za-z0-9_-]{16,512}$/;
+/** {@link SIGNATURE}, whole. */
+const SIGNATURE_SHAPE = new RegExp(`^${SIGNATURE}$`);
 
 /** What the signer is asked to sign when a protection is built over it. */
 const PROBE_PAYLOADS = ["csrf-token-signer.probe.a", "csrf-token-signer.probe.b"] as const;
@@ -199,7 +204,7 @@ const signerBreach = (signer: CsrfTokenSigner): string | undefined => {
 		return "sign does not answer a string";
 	}
 	if (!SIGNATURE_SHAPE.test(forA) || !SIGNATURE_SHAPE.test(forB)) {
-		return "sign does not answer base64url without padding, 16 to 512 characters";
+		return `sign does not answer base64url without padding, ${CSRF_SIGNATURE_MIN_LENGTH} to ${CSRF_SIGNATURE_MAX_LENGTH} characters`;
 	}
 	if (forA === forB) return "sign answers one signature for two payloads";
 	if (!verifies(signer, a, forA)) return "verify does not answer true for sign's own signature";
