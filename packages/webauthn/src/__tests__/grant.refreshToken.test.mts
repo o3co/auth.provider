@@ -153,11 +153,7 @@ async function makeDeps(
 		keyStore,
 		webauthnCredentialStore: credentialStore,
 		challengeCeremony: makeConsumedCeremony(),
-		webauthnConfig: {
-			rpId: "test.example",
-			origin: [ISSUER],
-			userVerification: "preferred" as const,
-		},
+		webauthnConfig: createTestWebAuthnConfig({ origin: [ISSUER] }),
 		...overrides,
 	};
 }

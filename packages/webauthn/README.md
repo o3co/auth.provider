@@ -330,6 +330,10 @@ A passkey is the primary login on a native app and the access token is short-liv
 
 **Sender-bound requests produce sender-bound refresh tokens.** A DPoP or mTLS request has its RFC 7800 confirmation (`cnf.jkt` / `cnf.x5t#S256`) carried into the refresh token on the same gate the other grants apply: public clients always; confidential clients only when the deployment sets `oauth.tokenBinding.bindConfidentialClientRefreshTokens` ([#275](https://github.com/o3co/auth.provider/issues/275)), since their client secret is already the refresh-time authenticator. The setting is core's, read through core's `resolveTokenBindingSettings` as the oauth grants read it ([#728](https://github.com/o3co/auth.provider/issues/728)). The access token binds on its own, wider gate — see below.
 
+## SECURITY — `auth_time` is one challenge lifetime pessimistic
+
+The access and refresh tokens carry `amr: ["hwk"]` and `auth_time` (RFC 9470 §6.1), which the refresh grant carries forward. A signed assertion stays redeemable until its challenge expires, so the grant cannot tell when within that window the user made the gesture, and stamps the earliest instant it could have been made: the time of the grant less `challengeTtlMs`. `auth_time` is therefore never later than the authentication and at most one challenge lifetime earlier (120 s with the shipped default). A resource server applying `max_age` may ask a user who authenticated just inside its limit to authenticate again, and a `max_age` shorter than `challengeTtlMs` is never met by a passkey token. `createWebAuthnGrant` reads the lifetime from `webauthnConfig.challengeTtlMs`, which `webauthnModule` fills from the `webauthn` section; a test builds that section with `createTestWebAuthnConfig` from `@o3co/auth-provider-webauthn/testing`.
+
 ## SECURITY — sender-constrained tokens
 
 **A sender-bound request produces a sender-bound access token.** When the request carries a DPoP proof or a client certificate, the resulting access token carries the matching RFC 7800 confirmation — `cnf.jkt` for DPoP, `cnf.x5t#S256` for mTLS — and a resource server that enforces binding accepts it only from the same key or certificate. It is the member the binding's mechanism owns (core's `ownedConfirmation`), the rule every grant applies: a contributed mechanism whose kind owns neither member, or a binding carrying a member its kind does not own, gets an unbound token, and a compound confirmation keeps the owned member alone. The webauthn grant has no rule of its own.
@@ -419,6 +423,7 @@ Not implemented:
 - `src/internal/` — the SimpleWebAuthn boundary (options generation and response verification, and the mapping of library failures onto this package's error codes), and the one answer to a store outage the grant and the routes share.
 - [`src/sessionSubject.mts`](src/sessionSubject.mts) — `webauthnSessionSubjectModule`: the session bridge on core's admission.
 - [`src/config.mts`](src/config.mts) — the config schema and the `webauthnConfig` slot; [`src/request.mts`](src/request.mts) — the `req.webauthnSubject` augmentation.
+- [`src/testing/index.mts`](src/testing/index.mts) — the testing entry, `@o3co/auth-provider-webauthn/testing`: `createTestWebAuthnConfig`, the `webauthn` section a test builds.
 
 The ports these depend on (`WebAuthnCredentialStore`, `ChallengeCeremony`, `ChallengeStore`) are core's.
 
