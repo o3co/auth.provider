@@ -147,7 +147,7 @@ async function answerOf(sending: Promise<unknown>, what: string): Promise<unknow
 
 /** The cases of the `MailSender` contract over the senders `input` builds. */
 export function mailSenderContract(input: MailSenderContractInput): readonly ContractCase[] {
-	/** Sends `mail` over a relay that accepts, and answers the mails to its recipient the relay then holds. */
+	/** Sends `mail` over a relay that accepts: answered delivered, and the relay holding one mail to its recipient, carrying the code. */
 	const deliver = async (
 		sender: MailSender,
 		relayed: () => Promise<readonly RelayedMail[]>,
