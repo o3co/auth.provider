@@ -30,10 +30,9 @@
  * rule the account-link start is (the `csrfGuard`'s `checkNavigation`), and
  * `session.csrf.trustedOrigins` is not widened to client origins; consent is
  * its CSRF defence. The answer is held to the deployment's `csrfGuard`
- * (`check`: the request's own origin as the provider sees it — `req.protocol`
- * and `req.host`, forwarded under `trust proxy` — or a trusted one, or,
- * naming no origin, the guard's double-submit token) and needs the challenge
- * AND the exact session binding. That holds only while connect never approves
+ * (`check`: this origin, as core's `CsrfGuard` defines it, or a trusted one,
+ * or, naming no origin, the guard's double-submit token) and needs the
+ * challenge AND the exact session binding. That holds only while connect never approves
  * or creates an upstream transaction, every grant and renewal (first-party
  * clients too) goes through consent, the consent data is never readable
  * cross-origin with credentials, the challenge never reaches another origin

@@ -570,7 +570,9 @@ when the signer's `verify` answers `true`, and one whose expiry lies more than
 `session.csrf.ttlSeconds` and 60 seconds of clock skew ahead is refused, since
 no token the routes issue expires later.
 Cross-origin login UIs list their origin on `session.csrf.trustedOrigins`;
-`cors.allowedOrigins` grants no CSRF trust.
+`cors.allowedOrigins` grants no CSRF trust. A listed origin can also answer
+federation-grant consents and device verification, so a client's origin is
+never listed (the federation-grants ADR's D7).
 
 Another package runs this policy through the `csrfGuard` slot `sessionModule`
 provides — device verification mounts its `middleware`, and the

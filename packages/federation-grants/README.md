@@ -632,11 +632,13 @@ session or the challenge is read, so a refused answer spends nothing:
 - **Any other origin** in the `Origin` — or, without one, the `Referer` — is
   refused whatever else the answer carries: `Origin: null`, which a form post
   from a page under `no-referrer` sends, among them.
-- **No origin at all** — neither header, as from a client that is not a
-  browser: the answer carries the guard's double-submit token, its cookie's
-  value echoed in its form field or its header — with the session module's
-  guard, the `<session.name>.csrf` cookie, `csrf_token` and `x-csrf-token`.
-  `GET /session/csrf` hands one out, as it does for `POST /session/login`.
+- **No origin at all** — a user agent that sends neither header: the answer
+  carries the guard's double-submit token, its cookie's value echoed in its
+  form field or its header — with the session module's guard, the
+  `<session.name>.csrf` cookie, `csrf_token` and `x-csrf-token`.
+  `GET /session/csrf` hands one out, as it does for `POST /session/login`. A
+  page may always include the token: it counts only when the answer names no
+  origin.
 
 The origin a request is compared with is the one the provider sees
 (`req.protocol` and `req.host`): behind a reverse proxy, `http.trustProxy`
