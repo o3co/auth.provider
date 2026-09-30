@@ -918,7 +918,7 @@ describe("the declaration: sessionRequirements.expected", () => {
 		},
 	);
 
-	it("names as missing only the expected names nothing registers, in the order they are declared", async () => {
+	it("names as missing only the expected names nothing registers, in the order they are declared, and says those alone, quoted", async () => {
 		const err = await refusal(
 			boot([contributing("test:first", { a: () => requirement("a") }), consumer({})], {
 				sessionRequirements: { expected: ["mfa", "a", "ghost"] },
@@ -930,6 +930,32 @@ describe("the declaration: sessionRequirements.expected", () => {
 			declared: ["mfa", "a", "ghost"],
 			registered: ["a"],
 		});
+		expect(err.message).toContain('sessionRequirements.expected names ["mfa", "ghost"], which');
+	});
+
+	it("names a name declared twice once among the missing", async () => {
+		const err = await refusal(boot([], { sessionRequirements: { expected: ["ghost", "ghost"] } }));
+		expect(err.details).toMatchObject({ missing: ["ghost"], declared: ["ghost", "ghost"] });
+	});
+
+	it("quotes each name it says, so a name with a space in it reads as written", async () => {
+		const err = await refusal(boot([], { sessionRequirements: { expected: ["mfa "] } }));
+		expect(err.reason).toBe("session-requirement-missing");
+		expect(err.details).toMatchObject({ missing: ["mfa "] });
+		expect(err.message).toContain('["mfa "]');
+	});
+
+	it("lists what registered in registration order", async () => {
+		const err = await refusal(
+			boot(
+				[
+					contributing("test:second", { b: () => requirement("b") }),
+					contributing("test:first", { a: () => requirement("a") }),
+				],
+				{ sessionRequirements: { expected: ["b", "a", "ghost"] } },
+			),
+		);
+		expect(err.details).toMatchObject({ missing: ["ghost"], registered: ["b", "a"] });
 	});
 
 	it("is checked for a missing name before a registered one it leaves out: a composition that expects a requirement it did not install is told to install it", async () => {
@@ -969,11 +995,21 @@ describe("the declaration: sessionRequirements.expected", () => {
 		await none.dispose();
 	});
 
-	it("admits a registered requirement it does not name when no consumer is installed", async () => {
-		const handle = await boot([contributing("test:first", { a: () => requirement("a") })], {
-			sessionRequirements: { expected: [] },
+	it("refuses a registered requirement it does not name when no consumer is installed too: once written, the key is compared both ways", async () => {
+		const err = await refusal(
+			boot([contributing("test:first", { a: () => requirement("a") })], {
+				sessionRequirements: { expected: [] },
+			}),
+		);
+		expect(err.reason).toBe("session-requirements-undeclared");
+		expect(err.details).toEqual({
+			reason: "session-requirements-undeclared",
+			configKey: "sessionRequirements.expected",
+			declared: [],
+			registered: ["a"],
+			consumedBy: [],
 		});
-		await handle.dispose();
+		expect(err.message).toContain('["a"]');
 	});
 
 	it("is not required without a consumer: a composition that installs none boots without the key, registered requirements or not", async () => {
@@ -986,7 +1022,7 @@ describe("the declaration: sessionRequirements.expected", () => {
 	});
 });
 
-describe("core reads no mfa.mode", () => {
+describe("boot's checks do not act on mfa.mode", () => {
 	it.each(["required", "optional"] as const)(
 		"boots under mfa.mode = %s with no requirement named mfa and no declaration, when nothing consults admission",
 		async (mode) => {

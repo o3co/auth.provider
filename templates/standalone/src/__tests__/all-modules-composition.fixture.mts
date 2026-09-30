@@ -191,6 +191,13 @@ federationGrants {
 	return file;
 })();
 
+/** `text` in a file of its own, for a layer above the composition's files. */
+function hoconFile(text: string): string {
+	const file = join(mkdtempSync(join(tmpdir(), "all-modules-operator-")), "operator.conf");
+	writeFileSync(file, text);
+	return file;
+}
+
 /** The composition's own files, highest first: the operator's layer, then the shipped production ones. */
 export function ownFiles(): string[] {
 	const { applicationConfPath, envConfPath } = resolveConfigPaths(configDir, "production");
@@ -572,6 +579,8 @@ export type ModuleOrder = typeof AS_LISTED | typeof REVERSED;
 
 export interface ComposeOptions {
 	readonly env?: Readonly<Record<string, string>>;
+	/** HOCON an operator writes above the composition's own files, read in both phases. */
+	readonly operatorHocon?: string;
 	/**
 	 * Paths read before boot beside the template's switches: what a module
 	 * `extraModules` adds reads when it is built (`readSwitches`'s `reads`).
@@ -644,7 +653,12 @@ export async function compose(options: ComposeOptions = {}): Promise<Composition
 	const adjust = (config: AppConfig) => (options.config ? options.config(config) : config);
 	// The composition's own layers, read once for both phases, as `app.mts`
 	// reads them. Phase one: the switches the modules are chosen by.
-	const own = readOwnLayers(ownFiles(), { env });
+	const own = readOwnLayers(
+		options.operatorHocon === undefined
+			? ownFiles()
+			: [hoconFile(options.operatorHocon), ...ownFiles()],
+		{ env },
+	);
 	const switches = resolveConfig(env, options.reads, own);
 	const config = adjust(switches);
 	const fakes = await sharedUpstreams();

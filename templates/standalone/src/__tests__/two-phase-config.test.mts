@@ -47,6 +47,7 @@ import { validate } from "@o3co/ts.hocon/zod";
 import { describe, expect, it } from "vitest";
 import { buildModules } from "../buildModules.mjs";
 import {
+	expectedSessionRequirements,
 	readOwnLayers,
 	readSwitches,
 	resolveConfigPaths,
@@ -170,7 +171,10 @@ describe("phase one reads its switches and nothing else", () => {
 		const { config, reads } = recording(
 			readSwitches(readOwnLayers(ownFiles("production"), { env })),
 		);
+		// What `app.mts` reads of phase one: the logger, the modules, and what
+		// the composition expects of session admission.
 		createAppLogger(config);
+		expectedSessionRequirements(config);
 		buildModules(config, { environment: "production" });
 		const covered = (path: string) =>
 			SWITCHES.some(
@@ -234,18 +238,19 @@ describe("phase two: what createApp is handed", () => {
 		expect(resolved).not.toHaveProperty("widget");
 	});
 
-	it("hands the configuration over as resolved and unparsed, with the shipped sessionRequirements.expected whatever MFA_MODE says", () => {
+	it("hands the configuration over as resolved and unparsed, with what phase one says the composition expects: mfa beside the configuration's list under MFA_MODE=optional", () => {
 		const optionalOwn = readOwnLayers(ownFiles("development"), {
 			env: { ...env, MFA_MODE: "optional", HTTP_PORT: "8080" },
 		});
+		const optional = readSwitches(optionalOwn);
 		const resolved = resolveForBoot(
 			optionalOwn,
 			buildModules(switches, { environment: "development" }),
+			expectedSessionRequirements(optional),
 		) as unknown as Record<string, Record<string, unknown>>;
 		// An environment variable's string, as HOCON substituted it: createApp parses it.
 		expect(resolved.http?.port).toBe("8080");
-		expect(resolved.mfa?.mode).toBe("optional");
-		expect(resolved.sessionRequirements).toEqual({ expected: [] });
+		expect(resolved.sessionRequirements).toEqual({ expected: ["mfa"] });
 	});
 });
 

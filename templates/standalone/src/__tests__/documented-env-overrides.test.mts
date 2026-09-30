@@ -20,6 +20,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
 	type AppConfig,
+	BootError,
 	coreReference,
 	createApp,
 	resolveAccessTokenLifetime,
@@ -524,12 +525,11 @@ describe("the shipped config boots with every documented override supplied as a 
 		}
 	});
 
-	it("parses each MFA_MODE at boot, and the shipped configuration expects no session requirement under any of them", async () => {
-		for (const mode of ["off", "optional", "required"] as const) {
-			const parsed = await bootParsed({ ...DOCUMENTED_ENV, MFA_MODE: mode });
-			expect(parsed.mfa.mode, mode).toBe(mode);
-			expect(parsed.sessionRequirements, mode).toEqual({ expected: [] });
-		}
+	it("parses MFA_MODE=off before boot and at boot, where the shipped configuration expects no session requirement", async () => {
+		expect(readShippedSwitches({ ...DOCUMENTED_ENV, MFA_MODE: "off" }).mfa?.mode).toBe("off");
+		const parsed = await bootParsed({ ...DOCUMENTED_ENV, MFA_MODE: "off" });
+		expect(parsed.mfa.mode).toBe("off");
+		expect(parsed.sessionRequirements).toEqual({ expected: [] });
 	});
 
 	describe("boolean overrides accept the spellings an operator writes", () => {
@@ -655,10 +655,24 @@ describe("the shipped config boots with every documented override supplied as a 
 			});
 		}
 
-		it("reads no MFA_MODE before boot: a mode that is none of the three is refused by boot's parse, naming mfa.mode", async () => {
-			expect(() => readShippedSwitches({ ...DOCUMENTED_ENV, MFA_MODE: "on" })).not.toThrow();
-			await expect(bootParsed({ ...DOCUMENTED_ENV, MFA_MODE: "on" })).rejects.toThrow(/mfa\.mode/);
+		it("refuses MFA_MODE that is none of the three before boot, naming mfa.mode", () => {
+			expect(() => readShippedSwitches({ ...DOCUMENTED_ENV, MFA_MODE: "on" })).toThrow(/mfa\.mode/);
 		});
+
+		for (const mode of ["optional", "required"] as const) {
+			it(`refuses MFA_MODE=${mode} at boot, the template installing no MFA module: session-requirement-missing, naming mfa`, async () => {
+				const err = await bootParsed({ ...DOCUMENTED_ENV, MFA_MODE: mode }).then(
+					() => undefined,
+					(caught: unknown) => caught,
+				);
+				expect(err).toBeInstanceOf(BootError);
+				expect((err as BootError).reason).toBe("session-requirement-missing");
+				expect((err as BootError).details).toMatchObject({
+					configKey: "sessionRequirements.expected",
+					missing: ["mfa"],
+				});
+			});
+		}
 
 		it("still refuses an empty SESSION_CSRF_TTL_SECONDS", async () => {
 			// Pinned alongside the boolean cases because it is the same trap

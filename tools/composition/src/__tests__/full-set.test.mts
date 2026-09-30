@@ -503,15 +503,17 @@ describe("the session requirements: the MFA package's, and the two a deployment 
 		});
 	});
 
-	it("boot under mfa.mode = required without the MFA package when mfa is not declared: the mode is the MFA package's to read", async () => {
-		const { handle, config } = await boot({
+	it("refuse the boot under mfa.mode = required without the MFA package: the template declares mfa from the mode, and nothing registers it", async () => {
+		const err = await refused({
 			features: { mfa: false },
 			adjust: (config) => ({ ...config, mfa: { ...config.mfa, mode: "required" } }),
 		});
-		expect(config.mfa.mode).toBe("required");
-		expect(
-			[...(handle.components.sessionRequirementResolver?.entries() ?? [])].map(([name]) => name),
-		).toEqual([...FIXTURE_REQUIREMENTS]);
+		expect(err.reason).toBe("session-requirement-missing");
+		expect(err.details).toMatchObject({
+			configKey: "sessionRequirements.expected",
+			missing: ["mfa"],
+			registered: [...FIXTURE_REQUIREMENTS],
+		});
 	});
 });
 
