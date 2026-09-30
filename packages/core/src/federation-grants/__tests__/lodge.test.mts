@@ -616,10 +616,10 @@ describe("lodging a reauthorization", () => {
 				renewal(),
 			),
 		).toEqual({ ok: false, reason: "connection_identity_changed" });
-		// The connection is gone.
+		// The connection is gone: refused as one the client may not use.
 		expect(
 			await lodgeFederationGrantReauthorization(deps({ connections: new Map() }), renewal()),
-		).toEqual({ ok: false, reason: "connection_not_configured" });
+		).toEqual({ ok: false, reason: "connection_not_permitted" });
 		// No token could ever satisfy the connection's maximum.
 		expect(
 			await lodgeFederationGrantReauthorization(
@@ -728,7 +728,7 @@ describe("lodging a reauthorization", () => {
 		});
 	});
 
-	it("judges the client's current permission only once the grant could be renewed", async () => {
+	it("refuses a client that may no longer use the grant's connection", async () => {
 		await establish();
 		expect(
 			await lodgeFederationGrantReauthorization(
@@ -736,6 +736,140 @@ describe("lodging a reauthorization", () => {
 				renewal({ client: { ...CLIENT, allowedFederationGrantConnections: [] } }),
 			),
 		).toEqual({ ok: false, reason: "connection_not_permitted" });
+	});
+
+	/** A renewal the configuration refuses: the client may no longer use the connection, or it was removed. */
+	const UNCONFIGURED = [
+		[
+			"a client that may no longer use the connection",
+			{ client: { ...CLIENT, allowedFederationGrantConnections: [] } },
+			{},
+		],
+		["a connection that was removed", {}, { connections: new Map() }],
+	] as const;
+
+	it.each(UNCONFIGURED)(
+		"tells %s that the grant is over — expired, revoked or pending — before the configuration",
+		async (_, request, over) => {
+			await establish();
+			expect(
+				await lodgeFederationGrantReauthorization(
+					deps({ ...over, maxExpiresInMs: MIN / 2 }),
+					renewal(request),
+				),
+			).toEqual({ ok: false, reason: "grant_expired", expiredBy: "operator_maximum" });
+
+			await grants.revoke("g-est", "operator", clock);
+			expect(await lodgeFederationGrantReauthorization(deps(over), renewal(request))).toEqual({
+				ok: false,
+				reason: "grant_revoked",
+				revokedBy: "operator",
+				revokedNow: false,
+			});
+
+			await grants.createPending({
+				id: "g-pend",
+				subject: "u-1",
+				clientId: "agent",
+				connection: CONNECTION.name,
+				intent: { handle: "h-pend", expiresAt: at(FEDERATION_GRANT_FLOW_BUDGET_MS) },
+				now: T0,
+			});
+			expect(
+				await lodgeFederationGrantReauthorization(
+					deps(over),
+					renewal({ ...request, grantId: "g-pend" }),
+				),
+			).toEqual({ ok: false, reason: "authorization_pending" });
+			expect(intents.size).toBe(0);
+		},
+	);
+
+	/** The established grant's store, answering that its credential's key is not in the ring. */
+	const keyless = (): FederationGrantStore => ({
+		...grants,
+		inspect: async (id, when) => {
+			const found = await grants.inspect(id, when);
+			return found === null ? null : { ...found, credentials: "key_unavailable" };
+		},
+	});
+
+	it.each([
+		[
+			"a changed identity",
+			() => ({
+				connections: new Map([
+					[CONNECTION.name, { ...CONNECTION, upstreamClientId: "another-client" }],
+				]),
+			}),
+			{},
+		],
+		[
+			"a maximum no token can satisfy",
+			() => ({
+				connections: new Map([[CONNECTION.name, { ...CONNECTION, maxAccessTokenLifetime: 0 }]]),
+			}),
+			{},
+		],
+		["a key missing from the ring", () => ({ grantStore: keyless() }), {}],
+		["an asserted connection that is not the grant's", () => ({}), { connection: "another" }],
+		["a request it would refuse", () => ({}), { redirectUri: "https://evil.test/" }],
+	] as const)(
+		"refuses a client that may no longer use the connection before %s",
+		async (_, over, request) => {
+			await establish();
+			expect(
+				await lodgeFederationGrantReauthorization(
+					deps(over()),
+					renewal({ ...request, client: { ...CLIENT, allowedFederationGrantConnections: [] } }),
+				),
+			).toEqual({ ok: false, reason: "connection_not_permitted" });
+			expect(intents.size).toBe(0);
+		},
+	);
+
+	it.each([
+		[
+			"an ineligibility marker",
+			async () => {
+				await starved("no_finite_lifetime");
+				return { over: {}, request: {} };
+			},
+		],
+		["a key missing from the ring", async () => ({ over: { grantStore: keyless() }, request: {} })],
+		[
+			"an asserted connection that is not the grant's",
+			async () => ({ over: {}, request: { connection: "another" } }),
+		],
+	] as const)("refuses a removed connection as not permitted before %s", async (_, arrange) => {
+		await establish();
+		const { over, request } = await arrange();
+		expect(
+			await lodgeFederationGrantReauthorization(
+				deps({ ...over, connections: new Map() }),
+				renewal(request),
+			),
+		).toEqual({ ok: false, reason: "connection_not_permitted" });
+		expect(intents.size).toBe(0);
+	});
+
+	it("re-reads a connection removed while the pointer write lost as one the client may not use, and closes the intent", async () => {
+		await establish();
+		const connections = new Map([[CONNECTION.name, CONNECTION]]);
+		const racing: FederationGrantStore = {
+			...grants,
+			nameIntent: async () => {
+				connections.delete(CONNECTION.name);
+				return { ok: false };
+			},
+		};
+		expect(
+			await lodgeFederationGrantReauthorization(
+				deps({ grantStore: racing, connections }),
+				renewal(),
+			),
+		).toEqual({ ok: false, reason: "connection_not_permitted" });
+		expect(await intents.getIntent("id-1", at(3 * MIN))).toBeNull();
 	});
 
 	it("reads the renewal's permission as a list or as nothing, as lodging does", async () => {
@@ -1149,14 +1283,14 @@ describe("what a storage refusal carries, for the route that answers it", () => 
 			]);
 		});
 
-		it("carries the renewed grant's connection when that connection is no longer configured", async () => {
+		it("refuses a renewal whose connection is no longer configured as not permitted, and carries no connection", async () => {
 			await establish();
 			const result = await lodgeFederationGrantReauthorization(
 				deps({ connections: new Map() }),
 				renewal(),
 			);
-			expect(result).toEqual({ ok: false, reason: "connection_not_configured" });
-			expect(connectionOf(result)).toBe("okta-calendar");
+			expect(result).toEqual({ ok: false, reason: "connection_not_permitted" });
+			expect(connectionOf(result)).toBeUndefined();
 		});
 
 		/**

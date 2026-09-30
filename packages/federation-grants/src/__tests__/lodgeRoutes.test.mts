@@ -350,6 +350,24 @@ describe("POST /oauth/federation-grants/:grantId/reauthorize — renewing a gran
 		});
 	});
 
+	it("answers a renewal on a removed connection as one the client may not use, and audits it so", async () => {
+		const h = harness();
+		await h.seed();
+		h.world.connections.delete(connection.name);
+		const response = await renew(h);
+		expect(response.status).toBe(403);
+		expect(response.body).toEqual({
+			error: "access_denied",
+			error_description: "connection_not_permitted",
+		});
+		await h.background.drain();
+		expect(
+			h.events
+				.filter((e) => e.type === "federation.grant.request.denied")
+				.map((e) => e.details?.outcome),
+		).toEqual(["access_denied/connection_not_permitted"]);
+	});
+
 	it("refuses what a renewal cannot mend, each with its own status and error", async () => {
 		const h = harness();
 		await h.seed();
