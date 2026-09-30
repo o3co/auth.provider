@@ -331,7 +331,7 @@ export const createAuthorizeHandler = (opts: AuthorizeHandlerOptions): RequestHa
 		if (!pkce) return;
 		if (!checkNonce(ctx)) return;
 
-		const scopes = resolveScopes(ctx, scope, client);
+		const scopes = await resolveScopes(ctx, scope, client);
 		if (!scopes) return;
 
 		// A client that is not first-party mints only with the user's recorded
