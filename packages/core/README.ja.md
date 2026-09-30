@@ -534,6 +534,7 @@ const userRepo = new InMemoryUserRepository(users);
 #### GrantPolicyHook（scope / audience / token exchange のポリシー）
 
 - `GrantPolicyHook.evaluate(request, ctx)` は allow（narrowing 可）/ deny を返す
+- allow になるのは `outcome` がちょうど `"allow"` のときだけ、拒否になるのはちょうど `"deny"` のときだけである。それ以外 — 別の文字列や大文字小文字違い、`outcome` がない、オブジェクトでない値 — は不正な決定で、allow にはならない: `/oauth/token` では説明 `policy_decision_invalid` 付きの `500 server_error`、`/oauth/authorize` ではリダイレクトの `error=server_error` で答え、ポリシーの `kind` だけを付けて（決定の中身は付けずに）`grant_policy_decision_invalid`（error）としてログに残し、理由 `policy_decision_invalid` の失敗として監査する。すべてのグラントと `/oauth/authorize` は決定を `readGrantPolicyDecision`（[`grants/grantPolicy.mts`](src/grants/grantPolicy.mts)）で読む
 - deny の `error` は RFC 6749 のエラーコード `1*NQSCHAR`（空でない、`"` と `\` を除く印字可能な ASCII）でなければならない（`isWellFormedErrorCode`、[`errors/envelope.mts`](src/errors/envelope.mts)）。それ以外のコードを `/oauth/token` は `invalid_request`、`/oauth/authorize` は `access_denied` として返し、ポリシーのコードをサニタイズしてログに残す
 - `/oauth/authorize` で 1 回だけ評価、`/oauth/token` は Code record に persist された `grantedScope` / `grantedAudience` を再利用（`authorization_code` では再評価しない）
 - その他のグラント（refresh / client_credentials / token-exchange）はトークンエンドポイントで評価
