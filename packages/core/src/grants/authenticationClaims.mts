@@ -15,10 +15,10 @@
  */
 
 /**
- * The authentication claims a token may carry: `amr` (RFC 8176) and `acr`
- * (OIDC Core §2), read in one shape by every grant that stamps them, plus the
- * `amr` values this provider records and `composeAmr`. See ADR
- * 2026-09-25-multi-factor-authentication.
+ * The authentication claims a token may carry: `amr` (RFC 8176), `acr` and
+ * `auth_time` (OIDC Core §2; on access tokens, RFC 9470 §6), read in one shape
+ * by every grant that stamps them, plus the `amr` values this provider records
+ * and `composeAmr`. See ADR 2026-09-25-multi-factor-authentication.
  *
  * They reach a token from a recorded `UserSession`, the code record, or an
  * earlier refresh token. A refresh copies them forward, vouching for them
@@ -82,6 +82,16 @@ export function wellFormedAmr(value: unknown): readonly string[] | undefined {
 /** `acr` as a token may carry it — a non-empty string — else undefined. */
 export function wellFormedAcr(value: unknown): string | undefined {
 	return typeof value === "string" && value.length > 0 ? value : undefined;
+}
+
+/** `auth_time` as a token may carry it — whole seconds since the epoch, not negative — else undefined. */
+export function wellFormedAuthTime(value: unknown): number | undefined {
+	return typeof value === "number" && Number.isSafeInteger(value) && value >= 0 ? value : undefined;
+}
+
+/** An authentication instant as `auth_time`: its whole seconds since the epoch, rounded down; undefined for an invalid `Date`. */
+export function authTimeClaim(instant: Date): number | undefined {
+	return wellFormedAuthTime(Math.floor(instant.getTime() / 1000));
 }
 
 /**

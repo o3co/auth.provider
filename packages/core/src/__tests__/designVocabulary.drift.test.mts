@@ -156,6 +156,16 @@ const VOCABULARY: readonly VocabularyRow[] = [
 		definition: /(?:function|const)\s+wellFormedAcr\b/,
 	},
 	{
+		concept: "authentication claims a token may carry — auth_time (the MFA ADR's D18, RFC 9470 §6)",
+		home: "packages/core/src/grants/authenticationClaims.mts",
+		definition: /(?:function|const)\s+wellFormedAuthTime\b/,
+	},
+	{
+		concept: "an authentication instant as the auth_time claim (the MFA ADR's D18)",
+		home: "packages/core/src/grants/authenticationClaims.mts",
+		definition: /(?:function|const)\s+authTimeClaim\b/,
+	},
+	{
 		concept: "the amr a federated login records — fed (#481, the MFA ADR's D13)",
 		home: "packages/core/src/grants/authenticationClaims.mts",
 		definition: /(?:function|const)\s+FEDERATED_AMR\b/,

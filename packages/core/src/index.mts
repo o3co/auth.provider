@@ -352,6 +352,7 @@ export {
 } from "./federations/types.mjs";
 // The authentication claims a token may carry
 export {
+	authTimeClaim,
 	composeAmr,
 	EMAIL_OTP_AMR,
 	FEDERATED_AMR,
@@ -363,6 +364,7 @@ export {
 	SOFTWARE_KEY_AMR,
 	wellFormedAcr,
 	wellFormedAmr,
+	wellFormedAuthTime,
 } from "./grants/authenticationClaims.mjs";
 export { filterClaimsByScope } from "./grants/claimFilter.mjs";
 export type { Confirmation } from "./grants/confirmation.mjs";
