@@ -15,10 +15,11 @@
  */
 
 /**
- * Why the drain is a component and not a `lifecycleRegistrar` callback (the
- * federation-grants ADR, D12; README, "Shutting down without losing a rotated
- * credential"). `AppHandle.dispose()` runs component cleanups before registrar
- * callbacks, so a registrar drain would run after the store's own cleanup. A
+ * Why the drain is a component's cleanup, not only a `lifecycleRegistrar`
+ * callback (the federation-grants ADR, D12; README, "Shutting down without
+ * losing a rotated credential"). `AppHandle.dispose()` runs component cleanups
+ * before registrar callbacks, so a registrar drain alone would run after the
+ * store's own cleanup. A
  * component whose dependency edges point at the store, the revocation boundary
  * and the sink is cleaned up before all three, because cleanups run in reverse
  * of build order.
