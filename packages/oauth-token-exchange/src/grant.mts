@@ -42,7 +42,6 @@ import {
 	consoleLogger,
 	formatObject,
 	generateToken,
-	generateTokenResponse,
 	isGrantTypeAllowed,
 	isWellFormedClientId,
 	isWellFormedErrorCode,
@@ -59,6 +58,7 @@ import {
 	resolveAccessTokenLifetime,
 } from "@o3co/auth-provider-core";
 import { buildActClaim, countActorChainDepth, matchesMayAct, matchesMayActClient } from "./act.mjs";
+import { invalidRequest, tokenAnswer } from "./answers.mjs";
 import { ACCESS_TOKEN_TYPE } from "./validator/selfIssuedAccessToken.mjs";
 
 const GRANT_TYPE = "urn:ietf:params:oauth:grant-type:token-exchange";
@@ -876,45 +876,9 @@ export function createTokenExchangeGrant(deps: TokenExchangeDependencies): Grant
 				},
 			);
 
-			// RFC 9449 §5: a DPoP-bound token is `token_type: "DPoP"`; mTLS keeps "Bearer"
-			// (RFC 8705 §3). Read off the stamped confirmation, so the two cannot disagree.
-			const tokens = generateTokenResponse({ accessToken });
-			const tokensWithIssuedType: typeof tokens & { issued_token_type: string } = {
-				...tokens,
-				issued_token_type: ACCESS_TOKEN_TYPE,
-			};
-
-			return {
-				result: {
-					status: 200,
-					tokens: tokensWithIssuedType,
-				},
-			};
+			return tokenAnswer(accessToken);
 		},
 	};
-}
-
-/**
- * `400 invalid_request`: RFC 8693 §2.2.2 makes it the code for a request that is
- * not valid and for a `subject_token` or `actor_token` that is invalid or
- * unacceptable for any reason. That covers malformed or repeated parameters,
- * mismatched `actor_token`/`actor_token_type`, a body `client_id` that is not the
- * authenticated client, a malformed `expires_in`, an unsupported token type (RFC
- * 6749 §5.2; `unsupported_token_type` is RFC 7009's, for revocation), and every
- * refused token: validator `null`, sender constraint, family, session,
- * `may_act`, actor-chain depth, expiry. `invalid_grant` is not open to this grant.
- *
- * One code covers all of these, so `error_description` tells a client which check
- * refused it and is part of the wire contract (the README names each). Quote
- * values with `'`: RFC 6749 §5.2 allows neither `"` nor `\`.
- *
- * Other answers keep their RFC codes: `invalid_target` for audience and resource
- * (including values of the wrong type, since both may repeat), `invalid_scope`,
- * `invalid_client`, `unauthorized_client`; a policy past a ceiling is core's
- * `policyOutOfBounds`, and an unavailable store is `503 temporarily_unavailable`.
- */
-function invalidRequest(errorDescription: string): GrantHandlerResult {
-	return { result: { status: 400, error: "invalid_request", errorDescription } };
 }
 
 /** What {@link parseRequestedExpiresIn} answers for a present, unusable value. */
