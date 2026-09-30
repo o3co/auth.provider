@@ -28,9 +28,10 @@
  * §5.2.2.3); that the family is registered under the refresh token's reserved
  * `jti` and expiry before anything is signed, so no refresh token is served
  * unless its family was registered, and a family store that cannot answer is
- * a 503 that costs no signature; and the DPoP `cnf.jkt` binding, on the same
+ * a 503 that costs no signature; the DPoP `cnf.jkt` binding, on the same
  * public-client / `bindConfidentialClientRefreshTokens` gate
- * `authorization.mts` and `refreshToken.mts` apply.
+ * `authorization.mts` and `refreshToken.mts` apply; and the `auth_time` both
+ * tokens carry, never later than the challenge's issuance.
  *
  * `verifyWebAuthnAssertion` is mocked, as in grant.test.mts: its contract is
  * covered by internal.verification.test.mts, and real CBOR/COSE fixtures add
@@ -57,7 +58,7 @@ import {
 } from "@o3co/auth-provider-core";
 import { createTestOAuthTokenSettings } from "@o3co/auth-provider-core/testing";
 import type { AuthenticationResponseJSON } from "@simplewebauthn/server";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("#/internal/verification.mjs", () => ({
 	verifyWebAuthnAssertion: vi.fn(),
@@ -67,6 +68,7 @@ vi.mock("#/internal/verification.mjs", () => ({
 import { createWebAuthnGrant, WEBAUTHN_GRANT_TYPE } from "#/grant.mjs";
 import { verifyWebAuthnAssertion } from "#/internal/verification.mjs";
 import { webauthnModule } from "#/module.mjs";
+import { createTestWebAuthnConfig } from "#/testing/index.mjs";
 
 const mockVerifyAssertion = vi.mocked(verifyWebAuthnAssertion);
 
@@ -302,18 +304,6 @@ describe("createWebAuthnGrant — refresh_token allowlist gate", () => {
 		expect(decodePayload(tokens.refresh_token as string).amr).toEqual(["hwk"]);
 	});
 
-	it("stamps the time the assertion was verified as auth_time, on the refresh token as on the access token", async () => {
-		// The passkey assertion is the authentication, so its time is `auth_time`
-		// (RFC 9470 §6.1); the refresh grant carries it from the refresh token.
-		const before = Math.floor(Date.now() / 1000);
-		const tokens = await issue(await makeDeps(), makeCtx(makeClient()));
-		const after = Math.floor(Date.now() / 1000);
-		const authTime = decodePayload(tokens.access_token as string).auth_time;
-		expect(authTime).toBeGreaterThanOrEqual(before);
-		expect(authTime).toBeLessThanOrEqual(after);
-		expect(decodePayload(tokens.refresh_token as string).auth_time).toBe(authTime);
-	});
-
 	it("issues no refresh_token when allowedGrantTypes omits refresh_token", async () => {
 		const tokens = await issue(
 			await makeDeps(),
@@ -352,6 +342,51 @@ describe("createWebAuthnGrant — refresh_token allowlist gate", () => {
 // ---------------------------------------------------------------------------
 // Redemption preconditions — every gate refreshToken.mts applies
 // ---------------------------------------------------------------------------
+
+describe("createWebAuthnGrant — the auth_time it stamps", () => {
+	// A signed assertion can be held until its challenge expires, so the time it
+	// reaches the grant says nothing about when the user made the gesture. The
+	// challenge was issued before the gesture, and no assertion arrives more than
+	// one challenge lifetime after it was issued.
+	const TTL_MS = 120_000;
+	const ISSUED_AT_MS = Date.UTC(2026, 8, 30, 12, 0, 0);
+
+	afterEach(() => {
+		vi.useRealTimers();
+	});
+
+	for (const heldMs of [0, TTL_MS - 1_000]) {
+		it(`is no later than the challenge's issuance, and at most one challenge lifetime before it, on both tokens: held ${heldMs / 1000}s`, async () => {
+			vi.useFakeTimers({ toFake: ["Date"] });
+			vi.setSystemTime(ISSUED_AT_MS);
+			const challengeStore = createMemoryChallengeStore();
+			const challengeCeremony = createChallengeCeremony({
+				challengeStore,
+				replaySeenSet: createMemoryReplaySeenSet(),
+			});
+			await challengeStore.issue(
+				"webauthn:authentication",
+				"held-challenge",
+				ISSUED_AT_MS + TTL_MS,
+			);
+			const deps = await makeDeps({
+				challengeCeremony,
+				webauthnConfig: createTestWebAuthnConfig({ origin: [ISSUER], challengeTtlMs: TTL_MS }),
+			});
+
+			vi.setSystemTime(ISSUED_AT_MS + heldMs);
+			const tokens = await issue(
+				deps,
+				makeCtx(makeClient(), { body: { assertion: makeAssertionResponse("held-challenge") } }),
+			);
+
+			const authTime = decodePayload(tokens.access_token).auth_time as number;
+			expect(authTime).toBeLessThanOrEqual(Math.floor(ISSUED_AT_MS / 1000));
+			expect(authTime).toBeGreaterThanOrEqual(Math.floor((ISSUED_AT_MS - TTL_MS) / 1000));
+			expect(decodePayload(tokens.refresh_token as string).auth_time).toBe(authTime);
+		});
+	}
+});
 
 describe("createWebAuthnGrant — the issued refresh token is redeemable", () => {
 	it("verifies as an rt+jwt bound to the issuing client, subject and scope", async () => {

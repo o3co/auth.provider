@@ -12,6 +12,10 @@
 			"import": "./dist/index.mjs",
 			"types": "./dist/index.d.mts"
 		},
+		"./testing": {
+			"types": "./dist/testing/index.d.mts",
+			"import": "./dist/testing/index.mjs"
+		},
 		"./reference.conf": "./config/reference.conf"
 	},
 	"files": [
