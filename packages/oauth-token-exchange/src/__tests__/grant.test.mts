@@ -1463,6 +1463,20 @@ describe("createTokenExchangeGrant — happy path", () => {
 		});
 	});
 
+	it("refuses to be built from oauth.tokenExchange with no section, naming oauth-token-exchange.maxActorChainDepth", () => {
+		// A bound written at the old path and read as unset would widen the
+		// chain to the default: the grant refuses instead.
+		const config = {
+			...mockConfig,
+			oauth: { ...mockConfig.oauth, tokenExchange: { maxActorChainDepth: 1 } },
+		} as unknown as AppConfig;
+		expect(() => buildGrant({ config })).toThrow(RangeError);
+		expect(() => buildGrant({ config })).toThrow(
+			/oauth\.tokenExchange[\s\S]*oauth-token-exchange\.maxActorChainDepth/,
+		);
+		expect(() => buildGrant({ config, section: { maxActorChainDepth: 1 } })).not.toThrow();
+	});
+
 	it("rejects actor delegation when adding actor would exceed maxActorChainDepth", async () => {
 		const g = buildGrant({ section: { maxActorChainDepth: 2 } });
 		const subject = await signSelfIssuedAccessToken({
