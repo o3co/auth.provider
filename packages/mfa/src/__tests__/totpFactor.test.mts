@@ -312,7 +312,7 @@ describe("enrolling a TOTP factor", () => {
 			expect(begun.state).toEqual({ secret, algorithm, digits: 6, period: 30 });
 			expect(begun.response).toEqual({
 				secret,
-				otpauth_uri: `otpauth://totp/auth.example:alice%40example.com?secret=${secret}&issuer=auth.example&algorithm=${algorithm}&digits=6&period=30`,
+				otpauth_uri: `otpauth://totp/auth.example:alice?secret=${secret}&issuer=auth.example&algorithm=${algorithm}&digits=6&period=30`,
 				algorithm,
 				digits: 6,
 				period: 30,
@@ -320,42 +320,47 @@ describe("enrolling a TOTP factor", () => {
 		}
 	});
 
-	it("labels the factor issuer:account, the account the user's email, else the username, each encoded", async () => {
+	it("labels the factor issuer:account, the account its username, each encoded — never its address", async () => {
 		const spaced = createTotpFactor({ ...SETTINGS, issuer: "Example Co" });
 		const withEmail = await spaced.beginEnrollment(enrollmentContext());
-		expect((withEmail.response as { otpauth_uri: string }).otpauth_uri).toMatch(
-			/^otpauth:\/\/totp\/Example%20Co:alice%40example\.com\?secret=[A-Z2-7]+&issuer=Example%20Co&/,
+		const uri = (withEmail.response as { otpauth_uri: string }).otpauth_uri;
+		expect(uri).toMatch(/^otpauth:\/\/totp\/Example%20Co:alice\?secret=[A-Z2-7]+&issuer=Example%20Co&/);
+		expect(decodeURIComponent(uri)).not.toContain(USER.email);
+		const spacedName = await spaced.beginEnrollment(
+			enrollmentContext({ id: "u-bob", username: "bob smith", email: "bob@example.com" }),
 		);
-		const withoutEmail = await spaced.beginEnrollment(
-			enrollmentContext({ id: "u-bob", username: "bob smith" }),
-		);
-		expect((withoutEmail.response as { otpauth_uri: string }).otpauth_uri).toMatch(
+		expect((spacedName.response as { otpauth_uri: string }).otpauth_uri).toMatch(
 			/^otpauth:\/\/totp\/Example%20Co:bob%20smith\?/,
 		);
-		const blankEmail = await spaced.beginEnrollment(
-			enrollmentContext({ id: "u-bob", username: "bob", email: "" }),
-		);
-		expect((blankEmail.response as { otpauth_uri: string }).otpauth_uri).toMatch(
-			/^otpauth:\/\/totp\/Example%20Co:bob\?/,
-		);
 	});
 
-	it("throws for an account with neither an email nor a username — a User core's type forbids, username being required, so a broken Store answer the coordinator reads as an outage", async () => {
-		await expect(factor.beginEnrollment(enrollmentContext({ id: "u-x" }))).rejects.toThrow(
-			RangeError,
-		);
-	});
-
-	it("refuses, with a RangeError, an email or a username that is not well-formed text, rather than let the URI's encoding throw", async () => {
+	it("refuses, with a RangeError quoting nothing, an account without a username — whatever its address — a User core's type forbids, so a broken Store answer the coordinator reads as an outage", async () => {
 		for (const user of [
-			{ id: "u-alice", username: "alice", email: "alice\uD800@example.com" },
-			{ id: "u-bob", username: "bob\uDC00" },
+			{ id: "u-x" },
+			{ id: "u-x", email: "x@example.com" },
+			{ id: "u-x", username: "", email: "x@example.com" },
+			{ id: "u-x", username: 7, email: "x@example.com" },
 		]) {
-			await expect(
-				factor.beginEnrollment(enrollmentContext(user)),
-				JSON.stringify(user),
-			).rejects.toThrow(RangeError);
+			const thrown = await factor
+				.beginEnrollment(enrollmentContext(user))
+				.catch((err: unknown) => err);
+			expect(thrown, JSON.stringify(user)).toBeInstanceOf(RangeError);
+			expect((thrown as Error).message, JSON.stringify(user)).not.toContain("x@example.com");
 		}
+	});
+
+	it("refuses, with a RangeError quoting nothing, a username that is not well-formed text, rather than let the URI's encoding throw; an address that is not reads nothing", async () => {
+		const thrown = await factor
+			.beginEnrollment(enrollmentContext({ id: "u-bob", username: "bob\uDC00" }))
+			.catch((err: unknown) => err);
+		expect(thrown).toBeInstanceOf(RangeError);
+		expect((thrown as Error).message).not.toContain("bob");
+		const begun = await factor.beginEnrollment(
+			enrollmentContext({ id: "u-alice", username: "alice", email: "alice\uD800@example.com" }),
+		);
+		expect((begun.response as { otpauth_uri: string }).otpauth_uri).toMatch(
+			/^otpauth:\/\/totp\/auth\.example:alice\?/,
+		);
 	});
 
 	it("hands each enrollment a secret of its own", async () => {

@@ -508,6 +508,40 @@ describe("mfaFactorContract", () => {
 		).toEqual([RULES.noAddress]);
 	});
 
+	it("fails an address answered percent-encoded, as a URI carries it", async () => {
+		const QUOTED = { ...USER, email: '"probe"@example.com' };
+		for (const user of [USER, QUOTED]) {
+			const encoding = inputFor({ mail: true }, (factor) => ({
+				...factor,
+				beginEnrollment: async (ctx) => {
+					const start = await factor.beginEnrollment(ctx);
+					return {
+						...start,
+						response: {
+							...(start.response as Record<string, unknown>),
+							uri: `otpauth://totp/Issuer:${encodeURIComponent(String(ctx.user.email))}`,
+						},
+					};
+				},
+			}));
+			expect(await failing({ ...encoding, user }), user.email).toEqual([RULES.noAddress]);
+		}
+	});
+
+	it("passes text a percent sign cannot decode, searching it as it is", async () => {
+		const stray = inputFor({}, (factor) => ({
+			...factor,
+			beginEnrollment: async (ctx) => {
+				const start = await factor.beginEnrollment(ctx);
+				return {
+					...start,
+					response: { ...(start.response as Record<string, unknown>), note: "100% of %E0%A4%A" },
+				};
+			},
+		}));
+		expect(await failing(stray)).toEqual([]);
+	});
+
 	it("fails a login code mailed with no address digest, one that is no digest, or the digest of another address", async () => {
 		for (const addressDigest of [
 			undefined,
