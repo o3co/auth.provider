@@ -67,6 +67,7 @@ const INPUT = (overrides: Partial<CreateUserSessionInput> = {}): CreateUserSessi
 	claims: overrides.claims ?? { email: "user@example.com" },
 	amr: overrides.amr,
 	authentication: overrides.authentication,
+	...(overrides.enrollmentFacts === undefined ? {} : { enrollmentFacts: overrides.enrollmentFacts }),
 });
 
 /** How a password login records itself, every field named. */
@@ -144,6 +145,107 @@ export function runUserSessionStoreContract(
 			expect(await store.get("sid-whole-plain")).toStrictEqual({
 				...plain,
 				createdAt: expect.any(Date),
+			});
+		});
+
+		it("round-trips enrollmentFacts, each witness and either flag, and leaves the key out when none was recorded", async () => {
+			const store = await factory();
+			for (const [sid, enrollmentFacts] of [
+				["sid-facts-enrolled", { witness: "enrolled", mailAddress: true }],
+				["sid-facts-not-enrolled", { witness: "not_enrolled", mailAddress: false }],
+				["sid-facts-malformed", { witness: "malformed", mailAddress: true }],
+			] as const) {
+				await store.create(INPUT({ sid, enrollmentFacts }));
+				expect((await store.get(sid))?.enrollmentFacts, sid).toStrictEqual(enrollmentFacts);
+			}
+			// Optional: a session recorded without them reads as one that has none.
+			await store.create(INPUT({ sid: "sid-facts-none" }));
+			expect(await store.get("sid-facts-none")).not.toHaveProperty("enrollmentFacts");
+		});
+
+		it("returns a session with enrollmentFacts whole, as plain data", async () => {
+			const store = await factory();
+			const input = INPUT({
+				sid: "sid-whole-facts",
+				amr: ["pwd"],
+				authentication: PASSWORD_LOGIN,
+				enrollmentFacts: { witness: "enrolled", mailAddress: false },
+			});
+			await store.create(input);
+			expect(await store.get("sid-whole-facts")).toStrictEqual({
+				...input,
+				createdAt: expect.any(Date),
+			});
+		});
+
+		it.each([
+			["a value that is not an object", "enrolled"],
+			["null", null],
+			["a list", ["enrolled", true]],
+			["no witness", { mailAddress: true }],
+			["a witness it does not know", { witness: "yes", mailAddress: true }],
+			["a witness that is a boolean", { witness: true, mailAddress: true }],
+			["a witness in another case", { witness: "Enrolled", mailAddress: true }],
+			["no flag", { witness: "enrolled" }],
+			["a flag that is not a boolean", { witness: "enrolled", mailAddress: 1 }],
+			["an address in place of the flag", { witness: "enrolled", mailAddress: "user@example.com" }],
+		])(
+			"create refuses enrollmentFacts with %s — a RangeError, and records nothing",
+			async (_label, enrollmentFacts) => {
+				// What the two stores keep is what the type admits: a value one
+				// store copied and the other wrote as an envelope it then reads as
+				// corrupt would part them, and an address must never be kept.
+				const store = await factory();
+				await expect(
+					store.create(
+						INPUT({
+							sid: "sid-bad-facts",
+							enrollmentFacts: enrollmentFacts as unknown as CreateUserSessionInput["enrollmentFacts"],
+						}),
+					),
+				).rejects.toThrow(RangeError);
+				expect(await store.get("sid-bad-facts")).toBeNull();
+				// Nothing was recorded, so this is not a duplicate.
+				await store.create(INPUT({ sid: "sid-bad-facts" }));
+				expect(await store.get("sid-bad-facts")).not.toBeNull();
+			},
+		);
+
+		it("keeps the two facts alone: a key beside them is not recorded", async () => {
+			const store = await factory();
+			await store.create(
+				INPUT({
+					sid: "sid-facts-extra",
+					enrollmentFacts: {
+						witness: "not_enrolled",
+						mailAddress: true,
+						email: "user@example.com",
+					} as unknown as CreateUserSessionInput["enrollmentFacts"],
+				}),
+			);
+			expect((await store.get("sid-facts-extra"))?.enrollmentFacts).toStrictEqual({
+				witness: "not_enrolled",
+				mailAddress: true,
+			});
+		});
+
+		it("keeps its own copy of enrollmentFacts: neither what was written nor what was read changes what is stored", async () => {
+			const store = await factory();
+			const written = { witness: "enrolled", mailAddress: true };
+			await store.create(
+				INPUT({
+					sid: "facts-iso",
+					enrollmentFacts: written as CreateUserSessionInput["enrollmentFacts"],
+				}),
+			);
+			written.witness = "not_enrolled";
+			written.mailAddress = false;
+			const read = await store.get("facts-iso");
+			expect(read?.enrollmentFacts).toStrictEqual({ witness: "enrolled", mailAddress: true });
+			Object.assign(read?.enrollmentFacts ?? {}, { witness: "malformed" });
+			expect((await store.get("facts-iso"))?.enrollmentFacts).toStrictEqual({
+				witness: "enrolled",
+				mailAddress: true,
 			});
 		});
 
@@ -420,6 +522,20 @@ export function runSecondFactorUpdateContract(
 			// it), createdAt, expiresAt and claims.
 			expect(recorded).toStrictEqual(expected);
 			expect(await store.get("sf-1")).toStrictEqual(expected);
+		});
+
+		it("keeps the session's enrollmentFacts as they were recorded", async () => {
+			const store = await capable();
+			const enrollmentFacts = { witness: "enrolled", mailAddress: true } as const;
+			await store.create(
+				INPUT({ sid: "sf-facts", amr: ["pwd"], authentication: PASSWORD_LOGIN, enrollmentFacts }),
+			);
+			const recorded = await store.recordSecondFactor("sf-facts", {
+				amr: ["otp", "mfa"],
+				at: at(1_000),
+			});
+			expect(recorded?.enrollmentFacts).toStrictEqual(enrollmentFacts);
+			expect((await store.get("sf-facts"))?.enrollmentFacts).toStrictEqual(enrollmentFacts);
 		});
 
 		it("keeps every vouched value, never repeats mfa, and takes the later mfaAt, each no later than the recording store's clock", async () => {

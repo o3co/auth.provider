@@ -95,6 +95,9 @@ const alternating = (keyPrefix: string): MfaTransactionStore => {
 		requireEmailProofAtNextBinding: (subject) => pick().requireEmailProofAtNextBinding(subject),
 		emailProofRequiredAtNextBinding: (subject) => pick().emailProofRequiredAtNextBinding(subject),
 		consumeEmailProofRequirement: (subject) => pick().consumeEmailProofRequirement(subject),
+		recordSessionEmailProof: (subject, sid, provedAtMs, untilMs) =>
+			pick().recordSessionEmailProof(subject, sid, provedAtMs, untilMs),
+		sessionEmailProofAt: (subject, sid, nowMs) => pick().sessionEmailProofAt(subject, sid, nowMs),
 	};
 };
 
@@ -778,5 +781,87 @@ describe("createRedisMfaTransactionStore — the email proof at the next first b
 		expect(await first().keys(`${prefix}*`)).toEqual([key]);
 		expect(await store.consumeEmailProofRequirement("user-1")).toBe(true);
 		expect(await first().exists(key)).toBe(0);
+	});
+});
+
+describe("createRedisMfaTransactionStore — a session's account-email proof", () => {
+	const proofKey = (prefix: string, subject: string, sid: string): string =>
+		`${prefix}session-proof:{${keyPart(subject)}}:${keyPart(sid)}`;
+
+	it("keeps it in a string of its own, <prefix>session-proof:{<subject>}:<sid>, holding when it was given and its end, expiring at its end on the store's clock", async () => {
+		const prefix = freshPrefix();
+		const store = storeAt(prefix);
+		const now = Date.now();
+		const until = now + 10 * MINUTE;
+		await store.recordSessionEmailProof("user-1", "sid-1", now, until);
+		const key = proofKey(prefix, "user-1", "sid-1");
+		expect(await first().keys(`${prefix}*`)).toEqual([key]);
+		expect(await first().type(key)).toBe("string");
+		expect(JSON.parse((await first().get(key)) as string)).toStrictEqual({
+			provedAtMs: now,
+			untilMs: until,
+		});
+		const ttl = await first().pttl(key);
+		expect(ttl).toBeGreaterThan(9 * MINUTE);
+		expect(ttl).toBeLessThanOrEqual(10 * MINUTE);
+	});
+
+	it("sets the key's lifetime from the store's own clock: a store whose clock runs behind keeps it longer, to the same end", async () => {
+		const prefix = freshPrefix();
+		const behind = createRedisMfaTransactionStore({
+			client: makeIoredisMfaTransactionStoreClient(first()),
+			keyPrefix: prefix,
+			now: () => Date.now() - 5 * MINUTE,
+		});
+		const now = Date.now();
+		await behind.recordSessionEmailProof("user-1", "sid-1", now - 5 * MINUTE, now + 10 * MINUTE);
+		expect(await first().pttl(proofKey(prefix, "user-1", "sid-1"))).toBeGreaterThan(14 * MINUTE);
+	});
+
+	it("answers a proof past its end on its own clock as absent, though the server still holds it", async () => {
+		const prefix = freshPrefix();
+		const onTime = storeAt(prefix);
+		const ahead = createRedisMfaTransactionStore({
+			client: makeIoredisMfaTransactionStoreClient(first()),
+			keyPrefix: prefix,
+			now: () => Date.now() + 11 * MINUTE,
+		});
+		const now = Date.now();
+		await onTime.recordSessionEmailProof("user-1", "sid-1", now, now + 10 * MINUTE);
+		expect(await ahead.sessionEmailProofAt("user-1", "sid-1", now)).toBeNull();
+		expect(await onTime.sessionEmailProofAt("user-1", "sid-1", now)).toBe(now);
+		expect(await first().exists(proofKey(prefix, "user-1", "sid-1"))).toBe(1);
+	});
+
+	it("answers a proof it cannot read back as absent: the user proves again", async () => {
+		const prefix = freshPrefix();
+		const store = storeAt(prefix);
+		const key = proofKey(prefix, "user-1", "sid-1");
+		const now = Date.now();
+		for (const value of [
+			"not json",
+			"null",
+			JSON.stringify({ provedAtMs: now }),
+			JSON.stringify({ provedAtMs: String(now), untilMs: now + MINUTE }),
+			JSON.stringify({ provedAtMs: now, untilMs: now + MINUTE + 0.5 }),
+			JSON.stringify({ provedAtMs: -1, untilMs: now + MINUTE }),
+			JSON.stringify({ provedAtMs: now, untilMs: now }),
+		]) {
+			await first().set(key, value, "PX", MINUTE);
+			expect(await store.sessionEmailProofAt("user-1", "sid-1", now), value).toBeNull();
+		}
+	});
+
+	it("keeps it apart from the transactions, the subject lock and the requirement an operator reset records", async () => {
+		const prefix = freshPrefix();
+		const store = storeAt(prefix);
+		const now = Date.now();
+		await store.recordSessionEmailProof("user-1", "sid-1", now, now + 10 * MINUTE);
+		await store.requireEmailProofAtNextBinding("user-1");
+		await store.reserveSubjectAttempt("user-1", now, POLICY);
+		await store.clearSubjectState("user-1");
+		expect(await store.consumeEmailProofRequirement("user-1")).toBe(true);
+		expect(await store.sessionEmailProofAt("user-1", "sid-1", now)).toBe(now);
+		expect(await first().keys(`${prefix}*`)).toEqual([proofKey(prefix, "user-1", "sid-1")]);
 	});
 });

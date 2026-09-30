@@ -32,6 +32,7 @@ import {
 	codeClaimFirstRead,
 	codeClaimRevalidation,
 	cookieClaim,
+	cookieSessionUser,
 	linkClaim,
 	tokenClaim,
 } from "#/session-admission/admit.mjs";
@@ -265,6 +266,80 @@ describe("the claim builders — one reading of each carrier", () => {
 		expect(Object.isFrozen(cookie())).toBe(true);
 		expect(Object.isFrozen(codeClaimFirstRead({ sid: "sid-1" }))).toBe(true);
 		expect(Object.isFrozen(linkClaim({ sid: "sid-1", subject: "user-1" }))).toBe(true);
+	});
+});
+
+describe("cookieSessionUser — the cookie session's user, for a route that admitted its subject", () => {
+	const carrying = (over: Record<string, unknown> = {}) => ({
+		session: {
+			isAuthenticated: true,
+			sid: "sid-1",
+			user: { id: "user-1", email: "alice@example.com", groups: ["staff"] },
+			...over,
+		},
+	});
+
+	it("answers the user the cookie session holds when its id is the admitted subject", () => {
+		expect(cookieSessionUser(carrying(), "user-1")).toEqual({
+			id: "user-1",
+			email: "alice@example.com",
+			groups: ["staff"],
+		});
+	});
+
+	it("answers a frozen copy that shares nothing with the session's user", () => {
+		const req = carrying();
+		const user = req.session.user as { groups: string[]; email: string };
+		const answered = cookieSessionUser(req, "user-1");
+		expect(answered).not.toBe(user);
+		expect(Object.isFrozen(answered)).toBe(true);
+		expect(Object.isFrozen(answered?.groups)).toBe(true);
+		user.groups.push("admin");
+		user.email = "mallory@example.com";
+		expect(answered).toEqual({ id: "user-1", email: "alice@example.com", groups: ["staff"] });
+	});
+
+	it("answers nothing for a subject that is not the user's", () => {
+		expect(cookieSessionUser(carrying(), "user-2")).toBeUndefined();
+		expect(cookieSessionUser(carrying({ user: { id: "user-10" } }), "user-1")).toBeUndefined();
+	});
+
+	it.each([
+		["no session", {}],
+		["a session that is not authenticated", carrying({ isAuthenticated: false })],
+		["a session whose flag is not exactly true", carrying({ isAuthenticated: "true" })],
+		["no user", carrying({ user: undefined })],
+		["a user without an id", carrying({ user: { email: "alice@example.com" } })],
+		["a user whose id is not a string", carrying({ user: { id: 1 } })],
+		["a user that is a list", carrying({ user: [{ id: "user-1" }] })],
+		["a user that is a string", carrying({ user: "user-1" })],
+		["a user that cannot be copied", carrying({ user: { id: "user-1", greet: () => "hi" } })],
+	])("answers nothing for %s", (_label, req) => {
+		expect(cookieSessionUser(req as never, "user-1")).toBeUndefined();
+	});
+
+	it("never answers a user whose id is not the subject, even one whose id answers differently to each read", () => {
+		let reads = 0;
+		const user = {
+			get id() {
+				reads += 1;
+				return reads === 1 ? "user-1" : "user-2";
+			},
+		};
+		const answered = cookieSessionUser(carrying({ user }), "user-1");
+		expect(answered === undefined || answered.id === "user-1").toBe(true);
+	});
+
+	it("refuses, as the claim builder does, a request that is not an object, and a subject that is not a non-empty string", () => {
+		for (const bad of [undefined, null, "cookie", 7]) {
+			expect(() => cookieSessionUser(bad as never, "user-1"), String(bad)).toThrow(RangeError);
+		}
+		for (const subject of [undefined, "", 7, null, ["user-1"]]) {
+			expect(
+				() => cookieSessionUser(carrying(), subject as never),
+				JSON.stringify(subject),
+			).toThrow(RangeError);
+		}
 	});
 });
 
