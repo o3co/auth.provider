@@ -36,6 +36,7 @@ import { type FakeStore, startFakeStore } from "@o3co/auth-provider-test-kit";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
 	HttpMfaFactorStore,
+	HttpUserRepository,
 	MfaStoreError,
 	StoreCredentialRefusedError,
 	StoreTransportError,
@@ -625,22 +626,37 @@ describe("construction", () => {
 	});
 
 	it("refuses a timeout, a response cap or a bearer token the user repository refuses", () => {
+		const repository = (options: Partial<ConstructorParameters<typeof HttpUserRepository>[0]>) =>
+			new HttpUserRepository({
+				authenticateUrl: "https://store.example/authenticate",
+				authenticateByTokenUrl: "https://store.example/authenticate-by-token",
+				timeout: 5000,
+				...options,
+			});
 		for (const timeout of [0, -1, 1.5, Number.NaN, 2_147_483_648]) {
 			expect(() => storeOver({ timeout }), String(timeout)).toThrow(/timeout/);
+			expect(() => repository({ timeout }), String(timeout)).toThrow(/timeout/);
 		}
 		for (const maxResponseBytes of [0, -1, 1.5, Number.NaN]) {
 			expect(() => storeOver({ maxResponseBytes }), String(maxResponseBytes)).toThrow(
 				/maxResponseBytes/,
 			);
+			expect(() => repository({ maxResponseBytes }), String(maxResponseBytes)).toThrow(
+				/maxResponseBytes/,
+			);
 		}
 		for (const bearerToken of ["", "short", "Bearer abc", `${TOKEN}\n`]) {
 			expect(() => storeOver({ bearerToken }), JSON.stringify(bearerToken)).toThrow(/bearerToken/);
+			expect(() => repository({ bearerToken }), JSON.stringify(bearerToken)).toThrow(/bearerToken/);
 		}
 	});
 
-	it("keeps the bearer token out of what inspecting or serialising the store shows", () => {
+	it("keeps the bearer token and the endpoints out of what inspecting or serialising the store shows", () => {
 		const store = storeOver();
-		expect(inspect(store, { depth: 5, showHidden: true })).not.toContain(TOKEN);
-		expect(JSON.stringify(store)).not.toContain(TOKEN);
+		const shown = [inspect(store, { depth: 5, showHidden: true }), JSON.stringify(store)];
+		for (const text of shown) {
+			expect(text).not.toContain(TOKEN);
+			for (const url of Object.values(urlsOf(fake))) expect(text).not.toContain(url);
+		}
 	});
 });

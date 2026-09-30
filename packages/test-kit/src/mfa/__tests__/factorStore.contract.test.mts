@@ -188,7 +188,7 @@ describe("the suite refuses a store that breaks the contract", () => {
 		);
 	});
 
-	it("one that updates at Number.MAX_SAFE_INTEGER", async () => {
+	it("one that answers an update at Number.MAX_SAFE_INTEGER with null rather than a RangeError", async () => {
 		const refused = await refusedBy(() =>
 			broken((store) => ({
 				update: async (subject, id, expectedVersion, next) =>
@@ -224,11 +224,10 @@ describe("the suite's records", () => {
 		for (const record of seen) expect(isMfaFactorId(record.id), record.id).toBe(true);
 	});
 
-	it("are run as core's ContractCase, which the kit re-exports", () => {
+	it("are typed as core's ContractCase, which the kit re-exports", () => {
 		expectTypeOf(
 			mfaFactorStoreContract({ build: async () => ({ store: createMemoryMfaFactorStore() }) }),
 		).toEqualTypeOf<readonly ContractCase[]>();
-		expect(true).toBe(true);
 	});
 });
 
