@@ -23,7 +23,8 @@
  *
  * Guarantees: an error is built from an allowlist — the operation, the
  * endpoint by origin and path, the Store's status as a number, and for an
- * unexpected version the subject and factor id through `auditErrorText` —
+ * unexpected version the subject and factor id through `auditErrorText`, at
+ * most 64 characters each and ahead of the rest —
  * never from a body, a status text or a header the Store sent, and a body is
  * released unread. No `status`, `statusCode`, `expose` or `cause`: an HTTP
  * layer reading one would answer with the Store's status, and the client
@@ -120,14 +121,33 @@ export function mfaStoreUnreadableRecord(url: string): MfaStoreError {
 	);
 }
 
-/** An update of `(subject, id)` at `expectedVersion` answered another version than `expectedVersion + 1`. */
+/** The most characters of a subject or a factor id an error names. */
+const IDENTIFIER_MAX_LENGTH = 64;
+
+/**
+ * `text` as an error names it: `auditErrorText`'s printable ASCII, cut at
+ * {@link IDENTIFIER_MAX_LENGTH} with `...`.
+ */
+const identifier = (text: string): string => {
+	const safe = auditErrorText(text);
+	return safe.length <= IDENTIFIER_MAX_LENGTH
+		? safe
+		: `${safe.slice(0, IDENTIFIER_MAX_LENGTH - 3)}...`;
+};
+
+/**
+ * An update of `(subject, id)` at `expectedVersion` answered another version
+ * than `expectedVersion + 1`. The subject and the factor id lead the
+ * message, so a log line that cuts it (`loggableError`, 256 characters) still
+ * names both.
+ */
 export function mfaStoreVersionSkipped(
 	url: string,
 	update: { readonly subject: string; readonly id: string; readonly expectedVersion: number },
 ): MfaStoreError {
 	return new MfaStoreError(
-		`${endpointOf("update", url)} answered a version other than ${update.expectedVersion + 1} ` +
-			`for subject ${auditErrorText(update.subject)}, factor ${auditErrorText(update.id)}`,
+		`subject ${identifier(update.subject)}, factor ${identifier(update.id)}: ` +
+			`${endpointOf("update", url)} answered a version other than ${update.expectedVersion + 1}`,
 		"version_skipped",
 		"update",
 	);
