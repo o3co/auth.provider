@@ -43,6 +43,41 @@ describe("createTestMfaFactor", () => {
 		expect(typeof createTestMfaFactor({ challenge: true }).challenge).toBe("function");
 	});
 
+	it("completes an enrollment with the secret it answered, then verifies that secret alone; a proof that is not a string is malformed", async () => {
+		const factor = createTestMfaFactor({ amrValues: ["hwk"] });
+		const ctx = {
+			subject: USER.id,
+			transactionId: "tx",
+			nowMs: 0,
+			request: {},
+			digests: createTestMfaDigests("test"),
+		};
+		const start = await factor.beginEnrollment({ ...ctx, user: USER, factors: [] });
+		const complete = (proof: unknown) =>
+			factor.completeEnrollment({ ...ctx, user: USER, factors: [], state: start.state, proof });
+		expect(await complete(7)).toEqual({ ok: false, reason: "malformed" });
+		expect(await complete("not-the-secret")).toEqual({ ok: false, reason: "invalid" });
+		const done = await complete(testMfaFactorProofs.enrollmentProof(start));
+		if (!done.ok) throw new Error("the enrollment's own secret did not complete it");
+		const enrolled = {
+			id: "f-1",
+			label: undefined,
+			createdAt: new Date(0),
+			lastUsedAt: undefined,
+			data: done.data,
+		};
+		expect(factor.amrFor(enrolled.data)).toEqual(["hwk"]);
+		expect(factor.describe(enrolled.data)).toEqual({});
+		const verify = (proof: unknown) =>
+			factor.verify({ ...ctx, factor: enrolled, factors: [enrolled], state: undefined, proof });
+		expect(await verify(testMfaFactorProofs.verificationProof(enrolled, undefined))).toEqual({
+			ok: true,
+			factorId: "f-1",
+		});
+		expect(await verify("not-the-secret")).toEqual({ ok: false, reason: "invalid" });
+		expect(await verify(null)).toEqual({ ok: false, reason: "malformed" });
+	});
+
 	it("verifies after a challenge only the secret beside the nonce that challenge answered", async () => {
 		const factor = createTestMfaFactor({ challenge: true });
 		const ctx = {
