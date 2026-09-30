@@ -43,7 +43,8 @@ const own = readOwnLayers([envConfPath, applicationConfPath]);
 // Phase one: what the template reads before it knows its modules, only for
 // those choices, and for what the composition expects of session admission
 // (`expectedSessionRequirements`): the configuration's list, with `mfa` added
-// when the parsed `mfa.mode` asks for a second factor.
+// when `mfa.mode`, which the template reads itself (`readMfaMode`), asks for a
+// second factor.
 const switches: AppConfig = readSwitches(own);
 
 // Built from config so its level is operator-controlled, and wired into

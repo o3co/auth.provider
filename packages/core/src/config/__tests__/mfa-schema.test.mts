@@ -16,21 +16,20 @@
 
 /**
  * The MFA configuration core owns (ADR 2026-09-25-multi-factor-authentication):
- * `mfa.mode`, the deployment's step-up page at `endpoints.mfa.url`, the two
- * store switches a composition root installs MFA's stores from, and the Redis
+ * the deployment's step-up page at `endpoints.mfa.url`, the two store
+ * switches a composition root installs MFA's stores from, and the Redis
  * stores' key prefixes, which the Redis package's modules read.
  *
- * `mfa.mode` is `"off"` by reference default and admits its three values; one
- * that is none of the three is refused here, naming its key. The MFA package
- * reads it, and the standalone template declares `mfa` from it; boot's checks
- * do not act on it.
+ * `mfa.mode` is not core's: it is the MFA module's key, which its section's
+ * schema holds to its values and its package's `reference.conf` defaults.
+ * Core's schema and `reference.conf` name no `mfa` section, and boot passes
+ * one through untouched, to whichever module reads it.
  */
 
 import { fileURLToPath } from "node:url";
 import { parseFile } from "@o3co/ts.hocon";
 import { validate } from "@o3co/ts.hocon/zod";
 import { describe, expect, it } from "vitest";
-import { BootError } from "#/boot/types.mjs";
 import { AppConfigSchema, CoreConfigSchema } from "#/config/application.schema.mjs";
 import { createApp } from "#/index.mjs";
 import { makeValidAppConfig, makeValidCoreConfig } from "#/testing/fixtures/valid-config.mjs";
@@ -50,9 +49,8 @@ const issuesAt = (result: { success: boolean; error?: { issues: { path: Property
 	result.success ? [] : (result.error?.issues ?? []).map((issue) => issue.path.join("."));
 
 describe("the MFA configuration core owns", () => {
-	it("resolves from reference.conf: mode off, the step-up page at /mfa, both stores in memory", () => {
+	it("resolves from reference.conf: the step-up page at /mfa, both stores in memory", () => {
 		const config = fromReference();
-		expect(config.mfa?.mode).toBe("off");
 		expect(config.endpoints.mfa?.url).toBe("/mfa");
 		expect(config.mfaFactorStore?.adapter).toBe("memory");
 		expect(config.mfaTransactionStore?.adapter).toBe("memory");
@@ -60,84 +58,35 @@ describe("the MFA configuration core owns", () => {
 
 	it("reads each from its environment variable", () => {
 		const config = fromReference({
-			MFA_MODE: "off",
 			ENDPOINTS_MFA_URL: "/account/mfa",
 			MFA_FACTOR_STORE_ADAPTER: "store",
 			MFA_TRANSACTION_STORE_ADAPTER: "redis",
 		});
-		expect(config.mfa?.mode).toBe("off");
 		expect(config.endpoints.mfa?.url).toBe("/account/mfa");
 		expect(config.mfaFactorStore?.adapter).toBe("store");
 		expect(config.mfaTransactionStore?.adapter).toBe("redis");
 	});
 
-	it("admits off, optional and required", () => {
-		for (const mode of ["off", "optional", "required"]) {
-			expect(fromReference({ MFA_MODE: mode }).mfa?.mode, mode).toBe(mode);
-			expect(
-				issuesAt(AppConfigSchema.safeParse({ ...makeValidAppConfig(), mfa: { mode } })),
-				mode,
-			).toEqual([]);
-		}
+	it("names no mfa section: neither core's schema nor its reference.conf, which binds no MFA_MODE", () => {
+		expect(Object.keys(CoreConfigSchema.shape)).not.toContain("mfa");
+		expect(Object.keys(AppConfigSchema.shape)).not.toContain("mfa");
+		const raw = parseFile(REFERENCE_CONF, { env: { ...ENV, MFA_MODE: "required" } }).toObject();
+		expect(raw).not.toHaveProperty("mfa");
 	});
 
-	it("refuses an mfa.mode that is none of the three, naming the key", () => {
-		for (const mode of ["", "on", "OFF", "Required"]) {
-			expect(() => fromReference({ MFA_MODE: mode }), mode).toThrow(/mfa\.mode/);
-			expect(
-				issuesAt(AppConfigSchema.safeParse({ ...makeValidAppConfig(), mfa: { mode } })),
-				mode,
-			).toContain("mfa.mode");
-		}
-	});
-
-	it("refuses an mfa.mode that is written but unusable in a composition that never parsed AppConfigSchema", async () => {
-		// createApp validates CoreConfigSchema itself, so a hand-built
-		// configuration is refused too — before any module is built.
-		expect(
-			issuesAt(CoreConfigSchema.safeParse({ ...makeValidCoreConfig(), mfa: { mode: "on" } })),
-		).toContain("mfa.mode");
-		const err = await createApp({
+	it("boots a configuration whatever its mfa section holds, handing the section on as written", async () => {
+		const handle = await createApp({
 			modules: [],
 			bootstrapComponents: {
-				config: { ...makeValidCoreConfig(), mfa: { mode: "on" } },
+				config: { ...makeValidCoreConfig(), mfa: { mode: "sometimes", lockout: {} } },
 				pathResolver: (p: string) => p,
 			} as never,
-		}).then(
-			() => undefined,
-			(caught: unknown) => caught,
-		);
-		expect(err).toBeInstanceOf(BootError);
-		expect((err as BootError).reason).toBe("config-validation-failed");
-		const issues = (err as { details?: { issues?: { path: PropertyKey[] }[] } }).details?.issues;
-		expect(issues?.map((issue) => issue.path.join("."))).toContain("mfa.mode");
-	});
-
-	it('reads a configuration with no mfa section, or no mode, as mode "off"', () => {
-		// A hand-built composition root that never wrote the key boots with MFA
-		// off: "off" is the default in the schema as well as in reference.conf.
-		// The template and create-app flip their own default; core keeps its
-		// (ADR 2026-09-28-session-admission).
-		const { mfa: _absent, ...withoutMfa } = makeValidCoreConfig() as Record<string, unknown>;
-		expect((CoreConfigSchema.parse(withoutMfa) as { mfa?: { mode?: string } }).mfa?.mode).toBe(
-			"off",
-		);
-		expect(
-			(
-				CoreConfigSchema.parse({ ...withoutMfa, mfa: { transactionTtlSeconds: 600 } }) as {
-					mfa?: Record<string, unknown>;
-				}
-			).mfa,
-		).toEqual({ mode: "off", transactionTtlSeconds: 600 });
-		expect(AppConfigSchema.parse(makeValidAppConfig()).mfa?.mode).toBe("off");
-	});
-
-	it("keeps the rest of the mfa section for the package that owns it", () => {
-		const parsed = CoreConfigSchema.parse({
-			...makeValidCoreConfig(),
-			mfa: { mode: "off", transactionTtlSeconds: 600 },
-		}) as { mfa?: Record<string, unknown> };
-		expect(parsed.mfa).toEqual({ mode: "off", transactionTtlSeconds: 600 });
+		});
+		expect((handle.components.config as { mfa?: unknown } | undefined)?.mfa).toEqual({
+			mode: "sometimes",
+			lockout: {},
+		});
+		await handle.dispose();
 	});
 
 	it("resolves the Redis stores' key prefixes from reference.conf, and from their environment variables", () => {

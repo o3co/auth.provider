@@ -173,14 +173,6 @@ describe("readTransitionalConfig — the switches a composition root reads befor
 		expect(config.oauth.jwt.issuer).toBe(makeValidCoreConfig().oauth.jwt.issuer);
 	});
 
-	it("keeps an ancestor's default: an absent section reads as its declared default does", () => {
-		// With no `mfa` section, the full parse has `mfa.mode = "off"` from the
-		// section's own default; a read of `mfa.mode` must agree.
-		const { mfa: _absent, ...withoutMfa } = resolved() as Record<string, unknown>;
-		expect(TransitionalConfigSchema.parse(withoutMfa).mfa.mode).toBe("off");
-		expect(readTransitionalConfig(withoutMfa, ["mfa.mode"]).mfa?.mode).toBe("off");
-	});
-
 	it("covers a path under another it reads", () => {
 		const config = readTransitionalConfig(
 			resolved({ http: { port: "8080", trustProxy: false, readinessTimeoutMs: "1500" } }),

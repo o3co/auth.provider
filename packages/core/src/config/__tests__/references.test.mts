@@ -209,11 +209,13 @@ describe("referenceConfProblems — a package's reference holds its modules' sec
 	});
 
 	it("reads the sections of every module declaring the reference, a nested one included", () => {
-		const outer = sectioned("outer", REF_B, "mfa");
-		const inner = sectioned("inner", REF_B, "mfa.factors.totp");
+		const outer = sectioned("outer", REF_B, "outer-section");
+		const inner = sectioned("inner", REF_B, "outer-section.factors.inner");
 		expect(
 			referenceConfProblems({
-				tree: { mfa: { lockout: { threshold: 5 }, factors: { totp: { enabled: true } } } },
+				tree: {
+					"outer-section": { lockout: { threshold: 5 }, factors: { inner: { enabled: true } } },
+				},
 				reference: REF_B,
 				modules: [outer, inner, dpopLike],
 			}),

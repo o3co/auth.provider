@@ -29,6 +29,7 @@ import { describe, expect, it } from "vitest";
 import { buildModules } from "../buildModules.mjs";
 import {
 	expectedSessionRequirements,
+	readMfaMode,
 	readOwnLayers,
 	readSwitches,
 	resolveConfigPaths,
@@ -190,7 +191,7 @@ const DOCUMENTED_ENV: Readonly<Record<string, string>> = {
 
 	// --- multi-factor authentication ----------------------------------
 	// The mode (ADR 2026-09-25-multi-factor-authentication), which the MFA
-	// package reads and the template declares `mfa` from (ADR
+	// module reads and the template declares `mfa` from (ADR
 	// 2026-09-28-session-admission), and the two store switches a composition
 	// installs MFA's stores from.
 	MFA_MODE: "off",
@@ -438,8 +439,10 @@ describe("the shipped config boots with every documented override supplied as a 
 			maxConcurrentFetches: 4,
 			cacheMaxAgeMs: 60000,
 		});
-		// ADR 2026-09-25-multi-factor-authentication.
-		expect(config.mfa?.mode).toBe("off");
+		// ADR 2026-09-25-multi-factor-authentication. The mode is read before
+		// boot, by the template, and handed to no module here.
+		expect(readMfaMode(readShippedSwitches(DOCUMENTED_ENV))).toBe("off");
+		expect(config).not.toHaveProperty("mfa");
 		expect(config.endpoints.mfa?.url).toBe("/account/mfa");
 		expect(config.mfaFactorStore?.adapter).toBe("redis");
 		expect(config.mfaTransactionStore?.adapter).toBe("redis");
@@ -533,10 +536,9 @@ describe("the shipped config boots with every documented override supplied as a 
 		}
 	});
 
-	it("parses MFA_MODE=off before boot and at boot, where the shipped configuration expects no session requirement", async () => {
-		expect(readShippedSwitches({ ...DOCUMENTED_ENV, MFA_MODE: "off" }).mfa?.mode).toBe("off");
+	it("reads MFA_MODE=off before boot, where the shipped configuration expects no session requirement", async () => {
+		expect(readMfaMode(readShippedSwitches({ ...DOCUMENTED_ENV, MFA_MODE: "off" }))).toBe("off");
 		const parsed = await bootParsed({ ...DOCUMENTED_ENV, MFA_MODE: "off" });
-		expect(parsed.mfa.mode).toBe("off");
 		expect(parsed.sessionRequirements).toEqual({ expected: [] });
 	});
 
@@ -663,8 +665,12 @@ describe("the shipped config boots with every documented override supplied as a 
 			});
 		}
 
-		it("refuses MFA_MODE that is none of the three before boot, naming mfa.mode", () => {
-			expect(() => readShippedSwitches({ ...DOCUMENTED_ENV, MFA_MODE: "on" })).toThrow(/mfa\.mode/);
+		it("refuses MFA_MODE that is none of the three before boot, naming mfa.mode", async () => {
+			const env = { ...DOCUMENTED_ENV, MFA_MODE: "on" };
+			expect(() => expectedSessionRequirements(readShippedSwitches(env))).toThrow(
+				new RangeError('mfa.mode must be "off", "optional" or "required"'),
+			);
+			await expect(bootParsed(env)).rejects.toThrow(/mfa\.mode/);
 		});
 
 		for (const mode of ["optional", "required"] as const) {

@@ -308,8 +308,7 @@ function declaredDefault(schema: z.ZodType): { readonly value: unknown } | undef
  * schema as `schema` declares it there (wrappers, coercions, checks and
  * transforms included), under objects that hold only the picked keys. An
  * ancestor of a picked path is optional unless `schema` declares a default
- * for it; then an absent ancestor reads as that default (a picked `mfa.mode`
- * with no `mfa` section is the section's default mode). A path under another
+ * for it; then an absent ancestor reads as that default. A path under another
  * picked path is covered by it.
  *
  * A path `schema` does not declare as one schema (a key no object on the way
