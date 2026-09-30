@@ -206,13 +206,25 @@ export const mfaConfigSchema = z.object(
 	{ error: sectionError },
 );
 
+/** `mfa.page`, the MFA page a step-up starts on: a section holding its `url`. */
+const mfaPageSchema = z.object(
+	{ url: z.string({ error: "must be a string" }) },
+	{ error: sectionError },
+);
+
 /**
  * What the MFA module's section schema checks before any factory runs: the
- * mode, and every other key handed on unread, for {@link readMfaSettings}. A
- * missing section or mode reads as unset, which the module refuses as it
- * refuses `off`.
+ * mode, the page's shape, and every other key handed on unread, for
+ * {@link readMfaSettings}. A missing section or mode reads as unset, which
+ * the module refuses as it refuses `off`; a missing page or an empty url is
+ * the module's to refuse.
  */
-export const mfaSectionSchema = mfaConfigSchema.pick({ mode: true }).partial().loose().optional();
+export const mfaSectionSchema = mfaConfigSchema
+	.pick({ mode: true })
+	.extend({ page: mfaPageSchema })
+	.partial()
+	.loose()
+	.optional();
 
 /** What the MFA module's settings parse: every key of {@link mfaConfigSchema} but the mode. */
 const mfaModuleSettingsSchema = mfaConfigSchema.omit({ mode: true });

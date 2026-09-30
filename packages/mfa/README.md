@@ -58,7 +58,7 @@ A key your `application.conf` sets shadows the substitution `reference.conf` mak
 
 **Refused**, each naming the key and quoting no key or id.
 
-- Before any factory runs (`config-validation-failed`, the key's path with its section's): `mfa.mode` outside `off`, `optional` and `required`; in `mfa-totp-factor`, a parameter out of its range, an algorithm it does not take, an `enabled` that is no switch, or an issuer outside its rule; `mfa-totp-factor` missing, because `reference.conf` is not layered; either section written as a value rather than a section of keys.
+- Before any factory runs (`config-validation-failed`, the key's path with its section's): `mfa.mode` outside `off`, `optional` and `required`; an `mfa.page` that is not a section with a string `url`; in `mfa-totp-factor`, a parameter out of its range, an algorithm it does not take, an `enabled` that is no switch, or an issuer outside its rule; `mfa-totp-factor` missing, because `reference.conf` is not layered; either section written as a value rather than a section of keys.
 - By the MFA module's factory, a `RangeError` whose message starts with the key: `mfa.mode` `off` or unset, which a missing `mfa` section reads as; an empty ring or one without `MFA_ENCRYPTION_KEY`; a key that is not canonical base64 of 32 bytes; a duplicate id — a fingerprint that equals a written id among them — or one outside `A-Za-z0-9_-` (1 to 64 characters); one key listed twice, whatever ids it is written under; a transaction's life outside 60 to 1800 seconds, its attempts outside 1 to 10, or a lock core's rule refuses.
 - By the TOTP factor's factory: for a factor that is on and has no issuer written, an `oauth.jwt.issuer` with no host to default it to (naming `MFA_TOTP_FACTOR_ISSUER`).
 
