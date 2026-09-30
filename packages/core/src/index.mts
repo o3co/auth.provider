@@ -553,6 +553,7 @@ export {
 	type MailSender,
 	type MailSendResult,
 } from "./mail/types.mjs";
+export { type MailSendOutcome, mailSendOutcome } from "./mail/outcome.mjs";
 // MFA — the second-factor contract (the manifest group below exports its
 // MfaFactor name)
 export type {

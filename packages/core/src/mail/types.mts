@@ -59,9 +59,10 @@ export interface MailSender {
 	readonly kind: string;
 	/**
 	 * Resolves with {@link MailSendResult}; rejects on anything else, an
-	 * outage the provider answers `503`, never "sent". The provider reads a
-	 * resolved value that is neither answer as an outage too. A rejection's
-	 * loggable projection (`loggableError`) carries nothing of the mail.
+	 * outage the provider answers `503`, never "sent". The provider reads what
+	 * it resolved with through `mailSendOutcome`, so any other value is an
+	 * outage too. A rejection's loggable projection (`loggableError`) carries
+	 * nothing of the mail.
 	 */
 	send(mail: MailSend): Promise<MailSendResult>;
 }
