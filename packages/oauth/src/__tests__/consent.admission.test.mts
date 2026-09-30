@@ -43,11 +43,12 @@ import {
 	type UserSession,
 	type UserSessionStore,
 } from "@o3co/auth-provider-core";
-import { GrantRegistry, resolverForTests } from "@o3co/auth-provider-core/testing";
+import { resolverForTests } from "@o3co/auth-provider-core/testing";
 import express from "express";
 import request from "supertest";
 import { describe, expect, it, vi } from "vitest";
 import { createOAuthRouter } from "#/routes.mjs";
+import { authorizationServerRegistry } from "./_helpers/authorizationServerRegistry.mjs";
 import { createMockLogger } from "./_helpers/mockLogger.mjs";
 
 const CLIENT_ID = "third-party-chat";
@@ -145,7 +146,7 @@ const makeApp = async (opts: {
 	const pendingConsentStore = createMemoryPendingConsentStore();
 	const logger = createMockLogger();
 	const { router } = await createOAuthRouter(express, {
-		registry: new GrantRegistry(),
+		registry: authorizationServerRegistry(),
 		config: {
 			oauth: { jwt: { issuer: ISSUER }, oidcMode: "dual", grants: {} },
 			rateLimit: { failMode: "open" as const },

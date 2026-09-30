@@ -30,7 +30,10 @@ const RESERVED_FIELDS = new Set(["issuer", "id_token_signing_alg_values_supporte
  * but omits the JWKS-contributing module fails at boot instead of serving a
  * document with no `jwks_uri`. `authorization_endpoint` is not: RFC 8414 §2
  * requires it only when a grant uses it, which {@link checkAuthorizationEndpoint}
- * holds against `response_types_supported`.
+ * holds against `response_types_supported`. A document without it is an
+ * authorization server's and not an OpenID Provider's — OpenID Connect
+ * Discovery §3 requires the endpoint of every OP — and is served at both
+ * discovery paths all the same, where a resource server finds the keys.
  */
 const REQUIRED_FIELDS = [
 	"issuer",

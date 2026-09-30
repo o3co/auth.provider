@@ -400,6 +400,8 @@ const issuerOf = (components: Readonly<Record<string, unknown>>): string | undef
  * as a failed contribution factory) for one its kind's projection could not
  * answer for:
  *
+ * - a `grants` value that is not an object: the grant resolver would list the
+ *   name as registered while `get` answered no handler for it;
  * - an `mfaFactors` factor whose `kind` is not its key: the resolver answers
  *   by key and a record's kind is read back through it, so a misfiled factor
  *   would verify another kind's records;
@@ -421,6 +423,16 @@ function checkNameKeyedValue(
 	value: unknown,
 	issuer: string | undefined,
 ): unknown {
+	if (kind === "grants") {
+		// What `/oauth/token` dispatches to, and what the resolver lists as
+		// registered: one answer to both only when the value is a handler.
+		if (typeof value !== "object" || value === null) {
+			throw new RangeError(
+				`grants "${name}": the factory must answer a grant handler, not ${value === null ? "null" : typeof value}`,
+			);
+		}
+		return value;
+	}
 	if (kind === "mfaFactors") {
 		if (value === null) return value;
 		if ((value as { kind?: unknown } | undefined)?.kind !== name) {

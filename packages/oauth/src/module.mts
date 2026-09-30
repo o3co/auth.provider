@@ -304,9 +304,18 @@ export const oauthModule = (_params: { config: AppConfig }): Module => {
 					// wired rather than accept an unchecked `jti`, so without a store
 					// all three endpoints would refuse the method.
 					const clientAssertionSupported = deps.replaySeenSet !== undefined;
+					// The authorization endpoint, and what a client sends to it — the
+					// response type, PKCE, request_uri, acr_values — and a document
+					// client, which uses no other grant, exist only with the grant that
+					// redeems what `/authorize` issues. Read off the same resolver as
+					// `grant_types_supported`, as the router reads it to mount `/authorize`.
+					const authorizationEndpoint =
+						deps.grantHandlerResolver.get("authorization_code") !== undefined;
 					const cimdSupported =
+						authorizationEndpoint &&
 						(deps.config as { oauth?: { clientIdMetadataDocuments?: { enabled?: unknown } } }).oauth
-							?.clientIdMetadataDocuments?.enabled === true && deps.consentStore !== undefined;
+							?.clientIdMetadataDocuments?.enabled === true &&
+						deps.consentStore !== undefined;
 					// RFC 8414 §2: an omitted `grant_types_supported` means
 					// `["authorization_code", "implicit"]`, which would advertise an
 					// implicit flow this AS does not implement. Read straight off the
@@ -318,28 +327,23 @@ export const oauthModule = (_params: { config: AppConfig }): Module => {
 					const grantTypesSupported = [...deps.grantHandlerResolver.entries()].map(
 						([grantType]) => grantType,
 					);
-					// The authorization endpoint, and what a client sends to it — the
-					// response type, PKCE, request_uri, acr_values — exist only with
-					// the grant that redeems what it issues. Read off the same
-					// resolver as `grant_types_supported`, as the router reads it to
-					// mount `/authorize`.
-					const authorizationEndpoint =
-						deps.grantHandlerResolver.get("authorization_code") !== undefined;
 					// The entries `/authorize` answers from: the configured table less
 					// what nothing this composition installs can satisfy, computed as
-					// the router computes it (which says at boot what it dropped). See
-					// ADR 2026-09-25-multi-factor-authentication.
-					const acrValuesSupported = Object.keys(
-						vouchableAcrValues(
-							readAcrTable(
-								(deps.config as { oauth?: { authorize?: { acrValues?: unknown } } }).oauth
-									?.authorize?.acrValues,
-							),
-							deps.federationProviders,
-							deps.config,
-							stepUpReach(Array.from(deps.sessionRequirementResolver.entries(), ([, r]) => r)),
-						).table,
-					);
+					// the router computes it (which says at boot what it dropped). None
+					// without `/authorize`.
+					const acrValuesSupported = !authorizationEndpoint
+						? []
+						: Object.keys(
+								vouchableAcrValues(
+									readAcrTable(
+										(deps.config as { oauth?: { authorize?: { acrValues?: unknown } } }).oauth
+											?.authorize?.acrValues,
+									),
+									deps.federationProviders,
+									deps.config,
+									stepUpReach(Array.from(deps.sessionRequirementResolver.entries(), ([, r]) => r)),
+								).table,
+							);
 					return {
 						// oauth owns the authorization-server surface, so it is the
 						// provider root: this is the explicit signal that core should
@@ -443,7 +447,7 @@ export const oauthModule = (_params: { config: AppConfig }): Module => {
 							// otherwise — an RP that sends `acr_values` to a server with no
 							// table gets `unmet_authentication_requirements`, and the metadata
 							// says so.
-							...(authorizationEndpoint && acrValuesSupported.length > 0
+							...(acrValuesSupported.length > 0
 								? { acr_values_supported: acrValuesSupported }
 								: {}),
 							...(logoutSupported

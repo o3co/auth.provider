@@ -185,7 +185,9 @@ export const createOAuthRouter = async (
 	}: {
 		/**
 		 * Where `/oauth/token` looks a `grant_type` up, and whether `/authorize`
-		 * is mounted: only with the `authorization_code` grant. Only `get` is read —
+		 * is mounted: only when it holds the `authorization_code` grant as the
+		 * router is built — `/token` reads it per request, `/authorize` once
+		 * here. Only `get` is read —
 		 * `grant_types_supported` is derived in `module.mts` from the planner's
 		 * resolver, not from this one — so this is the contract: the
 		 * planner's `GrantHandlerResolver` satisfies it, and so does a test's
@@ -299,13 +301,22 @@ export const createOAuthRouter = async (
 	const options = resolveOAuthOptions(config, logger);
 	// `/authorize` answers `acr_values` only from the entries this composition
 	// can satisfy — the same table discovery advertises — and an entry dropped
-	// is said once, here, at composition (ADR
-	// 2026-09-25-multi-factor-authentication).
-	// What the registered requirements can add to a session by a step-up: read
-	// once here, after every name-keyed contribution registered.
-	const reach = stepUpReach(Array.from(requirements.entries(), ([, r]) => r));
-	const acrValues = vouchableAcrValues(options.acrValues, getFederationProviders(), config, reach);
-	logUnsatisfiableAcrValues(acrValues.dropped, reach, logger);
+	// is said once, here, at composition. With no `/authorize` there is no
+	// table to answer from, and nothing to say. What the registered
+	// requirements can add to a session by a step-up is read once here, after
+	// every name-keyed contribution registered.
+	let acrTable: ReturnType<typeof vouchableAcrValues>["table"] | undefined;
+	if (authorizationEndpoint) {
+		const reach = stepUpReach(Array.from(requirements.entries(), ([, r]) => r));
+		const acrValues = vouchableAcrValues(
+			options.acrValues,
+			getFederationProviders(),
+			config,
+			reach,
+		);
+		logUnsatisfiableAcrValues(acrValues.dropped, reach, logger);
+		acrTable = acrValues.table;
+	}
 	// `iss` is a property of the deployment, never of a request: a fallback to
 	// the `Host` header would let a caller choose the issuer of its tokens. A
 	// canonical issuer is required and is the only source, resolved once here
@@ -325,14 +336,15 @@ export const createOAuthRouter = async (
 	// below — /authorize, /token, /revoke — so a document client is the same
 	// client everywhere.
 	//
-	// Wired only with a consent store, the gate discovery applies: a document
-	// client is never first-party, so `/authorize` refuses it without one, and
-	// resolving it anyway would make each request a guarded outbound HTTPS
-	// fetch before the refusal — an amplification surface where no request
-	// can succeed.
+	// Wired only with a consent store and the authorization_code grant, the
+	// gate discovery applies: a document client is never first-party, so
+	// `/authorize` refuses it without a consent store, and it may use no other
+	// grant. Resolving it anyway would make each request a guarded outbound
+	// HTTPS fetch before the refusal — an amplification surface where no
+	// request can succeed.
 	const cimd = options.clientIdMetadataDocuments;
 	const clientRepository: ClientRepository =
-		cimd.enabled && consentStore !== undefined
+		cimd.enabled && consentStore !== undefined && authorizationEndpoint
 			? withClientIdMetadataDocuments(registeredClients, {
 					allowedScopes: cimd.allowedScopes,
 					allowedAudiences: cimd.allowedAudiences,
@@ -394,7 +406,7 @@ export const createOAuthRouter = async (
 	// One handler instance behind both methods, so a check can never be
 	// mounted on GET and forgotten on POST. None without the grant.
 	const authorizeHandler =
-		authorizationEndpoint && codeRepository !== undefined
+		authorizationEndpoint && codeRepository !== undefined && acrTable !== undefined
 			? createAuthorizeHandler({
 					clientRepository,
 					codeRepository,
@@ -410,7 +422,7 @@ export const createOAuthRouter = async (
 					consentUrl: () => config.endpoints.consent?.url ?? "/consent",
 					consentStore,
 					pendingConsentStore,
-					oauth: { ...options, acrValues: acrValues.table },
+					oauth: { ...options, acrValues: acrTable },
 					// `/authorize` reads the cookie's session through admission with the
 					// router's own slots — the durable store (optional, as the slot is: a
 					// composition without session-backed login wires none), the
@@ -507,11 +519,12 @@ export const createOAuthRouter = async (
 		!!federationTokenStore &&
 		!!refreshTokenFamilyRevocation;
 
-	// Mounted below only with both consent stores; one without
-	// the other is refused there. Decided once, here, for the parsers and the
-	// mount alike — and by truthiness, so a JS caller's `null` is no store
-	// rather than a parser scoped to a route that is never mounted.
-	const consentMounted = !!consentStore && !!pendingConsentStore;
+	// Mounted below only with both consent stores, and only beside the
+	// `/authorize` whose requests it parks; one store without the other is
+	// refused there. Decided once, here, for the parsers and the mount alike —
+	// and by truthiness, so a JS caller's `null` is no store rather than a
+	// parser scoped to a route that is never mounted.
+	const consentMounted = !!consentStore && !!pendingConsentStore && authorizeHandler !== undefined;
 
 	router
 		.all(
