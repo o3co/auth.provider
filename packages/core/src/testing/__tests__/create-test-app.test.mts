@@ -14,9 +14,16 @@
  * limitations under the License.
  */
 import { describe, expect, it } from "vitest";
+import type { LifecycleRegistrar } from "#/adapters/AdapterFactory.mjs";
 import { defineModule } from "../../modules/manifest/index.mjs";
 import { createTestApp } from "../create-test-app.mjs";
 import { makeValidAppConfig } from "../fixtures/valid-config.mjs";
+
+declare module "@o3co/auth-provider-core" {
+	interface ComponentMap {
+		readonly testAppRegistrarHolder: number;
+	}
+}
 
 describe("createTestApp", () => {
 	it("boots with no modules and synthesised bootstrap components", async () => {
@@ -50,6 +57,26 @@ describe("createTestApp", () => {
 			bootstrapComponents: { config, pathResolver: (s) => s },
 		});
 		// No assertion on internal state; existence + dispose proves the override path compiled.
+		await handle.dispose();
+	});
+
+	it("reads the cleanup allowance live, as the production handle does", async () => {
+		let registrar: LifecycleRegistrar | undefined;
+		const holder = defineModule<never, "lifecycleRegistrar">({
+			name: "test:registrar-holder",
+			optional: ["lifecycleRegistrar"],
+			provides: {
+				testAppRegistrarHolder: (deps) => {
+					registrar = deps.lifecycleRegistrar;
+					return 1;
+				},
+			},
+			lifecycle: { testAppRegistrarHolder: { eager: true } },
+		});
+		const handle = await createTestApp({ modules: [holder] });
+		expect(handle.cleanupAllowanceMs).toBeUndefined();
+		registrar?.register(async () => {}, { tailMs: 60_000 });
+		expect(handle.cleanupAllowanceMs).toBe(60_000);
 		await handle.dispose();
 	});
 });
