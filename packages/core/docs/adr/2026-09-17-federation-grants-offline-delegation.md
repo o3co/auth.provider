@@ -751,6 +751,19 @@ a consent. A refused renewal retires that renewal's pointer, conditionally on
 its handle. The POST additionally refuses an explicit cross-site
 `Sec-Fetch-Site`. Events: `federation.grant.authorization_failed` (D18).
 
+**Amended 2026-09-30 (#728): the POST is held to the deployment's
+`csrfGuard`.** In place of its own `Sec-Fetch-Site` check, the POST asks the
+`csrfGuard` slot's `check` — the one browser-origin policy the session module
+provides, which `/session/login` and device verification apply too — before
+it reads the session or the challenge, and answers a refusal `403
+invalid_request` in its own vocabulary. A foreign `Origin`, `Origin: null`
+included, is refused whatever it carries; an origin in
+`session.csrf.trustedOrigins` is accepted; an answer with no origin signal
+needs the guard's double-submit token. So the deployment's page is served with
+`Referrer-Policy: same-origin`, not `no-referrer`: a form posted from a
+no-referrer page carries `Origin: null`. The module requires the slot when
+grants are enabled.
+
 The grant ID in the redirect is not proof of anything. Every grant-addressed
 route requires `sub` (D9), so a grant that belongs to another user cannot be
 adopted by mistake, and the status response carries `upstream` so the client
