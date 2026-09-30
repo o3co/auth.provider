@@ -1250,6 +1250,48 @@ describe("tokenExchangeModule booted through createApp — revocation", () => {
 		);
 	});
 
+	// Core reads every grant's policy decision; this grant's answer to one
+	// that is neither allow nor deny is the other grants'.
+	describe("a policy decision that is neither allow nor deny", () => {
+		it.each([
+			["another outcome", { outcome: "denied", error: "access_denied" }],
+			["another case", { outcome: "Deny" }],
+			["no outcome", {}],
+			["null", null],
+		])(
+			"answers a decision with %s as core's policy evaluation does: 500 server_error",
+			async (_label, decision) => {
+				const policy: GrantPolicyHook = {
+					kind: "test",
+					evaluate: async () => decision as unknown as GrantPolicyDecision,
+				};
+				const { grant } = await boot([
+					defineModule({
+						name: "test:invalid-grant-policy",
+						provides: { grantPolicy: () => policy },
+					}),
+				]);
+				const { result } = await exchange(grant, {
+					subject_token: await signSelfIssuedAccessToken({}),
+					subject_token_type: ACCESS_TOKEN_TYPE,
+				});
+				expect(result).toEqual({
+					status: 500,
+					error: "server_error",
+					errorDescription: "policy_decision_invalid",
+				});
+				const otherGrants = await evaluateGrantPolicy(
+					policy,
+					{ grantType: TOKEN_EXCHANGE_GRANT_TYPE },
+					{ issuer: ISSUER },
+					[],
+					{ logger: undefined },
+				);
+				expect(otherGrants).toEqual({ ok: false, result });
+			},
+		);
+	});
+
 	// Core's ExchangeTokenValidator contract: `null` means the token is not
 	// acceptable (the grant answers `invalid_request`, RFC 8693 §2.2.2), a
 	// throw means the answer is not knowable (`503 temporarily_unavailable`).

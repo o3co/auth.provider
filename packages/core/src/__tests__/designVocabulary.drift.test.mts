@@ -449,6 +449,11 @@ const VOCABULARY: readonly VocabularyRow[] = [
 		definition: /(?:function|const)\s+policyOutOfBounds\b/,
 	},
 	{
+		concept: "fail-closed grant-policy evaluation — the one reading of a decision",
+		home: "packages/core/src/grants/grantPolicy.mts",
+		definition: /(?:function|const)\s+readGrantPolicyDecision\b/,
+	},
+	{
 		concept: "key-ring sealing envelope — sealing (#593)",
 		home: "packages/core/src/sealing/envelope.mts",
 		definition: /(?:function|const)\s+sealWithKeyRing\b/,
@@ -650,7 +655,8 @@ function walk(dir: string, out: string[]): void {
  * Shipped sources allowed to call `grantPolicy.evaluate(` other than the home,
  * each with why. A grant that consults the policy anywhere else re-implements
  * the home's fail-closed rules inline, which the definition-only guard above
- * cannot see.
+ * cannot see. Each still reads the decision with the home's
+ * `readGrantPolicyDecision`, once per call.
  */
 const POLICY_EVALUATE_EXEMPTIONS: Readonly<Record<string, { calls: number; reason: string }>> = {
 	"packages/oauth/src/routes/authorize.mts": {
@@ -665,14 +671,35 @@ const POLICY_EVALUATE_EXEMPTIONS: Readonly<Record<string, { calls: number; reaso
 	},
 };
 
+/** `source` with its comments removed, so a mention in one is not code. */
+const withoutComments = (source: string): string =>
+	source.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:])\/\/.*$/gm, "$1");
+
 /** `grantPolicy.evaluate(` calls in `source`, comments removed so a mention is not a call. */
 const policyEvaluateCalls = (source: string): number =>
-	(
-		source
-			.replace(/\/\*[\s\S]*?\*\//g, "")
-			.replace(/(^|[^:])\/\/.*$/gm, "$1")
-			.match(/grantPolicy[\s\S]{0,40}?\.evaluate\s*\(/g) ?? []
-	).length;
+	(withoutComments(source).match(/grantPolicy[\s\S]{0,40}?\.evaluate\s*\(/g) ?? []).length;
+
+/**
+ * What `source` does with a grant policy's decision outside the home, comments
+ * removed: its `readGrantPolicyDecision(` calls, and its `outcome`s. A file
+ * exempt from calling the home's evaluation counts every `outcome` its code
+ * names: it holds a raw decision, and any read of that field is a second
+ * reading. Any other file counts its comparisons of an `outcome` with the
+ * string `allow` or `deny`.
+ */
+const policyDecisionReads = (
+	source: string,
+	exempt: boolean,
+): { reading: number; outcome: number } => {
+	const code = withoutComments(source);
+	const outcome = exempt
+		? /\boutcome\b/g
+		: /\.outcome\s*[!=]==?\s*["'`](?:allow|deny)["'`]|["'`](?:allow|deny)["'`]\s*[!=]==?\s*[\w$.?]*\.outcome\b/g;
+	return {
+		reading: (code.match(/\breadGrantPolicyDecision\s*\(/g) ?? []).length,
+		outcome: (code.match(outcome) ?? []).length,
+	};
+};
 
 /** Session admission's home: the acr selection is its own step, over the input `requirementSession` builds. */
 const REQUIREMENT_RULE_HOME = "packages/core/src/session-admission/admit.mts";
@@ -684,7 +711,7 @@ const REQUIREMENT_RULE_HOME = "packages/core/src/session-admission/admit.mts";
  * no call site passes one.
  */
 const requirementRuleCalls = (source: string): string[] => {
-	const code = source.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:])\/\/.*$/gm, "$1");
+	const code = withoutComments(source);
 	const calls: string[] = [];
 	// Its definition (`function selectAcr(`) is not a call.
 	for (const match of code.matchAll(/(?<!function\s)\bselectAcr\s*\(/g)) {
@@ -2058,6 +2085,31 @@ describe("design-vocabulary map (docs/design-vocabulary.md)", () => {
 		expect(found, "call evaluateGrantPolicy from core/src/grants/grantPolicy.mts").toEqual(
 			expected,
 		);
+	});
+
+	it("reads a grant policy's decision through the home: an exempt file calls it once per evaluation and names no outcome, and no other file compares one", () => {
+		const home = join(repoRoot, "packages/core/src/grants/grantPolicy.mts");
+		const found = Object.fromEntries(
+			listShippedSources()
+				.filter((file) => file !== home)
+				.map((file) => [relative(repoRoot, file).split(sep).join("/"), file] as const)
+				.map(([rel, file]) => {
+					const exempt = Object.hasOwn(POLICY_EVALUATE_EXEMPTIONS, rel);
+					return [rel, exempt, policyDecisionReads(readFileSync(file, "utf8"), exempt)] as const;
+				})
+				.filter(([, exempt, reads]) => exempt || reads.reading > 0 || reads.outcome > 0)
+				.map(([rel, , reads]) => [rel, reads] as const),
+		);
+		const expected = Object.fromEntries(
+			Object.entries(POLICY_EVALUATE_EXEMPTIONS).map(([rel, { calls }]) => [
+				rel,
+				{ reading: calls, outcome: 0 },
+			]),
+		);
+		expect(
+			found,
+			"read the decision with readGrantPolicyDecision (core/src/grants/grantPolicy.mts)",
+		).toEqual(expected);
 	});
 
 	it("flags a read of the deployment section by every shape: member, element, destructuring, alias, helper, reflection", () => {
