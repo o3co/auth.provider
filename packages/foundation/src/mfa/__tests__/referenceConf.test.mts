@@ -18,8 +18,8 @@
  * The package's `config/reference.conf`: it holds the section of the module
  * that keeps MFA factors in the Store and nothing else, which the section's
  * schema parses without losing a path — core's `packageReferenceProblems`,
- * run over a module declaring the section as the Store adapter's will. Each
- * URL is bound to the variable named after its path, and has no default.
+ * run over a module that declares the section and the reference. Each URL is
+ * bound to the variable named after its path, and has no default.
  */
 
 import { readFileSync } from "node:fs";

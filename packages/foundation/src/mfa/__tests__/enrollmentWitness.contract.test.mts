@@ -16,21 +16,25 @@
 
 /**
  * The enrollment witness's contract suite (`@o3co/auth-provider-test-kit`)
- * over the test kit's fake Store, as far as it runs without the Store
- * adapter's `markMfaEnrolled`: the witness is read back through
- * `HttpUserRepository.authenticate`, and written by a stand-in that posts
- * the mark as the wire contract says and reads an answer other than `204`
- * through `mfaStoreStatusError`. The adapter's own `markMfaEnrolled` takes
- * the stand-in's place.
+ * over the test kit's fake Store. The witness is read back through
+ * `HttpUserRepository.authenticate`. `HttpUserRepository` has no
+ * `markMfaEnrolled`, so the witness is written by this file's stand-in, which
+ * posts the mark as the wire contract says and reads an answer other than
+ * `204` through `mfaStoreStatusError`; a check here fails once the repository
+ * writes the witness itself, so the suite then runs over that.
  */
 
-import type { MfaStoreMarkEnrolledRequest, UserRepository } from "@o3co/auth-provider-core";
+import {
+	type MfaStoreMarkEnrolledRequest,
+	supportsMfaEnrollmentWitness,
+	type UserRepository,
+} from "@o3co/auth-provider-core";
 import {
 	type MfaEnrollmentWitnessHarness,
 	mfaEnrollmentWitnessContract,
 	startFakeStore,
 } from "@o3co/auth-provider-test-kit";
-import { describe, it } from "vitest";
+import { describe, expect, it } from "vitest";
 import { HttpUserRepository } from "#/index.mjs";
 import { mfaStoreStatusError } from "#/mfa/storeFailure.mjs";
 
@@ -77,6 +81,17 @@ async function build(): Promise<MfaEnrollmentWitnessHarness> {
 		close: () => fake.close(),
 	};
 }
+
+describe("the witness's write side", () => {
+	it("is this file's stand-in: HttpUserRepository has no markMfaEnrolled", () => {
+		const repository = new HttpUserRepository({
+			authenticateUrl: "https://store.example/authenticate",
+			authenticateByTokenUrl: "https://store.example/authenticate-by-token",
+			timeout: 5000,
+		});
+		expect(supportsMfaEnrollmentWitness(repository)).toBe(false);
+	});
+});
 
 describe("the enrollment witness over the fake Store, read back through HttpUserRepository", () => {
 	for (const contractCase of mfaEnrollmentWitnessContract({ build, withOutage: true })) {
