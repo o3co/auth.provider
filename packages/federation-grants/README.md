@@ -192,6 +192,7 @@ Exported from [`src/index.mts`](src/index.mts); the linked file holds each defin
 
 - `federationGrantsModules` — the pair to install — and its two halves `federationGrantsModule` and `federationGrantBackgroundModule`, with `federationGrantsConfigSchema` — [`module.mts`](src/module.mts).
 - `createFederationGrantRouter`, `FederationGrantRouterOptions`, `createDisabledFederationGrantRouter`, `FEDERATION_GRANTS_RATE_LIMIT_PREFIX` — [`routes.mts`](src/routes.mts). The client routes with their middleware chain, in the order that is the security property (correlation, throttle, parsing, client authentication), for a root that mounts them itself; and what a disabled deployment mounts instead. `createFederationGrantRouter` holds its `issuer` to core's `checkCanonicalIssuer` — the rule `oauth.jwt.issuer` is held to — and refuses to be built on anything else: a `connect_uri` could not be built on a `mailto:` or `urn:`.
+- `FEDERATION_GRANTS_ADMISSION_ACTIONS`, `FederationGrantsAdmissionAction` — [`admissionActions.mts`](src/admissionActions.mts). The actions the browser half admits, which `federationGrantsModule` registers; a root that mounts the routes itself registers them under `contributes.admissionActions`.
 - `createFederationGrantTokenHandler`, `FederationGrantTokenHandlerOptions` — [`tokenRoute.mts`](src/tokenRoute.mts); `createFederationGrantStatusHandler`, `FederationGrantStatusHandlerOptions` — [`statusRoute.mts`](src/statusRoute.mts). Single handlers, without that chain.
 - `createFederationGrantBackground`, `FederationGrantBackground` — [`background.mts`](src/background.mts). The shutdown registry ([below](#shutting-down-without-losing-a-rotated-credential)).
 - `FEDERATION_GRANTS_MOUNT_PATH` — [`types.mts`](src/types.mts).
@@ -513,7 +514,8 @@ a boot error rather than a flow that reads every signed-in user as signed out.
 admitted by core's session admission, on the cookie's claim, as the step's own
 action — `federation_grants.connect`, `federation_grants.consent` (the read
 and the answer) and `federation_grants.callback` (check 3, and again, with
-the same claim, just before the activation), each graded `use`. Admission
+the same claim, just before the activation), each graded `use` as
+`federationGrantsModule` registers it. Admission
 reads the durable session behind the cookie — live, the cookie's own
 subject's, not past its `expiresAt` — the subject's sessions boundary through
 `subjectRevocation`, and the registered session requirements. What stays

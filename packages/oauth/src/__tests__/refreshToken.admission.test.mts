@@ -250,7 +250,7 @@ describe("the refresh grant on admission — a requirement's verdicts", () => {
 		expect(requirement.inputs).toHaveLength(1);
 		const [input] = requirement.inputs;
 		expect(input?.carrier).toBe("token");
-		// The bundled action, the frozen entry itself.
+		// The action the refresh grant registers, with its grade.
 		expect(input?.action).toEqual({ name: "oauth.refresh", grade: "use" });
 		expect(input?.action.grade).toBe("use");
 		expect(input?.subject).toBe(SUBJECT);

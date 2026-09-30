@@ -257,6 +257,8 @@ Core exports the bundled actions as a closed union, `ADMISSION_ACTIONS`, each wi
 
 **Amended 2026-09-29 (module review): a bundled action is its `ADMISSION_ACTIONS` entry itself.** "The bundled consumers' grades are fixed in `ADMISSION_ACTIONS` and not the deployment's to change" holds at run time as well as at compile time: `admitSession` refuses, with a `RangeError` before anything is read, an action whose `name` is a key of `ADMISSION_ACTIONS` unless the object passed is that frozen entry itself — a copy of it, a literal with the same name and grade, and the name with another grade are all refused. So no consumer restates a bundled grade, even correctly, and a deployment's own route cannot take a bundled name, and with it a bundled grade, by writing a literal: its `{ name, grade }` names an action outside the union, as above. `session-admission/admit.mts` holds it; `session-admission/__tests__/admit.test.mts` pins it.
 
+**Amended 2026-09-30 (#733): actions are a contributed vocabulary.** Each consumer registers the actions it admits (`admissionActions`), each with one of core's grades, and passes the name; core keeps the closed list of grades — adding `grants_nothing`, which the device grant declares for `device.lookup` and `device.deny` and the MFA requirement meets on any live session in place of D6's refinement by name — and names no consumer's action: `ADMISSION_ACTIONS` leaves core, and a name nothing registers is refused at the call.
+
 ### D5 — Establishment: `admitPrimary`, the interruption, and the capability to establish
 
 `POST /session/login` reaches a point where the user is verified and nothing has been written. There it calls `admitPrimary(deps, primary)`:
