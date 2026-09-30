@@ -20,14 +20,12 @@ import { makeValidAppConfig } from "#/testing/fixtures/valid-config.mjs";
 
 /**
  * `federationTokenStore.type = "redis"` has to *reach* the composition root
- * before it can select anything. The standalone validates its HOCON against
- * `AppConfigSchema` before `buildModules` runs, and a top-level `z.object`
- * strips keys it does not know, so the switch and the module-internal
- * `redisFederationTokenStore.*` section (the encryption key above all) are
- * declared. Presence-only, like the other `redis*` sections: the defaults stay
- * in `reference.conf` and in `redisFederationTokenStoreModule.configSchema`.
+ * before it can select anything, so the switch is declared. The Redis store's
+ * own settings are its module's section, `redis-federation-token-store`,
+ * which its schema parses; core keeps that section and the path it moved
+ * from, `redisFederationTokenStore`, as written.
  */
-describe("federationTokenStore / redisFederationTokenStore survive AppConfigSchema", () => {
+describe("federationTokenStore and the Redis store's sections survive AppConfigSchema", () => {
 	it("keeps the adapter switch", () => {
 		const parsed = AppConfigSchema.parse({
 			...makeValidAppConfig(),
@@ -53,28 +51,16 @@ describe("federationTokenStore / redisFederationTokenStore survive AppConfigSche
 		expect(AppConfigSchema.parse(makeValidAppConfig()).federationTokenStore).toBeUndefined();
 	});
 
-	it("keeps the Redis module's section, encryption key included", () => {
-		const parsed = AppConfigSchema.parse({
-			...makeValidAppConfig(),
-			redisFederationTokenStore: {
+	it.each(["redis-federation-token-store", "redisFederationTokenStore"])(
+		"keeps %s as written, encryption key included",
+		(section) => {
+			const written = {
 				keyPrefix: "tenant-a:ft:",
-				encryptionMode: "required",
+				encryptionMode: "optional",
 				encryptionKey: "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=",
-			},
-		});
-		expect(parsed.redisFederationTokenStore).toEqual({
-			keyPrefix: "tenant-a:ft:",
-			encryptionMode: "required",
-			encryptionKey: "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=",
-		});
-	});
-
-	it("refuses an encryption mode the store does not have", () => {
-		expect(() =>
-			AppConfigSchema.parse({
-				...makeValidAppConfig(),
-				redisFederationTokenStore: { encryptionMode: "optional" },
-			}),
-		).toThrow();
-	});
+			};
+			const parsed = AppConfigSchema.parse({ ...makeValidAppConfig(), [section]: written });
+			expect((parsed as Record<string, unknown>)[section]).toEqual(written);
+		},
+	);
 });

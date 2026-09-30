@@ -15,21 +15,13 @@
  */
 
 import { defineModule } from "@o3co/auth-provider-core";
-import { z } from "zod";
+import { keyPrefixSection, redisReference } from "../internal/section.mjs";
 import { createRedisSessionFamilyIndex } from "../sessionFamilyIndex.mjs";
 import { createRedisSessionFederationIndex } from "../sessionFederationIndex.mjs";
 import { createRedisSessionRPRegistry } from "../sessionRPRegistry.mjs";
 import { createRedisSubjectRevocation } from "../subjectRevocation.mjs";
 import { createRedisSubjectSessionIndex } from "../subjectSessionIndex.mjs";
 import { createRedisUserSessionStore } from "../userSessionStore.mjs";
-
-const configSchema = z.object({
-	redisSessionStores: z
-		.object({
-			keyPrefix: z.string().default("ss:"),
-		})
-		.default({ keyPrefix: "ss:" }),
-});
 
 /**
  * Bundled module providing the six Redis user-session stores off the
@@ -50,7 +42,8 @@ const configSchema = z.object({
  * do not share one with the sid-keyed stores, so a sid cannot collide with a
  * subject. To override a single subprefix, use the per-adapter constructors.
  *
- * `requires` includes `"config"` because `provides` reads `deps.config`. The
+ * `keyPrefix` is its own section's, `redis-session-stores` (strict);
+ * `redisSessionStores`, the section's old path, refuses boot naming it. The
  * optional `logger` goes to the two stores that report a stored record they
  * cannot read, the user-session store (`user_session_corrupt_envelope`) and
  * the RP registry (`session_rp_registry_corrupt_envelope`); `consoleLogger`
@@ -65,59 +58,53 @@ export const redisSessionStoresModule = defineModule({
 		"sessionFederationIndexClient",
 		"subjectSessionIndexClient",
 		"subjectRevocationClient",
-		"config",
 	] as const,
 	optional: ["logger"] as const,
-	configSchema,
+	section: {
+		schema: keyPrefixSection("ss:"),
+		reference: redisReference(),
+		relocatedFrom: {
+			redisSessionStores: { to: "", environmentVariable: null },
+			"redisSessionStores.keyPrefix": "keyPrefix",
+		},
+	},
 	provides: {
 		userSessionStore: (deps) => {
-			const cfg = (deps.config as unknown as { redisSessionStores: { keyPrefix: string } })
-				.redisSessionStores;
 			return createRedisUserSessionStore({
 				client: deps.userSessionStoreClient,
-				keyPrefix: `${cfg.keyPrefix}us:`,
+				keyPrefix: `${deps.section.keyPrefix}us:`,
 				...(deps.logger !== undefined ? { logger: deps.logger } : {}),
 			});
 		},
 		sessionRPRegistry: (deps) => {
-			const cfg = (deps.config as unknown as { redisSessionStores: { keyPrefix: string } })
-				.redisSessionStores;
 			return createRedisSessionRPRegistry({
 				client: deps.sessionRPRegistryClient,
-				keyPrefix: `${cfg.keyPrefix}rp:`,
+				keyPrefix: `${deps.section.keyPrefix}rp:`,
 				...(deps.logger !== undefined ? { logger: deps.logger } : {}),
 			});
 		},
 		sessionFamilyIndex: (deps) => {
-			const cfg = (deps.config as unknown as { redisSessionStores: { keyPrefix: string } })
-				.redisSessionStores;
 			return createRedisSessionFamilyIndex({
 				client: deps.sessionFamilyIndexClient,
-				keyPrefix: `${cfg.keyPrefix}fi:`,
+				keyPrefix: `${deps.section.keyPrefix}fi:`,
 			});
 		},
 		sessionFederationIndex: (deps) => {
-			const cfg = (deps.config as unknown as { redisSessionStores: { keyPrefix: string } })
-				.redisSessionStores;
 			return createRedisSessionFederationIndex({
 				client: deps.sessionFederationIndexClient,
-				keyPrefix: `${cfg.keyPrefix}fed:`,
+				keyPrefix: `${deps.section.keyPrefix}fed:`,
 			});
 		},
 		subjectSessionIndex: (deps) => {
-			const cfg = (deps.config as unknown as { redisSessionStores: { keyPrefix: string } })
-				.redisSessionStores;
 			return createRedisSubjectSessionIndex({
 				client: deps.subjectSessionIndexClient,
-				keyPrefix: `${cfg.keyPrefix}sub:`,
+				keyPrefix: `${deps.section.keyPrefix}sub:`,
 			});
 		},
 		subjectRevocation: (deps) => {
-			const cfg = (deps.config as unknown as { redisSessionStores: { keyPrefix: string } })
-				.redisSessionStores;
 			return createRedisSubjectRevocation({
 				client: deps.subjectRevocationClient,
-				keyPrefix: `${cfg.keyPrefix}rev:`,
+				keyPrefix: `${deps.section.keyPrefix}rev:`,
 			});
 		},
 	},

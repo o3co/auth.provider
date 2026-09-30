@@ -26,6 +26,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { redisRefreshTokenFamilyStoreModule } from "../src/index.mjs";
 import { makeIoredisClients } from "../src/ioredis.mjs";
 import { testRedis } from "./support/redis.mjs";
+import { capturing } from "./support/section.mjs";
 
 let client: Redis;
 
@@ -60,18 +61,21 @@ describe("refresh-token family wiring — full Redis composition (createApp + re
 			},
 		});
 
-		const config = {
-			...makeValidCoreConfig(),
-			redisRefreshTokenFamilyStore: {
-				keyPrefix: `rtfam:wiring-${Date.now()}:`,
-				casRetryLimit: 3,
+		const config = capturing(
+			{
+				...makeValidCoreConfig(),
+				"redis-refresh-token-family-store": {
+					keyPrefix: `rtfam:wiring-${Date.now()}:`,
+					casRetryLimit: 3,
+				},
 			},
-		};
+			[redisRefreshTokenFamilyStoreModule],
+		);
 		const boot = {
 			config: config as never,
 			pathResolver: (s: string) => s,
 			// Per-purpose client slots — refreshTokenFamilyClient is consumed by
-			// redisRefreshTokenFamilyStoreModule (requires: ["refreshTokenFamilyClient", "config"]).
+			// redisRefreshTokenFamilyStoreModule (requires: ["refreshTokenFamilyClient"]).
 			...makeIoredisClients(client),
 		} satisfies Record<string, unknown> as BootstrapMap;
 

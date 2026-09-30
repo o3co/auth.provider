@@ -54,7 +54,7 @@ export function requireFederationGrantSubjectRevocation(input: {
 	const { module, subjectRevocation, federationGrantStore } = input;
 	if (subjectRevocation === undefined) {
 		throw new Error(
-			`${module}: federationGrants.enabled = true requires a subjectRevocation component. ` +
+			`${module}: federation-grants.enabled = true requires a subjectRevocation component. ` +
 				"A grant outlives the session it was agreed through, so the boundary is the only " +
 				"thing that ends one a user has withdrawn from a replica that never saw the " +
 				"withdrawal (D13). Install the bundled memory pair (single replica only) or an " +

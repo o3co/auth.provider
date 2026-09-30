@@ -21,8 +21,8 @@ import { makeValidAppConfig } from "#/testing/fixtures/valid-config.mjs";
 
 /**
  * The sections core's schema still mirrors, transitionally, for another
- * package's modules: `redisRateLimiter`, the `redis*` store namespaces,
- * `webauthn`. Boot's composed parse applies each
+ * package's modules: `webauthn`, `federation-grants.enabled`, and the stores'
+ * sections presence-only. Boot's composed parse applies each
  * mirror whenever the configuration carries the section, the module that
  * reads it loaded or not; a check here goes when its mirror leaves core.
  *
@@ -37,59 +37,63 @@ import { makeValidAppConfig } from "#/testing/fixtures/valid-config.mjs";
 const base = makeValidAppConfig();
 const parse = (config: unknown) => TransitionalConfigSchema.parse(config);
 
-describe("redisRateLimiter's mirror", () => {
-	it("coerces the env-var spelling of a budget, like memoryRateLimiter", () => {
-		const parsed = parse({
-			...base,
-			redisRateLimiter: { limits: { token: { limit: "120", windowSeconds: "60" } } },
-		});
-		expect(parsed.redisRateLimiter?.limits?.token).toEqual({ limit: 120, windowSeconds: 60 });
+describe("the stores' sections, and the paths they moved from", () => {
+	// Each store module's section schema coerces and refuses; core keeps its
+	// section and the path it moved from as written, for the module and for
+	// the relocation refusal.
+	const WRITTEN = { limits: { token: { limit: "0", windowSeconds: 1e13 } }, bogus: true };
+
+	it.each([
+		"core-rate-limiter-memory",
+		"redis-rate-limiter",
+		"redis-consent-store",
+		"memoryRateLimiter",
+		"redisRateLimiter",
+		"redisConsentStore",
+	])("keeps %s as written", (section) => {
+		expect((parse({ ...base, [section]: WRITTEN }) as Record<string, unknown>)[section]).toEqual(
+			WRITTEN,
+		);
+		expect(
+			(AppConfigSchema.parse({ ...base, [section]: WRITTEN }) as Record<string, unknown>)[section],
+		).toEqual(WRITTEN);
 	});
 
-	it("refuses a budget that would read as configured and limit nothing", () => {
-		expect(() =>
-			parse({ ...base, redisRateLimiter: { defaultLimit: { limit: 0, windowSeconds: 60 } } }),
-		).toThrow();
-	});
-
-	it("refuses a window longer than a year, the ceiling of every duration an operator writes", () => {
-		// A typo guard: 1e13 seconds is a window no Redis key can carry and no
-		// Date can end, and the adapter refusing it at boot is the second line.
-		for (const section of ["redisRateLimiter", "memoryRateLimiter"] as const) {
-			for (const spec of [
-				{ defaultLimit: { limit: 5, windowSeconds: 31_536_001 } },
-				{ limits: { token: { limit: 5, windowSeconds: 1e13 } } },
-			]) {
-				expect(
-					() => parse({ ...base, [section]: spec }),
-					`${section} ${JSON.stringify(spec)}`,
-				).toThrow();
-			}
-			expect(
-				parse({ ...base, [section]: { defaultLimit: { limit: 5, windowSeconds: 31_536_000 } } })[
-					section
-				]?.defaultLimit,
-			).toEqual({ limit: 5, windowSeconds: 31_536_000 });
-		}
-	});
-
-	it("is absent when omitted — the default lives in the module", () => {
-		expect(parse(base).redisRateLimiter).toBeUndefined();
+	it("keeps rateLimit.failMode as written, beside the login budget", () => {
+		expect(
+			parse({ ...base, rateLimit: { ...base.rateLimit, failMode: "sometimes" } }).rateLimit,
+		).toMatchObject({ failMode: "sometimes" });
 	});
 });
 
-describe("redisFederationGrantStore's listing allowance", () => {
-	it("is held to a year, the ceiling of every duration an operator writes", () => {
-		// Past the Date range it is a deadline Redis refuses after the script
-		// has reserved the grant in its subject's index, which is left with no
-		// TTL; the store refuses it too, as the second line.
-		const allowance = (listingAllowanceMs: unknown) =>
-			parse({ ...base, redisFederationGrantStore: { listingAllowanceMs } })
-				.redisFederationGrantStore?.listingAllowanceMs;
-		expect(allowance(31_536_000_000)).toBe(31_536_000_000);
-		for (const value of [31_536_000_001, 1e21]) {
-			expect(() => allowance(value), String(value)).toThrow();
-		}
+describe("the federation-grants sections, and the paths they moved from", () => {
+	// Each module's section schema coerces and refuses; core keeps these as
+	// written, for the modules and for the relocation refusal.
+	const WRITTEN = { keyPrefix: "{x}", tombstoneRetention: "not-a-duration", bogus: true };
+
+	it.each([
+		"federationGrants",
+		"redisFederationGrantStore",
+		"core-federation-grant-store-memory",
+		"redis-federation-grant-store",
+		"redis-federation-grant-intent-store",
+	])("keeps %s as written", (section) => {
+		expect((parse({ ...base, [section]: WRITTEN }) as Record<string, unknown>)[section]).toEqual(
+			WRITTEN,
+		);
+		expect(
+			(AppConfigSchema.parse({ ...base, [section]: WRITTEN }) as Record<string, unknown>)[section],
+		).toEqual(WRITTEN);
+	});
+
+	it("reads federation-grants.enabled from a variable's string, the one key read before modules, and keeps the rest as written", () => {
+		const written = { enabled: "true", maxExpiresIn: "not-a-duration", connections: {} };
+		const parsed = { ...written, enabled: true };
+		expect(parse({ ...base, "federation-grants": written })["federation-grants"]).toEqual(parsed);
+		expect(
+			AppConfigSchema.parse({ ...base, "federation-grants": written })["federation-grants"],
+		).toEqual(parsed);
+		expect(() => parse({ ...base, "federation-grants": { enabled: "sometimes" } })).toThrow();
 	});
 });
 

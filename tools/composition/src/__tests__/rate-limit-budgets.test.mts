@@ -125,7 +125,7 @@ mfa.rateLimit.routes { limit = 13, windowSeconds = 240 }
 
 /** Every prefix in the limiter's own section, beside the owners' keys. */
 const declaredLimits = (adapter: Adapter): string => `
-${adapter === "redis" ? "redisRateLimiter" : "memoryRateLimiter"}.limits {
+${adapter === "redis" ? "redis-rate-limiter" : "core-rate-limiter-memory"}.limits {
   login { limit = 4, windowSeconds = 45 }
   device_verification { limit = 2, windowSeconds = 90 }
   webauthn-authentication-options { limit = 9, windowSeconds = 15 }

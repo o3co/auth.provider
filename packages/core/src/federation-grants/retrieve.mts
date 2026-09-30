@@ -111,7 +111,7 @@ export interface FederationGrantAuditEvent {
 }
 
 export interface FederationGrantRetrievalLimits {
-	/** `federationGrants.maxExpiresIn`, as it is configured now. */
+	/** `federation-grants.maxExpiresIn`, as it is configured now. */
 	readonly maxExpiresInMs: number;
 	/**
 	 * How far replicas' clocks may differ. It is the backstop's allowance,
@@ -255,13 +255,13 @@ export function assertFederationGrantRetrievalLimits(limits: FederationGrantRetr
 	for (const name of timed) {
 		const value = limits[name];
 		if (!Number.isFinite(value) || value <= 0) {
-			throw new RangeError(`federationGrants: ${name} must be a positive finite number`);
+			throw new RangeError(`federation-grants: ${name} must be a positive finite number`);
 		}
 	}
 	for (const name of allowances) {
 		const value = limits[name];
 		if (!Number.isFinite(value) || value < 0) {
-			throw new RangeError(`federationGrants: ${name} must be a non-negative finite number`);
+			throw new RangeError(`federation-grants: ${name} must be a non-negative finite number`);
 		}
 	}
 	for (const name of [
@@ -272,21 +272,21 @@ export function assertFederationGrantRetrievalLimits(limits: FederationGrantRetr
 		"lockWaitMs",
 	] as const) {
 		if (limits[name] > MAX_TIMER_MS) {
-			throw new RangeError(`federationGrants: ${name} does not fit a timer`);
+			throw new RangeError(`federation-grants: ${name} does not fit a timer`);
 		}
 	}
 	// The store is given `SIDE_EFFECT_WAIT_MS` over the lock wait (`refresh`).
 	if (limits.lockWaitMs + SIDE_EFFECT_WAIT_MS > MAX_TIMER_MS) {
-		throw new RangeError("federationGrants: lockWaitMs does not fit a timer");
+		throw new RangeError("federation-grants: lockWaitMs does not fit a timer");
 	}
 	if (!(limits.refreshFailureBackoffMs <= limits.ineligibleRetryAfterMs)) {
 		throw new RangeError(
-			"federationGrants: refreshFailureBackoffMs must not exceed ineligibleRetryAfterMs — the marker's interval is the ceiling on how long a failing upstream is not asked",
+			"federation-grants: refreshFailureBackoffMs must not exceed ineligibleRetryAfterMs — the marker's interval is the ceiling on how long a failing upstream is not asked",
 		);
 	}
 	if (!(limits.upstreamTimeoutMs <= limits.upstreamHardTimeoutMs)) {
 		throw new RangeError(
-			"federationGrants: upstreamTimeoutMs must not exceed upstreamHardTimeoutMs — the soft deadline only answers the caller, and the hard one is where the request is aborted",
+			"federation-grants: upstreamTimeoutMs must not exceed upstreamHardTimeoutMs — the soft deadline only answers the caller, and the hard one is where the request is aborted",
 		);
 	}
 	if (
@@ -298,7 +298,7 @@ export function assertFederationGrantRetrievalLimits(limits: FederationGrantRetr
 		)
 	) {
 		throw new RangeError(
-			"federationGrants: upstreamHardTimeoutMs + persistRetryBudgetMs must leave a second of refreshLockTtlMs — the refresh lock has no renewal, and one that expires mid-refresh lets two replicas present the same refresh token",
+			"federation-grants: upstreamHardTimeoutMs + persistRetryBudgetMs must leave a second of refreshLockTtlMs — the refresh lock has no renewal, and one that expires mid-refresh lets two replicas present the same refresh token",
 		);
 	}
 }

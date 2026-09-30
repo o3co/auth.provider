@@ -50,7 +50,7 @@ export const DEFAULT_MEMORY_CHALLENGE_STORE_MIN_SWEEP_INTERVAL_MS = 10_000;
  * options requests a second held for two minutes, more than one process
  * serves, and the authentication options route is rate-limited per IP
  * besides. The memory it bounds is about 180 MB. `memoryChallengeStoreModule`
- * reads the cap from `challengeStore.memory.maxEntries`; past one replica,
+ * reads the cap from `core-challenge-store-memory.maxEntries`; past one replica,
  * use the Redis challenge store.
  */
 export const DEFAULT_MEMORY_CHALLENGE_STORE_MAX_ENTRIES = 1_000_000;

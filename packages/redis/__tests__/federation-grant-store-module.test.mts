@@ -14,8 +14,9 @@
  * limitations under the License.
  */
 
-// What turns the `federationGrants` configuration block into a Redis grant
-// store (ADR 2026-09-17-federation-grants-offline-delegation, D16). The
+// What turns the store's own section, `redis-federation-grant-store`, into a
+// Redis grant store (ADR 2026-09-17-federation-grants-offline-delegation,
+// D16). The
 // adapter takes options and reads no HOCON, so this module is where seconds
 // become milliseconds, base64 becomes key material, and a configuration that
 // cannot seal is refused at boot rather than at the first grant, after a user
@@ -32,26 +33,30 @@ import {
 	redisFederationGrantStoreModuleFor,
 	resolveRedisFederationGrantStoreOptions,
 } from "../src/federation-grant-store.mjs";
+import { capturing, withSection } from "./support/section.mjs";
 
 const client = {} as FederationGrantStoreClient;
 
 const KEY = Buffer.alloc(32, 7).toString("base64");
 
-const config = (federationGrants: Record<string, unknown>) => ({ federationGrants });
+/** The store's section as an operator writes it. */
+const config = (section: Record<string, unknown>) => section;
 
 /** What the module's `provides.federationGrantStore` is handed, with the mode core fills. */
 const build = (
-	federationGrants: Record<string, unknown>,
+	section: Record<string, unknown>,
 	options: Record<string, unknown> = {},
 	deploymentMode: DeploymentMode = "unset",
 ) => {
 	const module = redisFederationGrantStoreModuleFor(options as never);
 	const provide = module.provides?.federationGrantStore as (deps: unknown) => unknown;
-	return provide({
-		federationGrantStoreClient: client,
-		config: config(federationGrants),
-		deploymentMode,
-	});
+	return provide(
+		withSection(module, {
+			federationGrantStoreClient: client,
+			config: { "redis-federation-grant-store": section },
+			deploymentMode,
+		}),
+	);
 };
 
 /**
@@ -81,7 +86,7 @@ const bootRefusal = async (extra: Record<string, unknown>): Promise<unknown> => 
 	const boot = createApp({
 		modules: [redisFederationGrantStoreModule, grantsReader],
 		bootstrapComponents: {
-			config: { ...makeValidCoreConfig(), ...extra },
+			config: capturing({ ...makeValidCoreConfig(), ...extra }, [redisFederationGrantStoreModule]),
 			pathResolver: (p: string) => p,
 			federationGrantStoreClient: client,
 		} as never,
@@ -95,14 +100,10 @@ const bootRefusal = async (extra: Record<string, unknown>): Promise<unknown> => 
 };
 
 describe("the Redis federation grant store module", () => {
-	it("needs the client, the configuration and the deployment mode, and says which slot it fills", () => {
+	it("needs the client and the deployment mode, and says which slot it fills", () => {
 		const module = redisFederationGrantStoreModuleFor();
 		expect(module.name).toBe("redis-federation-grant-store");
-		expect(module.requires).toStrictEqual([
-			"federationGrantStoreClient",
-			"config",
-			"deploymentMode",
-		]);
+		expect(module.requires).toStrictEqual(["federationGrantStoreClient", "deploymentMode"]);
 		expect(Object.keys(module.provides ?? {})).toStrictEqual(["federationGrantStore"]);
 	});
 
@@ -195,12 +196,12 @@ describe("the Redis federation grant store module", () => {
 		});
 		expect(() => build(ringOf(["k-1", "k-1"]))).toThrow(
 			new RangeError(
-				"federation grant store: federationGrants.encryptionKeys has a duplicate encryption key id at index 1",
+				"federation grant store: redis-federation-grant-store.encryptionKeys has a duplicate encryption key id at index 1",
 			),
 		);
 		expect(() => build(ringOf(["k-1", "k.2"]))).toThrow(
 			new RangeError(
-				"federation grant store: federationGrants.encryptionKeys has an encryption key id at index 1 that does not match ^[A-Za-z0-9_-]{1,64}$",
+				"federation grant store: redis-federation-grant-store.encryptionKeys has an encryption key id at index 1 that does not match ^[A-Za-z0-9_-]{1,64}$",
 			),
 		);
 	});
@@ -259,7 +260,7 @@ describe("the Redis federation grant store module", () => {
 		// The key reader runs in the exported resolver, which a composition root
 		// that builds the store itself calls too; the factory takes key material.
 		const refusal = new RangeError(
-			"federation grant store: federationGrants.encryptionKeys[1].key must be canonical base64 of 32 bytes",
+			"federation grant store: redis-federation-grant-store.encryptionKeys[1].key must be canonical base64 of 32 bytes",
 		);
 		for (const key of [`${KEY}\n`, Buffer.alloc(16, 7).toString("base64"), "not base64!!"]) {
 			expect(
@@ -295,7 +296,7 @@ describe("the Redis federation grant store module", () => {
 		}
 		expect(thrown).toStrictEqual(
 			new RangeError(
-				"federation grant store: federationGrants.encryptionKeys[0].key must be canonical base64 of 32 bytes",
+				"federation grant store: redis-federation-grant-store.encryptionKeys[0].key must be canonical base64 of 32 bytes",
 			),
 		);
 		expect((thrown as Error).message).not.toContain(KEY);
@@ -308,12 +309,12 @@ describe("the Redis federation grant store module", () => {
 				{ id: "k-1", key: KEY },
 				{ id: "k-1", key: KEY },
 			],
-			"federation grant store: federationGrants.encryptionKeys has a duplicate encryption key id at index 1",
+			"federation grant store: redis-federation-grant-store.encryptionKeys has a duplicate encryption key id at index 1",
 		],
 		[
 			"a key id outside the rule",
 			[{ id: "k.1", key: KEY }],
-			"federation grant store: federationGrants.encryptionKeys has an encryption key id at index 0 that does not match ^[A-Za-z0-9_-]{1,64}$",
+			"federation grant store: redis-federation-grant-store.encryptionKeys has an encryption key id at index 0 that does not match ^[A-Za-z0-9_-]{1,64}$",
 		],
 		[
 			"no key at all",
@@ -323,18 +324,18 @@ describe("the Redis federation grant store module", () => {
 		[
 			"a key that is not canonical base64",
 			[{ id: "k-1", key: `${KEY}\n` }],
-			"federation grant store: federationGrants.encryptionKeys[0].key must be canonical base64 of 32 bytes",
+			"federation grant store: redis-federation-grant-store.encryptionKeys[0].key must be canonical base64 of 32 bytes",
 		],
 		[
 			"a key that is not 32 bytes",
 			[{ id: "k-1", key: Buffer.alloc(16, 7).toString("base64") }],
-			"federation grant store: federationGrants.encryptionKeys[0].key must be canonical base64 of 32 bytes",
+			"federation grant store: redis-federation-grant-store.encryptionKeys[0].key must be canonical base64 of 32 bytes",
 		],
 	])(
 		"fails boot on %s with a RangeError as the BootError's cause, naming the module",
 		async (_what, encryptionKeys, message) => {
 			const cause = await bootRefusal({
-				federationGrants: { encryptionMode: "required", encryptionKeys },
+				"redis-federation-grant-store": { encryptionMode: "required", encryptionKeys },
 			});
 			expect(cause).toStrictEqual(new RangeError(message));
 			expect(cause).toBeInstanceOf(RangeError);
@@ -358,8 +359,11 @@ describe("the Redis federation grant store module", () => {
 			).toThrow(new RangeError(message));
 		}
 		const cause = await bootRefusal({
-			federationGrants: { encryptionMode: "required", encryptionKeys: [{ id: "k-1", key: KEY }] },
-			redisFederationGrantStore: { keyPrefix: "fg:{tenant}:" },
+			"redis-federation-grant-store": {
+				encryptionMode: "required",
+				encryptionKeys: [{ id: "k-1", key: KEY }],
+				keyPrefix: "fg:{tenant}:",
+			},
 		});
 		expect(cause).toStrictEqual(new RangeError(message));
 		expect(cause).toBeInstanceOf(RangeError);
@@ -431,7 +435,7 @@ describe("the Redis federation grant store module", () => {
 				}),
 			).toThrow(new RangeError(message));
 			const cause = await bootRefusal({
-				federationGrants: { encryptionMode: "allow-plaintext" },
+				"redis-federation-grant-store": { encryptionMode: "allow-plaintext" },
 				core: { deployment: { mode: "multi" } },
 			});
 			expect(cause).toStrictEqual(new RangeError(message));
@@ -463,38 +467,35 @@ describe("the Redis federation grant store module", () => {
 		// Unbounded, a typo such as `tombstoneRetention = 1e18` becomes a
 		// deadline Redis refuses after the script has written, leaving a record
 		// with no TTL.
-		const resolve = (federationGrants: Record<string, unknown>, redisFederationGrantStore = {}) =>
+		const resolve = (section: Record<string, unknown>) =>
 			resolveRedisFederationGrantStoreOptions(
-				{
-					federationGrants: { encryptionKeys: [{ id: "k", key: KEY }], ...federationGrants },
-					redisFederationGrantStore,
-				} as never,
+				{ encryptionKeys: [{ id: "k", key: KEY }], ...section },
 				{},
 				"unset",
 			);
 		expect(resolve({ tombstoneRetention: 31_536_000 }).tombstoneRetentionMs).toBe(31_536_000_000);
-		expect(resolve({}, { listingAllowanceMs: 31_536_000_000 }).listingAllowanceMs).toBe(
-			31_536_000_000,
-		);
+		expect(resolve({ listingAllowanceMs: 31_536_000_000 }).listingAllowanceMs).toBe(31_536_000_000);
 		for (const tombstoneRetention of [31_536_001, 1e18]) {
 			expect(() => resolve({ tombstoneRetention }), String(tombstoneRetention)).toThrow();
 		}
 		for (const listingAllowanceMs of [31_536_000_001, 1e21]) {
-			expect(() => resolve({}, { listingAllowanceMs }), String(listingAllowanceMs)).toThrow();
+			expect(() => resolve({ listingAllowanceMs }), String(listingAllowanceMs)).toThrow();
 		}
 	});
 
-	it("leaves the key prefix and the listing allowance to their own section", () => {
-		// They are adapter layout rather than grant policy, as the other stores'
-		// prefixes are: `redisFederationGrantStore`, beside them.
+	it("reads the key prefix and the listing allowance beside the ring, and refuses a key it does not declare", () => {
 		const resolved = resolveRedisFederationGrantStoreOptions(
-			{
-				federationGrants: { encryptionKeys: [{ id: "k", key: KEY }] },
-				redisFederationGrantStore: { keyPrefix: "t:", listingAllowanceMs: 1_000 },
-			} as never,
+			{ encryptionKeys: [{ id: "k", key: KEY }], keyPrefix: "t:", listingAllowanceMs: 1_000 },
 			{},
 			"unset",
 		);
+		expect(() =>
+			resolveRedisFederationGrantStoreOptions(
+				{ encryptionKeys: [{ id: "k", key: KEY }], connections: {} },
+				{},
+				"unset",
+			),
+		).toThrow(/connections/);
 		expect(resolved.keyPrefix).toBe("t:");
 		expect(resolved.listingAllowanceMs).toBe(1_000);
 		// Unset, the module passes nothing and the adapter's own default applies:

@@ -39,10 +39,10 @@ import {
 	type Logger,
 	WebAuthnCredentialStorageError,
 } from "@o3co/auth-provider-core";
-import { makeValidAppConfig } from "@o3co/auth-provider-core/testing";
 import express from "express";
 import supertest from "supertest";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { makeAppConfig } from "./appConfig.fixture.mjs";
 
 vi.mock("#/internal/verification.mjs", () => ({
 	verifyWebAuthnAttestation: vi.fn(),
@@ -120,7 +120,7 @@ beforeEach(() => {
  * holds afterwards is what the request logged.
  */
 async function boot(stores: Stores, logger: SpyLogger): Promise<express.Express> {
-	const base = makeValidAppConfig();
+	const base = makeAppConfig();
 	const config = {
 		...base,
 		oauth: { ...base.oauth, jwt: { ...base.oauth.jwt, issuer: "https://test.example" } },

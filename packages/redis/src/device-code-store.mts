@@ -51,13 +51,13 @@ import {
 	defineModule,
 	isStorableExpiry,
 } from "@o3co/auth-provider-core";
-import { z } from "zod";
 import type {
 	DeviceCodeDecisionReply,
 	DeviceCodeKeyspace,
 	DeviceCodeRecordFields,
 	DeviceCodeStoreClient,
 } from "./clients.mjs";
+import { keyPrefixSection, redisReference } from "./internal/section.mjs";
 
 /**
  * Options for createRedisDeviceCodeStore.
@@ -241,27 +241,22 @@ export const redisDeviceCodeStoreBuilder: AdapterBuilder<DeviceCodeStore> = (con
  * the builder above is for runtime selection). Declares no `replicaSafety`, so
  * a composition mounting `deviceGrantModule` with it may declare
  * `core.deployment.mode = "multi"`. The `deviceCodeStoreClient` slot comes from
- * `makeIoredisClients` (or the standalone's shared clients module); config
- * lives under `redisDeviceCodeStore`, never a bare top-level `keyPrefix`.
+ * `makeIoredisClients` (or the standalone's shared clients module); its
+ * section, `redis-device-code-store`, holds `keyPrefix` (strict).
  */
 export const redisDeviceCodeStoreModule = defineModule({
 	name: "redis-device-code-store",
-	requires: ["deviceCodeStoreClient", "config"] as const,
-	configSchema: z.object({
-		redisDeviceCodeStore: z
-			.object({
-				keyPrefix: z.string().default("devauth:"),
-			})
-			.default({ keyPrefix: "devauth:" }),
-	}),
+	requires: ["deviceCodeStoreClient"] as const,
+	section: {
+		schema: keyPrefixSection("devauth:"),
+		reference: redisReference(),
+		relocatedFrom: { redisDeviceCodeStore: { to: "", environmentVariable: null } },
+	},
 	provides: {
-		deviceCodeStore: (deps) => {
-			const cfg = (deps.config as unknown as { redisDeviceCodeStore: { keyPrefix: string } })
-				.redisDeviceCodeStore;
-			return createRedisDeviceCodeStore({
-				client: deps.deviceCodeStoreClient,
-				keyPrefix: cfg.keyPrefix,
-			});
-		},
+		deviceCodeStore: ({ section, deviceCodeStoreClient }) =>
+			createRedisDeviceCodeStore({
+				client: deviceCodeStoreClient,
+				keyPrefix: section.keyPrefix,
+			}),
 	},
 });

@@ -42,11 +42,11 @@ import {
 	memoryRefreshTokenFamilyStoreModule,
 	registerBuiltinKeyStores,
 } from "@o3co/auth-provider-core";
-import { CORE_RELOCATIONS, renamedVariableCaptures } from "@o3co/auth-provider-core/testing";
 import express from "express";
 import request from "supertest";
 import { afterEach, describe, expect, it } from "vitest";
 import { buildModules } from "../buildModules.mjs";
+import { capturedRenames } from "./library-references.fixture.mjs";
 
 const keyPair = generateKeyPairSync("ed25519", {
 	publicKeyEncoding: { type: "spki", format: "pem" },
@@ -66,7 +66,7 @@ const config: AppConfig = {
 	// What a resolution under an environment that sets none captures of
 	// core's renamed variables.
 	...{
-		"renamed-variables": renamedVariableCaptures({ modules: [], core: CORE_RELOCATIONS, env: {} }),
+		"renamed-variables": capturedRenames({}),
 	},
 	http: HTTP,
 	logging: { level: "silent" },

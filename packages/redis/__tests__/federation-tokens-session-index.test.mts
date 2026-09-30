@@ -350,14 +350,11 @@ describe("scanFallback migration flag", () => {
 		expect(redis.scanIterator).not.toHaveBeenCalled();
 	});
 
-	it("the module config schema exposes scanFallback, defaulting to true", () => {
-		const parsed = redisFederationTokenStoreModule.configSchema?.safeParse({
-			redisFederationTokenStore: {},
-		});
-		expect(parsed?.success).toBe(true);
-		if (parsed?.success) {
-			expect(parsed.data.redisFederationTokenStore.scanFallback).toBe(true);
-		}
+	it("the module's section exposes scanFallback, defaulting to true, read from a variable's string", () => {
+		const schema = redisFederationTokenStoreModule.section?.schema;
+		expect(schema?.parse({})).toMatchObject({ scanFallback: true });
+		expect(schema?.parse({ scanFallback: "false" })).toMatchObject({ scanFallback: false });
+		expect(schema?.parse({ scanFallback: "true" })).toMatchObject({ scanFallback: true });
 	});
 });
 

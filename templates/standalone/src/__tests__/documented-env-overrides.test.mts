@@ -21,8 +21,8 @@ import { fileURLToPath } from "node:url";
 import {
 	type AppConfig,
 	BootError,
-	coreReference,
 	createApp,
+	moduleReferences,
 	resolveAccessTokenLifetime,
 } from "@o3co/auth-provider-core";
 import { describe, expect, it } from "vitest";
@@ -143,9 +143,9 @@ const DOCUMENTED_ENV: Readonly<Record<string, string>> = {
 	SESSION_STORAGE_REDIS_PASSWORD: "session-store-password",
 
 	// --- rate limiting ------------------------------------------------
-	RATE_LIMIT_FAIL_MODE: "open",
+	REDIS_RATE_LIMITER_FAIL_MODE: "open",
 	RATE_LIMITER_ADAPTER: "redis",
-	MEMORY_RATE_LIMITER_MAX_BUCKETS: "10000",
+	CORE_RATE_LIMITER_MEMORY_MAX_BUCKETS: "10000",
 
 	// --- audit --------------------------------------------------------
 	// Selects the sink builder; "console" is the registered builtin.
@@ -170,8 +170,8 @@ const DOCUMENTED_ENV: Readonly<Record<string, string>> = {
 	REDIS_CONSENT_STORE_KEY_PREFIX: "tenant-a:consent:",
 	REDIS_ACCESS_TOKEN_DENYLIST_KEY_PREFIX: "atdeny:",
 	REDIS_SESSION_STORES_KEY_PREFIX: "ss:",
-	REFRESH_TOKEN_FAMILY_STORE_KEY_PREFIX: "rtfam:",
-	REFRESH_TOKEN_FAMILY_STORE_CAS_RETRY_LIMIT: "3",
+	REDIS_REFRESH_TOKEN_FAMILY_STORE_KEY_PREFIX: "rtfam:",
+	REDIS_REFRESH_TOKEN_FAMILY_STORE_CAS_RETRY_LIMIT: "3",
 	REFRESH_TOKEN_FAMILY_STORE_REDIS_URL: "redis://redis:6379",
 	REFRESH_TOKEN_FAMILY_STORE_REDIS_PASSWORD: "rt-family-password",
 	// The federation token store's Redis branch.
@@ -185,13 +185,15 @@ const DOCUMENTED_ENV: Readonly<Record<string, string>> = {
 	FEDERATION_GRANTS_ENABLED: "true",
 	FEDERATION_GRANT_STORE_ADAPTER: "redis",
 	FEDERATION_GRANT_INTENT_STORE_ADAPTER: "redis",
-	FEDERATION_GRANTS_ENCRYPTION_MODE: "required",
+	REDIS_FEDERATION_GRANT_STORE_ENCRYPTION_MODE: "required",
 	FEDERATION_GRANTS_ALLOW_KEEP_ON_SUBJECT_REVOCATION: "false",
 	// Acquisition's two deployment decisions — whether the callback
 	// refuses an upstream account linked to another user, and the consent page.
 	FEDERATION_GRANTS_IDENTITY_LOOKUP: "required",
 	FEDERATION_GRANTS_CONSENT_URL: "/consent/grants",
 	REDIS_FEDERATION_GRANT_STORE_KEY_PREFIX: "fg:",
+	// The intent store's own namespace, which a deployment moves with the grant store's.
+	REDIS_FEDERATION_GRANT_INTENT_STORE_KEY_PREFIX: "fg:",
 
 	// --- multi-factor authentication ----------------------------------
 	// The mode (ADR 2026-09-25-multi-factor-authentication), which the MFA
@@ -262,6 +264,16 @@ const DELIBERATELY_UNSET: Readonly<Record<string, string>> = {
 		"#330 tombstone — any value must fail boot with migration instructions",
 	DEPLOYMENT_MODE:
 		"renamed CORE_DEPLOYMENT_MODE, and only captured — set alone, or to another value, it fails boot",
+	MEMORY_RATE_LIMITER_MAX_BUCKETS:
+		"renamed CORE_RATE_LIMITER_MEMORY_MAX_BUCKETS, and only captured — set alone, or to another value, it fails boot",
+	RATE_LIMIT_FAIL_MODE:
+		"renamed REDIS_RATE_LIMITER_FAIL_MODE, and only captured — set alone, or to another value, it fails boot",
+	REFRESH_TOKEN_FAMILY_STORE_KEY_PREFIX:
+		"renamed REDIS_REFRESH_TOKEN_FAMILY_STORE_KEY_PREFIX, and only captured — set alone, or to another value, it fails boot",
+	REFRESH_TOKEN_FAMILY_STORE_CAS_RETRY_LIMIT:
+		"renamed REDIS_REFRESH_TOKEN_FAMILY_STORE_CAS_RETRY_LIMIT, and only captured — set alone, or to another value, it fails boot",
+	FEDERATION_GRANTS_ENCRYPTION_MODE:
+		"renamed REDIS_FEDERATION_GRANT_STORE_ENCRYPTION_MODE, and only captured — set alone, or to another value, it fails boot",
 };
 
 /**
@@ -388,10 +400,16 @@ function documentedInReadme(path: string = readmePath): Set<string> {
 	return found;
 }
 
+/**
+ * The substitutions of the template's own layers, and of the `reference.conf`
+ * of every package the template loads a module from under the documented
+ * environment (core's among them).
+ */
 function liveSubstitutions(): Set<string> {
 	const { applicationConfPath } = resolveConfigPaths(configDir, "production");
+	const references = moduleReferences(buildModules(readShippedSwitches(DOCUMENTED_ENV)));
 	return new Set([
-		...substitutionsIn(fileURLToPath(coreReference())),
+		...references.flatMap((reference) => [...substitutionsIn(fileURLToPath(reference))]),
 		...substitutionsIn(fileURLToPath(templateReference())),
 		...substitutionsIn(applicationConfPath),
 	]);
@@ -414,7 +432,7 @@ describe("the shipped config boots with every documented override supplied as a 
 		expect(config.federations.oidc?.enabled).toBe(true);
 		// A leftover string here would be read as "on" by a truthiness check
 		// and as "off" by `=== true`, for a feature whose whole default is off.
-		expect(config.federationGrants?.enabled).toBe(true);
+		expect(config["federation-grants"]?.enabled).toBe(true);
 	});
 
 	it("turns every non-boolean override into its declared type", async () => {
@@ -435,7 +453,9 @@ describe("the shipped config boots with every documented override supplied as a 
 		expect(config.session.csrf?.ttlSeconds).toBe(7200);
 		expect(config.oauth.nonce?.maxLength).toBe(256);
 		expect(config.consentStore?.adapter).toBe("redis");
-		expect(config.redisConsentStore?.keyPrefix).toBe("tenant-a:consent:");
+		// A Redis store's section, which its module (not loaded here) parses.
+		const sections = config as unknown as Record<string, { keyPrefix?: unknown } | undefined>;
+		expect(sections["redis-consent-store"]?.keyPrefix).toBe("tenant-a:consent:");
 		// The comma-separated lists become lists, trimmed; the numbers, numbers.
 		expect(config.oauth.clientIdMetadataDocuments).toEqual({
 			enabled: true,
@@ -458,8 +478,8 @@ describe("the shipped config boots with every documented override supplied as a 
 		expect(config.endpoints).not.toHaveProperty("mfa");
 		expect(config.mfaFactorStore?.adapter).toBe("redis");
 		expect(config.mfaTransactionStore?.adapter).toBe("redis");
-		expect(config.redisMfaFactorStore?.keyPrefix).toBe("tenant-a:mfaf:");
-		expect(config.redisMfaTransactionStore?.keyPrefix).toBe("tenant-a:mfat:");
+		expect(sections["redis-mfa-factor-store"]?.keyPrefix).toBe("tenant-a:mfaf:");
+		expect(sections["redis-mfa-transaction-store"]?.keyPrefix).toBe("tenant-a:mfat:");
 		// A comma-separated string becomes a list of origins, trimmed.
 		expect(config.cors?.allowedOrigins).toEqual([
 			"https://app.example.com",

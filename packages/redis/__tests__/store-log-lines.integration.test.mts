@@ -11,7 +11,7 @@
  */
 
 import { randomUUID } from "node:crypto";
-import type { Logger } from "@o3co/auth-provider-core";
+import type { Logger, Module } from "@o3co/auth-provider-core";
 import { Redis } from "ioredis";
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { redisCodeRepositoryModule } from "#/code-repository.mjs";
@@ -19,6 +19,7 @@ import { makeIoredisClients } from "#/ioredis.mjs";
 import { redisSessionStoresModule } from "#/modules/redisSessionStores.mjs";
 import { createRedisUserSessionStore } from "#/userSessionStore.mjs";
 import { testRedis } from "./support/redis.mjs";
+import { withSection } from "./support/section.mjs";
 
 let raw: Redis;
 
@@ -67,13 +68,13 @@ const provide = <T,>(
 ): T => {
 	const factory = module.provides?.[slot] as ((deps: unknown) => T) | undefined;
 	if (factory === undefined) throw new Error(`the module provides no ${slot}`);
-	return factory(deps);
+	return factory(withSection(module as Module, deps));
 };
 
 describe("redisSessionStoresModule: the stores it builds log on the composition's logger", () => {
 	const sessionDeps = (keyPrefix: string, logger?: Logger) => ({
 		...makeIoredisClients(raw),
-		config: { redisSessionStores: { keyPrefix } },
+		config: { "redis-session-stores": { keyPrefix } },
 		...(logger !== undefined ? { logger } : {}),
 	});
 

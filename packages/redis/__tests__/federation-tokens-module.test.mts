@@ -3,7 +3,12 @@
  * Licensed under the Apache License, Version 2.0 (the "License");
  */
 
-import { createApp, type DeploymentMode, defineModule } from "@o3co/auth-provider-core";
+import {
+	createApp,
+	type DeploymentMode,
+	defineModule,
+	type Module,
+} from "@o3co/auth-provider-core";
 import { makeValidCoreConfig } from "@o3co/auth-provider-core/testing";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { FederationTokenStoreClient } from "../src/clients.mjs";
@@ -13,6 +18,7 @@ import {
 	redisFederationTokenStoreModule,
 	redisFederationTokenStoreModuleFor,
 } from "../src/federation-tokens.mjs";
+import { withSection } from "./support/section.mjs";
 
 const fakeClient = () => ({
 	get: () => null,
@@ -27,23 +33,22 @@ const fakeClient = () => ({
 });
 
 /** Runs a module's `federationTokenStore` provider against a plaintext config, with the mode core fills. */
-const provideFrom = (
-	module: { provides?: { federationTokenStore?: unknown } },
-	deploymentMode: DeploymentMode = "unset",
-) => {
+const provideFrom = (module: Module, deploymentMode: DeploymentMode = "unset") => {
 	const provider = module.provides?.federationTokenStore as (deps: unknown) => unknown;
-	return provider({
-		federationTokenStoreClient: fakeClient(),
-		config: {
-			redisFederationTokenStore: {
-				keyPrefix: "ft:",
-				ttl: 86400,
-				encryptionMode: "allow-plaintext",
-				scanFallback: true,
+	return provider(
+		withSection(module, {
+			federationTokenStoreClient: fakeClient(),
+			config: {
+				"redis-federation-token-store": {
+					keyPrefix: "ft:",
+					ttl: 86400,
+					encryptionMode: "allow-plaintext",
+					scanFallback: true,
+				},
 			},
-		},
-		deploymentMode,
-	});
+			deploymentMode,
+		}),
+	);
 };
 
 describe("the module hands the guard the selected environment and the deployment mode", () => {
@@ -67,7 +72,7 @@ describe("the module hands the guard the selected environment and the deployment
 		const m = redisFederationTokenStoreModuleFor({ environment: "production" });
 		expect(m.name).toBe(redisFederationTokenStoreModule.name);
 		expect(m.requires).toEqual(redisFederationTokenStoreModule.requires);
-		expect(m.configSchema).toBe(redisFederationTokenStoreModule.configSchema);
+		expect(m.section?.schema).toBe(redisFederationTokenStoreModule.section?.schema);
 	});
 
 	it("refuses plaintext when the composition root passes a production environment", () => {
@@ -109,7 +114,6 @@ describe("redisFederationTokenStoreModule", () => {
 	it("requires federationTokenStoreClient, config and deploymentMode", () => {
 		expect(redisFederationTokenStoreModule.requires).toEqual([
 			"federationTokenStoreClient",
-			"config",
 			"deploymentMode",
 		]);
 	});
@@ -118,17 +122,14 @@ describe("redisFederationTokenStoreModule", () => {
 		expect(typeof redisFederationTokenStoreModule.provides?.federationTokenStore).toBe("function");
 	});
 
-	it("declares a configSchema with redisFederationTokenStore namespaced key", () => {
-		const schema = redisFederationTokenStoreModule.configSchema;
-		expect(schema).toBeDefined();
-		// Default values flow through when only the namespace key is provided
-		const parsed = schema?.safeParse({ redisFederationTokenStore: {} });
-		expect(parsed?.success).toBe(true);
-		if (parsed?.success) {
-			expect(parsed.data.redisFederationTokenStore.keyPrefix).toBe("ft:");
-			expect(parsed.data.redisFederationTokenStore.ttl).toBe(86400);
-			expect(parsed.data.redisFederationTokenStore.encryptionMode).toBe("required");
-		}
+	it("reads its own section, redis-federation-token-store, with its defaults", () => {
+		expect(redisFederationTokenStoreModule.configSchema).toBeUndefined();
+		expect(redisFederationTokenStoreModule.section?.schema.parse(undefined)).toEqual({
+			keyPrefix: "ft:",
+			ttl: 86400,
+			encryptionMode: "required",
+			scanFallback: true,
+		});
 	});
 });
 
@@ -360,23 +361,23 @@ describe("every setting the token store is given and cannot use is refused as a 
 	it.each([
 		[
 			"a key that does not decode to 32 bytes",
-			{ redisFederationTokenStore: { encryptionKey: KEY_OF_16 } },
+			{ "redis-federation-token-store": { encryptionKey: KEY_OF_16 } },
 			"federationTokenStore.redis: encryption.key must be canonical base64 of 32 bytes (AES-256), or a Buffer of 32 bytes, when encryption.mode is 'required' (the default)",
 		],
 		[
 			"a key that is not canonical base64",
-			{ redisFederationTokenStore: { encryptionKey: `${KEY_OF_32}\n` } },
+			{ "redis-federation-token-store": { encryptionKey: `${KEY_OF_32}\n` } },
 			"federationTokenStore.redis: encryption.key must be canonical base64 of 32 bytes (AES-256), or a Buffer of 32 bytes, when encryption.mode is 'required' (the default)",
 		],
 		[
 			"no key under the default mode",
-			{ redisFederationTokenStore: {} },
+			{ "redis-federation-token-store": {} },
 			"federationTokenStore.redis: encryption.key must be canonical base64 of 32 bytes (AES-256), or a Buffer of 32 bytes, when encryption.mode is 'required' (the default)",
 		],
 		[
 			'plaintext under core.deployment.mode = "multi"',
 			{
-				redisFederationTokenStore: { encryptionMode: "allow-plaintext" },
+				"redis-federation-token-store": { encryptionMode: "allow-plaintext" },
 				core: { deployment: { mode: "multi" } },
 			},
 			PLAINTEXT_UNDER_MULTI,

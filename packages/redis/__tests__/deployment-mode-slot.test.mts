@@ -31,6 +31,7 @@ import {
 	redisFederationTokenStoreBuilder,
 	redisFederationTokenStoreModule,
 } from "../src/federation-tokens.mjs";
+import { capturing, withSection } from "./support/section.mjs";
 
 const tokenClient = {
 	get: async () => null,
@@ -58,14 +59,14 @@ const STORES = [
 		label: "federation-tokens",
 		module: redisFederationTokenStoreModule,
 		client: { federationTokenStoreClient: tokenClient },
-		plaintext: { redisFederationTokenStore: { encryptionMode: "allow-plaintext" } },
+		plaintext: { "redis-federation-token-store": { encryptionMode: "allow-plaintext" } },
 		provided: "federationTokenStore",
 	},
 	{
 		label: "federation-grants",
 		module: redisFederationGrantStoreModule,
 		client: { federationGrantStoreClient: grantClient },
-		plaintext: { federationGrants: { encryptionMode: "allow-plaintext" } },
+		plaintext: { "redis-federation-grant-store": { encryptionMode: "allow-plaintext" } },
 		provided: "federationGrantStore",
 	},
 ] as const;
@@ -110,7 +111,7 @@ const readerOf = (key: "federationTokenStore" | "federationGrantStore") =>
 
 /** The module's provider, run by hand on the deps given. */
 const provide = (module: Module, key: string, deps: Record<string, unknown>) =>
-	(module.provides as Record<string, (deps: unknown) => unknown>)[key]?.(deps);
+	(module.provides as Record<string, (deps: unknown) => unknown>)[key]?.(withSection(module, deps));
 
 let insecure: string | undefined;
 let nodeEnv: string | undefined;
@@ -187,11 +188,14 @@ describe.each(STORES)("the $label store's module reads the deploymentMode slot",
 			const boot = createApp({
 				modules: [store.module, readerOf(store.provided)],
 				bootstrapComponents: {
-					config: {
-						...makeValidCoreConfig(),
-						...store.plaintext,
-						...(deployment === undefined ? {} : { core: { deployment } }),
-					},
+					config: capturing(
+						{
+							...makeValidCoreConfig(),
+							...store.plaintext,
+							...(deployment === undefined ? {} : { core: { deployment } }),
+						},
+						[store.module],
+					),
 					pathResolver: (p: string) => p,
 					logger,
 					...store.client,
@@ -221,24 +225,22 @@ describe.each(STORES)("the $label store's module reads the deploymentMode slot",
 
 describe("the grant store's configuration", () => {
 	const KEY = Buffer.alloc(32, 7).toString("base64");
-	const grants = { federationGrants: { encryptionKeys: [{ id: "k", key: KEY }] } };
+	const grants = { encryptionKeys: [{ id: "k", key: KEY }] };
 
-	it("declares no deployment section: the module's parse leaves it to core", () => {
-		const parsed = redisFederationGrantStoreModule.configSchema?.parse({
-			...grants,
-			core: { deployment: { mode: "multi" } },
-		});
-		expect(parsed).not.toHaveProperty("deployment");
+	it("holds no deployment mode in its section: the mode is the slot's", () => {
+		expect(
+			redisFederationGrantStoreModule.section?.schema.safeParse({
+				...grants,
+				deployment: { mode: "multi" },
+			}).success,
+		).toBe(false);
 	});
 
 	it("refuses a deployment mode it cannot read — none, MULTI, null, 1 — as a TypeError naming the argument, never building a guard without it", () => {
 		const refusal = new TypeError(
 			'resolveRedisFederationGrantStoreOptions: deploymentMode must be "single", "multi" or "unset"',
 		);
-		const plaintextUnderMulti = {
-			federationGrants: { encryptionMode: "allow-plaintext" },
-			core: { deployment: { mode: "multi" } },
-		};
+		const plaintextUnderMulti = { encryptionMode: "allow-plaintext" };
 		const resolve = resolveRedisFederationGrantStoreOptions as (...args: unknown[]) => unknown;
 		expect(() => resolve(plaintextUnderMulti, {})).toThrow(refusal);
 		for (const deploymentMode of ["MULTI", null, 1]) {
@@ -250,13 +252,9 @@ describe("the grant store's configuration", () => {
 	});
 
 	it("hands the plaintext guard the mode it is given, not the configuration's", () => {
-		expect(
-			resolveRedisFederationGrantStoreOptions(
-				{ ...grants, core: { deployment: { mode: "multi" } } },
-				{},
-				"single",
-			).guard,
-		).toEqual({ deploymentMode: "single" });
+		expect(resolveRedisFederationGrantStoreOptions(grants, {}, "single").guard).toEqual({
+			deploymentMode: "single",
+		});
 		expect(resolveRedisFederationGrantStoreOptions(grants, {}, "multi").guard).toEqual({
 			deploymentMode: "multi",
 		});

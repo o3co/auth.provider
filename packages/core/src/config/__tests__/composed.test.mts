@@ -62,13 +62,16 @@ describe("readTransitionalConfig — the switches a composition root reads befor
 		const config = readTransitionalConfig(
 			resolved({
 				http: { port: "8080", trustProxy: "false", readinessTimeoutMs: "1500" },
-				redisRateLimiter: { limits: { token: { limit: "120", windowSeconds: "60" } } },
+				webauthn: { rateLimit: { authenticationOptions: { limit: "120", windowSeconds: "60" } } },
 			}),
-			["http", "redisRateLimiter"],
+			["http", "webauthn"],
 		);
 		expect(config.http?.port).toBe(8080);
 		expect(config.http?.readinessTimeoutMs).toBe(1500);
-		expect(config.redisRateLimiter?.limits?.token).toEqual({ limit: 120, windowSeconds: 60 });
+		expect(config.webauthn?.rateLimit?.authenticationOptions).toEqual({
+			limit: 120,
+			windowSeconds: 60,
+		});
 	});
 
 	it("parses only the paths it reads: every other key stays as written, and is not checked", () => {

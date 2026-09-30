@@ -31,7 +31,7 @@ import {
 
 const ISSUER = (makeValidCoreConfig() as { oauth: { jwt: { issuer: string } } }).oauth.jwt.issuer;
 
-/** Merged into `federationGrants`. */
+/** Merged into `federation-grants`. */
 export const ACQUISITION_GRANT_SETTINGS = { consent: { url: "/consent/grants" } } as const;
 
 /** The login page connect sends a browser that is not signed in to. */

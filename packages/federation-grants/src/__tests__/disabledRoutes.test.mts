@@ -46,7 +46,7 @@ const makeBoot = (federationGrants?: Record<string, unknown>): BootstrapMap =>
 	({
 		config: {
 			...makeValidCoreConfig(),
-			...(federationGrants === undefined ? {} : { federationGrants }),
+			...(federationGrants === undefined ? {} : { "federation-grants": federationGrants }),
 		},
 		pathResolver: (s: string) => s,
 		// Present because the enabled routes authenticate: what this file

@@ -61,7 +61,7 @@ export const isSealingKeyId = (id: unknown): id is string =>
  * say.
  *
  * `setting` names the ring in the refusal as its reader knows it (e.g.
- * `federationGrants.encryptionKeys`, or an option name). A refusal names the
+ * `redis-federation-grant-store.encryptionKeys`, or an option name). A refusal names the
  * entry by index and never quotes an ID: an operator who swapped an ID and
  * its key would see the key in a boot error, and a 32-byte key in hex or
  * unpadded base64url passes the ID rule.

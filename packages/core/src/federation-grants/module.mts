@@ -15,7 +15,9 @@
  */
 
 import { z } from "zod";
-import { fullSectionsSchema } from "../config/application.schema.mjs";
+import { durationFromEnv } from "../config/application.schema.mjs";
+import { MAX_DURATION_SECONDS } from "../config/durations.mjs";
+import { coreReference } from "../config/references.mjs";
 import { defineModule } from "../modules/index.mjs";
 import { createMemoryFederationGrantIntentStore } from "./intentMemory.mjs";
 import { createMemoryFederationGrantStore } from "./memory.mjs";
@@ -48,6 +50,12 @@ export const memoryFederationGrantIntentStoreModule = defineModule({
  * {@link FederationGrantStore}. Dev and single-replica only — no
  * persistence across restarts, which for a grant means every user connects
  * again, and refused by name under `core.deployment.mode = "multi"`.
+ *
+ * Its own section, `core-federation-grant-store-memory`, holds
+ * `tombstoneRetention`: how long, in seconds, a revoked or expired grant still
+ * answers, at most one year; zero keeps no tombstones, and absent is the
+ * adapter's default. Strict; `federationGrants.tombstoneRetention`, its old
+ * path, refuses boot naming it.
  */
 export const memoryFederationGrantStoreModule = defineModule({
 	name: "core-federation-grant-store-memory",
@@ -57,19 +65,28 @@ export const memoryFederationGrantStoreModule = defineModule({
 		reason:
 			"federation grants fork per replica — a grant lodged or authorized on one replica is unknown to every other, one revoked there still yields upstream tokens here, and a refresh token rotated on one replica leaves every other presenting the old one, which a reuse-detecting IdP answers by revoking the family",
 	},
-	// Reads the same `federationGrants.tombstoneRetention` (seconds) as the
-	// Redis store. Optional: without it the adapter's default applies.
-	requires: ["config"] as const,
-	// Projected from core's own declaration rather than restated, so this
-	// module parses the key exactly as core does (a narrower copy could read
-	// `null` as zero and silently keep no tombstones).
-	configSchema: z.object({
-		federationGrants: fullSectionsSchema.shape.federationGrants,
-	}),
+	// Read strictly (`durationFromEnv`): a `null` read as zero would keep no
+	// tombstones, silently.
+	section: {
+		schema: z
+			.object({
+				tombstoneRetention: durationFromEnv(
+					z.number().int().nonnegative().max(MAX_DURATION_SECONDS),
+				).optional(),
+			})
+			.strict()
+			.optional(),
+		reference: coreReference(),
+		relocatedFrom: {
+			"federationGrants.tombstoneRetention": {
+				to: "tombstoneRetention",
+				environmentVariable: null,
+			},
+		},
+	},
 	provides: {
-		federationGrantStore: (deps) => {
-			const seconds = (deps.config as { federationGrants?: { tombstoneRetention?: number } })
-				.federationGrants?.tombstoneRetention;
+		federationGrantStore: ({ section }) => {
+			const seconds = section?.tombstoneRetention;
 			return createMemoryFederationGrantStore(
 				seconds === undefined ? {} : { tombstoneRetentionMs: seconds * 1000 },
 			);

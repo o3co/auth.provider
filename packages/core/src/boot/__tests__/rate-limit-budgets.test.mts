@@ -157,7 +157,7 @@ const limiterUser = defineModule({
 const withMemoryLimiter = (extra: Record<string, unknown> = {}): BootstrapMap =>
 	bootWith({
 		core: { deployment: { mode: "single" } },
-		memoryRateLimiter: {
+		"core-rate-limiter-memory": {
 			limits: {},
 			defaultLimit: { limit: 60, windowSeconds: 60 },
 			maxBuckets: 100,
@@ -605,7 +605,7 @@ describe("rateLimitBudgets — the in-process limiter reads them", () => {
 			modules: [memoryRateLimiterModule, ...modules, limiterUser],
 			bootstrapComponents: bootWith({
 				core: { deployment: { mode: "single" } },
-				memoryRateLimiter: {
+				"core-rate-limiter-memory": {
 					limits: { declared: { limit: 4, windowSeconds: 45 } },
 					defaultLimit: { limit: 60, windowSeconds: 60 },
 					maxBuckets: 100,

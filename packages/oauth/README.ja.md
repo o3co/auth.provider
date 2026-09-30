@@ -37,7 +37,7 @@
 | [`oauthModule`](./src/module.mts) | `/oauth` のルートとディスカバリーの一部。グラントは 1 つも登録しない: `/oauth/token` は core の `grantHandlerResolver` を引いて振り分け、それはインストールされた各モジュールの `grants` 提供で埋まる。 | トークンエンドポイントはどのグラントがインストールされていても同じで、セッションストアが 1 つも無くても動く。 |
 | [`oauthAuthorizationModule`](./src/oauthAuthorization.mts) | `authorization_code`、`refresh_token`、`client_credentials`、jwt-bearer。それぞれ有効化されたときだけ。 | デプロイがグラントの組を選ぶ。これらのルート無しでグラントだけをインストールすることもでき、そのためこのモジュールは独自に `subjectRevocation` と `auditSink` の absence policy を宣言する。セッションを読む 2 つのグラントがそれを通してセッションを読む `sessionRequirementResolver` を要求する。`refresh_token` が有効なときは、トークンファミリーの 2 つのスロットが両方配線されていなければ起動を拒否する（[`refresh_token`](#refresh_token) を参照）。 |
 | [`oauthSessionModule`](./src/oauthSession.mts) | `session` グラント。有効化されたときだけ。 | 別の構成 — ブラウザーセッションから発行するファーストパーティ / BFF — のためのもので、コード系グラントとは独立に有効化され、宣言するのは `config`、`keyStore`、`sessionRequirementResolver` と、任意でアドミッションがその横で読むもの — `userSessionStore`、`subjectRevocation`、`auditSink`、障害の行を書き出す `logger` — だけで、`subjectRevocation` と `auditSink` の absence policy を付ける。 |
-| [`subjectRevocationServiceModule`](./src/logout/subjectRevocationService.mts) | `cascadeLogout` の上に組んだ core の `subjectRevocationService` コンポーネント。 | セッションカスケードの 6 ストアを要求するが、`oauthModule` のルートはそれを要求しない。`federationGrants.enabled = true` のときは `federationGrantStore` と、grants 境界を持つ `subjectRevocation` も要求し、無ければ boot を拒否する。core ではなくここにあるのは、core が `cascadeLogout` を import するとパッケージの依存方向が逆転するからである。 |
+| [`subjectRevocationServiceModule`](./src/logout/subjectRevocationService.mts) | `cascadeLogout` の上に組んだ core の `subjectRevocationService` コンポーネント。 | セッションカスケードの 6 ストアを要求するが、`oauthModule` のルートはそれを要求しない。`federation-grants.enabled = true` のときは `federationGrantStore` と、grants 境界を持つ `subjectRevocation` も要求し、無ければ boot を拒否する。core ではなくここにあるのは、core が `cascadeLogout` を import するとパッケージの依存方向が逆転するからである。 |
 
 どれも明示的にインストールする: どのモジュールも他のモジュールを登録しない。
 
@@ -122,7 +122,7 @@ standalone テンプレートの [`buildModules.mts`](../../templates/standalone
 
 **空白区切りの値。** クライアントが送る `scope`、`prompt`、`acr_values` は RFC 6749 §3.3 の文法で厳密に読む（core の `readSpaceDelimitedParameter`）: 区切りは空白だけで、scope-token でない要素 — タブ、改行、引用符、バックスラッシュ、印字可能な ASCII 以外 — があれば値全体が不正な形式になる。不正な形式の `scope` は、ここのすべてのグラントの `/oauth/token` と `/oauth/authorize` で `invalid_scope`（`scope is not a space-delimited list of scope-tokens`）になり、絞り込まれることも、スコープを名指しているかのように許可リストと照合されることもない。空白だけの値は空の値と同じく省略されたスコープだが、タブだけの値は不正な形式である。不正な形式の `prompt` と `acr_values` は `invalid_request`。繰り返された `scope` — および文字列でない値すべて — は `invalid_request` になる。一方、JSON ボディの `"scope": null` は、フォームボディの `scope=` と同じく省略されたスコープである（RFC 6749 §3.2）。このパッケージ自身のアクセストークンとリフレッシュトークンの `scope` クレーム（`/oauth/userinfo` とリフレッシュで）は、広がらないように読む（`readIssuedScope`）: 空白だけで分け、scope-token でない要素は捨てる — リクエストを厳密に読む前に発行されたトークンは `openid<TAB>email` を 1 つの要素として持ちうるが、それは発行時にどのスコープも名指さず、今もどのクレームも開示しない。リフレッシュはトークンのスコープを正規形で引き継ぐ。第三者が書いた値 — クライアントメタデータドキュメントの `scope`、上流の応答 — は寛容に読む（`parseScopeTokens`）: 任意の空白で分けて scope-token だけを残す。
 
-`/token`、`/introspect`、`/authorize`、`/revoke` は、構成が `rateLimiter` を配線していればクライアント認証より前でスロットリングされ、リミッター自身の障害時ポリシー（`RateLimiter.failMode`。Redis リミッターでは `rateLimit.failMode`）に従う。配線されていなければスロットリングされない。キーのプレフィックスは `token`、`introspect`、`authorize`、`revoke` で、oauth モジュールが自分の予算なしで主張する（`rateLimitBudgets`）: リミッターの `limits` の項目かその既定が適用され、ほかのモジュールはこれらに予算を設定できない。
+`/token`、`/introspect`、`/authorize`、`/revoke` は、構成が `rateLimiter` を配線していればクライアント認証より前でスロットリングされ、リミッター自身の障害時ポリシー（`RateLimiter.failMode`。Redis リミッターでは `redis-rate-limiter.failMode`）に従う。配線されていなければスロットリングされない。キーのプレフィックスは `token`、`introspect`、`authorize`、`revoke` で、oauth モジュールが自分の予算なしで主張する（`rateLimitBudgets`）: リミッターの `limits` の項目かその既定が適用され、ほかのモジュールはこれらに予算を設定できない。
 
 `consentStore` が `pendingConsentStore` 無しで配線されたとき（またはその逆）、および `oauth.revocation.accessToken = "denylist"` を宣言して `accessTokenDenylist` が無いとき、ルーターは構築を拒否する — `createApp` 経由では boot の失敗になる。
 
@@ -722,7 +722,7 @@ clients:
 - `federation.token.family_revoked` — ファミリー失効による 401 のとき
 - `federation.token.refresh_failed` — 500 `refresh_failed` のとき。ケースは 2 つ。`provider.refreshToken` がリフレッシュエラーの分類器で分類できないエラーを投げた場合: `details.reason` は `"unknown"`。または応答は返ったがこのルートが使えない場合: `"no_access_token"`・`"invalid_expiry"`・`"invalid_token_type"`。このイベントが持つ値はこの 4 つですべてで、SIEM のルールはこれでグループ化すること。分類器の残りの結果はこのイベントに**ならない**: `invalid_grant` は `federation.token.reauthentication_required`（410）、`rate_limited`（429）と `network`（503）は監査イベントを出さない。
 - `federation.token.reauthentication_required` — IdP の構造化された `invalid_grant` または `invalid_token` を受け取ったとき（上の 410）
-- `federation.token.upstream_ineligible` — 502 のとき。`details.reason` は `"token_type_unsupported"`、`details.tokenType` はレコードが保持していた値を読んだまま、ただしサニタイズして 200 文字で切り詰める（core の `auditErrorText`）— トークン型として不正な値もそのまま。それこそ見る価値がある。`null` はレコードが文字列ですらないものを保持していたことを意味する。レスポンスには `Retry-After: 300` を付ける — `federationGrants.ineligibleRetryAfter` の既定値と同じで、この状態はオペレーターが上流の登録を変えるまで終わらないため。呼び出し元にはどの型だったかは伝えない — 再試行以外にできることが無いため
+- `federation.token.upstream_ineligible` — 502 のとき。`details.reason` は `"token_type_unsupported"`、`details.tokenType` はレコードが保持していた値を読んだまま、ただしサニタイズして 200 文字で切り詰める（core の `auditErrorText`）— トークン型として不正な値もそのまま。それこそ見る価値がある。`null` はレコードが文字列ですらないものを保持していたことを意味する。レスポンスには `Retry-After: 300` を付ける — `federation-grants.ineligibleRetryAfter` の既定値と同じで、この状態はオペレーターが上流の登録を変えるまで終わらないため。呼び出し元にはどの型だったかは伝えない — 再試行以外にできることが無いため
 
 ## jwt-bearer: 信頼する発行者 (#525)
 

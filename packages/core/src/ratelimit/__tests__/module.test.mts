@@ -11,44 +11,54 @@ describe("memoryRateLimiterModule", () => {
 		expect(memoryRateLimiterModule.name).toBe("core-rate-limiter-memory");
 	});
 
-	it("requires config and the contributed budgets", () => {
-		expect(memoryRateLimiterModule.requires).toEqual(["config", "rateLimitBudgetResolver"]);
+	it("requires the contributed budgets alone", () => {
+		expect(memoryRateLimiterModule.requires).toEqual(["rateLimitBudgetResolver"]);
 	});
 
 	it("provides rateLimiter", () => {
 		expect(typeof memoryRateLimiterModule.provides?.rateLimiter).toBe("function");
 	});
 
-	it("defaults maxBuckets in module config schema", () => {
-		const parsed = memoryRateLimiterModule.configSchema?.parse({});
-		expect(parsed).toMatchObject({
-			memoryRateLimiter: {
-				maxBuckets: 10_000,
-			},
-		});
+	it("is read at its own section, core-rate-limiter-memory", () => {
+		expect(memoryRateLimiterModule.section?.at).toBeUndefined();
+		expect(memoryRateLimiterModule.configSchema).toBeUndefined();
 	});
 
-	it("refuses a window longer than a year in its own schema", () => {
-		for (const memoryRateLimiter of [
+	it("defaults maxBuckets in its section's schema", () => {
+		const parsed = memoryRateLimiterModule.section?.schema.parse(undefined);
+		expect(parsed).toMatchObject({ maxBuckets: 10_000 });
+	});
+
+	it("reads maxBuckets and a spec from the string an environment variable carries", () => {
+		expect(
+			memoryRateLimiterModule.section?.schema.parse({
+				maxBuckets: "500",
+				defaultLimit: { limit: "5", windowSeconds: "60" },
+			}),
+		).toMatchObject({ maxBuckets: 500, defaultLimit: { limit: 5, windowSeconds: 60 } });
+	});
+
+	it("refuses a window longer than a year, and a key it does not declare, in its section's schema", () => {
+		for (const section of [
 			{ defaultLimit: { limit: 5, windowSeconds: 31_536_001 } },
 			{ limits: { token: { limit: 5, windowSeconds: 1e13 } } },
+			{ maxBucket: 5 },
+			{ defaultLimit: { limit: 5, windowSeconds: 60, window: 1 } },
 		]) {
 			expect(
-				memoryRateLimiterModule.configSchema?.safeParse({ memoryRateLimiter })?.success,
-				JSON.stringify(memoryRateLimiter),
+				memoryRateLimiterModule.section?.schema.safeParse(section)?.success,
+				JSON.stringify(section),
 			).toBe(false);
 		}
 	});
 
 	it("limits requests per the configured spec", async () => {
 		const cfg = {
-			memoryRateLimiter: {
-				limits: { "test.ip": { limit: 2, windowSeconds: 60 } },
-				defaultLimit: { limit: 60, windowSeconds: 60 },
-				maxBuckets: 10_000,
-			},
+			limits: { "test.ip": { limit: 2, windowSeconds: 60 } },
+			defaultLimit: { limit: 60, windowSeconds: 60 },
+			maxBuckets: 10_000,
 		};
-		const limiter = memoryRateLimiterModule.provides?.rateLimiter?.({ config: cfg } as never);
+		const limiter = memoryRateLimiterModule.provides?.rateLimiter?.({ section: cfg } as never);
 		expect(limiter).toBeDefined();
 		if (!limiter) throw new Error("rateLimiter provider missing");
 		const a = await limiter.check("test.ip:1.2.3.4", { ip: "1.2.3.4" });
@@ -62,14 +72,12 @@ describe("memoryRateLimiterModule", () => {
 	it("limits a prefix by the budget its owner contributed, read at each check, under its own limits entry", async () => {
 		const budgets = new Map<string, { limit: number; windowSeconds: number }>();
 		const cfg = {
-			memoryRateLimiter: {
-				limits: { login: { limit: 4, windowSeconds: 45 } },
-				defaultLimit: { limit: 60, windowSeconds: 60 },
-				maxBuckets: 10_000,
-			},
+			limits: { login: { limit: 4, windowSeconds: 45 } },
+			defaultLimit: { limit: 60, windowSeconds: 60 },
+			maxBuckets: 10_000,
 		};
 		const limiter = memoryRateLimiterModule.provides?.rateLimiter?.({
-			config: cfg,
+			section: cfg,
 			rateLimitBudgetResolver: {
 				get: (prefix: string) => budgets.get(prefix),
 				entries: () => budgets.entries(),
@@ -90,12 +98,8 @@ describe("memoryRateLimiterModule", () => {
 		// The owners' keys are their modules' to read, and to refuse; the
 		// limiter reads their budgets through rateLimitBudgetResolver alone.
 		const limiter = memoryRateLimiterModule.provides?.rateLimiter?.({
+			section: { limits: {}, defaultLimit: { limit: 60, windowSeconds: 60 }, maxBuckets: 10_000 },
 			config: {
-				memoryRateLimiter: {
-					limits: {},
-					defaultLimit: { limit: 60, windowSeconds: 60 },
-					maxBuckets: 10_000,
-				},
 				rateLimit: { login: { windowMs: 900_000, limit: 0 } },
 				"device-grant": { rateLimit: { limit: 2, windowSeconds: 300 } },
 				webauthn: { rateLimit: { authenticationOptions: { limit: "thirty", windowSeconds: 60 } } },
@@ -118,19 +122,17 @@ describe("memoryRateLimiterModule", () => {
 		}
 	});
 
-	it("bounds bucket growth with memoryRateLimiter.maxBuckets", async () => {
+	it("bounds bucket growth with core-rate-limiter-memory.maxBuckets", async () => {
 		vi.useFakeTimers();
 		try {
 			vi.setSystemTime(new Date("2026-05-09T00:00:00Z"));
 
 			const cfg = {
-				memoryRateLimiter: {
-					limits: {},
-					defaultLimit: { limit: 2, windowSeconds: 60 },
-					maxBuckets: 2,
-				},
+				limits: {},
+				defaultLimit: { limit: 2, windowSeconds: 60 },
+				maxBuckets: 2,
 			};
-			const limiter = memoryRateLimiterModule.provides?.rateLimiter?.({ config: cfg } as never);
+			const limiter = memoryRateLimiterModule.provides?.rateLimiter?.({ section: cfg } as never);
 			expect(limiter).toBeDefined();
 			if (!limiter) throw new Error("rateLimiter provider missing");
 

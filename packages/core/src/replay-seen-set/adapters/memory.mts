@@ -48,7 +48,7 @@ export const DEFAULT_MEMORY_REPLAY_SEEN_SET_MIN_SWEEP_INTERVAL_MS = 10_000;
  * CPU. A lower cap would let one client fill it idly, and while it is full
  * every consumer is refused. Memory: ~200 MB with UUID `jti`s, up to ~725 MB
  * with 256-character non-Latin-1 ones. Read from
- * `replaySeenSet.memory.maxEntries`; past one replica, use the Redis seen-set.
+ * `core-replay-seen-set-memory.maxEntries`; past one replica, use the Redis seen-set.
  */
 export const DEFAULT_MEMORY_REPLAY_SEEN_SET_MAX_ENTRIES = 1_000_000;
 

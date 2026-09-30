@@ -264,7 +264,7 @@ const boot = (setup: Setup) => {
 				},
 				rateLimit: { ...full.rateLimit, failMode: "closed" },
 				...(setup.withAudit === false ? {} : { audit: { sink: { type: "none" } } }),
-				federationGrants: {
+				"federation-grants": {
 					enabled: setup.enabled ?? true,
 					connections: setup.connections ?? { calendar: CONNECTION },
 					...ACQUISITION_GRANT_SETTINGS,
@@ -591,7 +591,7 @@ describe("leaving the feature off", () => {
 		const { issues } = (error as BootError).details as {
 			issues: readonly { readonly path: readonly PropertyKey[]; readonly message: string }[];
 		};
-		const issue = issues.find((i) => i.path.join(".") === "federationGrants.enabled");
+		const issue = issues.find((i) => i.path.join(".") === "federation-grants.enabled");
 		expect(issue?.message).toMatch(/"true", "false", "1" or "0"/);
 	});
 });
@@ -599,7 +599,7 @@ describe("leaving the feature off", () => {
 describe("what creating a grant needs", () => {
 	it("refuses a deployment with no consent page, before a user could reach one that is not there", async () => {
 		await expect(boot({ grants: { consent: {} } })).rejects.toThrow(
-			/federationGrants\.consent\.url/,
+			/federation-grants\.consent\.url/,
 		);
 	});
 

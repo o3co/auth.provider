@@ -100,7 +100,7 @@ imports (see [Entry points](#entry-points)). The package depends on `zod`.
   evict keys that carry a TTL, which every replay record does. Keep the
   seen-set on a server whose policy is `noeviction`, or on one sized never
   to reach `maxmemory`. Core's in-process seen-set has a cap of its own
-  (`replaySeenSet.memory.maxEntries`, a million records by default) and
+  (`core-replay-seen-set-memory.maxEntries`, a million records by default) and
   refuses at it the same way, with a reserve this adapter does not have:
   DPoP proofs fill at most 90% of it, so a DPoP flood leaves room for
   `private_key_jwt` and WebAuthn. A Redis at `maxmemory` refuses every
@@ -342,9 +342,9 @@ Each adapter ships in up to two forms:
   refused because …`, and `[<store>] mode must be "required" or
   "allow-plaintext"` for a store built directly); the grant store's
   (`federation grant store: mode "required" needs at least one encryption
-  key`, `federation grant store: federationGrants.encryptionKeys[<i>].key
+  key`, `federation grant store: redis-federation-grant-store.encryptionKeys[<i>].key
   must be canonical base64 of 32 bytes`, core's ring rule under
-  `federation grant store: federationGrants.encryptionKeys`, and
+  `federation grant store: redis-federation-grant-store.encryptionKeys`, and
   `federation grant store: keyPrefix may not contain "{" or "}"`); and the
   token store's (`federationTokenStore.redis: encryption.key must be
   canonical base64 of 32 bytes (AES-256), or a Buffer of 32 bytes, when
@@ -365,24 +365,24 @@ Each adapter ships in up to two forms:
   deprecated and says so on every call: `adapter_builder_deprecated` (warn,
   `builder`, `replacement`).
 
-| Module | Requires | Provides | Config key | Builder |
+| Module | Requires | Provides | Section | Builder |
 | --- | --- | --- | --- | --- |
-| `redisChallengeStoreModule` | `challengeStoreClient` | `challengeStore` | `redisChallengeStore` | `redisChallengeStoreBuilder` |
-| `redisReplaySeenSetModule` | `replaySeenSetClient` | `replaySeenSet` | `redisReplaySeenSet` | `redisReplaySeenSetBuilder` |
-| `redisAccessTokenDenylistModule` | `accessTokenDenylistClient` | `accessTokenDenylist` | `redisAccessTokenDenylist` | `redisAccessTokenDenylistBuilder` |
-| `redisRefreshTokenFamilyStoreModule` | `refreshTokenFamilyClient` | `refreshTokenFamilyStore` | `redisRefreshTokenFamilyStore` | `redisRefreshTokenFamilyStoreBuilder` |
-| `redisSessionStoresModule` | the six session/subject clients | the six session/subject stores | `redisSessionStores` | per-store builders |
-| `redisFederationTokenStoreModule` | `federationTokenStoreClient` | `federationTokenStore` | `redisFederationTokenStore` | `redisFederationTokenStoreBuilder` |
-| `redisFederationGrantStoreModule` | `federationGrantStoreClient` | `federationGrantStore` | `redisFederationGrantStore`, `federationGrants` | — |
-| `redisFederationGrantIntentStoreModule` | `federationGrantIntentStoreClient` | `federationGrantIntentStore` | `redisFederationGrantStore` (`keyPrefix`) | — |
-| `redisRateLimiterModule` | `rateLimiterClient`, `rateLimitBudgetResolver` | `rateLimiter` | `redisRateLimiter`; `rateLimit.failMode` | `redisRateLimiterBuilder` |
+| `redisChallengeStoreModule` | `challengeStoreClient` | `challengeStore` | `redis-challenge-store` | `redisChallengeStoreBuilder` |
+| `redisReplaySeenSetModule` | `replaySeenSetClient` | `replaySeenSet` | `redis-replay-seen-set` | `redisReplaySeenSetBuilder` |
+| `redisAccessTokenDenylistModule` | `accessTokenDenylistClient` | `accessTokenDenylist` | `redis-access-token-denylist` | `redisAccessTokenDenylistBuilder` |
+| `redisRefreshTokenFamilyStoreModule` | `refreshTokenFamilyClient` | `refreshTokenFamilyStore` | `redis-refresh-token-family-store` | `redisRefreshTokenFamilyStoreBuilder` |
+| `redisSessionStoresModule` | the six session/subject clients | the six session/subject stores | `redis-session-stores` | per-store builders |
+| `redisFederationTokenStoreModule` | `federationTokenStoreClient` | `federationTokenStore` | `redis-federation-token-store` | `redisFederationTokenStoreBuilder` |
+| `redisFederationGrantStoreModule` | `federationGrantStoreClient` | `federationGrantStore` | `redis-federation-grant-store` (`keyPrefix`, `listingAllowanceMs`, `tombstoneRetention`, `encryptionMode`, `encryptionKeys`) | — |
+| `redisFederationGrantIntentStoreModule` | `federationGrantIntentStoreClient` | `federationGrantIntentStore` | `redis-federation-grant-intent-store` (`keyPrefix`, default `fg:`) | — |
+| `redisRateLimiterModule` | `rateLimiterClient`, `rateLimitBudgetResolver` | `rateLimiter` | `redis-rate-limiter` | `redisRateLimiterBuilder` |
 | `redisCodeRepositoryModule` | `codeRepositoryClient` | `codeRepository` | `redisCodeRepository` | `redisCodeRepositoryBuilder` |
-| `redisDeviceCodeStoreModule` | `deviceCodeStoreClient` | `deviceCodeStore` | `redisDeviceCodeStore` | `redisDeviceCodeStoreBuilder` |
-| `redisConsentStoreModule` | `consentStoreClient`, `pendingConsentStoreClient` | `consentStore`, `pendingConsentStore` | `redisConsentStore` | `redisConsentStoreBuilder`, `redisPendingConsentStoreBuilder` |
-| `redisMfaFactorStoreModule` | `mfaFactorStoreClient` | `mfaFactorStore` | `redisMfaFactorStore` (`keyPrefix`, default `mfaf:`) | — |
-| `redisMfaTransactionStoreModule` | `mfaTransactionStoreClient` | `mfaTransactionStore` | `redisMfaTransactionStore` (`keyPrefix`, default `mfat:`) | — |
+| `redisDeviceCodeStoreModule` | `deviceCodeStoreClient` | `deviceCodeStore` | `redis-device-code-store` | `redisDeviceCodeStoreBuilder` |
+| `redisConsentStoreModule` | `consentStoreClient`, `pendingConsentStoreClient` | `consentStore`, `pendingConsentStore` | `redis-consent-store` | `redisConsentStoreBuilder`, `redisPendingConsentStoreBuilder` |
+| `redisMfaFactorStoreModule` | `mfaFactorStoreClient` | `mfaFactorStore` | `redis-mfa-factor-store` (`keyPrefix`, default `mfaf:`) | — |
+| `redisMfaTransactionStoreModule` | `mfaTransactionStoreClient` | `mfaTransactionStore` | `redis-mfa-transaction-store` (`keyPrefix`, default `mfat:`) | — |
 
-Every module also requires `config`, and the two sealing-store modules `deploymentMode` as well. Every module whose stores log also reads
+Each store module but `redisCodeRepositoryModule` reads its own section, named after the module: strict, its defaults and its variables in the package's [`config/reference.conf`](config/reference.conf), which each module declares (`section.reference`) and a composition root layers when it loads any of them. The path a section moved from (`redisConsentStore`, `redisRateLimiter`, `rateLimit.failMode`, the grant store's `federationGrants` keys, …) refuses boot naming the new one, and so does a renamed variable's old name (`RATE_LIMIT_FAIL_MODE`, `REFRESH_TOKEN_FAMILY_STORE_KEY_PREFIX` and `_CAS_RETRY_LIMIT`, `FEDERATION_GRANTS_ENCRYPTION_MODE`) unless the new one carries the same value. `redisCodeRepositoryModule` still requires `config` and reads `redisCodeRepository`; the two sealing-store modules require `deploymentMode`. Every module whose stores log also reads
 the optional `logger` slot: the two sealing-store modules, for the plaintext
 guard's line; `redisSessionStoresModule` and `redisCodeRepositoryModule`, for a
 stored record they cannot read; the two MFA store modules, for their boot
@@ -393,20 +393,20 @@ fails stage-1 boot with `missing-required-component` — named at boot, not at
 the first command.
 
 The rate limiter takes a key's budget from core's one lookup,
-`createRateLimitBudgetLookup`: its own `redisRateLimiter.limits` entry for the
+`createRateLimitBudgetLookup`: its own `redis-rate-limiter.limits` entry for the
 key's prefix, else the budget the prefix's owning module contributed
 (`rateLimitBudgetResolver`, read and checked at each check), else its
 `defaultLimit`, which it declares (`RateLimiter.defaultLimit`).
-`redisRateLimiterModule` answers `rateLimit.failMode` — a key in core's
-`rateLimit` block — as the limiter's outage policy (`RateLimiter.failMode`),
-which the guard applies while Redis cannot answer; a value other than `"open"`
-or `"closed"` refuses boot naming the key, and none given is `closed`.
+`redisRateLimiterModule` answers `redis-rate-limiter.failMode`, its own key, as
+the limiter's outage policy (`RateLimiter.failMode`), which the guard applies
+while Redis cannot answer; a value other than `"open"` or `"closed"` refuses
+boot naming the key, and the default is `closed`.
 `redisRateLimiterBuilder` takes the policy as its config's `failMode`, with
 the same values; it reads no contributed budget, only the `limits` and
 `defaultLimit` it is given. That key governs only a limiter these build: any
 other limiter answers its own policy, and boot warns
-`rate_limit_fail_mode_not_applied` when the key says `"open"` and the wired
-limiter does not.
+`rate_limit_fail_mode_not_applied` when `rateLimit.failMode`, the key's old
+path, says `"open"` and the wired limiter does not.
 
 ## Expiries and key TTLs
 
@@ -484,7 +484,7 @@ connection is not blocked while Redis frees the values.
 Records written by releases before v0.10 have no index entry. An index-only
 `removeBySid` would walk past them and leave a logged-out session's
 **upstream IdP refresh tokens** in Redis until the store TTL expired them. So
-`scanFallback` (option on the builder, `redisFederationTokenStore.scanFallback`
+`scanFallback` (option on the builder, `redis-federation-token-store.scanFallback`
 in the module config) keeps the pattern scan running after the index-driven
 removal.
 
@@ -519,7 +519,7 @@ no dual-read path by design.
 ## Federation grants
 
 Their own keyspace, because what they hold outlives every session: default
-prefix `fg:` (`redisFederationGrantStore.keyPrefix`).
+prefix `fg:` (`redis-federation-grant-store.keyPrefix`).
 
 | Key | Type | Holds |
 | --- | --- | --- |
@@ -562,13 +562,15 @@ the old one listed for 365 days after the last replica that sealed with it
 stopped — the procedure, and why it is the ceiling and not `maxExpiresIn`, is
 in the [operator runbook](../../docs/operator-runbook.md).
 
-**Acquisition's records share the prefix.** The intent store keeps the intent
-a backend lodged, the consent challenge and the connect transaction under
-`<prefix>{intents}:…`, beside the grants, and reads the same
-`redisFederationGrantStore.keyPrefix` — a deployment that moves one namespace
-moves both. It is its own module so that grants can live in Redis while
-acquisition stays in memory on a single replica (a restart then loses flows in
-progress and nothing else); nothing spans the two keyspaces.
+**Acquisition's records sit beside the grants.** The intent store keeps the
+intent a backend lodged, the consent challenge and the connect transaction
+under `<prefix>{intents}:…`, where the prefix is its own section's,
+`redis-federation-grant-intent-store.keyPrefix` (default `fg:`, the grant
+store's default) — a deployment that moves the grant store's namespace sets
+this one to the same value; the standalone template refuses to boot with the
+grant store's moved and this one left at its default. It is its own module so that grants can live in
+Redis while acquisition stays in memory on a single replica (a restart then
+loses flows in progress and nothing else); nothing spans the two keyspaces.
 
 ## Device authorizations share one slot
 
@@ -580,7 +582,7 @@ as two keys:
 | `${keyPrefix}{devauth}:code:${device_code}` | hash | the record — status, expiry, interval, scope, subject, and the approval's instant (`approvedAtMs`, written by the approving script in the same `HSET`; a record approved before it was written reads it as absent) |
 | `${keyPrefix}{devauth}:user:${user_code}` | string | the `device_code` it belongs to |
 
-`keyPrefix` is `redisDeviceCodeStore.keyPrefix` (default `devauth:`); the
+`keyPrefix` is `redis-device-code-store.keyPrefix` (default `devauth:`); the
 `{devauth}` segment is a constant **hash tag**. The record is keyed by the
 device code, `approve`/`deny` arrive with the user code, and both are
 independent random values — so a script that follows the index to the record
@@ -614,7 +616,7 @@ composition with one and not the other. Its keys:
 | `${keyPrefix}{pending}:ch:${challenge}` | hash | a parked `/authorize` request, its `sessionId` and `expiresAt` |
 | `${keyPrefix}{pending}:sess:${sessionId}` | sorted set | that session's challenges, scored by the order they were parked |
 
-`keyPrefix` is `redisConsentStore.keyPrefix` (default `consent:`). A consent
+`keyPrefix` is `redis-consent-store.keyPrefix` (default `consent:`). A consent
 record is one key, and every script over it touches that key alone, so consent
 records spread across a Cluster like any other key; the pair is length-prefixed,
 as the challenge and replay stores encode theirs, so no subject or client id can

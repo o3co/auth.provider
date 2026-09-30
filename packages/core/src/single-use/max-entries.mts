@@ -16,7 +16,7 @@
 
 /*
  * An in-process store's cap, and how it is read from config
- * (`replaySeenSet.memory.maxEntries`, `challengeStore.memory.maxEntries`,
+ * (`core-replay-seen-set-memory.maxEntries`, `core-challenge-store-memory.maxEntries`,
  * an adapter config's `maxEntries`). A cap is a positive whole number up to
  * {@link MAX_MEMORY_STORE_ENTRIES}, past which `Map.set` would throw instead
  * of the store refusing at its cap. Absent means the store's default; a

@@ -219,7 +219,6 @@ const REMOVED_AUTHORIZE_FIELDS: readonly RemovedKey[] = [
  * and `[]` as 0, `true` as 1 and `"1e3"` as 1000: a malformed duration would be
  * normalised (`tombstoneRetention: null` disabling tombstones) instead of
  * failing boot naming the key.
- * @internal
  */
 export const durationFromEnv = (bounds: z.ZodNumber) =>
 	environmentCoercer(
@@ -928,83 +927,15 @@ export const fullSectionsSchema = z.object({
 	// them.
 	deployment: z.unknown().optional(),
 	sessionRequirements: z.unknown().optional(),
-	// The federation-grants section (see the federation-grants ADR). The bundled
-	// Redis grant store reads it too and is installed whether or not the routes
-	// are, so losing the block would silently drop the operator's encryption
-	// keys and lifetime bound. Bounds live where the values are used
-	// (`assertFederationGrantRetrievalLimits`, the store's constructor);
-	// defaults in `config/reference.conf`.
-	federationGrants: z
-		.object({
-			enabled: coerceBooleanFromEnv.optional(),
-			// Seconds. A new grant's lifetime, and the most an operator permits;
-			// the code's one-year ceiling still applies above it.
-			defaultExpiresIn: durationFromEnv(z.number().int().positive()).optional(),
-			maxExpiresIn: durationFromEnv(z.number().int().positive()).optional(),
-			// Seconds. The retrieval's timings.
-			refreshBuffer: durationFromEnv(z.number().int().nonnegative()).optional(),
-			ineligibleRetryAfter: durationFromEnv(z.number().int().positive()).optional(),
-			refreshFailureBackoff: durationFromEnv(z.number().int().nonnegative()).optional(),
-			// Milliseconds, as the limits they become are.
-			upstreamTimeoutMs: durationFromEnv(z.number().int().positive()).optional(),
-			upstreamHardTimeoutMs: durationFromEnv(z.number().int().positive()).optional(),
-			refreshLockTtlMs: durationFromEnv(z.number().int().positive()).optional(),
-			lockWaitMs: durationFromEnv(z.number().int().nonnegative()).optional(),
-			persistRetryBudgetMs: durationFromEnv(z.number().int().positive()).optional(),
-			// Seconds. How long a record answers past the end of what it was
-			// authorized for; zero keeps no tombstones. At most one year: past the
-			// Date range it is a deadline no store can keep, and stores refuse it.
-			tombstoneRetention: durationFromEnv(
-				z.number().int().nonnegative().max(MAX_DURATION_SECONDS),
-			).optional(),
-			// Whether a subject-wide revocation may be asked to leave this
-			// subject's established grants standing. An allowance, not an
-			// instruction: the caller must ask, the request and the outcome are
-			// both reported, and boot refuses it with an adapter that cannot stamp
-			// the two boundaries separately.
-			allowKeepOnSubjectRevocation: coerceBooleanFromEnv.optional(),
-			// Whether the connect callback refuses an upstream account already
-			// linked to another local user, which needs
-			// `UserRepository.findSubjectByFederatedIdentity`. "required", the
-			// default, refuses to boot without it; "unsupported" records that this
-			// deployment does not make that check.
-			identityLookup: z.enum(["required", "unsupported"]).optional(),
-			// The deployment's consent page for grants. No default: enabling the
-			// feature states that such a page exists, and boot refuses it without
-			// one. A path, or an absolute URL on the provider's origin.
-			consent: z.object({ url: z.string().min(1).optional() }).optional(),
-			// The credential envelope's key ring. The first key seals; every
-			// listed key opens, so a key stays in the ring for as long as a paused
-			// grant may live.
-			encryptionMode: z.enum(["required", "allow-plaintext"]).optional(),
-			encryptionKeys: z
-				.array(z.object({ id: z.string().min(1), key: z.string().min(1) }))
-				.optional(),
-			// What a grant may be for. An empty map is valid: removing the last
-			// connection must remain an operable change.
-			connections: z
-				.record(
-					z.string().min(1),
-					z.object({
-						federation: z.string().min(1),
-						scopes: z.array(z.string().min(1)).min(1),
-						resource: z.string().min(1).optional(),
-						// No default for either: a guessed access-token maximum
-						// invents a residual-access policy, and a guessed boundary
-						// silently shares one.
-						boundary: z.string().min(1),
-						maxAccessTokenLifetime: durationFromEnv(z.number().int().positive()),
-						allowScopeSubsets: coerceBooleanFromEnv.optional(),
-						authorizationParams: z.record(z.string(), z.string()).optional(),
-						callbackURL: z.string().min(1).optional(),
-						// Verified id_token claims handed to the Store beside the
-						// subject for the linked-account check. Names only; the
-						// package checks them.
-						identityClaims: z.array(z.string()).optional(),
-					}),
-				)
-				.optional(),
-		})
+	// Presence-only: the path the federation-grants section, and the grant
+	// stores' own keys, moved from.
+	federationGrants: z.unknown().optional(),
+	// The federation-grants module's section, parsed by its module. Mirrored
+	// for the one key a composition root reads before it knows its modules,
+	// `enabled`; every other key is kept as written.
+	"federation-grants": z
+		.object({ enabled: coerceBooleanFromEnv.optional() })
+		.passthrough()
 		.optional(),
 	session: z
 		.object({
@@ -1110,17 +1041,16 @@ export const fullSectionsSchema = z.object({
 	 * the `login` budget, in whole seconds, for every limiter to read.
 	 *
 	 * OAuth endpoint limits (`/token`, `/authorize`) are separate: the
-	 * `rateLimiter` slot's modules take them under `memoryRateLimiter.*` /
-	 * `redisRateLimiter.*` in `windowSeconds` (`ratelimit/types.mts`).
+	 * `rateLimiter` slot's modules take them in their own sections
+	 * (`core-rate-limiter-memory.*` / `redis-rate-limiter.*`) in
+	 * `windowSeconds` (`ratelimit/types.mts`).
 	 */
 	rateLimit: z.object({
 		login: rateLimitSchema,
-		// The outage policy `redisRateLimiterModule` answers for the limiter it
-		// builds; the guard applies the wired limiter's own. The default lives in
-		// `reference.conf`: `"closed"` answers 503 and logs. `"open"`
-		// (`RATE_LIMIT_FAIL_MODE=open`) lets traffic through and still logs at
-		// error, so the outage is visible even with the audit sink down.
-		failMode: z.enum(["open", "closed"]),
+		// Presence-only: the path `redis-rate-limiter.failMode` moved from, kept
+		// for the relocation refusal and for boot's
+		// `rate_limit_fail_mode_not_applied` warning.
+		failMode: z.unknown().optional(),
 	}),
 	federations: z.record(z.string(), federationEntrySchema),
 	repositories: z.object({
@@ -1243,8 +1173,8 @@ export const fullSectionsSchema = z.object({
 		})
 		.optional(),
 	// Connection config for the standalone refresh-token-family client; defaults
-	// in HOCON. Module-internal config (`keyPrefix`, `casRetryLimit`) is on the
-	// separate top-level key `redisRefreshTokenFamilyStore`.
+	// in HOCON. The store's own settings (`keyPrefix`, `casRetryLimit`) are in
+	// its section, `redis-refresh-token-family-store`.
 	refreshTokenFamilyStore: z
 		.object({
 			redis: z
@@ -1265,25 +1195,6 @@ export const fullSectionsSchema = z.object({
 			adapter: z.enum(["memory", "redis"]).optional(),
 		})
 		.optional(),
-	// Module-internal config for `memoryRateLimiterModule`, kept for its
-	// coercions and bounds. Defaults live in HOCON.
-	memoryRateLimiter: z
-		.object({
-			limits: z.record(z.string(), rateLimitSpecSchema).optional(),
-			defaultLimit: rateLimitSpecSchema.optional(),
-			maxBuckets: z.coerce.number().int().positive().optional(),
-		})
-		.optional(),
-	// The same section for the Redis adapter, which multi-replica deployments
-	// run. Lost, `redisRateLimiterModule.configSchema` defaults the whole object
-	// to 60 requests / 60 s in place of the operator's per-endpoint budgets.
-	// Presence-only; defaults in `reference.conf` and the module.
-	redisRateLimiter: z
-		.object({
-			limits: z.record(z.string(), rateLimitSpecSchema).optional(),
-			defaultLimit: rateLimitSpecSchema.optional(),
-		})
-		.optional(),
 	// Adapter for the four user-session stores (`userSessionStore`,
 	// `sessionRPRegistry`, `sessionFamilyIndex`, `sessionFederationIndex`).
 	// Multi-replica deployments MUST use `"redis"`: memory loses session state
@@ -1298,7 +1209,7 @@ export const fullSectionsSchema = z.object({
 	// session); default `"memory"` in HOCON. Memory forks per replica and its
 	// module declares `replicaSafety`, so `core.deployment.mode = "multi"` refuses it
 	// by name. `"redis"` mounts `redisFederationTokenStoreModule`, configured
-	// under `redisFederationTokenStore`.
+	// under `redis-federation-token-store`.
 	federationTokenStore: z
 		.object({
 			type: z.enum(["memory", "redis"]).optional(),
@@ -1334,56 +1245,8 @@ export const fullSectionsSchema = z.object({
 	mfaTransactionStore: z
 		.object({
 			adapter: z.enum(["memory", "redis"]).optional(),
-			// The memory store's cap, read by `memoryMfaTransactionStoreModule`
-			// the way `challengeStore.memory.maxEntries` is read. Absent: the
-			// adapter's default.
-			memory: z.object({ maxEntries: z.unknown().optional() }).optional(),
-		})
-		.optional(),
-	// Module-internal config for `redisMfaFactorStoreModule` and
-	// `redisMfaTransactionStoreModule`. Presence-only; the defaults (`mfaf:`,
-	// `mfat:`) live in `reference.conf` and the modules, which refuse a prefix
-	// with a brace.
-	redisMfaFactorStore: z
-		.object({
-			keyPrefix: z.string().optional(),
-		})
-		.optional(),
-	redisMfaTransactionStore: z
-		.object({
-			keyPrefix: z.string().optional(),
-		})
-		.optional(),
-	// This adapter's own layout: where a grant's keys live and how far past a
-	// horizon the subject index keeps a member. What a grant may be is
-	// `federationGrants` above.
-	redisFederationGrantStore: z
-		.object({
-			keyPrefix: z.string().optional(),
-			// One year at most, as every duration here; see tombstoneRetention.
-			listingAllowanceMs: z.coerce.number().int().nonnegative().max(MAX_DURATION_MS).optional(),
-		})
-		.optional(),
-	// Module-internal config for `redisFederationTokenStoreModule`, including
-	// the encryption key the store cannot start without. Presence-only;
-	// defaults in `reference.conf` and the module.
-	redisFederationTokenStore: z
-		.object({
-			keyPrefix: z.string().optional(),
-			ttl: z.coerce.number().int().positive().optional(),
-			encryptionMode: z.enum(["required", "allow-plaintext"]).optional(),
-			encryptionKey: z.string().optional(),
-			// An exported-but-empty variable reads as `false`, which turns off
-			// this migration safety net (default `true`): set the variable to
-			// `true` or `false`, never empty.
-			scanFallback: coerceBooleanFromEnv.optional(),
-		})
-		.optional(),
-	// Module-internal config for `redisDeviceCodeStoreModule`. Presence-only;
-	// the default lives in the module.
-	redisDeviceCodeStore: z
-		.object({
-			keyPrefix: z.string().optional(),
+			// Presence-only: the path `core-mfa-transaction-store-memory` moved from.
+			memory: z.unknown().optional(),
 		})
 		.optional(),
 	// Adapter for the RFC 7009 access-token denylist; default `"memory"` in
@@ -1403,18 +1266,14 @@ export const fullSectionsSchema = z.object({
 	replaySeenSet: z
 		.object({
 			adapter: z.enum(["memory", "redis"]).optional(),
-			// The memory seen-set's cap, read by `memoryReplaySeenSetModule`,
-			// which refuses at boot anything but a positive whole number (a digit
-			// string from an environment variable is taken). Absent: the
-			// adapter's default.
-			memory: z.object({ maxEntries: z.unknown().optional() }).optional(),
+			// Presence-only: the path `core-replay-seen-set-memory` moved from.
+			memory: z.unknown().optional(),
 		})
 		.optional(),
-	// The memory challenge store's cap, read by `memoryChallengeStoreModule`,
-	// the same way as `replaySeenSet.memory.maxEntries` above.
+	// Presence-only: the path `core-challenge-store-memory` moved from.
 	challengeStore: z
 		.object({
-			memory: z.object({ maxEntries: z.unknown().optional() }).optional(),
+			memory: z.unknown().optional(),
 		})
 		.optional(),
 	// Where consent to a non-first-party client is recorded. `"none"` (the HOCON
@@ -1424,37 +1283,6 @@ export const fullSectionsSchema = z.object({
 	consentStore: z
 		.object({
 			adapter: z.enum(["none", "memory", "redis"]).optional(),
-		})
-		.optional(),
-	// Module-internal config for `redisConsentStoreModule`. Presence-only;
-	// defaults in `reference.conf` and the module.
-	redisConsentStore: z
-		.object({
-			keyPrefix: z.string().optional(),
-		})
-		.optional(),
-	// Module-internal config for `redisAccessTokenDenylistModule`.
-	// Presence-only; defaults in `reference.conf` and the module.
-	redisAccessTokenDenylist: z
-		.object({
-			keyPrefix: z.string().optional(),
-		})
-		.optional(),
-	// Module-internal config for `redisSessionStoresModule` (the bundled Redis
-	// user-session namespace). Presence-only.
-	redisSessionStores: z
-		.object({
-			keyPrefix: z.string().optional(),
-		})
-		.optional(),
-	// Module-internal config for `redisRefreshTokenFamilyStoreModule`
-	// (`REFRESH_TOKEN_FAMILY_STORE_KEY_PREFIX` / `..._CAS_RETRY_LIMIT`).
-	// Presence-only: the module's `configSchema` owns shape and defaults, with
-	// `reference.conf`.
-	redisRefreshTokenFamilyStore: z
-		.object({
-			keyPrefix: z.string().optional(),
-			casRetryLimit: z.coerce.number().optional(),
 		})
 		.optional(),
 	// Module-internal config for `redisCodeRepositoryModule`
@@ -1470,17 +1298,41 @@ export const fullSectionsSchema = z.object({
 			defaultExpiresIn: z.coerce.number().int().positive().optional(),
 		})
 		.optional(),
-	// Presence-only; defaults in the modules.
-	redisChallengeStore: z
-		.object({
-			keyPrefix: z.string().optional(),
-		})
-		.optional(),
-	redisReplaySeenSet: z
-		.object({
-			keyPrefix: z.string().optional(),
-		})
-		.optional(),
+	// Presence-only: the paths the stores' sections moved from, kept so a root
+	// that parses with `AppConfigSchema` before boot still hands them to the
+	// relocation refusal. Nothing reads them.
+	memoryRateLimiter: z.unknown().optional(),
+	redisRateLimiter: z.unknown().optional(),
+	redisAccessTokenDenylist: z.unknown().optional(),
+	redisChallengeStore: z.unknown().optional(),
+	redisConsentStore: z.unknown().optional(),
+	redisDeviceCodeStore: z.unknown().optional(),
+	redisMfaFactorStore: z.unknown().optional(),
+	redisMfaTransactionStore: z.unknown().optional(),
+	redisRefreshTokenFamilyStore: z.unknown().optional(),
+	redisReplaySeenSet: z.unknown().optional(),
+	redisSessionStores: z.unknown().optional(),
+	redisFederationTokenStore: z.unknown().optional(),
+	redisFederationGrantStore: z.unknown().optional(),
+	// Presence-only: the stores' own sections, each parsed by its module. A
+	// package's `reference.conf` is layered whenever any of its modules is
+	// loaded, so it sets these sections while their own module may not be;
+	// declared here, they are not named as ignored at boot.
+	"core-rate-limiter-memory": z.unknown().optional(),
+	"core-federation-grant-store-memory": z.unknown().optional(),
+	"redis-access-token-denylist": z.unknown().optional(),
+	"redis-challenge-store": z.unknown().optional(),
+	"redis-consent-store": z.unknown().optional(),
+	"redis-device-code-store": z.unknown().optional(),
+	"redis-mfa-factor-store": z.unknown().optional(),
+	"redis-mfa-transaction-store": z.unknown().optional(),
+	"redis-rate-limiter": z.unknown().optional(),
+	"redis-refresh-token-family-store": z.unknown().optional(),
+	"redis-replay-seen-set": z.unknown().optional(),
+	"redis-session-stores": z.unknown().optional(),
+	"redis-federation-token-store": z.unknown().optional(),
+	"redis-federation-grant-store": z.unknown().optional(),
+	"redis-federation-grant-intent-store": z.unknown().optional(),
 });
 
 /**

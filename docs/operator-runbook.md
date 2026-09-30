@@ -130,16 +130,15 @@ store is on Redis: `USER_SESSION_STORES_ADAPTER=redis`,
 bytes — the AES-256 key, e.g. `openssl rand -base64 32`; the builder refuses
 any other length, and a value with whitespace, the URL alphabet or missing
 padding; `templates/standalone/src/buildModules.mts`,
-`packages/core/config/reference.conf`). The consent step for clients that are
+`packages/redis/config/reference.conf`). The consent step for clients that are
 not first-party is off by default (`CONSENT_STORE_ADAPTER=none`); to serve such
 clients under `multi`, set `CONSENT_STORE_ADAPTER=redis` — `memory` is refused
 there (#561; `packages/redis/src/consent-store.mts`).
 A deployment that ran `multi` with the default in-memory federation-token store
 before #455/#456 is refused at boot once they land — set the last pair before
-upgrading. `federationTokenStore.type` and `redisFederationTokenStore.*` are
-declared in the standalone's config schema since #456, so the switch and the key
-reach `buildModules` (read in the template's first configuration phase since
-#728) and the modules `createApp` parses them for.
+upgrading. `federationTokenStore.type` is read in the template's first
+configuration phase, and the store's own section, `redis-federation-token-store`,
+key included, is parsed by its module.
 
 ### The standalone production compose
 
@@ -206,7 +205,7 @@ config-parse time unless noted.
 | `repositories.user.http.authenticateUrl` / `authenticateByTokenUrl` (`CLIENT_USER_AUTHENTICATE_URL`, `CLIENT_USER_AUTHENTICATE_BY_TOKEN_URL`) | absolute `https` (loopback `http` only); `timeout` a positive integer ≤ 2147483647 ms. Whether an endpoint redirects cannot be checked at construction, so it is required all the same: each URL is the endpoint that answers — a `3xx` is not followed, so a URL that redirects fails every call ([foundation README](../packages/foundation/README.md#what-the-store-must-enforce-itself)) | `packages/foundation/src/repositories/HttpUserRepository.mts` |
 | `repositories.user.http.bearerToken` (`CLIENT_USER_BEARER_TOKEN`) | optional — unset sends the Store no `Authorization` header. Set, including exported but empty, and `repositories.user.type = "http"` (`CLIENT_USER_TYPE`; the standalone's default — core's `reference.conf` defaults to `yaml`, which never reads the `http` block): a bare RFC 6750 token (no `Bearer ` prefix, no whitespace) with at least 32 bytes of key material, measured like `SESSION_SECRET`; the message never quotes the value. One token goes to all four Store URLs, so they must be one trust domain. The Store should refuse every request without it, with `401` (or `403`) and a `Bearer` challenge; a token it refuses is not a boot failure but an outage on every Store call (see the Store row in [§3](#3-what-fail-closed-looks-like-on-each-path); [foundation README](../packages/foundation/README.md#what-the-store-must-enforce-itself)) | `packages/foundation/src/repositories/HttpUserRepository.mts`, with core's `keys/secretEntropy.mts` |
 | `refreshTokenFamilyStore.redis.url` (`REFRESH_TOKEN_FAMILY_STORE_REDIS_URL`) | required whenever any Redis adapter is selected — it is the one shared socket | `templates/standalone/src/modules.mts` (`standaloneRedisClientsModule`) |
-| `rateLimit.failMode` (`RATE_LIMIT_FAIL_MODE`) | `"open"` or `"closed"`; `reference.conf` ships `"closed"`. The outage policy of the limiter `redisRateLimiterModule` builds, which every guarded route applies while Redis cannot answer. It governs no other limiter: the in-process one has no backend to lose, and a limiter of the deployment's own answers its own policy — boot warns `rate_limit_fail_mode_not_applied` when this says `"open"` and the wired limiter does not | `application.schema.mts`; read by `redisRateLimiterModule` (`packages/redis/src/ratelimit.mts`), which refuses any other value |
+| `redis-rate-limiter.failMode` (`REDIS_RATE_LIMITER_FAIL_MODE`) | `"open"` or `"closed"`; the Redis package's `reference.conf` ships `"closed"`. The outage policy of the limiter `redisRateLimiterModule` builds, which every guarded route applies while Redis cannot answer. It governs no other limiter: the in-process one has no backend to lose, and a limiter of the deployment's own answers its own policy. Its old path, `rateLimit.failMode`, and old variable, `RATE_LIMIT_FAIL_MODE`, refuse boot where the module is installed; elsewhere boot warns `rate_limit_fail_mode_not_applied` when the old path says `"open"` and the wired limiter does not. Written at this path without the module installed, it is reported by nothing: core's schema mirrors the Redis stores' sections, so `config_sections_ignored` counts `redis-rate-limiter` as owned and does not name it, and the warning reads the old path only | the module's section (`packages/redis/src/ratelimit.mts`), which refuses any other value |
 | `audit.sink.type` (`AUDIT_SINK_TYPE`) | a registered sink name. Core accepts `"none"` as a declaration; the standalone registers no `"none"` builder, so there an unknown type (including `none`) fails boot naming the sinks that exist | `packages/core/src/audit/types.mts` (`AUDIT_SINK_ABSENCE_POLICY`); `templates/standalone/src/modules.mts` (`auditSinkModule`) |
 | `device-grant.verificationUri` | required once `device-grant.enabled = true`; the device displays it verbatim | `packages/device-grant/src/module.mts` |
 | `mtls.fullPki.revocation.mode` / `.onUnavailable` / `.allowedHosts` | all three required under `mode = "full-pki"` with `revocation.mode` ∈ `"crl"`, `"ocsp"`, `"both"` (`allowedHosts` covers CRL distribution points and OCSP responders alike); there is no default for what an outage means | `packages/mtls/src/module.mts`, `packages/mtls/config/reference.conf` |
@@ -239,17 +238,30 @@ Module-level messages that arrive wrapped in a factory failure:
 
 - Keys: `privateKey or privateKeyPath is required for EdDSA algorithm — no signing key is configured` (with the `openssl` commands); `Duplicate kid values: …`; `previousKeys is not valid for HS256 — use previousSecrets` and the mirror for asymmetric algorithms (`packages/core/src/keys/factory.mts`).
 - Standalone Redis: `` `refreshTokenFamilyStore.redis.url` is required when any Redis-backed adapter is selected `` (`templates/standalone/src/modules.mts`).
+- Standalone federation grant intents on Redis: `redis-federation-grant-store.keyPrefix
+  (REDIS_FEDERATION_GRANT_STORE_KEY_PREFIX) is set off its default key prefix,
+  and redis-federation-grant-intent-store.keyPrefix
+  (REDIS_FEDERATION_GRANT_INTENT_STORE_KEY_PREFIX) is left at its default. …`,
+  a `RangeError` before boot whenever the Redis intent store is installed,
+  the grants on Redis or in memory (`templates/standalone/src/configPath.mts`).
+  The intent store's prefix is its own key: set it too — to the grant store's
+  prefix to keep acquisition's records beside the grants, or to one of its
+  own. The check compares values, so an intent store prefix written as the
+  default reads as left there. With the grants in memory,
+  `redisFederationGrantStore.keyPrefix is set, and no installed module reads
+  it: …` refuses that old key written at all, naming the intent store's key
+  and variable: move the value there and delete the old line.
 - Federation grants (#593): the same guard, the same environment variable, and
   the message names `[federation-grants]` rather than `[federation-tokens]`
   (`packages/redis/src/internal/encryption-mode.mts`). One more refusal of its
   own: `mode "required" needs at least one encryption key`, at construction
   rather than at the first write — a ring that cannot seal would otherwise be
   discovered after a user had already consented. The store's own refusals of
-  `federationGrants.encryptionKeys` arrive as a `RangeError` `cause`:
+  `redis-federation-grant-store.encryptionKeys` arrive as a `RangeError` `cause`:
   `federation grant store: mode "required" needs at least one encryption key`,
-  `federation grant store: federationGrants.encryptionKeys[<i>].key must be
+  `federation grant store: redis-federation-grant-store.encryptionKeys[<i>].key must be
   canonical base64 of 32 bytes`, and, from core's ring rule,
-  `federation grant store: federationGrants.encryptionKeys has a duplicate
+  `federation grant store: redis-federation-grant-store.encryptionKeys has a duplicate
   encryption key id at index <i>` and `… has an encryption key id at index <i>
   that does not match ^[A-Za-z0-9_-]{1,64}$` — an entry is named by its
   index, never by its id, which could be a key written in the wrong place
@@ -261,7 +273,7 @@ Module-level messages that arrive wrapped in a factory failure:
   instead. A read never re-seals, so
   dropping the key that sealed a grant makes it read `key_unavailable` until
   it is put back; the rotation procedure below says when a key may leave.
-- Federation tokens: `mode "allow-plaintext" is refused because the environment is "production"` — the environment is the one the config was selected by (`CONFIG_ENV`, or `NODE_ENV`) *or* `NODE_ENV` itself — and `… because core.deployment.mode is "multi"` in every environment (#473); either way unless `FEDERATION_TOKENS_ALLOW_INSECURE=1`, which then logs `federation_store_plaintext_override` (error) on every boot (`packages/redis/src/internal/encryption-mode.mts`). That refusal, and `federationTokenStore.redis: encryption.key must be canonical base64 of 32 bytes (AES-256), or a Buffer of 32 bytes, when encryption.mode is 'required' (the default)` for a `redisFederationTokenStore.encryptionKey` that is missing, the wrong length or not canonical base64, are the store's own and arrive as a `RangeError` `cause`, as does the same guard's refusal for federation grants; a mode outside the schema's two is `config-validation-failed`.
+- Federation tokens: `mode "allow-plaintext" is refused because the environment is "production"` — the environment is the one the config was selected by (`CONFIG_ENV`, or `NODE_ENV`) *or* `NODE_ENV` itself — and `… because core.deployment.mode is "multi"` in every environment (#473); either way unless `FEDERATION_TOKENS_ALLOW_INSECURE=1`, which then logs `federation_store_plaintext_override` (error) on every boot (`packages/redis/src/internal/encryption-mode.mts`). That refusal, and `federationTokenStore.redis: encryption.key must be canonical base64 of 32 bytes (AES-256), or a Buffer of 32 bytes, when encryption.mode is 'required' (the default)` for a `redis-federation-token-store.encryptionKey` that is missing, the wrong length or not canonical base64, are the store's own and arrive as a `RangeError` `cause`, as does the same guard's refusal for federation grants; a mode outside the schema's two is `config-validation-failed`.
 - MFA stores on Redis (the MFA ADR's D12): `redisMfaFactorStoreModule` and
   `redisMfaTransactionStoreModule` read the server's `maxmemory-policy` and
   persistence before they provide their stores — the enrolled factors, and the
@@ -276,8 +288,8 @@ Module-level messages that arrive wrapped in a factory failure:
   TTL, and the transaction store warns that it may evict a D21 hold (§4). A
   question the server refuses (`NOPERM`, an unknown or renamed command) is a
   warning instead (§4); any other reply error (`BUSY`, `LOADING`, `NOAUTH`, …),
-  and a server that cannot be reached, fails the boot with it as the `cause`. A `redisMfaFactorStore.keyPrefix` or
-  `redisMfaTransactionStore.keyPrefix` that contains a brace is a `RangeError`
+  and a server that cannot be reached, fails the boot with it as the `cause`. A `redis-mfa-factor-store.keyPrefix` or
+  `redis-mfa-transaction-store.keyPrefix` that contains a brace is a `RangeError`
   `cause` (`packages/redis/src/internal/mfa-durability.mts`,
   `internal/mfa-keys.mts`).
 - The Store as the MFA factor store (`foundationMfaFactorStoreModule`,
@@ -419,10 +431,10 @@ refresh grant takes care to answer `503` for outages.
 
 | Failure | Surface | Client sees | Log / audit | Bounded by |
 | --- | --- | --- | --- | --- |
-| Shared Redis down — **rate limiter**, `rateLimit.failMode = "closed"` (default) | `/oauth/token`, `/oauth/authorize`, `/oauth/introspect`, `/session/login`, `/oauth/device_authorization`, `/oauth/device/verification`, WebAuthn authentication options, the federation-grant client routes (`tag: "federation_grants"`) and the connect flow's pages (`federation_grants_browser`) | `503 service_unavailable` "Rate limiter temporarily unavailable" (the connect flow's pages: plain text at connect and the callback, `temporarily_unavailable` / `rate_limiter` at consent) | `rate_limiter_failed_closed` (error, with `tag`, `ip`, `error`); audit `rate_limit.unavailable` (`packages/core/src/ratelimit/guard.mts`) | one `commandTimeout` (1 s) per request in the standalone; see [§5](#failure-timing-on-the-shared-socket) |
+| Shared Redis down — **rate limiter**, `redis-rate-limiter.failMode = "closed"` (default) | `/oauth/token`, `/oauth/authorize`, `/oauth/introspect`, `/session/login`, `/oauth/device_authorization`, `/oauth/device/verification`, WebAuthn authentication options, the federation-grant client routes (`tag: "federation_grants"`) and the connect flow's pages (`federation_grants_browser`) | `503 service_unavailable` "Rate limiter temporarily unavailable" (the connect flow's pages: plain text at connect and the callback, `temporarily_unavailable` / `rate_limiter` at consent) | `rate_limiter_failed_closed` (error, with `tag`, `ip`, `error`); audit `rate_limit.unavailable` (`packages/core/src/ratelimit/guard.mts`) | one `commandTimeout` (1 s) per request in the standalone; see [§5](#failure-timing-on-the-shared-socket) |
 | — same, `failMode = "open"` | same | request proceeds unlimited | `rate_limiter_failed_open` (error); audit `rate_limit.unavailable` | same |
 | — **device verification** | `POST /oauth/device/verification` | the same policy, applied by the handler itself because its budget is keyed per subject rather than per IP (#457): `503 service_unavailable` under `closed`; under `open` the lookup / approval / denial proceeds. A limiter that *answers* "no" is not an outage — `429 slow_down` and `device.rate_limited` are unchanged under either mode | `rate_limiter_failed_closed` / `rate_limiter_failed_open` with `tag: "device_verification"`; audit `rate_limit.unavailable` (`packages/device-grant/src/verificationEndpoint.mts`, through core's `checkWithFailMode`) | `commandTimeout` |
-| Shared Redis down — **refresh grant** | `grant_type=refresh_token` | `503 temporarily_unavailable` for a family-store, session-store, watermark or keystore outage (`packages/oauth/src/grants/refreshToken.mts`); the client keeps its token and retries | `token_verification_unavailable` (error, `site: "refresh_token"`, `reason`) for the watermark and keystore cases; `refresh_token_store_unavailable` (error, `store`, `step`: `rotate` / `revoke`) for the family store; `session_admission_unavailable` (error, `store: "user_session"`, `action: "oauth.refresh"`) for the session store the token's `sid` names | `commandTimeout`; CAS retries capped at `redisRefreshTokenFamilyStore.casRetryLimit` (default 3) then `conflict-exhausted` (`packages/redis/src/refresh-token-family.mts`) |
+| Shared Redis down — **refresh grant** | `grant_type=refresh_token` | `503 temporarily_unavailable` for a family-store, session-store, watermark or keystore outage (`packages/oauth/src/grants/refreshToken.mts`); the client keeps its token and retries | `token_verification_unavailable` (error, `site: "refresh_token"`, `reason`) for the watermark and keystore cases; `refresh_token_store_unavailable` (error, `store`, `step`: `rotate` / `revoke`) for the family store; `session_admission_unavailable` (error, `store: "user_session"`, `action: "oauth.refresh"`) for the session store the token's `sid` names | `commandTimeout`; CAS retries capped at `redis-refresh-token-family-store.casRetryLimit` (default 3) then `conflict-exhausted` (`packages/redis/src/refresh-token-family.mts`) |
 | Refresh-token **replay** (not an outage) | same | `400 invalid_grant` `replay_detected`; the whole family is revoked inside the same compare-and-swap (`packages/core/src/refresh-token-family/rotation.mts`) | — | — |
 | Shared Redis down — **authorization code** | `GET/POST /oauth/authorize` | redirect with `error=temporarily_unavailable` "authorization code store unavailable" — RFC 6749 §4.1.2.1's code for a temporary condition, not `server_error` (`packages/oauth/src/routes/authorize.mts`) | `authorize_store_unavailable` (error, `store: "authorization_code"`, `step: "create"`, `clientId`, the error's projection) | `commandTimeout` |
 | Shared Redis down — **session liveness at `/authorize`** (an authenticated browser session's `sid` cannot be checked) | `GET/POST /oauth/authorize` | fails closed, never a code: a redirect to the validated `redirect_uri` with `error=temporarily_unavailable` "session store unavailable", interactive or `prompt=none` alike — an interactive request used to be sent to the login page, whose forwarding of signed-in users looped on the flag the cookie kept, and `prompt=none` used to get `login_required`, which told the relying party nobody was signed in (`packages/oauth/src/routes/authorize.mts`, through core's session admission) | `session_admission_unavailable` (error, `store: "user_session"`, `action: "oauth.authorize"`, the error's projection; never the `sid`) — it was `authorize_session_liveness_unavailable` | `commandTimeout` |
@@ -633,7 +645,7 @@ need them?"* — and the status says which.
 | `429 rate_limited` / `provider` | This deployment's own throttle, keyed `federation_grants:ip:<ip>`. | Configure `limits.federation_grants` on the limiter adapter if the budget is genuinely too small. |
 | `429 rate_limited` / `upstream` | The IdP throttled us. `Retry-After` when it said when. | Back off at the client. |
 | `503 service_unavailable` / `shutting_down` | The process has begun draining and will not start work nothing will wait for. | Normal during a rolling restart. Size the host's cleanup allowance at **45 seconds or more** — a ten-second drain is shorter than the upstream hard timeout plus the persist budget, so a shutdown under it abandons exactly the rotation the drain exists to wait for. The standalone gives cleanup the configured refresh tail plus a margin — 45 s under the shipped budgets, more when `upstreamHardTimeoutMs`, `persistRetryBudgetMs` or `lockWaitMs` is raised — and its compose files give the process 60; a Kubernetes deployment sets `terminationGracePeriodSeconds: 60` itself (the default is 30, below drain + cleanup). |
-| `503 service_unavailable`, "Rate limiter temporarily unavailable" | The limiter backend is down and `rateLimit.failMode = "closed"`. | The limiter's policy, not this route's. |
+| `503 service_unavailable`, "Rate limiter temporarily unavailable" | The limiter backend is down and `redis-rate-limiter.failMode = "closed"`. | The limiter's policy, not this route's. |
 | `federation.grant.refresh_persist_failed` (`storage`, `write_in_flight`, `hard_timeout`) | A refresh succeeded upstream and this process could not write down what it got. | A rotation may be lost: the IdP has moved to a refresh token this deployment does not have. Reconnect the grant only if subsequent calls actually answer `410 reauthorization_required`; an IdP with a rotation grace period often does not. |
 | `federation_grant_token_unavailable`, `federation_grant_status_unavailable`, `federation_grant_revoke_unavailable`, `federation_grant_lodge_unavailable`, `federation_grant_connect_unavailable`, `federation_grant_consent_unavailable`, `federation_grant_callback_unavailable` (error) | One line per `503`, or per `temporarily_unavailable` redirect at the callback: `reason` — what the caller was answered (`storage`, `key_unavailable`, `upstream`, `connection_not_configured`, `upstream_unavailable`) — and, where a store failed, `store` (`federation_grant`, `federation_grant_intent`, `revocation_boundary`, `user_directory`; the connect flow's user-session store and sessions boundary are session admission's line, `session_admission_unavailable`) and `step` (on the token route, core's own: `open`, `boundary`, `status`, `backstop_revoke`, `lock`, `write`, `mark`, `upstream`, `refresh`), with `grantId` and `correlationId` where they are known and the error's projection as `err` — its name, message (capped at 256 characters: the store's or the library's own text reaches the line), code and causes, never what a library put beside them. A store or an upstream that did not answer in time is `err` "not answered in time; no longer waited for" (a credential write, a reauthorization mark); a credential write retried within `persistRetryBudgetMs` is one line with `attempts`. A lodging's `connection_not_configured` names the `connection` — for a renewal, the grant's. No `err` where nothing was thrown: a key missing from the ring, an upstream that did not answer before the caller stopped waiting, a failed refresh's backoff still standing, a store's refusal (`refusal`). | Restore what `store` names, or the upstream. Correlate by `correlationId`, which is the `x-request-id` the response was answered under — the caller's own when it was sent once and matches `[A-Za-z0-9._:+/=#-]{1,128}`, otherwise one generated for the request, which the response header carries — and is the same on events written after the response. |
 | `federation_grant_token_step_failed`, `federation_grant_status_step_failed`, `federation_grant_lodge_step_failed`, `federation_grant_consent_step_failed`, `federation_grant_callback_step_failed`, `federation_grant_callback_exchange_refused` (warn) | A failure that changed no answer, with the same fields: a boundary the answer did not need, a failed refresh's stamp, a lock release, a use record, an audit, a refresh that failed or was still persisting after the caller was answered, the upstream call the hard deadline abandoned, a different kind of failure an earlier credential-write attempt met, a lodging's store errors the answer does not stand for (a second write that threw and landed all the same — on a `201` too —, a question after it that could not be asked, a pointer write whose re-read decided the answer, an intent it could not close), a renewal's pointer that could not be retired, an upstream that answered with a refusal (`step: "upstream"` on the token route; `exchange_refused` at the callback). | Nothing waits on it. A sustained rate is the store or the upstream it names; a refresh that could not be persisted also emits `federation.grant.refresh_persist_failed`. |
@@ -654,7 +666,7 @@ Three ways, and they end different amounts of what a user has.
 
 The service takes `federationGrants: "revoke" | "keep"`, default `"revoke"`.
 `"keep"` — end the sessions and the tokens, leave the established grants —
-is an **operator allowance**, `federationGrants.allowKeepOnSubjectRevocation`,
+is an **operator allowance**, `federation-grants.allowKeepOnSubjectRevocation`,
 default `false`, and not something a caller may switch on. Turning it on needs
 a `subjectRevocation` adapter carrying both boundaries; boot refuses the
 pairing rather than revoking silently.
@@ -708,8 +720,8 @@ delegation and nothing else still wires those.
 
 | What you see | What it is | What to do |
 | --- | --- | --- |
-| boot: `… the userRepository has no findSubjectByFederatedIdentity`, or `… has no supportsFederatedIdentityLookup` | Under `identityLookup = "required"` (the default) the repository must have the lookup and say what it covers. The HTTP repository has it once `CLIENT_USER_FIND_SUBJECT_BY_FEDERATED_IDENTITY_URL` is set (#613). | Set the URL to your Store's lookup endpoint (foundation README, "The identity lookup"), or set `federationGrants.identityLookup = "unsupported"` — the recorded decision not to refuse an upstream account another local user holds. |
-| boot: `federationGrants.connections.<name>: the userRepository does not cover the registration …`, or `… threw when asked whether it covers …` | The Store must say, per connection, that it can place an upstream identity from that registration with the claims the connection names. For the HTTP repository that is `repositories.user.http.federatedIdentityLookupCoverage`: no entry equals this connection's `{ provider, issuer, clientId }`, or the entry's `requiredClaims` names one the connection's `identityClaims` does not. The bundled in-memory repository covers none. | Declare the registration (exactly as configured) with the claims your Store's strategy needs, and name them in the connection's `identityClaims`; or `"unsupported"`. |
+| boot: `… the userRepository has no findSubjectByFederatedIdentity`, or `… has no supportsFederatedIdentityLookup` | Under `identityLookup = "required"` (the default) the repository must have the lookup and say what it covers. The HTTP repository has it once `CLIENT_USER_FIND_SUBJECT_BY_FEDERATED_IDENTITY_URL` is set (#613). | Set the URL to your Store's lookup endpoint (foundation README, "The identity lookup"), or set `federation-grants.identityLookup = "unsupported"` — the recorded decision not to refuse an upstream account another local user holds. |
+| boot: `federation-grants.connections.<name>: the userRepository does not cover the registration …`, or `… threw when asked whether it covers …` | The Store must say, per connection, that it can place an upstream identity from that registration with the claims the connection names. For the HTTP repository that is `repositories.user.http.federatedIdentityLookupCoverage`: no entry equals this connection's `{ provider, issuer, clientId }`, or the entry's `requiredClaims` names one the connection's `identityClaims` does not. The bundled in-memory repository covers none. | Declare the registration (exactly as configured) with the claims your Store's strategy needs, and name them in the connection's `identityClaims`; or `"unsupported"`. |
 | redirect `error=temporarily_unavailable` at the callback, with `federation_grant_callback_unavailable` (error, `store: "user_directory"`, `step: "find_subject_by_federated_identity"`) | The lookup could not be made: the Store answered anything but a `2xx` with one of the three answers (a `404` is not "nobody"), timed out, redirected, or exceeded the body cap. With `err.name: "StoreCredentialRefusedError"` (`storeStatus` `401` or `403`), the Store answered with a `Bearer` challenge: it refused this deployment's `CLIENT_USER_BEARER_TOKEN`, not the user. With `StoreTransportError`, it could not be reached or answered something unreadable; with `TimeoutError`, it did not answer in time. A `TypeError` is a repository that no longer has the lookup — a composition fault. | Fix the Store; the flow can be started again. Never map an HTTP failure to `unlinked` on the Store side either. For a `StoreCredentialRefusedError`, set `CLIENT_USER_BEARER_TOKEN` to a token the Store accepts; for a `StoreTransportError`, the line's `err.reason` and `err.detail` say which transport failure it was, as on the login, federation and jwt-bearer lines (§3, Store row): `could not be reached` (`unreachable`) is the network path or TLS to the Store — DNS, a firewall, a certificate, `ERR_SSL_SSL/TLS_ALERT_HANDSHAKE_FAILURE` for a Store expecting a client certificate; `closed before a complete response arrived` (`connection_closed`) is a connection closed under the request — occasionally a keep-alive race with the Store's or a proxy's idle timeout, persistently the Store or a proxy closing or restarting; `answered with a malformed HTTP response` (`malformed_response`) or `could not be read` (`unreadable`) is the Store, or a proxy in front of it, answering badly — the URL's port and path, the proxy, the Store's own health. |
 | redirect `error=identity_unverifiable` | The Store could not establish who holds the upstream account (`indeterminate`), or a claim the connection's `identityClaims` names was not in the id_token — the audit outcome says which. Not transient: asking again does not change it. | For a missing claim, the upstream does not issue it for this registration (Entra's `oid` needs `profile` in the scopes); for `identity_not_resolvable`, the person is not in the Store's directory. |
 | redirect `error=identity_conflict` | The upstream account is another local user's. | Working as designed; the user signed in upstream as someone else. |
@@ -717,7 +729,7 @@ delegation and nothing else still wires those.
 
 ### Rotating the federation-grant key ring (#593, D16)
 
-`federationGrants.encryptionKeys` is a ring: **the first key seals** every
+`redis-federation-grant-store.encryptionKeys` is a ring: **the first key seals** every
 credential written from then on — activation and every refresh — and
 **every listed key opens**, the envelope naming the key that sealed it. A
 read never re-seals, so a paused grant stays under the key it was written
@@ -861,7 +873,7 @@ stream — its level is fixed at `info`.
 | `session_requirements_registered` (info — `requirements: [{ name, module, remediations, secondFactorAuthority }]`, once at boot) | `core/src/boot/apply-contributions.mts` | not drift: the one boot line saying which session requirements this composition registered, in order, and which one is the second-factor authority — the one that vouches for a second factor (`secondFactorAuthority: true`), whatever its name. Compare it with `core.sessionRequirements.expected` when a boot refuses `session-requirement-missing` or `session-requirements-undeclared` |
 | `admission_actions_registered` (info — `actions: [{ name, grade, module }]`, once at boot when any action is registered) | `core/src/boot/apply-contributions.mts` | not drift: the one boot line saying which admission actions this composition registered, in order, each with its grade and the module that declared it. A grade is that module's own statement: an action graded `grants_nothing` is exempt from the MFA requirement's baseline — met on any live session a cookie, a code or a link carries, without a second factor; a token is still judged on its own `amr` — so check that every `grants_nothing` action is one you expect, from the module you expect (the bundled ones are `device.lookup` and `device.deny`, from `device-grant`) |
 | `rate_limit_budgets_registered` (info — `limiter: { kind, failMode } \| null`, `budgets: [{ prefix, budget, module, by }]`, once at boot) | `core/src/boot/apply-contributions.mts` | not drift: the wired limiter and the outage policy the guard applies for it, and each prefix a module claims, with its contributed budget (`null`: the limiter's `limits` entry or its `defaultLimit` applies) and the module that set it, by `contribution` or `override`. A limiter's own `limits` entry for a prefix wins over the contributed budget and is not shown. An override may only tighten, and a budget's window is at most a year; either refused boots `contribute-factory-failed` |
-| `rate_limit_fail_mode_not_applied` (warn — `configured`, `limiter`) | `core/src/boot/apply-contributions.mts` | `rateLimit.failMode` says `"open"` and the wired limiter applies another policy: the key governs only the limiter `redisRateLimiterModule` builds. Give the deployment's limiter the policy itself, or set the key to `"closed"` |
+| `rate_limit_fail_mode_not_applied` (warn — `configured`, `limiter`) | `core/src/boot/apply-contributions.mts` | `rateLimit.failMode` — the old path of `redis-rate-limiter.failMode`, which only the Redis limiter's module refuses — says `"open"` and the wired limiter applies another policy. Give the deployment's limiter the policy itself, or remove the key. The new path, `redis-rate-limiter.failMode`, written without the Redis limiter's module, is reported by nothing: `config_sections_ignored` does not name it, as core's schema mirrors the Redis stores' sections and counts them as owned. Nor is `RATE_LIMIT_FAIL_MODE`, the old variable: it no longer binds `rateLimit.failMode`, so with a limiter other than Redis's it does not trigger this warning, and only the Redis limiter's module refuses it |
 | `replica_unsafe_adapters` (warn) | `core/src/boot/replica-safety.mts` | `core.deployment.mode` is unset; set it |
 | `dpop_replay_ttl_below_window` (warn, `iatWindowSeconds`, `replayTtlSeconds`, `requiredTtlSeconds`) | `dpop/src/verifier.mts` | `dpop.replayStoreTtlSeconds` is below `2 × iatWindowSeconds + 1`: a proof can outlive its replay record and be replayed while still inside its acceptance window. Raise it to `requiredTtlSeconds` or more. It was a sentence, with `reason: "replay_ttl_below_iat_window"` |
 | `login_rate_limiter_not_shared`, `webauthn_authentication_options_rate_limiter_not_shared` (warn) | `session/src/routes/Session.mts`, `webauthn/src/module.mts` | no shared `rateLimiter` and `core.deployment.mode` unset; the guard is per-process (`"multi"` refuses boot instead, `"single"` is silent — #474) |
@@ -1040,23 +1052,26 @@ claim the code makes is for `sAddWithTtl`, a single-key `MULTI`.
 
 Prefixes are the shipped defaults; every one is overridable so two deployments
 can share a database (`REDIS_SESSION_STORES_KEY_PREFIX`,
-`REFRESH_TOKEN_FAMILY_STORE_KEY_PREFIX`, `CLIENT_CODE_KEY_PREFIX`,
+`REDIS_REFRESH_TOKEN_FAMILY_STORE_KEY_PREFIX`, `CLIENT_CODE_KEY_PREFIX`,
 `REDIS_ACCESS_TOKEN_DENYLIST_KEY_PREFIX`, `REDIS_FEDERATION_TOKEN_STORE_KEY_PREFIX`,
 `REDIS_CONSENT_STORE_KEY_PREFIX`, `REDIS_MFA_FACTOR_STORE_KEY_PREFIX`,
-`REDIS_MFA_TRANSACTION_STORE_KEY_PREFIX`; `packages/core/config/reference.conf`).
+`REDIS_MFA_TRANSACTION_STORE_KEY_PREFIX`, `REDIS_FEDERATION_GRANT_STORE_KEY_PREFIX`,
+`REDIS_FEDERATION_GRANT_INTENT_STORE_KEY_PREFIX`; each store's own section in
+`packages/redis/config/reference.conf`, `CLIENT_CODE_KEY_PREFIX` in
+`packages/core/config/reference.conf`).
 
 | Key | Type / value | TTL comes from | Source |
 | --- | --- | --- | --- |
 | `rtfam:<familyId>` | string, JSON `{familyId, activeJti, revoked, expiresAtMs}` | the family's `expiresAtMs` (`oauth.refreshToken.expiresIn`, default 86400 s). Set once at creation; rotation **never extends** it (`Math.min` in `rotate`). Revocation — by `/oauth/revoke`, a logout, or a replay — **does**: a revoked family is kept until the later of that expiry and the revocation plus `oauth.accessToken.maxExpiresIn`, plus about five minutes (the verifier's clock tolerance), so its access tokens cannot outlive it; a family revoked after its key expired gets a revoked key again | `packages/redis/src/refresh-token-family.mts`, `core/src/refresh-token-family/rotation.mts`, `revocation.mts`, `retention.mts` |
 | `oauth:code:<code>` | string, JSON code record | `redisCodeRepository.defaultExpiresIn` (`CLIENT_CODE_DEFAULT_EXPIRES_IN`, default 600 s) or the per-call `expiresIn`; consumed with `GETDEL` | `packages/redis/src/code-repository.mts` |
 | `atdeny:<jti>` | string `"1"` | the revoked access token's **remaining** lifetime plus about five minutes (`REVOCATION_RETENTION_ALLOWANCE_MS` — the verifier accepts a token that long past its `exp`); a token already past that writes nothing | `packages/redis/src/access-token-denylist.mts`, `packages/oauth/src/routes/revoke.mts` |
-| `<tag>:ip:<ip>` — `token`, `authorize`, `introspect`, `login`, `device_authorization`, `webauthn-authentication-options`; `device_verification:user:<subject>` | integer counter | the prefix's `windowSeconds`: `redisRateLimiter.limits.<prefix>` when declared, else the budget the prefix's owning module contributes — `login` 20 per 900 s from `rateLimit.login` (the session module), `device_verification` 5 per 300 s from `device-grant.rateLimit` (the device grant), `webauthn-authentication-options` 30 per 60 s from `webauthn.rateLimit.authenticationOptions` (WebAuthn), `mfa` 60 per 300 s from `mfa.rateLimit.routes` (the MFA module) — else `defaultLimit` 60/60 s. The expiry is set atomically with the increment and only when missing, so a steady stream cannot hold a window open | `packages/redis/src/ratelimit.mts`, `ioredis.mts` (`LUA_INCREMENT_WITH_TTL`), `core/src/ratelimit/budgetLookup.mts` |
+| `<tag>:ip:<ip>` — `token`, `authorize`, `introspect`, `login`, `device_authorization`, `webauthn-authentication-options`; `device_verification:user:<subject>` | integer counter | the prefix's `windowSeconds`: `redis-rate-limiter.limits.<prefix>` when declared, else the budget the prefix's owning module contributes — `login` 20 per 900 s from `rateLimit.login` (the session module), `device_verification` 5 per 300 s from `device-grant.rateLimit` (the device grant), `webauthn-authentication-options` 30 per 60 s from `webauthn.rateLimit.authenticationOptions` (WebAuthn), `mfa` 60 per 300 s from `mfa.rateLimit.routes` (the MFA module) — else `defaultLimit` 60/60 s. The expiry is set atomically with the increment and only when missing, so a steady stream cannot hold a window open | `packages/redis/src/ratelimit.mts`, `ioredis.mts` (`LUA_INCREMENT_WITH_TTL`), `core/src/ratelimit/budgetLookup.mts` |
 | `ss:us:<sid>` | string, JSON `{sid, sub, authTimeMs, createdAtMs, expiresAtMs, claims, amr?, authentication?}` — `amr` (RFC 8176, #481) is left out when the login path recorded none; `authentication` (`{primary, federation?, upstreamAmr?, mfaAtMs?}`, the MFA ADR's D9) is left out by a release before it, and such a session is read as one to split — a federated one vouches for `fed` alone | the session's `expiresAt` (`SET … PX … NX`); a verified second factor rewrites the value with `KEEPTTL` | `packages/redis/src/userSessionStore.mts` |
 | `ss:rp:<sid>` | hash, field = `clientId`, value = RP envelope | `session.expiresAt`, raised but never truncated (`PEXPIREAT NX` + `GT`) | `packages/redis/src/sessionRPRegistry.mts`, `internal/redisSidHash.mts` |
 | `ss:fi:<sid>`, `ss:fed:<sid>` | sorted sets of family ids / federation names | same rule | `packages/redis/src/sessionFamilyIndex.mts`, `sessionFederationIndex.mts`, `internal/redisSidSortedSet.mts` |
 | `ss:sub:<subject>` | sorted set of sids, **score = each session's expiry** | key TTL raised to the latest member expiry; members pruned on read against the server's `TIME` | `packages/redis/src/subjectSessionIndex.mts` |
 | `ss:rev:<subject>` | string, epoch-ms watermark | the caller's `watermarkTtlMs` — sized to the **longest refresh token**, monotonic on both value and expiry | `packages/redis/src/subjectRevocation.mts`, `core/src/user-sessions/revokeAllForSubject.mts` |
-| `ft:<sid>:<federation>` | string, AES-256-GCM-encrypted envelope | `redisFederationTokenStore.ttl` (default 86400 s) — the store lifetime, deliberately **not** the upstream access token's expiry | `packages/redis/src/federation-tokens.mts` |
+| `ft:<sid>:<federation>` | string, AES-256-GCM-encrypted envelope | `redis-federation-token-store.ttl` (default 86400 s) — the store lifetime, deliberately **not** the upstream access token's expiry | `packages/redis/src/federation-tokens.mts` |
 | `ft:idx:<sid>` | set of federation names | same, raised with each write | same |
 | `ft:lock:<sid>:<federation>` | string, advisory lock token | the lock's own | `packages/redis/src/internal/lock.mts` |
 | `chal:…`, `replay:…` | strings `"1"` | the challenge / replay window, `SET … PX … NX`. A DPoP proof's record is `replay:<len>:dpop-proof:<jkt>\|<len>:<jti>`, kept `dpop.replayStoreTtlSeconds` (default 300 s) | `packages/redis/src/challenges.mts`, `replay-seen-set.mts`, `packages/dpop/src/verifier.mts` |
@@ -1141,7 +1156,7 @@ each sweeps on its writes, at most once per 1000 writes and once per ten
 seconds (`packages/core/src/single-use/sweep.mts`), so a WebAuthn ceremony
 the user abandons, or an options request repeated in a loop, costs an entry
 for its lifetime and not until the process restarts. The replay seen-set is
-also capped at a million records (`replaySeenSet.memory.maxEntries`;
+also capped at a million records (`core-replay-seen-set-memory.maxEntries`;
 `packages/core/src/replay-seen-set/adapters/memory.mts`): about 200 MB with
 the UUID `jti`s clients send, up to about 725 MB if every `jti` is a
 256-character one outside Latin-1. DPoP proofs — recorded before any rate
@@ -1171,7 +1186,7 @@ already lost its challenge: its retry is `400 invalid_grant`
 options request. Sustained, that is a flood of fresh
 DPoP proofs, or more traffic than one replica's seen-set should carry: move
 to `REPLAY_SEEN_SET_ADAPTER=redis`. The challenge store is capped the same
-way at a million challenges (`challengeStore.memory.maxEntries`;
+way at a million challenges (`core-challenge-store-memory.maxEntries`;
 `packages/core/src/challenges/adapters/memory.mts`, about 180 MB). It fills
 at `maxEntries / webauthn.challengeTtlMs` — over 8 000 options requests a
 second at the default 120 s, behind the options routes' rate limit — and at
@@ -1183,7 +1198,7 @@ the WebAuthn options routes answer `503 temporarily_unavailable`, logged as
 Core's in-process MFA transaction store (`memoryMfaTransactionStoreModule`,
 `mfaTransactionStore.adapter = "memory"`; nothing installs it while
 `mfa.mode` is `"off"`) sweeps the same way and is capped at a hundred
-thousand transactions (`mfaTransactionStore.memory.maxEntries`;
+thousand transactions (`core-mfa-transaction-store-memory.maxEntries`;
 `packages/core/src/mfa/memoryTransactionStore.mts`). A transaction carries
 the login's user snapshot, so it is larger than a challenge: about 1.1 KB
 with a small `User`, so about 110 MB at the cap, growing with what the
@@ -1203,8 +1218,8 @@ process can see, and in a small container that limit is well under 1 GB, so
 a flood fills the heap and the process dies before a cap refuses anything.
 Either give the process the room (`--max-old-space-size`, and a container
 limit above it) or lower the caps to what it has:
-`replaySeenSet.memory.maxEntries`, `challengeStore.memory.maxEntries` and
-`mfaTransactionStore.memory.maxEntries` (HOCON; a string of digits is
+`core-replay-seen-set-memory.maxEntries`, `core-challenge-store-memory.maxEntries` and
+`core-mfa-transaction-store-memory.maxEntries` (HOCON; a string of digits is
 accepted). Each module refuses to boot, with a
 RangeError naming its key, a value that is not a positive whole number or is
 above 16 777 216 (2^24, the most entries a `Map` holds). A
@@ -1237,7 +1252,7 @@ If you build the socket yourself, attach an `error` listener: an `EventEmitter`
 - **`scanFallback` is a migration flag, not a tuning knob.** With it on (the
   default), every federation-token `removeBySid` still runs one `SCAN` of the
   keyspace after the index-driven removal. Set
-  `redisFederationTokenStore.scanFallback = false` once no session that
+  `redis-federation-token-store.scanFallback = false` once no session that
   predates the index (v0.10) can still exist — that is, once `ttl` has elapsed
   since the last pre-v0.10 replica stopped writing (`packages/redis/README.md`
   "Federation-token keys and logout").
@@ -1414,7 +1429,7 @@ before you flip — and a relying party holding the secret can also mint.
   express-session as one value (`packages/session/src/modules/sessionStoreModule.mts`),
   so there is no overlap window: rotating `SESSION_SECRET` invalidates every
   browser session at once.
-- **The federation-token encryption key** (`redisFederationTokenStore.encryptionKey`
+- **The federation-token encryption key** (`redis-federation-token-store.encryptionKey`
   under `mode = "required"`): an envelope written under the old key fails to
   decrypt, is **deleted**, and the user is asked to re-authenticate with the
   upstream IdP (`packages/redis/src/federation-tokens.mts` `get`). Rotating
@@ -1513,7 +1528,7 @@ before you flip — and a relying party holding the secret can also mint.
 
 4. Note the migration windows that are **still open** at `v0.11.0`, each of
    which you should be able to close after the upgrade rather than leave on:
-   `redisFederationTokenStore.scanFallback` ([§5](#operational-notes)),
+   `redis-federation-token-store.scanFallback` ([§5](#operational-notes)),
    `oauth.jwt.legacyTypAccept` (`OAUTH_JWT_LEGACY_TYP_ACCEPT`), and
    `oauth.refreshToken.unknownFamilyPolicy = "accept"`
    (`packages/core/config/reference.conf`). That last one does not close by
