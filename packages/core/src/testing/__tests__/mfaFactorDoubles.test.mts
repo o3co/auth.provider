@@ -125,12 +125,101 @@ describe("createTestMfaFactor with mail", () => {
 		digests: createTestMfaDigests("test"),
 	};
 
-	it("is enrollable only by an account with an address, and keeps a challenge across attempts", () => {
+	/** The keyed digest of `email` as the coordinator makes it when it mails a code there. */
+	const sentTo = (email: string) => ctx.digests.digest([normaliseMailAddress(email) as string]);
+
+	it("is enrollable only by an account whose address normaliseMailAddress reads, and keeps a challenge across attempts", () => {
 		const factor = createTestMfaFactor({ mail: true });
 		expect(factor.enrollable?.(USER)).toBe(true);
-		expect(factor.enrollable?.({ id: "u-2" })).toBe(false);
-		expect(factor.enrollable?.({ id: "u-2", email: "" })).toBe(false);
+		expect(factor.enrollable?.({ id: "u-2", email: " Contract@Example.COM " })).toBe(true);
+		for (const email of [undefined, "", " ", "contract", "@example.com", "contract@", 7]) {
+			expect(factor.enrollable?.({ id: "u-2", email }), String(email)).toBe(false);
+		}
 		expect(factor.reusableChallenge).toBe(true);
+	});
+
+	it("records the address digest its completion is handed — of the address its code went to — never one of the account's address as it reads by then, and completes nothing without one", async () => {
+		const factor = createTestMfaFactor({ mail: true });
+		const start = await factor.beginEnrollment({ ...ctx, user: USER, factors: [] });
+		const complete = (extra: object) =>
+			factor.completeEnrollment({
+				...ctx,
+				user: { ...USER, email: "mallory@attacker.example" },
+				factors: [],
+				state: start.state,
+				proof: testMfaFactorProofs.enrollmentProof(start),
+				...extra,
+			});
+		expect(await complete({ addressDigest: sentTo(USER.email) })).toEqual({
+			ok: true,
+			data: { addressDigest: sentTo(USER.email) },
+		});
+		for (const addressDigest of [undefined, null, "digest", { keyId: "test-key" }]) {
+			expect(await complete({ addressDigest }), JSON.stringify(addressDigest)).toEqual({
+				ok: false,
+				reason: "expired",
+			});
+		}
+	});
+
+	it("mails a login code with a null address digest when its data holds none it can read, never with a value that is none", async () => {
+		const factor = createTestMfaFactor({ mail: true });
+		const challenge = factor.challenge as NonNullable<MfaFactor["challenge"]>;
+		for (const data of [
+			{},
+			{ addressDigest: null },
+			{ addressDigest: "digest" },
+			{ addressDigest: { keyId: "test-key" } },
+			{ addressDigest: { keyId: 1, digest: 2 } },
+		]) {
+			const enrolled = {
+				id: "f-1",
+				label: undefined,
+				createdAt: new Date(0),
+				lastUsedAt: undefined,
+				data,
+			};
+			const sent = await challenge({ ...ctx, factor: enrolled, factors: [enrolled] });
+			expect(sent.mail?.purpose, JSON.stringify(data)).toBe("login_code");
+			expect(sent.mail?.addressDigest, JSON.stringify(data)).toBeNull();
+		}
+	});
+
+	it("keeps the digest a verification is handed when it was made under another key than the one recorded, and nothing it was not handed", async () => {
+		const factor = createTestMfaFactor({ mail: true });
+		const enrolled = {
+			id: "f-1",
+			label: undefined,
+			createdAt: new Date(0),
+			lastUsedAt: undefined,
+			data: { addressDigest: sentTo(USER.email) },
+		};
+		const challenge = factor.challenge as NonNullable<MfaFactor["challenge"]>;
+		const sent = await challenge({ ...ctx, factor: enrolled, factors: [enrolled] });
+		const rotated = createTestMfaDigests("test", { rotated: true });
+		const handed = rotated.digest([normaliseMailAddress(USER.email) as string]);
+		const verify = (addressDigest: unknown) =>
+			factor.verify({
+				...ctx,
+				digests: rotated,
+				factor: enrolled,
+				factors: [enrolled],
+				state: sent.state,
+				proof: testMfaFactorProofs.verificationProof(enrolled, sent),
+				addressDigest: addressDigest as never,
+			});
+		expect(await verify(handed)).toEqual({
+			ok: true,
+			factorId: "f-1",
+			next: { addressDigest: handed },
+		});
+		expect(await verify(sentTo(USER.email))).toEqual({ ok: true, factorId: "f-1" });
+		for (const addressDigest of [undefined, null, "digest", { keyId: "test-key-2" }]) {
+			expect(await verify(addressDigest), JSON.stringify(addressDigest)).toEqual({
+				ok: true,
+				factorId: "f-1",
+			});
+		}
 	});
 
 	it("asks for its enrollment code and each challenge's code to be mailed, each with an expiry ten minutes on and a new code at each challenge, a login code with the digest of the address it confirmed, never answering them to the page, and verifies the latest", async () => {
@@ -149,6 +238,7 @@ describe("createTestMfaFactor with mail", () => {
 			factors: [],
 			state: start.state,
 			proof: testMfaFactorProofs.enrollmentProof(start),
+			addressDigest: sentTo(USER.email),
 		});
 		if (!done.ok) throw new Error("the mailed code did not complete the enrollment");
 		// It keeps the keyed digest of the address it confirmed, never the address.
@@ -215,5 +305,20 @@ describe("createTestMfaDigests", () => {
 		const digests = createTestMfaDigests("email");
 		const made = digests.digest(["x"]);
 		expect(digests.matchesDigest(["x"], { ...made, keyId: "retired" })).toBe("key_unavailable");
+		expect(
+			digests.matchesDigest(["x"], createTestMfaDigests("email", { rotated: true }).digest(["x"])),
+		).toBe("key_unavailable");
+	});
+
+	it("rotated, digests under a second test key first, and still matches what the first key made", () => {
+		const first = createTestMfaDigests("email");
+		const rotated = createTestMfaDigests("email", { rotated: true });
+		const made = rotated.digest(["x"]);
+		expect(made.keyId).toBe("test-key-2");
+		expect(made.digest).not.toBe(first.digest(["x"]).digest);
+		expect(rotated.matchesDigest(["x"], made)).toBe("match");
+		expect(rotated.matchesDigest(["x"], first.digest(["x"]))).toBe("match");
+		expect(rotated.matchesDigest(["y"], first.digest(["x"]))).toBe("mismatch");
+		expect(rotated.matchesDigest(["x"], { ...made, keyId: "retired" })).toBe("key_unavailable");
 	});
 });

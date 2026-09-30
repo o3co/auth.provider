@@ -24,7 +24,9 @@
  * as an outage). A factor that mails a code answers its purpose and the code,
  * never text or a recipient: the coordinator keeps the state, then sends. A
  * login code carries the keyed digest of the address the factor was enrolled
- * with; the coordinator sends it to the current address only on a match.
+ * with, or `null` when its data holds none it can read; the coordinator sends
+ * it to the current address only on a match. The digest a factor records is
+ * the one it is handed: of the address the code went to, kept at the send.
  *
  * These are type assertions: the file is in core's typecheck list.
  */
@@ -36,6 +38,7 @@ import type {
 	MfaChallengeContext,
 	MfaDigestMatch,
 	MfaDigests,
+	MfaEnrollmentCompletionContext,
 	MfaEnrollmentContext,
 	MfaEnrollmentStart,
 	MfaFactor,
@@ -117,7 +120,7 @@ describe("the MfaFactor contract", () => {
 			readonly purpose: "login_code";
 			readonly code: string;
 			readonly expiresAtMs?: number;
-			readonly addressDigest: MfaKeyedDigest;
+			readonly addressDigest: MfaKeyedDigest | null;
 		}>();
 		expectTypeOf<MfaChallenge>().toEqualTypeOf<{
 			readonly state?: MfaFactorState;
@@ -138,8 +141,11 @@ describe("the MfaFactor contract", () => {
 		expect(true).toBe(true);
 	});
 
-	it("hands a verification after a mailed login code the current address's digest, so a factor can keep it under the ring's first key", () => {
+	it("hands a verification after a mailed login code, and an enrollment's completion after its mailed code, the digest of the address that code went to, kept at the send, for the factor to record", () => {
 		expectTypeOf<MfaVerifyContext["addressDigest"]>().toEqualTypeOf<MfaKeyedDigest | undefined>();
+		expectTypeOf<MfaEnrollmentCompletionContext["addressDigest"]>().toEqualTypeOf<
+			MfaKeyedDigest | undefined
+		>();
 		expect(true).toBe(true);
 	});
 

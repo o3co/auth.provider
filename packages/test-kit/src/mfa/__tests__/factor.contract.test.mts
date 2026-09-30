@@ -20,7 +20,7 @@
  * the contract fails the case that names it.
  */
 
-import type { MfaFactor } from "@o3co/auth-provider-core";
+import { type MfaFactor, normaliseMailAddress } from "@o3co/auth-provider-core";
 import {
 	createTestMfaDigests,
 	createTestMfaFactor,
@@ -48,6 +48,10 @@ const RULES = {
 	challenge: "challenge, when present, answers state that survives a JSON round trip",
 	challengeMail:
 		"challenge, when it asks for a code to be mailed, asks for a login code, non-empty, with an expiry after now when it gives one and the keyed digest of the account's address, another at each challenge, and its response carries no form of the code",
+	handed:
+		"the address digest a factor records is the one it is handed — of the address its code went to, kept at the send — at an enrollment's completion and at a verification under a newer key, whatever the account's address reads by then",
+	unreadable:
+		"challenge, over data whose address digest is gone or is no digest, still asks for its login code, with a null address digest, and never throws: the coordinator refuses the factor",
 	noAddress:
 		"no answer carries the account's address, whatever its case or escaping: the pending enrollment's state and response, the enrolled data and label, a challenge's state and response, and a verification's next data",
 	verifyMalformed: "verify answers malformed for a proof it cannot read, and never throws for one",
@@ -503,10 +507,111 @@ describe("mfaFactorContract", () => {
 			createTestMfaDigests("test").digest(["someone@example.com"]),
 			createTestMfaDigests("another-kind").digest([USER.email]),
 		]) {
+			// Mailed so whatever the data holds, it breaks the unreadable case too.
 			expect(
 				await failing(challenging((sent) => ({ ...sent, mail: { ...sent.mail, addressDigest } }))),
 				JSON.stringify(addressDigest),
-			).toEqual([RULES.challengeMail]);
+			).toEqual([RULES.challengeMail, RULES.unreadable]);
+		}
+		// Null is for data that holds no digest, never for data that does.
+		expect(
+			await failing(
+				challenging((sent) => ({ ...sent, mail: { ...sent.mail, addressDigest: null } })),
+			),
+		).toEqual([RULES.challengeMail]);
+	});
+
+	it("fails a factor that records a digest of the account's address as it reads at completion, or at a verification a digest it was not handed", async () => {
+		const digestOf = (email: unknown) =>
+			createTestMfaDigests("test").digest([normaliseMailAddress(email) as string]);
+		expect(
+			await failing(
+				inputFor({ mail: true }, (factor) => ({
+					...factor,
+					completeEnrollment: async (ctx) => {
+						const done = await factor.completeEnrollment(ctx);
+						return done.ok ? { ...done, data: { addressDigest: digestOf(ctx.user.email) } } : done;
+					},
+				})),
+			),
+		).toEqual([RULES.handed]);
+		for (const next of [
+			{ addressDigest: digestOf("someone@attacker.example") },
+			{ addressDigest: null },
+			{},
+		]) {
+			expect(
+				await failing(
+					inputFor({ mail: true }, (factor) => ({
+						...factor,
+						verify: async (ctx) => {
+							const verdict = await factor.verify(ctx);
+							return verdict.ok && ctx.addressDigest !== undefined ? { ...verdict, next } : verdict;
+						},
+					})),
+				),
+				JSON.stringify(next),
+			).toEqual([RULES.handed]);
+		}
+	});
+
+	it("fails a challenge that, over data holding no readable address digest, throws, asks for no login code, or mails one with a digest that is none", async () => {
+		const unreadable = (data: Record<string, unknown>) =>
+			typeof data.addressDigest !== "object" ||
+			data.addressDigest === null ||
+			typeof (data.addressDigest as { digest?: unknown }).digest !== "string";
+		for (const change of [
+			() => {
+				throw new Error("no address digest");
+			},
+			(sent: Awaited<ReturnType<NonNullable<MfaFactor["challenge"]>>>) => ({
+				...sent,
+				mail: undefined,
+			}),
+			(sent: Awaited<ReturnType<NonNullable<MfaFactor["challenge"]>>>) => ({
+				...sent,
+				mail: { ...sent.mail, addressDigest: undefined },
+			}),
+			(sent: Awaited<ReturnType<NonNullable<MfaFactor["challenge"]>>>) => ({
+				...sent,
+				mail: { ...sent.mail, addressDigest: "digest" },
+			}),
+		]) {
+			expect(
+				await failing(
+					challenging((sent, ctx) =>
+						unreadable(ctx.factor.data) ? (change as (s: typeof sent) => unknown)(sent) : sent,
+					),
+				),
+				change.toString(),
+			).toEqual([RULES.unreadable]);
+		}
+	});
+
+	it("passes the double over an account whose address is padded, in another case, internationalised or decomposed, and fails a factor keeping it as normaliseMailAddress spells it", async () => {
+		for (const email of [
+			" Contract@Example.COM ",
+			"contract@b\u00fccher.example",
+			"jose\u0301@example.com",
+			"Jos\u00e9@B\u00fccher.example",
+		]) {
+			const user = { ...USER, email };
+			expect(await failing({ ...inputFor({ mail: true }), user }), email).toEqual([]);
+			expect(
+				await failing({
+					...inputFor({ mail: true }, (factor) => ({
+						...factor,
+						completeEnrollment: async (ctx) => {
+							const done = await factor.completeEnrollment(ctx);
+							return done.ok
+								? { ...done, data: { ...done.data, kept: normaliseMailAddress(ctx.user.email) } }
+								: done;
+						},
+					})),
+					user,
+				}),
+				email,
+			).toEqual([RULES.noAddress]);
 		}
 	});
 
