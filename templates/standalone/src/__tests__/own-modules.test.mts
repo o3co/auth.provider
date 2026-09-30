@@ -576,6 +576,76 @@ describe("an environment variable wins over a value the template's application.c
 	});
 });
 
+/** The marker of the block of variable bindings `application.conf` ships last. */
+const BINDINGS_BLOCK = "# The variables that set keys of the template's own modules";
+
+/**
+ * The template's own files with its `application.conf` trimmed of the block
+ * of variable bindings it ships last, as a deployment's own copy may be.
+ */
+function withoutApplicationBindings(): string[] {
+	const { applicationConfPath, envConfPath } = resolveConfigPaths(configDir, "development");
+	const shipped = readFileSync(applicationConfPath, "utf8");
+	const at = shipped.indexOf(BINDINGS_BLOCK);
+	if (at < 0) throw new Error("application.conf ships no bindings block");
+	const dir = mkdtempSync(join(tmpdir(), "own-modules-trimmed-"));
+	operatorDirs.push(dir);
+	const application = join(dir, "application.conf");
+	writeFileSync(application, shipped.slice(0, at));
+	const development = join(dir, "development.conf");
+	writeFileSync(development, readFileSync(envConfPath, "utf8"));
+	return [development, application];
+}
+
+describe("an environment variable takes effect though application.conf does not bind it", () => {
+	it("HTTP_PORT and HTTP_TRUST_PROXY", async () => {
+		const handle = await bootTemplate({
+			files: withoutApplicationBindings(),
+			env: { HTTP_PORT: "8080", HTTP_TRUST_PROXY: "loopback" },
+		});
+		try {
+			expect(handle.components.httpHostSettings?.port).toBe(8080);
+			expect(handle.components.httpSettings?.trustProxy).toEqual(["loopback"]);
+		} finally {
+			await handle.dispose();
+		}
+	});
+
+	it("CORS_ALLOWED_ORIGINS", async () => {
+		const handle = await bootTemplate({
+			files: withoutApplicationBindings(),
+			env: { CORS_ALLOWED_ORIGINS: "https://env.example.com" },
+		});
+		try {
+			expect(handle.components.httpSettings?.cors.allowedOrigins).toEqual([
+				"https://env.example.com",
+			]);
+		} finally {
+			await handle.dispose();
+		}
+	});
+
+	it("REFRESH_TOKEN_FAMILY_STORE_REDIS_URL and _PASSWORD", async () => {
+		const redis = await listeningRedis();
+		const handle = await bootTemplate({
+			redis: true,
+			files: withoutApplicationBindings(),
+			env: {
+				REFRESH_TOKEN_FAMILY_STORE_REDIS_URL: `redis://127.0.0.1:${redis.port}`,
+				REFRESH_TOKEN_FAMILY_STORE_REDIS_PASSWORD: "trimmed-file-password",
+			},
+		});
+		try {
+			await vi.waitFor(() => expect(redis.received()).toContain("trimmed-file-password"), {
+				timeout: 10_000,
+			});
+		} finally {
+			await handle.dispose().catch(() => {});
+			await redis.close();
+		}
+	});
+});
+
 describe("key-store", () => {
 	it("owns oauth.jwt.signingKey, and reads it as its section rather than the configuration", () => {
 		expect(keyStoreModule.section?.at).toBe("oauth.jwt.signingKey");
