@@ -149,14 +149,14 @@ const applyGrantPolicy = async (
 			grantType: "authorization_code",
 			policy: grantPolicy.kind,
 		});
-		if (reading.outcome === "invalid") {
+		if (reading.verdict === "invalid") {
 			// Core's answer on the redirect, audited as a failure, not a denial.
 			const { error, errorDescription } = reading.result;
 			await auditFailure(ctx, { reason: errorDescription });
 			redirectError(ctx, error, errorDescription);
 			return null;
 		}
-		if (reading.outcome === "deny") {
+		if (reading.verdict === "deny") {
 			// RFC 6749 §4.1.2.1 makes `error` 1*NQSCHAR. The policy's code goes
 			// out as given when it is one; otherwise the redirect says
 			// `access_denied` — the authorization server refused — and the code
