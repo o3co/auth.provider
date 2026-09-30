@@ -60,6 +60,7 @@ import {
 	memoryMfaFactorStoreModule,
 	memoryMfaTransactionStoreModule,
 	memoryWebAuthnCredentialStoreModule,
+	type MfaFactorStore,
 	type PrimaryAuthentication,
 	type PrimaryContinuation,
 	type RequirementInterruption,
@@ -73,6 +74,7 @@ import { dpopModule } from "@o3co/auth-provider-dpop";
 import { appleFederationModule } from "@o3co/auth-provider-federation-apple";
 import { githubFederationModule } from "@o3co/auth-provider-federation-github";
 import { mfaModules } from "@o3co/auth-provider-mfa";
+import { seedTotpFactor } from "@o3co/auth-provider-mfa/testing";
 import { mtlsModule } from "@o3co/auth-provider-mtls";
 import {
 	TOKEN_EXCHANGE_GRANT_TYPE,
@@ -84,7 +86,11 @@ import {
 	redisMfaFactorStoreModule,
 	redisMfaTransactionStoreModule,
 } from "@o3co/auth-provider-redis";
-import { answerInterruption, establishSession } from "@o3co/auth-provider-session";
+import {
+	answerInterruption,
+	establishSession,
+	loginCompletionModule,
+} from "@o3co/auth-provider-session";
 import {
 	type ComposeOptions,
 	type Composition,
@@ -102,6 +108,7 @@ import {
 	createFakeGithub,
 	type FakeGithub,
 } from "../../../../packages/federation-github/src/__tests__/fake-github.mts";
+
 
 /** The mTLS package's self-signed client certificate. */
 export const CLIENT_CERTIFICATE = readFileSync(
@@ -154,6 +161,22 @@ export const ALL_ON: Features = {
  * sample key: the full set boots as `production` does.
  */
 export const MFA_KEY = randomBytes(32).toString("base64");
+
+/**
+ * Seeds a TOTP factor for `subject` in the composition's factor store, sealed
+ * under the configuration's MFA key ring, through the MFA package's testing
+ * entry: what an enrollment leaves behind. Answers its id and its secret.
+ */
+export async function seedTotp(
+	components: { readonly mfaFactorStore?: MfaFactorStore },
+	config: AppConfig,
+	subject: string,
+): Promise<{ readonly factorId: string; readonly secret: Buffer }> {
+	const factorStore = components.mfaFactorStore;
+	if (factorStore === undefined) throw new Error("the composition holds no MFA factor store");
+	const { record, secret } = await seedTotpFactor({ config, factorStore, subject });
+	return { factorId: record.id, secret };
+}
 
 /** Which store backs each added feature: memory on one replica, Redis on several. */
 export type Stores = "memory" | "redis";
@@ -622,10 +645,13 @@ function addedModules(
 		// The MFA package: the TOTP factor, on by its reference.conf, the
 		// recovery-code factor's module, and the MFA module, which registers
 		// the requirement named mfa, over the two MFA stores. The environment
-		// is the one the template composes as.
+		// is the one the template composes as. The MFA routes finish a login
+		// through the session package's login completion, which a
+		// composition that completes a login loads beside the session module.
 		...(features.mfa
 			? [
 					...mfaModules({ environment: "production" }),
+					loginCompletionModule,
 					...(stores.mfa === "redis"
 						? [redisMfaFactorStoreModule, redisMfaTransactionStoreModule]
 						: [memoryMfaFactorStoreModule, memoryMfaTransactionStoreModule]),

@@ -52,6 +52,7 @@ import {
 	MULTI_ENV,
 	redeem,
 } from "@o3co/auth-provider-standalone/src/__tests__/all-modules-composition.fixture.mts";
+import { totpCodeForTests } from "@o3co/auth-provider-mfa/testing";
 import { Redis } from "ioredis";
 import request from "supertest";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
@@ -63,6 +64,7 @@ import {
 	type FullSet,
 	type FullSetOptions,
 	memoryWebAuthnCredentialStoreModule,
+	seedTotp,
 	TV,
 } from "./full-set.fixture.mts";
 
@@ -263,6 +265,50 @@ describe("two replicas on one Redis database share every flow's state", () => {
 		expect(
 			await components(a).mfaTransactionStore.get(signIn.body.transaction as string),
 		).toMatchObject({ purpose: "login", subject: ALICE.sub });
+	});
+
+	it("a TOTP login interrupted on one replica is verified on the other, and the session it establishes authorizes on the first", async () => {
+		const a = await replica();
+		const b = await replica();
+		const { factorId, secret } = await seedTotp(a.handle.components, a.config, ALICE.sub);
+		// One browser, its cookies carried between the two replicas.
+		const jar = new Map<string, string>();
+		const keep = (res: request.Response): request.Response => {
+			for (const line of ([] as string[]).concat(res.headers["set-cookie"] ?? [])) {
+				const pair = line.split(";")[0] ?? "";
+				jar.set(pair.slice(0, pair.indexOf("=")), pair);
+			}
+			return res;
+		};
+		const cookies = () => [...jar.values()].join("; ");
+		const csrf = async (app: FullSet["app"]) => {
+			const res = keep(await request(app).get("/session/csrf").set("Cookie", cookies()));
+			return [res.body.header_name as string, res.body.csrf_token as string] as const;
+		};
+
+		const signIn = keep(
+			await request(a.app)
+				.post("/session/login")
+				.set("Cookie", cookies())
+				.set(...(await csrf(a.app)))
+				.type("form")
+				.send({ username: ALICE.username, password: ALICE.password }),
+		);
+		expect(signIn.status).toBe(403);
+		const transaction = signIn.body.transaction as string;
+		const verified = keep(
+			await request(b.app)
+				.post("/session/mfa/verify")
+				.set("Cookie", cookies())
+				.set(...(await csrf(b.app)))
+				.send({ transaction_id: transaction, factor_id: factorId, proof: totpCodeForTests(secret) }),
+		);
+		expect(verified.status).toBe(200);
+		expect(await a.handle.components.mfaTransactionStore?.get(transaction)).toBeNull();
+
+		const authorized = await authorize(a.app, [...jar.values()]);
+		expect(authorized.status).toBe(302);
+		expect((await redeem(b.app, codeFrom(authorized))).status).toBe(200);
 	});
 
 	it("keeps the state in Redis: a WebAuthn challenge and a federation grant intent land in the database", async () => {

@@ -26,6 +26,7 @@
 import { randomBytes } from "node:crypto";
 import {
 	type AppConfig,
+	type AuditSink,
 	BootError,
 	createApp,
 	createInMemoryUserSessionStore,
@@ -38,19 +39,34 @@ import {
 	type MfaFactorStore,
 	type MfaTransactionStore,
 	type Module,
+	type RateLimiter,
 	type SessionFederationIndex,
 	type UserSessionStore,
 } from "@o3co/auth-provider-core";
 import {
 	CORE_RELOCATIONS,
+	coreConfigForTests,
+	createRecordingLoginCompletion,
+	createTestCsrfGuard,
 	makeValidAppConfig,
 	renamedVariableCaptures,
 } from "@o3co/auth-provider-core/testing";
-import { sessionModule, sessionStoreModuleFor } from "@o3co/auth-provider-session";
+import {
+	loginCompletionModule,
+	sessionModule,
+	sessionStoreModuleFor,
+} from "@o3co/auth-provider-session";
 import express from "express";
 import request from "supertest";
 import { type Mock, vi } from "vitest";
 import { type MfaModuleOptions, mfaModule, mfaModules } from "#/module.mjs";
+import {
+	type MfaConfigForTestsOptions,
+	type MfaTotpFactorConfigForTestsOptions,
+	mfaConfigForTests,
+	mfaRecoveryCodeFactorConfigForTests,
+	mfaTotpFactorConfigForTests,
+} from "#/testing/index.mjs";
 import { mfaTotpFactorModule } from "#/totp/module.mjs";
 
 export const ISSUER = "https://auth.example";
@@ -64,6 +80,14 @@ export const ALICE = {
 	password: "alice-password-long",
 	id: "u-alice",
 	email: "alice@example.com",
+} as const;
+
+/** A second user the directory verifies. */
+export const BOB = {
+	username: "bob",
+	password: "bob-password-long",
+	id: "u-bob",
+	email: "bob@example.com",
 } as const;
 
 /** A logger whose every level is a spy; `child` answers the same logger. */
@@ -100,39 +124,17 @@ export const events = (logger: SpyLogger, level: "info" | "warn" | "error"): str
  * `mfa.lockout` at its defaults (ADR 2026-09-25-multi-factor-authentication,
  * D19 and D21).
  */
-export const LOCKOUT = {
-	threshold: 5,
-	baseSeconds: 900,
-	maxSeconds: 86_400,
-	memorySeconds: 86_400,
-	weeklyBudget: 10,
-	hardLimit: 100,
-	trustedBrowsers: 5,
-	trustedBrowserDays: 30,
-} as const;
+export const LOCKOUT = mfaConfigForTests({ key: MFA_KEY }).mfa.lockout;
 
 /** The `mfa` section as the package's reference.conf resolves it, under `mode`, with this suite's key. */
-export const mfaSection = (mode: "off" | "optional" | "required") => ({
-	mode,
-	page: { url: "/mfa" },
-	encryptionKeys: [{ key: MFA_KEY }],
-	transactionTtlSeconds: 600,
-	maxAttemptsPerTransaction: 5,
-	lockout: { ...LOCKOUT },
-	manage: { maxAgeSeconds: 300 },
-});
+export const mfaSection = (mode: "off" | "optional" | "required") =>
+	mfaConfigForTests({ key: MFA_KEY, mode }).mfa;
 
 /** The recovery-code factor's `mfa-recovery-code-factor` section as the package's reference.conf resolves it. */
-export const RECOVERY_CODE_SECTION = { enabled: true, count: 10 } as const;
+export const RECOVERY_CODE_SECTION = mfaRecoveryCodeFactorConfigForTests()["mfa-recovery-code-factor"];
 
 /** The TOTP factor's `mfa-totp-factor` section as the package's reference.conf resolves it. */
-export const TOTP_SECTION = {
-	enabled: true,
-	algorithm: "SHA1",
-	digits: 6,
-	period: 30,
-	window: 1,
-} as const;
+export const TOTP_SECTION = mfaTotpFactorConfigForTests()["mfa-totp-factor"];
 
 /**
  * What a composition layering the package's reference.conf and core's
@@ -147,7 +149,7 @@ export const UNSET_RENAMED_VARIABLES = renamedVariableCaptures({
 
 /**
  * The composition's configuration: core's valid fixture, a login over plain
- * HTTP (no `Secure` cookie), `mfa` declared expected, the `mfa` section under
+ * HTTP (no `Secure` cookie), `expected` declared (`mfa` alone by default), the `mfa` section under
  * `mode`, and the TOTP factor's `mfa-totp-factor` section, each with the keys
  * given laid over it, the recovery-code factor's section as its defaults, and
  * the captures of the renamed variables, all unset.
@@ -156,6 +158,7 @@ export function configFor(
 	mode: "off" | "optional" | "required",
 	mfa: Record<string, unknown> = {},
 	totp: Record<string, unknown> = {},
+	expected: readonly string[] = ["mfa"],
 ): AppConfig {
 	const base = makeValidAppConfig();
 	return {
@@ -167,10 +170,10 @@ export function configFor(
 			secure: false,
 			redirectAllowlist: ["https://app.example/after"],
 		},
-		core: { sessionRequirements: { expected: ["mfa"] } },
-		mfa: { ...mfaSection(mode), ...mfa },
-		"mfa-totp-factor": { ...TOTP_SECTION, ...totp },
-		"mfa-recovery-code-factor": RECOVERY_CODE_SECTION,
+		...coreConfigForTests({ expected }),
+		...mfaConfigForTests({ key: MFA_KEY, mode, ...(mfa as Partial<MfaConfigForTestsOptions>) }),
+		...mfaTotpFactorConfigForTests(totp as MfaTotpFactorConfigForTestsOptions),
+		...mfaRecoveryCodeFactorConfigForTests(),
 		"renamed-variables": UNSET_RENAMED_VARIABLES,
 	} as unknown as AppConfig;
 }
@@ -178,12 +181,23 @@ export function configFor(
 const providing = (name: string, provides: Record<string, () => unknown>): Module =>
 	defineModule({ name, provides: provides as never });
 
-/** The session package's stores the login module requires beside the user-session store; unused here. */
-const sessionSupport = (): Module[] => [
+/** A limiter that allows what a test sends: every prefix well above any test's traffic. */
+const generousRateLimiter = (): RateLimiter =>
+	createMemoryRateLimiter({ limits: {}, defaultLimit: { limit: 1000, windowSeconds: 60 } });
+
+/**
+ * The session package's stores the login module requires beside the
+ * user-session store, and the directory; `rateLimiter` is the composition's
+ * limiter, none when `null`.
+ */
+const sessionSupport = (rateLimiter: RateLimiter | null): Module[] => [
 	providing("test:user-repository", {
 		userRepository: () =>
 			new InMemoryUserRepository(
-				new Map([[ALICE.username, { password: ALICE.password, id: ALICE.id, email: ALICE.email }]]),
+				new Map([
+					[ALICE.username, { password: ALICE.password, id: ALICE.id, email: ALICE.email }],
+					[BOB.username, { password: BOB.password, id: BOB.id, email: BOB.email }],
+				]),
 			),
 	}),
 	providing("test:federation-token-store", {
@@ -207,11 +221,19 @@ const sessionSupport = (): Module[] => [
 				removeBySid: async () => {},
 			}) as unknown as SessionFederationIndex,
 	}),
-	providing("test:rate-limiter", {
-		rateLimiter: () =>
-			createMemoryRateLimiter({ limits: {}, defaultLimit: { limit: 1000, windowSeconds: 60 } }),
-	}),
+	...(rateLimiter === null ? [] : [providing("test:rate-limiter", { rateLimiter: () => rateLimiter })]),
 ];
+
+/**
+ * What the MFA module requires of the session package, in a composition
+ * without its login: core's doubles for the CSRF guard and the login's
+ * completion.
+ */
+const loginStandIns = (): Module =>
+	providing("test:login-stand-ins", {
+		csrfGuard: () => createTestCsrfGuard(),
+		loginCompletion: () => createRecordingLoginCompletion(),
+	});
 
 export interface BootOptions {
 	readonly config?: AppConfig;
@@ -219,10 +241,16 @@ export interface BootOptions {
 	readonly factorStore?: MfaFactorStore;
 	readonly transactionStore?: MfaTransactionStore;
 	readonly userSessionStore?: UserSessionStore | null;
+	/** The composition's rate limiter; one that allows every test's traffic by default, none when `null`. */
+	readonly rateLimiter?: RateLimiter | null;
+	/** Where the composition's audit events go; the configuration declares none by default. */
+	readonly auditSink?: AuditSink;
 	/** Modules beside the composition's: another factor, say. */
 	readonly extraModules?: readonly Module[];
 	/** Leave the session package's login out: the MFA modules and their stores alone. */
 	readonly withoutLogin?: boolean;
+	/** Load the session package's login without its login-completion module. */
+	readonly withoutLoginCompletion?: boolean;
 	/** Install `mfaModule` alone, without the TOTP factor's module: a composition whose factors are all another package's. */
 	readonly withoutTotpModule?: boolean;
 	readonly logger?: SpyLogger;
@@ -251,11 +279,18 @@ export function modulesFor(options: BootOptions = {}): {
 		options.userSessionStore === undefined
 			? createInMemoryUserSessionStore()
 			: options.userSessionStore;
+	const rateLimiter =
+		options.rateLimiter === undefined ? generousRateLimiter() : options.rateLimiter;
 	return {
 		modules: [
 			...(options.withoutLogin === true
-				? []
-				: [sessionStoreModuleFor(config as never), sessionModule, ...sessionSupport()]),
+				? [loginStandIns()]
+				: [
+						sessionStoreModuleFor(config as never),
+						sessionModule,
+						...(options.withoutLoginCompletion === true ? [] : [loginCompletionModule]),
+						...sessionSupport(rateLimiter),
+					]),
 			...(userSessionStore === null
 				? []
 				: [providing("test:user-session-store", { userSessionStore: () => userSessionStore })]),
@@ -286,7 +321,12 @@ export async function boot(options: BootOptions = {}): Promise<Booted> {
 	const composed = modulesFor({ ...options, config });
 	const handle = await createApp({
 		modules: composed.modules,
-		bootstrapComponents: { config, pathResolver: (s: string) => s, logger } as never,
+		bootstrapComponents: {
+			config,
+			pathResolver: (s: string) => s,
+			logger,
+			...(options.auditSink === undefined ? {} : { auditSink: options.auditSink }),
+		} as never,
 	});
 	handles.push(handle);
 	const app = express();
@@ -305,12 +345,12 @@ export async function refusal(options: BootOptions = {}): Promise<BootError> {
 	throw new Error("the composition booted");
 }
 
-/** `POST /session/login` as a browser: a CSRF token first, then the credentials, on one cookie jar. */
+/** `POST /session/login` as a browser: a CSRF token first, then the credentials, on one cookie jar; alice's unless `body` names another. */
 export async function login(
 	app: express.Express,
 	body: Record<string, unknown> = {},
+	agent: ReturnType<typeof request.agent> = request.agent(app),
 ): Promise<{ readonly agent: ReturnType<typeof request.agent>; readonly res: request.Response }> {
-	const agent = request.agent(app);
 	const csrf = await agent.get("/session/csrf");
 	const res = await agent
 		.post("/session/login")
