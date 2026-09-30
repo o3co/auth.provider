@@ -20,8 +20,11 @@ export default defineConfig({
 		typecheck: {
 			enabled: true,
 			// tsconfig.test.json, not the build config: the build config holds
-			// `src` alone, and a test file outside tsc's program is never
-			// compiled — its assertions pass without being checked (#626).
+			// `src` alone. Its program takes every file under __tests__. In any
+			// run that includes one of the files `include` below names (a full
+			// run, and CI, always does), an error in any file of the program
+			// fails the run; `include` decides only which files' errors are
+			// reported against their own tests.
 			tsconfig: "./tsconfig.test.json",
 			// Type-level assertions in __tests__/types.test.mts (per-purpose
 			// client shapes + ComponentMap declaration-merge invariants) must
@@ -29,17 +32,17 @@ export default defineConfig({
 			// `typecheck.include` REPLACES vitest's default pattern entirely, so
 			// re-include the default `*.test-d.*` glob in addition to the
 			// runtime+typecheck hybrid file.
-			// `code-repository.test.mts` and `device-code-store.test.mts` (#626):
-			// their fixtures — and the contract the latter runs — build `Code` and
-			// `DeviceAuthorization` inputs, which name every key; uncompiled,
-			// nothing would hold them to it.
+			// `code-repository.test.mts` and `device-code-store.test.mts`: their
+			// fixtures — and the contract the latter runs — build `Code` and
+			// `DeviceAuthorization` inputs, which name every key; listed so their
+			// errors are reported against their own tests.
 			include: [
 				"**/*.test-d.?(c|m)[jt]s?(x)",
 				"__tests__/types.test.mts",
 				"__tests__/code-repository.test.mts",
 				"__tests__/device-code-store.test.mts",
-				// #626: the intent store's tests build intents, which name every key;
-				// the contract copy is compiled through the file that runs it.
+				// The intent store's tests build intents, which name every key;
+				// listed so their errors are reported against their own tests.
 				"__tests__/federation-grant-intent-store-codec.test.mts",
 				"__tests__/federation-grant-intent-store.integration.test.mts",
 				// #626: the federation grant store's tests build grants,
@@ -58,13 +61,13 @@ export default defineConfig({
 				// suite of its own, which vitest 5 reports as "No test suite found".
 				"__tests__/user-session-contract-parity.test.mts",
 				// The MFA ADR's D7, D8: the MFA stores' tests build factor records
-				// and transactions, which name every key; the contract copies are
-				// compiled through the files that run them.
+				// and transactions, which name every key; listed so their errors
+				// are reported against their own tests.
 				"__tests__/mfa-factor-store.test.mts",
 				"__tests__/mfa-transaction-store.test.mts",
 				"__tests__/mfa-store-modules.test.mts",
 				// The federation-token store's module and builder: the builder is
-				// called as `AdapterBuilder` types it. Paired with tsconfig.test.json.
+				// called as `AdapterBuilder` types it.
 				"__tests__/federation-tokens-module.test.mts",
 			],
 		},

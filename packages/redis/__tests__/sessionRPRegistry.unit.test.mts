@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
-import type { Logger } from "@o3co/auth-provider-core";
+import type { Logger, SessionRPRegistry } from "@o3co/auth-provider-core";
 import { describe, expect, it, vi } from "vitest";
 import type { SessionRPRegistryClient, SessionRPRegistryMultiClient } from "../src/clients.mjs";
 import {
@@ -186,7 +186,7 @@ describe("redisSessionRPRegistryBuilder", () => {
 		const registry = redisSessionRPRegistryBuilder(
 			{ client, logger },
 			{} as Parameters<typeof redisSessionRPRegistryBuilder>[1],
-		);
+		) as SessionRPRegistry;
 
 		await registry.listRPs("sid-builder");
 

@@ -3,6 +3,7 @@
  * Licensed under the Apache License, Version 2.0 (the "License");
  */
 
+import type { RateLimiter } from "@o3co/auth-provider-core";
 import { describe, expect, it } from "vitest";
 import { redisRateLimiterModule } from "../src/ratelimit.mjs";
 
@@ -41,7 +42,7 @@ describe("redisRateLimiterModule", () => {
 				get: (prefix: string) => budgets.get(prefix),
 				entries: () => budgets.entries(),
 			},
-		} as never);
+		} as never) as RateLimiter | undefined;
 		if (!limiter) throw new Error("rateLimiter provider missing");
 		budgets.set("mfa", { limit: 2, windowSeconds: 300 });
 		budgets.set("login", { limit: 20, windowSeconds: 900 });
@@ -74,7 +75,7 @@ describe("redisRateLimiterModule", () => {
 			},
 			rateLimiterClient: { incrementWithTtl: async () => 1 },
 			rateLimitBudgetResolver: { get: () => undefined, entries: () => new Map().entries() },
-		} as never);
+		} as never) as RateLimiter | undefined;
 		if (!limiter) throw new Error("rateLimiter provider missing");
 		for (const key of [
 			"login:ip:1.2.3.4",
@@ -93,7 +94,7 @@ describe("redisRateLimiterModule", () => {
 				section: { limits: {}, defaultLimit: { limit: 60, windowSeconds: 60 }, failMode },
 				rateLimiterClient: { incrementWithTtl: async () => 1 },
 				rateLimitBudgetResolver: { get: () => undefined, entries: () => new Map().entries() },
-			} as never);
+			} as never) as RateLimiter | undefined;
 
 		it.each(["open", "closed"] as const)(
 			"answers redis-rate-limiter.failMode = %s as the limiter's own",

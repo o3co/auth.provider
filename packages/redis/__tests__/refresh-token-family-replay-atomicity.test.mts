@@ -21,7 +21,7 @@ import {
 	type RefreshTokenFamilyRotationOutcome,
 	RefreshTokenStorageError,
 } from "@o3co/auth-provider-core";
-import Redis from "ioredis";
+import { Redis } from "ioredis";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { makeIoredisClients } from "../src/ioredis.mjs";
 import { createRedisRefreshTokenFamilyStore } from "../src/refresh-token-family.mjs";

@@ -67,7 +67,15 @@ describe("RedisUserSessionStore.get — corrupt envelope validation", () => {
 	});
 
 	it("returns null and logs json_parse warn on malformed JSON (object-first call shape)", async () => {
-		const logger = { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() };
+		const logger = {
+			trace: vi.fn(),
+			debug: vi.fn(),
+			info: vi.fn(),
+			warn: vi.fn(),
+			error: vi.fn(),
+			fatal: vi.fn(),
+			child: vi.fn(),
+		};
 		const client = makeMockClient();
 		const store = createRedisUserSessionStore({ client, keyPrefix, logger });
 		client.seed(`${keyPrefix}sid-bad`, "{not-valid-json}}");
@@ -184,7 +192,15 @@ describe("RedisUserSessionStore.get — corrupt envelope validation", () => {
 			{ ...validEnvelope, enrollmentFacts: { witness: "enrolled", mailAddress: true } },
 		],
 	])("returns null and logs shape_invalid warn for %s", async (_label, corrupt) => {
-		const logger = { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() };
+		const logger = {
+			trace: vi.fn(),
+			debug: vi.fn(),
+			info: vi.fn(),
+			warn: vi.fn(),
+			error: vi.fn(),
+			fatal: vi.fn(),
+			child: vi.fn(),
+		};
 		const client = makeMockClient();
 		const store = createRedisUserSessionStore({ client, keyPrefix, logger });
 		client.seed(`${keyPrefix}sid-corrupt`, JSON.stringify(corrupt));
@@ -279,7 +295,15 @@ describe("RedisUserSessionStore.recordSecondFactor — what it reads and how oft
 	};
 
 	it("reads a corrupt envelope as gone, as get does: null, one warn, nothing written", async () => {
-		const logger = { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() };
+		const logger = {
+			trace: vi.fn(),
+			debug: vi.fn(),
+			info: vi.fn(),
+			warn: vi.fn(),
+			error: vi.fn(),
+			fatal: vi.fn(),
+			child: vi.fn(),
+		};
 		const client = makeMockClient();
 		const store = createRedisUserSessionStore({ client, keyPrefix, logger });
 		client.seed(`${keyPrefix}sid-1`, JSON.stringify({ ...validEnvelope, authentication: null }));

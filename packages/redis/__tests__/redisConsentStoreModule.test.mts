@@ -21,7 +21,7 @@ import {
 	replicaUnsafeReason,
 } from "@o3co/auth-provider-core";
 import { makeValidCoreConfig } from "@o3co/auth-provider-core/testing";
-import Redis from "ioredis";
+import { Redis } from "ioredis";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { redisConsentStoreModule } from "#/consent-store.mjs";
 import { makeIoredisClients } from "#/ioredis.mjs";
