@@ -53,9 +53,17 @@ export async function createTestApp<B extends BootstrapMap = DefaultBootstrapMap
 
 	const inspect: TestInspect = projectInspect(handle);
 
-	// AppHandle is frozen by assembleApp: spread into a new plain object so
-	// the testing-only `inspect` field does not touch the production handle.
-	return { ...handle, inspect } as TestAppHandle;
+	// AppHandle is frozen by assembleApp: copy its descriptors onto a new object
+	// so `inspect` stays off the production handle and its getters stay live.
+	return Object.freeze(
+		Object.defineProperties(
+			{},
+			{
+				...Object.getOwnPropertyDescriptors(handle),
+				inspect: { value: inspect, enumerable: true },
+			},
+		),
+	) as TestAppHandle;
 }
 
 function projectInspect(handle: AppHandle): TestInspect {
