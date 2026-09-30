@@ -18,21 +18,23 @@
  * Internal WebAuthn options-generation helpers: thin wrappers around
  * `@simplewebauthn/server`'s `generateRegistrationOptions` and
  * `generateAuthenticationOptions` that
- *   1. encode `userId` as bytes (WebAuthn §5.4.3: `user.id` is an opaque byte
- *      sequence, no PII; README, "SECURITY — `userId` opacity");
- *   2. pass `undefined` rather than `[]` for an empty `allowCredentials`, the
+ *   1. take `userId` as bytes, or a string they encode as UTF-8 (WebAuthn
+ *      §5.4.3: `user.id` is an opaque byte sequence, no PII; README,
+ *      "SECURITY — `userId` opacity");
+ *   2. take credentials as descriptors, an id and its transports;
+ *   3. pass `undefined` rather than `[]` for an empty `allowCredentials`, the
  *      discoverable-credentials flow;
- *   3. map `attestationPreference = "indirect"` to `"none"`, since
+ *   4. map `attestationPreference = "indirect"` to `"none"`, since
  *      SimpleWebAuthn's `attestationType` accepts only
  *      `'direct' | 'enterprise' | 'none'`;
- *   4. set `authenticatorSelection.residentKey = "preferred"`;
- *   5. require an ArrayBuffer-backed `challenge` (see the field docs below).
+ *   5. ask for the `authenticatorSelection.residentKey` the caller names;
+ *   6. require an ArrayBuffer-backed `challenge` (see the field docs below).
  *
  * NOT exported from the package barrel, except `WEBAUTHN_ALGORITHM_IDS`,
  * which the barrel re-exports as the statement of the algorithm pin.
  */
 
-import type { WebAuthnCredential } from "@o3co/auth-provider-core";
+import type { AuthenticatorTransport } from "@o3co/auth-provider-core";
 import type {
 	PublicKeyCredentialCreationOptionsJSON,
 	PublicKeyCredentialRequestOptionsJSON,
@@ -61,17 +63,44 @@ import type { WebAuthnConfig } from "../config.mjs";
  */
 export const WEBAUTHN_ALGORITHM_IDS: readonly number[] = Object.freeze([-8, -7, -257]);
 
+/** A credential as the ceremony options name it: its id, and how a client may reach it when known. */
+export interface WebAuthnCredentialDescriptor {
+	readonly credentialId: string;
+	readonly transports?: ReadonlyArray<AuthenticatorTransport>;
+}
+
+/** The descriptors as SimpleWebAuthn takes them. */
+const descriptorsOf = (credentials: readonly WebAuthnCredentialDescriptor[]) =>
+	credentials.map((c) => ({
+		id: c.credentialId,
+		// Cast: SimpleWebAuthn expects AuthenticatorTransportFuture[]
+		// (superset of our AuthenticatorTransport — adds "cable" and
+		// "smart-card"). Our stored values are a strict subset; the cast
+		// is safe since the common values round-trip without loss.
+		// biome-ignore lint/suspicious/noExplicitAny: transport superset cast — see comment
+		transports: c.transports as any,
+	}));
+
 // ---------------------------------------------------------------------------
 // Registration
 // ---------------------------------------------------------------------------
 
 export async function generateRegistrationOptionsForUser(args: {
 	readonly config: WebAuthnConfig;
-	/** Opaque user handle per WebAuthn §5.4.3. No PII stored here. */
-	readonly userId: string;
+	/**
+	 * Opaque user handle per WebAuthn §5.4.3, 1 to 64 bytes. No PII stored here.
+	 * Bytes are used as they are; a string is encoded as UTF-8.
+	 */
+	readonly userId: string | Uint8Array<ArrayBuffer>;
 	readonly userName: string;
 	readonly userDisplayName: string;
-	readonly excludeCredentials: readonly WebAuthnCredential[];
+	readonly excludeCredentials: readonly WebAuthnCredentialDescriptor[];
+	/**
+	 * Whether the authenticator is asked to create a discoverable credential
+	 * (WebAuthn Level 3 §5.4.6). Advisory: an authenticator may create one
+	 * whatever is asked.
+	 */
+	readonly residentKey: "discouraged" | "preferred" | "required";
 	/**
 	 * Ceremony challenge, ArrayBuffer-backed: `@simplewebauthn/server` requires
 	 * the non-shared form, and a bare `Uint8Array` (`Uint8Array<ArrayBufferLike>`)
@@ -92,27 +121,16 @@ export async function generateRegistrationOptionsForUser(args: {
 		rpID: args.config.rpId,
 		// This package's set, not the library's shifting default.
 		supportedAlgorithmIDs: [...WEBAUTHN_ALGORITHM_IDS],
-		// TextEncoder produces a Uint8Array from the opaque userId string.
-		// SimpleWebAuthn accepts Uint8Array for userID and encodes it as base64url
-		// in the returned PublicKeyCredentialCreationOptionsJSON.
-		userID: new TextEncoder().encode(args.userId),
+		// SimpleWebAuthn encodes userID as base64url in the returned
+		// PublicKeyCredentialCreationOptionsJSON.
+		userID: typeof args.userId === "string" ? new TextEncoder().encode(args.userId) : args.userId,
 		userName: args.userName,
 		userDisplayName: args.userDisplayName,
 		attestationType,
-		excludeCredentials: args.excludeCredentials.map((c) => ({
-			id: c.credentialId,
-			// Cast: SimpleWebAuthn expects AuthenticatorTransportFuture[]
-			// (superset of our AuthenticatorTransport — adds "cable" and
-			// "smart-card"). Our stored values are a strict subset; the cast
-			// is safe since the common values round-trip without loss.
-			// biome-ignore lint/suspicious/noExplicitAny: transport superset cast — see comment
-			transports: c.transports as any,
-		})),
+		excludeCredentials: descriptorsOf(args.excludeCredentials),
 		authenticatorSelection: {
 			userVerification: args.config.userVerification,
-			// "preferred": ask for a discoverable credential, accept a
-			// server-side one (WebAuthn Level 3 §5.4.6).
-			residentKey: "preferred",
+			residentKey: args.residentKey,
 		},
 		challenge: args.challenge,
 	});
@@ -129,7 +147,7 @@ export async function generateAuthenticationOptionsForUser(args: {
 	 * Empty array → discoverable-credentials flow (pass undefined to SimpleWebAuthn
 	 * so the client browser prompts the user to pick an available passkey).
 	 */
-	readonly allowCredentials: readonly WebAuthnCredential[];
+	readonly allowCredentials: readonly WebAuthnCredentialDescriptor[];
 	/** Ceremony challenge, ArrayBuffer-backed, as for registration. */
 	readonly challenge: Uint8Array<ArrayBuffer>;
 }): Promise<PublicKeyCredentialRequestOptionsJSON> {
@@ -140,13 +158,7 @@ export async function generateAuthenticationOptionsForUser(args: {
 		// allowCredentials from the JSON (rather than sending an empty list, which
 		// some browsers interpret differently from absent).
 		allowCredentials:
-			args.allowCredentials.length === 0
-				? undefined
-				: args.allowCredentials.map((c) => ({
-						id: c.credentialId,
-						// biome-ignore lint/suspicious/noExplicitAny: transport superset cast — see comment on registration helper
-						transports: c.transports as any,
-					})),
+			args.allowCredentials.length === 0 ? undefined : descriptorsOf(args.allowCredentials),
 		challenge: args.challenge,
 	});
 }

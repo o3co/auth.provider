@@ -18,8 +18,9 @@
  * Internal wrappers around `@simplewebauthn/server` verification; not exported from the package
  * barrel. They map the library's thrown errors to a typed `reason` by matching message text
  * (recheck the patterns against the library's messages whenever it is bumped), reshape
- * registration material for the endpoint layer, and allow the sign-count 0/0 case of
- * authenticators that always report 0.
+ * registration material for the endpoint layer, allow the sign-count 0/0 case of
+ * authenticators that always report 0, and answer a verified assertion's backup state (BS) to
+ * the caller that asks for it.
  *
  * Attestation chain failures ("x5c could not be chained to any specified trust anchor") match no
  * pattern and read as "unknown"; there is no dedicated reason for them.
@@ -136,7 +137,11 @@ function mapRegistrationError(err: unknown): AttestationVerificationResult {
 // ---------------------------------------------------------------------------
 
 export interface AssertionVerificationInput {
-	readonly credential: WebAuthnCredential;
+	/** The stored credential: its id, its COSE public key, its sign count and its transports. */
+	readonly credential: Pick<
+		WebAuthnCredential,
+		"credentialId" | "publicKey" | "signCount" | "transports"
+	>;
 	readonly response: AuthenticationResponseJSON;
 	readonly expectedChallenge: string;
 	readonly expectedRpId: string;
@@ -165,9 +170,28 @@ export type AssertionVerificationResult =
 				| "unknown";
 	  };
 
+/**
+ * {@link AssertionVerificationResult}, with the backup state (BS) the verified authenticator data
+ * carries: whether the credential is backed up, a synced passkey, at this assertion.
+ */
+export type AssertionVerificationWithBackupState =
+	| { readonly ok: true; readonly newSignCount: number; readonly backedUp: boolean }
+	| Extract<AssertionVerificationResult, { ok: false }>;
+
 export async function verifyWebAuthnAssertion(
 	input: AssertionVerificationInput,
 ): Promise<AssertionVerificationResult> {
+	const verified = await verifyWebAuthnAssertionWithBackupState(input);
+	return verified.ok ? { ok: true, newSignCount: verified.newSignCount } : verified;
+}
+
+/**
+ * Verifies an assertion as {@link verifyWebAuthnAssertion} does, and answers the backup state its
+ * authenticator data carries beside the new count.
+ */
+export async function verifyWebAuthnAssertionWithBackupState(
+	input: AssertionVerificationInput,
+): Promise<AssertionVerificationWithBackupState> {
 	try {
 		const verification = await verifyAuthenticationResponse({
 			response: input.response,
@@ -201,13 +225,13 @@ export async function verifyWebAuthnAssertion(
 			return { ok: false, reason: "signature_invalid" };
 		}
 
-		const newCounter = verification.authenticationInfo.newCounter;
+		const { newCounter, credentialBackedUp } = verification.authenticationInfo;
 		const stored = input.credential.signCount;
 
 		// Both counters 0 is allowed: some authenticators always report 0 (the library skips its
 		// own counter check in that case too).
 		if (newCounter === 0 && stored === 0) {
-			return { ok: true, newSignCount: 0 };
+			return { ok: true, newSignCount: 0, backedUp: credentialBackedUp };
 		}
 
 		// The library already throws when the counter did not increase; this guard keeps the
@@ -216,13 +240,15 @@ export async function verifyWebAuthnAssertion(
 			return { ok: false, reason: "sign_count_regression" };
 		}
 
-		return { ok: true, newSignCount: newCounter };
+		return { ok: true, newSignCount: newCounter, backedUp: credentialBackedUp };
 	} catch (err) {
 		return mapAuthenticationError(err);
 	}
 }
 
-function mapAuthenticationError(err: unknown): AssertionVerificationResult {
+function mapAuthenticationError(
+	err: unknown,
+): Extract<AssertionVerificationResult, { ok: false }> {
 	if (err instanceof Error) {
 		// Before the plain-origin arm: the library's cross-origin messages contain "origin" and
 		// would otherwise point an operator at `webauthn.origin`, which cannot fix an embedding.
