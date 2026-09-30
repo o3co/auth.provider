@@ -23,7 +23,8 @@
  * redirect.
  */
 export interface MemorySidSortedSet {
-	add(sid: string, member: string, expiresAt: Date): void;
+	/** Whether it recorded: `false` for an `expiresAt` already past. */
+	add(sid: string, member: string, expiresAt: Date): boolean;
 	list(sid: string): string[];
 	remove(sid: string, member: string): void;
 	removeBySid(sid: string): void;
@@ -46,7 +47,7 @@ export function createMemorySidSortedSet(): MemorySidSortedSet {
 			if (!Number.isFinite(expiresAtMs)) {
 				throw new RangeError("expiresAt must be a valid date");
 			}
-			if (expiresAtMs <= Date.now()) return;
+			if (expiresAtMs <= Date.now()) return false;
 			const existing = store.get(sid);
 			// Lazy GC: if the previous bucket has already expired, drop its state
 			// so a re-used sid does not leak federation/family IDs from a prior
@@ -67,6 +68,7 @@ export function createMemorySidSortedSet(): MemorySidSortedSet {
 					expiresAtMs,
 				});
 			}
+			return true;
 		},
 		list(sid) {
 			const it = store.get(sid);
