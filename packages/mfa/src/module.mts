@@ -24,13 +24,15 @@
  * mode read as absent must not lift that); reads `auditSink` (absence declared)
  * and `logger`. Nothing forks per replica.
  *
- * Reads its own section, `mfa` — the mode and its settings — the deployment
- * mode from the `deploymentMode` slot, and, from the whole configuration,
- * `endpoints.mfa.url`.
+ * Reads its own section, `mfa` — the mode, its settings and the step-up
+ * page, `mfa.page.url` — and the deployment mode from the `deploymentMode`
+ * slot. The page's old path, `endpoints.mfa.url`, refuses the boot naming
+ * the new one, and so does `ENDPOINTS_MFA_URL` unless `MFA_PAGE_URL` carries
+ * the same value.
  *
  * Contributes `sessionRequirements.mfa`. Its factory refuses the boot when
  * `mfa.mode` is `off` or unset, when the package's settings are unusable (naming
- * the key), or when `endpoints.mfa.url` is unset. It builds the key ring's sealing
+ * the key), or when `mfa.page.url` is unset. It builds the key ring's sealing
  * once per boot (so `mfa_factor_sealed_with_retired_key` is logged once per key
  * id) and keeps it, with the requirement core issues `mfa.step_up` to, for the
  * same boot's routes (`mfaBootState`). It warns once when the development sample
@@ -216,13 +218,12 @@ function checkInstalledFactors(factors: MfaFactorResolver, mode: MfaRequirementM
 	}
 }
 
-/** The page a step-up starts on: `endpoints.mfa.url`, which core's reference.conf defaults. */
-function stepUpPageOf(config: unknown): StepUpPage {
-	const url = (config as { endpoints?: { mfa?: { url?: unknown } } } | undefined)?.endpoints?.mfa
-		?.url;
+/** The page a step-up starts on: `mfa.page.url`, which the package's reference.conf defaults. */
+function stepUpPageOf(section: unknown): StepUpPage {
+	const url = (section as { page?: { url?: unknown } } | null | undefined)?.page?.url;
 	if (typeof url !== "string" || url.length === 0) {
 		throw new RangeError(
-			"endpoints.mfa.url is not set: the MFA page a step-up starts on (ENDPOINTS_MFA_URL; core's reference.conf ships /mfa)",
+			"mfa.page.url is not set: the MFA page a step-up starts on (MFA_PAGE_URL; the package's reference.conf ships /mfa)",
 		);
 	}
 	return { url, params: {} };
@@ -256,6 +257,8 @@ export function mfaModule(options: MfaModuleOptions = {}): Module {
 		section: {
 			schema: mfaSectionSchema,
 			reference: new URL("../config/reference.conf", import.meta.url),
+			relocatedFrom: { "endpoints.mfa.url": "page.url" },
+			renamedVariables: { ENDPOINTS_MFA_URL: "endpoints.mfa.url" },
 		},
 		requires: [
 			"config",
@@ -284,7 +287,7 @@ export function mfaModule(options: MfaModuleOptions = {}): Module {
 						...options,
 						deploymentMode: deps.deploymentMode,
 					});
-					const stepUpPage = stepUpPageOf(deps.config);
+					const stepUpPage = stepUpPageOf(deps.section);
 					const logger = deps.logger ?? consoleLogger;
 					if (settings.developmentSampleKeyAccepted) {
 						logger.warn(
