@@ -34,6 +34,7 @@ import { makeValidAppConfig, makeValidCoreConfig } from "../../testing/fixtures/
 import { createApp } from "../create-app.mjs";
 import type { BootstrapMap } from "../types.mjs";
 import { BootError } from "../types.mjs";
+import { validateManifests } from "../validate-manifests.mjs";
 
 /** Coerces, so a `3` in the config slot proves the section was parsed and written back. */
 const RetrySection = z.object({ retries: z.coerce.number().int().positive() });
@@ -131,9 +132,9 @@ describe("one composed parse over the transitional base", () => {
 	});
 
 	it("refuses a value a mirrored section's schema refuses, naming the operator's path", async () => {
-		const err = await bootRefused([], resolved({ deployment: { mode: "several" } }));
+		const err = await bootRefused([], resolved({ rateLimiter: { adapter: "several" } }));
 		expect(err.reason).toBe("config-validation-failed");
-		expect(err.message).toMatch(/deployment\.mode: /);
+		expect(err.message).toMatch(/rateLimiter\.adapter: /);
 	});
 
 	it.each([
@@ -184,10 +185,25 @@ describe("one composed parse over the transitional base", () => {
 		expect(err.message).toMatch(/the port getter broke/);
 	});
 
-	it("names the configuration itself when it is not an object", async () => {
-		const err = await bootRefused([], "http.port = 3000" as unknown as Record<string, unknown>);
-		expect(err.reason).toBe("config-validation-failed");
-		expect(err.message).toMatch(/: \(the configuration\): /);
+	it("names the configuration itself when it is not an object, when core declares no renamed variable", () => {
+		// Core's own renamed variables are judged before the parse, and a value
+		// that is no object captures none: validated here without them.
+		let err: unknown;
+		try {
+			validateManifests({
+				modules: [],
+				bootstrapComponents: {
+					config: "http.port = 3000",
+					pathResolver: (s: string) => s,
+				} as unknown as BootstrapMap,
+				core: {},
+			});
+		} catch (caught) {
+			err = caught;
+		}
+		expect(err).toBeInstanceOf(BootError);
+		expect((err as BootError).reason).toBe("config-validation-failed");
+		expect((err as BootError).message).toMatch(/: \(the configuration\): /);
 	});
 
 	it("names every refused path in the message", async () => {
@@ -533,15 +549,53 @@ describe("config_sections_ignored — a top-level section nobody owns", () => {
 		expect(ignored).toEqual([[{ sections: ["typoSection", "zeta"] }, "config_sections_ignored"]]);
 	});
 
+	it("does not name a section that holds no key: it sets nothing, as a reference leaves one whose variables are unset", async () => {
+		const logger = recordingLogger();
+		const config = await bootAndRead(
+			[],
+			resolved({ emptySection: {}, typoSection: { enabled: true } }),
+			logger,
+		);
+		expect(config.emptySection).toEqual({});
+		expect(
+			logger.warn.mock.calls.filter(([, message]) => message === "config_sections_ignored"),
+		).toEqual([[{ sections: ["typoSection"] }, "config_sections_ignored"]]);
+	});
+
+	it("does not name a section that holds only empty sections: it sets nothing either", async () => {
+		const logger = recordingLogger();
+		await bootAndRead(
+			[],
+			resolved({ typoSection: { nested: {} }, listSection: [], valueSection: { key: 1 } }),
+			logger,
+		);
+		expect(
+			logger.warn.mock.calls.filter(([, message]) => message === "config_sections_ignored"),
+		).toEqual([[{ sections: ["listSection", "valueSection"] }, "config_sections_ignored"]]);
+	});
+
 	it("names the sections of a configuration handed as an object that is not plain data, by its own keys", async () => {
 		// Boot's parse takes an instance as the configuration; its own keys are
 		// the sections, and a key its prototype carries is not one.
+		// Validated without core's own renamed variables, whose captures an
+		// instance would carry as a section of its own.
 		const logger = recordingLogger();
+		const { "renamed-variables": _captures, ...plain } = resolved({
+			typoSection: { enabled: true },
+		});
 		const instance = Object.assign(
 			Object.create({ inheritedSection: { enabled: true } }),
-			resolved({ typoSection: { enabled: true } }),
+			plain,
 		) as Record<string, unknown>;
-		await bootAndRead([], instance, logger);
+		validateManifests({
+			modules: [],
+			bootstrapComponents: {
+				config: instance,
+				pathResolver: (s: string) => s,
+				logger,
+			} as unknown as BootstrapMap,
+			core: {},
+		});
 		expect(
 			logger.warn.mock.calls.filter(([, message]) => message === "config_sections_ignored"),
 		).toEqual([[{ sections: ["typoSection"] }, "config_sections_ignored"]]);

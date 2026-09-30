@@ -19,7 +19,7 @@
  * settings other modules depend on (`httpSettings`) and the replica count
  * (`deploymentMode`, which boot fills with `deploymentModeOf` in `mode.mts`).
  * A module requires the slot rather than reading `http {}` or
- * `deployment.mode` itself. Contract suites and a test double are on
+ * `core.deployment.mode` itself. Contract suites and a test double are on
  * `@o3co/auth-provider-core/testing`. Types only.
  */
 
@@ -47,7 +47,7 @@ export interface HttpSettings {
 
 /**
  * How many replicas the operator says this deployment runs:
- * `single` or `multi` as `deployment.mode` states it, `unset` when it
+ * `single` or `multi` as `core.deployment.mode` states it, `unset` when it
  * states nothing — the state in which a module that holds per-process
  * state warns rather than refuses.
  */
@@ -62,7 +62,7 @@ declare module "@o3co/auth-provider-core" {
 		readonly httpSettings?: HttpSettings;
 		/**
 		 * How many replicas run: filled by boot from the configuration's
-		 * `deployment.mode` for every composition, before any provider runs. A
+		 * `core.deployment.mode` for every composition, before any provider runs. A
 		 * synthetic key: no module provides it and no host map sets it
 		 * (`synthetic-key-collision`).
 		 */

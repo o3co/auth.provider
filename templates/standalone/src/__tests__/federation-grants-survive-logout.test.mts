@@ -50,6 +50,7 @@ import {
 	registerBuiltinKeyStores,
 	type UserSessionStore,
 } from "@o3co/auth-provider-core";
+import { CORE_RELOCATIONS, renamedVariableCaptures } from "@o3co/auth-provider-core/testing";
 import { parseFile } from "@o3co/ts.hocon";
 import { validate } from "@o3co/ts.hocon/zod";
 import express from "express";
@@ -125,6 +126,9 @@ function resolveConfig(): AppConfig {
 	);
 	return {
 		...config,
+		// What the resolution captured of core's renamed variables, which the
+		// schema's parse drops.
+		"renamed-variables": renamedVariableCaptures({ modules: [], core: CORE_RELOCATIONS, env: ENV }),
 		federations: {
 			...config.federations,
 			upstream: {

@@ -81,7 +81,7 @@ export interface BuildModulesOverrides {
 	 * NODE_ENV`, computed once in `app.mts`), so the Redis federation-token
 	 * store's `allow-plaintext` guard reads the environment the config came
 	 * from, not `NODE_ENV` alone. Omitted, the guard falls back to `NODE_ENV`
-	 * (and the `deploymentMode` slot core fills from `deployment.mode`, which it
+	 * (and the `deploymentMode` slot core fills from `core.deployment.mode`, which it
 	 * reads either way).
 	 */
 	readonly environment?: string;
@@ -263,7 +263,7 @@ export function buildModules(config: AppConfig, overrides: BuildModulesOverrides
 			: [inMemoryCodeRepositoryModule];
 
 	// The memory denylist is a dev convenience and nothing more: it forks per
-	// replica, so `deployment.mode = "multi"` refuses it by name (core's
+	// replica, so `core.deployment.mode = "multi"` refuses it by name (core's
 	// replica-safety guard). The template's own application.conf ships `"redis"`.
 	const accessTokenDenylistModules: Module[] =
 		accessTokenDenylistAdapter === "redis"
@@ -273,7 +273,7 @@ export function buildModules(config: AppConfig, overrides: BuildModulesOverrides
 	// Opt-in. Each module provides both slots the consent step needs (the
 	// consent records and the requests parked while the page asks), so the two
 	// cannot be wired apart. The memory one declares itself replica-unsafe and
-	// `deployment.mode = "multi"` refuses it by name; the Redis one shares both
+	// `core.deployment.mode = "multi"` refuses it by name; the Redis one shares both
 	// over the ioredis socket.
 	const consentStoreModules: Module[] =
 		consentStoreAdapter === "redis"
@@ -298,7 +298,7 @@ export function buildModules(config: AppConfig, overrides: BuildModulesOverrides
 	// One module per store, nothing while the feature is off. The Redis grant
 	// store is built for this composition root so its plaintext guard knows
 	// which environment selected the config, as the federation-token store's
-	// is. Both memory modules declare `replicaSafety`, so `deployment.mode =
+	// is. Both memory modules declare `replicaSafety`, so `core.deployment.mode =
 	// "multi"` refuses them by name; the routes module itself refuses a Redis
 	// grant store beside memory user-session stores, because the grants would
 	// outlive the boundary that ends them.
@@ -321,7 +321,7 @@ export function buildModules(config: AppConfig, overrides: BuildModulesOverrides
 		// MUST stay first: it declares no `before`/`after`, so this position is
 		// what mounts express-session ahead of every session-consuming module.
 		// Built from `config` so that `session.storage.type = "memory"` declares
-		// itself replica-unsafe and `deployment.mode = "multi"` refuses it.
+		// itself replica-unsafe and `core.deployment.mode = "multi"` refuses it.
 		sessionStoreModuleFor(config),
 		// Under `/oauth` beside `oauthModule`, each parsing its own requests, so
 		// their relative order does not matter; the browser half orders itself

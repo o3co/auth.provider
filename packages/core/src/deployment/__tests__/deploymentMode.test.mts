@@ -17,7 +17,7 @@
 /**
  * The `deploymentMode` slot: how many replicas the operator says
  * this deployment runs — `single`, `multi`, or `unset` when nothing was
- * said. Core fills it from the configuration's `deployment.mode` before any
+ * said. Core fills it from the configuration's `core.deployment.mode` before any
  * provider runs, for every composition, and reserves the key; the
  * replica-safety guard reads the same value. The one reading
  * (`deploymentModeOf`) and the check a reader holds a value to
@@ -81,14 +81,14 @@ describe("deploymentModeContract", () => {
 // Core fills it
 // ---------------------------------------------------------------------------
 
-/** Every `deployment` core's schema accepts, and the mode it states. */
+/** Every `core.deployment` core's schema accepts, and the mode it states. */
 const ACCEPTED: readonly (readonly [
 	string,
 	Record<string, unknown> | undefined,
 	DeploymentMode,
 ])[] = [
-	["deployment.mode = single", { mode: "single" }, "single"],
-	["deployment.mode = multi", { mode: "multi" }, "multi"],
+	["core.deployment.mode = single", { mode: "single" }, "single"],
+	["core.deployment.mode = multi", { mode: "multi" }, "multi"],
 	["an empty deployment section", {}, "unset"],
 	["no deployment section", undefined, "unset"],
 ];
@@ -107,13 +107,16 @@ const spyLogger = () => {
 	return { logger, warn };
 };
 
-/** A valid core configuration with `deployment` as given, and whatever else `extra` holds. */
+/** A valid core configuration with `core.deployment` as given, and whatever else `extra` holds. */
 const bootstrap = (
 	deployment: Record<string, unknown> | undefined,
 	extra: Record<string, unknown> = {},
 ): BootstrapMap =>
 	({
-		config: { ...makeValidCoreConfig(), ...(deployment === undefined ? {} : { deployment }) },
+		config: {
+			...makeValidCoreConfig(),
+			...(deployment === undefined ? {} : { core: { deployment } }),
+		},
 		pathResolver: (s: string) => s,
 		...extra,
 	}) as unknown as BootstrapMap;
@@ -146,7 +149,7 @@ const providerReading = (seen: unknown[]) => [
 	}),
 ];
 
-describe("core fills deploymentMode from the configuration's deployment.mode", () => {
+describe("core fills deploymentMode from the configuration's core.deployment.mode", () => {
 	it.each(ACCEPTED)(
 		"hands a provider that requires it the mode %s states",
 		async (_what, deployment, mode) => {
@@ -315,7 +318,7 @@ describe("the deploymentMode key is reserved", () => {
 		});
 	});
 
-	it("tells whoever set it to set deployment.mode instead, from every source", async () => {
+	it("tells whoever set it to set core.deployment.mode instead, from every source", async () => {
 		const provider = defineModule({
 			name: "test:provides-deployment-mode",
 			provides: { deploymentMode: () => "multi" as const },
@@ -334,7 +337,7 @@ describe("the deploymentMode key is reserved", () => {
 		]) {
 			const err = (await boot.catch((thrown: unknown) => thrown)) as Error;
 			expect(err.message).toContain(
-				"Set deployment.mode in the configuration instead: boot fills deploymentMode from it.",
+				"Set core.deployment.mode in the configuration instead: boot fills deploymentMode from it.",
 			);
 		}
 	});
@@ -355,9 +358,13 @@ describe("the deploymentMode key is reserved", () => {
 // ---------------------------------------------------------------------------
 
 describe("deploymentModeOf, on core's root", () => {
-	it("reads single and multi as the configuration states them", () => {
-		expect(core.deploymentModeOf({ deployment: { mode: "single" } })).toBe("single");
-		expect(core.deploymentModeOf({ deployment: { mode: "multi" } })).toBe("multi");
+	it("reads single and multi as the configuration states them at core.deployment.mode", () => {
+		expect(core.deploymentModeOf({ core: { deployment: { mode: "single" } } })).toBe("single");
+		expect(core.deploymentModeOf({ core: { deployment: { mode: "multi" } } })).toBe("multi");
+	});
+
+	it("reads nothing at deployment.mode, the path it moved from", () => {
+		expect(core.deploymentModeOf({ deployment: { mode: "multi" } })).toBe("unset");
 	});
 
 	it("reads unset for absence and for every value core's schema refuses, never single or multi", () => {
@@ -367,14 +374,15 @@ describe("deploymentModeOf, on core's root", () => {
 			42,
 			"multi",
 			{},
-			{ deployment: null },
-			{ deployment: "multi" },
-			{ deployment: {} },
-			{ deployment: { mode: "MULTI" } },
-			{ deployment: { mode: "Single" } },
-			{ deployment: { mode: 42 } },
-			{ deployment: { mode: null } },
-			{ deployment: { mode: "" } },
+			{ core: null },
+			{ core: { deployment: null } },
+			{ core: { deployment: "multi" } },
+			{ core: { deployment: {} } },
+			{ core: { deployment: { mode: "MULTI" } } },
+			{ core: { deployment: { mode: "Single" } } },
+			{ core: { deployment: { mode: 42 } } },
+			{ core: { deployment: { mode: null } } },
+			{ core: { deployment: { mode: "" } } },
 		]) {
 			expect(core.deploymentModeOf(config), JSON.stringify(config)).toBe("unset");
 		}

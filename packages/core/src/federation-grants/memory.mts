@@ -164,7 +164,7 @@ const storableCredentials = (credentials: FederationGrantCredentials): boolean =
  * call and destroys nothing.
  *
  * Single-replica only: grants fork per replica, so the module declares
- * itself replica-unsafe and `deployment.mode = "multi"` refuses it.
+ * itself replica-unsafe and `core.deployment.mode = "multi"` refuses it.
  */
 export function createMemoryFederationGrantStore(
 	options: MemoryFederationGrantStoreOptions = {},

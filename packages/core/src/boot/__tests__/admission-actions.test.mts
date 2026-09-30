@@ -45,7 +45,7 @@ const boot = (
 	createApp({
 		modules,
 		bootstrapComponents: {
-			config: { ...makeValidCoreConfig(), sessionRequirements: { expected } },
+			config: { ...makeValidCoreConfig(), core: { sessionRequirements: { expected } } },
 			pathResolver: (p: string) => p,
 			...(logger === undefined ? {} : { logger }),
 		} as never,

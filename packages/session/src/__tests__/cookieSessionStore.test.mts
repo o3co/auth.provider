@@ -184,7 +184,7 @@ async function boot(logger: SpyLogger): Promise<express.Express> {
 			secure: false,
 			storage: { type: "redis", redis: { url: "redis://fake:6379" } },
 		},
-		deployment: { mode: "single" },
+		core: { ...base.core, deployment: { mode: "single" } },
 	};
 	const routes = defineModule({
 		name: "test:cookie-session-routes",

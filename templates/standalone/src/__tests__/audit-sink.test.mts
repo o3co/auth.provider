@@ -40,6 +40,7 @@ import {
 	memoryRefreshTokenFamilyStoreModule,
 	registerBuiltinKeyStores,
 } from "@o3co/auth-provider-core";
+import { CORE_RELOCATIONS, renamedVariableCaptures } from "@o3co/auth-provider-core/testing";
 import express from "express";
 import request from "supertest";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -53,11 +54,16 @@ const keyPair = generateKeyPairSync("ed25519", {
 });
 
 const baseConfig: AppConfig = {
+	// What a resolution under an environment that sets none captures of
+	// core's renamed variables.
+	...{
+		"renamed-variables": renamedVariableCaptures({ modules: [], core: CORE_RELOCATIONS, env: {} }),
+	},
 	http: { port: 0, trustProxy: false, readinessTimeoutMs: 1000 },
 	logging: { level: "silent" },
 	// The shipped `application.conf` expects no session requirement (ADR
 	// 2026-09-28-session-admission).
-	sessionRequirements: { expected: [] },
+	core: { sessionRequirements: { expected: [] } },
 	oauth: {
 		jwt: {
 			issuer: "https://auth.test",

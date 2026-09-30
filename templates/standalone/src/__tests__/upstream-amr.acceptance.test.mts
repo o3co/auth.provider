@@ -43,6 +43,7 @@ import {
 	registerBuiltinKeyStores,
 	type UserSessionStore,
 } from "@o3co/auth-provider-core";
+import { CORE_RELOCATIONS, renamedVariableCaptures } from "@o3co/auth-provider-core/testing";
 import { parseFile } from "@o3co/ts.hocon";
 import { validate } from "@o3co/ts.hocon/zod";
 import express from "express";
@@ -95,7 +96,7 @@ function resolveConfig(trustUpstreamAmr: boolean | undefined): AppConfig {
 			.withFallback(parseFile(fileURLToPath(coreReference()), { env: ENV })),
 		AppConfigSchema,
 	) as AppConfig;
-	return AppConfigSchema.parse({
+	const parsed = AppConfigSchema.parse({
 		...shipped,
 		federations: {
 			...shipped.federations,
@@ -113,7 +114,13 @@ function resolveConfig(trustUpstreamAmr: boolean | undefined): AppConfig {
 				acrValues: { [MFA_ACR]: ["mfa"], [FED_ACR]: ["fed"] },
 			},
 		},
-	}) as AppConfig;
+	});
+	return {
+		...parsed,
+		// What the resolution captured of core's renamed variables, which the
+		// schema's parse drops.
+		"renamed-variables": renamedVariableCaptures({ modules: [], core: CORE_RELOCATIONS, env: ENV }),
+	} as AppConfig;
 }
 
 /** An IdP that authenticates `ext-1` and says it did so with `mfa` and `hwk`. */

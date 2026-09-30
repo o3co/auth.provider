@@ -113,7 +113,7 @@ async function runCleanupsReverse(cleanupRecords: readonly CleanupRecord[]): Pro
 /**
  * Stage 3 of the boot planner. Seeds `bootstrapComponents`, applies
  * `overrideComponents`, fills `deploymentMode` from the configuration's
- * `deployment.mode`, injects the synthetic projections of
+ * `core.deployment.mode`, injects the synthetic projections of
  * `contributionKinds` when given (a provider that requires one reads it
  * lazily, filled once stage 4 registers the contributions), then runs each
  * provider factory in `plan.providerActivations` order.

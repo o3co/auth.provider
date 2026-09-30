@@ -156,7 +156,7 @@ const limiterUser = defineModule({
 /** The bundled in-process limiter, its default 60 per 60 s, and a module that uses it. */
 const withMemoryLimiter = (extra: Record<string, unknown> = {}): BootstrapMap =>
 	bootWith({
-		deployment: { mode: "single" },
+		core: { deployment: { mode: "single" } },
 		memoryRateLimiter: {
 			limits: {},
 			defaultLimit: { limit: 60, windowSeconds: 60 },
@@ -604,7 +604,7 @@ describe("rateLimitBudgets — the in-process limiter reads them", () => {
 		const handle = await createApp({
 			modules: [memoryRateLimiterModule, ...modules, limiterUser],
 			bootstrapComponents: bootWith({
-				deployment: { mode: "single" },
+				core: { deployment: { mode: "single" } },
 				memoryRateLimiter: {
 					limits: { declared: { limit: 4, windowSeconds: 45 } },
 					defaultLimit: { limit: 60, windowSeconds: 60 },

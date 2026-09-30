@@ -78,11 +78,11 @@ describe("the module hands the guard the selected environment and the deployment
 
 	it('refuses plaintext when the deploymentMode slot is "multi" — default module included', () => {
 		expect(() => provideFrom(redisFederationTokenStoreModule, "multi")).toThrow(
-			/deployment\.mode is "multi"/,
+			/core\.deployment\.mode is "multi"/,
 		);
 		expect(() =>
 			provideFrom(redisFederationTokenStoreModuleFor({ environment: "development" }), "multi"),
-		).toThrow(/deployment\.mode is "multi"/);
+		).toThrow(/core\.deployment\.mode is "multi"/);
 	});
 
 	it("warns and builds the store in development with the deployment mode unset or single", () => {
@@ -226,7 +226,7 @@ const MESSAGE_KEY =
 	"federationTokenStore.redis: encryption.key must be canonical base64 of 32 bytes (AES-256), or a Buffer of 32 bytes, when encryption.mode is 'required' (the default)";
 
 const PLAINTEXT_UNDER_MULTI =
-	'[federation-tokens] mode "allow-plaintext" is refused because deployment.mode is "multi" ' +
+	'[federation-tokens] mode "allow-plaintext" is refused because core.deployment.mode is "multi" ' +
 	"(a multi-replica deployment is never a development box). " +
 	'Set mode to "required" and provide a 32-byte encryption key, OR set ' +
 	"FEDERATION_TOKENS_ALLOW_INSECURE=1 to override (NOT recommended for production).";
@@ -374,10 +374,10 @@ describe("every setting the token store is given and cannot use is refused as a 
 			"federationTokenStore.redis: encryption.key must be canonical base64 of 32 bytes (AES-256), or a Buffer of 32 bytes, when encryption.mode is 'required' (the default)",
 		],
 		[
-			'plaintext under deployment.mode = "multi"',
+			'plaintext under core.deployment.mode = "multi"',
 			{
 				redisFederationTokenStore: { encryptionMode: "allow-plaintext" },
-				deployment: { mode: "multi" },
+				core: { deployment: { mode: "multi" } },
 			},
 			PLAINTEXT_UNDER_MULTI,
 		],

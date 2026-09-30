@@ -75,13 +75,13 @@ describe("readTransitionalConfig — the switches a composition root reads befor
 		const config = readTransitionalConfig(
 			resolved({
 				http: { port: "8080", trustProxy: false, readinessTimeoutMs: "1500" },
-				deployment: { mode: "several" },
+				core: { deployment: { mode: "several" } },
 			}),
 			["http.port"],
-		) as unknown as { http: Record<string, unknown>; deployment: unknown };
+		) as unknown as { http: Record<string, unknown>; core: unknown };
 		expect(config.http?.port).toBe(8080);
 		expect(config.http?.readinessTimeoutMs).toBe("1500");
-		expect(config.deployment).toEqual({ mode: "several" });
+		expect(config.core).toEqual({ deployment: { mode: "several" } });
 	});
 
 	it("leaves out the captures of renamed variables: they reach no switch and no module factory", () => {
@@ -112,16 +112,16 @@ describe("readTransitionalConfig — the switches a composition root reads befor
 			readTransitionalConfig(
 				resolved({
 					http: { port: "not-a-port", trustProxy: false, readinessTimeoutMs: 1000 },
-					deployment: { mode: "several" },
+					core: { deployment: { mode: "several" } },
 				}),
-				["http.port", "deployment.mode"],
+				["http.port", "core.deployment.mode"],
 			);
 		} catch (err) {
 			thrown = err;
 		}
 		expect(thrown).toBeInstanceOf(RangeError);
 		expect((thrown as Error).message).toMatch(/http\.port: /);
-		expect((thrown as Error).message).toMatch(/deployment\.mode: /);
+		expect((thrown as Error).message).toMatch(/core\.deployment\.mode: /);
 		expect((thrown as Error).cause).toBeInstanceOf(z.ZodError);
 	});
 
@@ -202,9 +202,11 @@ describe("readTransitionalConfig — the switches a composition root reads befor
 	});
 
 	it("changes nothing it was given", () => {
-		const given = deepFreeze(resolved({ widget: { size: "3" }, deployment: { mode: "single" } }));
+		const given = deepFreeze(
+			resolved({ widget: { size: "3" }, core: { deployment: { mode: "single" } } }),
+		);
 		const before = JSON.stringify(given);
-		expect(() => readTransitionalConfig(given, ["http", "deployment"])).not.toThrow();
+		expect(() => readTransitionalConfig(given, ["http", "core.deployment"])).not.toThrow();
 		expect(JSON.stringify(given)).toBe(before);
 	});
 });

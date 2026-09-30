@@ -29,7 +29,7 @@
  *   - `replaySeenSet` — where every accepted proof's `jti` is recorded
  *     (`dpop-proof:<jkt>`). Optional because disabled DPoP records nothing;
  *     with DPoP enabled and the slot empty, boot is refused in every
- *     `deployment.mode`.
+ *     `core.deployment.mode`.
  *   - `oauthTokenSettings` — the issuer, provided by the oauth module from
  *     `oauth {}`; the configuration's when absent.
  */
@@ -118,7 +118,7 @@ const DPOP_SECTION_SCHEMA = dpopConfigSchema.shape.oauth.shape.dpop;
  * this module reads and does not fill, so the manifest declares no
  * `replicaSafety`: the seen-set's provider declares whether it forks per
  * replica, and core's guard reads that — `memoryReplaySeenSetModule` is
- * refused under `deployment.mode = "multi"`, warned about when the mode is
+ * refused under `core.deployment.mode = "multi"`, warned about when the mode is
  * unset, and silent under `"single"`. An enabled mechanism with no seen-set
  * is refused at boot in every mode: it could not refuse a replay.
  *

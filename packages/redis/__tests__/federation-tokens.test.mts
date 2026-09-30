@@ -578,16 +578,16 @@ describe("redisFederationTokenStoreBuilder env-based encryption guard", () => {
 });
 
 // ---------------------------------------------------------------------------
-// The guard reads the selected environment and `deployment.mode`, not
+// The guard reads the selected environment and `core.deployment.mode`, not
 // NODE_ENV alone. The standalone selects its config by
 // `CONFIG_ENV || NODE_ENV`, so `CONFIG_ENV=production NODE_ENV=test` runs
 // production.conf and must get the production guard; and under
-// `deployment.mode = "multi"`, a deployment that has said it runs more than one
+// `core.deployment.mode = "multi"`, a deployment that has said it runs more than one
 // replica, plaintext is refused regardless of environment unless
 // FEDERATION_TOKENS_ALLOW_INSECURE=1 overrides it.
 // ---------------------------------------------------------------------------
 
-describe("the plaintext guard reads the selected environment and deployment.mode", () => {
+describe("the plaintext guard reads the selected environment and core.deployment.mode", () => {
 	let origEnv: string | undefined;
 	let origInsecure: string | undefined;
 	let warnSpy: ReturnType<typeof vi.spyOn>;
@@ -651,7 +651,7 @@ describe("the plaintext guard reads the selected environment and deployment.mode
 		).toThrow(/the environment is "staging"/);
 	});
 
-	it('refuses plaintext under deployment.mode = "multi" regardless of environment', () => {
+	it('refuses plaintext under core.deployment.mode = "multi" regardless of environment', () => {
 		expect(() =>
 			createRedisFederationTokenStore({
 				client: createFakeRedis(),
@@ -659,7 +659,7 @@ describe("the plaintext guard reads the selected environment and deployment.mode
 				environment: "development",
 				deploymentMode: "multi",
 			}),
-		).toThrow(/mode "allow-plaintext" is refused because deployment\.mode is "multi"/);
+		).toThrow(/mode "allow-plaintext" is refused because core\.deployment\.mode is "multi"/);
 	});
 
 	it("names both reasons when both apply", () => {
@@ -670,10 +670,10 @@ describe("the plaintext guard reads the selected environment and deployment.mode
 				environment: "production",
 				deploymentMode: "multi",
 			}),
-		).toThrow(/the environment is "production" and deployment\.mode is "multi"/);
+		).toThrow(/the environment is "production" and core\.deployment\.mode is "multi"/);
 	});
 
-	it('warns and continues under deployment.mode = "single" in development', () => {
+	it('warns and continues under core.deployment.mode = "single" in development', () => {
 		expect(() =>
 			createRedisFederationTokenStore({
 				client: createFakeRedis(),
@@ -723,7 +723,7 @@ describe("the plaintext guard reads the selected environment and deployment.mode
 				{ client, encryption: plaintext, deploymentMode: "multi" },
 				{},
 			),
-		).toThrow(/deployment\.mode is "multi"/);
+		).toThrow(/core\.deployment\.mode is "multi"/);
 	});
 
 	it('mode = "required" is silent under multi in production — the guard is about plaintext only', () => {

@@ -32,7 +32,6 @@
 
 import type { NextFunction, Request, RequestHandler, Response } from "express";
 import { discoveryPathsFor } from "../discovery/wellKnownPaths.mjs";
-import { resolveJwksPath } from "../jwks/path.mjs";
 import type { Logger } from "../logging/Logger.mjs";
 import { checkSerializedOrigin, describeSerializedOriginRejection } from "../net/origin.mjs";
 
@@ -78,9 +77,11 @@ const PREFLIGHT_MAX_AGE_SECONDS = 600;
  *   - `GET|POST /oauth/userinfo`: OIDC Core §5.3 defines both methods.
  *   - `POST /oauth/revoke`: RFC 7009 §2.1 lets a public client revoke its own
  *     tokens (SPA sign-out).
- *   - the discovery documents ({@link discoveryPathsFor}) and JWKS
- *     ({@link resolveJwksPath}): public metadata, with paths from the same
- *     sources as the route registration and `jwks_uri`, so none can drift.
+ *   - the discovery documents ({@link discoveryPathsFor}) and the JWKS path
+ *     the caller names (`options.jwksPath`: `assembleApp` passes the path the
+ *     jwks module's route serves, and none without the module): public
+ *     metadata, with paths from the same sources as the route registration
+ *     and `jwks_uri`, so none can drift.
  *
  * Off the list:
  *   - `POST /oauth/introspect`: server-to-server; RFC 7662 §2.1 requires
@@ -95,14 +96,19 @@ const PREFLIGHT_MAX_AGE_SECONDS = 600;
  */
 export function browserFacingCorsRoutes(
 	config: {
-		oauth?: { jwt?: { jwksPath?: unknown; issuer?: unknown } };
+		oauth?: { jwt?: { issuer?: unknown } };
 	},
-	/**
-	 * The issuer the discovery paths derive from, when the caller holds it apart
-	 * from the config (`assembleApp` passes the `oauthTokenSettings` slot's, so
-	 * table and discovery route name one issuer). `oauth.jwt.issuer` otherwise.
-	 */
-	options: { readonly issuer?: string } = {},
+	options: {
+		/**
+		 * The issuer the discovery paths derive from, when the caller holds it
+		 * apart from the config (`assembleApp` passes the `oauthTokenSettings`
+		 * slot's, so table and discovery route name one issuer).
+		 * `oauth.jwt.issuer` otherwise.
+		 */
+		readonly issuer?: string;
+		/** The path a JWKS route serves; the table lists no JWKS path without one. */
+		readonly jwksPath?: string;
+	} = {},
 ): readonly CorsRoute[] {
 	const issuer = options.issuer ?? config.oauth?.jwt?.issuer;
 	const discovery = discoveryPathsFor(typeof issuer === "string" ? issuer : undefined);
@@ -111,7 +117,7 @@ export function browserFacingCorsRoutes(
 		{ path: "/oauth/userinfo", methods: ["GET", "POST"] },
 		{ path: "/oauth/revoke", methods: ["POST"] },
 		...[...discovery.oidc, ...discovery.oauth].map((path) => ({ path, methods: ["GET"] })),
-		{ path: resolveJwksPath(config), methods: ["GET"] },
+		...(options.jwksPath === undefined ? [] : [{ path: options.jwksPath, methods: ["GET"] }]),
 	];
 }
 

@@ -3,7 +3,11 @@ import { z } from "zod";
 import { createTestOAuthTokenSettings } from "../../../testing/slots/oauthTokenSettings.mjs";
 import type { ComponentKey } from "../component-map.mjs";
 import { defineModule } from "../define-module.mjs";
-import type { ModuleSection, SectionSchema } from "../module-section.mjs";
+import type {
+	ModuleSection,
+	RelocationWithoutVariable,
+	SectionSchema,
+} from "../module-section.mjs";
 import type { Module, ModuleSpec } from "../module-spec.mjs";
 import type { ProviderDeps } from "../provider.mjs";
 
@@ -221,8 +225,24 @@ test("a section declares its reference.conf, a transitional path and the paths i
 	expectTypeOf<ModuleSection["reference"]>().toEqualTypeOf<URL | undefined>();
 	expectTypeOf<ModuleSection["at"]>().toEqualTypeOf<string | undefined>();
 	expectTypeOf<ModuleSection["relocatedFrom"]>().toEqualTypeOf<
-		readonly string[] | Readonly<Record<string, string | null>> | undefined
+		| readonly string[]
+		| Readonly<Record<string, string | null | RelocationWithoutVariable>>
+		| undefined
 	>();
+});
+
+test("a relocatedFrom map entry may declare its new path bound to no variable", () => {
+	defineModule({
+		name: "relocating",
+		section: {
+			schema: RetrySection,
+			relocatedFrom: { "older.relocating": { to: "", environmentVariable: null } },
+		},
+	});
+	expectTypeOf<RelocationWithoutVariable>().toEqualTypeOf<{
+		readonly to: string;
+		readonly environmentVariable: null;
+	}>();
 });
 
 test("renamedVariables maps each old variable name to the old path it was bound to", () => {

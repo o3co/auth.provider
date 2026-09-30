@@ -39,6 +39,7 @@ import {
 	memoryRefreshTokenFamilyStoreModule,
 	registerBuiltinKeyStores,
 } from "@o3co/auth-provider-core";
+import { CORE_RELOCATIONS, renamedVariableCaptures } from "@o3co/auth-provider-core/testing";
 import { parseFile } from "@o3co/ts.hocon";
 import { validate } from "@o3co/ts.hocon/zod";
 import express from "express";
@@ -129,7 +130,7 @@ const BASE_ENV: Readonly<Record<string, string>> = {
 /** The umbrella E2E's shape: every shared store on Redis, more than one replica. */
 const ALL_REDIS_ENV: Readonly<Record<string, string>> = {
 	...BASE_ENV,
-	DEPLOYMENT_MODE: "multi",
+	CORE_DEPLOYMENT_MODE: "multi",
 	SESSION_STORAGE_TYPE: "redis",
 	SESSION_STORAGE_REDIS_URL: "redis://redis.test:6379",
 	USER_SESSION_STORES_ADAPTER: "redis",
@@ -163,6 +164,9 @@ function resolveConfig(env: Record<string, string>): AppConfig {
 	// the Redis grant store refuses to construct without one under "required".
 	return {
 		...config,
+		// What the resolution captured of core's renamed variables, which the
+		// schema's parse drops.
+		"renamed-variables": renamedVariableCaptures({ modules: [], core: CORE_RELOCATIONS, env: env }),
 		federationGrants: {
 			...config.federationGrants,
 			encryptionKeys: [{ id: "k-test", key: ENCRYPTION_KEY }],

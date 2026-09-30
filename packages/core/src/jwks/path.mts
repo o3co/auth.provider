@@ -18,7 +18,7 @@
  * Default path at which the JSON Web Key Set is published. Unlike
  * `/.well-known/openid-configuration` (fixed by RFC 8414), `jwks_uri` is
  * operator-choosable per OIDC Discovery — this is the near-universal
- * convention and the default when `oauth.jwt.jwksPath` is unset.
+ * convention and the default when `jwks.path` is unset.
  */
 export const DEFAULT_JWKS_PATH = "/.well-known/jwks.json";
 
@@ -46,13 +46,13 @@ export function isValidJwksPath(path: unknown): path is string {
 }
 
 /**
- * Resolves the JWKS publishing path: the single source for where the route
- * registers and the `jwks_uri` discovery advertises. `jwksModule` and the
- * oauth discovery route MUST both call it, so neither the config key nor the
- * default is duplicated. Re-applies {@link isValidJwksPath} so a caller that
- * bypasses the schema falls back to the default, not a malformed path.
+ * Resolves the JWKS publishing path, `jwks.path`: the single source for where
+ * the route registers, the `jwks_uri` discovery advertises and the CORS table
+ * lists, so neither the key nor the default is duplicated. Re-applies
+ * {@link isValidJwksPath} so a caller that bypasses the schema falls back to
+ * the default, not a malformed path.
  */
-export const resolveJwksPath = (config: { oauth?: { jwt?: { jwksPath?: unknown } } }): string => {
-	const configured = config.oauth?.jwt?.jwksPath;
+export const resolveJwksPath = (config: { jwks?: { path?: unknown } }): string => {
+	const configured = config.jwks?.path;
 	return isValidJwksPath(configured) ? configured : DEFAULT_JWKS_PATH;
 };

@@ -16,7 +16,7 @@
 
 /**
  * The template's posture on session admission (the session-admission ADR's
- * D7). What it expects is its configuration's `sessionRequirements.expected`
+ * D7). What it expects is its configuration's `core.sessionRequirements.expected`
  * — `[]` in the shipped `config/application.conf`, since `buildModules`
  * installs no module that registers a requirement — with `mfa` added when
  * `mfa.mode` is not `off` (`expectedSessionRequirements`). The template reads
@@ -73,11 +73,11 @@ const refusal = (composing: Promise<Composition>): Promise<unknown> =>
 describe("what the template expects of session admission", () => {
 	it("is [] in the shipped configuration under the shipped mfa.mode, off, and the composition boots with it", async () => {
 		const own = readOwnLayers(ownFiles(), { env: SINGLE_ENV });
-		expect(resolveLayers(own, []).sessionRequirements).toEqual({ expected: [] });
+		expect(resolveLayers(own, []).core).toEqual({ sessionRequirements: { expected: [] } });
 		expect(readMfaMode(readSwitches(own))).toBe("off");
 		current = await compose();
 		expect(current.config).not.toHaveProperty("mfa");
-		expect(current.config.sessionRequirements).toEqual({ expected: [] });
+		expect(current.config.core?.sessionRequirements).toEqual({ expected: [] });
 		expect([...(current.handle.components.sessionRequirementResolver?.entries() ?? [])]).toEqual(
 			[],
 		);
@@ -90,7 +90,7 @@ describe("what the template expects of session admission", () => {
 			expect(err).toBeInstanceOf(BootError);
 			expect((err as BootError).reason).toBe("session-requirement-missing");
 			expect((err as BootError).details).toMatchObject({
-				configKey: "sessionRequirements.expected",
+				configKey: "core.sessionRequirements.expected",
 				missing: ["mfa"],
 				declared: ["mfa"],
 				registered: [],
@@ -102,7 +102,7 @@ describe("what the template expects of session admission", () => {
 		const err = await refusal(
 			compose({
 				env: { ...SINGLE_ENV, MFA_MODE: "required" },
-				operatorHocon: 'sessionRequirements.expected = ["risk"]\n',
+				operatorHocon: 'core.sessionRequirements.expected = ["risk"]\n',
 			}),
 		);
 		expect(err).toBeInstanceOf(BootError);
@@ -151,12 +151,12 @@ describe("what the template expects of session admission", () => {
 
 	it("refuses the boot when the configuration expects mfa under mfa.mode = off and no installed module registers it", async () => {
 		const err = await refusal(
-			compose({ operatorHocon: 'sessionRequirements.expected = ["mfa"]\n' }),
+			compose({ operatorHocon: 'core.sessionRequirements.expected = ["mfa"]\n' }),
 		);
 		expect(err).toBeInstanceOf(BootError);
 		expect((err as BootError).reason).toBe("session-requirement-missing");
 		expect((err as BootError).details).toMatchObject({
-			configKey: "sessionRequirements.expected",
+			configKey: "core.sessionRequirements.expected",
 			missing: ["mfa"],
 		});
 	});
@@ -224,7 +224,7 @@ describe("the requirement the template declares for MFA must be the declared sec
 			contributes: { sessionRequirements: { mfa: () => named(false) } },
 		} as never);
 		current = await compose({
-			operatorHocon: 'sessionRequirements.expected = ["mfa"]\n',
+			operatorHocon: 'core.sessionRequirements.expected = ["mfa"]\n',
 			extraModules: () => [namedMfa],
 		});
 		expect(
@@ -312,13 +312,19 @@ describe("readMfaMode", () => {
 describe("expectedSessionRequirements", () => {
 	it("is the configuration's list, with mfa added once when the parsed mode is not off", () => {
 		const of = (config: unknown) => expectedSessionRequirements(config as never);
-		expect(of({ mfa: { mode: "off" }, sessionRequirements: { expected: ["risk"] } })).toEqual({
+		expect(
+			of({ mfa: { mode: "off" }, core: { sessionRequirements: { expected: ["risk"] } } }),
+		).toEqual({
 			expected: ["risk"],
 		});
-		expect(of({ mfa: { mode: "optional" }, sessionRequirements: { expected: ["risk"] } })).toEqual({
+		expect(
+			of({ mfa: { mode: "optional" }, core: { sessionRequirements: { expected: ["risk"] } } }),
+		).toEqual({
 			expected: ["risk", "mfa"],
 		});
-		expect(of({ mfa: { mode: "required" }, sessionRequirements: { expected: ["mfa"] } })).toEqual({
+		expect(
+			of({ mfa: { mode: "required" }, core: { sessionRequirements: { expected: ["mfa"] } } }),
+		).toEqual({
 			expected: ["mfa"],
 		});
 		expect(of({ mfa: { mode: "required" } })).toEqual({ expected: ["mfa"] });
@@ -327,17 +333,23 @@ describe("expectedSessionRequirements", () => {
 	it("keeps the configuration's list as written, repeats included, and adds mfa only when it is absent", () => {
 		const of = (config: unknown) => expectedSessionRequirements(config as never);
 		expect(
-			of({ mfa: { mode: "required" }, sessionRequirements: { expected: ["risk", "risk"] } }),
+			of({
+				mfa: { mode: "required" },
+				core: { sessionRequirements: { expected: ["risk", "risk"] } },
+			}),
 		).toEqual({
 			expected: ["risk", "risk", "mfa"],
 		});
 		expect(
-			of({ mfa: { mode: "required" }, sessionRequirements: { expected: ["mfa", "risk", "mfa"] } }),
+			of({
+				mfa: { mode: "required" },
+				core: { sessionRequirements: { expected: ["mfa", "risk", "mfa"] } },
+			}),
 		).toEqual({
 			expected: ["mfa", "risk", "mfa"],
 		});
 		expect(
-			of({ mfa: { mode: "off" }, sessionRequirements: { expected: ["risk", "risk"] } }),
+			of({ mfa: { mode: "off" }, core: { sessionRequirements: { expected: ["risk", "risk"] } } }),
 		).toEqual({
 			expected: ["risk", "risk"],
 		});

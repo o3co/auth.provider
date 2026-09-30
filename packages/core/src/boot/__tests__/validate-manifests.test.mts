@@ -843,7 +843,11 @@ describe("validateManifests — step 13: config-validation-failed", () => {
 			validateManifests({
 				modules: [noSchema],
 				bootstrapComponents: {
-					config: { http: {} } as never, // missing required `oauth`
+					// missing required `oauth`
+					config: {
+						http: {},
+						"renamed-variables": minCoreConfig["renamed-variables"],
+					} as never,
 					pathResolver: minBootstrap.pathResolver,
 				},
 			});

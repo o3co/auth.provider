@@ -52,7 +52,7 @@ export interface ComponentLifecycle<K extends ComponentKey> {
  * memory and **must** be shared for more than one replica to run correctly.
  *
  * The replica-safety guard reads it off every installed manifest:
- * `deployment.mode = "multi"` refuses boot naming the module, unset warns,
+ * `core.deployment.mode = "multi"` refuses boot naming the module, unset warns,
  * `"single"` is silent. The module declares it because the module is where the
  * fact is known, so a composition root's own in-memory modules are covered too.
  *
