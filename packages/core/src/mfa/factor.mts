@@ -245,6 +245,14 @@ export type MfaVerification =
 			 * over the stored one; a possible clone, refused and audited.
 			 */
 			readonly reason: "invalid" | "expired" | "replayed" | "malformed" | "sign_count_regression";
+			/**
+			 * The factor the refusal concerns, when the factor can tell — for
+			 * `sign_count_regression`, the one whose counter did not increase:
+			 * the record id of one of the subject's factors of this kind, never a
+			 * credential id, key or handle. The coordinator audits it only when it
+			 * names such a record.
+			 */
+			readonly factorId?: string;
 	  };
 
 /** What the end of an enrollment answers. */
