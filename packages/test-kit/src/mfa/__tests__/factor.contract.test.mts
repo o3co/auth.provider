@@ -22,6 +22,7 @@
 
 import type { MfaFactor } from "@o3co/auth-provider-core";
 import {
+	createTestMfaDigests,
 	createTestMfaFactor,
 	type TestMfaFactorOptions,
 	testMfaFactorProofs,
@@ -46,7 +47,7 @@ const RULES = {
 	describe: "describe answers a hint that is a string, or none, and never the account's address",
 	challenge: "challenge, when present, answers state that survives a JSON round trip",
 	challengeMail:
-		"challenge, when it asks for a code to be mailed, asks for a login code, non-empty, with an expiry after now when it gives one, another at each challenge, and its response carries no form of the code",
+		"challenge, when it asks for a code to be mailed, asks for a login code, non-empty, with an expiry after now when it gives one and the keyed digest of the account's address, another at each challenge, and its response carries no form of the code",
 	noAddress:
 		"no answer carries the account's address, whatever its case or escaping: the pending enrollment's state and response, the enrolled data and label, a challenge's state and response, and a verification's next data",
 	verifyMalformed: "verify answers malformed for a proof it cannot read, and never throws for one",
@@ -490,6 +491,41 @@ describe("mfaFactorContract", () => {
 					}),
 					QUOTED,
 				),
+			),
+		).toEqual([RULES.noAddress]);
+	});
+
+	it("fails a login code mailed with no address digest, one that is no digest, or the digest of another address", async () => {
+		for (const addressDigest of [
+			undefined,
+			"digest",
+			{ keyId: "test-key" },
+			createTestMfaDigests("test").digest(["someone@example.com"]),
+			createTestMfaDigests("another-kind").digest([USER.email]),
+		]) {
+			expect(
+				await failing(challenging((sent) => ({ ...sent, mail: { ...sent.mail, addressDigest } }))),
+				JSON.stringify(addressDigest),
+			).toEqual([RULES.challengeMail]);
+		}
+	});
+
+	it("passes a factor that keeps the keyed digest of the address it confirmed, spelled any way, and fails one that keeps the address", async () => {
+		expect(
+			await failing({
+				...inputFor({ mail: true }),
+				user: { ...USER, email: " Contract@EXAMPLE.com " },
+			}),
+		).toEqual([]);
+		expect(
+			await failing(
+				inputFor({ mail: true }, (factor) => ({
+					...factor,
+					completeEnrollment: async (ctx) => {
+						const done = await factor.completeEnrollment(ctx);
+						return done.ok ? { ...done, data: { ...done.data, address: ctx.user.email } } : done;
+					},
+				})),
 			),
 		).toEqual([RULES.noAddress]);
 	});
