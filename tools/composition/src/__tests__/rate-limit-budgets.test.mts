@@ -40,6 +40,7 @@
 import { BootError, defineModule, type RateLimiter } from "@o3co/auth-provider-core";
 import {
 	compose,
+	login,
 	SINGLE_ENV,
 } from "@o3co/auth-provider-standalone/src/__tests__/all-modules-composition.fixture.mts";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -228,4 +229,19 @@ describe("a prefix is its owner's", () => {
 			});
 		},
 	);
+});
+
+describe("the login budget at /session/login", () => {
+	it("advertises rateLimit.login's limit on a shared in-process limiter", async () => {
+		const composition = await composeFullSet({
+			operatorHocon: "rateLimit.login { windowMs = 60000, limit = 7 }",
+		});
+		try {
+			const { res } = await login(composition.app);
+			expect(res.status).toBe(200);
+			expect(res.headers["ratelimit-limit"]).toBe("7");
+		} finally {
+			await composition.handle.dispose();
+		}
+	});
 });
