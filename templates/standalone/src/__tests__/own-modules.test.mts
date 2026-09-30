@@ -43,8 +43,10 @@ import {
 	memoryRefreshTokenFamilyStoreModule,
 	moduleReferences,
 } from "@o3co/auth-provider-core";
-import { packageReferenceProblems } from "@o3co/auth-provider-core/testing";
+import { httpSettingsContract, packageReferenceProblems } from "@o3co/auth-provider-core/testing";
 import { parseFile } from "@o3co/ts.hocon";
+import express from "express";
+import request from "supertest";
 import { describe, expect, it, vi } from "vitest";
 import { buildModules } from "../buildModules.mjs";
 import {
@@ -57,7 +59,13 @@ import {
 	SWITCHES,
 } from "../configPath.mjs";
 import { createAppLogger } from "../logger.mjs";
-import { keyStoreModule, loggingModule, standaloneRedisClientsModule } from "../modules.mjs";
+import {
+	corsModule,
+	httpModule,
+	keyStoreModule,
+	loggingModule,
+	standaloneRedisClientsModule,
+} from "../modules.mjs";
 
 const configDir = fileURLToPath(new URL("../../config", import.meta.url));
 /** The template's own defaults: what its modules declare as their sections' reference. */
@@ -171,7 +179,13 @@ describe("the template's config/reference.conf", () => {
 		expect(
 			packageReferenceProblems({
 				reference: TEMPLATE_REFERENCE,
-				modules: [loggingModule, keyStoreModule, standaloneRedisClientsModule],
+				modules: [
+					loggingModule,
+					httpModule,
+					corsModule,
+					keyStoreModule,
+					standaloneRedisClientsModule,
+				],
 				read: (path) => parseFile(path, { env: {} }).toObject(),
 			}),
 		).toEqual([]);
@@ -218,6 +232,200 @@ describe("logging", () => {
 	it("refuses a level it does not know before boot, naming logging.level", () => {
 		const own = readOwnLayers(ownFiles(), { env: { ...BASE_ENV, LOG_LEVEL: "verbose" } });
 		expect(() => readLogging(own)).toThrow(/logging\.level/);
+	});
+});
+
+/**
+ * The template booted, and mounted as `app.mts` mounts it: `trust proxy` from
+ * the `httpSettings` slot, the composed router, and a route answering the
+ * address Express makes of the request, standing in for what every IP-keyed
+ * limit reads.
+ */
+async function mountTemplate(options: BootOptions = {}) {
+	const handle = await bootTemplate(options);
+	const settings = handle.components.httpSettings;
+	if (settings === undefined) throw new Error("booted without httpSettings");
+	const app = express();
+	app.set("trust proxy", settings.trustProxy);
+	app.get("/__ip__", (req, res) => {
+		res.json({ ip: req.ip });
+	});
+	app.use(handle.router);
+	return { app, handle };
+}
+
+/** A CORS preflight for the token endpoint from `origin`. */
+const preflight = (app: express.Express, origin: string) =>
+	request(app)
+		.options("/oauth/token")
+		.set("Origin", origin)
+		.set("Access-Control-Request-Method", "POST");
+
+describe("http", () => {
+	it("owns http, reads the CORS list through the cors module's slot, and requires no configuration", () => {
+		expect(httpModule.name).toBe("http");
+		expect(httpModule.section?.at).toBeUndefined();
+		expect(httpModule.section?.reference?.href).toBe(TEMPLATE_REFERENCE.href);
+		expect(httpModule.requires ?? []).toEqual(["corsAllowedOrigins"]);
+		expect(httpModule.optional ?? []).toEqual([]);
+	});
+
+	it("provides core's httpSettings, authoritative, and the host's own settings, both eagerly", () => {
+		expect(Object.keys(httpModule.provides ?? {}).sort()).toEqual([
+			"httpHostSettings",
+			"httpSettings",
+		]);
+		expect(httpModule.authoritative).toEqual(["httpSettings"]);
+		expect(httpModule.lifecycle?.httpSettings?.eager).toBe(true);
+		expect(httpModule.lifecycle?.httpHostSettings?.eager).toBe(true);
+	});
+
+	it("is loaded by the shipped composition, with the cors module", () => {
+		const own = readOwnLayers(ownFiles(), { env: BASE_ENV });
+		const modules = buildModules(readSwitches(own), { environment: "development" });
+		expect(named(modules, "http")).toBe(httpModule);
+		expect(named(modules, "cors")).toBe(corsModule);
+	});
+
+	describe("the httpSettings it provides keeps the slot's contract", () => {
+		for (const [name, env] of [
+			["for the shipped configuration", {}],
+			[
+				"for an operator's overrides",
+				{
+					HTTP_TRUST_PROXY: "10.0.0.0/8,loopback",
+					CORS_ALLOWED_ORIGINS: "https://app.example.com,http://localhost:5173",
+				},
+			],
+		] as const) {
+			it(name, async () => {
+				const handle = await bootTemplate({ env });
+				try {
+					const settings = handle.components.httpSettings;
+					if (settings === undefined) throw new Error("booted without httpSettings");
+					for (const contractCase of httpSettingsContract({ build: () => settings })) {
+						await contractCase.run();
+					}
+				} finally {
+					await handle.dispose();
+				}
+			});
+		}
+	});
+
+	it.each([
+		["the shipped defaults", {}, undefined, { port: 3000, readinessTimeoutMs: 1000 }],
+		[
+			"HTTP_PORT and HTTP_READINESS_TIMEOUT_MS",
+			{ HTTP_PORT: "8080", HTTP_READINESS_TIMEOUT_MS: "1500" },
+			undefined,
+			{ port: 8080, readinessTimeoutMs: 1500 },
+		],
+		[
+			"HOCON an operator writes",
+			{ HTTP_PORT: "8080" },
+			"http { port = 4000, readinessTimeoutMs = 2500 }\n",
+			{ port: 4000, readinessTimeoutMs: 2500 },
+		],
+	])(
+		"hands the host the port and the readiness deadline %s set",
+		async (_name, env, hocon, host) => {
+			const handle = await bootTemplate({ env, hocon });
+			try {
+				expect(handle.components.httpHostSettings).toEqual(host);
+			} finally {
+				await handle.dispose();
+			}
+		},
+	);
+
+	it.each([
+		["the shipped default", {}, undefined, false],
+		[
+			"HTTP_TRUST_PROXY",
+			{ HTTP_TRUST_PROXY: "10.0.0.0/8,loopback" },
+			undefined,
+			["10.0.0.0/8", "loopback"],
+		],
+		["HOCON an operator writes", {}, "http.trustProxy = 1\n", 1],
+	])("trusts the forwarding hops %s names", async (_name, env, hocon, trustProxy) => {
+		const handle = await bootTemplate({ env, hocon });
+		try {
+			expect(handle.components.httpSettings?.trustProxy).toEqual(trustProxy);
+		} finally {
+			await handle.dispose();
+		}
+	});
+
+	it("makes req.ip the forwarded client address only through a trusted hop", async () => {
+		const trusting = await mountTemplate({ env: { HTTP_TRUST_PROXY: "loopback" } });
+		const shipped = await mountTemplate();
+		try {
+			const forwarded = await request(trusting.app)
+				.get("/__ip__")
+				.set("X-Forwarded-For", "203.0.113.9");
+			expect(forwarded.body.ip).toBe("203.0.113.9");
+			const direct = await request(shipped.app)
+				.get("/__ip__")
+				.set("X-Forwarded-For", "203.0.113.9");
+			expect(direct.body.ip).not.toBe("203.0.113.9");
+		} finally {
+			await trusting.handle.dispose();
+			await shipped.handle.dispose();
+		}
+	});
+
+	it("refuses a trust proxy entry that is not an address, a range or a named range at boot, naming it", async () => {
+		await expect(bootTemplate({ env: { HTTP_TRUST_PROXY: "proxy.internal" } })).rejects.toThrow(
+			/http\.trustProxy/,
+		);
+	});
+});
+
+describe("cors", () => {
+	it("owns cors, and requires nothing", () => {
+		expect(corsModule.name).toBe("cors");
+		expect(corsModule.section?.at).toBeUndefined();
+		expect(corsModule.section?.reference?.href).toBe(TEMPLATE_REFERENCE.href);
+		expect(corsModule.requires ?? []).toEqual([]);
+		expect(corsModule.optional ?? []).toEqual([]);
+		expect(Object.keys(corsModule.provides ?? {})).toEqual(["corsAllowedOrigins"]);
+	});
+
+	it("lets no origin read with the shipped default: no CORS headers, not even Vary", async () => {
+		const { app, handle } = await mountTemplate();
+		try {
+			const res = await preflight(app, "https://app.example.com");
+			expect(res.headers["access-control-allow-origin"]).toBeUndefined();
+			expect(res.headers.vary ?? "").not.toMatch(/Origin/);
+		} finally {
+			await handle.dispose();
+		}
+	});
+
+	it.each([
+		["CORS_ALLOWED_ORIGINS", { CORS_ALLOWED_ORIGINS: "https://app.example.com" }, undefined],
+		["HOCON an operator writes", {}, 'cors.allowedOrigins = ["https://app.example.com"]\n'],
+	])(
+		"lets the origin %s lists read the token endpoint, and no other",
+		async (_name, env, hocon) => {
+			const { app, handle } = await mountTemplate({ env, hocon });
+			try {
+				const listed = await preflight(app, "https://app.example.com");
+				expect(listed.status).toBe(204);
+				expect(listed.headers["access-control-allow-origin"]).toBe("https://app.example.com");
+				const other = await preflight(app, "https://other.example.com");
+				expect(other.headers["access-control-allow-origin"]).toBeUndefined();
+			} finally {
+				await handle.dispose();
+			}
+		},
+	);
+
+	it("refuses an origin that could never match at boot, naming cors.allowedOrigins", async () => {
+		await expect(
+			bootTemplate({ env: { CORS_ALLOWED_ORIGINS: "https://app.example.com/" } }),
+		).rejects.toThrow(/cors\.allowedOrigins/);
 	});
 });
 
