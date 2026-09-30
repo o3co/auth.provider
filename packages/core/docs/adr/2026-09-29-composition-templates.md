@@ -192,6 +192,10 @@ sizes its drain from `federationGrants` (`cleanupAllowanceFor`), which the
 browser-facing composition hands it instead — as #728 also asks, since a
 composition root reads no package's key.
 
+Amended 2026-09-30 (#797): the allowance comes from the cleanup that needs
+it, not the composition. A cleanup registers its tail with core's lifecycle
+registrar, and the host reads the longest from the app handle.
+
 Rejected:
 
 - **A shared runtime package.** It would deliver a fix without a re-scaffold,

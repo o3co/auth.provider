@@ -31,11 +31,19 @@ export interface GracefulShutdownOptions {
 	/** How long in-flight requests get before connections are cut. Default 10s. */
 	readonly drainTimeoutMs?: number;
 	/**
-	 * How long `cleanup` gets before the shutdown gives up on it. Defaults to
-	 * `drainTimeoutMs`, so the worst-case shutdown is the two budgets in
-	 * sequence — size both against the orchestrator's grace period, not one.
+	 * How long `cleanup` gets before the shutdown gives up on it, unless
+	 * `cleanupAllowanceMs` is longer. Defaults to `drainTimeoutMs`, so the
+	 * worst-case shutdown is the two budgets in sequence — size both against
+	 * the orchestrator's grace period, not one.
 	 */
 	readonly cleanupTimeoutMs?: number;
+	/**
+	 * The least `cleanup` gets, read when the signal arrives: normally
+	 * `() => handle.cleanupAllowanceMs`, the longest tail a module registered
+	 * its cleanup with. Absent, unreadable, or not a whole number of
+	 * milliseconds from 1 to 2147483647, the budget is `cleanupTimeoutMs` alone.
+	 */
+	readonly cleanupAllowanceMs?: () => number | undefined;
 	/** Injected in tests; defaults to {@link deferExit}. */
 	readonly exit?: (code: number) => void;
 	/** Injected in tests; defaults to `process.on`. */
@@ -60,65 +68,23 @@ export function deferExit(code: number, exitProcess: (code: number) => void = pr
 const DEFAULT_DRAIN_TIMEOUT_MS = 10_000;
 const SIGNALS: readonly NodeJS.Signals[] = ["SIGTERM", "SIGINT"];
 
-/**
- * The least cleanup allowance federation grants get: 45 seconds. The
- * package's background registry drains on dispose, waiting for a rotated
- * upstream credential's write, and one refresh's longest tail is the upstream
- * hard timeout, the persist budget and the wait for the grant's lock, back to
- * back. With the shipped budgets (25 s + 3 s + 5 s) and
- * {@link FEDERATION_GRANTS_CLEANUP_MARGIN_MS} that is exactly this floor; a
- * raised budget raises the allowance ({@link cleanupAllowanceFor}). The
- * ten-second drain cleanup would otherwise inherit is shorter than the tail,
- * and would abandon exactly that write after the IdP had moved on to the new
- * refresh token. A host policy, not a grant setting: it bounds
- * `handle.dispose()`.
- */
-export const FEDERATION_GRANTS_CLEANUP_ALLOWANCE_MS = 45_000;
-
-/** What the allowance adds to the longest refresh tail: an exit margin. */
-export const FEDERATION_GRANTS_CLEANUP_MARGIN_MS = 12_000;
-
-/**
- * The most a timer can be asked for: Node's `setTimeout` takes a 32-bit signed
- * delay, and a larger one fires after ~1 ms instead. A sum of budgets an
- * operator set high enough to reach it would otherwise turn the allowance
- * into no allowance at all.
- */
+/** The longest delay a timer takes; a larger one, or NaN, fires after about a millisecond. */
 const MAX_TIMER_MS = 2_147_483_647;
 
-/**
- * The `cleanupTimeoutMs` to hand {@link installGracefulShutdown}, from the
- * config: while the feature is on, the longer of the floor above and the
- * configured refresh tail plus the margin; while it is off, nothing (the
- * drain's own budget applies). A fragment to spread, so an absent allowance
- * is absent rather than `undefined`. A config that carries no budgets (one
- * built by hand, without `reference.conf`) gets the floor.
- */
-export function cleanupAllowanceFor(config: {
-	readonly federationGrants?:
-		| {
-				readonly enabled?: boolean | undefined;
-				readonly upstreamHardTimeoutMs?: number | undefined;
-				readonly persistRetryBudgetMs?: number | undefined;
-				readonly lockWaitMs?: number | undefined;
-		  }
-		| undefined;
-}): { readonly cleanupTimeoutMs: number } | Record<string, never> {
-	const grants = config.federationGrants;
-	if (grants?.enabled !== true) return {};
-	const budgets = [grants.upstreamHardTimeoutMs, grants.persistRetryBudgetMs, grants.lockWaitMs];
-	const tail = budgets.every((budget) => typeof budget === "number" && Number.isFinite(budget))
-		? (budgets as number[]).reduce(
-				(sum, budget) => sum + budget,
-				FEDERATION_GRANTS_CLEANUP_MARGIN_MS,
-			)
-		: 0;
-	return {
-		cleanupTimeoutMs: Math.min(
-			Math.max(FEDERATION_GRANTS_CLEANUP_ALLOWANCE_MS, tail),
-			MAX_TIMER_MS,
-		),
-	};
+/** What `read` reports, when it is a delay a timer can wait; otherwise nothing. */
+function allowanceFrom(read: (() => number | undefined) | undefined): number | undefined {
+	let allowance: unknown;
+	try {
+		allowance = read?.();
+	} catch {
+		return undefined;
+	}
+	return typeof allowance === "number" &&
+		Number.isInteger(allowance) &&
+		allowance >= 1 &&
+		allowance <= MAX_TIMER_MS
+		? allowance
+		: undefined;
 }
 
 /**
@@ -143,7 +109,8 @@ export function installGracefulShutdown(server: Server, options: GracefulShutdow
 		},
 	} = options;
 
-	const cleanupTimeoutMs = options.cleanupTimeoutMs ?? drainTimeoutMs;
+	// Settled when the signal arrives, with the allowance as it stands then.
+	let cleanupTimeoutMs = options.cleanupTimeoutMs ?? drainTimeoutMs;
 
 	let shuttingDown = false;
 	let finished = false;
@@ -210,7 +177,8 @@ export function installGracefulShutdown(server: Server, options: GracefulShutdow
 		if (shuttingDown) return;
 		shuttingDown = true;
 		for (const signal of SIGNALS) offSignal(signal, handler);
-		logger.info({ drainTimeoutMs }, "shutdown_draining");
+		cleanupTimeoutMs = Math.max(cleanupTimeoutMs, allowanceFrom(options.cleanupAllowanceMs) ?? 0);
+		logger.info({ drainTimeoutMs, cleanupTimeoutMs }, "shutdown_draining");
 
 		const deadline = setTimeout(() => {
 			logger.error({ drainTimeoutMs }, "shutdown_drain_deadline_exceeded");

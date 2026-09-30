@@ -847,6 +847,10 @@ export function assembleApp(
 			});
 		},
 		dispose,
+		// Read when asked: a cleanup registered after boot is drained too.
+		get cleanupAllowanceMs() {
+			return options.lifecycleReg?._longestTailMs();
+		},
 		components: frozen.components,
 		routes: ordered,
 		readinessProbes: options.readinessReg?._probes() ?? [],

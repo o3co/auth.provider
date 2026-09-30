@@ -47,7 +47,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { buildModules } from "../buildModules.mjs";
 import { resolveConfigPaths } from "../configPath.mjs";
 import { templateReference } from "../modules.mjs";
-import { cleanupAllowanceFor, FEDERATION_GRANTS_CLEANUP_ALLOWANCE_MS } from "../shutdown.mjs";
+import { installGracefulShutdown } from "../shutdown.mjs";
 
 // The same stand-ins `replica-safety.test.mts` boots under: no socket opens,
 // and the shared clients module's readiness probe gets its PONG.
@@ -210,6 +210,56 @@ const boot = (config: AppConfig, memoryOnly = false, environment?: string) =>
 const names = (config: AppConfig, memoryOnly = false) =>
 	modulesFor(config, memoryOnly).map((m) => m.name);
 
+/**
+ * `app.mts`'s shutdown over `handle`, with a server double whose drain ends at
+ * once and signals that are not the process's: the handle's own dispose and
+ * the allowance it reports.
+ */
+function shutDown(handle: Awaited<ReturnType<typeof boot>>) {
+	const logger = {
+		trace: vi.fn(),
+		debug: vi.fn(),
+		info: vi.fn(),
+		warn: vi.fn(),
+		error: vi.fn(),
+		fatal: vi.fn(),
+		child: vi.fn(),
+	};
+	const exit = vi.fn();
+	const signals = new Map<string, () => void>();
+	const server = {
+		close: (callback?: (err?: Error) => void) => {
+			callback?.();
+			return server;
+		},
+		closeIdleConnections: () => undefined,
+		closeAllConnections: () => undefined,
+	};
+	installGracefulShutdown(server as never, {
+		logger: logger as never,
+		cleanup: () => handle.dispose(),
+		cleanupAllowanceMs: () => handle.cleanupAllowanceMs,
+		exit,
+		onSignal: (name, handler) => signals.set(name, handler),
+		offSignal: (name) => signals.delete(name),
+	});
+	return { logger, exit, sigterm: () => signals.get("SIGTERM")?.() };
+}
+
+/**
+ * Work the background registry holds open, as a refresh tail does, until the
+ * returned release: the drain waits for it.
+ */
+const holdTheDrainOpen = (handle: Awaited<ReturnType<typeof boot>>): (() => void) => {
+	let release!: () => void;
+	handle.components.federationGrantBackground?.register(
+		new Promise<void>((resolve) => {
+			release = () => resolve();
+		}),
+	);
+	return release;
+};
+
 const GRANT_MODULES = [
 	"federation-grants",
 	"federation-grant-background",
@@ -304,13 +354,83 @@ describe("the standalone composes federation grants from its config", () => {
 		expect(handleRef.components.federationGrantStore?.kind).toBe("redis");
 	});
 
-	it("gives cleanup the documented 45 seconds under the shipped budgets, and nothing while off", () => {
-		// The allowance is derived from reference.conf's budgets; if those move,
-		// the number every README states moves with them, and this says so.
-		expect(cleanupAllowanceFor(resolveConfig({ ...BASE_ENV, ...GRANTS_ON }))).toEqual({
-			cleanupTimeoutMs: FEDERATION_GRANTS_CLEANUP_ALLOWANCE_MS,
-		});
-		expect(cleanupAllowanceFor(resolveConfig(BASE_ENV))).toEqual({});
+	it("gives cleanup the documented 45 seconds under the shipped budgets, not the drain's ten", async () => {
+		// reference.conf's budgets: 25 s + 3 s + 5 s, plus the 12-second margin.
+		handleRef = await boot(resolveConfig({ ...BASE_ENV, ...GRANTS_ON }), true);
+		expect(handleRef.cleanupAllowanceMs).toBe(45_000);
+
+		vi.useFakeTimers();
+		const release = holdTheDrainOpen(handleRef);
+		try {
+			const { logger, exit, sigterm } = shutDown(handleRef);
+			sigterm();
+			await vi.advanceTimersByTimeAsync(44_999);
+			expect(exit).not.toHaveBeenCalled();
+			await vi.advanceTimersByTimeAsync(1);
+			expect(logger.error).toHaveBeenCalledWith(
+				{ cleanupTimeoutMs: 45_000 },
+				"shutdown_cleanup_timed_out",
+			);
+			expect(exit).toHaveBeenCalledExactlyOnceWith(1);
+		} finally {
+			release();
+			vi.useRealTimers();
+		}
+	});
+
+	it("grows the allowance with a raised refresh budget", async () => {
+		const shipped = resolveConfig({ ...BASE_ENV, ...GRANTS_ON });
+		// The lock must outlive the raised hard timeout, or boot refuses first.
+		const raised = {
+			...shipped,
+			federationGrants: {
+				...shipped.federationGrants,
+				upstreamHardTimeoutMs: 60_000,
+				refreshLockTtlMs: 65_000,
+			},
+		} as AppConfig;
+		handleRef = await boot(raised, true);
+		expect(handleRef.cleanupAllowanceMs).toBe(60_000 + 3_000 + 5_000 + 12_000);
+
+		vi.useFakeTimers();
+		const release = holdTheDrainOpen(handleRef);
+		try {
+			const { logger, exit, sigterm } = shutDown(handleRef);
+			sigterm();
+			await vi.advanceTimersByTimeAsync(79_999);
+			expect(exit).not.toHaveBeenCalled();
+			await vi.advanceTimersByTimeAsync(1);
+			expect(logger.error).toHaveBeenCalledWith(
+				{ cleanupTimeoutMs: 80_000 },
+				"shutdown_cleanup_timed_out",
+			);
+		} finally {
+			release();
+			vi.useRealTimers();
+		}
+	});
+
+	it("reports no allowance while the feature is off, and cleanup's budget is the drain's ten seconds", async () => {
+		handleRef = await boot(resolveConfig(BASE_ENV), true);
+		expect(handleRef.cleanupAllowanceMs).toBeUndefined();
+		const { logger, exit, sigterm } = shutDown(handleRef);
+		sigterm();
+		await vi.waitFor(() => expect(exit).toHaveBeenCalledExactlyOnceWith(0));
+		expect(logger.info).toHaveBeenCalledWith(
+			{ drainTimeoutMs: 10_000, cleanupTimeoutMs: 10_000 },
+			"shutdown_draining",
+		);
+	});
+
+	it("covers a tail registered after the shutdown was installed", async () => {
+		handleRef = await boot(resolveConfig(BASE_ENV), true);
+		const { logger, sigterm } = shutDown(handleRef);
+		handleRef.components.lifecycleRegistrar?.register(async () => {}, { tailMs: 60_000 });
+		sigterm();
+		expect(logger.info).toHaveBeenCalledWith(
+			{ drainTimeoutMs: 10_000, cleanupTimeoutMs: 60_000 },
+			"shutdown_draining",
+		);
 	});
 
 	it("adds the shared Redis client for the grant stores alone", () => {

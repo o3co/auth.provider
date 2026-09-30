@@ -424,4 +424,58 @@ describe("createLifecycleRegistrar", () => {
 		const errors = await reg._drain({ error: () => {} }, "dispose");
 		expect(errors).toEqual([]);
 	});
+
+	it("reports the longest tail a cleanup was registered with, and drains in the same LIFO order", async () => {
+		const order: string[] = [];
+		const reg = createLifecycleRegistrar();
+		expect(reg._longestTailMs()).toBeUndefined();
+		reg.register(async () => {
+			order.push("untailed");
+		});
+		expect(reg._longestTailMs()).toBeUndefined();
+		reg.register(
+			async () => {
+				order.push("45s");
+			},
+			{ tailMs: 45_000 },
+		);
+		reg.register(
+			async () => {
+				order.push("5s");
+			},
+			{ tailMs: 5_000 },
+		);
+		expect(reg._longestTailMs()).toBe(45_000);
+
+		await reg._drain({ error: () => {} }, "dispose");
+		expect(order).toEqual(["5s", "45s", "untailed"]);
+	});
+
+	it("accepts the longest delay a timer takes", () => {
+		const reg = createLifecycleRegistrar();
+		reg.register(async () => {}, { tailMs: 2_147_483_647 });
+		expect(reg._longestTailMs()).toBe(2_147_483_647);
+	});
+
+	it.each([0, -1, 1.5, Number.NaN, Number.POSITIVE_INFINITY, 2_147_483_648, "45000"])(
+		"refuses a tail of %s, and still drains the cleanup it came with",
+		async (tailMs) => {
+			// A builder that registers its connection's close with a bad tail fails
+			// the boot; the drain that follows still closes the connection.
+			const ran: string[] = [];
+			const reg = createLifecycleRegistrar();
+			expect(() =>
+				reg.register(
+					async () => {
+						ran.push("kept");
+					},
+					{ tailMs: tailMs as number },
+				),
+			).toThrow(RangeError);
+			expect(reg._longestTailMs()).toBeUndefined();
+
+			await reg._drain({ error: () => {} }, "boot_failure");
+			expect(ran).toEqual(["kept"]);
+		},
+	);
 });

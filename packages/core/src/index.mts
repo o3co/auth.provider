@@ -29,6 +29,7 @@ export {
 	AdapterFactoryError,
 	type BuilderContext,
 	createAdapterFactory,
+	type LifecycleCleanupOptions,
 	type LifecycleRegistrar,
 } from "./adapters/AdapterFactory.mjs";
 export {

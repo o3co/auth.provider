@@ -54,7 +54,7 @@ import {
 	resolveFederationGrantAcquisitionSettings,
 } from "./acquisitionSettings.mjs";
 import { FEDERATION_GRANTS_ADMISSION_ACTIONS } from "./admissionActions.mjs";
-import { createFederationGrantBackground } from "./background.mjs";
+import { createFederationGrantBackground, federationGrantsCleanupTailMs } from "./background.mjs";
 import {
 	createDisabledFederationGrantBrowserRouter,
 	createFederationGrantBrowserRouter,
@@ -116,6 +116,8 @@ const OPTIONAL = [
 	// and the acquisition settings are built on. Read from the configuration
 	// when no module provides it.
 	"oauthTokenSettings",
+	// Where an enabled deployment registers the drain's tail.
+	"lifecycleRegistrar",
 ] as const;
 
 /**
@@ -438,6 +440,14 @@ export const federationGrantsModule = defineModule<Requires, Optional>({
 					connections,
 				);
 				const lifetimes = resolveFederationGrantAcquisitionLimits(deps.config);
+				// The drain's allowance, for a host that bounds dispose(). The component
+				// cleanup runs the drain, ahead of the store; this waits only on a drain
+				// already started, never on a registry the host supplied.
+				const background = deps.federationGrantBackground;
+				deps.lifecycleRegistrar?.register(
+					() => (background.closing ? background.drain() : Promise.resolve()),
+					{ tailMs: federationGrantsCleanupTailMs(limits) },
+				);
 				return {
 					id: "federation-grants",
 					mountPath: FEDERATION_GRANTS_MOUNT_PATH,
