@@ -92,7 +92,7 @@ describe("core's reference.conf holds only what core's schema declares", () => {
 	it("resolves to a non-trivial tree, so the diff below is over something", () => {
 		const paths = collectPaths(resolved);
 		expect(paths.length).toBeGreaterThan(50);
-		expect(paths).toContain("oauth.jwt.signingKey.local.algorithm");
+		expect(paths).toContain("oauth.jwt.legacyTypAccept");
 		expect(paths).toContain("redisFederationTokenStore.keyPrefix");
 	});
 

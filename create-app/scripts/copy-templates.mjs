@@ -26,11 +26,11 @@ import { copyTemplates } from "./templates.mjs";
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const destRoot = resolve(__dirname, "../templates");
 
-// `reference.conf` is intentionally not copied: each package that ships
-// defaults exports its own (`./reference.conf`), and a composition root layers
-// them with `coreReference()` / `moduleReferences(modules)`. A template's
-// `config/` holds only the per-deployment delta. See ADR
-// 2026-05-13-reference-conf-shipping.
+// No package's `reference.conf` is copied: each package that ships defaults
+// exports its own (`./reference.conf`), and a composition root layers them
+// with `coreReference()` / `moduleReferences(modules)`. A template's `config/`
+// holds the deployment's layers and, in its own `reference.conf`, the defaults
+// of the template's own modules. See ADR 2026-05-13-reference-conf-shipping.
 
 copyTemplates(resolve(__dirname, "../../templates"), destRoot);
 

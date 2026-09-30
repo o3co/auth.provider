@@ -22,7 +22,7 @@ import { assertSecretEntropy } from "./secretEntropy.mjs";
 export type KeyStoreFactory = AdapterFactory<KeyStore>;
 
 /**
- * The algorithm this library defaults to, and the one `reference.conf` ships.
+ * The algorithm this library defaults to.
  * Asymmetric so a relying party can verify from the published JWKS without
  * holding a key that can also MINT tokens. EdDSA (Ed25519) over RS256: every
  * layer here supports it, its keys and signatures are the smallest, and it
@@ -32,7 +32,7 @@ export const DEFAULT_SIGNING_ALGORITHM = "EdDSA";
 
 const SUPPORTED_ALGORITHMS = ["HS256", "RS256", "ES256", "EdDSA"] as const;
 
-/** Env vars `reference.conf` binds the asymmetric key material to. */
+/** The keys that carry the asymmetric key material, and the variables conventionally bound to them. */
 const ASYMMETRIC_KEY_HELP =
 	"Set BOTH of:\n" +
 	"  oauth.jwt.signingKey.local.privateKeyPath  (env OAUTH_JWT_PRIVATE_KEY_PATH)\n" +
@@ -188,8 +188,7 @@ export function registerBuiltinKeyStores(factory: KeyStoreFactory): void {
 	factory.register("local", async (config) => {
 		const rawAlgorithm = config.algorithm;
 		// No fallback: an absent `algorithm` must not silently become HS256,
-		// quietly weaker than the operator believes. `reference.conf` always
-		// supplies it, so only a programmatic caller reaches this.
+		// quietly weaker than the operator believes.
 		if (typeof rawAlgorithm !== "string" || rawAlgorithm.length === 0) {
 			throw new Error(
 				"oauth.jwt.signingKey.local.algorithm is not configured (env OAUTH_JWT_ALGORITHM). " +

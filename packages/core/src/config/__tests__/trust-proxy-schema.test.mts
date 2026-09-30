@@ -40,7 +40,7 @@ describe("http.trustProxy — boolean", () => {
 	it.each([false, true])("accepts the boolean %s unchanged", (value) => {
 		const result = parsed(value);
 		expect(result.success).toBe(true);
-		if (result.success) expect(result.data.http.trustProxy).toBe(value);
+		if (result.success) expect(result.data.http?.trustProxy).toBe(value);
 	});
 
 	it.each([
@@ -52,7 +52,7 @@ describe("http.trustProxy — boolean", () => {
 		// bridge, so the schema has to do it.
 		const result = parsed(raw);
 		expect(result.success).toBe(true);
-		if (result.success) expect(result.data.http.trustProxy).toBe(expected);
+		if (result.success) expect(result.data.http?.trustProxy).toBe(expected);
 	});
 
 	it("treats an exported-but-empty env var as `false` rather than as a policy", () => {
@@ -60,7 +60,7 @@ describe("http.trustProxy — boolean", () => {
 		// a blank ConfigMap key arrives as "". Fail closed: trust nothing.
 		const result = parsed("");
 		expect(result.success).toBe(true);
-		if (result.success) expect(result.data.http.trustProxy).toBe(false);
+		if (result.success) expect(result.data.http?.trustProxy).toBe(false);
 	});
 });
 
@@ -68,13 +68,13 @@ describe("http.trustProxy — hop count", () => {
 	it.each([0, 1, 3])("accepts the hop count %s", (value) => {
 		const result = parsed(value);
 		expect(result.success).toBe(true);
-		if (result.success) expect(result.data.http.trustProxy).toBe(value);
+		if (result.success) expect(result.data.http?.trustProxy).toBe(value);
 	});
 
 	it("coerces a numeric env-var string to a number, not to a one-entry address list", () => {
 		const result = parsed("2");
 		expect(result.success).toBe(true);
-		if (result.success) expect(result.data.http.trustProxy).toBe(2);
+		if (result.success) expect(result.data.http?.trustProxy).toBe(2);
 	});
 
 	it("rejects a negative hop count", () => {
@@ -96,13 +96,13 @@ describe("http.trustProxy — address list", () => {
 	it("accepts a list of IP literals", () => {
 		const result = parsed(["10.0.0.7", "2001:db8::1"]);
 		expect(result.success).toBe(true);
-		if (result.success) expect(result.data.http.trustProxy).toEqual(["10.0.0.7", "2001:db8::1"]);
+		if (result.success) expect(result.data.http?.trustProxy).toEqual(["10.0.0.7", "2001:db8::1"]);
 	});
 
 	it("accepts CIDR ranges — the shape an operator with a pod network actually has", () => {
 		const result = parsed(["10.0.0.0/8", "fc00::/7"]);
 		expect(result.success).toBe(true);
-		if (result.success) expect(result.data.http.trustProxy).toEqual(["10.0.0.0/8", "fc00::/7"]);
+		if (result.success) expect(result.data.http?.trustProxy).toEqual(["10.0.0.0/8", "fc00::/7"]);
 	});
 
 	it.each(["loopback", "linklocal", "uniquelocal"])(
@@ -120,14 +120,14 @@ describe("http.trustProxy — address list", () => {
 		const result = parsed("10.0.0.0/8, 192.168.0.0/16");
 		expect(result.success).toBe(true);
 		if (result.success) {
-			expect(result.data.http.trustProxy).toEqual(["10.0.0.0/8", "192.168.0.0/16"]);
+			expect(result.data.http?.trustProxy).toEqual(["10.0.0.0/8", "192.168.0.0/16"]);
 		}
 	});
 
 	it("accepts a single-entry string", () => {
 		const result = parsed("loopback");
 		expect(result.success).toBe(true);
-		if (result.success) expect(result.data.http.trustProxy).toEqual(["loopback"]);
+		if (result.success) expect(result.data.http?.trustProxy).toEqual(["loopback"]);
 	});
 
 	it("rejects an empty list — a policy that matches nothing is a mistake, not a setting", () => {

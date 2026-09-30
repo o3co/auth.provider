@@ -82,7 +82,7 @@ const handle = await createApp({
 
 const server = express();
 server.use(handle.router);
-server.listen(config.http.port);
+server.listen(port); // 構成自身の設定。standalone テンプレートでは `http` モジュールが所有する
 // シャットダウン時
 await handle.dispose();
 ```

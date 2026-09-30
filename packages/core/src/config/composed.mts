@@ -118,10 +118,10 @@ export function operatorPath(path: readonly PropertyKey[]): string {
 
 /**
  * What a composition root reads before it knows its modules (transitional):
- * the values at `reads` (the switches it chooses its modules by, its log
- * level), each parsed with the schema the transitional base declares at that
- * path (`pickConfigSchema`) and laid over `raw`, so every key it does not
- * read stays as written.
+ * the values at `reads` (the switches it chooses its modules by), each parsed
+ * with the schema the transitional base declares at that path
+ * (`pickConfigSchema`) and laid over `raw`, so every key it does not read
+ * stays as written.
  *
  * Only `reads` is parsed. Before the modules are known, `raw` is resolved
  * over core's `reference.conf` alone, so a default only a package's

@@ -11,8 +11,9 @@ the file it comes from in parentheses. When this document and the code
 disagree, the code is right and this document has a bug — file it.
 
 Environment-variable names are the standalone template's
-(`templates/standalone/config/application.conf` and core's
-`packages/core/config/reference.conf`). A composition root of your own reads
+(`templates/standalone/config/application.conf`, the template's own
+`templates/standalone/config/reference.conf`, and the `reference.conf` of each
+package it loads, core's among them). A composition root of your own reads
 the same HOCON keys through whatever binding you gave them.
 
 ---

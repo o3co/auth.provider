@@ -202,9 +202,9 @@ export interface ProviderActivation {
 	readonly module: string;
 	readonly componentKey: ComponentKey;
 	/**
-	 * True when this entry is in the activation closure only because
-	 * `lifecycle[componentKey].eager === true`. Used by diagnostics; does not
-	 * change runtime behaviour.
+	 * True when this entry is in the activation closure only as a seed:
+	 * `lifecycle[componentKey].eager === true`, or a slot core reads. Used by
+	 * diagnostics; does not change runtime behaviour.
 	 */
 	readonly eager: boolean;
 }

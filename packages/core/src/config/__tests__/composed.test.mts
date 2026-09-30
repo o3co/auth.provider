@@ -66,8 +66,8 @@ describe("readTransitionalConfig — the switches a composition root reads befor
 			}),
 			["http", "redisRateLimiter"],
 		);
-		expect(config.http.port).toBe(8080);
-		expect(config.http.readinessTimeoutMs).toBe(1500);
+		expect(config.http?.port).toBe(8080);
+		expect(config.http?.readinessTimeoutMs).toBe(1500);
 		expect(config.redisRateLimiter?.limits?.token).toEqual({ limit: 120, windowSeconds: 60 });
 	});
 
@@ -79,8 +79,8 @@ describe("readTransitionalConfig — the switches a composition root reads befor
 			}),
 			["http.port"],
 		) as unknown as { http: Record<string, unknown>; deployment: unknown };
-		expect(config.http.port).toBe(8080);
-		expect(config.http.readinessTimeoutMs).toBe("1500");
+		expect(config.http?.port).toBe(8080);
+		expect(config.http?.readinessTimeoutMs).toBe("1500");
 		expect(config.deployment).toEqual({ mode: "several" });
 	});
 

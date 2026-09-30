@@ -122,6 +122,8 @@ describe("published-package install context (e2e)", () => {
 			expect(existsSync(join(targetDir, "package.json"))).toBe(true);
 			expect(existsSync(join(targetDir, "src", "app.mts"))).toBe(true);
 			expect(existsSync(join(targetDir, "config", "application.conf"))).toBe(true);
+			// The template's own modules' defaults, which it reads at start.
+			expect(existsSync(join(targetDir, "config", "reference.conf"))).toBe(true);
 			// The scaffold's vitest.config.mts loads this setup file, and vitest
 			// refuses to start without it — so the tarball has to carry it.
 			expect(existsSync(join(targetDir, "vitest.supertest-loopback.mts"))).toBe(true);
