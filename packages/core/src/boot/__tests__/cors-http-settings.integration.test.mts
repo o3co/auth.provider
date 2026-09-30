@@ -127,6 +127,10 @@ describe("the CORS mount reads the httpSettings slot when the composition holds 
 		}
 	});
 
+	it("refuses a provider that answers undefined, naming httpSettings, rather than reading cors.allowedOrigins", async () => {
+		await expect(boot([CONFIG_ORIGIN], [httpModule(undefined)])).rejects.toThrow(/httpSettings/);
+	});
+
 	it("reads a slot the host fills through overrideComponents", async () => {
 		const handle = await createApp({
 			modules: [tokenRoute],

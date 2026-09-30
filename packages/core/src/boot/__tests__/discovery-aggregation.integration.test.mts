@@ -297,6 +297,21 @@ describe("discoveryMetadata — core aggregation in assembleApp", () => {
 		await handle.dispose();
 	});
 
+	it("refuses a provider of oauthTokenSettings that answers undefined, naming the slot, rather than serving on the configuration's issuer", async () => {
+		const undefinedSettings = defineModule({
+			name: "test:undefined-token-settings",
+			provides: { oauthTokenSettings: () => undefined as never },
+		});
+		const booting = createTestApp({
+			modules: [oauthLikeModule, jwksLikeModule, keyStoreModule, undefinedSettings],
+			bootstrapComponents: {
+				config: withIssuer("https://auth.example.com"),
+				pathResolver: (s) => s,
+			},
+		});
+		await expect(booting).rejects.toThrow(/oauthTokenSettings/);
+	});
+
 	it("refuses an oauthTokenSettings without an issuer, naming the member, rather than serving on the configuration's", async () => {
 		// A slot the composition holds is read whole: a member it lacks is not
 		// taken from the configuration beside it.
