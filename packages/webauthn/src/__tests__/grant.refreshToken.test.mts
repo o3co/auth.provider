@@ -302,6 +302,18 @@ describe("createWebAuthnGrant — refresh_token allowlist gate", () => {
 		expect(decodePayload(tokens.refresh_token as string).amr).toEqual(["hwk"]);
 	});
 
+	it("stamps the time the assertion was verified as auth_time, on the refresh token as on the access token", async () => {
+		// The passkey assertion is the authentication, so its time is `auth_time`
+		// (RFC 9470 §6.1); the refresh grant carries it from the refresh token.
+		const before = Math.floor(Date.now() / 1000);
+		const tokens = await issue(await makeDeps(), makeCtx(makeClient()));
+		const after = Math.floor(Date.now() / 1000);
+		const authTime = decodePayload(tokens.access_token as string).auth_time;
+		expect(authTime).toBeGreaterThanOrEqual(before);
+		expect(authTime).toBeLessThanOrEqual(after);
+		expect(decodePayload(tokens.refresh_token as string).auth_time).toBe(authTime);
+	});
+
 	it("issues no refresh_token when allowedGrantTypes omits refresh_token", async () => {
 		const tokens = await issue(
 			await makeDeps(),
