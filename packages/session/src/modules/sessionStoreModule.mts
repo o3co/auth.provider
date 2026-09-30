@@ -61,10 +61,8 @@ const storageTypeOf = (config: SessionStoreModuleConfig | undefined): unknown =>
 	config?.session?.storage?.type;
 
 /**
- * The session cookie `session` describes: the one express-session is given
- * and the `sessionCookiePolicy` slot holds. A section that yields none refuses
- * boot at `stage`, as a configuration value refused: `config-validation-failed`,
- * its one issue naming the `session.*` key.
+ * The cookie express-session is given and the `sessionCookiePolicy` slot holds.
+ * A section that yields none refuses boot: `config-validation-failed` naming the key.
  */
 function sessionCookieOf(session: SessionCookieConfigSlice, stage: BootStage): SessionCookiePolicy {
 	const refusal = sessionCookieRefusal(session);
@@ -116,11 +114,8 @@ function buildSessionStoreModule(replicaSafety: ReplicaSafetyDeclaration | undef
 			csrfTokenSigner: (deps) =>
 				createSessionCsrfTokenSigner((deps.config as AppConfig).session.secret),
 		},
-		// One source while this module is loaded: its route mounts the cookie
-		// `session.*` describes, so an `overrideComponents` entry for the slot
-		// would describe a cookie no browser is given; boot refuses it
-		// (`authoritative-component-overridden`). A composition without the
-		// module fills the slot itself.
+		// The route mounts the cookie `session.*` describes: an override would
+		// describe a cookie no browser is given.
 		authoritative: ["sessionCookiePolicy"],
 		contributes: {
 			routes: [
@@ -151,9 +146,7 @@ function buildSessionStoreModule(replicaSafety: ReplicaSafetyDeclaration | undef
 							details: { reason: "replica-unsafe-adapter", modules: [MODULE_NAME] },
 						});
 					}
-					// The cookie the sessionCookiePolicy slot holds, refused where the
-					// slot is refused, whether or not a module requires it, and before
-					// the store opens a connection.
+					// The slot's cookie, refused before the store opens a connection.
 					const cookie = sessionCookieOf(config.session, "applyContributions");
 					const store = await factory.create({
 						type: storageSlice.type,

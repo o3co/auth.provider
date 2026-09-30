@@ -27,14 +27,9 @@
  * lifetime. The signing secret is not among them.
  *
  * One rule ({@link sessionCookieRefusal}) decides which sections yield a
- * cookie, and the store refuses at boot every section the rule refuses: the
- * store mounts no cookie the policy refuses, and no section yields a policy
- * that breaks core's contract (`sessionCookiePolicyContract`) — a cookie a
- * browser drops (a `__Host-` name that is not secure or that names a domain, a
- * `__Secure-` name or `SameSite=None` without `secure`), a name that is not an
- * RFC 6265 token, a lifetime outside 1 to `MAX_DURATION_MS` milliseconds.
- * Core's schema already refuses the `SameSite=None` and lifetime cases at
- * validation.
+ * cookie; the store refuses at boot what it refuses, so no section yields a
+ * policy that breaks core's contract (`sessionCookiePolicyContract`) or a
+ * cookie the store mounts and the policy refuses.
  */
 
 import { MAX_DURATION_MS, type SessionCookiePolicy } from "@o3co/auth-provider-core";
@@ -58,11 +53,10 @@ export interface SessionCookieRefusal {
 const COOKIE_NAME = /^[!#$%&'*+\-.^_`|~0-9A-Za-z]+$/;
 
 /**
- * Why `session` yields no session cookie, or `undefined` when it yields one.
- * A browser keeps a `__Host-` cookie only when it is secure and names no
- * domain — an empty one included — and a `__Secure-` or `SameSite=None`
- * cookie only when it is secure. A prefix rule names `session.name`, the
- * `SameSite=None` rule `session.secure`, as core's schema does.
+ * Why `session` yields no session cookie, or `undefined`: a cookie a browser
+ * drops (a `__Host-` name not secure or with a domain, an empty one included; a
+ * `__Secure-` name or `SameSite=None` not secure), a name that is not an RFC
+ * 6265 token, a lifetime outside 1 to `MAX_DURATION_MS` ms.
  */
 export function sessionCookieRefusal(
 	session: SessionCookieConfigSlice,
