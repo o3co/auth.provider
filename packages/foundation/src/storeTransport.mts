@@ -347,7 +347,7 @@ export async function postToStore(
 				(response.status === 401 || response.status === 403) &&
 				hasBearerChallenge(response.headers.get("www-authenticate"))
 			) {
-				throw new StoreCredentialRefusedError(url, response.status);
+				throw new StoreCredentialRefusedError(url, response.status, messages.owner);
 			}
 			return { response, text: undefined };
 		}

@@ -15,17 +15,19 @@
  */
 
 /**
- * Transport validation for the Store endpoints `HttpUserRepository` posts to:
- * `https://`, or `http://` to a loopback host only (`localhost`,
- * `127.0.0.0/8`, `[::1]`), because these endpoints receive plaintext user
- * credentials. See README, Constructor validation.
+ * Transport validation for the Store endpoints the Store clients post to —
+ * `HttpUserRepository`'s and `HttpMfaFactorStore`'s: `https://`, or
+ * `http://` to a loopback host only (`localhost`, `127.0.0.0/8`, `[::1]`),
+ * because what they carry — credentials, verified identities, sealed factor
+ * records — must not cross a network in the clear. See README, Constructor
+ * validation.
  *
  * Kept separate from `oauth.jwt.issuer`'s rule (core's `checkCanonicalIssuer`)
  * because an issuer may not carry a query string, while a Store endpoint may.
  * The loopback predicate is core's `isLoopbackHostname`, the session redirect
  * policy's too, so the carve-outs cannot drift apart. A message names an
  * endpoint by origin and path alone ({@link endpointForMessage}): a query may
- * carry a credential, and every caller logs what the repository throws.
+ * carry a credential, and every caller logs what a client throws.
  */
 
 import { isLoopbackHostname } from "@o3co/auth-provider-core";
@@ -105,7 +107,7 @@ export function describeEndpointRejection(reason: EndpointRejection): string {
 			);
 		case "insecure-scheme":
 			return (
-				"must use https — it carries plaintext user credentials; http is accepted only for " +
+				"must use https — what it carries must not cross a network in the clear; http is accepted only for " +
 				"a loopback host (localhost, 127.0.0.0/8, [::1])"
 			);
 		case "has-credentials":
