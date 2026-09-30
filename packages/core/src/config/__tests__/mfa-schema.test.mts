@@ -22,7 +22,8 @@
  *
  * `mfa.mode` is `"off"` by reference default and admits its three values; one
  * that is none of the three is refused here, naming its key. The MFA package
- * reads it; boot does not.
+ * reads it, and the standalone template declares `mfa` from it; boot's checks
+ * do not act on it.
  */
 
 import { fileURLToPath } from "node:url";

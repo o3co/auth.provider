@@ -1168,9 +1168,9 @@ export interface SessionRequirementKindGuardedDetails {
 }
 
 /**
- * A consumer of session admission is installed and `sessionRequirements.expected`
- * is absent, or leaves out a registered requirement. See ADR
- * 2026-09-28-session-admission.
+ * `sessionRequirements.expected` is written and leaves out a registered
+ * requirement, or is not written while a consumer of session admission is
+ * installed. See ADR 2026-09-28-session-admission.
  */
 export interface SessionRequirementsUndeclaredDetails {
 	readonly reason: "session-requirements-undeclared";
@@ -1179,7 +1179,7 @@ export interface SessionRequirementsUndeclaredDetails {
 	readonly declared: readonly string[] | undefined;
 	/** What registered, in registration order. */
 	readonly registered: readonly string[];
-	/** The modules that require or read `sessionRequirementResolver`. */
+	/** The modules that require or read `sessionRequirementResolver`; none when the key is written and nothing consults admission. */
 	readonly consumedBy: readonly string[];
 	readonly cleanupErrors?: readonly {
 		readonly module: string;

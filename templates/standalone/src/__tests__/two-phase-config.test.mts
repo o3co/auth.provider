@@ -20,7 +20,8 @@
  * 1. `readSwitches` — its own files over core's `reference.conf`, read with
  *    core's transitional reader — parses only `SWITCHES`, what the template
  *    reads before it knows its modules: the switches `buildModules` chooses
- *    them by, and the log level;
+ *    them by, the log level, and what `expectedSessionRequirements` reads —
+ *    the configuration's `sessionRequirements` and `mfa.mode`;
  * 2. `resolveForBoot` — its own files over the `reference.conf` of every
  *    package its modules come from, core's last — handed to `createApp`
  *    unparsed, which parses it once with every loaded module's schema.
@@ -220,10 +221,11 @@ describe("phase two: what createApp is handed", () => {
 
 	it("layers each loaded module's reference beneath the template's own files, over core's", () => {
 		const modules = [...buildModules(switches, { environment: "development" }), widgetModule()];
-		const resolved = resolveForBoot(own, modules) as unknown as Record<
-			string,
-			Record<string, unknown>
-		>;
+		const resolved = resolveForBoot(
+			own,
+			modules,
+			expectedSessionRequirements(switches),
+		) as unknown as Record<string, Record<string, unknown>>;
 		// The package's own section, from its reference.
 		expect(resolved.widget).toEqual({ size: 3 });
 		// The template's application.conf wins over a package's reference…
@@ -234,7 +236,11 @@ describe("phase two: what createApp is handed", () => {
 
 	it("layers no reference a loaded module does not declare", () => {
 		const modules = buildModules(switches, { environment: "development" });
-		const resolved = resolveForBoot(own, modules) as unknown as Record<string, unknown>;
+		const resolved = resolveForBoot(
+			own,
+			modules,
+			expectedSessionRequirements(switches),
+		) as unknown as Record<string, unknown>;
 		expect(resolved).not.toHaveProperty("widget");
 	});
 
@@ -265,7 +271,7 @@ describe("both phases read one snapshot of the composition's own layers", () => 
 		const own = readOwnLayers([operator, ...ownFiles("production")], { env });
 		writeFileSync(operator, 'rateLimiter.adapter = "memory"\n');
 		const switches = readSwitches(own);
-		const resolved = resolveForBoot(own, []) as unknown as {
+		const resolved = resolveForBoot(own, [], expectedSessionRequirements(switches)) as unknown as {
 			rateLimiter: { adapter: unknown };
 		};
 		expect(switches.rateLimiter?.adapter).toBe("redis");
@@ -277,7 +283,7 @@ describe("both phases read one snapshot of the composition's own layers", () => 
 		const own = readOwnLayers(ownFiles("production"), { env: changing });
 		changing.RATE_LIMITER_ADAPTER = "memory";
 		const switches = readSwitches(own);
-		const resolved = resolveForBoot(own, []) as unknown as {
+		const resolved = resolveForBoot(own, [], expectedSessionRequirements(switches)) as unknown as {
 			rateLimiter: { adapter: unknown };
 		};
 		expect(switches.rateLimiter?.adapter).toBe("redis");
@@ -287,13 +293,17 @@ describe("both phases read one snapshot of the composition's own layers", () => 
 	it("reads every switch as boot's parse has it, for the shipped environments", async () => {
 		for (const environment of ["development", "production"]) {
 			for (const [name, shipped] of Object.entries(ENVIRONMENTS)) {
-				const own = readOwnLayers(ownFiles(environment), { env: shipped });
+				// `mfa.mode` off: the template declares `mfa` under another mode, and
+				// installs no module that registers it, so boot refuses. Phase one's
+				// reading of the mode is pinned against the pre-parse above.
+				const variables = { ...shipped, MFA_MODE: "off" };
+				const own = readOwnLayers(ownFiles(environment), { env: variables });
 				const switches = readSwitches(own);
 				const modules = buildModules(switches, { environment });
 				const handle = await createApp({
 					modules: [],
 					bootstrapComponents: {
-						config: resolveForBoot(own, modules),
+						config: resolveForBoot(own, modules, expectedSessionRequirements(switches)),
 						pathResolver: (s: string) => s,
 						...FEDERATION_STORES,
 					} as never,

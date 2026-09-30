@@ -68,6 +68,7 @@ import request from "supertest";
 import { beforeAll, describe, expect, it } from "vitest";
 import { buildModules } from "#/buildModules.mjs";
 import {
+	expectedSessionRequirements,
 	type OwnLayers,
 	readOwnLayers,
 	readSwitches,
@@ -208,7 +209,9 @@ export function ownFiles(): string[] {
  * Phase one, as `app.mts` reads it: the switches `buildModules` chooses
  * the modules by — and `reads`, what a module added to the composition reads
  * when it is built — from the composition's own files under `env` over core's
- * `reference.conf`.
+ * `reference.conf`. What the composition expects of session admission is
+ * derived from it (`expectedSessionRequirements`), after `config` adjusts it
+ * as an operator's layer would.
  */
 export function resolveConfig(
 	env: Readonly<Record<string, string>>,
@@ -666,7 +669,7 @@ export async function compose(options: ComposeOptions = {}): Promise<Composition
 	const logger = createRecordingLogger();
 	// Phase two: the configuration as resolved over every loaded package's
 	// reference.conf, which createApp parses once.
-	const resolved = adjust(resolveForBoot(own, modules));
+	const resolved = adjust(resolveForBoot(own, modules, expectedSessionRequirements(config)));
 	const handle = await createApp({
 		modules,
 		bootstrapComponents: {

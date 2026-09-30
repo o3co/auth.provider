@@ -27,7 +27,13 @@ import {
 } from "@o3co/auth-provider-core";
 import { describe, expect, it } from "vitest";
 import { buildModules } from "../buildModules.mjs";
-import { readOwnLayers, readSwitches, resolveConfigPaths, resolveForBoot } from "../configPath.mjs";
+import {
+	expectedSessionRequirements,
+	readOwnLayers,
+	readSwitches,
+	resolveConfigPaths,
+	resolveForBoot,
+} from "../configPath.mjs";
 
 /**
  * Boots the shipped config with EVERY documented override supplied the way an
@@ -184,8 +190,9 @@ const DOCUMENTED_ENV: Readonly<Record<string, string>> = {
 
 	// --- multi-factor authentication ----------------------------------
 	// The mode (ADR 2026-09-25-multi-factor-authentication), which the MFA
-	// package reads, and the two store switches a composition installs MFA's
-	// stores from.
+	// package reads and the template declares `mfa` from (ADR
+	// 2026-09-28-session-admission), and the two store switches a composition
+	// installs MFA's stores from.
 	MFA_MODE: "off",
 	MFA_FACTOR_STORE_ADAPTER: "redis",
 	MFA_TRANSACTION_STORE_ADAPTER: "redis",
@@ -315,7 +322,8 @@ const FEDERATION_STORES = Object.fromEntries(
 
 /**
  * The shipped layers under `env`, as `app.mts` hands them to boot, and the
- * configuration boot parsed: phase two, resolved over every loaded package's
+ * configuration boot parsed: phase one for what the composition expects of
+ * session admission, phase two resolved over every loaded package's
  * reference (core's, for the template's modules) and parsed once by
  * `createApp` — no bridge on the way.
  * No module is loaded: the parse is what this suite asks about, and each
@@ -330,7 +338,7 @@ async function bootParsed(
 	const handle = await createApp({
 		modules: [],
 		bootstrapComponents: {
-			config: resolveForBoot(own, []),
+			config: resolveForBoot(own, [], expectedSessionRequirements(readSwitches(own))),
 			pathResolver: (s: string) => s,
 			...FEDERATION_STORES,
 		} as never,

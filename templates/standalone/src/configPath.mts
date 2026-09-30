@@ -34,6 +34,7 @@ import {
 	coreReference,
 	type Module,
 	moduleReferences,
+	readMfaMode,
 	readTransitionalConfig,
 } from "@o3co/auth-provider-core";
 import { type Config, empty, parseFile } from "@o3co/ts.hocon";
@@ -120,11 +121,12 @@ export function resolveLayers(own: OwnLayers, references: readonly URL[]): Recor
 
 /**
  * What the template reads before it knows its modules: the switches
- * `buildModules` and its module factories choose by, and the log level
- * (`logger.mts`). A module a deployment adds that reads its configuration
- * when it is built adds those paths here, or passes them to `readSwitches` as
- * `reads`. `two-phase-config.test.mts` holds the list to what the template
- * reads.
+ * `buildModules` and its module factories choose by, the log level
+ * (`logger.mts`), and what `expectedSessionRequirements` reads — the
+ * configuration's `sessionRequirements` and `mfa.mode`. A module a deployment
+ * adds that reads its configuration when it is built adds those paths here,
+ * or passes them to `readSwitches` as `reads`. `two-phase-config.test.mts`
+ * holds the list to what the template reads.
  *
  * Every path here and in `reads` must be one core's transitional base
  * declares (a section core's schema has, or mirrors for a package), or
@@ -135,6 +137,8 @@ export function resolveLayers(own: OwnLayers, references: readonly URL[]): Recor
  */
 export const SWITCHES: readonly string[] = [
 	"logging",
+	"mfa.mode",
+	"sessionRequirements",
 	"federations",
 	"federationGrants.enabled",
 	"federationGrantStore.adapter",
@@ -173,14 +177,43 @@ export function readSwitches(own: OwnLayers, options: SwitchesOptions = {}): App
 }
 
 /**
+ * What this composition expects of session admission, from phase one: the
+ * configuration's `sessionRequirements.expected`, with `mfa` added when the
+ * PARSED `mfa.mode` is not `off`. Boot's checks never act on `mfa.mode`, and
+ * the template installs no MFA module, so it is here that a mode asking for a
+ * second factor becomes a declaration boot refuses
+ * (`session-requirement-missing`) rather than a composition that logs users
+ * in on a password alone. Read from the parsed mode, never the raw `MFA_MODE`;
+ * a mode that is none of the three is a `RangeError` naming the key
+ * (`readMfaMode`). With no list written and the mode `off`, nothing is
+ * declared, and boot's rule for an unwritten key applies. Computed here
+ * because HOCON has no conditional. See ADR 2026-09-28-session-admission.
+ */
+export function expectedSessionRequirements(switches: AppConfig): AppConfig["sessionRequirements"] {
+	const written = switches.sessionRequirements?.expected;
+	const mode = readMfaMode(switches) ?? "off";
+	if (mode === "off") return written === undefined ? undefined : { expected: [...written] };
+	return { expected: [...new Set([...(written ?? []), "mfa"])] };
+}
+
+/**
  * Phase two: what `createApp` parses once, with every loaded module's schema:
  * the composition's own layers, the same read phase one had, over the
  * `reference.conf` of every package `modules` come from, core's last,
- * resolved and unparsed.
+ * resolved and unparsed, with `sessionRequirements` — what phase one says the
+ * composition expects (`expectedSessionRequirements`) — written over the
+ * resolved section when there is one to write.
  *
  * Typed `AppConfig` because that is the `config` slot's type; read the parsed
  * configuration from `handle.components.config`, not from this.
  */
-export function resolveForBoot(own: OwnLayers, modules: readonly Module[]): AppConfig {
-	return resolveLayers(own, moduleReferences(modules)) as unknown as AppConfig;
+export function resolveForBoot(
+	own: OwnLayers,
+	modules: readonly Module[],
+	sessionRequirements: AppConfig["sessionRequirements"],
+): AppConfig {
+	const resolved = resolveLayers(own, moduleReferences(modules));
+	return (sessionRequirements === undefined
+		? resolved
+		: { ...resolved, sessionRequirements }) as unknown as AppConfig;
 }

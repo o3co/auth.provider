@@ -16,16 +16,19 @@
 
 /**
  * `mfa.mode` as its consumers read it: the MFA package, whose requirement is
- * its one request-time reader. Boot does not read it; what a composition
- * expects of session admission is `sessionRequirements.expected`. Session
- * consumers never read it; admission decides what "logged in" means (ADR
- * 2026-09-28-session-admission).
+ * its one request-time reader, and the standalone template, which declares
+ * `mfa` in `sessionRequirements.expected` when the mode is not `off`. Boot
+ * validates the value, and its checks do not act on it: they check
+ * `sessionRequirements.expected`. Session consumers never read it; admission
+ * decides what "logged in" means (ADR 2026-09-28-session-admission).
  */
 
 /**
- * `mfa.mode`. `required`: every password login has a second factor and every
- * consumer enforces it. `optional`: users with factors are challenged, nobody is
- * forced, step-up works. `off`: no MFA.
+ * `mfa.mode`, as the MFA module honours it; without that module no mode is
+ * honoured. `required`: every password login has a second factor and every
+ * consumer enforces it. `optional`: users with factors are challenged, nobody
+ * is forced, step-up works. `off`: no MFA, and the MFA module refuses it —
+ * installed is on.
  */
 export type MfaMode = "off" | "optional" | "required";
 

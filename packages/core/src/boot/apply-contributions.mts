@@ -533,6 +533,10 @@ function reachOfFactors(resolver: MfaFactorResolver): ReadonlySet<string> {
 	return reach;
 }
 
+/** Names as a list of JSON strings, so a name with a space or a quote in it reads as written. */
+const quotedNames = (names: readonly string[]): string =>
+	`[${names.map((name) => JSON.stringify(name)).join(", ")}]`;
+
 const sameSet = (a: ReadonlySet<string>, b: ReadonlySet<string>): boolean =>
 	a.size === b.size && [...a].every((value) => b.has(value));
 
@@ -546,15 +550,16 @@ const sameSet = (a: ReadonlySet<string>, b: ReadonlySet<string>): boolean =>
  * - accept the reserved name `mfa` only from a module that requires every one
  *   of `MFA_PORTS`, reaches what core recomputes from the enabled factors,
  *   and declares `mfa.step_up` among its remediations;
- * - refuse a name in `sessionRequirements.expected` that no module
- *   registers (`session-requirement-missing`), whether or not anything
- *   consults admission: the composition would believe a requirement is in
- *   force that is not. Checked first, so a composition is told to install
- *   the module rather than to fix the list;
- * - when a module requires or reads `sessionRequirementResolver`, require
- *   `sessionRequirements.expected`, and every registered name in it
- *   (`session-requirements-undeclared`). With no such module a requirement
- *   changes no decision, so none is required.
+ * - once `sessionRequirements.expected` is written, compare it with the
+ *   registered names both ways, whether or not anything consults admission:
+ *   a name in it that no module registers is `session-requirement-missing`
+ *   (the composition would believe a requirement is in force that is not),
+ *   checked first so a composition is told to install the module rather than
+ *   to fix the list; a registered name it leaves out is
+ *   `session-requirements-undeclared`;
+ * - when a module requires or reads `sessionRequirementResolver`, require the
+ *   key written (`session-requirements-undeclared`). With no such module and
+ *   no key, nothing is compared.
  *
  * A refused requirement is `contribute-factory-failed`. Logs
  * `session_requirements_registered` at info when a consumer or a requirement
@@ -662,8 +667,8 @@ async function checkSessionRequirements(
 		const cleanupErrors = await runCleanupsReverse(material.cleanups);
 		throw new BootError({
 			message:
-				`sessionRequirements.expected names [${missing.join(", ")}], which no installed module registers ` +
-				`([${registered.join(", ")}] registered): install the module that registers each, ` +
+				`sessionRequirements.expected names ${quotedNames(missing)}, which no installed module registers ` +
+				`(${quotedNames(registered)} registered): install the module that registers each, ` +
 				"or remove the name from sessionRequirements.expected.",
 			reason: "session-requirement-missing",
 			stage: "applyContributions",
@@ -678,16 +683,21 @@ async function checkSessionRequirements(
 		});
 	}
 	if (
-		consumedBy.length > 0 &&
-		(declared === undefined || registered.some((name) => !declared.includes(name)))
+		declared === undefined
+			? consumedBy.length > 0
+			: registered.some((name) => !declared.includes(name))
 	) {
 		const cleanupErrors = await runCleanupsReverse(material.cleanups);
+		const consulting =
+			consumedBy.length === 0
+				? ""
+				: `, and ${consumedBy.length === 1 ? `module "${consumedBy[0]}"` : `modules [${consumedBy.join(", ")}]`} consult session admission`;
 		throw new BootError({
 			message:
 				`sessionRequirements.expected must name exactly the session requirements this composition registers: ` +
-				`${declared === undefined ? "nothing is declared" : `[${declared.join(", ")}] is declared`}, ` +
-				`[${registered.join(", ")}] registered, and ${consumedBy.length === 1 ? `module "${consumedBy[0]}"` : `modules [${consumedBy.join(", ")}]`} ` +
-				"consult session admission. Write the key to state what this composition expects (`[]` for none).",
+				`${declared === undefined ? "nothing is declared" : `${quotedNames(declared)} is declared`}, ` +
+				`${quotedNames(registered)} registered${consulting}. ` +
+				"Write the key to state what this composition expects (`[]` for none).",
 			reason: "session-requirements-undeclared",
 			stage: "applyContributions",
 			details: {

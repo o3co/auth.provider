@@ -38,7 +38,13 @@ import {
 } from "@o3co/auth-provider-core";
 import { redisRateLimiterModule } from "@o3co/auth-provider-redis";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { readOwnLayers, readSwitches, resolveConfigPaths, resolveForBoot } from "../configPath.mjs";
+import {
+	expectedSessionRequirements,
+	readOwnLayers,
+	readSwitches,
+	resolveConfigPaths,
+	resolveForBoot,
+} from "../configPath.mjs";
 
 const configDir = fileURLToPath(new URL("../../config", import.meta.url));
 
@@ -122,7 +128,7 @@ async function bootShipped() {
 		handle: await createApp({
 			modules,
 			bootstrapComponents: {
-				config: resolveForBoot(own, modules),
+				config: resolveForBoot(own, modules, expectedSessionRequirements(switches)),
 				pathResolver: (s: string) => s,
 				rateLimiterClient: makeCountingClient() as never,
 			},
