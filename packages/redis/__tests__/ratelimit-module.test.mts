@@ -60,124 +60,35 @@ describe("redisRateLimiterModule", () => {
 		expect(typeof redisRateLimiterModule.provides?.rateLimiter).toBe("function");
 	});
 
-	it("seeds device_verification from oauth.deviceAuthorization.rateLimit", async () => {
-		// The same seed the memory adapter applies, so the documented budget
-		// holds whichever adapter a deployment picks.
-		const counts = new Map<string, number>();
-		const client = {
-			async incrementWithTtl(key: string, _ttlSeconds: number) {
-				const next = (counts.get(key) ?? 0) + 1;
-				counts.set(key, next);
-				return next;
-			},
-		};
-		const config = {
-			redisRateLimiter: { limits: {}, defaultLimit: { limit: 60, windowSeconds: 60 } },
-			oauth: { deviceAuthorization: { rateLimit: { limit: 2, windowSeconds: 300 } } },
-		};
+	it("reads no owner's key: a prefix nothing contributes a budget for falls to its defaultLimit", async () => {
+		// The owners' keys are their modules' to read, and to refuse; the
+		// limiter reads their budgets through rateLimitBudgetResolver alone.
 		const limiter = redisRateLimiterModule.provides?.rateLimiter?.({
-			config,
-			rateLimiterClient: client,
-		} as never);
-		if (!limiter) throw new Error("rateLimiter provider missing");
-		const key = "device_verification:user:u1";
-		const first = await limiter.check(key, { userId: "u1" });
-		expect(first.allowed).toBe(true);
-		expect(first.limit).toBe(2);
-		expect((await limiter.check(key, { userId: "u1" })).allowed).toBe(true);
-		expect((await limiter.check(key, { userId: "u1" })).allowed).toBe(false);
-	});
-
-	it("seeds webauthn-authentication-options from webauthn.rateLimit.authenticationOptions", async () => {
-		// The route's budget lives in the WebAuthn section; unseeded, the
-		// unauthenticated options route would run on this adapter's 60 per 60 s.
-		const counts = new Map<string, number>();
-		const client = {
-			async incrementWithTtl(key: string, _ttlSeconds: number) {
-				const next = (counts.get(key) ?? 0) + 1;
-				counts.set(key, next);
-				return next;
-			},
-		};
-		const config = {
-			redisRateLimiter: { limits: {}, defaultLimit: { limit: 60, windowSeconds: 60 } },
-			webauthn: { rateLimit: { authenticationOptions: { limit: 2, windowSeconds: 60 } } },
-		};
-		const limiter = redisRateLimiterModule.provides?.rateLimiter?.({
-			config,
-			rateLimiterClient: client,
-		} as never);
-		if (!limiter) throw new Error("rateLimiter provider missing");
-		const key = "webauthn-authentication-options:ip:1.2.3.4";
-		const first = await limiter.check(key, { ip: "1.2.3.4" });
-		expect(first.limit).toBe(2);
-		expect((await limiter.check(key, { ip: "1.2.3.4" })).allowed).toBe(true);
-		expect((await limiter.check(key, { ip: "1.2.3.4" })).allowed).toBe(false);
-	});
-
-	it("seeds mfa and mfa-email from the MFA section's budgets", async () => {
-		// The same seeds the memory adapter applies, so the budgets hold
-		// whichever adapter a deployment picks.
-		const counts = new Map<string, number>();
-		const client = {
-			async incrementWithTtl(key: string, _ttlSeconds: number) {
-				const next = (counts.get(key) ?? 0) + 1;
-				counts.set(key, next);
-				return next;
-			},
-		};
-		const config = {
-			redisRateLimiter: { limits: {}, defaultLimit: { limit: 60, windowSeconds: 60 } },
-			mfa: {
-				rateLimit: { routes: { limit: 2, windowSeconds: 300 } },
-				factors: { email: { sendLimit: { limit: 1, windowSeconds: 3600 } } },
-			},
-		};
-		const limiter = redisRateLimiterModule.provides?.rateLimiter?.({
-			config,
-			rateLimiterClient: client,
-		} as never);
-		if (!limiter) throw new Error("rateLimiter provider missing");
-		const routes = "mfa:ip:1.2.3.4";
-		expect((await limiter.check(routes, { ip: "1.2.3.4" })).limit).toBe(2);
-		expect((await limiter.check(routes, { ip: "1.2.3.4" })).allowed).toBe(true);
-		expect((await limiter.check(routes, { ip: "1.2.3.4" })).allowed).toBe(false);
-		const sends = "mfa-email:user:u1";
-		expect((await limiter.check(sends, { userId: "u1" })).limit).toBe(1);
-		expect((await limiter.check(sends, { userId: "u1" })).allowed).toBe(false);
-	});
-
-	it("refuses a seeded budget that is present but unusable, naming the config key and not the limiter", () => {
-		const provide = (extra: Record<string, unknown>) => () =>
-			redisRateLimiterModule.provides?.rateLimiter?.({
-				config: {
-					redisRateLimiter: { limits: {}, defaultLimit: { limit: 60, windowSeconds: 60 } },
-					...extra,
+			config: {
+				redisRateLimiter: {
+					limits: {},
+					defaultLimit: { limit: 60, windowSeconds: 60 },
 				},
-				rateLimiterClient: { incrementWithTtl: async () => 1 },
-			} as never);
-		const cases: [Record<string, unknown>, RegExp][] = [
-			[{ rateLimit: { login: { windowMs: 1e19, limit: 20 } } }, /rateLimit\.login must be/],
-			[
-				{ oauth: { deviceAuthorization: { rateLimit: { limit: 5, windowSeconds: 1e13 } } } },
-				/oauth\.deviceAuthorization\.rateLimit must be/,
-			],
-			[
-				{ webauthn: { rateLimit: { authenticationOptions: { limit: 0, windowSeconds: 60 } } } },
-				/webauthn\.rateLimit\.authenticationOptions must be/,
-			],
-			[
-				{ mfa: { rateLimit: { routes: { limit: 60, windowSeconds: 1e13 } } } },
-				/mfa\.rateLimit\.routes must be/,
-			],
-			[
-				{ mfa: { factors: { email: { sendLimit: { limit: 0, windowSeconds: 3600 } } } } },
-				/mfa\.factors\.email\.sendLimit must be/,
-			],
-		];
-		for (const [extra, key] of cases) {
-			expect(provide(extra), JSON.stringify(extra)).toThrow(key);
-			expect(provide(extra), JSON.stringify(extra)).not.toThrow(/createRedisRateLimiter/);
+				rateLimit: { login: { windowMs: 900_000, limit: 0 } },
+				oauth: { deviceAuthorization: { rateLimit: { limit: 2, windowSeconds: 300 } } },
+				webauthn: { rateLimit: { authenticationOptions: { limit: "thirty", windowSeconds: 60 } } },
+				mfa: {
+					rateLimit: { routes: { limit: 2, windowSeconds: 300 } },
+					factors: { email: { sendLimit: { limit: 1, windowSeconds: 3600 } } },
+				},
+			},
+			rateLimiterClient: { incrementWithTtl: async () => 1 },
+			rateLimitBudgetResolver: { get: () => undefined, entries: () => new Map().entries() },
+		} as never);
+		if (!limiter) throw new Error("rateLimiter provider missing");
+		for (const key of [
+			"login:ip:1.2.3.4",
+			"device_verification:user:u1",
+			"webauthn-authentication-options:ip:1.2.3.4",
+			"mfa:ip:1.2.3.4",
+			"mfa-email:user:u1",
+		]) {
+			expect((await limiter.check(key, { ip: "1.2.3.4" })).limit, key).toBe(60);
 		}
 	});
 

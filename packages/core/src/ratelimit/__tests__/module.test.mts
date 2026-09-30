@@ -86,113 +86,35 @@ describe("memoryRateLimiterModule", () => {
 		expect((await limiter.check("token:ip:1.2.3.4", { ip: "1.2.3.4" })).limit).toBe(60);
 	});
 
-	it("seeds device_verification from oauth.deviceAuthorization.rateLimit", async () => {
-		// Without the seed a `device_verification:` key falls through to the
-		// 60/60s default — twelve times the budget RFC 8628 §5.1's entropy
-		// argument (and the boot refusal that cites it) assumes.
-		const cfg = {
-			memoryRateLimiter: {
-				limits: {},
-				defaultLimit: { limit: 60, windowSeconds: 60 },
-				maxBuckets: 10_000,
-			},
-			oauth: { deviceAuthorization: { rateLimit: { limit: 2, windowSeconds: 300 } } },
-		};
-		const limiter = memoryRateLimiterModule.provides?.rateLimiter?.({ config: cfg } as never);
-		if (!limiter) throw new Error("rateLimiter provider missing");
-		const key = "device_verification:user:u1";
-		const first = await limiter.check(key, { userId: "u1" });
-		expect(first.allowed).toBe(true);
-		expect(first.limit).toBe(2);
-		expect((await limiter.check(key, { userId: "u1" })).allowed).toBe(true);
-		expect((await limiter.check(key, { userId: "u1" })).allowed).toBe(false);
-	});
-
-	it("seeds webauthn-authentication-options from webauthn.rateLimit.authenticationOptions", async () => {
-		// The route's budget lives in the WebAuthn section, as login's lives
-		// in `rateLimit.login`; unseeded, it ran on the 60 per 60 s default.
-		const cfg = {
-			memoryRateLimiter: {
-				limits: {},
-				defaultLimit: { limit: 60, windowSeconds: 60 },
-				maxBuckets: 10_000,
-			},
-			webauthn: { rateLimit: { authenticationOptions: { limit: 2, windowSeconds: 60 } } },
-		};
-		const limiter = memoryRateLimiterModule.provides?.rateLimiter?.({ config: cfg } as never);
-		if (!limiter) throw new Error("rateLimiter provider missing");
-		const key = "webauthn-authentication-options:ip:1.2.3.4";
-		expect((await limiter.check(key, { ip: "1.2.3.4" })).limit).toBe(2);
-		expect((await limiter.check(key, { ip: "1.2.3.4" })).allowed).toBe(true);
-		expect((await limiter.check(key, { ip: "1.2.3.4" })).allowed).toBe(false);
-	});
-
-	it("seeds mfa and mfa-email from the MFA section's budgets", async () => {
-		// The MFA routes' flood guard and the per-subject email sends; their
-		// budgets live in the MFA section, and unseeded they ran on 60 per 60 s.
-		const cfg = {
-			memoryRateLimiter: {
-				limits: {},
-				defaultLimit: { limit: 60, windowSeconds: 60 },
-				maxBuckets: 10_000,
-			},
-			mfa: {
-				rateLimit: { routes: { limit: 2, windowSeconds: 300 } },
-				factors: { email: { sendLimit: { limit: 1, windowSeconds: 3600 } } },
-			},
-		};
-		const limiter = memoryRateLimiterModule.provides?.rateLimiter?.({ config: cfg } as never);
-		if (!limiter) throw new Error("rateLimiter provider missing");
-		const routes = "mfa:ip:1.2.3.4";
-		expect((await limiter.check(routes, { ip: "1.2.3.4" })).limit).toBe(2);
-		expect((await limiter.check(routes, { ip: "1.2.3.4" })).allowed).toBe(true);
-		expect((await limiter.check(routes, { ip: "1.2.3.4" })).allowed).toBe(false);
-		const sends = "mfa-email:user:u1";
-		expect((await limiter.check(sends, { userId: "u1" })).limit).toBe(1);
-		expect((await limiter.check(sends, { userId: "u1" })).allowed).toBe(false);
-	});
-
-	it("refuses a seeded budget that is present but unusable, naming the config key and not the limiter", () => {
-		// A configuration someone wrote, never passed through a schema: it
-		// used to be skipped, and the prefix ran on the 60 per 60 s default.
-		const provide = (extra: Record<string, unknown>) => () =>
-			memoryRateLimiterModule.provides?.rateLimiter?.({
-				config: {
-					memoryRateLimiter: {
-						limits: {},
-						defaultLimit: { limit: 60, windowSeconds: 60 },
-						maxBuckets: 10_000,
-					},
-					...extra,
+	it("reads no owner's key: a prefix nothing contributes a budget for falls to its defaultLimit", async () => {
+		// The owners' keys are their modules' to read, and to refuse; the
+		// limiter reads their budgets through rateLimitBudgetResolver alone.
+		const limiter = memoryRateLimiterModule.provides?.rateLimiter?.({
+			config: {
+				memoryRateLimiter: {
+					limits: {},
+					defaultLimit: { limit: 60, windowSeconds: 60 },
+					maxBuckets: 10_000,
 				},
-			} as never);
-		const cases: [Record<string, unknown>, RegExp][] = [
-			[{ rateLimit: { login: { windowMs: 900_000, limit: 0 } } }, /rateLimit\.login must be/],
-			[
-				{ oauth: { deviceAuthorization: { rateLimit: { limit: 5, windowSeconds: 0 } } } },
-				/oauth\.deviceAuthorization\.rateLimit must be/,
-			],
-			[
-				{
-					webauthn: {
-						rateLimit: { authenticationOptions: { limit: "thirty", windowSeconds: 60 } },
-					},
+				rateLimit: { login: { windowMs: 900_000, limit: 0 } },
+				oauth: { deviceAuthorization: { rateLimit: { limit: 2, windowSeconds: 300 } } },
+				webauthn: { rateLimit: { authenticationOptions: { limit: "thirty", windowSeconds: 60 } } },
+				mfa: {
+					rateLimit: { routes: { limit: 2, windowSeconds: 300 } },
+					factors: { email: { sendLimit: { limit: 1, windowSeconds: 3600 } } },
 				},
-				/webauthn\.rateLimit\.authenticationOptions must be/,
-			],
-			[
-				{ mfa: { rateLimit: { routes: { limit: 0, windowSeconds: 300 } } } },
-				/mfa\.rateLimit\.routes must be/,
-			],
-			[
-				{ mfa: { factors: { email: { sendLimit: { limit: 5, windowSeconds: 0 } } } } },
-				/mfa\.factors\.email\.sendLimit must be/,
-			],
-		];
-		for (const [extra, key] of cases) {
-			expect(provide(extra), JSON.stringify(extra)).toThrow(RangeError);
-			expect(provide(extra), JSON.stringify(extra)).toThrow(key);
-			expect(provide(extra), JSON.stringify(extra)).not.toThrow(/createMemoryRateLimiter/);
+			},
+			rateLimitBudgetResolver: { get: () => undefined, entries: () => new Map().entries() },
+		} as never);
+		if (!limiter) throw new Error("rateLimiter provider missing");
+		for (const key of [
+			"login:ip:1.2.3.4",
+			"device_verification:user:u1",
+			"webauthn-authentication-options:ip:1.2.3.4",
+			"mfa:ip:1.2.3.4",
+			"mfa-email:user:u1",
+		]) {
+			expect((await limiter.check(key, { ip: "1.2.3.4" })).limit, key).toBe(60);
 		}
 	});
 

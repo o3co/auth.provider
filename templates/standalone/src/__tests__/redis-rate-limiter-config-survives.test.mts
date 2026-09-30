@@ -185,11 +185,12 @@ describe("the shipped configuration reaches the Redis rate limiter", () => {
 		expect(decision.limit).toBe(60);
 	});
 
-	it("keeps seeding /session/login from rateLimit.login", async () => {
-		// `resolveSeededLimitSpecs` reads a section core declares, so this
-		// holds even were `redisRateLimiter` stripped.
+	it("applies no login budget without the session module: rateLimit.login is that module's to contribute", async () => {
+		// This boot loads the limiter alone. With the session module, the
+		// limiter applies the budget it contributes from rateLimit.login.
+		expect(config.rateLimit?.login.limit).toBe(20);
 		const decision = await limiter.check("login:ip:203.0.113.5", { ip: "203.0.113.5" });
-		expect(decision.limit).toBe(config.rateLimit?.login.limit);
+		expect(decision.limit).toBe(60);
 	});
 });
 
