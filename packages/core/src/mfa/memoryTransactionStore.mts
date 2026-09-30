@@ -37,9 +37,8 @@
  * bounds the transactions one session holds.
  */
 
-import { createHash, randomBytes } from "node:crypto";
+import { randomBytes } from "node:crypto";
 import { isStorableExpiry } from "../adapters/expiry.mjs";
-import { constantTimeStringEqual } from "../security/timingSafe.mjs";
 import { usableMaxEntries } from "../single-use/max-entries.mjs";
 import { type AmortizedSweepOptions, createAmortizedSweep } from "../single-use/sweep.mjs";
 import {
@@ -119,22 +118,6 @@ interface Attempt {
 	readonly seq: number;
 }
 
-interface TrustedBrowser {
-	readonly digest: string;
-	readonly createdAtMs: number;
-	/**
-	 * `createdAtMs` + `trustedBrowserDays` under the policy it was granted by,
-	 * so the sweep, which has no policy, can let an ended trust go.
-	 */
-	readonly trustedUntilMs: number;
-	/**
-	 * When the weekly window this trust outlives empties; `undefined` while no
-	 * failure has entered the window since the trust began. Each failure
-	 * recorded while the trust holds moves it to that failure's leaving time.
-	 */
-	windowUntilMs: number | undefined;
-}
-
 interface SubjectState {
 	/** The consecutive run: every attempt since the last success, pending or failed. */
 	run: Attempt[];
@@ -142,16 +125,10 @@ interface SubjectState {
 	week: Attempt[];
 	/** Reservations not yet settled, by id, with their order. */
 	readonly pending: Map<string, number>;
-	trusted: TrustedBrowser[];
 }
-
-const DAY_MS = 86_400_000;
 
 /** The transaction as plain data, every field named, its nested values copied. */
 const copyOf = (tx: MfaTransaction): MfaTransaction => structuredClone(tx);
-
-const digestOf = (browser: string): string =>
-	createHash("sha256").update(browser, "utf8").digest("base64url");
 
 const byTime = (attempts: readonly Attempt[]): Attempt[] =>
 	[...attempts].sort((a, b) => a.atMs - b.atMs);
@@ -205,19 +182,6 @@ function weeklyUntil(
 	const leaving = counted[counted.length - policy.weeklyBudget];
 	return leaving === undefined ? undefined : leaving.atMs + MFA_WEEKLY_WINDOW_MS;
 }
-
-/** When a trust ends, as far as the store can tell without a policy (with one, it may end sooner). */
-const trustEndsAt = (trust: TrustedBrowser, policy?: MfaLockoutPolicy): number =>
-	Math.min(
-		trust.trustedUntilMs,
-		policy === undefined
-			? Number.POSITIVE_INFINITY
-			: trust.createdAtMs + policy.trustedBrowserDays * DAY_MS,
-		trust.windowUntilMs ?? Number.POSITIVE_INFINITY,
-	);
-
-const trustHolds = (trust: TrustedBrowser, policy: MfaLockoutPolicy, nowMs: number): boolean =>
-	nowMs < trustEndsAt(trust, policy);
 
 function checkInstant(nowMs: number, operation: string): void {
 	if (!isStorableExpiry(nowMs)) {
@@ -288,15 +252,14 @@ export function createMemoryMfaTransactionStore(
 	}
 
 	/**
-	 * Drops ended failures and trusts, and reservations nothing counts. The
-	 * horizon is `nowMs` capped at this store's clock, minus
+	 * Drops ended failures, and reservations nothing counts. The horizon is
+	 * `nowMs` capped at this store's clock, minus
 	 * {@link MFA_CLOCK_SKEW_ALLOWANCE_MS}, so a caller whose clock runs ahead
 	 * erases nothing. What is kept still counts only at a caller's own time.
 	 */
-	function prune(state: SubjectState, nowMs: number, policy?: MfaLockoutPolicy): void {
+	function prune(state: SubjectState, nowMs: number): void {
 		const horizon = Math.min(nowMs, clock()) - MFA_CLOCK_SKEW_ALLOWANCE_MS;
 		state.week = state.week.filter((a) => a.atMs + MFA_WEEKLY_WINDOW_MS > horizon);
-		state.trusted = state.trusted.filter((t) => trustEndsAt(t, policy) > horizon);
 		for (const id of state.pending.keys()) {
 			if (!state.run.some((a) => a.id === id) && !state.week.some((a) => a.id === id)) {
 				state.pending.delete(id);
@@ -305,15 +268,12 @@ export function createMemoryMfaTransactionStore(
 	}
 
 	const isEmpty = (state: SubjectState): boolean =>
-		state.run.length === 0 &&
-		state.week.length === 0 &&
-		state.pending.size === 0 &&
-		state.trusted.length === 0;
+		state.run.length === 0 && state.week.length === 0 && state.pending.size === 0;
 
 	function stateOf(subject: string): SubjectState {
 		let state = subjects.get(subject);
 		if (state === undefined) {
-			state = { run: [], week: [], pending: new Map(), trusted: [] };
+			state = { run: [], week: [], pending: new Map() };
 			subjects.set(subject, state);
 		}
 		return state;
@@ -422,13 +382,12 @@ export function createMemoryMfaTransactionStore(
 			subject: string,
 			nowMs: number,
 			policy: MfaLockoutPolicy,
-			browser: string | undefined,
 		): Promise<MfaSubjectAttemptReservation> {
 			checkMfaLockoutPolicy(policy);
 			checkInstant(nowMs, "reserveSubjectAttempt");
 			sawCallerTime(nowMs);
 			const state = stateOf(subject);
-			prune(state, nowMs, policy);
+			prune(state, nowMs);
 
 			const refuse = (
 				hold: MfaSubjectHold,
@@ -441,13 +400,7 @@ export function createMemoryMfaTransactionStore(
 			if (state.run.length >= policy.hardLimit) return refuse("hard", null);
 
 			const backoff = backoffUntil(state.run, policy, nowMs);
-			const digest = browser === undefined ? undefined : digestOf(browser);
-			const trusted =
-				digest !== undefined &&
-				state.trusted.some(
-					(t) => trustHolds(t, policy, nowMs) && constantTimeStringEqual(t.digest, digest),
-				);
-			const weekly = trusted ? undefined : weeklyUntil(state.week, policy, nowMs);
+			const weekly = weeklyUntil(state.week, policy, nowMs);
 			if (backoff !== undefined || weekly !== undefined) {
 				// The hold that ends later is the one that decides when to come back.
 				return (weekly ?? Number.NEGATIVE_INFINITY) >= (backoff ?? Number.NEGATIVE_INFINITY)
@@ -463,14 +416,6 @@ export function createMemoryMfaTransactionStore(
 			state.run.push(attempt);
 			state.week.push(attempt);
 			state.pending.set(attempt.id, attempt.seq);
-			for (const trust of state.trusted) {
-				// Only a trust that holds is extended: one already ended stays ended.
-				if (!trustHolds(trust, policy, nowMs)) continue;
-				trust.windowUntilMs = Math.max(
-					trust.windowUntilMs ?? Number.NEGATIVE_INFINITY,
-					nowMs + MFA_WEEKLY_WINDOW_MS,
-				);
-			}
 			return { ok: true, reservation: attempt.id };
 		},
 
@@ -500,42 +445,16 @@ export function createMemoryMfaTransactionStore(
 			settleEmpty(subject, state);
 		},
 
-		async noteExemptSuccess(
-			subject: string,
-			nowMs: number,
-			policy: MfaLockoutPolicy,
-			presented: string | undefined,
-		): Promise<{ readonly browser: string }> {
-			checkMfaLockoutPolicy(policy);
+		async noteExemptSuccess(subject: string, nowMs: number): Promise<void> {
 			checkInstant(nowMs, "noteExemptSuccess");
 			sawCallerTime(nowMs);
-			const state = stateOf(subject);
-			prune(state, nowMs, policy);
+			const state = subjects.get(subject);
+			if (state === undefined) return;
+			prune(state, nowMs);
 			// The run up to this success ends; an attempt reserved later stays.
 			state.run = state.run.filter((a) => a.atMs > nowMs);
-			// A browser already trusted is renewed under a fresh value, not added.
-			if (presented !== undefined) {
-				const digest = digestOf(presented);
-				state.trusted = state.trusted.filter((t) => !constantTimeStringEqual(t.digest, digest));
-			}
-			const browser = randomBytes(32).toString("base64url");
-			const newest = inWeek(state.week, nowMs).reduce<number | undefined>(
-				(latest, a) => (latest === undefined || a.atMs > latest ? a.atMs : latest),
-				undefined,
-			);
-			state.trusted.push({
-				digest: digestOf(browser),
-				createdAtMs: nowMs,
-				trustedUntilMs: nowMs + policy.trustedBrowserDays * DAY_MS,
-				windowUntilMs: newest === undefined ? undefined : newest + MFA_WEEKLY_WINDOW_MS,
-			});
-			if (state.trusted.length > policy.trustedBrowsers) {
-				state.trusted = [...state.trusted]
-					.sort((a, b) => a.createdAtMs - b.createdAtMs)
-					.slice(state.trusted.length - policy.trustedBrowsers);
-			}
+			settleEmpty(subject, state);
 			if (schedule.wrote()) sweep(clock());
-			return { browser };
 		},
 
 		async clearSubjectState(subject: string): Promise<void> {

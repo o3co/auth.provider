@@ -96,8 +96,6 @@ export interface MfaTransaction {
 		| undefined;
 	/** Attempts reserved: only `reserveAttempt` moves it. */
 	readonly attempts: number;
-	readonly sends: number;
-	readonly lastSentAtMs: number | undefined;
 	readonly createdAtMs: number;
 	readonly expiresAtMs: number;
 	/** The compare-and-set token: `update` alone moves it. */
@@ -106,20 +104,16 @@ export interface MfaTransaction {
 
 /**
  * What `update` may change. A value sets the field; `null` clears a clearable
- * field (`challenge`, `pendingEnrollment`, `lastSentAtMs`: clearing the last
- * send lifts the resend cooldown after a failed delivery, and the retry still
- * costs a send). An absent or `undefined` key leaves the field alone, so a
- * patch never clears a limit by omission. A value the field does not admit, or
- * `null` for an unclearable field, is a `RangeError`
- * ({@link mfaTransactionPatchWrites}). Other keys are ignored.
+ * field (`challenge`, `pendingEnrollment`). An absent or `undefined` key leaves
+ * the field alone, so a patch never clears a requirement by omission. A value
+ * the field does not admit, or `null` for an unclearable field, is a
+ * `RangeError` ({@link mfaTransactionPatchWrites}). Other keys are ignored.
  */
 export interface MfaTransactionPatch {
 	readonly enrollment?: MfaTransaction["enrollment"];
 	readonly emailProof?: MfaTransaction["emailProof"];
 	readonly challenge?: NonNullable<MfaTransaction["challenge"]> | null;
 	readonly pendingEnrollment?: NonNullable<MfaTransaction["pendingEnrollment"]> | null;
-	readonly sends?: number;
-	readonly lastSentAtMs?: number | null;
 }
 
 /** The keys an {@link MfaTransactionPatch} may carry, for an adapter that copies one field by field. */
@@ -128,8 +122,6 @@ export const MFA_TRANSACTION_PATCH_KEYS = [
 	"emailProof",
 	"challenge",
 	"pendingEnrollment",
-	"sends",
-	"lastSentAtMs",
 ] as const satisfies readonly (keyof MfaTransactionPatch)[];
 
 const isCount = (value: unknown): value is number =>
@@ -206,15 +198,12 @@ const PATCH_VALUE_RULES: Readonly<
 		isRecord(v) && isText(v.kind) && isText(v.state) && isInstant(v.expiresAtMs)
 			? { value: { kind: v.kind, state: v.state, expiresAtMs: v.expiresAtMs } }
 			: undefined,
-	sends: (v) => (isCount(v) ? { value: v } : undefined),
-	lastSentAtMs: (v) => (isInstant(v) ? { value: v } : undefined),
 };
 
 /** The fields `null` may clear. */
 const CLEARABLE: ReadonlySet<keyof MfaTransactionPatch> = new Set([
 	"challenge",
 	"pendingEnrollment",
-	"lastSentAtMs",
 ]);
 
 /**
@@ -259,30 +248,17 @@ const ENROLLMENT_RANK: Readonly<Record<MfaTransaction["enrollment"], number>> = 
 };
 
 /**
- * Refuses, with a `RangeError`, writes that would refund a limit or undo a
- * requirement of `current`: `sends` going down, `lastSentAtMs` moving back, a
- * required email proof becoming anything but met or a met one undone (a
- * required proof is met, never waived), `enrollment` lowered (`none` <
- * `allowed` < `required`). Clearing `lastSentAtMs` is allowed: after a failed
- * delivery the user may retry at once, and the retry still costs a send. Every
- * adapter calls it on the record at the expected version, before writing.
+ * Refuses, with a `RangeError`, writes that would undo a requirement of
+ * `current`: a required email proof becoming anything but met or a met one
+ * undone (a required proof is met, never waived), `enrollment` lowered
+ * (`none` < `allowed` < `required`). Every adapter calls it on the record at
+ * the expected version, before writing.
  */
 export function checkMfaTransactionTransitions(
 	current: MfaTransaction,
 	writes: readonly (readonly [keyof MfaTransactionPatch, unknown])[],
 ): void {
 	for (const [key, next] of writes) {
-		if (key === "sends" && (next as number) < current.sends) {
-			throw new RangeError("MfaTransactionStore.update: sends cannot go down");
-		}
-		if (
-			key === "lastSentAtMs" &&
-			next !== undefined &&
-			current.lastSentAtMs !== undefined &&
-			(next as number) < current.lastSentAtMs
-		) {
-			throw new RangeError("MfaTransactionStore.update: lastSentAtMs cannot move back");
-		}
 		if (
 			key === "enrollment" &&
 			ENROLLMENT_RANK[next as MfaTransaction["enrollment"]] < ENROLLMENT_RANK[current.enrollment]
@@ -306,9 +282,9 @@ const isTextOrAbsent = (value: unknown): boolean => value === undefined || isTex
 /**
  * The record a store keeps for a new transaction, or a `RangeError`. Every
  * field is held to its type (patch fields by the patch rules, `enrollment` and
- * `emailProof` required), `attempts` must be `0`, and `version` and `sends`
- * safe non-negative integers: a limit is only as good as the count it starts
- * from (with `attempts` NaN, `NaN + 1 > max` is false and every reservation
+ * `emailProof` required), `attempts` must be `0`, and `version` a safe
+ * non-negative integer: a limit is only as good as the count it starts from
+ * (with `attempts` NaN, `NaN + 1 > max` is false and every reservation
  * passes). Only a transaction's fields are kept, sub-objects copied to known
  * fields. Every adapter calls it in `create`, beside its own expiry check.
  */
@@ -319,7 +295,6 @@ export function newMfaTransactionRecord(tx: MfaTransaction): MfaTransaction {
 	if (!isRecord(tx)) refuse("the transaction must be an object");
 	if (tx.attempts !== 0) refuse("attempts must be 0");
 	if (!isCount(tx.version)) refuse("version must be a safe non-negative integer");
-	if (!isCount(tx.sends)) refuse("sends must be a safe non-negative integer");
 	if (!isText(tx.id) || !isText(tx.subject)) refuse("id and subject must be strings");
 	const binding =
 		heldBinding(tx) ??
@@ -374,8 +349,6 @@ export function newMfaTransactionRecord(tx: MfaTransaction): MfaTransaction {
 		challenge: field("challenge", true) as MfaTransaction["challenge"],
 		pendingEnrollment: field("pendingEnrollment", true) as MfaTransaction["pendingEnrollment"],
 		attempts: 0,
-		sends: tx.sends,
-		lastSentAtMs: field("lastSentAtMs", true) as number | undefined,
 		createdAtMs: tx.createdAtMs,
 		expiresAtMs: tx.expiresAtMs,
 		version: tx.version,
@@ -449,18 +422,14 @@ export interface MfaLockoutPolicy {
 	readonly weeklyBudget: number;
 	/** Consecutive failures that hold guessable proofs until an exempt success (100); at most {@link MFA_LOCKOUT_MAX_HARD_LIMIT}. */
 	readonly hardLimit: number;
-	/** Browsers trusted at once (5). */
-	readonly trustedBrowsers: number;
-	/** The longest a browser stays trusted, in days (30). */
-	readonly trustedBrowserDays: number;
 }
 
 /** The weekly budget's window: any rolling seven days. */
 export const MFA_WEEKLY_WINDOW_MS = 7 * 86_400_000;
 
 /**
- * How long a store keeps a failure or a trust after it stops counting: a day,
- * on the store's clock. A caller whose clock runs ahead by less erases nothing
+ * How long a store keeps a failure after it stops counting: a day, on the
+ * store's clock. A caller whose clock runs ahead by less erases nothing
  * a caller on time still counts. With NTP-synced clocks a day is ample; it
  * costs a day of extra state.
  */
@@ -544,15 +513,14 @@ export interface MfaTransactionStore {
 
 	/**
 	 * Refuse while a hold applies at `nowMs` — the hard limit, the short
-	 * backoff, or the weekly budget unless `browser` is one an exempt success
-	 * trusted — and otherwise count a pending failure, which stands until
-	 * settled. A refusal records nothing.
+	 * backoff or the weekly budget, for every attempt alike — and otherwise
+	 * count a pending failure, which stands until settled. A refusal records
+	 * nothing.
 	 */
 	reserveSubjectAttempt(
 		subject: string,
 		nowMs: number,
 		policy: MfaLockoutPolicy,
-		browser: string | undefined,
 	): Promise<MfaSubjectAttemptReservation>;
 	/**
 	 * Settle a reservation, once, under the subject that made it; settling one
@@ -566,22 +534,13 @@ export interface MfaTransactionStore {
 	): Promise<void>;
 	/**
 	 * An exempt success (a recovery code, WebAuthn, the 80-bit email proof): ends
-	 * the run up to `nowMs` (a later reservation stays), and with it a hard hold,
-	 * and trusts the browser against the weekly hold. Answers the value the
-	 * browser presents from then on (32 CSPRNG bytes, base64url; the store keeps
-	 * a digest). An already-trusted `browser` is renewed under the new value, not
-	 * added, so daily exempt sign-ins never push other browsers out of
-	 * `trustedBrowsers`. The week stands. Call it only after the transaction
-	 * holding the exempt proof was consumed.
+	 * the run up to `nowMs` (a later reservation stays), and with it a hard hold.
+	 * The week stands, and lets no attempt through. Call it only after the
+	 * transaction holding the exempt proof was consumed.
 	 */
-	noteExemptSuccess(
-		subject: string,
-		nowMs: number,
-		policy: MfaLockoutPolicy,
-		browser: string | undefined,
-	): Promise<{ readonly browser: string }>;
+	noteExemptSuccess(subject: string, nowMs: number): Promise<void>;
 	/**
-	 * Forget `subject`'s lock state (the run, the week, the trusted browsers):
+	 * Forget `subject`'s lock state (the run and the week):
 	 * the operator reset and a credential change. Clearing the week on a
 	 * password change is deliberate: it is the remedy for an attacker who holds
 	 * the password, and it ends the hold that attacker caused.
@@ -636,8 +595,6 @@ export function checkMfaLockoutPolicy(policy: MfaLockoutPolicy, setting = "mfa.l
 		"memorySeconds",
 		"weeklyBudget",
 		"hardLimit",
-		"trustedBrowsers",
-		"trustedBrowserDays",
 	] as const) {
 		if (!isPositiveWhole(policy[field])) {
 			throw new RangeError(`${setting}.${field} must be a positive whole number`);
@@ -657,7 +614,6 @@ export function checkMfaLockoutPolicy(policy: MfaLockoutPolicy, setting = "mfa.l
 	for (const [field, ms] of [
 		["maxSeconds", policy.maxSeconds * 1000],
 		["memorySeconds", policy.memorySeconds * 1000],
-		["trustedBrowserDays", policy.trustedBrowserDays * 86_400_000],
 	] as const) {
 		if (!isStorableLifetime(ms)) {
 			throw new RangeError(`${setting}.${field} must end within the Date range`);

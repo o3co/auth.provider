@@ -1327,9 +1327,7 @@ export interface MfaSubjectKeys {
 	/**
 	 * HASH: `seq`, the order counter; `r:<id>` → `<seq>|<atMs>` for each
 	 * attempt in the consecutive run; `p:<id>` → `<seq>` for each reservation
-	 * not yet settled; `t:<digest>` →
-	 * `<createdAtMs>|<trustedUntilMs>|<windowUntilMs or empty>|<order>` for each
-	 * trusted browser.
+	 * not yet settled. A field of any other kind is ignored.
 	 */
 	readonly lock: string;
 	/** ZSET: the attempts the rolling week counts, each scored by its time. */
@@ -1340,8 +1338,6 @@ export interface ReserveMfaSubjectAttemptInput {
 	/** The caller's time, which every hold is judged on. */
 	readonly nowMs: number;
 	readonly policy: MfaLockoutPolicy;
-	/** The SHA-256 of the browser value presented, base64url; `undefined` when none was. */
-	readonly browserDigest: string | undefined;
 	/** The id the attempt is recorded under when it is let through. */
 	readonly reservation: string;
 }
@@ -1356,12 +1352,8 @@ export type ReserveMfaSubjectAttemptReply =
 	  };
 
 export interface NoteMfaExemptSuccessInput {
+	/** The time of the exempt success: the run ends up to it. */
 	readonly nowMs: number;
-	readonly policy: MfaLockoutPolicy;
-	/** The SHA-256 of the browser value presented, whose trust is renewed rather than added to; `undefined` when none was. */
-	readonly presentedDigest: string | undefined;
-	/** The SHA-256 of the new browser value, the one trusted from now on. */
-	readonly digest: string;
 }
 
 /**
@@ -1374,8 +1366,8 @@ export interface NoteMfaExemptSuccessInput {
  * `incarnation`, `attempts`, `challenge` and `expiresAtMs` fields by name,
  * and never decode its `record`.
  *
- * The subject state's decisions — backoff, weekly budget, hard limit and
- * trusted browsers — are the port's rules, judged on the caller's `nowMs`;
+ * The subject state's decisions — backoff, weekly budget and hard limit —
+ * are the port's rules, judged on the caller's `nowMs`;
  * what is reclaimed is judged on the server's clock, never later than a day
  * after it stops counting (`MFA_CLOCK_SKEW_ALLOWANCE_MS`). A stored value an
  * operation cannot read is refused with an error, never read as a state that

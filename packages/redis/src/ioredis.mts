@@ -2482,13 +2482,12 @@ return fields
 // Answers are judged on the caller's `now`; what a script forgets is judged no later than the
 // server's clock less a day (MFA_CLOCK_SKEW_ALLOWANCE_MS), so a caller far ahead erases nothing.
 // While a run is counted the keys have no TTL; otherwise they expire a day after the last
-// failure or trust stops counting. A stored value a script cannot read is an error (an
-// outage), never read as an empty state.
+// failure stops counting. A stored value a script cannot read is an error (an outage), never
+// read as an empty state; a lock-hash field of a kind the scripts do not read is ignored.
 
 const LUA_MFA_SUBJECT_PRELUDE = `
 local WEEK = 604800000
 local SKEW = 86400000
-local DAY = 86400000
 
 local function corrupt()
   error({err = 'MFA subject state: a stored value is not one this store wrote; the operation is refused'})
@@ -2507,33 +2506,10 @@ local function server_ms()
   return tonumber(t[1]) * 1000 + math.floor(tonumber(t[2]) / 1000)
 end
 
-local function trust_of(digest, value)
-  local created, until_ms, window, order = string.match(value, '^([^|]+)|([^|]+)|([^|]*)|(%d+)$')
-  if created == nil then corrupt() end
-  local w = nil
-  if window ~= '' then w = num(window) end
-  return {digest = digest, created = num(created), until_ms = num(until_ms), window = w, order = num(order)}
-end
-
-local function trust_text(t)
-  local w = ''
-  if t.window ~= nil then w = fmt(t.window) end
-  return fmt(t.created) .. '|' .. fmt(t.until_ms) .. '|' .. w .. '|' .. fmt(t.order)
-end
-
--- When a trust ends: at trustedUntilMs, at createdAtMs + days under the
--- policy asked with (none: the sweep's reading), and when its window empties.
-local function trust_end(t, days)
-  local e = t.until_ms
-  if days ~= nil then e = math.min(e, t.created + days * DAY) end
-  if t.window ~= nil then e = math.min(e, t.window) end
-  return e
-end
-
--- The state: the run, the reservations in flight, the trusts, and the week in
--- time order.
+-- The state: the run, the reservations in flight, and the week in time
+-- order. A field of any other kind is not read.
 local function load()
-  local run, pending, trusts, week = {}, {}, {}, {}
+  local run, pending, week = {}, {}, {}
   local flat = redis.call('HGETALL', KEYS[1])
   for i = 1, #flat, 2 do
     local field, value = flat[i], flat[i + 1]
@@ -2545,19 +2521,17 @@ local function load()
     elseif kind == 'p:' then
       if string.match(value, '^%d+$') == nil then corrupt() end
       pending[id] = num(value)
-    elseif kind == 't:' then
-      trusts[#trusts + 1] = trust_of(id, value)
     end
   end
   local z = redis.call('ZRANGE', KEYS[2], 0, -1, 'WITHSCORES')
   for i = 1, #z, 2 do week[#week + 1] = {id = z[i], at = num(z[i + 1])} end
-  return run, pending, trusts, week
+  return run, pending, week
 end
 
--- Forgets what no longer counts at horizon: the week's failures and the
--- trusts that ended before it, and the reservations nothing counts any more.
--- Answers what is kept, and whether anything was forgotten.
-local function prune(run, pending, trusts, week, horizon, days)
+-- Forgets what no longer counts at horizon: the week's failures that ended
+-- before it, and the reservations nothing counts any more. Answers what is
+-- kept, and whether anything was forgotten.
+local function prune(run, pending, week, horizon)
   local forgot = false
   local kept_week, in_week = {}, {}
   for _, a in ipairs(week) do
@@ -2566,15 +2540,6 @@ local function prune(run, pending, trusts, week, horizon, days)
       in_week[a.id] = true
     else
       redis.call('ZREM', KEYS[2], a.id)
-      forgot = true
-    end
-  end
-  local kept_trusts = {}
-  for _, t in ipairs(trusts) do
-    if trust_end(t, days) > horizon then
-      kept_trusts[#kept_trusts + 1] = t
-    else
-      redis.call('HDEL', KEYS[1], 't:' .. t.digest)
       forgot = true
     end
   end
@@ -2587,22 +2552,16 @@ local function prune(run, pending, trusts, week, horizon, days)
       forgot = true
     end
   end
-  return kept_week, kept_trusts, forgot
+  return kept_week, forgot
 end
 
 -- Sets what Redis reclaims: no TTL while a run is counted; else a day past
--- the last failure or trust to stop counting; nothing left, both keys go.
+-- the last failure to stop counting; nothing left, both keys go.
 local function keep()
   local flat = redis.call('HGETALL', KEYS[1])
   local running, deadline = false, nil
   for i = 1, #flat, 2 do
-    local kind = string.sub(flat[i], 1, 2)
-    if kind == 'r:' then
-      running = true
-    elseif kind == 't:' then
-      local e = trust_end(trust_of(string.sub(flat[i], 3), flat[i + 1]), nil)
-      if deadline == nil or e > deadline then deadline = e end
-    end
+    if string.sub(flat[i], 1, 2) == 'r:' then running = true end
   end
   if running then
     redis.call('PERSIST', KEYS[1])
@@ -2628,18 +2587,17 @@ end
  * `MfaTransactionStoreClient.reserveSubjectAttempt`.
  *
  * `ARGV`: now, threshold, baseSeconds, maxSeconds, memorySeconds,
- * weeklyBudget, hardLimit, trustedBrowserDays, the browser's digest (empty
- * for none), the reservation's id. Returns `{'ok'}`, or `{'held', hold,
- * retryAfterMs}` with an empty retry for the hard hold.
+ * weeklyBudget, hardLimit, the reservation's id. Returns `{'ok'}`, or
+ * `{'held', hold, retryAfterMs}` with an empty retry for the hard hold.
  */
 const LUA_MFA_SUBJECT_RESERVE = `${LUA_MFA_SUBJECT_PRELUDE}
 local now = num(ARGV[1])
 local threshold, base, max_s, memory_s = num(ARGV[2]), num(ARGV[3]), num(ARGV[4]), num(ARGV[5])
-local budget, hard, days = num(ARGV[6]), num(ARGV[7]), num(ARGV[8])
-local digest, id = ARGV[9], ARGV[10]
-local run, pending, trusts, week = load()
+local budget, hard = num(ARGV[6]), num(ARGV[7])
+local id = ARGV[8]
+local run, pending, week = load()
 local forgot
-week, trusts, forgot = prune(run, pending, trusts, week, math.min(now, server_ms()) - SKEW, days)
+week, forgot = prune(run, pending, week, math.min(now, server_ms()) - SKEW)
 
 -- A refusal writes nothing of its own: the deadlines are set again only when
 -- the prune forgot something, so a held subject hammered is no write load.
@@ -2674,23 +2632,14 @@ end
 local backoff = nil
 if lock_until ~= nil and now < lock_until then backoff = lock_until end
 
-local trusted = false
-if digest ~= '' then
-  for _, t in ipairs(trusts) do
-    if t.digest == digest and now < trust_end(t, days) then trusted = true end
-  end
-end
-
--- The weekly budget, unless the browser is trusted: when the week will count
--- fewer than weeklyBudget failures again.
+-- The weekly budget: when the week will count fewer than weeklyBudget
+-- failures again.
 local weekly = nil
-if not trusted then
-  local counted = {}
-  for _, a in ipairs(week) do
-    if a.at + WEEK > now then counted[#counted + 1] = a end
-  end
-  if #counted >= budget then weekly = counted[#counted - budget + 1].at + WEEK end
+local counted = {}
+for _, a in ipairs(week) do
+  if a.at + WEEK > now then counted[#counted + 1] = a end
 end
+if #counted >= budget then weekly = counted[#counted - budget + 1].at + WEEK end
 
 if backoff ~= nil or weekly ~= nil then
   if forgot then keep() end
@@ -2704,15 +2653,6 @@ end
 local seq = redis.call('HINCRBY', KEYS[1], 'seq', 1)
 redis.call('HSET', KEYS[1], 'r:' .. id, seq .. '|' .. ARGV[1], 'p:' .. id, seq)
 redis.call('ZADD', KEYS[2], ARGV[1], id)
--- Only a trust that holds is extended: one already ended stays ended.
-for _, t in ipairs(trusts) do
-  if now < trust_end(t, days) then
-    local w = now + WEEK
-    if t.window ~= nil and t.window > w then w = t.window end
-    t.window = w
-    redis.call('HSET', KEYS[1], 't:' .. t.digest, trust_text(t))
-  end
-end
 keep()
 return {'ok'}
 `;
@@ -2749,44 +2689,14 @@ return 1
 /**
  * `MfaTransactionStoreClient.noteExemptSuccess`.
  *
- * `ARGV`: now, trustedBrowsers, trustedBrowserDays, the presented browser's
- * digest (empty for none), the new browser's digest. Ends the run up to now,
- * renews the presented browser's trust under the new digest (or adds one),
- * and keeps the trustedBrowsers newest — oldest first out, ties by the order
- * they were trusted in.
+ * `ARGV`: now. Ends the run up to now; the week stands.
  */
 const LUA_MFA_SUBJECT_EXEMPT = `${LUA_MFA_SUBJECT_PRELUDE}
 local now = num(ARGV[1])
-local cap, days = num(ARGV[2]), num(ARGV[3])
-local presented, digest = ARGV[4], ARGV[5]
-local run, pending, trusts, week = load()
-week, trusts = prune(run, pending, trusts, week, math.min(now, server_ms()) - SKEW, days)
+local run, pending, week = load()
+prune(run, pending, week, math.min(now, server_ms()) - SKEW)
 for _, a in ipairs(run) do
   if a.at <= now then redis.call('HDEL', KEYS[1], 'r:' .. a.id) end
-end
-local kept = {}
-for _, t in ipairs(trusts) do
-  if presented ~= '' and t.digest == presented then
-    redis.call('HDEL', KEYS[1], 't:' .. t.digest)
-  else
-    kept[#kept + 1] = t
-  end
-end
-local newest = nil
-for _, a in ipairs(week) do
-  if a.at + WEEK > now and (newest == nil or a.at > newest) then newest = a.at end
-end
-local fresh = {digest = digest, created = now, until_ms = now + days * DAY, window = nil,
-  order = redis.call('HINCRBY', KEYS[1], 'seq', 1)}
-if newest ~= nil then fresh.window = newest + WEEK end
-redis.call('HSET', KEYS[1], 't:' .. digest, trust_text(fresh))
-kept[#kept + 1] = fresh
-if #kept > cap then
-  table.sort(kept, function(a, b)
-    if a.created ~= b.created then return a.created < b.created end
-    return a.order < b.order
-  end)
-  for i = 1, #kept - cap do redis.call('HDEL', KEYS[1], 't:' .. kept[i].digest) end
 end
 keep()
 return 1
@@ -2875,8 +2785,6 @@ export function makeIoredisMfaTransactionStoreClient(io: Redis): MfaTransactionS
 					String(policy.memorySeconds),
 					String(policy.weeklyBudget),
 					String(policy.hardLimit),
-					String(policy.trustedBrowserDays),
-					input.browserDigest ?? "",
 					input.reservation,
 				],
 			);
@@ -2897,18 +2805,7 @@ export function makeIoredisMfaTransactionStoreClient(io: Redis): MfaTransactionS
 			await runScript(io, MFA_SUBJECT_SETTLE, [keys.lock, keys.week], [reservation, outcome]);
 		},
 		async noteExemptSuccess(keys, input) {
-			await runScript(
-				io,
-				MFA_SUBJECT_EXEMPT,
-				[keys.lock, keys.week],
-				[
-					String(input.nowMs),
-					String(input.policy.trustedBrowsers),
-					String(input.policy.trustedBrowserDays),
-					input.presentedDigest ?? "",
-					input.digest,
-				],
-			);
+			await runScript(io, MFA_SUBJECT_EXEMPT, [keys.lock, keys.week], [String(input.nowMs)]);
 		},
 		async clearSubjectState(keys) {
 			await io.del(keys.lock, keys.week);

@@ -131,8 +131,6 @@ export function createLoginTransactions({
 				challenge: undefined,
 				pendingEnrollment: undefined,
 				attempts: 0,
-				sends: 0,
-				lastSentAtMs: undefined,
 				createdAtMs,
 				expiresAtMs: createdAtMs + ttlSeconds * 1000,
 				version: 0,

@@ -177,8 +177,6 @@ const lockoutSchema = z.object(
 		memorySeconds: positiveWhole,
 		weeklyBudget: positiveWhole,
 		hardLimit: positiveWhole,
-		trustedBrowsers: positiveWhole,
-		trustedBrowserDays: positiveWhole,
 	},
 	{ error: sectionError },
 );

@@ -22,7 +22,7 @@
  *
  * ```text
  * <keyPrefix>tx:{<id>}          HASH   one transaction, expiring at its expiresAtMs
- * <keyPrefix>lock:{<subject>}   HASH   the lockout run, reservations in flight, trusted browsers
+ * <keyPrefix>lock:{<subject>}   HASH   the lockout run, reservations in flight
  * <keyPrefix>week:{<subject>}   ZSET   the weekly window: one member per attempt, scored by time
  * <keyPrefix>proof:{<subject>}  STRING the email-proof requirement, with no TTL
  * ```
@@ -37,7 +37,9 @@
  * A transaction is written and read back through core's
  * `newMfaTransactionRecord`, so it has the in-process store's shape and rules.
  * One that does not read back is absent: the user starts again, rather than
- * getting a 503 for the rest of its lifetime.
+ * getting a 503 for the rest of its lifetime. A hash field that is no
+ * transaction's is not read, and a lock-hash field of no kind the scripts
+ * know is ignored: neither can loosen a limit the store keeps.
  *
  * Two clocks: the key expires on the server's clock (`PEXPIREAT`, rounded up),
  * and every operation also answers a transaction at or past `expiresAtMs` on
@@ -53,7 +55,7 @@
  * module runs the factor store's durability check.
  */
 
-import { createHash, randomBytes } from "node:crypto";
+import { randomBytes } from "node:crypto";
 import {
 	checkMfaLockoutPolicy,
 	checkMfaTransactionTransitions,
@@ -94,8 +96,6 @@ const PATCH_FIELD_TEXT: Readonly<Record<keyof MfaTransactionPatch, (value: unkno
 	emailProof: (value) => JSON.stringify(value),
 	challenge: (value) => JSON.stringify(value),
 	pendingEnrollment: (value) => JSON.stringify(value),
-	sends: (value) => String(value),
-	lastSentAtMs: (value) => JSON.stringify(value),
 };
 
 /** The fields of a new transaction's hash. */
@@ -105,7 +105,6 @@ function fieldsOf(record: MfaTransaction, incarnation: string): Record<string, s
 		incarnation,
 		version: String(record.version),
 		attempts: "0",
-		sends: String(record.sends),
 		enrollment: record.enrollment,
 		emailProof: JSON.stringify(record.emailProof),
 		// The deadline again, for the reserve and take scripts to read with
@@ -130,7 +129,6 @@ function fieldsOf(record: MfaTransaction, incarnation: string): Record<string, s
 	if (record.pendingEnrollment !== undefined) {
 		fields.pendingEnrollment = JSON.stringify(record.pendingEnrollment);
 	}
-	if (record.lastSentAtMs !== undefined) fields.lastSentAtMs = JSON.stringify(record.lastSentAtMs);
 	return fields;
 }
 
@@ -176,8 +174,6 @@ function transactionOf(
 			challenge: parsed(fields.challenge),
 			pendingEnrollment: parsed(fields.pendingEnrollment),
 			attempts: 0,
-			sends: countOf(fields.sends),
-			lastSentAtMs: parsed(fields.lastSentAtMs),
 			createdAtMs: fixed.createdAtMs,
 			expiresAtMs: fixed.expiresAtMs,
 			version: countOf(fields.version),
@@ -205,9 +201,6 @@ function challengeOf(text: string | null): MfaTransaction["challenge"] | null {
 		return null;
 	}
 }
-
-const digestOf = (browser: string): string =>
-	createHash("sha256").update(browser, "utf8").digest("base64url");
 
 function checkInstant(nowMs: number, operation: string): void {
 	if (!isStorableExpiry(nowMs)) {
@@ -301,14 +294,13 @@ export function createRedisMfaTransactionStore(
 			return fields === null ? null : transactionOf(fields, id, clock());
 		},
 
-		async reserveSubjectAttempt(subject, nowMs, policy, browser) {
+		async reserveSubjectAttempt(subject, nowMs, policy) {
 			checkMfaLockoutPolicy(policy);
 			checkInstant(nowMs, "reserveSubjectAttempt");
 			const reservation = randomBytes(16).toString("base64url");
 			const reply = await client.reserveSubjectAttempt(subjectKeys(subject), {
 				nowMs,
 				policy,
-				browserDigest: browser === undefined ? undefined : digestOf(browser),
 				reservation,
 			});
 			return reply.ok
@@ -325,17 +317,9 @@ export function createRedisMfaTransactionStore(
 			await client.settleSubjectAttempt(subjectKeys(subject), reservation, outcome);
 		},
 
-		async noteExemptSuccess(subject, nowMs, policy, presented) {
-			checkMfaLockoutPolicy(policy);
+		async noteExemptSuccess(subject, nowMs) {
 			checkInstant(nowMs, "noteExemptSuccess");
-			const browser = randomBytes(32).toString("base64url");
-			await client.noteExemptSuccess(subjectKeys(subject), {
-				nowMs,
-				policy,
-				presentedDigest: presented === undefined ? undefined : digestOf(presented),
-				digest: digestOf(browser),
-			});
-			return { browser };
+			await client.noteExemptSuccess(subjectKeys(subject), { nowMs });
 		},
 
 		async clearSubjectState(subject) {
