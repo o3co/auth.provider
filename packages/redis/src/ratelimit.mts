@@ -12,6 +12,7 @@ import {
 	type RateLimiter,
 	type RateLimitFailMode,
 	type RateLimitSpec,
+	shownConfigValue,
 } from "@o3co/auth-provider-core";
 import { z } from "zod";
 import type { RateLimiterClient } from "./clients.mjs";
@@ -45,7 +46,7 @@ function checkedFailMode(
 ): RateLimitFailMode | undefined {
 	if (failMode === undefined || failMode === "open" || failMode === "closed") return failMode;
 	throw new RangeError(
-		`${who}${name} must be "open" or "closed" (got ${JSON.stringify(failMode) ?? String(failMode)})`,
+		`${who}${name} must be "open" or "closed" (got ${shownConfigValue(failMode)})`,
 	);
 }
 
