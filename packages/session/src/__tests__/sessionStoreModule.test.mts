@@ -506,6 +506,12 @@ describe("the session store refuses the cookie its sessionCookiePolicy refuses",
 	const REFUSED_BY_THE_STORE = [
 		["a name that is not an RFC 6265 token", "name", { name: "auth session" }, NOT_A_TOKEN],
 		[
+			"an empty name",
+			"name",
+			{ name: "" },
+			'session.name "" is not a cookie name (an RFC 6265 token)',
+		],
+		[
 			"a __Secure- name that is not secure",
 			"name",
 			{ name: "__Secure-auth.session", secure: false },
