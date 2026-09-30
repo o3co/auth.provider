@@ -40,6 +40,13 @@ export interface FederationGrantStoreContractFactory<
 	 * grant. For a Redis adapter this is whether the credential key exists.
 	 */
 	credentialResident(store: S, grantId: string): Promise<boolean>;
+	/**
+	 * Set when the store's calls travel on more than one connection, so that a
+	 * release sent after a lock attempt can reach the server before it. The
+	 * lock cases then accept a lock taken by an attempt the release overtook,
+	 * provided `waitedMs` places it before the deadline. Unset, they do not.
+	 */
+	readonly lockCallsMayOvertake?: true;
 }
 
 const MIN = 60_000;
@@ -2850,10 +2857,9 @@ export function runFederationGrantStoreContract<S extends FederationGrantStore>(
 				await sleep(15);
 				await first.release();
 				const outcome = await waiting;
-				// Commands sent on two connections reach the store in no set order, so
-				// the release may land before the waiter's first attempt. A lock taken
-				// then was taken before the deadline, and `waitedMs` says so.
-				if (outcome.acquired) {
+				if (factory.lockCallsMayOvertake === true && outcome.acquired) {
+					// The release overtook the waiter's first attempt on its way to the
+					// server: a lock taken before the deadline, as `waitedMs` shows.
 					expect(outcome.waitedMs).toBeLessThan(waitForMs);
 					await outcome.release();
 				} else {
