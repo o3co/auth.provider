@@ -24,7 +24,12 @@
 
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { packageReferenceProblems } from "@o3co/auth-provider-core/testing";
+import {
+	makeValidAppConfig,
+	packageReferenceProblems,
+	userRepositoryHttpOf,
+	withUserRepositoryHttp,
+} from "@o3co/auth-provider-core/testing";
 import { parseFile } from "@o3co/ts.hocon";
 import { describe, expect, it } from "vitest";
 import { foundationMfaFactorStoreModule } from "#/index.mjs";
@@ -60,7 +65,11 @@ describe("the package's reference.conf", () => {
 		expect(
 			packageReferenceProblems({
 				reference: REFERENCE,
-				modules: [foundationMfaFactorStoreModule()],
+				modules: [
+					foundationMfaFactorStoreModule({
+						storeTransport: userRepositoryHttpOf(withUserRepositoryHttp(makeValidAppConfig(), {})),
+					}),
+				],
 				read,
 			}),
 		).toEqual([]);

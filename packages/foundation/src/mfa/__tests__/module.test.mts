@@ -17,27 +17,33 @@
 /**
  * `foundationMfaFactorStoreModule` through `createApp`: it provides the
  * Store-backed factor store over its section's four URLs, built at boot, on
- * the user repository's HTTP settings the composition root hands it (their
- * `bearerToken`, `timeout` and `maxResponseBytes`, read as the user
- * repository's builder reads them), with its version floor in the
- * `replaySeenSet` slot. It reads no configuration beyond its own section,
- * and declares no replica-unsafe state.
+ * the Store transport settings the composition root must hand it — the user
+ * repository's HTTP settings, whose `bearerToken`, `timeout` and
+ * `maxResponseBytes` are read as the user repository's builder reads them,
+ * and refused where that repository refuses them. It requires no slot, reads
+ * no configuration beyond its own section, and declares no replica-unsafe
+ * state.
  */
 
 import {
 	BootError,
 	createApp,
-	createMemoryReplaySeenSet,
-	defineModule,
 	type MfaFactorRecord,
 	type MfaFactorStore,
-	memoryReplaySeenSetModule,
-	type ReplaySeenSet,
 } from "@o3co/auth-provider-core";
-import { makeValidAppConfig } from "@o3co/auth-provider-core/testing";
+import {
+	makeValidAppConfig,
+	userRepositoryHttpOf,
+	withUserRepositoryHttp,
+} from "@o3co/auth-provider-core/testing";
 import { type FakeStore, startFakeStore } from "@o3co/auth-provider-test-kit";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { foundationMfaFactorStoreModule, HttpMfaFactorStore } from "#/index.mjs";
+import { afterEach, beforeEach, describe, expect, expectTypeOf, it } from "vitest";
+import {
+	type FoundationMfaFactorStoreModuleOptions,
+	foundationMfaFactorStoreModule,
+	HttpMfaFactorStore,
+	HttpUserRepository,
+} from "#/index.mjs";
 import {
 	FOUNDATION_MFA_FACTOR_STORE_SECTION,
 	foundationMfaFactorStoreLifecycle,
@@ -70,41 +76,32 @@ afterEach(async () => {
 	await fake.close();
 });
 
-/** The configuration with the section on `store`'s URLs. */
-const configOver = (store = fake) => ({
-	...makeValidAppConfig(),
+/** The configuration: the user repository's HTTP settings `http`, and the section on `store`'s URLs. */
+const configOver = (http: Readonly<Record<string, unknown>>, store = fake) => ({
+	...withUserRepositoryHttp(makeValidAppConfig(), http),
 	...foundationMfaFactorStoreConfig(store.urls),
 });
 
-/** A module providing `seen` as the seen-set. */
-const seenSetModule = (seen: ReplaySeenSet) =>
-	defineModule({ name: "test-replay-seen-set", provides: { replaySeenSet: () => seen } });
-
-/** Boots the module over the user repository's HTTP settings `http`, with a consumer, and answers the store it provides. */
-async function provided(
-	http: unknown,
-	seenSet = seenSetModule(createMemoryReplaySeenSet()),
-	store = fake,
-): Promise<MfaFactorStore> {
+/** Boots the module with `storeTransport` and a consumer, over `config`, and answers the store it provides. */
+async function bootWith(storeTransport: unknown, config: object): Promise<MfaFactorStore> {
 	const seen: { store?: MfaFactorStore } = {};
 	disposable = await createApp({
-		modules: [
-			foundationMfaFactorStoreModule({ userRepositoryHttp: http }),
-			seenSet,
-			consumer(seen),
-		],
-		bootstrapComponents: {
-			config: configOver(store),
-			pathResolver: (p: string) => p,
-		} as never,
+		modules: [foundationMfaFactorStoreModule({ storeTransport }), consumer(seen)],
+		bootstrapComponents: { config, pathResolver: (p: string) => p } as never,
 	});
 	if (seen.store === undefined) throw new Error("no store was provided");
 	return seen.store;
 }
 
-async function refusal(http: unknown): Promise<BootError> {
+/** Boots the module as a composition root does: handed the user repository's HTTP settings of the configuration it boots. */
+function provided(http: Readonly<Record<string, unknown>>, store = fake): Promise<MfaFactorStore> {
+	const config = configOver(http, store);
+	return bootWith(userRepositoryHttpOf(config), config);
+}
+
+async function refusal(boot: () => Promise<unknown>): Promise<BootError> {
 	try {
-		await provided(http);
+		await boot();
 	} catch (error) {
 		expect(error).toBeInstanceOf(BootError);
 		return error as BootError;
@@ -113,16 +110,27 @@ async function refusal(http: unknown): Promise<BootError> {
 }
 
 describe("foundationMfaFactorStoreModule", () => {
-	it("is the section's module, provides mfaFactorStore at boot, requires the seen-set alone, and declares no replica-unsafe state", () => {
-		const module = foundationMfaFactorStoreModule();
+	it("is the section's module, provides mfaFactorStore at boot, requires no slot, and declares no replica-unsafe state", () => {
+		const module = foundationMfaFactorStoreModule({
+			storeTransport: userRepositoryHttpOf(withUserRepositoryHttp(makeValidAppConfig(), {})),
+		});
 		expect(module.name).toBe(FOUNDATION_MFA_FACTOR_STORE_SECTION);
 		expect(module.lifecycle).toEqual(foundationMfaFactorStoreLifecycle);
 		expect(module.replicaSafety).toBeUndefined();
-		expect(module.requires).toEqual(["replaySeenSet"]);
+		expect(module.requires ?? []).toEqual([]);
 		expect(module.optional ?? []).toEqual([]);
 	});
 
-	it("provides the Store-backed factor store over the section's URLs", async () => {
+	it("takes the Store transport settings as a required option", () => {
+		expectTypeOf(foundationMfaFactorStoreModule).parameters.toEqualTypeOf<
+			[FoundationMfaFactorStoreModuleOptions]
+		>();
+		expectTypeOf<FoundationMfaFactorStoreModuleOptions>().toEqualTypeOf<{
+			readonly storeTransport: unknown;
+		}>();
+	});
+
+	it("provides the Store-backed factor store over the section's URLs, with nothing else installed", async () => {
 		const store = await provided({ bearerToken: TOKEN });
 		expect(store).toBeInstanceOf(HttpMfaFactorStore);
 		expect(store.kind).toBe("store");
@@ -138,10 +146,10 @@ describe("foundationMfaFactorStoreModule", () => {
 		]);
 	});
 
-	it("sends no Authorization header when the user repository has no bearer token", async () => {
+	it("sends no Authorization header when the settings it is handed hold no bearer token", async () => {
 		const open = await startFakeStore();
 		try {
-			await (await provided(undefined, undefined, open)).list("user-1");
+			await (await provided({}, open)).list("user-1");
 			expect(open.requests.map((request) => request.headers.authorization)).toEqual([undefined]);
 		} finally {
 			await disposable?.dispose();
@@ -162,6 +170,8 @@ describe("foundationMfaFactorStoreModule", () => {
 	});
 
 	it("refuses the boot for a bearer token, a deadline or a cap the user repository refuses", async () => {
+		const numberOf = (value: unknown) =>
+			typeof value === "string" ? Number(value.trim()) : (value as number);
 		for (const http of [
 			{ bearerToken: "short" },
 			{ bearerToken: "" },
@@ -170,52 +180,33 @@ describe("foundationMfaFactorStoreModule", () => {
 			{ maxResponseBytes: "" },
 			{ maxResponseBytes: -1 },
 		]) {
-			const refused = await refusal(http);
+			const refused = await refusal(() => provided(http));
 			expect(refused.reason, JSON.stringify(http)).toBe("provides-factory-failed");
 			expect(refused.message, JSON.stringify(http)).toContain("HttpMfaFactorStore");
+			// The user repository refuses the same value.
+			expect(
+				() =>
+					new HttpUserRepository({
+						authenticateUrl: "https://store.example/authenticate",
+						authenticateByTokenUrl: "https://store.example/authenticate-by-token",
+						timeout: "timeout" in http ? numberOf(http.timeout) : 5000,
+						...("maxResponseBytes" in http
+							? { maxResponseBytes: numberOf(http.maxResponseBytes) }
+							: {}),
+						...("bearerToken" in http ? { bearerToken: http.bearerToken } : {}),
+					}),
+				JSON.stringify(http),
+			).toThrow();
 		}
 	});
 
-	it("refuses the boot for settings that are not a section of keys", async () => {
-		for (const http of ["https://store.example", 5000, null, ["x"]]) {
-			const refused = await refusal(http);
-			expect(refused.reason, JSON.stringify(http)).toBe("provides-factory-failed");
-			expect(refused.message, JSON.stringify(http)).toContain(
-				"the user repository's HTTP settings must be a section of keys",
+	it("refuses the boot when the settings it is handed are absent or not a section of keys, rather than sending no credential", async () => {
+		for (const storeTransport of [undefined, "https://store.example", 5000, null, ["x"]]) {
+			const refused = await refusal(() => bootWith(storeTransport, configOver({})));
+			expect(refused.reason, JSON.stringify(storeTransport)).toBe("provides-factory-failed");
+			expect(refused.message, JSON.stringify(storeTransport)).toContain(
+				"storeTransport, the Store transport settings, must be a section of keys ({} for none)",
 			);
 		}
-	});
-
-	it("keeps its version floor in the replaySeenSet slot", async () => {
-		const scopes: string[] = [];
-		const inner = createMemoryReplaySeenSet();
-		const recording: ReplaySeenSet = {
-			kind: "recording",
-			markSeen: (scope, key, expiresAtMs) => {
-				scopes.push(scope);
-				return inner.markSeen(scope, key, expiresAtMs);
-			},
-			contains: (scope, key) => inner.contains(scope, key),
-		};
-		const store = await provided({ bearerToken: TOKEN }, seenSetModule(recording));
-		await store.create(RECORD);
-		await store.update("user-1", RECORD.id, 1, {
-			data: "v2.x",
-			label: undefined,
-			lastUsedAt: undefined,
-		});
-		expect(new Set(scopes)).toEqual(new Set(["mfa-factor-version-floor"]));
-	});
-
-	it("boots beside core's in-process seen-set", async () => {
-		const seen: { store?: MfaFactorStore } = {};
-		disposable = await createApp({
-			modules: [foundationMfaFactorStoreModule(), memoryReplaySeenSetModule, consumer(seen)],
-			bootstrapComponents: {
-				config: configOver(),
-				pathResolver: (p: string) => p,
-			} as never,
-		});
-		expect(seen.store?.kind).toBe("store");
 	});
 });

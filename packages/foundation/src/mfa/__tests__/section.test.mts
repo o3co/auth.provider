@@ -23,17 +23,16 @@
  * the section — one that provides its store eagerly and reads the URLs first
  * — refuses the boot with any URL missing, naming each missing key and its
  * variable, whether or not anything requires the store. Here the package's
- * module reads the section, beside an in-process seen-set for its version
- * floor.
+ * module reads the section, installed alone.
  */
 
+import { BootError, createApp, type MfaFactorStore } from "@o3co/auth-provider-core";
 import {
-	BootError,
-	createApp,
-	type MfaFactorStore,
-	memoryReplaySeenSetModule,
-} from "@o3co/auth-provider-core";
-import { makeValidAppConfig, unreadableModuleLeaves } from "@o3co/auth-provider-core/testing";
+	makeValidAppConfig,
+	unreadableModuleLeaves,
+	userRepositoryHttpOf,
+	withUserRepositoryHttp,
+} from "@o3co/auth-provider-core/testing";
 import { afterEach, describe, expect, it } from "vitest";
 import { foundationMfaFactorStoreModule } from "#/index.mjs";
 import {
@@ -61,7 +60,9 @@ const VARIABLES = {
 
 const KEYS = Object.keys(URLS) as (keyof typeof URLS)[];
 
-const base = makeValidAppConfig();
+const base = withUserRepositoryHttp(makeValidAppConfig(), {});
+/** The module as a composition root builds it, handed the user repository's HTTP settings. */
+const module = () => foundationMfaFactorStoreModule({ storeTransport: userRepositoryHttpOf(base) });
 /** The configuration with the section holding `urls` and `extra`; without the section when `urls` is undefined. */
 const configWith = (
 	urls: Partial<Record<keyof typeof URLS, unknown>> | undefined,
@@ -75,7 +76,7 @@ afterEach(async () => {
 });
 
 interface BootOptions {
-	/** Nothing requires the store: the module and its seen-set alone. */
+	/** Nothing requires the store: the module alone. */
 	readonly alone?: boolean;
 	readonly extra?: Readonly<Record<string, unknown>>;
 }
@@ -85,9 +86,8 @@ async function boot(
 	options: BootOptions = {},
 ) {
 	const seen: { store?: MfaFactorStore } = {};
-	const installed = [foundationMfaFactorStoreModule(), memoryReplaySeenSetModule];
 	disposable = await createApp({
-		modules: options.alone === true ? installed : [...installed, consumer(seen)],
+		modules: options.alone === true ? [module()] : [module(), consumer(seen)],
 		bootstrapComponents: {
 			config: configWith(urls, options.extra),
 			pathResolver: (p: string) => p,
@@ -117,7 +117,7 @@ describe("the section's schema", () => {
 		expect(foundationMfaFactorStoreSection.reference.href).toMatch(
 			/\/packages\/foundation\/config\/reference\.conf$/,
 		);
-		expect(unreadableModuleLeaves([foundationMfaFactorStoreModule()])).toEqual([]);
+		expect(unreadableModuleLeaves([module()])).toEqual([]);
 	});
 
 	it("reads the four URLs, https or http to a loopback host", () => {
@@ -211,7 +211,7 @@ describe("a composition that selects the Store for MFA factors", () => {
 		await boot(URLS, { alone: true });
 	});
 
-	it("refuses the boot with nothing requiring its store and the URLs missing", async () => {
+	it("refuses the boot with the module installed alone, nothing requiring its store, and the URLs missing", async () => {
 		const refused = await bootRefusal({}, { alone: true });
 		expect(refused.reason).toBe("provides-factory-failed");
 		for (const key of KEYS) {
@@ -237,26 +237,6 @@ describe("a composition that selects the Store for MFA factors", () => {
 		const unknown = await bootRefusal(URLS, { extra: { markMfaEnrolledUrl: URLS.listUrl } });
 		expect(unknown.reason).toBe("config-validation-failed");
 		expect(unknown.message).toContain("markMfaEnrolledUrl");
-	});
-
-	it("refuses the boot without a seen-set for its version floor, naming the slot, the URLs set or not", async () => {
-		for (const urls of [URLS, {}]) {
-			let refused: unknown;
-			try {
-				disposable = await createApp({
-					modules: [foundationMfaFactorStoreModule()],
-					bootstrapComponents: {
-						config: configWith(urls),
-						pathResolver: (p: string) => p,
-					} as never,
-				});
-			} catch (error) {
-				refused = error;
-			}
-			expect(refused).toBeInstanceOf(BootError);
-			expect((refused as BootError).reason).toBe("missing-required-component");
-			expect((refused as BootError).message).toContain("replaySeenSet");
-		}
 	});
 
 	it("refuses the boot without the package's reference.conf layered, naming it", async () => {
