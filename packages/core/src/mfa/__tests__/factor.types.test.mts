@@ -21,17 +21,25 @@
  * key ring for the factor, which never sees the ring; a factor may refuse a
  * sign count that did not increase, opt in to a challenge that stays across
  * attempts, and say a user cannot enroll it without throwing (a throw reads
- * as an outage).
+ * as an outage). A factor that mails a code answers its purpose and the code,
+ * never text or a recipient: the coordinator keeps the state, then sends.
  *
  * These are type assertions: the file is in core's typecheck list.
  */
 
 import { describe, expect, expectTypeOf, it } from "vitest";
+import type { MailPurpose } from "#/mail/types.mjs";
 import type {
 	MfaCeremonyContext,
+	MfaChallenge,
+	MfaChallengeContext,
 	MfaDigestMatch,
 	MfaDigests,
+	MfaEnrollmentContext,
+	MfaEnrollmentStart,
 	MfaFactor,
+	MfaFactorMail,
+	MfaFactorState,
 	MfaKeyedDigest,
 	MfaVerification,
 } from "#/mfa/factor.mjs";
@@ -86,6 +94,35 @@ describe("the MfaFactor contract", () => {
 		expectTypeOf<MfaFactor["enrollable"]>().toEqualTypeOf<
 			((user: Readonly<Record<string, unknown>>) => boolean) | undefined
 		>();
+		expect(true).toBe(true);
+	});
+
+	it("lets a challenge or an enrollment ask for a code to be mailed: its purpose and the code, beside the state and the response", () => {
+		expectTypeOf<MfaFactorMail>().toEqualTypeOf<{
+			readonly purpose: MailPurpose;
+			readonly code: string;
+		}>();
+		expectTypeOf<MfaChallenge>().toEqualTypeOf<{
+			readonly state?: MfaFactorState;
+			readonly response: unknown;
+			readonly mail?: MfaFactorMail;
+		}>();
+		expectTypeOf<MfaEnrollmentStart>().toEqualTypeOf<{
+			readonly state: MfaFactorState;
+			readonly response: unknown;
+			readonly mail?: MfaFactorMail;
+		}>();
+		expectTypeOf<NonNullable<MfaFactor["challenge"]>>().toEqualTypeOf<
+			(ctx: MfaChallengeContext) => Promise<MfaChallenge>
+		>();
+		expectTypeOf<MfaFactor["beginEnrollment"]>().toEqualTypeOf<
+			(ctx: MfaEnrollmentContext) => Promise<MfaEnrollmentStart>
+		>();
+		expect(true).toBe(true);
+	});
+
+	it("declares no mail limits: a limit on sending is the sender's", () => {
+		expectTypeOf<MfaFactor>().not.toHaveProperty("mailLimits");
 		expect(true).toBe(true);
 	});
 });
