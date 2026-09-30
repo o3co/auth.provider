@@ -27,7 +27,8 @@
  * The rule (`namingProblems`): a misnamed variable fails unless it is in
  * `LEGACY`, the names that predated the rule, whatever else a change renames.
  * `LEGACY` only loses entries, and may keep a name that has since been
- * renamed. How many variables are misnamed is held at exactly `CEILING`: a
+ * renamed; an entry whose binding moves to another layer follows it, its
+ * layer changed and its name and path not. How many variables are misnamed is held at exactly `CEILING`: a
  * rename fails until `CEILING` is lowered by the names it renames. Nothing
  * raises it.
  */
@@ -57,7 +58,8 @@ const LEGACY_BASELINE = 61;
 /**
  * The names that predated the rule, as `<layer>: <VAR> at <path>`, where
  * `<layer>` is a package's directory name, or `template` for the standalone
- * template's layers. Entries are deleted, never added (see the file header).
+ * template's layers. Entries are deleted, never added; one follows its
+ * binding to another layer (see the file header).
  */
 const LEGACY: readonly string[] = [
 	"core: OAUTH_GRANTS_JWT_BEARER_ENABLED at oauth.grants.urn:ietf:params:oauth:grant-type:jwt-bearer.enabled",

@@ -95,8 +95,8 @@ export function templateReference(): URL {
 }
 
 /**
- * The section schemas: core's declarations of these paths, which core still
- * mirrors, so each rule has one definition.
+ * The section schemas: core's declarations of these paths, so each rule has
+ * one definition until these modules have schemas of their own.
  */
 export const LOGGING_SECTION = CoreConfigSchema.shape.logging.unwrap();
 const HTTP_SECTION = CoreConfigSchema.shape.http.unwrap();
