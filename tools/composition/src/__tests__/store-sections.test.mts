@@ -434,8 +434,18 @@ describe("the Redis grant store's key prefix moved and the intent store's left a
 	const GRANT = "REDIS_FEDERATION_GRANT_STORE_KEY_PREFIX";
 	const INTENT = "REDIS_FEDERATION_GRANT_INTENT_STORE_KEY_PREFIX";
 
-	it("refuses boot, naming both keys and both variables and quoting no value", async () => {
-		const err = await composeFullSet(onRedis({ env: { [GRANT]: "t1:fg:" } })).then(
+	/**
+	 * The grants kept in memory, the intents on Redis, on one replica (the
+	 * memory grant store is refused under "multi"): a pairing the template allows.
+	 */
+	const GRANTS_IN_MEMORY = {
+		FEDERATION_GRANT_STORE_ADAPTER: "memory",
+		CORE_DEPLOYMENT_MODE: "single",
+	};
+
+	/** What the template's reading refused the full set with, before boot. */
+	async function refusedBeforeBoot(options: FullSetOptions): Promise<RangeError> {
+		const err = await composeFullSet(options).then(
 			async (composition) => {
 				await composition.handle.dispose();
 				throw new Error("the full set booted");
@@ -443,8 +453,33 @@ describe("the Redis grant store's key prefix moved and the intent store's left a
 			(error: unknown) => error,
 		);
 		expect(err).toBeInstanceOf(RangeError);
-		const { message } = err as RangeError;
+		return err as RangeError;
+	}
+
+	it("refuses boot, naming both keys and both variables and quoting no value", async () => {
+		const { message } = await refusedBeforeBoot(onRedis({ env: { [GRANT]: "t1:fg:" } }));
 		expect(message).toContain(`redis-federation-grant-store.keyPrefix (${GRANT})`);
+		expect(message).toContain(`redis-federation-grant-intent-store.keyPrefix (${INTENT})`);
+		expect(message).not.toContain("fg:");
+	});
+
+	it("grants kept in memory and intents on Redis: the grant store's variable refused the same", async () => {
+		const { message } = await refusedBeforeBoot(
+			onRedis({ env: { ...GRANTS_IN_MEMORY, [GRANT]: "t1:fg:" } }),
+		);
+		expect(message).toContain(`redis-federation-grant-store.keyPrefix (${GRANT})`);
+		expect(message).toContain(`redis-federation-grant-intent-store.keyPrefix (${INTENT})`);
+		expect(message).not.toContain("fg:");
+	});
+
+	it("grants kept in memory and intents on Redis: the grant store's key at its old path refused, naming the intent store's", async () => {
+		const { message } = await refusedBeforeBoot(
+			onRedis({
+				env: GRANTS_IN_MEMORY,
+				operatorHocon: 'redisFederationGrantStore.keyPrefix = "t1:fg:"\n',
+			}),
+		);
+		expect(message).toContain("redisFederationGrantStore.keyPrefix");
 		expect(message).toContain(`redis-federation-grant-intent-store.keyPrefix (${INTENT})`);
 		expect(message).not.toContain("fg:");
 	});

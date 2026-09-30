@@ -332,6 +332,31 @@ describe("phase two refuses the Redis grant store's key prefix moved while the i
 	it("the grant store's set with the intent store not on Redis: resolved, as nothing of acquisition's is kept there", () => {
 		expect(() => resolve({ [GRANT]: "t1:fg:" }, [redisFederationGrantStoreModule])).not.toThrow();
 	});
+
+	it("grants kept in memory and intents on Redis: the grant store's variable refused the same, as the package's reference binds it beside the intent store's", () => {
+		const { message } = refusal({ [GRANT]: "t1:fg:" }, [redisFederationGrantIntentStoreModule]);
+		expect(message).toContain(`redis-federation-grant-store.keyPrefix (${GRANT})`);
+		expect(message).toContain(`redis-federation-grant-intent-store.keyPrefix (${INTENT})`);
+		expect(message).not.toContain("fg:");
+	});
+
+	it("grants kept in memory and intents on Redis: the grant store's key at its old path, which no loaded module relocates, refused naming the intent store's", () => {
+		const operator = operatorLayer('redisFederationGrantStore.keyPrefix = "t1:fg:"\n');
+		const { message } = refusal(
+			{ [INTENT]: "t1:fgi:" },
+			[redisFederationGrantIntentStoreModule],
+			[operator, ...ownFiles("development")],
+		);
+		expect(message).toContain("redisFederationGrantStore.keyPrefix");
+		expect(message).toContain(`redis-federation-grant-intent-store.keyPrefix (${INTENT})`);
+		expect(message).not.toContain("fg:");
+	});
+
+	it("grants kept in memory and intents on Redis, the intent store's prefix set: resolved", () => {
+		expect(() =>
+			resolve({ [GRANT]: "t1:fg:", [INTENT]: "t1:fgi:" }, [redisFederationGrantIntentStoreModule]),
+		).not.toThrow();
+	});
 });
 
 describe("both phases read one snapshot of the composition's own layers", () => {
