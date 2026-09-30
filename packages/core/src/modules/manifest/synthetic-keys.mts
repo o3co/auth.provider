@@ -70,7 +70,9 @@ export type { FederationProvider };
  * any of them in a module's `provides`, in `bootstrapComponents` and in
  * `overrideComponents` (`synthetic-key-collision`). Each `…Resolver` projects
  * the contribution kind of the same stem; `federationRedirectPolicies` is
- * typed in `@o3co/auth-provider-session`.
+ * typed in `@o3co/auth-provider-session`. `deploymentMode` is the
+ * configuration's `deployment.mode` (`deployment/mode.mts`), typed with its
+ * slot in `deployment/types.mts`.
  *
  * Immutability rests on the `ReadonlySet<string>` type. `Object.freeze` does
  * not stop the built-in Set methods from mutating `[[SetData]]`, so a cast to
@@ -93,6 +95,10 @@ export const SYNTHETIC_COMPONENT_KEYS: ReadonlySet<string> = Object.freeze(
 		// while builders register probes on the consumer's, and `/readyz` would
 		// answer ready with nothing probed.
 		"readinessRegistrar",
+		// Filled from the configuration before any provider runs: a module or
+		// host that set it would be a second statement of the replica count,
+		// beside the one the replica-safety guard reads.
+		"deploymentMode",
 	]),
 );
 

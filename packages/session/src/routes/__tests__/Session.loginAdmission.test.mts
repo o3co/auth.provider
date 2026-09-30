@@ -37,7 +37,7 @@ import {
 	type UserRepository,
 	type UserSessionStore,
 } from "@o3co/auth-provider-core";
-import { resolverForTests } from "@o3co/auth-provider-core/testing";
+import { createTestCsrfTokenSigner, resolverForTests } from "@o3co/auth-provider-core/testing";
 import express from "express";
 import session, { MemoryStore } from "express-session";
 import request from "supertest";
@@ -54,7 +54,6 @@ const config = {
 	cors: { allowedOrigins: [] },
 	rateLimit: { login: { windowMs: 60_000, limit: 100 } },
 	session: {
-		secret: "test-session-secret",
 		name: "auth.session",
 		secure: false,
 		sameSite: "lax",
@@ -63,8 +62,10 @@ const config = {
 	},
 } as never;
 
+/** The signer the router is given, and a protection over it that mints the tokens these requests carry. */
+const SIGNER = createTestCsrfTokenSigner();
 const csrf = createCsrfProtection({
-	secret: "test-session-secret",
+	signer: SIGNER,
 	cookieName: "auth.session.csrf",
 });
 const csrfToken = csrf.mint();
@@ -236,11 +237,12 @@ function setup(options: Setup = {}) {
 	app.use(
 		"/session",
 		createRouter(express, {
+			csrfTokenSigner: SIGNER,
 			userRepository,
 			config,
+			deploymentMode: "unset",
 			userSessionStore,
 			subjectSessionIndex: subjectSessionIndex as never,
-			csrf,
 			logger: logger as unknown as Logger,
 			requirements: resolverForTests(options.requirements ?? []),
 		}),
@@ -299,9 +301,10 @@ describe("the session router takes the session requirements", () => {
 	it("throws at construction without requirements", () => {
 		expect(() =>
 			createRouter(express, {
+				csrfTokenSigner: SIGNER,
 				userRepository: {} as UserRepository,
 				config,
-				csrf,
+				deploymentMode: "unset",
 				logger: spyLogger() as unknown as Logger,
 				requirements: undefined as never,
 			}),
@@ -312,9 +315,10 @@ describe("the session router takes the session requirements", () => {
 		const forged = { get: () => undefined, entries: () => [][Symbol.iterator]() };
 		expect(() =>
 			createRouter(express, {
+				csrfTokenSigner: SIGNER,
 				userRepository: {} as UserRepository,
 				config,
-				csrf,
+				deploymentMode: "unset",
 				logger: spyLogger() as unknown as Logger,
 				requirements: forged as never,
 			}),

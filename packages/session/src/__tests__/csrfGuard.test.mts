@@ -16,12 +16,12 @@
 
 /**
  * The session package's `csrfGuard`: the one CSRF policy the session routes
- * run, as the slot other packages require. It is built from the session
- * configuration as the session module builds it: the signed double-submit
- * token of `createCsrfProtectionFromConfig`, the origin rule over
+ * run, as the slot other packages require. It is built as the session module
+ * builds it: the signed double-submit token of `createCsrfProtectionFromConfig`
+ * over the `csrfTokenSigner` slot's signer, the origin rule over
  * `session.csrf.trustedOrigins`, and the link start's navigation rule. Its
  * middleware answers and logs what `createCsrfGuard` does, and it signs with
- * the key `GET /session/csrf` signs with.
+ * the signer `GET /session/csrf` signs with.
  */
 
 import {
@@ -36,6 +36,7 @@ import {
 } from "@o3co/auth-provider-core";
 import {
 	createTestApp,
+	createTestCsrfTokenSigner,
 	csrfGuardContract,
 	makeValidAppConfig,
 } from "@o3co/auth-provider-core/testing";
@@ -60,10 +61,16 @@ const sessionSlice = (): SessionCsrfConfigSlice => {
 	return { ...session, csrf: { trustedOrigins: [TRUSTED] } };
 };
 
+/** What the guards below sign with: the `csrfTokenSigner` slot's double. */
+const SIGNER = createTestCsrfTokenSigner();
+
 const guardOver = (now?: () => number): CsrfGuard => {
 	const session = sessionSlice();
 	return createSessionCsrfGuard({
-		csrf: createCsrfProtectionFromConfig(session, now === undefined ? {} : { now }),
+		csrf: createCsrfProtectionFromConfig(session, {
+			signer: SIGNER,
+			...(now === undefined ? {} : { now }),
+		}),
 		trustedOrigins: session.csrf?.trustedOrigins ?? [],
 	});
 };
@@ -142,7 +149,7 @@ describe("the guard's middleware answers and logs as createCsrfGuard does", () =
 
 	it.each(cases)("%s: the same status, body and warn line", async (_what, headersFor) => {
 		const session = sessionSlice();
-		const csrf = createCsrfProtectionFromConfig(session);
+		const csrf = createCsrfProtectionFromConfig(session, { signer: SIGNER });
 		const headers = headersFor(csrf);
 		const slotLogger = spyLogger();
 		const direct = spyLogger();
@@ -261,7 +268,7 @@ describe("the session module provides csrfGuard", () => {
 		expect(seen.guard?.cookieName).toBe("auth.session.csrf");
 	});
 
-	it("accepts the token GET /session/csrf hands out: one key, whoever mounts the guard", async () => {
+	it("accepts the token GET /session/csrf hands out: one signer, whoever mounts the guard", async () => {
 		const app = await boot({});
 		const agent = request.agent(app);
 		const issued = await agent.get("/session/csrf");

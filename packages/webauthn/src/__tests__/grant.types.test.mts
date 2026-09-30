@@ -40,6 +40,9 @@ const REQUIRES = [
 	"challengeCeremony",
 	"config",
 	"keyStore",
+	// The replica count the authentication/options route's fallback limiter is
+	// refused or warned about by; the grant does not read it.
+	"deploymentMode",
 ] as const;
 const OPTIONAL = [
 	"grantPolicy",

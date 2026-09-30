@@ -19,8 +19,10 @@
  * (installed is on).
  *
  * Requires `config`, core's three MFA ports (the name `mfa` is accepted only from
- * a module bound to them), `userSessionStore` and `sessionRequirementResolver`;
- * reads `auditSink` (absence declared) and `logger`. Nothing forks per replica.
+ * a module bound to them), `userSessionStore`, `sessionRequirementResolver` and
+ * `deploymentMode` (the development sample key is refused under `multi`, so a
+ * mode read as absent must not lift that); reads `auditSink` (absence declared)
+ * and `logger`. Nothing forks per replica.
  *
  * Contributes `sessionRequirements.mfa`. Its factory refuses the boot when
  * `mfa.mode` is `off` or unset, when the package's settings are unusable (naming
@@ -249,7 +251,8 @@ export function mfaModule(options: MfaModuleOptions = {}): Module {
 		| "mfaFactorStore"
 		| "mfaTransactionStore"
 		| "userSessionStore"
-		| "sessionRequirementResolver",
+		| "sessionRequirementResolver"
+		| "deploymentMode",
 		"auditSink" | "logger",
 		typeof MFA_SECTION_SCHEMA
 	>({
@@ -266,6 +269,7 @@ export function mfaModule(options: MfaModuleOptions = {}): Module {
 			"mfaTransactionStore",
 			"userSessionStore",
 			"sessionRequirementResolver",
+			"deploymentMode",
 		],
 		optional: ["auditSink", "logger"],
 		absencePolicies: { auditSink: AUDIT_SINK_ABSENCE_POLICY },
@@ -281,7 +285,10 @@ export function mfaModule(options: MfaModuleOptions = {}): Module {
 							'mfa.mode is "off" (or unset) while the MFA module is installed: remove the MFA module, or set mfa.mode to "required" or "optional"',
 						);
 					}
-					const settings = readMfaSettings(deps.config, options);
+					const settings = readMfaSettings(deps.config, {
+						...options,
+						deploymentMode: deps.deploymentMode,
+					});
 					const stepUpPage = stepUpPageOf(deps.config);
 					const logger = deps.logger ?? consoleLogger;
 					if (settings.developmentSampleKeyAccepted) {

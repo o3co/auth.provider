@@ -17,6 +17,7 @@
 import { memoryAccessTokenDenylistModule } from "../access-token-denylist/module.mjs";
 import { memoryChallengeStoreModule } from "../challenges/module.mjs";
 import { memoryConsentStoreModule } from "../consents/module.mjs";
+import { deploymentModeOf } from "../deployment/mode.mjs";
 import { memoryDeviceCodeStoreModule } from "../device-authorization/module.mjs";
 import {
 	memoryFederationGrantIntentStoreModule,
@@ -107,17 +108,22 @@ export function replicaUnsafeReason(module: ReplicaSafetyModuleRef): string | un
 
 export interface CheckReplicaSafetyInput {
 	readonly modules: readonly ReplicaSafetyModuleRef[];
-	/** Parsed application config; only `deployment.mode` is read. */
+	/**
+	 * Parsed application config; only `deployment.mode` is read, with
+	 * `deploymentModeOf` — the reading boot fills the `deploymentMode` slot
+	 * with.
+	 */
 	readonly config: unknown;
 	readonly logger?: Logger;
 }
 
 /**
- * Composition-root guard for replica-unsafe state, keyed on `deployment.mode`:
- *   - `"multi"`: boot fails naming every offender.
- *   - `"single"`: silent. Warning here would fire on every local run and train
+ * Composition-root guard for replica-unsafe state, keyed on `deployment.mode`
+ * as the `deploymentMode` slot holds it:
+ *   - `multi`: boot fails naming every offender.
+ *   - `single`: silent. Warning here would fire on every local run and train
  *     people to ignore the warning that matters.
- *   - unset: one consolidated warning naming each in-memory store and its cost.
+ *   - `unset`: one consolidated warning naming each in-memory store and its cost.
  *
  * `deployment.mode` therefore has no HOCON default; one would make the unset
  * state unreachable. An operator who scales without setting the mode cannot be
@@ -130,7 +136,7 @@ export function checkReplicaSafety({ modules, config, logger }: CheckReplicaSafe
 	});
 	if (offenders.length === 0) return;
 
-	const mode = (config as { deployment?: { mode?: unknown } } | undefined)?.deployment?.mode;
+	const mode = deploymentModeOf(config);
 	const names = offenders.map((o) => o.name);
 	const reasons = offenders.map((o) => `${o.name}: ${o.reason}`);
 

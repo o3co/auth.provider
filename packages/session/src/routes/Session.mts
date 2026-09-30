@@ -31,10 +31,13 @@ import {
 	type AuditSink,
 	admitPrimary,
 	BootError,
+	type CsrfTokenSigner,
+	checkDeploymentMode,
 	checkResolver,
 	consoleLogger,
 	createMemoryRateLimiter,
 	createRateLimitGuard,
+	type DeploymentMode,
 	type FederationTokenStore,
 	type Logger,
 	loggableError,
@@ -50,7 +53,6 @@ import {
 import type { NextFunction, Request, RequestHandler, Response, Router } from "express";
 import { answerInterruption } from "../answer-interruption.mjs";
 import {
-	type CsrfProtection,
 	createCsrfGuard,
 	createCsrfIssueHandler,
 	createCsrfProtectionFromConfig,
@@ -84,6 +86,7 @@ export const createRouter = (
 	{
 		userRepository,
 		config,
+		deploymentMode,
 		userSessionStore,
 		subjectSessionIndex,
 		federationTokenStore,
@@ -92,11 +95,18 @@ export const createRouter = (
 		auditSink,
 		sessionTtlMs = DEFAULT_SESSION_TTL_MS,
 		logger = consoleLogger,
-		csrf,
+		csrfTokenSigner,
 		requirements,
 	}: {
 		userRepository: UserRepository;
 		config: AppConfig;
+		/**
+		 * The replica count, as core's `deploymentMode` slot holds it: what the
+		 * login throttle's per-process fallback is refused, warned about or
+		 * silent by. Anything but the three values, absence included, is a
+		 * TypeError at construction.
+		 */
+		deploymentMode: DeploymentMode;
 		userSessionStore?: UserSessionStore;
 		/**
 		 * Subject-keyed index of live sessions, written on every login so a
@@ -117,8 +127,8 @@ export const createRouter = (
 		/**
 		 * Shared rate limiter for the login brute-force guard, so the limit holds
 		 * across replicas. Omitted, the router builds a per-process in-memory
-		 * limiter with the same spec and warns (or refuses under
-		 * `deployment.mode = "multi"`).
+		 * limiter with the same spec and warns (or refuses when `deploymentMode`
+		 * is `"multi"`).
 		 */
 		rateLimiter?: RateLimiter;
 		/**
@@ -130,12 +140,13 @@ export const createRouter = (
 		sessionTtlMs?: number;
 		logger?: Logger;
 		/**
-		 * CSRF mechanism for the state-changing routes; built from the `session`
-		 * config slice when omitted. Tokens are signed, not stored, so instances
-		 * built from one secret accept each other's; inject one so a composition
-		 * root can issue tokens from its own pages.
+		 * What the CSRF token of the state-changing routes is signed and checked
+		 * with: the `csrfTokenSigner` slot's signer. Tokens are signed, not
+		 * stored, so a guard over the same signer (the `csrfGuard` slot) accepts
+		 * the tokens these routes issue, and these routes accept the tokens it
+		 * issues.
 		 */
-		csrf?: CsrfProtection;
+		csrfTokenSigner: CsrfTokenSigner;
 		/**
 		 * The registered session requirements, asked through `admitPrimary`
 		 * before a password login writes anything. Required: a missing resolver,
@@ -145,6 +156,12 @@ export const createRouter = (
 	},
 ): Router => {
 	checkResolver(requirements, "session routes");
+	if (csrfTokenSigner === undefined) {
+		throw new Error(
+			"session routes: csrfTokenSigner is required: pass the csrfTokenSigner slot's signer, or createSessionCsrfTokenSigner(secret)",
+		);
+	}
+	const replicas = checkDeploymentMode(deploymentMode, "session routes: deploymentMode");
 	const router = express.Router();
 
 	/**
@@ -167,7 +184,7 @@ export const createRouter = (
 	// `session.csrf.trustedOrigins`, not `cors.allowedOrigins`; the acceptance
 	// rule is in `../csrf.mjs`.
 	const sessionSlice = config.session as unknown as SessionCsrfConfigSlice;
-	const csrfProtection = csrf ?? createCsrfProtectionFromConfig(sessionSlice);
+	const csrfProtection = createCsrfProtectionFromConfig(sessionSlice, { signer: csrfTokenSigner });
 	const verifyCsrf = createCsrfGuard({
 		csrf: csrfProtection,
 		trustedOrigins: sessionSlice.csrf?.trustedOrigins ?? [],
@@ -185,10 +202,9 @@ export const createRouter = (
 	if (rateLimiter === undefined) {
 		// The per-process fallback is replica-unsafe state, so the deployment
 		// mode decides: "multi" refuses at boot (the limit would really be
-		// limit × replicas, reset on every deploy), "single" is silent, unset
+		// limit × replicas, reset on every deploy), "single" is silent, "unset"
 		// warns. The planner wraps this throw as `contribute-factory-failed`.
-		const deploymentMode = config.deployment?.mode;
-		if (deploymentMode === "multi") {
+		if (replicas === "multi") {
 			throw new BootError({
 				stage: "applyContributions",
 				reason: "replica-unsafe-adapter",
@@ -196,7 +212,7 @@ export const createRouter = (
 				details: { reason: "replica-unsafe-adapter", modules: ["session"] },
 			});
 		}
-		if (deploymentMode !== "single") {
+		if (replicas !== "single") {
 			logger.warn(
 				{
 					limit: loginLimitSpec.limit,

@@ -22,6 +22,7 @@
  * factory side effects give the same output or the same error.
  */
 
+import { deploymentModeOf } from "../deployment/mode.mjs";
 import type { ComponentKey, ComponentMap } from "../modules/manifest/component-map.mjs";
 import { prepareSyntheticProjections } from "./apply-contributions.mjs";
 import { failureSummary } from "./failure-summary.mjs";
@@ -111,7 +112,8 @@ async function runCleanupsReverse(cleanupRecords: readonly CleanupRecord[]): Pro
 
 /**
  * Stage 3 of the boot planner. Seeds `bootstrapComponents`, applies
- * `overrideComponents`, injects the synthetic projections of
+ * `overrideComponents`, fills `deploymentMode` from the configuration's
+ * `deployment.mode`, injects the synthetic projections of
  * `contributionKinds` when given (a provider that requires one reads it
  * lazily, filled once stage 4 registers the contributions), then runs each
  * provider factory in `plan.providerActivations` order.
@@ -149,6 +151,11 @@ export async function materializeComponents(
 			externalKeys.add(key as ComponentKey);
 		}
 	}
+
+	// The replica count, from the configuration stage 1 parsed — the value its
+	// replica-safety guard decided by. Stage 1 refuses the key from every
+	// other source.
+	components.deploymentMode = deploymentModeOf(bootstrapComponents.config);
 
 	// Synthetic projections are stable read-through views of the collectors
 	// stage 4 fills, so a provider that requires one gets the object the world
