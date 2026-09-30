@@ -47,6 +47,7 @@ import {
 	moduleReferences,
 } from "@o3co/auth-provider-core";
 import { httpSettingsContract, packageReferenceProblems } from "@o3co/auth-provider-core/testing";
+import { HttpUserRepository } from "@o3co/auth-provider-foundation";
 import { parseFile } from "@o3co/ts.hocon";
 import express from "express";
 import request from "supertest";
@@ -91,11 +92,11 @@ const BASE_ENV: Readonly<Record<string, string>> = {
 	SESSION_STORE_SECURE: "false",
 	SESSION_STORE_NAME: "auth.session",
 	SESSION_STORE_STORAGE_TYPE: "memory",
-	CLIENT_USER_TYPE: "yaml",
+	ADAPTERS_USER_REPOSITORY: "yaml",
 	CORE_DEPLOYMENT_MODE: "single",
-	OAUTH_CODE_ADAPTER: "memory",
-	ACCESS_TOKEN_DENYLIST_ADAPTER: "memory",
-	REPLAY_SEEN_SET_ADAPTER: "memory",
+	ADAPTERS_CODE_REPOSITORY: "memory",
+	ADAPTERS_ACCESS_TOKEN_DENYLIST: "memory",
+	ADAPTERS_REPLAY_SEEN_SET: "memory",
 };
 
 /** A logger that writes nothing. */
@@ -135,6 +136,8 @@ interface BootOptions {
 	readonly adjust?: (resolved: Record<string, unknown>) => Record<string, unknown>;
 	/** Components a host lays over the modules' (`overrideComponents`). */
 	readonly overrides?: Record<string, unknown>;
+	/** Keep the template's own `repositories` module, reading its section, rather than in-memory ones. */
+	readonly repositories?: boolean;
 }
 
 /** The directories the operator layers are written to, removed after the suite. */
@@ -165,7 +168,7 @@ async function bootTemplate(options: BootOptions = {}): Promise<AppHandle> {
 	const switches = readSwitches(own);
 	const modules = buildModules(switches, {
 		environment: "development",
-		repositoriesModule: testRepositoriesModule,
+		...(options.repositories ? {} : { repositoriesModule: testRepositoriesModule }),
 		...(options.redis ? {} : { refreshTokenFamilyModules: [memoryRefreshTokenFamilyStoreModule] }),
 	});
 	const resolved = resolveForBoot(own, modules, expectedSessionRequirements(switches));
@@ -1037,5 +1040,228 @@ describe("redis-clients", () => {
 				renamed: [{ module: "redis-clients", from, to, path, state: "unset" }],
 			},
 		});
+	});
+});
+
+/** A YAML file of `text` in a directory removed after the suite. */
+function yamlFile(name: string, text: string): string {
+	const dir = mkdtempSync(join(tmpdir(), "own-modules-yaml-"));
+	operatorDirs.push(dir);
+	const file = join(dir, name);
+	writeFileSync(file, text);
+	return file;
+}
+
+/** The value at a dotted path of the configuration boot parsed. */
+function parsedAt(handle: AppHandle, path: string): unknown {
+	let cursor: unknown = handle.components.config;
+	for (const key of path.split(".")) {
+		if (typeof cursor !== "object" || cursor === null) return undefined;
+		cursor = (cursor as Record<string, unknown>)[key];
+	}
+	return cursor;
+}
+
+/** Each variable the repositories module renamed: old name, new name, path, a value. */
+const REPOSITORY_RENAMES = [
+	["CLIENT_PATH", "REPOSITORIES_CLIENT_YAML_PATH", "repositories.client.yaml.path", "./x.yaml"],
+	["CLIENT_USER_PATH", "REPOSITORIES_USER_YAML_PATH", "repositories.user.yaml.path", "./y.yaml"],
+	...(
+		[
+			["AUTHENTICATE_URL", "authenticateUrl", "https://store.example/authenticate"],
+			["AUTHENTICATE_BY_TOKEN_URL", "authenticateByTokenUrl", "https://store.example/by-token"],
+			["LINK_FEDERATED_IDENTITY_URL", "linkFederatedIdentityUrl", "https://store.example/link"],
+			[
+				"FIND_SUBJECT_BY_FEDERATED_IDENTITY_URL",
+				"findSubjectByFederatedIdentityUrl",
+				"https://store.example/find",
+			],
+			["BEARER_TOKEN", "bearerToken", "0328d706529061d93abd6d826e09ef0f0a1e71a12af813b29e5cd2977b7dc63a"],
+			["TIMEOUT", "timeout", "3000"],
+			["MAX_RESPONSE_BYTES", "maxResponseBytes", "2048"],
+		] as const
+	).map(
+		([name, key, value]) =>
+			[
+				`CLIENT_USER_${name}`,
+				`REPOSITORIES_USER_HTTP_${name}`,
+				`repositories.user.http.${key}`,
+				value,
+			] as const,
+	),
+] as const;
+
+describe("repositories", () => {
+	it("owns repositories, and reads it as its section rather than the configuration", async () => {
+		const own = readOwnLayers(ownFiles(), { env: BASE_ENV });
+		const modules = buildModules(readSwitches(own), { environment: "development" });
+		const repositories = named(modules, "repositories");
+		expect(repositories.section?.at).toBeUndefined();
+		expect(repositories.section?.reference?.href).toBe(TEMPLATE_REFERENCE.href);
+		expect(repositories.requires ?? []).not.toContain("config");
+		expect(repositories.optional ?? []).not.toContain("config");
+	});
+
+	it("reads the client registry and the users from the YAML files REPOSITORIES_*_YAML_PATH name", async () => {
+		const clients = yamlFile(
+			"clients.yaml",
+			"yaml-client:\n  tokenEndpointAuthMethod: none\n  allowedRedirectUris: []\n",
+		);
+		const users = yamlFile("users.yaml", "");
+		const handle = await bootTemplate({
+			repositories: true,
+			env: { REPOSITORIES_CLIENT_YAML_PATH: clients, REPOSITORIES_USER_YAML_PATH: users },
+		});
+		try {
+			expect(parsedAt(handle, "repositories.client.yaml.path")).toBe(clients);
+			expect(await handle.components.clientRepository?.findById("yaml-client")).toBeDefined();
+		} finally {
+			await handle.dispose();
+		}
+	});
+
+	it("builds the Store's HTTP user repository under ADAPTERS_USER_REPOSITORY=http, from REPOSITORIES_USER_HTTP_*", async () => {
+		const clients = yamlFile("clients.yaml", "");
+		const handle = await bootTemplate({
+			repositories: true,
+			env: {
+				ADAPTERS_USER_REPOSITORY: "http",
+				REPOSITORIES_CLIENT_YAML_PATH: clients,
+				REPOSITORIES_USER_HTTP_AUTHENTICATE_URL: "https://store.example/authenticate",
+				REPOSITORIES_USER_HTTP_AUTHENTICATE_BY_TOKEN_URL: "https://store.example/by-token",
+				REPOSITORIES_USER_HTTP_LINK_FEDERATED_IDENTITY_URL: "https://store.example/link",
+			},
+		});
+		try {
+			const users = handle.components.userRepository;
+			expect(users).toBeInstanceOf(HttpUserRepository);
+			expect((users as HttpUserRepository).linkFederatedIdentity).toBeDefined();
+			expect(parsedAt(handle, "repositories.user.http.timeout")).toBe(5000);
+		} finally {
+			await handle.dispose();
+		}
+	});
+
+	it("refuses a key the section does not declare, naming it", async () => {
+		await expect(
+			bootTemplate({ repositories: true, hocon: 'repositories.user.ldap.url = "ldap://x"\n' }),
+		).rejects.toMatchObject({ reason: "config-validation-failed", message: expect.stringContaining('"ldap"') });
+	});
+
+	it.each(REPOSITORY_RENAMES)(
+		"has boot refuse %s set alone, naming %s and %s",
+		async (from, to, path, value) => {
+			await expect(
+				bootTemplate({ repositories: true, env: { [from]: value } }),
+			).rejects.toMatchObject({
+				details: {
+					reason: "environment-variable-renamed",
+					renamed: [{ module: "repositories", from, to, path, state: "unset" }],
+				},
+			});
+		},
+	);
+});
+
+describe("standalone-in-memory-code-repository", () => {
+	it("reads its own section, which STANDALONE_IN_MEMORY_CODE_REPOSITORY_DEFAULT_EXPIRES_IN sets", async () => {
+		const handle = await bootTemplate({
+			env: { STANDALONE_IN_MEMORY_CODE_REPOSITORY_DEFAULT_EXPIRES_IN: "900" },
+		});
+		try {
+			expect(parsedAt(handle, "standalone-in-memory-code-repository.defaultExpiresIn")).toBe(900);
+		} finally {
+			await handle.dispose();
+		}
+	});
+
+	it("refuses a lifetime that is not positive whole seconds, naming the key", async () => {
+		await expect(
+			bootTemplate({ env: { STANDALONE_IN_MEMORY_CODE_REPOSITORY_DEFAULT_EXPIRES_IN: "0" } }),
+		).rejects.toThrow(/standalone-in-memory-code-repository\.defaultExpiresIn/);
+	});
+
+	it("has boot refuse repositories.code.memory, the path it moved from, and repositories.code.redis, removed", async () => {
+		await expect(
+			bootTemplate({
+				hocon: "repositories.code { memory.defaultExpiresIn = 900, redis.endpointUri = \"redis://x\" }\n",
+			}),
+		).rejects.toMatchObject({
+			details: {
+				reason: "config-path-relocated",
+				relocated: [
+					{
+						module: "standalone-in-memory-code-repository",
+						from: "repositories.code.memory.defaultExpiresIn",
+						to: "standalone-in-memory-code-repository.defaultExpiresIn",
+						environmentVariable: "STANDALONE_IN_MEMORY_CODE_REPOSITORY_DEFAULT_EXPIRES_IN",
+					},
+					{
+						module: "standalone-in-memory-code-repository",
+						from: "repositories.code.redis.endpointUri",
+						to: null,
+					},
+				],
+			},
+		});
+	});
+
+	it.each([
+		[
+			"CLIENT_CODE_DEFAULT_EXPIRES_IN",
+			"900",
+			{
+				to: "STANDALONE_IN_MEMORY_CODE_REPOSITORY_DEFAULT_EXPIRES_IN",
+				path: "standalone-in-memory-code-repository.defaultExpiresIn",
+				state: "unset",
+			},
+		],
+		["CLIENT_CODE_ENDPOINT_URI", "redis://x", { to: null, path: null, state: "removed" }],
+		["CLIENT_CODE_PASSWORD", "p", { to: null, path: null, state: "removed" }],
+	])("has boot refuse %s", async (from, value, expected) => {
+		await expect(bootTemplate({ env: { [from]: value } })).rejects.toMatchObject({
+			details: {
+				reason: "environment-variable-renamed",
+				renamed: [{ module: "standalone-in-memory-code-repository", from, ...expected }],
+			},
+		});
+	});
+});
+
+describe("audit-sink", () => {
+	it("builds the sink ADAPTERS_AUDIT_SINK names, the template's logger by default", async () => {
+		const shipped = await bootTemplate();
+		const console = await bootTemplate({ env: { ADAPTERS_AUDIT_SINK: "console" } });
+		try {
+			expect(shipped.components.auditSink?.kind).toBe("logger");
+			expect(console.components.auditSink?.kind).toBe("console");
+		} finally {
+			await shipped.dispose();
+			await console.dispose();
+		}
+	});
+
+	it("reads its own section, audit-sink, and requires no configuration", () => {
+		const own = readOwnLayers(ownFiles(), { env: BASE_ENV });
+		const sink = named(buildModules(readSwitches(own), { environment: "development" }), "audit-sink");
+		expect(sink.section?.at).toBeUndefined();
+		expect(sink.requires ?? []).not.toContain("config");
+	});
+
+	it("has boot refuse a sink's options at audit.sink, the path they moved from, naming audit-sink", async () => {
+		await expect(bootTemplate({ hocon: "audit.sink.console.pretty = true\n" })).rejects.toMatchObject(
+			{
+				details: {
+					reason: "config-path-relocated",
+					relocated: [
+						{
+							module: "audit-sink",
+							from: "audit.sink.console.pretty",
+							to: "audit-sink.console.pretty",
+						},
+					],
+				},
+			},
+		);
 	});
 });

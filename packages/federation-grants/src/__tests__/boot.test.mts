@@ -178,6 +178,8 @@ interface Setup {
 	readonly revocation?: "memory" | "older" | "absent";
 	readonly withLimiter?: boolean;
 	readonly withAudit?: boolean;
+	/** Also writes `audit.sink.type = "none"`, the path the audit sink's declared absence moved from. */
+	readonly oldAuditDeclaration?: boolean;
 	readonly provider?: FederationProvider | null;
 	/** The federation module listed BEFORE the routes, or after. */
 	readonly federationFirst?: boolean;
@@ -261,7 +263,10 @@ const boot = (setup: Setup) => {
 					upstream: { enabled: true, issuer: "https://issuer.example", clientId: "cid" },
 				},
 				rateLimit: { failMode: "closed" },
-				...(setup.withAudit === false ? {} : { audit: { sink: { type: "none" } } }),
+				...(setup.withAudit === false
+					? {}
+					: { core: { ...makeValidCoreConfig().core, declaredAbsent: ["auditSink"] } }),
+				...(setup.oldAuditDeclaration === true ? { audit: { sink: { type: "none" } } } : {}),
 				"federation-grants": {
 					enabled: setup.enabled ?? true,
 					connections: setup.connections ?? { calendar: CONNECTION },
@@ -430,8 +435,16 @@ describe("enabling the feature", () => {
 		await expect(boot({ provider: formPost })).rejects.toThrow(/form_post/);
 	});
 
-	it("refuses to discard every disclosure without being told to", async () => {
-		await expect(boot({ withAudit: false })).rejects.toThrow(/auditSink|audit\.sink\.type/);
+	it("refuses to discard every disclosure without being told to, naming core.declaredAbsent", async () => {
+		await expect(boot({ withAudit: false })).rejects.toThrow(
+			/list "auditSink" in core\.declaredAbsent/,
+		);
+	});
+
+	it('does not take audit.sink.type = "none", where the declaration was, as the declaration', async () => {
+		await expect(boot({ withAudit: false, oldAuditDeclaration: true })).rejects.toThrow(
+			/core\.declaredAbsent/,
+		);
 	});
 
 	it("boots with an empty connection map, because removing the last one is operable", async () => {

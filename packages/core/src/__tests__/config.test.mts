@@ -20,6 +20,27 @@ describe("provider config", () => {
 		expect(sections["key-store"]).toBeUndefined();
 		expect(sections.logging).toBeUndefined();
 		expect(sections.http).toBeUndefined();
+		// Which adapter fills a slot is the composition root's (`adapters`), the
+		// repositories' and the audit sink's settings their modules': core ships
+		// none of them.
+		for (const section of [
+			"audit",
+			"repositories",
+			"rateLimiter",
+			"userSessionStores",
+			"accessTokenDenylist",
+			"replaySeenSet",
+			"consentStore",
+			"federationTokenStore",
+			"federationGrantStore",
+			"federationGrantIntentStore",
+			"mfaFactorStore",
+			"mfaTransactionStore",
+			"redisCodeRepository",
+		]) {
+			expect(sections[section], section).toBeUndefined();
+		}
+		expect((config.oauth as Record<string, unknown>).code).toBeUndefined();
 		expect(config["redis-session-stores"]).toBeUndefined();
 		expect(config.oauth.oidcMode).toBe("oidc-required");
 		expect(config.session).toBeUndefined();

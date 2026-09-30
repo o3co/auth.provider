@@ -15,21 +15,26 @@
  */
 
 /**
- * The template's own modules' sections, through the template's own reading
- * of the full set: the operator's layer and environment read once, phase
- * one's switches, then the layers over every loaded package's
- * `reference.conf` handed to boot. `logging`, `http` (with its CORS list),
- * `key-store` and `redis-clients` each read the section named after it. A
- * path they moved from refuses boot naming the new one, a key a section does
- * not declare is refused, and a variable renamed with them refuses boot
- * unless its new name carries the same value.
+ * The template's own sections, through the template's own reading of the
+ * full set: the operator's layer and environment read once, phase one's
+ * switches, then the layers over every loaded package's `reference.conf`
+ * handed to boot. `logging`, `http` (with its CORS list), `key-store`,
+ * `redis-clients`, the code repositories and `audit-sink` each read the
+ * section named after it; which adapter fills a slot is the composition
+ * root's own `adapters`, which phase one reads alone. A path they moved from
+ * refuses naming the new one, a key a section does not declare is refused,
+ * and a variable renamed with them refuses unless its new name carries the
+ * same value.
  */
 
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { BootError } from "@o3co/auth-provider-core";
-import { SINGLE_ENV } from "@o3co/auth-provider-standalone/src/__tests__/all-modules-composition.fixture.mts";
+import {
+	MULTI_ENV,
+	SINGLE_ENV,
+} from "@o3co/auth-provider-standalone/src/__tests__/all-modules-composition.fixture.mts";
 import { afterAll, afterEach, describe, expect, it } from "vitest";
 import { composeFullSet, type FullSet, type FullSetOptions } from "./full-set.fixture.mts";
 
@@ -314,5 +319,109 @@ describe("a variable the template's own modules renamed, through the template's 
 		const composition = await boot({ ...loading(row), env: { ...SINGLE_ENV, [from]: value, [to]: value } });
 
 		expect(parsedAt(composition, path)).toEqual(parsed);
+	});
+});
+
+/** What phase one refused the full set with, before any module was chosen. */
+async function phaseOneRefused(options: FullSetOptions): Promise<RangeError> {
+	try {
+		current = await composeFullSet(options);
+	} catch (err) {
+		if (err instanceof RangeError) return err;
+		throw err;
+	}
+	throw new Error("the full set booted");
+}
+
+describe("the composition root's adapters, read by phase one alone", () => {
+	it("ADAPTERS_CONSENT_STORE=none leaves the consent stores out", async () => {
+		const composition = await boot({ env: { ...SINGLE_ENV, ADAPTERS_CONSENT_STORE: "none" } });
+
+		expect(composition.modules.map((module) => module.name)).not.toContain(
+			"core-consent-store-memory",
+		);
+		expect(composition.config).not.toHaveProperty("adapters");
+	});
+
+	it("ADAPTERS_AUDIT_SINK=console builds core's console sink", async () => {
+		const composition = await boot({ env: { ...SINGLE_ENV, ADAPTERS_AUDIT_SINK: "console" } });
+
+		expect(composition.handle.components.auditSink?.kind).toBe("console");
+	});
+
+	it.each([
+		['rateLimiter.adapter = "memory"', "rateLimiter.adapter", "adapters.rateLimiter", "ADAPTERS_RATE_LIMITER"],
+		['oauth.code.adapter = "memory"', "oauth.code.adapter", "adapters.codeRepository", "ADAPTERS_CODE_REPOSITORY"],
+		['audit.sink.type = "logger"', "audit.sink.type", "adapters.auditSink", "ADAPTERS_AUDIT_SINK"],
+	])("%s: refused before boot, naming %s's new path and variable", async (hocon, from, to, variable) => {
+		const err = await phaseOneRefused({ operatorHocon: `${hocon}\n` });
+
+		expect(err.message).toContain(`${from} has moved to ${to}`);
+		expect(err.message).toContain(variable);
+	});
+
+	it.each([
+		["RATE_LIMITER_ADAPTER", "ADAPTERS_RATE_LIMITER"],
+		["OAUTH_CODE_ADAPTER", "ADAPTERS_CODE_REPOSITORY"],
+		["CLIENT_USER_TYPE", "ADAPTERS_USER_REPOSITORY"],
+		["AUDIT_SINK_TYPE", "ADAPTERS_AUDIT_SINK"],
+	])("%s set alone: refused before boot, naming %s", async (from, to) => {
+		const err = await phaseOneRefused({ env: { ...without(to), [from]: "memory" } });
+
+		expect(err.message).toContain(`${from} was renamed ${to}`);
+	});
+});
+
+describe("the code repositories' own sections", () => {
+	it("standalone-in-memory-code-repository.defaultExpiresIn, which STANDALONE_IN_MEMORY_CODE_REPOSITORY_DEFAULT_EXPIRES_IN sets", async () => {
+		const composition = await boot({
+			env: { ...SINGLE_ENV, STANDALONE_IN_MEMORY_CODE_REPOSITORY_DEFAULT_EXPIRES_IN: "900" },
+		});
+
+		expect(parsedAt(composition, "standalone-in-memory-code-repository.defaultExpiresIn")).toBe(
+			900,
+		);
+	});
+
+	it("redis-code-repository, which REDIS_CODE_REPOSITORY_* set, on the shared socket", async () => {
+		const composition = await boot({
+			env: {
+				...MULTI_ENV,
+				REDIS_CODE_REPOSITORY_KEY_PREFIX: "tenant-a:code:",
+				REDIS_CODE_REPOSITORY_DEFAULT_EXPIRES_IN: "300",
+			},
+			shippedRefreshTokenFamilyStore: true,
+			stores: "redis",
+		});
+
+		expect(parsedAt(composition, "redis-code-repository")).toEqual({
+			keyPrefix: "tenant-a:code:",
+			defaultExpiresIn: 300,
+		});
+	});
+
+	it.each([
+		[
+			SINGLE_ENV,
+			"standalone-in-memory-code-repository",
+			"STANDALONE_IN_MEMORY_CODE_REPOSITORY_DEFAULT_EXPIRES_IN",
+			"standalone-in-memory-code-repository.defaultExpiresIn",
+		],
+		[
+			MULTI_ENV,
+			"redis-code-repository",
+			"REDIS_CODE_REPOSITORY_DEFAULT_EXPIRES_IN",
+			"redis-code-repository.defaultExpiresIn",
+		],
+	])("CLIENT_CODE_DEFAULT_EXPIRES_IN set alone: refused, naming %s's new variable", async (env, module, to, path) => {
+		const err = await refused({
+			env: { ...env, CLIENT_CODE_DEFAULT_EXPIRES_IN: "300" },
+			...(env === MULTI_ENV ? { shippedRefreshTokenFamilyStore: true, stores: "redis" as const } : {}),
+		});
+
+		expect(err.details).toEqual({
+			reason: "environment-variable-renamed",
+			renamed: [{ module, from: "CLIENT_CODE_DEFAULT_EXPIRES_IN", to, path, state: "unset" }],
+		});
 	});
 });

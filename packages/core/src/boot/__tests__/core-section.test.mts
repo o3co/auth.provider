@@ -196,6 +196,32 @@ describe("core's own section, strict", () => {
 	});
 });
 
+describe("core.declaredAbsent, the slots a composition runs without on purpose", () => {
+	it("reads a list of slot names, which no variable sets", async () => {
+		const handle = await boot({}, 'core.declaredAbsent = ["auditSink"]\n');
+		const config = handle.components.config as { core?: { declaredAbsent?: unknown } };
+		expect(config.core?.declaredAbsent).toEqual(["auditSink"]);
+		await handle.dispose();
+	});
+
+	it("ships none: core's reference.conf declares nothing absent", () => {
+		const reference = parseFile(fileURLToPath(coreReference()), {
+			env: { OAUTH_JWT_ISSUER: "https://auth.test" },
+		}).toObject() as { core?: { declaredAbsent?: unknown } };
+		expect(reference.core?.declaredAbsent).toBeUndefined();
+	});
+
+	it.each([
+		['core.declaredAbsent = "auditSink"', "a name that is not in a list"],
+		['core.declaredAbsent = [""]', "an empty name"],
+	])("refuses %s (%s), naming core.declaredAbsent", async (hocon) => {
+		const err = await refusal(boot({}, `${hocon}\n`));
+
+		expect(err.reason).toBe("config-validation-failed");
+		expect(err.message).toContain("core.declaredAbsent");
+	});
+});
+
 describe("a root that parses its resolved configuration with AppConfigSchema before boot", () => {
 	/**
 	 * `operator` HOCON over core's own `reference.conf` and the fixture's

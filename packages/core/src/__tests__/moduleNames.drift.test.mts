@@ -213,6 +213,15 @@ describe("the module-name scan", () => {
 	});
 });
 
+describe("no module the repository ships is named after a reserved section", () => {
+	it("names none adapters, the composition root's own section, nor core", () => {
+		const reserved = NAMES.filter(
+			(found) => found.name === "adapters" || found.name === "core",
+		).map((found) => `${found.file}:${found.line}: ${found.text}`);
+		expect(reserved).toEqual([]);
+	});
+});
+
 describe("every module the repository ships is named in kebab-case", () => {
 	it("names each one in kebab-case, in a form the scan can read", () => {
 		const offenders = NAMES.filter(
