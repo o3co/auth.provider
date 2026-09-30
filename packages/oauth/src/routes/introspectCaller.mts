@@ -33,7 +33,7 @@ import {
 } from "@o3co/auth-provider-core";
 import type { Request, RequestHandler, Response } from "express";
 import { parseAccessTokenHeader } from "../accessTokenHeader.mjs";
-import { introspectionOutageAnswers } from "./introspectUnavailable.mjs";
+import { createIntrospectUnavailableAnswers } from "./introspectUnavailable.mjs";
 
 export const createIntrospectCallerCheck = ({
 	keyStore,
@@ -55,7 +55,10 @@ export const createIntrospectCallerCheck = ({
 	readonly auditSink: AuditSink | undefined;
 	readonly logger: Logger;
 }): RequestHandler => {
-	const { answerIntrospectionUnavailable } = introspectionOutageAnswers({ auditSink, logger });
+	const { answerIntrospectionUnavailable } = createIntrospectUnavailableAnswers({
+		auditSink,
+		logger,
+	});
 	return async (req: Request, res: Response, next) => {
 		// Bearer (RFC 6750 §2.1) or DPoP (RFC 9449 §7.1) — the caller's own
 		// access token used as the introspection credential. Which scheme a

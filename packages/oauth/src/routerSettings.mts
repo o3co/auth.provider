@@ -32,12 +32,12 @@ import {
 	type SessionRequirementResolver,
 	stepUpReach,
 } from "@o3co/auth-provider-core";
-import { logUnsatisfiableAcrValues, vouchableAcrValues } from "../acrValues.mjs";
+import { logUnsatisfiableAcrValues, vouchableAcrValues } from "./acrValues.mjs";
 import {
 	type ClientIdMetadataDocumentOptions,
 	withClientIdMetadataDocuments,
-} from "../clients/clientIdMetadataDocument.mjs";
-import { type ResolvedOAuthOptions, resolveOAuthOptions } from "../resolveOAuthOptions.mjs";
+} from "./clients/clientIdMetadataDocument.mjs";
+import { type ResolvedOAuthOptions, resolveOAuthOptions } from "./resolveOAuthOptions.mjs";
 
 /** What {@link resolveRouterSettings} resolved. */
 export interface RouterSettings {
@@ -74,7 +74,7 @@ export const resolveRouterSettings = ({
 	// Every `oauth.*` knob this router consumes is resolved exactly once,
 	// here, at router composition; see `resolveOAuthOptions` for the defensive
 	// reads and per-field defaults. The /authorize handler receives the whole
-	// object (`./authorize.mts`).
+	// object (routes/authorize.mts).
 	const options = resolveOAuthOptions(config);
 	// `/authorize` answers `acr_values` only from the entries this composition
 	// can satisfy — the same table discovery advertises — and an entry dropped

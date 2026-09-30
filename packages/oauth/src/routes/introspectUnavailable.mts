@@ -31,7 +31,7 @@ import type { Request, Response } from "express";
 import { refuseVerificationUnavailable } from "../verificationUnavailable.mjs";
 
 /** The answers, reported through the router's audit sink and logger. */
-export const introspectionOutageAnswers = ({
+export const createIntrospectUnavailableAnswers = ({
 	auditSink,
 	logger,
 }: {

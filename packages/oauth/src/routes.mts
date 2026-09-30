@@ -69,14 +69,14 @@ import type {} from "express-session";
 import type { ClientIdMetadataDocumentOptions } from "./clients/clientIdMetadataDocument.mjs";
 import { createClientAuthMiddleware } from "./middleware/clientAuth.mjs";
 import { OAUTH_RATE_LIMIT_PREFIXES } from "./rateLimitPrefixes.mjs";
+import { resolveRouterSettings } from "./routerSettings.mjs";
 import { createAuthorizeHandler } from "./routes/authorize.mjs";
 import { createConsentRouter } from "./routes/consent.mjs";
 import * as federationTokenRoute from "./routes/federationToken.mjs";
 import { createIntrospectCallerCheck } from "./routes/introspectCaller.mjs";
-import { introspectionOutageAnswers } from "./routes/introspectUnavailable.mjs";
+import { createIntrospectUnavailableAnswers } from "./routes/introspectUnavailable.mjs";
 import * as logoutRoute from "./routes/logout.mjs";
 import { createRevokeRouter } from "./routes/revoke.mjs";
-import { resolveRouterSettings } from "./routes/routerSettings.mjs";
 import { createTokenHandler } from "./routes/token.mjs";
 import * as userinfo from "./routes/userinfo.mjs";
 import {
@@ -151,7 +151,7 @@ export const oauthRoutePaths = (mounted: {
  * `active: false` for a revoked family, an ended session or a compound `cnf`;
  * otherwise RFC 7662 §2.2's metadata. An outage is `503`, never a verdict.
  */
-const createIntrospectionHandler = ({
+const createIntrospectHandler = ({
 	keyStore,
 	canonicalIssuer,
 	legacyTypAccept: legacyTypAcceptOpt,
@@ -172,10 +172,11 @@ const createIntrospectionHandler = ({
 	readonly auditSink: AuditSink | undefined;
 	readonly logger: Logger;
 }): RequestHandler => {
-	const { answerIntrospectionUnavailable, answerStoreUnavailable } = introspectionOutageAnswers({
-		auditSink,
-		logger,
-	});
+	const { answerIntrospectionUnavailable, answerStoreUnavailable } =
+		createIntrospectUnavailableAnswers({
+			auditSink,
+			logger,
+		});
 	return async (req: Request, res: Response) => {
 		const { token } = req.body;
 		if (!token) {
@@ -649,7 +650,7 @@ export const createOAuthRouter = async (
 				auditSink,
 				logger,
 			}),
-			createIntrospectionHandler({
+			createIntrospectHandler({
 				keyStore,
 				canonicalIssuer,
 				legacyTypAccept: legacyTypAcceptOpt,
