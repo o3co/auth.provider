@@ -20,6 +20,7 @@
  */
 
 import { describe, expect, it } from "vitest";
+import { normaliseMailAddress } from "#/mail/address.mjs";
 import type { MfaFactor } from "#/mfa/factor.mjs";
 import {
 	createTestMfaDigests,
@@ -132,7 +133,7 @@ describe("createTestMfaFactor with mail", () => {
 		expect(factor.reusableChallenge).toBe(true);
 	});
 
-	it("asks for its enrollment code and each challenge's code to be mailed, each with an expiry ten minutes on and a new code at each challenge, never answering them to the page, and verifies the latest", async () => {
+	it("asks for its enrollment code and each challenge's code to be mailed, each with an expiry ten minutes on and a new code at each challenge, a login code with the digest of the address it confirmed, never answering them to the page, and verifies the latest", async () => {
 		const factor = createTestMfaFactor({ mail: true });
 		const start = await factor.beginEnrollment({ ...ctx, user: USER, factors: [] });
 		expect(start.mail).toEqual({
@@ -150,7 +151,15 @@ describe("createTestMfaFactor with mail", () => {
 			proof: testMfaFactorProofs.enrollmentProof(start),
 		});
 		if (!done.ok) throw new Error("the mailed code did not complete the enrollment");
+		// It keeps the keyed digest of the address it confirmed, never the address.
 		expect(JSON.stringify(done.data)).not.toContain(USER.email);
+		const digests = createTestMfaDigests("test");
+		expect(
+			digests.matchesDigest(
+				[normaliseMailAddress(USER.email) as string],
+				done.data.addressDigest as never,
+			),
+		).toBe("match");
 		const enrolled = {
 			id: "f-1",
 			label: undefined,
@@ -165,6 +174,7 @@ describe("createTestMfaFactor with mail", () => {
 			purpose: "login_code",
 			code: expect.any(String),
 			expiresAtMs: ctx.nowMs + 600_000,
+			addressDigest: done.data.addressDigest,
 		});
 		expect(second.mail?.code).not.toBe(first.mail?.code);
 		expect(JSON.stringify(second.response)).not.toContain(second.mail?.code);

@@ -22,7 +22,9 @@
  * sign count that did not increase, opt in to a challenge that stays across
  * attempts, and say a user cannot enroll it without throwing (a throw reads
  * as an outage). A factor that mails a code answers its purpose and the code,
- * never text or a recipient: the coordinator keeps the state, then sends.
+ * never text or a recipient: the coordinator keeps the state, then sends. A
+ * login code carries the keyed digest of the address the factor was enrolled
+ * with; the coordinator sends it to the current address only on a match.
  *
  * These are type assertions: the file is in core's typecheck list.
  */
@@ -41,7 +43,9 @@ import type {
 	MfaFactorMailPurpose,
 	MfaFactorState,
 	MfaKeyedDigest,
+	MfaLoginCodeMail,
 	MfaVerification,
+	MfaVerifyContext,
 } from "#/mfa/factor.mjs";
 
 describe("the MfaFactor contract", () => {
@@ -109,10 +113,16 @@ describe("the MfaFactor contract", () => {
 			readonly code: string;
 			readonly expiresAtMs?: number;
 		}>();
+		expectTypeOf<MfaLoginCodeMail>().toEqualTypeOf<{
+			readonly purpose: "login_code";
+			readonly code: string;
+			readonly expiresAtMs?: number;
+			readonly addressDigest: MfaKeyedDigest;
+		}>();
 		expectTypeOf<MfaChallenge>().toEqualTypeOf<{
 			readonly state?: MfaFactorState;
 			readonly response: unknown;
-			readonly mail?: MfaFactorMail<"login_code">;
+			readonly mail?: MfaLoginCodeMail;
 		}>();
 		expectTypeOf<MfaEnrollmentStart>().toEqualTypeOf<{
 			readonly state: MfaFactorState;
@@ -125,6 +135,11 @@ describe("the MfaFactor contract", () => {
 		expectTypeOf<MfaFactor["beginEnrollment"]>().toEqualTypeOf<
 			(ctx: MfaEnrollmentContext) => Promise<MfaEnrollmentStart>
 		>();
+		expect(true).toBe(true);
+	});
+
+	it("hands a verification after a mailed login code the current address's digest, so a factor can keep it under the ring's first key", () => {
+		expectTypeOf<MfaVerifyContext["addressDigest"]>().toEqualTypeOf<MfaKeyedDigest | undefined>();
 		expect(true).toBe(true);
 	});
 

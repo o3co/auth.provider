@@ -494,6 +494,11 @@ const VOCABULARY: readonly VocabularyRow[] = [
 		definition: /(?:function|const)\s+hasControlCharacter\b/,
 	},
 	{
+		concept: "an email address as the provider digests and compares it",
+		home: "packages/core/src/mail/address.mts",
+		definition: /(?:function|const)\s+normaliseMailAddress\b/,
+	},
+	{
 		concept: "what a mail sender answered — delivered, refused at a limit, or else an outage",
 		home: "packages/core/src/mail/outcome.mts",
 		definition: /(?:function|const)\s+mailSendOutcome\b/,
