@@ -214,27 +214,40 @@ const signerBreach = (signer: CsrfTokenSigner): string | undefined => {
 };
 
 /**
- * Reject a protection with nothing to sign with, or with a signer that breaks
+ * The signer a protection signs and checks with: `sign` and `verify` read off
+ * the given signer once, called on it, and probed. A protection never reads
+ * them again, so a signer object changed after construction — a method
+ * replaced, or an accessor answering another one — cannot pass a forged token
+ * or mint with an unprobed `sign`.
+ *
+ * Refuses a protection with nothing to sign with, or with a signer that breaks
  * the contract. A caller passing a `secret` in a signer's place, or a signer
  * whose `verify` answers a promise, would otherwise build a protection that
  * fails on its first request — or accepts a forged token — instead of refusing
  * at boot.
  */
-const assertSigner: (signer: unknown) => asserts signer is CsrfTokenSigner = (signer) => {
+const pinSigner = (signer: unknown): CsrfTokenSigner => {
 	const candidate = signer as Partial<CsrfTokenSigner> | null | undefined;
-	if (typeof candidate?.sign !== "function" || typeof candidate.verify !== "function") {
+	const sign = candidate?.sign;
+	const verify = candidate?.verify;
+	if (typeof sign !== "function" || typeof verify !== "function") {
 		throw new Error(`csrf: signer is required: ${PASS_A_SIGNER}`);
 	}
-	const breach = signerBreach(candidate as CsrfTokenSigner);
+	const pinned: CsrfTokenSigner = Object.freeze({
+		sign: (payload: string) => sign.call(candidate, payload),
+		verify: (payload: string, signature: string) => verify.call(candidate, payload, signature),
+	});
+	const breach = signerBreach(pinned);
 	if (breach !== undefined) {
 		throw new Error(
 			`csrf: the signer does not keep the csrfTokenSigner contract (${breach}): ${PASS_A_SIGNER}`,
 		);
 	}
+	return pinned;
 };
 
 export const createCsrfProtection = (options: CsrfProtectionOptions): CsrfProtection => {
-	assertSigner(options.signer);
+	const signer = pinSigner(options.signer);
 	const cookieName = options.cookieName ?? DEFAULT_CSRF_COOKIE_NAME;
 	const headerName = (options.headerName ?? DEFAULT_CSRF_HEADER_NAME).toLowerCase();
 	const bodyField = options.bodyField ?? DEFAULT_CSRF_BODY_FIELD;
@@ -242,7 +255,6 @@ export const createCsrfProtection = (options: CsrfProtectionOptions): CsrfProtec
 	assertValidTtlSeconds(ttlSeconds);
 	const cookie = options.cookie ?? { secure: true, sameSite: "lax" as const };
 	const now = options.now ?? Date.now;
-	const { signer } = options;
 
 	const mint = (): string => {
 		const expires = Math.floor(now() / 1000) + ttlSeconds;

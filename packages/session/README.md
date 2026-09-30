@@ -574,7 +574,9 @@ login page or protect their own routes. `createCsrfProtection` and
 ([`src/csrf-token-signer.mts`](src/csrf-token-signer.mts)), which holds the
 secret to core's entropy floor — and refuse to be built without one, or with
 one that breaks core's contract: they sign two payloads and check the
-signatures, a changed one and another payload's, before building.
+signatures, a changed one and another payload's, before building. They read
+`sign` and `verify` off the signer once, so a signer object changed afterwards
+changes nothing they mint or accept.
 
 ### What a session records about the authentication
 
