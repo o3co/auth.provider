@@ -616,13 +616,36 @@ describe("boot, over a configuration that captures the modules' renamed variable
 		await handle.dispose();
 	});
 
-	it("refuses a session-store with no secret, naming SESSION_STORE_SECRET", async () => {
-		const err = await refusal((config) => {
-			const { secret: _secret, ...store } = config["session-store"] as Record<string, unknown>;
-			return { ...config, "session-store": store };
-		});
+	/** The fixture's configuration without `session-store.secret`. */
+	const withoutSecret = (config: Record<string, unknown>) => {
+		const { secret: _secret, ...store } = config["session-store"] as Record<string, unknown>;
+		return { ...config, "session-store": store };
+	};
 
+	it("refuses a session-store with no secret where the signer is built, naming SESSION_STORE_SECRET", async () => {
+		const err = await refusal(withoutSecret);
+
+		expect(err.reason).toBe("provides-factory-failed");
 		expect(err.message).toContain("session-store.secret is not set");
+		expect(err.message).toContain("SESSION_STORE_SECRET");
+	});
+
+	it("refuses a session-store with no secret at its route when the store is installed alone", async () => {
+		const config = withSessionCaptures(
+			withoutSecret(makeValidAppConfig() as unknown as Record<string, unknown>),
+		);
+		const err = await createApp({
+			modules: [sessionStoreModule],
+			bootstrapComponents: { config, pathResolver: (s: string) => s } as never,
+		}).then(
+			async (handle) => {
+				await handle.dispose();
+				return expect.fail("boot should have been refused");
+			},
+			(caught: unknown) => caught as BootError,
+		);
+
+		expect(err.reason).toBe("contribute-factory-failed");
 		expect(err.message).toContain("SESSION_STORE_SECRET");
 	});
 

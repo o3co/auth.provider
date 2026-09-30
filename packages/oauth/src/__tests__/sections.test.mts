@@ -231,6 +231,7 @@ describe("the grant switches, read from the configuration handed to the module",
 		[true, ["session"]],
 		["true", ["session"]],
 		["1", ["session"]],
+		["TRUE", ["session"]],
 		[false, []],
 		["false", []],
 		["", []],
@@ -427,6 +428,23 @@ describe("boot, over a configuration that captures the modules' renamed variable
 			renamed: [{ module, from, to, path, state: "unset" }],
 		});
 	});
+
+	it.each([
+		["yes", { "oauth-session": { enabled: "yes" } }, "oauth-session.enabled"],
+		[
+			"on",
+			{ "oauth-authorization": { grants: { clientCredentials: { enabled: "on" } } } },
+			"oauth-authorization.grants.clientCredentials.enabled",
+		],
+	] as const)(
+		"refuses a switch set to %j, naming it: it reads no guess",
+		async (_value, sections, key) => {
+			const err = await refusal((config) => ({ ...config, ...sections }));
+
+			expect(err.reason).toBe("config-validation-failed");
+			expect(err.message).toContain(key);
+		},
+	);
 
 	it.each([
 		["oauth-session", { enabeld: true }, "enabeld"],
