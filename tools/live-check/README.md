@@ -1,6 +1,6 @@
 # live-check — a real IdP login against this checkout
 
-Last updated: 2026-09-24
+Last updated: 2026-10-01
 
 A hand-run check: boot the standalone template from the working tree with its
 **default** configuration, sign in at a real identity provider in a browser,
@@ -114,7 +114,7 @@ with that default on; the issue for the provider says what to do next.
 
 ```
 browser ──▶ :3210  live-check front (proxy.mjs)  ──▶ :3000  standalone template (this checkout, default config)
-             │  /                 the page                    │  federations.<name>: enabled, your client,
+             │  /                 the page                    │  core.federations.<name>: enabled, your client,
              │  /__live-check/*   the record                  │    callbackURL → :3210, clientUrl → :3210/
              │  /__store/*        a user Store that accepts   │  repositories.user.http → :3210/__store/*
              │                    every <federation>:<sub>    │  Redis: :6379 (docker or yours)
@@ -127,7 +127,7 @@ browser ──▶ :3210  live-check front (proxy.mjs)  ──▶ :3000  standalo
   and by nothing else the tool runs.
 - The provider runs the template's `src/app.mts` (`tsx`, no build) with
   `config/application.conf` as shipped plus one overlay,
-  `config/live-check.local.conf` (`federations.<name>.clientUrl`, the one key
+  `config/live-check.local.conf` (`core.federations.<name>.clientUrl`, the one key
   a check needs that has no environment form), written at `start`, removed at
   `stop`, and git-ignored by the template as `config/*.local.conf`. Everything
   else goes in through the environment switches the template documents.
@@ -149,7 +149,7 @@ template's own `CORE_FEDERATIONS_<NAME>_*` switches for the client. `start` adds
 
 - **Google** — `google.env.example`; exercised (#600).
 - **Any OpenID Connect IdP** (Okta, Clerk, Entra ID, Auth0, Keycloak, …) —
-  through the template's generic `federations.oidc` entry: copy
+  through the template's generic `core.federations.oidc` entry: copy
   `oidc.env.example` to `<idp>.env`, set the issuer, the client, and
   `LIVE_CHECK_EXPECTED_ISS` to the issuer, then `start <idp>`. Not yet
   exercised against a real IdP; the first run goes on its issue and that note
