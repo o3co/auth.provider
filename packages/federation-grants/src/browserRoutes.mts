@@ -68,6 +68,7 @@ import {
 	type ClientRepository,
 	type CookieCarrier,
 	type CsrfGuard,
+	type CsrfVerdict,
 	checkCanonicalIssuer,
 	checkResolver,
 	checkWithFailMode,
@@ -193,6 +194,19 @@ const NO_PENDING =
 	"no pending consent for this challenge: it was answered, has expired, or was not issued to this session; start again";
 
 const BODY_LIMIT = "8kb";
+
+/**
+ * The consent answer's `error_description` for each reason the `csrfGuard`
+ * refuses one: an origin it does not accept, or, with none named, a token
+ * that is absent or does not check out.
+ */
+const CSRF_REFUSAL: Readonly<
+	Record<Extract<CsrfVerdict, { outcome: "refused" }>["reason"], string>
+> = Object.freeze({
+	foreign_origin: "cross-site answer refused",
+	token_absent: "no origin and no valid csrf token",
+	token_invalid: "no origin and no valid csrf token",
+});
 
 // ---------------------------------------------------------------------------
 // Transport
@@ -853,19 +867,11 @@ export function createFederationGrantBrowserRouter(
 		parserRefusals,
 		admitted(shuttingDownJson, async (req, res) => {
 			try {
-				// The deployment's CSRF policy, before the session or the challenge
-				// is read: the page's form post names the issuer's origin; an answer
-				// naming no origin at all echoes the guard's token.
+				// Asked before the session or the challenge is read, so a refused
+				// answer spends nothing.
 				const verdict = options.csrfGuard.check(req);
 				if (verdict.outcome === "refused") {
-					jsonError(
-						res,
-						403,
-						"invalid_request",
-						verdict.reason === "foreign_origin"
-							? "cross-site answer refused"
-							: "no origin and no valid csrf token",
-					);
+					jsonError(res, 403, "invalid_request", CSRF_REFUSAL[verdict.reason]);
 					return;
 				}
 				const body = (req.body ?? {}) as Record<string, unknown>;

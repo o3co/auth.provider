@@ -306,7 +306,8 @@ const requireCsrfGuard = (
 				"POST /session/federation-grants/consent, the user's answer, is made with the browser's " +
 				"session cookie and is held to the deployment's CSRF policy — the one /session/login runs, " +
 				"an Origin/Referer check against session.csrf.trustedOrigins and a signed double-submit " +
-				"token — through the csrfGuard slot the session module (sessionModule) provides",
+				"token — through the csrfGuard slot the session module (sessionModule) provides. " +
+				"Install the session module, or leave federation grants disabled.",
 		);
 	}
 	return deps.csrfGuard;
