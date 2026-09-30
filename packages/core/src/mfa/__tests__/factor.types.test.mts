@@ -28,7 +28,6 @@
  */
 
 import { describe, expect, expectTypeOf, it } from "vitest";
-import type { MailPurpose } from "#/mail/types.mjs";
 import type {
 	MfaCeremonyContext,
 	MfaChallenge,
@@ -39,6 +38,7 @@ import type {
 	MfaEnrollmentStart,
 	MfaFactor,
 	MfaFactorMail,
+	MfaFactorMailPurpose,
 	MfaFactorState,
 	MfaKeyedDigest,
 	MfaVerification,
@@ -97,20 +97,27 @@ describe("the MfaFactor contract", () => {
 		expect(true).toBe(true);
 	});
 
-	it("lets a challenge or an enrollment ask for a code to be mailed: its purpose and the code, beside the state and the response", () => {
+	it("lets a challenge ask for a login code to be mailed, and an enrollment for its enrollment code: the purpose, the code and, when it has one, its expiry", () => {
+		expectTypeOf<MfaFactorMailPurpose>().toEqualTypeOf<"login_code" | "email_factor_enrollment">();
 		expectTypeOf<MfaFactorMail>().toEqualTypeOf<{
-			readonly purpose: MailPurpose;
+			readonly purpose: MfaFactorMailPurpose;
 			readonly code: string;
+			readonly expiresAtMs?: number;
+		}>();
+		expectTypeOf<MfaFactorMail<"login_code">>().toEqualTypeOf<{
+			readonly purpose: "login_code";
+			readonly code: string;
+			readonly expiresAtMs?: number;
 		}>();
 		expectTypeOf<MfaChallenge>().toEqualTypeOf<{
 			readonly state?: MfaFactorState;
 			readonly response: unknown;
-			readonly mail?: MfaFactorMail;
+			readonly mail?: MfaFactorMail<"login_code">;
 		}>();
 		expectTypeOf<MfaEnrollmentStart>().toEqualTypeOf<{
 			readonly state: MfaFactorState;
 			readonly response: unknown;
-			readonly mail?: MfaFactorMail;
+			readonly mail?: MfaFactorMail<"email_factor_enrollment">;
 		}>();
 		expectTypeOf<NonNullable<MfaFactor["challenge"]>>().toEqualTypeOf<
 			(ctx: MfaChallengeContext) => Promise<MfaChallenge>
