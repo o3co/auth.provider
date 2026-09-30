@@ -123,7 +123,7 @@ const RENAMES = [
 ] as const;
 
 describe.each(RENAMES)(
-	"$old, renamed $renamed with a key moved out of another section",
+	"$old, renamed $renamed with a key moved in from outside its module's section",
 	({ old, renamed, path, key, value, read, other }) => {
 		it("set alone: refused, naming the new path and the new variable", async () => {
 			const err = await refused({ [old]: value });
