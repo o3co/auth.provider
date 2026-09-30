@@ -45,6 +45,7 @@ import request from "supertest";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { buildModules } from "../buildModules.mjs";
 import { resolveConfigPaths } from "../configPath.mjs";
+import { templateReference } from "../modules.mjs";
 import { cleanupAllowanceFor, FEDERATION_GRANTS_CLEANUP_ALLOWANCE_MS } from "../shutdown.mjs";
 
 // The same stand-ins `replica-safety.test.mts` boots under: no socket opens,
@@ -153,6 +154,7 @@ function resolveConfig(env: Record<string, string>): AppConfig {
 	const config = validate(
 		parseFile(envConfPath, { env })
 			.withFallback(parseFile(applicationConfPath, { env }))
+			.withFallback(parseFile(fileURLToPath(templateReference()), { env }))
 			.withFallback(parseFile(fileURLToPath(coreReference()), { env })),
 		AppConfigSchema,
 	);
@@ -184,7 +186,7 @@ const testKeyStoreModule = defineModule({
 			registerBuiltinKeyStores(factory);
 			return factory.create({
 				type: "local",
-				...((c as AppConfig).oauth.jwt.signingKey.local ?? {}),
+				...((c as AppConfig).oauth.jwt.signingKey?.local ?? {}),
 			});
 		},
 	},

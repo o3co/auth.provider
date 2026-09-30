@@ -151,7 +151,7 @@ const testKeyStoreModule = defineModule({
 			registerBuiltinKeyStores(factory);
 			return factory.create({
 				type: "local",
-				...((c as AppConfig).oauth.jwt.signingKey.local ?? {}),
+				...((c as AppConfig).oauth.jwt.signingKey?.local ?? {}),
 			});
 		},
 	},

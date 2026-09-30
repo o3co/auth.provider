@@ -56,6 +56,7 @@ import { validate } from "@o3co/ts.hocon/zod";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { buildModules } from "../buildModules.mjs";
 import { resolveConfigPaths } from "../configPath.mjs";
+import { templateReference } from "../modules.mjs";
 
 // The redis session-store builder, which the baseline selects, dynamically
 // imports these; mock them so no socket opens.
@@ -160,6 +161,7 @@ function resolveConfig(env: Record<string, string>): AppConfig {
 	return validate(
 		parseFile(envConfPath, { env })
 			.withFallback(parseFile(applicationConfPath, { env }))
+			.withFallback(parseFile(fileURLToPath(templateReference()), { env }))
 			.withFallback(parseFile(fileURLToPath(coreReference()), { env })),
 		AppConfigSchema,
 	);
@@ -191,7 +193,7 @@ const testKeyStoreModule = defineModule({
 			registerBuiltinKeyStores(factory);
 			return factory.create({
 				type: "local",
-				...((c as AppConfig).oauth.jwt.signingKey.local ?? {}),
+				...((c as AppConfig).oauth.jwt.signingKey?.local ?? {}),
 			});
 		},
 	},

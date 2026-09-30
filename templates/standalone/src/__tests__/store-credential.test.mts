@@ -51,7 +51,7 @@ import request from "supertest";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import { buildModules } from "../buildModules.mjs";
 import { resolveConfigPaths } from "../configPath.mjs";
-import { repositoriesModule } from "../modules.mjs";
+import { repositoriesModule, templateReference } from "../modules.mjs";
 
 const configDir = fileURLToPath(new URL("../../config", import.meta.url));
 
@@ -103,6 +103,7 @@ const resolve = (env: Record<string, string>): AppConfig => {
 	return validate(
 		parseFile(envConfPath, { env })
 			.withFallback(parseFile(applicationConfPath, { env }))
+			.withFallback(parseFile(fileURLToPath(templateReference()), { env }))
 			.withFallback(parseFile(fileURLToPath(coreReference()), { env })),
 		AppConfigSchema,
 	);
@@ -183,7 +184,7 @@ describe("a token the Store refuses, seen from outside the booted app", () => {
 				registerBuiltinKeyStores(factory);
 				return factory.create({
 					type: "local",
-					...((c as AppConfig).oauth.jwt.signingKey.local ?? {}),
+					...((c as AppConfig).oauth.jwt.signingKey?.local ?? {}),
 				});
 			},
 		},

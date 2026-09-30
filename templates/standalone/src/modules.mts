@@ -16,6 +16,7 @@
 import path from "node:path";
 import {
 	type AppConfig,
+	CoreConfigSchema,
 	consoleLogger,
 	createAuditSinkFactory,
 	createFederationTokenStoreFactory,
@@ -28,6 +29,7 @@ import {
 	createKeyStoreFactory,
 	createRepositoryFactories,
 	defineModule,
+	fullSectionsSchema,
 	type LifecycleRegistrar,
 	type Logger,
 	loggableError,
@@ -79,18 +81,53 @@ function flattenAdapterConfig(
 }
 
 /**
- * KeyStore module: provides the JWT signing KeyStore from config through the
- * built-in local/jwks adapters. Other deployments wire their own KeyStore
- * through a module of the same shape.
+ * The template's `config/reference.conf`, resolved from this file, which sits
+ * one directory under the template's root in `src/` and in `dist/` alike.
+ */
+const TEMPLATE_REFERENCE_HREF: string = new URL("../config/reference.conf", import.meta.url).href;
+
+/**
+ * The template's own defaults, `config/reference.conf`: every module in this
+ * file that owns a section declares it as the section's reference, so
+ * `moduleReferences` layers it beneath the template's own files and above
+ * core's. A new `URL` on every call, as `coreReference()` answers: one shared
+ * object could be changed in place for every holder.
+ */
+export function templateReference(): URL {
+	return new URL(TEMPLATE_REFERENCE_HREF);
+}
+
+/**
+ * The schemas the template's modules parse their sections with: core's
+ * declarations of those paths, which core's schema still mirrors, so each
+ * rule (the signing-key union, the Redis connection's shape) has one
+ * definition. A section refused here refuses the boot naming the operator's
+ * path.
+ */
+const SIGNING_KEY_SECTION = CoreConfigSchema.shape.oauth.shape.jwt.out.shape.signingKey.unwrap();
+const REDIS_CLIENTS_SECTION = fullSectionsSchema.shape.refreshTokenFamilyStore
+	.unwrap()
+	.shape.redis.unwrap();
+
+/**
+ * KeyStore module: provides the JWT signing KeyStore from its own section,
+ * `oauth.jwt.signingKey`, through the built-in local/jwks adapters. Nothing
+ * else reads the signing key: the modules that sign and verify require the
+ * `keyStore` slot. Other deployments wire their own KeyStore through a module
+ * of the same shape.
  */
 export const keyStoreModule: Module = defineModule({
 	name: "key-store",
-	requires: ["config"] as const,
+	section: {
+		schema: SIGNING_KEY_SECTION,
+		reference: templateReference(),
+		at: "oauth.jwt.signingKey",
+	},
 	provides: {
-		keyStore: async ({ config }) => {
+		keyStore: async ({ section }) => {
 			const factory = createKeyStoreFactory();
 			registerBuiltinKeyStores(factory);
-			return factory.create(flattenAdapterConfig((config as AppConfig).oauth.jwt.signingKey));
+			return factory.create(flattenAdapterConfig(section));
 		},
 	},
 });
@@ -297,13 +334,14 @@ export const storesModule: Module = defineModule({
  * those this template does not select; `all-modules-composition.multi.test.mts`
  * pins that.
  *
- * The connection reuses `refreshTokenFamilyStore.redis.{url, password}`;
- * being shared, it has no config key of its own. Per-store Redis instances
- * belong in a custom composition root. A missing URL throws: the HOCON
- * default in `application.conf` covers single-instance and dev use, and an
- * operator who removes it in production gets an explicit error, not a silent
- * localhost fallback. `io.quit()` is registered once with
- * `lifecycleRegistrar`, so `handle.dispose()` closes the connection.
+ * The connection's URL and password are the module's own section,
+ * `refreshTokenFamilyStore.redis { url, password }`, with the template's
+ * `config/reference.conf` holding the default URL. Per-store Redis instances
+ * belong in a custom composition root. An empty URL throws: the default
+ * covers single-instance and dev use, and an operator who blanks it gets an
+ * explicit error, not a silent localhost fallback. `io.quit()` is registered
+ * once with `lifecycleRegistrar`, so `handle.dispose()` closes the
+ * connection.
  *
  * `buildModules` adds this module only when some composed module needs a
  * Redis client (`usingRedisAnywhere`), so memory-only compositions open no
@@ -311,42 +349,51 @@ export const storesModule: Module = defineModule({
  */
 export const standaloneRedisClientsModule: Module = defineModule({
 	name: "redis-clients",
-	requires: ["config"] as const,
+	section: {
+		schema: REDIS_CLIENTS_SECTION,
+		reference: templateReference(),
+		at: "refreshTokenFamilyStore.redis",
+	},
 	optional: ["lifecycleRegistrar", "readinessRegistrar", "logger"] as const,
 	provides: {
 		refreshTokenFamilyClient: async ({
-			config,
+			section,
 			lifecycleRegistrar,
 			readinessRegistrar,
 			logger,
 		}) => {
-			return getOrCreateClients(config as AppConfig, lifecycleRegistrar, readinessRegistrar, logger)
+			return getOrCreateClients(section, lifecycleRegistrar, readinessRegistrar, logger)
 				.refreshTokenFamilyClient;
 		},
-		userSessionStoreClient: async ({ config, lifecycleRegistrar, readinessRegistrar, logger }) => {
-			return getOrCreateClients(config as AppConfig, lifecycleRegistrar, readinessRegistrar, logger)
+		userSessionStoreClient: async ({ section, lifecycleRegistrar, readinessRegistrar, logger }) => {
+			return getOrCreateClients(section, lifecycleRegistrar, readinessRegistrar, logger)
 				.userSessionStoreClient;
 		},
-		sessionRPRegistryClient: async ({ config, lifecycleRegistrar, readinessRegistrar, logger }) => {
-			return getOrCreateClients(config as AppConfig, lifecycleRegistrar, readinessRegistrar, logger)
+		sessionRPRegistryClient: async ({
+			section,
+			lifecycleRegistrar,
+			readinessRegistrar,
+			logger,
+		}) => {
+			return getOrCreateClients(section, lifecycleRegistrar, readinessRegistrar, logger)
 				.sessionRPRegistryClient;
 		},
 		sessionFamilyIndexClient: async ({
-			config,
+			section,
 			lifecycleRegistrar,
 			readinessRegistrar,
 			logger,
 		}) => {
-			return getOrCreateClients(config as AppConfig, lifecycleRegistrar, readinessRegistrar, logger)
+			return getOrCreateClients(section, lifecycleRegistrar, readinessRegistrar, logger)
 				.sessionFamilyIndexClient;
 		},
 		sessionFederationIndexClient: async ({
-			config,
+			section,
 			lifecycleRegistrar,
 			readinessRegistrar,
 			logger,
 		}) => {
-			return getOrCreateClients(config as AppConfig, lifecycleRegistrar, readinessRegistrar, logger)
+			return getOrCreateClients(section, lifecycleRegistrar, readinessRegistrar, logger)
 				.sessionFederationIndexClient;
 		},
 		// The grant store and the intent store, consumed by the Redis grant
@@ -354,48 +401,48 @@ export const standaloneRedisClientsModule: Module = defineModule({
 		// is installed, as every slot here is: a slot is cheap, the socket is
 		// the cost.
 		federationGrantStoreClient: async ({
-			config,
+			section,
 			lifecycleRegistrar,
 			readinessRegistrar,
 			logger,
 		}) => {
-			return getOrCreateClients(config as AppConfig, lifecycleRegistrar, readinessRegistrar, logger)
+			return getOrCreateClients(section, lifecycleRegistrar, readinessRegistrar, logger)
 				.federationGrantStoreClient;
 		},
 		federationGrantIntentStoreClient: async ({
-			config,
+			section,
 			lifecycleRegistrar,
 			readinessRegistrar,
 			logger,
 		}) => {
-			return getOrCreateClients(config as AppConfig, lifecycleRegistrar, readinessRegistrar, logger)
+			return getOrCreateClients(section, lifecycleRegistrar, readinessRegistrar, logger)
 				.federationGrantIntentStoreClient;
 		},
 		// The replay seen-set behind private_key_jwt client assertions.
-		replaySeenSetClient: async ({ config, lifecycleRegistrar, readinessRegistrar, logger }) => {
-			return getOrCreateClients(config as AppConfig, lifecycleRegistrar, readinessRegistrar, logger)
+		replaySeenSetClient: async ({ section, lifecycleRegistrar, readinessRegistrar, logger }) => {
+			return getOrCreateClients(section, lifecycleRegistrar, readinessRegistrar, logger)
 				.replaySeenSetClient;
 		},
-		rateLimiterClient: async ({ config, lifecycleRegistrar, readinessRegistrar, logger }) => {
-			return getOrCreateClients(config as AppConfig, lifecycleRegistrar, readinessRegistrar, logger)
+		rateLimiterClient: async ({ section, lifecycleRegistrar, readinessRegistrar, logger }) => {
+			return getOrCreateClients(section, lifecycleRegistrar, readinessRegistrar, logger)
 				.rateLimiterClient;
 		},
 		// `redisCodeRepositoryModule` consumes this slot when
 		// `oauth.code.adapter = "redis"`.
-		codeRepositoryClient: async ({ config, lifecycleRegistrar, readinessRegistrar, logger }) => {
-			return getOrCreateClients(config as AppConfig, lifecycleRegistrar, readinessRegistrar, logger)
+		codeRepositoryClient: async ({ section, lifecycleRegistrar, readinessRegistrar, logger }) => {
+			return getOrCreateClients(section, lifecycleRegistrar, readinessRegistrar, logger)
 				.codeRepositoryClient;
 		},
 		// A denylist is only worth having if every replica reads the same one,
 		// so it belongs on the connection the rest of the shared state uses
 		// rather than a second one.
 		accessTokenDenylistClient: async ({
-			config,
+			section,
 			lifecycleRegistrar,
 			readinessRegistrar,
 			logger,
 		}) => {
-			return getOrCreateClients(config as AppConfig, lifecycleRegistrar, readinessRegistrar, logger)
+			return getOrCreateClients(section, lifecycleRegistrar, readinessRegistrar, logger)
 				.accessTokenDenylistClient;
 		},
 		// The subject-level revocation pair, both required by
@@ -404,58 +451,63 @@ export const standaloneRedisClientsModule: Module = defineModule({
 		// Nothing in the standalone consumes them directly; they exist so that
 		// module can be selected.
 		subjectSessionIndexClient: async ({
-			config,
+			section,
 			lifecycleRegistrar,
 			readinessRegistrar,
 			logger,
 		}) => {
-			return getOrCreateClients(config as AppConfig, lifecycleRegistrar, readinessRegistrar, logger)
+			return getOrCreateClients(section, lifecycleRegistrar, readinessRegistrar, logger)
 				.subjectSessionIndexClient;
 		},
-		subjectRevocationClient: async ({ config, lifecycleRegistrar, readinessRegistrar, logger }) => {
-			return getOrCreateClients(config as AppConfig, lifecycleRegistrar, readinessRegistrar, logger)
+		subjectRevocationClient: async ({
+			section,
+			lifecycleRegistrar,
+			readinessRegistrar,
+			logger,
+		}) => {
+			return getOrCreateClients(section, lifecycleRegistrar, readinessRegistrar, logger)
 				.subjectRevocationClient;
 		},
 		// Required by `redisDeviceCodeStoreModule`. This template does not mount
 		// the device grant; the slot is provided anyway, so a deployment that
 		// adds `deviceGrantModule` with the Redis store is not refused at boot
 		// (`missing-required-component`) for a client slot nothing provided.
-		deviceCodeStoreClient: async ({ config, lifecycleRegistrar, readinessRegistrar, logger }) => {
-			return getOrCreateClients(config as AppConfig, lifecycleRegistrar, readinessRegistrar, logger)
+		deviceCodeStoreClient: async ({ section, lifecycleRegistrar, readinessRegistrar, logger }) => {
+			return getOrCreateClients(section, lifecycleRegistrar, readinessRegistrar, logger)
 				.deviceCodeStoreClient;
 		},
 		// The WebAuthn challenge store's client, for the device-code slot's
 		// reason: this template does not mount WebAuthn, and a deployment that
 		// adds `webauthnModule` with `redisChallengeStoreModule` would otherwise
 		// be refused at boot for a `challengeStoreClient` nothing provided.
-		challengeStoreClient: async ({ config, lifecycleRegistrar, readinessRegistrar, logger }) => {
-			return getOrCreateClients(config as AppConfig, lifecycleRegistrar, readinessRegistrar, logger)
+		challengeStoreClient: async ({ section, lifecycleRegistrar, readinessRegistrar, logger }) => {
+			return getOrCreateClients(section, lifecycleRegistrar, readinessRegistrar, logger)
 				.challengeStoreClient;
 		},
 		// The consent stores' clients. `redisConsentStoreModule` requires both
 		// (it provides the consent records and the parked requests together),
 		// and `buildModules` selects it under `consentStore.adapter = "redis"`.
-		consentStoreClient: async ({ config, lifecycleRegistrar, readinessRegistrar, logger }) => {
-			return getOrCreateClients(config as AppConfig, lifecycleRegistrar, readinessRegistrar, logger)
+		consentStoreClient: async ({ section, lifecycleRegistrar, readinessRegistrar, logger }) => {
+			return getOrCreateClients(section, lifecycleRegistrar, readinessRegistrar, logger)
 				.consentStoreClient;
 		},
 		pendingConsentStoreClient: async ({
-			config,
+			section,
 			lifecycleRegistrar,
 			readinessRegistrar,
 			logger,
 		}) => {
-			return getOrCreateClients(config as AppConfig, lifecycleRegistrar, readinessRegistrar, logger)
+			return getOrCreateClients(section, lifecycleRegistrar, readinessRegistrar, logger)
 				.pendingConsentStoreClient;
 		},
 		// Required by `redisFederationTokenStoreModule`.
 		federationTokenStoreClient: async ({
-			config,
+			section,
 			lifecycleRegistrar,
 			readinessRegistrar,
 			logger,
 		}) => {
-			return getOrCreateClients(config as AppConfig, lifecycleRegistrar, readinessRegistrar, logger)
+			return getOrCreateClients(section, lifecycleRegistrar, readinessRegistrar, logger)
 				.federationTokenStoreClient;
 		},
 		// The two MFA stores' clients, required by `redisMfaFactorStoreModule`
@@ -464,17 +516,17 @@ export const standaloneRedisClientsModule: Module = defineModule({
 		// reason. Each module checks the server's eviction
 		// policy and persistence when it boots (ADR
 		// 2026-09-25-multi-factor-authentication).
-		mfaFactorStoreClient: async ({ config, lifecycleRegistrar, readinessRegistrar, logger }) => {
-			return getOrCreateClients(config as AppConfig, lifecycleRegistrar, readinessRegistrar, logger)
+		mfaFactorStoreClient: async ({ section, lifecycleRegistrar, readinessRegistrar, logger }) => {
+			return getOrCreateClients(section, lifecycleRegistrar, readinessRegistrar, logger)
 				.mfaFactorStoreClient;
 		},
 		mfaTransactionStoreClient: async ({
-			config,
+			section,
 			lifecycleRegistrar,
 			readinessRegistrar,
 			logger,
 		}) => {
-			return getOrCreateClients(config as AppConfig, lifecycleRegistrar, readinessRegistrar, logger)
+			return getOrCreateClients(section, lifecycleRegistrar, readinessRegistrar, logger)
 				.mfaTransactionStoreClient;
 		},
 	},
@@ -526,7 +578,7 @@ type StandaloneRedisClients = ReturnType<typeof makeIoredisClients> & {
 // registrar (tests that seed none), each call creates a fresh client.
 const clientsCache = new WeakMap<LifecycleRegistrar, StandaloneRedisClients>();
 function getOrCreateClients(
-	config: AppConfig,
+	section: { readonly url: string; readonly password?: string | undefined },
 	lifecycleRegistrar: LifecycleRegistrar | undefined,
 	readinessRegistrar?: ReadinessRegistrar,
 	injectedLogger?: Logger,
@@ -535,18 +587,16 @@ function getOrCreateClients(
 	const cached = lifecycleRegistrar ? clientsCache.get(lifecycleRegistrar) : undefined;
 	if (cached) return cached;
 
-	const cfg = config.refreshTokenFamilyStore?.redis;
-	if (typeof cfg?.url !== "string" || cfg.url.length === 0) {
+	if (section.url.length === 0) {
 		throw new Error(
 			"standaloneRedisClientsModule: `refreshTokenFamilyStore.redis.url` is required when any " +
-				"Redis-backed adapter is selected. Set REFRESH_TOKEN_FAMILY_STORE_REDIS_URL or " +
-				"restore the `refreshTokenFamilyStore.redis` block in application.conf. Multi-replica " +
-				"deployments require a shared Redis 7.2+ instance.",
+				"Redis-backed adapter is selected. Set REFRESH_TOKEN_FAMILY_STORE_REDIS_URL, or the " +
+				"key in a configuration layer, to a non-empty URL. Multi-replica deployments require " +
+				"a shared Redis 7.2+ instance.",
 		);
 	}
-	const password = typeof cfg.password === "string" ? cfg.password : undefined;
 
-	const io = new Redis(cfg.url, { password, ...SHARED_REDIS_TIMEOUTS });
+	const io = new Redis(section.url, { password: section.password, ...SHARED_REDIS_TIMEOUTS });
 
 	// Attach an error handler so unhandled "error" events do not crash the
 	// process. Initial connection failures surface here; downstream adapter

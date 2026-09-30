@@ -160,7 +160,7 @@ const testKeyStoreModule = defineModule({
 			registerBuiltinKeyStores(factory);
 			return factory.create({
 				type: "local",
-				...((c as AppConfig).oauth.jwt.signingKey.local ?? {}),
+				...((c as AppConfig).oauth.jwt.signingKey?.local ?? {}),
 			});
 		},
 	},
@@ -656,7 +656,7 @@ describe("standalone smoke test", () => {
 		registerBuiltinKeyStores(ksf);
 		const keyStore = await ksf.create({
 			type: "local",
-			...(config.oauth.jwt.signingKey.local ?? {}),
+			...(config.oauth.jwt.signingKey?.local ?? {}),
 		});
 		// The token must carry the deployment's configured `iss`: introspection
 		// pins it (RFC 9068 §4), and every deployment has one.

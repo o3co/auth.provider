@@ -264,7 +264,11 @@ const jwtSchemaBase = z.object({
 			});
 		}
 	}),
-	signingKey: signingKeySchema,
+	// The signing key a composition's key store is built from. Core reads none
+	// of it: the module that provides `keyStore` owns it (the standalone
+	// template's `key-store`), with its defaults. Declared here while `oauth`
+	// is mirrored, so a configuration carrying it is held to its shape.
+	signingKey: signingKeySchema.optional(),
 	// JWKS publishing path (OIDC `jwks_uri`). Operator-choosable per OIDC
 	// Discovery; defaults to `/.well-known/jwks.json` when unset (applied by
 	// `resolveJwksPath`). Must be an absolute path so the JWKS route and the

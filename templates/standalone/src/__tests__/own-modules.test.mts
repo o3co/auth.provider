@@ -34,6 +34,7 @@ import { fileURLToPath } from "node:url";
 import {
 	type AppHandle,
 	createApp,
+	DEFAULT_SIGNING_ALGORITHM,
 	defineModule,
 	InMemoryClientRepository,
 	InMemoryUserRepository,
@@ -225,6 +226,50 @@ describe("key-store", () => {
 		}
 	});
 
+	it("ships core's default algorithm, and no key material", () => {
+		const shipped = parseFile(fileURLToPath(TEMPLATE_REFERENCE), { env: {} }).toObject() as {
+			oauth: { jwt: { signingKey: { provider: unknown; local: Record<string, unknown> } } };
+		};
+		expect(shipped.oauth.jwt.signingKey.provider).toBe("local");
+		expect(shipped.oauth.jwt.signingKey.local).toEqual({
+			algorithm: DEFAULT_SIGNING_ALGORITHM,
+			kid: "v0",
+		});
+	});
+
+	it("refuses to boot with no key material, naming the variables to set and how to make a key pair", async () => {
+		const booting = bootTemplate({
+			env: { OAUTH_JWT_PRIVATE_KEY: undefined, OAUTH_JWT_PUBLIC_KEY: undefined },
+		});
+		await expect(booting).rejects.toThrow(/OAUTH_JWT_PRIVATE_KEY_PATH/);
+		await expect(booting).rejects.toThrow(/openssl genpkey -algorithm ed25519/i);
+	});
+
+	it("refuses to boot on OAUTH_JWT_SECRET alone, saying how to opt into HS256", async () => {
+		await expect(
+			bootTemplate({
+				env: {
+					OAUTH_JWT_PRIVATE_KEY: undefined,
+					OAUTH_JWT_PUBLIC_KEY: undefined,
+					OAUTH_JWT_SECRET: "own-modules-hs256-secret.at-least-32-bytes.ok",
+				},
+			}),
+		).rejects.toThrow(/OAUTH_JWT_ALGORITHM=HS256/);
+	});
+
+	it("refuses to boot on an HS256 secret below 32 bytes", async () => {
+		await expect(
+			bootTemplate({
+				env: {
+					OAUTH_JWT_PRIVATE_KEY: undefined,
+					OAUTH_JWT_PUBLIC_KEY: undefined,
+					OAUTH_JWT_ALGORITHM: "HS256",
+					OAUTH_JWT_SECRET: "too-short-a-secret",
+				},
+			}),
+		).rejects.toThrow(/at least 32 bytes/i);
+	});
+
 	it("refuses a key store section its schema refuses at boot, naming the operator's path", async () => {
 		await expect(
 			bootTemplate({ hocon: 'oauth.jwt.signingKey.local.algorithm = "none"\n' }),
@@ -310,6 +355,12 @@ describe("redis-clients", () => {
 			await handle.dispose().catch(() => {});
 			await redis.close();
 		}
+	});
+
+	it("refuses a section with no URL at boot, naming the key", async () => {
+		await expect(
+			bootTemplate({ redis: true, hocon: "refreshTokenFamilyStore.redis.url = null\n" }),
+		).rejects.toThrow(/refreshTokenFamilyStore\.redis\.url/);
 	});
 
 	it("refuses an empty URL when a client is built, naming the key and its variable", async () => {

@@ -117,11 +117,12 @@ describe("the Dockerfile installs with everything pnpm needs", () => {
 
 describe("the dev compose can reach every Redis it configures", () => {
 	it("sets every *_REDIS_URL the template config reads", () => {
-		// The template's application.conf substitutes several Redis URLs, each
-		// defaulting to `redis://localhost:6379` — which inside the container is
-		// the container itself. `.env.example` is what the compose file loads,
-		// so a URL missing from it is a boot that dials nothing.
-		const conf = read("/config/application.conf");
+		// The template's application.conf and its own reference.conf substitute
+		// several Redis URLs, each defaulting to `redis://localhost:6379` —
+		// which inside the container is the container itself. `.env.example` is
+		// what the compose file loads, so a URL missing from it is a boot that
+		// dials nothing.
+		const conf = read("/config/application.conf") + read("/config/reference.conf");
 		const declared = [...conf.matchAll(/\$\{\?([A-Z0-9_]*REDIS_URL)\}/g)].map((m) => m[1]);
 		expect(declared.length).toBeGreaterThan(0);
 

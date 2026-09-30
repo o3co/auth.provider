@@ -34,6 +34,7 @@ import {
 	resolveConfigPaths,
 	resolveForBoot,
 } from "../configPath.mjs";
+import { templateReference } from "../modules.mjs";
 
 /**
  * Boots the shipped config with EVERY documented override supplied the way an
@@ -323,9 +324,9 @@ const FEDERATION_STORES = Object.fromEntries(
 /**
  * The shipped layers under `env`, as `app.mts` hands them to boot, and the
  * configuration boot parsed: phase one for what the composition expects of
- * session admission, phase two resolved over every loaded package's
- * reference (core's, for the template's modules) and parsed once by
- * `createApp` — no bridge on the way.
+ * session admission, phase two resolved over the reference of every package
+ * the template's modules come from (the template's own and core's) and
+ * parsed once by `createApp` — no bridge on the way.
  * No module is loaded: the parse is what this suite asks about, and each
  * key it reads is one core's schema declares.
  */
@@ -335,10 +336,15 @@ async function bootParsed(
 	operatorLayer?: string,
 ): Promise<AppConfig> {
 	const own = readOwnLayers(ownFiles(configEnv, operatorLayer), { env });
+	const switches = readSwitches(own);
 	const handle = await createApp({
 		modules: [],
 		bootstrapComponents: {
-			config: resolveForBoot(own, [], expectedSessionRequirements(readSwitches(own))),
+			config: resolveForBoot(
+				own,
+				buildModules(switches, { environment: configEnv }),
+				expectedSessionRequirements(switches),
+			),
 			pathResolver: (s: string) => s,
 			...FEDERATION_STORES,
 		} as never,
@@ -380,6 +386,7 @@ function liveSubstitutions(): Set<string> {
 	const { applicationConfPath } = resolveConfigPaths(configDir, "production");
 	return new Set([
 		...substitutionsIn(fileURLToPath(coreReference())),
+		...substitutionsIn(fileURLToPath(templateReference())),
 		...substitutionsIn(applicationConfPath),
 	]);
 }
@@ -510,7 +517,7 @@ describe("the shipped config boots with every documented override supplied as a 
 		void OAUTH_JWT_PUBLIC_KEY;
 		void OAUTH_JWT_PUBLIC_KEY_PATH;
 		const config = await bootParsed({ ...hs256, OAUTH_JWT_ALGORITHM: "HS256" });
-		expect(config.oauth.jwt.signingKey.local?.algorithm).toBe("HS256");
+		expect(config.oauth.jwt.signingKey?.local?.algorithm).toBe("HS256");
 	});
 
 	it("parses the environment the umbrella E2E boots, with SESSION_SECURE=false as a string", async () => {

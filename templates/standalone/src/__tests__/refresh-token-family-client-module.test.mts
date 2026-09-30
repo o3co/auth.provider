@@ -60,11 +60,8 @@ const importModule = async () =>
 		standaloneRedisClientsModule: import("@o3co/auth-provider-core").Module;
 	};
 
-const baseConfig = {
-	refreshTokenFamilyStore: {
-		redis: { url: "redis://example.com:6379", password: "test-pw" },
-	},
-};
+/** The module's own section, `refreshTokenFamilyStore.redis`, as boot hands it over. */
+const baseSection = { url: "redis://example.com:6379", password: "test-pw" };
 
 describe("standaloneRedisClientsModule", () => {
 	beforeEach(() => {
@@ -77,14 +74,14 @@ describe("standaloneRedisClientsModule", () => {
 		vi.restoreAllMocks();
 	});
 
-	it("passes operator-supplied Redis URL + password from config to the ioredis constructor", async () => {
+	it("passes the operator's Redis URL and password from its section to the ioredis constructor", async () => {
 		const { standaloneRedisClientsModule } = await importModule();
 		const provides = (
 			standaloneRedisClientsModule as unknown as {
 				provides: Record<string, (deps: Record<string, unknown>) => Promise<unknown>>;
 			}
 		).provides;
-		await provides.refreshTokenFamilyClient({ config: { ...baseConfig } });
+		await provides.refreshTokenFamilyClient({ section: { ...baseSection } });
 
 		expect(redisCtorCalls).toHaveLength(1);
 		expect(redisCtorCalls[0]?.url).toBe("redis://example.com:6379");
@@ -105,7 +102,7 @@ describe("standaloneRedisClientsModule", () => {
 				provides: Record<string, (deps: Record<string, unknown>) => Promise<unknown>>;
 			}
 		).provides;
-		await provides.refreshTokenFamilyClient({ config: { ...baseConfig }, lifecycleRegistrar });
+		await provides.refreshTokenFamilyClient({ section: { ...baseSection }, lifecycleRegistrar });
 
 		expect(registered).toHaveLength(1);
 		// Pre-drain: quit not yet called.
@@ -129,12 +126,12 @@ describe("standaloneRedisClientsModule", () => {
 		// after the factory resolves; the registrar branch is the only place
 		// `quit()` would be wired up in the no-real-shutdown unit-test path).
 		await expect(
-			provides.refreshTokenFamilyClient({ config: { ...baseConfig } }),
+			provides.refreshTokenFamilyClient({ section: { ...baseSection } }),
 		).resolves.toBeDefined();
 		expect(quitSpies[0]).not.toHaveBeenCalled();
 	});
 
-	it("fails fast when refreshTokenFamilyStore.redis.url is missing (no silent localhost fallback)", async () => {
+	it("fails fast on an empty refreshTokenFamilyStore.redis.url (no silent localhost fallback)", async () => {
 		const { standaloneRedisClientsModule } = await importModule();
 		const provides = (
 			standaloneRedisClientsModule as unknown as {
@@ -142,11 +139,11 @@ describe("standaloneRedisClientsModule", () => {
 			}
 		).provides;
 
-		// Operator deliberately removed the section — must throw instead of
-		// silently falling back to redis://localhost:6379, which in production
-		// would leave each replica with refresh-token families the others
-		// cannot see.
-		await expect(provides.refreshTokenFamilyClient({ config: {} })).rejects.toThrow(
+		// An operator who blanked the URL — must throw instead of silently
+		// falling back to redis://localhost:6379, which in production would
+		// leave each replica with refresh-token families the others cannot
+		// see. A section with no URL at all is refused by boot's parse of it.
+		await expect(provides.refreshTokenFamilyClient({ section: { url: "" } })).rejects.toThrow(
 			/refreshTokenFamilyStore\.redis\.url/,
 		);
 		// And no ioredis instance was constructed because we threw before
@@ -161,7 +158,7 @@ describe("standaloneRedisClientsModule", () => {
 				provides: Record<string, (deps: Record<string, unknown>) => Promise<unknown>>;
 			}
 		).provides;
-		await provides.refreshTokenFamilyClient({ config: { ...baseConfig } });
+		await provides.refreshTokenFamilyClient({ section: { ...baseSection } });
 
 		expect(onSpies[0]).toHaveBeenCalledWith("error", expect.any(Function));
 	});
@@ -178,7 +175,7 @@ describe("standaloneRedisClientsModule", () => {
 				provides: Record<string, (deps: Record<string, unknown>) => Promise<unknown>>;
 			}
 		).provides;
-		await provides.refreshTokenFamilyClient({ config: { ...baseConfig } });
+		await provides.refreshTokenFamilyClient({ section: { ...baseSection } });
 
 		const options = redisCtorCalls[0]?.options;
 		expect(options?.commandTimeout).toBe(1_000);
@@ -204,18 +201,18 @@ describe("standaloneRedisClientsModule", () => {
 				provides: Record<string, (deps: Record<string, unknown>) => Promise<unknown>>;
 			}
 		).provides;
-		await provides.refreshTokenFamilyClient({ config: { ...baseConfig } });
+		await provides.refreshTokenFamilyClient({ section: { ...baseSection } });
 
 		expect(redisCtorCalls[0]?.options?.enableOfflineQueue).toBe(true);
 	});
 
-	it("declares 'config' as required and both registrars as optional", async () => {
+	it("requires no configuration, and takes both registrars as optional", async () => {
 		const { standaloneRedisClientsModule } = await importModule();
 		const m = standaloneRedisClientsModule as {
 			requires?: readonly string[];
 			optional?: readonly string[];
 		};
-		expect(m.requires).toContain("config");
+		expect(m.requires ?? []).not.toContain("config");
 		expect(m.optional).toContain("lifecycleRegistrar");
 		expect(m.optional).toContain("readinessRegistrar");
 	});
@@ -235,12 +232,12 @@ describe("standaloneRedisClientsModule", () => {
 		const lifecycleRegistrar: LifecycleRegistrar = { register: () => {} };
 
 		await provides.refreshTokenFamilyClient({
-			config: { ...baseConfig },
+			section: { ...baseSection },
 			lifecycleRegistrar,
 			readinessRegistrar,
 		});
 		await provides.rateLimiterClient({
-			config: { ...baseConfig },
+			section: { ...baseSection },
 			lifecycleRegistrar,
 			readinessRegistrar,
 		});
