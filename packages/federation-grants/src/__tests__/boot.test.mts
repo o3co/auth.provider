@@ -416,6 +416,37 @@ describe("enabling the feature", () => {
 	});
 });
 
+describe("the actions it registers", () => {
+	it("registers the browser half's three actions, graded use", async () => {
+		const handle = await boot({});
+		try {
+			const resolver = handle.components.sessionRequirementResolver;
+			expect(
+				[
+					"federation_grants.connect",
+					"federation_grants.consent",
+					"federation_grants.callback",
+				].map((name) => resolver?.action(name)),
+			).toEqual([
+				{ name: "federation_grants.connect", grade: "use" },
+				{ name: "federation_grants.consent", grade: "use" },
+				{ name: "federation_grants.callback", grade: "use" },
+			]);
+		} finally {
+			await handle.dispose();
+		}
+	});
+
+	it("exports what it registers, for a composition that mounts the router itself", async () => {
+		const { FEDERATION_GRANTS_ADMISSION_ACTIONS } = await import("#/index.mjs");
+		expect(FEDERATION_GRANTS_ADMISSION_ACTIONS).toEqual({
+			"federation_grants.connect": { grade: "use" },
+			"federation_grants.consent": { grade: "use" },
+			"federation_grants.callback": { grade: "use" },
+		});
+	});
+});
+
 describe("leaving the feature off", () => {
 	it('reads the spellings an environment variable arrives in, so "true" enables', async () => {
 		// HOCON substitutes `${?FEDERATION_GRANTS_ENABLED}` as a string,

@@ -203,6 +203,12 @@ describe("webauthnSessionSubjectModule — the manifest", () => {
 		);
 	});
 
+	it("registers webauthn.register, graded credential_change: a passkey is a new way into the account", () => {
+		expect(module.contributes?.admissionActions).toEqual({
+			"webauthn.register": { grade: "credential_change" },
+		});
+	});
+
 	it("may be given the revocation boundary, an audit sink and a logger, each absence decided", () => {
 		expect([...(module.optional ?? [])].sort()).toEqual(
 			["auditSink", "logger", "subjectRevocation"].sort(),

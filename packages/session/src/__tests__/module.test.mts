@@ -317,6 +317,13 @@ describe("sessionModule — the link routes are a consumer of session admission"
 		expect(sessionModule.requires).toContain("sessionRequirementResolver");
 	});
 
+	it("registers the link flow's actions: the start adds a way into the account, the callback uses the session the start bound", () => {
+		expect(sessionModule.contributes?.admissionActions).toEqual({
+			"session.link": { grade: "credential_change" },
+			"session.link_callback": { grade: "use" },
+		});
+	});
+
 	it("takes subjectRevocation as an optional slot, under the one subject-revocation policy it attaches for subjectSessionIndex", () => {
 		expect(sessionModule.optional).toContain("subjectRevocation");
 		expect(sessionModule.requires).not.toContain("subjectRevocation");

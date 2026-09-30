@@ -406,6 +406,42 @@ describe("deviceGrantModule — boot", () => {
 	});
 });
 
+describe("deviceGrantModule — the actions it registers", () => {
+	it("registers the three body actions device verification admits, lookup and deny granting nothing", async () => {
+		const handle = await boot({ deviceAuthorization: ENABLED });
+		try {
+			const resolver = handle.components.sessionRequirementResolver;
+			expect(
+				["device.lookup", "device.approve", "device.deny"].map((name) => resolver?.action(name)),
+			).toEqual([
+				{ name: "device.lookup", grade: "grants_nothing" },
+				{ name: "device.approve", grade: "use" },
+				{ name: "device.deny", grade: "grants_nothing" },
+			]);
+		} finally {
+			await handle.dispose();
+		}
+	});
+
+	it("registers none while the grant is off: nothing admits them", async () => {
+		const handle = await boot({});
+		try {
+			expect(handle.components.sessionRequirementResolver?.action("device.lookup")).toBeUndefined();
+		} finally {
+			await handle.dispose();
+		}
+	});
+
+	it("exports what it registers, for a composition that mounts the verification handler itself", async () => {
+		const { DEVICE_GRANT_ADMISSION_ACTIONS } = await import("#/index.mjs");
+		expect(DEVICE_GRANT_ADMISSION_ACTIONS).toEqual({
+			"device.lookup": { grade: "grants_nothing" },
+			"device.approve": { grade: "use" },
+			"device.deny": { grade: "grants_nothing" },
+		});
+	});
+});
+
 describe("deviceGrantModule — discovery (RFC 8628 §4)", () => {
 	it("contributes the endpoint as an issuer-relative path when enabled", () => {
 		// A client has no other way to find the endpoint, so the metadata is
