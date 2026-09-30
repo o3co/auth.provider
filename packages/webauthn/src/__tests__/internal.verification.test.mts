@@ -535,10 +535,13 @@ describe("the user handle an assertion carries", () => {
 			},
 		});
 
-	/** An input whose response carries `userHandle` as given (a `null` included), the owner's handle expected unless told otherwise. */
+	/**
+	 * An input whose response carries `userHandle` as given (a `null` included), expecting the
+	 * owner's handle unless told otherwise; `null` expects none.
+	 */
 	const input = (
 		userHandle: unknown,
-		expectedUserHandle: Uint8Array | undefined = OWNER,
+		expectedUserHandle: Uint8Array | null = OWNER,
 	): Parameters<typeof verifyWebAuthnAssertion>[0] => ({
 		credential: makeStoredCredential(5),
 		response: {
@@ -551,7 +554,7 @@ describe("the user handle an assertion carries", () => {
 		expectedChallenge: "some-challenge",
 		expectedRpId: "example.com",
 		expectedOrigins: ["https://example.com"],
-		...(expectedUserHandle === undefined ? {} : { expectedUserHandle }),
+		...(expectedUserHandle === null ? {} : { expectedUserHandle }),
 	});
 
 	it.each([
@@ -588,7 +591,7 @@ describe("the user handle an assertion carries", () => {
 
 	it("does not read it when the caller expects none", async () => {
 		verified();
-		expect(await verifyWebAuthnAssertion(input(OTHER_JSON, undefined))).toEqual({
+		expect(await verifyWebAuthnAssertion(input(OTHER_JSON, null))).toEqual({
 			ok: true,
 			newSignCount: 6,
 		});

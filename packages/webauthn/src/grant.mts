@@ -260,6 +260,9 @@ export const createWebAuthnGrant = (deps: WebAuthnGrantDeps): GrantHandler => {
 				...(deps.webauthnConfig.topOrigin === undefined
 					? {}
 					: { expectedTopOrigins: deps.webauthnConfig.topOrigin }),
+				// The owner's handle, as the registration options named it: `userId`'s UTF-8 bytes. The
+				// relying party's other ceremonies can present this credential under another handle.
+				expectedUserHandle: new TextEncoder().encode(credential.userId),
 				userVerification: deps.webauthnConfig.userVerification,
 			});
 			if (!verificationResult.ok) {
