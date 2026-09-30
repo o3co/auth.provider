@@ -19,6 +19,9 @@ import { fileURLToPath } from "node:url";
 import { parseFile } from "@o3co/ts.hocon";
 import { describe, expect, it } from "vitest";
 import { overlayConfig, TransitionalConfigSchema } from "#/config/composed.mjs";
+import { CORE_RELOCATIONS } from "#/config/core-relocations.mjs";
+import { RENAMED_VARIABLES_SECTION } from "#/config/removed-keys.mjs";
+import { renamedVariableProblems } from "#/testing/renamedVariables.mjs";
 
 /** What core's base makes of `raw`, laid over it: boot's first parse. */
 const parsedByBase = (raw: unknown): unknown =>
@@ -35,7 +38,9 @@ const parsedByBase = (raw: unknown): unknown =>
  * core's own schema: resolved and parsed with the transitional base, with
  * nothing laid back over it, any path the file has and the parse lacks is a
  * default core ships that core's schema does not declare — one no reader is
- * sure to see.
+ * sure to see. The captures of the variables core's own section declares
+ * renamed (`renamed-variables`) are no setting: boot removes them before its
+ * parse, and the file captures exactly the names `CORE_RELOCATIONS` declares.
  */
 
 const REFERENCE_CONF_PATH = fileURLToPath(
@@ -66,6 +71,10 @@ function collectPaths(tree: unknown, prefix = ""): string[] {
 	});
 }
 
+/** Whether `path` is the captures of renamed variables, or one of them. */
+const isCapture = (path: string): boolean =>
+	path === RENAMED_VARIABLES_SECTION || path.startsWith(`${RENAMED_VARIABLES_SECTION}.`);
+
 function hasPath(tree: unknown, path: string): boolean {
 	let cursor: unknown = tree;
 	for (const segment of path.split(".")) {
@@ -88,12 +97,29 @@ describe("core's reference.conf holds only what core's schema declares", () => {
 	});
 
 	it("ships no path core's schema does not declare", () => {
-		const stripped = collectPaths(resolved).filter((path) => !hasPath(parsed, path));
+		const stripped = collectPaths(resolved).filter(
+			(path) => !isCapture(path) && !hasPath(parsed, path),
+		);
 		// A path listed here is a section core's `reference.conf` ships that
 		// core's schema does not declare. Declare it where it belongs, or move
 		// the default to the package that owns the section, rather than adding
 		// it to an allowlist here.
 		expect(stripped).toEqual([]);
+	});
+});
+
+describe("core's reference.conf captures exactly the variables core's own section declares renamed", () => {
+	it("captures each of CORE_RELOCATIONS' names, binds each new one at its path, and captures nothing else", () => {
+		const read = (path: string, env: Readonly<Record<string, string>>): unknown =>
+			parseFile(path, { env: { ...REQUIRED_ENV, ...env } }).toObject();
+		expect(
+			renamedVariableProblems({
+				modules: [],
+				core: CORE_RELOCATIONS,
+				layers: [REFERENCE_CONF_PATH],
+				read,
+			}),
+		).toEqual([]);
 	});
 });
 

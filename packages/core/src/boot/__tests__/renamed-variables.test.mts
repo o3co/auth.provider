@@ -31,6 +31,7 @@
 import { parseString } from "@o3co/ts.hocon";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
+import { CORE_RELOCATIONS } from "../../config/core-relocations.mjs";
 import { defineModule } from "../../modules/manifest/index.mjs";
 import type { Module } from "../../modules/manifest/module-spec.mjs";
 import { makeValidCoreConfig } from "../../testing/fixtures/valid-config.mjs";
@@ -582,6 +583,11 @@ describe("a renamed variable — core's own section", () => {
 		expect(err.details).toMatchObject({ renamed: [{ module: "core", state: "uncaptured" }] });
 		expect(err.message).toContain("core's own reference.conf");
 		expect(err.message).not.toContain('module "core" comes from');
+	});
+
+	it("ships a declaration frozen with every map it holds", () => {
+		expect(Object.isFrozen(CORE_RELOCATIONS)).toBe(true);
+		for (const map of Object.values(CORE_RELOCATIONS)) expect(Object.isFrozen(map)).toBe(true);
 	});
 
 	it("holds its declaration as a module's: a name that did not change is refused", () => {
