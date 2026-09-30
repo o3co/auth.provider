@@ -38,20 +38,17 @@ import {
 	auditErrorText,
 	checkOAuthTokenSettings,
 	consoleLogger,
-	formatObject,
-	generateToken,
 	isWellFormedErrorCode,
-	LIVENESS_SID_CLAIM,
 	logGrantPolicyUnavailable,
 	loggableError,
 	policyOutOfBounds,
 	resolveAccessTokenLifetime,
 } from "@o3co/auth-provider-core";
-import { buildActClaim } from "./act.mjs";
 import { invalidRequest, isRefusal, tokenAnswer } from "./answers.mjs";
 import { authenticateClient } from "./clientAuthentication.mjs";
 import { delegationRefusal } from "./delegation.mjs";
 import { GRANT_TYPE } from "./grantType.mjs";
+import { issueAccessToken } from "./issuance.mjs";
 import { issuedTarget, requestTargets } from "./targetCeilings.mjs";
 import { readTokenRequest } from "./tokenRequest.mjs";
 import {
@@ -300,64 +297,23 @@ export function createTokenExchangeGrant(deps: TokenExchangeDependencies): Grant
 			if (isRefusal(issued)) return issued;
 			const { audienceForToken } = issued;
 
-			const act = buildActClaim({
-				subject: subjectValidated,
-				actor: actorValidated ?? undefined,
-			});
-			const scopeClaim = grantedScope && grantedScope.length > 0 ? grantedScope.join(" ") : null;
-
-			// The issued lifetime: the requested `expires_in` or
-			// `oauth.accessToken.defaultExpiresIn`, clamped (not refused) to `maxExpiresIn`,
-			// then capped at the subject token's remaining lifetime below. An unset max
-			// equals the default. The max also bounds how long a resource server validating
-			// offline keeps accepting this token after its family is revoked.
-			let expiresIn = Math.min(requestedExpiresIn ?? defaultExpiresIn, maxExpiresIn);
-
-			// RFC 8693 §2.2.1: the issued token SHOULD NOT outlive the subject token, or a
-			// chain of exchanges outlives its origin indefinitely. The built-in validator
-			// already rejects an expired subject, so this is the fail-closed backstop for
-			// contributed validators, placed here so the refusal order of a doubly invalid
-			// request is unchanged. The issuance instant is read once for both the cap and
-			// the minted `iat`/`exp`, so they cannot straddle a second and exceed the
-			// subject's `exp`.
-			const issuedAt = Math.floor(Date.now() / 1000);
-			const subjectExpiry = subjectValidated.claims.exp;
-			if (typeof subjectExpiry === "number" && Number.isFinite(subjectExpiry)) {
-				const remaining = Math.floor(subjectExpiry - issuedAt);
-				// `<= 0` includes a token expiring within this second: capping would mint a dead
-				// token, so refuse instead.
-				if (remaining <= 0) return invalidRequest("subject_token has expired");
-				expiresIn = Math.min(expiresIn, remaining);
-			}
-			// A subject token without `exp` leaves the lifetime above standing: `exp` is a
-			// property of the presented credential, and a validator returning none asserts a
-			// credential with no expiry. The built-in validator never takes this path.
-
-			const accessToken = await generateToken(
-				formatObject({
-					family_id: reportedFamily(subjectValidated),
-					// The subject's session as a liveness link only (core's
-					// `grants/sessionClaims.mts`): the logout that ends the subject token ends this
-					// one at introspection and userinfo, and nothing a `sid` authorises is reachable
-					// with it. The actor's session is not carried.
-					[LIVENESS_SID_CLAIM]: subjectValidated.sid ? subjectValidated.sid : undefined,
-					act,
-				}),
+			const issuedToken = await issueAccessToken(
+				deps,
+				ctx,
+				{ defaultExpiresIn, maxExpiresIn },
 				{
-					expiresIn,
-					issuedAt,
-					keyStore: deps.keyStore,
-					issuer: ctx.issuer,
-					audience: audienceForToken,
-					subject: subjectValidated.sub,
-					authorizedParty: client.clientId,
-					scope: scopeClaim,
-					tokenType: "at+jwt",
-					...(issuedConfirmation ? { confirmation: issuedConfirmation } : {}),
+					client,
+					subjectValidated,
+					actorValidated,
+					grantedScope,
+					audienceForToken,
+					requestedExpiresIn,
+					issuedConfirmation,
 				},
 			);
+			if (isRefusal(issuedToken)) return issuedToken;
 
-			return tokenAnswer(accessToken);
+			return tokenAnswer(issuedToken.accessToken);
 		},
 	};
 }
