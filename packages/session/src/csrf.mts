@@ -23,7 +23,7 @@
  *    attacker can neither write the victim's cookie for this origin nor set a
  *    custom header without a CORS preflight the provider never grants, so a
  *    matching pair is evidence the request was composed by same-site code.
- *    The signature means only the holder of the session secret can mint a
+ *    The signature means only the holder of the signer's key can mint a
  *    token that verifies; a plain double-submit would trust whatever a sibling
  *    subdomain able to write a parent-domain cookie put there. The signature
  *    is the `csrfTokenSigner` slot's (`./csrf-token-signer.mts`), so nothing

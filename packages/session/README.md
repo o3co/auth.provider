@@ -305,7 +305,9 @@ signs as the module does, so tokens issued under that secret keep verifying.
 The manifest ([`src/module.mts`](src/module.mts)):
 
 - `requires`: `config`, `userRepository`, `userSessionStore`,
-  `federationTokenStore`, `sessionFederationIndex`, and the synthetic
+  `federationTokenStore`, `sessionFederationIndex`, `csrfTokenSigner` (what the
+  CSRF token is signed and checked with; the session store's module provides
+  it), and the synthetic
   `federationProviders` and `federationRedirectPolicyResolver`, which the boot
   planner builds from per-federation modules' `federations.<name>` and
   `federationRedirectPolicies.<name>` contributions, and
@@ -317,7 +319,8 @@ The manifest ([`src/module.mts`](src/module.mts)):
   `sessionRequirements.expected`. A router built by hand
   (`routes/Session.mts`, `routes/Federation.mts`) takes the resolver as the
   required `requirements` option and throws without it; a test builds one with
-  core's `resolverForTests`. `sessionRPRegistry` and
+  core's `resolverForTests`. The session router also takes the signer as the
+  required `csrfTokenSigner` option, and throws without it. `sessionRPRegistry` and
   `sessionFamilyIndex`, the other two session stores, are `oauth`'s.
 - `optional`: `logger`, `rateLimiter`, `auditSink`, `subjectSessionIndex`,
   `subjectRevocation` (the boundary the linking routes' admission reads).
@@ -549,7 +552,10 @@ The token is a signed, stateless HMAC over a random nonce and an expiry
 (`session.csrf.ttlSeconds`), keyed by an HKDF expansion of `session.secret` — a
 subdomain able to write the parent-domain cookie still cannot forge one. The
 routes sign and check it through the `csrfTokenSigner` slot, which the session
-store's module fills; they hold neither the secret nor the key.
+store's module fills, and read no `session.secret`. A token is well signed only
+when the signer's `verify` answers `true`, and one whose expiry lies more than
+`session.csrf.ttlSeconds` and 60 seconds of clock skew ahead is refused, since
+no token the routes issue expires later.
 Cross-origin login UIs list their origin on `session.csrf.trustedOrigins`;
 `cors.allowedOrigins` grants no CSRF trust.
 
@@ -561,8 +567,10 @@ exported ([`src/csrf.mts`](src/csrf.mts)) for compositions that mount their own
 login page or protect their own routes. `createCsrfProtection` and
 `createCsrfProtectionFromConfig` take the signer (`{ signer }`) — the
 `csrfTokenSigner` slot's, or `createSessionCsrfTokenSigner(sessionSecret)`
-([`src/csrf-token-signer.mts`](src/csrf-token-signer.mts)) — and refuse to be
-built without one.
+([`src/csrf-token-signer.mts`](src/csrf-token-signer.mts)), which holds the
+secret to core's entropy floor — and refuse to be built without one, or with
+one that breaks core's contract: they sign two payloads and check the
+signatures, a changed one and another payload's, before building.
 
 ### What a session records about the authentication
 
@@ -1207,8 +1215,8 @@ The bundled adapters are the worked examples — for instance
 | [`src/__tests__/sessionStoreModule.test.mts`](src/__tests__/sessionStoreModule.test.mts) | the middleware route at `/`, the cookie name, the `__Host-` rule, and the replica-safety declaration and refusal |
 | [`src/store/__tests__/factory.test.mts`](src/store/__tests__/factory.test.mts) | the two built-in stores, the `session-store` readiness probe, and the Redis client's error listener |
 | [`src/__tests__/cookieSessionStore.test.mts`](src/__tests__/cookieSessionStore.test.mts) | the cookie-session store failing under the real express-session and connect-redis: the middleware's `503` and its one line, and a route's outage answered once with the session not written again |
-| [`src/__tests__/csrf.test.mts`](src/__tests__/csrf.test.mts) | the signed token, the origin check and the guard's acceptance rule |
-| [`src/__tests__/csrfTokenSigner.test.mts`](src/__tests__/csrfTokenSigner.test.mts) | the session store's `csrfTokenSigner`: core's contract, the fixed vector, and a token signed under `session.secret` passing `/session/*` and the `csrfGuard` slot; `sessionModule` refused at boot without a signer, signing through the slot's, its tokens passing between the slot and `/session/*`, and reading no `session.secret` |
+| [`src/__tests__/csrf.test.mts`](src/__tests__/csrf.test.mts) | the signed token, its expiry bound, the signer refused when built and read as refusing unless `verify` answers `true`, the origin check and the guard's acceptance rule |
+| [`src/__tests__/csrfTokenSigner.test.mts`](src/__tests__/csrfTokenSigner.test.mts) | the session store's `csrfTokenSigner`: core's contract, the fixed vectors, the entropy floor, a token signed under `session.secret` passing `/session/*` and the `csrfGuard` slot, and an override replacing it; `sessionModule` and a hand-built router refused without a signer, signing through the slot's, its tokens passing between the slot and `/session/*`, and reading no `session.secret` on any route |
 | [`src/__tests__/csrfGuard.test.mts`](src/__tests__/csrfGuard.test.mts), [`loginEntry.test.mts`](src/__tests__/loginEntry.test.mts), [`loginCompletion.test.mts`](src/__tests__/loginCompletion.test.mts), [`sessionCookiePolicy.test.mts`](src/__tests__/sessionCookiePolicy.test.mts) | what the modules provide other packages: each keeps core's contract, the modules provide it, the guard answers and logs as `/session/login`'s does and accepts the tokens `GET /session/csrf` hands out, the login entry is built without a page and fails where it is read, and the cookie policy refuses what the store refuses and whatever else would break the contract, over every combination of the cookie's attributes |
 | [`src/__tests__/establish-session.test.mts`](src/__tests__/establish-session.test.mts) | the login tail: what it writes (the establishment's primary alone, and a forged establishment refused), its sequence, what it hands each write, and the rollback at every point it can fail |
 | [`src/routes/__tests__/Session.test.mts`](src/routes/__tests__/Session.test.mts), [`loginRateLimit.test.mts`](src/routes/__tests__/loginRateLimit.test.mts) | login, what logout invalidates and that a store outage does not stop the `UserSession` delete, the outage answers and their one log line, and the login rate-limit guard |

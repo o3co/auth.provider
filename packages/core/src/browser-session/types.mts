@@ -85,7 +85,7 @@ export type NavigationVerdict =
  * The token's signing key is derived from the session cookie's secret, which
  * the session store's module owns, while the session module provides the
  * guard: the guard's provider signs and checks the token through
- * `csrfTokenSigner`, and never holds the secret or the key.
+ * `csrfTokenSigner`, and reads no `session.secret`.
  */
 export interface CsrfGuard {
 	/** The cookie the double-submit token is set in; script reads it. */
@@ -178,7 +178,7 @@ declare module "@o3co/auth-provider-core" {
 		/**
 		 * The CSRF token's signature: provided by the module that owns the
 		 * session cookie's secret (the session store's), read by the `csrfGuard`
-		 * provider.
+		 * provider and the session routes.
 		 */
 		readonly csrfTokenSigner?: CsrfTokenSigner;
 		/** The session cookie's attributes: provided by the session store's module, which owns the session cookie. */

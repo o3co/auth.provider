@@ -254,7 +254,7 @@ JWT の `exp`・`iat`・`nbf` は、有限で Date の範囲に収まるとき�
 
 - `oauthTokenSettings` — ほかのモジュールが読む oauth モジュールのトークン設定 — [`src/token-settings/types.mts`](src/token-settings/types.mts)。
 - `loginCompletion` — 要件の完了処理が session パッケージを import する代わりに使う、ログインの末尾（`establishSession`、`answerInterruption`）— [`src/session-admission/login-completion.mts`](src/session-admission/login-completion.mts)。
-- `loginEntry`、`csrfGuard`、`csrfTokenSigner`、`sessionCookiePolicy`: `redirect_to` のプロトコルを伴うログインページ、ブラウザーが状態を変えてよいかの唯一のポリシー（リクエストと、フローを始めるナビゲーションの両方）、セッションのシークレットの所有者がガードの提供者に渡す CSRF トークンの署名、セッション Cookie の属性 — [`src/browser-session/types.mts`](src/browser-session/types.mts)。
+- `loginEntry`、`csrfGuard`、`csrfTokenSigner`、`sessionCookiePolicy`: `redirect_to` のプロトコルを伴うログインページ、ブラウザーが状態を変えてよいかの唯一のポリシー（リクエストと、フローを始めるナビゲーションの両方）、セッションのシークレットの所有者がガードの提供者とセッションのルートに渡す CSRF トークンの署名、セッション Cookie の属性 — [`src/browser-session/types.mts`](src/browser-session/types.mts)。
 - `httpSettings`（`trustProxy`、CORS のオリジン）と `deploymentMode`（`single`、`multi`、`unset`。core 自身が埋める予定）— [`src/deployment/types.mts`](src/deployment/types.mts)。
 - `RateLimiter.failMode` — リミッター自身の障害時ポリシー — [`src/ratelimit/types.mts`](src/ratelimit/types.mts)。
 
