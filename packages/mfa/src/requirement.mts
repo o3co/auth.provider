@@ -24,16 +24,17 @@
  * it equals what core recomputes from the same factors, and the requirement's own
  * verdicts read the same snapshot, so the two never disagree.
  *
- * `admit` decides by the action's grade, never its name (`RECORD_RULE`). A
- * token is judged on its own `amr` (`admitToken`) under `required`, whatever
- * the grade, and met under `optional`. A session a cookie, code or link carries
- * is held, under `required`, to its record's baseline, except that an action
- * graded `grants_nothing` is met on any live record; under `optional` it is
- * met. An action graded `credential_change` adds a way into the account and is
- * held to recent MFA (`isRecentMfa`) under either mode, over a primary the
- * baseline knows: the subject's factor records say whether it holds a counting
- * factor — a record of a kind no installed factor declares non-counting counts
- * — and a list that cannot answer throws.
+ * `admit` decides by the mode and the action's grade, never its name
+ * (`RECORD_RULES`). A token is judged on its own `amr` (`admitToken`) under
+ * `required`, whatever the grade, and met under `optional`. A session a cookie,
+ * code or link carries is held, under `required`, to its record's baseline,
+ * except that an action graded `grants_nothing` is met on any live record;
+ * under `optional` it is met. An action graded `credential_change` adds a way
+ * into the account and is held to recent MFA (`isRecentMfa`) over a primary the
+ * baseline knows — under `required` on top of the baseline, so it is never
+ * looser than `use`: the subject's factor records say whether it may hold a
+ * counting factor — a record of a kind no installed factor declares
+ * non-counting counts — and a list that cannot answer throws.
  *
  * `admitPrimary` interrupts a password login for a second factor when the subject
  * has any factor record: a record it cannot use is never "none", and a `list`
@@ -153,16 +154,34 @@ const STEP_UP: RequirementVerdict = Object.freeze({
 });
 
 /**
- * What a live record is held to, by grade — exhaustive over core's grades. An
- * action that grants nothing is met, so a user can refuse a phished device
- * request without a step-up; one that adds a way into the account needs recent
- * MFA; core never asks about a remediation.
+ * What a session a record carries is held to: `met` whatever it is, `live` met
+ * on any live record, `baseline`, `recent` (recent MFA), or `baseline+recent`
+ * (the baseline, then recent MFA on a session it meets).
  */
-const RECORD_RULE: Readonly<Record<AdmissionGrade, "baseline" | "met" | "recent">> = {
-	use: "baseline",
-	grants_nothing: "met",
-	credential_change: "recent",
-	remediation: "baseline",
+type RecordRule = "met" | "live" | "baseline" | "recent" | "baseline+recent";
+
+/**
+ * The rule by mode and grade — the session-admission ADR's D6 table,
+ * exhaustive over core's grades. An action that grants nothing is met, so a
+ * user can refuse a phished device request without a step-up; one that adds a
+ * way into the account needs recent MFA, and under `required` the baseline
+ * first; core never asks about a remediation.
+ */
+const RECORD_RULES: Readonly<
+	Record<MfaRequirementMode, Readonly<Record<AdmissionGrade, RecordRule>>>
+> = {
+	optional: {
+		use: "met",
+		grants_nothing: "met",
+		credential_change: "recent",
+		remediation: "met",
+	},
+	required: {
+		use: "baseline",
+		grants_nothing: "live",
+		credential_change: "baseline+recent",
+		remediation: "baseline",
+	},
 };
 
 /** The `amr` values a step-up through the installed factors can add: each one's `amrValues`, and `mfa` when one adds it. */
@@ -265,19 +284,31 @@ export function createMfaRequirement(options: MfaRequirementOptions): SessionReq
 		return counting ? stepUp() : REAUTHENTICATE;
 	};
 
-	/** A session a cookie, a code or a link carries, held to its grade's rule over its record. */
+	/** A session a cookie, a code or a link carries, held over its record to the rule its mode and grade name. */
 	const admitRecord = async ({
 		session,
 		authentication,
 		action,
 		now,
 	}: RequirementInput): Promise<RequirementVerdict> => {
-		const rule = RECORD_RULE[action.grade];
-		if (mode === "optional" && rule !== "recent") return MET;
-		if (session === null) return REAUTHENTICATE;
+		const rule = RECORD_RULES[mode][action.grade];
 		if (rule === "met") return MET;
+		if (session === null) return REAUTHENTICATE;
 		const recorded = authentication?.authentication;
-		return rule === "recent" ? recent(session, recorded, now.getTime()) : baseline(recorded);
+		switch (rule) {
+			case "live":
+				return MET;
+			case "baseline":
+				return baseline(recorded);
+			case "recent":
+				return recent(session, recorded, now.getTime());
+			case "baseline+recent": {
+				const verdict = baseline(recorded);
+				return verdict.outcome === "met" ? recent(session, recorded, now.getTime()) : verdict;
+			}
+			default:
+				throw new TypeError(`no record rule named ${rule satisfies never}`);
+		}
 	};
 
 	/** The interruption that opens the login's transaction with `interruption`'s answer. */
