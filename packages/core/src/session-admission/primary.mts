@@ -37,15 +37,15 @@ import {
 import type { RecordedAuthentication } from "../user-sessions/authentication.mjs";
 import type { SessionAuthentication, UserSessionClaims } from "../user-sessions/types.mjs";
 import { SECOND_FACTOR_AMR } from "./acr.mjs";
-import {
-	type CompletedRequirement,
-	type CompletedRequirementDto,
-	MFA_REQUIREMENT_NAME,
-	type PrimaryAdditions,
-	type PrimaryAdditionsDto,
-	type PrimaryAuthentication,
-	type PrimaryAuthenticationDto,
-	type PrimaryContinuation,
+import type {
+	CompletedRequirement,
+	CompletedRequirementDto,
+	PrimaryAdditions,
+	PrimaryAdditionsDto,
+	PrimaryAuthentication,
+	PrimaryAuthenticationDto,
+	PrimaryContinuation,
+	RegisteredRequirement,
 } from "./requirement.mjs";
 
 const isPlainObject = (value: unknown): value is Record<string, unknown> =>
@@ -205,68 +205,80 @@ export function primaryFromDto(dto: PrimaryAuthenticationDto): PrimaryAuthentica
 	return Object.freeze({ ...fields, authTime: new Date(authTimeMs) });
 }
 
+/** The completing requirement as registered: its name and its declaration, read once. */
+export type CompletingRequirement = Pick<RegisteredRequirement, "name" | "secondFactorAuthority">;
+
 /**
- * What a completing requirement named `requirement` may add: an `amr` of
- * non-empty strings, none a primary's marker, `mfa` never alone; `mfaAt`
- * never beside an empty `amr`. A second-factor value or an `mfaAt` under any
- * name but `mfa` is refused, so a risk score or a re-consent cannot make a
- * session meet `urn:o3co:acr:mfa`. Under `mfa`, see `checkMfaCompletion`.
- * A frozen copy.
+ * What `requirement` may add as it completes: an `amr` of non-empty strings,
+ * none a primary's marker, `mfa` never alone; `mfaAt` never beside an empty
+ * `amr`. A second factor from the second-factor authority alone, and from it
+ * a verified one (`checkSecondFactor`). A frozen copy.
  */
-export function checkPrimaryAdditions(requirement: string, value: unknown): PrimaryAdditions {
+export function checkPrimaryAdditions(
+	requirement: CompletingRequirement,
+	value: unknown,
+): PrimaryAdditions {
 	const refuse = (what: string): never => {
-		throw new RangeError(`requirement "${requirement}" adds ${what}`);
+		throw new RangeError(`requirement "${requirement.name}" adds ${what}`);
 	};
 	if (!isPlainObject(value)) return refuse("something that is not an object");
-	const amr = checkAddedAmr(requirement, value, refuse);
+	const amr = checkAddedAmr(value, refuse);
 	if (value.mfaAt !== undefined && !isValidDate(value.mfaAt)) {
 		refuse("an mfaAt that is not a valid date");
 	}
-	if (requirement !== MFA_REQUIREMENT_NAME && value.mfaAt !== undefined) {
-		refuse("an mfaAt, which only the requirement named mfa may add");
+	const hasMfaAt = value.mfaAt !== undefined;
+	if (requirement.secondFactorAuthority === true) {
+		if (!addsSecondFactor(amr, hasMfaAt)) {
+			refuse(
+				"no second factor: a completion by the second-factor authority is a verified second factor",
+			);
+		}
+	} else {
+		if (amr.some((entry) => SECOND_FACTOR_AMR.has(entry))) {
+			refuse("a second-factor amr value, which only the second-factor authority may add");
+		}
+		if (hasMfaAt) refuse("an mfaAt, which only the second-factor authority may add");
 	}
-	if (amr.length === 0 && value.mfaAt !== undefined) {
-		refuse(
-			"an mfaAt beside an empty amr: a completion that adds no value verified no second factor",
-		);
-	}
-	checkMfaCompletion(requirement, amr, value.mfaAt !== undefined, refuse);
+	checkSecondFactor(amr, hasMfaAt, refuse);
 	return Object.freeze({
 		amr,
 		...(value.mfaAt === undefined ? {} : { mfaAt: new Date((value.mfaAt as Date).getTime()) }),
 	});
 }
 
+/** Whether an addition carries a second factor: a second-factor `amr` value, or `mfaAt`. */
+const addsSecondFactor = (amr: readonly string[], hasMfaAt: boolean): boolean =>
+	hasMfaAt || amr.some((entry) => SECOND_FACTOR_AMR.has(entry));
+
 /**
- * Under the name `mfa`, a completion is a verified second factor: at least
- * one second-factor `amr` value of the factor's own, `mfa` beside it (only
- * the email code may leave it out, see ADR
- * 2026-09-25-multi-factor-authentication), and `mfaAt`. `resumePrimary`
- * does not re-ask a completed requirement, so this check is what keeps a
- * completion that verified nothing from establishing a password-only
- * session.
+ * A second factor added, whoever adds it, is a verified one: a second-factor
+ * `amr` value of the factor's own (not `mfa`), `mfa` beside it (only the
+ * email code may leave it out, the MFA ADR's D14), and `mfaAt`; an `mfaAt`
+ * beside an empty `amr` verified nothing.
  */
-function checkMfaCompletion(
-	requirement: string,
+function checkSecondFactor(
 	amr: readonly string[],
 	hasMfaAt: boolean,
 	refuse: (what: string) => never,
 ): void {
-	if (requirement !== MFA_REQUIREMENT_NAME) return;
+	if (amr.length === 0 && hasMfaAt) {
+		refuse(
+			"an mfaAt beside an empty amr: a completion that adds no value verified no second factor",
+		);
+	}
+	if (!addsSecondFactor(amr, hasMfaAt)) return;
 	const factorValues = amr.filter((entry) => entry !== MFA_AMR);
 	if (!factorValues.some((entry) => SECOND_FACTOR_AMR.has(entry))) {
-		refuse("no second factor's own amr value: a completion under mfa is a verified second factor");
+		refuse("no second factor's own amr value: a second factor added is a verified one");
 	}
 	if (!amr.includes(MFA_AMR) && !factorValues.every((entry) => entry === EMAIL_OTP_AMR)) {
 		refuse(`no "${MFA_AMR}" beside a factor that adds it: only the email code's may leave it out`);
 	}
-	if (!hasMfaAt)
-		refuse("no mfaAt: a completion under mfa says when the second factor was verified");
+	if (!hasMfaAt) refuse("no mfaAt: a second factor added says when it was verified");
 }
 
-/** The `amr` rules an addition is held to under `requirement`, shared by both forms. */
+/** The `amr` rules every addition is held to, whoever adds it, in both forms. */
 function checkAddedAmr(
-	requirement: string,
 	value: Record<string, unknown>,
 	refuse: (what: string) => never,
 ): readonly string[] {
@@ -285,39 +297,24 @@ function checkAddedAmr(
 	if (values.length > 0 && values.every((entry) => entry === MFA_AMR)) {
 		refuse(`"${MFA_AMR}" alone, which comes beside a factor's own amr values`);
 	}
-	if (
-		requirement !== MFA_REQUIREMENT_NAME &&
-		values.some((entry) => SECOND_FACTOR_AMR.has(entry))
-	) {
-		refuse("a second-factor amr value, which only the requirement named mfa may add");
-	}
 	return Object.freeze([...values]);
 }
 
 /**
- * `value` as a `PrimaryAdditionsDto` under `requirement`: the `amr` rules,
- * `mfaAtMs` epoch milliseconds under the name `mfa` alone, and under that
- * name a verified second factor (`checkMfaCompletion`), as a completion
- * presented to `resumePrimary` is held to.
+ * `value` as a `PrimaryAdditionsDto` read back from a continuation: the `amr`
+ * rules, `mfaAtMs` epoch milliseconds, and a second factor added a verified
+ * one. Whether `requirement` may add one is `resumePrimary`'s to check.
  */
 function checkPrimaryAdditionsDto(requirement: string, value: unknown): PrimaryAdditionsDto {
 	const refuse = (what: string): never => {
 		throw new RangeError(`requirement "${requirement}" adds ${what}`);
 	};
 	if (!isPlainObject(value)) return refuse("something that is not an object");
-	const amr = checkAddedAmr(requirement, value, refuse);
+	const amr = checkAddedAmr(value, refuse);
 	if (value.mfaAtMs !== undefined && !isEpochMs(value.mfaAtMs)) {
 		refuse("an mfaAtMs that is not epoch milliseconds");
 	}
-	if (requirement !== MFA_REQUIREMENT_NAME && value.mfaAtMs !== undefined) {
-		refuse("an mfaAt, which only the requirement named mfa may add");
-	}
-	if (amr.length === 0 && value.mfaAtMs !== undefined) {
-		refuse(
-			"an mfaAtMs beside an empty amr: a completion that adds no value verified no second factor",
-		);
-	}
-	checkMfaCompletion(requirement, amr, value.mfaAtMs !== undefined, refuse);
+	checkSecondFactor(amr, value.mfaAtMs !== undefined, refuse);
 	return Object.freeze({
 		amr,
 		...(value.mfaAtMs === undefined ? {} : { mfaAtMs: value.mfaAtMs as number }),
@@ -345,9 +342,11 @@ function copyCompleted(value: unknown, refuse: (what: string) => never): Complet
 
 /**
  * `value` as a `PrimaryContinuation`: a primary DTO and `done`, the
- * completed requirements with what each added, no name twice, every instant
- * epoch milliseconds. A frozen deep copy: what a requirement's record holds
- * and what `resumePrimary` reads back.
+ * completed requirements with what each added — a second factor a verified
+ * one, added by one entry at most — no name twice, every instant epoch
+ * milliseconds. A frozen deep copy: what a requirement's record holds and
+ * what `resumePrimary` reads back. Which requirement declares the
+ * second-factor authority it does not know: `resumePrimary` checks that.
  */
 export function checkPrimaryContinuation(value: unknown): PrimaryContinuation {
 	const refuse = (what: string): never => {
@@ -359,6 +358,15 @@ export function checkPrimaryContinuation(value: unknown): PrimaryContinuation {
 	const done = value.done.map((entry) => copyCompleted(entry, refuse));
 	const names = new Set(done.map((entry) => entry.requirement));
 	if (names.size !== done.length) refuse("done names a requirement twice");
+	// One requirement may add a second factor, and a name completes once.
+	const adding = done.filter((entry) =>
+		addsSecondFactor(entry.adds.amr, entry.adds.mfaAtMs !== undefined),
+	);
+	if (adding.length > 1) {
+		refuse(
+			"done holds more than one completion that adds a second factor: only the second-factor authority adds one, and it completes once",
+		);
+	}
 	const interruptedBy = value.interruptedBy;
 	if (!isNonEmptyString(interruptedBy)) {
 		refuse("interruptedBy must name the requirement whose ceremony it waits on");

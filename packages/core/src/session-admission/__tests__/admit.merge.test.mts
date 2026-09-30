@@ -17,9 +17,10 @@
 /**
  * The merge: the requirement rule's rows from
  * ADR 2026-09-25-multi-factor-authentication pass unchanged against
- * `admitSession` with a requirement whose `admit` is the MFA requirement's
- * table, under the mapping to `MfaRequirementDecision` in
- * ADR 2026-09-28-session-admission.
+ * `admitSession` with a requirement that declares the second-factor
+ * authority and whose `admit` is the MFA requirement's table, under the
+ * mapping to `MfaRequirementDecision` in ADR 2026-09-28-session-admission.
+ * The stand-in is not named `mfa`: the rows are the declared authority's.
  *
  * The rows are the ones the rule decided — the freshness rows (`max_age`,
  * `prompt=login`, the ask) and the `prompt=none` answers are `/authorize`'s,
@@ -37,6 +38,7 @@ import type {
 	Admission,
 	AdmissionDeps,
 	SessionRequirement,
+	SessionRequirementResolver,
 	StepUpPage,
 } from "#/session-admission/requirement.mjs";
 import { ADMISSION_ACTIONS } from "#/session-admission/requirement.mjs";
@@ -55,9 +57,9 @@ const { MFA, PHR, KBA } = MERGE_ACR;
 
 /** The issuer each page is registered on. */
 const ISSUER = "https://auth.test";
-const PAGE: StepUpPage = { url: "/mfa", params: {} };
-/** The page as registered: what a step_up admission carries. */
-const REGISTERED_PAGE = { ...PAGE, href: `${ISSUER}/mfa` };
+const PAGE: StepUpPage = { url: "/verifier", params: {} };
+/** The name the stand-in registers under: not `mfa`, since the rows are the declared authority's. */
+const AUTHORITY = "verifier";
 
 const minutesAgo = (minutes: number): Date => new Date(Date.now() - minutes * 60_000);
 
@@ -76,18 +78,16 @@ const passwordSession = (amr: readonly string[], mfaAt?: Date): UserSession => (
 const KNOWN_PRIMARIES: ReadonlySet<string> = new Set(["pwd", "fed"]);
 
 /**
- * A stand-in for the MFA requirement's `admit`: its table for the `use`
- * grade, under `mode` with `reach` — the MFA package's own requirement runs
- * the same rows in that package.
+ * A stand-in for the second-factor authority — the MFA requirement's `admit`:
+ * its table for the `use` grade, under `mode` with `reach`. The MFA package's
+ * own requirement runs the same rows in that package.
  */
-const mfaRequirement = (
-	mode: MergeRow["mode"],
-	reach: ReadonlySet<string>,
-): SessionRequirement => ({
-	name: "mfa",
+const authority = (mode: MergeRow["mode"], reach: ReadonlySet<string>): SessionRequirement => ({
+	name: AUTHORITY,
+	secondFactorAuthority: true,
 	reach,
 	stepUpPage: reach.size > 0 ? PAGE : undefined,
-	remediations: ["mfa.step_up"],
+	remediations: [`${AUTHORITY}.step_up`],
 	hintKeys: ["enrollable", "email_proof"],
 	admit: async ({ session, authentication }) => {
 		if (mode !== "required") return { outcome: "met" };
@@ -114,31 +114,152 @@ const storeOf = (session: UserSession): UserSessionStore => ({
 const claim = () =>
 	cookieClaim({ session: { isAuthenticated: true, sid: "sid-1", user: { id: "user-1" } } });
 
-const deps = (session: UserSession | null, requirements: SessionRequirement[]): AdmissionDeps => ({
+/** Admission's deps over `requirements`, registered on the issuer as boot registers them. */
+const depsOver = (
+	session: UserSession | null,
+	requirements: SessionRequirementResolver,
+): AdmissionDeps => ({
 	userSessionStore: session === null ? undefined : storeOf(session),
 	subjectRevocation: undefined,
-	// The merge's own mechanics need two reaching requirements: the reach
-	// rules boot holds a registration to are lifted here, the snapshot kept.
-	requirements: resolverForTests(requirements, { allowAnyReach: true, issuer: ISSUER }),
+	requirements,
 	acrTable: MERGE_ACR_TABLE,
 	logger: undefined,
 	auditSink: undefined,
 });
 
-const decide = (row: MergeRow): Promise<Admission> =>
-	admitSession(deps(row.session, [mfaRequirement(row.mode, MERGE_REACH[row.factors])]), {
-		claim: claim(),
-		action: ADMISSION_ACTIONS["oauth.authorize"],
-		asks: { acrValues: row.acrValues ?? [] },
+/**
+ * Admission's deps for the rows the MFA table does not reach, which need two
+ * reaching requirements neither of which is the authority: the reach rules
+ * boot holds a registration to are lifted, the snapshot kept.
+ */
+const deps = (session: UserSession | null, requirements: SessionRequirement[]): AdmissionDeps =>
+	depsOver(session, resolverForTests(requirements, { allowAnyReach: true, issuer: ISSUER }));
+
+/**
+ * One row, decided by the stand-in registered as boot registers it (the
+ * reach rules held, so it registers only as the declared authority) and
+ * mapped onto the admission of that registered requirement.
+ */
+const decide = async (row: MergeRow): Promise<{ admission: Admission; expected: Admission }> => {
+	const requirements = resolverForTests([authority(row.mode, MERGE_REACH[row.factors])], {
+		issuer: ISSUER,
 	});
+	const registered = requirements.get(AUTHORITY);
+	if (registered === undefined) throw new Error("the stand-in did not register");
+	return {
+		admission: await admitSession(depsOver(row.session, requirements), {
+			claim: claim(),
+			action: ADMISSION_ACTIONS["oauth.authorize"],
+			asks: { acrValues: row.acrValues ?? [] },
+		}),
+		expected: mergeAdmission(row.expected, row.session, registered),
+	};
+};
 
 for (const group of MERGE_ROW_GROUPS) {
 	describe(group.title, () => {
 		it.each(group.rows)("$row", async (row) => {
-			expect(await decide(row)).toEqual(mergeAdmission(row.expected, row.session, REGISTERED_PAGE));
+			const { admission, expected } = await decide(row);
+			expect(admission).toEqual(expected);
 		});
 	});
 }
+
+describe("mergeAdmission — the rows are the declared authority's", () => {
+	const decision = { outcome: "step_up", requirement: "baseline", acrValues: [] } as const;
+	const session = passwordSession(["pwd"]);
+
+	it("maps a row onto the registered authority's name and page", () => {
+		const registered = resolverForTests([authority("required", MERGE_REACH.installed)], {
+			issuer: ISSUER,
+		}).get(AUTHORITY);
+		expect(mergeAdmission(decision, session, registered as never)).toMatchObject({
+			outcome: "step_up",
+			requirement: AUTHORITY,
+			page: { url: "/verifier", params: {}, href: `${ISSUER}/verifier` },
+			whenStillUnmet: "reauthenticate",
+		});
+	});
+
+	it("throws for a requirement that does not declare the second-factor authority, whatever its name", () => {
+		for (const name of ["mfa", AUTHORITY]) {
+			const plain = resolverForTests(
+				[
+					{
+						...authority("required", new Set()),
+						name,
+						secondFactorAuthority: false,
+						remediations: [],
+					},
+				],
+				{ issuer: ISSUER },
+			).get(name);
+			expect(() => mergeAdmission(decision, session, plain as never), name).toThrow(
+				/does not declare the second-factor authority/,
+			);
+			expect(
+				() => mergeAdmission({ outcome: "met", acr: undefined }, session, plain as never),
+				name,
+			).toThrow(/does not declare the second-factor authority/);
+		}
+	});
+
+	it("maps a row that names no requirement with no authority given — what a composition without one registers — and throws for one that names it", () => {
+		expect(mergeAdmission({ outcome: "met", acr: MFA }, session, undefined)).toEqual({
+			outcome: "admitted",
+			session,
+			acr: MFA,
+		});
+		expect(mergeAdmission({ outcome: "unmet", requirement: "acr" }, session, undefined)).toEqual({
+			outcome: "unmet",
+			requirement: "acr",
+			session,
+		});
+		for (const named of [
+			decision,
+			{ outcome: "step_up", requirement: "acr", acrValues: [MFA] } as const,
+			{ outcome: "unmet", requirement: "baseline" } as const,
+			{ outcome: "reauthenticate" } as const,
+		]) {
+			expect(() => mergeAdmission(named, session, undefined), JSON.stringify(named)).toThrow(
+				/names the second-factor authority, and none is given/,
+			);
+		}
+	});
+
+	it("throws for a step-up row when the authority registered no step-up page, or when there is no session", () => {
+		const pageless = resolverForTests(
+			[
+				{
+					...authority("required", MERGE_REACH.installed),
+					stepUpPage: undefined,
+					remediations: [],
+				},
+			],
+			{ issuer: ISSUER, allowAnyReach: true },
+		).get(AUTHORITY);
+		expect(() => mergeAdmission(decision, session, pageless as never)).toThrow(
+			/registered no step-up page/,
+		);
+		const registered = resolverForTests([authority("required", MERGE_REACH.installed)], {
+			issuer: ISSUER,
+		}).get(AUTHORITY);
+		expect(() => mergeAdmission(decision, null, registered as never)).toThrow(
+			/a step-up needs a session/,
+		);
+	});
+
+	it("throws for an object that is not a registered requirement, however it is shaped", () => {
+		const copy = {
+			name: AUTHORITY,
+			secondFactorAuthority: true,
+			stepUpPage: { ...PAGE, href: `${ISSUER}/verifier` },
+		};
+		expect(() => mergeAdmission(decision, session, copy as never)).toThrow(
+			/not a registered requirement/,
+		);
+	});
+});
 
 describe("the merge — the rows the MFA table does not reach", () => {
 	/** A requirement that is met, reaches `reach`, and steps up nowhere of its own. */

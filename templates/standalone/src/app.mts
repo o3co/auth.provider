@@ -20,6 +20,7 @@ import helmet from "helmet";
 import { buildModules } from "./buildModules.mjs";
 import {
 	expectedSessionRequirements,
+	readMfaMode,
 	readOwnLayers,
 	readSwitches,
 	resolveConfigPaths,
@@ -29,6 +30,7 @@ import { listen } from "./listen.mjs";
 import { createAppLogger } from "./logger.mjs";
 import { createMetrics } from "./metrics.mjs";
 import { mountRoutes } from "./routes.mjs";
+import { requireMfaSecondFactorAuthority } from "./secondFactorAuthority.mjs";
 import { cleanupAllowanceFor, installGracefulShutdown } from "./shutdown.mjs";
 
 // Step 1: the configuration, in two phases (`configPath.mts`; template
@@ -46,6 +48,8 @@ const own = readOwnLayers([envConfPath, applicationConfPath]);
 // when `mfa.mode`, which the template reads itself (`readMfaMode`), asks for a
 // second factor.
 const switches: AppConfig = readSwitches(own);
+// `mfa.mode`, read once, for the second-factor authority's guard.
+const mfaMode = readMfaMode(switches);
 
 // Built from config so its level is operator-controlled, and wired into
 // `bootstrapComponents` so every module that declares `optional: ["logger"]`
@@ -93,6 +97,8 @@ await (async (): Promise<void> => {
 			logger,
 		},
 	});
+	// A second factor asked for needs `mfa` registered as the declared authority.
+	await requireMfaSecondFactorAuthority(mfaMode, handle);
 	const config = handle.components.config;
 	if (config === undefined) throw new Error("createApp booted without the parsed configuration");
 	// `false` | `true` | a hop count | a list of IPs / CIDR ranges / named

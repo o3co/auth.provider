@@ -66,6 +66,10 @@ describe("the barrel's session-admission surface", () => {
 		}
 	});
 
+	it("does not export MFA_REQUIREMENT_NAME: the name mfa is the MFA package's", () => {
+		expect(Object.hasOwn(core, "MFA_REQUIREMENT_NAME")).toBe(false);
+	});
+
 	it("does not export boot's internals: registration, the seal and the continuation builders", () => {
 		for (const internal of [
 			"registeredRequirement",
