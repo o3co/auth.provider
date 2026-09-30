@@ -94,7 +94,10 @@ them; boolean flags; state and data that survive the JSON round trip sealing
 puts them through, and are handed back after it; a hint that never shows the
 account's address; a proof the factor cannot read answered `malformed`,
 never thrown; and a valid proof that completes an enrollment and verifies the
-factor it enrolled. It enrolls at one instant and verifies an hour later.
+factor it enrolled. It enrolls at one instant and verifies an hour later,
+every call made for the account's `User.id` as its subject; state and data
+are held to the rule the coordinator seals them by — JSON values JSON gives
+back as they are, in plain or null-prototype objects.
 
 ```typescript
 import { mfaFactorContract } from "@o3co/auth-provider-test-kit";

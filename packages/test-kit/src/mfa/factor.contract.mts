@@ -27,8 +27,11 @@
  * and a valid proof that completes an enrollment and verifies the factor it
  * enrolled. The suite enrolls at one instant and verifies an hour later, so a
  * factor that refuses reuse within a time step is not asked to verify at the
- * step it enrolled. Every call is handed core's test digests
- * (`createTestMfaDigests`), made for the factor's kind.
+ * step it enrolled. Every call is made for the account's `User.id` as its
+ * subject, and handed core's test digests (`createTestMfaDigests`), made for
+ * the factor's kind. State and data are held to the rule the coordinator
+ * seals them by: JSON values JSON gives back as they are, in plain or
+ * null-prototype objects.
  */
 
 import assert from "node:assert/strict";
@@ -75,32 +78,79 @@ export interface MfaFactorContractInput {
 /** When the suite enrolls, and an hour later, when it verifies. */
 const ENROLLED_AT_MS = Date.UTC(2026, 0, 1);
 const VERIFIED_AT_MS = ENROLLED_AT_MS + 3_600_000;
-const SUBJECT = "contract-subject";
 const FACTOR_ID = "contract-factor-1";
 
 const DEFAULT_MALFORMED: readonly unknown[] = [undefined, null, 1234, {}];
 
-/** Whether `value` comes back from JSON as it went in. */
-function survivesJson(value: unknown, what: string): void {
-	let copy: unknown;
+/**
+ * Where `value` is not a JSON value JSON gives back as it is — the rule the
+ * coordinator seals state and data by — as a path, or `undefined`: `null`,
+ * booleans, finite numbers, strings, real arrays with no hole or `undefined`
+ * entry, and objects whose prototype is `Object.prototype` or none, with no
+ * accessor, whose `undefined` members JSON drops. Anything else — a Date, a
+ * Map, a class instance, a function, BigInt, NaN, a cycle — is refused.
+ */
+function notJsonAt(
+	value: unknown,
+	path: string,
+	ancestors: Set<object> = new Set(),
+): string | undefined {
+	if (value === null || typeof value === "string" || typeof value === "boolean") return undefined;
+	if (typeof value === "number") return Number.isFinite(value) ? undefined : path;
+	if (typeof value !== "object" || ancestors.has(value)) return path;
+	const hasAccessor = Reflect.ownKeys(value).some((key) => {
+		const descriptor = Reflect.getOwnPropertyDescriptor(value, key);
+		return descriptor !== undefined && !("value" in descriptor);
+	});
+	if (hasAccessor) return path;
+	const prototype = Object.getPrototypeOf(value);
+	ancestors.add(value);
 	try {
-		copy = JSON.parse(JSON.stringify(value));
-	} catch {
-		assert.fail(`${what} cannot be written as JSON`);
+		if (Array.isArray(value)) {
+			if (prototype !== Array.prototype) return path;
+			for (let index = 0; index < value.length; index++) {
+				if (!Object.hasOwn(value, index) || value[index] === undefined) return `${path}[${index}]`;
+				const found = notJsonAt(value[index], `${path}[${index}]`, ancestors);
+				if (found !== undefined) return found;
+			}
+			return undefined;
+		}
+		if (prototype !== Object.prototype && prototype !== null) return path;
+		for (const [key, member] of Object.entries(value)) {
+			if (member === undefined) continue;
+			const found = notJsonAt(member, `${path}.${key}`, ancestors);
+			if (found !== undefined) return found;
+		}
+		return undefined;
+	} finally {
+		ancestors.delete(value);
 	}
-	assert.deepStrictEqual(copy, value, `${what} does not survive a JSON round trip`);
+}
+
+/** Refuses `value` unless JSON gives it back as it is, as the coordinator keeps it. */
+function survivesJson(value: unknown, what: string): void {
+	const at = notJsonAt(value, what);
+	assert.ok(at === undefined, `${at} is not a value JSON gives back as it is`);
 }
 
 /** `value` as the coordinator hands it back after keeping it: through JSON. */
 const reopened = <T,>(value: T): T => JSON.parse(JSON.stringify(value)) as T;
 
-/** Every call's context, at `nowMs`, under the transaction `transactionId`. */
+/** The subject every call is made for: the account's `User.id`, as the coordinator hands it. */
+function subjectOf(user: Readonly<Record<string, unknown>>): string {
+	const { id } = user;
+	assert.ok(typeof id === "string" && id.length > 0, "the account has no id: a subject is User.id");
+	return id;
+}
+
+/** Every call's context, for `subject`, at `nowMs`, under the transaction `transactionId`. */
 const contextAt = (
 	factor: MfaFactor,
+	subject: string,
 	nowMs: number,
 	transactionId: string,
 ): MfaCeremonyContext => ({
-	subject: SUBJECT,
+	subject,
 	transactionId,
 	nowMs,
 	request: { ip: "192.0.2.1", userAgent: "mfa-factor-contract" },
@@ -112,7 +162,7 @@ export function mfaFactorContract(input: MfaFactorContractInput): readonly Contr
 	const malformed = input.malformedProofs ?? DEFAULT_MALFORMED;
 
 	const begin = async (factor: MfaFactor) => {
-		const context = contextAt(factor, ENROLLED_AT_MS, "contract-enrollment");
+		const context = contextAt(factor, subjectOf(input.user), ENROLLED_AT_MS, "contract-enrollment");
 		const start = await factor.beginEnrollment({ ...context, user: input.user, factors: [] });
 		return { context, start };
 	};
@@ -142,7 +192,12 @@ export function mfaFactorContract(input: MfaFactorContractInput): readonly Contr
 
 	/** A challenge of `enrolled`, when the factor has one, an hour after the enrollment. */
 	const challenge = async (factor: MfaFactor, enrolled: MfaEnrolledFactor) => {
-		const context = contextAt(factor, VERIFIED_AT_MS, "contract-verification");
+		const context = contextAt(
+			factor,
+			subjectOf(input.user),
+			VERIFIED_AT_MS,
+			"contract-verification",
+		);
 		const sent =
 			factor.challenge === undefined
 				? undefined
