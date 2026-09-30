@@ -330,7 +330,7 @@ describe("the configuration createApp is handed reaches every loaded module whol
 			"oauth.dpop.iat-window-seconds",
 			"oauth.mtls.full-pki.max-chain-depth",
 			"webauthn.rateLimit.authenticationOptions.limit",
-			"mfa.factors.totp.enabled",
+			"mfa-totp-factor.enabled",
 		]) {
 			expect(valueAt(resolved, path), path).toBeDefined();
 		}
@@ -398,6 +398,49 @@ describe("the configuration createApp is handed reaches every loaded module whol
 		expect(
 			logger.lines.filter((line) => JSON.stringify(line).includes("config_sections_ignored")),
 		).toEqual([]);
+	});
+});
+
+// ---------------------------------------------------------------------------
+// A path a section moved from, through the template's own reading
+// ---------------------------------------------------------------------------
+
+describe("a setting still written where its section moved from, read as the template reads its configuration", () => {
+	it("refuses the boot when the operator's own layer writes the TOTP factor's old path, naming the new one and its variable", async () => {
+		const err = await refused({ operatorHocon: "mfa.factors.totp { enabled = false }\n" });
+		expect(err.reason).toBe("config-path-relocated");
+		expect(err.details).toEqual({
+			reason: "config-path-relocated",
+			relocated: [
+				{
+					module: "mfa-totp-factor",
+					from: "mfa.factors.totp.enabled",
+					to: "mfa-totp-factor.enabled",
+					environmentVariable: "MFA_TOTP_FACTOR_ENABLED",
+				},
+			],
+		});
+	});
+
+	it("refuses the boot when the environment sets the TOTP factor's old variable, which the MFA package's reference.conf binds at the old path", async () => {
+		const err = await refused({ env: { ...SINGLE_ENV, MFA_TOTP_ISSUER: "Example Co" } });
+		expect(err.reason).toBe("config-path-relocated");
+		expect(err.details).toEqual({
+			reason: "config-path-relocated",
+			relocated: [
+				{
+					module: "mfa-totp-factor",
+					from: "mfa.factors.totp.issuer",
+					to: "mfa-totp-factor.issuer",
+					environmentVariable: "MFA_TOTP_FACTOR_ISSUER",
+				},
+			],
+		});
+	});
+
+	it("boots with the setting at the new path, through its variable, and the factor reads it", async () => {
+		const { handle } = await boot({ env: { ...SINGLE_ENV, MFA_TOTP_FACTOR_ENABLED: "false" } });
+		expect(handle.components.mfaFactorResolver?.get("totp")).toBeUndefined();
 	});
 });
 
