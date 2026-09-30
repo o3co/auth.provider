@@ -107,19 +107,31 @@ export interface ModuleSection<S extends SectionSchema = SectionSchema> {
 	 */
 	readonly relocatedFrom?: readonly string[] | Readonly<Record<string, string | null>>;
 	/**
-	 * The environment variables whose names changed with the move: each old
-	 * name, mapped to the old path it was bound to (`{ LEGACY_RETRIES:
-	 * "legacy.retries" }`). The new name is the variable the key's new path is
-	 * bound to (`environmentVariableFor`), so no binding stays at the old path.
-	 * While the environment the configuration was resolved with sets an old
-	 * name, boot refuses (`environment-variable-renamed`) unless the new name
-	 * is set to the same string; a default at the new path does not count.
+	 * The environment variables whose names changed: each old name, mapped to
+	 * the old path it was bound to (`{ LEGACY_RETRIES: "legacy.retries" }`).
+	 * An old path {@link relocatedFrom} covers moves as it maps, and one in the
+	 * module's own section that no relocation covers stays where it is; the new
+	 * name is the variable its path is bound to (`environmentVariableFor`). An
+	 * old path mapped to `null` was removed, and its variable has no new name.
 	 *
-	 * Each old path lies at or under an entry of {@link relocatedFrom} that
-	 * moves it into a section read at its module's name; an old name is not the
-	 * new one, and is renamed by one loaded module and is no rename's new name
-	 * (`module-section-path-invalid`). Removed with `relocatedFrom` at the
-	 * first major release.
+	 * Nothing binds an old name at a path. The package's `reference.conf` binds
+	 * each new name at its path, and captures every declared old and new name
+	 * in the top-level `renamed-variables` section, each `null` and then
+	 * `${?NAME}`, so boot judges what the resolution saw: the old name set
+	 * refuses boot (`environment-variable-renamed`) unless the new one is set
+	 * to the same string — a default at the new path does not count — and a
+	 * removed key's variable set refuses it outright, as does a name the
+	 * configuration does not capture.
+	 *
+	 * A rename carries the value unchanged: a move that changes what a value
+	 * means (its unit, its encoding) is not declared here. A name bound element
+	 * by element (`${?NAME[]}`) cannot be declared.
+	 *
+	 * Each old name is a variable name, differs from its new one, and is
+	 * declared by one loaded module and is no rename's new name; a new path
+	 * lies in a section read at its module's name, and is not the section
+	 * itself (`module-section-path-invalid`). Removed with `relocatedFrom` at
+	 * the first major release.
 	 */
 	readonly renamedVariables?: Readonly<Record<string, string>>;
 }

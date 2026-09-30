@@ -527,15 +527,6 @@ export interface CreateAppOptions<B extends BootstrapMap = DefaultBootstrapMap> 
 	 * other. `__proto__` as an own key throws `reserved-component-key`.
 	 */
 	readonly overrideComponents?: Partial<ComponentMap>;
-
-	/**
-	 * The environment the configuration's `${?VAR}` substitutions were
-	 * resolved with; the process's when unset. Boot reads from it only the
-	 * variables a loaded module declares renamed (`section.renamedVariables`),
-	 * each as an own string property, and puts nothing of it in the component
-	 * map.
-	 */
-	readonly environment?: Readonly<Record<string, string | undefined>>;
 }
 
 // ---------------------------------------------------------------------------
@@ -953,22 +944,24 @@ export interface ConfigPathRelocatedDetails {
 }
 
 /**
- * The environment the configuration was resolved with sets a variable a
- * loaded module declares renamed (`section.renamedVariables`) while the new
- * name is unset, or set to a different string. Each entry: the module, the
- * old name, the new name, the dot path the new name is bound to, and which of
- * the two it is. No value is carried: a variable may hold a secret. A bridge
- * for the 0.x line, removed at the first major release with
- * `config-path-relocated`.
+ * What the resolution captured of a variable a loaded module — or core, for
+ * its own section — declares renamed (`section.renamedVariables`) refuses
+ * boot. Each entry: the declaring module (`"core"` for core), the old name,
+ * the new name and the dot path it is bound to (both `null` for a removed
+ * key), and why (`state`): the new name `unset` or set to a `different`
+ * string while the old one is set, a `removed` key's variable set, or a name
+ * the configuration does not capture (`uncaptured`). No value is carried: a
+ * variable may hold a secret. A bridge for the 0.x line, removed at the first
+ * major release with `config-path-relocated`.
  */
 export interface EnvironmentVariableRenamedDetails {
 	readonly reason: "environment-variable-renamed";
 	readonly renamed: readonly {
 		readonly module: string;
 		readonly from: string;
-		readonly to: string;
-		readonly path: string;
-		readonly newVariable: "unset" | "different";
+		readonly to: string | null;
+		readonly path: string | null;
+		readonly state: "unset" | "different" | "removed" | "uncaptured";
 	}[];
 }
 

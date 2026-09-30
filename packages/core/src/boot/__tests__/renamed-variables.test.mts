@@ -366,7 +366,7 @@ describe("a renamed variable — more", () => {
 		const env = { LEGACY_LABEL: "a", OLDER_RETRIES: "2" };
 		const order = async (modules: readonly Module[]) =>
 			(
-				(await refusal(boot(env, modules, "", reference))).details as {
+				(await refusal(boot(env, modules, "", reference))).details as unknown as {
 					renamed: { from: string }[];
 				}
 			).renamed.map(({ from }) => from);

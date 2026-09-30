@@ -31,8 +31,9 @@
  * new path and its environment variable. Boot reads the rows off the loaded
  * modules' manifests, since an old path may sit in no section any of them
  * parses. A variable renamed with the move is declared beside them
- * (`section.renamedVariables`): while the environment sets its old name, boot
- * refuses unless the new name is set to the same string
+ * (`section.renamedVariables`) and captured by the declaring package's
+ * `reference.conf` (`RENAMED_VARIABLES_SECTION`): while the resolution saw its
+ * old name set, boot refuses unless it saw the new name set to the same string
  * (`environment-variable-renamed`). Both refusals are removed at the first
  * major release; `relocatedPaths.drift.test.mts` fails the cut that forgets.
  *
@@ -252,63 +253,103 @@ export function relocatedKeyMessage(key: RelocatedKey): string {
 }
 
 /**
- * An environment variable whose name changed with a relocation: its old name,
- * its name now, and the path the new name is bound to.
+ * The reserved top-level section a configuration captures renamed variables
+ * in: each declared name `null`, then `${?NAME}`, in the `reference.conf` of
+ * the package that declares it, so it holds what the resolution saw — `null`
+ * for a name unset, the raw string for one set. Boot judges it and removes it
+ * before the configuration is parsed; no module's section may be read there.
+ */
+export const RENAMED_VARIABLES_SECTION = "renamed-variables";
+
+/**
+ * An environment variable whose name changed: its old name and the old path
+ * it was bound to, and its name now with the path that name is bound to —
+ * both `null` for a key removed rather than moved.
  */
 export interface RenamedVariable {
 	readonly from: string;
-	readonly to: string;
-	readonly path: string;
+	readonly oldPath: string;
+	readonly to: string | null;
+	readonly path: string | null;
 }
 
 /**
- * How the environment breaks a rename while it sets the old name: the new
- * name unset, or set to a different string. Neither value is carried.
+ * Why a rename refuses boot: the old name set and the new one `unset`, or set
+ * to a `different` string; the variable of a `removed` key set; or a name the
+ * configuration does not capture (`uncaptured`), which cannot be told apart
+ * from one set. No value is carried.
  */
-export type RenamedVariableProblem = "unset" | "different";
+export type RenamedVariableState = "unset" | "different" | "removed" | "uncaptured";
 
-/** The value `name` has as an own string property of `environment`; `undefined` otherwise. */
-const variableIn = (
-	environment: Readonly<Record<string, string | undefined>>,
-	name: string,
-): string | undefined => {
-	if (!Object.hasOwn(environment, name)) return undefined;
-	const value: unknown = environment[name];
-	return typeof value === "string" ? value : undefined;
+/** What the configuration captured of `name`: `null` unset, a string set; `undefined` when it holds no capture of it. */
+const capturedIn = (section: unknown, name: string): string | null | undefined => {
+	if (!isPlainObject(section) || !Object.hasOwn(section, name)) return undefined;
+	const value: unknown = section[name];
+	return value === null || typeof value === "string" ? value : undefined;
 };
 
 /**
- * Every rename `environment` breaks, in `renames` order: the old name set (the
- * empty string included) while the new name is unset, or set to a different
- * string. The two set to the same string, or the old name unset, break
- * nothing. A default at the new path is not the new name set.
+ * Every rename `config`'s captures break, in `renames` order: a name not
+ * captured; a removed key's variable set (the empty string included); the old
+ * name set while the new one is unset or set to a different string. The two
+ * set to the same string, or the old name unset, break nothing. A default at
+ * the new path is not the new name set.
  */
 export function findRenamedVariables<V extends RenamedVariable>(
-	environment: Readonly<Record<string, string | undefined>>,
+	config: unknown,
 	renames: readonly V[],
-): (V & { readonly newVariable: RenamedVariableProblem })[] {
-	return renames.flatMap((rename) => {
-		const old = variableIn(environment, rename.from);
-		if (old === undefined) return [];
-		const current = variableIn(environment, rename.to);
-		if (current === old) return [];
-		return [{ ...rename, newVariable: current === undefined ? "unset" : "different" }];
+): (V & { readonly state: RenamedVariableState })[] {
+	const section = readOwn(config, [RENAMED_VARIABLES_SECTION]);
+	return renames.flatMap((rename): (V & { readonly state: RenamedVariableState })[] => {
+		const old = capturedIn(section, rename.from);
+		const current = rename.to === null ? null : capturedIn(section, rename.to);
+		if (old === undefined || current === undefined) return [{ ...rename, state: "uncaptured" }];
+		if (old === null || current === old) return [];
+		if (rename.to === null) return [{ ...rename, state: "removed" }];
+		return [{ ...rename, state: current === null ? "unset" : "different" }];
 	});
+}
+
+/** `config` without the reserved `renamed-variables` section; `config` itself when it has none. */
+export function withoutRenamedVariables(config: unknown): unknown {
+	if (!isPlainObject(config) || !Object.hasOwn(config, RENAMED_VARIABLES_SECTION)) return config;
+	const { [RENAMED_VARIABLES_SECTION]: _captured, ...rest } = config;
+	return rest;
 }
 
 /**
  * What to tell the operator whose environment breaks a rename, in the words a
- * relocated key is refused in. Names the variables and the new path, never a
- * value: a variable may carry a secret.
+ * relocated key is refused in, or the composition that captures no value for
+ * it. Names the variables and the paths, never a value: a variable may carry
+ * a secret.
  */
 export function renamedVariableMessage(
-	rename: RenamedVariable & { readonly newVariable: RenamedVariableProblem },
+	rename: RenamedVariable & {
+		readonly module: string;
+		readonly state: RenamedVariableState;
+	},
 ): string {
-	return goneKeyMessage(
-		rename.from,
-		`was renamed ${rename.to}, the variable ${rename.path} is bound to`,
-		rename.newVariable === "unset"
-			? `Set ${rename.to} instead and unset ${rename.from}.`
-			: `${rename.to} is set to a different value: keep the one you mean in ${rename.to} and unset ${rename.from}.`,
-	);
+	const names = rename.to === null ? rename.from : `${rename.from} or ${rename.to}`;
+	switch (rename.state) {
+		case "uncaptured":
+			return `${names} is not captured in the configuration's ${RENAMED_VARIABLES_SECTION} section, so whether the environment sets it cannot be told. Layer the reference.conf of the package module "${rename.module}" comes from, which captures it.`;
+		case "removed":
+			return goneKeyMessage(
+				rename.from,
+				`sets ${rename.oldPath}, which was removed`,
+				`Unset ${rename.from}.`,
+			);
+		case "unset":
+			return goneKeyMessage(
+				rename.from,
+				`was renamed ${rename.to}, the variable ${rename.path} is bound to`,
+				`Set ${rename.to} instead and unset ${rename.from}.`,
+			);
+		case "different":
+			return goneKeyMessage(
+				rename.from,
+				`was renamed ${rename.to}, the variable ${rename.path} is bound to`,
+				`${rename.to} is set to a different value: keep the one you mean in ${rename.to} and unset ${rename.from}.`,
+			);
+	}
 }
