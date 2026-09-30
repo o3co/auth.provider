@@ -115,6 +115,8 @@ const TEMPLATE_PACKAGES: Readonly<Record<string, string>> = {
 		"oauthModule, oauthSessionModule, oauthAuthorizationModule, subjectRevocationServiceModule",
 	"@o3co/auth-provider-redis": "the Redis stores (all-modules-composition.multi.test.mts)",
 	"@o3co/auth-provider-session": "sessionModule, sessionStoreModuleFor",
+	"@o3co/auth-provider-standard":
+		"standardSmtpMailSenderModule; standardDevelopmentMailSenderModule in development",
 };
 
 /**
@@ -131,7 +133,7 @@ const NOT_IN_TEMPLATE: Readonly<Record<string, string>> = {
 	"@o3co/auth-provider-federation-apple": "appleFederationModule",
 	"@o3co/auth-provider-federation-github": "githubFederationModule",
 	"@o3co/auth-provider-mfa":
-		"mfaModules (mfaTotpFactorModule, mfaRecoveryCodeFactorModule, mfaModule); private until the MFA ADR's build-order step 20 wires it",
+		"mfaModules (mfaTotpFactorModule, mfaRecoveryCodeFactorModule, mfaEmailFactorModule, mfaModule); private until the MFA ADR's build-order step 20 wires it",
 	"@o3co/auth-provider-mtls": "mtlsModule",
 	"@o3co/auth-provider-oauth-token-exchange": "tokenExchangeModule",
 	"@o3co/auth-provider-test-kit": "no module: contract suites and fakes, for tests",
@@ -191,6 +193,7 @@ const ALL_ON_MODULES = [
 	"key-store",
 	"test:repositories",
 	"audit-sink",
+	"standard-smtp-mail-sender",
 	"standalone-in-memory-federation-token-store",
 	"core-federation-grant-store-memory",
 	"core-federation-grant-intent-store-memory",

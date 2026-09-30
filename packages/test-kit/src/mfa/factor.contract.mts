@@ -22,8 +22,21 @@
  * whatever the kind: a kind a hint can carry; `amrValues` it can vouch for and
  * `amrFor` within them, never empty; boolean flags; state and data that
  * survive the JSON round trip sealing puts them through, which the suite also
- * hands the factor back after; a hint that never shows the account's
- * address; a proof the factor cannot read answered `malformed`, never thrown;
+ * hands the factor back after; a code asked to be mailed only for the call's
+ * purpose, with an expiry after now when one is given, another at each
+ * challenge, a login code with the keyed digest of the account's address, and
+ * in no form in the page's response; the address digest it records exactly
+ * the one it is handed — of the address its code went to, as the coordinator
+ * kept it at the send — never one of the address the account answers at the
+ * start or by the completion, and no completion without one; a digest a
+ * verification is handed under a newer key kept in its next data and mailed
+ * by the next challenge; over data
+ * whose digest is gone or unreadable, a login code still asked for, with a
+ * `null` digest, which the coordinator refuses; no answer — state,
+ * response, data, label — carrying the account's address, as given or as
+ * `normaliseMailAddress` spells it, which the provider keeps none of and a
+ * page does not show; a hint that never shows it; a proof
+ * the factor cannot read answered `malformed`, never thrown;
  * and a valid proof that completes an enrollment and verifies the factor it
  * enrolled. The suite enrolls at one instant and verifies an hour later, so a
  * factor that refuses reuse within a time step is not asked to verify at the
@@ -31,7 +44,8 @@
  * subject, and handed core's test digests (`createTestMfaDigests`), made for
  * the factor's kind. State and data are held to the rule the coordinator
  * seals them by: JSON values JSON gives back as they are, in plain or
- * null-prototype objects.
+ * null-prototype objects. A code and an address are looked for in the
+ * strings an answer holds as a reader decodes them, not in its JSON text.
  */
 
 import assert from "node:assert/strict";
@@ -40,8 +54,13 @@ import {
 	isHintToken,
 	MFA_AMR,
 	type MfaCeremonyContext,
+	type MfaDigests,
 	type MfaEnrolledFactor,
 	type MfaFactor,
+	type MfaFactorData,
+	type MfaFactorMailPurpose,
+	type MfaKeyedDigest,
+	normaliseMailAddress,
 	PASSWORD_AMR,
 } from "@o3co/auth-provider-core";
 import { type ContractCase, createTestMfaDigests } from "@o3co/auth-provider-core/testing";
@@ -74,6 +93,22 @@ export interface MfaFactorContractInput {
 	/** Proofs the factor cannot read. Default: `undefined`, `null`, a number and an empty object. */
 	readonly malformedProofs?: readonly unknown[];
 }
+
+/** The address the account's user record answers after the code went out, in the cases that change it. */
+const MOVED_ADDRESS = "mfa-contract-moved@attacker.example";
+
+/** An address neither the start nor the completion reads, whose digest the suite hands a completion. */
+const HANDED_ADDRESS = "mfa-contract-sent-to@example.org";
+
+/** What the suite puts where a factor's address digest was, to see it read as none. */
+const UNREADABLE_DIGESTS: readonly unknown[] = [
+	null,
+	"digest",
+	{},
+	{ keyId: "test-key" },
+	{ keyId: 1, digest: 2 },
+	[],
+];
 
 /** When the suite enrolls, and an hour later, when it verifies. */
 const ENROLLED_AT_MS = Date.UTC(2026, 0, 1);
@@ -136,6 +171,160 @@ function survivesJson(value: unknown, what: string): void {
 /** `value` as the coordinator hands it back after keeping it: through JSON. */
 const reopened = <T,>(value: T): T => JSON.parse(JSON.stringify(value)) as T;
 
+/**
+ * Every string `value` holds, as a reader of it decodes them: string, number
+ * and bigint values, and the keys of objects, maps and arrays' holders,
+ * through arrays, sets and maps, each object once.
+ */
+function decodedStrings(value: unknown, seen: Set<object> = new Set()): string[] {
+	if (typeof value === "string") return [value];
+	if (typeof value === "number" || typeof value === "bigint") return [String(value)];
+	if (typeof value !== "object" || value === null || seen.has(value)) return [];
+	seen.add(value);
+	if (value instanceof Map) {
+		return [...value].flatMap(([key, member]) => [
+			...decodedStrings(key, seen),
+			...decodedStrings(member, seen),
+		]);
+	}
+	if (value instanceof Set) return [...value].flatMap((member) => decodedStrings(member, seen));
+	return Object.entries(value).flatMap(([key, member]) => [key, ...decodedStrings(member, seen)]);
+}
+
+/** Text as the suite compares a code: lower case, letters and digits alone. */
+const normalised = (text: string): string => text.toLowerCase().replace(/[^\p{L}\p{N}]/gu, "");
+
+/** Whether `value` holds `code` in any string, compared normalised, or verbatim when nothing of it survives normalising. */
+function carriesCode(value: unknown, code: string): boolean {
+	const needle = normalised(code);
+	return decodedStrings(value).some((text) =>
+		needle === "" ? text.includes(code) : normalised(text).includes(needle),
+	);
+}
+
+/**
+ * Refuses a code a call asks to be mailed unless its purpose is `purpose`,
+ * its code a non-empty string that `response`, what the page is answered,
+ * carries in no form, and its expiry, when given, an instant after `nowMs`.
+ * Answers the code; no mail asked for passes, answering nothing.
+ */
+function checkMail(
+	mail: unknown,
+	response: unknown,
+	expected: {
+		readonly purpose: MfaFactorMailPurpose;
+		readonly nowMs: number;
+		readonly what: string;
+	},
+): string | undefined {
+	if (mail === undefined) return undefined;
+	const { what } = expected;
+	const { purpose, code, expiresAtMs } = (
+		typeof mail === "object" && mail !== null ? mail : {}
+	) as {
+		readonly purpose?: unknown;
+		readonly code?: unknown;
+		readonly expiresAtMs?: unknown;
+	};
+	assert.equal(purpose, expected.purpose, `${what}'s mail is not for ${expected.purpose}`);
+	assert.ok(typeof code === "string" && code.length > 0, `${what}'s mail has no code`);
+	assert.ok(
+		expiresAtMs === undefined ||
+			(typeof expiresAtMs === "number" &&
+				Number.isFinite(expiresAtMs) &&
+				expiresAtMs > expected.nowMs),
+		`${what}'s mail expires at ${String(expiresAtMs)}, not after now`,
+	);
+	assert.ok(
+		!carriesCode(response, code),
+		`${what}'s response carries the code it asks to be mailed: the page would hold what only the mailbox should`,
+	);
+	return code;
+}
+
+/** Whether `value` is a keyed digest: a key id and a digest, each a string. */
+function isKeyedDigest(value: unknown): value is MfaKeyedDigest {
+	if (typeof value !== "object" || value === null) return false;
+	const { keyId, digest } = value as { readonly keyId?: unknown; readonly digest?: unknown };
+	return typeof keyId === "string" && typeof digest === "string";
+}
+
+/**
+ * Refuses a login code's `addressDigest` unless it is the keyed digest of the
+ * account's address as `normaliseMailAddress` spells it, made for `kind`
+ * under the digests a factor is handed.
+ */
+function checkAddressDigest(
+	addressDigest: unknown,
+	kind: string,
+	user: Readonly<Record<string, unknown>>,
+): void {
+	const address = normaliseMailAddress(user.email);
+	assert.ok(address !== undefined, "a factor mails a login code, and the account has no address");
+	assert.ok(
+		isKeyedDigest(addressDigest),
+		"a login code carries no keyed digest of the address it goes to",
+	);
+	assert.equal(
+		createTestMfaDigests(kind).matchesDigest([address], addressDigest),
+		"match",
+		"a login code carries the digest of another address than the account's",
+	);
+}
+
+/**
+ * Refuses `value` when a string it holds carries the account's address,
+ * whatever its case: as the account gives it, or as `normaliseMailAddress`
+ * spells it — trimmed, NFC, its domain in ASCII.
+ */
+function carriesNoAddress(value: unknown, user: Readonly<Record<string, unknown>>, what: string) {
+	const { email } = user;
+	if (typeof email !== "string" || email === "") return;
+	const addresses = [email.toLowerCase(), normaliseMailAddress(email)].filter(
+		(address): address is string => address !== undefined && address.trim() !== "",
+	);
+	assert.ok(
+		!decodedStrings(value).some((text) =>
+			addresses.some((address) => text.toLowerCase().includes(address)),
+		),
+		`${what} carries the account's address, which the provider does not keep and a page does not show`,
+	);
+}
+
+/**
+ * The keyed digest of `user`'s address as the coordinator makes it when it
+ * mails a code there: `normaliseMailAddress`'s spelling, under `digests`.
+ */
+function digestOfAddress(
+	digests: MfaDigests,
+	user: Readonly<Record<string, unknown>>,
+): MfaKeyedDigest | undefined {
+	const address = normaliseMailAddress(user.email);
+	return address === undefined ? undefined : digests.digest([address]);
+}
+
+/** Each copy of `data` with the member at `path` removed, or replaced by an unreadable digest. */
+function damagedAt(data: MfaFactorData, path: readonly string[]): MfaFactorData[] {
+	const [key, ...rest] = path as [string, ...string[]];
+	if (rest.length > 0) {
+		return damagedAt(data[key] as MfaFactorData, rest).map((inner) => ({ ...data, [key]: inner }));
+	}
+	const { [key]: _removed, ...without } = data;
+	return [without, ...UNREADABLE_DIGESTS.map((value) => ({ ...data, [key]: value }))];
+}
+
+/** The path to the member of `value` equal to `digest`, through plain objects, or `undefined`. */
+function pathTo(value: unknown, digest: MfaKeyedDigest): string[] | undefined {
+	if (typeof value !== "object" || value === null || Array.isArray(value)) return undefined;
+	for (const [key, member] of Object.entries(value)) {
+		const { keyId, digest: made } = (member ?? {}) as { keyId?: unknown; digest?: unknown };
+		if (keyId === digest.keyId && made === digest.digest) return [key];
+		const inner = pathTo(member, digest);
+		if (inner !== undefined) return [key, ...inner];
+	}
+	return undefined;
+}
+
 /** The subject every call is made for: the account's `User.id`, as the coordinator hands it. */
 function subjectOf(user: Readonly<Record<string, unknown>>): string {
 	const { id } = user;
@@ -161,22 +350,43 @@ const contextAt = (
 export function mfaFactorContract(input: MfaFactorContractInput): readonly ContractCase[] {
 	const malformed = input.malformedProofs ?? DEFAULT_MALFORMED;
 
+	/**
+	 * The start of an enrollment, and — when it asks for a code to be mailed —
+	 * the digest of the address the code goes to, as the coordinator keeps it
+	 * at the send.
+	 */
 	const begin = async (factor: MfaFactor) => {
 		const context = contextAt(factor, subjectOf(input.user), ENROLLED_AT_MS, "contract-enrollment");
 		const start = await factor.beginEnrollment({ ...context, user: input.user, factors: [] });
-		return { context, start };
+		const sentTo =
+			start.mail === undefined ? undefined : digestOfAddress(context.digests, input.user);
+		return { context, start, sentTo };
 	};
+
+	/** The completion of `begun` with `proof`, for `user` as the Store answers by then, as the coordinator hands it. */
+	const complete = (
+		factor: MfaFactor,
+		begun: Awaited<ReturnType<typeof begin>>,
+		proof: unknown,
+		user: Readonly<Record<string, unknown>> = input.user,
+	) =>
+		factor.completeEnrollment({
+			...begun.context,
+			user,
+			factors: [],
+			state: reopened(begun.start.state),
+			proof,
+			...(begun.sentTo === undefined ? {} : { addressDigest: begun.sentTo }),
+		});
 
 	/** The factor enrolled through its own ceremony, its data as the coordinator opens it. */
 	const enroll = async (factor: MfaFactor): Promise<MfaEnrolledFactor> => {
-		const { context, start } = await begin(factor);
-		const done = await factor.completeEnrollment({
-			...context,
-			user: input.user,
-			factors: [],
-			state: reopened(start.state),
-			proof: await input.enrollmentProof(start, context),
-		});
+		const begun = await begin(factor);
+		const done = await complete(
+			factor,
+			begun,
+			await input.enrollmentProof(begun.start, begun.context),
+		);
 		assert.ok(
 			done.ok,
 			`the proof of possession did not complete the enrollment: ${JSON.stringify(done)}`,
@@ -190,18 +400,20 @@ export function mfaFactorContract(input: MfaFactorContractInput): readonly Contr
 		};
 	};
 
-	/** A challenge of `enrolled`, when the factor has one, an hour after the enrollment. */
+	/**
+	 * A challenge of `enrolled`, when the factor has one, an hour after the
+	 * enrollment. After a mailed login code the verification context carries
+	 * the digest of the address it went to, as the coordinator keeps it at the
+	 * send.
+	 */
 	const challenge = async (factor: MfaFactor, enrolled: MfaEnrolledFactor) => {
-		const context = contextAt(
-			factor,
-			subjectOf(input.user),
-			VERIFIED_AT_MS,
-			"contract-verification",
-		);
+		const base = contextAt(factor, subjectOf(input.user), VERIFIED_AT_MS, "contract-verification");
 		const sent =
 			factor.challenge === undefined
 				? undefined
-				: await factor.challenge({ ...context, factor: enrolled, factors: [enrolled] });
+				: await factor.challenge({ ...base, factor: enrolled, factors: [enrolled] });
+		const sentTo = sent?.mail === undefined ? undefined : digestOfAddress(base.digests, input.user);
+		const context = sentTo === undefined ? base : { ...base, addressDigest: sentTo };
 		return { context, sent };
 	};
 
@@ -261,18 +473,24 @@ export function mfaFactorContract(input: MfaFactorContractInput): readonly Contr
 			},
 		},
 		{
-			name: "completeEnrollment answers malformed for a proof it cannot read, and never throws for one",
+			name: "beginEnrollment, when it asks for a code to be mailed, asks for the enrollment code, non-empty, with an expiry after now when it gives one, and its response carries no form of the code",
 			run: async () => {
 				const factor = input.build();
 				const { context, start } = await begin(factor);
+				checkMail(start.mail, start.response, {
+					purpose: "email_factor_enrollment",
+					nowMs: context.nowMs,
+					what: "beginEnrollment",
+				});
+			},
+		},
+		{
+			name: "completeEnrollment answers malformed for a proof it cannot read, and never throws for one",
+			run: async () => {
+				const factor = input.build();
+				const begun = await begin(factor);
 				for (const proof of malformed) {
-					const done = await factor.completeEnrollment({
-						...context,
-						user: input.user,
-						factors: [],
-						state: reopened(start.state),
-						proof,
-					});
+					const done = await complete(factor, begun, proof);
 					assert.deepEqual(done, { ok: false, reason: "malformed" }, `the proof ${String(proof)}`);
 				}
 			},
@@ -281,14 +499,12 @@ export function mfaFactorContract(input: MfaFactorContractInput): readonly Contr
 			name: "completeEnrollment takes the proof of possession, and answers data that survives a JSON round trip, a label that is a string when present, and at least one amr value, each among amrValues",
 			run: async () => {
 				const factor = input.build();
-				const { context, start } = await begin(factor);
-				const done = await factor.completeEnrollment({
-					...context,
-					user: input.user,
-					factors: [],
-					state: reopened(start.state),
-					proof: await input.enrollmentProof(start, context),
-				});
+				const begun = await begin(factor);
+				const done = await complete(
+					factor,
+					begun,
+					await input.enrollmentProof(begun.start, begun.context),
+				);
 				assert.ok(
 					done.ok,
 					`the proof of possession did not complete the enrollment: ${JSON.stringify(done)}`,
@@ -314,10 +530,10 @@ export function mfaFactorContract(input: MfaFactorContractInput): readonly Contr
 				const factor = input.build();
 				const { hint } = factor.describe((await enroll(factor)).data);
 				assert.ok(hint === undefined || typeof hint === "string", "the hint is not a string");
-				const { email } = input.user;
-				assert.ok(
-					typeof email !== "string" || email === "" || !(hint ?? "").includes(email),
-					"the hint shows the account's address, which a page may show to whoever holds the password",
+				carriesNoAddress(
+					hint,
+					input.user,
+					"the hint, which a page may show to whoever holds the password,",
 				);
 			},
 		},
@@ -328,6 +544,204 @@ export function mfaFactorContract(input: MfaFactorContractInput): readonly Contr
 				if (factor.challenge === undefined) return;
 				const { sent } = await challenge(factor, await enroll(factor));
 				if (sent?.state !== undefined) survivesJson(sent.state, "the challenge's state");
+			},
+		},
+		{
+			name: "challenge, when it asks for a code to be mailed, asks for a login code, non-empty, with an expiry after now when it gives one and the keyed digest of the account's address, another at each challenge, and its response carries no form of the code",
+			run: async () => {
+				const factor = input.build();
+				if (factor.challenge === undefined) return;
+				const enrolled = await enroll(factor);
+				const codes: (string | undefined)[] = [];
+				for (let n = 0; n < 2; n++) {
+					const { context, sent } = await challenge(factor, enrolled);
+					codes.push(
+						checkMail(sent?.mail, sent?.response, {
+							purpose: "login_code",
+							nowMs: context.nowMs,
+							what: "challenge",
+						}),
+					);
+					if (sent?.mail !== undefined) {
+						checkAddressDigest(
+							(sent.mail as { readonly addressDigest?: unknown }).addressDigest,
+							factor.kind,
+							input.user,
+						);
+					}
+				}
+				if (codes[0] !== undefined) {
+					assert.notEqual(codes[1], codes[0], "two challenges mail the same code");
+				}
+			},
+		},
+		{
+			name: "completeEnrollment records exactly the address digest it is handed — of the address its code went to, kept at the send — never one of the address the account answered at the start or answers by the completion",
+			run: async () => {
+				const factor = input.build();
+				const begun = await begin(factor);
+				if (begun.sentTo === undefined) return;
+				// The digest of an address neither the start nor the completion reads:
+				// only what the factor is handed can put it in its data.
+				const handed = digestOfAddress(begun.context.digests, {
+					email: HANDED_ADDRESS,
+				}) as MfaKeyedDigest;
+				const moved = { ...input.user, email: MOVED_ADDRESS };
+				const done = await complete(
+					factor,
+					{ ...begun, sentTo: handed },
+					await input.enrollmentProof(begun.start, begun.context),
+					moved,
+				);
+				assert.ok(
+					done.ok,
+					`the proof of possession did not complete the enrollment: ${JSON.stringify(done)}`,
+				);
+				assert.ok(
+					pathTo(done.data, handed) !== undefined,
+					"the enrolled data does not keep the address digest it was handed: the address its code went to",
+				);
+				const kept = decodedStrings(done.data);
+				for (const [when, user] of [
+					["the start", input.user],
+					["the completion", moved],
+				] as const) {
+					const read = digestOfAddress(begun.context.digests, user)?.digest;
+					assert.ok(
+						read === undefined || !kept.includes(read),
+						`the enrolled data keeps a digest of the address the account answered at ${when}, not the one it was handed`,
+					);
+				}
+			},
+		},
+		{
+			name: "completeEnrollment, after its code was mailed, completes nothing when it is handed no address digest",
+			run: async () => {
+				const factor = input.build();
+				const begun = await begin(factor);
+				if (begun.sentTo === undefined) return;
+				const done = await complete(
+					factor,
+					{ ...begun, sentTo: undefined },
+					await input.enrollmentProof(begun.start, begun.context),
+				);
+				assert.ok(
+					!done.ok,
+					"a completion after a mailed code, handed no address digest, completed: what it recorded is no address a code went to",
+				);
+			},
+		},
+		{
+			name: "verify, handed the address digest under a newer key than the one recorded, keeps it in its next data, and a later challenge mails it",
+			run: async () => {
+				const factor = input.build();
+				if (factor.challenge === undefined) return;
+				const enrolled = await enroll(factor);
+				const { context, sent } = await challenge(factor, enrolled);
+				if (sent?.mail === undefined) return;
+				// The ring's first key has changed since the enrollment: the digest kept at
+				// the send is under the newer one.
+				const rotated = createTestMfaDigests(factor.kind, { rotated: true });
+				const handed = digestOfAddress(rotated, input.user) as MfaKeyedDigest;
+				const verdict = await factor.verify({
+					...context,
+					digests: rotated,
+					addressDigest: handed,
+					factor: enrolled,
+					factors: [enrolled],
+					state: sent.state === undefined ? undefined : reopened(sent.state),
+					proof: await input.verificationProof(enrolled, sent, context),
+				});
+				assert.ok(verdict.ok, `a valid proof was refused: ${JSON.stringify(verdict)}`);
+				assert.ok(
+					verdict.next !== undefined && pathTo(verdict.next, handed) !== undefined,
+					"the factor's next data does not keep the address digest it was handed under the newer key: the older key could never leave the ring",
+				);
+				const rewrapped: MfaEnrolledFactor = { ...enrolled, data: reopened(verdict.next) };
+				const later = await factor.challenge({
+					...contextAt(factor, subjectOf(input.user), VERIFIED_AT_MS + 60_000, "contract-later"),
+					digests: rotated,
+					factor: rewrapped,
+					factors: [rewrapped],
+				});
+				const mailed = (later.mail as { readonly addressDigest?: unknown } | undefined)
+					?.addressDigest;
+				assert.ok(
+					isKeyedDigest(mailed) && mailed.keyId === handed.keyId && mailed.digest === handed.digest,
+					"a later challenge does not mail the address digest kept under the newer key",
+				);
+			},
+		},
+		{
+			name: "challenge, over data whose address digest is gone or is no digest, still asks for its login code, with a null address digest, and never throws: the coordinator refuses the factor",
+			run: async () => {
+				const factor = input.build();
+				if (factor.challenge === undefined) return;
+				const enrolled = await enroll(factor);
+				const { sent: intact } = await challenge(factor, enrolled);
+				const recorded = (intact?.mail as { readonly addressDigest?: unknown } | undefined)
+					?.addressDigest;
+				// Where the data keeps the digest the login code carries; a code that carries
+				// none, or none the data holds as it is, is the mailed-code case's to refuse.
+				const path = isKeyedDigest(recorded) ? pathTo(enrolled.data, recorded) : undefined;
+				if (path === undefined) return;
+				for (const data of damagedAt(enrolled.data, path)) {
+					const damaged: MfaEnrolledFactor = { ...enrolled, data };
+					const what = `over data ${JSON.stringify(data)}`;
+					let sent: Awaited<ReturnType<typeof challenge>>["sent"];
+					try {
+						({ sent } = await challenge(factor, damaged));
+					} catch (error) {
+						assert.fail(
+							`challenge threw ${what} (${String(error)}): an unreadable address digest is a mismatch the coordinator refuses, never an outage`,
+						);
+					}
+					const mail = sent?.mail as { readonly addressDigest?: unknown } | undefined;
+					assert.ok(
+						typeof mail === "object" && mail !== null,
+						`challenge ${what} asks for no login code: the coordinator cannot refuse the factor`,
+					);
+					if (mail.addressDigest === null) continue;
+					checkAddressDigest(mail.addressDigest, factor.kind, input.user);
+				}
+			},
+		},
+		{
+			name: "no answer carries the account's address, whatever its case or escaping: the pending enrollment's state and response, the enrolled data and label, a challenge's state and response, and a verification's next data",
+			run: async () => {
+				const factor = input.build();
+				const begun = await begin(factor);
+				carriesNoAddress(begun.start.state, input.user, "the pending enrollment's state");
+				carriesNoAddress(begun.start.response, input.user, "the pending enrollment's response");
+				const done = await complete(
+					factor,
+					begun,
+					await input.enrollmentProof(begun.start, begun.context),
+				);
+				assert.ok(
+					done.ok,
+					`the proof of possession did not complete the enrollment: ${JSON.stringify(done)}`,
+				);
+				carriesNoAddress(done.data, input.user, "the enrolled factor's data");
+				carriesNoAddress(done.label, input.user, "the enrolled factor's label");
+				const enrolled: MfaEnrolledFactor = {
+					id: FACTOR_ID,
+					label: done.label,
+					createdAt: new Date(ENROLLED_AT_MS),
+					lastUsedAt: undefined,
+					data: reopened(done.data),
+				};
+				const { context: later, sent } = await challenge(factor, enrolled);
+				carriesNoAddress(sent?.state, input.user, "the challenge's state");
+				carriesNoAddress(sent?.response, input.user, "the challenge's response");
+				const verdict = await factor.verify({
+					...later,
+					factor: enrolled,
+					factors: [enrolled],
+					state: sent?.state === undefined ? undefined : reopened(sent.state),
+					proof: await input.verificationProof(enrolled, sent, later),
+				});
+				if (verdict.ok) carriesNoAddress(verdict.next, input.user, "the factor's next data");
 			},
 		},
 		{

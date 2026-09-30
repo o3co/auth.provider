@@ -21,7 +21,12 @@
  * key ring for the factor, which never sees the ring; a factor may refuse a
  * sign count that did not increase, opt in to a challenge that stays across
  * attempts, and say a user cannot enroll it without throwing (a throw reads
- * as an outage).
+ * as an outage). A factor that mails a code answers its purpose and the code,
+ * never text or a recipient: the coordinator keeps the state, then sends. A
+ * login code carries the keyed digest of the address the factor was enrolled
+ * with, or `null` when its data holds none it can read; the coordinator sends
+ * it to the current address only on a match. The digest a factor records is
+ * the one it is handed: of the address the code went to, kept at the send.
  *
  * These are type assertions: the file is in core's typecheck list.
  */
@@ -29,11 +34,21 @@
 import { describe, expect, expectTypeOf, it } from "vitest";
 import type {
 	MfaCeremonyContext,
+	MfaChallenge,
+	MfaChallengeContext,
 	MfaDigestMatch,
 	MfaDigests,
+	MfaEnrollmentCompletionContext,
+	MfaEnrollmentContext,
+	MfaEnrollmentStart,
 	MfaFactor,
+	MfaFactorMail,
+	MfaFactorMailPurpose,
+	MfaFactorState,
 	MfaKeyedDigest,
+	MfaLoginCodeMail,
 	MfaVerification,
+	MfaVerifyContext,
 } from "#/mfa/factor.mjs";
 
 describe("the MfaFactor contract", () => {
@@ -86,6 +101,56 @@ describe("the MfaFactor contract", () => {
 		expectTypeOf<MfaFactor["enrollable"]>().toEqualTypeOf<
 			((user: Readonly<Record<string, unknown>>) => boolean) | undefined
 		>();
+		expect(true).toBe(true);
+	});
+
+	it("lets a challenge ask for a login code to be mailed, and an enrollment for its enrollment code: the purpose, the code and, when it has one, its expiry", () => {
+		expectTypeOf<MfaFactorMailPurpose>().toEqualTypeOf<"login_code" | "email_factor_enrollment">();
+		expectTypeOf<MfaFactorMail>().toEqualTypeOf<{
+			readonly purpose: MfaFactorMailPurpose;
+			readonly code: string;
+			readonly expiresAtMs?: number;
+		}>();
+		expectTypeOf<MfaFactorMail<"login_code">>().toEqualTypeOf<{
+			readonly purpose: "login_code";
+			readonly code: string;
+			readonly expiresAtMs?: number;
+		}>();
+		expectTypeOf<MfaLoginCodeMail>().toEqualTypeOf<{
+			readonly purpose: "login_code";
+			readonly code: string;
+			readonly expiresAtMs?: number;
+			readonly addressDigest: MfaKeyedDigest | null;
+		}>();
+		expectTypeOf<MfaChallenge>().toEqualTypeOf<{
+			readonly state?: MfaFactorState;
+			readonly response: unknown;
+			readonly mail?: MfaLoginCodeMail;
+		}>();
+		expectTypeOf<MfaEnrollmentStart>().toEqualTypeOf<{
+			readonly state: MfaFactorState;
+			readonly response: unknown;
+			readonly mail?: MfaFactorMail<"email_factor_enrollment">;
+		}>();
+		expectTypeOf<NonNullable<MfaFactor["challenge"]>>().toEqualTypeOf<
+			(ctx: MfaChallengeContext) => Promise<MfaChallenge>
+		>();
+		expectTypeOf<MfaFactor["beginEnrollment"]>().toEqualTypeOf<
+			(ctx: MfaEnrollmentContext) => Promise<MfaEnrollmentStart>
+		>();
+		expect(true).toBe(true);
+	});
+
+	it("hands a verification after a mailed login code, and an enrollment's completion after its mailed code, the digest of the address that code went to, kept at the send, for the factor to record", () => {
+		expectTypeOf<MfaVerifyContext["addressDigest"]>().toEqualTypeOf<MfaKeyedDigest | undefined>();
+		expectTypeOf<MfaEnrollmentCompletionContext["addressDigest"]>().toEqualTypeOf<
+			MfaKeyedDigest | undefined
+		>();
+		expect(true).toBe(true);
+	});
+
+	it("declares no mail limits: a limit on sending is the sender's", () => {
+		expectTypeOf<MfaFactor>().not.toHaveProperty("mailLimits");
 		expect(true).toBe(true);
 	});
 });

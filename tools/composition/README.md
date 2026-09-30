@@ -28,7 +28,9 @@ another's body limit, or a memory store booting under `core.deployment.mode =
   a deployment writes itself (config bridges, a grant policy, a session-to-WebAuthn-subject
   bridge, and two session requirements — each with the completion route a
   requirement's module contributes, built on the session package's exported
-  `establishSession` and `answerInterruption`). The composition, the body and outage helpers and the outage runner
+  `establishSession` and `answerInterruption`), and a mail sender — core's
+  recording one, handed to the tests as `mail`, since the template's SMTP
+  sender's module provides none. The composition, the body and outage helpers and the outage runner
   are not copied: they are the template suite's, exported by its fixture,
   [`all-modules-composition.fixture.mts`](../../templates/standalone/src/__tests__/all-modules-composition.fixture.mts).
   Upstream identity providers are fakes; nothing reaches the network.

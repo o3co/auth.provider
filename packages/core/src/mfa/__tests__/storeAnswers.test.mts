@@ -125,8 +125,6 @@ const BOUND: MfaTransaction = {
 	challenge: undefined,
 	pendingEnrollment: undefined,
 	attempts: 1,
-	sends: 0,
-	lastSentAtMs: undefined,
 	createdAtMs: 1_800_000_000_000,
 	expiresAtMs: 1_800_000_600_000,
 	version: 2,
