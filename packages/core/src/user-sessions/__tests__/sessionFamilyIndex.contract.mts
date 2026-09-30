@@ -200,10 +200,9 @@ export function runSessionEndContract(
 			expect(await idx.addFamilyIdUnlessEnded("sid-1", "fam-A", expiresAt)).toBe("ended");
 		});
 
-		it("an add started while an end is in flight: the end lists its family, or the add answers ended", async () => {
-			// The end is started first, and the add before the end has answered:
-			// wherever the store lets the add fall, before the end's listing or
-			// after it, one of the two sees the other.
+		it("an end and an add started together (end first): the end lists the family, or the add answers ended", async () => {
+			// Neither is awaited before the other starts; however the store orders
+			// the two, one of them sees the other.
 			const idx = await capable();
 			const expiresAt = FUTURE();
 			const ending = idx.endSession("sid-1", expiresAt);
@@ -212,7 +211,7 @@ export function runSessionEndContract(
 			listedOrEnded(listed, answer, "fam-A");
 		});
 
-		it("an end started while an add is in flight: the end lists its family, or the add answers ended", async () => {
+		it("an end and an add started together (add first): the end lists the family, or the add answers ended", async () => {
 			const idx = await capable();
 			const expiresAt = FUTURE();
 			const adding = idx.addFamilyIdUnlessEnded("sid-1", "fam-A", expiresAt);

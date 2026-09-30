@@ -185,9 +185,9 @@ export interface SessionSidSortedSetClient {
  */
 export interface SessionFamilyIndexClient extends SessionSidSortedSetClient {
 	/** Write the mark at `key`, expiring at the epoch-ms `msTimestamp` (`SET key 1 PXAT msTimestamp`). */
-	writeEndMark?(key: string, msTimestamp: number): Promise<void>;
+	writeEndedMark?(key: string, msTimestamp: number): Promise<void>;
 	/** Whether the mark at `key` is there (`EXISTS key`). */
-	hasEndMark?(key: string): Promise<boolean>;
+	hasEndedMark?(key: string): Promise<boolean>;
 }
 
 // --- Subject-keyed clients -------------------------------------------------

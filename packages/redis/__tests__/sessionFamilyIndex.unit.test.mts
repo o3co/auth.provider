@@ -51,8 +51,8 @@ const recordingClient = (options: { readonly marked?: boolean } = {}) => {
 		zAdd: () => reply("zAdd", 1),
 		zRange: (key) => reply(`zRange ${key}`, []),
 		zRem: () => reply("zRem", 1),
-		writeEndMark: (key, msTimestamp) => reply(`writeEndMark ${key} ${msTimestamp}`, undefined),
-		hasEndMark: (key) => reply(`hasEndMark ${key}`, options.marked ?? false),
+		writeEndedMark: (key, msTimestamp) => reply(`writeEndedMark ${key} ${msTimestamp}`, undefined),
+		hasEndedMark: (key) => reply(`hasEndedMark ${key}`, options.marked ?? false),
 	};
 	return { client, log };
 };
@@ -60,7 +60,7 @@ const recordingClient = (options: { readonly marked?: boolean } = {}) => {
 const FUTURE = () => new Date(Date.now() + 60_000);
 
 describe("createRedisSessionFamilyIndex — the session-end capability", () => {
-	it("is claimed over a client with writeEndMark and hasEndMark, given endedKeyPrefix", () => {
+	it("is claimed over a client with writeEndedMark and hasEndedMark, given endedKeyPrefix", () => {
 		const { client } = recordingClient();
 		const idx = createRedisSessionFamilyIndex({
 			client,
@@ -94,9 +94,9 @@ describe("createRedisSessionFamilyIndex — the session-end capability", () => {
 
 	it("is not claimed over a client without the mark's methods, or with one of them", () => {
 		const { client } = recordingClient();
-		const { writeEndMark: _write, hasEndMark: _has, ...sortedSetOnly } = client;
-		const { hasEndMark: _hasOnly, ...writeOnly } = client;
-		const { writeEndMark: _writeOnly, ...readOnly } = client;
+		const { writeEndedMark: _write, hasEndedMark: _has, ...sortedSetOnly } = client;
+		const { hasEndedMark: _hasOnly, ...writeOnly } = client;
+		const { writeEndedMark: _writeOnly, ...readOnly } = client;
 		for (const partial of [sortedSetOnly, writeOnly, readOnly]) {
 			const idx = createRedisSessionFamilyIndex({
 				client: partial,
@@ -125,8 +125,8 @@ describe("createRedisSessionFamilyIndex — the order of the two operations", ()
 		const expiresAt = FUTURE();
 		await idx.endSession("sid-1", expiresAt);
 		expect(log).toEqual([
-			`writeEndMark t:fi-ended:sid-1 ${expiresAt.getTime()} sent`,
-			`writeEndMark t:fi-ended:sid-1 ${expiresAt.getTime()} replied`,
+			`writeEndedMark t:fi-ended:sid-1 ${expiresAt.getTime()} sent`,
+			`writeEndedMark t:fi-ended:sid-1 ${expiresAt.getTime()} replied`,
 			"zRange t:fi:sid-1 sent",
 			"zRange t:fi:sid-1 replied",
 		]);
@@ -138,8 +138,8 @@ describe("createRedisSessionFamilyIndex — the order of the two operations", ()
 		expect(log).toEqual([
 			"exec sent",
 			"exec replied",
-			"hasEndMark t:fi-ended:sid-1 sent",
-			"hasEndMark t:fi-ended:sid-1 replied",
+			"hasEndedMark t:fi-ended:sid-1 sent",
+			"hasEndedMark t:fi-ended:sid-1 replied",
 		]);
 	});
 
@@ -182,7 +182,7 @@ describe("redisSessionFamilyIndexBuilder — the ended mark", () => {
 		if (!supportsSessionEnd(idx)) throw new Error("the index does not claim SupportsSessionEnd");
 		const expiresAt = FUTURE();
 		await idx.endSession("sid-1", expiresAt);
-		expect(log[0]).toBe(`writeEndMark ss:fi-ended:sid-1 ${expiresAt.getTime()} sent`);
+		expect(log[0]).toBe(`writeEndedMark ss:fi-ended:sid-1 ${expiresAt.getTime()} sent`);
 		expect(log[2]).toBe("zRange ss:fi:sid-1 sent");
 	});
 
@@ -195,6 +195,6 @@ describe("redisSessionFamilyIndexBuilder — the ended mark", () => {
 		if (!supportsSessionEnd(idx)) throw new Error("the index does not claim SupportsSessionEnd");
 		const expiresAt = FUTURE();
 		await idx.endSession("sid-1", expiresAt);
-		expect(log[0]).toBe(`writeEndMark x:fi-ended:sid-1 ${expiresAt.getTime()} sent`);
+		expect(log[0]).toBe(`writeEndedMark x:fi-ended:sid-1 ${expiresAt.getTime()} sent`);
 	});
 });

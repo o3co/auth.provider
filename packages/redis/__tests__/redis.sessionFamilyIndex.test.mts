@@ -149,13 +149,11 @@ describe("SessionFamilyIndex concurrency", () => {
 		}
 	});
 
-	it("500 interleaved add/end pairs over two connections: in every pair the end lists the family or the add answers ended", async () => {
+	it("500 add/end pairs over two connections, the second side started after a varying lag: in every pair the end lists the family or the add answers ended", async () => {
 		// One connection stands for the replica that serves the logout, the
 		// other for the one that serves the grant. Each pair has a sid of its
-		// own; which side starts first alternates, and the other starts after a
-		// varying number of event-loop turns, so that pairs land in different
-		// orders: the add wholly before the end, wholly after it, or between the
-		// end's mark and its listing.
+		// own; which side starts first alternates, and the other starts after
+		// 0 to 11 event-loop turns.
 		const logoutConnection = new Redis(at);
 		const grantConnection = new Redis(at);
 		const turns = (n: number): Promise<void> =>

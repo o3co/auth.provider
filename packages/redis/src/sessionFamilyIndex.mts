@@ -39,7 +39,7 @@ export interface RedisSessionFamilyIndexOptions {
  * scored in insertion order, `ZADD NX`). Cascade revoke does not depend on
  * the order; the sorted set is for consistency with `SessionFederationIndex`.
  *
- * Given `endedKeyPrefix` and a client with `writeEndMark` and `hasEndMark`, it
+ * Given `endedKeyPrefix` and a client with `writeEndedMark` and `hasEndedMark`, it
  * has core's `SupportsSessionEnd`. The mark is a string at
  * `${endedKeyPrefix}${sid}` expiring at the session's `expiresAt` (`PXAT`),
  * which `removeBySid` leaves. `endSession` writes the mark, then lists;
@@ -73,12 +73,12 @@ export function createRedisSessionFamilyIndex(
 		},
 	};
 
-	const writeEndMark = client.writeEndMark?.bind(client);
-	const hasEndMark = client.hasEndMark?.bind(client);
+	const writeEndedMark = client.writeEndedMark?.bind(client);
+	const hasEndedMark = client.hasEndedMark?.bind(client);
 	if (
 		endedKeyPrefix === undefined ||
-		typeof writeEndMark !== "function" ||
-		typeof hasEndMark !== "function"
+		typeof writeEndedMark !== "function" ||
+		typeof hasEndedMark !== "function"
 	) {
 		return index;
 	}
@@ -90,12 +90,12 @@ export function createRedisSessionFamilyIndex(
 			if (!Number.isFinite(expiresAtMs)) {
 				throw new RangeError("expiresAt must be a valid date");
 			}
-			if (expiresAtMs > Date.now()) await writeEndMark(markKey(sid), expiresAtMs);
+			if (expiresAtMs > Date.now()) await writeEndedMark(markKey(sid), expiresAtMs);
 			return zset.list(sid);
 		},
 		async addFamilyIdUnlessEnded(sid, familyId, expiresAt) {
 			if (!(await zset.add(sid, familyId, expiresAt))) return "ended";
-			return (await hasEndMark(markKey(sid))) ? "ended" : "added";
+			return (await hasEndedMark(markKey(sid))) ? "ended" : "added";
 		},
 	};
 	return { ...index, ...sessionEnd };

@@ -165,10 +165,10 @@ export function makeIoredisSessionSidSortedSetClient(io: Redis): SessionSidSorte
 export function makeIoredisSessionFamilyIndexClient(io: Redis): SessionFamilyIndexClient {
 	return {
 		...makeIoredisSessionSidSortedSetClient(io),
-		async writeEndMark(key, msTimestamp) {
+		async writeEndedMark(key, msTimestamp) {
 			await io.set(key, "1", "PXAT", msTimestamp);
 		},
-		async hasEndMark(key) {
+		async hasEndedMark(key) {
 			return (await io.exists(key)) === 1;
 		},
 	};

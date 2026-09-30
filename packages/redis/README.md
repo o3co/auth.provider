@@ -170,8 +170,8 @@ Each one implements a port core declares; the slot name is in parentheses.
   is refused as corrupt, and a release before this one ignores the key. A
   step-up keeps it as it was. The `SessionFamilyIndex` has the session-end
   capability (core's `SupportsSessionEnd`) when it is given an
-  `endedKeyPrefix` and a `SessionFamilyIndexClient` with `writeEndMark` and
-  `hasEndMark`, which `makeIoredisClients`, the module and the builder
+  `endedKeyPrefix` and a `SessionFamilyIndexClient` with `writeEndedMark` and
+  `hasEndedMark`, which `makeIoredisClients`, the module and the builder
   provide: the mark is a string at `<endedKeyPrefix><sid>` (`ss:fi-ended:` by
   default) expiring at the session's `expiresAt`, beside the family set, and
   `removeBySid` leaves it. `endSession` writes the mark and then lists;
