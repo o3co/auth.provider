@@ -184,6 +184,7 @@ const DEPLOYMENT_MODULES = [
 	"deployment:github-federation-config",
 	"deployment:requirement-page",
 	"deployment:requirement-bare",
+	"deployment:mail-sender",
 ];
 
 describe("what the full set covers", () => {
@@ -237,6 +238,15 @@ const ALL_GRANTS = [
 	"session",
 	...ADDED_GRANTS,
 ].sort();
+
+describe("the full set's mail sender", () => {
+	it("fills the mailSender slot with the recording sender the full set hands its tests", async () => {
+		const { handle, mail } = await boot();
+		expect(handle.components.mailSender).toBe(mail);
+		expect(mail.kind).toBe("recording");
+		expect(mail.sent).toEqual([]);
+	});
+});
 
 describe("the full set boots together", () => {
 	it("mounts every added route, registers every federation and every grant", async () => {
