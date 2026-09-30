@@ -40,6 +40,7 @@ import {
 	type RegisteredRequirement,
 	registeredRequirement,
 	sealRegisteredReach,
+	secondFactorAuthorities,
 } from "../session-admission/requirement.mjs";
 import { failureSummary } from "./failure-summary.mjs";
 import { compositionIssuer } from "./oauth-token-settings.mjs";
@@ -607,8 +608,11 @@ async function checkSessionRequirements(
 			registrations.push({ name: entry.key, module: moduleName, requirement });
 		}
 	}
-	const authorities = registrations.filter(
-		(registration) => registration.requirement.secondFactorAuthority,
+	const declarers = new Set(
+		secondFactorAuthorities(registrations.map((registration) => registration.requirement)),
+	);
+	const authorities = registrations.filter((registration) =>
+		declarers.has(registration.requirement),
 	);
 	if (authorities.length > 1) {
 		const cleanupErrors = await runCleanupsReverse(material.cleanups);

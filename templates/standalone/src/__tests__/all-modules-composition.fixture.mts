@@ -59,6 +59,7 @@ import {
 	type Logger,
 	type Module,
 	memoryRefreshTokenFamilyStoreModule,
+	readMfaMode,
 	terminalErrorHandler,
 } from "@o3co/auth-provider-core";
 import { createFakeIdp, type FakeIdp } from "@o3co/auth-provider-core/testing";
@@ -665,6 +666,8 @@ export async function compose(options: ComposeOptions = {}): Promise<Composition
 	);
 	const switches = resolveConfig(env, options.reads, own);
 	const config = adjust(switches);
+	// The parsed `mfa.mode`, read once, as `app.mts` reads it.
+	const mfaMode = readMfaMode(config) ?? "off";
 	const fakes = await sharedUpstreams();
 	const modules = composedModules(config, options);
 	const logger = createRecordingLogger();
@@ -684,7 +687,7 @@ export async function compose(options: ComposeOptions = {}): Promise<Composition
 		} as never,
 	});
 	// As app.mts does, before anything listens.
-	await requireMfaSecondFactorAuthority(config, handle);
+	await requireMfaSecondFactorAuthority(mfaMode, handle);
 	const parsed = handle.components.config;
 	if (parsed === undefined) throw new Error("createApp booted without the parsed configuration");
 	const app = express();

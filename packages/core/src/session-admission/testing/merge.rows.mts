@@ -491,47 +491,60 @@ export const MERGE_ROW_GROUPS: readonly MergeRowGroup[] = [
 
 /**
  * The ADR's mapping of a row's decision onto the admission, for `authority`,
- * the registered second-factor authority: `requirement: "acr"` stays
- * `"acr"`, `"baseline"` becomes the authority's name, and a `step_up`'s
- * requirement becomes `whenStillUnmet` (`"acr"` → `"unmet"`, `"baseline"` →
- * `"reauthenticate"`) with its registered page. Throws unless `authority` is
- * a registered requirement that declares the authority.
+ * the registered second-factor authority (`undefined` when none is
+ * registered): `requirement: "acr"` stays `"acr"`, `"baseline"` becomes the
+ * authority's name, and a `step_up`'s requirement becomes `whenStillUnmet`
+ * (`"acr"` → `"unmet"`, `"baseline"` → `"reauthenticate"`) with its
+ * registered page. Throws for an `authority` that is not a registered
+ * requirement declaring it, and for a row that names it when none is given.
  */
 export function mergeAdmission(
 	expected: MergeDecision,
 	session: UserSession | null,
-	authority: RegisteredRequirement,
+	authority: RegisteredRequirement | undefined,
 ): Admission {
-	if (!isRegisteredRequirement(authority)) {
-		throw new Error("mergeAdmission: the authority is not a registered requirement");
+	if (authority !== undefined) {
+		if (!isRegisteredRequirement(authority)) {
+			throw new Error("mergeAdmission: the authority is not a registered requirement");
+		}
+		if (authority.secondFactorAuthority !== true) {
+			throw new Error(
+				`mergeAdmission: "${authority.name}" does not declare the second-factor authority, whose rows these are`,
+			);
+		}
 	}
-	if (authority.secondFactorAuthority !== true) {
-		throw new Error(
-			`mergeAdmission: "${authority.name}" does not declare the second-factor authority, whose rows these are`,
-		);
-	}
+	const named = (): RegisteredRequirement => {
+		if (authority === undefined) {
+			throw new Error(
+				`mergeAdmission: the row's ${expected.outcome} names the second-factor authority, and none is given`,
+			);
+		}
+		return authority;
+	};
 	switch (expected.outcome) {
 		case "met":
 			return { outcome: "admitted", session, acr: expected.acr };
 		case "reauthenticate":
-			return { outcome: "reauthenticate", requirement: authority.name, session };
-		case "step_up":
+			return { outcome: "reauthenticate", requirement: named().name, session };
+		case "step_up": {
 			if (session === null) throw new Error("a step-up needs a session");
-			if (authority.stepUpPage === undefined) {
-				throw new Error(`mergeAdmission: "${authority.name}" registered no step-up page`);
+			const { name, stepUpPage } = named();
+			if (stepUpPage === undefined) {
+				throw new Error(`mergeAdmission: "${name}" registered no step-up page`);
 			}
 			return {
 				outcome: "step_up",
-				requirement: authority.name,
+				requirement: name,
 				session,
-				page: authority.stepUpPage,
+				page: stepUpPage,
 				acrValues: expected.acrValues,
 				whenStillUnmet: expected.requirement === "acr" ? "unmet" : "reauthenticate",
 			};
+		}
 		case "unmet":
 			return {
 				outcome: "unmet",
-				requirement: expected.requirement === "acr" ? "acr" : authority.name,
+				requirement: expected.requirement === "acr" ? "acr" : named().name,
 				session,
 			};
 	}

@@ -32,6 +32,7 @@ import {
 	type SessionRequirement,
 	type SessionRequirementResolver,
 	sealRegisteredReach,
+	secondFactorAuthorities,
 	snapshotReach,
 } from "../requirement.mjs";
 
@@ -54,22 +55,19 @@ export function resolverForTests(
 		throw new RangeError("resolverForTests: requirements must be a list");
 	}
 	const byName = new Map<string, RegisteredRequirement>();
-	let authority: string | undefined;
 	for (const candidate of requirements) {
 		// What is wrong is named by the registration itself, as boot reports it.
 		const requirement = registeredRequirement(candidate, options.issuer);
 		if (byName.has(requirement.name)) {
 			throw new RangeError(`resolverForTests: two requirements are named "${requirement.name}"`);
 		}
-		if (requirement.secondFactorAuthority) {
-			if (authority !== undefined) {
-				throw new RangeError(
-					`resolverForTests: "${authority}" and "${requirement.name}" both declare the second-factor authority, and at most one requirement may`,
-				);
-			}
-			authority = requirement.name;
-		}
 		byName.set(requirement.name, requirement);
+	}
+	const declarers = secondFactorAuthorities(byName.values()).map(({ name }) => `"${name}"`);
+	if (declarers.length > 1) {
+		throw new RangeError(
+			`resolverForTests: ${declarers.slice(0, -1).join(", ")} and ${declarers.at(-1)} ${declarers.length === 2 ? "both" : "all"} declare the second-factor authority, and at most one requirement may`,
+		);
 	}
 	for (const requirement of byName.values()) {
 		if (options.allowAnyReach === true) {

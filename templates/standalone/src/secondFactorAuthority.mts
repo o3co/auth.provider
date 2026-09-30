@@ -20,7 +20,10 @@
  * merely named `mfa` would meet the declaration alone.
  */
 
-import { type AppConfig, type AppHandle, readMfaMode } from "@o3co/auth-provider-core";
+import type { AppHandle } from "@o3co/auth-provider-core";
+
+/** The parsed `mfa.mode`: its composition root reads it. */
+export type TemplateMfaMode = "off" | "optional" | "required";
 
 /** The requirement the template declares for MFA: the MFA package's. */
 const MFA_REQUIREMENT = "mfa";
@@ -29,27 +32,35 @@ const MFA_REQUIREMENT = "mfa";
 export class MfaRequirementNotAuthorityError extends Error {
 	readonly reason = "mfa-requirement-not-second-factor-authority";
 
-	constructor(mode: string, registered: boolean) {
+	constructor(mode: TemplateMfaMode, registered: boolean, options?: ErrorOptions) {
 		super(
 			`mfa.mode is "${mode}", and ${registered ? `the session requirement registered as "${MFA_REQUIREMENT}" does not declare the second-factor authority` : `no session requirement is registered as "${MFA_REQUIREMENT}"`}: no login would be asked for a second factor. Install the MFA package's modules (mfaModules), whose requirement declares it, or set mfa.mode = "off" (MFA_MODE)`,
+			options,
 		);
 		this.name = "MfaRequirementNotAuthorityError";
 	}
 }
 
 /**
- * After boot, before listening: under a parsed `mfa.mode` other than `off`,
- * disposes `handle` and throws `MfaRequirementNotAuthorityError` unless the
- * requirement registered as `mfa` declares the second-factor authority.
+ * After boot, before listening: under `mode` other than `off`, disposes
+ * `handle` and throws `MfaRequirementNotAuthorityError` unless the
+ * requirement registered as `mfa` declares the second-factor authority. A
+ * failed dispose is the refusal's `cause`, never in its place.
  */
 export async function requireMfaSecondFactorAuthority(
-	switches: AppConfig,
+	mode: TemplateMfaMode,
 	handle: Pick<AppHandle, "components" | "dispose">,
 ): Promise<void> {
-	const mode = readMfaMode(switches) ?? "off";
 	if (mode === "off") return;
 	const registered = handle.components.sessionRequirementResolver?.get(MFA_REQUIREMENT);
 	if (registered?.secondFactorAuthority === true) return;
-	await handle.dispose();
-	throw new MfaRequirementNotAuthorityError(mode, registered !== undefined);
+	let cleanup: unknown;
+	await handle.dispose().catch((err: unknown) => {
+		cleanup = err;
+	});
+	throw new MfaRequirementNotAuthorityError(
+		mode,
+		registered !== undefined,
+		cleanup === undefined ? undefined : { cause: cleanup },
+	);
 }

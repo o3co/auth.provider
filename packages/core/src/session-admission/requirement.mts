@@ -751,13 +751,16 @@ export function registeredRequirement(value: unknown, issuer?: string): Register
  * `remedy` is appended to the refusal of a non-empty reach from any other.
  */
 export function sealRegisteredReach(
-	requirement: SessionRequirement,
+	requirement: RegisteredRequirement,
 	remedy?: string,
 ): ReadonlySet<string> {
 	const refuse = (what: string): never => {
 		throw new RangeError(`session requirement "${requirement.name}": ${what}`);
 	};
-	const authority = requirement.secondFactorAuthority === true;
+	if (!isRegisteredRequirement(requirement)) {
+		return refuse("is not a registered copy: its declaration is the one registration read");
+	}
+	const authority = requirement.secondFactorAuthority;
 	const reach: unknown = requirement.reach;
 	if (!isIterableOfValues(reach)) return refuse("reach must be a Set of amr values");
 	const read = new Set<string>();
@@ -792,7 +795,7 @@ export function sealRegisteredReach(
  * For `resolverForTests` alone.
  * @internal
  */
-export function snapshotReach(requirement: SessionRequirement): ReadonlySet<string> {
+export function snapshotReach(requirement: RegisteredRequirement): ReadonlySet<string> {
 	const reach: unknown = requirement.reach;
 	if (!isIterableOfValues(reach)) {
 		throw new RangeError(
@@ -801,6 +804,12 @@ export function snapshotReach(requirement: SessionRequirement): ReadonlySet<stri
 	}
 	return seal(requirement, reach as Iterable<string>);
 }
+
+/** The registered requirements among `requirements` that declare the second-factor authority, in order: at most one may. */
+export const secondFactorAuthorities = (
+	requirements: Iterable<RegisteredRequirement>,
+): RegisteredRequirement[] =>
+	[...requirements].filter((requirement) => requirement.secondFactorAuthority);
 
 /**
  * The read side of the `sessionRequirements` kind — the synthetic key

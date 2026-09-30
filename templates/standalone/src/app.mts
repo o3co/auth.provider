@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 import { fileURLToPath } from "node:url";
-import { type AppConfig, createApp } from "@o3co/auth-provider-core";
+import { type AppConfig, createApp, readMfaMode } from "@o3co/auth-provider-core";
 import express from "express";
 import helmet from "helmet";
 import { buildModules } from "./buildModules.mjs";
@@ -46,6 +46,8 @@ const own = readOwnLayers([envConfPath, applicationConfPath]);
 // (`expectedSessionRequirements`): the configuration's list, with `mfa` added
 // when the parsed `mfa.mode` asks for a second factor.
 const switches: AppConfig = readSwitches(own);
+// The parsed `mfa.mode`, read once.
+const mfaMode = readMfaMode(switches) ?? "off";
 
 // Built from config so its level is operator-controlled, and wired into
 // `bootstrapComponents` so every module that declares `optional: ["logger"]`
@@ -94,7 +96,7 @@ await (async (): Promise<void> => {
 		},
 	});
 	// A second factor asked for needs `mfa` registered as the declared authority.
-	await requireMfaSecondFactorAuthority(switches, handle);
+	await requireMfaSecondFactorAuthority(mfaMode, handle);
 	const config = handle.components.config;
 	if (config === undefined) throw new Error("createApp booted without the parsed configuration");
 	// `false` | `true` | a hop count | a list of IPs / CIDR ranges / named
