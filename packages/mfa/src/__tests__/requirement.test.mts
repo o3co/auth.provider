@@ -24,7 +24,8 @@
  *
  * `admit`'s table, by grade alone: the `use` baseline under `mfa.mode`, the
  * token rows, `grants_nothing` met on any live session whatever the action is
- * named, and `credential_change` held to the baseline, with no recent-MFA rule.
+ * named, and `credential_change` held to recent MFA under either mode on a
+ * session a record carries, over the subject's factor records.
  */
 
 import {
@@ -32,10 +33,13 @@ import {
 	ADMISSION_GRADES,
 	type AdmissionAction,
 	admitPrimary,
+	admitSession,
+	cookieClaim,
 	createMemoryMfaTransactionStore,
 	federatedSessionAuthentication,
 	type Logger,
 	type MfaFactor,
+	type MfaFactorRecord,
 	type MfaFactorStore,
 	type MfaTransactionStore,
 	type PrimaryAuthentication,
@@ -48,6 +52,7 @@ import {
 	type SessionClaim,
 	type SessionRequirement,
 	type UserSession,
+	type UserSessionStore,
 } from "@o3co/auth-provider-core";
 import { resolverForTests, sessionRequirementContract } from "@o3co/auth-provider-core/testing";
 import { describe, expect, it, type Mock, vi } from "vitest";
@@ -93,6 +98,8 @@ function build(
 		readonly transactionStore?: MfaTransactionStore;
 		/** Whether the session store can record a step-up (`supportsSecondFactorUpdate`); it can, by default. */
 		readonly stepUpRecordable?: boolean;
+		/** `mfa.manage.maxAgeSeconds`; the package's default, by default. */
+		readonly recentMfaMaxAgeSeconds?: number;
 		readonly logger?: Logger;
 	} = {},
 ): Built {
@@ -108,6 +115,7 @@ function build(
 		}),
 		stepUpPage: PAGE,
 		stepUpRecordable: options.stepUpRecordable ?? true,
+		recentMfaMaxAgeSeconds: options.recentMfaMaxAgeSeconds ?? 300,
 		logger: options.logger ?? silentLogger(),
 	});
 	return { requirement, transactionStore };
@@ -251,13 +259,19 @@ const record = (
 const password = (amr: readonly string[] = ["pwd"], mfaAt?: Date): UserSession =>
 	record(amr, { primary: "pwd", federation: undefined, upstreamAmr: undefined, mfaAt });
 
-const federated = (): UserSession =>
-	record(["fed"], {
+const federated = (mfaAt?: Date): UserSession =>
+	record(mfaAt === undefined ? ["fed"] : ["fed", "otp", "mfa"], {
 		primary: "fed",
 		federation: "google",
 		upstreamAmr: undefined,
-		mfaAt: undefined,
+		mfaAt,
 	});
+
+/** `session` with its primary `minutes` old. */
+const aged = (session: UserSession, minutes: number): UserSession => ({
+	...session,
+	authTime: minutesAgo(minutes),
+});
 
 /** A record written before `authentication`, whose `amr` carries no primary's marker: its primary cannot be told. */
 const untold = (): UserSession => record(["hwk"], undefined);
@@ -312,8 +326,13 @@ interface AdmitRow {
 	readonly mode: "optional" | "required";
 	readonly input: RequirementInput;
 	readonly factors?: MfaFactor[];
+	/** The factor records the store holds; none, by default. */
+	readonly records?: MfaFactorRecord[];
 	readonly expected: RequirementVerdict;
 }
+
+/** A TOTP factor u-alice holds: a counting factor. */
+const HOLDING_TOTP: MfaFactorRecord[] = [factorRecord("u-alice")];
 
 describe("admit — its table of verdicts under mfa.mode", () => {
 	const rows: readonly AdmitRow[] = [
@@ -443,29 +462,11 @@ describe("admit — its table of verdicts under mfa.mode", () => {
 			expected: STEP_UP,
 		},
 		{
-			row: "required · credential_change · an action named device.deny graded credential_change → step_up",
+			row: "required · credential_change · an action named device.deny graded credential_change, a counting factor held → step_up",
 			mode: "required",
 			input: about(password(), { name: "device.deny", grade: "credential_change" }),
+			records: HOLDING_TOTP,
 			expected: STEP_UP,
-		},
-		// required · credential_change: the baseline, with no recent-MFA rule.
-		{
-			row: "required · credential_change · pwd without mfaAt → step_up: the baseline",
-			mode: "required",
-			input: about(password(), CHANGE),
-			expected: STEP_UP,
-		},
-		{
-			row: "required · credential_change · pwd with an old mfaAt → met: no recent-MFA rule before step 12",
-			mode: "required",
-			input: about(password(["pwd", "otp", "mfa"], minutesAgo(24 * 60)), CHANGE),
-			expected: MET,
-		},
-		{
-			row: "required · credential_change · fed → met",
-			mode: "required",
-			input: about(federated(), CHANGE),
-			expected: MET,
 		},
 		// required · use, carrier token: judged on the token's own amr.
 		{
@@ -577,22 +578,338 @@ describe("admit — its table of verdicts under mfa.mode", () => {
 			input: aboutToken(["pwd"]),
 			expected: MET,
 		},
-		{
-			row: "optional · credential_change · pwd without mfaAt → met: recent MFA is steps 12 and 14's",
-			mode: "optional",
-			input: about(password(), CHANGE),
-			expected: MET,
-		},
 	];
 
-	it.each(rows)("$row", async ({ mode, input, factors, expected }) => {
-		const { requirement } = build(mode, factors === undefined ? {} : { factors });
+	it.each(rows)("$row", async ({ mode, input, factors, records, expected }) => {
+		const { requirement } = build(mode, {
+			...(factors === undefined ? {} : { factors }),
+			factorStore: factorStoreHolding(...(records ?? [])),
+		});
 		expect(await requirement.admit(input)).toEqual(expected);
 	});
 });
 
+describe("admit — credential_change: recent MFA on a session a record carries, the same under either mode", () => {
+	interface RecentRow {
+		readonly row: string;
+		readonly input: RequirementInput;
+		readonly records: MfaFactorRecord[];
+		readonly factors?: MfaFactor[];
+		readonly stepUpRecordable?: boolean;
+		readonly expected: RequirementVerdict;
+	}
+	const rows: readonly RecentRow[] = [
+		// A subject who holds a counting factor: a second factor inside the window.
+		{
+			row: "a second factor verified inside the window → met",
+			input: about(password(["pwd", "otp", "mfa"], minutesAgo(1)), CHANGE),
+			records: HOLDING_TOTP,
+			expected: MET,
+		},
+		{
+			row: "a second factor verified before the window → step_up, sent to log in again when still unmet",
+			input: about(password(["pwd", "otp", "mfa"], minutesAgo(24 * 60)), CHANGE),
+			records: HOLDING_TOTP,
+			expected: STEP_UP,
+		},
+		{
+			row: "no second factor verified in the session → step_up, however recent the primary",
+			input: about(password(), CHANGE),
+			records: HOLDING_TOTP,
+			expected: STEP_UP,
+		},
+		{
+			row: "an mfaAt up to the tolerated clock skew ahead of admission's clock → met",
+			input: about(password(["pwd", "otp", "mfa"], new Date(Date.now() + 60_000)), CHANGE),
+			records: HOLDING_TOTP,
+			expected: MET,
+		},
+		{
+			row: "measured on admission's clock: an mfaAt a minute before now is stale a day later → step_up",
+			input: {
+				...about(password(["pwd", "otp", "mfa"], minutesAgo(1)), CHANGE),
+				now: new Date(Date.now() + 24 * 3_600_000),
+			},
+			records: HOLDING_TOTP,
+			expected: STEP_UP,
+		},
+		{
+			row: "a federated session with no second factor verified → step_up: a federated primary meets the baseline, not recent MFA",
+			input: about(federated(), CHANGE),
+			records: HOLDING_TOTP,
+			expected: STEP_UP,
+		},
+		{
+			row: "a federated session with a second factor inside the window → met",
+			input: about(federated(minutesAgo(1)), CHANGE),
+			records: HOLDING_TOTP,
+			expected: MET,
+		},
+		{
+			row: "a record of a kind no longer installed counts as a counting factor → step_up",
+			input: about(password(), CHANGE),
+			records: [factorRecord("u-alice", "retired-kind")],
+			expected: STEP_UP,
+		},
+		{
+			row: "a code's read is judged as the cookie's",
+			input: about(password(), CHANGE, "code"),
+			records: HOLDING_TOTP,
+			expected: STEP_UP,
+		},
+		{
+			row: "a link's read is judged as the cookie's",
+			input: about(password(), CHANGE, "link"),
+			records: HOLDING_TOTP,
+			expected: STEP_UP,
+		},
+		{
+			row: "a counting factor held and no factor enabled → unmet: nothing could finish a step-up",
+			input: about(password(), CHANGE),
+			records: HOLDING_TOTP,
+			factors: [],
+			expected: UNMET,
+		},
+		{
+			row: "a counting factor held, and a session store that cannot record a step-up → reauthenticate",
+			input: about(password(), CHANGE),
+			records: HOLDING_TOTP,
+			stepUpRecordable: false,
+			expected: REAUTHENTICATE,
+		},
+		// A subject with no counting factor: a recent primary instead.
+		{
+			row: "no factor record, a password primary inside the window → met",
+			input: about(password(), CHANGE),
+			records: [],
+			expected: MET,
+		},
+		{
+			row: "no factor record, a password primary before the window → reauthenticate",
+			input: about(aged(password(), 24 * 60), CHANGE),
+			records: [],
+			expected: REAUTHENTICATE,
+		},
+		{
+			row: "no factor record, a federated primary inside the window → met",
+			input: about(federated(), CHANGE),
+			records: [],
+			expected: MET,
+		},
+		{
+			row: "no factor record, a federated primary before the window → reauthenticate",
+			input: about(aged(federated(), 24 * 60), CHANGE),
+			records: [],
+			expected: REAUTHENTICATE,
+		},
+		{
+			row: "no factor record, a stale primary with a second factor verified inside the window → met",
+			input: about(aged(password(["pwd", "recovery", "mfa"], minutesAgo(1)), 24 * 60), CHANGE),
+			records: [],
+			expected: MET,
+		},
+		{
+			row: "recovery codes alone do not count: a primary inside the window → met",
+			input: about(password(), CHANGE),
+			records: [factorRecord("u-alice", "recovery_code")],
+			factors: [FACTORS.totp(), FACTORS.recovery()],
+			expected: MET,
+		},
+		{
+			row: "recovery codes alone do not count: a primary before the window → reauthenticate",
+			input: about(aged(password(), 24 * 60), CHANGE),
+			records: [factorRecord("u-alice", "recovery_code")],
+			factors: [FACTORS.totp(), FACTORS.recovery()],
+			expected: REAUTHENTICATE,
+		},
+		{
+			row: "another subject's factor does not count: a primary inside the window → met",
+			input: about(password(), CHANGE),
+			records: [factorRecord("u-bob")],
+			expected: MET,
+		},
+		{
+			row: "no factor record, a stale primary, and a session store that cannot record a step-up → reauthenticate",
+			input: about(aged(password(), 24 * 60), CHANGE),
+			records: [],
+			stepUpRecordable: false,
+			expected: REAUTHENTICATE,
+		},
+		// No session, or a primary the rule cannot judge.
+		{
+			row: "no session → reauthenticate",
+			input: about(null, CHANGE),
+			records: HOLDING_TOTP,
+			expected: REAUTHENTICATE,
+		},
+		{
+			row: "a primary that cannot be told → reauthenticate, however recent",
+			input: about(untold(), CHANGE),
+			records: [],
+			expected: REAUTHENTICATE,
+		},
+		{
+			row: "a primary the baseline does not know → reauthenticate, even beside a recent mfaAt",
+			input: about(knownNot("magiclink", minutesAgo(1)), CHANGE),
+			records: HOLDING_TOTP,
+			expected: REAUTHENTICATE,
+		},
+	];
+
+	for (const mode of ["optional", "required"] as const) {
+		it.each(rows)(
+			`${mode} · $row`,
+			async ({ input, records, factors, stepUpRecordable, expected }) => {
+				const { requirement } = build(mode, {
+					...(factors === undefined ? {} : { factors }),
+					...(stepUpRecordable === undefined ? {} : { stepUpRecordable }),
+					factorStore: factorStoreHolding(...records),
+				});
+				expect(await requirement.admit(input)).toEqual(expected);
+			},
+		);
+	}
+
+	it("measures the window mfa.manage.maxAgeSeconds gives: a second factor half an hour old is recent under an hour's window, not under the default", async () => {
+		const input = about(password(["pwd", "otp", "mfa"], minutesAgo(30)), CHANGE);
+		const factorStore = factorStoreHolding(...HOLDING_TOTP);
+		const hour = build("required", { factorStore, recentMfaMaxAgeSeconds: 3_600 }).requirement;
+		const byDefault = build("required", { factorStore }).requirement;
+		expect(await hour.admit(input)).toEqual(MET);
+		expect(await byDefault.admit(input)).toEqual(STEP_UP);
+	});
+});
+
+describe("admit — credential_change on a token: judged on the token's own amr, as every grade", () => {
+	it("under required: a password-only token is unmet, one with a second-factor value met however old, one with no amr sent to log in", async () => {
+		const { requirement } = build("required", {
+			factorStore: factorStoreHolding(...HOLDING_TOTP),
+		});
+		const change = (amr: readonly string[] | undefined) => ({ ...aboutToken(amr), action: CHANGE });
+		expect(await requirement.admit(change(["pwd"]))).toEqual(UNMET);
+		expect(await requirement.admit(change(["pwd", "otp", "mfa"]))).toEqual(MET);
+		expect(await requirement.admit(change(["fed"]))).toEqual(MET);
+		expect(await requirement.admit(change(undefined))).toEqual(REAUTHENTICATE);
+	});
+
+	it("under optional: met", async () => {
+		const { requirement } = build("optional", {
+			factorStore: factorStoreHolding(...HOLDING_TOTP),
+		});
+		expect(await requirement.admit({ ...aboutToken(["pwd"]), action: CHANGE })).toEqual(MET);
+	});
+});
+
+describe("admit — credential_change reads the subject's factor records", () => {
+	it("throws when the records cannot be listed, under either mode — admission answers unavailable", async () => {
+		for (const mode of ["optional", "required"] as const) {
+			const { requirement } = build(mode, { factorStore: unreachableFactorStore() });
+			await expect(requirement.admit(about(password(), CHANGE)), mode).rejects.toThrow(
+				"factor store unreachable",
+			);
+			await expect(
+				requirement.admit(about(password(["pwd", "otp", "mfa"], minutesAgo(1)), CHANGE)),
+				mode,
+			).rejects.toThrow("factor store unreachable");
+		}
+	});
+
+	it("throws when the store answers a list that is not one, never read as no counting factor", async () => {
+		for (const answer of [null, {}, { length: 0 }, ""]) {
+			const { requirement } = build("required", {
+				factorStore: { ...factorStoreHolding(), list: async () => answer as never },
+			});
+			await expect(
+				requirement.admit(about(password(), CHANGE)),
+				JSON.stringify(answer),
+			).rejects.toThrow(TypeError);
+		}
+	});
+
+	it("reads them for credential_change alone: use and grants_nothing are answered over a store that is down", async () => {
+		const { requirement } = build("required", { factorStore: unreachableFactorStore() });
+		expect(await requirement.admit(about(password(), USE))).toEqual(STEP_UP);
+		expect(await requirement.admit(about(password(), NOTHING))).toEqual(MET);
+		const optional = build("optional", { factorStore: unreachableFactorStore() }).requirement;
+		expect(await optional.admit(about(password(), USE))).toEqual(MET);
+	});
+
+	it("reads none for a session it sends to log in whatever they hold: no session, or a primary it cannot judge", async () => {
+		const { requirement } = build("required", { factorStore: unreachableFactorStore() });
+		expect(await requirement.admit(about(null, CHANGE))).toEqual(REAUTHENTICATE);
+		expect(await requirement.admit(about(untold(), CHANGE))).toEqual(REAUTHENTICATE);
+		expect(await requirement.admit(about(knownNot("magiclink"), CHANGE))).toEqual(REAUTHENTICATE);
+	});
+
+	it("reads the live record's subject's, the code's first read included, which names no subject of its own", async () => {
+		const list = vi.fn(async (_subject: string) => [] as MfaFactorRecord[]);
+		const { requirement } = build("required", {
+			factorStore: { ...factorStoreHolding(), list },
+		});
+		await requirement.admit({ ...about(password(), CHANGE, "code"), subject: undefined });
+		expect(list.mock.calls).toEqual([["u-alice"]]);
+	});
+});
+
+describe("credential_change through admission, under each mode", () => {
+	const CHANGE_ACTIONS = { "test.change": { grade: "credential_change" } } as const;
+	const storeHolding = (session: UserSession): UserSessionStore => ({
+		kind: "test",
+		create: async () => {},
+		get: async (sid) => (sid === session.sid ? session : null),
+		delete: async () => {},
+	});
+	const admitChange = (session: UserSession, requirements: SessionRequirement[]) =>
+		admitSession(
+			{
+				userSessionStore: storeHolding(session),
+				subjectRevocation: undefined,
+				requirements: resolverForTests(requirements, {
+					issuer: ISSUER,
+					actions: CHANGE_ACTIONS,
+				}),
+				acrTable: readAcrTable({}),
+				logger: undefined,
+				auditSink: undefined,
+			},
+			{
+				claim: cookieClaim({
+					session: { isAuthenticated: true, sid: session.sid, user: { id: session.sub } },
+				}),
+				action: "test.change",
+			},
+		);
+	const stale = password(["pwd", "otp", "mfa"], minutesAgo(24 * 60));
+	const recent = password(["pwd", "otp", "mfa"], minutesAgo(1));
+
+	it("off — no requirement registered: a session whose second factor is a day old is admitted", async () => {
+		expect(await admitChange(stale, [])).toMatchObject({ outcome: "admitted" });
+	});
+
+	for (const mode of ["optional", "required"] as const) {
+		it(`${mode}: a subject holding a counting factor is stepped up to the MFA page without recent MFA, and admitted with it`, async () => {
+			const { requirement } = build(mode, { factorStore: factorStoreHolding(...HOLDING_TOTP) });
+			expect(await admitChange(stale, [requirement])).toMatchObject({
+				outcome: "step_up",
+				requirement: "mfa",
+				page: { href: `${ISSUER}/mfa` },
+				whenStillUnmet: "reauthenticate",
+			});
+			expect(await admitChange(recent, [requirement])).toMatchObject({ outcome: "admitted" });
+		});
+
+		it(`${mode}: an outage of the factor store is unavailable, naming the requirement`, async () => {
+			const { requirement } = build(mode, { factorStore: unreachableFactorStore() });
+			expect(await admitChange(recent, [requirement])).toEqual({
+				outcome: "unavailable",
+				store: "mfa",
+			});
+		});
+	}
+});
+
 describe("admit — decides by grade alone, over every grade core has", () => {
-	/** A password session without a second factor, under required, for each grade an action registers with. */
+	/** A password session without a second factor, its subject holding a counting factor, under required, for each grade an action registers with. */
 	const PASSWORD_ONLY: Readonly<Record<ActionGrade, RequirementVerdict>> = {
 		use: STEP_UP,
 		grants_nothing: MET,
@@ -600,7 +917,9 @@ describe("admit — decides by grade alone, over every grade core has", () => {
 	};
 
 	it("answers each grade an action registers with", async () => {
-		const { requirement } = build("required");
+		const { requirement } = build("required", {
+			factorStore: factorStoreHolding(...HOLDING_TOTP),
+		});
 		for (const grade of ADMISSION_GRADES) {
 			if (grade === "remediation") continue;
 			expect(
@@ -613,7 +932,10 @@ describe("admit — decides by grade alone, over every grade core has", () => {
 
 describe("admit — a step-up only where the session store can record one", () => {
 	it("sends a password session to log in again, where the table steps it up, when the store cannot record a second factor", async () => {
-		const { requirement } = build("required", { stepUpRecordable: false });
+		const { requirement } = build("required", {
+			stepUpRecordable: false,
+			factorStore: factorStoreHolding(...HOLDING_TOTP),
+		});
 		expect(await requirement.admit(about(password()))).toEqual(REAUTHENTICATE);
 		expect(await requirement.admit(about(password(), CHANGE))).toEqual(REAUTHENTICATE);
 		expect(await requirement.admit(about(password(), USE))).toEqual(REAUTHENTICATE);

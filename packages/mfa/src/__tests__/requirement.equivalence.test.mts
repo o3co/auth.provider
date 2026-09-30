@@ -16,8 +16,9 @@
 
 /**
  * The `mfa` requirement over every action a bundled consumer admits, as its
- * package registers it, under both modes and three factor setups, answers the
- * verdict table in `bundled-actions.fixture.mts`.
+ * package registers it, under both modes and each setup — the factors
+ * installed, whether a step-up can be recorded, and the factor records the
+ * subject holds — answers the verdict table in `bundled-actions.fixture.mts`.
  */
 
 import {
@@ -39,7 +40,7 @@ import {
 	TOKEN_SITUATIONS,
 	VERDICTS,
 } from "./bundled-actions.fixture.mjs";
-import { FACTORS, factorStoreHolding, resolverOver } from "./requirementHarness.mjs";
+import { FACTORS, factorRecord, factorStoreHolding, resolverOver } from "./requirementHarness.mjs";
 
 const NOW = Date.parse("2026-09-30T00:00:00Z");
 const minutesAgo = (minutes: number): Date => new Date(NOW - minutes * 60_000);
@@ -137,14 +138,16 @@ function inputsFor(name: string): RequirementInput[] {
 
 describe("the mfa requirement over every bundled action, by the grade its package registers", () => {
 	for (const mode of ["optional", "required"] as const) {
-		for (const [setup, { factors, stepUpRecordable }] of Object.entries(SETUPS)) {
+		for (const [setup, { factors, stepUpRecordable, holds }] of Object.entries(SETUPS)) {
 			const table = VERDICTS[`${mode} · ${setup}`] as Readonly<Record<string, string>>;
 
 			it(`answers the table's verdicts — ${mode}, ${setup}`, async () => {
 				const requirement = createMfaRequirement({
 					mode,
 					factors: resolverOver(factors.map(() => FACTORS.totp())),
-					factorStore: factorStoreHolding(),
+					factorStore: factorStoreHolding(
+						...(holds as readonly string[]).map((kind) => factorRecord("u-alice", kind)),
+					),
 					transactions: createLoginTransactions({
 						store: createMemoryMfaTransactionStore(),
 						ttlSeconds: 600,
@@ -152,6 +155,7 @@ describe("the mfa requirement over every bundled action, by the grade its packag
 					}),
 					stepUpPage: { url: "/mfa", params: {} },
 					stepUpRecordable,
+					recentMfaMaxAgeSeconds: 300,
 					logger: silent(),
 				});
 				const answered: Record<string, string> = {};

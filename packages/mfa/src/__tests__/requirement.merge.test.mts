@@ -90,6 +90,7 @@ const realRequirement = (
 		}),
 		stepUpPage: PAGE,
 		stepUpRecordable: true,
+		recentMfaMaxAgeSeconds: 300,
 		logger: consoleLogger,
 	});
 

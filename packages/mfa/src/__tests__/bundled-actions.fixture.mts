@@ -74,11 +74,20 @@ export const TOKEN_SITUATIONS: readonly (readonly string[] | undefined)[] = [
 	["pwd", "email"],
 ];
 
-/** The factor setups a verdict table is taken under. */
+/**
+ * The setups a verdict table is taken under: the factors installed, whether
+ * the session store can record a step-up, and the kinds of the factor records
+ * the subject holds.
+ */
 export const SETUPS = {
-	"totp, recordable": { factors: ["totp"], stepUpRecordable: true },
-	"no factor": { factors: [], stepUpRecordable: true },
-	"totp, not recordable": { factors: ["totp"], stepUpRecordable: false },
+	"totp, recordable": { factors: ["totp"], stepUpRecordable: true, holds: [] },
+	"no factor": { factors: [], stepUpRecordable: true, holds: [] },
+	"totp, not recordable": { factors: ["totp"], stepUpRecordable: false, holds: [] },
+	"totp, recordable, holding totp": {
+		factors: ["totp"],
+		stepUpRecordable: true,
+		holds: ["totp"],
+	},
 } as const;
 
 /**
@@ -99,9 +108,9 @@ export const VERDICTS: Readonly<Record<string, Readonly<Record<string, string>>>
 		"federation_grants.connect": "mmmmmm",
 		"federation_grants.consent": "mmmmmm",
 		"federation_grants.callback": "mmmmmm",
-		"session.link": "mmmmmm",
+		"session.link": "rmmmrr",
 		"session.link_callback": "mmmmmm",
-		"webauthn.register": "mmmmmm",
+		"webauthn.register": "rmmmrr",
 	},
 	"optional · no factor": {
 		"oauth.authorize": "mmmmmm",
@@ -115,9 +124,9 @@ export const VERDICTS: Readonly<Record<string, Readonly<Record<string, string>>>
 		"federation_grants.connect": "mmmmmm",
 		"federation_grants.consent": "mmmmmm",
 		"federation_grants.callback": "mmmmmm",
-		"session.link": "mmmmmm",
+		"session.link": "rmmmrr",
 		"session.link_callback": "mmmmmm",
-		"webauthn.register": "mmmmmm",
+		"webauthn.register": "rmmmrr",
 	},
 	"optional · totp, not recordable": {
 		"oauth.authorize": "mmmmmm",
@@ -131,9 +140,9 @@ export const VERDICTS: Readonly<Record<string, Readonly<Record<string, string>>>
 		"federation_grants.connect": "mmmmmm",
 		"federation_grants.consent": "mmmmmm",
 		"federation_grants.callback": "mmmmmm",
-		"session.link": "mmmmmm",
+		"session.link": "rmmmrr",
 		"session.link_callback": "mmmmmm",
-		"webauthn.register": "mmmmmm",
+		"webauthn.register": "rmmmrr",
 	},
 	"required · totp, recordable": {
 		"oauth.authorize": "rsmmrr",
@@ -147,9 +156,9 @@ export const VERDICTS: Readonly<Record<string, Readonly<Record<string, string>>>
 		"federation_grants.connect": "rsmmrr",
 		"federation_grants.consent": "rsmmrr",
 		"federation_grants.callback": "rsmmrr",
-		"session.link": "rsmmrr",
+		"session.link": "rmmmrr",
 		"session.link_callback": "rsmmrr",
-		"webauthn.register": "rsmmrr",
+		"webauthn.register": "rmmmrr",
 	},
 	"required · no factor": {
 		"oauth.authorize": "rummrr",
@@ -163,9 +172,9 @@ export const VERDICTS: Readonly<Record<string, Readonly<Record<string, string>>>
 		"federation_grants.connect": "rummrr",
 		"federation_grants.consent": "rummrr",
 		"federation_grants.callback": "rummrr",
-		"session.link": "rummrr",
+		"session.link": "rmmmrr",
 		"session.link_callback": "rummrr",
-		"webauthn.register": "rummrr",
+		"webauthn.register": "rmmmrr",
 	},
 	"required · totp, not recordable": {
 		"oauth.authorize": "rrmmrr",
@@ -179,8 +188,40 @@ export const VERDICTS: Readonly<Record<string, Readonly<Record<string, string>>>
 		"federation_grants.connect": "rrmmrr",
 		"federation_grants.consent": "rrmmrr",
 		"federation_grants.callback": "rrmmrr",
-		"session.link": "rrmmrr",
+		"session.link": "rmmmrr",
 		"session.link_callback": "rrmmrr",
-		"webauthn.register": "rrmmrr",
+		"webauthn.register": "rmmmrr",
+	},
+	"optional · totp, recordable, holding totp": {
+		"oauth.authorize": "mmmmmm",
+		"oauth.consent": "mmmmmm",
+		"oauth.session_grant": "mmmmmm",
+		"oauth.code_exchange": "mmmmmm",
+		"oauth.refresh": "mmmmmmmm",
+		"device.lookup": "mmmmmm",
+		"device.approve": "mmmmmm",
+		"device.deny": "mmmmmm",
+		"federation_grants.connect": "mmmmmm",
+		"federation_grants.consent": "mmmmmm",
+		"federation_grants.callback": "mmmmmm",
+		"session.link": "rsmsrr",
+		"session.link_callback": "mmmmmm",
+		"webauthn.register": "rsmsrr",
+	},
+	"required · totp, recordable, holding totp": {
+		"oauth.authorize": "rsmmrr",
+		"oauth.consent": "rsmmrr",
+		"oauth.session_grant": "rsmmrr",
+		"oauth.code_exchange": "rsmmrr",
+		"oauth.refresh": "urrmmmrm",
+		"device.lookup": "rmmmmm",
+		"device.approve": "rsmmrr",
+		"device.deny": "rmmmmm",
+		"federation_grants.connect": "rsmmrr",
+		"federation_grants.consent": "rsmmrr",
+		"federation_grants.callback": "rsmmrr",
+		"session.link": "rsmsrr",
+		"session.link_callback": "rsmmrr",
+		"webauthn.register": "rsmsrr",
 	},
 };
