@@ -55,6 +55,9 @@ const REQUIRES = [
 	"sessionFederationIndex",
 	"refreshTokenFamilyRevocation",
 	"federationTokenStore",
+	// The session's lifetime, which the boundary must outlive: the session
+	// store's, and core reads it from no configuration key.
+	"sessionCookiePolicy",
 ] as const;
 /**
  * What turns "this subject" into sessions, and what outlives them, are
@@ -70,12 +73,9 @@ const OPTIONAL = [
 	"federationGrantStore",
 	"auditSink",
 	"logger",
-	// What the boundary must outlive: the oauth module's token lifetimes,
-	// read from the configuration when the composition does not hold them,
-	// and the session store's session lifetime, which the configuration does
-	// not carry for core: without the slot the provider refuses, naming it.
+	// The token lifetimes the boundary must outlive, read from the
+	// configuration when the composition does not hold them.
 	"oauthTokenSettings",
-	"sessionCookiePolicy",
 ] as const;
 
 /**
@@ -229,16 +229,13 @@ export const subjectRevocationServiceModule = defineModule<Requires, Optional>({
 				// The boundary must outlive the longest-lived thing it covers,
 				// which this module can read and the service cannot: the token
 				// lifetimes from `oauthTokenSettings` when the composition holds
-				// it, otherwise the configuration's; the session's from
-				// `sessionCookiePolicy`, without which the resolver refuses,
-				// naming the slot.
+				// it, otherwise the configuration's, and the session's from
+				// `sessionCookiePolicy`.
 				watermarkTtlMs: resolveSubjectRevocationHorizonMs(deps.config, {
 					...(deps.oauthTokenSettings === undefined
 						? {}
 						: { tokenSettings: deps.oauthTokenSettings }),
-					...(deps.sessionCookiePolicy === undefined
-						? {}
-						: { sessionCookie: deps.sessionCookiePolicy }),
+					sessionCookie: deps.sessionCookiePolicy,
 				}),
 				...(enabled && store !== undefined ? { federationGrantStore: store } : {}),
 				// Gated on the feature: an allowance to keep grants in a
