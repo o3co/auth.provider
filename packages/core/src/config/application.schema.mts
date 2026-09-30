@@ -1196,8 +1196,8 @@ export const fullSectionsSchema = z.object({
 	 * Rate limits for session routes (`/session/login` brute-force protection).
 	 * `windowMs` is milliseconds, the `express-rate-limit` shape. The login guard
 	 * runs on the shared `rateLimiter` component, keyed `login:ip:<ip>`; these
-	 * values stay its source of truth, which both bundled limiter adapters seed
-	 * into `limits.login` in whole seconds (`resolveLoginLimitSpec`).
+	 * values stay its source of truth, which the session module contributes as
+	 * the `login` budget, in whole seconds, for every limiter to read.
 	 *
 	 * OAuth endpoint limits (`/token`, `/authorize`) are separate: the
 	 * `rateLimiter` slot's modules take them under `memoryRateLimiter.*` /
@@ -1205,10 +1205,11 @@ export const fullSectionsSchema = z.object({
 	 */
 	rateLimit: z.object({
 		login: rateLimitSchema,
-		// What the OAuth-endpoint limiter does when its backend errors. The
-		// default lives in `reference.conf`: `"closed"` answers 503 and logs.
-		// `"open"` (`RATE_LIMIT_FAIL_MODE=open`) lets traffic through and still
-		// logs at error, so the outage is visible even with the audit sink down.
+		// The outage policy `redisRateLimiterModule` answers for the limiter it
+		// builds; the guard applies the wired limiter's own. The default lives in
+		// `reference.conf`: `"closed"` answers 503 and logs. `"open"`
+		// (`RATE_LIMIT_FAIL_MODE=open`) lets traffic through and still logs at
+		// error, so the outage is visible even with the audit sink down.
 		failMode: z.enum(["open", "closed"]),
 	}),
 	federations: z.record(z.string(), federationEntrySchema),
@@ -1351,7 +1352,8 @@ export const fullSectionsSchema = z.object({
 	// Adapter for the rate limiter, which serves both the OAuth endpoints and
 	// `/session/login`, so `"redis"` is what makes either safe across replicas.
 	// Default `"memory"` in HOCON. `rateLimit.login` still configures the login
-	// window and limit, which the adapters seed into `limits.login`.
+	// window and limit, which the session module contributes as the `login`
+	// budget.
 	rateLimiter: z
 		.object({
 			adapter: z.enum(["memory", "redis"]).optional(),

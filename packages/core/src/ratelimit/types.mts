@@ -15,7 +15,12 @@
  */
 
 import type { AdapterFactory } from "../adapters/AdapterFactory.mjs";
-import type { RateLimitFailMode } from "./guard.mjs";
+
+/**
+ * What the guard does when a limiter's backend errors: `"open"` lets the
+ * request through, `"closed"` answers `503`.
+ */
+export type RateLimitFailMode = "open" | "closed";
 
 export interface RateLimitContext {
 	readonly ip?: string;
@@ -36,10 +41,10 @@ export interface RateLimitDecision {
 	readonly reason?: string;
 	/**
 	 * The limit the adapter actually applied to this key. It can differ from
-	 * the caller's: an operator's `limits.login` on the adapter overrides the
-	 * value seeded from `rateLimit.login`, and an unmatched key falls to
-	 * `defaultLimit`. RFC 9239 `RateLimit-*` headers must report what was
-	 * enforced. Optional; callers then fall back to their configured value.
+	 * the caller's: an operator's `limits` entry on the adapter overrides the
+	 * budget a module contributes for the prefix, and a key nothing budgets
+	 * falls to `defaultLimit`. RFC 9239 `RateLimit-*` headers must report what
+	 * was enforced. Optional; callers then fall back to their configured value.
 	 */
 	readonly limit?: number;
 }
@@ -53,11 +58,17 @@ export interface RateLimiter {
 	 * The limiter's outage policy: what the guard does when `check` throws
 	 * (`"open"` lets the request through, `"closed"` answers `503`), logged and
 	 * audited either way. It belongs to the limiter because only its backend can
-	 * be down. Absent (as on the in-process limiter) means `closed`, the
-	 * `rateLimit.failMode` default. Not read yet: the guard and its callers
-	 * still take the policy from `rateLimit.failMode`.
+	 * be down, and the guard reads it from here alone, once, when it is built.
+	 * Only absence (as on the in-process limiter, which has no backend) means
+	 * `closed`; any other value refuses the guard's or the policy's build.
 	 */
 	readonly failMode?: RateLimitFailMode;
+	/**
+	 * The budget a key falls to when nothing else covers its prefix. Boot holds
+	 * an override of a switched-off budget to it; a limiter that declares none
+	 * gets no such override.
+	 */
+	readonly defaultLimit?: RateLimitSpec;
 	/**
 	 * Atomic check + increment. Key is endpoint-specific (e.g.,
 	 * "login:ip:1.2.3.4", "token:client:abc").

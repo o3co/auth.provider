@@ -14,8 +14,9 @@
  * limitations under the License.
  */
 
+import type { RateLimitBudgetResolver } from "../modules/manifest/synthetic-keys.mjs";
+import { createRateLimitBudgetLookup } from "./budgetLookup.mjs";
 import type { RateLimiter, RateLimitSpec } from "./types.mjs";
-import { assertUsableRateLimitSpecs } from "./usableSpec.mjs";
 
 export const DEFAULT_MEMORY_RATE_LIMITER_MAX_BUCKETS = 10_000;
 
@@ -29,11 +30,8 @@ export interface MemoryRateLimiterOptions {
 	limits?: Record<string, RateLimitSpec>;
 	defaultLimit: RateLimitSpec;
 	maxBuckets?: number;
-}
-
-function keyPrefix(key: string): string {
-	const colon = key.indexOf(":");
-	return colon === -1 ? key : key.slice(0, colon);
+	/** The owners' contributed budgets, read at each check; `limits` wins over one. */
+	budgets?: RateLimitBudgetResolver;
 }
 
 function normalizeMaxBuckets(value: number | undefined): number {
@@ -50,8 +48,8 @@ function pruneExpiredBuckets(buckets: Map<string, BucketState>, now: number): vo
 
 /**
  * Removes the bucket that resets first. Every `resetAt` is finite: it is
- * `Date.now()` plus a window construction checked, from specs the limiter
- * holds as it checked them. And a non-empty map always loses one bucket,
+ * `Date.now()` plus a window the lookup checked — at construction, or for a
+ * contributed budget at the lookup itself. And a non-empty map always loses one bucket,
  * since the first entry is taken before any comparison, so the caller's
  * `while (size >= max)` loop always makes progress.
  */
@@ -68,35 +66,23 @@ function evictEarliestResetBucket(buckets: Map<string, BucketState>): void {
 }
 
 export function createMemoryRateLimiter(options: MemoryRateLimiterOptions): RateLimiter {
-	// A spec this limiter cannot apply as written is refused here, by the
-	// predicate the Redis adapter refuses it by: kept, a zero window reset on
-	// every check and never limited anything, and a NaN one reset at an
-	// Invalid Date. The default is not optional here.
+	// A spec this limiter cannot apply as written is refused by the lookup,
+	// by the predicate the Redis adapter refuses it by: kept, a zero window
+	// reset on every check and never limited anything, and a NaN one reset at
+	// an Invalid Date. The default is not optional here.
 	if (options.defaultLimit === undefined) {
 		throw new RangeError("createMemoryRateLimiter: defaultLimit is required");
 	}
-	assertUsableRateLimitSpecs("createMemoryRateLimiter", options);
-	// Held as they were checked, as the Redis adapter holds them: a change to
-	// the objects it was handed cannot reach a check. A missing `limits` is
-	// none; a present one that is not an object was refused above.
-	const limits: Readonly<Record<string, RateLimitSpec>> = Object.fromEntries(
-		Object.entries(options.limits ?? {}).map(([prefix, spec]) => [
-			prefix,
-			{ limit: spec.limit, windowSeconds: spec.windowSeconds },
-		]),
-	);
-	const defaultLimit: RateLimitSpec = {
-		limit: options.defaultLimit.limit,
-		windowSeconds: options.defaultLimit.windowSeconds,
-	};
+	const budgetFor = createRateLimitBudgetLookup("createMemoryRateLimiter", options);
 	const buckets = new Map<string, BucketState>();
 	const maxBuckets = normalizeMaxBuckets(options.maxBuckets);
 
 	return {
 		kind: "memory",
+		defaultLimit: budgetFor.defaultLimit,
 		async check(key) {
 			const now = Date.now();
-			const spec = limits[keyPrefix(key)] ?? defaultLimit;
+			const { prefix, spec } = budgetFor(key);
 			const bucket = buckets.get(key);
 			if (!bucket || bucket.resetAt <= now) {
 				if (!bucket && buckets.size >= maxBuckets) {
@@ -120,7 +106,7 @@ export function createMemoryRateLimiter(options: MemoryRateLimiterOptions): Rate
 					allowed: false,
 					remaining: 0,
 					resetAt: new Date(bucket.resetAt),
-					reason: `limit:${keyPrefix(key)}`,
+					reason: `limit:${prefix}`,
 					limit: spec.limit,
 				};
 			}

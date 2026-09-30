@@ -33,7 +33,9 @@ interface MemoryRateLimiterConfig {
 const DEFAULT_LIMIT: RateLimitSpec = { limit: 60, windowSeconds: 60 };
 
 /**
- * Registers the built-in in-memory RateLimiter. The "redis" backend is in
+ * Registers the built-in in-memory RateLimiter, over the `limits` and
+ * `defaultLimit` it is given and no contributed budget: those reach a limiter
+ * through `memoryRateLimiterModule`. The "redis" backend is in
  * `@o3co/auth-provider-redis`; consumers wire it via:
  *
  *   import { redisRateLimiterBuilder } from "@o3co/auth-provider-redis";

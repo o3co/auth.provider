@@ -32,8 +32,8 @@
  *   `UserSession` behind the cookie's `sid`, not the cookie's claim: the
  *   device token carries no `sid` or `family_id`, so no later logout reaches
  *   it, and the approval is the last point that can check the session.
- * - Outages fail closed as 503 (a limiter outage follows
- *   `rateLimit.failMode`), never as `login_required`.
+ * - Outages fail closed as 503 (a limiter outage follows the limiter's own
+ *   `failMode`), never as `login_required`.
  * - Decisions and budget exhaustion are audit events; none carries the user
  *   code (the brute-force target) or the device code (a bearer credential).
  * - JSON only, checked here whatever parsed the body: a form POST is a CORS
@@ -50,7 +50,6 @@ import type {
 	Logger,
 	RateLimitContext,
 	RateLimiter,
-	RateLimitFailMode,
 	RateLimitOutageLogger,
 	SessionRequirementResolver,
 	SubjectRevocation,
@@ -63,6 +62,7 @@ import {
 	checkWithFailMode,
 	consoleLogger,
 	cookieClaim,
+	createRateLimitPolicy,
 	describeAdmissionOutage,
 	emitAuditEvent,
 	isEmailVerified,
@@ -215,14 +215,10 @@ const refusalOf = (
 export interface DeviceVerificationHandlerOptions extends DeviceGrantDependencies {
 	/**
 	 * Required: RFC 8628 §5.1 sizes the user code's entropy against a limit,
-	 * so without one it is 34.5 bits and no ceiling.
+	 * so without one it is 34.5 bits and no ceiling. Its own `failMode` is the
+	 * policy for its backend's outage.
 	 */
 	readonly rateLimiter: RateLimiter;
-	/**
-	 * Required, not defaulted: `rateLimit.failMode` is the product's one
-	 * policy for a limiter-backend outage.
-	 */
-	readonly failMode: RateLimitFailMode;
 	/**
 	 * Required: where admission reads the `UserSession` behind the cookie's
 	 * `sid`. Without it an approval would rest on the cookie's word alone.
@@ -272,13 +268,15 @@ export const createDeviceVerificationHandler = (
 		now: () => new Date(now()),
 	};
 	// The guard's check with its outage policy attached — see the file header.
-	const policy = {
-		limiter: options.rateLimiter,
-		tag: DEVICE_VERIFICATION_RATE_LIMIT_PREFIX,
-		failMode: options.failMode,
-		logger: hasErrorChannel(options.logger) ? options.logger : undefined,
-		auditSink: options.auditSink,
-	};
+	const policy = createRateLimitPolicy(
+		{
+			limiter: options.rateLimiter,
+			tag: DEVICE_VERIFICATION_RATE_LIMIT_PREFIX,
+			...(hasErrorChannel(options.logger) ? { logger: options.logger } : {}),
+			...(options.auditSink === undefined ? {} : { auditSink: options.auditSink }),
+		},
+		"createDeviceVerificationHandler",
+	);
 
 	return async (req: Request, res: Response): Promise<void> => {
 		// JSON only — see the file header. Checked on the request's media
@@ -340,7 +338,7 @@ export const createDeviceVerificationHandler = (
 			contextOf(req, subject),
 		);
 		if (budget.status === "unavailable") {
-			// The limiter had no answer, so `rateLimit.failMode` decides. The
+			// The limiter had no answer, so its own `failMode` decides. The
 			// shared check already logged and audited the outage; `open`
 			// serves the request exactly as the guard would.
 			if (budget.failMode === "closed") {

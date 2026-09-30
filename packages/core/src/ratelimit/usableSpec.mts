@@ -15,6 +15,8 @@
  */
 
 import { isStorableLifetime } from "../adapters/expiry.mjs";
+import { configuredNumber, shownConfigValue } from "../config/configuredValue.mjs";
+import { MAX_DURATION_SECONDS } from "../config/durations.mjs";
 import type { RateLimitSpec } from "./types.mjs";
 
 const isPositiveInteger = (value: unknown): value is number =>
@@ -41,33 +43,6 @@ export const isUsableRateLimitSpec = (value: unknown): value is RateLimitSpec =>
 	);
 };
 
-/**
- * A value as a refusal shows it, with its type: a string quoted (so `"20"`
- * does not read as a usable number), a number as it prints (`NaN` included),
- * a BigInt with its `n`, a function as `[function]` (never its source),
- * anything else as JSON, or `String()` where JSON cannot write it (a circular
- * object, a `toJSON` that answers nothing, a Symbol).
- */
-export const shownConfigValue = (value: unknown): string => {
-	switch (typeof value) {
-		case "number":
-		case "undefined":
-		case "symbol":
-			return String(value);
-		case "string":
-			return JSON.stringify(value);
-		case "bigint":
-			return `${value}n`;
-		case "function":
-			return "[function]";
-	}
-	try {
-		return JSON.stringify(value) ?? String(value);
-	} catch {
-		return String(value);
-	}
-};
-
 const described = (spec: unknown): string => {
 	if (typeof spec !== "object" || spec === null) return shownConfigValue(spec);
 	const { limit, windowSeconds } = spec as { limit?: unknown; windowSeconds?: unknown };
@@ -75,29 +50,28 @@ const described = (spec: unknown): string => {
 };
 
 /**
- * What `z.coerce.number()` makes of a configured value, for a key whose
- * owning schema coerces: a number as it is, and a string that is not blank
- * and whose `Number()` is finite as that number. HOCON substitutes an
- * environment variable as a string, so a key filled from one arrives as one
- * wherever the schema did not run. Anything else — a blank or non-numeric
- * string, a boolean, an array, an object — is `undefined`: none of it can
- * come from a substitution, and none of it is a number.
+ * Whether a value is a budget a module may contribute: a positive whole
+ * `limit` and a positive whole `windowSeconds` of at most a year
+ * (`MAX_DURATION_SECONDS`, the cap every config schema holds a duration to).
+ * Unlike {@link isUsableRateLimitSpec} it does not depend on the clock, so a
+ * budget that passes it at boot passes it at every later check.
  */
-export const configuredNumber = (value: unknown): number | undefined => {
-	if (typeof value === "number") return value;
-	if (typeof value !== "string" || value.trim() === "") return undefined;
-	const parsed = Number(value);
-	return Number.isFinite(parsed) ? parsed : undefined;
+export const isBoundedRateLimitSpec = (value: unknown): value is RateLimitSpec => {
+	if (typeof value !== "object" || value === null) return false;
+	const { limit, windowSeconds } = value as { limit?: unknown; windowSeconds?: unknown };
+	return (
+		isPositiveInteger(limit) &&
+		isPositiveInteger(windowSeconds) &&
+		windowSeconds <= MAX_DURATION_SECONDS
+	);
 };
 
 /**
  * The budget a configuration gives under `key`, or a `RangeError` naming
  * `key` when it is given but is not a spec a limiter can apply.
  *
- * For a seed and anything else that reads a budget from its own config key
- * (`oauth.deviceAuthorization.rateLimit`,
- * `webauthn.rateLimit.authenticationOptions`). Each field is read as the key's
- * schema coerces it. A given key, hand-built config included, is refused
+ * For a module that contributes a budget read from its own config key. Each
+ * field is read as the key's schema coerces it. A given key, hand-built config included, is refused
  * rather than skipped, since skipping it runs the route on the limiter's
  * default. A key not given is the caller's to handle.
  */

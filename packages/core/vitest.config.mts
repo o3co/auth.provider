@@ -115,6 +115,9 @@ export default defineConfig({
 				"src/deployment/__tests__/**/*.test.mts",
 				// The RateLimiter port's `failMode` and its contract suite (#728).
 				"src/ratelimit/__tests__/rateLimiter.contract.test.mts",
+				// The outage policy's brand and options (#728). Paired with
+				// tsconfig.test.json.
+				"src/ratelimit/__tests__/policy.types.test.mts",
 			],
 			// vitest 5 collects a typecheck-included file's tests from the file
 			// itself, where 4 was content to let an imported helper register

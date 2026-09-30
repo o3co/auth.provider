@@ -48,9 +48,6 @@ import {
 	MAX_DURATION_SECONDS,
 	type Module,
 	type ProviderDeps,
-	type RateLimitFailMode,
-	type RateLimitSpec,
-	requireUsableConfiguredRateLimitSpec,
 	resolveAccessTokenLifetime,
 } from "@o3co/auth-provider-core";
 import { createClientAuthMiddleware } from "@o3co/auth-provider-oauth";
@@ -63,6 +60,10 @@ import {
 } from "./deviceAuthorizationEndpoint.mjs";
 import { createDeviceCodeGrant } from "./grant.mjs";
 import { DEVICE_AUTHORIZATION_RATE_LIMIT_PREFIX, DEVICE_CODE_GRANT_TYPE } from "./types.mjs";
+import {
+	DEVICE_VERIFICATION_RATE_LIMIT_PREFIX,
+	readVerificationRateLimitBudget,
+} from "./verificationBudget.mjs";
 import { createDeviceVerificationHandler } from "./verificationEndpoint.mjs";
 
 /**
@@ -121,8 +122,9 @@ export const deviceGrantConfigSchema = z.object({
 					.default(5),
 				/**
 				 * The verification endpoint's budget per authenticated subject,
-				 * seeded into the rate limiter under the `device_verification`
-				 * prefix (an adapter's own `limits.device_verification` wins).
+				 * which the module contributes as the `device_verification`
+				 * budget every limiter reads (a limiter's own
+				 * `limits.device_verification` wins).
 				 */
 				rateLimit: rateLimitSpecSchema.default(DEFAULT_VERIFICATION_RATE_LIMIT),
 				/**
@@ -149,8 +151,8 @@ interface DeviceAuthorizationConfigSlice {
 	readonly "code-lifetime-seconds": number;
 	readonly "polling-interval-seconds": number;
 	/**
-	 * Applied by core's limiter modules when they seed `limits`; here it is
-	 * only required to be present and usable.
+	 * Contributed as the `device_verification` budget; the verification route
+	 * requires it present and usable.
 	 */
 	readonly rateLimit?: unknown;
 }
@@ -162,6 +164,9 @@ const REQUIRES = [
 	// Session admission's synthetic key: the verification endpoint admits
 	// each action through it. The planner always fills it.
 	"sessionRequirementResolver",
+	// The contributed budgets; the verification route holds its own to its
+	// configuration. The planner always fills it.
+	"rateLimitBudgetResolver",
 ] as const;
 // `replaySeenSet` records a client assertion's single-use `jti`. Optional as
 // on the OAuth router: without it a `private_key_jwt` request is
@@ -437,26 +442,6 @@ const requireCsrfGuard = (
 	return deps.csrfGuard;
 };
 
-/**
- * `rateLimit.failMode` is the product's one outage policy for a failed
- * limiter backend; defaulting it here would be a second policy, so its
- * absence refuses boot. Both route factories call this, so the refusal does
- * not depend on planner order.
- */
-const requireFailMode = (deps: DeviceGrantModuleDeps): RateLimitFailMode => {
-	const failMode = deps.config?.rateLimit?.failMode;
-	if (failMode !== "open" && failMode !== "closed") {
-		throw new Error(
-			"deviceGrantModule: oauth.deviceAuthorization.enabled = true requires " +
-				'rateLimit.failMode ("open" | "closed"). POST /oauth/device_authorization ' +
-				"and POST /oauth/device/verification both apply the shared rate-limit " +
-				"outage policy, and what that policy does when the limiter backend is " +
-				"down is the product's decision, not this module's.",
-		);
-	}
-	return failMode;
-};
-
 const requireRateLimiter = (
 	deps: DeviceGrantModuleDeps,
 ): NonNullable<DeviceGrantModuleDeps["rateLimiter"]> => {
@@ -518,27 +503,44 @@ const requireUserSessionStore = (
 };
 
 /**
- * The limiter applies this budget to `device_verification` only because its
- * adapter module seeds that prefix from `oauth.deviceAuthorization.rateLimit`,
- * and it seeds nothing when the key is absent. A hand-built config that
- * skipped the schema default would silently run on the adapter's default
- * budget instead of the one the `rateLimiter` requirement reasons from. An
- * unusable key is refused with the same call the seed makes, so both give the
- * same message.
+ * The contributed `device_verification` budget (`rateLimitBudgetResolver`,
+ * after any override) must be `oauth.deviceAuthorization.rateLimit`, the
+ * budget the `rateLimiter` requirement's RFC 8628 §5.1 argument rests on; boot
+ * is refused otherwise. A limiter's own `limits.device_verification` wins over
+ * it and is not compared.
  */
-const requireVerificationRateLimit = (slice: DeviceAuthorizationConfigSlice): RateLimitSpec => {
-	const spec = slice.rateLimit;
-	if (spec === undefined) {
+const requireContributedVerificationBudget = (
+	slice: DeviceAuthorizationConfigSlice,
+	deps: Pick<DeviceGrantModuleDeps, "rateLimitBudgetResolver">,
+): void => {
+	const configured = readVerificationRateLimitBudget(slice);
+	if (configured === null) {
 		throw new Error(
 			"deviceGrantModule: oauth.deviceAuthorization.enabled = true requires " +
 				"oauth.deviceAuthorization.rateLimit { limit, windowSeconds }. It is the budget " +
-				"RFC 8628 §5.1 sizes the user code against and the value the limiter adapter " +
-				"seeds `device_verification` from; without it POST /oauth/device/verification " +
-				"would run on the adapter's default budget, which is not the number the " +
-				"rateLimiter requirement reasons from.",
+				"RFC 8628 §5.1 sizes the user code against and the `device_verification` budget " +
+				"this module contributes; without it POST /oauth/device/verification would run " +
+				"on the limiter's default budget, which is not the number the rateLimiter " +
+				"requirement reasons from.",
 		);
 	}
-	return requireUsableConfiguredRateLimitSpec("oauth.deviceAuthorization.rateLimit", spec);
+	const contributed = deps.rateLimitBudgetResolver.get(DEVICE_VERIFICATION_RATE_LIMIT_PREFIX);
+	if (
+		contributed?.limit !== configured.limit ||
+		contributed.windowSeconds !== configured.windowSeconds
+	) {
+		const shown =
+			contributed === undefined
+				? "none"
+				: `limit ${contributed.limit}, windowSeconds ${contributed.windowSeconds}`;
+		throw new Error(
+			`deviceGrantModule: the contributed device_verification budget (${shown}) is not ` +
+				`oauth.deviceAuthorization.rateLimit (limit ${configured.limit}, windowSeconds ` +
+				`${configured.windowSeconds}): another module has overridden it. RFC 8628 §5.1 sizes the ` +
+				"user code against the configured budget; change oauth.deviceAuthorization.rateLimit " +
+				"instead.",
+		);
+	}
 };
 
 /**
@@ -576,6 +578,14 @@ export const deviceGrantModule = (params: { config: AppConfig }): Module => {
 			auditSink: AUDIT_SINK_ABSENCE_POLICY,
 		},
 		contributes: {
+			// The verification endpoint's budget, for every limiter to read, with
+			// the grant on or off: nothing keys the prefix while it is off.
+			rateLimitBudgets: {
+				[DEVICE_VERIFICATION_RATE_LIMIT_PREFIX]: (deps) =>
+					readVerificationRateLimitBudget(deps.section),
+				// Keyed by the device_authorization guard, with no budget of its own.
+				[DEVICE_AUTHORIZATION_RATE_LIMIT_PREFIX]: () => null,
+			},
 			// Only when enabled — see the file header. Absent, `/oauth/token`
 			// answers `unsupported_grant_type` for an unregistered grant, and
 			// `grant_types_supported`, read off the same resolver, does not name
@@ -627,7 +637,6 @@ export const deviceGrantModule = (params: { config: AppConfig }): Module => {
 						createRateLimitGuard({
 							limiter: requireRateLimiter(deps),
 							tag: DEVICE_AUTHORIZATION_RATE_LIMIT_PREFIX,
-							failMode: requireFailMode(deps),
 							...(deps.logger ? { logger: deps.logger } : {}),
 							auditSink: deps.auditSink,
 						}),
@@ -689,20 +698,19 @@ export const deviceGrantModule = (params: { config: AppConfig }): Module => {
 					// The session module's CSRF guard, on the whole route rather than
 					// on `approve` / `deny` alone, so no future action can forget it.
 					const csrfGuard = requireCsrfGuard(deps);
-					// Asserted here so the `rateLimiter` requirement really means the
-					// configured budget; the limiter applies it, seeded from config.
-					requireVerificationRateLimit(slice);
+					// The `rateLimiter` requirement means the configured budget only
+					// while that budget is the one contributed.
+					requireContributedVerificationBudget(slice, deps);
 					const userSessionStore = requireUserSessionStore(deps);
 					router.post(
 						"/",
 						csrfGuard.middleware,
 						createDeviceVerificationHandler({
 							store: requireDeviceCodeStore(deps),
-							rateLimiter: requireRateLimiter(deps),
-							// The outage policy the device_authorization guard applies.
 							// The handler keys its budget on the subject, so it runs the
-							// guard's check itself rather than the guard as middleware.
-							failMode: requireFailMode(deps),
+							// guard's check itself, with the limiter's own outage policy,
+							// rather than the guard as middleware.
+							rateLimiter: requireRateLimiter(deps),
 							// What session admission reads for every action: the
 							// live session, and the requirements registered.
 							userSessionStore,

@@ -70,7 +70,9 @@
 		"src/token-settings/**/*.mts",
 		"src/browser-session/**/*.mts",
 		"src/deployment/**/*.mts",
-		"src/ratelimit/__tests__/rateLimiter.contract.test.mts"
+		"src/ratelimit/__tests__/rateLimiter.contract.test.mts",
+		// The outage policy's brand and options; paired with vitest.config.mts.
+		"src/ratelimit/__tests__/policy.types.test.mts"
 	],
 	"exclude": ["node_modules", "dist"]
 }

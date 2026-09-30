@@ -161,7 +161,6 @@ interface Setup {
 	readonly revocation?: "memory" | "older" | "absent";
 	readonly withLimiter?: boolean;
 	readonly withAudit?: boolean;
-	readonly failMode?: unknown;
 	readonly provider?: FederationProvider | null;
 	/** The federation module listed BEFORE the routes, or after. */
 	readonly federationFirst?: boolean;
@@ -232,7 +231,7 @@ const boot = (setup: Setup) => {
 				federations: {
 					upstream: { enabled: true, issuer: "https://issuer.example", clientId: "cid" },
 				},
-				rateLimit: { ...full.rateLimit, failMode: setup.failMode ?? "closed" },
+				rateLimit: { ...full.rateLimit, failMode: "closed" },
 				...(setup.withAudit === false ? {} : { audit: { sink: { type: "none" } } }),
 				federationGrants: {
 					enabled: setup.enabled ?? true,
@@ -343,10 +342,6 @@ describe("enabling the feature", () => {
 
 	it("refuses to boot with no throttle in front of an opaque grant id", async () => {
 		await expect(boot({ withLimiter: false })).rejects.toThrow(/rateLimiter/);
-	});
-
-	it("refuses to boot without the product's limiter-outage policy", async () => {
-		await expect(boot({ failMode: "maybe" })).rejects.toThrow(/failMode/);
 	});
 
 	it("refuses a retrieval limit the promises cannot be kept under", async () => {

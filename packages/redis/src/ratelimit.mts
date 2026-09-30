@@ -5,12 +5,14 @@
 
 import {
 	type AdapterBuilder,
-	assertUsableRateLimitSpecs,
+	createRateLimitBudgetLookup,
 	defineModule,
 	MAX_DURATION_SECONDS,
+	type RateLimitBudgetResolver,
 	type RateLimiter,
+	type RateLimitFailMode,
 	type RateLimitSpec,
-	resolveSeededLimitSpecs,
+	shownConfigValue,
 } from "@o3co/auth-provider-core";
 import { z } from "zod";
 import type { RateLimiterClient } from "./clients.mjs";
@@ -20,20 +22,32 @@ interface RedisRateLimiterConfig {
 	limits?: Record<string, RateLimitSpec>;
 	defaultLimit?: RateLimitSpec;
 	client?: RateLimiterClient;
+	failMode?: RateLimitFailMode;
 }
 
 /** The built-in default, for a configuration that gives none. */
 const DEFAULT_LIMIT: RateLimitSpec = { limit: 60, windowSeconds: 60 };
 
-function keyPrefix(key: string): string {
-	const colon = key.indexOf(":");
-	return colon === -1 ? key : key.slice(0, colon);
-}
-
 interface CreateRedisRateLimiterOptions {
 	client: RateLimiterClient;
 	limits?: Record<string, RateLimitSpec>;
 	defaultLimit?: RateLimitSpec;
+	/** The owners' contributed budgets, read at each check; `limits` wins over one. */
+	budgets?: RateLimitBudgetResolver;
+	/** The limiter's outage policy (`RateLimiter.failMode`); not given, none (closed). */
+	failMode?: RateLimitFailMode;
+}
+
+/** `failMode` as given, or a `RangeError` naming it when it is neither policy. */
+function checkedFailMode(
+	who: string,
+	name: string,
+	failMode: unknown,
+): RateLimitFailMode | undefined {
+	if (failMode === undefined || failMode === "open" || failMode === "closed") return failMode;
+	throw new RangeError(
+		`${who}${name} must be "open" or "closed" (got ${shownConfigValue(failMode)})`,
+	);
 }
 
 /**
@@ -48,35 +62,25 @@ interface CreateRedisRateLimiterOptions {
  * hook; its lifetime belongs to the composition root.
  */
 export function createRedisRateLimiter(opts: CreateRedisRateLimiterOptions): RateLimiter {
-	// Every spec it was given, `defaultLimit` included, must be one it can
-	// apply as written (core's predicate, which the in-process limiter uses
-	// too). `redisRateLimiterBuilder` accepts a config object that never passed
-	// the zod schema, so this is where a zero window (`EXPIRE key 0` deletes
-	// the counter), a limit of zero or less, NaN, a fraction, or a window past
-	// the Date range (an `EXPIRE` Redis refuses after the `INCR`) is refused,
-	// rather than replaced by the default, a looser budget than the operator
-	// wrote. Only a default nobody gave is the built-in 60 per 60 s.
-	assertUsableRateLimitSpecs("createRedisRateLimiter", opts);
-	// Held as they were checked, the default included, as the in-process
-	// limiter holds them: a later change to the caller's objects cannot reach
-	// a check, and so cannot hand Redis a window nobody validated.
-	const limits: Record<string, RateLimitSpec> = Object.fromEntries(
-		Object.entries(opts.limits ?? {}).map(([prefix, spec]) => [
-			prefix,
-			{ limit: spec.limit, windowSeconds: spec.windowSeconds },
-		]),
-	);
-	const givenDefault = opts.defaultLimit ?? DEFAULT_LIMIT;
-	const defaultLimit: RateLimitSpec = {
-		limit: givenDefault.limit,
-		windowSeconds: givenDefault.windowSeconds,
-	};
+	// Every spec given, `defaultLimit` included, is refused unless usable as
+	// written (a zero window deletes the counter; one past the Date range is an
+	// `EXPIRE` Redis refuses), never replaced by the default. Only a default
+	// nobody gave is the built-in 60 per 60 s.
+	const budgetFor = createRateLimitBudgetLookup("createRedisRateLimiter", {
+		...(opts.limits === undefined ? {} : { limits: opts.limits }),
+		// Only `undefined` is "not given": a `null` default is refused.
+		defaultLimit: opts.defaultLimit === undefined ? DEFAULT_LIMIT : opts.defaultLimit,
+		...(opts.budgets === undefined ? {} : { budgets: opts.budgets }),
+	});
 	const client = opts.client;
+	const failMode = checkedFailMode("createRedisRateLimiter: ", "failMode", opts.failMode);
 
 	return {
 		kind: "redis",
+		defaultLimit: budgetFor.defaultLimit,
+		...(failMode === undefined ? {} : { failMode }),
 		async check(key) {
-			const spec = limits[keyPrefix(key)] ?? defaultLimit;
+			const { prefix, spec } = budgetFor(key);
 			// Take the PTTL with the count when the client offers it, so the
 			// decision can say when the window ends — without `resetAt` the guard's
 			// 429 carries no `Retry-After` behind Redis while the memory adapter's
@@ -93,7 +97,7 @@ export function createRedisRateLimiter(opts: CreateRedisRateLimiterOptions): Rat
 				return {
 					allowed: false,
 					remaining: 0,
-					reason: `limit:${keyPrefix(key)}`,
+					reason: `limit:${prefix}`,
 					limit: spec.limit,
 					...resetAt,
 				};
@@ -109,7 +113,9 @@ export function createRedisRateLimiter(opts: CreateRedisRateLimiterOptions): Rat
 }
 
 /**
- * AdapterFactory builder. Consumer wires:
+ * AdapterFactory builder, over `client`, `limits`, `defaultLimit` and
+ * `failMode` from its config and no contributed budget: those reach a limiter
+ * through `redisRateLimiterModule`. Consumer wires:
  *   factory.register("redis", redisRateLimiterBuilder);
  */
 export const redisRateLimiterBuilder: AdapterBuilder<RateLimiter> = (config, _ctx) => {
@@ -123,6 +129,7 @@ export const redisRateLimiterBuilder: AdapterBuilder<RateLimiter> = (config, _ct
 		client: cfg.client as RateLimiterClient,
 		limits: cfg.limits,
 		defaultLimit: cfg.defaultLimit,
+		failMode: cfg.failMode,
 	});
 };
 
@@ -134,13 +141,15 @@ const rateLimitSpecSchema = z.object({
 
 /**
  * `defineModule` manifest for the redis RateLimiter. Reads `redisRateLimiter`
- * config slice (limits + defaultLimit). The redis client itself comes from
- * the `rateLimiterClient` ComponentMap slot (per-purpose interface declared
- * in `@o3co/auth-provider-core`'s `ratelimit/types.mts`).
+ * config slice (limits + defaultLimit), the contributed budgets
+ * (`rateLimitBudgetResolver`), and `rateLimit.failMode` — a key in core's
+ * `rateLimit` block — as the limiter's own outage policy. The redis client
+ * itself comes from the `rateLimiterClient` ComponentMap slot (per-purpose
+ * interface declared in `@o3co/auth-provider-core`'s `ratelimit/types.mts`).
  */
 export const redisRateLimiterModule = defineModule({
 	name: "redis-rate-limiter",
-	requires: ["rateLimiterClient", "config"] as const,
+	requires: ["rateLimiterClient", "config", "rateLimitBudgetResolver"] as const,
 	configSchema: z.object({
 		redisRateLimiter: z
 			.object({
@@ -151,23 +160,19 @@ export const redisRateLimiterModule = defineModule({
 	}),
 	provides: {
 		rateLimiter: (deps) => {
-			const cfg = (
-				deps.config as unknown as {
-					redisRateLimiter: {
-						limits: Record<string, RateLimitSpec>;
-						defaultLimit: RateLimitSpec;
-					};
-				}
-			).redisRateLimiter;
+			const config = deps.config as unknown as {
+				redisRateLimiter: {
+					limits: Record<string, RateLimitSpec>;
+					defaultLimit: RateLimitSpec;
+				};
+				rateLimit?: { failMode?: unknown };
+			};
+			const cfg = config.redisRateLimiter;
 			return createRedisRateLimiter({
+				failMode: checkedFailMode("", "rateLimit.failMode", config.rateLimit?.failMode),
 				client: deps.rateLimiterClient,
-				// `/session/login` limits under the `login:` prefix, but its window
-				// and limit are configured at `rateLimit.login`; the device
-				// verification endpoint likewise under `device_verification:`,
-				// configured at `oauth.deviceAuthorization.rateLimit`. Seeding
-				// keeps those the single source of truth; an operator-declared
-				// entry for either prefix still wins. See `resolveSeededLimitSpecs`.
-				limits: resolveSeededLimitSpecs(cfg.limits, deps.config),
+				limits: cfg.limits,
+				budgets: deps.rateLimitBudgetResolver,
 				defaultLimit: cfg.defaultLimit,
 			});
 		},

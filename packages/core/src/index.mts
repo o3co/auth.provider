@@ -223,6 +223,9 @@ export {
 // before it knows them. `createApp` takes the resolved configuration itself,
 // and parses it once.
 export { readTransitionalConfig } from "./config/composed.mjs";
+// How a configured value is read where its owning schema did not run, and how
+// a refusal quotes it.
+export { configuredNumber, shownConfigValue } from "./config/configuredValue.mjs";
 export { MAX_DURATION_MS, MAX_DURATION_SECONDS } from "./config/durations.mjs";
 // The reference.conf files a composition layers beneath its own
 // configuration — core's, and each loaded module's package's (`section.reference`).
@@ -767,11 +770,13 @@ export type {
 	GrantPolicyHookFactory,
 	GrantPolicyRequest,
 } from "./policy/types.mjs";
+// The one lookup every bundled limiter takes a key's budget from.
 export {
-	DEVICE_VERIFICATION_RATE_LIMIT_PREFIX,
-	isDeviceVerificationRateLimitSpec,
-	resolveDeviceVerificationLimitSpec,
-} from "./ratelimit/deviceVerificationSpec.mjs";
+	createRateLimitBudgetLookup,
+	type RateLimitBudget,
+	type RateLimitBudgetLookup,
+	type RateLimitBudgetLookupOptions,
+} from "./ratelimit/budgetLookup.mjs";
 export {
 	createRateLimiterFactory,
 	registerBuiltinRateLimiters,
@@ -782,26 +787,20 @@ export {
 export {
 	checkWithFailMode,
 	createRateLimitGuard,
+	createRateLimitPolicy,
 	type RateLimitCheckOutcome,
-	type RateLimitFailMode,
 	type RateLimitGuardOptions,
 	type RateLimitOutageLogger,
+	type RateLimitPolicy,
 	type RateLimitPolicyOptions,
 	rateLimiterUnavailableEnvelope,
 } from "./ratelimit/guard.mjs";
-export { resolveLoginLimitSpec } from "./ratelimit/loginSpec.mjs";
 export {
 	createMemoryRateLimiter,
 	DEFAULT_MEMORY_RATE_LIMITER_MAX_BUCKETS,
 	type MemoryRateLimiterOptions,
 } from "./ratelimit/memory.mjs";
-export {
-	MFA_EMAIL_RATE_LIMIT_PREFIX,
-	MFA_RATE_LIMIT_PREFIX,
-	resolveMfaLimitSpecs,
-} from "./ratelimit/mfaSpec.mjs";
 export { memoryRateLimiterModule } from "./ratelimit/module.mjs";
-export { resolveSeededLimitSpecs } from "./ratelimit/seededSpecs.mjs";
 // Rate limiter. Backing client interface (RateLimiterClient) lives in
 // @o3co/auth-provider-redis.
 export type {
@@ -809,6 +808,7 @@ export type {
 	RateLimitDecision,
 	RateLimiter,
 	RateLimiterFactory,
+	RateLimitFailMode,
 	RateLimitSpec,
 } from "./ratelimit/types.mjs";
 export {
@@ -817,10 +817,6 @@ export {
 	readConfiguredRateLimitSpec,
 	requireUsableConfiguredRateLimitSpec,
 } from "./ratelimit/usableSpec.mjs";
-export {
-	resolveWebAuthnAuthenticationOptionsLimitSpec,
-	WEBAUTHN_AUTHENTICATION_OPTIONS_RATE_LIMIT_PREFIX,
-} from "./ratelimit/webauthnSpec.mjs";
 export { type RunReadinessOptions, runReadinessProbes } from "./readiness/run.mjs";
 export type {
 	ProbeResult,

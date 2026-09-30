@@ -125,13 +125,19 @@ const VOCABULARY: readonly VocabularyRow[] = [
 	},
 	{
 		concept: "device-verification budget shape (#448)",
-		home: "packages/core/src/ratelimit/deviceVerificationSpec.mts",
+		home: "packages/device-grant/src/verificationBudget.mts",
 		definition: /(?:function|const)\s+isDeviceVerificationRateLimitSpec\b/,
 	},
 	{
 		concept: "usable rate-limit spec — what a limiter applies as written",
 		home: "packages/core/src/ratelimit/usableSpec.mts",
 		definition: /(?:function|const)\s+isUsableRateLimitSpec\b/,
+	},
+	{
+		concept:
+			"the budget a limiter applies to a key — its own limits entry, else the owner's contributed budget, else its default (#728)",
+		home: "packages/core/src/ratelimit/budgetLookup.mts",
+		definition: /(?:function|const)\s+createRateLimitBudgetLookup\b/,
 	},
 	{
 		concept: "authentication claims a token may carry — amr (#481)",
@@ -462,12 +468,12 @@ const VOCABULARY: readonly VocabularyRow[] = [
 		definition: /(?:function|const)\s+getBoundMfaTransaction\b/,
 	},
 	{
-		concept: "deployment.mode as core reads it — the deploymentMode slot's value",
+		concept: "core.deployment.mode as core reads it — the deploymentMode slot's value",
 		home: DEPLOYMENT_MODE_HOME,
 		definition: /(?:function|const)\s+deploymentModeOf\b/,
 	},
 	{
-		concept: "deployment.mode as core reads it — the check a reader holds the slot's value to",
+		concept: "core.deployment.mode as core reads it — the check a reader holds the slot's value to",
 		home: DEPLOYMENT_MODE_HOME,
 		definition: /(?:function|const)\s+checkDeploymentMode\b/,
 	},
@@ -1447,7 +1453,8 @@ interface DeploymentTouch {
  *   non-null or through a cast alike); a destructuring that names it, by
  *   declaration, parameter or assignment, flat or nested, renamed or not,
  *   its key an identifier, a string or a computed string; and a string
- *   literal `"deployment"` or `"deployment.mode"` anywhere a value goes — an
+ *   literal `"deployment"`, `"deployment.mode"`, `"core.deployment"` or
+ *   `"core.deployment.mode"` anywhere a value goes — an
  *   element access, `Reflect.get`, a path handed to a helper, an `in` test,
  *   a type's indexed access. An alias (`const d = config.deployment`) is
  *   caught at the access that made it.
