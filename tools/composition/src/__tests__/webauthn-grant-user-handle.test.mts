@@ -25,7 +25,7 @@
  * that account.
  */
 
-import type { AppConfig, MfaFactorStore } from "@o3co/auth-provider-core";
+import type { AppConfig, AuditEvent, AuditSink, MfaFactorStore } from "@o3co/auth-provider-core";
 import { seedMfaFactor } from "@o3co/auth-provider-mfa/testing";
 import {
 	ALICE,
@@ -61,11 +61,32 @@ afterEach(async () => {
 	current = undefined;
 });
 
-/** The full set with the WebAuthn second factor on, mallory in the Store, and the passkey client. */
-async function boot(): Promise<{ readonly app: Express; readonly set: FullSet }> {
+/** An audit sink that keeps what it is handed, oldest first. */
+function recordingAuditSink(): AuditSink & { readonly events: AuditEvent[] } {
+	const events: AuditEvent[] = [];
+	return {
+		kind: "recording",
+		events,
+		async record(event) {
+			events.push(event);
+		},
+	};
+}
+
+/**
+ * The full set with the WebAuthn second factor on, mallory in the Store, the passkey client, and
+ * a recording audit sink.
+ */
+async function boot(): Promise<{
+	readonly app: Express;
+	readonly set: FullSet;
+	readonly audit: AuditEvent[];
+}> {
+	const audit = recordingAuditSink();
 	current = await composeFullSet({
 		adjust: (config) =>
 			({ ...config, ...webauthnMfaFactorConfigForTests({ enabled: true }) }) as AppConfig,
+		extraOverrides: () => ({ auditSink: audit }),
 		extraUsers: { [MALLORY.username]: { id: MALLORY.sub, password: MALLORY.password } },
 		extraClients: {
 			[PASSKEY_APP.id]: {
@@ -77,7 +98,7 @@ async function boot(): Promise<{ readonly app: Express; readonly set: FullSet }>
 			},
 		},
 	});
-	return { app: current.app, set: current };
+	return { app: current.app, set: current, audit: audit.events };
 }
 
 /** A software passkey for the full set's relying party (`auth.test`, the issuer's origin): a synced one. */
@@ -145,18 +166,40 @@ async function signIn(
 const subjectOf = (accessToken: string): unknown =>
 	JSON.parse(Buffer.from(accessToken.split(".")[1] as string, "base64url").toString("utf8")).sub;
 
+/**
+ * alice's second factor registered as mallory's passkey by its id and public key, then asserted
+ * by alice's authenticator with her user handle: the sign-in's answer, and the audit events.
+ */
+async function aliceAssertsHerFactorAsMallorys(): Promise<{
+	readonly res: request.Response;
+	readonly audit: AuditEvent[];
+}> {
+	const { app, set, audit } = await boot();
+	const alicePasskey = passkeyFor();
+	await seedAliceFactor(set, alicePasskey);
+	const { registered } = await registerAsMallory(app, alicePasskey);
+	expect(registered.status, JSON.stringify(registered.body)).toBe(200);
+	return { res: await signIn(app, alicePasskey, ALICE_MFA_HANDLE), audit };
+}
+
 describe("the passwordless grant's assertion and its user handle", () => {
 	it("refuses alice's second factor, registered as mallory's passkey by its id and public key, when her authenticator answers with her user handle: 400 invalid_grant user_handle_mismatch, no token for mallory", async () => {
-		const { app, set } = await boot();
-		const alicePasskey = passkeyFor();
-		await seedAliceFactor(set, alicePasskey);
-		const { registered } = await registerAsMallory(app, alicePasskey);
-		expect(registered.status, JSON.stringify(registered.body)).toBe(200);
-
-		const res = await signIn(app, alicePasskey, ALICE_MFA_HANDLE);
+		const { res } = await aliceAssertsHerFactorAsMallorys();
 
 		expect(res.status, JSON.stringify(res.body)).toBe(400);
 		expect(res.body).toEqual({ error: "invalid_grant", error_description: "user_handle_mismatch" });
+	});
+
+	it("audits that refusal as token.issued.failure with reason user_handle_mismatch", async () => {
+		const { audit } = await aliceAssertsHerFactorAsMallorys();
+
+		const failures = audit.filter((event) => event.type === "token.issued.failure");
+		expect(failures).toHaveLength(1);
+		expect(failures[0]?.details).toMatchObject({
+			grant_type: WEBAUTHN_GRANT_TYPE,
+			error: "invalid_grant",
+			reason: "user_handle_mismatch",
+		});
 	});
 
 	it("signs mallory in with her own passkey when it answers with the user handle her registration options named", async () => {
@@ -169,5 +212,17 @@ describe("the passwordless grant's assertion and its user handle", () => {
 
 		expect(res.status, JSON.stringify(res.body)).toBe(200);
 		expect(subjectOf(res.body.access_token as string)).toBe(MALLORY.sub);
+	});
+
+	it("refuses mallory's own passkey answering her userId as raw text, as a client before @simplewebauthn/browser v10 does: 400 invalid_grant user_handle_mismatch", async () => {
+		const { app } = await boot();
+		const own = passkeyFor();
+		const { registered } = await registerAsMallory(app, own);
+		expect(registered.status, JSON.stringify(registered.body)).toBe(200);
+
+		const res = await signIn(app, own, MALLORY.sub);
+
+		expect(res.status, JSON.stringify(res.body)).toBe(400);
+		expect(res.body).toEqual({ error: "invalid_grant", error_description: "user_handle_mismatch" });
 	});
 });

@@ -519,12 +519,15 @@ describe("the user handle an assertion carries", () => {
 	/** Another account's user handle, as the JSON form writes it. */
 	const OTHER_JSON = Buffer.from("user-mallory").toString("base64url");
 
-	/** A verified assertion as the library answers one, its counter increased. */
-	const verified = () =>
+	/** An owner's user handle whose base64url uses both characters the base64 alphabet writes otherwise. */
+	const URL_SAFE_OWNER = new Uint8Array(Buffer.from("u-_owner", "base64url"));
+
+	/** A verified assertion as the library answers one, its counter `newCounter` (increased unless given). */
+	const verified = (newCounter = 6) =>
 		mockVerifyAuthentication.mockResolvedValueOnce({
 			verified: true,
 			authenticationInfo: {
-				newCounter: 6,
+				newCounter,
 				credentialID: "dGVzdC1jcmVkZW50aWFsLWlk",
 				userVerified: true,
 				credentialDeviceType: "singleDevice",
@@ -561,6 +564,10 @@ describe("the user handle an assertion carries", () => {
 		["another account's", OTHER_JSON],
 		["an empty one", ""],
 		["the owner's, padded", `${OWNER_JSON}==`],
+		[
+			"the owner's as raw text, as a client before @simplewebauthn/browser v10 answers it",
+			"user-alice",
+		],
 	])("refuses %s as user_handle_mismatch", async (_what, userHandle) => {
 		verified();
 		expect(await verifyWebAuthnAssertion(input(userHandle))).toEqual({
@@ -584,6 +591,29 @@ describe("the user handle an assertion carries", () => {
 	it("refuses another's with the backup flags asked for too", async () => {
 		verified();
 		expect(await verifyWebAuthnAssertionWithBackupState(input(OTHER_JSON))).toEqual({
+			ok: false,
+			reason: "user_handle_mismatch",
+		});
+	});
+
+	it("refuses the owner's written in the standard base64 alphabet, and accepts it in the URL-safe one", async () => {
+		const standard = Buffer.from(URL_SAFE_OWNER).toString("base64");
+		expect(standard).toBe("u+/owner");
+		verified();
+		expect(await verifyWebAuthnAssertion(input(standard, URL_SAFE_OWNER))).toEqual({
+			ok: false,
+			reason: "user_handle_mismatch",
+		});
+		verified();
+		expect(await verifyWebAuthnAssertion(input("u-_owner", URL_SAFE_OWNER))).toEqual({
+			ok: true,
+			newSignCount: 6,
+		});
+	});
+
+	it("judges it before the count: another's with a counter that did not increase is user_handle_mismatch", async () => {
+		verified(5);
+		expect(await verifyWebAuthnAssertion(input(OTHER_JSON))).toEqual({
 			ok: false,
 			reason: "user_handle_mismatch",
 		});
