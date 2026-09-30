@@ -115,18 +115,21 @@ export function describeEndpointRejection(reason: EndpointRejection): string {
 
 /**
  * Returns `value` when it is a usable Store endpoint, otherwise throws naming
- * `field` and the reason.
+ * `owner`, `field` and the reason.
  *
  * The rejected value is deliberately **not** echoed into the message: it is
  * operator-supplied configuration that may embed a secret, and a boot error
  * lands in logs.
  */
-export function assertSecureEndpoint(value: unknown, field: string): string {
+export function assertSecureEndpoint(
+	value: unknown,
+	field: string,
+	owner = "HttpUserRepository",
+): string {
 	const rejection = checkSecureEndpoint(value);
 	if (rejection !== null) {
 		throw new Error(
-			`HttpUserRepository: "${field}" ${describeEndpointRejection(rejection)} ` +
-				`(reason: ${rejection})`,
+			`${owner}: "${field}" ${describeEndpointRejection(rejection)} (reason: ${rejection})`,
 		);
 	}
 	return value as string;

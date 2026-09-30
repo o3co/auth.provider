@@ -29,16 +29,16 @@ export {
 	mfaEnrollmentWitnessContract,
 } from "./mfa/enrollmentWitness.contract.mjs";
 export {
-	type MfaFactorStoreContractInput,
-	type MfaFactorStoreHarness,
-	mfaFactorStoreContract,
-} from "./mfa/factorStore.contract.mjs";
-export {
 	type MfaFactorChallenge,
 	type MfaFactorContractInput,
 	type MfaFactorEnrollmentStart,
 	mfaFactorContract,
 } from "./mfa/factor.contract.mjs";
+export {
+	type MfaFactorStoreContractInput,
+	type MfaFactorStoreHarness,
+	mfaFactorStoreContract,
+} from "./mfa/factorStore.contract.mjs";
 export {
 	FAKE_STORE_MAX_BODY_BYTES,
 	type FakeStore,

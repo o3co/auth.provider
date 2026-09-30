@@ -160,10 +160,19 @@ const storeAt = (origin: string, bearerToken?: string): HttpMfaFactorStore =>
 
 describe("what it sends", () => {
 	it("posts JSON to each URL as configured, with the bearer token, and no subject or factor id in the request line", async () => {
-		const seen: { method?: string; url?: string; headers: IncomingMessage["headers"]; body: unknown }[] =
-			[];
+		const seen: {
+			method?: string;
+			url?: string;
+			headers: IncomingMessage["headers"];
+			body: unknown;
+		}[] = [];
 		const origin = await serve((request, body, response) => {
-			seen.push({ method: request.method, url: request.url, headers: request.headers, body: JSON.parse(body) });
+			seen.push({
+				method: request.method,
+				url: request.url,
+				headers: request.headers,
+				body: JSON.parse(body),
+			});
 			if (request.url?.startsWith("/mfa/list")) {
 				response.writeHead(200, { "Content-Type": "application/json" });
 				response.end(JSON.stringify({ factors: [] }));
@@ -224,12 +233,19 @@ describe("what it sends", () => {
 		const store = storeOver();
 		await store.create({ ...RECORD, data: created });
 		await store.update("user-1", ID, 1, { ...NEXT, data: resealed });
-		const [create, update] = fake.requests;
-		expect((create?.body as { factor: { data: string } }).factor.data).toBe(created);
-		expect((update?.body as { changes: { data: string } }).changes.data).toBe(resealed);
+		expect(fake.requests.map((request) => request.body)).toMatchObject([
+			{ factor: { data: created } },
+			{ changes: { data: resealed } },
+		]);
 		expect(JSON.stringify(fake.requests)).not.toContain("PLAINTEXT-SECRET");
 		expect(fake.factors("user-1")).toEqual([
-			{ ...WIRE, data: resealed, label: NEXT.label, lastUsedAtMs: NEXT.lastUsedAt.getTime(), version: 2 },
+			{
+				...WIRE,
+				data: resealed,
+				label: NEXT.label,
+				lastUsedAtMs: NEXT.lastUsedAt.getTime(),
+				version: 2,
+			},
 		]);
 	});
 
@@ -479,6 +495,7 @@ describe("nothing the Store sends reaches what it throws", () => {
 			() => store.update("user-1", ID, 1, NEXT),
 			() => store.remove("user-1", ID),
 		];
+		let thrown = 0;
 		for (const answer of [
 			{ status: 500, body: `{"error":"${MARKER}"}` },
 			{ status: 503, body: MARKER },
@@ -498,9 +515,12 @@ describe("nothing the Store sends reaches what it throws", () => {
 					(thrown: Error) => thrown,
 				);
 				if (error === undefined) continue;
+				thrown += 1;
 				expect(everyForm(error), `${answer.status} ${answer.body}`).not.toContain(MARKER);
 			}
 		}
+		// Create and delete take the four 200s as done; every other call throws.
+		expect(thrown).toBe(9 * calls.length - 2 * 4);
 	});
 
 	it("in a credential refusal", async () => {

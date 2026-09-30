@@ -14,40 +14,35 @@
  * limitations under the License.
  */
 
-import {
-	describeWeakSecret,
-	type FederatedIdentityLink,
-	type FederatedIdentityLookup,
-	type FederatedIdentityLookupResult,
-	type FederatedIdentityRegistration,
-	type LinkFederatedIdentityResult,
-	MIN_SECRET_ENTROPY_BYTES,
-	measureSecretEntropyBytes,
-	type User,
-	type UserRepository,
+import type {
+	FederatedIdentityLink,
+	FederatedIdentityLookup,
+	FederatedIdentityLookupResult,
+	FederatedIdentityRegistration,
+	LinkFederatedIdentityResult,
+	User,
+	UserRepository,
 } from "@o3co/auth-provider-core";
 import { assertSecureEndpoint, endpointForMessage } from "../endpointUrl.mjs";
+import {
+	bearerAuthorization,
+	checkStoreResponseCap,
+	checkStoreTimeout,
+	DEFAULT_MAX_RESPONSE_BYTES,
+	discardBody,
+	isAbortError,
+	readBodyCapped,
+} from "../storeTransport.mjs";
 import { readFailure, requestFailure, StoreCredentialRefusedError } from "./storeErrors.mjs";
 import { hasBearerChallenge } from "./wwwAuthenticate.mjs";
 
+export { DEFAULT_MAX_RESPONSE_BYTES };
+
+/** What this repository's messages lead with. */
+const OWNER = "HttpUserRepository";
+
 /** The Store answered 409 to a link request: the identity is already someone else's. */
 const CONFLICT = Symbol("conflict");
-
-/**
- * Default ceiling on an upstream response body, in bytes.
- *
- * A `User` record is a few hundred bytes; 1 MiB is generous for one carrying
- * custom claims and small enough that a hostile or broken Store cannot walk the
- * process out of memory one login at a time.
- */
-export const DEFAULT_MAX_RESPONSE_BYTES = 1024 * 1024;
-
-/**
- * Largest delay Node's timer subsystem represents. Anything above it is
- * silently clamped to 1ms — so an operator writing a very large number meaning
- * "be patient" would otherwise get the most impatient timeout possible.
- */
-const MAX_TIMEOUT_MS = 2_147_483_647;
 
 /**
  * Runtime guard for the Store's user response, so a malformed payload cannot
@@ -198,152 +193,6 @@ function lookupAnswer(value: unknown): FederatedIdentityLookupResult | undefined
 }
 
 /**
- * RFC 6750 §2.1 `b64token` — the characters a bearer credential may carry.
- * Nothing in it is whitespace or a control character, so a token that
- * matches cannot break the header it rides in.
- */
-const B64TOKEN = /^[A-Za-z0-9\-._~+/]+=*$/;
-
-const BEARER_TOKEN_FIELD = "bearerToken";
-
-/**
- * The credential presented to the Store, checked at construction (so an
- * unusable one fails at boot) and turned into the `Authorization` value;
- * `undefined` when none is configured, which sends no `Authorization` header.
- *
- * The shape is refused here, not left to `fetch`, which QUOTES a header value
- * it refuses in the `TypeError` it throws, where the session routes log it.
- * The strength is core's shared-secret floor (`MIN_SECRET_ENTROPY_BYTES`, on
- * the decoded length): whoever holds this token speaks to the Store as
- * auth.provider. No message quotes the value.
- */
-function bearerAuthorization(value: unknown): string | undefined {
-	if (value === undefined) return undefined;
-	const refuse = (problem: string): Error =>
-		new Error(`HttpUserRepository: "${BEARER_TOKEN_FIELD}" ${problem}`);
-	if (typeof value !== "string") throw refuse("must be a string");
-	if (value === "") {
-		throw refuse(
-			'must not be empty — HOCON substitutes an exported-but-empty variable as ""; ' +
-				"leave it unset to send no Authorization header",
-		);
-	}
-	if (!B64TOKEN.test(value)) {
-		throw refuse(
-			"must be a bare RFC 6750 token: letters, digits and - . _ ~ + /, then optional = padding — " +
-				'no whitespace, no line break, and no "Bearer " prefix (the scheme is added)',
-		);
-	}
-	const actualBytes = measureSecretEntropyBytes(value);
-	if (actualBytes < MIN_SECRET_ENTROPY_BYTES) {
-		throw new Error(
-			`HttpUserRepository: ${describeWeakSecret(actualBytes, {
-				configKey: "repositories.user.http.bearerToken",
-				envVar: "CLIENT_USER_BEARER_TOKEN",
-			})}`,
-		);
-	}
-	return `Bearer ${value}`;
-}
-
-/** Whether `value` is a positive integer that fits `bound`. */
-function isPositiveIntegerWithin(value: unknown, bound: number): value is number {
-	return typeof value === "number" && Number.isInteger(value) && value > 0 && value <= bound;
-}
-
-/**
- * Releases a response body we are not going to read. Left unconsumed, undici
- * holds the socket until the response is garbage collected instead of
- * returning it to the keep-alive pool: a slow leak on the failure path.
- *
- * Deliberately not awaited: that would hand a hostile Store a second way to
- * stall the caller, the one the request deadline exists to close, and some
- * interceptors never settle it at all.
- */
-function discardBody(res: Response): void {
-	res.body?.cancel().catch(() => {
-		// Already consumed, already errored, or aborted — nothing to release.
-	});
-}
-
-/**
- * Reads at most `limit` bytes of `res` as text, throwing once it is passed.
- * `Content-Length` refuses an honest oversized response before a byte is read,
- * but the streaming count is the load-bearing half: a hostile Store omits the
- * header or lies, and chunked encoding has none. Everything it throws is the
- * adapter's own (the cap, the deadline's rejection, what `unreadable` makes of
- * a transport error mid-read), never the transport's error as it is.
- */
-async function readBodyCapped(
-	res: Response,
-	limit: number,
-	endpoint: string,
-	deadline: Promise<never>,
-	unreadable: (err: unknown) => Error,
-): Promise<string> {
-	const declared = Number(res.headers.get("content-length"));
-	if (Number.isFinite(declared) && declared > limit) {
-		discardBody(res);
-		throw new Error(
-			`HttpUserRepository: upstream ${endpoint} response exceeds the ${limit}-byte cap ` +
-				`(Content-Length: ${declared})`,
-		);
-	}
-
-	if (res.body === null) return "";
-
-	const reader = res.body.getReader();
-	const decoder = new TextDecoder();
-	let text = "";
-	let read = 0;
-	try {
-		for (;;) {
-			// Raced against the deadline rather than relying on `signal` alone:
-			// aborting a request does not reliably interrupt a `read()` already
-			// in flight, which is exactly the slow-loris shape — headers arrive
-			// promptly, then the body dribbles or stops. One absolute deadline
-			// for the whole exchange, not a fresh one per chunk.
-			const { done, value } = await Promise.race([
-				reader.read().catch((err: unknown) => {
-					throw unreadable(err);
-				}),
-				deadline,
-			]);
-			if (done) break;
-			read += value.byteLength;
-			if (read > limit) {
-				throw new Error(
-					`HttpUserRepository: upstream ${endpoint} response exceeds the ${limit}-byte cap`,
-				);
-			}
-			text += decoder.decode(value, { stream: true });
-		}
-	} finally {
-		// Tears down the connection when we bail out early; a no-op once the
-		// stream has completed on its own. Not awaited, for the reason given on
-		// `discardBody`.
-		reader.cancel().catch(() => {});
-	}
-	return text + decoder.decode();
-}
-
-/**
- * Whether `err` is the abort our own deadline raised on the `fetch` itself,
- * where the response headers never arrive. Deliberately shallow: an aborted
- * `fetch` rejects with the `AbortError` directly. A runtime that wrapped one
- * would still fail the request, as a `StoreTransportError` rather than a
- * `TimeoutError`: misnamed, not missed. A stalled *body* is the deadline race
- * in `readBodyCapped`.
- */
-function isAbortError(err: unknown): boolean {
-	// Optional chaining rather than a `typeof` guard: it covers `null`,
-	// `undefined` and a thrown primitive in the same expression, with no
-	// branch that only a contrived throw could reach.
-	const name = (err as { name?: unknown } | null | undefined)?.name;
-	return name === "AbortError" || name === "TimeoutError";
-}
-
-/**
  * `UserRepository` backed by "the Store", the upstream user service defined
  * on core's `User` doc (`@o3co/auth-provider-core`, `src/repositories/types.mts`).
  * See README, The wire contract and Constructor validation.
@@ -429,7 +278,7 @@ export class HttpUserRepository implements UserRepository {
 			authenticateByTokenUrl,
 			"authenticateByTokenUrl",
 		);
-		this.#authorization = bearerAuthorization(bearerToken);
+		this.#authorization = bearerAuthorization(bearerToken, OWNER);
 		if (linkFederatedIdentityUrl !== undefined) {
 			this.linkFederatedIdentityUrl = assertSecureEndpoint(
 				linkFederatedIdentityUrl,
@@ -460,18 +309,8 @@ export class HttpUserRepository implements UserRepository {
 			);
 		}
 
-		if (!isPositiveIntegerWithin(timeout, MAX_TIMEOUT_MS)) {
-			throw new Error(
-				`HttpUserRepository: "timeout" must be a positive integer no greater than ` +
-					`${MAX_TIMEOUT_MS} milliseconds`,
-			);
-		}
-		this.timeout = timeout;
-
-		if (!isPositiveIntegerWithin(maxResponseBytes, Number.MAX_SAFE_INTEGER)) {
-			throw new Error('HttpUserRepository: "maxResponseBytes" must be a positive integer');
-		}
-		this.maxResponseBytes = maxResponseBytes;
+		this.timeout = checkStoreTimeout(timeout, OWNER);
+		this.maxResponseBytes = checkStoreResponseCap(maxResponseBytes, OWNER);
 	}
 
 	/** What every request carries: the body's type and, when configured, the credential. */
@@ -630,8 +469,17 @@ export class HttpUserRepository implements UserRepository {
 			}
 			let raw: string;
 			try {
-				raw = await readBodyCapped(res, this.maxResponseBytes, endpoint, deadline, (err) =>
-					readFailure(err, `HttpUserRepository: identity lookup at ${endpoint} could not be read`),
+				raw = await readBodyCapped(
+					res,
+					this.maxResponseBytes,
+					endpoint,
+					deadline,
+					(err) =>
+						readFailure(
+							err,
+							`HttpUserRepository: identity lookup at ${endpoint} could not be read`,
+						),
+					OWNER,
 				);
 			} catch (err) {
 				if (timedOut) throw timeoutError();
@@ -724,8 +572,14 @@ export class HttpUserRepository implements UserRepository {
 			if (res.ok) {
 				let raw: string;
 				try {
-					raw = await readBodyCapped(res, this.maxResponseBytes, endpoint, deadline, (err) =>
-						readFailure(err, `HttpUserRepository: response from ${endpoint} could not be read`),
+					raw = await readBodyCapped(
+						res,
+						this.maxResponseBytes,
+						endpoint,
+						deadline,
+						(err) =>
+							readFailure(err, `HttpUserRepository: response from ${endpoint} could not be read`),
+						OWNER,
 					);
 				} catch (err) {
 					// Whatever the deadline interrupted is a timeout; everything

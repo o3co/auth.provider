@@ -16,10 +16,10 @@
 
 import type { AdapterFactory, UserRepository } from "@o3co/auth-provider-core";
 import {
-	DEFAULT_MAX_RESPONSE_BYTES,
 	type FederatedIdentityLookupCoverage,
 	HttpUserRepository,
 } from "./repositories/HttpUserRepository.mjs";
+import { DEFAULT_MAX_RESPONSE_BYTES } from "./storeTransport.mjs";
 
 /** Default request deadline, in milliseconds, when the config names none. */
 const DEFAULT_TIMEOUT_MS = 5000;
@@ -85,12 +85,15 @@ export const registerBuiltinAdapters = (factories: {
 };
 
 export {
+	HttpMfaFactorStore,
+	type HttpMfaFactorStoreOptions,
+} from "./mfa/HttpMfaFactorStore.mjs";
+export {
 	MfaStoreError,
 	type MfaStoreFailure,
 	type MfaStoreOperation,
 } from "./mfa/storeFailure.mjs";
 export {
-	DEFAULT_MAX_RESPONSE_BYTES,
 	type FederatedIdentityLookupCoverage,
 	HttpUserRepository,
 } from "./repositories/HttpUserRepository.mjs";
@@ -99,3 +102,4 @@ export {
 	StoreTransportError,
 	type StoreTransportFailure,
 } from "./repositories/storeErrors.mjs";
+export { DEFAULT_MAX_RESPONSE_BYTES } from "./storeTransport.mjs";

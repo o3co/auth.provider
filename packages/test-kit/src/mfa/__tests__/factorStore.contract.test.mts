@@ -27,11 +27,7 @@ import {
 	type MfaFactorStore,
 } from "@o3co/auth-provider-core";
 import { describe, expect, expectTypeOf, it } from "vitest";
-import {
-	type ContractCase,
-	type MfaFactorStoreHarness,
-	mfaFactorStoreContract,
-} from "#/index.mjs";
+import { type ContractCase, type MfaFactorStoreHarness, mfaFactorStoreContract } from "#/index.mjs";
 
 describe("mfaFactorStoreContract over core's in-process store", () => {
 	for (const contractCase of mfaFactorStoreContract({

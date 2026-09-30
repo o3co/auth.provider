@@ -105,23 +105,20 @@ export function mfaFactorStoreContract(
 			assert.deepStrictEqual(await store.list("nobody"), []);
 		}),
 
-		test(
-			"returns a created record whole, as plain data, its undefined fields named",
-			async (store) => {
-				// Strictly: a key too many, one left out, or a class instance in place
-				// of plain data fails here.
-				const full = RECORD();
-				const bare = RECORD({
-					id: FACTOR_2,
-					label: undefined,
-					binding: undefined,
-					lastUsedAt: undefined,
-				});
-				await store.create(full);
-				await store.create(bare);
-				assert.deepStrictEqual(byId(await store.list("user-1")), [full, bare]);
-			},
-		),
+		test("returns a created record whole, as plain data, its undefined fields named", async (store) => {
+			// Strictly: a key too many, one left out, or a class instance in place
+			// of plain data fails here.
+			const full = RECORD();
+			const bare = RECORD({
+				id: FACTOR_2,
+				label: undefined,
+				binding: undefined,
+				lastUsedAt: undefined,
+			});
+			await store.create(full);
+			await store.create(bare);
+			assert.deepStrictEqual(byId(await store.list("user-1")), [full, bare]);
+		}),
 
 		test("keeps data verbatim: the store never reads it", async (store) => {
 			const samples = ["[]", "{}", '{"a":[],"b":{}}', "ü∆ 漢字 🙂", "x".repeat(4096)];
@@ -161,34 +158,28 @@ export function mfaFactorStoreContract(
 			assert.equal((await store.list("user-1")).length, 1);
 		}),
 
-		test(
-			"keeps subjects apart: the same id under another subject is another record",
-			async (store) => {
-				const mine = RECORD();
-				const theirs = RECORD({ subject: "user-2", data: "v2.theirs" });
-				await store.create(mine);
-				await store.create(theirs);
-				assert.deepStrictEqual(await store.list("user-1"), [mine]);
-				assert.deepStrictEqual(await store.list("user-2"), [theirs]);
-			},
-		),
+		test("keeps subjects apart: the same id under another subject is another record", async (store) => {
+			const mine = RECORD();
+			const theirs = RECORD({ subject: "user-2", data: "v2.theirs" });
+			await store.create(mine);
+			await store.create(theirs);
+			assert.deepStrictEqual(await store.list("user-1"), [mine]);
+			assert.deepStrictEqual(await store.list("user-2"), [theirs]);
+		}),
 
-		test(
-			"updates at the current version: data, label and lastUsedAt replaced, version + 1, nothing else moved",
-			async (store) => {
-				const record = RECORD();
-				await store.create(record);
-				const next = {
-					data: "v2.re-sealed",
-					label: "Work phone",
-					lastUsedAt: new Date("2026-09-03T00:00:00.000Z"),
-				};
-				const updated = await store.update("user-1", FACTOR_1, 1, next);
-				const expected = { ...record, ...next, version: 2 };
-				assert.deepStrictEqual(updated, expected);
-				assert.deepStrictEqual(await store.list("user-1"), [expected]);
-			},
-		),
+		test("updates at the current version: data, label and lastUsedAt replaced, version + 1, nothing else moved", async (store) => {
+			const record = RECORD();
+			await store.create(record);
+			const next = {
+				data: "v2.re-sealed",
+				label: "Work phone",
+				lastUsedAt: new Date("2026-09-03T00:00:00.000Z"),
+			};
+			const updated = await store.update("user-1", FACTOR_1, 1, next);
+			const expected = { ...record, ...next, version: 2 };
+			assert.deepStrictEqual(updated, expected);
+			assert.deepStrictEqual(await store.list("user-1"), [expected]);
+		}),
 
 		test("clears label and lastUsedAt when the update says undefined", async (store) => {
 			await store.create(RECORD());
@@ -221,19 +212,16 @@ export function mfaFactorStoreContract(
 			assert.deepStrictEqual(await store.list("user-1"), []);
 		}),
 
-		test(
-			"refuses, with a RangeError, an update at Number.MAX_SAFE_INTEGER — the next version would be no safe integer — and changes nothing, whatever the stored version; the update that reaches it passes",
-			async (store) => {
-				const max = Number.MAX_SAFE_INTEGER;
-				await store.create(RECORD({ version: max - 1 }));
-				const next = { data: "v2.re-sealed", label: undefined, lastUsedAt: undefined };
-				const reached = await store.update("user-1", FACTOR_1, max - 1, next);
-				assert.deepStrictEqual(reached, { ...RECORD(), ...next, version: max });
-				await assert.rejects(store.update("user-1", FACTOR_1, max, next), RangeError);
-				assert.deepStrictEqual(await store.list("user-1"), [reached]);
-				await assert.rejects(store.update("user-1", factorId("gone"), max, next), RangeError);
-			},
-		),
+		test("refuses, with a RangeError, an update at Number.MAX_SAFE_INTEGER — the next version would be no safe integer — and changes nothing, whatever the stored version; the update that reaches it passes", async (store) => {
+			const max = Number.MAX_SAFE_INTEGER;
+			await store.create(RECORD({ version: max - 1 }));
+			const next = { data: "v2.re-sealed", label: undefined, lastUsedAt: undefined };
+			const reached = await store.update("user-1", FACTOR_1, max - 1, next);
+			assert.deepStrictEqual(reached, { ...RECORD(), ...next, version: max });
+			await assert.rejects(store.update("user-1", FACTOR_1, max, next), RangeError);
+			assert.deepStrictEqual(await store.list("user-1"), [reached]);
+			await assert.rejects(store.update("user-1", factorId("gone"), max, next), RangeError);
+		}),
 
 		test("lets exactly one of N concurrent updates at one version win", async (store) => {
 			await store.create(RECORD());
@@ -260,37 +248,31 @@ export function mfaFactorStoreContract(
 			assert.deepStrictEqual(await store.list("user-1"), []);
 		}),
 
-		test(
-			"removes one record, idempotently, leaving the subject's others and other subjects'",
-			async (store) => {
-				const a = factorId("a");
-				const b = factorId("b");
-				await store.create(RECORD({ id: a }));
-				await store.create(RECORD({ id: b }));
-				await store.create(RECORD({ id: a, subject: "user-2" }));
-				await store.remove("user-1", a);
-				await store.remove("user-1", a);
-				await store.remove("user-1", factorId("never-was"));
-				assert.deepStrictEqual(await store.list("user-1"), [RECORD({ id: b })]);
-				assert.deepStrictEqual(await store.list("user-2"), [RECORD({ id: a, subject: "user-2" })]);
-			},
-		),
+		test("removes one record, idempotently, leaving the subject's others and other subjects'", async (store) => {
+			const a = factorId("a");
+			const b = factorId("b");
+			await store.create(RECORD({ id: a }));
+			await store.create(RECORD({ id: b }));
+			await store.create(RECORD({ id: a, subject: "user-2" }));
+			await store.remove("user-1", a);
+			await store.remove("user-1", a);
+			await store.remove("user-1", factorId("never-was"));
+			assert.deepStrictEqual(await store.list("user-1"), [RECORD({ id: b })]);
+			assert.deepStrictEqual(await store.list("user-2"), [RECORD({ id: a, subject: "user-2" })]);
+		}),
 
-		test(
-			"removes every record of one subject, idempotently, and no other subject's",
-			async (store) => {
-				await store.create(RECORD({ id: factorId("a") }));
-				await store.create(RECORD({ id: factorId("b") }));
-				await store.create(RECORD({ id: factorId("c"), subject: "user-2" }));
-				await store.removeAllForSubject("user-1");
-				await store.removeAllForSubject("user-1");
-				await store.removeAllForSubject("nobody");
-				assert.deepStrictEqual(await store.list("user-1"), []);
-				assert.deepStrictEqual(await store.list("user-2"), [
-					RECORD({ id: factorId("c"), subject: "user-2" }),
-				]);
-			},
-		),
+		test("removes every record of one subject, idempotently, and no other subject's", async (store) => {
+			await store.create(RECORD({ id: factorId("a") }));
+			await store.create(RECORD({ id: factorId("b") }));
+			await store.create(RECORD({ id: factorId("c"), subject: "user-2" }));
+			await store.removeAllForSubject("user-1");
+			await store.removeAllForSubject("user-1");
+			await store.removeAllForSubject("nobody");
+			assert.deepStrictEqual(await store.list("user-1"), []);
+			assert.deepStrictEqual(await store.list("user-2"), [
+				RECORD({ id: factorId("c"), subject: "user-2" }),
+			]);
+		}),
 
 		test("takes a record again after it was removed", async (store) => {
 			// A removed factor leaves nothing behind that refuses the next one.
