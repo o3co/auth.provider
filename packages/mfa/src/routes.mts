@@ -353,6 +353,10 @@ export function createMfaRouter(options: MfaRoutesOptions): Router {
 					answerOutage("verify", res, outcome);
 					return;
 				case "refused":
+					if (outcome.factorIdDropped === true) {
+						// A factor answering outside its contract: the value it named is never logged.
+						logger.warn({ kind: outcome.kind }, "mfa_refusal_factor_id_dropped");
+					}
 					emitAuditEvent(auditSink, {
 						timestamp: new Date(),
 						type: "mfa.verify.failure",
