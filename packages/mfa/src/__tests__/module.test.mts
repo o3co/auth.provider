@@ -81,11 +81,10 @@ describe("mfaModules", () => {
 		expect(mfaModules()[0]).toBe(mfaTotpFactorModule);
 	});
 
-	it("requires what the requirement is bound to, and reads the audit sink — its absence declared — and the logger", () => {
+	it("requires what the requirement is bound to and not the configuration, and reads the audit sink — its absence declared — and the logger", () => {
 		const module = mfaModule();
 		expect([...(module.requires ?? [])].sort()).toEqual(
 			[
-				"config",
 				"deploymentMode",
 				"mfaFactorResolver",
 				"mfaFactorStore",
