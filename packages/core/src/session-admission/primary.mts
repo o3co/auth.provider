@@ -90,8 +90,9 @@ class NotPlainData extends Error {}
  * `value` copied as plain data — a primitive; an array; or an object whose
  * prototype is `Object.prototype` or `null` — frozen at every depth and
  * sharing nothing with it. Every own property must be an enumerable data
- * property under a string key, read once from its descriptor, so no getter
- * runs; anything else throws `NotPlainData`. `copies` keeps a shared or
+ * property under a string key, read once from its descriptor, so no accessor
+ * of the object runs (a Proxy's traps are read once); anything else throws
+ * `NotPlainData`. `copies` keeps a shared or
  * cyclic reference one copy.
  */
 function plainCopy(value: unknown, copies: Map<object, unknown>): unknown {
