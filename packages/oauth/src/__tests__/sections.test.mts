@@ -40,7 +40,7 @@ import {
 import { makeValidAppConfig, packageReferenceProblems } from "@o3co/auth-provider-core/testing";
 import { parseFile } from "@o3co/ts.hocon";
 import { describe, expect, it } from "vitest";
-import { oauthModule } from "#/module.mjs";
+import { oauthModule, oauthSectionSchema } from "#/module.mjs";
 import { oauthAuthorizationModule } from "#/oauthAuthorization.mjs";
 import { oauthSessionModule } from "#/oauthSession.mjs";
 import { capturing, type GrantSwitches, withGrants } from "./_helpers/sections.mjs";
@@ -226,6 +226,23 @@ describe("the paths the settings moved from, on the manifests", () => {
 			OAUTH_GRANTS_JWT_BEARER_ENABLED:
 				"oauth.grants.urn:ietf:params:oauth:grant-type:jwt-bearer.enabled",
 		});
+	});
+});
+
+describe("the oauth module's section, as an environment variable carries it", () => {
+	it.each([
+		[
+			"a comma-separated string, entries trimmed and empties dropped",
+			" a.example, .b.example ,",
+			["a.example", ".b.example"],
+		],
+		["an exported-but-empty variable, as no entries", "", []],
+		["a list written in configuration, as written", ["a.example"], ["a.example"]],
+	] as const)("reads clientIdMetadataDocuments.allowedHosts from %s", (_what, written, read) => {
+		const parsed = oauthSectionSchema.parse({
+			clientIdMetadataDocuments: { enabled: "true", allowedHosts: written },
+		});
+		expect(parsed.clientIdMetadataDocuments?.allowedHosts).toEqual(read);
 	});
 });
 
