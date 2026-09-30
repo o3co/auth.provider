@@ -55,6 +55,10 @@ import {
 	sessionStoreModuleFor,
 } from "@o3co/auth-provider-session";
 import {
+	standardDevelopmentMailSenderModule,
+	standardSmtpMailSenderModule,
+} from "@o3co/auth-provider-standard";
+import {
 	auditSinkModule,
 	corsModule,
 	googleFederationConfigModule,
@@ -82,7 +86,9 @@ export interface BuildModulesOverrides {
 	 * store's `allow-plaintext` guard reads the environment the config came
 	 * from, not `NODE_ENV` alone. Omitted, the guard falls back to `NODE_ENV`
 	 * (and the `deploymentMode` slot core fills from `core.deployment.mode`, which it
-	 * reads either way).
+	 * reads either way). It also chooses the mail sender: `development`
+	 * installs the one that logs each code, any other name the SMTP one, and
+	 * none is installed when it is omitted.
 	 */
 	readonly environment?: string;
 	/**
@@ -317,6 +323,16 @@ export function buildModules(config: AppConfig, overrides: BuildModulesOverrides
 			? [redisFederationGrantIntentStoreModule]
 			: [memoryFederationGrantIntentStoreModule];
 
+	// The mail sender behind core's `mailSender` slot. The development one logs
+	// each code and refuses the boot where the configuration or NODE_ENV is
+	// production or staging, or the deployment multi-replica.
+	const mailSenderModules: Module[] =
+		overrides.environment === undefined
+			? []
+			: overrides.environment === "development"
+				? [standardDevelopmentMailSenderModule({ environment: overrides.environment })]
+				: [standardSmtpMailSenderModule];
+
 	return [
 		// MUST stay first: it declares no `before`/`after`, so this position is
 		// what mounts express-session ahead of every session-consuming module.
@@ -351,6 +367,7 @@ export function buildModules(config: AppConfig, overrides: BuildModulesOverrides
 		// Which sink is a config question (`audit.sink.type`); whether there is
 		// one is not.
 		overrides.auditSinkModule ?? auditSinkModule,
+		...mailSenderModules,
 		...(usingRedisAnywhere ? [standaloneRedisClientsModule] : []),
 		...federationTokenStoreModules,
 		...federationGrantStoreModules,

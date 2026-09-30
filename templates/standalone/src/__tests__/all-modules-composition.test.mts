@@ -191,6 +191,7 @@ const ALL_ON_MODULES = [
 	"key-store",
 	"test:repositories",
 	"audit-sink",
+	"standard-smtp-mail-sender",
 	"standalone-in-memory-federation-token-store",
 	"core-federation-grant-store-memory",
 	"core-federation-grant-intent-store-memory",

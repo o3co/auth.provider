@@ -18,8 +18,9 @@
  * The mail sender the template installs behind core's `mailSender` slot,
  * both from `@o3co/auth-provider-standard`: the development sender where the
  * configuration was selected as development — the name `app.mts` defaults
- * to — and the SMTP sender's module anywhere else. Nothing in the template
- * reads the slot: this is the wiring alone.
+ * to — the SMTP sender's module under any other name, and none when
+ * `buildModules` is told no name. Nothing in the template reads the slot:
+ * this is the wiring alone.
  */
 
 import type { MailSender } from "@o3co/auth-provider-core";
@@ -52,9 +53,9 @@ describe("the template's mail sender", () => {
 		current = undefined;
 	});
 
-	it("is the development sender in development, and where no environment is named, as app.mts defaults it", () => {
+	it("is the development sender in development, and none where no environment is named", () => {
 		expect(senders("development")).toEqual([DEVELOPMENT]);
-		expect(senders(undefined)).toEqual([DEVELOPMENT]);
+		expect(senders(undefined)).toEqual([]);
 	});
 
 	it("is the SMTP sender's module under any other environment", () => {
