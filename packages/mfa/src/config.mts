@@ -29,9 +29,11 @@
 
 import { createHmac } from "node:crypto";
 import {
+	checkDeploymentMode,
 	checkMfaLockoutPolicy,
 	checkSealingKeyRing,
 	coerceBooleanFromEnv,
+	type DeploymentMode,
 	decodeSealingKey,
 	type MfaLockoutPolicy,
 	SEALING_KEY_BYTES,
@@ -48,7 +50,7 @@ import { MFA_TRANSACTION_TTL_SECONDS } from "./transactions.mjs";
  * configuration may carry in place of `MFA_ENCRYPTION_KEY`. Everyone
  * holds it, so data sealed under it is sealed from nobody: the settings
  * refuse it wherever the configuration was selected as production or
- * staging, `NODE_ENV` is either, or `deployment.mode` is `"multi"`.
+ * staging, `NODE_ENV` is either, or the deployment mode is `"multi"`.
  */
 export const MFA_DEVELOPMENT_SAMPLE_KEY = "bzNjbzptZmE6ZGV2ZWxvcG1lbnQtc2FtcGxlLWtleSE=";
 
@@ -210,7 +212,7 @@ export interface MfaSettings {
 	readonly lockout: MfaLockoutPolicy;
 }
 
-/** What a composition root tells the settings that its configuration cannot. */
+/** What the settings read beside the configuration. */
 export interface MfaSettingsOptions {
 	/**
 	 * The name the deployment selected its configuration by — the standalone
@@ -218,6 +220,13 @@ export interface MfaSettingsOptions {
 	 * consulted, by the sample-key refusal.
 	 */
 	readonly environment?: string;
+	/**
+	 * The replica count, as core's `deploymentMode` slot holds it — the MFA
+	 * module passes the slot's value. `multi` refuses the sample key; the
+	 * configuration's own `deployment` is not read. Anything but the three
+	 * values, absence included, is a TypeError.
+	 */
+	readonly deploymentMode: DeploymentMode;
 }
 
 const RING = "mfa.encryptionKeys";
@@ -226,7 +235,6 @@ const PRODUCTION_ENVIRONMENTS: ReadonlySet<string> = new Set(["production", "sta
 interface ConfigShape {
 	readonly mfa?: unknown;
 	readonly oauth?: { readonly jwt?: { readonly issuer?: unknown } };
-	readonly deployment?: { readonly mode?: unknown };
 }
 
 /** `path` under `prefix`, an array index in brackets. */
@@ -308,15 +316,11 @@ export function readMfaTotpSettings(
 /**
  * The sample key's refusal: the environment the configuration
  * was selected by, or `NODE_ENV`, is production or staging, or
- * `deployment.mode` is `"multi"`. Every key opens, so it is refused wherever
- * it sits in the ring. Answers whether the ring carries it — accepted, when
- * this did not refuse it.
+ * `options.deploymentMode` is `"multi"`. Every key opens, so it is refused
+ * wherever it sits in the ring. Answers whether the ring carries it —
+ * accepted, when this did not refuse it.
  */
-function refuseSampleKey(
-	ring: SealingKeyRing,
-	config: ConfigShape,
-	options: MfaSettingsOptions,
-): boolean {
+function refuseSampleKey(ring: SealingKeyRing, options: MfaSettingsOptions): boolean {
 	const sample = decodeSealingKey(MFA_DEVELOPMENT_SAMPLE_KEY);
 	const index = ring.findIndex((entry) => sample !== undefined && entry.key.equals(sample));
 	if (index === -1) return false;
@@ -330,7 +334,7 @@ function refuseSampleKey(
 	if (productionEnvironment !== undefined) {
 		reasons.push(`the environment is "${productionEnvironment}"`);
 	}
-	if (config.deployment?.mode === "multi") {
+	if (options.deploymentMode === "multi") {
 		reasons.push(
 			'deployment.mode is "multi" (a multi-replica deployment is never a development box)',
 		);
@@ -361,7 +365,6 @@ const keyFingerprint = (key: Buffer): string =>
  */
 function readKeyRing(
 	entries: z.infer<typeof mfaConfigSchema>["encryptionKeys"],
-	config: ConfigShape,
 	options: MfaSettingsOptions,
 ): { readonly ring: SealingKeyRing; readonly developmentSampleKeyAccepted: boolean } {
 	if (entries.length === 0) {
@@ -385,7 +388,7 @@ function readKeyRing(
 	});
 	checkSealingKeyRing(ring, RING);
 	refuseRepeatedKey(ring);
-	return { ring, developmentSampleKeyAccepted: refuseSampleKey(ring, config, options) };
+	return { ring, developmentSampleKeyAccepted: refuseSampleKey(ring, options) };
 }
 
 /**
@@ -413,17 +416,15 @@ function refuseRepeatedKey(ring: SealingKeyRing): void {
  * and the subject lock — held to core's `checkMfaLockoutPolicy` under
  * `mfa.lockout`. No factor's section: the TOTP factor's is
  * {@link readMfaTotpSettings}'s. `options.environment` is the
- * name the composition root selected its configuration by. A refusal
+ * name the composition root selected its configuration by, and
+ * `options.deploymentMode` the `deploymentMode` slot's value. A refusal
  * is a `RangeError` that names the key and quotes no key material.
  */
-export function readMfaSettings(config: unknown, options: MfaSettingsOptions = {}): MfaSettings {
+export function readMfaSettings(config: unknown, options: MfaSettingsOptions): MfaSettings {
+	checkDeploymentMode(options.deploymentMode, "mfa settings: deploymentMode");
 	const shape = (config ?? {}) as ConfigShape;
 	const section = parseSection(mfaModuleSettingsSchema, shape.mfa, "mfa");
-	const { ring, developmentSampleKeyAccepted } = readKeyRing(
-		section.encryptionKeys,
-		shape,
-		options,
-	);
+	const { ring, developmentSampleKeyAccepted } = readKeyRing(section.encryptionKeys, options);
 	checkMfaLockoutPolicy(section.lockout, "mfa.lockout");
 	return {
 		encryptionKeys: ring,

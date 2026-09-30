@@ -12,6 +12,7 @@ import {
 	type AppConfig,
 	BootError,
 	type BuilderContext,
+	checkDeploymentMode,
 	consoleLogger,
 	defineModule,
 	fullSectionsSchema,
@@ -54,10 +55,15 @@ const storageTypeOf = (config: SessionStoreModuleConfig | undefined): unknown =>
 	config?.session?.storage?.type;
 
 function buildSessionStoreModule(replicaSafety: ReplicaSafetyDeclaration | undefined) {
-	return defineModule<"config", "lifecycleRegistrar" | "readinessRegistrar" | "logger">({
+	return defineModule<
+		"config" | "deploymentMode",
+		"lifecycleRegistrar" | "readinessRegistrar" | "logger"
+	>({
 		name: MODULE_NAME,
 		configSchema: sessionStoreConfigSchema,
-		requires: ["config"],
+		// `deploymentMode`: memory storage is refused under `multi`, so a mode
+		// read as absent must not lift that.
+		requires: ["config", "deploymentMode"],
 		// `logger` is optional: the redis client's error handler, and the
 		// middleware's report of a store that cannot load or save a session,
 		// fall back to consoleLogger when the composition wires no logger slot.
@@ -80,6 +86,10 @@ function buildSessionStoreModule(replicaSafety: ReplicaSafetyDeclaration | undef
 			routes: [
 				async (deps) => {
 					const config = deps.config as AppConfig;
+					const replicas = checkDeploymentMode(
+						deps.deploymentMode,
+						"session-store: deploymentMode",
+					);
 					const ctx: BuilderContext = {
 						lifecycle: deps.lifecycleRegistrar,
 						readiness: deps.readinessRegistrar,
@@ -93,7 +103,7 @@ function buildSessionStoreModule(replicaSafety: ReplicaSafetyDeclaration | undef
 					// nothing: refuse the combination here, with the same reason,
 					// rather than mount a per-process store. With
 					// `sessionStoreModuleFor(config)` the guard refused before this.
-					if (storageSlice.type === "memory" && config.deployment?.mode === "multi") {
+					if (storageSlice.type === "memory" && replicas === "multi") {
 						throw new BootError({
 							stage: "applyContributions",
 							reason: "replica-unsafe-adapter",
@@ -173,9 +183,9 @@ export function sessionStoreModuleFor(config: SessionStoreModuleConfig) {
  * module in `buildModules(config)` (README, "Browser session store").
  *
  * It does not know the storage type, so it declares no `replicaSafety` and the
- * stage-1 guard cannot name it. The route factory still refuses `memory` under
- * `deployment.mode = "multi"`, but a composition root that has its config
- * should use {@link sessionStoreModuleFor} and get the refusal at stage 1,
- * listed with the other offenders.
+ * stage-1 guard cannot name it. The route factory still refuses `memory` when
+ * the `deploymentMode` slot is `multi`, but a composition root that has its
+ * config should use {@link sessionStoreModuleFor} and get the refusal at stage
+ * 1, listed with the other offenders.
  */
 export const sessionStoreModule = buildSessionStoreModule(undefined);

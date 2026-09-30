@@ -213,6 +213,7 @@ async function boot(logger: SpyLogger): Promise<express.Express> {
 							authenticateByToken: vi.fn(async () => alice),
 						} as unknown as UserRepository,
 						config: config as never,
+						deploymentMode: "single",
 						logger: logger as unknown as Logger,
 					}),
 				}),
