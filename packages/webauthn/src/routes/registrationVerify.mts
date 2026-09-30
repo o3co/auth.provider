@@ -220,9 +220,7 @@ export function createRegistrationVerifyHandler(deps: RegistrationVerifyDeps): R
 			expectedChallenge: challengeValue,
 			expectedRpId: deps.config.rpId,
 			expectedOrigins: deps.config.origin,
-			...(deps.config.topOrigin === undefined
-				? {}
-				: { expectedTopOrigins: deps.config.topOrigin }),
+			...(deps.config.topOrigin === undefined ? {} : { expectedTopOrigins: deps.config.topOrigin }),
 			userVerification: deps.config.userVerification,
 		});
 
