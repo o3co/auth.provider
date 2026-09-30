@@ -55,6 +55,16 @@ describe("IntrospectResponse typed shape", () => {
 		expect(r.token_type).toBe("Bearer");
 	});
 
+	it("active response with the authentication event, RFC 9470 §6.2's acr and auth_time", () => {
+		const r: IntrospectResponse = {
+			active: true,
+			acr: "urn:example:mfa",
+			auth_time: 1776729600,
+		};
+		expect(r.acr).toBe("urn:example:mfa");
+		expect(r.auth_time).toBe(1776729600);
+	});
+
 	it("inactive response omits everything except active=false", () => {
 		const r: IntrospectResponse = { active: false };
 		expect(r.active).toBe(false);
