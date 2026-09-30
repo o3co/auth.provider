@@ -61,6 +61,9 @@ interface VocabularyRow {
 	readonly homeMatches?: number;
 }
 
+/** The one reading of `deployment.mode`; every other module requires the `deploymentMode` slot. */
+const DEPLOYMENT_MODE_HOME = "packages/core/src/deployment/mode.mts";
+
 // One row per symbol, so the home has to define each of them: an
 // alternation would pass a home that kept one and lost the others. Two rows
 // still match one concept in two forms, and each pins the form the home must
@@ -451,6 +454,11 @@ const VOCABULARY: readonly VocabularyRow[] = [
 		home: "packages/core/src/mfa/transactionStore.mts",
 		definition: /(?:function|const)\s+getBoundMfaTransaction\b/,
 	},
+	{
+		concept: "deployment.mode as core reads it — the deploymentMode slot's value",
+		home: DEPLOYMENT_MODE_HOME,
+		definition: /(?:function|const)\s+deploymentModeOf\b/,
+	},
 ];
 
 /** Every shipped source file across the workspace: packages/*\/src\/**\/*.mts, tests excluded. */
@@ -506,6 +514,20 @@ const policyEvaluateCalls = (source: string): number =>
 			.replace(/\/\*[\s\S]*?\*\//g, "")
 			.replace(/(^|[^:])\/\/.*$/gm, "$1")
 			.match(/grantPolicy[\s\S]{0,40}?\.evaluate\s*\(/g) ?? []
+	).length;
+
+/**
+ * Reads of `deployment.mode` off a configuration in `source` — a member
+ * access, `config.deployment?.mode` or `.deployment.mode` — comments removed so
+ * a mention is not a read. A message that names the key (`'deployment.mode is
+ * "multi"'`) is not a member access and does not count.
+ */
+const deploymentModeReads = (source: string): number =>
+	(
+		source
+			.replace(/\/\*[\s\S]*?\*\//g, "")
+			.replace(/(^|[^:])\/\/.*$/gm, "$1")
+			.match(/[.?]\s*deployment\s*\??\.\s*mode\b/g) ?? []
 	).length;
 
 /** Session admission's home: the acr selection is its own step, over the input `requirementSession` builds. */
@@ -1659,6 +1681,25 @@ describe("design-vocabulary map (docs/design-vocabulary.md)", () => {
 		expect(found, "call evaluateGrantPolicy from core/src/grants/grantPolicy.mts").toEqual(
 			expected,
 		);
+	});
+
+	it("reads a member access of deployment.mode as a read, and neither a mention nor a message", () => {
+		expect(deploymentModeReads("const m = config.deployment?.mode;")).toBe(1);
+		expect(deploymentModeReads("if (cfg?.deployment.mode === 'multi') {}")).toBe(1);
+		expect(deploymentModeReads("x.deployment ?. mode")).toBe(1);
+		expect(deploymentModeReads("// config.deployment?.mode\n/* x.deployment.mode */")).toBe(0);
+		expect(deploymentModeReads("throw new Error('deployment.mode is \"multi\"');")).toBe(0);
+		expect(deploymentModeReads('const m = `set deployment.mode = "single"`;')).toBe(0);
+	});
+
+	it("reads deployment.mode off a configuration only in its home: every other module requires the deploymentMode slot", () => {
+		const home = join(repoRoot, DEPLOYMENT_MODE_HOME);
+		expect(deploymentModeReads(readFileSync(home, "utf8"))).toBe(1);
+		const offenders = listShippedSources()
+			.filter((file) => file !== home)
+			.filter((file) => deploymentModeReads(readFileSync(file, "utf8")) > 0)
+			.map((file) => relative(repoRoot, file).split(sep).join("/"));
+		expect(offenders, `require the deploymentMode slot (${DEPLOYMENT_MODE_HOME})`).toEqual([]);
 	});
 
 	const sources = listShippedSources();
