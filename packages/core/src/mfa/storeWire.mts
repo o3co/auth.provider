@@ -21,14 +21,25 @@
  * `@o3co/auth-provider-foundation`'s README, "The Store's MFA endpoints".
  *
  * Guarantees: times are epoch milliseconds named `…Ms`; an optional field
- * with no value is left out, and `null` is never read as "unset"; what a
- * writer makes, the reader reads back whole, and what the reader refuses,
- * the writer refuses with a `RangeError`; an update carries the expected
- * version and `data`, `label` and `lastUsedAtMs`, nothing else of the record.
+ * with no value is left out, and `null` is never read as "unset"; the fields
+ * a page shows are read only in the record's shape (`isMfaFactorId`,
+ * `isMfaFactorKind`, `isMfaFactorLabel`), anything else being a record the
+ * provider cannot read; a list is read whole, refused for one unreadable
+ * record, one of another subject or a repeated id; what a writer makes, the
+ * reader reads back whole, and what the reader refuses, the writer refuses
+ * with a `RangeError`; an update names the record by `subject` and `id` and
+ * carries the expected version and, as its changes, only `data`, `label` and
+ * `lastUsedAtMs`.
  */
 
 import { isStorableExpiry } from "../adapters/expiry.mjs";
-import type { MfaFactorRecord, MfaFactorRecordUpdate } from "./factorStore.mjs";
+import {
+	isMfaFactorId,
+	isMfaFactorKind,
+	isMfaFactorLabel,
+	type MfaFactorRecord,
+	type MfaFactorRecordUpdate,
+} from "./factorStore.mjs";
 import { checkMfaVersionAdvances } from "./version.mjs";
 
 /** What authorized a binding, as a record carries it. */
@@ -36,10 +47,12 @@ export type MfaStoreFactorBinding = NonNullable<MfaFactorRecord["binding"]>;
 
 /** A factor record on the wire: {@link MfaFactorRecord} with its dates as epoch milliseconds. */
 export interface MfaStoreFactor {
+	/** 22 base64url characters (`isMfaFactorId`). */
 	readonly id: string;
 	readonly subject: string;
+	/** A hint token (`isMfaFactorKind`). */
 	readonly kind: string;
-	/** Left out when the factor has none. */
+	/** 1 to 64 printable characters (`isMfaFactorLabel`); left out when the factor has none. */
 	readonly label?: string;
 	/** Left out when none was recorded. */
 	readonly binding?: MfaStoreFactorBinding;
@@ -104,7 +117,12 @@ export interface MfaStoreMarkEnrolledRequest {
 	readonly enrolled: boolean;
 }
 
-const BINDINGS: ReadonlySet<unknown> = new Set(["password", "email_proof", "mfa"]);
+const BINDING_NAMES = {
+	password: true,
+	email_proof: true,
+	mfa: true,
+} as const satisfies Record<MfaStoreFactorBinding, true>;
+const BINDINGS: ReadonlySet<unknown> = new Set(Object.keys(BINDING_NAMES));
 const CHANGE_KEYS: ReadonlySet<string> = new Set(["data", "label", "lastUsedAtMs"]);
 
 const refuse = (what: string): RangeError => new RangeError(`MfaStoreFactor: ${what}`);
@@ -134,17 +152,30 @@ function checkString(value: unknown, field: string): string {
 	return value;
 }
 
+function checkId(value: unknown): string {
+	if (!isMfaFactorId(value)) throw refuse("id must be 22 base64url characters");
+	return value;
+}
+
+function checkLabel(value: unknown): string {
+	if (!isMfaFactorLabel(value)) {
+		throw refuse("label must be 1 to 64 printable characters on one line");
+	}
+	return value;
+}
+
 /** A record as the wire carries it; a `RangeError` for one {@link readMfaStoreFactor} would not read back. */
 export function toMfaStoreFactor(record: MfaFactorRecord): MfaStoreFactor {
 	if (record.binding !== undefined && !BINDINGS.has(record.binding)) {
 		throw refuse('binding must be "password", "email_proof", "mfa" or absent');
 	}
 	if (!isVersion(record.version)) throw refuse("version must be a safe non-negative integer");
+	if (!isMfaFactorKind(record.kind)) throw refuse("kind must be a hint token");
 	return {
-		id: checkString(record.id, "id"),
+		id: checkId(record.id),
 		subject: checkString(record.subject, "subject"),
-		kind: checkString(record.kind, "kind"),
-		...(record.label !== undefined ? { label: checkString(record.label, "label") } : {}),
+		kind: record.kind,
+		...(record.label !== undefined ? { label: checkLabel(record.label) } : {}),
 		...(record.binding !== undefined ? { binding: record.binding } : {}),
 		createdAtMs: instantOf(record.createdAt, "createdAt"),
 		...(record.lastUsedAt !== undefined
@@ -158,8 +189,9 @@ export function toMfaStoreFactor(record: MfaFactorRecord): MfaStoreFactor {
 /**
  * `value` as a wire record, when it is one: a fresh object of the record's
  * own fields, any other field left behind. `undefined` for anything else — a
- * field missing, of the wrong type, out of range, or `null` — which the
- * provider holds to be a record it cannot read, never an absent one.
+ * field missing, of the wrong type, out of range, out of the record's shape,
+ * or `null` — which the provider holds to be a record it cannot read, never
+ * an absent one.
  */
 export function readMfaStoreFactor(value: unknown): MfaStoreFactor | undefined {
 	if (!isRecord(value)) return undefined;
@@ -172,10 +204,10 @@ export function readMfaStoreFactor(value: unknown): MfaStoreFactor | undefined {
 	const lastUsedAtMs = own(value, "lastUsedAtMs");
 	const version = own(value, "version");
 	const data = own(value, "data");
-	if (typeof id !== "string" || typeof subject !== "string" || typeof kind !== "string") {
+	if (!isMfaFactorId(id) || typeof subject !== "string" || !isMfaFactorKind(kind)) {
 		return undefined;
 	}
-	if (Object.hasOwn(value, "label") && typeof label !== "string") return undefined;
+	if (Object.hasOwn(value, "label") && !isMfaFactorLabel(label)) return undefined;
 	if (Object.hasOwn(value, "binding") && !BINDINGS.has(binding)) return undefined;
 	if (!isInstant(createdAtMs)) return undefined;
 	if (Object.hasOwn(value, "lastUsedAtMs") && !isInstant(lastUsedAtMs)) return undefined;
@@ -184,13 +216,43 @@ export function readMfaStoreFactor(value: unknown): MfaStoreFactor | undefined {
 		id,
 		subject,
 		kind,
-		...(typeof label === "string" ? { label } : {}),
+		...(label !== undefined ? { label: label as string } : {}),
 		...(binding !== undefined ? { binding: binding as MfaStoreFactorBinding } : {}),
 		createdAtMs,
 		...(lastUsedAtMs !== undefined ? { lastUsedAtMs: lastUsedAtMs as number } : {}),
 		version,
 		data,
 	};
+}
+
+/** What {@link readMfaStoreListAnswer} makes of a list's answer. */
+export type MfaStoreListReading =
+	| { readonly ok: true; readonly factors: readonly MfaStoreFactor[] }
+	/**
+	 * `malformed`: not `{ factors: [...] }`. `unreadable`: a record the
+	 * provider cannot read, one naming another subject, or two with one id.
+	 */
+	| { readonly ok: false; readonly reason: "malformed" | "unreadable" };
+
+/**
+ * A list's answer for `subject`, read whole: every record read by
+ * {@link readMfaStoreFactor}, each naming `subject`, no id twice. One that
+ * fails refuses the whole list, never reads as fewer records.
+ */
+export function readMfaStoreListAnswer(value: unknown, subject: string): MfaStoreListReading {
+	const factors = isRecord(value) ? own(value, "factors") : undefined;
+	if (!Array.isArray(factors)) return { ok: false, reason: "malformed" };
+	const read: MfaStoreFactor[] = [];
+	const ids = new Set<string>();
+	for (const entry of factors) {
+		const factor = readMfaStoreFactor(entry);
+		if (factor === undefined || factor.subject !== subject || ids.has(factor.id)) {
+			return { ok: false, reason: "unreadable" };
+		}
+		ids.add(factor.id);
+		read.push(factor);
+	}
+	return { ok: true, factors: read };
 }
 
 /** A wire record {@link readMfaStoreFactor} answered, as the port's record. */
@@ -216,7 +278,7 @@ export function fromMfaStoreFactor(factor: MfaStoreFactor): MfaFactorRecord {
 export function toMfaStoreFactorChanges(next: MfaFactorRecordUpdate): MfaStoreFactorChanges {
 	return {
 		data: checkString(next.data, "data"),
-		...(next.label !== undefined ? { label: checkString(next.label, "label") } : {}),
+		...(next.label !== undefined ? { label: checkLabel(next.label) } : {}),
 		...(next.lastUsedAt !== undefined
 			? { lastUsedAtMs: instantOf(next.lastUsedAt, "lastUsedAt") }
 			: {}),
@@ -236,11 +298,11 @@ export function readMfaStoreFactorChanges(value: unknown): MfaStoreFactorChanges
 	const label = own(value, "label");
 	const lastUsedAtMs = own(value, "lastUsedAtMs");
 	if (typeof data !== "string") return undefined;
-	if (Object.hasOwn(value, "label") && typeof label !== "string") return undefined;
+	if (Object.hasOwn(value, "label") && !isMfaFactorLabel(label)) return undefined;
 	if (Object.hasOwn(value, "lastUsedAtMs") && !isInstant(lastUsedAtMs)) return undefined;
 	return {
 		data,
-		...(typeof label === "string" ? { label } : {}),
+		...(label !== undefined ? { label: label as string } : {}),
 		...(lastUsedAtMs !== undefined ? { lastUsedAtMs: lastUsedAtMs as number } : {}),
 	};
 }
@@ -248,8 +310,8 @@ export function readMfaStoreFactorChanges(value: unknown): MfaStoreFactorChanges
 /**
  * The body of an update of `(subject, id)` at `expectedVersion`. A
  * `RangeError` for an `expectedVersion` that is no version, or at
- * `Number.MAX_SAFE_INTEGER` (`checkMfaVersionAdvances`), and for changes
- * {@link toMfaStoreFactorChanges} refuses.
+ * `Number.MAX_SAFE_INTEGER` (`checkMfaVersionAdvances`), for an id no record
+ * can have, and for changes {@link toMfaStoreFactorChanges} refuses.
  */
 export function toMfaStoreUpdateRequest(
 	subject: string,
@@ -263,7 +325,7 @@ export function toMfaStoreUpdateRequest(
 	}
 	return {
 		subject: checkString(subject, "subject"),
-		id: checkString(id, "id"),
+		id: checkId(id),
 		expectedVersion,
 		changes: toMfaStoreFactorChanges(next),
 	};

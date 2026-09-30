@@ -563,11 +563,15 @@ export type {
 	MfaVerification,
 	MfaVerifyContext,
 } from "./mfa/factor.mjs";
-export type {
-	MfaFactorRecord,
-	MfaFactorRecordUpdate,
-	MfaFactorStore,
-	MfaFactorStoreFactory,
+export {
+	isMfaFactorId,
+	isMfaFactorKind,
+	isMfaFactorLabel,
+	MFA_FACTOR_LABEL_MAX_LENGTH,
+	type MfaFactorRecord,
+	type MfaFactorRecordUpdate,
+	type MfaFactorStore,
+	type MfaFactorStoreFactory,
 } from "./mfa/factorStore.mjs";
 export {
 	createMfaFactorStoreFactory,
@@ -598,12 +602,14 @@ export {
 	type MfaStoreFactorBinding,
 	type MfaStoreFactorChanges,
 	type MfaStoreListAnswer,
+	type MfaStoreListReading,
 	type MfaStoreListRequest,
 	type MfaStoreMarkEnrolledRequest,
 	type MfaStoreUpdateAnswer,
 	type MfaStoreUpdateRequest,
 	readMfaStoreFactor,
 	readMfaStoreFactorChanges,
+	readMfaStoreListAnswer,
 	toMfaStoreFactor,
 	toMfaStoreFactorChanges,
 	toMfaStoreUpdateRequest,
