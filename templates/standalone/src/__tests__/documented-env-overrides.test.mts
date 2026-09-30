@@ -245,7 +245,6 @@ const DOCUMENTED_ENV: Readonly<Record<string, string>> = {
 	// --- endpoints ----------------------------------------------------
 	ENDPOINTS_LOGIN_URL: "/login",
 	ENDPOINTS_CONSENT_URL: "/consent",
-	ENDPOINTS_MFA_URL: "/account/mfa",
 
 	// --- cors ---------------------------------------------------------
 	// A list, in the only shape an environment variable can carry one.
@@ -457,7 +456,7 @@ describe("the shipped config boots with every documented override supplied as a 
 		// boot, by the template, and handed to no module here.
 		expect(readMfaMode(readShippedSwitches(DOCUMENTED_ENV))).toBe("off");
 		expect(config).not.toHaveProperty("mfa");
-		expect(config.endpoints.mfa?.url).toBe("/account/mfa");
+		expect(config.endpoints).not.toHaveProperty("mfa");
 		expect(config.mfaFactorStore?.adapter).toBe("redis");
 		expect(config.mfaTransactionStore?.adapter).toBe("redis");
 		expect(config.redisMfaFactorStore?.keyPrefix).toBe("tenant-a:mfaf:");

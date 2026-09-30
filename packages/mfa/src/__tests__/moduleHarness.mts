@@ -114,6 +114,7 @@ export const LOCKOUT = {
 /** The `mfa` section as the package's reference.conf resolves it, under `mode`, with this suite's key. */
 export const mfaSection = (mode: "off" | "optional" | "required") => ({
 	mode,
+	page: { url: "/mfa" },
 	encryptionKeys: [{ key: MFA_KEY }],
 	transactionTtlSeconds: 600,
 	maxAttemptsPerTransaction: 5,
@@ -135,22 +136,21 @@ export const TOTP_SECTION = {
 
 /**
  * What a composition layering the package's reference.conf and core's
- * captures of the TOTP factor's renamed variables and core's own under an
+ * captures of the MFA modules' renamed variables and core's own, under an
  * environment that sets none.
  */
 export const UNSET_RENAMED_VARIABLES = renamedVariableCaptures({
-	modules: [mfaTotpFactorModule],
+	modules: [mfaTotpFactorModule, mfaModule()],
 	core: CORE_RELOCATIONS,
 	env: {},
 });
 
 /**
  * The composition's configuration: core's valid fixture, a login over plain
- * HTTP (no `Secure` cookie), `endpoints.mfa.url` as core's reference.conf
- * ships it, `mfa` declared expected, the `mfa` section under `mode`, and the
- * TOTP factor's `mfa-totp-factor` section, each with the keys given laid
- * over it, the recovery-code factor's section as its defaults, and the
- * captures of the TOTP factor's renamed variables, all unset.
+ * HTTP (no `Secure` cookie), `mfa` declared expected, the `mfa` section under
+ * `mode`, and the TOTP factor's `mfa-totp-factor` section, each with the keys
+ * given laid over it, the recovery-code factor's section as its defaults, and
+ * the captures of the renamed variables, all unset.
  */
 export function configFor(
 	mode: "off" | "optional" | "required",
@@ -167,7 +167,6 @@ export function configFor(
 			secure: false,
 			redirectAllowlist: ["https://app.example/after"],
 		},
-		endpoints: { ...base.endpoints, mfa: { url: "/mfa" } },
 		core: { sessionRequirements: { expected: ["mfa"] } },
 		mfa: { ...mfaSection(mode), ...mfa },
 		"mfa-totp-factor": { ...TOTP_SECTION, ...totp },

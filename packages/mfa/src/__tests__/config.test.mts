@@ -170,18 +170,35 @@ describe("the MFA settings this package reads", () => {
 		expect(refusal(() => readTotp(undefined))).toMatch(/^mfa-totp-factor /);
 	});
 
-	it("exports the schema of the mfa section it reads: its mode, the ring, the transaction's keys, the lock and recent MFA's window — no factor's", () => {
+	it("exports the schema of the mfa section it reads: its mode, the page, the ring, the transaction's keys, the lock and recent MFA's window — no factor's", () => {
 		expect(Object.keys(mfaConfigSchema.shape).sort()).toEqual([
 			"encryptionKeys",
 			"lockout",
 			"manage",
 			"maxAttemptsPerTransaction",
 			"mode",
+			"page",
 			"transactionTtlSeconds",
 		]);
 		expect(mfaConfigSchema.safeParse(valid().mfa).success).toBe(true);
 		expect(mfaConfigSchema.safeParse({ ...valid().mfa, mode: "sometimes" }).success).toBe(false);
 		expect(mfaConfigSchema.safeParse({}).success).toBe(false);
+	});
+
+	it("holds the page, when given, to a section with a string url; whether it is set is the module's to refuse", () => {
+		const withPage = (page: unknown) => mfaConfigSchema.safeParse({ ...valid().mfa, page });
+		expect(withPage({ url: "/mfa" }).success).toBe(true);
+		expect(withPage({ url: "" }).success).toBe(true);
+		for (const [page, path] of [
+			[{ url: 5 }, ["page", "url"]],
+			[{}, ["page", "url"]],
+			["/mfa", ["page"]],
+		] as const) {
+			expect(
+				withPage(page).error?.issues.map((issue) => issue.path),
+				JSON.stringify(page),
+			).toEqual([path]);
+		}
 	});
 });
 

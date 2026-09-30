@@ -181,6 +181,8 @@ Rejected: SMTP on a subpath of `packages/mfa` with an optional peer (it ties a m
 
 As for login and consent, the provider owns `/session/mfa/*` (JSON) and redirects to `endpoints.mfa.url` (default `/mfa`) when `/authorize` needs a step-up. The login page continues from the login response without a redirect (F1). The self-service screen is the deployment's account page. The QR code is rendered by the page from the `otpauth://` URI. The page contract is documented in the MFA package README with a worked example, and requires: same origin as the provider (the session cookie is `__Host-`); navigation back to `redirect_to` only when it is on the provider's origin; code inputs with `autocomplete="one-time-code"` and `inputmode="numeric"`, and long codes accepted pasted with or without hyphens; `frame-ancestors 'none'`; and a lock answer (`429 mfa_locked`) shown with the factors that still work (D21).
 
+Amended 2026-09-30 (#803): the MFA page's URL is `mfa.page.url`, the MFA module's key.
+
 Rejected for the first release (O11): provider-served reference pages, and a server-rendered QR image.
 
 ---
