@@ -31,7 +31,8 @@ export interface RedisSidSortedSetOptions {
 const DEFAULT_PAGE_SIZE = 100;
 
 export interface RedisSidSortedSet {
-	add(sid: string, member: string, expiresAt: Date): Promise<void>;
+	/** Whether it wrote: `false` for an `expiresAt` already past. */
+	add(sid: string, member: string, expiresAt: Date): Promise<boolean>;
 	list(sid: string): Promise<string[]>;
 	remove(sid: string, member: string): Promise<void>;
 	removeBySid(sid: string): Promise<void>;
@@ -88,12 +89,13 @@ export function createRedisSidSortedSet(opts: RedisSidSortedSetOptions): RedisSi
 			if (!Number.isFinite(expiresAtMs)) {
 				throw new RangeError("expiresAt must be a valid date");
 			}
-			if (expiresAtMs <= Date.now()) return;
+			if (expiresAtMs <= Date.now()) return false;
 			const score = ++_insertionCounter;
 			const pipeline = opts.client.multi();
 			pipeline.zAdd(k(sid), { score, value: member }, { NX: true });
 			pipeline.pExpireGT(k(sid), expiresAtMs);
 			await pipeline.exec();
+			return true;
 		},
 		async list(sid) {
 			const all: string[] = [];
