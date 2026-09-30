@@ -123,6 +123,24 @@ export interface CsrfProtection {
 const TOKEN_SHAPE = /^(\d{1,15})\.([A-Za-z0-9_-]{16,})\.([A-Za-z0-9_-]{16,})$/;
 
 /**
+ * How far a token's expiry may lie past the latest one `issue` mints
+ * (now + `ttlSeconds`): the clock skew between the replicas that mint and
+ * check. A well-signed token expiring later was not minted by `issue`, and is
+ * refused, so the signer is no oracle for a token that outlives the policy.
+ */
+const EXPIRY_SKEW_SECONDS = 60;
+
+/** A signature the token can carry: base64url without padding, of a length a cookie holds. */
+const SIGNATURE_SHAPE = /^[A-Za-z0-9_-]{16,512}$/;
+
+/** What the signer is asked to sign when a protection is built over it. */
+const PROBE_PAYLOADS = ["csrf-token-signer.probe.a", "csrf-token-signer.probe.b"] as const;
+
+/** What a refusal of the signer tells the composition to pass instead. */
+const PASS_A_SIGNER =
+	"pass the csrfTokenSigner slot's signer, or createSessionCsrfTokenSigner(secret)";
+
+/**
  * Reject a `ttlSeconds` that would silently disable the token arm.
  *
  * The value is stringified into the token's expiry field. A decimal mints an
@@ -146,14 +164,67 @@ const assertValidTtlSeconds = (ttlSeconds: number): void => {
 };
 
 /**
- * Reject a protection with nothing to sign with. A caller passing a `secret`
- * in its place would otherwise build one that throws on its first mint or
- * check, answering that request with a `500` instead of refusing at boot.
+ * Whether `signature` is the signer's for `payload`: `verify` answering
+ * `true`, and nothing else. A promise, a truthy value that is not `true`, or
+ * a throw is a refusal, so a signer outside the contract cannot pass a forged
+ * token and the check never throws.
+ */
+const verifies = (signer: CsrfTokenSigner, payload: string, signature: string): boolean => {
+	try {
+		return signer.verify(payload, signature) === true;
+	} catch {
+		return false;
+	}
+};
+
+/** `signature` with its first character changed: every bit of it is signature, never padding. */
+const tamperedSignature = (signature: string): string =>
+	`${signature.startsWith("A") ? "B" : "A"}${signature.slice(1)}`;
+
+/**
+ * How `signer` breaks what a token needs of the `csrfTokenSigner` contract,
+ * found by signing two payloads and checking the signatures; `undefined` when
+ * it keeps it.
+ */
+const signerBreach = (signer: CsrfTokenSigner): string | undefined => {
+	const [a, b] = PROBE_PAYLOADS;
+	let signed: readonly unknown[];
+	try {
+		signed = [signer.sign(a), signer.sign(b)];
+	} catch {
+		return "sign threw";
+	}
+	const [forA, forB] = signed;
+	if (typeof forA !== "string" || typeof forB !== "string") {
+		return "sign does not answer a string";
+	}
+	if (!SIGNATURE_SHAPE.test(forA) || !SIGNATURE_SHAPE.test(forB)) {
+		return "sign does not answer base64url without padding, 16 to 512 characters";
+	}
+	if (forA === forB) return "sign answers one signature for two payloads";
+	if (!verifies(signer, a, forA)) return "verify does not answer true for sign's own signature";
+	if (verifies(signer, a, tamperedSignature(forA))) return "verify accepts a changed signature";
+	if (verifies(signer, b, forA)) return "verify accepts another payload's signature";
+	return undefined;
+};
+
+/**
+ * Reject a protection with nothing to sign with, or with a signer that breaks
+ * the contract. A caller passing a `secret` in a signer's place, or a signer
+ * whose `verify` answers a promise, would otherwise build a protection that
+ * fails on its first request — or accepts a forged token — instead of refusing
+ * at boot.
  */
 const assertSigner: (signer: unknown) => asserts signer is CsrfTokenSigner = (signer) => {
 	const candidate = signer as Partial<CsrfTokenSigner> | null | undefined;
 	if (typeof candidate?.sign !== "function" || typeof candidate.verify !== "function") {
-		throw new Error("csrf: signer is required: a CsrfTokenSigner with sign and verify");
+		throw new Error(`csrf: signer is required: ${PASS_A_SIGNER}`);
+	}
+	const breach = signerBreach(candidate as CsrfTokenSigner);
+	if (breach !== undefined) {
+		throw new Error(
+			`csrf: the signer does not keep the csrfTokenSigner contract (${breach}): ${PASS_A_SIGNER}`,
+		);
 	}
 };
 
@@ -178,8 +249,10 @@ export const createCsrfProtection = (options: CsrfProtectionOptions): CsrfProtec
 		const match = TOKEN_SHAPE.exec(token);
 		if (!match) return false;
 		const [, expires, nonce, signature] = match;
-		if (!signer.verify(`${expires}.${nonce}`, signature ?? "")) return false;
-		return Number(expires) * 1000 > now();
+		if (!verifies(signer, `${expires}.${nonce}`, signature ?? "")) return false;
+		const expiresMs = Number(expires) * 1000;
+		const current = now();
+		return expiresMs > current && expiresMs <= current + (ttlSeconds + EXPIRY_SKEW_SECONDS) * 1000;
 	};
 
 	const readSubmitted = (req: Request): string | undefined => {

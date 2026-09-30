@@ -145,6 +145,11 @@ export const createRouter = (
 	},
 ): Router => {
 	checkResolver(requirements, "session routes");
+	if (csrfTokenSigner === undefined) {
+		throw new Error(
+			"session routes: csrfTokenSigner is required: pass the csrfTokenSigner slot's signer, or createSessionCsrfTokenSigner(secret)",
+		);
+	}
 	const router = express.Router();
 
 	/**

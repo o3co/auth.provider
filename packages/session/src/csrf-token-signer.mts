@@ -28,7 +28,7 @@
  */
 
 import { createHmac, hkdfSync } from "node:crypto";
-import type { CsrfTokenSigner } from "@o3co/auth-provider-core";
+import { assertSecretEntropy, type CsrfTokenSigner } from "@o3co/auth-provider-core";
 import { constantTimeEquals } from "./internal/constantTimeEquals.mjs";
 
 /**
@@ -42,8 +42,13 @@ const CSRF_KEY_INFO = "o3co.auth.provider/session-csrf/v1";
  * Neither the secret nor the key is reachable from what it answers: a frozen
  * plain object carrying `sign` and `verify` alone. `verify` compares in
  * constant time and answers `false` for anything that is not a string.
+ *
+ * The secret is held to the floor core's schema holds `session.secret` to
+ * (`assertSecretEntropy`), since a composition without the session store's
+ * module calls this with a secret no schema has read.
  */
 export const createSessionCsrfTokenSigner = (secret: string): CsrfTokenSigner => {
+	assertSecretEntropy(secret, { configKey: "session.secret", envVar: "SESSION_SECRET" });
 	const key = Buffer.from(hkdfSync("sha256", secret, "", CSRF_KEY_INFO, 32));
 	const sign = (payload: string): string =>
 		createHmac("sha256", key).update(payload, "utf8").digest("base64url");
