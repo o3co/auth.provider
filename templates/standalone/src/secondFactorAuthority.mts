@@ -32,7 +32,7 @@ export class MfaRequirementNotAuthorityError extends Error {
 
 	constructor(mode: MfaMode, registered: boolean, options?: ErrorOptions) {
 		super(
-			`mfa.mode is "${mode}", and ${registered ? `the session requirement registered as "${MFA_REQUIREMENT}" does not declare the second-factor authority` : `no session requirement is registered as "${MFA_REQUIREMENT}"`}: no login would be asked for a second factor. Install the MFA package's modules (mfaModules), whose requirement declares it, or set mfa.mode = "off" (MFA_MODE)`,
+			`mfa.mode is "${mode}", and ${registered ? `the session requirement registered as "${MFA_REQUIREMENT}" does not declare the second-factor authority` : `no session requirement is registered as "${MFA_REQUIREMENT}"`}, so the requirement the template expects is not the one that enforces the second factor mfa.mode asks for. Install the MFA package's modules (mfaModules), whose requirement declares it, or set mfa.mode = "off" (MFA_MODE)`,
 			options,
 		);
 		this.name = "MfaRequirementNotAuthorityError";
