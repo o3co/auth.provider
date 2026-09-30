@@ -617,9 +617,117 @@ describe("two transactions of one subject racing the first binding", () => {
 		expect(create).toHaveBeenCalledTimes(bound.length);
 		expect(audit.of("mfa.first_binding_conflict")).toHaveLength(refused.length);
 		for (const event of audit.of("mfa.first_binding_conflict")) {
-			expect(event).toMatchObject({ subject: ALICE.id, details: { kind: "totp" } });
-			expect(Object.keys(event.details ?? {})).toEqual(["kind"]);
+			expect(event).toMatchObject({ subject: ALICE.id });
+			expect(event.details).toEqual({ kind: "totp", removed: true });
 		}
+	});
+
+	/** Two logins of alice, each with a TOTP enrollment begun, whose completions write their factors past each other; `remove` as given. */
+	async function racing(remove: (subject: string, id: string) => Promise<void>) {
+		const memory = createMemoryMfaFactorStore();
+		const arrive = barrier(2);
+		const audit = recordingAuditSink();
+		const booted = await boot({
+			config: configFor("required"),
+			factorStore: {
+				...memory,
+				create: async (record) => {
+					if (record.kind === "totp") await arrive();
+					return memory.create(record);
+				},
+				remove: (subject, id) => remove(subject, id).then(() => memory.remove(subject, id)),
+			},
+			auditSink: audit,
+		});
+		const logins = [await beginFirstBinding(booted.app), await beginFirstBinding(booted.app)];
+		const begun = await Promise.all(
+			logins.map((login) => beginEnrollment(login.agent, login.transaction, "totp")),
+		);
+		const answers = await Promise.all(
+			logins.map((login, index) =>
+				completeEnrollment(login.agent, login.transaction, totpProofOf(begun[index]?.body.secret)),
+			),
+		);
+		return { ...booted, memory, audit, answers };
+	}
+
+	it("tries its own factor's removal three times, and when it still cannot remove it says so: 503, mfa.first_binding_conflict with removed false, and one error line naming the subject and the kind", async () => {
+		let removals = 0;
+		const { answers, audit, logger, memory } = await racing(async () => {
+			removals += 1;
+			throw new Error("factor store unreachable");
+		});
+
+		expect(answers.map((res) => res.status)).toEqual([503, 503]);
+		expect(removals).toBe(6);
+		// Both first factors stand; what an operator sees says so.
+		expect((await memory.list(ALICE.id)).filter((record) => record.kind === "totp")).toHaveLength(
+			2,
+		);
+		expect(audit.of("mfa.first_binding_conflict").map((event) => event.details)).toEqual([
+			{ kind: "totp", removed: false },
+			{ kind: "totp", removed: false },
+		]);
+		const standing = logger.error.mock.calls.filter(
+			(call) => call[1] === "mfa_first_binding_factor_standing",
+		);
+		expect(standing).toHaveLength(2);
+		for (const [line] of standing) {
+			expect(line).toMatchObject({ sub: ALICE.id, kind: "totp", err: { name: "Error" } });
+			expect(Object.keys(line as object).sort()).toEqual(["err", "kind", "sub"]);
+		}
+	});
+
+	it("leaves at most one factor when a removal fails once and then succeeds: removed true", async () => {
+		const failed = new Set<string>();
+		const { answers, audit, memory } = await racing(async (_subject, id) => {
+			if (!failed.has(id)) {
+				failed.add(id);
+				throw new Error("factor store unreachable");
+			}
+		});
+
+		const bound = (await memory.list(ALICE.id)).filter((record) => record.kind === "totp");
+		expect(bound.length).toBeLessThanOrEqual(1);
+		expect(answers.filter((res) => res.status === 200)).toHaveLength(bound.length);
+		for (const event of audit.of("mfa.first_binding_conflict")) {
+			expect(event.details).toEqual({ kind: "totp", removed: true });
+		}
+	});
+
+	it("says a factor it could neither check nor remove still stands: the re-read's outage and the standing factor, each once", async () => {
+		const memory = createMemoryMfaFactorStore();
+		let written = false;
+		const { app, logger } = await boot({
+			config: configFor("required"),
+			factorStore: {
+				...memory,
+				create: async (record) => {
+					await memory.create(record);
+					written = true;
+				},
+				list: async (subject) => {
+					if (written) throw new Error("factor store unreachable");
+					return memory.list(subject);
+				},
+				remove: async () => {
+					throw new Error("factor store unreachable");
+				},
+			},
+		});
+		const { agent, transaction } = await beginFirstBinding(app);
+		const begun = await beginEnrollment(agent, transaction, "totp");
+
+		const res = await completeEnrollment(agent, transaction, totpProofOf(begun.body.secret));
+
+		expect(res.status).toBe(503);
+		expect(events(logger, "error")).toEqual([
+			"mfa_store_unavailable",
+			"mfa_first_binding_factor_standing",
+		]);
+		expect(logger.error.mock.calls[0]?.[0]).toMatchObject({ store: "mfa_factor", step: "list" });
+		expect(logger.error.mock.calls[1]?.[0]).toMatchObject({ sub: ALICE.id, kind: "totp" });
+		expect(await memory.list(ALICE.id)).toHaveLength(1);
 	});
 
 	it("removes its own factor and answers 503 once when the records cannot be read again after it was written: never a binding it could not check", async () => {
