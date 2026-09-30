@@ -22,7 +22,6 @@ Multi-factor authentication for [`auth.provider`](../../README.md): a second fac
 
 **Does not own:**
 
-- `mfa.mode`'s default, `off`, and `MFA_MODE` — in core's `reference.conf`, and the key in core's schema, because the standalone template reads the mode before it knows its modules (through core's `readMfaMode`), to declare `mfa` in `sessionRequirements.expected`. The MFA module reads the mode from its own section;
 - the `MfaFactor` contract, the `MfaFactorStore` and `MfaTransactionStore` ports and their adapters, the `mfaFactors` kind and `mfaFactorResolver` — core's (`packages/core/src/mfa/`), with Redis adapters in `@o3co/auth-provider-redis`;
 - the WebAuthn factor — `@o3co/auth-provider-webauthn`'s (the ADR's D4);
 - the pages: the login page's second step, the MFA page and the account page are the deployment's (D6).
@@ -35,7 +34,7 @@ Two sections, each its module's and named after it: `mfa`, the MFA module's, and
 
 | Key | Env | Default | Meaning |
 | --- | --- | --- | --- |
-| `mfa.mode` | `MFA_MODE` | `off`, in core's `reference.conf` | `required` or `optional`, the two the module honours; `off`, or unset, with the module installed is refused. Any other value is refused before any factory runs, naming `mfa.mode` |
+| `mfa.mode` | `MFA_MODE` | `off` | `required` or `optional`, the two the module honours; `off`, or unset, with the module installed is refused. Any other value is refused before any factory runs, naming `mfa.mode` |
 | `mfa.encryptionKeys` | `MFA_ENCRYPTION_KEY` feeds the first entry | none | The key ring, `[{ id?, key }]`: each key canonical base64 of 32 bytes (`openssl rand -base64 32`); the first seals, every key opens (D11). An entry without an `id` is named by its key's fingerprint |
 | `mfa-totp-factor.enabled` | `MFA_TOTP_FACTOR_ENABLED` | `true` | Whether the TOTP factor is offered |
 | `mfa-totp-factor.algorithm` | — | `SHA1` | `SHA1`, `SHA256` or `SHA512`, for new enrollments |
@@ -59,7 +58,7 @@ A key your `application.conf` sets shadows the substitution `reference.conf` mak
 
 ## Installing
 
-Installed is on (the session-admission ADR's D7): a composition that wants no MFA installs none of this package and leaves core's `mfa.mode` at `off`. One that wants it lists `mfaModules({ environment })` — the TOTP factor's module and `mfaModule` — with an `MfaFactorStore` and an `MfaTransactionStore` (core's memory modules on one replica, `@o3co/auth-provider-redis`'s on several), the session package's login and its user-session store; sets `mfa.mode` to `optional` or `required`; and declares `"mfa"` in `sessionRequirements.expected`.
+Installed is on (the session-admission ADR's D7): a composition that wants no MFA installs none of this package, and an `mfa` section it writes is one no module reads. The standalone template reads `mfa.mode` itself before it chooses its modules, and declares `mfa` from it, until it installs this package at the MFA ADR's build-order step 20. One that wants it lists `mfaModules({ environment })` — the TOTP factor's module and `mfaModule` — with an `MfaFactorStore` and an `MfaTransactionStore` (core's memory modules on one replica, `@o3co/auth-provider-redis`'s on several), the session package's login and its user-session store; sets `mfa.mode` to `optional` or `required`; and declares `"mfa"` in `sessionRequirements.expected`.
 
 `mfaModule` requires `config`, `mfaFactorResolver`, `mfaFactorStore`, `mfaTransactionStore`, `userSessionStore` and `sessionRequirementResolver`, and reads `auditSink` — its absence declared with `audit.sink.type = "none"` — and `logger`. It mounts `mfa-routes` (`MFA_ROUTES_ID`) at `/session/mfa`, after the session middleware; nothing answers there before step 8's third part. The boot is refused:
 
