@@ -30,6 +30,7 @@ import {
 	type CsrfGuard,
 	type CsrfTokenSigner,
 	defineModule,
+	type FederationProvider,
 	type FederationTokenStore,
 	type Module,
 	type SessionFederationIndex,
@@ -49,20 +50,49 @@ import { afterEach, describe, expect, it } from "vitest";
 import { createSessionCsrfTokenSigner } from "#/csrf-token-signer.mjs";
 import { sessionModule } from "#/module.mjs";
 import { sessionStoreModule, sessionStoreModuleFor } from "#/modules/sessionStoreModule.mjs";
+import { createRouter as createSessionRouter } from "#/routes/Session.mjs";
 
 /**
- * A token's payload (`<expiry-seconds>.<nonce>`, the expiry in 2100) and its
- * signature under `secret`. Tokens of this derivation are in flight wherever a
- * deployment keeps its secret, so the signature must not change.
+ * A token's payload (`<expiry-seconds>.<nonce>`) and its signature under
+ * `secret`. Tokens of this derivation are in flight wherever a deployment
+ * keeps its secret, so no signature here may change.
  */
-const VECTOR = {
+interface Vector {
+	readonly secret: string;
+	readonly payload: string;
+	readonly signature: string;
+}
+
+const VECTOR: Vector = {
 	secret: "fixed-vector.session-secret.at-least-32-bytes.ok",
 	payload: "4102444800.Zml4ZWQtdmVjdG9yLW5vbmNl",
 	signature: "uMTD9J4fNg6OrX38rJXZ9QNr3VIPUxlUSG7yRJ3OLkA",
-} as const;
+};
 
-/** The whole double-submit token the vector makes. */
-const VECTOR_TOKEN = `${VECTOR.payload}.${VECTOR.signature}`;
+/**
+ * Each vector a derivation must sign: `VECTOR`; one whose signature carries
+ * `-` and `_`, which base64 would write as `+` and `/`; and one under a secret
+ * beyond ASCII, which the key derivation reads as UTF-8.
+ */
+const VECTORS: readonly (readonly [string, Vector])[] = [
+	["the vector", VECTOR],
+	[
+		"a signature carrying - and _",
+		{
+			secret: VECTOR.secret,
+			payload: "1767225600.bm9uY2Utb2YtYW5vdGhlci10b2tlbg",
+			signature: "gk5X5yzuTzGmSErkPINFDhFX-mANe2EZs9sYzaAVn_k",
+		},
+	],
+	[
+		"a secret beyond ASCII",
+		{
+			secret: "fixed-vector.セッションの秘密.ünïcödé-secret.ok",
+			payload: "1700007200.yUvK1KLv8EdEoWr-lEovB_Z4XS5JK7S8",
+			signature: "xBRwiZSIew7WWuREvWQRiLAwoWmxuVHw9DjF0jnYF4Q",
+		},
+	],
+];
 
 const OTHER_SECRET = "another-session-secret.at-least-32-bytes.ok";
 
@@ -101,18 +131,30 @@ describe("createSessionCsrfTokenSigner keeps core's csrfTokenSigner contract", (
 });
 
 describe("the signature a session secret gives", () => {
-	it("signs the fixed vector, and verifies it", () => {
-		const signer = createSessionCsrfTokenSigner(VECTOR.secret);
-		expect(signer.sign(VECTOR.payload)).toBe(VECTOR.signature);
-		expect(signer.verify(VECTOR.payload, VECTOR.signature)).toBe(true);
+	it.each(VECTORS)("signs %s, and verifies it", (_what, vector) => {
+		const signer = createSessionCsrfTokenSigner(vector.secret);
+		expect(signer.sign(vector.payload)).toBe(vector.signature);
+		expect(signer.verify(vector.payload, vector.signature)).toBe(true);
 	});
 
 	it("is the HMAC-SHA256 of the payload under the HKDF-SHA256 expansion of the secret: no salt, info o3co.auth.provider/session-csrf/v1, 32 bytes", () => {
+		for (const [, vector] of VECTORS) {
+			expect(derivedSignature(vector.secret, vector.payload)).toBe(vector.signature);
+		}
 		const signer = createSessionCsrfTokenSigner(VECTOR.secret);
-		for (const payload of [VECTOR.payload, "", "1767225600.bm9uY2Utb2YtYW5vdGhlci10b2tlbg"]) {
+		for (const payload of [VECTOR.payload, "", "payload beyond ASCII · ✓"]) {
 			expect(signer.sign(payload)).toBe(derivedSignature(VECTOR.secret, payload));
 		}
-		expect(derivedSignature(VECTOR.secret, VECTOR.payload)).toBe(VECTOR.signature);
+	});
+
+	it.each([
+		["an empty secret", ""],
+		["a short secret", "short-secret"],
+		["a hex secret of 16 bytes", "00112233445566778899aabbccddeeff"],
+	])("refuses %s: core's entropy floor, naming session.secret", (_what, secret) => {
+		expect(() => createSessionCsrfTokenSigner(secret)).toThrow(
+			/^session\.secret must carry at least 32 bytes \(256 bits\) of key material; .* SESSION_SECRET\./,
+		);
 	});
 
 	it("does not verify the vector under another secret", () => {
@@ -313,6 +355,12 @@ const withToken = (test: request.Test, token: string): request.Test =>
 const livePayload = (): string =>
 	`${Math.floor(Date.now() / 1000) + 3600}.bGl2ZS1wYXlsb2FkLW5vbmNlLW9mLWEtdGVzdA`;
 
+/** A token signed under `VECTOR.secret` by the derivation written out, expiring an hour from now. */
+const secretSignedToken = (): string => {
+	const payload = livePayload();
+	return `${payload}.${derivedSignature(VECTOR.secret, payload)}`;
+};
+
 describe("the session module requires csrfTokenSigner", () => {
 	it("declares it in requires", () => {
 		expect(sessionModule.requires).toContain("csrfTokenSigner");
@@ -326,6 +374,18 @@ describe("the session module requires csrfTokenSigner", () => {
 			}),
 		).rejects.toThrow(
 			/Missing required component "csrfTokenSigner" — module "session" requires it/,
+		);
+	});
+
+	it("refuses a session router built by hand without csrfTokenSigner, naming the option", () => {
+		expect(() =>
+			createSessionRouter(express, {
+				userRepository: fakeUserRepository,
+				config: configWith(VECTOR.secret),
+				requirements: resolverForTests([]),
+			} as never),
+		).toThrow(
+			"session routes: csrfTokenSigner is required: pass the csrfTokenSigner slot's signer, or createSessionCsrfTokenSigner(secret)",
 		);
 	});
 });
@@ -405,7 +465,7 @@ describe("the session module signs and verifies through the signer in the slot, 
 });
 
 describe("the session module reads no session.secret", () => {
-	it("neither its providers nor its route factories nor its routes read it", async () => {
+	it("neither its providers nor its route factories nor its routes — csrf, login, logout, a federation's start and callback — read it", async () => {
 		const reads: string[] = [];
 		const base = configWith(VECTOR.secret);
 		const session = new Proxy(base.session as object, {
@@ -414,17 +474,55 @@ describe("the session module reads no session.secret", () => {
 				return Reflect.get(target, key, receiver);
 			},
 		});
-		const config = { ...base, deployment: { mode: "single" }, session } as unknown as AppConfig;
-		// What the planner hands the module's factories; no federation is configured.
+		const config = {
+			...base,
+			deployment: { mode: "single" },
+			session,
+			federations: {
+				...base.federations,
+				stub: {
+					enabled: true,
+					clientId: "id",
+					clientSecret: "federation-client-secret",
+					callbackURL: "https://app.example.com/session/oauth/federation/stub/callback",
+				},
+			},
+		} as unknown as AppConfig;
+		const stub: FederationProvider = {
+			name: "stub",
+			scope: ["openid"],
+			buildAuthorizationUrl: ({ state }: { state: string }) => {
+				const url = new URL("https://idp.example.com/authorize");
+				url.searchParams.set("state", state);
+				return url;
+			},
+			exchangeCode: async () => ({
+				issuer: "https://idp.example.com",
+				sub: "ext-1",
+				expiresAt: null,
+			}),
+		};
+		// What the planner hands the module's factories.
 		const deps = {
 			config,
 			csrfTokenSigner: createTestCsrfTokenSigner(),
-			userRepository: fakeUserRepository,
+			userRepository: {
+				authenticate: async () => ({ id: "user-1", username: "alice" }),
+				authenticateByToken: async () => null,
+			},
 			userSessionStore: fakeUserSessionStore(),
 			federationTokenStore: fakeFederationTokenStore(),
 			sessionFederationIndex: fakeSessionFederationIndex(),
-			federationProviders: new Map(),
-			federationRedirectPolicyResolver: new Map(),
+			federationProviders: new Map([["stub", stub]]),
+			federationRedirectPolicyResolver: new Map([
+				[
+					"stub",
+					{
+						validateRedirect: () => ({ ok: true as const, value: undefined }),
+						resolveCallbackRedirect: () => ({ ok: true as const, value: "/" }),
+					},
+				],
+			]),
 			sessionRequirementResolver: resolverForTests([]),
 		};
 		const provides = sessionModule.provides as Record<string, (d: unknown) => unknown>;
@@ -434,22 +532,45 @@ describe("the session module reads no session.secret", () => {
 			readonly handler: express.RequestHandler;
 		})[];
 		const app = express();
+		// One cookie session for every request, as express-session keeps it.
+		const fresh = (): Record<string, unknown> => ({
+			regenerate(cb: (err: unknown) => void) {
+				bag = fresh();
+				cb(null);
+			},
+			save: (cb: (err: unknown) => void) => cb(null),
+			destroy: (cb: (err: unknown) => void) => cb(null),
+		});
+		let bag = fresh();
 		app.use((req, _res, next) => {
-			(req as unknown as { session: Record<string, unknown> }).session = {
-				destroy: (cb: (err: unknown) => void) => cb(null),
-				save: (cb: (err: unknown) => void) => cb(null),
-			};
+			(req as unknown as { session: Record<string, unknown> }).session = bag;
 			next();
 		});
 		for (const route of routes) app.use("/session", route(deps).handler);
 		const agent = request.agent(app);
-		const issued = await agent.get("/session/csrf");
-		expect(issued.status).toBe(200);
-		const logout = await agent
-			.post("/session/logout")
-			.set("x-csrf-token", issued.body.csrf_token as string)
-			.send({});
+		/** A fresh token from `GET /session/csrf`, its cookie kept by the agent. */
+		const freshToken = async (): Promise<string> => {
+			const issued = await agent.get("/session/csrf");
+			expect(issued.status).toBe(200);
+			return issued.body.csrf_token as string;
+		};
+		const loginToken = await freshToken();
+		const login = await agent
+			.post("/session/login")
+			.set("x-csrf-token", loginToken)
+			.send({ username: "alice", password: "secret" });
+		expect(login.status).toBe(200);
+		// A login sets a fresh token; the next state change sends a fresh one too.
+		const logoutToken = await freshToken();
+		const logout = await agent.post("/session/logout").set("x-csrf-token", logoutToken).send({});
 		expect(logout.status).toBe(200);
+		const start = await agent.get("/session/oauth/federation/stub");
+		expect(start.status).toBe(302);
+		const state = new URL(start.headers.location as string).searchParams.get("state");
+		const callback = await agent.get(
+			`/session/oauth/federation/stub/callback?code=code-1&state=${encodeURIComponent(state ?? "")}`,
+		);
+		expect(callback.status).toBeLessThan(500);
 		expect(reads).toEqual([]);
 	});
 });
@@ -465,10 +586,11 @@ describe("a token signed under session.secret verifies through the session store
 			[sessionStoreModuleFor(config), sessionModule, ...stores(), probe()],
 			config,
 		);
-		expect(
-			(await withToken(request(app).post("/session/logout"), VECTOR_TOKEN).send({})).status,
-		).toBe(200);
-		expect((await withToken(request(app).post("/probe"), VECTOR_TOKEN).send({})).status).toBe(200);
+		const token = secretSignedToken();
+		expect((await withToken(request(app).post("/session/logout"), token).send({})).status).toBe(
+			200,
+		);
+		expect((await withToken(request(app).post("/probe"), token).send({})).status).toBe(200);
 	});
 
 	it("is refused by both when the session secret is another", async () => {
@@ -477,9 +599,35 @@ describe("a token signed under session.secret verifies through the session store
 			[sessionStoreModuleFor(config), sessionModule, ...stores(), probe()],
 			config,
 		);
-		expect(
-			(await withToken(request(app).post("/session/logout"), VECTOR_TOKEN).send({})).status,
-		).toBe(403);
-		expect((await withToken(request(app).post("/probe"), VECTOR_TOKEN).send({})).status).toBe(403);
+		const token = secretSignedToken();
+		expect((await withToken(request(app).post("/session/logout"), token).send({})).status).toBe(
+			403,
+		);
+		expect((await withToken(request(app).post("/probe"), token).send({})).status).toBe(403);
+	});
+});
+
+// ---------------------------------------------------------------------------
+// The slot is not authoritative
+// ---------------------------------------------------------------------------
+
+describe("a composition may put its own signer in the slot beside the session store's module", () => {
+	it("then POST /session/logout and the csrfGuard slot accept the override's tokens and refuse the session secret's", async () => {
+		const config = configWith(VECTOR.secret);
+		const override = createTestCsrfTokenSigner();
+		const handle = await createTestApp({
+			modules: [sessionStoreModuleFor(config), sessionModule, ...stores(), probe()],
+			bootstrapComponents: { config, pathResolver: (s: string) => s },
+			overrideComponents: { csrfTokenSigner: override },
+		});
+		handles.push(handle);
+		const app = express();
+		app.use(handle.router);
+		const overrideToken = tokenSignedBy(override, livePayload());
+		const secretToken = secretSignedToken();
+		for (const path of ["/session/logout", "/probe"]) {
+			expect((await withToken(request(app).post(path), overrideToken).send({})).status).toBe(200);
+			expect((await withToken(request(app).post(path), secretToken).send({})).status).toBe(403);
+		}
 	});
 });
