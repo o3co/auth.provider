@@ -222,6 +222,66 @@ describe("core.declaredAbsent, the slots a composition runs without on purpose",
 	});
 });
 
+describe("the federations, under core.federations", () => {
+	it("reads each federation written there, its switches as the environment carries them", async () => {
+		const handle = await boot(
+			{ CORE_FEDERATIONS_UPSTREAM_ENABLED: "false" },
+			'core.federations.upstream { enabled = ${?CORE_FEDERATIONS_UPSTREAM_ENABLED}, type = "oidc", trustUpstreamAmr = "true" }\n',
+		);
+		const config = handle.components.config as {
+			core?: { federations?: Record<string, Record<string, unknown>> };
+		};
+		expect(config.core?.federations?.upstream).toEqual({
+			enabled: false,
+			type: "oidc",
+			trustUpstreamAmr: true,
+		});
+		await handle.dispose();
+	});
+
+	it("ships an empty map there, and nothing at the top level", () => {
+		const reference = parseFile(fileURLToPath(coreReference()), {
+			env: { OAUTH_JWT_ISSUER: "https://auth.test" },
+		}).toObject() as { core?: { federations?: unknown }; federations?: unknown };
+		expect(reference.core?.federations).toEqual({});
+		expect(reference).not.toHaveProperty("federations");
+	});
+
+	it("refuses an enabled federation without the stores it needs, naming it under core.federations", async () => {
+		const err = await refusal(boot({}, "core.federations.upstream.enabled = true\n"));
+
+		expect(err.message).toContain("core.federations.upstream");
+	});
+
+	it("refuses federations at the top level, naming each key's path under core.federations and its variable", async () => {
+		const err = await refusal(
+			boot(
+				{},
+				'federations.google.enabled = true\nfederations.google.clientId = "old-value-5e2d"\n',
+			),
+		);
+
+		expect(err.details).toEqual({
+			reason: "config-path-relocated",
+			relocated: [
+				{
+					module: "core",
+					from: "federations.google.enabled",
+					to: "core.federations.google.enabled",
+					environmentVariable: "CORE_FEDERATIONS_GOOGLE_ENABLED",
+				},
+				{
+					module: "core",
+					from: "federations.google.clientId",
+					to: "core.federations.google.clientId",
+					environmentVariable: "CORE_FEDERATIONS_GOOGLE_CLIENT_ID",
+				},
+			],
+		});
+		expect(err.message).not.toContain("old-value-5e2d");
+	});
+});
+
 describe("a root that parses its resolved configuration with AppConfigSchema before boot", () => {
 	/**
 	 * `operator` HOCON over core's own `reference.conf` and the fixture's

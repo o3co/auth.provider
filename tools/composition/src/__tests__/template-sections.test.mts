@@ -467,3 +467,54 @@ describe("the code repositories' own sections", () => {
 		},
 	);
 });
+
+describe("the federations, under core.federations", () => {
+	/** The environment the full set boots with, its federations' variables under their old names. */
+	const withOldNames = (env: Readonly<Record<string, string>>): Record<string, string> =>
+		Object.fromEntries(
+			Object.entries(env).map(([name, value]) => [
+				name.replace(/^CORE_FEDERATIONS_/, "FEDERATIONS_"),
+				value,
+			]),
+		);
+
+	it("reads the shipped OIDC federation from CORE_FEDERATIONS_OIDC_*, and boots it", async () => {
+		const composition = await boot({});
+
+		expect(parsedAt(composition, "core.federations.oidc.clientId")).toBe("oidc-client");
+		expect(parsedAt(composition, "core.federations.oidc.enabled")).toBe(true);
+		expect(composition.config).not.toHaveProperty("federations");
+	});
+
+	it("refuses, before any module is chosen, the variables under their old names alone", async () => {
+		const err = await phaseOneRefused({ env: withOldNames(SINGLE_ENV) });
+
+		for (const name of ["GOOGLE_ENABLED", "OIDC_ISSUER", "OIDC_CLIENT_ID"]) {
+			expect(err.message).toContain(`FEDERATIONS_${name} was renamed CORE_FEDERATIONS_${name}`);
+		}
+	});
+
+	it("boots the old names beside the new ones at the same values", async () => {
+		const composition = await boot({ env: { ...SINGLE_ENV, ...withOldNames(SINGLE_ENV) } });
+
+		expect(parsedAt(composition, "core.federations.oidc.clientId")).toBe("oidc-client");
+	});
+
+	it("refuses a key written at the top level, naming its path under core.federations and its variable", async () => {
+		const err = await refused({
+			operatorHocon: 'federations.oidc.clientUrl = "https://app.test/"\n',
+		});
+
+		expect(err.details).toMatchObject({
+			reason: "config-path-relocated",
+			relocated: [
+				{
+					module: "core",
+					from: "federations.oidc.clientUrl",
+					to: "core.federations.oidc.clientUrl",
+					environmentVariable: "CORE_FEDERATIONS_OIDC_CLIENT_URL",
+				},
+			],
+		});
+	});
+});
