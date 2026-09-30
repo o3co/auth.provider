@@ -287,7 +287,7 @@ openssl pkey -in jwt-private.pem -pubout -out jwt-public.pem
 | `SESSION_STORAGE_REDIS_URL` | `redis://localhost:6379` | セッションストア用 Redis 接続 URL |
 | `SESSION_STORAGE_REDIS_PASSWORD` | — | セッションストア用 Redis パスワード |
 
-ローカルの HTTP 開発のために `SESSION_SECURE=false` を設定する場合や、ドメインを共有する Cookie のために `SESSION_DOMAIN` を設定する場合は、`SESSION_NAME` も `auth.sid` のような `__Host-` でない値にすること — `SESSION_SECURE=false` なら接頭辞の無い値にする: `__Secure-` の名前も `SESSION_SECURE=true` を要する。`__Host-` や `__Secure-` の Cookie 名が、ブラウザがその prefix に対して拒否する属性と組み合わされると、また `SESSION_NAME` が Cookie の名前（RFC 6265 のトークン: 空白、`;` などの区切り文字を含まない）でないと、サーバーは fail-fast する。
+ローカルの HTTP 開発のために `SESSION_SECURE=false` を設定する場合や、ドメインを共有する Cookie のために `SESSION_DOMAIN` を設定する場合は、`SESSION_NAME` も `auth.sid` のような `__Host-` でない値にすること — `SESSION_SECURE=false` なら接頭辞の無い値にする: `__Secure-` の名前も `SESSION_SECURE=true` を要する。`__Host-` や `__Secure-`（大文字小文字は問わない）の Cookie 名が、ブラウザがその prefix に対して拒否する属性と組み合わされると、`SESSION_NAME` が Cookie の名前（RFC 6265 のトークン: 空白、`;` などの区切り文字を含まない）でないと、また `SESSION_DOMAIN` がホスト名でない（スキーム、ポート、パスを含む）と、サーバーは fail-fast する。
 
 #### `/session/login` と `/session/logout` の CSRF 対策
 
