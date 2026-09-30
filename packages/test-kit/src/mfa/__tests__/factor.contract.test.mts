@@ -15,22 +15,19 @@
  */
 
 /**
- * The conformance suite every contributed second factor runs, the factor
- * double, and the keyed digests a factor's tests hand it. The suite runs
- * against the double, with and without a challenge; each way a factor can break
+ * The conformance suite every contributed second factor runs, against core's
+ * factor double, with and without a challenge; each way a factor can break
  * the contract fails the case that names it.
  */
 
-import { describe, expect, it } from "vitest";
-import type { MfaFactor } from "#/mfa/factor.mjs";
+import type { MfaFactor } from "@o3co/auth-provider-core";
 import {
-	createTestMfaDigests,
 	createTestMfaFactor,
-	type MfaFactorContractInput,
-	mfaFactorContract,
 	type TestMfaFactorOptions,
 	testMfaFactorProofs,
-} from "#/testing/index.mjs";
+} from "@o3co/auth-provider-core/testing";
+import { describe, expect, it } from "vitest";
+import { type MfaFactorContractInput, mfaFactorContract } from "#/index.mjs";
 
 const RULES = {
 	kind: "kind is a hint token: a lowercase letter, then up to 63 lowercase letters, digits, _ or -",
@@ -233,76 +230,5 @@ describe("mfaFactorContract", () => {
 				})),
 			),
 		).toEqual([RULES.verify]);
-	});
-});
-
-describe("createTestMfaFactor", () => {
-	it("is a counting, non-guessable factor of kind test adding otp and mfa, with a challenge only when asked for one", () => {
-		const factor = createTestMfaFactor();
-		expect(factor).toMatchObject({
-			kind: "test",
-			amrValues: ["otp"],
-			addsMfa: true,
-			counting: true,
-			guessable: false,
-		});
-		expect(factor.challenge).toBeUndefined();
-		expect(typeof createTestMfaFactor({ challenge: true }).challenge).toBe("function");
-	});
-
-	it("verifies after a challenge only the secret beside the nonce that challenge answered", async () => {
-		const factor = createTestMfaFactor({ challenge: true });
-		const ctx = {
-			subject: USER.id,
-			transactionId: "tx",
-			nowMs: 0,
-			request: {},
-			digests: createTestMfaDigests("test"),
-		};
-		const enrolled = {
-			id: "f-1",
-			label: undefined,
-			createdAt: new Date(0),
-			lastUsedAt: undefined,
-			data: { secret: "s3cret" },
-		};
-		const challenge = factor.challenge as NonNullable<MfaFactor["challenge"]>;
-		const first = await challenge({ ...ctx, factor: enrolled, factors: [enrolled] });
-		const second = await challenge({ ...ctx, factor: enrolled, factors: [enrolled] });
-		const verify = (state: unknown, proof: unknown) =>
-			factor.verify({
-				...ctx,
-				factor: enrolled,
-				factors: [enrolled],
-				state: state as never,
-				proof,
-			});
-		expect(
-			await verify(second.state, testMfaFactorProofs.verificationProof(enrolled, second)),
-		).toEqual({ ok: true, factorId: "f-1" });
-		expect(
-			await verify(second.state, testMfaFactorProofs.verificationProof(enrolled, first)),
-		).toEqual({ ok: false, reason: "invalid" });
-		expect(await verify(undefined, "s3cret:x")).toEqual({ ok: false, reason: "expired" });
-	});
-});
-
-describe("createTestMfaDigests", () => {
-	it("matches what it digested, under its kind and parts alone", () => {
-		const digests = createTestMfaDigests("email");
-		const made = digests.digest(["tx", "f-1", "123456"]);
-		expect(digests.matchesDigest(["tx", "f-1", "123456"], made)).toBe("match");
-		expect(digests.matchesDigest(["tx", "f-1", "654321"], made)).toBe("mismatch");
-		// Length-prefixed: moving a character between two parts is another input.
-		expect(digests.matchesDigest(["tx", "f-11", "23456"], made)).toBe("mismatch");
-		expect(createTestMfaDigests("recovery_code").matchesDigest(["tx", "f-1", "123456"], made)).toBe(
-			"mismatch",
-		);
-	});
-
-	it("answers key_unavailable for a digest made under a key it does not hold", () => {
-		const digests = createTestMfaDigests("email");
-		const made = digests.digest(["x"]);
-		expect(digests.matchesDigest(["x"], { ...made, keyId: "retired" })).toBe("key_unavailable");
 	});
 });
