@@ -31,7 +31,10 @@
  *   `limits`, which wins;
  * - off: the owners switched off — the device grant disabled, WebAuthn and
  *   the MFA package not installed. The session module is the template's and
- *   always installed, and its schema requires `rateLimit.login`.
+ *   always installed, and its schema requires `rateLimit.login`;
+ * - off, keys set: the same, with each owner's key set. A key whose owner is
+ *   not installed sets no budget; the disabled device grant is installed, and
+ *   its key does.
  *
  * `token` has no owner: the limiter's `defaultLimit`, or its own `limits`
  * entry.
@@ -53,7 +56,7 @@ import {
 } from "./full-set.fixture.mts";
 
 type Adapter = "memory" | "redis";
-type Cell = "shipped" | "configured" | "declared" | "off";
+type Cell = "shipped" | "configured" | "declared" | "off" | "offConfigured";
 
 interface Applied {
 	readonly limit: number | undefined;
@@ -78,6 +81,7 @@ const TABLE: Readonly<Record<Prefix, Readonly<Record<Cell, Applied>>>> = {
 		configured: spec(7, 60),
 		declared: spec(4, 45),
 		off: spec(20, 900),
+		offConfigured: spec(7, 60),
 	},
 	device_verification: {
 		shipped: spec(5, 300),
@@ -85,12 +89,14 @@ const TABLE: Readonly<Record<Prefix, Readonly<Record<Cell, Applied>>>> = {
 		declared: spec(2, 90),
 		// Disabled, the grant still carries its default budget; nothing keys the prefix.
 		off: spec(5, 300),
+		offConfigured: spec(3, 120),
 	},
 	"webauthn-authentication-options": {
 		shipped: spec(30, 60),
 		configured: spec(11, 30),
 		declared: spec(9, 15),
 		off: spec(60, 60),
+		offConfigured: spec(60, 60),
 	},
 	mfa: {
 		// No `mfa.rateLimit.routes` ships: the limiter's default.
@@ -98,12 +104,14 @@ const TABLE: Readonly<Record<Prefix, Readonly<Record<Cell, Applied>>>> = {
 		configured: spec(13, 240),
 		declared: spec(6, 75),
 		off: spec(60, 60),
+		offConfigured: spec(60, 60),
 	},
 	token: {
 		shipped: spec(60, 60),
 		configured: spec(60, 60),
 		declared: spec(17, 20),
 		off: spec(60, 60),
+		offConfigured: spec(60, 60),
 	},
 };
 
@@ -131,6 +139,10 @@ const CELLS: Readonly<Record<Cell, (adapter: Adapter) => FullSetOptions>> = {
 	configured: () => ({ operatorHocon: OWNERS_KEYS }),
 	declared: (adapter) => ({ operatorHocon: `${OWNERS_KEYS}${declaredLimits(adapter)}` }),
 	off: () => ({ features: { deviceGrant: false, webauthn: false, mfa: false } }),
+	offConfigured: () => ({
+		features: { deviceGrant: false, webauthn: false, mfa: false },
+		operatorHocon: OWNERS_KEYS,
+	}),
 };
 
 let redis: TestRedis;
@@ -166,24 +178,27 @@ async function applied(limiter: RateLimiter, prefix: Prefix): Promise<Applied> {
 }
 
 describe.each<Adapter>(["memory", "redis"])("the %s limiter", (adapter) => {
-	describe.each<Cell>(["shipped", "configured", "declared", "off"])("%s", (cell) => {
-		let composition: FullSet;
+	describe.each<Cell>(["shipped", "configured", "declared", "off", "offConfigured"])(
+		"%s",
+		(cell) => {
+			let composition: FullSet;
 
-		beforeAll(async () => {
-			composition = await composeFullSet({ env: envFor(adapter), ...CELLS[cell](adapter) });
-			expect(composition.handle.components.rateLimiter?.kind).toBe(adapter);
-		});
+			beforeAll(async () => {
+				composition = await composeFullSet({ env: envFor(adapter), ...CELLS[cell](adapter) });
+				expect(composition.handle.components.rateLimiter?.kind).toBe(adapter);
+			});
 
-		afterAll(async () => {
-			await composition?.handle.dispose();
-		});
+			afterAll(async () => {
+				await composition?.handle.dispose();
+			});
 
-		it.each(PREFIXES)("limits %s by the table's budget", async (prefix) => {
-			const limiter = composition.handle.components.rateLimiter;
-			if (limiter === undefined) throw new Error("the full set booted without a rateLimiter");
-			expect(await applied(limiter, prefix)).toEqual(TABLE[prefix][cell]);
-		});
-	});
+			it.each(PREFIXES)("limits %s by the table's budget", async (prefix) => {
+				const limiter = composition.handle.components.rateLimiter;
+				if (limiter === undefined) throw new Error("the full set booted without a rateLimiter");
+				expect(await applied(limiter, prefix)).toEqual(TABLE[prefix][cell]);
+			});
+		},
+	);
 });
 
 /** Every prefix a package keys a limiter under, with the module that owns it. */
