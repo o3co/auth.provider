@@ -682,6 +682,43 @@ wires it.
   development sender logs each code, and installs only where the name the
   configuration was selected by, and `CONFIG_ENV` and `NODE_ENV` wherever
   they are set, each read `development` or `test`.
+- **Mail failures: `429` and `503`.** `429` means the sender was refused at
+  a limit: the user may try again later, and a steady rate of them means the
+  relay's quota is too small for your sign-ins. `503` means the code did not
+  leave for another reason; a steady rate of them is an outage of your mail
+  path. With `@o3co/auth-provider-standard`'s SMTP sender, a limit is
+  only a relay reply `421`, `450`, `451` or `452` carrying the enhanced code
+  `4.7.1`, `4.7.28` or `4.5.3`, to the sender, the recipient or the message;
+  every other failure is a `MailTransportError`, whose message names the
+  stage, the relay's reply codes (`SMTP 550 5.1.1`) and the connection's
+  failure (`ECONNREFUSED`, `ENOTFOUND`, `EAI_AGAIN`, `EHOSTUNREACH`,
+  `ENETUNREACH`, `ECONNRESET`), never the reply's text, and whose `reason`
+  says where to look:
+  - `unreachable`: the network or the relay's name, where the message says
+    it could not be reached (its code says how); or TLS, where it says the
+    connection could not be secured — a certificate that does not name
+    `standard-smtp-mail-sender.host` or chains to no CA the process trusts
+    (add yours with `NODE_EXTRA_CA_CERTS`; `NODE_TLS_REJECT_UNAUTHORIZED`
+    does not turn the check off), or a relay that does not offer STARTTLS
+    under `secure = "starttls"`; or, under `none`, a host that reached an
+    address that is not loopback;
+  - `auth_failed`: the account (`STANDARD_SMTP_MAIL_SENDER_USER`, `_PASSWORD`);
+  - `rejected`: the relay's policy — the sender address (`_FROM`), the
+    recipient, the message — or a transient refusal that is not a limit
+    (`421 4.3.2`, the relay going down); or an address the transport cannot
+    send to as written — one beyond ASCII to a relay that does not offer
+    SMTPUTF8, or an angle bracket in a quoted local part;
+  - `timeout`: no TCP connection in 10 seconds, no implicit TLS handshake in
+    another 10, no greeting in 10, 20 seconds without an answer, or no
+    answer to the message within 40 seconds in all, however the relay spaces
+    its bytes. A delivery the relay confirmed stays delivered, whatever
+    comes of the `QUIT` after it.
+
+  The SMTP sender's module needs `STANDARD_SMTP_MAIL_SENDER_HOST` and `_FROM`
+  only where something reads the `mailSender` slot; there it refuses the boot
+  without them, and with only one of `_USER` and `_PASSWORD` (an empty
+  password is none). It sends each code to the one address the Store holds, and
+  to nobody else.
 - **The email factor's address.** The factor keeps no address: only a keyed
   digest of the one its enrollment code went to. A login code goes to the
   account's current address only while that digest matches, so **a change of

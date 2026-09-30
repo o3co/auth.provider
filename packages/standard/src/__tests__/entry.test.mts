@@ -15,9 +15,9 @@
  */
 
 /**
- * What the package publishes: the mail senders' modules, the rendering and
- * the SMTP section's schema on its entry; the builder of that section on its
- * testing entry.
+ * What the package publishes: the mail senders' modules, the rendering, the
+ * SMTP section's schema and the error the SMTP sender rejects with on its
+ * entry; the builder of that section on its testing entry.
  */
 
 import { describe, expect, it } from "vitest";
@@ -25,8 +25,9 @@ import * as entry from "#/index.mjs";
 import * as testing from "#/testing/index.mjs";
 
 describe("the package's entries", () => {
-	it("publishes the senders' modules, the rendering and the SMTP section's schema, and nothing else: no development sender without its module's guard", () => {
+	it("publishes the senders' modules, the rendering, the SMTP section's schema and the SMTP sender's error, and nothing else: no sender without its module", () => {
 		expect(Object.keys(entry).sort()).toEqual([
+			"MailTransportError",
 			"renderStandardMail",
 			"standardDevelopmentMailSenderModule",
 			"standardSmtpMailSenderConfigSchema",
