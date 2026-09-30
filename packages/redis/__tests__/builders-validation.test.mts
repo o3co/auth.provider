@@ -62,7 +62,7 @@ describe("redisChallengeStoreBuilder — client guard", () => {
 		const store = redisChallengeStoreBuilder(
 			{ client: noopChallengeClient } as never,
 			{ lifecycle: undefined } as never,
-		);
+		) as { kind: string };
 		expect(store).toBeDefined();
 		expect(store.kind).toBe("redis");
 	});
@@ -79,7 +79,7 @@ describe("redisReplaySeenSetBuilder — client guard", () => {
 		const store = redisReplaySeenSetBuilder(
 			{ client: noopReplayClient } as never,
 			{ lifecycle: undefined } as never,
-		);
+		) as { kind: string };
 		expect(store).toBeDefined();
 		expect(store.kind).toBe("redis");
 	});
@@ -124,7 +124,7 @@ describe("redisSessionFamilyIndexBuilder — client guard", () => {
 		const adapter = redisSessionFamilyIndexBuilder(
 			{ client: noopSidSortedSetClient } as never,
 			{ lifecycle: undefined } as never,
-		);
+		) as { kind: string };
 		expect(adapter).toBeDefined();
 		expect(adapter.kind).toBe("redis");
 	});
@@ -141,7 +141,7 @@ describe("redisSessionFederationIndexBuilder — client guard", () => {
 		const adapter = redisSessionFederationIndexBuilder(
 			{ client: noopSidSortedSetClient } as never,
 			{ lifecycle: undefined } as never,
-		);
+		) as { kind: string };
 		expect(adapter).toBeDefined();
 		expect(adapter.kind).toBe("redis");
 	});
@@ -158,7 +158,7 @@ describe("redisSessionRPRegistryBuilder — client guard", () => {
 		const adapter = redisSessionRPRegistryBuilder(
 			{ client: noopRPRegistryClient } as never,
 			{ lifecycle: undefined } as never,
-		);
+		) as { kind: string };
 		expect(adapter).toBeDefined();
 		expect(adapter.kind).toBe("redis");
 	});
@@ -175,7 +175,7 @@ describe("redisUserSessionStoreBuilder — client guard", () => {
 		const adapter = redisUserSessionStoreBuilder(
 			{ client: noopUserSessionStoreClient } as never,
 			{ lifecycle: undefined } as never,
-		);
+		) as { kind: string };
 		expect(adapter).toBeDefined();
 		expect(adapter.kind).toBe("redis");
 	});

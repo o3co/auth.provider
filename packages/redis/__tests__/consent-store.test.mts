@@ -17,7 +17,7 @@
 
 import type { PendingConsentRecord } from "@o3co/auth-provider-core";
 import { PENDING_CONSENT_PER_SESSION_LIMIT } from "@o3co/auth-provider-core";
-import Redis from "ioredis";
+import { Redis } from "ioredis";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
 	CONSENT_EXPIRY_SLACK_MS,
@@ -274,7 +274,7 @@ describe("createRedisPendingConsentStore — what is Redis-specific", () => {
 		await store.set(parked({ challenge: "ch-2" }));
 		expect(await store.consume("ch-1")).not.toBeNull();
 		expect(await raw.exists(`${prefix}{pending}:ch:ch-1`)).toBe(0);
-		expect(await raw.zrange(`${prefix}{pending}:sess:sess-1`, 0, -1)).toEqual(["ch-2"]);
+		expect(await raw.zrange(`${prefix}{pending}:sess:sess-1`, "0", "-1")).toEqual(["ch-2"]);
 	});
 
 	it("reads without spending, and reclaims a record read past its expiry", async () => {
@@ -286,7 +286,7 @@ describe("createRedisPendingConsentStore — what is Redis-specific", () => {
 		expect(await raw.exists(`${prefix}{pending}:ch:ch-1`)).toBe(1);
 		expect(await store.get("ch-old")).toBeNull();
 		expect(await raw.exists(`${prefix}{pending}:ch:ch-old`)).toBe(0);
-		expect(await raw.zrange(`${prefix}{pending}:sess:sess-1`, 0, -1)).toEqual(["ch-1"]);
+		expect(await raw.zrange(`${prefix}{pending}:sess:sess-1`, "0", "-1")).toEqual(["ch-1"]);
 	});
 
 	it("moves a challenge re-parked by another session out of the first session's index", async () => {
@@ -295,7 +295,7 @@ describe("createRedisPendingConsentStore — what is Redis-specific", () => {
 		await store.set(parked({ sessionId: "sess-a" }));
 		await store.set(parked({ sessionId: "sess-b" }));
 		expect(await raw.exists(`${prefix}{pending}:sess:sess-a`)).toBe(0);
-		expect(await raw.zrange(`${prefix}{pending}:sess:sess-b`, 0, -1)).toEqual(["ch-1"]);
+		expect(await raw.zrange(`${prefix}{pending}:sess:sess-b`, "0", "-1")).toEqual(["ch-1"]);
 		expect((await store.get("ch-1"))?.sessionId).toBe("sess-b");
 	});
 

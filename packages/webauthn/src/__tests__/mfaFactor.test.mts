@@ -494,7 +494,7 @@ describe("an assertion's verification", () => {
 			...overrides,
 		});
 
-	it("verifies the credential named by the assertion against the challenge taken, and answers its new count and backup state as its next data", async () => {
+	it("verifies the credential named by the assertion against the challenge taken and the subject's user handle, and answers its new count and backup state as its next data", async () => {
 		asserted(6);
 		const factor = factorWith("required");
 		expect(await verify(factor, assertion("Y3JlZC1h"))).toEqual({
@@ -515,6 +515,7 @@ describe("an assertion's verification", () => {
 			expectedOrigins: ["https://test.example"],
 			expectedTopOrigins: ["https://embedder.test.example"],
 			userVerification: "required",
+			expectedUserHandle: new Uint8Array(32).fill(7),
 		});
 	});
 
@@ -579,6 +580,7 @@ describe("an assertion's verification", () => {
 		"origin_mismatch",
 		"top_origin_mismatch",
 		"rp_id_mismatch",
+		"user_handle_mismatch",
 		"unknown",
 	] as const)("refuses as invalid an assertion the library refuses: %s", async (reason) => {
 		mockAssertion.mockResolvedValueOnce({ ok: false, reason });
@@ -596,17 +598,22 @@ describe("an assertion's verification", () => {
 		expect(mockAssertion).not.toHaveBeenCalled();
 	});
 
-	it("refuses as invalid an assertion whose user handle is not the credential's, checking nothing", async () => {
+	it("hands the verification an assertion whose user handle is not the credential's, with the subject's to hold it to, and answers its user_handle_mismatch as invalid", async () => {
+		mockAssertion.mockResolvedValueOnce({ ok: false, reason: "user_handle_mismatch" });
+		const other = b64url(new Uint8Array(32).fill(9));
 		const proof = assertion("Y3JlZC1h", {
 			response: {
 				clientDataJSON: "Y2Q",
 				authenticatorData: "YWQ",
 				signature: "c2ln",
-				userHandle: b64url(new Uint8Array(32).fill(9)),
+				userHandle: other,
 			},
 		});
 		expect(await verify(factorWith(), proof)).toEqual({ ok: false, reason: "invalid" });
-		expect(mockAssertion).not.toHaveBeenCalled();
+		expect(mockAssertion).toHaveBeenCalledTimes(1);
+		const [input] = mockAssertion.mock.calls[0] ?? [];
+		expect(input?.response.response.userHandle).toBe(other);
+		expect(input?.expectedUserHandle).toEqual(new Uint8Array(32).fill(7));
 	});
 
 	it("reads a user handle of null as none: it verifies, and the library is handed no user handle", async () => {

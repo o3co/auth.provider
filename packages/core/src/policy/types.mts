@@ -35,6 +35,12 @@ export interface GrantPolicyContext {
 	readonly issuer: string;
 }
 
+/**
+ * What a policy returns. `outcome` must be exactly `"allow"` or `"deny"`:
+ * any other value, or a value that is not such a record, is an invalid
+ * decision, answered `500 server_error` and never allowed
+ * (`readGrantPolicyDecision`).
+ */
 export type GrantPolicyDecision =
 	| {
 			readonly outcome: "allow";

@@ -19,12 +19,15 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { createRedisDeviceCodeStore } from "../src/device-code-store.mjs";
 import { makeIoredisClients } from "../src/ioredis.mjs";
 
+/** The fake's members a test replaces or reads back as mocks. */
 interface FakeIoredis {
 	evalsha: ReturnType<typeof vi.fn>;
 	eval: ReturnType<typeof vi.fn>;
+	multi: ReturnType<typeof vi.fn>;
+	duplicate: ReturnType<typeof vi.fn>;
 }
 
-function makeFakeIoredis(overrides: Partial<FakeIoredis> = {}): Redis {
+function makeFakeIoredis(overrides: Partial<FakeIoredis> = {}): Redis & FakeIoredis {
 	const fake = {
 		evalsha: vi.fn(),
 		eval: vi.fn(),
@@ -50,7 +53,7 @@ function makeFakeIoredis(overrides: Partial<FakeIoredis> = {}): Redis {
 		script: vi.fn(),
 		...overrides,
 	};
-	return fake as unknown as Redis;
+	return fake as unknown as Redis & FakeIoredis;
 }
 
 describe("makeIoredisClients federationTokenStoreClient.compareAndDelete", () => {
