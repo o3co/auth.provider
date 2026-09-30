@@ -181,7 +181,11 @@ export interface SessionSidSortedSetClient {
  * Backing client for the SessionFamilyIndex adapter: the sorted set, and the
  * session's "ended" mark beside it. The mark's two methods are optional, and
  * the index has core's `SupportsSessionEnd` only over a client with both.
- * Each call's reply is in before the index sends its next.
+ *
+ * What a client owes that capability: its writes (`writeEndedMark`,
+ * `multi().exec()`) resolve only once the server has replied, and its reads
+ * (`hasEndedMark`, `zRange`) are served by the primary. The index sends each
+ * command only after the previous one has resolved.
  */
 export interface SessionFamilyIndexClient extends SessionSidSortedSetClient {
 	/** Write the mark at `key`, expiring at the epoch-ms `msTimestamp` (`SET key 1 PXAT msTimestamp`). */
