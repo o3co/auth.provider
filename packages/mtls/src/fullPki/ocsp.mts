@@ -69,7 +69,6 @@ import {
 	checkSignatureAlgorithm,
 } from "./algorithms.mjs";
 import {
-	type CriticalExtensionCheck,
 	checkCriticalExtensions,
 	checkOcspCriticalExtensions,
 	extensionValueParsed,
@@ -86,6 +85,7 @@ import {
 	type OcspUnavailableReason,
 } from "./ocspAnswer.mjs";
 import { equalBytes } from "./ocspBytes.mjs";
+import { ocspResponders } from "./ocspResponders.mjs";
 
 export type {
 	OcspCertificateStatus,
@@ -93,11 +93,9 @@ export type {
 	OcspResponderUnavailable,
 	OcspUnavailableReason,
 } from "./ocspAnswer.mjs";
+export { checkMustStaple } from "./ocspMustStaple.mjs";
+export { type OcspResponders, ocspResponders } from "./ocspResponders.mjs";
 
-/** OID of `authorityInfoAccess` (RFC 5280 §4.2.2.1). */
-const OID_AUTHORITY_INFO_ACCESS = "1.3.6.1.5.5.7.1.1";
-/** `id-ad-ocsp` access method. */
-const OID_AD_OCSP = "1.3.6.1.5.5.7.48.1";
 /** `id-pkix-ocsp-basic` response type (RFC 6960 §4.2.1). */
 const OID_OCSP_BASIC = "1.3.6.1.5.5.7.48.1.1";
 /** `id-pkix-ocsp-nonce` (RFC 6960 §4.4.1). */
@@ -108,15 +106,8 @@ const OID_KP_OCSP_SIGNING = "1.3.6.1.5.5.7.3.9";
 const OID_OCSP_NOCHECK = "1.3.6.1.5.5.7.48.1.5";
 /** `extendedKeyUsage` (RFC 5280 §4.2.1.12). */
 const OID_EXT_KEY_USAGE = "2.5.29.37";
-/** The TLS feature extension (RFC 7633). */
-const OID_TLS_FEATURE = "1.3.6.1.5.5.7.1.24";
 /** SHA-1, the `CertID` hash. */
 const OID_SHA1 = "1.3.14.3.2.26";
-/** `GeneralName` tag for `uniformResourceIdentifier`. */
-const GENERAL_NAME_URI = 6;
-/** TLS extension types that mean OCSP must-staple (RFC 7633 §4.2.3.1). */
-const TLS_FEATURE_STATUS_REQUEST = 5;
-const TLS_FEATURE_STATUS_REQUEST_V2 = 17;
 /** RFC 8954 §2.1 bounds the nonce to 1..32 bytes. */
 const NONCE_BYTES = 16;
 
@@ -145,79 +136,6 @@ export const OCSP_CLOCK_SKEW_MS = 5 * 60_000;
  * stays in the same order of magnitude as the negative window.
  */
 export const OCSP_UNDATED_RESPONSE_MAX_AGE_MS = 10 * 60_000;
-
-export type OcspResponders =
-	| { readonly ok: true; readonly urls: readonly string[] }
-	| { readonly ok: false; readonly reason: "no_responder"; readonly detail: string };
-
-const isHttpUrl = (value: string): boolean => /^https?:\/\//i.test(value);
-
-/**
- * The OCSP responders a certificate advertises, in the order listed. RFC
- * 5280 §4.2.2.1 lets a CA list several; they are tried in turn until one
- * yields an answer that can be used. Only absolute HTTP(S) URIs are kept —
- * a certificate left with none is `no_responder`, the OCSP twin of
- * `no_distribution_point`: an honest "cannot check", not a silent pass.
- */
-export const ocspResponders = (certificate: pkijs.Certificate): OcspResponders => {
-	const extension = certificate.extensions?.find((ext) => ext.extnID === OID_AUTHORITY_INFO_ACCESS);
-	const parsed = extension?.parsedValue as pkijs.InfoAccess | undefined;
-	const urls = (parsed?.accessDescriptions ?? [])
-		.filter((description) => description.accessMethod === OID_AD_OCSP)
-		.filter((description) => description.accessLocation.type === GENERAL_NAME_URI)
-		.map((description) => description.accessLocation.value)
-		.filter((value): value is string => typeof value === "string" && isHttpUrl(value));
-	if (urls.length === 0) {
-		return {
-			ok: false,
-			reason: "no_responder",
-			detail: "certificate advertises no id-ad-ocsp HTTP(S) URI in authorityInfoAccess",
-		};
-	}
-	return { ok: true, urls };
-};
-
-/**
- * RFC 7633: a certificate whose TLS feature extension names `status_request`
- * (or `status_request_v2`) demands a stapled OCSP response, which this server
- * cannot present for a client certificate. It is refused under every
- * revocation mode, `disabled` included, since the demand is the
- * certificate's own. Other feature numbers are ignored; an undecodable value
- * is refused whether or not the extension is critical.
- */
-export const checkMustStaple = (leaf: pkijs.Certificate): CriticalExtensionCheck => {
-	const extension = leaf.extensions?.find((ext) => ext.extnID === OID_TLS_FEATURE);
-	if (extension === undefined) return { ok: true };
-	const unparseable: CriticalExtensionCheck = {
-		ok: false,
-		step: "unparseable TLS feature extension",
-		detail:
-			"the leaf carries a TLS feature extension (RFC 7633) whose value could not be " +
-			"decoded, so the requirement it states cannot be honoured",
-	};
-	const decoded = asn1js.fromBER(extension.extnValue.valueBlock.valueHexView);
-	if (decoded.offset === -1 || !(decoded.result instanceof asn1js.Sequence)) return unparseable;
-	const features: number[] = [];
-	for (const item of decoded.result.valueBlock.value) {
-		if (!(item instanceof asn1js.Integer)) return unparseable;
-		features.push(item.valueBlock.valueDec);
-	}
-	if (
-		features.includes(TLS_FEATURE_STATUS_REQUEST) ||
-		features.includes(TLS_FEATURE_STATUS_REQUEST_V2)
-	) {
-		return {
-			ok: false,
-			step: "OCSP must-staple cannot be satisfied",
-			detail:
-				"the leaf carries the TLS feature extension (RFC 7633) requiring status_request, " +
-				"and no stapled OCSP response can be presented for a client certificate here — " +
-				"the certificate's own requirement cannot be met, so it is refused rather than " +
-				"treated as unstapled",
-		};
-	}
-	return { ok: true };
-};
 
 /** `CRLReason` names (RFC 5280 §5.3.1), for the audit trail. */
 const CRL_REASON_NAMES: Readonly<Record<number, string>> = {
