@@ -31,9 +31,9 @@ export const MIN_SECRET_ENTROPY_BYTES = 32;
 
 /** Identifies the setting under check so the failure can name it. */
 export interface SecretEntropyRequirement {
-	/** Dotted config path, e.g. `"session.secret"`. */
+	/** Dotted config path, e.g. `"session-store.secret"`. */
 	readonly configKey: string;
-	/** Environment variable the shipped HOCON binds it to, e.g. `"SESSION_SECRET"`. */
+	/** Environment variable the shipped HOCON binds it to, e.g. `"SESSION_STORE_SECRET"`. */
 	readonly envVar: string;
 	/** Override for {@link MIN_SECRET_ENTROPY_BYTES}. */
 	readonly minBytes?: number;

@@ -57,7 +57,7 @@ export const SUBJECT_REVOCATION_MIN_RETENTION_MS = FEDERATION_GRANT_LIFETIME_CEI
 /**
  * Milliseconds an operator configured, or a refusal that names the path. The
  * token lifetimes have resolvers of their own in the configuration schema;
- * this reads what has none, `session.maxAge`.
+ * this reads what has none, the session store's `session-store.maxAge`.
  */
 const lifetimeMs = (value: unknown, path: string): number => {
 	const raw = typeof value === "number" ? value : Number.NaN;
@@ -74,7 +74,7 @@ const lifetimeMs = (value: unknown, path: string): number => {
 
 /**
  * The session lifetime a `sessionCookiePolicy` carries, held to the rule the
- * configuration's `session.maxAge` is held to where it is parsed — whole
+ * configuration's `session-store.maxAge` is held to where it is parsed — whole
  * milliseconds from 1 to the one-year ceiling, as the schema and the session
  * store's provider hold it — or a refusal that names the slot's member.
  */
@@ -144,7 +144,7 @@ export function resolveSubjectRevocationHorizonMs(
 		readonly sessionCookie?: Pick<SessionCookiePolicy, "maxAgeMs">;
 	} = {},
 ): number {
-	const root = config as { session?: { maxAge?: unknown } } | undefined;
+	const root = config as { "session-store"?: { maxAge?: unknown } } | undefined;
 	const { tokenSettings, sessionCookie } = from;
 	// Through the key's one reader, which holds it to the schema's rule.
 	const refreshMs =
@@ -169,7 +169,7 @@ export function resolveSubjectRevocationHorizonMs(
 				)) * 1000;
 	const sessionMs =
 		sessionCookie === undefined
-			? lifetimeMs(root?.session?.maxAge, "session.maxAge")
+			? lifetimeMs(root?.["session-store"]?.maxAge, "session-store.maxAge")
 			: slotLifetimeMs(sessionCookie.maxAgeMs, "sessionCookiePolicy.maxAgeMs");
 	const longest = Math.max(
 		sessionMs,

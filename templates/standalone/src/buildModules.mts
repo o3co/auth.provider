@@ -330,7 +330,7 @@ export function buildModules(config: AppConfig, overrides: BuildModulesOverrides
 	return [
 		// MUST stay first: it declares no `before`/`after`, so this position is
 		// what mounts express-session ahead of every session-consuming module.
-		// Built from `config` so that `session.storage.type = "memory"` declares
+		// Built from `config` so that `session-store.storage.type = "memory"` declares
 		// itself replica-unsafe and `core.deployment.mode = "multi"` refuses it.
 		sessionStoreModuleFor(config),
 		// Under `/oauth` beside `oauthModule`, each parsing its own requests, so

@@ -18,24 +18,25 @@
  * The session cookie's attributes as core's `SessionCookiePolicy` — the
  * `sessionCookiePolicy` slot the session store's module provides, for a module
  * that sets a cookie of its own beside the session's or sizes what must
- * outlive a session, instead of reading `session.*`.
+ * outlive a session, instead of reading `session-store.*`.
  *
  * The attributes are the ones express-session is given
- * (`./modules/sessionStoreModule.mts`): `session.name`, `session.secure`,
- * `session.sameSite`, `session.domain` (`null` or empty: a host-only cookie)
- * and `session.maxAge`, the cookie's `Max-Age` and a session record's
- * lifetime. The signing secret is not among them.
+ * (`./modules/sessionStoreModule.mts`): `session-store.name`,
+ * `session-store.secure`, `session-store.sameSite`, `session-store.domain`
+ * (`null` or empty: a host-only cookie) and `session-store.maxAge`, the
+ * cookie's `Max-Age` and a session record's lifetime. The signing secret is
+ * not among them.
  *
  * One rule ({@link sessionCookieRefusal}) decides which sections yield a
- * cookie; the store's configSchema refuses at validation what it refuses, so
- * no section yields a policy that breaks core's contract
+ * cookie; the store's section schema refuses at validation what it refuses,
+ * so no section yields a policy that breaks core's contract
  * (`sessionCookiePolicyContract`) or a cookie the store mounts and the policy
  * refuses.
  */
 
 import { MAX_DURATION_MS, type SessionCookiePolicy } from "@o3co/auth-provider-core";
 
-/** The `session.*` keys the policy is read from. */
+/** The `session-store.*` keys the policy is read from. */
 export interface SessionCookieConfigSlice {
 	readonly name: string;
 	readonly secure: boolean;
@@ -44,7 +45,7 @@ export interface SessionCookieConfigSlice {
 	readonly maxAge: number;
 }
 
-/** Why no session cookie is built from a section: the `session.*` key it names, and the rule. */
+/** Why no session cookie is built from a section: the `session-store.*` key it names, and the rule. */
 export interface SessionCookieRefusal {
 	readonly key: "name" | "secure" | "domain" | "maxAge";
 	readonly message: string;
@@ -62,7 +63,7 @@ const HOST_PREFIX = /^__host-/i;
 const SECURE_PREFIX = /^__secure-/i;
 
 /**
- * Why `session` yields no session cookie, or `undefined`: a cookie a browser
+ * Why `session-store` yields no session cookie, or `undefined`: a cookie a browser
  * drops (a `__Host-` name not secure or with a domain, an empty one included; a
  * `__Secure-` name or `SameSite=None` not secure), a name that is not an RFC
  * 6265 token, a domain a cookie cannot carry, a lifetime outside 1 to
@@ -76,41 +77,45 @@ export function sessionCookieRefusal(
 		return {
 			key: "name",
 			message:
-				"session.name with __Host- prefix requires session.secure=true and session.domain=null",
+				"session-store.name with __Host- prefix requires session-store.secure=true and session-store.domain=null",
 		};
 	}
 	if (!COOKIE_NAME.test(name)) {
 		return {
 			key: "name",
-			message: `session.name ${JSON.stringify(name)} is not a cookie name (an RFC 6265 token)`,
+			message: `session-store.name ${JSON.stringify(name)} is not a cookie name (an RFC 6265 token)`,
 		};
 	}
 	if (SECURE_PREFIX.test(name) && secure !== true) {
 		return {
 			key: "name",
-			message: "session.name with __Secure- prefix requires session.secure=true",
+			message: "session-store.name with __Secure- prefix requires session-store.secure=true",
 		};
 	}
 	if (domain !== null && domain !== "" && !COOKIE_DOMAIN.test(domain)) {
 		return {
 			key: "domain",
-			message: `session.domain ${JSON.stringify(domain)} is not a cookie domain (a host name, one leading dot allowed)`,
+			message: `session-store.domain ${JSON.stringify(domain)} is not a cookie domain (a host name, one leading dot allowed)`,
 		};
 	}
 	if (sameSite === "none" && secure !== true) {
-		return { key: "secure", message: 'session.sameSite = "none" requires session.secure = true' };
+		return {
+			key: "secure",
+			message:
+				'session-store.sameSite = "none" requires session-store.secure = true (SESSION_STORE_SECURE=true): browsers drop a SameSite=None cookie that is not Secure',
+		};
 	}
 	if (!Number.isInteger(maxAge) || maxAge < 1 || maxAge > MAX_DURATION_MS) {
 		return {
 			key: "maxAge",
-			message: `session.maxAge must be a whole number of milliseconds from 1 to ${MAX_DURATION_MS}`,
+			message: `session-store.maxAge must be a whole number of milliseconds from 1 to ${MAX_DURATION_MS}`,
 		};
 	}
 	return undefined;
 }
 
 /**
- * The session cookie's attributes from `session`, frozen. Throws, with the
+ * The session cookie's attributes from `session-store`, frozen. Throws, with the
  * refusal's message, where {@link sessionCookieRefusal} refuses the section.
  */
 export function sessionCookiePolicyFrom(session: SessionCookieConfigSlice): SessionCookiePolicy {

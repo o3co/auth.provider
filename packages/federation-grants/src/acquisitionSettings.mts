@@ -40,8 +40,7 @@ export interface FederationGrantAcquisitionSettings {
 	readonly consentUrl: string;
 	/**
 	 * Where connect sends a browser that is not signed in, and how it comes
-	 * back: the `loginEntry` slot the session module provides, over
-	 * `endpoints.login.url`.
+	 * back: the `loginEntry` slot the session module provides.
 	 */
 	readonly login: LoginEntry;
 	readonly identityLookup: FederationGrantIdentityLookup;
@@ -70,7 +69,7 @@ const issuerOrigin = (issuer: unknown): string => {
 };
 
 /**
- * The consent page: no default, unlike `endpoints.consent.url`, because
+ * The consent page: no default, unlike the oauth module's consent page, because
  * enabling grants is a recorded statement that a page exists. A path, or an
  * absolute URL on the provider's own origin, and nothing else: the page reads
  * what it must show with the session cookie, and this provider never answers
@@ -127,14 +126,12 @@ const consentUrl = (section: AcquisitionSection | undefined, origin: string): st
 
 /**
  * The login page connect sends a browser that is not signed in to: the
- * `loginEntry` slot, which the session module provides from
- * `endpoints.login.url`. Optional in the manifest, so a deployment that
- * leaves grants off owes nothing; required here, once they are on.
+ * `loginEntry` slot, which the session module provides. Optional in the
+ * manifest, so a deployment that leaves grants off owes nothing; required
+ * here, once they are on.
  *
- * Core's schema takes an empty page and only `oauthModule` requires one, so
- * a deployment without that module could otherwise boot and answer every
- * such browser with a 500. An entry built with no page fails where its `url`
- * is read: here, at boot.
+ * An entry built with no page configured fails where its `url` is read: here,
+ * at boot, rather than answering every such browser with a 500.
  */
 const loginEntry = (entry: LoginEntry | undefined): LoginEntry => {
 	if (entry === undefined) {
@@ -148,7 +145,7 @@ const loginEntry = (entry: LoginEntry | undefined): LoginEntry => {
 		void entry.url;
 	} catch (error) {
 		return refuse(
-			"endpoints.login.url must be configured: the connect flow sends a browser that is not " +
+			"the loginEntry slot names no login page: the connect flow sends a browser that is not " +
 				"signed in to the login page, and back to the link it came from",
 			{ cause: error },
 		);

@@ -21,8 +21,6 @@ import {
 	coerceBooleanFromEnv,
 	consoleLogger,
 	defineModule,
-	LOGIN_RETURN_PARAMETER,
-	loginPageCarriesReturn,
 	type Module,
 	type ProviderDeps,
 	readAccessTokenRevocationMode,
@@ -38,36 +36,6 @@ import { CLIENT_ASSERTION_ALGORITHMS } from "./middleware/clientAssertion.mjs";
 import { OAUTH_RATE_LIMIT_PREFIXES } from "./rateLimitPrefixes.mjs";
 import { createOAuthRouter } from "./routes.mjs";
 import { oauthTokenSettingsFrom } from "./tokenSettings.mjs";
-
-/**
- * Config-slice schema for `oauthModule`. `/authorize` redirects an
- * unauthenticated request to `config.endpoints.login.url` when no module
- * provides the `loginEntry` slot, and the session module builds that slot
- * from the same key, so both rules below hold either way:
- *
- * - non-empty (core's `CoreConfigSchema` requires only a string): an empty
- *   URL names no page;
- * - no `redirect_to` of its own: `/authorize` adds one naming the request to
- *   come back to (core's `LoginEntry` contract), and with two a page reading
- *   the first would send the user to the preconfigured target.
- *
- * Parsed by boot's composed parse over what core's base made of the
- * configuration, so boot fails with
- * `BootError(reason: "config-validation-failed")`, the issue at
- * `endpoints.login.url`, before any request hits the route.
- */
-const oauthConfigSchema = z.object({
-	endpoints: z.object({
-		login: z.object({
-			url: z
-				.string()
-				.min(1)
-				.refine((url) => !loginPageCarriesReturn(url), {
-					message: `endpoints.login.url must not carry a "${LOGIN_RETURN_PARAMETER}" query parameter of its own: the provider adds "${LOGIN_RETURN_PARAMETER}" when it sends a browser to the login page, naming the request to come back to`,
-				}),
-		}),
-	}),
-});
 
 /**
  * A list an environment variable may carry as one comma-separated string:
@@ -202,7 +170,6 @@ export const oauthModule = (_params: { config: AppConfig }): Module => {
 	>({
 		name: "oauth",
 		section: SECTION,
-		configSchema: oauthConfigSchema,
 		requires: [
 			"config", // createOAuthRouter reads config.oauth.jwt.issuer, accessToken / refreshToken expiry
 			"clientRepository",
@@ -227,7 +194,7 @@ export const oauthModule = (_params: { config: AppConfig }): Module => {
 			"pendingConsentStore", // where the consent step parks a request; the memory consent module provides it with consentStore, and the router refuses one without the other
 			"federationProviders", // synthetic — boot planner injects ReadonlyMap from federation contributions
 			"replaySeenSet", // jti single-use for private_key_jwt client assertions; server_error on that path when absent
-			"loginEntry", // the login page /authorize sends a browser to, which the session module provides; endpoints.login.url is read when absent
+			"loginEntry", // the login page /authorize sends a browser to, which the session module provides; required to serve /authorize
 			"logger", // structured logger; falls back to consoleLogger when absent
 		],
 		// Optional to wire, not optional to decide. `auditSink` absence must

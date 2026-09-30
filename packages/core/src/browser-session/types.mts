@@ -90,7 +90,7 @@ export type NavigationVerdict =
  * The token's signing key is derived from the session cookie's secret, which
  * the session store's module owns, while the session module provides the
  * guard: the guard's provider signs and checks the token through
- * `csrfTokenSigner`, and reads no `session.secret`.
+ * `csrfTokenSigner`, and reads no `session-store.secret`.
  */
 export interface CsrfGuard {
 	/** The cookie the double-submit token is set in; script reads it. */
@@ -129,9 +129,9 @@ export interface CsrfGuard {
  * a double-submit token with, without holding the key.
  *
  * The key's one owner, the module owning the session cookie's secret
- * (`session.secret`, the session store's), derives it from that secret for
- * this purpose alone, so a token's signature is never a session cookie's nor
- * an oracle for one. The derivation is the owner's: providers that derive it
+ * (`session-store.secret`, the session store's), derives it from that secret
+ * for this purpose alone, so a token's signature is never a session cookie's
+ * nor an oracle for one. The derivation is the owner's: providers that derive it
  * differently do not verify each other's tokens (switching invalidates the
  * short-lived outstanding ones), and a provider that must keep verifying an
  * earlier one's tokens pins that derivation in its own tests. Neither the

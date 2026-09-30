@@ -31,7 +31,7 @@
 # - **Scale out.** This is one replica (CORE_DEPLOYMENT_MODE=single). Before
 #   `--scale app=N`, set CORE_DEPLOYMENT_MODE=multi and read that same README
 #   section — boot will then refuse any in-memory store that must be shared.
-# - **Invent secrets.** SESSION_SECRET comes from `.env`, which is required
+# - **Invent secrets.** SESSION_STORE_SECRET comes from `.env`, which is required
 #   here — chmod 600 it, keep it out of git (`git local-files` or your secret
 #   manager of choice), and never bake it into the image. The client
 #   registry's secrets are yours to write too; give them as bcrypt hashes.
@@ -65,7 +65,7 @@ services:
         condition: service_healthy
     env_file:
       # Required, unlike the dev file: a production boot without
-      # SESSION_SECRET (or with the sample one) must fail loudly here, not
+      # SESSION_STORE_SECRET (or with the sample one) must fail loudly here, not
       # serve quietly with a guessable secret.
       - path: .env
         required: true
@@ -121,14 +121,14 @@ services:
       OAUTH_JWT_PUBLIC_KEY_PATH: /run/secrets/jwt_public_key
       CLIENT_PATH: /run/secrets/client_registry
       # `environment` wins over `env_file`, which is the point here:
-      # `.env.example` ships SESSION_SECURE=false / SESSION_NAME=auth.sid so a
+      # `.env.example` ships SESSION_STORE_SECURE=false / SESSION_STORE_NAME=auth.sid so a
       # plain-HTTP local run works, and this file requires that same `.env`.
       # Behind the TLS this compose assumes, a non-Secure session cookie is the
       # session handed to anyone who can read one plaintext hop. The default
       # `__Host-` cookie name is restored with it — the prefix browsers only
       # honour on a Secure cookie.
-      SESSION_SECURE: "true"
-      SESSION_NAME: __Host-auth.session
+      SESSION_STORE_SECURE: "true"
+      SESSION_STORE_NAME: __Host-auth.session
       # Every Redis-backed store shares the compose-network Redis below.
       #
       # These are stated in full rather than inherited from
@@ -139,8 +139,8 @@ services:
       # layer and are left there on purpose — restating a value that agrees is
       # a second place to forget to change.
       REFRESH_TOKEN_FAMILY_STORE_REDIS_URL: redis://redis:6379
-      SESSION_STORAGE_TYPE: redis
-      SESSION_STORAGE_REDIS_URL: redis://redis:6379
+      SESSION_STORE_STORAGE_TYPE: redis
+      SESSION_STORE_STORAGE_REDIS_URL: redis://redis:6379
       # The UserSession stores: the provider's own record of who is signed in,
       # which RPs a session has touched, and the family / federation indexes
       # hanging off it. They MUST be on Redis whenever the express-session

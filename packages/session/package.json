@@ -11,10 +11,12 @@
 		".": {
 			"import": "./dist/index.mjs",
 			"types": "./dist/index.d.mts"
-		}
+		},
+		"./reference.conf": "./config/reference.conf"
 	},
 	"files": [
 		"dist",
+		"config",
 		"README.md"
 	],
 	"repository": {
@@ -35,6 +37,9 @@
 		"test": "vitest run",
 		"test:coverage": "vitest run --coverage"
 	},
+	"dependencies": {
+		"zod": "^4.6.5"
+	},
 	"peerDependencies": {
 		"@o3co/auth-provider-core": "workspace:^",
 		"connect-redis": "^10.0.0",
@@ -52,6 +57,7 @@
 	},
 	"devDependencies": {
 		"@o3co/auth-provider-core": "workspace:*",
+		"@o3co/ts.hocon": "^1.13.0",
 		"@types/express": "^5.0.6",
 		"@types/express-session": "^1",
 		"@types/supertest": "^7.2.1",
