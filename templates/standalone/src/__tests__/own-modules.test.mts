@@ -49,12 +49,15 @@ import { describe, expect, it, vi } from "vitest";
 import { buildModules } from "../buildModules.mjs";
 import {
 	expectedSessionRequirements,
+	readLogging,
 	readOwnLayers,
 	readSwitches,
 	resolveConfigPaths,
 	resolveForBoot,
+	SWITCHES,
 } from "../configPath.mjs";
-import { keyStoreModule, standaloneRedisClientsModule } from "../modules.mjs";
+import { createAppLogger } from "../logger.mjs";
+import { keyStoreModule, loggingModule, standaloneRedisClientsModule } from "../modules.mjs";
 
 const configDir = fileURLToPath(new URL("../../config", import.meta.url));
 /** The template's own defaults: what its modules declare as their sections' reference. */
@@ -168,7 +171,7 @@ describe("the template's config/reference.conf", () => {
 		expect(
 			packageReferenceProblems({
 				reference: TEMPLATE_REFERENCE,
-				modules: [keyStoreModule, standaloneRedisClientsModule],
+				modules: [loggingModule, keyStoreModule, standaloneRedisClientsModule],
 				read: (path) => parseFile(path, { env: {} }).toObject(),
 			}),
 		).toEqual([]);
@@ -178,6 +181,42 @@ describe("the template's config/reference.conf", () => {
 		const own = readOwnLayers(ownFiles(), { env: BASE_ENV });
 		const modules = buildModules(readSwitches(own), { environment: "development" });
 		expect(moduleReferences(modules).map((url) => url.href)).toContain(TEMPLATE_REFERENCE.href);
+	});
+});
+
+describe("logging", () => {
+	it("owns logging, and requires nothing", () => {
+		expect(loggingModule.name).toBe("logging");
+		expect(loggingModule.section?.at).toBeUndefined();
+		expect(loggingModule.section?.reference?.href).toBe(TEMPLATE_REFERENCE.href);
+		expect(loggingModule.requires ?? []).toEqual([]);
+		expect(loggingModule.optional ?? []).toEqual([]);
+	});
+
+	it("is loaded by the shipped composition, so boot parses its section", () => {
+		const own = readOwnLayers(ownFiles(), { env: BASE_ENV });
+		const modules = buildModules(readSwitches(own), { environment: "development" });
+		expect(named(modules, "logging")).toBe(loggingModule);
+	});
+
+	it("is read before boot apart from the switches, which no longer list it", () => {
+		expect(SWITCHES).not.toContain("logging");
+	});
+
+	it.each([
+		["the shipped default", {}, undefined, "info"],
+		["LOG_LEVEL", { LOG_LEVEL: "debug" }, undefined, "debug"],
+		["HOCON an operator writes", {}, 'logging.level = "warn"\n', "warn"],
+		["HOCON over LOG_LEVEL", { LOG_LEVEL: "debug" }, 'logging.level = "error"\n', "error"],
+	])("gives the logger the level %s sets", (_name, env, hocon, level) => {
+		const own = readOwnLayers(ownFiles(hocon), { env: { ...BASE_ENV, ...env } });
+		expect(readLogging(own)).toEqual({ level });
+		expect(createAppLogger(readLogging(own)).level).toBe(level);
+	});
+
+	it("refuses a level it does not know before boot, naming logging.level", () => {
+		const own = readOwnLayers(ownFiles(), { env: { ...BASE_ENV, LOG_LEVEL: "verbose" } });
+		expect(() => readLogging(own)).toThrow(/logging\.level/);
 	});
 });
 
