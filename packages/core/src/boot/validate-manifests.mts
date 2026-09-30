@@ -759,7 +759,7 @@ export function refuseGuardedHostKinds(host: ContributionKindMap | undefined): v
 	for (const kind of PLANNER_OWNED_KINDS) {
 		if (Object.hasOwn(host, kind)) {
 			throw new BootError({
-				message: `contributionKinds replaces the collector for "${kind}", which is the planner's: the modules that own its entries contribute them, and a module may override one.`,
+				message: `contributionKinds replaces the collector for "${kind}", which is the planner's: the modules that own its entries contribute them, ${kind === "admissionActions" ? "and no module overrides one" : "and a module may override one"}.`,
 				reason: "contribution-kind-guarded",
 				stage: "validateManifests",
 				details: { reason: "contribution-kind-guarded", kind },
@@ -786,10 +786,11 @@ const containerShape = (container: unknown): string =>
  *   an object with a Zod `entrySchema` and a `factory` function, so one
  *   written in JavaScript is refused as itself, not as a `TypeError` at
  *   registration;
- * - an action is registered by the module that admits it, never overridden,
- *   and its name and declaration, as normalisation read it
+ * - an action's name and declaration, as normalisation read it
  *   (`admissionActionSnapshots`), are what registration admits
- *   (`admissionActionProblem`).
+ *   (`admissionActionProblem`); an action is registered by the module that
+ *   admits it, so an override of one is refused as the kind guarded
+ *   (`contribution-kind-guarded`).
  *
  * Throws `contribution-malformed`; `name` is absent for a container.
  * @internal
@@ -856,13 +857,18 @@ function checkContributionShapes(
 			for (const entry of entries ?? []) {
 				if (entry.kind !== "admissionActions" || typeof entry.key !== "string") continue;
 				if (channel === "overrides") {
-					refuse(
-						m,
-						"admissionActions",
-						entry.key,
-						channel,
-						"an action is registered by the module that admits it, and its grade is not overridden",
-					);
+					throw new BootError({
+						message: `Module "${m.name}" overrides admissionActions "${entry.key}", which no module may: an action is registered by the module that admits it, and its grade is that module's.`,
+						reason: "contribution-kind-guarded",
+						stage: "validateManifests",
+						details: {
+							reason: "contribution-kind-guarded",
+							kind: "admissionActions",
+							channel: "overrides",
+							module: m.name,
+							name: entry.key,
+						},
+					});
 				}
 				const snapshot = admissionActionSnapshots.get(entry.factory as object);
 				const problem = admissionActionProblem(entry.key, snapshot ?? entry.factory);

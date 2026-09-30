@@ -87,7 +87,9 @@ export function resolverForTests(
 		);
 	}
 	for (const requirement of byName.values()) {
-		checkRemediationsAgainstActions(requirement, (name) => actions.get(name));
+		checkRemediationsAgainstActions(requirement, (name) =>
+			actions.has(name) ? "the test's actions" : undefined,
+		);
 		if (options.allowAnyReach === true) {
 			snapshotReach(requirement);
 			continue;

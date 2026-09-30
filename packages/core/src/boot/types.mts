@@ -1167,11 +1167,17 @@ export interface ComponentAbsenceUndeclaredDetails {
  * a looser budget than the owning module contributed, on a prefix such as
  * RFC 8628 §5.1's device verification — `federationTypes`, and
  * `admissionActions`, whose grades admission hands the requirements. Refused
- * in `createApp`, before the kinds are merged.
+ * in `createApp`, before the kinds are merged. Also a module's
+ * `overrides.admissionActions` entry, at stage 1 (`channel: "overrides"`,
+ * naming the module and the action): an action's grade is its registrant's.
  */
 export interface ContributionKindGuardedDetails {
 	readonly reason: "contribution-kind-guarded";
 	readonly kind: "rateLimitBudgets" | "federationTypes" | "admissionActions";
+	/** Present for a module's override; absent for a host collector. */
+	readonly channel?: "overrides";
+	readonly module?: string;
+	readonly name?: string;
 }
 
 /**

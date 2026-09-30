@@ -764,19 +764,20 @@ export const secondFactorAuthorities = (
 	[...requirements].filter((requirement) => requirement.secondFactorAuthority);
 
 /**
- * Refuses a registered requirement whose remediation is the name of an action
- * `action` answers: registered as a remediation, it would skip every
- * requirement for that action. Boot and `resolverForTests` run it once both
- * kinds have registered.
+ * Refuses a registered requirement whose remediation is the name of a
+ * registered action — `registrant` answers who registered it — naming the
+ * registrant: as a remediation it would skip every requirement for that
+ * action. Boot and `resolverForTests` run it once both kinds have registered.
  */
 export function checkRemediationsAgainstActions(
 	requirement: RegisteredRequirement,
-	action: (name: string) => AdmissionAction | undefined,
+	registrant: (name: string) => string | undefined,
 ): void {
-	const taken = requirement.remediations.filter((remediation) => action(remediation) !== undefined);
-	if (taken.length > 0) {
+	for (const remediation of requirement.remediations) {
+		const by = registrant(remediation);
+		if (by === undefined) continue;
 		throw new RangeError(
-			`session requirement "${requirement.name}": remediation ${taken.map((name) => `"${name}"`).join(", ")} is a registered admission action's name: registered as a remediation it would skip every requirement for that action`,
+			`session requirement "${requirement.name}": remediation "${remediation}" is the name of the admission action ${by} registers: as a remediation it would skip every requirement for that action`,
 		);
 	}
 }
