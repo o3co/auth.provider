@@ -14,6 +14,12 @@
  * limitations under the License.
  */
 
+/**
+ * The `/authorize` handler: runs the stages of RFC 6749 §4.1.1 to §4.1.2 in a
+ * fixed order and stops at the first that answers. It holds the grant policy
+ * hook, evaluated once here so the code exchange never evaluates it again.
+ */
+
 import {
 	type AdmissionDeps,
 	admitSession,
