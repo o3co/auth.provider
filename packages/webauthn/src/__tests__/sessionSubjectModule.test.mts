@@ -249,6 +249,15 @@ describe("webauthnSessionSubjectModule — the manifest", () => {
 		);
 	});
 
+	it("refuses, when its route is built, a resolver on which webauthn.register is not registered, naming the module and the action", () => {
+		expect(() =>
+			routeFactory(bySubject)({
+				sessionRequirementResolver: resolverForTests([]),
+				userSessionStore: {} as never,
+			}),
+		).toThrow(/^webauthnSessionSubjectModule: admits "webauthn\.register", which no module registers/);
+	});
+
 	it("refuses a mapper that is not a function when the module is built", () => {
 		expect(() => webauthnSessionSubjectModule({ subjectFor: undefined as never })).toThrow(
 			TypeError,

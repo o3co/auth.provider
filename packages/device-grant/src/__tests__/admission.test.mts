@@ -428,6 +428,24 @@ describe("device verification on session admission", () => {
 		);
 	});
 
+	it("refuses to be built on a resolver on which an action it admits is not registered, naming the action: a build error, not a 500 per request", () => {
+		expect(() =>
+			createDeviceVerificationHandler({
+				store: createMemoryDeviceCodeStore(),
+				settings,
+				rateLimiter: createMemoryRateLimiter({
+					limits: { device_verification: { limit: 5, windowSeconds: 300 } },
+					defaultLimit: { limit: 60, windowSeconds: 60 },
+				}),
+				userSessionStore: liveSessionStore(),
+				requirements: resolverForTests([], {
+					actions: { "device.lookup": { grade: "grants_nothing" } },
+				}),
+				requireEmailVerified: false,
+			} as never),
+		).toThrow(/^createDeviceVerificationHandler: admits "device\.approve", which no module registers/);
+	});
+
 	it("reads no issuer: the page it answers is the one registration resolved on the issuer — built without one, it answers that page", async () => {
 		const handler = createDeviceVerificationHandler({
 			store: createMemoryDeviceCodeStore(),

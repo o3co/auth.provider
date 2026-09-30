@@ -3790,4 +3790,19 @@ describe("the browser half on session admission", () => {
 			/^createFederationGrantBrowserRouter: requirements must be the sessionRequirementResolver the boot planner built/,
 		);
 	});
+
+	it("refuses to be built on a resolver on which a step's action is not registered, naming the factory and the action", () => {
+		expect(() =>
+			createFederationGrantBrowserRouter({
+				requirements: resolverForTests([], {
+					actions: {
+						"federation_grants.connect": { grade: "use" },
+						"federation_grants.consent": { grade: "use" },
+					},
+				}),
+			} as never),
+		).toThrow(
+			/^createFederationGrantBrowserRouter: admits "federation_grants\.callback", which no module registers/,
+		);
+	});
 });

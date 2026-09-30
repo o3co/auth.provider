@@ -432,13 +432,9 @@ describe("the actions it registers", () => {
 		}
 	});
 
-	it("exports what it registers, for a composition that mounts the router itself", async () => {
-		const { FEDERATION_GRANTS_ADMISSION_ACTIONS } = await import("#/index.mjs");
-		expect(FEDERATION_GRANTS_ADMISSION_ACTIONS).toEqual({
-			"federation_grants.connect": { grade: "use" },
-			"federation_grants.consent": { grade: "use" },
-			"federation_grants.callback": { grade: "use" },
-		});
+	it("exports none of them: the router that admits them is mounted by the module alone", async () => {
+		const entry = await import("#/index.mjs");
+		expect(Object.hasOwn(entry, "FEDERATION_GRANTS_ADMISSION_ACTIONS")).toBe(false);
 	});
 });
 

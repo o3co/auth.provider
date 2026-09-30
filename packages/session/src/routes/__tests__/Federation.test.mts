@@ -1636,6 +1636,24 @@ describe("Federation routes", () => {
 			);
 		});
 
+		it("throws if an action the link flow admits is not registered on the resolver, naming it: a build error, never a 500 per link", () => {
+			expect(() =>
+				createRouter(express, {
+					config: {} as never,
+					requirements: resolverForTests([], {
+						actions: { "session.link": { grade: "credential_change" } },
+					}),
+					federationProviders: new Map(),
+					federationRedirectPolicyResolver: new Map(),
+					userRepository: makeUserRepository(),
+					userSessionStore: makeUserSessionStore(),
+					sessionFederationIndex: makeSessionFederationIndex(),
+					federationTokenStore: makeFederationTokenStore(),
+					providerCallbackUrls: new Map(),
+				}),
+			).toThrow(/^federation routes: admits "session\.link_callback", which no module registers/);
+		});
+
 		it("throws if providerCallbackUrls is missing", () => {
 			expect(() =>
 				createRouter(express, {
