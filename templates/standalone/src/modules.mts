@@ -151,8 +151,8 @@ export const corsModule = defineModule({
 
 /**
  * HTTP module: owns `http {}`, and provides core's `httpSettings` (with the
- * `cors` module's origins) and the host's `httpHostSettings`. Both eager:
- * core and `app.mts` read them, and no module requires them.
+ * `cors` module's origins) and the host's `httpHostSettings`, which is eager:
+ * only `app.mts` reads it, and no module requires it.
  */
 export const httpModule = defineModule({
 	name: "http",

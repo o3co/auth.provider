@@ -62,8 +62,8 @@ const config = handle.components.config; // boot がパースしたもの
 
 | フィールド | 説明 |
 | --- | --- |
-| `http` | ホストプロセスの HTTP 設定 — `port`、`trustProxy`（Express の `trust proxy`: `false` / IP・CIDR レンジ・名前付きレンジ `loopback` / `linklocal` / `uniquelocal` のアドレスリスト / ホップ数 / `true`）、`readinessTimeoutMs`。`httpSettings` を provide するモジュール（standalone テンプレートの `http` モジュール）が所有し、デフォルトもそこにある。core はどれも読まず、デフォルトも持たない。core のスキーマはまだこのセクションを宣言しているので、設定が持つたびにエントリは boot 時に検証される。`true` はプロセスに到達できる誰からの forwarded アドレスも信じるため、プロキシを明示することを推奨 |
-| `logging.level` | composition の logger が出力するレベル。composition root の logging モジュール（standalone テンプレートの `logging`）が所有し、デフォルトもそこにある。core はこれを読まず、スキーマが語彙をまだ宣言している |
+| `http` | ホストプロセスの HTTP 設定 — `port`、`trustProxy`（Express の `trust proxy`: `false` / IP・CIDR レンジ・名前付きレンジ `loopback` / `linklocal` / `uniquelocal` のアドレスリスト / ホップ数 / `true`）、`readinessTimeoutMs`。`httpSettings` を provide するモジュール（standalone テンプレートの `http` モジュール）が所有し、デフォルトもそこにある。core はどれも読まず、デフォルトも持たない。core のスキーマはこのセクションを宣言しているので、設定が持つたびにエントリは boot 時に検証される。`true` はプロセスに到達できる誰からの forwarded アドレスも信じるため、プロキシを明示することを推奨 |
+| `logging.level` | composition の logger が出力するレベル。composition root の logging モジュール（standalone テンプレートの `logging`）が所有し、デフォルトもそこにある。core はこれを読まず、スキーマが語彙を宣言している |
 | `oauth.jwt` | JWT 設定 — `issuer`、`jwksPath`、`jwksCacheMaxAge`、そして `signingKey`（`provider` とそのサブセクション）: `keyStore` を provide するモジュール（standalone テンプレートの `key-store`）のセクションで、デフォルトもそこにある。core は `signingKey` を読まない |
 | `oauth.accessToken.defaultExpiresIn` | リクエストが有効期間を指定しないときに全グラントが発行するアクセストークンの有効期間（秒）。指定できるのは token exchange（`expires_in` パラメータ）だけで、他のグラントはそのパラメータを無視する。有効期間は `resolveAccessTokenLifetime(config)` で読む。スキーマが拒否する値にはキーを名指しした `RangeError` を投げ（規則は `isLifetimeSeconds` で、数値として渡される有効期間のために export されている）、同梱のグラントはすべて構築時に読むので、それが拒否する手組みの config はリクエストではなく構築（と起動）で失敗する |
 | `oauth.accessToken.maxExpiresIn` | token exchange の `expires_in` で得られる上限。超えるリクエストはこの値に切り詰められる。未設定ならデフォルトと同じで、明示的に設定しない限り延長されない。デフォルトがこれを超えると両キーを名指しして起動失敗 |

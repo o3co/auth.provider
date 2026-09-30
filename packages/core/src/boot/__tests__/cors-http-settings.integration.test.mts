@@ -50,7 +50,7 @@ const tokenRoute = defineModule({
 	},
 });
 
-/** A module providing `settings` as the `http` module does: eagerly, since core reads it. */
+/** A module providing `settings` eagerly. */
 const httpModule = (settings: unknown) =>
 	defineModule({
 		name: "http",
