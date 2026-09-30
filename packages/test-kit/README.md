@@ -46,8 +46,9 @@ Peer dependency: `@o3co/auth-provider-core`. No dependency of its own.
 
 ## The enrollment witness's contract suite
 
-A suite is a list of `{ name, run }` cases (core's `ContractCase`), as the slot
-suites on `@o3co/auth-provider-core/testing` are, so any test runner runs it:
+A suite is a list of `{ name, run }` cases (core's `ContractCase`, which the
+kit re-exports), as the slot suites on `@o3co/auth-provider-core/testing` are,
+so any test runner runs it:
 
 ```typescript
 import { mfaEnrollmentWitnessContract } from "@o3co/auth-provider-test-kit";
@@ -71,8 +72,9 @@ a user nobody marked read as not enrolled; a mark resolving to nothing, and
 the next `authenticate` answering it, `true` and `false` alike; a mark of the
 value already held succeeding and keeping it; the last of successive marks
 holding; a mark reaching its own subject alone; concurrent marks of one value
-all succeeding; a mark for a subject the backend does not hold throwing and
-marking nobody; and, with `withOutage`, a mark during an outage throwing. The
+all succeeding; a mark of either value for a subject the backend does not
+hold throwing, with a witness held true and one held false both left as they
+were; and, with `withOutage`, a mark during an outage throwing. The
 witness is read as the provider reads it, through core's
 `readMfaEnrollmentWitness`, so a backend answering anything but a boolean
 fails.
@@ -97,33 +99,40 @@ the bodies of core's `mfa/storeWire.mts`:
 - a body the contract does not give an endpoint is `400`, a method but `POST`
   `405`, an unknown path `404`; with `bearerToken`, a request without
   `Authorization: Bearer <token>` is `401` with
-  `WWW-Authenticate: Bearer error="invalid_token"`.
+  `WWW-Authenticate: Bearer error="invalid_token"`;
+- before it records a request, it refuses an absolute or odd request target
+  (`400`), a `Host` other than its own `127.0.0.1:<port>` (`421`), a body over
+  `FAKE_STORE_MAX_BODY_BYTES` (1 MiB; `413`, the rest read and dropped) and a
+  body not declared `application/json` (`415`).
 
 To test how an adapter reads a Store that breaks the contract:
 `answer(endpoint, answerer)` answers an endpoint with what `answerer` returns
 (`{ status, headers?, body? }`), or by the contract when it returns
-`undefined`, until released with `answer(endpoint, undefined)`; and
+`undefined` — at once, or through a promise that settles later or never, for
+a slow or hung Store — until released with `answer(endpoint, undefined)`; and
 `holdFactor(subject, record)` holds a record as it is, readable or not. What
 it received is `requests` (the endpoint, the headers, the body as parsed);
 what it holds is `factors(subject)` and `enrolled(subject)`. `close()` stops
-it.
+it. It keeps every request it records, headers included — the bearer token
+too — for as long as it runs: give it test data only.
 
 ## Public API
 
 Exported from [`src/index.mts`](src/index.mts):
 
+- `ContractCase`, core's type of a suite's case;
 - `mfaEnrollmentWitnessContract`, with `MfaEnrollmentWitnessContractInput`,
   `MfaEnrollmentWitnessHarness` and `MfaEnrollmentWitnessUser`;
-- `startFakeStore`, with `FakeStore`, `FakeStoreOptions`, `FakeStoreUser`,
-  `FakeStoreUrls`, `FakeStoreEndpoint`, `FakeStoreRequest`, `FakeStoreAnswer`
-  and `FakeStoreAnswerer`.
+- `startFakeStore`, with `FAKE_STORE_MAX_BODY_BYTES`, `FakeStore`,
+  `FakeStoreOptions`, `FakeStoreUser`, `FakeStoreUrls`, `FakeStoreEndpoint`,
+  `FakeStoreRequest`, `FakeStoreAnswer` and `FakeStoreAnswerer`.
 
 ## Tests
 
 | Test file | Pins |
 | --- | --- |
-| [`enrollmentWitness.contract.test.mts`](src/mfa/__tests__/enrollmentWitness.contract.test.mts) | the witness's suite over an in-process repository and over the fake Store; each broken repository refused by the case that names what it breaks; the outage case present only with `withOutage` |
-| [`fakeStore.test.mts`](src/mfa/__tests__/fakeStore.test.mts) | each endpoint's answers over real HTTP: every record answered back, the update's compare-and-set and what it writes, `409` / `404`, changes carrying another field refused, the witness mark's `204` / `404` and idempotence, the credential, what it records, and an endpoint answered as told |
+| [`enrollmentWitness.contract.test.mts`](src/mfa/__tests__/enrollmentWitness.contract.test.mts) | the witness's suite over an in-process repository and over the fake Store; each broken repository — one that erases or sets every witness when it refuses a subject among them — refused by the case that names what it breaks; the outage case present only with `withOutage`; the kit's `ContractCase` core's |
+| [`fakeStore.test.mts`](src/mfa/__tests__/fakeStore.test.mts) | each endpoint's answers over real HTTP: every record answered back, the update's compare-and-set and what it writes, `409` / `404`, changes carrying another field refused, the witness mark's `204` / `404` and idempotence, the credential, what it refuses before it records a request, what it records, and an endpoint answered as told — at once, later, or never |
 
 ## See also
 
