@@ -100,11 +100,13 @@ export function templateReference(): URL {
 /**
  * The schemas the template's modules parse their sections with: core's
  * declarations of those paths, which core's schema still mirrors, so each
- * rule (the log levels, the signing-key union, the Redis connection's
- * shape) has one definition. A section refused here refuses the boot naming the operator's
+ * rule (the log levels, the trusted-proxy forms, the serialized-origin rule,
+ * the signing-key union, the Redis connection's shape) has one definition. A section refused here refuses the boot naming the operator's
  * path.
  */
 export const LOGGING_SECTION = CoreConfigSchema.shape.logging.unwrap();
+const HTTP_SECTION = CoreConfigSchema.shape.http.unwrap();
+const CORS_SECTION = fullSectionsSchema.shape.cors;
 const SIGNING_KEY_SECTION = CoreConfigSchema.shape.oauth.shape.jwt.out.shape.signingKey.unwrap();
 const REDIS_CLIENTS_SECTION = fullSectionsSchema.shape.refreshTokenFamilyStore
 	.unwrap()
@@ -122,6 +124,75 @@ const REDIS_CLIENTS_SECTION = fullSectionsSchema.shape.refreshTokenFamilyStore
 export const loggingModule = defineModule({
 	name: "logging",
 	section: { schema: LOGGING_SECTION, reference: templateReference() },
+});
+
+/** What the host process reads of `http {}`, beside what the `httpSettings` slot carries. */
+export interface HttpHostSettings {
+	/** The port the server listens on; `0` lets the OS pick one. */
+	readonly port: number;
+	/** The per-probe deadline of `/readyz` and the metrics scrape, in milliseconds. */
+	readonly readinessTimeoutMs: number;
+}
+
+declare module "@o3co/auth-provider-core" {
+	interface ComponentMap {
+		/**
+		 * The browser origins `cors {}` lists, parsed and frozen: provided by
+		 * the `cors` module for the `http` module's `httpSettings`, since a
+		 * module owns one section and the list sits beside `http {}`.
+		 */
+		readonly corsAllowedOrigins?: readonly string[];
+		/** What the host process reads of `http {}`: provided by the `http` module. */
+		readonly httpHostSettings?: HttpHostSettings;
+	}
+}
+
+/**
+ * CORS module: owns `cors {}`, the browser origins core's CORS middleware
+ * lets read the token, userinfo, revocation and discovery/JWKS responses,
+ * with its default in the template's `config/reference.conf`. It hands the
+ * parsed list to the `http` module, which carries it in core's
+ * `httpSettings`; no other module reads it.
+ */
+export const corsModule = defineModule({
+	name: "cors",
+	section: { schema: CORS_SECTION, reference: templateReference() },
+	provides: {
+		corsAllowedOrigins: ({ section }) => Object.freeze([...section.allowedOrigins]),
+	},
+});
+
+/**
+ * HTTP module: owns `http {}` — the port, the trusted forwarding hops and the
+ * readiness deadline — with its defaults in the template's
+ * `config/reference.conf`, and provides:
+ *
+ * - `httpSettings`, core's slot: the trusted hops and the CORS origins the
+ *   `cors` module parsed, which core's CORS middleware reads. Authoritative,
+ *   so no composition substitutes it while this module is loaded; eager,
+ *   since core's own machinery reads it and no module requires it.
+ * - `httpHostSettings`, the template's own: the port and the readiness
+ *   deadline, which only the host process reads (`app.mts`). Eager, for the
+ *   same reason.
+ *
+ * `app.mts` applies `trustProxy` to Express from the slot, before a request
+ * can arrive.
+ */
+export const httpModule = defineModule({
+	name: "http",
+	section: { schema: HTTP_SECTION, reference: templateReference() },
+	requires: ["corsAllowedOrigins"] as const,
+	provides: {
+		httpSettings: ({ section, corsAllowedOrigins }) =>
+			Object.freeze({
+				trustProxy: section.trustProxy,
+				cors: Object.freeze({ allowedOrigins: corsAllowedOrigins }),
+			}),
+		httpHostSettings: ({ section }): HttpHostSettings =>
+			Object.freeze({ port: section.port, readinessTimeoutMs: section.readinessTimeoutMs }),
+	},
+	authoritative: ["httpSettings"],
+	lifecycle: { httpSettings: { eager: true }, httpHostSettings: { eager: true } },
 });
 
 /**

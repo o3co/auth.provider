@@ -44,8 +44,11 @@ const smokeKeyPair = generateKeyPairSync("ed25519", {
 	privateKeyEncoding: { type: "pkcs8", format: "pem" },
 });
 
+/** The `http` module's section, as the hand-built configuration below carries it. */
+const HTTP = { port: 0, trustProxy: false, readinessTimeoutMs: 1000 };
+
 const config: AppConfig = {
-	http: { port: 0, trustProxy: false, readinessTimeoutMs: 1000 },
+	http: HTTP,
 	logging: { level: "silent" },
 	// The parsed config always carries `mfa`. A composition with a consumer of
 	// session admission states what it expects (ADR
@@ -186,7 +189,7 @@ describe("standalone smoke test", () => {
 		app.use(
 			createReadinessRouter(express, {
 				probes: handle.readinessProbes,
-				timeoutMs: config.http.readinessTimeoutMs,
+				timeoutMs: HTTP.readinessTimeoutMs,
 			}),
 		);
 		app.use(handle.router);
@@ -277,7 +280,7 @@ describe("standalone smoke test", () => {
 						},
 					},
 				],
-				timeoutMs: config.http.readinessTimeoutMs,
+				timeoutMs: HTTP.readinessTimeoutMs,
 			}),
 		);
 		const res = await request(app).get("/readyz");

@@ -182,6 +182,8 @@ const ALL_ON_MODULES = [
 	"oidc-federation-config",
 	"federation-oidc-oidc",
 	"logging",
+	"http",
+	"cors",
 	"key-store",
 	"test:repositories",
 	"audit-sink",

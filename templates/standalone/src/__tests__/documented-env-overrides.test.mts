@@ -413,9 +413,9 @@ describe("the shipped config boots with every documented override supplied as a 
 
 	it("turns every non-boolean override into its declared type", async () => {
 		const config = await bootParsed(DOCUMENTED_ENV);
-		expect(config.http.port).toBe(3000);
-		expect(config.http.readinessTimeoutMs).toBe(1500);
-		expect(config.http.trustProxy).toEqual(["10.0.0.0/8", "loopback"]);
+		expect(config.http?.port).toBe(3000);
+		expect(config.http?.readinessTimeoutMs).toBe(1500);
+		expect(config.http?.trustProxy).toEqual(["10.0.0.0/8", "loopback"]);
 		expect(config.federations.google?.accessType).toBe("online");
 		// The new default wins over the deprecated variable, and the parsed
 		// config mirrors it onto the old key for readers that predate the split.

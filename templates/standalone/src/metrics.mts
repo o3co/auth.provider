@@ -64,7 +64,7 @@ export interface MetricsRouteOptions {
 	 * up/down gauge. Pass `handle.readinessProbes`.
 	 */
 	readonly probes: readonly ReadinessProbe[];
-	/** Per-probe deadline, in milliseconds. Use `config.http.readinessTimeoutMs`. */
+	/** Per-probe deadline, in milliseconds. Use the `http` module's `readinessTimeoutMs`. */
 	readonly probeTimeoutMs: number;
 	/** Route path. Defaults to `/metrics`. */
 	readonly path?: string;

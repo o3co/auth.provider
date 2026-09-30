@@ -684,8 +684,10 @@ export async function compose(options: ComposeOptions = {}): Promise<Composition
 	});
 	const parsed = handle.components.config;
 	if (parsed === undefined) throw new Error("createApp booted without the parsed configuration");
+	const httpSettings = handle.components.httpSettings;
+	if (httpSettings === undefined) throw new Error("createApp booted without httpSettings");
 	const app = express();
-	app.set("trust proxy", parsed.http.trustProxy);
+	app.set("trust proxy", httpSettings.trustProxy);
 	app.use(
 		helmet({
 			contentSecurityPolicy: { directives: { defaultSrc: ["'none'"], frameAncestors: ["'none'"] } },

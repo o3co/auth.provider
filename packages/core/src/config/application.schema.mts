@@ -686,18 +686,25 @@ const trustProxySchema = z
  * Token-only deployments (no session, no federation) only need these sections.
  */
 export const CoreConfigSchema = z.object({
-	http: z.object({
-		port: z.coerce.number(),
-		// Boolean, hop count or address list. See `trustProxySchema`.
-		trustProxy: trustProxySchema,
-		// Per-probe deadline for the readiness endpoint; keep it well under the
-		// orchestrator's probe timeout, or a partitioned dependency reads as a
-		// slow replica instead of an unready one. Default in HOCON. Bounded both
-		// ways because `setTimeout` turns 0 (an empty env var through
-		// `z.coerce.number()`) and anything above 2^31-1 into 1ms: every probe
-		// would time out and the replica would answer 503 with nothing wrong.
-		readinessTimeoutMs: z.coerce.number().int().positive().max(2_147_483_647),
-	}),
+	// The host process's HTTP settings. Core reads none of them: the module
+	// that owns them (the standalone template's `http`) ships their defaults,
+	// and hands every module the trusted hops through the `httpSettings` slot.
+	// Declared here while core's schema mirrors them, so a configuration
+	// carrying them is held to these rules.
+	http: z
+		.object({
+			port: z.coerce.number(),
+			// Boolean, hop count or address list. See `trustProxySchema`.
+			trustProxy: trustProxySchema,
+			// Per-probe deadline for the readiness endpoint; keep it well under the
+			// orchestrator's probe timeout, or a partitioned dependency reads as a
+			// slow replica instead of an unready one. Bounded both ways because
+			// `setTimeout` turns 0 (an empty env var through `z.coerce.number()`)
+			// and anything above 2^31-1 into 1ms: every probe would time out and
+			// the replica would answer 503 with nothing wrong.
+			readinessTimeoutMs: z.coerce.number().int().positive().max(2_147_483_647),
+		})
+		.optional(),
 	// The level a composition's logger emits at. Core reads none of it: the
 	// module that owns it (the standalone template's `logging`) ships its
 	// default. Declared here while core's schema mirrors it, so a

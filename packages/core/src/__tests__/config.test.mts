@@ -24,10 +24,13 @@ describe("provider config", () => {
 		});
 		const config = validate(raw, AppConfigSchema);
 
-		// The signing key is the key store's section, with its defaults in the
-		// package that provides `keyStore` (the standalone template's
-		// `config/reference.conf`): core ships none.
+		// The signing key, the log level and the HTTP settings are the sections
+		// of the modules that own them, with their defaults in those modules'
+		// package (the standalone template's `config/reference.conf`): core
+		// ships none.
 		expect(config.oauth.jwt.signingKey).toBeUndefined();
+		expect(config.logging).toBeUndefined();
+		expect(config.http).toBeUndefined();
 		expect(config.oauth.oidcMode).toBe("oidc-required");
 		expect(config.session.name).toBe("__Host-auth.session");
 		expect(config.redisSessionStores?.keyPrefix).toBe("ss:");
@@ -85,8 +88,6 @@ describe("provider config", () => {
 				CLIENT_USER_BASE_URL: "http://localhost:8080",
 				CLIENT_APP_BASE_URL: "http://localhost:8080",
 				CLIENT_CODE_ENDPOINT_URI: "redis://localhost:6379",
-				HTTP_PORT: "9090",
-				HTTP_TRUST_PROXY: "true",
 				SESSION_SECURE: "false",
 				SESSION_NAME: "auth.sid",
 				OAUTH_OIDC_MODE: "dual",
@@ -95,8 +96,6 @@ describe("provider config", () => {
 		});
 		const config = validate(raw, AppConfigSchema);
 
-		expect(config.http.port).toBe(9090);
-		expect(config.http.trustProxy).toBe(true);
 		expect(config.session.secure).toBe(false);
 		expect(config.session.name).toBe("auth.sid");
 		expect(config.oauth.oidcMode).toBe("dual");

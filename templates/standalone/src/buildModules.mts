@@ -56,7 +56,9 @@ import {
 } from "@o3co/auth-provider-session";
 import {
 	auditSinkModule,
+	corsModule,
 	googleFederationConfigModule,
+	httpModule,
 	inMemoryCodeRepositoryModule,
 	inMemoryFederationTokenStoreModule,
 	inMemorySessionStoresModule,
@@ -339,6 +341,11 @@ export function buildModules(config: AppConfig, overrides: BuildModulesOverrides
 		// Owns `logging {}`: the logger is built from it before boot
 		// (`readLogging`), and boot parses it as this module's section.
 		loggingModule,
+		// Own `http {}` and `cors {}`: `httpSettings`, which core's CORS
+		// middleware reads, and what the host process reads after boot
+		// (`app.mts`).
+		httpModule,
+		corsModule,
 		overrides.keyStoreModule ?? keyStoreModule,
 		overrides.repositoriesModule ?? repositoriesModule,
 		// The audit sink, always wired: `emitAuditEvent` no-ops on an empty slot,
