@@ -496,10 +496,11 @@ describe("webauthn authentication/options rate limit — mandatory fallback", ()
 });
 
 describe("webauthn authentication/options rate limit — limiter outage", () => {
-	it("forwards the auditSink so an outage emits rate_limit.unavailable, and applies failMode", async () => {
+	it("forwards the auditSink so an outage emits rate_limit.unavailable, and applies the limiter's failMode", async () => {
 		const { sink, events } = spyAuditSink();
 		const brokenLimiter: RateLimiter = {
 			kind: "broken",
+			failMode: "closed",
 			async check() {
 				throw new Error("redis down");
 			},
@@ -513,7 +514,8 @@ describe("webauthn authentication/options rate limit — limiter outage", () => 
 				}),
 				defineModule({ name: "test:webauthn-rl-audit", provides: { auditSink: () => sink } }),
 			],
-			"closed",
+			// The limiter's policy, not the configuration's `rateLimit.failMode`.
+			"open",
 		);
 
 		const res = await hit(app);
@@ -531,9 +533,10 @@ describe("webauthn authentication/options rate limit — limiter outage", () => 
 		await handle.dispose();
 	});
 
-	it("honours failMode='open' from the same config key the other throttles read", async () => {
+	it("honours the limiter's failMode='open', the policy every other throttle reads", async () => {
 		const brokenLimiter: RateLimiter = {
 			kind: "broken",
+			failMode: "open",
 			async check() {
 				throw new Error("redis down");
 			},
@@ -546,7 +549,7 @@ describe("webauthn authentication/options rate limit — limiter outage", () => 
 					provides: { rateLimiter: () => brokenLimiter },
 				}),
 			],
-			"open",
+			"closed",
 		);
 
 		expect((await hit(app)).status).toBe(200);

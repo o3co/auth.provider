@@ -132,8 +132,6 @@ const makeBoot = (overrides: Overrides): BootstrapMap => {
 	return {
 		config: {
 			...core,
-			// The device_authorization guard reads the product-wide outage
-			// policy, `rateLimit.failMode`, like every other guarded route.
 			rateLimit: full.rateLimit,
 			// The module attaches AUDIT_SINK_ABSENCE_POLICY, so a boot
 			// with no sink must say so — which is what this fixture is.
@@ -574,27 +572,16 @@ describe("deviceGrantModule — the route it actually contributes", () => {
 		expect(next.status).toBe(429);
 	});
 
-	it("refuses to mount device_authorization without the outage policy, rateLimit.failMode", () => {
-		// The guard's fail-open / fail-closed choice is the product's, made
-		// once in config. Defaulting it here would be a second policy.
-		const deps = enabledDeps();
-		const factory = contributionsFor(deps)?.routes?.[0] as (d: unknown) => unknown;
-		expect(() => factory({ ...deps, config: { ...deps.config, rateLimit: undefined } })).toThrow(
-			/rateLimit\.failMode/,
-		);
-	});
-
-	it("refuses to mount device/verification without the outage policy, rateLimit.failMode", () => {
-		// The verification endpoint applies the same policy from the same key.
-		// A composition that enables the grant with no `failMode` is
-		// refused for this route too, not only for device_authorization — or
-		// the refusal would depend on which factory the planner ran first.
-		const deps = enabledDeps();
-		const factory = contributionsFor(deps)?.routes?.[1] as (d: unknown) => unknown;
-		expect(() => factory({ ...deps, config: { ...deps.config, rateLimit: undefined } })).toThrow(
-			/rateLimit\.failMode/,
-		);
-	});
+	it.each([0, 1])(
+		"mounts route %i with no rateLimit.failMode: the outage policy is the limiter's own",
+		(index) => {
+			const deps = enabledDeps();
+			const factory = contributionsFor(deps)?.routes?.[index] as (d: unknown) => unknown;
+			expect(() =>
+				factory({ ...deps, config: { ...deps.config, rateLimit: undefined } }),
+			).not.toThrow();
+		},
+	);
 
 	/** Mount the contributed verification route behind a fixed end-user session. */
 	const mountVerificationRoute = (deps: TestDeps) => {
@@ -704,15 +691,18 @@ describe("deviceGrantModule — the route it actually contributes", () => {
 		["closed", 503, "service_unavailable"],
 		["open", 404, "invalid_user_code"],
 	] as const)(
-		"applies rateLimit.failMode = %s from config on the mounted device/verification route",
+		"applies the limiter's failMode = %s on the mounted device/verification route, whatever rateLimit.failMode says",
 		async (failMode, status, error) => {
 			// What no test of the handler alone can observe: that the module
-			// reads `rateLimit.failMode` and hands it to this route.
+			// hands this route the limiter, whose own policy applies.
 			const deps = enabledDeps();
 			const app = mountVerificationRoute({
 				...deps,
-				config: { ...deps.config, rateLimit: { failMode } },
-				rateLimiter: brokenLimiter,
+				config: {
+					...deps.config,
+					rateLimit: { failMode: failMode === "open" ? "closed" : "open" },
+				},
+				rateLimiter: { ...brokenLimiter, failMode },
 			});
 
 			const res = await request(app)

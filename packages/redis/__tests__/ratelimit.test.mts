@@ -23,4 +23,13 @@ describe("redisRateLimiterBuilder", () => {
 		const limiter = redisRateLimiterBuilder({ client: fakeRedis }, {});
 		expect(limiter.kind).toBe("redis");
 	});
+
+	it("answers the outage policy it was configured with", () => {
+		const client = { incrementWithTtl: async () => 1 };
+		expect(redisRateLimiterBuilder({ client, failMode: "open" }, {}).failMode).toBe("open");
+		expect(redisRateLimiterBuilder({ client }, {}).failMode).toBeUndefined();
+		expect(() => redisRateLimiterBuilder({ client, failMode: "maybe" }, {})).toThrow(
+			/^createRedisRateLimiter: failMode must be "open" or "closed"/,
+		);
+	});
 });

@@ -92,6 +92,39 @@ describe("redisRateLimiterModule", () => {
 		}
 	});
 
+	describe("its outage policy", () => {
+		const provided = (rateLimit: unknown) =>
+			redisRateLimiterModule.provides?.rateLimiter?.({
+				config: {
+					redisRateLimiter: { limits: {}, defaultLimit: { limit: 60, windowSeconds: 60 } },
+					...(rateLimit === undefined ? {} : { rateLimit }),
+				},
+				rateLimiterClient: { incrementWithTtl: async () => 1 },
+				rateLimitBudgetResolver: { get: () => undefined, entries: () => new Map().entries() },
+			} as never);
+
+		it.each(["open", "closed"] as const)(
+			"answers rateLimit.failMode = %s as the limiter's own",
+			(failMode) => {
+				expect(provided({ failMode })?.failMode).toBe(failMode);
+			},
+		);
+
+		it("declares none when the configuration gives none, which the guard reads as closed", () => {
+			for (const rateLimit of [undefined, {}]) {
+				expect(provided(rateLimit)?.failMode, JSON.stringify(rateLimit)).toBeUndefined();
+			}
+		});
+
+		it("refuses a rateLimit.failMode that is neither open nor closed, naming the key", () => {
+			for (const failMode of ["maybe", "", "OPEN", 1, null]) {
+				expect(() => provided({ failMode }), JSON.stringify(failMode)).toThrow(
+					/^rateLimit\.failMode must be "open" or "closed"/,
+				);
+			}
+		});
+	});
+
 	it("refuses a window longer than a year in its own schema", () => {
 		const schema = redisRateLimiterModule.configSchema;
 		for (const redisRateLimiter of [

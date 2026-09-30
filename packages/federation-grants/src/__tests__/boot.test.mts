@@ -162,6 +162,8 @@ interface Setup {
 	readonly withLimiter?: boolean;
 	readonly withAudit?: boolean;
 	readonly failMode?: unknown;
+	/** Leave `rateLimit.failMode` out of the configuration. */
+	readonly omitFailMode?: boolean;
 	readonly provider?: FederationProvider | null;
 	/** The federation module listed BEFORE the routes, or after. */
 	readonly federationFirst?: boolean;
@@ -227,7 +229,10 @@ const boot = (setup: Setup) => {
 				federations: {
 					upstream: { enabled: true, issuer: "https://issuer.example", clientId: "cid" },
 				},
-				rateLimit: { ...full.rateLimit, failMode: setup.failMode ?? "closed" },
+				rateLimit:
+					setup.omitFailMode === true
+						? { login: full.rateLimit.login }
+						: { ...full.rateLimit, failMode: setup.failMode ?? "closed" },
 				...(setup.withAudit === false ? {} : { audit: { sink: { type: "none" } } }),
 				federationGrants: {
 					enabled: setup.enabled ?? true,
@@ -331,8 +336,9 @@ describe("enabling the feature", () => {
 		await expect(boot({ withLimiter: false })).rejects.toThrow(/rateLimiter/);
 	});
 
-	it("refuses to boot without the product's limiter-outage policy", async () => {
-		await expect(boot({ failMode: "maybe" })).rejects.toThrow(/failMode/);
+	it("boots with no rateLimit.failMode: the outage policy is the limiter's own", async () => {
+		const handle = await boot({ failMode: undefined, omitFailMode: true });
+		await handle.dispose();
 	});
 
 	it("refuses a retrieval limit the promises cannot be kept under", async () => {
