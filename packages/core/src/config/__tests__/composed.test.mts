@@ -84,6 +84,14 @@ describe("readTransitionalConfig — the switches a composition root reads befor
 		expect(config.deployment).toEqual({ mode: "several" });
 	});
 
+	it("leaves out the captures of renamed variables: they reach no switch and no module factory", () => {
+		const config = readTransitionalConfig(
+			resolved({ "renamed-variables": { LEGACY_RETRIES: "5", FIXTURE_RENAMING_RETRIES: null } }),
+			["http.port"],
+		);
+		expect(config).not.toHaveProperty("renamed-variables");
+	});
+
 	it("does not refuse a section a package's reference completes, unless it reads it", () => {
 		// Before the modules are known, the device grant's reference is not
 		// layered: its `windowSeconds` is missing, and boot, which layers it,

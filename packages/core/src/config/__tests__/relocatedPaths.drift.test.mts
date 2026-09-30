@@ -22,8 +22,9 @@
  * bridge is for the 0.x line only, and nothing in a release cut would remember
  * to remove it. So this fails from the cut that writes the first major
  * version's section in the CHANGELOG (written at cut time,
- * docs/release-policy.md R2) until `relocatedFrom` and
- * `config-path-relocated` are gone from core's source.
+ * docs/release-policy.md R2) until `relocatedFrom`, `config-path-relocated`,
+ * `renamedVariables` and `environment-variable-renamed` are gone from core's
+ * source.
  */
 
 import { readdirSync, readFileSync, statSync } from "node:fs";
@@ -58,7 +59,11 @@ function sourcesNamingRelocations(dir: string = coreSrc): string[] {
 		}
 		if (!entry.endsWith(".mts")) continue;
 		const text = readFileSync(full, "utf8");
-		if (/relocatedFrom|config-path-relocated/.test(text)) found.push(relative(repoRoot, full));
+		if (
+			/relocatedFrom|config-path-relocated|renamedVariables|environment-variable-renamed/.test(text)
+		) {
+			found.push(relative(repoRoot, full));
+		}
 	}
 	return found;
 }
@@ -88,7 +93,7 @@ describe("relocated-path refusals are removed at the first major release", () =>
 			: [];
 		expect(
 			remaining,
-			"the first major release retires relocatedFrom and config-path-relocated (#728 B10): delete them",
+			"the first major release retires relocatedFrom, renamedVariables and their refusals (#728 B10): delete them",
 		).toEqual([]);
 	});
 });

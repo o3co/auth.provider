@@ -98,14 +98,48 @@ export interface ModuleSection<S extends SectionSchema = SectionSchema> {
 	 *
 	 * A switch that decides whether a module loads (an adapter selection,
 	 * `federations.<name>.enabled`) is relocated by a module that is always
-	 * loaded, since the module it selects may never be. Defaults move with the
-	 * path; tombstone and schema rules are in `docs/release-policy.md` ("Key
-	 * moved to another path").
+	 * loaded, since the module it selects may never be. Defaults and variable
+	 * bindings move with the path, and none stays at the old one; the schema
+	 * rules are in `docs/release-policy.md` ("Key moved to another path").
 	 *
 	 * A bridge for the 0.x line: removed at the first major release; the
 	 * relocated-paths drift test fails the cut that forgets.
 	 */
 	readonly relocatedFrom?: readonly string[] | Readonly<Record<string, string | null>>;
+	/**
+	 * The environment variables whose names changed: each old name, mapped to
+	 * the old path it was bound to (`{ LEGACY_RETRIES: "legacy.retries" }`).
+	 * An old path {@link relocatedFrom} covers moves as it maps, and one in the
+	 * module's own section that no relocation covers stays where it is; the new
+	 * name is the variable its path is bound to (`environmentVariableFor`). An
+	 * old path mapped to `null` was removed, and its variable has no new name.
+	 *
+	 * Nothing binds an old name at a path. The module's own {@link reference}
+	 * binds each new name at its path, and captures every declared old and new
+	 * name in the top-level `renamed-variables` section, each `null` and then
+	 * `${?NAME}`, so boot judges what the resolution saw: the old name set
+	 * refuses boot (`environment-variable-renamed`) unless the new one is set
+	 * to the same string — a default at the new path does not count — and a
+	 * removed key's variable set refuses it outright, as does a name the
+	 * configuration does not capture. For a composition root's own module the
+	 * reference is the root's `config/reference.conf`, layered through
+	 * `moduleReferences`, never its `application.conf`. No other layer writes
+	 * `renamed-variables`: a capture written by hand overrides what the
+	 * resolution saw, and a root that builds its configuration by hand must
+	 * capture every declared name from the environment it substitutes with,
+	 * `null` when unset (`renamedVariableCaptures`, on the testing entry).
+	 *
+	 * A rename carries the value unchanged: a move that changes what a value
+	 * means (its unit, its encoding) is not declared here. A name bound element
+	 * by element (`${?NAME[]}`) cannot be declared.
+	 *
+	 * Each old name is a variable name, differs from its new one, and is
+	 * declared by one loaded module and is no rename's new name; a new path
+	 * lies in a section read at its module's name, and is not the section
+	 * itself (`module-section-path-invalid`). Removed with `relocatedFrom` at
+	 * the first major release.
+	 */
+	readonly renamedVariables?: Readonly<Record<string, string>>;
 }
 
 /**

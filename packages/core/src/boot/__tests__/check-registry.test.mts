@@ -67,6 +67,7 @@ describe("stage-1 check registries", () => {
 			"lifecycle-closure",
 			"module-section-paths",
 			"relocated-config-paths",
+			"renamed-environment-variables",
 		]);
 		expect(STAGE_ONE_POST_CONFIG_CHECKS.map((c) => c.id)).toEqual([
 			"grant-policy-issuer",
