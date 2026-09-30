@@ -18,6 +18,8 @@
  * The browser half of federation-grant acquisition, mounted at
  * `/session/federation-grants`: the connect start a client sends the user to,
  * the consent the deployment's page reads and answers, and the upstream callback.
+ * This file mounts each stage behind the browser budget and the shutdown drain;
+ * what follows holds across the stages.
  *
  * Connect and the callback are navigations: redirects and plain text, never a
  * JSON body. `GET`/`POST /consent` mirror `/oauth/consent` for the page that
@@ -43,7 +45,7 @@
  *
  * Whether the session may go on is core's `admitSession` on the cookie's claim,
  * as `federation_grants.connect`, `.consent` and `.callback` (the callback asks
- * twice: before the exchange and before activation). This file checks the
+ * twice: before the exchange and before activation). The stages check the
  * flow's own conditions: the intent's subject, the browser binding (express
  * session id and durable `sid`), the grant's current intent, the client's
  * permission, the connection's pins and the grants boundary. Anything admission
@@ -89,10 +91,6 @@ export const FEDERATION_GRANTS_BROWSER_MOUNT_PATH = "/session/federation-grants"
 export const FEDERATION_GRANTS_BROWSER_RATE_LIMIT_PREFIX = "federation_grants_browser";
 
 const BODY_LIMIT = "8kb";
-
-// ---------------------------------------------------------------------------
-// The router
-// ---------------------------------------------------------------------------
 
 export function createFederationGrantBrowserRouter(
 	options: FederationGrantBrowserRouterOptions,
