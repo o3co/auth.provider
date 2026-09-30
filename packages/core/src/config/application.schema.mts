@@ -219,7 +219,6 @@ const REMOVED_AUTHORIZE_FIELDS: readonly RemovedKey[] = [
  * and `[]` as 0, `true` as 1 and `"1e3"` as 1000: a malformed duration would be
  * normalised (`tombstoneRetention: null` disabling tombstones) instead of
  * failing boot naming the key.
- * @internal
  */
 export const durationFromEnv = (bounds: z.ZodNumber) =>
 	environmentCoercer(
@@ -1210,7 +1209,7 @@ export const fullSectionsSchema = z.object({
 	// session); default `"memory"` in HOCON. Memory forks per replica and its
 	// module declares `replicaSafety`, so `core.deployment.mode = "multi"` refuses it
 	// by name. `"redis"` mounts `redisFederationTokenStoreModule`, configured
-	// under `redisFederationTokenStore`.
+	// under `redis-federation-token-store`.
 	federationTokenStore: z
 		.object({
 			type: z.enum(["memory", "redis"]).optional(),

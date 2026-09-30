@@ -238,15 +238,19 @@ Module-level messages that arrive wrapped in a factory failure:
 
 - Keys: `privateKey or privateKeyPath is required for EdDSA algorithm — no signing key is configured` (with the `openssl` commands); `Duplicate kid values: …`; `previousKeys is not valid for HS256 — use previousSecrets` and the mirror for asymmetric algorithms (`packages/core/src/keys/factory.mts`).
 - Standalone Redis: `` `refreshTokenFamilyStore.redis.url` is required when any Redis-backed adapter is selected `` (`templates/standalone/src/modules.mts`).
-- Standalone federation grants on Redis: `redis-federation-grant-store.keyPrefix
-  (REDIS_FEDERATION_GRANT_STORE_KEY_PREFIX) moves the Redis federation grant
-  store off its default key prefix, and redis-federation-grant-intent-store.keyPrefix
+- Standalone federation grant intents on Redis: `redis-federation-grant-store.keyPrefix
+  (REDIS_FEDERATION_GRANT_STORE_KEY_PREFIX) is set off its default key prefix,
+  and redis-federation-grant-intent-store.keyPrefix
   (REDIS_FEDERATION_GRANT_INTENT_STORE_KEY_PREFIX) is left at its default. …`,
-  a `RangeError` before boot when both Redis stores are installed
-  (`templates/standalone/src/configPath.mts`). The intent store's prefix is its
-  own key: set it too — to the grant store's prefix to keep acquisition's
-  records beside the grants, or to one of its own. The check compares values,
-  so an intent store prefix written as the default reads as left there.
+  a `RangeError` before boot whenever the Redis intent store is installed,
+  the grants on Redis or in memory (`templates/standalone/src/configPath.mts`).
+  The intent store's prefix is its own key: set it too — to the grant store's
+  prefix to keep acquisition's records beside the grants, or to one of its
+  own. The check compares values, so an intent store prefix written as the
+  default reads as left there. With the grants in memory,
+  `redisFederationGrantStore.keyPrefix is set, and no installed module reads
+  it: …` refuses that old key written at all, naming the intent store's key
+  and variable: move the value there and delete the old line.
 - Federation grants (#593): the same guard, the same environment variable, and
   the message names `[federation-grants]` rather than `[federation-tokens]`
   (`packages/redis/src/internal/encryption-mode.mts`). One more refusal of its
@@ -822,7 +826,7 @@ stream — its level is fixed at `info`.
 | `session_requirements_registered` (info — `requirements: [{ name, module, remediations, secondFactorAuthority }]`, once at boot) | `core/src/boot/apply-contributions.mts` | not drift: the one boot line saying which session requirements this composition registered, in order, and which one is the second-factor authority — the one that vouches for a second factor (`secondFactorAuthority: true`), whatever its name. Compare it with `core.sessionRequirements.expected` when a boot refuses `session-requirement-missing` or `session-requirements-undeclared` |
 | `admission_actions_registered` (info — `actions: [{ name, grade, module }]`, once at boot when any action is registered) | `core/src/boot/apply-contributions.mts` | not drift: the one boot line saying which admission actions this composition registered, in order, each with its grade and the module that declared it. A grade is that module's own statement: an action graded `grants_nothing` is exempt from the MFA requirement's baseline — met on any live session a cookie, a code or a link carries, without a second factor; a token is still judged on its own `amr` — so check that every `grants_nothing` action is one you expect, from the module you expect (the bundled ones are `device.lookup` and `device.deny`, from `device-grant`) |
 | `rate_limit_budgets_registered` (info — `limiter: { kind, failMode } \| null`, `budgets: [{ prefix, budget, module, by }]`, once at boot) | `core/src/boot/apply-contributions.mts` | not drift: the wired limiter and the outage policy the guard applies for it, and each prefix a module claims, with its contributed budget (`null`: the limiter's `limits` entry or its `defaultLimit` applies) and the module that set it, by `contribution` or `override`. A limiter's own `limits` entry for a prefix wins over the contributed budget and is not shown. An override may only tighten, and a budget's window is at most a year; either refused boots `contribute-factory-failed` |
-| `rate_limit_fail_mode_not_applied` (warn — `configured`, `limiter`) | `core/src/boot/apply-contributions.mts` | `rateLimit.failMode` — the old path of `redis-rate-limiter.failMode`, which only the Redis limiter's module refuses — says `"open"` and the wired limiter applies another policy. Give the deployment's limiter the policy itself, or remove the key. The new path, `redis-rate-limiter.failMode`, written without the Redis limiter's module, is reported by nothing: `config_sections_ignored` does not name it, as core's schema mirrors the Redis stores' sections and counts them as owned |
+| `rate_limit_fail_mode_not_applied` (warn — `configured`, `limiter`) | `core/src/boot/apply-contributions.mts` | `rateLimit.failMode` — the old path of `redis-rate-limiter.failMode`, which only the Redis limiter's module refuses — says `"open"` and the wired limiter applies another policy. Give the deployment's limiter the policy itself, or remove the key. The new path, `redis-rate-limiter.failMode`, written without the Redis limiter's module, is reported by nothing: `config_sections_ignored` does not name it, as core's schema mirrors the Redis stores' sections and counts them as owned. Nor is `RATE_LIMIT_FAIL_MODE`, the old variable: it no longer binds `rateLimit.failMode`, so with a limiter other than Redis's it does not trigger this warning, and only the Redis limiter's module refuses it |
 | `replica_unsafe_adapters` (warn) | `core/src/boot/replica-safety.mts` | `core.deployment.mode` is unset; set it |
 | `dpop_replay_ttl_below_window` (warn, `iatWindowSeconds`, `replayTtlSeconds`, `requiredTtlSeconds`) | `dpop/src/verifier.mts` | `dpop.replayStoreTtlSeconds` is below `2 × iatWindowSeconds + 1`: a proof can outlive its replay record and be replayed while still inside its acceptance window. Raise it to `requiredTtlSeconds` or more. It was a sentence, with `reason: "replay_ttl_below_iat_window"` |
 | `login_rate_limiter_not_shared`, `webauthn_authentication_options_rate_limiter_not_shared` (warn) | `session/src/routes/Session.mts`, `webauthn/src/module.mts` | no shared `rateLimiter` and `core.deployment.mode` unset; the guard is per-process (`"multi"` refuses boot instead, `"single"` is silent — #474) |
