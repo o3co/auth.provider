@@ -22,9 +22,6 @@ import { createMfaFactorStoreFactory, registerBuiltinMfaFactorStores } from "#/m
 import { createMemoryMfaFactorStore } from "#/mfa/memoryFactorStore.mjs";
 import { memoryMfaFactorStoreModule } from "#/mfa/module.mjs";
 import { makeValidCoreConfig } from "#/testing/fixtures/valid-config.mjs";
-import { runMfaFactorStoreContract } from "./factorStore.contract.mjs";
-
-runMfaFactorStoreContract(async () => createMemoryMfaFactorStore());
 
 const RECORD: MfaFactorRecord = {
 	id: "factor-1",

@@ -16,7 +16,7 @@
 
 /**
  * The Redis `MfaFactorStore` (ADR 2026-09-25-multi-factor-authentication, D7)
- * against core's contract, on a real Redis, and what is Redis-specific below
+ * against the test kit's contract suite, on a real Redis, and what is Redis-specific below
  * it: one hash per subject with a field per factor, no TTL, a compare-and-set
  * that never decodes the JSON, and a stored record this adapter cannot read
  * refused rather than read as no factor (same ADR, D12 and D28).
@@ -26,11 +26,11 @@
  */
 
 import type { MfaFactorRecord, MfaFactorStore } from "@o3co/auth-provider-core";
+import { mfaFactorStoreContract } from "@o3co/auth-provider-test-kit";
 import { Redis } from "ioredis";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { makeIoredisMfaFactorStoreClient } from "#/ioredis.mjs";
 import { createRedisMfaFactorStore } from "#/mfa-factor-store.mjs";
-import { runMfaFactorStoreContract } from "./adapters.mfa-factor-store.contract.mjs";
 import { testRedis } from "./support/redis.mjs";
 
 let connections: Redis[] = [];
@@ -79,7 +79,13 @@ const alternating = (keyPrefix: string): MfaFactorStore => {
 	};
 };
 
-runMfaFactorStoreContract(async () => alternating(freshPrefix()));
+describe("MfaFactorStore contract", () => {
+	for (const contractCase of mfaFactorStoreContract({
+		build: async () => ({ store: alternating(freshPrefix()) }),
+	})) {
+		it(contractCase.name, contractCase.run);
+	}
+});
 
 const RECORD = (overrides: Partial<MfaFactorRecord> = {}): MfaFactorRecord => ({
 	id: "factor-1",

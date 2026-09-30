@@ -280,6 +280,19 @@ Module-level messages that arrive wrapped in a factory failure:
   `redisMfaTransactionStore.keyPrefix` that contains a brace is a `RangeError`
   `cause` (`packages/redis/src/internal/mfa-durability.mts`,
   `internal/mfa-keys.mts`).
+- The Store as the MFA factor store (`foundationMfaFactorStoreModule`,
+  `packages/foundation/src/mfa/module.mts`): `foundation-mfa-factor-store.listUrl
+  (FOUNDATION_MFA_FACTOR_STORE_LIST_URL), … must be set: the Store keeps the MFA
+  factors only with all four endpoints`, naming each URL left unset, whether or
+  not anything requires the store; a URL that is not `https` or loopback `http`,
+  or a key the section does not know, is `config-validation-failed` naming the
+  key. The Store's credential, deadline and cap are the Store transport
+  settings the composition root must hand the module — the user repository's
+  HTTP settings: `foundation-mfa-factor-store: storeTransport, the Store
+  transport settings, must be a section of keys ({} for none)` when they are
+  left out or are anything else, and a `bearerToken`, `timeout` or
+  `maxResponseBytes` the user repository would refuse is refused the same
+  way, the message leading with `HttpMfaFactorStore`.
 - The MFA module (`mfaModule`, `packages/mfa/src/module.mts` — private
   until the template wires it): `mfa.mode is "off" (or unset) while the MFA
   module is installed: remove the MFA module, or set mfa.mode to "required"
@@ -440,6 +453,7 @@ refresh grant takes care to answer `503` for outages.
 | **Upstream IdP starts issuing sender-constrained tokens** | `POST /oauth/federation/:name/token` | `502 upstream_token_ineligible`, `error_description: token_type_unsupported`, `Retry-After: 300` — the token cannot be handed to a caller that holds no proof key, so it is refused rather than answered as `Bearer` (#645) | audit `federation.token.upstream_ineligible`, with `details.tokenType` naming what the record carried | not transient: it stands until the upstream client registration is changed back. After that, a record whose token has expired repairs itself on the next refresh, which re-records the type; one still inside its expiry stays refused until it expires, and a reconnect clears it at once |
 | | `/oauth/federation/:name/logout` | `200 {"disconnected": true}` — local state is already cleared, the IdP session is orphaned (`packages/oauth/src/routes/logout.mts`) | audit `federation.logout.idp_unreachable` | — |
 | **The Store** (user directory) down or slow, a configured Store URL answers with a redirect (no request follows one), or the Store refuses this deployment's `bearerToken` (`401` or `403` with `WWW-Authenticate: Bearer`) | `POST /session/login`; federation callback, a `?link=1` link included; jwt-bearer grant; the federation-grants connect callback (the identity lookup — its own row under [Acquisition refusals](#acquisition-refusals-an-operator-meets-593-slice-6-611)) | `503 temporarily_unavailable` "User directory temporarily unavailable" (`Session.mts`, `Federation.mts`); `503 temporarily_unavailable` "identity resolution unavailable" from the jwt-bearer grant (`packages/oauth/src/grants/jwtBearer.mts`) | `login_store_unavailable`, `federation_callback_store_unavailable`, `federation_link_store_unavailable` (error, `store: "user_repository"`, `step` `authenticate` / `authenticate_by_token` / `link` — they were the warns `local login authenticate failed`, `user repository lookup failed`, `federation link: user repository failed`); `jwt_bearer_user_repository_unavailable` (error); `federation_grant_callback_unavailable` (error, `store: "user_directory"`) at the federation-grants callback. Each `<url>` below is the configured URL's origin and path — a query string or fragment is never quoted. A redirect is the case whose logged `err` reads `Unexpected HTTP status 30x from <url>`: set the URL to the endpoint that answers, not one that redirects. A refused token is the case whose logged `err` is a `StoreCredentialRefusedError` reading `the Store at <url> refused this deployment's credential (HTTP 401 with a Bearer challenge)` (or `403`) on the login, federation, jwt-bearer and federation-grants callback lines. Set `CLIENT_USER_BEARER_TOKEN` to a token the Store accepts. The token itself is never logged. A transport failure is a `StoreTransportError`: `request to <url> could not be reached` (refused, DNS, TLS — the network path or TLS), `the connection to <url> closed before a complete response arrived` (closed or reset first: an occasional one is a pooled keep-alive connection the Store, a proxy or an idle timeout closed between requests; a steady stream is the Store or a proxy closing mid-answer or restarting), `the Store at <url> answered with a malformed HTTP response` (the parser refused the status line or a header, or the head outgrew the size limit — a proxy or a wrong port), or `response from <url> could not be read` (the body broke mid-read), with at most a code such as `ECONNREFUSED` or `ERR_SSL_WRONG_VERSION_NUMBER` (an https URL on a plain-HTTP port) — never the transport's own error, which can quote what was sent. Two symptoms with no refused-credential line: **every login answers `401 invalid_credentials`** while the Store checks a token — `CLIENT_USER_BEARER_TOKEN` is unset (with no token sent, even a challenged `401` reads as "no such user"), or it is wrong and the Store refuses without a `Bearer` challenge; set the token, and have the Store send the challenge. **Refused-credential lines on some logins while correct passwords still succeed** — the token is fine; the Store is putting a `Bearer` challenge on user-level `401`s (a wrong password), which must carry none. Do not rotate the token for it | `repositories.user.http.timeout` (default 5000 ms) and `maxResponseBytes` (default 1048576) — a timeout is a thrown error, not a `null` user (`packages/foundation/src/repositories/HttpUserRepository.mts`) |
+| **The Store as the MFA factor store** (`foundationMfaFactorStoreModule`) down or slow, answering a redirect or anything else outside its contract, or refusing this deployment's `bearerToken` | `POST /session/login` (the `mfa` requirement reads the subject's factors), and every MFA route that reads or writes a factor | `503 temporarily_unavailable`, never "no factors": a login under `mfa.mode = "optional"` is not let through without the second factor, and a subject with an unreadable record never opens a first binding. Nothing the Store sent — its status, text, headers or records — reaches the client | the caller's one error line — at login `session_admission_unavailable` (error, `store: "mfa"`) — whose `err` projection is what the adapter threw: `MfaStoreError` (`reason` `unexpected_status` with `storeStatus`, `malformed_answer`, `unreadable_record`, `version_skipped`; `operation`), `StoreTransportError`, a `TimeoutError`, `StoreCredentialRefusedError` (leading with `HttpMfaFactorStore`), an `Error` for an answer over the cap (`HttpMfaFactorStore: upstream <url> response exceeds the <n>-byte cap`), an `Error` for a `409` to a create (`an MFA factor record with this id already exists for the subject`), or a `RangeError` for a record or an update the wire codec would not read back, thrown before any request. `version_skipped` leads with the subject and the factor id (`packages/foundation/src/mfa/storeFailure.mts`) | the user repository's `timeout` (`repositories.user.http.timeout`) |
 | **Client repository** lookup throws | client authentication on `/oauth/token`, `/oauth/introspect`, `/oauth/revoke`, device authorization and the federation-grant client routes — a secret (`findById` or `authenticate`) or a `private_key_jwt` assertion (`findById`) — the client lookup at `/authorize`, token exchange's own lookup, the federation token route's `azp` lookup, the code exchange's logout-metadata lookup, the consent page's and answer's lookup, the federation-grants connect and consent pages' lookup, and the two logout routes' check of a `post_logout_redirect_uri` against the client's registered list (`/oauth/logout`, `POST /oauth/federation/:name/logout` — asked only when the request names one and the hint names a session) | `503 temporarily_unavailable` "client repository unavailable" (`/oauth/consent`: "client registry unavailable") — except at the two logout routes, which complete the logout without the redirect, as if no `post_logout_redirect_uri` had been sent: an outage costs the redirect, never the logout (it used to be dropped without a log line), no `WWW-Authenticate` challenge — repository unavailability never admits a client, and is not answered `invalid_client` either: the client did nothing wrong, and a proxy holding client credentials would read `401 invalid_client` as its own misconfiguration. `/authorize` answers it as JSON (no redirect target is trusted yet); it was `500 server_error` "Failed to fetch client", unlogged. An unknown client or a wrong secret is still `401 invalid_client` (`400` at `/authorize`). A `client_id` that cannot name a client — a control character, or longer than 256 characters (`MAX_CLIENT_ID_LENGTH`) — is refused the same way before the repository is asked, so a store that throws on such input (a SQL driver refusing a NUL byte) cannot be made to answer `503` (`packages/oauth/src/middleware/clientAuth.mts`, `clientAssertion.mts`, `routes/authorize.mts`; the check is core's `isWellFormedClientId`) | `client_repository_unavailable` (error, `step`: `find` / `authenticate`, `clientId` sanitised and capped at 200 characters, the error's projection; `site` where it is not client authentication: `authorize`, `token_exchange`, `federation_token`, `authorization_code`, `consent`, `federation_grant_connect`, `federation_grant_consent`, `logout`, `federation_logout` — and `federation_grants` for client authentication on the federation-grant client routes) — every client lookup in core, oauth, token exchange and federation grants writes this one line through core's `logClientRepositoryUnavailable` (the consent route's own `consent_client_repository_unavailable` is gone); `client_assertion_refused` (error, `reason: "client_repository_unavailable"`) for an assertion | the repository's own I/O |
 | **`grantPolicy` hook** throws | every grant; `/oauth/authorize` | `503 temporarily_unavailable` "policy evaluation unavailable" (`packages/core/src/grants/grantPolicy.mts`); redirect `error=temporarily_unavailable` at `/authorize` | `grant_policy_unavailable` (error, `grantType`, the policy's `kind`, `site: "authorize"` at `/authorize`, the error's projection) — from every token grant (oauth's, token exchange, webauthn) and `/authorize`; `evaluateGrantPolicy` takes the logger as a required option, so no grant can leave it out | the hook's own |
 | Shared Redis down — **consent step** (`CONSENT_STORE_ADAPTER=redis`) | `GET/POST /oauth/authorize` for a client that is not first-party; `GET/POST /oauth/consent` | `/authorize` redirects with `error=temporarily_unavailable` "consent store unavailable" — never a code, never a refusal the user could act on (`packages/oauth/src/routes/authorize.mts`); `/oauth/consent` answers `503 temporarily_unavailable` "consent store unavailable" (`packages/oauth/src/routes/consent.mts`) | `authorize_consent_store_unavailable`, `authorize_pending_consent_store_unavailable`, `pending_consent_store_unavailable`, `consent_store_unavailable` (error) | `commandTimeout` |
@@ -466,6 +480,39 @@ Two cross-cutting facts about these rows:
   like every other per-process store (#474, see [Boot refusals you will meet](#boot-refusals-you-will-meet)); under
   `"single"` it is silent. The OAuth endpoints, by contrast, run with no
   limiter at all in that case (`packages/oauth/src/routes.mts`).
+
+### Keeping MFA factors in the Store
+
+With `foundationMfaFactorStoreModule` installed, the Store keeps every enrolled
+factor, and the provider trusts it with their integrity and freshness: it
+never rolls a factor back, hides one from a list, answers one it acknowledged
+removing, or lets two updates at one version both succeed; a version never
+goes back, and an acknowledged write is never lost across a restore or a
+failover. The provider reads every answer strictly, but it cannot tell when
+this breaks: a factor's older record opens as it did then — its sealed data
+is bound to the subject, the factor id and the kind, not the version.
+
+- **What breaking it opens.** An older record brings back a TOTP step
+  already used, within its window, and a spent recovery code; a removed
+  factor answered again works again. A Store that drops a subject's records
+  lets a password-only login through under `mfa.mode = "optional"`, and
+  opens a first binding to whoever holds the password under `required`. The
+  enrollment witness, kept outside the factor store, is what stops that (the
+  MFA ADR's D12); the MFA package's `mfa` requirement reads it at login, in
+  `admitPrimary`, from the MFA ADR's build-order step 9.
+- **Failover and restore.** A failover to an asynchronous replica can lose
+  the last acknowledged writes, and so can a restore from a backup. Replicate
+  the factor records synchronously; or, after a failover or a restore and
+  before authentication resumes, expire the MFA state written since — the
+  users' factors and recovery codes — or have the affected users enroll again.
+  Treat what was written since as lost, and tell the users whose factors it
+  touched.
+- **Reads that lag writes.** A list served from a replica that has not seen
+  the last write answers an older version: serve the list endpoint from where
+  the writes land.
+- **Where to keep them.** The MFA ADR's O6 recommends the factors in Redis
+  and the witness in the Store. Keeping both in one Store weakens this
+  protection: what drops or rolls back the one can do the same to the other.
 
 ### Which logout endpoint invalidates what
 
@@ -866,7 +913,10 @@ is answered as absent, and the user starts the ceremony again; a subject's
 lock state a script cannot read refuses the attempt (`MFA subject state: …`)
 rather than let it through (`packages/redis/src/mfa-factor-store.mts`,
 `mfa-transaction-store.mts`). None writes a line of its own: its caller
-answers it as an outage.
+answers it as an outage. The Store-backed factor store refuses a subject's
+whole list the same way for a record it cannot read, one of another subject
+or an id listed twice (`unreadable_record`;
+`packages/foundation/src/mfa/HttpMfaFactorStore.mts`).
 A watermark that is not a number throws rather than reading as "not revoked"
 (`packages/redis/src/subjectRevocation.mts`). A cookie-session record the
 store holds but cannot read — not JSON, or not a session record — is read as

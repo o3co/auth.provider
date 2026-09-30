@@ -35,6 +35,11 @@ export {
 	mfaFactorContract,
 } from "./mfa/factor.contract.mjs";
 export {
+	type MfaFactorStoreContractInput,
+	type MfaFactorStoreHarness,
+	mfaFactorStoreContract,
+} from "./mfa/factorStore.contract.mjs";
+export {
 	FAKE_STORE_MAX_BODY_BYTES,
 	type FakeStore,
 	type FakeStoreAnswer,

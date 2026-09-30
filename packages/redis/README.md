@@ -758,6 +758,9 @@ contract file cannot be imported across a package boundary, so the suites
 there are copies of core's; [`contract-copies-parity.test.mts`](__tests__/contract-copies-parity.test.mts)
 and the per-port `*-parity.test.mts` tests fail when a copy differs from its
 core original anywhere below its imports, and when no Redis test runs it.
+`MfaFactorStore`'s suite is not copied: it is the test kit's published
+`mfaFactorStoreContract` (`@o3co/auth-provider-test-kit`, a devDependency),
+which [`mfa-factor-store.test.mts`](__tests__/mfa-factor-store.test.mts) runs.
 Which ports have a suite, and the one Redis adapter the suites do not run
 against (`AccessTokenDenylist`, whose expiry is Redis's own key TTL and cannot
 follow the suite's fake clock), are in

@@ -53,6 +53,7 @@
 	},
 	"devDependencies": {
 		"@o3co/auth-provider-core": "workspace:*",
+		"@o3co/auth-provider-test-kit": "workspace:*",
 		"@vitest/coverage-v8": "^5.0.2",
 		"ioredis": "^6.0.0",
 		"testcontainers": "^12.1.0",
