@@ -324,9 +324,11 @@ Each adapter ships in up to two forms:
   plaintext guard reads that name in addition to `NODE_ENV`, and the
   replica count from core's `deploymentMode` slot, which both modules require
   and core fills from `deployment.mode` — `"multi"` refuses plaintext in every
-  environment (#473). A composition root that builds the grant store itself
-  passes the mode to `resolveRedisFederationGrantStoreOptions` as its third
-  argument. Where plaintext goes ahead the guard logs one line on
+  environment. A composition root that builds the grant store itself passes
+  `deploymentModeOf(config)` from `@o3co/auth-provider-core` — the reading
+  boot fills the slot with — to `resolveRedisFederationGrantStoreOptions` as
+  its third argument; a mode that is not `single`, `multi` or `unset`, none
+  included, is a TypeError naming the argument. Where plaintext goes ahead the guard logs one line on
   the module's optional `logger` slot (`consoleLogger` when it is empty):
   `federation_store_plaintext` (warn, `store`, `mode`) where it is allowed,
   `federation_store_plaintext_override` (error, with the `environment` or

@@ -224,7 +224,8 @@ What holds:
   (`replica-unsafe-adapter`) and never warns. Prefer `sessionStoreModuleFor`
   wherever the config is in hand. Both forms require core's `deploymentMode`
   slot, which core fills from `deployment.mode`, and read nothing of
-  `deployment` themselves.
+  `deployment` themselves; a slot value that is none of `single`, `multi`,
+  `unset` is a TypeError.
 - **The Redis store opens its own connection.** A `redis` (node-redis) client to
   `session.storage.redis.url` (with `password` when set), under `connect-redis`'s
   `RedisStore`. With a readiness registrar wired it registers the probe
@@ -317,7 +318,9 @@ The manifest ([`src/module.mts`](src/module.mts)):
   core's `resolverForTests`. And `deploymentMode`, which core fills from
   `deployment.mode`: the login throttle's per-process fallback is refused under
   `multi`, so the mode is required rather than read as absent; the session
-  router built by hand takes it as the required `deploymentMode` option.
+  router built by hand takes it as the required `deploymentMode` option, and a
+  value that is none of the three, absence included, is a TypeError at
+  construction.
   `sessionRPRegistry` and `sessionFamilyIndex`, the other two session stores,
   are `oauth`'s.
 - `optional`: `logger`, `rateLimiter`, `auditSink`, `subjectSessionIndex`,
