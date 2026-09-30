@@ -300,10 +300,7 @@ describe("the full set boots together", () => {
 
 	it("turns the WebAuthn second factor on through its variable, and the requirement named mfa then reaches hwk and swk beside TOTP's otp", async () => {
 		const { handle } = await boot({ env: { ...SINGLE_ENV, WEBAUTHN_MFA_FACTOR_ENABLED: "true" } });
-		expect(handle.components.mfaFactorResolver?.get("webauthn")?.amrValues).toEqual([
-			"hwk",
-			"swk",
-		]);
+		expect(handle.components.mfaFactorResolver?.get("webauthn")?.amrValues).toEqual(["hwk", "swk"]);
 		expect(
 			[...(handle.components.sessionRequirementResolver?.get("mfa")?.reach ?? [])].sort(),
 		).toEqual(["hwk", "mfa", "otp", "swk"]);

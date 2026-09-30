@@ -77,7 +77,12 @@ describe("a WebAuthn login", () => {
 		expect(options.body.allowCredentials.map((c: { id: string }) => c.id).sort()).toEqual(
 			[passkey.credentialId, other.credentialId].sort(),
 		);
-		const res = await verify(browser, transaction, record.id, passkey.assert(options.body.challenge));
+		const res = await verify(
+			browser,
+			transaction,
+			record.id,
+			passkey.assert(options.body.challenge),
+		);
 
 		expect(res.status, JSON.stringify(res.body)).toBe(200);
 		expect(res.body).toEqual({ message: "Logged in successfully" });
@@ -109,7 +114,12 @@ describe("a WebAuthn login", () => {
 		const { browser, transaction } = await beginLogin(app);
 		const options = await challenge(browser, transaction, record.id);
 
-		const res = await verify(browser, transaction, record.id, passkey.assert(options.body.challenge));
+		const res = await verify(
+			browser,
+			transaction,
+			record.id,
+			passkey.assert(options.body.challenge),
+		);
 
 		expect(res.status, JSON.stringify(res.body)).toBe(200);
 		expect(create.mock.calls[0]?.[0]).toMatchObject({ amr: ["pwd", "swk", "mfa"] });
@@ -146,7 +156,12 @@ describe("a WebAuthn login", () => {
 		for (let login = 0; login < 2; login++) {
 			const { browser, transaction } = await beginLogin(app);
 			const options = await challenge(browser, transaction, record.id);
-			const res = await verify(browser, transaction, record.id, passkey.assert(options.body.challenge));
+			const res = await verify(
+				browser,
+				transaction,
+				record.id,
+				passkey.assert(options.body.challenge),
+			);
 			expect(res.status, JSON.stringify(res.body)).toBe(200);
 		}
 		const after = await storedFactor(factorStore, record);
@@ -177,7 +192,12 @@ describe("the challenge, kept on the transaction", () => {
 		expect(tampered.status).toBe(401);
 		expect((await transactionStore.get(transaction))?.challenge).toBeUndefined();
 		// A right answer to the same challenge now has no challenge to answer.
-		const again = await verify(browser, transaction, record.id, passkey.assert(options.body.challenge));
+		const again = await verify(
+			browser,
+			transaction,
+			record.id,
+			passkey.assert(options.body.challenge),
+		);
 		expect(again.status).toBe(401);
 		expect(again.body).toEqual({ ...NOT_ACCEPTED, attempts_remaining: 3 });
 		expect(audit.of("mfa.verify.failure").map((event) => event.details?.reason)).toEqual([
@@ -234,7 +254,12 @@ describe("the sign count", () => {
 		const { browser, transaction } = await beginLogin(app);
 		const options = await challenge(browser, transaction, record.id);
 
-		const res = await verify(browser, transaction, record.id, passkey.assert(options.body.challenge));
+		const res = await verify(
+			browser,
+			transaction,
+			record.id,
+			passkey.assert(options.body.challenge),
+		);
 
 		expect(res.status).toBe(401);
 		expect(res.body).toEqual({ ...NOT_ACCEPTED, attempts_remaining: 4 });
@@ -260,7 +285,12 @@ describe("the sign count", () => {
 		const { browser, transaction } = await beginLogin(app);
 		const options = await challenge(browser, transaction, record.id);
 
-		const res = await verify(browser, transaction, record.id, passkey.assert(options.body.challenge));
+		const res = await verify(
+			browser,
+			transaction,
+			record.id,
+			passkey.assert(options.body.challenge),
+		);
 
 		expect(res.status, JSON.stringify(res.body)).toBe(200);
 		expect(losing.calls()).toBe(2);
@@ -280,7 +310,12 @@ describe("the sign count", () => {
 		const { browser, transaction } = await beginLogin(app);
 		const options = await challenge(browser, transaction, record.id);
 
-		const res = await verify(browser, transaction, record.id, passkey.assert(options.body.challenge));
+		const res = await verify(
+			browser,
+			transaction,
+			record.id,
+			passkey.assert(options.body.challenge),
+		);
 
 		expect(res.status).toBe(401);
 		expect(res.body.error).toBe("mfa_invalid");
@@ -318,7 +353,12 @@ describe("beside TOTP", () => {
 		const { browser, transaction } = await beginLogin(app);
 		const options = await challenge(browser, transaction, record.id);
 
-		const res = await verify(browser, transaction, record.id, passkey.assert(options.body.challenge));
+		const res = await verify(
+			browser,
+			transaction,
+			record.id,
+			passkey.assert(options.body.challenge),
+		);
 
 		expect(res.status, JSON.stringify(res.body)).toBe(200);
 	});

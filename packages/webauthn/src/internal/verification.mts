@@ -246,9 +246,7 @@ export async function verifyWebAuthnAssertionWithBackupState(
 	}
 }
 
-function mapAuthenticationError(
-	err: unknown,
-): Extract<AssertionVerificationResult, { ok: false }> {
+function mapAuthenticationError(err: unknown): Extract<AssertionVerificationResult, { ok: false }> {
 	if (err instanceof Error) {
 		// Before the plain-origin arm: the library's cross-origin messages contain "origin" and
 		// would otherwise point an operator at `webauthn.origin`, which cannot fix an embedding.

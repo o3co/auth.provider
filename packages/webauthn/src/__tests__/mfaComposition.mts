@@ -271,10 +271,8 @@ export function browser(app: express.Express): Browser {
 		return res;
 	};
 	const headers = () => ({ Cookie: [...jar.values()].join("; "), "X-Forwarded-Proto": "https" });
-	const get = async (
-		path: string,
-		extra: Record<string, string> = {},
-	): Promise<request.Response> => keep(await request(app).get(path).set(headers()).set(extra));
+	const get = async (path: string, extra: Record<string, string> = {}): Promise<request.Response> =>
+		keep(await request(app).get(path).set(headers()).set(extra));
 	const post = async (path: string, body: Record<string, unknown>): Promise<request.Response> => {
 		const csrf = await get("/session/csrf");
 		return keep(

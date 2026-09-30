@@ -46,11 +46,11 @@ vi.mock("#/internal/verification.mjs", () => ({
 	verifyWebAuthnAssertionWithBackupState: vi.fn(),
 }));
 
+import { WEBAUTHN_ALGORITHM_IDS } from "#/internal/options.mjs";
 import {
 	verifyWebAuthnAssertionWithBackupState,
 	verifyWebAuthnAttestation,
 } from "#/internal/verification.mjs";
-import { WEBAUTHN_ALGORITHM_IDS } from "#/internal/options.mjs";
 import { createWebAuthnMfaFactor, WEBAUTHN_MFA_FACTOR_KIND } from "#/mfaFactor/factor.mjs";
 import { createTestWebAuthnConfig } from "#/testing/index.mjs";
 
@@ -131,7 +131,10 @@ const registration = (overrides: Record<string, unknown> = {}): RegistrationResp
 	}) as RegistrationResponseJSON;
 
 /** An assertion as a client sends it, by the credential `id`; its shape alone matters here. */
-const assertion = (id: string, overrides: Record<string, unknown> = {}): AuthenticationResponseJSON =>
+const assertion = (
+	id: string,
+	overrides: Record<string, unknown> = {},
+): AuthenticationResponseJSON =>
 	({
 		id,
 		rawId: id,
@@ -393,7 +396,11 @@ describe("registration", () => {
 	});
 
 	it("throws for a pending state that is not a WebAuthn enrollment's", async () => {
-		for (const state of [{}, { challenge: "Y2g", userHandle: HANDLE }, { challenge: 1, userHandle: HANDLE, expiresAtMs: 1 }]) {
+		for (const state of [
+			{},
+			{ challenge: "Y2g", userHandle: HANDLE },
+			{ challenge: 1, userHandle: HANDLE, expiresAtMs: 1 },
+		]) {
 			await expect(
 				factorWith().completeEnrollment({
 					...ceremony(),
@@ -574,7 +581,12 @@ describe("an assertion's verification", () => {
 			assertion(""),
 			assertion("Y3JlZC1h", { response: { clientDataJSON: "Y2Q", authenticatorData: "YWQ" } }),
 			assertion("Y3JlZC1h", {
-				response: { clientDataJSON: "Y2Q", authenticatorData: "YWQ", signature: "c2ln", userHandle: 7 },
+				response: {
+					clientDataJSON: "Y2Q",
+					authenticatorData: "YWQ",
+					signature: "c2ln",
+					userHandle: 7,
+				},
 			}),
 		]) {
 			expect(await verify(factor, proof)).toEqual({ ok: false, reason: "malformed" });

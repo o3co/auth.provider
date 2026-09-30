@@ -86,9 +86,9 @@ describe("webauthn-mfa-factor, the WebAuthn second factor's section", () => {
 		expect(webauthnMfaFactorConfigForTests()).toEqual({
 			"webauthn-mfa-factor": { enabled: false, userVerification: "preferred" },
 		});
-		expect(webauthnMfaFactorConfigForTests({ enabled: true, userVerification: "required" })).toEqual(
-			{ "webauthn-mfa-factor": { enabled: true, userVerification: "required" } },
-		);
+		expect(
+			webauthnMfaFactorConfigForTests({ enabled: true, userVerification: "required" }),
+		).toEqual({ "webauthn-mfa-factor": { enabled: true, userVerification: "required" } });
 	});
 
 	it("keeps its schema off the package's entry", () => {

@@ -53,7 +53,9 @@ export interface WebAuthnMfaFactorConfigForTestsOptions {
  * The WebAuthn second factor's section, `webauthn-mfa-factor`, as the package's reference.conf
  * resolves it — off, user verification `preferred` — with `options` laid over it.
  */
-export function webauthnMfaFactorConfigForTests(options: WebAuthnMfaFactorConfigForTestsOptions = {}) {
+export function webauthnMfaFactorConfigForTests(
+	options: WebAuthnMfaFactorConfigForTestsOptions = {},
+) {
 	return {
 		"webauthn-mfa-factor": {
 			enabled: false,

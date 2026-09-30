@@ -99,7 +99,9 @@ export function softwarePasskey(options: {
 					clientDataJSON: b64url(clientDataJSON),
 					authenticatorData: b64url(authenticatorData),
 					signature: b64url(signature),
-					...(assertOptions.userHandle === undefined ? {} : { userHandle: assertOptions.userHandle }),
+					...(assertOptions.userHandle === undefined
+						? {}
+						: { userHandle: assertOptions.userHandle }),
 				},
 				clientExtensionResults: {},
 			};

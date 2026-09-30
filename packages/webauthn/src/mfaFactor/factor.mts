@@ -165,20 +165,30 @@ const descriptorOf = (data: WebAuthnFactorData): WebAuthnCredentialDescriptor =>
 	transports: data.transports,
 });
 
-/** A pending ceremony's state: its challenge, until when it may be answered, and — for an enrollment — the user handle. */
-function readState(
+/** A pending ceremony's state: its challenge, and until when it may be answered. */
+function readCeremony(
 	state: unknown,
 	what: string,
-	withHandle: boolean,
-): { readonly challenge: string; readonly expiresAtMs: number; readonly userHandle: string } {
-	const record = isRecord(state) ? state : {};
-	const { challenge, expiresAtMs, userHandle } = record;
+): { readonly challenge: string; readonly expiresAtMs: number } {
+	const { challenge, expiresAtMs } = isRecord(state) ? state : {};
 	if (!isBase64url(challenge)) throw unreadable(what, "challenge");
 	if (typeof expiresAtMs !== "number" || !Number.isFinite(expiresAtMs)) {
 		throw unreadable(what, "expiresAtMs");
 	}
-	if (withHandle && !isBase64url(userHandle)) throw unreadable(what, "userHandle");
-	return { challenge, expiresAtMs, userHandle: withHandle ? (userHandle as string) : "" };
+	return { challenge, expiresAtMs };
+}
+
+/** A pending enrollment's state: its ceremony, and the user handle the credential is made under. */
+function readEnrollment(state: unknown): {
+	readonly challenge: string;
+	readonly expiresAtMs: number;
+	readonly userHandle: string;
+} {
+	const what = "the pending enrollment";
+	const ceremony = readCeremony(state, what);
+	const { userHandle } = state as Readonly<Record<string, unknown>>;
+	if (!isBase64url(userHandle)) throw unreadable(what, "userHandle");
+	return { ...ceremony, userHandle };
 }
 
 const isText = (value: unknown): value is string => typeof value === "string" && value.length > 0;
@@ -304,7 +314,7 @@ export function createWebAuthnMfaFactor(settings: WebAuthnMfaFactorSettings): Mf
 			if (assertion === undefined) return { ok: false, reason: "malformed" };
 			readData(ctx.factor.data);
 			if (ctx.state === undefined) return { ok: false, reason: "expired" };
-			const state = readState(ctx.state, "the challenge's state", false);
+			const state = readCeremony(ctx.state, "the challenge's state");
 			if (ctx.nowMs >= state.expiresAtMs) return { ok: false, reason: "expired" };
 			const found = readable(ctx.factors).find(({ data }) => data.credentialId === assertion.id);
 			if (found === undefined) return { ok: false, reason: "invalid" };
@@ -369,7 +379,7 @@ export function createWebAuthnMfaFactor(settings: WebAuthnMfaFactorSettings): Mf
 		async completeEnrollment(ctx): Promise<MfaEnrollmentCompletion> {
 			const registration = readRegistration(ctx.proof);
 			if (registration === undefined) return { ok: false, reason: "malformed" };
-			const state = readState(ctx.state, "the pending enrollment", true);
+			const state = readEnrollment(ctx.state);
 			if (ctx.nowMs >= state.expiresAtMs) return { ok: false, reason: "expired" };
 			const verified = await verifyWebAuthnAttestation({
 				response: registration,
