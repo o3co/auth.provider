@@ -60,7 +60,7 @@
  *   delegated responder's status unreadable for such a reason).
  */
 
-import { createHash, randomBytes, X509Certificate } from "node:crypto";
+import { createHash, X509Certificate } from "node:crypto";
 import * as asn1js from "asn1js";
 import * as pkijs from "pkijs";
 import {
@@ -85,6 +85,7 @@ import {
 	type OcspUnavailableReason,
 } from "./ocspAnswer.mjs";
 import { equalBytes } from "./ocspBytes.mjs";
+import { buildRequest, checkNonce } from "./ocspRequest.mjs";
 import { ocspResponders } from "./ocspResponders.mjs";
 
 export type {
@@ -98,8 +99,6 @@ export { type OcspResponders, ocspResponders } from "./ocspResponders.mjs";
 
 /** `id-pkix-ocsp-basic` response type (RFC 6960 §4.2.1). */
 const OID_OCSP_BASIC = "1.3.6.1.5.5.7.48.1.1";
-/** `id-pkix-ocsp-nonce` (RFC 6960 §4.4.1). */
-const OID_OCSP_NONCE = "1.3.6.1.5.5.7.48.1.2";
 /** `id-kp-OCSPSigning` (RFC 6960 §4.2.2.2). */
 const OID_KP_OCSP_SIGNING = "1.3.6.1.5.5.7.3.9";
 /** `id-pkix-ocsp-nocheck` (RFC 6960 §4.2.2.2.1): the CA vouches for the responder for its certificate's lifetime. */
@@ -108,8 +107,6 @@ const OID_OCSP_NOCHECK = "1.3.6.1.5.5.7.48.1.5";
 const OID_EXT_KEY_USAGE = "2.5.29.37";
 /** SHA-1, the `CertID` hash. */
 const OID_SHA1 = "1.3.14.3.2.26";
-/** RFC 8954 §2.1 bounds the nonce to 1..32 bytes. */
-const NONCE_BYTES = 16;
 
 const OCSP_REQUEST_MEDIA_TYPE = "application/ocsp-request";
 const OCSP_RESPONSE_MEDIA_TYPE = "application/ocsp-response";
@@ -301,44 +298,6 @@ type SignerRefusal = {
 	readonly ok: false;
 	readonly reason: "bad_signature" | "algorithm_not_permitted";
 	readonly detail: string;
-};
-
-interface BuiltRequest {
-	readonly der: Uint8Array;
-	readonly certId: pkijs.CertID;
-	/** The nonce extension's `extnValue` — the bytes the responder must echo. */
-	readonly nonce: Uint8Array;
-}
-
-const buildRequest = async (
-	certificate: pkijs.Certificate,
-	issuer: pkijs.Certificate,
-	crypto: pkijs.ICryptoEngine,
-): Promise<BuiltRequest> => {
-	const certId = await pkijs.CertID.create(
-		certificate,
-		{ hashAlgorithm: "SHA-1", issuerCertificate: issuer },
-		crypto,
-	);
-	// A fresh copy: `randomBytes` may hand back a slice of a pooled buffer,
-	// and the ASN.1 encoder reads the whole underlying `ArrayBuffer`.
-	const random = new Uint8Array(randomBytes(NONCE_BYTES));
-	const nonce = new Uint8Array(
-		new asn1js.OctetString({ valueHex: random.buffer as ArrayBuffer }).toBER(false),
-	);
-	const request = new pkijs.OCSPRequest({
-		tbsRequest: new pkijs.TBSRequest({
-			requestList: [new pkijs.Request({ reqCert: certId })],
-			requestExtensions: [
-				new pkijs.Extension({
-					extnID: OID_OCSP_NONCE,
-					critical: false,
-					extnValue: nonce.slice().buffer as ArrayBuffer,
-				}),
-			],
-		}),
-	});
-	return { der: new Uint8Array(request.toSchema(true).toBER(false)), certId, nonce };
 };
 
 type Parsed =
@@ -803,27 +762,8 @@ export const createOcspResolver = (options: OcspResolverOptions): OcspResolver =
 		}
 
 		// The nonce is judged on bytes the responder actually signed.
-		const echoed = basic.tbsResponseData.responseExtensions?.find(
-			(ext) => ext.extnID === OID_OCSP_NONCE,
-		);
-		if (echoed === undefined) {
-			if (requireNonce) {
-				return {
-					ok: false,
-					reason: "nonce_missing",
-					detail:
-						"the response carries no nonce, so nothing binds it to this request " +
-						"(RFC 6960 §4.4.1; set mtls.fullPki.revocation.ocspRequireNonce = false only for a responder " +
-						"that pre-produces its answers)",
-				};
-			}
-		} else if (!equalBytes(echoed.extnValue.valueBlock.valueHexView, request.nonce)) {
-			return {
-				ok: false,
-				reason: "nonce_mismatch",
-				detail: "the response's nonce is not the one this request sent",
-			};
-		}
+		const nonce = checkNonce(basic, request.nonce, requireNonce);
+		if (!nonce.ok) return nonce;
 
 		const decoded = decodeStatus(single.certStatus);
 		if (!decoded.ok) return { ok: false, reason: "unparseable", detail: decoded.detail };
