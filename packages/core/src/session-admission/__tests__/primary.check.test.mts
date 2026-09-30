@@ -22,16 +22,20 @@
  * store read through.
  */
 
-import { describe, expect, it } from "vitest";
+import { describe, expect, expectTypeOf, it } from "vitest";
 import {
 	additionsFromDto,
+	type CompletingRequirement,
 	checkPrimaryAdditions,
 	checkPrimaryAuthentication,
 	checkPrimaryContinuation,
 	continuationOf,
 	primaryFromDto,
 } from "#/session-admission/primary.mjs";
-import type { PrimaryAuthentication } from "#/session-admission/requirement.mjs";
+import type {
+	PrimaryAuthentication,
+	RegisteredRequirement,
+} from "#/session-admission/requirement.mjs";
 
 const NOW = new Date("2026-09-28T12:00:00Z");
 
@@ -40,6 +44,15 @@ const AUTHORITY = { name: "second", secondFactorAuthority: true } as const;
 
 /** A requirement of `name` that does not declare the second-factor authority. */
 const plain = (name: string) => ({ name, secondFactorAuthority: false }) as const;
+
+describe("CompletingRequirement — what the addition checks read of a requirement", () => {
+	it("is the registered copy's name and declaration: a boolean read once at registration, never a raw requirement's field", () => {
+		expectTypeOf<CompletingRequirement>().toEqualTypeOf<
+			Pick<RegisteredRequirement, "name" | "secondFactorAuthority">
+		>();
+		expectTypeOf<CompletingRequirement["secondFactorAuthority"]>().toEqualTypeOf<boolean>();
+	});
+});
 
 const primary = (over: Record<string, unknown> = {}): PrimaryAuthentication =>
 	({
@@ -201,7 +214,6 @@ describe("checkPrimaryAdditions — what a completing requirement may add, by wh
 	it("accepts a completion that adds nothing — amr [] — which is all a requirement reaching nothing can add, from any requirement that does not declare the second-factor authority", () => {
 		expect(checkPrimaryAdditions(plain("consent"), { amr: [] })).toEqual({ amr: [] });
 		expect(Object.isFrozen(checkPrimaryAdditions(plain("consent"), { amr: [] }).amr)).toBe(true);
-		expect(checkPrimaryAdditions({ name: "consent" }, { amr: [] })).toEqual({ amr: [] });
 		expect(() => checkPrimaryAdditions(AUTHORITY, { amr: [], mfaAt: NOW })).toThrow(RangeError);
 	});
 
@@ -258,7 +270,7 @@ describe("checkPrimaryAdditions — what a completing requirement may add, by wh
 	});
 
 	it("refuses a second-factor value or an mfaAt from any requirement that does not declare the second-factor authority — one named mfa among them", () => {
-		for (const requirement of [plain("risk"), plain("mfa"), { name: "mfa" }]) {
+		for (const requirement of [plain("risk"), plain("mfa")]) {
 			expect(() => checkPrimaryAdditions(requirement, { amr: ["otp"] }), requirement.name).toThrow(
 				/a second-factor amr value, which only the second-factor authority may add/,
 			);
@@ -323,6 +335,31 @@ describe("checkPrimaryContinuation — a done entry held to what any completion 
 		for (const requirement of ["second", "risk", "mfa"]) {
 			expect(() => readBack(adds, requirement), requirement).toThrow(RangeError);
 		}
+	});
+
+	it("refuses a done in which more than one entry adds a second factor: only one requirement may, and it completes once", () => {
+		const verified = { amr: ["otp", "mfa"], mfaAtMs: NOW.getTime() };
+		expect(() =>
+			checkPrimaryContinuation({
+				primary: dto(),
+				done: [
+					{ requirement: "second", adds: verified },
+					{ requirement: "other", adds: { amr: ["hwk", "mfa"], mfaAtMs: NOW.getTime() } },
+				],
+				interruptedBy: "hold",
+			}),
+		).toThrow(/more than one completion that adds a second factor/);
+		// One that adds one beside others that add none reads back.
+		expect(
+			checkPrimaryContinuation({
+				primary: dto(),
+				done: [
+					{ requirement: "risk", adds: { amr: [] } },
+					{ requirement: "second", adds: verified },
+				],
+				interruptedBy: "hold",
+			}).done,
+		).toHaveLength(2);
 	});
 
 	it("reads back a verified second factor, and a completion that added nothing, under any name", () => {

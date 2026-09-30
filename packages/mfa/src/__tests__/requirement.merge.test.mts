@@ -75,8 +75,6 @@ const FACTOR_SETS: Readonly<Record<MergeFactors, () => MfaFactor[]>> = {
 const ISSUER = "https://auth.test";
 /** `endpoints.mfa.url` as core's reference.conf ships it. */
 const PAGE: StepUpPage = { url: "/mfa", params: {} };
-/** The second-factor authority the rows are decided by: this package's requirement, its name and its page as registered. */
-const AUTHORITY = { name: "mfa", page: { ...PAGE, href: `${ISSUER}/mfa` } };
 
 /** The requirement the MFA module registers under `mode`, over the factors of `factors`. */
 const realRequirement = (
@@ -126,10 +124,27 @@ const decide = (row: MergeRow): Promise<Admission> =>
 		asks: { acrValues: row.acrValues ?? [] },
 	});
 
+/**
+ * The requirement a row's decision names, as registered: the one this
+ * package registers, the declared second-factor authority. Under `off` no
+ * requirement is registered, and those rows name none; they are mapped with
+ * it all the same.
+ */
+const authorityFor = (row: MergeRow) => {
+	const registered = resolverForTests(
+		[realRequirement(row.mode === "off" ? "optional" : row.mode, row.factors)],
+		{ issuer: ISSUER },
+	).get("mfa");
+	if (registered === undefined) throw new Error("the mfa requirement did not register");
+	return registered;
+};
+
 for (const group of MERGE_ROW_GROUPS) {
 	describe(group.title, () => {
 		it.each(group.rows)("$row", async (row) => {
-			expect(await decide(row)).toEqual(mergeAdmission(row.expected, row.session, AUTHORITY));
+			expect(await decide(row)).toEqual(
+				mergeAdmission(row.expected, row.session, authorityFor(row)),
+			);
 		});
 	});
 }

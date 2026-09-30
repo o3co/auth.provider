@@ -66,7 +66,7 @@ describe("the barrel's session-admission surface", () => {
 		}
 	});
 
-	it("names no requirement: the second-factor authority is what a requirement declares, and the name mfa is the MFA package's", () => {
+	it("does not export MFA_REQUIREMENT_NAME: the name mfa is the MFA package's", () => {
 		expect(Object.hasOwn(core, "MFA_REQUIREMENT_NAME")).toBe(false);
 	});
 

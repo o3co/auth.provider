@@ -487,6 +487,20 @@ describe("resolverForTests — the resolver a test builds", () => {
 		).toThrow(/both declare the second-factor authority/);
 	});
 
+	it("refuses a second authority before it seals any reach, as boot does: the duplicate is named even when the first one's reach is refused too", () => {
+		const badReach = requirement("first", {
+			secondFactorAuthority: true,
+			reach: new Set(["pwd"]),
+			stepUpPage: { url: "https://auth.test/first", params: {} },
+		});
+		const second = requirement("second", { secondFactorAuthority: true });
+		expect(() => resolverForTests([badReach, second])).toThrow(
+			/"first" and "second" both declare the second-factor authority/,
+		);
+		// Alone, the first is refused for its reach.
+		expect(() => resolverForTests([badReach])).toThrow(/a primary's marker/);
+	});
+
 	it("refuses a name admission gives an outage of one of its own stores — ADMISSION_INFRASTRUCTURE_STORES, user_session and revocation_boundary — which a consumer telling an outage by its store would take the requirement's for", () => {
 		expect(ADMISSION_INFRASTRUCTURE_STORES).toEqual(["user_session", "revocation_boundary"]);
 		expect(Object.isFrozen(ADMISSION_INFRASTRUCTURE_STORES)).toBe(true);

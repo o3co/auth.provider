@@ -771,7 +771,8 @@ describe("resumePrimary — after a ceremony completes", () => {
 	});
 
 	it("holds a requirement named mfa that does not declare the second-factor authority to what any other may add: a verified second factor is refused, presented or read back, even with a reach that names it", async () => {
-		// The reach rules are lifted here: the name alone is weighed.
+		// The reach rules are lifted here, so only the missing declaration sets
+		// it apart from the authority.
 		const named = asking("mfa", () => interrupting(), {
 			reach: new Set(["otp", "mfa"]),
 			stepUpPage: { url: "/mfa", params: {} },

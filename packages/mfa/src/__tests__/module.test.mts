@@ -125,7 +125,9 @@ describe("the requirement it registers", () => {
 		);
 		expect(said).toHaveLength(1);
 		expect(said[0]?.[0]).toEqual({
-			requirements: [{ name: "mfa", module: "mfa", remediations: ["mfa.step_up"] }],
+			requirements: [
+				{ name: "mfa", module: "mfa", remediations: ["mfa.step_up"], secondFactorAuthority: true },
+			],
 		});
 	});
 

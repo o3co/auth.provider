@@ -420,22 +420,33 @@ async function refused(options: FullSetOptions): Promise<BootError> {
 const REGISTERED = ["mfa", ...FIXTURE_REQUIREMENTS];
 
 describe("the session requirements: the MFA package's, and the two a deployment writes", () => {
-	it("are said at boot, once: each registered requirement with its module and its remediations, in registration order", async () => {
+	it("are said at boot, once: each registered requirement with its module, its remediations and whether it declares the second-factor authority, in registration order", async () => {
 		const { logger } = await boot();
 		const said = logger.lines.filter((line) => line.args[1] === "session_requirements_registered");
 		expect(said).toHaveLength(1);
 		expect(said[0]?.level).toBe("info");
 		const { requirements } = (said[0]?.args[0] ?? { requirements: [] }) as {
-			requirements: { name: string; module: string; remediations: string[] }[];
+			requirements: {
+				name: string;
+				module: string;
+				remediations: string[];
+				secondFactorAuthority: boolean;
+			}[];
 		};
 		expect([...requirements].sort((a, b) => a.name.localeCompare(b.name))).toEqual([
-			{ name: "fixture-bare", module: "deployment:requirement-bare", remediations: [] },
+			{
+				name: "fixture-bare",
+				module: "deployment:requirement-bare",
+				remediations: [],
+				secondFactorAuthority: false,
+			},
 			{
 				name: "fixture-page",
 				module: "deployment:requirement-page",
 				remediations: ["fixture-page.step_up"],
+				secondFactorAuthority: false,
 			},
-			{ name: "mfa", module: "mfa", remediations: ["mfa.step_up"] },
+			{ name: "mfa", module: "mfa", remediations: ["mfa.step_up"], secondFactorAuthority: true },
 		]);
 		// The fixtures in the order the deployment listed them.
 		expect(requirements.map((r) => r.name).filter((name) => name !== "mfa")).toEqual(

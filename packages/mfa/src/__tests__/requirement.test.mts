@@ -164,7 +164,7 @@ describe("what the requirement declares", () => {
 		expect(requirement.hintKeys).toEqual(["enrollable", "email_proof"]);
 	});
 
-	it("declares the second-factor authority, under either mode: the one requirement core lets reach and add a second factor, bound to its MFA ports", () => {
+	it("declares the second-factor authority under either mode, and registers as it", () => {
 		for (const mode of ["optional", "required"] as const) {
 			expect(build(mode).requirement.secondFactorAuthority, mode).toBe(true);
 			expect(

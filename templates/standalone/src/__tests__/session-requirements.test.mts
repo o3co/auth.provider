@@ -25,7 +25,13 @@
  * rather than letting logins through on a password alone.
  */
 
-import { BootError } from "@o3co/auth-provider-core";
+import {
+	BootError,
+	defineModule,
+	memoryMfaFactorStoreModule,
+	memoryMfaTransactionStoreModule,
+	type SessionRequirement,
+} from "@o3co/auth-provider-core";
 import { afterEach, describe, expect, it } from "vitest";
 import { expectedSessionRequirements, readOwnLayers, resolveLayers } from "../configPath.mjs";
 import {
@@ -104,6 +110,75 @@ describe("what the template expects of session admission", () => {
 			configKey: "sessionRequirements.expected",
 			missing: ["mfa"],
 		});
+	});
+});
+
+describe("the requirement the template declares for MFA must be the declared second-factor authority", () => {
+	/** A requirement registered as `mfa`, declaring the authority or not. */
+	const named = (secondFactorAuthority: boolean): SessionRequirement => ({
+		name: "mfa",
+		secondFactorAuthority,
+		reach: new Set(),
+		stepUpPage: undefined,
+		remediations: ["mfa.step_up"],
+		hintKeys: [],
+		admit: async () => ({ outcome: "met" }),
+	});
+
+	it.each(["optional", "required"] as const)(
+		"refuses the boot under MFA_MODE=%s when a module registers a requirement named mfa that does not declare the authority, disposing the handle before it listens",
+		async (mode) => {
+			const disposed: string[] = [];
+			// Not MFA: named `mfa`, reaching nothing, bound to no MFA port.
+			const namedMfa = defineModule({
+				name: "deployment:named-mfa",
+				provides: { namedMfaProbe: () => ({}) },
+				lifecycle: {
+					namedMfaProbe: {
+						eager: true,
+						cleanup: () => {
+							disposed.push("namedMfaProbe");
+						},
+					},
+				},
+				contributes: { sessionRequirements: { mfa: () => named(false) } },
+			} as never);
+			const err = await refusal(
+				compose({ env: { ...SINGLE_ENV, MFA_MODE: mode }, extraModules: () => [namedMfa] }),
+			);
+			expect(err).toBeInstanceOf(Error);
+			expect((err as { reason?: unknown }).reason).toBe(
+				"mfa-requirement-not-second-factor-authority",
+			);
+			expect(disposed).toEqual(["namedMfaProbe"]);
+		},
+	);
+
+	it("boots under MFA_MODE=required when the requirement registered as mfa declares the authority, bound to the MFA ports", async () => {
+		const authority = defineModule({
+			name: "deployment:mfa",
+			requires: ["mfaFactorResolver", "mfaFactorStore", "mfaTransactionStore"],
+			contributes: { sessionRequirements: { mfa: () => named(true) } },
+		} as never);
+		current = await compose({
+			env: { ...SINGLE_ENV, MFA_MODE: "required" },
+			extraModules: () => [memoryMfaFactorStoreModule, memoryMfaTransactionStoreModule, authority],
+		});
+		expect(
+			current.handle.components.sessionRequirementResolver?.get("mfa")?.secondFactorAuthority,
+		).toBe(true);
+	});
+
+	it("asks nothing of a requirement named mfa under mfa.mode = off: the template declared none for MFA", async () => {
+		const namedMfa = defineModule({
+			name: "deployment:named-mfa",
+			contributes: { sessionRequirements: { mfa: () => named(false) } },
+		} as never);
+		current = await compose({
+			operatorHocon: 'sessionRequirements.expected = ["mfa"]\n',
+			extraModules: () => [namedMfa],
+		});
+		expect(current.config.mfa.mode).toBe("off");
 	});
 });
 

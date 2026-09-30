@@ -1234,6 +1234,7 @@ describe("the second-factor authority is declared, and bound to core's MFA ports
 		expect(err.message).toContain('"verifier" (module "test:verifier")');
 		expect(err.message).toContain('"keys" (module "test:keys")');
 		expect(err.message).toMatch(/at most one/);
+		expect(err.message).toContain("install only one of the modules that contribute them");
 	});
 
 	it("refuses a second declaration whatever else is wrong with either: the duplicate is what the composition must fix first", async () => {
@@ -1249,6 +1250,33 @@ describe("the second-factor authority is declared, and bound to core's MFA ports
 			),
 		);
 		expect(err.reason).toBe("duplicate-second-factor-authority");
+	});
+
+	it("refuses a declaration that is neither true, false nor absent as the contribution's failure, naming the module", async () => {
+		for (const declared of ["yes", 1, null]) {
+			const err = await refusal(
+				boot(
+					[
+						contributing("test:risk", {
+							risk: () => ({
+								...requirement("risk"),
+								secondFactorAuthority: declared as never,
+							}),
+						}),
+					],
+					{ sessionRequirements: { expected: ["risk"] } },
+				),
+			);
+			expect(err.reason, String(declared)).toBe("contribute-factory-failed");
+			expect(err.details, String(declared)).toMatchObject({
+				module: "test:risk",
+				kind: "sessionRequirements",
+				name: "risk",
+			});
+			expect(err.message, String(declared)).toMatch(
+				/secondFactorAuthority must be true, false or absent/,
+			);
+		}
 	});
 
 	it("boots one authority beside requirements that do not declare it, and binds only the one that does", async () => {
@@ -1297,12 +1325,48 @@ describe("the session_requirements_registered boot line", () => {
 				message: "session_requirements_registered",
 				fields: {
 					requirements: [
-						{ name: "b", module: "test:second", remediations: [] },
-						{ name: "a", module: "test:first", remediations: ["a.step_up"] },
+						{ name: "b", module: "test:second", remediations: [], secondFactorAuthority: false },
+						{
+							name: "a",
+							module: "test:first",
+							remediations: ["a.step_up"],
+							secondFactorAuthority: false,
+						},
 					],
 				},
 			},
 		]);
+	});
+
+	it("says which requirement declares the second-factor authority, whatever its name, so the log tells the authority from a requirement merely named mfa", async () => {
+		const { logger, lines } = recordingLogger();
+		const handle = await boot(
+			[
+				defineModule({
+					name: "test:factors",
+					contributes: { mfaFactors: { totp: () => factor("totp", ["otp"], true) } },
+				}),
+				...stores,
+				contributing("test:named", { mfa: () => requirement("mfa", { remediations: [] }) }),
+				authorityModule(),
+			],
+			{ sessionRequirements: { expected: ["mfa", "verifier"] } },
+			{},
+			logger,
+		);
+		await handle.dispose();
+		const [registered] = lines.filter((line) => line.message === "session_requirements_registered");
+		expect(registered?.fields).toEqual({
+			requirements: [
+				{ name: "mfa", module: "test:named", remediations: [], secondFactorAuthority: false },
+				{
+					name: "verifier",
+					module: "test:verifier",
+					remediations: ["verifier.step_up"],
+					secondFactorAuthority: true,
+				},
+			],
+		});
 	});
 
 	it("says nothing when neither a consumer nor a requirement is installed", async () => {
