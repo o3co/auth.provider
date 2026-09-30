@@ -177,8 +177,11 @@ describe("device verification on session admission", () => {
 		expect(asked).toEqual([]);
 	});
 
+	/** The grade each body action is admitted with: lookup and deny grant nothing. */
+	const GRADES = { lookup: "grants_nothing", approve: "use", deny: "grants_nothing" } as const;
+
 	it.each(ACTIONS)(
-		"admits %s as its own action, device.<action>, graded use, on the cookie's claim",
+		"admits %s as its own action, device.<action>, with its grade, on the cookie's claim",
 		async (action) => {
 			const asked: RequirementInput[] = [];
 			const { verify } = await harness({
@@ -187,7 +190,7 @@ describe("device verification on session admission", () => {
 			const res = await verify({ action, user_code: USER_CODE });
 			expect(res.status).toBe(200);
 			expect(asked).toHaveLength(1);
-			expect(asked[0]?.action).toEqual({ name: `device.${action}`, grade: "use" });
+			expect(asked[0]?.action).toEqual({ name: `device.${action}`, grade: GRADES[action] });
 			expect(asked[0]).toMatchObject({
 				carrier: "cookie",
 				subject: "user-1",
