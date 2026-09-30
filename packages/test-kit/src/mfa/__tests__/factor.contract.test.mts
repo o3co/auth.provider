@@ -309,34 +309,33 @@ describe("mfaFactorContract", () => {
 	});
 
 	it("fails a mail whose purpose is not one of the closed list, or whose code is empty or no string", async () => {
-		for (const mail of [
-			{ purpose: "security_notice", code: "123456" },
-			{ purpose: "LOGIN_CODE", code: "123456" },
-			{ purpose: "login_code", code: "" },
-			{ purpose: "login_code", code: 123456 },
-			{ purpose: "login_code" },
-			"123456",
-		]) {
-			expect(
-				await failing(
-					inputFor({ mail: true }, (factor) => ({
-						...factor,
-						challenge: async (ctx) => {
-							const sent = await (factor.challenge as NonNullable<MfaFactor["challenge"]>)(ctx);
-							return { ...sent, mail: mail as never };
-						},
-					})),
-				),
-				JSON.stringify(mail),
-			).toEqual([RULES.challenge]);
+		const mailing = (mail: (sent: { purpose: string; code: string }) => unknown) =>
+			inputFor({ mail: true }, (factor) => ({
+				...factor,
+				challenge: async (ctx) => {
+					const sent = await (factor.challenge as NonNullable<MfaFactor["challenge"]>)(ctx);
+					return { ...sent, mail: mail(sent.mail as { purpose: string; code: string }) as never };
+				},
+			}));
+		for (const purpose of ["security_notice", "LOGIN_CODE", undefined]) {
+			expect(await failing(mailing((sent) => ({ ...sent, purpose }))), String(purpose)).toEqual([
+				RULES.challenge,
+			]);
 		}
+		// A code that is not the one kept is no proof either: verification fails beside it.
+		for (const code of ["", 123456, undefined]) {
+			expect(await failing(mailing((sent) => ({ ...sent, code }))), String(code)).toContain(
+				RULES.challenge,
+			);
+		}
+		expect(await failing(mailing((sent) => sent.code))).toContain(RULES.challenge);
 		expect(
 			await failing(
 				inputFor({ mail: true }, (factor) => ({
 					...factor,
 					beginEnrollment: async (ctx) => {
 						const start = await factor.beginEnrollment(ctx);
-						return { ...start, mail: { purpose: "notice", code: "1" } as never };
+						return { ...start, mail: { ...start.mail, purpose: "notice" } as never };
 					},
 				})),
 			),

@@ -16,7 +16,7 @@
 
 /**
  * The doubles a second factor's tests use: `createTestMfaFactor`, a factor
- * with a trivial protocol, with or without a challenge; `testMfaFactorProofs`,
+ * with a trivial protocol, with or without a challenge, or mailing its codes; `testMfaFactorProofs`,
  * the proofs it takes; and `createTestMfaDigests`, keyed digests under a fixed
  * test key, as the coordinator hands a factor under the key ring. The
  * conformance suite a factor runs, `mfaFactorContract`, is
@@ -101,18 +101,28 @@ export interface TestMfaFactorOptions {
 	 * it was handed. Absent: there is no challenge.
 	 */
 	readonly challenge?: boolean;
+	/**
+	 * Mail codes instead, and take precedence over `challenge`: the enrollment
+	 * asks for its code to be mailed (`email_factor_enrollment`) and each
+	 * challenge for another (`login_code`), which a verification repeats; the
+	 * latest stands across attempts. Enrollable only by an account with an
+	 * address, which the factor never keeps.
+	 */
+	readonly mail?: boolean;
 }
 
 /**
  * A second factor with a trivial protocol, for tests: the enrollment answers
  * a random secret, and a verification is that secret — with `challenge`, the
- * secret and the nonce the latest challenge answered, as `secret:nonce`.
+ * secret and the nonce the latest challenge answered, as `secret:nonce`;
+ * with `mail`, the code the latest challenge asked to be mailed.
  * {@link testMfaFactorProofs} makes the proofs. A proof that is not a string
  * is `malformed`.
  */
 export function createTestMfaFactor(options: TestMfaFactorOptions = {}): MfaFactor {
 	const amrValues = Object.freeze([...(options.amrValues ?? [OTP_AMR])]);
 	const newSecret = (): string => randomBytes(8).toString("hex");
+	const mails = options.mail === true;
 	const factor: MfaFactor = {
 		kind: options.kind ?? "test",
 		amrValues,
@@ -123,15 +133,28 @@ export function createTestMfaFactor(options: TestMfaFactorOptions = {}): MfaFact
 		describe: () => ({}),
 		beginEnrollment: async () => {
 			const secret = newSecret();
-			return { state: { secret }, response: { secret } };
+			return mails
+				? {
+						state: { secret },
+						response: { sent: true },
+						mail: { purpose: "email_factor_enrollment", code: secret },
+					}
+				: { state: { secret }, response: { secret } };
 		},
 		completeEnrollment: async (ctx) => {
 			if (typeof ctx.proof !== "string") return { ok: false, reason: "malformed" };
 			if (ctx.proof !== ctx.state.secret) return { ok: false, reason: "invalid" };
-			return { ok: true, data: { secret: ctx.state.secret } };
+			return { ok: true, data: mails ? {} : { secret: ctx.state.secret } };
 		},
 		verify: async (ctx) => {
 			if (typeof ctx.proof !== "string") return { ok: false, reason: "malformed" };
+			if (mails) {
+				const code = ctx.state?.code;
+				if (typeof code !== "string") return { ok: false, reason: "expired" };
+				return ctx.proof === code
+					? { ok: true, factorId: ctx.factor.id }
+					: { ok: false, reason: "invalid" };
+			}
 			const { secret } = ctx.factor.data;
 			if (options.challenge !== true) {
 				return ctx.proof === secret
@@ -144,23 +167,38 @@ export function createTestMfaFactor(options: TestMfaFactorOptions = {}): MfaFact
 				? { ok: true, factorId: ctx.factor.id }
 				: { ok: false, reason: "invalid" };
 		},
-		...(options.challenge === true
+		...(mails
 			? {
+					reusableChallenge: true,
+					enrollable: (user: Readonly<Record<string, unknown>>) =>
+						typeof user.email === "string" && user.email !== "",
 					challenge: async () => {
-						const nonce = newSecret();
-						return { state: { nonce }, response: { nonce } };
+						const code = newSecret();
+						return {
+							state: { code },
+							response: { sent: true },
+							mail: { purpose: "login_code", code },
+						};
 					},
 				}
-			: {}),
+			: options.challenge === true
+				? {
+						challenge: async () => {
+							const nonce = newSecret();
+							return { state: { nonce }, response: { nonce } };
+						},
+					}
+				: {}),
 	};
 	return factor;
 }
 
 /**
  * The proofs of {@link createTestMfaFactor}: the secret its enrollment
- * answered; for a verification, that secret — and, after a challenge, the
- * nonce it answered, as `secret:nonce`. An input to the test kit's `mfaFactorContract`
- * beside the double.
+ * answered, or the code it asked to be mailed; for a verification, that
+ * secret — and, after a challenge, the nonce it answered, as `secret:nonce`
+ * — or the code the challenge asked to be mailed. An input to the test
+ * kit's `mfaFactorContract` beside the double.
  */
 export const testMfaFactorProofs: {
 	readonly enrollmentProof: (start: EnrollmentStart) => unknown;
@@ -169,9 +207,11 @@ export const testMfaFactorProofs: {
 		challenge: Challenge | undefined,
 	) => unknown;
 } = Object.freeze({
-	enrollmentProof: (start: EnrollmentStart) => (start.response as { secret?: unknown }).secret,
-	verificationProof: (enrolled: MfaEnrolledFactor, challenge: Challenge | undefined) =>
-		challenge === undefined
-			? enrolled.data.secret
-			: `${String(enrolled.data.secret)}:${String((challenge.response as { nonce?: unknown }).nonce)}`,
+	enrollmentProof: (start: EnrollmentStart) =>
+		start.mail?.code ?? (start.response as { secret?: unknown }).secret,
+	verificationProof: (enrolled: MfaEnrolledFactor, challenge: Challenge | undefined) => {
+		if (challenge === undefined) return enrolled.data.secret;
+		if (challenge.mail !== undefined) return challenge.mail.code;
+		return `${String(enrolled.data.secret)}:${String((challenge.response as { nonce?: unknown }).nonce)}`;
+	},
 });

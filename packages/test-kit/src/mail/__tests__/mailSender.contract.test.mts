@@ -191,7 +191,7 @@ describe("mailSenderContract", () => {
 					{ to: mail.to, content: mail.code },
 				]),
 			),
-		).toEqual([RULES.delivered]);
+		).toEqual([RULES.delivered, RULES.purposes]);
 	});
 
 	it("fails a sender that cannot send a purpose of the closed list", async () => {
@@ -272,7 +272,8 @@ describe("mailSenderContract", () => {
 				await failing(
 					changed(
 						rejectingWith(
-							(_mail, reply) => new Error("the relay refused the mail", { cause: new Error(reply) }),
+							(_mail, reply) =>
+								new Error("the relay refused the mail", { cause: new Error(reply) }),
 							refusal,
 						),
 					),

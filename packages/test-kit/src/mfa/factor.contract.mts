@@ -22,8 +22,12 @@
  * whatever the kind: a kind a hint can carry; `amrValues` it can vouch for and
  * `amrFor` within them, never empty; boolean flags; state and data that
  * survive the JSON round trip sealing puts them through, which the suite also
- * hands the factor back after; a hint that never shows the account's
- * address; a proof the factor cannot read answered `malformed`, never thrown;
+ * hands the factor back after; a code asked to be mailed only with a purpose
+ * from core's closed list, and never in the page's response; data that never
+ * carries the account's address, since the provider keeps none and a mailed
+ * code goes to the address on the account at the time; a hint that never
+ * shows the account's address; a proof the factor cannot read answered
+ * `malformed`, never thrown;
  * and a valid proof that completes an enrollment and verifies the factor it
  * enrolled. The suite enrolls at one instant and verifies an hour later, so a
  * factor that refuses reuse within a time step is not asked to verify at the
@@ -38,6 +42,7 @@ import assert from "node:assert/strict";
 import {
 	FEDERATED_AMR,
 	isHintToken,
+	MAIL_PURPOSES,
 	MFA_AMR,
 	type MfaCeremonyContext,
 	type MfaEnrolledFactor,
@@ -135,6 +140,38 @@ function survivesJson(value: unknown, what: string): void {
 
 /** `value` as the coordinator hands it back after keeping it: through JSON. */
 const reopened = <T,>(value: T): T => JSON.parse(JSON.stringify(value)) as T;
+
+/**
+ * Refuses a code a call asks to be mailed unless its purpose is one of
+ * core's closed list and its code a non-empty string that `response`, what
+ * the page is answered, does not carry. No mail asked for passes.
+ */
+function checkMail(mail: unknown, response: unknown, what: string): void {
+	if (mail === undefined) return;
+	const { purpose, code } = (typeof mail === "object" && mail !== null ? mail : {}) as {
+		readonly purpose?: unknown;
+		readonly code?: unknown;
+	};
+	assert.ok(
+		(MAIL_PURPOSES as readonly unknown[]).includes(purpose),
+		`${what}'s mail has a purpose outside the closed list: ${JSON.stringify(purpose)}`,
+	);
+	assert.ok(typeof code === "string" && code.length > 0, `${what}'s mail has no code`);
+	assert.ok(
+		!(JSON.stringify(response) ?? "").includes(code),
+		`${what}'s response carries the code it asks to be mailed: the page would hold what only the mailbox should`,
+	);
+}
+
+/** Refuses `value` when it carries the account's address, whatever its letter case. */
+function carriesNoAddress(value: unknown, user: Readonly<Record<string, unknown>>, what: string) {
+	const { email } = user;
+	if (typeof email !== "string" || email === "") return;
+	assert.ok(
+		!(JSON.stringify(value) ?? "").toLowerCase().includes(email.toLowerCase()),
+		`${what} carries the account's address, which the provider does not keep`,
+	);
+}
 
 /** The subject every call is made for: the account's `User.id`, as the coordinator hands it. */
 function subjectOf(user: Readonly<Record<string, unknown>>): string {
@@ -253,11 +290,12 @@ export function mfaFactorContract(input: MfaFactorContractInput): readonly Contr
 			},
 		},
 		{
-			name: "beginEnrollment answers state that survives a JSON round trip",
+			name: "beginEnrollment answers state that survives a JSON round trip, and, when it asks for a code to be mailed, a purpose from the closed list and a non-empty code its response does not carry",
 			run: async () => {
 				const factor = input.build();
 				const { start } = await begin(factor);
 				survivesJson(start.state, "the pending enrollment's state");
+				checkMail(start.mail, start.response, "beginEnrollment");
 			},
 		},
 		{
@@ -309,6 +347,13 @@ export function mfaFactorContract(input: MfaFactorContractInput): readonly Contr
 			},
 		},
 		{
+			name: "completeEnrollment answers data that never carries the account's address",
+			run: async () => {
+				const factor = input.build();
+				carriesNoAddress((await enroll(factor)).data, input.user, "the enrolled factor's data");
+			},
+		},
+		{
 			name: "describe answers a hint that is a string, or none, and never the account's address",
 			run: async () => {
 				const factor = input.build();
@@ -322,12 +367,13 @@ export function mfaFactorContract(input: MfaFactorContractInput): readonly Contr
 			},
 		},
 		{
-			name: "challenge, when present, answers state that survives a JSON round trip",
+			name: "challenge, when present, answers state that survives a JSON round trip, and, when it asks for a code to be mailed, a purpose from the closed list and a non-empty code its response does not carry",
 			run: async () => {
 				const factor = input.build();
 				if (factor.challenge === undefined) return;
 				const { sent } = await challenge(factor, await enroll(factor));
 				if (sent?.state !== undefined) survivesJson(sent.state, "the challenge's state");
+				checkMail(sent?.mail, sent?.response, "challenge");
 			},
 		},
 		{
@@ -353,7 +399,7 @@ export function mfaFactorContract(input: MfaFactorContractInput): readonly Contr
 			},
 		},
 		{
-			name: "verify takes a valid proof, names a factor the subject holds, and answers next data that survives a JSON round trip",
+			name: "verify takes a valid proof, names a factor the subject holds, and answers next data that survives a JSON round trip and never carries the account's address",
 			run: async () => {
 				const factor = input.build();
 				const enrolled = await enroll(factor);
@@ -371,7 +417,10 @@ export function mfaFactorContract(input: MfaFactorContractInput): readonly Contr
 					enrolled.id,
 					"the verification names a factor the subject does not hold",
 				);
-				if (verdict.next !== undefined) survivesJson(verdict.next, "the factor's next data");
+				if (verdict.next !== undefined) {
+					survivesJson(verdict.next, "the factor's next data");
+					carriesNoAddress(verdict.next, input.user, "the factor's next data");
+				}
 			},
 		},
 	];
