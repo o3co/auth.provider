@@ -61,6 +61,16 @@ export {
 	makeValidCoreConfig,
 	makeValidFullSections,
 } from "./fixtures/valid-config.mjs";
+// The conformance suite a contributed second factor runs, its double, and
+// the keyed digests a factor's tests hand it.
+export {
+	createTestMfaDigests,
+	createTestMfaFactor,
+	type MfaFactorContractInput,
+	mfaFactorContract,
+	type TestMfaFactorOptions,
+	testMfaFactorProofs,
+} from "./mfaFactor.mjs";
 export {
 	createRecordingMailSender,
 	type RecordingMailSender,
@@ -110,6 +120,10 @@ export {
 	type LoginEntryContractInput,
 	loginEntryContract,
 } from "./slots/loginEntry.mjs";
+export {
+	type MailSenderContractInput,
+	mailSenderContract,
+} from "./slots/mailSender.mjs";
 export {
 	createTestOAuthTokenSettings,
 	type OAuthTokenSettingsContractInput,

@@ -232,11 +232,13 @@ describe("mfaFactorContract", () => {
 	});
 
 	it("fails a verification that refuses a valid proof, or names a factor the subject does not hold", async () => {
+		// Each reads a malformed proof as the double does, so only the valid one breaks the contract.
 		expect(
 			await failing(
 				inputFor({}, (factor) => ({
 					...factor,
-					verify: async () => ({ ok: false, reason: "invalid" }),
+					verify: async (ctx) =>
+						typeof ctx.proof === "string" ? { ok: false, reason: "invalid" } : factor.verify(ctx),
 				})),
 			),
 		).toEqual([RULES.verify]);
@@ -244,7 +246,10 @@ describe("mfaFactorContract", () => {
 			await failing(
 				inputFor({}, (factor) => ({
 					...factor,
-					verify: async () => ({ ok: true, factorId: "someone-else's" }),
+					verify: async (ctx) =>
+						typeof ctx.proof === "string"
+							? { ok: true, factorId: "someone-else's" }
+							: factor.verify(ctx),
 				})),
 			),
 		).toEqual([RULES.verify]);
