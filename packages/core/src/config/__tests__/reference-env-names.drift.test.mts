@@ -53,7 +53,7 @@ const TEMPLATE_CONFIG = fileURLToPath(
  * many as are today. A rename lowers it by the names it renames; nothing
  * raises it.
  */
-const CEILING = 57;
+const CEILING = 55;
 
 /** `LEGACY`'s first count: it only ever loses entries. */
 const LEGACY_BASELINE = 61;
@@ -95,8 +95,6 @@ const LEGACY: readonly string[] = [
 	"core: CLIENT_CODE_DEFAULT_EXPIRES_IN at redisCodeRepository.defaultExpiresIn",
 	"core: CLIENT_CODE_ENDPOINT_URI at repositories.code.redis.endpointUri",
 	"core: CLIENT_CODE_PASSWORD at repositories.code.redis.password",
-	"core: REFRESH_TOKEN_FAMILY_STORE_KEY_PREFIX at redisRefreshTokenFamilyStore.keyPrefix",
-	"core: REFRESH_TOKEN_FAMILY_STORE_CAS_RETRY_LIMIT at redisRefreshTokenFamilyStore.casRetryLimit",
 	"core: CLIENT_CODE_KEY_PREFIX at redisCodeRepository.keyPrefix",
 	"mfa: MFA_ENCRYPTION_KEY at mfa.encryptionKeys.0.key",
 	"template: LOG_LEVEL at logging.level",

@@ -63,16 +63,14 @@ describe("memoryChallengeStoreModule", () => {
 		expect(memoryChallengeStoreModule.name).toBe("core-challenge-store-memory");
 	});
 
-	it("provides challengeStore via factory, reading its cap from config", () => {
-		expect(memoryChallengeStoreModule.requires ?? []).toEqual(["config"]);
+	it("provides challengeStore via factory, reading its cap from its own section", () => {
+		expect(memoryChallengeStoreModule.requires ?? []).toEqual([]);
 		expect(typeof memoryChallengeStoreModule.provides?.challengeStore).toBe("function");
-		const store = memoryChallengeStoreModule.provides?.challengeStore?.({
-			config: makeValidCoreConfig(),
-		} as never);
+		const store = memoryChallengeStoreModule.provides?.challengeStore?.({ section: undefined } as never);
 		expect((store as { kind: string }).kind).toBe("memory");
 	});
 
-	describe("challengeStore.memory.maxEntries", () => {
+	describe("core-challenge-store-memory.maxEntries", () => {
 		const storeOf = async (extra: Record<string, unknown>): Promise<MemoryChallengeStore> => {
 			const handle = await bootWith(memoryChallengeStoreModule, extra);
 			const store = handle.components.challengeStore as MemoryChallengeStore;
@@ -80,13 +78,36 @@ describe("memoryChallengeStoreModule", () => {
 			return store;
 		};
 
-		it("survives the schema a composition root parses its config with", () => {
+		it("keeps the path the cap moved from through the schema a composition root parses with, for the refusal", () => {
 			// `AppConfigSchema` strips what it does not declare, before any module runs.
 			const parsed = AppConfigSchema.parse({
 				...makeValidAppConfig(),
 				challengeStore: { memory: { maxEntries: "5000" } },
 			});
-			expect(parsed.challengeStore?.memory?.maxEntries).toBe("5000");
+			expect(parsed.challengeStore?.memory).toEqual({ maxEntries: "5000" });
+		});
+
+		it("refuses challengeStore.memory.maxEntries at boot, naming core-challenge-store-memory.maxEntries", async () => {
+			const err = await refusalOf(
+				bootWith(memoryChallengeStoreModule, { challengeStore: { memory: { maxEntries: 5000 } } }),
+			);
+			expect(err.reason).toBe("config-path-relocated");
+			expect(err.details).toEqual({
+				reason: "config-path-relocated",
+				relocated: [
+					{
+						module: "core-challenge-store-memory",
+						from: "challengeStore.memory.maxEntries",
+						to: "core-challenge-store-memory.maxEntries",
+					},
+				],
+			});
+		});
+
+		it("refuses a key its section does not declare", async () => {
+			const err = await refusalOf(bootWith(memoryChallengeStoreModule, { "core-challenge-store-memory": { maxEntry: 5 } }));
+			expect(err.reason).toBe("config-validation-failed");
+			expect(err.message).toContain('"maxEntry"');
 		});
 
 		it("takes the default when the key is absent", async () => {
@@ -94,11 +115,11 @@ describe("memoryChallengeStoreModule", () => {
 		});
 
 		it("takes a number, or the string an environment variable delivers", async () => {
-			expect((await storeOf({ challengeStore: { memory: { maxEntries: 5000 } } })).maxEntries).toBe(
+			expect((await storeOf({ "core-challenge-store-memory": { maxEntries: 5000 } })).maxEntries).toBe(
 				5000,
 			);
 			expect(
-				(await storeOf({ challengeStore: { memory: { maxEntries: "7000" } } })).maxEntries,
+				(await storeOf({ "core-challenge-store-memory": { maxEntries: "7000" } })).maxEntries,
 			).toBe(7000);
 		});
 
@@ -106,12 +127,12 @@ describe("memoryChallengeStoreModule", () => {
 			for (const tooMany of [2 ** 24 + 1, "16777217"]) {
 				const err = await refusalOf(
 					bootWith(memoryChallengeStoreModule, {
-						challengeStore: { memory: { maxEntries: tooMany } },
+						"core-challenge-store-memory": { maxEntries: tooMany },
 					}),
 				);
 				expect(err.cause).toBeInstanceOf(RangeError);
 				expect((err.cause as Error).message).toBe(
-					`challengeStore.memory.maxEntries must be at most 16777216, the most entries a Map holds (got ${JSON.stringify(tooMany)})`,
+					`core-challenge-store-memory.maxEntries must be at most 16777216, the most entries a Map holds (got ${JSON.stringify(tooMany)})`,
 				);
 			}
 		});
@@ -119,12 +140,12 @@ describe("memoryChallengeStoreModule", () => {
 		it("refuses a value it cannot use at boot, naming the key", async () => {
 			for (const bad of [0, -1, 1.5, "lots", "", true, null]) {
 				const err = await refusalOf(
-					bootWith(memoryChallengeStoreModule, { challengeStore: { memory: { maxEntries: bad } } }),
+					bootWith(memoryChallengeStoreModule, { "core-challenge-store-memory": { maxEntries: bad } }),
 				);
 				expect(err.reason, String(bad)).toBe("provides-factory-failed");
 				expect(err.cause).toBeInstanceOf(RangeError);
 				expect((err.cause as Error).message).toBe(
-					`challengeStore.memory.maxEntries must be a positive whole number (got ${JSON.stringify(bad)})`,
+					`core-challenge-store-memory.maxEntries must be a positive whole number (got ${JSON.stringify(bad)})`,
 				);
 			}
 		});

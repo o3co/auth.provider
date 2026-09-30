@@ -115,7 +115,7 @@ describe("core's reference.conf holds only what core's schema declares", () => {
 		const paths = collectPaths(resolved);
 		expect(paths.length).toBeGreaterThan(50);
 		expect(paths).toContain("oauth.jwt.legacyTypAccept");
-		expect(paths).toContain("redisFederationTokenStore.keyPrefix");
+		expect(paths).toContain("core-rate-limiter-memory.maxBuckets");
 	});
 
 	it("ships no path core's schema does not declare, outside its own modules' sections", () => {
@@ -131,13 +131,28 @@ describe("core's reference.conf holds only what core's schema declares", () => {
 });
 
 describe("core's reference.conf holds the sections of core's own modules to their schemas", () => {
-	it("finds them: the JWKS module's among them (the guard is not vacuous)", () => {
-		expect(CORE_MODULE_SECTIONS).toContain("jwks");
+	it("finds them: the JWKS module's and the in-process stores' among them (the guard is not vacuous)", () => {
+		expect(CORE_MODULE_SECTIONS).toEqual(
+			expect.arrayContaining([
+				"jwks",
+				"core-challenge-store-memory",
+				"core-mfa-transaction-store-memory",
+				"core-rate-limiter-memory",
+				"core-replay-seen-set-memory",
+			]),
+		);
 	});
 
 	it.each([
 		["with no variable set", {}],
-		["with each variable set", { JWKS_PATH: "/keys/jwks.json", JWKS_CACHE_MAX_AGE: "60" }],
+		[
+			"with each variable set",
+			{
+				JWKS_PATH: "/keys/jwks.json",
+				JWKS_CACHE_MAX_AGE: "60",
+				CORE_RATE_LIMITER_MEMORY_MAX_BUCKETS: "500",
+			},
+		],
 	])("parses each without losing a path, %s", (_label, env) => {
 		const tree = parseFile(REFERENCE_CONF_PATH, {
 			env: { ...REQUIRED_ENV, ...env },
@@ -152,13 +167,13 @@ describe("core's reference.conf holds the sections of core's own modules to thei
 	});
 });
 
-describe("core's reference.conf captures exactly the variables core's own section declares renamed", () => {
-	it("captures each of CORE_RELOCATIONS' names, binds each new one at its path, and captures nothing else", () => {
+describe("core's reference.conf captures exactly the variables core's own section and core's own modules declare renamed", () => {
+	it("captures each of their names, binds each new one at its path, and captures nothing else", () => {
 		const read = (path: string, env: Readonly<Record<string, string>>): unknown =>
 			parseFile(path, { env: { ...REQUIRED_ENV, ...env } }).toObject();
 		expect(
 			renamedVariableProblems({
-				modules: [],
+				modules: CORE_MODULES,
 				core: CORE_RELOCATIONS,
 				layers: [REFERENCE_CONF_PATH],
 				read,
@@ -167,7 +182,7 @@ describe("core's reference.conf captures exactly the variables core's own sectio
 	});
 });
 
-describe("core's reference.conf binds core's own section and the JWKS module's, and nothing at the paths they moved from", () => {
+describe("core's reference.conf binds core's own section and its modules', and nothing at the paths they moved from", () => {
 	const MARKER = "__CORE_SECTION_MARKER__";
 	/** Every dotted path the file sets to `MARKER` with `variable` set to it. */
 	const pathsSetBy = (variable: string): string[] => {
@@ -190,12 +205,17 @@ describe("core's reference.conf binds core's own section and the JWKS module's, 
 		["CORE_DEPLOYMENT_MODE", "core.deployment.mode"],
 		["JWKS_PATH", "jwks.path"],
 		["JWKS_CACHE_MAX_AGE", "jwks.cacheMaxAge"],
+		["CORE_RATE_LIMITER_MEMORY_MAX_BUCKETS", "core-rate-limiter-memory.maxBuckets"],
 	])("binds %s at %s alone", (variable, path) => {
 		expect(pathsSetBy(variable)).toEqual([path]);
 	});
 
-	it("binds DEPLOYMENT_MODE nowhere but its capture", () => {
-		expect(pathsSetBy("DEPLOYMENT_MODE")).toEqual([]);
+	it.each([
+		"DEPLOYMENT_MODE",
+		"MEMORY_RATE_LIMITER_MAX_BUCKETS",
+		"RATE_LIMIT_FAIL_MODE",
+	])("binds %s nowhere but its capture", (variable) => {
+		expect(pathsSetBy(variable)).toEqual([]);
 	});
 
 	it("captures DEPLOYMENT_MODE and CORE_DEPLOYMENT_MODE as the resolution sees them", () => {
@@ -206,20 +226,30 @@ describe("core's reference.conf binds core's own section and the JWKS module's, 
 					unknown
 				>
 			)[RENAMED_VARIABLES_SECTION];
-		expect(captured({})).toEqual({ DEPLOYMENT_MODE: null, CORE_DEPLOYMENT_MODE: null });
-		expect(captured({ DEPLOYMENT_MODE: "multi" })).toEqual({
+		expect(captured({})).toMatchObject({ DEPLOYMENT_MODE: null, CORE_DEPLOYMENT_MODE: null });
+		expect(captured({ DEPLOYMENT_MODE: "multi" })).toMatchObject({
 			DEPLOYMENT_MODE: "multi",
 			CORE_DEPLOYMENT_MODE: null,
 		});
 	});
 
-	it("sets nothing at deployment, sessionRequirements or oauth.jwt's JWKS keys", () => {
+	it("sets nothing at the paths core's section, the JWKS module's and the stores' moved from", () => {
 		const tree = parseFile(REFERENCE_CONF_PATH, { env: REQUIRED_ENV }).toObject();
 		for (const path of [
 			"deployment",
 			"sessionRequirements",
 			"oauth.jwt.jwksPath",
 			"oauth.jwt.jwksCacheMaxAge",
+			"memoryRateLimiter",
+			"redisRateLimiter",
+			"rateLimit.failMode",
+			"redisAccessTokenDenylist",
+			"redisConsentStore",
+			"redisMfaFactorStore",
+			"redisMfaTransactionStore",
+			"redisRefreshTokenFamilyStore",
+			"redisSessionStores",
+			"redisFederationTokenStore",
 		]) {
 			expect(hasPath(tree, path), path).toBe(false);
 		}

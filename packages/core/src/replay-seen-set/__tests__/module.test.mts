@@ -60,16 +60,14 @@ describe("memoryReplaySeenSetModule", () => {
 		expect(memoryReplaySeenSetModule.name).toBe("core-replay-seen-set-memory");
 	});
 
-	it("provides replaySeenSet via factory, reading its cap from config", () => {
-		expect(memoryReplaySeenSetModule.requires ?? []).toEqual(["config"]);
+	it("provides replaySeenSet via factory, reading its cap from its own section", () => {
+		expect(memoryReplaySeenSetModule.requires ?? []).toEqual([]);
 		expect(typeof memoryReplaySeenSetModule.provides?.replaySeenSet).toBe("function");
-		const set = memoryReplaySeenSetModule.provides?.replaySeenSet?.({
-			config: makeValidCoreConfig(),
-		} as never);
+		const set = memoryReplaySeenSetModule.provides?.replaySeenSet?.({ section: undefined } as never);
 		expect((set as { kind: string }).kind).toBe("memory");
 	});
 
-	describe("replaySeenSet.memory.maxEntries", () => {
+	describe("core-replay-seen-set-memory.maxEntries", () => {
 		const seenSetOf = async (extra: Record<string, unknown>): Promise<MemoryReplaySeenSet> => {
 			const handle = await bootWith(memoryReplaySeenSetModule, extra);
 			const set = handle.components.replaySeenSet as MemoryReplaySeenSet;
@@ -77,13 +75,36 @@ describe("memoryReplaySeenSetModule", () => {
 			return set;
 		};
 
-		it("survives the schema a composition root parses its config with", () => {
+		it("keeps the path the cap moved from through the schema a composition root parses with, for the refusal", () => {
 			// `AppConfigSchema` strips what it does not declare, before any module runs.
 			const parsed = AppConfigSchema.parse({
 				...makeValidAppConfig(),
 				replaySeenSet: { memory: { maxEntries: "5000" } },
 			});
-			expect(parsed.replaySeenSet?.memory?.maxEntries).toBe("5000");
+			expect(parsed.replaySeenSet?.memory).toEqual({ maxEntries: "5000" });
+		});
+
+		it("refuses replaySeenSet.memory.maxEntries at boot, naming core-replay-seen-set-memory.maxEntries", async () => {
+			const err = await refusalOf(
+				bootWith(memoryReplaySeenSetModule, { replaySeenSet: { memory: { maxEntries: 5000 } } }),
+			);
+			expect(err.reason).toBe("config-path-relocated");
+			expect(err.details).toEqual({
+				reason: "config-path-relocated",
+				relocated: [
+					{
+						module: "core-replay-seen-set-memory",
+						from: "replaySeenSet.memory.maxEntries",
+						to: "core-replay-seen-set-memory.maxEntries",
+					},
+				],
+			});
+		});
+
+		it("refuses a key its section does not declare", async () => {
+			const err = await refusalOf(bootWith(memoryReplaySeenSetModule, { "core-replay-seen-set-memory": { maxEntry: 5 } }));
+			expect(err.reason).toBe("config-validation-failed");
+			expect(err.message).toContain('"maxEntry"');
 		});
 
 		it("takes the default when the key is absent", async () => {
@@ -92,10 +113,10 @@ describe("memoryReplaySeenSetModule", () => {
 
 		it("takes a number, or the string an environment variable delivers", async () => {
 			expect(
-				(await seenSetOf({ replaySeenSet: { memory: { maxEntries: 5000 } } })).maxEntries,
+				(await seenSetOf({ "core-replay-seen-set-memory": { maxEntries: 5000 } })).maxEntries,
 			).toBe(5000);
 			expect(
-				(await seenSetOf({ replaySeenSet: { memory: { maxEntries: "7000" } } })).maxEntries,
+				(await seenSetOf({ "core-replay-seen-set-memory": { maxEntries: "7000" } })).maxEntries,
 			).toBe(7000);
 		});
 
@@ -103,12 +124,12 @@ describe("memoryReplaySeenSetModule", () => {
 			for (const tooMany of [2 ** 24 + 1, "16777217"]) {
 				const err = await refusalOf(
 					bootWith(memoryReplaySeenSetModule, {
-						replaySeenSet: { memory: { maxEntries: tooMany } },
+						"core-replay-seen-set-memory": { maxEntries: tooMany },
 					}),
 				);
 				expect(err.cause).toBeInstanceOf(RangeError);
 				expect((err.cause as Error).message).toBe(
-					`replaySeenSet.memory.maxEntries must be at most 16777216, the most entries a Map holds (got ${JSON.stringify(tooMany)})`,
+					`core-replay-seen-set-memory.maxEntries must be at most 16777216, the most entries a Map holds (got ${JSON.stringify(tooMany)})`,
 				);
 			}
 		});
@@ -116,12 +137,12 @@ describe("memoryReplaySeenSetModule", () => {
 		it("refuses a value it cannot use at boot, naming the key", async () => {
 			for (const bad of [0, -1, 1.5, "lots", "", true, null]) {
 				const err = await refusalOf(
-					bootWith(memoryReplaySeenSetModule, { replaySeenSet: { memory: { maxEntries: bad } } }),
+					bootWith(memoryReplaySeenSetModule, { "core-replay-seen-set-memory": { maxEntries: bad } }),
 				);
 				expect(err.reason, String(bad)).toBe("provides-factory-failed");
 				expect(err.cause).toBeInstanceOf(RangeError);
 				expect((err.cause as Error).message).toBe(
-					`replaySeenSet.memory.maxEntries must be a positive whole number (got ${JSON.stringify(bad)})`,
+					`core-replay-seen-set-memory.maxEntries must be a positive whole number (got ${JSON.stringify(bad)})`,
 				);
 			}
 		});
