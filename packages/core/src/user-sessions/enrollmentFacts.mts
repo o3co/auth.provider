@@ -17,12 +17,13 @@
 /**
  * What a session's `enrollmentFacts` may hold, read one way by both bundled
  * stores and by session admission: a witness `MfaEnrollmentWitness` admits
- * and a boolean, copied to those two fields and nothing else, so no address
- * or other part of a `User` is ever kept or handed on through them.
+ * and an address fact `MailAddressFact` admits, copied to those two fields
+ * and nothing else, so no address or other part of a `User` is ever kept or
+ * handed on through them.
  */
 
 import type { MfaEnrollmentWitness } from "../repositories/UserRepository.mjs";
-import type { SessionEnrollmentFacts } from "./types.mjs";
+import type { MailAddressFact, SessionEnrollmentFacts } from "./types.mjs";
 
 /** Every value `MfaEnrollmentWitness` admits: `satisfies` fails the build when the type gains or loses one. */
 const WITNESSES = {
@@ -30,6 +31,13 @@ const WITNESSES = {
 	not_enrolled: true,
 	malformed: true,
 } as const satisfies Record<MfaEnrollmentWitness, true>;
+
+/** Every value `MailAddressFact` admits, held to the type the same way. */
+const MAIL_ADDRESS_FACTS = {
+	none: true,
+	address: true,
+	unreadable: true,
+} as const satisfies Record<MailAddressFact, true>;
 
 /**
  * `value` as `SessionEnrollmentFacts`: a new object holding its two fields
@@ -42,8 +50,12 @@ export function readEnrollmentFacts(value: unknown): SessionEnrollmentFacts | un
 		const { witness, mailAddress } = value as Record<string, unknown>;
 		return typeof witness === "string" &&
 			Object.hasOwn(WITNESSES, witness) &&
-			typeof mailAddress === "boolean"
-			? { witness: witness as MfaEnrollmentWitness, mailAddress }
+			typeof mailAddress === "string" &&
+			Object.hasOwn(MAIL_ADDRESS_FACTS, mailAddress)
+			? {
+					witness: witness as MfaEnrollmentWitness,
+					mailAddress: mailAddress as MailAddressFact,
+				}
 			: undefined;
 	} catch {
 		return undefined;
@@ -66,7 +78,7 @@ export function recordableEnrollmentFacts(
 	const facts = readEnrollmentFacts(value);
 	if (facts === undefined) {
 		throw new RangeError(
-			`UserSession ${sid}: enrollmentFacts must be a witness ("enrolled", "not_enrolled" or "malformed") and a boolean mailAddress, or undefined`,
+			`UserSession ${sid}: enrollmentFacts must be a witness ("enrolled", "not_enrolled" or "malformed") and a mailAddress ("none", "address" or "unreadable"), or undefined`,
 		);
 	}
 	return facts;

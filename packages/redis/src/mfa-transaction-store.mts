@@ -77,6 +77,8 @@ import {
 	type MfaTransactionStore,
 	mfaTransactionPatchWrites,
 	newMfaTransactionRecord,
+	type SessionEmailProof,
+	sessionEmailProofAnswer,
 } from "@o3co/auth-provider-core";
 import type { MfaSubjectKeys, MfaTransactionStoreClient } from "./clients.mjs";
 import { checkRedisMfaStoreDurability } from "./internal/mfa-durability.mjs";
@@ -212,20 +214,21 @@ function challengeOf(text: string | null): MfaTransaction["challenge"] | null {
 }
 
 /**
- * The session proof `text` holds — epoch milliseconds when it was given and
- * when it ends, as `checkSessionEmailProof` admits them — or `null`.
+ * The session proof `text` holds, held on `storeNowMs` to the rule it was
+ * written under (`checkSessionEmailProof`), or `null`.
  */
 function sessionProofOf(
 	text: string | null,
 	subject: string,
 	sid: string,
-): { readonly provedAtMs: number; readonly untilMs: number } | null {
+	storeNowMs: number,
+): SessionEmailProof | null {
 	if (text === null) return null;
 	try {
 		const value: unknown = JSON.parse(text);
 		if (!isObject(value)) return null;
 		const { provedAtMs, untilMs } = value;
-		checkSessionEmailProof(subject, sid, provedAtMs, untilMs);
+		checkSessionEmailProof(subject, sid, provedAtMs, untilMs, storeNowMs);
 		return { provedAtMs: provedAtMs as number, untilMs: untilMs as number };
 	} catch {
 		return null;
@@ -372,29 +375,21 @@ export function createRedisMfaTransactionStore(
 		},
 
 		async recordSessionEmailProof(subject, sid, provedAtMs, untilMs) {
-			checkSessionEmailProof(subject, sid, provedAtMs, untilMs);
-			const ttlMs = untilMs - clock();
-			if (!(ttlMs > 0)) {
-				throw new RangeError(
-					"MfaTransactionStore.recordSessionEmailProof: untilMs must be after the store's clock",
-				);
-			}
+			const nowMs = clock();
+			checkSessionEmailProof(subject, sid, provedAtMs, untilMs, nowMs);
 			await client.recordSessionEmailProof(
 				sessionProofKey(subject, sid),
 				JSON.stringify({ provedAtMs, untilMs }),
-				Math.ceil(ttlMs),
+				Math.ceil(untilMs - nowMs),
 			);
 		},
 
 		async sessionEmailProofAt(subject, sid, nowMs) {
 			checkSessionEmailProofQuestion(subject, sid, nowMs);
-			const proof = sessionProofOf(
-				await client.sessionEmailProof(sessionProofKey(subject, sid)),
-				subject,
-				sid,
-			);
-			if (proof === null || proof.untilMs <= clock() || proof.untilMs <= nowMs) return null;
-			return Math.min(proof.provedAtMs, nowMs);
+			const text = await client.sessionEmailProof(sessionProofKey(subject, sid));
+			const storeNowMs = clock();
+			const proof = sessionProofOf(text, subject, sid, storeNowMs);
+			return proof === null ? null : sessionEmailProofAnswer(proof, nowMs, storeNowMs);
 		},
 	};
 }

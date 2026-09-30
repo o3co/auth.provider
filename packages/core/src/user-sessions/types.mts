@@ -107,9 +107,16 @@ export interface UserSession {
 export interface SessionEnrollmentFacts {
 	/** The enrollment witness, as `readMfaEnrollmentWitness(user)` reads it. */
 	readonly witness: MfaEnrollmentWitness;
-	/** Whether `user.email` is one address `normaliseMailAddress` reads. */
-	readonly mailAddress: boolean;
+	/** What `user.email` is: see {@link MailAddressFact}. */
+	readonly mailAddress: MailAddressFact;
 }
+
+/**
+ * What a `User`'s `email` is, as a first binding is decided on it: `none` —
+ * absent, `null` or empty; `address` — one address `normaliseMailAddress`
+ * reads; `unreadable` — anything else, which no proof can be sent to.
+ */
+export type MailAddressFact = "none" | "address" | "unreadable";
 
 /**
  * How a session was established: the primary authentication, which

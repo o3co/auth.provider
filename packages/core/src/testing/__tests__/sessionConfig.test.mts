@@ -22,11 +22,7 @@
 
 import { describe, expect, it } from "vitest";
 import { AppConfigSchema } from "#/config/application.schema.mjs";
-import {
-	makeValidAppConfig,
-	withFederation,
-	withInsecureSessionCookie,
-} from "#/testing/index.mjs";
+import { makeValidAppConfig, withFederation, withInsecureSessionCookie } from "#/testing/index.mjs";
 
 describe("withInsecureSessionCookie", () => {
 	it("answers a copy whose session cookie a plain-HTTP client keeps: not Secure, and so no __Host- name", () => {
@@ -74,7 +70,10 @@ describe("withFederation", () => {
 			clientSecret: "secret-2",
 		});
 		expect(Object.keys(two.federations)).toEqual(["first", "second"]);
-		expect(two.federations.second).toMatchObject({ clientId: "client-2", clientSecret: "secret-2" });
+		expect(two.federations.second).toMatchObject({
+			clientId: "client-2",
+			clientSecret: "secret-2",
+		});
 		expect(base.federations).toEqual({});
 		expect(Object.keys(one.federations)).toEqual(["first"]);
 	});

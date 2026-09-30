@@ -62,6 +62,8 @@ import {
 	type MfaTransactionStore,
 	mfaTransactionPatchWrites,
 	newMfaTransactionRecord,
+	type SessionEmailProof,
+	sessionEmailProofAnswer,
 } from "./transactionStore.mjs";
 import { checkMfaVersionAdvances } from "./version.mjs";
 
@@ -138,12 +140,6 @@ interface SubjectState {
 	readonly pending: Map<string, number>;
 	/** Whether a refusal was answered since an attempt was last let through: an episode is under way. */
 	refusing: boolean;
-}
-
-/** A session's account-email proof as the store keeps it. */
-interface SessionEmailProof {
-	readonly provedAtMs: number;
-	readonly untilMs: number;
 }
 
 /** Where a session's proof is kept: the subject and the `sid` as one unambiguous key. */
@@ -519,13 +515,8 @@ export function createMemoryMfaTransactionStore(
 			provedAtMs: number,
 			untilMs: number,
 		): Promise<void> {
-			checkSessionEmailProof(subject, sid, provedAtMs, untilMs);
 			const nowMs = clock();
-			if (untilMs <= nowMs) {
-				throw new RangeError(
-					"MfaTransactionStore.recordSessionEmailProof: untilMs must be after the store's clock",
-				);
-			}
+			checkSessionEmailProof(subject, sid, provedAtMs, untilMs, nowMs);
 			const key = proofKeyOf(subject, sid);
 			if (!proofs.has(key)) makeRoom(nowMs);
 			proofs.set(key, { provedAtMs, untilMs });
@@ -537,11 +528,10 @@ export function createMemoryMfaTransactionStore(
 			const key = proofKeyOf(subject, sid);
 			const proof = proofs.get(key);
 			if (proof === undefined) return null;
-			if (proof.untilMs <= clock()) {
-				proofs.delete(key);
-				return null;
-			}
-			return proof.untilMs > nowMs ? Math.min(proof.provedAtMs, nowMs) : null;
+			const storeNowMs = clock();
+			// Gone on this store's clock: reclaimed now rather than at a sweep.
+			if (proof.untilMs <= storeNowMs) proofs.delete(key);
+			return sessionEmailProofAnswer(proof, nowMs, storeNowMs);
 		},
 	};
 }

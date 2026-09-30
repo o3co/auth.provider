@@ -42,6 +42,7 @@ import { normaliseMailAddress } from "../mail/address.mjs";
 import { readMfaEnrollmentWitness } from "../repositories/UserRepository.mjs";
 import type { RecordedAuthentication } from "../user-sessions/authentication.mjs";
 import type {
+	MailAddressFact,
 	SessionAuthentication,
 	SessionEnrollmentFacts,
 	UserSessionClaims,
@@ -82,35 +83,110 @@ function deepFreeze<T>(value: T): T {
 	return value;
 }
 
-/** A deep copy of `user` that shares nothing with it, frozen at every depth; `undefined` for a value that is not an object or cannot be copied. */
+/** What `plainCopy` throws for a value that is not plain data. */
+class NotPlainData extends Error {}
+
+/**
+ * `value` copied as plain data — a primitive; an array; or an object whose
+ * prototype is `Object.prototype` or `null` — frozen at every depth and
+ * sharing nothing with it. Every own property must be an enumerable data
+ * property under a string key, read once from its descriptor, so no getter
+ * runs; anything else throws `NotPlainData`. `copies` keeps a shared or
+ * cyclic reference one copy.
+ */
+function plainCopy(value: unknown, copies: Map<object, unknown>): unknown {
+	if (value === null) return null;
+	switch (typeof value) {
+		case "string":
+		case "number":
+		case "boolean":
+		case "bigint":
+		case "undefined":
+			return value;
+		case "object":
+			break;
+		default:
+			throw new NotPlainData();
+	}
+	const source = value as object;
+	const known = copies.get(source);
+	if (known !== undefined) return known;
+	const isArray = Array.isArray(source);
+	const prototype = Reflect.getPrototypeOf(source);
+	if (
+		isArray ? prototype !== Array.prototype : prototype !== Object.prototype && prototype !== null
+	) {
+		throw new NotPlainData();
+	}
+	const copy: object = isArray ? [] : {};
+	copies.set(source, copy);
+	for (const key of Reflect.ownKeys(source)) {
+		if (typeof key !== "string") throw new NotPlainData();
+		const descriptor = Reflect.getOwnPropertyDescriptor(source, key);
+		if (descriptor === undefined || !Object.hasOwn(descriptor, "value")) throw new NotPlainData();
+		if (isArray && key === "length") {
+			(copy as unknown[]).length = descriptor.value as number;
+			continue;
+		}
+		if (descriptor.enumerable !== true) throw new NotPlainData();
+		Object.defineProperty(copy, key, {
+			value: plainCopy(descriptor.value, copies),
+			enumerable: true,
+			writable: true,
+			configurable: true,
+		});
+	}
+	return Object.freeze(copy);
+}
+
+/**
+ * `user` copied as plain data, frozen at every depth and sharing nothing
+ * with it (`plainCopy`); `undefined` for a value that is not an object, or
+ * holds anything but plain data — a field an accessor, a prototype or a
+ * non-enumerable property holds would be lost from the copy.
+ */
 export function frozenUserCopy(user: unknown): Readonly<Record<string, unknown>> | undefined {
 	if (!isPlainObject(user)) return undefined;
 	try {
-		const copy: unknown = structuredClone(user);
-		return isPlainObject(copy) ? deepFreeze(copy) : undefined;
+		return plainCopy(user, new Map()) as Readonly<Record<string, unknown>>;
 	} catch {
 		return undefined;
 	}
 }
 
-/** A deep copy of `user` that shares nothing with it, frozen at every depth; a value that cannot be copied is refused. */
+/** `user` as `frozenUserCopy` copies it; a value that is not plain data is refused, quoting nothing of it. */
 function copyUser(
 	user: unknown,
 	refuse: (what: string) => never,
 ): Readonly<Record<string, unknown>> {
 	if (!isPlainObject(user)) return refuse("user must be an object");
-	return frozenUserCopy(user) ?? refuse("user holds a value that cannot be copied");
+	return (
+		frozenUserCopy(user) ??
+		refuse(
+			"user must be plain data: own enumerable data properties holding primitives, arrays and plain objects",
+		)
+	);
+}
+
+/**
+ * What `email` says of a first binding: `none` when it is absent, `null` or
+ * empty; `address` when `normaliseMailAddress` reads one address; else
+ * `unreadable`.
+ */
+function mailAddressFactOf(email: unknown): MailAddressFact {
+	if (email === undefined || email === null || email === "") return "none";
+	return normaliseMailAddress(email) === undefined ? "unreadable" : "address";
 }
 
 /**
  * What a session records of its login's `user` for a first binding: the
- * witness as `readMfaEnrollmentWitness` reads it, and whether `user.email` is
- * one address `normaliseMailAddress` reads — never the address. Frozen.
+ * witness as `readMfaEnrollmentWitness` reads it, and what its `email` is
+ * (`mailAddressFactOf`) — never the address. Frozen.
  */
 export function enrollmentFactsOf(user: Readonly<Record<string, unknown>>): SessionEnrollmentFacts {
 	return Object.freeze({
 		witness: readMfaEnrollmentWitness(user),
-		mailAddress: normaliseMailAddress(user.email) !== undefined,
+		mailAddress: mailAddressFactOf(user.email),
 	});
 }
 

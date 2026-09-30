@@ -873,7 +873,7 @@ describe("the shapes the contract names", () => {
 		}>();
 		expectTypeOf<SessionEnrollmentFacts>().toEqualTypeOf<{
 			readonly witness: MfaEnrollmentWitness;
-			readonly mailAddress: boolean;
+			readonly mailAddress: "none" | "address" | "unreadable";
 		}>();
 		expectTypeOf<RequirementInput["authentication"]>().toEqualTypeOf<RequirementSession | null>();
 		expectTypeOf<RequirementInput["carrier"]>().toEqualTypeOf<

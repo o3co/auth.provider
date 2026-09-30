@@ -220,11 +220,12 @@ export function cookieClaim(req: CookieCarrier): SessionClaim {
 }
 
 /**
- * The `User` the cookie session holds — its login's — as a frozen deep copy
- * that shares nothing with it, when the session is authenticated
- * (`isAuthenticated === true`, as `cookieClaim` reads it) and the copy's `id`
- * is `subject`; else `undefined`. For a route that admitted `subject` over
- * the cookie's claim. A request that is not an object, or a `subject` that is
+ * The `User` the cookie session holds — its login's — copied as plain data,
+ * frozen at every depth and sharing nothing with it (`frozenUserCopy`), when
+ * the session is authenticated (`isAuthenticated === true`, as `cookieClaim`
+ * reads it) and the copy's `id` is `subject`; else `undefined`, a user that
+ * is not plain data included. For a route that admitted `subject` over the
+ * cookie's claim. A request that is not an object, or a `subject` that is
  * not a non-empty string, is a `RangeError`.
  */
 export function cookieSessionUser(

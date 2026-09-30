@@ -57,9 +57,9 @@ describe("checkSessionEmailProof — a proof a store can keep, on its clock", ()
 			STORE_NOW + MFA_CLOCK_SKEW_ALLOWANCE_MS + MINUTE,
 		],
 	])("refuses %s with a RangeError", (_label, provedAtMs, untilMs) => {
-		expect(() =>
-			checkSessionEmailProof("user-1", "sid-1", provedAtMs, untilMs, STORE_NOW),
-		).toThrow(RangeError);
+		expect(() => checkSessionEmailProof("user-1", "sid-1", provedAtMs, untilMs, STORE_NOW)).toThrow(
+			RangeError,
+		);
 	});
 });
 

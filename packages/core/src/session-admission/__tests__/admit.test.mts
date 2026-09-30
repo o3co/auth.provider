@@ -322,7 +322,11 @@ describe("cookieSessionUser — the cookie session's user, for a route that admi
 		],
 		[
 			"a user that is a class instance",
-			carrying({ user: new (class Account { id = "user-1" })() }),
+			carrying({
+				user: new (class Account {
+					id = "user-1";
+				})(),
+			}),
 		],
 		[
 			"a user whose id it does not enumerate",

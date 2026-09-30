@@ -662,6 +662,8 @@ export {
 	newMfaTransactionRecord,
 	readMfaAttemptReservation,
 	readSessionEmailProof,
+	type SessionEmailProof,
+	sessionEmailProofAnswer,
 } from "./mfa/transactionStore.mjs";
 export { checkMfaVersionAdvances } from "./mfa/version.mjs";
 // Middleware — CORS for the browser-facing OAuth surface
@@ -1099,6 +1101,7 @@ export {
 // @o3co/auth-provider-redis.
 export type {
 	CreateUserSessionInput,
+	MailAddressFact,
 	RegisteredRP,
 	SecondFactorEvent,
 	SessionAuthentication,

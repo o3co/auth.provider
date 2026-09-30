@@ -69,7 +69,7 @@ const primary = (over: Record<string, unknown> = {}): PrimaryAuthentication =>
 			},
 		},
 		// What core derives from that user: no witness, no address.
-		enrollmentFacts: { witness: "not_enrolled", mailAddress: false },
+		enrollmentFacts: { witness: "not_enrolled", mailAddress: "none" },
 		authTime: NOW,
 		redirectTo: "/after",
 		request: { ip: "198.51.100.7", userAgent: "test" },
@@ -155,7 +155,14 @@ describe("checkPrimaryAuthentication — a primary as the login route builds it"
 		["a user that cannot be copied", { user: { f: () => 1 } }],
 		["a user holding a Date", { user: { id: "user-1", joined: new Date(0) } }],
 		["a user holding a Map", { user: { id: "user-1", roles: new Map() } }],
-		["a user that is a class instance", { user: new (class User { id = "user-1" })() }],
+		[
+			"a user that is a class instance",
+			{
+				user: new (class User {
+					id = "user-1";
+				})(),
+			},
+		],
 		[
 			"a user with a field it does not enumerate",
 			{ user: Object.defineProperty({ id: "user-1" }, "mfaEnrolled", { value: true }) },
