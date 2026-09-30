@@ -28,8 +28,9 @@
  * everything is met; under `required` a token is judged on its own `amr`
  * (`admitToken`) and a session carried by a cookie, code or link on its record's
  * baseline (`admitRecord`), except that an action graded `grants_nothing` is met
- * on any live session. `credential_change` has no recent-MFA rule yet and gets
- * the same baseline.
+ * on any live record. A token is judged on its own `amr` whatever the grade:
+ * `grants_nothing` exempts only an admission a record carries. `credential_change`
+ * has no recent-MFA rule yet and gets the same baseline.
  *
  * `admitPrimary` interrupts a password login for a second factor when the subject
  * has any factor record: a record it cannot use is never "none", and a `list`

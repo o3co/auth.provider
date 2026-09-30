@@ -27,7 +27,10 @@
 /**
  * The grades, each deciding how a requirement treats an action: `use`
  * exercises the session; `grants_nothing` reads or refuses and gives nothing
- * to anyone; `credential_change` adds or removes a way into the account;
+ * to anyone, so a requirement may meet it on a session a record carries (the
+ * MFA requirement does), while a token carrier is judged on the token's own
+ * `amr` whatever the grade; `credential_change` adds or removes a way into
+ * the account;
  * `remediation` is a requirement's own route, by which the session meets that
  * requirement, issued by core to the requirement that declared it.
  */
@@ -41,7 +44,12 @@ export const ADMISSION_GRADES = Object.freeze([
 /** One of {@link ADMISSION_GRADES}. */
 export type AdmissionGrade = (typeof ADMISSION_GRADES)[number];
 
-/** The grades an action registers with: every grade but `remediation`, which only a requirement declares, for its own routes. */
+/**
+ * The grades an action registers with: every grade but `remediation`, which
+ * only a requirement declares, for its own routes. `grants_nothing` exempts an
+ * admission a record carries (a cookie, a code, a link) from a requirement's
+ * baseline, never a token's.
+ */
 export type ActionGrade = Exclude<AdmissionGrade, "remediation">;
 
 /** What the consumer is about to let the session do, as the requirements are asked about it: a name and a grade. */

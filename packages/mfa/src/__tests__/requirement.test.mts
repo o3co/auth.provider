@@ -417,6 +417,25 @@ describe("admit — its table of verdicts under mfa.mode", () => {
 			input: about(password(), { name: "acme.peek", grade: "grants_nothing" }),
 			expected: MET,
 		},
+		// required · grants_nothing on a token: the token's own amr is judged, whatever the grade.
+		{
+			row: "required · grants_nothing · token, pwd alone → unmet: a token is judged on its own amr whatever the grade",
+			mode: "required",
+			input: { ...aboutToken(["pwd"]), action: NOTHING },
+			expected: UNMET,
+		},
+		{
+			row: "required · grants_nothing · token, no amr at all → reauthenticate, as the token baseline counts it",
+			mode: "required",
+			input: { ...aboutToken(undefined), action: NOTHING },
+			expected: REAUTHENTICATE,
+		},
+		{
+			row: "required · grants_nothing · token, pwd beside a second-factor value → met by the token baseline",
+			mode: "required",
+			input: { ...aboutToken(["pwd", "otp", "mfa"]), action: NOTHING },
+			expected: MET,
+		},
 		{
 			row: "required · use · an action named device.lookup graded use → step_up: a name admits nothing",
 			mode: "required",

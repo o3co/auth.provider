@@ -636,8 +636,9 @@ function admissionActionRegistrants(material: ComponentWorld): ReadonlyMap<strin
 /**
  * Logs `admission_actions_registered` at info once any action is registered:
  * each action's name, its grade and the module that registered it, in init
- * order. An action graded `grants_nothing` is exempt from the MFA baseline;
- * this line is where an operator sees which module declared it.
+ * order. An action graded `grants_nothing` is exempt from the MFA baseline on
+ * a session a record carries; this line is where an operator sees which
+ * module declared it.
  * @internal
  */
 function logAdmissionActions(
