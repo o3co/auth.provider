@@ -1394,8 +1394,10 @@ export {
 	DEFAULT_CLOCK_SKEW_MS,
 	DEFAULT_SUBJECT_REVOCATION_SKEW_MS,
 } from "./jwt/verify.mjs";
-// Timing-safe primitives, exported from the package root because
+// The one reading of a control character in configured text, and the
+// timing-safe primitives, exported from the package root because
 // `package.json#exports` registers no `./security/*` subpath.
+export { hasControlCharacter } from "./security/controlCharacters.mjs";
 export { constantTimeStringEqual } from "./security/timingSafe.mjs";
 export {
 	resolveSubjectRevocationHorizonMs,

@@ -37,6 +37,7 @@ import {
 	checkSealingKeyRing,
 	coerceBooleanFromEnv,
 	type DeploymentMode,
+	hasControlCharacter,
 	decodeSealingKey,
 	type MfaLockoutPolicy,
 	SEALING_KEY_BYTES,
@@ -105,20 +106,6 @@ export const environmentWholeNumber = (min: number, max: number, unit: string) =
 
 const ISSUER_RULE =
 	"must be well-formed text, not blank, with no control character and no colon — the otpauth label puts one between the issuer and the account";
-
-/** Whether `text` carries a C0 control character, DEL or a C1 control character, other than one `allowed`. */
-export function hasControlCharacter(
-	text: string,
-	allowed: ReadonlySet<string> = new Set(),
-): boolean {
-	for (let index = 0; index < text.length; index++) {
-		const code = text.charCodeAt(index);
-		if ((code <= 0x1f || (code >= 0x7f && code <= 0x9f)) && !allowed.has(text.charAt(index))) {
-			return true;
-		}
-	}
-	return false;
-}
 
 /** An issuer the otpauth label can carry, and an authenticator app can show. */
 const isShowableIssuer = (issuer: string): boolean =>

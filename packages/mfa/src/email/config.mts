@@ -27,9 +27,9 @@
  * apart; a budget's window at most a year, as every rate-limit budget's.
  */
 
-import { coerceBooleanFromEnv } from "@o3co/auth-provider-core";
+import { coerceBooleanFromEnv, hasControlCharacter } from "@o3co/auth-provider-core";
 import { z } from "zod";
-import { environmentWholeNumber, hasControlCharacter, sectionError } from "../config.mjs";
+import { environmentWholeNumber, sectionError } from "../config.mjs";
 
 /** The longest window a rate-limit budget may take: a year, in seconds. */
 const YEAR_SECONDS = 31_536_000;

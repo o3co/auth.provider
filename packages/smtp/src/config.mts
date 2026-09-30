@@ -26,7 +26,7 @@
  */
 
 import { isIP } from "node:net";
-import { isLoopbackHostname } from "@o3co/auth-provider-core";
+import { hasControlCharacter, isLoopbackHostname } from "@o3co/auth-provider-core";
 import { z } from "zod";
 
 /** The ways a connection to the relay is secured. */
@@ -77,15 +77,6 @@ const port = z.union(
 	],
 	{ error: PORT_RULE },
 );
-
-/** Whether `text` carries a C0 control character, DEL or a C1 control character. */
-function hasControlCharacter(text: string): boolean {
-	for (let index = 0; index < text.length; index++) {
-		const code = text.charCodeAt(index);
-		if (code <= 0x1f || (code >= 0x7f && code <= 0x9f)) return true;
-	}
-	return false;
-}
 
 const TEXT_RULE = "must be well-formed text on one line, not blank, with no control character";
 
