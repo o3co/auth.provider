@@ -132,10 +132,14 @@ describe("createTestMfaFactor with mail", () => {
 		expect(factor.reusableChallenge).toBe(true);
 	});
 
-	it("asks for its enrollment code and each challenge's code to be mailed, never answering them to the page, and verifies the latest", async () => {
+	it("asks for its enrollment code and each challenge's code to be mailed, each with an expiry ten minutes on and a new code at each challenge, never answering them to the page, and verifies the latest", async () => {
 		const factor = createTestMfaFactor({ mail: true });
 		const start = await factor.beginEnrollment({ ...ctx, user: USER, factors: [] });
-		expect(start.mail).toEqual({ purpose: "email_factor_enrollment", code: expect.any(String) });
+		expect(start.mail).toEqual({
+			purpose: "email_factor_enrollment",
+			code: expect.any(String),
+			expiresAtMs: ctx.nowMs + 600_000,
+		});
 		expect(JSON.stringify(start.response)).not.toContain(start.mail?.code);
 		expect(testMfaFactorProofs.enrollmentProof(start)).toBe(start.mail?.code);
 		const done = await factor.completeEnrollment({
@@ -157,7 +161,12 @@ describe("createTestMfaFactor with mail", () => {
 		const challenge = factor.challenge as NonNullable<MfaFactor["challenge"]>;
 		const first = await challenge({ ...ctx, factor: enrolled, factors: [enrolled] });
 		const second = await challenge({ ...ctx, factor: enrolled, factors: [enrolled] });
-		expect(second.mail).toEqual({ purpose: "login_code", code: expect.any(String) });
+		expect(second.mail).toEqual({
+			purpose: "login_code",
+			code: expect.any(String),
+			expiresAtMs: ctx.nowMs + 600_000,
+		});
+		expect(second.mail?.code).not.toBe(first.mail?.code);
 		expect(JSON.stringify(second.response)).not.toContain(second.mail?.code);
 		const verify = (proof: unknown) =>
 			factor.verify({

@@ -36,19 +36,22 @@ const RULES = {
 	flags:
 		"addsMfa, counting and guessable are true or false, and reusableChallenge true, false or absent",
 	enrollable: "enrollable, when present, answers true for an account that can enroll the factor",
-	begin:
-		"beginEnrollment answers state that survives a JSON round trip, and, when it asks for a code to be mailed, a purpose from the closed list and a non-empty code its response does not carry",
+	begin: "beginEnrollment answers state that survives a JSON round trip",
+	beginMail:
+		"beginEnrollment, when it asks for a code to be mailed, asks for the enrollment code, non-empty, with an expiry after now when it gives one, and its response carries no form of the code",
 	completeMalformed:
 		"completeEnrollment answers malformed for a proof it cannot read, and never throws for one",
 	complete:
 		"completeEnrollment takes the proof of possession, and answers data that survives a JSON round trip, a label that is a string when present, and at least one amr value, each among amrValues",
-	enrolledAddress: "completeEnrollment answers data that never carries the account's address",
 	describe: "describe answers a hint that is a string, or none, and never the account's address",
-	challenge:
-		"challenge, when present, answers state that survives a JSON round trip, and, when it asks for a code to be mailed, a purpose from the closed list and a non-empty code its response does not carry",
+	challenge: "challenge, when present, answers state that survives a JSON round trip",
+	challengeMail:
+		"challenge, when it asks for a code to be mailed, asks for a login code, non-empty, with an expiry after now when it gives one, another at each challenge, and its response carries no form of the code",
+	noAddress:
+		"no answer carries the account's address, whatever its case or escaping: the pending enrollment's state and response, the enrolled data and label, a challenge's state and response, and a verification's next data",
 	verifyMalformed: "verify answers malformed for a proof it cannot read, and never throws for one",
 	verify:
-		"verify takes a valid proof, names a factor the subject holds, and answers next data that survives a JSON round trip and never carries the account's address",
+		"verify takes a valid proof, names a factor the subject holds, and answers next data that survives a JSON round trip",
 } as const;
 
 const USER = { id: "u-contract", username: "contract", email: "contract@example.com" };
@@ -283,6 +286,34 @@ describe("mfaFactorContract", () => {
 		).toEqual([RULES.verify]);
 	});
 
+	/** The double with mail, its challenge answer changed by `change`. */
+	const challenging = (
+		change: (
+			sent: Awaited<ReturnType<NonNullable<MfaFactor["challenge"]>>>,
+			ctx: Parameters<NonNullable<MfaFactor["challenge"]>>[0],
+		) => unknown,
+		user: Record<string, unknown> = USER,
+	) => ({
+		...inputFor({ mail: true }, (factor) => ({
+			...factor,
+			challenge: async (ctx) => {
+				const sent = await (factor.challenge as NonNullable<MfaFactor["challenge"]>)(ctx);
+				return change(sent, ctx) as never;
+			},
+		})),
+		user,
+	});
+
+	/** The challenge's code set to `code`, kept and mailed alike, so only the response can break the contract. */
+	const withCode =
+		(code: string, response: (code: string) => unknown): Parameters<typeof challenging>[0] =>
+		(sent) => ({
+			...sent,
+			state: { code },
+			mail: { ...sent.mail, code },
+			response: response(code),
+		});
+
 	it("fails an enrollment or a challenge whose response carries the code it asks to be mailed", async () => {
 		expect(
 			await failing(
@@ -294,78 +325,172 @@ describe("mfaFactorContract", () => {
 					},
 				})),
 			),
-		).toEqual([RULES.begin]);
+		).toEqual([RULES.beginMail]);
 		expect(
 			await failing(
-				inputFor({ mail: true }, (factor) => ({
-					...factor,
-					challenge: async (ctx) => {
-						const sent = await (factor.challenge as NonNullable<MfaFactor["challenge"]>)(ctx);
-						return { ...sent, response: `sent ${sent.mail?.code} to your mailbox` };
-					},
-				})),
+				challenging((sent) => ({ ...sent, response: `sent ${sent.mail?.code} to your mailbox` })),
 			),
-		).toEqual([RULES.challenge]);
+		).toEqual([RULES.challengeMail]);
 	});
 
-	it("fails a mail whose purpose is not one of the closed list, or whose code is empty or no string", async () => {
-		const mailing = (mail: (sent: { purpose: string; code: string }) => unknown) =>
-			inputFor({ mail: true }, (factor) => ({
-				...factor,
-				challenge: async (ctx) => {
-					const sent = await (factor.challenge as NonNullable<MfaFactor["challenge"]>)(ctx);
-					return { ...sent, mail: mail(sent.mail as { purpose: string; code: string }) as never };
-				},
-			}));
-		for (const purpose of ["security_notice", "LOGIN_CODE", undefined]) {
-			expect(await failing(mailing((sent) => ({ ...sent, purpose }))), String(purpose)).toEqual([
-				RULES.challenge,
+	it("fails a response carrying the code escaped, in another case or spacing, as a number or as a key", async () => {
+		for (const [code, response] of [
+			['ab"cd123', (c: string) => ({ code: c })],
+			["ab\\cd123", (c: string) => ({ code: c })],
+			["ab12cd34", (c: string) => ({ hint: c.toUpperCase().replace(/(....)/, "$1-") })],
+			["482913", (c: string) => ({ code: Number(c) })],
+			["482913", (c: string) => ({ codes: { [c]: true } })],
+			["482913", (c: string) => [`${c.slice(0, 3)} ${c.slice(3)}`]],
+		] as const) {
+			expect(await failing(challenging(withCode(code, response))), code).toEqual([
+				RULES.challengeMail,
 			]);
+		}
+	});
+
+	it("fails a mail whose purpose is not the call's, or whose code is empty or no string", async () => {
+		for (const purpose of [
+			"email_factor_enrollment",
+			"account_email_proof",
+			"security_notice",
+			"LOGIN_CODE",
+			undefined,
+		]) {
+			expect(
+				await failing(challenging((sent) => ({ ...sent, mail: { ...sent.mail, purpose } }))),
+				String(purpose),
+			).toEqual([RULES.challengeMail]);
 		}
 		// A code that is not the one kept is no proof either: verification fails beside it.
 		for (const code of ["", 123456, undefined]) {
-			expect(await failing(mailing((sent) => ({ ...sent, code }))), String(code)).toContain(
-				RULES.challenge,
-			);
+			expect(
+				await failing(challenging((sent) => ({ ...sent, mail: { ...sent.mail, code } }))),
+				String(code),
+			).toContain(RULES.challengeMail);
 		}
-		expect(await failing(mailing((sent) => sent.code))).toContain(RULES.challenge);
-		expect(
-			await failing(
-				inputFor({ mail: true }, (factor) => ({
-					...factor,
-					beginEnrollment: async (ctx) => {
-						const start = await factor.beginEnrollment(ctx);
-						return { ...start, mail: { ...start.mail, purpose: "notice" } as never };
-					},
-				})),
-			),
-		).toEqual([RULES.begin]);
+		expect(await failing(challenging((sent) => ({ ...sent, mail: sent.mail?.code })))).toContain(
+			RULES.challengeMail,
+		);
+		for (const purpose of ["login_code", "account_email_proof", "notice"]) {
+			expect(
+				await failing(
+					inputFor({ mail: true }, (factor) => ({
+						...factor,
+						beginEnrollment: async (ctx) => {
+							const start = await factor.beginEnrollment(ctx);
+							return { ...start, mail: { ...start.mail, purpose } as never };
+						},
+					})),
+				),
+				purpose,
+			).toEqual([RULES.beginMail]);
+		}
 	});
 
-	it("fails enrolled data, or a verification's next data, that carries the account's address, whatever its letter case", async () => {
-		expect(
-			await failing(
-				inputFor({ mail: true }, (factor) => ({
-					...factor,
+	it("fails a mailed code whose expiry is not after now, and a challenge that mails the same code twice", async () => {
+		for (const expiry of [
+			(now: number) => now,
+			(now: number) => now - 1,
+			() => Number.NaN,
+			() => "soon",
+		]) {
+			expect(
+				await failing(
+					challenging((sent, ctx) => ({
+						...sent,
+						mail: { ...sent.mail, expiresAtMs: expiry(ctx.nowMs) },
+					})),
+				),
+				String(expiry),
+			).toEqual([RULES.challengeMail]);
+			expect(
+				await failing(
+					inputFor({ mail: true }, (factor) => ({
+						...factor,
+						beginEnrollment: async (ctx) => {
+							const start = await factor.beginEnrollment(ctx);
+							return {
+								...start,
+								mail: { ...start.mail, expiresAtMs: expiry(ctx.nowMs) } as never,
+							};
+						},
+					})),
+				),
+				String(expiry),
+			).toEqual([RULES.beginMail]);
+		}
+		expect(await failing(challenging(withCode("482913", () => ({ sent: true }))))).toEqual([
+			RULES.challengeMail,
+		]);
+	});
+
+	it("fails an address kept or answered anywhere, in another case or under JSON escaping", async () => {
+		const QUOTED = { ...USER, email: '"probe"@example.com' };
+		const answering = (
+			change: (factor: MfaFactor) => Partial<MfaFactor>,
+			user: Record<string, unknown> = USER,
+		) => ({ ...inputFor({ mail: true }, (factor) => ({ ...factor, ...change(factor) })), user });
+		const cases = (email: string): [string, (factor: MfaFactor) => Partial<MfaFactor>][] => [
+			[
+				"the enrolled data",
+				(factor) => ({
 					completeEnrollment: async (ctx) => {
 						const done = await factor.completeEnrollment(ctx);
-						return done.ok
-							? { ...done, data: { ...done.data, to: String(ctx.user.email).toUpperCase() } }
-							: done;
+						return done.ok ? { ...done, data: { ...done.data, to: ctx.user.email } } : done;
 					},
-				})),
-			),
-		).toEqual([RULES.enrolledAddress]);
+				}),
+			],
+			[
+				"the label",
+				(factor) => ({
+					completeEnrollment: async (ctx) => {
+						const done = await factor.completeEnrollment(ctx);
+						return done.ok ? { ...done, label: `mail to ${String(ctx.user.email)}` } : done;
+					},
+				}),
+			],
+			[
+				"the pending enrollment's state and response",
+				(factor) => ({
+					beginEnrollment: async (ctx) => {
+						const start = await factor.beginEnrollment(ctx);
+						return {
+							...start,
+							state: { ...start.state, to: ctx.user.email },
+							response: { sentTo: ctx.user.email },
+						};
+					},
+				}),
+			],
+			[
+				"a challenge's state",
+				(factor) => ({
+					challenge: async (ctx) => {
+						const sent = await (factor.challenge as NonNullable<MfaFactor["challenge"]>)(ctx);
+						return { ...sent, state: { ...sent.state, to: email.toUpperCase() } };
+					},
+				}),
+			],
+		];
+		for (const user of [USER, QUOTED]) {
+			for (const [where, change] of cases(user.email)) {
+				expect(await failing(answering(change, user)), `${where}, ${user.email}`).toEqual([
+					RULES.noAddress,
+				]);
+			}
+		}
 		expect(
 			await failing(
-				inputFor({}, (factor) => ({
-					...factor,
-					verify: async (ctx) => {
-						const verdict = await factor.verify(ctx);
-						return verdict.ok ? { ...verdict, next: { lastTo: USER.email } } : verdict;
-					},
-				})),
+				answering(
+					(factor) => ({
+						verify: async (ctx) => {
+							const verdict = await factor.verify(ctx);
+							return verdict.ok ? { ...verdict, next: { lastTo: QUOTED.email } } : verdict;
+						},
+					}),
+					QUOTED,
+				),
 			),
-		).toEqual([RULES.verify]);
+		).toEqual([RULES.noAddress]);
 	});
 });
