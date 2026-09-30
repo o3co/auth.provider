@@ -22,13 +22,14 @@
  * and `admitPrimary`. See ADR 2026-09-28-session-admission and ADR
  * 2026-09-25-multi-factor-authentication.
  *
- * `admit`'s table: the `use` baseline under `mfa.mode`, three token rows,
- * `device.lookup` / `device.deny` met on any live session, and
- * `credential_change` held to the baseline, with no recent-MFA rule.
+ * `admit`'s table, by grade alone: the `use` baseline under `mfa.mode`, the
+ * token rows, `grants_nothing` met on any live session whatever the action is
+ * named, and `credential_change` held to the baseline, with no recent-MFA rule.
  */
 
 import {
-	ADMISSION_ACTIONS,
+	ADMISSION_GRADES,
+	type ActionGrade,
 	type AdmissionAction,
 	admitPrimary,
 	createMemoryMfaTransactionStore,
@@ -264,10 +265,15 @@ const untold = (): UserSession => record(["hwk"], undefined);
 const knownNot = (primary: string, mfaAt?: Date): UserSession =>
 	record(["pwd"], { primary, federation: undefined, upstreamAmr: undefined, mfaAt });
 
+/** Actions of each grade, under names of this file's own: the requirement decides by grade alone. */
+const USE: AdmissionAction = { name: "test.use", grade: "use" };
+const NOTHING: AdmissionAction = { name: "test.peek", grade: "grants_nothing" };
+const CHANGE: AdmissionAction = { name: "test.change", grade: "credential_change" };
+
 /** What admission hands a requirement about a record read by `carrier`. */
 const about = (
 	session: UserSession | null,
-	action: AdmissionAction = ADMISSION_ACTIONS["oauth.authorize"],
+	action: AdmissionAction = USE,
 	carrier: SessionClaim["carrier"] = "cookie",
 ): RequirementInput => ({
 	session:
@@ -292,7 +298,7 @@ const aboutToken = (
 	amr: readonly string[] | undefined,
 	session: UserSession | null = null,
 ): RequirementInput => ({
-	...about(session, ADMISSION_ACTIONS["oauth.refresh"], "token"),
+	...about(session, USE, "token"),
 	authentication: requirementSessionFromAmr(amr),
 });
 
@@ -301,7 +307,6 @@ const REAUTHENTICATE: RequirementVerdict = { outcome: "reauthenticate" };
 const UNMET: RequirementVerdict = { outcome: "unmet" };
 const STEP_UP: RequirementVerdict = { outcome: "step_up", whenStillUnmet: "reauthenticate" };
 
-const LINK = ADMISSION_ACTIONS["session.link"];
 
 interface AdmitRow {
 	readonly row: string;
@@ -323,7 +328,7 @@ describe("admit — its table of verdicts under mfa.mode", () => {
 		{
 			row: "required · credential_change · no session → reauthenticate",
 			mode: "required",
-			input: about(null, LINK),
+			input: about(null, CHANGE),
 			expected: REAUTHENTICATE,
 		},
 		{
@@ -373,69 +378,75 @@ describe("admit — its table of verdicts under mfa.mode", () => {
 		{
 			row: "required · use · a code's read and a link's are judged as the cookie's",
 			mode: "required",
-			input: about(password(), ADMISSION_ACTIONS["oauth.code_exchange"], "code"),
+			input: about(password(), USE, "code"),
 			expected: STEP_UP,
 		},
 		{
 			row: "required · use · the link callback's read, a pwd session without mfaAt → step_up",
 			mode: "required",
-			input: about(password(), ADMISSION_ACTIONS["session.link_callback"], "link"),
+			input: about(password(), USE, "link"),
 			expected: STEP_UP,
 		},
-		// required · use, refined by name: device.lookup and device.deny grant nothing.
+		// required · grants_nothing: met on any live session, whatever the action is named.
 		{
-			row: "required · device.lookup · pwd without mfaAt → met: it grants nothing",
+			row: "required · grants_nothing · pwd without mfaAt → met: the action grants nothing",
 			mode: "required",
-			input: about(password(), ADMISSION_ACTIONS["device.lookup"]),
+			input: about(password(), NOTHING),
 			expected: MET,
 		},
 		{
-			row: "required · device.deny · pwd without mfaAt → met: a phished device request is refused without a step-up",
+			row: "required · grants_nothing · any live session, its primary untold included → met",
 			mode: "required",
-			input: about(password(), ADMISSION_ACTIONS["device.deny"]),
+			input: about(untold(), NOTHING),
 			expected: MET,
 		},
 		{
-			row: "required · device.deny · any live session, its primary untold included → met",
+			row: "required · grants_nothing · a primary the baseline does not know → met",
 			mode: "required",
-			input: about(untold(), ADMISSION_ACTIONS["device.deny"]),
+			input: about(knownNot("magiclink"), NOTHING),
 			expected: MET,
 		},
 		{
-			row: "required · device.approve · pwd without mfaAt → step_up: approving grants a device a token",
+			row: "required · grants_nothing · no session → reauthenticate: met only over a live session",
 			mode: "required",
-			input: about(password(), ADMISSION_ACTIONS["device.approve"]),
-			expected: STEP_UP,
-		},
-		{
-			row: "required · device.lookup · no session → reauthenticate: the refinement is for a live session",
-			mode: "required",
-			input: about(null, ADMISSION_ACTIONS["device.lookup"]),
+			input: about(null, NOTHING),
 			expected: REAUTHENTICATE,
 		},
 		{
-			row: "required · a deployment's own action named device.lookup but graded credential_change is not refined",
+			row: "required · grants_nothing · met under any name: an action named acme.peek",
 			mode: "required",
-			input: about(password(), { name: "device.lookup", grade: "credential_change" }),
+			input: about(password(), { name: "acme.peek", grade: "grants_nothing" }),
+			expected: MET,
+		},
+		{
+			row: "required · use · an action named device.lookup graded use → step_up: a name admits nothing",
+			mode: "required",
+			input: about(password(), { name: "device.lookup", grade: "use" }),
+			expected: STEP_UP,
+		},
+		{
+			row: "required · credential_change · an action named device.deny graded credential_change → step_up",
+			mode: "required",
+			input: about(password(), { name: "device.deny", grade: "credential_change" }),
 			expected: STEP_UP,
 		},
 		// required · credential_change: the baseline, with no recent-MFA rule.
 		{
 			row: "required · credential_change · pwd without mfaAt → step_up: the baseline",
 			mode: "required",
-			input: about(password(), LINK),
+			input: about(password(), CHANGE),
 			expected: STEP_UP,
 		},
 		{
 			row: "required · credential_change · pwd with an old mfaAt → met: no recent-MFA rule before step 12",
 			mode: "required",
-			input: about(password(["pwd", "otp", "mfa"], minutesAgo(24 * 60)), LINK),
+			input: about(password(["pwd", "otp", "mfa"], minutesAgo(24 * 60)), CHANGE),
 			expected: MET,
 		},
 		{
 			row: "required · credential_change · fed → met",
 			mode: "required",
-			input: about(federated(), ADMISSION_ACTIONS["webauthn.register"]),
+			input: about(federated(), CHANGE),
 			expected: MET,
 		},
 		// required · use, carrier token: judged on the token's own amr.
@@ -551,7 +562,7 @@ describe("admit — its table of verdicts under mfa.mode", () => {
 		{
 			row: "optional · credential_change · pwd without mfaAt → met: recent MFA is steps 12 and 14's",
 			mode: "optional",
-			input: about(password(), LINK),
+			input: about(password(), CHANGE),
 			expected: MET,
 		},
 	];
@@ -562,14 +573,32 @@ describe("admit — its table of verdicts under mfa.mode", () => {
 	});
 });
 
+describe("admit — decides by grade alone, over every grade core has", () => {
+	/** A password session without a second factor, under required, for each grade an action registers with. */
+	const PASSWORD_ONLY: Readonly<Record<ActionGrade, RequirementVerdict>> = {
+		use: STEP_UP,
+		grants_nothing: MET,
+		credential_change: STEP_UP,
+	};
+
+	it("answers each grade an action registers with — core never asks about a remediation", async () => {
+		const { requirement } = build("required");
+		for (const grade of ADMISSION_GRADES) {
+			if (grade === "remediation") continue;
+			expect(
+				await requirement.admit(about(password(), { name: "test.action", grade })),
+				grade,
+			).toEqual(PASSWORD_ONLY[grade]);
+		}
+	});
+});
+
 describe("admit — a step-up only where the session store can record one", () => {
 	it("sends a password session to log in again, where the table steps it up, when the store cannot record a second factor", async () => {
 		const { requirement } = build("required", { stepUpRecordable: false });
 		expect(await requirement.admit(about(password()))).toEqual(REAUTHENTICATE);
-		expect(await requirement.admit(about(password(), LINK))).toEqual(REAUTHENTICATE);
-		expect(await requirement.admit(about(password(), ADMISSION_ACTIONS["device.approve"]))).toEqual(
-			REAUTHENTICATE,
-		);
+		expect(await requirement.admit(about(password(), CHANGE))).toEqual(REAUTHENTICATE);
+		expect(await requirement.admit(about(password(), USE))).toEqual(REAUTHENTICATE);
 	});
 
 	it("changes nothing else: met stays met and unmet stays unmet, for a token too", async () => {
@@ -578,9 +607,7 @@ describe("admit — a step-up only where the session store can record one", () =
 			MET,
 		);
 		expect(await requirement.admit(about(federated()))).toEqual(MET);
-		expect(await requirement.admit(about(password(), ADMISSION_ACTIONS["device.deny"]))).toEqual(
-			MET,
-		);
+		expect(await requirement.admit(about(password(), NOTHING))).toEqual(MET);
 		expect(await requirement.admit(aboutToken(["pwd"]))).toEqual(UNMET);
 		const nothing = build("required", { stepUpRecordable: false, factors: [] }).requirement;
 		expect(await nothing.admit(about(password()))).toEqual(UNMET);
