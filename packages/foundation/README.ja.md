@@ -1,6 +1,6 @@
 # @o3co/auth-provider-foundation
 
-最終更新: 2026-09-30
+最終更新: 2026-10-01
 
 auth.provider のための「the Store」 — デプロイ自身のユーザーサービス — の HTTP クライアント。`HttpUserRepository` は core の `UserRepository` ポートを HTTPS で実装する: ユーザーを認証し、フェデレーション ID をリンクし、federation grants が求める ID の照会に答える。`registerBuiltinAdapters` はそれを `"http"` ユーザーアダプターとして登録する。このパッケージはまた、Store の MFA エンドポイント — Store が主体の第二要素と登録の証人を保持する場所 — の契約を、それを名指す設定セクションと、その失敗が投げるものとともに定める。`HttpMfaFactorStore` は要素のエンドポイントの上に core の `MfaFactorStore` を実装し、`foundationMfaFactorStoreModule` がそれを組み込む。
 
@@ -73,9 +73,9 @@ const userRepo = await userFactory.create({
 
 **`authenticate`** は `authenticateUrl` に `{ email, password }` を送る（ユーザー名は `email` として届く）。**`authenticateByToken`** は `authenticateByTokenUrl` に `{ token }` を送る。`token` は Store がユーザーに解決する不透明なハンドル — フェデレーションのコールバックからは `<provider>:<sub>`、`oauth` の jwt-bearer グラントからは検証済みアサーションの subject ハンドル。どちらも:
 
-- ボディが JSON の `User`（`{ id: string, username: string, … }`）である `2xx` はそのユーザー。
+- ボディが JSON の `User`（`{ id: string, username: string, … }`、どちらも空でない）である `2xx` はそのユーザー。
 - `401` または `403` は `null` — ユーザーが居ない、または資格情報が誤り。
-- `User` でないボディの `2xx` は例外 — 「ユーザーが見つからない」ではなく上流の障害。
+- `User` でないボディの `2xx` は例外 — 「ユーザーが見つからない」ではなく上流の障害。空の `id` や `username` は `User` ではない: 空の `id` は空の主体になり、OpenID Connect Core §2 はそれを `sub` として認めない。セッションのルートと jwt-bearer グラントはこの例外を、Store の他の障害と同じく `503 temporarily_unavailable` で返す（それぞれが出すログは [Store が自分で守るべきこと](#store-が自分で守るべきこと) の表にある）。
 - それ以外のステータスは例外。
 
 `2xx` 以外の応答のボディは、これらでもリンクでも読まずに捨てる。ID の照会を含め、どのリクエストもリダイレクトを追わない: `3xx` は例外になるステータスの一つにすぎず、その `Location` には一切接続しない。
