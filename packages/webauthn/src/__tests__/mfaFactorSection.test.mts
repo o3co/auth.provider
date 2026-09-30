@@ -16,14 +16,11 @@
 
 /**
  * The WebAuthn second factor's section, `webauthn-mfa-factor` (the MFA ADR's
- * D19 `mfa.factors.webauthn`, in the configuration's own shape), declared as
- * a schema its module is to read: its switch and the user verification a
- * registration asks for, each read from the string its variable carries, and
- * an unknown key refused by its name. Its defaults are not in the package's
- * reference.conf, nor the schema on its entry: no module of the package reads
- * the section, and a section in reference.conf that no installed module owns
- * is named ignored at every boot of every composition that installs the
- * WebAuthn grant.
+ * D19 `mfa.factors.webauthn`, in the configuration's own shape), which its
+ * module reads: its switch and the user verification its ceremonies ask for,
+ * each read from the string its variable carries, and an unknown key refused
+ * by its name. Its defaults — off, `preferred` — are the package's
+ * reference.conf's alone; the schema is not on the package's entry.
  */
 
 import { fileURLToPath } from "node:url";
@@ -31,6 +28,7 @@ import { parseFile } from "@o3co/ts.hocon";
 import { describe, expect, it } from "vitest";
 import * as entry from "#/index.mjs";
 import { webauthnMfaFactorConfigSchema } from "#/mfaFactor/config.mjs";
+import { webauthnMfaFactorConfigForTests } from "#/testing/index.mjs";
 
 const REFERENCE = fileURLToPath(new URL("../../config/reference.conf", import.meta.url));
 
@@ -59,8 +57,41 @@ describe("webauthn-mfa-factor, the WebAuthn second factor's section", () => {
 		).toBe(false);
 	});
 
-	it("is not in the package's reference.conf, nor on its entry", () => {
-		expect(parseFile(REFERENCE, { env: {} }).toObject()).not.toHaveProperty("webauthn-mfa-factor");
+	it("defaults in the package's reference.conf to off, and user verification preferred", () => {
+		const section = (parseFile(REFERENCE, { env: {} }).toObject() as Record<string, unknown>)[
+			"webauthn-mfa-factor"
+		];
+		expect(webauthnMfaFactorConfigSchema.parse(section)).toEqual({
+			enabled: false,
+			userVerification: "preferred",
+		});
+	});
+
+	it("reads each key from the variable its path names", () => {
+		const section = (
+			parseFile(REFERENCE, {
+				env: {
+					WEBAUTHN_MFA_FACTOR_ENABLED: "true",
+					WEBAUTHN_MFA_FACTOR_USER_VERIFICATION: "required",
+				},
+			}).toObject() as Record<string, unknown>
+		)["webauthn-mfa-factor"];
+		expect(webauthnMfaFactorConfigSchema.parse(section)).toEqual({
+			enabled: true,
+			userVerification: "required",
+		});
+	});
+
+	it("is built for a test by the package's testing entry, as reference.conf resolves it, with what the test lays over it", () => {
+		expect(webauthnMfaFactorConfigForTests()).toEqual({
+			"webauthn-mfa-factor": { enabled: false, userVerification: "preferred" },
+		});
+		expect(webauthnMfaFactorConfigForTests({ enabled: true, userVerification: "required" })).toEqual(
+			{ "webauthn-mfa-factor": { enabled: true, userVerification: "required" } },
+		);
+	});
+
+	it("keeps its schema off the package's entry", () => {
 		expect(Object.keys(entry)).not.toContain("webauthnMfaFactorConfigSchema");
 	});
 });

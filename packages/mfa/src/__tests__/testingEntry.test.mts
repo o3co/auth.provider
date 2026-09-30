@@ -17,7 +17,9 @@
 /**
  * The package's testing entry, `@o3co/auth-provider-mfa/testing`: its three
  * sections as configuration fragments the modules accept, a TOTP factor
- * seeded as an enrollment leaves it, and the codes that factor takes.
+ * seeded as an enrollment leaves it, and the codes that factor takes; a
+ * factor of any kind seeded, and its data sealed and opened, under a
+ * configuration's key ring.
  */
 
 import { randomBytes } from "node:crypto";
@@ -32,6 +34,9 @@ import {
 	mfaConfigForTests,
 	mfaRecoveryCodeFactorConfigForTests,
 	mfaTotpFactorConfigForTests,
+	openMfaFactorDataForTests,
+	sealMfaFactorDataForTests,
+	seedMfaFactor,
 	seedTotpFactor,
 	totpCodeForTests,
 } from "#/testing/index.mjs";
@@ -139,5 +144,80 @@ describe("totpCodeForTests", () => {
 		expect(totpCodeForTests(secret, { atMs: at, offset: -1 })).toBe(
 			hotp(secret, totpStep(at, 30) - 1, { algorithm: "SHA1", digits: 6 }),
 		);
+	});
+});
+
+describe("seedMfaFactor, and a factor's data sealed and opened", () => {
+	const config = mfaConfigForTests({ key: KEY, mode: "required" });
+	const sealing = () =>
+		createMfaSealing({
+			ring: readMfaSettings(config.mfa, { deploymentMode: "unset" }).encryptionKeys,
+		});
+
+	it("stores a factor of the kind given, its data sealed to its record under the configuration's key ring", async () => {
+		const factorStore = createMemoryMfaFactorStore();
+		const record = await seedMfaFactor({
+			config,
+			factorStore,
+			subject: "u-alice",
+			kind: "webauthn",
+			data: { credentialId: "Y3JlZA", signCount: 3 },
+			label: "Key",
+		});
+
+		expect(await factorStore.list("u-alice")).toEqual([record]);
+		expect(record).toMatchObject({
+			subject: "u-alice",
+			kind: "webauthn",
+			label: "Key",
+			binding: "password",
+			version: 0,
+			lastUsedAt: undefined,
+		});
+		expect(record.id).toMatch(/^[A-Za-z0-9_-]{22}$/);
+		expect(sealing().openFactorData(record, record.data)).toEqual({
+			state: "ok",
+			value: { credentialId: "Y3JlZA", signCount: 3 },
+		});
+	});
+
+	it("keeps the id given", async () => {
+		const record = await seedMfaFactor({
+			config,
+			factorStore: createMemoryMfaFactorStore(),
+			subject: "u-alice",
+			kind: "webauthn",
+			data: {},
+			id: "factor-1",
+		});
+		expect(record.id).toBe("factor-1");
+	});
+
+	it("seals data as the MFA module seals a factor's, and opens what it sealed", () => {
+		const bound = { subject: "u-alice", id: "factor-1", kind: "webauthn" };
+		const sealed = sealMfaFactorDataForTests(config, bound, { signCount: 9 });
+		expect(sealing().openFactorData(bound, sealed)).toEqual({
+			state: "ok",
+			value: { signCount: 9 },
+		});
+		expect(openMfaFactorDataForTests(config, { ...bound, data: sealed })).toEqual({
+			signCount: 9,
+		});
+	});
+
+	it("throws for data that does not open for the record named", () => {
+		const sealed = sealMfaFactorDataForTests(
+			config,
+			{ subject: "u-bob", id: "factor-1", kind: "webauthn" },
+			{ signCount: 9 },
+		);
+		expect(() =>
+			openMfaFactorDataForTests(config, {
+				subject: "u-alice",
+				id: "factor-1",
+				kind: "webauthn",
+				data: sealed,
+			}),
+		).toThrow(/does not open/);
 	});
 });

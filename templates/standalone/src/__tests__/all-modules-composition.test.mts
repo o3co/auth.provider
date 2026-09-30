@@ -135,7 +135,8 @@ const NOT_IN_TEMPLATE: Readonly<Record<string, string>> = {
 	"@o3co/auth-provider-mtls": "mtlsModule",
 	"@o3co/auth-provider-oauth-token-exchange": "tokenExchangeModule",
 	"@o3co/auth-provider-test-kit": "no module: contract suites and fakes, for tests",
-	"@o3co/auth-provider-webauthn": "webauthnModule, webauthnSessionSubjectModule",
+	"@o3co/auth-provider-webauthn":
+		"webauthnModule, webauthnSessionSubjectModule, webauthnMfaFactorModule",
 };
 
 describe("what the all-modules composition covers", () => {

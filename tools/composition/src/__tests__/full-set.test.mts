@@ -176,6 +176,7 @@ const ADDED: Readonly<Record<string, readonly string[]>> = {
 	"@o3co/auth-provider-webauthn": [
 		"webauthn",
 		"webauthn-session-subject",
+		"webauthn-mfa-factor",
 		"core-webauthn-credential-store-memory",
 		"core-challenge-store-memory",
 		"core-default-challenge-ceremony",
@@ -292,6 +293,22 @@ describe("the full set boots together", () => {
 		expect((config as unknown as { mfa: { mode: unknown } }).mfa.mode).toBe("optional");
 	});
 
+	it("installs the WebAuthn second factor's module, off by its reference.conf: no webauthn factor", async () => {
+		const { handle } = await boot();
+		expect(handle.components.mfaFactorResolver?.get("webauthn")).toBeUndefined();
+	});
+
+	it("turns the WebAuthn second factor on through its variable, and the requirement named mfa then reaches hwk and swk beside TOTP's otp", async () => {
+		const { handle } = await boot({ env: { ...SINGLE_ENV, WEBAUTHN_MFA_FACTOR_ENABLED: "true" } });
+		expect(handle.components.mfaFactorResolver?.get("webauthn")?.amrValues).toEqual([
+			"hwk",
+			"swk",
+		]);
+		expect(
+			[...(handle.components.sessionRequirementResolver?.get("mfa")?.reach ?? [])].sort(),
+		).toEqual(["hwk", "mfa", "otp", "swk"]);
+	});
+
 	it("registers exactly the actions the bundled consumers admit, each with the grade the MFA requirement's verdict table is taken over, said at boot with its module", async () => {
 		const { logger } = await boot();
 		const said = logger.lines.filter((line) => line.args[1] === "admission_actions_registered");
@@ -389,6 +406,7 @@ describe("the configuration createApp is handed reaches every loaded module whol
 			"mtls.fullPki.maxChainDepth",
 			"oauth-token-exchange.maxActorChainDepth",
 			"webauthn.rateLimit.authenticationOptions.limit",
+			"webauthn-mfa-factor.userVerification",
 			"mfa-totp-factor.enabled",
 		]) {
 			expect(valueAt(resolved, path), path).toBeDefined();
