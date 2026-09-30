@@ -795,11 +795,15 @@ export const DISCOVERY_PATHS = [
 /**
  * What RFC 8414 §2 and OpenID Connect Discovery §3 require of the document
  * this composition serves, and what each advertised URL must be: https, on
- * the issuer's origin. The authorization endpoint is named exactly when the
- * authorization_code grant is registered; a response type, and PKCE, are
- * what a client uses there, so they are listed with it and not without.
+ * the issuer's origin. `authorizationCode` says whether the composition
+ * registers that grant (it does unless a test switches it off): with it the
+ * document names the authorization endpoint and lists the code response type
+ * and PKCE; without it, none of them.
  */
-export function expectValidMetadata(doc: Record<string, unknown>): void {
+export function expectValidMetadata(
+	doc: Record<string, unknown>,
+	{ authorizationCode = true }: { readonly authorizationCode?: boolean } = {},
+): void {
 	expect(doc.issuer).toBe(ISSUER);
 	for (const field of [
 		"token_endpoint",
@@ -822,10 +826,12 @@ export function expectValidMetadata(doc: Record<string, unknown>): void {
 			expect(new Set(value).size, `${field} repeats a value`).toBe(value.length);
 		}
 	}
-	if (doc.authorization_endpoint !== undefined) {
+	if (authorizationCode) {
+		expect(doc.authorization_endpoint).toBe(`${ISSUER}/oauth/authorize`);
 		expect(doc.response_types_supported).toEqual(["code"]);
 		expect(doc.code_challenge_methods_supported).toEqual(["S256"]);
 	} else {
+		expect(doc).not.toHaveProperty("authorization_endpoint");
 		expect(doc.response_types_supported).toEqual([]);
 		expect(doc).not.toHaveProperty("code_challenge_methods_supported");
 	}

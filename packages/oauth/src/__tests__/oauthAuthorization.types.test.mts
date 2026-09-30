@@ -107,7 +107,7 @@ describe("the grant factories declare the slots they read", () => {
 		expect(true).toBe(true);
 	});
 
-	it("authorization_code requires the code repository the module lists optional, so the module checks before handing over", () => {
+	it("authorization_code requires the code repository the module lists optional", () => {
 		expectTypeOf<OAuthAuthorizationModuleDeps>().not.toMatchTypeOf<AuthorizationDeps>();
 		expectTypeOf<AuthorizationDeps["codeRepository"]>().toEqualTypeOf<CodeRepository>();
 		expect(true).toBe(true);

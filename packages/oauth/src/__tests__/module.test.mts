@@ -1310,9 +1310,71 @@ describe("oauthModule — a composition with no authorization_code grant", () =>
 			expect(body.grant_types_supported).toEqual(["client_credentials"]);
 			expect(body.token_endpoint).toBe("https://auth.example.com/oauth/token");
 			expect(body).not.toHaveProperty("code_challenge_methods_supported");
+			expect(body).not.toHaveProperty("request_uri_parameter_supported");
 			await handle.dispose();
 		},
 	);
+
+	it("with an acr table configured, advertises none and says nothing of it at boot", async () => {
+		const base = headlessConfig(false);
+		const config = {
+			...base,
+			oauth: {
+				...base.oauth,
+				authorize: { acrValues: { "urn:example:pwd": ["pwd"], "urn:example:mfa": ["pwd", "mfa"] } },
+			},
+		} as ReturnType<typeof makeValidAppConfig>;
+		const logger = createMockLogger();
+		const handle = await createTestApp({
+			modules: [
+				oauthModule({ config }),
+				oauthAuthorizationModule({ config }),
+				memoryAccessTokenDenylistModule,
+				jwksModule,
+				clientRepositoryModule,
+				keyStoreModule,
+			],
+			bootstrapComponents: { config, pathResolver: (s) => s, logger },
+		});
+		const app = express();
+		app.use(handle.router);
+		const { body } = await request(app).get("/.well-known/openid-configuration");
+		await handle.dispose();
+
+		expect(body).not.toHaveProperty("acr_values_supported");
+		const acrLines = [logger.info, logger.warn].flatMap((level) =>
+			level.mock.calls.filter((call) => call[1] === "acr_value_unsatisfiable"),
+		);
+		expect(acrLines).toEqual([]);
+	});
+
+	it("refuses to boot a grant registered with no code repository, from the router", async () => {
+		const config = headlessConfig(false);
+		const refusal = await createTestApp({
+			modules: [
+				oauthModule({ config }),
+				authorizationCodeGrantModule,
+				memoryAccessTokenDenylistModule,
+				jwksModule,
+				clientRepositoryModule,
+				keyStoreModule,
+			],
+			bootstrapComponents: { config, pathResolver: (s) => s },
+		}).then(
+			async (handle) => {
+				await handle.dispose();
+				return undefined;
+			},
+			(err: unknown) => err as { reason?: unknown; cause?: { message?: unknown } },
+		);
+		expect(refusal, "boot must be refused").toMatchObject({
+			name: "BootError",
+			reason: "contribute-factory-failed",
+		});
+		expect(String(refusal?.cause?.message)).toMatch(
+			/authorization_code grant is registered but no codeRepository is wired/,
+		);
+	});
 
 	it("with the grant and a code repository, serves /oauth/authorize and names it", async () => {
 		const handle = await boot(true, [codeRepositoryModule]);

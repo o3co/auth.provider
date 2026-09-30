@@ -20,6 +20,8 @@ import {
 	type AuditSink,
 	type ClientRepository,
 	type CodeRepository,
+	createMemoryConsentStore,
+	createMemoryPendingConsentStore,
 	createSymmetricKeyStore,
 	type FederationTokenStore,
 	type GrantHandler,
@@ -719,6 +721,23 @@ describe("createOAuthRouter — /authorize is the authorization_code grant's", (
 		expect(calls.get.some((args) => args[0] === "/authorize")).toBe(false);
 		expect(calls.post.some((args) => args[0] === "/authorize")).toBe(false);
 		expect(calls.post.some((args) => args[0] === "/token")).toBe(true);
+	});
+
+	it("mounts no consent step without that grant: nothing parks a request for it", async () => {
+		const { router } = await createOAuthRouter(express, {
+			requirements: resolverForTests([]),
+			registry: registryOf("client_credentials"),
+			config: mockConfig,
+			clientRepository: {} as ClientRepository,
+			keyStore: createSymmetricKeyStore("test-secret"),
+			consentStore: createMemoryConsentStore(),
+			pendingConsentStore: createMemoryPendingConsentStore(),
+		});
+		const app = express();
+		app.use("/oauth", router);
+
+		expect((await request(app).get("/oauth/consent")).status).toBe(404);
+		expect((await request(app).post("/oauth/consent")).status).toBe(404);
 	});
 
 	it("refuses to build /authorize without a code repository to issue its codes into", async () => {

@@ -163,7 +163,7 @@ describe("buildDiscoveryDocument", () => {
 		expect(() => buildDiscoveryDocument(items, OPTS)).toThrow(DiscoveryDocumentError);
 	});
 
-	it("throws when the assembled document is missing an OIDC-required field (presence contract)", () => {
+	it("throws when the assembled document is missing a required field (presence contract)", () => {
 		// jwks-only: no authorization/token endpoints, no response/subject types.
 		const items: OidcDiscoveryContribution[] = [
 			{ endpoints: { jwks_uri: "/.well-known/jwks.json" } },
@@ -246,9 +246,9 @@ describe("buildDiscoveryDocument", () => {
 		expect(() => buildDiscoveryDocument(items, OPTS)).toThrow(/issuer-relative|endpoints/);
 	});
 
-	it("throws when a required array field is present but empty (validity, not just presence)", () => {
-		// `response_types_supported: []` is present (passes the REQUIRED_FIELDS
-		// presence check) but OIDC-invalid — an RP cannot use it. Fail fast.
+	it("refuses a document that names authorization_endpoint with no response type", () => {
+		// A client asks for a response type at the authorization endpoint, so
+		// one named with `response_types_supported: []` offers nothing to ask for.
 		const items: OidcDiscoveryContribution[] = [
 			{
 				endpoints: {

@@ -505,6 +505,14 @@ describe("oauthModule — client_id_metadata_document_supported", () => {
 		const on = await discoveryContribution({}, enabled());
 		expect(on.metadata?.client_id_metadata_document_supported).toBeUndefined();
 	});
+
+	it("says nothing without the authorization_code grant — a document client can use no other", async () => {
+		const on = await discoveryContribution(
+			{ consentStore: {}, grantHandlerResolver: grantResolver("client_credentials") },
+			enabled(),
+		);
+		expect(on.metadata?.client_id_metadata_document_supported).toBeUndefined();
+	});
 });
 
 describe("oauthModule — private_key_jwt is advertised only where it can be honoured", () => {

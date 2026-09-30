@@ -29,7 +29,7 @@ import {
 	createMemoryPendingConsentStore,
 	createSymmetricKeyStore,
 } from "@o3co/auth-provider-core";
-import { resolverForTests } from "@o3co/auth-provider-core/testing";
+import { GrantRegistry, resolverForTests } from "@o3co/auth-provider-core/testing";
 import express from "express";
 import request from "supertest";
 import { describe, expect, it, vi } from "vitest";
@@ -56,6 +56,8 @@ const makeApp = async (opts: {
 	document?: unknown;
 	/** Wire the consent step a document client needs. Default: yes. */
 	consent?: boolean;
+	/** Register the authorization_code grant a document client uses. Default: yes. */
+	authorizationCode?: boolean;
 	/** Set the cache and fetch-budget knobs in config. */
 	knobs?: boolean;
 }) => {
@@ -104,7 +106,8 @@ const makeApp = async (opts: {
 	) as unknown as typeof fetch;
 	const { router } = await createOAuthRouter(express, {
 		requirements: resolverForTests([]),
-		registry: authorizationServerRegistry(),
+		registry:
+			opts.authorizationCode === false ? new GrantRegistry() : authorizationServerRegistry(),
 		config,
 		clientRepository,
 		codeRepository,
@@ -212,6 +215,23 @@ describe("/authorize does not fetch a document it could never honour", () => {
 		// and it sends no attacker-authored URL to the browser.
 		expect(res.status).toBe(400);
 		expect(res.body.error).toBe("invalid_client");
+	});
+
+	it("makes no outbound request at /oauth/token or /oauth/revoke without the authorization_code grant", async () => {
+		// A document client may use no grant but authorization_code (and the
+		// refresh tokens it yields), so with that grant absent no request
+		// naming one can succeed: resolving it would be the same fetch before
+		// a refusal.
+		const { app, fetchImpl } = await makeApp({ enabled: true, authorizationCode: false });
+		await request(app)
+			.post("/oauth/token")
+			.type("form")
+			.send({ grant_type: "client_credentials", client_id: CLIENT_URL });
+		await request(app)
+			.post("/oauth/revoke")
+			.type("form")
+			.send({ token: "t", client_id: CLIENT_URL });
+		expect(fetchImpl).not.toHaveBeenCalled();
 	});
 
 	it("still fetches when the flow can finish", async () => {

@@ -370,6 +370,35 @@ describe("applyContributions — step 2: factory throw wraps as BootError", () =
 	});
 });
 
+describe("applyContributions — step 2: a grant is a handler", () => {
+	it.each([
+		["undefined", undefined],
+		["null", null],
+		["a string", "handler"],
+	])(
+		"refuses a grants factory that answers %s, naming the grant, and registers nothing",
+		async (_label, answer) => {
+			const grantCollector = makeStubNameCollector<GrantHandler>();
+			const contributionKinds: ContributionCollectorMap = { grants: grantCollector };
+			const modA = defineModule({
+				name: "ModA",
+				contributes: { grants: { broken_grant: () => answer as never } },
+			});
+
+			const world = await buildWorld([modA], contributionKinds);
+
+			await expect(applyContributions(world, contributionKinds)).rejects.toSatisfy(
+				(err: unknown) =>
+					err instanceof BootError &&
+					err.reason === "contribute-factory-failed" &&
+					err.cause instanceof RangeError &&
+					(err.cause as Error).message.startsWith('grants "broken_grant":'),
+			);
+			expect([...grantCollector.entries()]).toEqual([]);
+		},
+	);
+});
+
 // ---------------------------------------------------------------------------
 // 6. Pre-scan prevents factory side-effect leak
 // ---------------------------------------------------------------------------
