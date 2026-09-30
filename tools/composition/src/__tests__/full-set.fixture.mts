@@ -54,6 +54,7 @@ import {
 	type GrantPolicyHook,
 	type InterruptionAnswer,
 	loggableError,
+	type MfaFactorStore,
 	type Module,
 	memoryChallengeStoreModule,
 	memoryDeviceCodeStoreModule,
@@ -73,6 +74,7 @@ import { dpopModule } from "@o3co/auth-provider-dpop";
 import { appleFederationModule } from "@o3co/auth-provider-federation-apple";
 import { githubFederationModule } from "@o3co/auth-provider-federation-github";
 import { mfaModules } from "@o3co/auth-provider-mfa";
+import { seedTotpFactor } from "@o3co/auth-provider-mfa/testing";
 import { mtlsModule } from "@o3co/auth-provider-mtls";
 import {
 	TOKEN_EXCHANGE_GRANT_TYPE,
@@ -84,7 +86,11 @@ import {
 	redisMfaFactorStoreModule,
 	redisMfaTransactionStoreModule,
 } from "@o3co/auth-provider-redis";
-import { answerInterruption, establishSession } from "@o3co/auth-provider-session";
+import {
+	answerInterruption,
+	establishSession,
+	loginCompletionModule,
+} from "@o3co/auth-provider-session";
 import {
 	type ComposeOptions,
 	type Composition,
@@ -97,7 +103,8 @@ import {
 	webauthnModule,
 	webauthnSessionSubjectModule,
 } from "@o3co/auth-provider-webauthn";
-import type { RequestHandler } from "express";
+import type { Express, RequestHandler } from "express";
+import request from "supertest";
 import {
 	createFakeGithub,
 	type FakeGithub,
@@ -154,6 +161,63 @@ export const ALL_ON: Features = {
  * sample key: the full set boots as `production` does.
  */
 export const MFA_KEY = randomBytes(32).toString("base64");
+
+/**
+ * Seeds a TOTP factor for `subject` in the composition's factor store, sealed
+ * under the configuration's MFA key ring, through the MFA package's testing
+ * entry: what an enrollment leaves behind. Answers its id and its secret.
+ */
+export async function seedTotp(
+	components: { readonly mfaFactorStore?: MfaFactorStore },
+	config: AppConfig,
+	subject: string,
+): Promise<{ readonly factorId: string; readonly secret: Buffer }> {
+	const factorStore = components.mfaFactorStore;
+	if (factorStore === undefined) throw new Error("the composition holds no MFA factor store");
+	const { record, secret } = await seedTotpFactor({ config, factorStore, subject });
+	return { factorId: record.id, secret };
+}
+
+/**
+ * One browser, across the replicas it talks to: every cookie it is handed is
+ * sent back, `Secure` ones too, since supertest speaks plain HTTP to what
+ * the template sets `__Host-` cookies on. A POST first fetches a CSRF token
+ * from the replica it posts to, as the page does.
+ */
+export function browser() {
+	const jar = new Map<string, string>();
+	const keep = (res: request.Response): request.Response => {
+		for (const line of ([] as string[]).concat(res.headers["set-cookie"] ?? [])) {
+			const pair = line.split(";")[0] ?? "";
+			jar.set(pair.slice(0, pair.indexOf("=")), pair);
+		}
+		return res;
+	};
+	const cookies = (): string[] => [...jar.values()];
+	const get = async (
+		app: Express,
+		path: string,
+		headers: Record<string, string> = {},
+	): Promise<request.Response> =>
+		keep(await request(app).get(path).set("Cookie", cookies().join("; ")).set(headers));
+	return {
+		cookies,
+		get,
+		async post(
+			app: Express,
+			path: string,
+			body: Record<string, unknown>,
+			options: { readonly form?: boolean } = {},
+		): Promise<request.Response> {
+			const csrf = await get(app, "/session/csrf");
+			const call = request(app)
+				.post(path)
+				.set("Cookie", cookies().join("; "))
+				.set(csrf.body.header_name as string, csrf.body.csrf_token as string);
+			return keep(await (options.form === true ? call.type("form") : call).send(body));
+		},
+	};
+}
 
 /** Which store backs each added feature: memory on one replica, Redis on several. */
 export type Stores = "memory" | "redis";
@@ -622,10 +686,13 @@ function addedModules(
 		// The MFA package: the TOTP factor, on by its reference.conf, the
 		// recovery-code factor's module, and the MFA module, which registers
 		// the requirement named mfa, over the two MFA stores. The environment
-		// is the one the template composes as.
+		// is the one the template composes as. The MFA routes finish a login
+		// through the session package's login completion, which a
+		// composition that completes a login loads beside the session module.
 		...(features.mfa
 			? [
 					...mfaModules({ environment: "production" }),
+					loginCompletionModule,
 					...(stores.mfa === "redis"
 						? [redisMfaFactorStoreModule, redisMfaTransactionStoreModule]
 						: [memoryMfaFactorStoreModule, memoryMfaTransactionStoreModule]),

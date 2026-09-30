@@ -57,6 +57,8 @@ export {
 	type FakeIdpRequest,
 } from "./fake-idp.mjs";
 export {
+	type CoreConfigForTestsOptions,
+	coreConfigForTests,
 	makeValidAppConfig,
 	makeValidCoreConfig,
 	makeValidFullSections,

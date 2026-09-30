@@ -270,6 +270,49 @@ describe("keyed digests", () => {
 		).toBe("key_unavailable");
 	});
 
+	it("matches a digest made under a key that is no longer first, and says so once per key id, at info, beside what sealed data says of the same key — so both are counted before the key is retired", () => {
+		const stored = sealingOver([K1]).digestsFor("recovery_code").digest(["ABCD1234EFGH5678"]);
+		const sealedUnderK1 = sealingOver([K1]).sealFactorData(RECORD, DATA);
+		const { logger, lines } = recordingLogger();
+		const rotated = sealingOver([K2, K1], logger);
+		expect(rotated.openFactorData(RECORD, sealedUnderK1)).toMatchObject({ state: "ok" });
+		for (let i = 0; i < 3; i++) {
+			expect(rotated.digestsFor("recovery_code").matchesDigest(["ABCD1234EFGH5678"], stored)).toBe(
+				"match",
+			);
+		}
+		expect(rotated.digestsFor("recovery_code").matchesDigest(["ABCD1234EFGH5679"], stored)).toBe(
+			"mismatch",
+		);
+		expect(lines).toEqual([
+			{ level: "info", fields: { keyId: "k1" }, event: "mfa_factor_sealed_with_retired_key" },
+			{ level: "info", fields: { keyId: "k1" }, event: "mfa_digest_made_with_retired_key" },
+		]);
+		// A digest under the first key says nothing.
+		const current = rotated.digestsFor("recovery_code").digest(["ABCD1234EFGH5678"]);
+		expect(rotated.digestsFor("recovery_code").matchesDigest(["ABCD1234EFGH5678"], current)).toBe(
+			"match",
+		);
+		expect(lines).toHaveLength(2);
+	});
+
+	it("says a stored digest names a key that is no longer first before it compares it, so a first comparison that mismatches still counts the key", () => {
+		const stored = sealingOver([K1]).digestsFor("recovery_code").digest(["ABCD1234EFGH5678"]);
+		const { logger, lines } = recordingLogger();
+		const rotated = sealingOver([K2, K1], logger);
+		expect(rotated.digestsFor("recovery_code").matchesDigest(["WRONG0000WRONG00"], stored)).toBe(
+			"mismatch",
+		);
+		expect(lines).toEqual([
+			{ level: "info", fields: { keyId: "k1" }, event: "mfa_digest_made_with_retired_key" },
+		]);
+		// Not said for a key the ring no longer holds: that is key_unavailable's.
+		expect(sealingOver([K2], logger).digestsFor("recovery_code").matchesDigest(["X"], stored)).toBe(
+			"key_unavailable",
+		);
+		expect(lines).toHaveLength(1);
+	});
+
 	it("throws on a stored digest that is not { keyId, digest }: key_unavailable means a key is missing, and a malformed record is never a wrong code", () => {
 		const digests = sealingOver([K1]).digestsFor("email");
 		const good = digests.digest(["a"]);

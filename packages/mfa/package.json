@@ -14,8 +14,8 @@
 			"types": "./dist/index.d.mts"
 		},
 		"./testing": {
-			"types": "./dist/testing/index.d.mts",
-			"import": "./dist/testing/index.mjs"
+			"import": "./dist/testing/index.mjs",
+			"types": "./dist/testing/index.d.mts"
 		},
 		"./reference.conf": "./config/reference.conf"
 	},
@@ -46,7 +46,8 @@
 		"zod": "^4.6.5"
 	},
 	"peerDependencies": {
-		"@o3co/auth-provider-core": "workspace:^"
+		"@o3co/auth-provider-core": "workspace:^",
+		"express": "^5.0.0"
 	},
 	"devDependencies": {
 		"@o3co/auth-provider-core": "workspace:*",

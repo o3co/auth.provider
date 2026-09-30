@@ -489,6 +489,21 @@ const VOCABULARY: readonly VocabularyRow[] = [
 		definition: /(?:function|const)\s+getBoundMfaTransaction\b/,
 	},
 	{
+		concept: "an MFA store's answer, read as promised — a reservation (#809)",
+		home: "packages/core/src/mfa/transactionStore.mts",
+		definition: /(?:function|const)\s+readMfaAttemptReservation\b/,
+	},
+	{
+		concept: "an MFA store's answer, read as promised — a consumed transaction (#809)",
+		home: "packages/core/src/mfa/transactionStore.mts",
+		definition: /(?:function|const)\s+isConsumedMfaTransaction\b/,
+	},
+	{
+		concept: "an MFA store's answer, read as promised — a factor's compare-and-set (#809)",
+		home: "packages/core/src/mfa/factorStore.mts",
+		definition: /(?:function|const)\s+isMfaFactorUpdateWritten\b/,
+	},
+	{
 		concept: "core.deployment.mode as core reads it — the deploymentMode slot's value",
 		home: DEPLOYMENT_MODE_HOME,
 		definition: /(?:function|const)\s+deploymentModeOf\b/,

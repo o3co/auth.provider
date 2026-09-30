@@ -40,13 +40,16 @@ import {
 	type UserSession,
 	type UserSessionStore,
 } from "@o3co/auth-provider-core";
-import { createTestOAuthTokenSettings, resolverForTests } from "@o3co/auth-provider-core/testing";
+import {
+	coreConfigForTests,
+	createTestOAuthTokenSettings,
+	resolverForTests,
+} from "@o3co/auth-provider-core/testing";
 import { afterEach, describe, expect, it } from "vitest";
 import { MFA_DEVELOPMENT_SAMPLE_KEY } from "#/config.mjs";
 import { MFA_ROUTES_ID, mfaBootState, mfaModule, mfaModules } from "#/module.mjs";
 import { mfaRecoveryCodeFactorModule } from "#/recovery/module.mjs";
 import { createMfaSealing } from "#/sealing.mjs";
-import { createTestMfaConfig } from "#/testing/index.mjs";
 import { mfaTotpFactorModule } from "#/totp/module.mjs";
 import {
 	ALICE,
@@ -61,6 +64,7 @@ import {
 	TOTP_SECTION,
 } from "./moduleHarness.mjs";
 import { factorRecord, stubFactor } from "./requirementHarness.mjs";
+import { beginLogin, seedTotp, verify, wrongCode } from "./routesHarness.mjs";
 
 afterEach(disposeAll);
 
@@ -89,11 +93,13 @@ describe("mfaModules", () => {
 		expect(mfaModules()[1]).toBe(mfaRecoveryCodeFactorModule);
 	});
 
-	it("requires what the requirement is bound to and not the configuration, and reads the audit sink — its absence declared — and the logger", () => {
+	it("requires what the requirement is bound to, the CSRF guard its POSTs sit behind and the login's completion, and not the configuration; reads the rate limiter, the audit sink — its absence declared — and the logger", () => {
 		const module = mfaModule();
 		expect([...(module.requires ?? [])].sort()).toEqual(
 			[
+				"csrfGuard",
 				"deploymentMode",
+				"loginCompletion",
 				"mfaFactorResolver",
 				"mfaFactorStore",
 				"mfaTransactionStore",
@@ -101,7 +107,7 @@ describe("mfaModules", () => {
 				"userSessionStore",
 			].sort(),
 		);
-		expect([...(module.optional ?? [])].sort()).toEqual(["auditSink", "logger"]);
+		expect([...(module.optional ?? [])].sort()).toEqual(["auditSink", "logger", "rateLimiter"]);
 		expect(module.absencePolicies?.auditSink).toMatchObject({
 			configKey: ["audit", "sink", "type"],
 			absentValue: "none",
@@ -437,6 +443,12 @@ describe("the boot refusals", () => {
 		expect(err.details).toMatchObject({ missingKey: "userSessionStore", rootModule: "mfa" });
 	});
 
+	it("refuses a composition that loads the session module without the login's completion, naming the slot", async () => {
+		const err = await refusal({ withoutLoginCompletion: true });
+		expect(err.reason).toBe("missing-required-component");
+		expect(err.details).toMatchObject({ missingKey: "loginCompletion", rootModule: "mfa" });
+	});
+
 	it("refuses an out-of-range transaction life and an unusable lock, naming the key", async () => {
 		for (const [mfa, key] of [
 			[{ transactionTtlSeconds: 59 }, "mfa.transactionTtlSeconds"],
@@ -556,6 +568,67 @@ describe("the factors' sections are the factors' modules' to read", () => {
 			module: "mfa-totp-factor",
 		});
 		expect((err.cause as Error).message).toContain("MFA_TOTP_FACTOR_ISSUER");
+	});
+});
+
+describe("the MFA routes' flood guard without a shared rate limiter", () => {
+	const underMode = (deploymentMode: "single" | "multi" | undefined): AppConfig => ({
+		...configFor("required"),
+		...coreConfigForTests({
+			expected: ["mfa"],
+			...(deploymentMode === undefined ? {} : { deploymentMode }),
+		}),
+	});
+
+	it("builds a per-process limiter over mfa.rateLimit.routes, which refuses a POST past the budget, and says so once at warn when the deployment mode is unset", async () => {
+		const logger = spyLogger();
+		const factorStore = createMemoryMfaFactorStore();
+		const { record, secret } = await seedTotp(factorStore);
+		const config = configFor("required", {
+			rateLimit: { routes: { limit: 2, windowSeconds: 300 } },
+		});
+		const { app } = await boot({ config, factorStore, rateLimiter: null, logger });
+		const { agent, transaction } = await beginLogin(app);
+
+		const statuses = [];
+		for (let n = 0; n < 3; n++) {
+			statuses.push((await verify(agent, transaction, record.id, wrongCode(secret))).status);
+		}
+
+		expect(statuses).toEqual([401, 401, 429]);
+		const said = logger.warn.mock.calls.filter((c) => c[1] === "mfa_rate_limiter_not_shared");
+		expect(said).toEqual([[{ limit: 2, windowSeconds: 300 }, "mfa_rate_limiter_not_shared"]]);
+	});
+
+	it("is silent under a single replica", async () => {
+		const logger = spyLogger();
+		await boot({ config: underMode("single"), rateLimiter: null, logger });
+		expect(events(logger, "warn")).not.toContain("mfa_rate_limiter_not_shared");
+	});
+
+	it("refuses the boot under several replicas, where a per-process count is no limit", async () => {
+		const err = await refusal({
+			config: underMode("multi"),
+			withoutLogin: true,
+			rateLimiter: null,
+		});
+		expect(err.reason).toBe("contribute-factory-failed");
+		expect((err.cause as Error).message).toContain("rateLimiter");
+	});
+
+	it("refuses the boot when neither a rate limiter nor mfa.rateLimit.routes is there to limit the routes by, naming the key", async () => {
+		const err = await refusal({
+			config: configFor("required", { rateLimit: undefined }),
+			rateLimiter: null,
+		});
+		expect(err.reason).toBe("contribute-factory-failed");
+		expect((err.cause as Error).message).toMatch(/^mfa\.rateLimit\.routes is not set/);
+	});
+
+	it("is not built when the composition wires a shared rate limiter", async () => {
+		const logger = spyLogger();
+		await boot({ config: underMode(undefined), logger });
+		expect(events(logger, "warn")).not.toContain("mfa_rate_limiter_not_shared");
 	});
 });
 
@@ -746,11 +819,9 @@ describe("recent MFA's window", () => {
 		const factorStore = createMemoryMfaFactorStore();
 		await factorStore.create(factorRecord(ALICE.id));
 		const admitted = async (maxAgeSeconds: number) => {
+			// configFor builds the section with mfaConfigForTests, these options laid over it.
 			const { handle } = await boot({
-				config: configFor(
-					"optional",
-					createTestMfaConfig({ mode: "optional", manage: { maxAgeSeconds } }),
-				),
+				config: configFor("optional", { manage: { maxAgeSeconds } }),
 				factorStore,
 			});
 			return handle.components.sessionRequirementResolver?.get("mfa")?.admit(credentialChange(30));
