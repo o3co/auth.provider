@@ -24,10 +24,11 @@
  * as not enrolled; a mark resolving to nothing and the next login answering
  * it, `true` and `false` alike; a repeated mark a success that changes
  * nothing; the last of successive marks holding; a mark reaching its own
- * subject alone; concurrent marks of one value all succeeding; a subject the
- * backend does not hold refused with a throw, marking nobody; and, when the
- * harness can make one, an outage thrown, never resolved as done. Each case
- * builds a fresh harness and closes it.
+ * subject alone; concurrent marks of one value all succeeding; a mark of
+ * either value for a subject the backend does not hold refused with a throw,
+ * every held witness left as it was; and, when the harness can make one, an
+ * outage thrown, never resolved as done. Each case builds a fresh harness
+ * and closes it.
  */
 
 import assert from "node:assert/strict";
@@ -186,14 +187,27 @@ export function mfaEnrollmentWitnessContract(
 		),
 		contractCase(
 			input,
-			"a mark for a subject the backend does not hold throws, and marks nobody",
+			"a mark for a subject the backend does not hold throws, whether it marks true or false, and leaves every held witness as it was",
 			async (harness) => {
-				await assert.rejects(
-					markOf(harness)(harness.unknownSubject, true),
-					"a mark for a subject the backend does not hold resolved as done",
-				);
-				for (const user of harness.users) {
-					assert.equal(await witnessOf(harness, user), "not_enrolled", user.username);
+				const [enrolled, cleared] = harness.users;
+				const mark = markOf(harness);
+				await mark(enrolled.subject, true);
+				await mark(cleared.subject, false);
+				for (const value of [true, false]) {
+					await assert.rejects(
+						mark(harness.unknownSubject, value),
+						`a mark of ${value} for a subject the backend does not hold resolved as done`,
+					);
+					assert.equal(
+						await witnessOf(harness, enrolled),
+						"enrolled",
+						`a refused mark of ${value} changed ${enrolled.username}'s witness`,
+					);
+					assert.equal(
+						await witnessOf(harness, cleared),
+						"not_enrolled",
+						`a refused mark of ${value} changed ${cleared.username}'s witness`,
+					);
 				}
 			},
 		),

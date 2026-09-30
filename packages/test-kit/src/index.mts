@@ -20,6 +20,8 @@
  * it; production code never does. It depends on core alone.
  */
 
+/** A suite's case, as core's slot suites give them: run each with any test runner's `it`. */
+export type { ContractCase } from "@o3co/auth-provider-core/testing";
 export {
 	type MfaEnrollmentWitnessContractInput,
 	type MfaEnrollmentWitnessHarness,
@@ -27,6 +29,7 @@ export {
 	mfaEnrollmentWitnessContract,
 } from "./mfa/enrollmentWitness.contract.mjs";
 export {
+	FAKE_STORE_MAX_BODY_BYTES,
 	type FakeStore,
 	type FakeStoreAnswer,
 	type FakeStoreAnswerer,

@@ -24,10 +24,14 @@
  * Guarantees: every record held is answered back as held, one the provider
  * cannot read included; an update is a compare-and-set that writes the
  * changes and nothing else of the record, at the expected version plus one;
- * each request is answered from state it reads and writes without yielding,
- * so concurrent requests are atomic. `answer` makes an endpoint break the
- * contract on purpose, and `holdFactor` holds a record as a Store might, so
- * an adapter's reading of a broken Store can be tested.
+ * each request is answered by the contract from state it reads and writes
+ * without yielding, so concurrent requests are atomic; a request with an
+ * absolute or odd target, naming a host other than its own address, with a
+ * body over {@link FAKE_STORE_MAX_BODY_BYTES} or not declared JSON is refused
+ * and not recorded. `answer` makes an endpoint break the contract on purpose
+ * — at once, later, or never — and `holdFactor` holds a record as a Store
+ * might, so an adapter's reading of a broken Store can be tested. It keeps
+ * every request it records, headers included: test data only.
  */
 
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
@@ -95,8 +99,16 @@ export interface FakeStoreAnswer {
 	readonly body?: string;
 }
 
-/** Answers a request in place of the contract, or `undefined` to leave it to the contract. */
-export type FakeStoreAnswerer = (request: FakeStoreRequest) => FakeStoreAnswer | undefined;
+/**
+ * Answers a request in place of the contract, or `undefined` to leave it to
+ * the contract — at once, or through a promise that settles later or never.
+ */
+export type FakeStoreAnswerer = (
+	request: FakeStoreRequest,
+) => FakeStoreAnswer | undefined | Promise<FakeStoreAnswer | undefined>;
+
+/** The largest request body the fake Store reads: 1 MiB. */
+export const FAKE_STORE_MAX_BODY_BYTES = 1024 * 1024;
 
 export interface FakeStore {
 	readonly urls: FakeStoreUrls;
@@ -147,14 +159,27 @@ const json = (status: number, value: unknown): FakeStoreAnswer => ({
 
 const empty = (status: number): FakeStoreAnswer => ({ status });
 
-function readBody(request: IncomingMessage): Promise<string> {
+/** The request's body as text, or `undefined` once it passes the cap: the rest is read and dropped. */
+function readBody(request: IncomingMessage): Promise<string | undefined> {
 	return new Promise((resolve, reject) => {
 		const chunks: Buffer[] = [];
-		request.on("data", (chunk: Buffer) => chunks.push(chunk));
-		request.on("end", () => resolve(Buffer.concat(chunks).toString("utf8")));
+		let size = 0;
+		request.on("data", (chunk: Buffer) => {
+			size += chunk.byteLength;
+			if (size <= FAKE_STORE_MAX_BODY_BYTES) chunks.push(chunk);
+		});
+		request.on("end", () =>
+			resolve(
+				size > FAKE_STORE_MAX_BODY_BYTES ? undefined : Buffer.concat(chunks).toString("utf8"),
+			),
+		);
 		request.on("error", reject);
 	});
 }
+
+/** Whether a `Content-Type` declares JSON, parameters aside. */
+const declaresJson = (value: string | undefined): boolean =>
+	value?.split(";")[0]?.trim().toLowerCase() === "application/json";
 
 function send(response: ServerResponse, answer: FakeStoreAnswer): void {
 	response.writeHead(answer.status, { ...(answer.headers ?? {}) });
@@ -248,12 +273,19 @@ export async function startFakeStore(options: FakeStoreOptions = {}): Promise<Fa
 		}
 	}
 
+	/** `127.0.0.1:<port>`, once listening: the one `Host` it answers. */
+	let ownHost = "";
 	const server = createServer((incoming, response) => {
 		void (async () => {
-			const endpoint = ENDPOINT_BY_PATH.get(new URL(incoming.url ?? "/", "http://fake").pathname);
 			const text = await readBody(incoming);
+			const target = incoming.url ?? "";
+			if (!target.startsWith("/") || target.startsWith("//")) return send(response, empty(400));
+			const endpoint = ENDPOINT_BY_PATH.get(new URL(target, "http://fake").pathname);
 			if (endpoint === undefined) return send(response, empty(404));
 			if (incoming.method !== "POST") return send(response, empty(405));
+			if (incoming.headers.host !== ownHost) return send(response, empty(421));
+			if (text === undefined) return send(response, empty(413));
+			if (!declaresJson(incoming.headers["content-type"])) return send(response, empty(415));
 			if (
 				options.bearerToken !== undefined &&
 				incoming.headers.authorization !== `Bearer ${options.bearerToken}`
@@ -276,7 +308,9 @@ export async function startFakeStore(options: FakeStoreOptions = {}): Promise<Fa
 			);
 			const request: FakeStoreRequest = { endpoint, headers, body };
 			requests.push(request);
-			send(response, answerers.get(endpoint)?.(request) ?? contract(request));
+			const answerer = answerers.get(endpoint);
+			const told = answerer === undefined ? undefined : await answerer(request);
+			send(response, told ?? contract(request));
 		})().catch(() => {
 			response.destroy();
 		});
@@ -287,7 +321,8 @@ export async function startFakeStore(options: FakeStoreOptions = {}): Promise<Fa
 		server.listen(0, "127.0.0.1", () => resolve());
 	});
 	const { port } = server.address() as AddressInfo;
-	const origin = `http://127.0.0.1:${port}`;
+	ownHost = `127.0.0.1:${port}`;
+	const origin = `http://${ownHost}`;
 
 	return {
 		urls: {
