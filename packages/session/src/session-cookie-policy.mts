@@ -26,13 +26,14 @@
  * and `session.maxAge`, the cookie's `Max-Age` and a session record's
  * lifetime. The signing secret is not among them.
  *
- * It refuses what would break core's contract (`sessionCookiePolicyContract`),
- * so no section yields a policy a reader cannot trust: first what the store
- * refuses, with the store's message ({@link assertHostPrefixKept}), then a
- * cookie a browser drops (a name that is not an RFC 6265 token, a `__Secure-`
- * name or `SameSite=None` without `secure`) and a lifetime outside 1 to
- * `MAX_DURATION_MS` milliseconds. Core's schema already refuses the
- * `SameSite=None` and lifetime cases at validation.
+ * One rule decides which sections yield a cookie ({@link sessionCookieRefusal}),
+ * and the store refuses at boot every section it refuses, so the store mounts
+ * no cookie the policy refuses and no section yields a policy that breaks
+ * core's contract (`sessionCookiePolicyContract`): a cookie a browser drops (a
+ * `__Host-` name that is not secure or that names a domain, a `__Secure-` name
+ * or `SameSite=None` without `secure`), a name that is not an RFC 6265 token,
+ * and a lifetime outside 1 to `MAX_DURATION_MS` milliseconds. Core's schema
+ * already refuses the `SameSite=None` and lifetime cases at validation.
  */
 
 import { MAX_DURATION_MS, type SessionCookiePolicy } from "@o3co/auth-provider-core";
@@ -46,48 +47,65 @@ export interface SessionCookieConfigSlice {
 	readonly maxAge: number;
 }
 
-/**
- * The session store's one rule of the cookie: a `__Host-` name is kept by a
- * browser only when the cookie is secure and names no domain, so such a name
- * with `secure` off or any `domain` — an empty one included — is refused.
- */
-export function assertHostPrefixKept(
-	session: Pick<SessionCookieConfigSlice, "name" | "secure" | "domain">,
-): void {
-	if (session.name.startsWith("__Host-") && (session.secure !== true || session.domain !== null)) {
-		throw new Error(
-			"session.name with __Host- prefix requires session.secure=true and session.domain=null",
-		);
-	}
+/** Why no session cookie is built from a section: the `session.*` key it names, and the rule. */
+export interface SessionCookieRefusal {
+	readonly key: keyof SessionCookieConfigSlice;
+	readonly message: string;
 }
 
 /** RFC 6265 §4.1.1: a cookie name is an RFC 2616 token — visible ASCII but separators. */
 const COOKIE_NAME = /^[!#$%&'*+\-.^_`|~0-9A-Za-z]+$/;
 
 /**
- * The session cookie's attributes from `session`, frozen. Throws where the
- * session store does ({@link assertHostPrefixKept}), and where the policy
- * would break core's contract.
+ * Why `session` yields no session cookie, or `undefined` when it yields one.
+ * A browser keeps a `__Host-` cookie only when it is secure and names no
+ * domain — an empty one included — and a `__Secure-` or `SameSite=None`
+ * cookie only when it is secure. A prefix rule names `session.name`, the
+ * `SameSite=None` rule `session.secure`, as core's schema does.
  */
-export function sessionCookiePolicyFrom(session: SessionCookieConfigSlice): SessionCookiePolicy {
-	assertHostPrefixKept(session);
-	const { name, secure, sameSite, maxAge } = session;
+export function sessionCookieRefusal(
+	session: SessionCookieConfigSlice,
+): SessionCookieRefusal | undefined {
+	const { name, secure, sameSite, domain, maxAge } = session;
+	if (name.startsWith("__Host-") && (secure !== true || domain !== null)) {
+		return {
+			key: "name",
+			message:
+				"session.name with __Host- prefix requires session.secure=true and session.domain=null",
+		};
+	}
 	if (!COOKIE_NAME.test(name)) {
-		throw new Error(
-			`session.name ${JSON.stringify(name)} is not a cookie name (an RFC 6265 token)`,
-		);
+		return {
+			key: "name",
+			message: `session.name ${JSON.stringify(name)} is not a cookie name (an RFC 6265 token)`,
+		};
 	}
 	if (name.startsWith("__Secure-") && secure !== true) {
-		throw new Error("session.name with __Secure- prefix requires session.secure=true");
+		return {
+			key: "name",
+			message: "session.name with __Secure- prefix requires session.secure=true",
+		};
 	}
 	if (sameSite === "none" && secure !== true) {
-		throw new Error('session.sameSite = "none" requires session.secure = true');
+		return { key: "secure", message: 'session.sameSite = "none" requires session.secure = true' };
 	}
 	if (!Number.isInteger(maxAge) || maxAge < 1 || maxAge > MAX_DURATION_MS) {
-		throw new Error(
-			`session.maxAge must be a whole number of milliseconds from 1 to ${MAX_DURATION_MS}`,
-		);
+		return {
+			key: "maxAge",
+			message: `session.maxAge must be a whole number of milliseconds from 1 to ${MAX_DURATION_MS}`,
+		};
 	}
+	return undefined;
+}
+
+/**
+ * The session cookie's attributes from `session`, frozen. Throws, with the
+ * refusal's message, where {@link sessionCookieRefusal} refuses the section.
+ */
+export function sessionCookiePolicyFrom(session: SessionCookieConfigSlice): SessionCookiePolicy {
+	const refusal = sessionCookieRefusal(session);
+	if (refusal !== undefined) throw new Error(refusal.message);
+	const { name, secure, sameSite, maxAge } = session;
 	// As express-session is given it: `null` or empty is a host-only cookie.
 	const domain = session.domain || undefined;
 	return Object.freeze({ name, secure, sameSite, domain, maxAgeMs: maxAge });
