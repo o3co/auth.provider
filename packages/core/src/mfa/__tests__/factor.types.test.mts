@@ -21,18 +21,27 @@
  * key ring for the factor, which never sees the ring; a factor may refuse a
  * sign count that did not increase, opt in to a challenge that stays across
  * attempts, and say a user cannot enroll it without throwing (a throw reads
- * as an outage).
+ * as an outage). A factor that mails a code hands the message to the
+ * coordinator, which sends it after keeping the state, and declares the
+ * limits the coordinator holds those sends to.
  *
  * These are type assertions: the file is in core's typecheck list.
  */
 
 import { describe, expect, expectTypeOf, it } from "vitest";
+import type { MailMessage } from "#/mail/types.mjs";
 import type {
 	MfaCeremonyContext,
+	MfaChallenge,
+	MfaChallengeContext,
 	MfaDigestMatch,
 	MfaDigests,
+	MfaEnrollmentContext,
+	MfaEnrollmentStart,
 	MfaFactor,
+	MfaFactorState,
 	MfaKeyedDigest,
+	MfaMailLimits,
 	MfaVerification,
 } from "#/mfa/factor.mjs";
 
@@ -86,6 +95,35 @@ describe("the MfaFactor contract", () => {
 		expectTypeOf<MfaFactor["enrollable"]>().toEqualTypeOf<
 			((user: Readonly<Record<string, unknown>>) => boolean) | undefined
 		>();
+		expect(true).toBe(true);
+	});
+
+	it("hands the coordinator the message a challenge or an enrollment sends, beside the state it keeps", () => {
+		expectTypeOf<MfaChallenge>().toEqualTypeOf<{
+			readonly state?: MfaFactorState;
+			readonly response: unknown;
+			readonly mail?: MailMessage;
+		}>();
+		expectTypeOf<MfaEnrollmentStart>().toEqualTypeOf<{
+			readonly state: MfaFactorState;
+			readonly response: unknown;
+			readonly mail?: MailMessage;
+		}>();
+		expectTypeOf<NonNullable<MfaFactor["challenge"]>>().toEqualTypeOf<
+			(ctx: MfaChallengeContext) => Promise<MfaChallenge>
+		>();
+		expectTypeOf<MfaFactor["beginEnrollment"]>().toEqualTypeOf<
+			(ctx: MfaEnrollmentContext) => Promise<MfaEnrollmentStart>
+		>();
+		expect(true).toBe(true);
+	});
+
+	it("declares the limits the coordinator holds a factor's mail to, per transaction", () => {
+		expectTypeOf<MfaFactor["mailLimits"]>().toEqualTypeOf<MfaMailLimits | undefined>();
+		expectTypeOf<MfaMailLimits>().toEqualTypeOf<{
+			readonly maxSends: number;
+			readonly resendAfterSeconds: number;
+		}>();
 		expect(true).toBe(true);
 	});
 });
