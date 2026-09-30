@@ -16,12 +16,13 @@
 
 /**
  * Core's own settings, in its section `core`: the replica count at
- * `core.deployment.mode` and the expected session requirements at
- * `core.sessionRequirements.expected`, read from core's own `reference.conf`
- * resolved under an environment, as a composition root layers it. The paths
- * they moved from refuse boot naming the new one, and `DEPLOYMENT_MODE`,
- * renamed `CORE_DEPLOYMENT_MODE`, refuses boot unless the new name carries
- * the same value.
+ * `core.deployment.mode`, the expected session requirements at
+ * `core.sessionRequirements.expected` and the token-binding settings at
+ * `core.tokenBinding`, read from core's own `reference.conf` resolved under
+ * an environment, as a composition root layers it. The paths they moved from
+ * refuse boot naming the new one, and a variable renamed with them
+ * (`DEPLOYMENT_MODE`, `OAUTH_TOKEN_BINDING_*`) refuses boot unless the new
+ * name carries the same value.
  */
 
 import { fileURLToPath } from "node:url";
@@ -37,6 +38,7 @@ import { jwksModule } from "#/jwks/module.mjs";
 import { createSymmetricKeyStore } from "#/keys/KeyStore.mjs";
 import type { Logger } from "#/logging/Logger.mjs";
 import { defineModule } from "#/modules/manifest/index.mjs";
+import { resolveTokenBindingSettings } from "#/middleware/tokenBinding.mjs";
 import { makeValidAppConfig, makeValidCoreConfig } from "#/testing/fixtures/valid-config.mjs";
 import { renamedVariableCaptures } from "#/testing/renamedVariables.mjs";
 
@@ -233,6 +235,11 @@ describe("a root that parses its resolved configuration with AppConfigSchema bef
 	it.each([
 		['deployment.mode = "multi"', [], "deployment.mode"],
 		['sessionRequirements.expected = ["mfa"]', [], "sessionRequirements.expected"],
+		[
+			'oauth.tokenBinding.dispatch-policy = "strict-mutual-exclusion"',
+			[],
+			"oauth.tokenBinding.dispatch-policy",
+		],
 		['oauth.jwt.jwksPath = "/keys/jwks.json"', [jwksModule, keyStoreModule], "oauth.jwt.jwksPath"],
 		["oauth.jwt.jwksCacheMaxAge = 60", [jwksModule, keyStoreModule], "oauth.jwt.jwksCacheMaxAge"],
 	] as const)(
@@ -306,5 +313,149 @@ describe("DEPLOYMENT_MODE, renamed CORE_DEPLOYMENT_MODE", () => {
 
 	it("set beside CORE_DEPLOYMENT_MODE at the same value: boots with that mode", async () => {
 		expect(await modeOf({ DEPLOYMENT_MODE: "multi", CORE_DEPLOYMENT_MODE: "multi" })).toBe("multi");
+	});
+});
+
+describe("the token-binding settings, under core.tokenBinding", () => {
+	/** The token-binding settings of the configuration boot parsed, as core reads them. */
+	async function settingsOf(env: Record<string, string>, operator = "") {
+		const handle = await boot(env, operator);
+		const settings = resolveTokenBindingSettings(handle.components.config);
+		await handle.dispose();
+		return settings;
+	}
+
+	it("reads intent-explicit and no confidential-client binding when nothing sets them", async () => {
+		expect(await settingsOf({})).toEqual({
+			dispatchPolicy: "intent-explicit",
+			bindConfidentialClientRefreshTokens: false,
+		});
+	});
+
+	it("reads what CORE_TOKEN_BINDING_DISPATCH_POLICY and CORE_TOKEN_BINDING_BIND_CONFIDENTIAL_CLIENT_REFRESH_TOKENS set", async () => {
+		expect(
+			await settingsOf({
+				CORE_TOKEN_BINDING_DISPATCH_POLICY: "strict-mutual-exclusion",
+				CORE_TOKEN_BINDING_BIND_CONFIDENTIAL_CLIENT_REFRESH_TOKENS: "true",
+			}),
+		).toEqual({
+			dispatchPolicy: "strict-mutual-exclusion",
+			bindConfidentialClientRefreshTokens: true,
+		});
+	});
+
+	it("reads what core.tokenBinding says in a layer", async () => {
+		expect(
+			await settingsOf(
+				{},
+				'core.tokenBinding { dispatchPolicy = "strict-mutual-exclusion", bindConfidentialClientRefreshTokens = true }\n',
+			),
+		).toEqual({
+			dispatchPolicy: "strict-mutual-exclusion",
+			bindConfidentialClientRefreshTokens: true,
+		});
+	});
+
+	it("refuses a key core.tokenBinding does not declare, naming it and never its value", async () => {
+		const err = await refusal(boot({}, 'core.tokenBinding.dispatchPolcy = "strict-5e2d"\n'));
+
+		expect(err.reason).toBe("config-validation-failed");
+		expect(err.message).toContain('"dispatchPolcy"');
+		expect(err.message).not.toContain("strict-5e2d");
+	});
+});
+
+describe("the paths the token-binding settings moved from", () => {
+	it.each([
+		[
+			'oauth.tokenBinding.dispatch-policy = "strict-mutual-exclusion"',
+			"oauth.tokenBinding.dispatch-policy",
+			"core.tokenBinding.dispatchPolicy",
+			"CORE_TOKEN_BINDING_DISPATCH_POLICY",
+		],
+		[
+			"oauth.tokenBinding.bindConfidentialClientRefreshTokens = true",
+			"oauth.tokenBinding.bindConfidentialClientRefreshTokens",
+			"core.tokenBinding.bindConfidentialClientRefreshTokens",
+			"CORE_TOKEN_BINDING_BIND_CONFIDENTIAL_CLIENT_REFRESH_TOKENS",
+		],
+	])("refuses %s, naming %s's new path and its variable", async (hocon, from, to, variable) => {
+		const err = await refusal(boot({}, `${hocon}\n`));
+
+		expect(err.details).toEqual({
+			reason: "config-path-relocated",
+			relocated: [{ module: "core", from, to, environmentVariable: variable }],
+		});
+	});
+
+	it("refuses another key under oauth.tokenBinding, naming its path under core.tokenBinding and no variable", async () => {
+		const err = await refusal(boot({}, 'oauth.tokenBinding.other = "old-value-5e2d"\n'));
+
+		expect(err.details).toEqual({
+			reason: "config-path-relocated",
+			relocated: [
+				{ module: "core", from: "oauth.tokenBinding.other", to: "core.tokenBinding.other" },
+			],
+		});
+		expect(err.message).not.toContain("old-value-5e2d");
+	});
+});
+
+describe("the token-binding variables, renamed after their paths under core", () => {
+	it.each([
+		[
+			"OAUTH_TOKEN_BINDING_DISPATCH_POLICY",
+			"CORE_TOKEN_BINDING_DISPATCH_POLICY",
+			"core.tokenBinding.dispatchPolicy",
+		],
+		[
+			"OAUTH_TOKEN_BINDING_BIND_CONFIDENTIAL_CLIENT_REFRESH_TOKENS",
+			"CORE_TOKEN_BINDING_BIND_CONFIDENTIAL_CLIENT_REFRESH_TOKENS",
+			"core.tokenBinding.bindConfidentialClientRefreshTokens",
+		],
+	])("%s set alone: refused, naming %s and its path", async (from, to, path) => {
+		const err = await refusal(boot({ [from]: "true" }));
+
+		expect(err.details).toEqual({
+			reason: "environment-variable-renamed",
+			renamed: [{ module: "core", from, to, path, state: "unset" }],
+		});
+	});
+
+	it("set beside the new name at a different value: refused, naming neither value", async () => {
+		const err = await refusal(
+			boot({
+				OAUTH_TOKEN_BINDING_DISPATCH_POLICY: "old-policy-5e2d",
+				CORE_TOKEN_BINDING_DISPATCH_POLICY: "new-policy-c81a",
+			}),
+		);
+
+		expect(err.details).toMatchObject({
+			renamed: [
+				{
+					from: "OAUTH_TOKEN_BINDING_DISPATCH_POLICY",
+					to: "CORE_TOKEN_BINDING_DISPATCH_POLICY",
+					state: "different",
+				},
+			],
+		});
+		expect(err.message).not.toContain("old-policy-5e2d");
+		expect(err.message).not.toContain("new-policy-c81a");
+	});
+
+	it("set beside the new name at the same value: boots with that value", async () => {
+		const handle = await boot({
+			OAUTH_TOKEN_BINDING_DISPATCH_POLICY: "strict-mutual-exclusion",
+			CORE_TOKEN_BINDING_DISPATCH_POLICY: "strict-mutual-exclusion",
+			OAUTH_TOKEN_BINDING_BIND_CONFIDENTIAL_CLIENT_REFRESH_TOKENS: "true",
+			CORE_TOKEN_BINDING_BIND_CONFIDENTIAL_CLIENT_REFRESH_TOKENS: "true",
+		});
+		const settings = resolveTokenBindingSettings(handle.components.config);
+		await handle.dispose();
+
+		expect(settings).toEqual({
+			dispatchPolicy: "strict-mutual-exclusion",
+			bindConfidentialClientRefreshTokens: true,
+		});
 	});
 });

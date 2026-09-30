@@ -118,8 +118,8 @@ const DOCUMENTED_ENV: Readonly<Record<string, string>> = {
 	OAUTH_CIMD_STALE_IF_ERROR_MS: "120000",
 	OAUTH_CIMD_NEGATIVE_CACHE_MS: "30000",
 	OAUTH_CIMD_MAX_CONCURRENT_FETCHES: "4",
-	OAUTH_TOKEN_BINDING_DISPATCH_POLICY: "intent-explicit",
-	OAUTH_TOKEN_BINDING_BIND_CONFIDENTIAL_CLIENT_REFRESH_TOKENS: "true",
+	CORE_TOKEN_BINDING_DISPATCH_POLICY: "intent-explicit",
+	CORE_TOKEN_BINDING_BIND_CONFIDENTIAL_CLIENT_REFRESH_TOKENS: "true",
 
 	// --- oauth.grants -------------------------------------------------
 	OAUTH_GRANTS_SESSION_ENABLED: "false",
@@ -274,6 +274,10 @@ const DELIBERATELY_UNSET: Readonly<Record<string, string>> = {
 		"renamed REDIS_REFRESH_TOKEN_FAMILY_STORE_CAS_RETRY_LIMIT, and only captured — set alone, or to another value, it fails boot",
 	FEDERATION_GRANTS_ENCRYPTION_MODE:
 		"renamed REDIS_FEDERATION_GRANT_STORE_ENCRYPTION_MODE, and only captured — set alone, or to another value, it fails boot",
+	OAUTH_TOKEN_BINDING_DISPATCH_POLICY:
+		"renamed CORE_TOKEN_BINDING_DISPATCH_POLICY, and only captured — set alone, or to another value, it fails boot",
+	OAUTH_TOKEN_BINDING_BIND_CONFIDENTIAL_CLIENT_REFRESH_TOKENS:
+		"renamed CORE_TOKEN_BINDING_BIND_CONFIDENTIAL_CLIENT_REFRESH_TOKENS, and only captured — set alone, or to another value, it fails boot",
 };
 
 /**

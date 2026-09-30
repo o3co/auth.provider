@@ -65,12 +65,15 @@ const everySwitchOn = (): AppConfig => {
 			jwt: { ...base.oauth.jwt, legacyTypAccept: true },
 			accessToken: { defaultExpiresIn: 300, maxExpiresIn: 900 },
 			refreshToken: { ...base.oauth.refreshToken, expiresIn: 7200 },
-			tokenBinding: {
-				"dispatch-policy": "strict-mutual-exclusion",
-				bindConfidentialClientRefreshTokens: true,
-			},
 			resourceIndicator: { enabled: true },
 			requireEmailVerified: true,
+		},
+		core: {
+			...base.core,
+			tokenBinding: {
+				dispatchPolicy: "strict-mutual-exclusion",
+				bindConfidentialClientRefreshTokens: true,
+			},
 		},
 	} as AppConfig;
 };
