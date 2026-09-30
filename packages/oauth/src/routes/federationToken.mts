@@ -14,20 +14,7 @@
  * limitations under the License.
  */
 
-import type {
-	AccessTokenDenylist,
-	AuditSink,
-	ClientRepository,
-	FederationProvider,
-	FederationTokenStore,
-	KeyStore,
-	Logger,
-	RefreshedTokens,
-	RefreshTokenFamilyRevocation,
-	SessionFederationIndex,
-	SubjectRevocation,
-	UserSessionStore,
-} from "@o3co/auth-provider-core";
+import type { RefreshedTokens } from "@o3co/auth-provider-core";
 import {
 	auditErrorText,
 	BEARER_TOKEN_TYPE,
@@ -49,6 +36,12 @@ import {
 import type { Request, RequestHandler, Response, Router } from "express";
 import { parseAccessTokenHeader } from "../accessTokenHeader.mjs";
 import { refuseVerificationUnavailable } from "../verificationUnavailable.mjs";
+import {
+	createStoreUnavailableLog,
+	type FederationTokenRouterOptions,
+} from "./federationTokenContext.mjs";
+
+export type { FederationTokenRouterOptions } from "./federationTokenContext.mjs";
 
 type ExpressLike = {
 	Router: () => Router;
@@ -189,45 +182,6 @@ const narrowedScope = (
 	return asked.every((entry) => within.has(entry)) ? asked.join(" ") : keep;
 };
 
-export interface FederationTokenRouterOptions {
-	keyStore: KeyStore;
-	refreshTokenFamilyRevocation: RefreshTokenFamilyRevocation;
-	userSessionStore: UserSessionStore;
-	sessionFederationIndex: SessionFederationIndex;
-	federationTokenStore: FederationTokenStore;
-	clientRepository: ClientRepository;
-	/** RFC 7009: when wired, verifyJwt consults the denylist so revoked access tokens answer 401. */
-	accessTokenDenylist?: AccessTokenDenylist;
-	/**
-	 * When wired, verifyJwt rejects an access token whose `iat` is at or before
-	 * this subject's revocation watermark: the denylist revokes a named token,
-	 * this revokes every token a subject held as of a credential change.
-	 */
-	subjectRevocation?: SubjectRevocation;
-	/**
-	 * Getter for the federation providers Map. Evaluated at request time (not at
-	 * router construction time) so module init order does not matter.
-	 * Returns undefined when federation is not configured.
-	 */
-	getFederationProviders: () => ReadonlyMap<string, FederationProvider> | undefined;
-	/** Audit sink for operator observability events. No-op when undefined. */
-	auditSink?: AuditSink;
-	/** Structured logger. Defaults to console when undefined. */
-	logger?: Logger;
-	/**
-	 * Tokens within this many milliseconds of expiry are proactively refreshed.
-	 * Default: 30_000 (30 seconds).
-	 */
-	refreshBufferMs?: number;
-	/** Configured issuer, pinned by the central verifier. */
-	issuer?: string;
-	/**
-	 * Accept tokens with no `typ` header, logging `jwt_verify_legacy_typ`.
-	 * Default `false`; `true` is a legacy opt-in.
-	 */
-	legacyTypAccept?: boolean;
-}
-
 /**
  * POST /federation/:name/token — the federation token proxy. Returns the
  * user's upstream federation access token to an opted-in client: the caller
@@ -247,20 +201,7 @@ export function createRouter(express: ExpressLike, opts: FederationTokenRouterOp
 		// the linked-federation check.
 		const federation = auditErrorText(name);
 		const logger = opts.logger ?? console;
-		// A store that cannot answer is `503`, logged once as
-		// `federation_token_store_unavailable` with `store` and `step` and the
-		// error's projection — never the error, which may quote a token record.
-		const storeUnavailable = (
-			federation: string,
-			store: "user_session" | "session_federation_index" | "federation_token",
-			step: "get" | "list" | "acquire_lock" | "get_after_lock" | "update",
-			error: unknown,
-		): void => {
-			logger.error(
-				{ federation, store, step, err: loggableError(error) },
-				"federation_token_store_unavailable",
-			);
-		};
+		const storeUnavailable = createStoreUnavailableLog(logger);
 		const refreshBufferMs = opts.refreshBufferMs ?? 30_000;
 
 		// RFC 6749 §5.1 / RFC 9207: cache headers on every response path.
