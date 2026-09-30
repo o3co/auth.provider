@@ -124,10 +124,12 @@ describe("one composed parse over the transitional base", () => {
 	it("coerces a section core mirrors that no loaded module owns, and keeps it", async () => {
 		const config = await bootAndRead(
 			[],
-			resolved({ redisRateLimiter: { limits: { token: { limit: "120", windowSeconds: "60" } } } }),
+			resolved({
+				webauthn: { rateLimit: { authenticationOptions: { limit: "120", windowSeconds: "60" } } },
+			}),
 		);
-		expect(config.redisRateLimiter).toEqual({
-			limits: { token: { limit: 120, windowSeconds: 60 } },
+		expect(config.webauthn).toEqual({
+			rateLimit: { authenticationOptions: { limit: 120, windowSeconds: 60 } },
 		});
 	});
 

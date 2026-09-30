@@ -40,6 +40,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { redisRefreshTokenFamilyStoreModule } from "../src/index.mjs";
 import { makeIoredisClients } from "../src/ioredis.mjs";
 import { testRedis } from "./support/redis.mjs";
+import { capturing } from "./support/section.mjs";
 
 let client: Redis;
 
@@ -59,14 +60,17 @@ const ALLOWANCE_MS = 300_000 + 1_000 + 1_000;
 
 async function boot(keyPrefix: string) {
 	const base = makeValidCoreConfig();
-	const config = {
-		...base,
-		oauth: {
-			...base.oauth,
-			accessToken: { defaultExpiresIn: 3600, maxExpiresIn: MAX_ACCESS_TOKEN_SECONDS },
+	const config = capturing(
+		{
+			...base,
+			oauth: {
+				...base.oauth,
+				accessToken: { defaultExpiresIn: 3600, maxExpiresIn: MAX_ACCESS_TOKEN_SECONDS },
+			},
+			"redis-refresh-token-family-store": { keyPrefix, casRetryLimit: 3 },
 		},
-		redisRefreshTokenFamilyStore: { keyPrefix, casRetryLimit: 3 },
-	};
+		[redisRefreshTokenFamilyStoreModule],
+	);
 	const handle = await createApp({
 		modules: [
 			redisRefreshTokenFamilyStoreModule,

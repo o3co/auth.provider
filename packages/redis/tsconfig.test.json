@@ -28,7 +28,6 @@
 		"__tests__/userSessionStore.contract.mts",
 		"__tests__/user-session-contract-parity.test.mts",
 		"__tests__/mfa-factor-store.test.mts",
-		"__tests__/adapters.mfa-factor-store.contract.mts",
 		"__tests__/mfa-transaction-store.test.mts",
 		"__tests__/adapters.mfa-transaction-store.contract.mts",
 		"__tests__/mfa-store-modules.test.mts"

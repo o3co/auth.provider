@@ -25,6 +25,7 @@ import {
 } from "@o3co/auth-provider-core";
 import { z } from "zod";
 import type { RefreshTokenFamilyClient } from "./clients.mjs";
+import { redisReference } from "./internal/section.mjs";
 
 /**
  * Options for createRedisRefreshTokenFamilyStore.
@@ -266,33 +267,49 @@ export const redisRefreshTokenFamilyStoreBuilder: AdapterBuilder<RefreshTokenFam
 };
 
 /**
+ * The schema of `redis-refresh-token-family-store {}`, the module's own
+ * section: its key namespace and the compare-and-set retry bound (1 to 10),
+ * read from the string a variable carries. Strict.
+ */
+export const redisRefreshTokenFamilyStoreSectionSchema = z
+	.object({
+		keyPrefix: z.string().default("rtfam:"),
+		casRetryLimit: z.coerce.number().int().min(1).max(10).default(3),
+	})
+	.strict()
+	.default(() => ({ keyPrefix: "rtfam:", casRetryLimit: 3 }));
+
+/**
  * `defineModule` manifest for the Redis RefreshTokenFamilyStore (static
- * composition; the builder above is for runtime selection). Config lives under
- * `redisRefreshTokenFamilyStore`.
+ * composition; the builder above is for runtime selection), read from its own
+ * section, `redis-refresh-token-family-store`. `redisRefreshTokenFamilyStore`,
+ * the section's old path, and the variables' old names
+ * (`REFRESH_TOKEN_FAMILY_STORE_KEY_PREFIX`,
+ * `REFRESH_TOKEN_FAMILY_STORE_CAS_RETRY_LIMIT`) refuse boot naming the new
+ * ones.
  */
 export const redisRefreshTokenFamilyStoreModule = defineModule({
 	name: "redis-refresh-token-family-store",
-	requires: ["refreshTokenFamilyClient", "config"] as const,
-	configSchema: z.object({
-		redisRefreshTokenFamilyStore: z
-			.object({
-				keyPrefix: z.string().default("rtfam:"),
-				casRetryLimit: z.number().int().min(1).max(10).default(3),
-			})
-			.default({ keyPrefix: "rtfam:", casRetryLimit: 3 }),
-	}),
-	provides: {
-		refreshTokenFamilyStore: (deps) => {
-			const cfg = (
-				deps.config as unknown as {
-					redisRefreshTokenFamilyStore: { keyPrefix: string; casRetryLimit: number };
-				}
-			).redisRefreshTokenFamilyStore;
-			return createRedisRefreshTokenFamilyStore({
-				client: deps.refreshTokenFamilyClient,
-				keyPrefix: cfg.keyPrefix,
-				casRetryLimit: cfg.casRetryLimit,
-			});
+	section: {
+		schema: redisRefreshTokenFamilyStoreSectionSchema,
+		reference: redisReference(),
+		relocatedFrom: {
+			redisRefreshTokenFamilyStore: { to: "", environmentVariable: null },
+			"redisRefreshTokenFamilyStore.keyPrefix": "keyPrefix",
+			"redisRefreshTokenFamilyStore.casRetryLimit": "casRetryLimit",
 		},
+		renamedVariables: {
+			REFRESH_TOKEN_FAMILY_STORE_KEY_PREFIX: "redisRefreshTokenFamilyStore.keyPrefix",
+			REFRESH_TOKEN_FAMILY_STORE_CAS_RETRY_LIMIT: "redisRefreshTokenFamilyStore.casRetryLimit",
+		},
+	},
+	requires: ["refreshTokenFamilyClient"] as const,
+	provides: {
+		refreshTokenFamilyStore: ({ section, refreshTokenFamilyClient }) =>
+			createRedisRefreshTokenFamilyStore({
+				client: refreshTokenFamilyClient,
+				keyPrefix: section.keyPrefix,
+				casRetryLimit: section.casRetryLimit,
+			}),
 	},
 });

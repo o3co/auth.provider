@@ -280,7 +280,7 @@ const boot = async (
 				},
 				rateLimit: { ...full.rateLimit, failMode: "closed" },
 				audit: { sink: { type: "none" } },
-				federationGrants: {
+				"federation-grants": {
 					enabled: true,
 					consent: { url: "/consent/grants" },
 					connections: {

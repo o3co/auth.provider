@@ -24,15 +24,15 @@ describe("provider config", () => {
 		});
 		const config = validate(raw, AppConfigSchema);
 
-		// The signing key, the log level and the HTTP settings are the sections
-		// of the modules that own them, with their defaults in those modules'
-		// package: core ships none.
+		// The signing key, the log level, the HTTP settings and the Redis stores'
+		// settings are the sections of the modules that own them, with their
+		// defaults in those modules' package: core ships none.
 		expect(config.oauth.jwt.signingKey).toBeUndefined();
 		expect(config.logging).toBeUndefined();
 		expect(config.http).toBeUndefined();
+		expect(config["redis-session-stores"]).toBeUndefined();
 		expect(config.oauth.oidcMode).toBe("oidc-required");
 		expect(config.session.name).toBe("__Host-auth.session");
-		expect(config.redisSessionStores?.keyPrefix).toBe("ss:");
 		// `session` is wrapped in a cross-field refinement (SameSite/Secure), and
 		// `session.csrf` sits inside the same object. Resolve the real
 		// reference.conf and assert the sub-section still arrives COERCED — a
@@ -90,7 +90,6 @@ describe("provider config", () => {
 				SESSION_SECURE: "false",
 				SESSION_NAME: "auth.sid",
 				OAUTH_OIDC_MODE: "dual",
-				REDIS_SESSION_STORES_KEY_PREFIX: "tenant-a:ss:",
 			},
 		});
 		const config = validate(raw, AppConfigSchema);
@@ -98,7 +97,6 @@ describe("provider config", () => {
 		expect(config.session.secure).toBe(false);
 		expect(config.session.name).toBe("auth.sid");
 		expect(config.oauth.oidcMode).toBe("dual");
-		expect(config.redisSessionStores?.keyPrefix).toBe("tenant-a:ss:");
 		// federations.google.enabled env-var coercion is covered by the
 		// HOCON reference.conf wiring; schema-level boolean coercion for
 		// federation entries is tested in federations-schema.test.mts.
@@ -142,7 +140,7 @@ describe("provider config", () => {
 		expect(config.repositories.code.type).toBe("memory");
 	});
 
-	it("loads memoryRateLimiter.maxBuckets default and env override", () => {
+	it("loads core-rate-limiter-memory.maxBuckets default and CORE_RATE_LIMITER_MEMORY_MAX_BUCKETS", () => {
 		const path = new URL("../../config/reference.conf", import.meta.url).pathname;
 		const base = validate(
 			parseFile(path, {
@@ -154,7 +152,8 @@ describe("provider config", () => {
 			}),
 			AppConfigSchema,
 		);
-		expect(base.memoryRateLimiter?.maxBuckets).toBe(10_000);
+		// Presence-only in core's schema: the module's own section schema reads it.
+		expect(base["core-rate-limiter-memory"]).toMatchObject({ maxBuckets: 10_000 });
 
 		const overridden = validate(
 			parseFile(path, {
@@ -162,12 +161,12 @@ describe("provider config", () => {
 					OAUTH_JWT_SECRET: "test-jwt-secret.at-least-32-bytes.ok",
 					OAUTH_JWT_ISSUER: "https://auth.test",
 					SESSION_SECRET: "test-session-secret.at-least-32-bytes.ok",
-					MEMORY_RATE_LIMITER_MAX_BUCKETS: "123",
+					CORE_RATE_LIMITER_MEMORY_MAX_BUCKETS: "123",
 				},
 			}),
 			AppConfigSchema,
 		);
-		expect(overridden.memoryRateLimiter?.maxBuckets).toBe(123);
+		expect(overridden["core-rate-limiter-memory"]).toMatchObject({ maxBuckets: "123" });
 	});
 });
 

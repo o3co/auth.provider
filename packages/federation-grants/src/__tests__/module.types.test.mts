@@ -16,7 +16,11 @@
 
 import type { FederationGrantStore, ProviderDeps, RateLimiter } from "@o3co/auth-provider-core";
 import { describe, expect, expectTypeOf, it } from "vitest";
-import { type FederationGrantsModuleDeps, federationGrantsModule } from "#/module.mjs";
+import {
+	type FederationGrantsModuleDeps,
+	type federationGrantsConfigSchema,
+	federationGrantsModule,
+} from "#/module.mjs";
 
 // The manifest's contribution callbacks read only the slots it declares, and
 // an optional slot is used only behind a presence check.
@@ -49,10 +53,14 @@ const OPTIONAL = [
 	// Where an enabled deployment registers the drain's tail.
 	"lifecycleRegistrar",
 ] as const;
-type Declared = ProviderDeps<(typeof REQUIRES)[number], (typeof OPTIONAL)[number]>;
+type Declared = ProviderDeps<
+	(typeof REQUIRES)[number],
+	(typeof OPTIONAL)[number],
+	typeof federationGrantsConfigSchema
+>;
 
 describe("federationGrantsModule's deps are the slots it declares", () => {
-	it("types every contribution callback as ProviderDeps of `requires` / `optional`", () => {
+	it("types every contribution callback as ProviderDeps of `requires` / `optional` and its section", () => {
 		expectTypeOf<FederationGrantsModuleDeps>().branded.toEqualTypeOf<Declared>();
 		expect([...(federationGrantsModule.requires ?? [])].sort()).toEqual([...REQUIRES].sort());
 		expect([...(federationGrantsModule.optional ?? [])].sort()).toEqual([...OPTIONAL].sort());

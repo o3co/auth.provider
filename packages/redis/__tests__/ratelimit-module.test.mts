@@ -11,10 +11,9 @@ describe("redisRateLimiterModule", () => {
 		expect(redisRateLimiterModule.name).toBe("redis-rate-limiter");
 	});
 
-	it("requires rateLimiterClient, config and the contributed budgets", () => {
+	it("requires rateLimiterClient and the contributed budgets", () => {
 		expect(redisRateLimiterModule.requires).toEqual([
 			"rateLimiterClient",
-			"config",
 			"rateLimitBudgetResolver",
 		]);
 	});
@@ -32,11 +31,10 @@ describe("redisRateLimiterModule", () => {
 		};
 		const budgets = new Map<string, { limit: number; windowSeconds: number }>();
 		const limiter = redisRateLimiterModule.provides?.rateLimiter?.({
-			config: {
-				redisRateLimiter: {
-					limits: { login: { limit: 4, windowSeconds: 45 } },
-					defaultLimit: { limit: 60, windowSeconds: 60 },
-				},
+			section: {
+				limits: { login: { limit: 4, windowSeconds: 45 } },
+				defaultLimit: { limit: 60, windowSeconds: 60 },
+				failMode: "closed",
 			},
 			rateLimiterClient: client,
 			rateLimitBudgetResolver: {
@@ -64,11 +62,8 @@ describe("redisRateLimiterModule", () => {
 		// The owners' keys are their modules' to read, and to refuse; the
 		// limiter reads their budgets through rateLimitBudgetResolver alone.
 		const limiter = redisRateLimiterModule.provides?.rateLimiter?.({
+			section: { limits: {}, defaultLimit: { limit: 60, windowSeconds: 60 }, failMode: "closed" },
 			config: {
-				redisRateLimiter: {
-					limits: {},
-					defaultLimit: { limit: 60, windowSeconds: 60 },
-				},
 				rateLimit: { login: { windowMs: 900_000, limit: 0 } },
 				"device-grant": { rateLimit: { limit: 2, windowSeconds: 300 } },
 				webauthn: { rateLimit: { authenticationOptions: { limit: "thirty", windowSeconds: 60 } } },
@@ -93,61 +88,57 @@ describe("redisRateLimiterModule", () => {
 	});
 
 	describe("its outage policy", () => {
-		const provided = (rateLimit: unknown) =>
+		const provided = (failMode: "open" | "closed") =>
 			redisRateLimiterModule.provides?.rateLimiter?.({
-				config: {
-					redisRateLimiter: { limits: {}, defaultLimit: { limit: 60, windowSeconds: 60 } },
-					...(rateLimit === undefined ? {} : { rateLimit }),
-				},
+				section: { limits: {}, defaultLimit: { limit: 60, windowSeconds: 60 }, failMode },
 				rateLimiterClient: { incrementWithTtl: async () => 1 },
 				rateLimitBudgetResolver: { get: () => undefined, entries: () => new Map().entries() },
 			} as never);
 
 		it.each(["open", "closed"] as const)(
-			"answers rateLimit.failMode = %s as the limiter's own",
+			"answers redis-rate-limiter.failMode = %s as the limiter's own",
 			(failMode) => {
-				expect(provided({ failMode })?.failMode).toBe(failMode);
+				expect(provided(failMode)?.failMode).toBe(failMode);
 			},
 		);
 
-		it("declares none when the configuration gives none", () => {
-			for (const rateLimit of [undefined, {}]) {
-				expect(provided(rateLimit)?.failMode, JSON.stringify(rateLimit)).toBeUndefined();
-			}
+		it("is closed when the section gives none", () => {
+			expect(redisRateLimiterModule.section?.schema.parse({})).toMatchObject({
+				failMode: "closed",
+			});
 		});
 
-		it("refuses a rateLimit.failMode that is neither open nor closed, naming the key", () => {
+		it("refuses a failMode that is neither open nor closed, naming the key", () => {
 			for (const failMode of ["maybe", "", "OPEN", 1, null]) {
-				expect(() => provided({ failMode }), JSON.stringify(failMode)).toThrow(
-					/^rateLimit\.failMode must be "open" or "closed"/,
-				);
+				const parsed = redisRateLimiterModule.section?.schema.safeParse({ failMode });
+				expect(parsed?.success, JSON.stringify(failMode)).toBe(false);
+				expect(parsed?.error?.issues.map((issue) => issue.path.join("."))).toEqual(["failMode"]);
 			}
 		});
 	});
 
-	it("refuses a window longer than a year in its own schema", () => {
-		const schema = redisRateLimiterModule.configSchema;
-		for (const redisRateLimiter of [
+	it("refuses a window longer than a year, and a key it does not declare, in its section's schema", () => {
+		const schema = redisRateLimiterModule.section?.schema;
+		for (const section of [
 			{ defaultLimit: { limit: 5, windowSeconds: 31_536_001 } },
 			{ limits: { token: { limit: 5, windowSeconds: 1e13 } } },
+			{ failmode: "open" },
 		]) {
-			expect(
-				schema?.safeParse({ redisRateLimiter })?.success,
-				JSON.stringify(redisRateLimiter),
-			).toBe(false);
+			expect(schema?.safeParse(section)?.success, JSON.stringify(section)).toBe(false);
 		}
 	});
 
-	it("declares a configSchema with redisRateLimiter namespaced key", () => {
-		const schema = redisRateLimiterModule.configSchema;
-		expect(schema).toBeDefined();
-		const parsed = schema?.safeParse({ redisRateLimiter: {} });
-		expect(parsed?.success).toBe(true);
-		if (parsed?.success) {
-			expect(parsed.data.redisRateLimiter.defaultLimit).toEqual({
-				limit: 60,
-				windowSeconds: 60,
-			});
-		}
+	it("reads its own section, redis-rate-limiter, its defaultLimit 60 per 60 s unless written", () => {
+		expect(redisRateLimiterModule.configSchema).toBeUndefined();
+		expect(redisRateLimiterModule.section?.schema.parse(undefined)).toEqual({
+			limits: {},
+			defaultLimit: { limit: 60, windowSeconds: 60 },
+			failMode: "closed",
+		});
+		expect(
+			redisRateLimiterModule.section?.schema.parse({
+				defaultLimit: { limit: "5", windowSeconds: "30" },
+			}),
+		).toMatchObject({ defaultLimit: { limit: 5, windowSeconds: 30 } });
 	});
 });

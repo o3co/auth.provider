@@ -19,7 +19,7 @@ import type { FederationGrantExpiredReason } from "./types.mjs";
 /**
  * The longest a federation grant can live: one year.
  *
- * The schema caps `federationGrants.maxExpiresIn` at the same value, but a
+ * The schema caps `federation-grants.maxExpiresIn` at the same value, but a
  * hand-built config bypasses the schema, and the revocation boundary is
  * retained for exactly this long. So it is a domain constant, checked both
  * when an intent's lifetime is resolved and when a grant is activated.

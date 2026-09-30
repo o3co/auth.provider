@@ -94,26 +94,27 @@ describe("the MFA configuration core owns", () => {
 		await handle.dispose();
 	});
 
-	it("resolves the Redis stores' key prefixes from reference.conf, and from their environment variables", () => {
-		const defaults = fromReference();
-		expect(defaults.redisMfaFactorStore?.keyPrefix).toBe("mfaf:");
-		expect(defaults.redisMfaTransactionStore?.keyPrefix).toBe("mfat:");
-		const overridden = fromReference({
-			REDIS_MFA_FACTOR_STORE_KEY_PREFIX: "tenant-a:mfaf:",
-			REDIS_MFA_TRANSACTION_STORE_KEY_PREFIX: "tenant-a:mfat:",
-		});
-		expect(overridden.redisMfaFactorStore?.keyPrefix).toBe("tenant-a:mfaf:");
-		expect(overridden.redisMfaTransactionStore?.keyPrefix).toBe("tenant-a:mfat:");
+	it("ships no Redis store's key prefix: each is the Redis package's", () => {
+		const defaults = fromReference() as Record<string, unknown>;
+		for (const section of [
+			"redisMfaFactorStore",
+			"redisMfaTransactionStore",
+			"redis-mfa-factor-store",
+			"redis-mfa-transaction-store",
+		]) {
+			expect(defaults, section).not.toHaveProperty(section);
+		}
 	});
 
-	it("keeps the Redis stores' key prefixes through the strip-mode schema, for the modules that read them", () => {
-		const parsed = AppConfigSchema.parse({
-			...makeValidAppConfig(),
-			redisMfaFactorStore: { keyPrefix: "t:mfaf:" },
-			redisMfaTransactionStore: { keyPrefix: "t:mfat:" },
-		});
-		expect(parsed.redisMfaFactorStore).toEqual({ keyPrefix: "t:mfaf:" });
-		expect(parsed.redisMfaTransactionStore).toEqual({ keyPrefix: "t:mfat:" });
+	it("keeps the Redis stores' sections, and the paths they moved from, through the strip-mode schema as written", () => {
+		const written = {
+			"redis-mfa-factor-store": { keyPrefix: "t:mfaf:" },
+			"redis-mfa-transaction-store": { keyPrefix: "t:mfat:" },
+			redisMfaFactorStore: { keyPrefix: "t:old-mfaf:" },
+			redisMfaTransactionStore: { keyPrefix: "t:old-mfat:" },
+		};
+		const parsed = AppConfigSchema.parse({ ...makeValidAppConfig(), ...written });
+		expect(parsed).toMatchObject(written);
 	});
 
 	it("accepts the factor store's three adapters and the transaction store's two, and nothing else", () => {

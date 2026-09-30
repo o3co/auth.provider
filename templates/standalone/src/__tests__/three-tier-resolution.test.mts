@@ -112,9 +112,9 @@ describe("three-tier HOCON resolution (env → application.conf → reference.co
 		).toEqual([]);
 	});
 
-	it("reference.conf default for rateLimit.failMode is 'closed'", () => {
+	it("core's reference.conf ships no rateLimit.failMode: it is the Redis limiter's own key", () => {
 		const config = buildResolvedConfig("development");
-		expect(config.rateLimit?.failMode).toBe("closed");
+		expect(config.rateLimit).not.toHaveProperty("failMode");
 	});
 
 	it("reference.conf default for client_credentials.enabled is false", () => {

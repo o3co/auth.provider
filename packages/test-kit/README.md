@@ -17,6 +17,9 @@ devDependencies.
 
 **Owns:**
 
+- `mfaFactorStoreContract`, the contract suite of `MfaFactorStore`, where a
+  subject's enrolled second factors are kept (the MFA ADR's D7), in
+  [`src/mfa/factorStore.contract.mts`](src/mfa/factorStore.contract.mts);
 - `mfaEnrollmentWitnessContract`, the contract suite of the MFA enrollment
   witness — a `UserRepository` that writes it with `markMfaEnrolled` and
   answers it back on `authenticate` as `User.mfaEnrolled` (the MFA ADR's
@@ -34,7 +37,8 @@ devDependencies.
 (core); the wire format of the Store's MFA endpoints (core's
 [`mfa/storeWire.mts`](../core/src/mfa/storeWire.mts)) and what each answer
 means ([`@o3co/auth-provider-foundation`](../foundation/README.md#the-stores-mfa-endpoints));
-any adapter; the doubles a factor's tests use — `createTestMfaFactor`,
+any adapter, core's in-process ones included (the kit's own tests run
+`mfaFactorStoreContract` over core's); the doubles a factor's tests use — `createTestMfaFactor`,
 `testMfaFactorProofs` and `createTestMfaDigests` — which stay on
 `@o3co/auth-provider-core/testing`, since core's own tests use them and core
 cannot depend on this package. The other ports' suites are core's, on
@@ -87,6 +91,43 @@ were; and, with `withOutage`, a mark during an outage throwing. The
 witness is read as the provider reads it, through core's
 `readMfaEnrollmentWitness`, so a backend answering anything but a boolean
 fails.
+
+## The factor store's contract suite
+
+`mfaFactorStoreContract({ build })` holds an `MfaFactorStore` to what "only
+zero records open a first binding" relies on. `build` answers a fresh harness
+for each case (`MfaFactorStoreHarness`): the store under test, holding
+nothing, and `close`, called when the case ends.
+
+```typescript
+import { mfaFactorStoreContract } from "@o3co/auth-provider-test-kit";
+import { describe, it } from "vitest";
+
+describe("my store keeps the MfaFactorStore contract", () => {
+  for (const contractCase of mfaFactorStoreContract({
+    build: async () => ({ store: createMyStore(), close: () => cleanUp() }),
+  })) {
+    it(contractCase.name, contractCase.run);
+  }
+});
+```
+
+It holds the store to: nothing listed for a subject with none; a created
+record listed whole, as plain data, its undefined fields named; `data` kept
+byte for byte; every binding and any kind round-tripped; a duplicate
+`(subject, id)` refused and the record kept, and one of ten concurrent
+creates let through; subjects kept apart; an update at the current version
+replacing `data`, `label` and `lastUsedAt` and nothing else, at version + 1,
+and clearing what it says `undefined`; `null` for a version that moved or a
+record that is gone, nothing changed; a `RangeError` for an update at
+`Number.MAX_SAFE_INTEGER`; one winner among ten concurrent updates at one
+version; a successful update reaching no other record — the same id under
+another subject, the subject's other factors; removal of one record and of
+a subject's records, idempotent and no further; and a removed record taken
+again. Every record id is 22
+base64url characters, the shape the provider makes and the Store's wire
+codec requires. Core's in-process store, the Redis store and foundation's
+Store-backed store run it.
 
 ## A second factor's contract suite
 
@@ -204,6 +245,8 @@ Exported from [`src/index.mts`](src/index.mts):
 - `ContractCase`, core's type of a suite's case;
 - `mailSenderContract`, with `MailSenderContractInput`, `MAIL_RELAY_REFUSALS`,
   `MailRelayRefusal` and `RelayedMail`;
+- `mfaFactorStoreContract`, with `MfaFactorStoreContractInput` and
+  `MfaFactorStoreHarness`;
 - `mfaEnrollmentWitnessContract`, with `MfaEnrollmentWitnessContractInput`,
   `MfaEnrollmentWitnessHarness` and `MfaEnrollmentWitnessUser`;
 - `mfaFactorContract`, with `MfaFactorContractInput`,
@@ -217,6 +260,7 @@ Exported from [`src/index.mts`](src/index.mts):
 | Test file | Pins |
 | --- | --- |
 | [`enrollmentWitness.contract.test.mts`](src/mfa/__tests__/enrollmentWitness.contract.test.mts) | the witness's suite over an in-process repository and over the fake Store; each broken repository — one that erases or sets every witness when it refuses a subject among them — refused by the case that names what it breaks; the outage case present only with `withOutage`; the kit's `ContractCase` core's |
+| [`factorStore.contract.test.mts`](src/mfa/__tests__/factorStore.contract.test.mts) | the factor store's suite over core's in-process store; each broken store — one that drops an undefined field, rewrites data, overwrites a duplicate, lets every writer win, changes a field an update does not carry, reaches another subject's record, removes every subject's records, writes the same id under another subject or the subject's other factors on a successful update, or answers an update at `Number.MAX_SAFE_INTEGER` with `null` rather than a `RangeError` — refused by the case that names what it breaks; every record id in the provider's shape; a harness built and closed per case |
 | [`factor.contract.test.mts`](src/mfa/__tests__/factor.contract.test.mts) | the factor suite over core's double, with and without a challenge, and mailing its codes; each broken factor — a code in any spelling or escaping in a response, an address in any case or escaping in an answer, the address kept where its keyed digest belongs, a code for another purpose, an expiry already past, one code at two challenges — refused by the case that names what it breaks |
 | [`mailSender.contract.test.mts`](src/mail/__tests__/mailSender.contract.test.mts) | the mail sender suite over core's recording sender; each broken sender — an old answer, a lost mail, a mail to another mailbox too, a limit read as an outage, an outage or a transient failure answered, a rejection carrying the mail or the relay's reply in any case or in base64, the mail changed — refused by the case that names what it breaks |
 | [`fakeStore.test.mts`](src/mfa/__tests__/fakeStore.test.mts) | each endpoint's answers over real HTTP: every record answered back, the update's compare-and-set and what it writes, `409` / `404`, changes carrying another field refused, the witness mark's `204` / `404` and idempotence, the credential, what it refuses before it records a request, what it records, and an endpoint answered as told — at once, later, or never |
@@ -227,5 +271,6 @@ Exported from [`src/index.mts`](src/index.mts):
   reader, the MFA endpoints' wire format, and the slot suites on its testing
   entry
 - [`@o3co/auth-provider-foundation`](../foundation/README.md) — the Store
-  client, and the contract of the Store's MFA endpoints
+  client, the contract of the Store's MFA endpoints, and the Store-backed
+  factor store
 - [auth.provider](../../README.md) — top-level repository documentation

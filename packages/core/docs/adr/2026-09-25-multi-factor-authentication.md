@@ -19,6 +19,7 @@
   - **D26.** "D21's trusted browser is not this" goes: there is none.
   - **Build order.** Row 9 declares and sends no notice: it records the audit events. Row 10 builds no trusted browser: a recovery code passes during a hold and trusts nothing. Row 16 has no send limits — no `maxSends`, cooldown or per-subject sends — and keeps a resend replacing the code, D5's recipient rule and D23's answers. Row 17 is the SMTP sender's delivery in `@o3co/auth-provider-standard`. Row 20 has no `MFA_NOTICES`, and its SMTP variables are the standard package's (`STANDARD_SMTP_MAIL_SENDER_*`).
   - **Upgrading and BREAKING.** The port checklist's mail package is `@o3co/auth-provider-standard`, its variables `STANDARD_SMTP_MAIL_SENDER_*`, and there is no `MFA_NOTICES`; BREAKING item 1 loses its `mfa.notices` clause. Rate limiting gains one prefix, `mfa`, which the MFA module contributes (#782).
+- Amended 2026-09-30 (build-order step 19, first part): the Store-backed factor store trusts the Store with the factors' integrity and freshness (D7's amendment of that date).
 
 ## Context
 
@@ -400,6 +401,8 @@ A factor never sees a key, a store or a transaction: the coordinator opens and s
   The Store keeps `data` verbatim and never decodes, logs or derives anything from it; the provider seals it first. The Store must compare-and-set atomically on `version`. This write path, and the witness's (D12), are justified in `docs/adapter-surface.md` beside `linkFederatedIdentity`: the flows are the library's own, end to end; unlike linking, the provider decides and the Store only persists.
 
 One shared contract suite (`packages/core/src/mfa/__tests__/factorStore.contract.mts`): every field round-trips; duplicates refused; N concurrent updates at one version → one success; idempotent removal; subjects kept apart. The Redis copy is held to core's by a parity test; the Store adapter runs it against a fake Store.
+
+**Amended 2026-09-30 (build-order step 19, first part): the Store is trusted with the factors it keeps.** A Store that keeps the MFA factors is responsible for their integrity and freshness: it never rolls a factor back, hides one from a list, answers one it acknowledged removing, or lets two updates at one version both succeed; a version never goes back, and an acknowledged write is never lost across a restore or a failover. The provider does not check it. The runbook says what breaking it opens and what a failover or a restore requires, beside O6's advice.
 
 ### D8 — The MFA transaction and `MfaTransactionStore`; the coordinator slot
 

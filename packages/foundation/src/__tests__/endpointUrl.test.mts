@@ -142,6 +142,10 @@ describe("describeEndpointRejection", () => {
 		}
 	});
 
+	it("words the insecure-scheme rule for every Store client, naming no one client's payload", () => {
+		expect(describeEndpointRejection("insecure-scheme")).not.toMatch(/credential/);
+	});
+
 	it("does not claim https is unconditionally required", () => {
 		expect(describeEndpointRejection("unsupported-scheme")).not.toBe("must use the https scheme");
 	});

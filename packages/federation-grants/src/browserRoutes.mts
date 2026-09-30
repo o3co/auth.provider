@@ -147,7 +147,7 @@ export interface FederationGrantBrowserRouterOptions {
 	readonly connections: ReadonlyMap<string, FederationGrantAcquisitionConnection>;
 	/** The federation's delegated authorizer, or `undefined` when it has none. */
 	readonly authorizerFor: (federation: string) => FederationGrantDelegatedAuthorizer | undefined;
-	/** `federationGrants.consent.url`: a path, or an absolute URL on the provider's origin. */
+	/** `federation-grants.consent.url`: a path, or an absolute URL on the provider's origin. */
 	readonly consentUrl: string;
 	/**
 	 * The login page a browser that is not signed in is sent to, and its

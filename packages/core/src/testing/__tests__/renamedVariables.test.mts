@@ -36,6 +36,7 @@ import { z } from "zod";
 import { CORE_RELOCATIONS } from "#/config/core-relocations.mjs";
 import { coreReference } from "#/config/references.mjs";
 import { defineModule } from "#/modules/manifest/index.mjs";
+import { memoryRateLimiterModule } from "#/ratelimit/module.mjs";
 import {
 	packageReferenceProblems,
 	renamedVariableCaptures,
@@ -175,11 +176,16 @@ describe("renamedVariableProblems", () => {
 		).toEqual([]);
 	});
 
-	it("holds core's own section's renames to core's own reference.conf, which captures the shipped ones", () => {
+	it("holds core's own section's and core's modules' renames to core's own reference.conf, which captures the shipped ones", () => {
 		const core = fileURLToPath(coreReference());
 
 		expect(
-			renamedVariableProblems({ modules: [], core: CORE_RELOCATIONS, layers: [core], read }),
+			renamedVariableProblems({
+				modules: [memoryRateLimiterModule],
+				core: CORE_RELOCATIONS,
+				layers: [core],
+				read,
+			}),
 		).toEqual([]);
 	});
 
@@ -187,7 +193,7 @@ describe("renamedVariableProblems", () => {
 		const core = fileURLToPath(coreReference());
 
 		const problems = renamedVariableProblems({
-			modules: [],
+			modules: [memoryRateLimiterModule],
 			core: {
 				...CORE_RELOCATIONS,
 				renamedVariables: { ...CORE_RELOCATIONS.renamedVariables, LEGACY_CORE_FLAG: "core.flag" },

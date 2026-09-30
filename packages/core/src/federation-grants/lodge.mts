@@ -71,7 +71,7 @@ import type {
 
 /** A connection as acquisition needs it: with the callback its flow returns to. */
 export interface FederationGrantAcquisitionConnection extends FederationGrantConnection {
-	/** `federationGrants.connections.<name>.callbackURL`, exactly as configured. */
+	/** `federation-grants.connections.<name>.callbackURL`, exactly as configured. */
 	readonly callbackUri: string;
 }
 
@@ -96,7 +96,7 @@ export interface FederationGrantLodgingDeps {
 	/** The subject's GRANTS boundary — never the sessions one. */
 	readonly grantsRevokedBefore: (subject: string) => Promise<Date | null>;
 	readonly revocationSkewMs: number;
-	/** `federationGrants.maxExpiresIn`, in milliseconds, as retrieval reads it. */
+	/** `federation-grants.maxExpiresIn`, in milliseconds, as retrieval reads it. */
 	readonly maxExpiresInMs: number;
 }
 

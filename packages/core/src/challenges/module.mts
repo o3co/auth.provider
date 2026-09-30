@@ -13,6 +13,8 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+import { z } from "zod";
+import { coreReference } from "../config/references.mjs";
 import { defineModule } from "../modules/manifest/index.mjs";
 import { configuredMaxEntries } from "../single-use/max-entries.mjs";
 import { createMemoryChallengeStore } from "./adapters/memory.mjs";
@@ -20,26 +22,28 @@ import { createChallengeCeremony } from "./ceremony.mjs";
 
 /**
  * Built-in module that provides the in-process memory ChallengeStore, capped
- * at `challengeStore.memory.maxEntries` when the config sets it (the
- * adapter's default otherwise); a value that is not a positive whole number
- * refuses the boot, naming the key.
+ * at `core-challenge-store-memory.maxEntries`, its own section, when the
+ * config sets it (the adapter's default otherwise); a value that is not a
+ * positive whole number refuses the boot, naming the key. The section is
+ * strict; `challengeStore.memory`, its old path, refuses boot naming it.
  */
 export const memoryChallengeStoreModule = defineModule({
 	name: "core-challenge-store-memory",
+	section: {
+		schema: z.object({ maxEntries: z.unknown().optional() }).strict().optional(),
+		reference: coreReference(),
+		relocatedFrom: { "challengeStore.memory": { to: "", environmentVariable: null } },
+	},
 	// What forks per replica, quoted into a refused multi-replica boot.
 	replicaSafety: {
 		unsafe: true,
 		reason:
 			"WebAuthn challenges fork per replica — a ceremony started on one replica cannot be completed on another",
 	},
-	requires: ["config"] as const,
 	provides: {
-		challengeStore: ({ config }) =>
+		challengeStore: ({ section }) =>
 			createMemoryChallengeStore(
-				configuredMaxEntries(
-					config?.challengeStore?.memory?.maxEntries,
-					"challengeStore.memory.maxEntries",
-				),
+				configuredMaxEntries(section?.maxEntries, "core-challenge-store-memory.maxEntries"),
 			),
 	},
 });

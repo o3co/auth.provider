@@ -41,7 +41,6 @@ import { fileURLToPath } from "node:url";
 import {
 	type AppConfig,
 	AppConfigSchema,
-	coreReference,
 	createApp,
 	createKeyStoreFactory,
 	defineModule,
@@ -51,7 +50,6 @@ import {
 	registerBuiltinKeyStores,
 	replicaUnsafeReason,
 } from "@o3co/auth-provider-core";
-import { CORE_RELOCATIONS, renamedVariableCaptures } from "@o3co/auth-provider-core/testing";
 import { standardSmtpMailSenderConfigForTests } from "@o3co/auth-provider-standard/testing";
 import { parseFile } from "@o3co/ts.hocon";
 import { validate } from "@o3co/ts.hocon/zod";
@@ -59,6 +57,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { buildModules } from "../buildModules.mjs";
 import { resolveConfigPaths } from "../configPath.mjs";
 import { templateReference } from "../modules.mjs";
+import { capturedRenames, libraryLayers } from "./library-references.fixture.mjs";
 
 // The redis session-store builder, which the baseline selects, dynamically
 // imports these; mock them so no socket opens.
@@ -165,12 +164,12 @@ function resolveConfig(env: Record<string, string>): AppConfig {
 			parseFile(envConfPath, { env })
 				.withFallback(parseFile(applicationConfPath, { env }))
 				.withFallback(parseFile(fileURLToPath(templateReference()), { env }))
-				.withFallback(parseFile(fileURLToPath(coreReference()), { env })),
+				.withFallback(libraryLayers(env)),
 			AppConfigSchema,
 		),
 		// What the resolution captured of core's renamed variables, which the
 		// schema's parse drops.
-		"renamed-variables": renamedVariableCaptures({ modules: [], core: CORE_RELOCATIONS, env: env }),
+		"renamed-variables": capturedRenames(env),
 	} as AppConfig;
 }
 

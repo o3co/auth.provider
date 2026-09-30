@@ -15,7 +15,7 @@
  */
 
 /**
- * `federationGrants.connections.<name>` read into the connections the domain
+ * `federation-grants.connections.<name>` read into the connections the domain
  * rules take (the federation-grants ADR, D4/D6/D15).
  *
  * Everything refused here is refused at boot: what a connection decides —
@@ -38,7 +38,7 @@ const NAME = /^[A-Za-z0-9_-]+$/;
 const SCOPE_TOKEN = /^[\x21\x23-\x5B\x5D-\x7E]+$/;
 
 const refuse = (name: string, what: string): never => {
-	throw new Error(`federationGrants.connections.${name}: ${what}`);
+	throw new Error(`federation-grants.connections.${name}: ${what}`);
 };
 
 interface FederationEntry {
@@ -194,29 +194,26 @@ const seconds = (value: unknown, name: string, key: string): number => {
 };
 
 /**
- * Every configured connection, joined with the federation it points at.
+ * Every connection `section` (`federation-grants {}`) configures, joined with
+ * the federation it points at in `config.federations`.
  *
  * An empty map is valid and so is an absent one: removing the last connection
  * has to remain an operable change, and a deployment with none still answers
  * about the grants it already has.
  */
 export function resolveFederationGrantConnections(
+	section: { readonly connections?: Readonly<Record<string, unknown>> } | undefined,
 	config: unknown,
 ): ReadonlyMap<string, FederationGrantConnection> {
-	const root = config as
-		| {
-				federations?: Record<string, FederationEntry>;
-				federationGrants?: { connections?: Record<string, unknown> };
-		  }
-		| undefined;
-	const federations = root?.federations ?? {};
-	const entries = root?.federationGrants?.connections ?? {};
+	const federations =
+		(config as { federations?: Record<string, FederationEntry> } | undefined)?.federations ?? {};
+	const entries = section?.connections ?? {};
 	const resolved = new Map<string, FederationGrantConnection>();
 
 	for (const [name, raw] of Object.entries(entries)) {
 		if (name === "" || !NAME.test(name)) {
 			throw new Error(
-				`federationGrants.connections: ${JSON.stringify(name)} is not a usable connection name ` +
+				`federation-grants.connections: ${JSON.stringify(name)} is not a usable connection name ` +
 					"(letters, digits, underscore and hyphen)",
 			);
 		}

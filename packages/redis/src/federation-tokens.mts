@@ -52,6 +52,7 @@ import {
 
 import { createRedisLock } from "./internal/lock.mjs";
 import { createRedisSidSet } from "./internal/redisSidSet.mjs";
+import { redisReference } from "./internal/section.mjs";
 
 export type EncryptionConfig = { mode: "required"; key: Buffer } | { mode: "allow-plaintext" };
 
@@ -521,26 +522,28 @@ export const redisFederationTokenStoreBuilder: AdapterBuilder<FederationTokenSto
 	});
 };
 
-const redisFederationTokenStoreConfigSchema = z.object({
-	redisFederationTokenStore: z
-		.object({
-			keyPrefix: z.string().default("ft:"),
-			ttl: z.number().positive().default(86400),
-			encryptionMode: z.enum(["required", "allow-plaintext"]).default("required"),
-			encryptionKey: z.string().optional(),
-			// Migration flag; see `RedisFederationTokenStoreOptions.scanFallback`.
-			// Read from the string a `${?VAR}` carries: an exported-but-empty
-			// variable reads as `false`, turning the safety net off, so set it to
-			// `true` or `false`, never empty.
-			scanFallback: coerceBooleanFromEnv.default(true),
-		})
-		.default({
-			keyPrefix: "ft:",
-			ttl: 86400,
-			encryptionMode: "required",
-			scanFallback: true,
-		}),
-});
+/**
+ * The schema of `redis-federation-token-store {}`, the module's own section,
+ * each leaf read from the string a variable carries. Strict.
+ */
+export const redisFederationTokenStoreSectionSchema = z
+	.object({
+		keyPrefix: z.string().default("ft:"),
+		ttl: z.coerce.number().int().positive().default(86400),
+		encryptionMode: z.enum(["required", "allow-plaintext"]).default("required"),
+		encryptionKey: z.string().optional(),
+		// Migration flag; see `RedisFederationTokenStoreOptions.scanFallback`.
+		// An exported-but-empty variable reads as `false`, turning the safety
+		// net off, so set it to `true` or `false`, never empty.
+		scanFallback: coerceBooleanFromEnv.default(true),
+	})
+	.strict()
+	.default(() => ({
+		keyPrefix: "ft:",
+		ttl: 86400,
+		encryptionMode: "required" as const,
+		scanFallback: true,
+	}));
 
 /** What a composition root tells the module that its config cannot. */
 export interface RedisFederationTokenStoreModuleOptions {
@@ -556,9 +559,10 @@ export interface RedisFederationTokenStoreModuleOptions {
 /**
  * `defineModule` manifest for the Redis FederationTokenStore, built for one
  * composition root (static composition; the builder above is for runtime
- * selection). Config lives under `redisFederationTokenStore`; the key is its
- * `encryptionKey` (canonical base64), which operators set through
- * `REDIS_FEDERATION_TOKEN_STORE_ENCRYPTION_KEY`.
+ * selection). Its settings are its own section, `redis-federation-token-store`;
+ * the key is its `encryptionKey` (canonical base64), which operators set
+ * through `REDIS_FEDERATION_TOKEN_STORE_ENCRYPTION_KEY`.
+ * `redisFederationTokenStore`, the section's old path, refuses boot naming it.
  *
  * The `allow-plaintext` guard reads the replica count from the
  * `deploymentMode` slot core fills — required, and held to its three values
@@ -572,21 +576,21 @@ export function redisFederationTokenStoreModuleFor(
 ) {
 	return defineModule({
 		name: "redis-federation-token-store",
-		requires: ["federationTokenStoreClient", "config", "deploymentMode"] as const,
+		section: {
+			schema: redisFederationTokenStoreSectionSchema,
+			reference: redisReference(),
+			relocatedFrom: {
+				redisFederationTokenStore: { to: "", environmentVariable: null },
+				"redisFederationTokenStore.keyPrefix": "keyPrefix",
+				"redisFederationTokenStore.encryptionMode": "encryptionMode",
+				"redisFederationTokenStore.encryptionKey": "encryptionKey",
+			},
+		},
+		requires: ["federationTokenStoreClient", "deploymentMode"] as const,
 		optional: ["logger"] as const,
-		configSchema: redisFederationTokenStoreConfigSchema,
 		provides: {
 			federationTokenStore: (deps) => {
-				const config = deps.config as unknown as {
-					redisFederationTokenStore: {
-						keyPrefix: string;
-						ttl: number;
-						encryptionMode: "required" | "allow-plaintext";
-						encryptionKey?: string;
-						scanFallback: boolean;
-					};
-				};
-				const cfg = config.redisFederationTokenStore;
+				const cfg = deps.section;
 				return redisFederationTokenStoreBuilder(
 					{
 						client: deps.federationTokenStoreClient,

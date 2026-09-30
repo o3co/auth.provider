@@ -13,32 +13,36 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+import { z } from "zod";
+import { coreReference } from "../config/references.mjs";
 import { defineModule } from "../modules/manifest/index.mjs";
 import { configuredMaxEntries } from "../single-use/max-entries.mjs";
 import { createMemoryReplaySeenSet } from "./adapters/memory.mjs";
 
 /**
  * Built-in module that provides the in-process memory ReplaySeenSet, capped
- * at `replaySeenSet.memory.maxEntries` when the config sets it (the adapter's
- * default otherwise); a value that is not a positive whole number refuses
- * the boot, naming the key.
+ * at `core-replay-seen-set-memory.maxEntries`, its own section, when the
+ * config sets it (the adapter's default otherwise); a value that is not a
+ * positive whole number refuses the boot, naming the key. The section is
+ * strict; `replaySeenSet.memory`, its old path, refuses boot naming it.
  */
 export const memoryReplaySeenSetModule = defineModule({
 	name: "core-replay-seen-set-memory",
+	section: {
+		schema: z.object({ maxEntries: z.unknown().optional() }).strict().optional(),
+		reference: coreReference(),
+		relocatedFrom: { "replaySeenSet.memory": { to: "", environmentVariable: null } },
+	},
 	// What forks per replica, quoted into a refused multi-replica boot.
 	replicaSafety: {
 		unsafe: true,
 		reason:
 			"single-use records fork per replica — a private_key_jwt client assertion, the jti of an ID-JAG (jwt-bearer) assertion, a consumed WebAuthn challenge or, with DPoP enabled, a DPoP proof captured once can be replayed once against each replica",
 	},
-	requires: ["config"] as const,
 	provides: {
-		replaySeenSet: ({ config }) =>
+		replaySeenSet: ({ section }) =>
 			createMemoryReplaySeenSet(
-				configuredMaxEntries(
-					config?.replaySeenSet?.memory?.maxEntries,
-					"replaySeenSet.memory.maxEntries",
-				),
+				configuredMaxEntries(section?.maxEntries, "core-replay-seen-set-memory.maxEntries"),
 			),
 	},
 });

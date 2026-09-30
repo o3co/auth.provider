@@ -125,6 +125,13 @@ export interface BuildModulesOverrides {
  */
 const SHIPPED_ACCESS_TOKEN_EXPIRES_IN = 3600;
 
+/** Whether `value` sets anything: a value, or a section with one somewhere under it. */
+function setsAnything(value: unknown): boolean {
+	if (value === undefined) return false;
+	if (typeof value !== "object" || value === null || Array.isArray(value)) return true;
+	return Object.values(value).some(setsAnything);
+}
+
 /**
  * Compose the standalone module list from `config`. Kept out of `app.mts` so
  * a smoke test can check the manifest (that disabling a federation removes
@@ -175,8 +182,11 @@ export function buildModules(config: AppConfig, overrides: BuildModulesOverrides
 	// subject holds" include the grants. Enabling it also states the deployment
 	// has a consent page, a callback per connection and a user repository
 	// covering each connection's registration; the routes module refuses at
-	// boot what is missing, naming it.
-	const federationGrantsEnabled = config.federationGrants?.enabled === true;
+	// boot what is missing, naming it. A setting still written at the section's
+	// old path, `federationGrants`, installs the feature too, so that boot
+	// refuses it naming the new path rather than reading the feature as off.
+	const federationGrantsEnabled =
+		config["federation-grants"]?.enabled === true || setsAnything(config.federationGrants);
 	const federationGrantStoreAdapter = config.federationGrantStore?.adapter ?? "memory";
 	const federationGrantIntentStoreAdapter = config.federationGrantIntentStore?.adapter ?? "memory";
 

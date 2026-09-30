@@ -78,20 +78,7 @@ const CONFIG_REQUIRERS: readonly string[] = [
 	"packages/session -> session-store",
 	"packages/webauthn -> webauthn",
 	// The Redis stores read their own sections, and the deployment mode.
-	"packages/redis -> redis-access-token-denylist",
-	"packages/redis -> redis-challenge-store",
 	"packages/redis -> redis-code-repository",
-	"packages/redis -> redis-consent-store",
-	"packages/redis -> redis-device-code-store",
-	"packages/redis -> redis-federation-grant-intent-store",
-	"packages/redis -> redis-federation-grant-store",
-	"packages/redis -> redis-federation-token-store",
-	"packages/redis -> redis-mfa-factor-store",
-	"packages/redis -> redis-mfa-transaction-store",
-	"packages/redis -> redis-rate-limiter",
-	"packages/redis -> redis-refresh-token-family-store",
-	"packages/redis -> redis-replay-seen-set",
-	"packages/redis -> redis-session-stores",
 	// The standalone template's own modules, which read the template's
 	// settings and the adapter selection.
 	"templates/standalone -> audit-sink",

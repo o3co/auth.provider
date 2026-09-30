@@ -239,7 +239,7 @@ describe("the MfaTransactionStore adapter factory — the memory adapter's cap",
 	});
 });
 
-describe("mfaTransactionStore.memory.maxEntries", () => {
+describe("core-mfa-transaction-store-memory.maxEntries", () => {
 	const bootWith = (extra: Record<string, unknown>) =>
 		createApp({
 			modules: [
@@ -273,29 +273,52 @@ describe("mfaTransactionStore.memory.maxEntries", () => {
 		return store;
 	};
 
-	it("survives the schema a composition root parses its config with", () => {
+	it("keeps the path the cap moved from through the schema a composition root parses with, for the refusal", () => {
 		// `AppConfigSchema` strips what it does not declare, before any module runs.
 		const parsed = AppConfigSchema.parse({
 			...makeValidAppConfig(),
 			mfaTransactionStore: { adapter: "memory", memory: { maxEntries: "5000" } },
 		});
-		expect(parsed.mfaTransactionStore?.memory?.maxEntries).toBe("5000");
+		expect(parsed.mfaTransactionStore?.memory).toEqual({ maxEntries: "5000" });
 	});
 
-	it("is read by the module, which requires config", async () => {
-		expect(memoryMfaTransactionStoreModule.requires ?? []).toEqual(["config"]);
+	it("is read from the module's own section", async () => {
+		expect(memoryMfaTransactionStoreModule.requires ?? []).toEqual([]);
 		expect((await storeOf({})).maxEntries).toBe(DEFAULT_MEMORY_MFA_TRANSACTION_STORE_MAX_ENTRIES);
 		expect(
-			(await storeOf({ mfaTransactionStore: { memory: { maxEntries: 5000 } } })).maxEntries,
+			(await storeOf({ "core-mfa-transaction-store-memory": { maxEntries: 5000 } })).maxEntries,
 		).toBe(5000);
 		expect(
-			(await storeOf({ mfaTransactionStore: { memory: { maxEntries: "7000" } } })).maxEntries,
+			(await storeOf({ "core-mfa-transaction-store-memory": { maxEntries: "7000" } })).maxEntries,
 		).toBe(7000);
+	});
+
+	it("refuses mfaTransactionStore.memory.maxEntries at boot, naming core-mfa-transaction-store-memory.maxEntries", async () => {
+		const outcome = await bootWith({ mfaTransactionStore: { memory: { maxEntries: 5000 } } }).then(
+			async (handle) => {
+				await handle.dispose();
+				return undefined;
+			},
+			(err: unknown) => err,
+		);
+		expect(outcome).toBeInstanceOf(BootError);
+		expect((outcome as BootError).details).toEqual({
+			reason: "config-path-relocated",
+			relocated: [
+				{
+					module: "core-mfa-transaction-store-memory",
+					from: "mfaTransactionStore.memory.maxEntries",
+					to: "core-mfa-transaction-store-memory.maxEntries",
+				},
+			],
+		});
 	});
 
 	it("refuses a value it cannot use at boot, naming the key", async () => {
 		for (const bad of [0, 1.5, "lots", null, 2 ** 24 + 1]) {
-			const outcome = await bootWith({ mfaTransactionStore: { memory: { maxEntries: bad } } }).then(
+			const outcome = await bootWith({
+				"core-mfa-transaction-store-memory": { maxEntries: bad },
+			}).then(
 				async (handle) => {
 					await handle.dispose();
 					return undefined;
@@ -307,7 +330,7 @@ describe("mfaTransactionStore.memory.maxEntries", () => {
 			const cause = (outcome as BootError).cause;
 			expect(cause, String(bad)).toBeInstanceOf(RangeError);
 			expect((cause as Error).message, String(bad)).toMatch(
-				/^mfaTransactionStore\.memory\.maxEntries must be /,
+				/^core-mfa-transaction-store-memory\.maxEntries must be /,
 			);
 		}
 	});

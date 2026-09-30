@@ -139,7 +139,7 @@ const boot = async (boundaries: Boundaries = {}, spent = false) => {
 				},
 				rateLimit: { ...full.rateLimit, failMode: "closed" },
 				audit: { sink: { type: "none" } },
-				federationGrants: {
+				"federation-grants": {
 					enabled: true,
 					connections: {
 						[connection.name]: {

@@ -36,7 +36,6 @@ import {
 	unreadableLeafPaths,
 } from "#/config/schema-path.mjs";
 import { JWKS_SECTION } from "#/jwks/section.mjs";
-import { makeValidCoreConfig } from "#/testing/fixtures/valid-config.mjs";
 
 describe("every leaf core's schema declares reads the string an environment variable arrives as", () => {
 	it("walks the whole base (the guard is not vacuous)", () => {
@@ -84,9 +83,7 @@ describe("every leaf core's schema declares reads the string an environment vari
 	});
 });
 
-describe("jwks.cacheMaxAge and redisFederationTokenStore.scanFallback, read from the strings an operator's variables carry", () => {
-	const base = makeValidCoreConfig();
-
+describe("jwks.cacheMaxAge, read from the strings an operator's variables carry", () => {
 	const withMaxAge = (cacheMaxAge: unknown) => JWKS_SECTION.safeParse({ cacheMaxAge });
 
 	it("jwks.cacheMaxAge, from the plain decimal string a variable carries", () => {
@@ -115,19 +112,6 @@ describe("jwks.cacheMaxAge and redisFederationTokenStore.scanFallback, read from
 					JSON.stringify(written),
 				).toEqual(["cacheMaxAge"]);
 			}
-		}
-	});
-
-	it("redisFederationTokenStore.scanFallback", () => {
-		for (const [written, read] of [
-			["false", false],
-			["true", true],
-		] as const) {
-			const parsed = TransitionalConfigSchema.parse({
-				...base,
-				redisFederationTokenStore: { scanFallback: written },
-			});
-			expect(parsed.redisFederationTokenStore?.scanFallback, written).toBe(read);
 		}
 	});
 });

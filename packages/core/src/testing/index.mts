@@ -56,6 +56,7 @@ export {
 	type FakeIdpOptions,
 	type FakeIdpRequest,
 } from "./fake-idp.mjs";
+export { userRepositoryHttpOf, withUserRepositoryHttp } from "./fixtures/userRepository.mjs";
 export {
 	type CoreConfigForTestsOptions,
 	coreConfigForTests,

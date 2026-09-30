@@ -4,7 +4,9 @@ Last updated: 2026-09-30
 
 Federation grants for [`auth.provider`](https://github.com/o3co/auth.provider) — offline delegation of upstream access tokens (#593). A user consents once that a client may reach one upstream connection on their behalf; the client then obtains upstream access tokens over HTTP, later, with the user nowhere near a browser.
 
-Optional. Nothing here is active until `federationGrants.enabled = true`.
+Optional. Nothing here is active until `federation-grants.enabled = true`.
+
+Its settings are the module's own section, `federation-grants {}`, strict, with their defaults in the package's [`config/reference.conf`](config/reference.conf), which the module declares and a composition root layers. The grant stores' settings — their retention, the Redis store's key ring and key prefix — are the stores' own sections (`core-federation-grant-store-memory`, `redis-federation-grant-store`, `redis-federation-grant-intent-store`). A key still written under `federationGrants`, the section's old path, refuses boot naming its new one.
 
 The standalone template composes it from `FEDERATION_GRANTS_ENABLED=true` — see its README's "Federation Grants" — and [`docs/offline-access.md`](docs/offline-access.md) says what each IdP needs before it will issue a refresh token.
 
@@ -73,7 +75,7 @@ const app = await createApp({
 
 The grant store is a separate module again, because a store is what a deployment installs whether or not it mounts these routes: a subject-wide revocation reaches grants through the same port (an ordinary logout leaves them standing, D14 — a grant is consent to act while the user is away). `memoryFederationGrantStoreModule` is single-replica only; a scaled deployment wires `redisFederationGrantStoreModule` from `@o3co/auth-provider-redis`. The same holds for the intent store: `memoryFederationGrantIntentStoreModule` on one replica, `redisFederationGrantIntentStoreModule` on several — an intent lodged on one replica is otherwise unknown to the one the browser lands on.
 
-Creating grants also needs, each refused at boot when missing rather than met by a user mid-flow: `federationGrants.consent.url` (the deployment's consent page — there is no default), a `callbackURL` on every connection, a `loginEntry` (the session module's, which needs `endpoints.login.url`), a `csrfGuard` (the session module's CSRF policy, which the [consent answer](#get-and-post-sessionfederation-grantsconsent) is held to), a `userSessionStore` (what session admission reads), and, once a connection is configured, either a `userRepository` whose `supportsFederatedIdentityLookup` answers `true` for every connection's registration (with `findSubjectByFederatedIdentity` beside it) or `federationGrants.identityLookup = "unsupported"`. The bundled `InMemoryUserRepository` covers no registration, so a deployment on it with a connection configured must choose the second. Each is described where the flow uses it, below.
+Creating grants also needs, each refused at boot when missing rather than met by a user mid-flow: `federation-grants.consent.url` (the deployment's consent page — there is no default), a `callbackURL` on every connection, a `loginEntry` (the session module's, which needs `endpoints.login.url`), a `csrfGuard` (the session module's CSRF policy, which the [consent answer](#get-and-post-sessionfederation-grantsconsent) is held to), a `userSessionStore` (what session admission reads), and, once a connection is configured, either a `userRepository` whose `supportsFederatedIdentityLookup` answers `true` for every connection's registration (with `findSubjectByFederatedIdentity` beside it) or `federation-grants.identityLookup = "unsupported"`. The bundled `InMemoryUserRepository` covers no registration, so a deployment on it with a connection configured must choose the second. Each is described where the flow uses it, below.
 
 Enabling the feature also requires a `subjectRevocation` component that carries the **grants boundary** — `revokeSessionsBefore` and `grantsRevokedBefore` beside the pair #296 shipped (D13). A grant outlives the session it was agreed through, so that boundary is what reaches one on a replica that never saw the withdrawal, and every disclosure is compared against it. Three compositions are refused at boot rather than per request:
 
@@ -203,7 +205,7 @@ The browser half is mounted only by the module. The store ports, the grant domai
 
 ## A disabled deployment names no feature and runs nothing
 
-`federationGrants.enabled` defaults to `false`, and while it is false the package still mounts both of its paths, each answering every request with a `404` that says nothing about the feature.
+`federation-grants.enabled` defaults to `false`, and while it is false the package still mounts both of its paths, each answering every request with a `404` that says nothing about the feature.
 
 Under `/oauth/federation-grants`, the client routes' JSON shape:
 
@@ -272,7 +274,7 @@ send the user, and nothing has been granted yet:
   minutes, measured from this answer. A user who spends nine of them on the
   consent page has one left for the upstream; start again if it runs out.
 - `expires_in` is the grant lifetime that applied — a request above
-  `federationGrants.maxExpiresIn` is clamped, not refused. There is no
+  `federation-grants.maxExpiresIn` is clamped, not refused. There is no
   `expires_at` yet: a grant is dated from the user's consent.
 - `sub` is what the client asserts. The connect flow is where a browser
   session proves it, and a session for anyone else is refused.
@@ -517,7 +519,7 @@ admitted by core's session admission, on the cookie's claim, as the step's own
 action — `federation_grants.connect`, `federation_grants.consent` (the read
 and the answer) and `federation_grants.callback` (check 3, and again, with
 the same claim, just before the activation), each graded `use` as
-`federationGrantsModule` registers it — whether or not `federationGrants.enabled`
+`federationGrantsModule` registers it — whether or not `federation-grants.enabled`
 is set, so `admission_actions_registered` lists them either way: a module's
 registration follows a switch only when the module decides, as it is built,
 whether it installs the admitting code, and this one reads its switch when the
@@ -569,7 +571,7 @@ and plain text, never a JSON body.
    connection, or the connection changed since the intent was lodged: `400` /
    `403`, plain.
 7. Otherwise one consent challenge is parked for this browser — a reload gets
-   the same one — and the browser is sent to `federationGrants.consent.url`
+   the same one — and the browser is sent to `federation-grants.consent.url`
    with `?challenge=`.
 
 It is not held to the navigation rule the account-link start is (the
@@ -631,7 +633,7 @@ so a refused answer spends no consent (the session middleware and the route's
 throttle run before it, as on every route):
 
 - **The page's form post.** The page is on the provider's origin
-  (`federationGrants.consent.url` must be) and posts the answer as a form. The
+  (`federation-grants.consent.url` must be) and posts the answer as a form. The
   browser's `Origin` names that origin, which is accepted.
 - **An origin on `session.csrf.trustedOrigins`** is accepted too, whatever
   `Sec-Fetch-Site` says, `cross-site` included: the list names who may change
@@ -802,7 +804,7 @@ It checks, in this order:
    local user — with the connection naming them:
 
    ```hocon
-   federationGrants.connections.files {
+   federation-grants.connections.files {
      federation = "entra-files"          # its own app registration
      scopes = ["openid", "profile", "offline_access", "Files.Read"]
      allowScopeSubsets = false
