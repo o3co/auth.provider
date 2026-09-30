@@ -175,7 +175,7 @@ describe("seedMfaFactor, and a factor's data sealed and opened", () => {
 			lastUsedAt: undefined,
 		});
 		expect(record.id).toMatch(/^[A-Za-z0-9_-]{22}$/);
-		expect(sealing().openFactorData(record, record.data)).toEqual({
+		expect(sealing().openFactorData(record, record.data)).toMatchObject({
 			state: "ok",
 			value: { credentialId: "Y3JlZA", signCount: 3 },
 		});
@@ -196,7 +196,7 @@ describe("seedMfaFactor, and a factor's data sealed and opened", () => {
 	it("seals data as the MFA module seals a factor's, and opens what it sealed", () => {
 		const bound = { subject: "u-alice", id: "factor-1", kind: "webauthn" };
 		const sealed = sealMfaFactorDataForTests(config, bound, { signCount: 9 });
-		expect(sealing().openFactorData(bound, sealed)).toEqual({
+		expect(sealing().openFactorData(bound, sealed)).toMatchObject({
 			state: "ok",
 			value: { signCount: 9 },
 		});

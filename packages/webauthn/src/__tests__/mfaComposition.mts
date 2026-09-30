@@ -253,8 +253,15 @@ export async function storedFactor(
 	return { record: stored, data: openMfaFactorDataForTests(CONFIG, stored) };
 }
 
+/** A browser on the composition. */
+export interface Browser {
+	get(path: string, headers?: Record<string, string>): Promise<request.Response>;
+	/** A POST as the page sends it: a fresh CSRF token, then the JSON body. */
+	post(path: string, body: Record<string, unknown>): Promise<request.Response>;
+}
+
 /** A browser on the composition: its cookies kept and sent back, over the forwarded https hop. */
-export function browser(app: express.Express) {
+export function browser(app: express.Express): Browser {
 	const jar = new Map<string, string>();
 	const keep = (res: request.Response): request.Response => {
 		for (const line of ([] as string[]).concat(res.headers["set-cookie"] ?? [])) {
@@ -264,9 +271,11 @@ export function browser(app: express.Express) {
 		return res;
 	};
 	const headers = () => ({ Cookie: [...jar.values()].join("; "), "X-Forwarded-Proto": "https" });
-	const get = async (path: string, extra: Record<string, string> = {}) =>
-		keep(await request(app).get(path).set(headers()).set(extra));
-	const post = async (path: string, body: Record<string, unknown>) => {
+	const get = async (
+		path: string,
+		extra: Record<string, string> = {},
+	): Promise<request.Response> => keep(await request(app).get(path).set(headers()).set(extra));
+	const post = async (path: string, body: Record<string, unknown>): Promise<request.Response> => {
 		const csrf = await get("/session/csrf");
 		return keep(
 			await request(app)
@@ -278,8 +287,6 @@ export function browser(app: express.Express) {
 	};
 	return { get, post };
 }
-
-export type Browser = ReturnType<typeof browser>;
 
 /** alice's password login, answered 403 mfa_required: the browser holding the regenerated session, and the transaction. */
 export async function beginLogin(
@@ -297,9 +304,18 @@ export async function beginLogin(
 }
 
 /** `POST /session/mfa/challenge` for `factorId`: the request options it answers. */
-export const challenge = (agent: Browser, transaction: string, factorId: string) =>
+export const challenge = (
+	agent: Browser,
+	transaction: string,
+	factorId: string,
+): Promise<request.Response> =>
 	agent.post("/session/mfa/challenge", { transaction_id: transaction, factor_id: factorId });
 
 /** `POST /session/mfa/verify` of `proof` for `factorId`. */
-export const verify = (agent: Browser, transaction: string, factorId: string, proof: unknown) =>
+export const verify = (
+	agent: Browser,
+	transaction: string,
+	factorId: string,
+	proof: unknown,
+): Promise<request.Response> =>
 	agent.post("/session/mfa/verify", { transaction_id: transaction, factor_id: factorId, proof });

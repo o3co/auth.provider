@@ -18,13 +18,19 @@
  * `@o3co/auth-provider-mfa/testing`: what another package's tests use of this
  * one, so none writes its sections or seals its data by hand. The three
  * sections its modules read, each as a configuration fragment at the
- * section's name with the reference defaults; a TOTP factor stored as an
- * enrollment leaves it, sealed under a configuration's key ring; and the
- * codes that factor takes. For tests only.
+ * section's name with the reference defaults; a factor of any kind stored as
+ * an enrollment leaves it, and its data sealed and opened, under a
+ * configuration's key ring; a TOTP factor so stored; and the codes that
+ * factor takes. For tests only.
  */
 
 import { randomBytes } from "node:crypto";
-import type { MfaFactorRecord, MfaFactorStore, MfaLockoutPolicy } from "@o3co/auth-provider-core";
+import type {
+	MfaFactorData,
+	MfaFactorRecord,
+	MfaFactorStore,
+	MfaLockoutPolicy,
+} from "@o3co/auth-provider-core";
 import { readMfaSettings } from "../config.mjs";
 import { createMfaSealing } from "../sealing.mjs";
 import { encodeBase32 } from "../totp/base32.mjs";
@@ -108,6 +114,84 @@ export function mfaRecoveryCodeFactorConfigForTests(
 	options: { readonly enabled?: boolean; readonly count?: number } = {},
 ) {
 	return { "mfa-recovery-code-factor": { enabled: true, count: 10, ...options } };
+}
+
+/** The sealing the MFA module builds from the MFA section `config` holds: the same key ring. */
+function sealingOf(config: unknown) {
+	const section = (config as { mfa?: unknown } | null | undefined)?.mfa;
+	const { encryptionKeys } = readMfaSettings(section, { deploymentMode: "unset" });
+	return createMfaSealing({ ring: encryptionKeys });
+}
+
+/** A factor record's binding: what its sealed data is bound to. */
+export interface MfaFactorBindingForTests {
+	readonly subject: string;
+	readonly id: string;
+	readonly kind: string;
+}
+
+/**
+ * `data` sealed for the record `bound` names, under the key ring of the MFA
+ * section `config` holds, as the coordinator seals a factor's data.
+ */
+export function sealMfaFactorDataForTests(
+	config: unknown,
+	bound: MfaFactorBindingForTests,
+	data: MfaFactorData,
+): string {
+	return sealingOf(config).sealFactorData(bound, data);
+}
+
+/**
+ * The data of `record` opened under the key ring of the MFA section `config`
+ * holds, as the coordinator opens it. Throws when it does not open.
+ */
+export function openMfaFactorDataForTests(
+	config: unknown,
+	record: MfaFactorBindingForTests & { readonly data: string },
+): MfaFactorData {
+	const opened = sealingOf(config).openFactorData(record, record.data);
+	if (opened.state !== "ok") {
+		throw new Error(`the factor's data does not open: ${opened.state}`);
+	}
+	return opened.value;
+}
+
+/** What {@link seedMfaFactor} stores. */
+export interface SeedMfaFactorOptions {
+	/** A configuration holding the MFA module's section: its key ring seals the data. */
+	readonly config: unknown;
+	readonly factorStore: MfaFactorStore;
+	readonly subject: string;
+	readonly kind: string;
+	/** The factor's own data, as its factor reads it. */
+	readonly data: MfaFactorData;
+	/** A fresh factor id unless given. */
+	readonly id?: string;
+	readonly label?: string;
+}
+
+/**
+ * Stores a factor of `kind` for `subject`, its data sealed to its record
+ * under the ring of `config`'s MFA section, as an enrollment by password
+ * leaves it a day ago. Answers the record stored.
+ */
+export async function seedMfaFactor(options: SeedMfaFactorOptions): Promise<MfaFactorRecord> {
+	const id = options.id ?? randomBytes(16).toString("base64url");
+	const bound = { subject: options.subject, id, kind: options.kind };
+	const record: MfaFactorRecord = {
+		id,
+		subject: options.subject,
+		kind: options.kind,
+		label: options.label,
+		binding: "password",
+		createdAt: new Date(Date.now() - 86_400_000),
+		lastUsedAt: undefined,
+		version: 0,
+		data: sealMfaFactorDataForTests(options.config, bound, options.data),
+	};
+	await options.factorStore.create(record);
+	return record;
 }
 
 /** What {@link seedTotpFactor} stores. */

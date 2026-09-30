@@ -16,10 +16,12 @@
 
 /**
  * The WebAuthn package's testing entry (`@o3co/auth-provider-webauthn/testing`): what a test
- * builds this package's configuration with, so no test writes the `webauthn` section by hand.
+ * builds this package's configuration with, so no test writes the `webauthn` or the
+ * `webauthn-mfa-factor` section by hand.
  */
 
 import { type WebAuthnConfig, webauthnConfigSchema } from "../config.mjs";
+import type { UserVerificationRequirement } from "../mfaFactor/factor.mjs";
 
 /**
  * The `webauthn` section as `webauthnConfigSchema` parses it, for a test relying party
@@ -39,4 +41,24 @@ export function createTestWebAuthnConfig(overrides: Partial<WebAuthnConfig> = {}
 		rateLimit: { authenticationOptions: { limit: 1000, windowSeconds: 60 } },
 		...overrides,
 	});
+}
+
+/** What {@link webauthnMfaFactorConfigForTests} lays over the reference defaults. */
+export interface WebAuthnMfaFactorConfigForTestsOptions {
+	readonly enabled?: boolean;
+	readonly userVerification?: UserVerificationRequirement;
+}
+
+/**
+ * The WebAuthn second factor's section, `webauthn-mfa-factor`, as the package's reference.conf
+ * resolves it — off, user verification `preferred` — with `options` laid over it.
+ */
+export function webauthnMfaFactorConfigForTests(options: WebAuthnMfaFactorConfigForTestsOptions = {}) {
+	return {
+		"webauthn-mfa-factor": {
+			enabled: false,
+			userVerification: "preferred" as UserVerificationRequirement,
+			...options,
+		},
+	};
 }
