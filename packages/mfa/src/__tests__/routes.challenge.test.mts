@@ -28,9 +28,10 @@ import {
 	createMemoryMfaTransactionStore,
 	type MfaFactor,
 	type MfaTransactionStore,
+	type UserSessionStore,
 } from "@o3co/auth-provider-core";
 import { createTestMfaFactor } from "@o3co/auth-provider-core/testing";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ALICE, boot, configFor, disposeAll, events } from "./moduleHarness.mjs";
 import {
 	beginLogin,
@@ -170,6 +171,40 @@ describe("POST /session/mfa/challenge", () => {
 		expect(audit.of("mfa.challenge.sent")).toEqual([]);
 	});
 
+	it("answers 503 once when the factor's challenge answers something that is not an object, and keeps nothing", async () => {
+		const { app, logger, transactionStore, record } = await withChallengedFactor(
+			challenged({ challenge: async () => ({ state: { nonce: "n" }, response: "a string" }) }),
+		);
+		const { agent, transaction } = await beginLogin(app);
+
+		const res = await mfaPost(agent, "/challenge", {
+			transaction_id: transaction,
+			factor_id: record.id,
+		});
+
+		expect(res.status).toBe(503);
+		expect(events(logger, "error")).toEqual(["mfa_factor_challenge_unavailable"]);
+		expect((await transactionStore.get(transaction))?.challenge).toBeUndefined();
+	});
+
+	it("answers 400 as an unknown transaction when the transaction moved on before the challenge was kept, and audits nothing", async () => {
+		const store = createMemoryMfaTransactionStore();
+		const { app, record, audit } = await withChallengedFactor(challenged(), {
+			...store,
+			update: async () => null,
+		});
+		const { agent, transaction } = await beginLogin(app);
+
+		const res = await mfaPost(agent, "/challenge", {
+			transaction_id: transaction,
+			factor_id: record.id,
+		});
+
+		expect(res.status).toBe(400);
+		expect(res.body.error).toBe("invalid_request");
+		expect(audit.of("mfa.challenge.sent")).toEqual([]);
+	});
+
 	it("answers 503 once when the transaction store cannot keep the challenge", async () => {
 		const store = createMemoryMfaTransactionStore();
 		let armed = false;
@@ -231,6 +266,52 @@ describe("a verification against a challenge", () => {
 			"expired",
 		]);
 		expect(audit.of("mfa.verified")).toHaveLength(1);
+	});
+
+	it("leaves a challenge a factor keeps across attempts for the next verification: a wrong proof, then the right one, against one challenge", async () => {
+		const { app, transactionStore, record } = await withChallengedFactor(
+			challenged({ reusableChallenge: true }),
+		);
+		const { agent, transaction } = await beginLogin(app);
+		const issued = await mfaPost(agent, "/challenge", {
+			transaction_id: transaction,
+			factor_id: record.id,
+		});
+		const nonce = issued.body.nonce as string;
+
+		expect((await verify(agent, transaction, record.id, `wrong:${nonce}`)).status).toBe(401);
+		expect((await transactionStore.get(transaction))?.challenge?.factorId).toBe(record.id);
+		expect((await verify(agent, transaction, record.id, `s3cret:${nonce}`)).status).toBe(200);
+	});
+
+	it("answers 503 once, before the transaction is consumed and with no session written, when the factor verifies a factor the subject does not hold", async () => {
+		const double = challenged();
+		const { app, logger, record, userSessionStore, transactionStore } = await withChallengedFactor({
+			...double,
+			verify: async (ctx) => {
+				const result = await double.verify(ctx);
+				return result.ok ? { ...result, factorId: "someone-elses" } : result;
+			},
+		});
+		const create = vi.spyOn(userSessionStore as UserSessionStore, "create");
+		const { agent, transaction } = await beginLogin(app);
+		const issued = await mfaPost(agent, "/challenge", {
+			transaction_id: transaction,
+			factor_id: record.id,
+		});
+
+		const res = await verify(
+			agent,
+			transaction,
+			record.id,
+			`s3cret:${issued.body.nonce as string}`,
+		);
+
+		expect(res.status).toBe(503);
+		expect(events(logger, "error")).toEqual(["mfa_factor_unreadable"]);
+		expect(logger.error.mock.calls[0]?.[0]).toMatchObject({ state: "verification" });
+		expect(await transactionStore.get(transaction)).not.toBeNull();
+		expect(create).not.toHaveBeenCalled();
 	});
 
 	it("does not take a challenge issued for another factor as this one's", async () => {

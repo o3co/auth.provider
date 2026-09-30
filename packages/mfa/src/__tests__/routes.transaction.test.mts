@@ -21,13 +21,16 @@
  * and F1.
  */
 
-import { createMemoryMfaFactorStore } from "@o3co/auth-provider-core";
+import { createMemoryMfaFactorStore, type MfaFactor } from "@o3co/auth-provider-core";
 import request from "supertest";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { ALICE, boot, configFor, disposeAll, login } from "./moduleHarness.mjs";
+import { ALICE, BOB, boot, configFor, disposeAll, login } from "./moduleHarness.mjs";
+import { stubFactor } from "./requirementHarness.mjs";
 import {
 	beginLogin,
+	contributing,
 	freezeClock,
+	newFactorId,
 	readTransaction,
 	seedFactor,
 	seedTotp,
@@ -95,6 +98,39 @@ describe("GET /session/mfa/transaction", () => {
 		const res = await readTransaction(agent, transaction);
 
 		expect(res.body.factors).toEqual([{ id: record.id, kind: "totp" }]);
+	});
+
+	it("lists a factor's hint when its data opens, and a factor whose data does not open without one — never leaving it out", async () => {
+		const factorStore = createMemoryMfaFactorStore();
+		const hinted = await seedFactor(factorStore, "hinted", { address: "k***@example.com" });
+		const sealedForBob = await seedFactor(
+			factorStore,
+			"hinted",
+			{ address: "b***@example.com" },
+			BOB.id,
+		);
+		const copied = { ...sealedForBob, subject: ALICE.id, id: newFactorId() };
+		await factorStore.create(copied);
+		const factor: MfaFactor = {
+			...stubFactor("hinted", ["otp"]),
+			describe: (data) => ({ hint: String(data.address) }),
+		};
+		const { app } = await boot({
+			config: configFor("required"),
+			factorStore,
+			extraModules: [contributing(factor)],
+		});
+		const { agent, transaction } = await beginLogin(app);
+
+		const res = await readTransaction(agent, transaction);
+
+		expect(res.body.factors).toEqual(
+			expect.arrayContaining([
+				{ id: hinted.id, kind: "hinted", hint: "k***@example.com" },
+				{ id: copied.id, kind: "hinted" },
+			]),
+		);
+		expect(res.body.factors).toHaveLength(2);
 	});
 
 	it("answers a first binding's transaction with no factor, and the enrollment it requires", async () => {

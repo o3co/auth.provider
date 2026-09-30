@@ -602,6 +602,15 @@ describe("the MFA routes' flood guard without a shared rate limiter", () => {
 		expect((err.cause as Error).message).toContain("rateLimiter");
 	});
 
+	it("refuses the boot when neither a rate limiter nor mfa.rateLimit.routes is there to limit the routes by, naming the key", async () => {
+		const err = await refusal({
+			config: configFor("required", { rateLimit: undefined }),
+			rateLimiter: null,
+		});
+		expect(err.reason).toBe("contribute-factory-failed");
+		expect((err.cause as Error).message).toMatch(/^mfa\.rateLimit\.routes is not set/);
+	});
+
 	it("is not built when the composition wires a shared rate limiter", async () => {
 		const logger = spyLogger();
 		await boot({ config: underMode(undefined), logger });
