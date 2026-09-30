@@ -765,11 +765,6 @@ export {
 	type RateLimitBudgetLookupOptions,
 } from "./ratelimit/budgetLookup.mjs";
 export {
-	DEVICE_VERIFICATION_RATE_LIMIT_PREFIX,
-	isDeviceVerificationRateLimitSpec,
-	resolveDeviceVerificationLimitSpec,
-} from "./ratelimit/deviceVerificationSpec.mjs";
-export {
 	createRateLimiterFactory,
 	registerBuiltinRateLimiters,
 } from "./ratelimit/factory.mjs";
@@ -786,19 +781,12 @@ export {
 	type RateLimitPolicyOptions,
 	rateLimiterUnavailableEnvelope,
 } from "./ratelimit/guard.mjs";
-export { resolveLoginLimitSpec } from "./ratelimit/loginSpec.mjs";
 export {
 	createMemoryRateLimiter,
 	DEFAULT_MEMORY_RATE_LIMITER_MAX_BUCKETS,
 	type MemoryRateLimiterOptions,
 } from "./ratelimit/memory.mjs";
-export {
-	MFA_EMAIL_RATE_LIMIT_PREFIX,
-	MFA_RATE_LIMIT_PREFIX,
-	resolveMfaLimitSpecs,
-} from "./ratelimit/mfaSpec.mjs";
 export { memoryRateLimiterModule } from "./ratelimit/module.mjs";
-export { resolveSeededLimitSpecs } from "./ratelimit/seededSpecs.mjs";
 // Rate limiter. Backing client interface (RateLimiterClient) lives in
 // @o3co/auth-provider-redis.
 export type {
@@ -816,10 +804,6 @@ export {
 	requireUsableConfiguredRateLimitSpec,
 	shownConfigValue,
 } from "./ratelimit/usableSpec.mjs";
-export {
-	resolveWebAuthnAuthenticationOptionsLimitSpec,
-	WEBAUTHN_AUTHENTICATION_OPTIONS_RATE_LIMIT_PREFIX,
-} from "./ratelimit/webauthnSpec.mjs";
 export { type RunReadinessOptions, runReadinessProbes } from "./readiness/run.mjs";
 export type {
 	ProbeResult,

@@ -11,7 +11,6 @@ import {
 	type RateLimitBudgetResolver,
 	type RateLimiter,
 	type RateLimitSpec,
-	resolveSeededLimitSpecs,
 } from "@o3co/auth-provider-core";
 import { z } from "zod";
 import type { RateLimiterClient } from "./clients.mjs";
@@ -156,14 +155,10 @@ export const redisRateLimiterModule = defineModule({
 			).redisRateLimiter;
 			return createRedisRateLimiter({
 				client: deps.rateLimiterClient,
+				// What an operator declared on this limiter wins over the budget a
+				// prefix's owner contributed, which wins over `defaultLimit`.
+				limits: cfg.limits,
 				budgets: deps.rateLimitBudgetResolver,
-				// `/session/login` limits under the `login:` prefix, but its window
-				// and limit are configured at `rateLimit.login`; the device
-				// verification endpoint likewise under `device_verification:`,
-				// configured at `oauth.deviceAuthorization.rateLimit`. Seeding
-				// keeps those the single source of truth; an operator-declared
-				// entry for either prefix still wins. See `resolveSeededLimitSpecs`.
-				limits: resolveSeededLimitSpecs(cfg.limits, deps.config),
 				defaultLimit: cfg.defaultLimit,
 			});
 		},

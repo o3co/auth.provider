@@ -280,9 +280,9 @@ describe("webauthn authentication/options rate limit — the configured budget o
 		await handle.dispose();
 	});
 
-	it("leaves an operator's explicit limits entry for the route in force, as login's seed does", async () => {
+	it("leaves an operator's explicit limits entry for the route in force over the budget the module contributes", async () => {
 		// An explicit `limits.webauthn-authentication-options` is a statement
-		// about this adapter; seeding over it would discard what was written.
+		// about this limiter; the contributed budget must not discard it.
 		const { handle, app } = await bootApp(
 			makeWebAuthnConfig(2),
 			[memoryRateLimiterModule],
@@ -301,11 +301,61 @@ describe("webauthn authentication/options rate limit — the configured budget o
 
 		await handle.dispose();
 	});
+
+	it("applies the budget given as the strings HOCON substitutes", async () => {
+		const { handle, app } = await bootApp(
+			makeWebAuthnConfig(2),
+			[memoryRateLimiterModule],
+			undefined,
+			undefined,
+			{
+				...composed(),
+				webauthn: { rateLimit: { authenticationOptions: { limit: "2", windowSeconds: "60" } } },
+			},
+		);
+
+		expect((await hit(app)).headers["ratelimit-limit"]).toBe("2");
+		await handle.dispose();
+	});
+
+	it("refuses to boot on a budget no limiter can apply, naming the key and not the limiter", async () => {
+		for (const authenticationOptions of [
+			{ limit: 30, windowSeconds: 0 },
+			{ limit: 1.5, windowSeconds: 60 },
+			{ limit: "thirty", windowSeconds: 60 },
+			{ limit: "", windowSeconds: 60 },
+			{ limit: 30, windowSeconds: 1e13 },
+		]) {
+			const refusal = await bootApp(
+				makeWebAuthnConfig(2),
+				[memoryRateLimiterModule],
+				undefined,
+				undefined,
+				{
+					...composed(),
+					webauthn: { rateLimit: { authenticationOptions } },
+				},
+			).then(
+				() => "booted",
+				(err: unknown) => {
+					const texts: string[] = [];
+					for (let at = err; at instanceof Error; at = at.cause) texts.push(at.message);
+					return texts.join("\n");
+				},
+			);
+			expect(refusal, JSON.stringify(authenticationOptions)).toMatch(
+				/webauthn\.rateLimit\.authenticationOptions/,
+			);
+			expect(refusal, JSON.stringify(authenticationOptions)).not.toMatch(
+				/createMemoryRateLimiter|limits\.webauthn/,
+			);
+		}
+	});
 });
 
-describe("webauthn authentication/options rate limit — the slot and the seeded key", () => {
+describe("webauthn authentication/options rate limit — the slot and the contributed budget", () => {
 	/**
-	 * A shared limiter applies the budget its module seeded from the app
+	 * A shared limiter applies the budget the module contributes from the app
 	 * config's `webauthn.rateLimit.authenticationOptions`; the route's
 	 * per-process fallback and its headers read the `webauthnConfig` slot. A
 	 * composition that hard-codes the slot (`webauthnConfigSchema.parse({…})`)

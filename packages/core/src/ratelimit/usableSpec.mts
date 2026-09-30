@@ -94,7 +94,7 @@ export const configuredNumber = (value: unknown): number | undefined => {
  * The budget a configuration gives under `key`, or a `RangeError` naming
  * `key` when it is given but is not a spec a limiter can apply.
  *
- * For a seed and anything else that reads a budget from its own config key
+ * For a module that contributes a budget read from its own config key
  * (`oauth.deviceAuthorization.rateLimit`,
  * `webauthn.rateLimit.authenticationOptions`). Each field is read as the key's
  * schema coerces it. A given key, hand-built config included, is refused

@@ -115,13 +115,19 @@ const VOCABULARY: readonly VocabularyRow[] = [
 	},
 	{
 		concept: "device-verification budget shape (#448)",
-		home: "packages/core/src/ratelimit/deviceVerificationSpec.mts",
+		home: "packages/device-grant/src/verificationBudget.mts",
 		definition: /(?:function|const)\s+isDeviceVerificationRateLimitSpec\b/,
 	},
 	{
 		concept: "usable rate-limit spec — what a limiter applies as written",
 		home: "packages/core/src/ratelimit/usableSpec.mts",
 		definition: /(?:function|const)\s+isUsableRateLimitSpec\b/,
+	},
+	{
+		concept:
+			"the budget a limiter applies to a key — its own limits entry, else the owner's contributed budget, else its default (#728)",
+		home: "packages/core/src/ratelimit/budgetLookup.mts",
+		definition: /(?:function|const)\s+createRateLimitBudgetLookup\b/,
 	},
 	{
 		concept: "authentication claims a token may carry — amr (#481)",
