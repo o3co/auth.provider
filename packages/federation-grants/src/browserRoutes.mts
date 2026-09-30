@@ -26,15 +26,19 @@
  * for both `POST` outcomes. None inherits the JSON router's client
  * authentication, 404 or throttle body.
  *
- * Connect is cross-site by construction, so it skips the login flow's
- * `Sec-Fetch-Site` check and `session.csrf.trustedOrigins` is not widened to
- * client origins; consent is its CSRF defence. That holds only while connect
- * never approves or creates an upstream transaction, every grant and renewal
- * (first-party clients too) goes through consent, the answer needs the
- * challenge AND the exact session binding, the consent data is never readable
- * cross-origin with credentials, the challenge never leaks via a referrer
- * (`Referrer-Policy: no-referrer` on every response), and the answer re-admits
- * the session. Making consent skippable is a redesign of this exemption.
+ * Connect is cross-site by construction, so it is not held to the navigation
+ * rule the account-link start is (the `csrfGuard`'s `checkNavigation`), and
+ * `session.csrf.trustedOrigins` is not widened to client origins; consent is
+ * its CSRF defence. The answer is held to the deployment's `csrfGuard`
+ * (`check`: the issuer's origin or a trusted one, or, naming no origin, the
+ * guard's double-submit token) and needs the challenge AND the exact session
+ * binding. That holds only while connect never approves or creates an
+ * upstream transaction, every grant and renewal (first-party clients too)
+ * goes through consent, the consent data is never readable cross-origin with
+ * credentials, the challenge never reaches another origin via a referrer
+ * (`Referrer-Policy: no-referrer` on every response here; the deployment's
+ * page keeps its own URL on its origin), and the answer re-admits the
+ * session. Making consent skippable is a redesign of this exemption.
  *
  * Whether the session may go on is core's `admitSession` on the cookie's claim,
  * as `federation_grants.connect`, `.consent` and `.callback` (the callback asks
@@ -63,6 +67,7 @@ import {
 	admitSession,
 	type ClientRepository,
 	type CookieCarrier,
+	type CsrfGuard,
 	checkCanonicalIssuer,
 	checkResolver,
 	checkWithFailMode,
@@ -148,6 +153,11 @@ export interface FederationGrantBrowserRouterOptions {
 	 * `redirect_to` protocol: the session module's `loginEntry` slot.
 	 */
 	readonly login: Pick<LoginEntry, "urlFor">;
+	/**
+	 * The deployment's CSRF policy, the `csrfGuard` slot the session module
+	 * provides: the consent answer is held to its request rule.
+	 */
+	readonly csrfGuard: Pick<CsrfGuard, "check">;
 	/** `oauth.jwt.issuer`, held to core's `checkCanonicalIssuer`: every URL this router builds is built on it. */
 	readonly issuer: string;
 	readonly rateLimiter: RateLimiter;
@@ -843,11 +853,19 @@ export function createFederationGrantBrowserRouter(
 		parserRefusals,
 		admitted(shuttingDownJson, async (req, res) => {
 			try {
-				// Belt to the challenge's braces: a page on this origin sends
-				// `same-origin`, and a navigation from nowhere sends `none`.
-				const site = req.get("sec-fetch-site");
-				if (site !== undefined && site !== "same-origin" && site !== "none") {
-					jsonError(res, 403, "invalid_request", "cross-site answer refused");
+				// The deployment's CSRF policy, before the session or the challenge
+				// is read: the page's form post names the issuer's origin; an answer
+				// naming no origin at all echoes the guard's token.
+				const verdict = options.csrfGuard.check(req);
+				if (verdict.outcome === "refused") {
+					jsonError(
+						res,
+						403,
+						"invalid_request",
+						verdict.reason === "foreign_origin"
+							? "cross-site answer refused"
+							: "no origin and no valid csrf token",
+					);
 					return;
 				}
 				const body = (req.body ?? {}) as Record<string, unknown>;
