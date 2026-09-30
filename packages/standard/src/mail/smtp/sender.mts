@@ -33,9 +33,11 @@
  *   environment says. The account signs in only once the connection is
  *   secured as `secure` says.
  * - The TCP connection, implicit TLS's handshake, the greeting and each
- *   answer have a deadline, and so does the whole send, which nothing the
- *   relay sends extends.
- * - A delivery ends with QUIT; every send ends with its socket destroyed.
+ *   answer have a deadline, and so does the whole send up to the relay's
+ *   answer to the message, which nothing the relay sends extends.
+ * - A delivery ends with QUIT, bounded on its own; neither QUIT's answer nor
+ *   its failure changes a delivery the relay confirmed. Every send ends with
+ *   its socket destroyed.
  * - A limit is answered `refused_at_limit`; anything else rejects with a
  *   `MailTransportError` (see `failure.mts`). The sender logs nothing.
  */
@@ -59,8 +61,9 @@ import { MailTransportError, readSendFailure, transportCodeOf } from "./failure.
 const SECTION = "standard-smtp-mail-sender";
 
 /**
- * How long a send waits, in milliseconds. The whole send has these three
- * together, however the relay spaces what it sends.
+ * How long a send waits, in milliseconds. The whole send, up to the relay's
+ * answer to the message, has these three together, however the relay spaces
+ * what it sends.
  */
 export interface SmtpTimeouts {
 	/** For the TCP connection; implicit TLS's handshake then has as long again. */
@@ -281,7 +284,10 @@ function exchange(
 	});
 }
 
-/** Sends QUIT and waits, `QUIT_MS` at most, for the relay to answer it. */
+/**
+ * Sends QUIT and waits, `QUIT_MS` at most, for the connection to end. Never
+ * rejects: the relay's answer to QUIT, or its failure, changes nothing.
+ */
 function quit(connection: SMTPConnection): Promise<void> {
 	return new Promise((resolve) => {
 		if (connection.destroyed) {
@@ -293,7 +299,12 @@ function quit(connection: SMTPConnection): Promise<void> {
 			clearTimeout(timer);
 			resolve();
 		});
-		connection.quit();
+		try {
+			connection.quit();
+		} catch {
+			clearTimeout(timer);
+			resolve();
+		}
 	});
 }
 
@@ -346,14 +357,7 @@ export function createStandardSmtpMailSender(
 			transactionLog: false,
 		});
 		attempt.connection = connection;
-		const answer = await exchange(
-			connection,
-			credentials,
-			{ from: sender.address, to: [to] },
-			message,
-		);
-		if (answer.outcome === "delivered") await quit(connection);
-		return answer;
+		return exchange(connection, credentials, { from: sender.address, to: [to] }, message);
 	};
 
 	return {
@@ -371,7 +375,13 @@ export function createStandardSmtpMailSender(
 				);
 			});
 			try {
-				return await Promise.race([converse(attempt, to, message), expired]);
+				const answer = await Promise.race([converse(attempt, to, message), expired]);
+				// The relay's answer is known: nothing after it, QUIT included, changes it.
+				clearTimeout(deadline);
+				if (answer.outcome === "delivered" && attempt.connection !== undefined) {
+					await quit(attempt.connection);
+				}
+				return answer;
 			} finally {
 				clearTimeout(deadline);
 				attempt.connection?.close();

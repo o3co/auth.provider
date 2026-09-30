@@ -709,8 +709,10 @@ wires it.
     send to as written — one beyond ASCII to a relay that does not offer
     SMTPUTF8, or an angle bracket in a quoted local part;
   - `timeout`: no TCP connection in 10 seconds, no implicit TLS handshake in
-    another 10, no greeting in 10, 20 seconds without an answer, or a send
-    not finished in 40 seconds in all, however the relay spaces its bytes.
+    another 10, no greeting in 10, 20 seconds without an answer, or no
+    answer to the message within 40 seconds in all, however the relay spaces
+    its bytes. A delivery the relay confirmed stays delivered, whatever
+    comes of the `QUIT` after it.
 
   The SMTP sender's module needs `STANDARD_SMTP_MAIL_SENDER_HOST` and `_FROM`
   only where something reads the `mailSender` slot; there it refuses the boot
