@@ -121,8 +121,8 @@ export const mintFederationTransactionId = (): string => randomBytes(32).toStrin
 
 /**
  * Name the transaction cookie after the deployment's session cookie, the way
- * the CSRF cookie is named: any prefix the session name carries is stripped
- * and `__Secure-` applied **unconditionally**, giving
+ * the CSRF cookie is named: any prefix the session name carries, in any case,
+ * is stripped and `__Secure-` applied **unconditionally**, giving
  * `__Secure-<base>.federation` even for an unprefixed session cookie.
  *
  * `__Secure-` rather than `__Host-`, because `__Host-` requires `Path=/` and
@@ -133,7 +133,7 @@ export const mintFederationTransactionId = (): string => randomBytes(32).toStrin
  * in a position to inject a cookie, can set it over a plain-HTTP hop.
  */
 export const deriveFederationTransactionCookieName = (sessionCookieName: string): string => {
-	const base = sessionCookieName.replace(/^__(?:Host|Secure)-/, "");
+	const base = sessionCookieName.replace(/^__(?:host|secure)-/i, "");
 	return `__Secure-${base}${FEDERATION_TRANSACTION_COOKIE_SUFFIX}`;
 };
 
