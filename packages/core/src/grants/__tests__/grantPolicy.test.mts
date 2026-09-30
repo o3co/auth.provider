@@ -51,6 +51,8 @@ const INVALID_DECISIONS: ReadonlyArray<readonly [string, unknown]> = [
 	["no outcome", {}],
 	["null", null],
 	["a bare string", "allow"],
+	["a String object", new String("allow")],
+	["an array", ["allow"]],
 	[
 		"an outcome that throws when read",
 		Object.defineProperty({}, "outcome", {
@@ -345,6 +347,20 @@ describe("readGrantPolicyDecision", () => {
 			expect(logger.error).toHaveBeenCalledWith(site, "grant_policy_decision_invalid");
 		},
 	);
+
+	it("reads outcome once, so a getter that answers allow and then deny is allowed", () => {
+		let reads = 0;
+		const decision = {
+			get outcome() {
+				reads += 1;
+				return reads === 1 ? "allow" : "deny";
+			},
+		};
+		expect(readGrantPolicyDecision(decision, { error: vi.fn() }, site)).toMatchObject({
+			verdict: "allow",
+		});
+		expect(reads).toBe(1);
+	});
 
 	it("names the caller's site in the log line when it has one", () => {
 		const logger = { error: vi.fn() };
