@@ -164,6 +164,17 @@ describe("what the requirement declares", () => {
 		expect(requirement.hintKeys).toEqual(["enrollable", "email_proof"]);
 	});
 
+	it("declares the second-factor authority, under either mode: the one requirement core lets reach and add a second factor, bound to its MFA ports", () => {
+		for (const mode of ["optional", "required"] as const) {
+			expect(build(mode).requirement.secondFactorAuthority, mode).toBe(true);
+			expect(
+				resolverForTests([build(mode).requirement], { issuer: ISSUER }).get("mfa")
+					?.secondFactorAuthority,
+				mode,
+			).toBe(true);
+		}
+	});
+
 	it("reaches the union of the enabled factors' amrValues, and mfa when one adds it", () => {
 		const { requirement } = build("required", {
 			factors: [FACTORS.totp(), FACTORS.webauthn(), FACTORS.email(), FACTORS.recovery()],

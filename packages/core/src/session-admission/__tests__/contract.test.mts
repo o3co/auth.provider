@@ -52,7 +52,7 @@ const interruption = (
 	},
 ): RequirementInterruption => ({ open: async () => ({ status: 403, body }) as never });
 
-/** A fixture that keeps the contract: reaches nothing (only mfa does), admits, interrupts a login, throws on an outage. */
+/** A fixture that keeps the contract: reaches nothing (only the second-factor authority does), admits, interrupts a login, throws on an outage. */
 const fixture = (over: Partial<SessionRequirement> = {}, down = false): SessionRequirement => ({
 	name: "fixture-a",
 	reach: new Set(),
@@ -95,8 +95,8 @@ describe("sessionRequirementContract — a well-formed fixture", () => {
 
 	it("names each of its cases, in order", () => {
 		expect(cases.map((c) => c.name)).toEqual([
-			"name equals its key, and a fixture is never named mfa",
-			"reach holds non-empty strings, no primary's marker, no second-factor value unless the name is mfa, and — in this release — nothing at all unless the name is mfa; stepUpPage is set when reach is not empty, and is valid when set",
+			"name equals its key, and a fixture never declares the second-factor authority",
+			"reach holds non-empty strings, no primary's marker, no second-factor value unless the requirement declares the second-factor authority, and — in this release — nothing at all unless it does; stepUpPage is set when reach is not empty, and is valid when set",
 			"remediations are the requirement's own routes — <name>.<route> — each once, none a consumer's action in ADMISSION_ACTIONS",
 			"hintKeys are hint names",
 			"admit is never called with a dead session",
@@ -113,18 +113,27 @@ describe("sessionRequirementContract — a well-formed fixture", () => {
 });
 
 describe("sessionRequirementContract — each way a requirement can break it", () => {
-	it("a name that is not its key, or a fixture named mfa", async () => {
+	it("a name that is not its key, or a fixture that declares the second-factor authority — whatever its name — while a fixture named mfa that does not is only a name", async () => {
 		expect(await failing({ build: () => fixture({ name: "other" }) })).toContain(
-			"name equals its key, and a fixture is never named mfa",
+			"name equals its key, and a fixture never declares the second-factor authority",
 		);
-		expect(await failing({ key: "mfa", build: () => fixture({ name: "mfa" }) })).toContain(
-			"name equals its key, and a fixture is never named mfa",
+		expect(await failing({ build: () => fixture({ secondFactorAuthority: true }) })).toContain(
+			"name equals its key, and a fixture never declares the second-factor authority",
+		);
+		expect(await failing({ key: "mfa", build: () => fixture({ name: "mfa" }) })).not.toContain(
+			"name equals its key, and a fixture never declares the second-factor authority",
+		);
+		// A requirement under test that is not a fixture may declare it.
+		expect(
+			await failing({ fixture: false, build: () => fixture({ secondFactorAuthority: true }) }),
+		).not.toContain(
+			"name equals its key, and a fixture never declares the second-factor authority",
 		);
 	});
 
 	it("a reach with a reserved value under another name, a primary's marker, or a page missing", async () => {
 		const reach =
-			"reach holds non-empty strings, no primary's marker, no second-factor value unless the name is mfa, and — in this release — nothing at all unless the name is mfa; stepUpPage is set when reach is not empty, and is valid when set";
+			"reach holds non-empty strings, no primary's marker, no second-factor value unless the requirement declares the second-factor authority, and — in this release — nothing at all unless it does; stepUpPage is set when reach is not empty, and is valid when set";
 		expect(await failing({ build: () => fixture({ reach: new Set(["otp"]) }) })).toContain(reach);
 		expect(await failing({ build: () => fixture({ reach: new Set(["pwd"]) }) })).toContain(reach);
 		expect(await failing({ build: () => fixture({ reach: new Set(["fixture-ok"]) }) })).toContain(
@@ -147,9 +156,9 @@ describe("sessionRequirementContract — each way a requirement can break it", (
 		).not.toContain(reach);
 	});
 
-	it("a reach under any name but mfa: only the MFA requirement adds vouched values in this release", async () => {
+	it("a reach from a requirement that does not declare the second-factor authority — one named mfa among them: only the authority adds vouched values in this release", async () => {
 		const only =
-			"reach holds non-empty strings, no primary's marker, no second-factor value unless the name is mfa, and — in this release — nothing at all unless the name is mfa; stepUpPage is set when reach is not empty, and is valid when set";
+			"reach holds non-empty strings, no primary's marker, no second-factor value unless the requirement declares the second-factor authority, and — in this release — nothing at all unless it does; stepUpPage is set when reach is not empty, and is valid when set";
 		expect(
 			await failing({
 				build: () =>
@@ -160,6 +169,30 @@ describe("sessionRequirementContract — each way a requirement can break it", (
 			}),
 		).toContain(only);
 		expect(await failing({ build: () => fixture() })).not.toContain(only);
+		expect(
+			await failing({
+				key: "mfa",
+				build: () =>
+					fixture({
+						name: "mfa",
+						remediations: ["mfa.step_up"],
+						reach: new Set(["otp", "mfa"]),
+						stepUpPage: { url: "/mfa", params: {} },
+					}),
+			}),
+		).toContain(only);
+		// The authority, under any name, reaches the second-factor values.
+		expect(
+			await failing({
+				fixture: false,
+				build: () =>
+					fixture({
+						secondFactorAuthority: true,
+						reach: new Set(["otp", "mfa"]),
+						stepUpPage: { url: "/fixture-a", params: {} },
+					}),
+			}),
+		).not.toContain(only);
 	});
 
 	it("remediations that are not names, are not the requirement's own routes, or repeat", async () => {

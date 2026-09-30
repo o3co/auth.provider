@@ -439,6 +439,54 @@ describe("resolverForTests — the resolver a test builds", () => {
 		expect(Object.isFrozen(resolver)).toBe(true);
 	});
 
+	it("registers whether a requirement declares the second-factor authority — true when it says so, false when it says false or nothing — read once, and refuses a declaration that is neither", () => {
+		expect(
+			resolverForTests([requirement("second", { secondFactorAuthority: true })]).get("second")
+				?.secondFactorAuthority,
+		).toBe(true);
+		expect(
+			resolverForTests([requirement("x", { secondFactorAuthority: false })]).get("x")
+				?.secondFactorAuthority,
+		).toBe(false);
+		expect(resolverForTests([requirement("x")]).get("x")?.secondFactorAuthority).toBe(false);
+		// The name is not a declaration: `mfa` saying nothing is not the authority.
+		expect(resolverForTests([requirement("mfa")]).get("mfa")?.secondFactorAuthority).toBe(false);
+		for (const declared of ["yes", 1, null, {}]) {
+			expect(
+				() => resolverForTests([requirement("x", { secondFactorAuthority: declared as never })]),
+				JSON.stringify(declared),
+			).toThrow(/secondFactorAuthority must be true, false or absent/);
+		}
+		let reads = 0;
+		const flipping = {
+			...requirement("x"),
+			get secondFactorAuthority() {
+				reads++;
+				return reads === 1;
+			},
+		};
+		const registered = resolverForTests([flipping as never]).get("x");
+		expect(registered?.secondFactorAuthority).toBe(true);
+		expect(registered?.secondFactorAuthority).toBe(true);
+		expect(reads).toBe(1);
+	});
+
+	it("refuses a second requirement that declares the second-factor authority, naming both: at most one registered requirement may", () => {
+		const declaring = (name: string) => requirement(name, { secondFactorAuthority: true });
+		expect(() => resolverForTests([declaring("first"), declaring("second")])).toThrow(
+			/"first" and "second" both declare the second-factor authority/,
+		);
+		// One authority beside any number that do not declare it.
+		const resolver = resolverForTests([requirement("a"), declaring("first"), requirement("b")]);
+		expect(
+			[...resolver.entries()].filter(([, r]) => r.secondFactorAuthority).map(([name]) => name),
+		).toEqual(["first"]);
+		// Lifting the reach rules does not lift this one.
+		expect(() =>
+			resolverForTests([declaring("first"), declaring("second")], { allowAnyReach: true }),
+		).toThrow(/both declare the second-factor authority/);
+	});
+
 	it("refuses a name admission gives an outage of one of its own stores — ADMISSION_INFRASTRUCTURE_STORES, user_session and revocation_boundary — which a consumer telling an outage by its store would take the requirement's for", () => {
 		expect(ADMISSION_INFRASTRUCTURE_STORES).toEqual(["user_session", "revocation_boundary"]);
 		expect(Object.isFrozen(ADMISSION_INFRASTRUCTURE_STORES)).toBe(true);
@@ -509,7 +557,7 @@ describe("resolverForTests — the resolver a test builds", () => {
 		expect(() => resolverForTests("x" as never)).toThrow(RangeError);
 	});
 
-	it("holds a fixture to boot's rules by default — a non-empty reach under any name but mfa, a reserved value, a reach without a page are refused — and lifts the reach rules under allowAnyReach for the merge-table tests", () => {
+	it("holds a fixture to boot's rules by default — a non-empty reach from a requirement that does not declare the second-factor authority, a reserved value, a reach without a page are refused — and lifts the reach rules under allowAnyReach for the merge-table tests", () => {
 		const page = { url: "/x", params: {} };
 		const onIssuer = { issuer: ISSUER };
 		// The seal's refusal, with the remedy a test has: the opt-out below.
@@ -519,7 +567,7 @@ describe("resolverForTests — the resolver a test builds", () => {
 				onIssuer,
 			),
 		).toThrow(
-			/only the requirement named "mfa" adds vouched values to a session, so any other reach must be empty — pass allowAnyReach for a test of admission's own mechanics$/,
+			/only the second-factor authority adds vouched values to a session, so any other reach must be empty — pass allowAnyReach for a test of admission's own mechanics$/,
 		);
 		expect(() =>
 			resolverForTests([requirement("x", { reach: new Set(["otp"]), stepUpPage: page })], onIssuer),
@@ -527,18 +575,26 @@ describe("resolverForTests — the resolver a test builds", () => {
 		expect(() => resolverForTests([requirement("x", { reach: new Set(["risk-ok"]) })])).toThrow(
 			/where the step-up starts/,
 		);
+		// The name is not a declaration: `mfa` saying nothing reaches nothing.
+		expect(() =>
+			resolverForTests(
+				[requirement("mfa", { reach: new Set(["otp", "mfa"]), stepUpPage: page })],
+				onIssuer,
+			),
+		).toThrow(RangeError);
 		expect(
 			resolverForTests(
 				[
-					requirement("mfa", {
+					requirement("second", {
+						secondFactorAuthority: true,
 						reach: new Set(["otp", "mfa"]),
 						stepUpPage: page,
-						remediations: ["mfa.step_up"],
+						remediations: ["second.step_up"],
 					}),
 				],
 				onIssuer,
 			)
-				.get("mfa")
+				.get("second")
 				?.reach.has("otp"),
 		).toBe(true);
 		const lifted = resolverForTests(
@@ -581,25 +637,39 @@ describe("sealRegisteredReach — a registered reach, read once after the name-k
 			admit: async () => ({ outcome: "met" }),
 		}) as SessionRequirement;
 
-	it("answers the reach as a set of its own, and lets the requirement named mfa reach the second-factor values", () => {
+	/** A requirement that declares the second-factor authority, under a name that is not `mfa`. */
+	const authority = (reach: unknown, name = "second"): SessionRequirement => ({
+		...requirement(name, reach),
+		secondFactorAuthority: true,
+	});
+
+	it("answers the reach as a set of its own, and lets the requirement that declares the second-factor authority reach the second-factor values, whatever its name", () => {
 		const reach = new Set(["otp", "hwk", "mfa"]);
-		const read = sealRegisteredReach(requirement("mfa", reach));
+		const read = sealRegisteredReach(authority(reach));
 		expect([...read]).toEqual(["otp", "hwk", "mfa"]);
 		expect(read).not.toBe(reach);
+		expect([...sealRegisteredReach(authority(new Set(["otp"]), "keys"))]).toEqual(["otp"]);
 		expect(sealRegisteredReach(requirement("plain", new Set(), "none")).size).toBe(0);
 	});
 
-	it("refuses a non-empty reach under any name but mfa — in this release only the MFA requirement adds vouched values to a session — the one home of the rule boot, resolverForTests and the contract suite hold a reach to", () => {
-		for (const name of ["risk", "consent", "x"]) {
+	it("refuses a non-empty reach from a requirement that does not declare the second-factor authority — in this release only the authority adds vouched values to a session — the one home of the rule boot, resolverForTests and the contract suite hold a reach to", () => {
+		for (const name of ["risk", "consent", "x", "mfa"]) {
 			expect(() => sealRegisteredReach(requirement(name, new Set(["risk-ok"]))), name).toThrow(
 				RangeError,
 			);
 			expect(() => sealRegisteredReach(requirement(name, ["risk-ok"])), name).toThrow(
-				/only the requirement named "mfa" adds vouched values to a session/,
+				/only the second-factor authority adds vouched values to a session/,
 			);
 			// Nothing reached: accepted, with or without a page.
 			expect(sealRegisteredReach(requirement(name, new Set())).size, name).toBe(0);
 		}
+		// Saying it is not the authority is saying nothing.
+		expect(() =>
+			sealRegisteredReach({
+				...requirement("risk", new Set(["risk-ok"])),
+				secondFactorAuthority: false,
+			}),
+		).toThrow(/only the second-factor authority adds vouched values to a session/);
 		// The page is still asked for first: a reach without one says so.
 		expect(() => sealRegisteredReach(requirement("risk", new Set(["risk-ok"]), "none"))).toThrow(
 			/where the step-up starts/,
@@ -615,13 +685,24 @@ describe("sealRegisteredReach — a registered reach, read once after the name-k
 		const registered = registeredRequirement(requirement("risk", new Set(["risk-ok"])), ISSUER);
 		expect(() => sealRegisteredReach(registered)).toThrow(RangeError);
 		expect("add" in registered.reach).toBe(true);
-		// The requirement named mfa reaches what its factors do, a value of its own included.
-		expect([...sealRegisteredReach(requirement("mfa", new Set(["risk-ok"])))]).toEqual(["risk-ok"]);
+		// The authority reaches what its factors do, a value of its own included.
+		expect([...sealRegisteredReach(authority(new Set(["risk-ok"])))]).toEqual(["risk-ok"]);
+	});
+
+	it("holds a requirement named mfa that does not declare the second-factor authority to the rules of any other: no second-factor value, and nothing at all", () => {
+		for (const reach of [["otp"], ["mfa"], ["otp", "mfa"], ["risk-ok"]]) {
+			expect(() => sealRegisteredReach(requirement("mfa", new Set(reach))), String(reach)).toThrow(
+				RangeError,
+			);
+		}
+		expect(() => sealRegisteredReach(requirement("mfa", new Set(["otp"])))).toThrow(
+			/a second-factor value only the second-factor authority may reach/,
+		);
 	});
 
 	it("reads the getter once", () => {
 		let reads = 0;
-		const source = requirement("mfa", undefined);
+		const source = authority(undefined);
 		Object.defineProperty(source, "reach", {
 			get() {
 				reads++;
@@ -637,12 +718,13 @@ describe("sealRegisteredReach — a registered reach, read once after the name-k
 		const live = new Set(["risk-ok"]);
 		let current = live;
 		const source = {
-			name: "mfa",
+			name: "second",
+			secondFactorAuthority: true,
 			get reach() {
 				reads++;
 				return current;
 			},
-			stepUpPage: { url: "/mfa", params: {} },
+			stepUpPage: { url: "/second", params: {} },
 			remediations: [],
 			hintKeys: [],
 			admit: async () => ({ outcome: "met" as const }),
@@ -683,7 +765,7 @@ describe("sealRegisteredReach — a registered reach, read once after the name-k
 
 	it("answers a frozen set of its own for a requirement that is not a registered copy — what the contract suite checks — and seals nothing on it", () => {
 		const live = new Set(["risk-ok"]);
-		const source = requirement("mfa", live);
+		const source = authority(live);
 		const checked = sealRegisteredReach(source);
 		expect(checked).not.toBe(live);
 		live.add("other");
@@ -692,10 +774,8 @@ describe("sealRegisteredReach — a registered reach, read once after the name-k
 	});
 
 	it("accepts an iterable of values that is not a string — an array — answering a Set, and seals a registered copy on it", () => {
-		expect([...sealRegisteredReach(requirement("mfa", ["risk-ok", "risk-ok"]))]).toEqual([
-			"risk-ok",
-		]);
-		const registered = registeredRequirement(requirement("mfa", ["risk-ok"]), ISSUER);
+		expect([...sealRegisteredReach(authority(["risk-ok", "risk-ok"]))]).toEqual(["risk-ok"]);
+		const registered = registeredRequirement(authority(["risk-ok"]), ISSUER);
 		sealRegisteredReach(registered);
 		expect("add" in registered.reach).toBe(false);
 		expect(registered.reach.has("risk-ok")).toBe(true);
@@ -713,10 +793,25 @@ describe("sealRegisteredReach — a registered reach, read once after the name-k
 		["a non-string", new Set([7])],
 		["a primary's marker", new Set(["pwd"])],
 		["the federated marker", new Set(["fed"])],
-		["a second-factor value under another name", new Set(["otp"])],
-		["mfa under another name", new Set(["mfa"])],
+		[
+			"a second-factor value from a requirement that does not declare the authority",
+			new Set(["otp"]),
+		],
+		["mfa from a requirement that does not declare the authority", new Set(["mfa"])],
 	])("refuses a reach that is %s with a RangeError", (_label, reach) => {
 		expect(() => sealRegisteredReach(requirement("risk", reach))).toThrow(RangeError);
+	});
+
+	it("holds the authority's reach to the rules every reach keeps: no primary's marker, non-empty strings, a page when not empty", () => {
+		for (const reach of [new Set(["pwd"]), new Set(["fed"]), new Set([""]), "otp"]) {
+			expect(() => sealRegisteredReach(authority(reach)), String(reach)).toThrow(RangeError);
+		}
+		expect(() =>
+			sealRegisteredReach({
+				...requirement("second", new Set(["otp"]), "none"),
+				secondFactorAuthority: true,
+			}),
+		).toThrow(/where the step-up starts/);
 	});
 
 	it("requires a page of a non-empty reach, and lets a requirement that reaches nothing register one: a step-up that adds no value — a re-consent — still has somewhere to start", () => {
@@ -767,17 +862,18 @@ describe("the shapes the contract names", () => {
 });
 
 describe("the refusals and the read-only view, each driven", () => {
-	const mfa = {
-		name: "mfa",
+	const authority = {
+		name: "second",
+		secondFactorAuthority: true,
 		reach: new Set(["otp", "mfa"]),
-		stepUpPage: { url: "/mfa", params: {} },
-		remediations: ["mfa.step_up"],
+		stepUpPage: { url: "/second", params: {} },
+		remediations: ["second.step_up"],
 		hintKeys: [],
 		admit: async () => ({ outcome: "met" as const }),
 	} satisfies SessionRequirement;
 
 	it("a sealed reach answers the set algebra over a copy of its own — never the private set — and names itself", () => {
-		const reach = resolverForTests([mfa], { issuer: ISSUER }).get("mfa")
+		const reach = resolverForTests([authority], { issuer: ISSUER }).get("second")
 			?.reach as ReadonlySet<string>;
 		expect(Object.prototype.toString.call(reach)).toBe("[object SealedReach]");
 		const other = new Set(["hwk", "otp"]);
@@ -800,7 +896,7 @@ describe("the refusals and the read-only view, each driven", () => {
 		for (const reach of [7, "otp", null, undefined, { otp: true }]) {
 			expect(
 				() =>
-					resolverForTests([{ ...mfa, name: "x", remediations: [], reach } as never], {
+					resolverForTests([{ ...authority, name: "x", remediations: [], reach } as never], {
 						allowAnyReach: true,
 						issuer: ISSUER,
 					}),

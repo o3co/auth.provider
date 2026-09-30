@@ -31,12 +31,15 @@ import {
 	continuationOf,
 	primaryFromDto,
 } from "#/session-admission/primary.mjs";
-import {
-	MFA_REQUIREMENT_NAME,
-	type PrimaryAuthentication,
-} from "#/session-admission/requirement.mjs";
+import type { PrimaryAuthentication } from "#/session-admission/requirement.mjs";
 
 const NOW = new Date("2026-09-28T12:00:00Z");
+
+/** The requirement that declares the second-factor authority, under a name that is not `mfa`. */
+const AUTHORITY = { name: "second", secondFactorAuthority: true } as const;
+
+/** A requirement of `name` that does not declare the second-factor authority. */
+const plain = (name: string) => ({ name, secondFactorAuthority: false }) as const;
 
 const primary = (over: Record<string, unknown> = {}): PrimaryAuthentication =>
 	({
@@ -194,20 +197,19 @@ const dto = () => {
 	return { ...fields, authTimeMs: authTime.getTime() };
 };
 
-describe("checkPrimaryAdditions — what a completing requirement may add", () => {
-	it("accepts a completion that adds nothing — amr [] — which is all a requirement reaching nothing can add, under any name but mfa", () => {
-		expect(checkPrimaryAdditions("consent", { amr: [] })).toEqual({ amr: [] });
-		expect(Object.isFrozen(checkPrimaryAdditions("consent", { amr: [] }).amr)).toBe(true);
-		expect(() => checkPrimaryAdditions(MFA_REQUIREMENT_NAME, { amr: [], mfaAt: NOW })).toThrow(
-			RangeError,
-		);
+describe("checkPrimaryAdditions — what a completing requirement may add, by what it declares", () => {
+	it("accepts a completion that adds nothing — amr [] — which is all a requirement reaching nothing can add, from any requirement that does not declare the second-factor authority", () => {
+		expect(checkPrimaryAdditions(plain("consent"), { amr: [] })).toEqual({ amr: [] });
+		expect(Object.isFrozen(checkPrimaryAdditions(plain("consent"), { amr: [] }).amr)).toBe(true);
+		expect(checkPrimaryAdditions({ name: "consent" }, { amr: [] })).toEqual({ amr: [] });
+		expect(() => checkPrimaryAdditions(AUTHORITY, { amr: [], mfaAt: NOW })).toThrow(RangeError);
 	});
 
 	// resumePrimary does not ask a requirement already done again, so the
-	// check fails closed on its own: a completion under mfa is a verified
-	// second factor — a factor's value, `mfa` beside it (unless the factor is
-	// the email code, whose `addsMfa` is off by default: the MFA ADR's D14,
-	// O7), and when it was verified.
+	// check fails closed on its own: a completion by the second-factor
+	// authority is a verified second factor — a factor's value, `mfa` beside
+	// it (unless the factor is the email code, whose `addsMfa` is off by
+	// default: the MFA ADR's D14, O7), and when it was verified.
 	it.each([
 		["nothing", { amr: [] }],
 		["a factor and mfa without mfaAt", { amr: ["otp", "mfa"] }],
@@ -219,21 +221,9 @@ describe("checkPrimaryAdditions — what a completing requirement may add", () =
 		],
 		["mfa and no second factor's value", { amr: ["mfa", "kba"], mfaAt: NOW }],
 		["the email code without mfaAt", { amr: ["email"] }],
-	])("refuses, under mfa, a completion that adds %s", (_label, adds) => {
-		expect(() => checkPrimaryAdditions(MFA_REQUIREMENT_NAME, adds)).toThrow(RangeError);
-		const { mfaAt, ...rest } = adds as { amr: string[]; mfaAt?: Date };
-		expect(() =>
-			checkPrimaryContinuation({
-				primary: dto(),
-				done: [
-					{
-						requirement: MFA_REQUIREMENT_NAME,
-						adds: { ...rest, ...(mfaAt === undefined ? {} : { mfaAtMs: mfaAt.getTime() }) },
-					},
-				],
-				interruptedBy: "hold",
-			}),
-		).toThrow(RangeError);
+		["a value of its own and nothing verified", { amr: ["risk-ok"] }],
+	])("refuses, from the second-factor authority, a completion that adds %s", (_label, adds) => {
+		expect(() => checkPrimaryAdditions(AUTHORITY, adds)).toThrow(RangeError);
 	});
 
 	it.each([
@@ -243,40 +233,44 @@ describe("checkPrimaryAdditions — what a completing requirement may add", () =
 		["the email code alone (O7)", { amr: ["email"], mfaAt: NOW }],
 		["the email code and mfa (addsMfa configured)", { amr: ["email", "mfa"], mfaAt: NOW }],
 	])(
-		"accepts, under mfa, a completion that adds %s — and reads it back from a continuation",
+		"accepts, from the second-factor authority, a completion that adds %s — and reads it back from a continuation",
 		(_label, adds) => {
-			expect(checkPrimaryAdditions(MFA_REQUIREMENT_NAME, adds)).toEqual(adds);
+			expect(checkPrimaryAdditions(AUTHORITY, adds)).toEqual(adds);
 			const read = checkPrimaryContinuation({
 				primary: dto(),
-				done: [
-					{
-						requirement: MFA_REQUIREMENT_NAME,
-						adds: { amr: adds.amr, mfaAtMs: adds.mfaAt.getTime() },
-					},
-				],
+				done: [{ requirement: "second", adds: { amr: adds.amr, mfaAtMs: adds.mfaAt.getTime() } }],
 				interruptedBy: "hold",
 			});
 			expect(read.done).toEqual([
-				{ requirement: MFA_REQUIREMENT_NAME, adds: { amr: adds.amr, mfaAtMs: NOW.getTime() } },
+				{ requirement: "second", adds: { amr: adds.amr, mfaAtMs: NOW.getTime() } },
 			]);
 		},
 	);
 
-	it("copies what the requirement named mfa adds, mfaAt included", () => {
-		const adds = checkPrimaryAdditions(MFA_REQUIREMENT_NAME, { amr: ["otp", "mfa"], mfaAt: NOW });
+	it("copies what the second-factor authority adds, mfaAt included", () => {
+		const adds = checkPrimaryAdditions(AUTHORITY, { amr: ["otp", "mfa"], mfaAt: NOW });
 		expect(adds).toEqual({ amr: ["otp", "mfa"], mfaAt: NOW });
 		expect(Object.isFrozen(adds)).toBe(true);
 		expect(adds.mfaAt).not.toBe(NOW);
-		expect(checkPrimaryAdditions("risk", { amr: ["risk-ok"] })).toEqual({ amr: ["risk-ok"] });
+		expect(checkPrimaryAdditions(plain("risk"), { amr: ["risk-ok"] })).toEqual({
+			amr: ["risk-ok"],
+		});
 	});
 
-	it("refuses a second-factor value or an mfaAt under any name but mfa", () => {
-		expect(() => checkPrimaryAdditions("risk", { amr: ["otp"] })).toThrow(
-			/only the requirement named mfa/,
-		);
-		expect(() => checkPrimaryAdditions("risk", { amr: ["risk-ok"], mfaAt: NOW })).toThrow(
-			/only the requirement named mfa/,
-		);
+	it("refuses a second-factor value or an mfaAt from any requirement that does not declare the second-factor authority — one named mfa among them", () => {
+		for (const requirement of [plain("risk"), plain("mfa"), { name: "mfa" }]) {
+			expect(() => checkPrimaryAdditions(requirement, { amr: ["otp"] }), requirement.name).toThrow(
+				/a second-factor amr value, which only the second-factor authority may add/,
+			);
+			expect(
+				() => checkPrimaryAdditions(requirement, { amr: ["otp", "mfa"], mfaAt: NOW }),
+				requirement.name,
+			).toThrow(/only the second-factor authority may add/);
+			expect(
+				() => checkPrimaryAdditions(requirement, { amr: ["risk-ok"], mfaAt: NOW }),
+				requirement.name,
+			).toThrow(/an mfaAt, which only the second-factor authority may add/);
+		}
 	});
 
 	it.each([
@@ -287,18 +281,60 @@ describe("checkPrimaryAdditions — what a completing requirement may add", () =
 		["mfa alone", { amr: ["mfa"] }],
 		["an invalid mfaAt", { amr: ["otp"], mfaAt: "now" }],
 	])("refuses %s with a RangeError", (_label, adds) => {
-		expect(() => checkPrimaryAdditions(MFA_REQUIREMENT_NAME, adds)).toThrow(RangeError);
+		expect(() => checkPrimaryAdditions(AUTHORITY, adds)).toThrow(RangeError);
 	});
 
 	it("quotes nothing of what it refuses but a marker", () => {
 		let refusal: unknown;
 		try {
-			checkPrimaryAdditions("risk", { amr: ["sentinel-value"], mfaAt: NOW });
+			checkPrimaryAdditions(plain("risk"), { amr: ["sentinel-value"], mfaAt: NOW });
 		} catch (err) {
 			refusal = err;
 		}
 		expect(refusal).toBeInstanceOf(RangeError);
 		expect((refusal as RangeError).message).not.toContain("sentinel-value");
+	});
+});
+
+describe("checkPrimaryContinuation — a done entry held to what any completion keeps, whatever its requirement declares", () => {
+	// Which requirement declares the second-factor authority is the
+	// registration's, which a store does not hold: `resumePrimary` holds each
+	// entry read back to it. What holds for any completion is held here — a
+	// second factor's evidence, whoever adds it, is a verified second factor.
+	const readBack = (adds: Record<string, unknown>, requirement = "second") =>
+		checkPrimaryContinuation({
+			primary: dto(),
+			done: [{ requirement, adds }],
+			interruptedBy: "hold",
+		});
+
+	it.each([
+		["a factor and mfa without mfaAt", { amr: ["otp", "mfa"] }],
+		["a factor that adds mfa, without mfa", { amr: ["otp"], mfaAtMs: NOW.getTime() }],
+		["a recovery code without mfa", { amr: ["recovery"], mfaAtMs: NOW.getTime() }],
+		[
+			"the email code beside a factor that adds mfa, without mfa",
+			{ amr: ["email", "otp"], mfaAtMs: NOW.getTime() },
+		],
+		["mfa and no second factor's value", { amr: ["mfa", "kba"], mfaAtMs: NOW.getTime() }],
+		["the email code without mfaAt", { amr: ["email"] }],
+		["an mfaAt and no second factor's value", { amr: ["risk-ok"], mfaAtMs: NOW.getTime() }],
+	])("refuses a done entry that adds %s, under any name", (_label, adds) => {
+		for (const requirement of ["second", "risk", "mfa"]) {
+			expect(() => readBack(adds, requirement), requirement).toThrow(RangeError);
+		}
+	});
+
+	it("reads back a verified second factor, and a completion that added nothing, under any name: what its requirement may add is resumePrimary's to hold it to", () => {
+		for (const requirement of ["second", "risk", "mfa"]) {
+			expect(
+				readBack({ amr: ["otp", "mfa"], mfaAtMs: NOW.getTime() }, requirement).done,
+				requirement,
+			).toEqual([{ requirement, adds: { amr: ["otp", "mfa"], mfaAtMs: NOW.getTime() } }]);
+			expect(readBack({ amr: [] }, requirement).done, requirement).toEqual([
+				{ requirement, adds: { amr: [] } },
+			]);
+		}
 	});
 });
 
@@ -325,7 +361,8 @@ describe("the continuation — what a requirement persists and presents back, as
 		expect(() =>
 			checkPrimaryContinuation({
 				primary: dto(),
-				done: [{ requirement: MFA_REQUIREMENT_NAME, adds: { amr: [], mfaAtMs: 1 } }],
+				done: [{ requirement: "second", adds: { amr: [], mfaAtMs: 1 } }],
+				interruptedBy: "hold",
 			}),
 		).toThrow(RangeError);
 	});
@@ -413,8 +450,9 @@ describe("the continuation — what a requirement persists and presents back, as
 			checkPrimaryContinuation({
 				primary: dto(),
 				done: [{ requirement: "risk", adds: { amr: ["risk-ok"], mfaAtMs: NOW.getTime() } }],
+				interruptedBy: "hold",
 			}),
-		).toThrow(/only the requirement named mfa/);
+		).toThrow(/no second factor's own amr value/);
 		for (const bad of [NOW, "now", -1, 1.5, Number.NaN]) {
 			expect(() =>
 				checkPrimaryContinuation({

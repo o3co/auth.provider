@@ -17,9 +17,10 @@
 /**
  * The merge: the requirement rule's rows from
  * ADR 2026-09-25-multi-factor-authentication pass unchanged against
- * `admitSession` with a requirement whose `admit` is the MFA requirement's
- * table, under the mapping to `MfaRequirementDecision` in
- * ADR 2026-09-28-session-admission.
+ * `admitSession` with a requirement that declares the second-factor
+ * authority and whose `admit` is the MFA requirement's table, under the
+ * mapping to `MfaRequirementDecision` in ADR 2026-09-28-session-admission.
+ * The stand-in is not named `mfa`: the rows are the declared authority's.
  *
  * The rows are the ones the rule decided — the freshness rows (`max_age`,
  * `prompt=login`, the ask) and the `prompt=none` answers are `/authorize`'s,
@@ -56,9 +57,9 @@ const { MFA, PHR, KBA } = MERGE_ACR;
 
 /** The issuer each page is registered on. */
 const ISSUER = "https://auth.test";
-const PAGE: StepUpPage = { url: "/mfa", params: {} };
-/** The page as registered: what a step_up admission carries. */
-const REGISTERED_PAGE = { ...PAGE, href: `${ISSUER}/mfa` };
+const PAGE: StepUpPage = { url: "/verifier", params: {} };
+/** The stand-in's name and page as registered: what a row's admission names and carries. */
+const AUTHORITY = { name: "verifier", page: { ...PAGE, href: `${ISSUER}/verifier` } };
 
 const minutesAgo = (minutes: number): Date => new Date(Date.now() - minutes * 60_000);
 
@@ -77,15 +78,16 @@ const passwordSession = (amr: readonly string[], mfaAt?: Date): UserSession => (
 const KNOWN_PRIMARIES: ReadonlySet<string> = new Set(["pwd", "fed"]);
 
 /**
- * A stand-in for the MFA requirement's `admit`: its table for the `use`
- * grade, under `mode` with `reach` — the MFA package's own requirement runs
- * the same rows in that package.
+ * A stand-in for the second-factor authority — the MFA requirement's `admit`:
+ * its table for the `use` grade, under `mode` with `reach`. The MFA package's
+ * own requirement runs the same rows in that package.
  */
-const mfaRequirement = (mode: MfaMode, reach: ReadonlySet<string>): SessionRequirement => ({
-	name: "mfa",
+const authority = (mode: MfaMode, reach: ReadonlySet<string>): SessionRequirement => ({
+	name: AUTHORITY.name,
+	secondFactorAuthority: true,
 	reach,
 	stepUpPage: reach.size > 0 ? PAGE : undefined,
-	remediations: ["mfa.step_up"],
+	remediations: [`${AUTHORITY.name}.step_up`],
 	hintKeys: ["enrollable", "email_proof"],
 	admit: async ({ session, authentication }) => {
 		if (mode !== "required") return { outcome: "met" };
@@ -124,7 +126,7 @@ const deps = (session: UserSession | null, requirements: SessionRequirement[]): 
 });
 
 const decide = (row: MergeRow): Promise<Admission> =>
-	admitSession(deps(row.session, [mfaRequirement(row.mode, MERGE_REACH[row.factors])]), {
+	admitSession(deps(row.session, [authority(row.mode, MERGE_REACH[row.factors])]), {
 		claim: claim(),
 		action: ADMISSION_ACTIONS["oauth.authorize"],
 		asks: { acrValues: row.acrValues ?? [] },
@@ -133,7 +135,7 @@ const decide = (row: MergeRow): Promise<Admission> =>
 for (const group of MERGE_ROW_GROUPS) {
 	describe(group.title, () => {
 		it.each(group.rows)("$row", async (row) => {
-			expect(await decide(row)).toEqual(mergeAdmission(row.expected, row.session, REGISTERED_PAGE));
+			expect(await decide(row)).toEqual(mergeAdmission(row.expected, row.session, AUTHORITY));
 		});
 	});
 }
