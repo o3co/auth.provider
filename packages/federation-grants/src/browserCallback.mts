@@ -23,13 +23,10 @@
 
 import {
 	coveredByRevocationBoundary,
-	type FederationGrantAcquisitionConnection,
 	type FederationGrantConnectTransaction,
 	type FederationGrantIntent,
 	type FederationGrantStore,
 	federationGrantAuditMetadata,
-	federationGrantAuthorizationRevision,
-	federationGrantIdentityRevision,
 	isFederationUpstreamOutage,
 	judgeUpstreamAccessToken,
 	parseScopeTokens,
@@ -42,7 +39,7 @@ import type {
 	FederationGrantDelegatedAuthorizer,
 	Unanswered,
 } from "./browserFlow.mjs";
-import { sessionHolds } from "./browserJudgement.mjs";
+import { pinned, sessionHolds } from "./browserJudgement.mjs";
 import { callbackParamsOf, claimOf, single } from "./browserRequest.mjs";
 import { requestIdOf } from "./requestId.mjs";
 
@@ -472,21 +469,4 @@ async function readBoundary(
 		throw new TypeError("the boundary is neither a date nor null");
 	}
 	return boundary;
-}
-
-/** Whether the connection is still what the intent was lodged against. */
-function pinned(
-	connection: FederationGrantAcquisitionConnection | undefined,
-	intent: FederationGrantIntent,
-): connection is FederationGrantAcquisitionConnection {
-	return (
-		connection !== undefined &&
-		// Not in either revision, and still pinned: a connection re-pointed onto another
-		// federation entry mid-flow would have check 5 ask about a registration boot
-		// never probed.
-		connection.federation === intent.federation &&
-		federationGrantIdentityRevision(connection) === intent.identityRevision &&
-		federationGrantAuthorizationRevision(connection) === intent.authorizationRevision &&
-		connection.callbackUri === intent.callbackUri
-	);
 }
