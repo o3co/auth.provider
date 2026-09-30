@@ -1196,9 +1196,10 @@ export interface ContributionKindGuardedDetails {
  * `rateLimitBudgets`, `federationTypes` or `admissionActions` container that
  * is not a record (an array, a function, `null`) — `name` then absent — a
  * `rateLimitBudgets` prefix that is empty or holds `:` — no limiter key
- * carries it — a `federationTypes` declaration that is not an object with a
- * Zod `entrySchema` and a `factory`, or an `admissionActions` entry whose
- * name, declaration or grade registration refuses. `problem` says which.
+ * carries it — or names an `Object.prototype` member, a `federationTypes`
+ * declaration that is not an object with a Zod `entrySchema` and a
+ * `factory`, or an `admissionActions` entry whose name, declaration or grade
+ * registration refuses. `problem` says which.
  */
 export interface ContributionMalformedDetails {
 	readonly reason: "contribution-malformed";
