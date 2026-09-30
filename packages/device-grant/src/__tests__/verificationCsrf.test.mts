@@ -93,7 +93,7 @@ const makeDeps = (overrides: { csrfGuard?: unknown } = {}) => {
 					"code-lifetime-seconds": 600,
 					"polling-interval-seconds": 5,
 					// Present because the module refuses to mount without it, and
-					// the budget in force below agrees with it.
+					// the contributed budget below agrees with it.
 					rateLimit: { limit: 50, windowSeconds: 300 },
 				},
 			},

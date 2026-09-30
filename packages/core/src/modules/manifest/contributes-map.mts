@@ -165,7 +165,8 @@ export type TokenBindingMechanismFactory<Deps> = (
  *
  * Answer parsed numbers (through the module's schema, coercing environment
  * strings, or `requireUsableConfiguredRateLimitSpec`): the budget is held to
- * `isUsableRateLimitSpec` as answered, and `"20"` is not a limit.
+ * `isBoundedRateLimitSpec` as answered — a window of at most a year — and
+ * `"20"` is not a limit.
  *
  * `null` claims the prefix with no budget of its own — keyed with none, or
  * switched off by the module's settings: absent from `rateLimitBudgetResolver`,

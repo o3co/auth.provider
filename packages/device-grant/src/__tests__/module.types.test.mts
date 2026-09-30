@@ -31,7 +31,7 @@ const REQUIRES = [
 	"keyStore",
 	// The session-admission ADR's D1: every consumer of admission requires it.
 	"sessionRequirementResolver",
-	// The budgets in force: the verification route holds its own to its configuration.
+	// The contributed budgets: the verification route holds its own to its configuration.
 	"rateLimitBudgetResolver",
 ] as const;
 const OPTIONAL = [

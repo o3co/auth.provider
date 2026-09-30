@@ -84,7 +84,7 @@ describe("the MFA module's routes budget", () => {
 });
 
 describe("the MFA module's routes budget, through createApp", () => {
-	it("registers mfa.rateLimit.routes as the budget in force for mfa", async () => {
+	it("registers mfa.rateLimit.routes as the contributed budget for mfa", async () => {
 		const { handle } = await boot({
 			config: configFor("optional", { rateLimit: { routes: { limit: 13, windowSeconds: 240 } } }),
 		});
