@@ -26,12 +26,23 @@ import type { ModuleSection } from "../modules/manifest/module-section.mjs";
 /** Core's declaration: the two fields of a module's `section` that say where it moved from. */
 export type CoreRelocations = Pick<ModuleSection, "relocatedFrom" | "renamedVariables">;
 
-/** `core`, frozen with every map it holds. */
+/** `core`, frozen with every map it holds and every entry of them. */
 const frozen = (core: CoreRelocations): CoreRelocations =>
 	Object.freeze({
 		...(core.relocatedFrom === undefined
 			? {}
-			: { relocatedFrom: Object.freeze(core.relocatedFrom) }),
+			: {
+					relocatedFrom: Object.freeze(
+						Array.isArray(core.relocatedFrom)
+							? core.relocatedFrom
+							: Object.fromEntries(
+									Object.entries(core.relocatedFrom).map(([from, to]) => [
+										from,
+										typeof to === "object" && to !== null ? Object.freeze({ ...to }) : to,
+									]),
+								),
+					),
+				}),
 		...(core.renamedVariables === undefined
 			? {}
 			: { renamedVariables: Object.freeze(core.renamedVariables) }),
@@ -40,9 +51,13 @@ const frozen = (core: CoreRelocations): CoreRelocations =>
 /**
  * Core's shipped declaration, frozen whole: the replica count and the
  * expected session requirements moved into `core`, and `DEPLOYMENT_MODE`
- * renamed with the first.
+ * renamed with the first. No variable sets the expected session
+ * requirements.
  */
 export const CORE_RELOCATIONS: CoreRelocations = frozen({
-	relocatedFrom: { deployment: "deployment", sessionRequirements: "sessionRequirements" },
+	relocatedFrom: {
+		deployment: "deployment",
+		sessionRequirements: { to: "sessionRequirements", environmentVariable: null },
+	},
 	renamedVariables: { DEPLOYMENT_MODE: "deployment.mode" },
 });

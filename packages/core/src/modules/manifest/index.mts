@@ -52,7 +52,12 @@ export {
 	type FederationTypeDeclaration,
 } from "./define-federation-type.mjs";
 export { defineModule } from "./define-module.mjs";
-export type { ModuleSection, SectionDeps, SectionSchema } from "./module-section.mjs";
+export type {
+	ModuleSection,
+	RelocationWithoutVariable,
+	SectionDeps,
+	SectionSchema,
+} from "./module-section.mjs";
 export type {
 	ComponentLifecycle,
 	ConfigSchema,

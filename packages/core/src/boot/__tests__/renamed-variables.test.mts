@@ -621,9 +621,14 @@ describe("a renamed variable — core's own section, as it ships", () => {
 		expect(err.message).not.toContain('module "core" comes from');
 	});
 
-	it("ships a declaration frozen with every map it holds", () => {
+	it("ships a declaration frozen with every map it holds, and every entry of them", () => {
 		expect(Object.isFrozen(CORE_RELOCATIONS)).toBe(true);
-		for (const map of Object.values(CORE_RELOCATIONS)) expect(Object.isFrozen(map)).toBe(true);
+		for (const map of Object.values(CORE_RELOCATIONS)) {
+			expect(Object.isFrozen(map)).toBe(true);
+			for (const entry of Object.values(map)) {
+				if (typeof entry === "object" && entry !== null) expect(Object.isFrozen(entry)).toBe(true);
+			}
+		}
 	});
 
 	it("holds its declaration as a module's: a name that did not change is refused", () => {

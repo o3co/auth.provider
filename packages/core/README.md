@@ -31,7 +31,7 @@ A composition root resolves its configuration — its own files over the `refere
 2. laid over what was written, so a key no schema declares is kept — at the top, and under a section core declares;
 3. then with each loaded module's `configSchema`, over the base's output, and with each module's own section at its path, written back there: a loaded module's section is never stripped.
 
-A value any of them refuses refuses boot (`config-validation-failed`), naming each path the operator wrote. A top-level section nothing loaded owns is kept and named once in the log — `config_sections_ignored`, at `warn`, with the names, to the logger bootstrapped beside the configuration — which is where a misspelt section name shows. While core's schema still mirrors other packages' sections (below), it names none of them: a mirrored section counts as owned, loaded module or not. What boot parsed is the `config` slot; read it from the handle.
+A value any of them refuses refuses boot (`config-validation-failed`), naming each path the operator wrote. A top-level section nothing loaded owns is kept and named once in the log — `config_sections_ignored`, at `warn`, with the names, to the logger bootstrapped beside the configuration — which is where a misspelt section name shows. A section that holds no key sets nothing and is not named, as core's own `reference.conf` leaves `jwks` when `JWKS_PATH` and `JWKS_CACHE_MAX_AGE` are unset. While core's schema still mirrors other packages' sections (below), it names none of them: a mirrored section counts as owned, loaded module or not. What boot parsed is the `config` slot; read it from the handle.
 
 ```typescript
 import { fileURLToPath } from "node:url";

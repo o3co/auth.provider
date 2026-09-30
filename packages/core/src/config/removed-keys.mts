@@ -318,25 +318,34 @@ export function withoutRenamedVariables(config: unknown): unknown {
 }
 
 /**
+ * What `createApp` was handed as the configuration: an object, nothing, or a
+ * value that is not an object.
+ */
+export type HandedConfiguration = "object" | "none" | "not-an-object";
+
+/**
  * What to tell the operator whose environment breaks a rename, in the words a
  * relocated key is refused in, or the composition that captures no value for
- * it: that it handed no configuration (`configured` false), or which
- * `reference.conf` captures the names — core's own for module "core", else
- * the module's `section.reference`. Names the variables and the paths, never
- * a value: a variable may carry a secret.
+ * it: that it handed no configuration, or one that is not an object
+ * (`handed`), or which `reference.conf` captures the names — core's own for
+ * module "core", else the module's `section.reference`. Names the variables
+ * and the paths, never a value: a variable may carry a secret.
  */
 export function renamedVariableMessage(
 	rename: RenamedVariable & {
 		readonly module: string;
 		readonly state: RenamedVariableState;
 	},
-	configured = true,
+	handed: HandedConfiguration = "object",
 ): string {
 	const names = rename.to === null ? rename.from : `${rename.from} or ${rename.to}`;
 	switch (rename.state) {
 		case "uncaptured": {
-			if (!configured) {
+			if (handed === "none") {
 				return `createApp was handed no configuration, so whether the environment sets ${names} cannot be told.`;
+			}
+			if (handed === "not-an-object") {
+				return `createApp was handed a configuration that is not an object, so whether the environment sets ${names} cannot be told.`;
 			}
 			const capturing =
 				rename.module === "core"
