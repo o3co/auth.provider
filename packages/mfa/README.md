@@ -10,15 +10,17 @@ Multi-factor authentication for [`auth.provider`](../../README.md): a second fac
 
 **Role.** Everything MFA needs that is not a shared port: the `mfa` session requirement it contributes to core's session admission — what the MFA ADR called the coordinator — the browser API under `/session/mfa/*`, the factors that are not another package's, the key ring and what is sealed under it, lockout and audit. Core holds the ports the factors and the stores share; a factor from another package (WebAuthn's) reaches the requirement as an `mfaFactors` contribution.
 
-**Owns, as of the build-order step 8's first two parts:**
+**Owns, as of the build-order step 8:**
 
 - the `mfa` session requirement — what MFA is to every consumer of a session, through core's admission — and `mfaModule`, which registers it as `sessionRequirements.mfa` and refuses the compositions that could not honour it;
 - the login's MFA transaction: opened when the requirement interrupts a password login, and the `403` the login is answered with;
+- the routes under `/session/mfa` — reading a transaction, a factor's challenge, a verification — and the login a verified second factor completes, with the audit events they emit;
 - the TOTP factor (RFC 6238 on `node:crypto`), contributed as `mfaFactors.totp` by `mfaTotpFactorModule`;
 - the sections its modules read — `mfa`, the MFA module's (the mode, the MFA page, the key ring, a transaction's life and attempts, the subject lock, recent MFA's window), `mfa-totp-factor`, the TOTP factor's module's, and `mfa-recovery-code-factor`, the recovery-code factor's module's — their defaults ([`config/reference.conf`](config/reference.conf), exported as `@o3co/auth-provider-mfa/reference.conf`) and their refusals, the development sample key among them;
-- sealing a factor's data and a ceremony's state under the key ring, and keyed digests for codes that are compared and never recovered — so that no factor holds a key.
+- sealing a factor's data and a ceremony's state under the key ring, and keyed digests for codes that are compared and never recovered — so that no factor holds a key;
+- its testing entry, `@o3co/auth-provider-mfa/testing` ([`src/testing/index.mts`](src/testing/index.mts)): what another package's tests use of this one.
 
-**Not yet here:** the recovery codes — their module and section are declared, and nothing reads the section; the routes under `/session/mfa` — reading a transaction, a challenge, a verification — completing a login, and audit (step 8's third part): until they land, a login the requirement interrupts cannot be finished, and `mfa_required` ends there; enrollment, the first binding and the enrollment witness — its writes, and its reads at login and before a self-service first binding (step 9); the lock and recovery codes (step 10); the step-up route, `POST /session/mfa/step-up`, which the MFA page calls to meet a step-up and which answers `404` until step 11; management and the operator reset (step 12).
+**Not yet here:** the recovery codes — their module and section are declared, and nothing reads the section; the subject lock and the weekly budget, so until step 10 a guessable code is bounded per transaction (`mfa.maxAttemptsPerTransaction`) and per client address (`mfa.rateLimit.routes`) alone; enrollment, the first binding and the enrollment witness — its writes, and its reads at login and before a self-service first binding (step 9); the lock and recovery codes (step 10); the step-up route, `POST /session/mfa/step-up`, which the MFA page calls to meet a step-up and which answers `404` until step 11; management and the operator reset (step 12).
 
 **Does not own:**
 
@@ -70,13 +72,14 @@ A key your `application.conf` sets shadows the substitution `reference.conf` mak
 
 ## Installing
 
-Installed is on (the session-admission ADR's D7): a composition that wants no MFA installs none of this package, and an `mfa` section it writes is one no module reads. The standalone template reads `mfa.mode` itself before it chooses its modules, and declares `mfa` from it, until it installs this package at the MFA ADR's build-order step 20. One that wants it lists `mfaModules({ environment })` — the TOTP factor's module, the recovery-code factor's and `mfaModule` — with an `MfaFactorStore` and an `MfaTransactionStore` (core's memory modules on one replica, `@o3co/auth-provider-redis`'s on several), the session package's login and its user-session store; sets `mfa.mode` to `optional` or `required`; and declares `"mfa"` in `core.sessionRequirements.expected`.
+Installed is on (the session-admission ADR's D7): a composition that wants no MFA installs none of this package, and an `mfa` section it writes is one no module reads. The standalone template reads `mfa.mode` itself before it chooses its modules, and declares `mfa` from it, until it installs this package at the MFA ADR's build-order step 20. One that wants it lists `mfaModules({ environment })` — the TOTP factor's module, the recovery-code factor's and `mfaModule` — with an `MfaFactorStore` and an `MfaTransactionStore` (core's memory modules on one replica, `@o3co/auth-provider-redis`'s on several), the session package's login, its `loginCompletionModule` and its user-session store; sets `mfa.mode` to `optional` or `required`; and declares `"mfa"` in `core.sessionRequirements.expected`.
 
-`mfaModule` requires `mfaFactorResolver`, `mfaFactorStore`, `mfaTransactionStore`, `userSessionStore`, `sessionRequirementResolver` and `deploymentMode` — core's, filled from `core.deployment.mode`, which the development sample key's refusal reads — and reads `auditSink` — its absence declared with `audit.sink.type = "none"` — and `logger`. It mounts `mfa-routes` (`MFA_ROUTES_ID`) at `/session/mfa`, after the session middleware; nothing answers there before step 8's third part. It contributes `mfa.rateLimit.routes` as the budget of the `mfa` prefix (`MFA_RATE_LIMIT_PREFIX`). The boot is refused:
+`mfaModule` requires `mfaFactorResolver`, `mfaFactorStore`, `mfaTransactionStore`, `userSessionStore`, `sessionRequirementResolver`, `csrfGuard` (every MFA POST runs it), `loginCompletion` (a verified second factor finishes the login through it: load the session package's `loginCompletionModule` beside `sessionModule`) and `deploymentMode` — core's, filled from `core.deployment.mode`, which the development sample key's refusal and the routes' limiter read — and reads `rateLimiter`, `auditSink` — its absence declared with `audit.sink.type = "none"` — and `logger`. It mounts `mfa-routes` (`MFA_ROUTES_ID`) at `/session/mfa`, after the session middleware (see [The routes](#the-routes)). It contributes `mfa.rateLimit.routes` as the budget of the `mfa` prefix (`MFA_RATE_LIMIT_PREFIX`). Without a `rateLimiter` the routes limit through a per-process one over that budget, which several replicas would each count apart: said once at warn (`mfa_rate_limiter_not_shared`) when `core.deployment.mode` is unset, silent under `single`. The boot is refused:
 
 - `mfa.mode = "off"`, or unset, with the module installed: remove the module, or set the mode;
 - once every factor has registered, for what a first binding's `hints.enrollable` would have to list, each `cause` carrying a `reason`: an enabled factor — this package's or another's — whose kind core's hint grammar refuses (`^[a-z][a-z0-9_-]{0,63}$`; `MfaFactorKindUnhintableError`, `mfa-factor-kind-unhintable`, naming the kind); more than 16 enabled counting factors, the most a hint list carries (`MfaTooManyFactorsError`, `mfa-too-many-factors`); and `mfa.mode = "required"` with no counting factor enabled, which nobody could meet (`MfaNoCountingFactorError`, `mfa-no-counting-factor`: it names the enabled factors that do not count, and asks for an installed counting factor's `enabled` key — the TOTP factor's, `mfa-totp-factor.enabled` (`MFA_TOTP_FACTOR_ENABLED`), where its module is installed);
-- without a `userSessionStore`, at the requires-closure, naming the slot;
+- without a `userSessionStore`, a `csrfGuard` or a `loginCompletion`, at the requires-closure, naming the slot;
+- under `core.deployment.mode = "multi"` without a `rateLimiter` (`replica-unsafe-adapter`): the routes' per-process limiter would count per replica;
 - for a key ring, a transaction life, attempts or a lock the settings refuse (above), and without `mfa.page.url`, the page a step-up starts on (`MFA_PAGE_URL`; `reference.conf` ships `/mfa`);
 - by core, when the requirement's reach is not what the enabled factors reach, when `mfa` is not declared in `core.sessionRequirements.expected`, or when another installed requirement declares the second-factor authority too (`duplicate-second-factor-authority`).
 
@@ -105,11 +108,38 @@ A password login the requirement interrupts is answered `403` once the express s
   "hints": { "enrollable": ["totp"], "email_proof": false } }
 ```
 
-- `transaction` is 32 random bytes, base64url. It is not a bearer: every use compares the session it is bound to with the browser's, so the page keeps the cookie the `403` set. It travels only in request bodies and the `MFA-Transaction` request header, which the MFA routes will read (step 8's third part) — never in a URL.
+- `transaction` is 32 random bytes, base64url. It is not a bearer: every use compares the session it is bound to with the browser's, so the page keeps the cookie the `403` set. It travels only in request bodies and the `MFA-Transaction` request header — never in a URL.
 - `expires_in` is `mfa.transactionTtlSeconds`; the transaction expires then, and the user starts again from the password.
 - `mfa_required`: the subject holds a factor; the page asks for it.
 - `mfa_enrollment_required` (`required`, no factor on record): `hints.enrollable` lists the counting factors this user may enroll, in registration order; `hints.email_proof` says whether an account-email proof comes first — `false` until step 9 wires mail.
 - The `403` carries a fresh CSRF token, as a successful login does.
+
+## The routes
+
+Mounted at `/session/mfa` ([`src/routes.mts`](src/routes.mts), over the coordinator in [`src/coordinator.mts`](src/coordinator.mts)); the page is the deployment's (the MFA ADR's D6). A login's transaction is the one the routes complete in this build.
+
+- **Every answer** carries `Cache-Control: no-store`.
+- **Every POST** sits behind the deployment's CSRF guard (`csrfGuard`: the session's double-submit token, or a same-origin `Origin` / `Referer`; refused `403 access_denied`), then the flood guard, `mfa.rateLimit.routes` per client address under `mfa:ip:<ip>` (`429 rate_limited`), before anything is read. Bodies are JSON or a form, parsed on these paths alone.
+- **The transaction id** travels in the body's `transaction_id` or the `MFA-Transaction` header — the header alone on the `GET` — and never in a URL; two that disagree name none. A transaction bound to another browser, missing, malformed, spent, expired, or not a login's is answered alike, spending nothing: `400 {"error":"invalid_request","error_description":"Unknown or expired MFA transaction"}`.
+- **A factor** is named by `factor_id`, one of the subject's that an installed factor verifies; anything else is `400 {"error":"invalid_request","error_description":"Unknown second factor"}`, spending nothing.
+- **An outage** — a store that cannot answer, a factor whose data does not open, a factor that throws — is `503 {"error":"temporarily_unavailable","error_description":"MFA temporarily unavailable"}`, logged once at error; never a wrong code, never "no factor".
+
+| Route | Answers |
+| --- | --- |
+| `GET /session/mfa/transaction` (`MFA-Transaction: <id>`) | `200 {"purpose":"login", "factors":[{"id","kind","label"?,"hint"?}], "enrollment":"none"\|"required", "email_proof":false, "expires_in":<s>, "attempts_remaining":<n>}` — the subject's factors an installed factor verifies, oldest first, never their data |
+| `POST /session/mfa/challenge` `{transaction_id, factor_id}` | `200 {}` for a factor that needs no challenge (TOTP). A factor with one: its answer (`200` with the factor's JSON object), its state sealed on the transaction until the transaction's expiry; audited `mfa.challenge.sent`. A factor that cannot issue it is `503`, and nothing is kept |
+| `POST /session/mfa/verify` `{transaction_id, factor_id, proof}` | `200 {"message":"Logged in successfully"}`, the session established on a regenerated session id with a fresh CSRF token (as `POST /session/login`'s `200`); or another requirement's `403`, as the login answers one; `401 {"error":"mfa_invalid", …, "attempts_remaining":<n>}` for a proof refused; `401 {"error":"login_required"}` for a login core will not resume |
+| `POST /session/mfa/step-up` | `404` until step 11 |
+
+**A verification**, in order: the bound read (`getBoundMfaTransaction`), after which only operations that carry the version it read, and `reserveAttempt` once it held; the factor's data opened (before an attempt is spent, so an outage spends none); an attempt reserved (`mfa.maxAttemptsPerTransaction`; past it the store ends the transaction and the answer is `401 mfa_invalid` with `attempts_remaining: 0`, audited `exhausted`) — so N codes sent at once spend N attempts; the factor's challenge taken, when it has one; the proof checked (`401 mfa_invalid` and `mfa.verify.failure` with its `reason`); **the transaction consumed**, before anything else is written — so of N right proofs sent at once one completes and the rest are answered `400` as a spent transaction, and a verification that loses the transaction writes nothing to the factor; the factor's next state written by compare-and-set on its version, re-sealed under the ring's first key, with `lastUsedAt` — a lost compare-and-set reads the factor and checks the proof again, so a TOTP code used in two logins at once completes one (RFC 6238 §5.2); `mfa.verified`; then the login.
+
+**The login's completion.** The verification's additions — the factor's `amr` values, `mfa` when the factor adds it, and `mfaAt` — go to core's `resumePrimary` with the continuation the transaction carried, and every other requirement not yet done in that login is asked. `establish` is written through the `loginCompletion` slot, the session recording `amr` `["pwd", "otp", "mfa"]` for a TOTP login and `authentication.mfaAt`; another requirement's interruption is answered through it too (its ceremony on a regenerated session, its `403` with a fresh CSRF token). A requirement's store that cannot answer is `503` with admission's line; a session store that cannot is `503 {"error":"temporarily_unavailable","error_description":"Session store unavailable"}`, rolled back.
+
+**Audit** (the MFA ADR's D28), each with `subject`, `ip`, `userAgent`, and `kind` and `purpose` in its details: `mfa.challenge.sent`; `mfa.verified`; `mfa.verify.failure`, with `reason` — `invalid`, `expired`, `replayed`, `malformed`, `sign_count_regression` or `exhausted`.
+
+**Logs** never carry the transaction id, a proof, a secret or a factor's data: `mfa_store_unavailable` (error: `route`, `store` — `mfa_transaction`, `mfa_factor`, `user_session`, `cookie_session` or an interrupting requirement's name — `step`, the error's projection), `mfa_factor_unreadable` (error: `route`, `kind`, `factorId`, `state` — `unreadable`, `key_unavailable` with the `keyId` to put back, or `verification`), `mfa_factor_challenge_unavailable` (error: `kind`, `factorId`), `mfa_login_not_resumed` (warn), `mfa_login_cleanup_failed` (warn), `subject_session_index_write_failed` (error), `mfa_rate_limiter_not_shared` (warn, at boot), and the sealing's `mfa_factor_sealed_with_retired_key` and `mfa_digest_made_with_retired_key` (info, once per key id: a key still needed, by sealed data or by a stored digest).
+
+The suites that pin these: `src/__tests__/routes.*.test.mts`.
 
 ## The TOTP factor
 
@@ -134,3 +164,11 @@ A password login the requirement interrupts is answered `403` once the express s
 | [`mfaRecoveryCodeFactorModule`](src/recovery/module.mts) | The recovery-code factor's module, `mfa-recovery-code-factor`: its section alone |
 | [`mfaConfigSchema`](src/config.mts) | The shapes and ranges of the MFA module's `mfa` section — the mode, the page, the transaction's life and attempts, the lock's fields, recent MFA's window — not the ring's, the sample key's or how the lock's fields relate, which reading the settings checks |
 | [`MFA_DEVELOPMENT_SAMPLE_KEY`](src/config.mts) | The published development key, refused outside development |
+
+The testing entry, `@o3co/auth-provider-mfa/testing` ([`src/testing/index.mts`](src/testing/index.mts)), for tests only:
+
+| Export | What it is |
+| --- | --- |
+| `mfaConfigForTests`, `mfaTotpFactorConfigForTests`, `mfaRecoveryCodeFactorConfigForTests` | Each of the package's sections as a configuration fragment at its name, the reference defaults with the options given laid over them — what another package's tests build these sections with |
+| `seedTotpFactor` | Stores a TOTP factor (SHA1, 6 digits, 30 s) for a subject, its data sealed under the ring of a configuration's `mfa` section, as an enrollment leaves it |
+| `totpCodeForTests` | The code such a factor takes at a time, a number of steps away |

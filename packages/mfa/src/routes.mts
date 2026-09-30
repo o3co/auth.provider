@@ -112,16 +112,17 @@ const postedTransactionId = (req: Request): string | undefined => {
 };
 
 /** The ceremony call a request makes, naming `transactionId`. */
-const callOf = (req: Request, transactionId: string | undefined): MfaCeremonyCall => ({
-	transactionId,
-	binding: { kind: "session", id: sessionIdOf(req) },
-	request: {
-		...(typeof req.ip === "string" ? { ip: req.ip } : {}),
-		...(headerOf(req, "user-agent") === undefined
-			? {}
-			: { userAgent: headerOf(req, "user-agent") as string }),
-	},
-});
+const callOf = (req: Request, transactionId: string | undefined): MfaCeremonyCall => {
+	const userAgent = headerOf(req, "user-agent");
+	return {
+		transactionId,
+		binding: { kind: "session", id: sessionIdOf(req) },
+		request: {
+			...(typeof req.ip === "string" ? { ip: req.ip } : {}),
+			...(userAgent === undefined ? {} : { userAgent }),
+		},
+	};
+};
 
 /** Every answer of these routes is kept by no cache. */
 const noStore: RequestHandler = (_req, res, next) => {
