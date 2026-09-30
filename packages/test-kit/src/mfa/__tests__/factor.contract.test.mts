@@ -495,7 +495,10 @@ describe("mfaFactorContract", () => {
 						verify: async (ctx) => {
 							const verdict = await factor.verify(ctx);
 							return verdict.ok
-								? { ...verdict, next: { ...ctx.factor.data, lastTo: QUOTED.email } }
+								? {
+										...verdict,
+										next: { ...(verdict.next ?? ctx.factor.data), lastTo: QUOTED.email },
+									}
 								: verdict;
 						},
 					}),
@@ -516,14 +519,15 @@ describe("mfaFactorContract", () => {
 			expect(
 				await failing(challenging((sent) => ({ ...sent, mail: { ...sent.mail, addressDigest } }))),
 				JSON.stringify(addressDigest),
-			).toEqual([RULES.challengeMail]);
+			).toEqual([RULES.challengeMail, RULES.rotated]);
 		}
-		// Null is for data that holds no digest, never for data that does.
+		// Null is for data that holds no digest, never for data that does. Each is
+		// mailed at every challenge, the one after a rotation too.
 		expect(
 			await failing(
 				challenging((sent) => ({ ...sent, mail: { ...sent.mail, addressDigest: null } })),
 			),
-		).toEqual([RULES.challengeMail]);
+		).toEqual([RULES.challengeMail, RULES.rotated]);
 	});
 
 	it("fails a factor that records a digest of the account's address as it reads at completion, or at a verification anything but the digest it was handed", async () => {

@@ -25,9 +25,12 @@
  * hands the factor back after; a code asked to be mailed only for the call's
  * purpose, with an expiry after now when one is given, another at each
  * challenge, a login code with the keyed digest of the account's address, and
- * in no form in the page's response; the address digest it records the one
- * it is handed — of the address its code went to, as the coordinator kept it
- * at the send — whatever the account's address reads by then; over data
+ * in no form in the page's response; the address digest it records exactly
+ * the one it is handed — of the address its code went to, as the coordinator
+ * kept it at the send — never one of the address the account answers at the
+ * start or by the completion, and no completion without one; a digest a
+ * verification is handed under a newer key kept in its next data and mailed
+ * by the next challenge; over data
  * whose digest is gone or unreadable, a login code still asked for, with a
  * `null` digest, which the coordinator refuses; no answer — state,
  * response, data, label — carrying the account's address, as given or as
@@ -93,6 +96,9 @@ export interface MfaFactorContractInput {
 
 /** The address the account's user record answers after the code went out, in the cases that change it. */
 const MOVED_ADDRESS = "mfa-contract-moved@attacker.example";
+
+/** An address neither the start nor the completion reads, whose digest the suite hands a completion. */
+const HANDED_ADDRESS = "mfa-contract-sent-to@example.org";
 
 /** What the suite puts where a factor's address digest was, to see it read as none. */
 const UNREADABLE_DIGESTS: readonly unknown[] = [
@@ -570,16 +576,20 @@ export function mfaFactorContract(input: MfaFactorContractInput): readonly Contr
 			},
 		},
 		{
-			name: "the address digest a factor records is the one it is handed — of the address its code went to, kept at the send — at an enrollment's completion and at a verification under a newer key, whatever the account's address reads by then",
+			name: "completeEnrollment records exactly the address digest it is handed — of the address its code went to, kept at the send — never one of the address the account answered at the start or answers by the completion",
 			run: async () => {
 				const factor = input.build();
 				const begun = await begin(factor);
 				if (begun.sentTo === undefined) return;
-				// The Store answers another address by the completion.
+				// The digest of an address neither the start nor the completion reads:
+				// only what the factor is handed can put it in its data.
+				const handed = digestOfAddress(begun.context.digests, {
+					email: HANDED_ADDRESS,
+				}) as MfaKeyedDigest;
 				const moved = { ...input.user, email: MOVED_ADDRESS };
 				const done = await complete(
 					factor,
-					begun,
+					{ ...begun, sentTo: handed },
 					await input.enrollmentProof(begun.start, begun.context),
 					moved,
 				);
@@ -587,27 +597,50 @@ export function mfaFactorContract(input: MfaFactorContractInput): readonly Contr
 					done.ok,
 					`the proof of possession did not complete the enrollment: ${JSON.stringify(done)}`,
 				);
-				const kept = decodedStrings(done.data);
 				assert.ok(
-					kept.includes(begun.sentTo.digest),
+					pathTo(done.data, handed) !== undefined,
 					"the enrolled data does not keep the address digest it was handed: the address its code went to",
 				);
-				const movedDigest = digestOfAddress(begun.context.digests, moved)?.digest;
-				assert.ok(
-					!kept.includes(movedDigest as string),
-					"the enrolled data keeps a digest of the address the account answers by now, not of the one its code went to",
+				const kept = decodedStrings(done.data);
+				for (const [when, user] of [
+					["the start", input.user],
+					["the completion", moved],
+				] as const) {
+					const read = digestOfAddress(begun.context.digests, user)?.digest;
+					assert.ok(
+						read === undefined || !kept.includes(read),
+						`the enrolled data keeps a digest of the address the account answered at ${when}, not the one it was handed`,
+					);
+				}
+			},
+		},
+		{
+			name: "completeEnrollment, after its code was mailed, completes nothing when it is handed no address digest",
+			run: async () => {
+				const factor = input.build();
+				const begun = await begin(factor);
+				if (begun.sentTo === undefined) return;
+				const done = await complete(
+					factor,
+					{ ...begun, sentTo: undefined },
+					await input.enrollmentProof(begun.start, begun.context),
 				);
-				const enrolled: MfaEnrolledFactor = {
-					id: FACTOR_ID,
-					label: done.label,
-					createdAt: new Date(ENROLLED_AT_MS),
-					lastUsedAt: undefined,
-					data: reopened(done.data),
-				};
+				assert.ok(
+					!done.ok,
+					"a completion after a mailed code, handed no address digest, completed: what it recorded is no address a code went to",
+				);
+			},
+		},
+		{
+			name: "verify, handed the address digest under a newer key than the one recorded, keeps it in its next data, and a later challenge mails it",
+			run: async () => {
+				const factor = input.build();
 				if (factor.challenge === undefined) return;
+				const enrolled = await enroll(factor);
 				const { context, sent } = await challenge(factor, enrolled);
 				if (sent?.mail === undefined) return;
-				// The ring's first key has changed since: the handed digest is under the newer one.
+				// The ring's first key has changed since the enrollment: the digest kept at
+				// the send is under the newer one.
 				const rotated = createTestMfaDigests(factor.kind, { rotated: true });
 				const handed = digestOfAddress(rotated, input.user) as MfaKeyedDigest;
 				const verdict = await factor.verify({
@@ -620,11 +653,22 @@ export function mfaFactorContract(input: MfaFactorContractInput): readonly Contr
 					proof: await input.verificationProof(enrolled, sent, context),
 				});
 				assert.ok(verdict.ok, `a valid proof was refused: ${JSON.stringify(verdict)}`);
-				if (verdict.next === undefined) return;
-				const next = decodedStrings(verdict.next);
 				assert.ok(
-					next.includes(handed.digest) || next.includes(begun.sentTo.digest),
-					"the factor's next data keeps neither the address digest it was handed nor the one it recorded",
+					verdict.next !== undefined && pathTo(verdict.next, handed) !== undefined,
+					"the factor's next data does not keep the address digest it was handed under the newer key: the older key could never leave the ring",
+				);
+				const rewrapped: MfaEnrolledFactor = { ...enrolled, data: reopened(verdict.next) };
+				const later = await factor.challenge({
+					...contextAt(factor, subjectOf(input.user), VERIFIED_AT_MS + 60_000, "contract-later"),
+					digests: rotated,
+					factor: rewrapped,
+					factors: [rewrapped],
+				});
+				const mailed = (later.mail as { readonly addressDigest?: unknown } | undefined)
+					?.addressDigest;
+				assert.ok(
+					isKeyedDigest(mailed) && mailed.keyId === handed.keyId && mailed.digest === handed.digest,
+					"a later challenge does not mail the address digest kept under the newer key",
 				);
 			},
 		},
