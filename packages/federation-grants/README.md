@@ -618,7 +618,9 @@ nothing else; the grant keeps working.
 
 The answer is held to the deployment's CSRF policy — the `csrfGuard` slot the
 session module provides, the rule `POST /session/login` runs — before the
-session or the challenge is read, so a refused answer spends nothing:
+route reads the answer's session binding, the challenge or the intent store,
+so a refused answer spends no consent (the session middleware and the route's
+throttle run before it, as on every route):
 
 - **The page's form post.** The page is on the provider's origin
   (`federationGrants.consent.url` must be) and posts the answer as a form. The

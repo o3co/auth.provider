@@ -309,7 +309,8 @@ const requireCsrfGuard = (
 				"session cookie and is held to the deployment's CSRF policy — the one /session/login runs, " +
 				"an Origin/Referer check against session.csrf.trustedOrigins and a signed double-submit " +
 				"token — through the csrfGuard slot the session module (sessionModule) provides. " +
-				"Install the session module, or leave federation grants disabled.",
+				"Install the session module, fill the csrfGuard slot with a guard of your own that keeps " +
+				"core's CsrfGuard contract, or leave federation grants disabled.",
 		);
 	}
 	if (typeof guard.check !== "function") {

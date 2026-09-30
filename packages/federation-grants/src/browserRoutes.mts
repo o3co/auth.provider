@@ -887,8 +887,8 @@ export function createFederationGrantBrowserRouter(
 		parserRefusals,
 		admitted(shuttingDownJson, async (req, res) => {
 			try {
-				// Asked before the session or the challenge is read, so a refused
-				// answer spends nothing.
+				// Asked before the route reads the session binding, the challenge or
+				// the intent store, so a refused answer spends no consent.
 				const refusal = csrfRefusal(options.csrfGuard.check(req));
 				if (refusal !== null) {
 					log.refused("federation_grant_consent_csrf_refused", {
