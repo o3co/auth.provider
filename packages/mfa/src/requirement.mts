@@ -52,6 +52,7 @@ import {
 	FEDERATED_AMR,
 	type Logger,
 	MFA_AMR,
+	type MfaFactorRecord,
 	type MfaFactorResolver,
 	type MfaFactorStore,
 	PASSWORD_AMR,
@@ -214,7 +215,7 @@ export function createMfaRequirement(options: MfaRequirementOptions): SessionReq
 	};
 
 	/** The subject's factor records; a store that cannot answer, or answers something other than a list, throws. */
-	const listRecords = async (subject: string): Promise<readonly unknown[]> => {
+	const listRecords = async (subject: string): Promise<readonly MfaFactorRecord[]> => {
 		const records: unknown = await factorStore.list(subject);
 		if (!Array.isArray(records)) {
 			throw new TypeError("MfaFactorStore.list answered something that is not a list");
@@ -222,13 +223,15 @@ export function createMfaRequirement(options: MfaRequirementOptions): SessionReq
 		return records;
 	};
 
-	/** Whether any of the subject's records is of a kind that counts: one no installed factor declares non-counting does. */
+	/**
+	 * Whether the subject holds a counting factor: a record counts unless an
+	 * installed factor of its kind declares it does not, so a kind no longer
+	 * installed counts.
+	 */
 	const holdsCountingFactor = async (subject: string): Promise<boolean> =>
-		(await listRecords(subject)).some(
-			(record) => factors.get((record as { kind: string }).kind)?.counting !== false,
-		);
+		(await listRecords(subject)).some((record) => factors.get(record.kind)?.counting !== false);
 
-	/** The answer where a second factor would meet the rule: a step-up, where one can finish and be recorded. */
+	/** Where a second factor would meet the rule: a step-up, `unmet` when no factor could finish one, a new login when none could be recorded. */
 	const stepUp = (): RequirementVerdict => {
 		if (reach().size === 0) return UNMET;
 		return stepUpRecordable ? STEP_UP : REAUTHENTICATE;
