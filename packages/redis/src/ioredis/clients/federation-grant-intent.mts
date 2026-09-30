@@ -16,7 +16,8 @@
 
 /**
  * The federation grant intent store's client: five operations one script each, and two plain
- * reads. A reply a script does not document throws rather than reading as an answer.
+ * reads. An admission or answer reply the script does not document throws rather than
+ * reading as an answer.
  */
 
 import type { Redis } from "ioredis";

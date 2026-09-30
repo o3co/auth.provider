@@ -17,7 +17,7 @@
 /**
  * Clients for the session stores: the session record, the indexes keyed by sid, the subject's
  * session index and its revocation record. A pipeline's `exec` rejects when a queued command
- * failed, so no mutation is left without the expiry queued with it.
+ * failed, so a mutation whose paired expiry failed is never reported as written.
  */
 
 // --- UserSessionStoreClient ------------------------------------------------

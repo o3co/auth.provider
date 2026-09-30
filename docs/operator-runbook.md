@@ -1121,7 +1121,9 @@ session adapters issue `PEXPIREAT … NX` + `PEXPIREAT … GT`, `PEXPIRETIME` ba
 the monotonic watermark, `GETDEL` backs code consumption; and **Lua** — the
 rate-limit increment, the lock release, the watermark write and the subject
 sweep are `EVALSHA`/`EVAL` scripts with a `NOSCRIPT` fallback that re-loads
-after a `SCRIPT FLUSH` or a failover (`packages/redis/src/ioredis/commands.mts`). Redis
+after a `SCRIPT FLUSH` or a failover (`packages/redis/src/ioredis/`: the classifier
+in `commands.mts`, the fallbacks in `clients/federation-tokens.mts` and
+`clients/user-sessions.mts`). Redis
 Cluster with Lua disabled is not supported by `makeIoredisClients`. Nothing in
 the key layout groups a session's keys into one slot: the only Cluster-safety
 claim the code makes is for `sAddWithTtl`, a single-key `MULTI`.
@@ -1337,7 +1339,7 @@ If you build the socket yourself, attach an `error` listener: an `EventEmitter`
 - Removals during logout use `UNLINK` in batches of 100 keys and paged
   `SSCAN`/`HSCAN`/`ZRANGE` reads, so one heavily-linked session does not block
   the shared connection (`packages/redis/src/federation-tokens.mts`,
-  `clients.mts`).
+  `clients/federation-tokens.mts`).
 - A `MULTI`/`EXEC` reply with a per-command error is surfaced as a thrown
   error rather than reported as success — a refused `PEXPIRE` would otherwise
   strand a key with no TTL (`assertPipelineSucceeded`, `ioredis/commands.mts`). The
