@@ -23,6 +23,7 @@
  * 3), D11 and D28.
  */
 
+import { randomBytes } from "node:crypto";
 import {
 	createMemoryMfaFactorStore,
 	createMemoryMfaTransactionStore,
@@ -32,6 +33,7 @@ import {
 } from "@o3co/auth-provider-core";
 import { createTestMfaFactor } from "@o3co/auth-provider-core/testing";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { createMfaSealing } from "#/sealing.mjs";
 import { ALICE, boot, configFor, disposeAll, events } from "./moduleHarness.mjs";
 import {
 	beginLogin,
@@ -267,6 +269,65 @@ describe("POST /session/mfa/challenge", () => {
 		});
 		expect(audit.of("mfa.challenge.sent")).toEqual([]);
 	});
+});
+
+describe("a challenge whose state does not open (D11)", () => {
+	/** A transaction store whose taken challenge carries `state(transactionId)` in place of the one kept. */
+	const answeringState = (state: (transactionId: string) => string): MfaTransactionStore => {
+		const store = createMemoryMfaTransactionStore();
+		return {
+			...store,
+			takeChallenge: async (id, version) => {
+				const taken = await store.takeChallenge(id, version);
+				return taken ? { ...taken, state: state(id) } : null;
+			},
+		};
+	};
+
+	it.each<[string, (transactionId: string) => string, Record<string, unknown>]>([
+		[
+			"sealed under a key the ring no longer holds",
+			(transactionId) =>
+				createMfaSealing({ ring: [{ id: "k-gone", key: randomBytes(32) }] }).sealState(
+					{ transactionId, kind: "test", use: "challenge" },
+					{ nonce: "n" },
+				),
+			{ keyId: "k-gone" },
+		],
+		["corrupted", () => "not-an-envelope", {}],
+	])(
+		"%s: a right proof is answered 503 once, the attempt it reserved spent — never a wrong code",
+		async (_label, state, logged) => {
+			const { app, logger, record, audit, transactionStore, userSessionStore } =
+				await withChallengedFactor(challenged(), answeringState(state));
+			const create = vi.spyOn(userSessionStore as UserSessionStore, "create");
+			const { agent, transaction } = await beginLogin(app);
+			const issued = await mfaPost(agent, "/challenge", {
+				transaction_id: transaction,
+				factor_id: record.id,
+			});
+
+			const res = await verify(
+				agent,
+				transaction,
+				record.id,
+				`s3cret:${issued.body.nonce as string}`,
+			);
+
+			expect(res.status).toBe(503);
+			expect(res.body).toEqual({
+				error: "temporarily_unavailable",
+				error_description: "MFA temporarily unavailable",
+			});
+			expect(events(logger, "error")).toEqual(["mfa_factor_unreadable"]);
+			const line = logger.error.mock.calls[0]?.[0] as Record<string, unknown>;
+			expect(line).toMatchObject({ route: "verify", kind: "test", state: "challenge", ...logged });
+			if (!("keyId" in logged)) expect(line).not.toHaveProperty("keyId");
+			expect(audit.of("mfa.verify.failure")).toEqual([]);
+			expect(create).not.toHaveBeenCalled();
+			expect((await transactionStore.get(transaction))?.attempts).toBe(1);
+		},
+	);
 });
 
 describe("a verification against a challenge", () => {
