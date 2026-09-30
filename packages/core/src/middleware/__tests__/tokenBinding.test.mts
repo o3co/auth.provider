@@ -51,6 +51,16 @@ const mtlsMechanism = (result: TokenBinding | null | Error): TokenBindingMechani
 	},
 });
 
+/** A second ambient mechanism beside mTLS, always succeeding. */
+const secondAmbient: TokenBindingMechanism = {
+	kind: "mtls-secondary",
+	intentExplicit: false,
+	extract: async () => ({
+		kind: "mtls-secondary",
+		confirmation: { "x5t#S256": "CCC" },
+	}),
+};
+
 describe("tokenBindingMw", () => {
 	it("is a no-op when mechanisms is empty", async () => {
 		const mw = tokenBindingMw({ mechanisms: [], dispatchPolicy: "intent-explicit" });
@@ -207,21 +217,7 @@ describe("tokenBindingMw", () => {
 		expect(req.tokenBinding).toEqual(fakeMtls);
 	});
 
-	it("intent-explicit: two ambient mechanisms succeeding → first-registered wins", async () => {
-		// Pinned with a synthetic second ambient mechanism, so that adding a
-		// real one surfaces the first-wins rule as a failing test instead of
-		// applying it silently. It asserts what the code does today, NOT that
-		// first-wins is right for a real multi-ambient deployment: whoever adds
-		// that mechanism must consciously keep this or change it (e.g. to
-		// reject, like the ≥2-explicit branch does).
-		const secondAmbient: TokenBindingMechanism = {
-			kind: "mtls-secondary",
-			intentExplicit: false,
-			extract: async () => ({
-				kind: "mtls-secondary",
-				confirmation: { "x5t#S256": "CCC" },
-			}),
-		};
+	it("intent-explicit: two ambient successes and no explicit one → 400 invalid_request naming both kinds", async () => {
 		const mw = tokenBindingMw({
 			mechanisms: [mtlsMechanism(fakeMtls), secondAmbient],
 			dispatchPolicy: "intent-explicit",
@@ -231,25 +227,32 @@ describe("tokenBindingMw", () => {
 		const next = vi.fn();
 		await mw(req, res, next);
 
+		expect(next).not.toHaveBeenCalled();
+		expect(req.tokenBinding).toBeUndefined();
+		expect(res.status).toHaveBeenCalledWith(400);
+		expect(res.json).toHaveBeenCalledWith({
+			error: "invalid_request",
+			error_description:
+				"multiple ambient token-binding mechanisms succeeded (mtls, mtls-secondary)",
+		});
+	});
+
+	it("intent-explicit: one explicit success wins over two ambient successes", async () => {
+		const mw = tokenBindingMw({
+			mechanisms: [mtlsMechanism(fakeMtls), secondAmbient, dpopMechanism(fakeDPoP)],
+			dispatchPolicy: "intent-explicit",
+		});
+		const req = fakeReq();
+		const res = fakeRes();
+		const next = vi.fn();
+		await mw(req, res, next);
+
 		expect(next).toHaveBeenCalledOnce();
-		// First-registered wins; the second ambient success is discarded.
-		expect(req.tokenBinding).toEqual(fakeMtls);
+		expect(req.tokenBinding).toEqual(fakeDPoP);
 		expect(res.status).not.toHaveBeenCalled();
 	});
 
 	it("strict-mutual-exclusion: two ambient mechanisms succeeding → rejected", async () => {
-		// Contrast with the case above: strict-mutual-exclusion counts raw
-		// successes and does not care about intent, so it already refuses two
-		// ambient mechanisms. Pinning both makes the asymmetry explicit —
-		// intent-explicit silently picks a winner where strict rejects.
-		const secondAmbient: TokenBindingMechanism = {
-			kind: "mtls-secondary",
-			intentExplicit: false,
-			extract: async () => ({
-				kind: "mtls-secondary",
-				confirmation: { "x5t#S256": "CCC" },
-			}),
-		};
 		const mw = tokenBindingMw({
 			mechanisms: [mtlsMechanism(fakeMtls), secondAmbient],
 			dispatchPolicy: "strict-mutual-exclusion",
