@@ -182,7 +182,11 @@ Each provider runs core's contract suite in this package's tests.
 The CSRF token's key is derived from `session.secret`, which the session
 store's module owns. `sessionModule` requires `csrfTokenSigner` and reads no
 `session.secret`: its `csrfGuard` and its routes sign and check through the one
-signer, so a token either issues passes the other's check. A composition that
+signer, so a token the guard issues passes the routes' check, and one the routes
+issue passes the guard's. The signer's derivation is pinned by literal vectors,
+so while the secret is kept a token verifies across a deploy in either
+direction: one issued before the deploy verifies after it, and one issued after
+it verifies under the release it replaced. A composition that
 provides `csrfGuard` without `sessionModule` builds it with
 `createSessionCsrfGuard`, and one that loads `sessionModule` without the session
 store's module provides `csrfTokenSigner` with `createSessionCsrfTokenSigner`

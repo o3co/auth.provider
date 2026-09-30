@@ -133,7 +133,8 @@ export const createRouter = (
 		 * What the CSRF token of the state-changing routes is signed and checked
 		 * with: the `csrfTokenSigner` slot's signer. Tokens are signed, not
 		 * stored, so a guard over the same signer (the `csrfGuard` slot) accepts
-		 * these routes' tokens, and they its.
+		 * the tokens these routes issue, and these routes accept the tokens it
+		 * issues.
 		 */
 		csrfTokenSigner: CsrfTokenSigner;
 		/**

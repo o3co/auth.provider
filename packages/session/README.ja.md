@@ -85,7 +85,7 @@ const handle = await createApp({
 | `sessionCookiePolicy` | セッションストアのモジュール | express-session に渡すとおりのセッション cookie の名前、`secure`、`sameSite`、ドメイン、寿命。core の契約を破る場合は拒否する: ストアが cookie を拒否する場合はストアと同じメッセージで — secure でない、またはドメインを指定した `__Host-` の名前 — 、ストアがまだ拒否しない場合も — cookie の名前でない名前、secure でない `__Secure-` の名前や `SameSite=None` の cookie、範囲外の寿命。 | バンドルされたものはまだない |
 | `csrfTokenSigner` | セッションストアのモジュール | この用途のためだけに `session.secret` から導出した鍵による CSRF トークンの署名: HKDF-SHA256（salt なし、info `o3co.auth.provider/session-csrf/v1`、32 バイト）、続いて HMAC-SHA256、base64url。テストの固定ベクターがこの導出を固定するので、secret を保つ限りトークンは検証を通る。secret も鍵もこの外に出ない。 | `sessionModule`: その `csrfGuard` と `/session` のルート |
 
-CSRF トークンの鍵は `session.secret` から導出され、`session.secret` はセッションストアのモジュールが所有する。`sessionModule` は `csrfTokenSigner` を require し、`session.secret` を読まない: その `csrfGuard` とルートは一つの署名器で署名・検査するので、一方が発行したトークンは他方の検査を通る。`sessionModule` なしで `csrfGuard` を提供する組み立ては `createSessionCsrfGuard` で作り、セッションストアのモジュールなしで `sessionModule` を読み込む組み立ては `csrfTokenSigner` を `createSessionCsrfTokenSigner` で提供する（[別のストア](#ブラウザセッションストア)）。
+CSRF トークンの鍵は `session.secret` から導出され、`session.secret` はセッションストアのモジュールが所有する。`sessionModule` は `csrfTokenSigner` を require し、`session.secret` を読まない: その `csrfGuard` とルートは一つの署名器で署名・検査するので、ガードが発行したトークンはルートの検査を通り、ルートが発行したトークンはガードの検査を通る。署名器の導出はテストのリテラルなベクターで固定されているので、secret を保つ限りトークンはデプロイをまたいでどちら向きにも検証を通る: デプロイ前に発行したトークンはデプロイ後に通り、デプロイ後に発行したトークンは置き換えられたリリースの下でも通る。`sessionModule` なしで `csrfGuard` を提供する組み立ては `createSessionCsrfGuard` で作り、セッションストアのモジュールなしで `sessionModule` を読み込む組み立ては `csrfTokenSigner` を `createSessionCsrfTokenSigner` で提供する（[別のストア](#ブラウザセッションストア)）。
 
 ## ブラウザセッションストア
 

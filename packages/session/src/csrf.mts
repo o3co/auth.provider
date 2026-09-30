@@ -479,7 +479,8 @@ export const checkNavigationOrigin = (
  * `csrf` signs through the `csrfTokenSigner` slot, which the session store's
  * module fills from `session.secret`: the session module builds it with
  * {@link createCsrfProtectionFromConfig}, as the session routes build theirs,
- * so a token either issues passes the other's check.
+ * so a token the guard issues passes the routes' check, and one the routes
+ * issue passes the guard's.
  */
 export const createSessionCsrfGuard = ({
 	csrf,
