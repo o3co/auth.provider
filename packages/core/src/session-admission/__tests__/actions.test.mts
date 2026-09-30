@@ -140,9 +140,9 @@ describe("resolverForTests — the actions a test registers", () => {
 	});
 
 	it("refuses an action registration refuses", () => {
-		expect(() => resolverForTests([], { actions: { "acme.export": { grade: "remediation" } } })).toThrow(
-			RangeError,
-		);
+		expect(() =>
+			resolverForTests([], { actions: { "acme.export": { grade: "remediation" as never } } }),
+		).toThrow(RangeError);
 		expect(() => resolverForTests([], { actions: { Export: { grade: "use" } } })).toThrow(
 			RangeError,
 		);

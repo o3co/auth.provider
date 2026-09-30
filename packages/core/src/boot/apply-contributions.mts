@@ -36,7 +36,9 @@ import type {
 import type { RateLimitSpec } from "../ratelimit/types.mjs";
 import { isUsableRateLimitSpec, shownConfigValue } from "../ratelimit/usableSpec.mjs";
 import { sessionRequirementResolverOver } from "../session-admission/admit.mjs";
+import type { AdmissionAction } from "../session-admission/actions.mjs";
 import {
+	checkRemediationsAgainstActions,
 	type RegisteredRequirement,
 	registeredRequirement,
 	sealRegisteredReach,
@@ -336,6 +338,7 @@ export function prepareSyntheticProjections(
 		mfaFactors,
 		sessionRequirements,
 		rateLimitBudgets,
+		admissionActions,
 	} = contributionKinds;
 	if (grants !== undefined) {
 		inject("grantHandlerResolver", () =>
@@ -368,7 +371,7 @@ export function prepareSyntheticProjections(
 	// The session-requirement resolver is branded by its home: the object the
 	// planner records is the gated view a consumer is handed, so `admitSession`
 	// knows it and a home-made object forges nothing (ADR
-	// 2026-09-28-session-admission).
+	// 2026-09-28-session-admission). It answers the registered actions too.
 	if (
 		sessionRequirements !== undefined &&
 		!Object.hasOwn(components, "sessionRequirementResolver")
@@ -377,6 +380,7 @@ export function prepareSyntheticProjections(
 			{
 				get: (name) => sessionRequirements.get(name),
 				entries: () => sessionRequirements.entries(),
+				action: (name) => admissionActions?.get(name),
 			},
 			(view) => readableFromStage4(view, "sessionRequirementResolver", readGate),
 		);
@@ -568,6 +572,9 @@ const sameSet = (a: ReadonlySet<string>, b: ReadonlySet<string>): boolean =>
  *   module), before anything else is checked;
  * - seal each `reach` with `sealRegisteredReach`, which holds its rules, so
  *   the `acr` drop and admission read what was checked;
+ * - refuse a remediation named after a registered admission action
+ *   (`checkRemediationsAgainstActions`): it would skip every requirement for
+ *   that action;
  * - accept the second-factor authority, whatever its name, only from a
  *   module that requires every one of `MFA_PORTS`, reaching what core
  *   recomputes from the enabled factors, and declaring its own
@@ -593,6 +600,7 @@ async function checkSessionRequirements(
 	material: ComponentWorld,
 	components: Record<string, unknown>,
 	collector: NameKeyedCollector<RegisteredRequirement> | undefined,
+	actions: NameKeyedCollector<AdmissionAction> | undefined,
 ): Promise<void> {
 	if (collector === undefined) return;
 	const registrations: RequirementRegistration[] = [];
@@ -651,6 +659,7 @@ async function checkSessionRequirements(
 	for (const registration of registrations) {
 		let reach: ReadonlySet<string>;
 		try {
+			checkRemediationsAgainstActions(registration.requirement, (name) => actions?.get(name));
 			reach = sealRegisteredReach(registration.requirement);
 		} catch (cause) {
 			return failed(registration, cause);
@@ -1040,7 +1049,12 @@ export async function applyContributions(
 	// reads a requirement's reach.
 	// ---------------------------------------------------------------------------
 
-	await checkSessionRequirements(material, components, contributionKinds.sessionRequirements);
+	await checkSessionRequirements(
+		material,
+		components,
+		contributionKinds.sessionRequirements,
+		contributionKinds.admissionActions,
+	);
 
 	// ---------------------------------------------------------------------------
 	// Step 3: List-shaped pass in INPUT-ARRAY order.

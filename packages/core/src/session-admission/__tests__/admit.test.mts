@@ -34,8 +34,8 @@ import {
 	linkClaim,
 	tokenClaim,
 } from "#/session-admission/admit.mjs";
+import type { AdmissionAction } from "#/session-admission/actions.mjs";
 import type {
-	AdmissionAction,
 	AdmissionDeps,
 	AdmissionRequest,
 	RequirementInput,

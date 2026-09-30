@@ -62,6 +62,7 @@ import type {
 	UserSessionStore,
 } from "../user-sessions/types.mjs";
 import { type AcrSelection, type AcrTable, selectAcr, stepUpReach } from "./acr.mjs";
+import { ADMISSION_GRADES, type AdmissionAction, type AdmissionGrade } from "./actions.mjs";
 import {
 	additionsFromDto,
 	checkPrimaryAdditions,
@@ -73,10 +74,8 @@ import {
 import {
 	ADMISSION_ACTIONS,
 	type Admission,
-	type AdmissionAction,
 	type AdmissionAsks,
 	type AdmissionDeps,
-	type AdmissionGrade,
 	type AdmissionInfrastructureStore,
 	type AdmissionRequest,
 	type CompletedRequirement,
@@ -109,10 +108,11 @@ const knownClaims = new WeakSet<object>();
 /** The resolvers the boot planner and `resolverForTests` built. */
 const knownResolvers = new WeakSet<object>();
 
-/** What a resolver is built over: the collector's read side, or a test's list. */
+/** What a resolver is built over: the collectors' read side, or a test's lists. */
 export interface SessionRequirementSource {
 	get(name: string): RegisteredRequirement | undefined;
 	entries(): IterableIterator<readonly [string, RegisteredRequirement]>;
+	action(name: string): AdmissionAction | undefined;
 }
 
 /**
@@ -130,6 +130,7 @@ export function sessionRequirementResolverOver(
 		Object.freeze({
 			get: (name: string) => source.get(name),
 			entries: () => source.entries(),
+			action: (name: string) => source.action(name),
 		}),
 	);
 	knownResolvers.add(view);
@@ -298,15 +299,15 @@ export function tokenClaim(claims: TokenCarrier): SessionClaim {
 // remediation rule that reads it.
 // ---------------------------------------------------------------------------
 
-const GRADES: ReadonlySet<string> = new Set<AdmissionGrade>([
-	"use",
-	"credential_change",
-	"remediation",
-]);
+const GRADES: ReadonlySet<string> = new Set<string>(ADMISSION_GRADES);
 
-/** The `action` field of a log line: a bundled action's name, or an issued remediation's, else `custom`. */
-const actionLabel = (action: AdmissionAction): string =>
-	Object.hasOwn(ADMISSION_ACTIONS, action.name) || isIssuedAction(action) ? action.name : "custom";
+/** The `action` field of a log line: a registered or bundled action's name, or an issued remediation's, else `custom`. */
+const actionLabel = (action: AdmissionAction, resolver: SessionRequirementResolver): string =>
+	resolver.action(action.name) === action ||
+	Object.hasOwn(ADMISSION_ACTIONS, action.name) ||
+	isIssuedAction(action)
+		? action.name
+		: "custom";
 
 /** The `remediation` names already said to be undeclared, once per process each, up to the cap; past it, once for all. */
 const undeclaredRemediations = new Set<string>();
@@ -345,6 +346,45 @@ interface CheckedRequest {
 	readonly now: Date;
 }
 
+/**
+ * The action a request names, read once: a registered action by its name —
+ * the object registration made, so the grade is never the caller's to
+ * restate — an issued remediation by its identity, or a bundled entry itself.
+ * Anything else is copied.
+ */
+function checkedAction(asked: unknown, requirements: SessionRequirementResolver): AdmissionAction {
+	if (typeof asked === "string") {
+		const registered = requirements.action(asked);
+		if (registered === undefined) {
+			throw new RangeError(
+				`admitSession: ${JSON.stringify(asked)} is not a registered admission action: the module that admits it registers it under contributes.admissionActions`,
+			);
+		}
+		return registered;
+	}
+	if (!isObject(asked))
+		throw new RangeError("admitSession: the action must be a name with a grade");
+	const name = nonEmptyString(asked.name);
+	const grade = asked.grade;
+	if (name === undefined || typeof grade !== "string" || !GRADES.has(grade)) {
+		throw new RangeError("admitSession: the action must be a name with a grade");
+	}
+	// A bundled name is accepted as the bundled entry itself alone: the grade
+	// is not the caller's to restate.
+	if (Object.hasOwn(ADMISSION_ACTIONS, name)) {
+		if ((asked as unknown) !== (ADMISSION_ACTIONS as Record<string, AdmissionAction>)[name]) {
+			throw new RangeError(
+				`admitSession: "${name}" is a bundled action: pass ADMISSION_ACTIONS["${name}"] itself, not a copy or a literal`,
+			);
+		}
+	}
+	// The issued object keeps its identity — that is what step 5 checks — and
+	// so does the bundled entry; anything else is copied.
+	return isIssuedAction(asked) || Object.hasOwn(ADMISSION_ACTIONS, name)
+		? (asked as unknown as AdmissionAction)
+		: Object.freeze({ name, grade: grade as AdmissionGrade });
+}
+
 /** A caller's fault is a `RangeError` before anything is read. Answers core's copy of what it read, each input read once. */
 function checkRequest(deps: AdmissionDeps, request: AdmissionRequest): CheckedRequest {
 	if (!isObject(deps)) throw new RangeError("admitSession: deps must be an object");
@@ -375,29 +415,7 @@ function checkRequest(deps: AdmissionDeps, request: AdmissionRequest): CheckedRe
 			? { tokenAmr: Object.freeze([...(presented.tokenAmr as readonly string[])]) }
 			: {}),
 	}) as SessionClaim;
-	const asked = request.action;
-	if (!isObject(asked))
-		throw new RangeError("admitSession: the action must be a name with a grade");
-	const name = asked.name;
-	const grade = asked.grade;
-	if (nonEmptyString(name) === undefined || typeof grade !== "string" || !GRADES.has(grade)) {
-		throw new RangeError("admitSession: the action must be a name with a grade");
-	}
-	// A bundled name is accepted as the bundled entry itself alone: the grade
-	// is not the caller's to restate.
-	if (Object.hasOwn(ADMISSION_ACTIONS, name)) {
-		if (asked !== (ADMISSION_ACTIONS as Record<string, AdmissionAction>)[name]) {
-			throw new RangeError(
-				`admitSession: "${name}" is a bundled action: pass ADMISSION_ACTIONS["${name}"] itself, not a copy or a literal`,
-			);
-		}
-	}
-	// The issued object keeps its identity — that is what step 5 checks — and
-	// so does the bundled entry; anything else is copied.
-	const action: AdmissionAction =
-		isIssuedAction(asked) || Object.hasOwn(ADMISSION_ACTIONS, name)
-			? (asked as AdmissionAction)
-			: Object.freeze({ name, grade: grade as AdmissionGrade });
+	const action = checkedAction(request.action, requirements);
 	const asksRead = request.asks;
 	let asks: AdmissionAsks | undefined;
 	if (asksRead !== undefined) {
@@ -506,7 +524,7 @@ export async function admitSession(
 		now,
 		logger,
 	} = checked;
-	const label = actionLabel(checked.action);
+	const label = actionLabel(checked.action, resolver);
 	const unavailable = (store: string, err: unknown): Admission => {
 		logger?.error(
 			{ store, action: label, err: loggableError(err) },

@@ -28,8 +28,8 @@ import { BootError } from "#/boot/types.mjs";
 import { createApp, defineModule, type Module } from "#/index.mjs";
 import { readAcrTable } from "#/session-admission/acr.mjs";
 import { admitSession, cookieClaim } from "#/session-admission/admit.mjs";
+import type { AdmissionAction } from "#/session-admission/actions.mjs";
 import type {
-	AdmissionAction,
 	SessionRequirement,
 	SessionRequirementResolver,
 } from "#/session-admission/requirement.mjs";

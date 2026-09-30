@@ -37,6 +37,7 @@ import type {
 	UserSessionStore,
 } from "../user-sessions/types.mjs";
 import { type AcrTable, SECOND_FACTOR_AMR } from "./acr.mjs";
+import type { AdmissionAction, AdmissionGrade } from "./actions.mjs";
 
 /**
  * The stores admission reads itself, by the name an `unavailable` admission
@@ -102,21 +103,6 @@ export interface SessionClaim {
 	readonly tokenAmr?: readonly string[];
 }
 
-/**
- * A grade decides how a requirement treats an action: `use` exercises the
- * session; `credential_change` adds or removes a way into the account;
- * `remediation` is a requirement's own route, by which the session meets
- * that requirement, accepted only for a name a registered requirement
- * declared.
- */
-export type AdmissionGrade = "use" | "credential_change" | "remediation";
-
-/** What the consumer is about to let the session do: a name and a grade. `ADMISSION_ACTIONS` names the bundled ones. */
-export interface AdmissionAction {
-	readonly name: string;
-	readonly grade: AdmissionGrade;
-}
-
 /** What the request asks beyond the action: `acr_values`, at `/authorize` only. */
 export interface AdmissionAsks {
 	readonly acrValues?: readonly string[];
@@ -124,7 +110,13 @@ export interface AdmissionAsks {
 
 export interface AdmissionRequest {
 	readonly claim: SessionClaim;
-	readonly action: AdmissionAction;
+	/**
+	 * What the consumer is about to let the session do: the name of an action
+	 * a module registered under `contributes.admissionActions`, admitted with
+	 * the grade it registered, or a remediation action core issued to a
+	 * requirement.
+	 */
+	readonly action: string | AdmissionAction;
 	readonly asks?: AdmissionAsks;
 }
 
@@ -812,15 +804,35 @@ export const secondFactorAuthorities = (
 	[...requirements].filter((requirement) => requirement.secondFactorAuthority);
 
 /**
+ * Refuses a registered requirement whose remediation is the name of an action
+ * `action` answers: registered as a remediation, it would skip every
+ * requirement for that action. Boot and `resolverForTests` run it once both
+ * kinds have registered.
+ */
+export function checkRemediationsAgainstActions(
+	requirement: RegisteredRequirement,
+	action: (name: string) => AdmissionAction | undefined,
+): void {
+	const taken = requirement.remediations.filter((remediation) => action(remediation) !== undefined);
+	if (taken.length > 0) {
+		throw new RangeError(
+			`session requirement "${requirement.name}": remediation ${taken.map((name) => `"${name}"`).join(", ")} is a registered admission action's name: registered as a remediation it would skip every requirement for that action`,
+		);
+	}
+}
+
+/**
  * The read side of the `sessionRequirements` kind — the synthetic key
  * `sessionRequirementResolver`: `entries()` in registration order,
- * `get(name)`. Branded: only the boot planner and `resolverForTests` build
- * one, and `admitSession` refuses any other.
+ * `get(name)` — and of the `admissionActions` kind: `action(name)`, the
+ * registered action of that name. Branded: only the boot planner and
+ * `resolverForTests` build one, and `admitSession` refuses any other.
  */
 export interface SessionRequirementResolver {
 	readonly [resolverBrand]: true;
 	readonly get: (name: string) => RegisteredRequirement | undefined;
 	readonly entries: () => IterableIterator<readonly [string, RegisteredRequirement]>;
+	readonly action: (name: string) => AdmissionAction | undefined;
 }
 
 // ---------------------------------------------------------------------------

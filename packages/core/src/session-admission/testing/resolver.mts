@@ -20,13 +20,20 @@
  * the boot planner's, so the brand stops accidents, not a deployment that
  * imports the testing entry on purpose. Each requirement is registered and
  * its reach sealed as boot does, and at most one may declare the
- * second-factor authority. `allowAnyReach` lifts the reach rules (the
- * snapshot stays) for tests of admission's own mechanics that need two
- * reaching requirements; nothing else uses it.
+ * second-factor authority; each action is registered as boot registers one,
+ * and no remediation may take an action's name. `allowAnyReach` lifts the
+ * reach rules (the snapshot stays) for tests of admission's own mechanics
+ * that need two reaching requirements; nothing else uses it.
  */
 
+import {
+	type AdmissionAction,
+	type AdmissionActionDeclaration,
+	registeredAdmissionAction,
+} from "../actions.mjs";
 import { sessionRequirementResolverOver } from "../admit.mjs";
 import {
+	checkRemediationsAgainstActions,
 	type RegisteredRequirement,
 	registeredRequirement,
 	type SessionRequirement,
@@ -41,18 +48,28 @@ const ALLOW_ANY_REACH_REMEDY = "pass allowAnyReach for a test of admission's own
 
 /**
  * The resolver a test hands a consumer: `requirements` by their names, in the
- * order given. Two of one name, or two that declare the second-factor
- * authority, are refused before any reach is read, as boot orders them. With
- * `issuer`, each page is held to that origin. Each reach is read once, here,
- * held to boot's rules unless `allowAnyReach`, and the resolver answers that
- * snapshot. The authority's binding to the MFA ports is boot's alone.
+ * order given, and `actions` — what a consumer's module registers under
+ * `contributes.admissionActions` — by theirs. Two requirements of one name,
+ * or two that declare the second-factor authority, are refused before any
+ * reach is read, as boot orders them. With `issuer`, each page is held to
+ * that origin. Each reach is read once, here, held to boot's rules unless
+ * `allowAnyReach`, and the resolver answers that snapshot. The authority's
+ * binding to the MFA ports is boot's alone.
  */
 export function resolverForTests(
 	requirements: readonly SessionRequirement[],
-	options: { readonly issuer?: string; readonly allowAnyReach?: boolean } = {},
+	options: {
+		readonly issuer?: string;
+		readonly allowAnyReach?: boolean;
+		readonly actions?: Readonly<Record<string, AdmissionActionDeclaration>>;
+	} = {},
 ): SessionRequirementResolver {
 	if (!Array.isArray(requirements)) {
 		throw new RangeError("resolverForTests: requirements must be a list");
+	}
+	const actions = new Map<string, AdmissionAction>();
+	for (const [name, declaration] of Object.entries(options.actions ?? {})) {
+		actions.set(name, registeredAdmissionAction(name, declaration));
 	}
 	const byName = new Map<string, RegisteredRequirement>();
 	for (const candidate of requirements) {
@@ -70,6 +87,7 @@ export function resolverForTests(
 		);
 	}
 	for (const requirement of byName.values()) {
+		checkRemediationsAgainstActions(requirement, (name) => actions.get(name));
 		if (options.allowAnyReach === true) {
 			snapshotReach(requirement);
 			continue;
@@ -79,5 +97,6 @@ export function resolverForTests(
 	return sessionRequirementResolverOver({
 		get: (name) => byName.get(name),
 		entries: () => byName.entries(),
+		action: (name) => actions.get(name),
 	});
 }

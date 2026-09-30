@@ -934,14 +934,21 @@ export type {
 	LoginInterruptionStep,
 } from "./session-admission/login-completion.mjs";
 export { checkPrimaryContinuation } from "./session-admission/primary.mjs";
+// The grades core owns, and what a consumer registers for each action it
+// admits (`contributes.admissionActions`).
+export {
+	ADMISSION_GRADES,
+	type ActionGrade,
+	type AdmissionAction,
+	type AdmissionActionDeclaration,
+	type AdmissionGrade,
+} from "./session-admission/actions.mjs";
 export {
 	ADMISSION_ACTIONS,
 	type Admission,
-	type AdmissionAction,
 	type AdmissionActionName,
 	type AdmissionAsks,
 	type AdmissionDeps,
-	type AdmissionGrade,
 	type AdmissionInfrastructureStore,
 	type AdmissionRequest,
 	type CompletedRequirement,

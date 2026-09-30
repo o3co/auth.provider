@@ -16,7 +16,7 @@ import type { ProviderDeps } from "../provider.mjs";
 // Local fixture deps — does NOT augment shared ComponentMap.
 type LocalDeps = { readonly _localCfg: { readonly url: string } };
 
-test("ContributesMap has exactly core's thirteen contribution kinds", () => {
+test("ContributesMap has exactly core's fourteen contribution kinds", () => {
 	// `federationRedirectPolicies` is absent: the session package adds it
 	// through `declare module` augmentation.
 	type Keys = keyof ContributesMap<LocalDeps>;
@@ -34,6 +34,7 @@ test("ContributesMap has exactly core's thirteen contribution kinds", () => {
 		| "sessionRequirements"
 		| "rateLimitBudgets"
 		| "federationTypes"
+		| "admissionActions"
 	>();
 });
 
