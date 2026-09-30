@@ -20,10 +20,11 @@
  * 1. `readSwitches` — its own files over core's `reference.conf`, read with
  *    core's transitional reader — parses only `SWITCHES`, what the template
  *    reads before it knows its modules: the switches `buildModules` chooses
- *    them by, and what `expectedSessionRequirements` reads — the
- *    configuration's `sessionRequirements` and `mfa.mode` (the log level is
- *    the `logging` module's section, which `readLogging` reads with that
- *    module's schema: `own-modules.test.mts`);
+ *    them by, and the configuration's `sessionRequirements`, which
+ *    `expectedSessionRequirements` reads beside `mfa.mode` — the one path it
+ *    reads raw (`OWN_READS`, `readMfaMode`), until the MFA ADR's build-order
+ *    step 20 (the log level is the `logging` module's section, which
+ *    `readLogging` reads with that module's schema: `own-modules.test.mts`);
  * 2. `resolveForBoot` — its own files over the `reference.conf` of every
  *    package its modules come from, core's last — handed to `createApp`
  *    unparsed, which parses it once with every loaded module's schema.
@@ -51,6 +52,8 @@ import { describe, expect, it } from "vitest";
 import { buildModules } from "../buildModules.mjs";
 import {
 	expectedSessionRequirements,
+	OWN_READS,
+	readMfaMode,
 	readOwnLayers,
 	readSwitches,
 	resolveConfigPaths,
@@ -151,6 +154,16 @@ describe("phase one reads each switch as the template's AppConfigSchema pre-pars
 			});
 		}
 	}
+
+	it("reads mfa.mode raw, as the environment sets it, beside the switches core's reader parses", () => {
+		expect(OWN_READS).toEqual(["mfa.mode"]);
+		expect(SWITCHES).not.toContain("mfa.mode");
+		for (const [name, env] of Object.entries(ENVIRONMENTS)) {
+			expect(readMfaMode(readSwitches(readOwnLayers(ownFiles("production"), { env }))), name).toBe(
+				env.MFA_MODE ?? "off",
+			);
+		}
+	});
 });
 
 describe("phase one reads its switches and nothing else", () => {
@@ -178,7 +191,7 @@ describe("phase one reads its switches and nothing else", () => {
 		expectedSessionRequirements(config);
 		buildModules(config, { environment: "production" });
 		const covered = (path: string) =>
-			SWITCHES.some(
+			[...SWITCHES, ...OWN_READS].some(
 				(switchPath) =>
 					path === switchPath ||
 					path.startsWith(`${switchPath}.`) ||

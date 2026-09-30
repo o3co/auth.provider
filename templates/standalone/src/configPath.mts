@@ -35,7 +35,6 @@ import {
 	coreReference,
 	type Module,
 	moduleReferences,
-	readMfaMode,
 	readTransitionalConfig,
 } from "@o3co/auth-provider-core";
 import { type Config, empty, parseFile } from "@o3co/ts.hocon";
@@ -123,13 +122,20 @@ export function resolveLayers(own: OwnLayers, references: readonly URL[]): Recor
 }
 
 /**
- * What the template reads before it knows its modules: the switches
- * `buildModules` and its module factories choose by, and what
- * `expectedSessionRequirements` reads — the configuration's
- * `sessionRequirements` and `mfa.mode` (the log level is `readLogging`'s). A
+ * What the template reads before it knows its modules, through core's
+ * reader: the switches `buildModules` and its module factories choose by, and
+ * the configuration's `sessionRequirements`, which
+ * `expectedSessionRequirements` reads (the log level is `readLogging`'s). A
  * module a deployment adds that reads its configuration when it is built adds
  * those paths here, or passes them to `readSwitches` as `reads`.
- * `two-phase-config.test.mts` holds the list to what the template reads.
+ * `two-phase-config.test.mts` holds this list and `OWN_READS` to what the
+ * template reads.
+ *
+ * Beside these the template reads `mfa.mode`, the MFA module's key, itself
+ * (`OWN_READS`, `readMfaMode`): a composition root reads no module's key, and
+ * the template reads this one before it chooses its modules only until it
+ * installs the MFA module (the MFA ADR's build order, step 20), which removes
+ * this reading.
  *
  * Every path here and in `reads` must be one core's transitional base
  * declares (a section core's schema has, or mirrors for a package), or
@@ -139,7 +145,6 @@ export function resolveLayers(own: OwnLayers, references: readonly URL[]): Recor
  * `reference.conf` sets. Parse it in the module, or read it after boot.
  */
 export const SWITCHES: readonly string[] = [
-	"mfa.mode",
 	"sessionRequirements",
 	"federations",
 	"federationGrants.enabled",
@@ -157,6 +162,56 @@ export const SWITCHES: readonly string[] = [
 	"oauth.grants",
 	"oauth.accessToken",
 ];
+
+/**
+ * What the template reads before it knows its modules and outside `SWITCHES`:
+ * `mfa.mode`, the MFA module's key, which core's schema does not declare, read
+ * raw from the template's own layers and held to its values by `readMfaMode`.
+ * Read only until the template installs the MFA module (the MFA ADR's build
+ * order, step 20), which removes this reading.
+ */
+export const OWN_READS: readonly string[] = ["mfa.mode"];
+
+/** The values `mfa.mode` takes. */
+const MFA_MODES = ["off", "optional", "required"] as const;
+
+/** What an `mfa` that is not a section of keys reads as: no mode `readMfaMode` accepts. */
+const REFUSED = Symbol("refused");
+
+/** A section of keys: an object whose prototype is `Object.prototype` or none. */
+function isPlainSection(value: unknown): value is Readonly<Record<string, unknown>> {
+	if (typeof value !== "object" || value === null) return false;
+	const prototype: unknown = Object.getPrototypeOf(value);
+	return prototype === Object.prototype || prototype === null;
+}
+
+/** `mfa.mode`, as `readMfaMode` answers it. */
+export type MfaMode = (typeof MFA_MODES)[number];
+
+/**
+ * `mfa.mode` as the template reads it before it chooses its modules: raw,
+ * off phase one's switches — the template's own layers, where
+ * `config/application.conf` binds `MFA_MODE`, since core's `reference.conf`
+ * does not — and held to its values here, as the template cannot import the
+ * MFA package's schema (it is private). Absent is `off`; anything else is a
+ * `RangeError` naming `mfa.mode` that quotes nothing of the value, never read
+ * as `off`, which would drop the declaration on a typo.
+ *
+ * The MFA module's key, which a composition root does not read: the template
+ * reads it only until it installs the MFA module (the MFA ADR's build order,
+ * step 20), which removes this reading.
+ */
+export function readMfaMode(switches: unknown): MfaMode {
+	const section = (switches as { mfa?: unknown } | undefined)?.mfa;
+	if (section === undefined) return "off";
+	const mode = isPlainSection(section) ? section.mode : REFUSED;
+	if (mode === undefined) return "off";
+	const known = MFA_MODES.find((value) => value === mode);
+	if (known === undefined) {
+		throw new RangeError('mfa.mode must be "off", "optional" or "required"');
+	}
+	return known;
+}
 
 export interface SwitchesOptions {
 	/** Paths read beside `SWITCHES`: what a module a deployment adds reads when it is built. */
@@ -200,24 +255,50 @@ export function readLogging(own: OwnLayers): LoggingSettings {
 
 /**
  * What this composition expects of session admission, from phase one: the
- * configuration's `sessionRequirements.expected` as written, with `mfa` appended
- * when the PARSED `mfa.mode` is not `off` and the list does not name it. Boot's checks never act on `mfa.mode`, and
- * the template installs no MFA module, so it is here that a mode asking for a
- * second factor becomes a declaration boot refuses
- * (`session-requirement-missing`) rather than a composition that logs users
- * in on a password alone. Read from the parsed mode, never the raw `MFA_MODE`;
- * a mode that is none of the three is a `RangeError` naming the key
- * (`readMfaMode`). With no list written and the mode `off`, nothing is
- * declared, and boot's rule for an unwritten key applies. Computed here
- * because HOCON has no conditional. See ADR 2026-09-28-session-admission.
+ * configuration's `sessionRequirements.expected` as written, with `mfa`
+ * appended when `mfa.mode` (`readMfaMode`) is not `off` and the list does not
+ * name it. Boot's checks never act on `mfa.mode`, and the template installs no
+ * MFA module, so it is here that a mode asking for a second factor becomes a
+ * declaration boot refuses (`session-requirement-missing`) rather than a
+ * composition that logs users in on a password alone. A mode that is none of
+ * the three is a `RangeError` naming the key. With no list written and the
+ * mode `off`, nothing is declared, and boot's rule for an unwritten key
+ * applies. Computed here because HOCON has no conditional. See ADR
+ * 2026-09-28-session-admission; the reading of `mfa.mode` goes at the MFA
+ * ADR's build-order step 20.
  */
 export function expectedSessionRequirements(switches: AppConfig): AppConfig["sessionRequirements"] {
 	const written = switches.sessionRequirements?.expected;
-	const mode = readMfaMode(switches) ?? "off";
+	const mode = readMfaMode(switches);
 	if (mode === "off") return written === undefined ? undefined : { expected: [...written] };
 	const declared = [...(written ?? [])];
 	return { expected: declared.includes("mfa") ? declared : [...declared, "mfa"] };
 }
+
+/**
+ * Whether a module in `modules` owns the top-level section `name`: its
+ * section sits there or under it, or it moved from there or under it.
+ */
+function ownsSection(modules: readonly Module[], name: string): boolean {
+	const topOf = (path: string): string | undefined => path.split(".")[0];
+	return modules.some((module) => {
+		const section = module.section;
+		if (section === undefined) return false;
+		if ((section.at === undefined ? module.name : topOf(section.at)) === name) return true;
+		const from = section.relocatedFrom;
+		const old = from === undefined ? [] : Array.isArray(from) ? from : Object.keys(from);
+		return old.some((path) => topOf(path) === name);
+	});
+}
+
+/**
+ * Whether `mfa` is only what the template consumed — no key, or the mode
+ * alone — with no loaded module owning the section.
+ */
+const consumedMfa = (mfa: unknown, modules: readonly Module[]): boolean =>
+	isPlainSection(mfa) &&
+	Object.keys(mfa).every((key) => key === "mode") &&
+	!ownsSection(modules, "mfa");
 
 /**
  * Phase two: what `createApp` parses once, with every loaded module's schema:
@@ -225,7 +306,11 @@ export function expectedSessionRequirements(switches: AppConfig): AppConfig["ses
  * `reference.conf` of every package `modules` come from, core's last,
  * resolved and unparsed, with `sessionRequirements` — what phase one says the
  * composition expects (`expectedSessionRequirements`) — written over the
- * resolved section when there is one to write.
+ * resolved section when there is one to write. An `mfa` section holding
+ * nothing but the mode, which the template read for itself (`readMfaMode`),
+ * is left out when no loaded module owns it; anything more reaches boot,
+ * which names an unowned section once. The MFA ADR's build-order step 20
+ * removes this with the template's reading.
  *
  * Typed `AppConfig` because that is the `config` slot's type; read the parsed
  * configuration from `handle.components.config`, not from this.
@@ -235,7 +320,9 @@ export function resolveForBoot(
 	modules: readonly Module[],
 	sessionRequirements: AppConfig["sessionRequirements"],
 ): AppConfig {
-	const resolved = resolveLayers(own, moduleReferences(modules));
+	const layered = resolveLayers(own, moduleReferences(modules));
+	const { mfa: _consumed, ...withoutMfa } = layered;
+	const resolved = consumedMfa(layered.mfa, modules) ? withoutMfa : layered;
 	return (sessionRequirements === undefined
 		? resolved
 		: { ...resolved, sessionRequirements }) as unknown as AppConfig;

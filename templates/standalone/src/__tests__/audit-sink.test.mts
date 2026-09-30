@@ -55,11 +55,8 @@ const keyPair = generateKeyPairSync("ed25519", {
 const baseConfig: AppConfig = {
 	http: { port: 0, trustProxy: false, readinessTimeoutMs: 1000 },
 	logging: { level: "silent" },
-	// The parsed config always carries `mfa` (ADR
-	// 2026-09-25-multi-factor-authentication), and the shipped
-	// `application.conf` expects no session requirement (ADR
+	// The shipped `application.conf` expects no session requirement (ADR
 	// 2026-09-28-session-admission).
-	mfa: { mode: "off" },
 	sessionRequirements: { expected: [] },
 	oauth: {
 		jwt: {

@@ -125,6 +125,19 @@ describe("pickConfigSchema — the schema of the paths read alone", () => {
 		);
 	});
 
+	it("reads an absent ancestor of a picked path as the default the schema declares for it", () => {
+		const defaulted = z.object({
+			section: z.object({ mode: z.enum(["off", "on"]).default("off") }).default({ mode: "off" }),
+			other: z.object({ mode: z.enum(["off", "on"]) }).optional(),
+		});
+		const picked = pickConfigSchema(defaulted, ["section.mode", "other.mode"]);
+		expect(picked.parse({})).toEqual({ section: { mode: "off" } });
+		expect(picked.parse({ section: { mode: "on" }, other: { mode: "on" } })).toEqual({
+			section: { mode: "on" },
+			other: { mode: "on" },
+		});
+	});
+
 	it("refuses a path with an empty key", () => {
 		for (const path of ["federations..enabled", ".federations", "federations."]) {
 			expect(() => pickConfigSchema(schema, [path]), path).toThrow(

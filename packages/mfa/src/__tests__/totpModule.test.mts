@@ -18,10 +18,12 @@
  * `mfaTotpFactorModule` through `createApp` (the MFA ADR's D1, D3, D19): it
  * contributes the `totp` factor under the `mfaFactors` kind, where the
  * coordinator reads it through `mfaFactorResolver`; a factory answering `null`
- * — `mfa.factors.totp.enabled = false` — leaves the kind absent from the
- * resolver. It reads `mfa.factors.totp` alone — never the key ring, which a
- * factor never holds — and a section it cannot read refuses the boot, naming
- * the key. It registers no session requirement: that is the MFA module's.
+ * — `mfa-totp-factor.enabled = false` — leaves the kind absent from the
+ * resolver. It reads its own section, `mfa-totp-factor`, alone — never the key
+ * ring, which a factor never holds — which boot parses with the module's
+ * schema before any factory runs; a configuration still setting the section's
+ * old path, `mfa.factors.totp`, is refused naming the new one. It registers no
+ * session requirement: that is the MFA module's.
  */
 
 import {
@@ -31,8 +33,9 @@ import {
 	type MfaFactorResolver,
 	type Module,
 } from "@o3co/auth-provider-core";
-import { makeValidAppConfig } from "@o3co/auth-provider-core/testing";
+import { makeValidAppConfig, unreadableModuleLeaves } from "@o3co/auth-provider-core/testing";
 import { afterEach, describe, expect, it } from "vitest";
+import { mfaModule } from "#/module.mjs";
 import { encodeBase32 } from "#/totp/base32.mjs";
 import { mfaTotpFactorModule } from "#/totp/module.mjs";
 import { hotp, totpStep } from "#/totp/rfc6238.mjs";
@@ -40,10 +43,15 @@ import { hotp, totpStep } from "#/totp/rfc6238.mjs";
 const TOTP = { enabled: true, algorithm: "SHA1", digits: 6, period: 30, window: 1 };
 
 const base = makeValidAppConfig();
-const configWith = (mfa: Record<string, unknown>) => ({
+/** A configuration whose `mfa-totp-factor` section is `totp`, or which has none. */
+const configWith = (
+	totp: Record<string, unknown> | undefined,
+	mfa: Record<string, unknown> = {},
+) => ({
 	...base,
 	oauth: { ...base.oauth, jwt: { ...base.oauth.jwt, issuer: "https://login.example" } },
 	mfa: { mode: "off", ...mfa },
+	...(totp === undefined ? {} : { "mfa-totp-factor": totp }),
 });
 
 /** Reads the resolver as the coordinator will: by requiring it, from a list-shaped contribution. */
@@ -103,8 +111,18 @@ describe("mfaTotpFactorModule", () => {
 		expect(Object.keys(mfaTotpFactorModule.contributes ?? {})).toEqual(["mfaFactors"]);
 	});
 
+	it("reads its own section at its name, mfa-totp-factor, moved whole from mfa.factors.totp", () => {
+		expect(mfaTotpFactorModule.section?.at).toBeUndefined();
+		expect(mfaTotpFactorModule.section?.relocatedFrom).toEqual(["mfa.factors.totp"]);
+		expect(mfaTotpFactorModule.section?.reference?.href).toMatch(/\/config\/reference\.conf$/);
+	});
+
+	it("declares only leaves that read the string an environment variable carries", () => {
+		expect(unreadableModuleLeaves([mfaTotpFactorModule, mfaModule()])).toEqual([]);
+	});
+
 	it("contributes the totp factor, which the resolver answers by its kind", async () => {
-		const { resolver } = await boot(configWith({ factors: { totp: { ...TOTP } } }));
+		const { resolver } = await boot(configWith({ ...TOTP }));
 		const factor = resolver?.get("totp");
 		expect(factor?.kind).toBe("totp");
 		expect(factor?.amrValues).toEqual(["otp"]);
@@ -112,7 +130,7 @@ describe("mfaTotpFactorModule", () => {
 	});
 
 	it("builds the factor from the configuration: its window, and the issuer from oauth.jwt.issuer", async () => {
-		const { resolver } = await boot(configWith({ factors: { totp: { ...TOTP, window: 0 } } }));
+		const { resolver } = await boot(configWith({ ...TOTP, window: 0 }));
 		const factor = resolver?.get("totp");
 		if (factor === undefined) throw new Error("no totp factor");
 		const secret = Buffer.from("12345678901234567890", "ascii");
@@ -165,17 +183,15 @@ describe("mfaTotpFactorModule", () => {
 		);
 	});
 
-	it("leaves the kind absent from the resolver when mfa.factors.totp.enabled is false", async () => {
-		const { resolver } = await boot(
-			configWith({ factors: { totp: { ...TOTP, enabled: "false" } } }),
-		);
+	it("leaves the kind absent from the resolver when mfa-totp-factor.enabled is false", async () => {
+		const { resolver } = await boot(configWith({ ...TOTP, enabled: "false" }));
 		expect(resolver?.get("totp")).toBeUndefined();
 		expect([...(resolver?.entries() ?? [])]).toEqual([]);
 	});
 
 	it("boots a switched-off factor whatever oauth.jwt.issuer names: the issuer is resolved only for a factor that is on", async () => {
 		const noHost = (enabled: unknown) => ({
-			...configWith({ factors: { totp: { ...TOTP, enabled } } }),
+			...configWith({ ...TOTP, enabled }),
 			oauth: { ...base.oauth, jwt: { ...base.oauth.jwt, issuer: "https://[2001:db8::1]" } },
 		});
 		const { resolver } = await boot(noHost(false));
@@ -184,31 +200,65 @@ describe("mfaTotpFactorModule", () => {
 		disposable = undefined;
 		const refused = await bootRefusal(noHost(true));
 		expect(refused.reason).toBe("contribute-factory-failed");
-		expect(refused.message).toContain("MFA_TOTP_ISSUER");
+		expect(refused.message).toContain("mfa-totp-factor.issuer");
+		expect(refused.message).toContain("MFA_TOTP_FACTOR_ISSUER");
 	});
 
 	it("reads no key ring: the factor never holds a key", async () => {
-		const { resolver } = await boot(
-			configWith({ encryptionKeys: [], factors: { totp: { ...TOTP } } }),
-		);
+		const { resolver } = await boot(configWith({ ...TOTP }, { encryptionKeys: [] }));
 		expect(resolver?.get("totp")).toBeDefined();
 	});
 
-	it("refuses the boot for a section it cannot read, naming the module and the key", async () => {
-		const refused = await bootRefusal(configWith({ factors: { totp: { ...TOTP, digits: 9 } } }));
-		expect(refused.reason).toBe("contribute-factory-failed");
-		expect(refused.message).toContain("mfa-totp-factor");
-		expect(refused.message).toContain("mfa.factors.totp.digits");
+	it("refuses the boot for a section its schema refuses, before any factory runs, naming the key", async () => {
+		const refused = await bootRefusal(configWith({ ...TOTP, digits: 9 }));
+		expect(refused.reason).toBe("config-validation-failed");
+		expect(refused.message).toContain("mfa-totp-factor.digits");
+		expect(refused.details).toMatchObject({
+			modules: [{ module: "mfa-totp-factor", schemaPath: "mfa-totp-factor" }],
+		});
 	});
 
 	it("refuses the boot without the package's reference.conf layered beneath the configuration", async () => {
-		const refused = await bootRefusal(configWith({}));
-		expect(refused.reason).toBe("contribute-factory-failed");
+		const refused = await bootRefusal(configWith(undefined));
+		expect(refused.reason).toBe("config-validation-failed");
+		expect(refused.message).toContain("mfa-totp-factor");
 		expect(refused.message).toContain("@o3co/auth-provider-mfa/reference.conf");
 	});
 
+	it("refuses a configuration that still sets the old path, naming each key's new path and its variable", async () => {
+		const refused = await bootRefusal(
+			configWith({ ...TOTP }, { factors: { totp: { enabled: false, issuer: "Example Co" } } }),
+		);
+		expect(refused.reason).toBe("config-path-relocated");
+		expect(refused.details).toEqual({
+			reason: "config-path-relocated",
+			relocated: [
+				{
+					module: "mfa-totp-factor",
+					from: "mfa.factors.totp.enabled",
+					to: "mfa-totp-factor.enabled",
+					environmentVariable: "MFA_TOTP_FACTOR_ENABLED",
+				},
+				{
+					module: "mfa-totp-factor",
+					from: "mfa.factors.totp.issuer",
+					to: "mfa-totp-factor.issuer",
+					environmentVariable: "MFA_TOTP_FACTOR_ISSUER",
+				},
+			],
+		});
+		expect(refused.message).toContain(
+			"mfa.factors.totp.enabled has moved to mfa-totp-factor.enabled",
+		);
+	});
+
+	it("boots over an old path that sets nothing: the empty section an unset variable leaves there", async () => {
+		const { resolver } = await boot(configWith({ ...TOTP }, { factors: { totp: {} } }));
+		expect(resolver?.get("totp")).toBeDefined();
+	});
+
 	it("registers no session requirement", async () => {
-		const { handle } = await boot(configWith({ factors: { totp: { ...TOTP } } }));
+		const { handle } = await boot(configWith({ ...TOTP }));
 		expect([...(handle.components.sessionRequirementResolver?.entries() ?? [])]).toEqual([]);
 		expect(handle.components.sessionRequirementResolver).toBeDefined();
 	});
