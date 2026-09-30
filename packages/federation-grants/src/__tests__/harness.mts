@@ -261,7 +261,6 @@ export function harness(options: HarnessOptions = {}): Harness {
 			rateLimiter:
 				options.rateLimiter ??
 				createMemoryRateLimiter({ limits: {}, defaultLimit: { limit: 1000, windowSeconds: 60 } }),
-			failMode: "closed",
 			logger,
 			acquisition: {
 				intentStore: intents,

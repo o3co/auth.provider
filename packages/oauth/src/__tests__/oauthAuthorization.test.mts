@@ -44,6 +44,7 @@ import { type AuthorizationGrantDeps, createAuthorizationGrant } from "#/grants/
 import { createRefreshTokenGrant, type RefreshTokenGrantDeps } from "#/grants/refreshToken.mjs";
 import { oauthAuthorizationModule } from "#/oauthAuthorization.mjs";
 import { createOAuthRouter } from "#/routes.mjs";
+import { OAUTH_ADMISSION_ACTIONS } from "./_helpers/admissionActions.mjs";
 import { authorizationServerRegistry } from "./_helpers/authorizationServerRegistry.mjs";
 import { createMockLogger } from "./_helpers/mockLogger.mjs";
 
@@ -193,7 +194,7 @@ async function buildAuthorizeApp(opts: {
 	) as AppConfig;
 
 	const { router } = await createOAuthRouter(express, {
-		requirements: resolverForTests([]),
+		requirements: resolverForTests([], { actions: OAUTH_ADMISSION_ACTIONS }),
 		registry: authorizationServerRegistry(),
 		config: mergedConfig,
 		clientRepository: opts.clientRepo ?? authorizeClientRepo,
@@ -638,7 +639,7 @@ describe("createRefreshTokenGrant — refreshTokenFamilyRotation forwarding", ()
 		};
 		const keyStore = createSymmetricKeyStore("test-secret-at-least-32-chars!!");
 		const baseDeps: RefreshTokenGrantDeps = {
-			sessionRequirementResolver: resolverForTests([]),
+			sessionRequirementResolver: resolverForTests([], { actions: OAUTH_ADMISSION_ACTIONS }),
 			config: {
 				oauth: {
 					jwt: { secret: "test-secret" },
@@ -722,7 +723,7 @@ describe("createAuthorizationGrant — userSessionStore forwarding", () => {
 		});
 
 		const deps: AuthorizationGrantDeps = {
-			sessionRequirementResolver: resolverForTests([]),
+			sessionRequirementResolver: resolverForTests([], { actions: OAUTH_ADMISSION_ACTIONS }),
 			config: {
 				oauth: {
 					jwt: { secret: "test-secret" },
@@ -781,7 +782,7 @@ describe("createAuthorizationGrant — grantPolicy forwarding", () => {
 		// Build a valid refresh token first via authorization grant
 		const consumeByCode = vi.fn().mockResolvedValue({ code: "auth-code" });
 		const authDeps: AuthorizationGrantDeps = {
-			sessionRequirementResolver: resolverForTests([]),
+			sessionRequirementResolver: resolverForTests([], { actions: OAUTH_ADMISSION_ACTIONS }),
 			config: {
 				oauth: {
 					jwt: { secret: "test-secret" },
@@ -824,7 +825,7 @@ describe("createAuthorizationGrant — grantPolicy forwarding", () => {
 
 		// Now test the refresh grant with grantPolicy
 		const rtDeps: RefreshTokenGrantDeps = {
-			sessionRequirementResolver: resolverForTests([]),
+			sessionRequirementResolver: resolverForTests([], { actions: OAUTH_ADMISSION_ACTIONS }),
 			config: {
 				oauth: {
 					jwt: { secret: "test-secret" },
@@ -854,7 +855,7 @@ describe("createAuthorizationGrant — returns 400 for invalid code", () => {
 		const keyStore = createSymmetricKeyStore("test-secret-at-least-32-chars!!");
 		const consumeByCode = vi.fn().mockResolvedValue(null);
 		const deps: AuthorizationGrantDeps = {
-			sessionRequirementResolver: resolverForTests([]),
+			sessionRequirementResolver: resolverForTests([], { actions: OAUTH_ADMISSION_ACTIONS }),
 			config: {
 				oauth: {
 					jwt: { secret: "test-secret" },
@@ -1530,7 +1531,7 @@ describe("/authorize public-client PKCE/S256 mandatory (RFC 9700 §2.1.1)", () =
 		};
 
 		const { router } = await createOAuthRouter(express, {
-			requirements: resolverForTests([]),
+			requirements: resolverForTests([], { actions: OAUTH_ADMISSION_ACTIONS }),
 			registry: authorizationServerRegistry(),
 			config: authorizeConfig,
 			clientRepository: publicClientRepo,

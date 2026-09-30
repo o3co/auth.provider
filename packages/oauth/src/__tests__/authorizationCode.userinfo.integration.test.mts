@@ -37,6 +37,7 @@ import request from "supertest";
 import { describe, expect, it, vi } from "vitest";
 import { createAuthorizationGrant } from "#/grants/authorization.mjs";
 import { createRouter } from "#/routes/userinfo.mjs";
+import { OAUTH_ADMISSION_ACTIONS } from "./_helpers/admissionActions.mjs";
 
 const SECRET = "test-secret-at-least-32-chars!!";
 const ISSUER = "https://auth.example.com";
@@ -91,7 +92,7 @@ const refreshTokenFamilyRevocation = {
 /** Exchange a code the way a confidential client does: no cookie on the request. */
 async function exchangeCodeWithoutCookie() {
 	const handler = createAuthorizationGrant({
-		sessionRequirementResolver: resolverForTests([]),
+		sessionRequirementResolver: resolverForTests([], { actions: OAUTH_ADMISSION_ACTIONS }),
 		config,
 		keyStore,
 		clientRepository,

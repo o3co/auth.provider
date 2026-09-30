@@ -158,7 +158,6 @@ const deployment = (
 				limits: {},
 				defaultLimit: { limit: 1000, windowSeconds: 60 },
 			}),
-			failMode: "closed",
 		}),
 	);
 	return { app, store, refresh, events, drain: () => background.drain() };

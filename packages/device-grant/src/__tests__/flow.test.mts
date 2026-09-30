@@ -49,6 +49,7 @@ import { createClientAuthMiddleware } from "@o3co/auth-provider-oauth";
 import express from "express";
 import request from "supertest";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { DEVICE_GRANT_ADMISSION_ACTIONS } from "#/admissionActions.mjs";
 import { createDeviceAuthorizationHandler } from "#/deviceAuthorizationEndpoint.mjs";
 import { createDeviceCodeGrant } from "#/grant.mjs";
 import { DEVICE_CODE_GRANT_TYPE } from "#/types.mjs";
@@ -135,8 +136,6 @@ const makeHarness = (
 	overrides: {
 		settings?: Partial<typeof settings>;
 		rateLimiter?: RateLimiter;
-		/** The outage policy; the harness defaults to the product's `closed`. */
-		failMode?: RateLimitFailMode;
 		session?: Record<string, unknown>;
 		auditSink?: AuditSink;
 		logger?: ReturnType<typeof makeLogger>;
@@ -185,11 +184,10 @@ const makeHarness = (
 			store,
 			settings: resolved,
 			rateLimiter,
-			failMode: overrides.failMode ?? "closed",
 			userSessionStore,
 			// No requirement registered; what admission changes here (the
 			// session-admission ADR's D8) is admission.test.mts's.
-			requirements: resolverForTests([]),
+			requirements: resolverForTests([], { actions: DEVICE_GRANT_ADMISSION_ACTIONS }),
 			requireEmailVerified: overrides.requireEmailVerified ?? false,
 			...(overrides.subjectRevocation ? { subjectRevocation: overrides.subjectRevocation } : {}),
 			now: clock.now,
@@ -253,9 +251,13 @@ const makeSink = () => {
 /** The sink is fire-and-forget, so give the detached promise a turn. */
 const settle = () => new Promise((resolve) => setImmediate(resolve));
 
-/** A limiter whose backend is down: every check rejects, as a Redis client would. */
-const brokenLimiter = (): RateLimiter => ({
+/**
+ * A limiter whose backend is down: every check rejects, as a Redis client
+ * would, and `failMode` is its own outage policy.
+ */
+const brokenLimiter = (failMode: RateLimitFailMode): RateLimiter => ({
 	kind: "broken",
+	failMode,
 	check: async () => {
 		throw new Error("redis down");
 	},
@@ -699,11 +701,14 @@ describe("audit trail for the human's decision", () => {
 			// `failMode = "open"` waves a request through when the limiter has
 			// no answer; a limiter that answered "no" is not that case.
 			const { sink, events } = makeSink();
-			const rateLimiter = createMemoryRateLimiter({
-				limits: { device_verification: { limit: 1, windowSeconds: 300 } },
-				defaultLimit: { limit: 60, windowSeconds: 60 },
-			});
-			const { app } = makeHarness({ auditSink: sink, rateLimiter, failMode });
+			const rateLimiter: RateLimiter = {
+				...createMemoryRateLimiter({
+					limits: { device_verification: { limit: 1, windowSeconds: 300 } },
+					defaultLimit: { limit: 60, windowSeconds: 60 },
+				}),
+				failMode,
+			};
+			const { app } = makeHarness({ auditSink: sink, rateLimiter });
 
 			await verify(app, { action: "lookup", user_code: "BCDF-GHJK" });
 			const limited = await verify(app, { action: "lookup", user_code: "BCDF-GHJK" });
@@ -741,17 +746,16 @@ describe("audit trail for the human's decision", () => {
 	});
 });
 
-describe("limiter outage — rateLimit.failMode applies here too", () => {
+describe("limiter outage — the limiter's failMode applies here too", () => {
 	// This endpoint runs the limiter itself rather than through
 	// `createRateLimitGuard`, so a limiter-backend outage must still follow
-	// `failMode` and raise the `rate_limit.unavailable` event the alert
+	// the limiter's `failMode` and raise the `rate_limit.unavailable` event the alert
 	// operators page on — on the one endpoint RFC 8628 §5.1 sizes the user
 	// code's entropy against.
 
 	it('failMode = "closed": answers 503 with the guard\'s envelope and does not decide', async () => {
 		const { app, store, clock } = makeHarness({
-			rateLimiter: brokenLimiter(),
-			failMode: "closed",
+			rateLimiter: brokenLimiter("closed"),
 			logger: makeLogger(),
 		});
 		const started = await startDevice(app);
@@ -775,8 +779,7 @@ describe("limiter outage — rateLimit.failMode applies here too", () => {
 		const { sink, events } = makeSink();
 		const logger = makeLogger();
 		const { app } = makeHarness({
-			rateLimiter: brokenLimiter(),
-			failMode: "closed",
+			rateLimiter: brokenLimiter("closed"),
 			auditSink: sink,
 			logger,
 		});
@@ -814,8 +817,7 @@ describe("limiter outage — rateLimit.failMode applies here too", () => {
 			const { sink, events } = makeSink();
 			const logger = makeLogger();
 			const { app } = makeHarness({
-				rateLimiter: brokenLimiter(),
-				failMode: "open",
+				rateLimiter: brokenLimiter("open"),
 				auditSink: sink,
 				logger,
 			});
@@ -837,7 +839,7 @@ describe("limiter outage — rateLimit.failMode applies here too", () => {
 	it('failMode = "open": an approval made during the outage is a real approval', async () => {
 		// Fail-open means the request is served as if allowed, all the way to
 		// the device collecting its token — not half-served.
-		const { app, poll, clock } = makeHarness({ rateLimiter: brokenLimiter(), failMode: "open" });
+		const { app, poll, clock } = makeHarness({ rateLimiter: brokenLimiter("open") });
 		const started = await startDevice(app);
 
 		const approval = await verify(app, { action: "approve", user_code: started.body.user_code });
@@ -852,8 +854,7 @@ describe("limiter outage — rateLimit.failMode applies here too", () => {
 		// the session are validated. An anonymous caller during an outage is
 		// still told to log in, not that the limiter is down.
 		const anonymous = makeHarness({
-			rateLimiter: brokenLimiter(),
-			failMode: "closed",
+			rateLimiter: brokenLimiter("closed"),
 			session: { isAuthenticated: false },
 		});
 		const unauthenticated = await verify(anonymous.app, {
@@ -862,7 +863,7 @@ describe("limiter outage — rateLimit.failMode applies here too", () => {
 		});
 		expect(unauthenticated.status).toBe(401);
 
-		const { app } = makeHarness({ rateLimiter: brokenLimiter(), failMode: "closed" });
+		const { app } = makeHarness({ rateLimiter: brokenLimiter("closed") });
 		const badAction = await verify(app, { action: "revoke", user_code: "BCDF-GHJK" });
 		expect(badAction.status).toBe(400);
 	});
@@ -1467,7 +1468,6 @@ describe("the session check, further", () => {
 					limits: { device_verification: { limit: 5, windowSeconds: 300 } },
 					defaultLimit: { limit: 60, windowSeconds: 60 },
 				}),
-				failMode: "closed",
 				requireEmailVerified: false,
 			} as never),
 		).toThrow(/userSessionStore/);

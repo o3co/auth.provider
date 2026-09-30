@@ -97,7 +97,7 @@ describe("sessionRequirementContract — a well-formed fixture", () => {
 		expect(cases.map((c) => c.name)).toEqual([
 			"name equals its key, and a fixture never declares the second-factor authority",
 			"reach holds non-empty strings, no primary's marker, no second-factor value unless the requirement declares the second-factor authority, and — in this release — nothing at all unless it does; stepUpPage is set when reach is not empty, and is valid when set",
-			"remediations are the requirement's own routes — <name>.<route> — each once, none a consumer's action in ADMISSION_ACTIONS",
+			"remediations are the requirement's own routes — <name>.<route> — each once",
 			"hintKeys are hint names",
 			"admit is never called with a dead session",
 			"admit is never called for a remediation action",
@@ -207,7 +207,7 @@ describe("sessionRequirementContract — each way a requirement can break it", (
 
 	it("remediations that are not names, are not the requirement's own routes, or repeat", async () => {
 		const remediations =
-			"remediations are the requirement's own routes — <name>.<route> — each once, none a consumer's action in ADMISSION_ACTIONS";
+			"remediations are the requirement's own routes — <name>.<route> — each once";
 		expect(await failing({ build: () => fixture({ remediations: [""] }) })).toContain(remediations);
 		expect(await failing({ build: () => fixture({ remediations: ["a", "a"] }) })).toContain(
 			remediations,
@@ -227,17 +227,6 @@ describe("sessionRequirementContract — each way a requirement can break it", (
 			await failing({ build: () => fixture({ admitPrimary: async () => "establish" }) }),
 		).toContain(
 			"an interruption's body carries none of the reserved keys, and no hint value carries an address",
-		);
-	});
-
-	it("a remediation that is a consumer's action, under the requirement's own namespace", async () => {
-		expect(
-			await failing({
-				key: "oauth",
-				build: () => fixture({ name: "oauth", remediations: ["oauth.authorize"] }),
-			}),
-		).toContain(
-			"remediations are the requirement's own routes — <name>.<route> — each once, none a consumer's action in ADMISSION_ACTIONS",
 		);
 	});
 

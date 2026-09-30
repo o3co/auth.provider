@@ -38,6 +38,7 @@ import type {
 import { resolverForTests } from "@o3co/auth-provider-core/testing";
 import express from "express";
 import { vi } from "vitest";
+import { SESSION_ADMISSION_ACTIONS } from "#/admissionActions.mjs";
 import { deriveFederationTransactionCookieName } from "#/federations/transaction.mjs";
 import { createRouter } from "#/routes/Federation.mjs";
 
@@ -308,7 +309,7 @@ export function buildFederationApp({
 			...(subjectRevocation ? { subjectRevocation } : {}),
 			federationTokenStore,
 			federationTransactionCookieName: HARNESS_TRANSACTION_COOKIE_NAME,
-			requirements: requirements ?? resolverForTests([]),
+			requirements: requirements ?? resolverForTests([], { actions: SESSION_ADMISSION_ACTIONS }),
 			...(auditSink ? { auditSink } : {}),
 			...(logger ? { logger } : {}),
 		}),

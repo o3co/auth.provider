@@ -38,6 +38,7 @@ import {
 import express from "express";
 import request from "supertest";
 import { describe, expect, it, vi } from "vitest";
+import { DEVICE_GRANT_ADMISSION_ACTIONS } from "#/admissionActions.mjs";
 import { deviceGrantModule } from "#/module.mjs";
 import { liveCookieSession, liveSessionStore } from "./liveSessions.mjs";
 
@@ -92,9 +93,8 @@ const makeDeps = (overrides: { csrfGuard?: unknown } = {}) => {
 					"verification-uri-complete": false,
 					"code-lifetime-seconds": 600,
 					"polling-interval-seconds": 5,
-					// Present because the module refuses to mount without it;
-					// the limiter below declares the prefix explicitly, so the seed
-					// never runs here and the numbers need not agree.
+					// Present because the module refuses to mount without it, and
+					// the contributed budget below agrees with it.
 					rateLimit: { limit: 50, windowSeconds: 300 },
 				},
 			},
@@ -103,7 +103,12 @@ const makeDeps = (overrides: { csrfGuard?: unknown } = {}) => {
 		clientRepository,
 		deviceCodeStore: store,
 		userSessionStore: liveSessionStore(),
-		sessionRequirementResolver: resolverForTests([]),
+		sessionRequirementResolver: resolverForTests([], { actions: DEVICE_GRANT_ADMISSION_ACTIONS }),
+		rateLimitBudgetResolver: {
+			get: (prefix: string) =>
+				prefix === "device_verification" ? { limit: 50, windowSeconds: 300 } : undefined,
+			entries: () => new Map().entries(),
+		},
 		rateLimiter: createMemoryRateLimiter({
 			limits: { device_verification: { limit: 50, windowSeconds: 300 } },
 			defaultLimit: { limit: 60, windowSeconds: 60 },

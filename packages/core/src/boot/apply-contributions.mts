@@ -21,6 +21,7 @@
  * {@link applyContributions}.
  */
 
+import { shownConfigValue } from "../config/configuredValue.mjs";
 import { FEDERATED_AMR, MFA_AMR, PASSWORD_AMR } from "../grants/authenticationClaims.mjs";
 import { consoleLogger } from "../logging/consoleLogger.mjs";
 import type { Logger } from "../logging/Logger.mjs";
@@ -33,10 +34,13 @@ import type {
 	RateLimitBudgetResolver,
 	TokenExchangeValidatorResolver,
 } from "../modules/manifest/synthetic-keys.mjs";
-import type { RateLimitSpec } from "../ratelimit/types.mjs";
-import { isUsableRateLimitSpec, shownConfigValue } from "../ratelimit/usableSpec.mjs";
+import { readRateLimitFailMode } from "../ratelimit/guard.mjs";
+import type { RateLimiter, RateLimitSpec } from "../ratelimit/types.mjs";
+import { isBoundedRateLimitSpec, isUsableRateLimitSpec } from "../ratelimit/usableSpec.mjs";
+import type { AdmissionAction } from "../session-admission/actions.mjs";
 import { sessionRequirementResolverOver } from "../session-admission/admit.mjs";
 import {
+	checkRemediationsAgainstActions,
 	type RegisteredRequirement,
 	registeredRequirement,
 	sealRegisteredReach,
@@ -336,6 +340,7 @@ export function prepareSyntheticProjections(
 		mfaFactors,
 		sessionRequirements,
 		rateLimitBudgets,
+		admissionActions,
 	} = contributionKinds;
 	if (grants !== undefined) {
 		inject("grantHandlerResolver", () =>
@@ -368,7 +373,7 @@ export function prepareSyntheticProjections(
 	// The session-requirement resolver is branded by its home: the object the
 	// planner records is the gated view a consumer is handed, so `admitSession`
 	// knows it and a home-made object forges nothing (ADR
-	// 2026-09-28-session-admission).
+	// 2026-09-28-session-admission). It answers the registered actions too.
 	if (
 		sessionRequirements !== undefined &&
 		!Object.hasOwn(components, "sessionRequirementResolver")
@@ -377,6 +382,7 @@ export function prepareSyntheticProjections(
 			{
 				get: (name) => sessionRequirements.get(name),
 				entries: () => sessionRequirements.entries(),
+				action: (name) => admissionActions?.get(name),
 			},
 			(view) => readableFromStage4(view, "sessionRequirementResolver", readGate),
 		);
@@ -487,9 +493,9 @@ function checkNameKeyedValue(
 						windowSeconds: (value as { readonly windowSeconds?: unknown }).windowSeconds,
 					}
 				: { limit: undefined, windowSeconds: undefined };
-		if (typeof value !== "object" || !isUsableRateLimitSpec(read)) {
+		if (typeof value !== "object" || !isBoundedRateLimitSpec(read)) {
 			throw new RangeError(
-				`rateLimitBudgets "${name}": a budget is { limit, windowSeconds }, a positive whole limit and a positive whole number of seconds that ends within the Date range (got limit ${shownConfigValue(read.limit)}, windowSeconds ${shownConfigValue(read.windowSeconds)})`,
+				`rateLimitBudgets "${name}": a budget is { limit, windowSeconds }, a positive whole limit and a positive whole number of seconds, at most a year (got limit ${shownConfigValue(read.limit)}, windowSeconds ${shownConfigValue(read.windowSeconds)})`,
 			);
 		}
 		return Object.freeze(read);
@@ -508,6 +514,147 @@ function checkNameKeyedValue(
 		return registeredRequirement(value, issuer);
 	}
 	return value;
+}
+
+/** A budget as a refusal shows it. */
+const describedBudget = (spec: RateLimitSpec): string =>
+	`limit ${spec.limit}, windowSeconds ${spec.windowSeconds}`;
+
+/**
+ * Refuses a `rateLimitBudgets` override that loosens the budget it replaces:
+ * a higher `limit` or a shorter `windowSeconds`. A `null` side counts as the
+ * wired limiter's `defaultLimit`; without one it cannot be compared, and is
+ * refused.
+ * @internal
+ */
+function checkBudgetOverride(
+	name: string,
+	replaced: RateLimitSpec | null,
+	overriding: RateLimitSpec | null,
+	limiter: unknown,
+): void {
+	if (replaced === null && overriding === null) return;
+	const declared = (limiter as { readonly defaultLimit?: unknown } | undefined)?.defaultLimit;
+	const defaultLimit = isUsableRateLimitSpec(declared) ? declared : undefined;
+	const from = replaced ?? defaultLimit;
+	const to = overriding ?? defaultLimit;
+	if (from === undefined || to === undefined) {
+		throw new RangeError(
+			`rateLimitBudgets "${name}": an override may only tighten the budget it replaces, and a switched-off budget counts as the wired limiter's defaultLimit, which no wired limiter declares`,
+		);
+	}
+	if (to.limit > from.limit || to.windowSeconds < from.windowSeconds) {
+		throw new RangeError(
+			`rateLimitBudgets "${name}": an override may only tighten the budget it replaces — limit no higher and windowSeconds no shorter than ${describedBudget(from)}${replaced === null ? ", the limiter's defaultLimit" : ""} (got ${describedBudget(to)}${overriding === null ? ", the limiter's defaultLimit" : ""})`,
+		);
+	}
+}
+
+/** The wired limiter's kind and the outage policy the guard applies for it. */
+function limiterInForce(
+	limiter: RateLimiter | undefined,
+): { readonly kind: unknown; readonly failMode: string } | null {
+	if (limiter === undefined) return null;
+	let failMode: string;
+	try {
+		failMode = readRateLimitFailMode(limiter, "rateLimiter");
+	} catch {
+		failMode = "invalid";
+	}
+	return { kind: limiter.kind, failMode };
+}
+
+/**
+ * Logs `rate_limit_budgets_registered` at info — the wired limiter's kind and
+ * outage policy, and each prefix with its contributed budget and the module
+ * that set it; a limiter's own `limits` entry wins over that budget and is
+ * not shown — and `rate_limit_fail_mode_not_applied` at warn when
+ * `rateLimit.failMode` says `open` and the wired limiter applies another
+ * policy.
+ * @internal
+ */
+function logRateLimitBudgets(
+	material: ComponentWorld,
+	components: Record<string, unknown>,
+	collector: NameKeyedCollector<RateLimitSpec | null> | undefined,
+): void {
+	const setters = new Map<string, { module: string; by: "contribution" | "override" }>();
+	for (const moduleName of material.plan.initOrder) {
+		// biome-ignore lint/style/noNonNullAssertion: every module in the init order was validated under its name
+		const normalised = material.plan.validated.byName.get(moduleName)!.normalised;
+		for (const [entries, by] of [
+			[normalised.contributesEntries, "contribution"],
+			[normalised.overridesEntries, "override"],
+		] as const) {
+			for (const entry of entries) {
+				if (entry.kind !== "rateLimitBudgets" || typeof entry.key !== "string") continue;
+				setters.set(entry.key, { module: moduleName, by });
+			}
+		}
+	}
+	const limiter = limiterInForce(components.rateLimiter as RateLimiter | undefined);
+	if (setters.size === 0 && limiter === null) return;
+	const logger = (components.logger as Logger | undefined) ?? consoleLogger;
+	logger.info(
+		{
+			limiter,
+			budgets: [...setters].map(([prefix, { module, by }]) => {
+				const budget = collector?.get(prefix) ?? null;
+				return {
+					prefix,
+					budget:
+						budget === null ? null : { limit: budget.limit, windowSeconds: budget.windowSeconds },
+					module,
+					by,
+				};
+			}),
+		},
+		"rate_limit_budgets_registered",
+	);
+	const configured = (components.config as { rateLimit?: { failMode?: unknown } } | undefined)
+		?.rateLimit?.failMode;
+	if (configured === "open" && limiter !== null && limiter.failMode !== "open") {
+		logger.warn({ configured, limiter }, "rate_limit_fail_mode_not_applied");
+	}
+}
+
+/** Each registered admission action's name, with the module that registered it, in init order. */
+function admissionActionRegistrants(material: ComponentWorld): ReadonlyMap<string, string> {
+	const registrants = new Map<string, string>();
+	for (const moduleName of material.plan.initOrder) {
+		// biome-ignore lint/style/noNonNullAssertion: every module in the init order was validated under its name
+		const normalised = material.plan.validated.byName.get(moduleName)!.normalised;
+		for (const entry of normalised.contributesEntries) {
+			if (entry.kind === "admissionActions" && typeof entry.key === "string") {
+				registrants.set(entry.key, moduleName);
+			}
+		}
+	}
+	return registrants;
+}
+
+/**
+ * Logs `admission_actions_registered` at info once any action is registered:
+ * each action's name, its grade and the module that registered it, in init
+ * order. An action graded `grants_nothing` is exempt from the MFA baseline on
+ * a session a record carries; this line is where an operator sees which
+ * module declared it.
+ * @internal
+ */
+function logAdmissionActions(
+	material: ComponentWorld,
+	components: Record<string, unknown>,
+	collector: NameKeyedCollector<AdmissionAction> | undefined,
+): void {
+	const actions = [...admissionActionRegistrants(material)].flatMap(([name, module]) => {
+		const action = collector?.get(name);
+		return action === undefined ? [] : [{ name, grade: action.grade, module }];
+	});
+	if (actions.length === 0) return;
+	((components.logger as Logger | undefined) ?? consoleLogger).info(
+		{ actions },
+		"admission_actions_registered",
+	);
 }
 
 /** One registered session requirement, with the module that contributed it. */
@@ -568,6 +715,9 @@ const sameSet = (a: ReadonlySet<string>, b: ReadonlySet<string>): boolean =>
  *   module), before anything else is checked;
  * - seal each `reach` with `sealRegisteredReach`, which holds its rules, so
  *   the `acr` drop and admission read what was checked;
+ * - refuse a remediation named after a registered admission action
+ *   (`checkRemediationsAgainstActions`): it would skip every requirement for
+ *   that action;
  * - accept the second-factor authority, whatever its name, only from a
  *   module that requires every one of `MFA_PORTS`, reaching what core
  *   recomputes from the enabled factors, and declaring its own
@@ -593,8 +743,10 @@ async function checkSessionRequirements(
 	material: ComponentWorld,
 	components: Record<string, unknown>,
 	collector: NameKeyedCollector<RegisteredRequirement> | undefined,
+	actions: NameKeyedCollector<AdmissionAction> | undefined,
 ): Promise<void> {
 	if (collector === undefined) return;
+	const registrants = admissionActionRegistrants(material);
 	const registrations: RequirementRegistration[] = [];
 	// An override of the kind never reaches here: stage 1's guard refuses it
 	// off the same normalised entries this pass reads.
@@ -651,6 +803,10 @@ async function checkSessionRequirements(
 	for (const registration of registrations) {
 		let reach: ReadonlySet<string>;
 		try {
+			checkRemediationsAgainstActions(registration.requirement, (name) => {
+				const module = actions?.get(name) === undefined ? undefined : registrants.get(name);
+				return module === undefined ? undefined : `module ${JSON.stringify(module)}`;
+			});
 			reach = sealRegisteredReach(registration.requirement);
 		} catch (cause) {
 			return failed(registration, cause);
@@ -858,7 +1014,8 @@ function warnOnTokenBindingSurfaceOverlap(
  *      then feed `collector.register` (contributes) or `collector.replace`
  *      (overrides).
  *   2b. `checkSessionRequirements`, before a list-shaped factory reads a
- *      requirement's reach.
+ *      requirement's reach; then the rate-limit budgets' and the admission
+ *      actions' boot lines.
  *   3. List-shaped pass, in INPUT-ARRAY order: `collector.append` (dedup by
  *      reference is the collector's job); routes are wrapped as
  *      `CollectedRouteContribution` with a `declarationIndex`.
@@ -1012,6 +1169,14 @@ export async function applyContributions(
 			let value: unknown;
 			try {
 				value = checkNameKeyedValue(entry.kind, name, await factory(deps), issuerOf(components));
+				if (entry.kind === "rateLimitBudgets") {
+					checkBudgetOverride(
+						name,
+						collector.get(name) as RateLimitSpec | null,
+						value as RateLimitSpec | null,
+						components.rateLimiter,
+					);
+				}
 			} catch (thrownValue) {
 				const cleanupErrors = await runCleanupsReverse(material.cleanups);
 				throw new BootError({
@@ -1040,7 +1205,14 @@ export async function applyContributions(
 	// reads a requirement's reach.
 	// ---------------------------------------------------------------------------
 
-	await checkSessionRequirements(material, components, contributionKinds.sessionRequirements);
+	await checkSessionRequirements(
+		material,
+		components,
+		contributionKinds.sessionRequirements,
+		contributionKinds.admissionActions,
+	);
+	logRateLimitBudgets(material, components, contributionKinds.rateLimitBudgets);
+	logAdmissionActions(material, components, contributionKinds.admissionActions);
 
 	// ---------------------------------------------------------------------------
 	// Step 3: List-shaped pass in INPUT-ARRAY order.

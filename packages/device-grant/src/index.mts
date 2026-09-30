@@ -24,6 +24,12 @@
  * dependency on the grant that consumes it.
  */
 
+// The actions device verification admits, for a composition that mounts
+// createDeviceVerificationHandler itself and registers them.
+export {
+	DEVICE_GRANT_ADMISSION_ACTIONS,
+	type DeviceGrantAdmissionAction,
+} from "./admissionActions.mjs";
 export {
 	createDeviceAuthorizationHandler,
 	type DeviceAuthorizationEndpointOptions,
@@ -37,6 +43,7 @@ export {
 	type DeviceAuthorizationSettings,
 	type DeviceGrantDependencies,
 } from "./types.mjs";
+export { isDeviceVerificationRateLimitSpec } from "./verificationBudget.mjs";
 export {
 	createDeviceVerificationHandler,
 	type DeviceVerificationHandlerOptions,

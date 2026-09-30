@@ -15,7 +15,6 @@
  */
 
 import {
-	ADMISSION_ACTIONS,
 	type Admission,
 	type AdmissionDeps,
 	type AuditSink,
@@ -59,6 +58,7 @@ import {
 	unrepresentedResources,
 } from "@o3co/auth-provider-core";
 import type { Request, RequestHandler, Response } from "express";
+import type { OAUTH_ROUTER_ADMISSION_ACTIONS } from "../admissionActions.mjs";
 import {
 	PKCE_METHOD_ABSENT_DEFAULT,
 	PKCE_METHOD_S256,
@@ -72,6 +72,9 @@ import {
 	type ReauthAskStore,
 	reauthAskStoreFor,
 } from "./reauthAsk.mjs";
+
+/** The action /authorize admits, as `oauthModule` registers it. */
+const AUTHORIZE_ACTION = "oauth.authorize" satisfies keyof typeof OAUTH_ROUTER_ADMISSION_ACTIONS;
 
 export interface AuthorizeHandlerOptions {
 	readonly clientRepository: ClientRepository;
@@ -1495,7 +1498,7 @@ export const createAuthorizeHandler = (opts: AuthorizeHandlerOptions): RequestHa
 	const admissionDeps: AdmissionDeps = {
 		userSessionStore: opts.userSessionStore,
 		subjectRevocation: opts.subjectRevocation,
-		requirements: checkResolver(opts.requirements, "createAuthorizeHandler"),
+		requirements: checkResolver(opts.requirements, "createAuthorizeHandler", [AUTHORIZE_ACTION]),
 		acrTable: opts.oauth.acrValues,
 		logger: opts.logger,
 		auditSink: opts.auditSink,
@@ -1580,7 +1583,7 @@ export const createAuthorizeHandler = (opts: AuthorizeHandlerOptions): RequestHa
 		// validated; what each outcome is answered with is `decideOnAdmission`'s.
 		const admission = await admitSession(admissionDeps, {
 			claim,
-			action: ADMISSION_ACTIONS["oauth.authorize"],
+			action: AUTHORIZE_ACTION,
 			...(requested.length > 0 ? { asks: { acrValues: requested } } : {}),
 		});
 		const decided = await decideOnAdmission(

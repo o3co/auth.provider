@@ -16,7 +16,6 @@
 
 import { randomUUID } from "node:crypto";
 import {
-	ADMISSION_ACTIONS,
 	type Admission,
 	type AdmissionDeps,
 	admitSession,
@@ -52,6 +51,7 @@ import {
 } from "@o3co/auth-provider-core";
 import type { JWTPayload } from "jose";
 import { stepUpRefusal } from "../admission.mjs";
+import type { REFRESH_TOKEN_GRANT_ADMISSION_ACTIONS } from "../admissionActions.mjs";
 
 /**
  * Subtracted from the family ceiling a rotation reports before the refresh
@@ -468,7 +468,7 @@ export const createRefreshTokenGrant = (deps: RefreshTokenGrantDeps): GrantHandl
 			const admission = await admitSession(admissionDeps, {
 				// `subjectStr` was refused above when the token carries no `sub`.
 				claim: tokenClaim({ sid, sub: subjectStr, amr: carriedAmr }),
-				action: ADMISSION_ACTIONS["oauth.refresh"],
+				action: "oauth.refresh" satisfies keyof typeof REFRESH_TOKEN_GRANT_ADMISSION_ACTIONS,
 			});
 			const refusal = refusalFor(admission);
 			if (refusal !== undefined) return { result: refusal };

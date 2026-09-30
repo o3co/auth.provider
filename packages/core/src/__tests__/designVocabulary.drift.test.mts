@@ -118,13 +118,19 @@ const VOCABULARY: readonly VocabularyRow[] = [
 	},
 	{
 		concept: "device-verification budget shape (#448)",
-		home: "packages/core/src/ratelimit/deviceVerificationSpec.mts",
+		home: "packages/device-grant/src/verificationBudget.mts",
 		definition: /(?:function|const)\s+isDeviceVerificationRateLimitSpec\b/,
 	},
 	{
 		concept: "usable rate-limit spec — what a limiter applies as written",
 		home: "packages/core/src/ratelimit/usableSpec.mts",
 		definition: /(?:function|const)\s+isUsableRateLimitSpec\b/,
+	},
+	{
+		concept:
+			"the budget a limiter applies to a key — its own limits entry, else the owner's contributed budget, else its default (#728)",
+		home: "packages/core/src/ratelimit/budgetLookup.mts",
+		definition: /(?:function|const)\s+createRateLimitBudgetLookup\b/,
 	},
 	{
 		concept: "authentication claims a token may carry — amr (#481)",
@@ -214,10 +220,15 @@ const VOCABULARY: readonly VocabularyRow[] = [
 		definition: /(?:function|const)\s+checkPrimaryContinuation\b/,
 	},
 	{
+		concept: "session admission — the grades core owns (the session-admission ADR's D4)",
+		home: "packages/core/src/session-admission/actions.mts",
+		definition: /(?:function|const)\s+ADMISSION_GRADES\b/,
+	},
+	{
 		concept:
-			"session admission — the bundled actions and their grades (the session-admission ADR's D4)",
-		home: "packages/core/src/session-admission/requirement.mts",
-		definition: /(?:function|const)\s+ADMISSION_ACTIONS\b/,
+			"session admission — an action's name, as a registration holds it (the session-admission ADR's D4)",
+		home: "packages/core/src/session-admission/actions.mts",
+		definition: /(?:function|const)\s+isAdmissionActionName\b/,
 	},
 	{
 		// Refused under the name device verification's copy had, too.

@@ -21,7 +21,10 @@
  */
 
 import { describe, expect, expectTypeOf, it } from "vitest";
+import type { AdmissionAction } from "#/session-admission/actions.mjs";
 import type {
+	AdmissionRequest,
+	IssuedRemediationAction,
 	PrimaryAuthentication,
 	RegisteredRequirement,
 	RequirementInput,
@@ -31,7 +34,6 @@ import type {
 	SessionView,
 } from "#/session-admission/requirement.mjs";
 import {
-	ADMISSION_ACTIONS,
 	ADMISSION_INFRASTRUCTURE_STORES,
 	checkStepUpPage,
 	describeAdmissionOutage,
@@ -282,7 +284,7 @@ describe("resolverForTests — the resolver a test builds", () => {
 		]);
 	});
 
-	it("holds remediations to the requirement's own routes — <name>.<route>, the route a lower-case identifier — each once, and never a consumer's action, which may share the namespace", () => {
+	it("holds remediations to the requirement's own routes — <name>.<route>, the route a lower-case identifier — each once, and never a registered action's name, which may share the namespace", () => {
 		expect(
 			resolverForTests([requirement("x", { remediations: ["x.step_up", "x.recover"] })]).get("x")
 				?.remediations,
@@ -303,20 +305,18 @@ describe("resolverForTests — the resolver a test builds", () => {
 				JSON.stringify(remediations),
 			).toThrow(RangeError);
 		}
-		// A consumer's action may share a requirement's namespace (`mfa.manage`,
-		// or a requirement named `oauth`): any name in `ADMISSION_ACTIONS` is
-		// refused, since a remediation under it would skip every requirement
-		// for that action.
-		expect(Object.hasOwn(ADMISSION_ACTIONS, "mfa.step_up")).toBe(false);
+		// A consumer's action may share a requirement's namespace: a registered
+		// action's name is refused, since a remediation under it would skip every
+		// requirement for that action.
 		expect(() =>
-			resolverForTests([requirement("oauth", { remediations: ["oauth.authorize"] })]),
+			resolverForTests([requirement("oauth", { remediations: ["oauth.authorize"] })], {
+				actions: { "oauth.authorize": { grade: "use" } },
+			}),
 		).toThrow(/oauth\.authorize/);
-		expect(() => resolverForTests([requirement("mfa", { remediations: ["mfa.manage"] })])).toThrow(
-			/mfa\.manage/,
-		);
 		expect(
-			resolverForTests([requirement("mfa", { remediations: ["mfa.step_up"] })]).get("mfa")
-				?.remediations,
+			resolverForTests([requirement("mfa", { remediations: ["mfa.step_up"] })], {
+				actions: { "mfa.manage": { grade: "credential_change" } },
+			}).get("mfa")?.remediations,
 		).toEqual(["mfa.step_up"]);
 	});
 
@@ -350,8 +350,10 @@ describe("resolverForTests — the resolver a test builds", () => {
 				return names === 1 ? "oauth" : "x";
 			},
 		};
-		// Read once as "oauth": its remediation is a consumer's action, refused.
-		expect(() => resolverForTests([renaming as never])).toThrow(/oauth\.authorize/);
+		// Read once as "oauth": its remediation is its own route, so it registers.
+		expect(resolverForTests([renaming as never]).get("oauth")?.remediations).toEqual([
+			"oauth.authorize",
+		]);
 		let reads = 0;
 		const swapping = {
 			...requirement("x"),
@@ -435,9 +437,9 @@ describe("resolverForTests — the resolver a test builds", () => {
 		expect(reads).toBe(1);
 	});
 
-	it("exposes get and entries alone, frozen", () => {
+	it("exposes get, entries and action alone, frozen", () => {
 		const resolver = resolverForTests([]);
-		expect(Object.keys(resolver).sort()).toEqual(["entries", "get"]);
+		expect(Object.keys(resolver).sort()).toEqual(["action", "entries", "get"]);
 		expect(Object.isFrozen(resolver)).toBe(true);
 	});
 
@@ -879,6 +881,13 @@ describe("the shapes the contract names", () => {
 			| { readonly outcome: "step_up"; readonly whenStillUnmet: "reauthenticate" | "unmet" }
 			| { readonly outcome: "unmet" }
 		>();
+		expect(true).toBe(true);
+	});
+
+	it("a request's action is a name, or a remediation core issued: a registered action's object is not one", () => {
+		expectTypeOf<AdmissionRequest["action"]>().toEqualTypeOf<string | IssuedRemediationAction>();
+		expectTypeOf<AdmissionAction>().not.toMatchTypeOf<AdmissionRequest["action"]>();
+		expectTypeOf<IssuedRemediationAction>().toMatchTypeOf<AdmissionAction>();
 		expect(true).toBe(true);
 	});
 

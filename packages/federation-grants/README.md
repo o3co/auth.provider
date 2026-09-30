@@ -184,7 +184,10 @@ say what each one means and what to do.
 - **The throttles** log and audit a limiter outage through core with the
   deployment's own logger and sink — `rate_limiter_failed_closed` /
   `rate_limiter_failed_open` and `rate_limit.unavailable`, tagged
-  `federation_grants` or `federation_grants_browser`.
+  `federation_grants` or `federation_grants_browser`. The module claims both
+  prefixes with no budget of its own (`rateLimitBudgets`), whether or not the
+  feature is enabled: the limiter's `limits` entry or its default applies,
+  and no other module can set a budget for them.
 
 ## Public API
 
@@ -513,7 +516,12 @@ a boot error rather than a flow that reads every signed-in user as signed out.
 admitted by core's session admission, on the cookie's claim, as the step's own
 action — `federation_grants.connect`, `federation_grants.consent` (the read
 and the answer) and `federation_grants.callback` (check 3, and again, with
-the same claim, just before the activation), each graded `use`. Admission
+the same claim, just before the activation), each graded `use` as
+`federationGrantsModule` registers it — whether or not `federationGrants.enabled`
+is set, so `admission_actions_registered` lists them either way: a module's
+registration follows a switch only when the module decides, as it is built,
+whether it installs the admitting code, and this one reads its switch when the
+routes are built. Admission
 reads the durable session behind the cookie — live, the cookie's own
 subject's, not past its `expiresAt` — the subject's sessions boundary through
 `subjectRevocation`, and the registered session requirements. What stays
@@ -669,7 +677,7 @@ A refused answer is logged as one warn line,
 | A store of this package could not answer | 503 | `temporarily_unavailable` | `storage` |
 | Session admission could not answer — the session store, the sessions boundary or a session requirement — described as every consumer of admission describes it (core's `describeAdmissionOutage`) | 503 | `temporarily_unavailable` | `session store unavailable`, `revocation store unavailable` or `session requirement unavailable` |
 | The client registry could not answer — judging the question or describing the client | 503 | `temporarily_unavailable` | `client registry unavailable` |
-| The limiter backend is down, under `rateLimit.failMode = "closed"` | 503 | `temporarily_unavailable` | `rate_limiter` |
+| The limiter backend is down, and the limiter's `failMode` is `"closed"` | 503 | `temporarily_unavailable` | `rate_limiter` |
 | The upstream URL could not be built, or the federation lost the capability (nothing is spent) | 503 | `temporarily_unavailable` | `upstream_unavailable` |
 
 A challenge is not a bearer token: it is answerable only from the browser it

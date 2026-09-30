@@ -40,7 +40,8 @@ responsibilities:
 
 - the `/session` routes and their answers; the CSRF policy for them
   (`session.csrf.*`), which other packages run through the `csrfGuard` slot;
-  the login rate-limit guard's wiring (`rateLimit.login`); the redirect
+  the login rate-limit guard's wiring and its budget (`rateLimit.login`, which
+  the session module contributes as the `login` budget); the redirect
   allowlists (`session.redirectAllowlist`, `federations.<name>.redirectAllowlist`);
 - what the modules provide other packages through slots whose contracts
   are core's: `csrfGuard`, `loginEntry` and `loginCompletion`, and
@@ -392,8 +393,10 @@ The manifest ([`src/module.mts`](src/module.mts)):
   [Redirect allowlists](#redirect-allowlists)) and is stored as
   `req.session.redirectTo`; nothing in this package redirects to it.
 - The brute-force guard runs on the shared `rateLimiter` (prefix `login`, keyed
-  by client IP) with `rateLimit.login`'s window and limit, answering `429` when
-  it denies and following `rateLimit.failMode` when the limiter fails. With no
+  by client IP) with `rateLimit.login`'s window and limit — the session module
+  contributes them as the `login` budget, which a limiter's own `limits.login`
+  overrides — answering `429` when it denies and following the limiter's own
+  `failMode` when the limiter fails. With no
   `rateLimiter` wired the route falls back to a per-process limiter: boot is
   refused under `deployment.mode = "multi"`, a `login_rate_limiter_not_shared`
   warning is logged when the mode is unset, and nothing is said under

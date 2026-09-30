@@ -24,6 +24,7 @@ import type { MfaFactor as ConcreteMfaFactor } from "../../mfa/factor.mjs";
 import type { TokenBindingMechanism } from "../../middleware/tokenBinding.mjs";
 import type { GrantPolicyHook } from "../../policy/types.mjs";
 import type { RateLimitSpec } from "../../ratelimit/types.mjs";
+import type { AdmissionActionDeclaration } from "../../session-admission/actions.mjs";
 import type { SessionRequirement as ConcreteSessionRequirement } from "../../session-admission/requirement.mjs";
 import type { ExchangeTokenValidator as ConcreteExchangeTokenValidator } from "../../token-exchange/validator.mjs";
 import type { Contributed } from "./contributed.mjs";
@@ -165,11 +166,13 @@ export type TokenBindingMechanismFactory<Deps> = (
  *
  * Answer parsed numbers (through the module's schema, coercing environment
  * strings, or `requireUsableConfiguredRateLimitSpec`): the budget is held to
- * `isUsableRateLimitSpec` as answered, and `"20"` is not a limit.
+ * `isBoundedRateLimitSpec` as answered — a window of at most a year — and
+ * `"20"` is not a limit.
  *
- * `null` switches the budget off: the prefix is absent from
- * `rateLimitBudgetResolver` yet still claimed (a second contribution is a
- * duplicate). Absent is not unlimited: keys fall to the limiter's `defaultLimit`.
+ * `null` claims the prefix with no budget of its own — keyed with none, or
+ * switched off by the module's settings: absent from `rateLimitBudgetResolver`,
+ * yet a second contribution is a duplicate. Absent is not unlimited: keys fall
+ * to the limiter's `defaultLimit`. A module claims every prefix it keys.
  */
 export type RateLimitBudgetFactory<Deps> = (deps: Deps) => Contributed<RateLimitSpec | null>;
 
@@ -181,7 +184,7 @@ export type RateLimitBudgetFactory<Deps> = (deps: Deps) => Contributed<RateLimit
  * Collisions:
  * - Name-keyed (`grants`, `federations`, `tokenExchangeValidators`,
  *   `mfaFactors`, `sessionRequirements`, `rateLimitBudgets`,
- *   `federationTypes`): a duplicate refuses boot.
+ *   `federationTypes`, `admissionActions`): a duplicate refuses boot.
  * - List-shaped (`auditHooks`, `routes`, `grantPolicyHooks`,
  *   `grantMiddleware`): duplicates allowed; routes still refuse a duplicate
  *   `id` or an undecorated-mountPath collision.
@@ -225,11 +228,26 @@ export interface ContributesMap<Deps = ProviderDeps<never, never>> {
 	 * budgets into the synthetic key `rateLimitBudgetResolver`, read at request
 	 * time. A prefix contributed twice refuses boot (`duplicate-contribute`); an
 	 * empty prefix or one holding `:` refuses it at stage 1
-	 * (`contribution-malformed`); an unusable budget fails its contribution; a
-	 * host may not supply the collector (`contribution-kind-guarded`).
+	 * (`contribution-malformed`); an unusable budget fails its contribution, and
+	 * so does an override that loosens the budget it replaces (a `null` side
+	 * counts as the wired limiter's `defaultLimit`); a host may not supply the
+	 * collector (`contribution-kind-guarded`).
 	 */
 	readonly rateLimitBudgets?: {
 		readonly [prefix: string]: RateLimitBudgetFactory<Deps>;
+	};
+	/**
+	 * The actions this module admits through session admission, keyed by the
+	 * name it passes `admitSession` (`acme.export`), each declaring one of
+	 * core's grades. A declaration, not a factory: boot reads each once, at
+	 * stage 1. A name outside the grammar, a grade outside the grades (or
+	 * `remediation`, a requirement's), a container that is not a record and an
+	 * override refuse it there (`contribution-malformed`); a name two modules
+	 * register refuses it too (`duplicate-contribute`); a host may not supply
+	 * the collector (`contribution-kind-guarded`).
+	 */
+	readonly admissionActions?: {
+		readonly [name: string]: AdmissionActionDeclaration;
 	};
 	readonly auditHooks?: readonly AuditHookFactory<Deps>[];
 	readonly routes?: readonly RouteContributionEntry<Deps>[];

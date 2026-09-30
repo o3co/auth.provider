@@ -24,7 +24,7 @@
  */
 
 import {
-	ADMISSION_ACTIONS,
+	type AdmissionActionDeclaration,
 	AUDIT_SINK_ABSENCE_POLICY,
 	admitSession,
 	type CookieCarrier,
@@ -54,6 +54,11 @@ export interface WebAuthnSessionSubjectOptions {
 	 */
 	readonly subjectFor: (session: UserSession) => WebAuthnSubject;
 }
+
+/** What registering from a session admits: a passkey is a new way into the account. */
+export const SESSION_SUBJECT_ADMISSION_ACTIONS = Object.freeze({
+	"webauthn.register": Object.freeze({ grade: "credential_change" }),
+} as const satisfies Readonly<Record<string, AdmissionActionDeclaration>>);
 
 /** The registration routes ask admission for no `acr_values`: the table it selects against is empty. */
 const NO_ACR_TABLE = Object.freeze({});
@@ -110,13 +115,16 @@ export function webauthnSessionSubjectModule(options: WebAuthnSessionSubjectOpti
 			auditSink: AUDIT_SINK_ABSENCE_POLICY,
 		},
 		contributes: {
+			admissionActions: SESSION_SUBJECT_ADMISSION_ACTIONS,
 			routes: [
 				(deps) => {
-					// Refused here, when the route is built — a missing resolver, or
-					// one the planner did not build — not on the first request.
+					// Refused here, when the route is built — a missing resolver, one
+					// the planner did not build, or webauthn.register unregistered —
+					// not on the first request.
 					const requirements = checkResolver(
 						deps.sessionRequirementResolver,
 						"webauthnSessionSubjectModule",
+						Object.keys(SESSION_SUBJECT_ADMISSION_ACTIONS),
 					);
 					const logger = deps.logger ?? consoleLogger;
 					const admitRegistration: RequestHandler = async (req, res, next) => {
@@ -132,7 +140,8 @@ export function webauthnSessionSubjectModule(options: WebAuthnSessionSubjectOpti
 							{
 								// express-session's `req.session`, read without its type package.
 								claim: cookieClaim(req as unknown as CookieCarrier),
-								action: ADMISSION_ACTIONS["webauthn.register"],
+								action:
+									"webauthn.register" satisfies keyof typeof SESSION_SUBJECT_ADMISSION_ACTIONS,
 							},
 						);
 						if (admission.outcome === "unavailable") {

@@ -122,7 +122,7 @@ standalone テンプレートの [`buildModules.mts`](../../templates/standalone
 
 **空白区切りの値。** クライアントが送る `scope`、`prompt`、`acr_values` は RFC 6749 §3.3 の文法で厳密に読む（core の `readSpaceDelimitedParameter`）: 区切りは空白だけで、scope-token でない要素 — タブ、改行、引用符、バックスラッシュ、印字可能な ASCII 以外 — があれば値全体が不正な形式になる。不正な形式の `scope` は、ここのすべてのグラントの `/oauth/token` と `/oauth/authorize` で `invalid_scope`（`scope is not a space-delimited list of scope-tokens`）になり、絞り込まれることも、スコープを名指しているかのように許可リストと照合されることもない。空白だけの値は空の値と同じく省略されたスコープだが、タブだけの値は不正な形式である。不正な形式の `prompt` と `acr_values` は `invalid_request`。繰り返された `scope` — および文字列でない値すべて — は `invalid_request` になる。一方、JSON ボディの `"scope": null` は、フォームボディの `scope=` と同じく省略されたスコープである（RFC 6749 §3.2）。このパッケージ自身のアクセストークンとリフレッシュトークンの `scope` クレーム（`/oauth/userinfo` とリフレッシュで）は、広がらないように読む（`readIssuedScope`）: 空白だけで分け、scope-token でない要素は捨てる — リクエストを厳密に読む前に発行されたトークンは `openid<TAB>email` を 1 つの要素として持ちうるが、それは発行時にどのスコープも名指さず、今もどのクレームも開示しない。リフレッシュはトークンのスコープを正規形で引き継ぐ。第三者が書いた値 — クライアントメタデータドキュメントの `scope`、上流の応答 — は寛容に読む（`parseScopeTokens`）: 任意の空白で分けて scope-token だけを残す。
 
-`/token`、`/introspect`、`/authorize`、`/revoke` は、構成が `rateLimiter` を配線していればクライアント認証より前でスロットリングされ、プロダクトの `rateLimit.failMode` に従う。配線されていなければスロットリングされない。
+`/token`、`/introspect`、`/authorize`、`/revoke` は、構成が `rateLimiter` を配線していればクライアント認証より前でスロットリングされ、リミッター自身の障害時ポリシー（`RateLimiter.failMode`。Redis リミッターでは `rateLimit.failMode`）に従う。配線されていなければスロットリングされない。キーのプレフィックスは `token`、`introspect`、`authorize`、`revoke` で、oauth モジュールが自分の予算なしで主張する（`rateLimitBudgets`）: リミッターの `limits` の項目かその既定が適用され、ほかのモジュールはこれらに予算を設定できない。
 
 `consentStore` が `pendingConsentStore` 無しで配線されたとき（またはその逆）、および `oauth.revocation.accessToken = "denylist"` を宣言して `accessTokenDenylist` が無いとき、ルーターは構築を拒否する — `createApp` 経由では boot の失敗になる。
 
@@ -139,7 +139,7 @@ standalone テンプレートの [`buildModules.mts`](../../templates/standalone
 - `oauthSessionModule({ config })` — [`oauthSession.mts`](./src/oauthSession.mts)
 - `subjectRevocationServiceModule`（ファクトリではなくモジュールの値） — [`logout/subjectRevocationService.mts`](./src/logout/subjectRevocationService.mts)
 
-**ルーター。** `createOAuthRouter(express, options)` — [`routes.mts`](./src/routes.mts) — 明示的なオプションから `/oauth` ルーターを組み立てる。`oauthModule` が解決済みの deps を渡して呼ぶものであり、ルーターを自分でマウントする composition root 向け。グラントレジストリは生成しない: `registry` は呼び出し元が渡す `get(grantType)` を持つ任意のオブジェクトで、同じ値がそのまま返る。`/oauth/token` はこれに対して振り分け、`/authorize` はこれが `authorization_code` グラントを持つときだけマウントされる。そのとき `codeRepository` は必須である。登録済みのグラントタイプが必要な呼び出し元は core の `grantHandlerResolver` を読むこと。`requirements` は必須である: boot プランナーが組み立てた `sessionRequirementResolver` で、`/authorize` と同意ステップはそれを通してセッションを読む。それが無い場合も、プランナーが組み立てていないものが渡された場合も、ルーターは組み立てを拒否する。テストは `@o3co/auth-provider-core/testing` の `resolverForTests` で作る。
+**ルーター。** `createOAuthRouter(express, options)` — [`routes.mts`](./src/routes.mts) — 明示的なオプションから `/oauth` ルーターを組み立てる。`oauthModule` が解決済みの deps を渡して呼ぶものであり、ルーターを自分でマウントする composition root 向け。グラントレジストリは生成しない: `registry` は呼び出し元が渡す `get(grantType)` を持つ任意のオブジェクトで、同じ値がそのまま返る。`/oauth/token` はこれに対して振り分け、`/authorize` はこれが `authorization_code` グラントを持つときだけマウントされる。そのとき `codeRepository` は必須である。登録済みのグラントタイプが必要な呼び出し元は core の `grantHandlerResolver` を読むこと。`requirements` は必須である: boot プランナーが組み立てた `sessionRequirementResolver` で、`/authorize` と同意ステップはそれを通してセッションを読む。それが無い場合も、プランナーが組み立てていないものが渡された場合も、ルーターは組み立てを拒否する。この二つが許可を求めるアクションは `oauth.authorize` と `oauth.consent` で、`oauthModule` が登録する。ルーターを自分でマウントする root は `OAUTH_ROUTER_ADMISSION_ACTIONS` を `contributes.admissionActions` に登録する。登録しなければ、ルーターはハンドラーとアクションを名指して組み立てを拒否する。テストは `@o3co/auth-provider-core/testing` の `resolverForTests` でリゾルバーを作り、それらを登録する。
 
 **クライアント認証。**
 
@@ -298,7 +298,7 @@ oauth.authorize.acrValues {
 
 ## セッションアドミッション
 
-ここでセッションに何かをさせるエンドポイントはどれも、core の唯一の判断 `admitSession`（[session-admission ADR](../core/docs/adr/2026-09-28-session-admission.md)、[`session-admission/`](../core/src/session-admission/README.md)）を通してセッションを読み、core が組み立てる claim と、自らが名指すアクションを渡す。ここのルートやグラントが、自ら受け入れるセッションのために `UserSessionStore` を他の手段で読むことは無い（core のドリフトガードがそれを保つ）。アドミッションが読むのは、claim、ストアが配線されていればその `sid` が名指す生存中のレコード — サブジェクトを持ち、claim のサブジェクトであり、`expiresAt` を過ぎていないこと — `subjectRevocation` が配線されていればサブジェクト失効の境界（トークンは除く。その境界は `verifyJwt` が読む）、登録済みのセッション要件、そして `/authorize` では要求された `acr_values` である。そのどれかの障害は、ストアとアクションを付けて `session_admission_unavailable` として error レベルで 1 度だけログに出し、`sid` は決して出さない。各コンシューマーが結果ごとに何を返すかは、このパッケージのものである:
+ここでセッションに何かをさせるエンドポイントはどれも、core の唯一の判断 `admitSession`（[session-admission ADR](../core/docs/adr/2026-09-28-session-admission.md)、[`session-admission/`](../core/src/session-admission/README.md)）を通してセッションを読み、core が組み立てる claim と、そのモジュールが登録したアクションの名前を渡す — `oauthModule` が登録する `oauth.authorize` と `oauth.consent`、そしてセッションに紐づく各グラントのものはそのグラントを組み込むモジュールが登録し、いずれもグレードは `use`（アクションの登録より前に組み立てられるグラントは、登録されていないアクションをリクエスト時に拒否し、ルーターは組み立て時に拒否する）。ここのルートやグラントが、自ら受け入れるセッションのために `UserSessionStore` を他の手段で読むことは無い（core のドリフトガードがそれを保つ）。アドミッションが読むのは、claim、ストアが配線されていればその `sid` が名指す生存中のレコード — サブジェクトを持ち、claim のサブジェクトであり、`expiresAt` を過ぎていないこと — `subjectRevocation` が配線されていればサブジェクト失効の境界（トークンは除く。その境界は `verifyJwt` が読む）、登録済みのセッション要件、そして `/authorize` では要求された `acr_values` である。そのどれかの障害は、ストアとアクションを付けて `session_admission_unavailable` として error レベルで 1 度だけログに出し、`sid` は決して出さない。各コンシューマーが結果ごとに何を返すかは、このパッケージのものである:
 
 | コンシューマー | アクション、claim | 生存していない / 失効 | 満たされない要件 | ステップアップ | 障害 |
 |---|---|---|---|---|---|

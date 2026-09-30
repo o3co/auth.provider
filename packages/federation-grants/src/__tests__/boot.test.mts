@@ -179,7 +179,6 @@ interface Setup {
 	readonly revocation?: "memory" | "older" | "absent";
 	readonly withLimiter?: boolean;
 	readonly withAudit?: boolean;
-	readonly failMode?: unknown;
 	readonly provider?: FederationProvider | null;
 	/** The federation module listed BEFORE the routes, or after. */
 	readonly federationFirst?: boolean;
@@ -263,7 +262,7 @@ const boot = (setup: Setup) => {
 				federations: {
 					upstream: { enabled: true, issuer: "https://issuer.example", clientId: "cid" },
 				},
-				rateLimit: { ...full.rateLimit, failMode: setup.failMode ?? "closed" },
+				rateLimit: { ...full.rateLimit, failMode: "closed" },
 				...(setup.withAudit === false ? {} : { audit: { sink: { type: "none" } } }),
 				federationGrants: {
 					enabled: setup.enabled ?? true,
@@ -374,10 +373,6 @@ describe("enabling the feature", () => {
 
 	it("refuses to boot with no throttle in front of an opaque grant id", async () => {
 		await expect(boot({ withLimiter: false })).rejects.toThrow(/rateLimiter/);
-	});
-
-	it("refuses to boot without the product's limiter-outage policy", async () => {
-		await expect(boot({ failMode: "maybe" })).rejects.toThrow(/failMode/);
 	});
 
 	it("refuses a retrieval limit the promises cannot be kept under", async () => {
@@ -510,6 +505,50 @@ describe("with the feature on, the drain", () => {
 		persist();
 		await disposed;
 		expect(order).toEqual(["late write persisted", "store closed"]);
+	});
+});
+
+describe("the actions it registers", () => {
+	it("registers the browser half's three actions, graded use", async () => {
+		const handle = await boot({});
+		try {
+			const resolver = handle.components.sessionRequirementResolver;
+			expect(
+				[
+					"federation_grants.connect",
+					"federation_grants.consent",
+					"federation_grants.callback",
+				].map((name) => resolver?.action(name)),
+			).toEqual([
+				{ name: "federation_grants.connect", grade: "use" },
+				{ name: "federation_grants.consent", grade: "use" },
+				{ name: "federation_grants.callback", grade: "use" },
+			]);
+		} finally {
+			await handle.dispose();
+		}
+	});
+
+	it("registers them while the feature is off too: the switch is read when the routes are built, after the actions register", async () => {
+		const handle = await boot({
+			enabled: false,
+			withStore: false,
+			withLimiter: false,
+			withAudit: false,
+			provider: null,
+		});
+		try {
+			expect(
+				handle.components.sessionRequirementResolver?.action("federation_grants.connect"),
+			).toEqual({ name: "federation_grants.connect", grade: "use" });
+		} finally {
+			await handle.dispose();
+		}
+	});
+
+	it("exports none of them: the router that admits them is mounted by the module alone", async () => {
+		const entry = await import("#/index.mjs");
+		expect(Object.hasOwn(entry, "FEDERATION_GRANTS_ADMISSION_ACTIONS")).toBe(false);
 	});
 });
 

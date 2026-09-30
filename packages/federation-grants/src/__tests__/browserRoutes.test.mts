@@ -44,7 +44,6 @@ import {
 	lodgeFederationGrantReauthorization,
 	passwordSessionAuthentication,
 	type RateLimiter,
-	type RateLimitFailMode,
 	type RequirementInput,
 	type RequirementVerdict,
 	type SessionRequirement,
@@ -58,6 +57,7 @@ import {
 import express from "express";
 import request from "supertest";
 import { describe, expect, it, vi } from "vitest";
+import { FEDERATION_GRANTS_ADMISSION_ACTIONS } from "#/admissionActions.mjs";
 import { createFederationGrantBackground, type FederationGrantBackground } from "#/background.mjs";
 import {
 	createFederationGrantBrowserRouter,
@@ -141,7 +141,6 @@ class Directory {
 
 interface WorldOptions {
 	readonly rateLimiter?: RateLimiter;
-	readonly failMode?: RateLimitFailMode;
 	readonly identityLookup?: FederationGrantBrowserRouterOptions["identityLookup"];
 	/** Replaces the repository whose lookup records into `state.lookups`. */
 	readonly userRepository?: FederationGrantBrowserRouterOptions["userRepository"];
@@ -294,7 +293,10 @@ function world(options: WorldOptions = {}) {
 					return state.sessionsBoundary;
 				},
 			},
-			requirements: resolverForTests(options.requirements ?? [], { issuer: ISSUER }),
+			requirements: resolverForTests(options.requirements ?? [], {
+				issuer: ISSUER,
+				actions: FEDERATION_GRANTS_ADMISSION_ACTIONS,
+			}),
 			revocationSkewMs: 1000,
 			connections: {
 				get: (name: string) => {
@@ -341,7 +343,6 @@ function world(options: WorldOptions = {}) {
 			rateLimiter:
 				options.rateLimiter ??
 				createMemoryRateLimiter({ limits: {}, defaultLimit: { limit: 1000, windowSeconds: 60 } }),
-			failMode: options.failMode ?? "closed",
 			background,
 			now,
 			randomId: () => state.ids.shift() ?? randomUUID(),
@@ -1980,8 +1981,8 @@ describe("connect, when the world fails or moves", () => {
 });
 
 describe("the browser throttle, when the limiter is down", () => {
-	it("refuses every route in its own representation when the policy fails closed", async () => {
-		const w = world({ rateLimiter: brokenLimiter, failMode: "closed" });
+	it("refuses every route in its own representation when the limiter's policy fails closed", async () => {
+		const w = world({ rateLimiter: { ...brokenLimiter, failMode: "closed" } });
 		const connect = await w.connect("any");
 		expect(connect.status).toBe(503);
 		isPlain(connect);
@@ -1996,8 +1997,8 @@ describe("the browser throttle, when the limiter is down", () => {
 		isPlain(back);
 	});
 
-	it("lets the request through when the policy fails open", async () => {
-		const w = world({ rateLimiter: brokenLimiter, failMode: "open" });
+	it("lets the request through when the limiter's policy fails open", async () => {
+		const w = world({ rateLimiter: { ...brokenLimiter, failMode: "open" } });
 		// Past the throttle, to the handler's own refusal of a link without a handle.
 		const response = await request(w.app).get(`${FEDERATION_GRANTS_BROWSER_MOUNT_PATH}/connect`);
 		expect(response.status).toBe(400);
@@ -3412,11 +3413,11 @@ describe("the browser throttle, when the limiter is down — what it logs and au
 		const w = world({
 			rateLimiter: {
 				kind: "down",
+				failMode: "closed",
 				check: async () => {
 					throw new Error("limiter down");
 				},
 			},
-			failMode: "closed",
 		});
 		expect((await w.connect("any")).status).toBe(503);
 		expect(written(await settledLines(w))).toEqual(["error rate_limiter_failed_closed"]);
@@ -3762,7 +3763,9 @@ describe("the browser half on session admission", () => {
 
 	it("refuses to be built without the subject revocation it reads the sessions boundary through: no boundary is no backstop", () => {
 		expect(() =>
-			createFederationGrantBrowserRouter({ requirements: resolverForTests([]) } as never),
+			createFederationGrantBrowserRouter({
+				requirements: resolverForTests([], { actions: FEDERATION_GRANTS_ADMISSION_ACTIONS }),
+			} as never),
 		).toThrow(/subjectRevocation/);
 	});
 
@@ -3785,6 +3788,21 @@ describe("the browser half on session admission", () => {
 		const forged = { get: () => undefined, entries: () => [][Symbol.iterator]() };
 		expect(() => createFederationGrantBrowserRouter({ requirements: forged } as never)).toThrow(
 			/^createFederationGrantBrowserRouter: requirements must be the sessionRequirementResolver the boot planner built/,
+		);
+	});
+
+	it("refuses to be built on a resolver on which a step's action is not registered, naming the factory and the action", () => {
+		expect(() =>
+			createFederationGrantBrowserRouter({
+				requirements: resolverForTests([], {
+					actions: {
+						"federation_grants.connect": { grade: "use" },
+						"federation_grants.consent": { grade: "use" },
+					},
+				}),
+			} as never),
+		).toThrow(
+			/^createFederationGrantBrowserRouter: admits "federation_grants\.callback", which no module registers/,
 		);
 	});
 });
