@@ -46,10 +46,10 @@ const CONFLICT = Symbol("conflict");
 
 /**
  * Runtime guard for the Store's user response, so a malformed payload cannot
- * become a `User` with a missing or empty `id` and leak an unusable `sub`
- * into authentication (OpenID Connect Core §2). Accepts any object with a
- * non-empty string `id` and `username`, keeping the extras `User`'s index
- * signature allows.
+ * become a `User` whose `id` is missing or empty: an empty `id` names nobody,
+ * and OpenID Connect Core §2 requires the `sub` it becomes to be a locally
+ * unique identifier. Accepts any object with a non-empty string `id` and
+ * `username`, keeping the extras `User`'s index signature allows.
  */
 function isUser(v: unknown): v is User {
 	if (typeof v !== "object" || v === null) return false;
