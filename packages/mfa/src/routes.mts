@@ -359,7 +359,12 @@ export function createMfaRouter(options: MfaRoutesOptions): Router {
 						subject: outcome.subject,
 						ip: call.request.ip,
 						userAgent: call.request.userAgent,
-						details: { kind: outcome.kind, purpose: outcome.purpose, reason: outcome.reason },
+						details: {
+							kind: outcome.kind,
+							purpose: outcome.purpose,
+							reason: outcome.reason,
+							...(isMfaFactorId(outcome.factorId) ? { factorId: outcome.factorId } : {}),
+						},
 					});
 					res.status(401).json(notAccepted(outcome.attemptsRemaining));
 					return;

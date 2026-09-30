@@ -33,6 +33,8 @@
  *   factor that throws are outages: never a wrong code, never "no factor".
  * - A factor is handed its records opened and digests under the ring; it
  *   never sees a key, a store or a transaction.
+ * - A refusal carries the factor id the factor named only when it is one of
+ *   the subject's factors of the kind verified: nothing else reaches the audit.
  */
 
 import {
@@ -171,6 +173,8 @@ export type MfaVerifyOutcome =
 			readonly outcome: "refused";
 			readonly reason: MfaRefusalReason;
 			readonly attemptsRemaining: number;
+			/** The subject's factor the refusal concerns, as the factor named it (a clone's). */
+			readonly factorId?: string;
 	  } & MfaCeremonySubject)
 	/** The proof was right, and another verification consumed the transaction first. */
 	| { readonly outcome: "spent" }
@@ -513,10 +517,15 @@ export function createMfaCoordinator(options: MfaCoordinatorOptions): MfaCoordin
 				kind: record.kind,
 				purpose: tx.purpose,
 			};
-			const refused = (reason: MfaRefusalReason, attemptsRemaining: number): MfaVerifyOutcome => ({
+			const refused = (
+				reason: MfaRefusalReason,
+				attemptsRemaining: number,
+				factorId?: string,
+			): MfaVerifyOutcome => ({
 				outcome: "refused",
 				reason,
 				attemptsRemaining,
+				...(factorId === undefined ? {} : { factorId }),
 				...about,
 			});
 			const unreadable = (cause: unknown): MfaFactorUnreadable => ({
@@ -562,7 +571,7 @@ export function createMfaCoordinator(options: MfaCoordinatorOptions): MfaCoordin
 						/** What the verification adds: the factor's values, as it declares them. */
 						readonly added: readonly string[];
 				  }
-				| { readonly reason: MfaRefusalReason }
+				| { readonly reason: MfaRefusalReason; readonly factorId?: string }
 				| MfaFactorUnreadable
 			> => {
 				if ("outcome" in opened) return opened;
@@ -583,7 +592,12 @@ export function createMfaCoordinator(options: MfaCoordinatorOptions): MfaCoordin
 				} catch (cause) {
 					return unreadable(cause);
 				}
-				if (!result.ok) return { reason: result.reason };
+				if (!result.ok) {
+					const concerned = all.find((candidate) => candidate.id === result.factorId);
+					return concerned === undefined
+						? { reason: result.reason }
+						: { reason: result.reason, factorId: concerned.id };
+				}
 				const verified = all.find((candidate) => candidate.id === result.factorId);
 				if (verified === undefined) {
 					return unreadable(
@@ -607,7 +621,7 @@ export function createMfaCoordinator(options: MfaCoordinatorOptions): MfaCoordin
 
 			let checked = await check();
 			if ("outcome" in checked) return checked;
-			if ("reason" in checked) return refused(checked.reason, attemptsRemaining);
+			if ("reason" in checked) return refused(checked.reason, attemptsRemaining, checked.factorId);
 
 			// F3: under `required`, a factor that does not count completes no login
 			// for a subject left with no counting factor it can use.
@@ -682,7 +696,7 @@ export function createMfaCoordinator(options: MfaCoordinatorOptions): MfaCoordin
 				if ("outcome" in opened) return opened;
 				checked = await check();
 				if ("outcome" in checked) return checked;
-				if ("reason" in checked) return refused(checked.reason, 0);
+				if ("reason" in checked) return refused(checked.reason, 0, checked.factorId);
 			}
 
 			return {
