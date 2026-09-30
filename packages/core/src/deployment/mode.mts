@@ -15,7 +15,7 @@
  */
 
 /**
- * The one reading of the configuration's `deployment.mode` — what boot fills
+ * The one reading of the configuration's `core.deployment.mode` — what boot fills
  * the `deploymentMode` slot with before any provider runs, and what the
  * replica-safety guard decides by — and the check a reader holds the slot's
  * value to. Every other module requires the slot; a composition root that
@@ -25,13 +25,14 @@
 import type { DeploymentMode } from "./types.mjs";
 
 /**
- * `single` or `multi` as `deployment.mode` states it, `unset` for anything
+ * `single` or `multi` as `core.deployment.mode` states it, `unset` for anything
  * else — absence included. Core's schema admits only the two, or none; any
  * other value reaches here only through a configuration the schema never
  * saw, and reads as `unset`, never as `single` or `multi`.
  */
 export function deploymentModeOf(config: unknown): DeploymentMode {
-	const mode = (config as { deployment?: { mode?: unknown } } | undefined)?.deployment?.mode;
+	const mode = (config as { core?: { deployment?: { mode?: unknown } } } | undefined)?.core
+		?.deployment?.mode;
 	return mode === "single" || mode === "multi" ? mode : "unset";
 }
 

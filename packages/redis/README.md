@@ -12,7 +12,7 @@ ioredis connection into every client they need.
 store port (`ChallengeStore`, `UserSessionStore`, `FederationGrantStore`, …)
 and ships an in-process implementation that is correct on one replica; those
 whose state must be shared declare themselves replica-unsafe and are refused
-under `deployment.mode = "multi"`. This package supplies the implementation
+under `core.deployment.mode = "multi"`. This package supplies the implementation
 every replica shares, and the manifest that puts it in the port's slot.
 
 **Owns:**
@@ -26,7 +26,7 @@ every replica shares, and the manifest that puts it in the port's slot.
   subpath;
 - sealing the federation-token and federation-grant records at rest, and the
   guard that refuses `allow-plaintext` in a production or staging environment
-  and under `deployment.mode = "multi"`.
+  and under `core.deployment.mode = "multi"`.
 
 **Does not own:**
 
@@ -126,11 +126,11 @@ Each one implements a port core declares; the slot name is in parentheses.
   `@o3co/auth-provider-dpop` accepts (under `dpop-proof:<jkt>`). The
   in-process alternative forks per replica, so a captured assertion or proof
   replays once against each; core refuses that one under
-  `deployment.mode = "multi"`.
+  `core.deployment.mode = "multi"`.
 - `AccessTokenDenylist` (`accessTokenDenylist`) — the store behind RFC 7009
   access-token revocation. The in-process alternative forks per replica, so a
   token revoked on one replica keeps working on the others; core refuses that
-  one under `deployment.mode = "multi"` (#277).
+  one under `core.deployment.mode = "multi"` (#277).
 - `RefreshTokenFamilyStore` (`refreshTokenFamilyStore`) — the store only.
   Rotation and revocation are core's processes over it. A family's key lives
   until the `expiresAtMs` last committed to it: the family's lifetime while
@@ -171,19 +171,19 @@ Each one implements a port core declares; the slot name is in parentheses.
   authorizations for `@o3co/auth-provider-device-grant`. The in-process
   alternative forks per replica — the human approves on the replica that
   served the verification page while the device polls one that has never
-  heard of the code — so core refuses it under `deployment.mode = "multi"`
+  heard of the code — so core refuses it under `core.deployment.mode = "multi"`
   (#433). See [Device authorizations share one slot](#device-authorizations-share-one-slot)
   before choosing it.
 - `MfaFactorStore` (`mfaFactorStore`) and `MfaTransactionStore`
   (`mfaTransactionStore`) — enrolled second factors, and the MFA ceremonies,
   subject lock and email-proof requirement beside them (the MFA ADR's D7, D8,
   D21, D25). The in-process alternatives fork per replica; core refuses them
-  under `deployment.mode = "multi"`. See [MFA stores](#mfa-stores).
+  under `core.deployment.mode = "multi"`. See [MFA stores](#mfa-stores).
 - `ConsentStore` / `PendingConsentStore` (`consentStore`, `pendingConsentStore`)
   — the consent step for clients that are not first-party: what a user agreed
   a client may obtain, and the `/authorize` request parked while the consent
   page asks. Core's in-process pair forks per replica and is refused under
-  `deployment.mode = "multi"`. See [Consent records and parked requests](#consent-records-and-parked-requests).
+  `core.deployment.mode = "multi"`. See [Consent records and parked requests](#consent-records-and-parked-requests).
 
 ## Entry points
 
@@ -323,7 +323,7 @@ Each adapter ships in up to two forms:
   config by a name other than `NODE_ENV` (the standalone's `CONFIG_ENV`): the
   plaintext guard reads that name in addition to `NODE_ENV`, and the
   replica count from core's `deploymentMode` slot, which both modules require
-  and core fills from `deployment.mode` — `"multi"` refuses plaintext in every
+  and core fills from `core.deployment.mode` — `"multi"` refuses plaintext in every
   environment. A composition root that builds either store itself passes
   `deploymentModeOf(config)` from `@o3co/auth-provider-core` — the reading
   boot fills the slot with — to `resolveRedisFederationGrantStoreOptions` as

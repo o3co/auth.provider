@@ -21,7 +21,7 @@ import { makeValidAppConfig } from "#/testing/fixtures/valid-config.mjs";
 /**
  * `consentStore.adapter` selects which module provides both consent slots in
  * a composition like the standalone; `"redis"` is the one
- * `deployment.mode = "multi"` accepts. `redisConsentStore` is presence-only,
+ * `core.deployment.mode = "multi"` accepts. `redisConsentStore` is presence-only,
  * like every `redis*` section: without it `AppConfigSchema`'s strip mode
  * drops the operator's namespace before the module's own `configSchema` runs,
  * and the default silently takes its place.

@@ -139,7 +139,7 @@ function buildSessionStoreModule(replicaSafety: ReplicaSafetyDeclaration | undef
 						throw new BootError({
 							stage: "applyContributions",
 							reason: "replica-unsafe-adapter",
-							message: `deployment.mode is "multi" but session.storage.type is "memory", which cannot be shared across replicas: ${MEMORY_STORE_REPLICA_SAFETY.reason}. Set session.storage.type = "redis", or set deployment.mode = "single".`,
+							message: `core.deployment.mode is "multi" but session.storage.type is "memory", which cannot be shared across replicas: ${MEMORY_STORE_REPLICA_SAFETY.reason}. Set session.storage.type = "redis", or set core.deployment.mode = "single".`,
 							details: { reason: "replica-unsafe-adapter", modules: [MODULE_NAME] },
 						});
 					}
@@ -185,7 +185,7 @@ function buildSessionStoreModule(replicaSafety: ReplicaSafetyDeclaration | undef
  *
  * `session.storage.type = "memory"` is express-session's per-process
  * `MemoryStore`, the same shape as every memory store the replica-safety guard
- * refuses under `deployment.mode = "multi"`, but the type is config, so a
+ * refuses under `core.deployment.mode = "multi"`, but the type is config, so a
  * static manifest cannot carry the declaration. This declares `replicaSafety`
  * when the configured store is in memory, so the guard refuses it by name
  * under `"multi"`, warns when the mode is unset, and says nothing under

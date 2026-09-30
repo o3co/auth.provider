@@ -47,6 +47,7 @@ import {
 	type SessionFederationIndex,
 	type UserSessionStore,
 } from "@o3co/auth-provider-core";
+import { CORE_RELOCATIONS, renamedVariableCaptures } from "@o3co/auth-provider-core/testing";
 import {
 	type GoogleProviderConfig,
 	googleFederationModule,
@@ -122,13 +123,18 @@ function resolveConfig(google: GoogleWiring): AppConfig {
 				}
 			: { ...ENV };
 	const { applicationConfPath, envConfPath } = resolveConfigPaths(configDir, "production");
-	return validate(
-		parseFile(envConfPath, { env })
-			.withFallback(parseFile(applicationConfPath, { env }))
-			.withFallback(parseFile(fileURLToPath(templateReference()), { env }))
-			.withFallback(parseFile(fileURLToPath(coreReference()), { env })),
-		AppConfigSchema,
-	) as AppConfig;
+	return {
+		...validate(
+			parseFile(envConfPath, { env })
+				.withFallback(parseFile(applicationConfPath, { env }))
+				.withFallback(parseFile(fileURLToPath(templateReference()), { env }))
+				.withFallback(parseFile(fileURLToPath(coreReference()), { env })),
+			AppConfigSchema,
+		),
+		// What the resolution captured of core's renamed variables, which the
+		// schema's parse drops.
+		"renamed-variables": renamedVariableCaptures({ modules: [], core: CORE_RELOCATIONS, env: env }),
+	} as AppConfig;
 }
 
 const testRepositoriesModule = defineModule({

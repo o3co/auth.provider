@@ -41,7 +41,11 @@ import {
 	type SessionFederationIndex,
 	type UserSessionStore,
 } from "@o3co/auth-provider-core";
-import { makeValidAppConfig, renamedVariableCaptures } from "@o3co/auth-provider-core/testing";
+import {
+	CORE_RELOCATIONS,
+	makeValidAppConfig,
+	renamedVariableCaptures,
+} from "@o3co/auth-provider-core/testing";
 import { sessionModule, sessionStoreModuleFor } from "@o3co/auth-provider-session";
 import express from "express";
 import request from "supertest";
@@ -127,11 +131,13 @@ export const TOTP_SECTION = {
 } as const;
 
 /**
- * What a composition layering the package's reference.conf captures of the
- * variables its modules declare renamed, under an environment that sets none.
+ * What a composition layering the package's reference.conf and core's
+ * captures of the MFA modules' renamed variables and core's own, under an
+ * environment that sets none.
  */
 export const UNSET_RENAMED_VARIABLES = renamedVariableCaptures({
 	modules: [mfaTotpFactorModule, mfaModule()],
+	core: CORE_RELOCATIONS,
 	env: {},
 });
 
@@ -156,7 +162,7 @@ export function configFor(
 			secure: false,
 			redirectAllowlist: ["https://app.example/after"],
 		},
-		sessionRequirements: { expected: ["mfa"] },
+		core: { sessionRequirements: { expected: ["mfa"] } },
 		mfa: { ...mfaSection(mode), ...mfa },
 		"mfa-totp-factor": { ...TOTP_SECTION, ...totp },
 		"renamed-variables": UNSET_RENAMED_VARIABLES,

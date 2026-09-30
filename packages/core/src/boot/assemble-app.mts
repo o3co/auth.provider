@@ -28,6 +28,7 @@ import type { Express, Request, RequestHandler, Router } from "express";
 import type { InternalLifecycleRegistrar } from "../adapters/AdapterFactory.mjs";
 import { discoveryRouteFor, planDiscoveryDocument } from "../discovery/planRoute.mjs";
 import type { OidcDiscoveryContribution } from "../discovery/types.mjs";
+import { jwksModule } from "../jwks/module.mjs";
 import { consoleLogger } from "../logging/consoleLogger.mjs";
 import type { Logger } from "../logging/Logger.mjs";
 import { browserFacingCorsRoutes, corsMw } from "../middleware/cors.mjs";
@@ -64,12 +65,25 @@ import { BootError } from "./types.mjs";
  */
 type ExpressFactory = (() => Express) & { Router: () => Router };
 
-/** The issuer the CORS table's discovery paths derive from: the composition's, when it is a string. */
-const corsIssuerOptions = (
+/**
+ * What the CORS table derives from the composition: the issuer its discovery
+ * paths hang off, the composition's when it is a string; and the path the jwks
+ * module's route serves (its own section's), none when the module is not
+ * installed.
+ */
+const corsTableOptions = (
 	components: Readonly<Record<string, unknown>>,
-): { readonly issuer?: string } => {
+	routes: readonly CollectedRouteContribution[],
+): { readonly issuer?: string; readonly jwksPath?: string } => {
 	const issuer = compositionIssuer(components);
-	return typeof issuer === "string" ? { issuer } : {};
+	const jwksPath = routes
+		.filter(({ contributedBy }) => contributedBy === jwksModule.name)
+		.flatMap(({ contribution }) => contribution.routes ?? [])
+		.find(({ method }) => method === "GET")?.path;
+	return {
+		...(typeof issuer === "string" ? { issuer } : {}),
+		...(jwksPath === undefined ? {} : { jwksPath }),
+	};
 };
 
 // ---------------------------------------------------------------------------
@@ -623,7 +637,7 @@ export function assembleApp(
 	{
 		const components = frozen.components as Record<string, unknown>;
 		const config = components.config as
-			| { cors?: { allowedOrigins?: unknown }; oauth?: { jwt?: { jwksPath?: unknown } } }
+			| { cors?: { allowedOrigins?: unknown }; oauth?: { jwt?: { issuer?: unknown } } }
 			| undefined;
 		const fromSlot = Object.hasOwn(components, "httpSettings");
 		const configured = fromSlot ? undefined : config?.cors?.allowedOrigins;
@@ -640,9 +654,10 @@ export function assembleApp(
 		if (allowedOrigins.length > 0) {
 			const mw = corsMw({
 				allowedOrigins,
-				// On the issuer the discovery route is served on: the oauth
-				// module's `oauthTokenSettings` when the composition holds it.
-				routes: browserFacingCorsRoutes(config ?? {}, corsIssuerOptions(components)),
+				// On the issuer the discovery route is served on (the oauth
+				// module's `oauthTokenSettings` when the composition holds it),
+				// and the JWKS path the jwks module's route serves.
+				routes: browserFacingCorsRoutes(config ?? {}, corsTableOptions(components, allRoutes)),
 				...(logger ? { logger } : {}),
 			});
 			if (mw !== null) router.use(mw);

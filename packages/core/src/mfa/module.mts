@@ -17,7 +17,7 @@
 /**
  * The modules that provide core's in-process MFA stores. Both are for
  * development and a single replica, and are refused by name under
- * `deployment.mode = "multi"`.
+ * `core.deployment.mode = "multi"`.
  */
 
 import { consoleLogger } from "../logging/consoleLogger.mjs";

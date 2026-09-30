@@ -106,7 +106,7 @@ export {
 // ---------------------------------------------------------------------------
 // ConsentStore + PendingConsentStore. The Redis half of the consent
 // step for clients that are not first-party: core's memory module is refused
-// under `deployment.mode = "multi"`, so this is what lets such clients be
+// under `core.deployment.mode = "multi"`, so this is what lets such clients be
 // served by a scaled deployment. One module provides both slots.
 // ---------------------------------------------------------------------------
 export {
@@ -121,7 +121,7 @@ export {
 } from "./consent-store.mjs";
 // ---------------------------------------------------------------------------
 // DeviceCodeStore. The Redis half of the RFC 8628 device grant's
-// storage: the memory adapter in core is refused under `deployment.mode =
+// storage: the memory adapter in core is refused under `core.deployment.mode =
 // "multi"`, so this is what makes the grant usable in a scaled deployment.
 // ---------------------------------------------------------------------------
 export {

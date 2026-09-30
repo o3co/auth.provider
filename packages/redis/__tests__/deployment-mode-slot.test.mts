@@ -6,7 +6,7 @@
 /**
  * The two stores that seal upstream refresh tokens read the replica count
  * from core's `deploymentMode` slot, which core fills from the
- * configuration's `deployment.mode`. Each module requires the slot, refuses a
+ * configuration's `core.deployment.mode`. Each module requires the slot, refuses a
  * value that is none of its three, and reads nothing of `deployment` itself.
  * Through `createApp` each refuses plaintext under `multi`, and allows it with
  * the warning under `single`, an empty section and none.
@@ -47,7 +47,7 @@ const tokenClient = {
 const grantClient = {} as FederationGrantStoreClient;
 
 const refusedUnderMulti = (label: string) =>
-	`[${label}] mode "allow-plaintext" is refused because deployment.mode is "multi" ` +
+	`[${label}] mode "allow-plaintext" is refused because core.deployment.mode is "multi" ` +
 	"(a multi-replica deployment is never a development box). " +
 	'Set mode to "required" and provide a 32-byte encryption key, OR set ' +
 	"FEDERATION_TOKENS_ALLOW_INSECURE=1 to override (NOT recommended for production).";
@@ -72,8 +72,8 @@ const STORES = [
 
 /** What becomes of plaintext under every `deployment` core's schema accepts. */
 const ACCEPTED = [
-	["refused", "deployment.mode = multi", { mode: "multi" }],
-	["allowed with the warning", "deployment.mode = single", { mode: "single" }],
+	["refused", "core.deployment.mode = multi", { mode: "multi" }],
+	["allowed with the warning", "core.deployment.mode = single", { mode: "single" }],
 	["allowed with the warning", "an empty deployment section", {}],
 	["allowed with the warning", "no deployment section", undefined],
 ] as const;
@@ -141,7 +141,7 @@ describe.each(STORES)("the $label store's module reads the deploymentMode slot",
 				() =>
 					provide(store.module, store.provided, {
 						...store.client,
-						config: { ...store.plaintext, deployment: { mode: "multi" } },
+						config: { ...store.plaintext, core: { deployment: { mode: "multi" } } },
 						...(deploymentMode === undefined ? {} : { deploymentMode }),
 						logger,
 					}),
@@ -155,7 +155,7 @@ describe.each(STORES)("the $label store's module reads the deploymentMode slot",
 		expect(() =>
 			provide(store.module, store.provided, {
 				...store.client,
-				config: { ...store.plaintext, deployment: { mode: "single" } },
+				config: { ...store.plaintext, core: { deployment: { mode: "single" } } },
 				deploymentMode: "multi",
 				logger,
 			}),
@@ -168,7 +168,7 @@ describe.each(STORES)("the $label store's module reads the deploymentMode slot",
 			const { logger, warn } = recordingLogger();
 			const built = provide(store.module, store.provided, {
 				...store.client,
-				config: { ...store.plaintext, deployment: { mode: "multi" } },
+				config: { ...store.plaintext, core: { deployment: { mode: "multi" } } },
 				deploymentMode,
 				logger,
 			}) as { kind: string };
@@ -190,7 +190,7 @@ describe.each(STORES)("the $label store's module reads the deploymentMode slot",
 					config: {
 						...makeValidCoreConfig(),
 						...store.plaintext,
-						...(deployment === undefined ? {} : { deployment }),
+						...(deployment === undefined ? {} : { core: { deployment } }),
 					},
 					pathResolver: (p: string) => p,
 					logger,
@@ -226,7 +226,7 @@ describe("the grant store's configuration", () => {
 	it("declares no deployment section: the module's parse leaves it to core", () => {
 		const parsed = redisFederationGrantStoreModule.configSchema?.parse({
 			...grants,
-			deployment: { mode: "multi" },
+			core: { deployment: { mode: "multi" } },
 		});
 		expect(parsed).not.toHaveProperty("deployment");
 	});
@@ -237,7 +237,7 @@ describe("the grant store's configuration", () => {
 		);
 		const plaintextUnderMulti = {
 			federationGrants: { encryptionMode: "allow-plaintext" },
-			deployment: { mode: "multi" },
+			core: { deployment: { mode: "multi" } },
 		};
 		const resolve = resolveRedisFederationGrantStoreOptions as (...args: unknown[]) => unknown;
 		expect(() => resolve(plaintextUnderMulti, {})).toThrow(refusal);
@@ -252,7 +252,7 @@ describe("the grant store's configuration", () => {
 	it("hands the plaintext guard the mode it is given, not the configuration's", () => {
 		expect(
 			resolveRedisFederationGrantStoreOptions(
-				{ ...grants, deployment: { mode: "multi" } },
+				{ ...grants, core: { deployment: { mode: "multi" } } },
 				{},
 				"single",
 			).guard,

@@ -15,7 +15,7 @@
  */
 
 /**
- * The standalone's own store modules under `deployment.mode = "multi"`,
+ * The standalone's own store modules under `core.deployment.mode = "multi"`,
  * booted the way an operator reaches them: from the shipped HOCON with one
  * environment variable flipped.
  *
@@ -28,7 +28,7 @@
  *   `redisFederationTokenStoreModule` off the shared ioredis socket.
  * - The Redis federation store's `allow-plaintext` guard reads the
  *   environment the config was selected by (`CONFIG_ENV || NODE_ENV`, passed
- *   through `buildModules`) and refuses under `deployment.mode = "multi"` in
+ *   through `buildModules`) and refuses under `core.deployment.mode = "multi"` in
  *   every environment.
  *
  * ioredis, node-redis and connect-redis are mocked, as in
@@ -51,6 +51,7 @@ import {
 	registerBuiltinKeyStores,
 	replicaUnsafeReason,
 } from "@o3co/auth-provider-core";
+import { CORE_RELOCATIONS, renamedVariableCaptures } from "@o3co/auth-provider-core/testing";
 import { parseFile } from "@o3co/ts.hocon";
 import { validate } from "@o3co/ts.hocon/zod";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -142,7 +143,7 @@ const ALL_REDIS_ENV: Readonly<Record<string, string>> = {
 	SESSION_STORAGE_TYPE: "redis",
 	SESSION_STORAGE_REDIS_URL: "redis://redis.test:6379",
 	CLIENT_USER_TYPE: "yaml",
-	DEPLOYMENT_MODE: "multi",
+	CORE_DEPLOYMENT_MODE: "multi",
 	REFRESH_TOKEN_FAMILY_STORE_REDIS_URL: "redis://redis.test:6379",
 	USER_SESSION_STORES_ADAPTER: "redis",
 	RATE_LIMITER_ADAPTER: "redis",
@@ -158,13 +159,18 @@ const ALL_REDIS_ENV: Readonly<Record<string, string>> = {
 
 function resolveConfig(env: Record<string, string>): AppConfig {
 	const { applicationConfPath, envConfPath } = resolveConfigPaths(configDir, "production");
-	return validate(
-		parseFile(envConfPath, { env })
-			.withFallback(parseFile(applicationConfPath, { env }))
-			.withFallback(parseFile(fileURLToPath(templateReference()), { env }))
-			.withFallback(parseFile(fileURLToPath(coreReference()), { env })),
-		AppConfigSchema,
-	);
+	return {
+		...validate(
+			parseFile(envConfPath, { env })
+				.withFallback(parseFile(applicationConfPath, { env }))
+				.withFallback(parseFile(fileURLToPath(templateReference()), { env }))
+				.withFallback(parseFile(fileURLToPath(coreReference()), { env })),
+			AppConfigSchema,
+		),
+		// What the resolution captured of core's renamed variables, which the
+		// schema's parse drops.
+		"renamed-variables": renamedVariableCaptures({ modules: [], core: CORE_RELOCATIONS, env: env }),
+	} as AppConfig;
 }
 
 /** Drops a variable, so the HOCON default takes over. */
@@ -218,7 +224,7 @@ const messageChain = (err: unknown): string => {
 	return `${e.message ?? ""} ${e.cause?.message ?? ""}`;
 };
 
-describe('the standalone\'s memory modules are refused under deployment.mode = "multi"', () => {
+describe('the standalone\'s memory modules are refused under core.deployment.mode = "multi"', () => {
 	let handleRef: Awaited<ReturnType<typeof boot>> | undefined;
 
 	afterEach(async () => {
@@ -346,7 +352,7 @@ describe('federationTokenStore.type = "redis" in the standalone', () => {
 		// `missing-required-component`.
 		const config = resolveConfig({
 			...ALL_REDIS_ENV,
-			DEPLOYMENT_MODE: "single",
+			CORE_DEPLOYMENT_MODE: "single",
 			USER_SESSION_STORES_ADAPTER: "memory",
 			OAUTH_CODE_ADAPTER: "memory",
 			RATE_LIMITER_ADAPTER: "memory",
@@ -379,7 +385,7 @@ describe('federationTokenStore.type = "redis" in the standalone', () => {
 	it("keeps the memory branch: the default, in single mode, resolves the memory adapter", async () => {
 		const config = resolveConfig({
 			...without(ALL_REDIS_ENV, "FEDERATION_TOKEN_STORE_TYPE"),
-			DEPLOYMENT_MODE: "single",
+			CORE_DEPLOYMENT_MODE: "single",
 		});
 		const names = modulesFor(config).map((m) => m.name);
 		expect(names).toContain("standalone-in-memory-federation-token-store");
@@ -419,7 +425,7 @@ describe('consentStore.adapter = "redis" in the standalone', () => {
 		// provides.
 		const config = resolveConfig({
 			...ALL_REDIS_ENV,
-			DEPLOYMENT_MODE: "single",
+			CORE_DEPLOYMENT_MODE: "single",
 			USER_SESSION_STORES_ADAPTER: "memory",
 			OAUTH_CODE_ADAPTER: "memory",
 			RATE_LIMITER_ADAPTER: "memory",
@@ -436,7 +442,7 @@ describe('consentStore.adapter = "redis" in the standalone', () => {
 		expect(names).toContain("redis-clients");
 	});
 
-	it("boots under DEPLOYMENT_MODE=multi with both slots resolved to the Redis adapters", async () => {
+	it("boots under CORE_DEPLOYMENT_MODE=multi with both slots resolved to the Redis adapters", async () => {
 		handleRef = await boot(resolveConfig(ALL_REDIS_ENV));
 		expect(handleRef.components.consentStore?.kind).toBe("redis");
 		expect(handleRef.components.pendingConsentStore?.kind).toBe("redis");
@@ -474,11 +480,11 @@ describe("the Redis federation store's plaintext guard, booted from the shipped 
 		REDIS_FEDERATION_TOKEN_STORE_ENCRYPTION_MODE: "allow-plaintext",
 	};
 
-	it('is refused under deployment.mode = "multi" in a development environment', async () => {
+	it('is refused under core.deployment.mode = "multi" in a development environment', async () => {
 		// The umbrella shape with plaintext. A multi-replica deployment is
 		// never a development box.
 		await expect(boot(resolveConfig(PLAINTEXT_ENV), "development")).rejects.toSatisfy(
-			(err: unknown) => /deployment\.mode is "multi"/.test(messageChain(err)),
+			(err: unknown) => /core\.deployment\.mode is "multi"/.test(messageChain(err)),
 		);
 		expect(errorSpy).not.toHaveBeenCalled();
 	});
@@ -487,14 +493,14 @@ describe("the Redis federation store's plaintext guard, booted from the shipped 
 		// `app.mts` selects `production.conf` by `CONFIG_ENV || NODE_ENV` and
 		// passes that name through `buildModules`; the guard reads that name,
 		// not NODE_ENV alone.
-		const config = resolveConfig({ ...PLAINTEXT_ENV, DEPLOYMENT_MODE: "single" });
+		const config = resolveConfig({ ...PLAINTEXT_ENV, CORE_DEPLOYMENT_MODE: "single" });
 		await expect(boot(config, "production")).rejects.toSatisfy((err: unknown) =>
 			/the environment is "production"/.test(messageChain(err)),
 		);
 	});
 
 	it("boots with the plaintext warning in a development environment on a single replica", async () => {
-		const config = resolveConfig({ ...PLAINTEXT_ENV, DEPLOYMENT_MODE: "single" });
+		const config = resolveConfig({ ...PLAINTEXT_ENV, CORE_DEPLOYMENT_MODE: "single" });
 		handleRef = await boot(config, "development");
 		expect(handleRef.components.federationTokenStore?.kind).toBe("redis");
 		expect(warnSpy).toHaveBeenCalledWith(

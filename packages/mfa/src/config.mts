@@ -371,7 +371,7 @@ function refuseSampleKey(ring: SealingKeyRing, options: MfaSettingsOptions): boo
 	}
 	if (options.deploymentMode === "multi") {
 		reasons.push(
-			'deployment.mode is "multi" (a multi-replica deployment is never a development box)',
+			'core.deployment.mode is "multi" (a multi-replica deployment is never a development box)',
 		);
 	}
 	if (reasons.length === 0) return true;

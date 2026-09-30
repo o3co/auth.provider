@@ -1,6 +1,6 @@
 # @o3co/auth-provider-dpop
 
-Last updated: 2026-09-29
+Last updated: 2026-09-30
 
 DPoP ([RFC 9449](https://www.rfc-editor.org/rfc/rfc9449)) sender-constrained
 tokens for [`auth.provider`](../../README.md): a token issued against a DPoP
@@ -46,7 +46,7 @@ contributes the DPoP mechanism to both.
   `replaySeenSet` slot that `private_key_jwt` client authentication and the
   WebAuthn challenge ceremony record in too;
   core's `memoryReplaySeenSetModule` and the replica-safety check that
-  refuses it under `deployment.mode = "multi"`; and
+  refuses it under `core.deployment.mode = "multi"`; and
   [`@o3co/auth-provider-redis`](../redis/README.md)'s `redisReplaySeenSetModule`,
   the one replicas share. The composition root installs one of them.
 
@@ -243,9 +243,9 @@ both run it ([docs/adapter-surface.md](../../docs/adapter-surface.md)).
   `http.trustProxy` still matters for IP-keyed rate limiting and for the CSRF origin check — it is simply not load-bearing for DPoP.
 - **Replay protection across replicas needs a shared seen-set.** A per-process seen-set is per process: with several replicas, a proof replayed to a replica that did not see it is accepted. Install `redisReplaySeenSetModule` from [`@o3co/auth-provider-redis`](../redis/README.md) — `replaySeenSet.adapter = "redis"` in the standalone template — and every replica records in, and refuses from, the same set.
 
-  With DPoP enabled and no seen-set wired, boot is refused in every `deployment.mode`: the mechanism would have nowhere to record a proof, so it could refuse no replay. There is no per-process fallback. Installed with `memoryReplaySeenSetModule`, the deployment gets core's replica-safety answer for that module, as for every other per-process store — DPoP adds no check of its own:
+  With DPoP enabled and no seen-set wired, boot is refused in every `core.deployment.mode`: the mechanism would have nowhere to record a proof, so it could refuse no replay. There is no per-process fallback. Installed with `memoryReplaySeenSetModule`, the deployment gets core's replica-safety answer for that module, as for every other per-process store — DPoP adds no check of its own:
 
-  | `deployment.mode` | What boot does |
+  | `core.deployment.mode` | What boot does |
   | --- | --- |
   | `"multi"` | Refuses: a `replica-unsafe-adapter` `BootError` naming `core-replay-seen-set-memory`, whose reason says a DPoP proof captured once can be replayed once against each replica. |
   | unset | Boots, and logs one `replica_unsafe_adapters` warning listing `core-replay-seen-set-memory` with every other per-process store. |

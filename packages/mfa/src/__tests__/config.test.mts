@@ -417,7 +417,7 @@ describe("the development sample key", () => {
 		const message = refusal(() =>
 			readSettings(sample(), { environment: "development", deploymentMode: "multi" }),
 		);
-		expect(message).toContain('deployment.mode is "multi"');
+		expect(message).toContain('core.deployment.mode is "multi"');
 	});
 
 	it("refuses a deployment mode it cannot read, absent included, as a TypeError naming it", () => {
@@ -437,7 +437,7 @@ describe("the development sample key", () => {
 		vi.stubEnv("NODE_ENV", "development");
 		for (const deploymentMode of ["single", "unset"] as const) {
 			expect(
-				readSettings(sample({ deployment: { mode: "multi" } }), {
+				readSettings(sample({ core: { deployment: { mode: "multi" } } }), {
 					environment: "development",
 					deploymentMode,
 				}).developmentSampleKeyAccepted,
@@ -446,9 +446,11 @@ describe("the development sample key", () => {
 		}
 		expect(
 			refusal(() =>
-				readSettings(sample({ deployment: { mode: "single" } }), { deploymentMode: "multi" }),
+				readSettings(sample({ core: { deployment: { mode: "single" } } }), {
+					deploymentMode: "multi",
+				}),
 			),
-		).toContain('deployment.mode is "multi"');
+		).toContain('core.deployment.mode is "multi"');
 	});
 
 	it("is refused wherever it sits in the ring, since every key opens", () => {

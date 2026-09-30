@@ -24,7 +24,7 @@ test("SYNTHETIC_COMPONENT_KEYS has 10 members", () => {
 });
 
 test("SYNTHETIC_COMPONENT_KEYS includes deploymentMode", () => {
-	// Core fills it from the configuration's deployment.mode: a module or host
+	// Core fills it from the configuration's core.deployment.mode: a module or host
 	// that set it would be a second statement of the replica count, beside the
 	// one the replica-safety guard reads.
 	expect(SYNTHETIC_COMPONENT_KEYS.has("deploymentMode")).toBe(true);

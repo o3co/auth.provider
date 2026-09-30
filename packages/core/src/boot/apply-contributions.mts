@@ -723,7 +723,7 @@ const sameSet = (a: ReadonlySet<string>, b: ReadonlySet<string>): boolean =>
  *   recomputes from the enabled factors, and declaring its own
  *   `<name>.step_up` among its remediations; a requirement that does not
  *   declare it is bound to none of this, whatever its name;
- * - once `sessionRequirements.expected` is written, compare it with the
+ * - once `core.sessionRequirements.expected` is written, compare it with the
  *   registered names both ways, whether or not anything consults admission:
  *   a name in it that no module registers is `session-requirement-missing`
  *   (the composition would believe a requirement is in force that is not),
@@ -859,8 +859,8 @@ async function checkSessionRequirements(
 		].includes("sessionRequirementResolver");
 	});
 	const expected = (
-		components.config as { sessionRequirements?: { expected?: unknown } } | undefined
-	)?.sessionRequirements?.expected;
+		components.config as { core?: { sessionRequirements?: { expected?: unknown } } } | undefined
+	)?.core?.sessionRequirements?.expected;
 	const declared =
 		Array.isArray(expected) && expected.every((name) => typeof name === "string")
 			? (expected as readonly string[])
@@ -870,14 +870,14 @@ async function checkSessionRequirements(
 		const cleanupErrors = await runCleanupsReverse(material.cleanups);
 		throw new BootError({
 			message:
-				`sessionRequirements.expected names ${quotedNames(missing)}, which no installed module registers ` +
+				`core.sessionRequirements.expected names ${quotedNames(missing)}, which no installed module registers ` +
 				`(${quotedNames(registered)} registered): install the module that registers each, ` +
-				"or remove the name from sessionRequirements.expected.",
+				"or remove the name from core.sessionRequirements.expected.",
 			reason: "session-requirement-missing",
 			stage: "applyContributions",
 			details: {
 				reason: "session-requirement-missing",
-				configKey: "sessionRequirements.expected",
+				configKey: "core.sessionRequirements.expected",
 				missing,
 				declared,
 				registered,
@@ -897,7 +897,7 @@ async function checkSessionRequirements(
 				: `, and ${consumedBy.length === 1 ? `module "${consumedBy[0]}"` : `modules [${consumedBy.join(", ")}]`} consult session admission`;
 		throw new BootError({
 			message:
-				`sessionRequirements.expected must name exactly the session requirements this composition registers: ` +
+				`core.sessionRequirements.expected must name exactly the session requirements this composition registers: ` +
 				`${declared === undefined ? "nothing is declared" : `${quotedNames(declared)} is declared`}, ` +
 				`${quotedNames(registered)} registered${consulting}. ` +
 				"Write the key to state what this composition expects (`[]` for none).",
@@ -905,7 +905,7 @@ async function checkSessionRequirements(
 			stage: "applyContributions",
 			details: {
 				reason: "session-requirements-undeclared",
-				configKey: "sessionRequirements.expected",
+				configKey: "core.sessionRequirements.expected",
 				declared,
 				registered,
 				consumedBy,

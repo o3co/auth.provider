@@ -24,10 +24,11 @@
  * own for core) holds `renamed-variables`. A declaration of a name a shipped
  * layer still binds would refuse every operator who sets it; a new name bound
  * nowhere would drop what an operator sets under it; a capture written in any
- * other layer would override what the resolution saw.
+ * other layer would override what the resolution saw. No layer binds a
+ * variable under the one new path core's relocations declare bound to none.
  */
 
-import { readdirSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { coreReference } from "@o3co/auth-provider-core";
@@ -58,6 +59,19 @@ const LAYERS: readonly string[] = [
 const read = (path: string, env: Readonly<Record<string, string>>): unknown =>
 	parseFile(path, { env: { ...env } }).toObject();
 
+/** The variables a layer substitutes, outside its comments. */
+const variables = (path: string): readonly string[] => [
+	...new Set(
+		[
+			...readFileSync(path, "utf8")
+				.split("\n")
+				.filter((line) => !/^\s*(#|\/\/)/.test(line))
+				.join("\n")
+				.matchAll(/\$\{\??([A-Za-z0-9_]+)\}/g),
+		].map((match) => String(match[1])),
+	),
+];
+
 let fullSet: FullSet | undefined;
 
 afterAll(async () => {
@@ -86,6 +100,33 @@ describe("the variables renamed with a move, across every shipped layer", () => 
 				read,
 			}),
 		).toEqual([]);
+	});
+
+	it("binds nothing, in any shipped layer, at or under core.sessionRequirements, which core's relocation declares bound to no variable", () => {
+		const MARKER = "__RELOCATION_MARKER__";
+		const marked = (tree: unknown, prefix = ""): string[] =>
+			typeof tree === "object" && tree !== null
+				? Object.entries(tree).flatMap(([key, value]) =>
+						marked(value, prefix === "" ? key : `${prefix}.${key}`),
+					)
+				: tree === MARKER
+					? [prefix]
+					: [];
+		expect(CORE_RELOCATIONS.relocatedFrom).toMatchObject({
+			sessionRequirements: { to: "sessionRequirements", environmentVariable: null },
+		});
+
+		const binding = LAYERS.flatMap((layer) =>
+			variables(layer).flatMap((name) =>
+				marked(read(layer, { [name]: MARKER }))
+					.filter(
+						(path) =>
+							path === "core.sessionRequirements" || path.startsWith("core.sessionRequirements."),
+					)
+					.map((path) => `${name} at ${path} in ${layer}`),
+			),
+		);
+		expect(binding).toEqual([]);
 	});
 
 	it("finds renamed-variables in no layer but a declaring module's own reference", () => {

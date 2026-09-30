@@ -17,7 +17,7 @@
 /**
  * The replica-safety guard must not fall behind the modules.
  *
- * Under `deployment.mode = "multi"`, a wired in-process state store refuses
+ * Under `core.deployment.mode = "multi"`, a wired in-process state store refuses
  * boot, naming each offender and what diverges. The guard reads the module's
  * own manifest declaration (`replicaSafety`), so this suite checks that the
  * declaration is made: every bundled module whose name marks it as

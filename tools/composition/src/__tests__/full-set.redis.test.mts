@@ -15,7 +15,7 @@
  */
 
 /**
- * The full set on real Redis, under `deployment.mode = "multi"`: every shared
+ * The full set on real Redis, under `core.deployment.mode = "multi"`: every shared
  * store on the standalone template's one ioredis socket (the added packages'
  * device-code and challenge stores included), express-session on its own
  * node-redis connection, all against the Redis package's shared test
@@ -103,7 +103,7 @@ async function replica(options: FullSetOptions = {}): Promise<FullSet> {
 	return composition;
 }
 
-describe('every package on, every shared store on Redis, deployment.mode = "multi"', () => {
+describe('every package on, every shared store on Redis, core.deployment.mode = "multi"', () => {
 	it("boots, with the added stores on Redis and nothing declaring replica-unsafe state", async () => {
 		const { modules, handle } = await replica();
 		const names = modules.map((m) => m.name);
