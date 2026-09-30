@@ -19,10 +19,11 @@
  * attributes (name, `secure`, `sameSite`, domain, the session's lifetime) for
  * a module that sets a cookie of its own beside the session's, or sizes what
  * must outlive a session. It is the cookie express-session is given, and no
- * session section yields a policy that breaks core's contract: what would
- * break it is refused, and the session store refuses at boot exactly what the
- * policy refuses, with its message. While the store's module is loaded the
- * slot has no other source.
+ * session section yields a policy that breaks core's contract. Through
+ * createApp a section the policy refuses is refused at validation: by the
+ * store's configSchema with the policy's message for a name or a domain, by
+ * core's schema first for `SameSite=None` and the lifetime. While the store's
+ * module is loaded the slot has no other source.
  */
 
 import type { AppConfig, SessionCookiePolicy } from "@o3co/auth-provider-core";
@@ -82,6 +83,9 @@ describe("sessionCookiePolicyFrom", () => {
 
 	const HOST_PREFIX =
 		"session.name with __Host- prefix requires session.secure=true and session.domain=null";
+	const SECURE_PREFIX = "session.name with __Secure- prefix requires session.secure=true";
+	const notADomain = (domain: string) =>
+		`session.domain ${JSON.stringify(domain)} is not a cookie domain (a host name, one leading dot allowed)`;
 
 	/**
 	 * Session sections, each with what the policy refuses it with
@@ -93,9 +97,29 @@ describe("sessionCookiePolicyFrom", () => {
 		["a __Host- name with a domain", { domain: "example.com" }, HOST_PREFIX],
 		["a __Host- name with an empty domain", { domain: "" }, HOST_PREFIX],
 		[
+			"a __host- name, in any case, that is not secure",
+			{ name: "__host-auth.session", secure: false },
+			HOST_PREFIX,
+		],
+		[
+			"a __HOST- name, in any case, with a domain",
+			{ name: "__HOST-auth.session", domain: "example.com" },
+			HOST_PREFIX,
+		],
+		[
+			"a __HOST- name, in any case, that is secure and host-only",
+			{ name: "__HOST-auth.session" },
+			undefined,
+		],
+		[
 			"a __Secure- name that is not secure",
 			{ name: "__Secure-auth.session", secure: false },
-			"session.name with __Secure- prefix requires session.secure=true",
+			SECURE_PREFIX,
+		],
+		[
+			"a __SECURE- name, in any case, that is not secure",
+			{ name: "__SECURE-auth.session", secure: false },
+			SECURE_PREFIX,
 		],
 		[
 			"a name that is not a cookie name",
@@ -106,6 +130,27 @@ describe("sessionCookiePolicyFrom", () => {
 			"a cookie with no prefix and an empty domain",
 			{ name: "auth.session", domain: "" },
 			undefined,
+		],
+		["a domain after a leading dot", { name: "auth.session", domain: ".example.com" }, undefined],
+		[
+			"a domain that is a URL",
+			{ name: "auth.session", domain: "https://auth.example.com" },
+			notADomain("https://auth.example.com"),
+		],
+		[
+			"a domain with a port",
+			{ name: "auth.session", domain: "auth.example.com:8443" },
+			notADomain("auth.example.com:8443"),
+		],
+		[
+			"a domain with an empty label",
+			{ name: "auth.session", domain: "example..com" },
+			notADomain("example..com"),
+		],
+		[
+			"a domain whose label starts with a hyphen",
+			{ name: "auth.session", domain: "-example.com" },
+			notADomain("-example.com"),
 		],
 	];
 
@@ -119,7 +164,7 @@ describe("sessionCookiePolicyFrom", () => {
 	});
 
 	it.each(CASES)(
-		"%s: the session store boots with it exactly when the policy is built, and refuses it with the policy's message",
+		"%s: the session store boots with it exactly when the policy is built, and refuses it at validation with the policy's message",
 		async (_what, change, refusal) => {
 			const base = makeValidAppConfig() as AppConfig;
 			const config = { ...base, session: { ...base.session, ...change } } as AppConfig;
@@ -130,7 +175,11 @@ describe("sessionCookiePolicyFrom", () => {
 			if (refusal === undefined) {
 				handles.push(await booting);
 			} else {
-				await expect(booting).rejects.toMatchObject({ cause: { message: refusal } });
+				await expect(booting).rejects.toMatchObject({
+					reason: "config-validation-failed",
+					stage: "validateManifests",
+					details: { issues: [{ message: refusal }] },
+				});
 			}
 		},
 	);
@@ -165,7 +214,9 @@ describe("sessionCookiePolicyFrom", () => {
 	it("yields no policy that breaks core's contract, over every combination of the cookie's attributes", async () => {
 		const names = [
 			"__Host-auth.session",
+			"__host-auth.session",
 			"__Secure-auth.session",
+			"__SECURE-auth.session",
 			"auth.session",
 			"auth session",
 			"auth;session",
@@ -175,7 +226,7 @@ describe("sessionCookiePolicyFrom", () => {
 		for (const name of names) {
 			for (const secure of [true, false]) {
 				for (const sameSite of ["lax", "strict", "none"] as const) {
-					for (const domain of [null, "", "example.com"]) {
+					for (const domain of [null, "", "example.com", ".example.com", "https://example.com"]) {
 						for (const maxAge of [3_600_000, 0, 1.5, MAX_DURATION_MS + 1]) {
 							const session = { ...fixture(), name, secure, sameSite, domain, maxAge };
 							let policy: SessionCookiePolicy;
@@ -257,34 +308,35 @@ describe("the session store module provides sessionCookiePolicy", () => {
 		expect(Object.isFrozen(seen.policy)).toBe(true);
 	});
 
-	it("refuses, where a module requires it, as its route does: config-validation-failed naming the key", async () => {
-		const base = makeValidAppConfig() as AppConfig;
-		const config = { ...base, session: { ...base.session, name: "auth session" } } as AppConfig;
-		const message = 'session.name "auth session" is not a cookie name (an RFC 6265 token)';
-		expect(
-			await settled(
-				createTestApp({
-					modules: [sessionStoreModuleFor(config), consumer({})],
-					bootstrapComponents: { config, pathResolver: (s: string) => s },
-				}),
-			),
-		).toMatchObject({
-			name: "BootError",
-			reason: "provides-factory-failed",
-			details: { module: "session-store", componentKey: "sessionCookiePolicy" },
-			cause: {
-				name: "BootError",
-				reason: "config-validation-failed",
-				stage: "materializeComponents",
-				message,
-				details: {
+	it.each([
+		["sessionStoreModuleFor(config)", (config: AppConfig) => sessionStoreModuleFor(config)],
+		["sessionStoreModule", () => sessionStoreModule],
+	] as const)(
+		"%s: a section it refuses is refused at validation, whether or not a module requires the slot",
+		async (_form, form) => {
+			const base = makeValidAppConfig() as AppConfig;
+			const config = { ...base, session: { ...base.session, name: "auth session" } } as AppConfig;
+			const message = 'session.name "auth session" is not a cookie name (an RFC 6265 token)';
+			for (const readers of [[], [consumer({})]]) {
+				expect(
+					await settled(
+						createTestApp({
+							modules: [form(config), ...readers],
+							bootstrapComponents: { config, pathResolver: (s: string) => s },
+						}),
+					),
+				).toMatchObject({
+					name: "BootError",
 					reason: "config-validation-failed",
-					issues: [{ code: "custom", path: ["session", "name"], message }],
-					modules: [{ module: "session-store" }],
-				},
-			},
-		});
-	});
+					stage: "validateManifests",
+					details: {
+						reason: "config-validation-failed",
+						issues: [{ code: "custom", path: ["session", "name"], message }],
+					},
+				});
+			}
+		},
+	);
 });
 
 describe("the session store module names sessionCookiePolicy authoritative", () => {

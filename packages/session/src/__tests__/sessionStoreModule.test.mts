@@ -6,16 +6,19 @@
 // sessionStoreModule's manifest invokes the express-session middleware
 // factory and forwards `BuilderContext.lifecycle` so the underlying session
 // store registers its disposal callback. Tests exercise the route-contribution
-// factory directly with mock deps — the boot planner integration path is
-// covered by templates/standalone/src/__tests__/smoke.test.mts.
+// factory directly with mock deps, and boot the module through createApp for
+// what its configSchema refuses and what it mounts.
 
 import {
+	type AppConfig,
 	checkReplicaSafety,
 	createApp,
+	defineModule,
 	type LifecycleRegistrar,
 	MAX_DURATION_MS,
 	type Module,
 	replicaUnsafeReason,
+	type SessionCookiePolicy,
 } from "@o3co/auth-provider-core";
 import { makeValidAppConfig } from "@o3co/auth-provider-core/testing";
 import express from "express";
@@ -454,9 +457,9 @@ describe("sessionStoreModule (static manifest) — factory-time refusal under mu
 });
 
 // ---------------------------------------------------------------------------
-// The cookie the store mounts is the one its `sessionCookiePolicy` describes,
-// so the store refuses at boot every section the policy refuses, whether or
-// not a module requires the slot.
+// The cookie the store mounts is the one its `sessionCookiePolicy` describes:
+// the module's configSchema refuses at validation every section the policy
+// refuses, and the route reuses the provider's policy.
 // ---------------------------------------------------------------------------
 
 describe("the session store refuses the cookie its sessionCookiePolicy refuses", () => {
@@ -464,6 +467,8 @@ describe("the session store refuses the cookie its sessionCookiePolicy refuses",
 		"session.name with __Host- prefix requires session.secure=true and session.domain=null";
 	const SECURE_PREFIX = "session.name with __Secure- prefix requires session.secure=true";
 	const NOT_A_TOKEN = 'session.name "auth session" is not a cookie name (an RFC 6265 token)';
+	const notADomain = (domain: string) =>
+		`session.domain ${JSON.stringify(domain)} is not a cookie domain (a host name, one leading dot allowed)`;
 	const CROSS_SITE = 'session.sameSite = "none" requires session.secure = true';
 	const LIFETIME = `session.maxAge must be a whole number of milliseconds from 1 to ${MAX_DURATION_MS}`;
 
@@ -497,7 +502,7 @@ describe("the session store refuses the cookie its sessionCookiePolicy refuses",
 			(err: unknown) => err,
 		);
 
-	/** A refusal the route reaches through createApp: [what, key, change, message]. */
+	/** A refusal the module's configSchema makes: [what, key, change, message]. */
 	const REFUSED_BY_THE_STORE = [
 		["a name that is not an RFC 6265 token", "name", { name: "auth session" }, NOT_A_TOKEN],
 		[
@@ -506,12 +511,36 @@ describe("the session store refuses the cookie its sessionCookiePolicy refuses",
 			{ name: "__Secure-auth.session", secure: false },
 			SECURE_PREFIX,
 		],
+		[
+			"a __secure- name, in any case, that is not secure",
+			"name",
+			{ name: "__secure-auth.session", secure: false },
+			SECURE_PREFIX,
+		],
 		["a __Host- name that is not secure", "name", { secure: false }, HOST_PREFIX],
 		["a __Host- name with a domain", "name", { domain: "example.com" }, HOST_PREFIX],
+		[
+			"a __HOST- name, in any case, that is not secure",
+			"name",
+			{ name: "__HOST-auth.session", secure: false },
+			HOST_PREFIX,
+		],
+		[
+			"a domain that is a URL",
+			"domain",
+			{ name: "auth.session", domain: "https://auth.example.com" },
+			notADomain("https://auth.example.com"),
+		],
+		[
+			"a domain with a port",
+			"domain",
+			{ name: "auth.session", domain: "auth.example.com:8443" },
+			notADomain("auth.example.com:8443"),
+		],
 	] as const;
 
-	/** A refusal core's schema makes first, at validation: [what, key, change, the store's message]. */
-	const REFUSED_AT_VALIDATION = [
+	/** A refusal core's schema makes first, with its own message: [what, key, change, the policy's message]. */
+	const REFUSED_BY_CORE = [
 		[
 			"SameSite=None that is not secure",
 			"secure",
@@ -525,28 +554,21 @@ describe("the session store refuses the cookie its sessionCookiePolicy refuses",
 
 	describe.each(FORMS)("through createApp, with %s installed alone", (_form, form) => {
 		it.each(REFUSED_BY_THE_STORE)(
-			"refuses %s as config-validation-failed naming session.%s, from its route",
+			"refuses %s at validation, its one issue naming session.%s with the policy's message",
 			async (_what, key, change, message) => {
 				expect(await settled(bootAlone(form, change))).toMatchObject({
 					name: "BootError",
-					reason: "contribute-factory-failed",
-					details: { module: "session-store", kind: "routes" },
-					cause: {
-						name: "BootError",
+					reason: "config-validation-failed",
+					stage: "validateManifests",
+					details: {
 						reason: "config-validation-failed",
-						stage: "applyContributions",
-						message,
-						details: {
-							reason: "config-validation-failed",
-							issues: [{ code: "custom", path: ["session", key], message }],
-							modules: [{ module: "session-store" }],
-						},
+						issues: [{ code: "custom", path: ["session", key], message }],
 					},
 				});
 			},
 		);
 
-		it.each(REFUSED_AT_VALIDATION)(
+		it.each(REFUSED_BY_CORE)(
 			"refuses %s at validation, naming session.%s",
 			async (_what, key, change) => {
 				expect(await settled(bootAlone(form, change))).toMatchObject({
@@ -562,9 +584,14 @@ describe("the session store refuses the cookie its sessionCookiePolicy refuses",
 
 		it.each([
 			["the fixture's __Host- cookie, secure and host-only", {}],
+			["a __HOST- cookie, in any case, secure and host-only", { name: "__HOST-auth.session" }],
 			[
 				"a __Secure- cookie that is secure and names a domain",
 				{ name: "__Secure-auth.session", secure: true, domain: "example.com" },
+			],
+			[
+				"a cookie shared across subdomains, its domain after a leading dot",
+				{ name: "auth.session", domain: ".example.com" },
 			],
 			["an unprefixed cookie over plain HTTP", { name: "auth.session", secure: false }],
 			[
@@ -589,26 +616,16 @@ describe("the session store refuses the cookie its sessionCookiePolicy refuses",
 		return factory;
 	};
 
-	it.each([...REFUSED_BY_THE_STORE, ...REFUSED_AT_VALIDATION])(
-		"the route refuses %s itself, naming session.%s, whatever validated the section",
-		async (_what, key, change, message) => {
+	it.each([...REFUSED_BY_THE_STORE, ...REFUSED_BY_CORE])(
+		"the route refuses %s itself, with the policy's message, for deps no parse validated",
+		async (_what, _key, change, message) => {
 			await expect(
 				factoryOf(sessionStoreModule)({
 					config: configWith(change) as never,
 					deploymentMode: "unset",
 					lifecycleRegistrar: undefined,
 				} as never),
-			).rejects.toMatchObject({
-				name: "BootError",
-				reason: "config-validation-failed",
-				stage: "applyContributions",
-				message,
-				details: {
-					reason: "config-validation-failed",
-					issues: [{ code: "custom", path: ["session", key], message }],
-					modules: [{ module: "session-store" }],
-				},
-			});
+			).rejects.toThrow(message);
 		},
 	);
 
@@ -621,7 +638,7 @@ describe("the session store refuses the cookie its sessionCookiePolicy refuses",
 				deploymentMode: "unset",
 				lifecycleRegistrar: undefined,
 			} as never),
-		).rejects.toMatchObject({ reason: "config-validation-failed" });
+		).rejects.toThrow(NOT_A_TOKEN);
 		expect(createClient).not.toHaveBeenCalled();
 
 		await factoryOf(sessionStoreModule)({
@@ -630,6 +647,56 @@ describe("the session store refuses the cookie its sessionCookiePolicy refuses",
 			lifecycleRegistrar: undefined,
 		} as never);
 		expect(createClient).toHaveBeenCalledTimes(1);
+	});
+
+	it("mounts the cookie its provider built, though config.session changed after", async () => {
+		const config = configWith({ name: "auth.session", secure: false }) as AppConfig;
+		const seen: { policy?: SessionCookiePolicy } = {};
+		const handle = await createApp({
+			modules: [
+				// Listed first, so its route factory runs after the providers and
+				// before the store's route.
+				defineModule({
+					name: "test:session-section-mutator",
+					requires: ["config"],
+					contributes: {
+						routes: [
+							(deps) => {
+								(deps.config as { session: { name: string } }).session.name = "auth.other";
+								return { id: "test:mutator", mountPath: "/mutator", handler: express.Router() };
+							},
+						],
+					},
+				}),
+				sessionStoreModuleFor(config),
+				defineModule({
+					name: "test:session-cookie-policy-reader",
+					requires: ["sessionCookiePolicy"],
+					contributes: {
+						routes: [
+							(deps) => {
+								seen.policy = deps.sessionCookiePolicy;
+								const touch = express.Router();
+								touch.post("/", (req, res) => {
+									(req.session as unknown as Record<string, unknown>).touched = true;
+									res.status(200).json({ ok: true });
+								});
+								return { id: "test:touch", mountPath: "/touch", handler: touch };
+							},
+						],
+					},
+				}),
+			],
+			bootstrapComponents: { config, pathResolver: (p: string) => p } as never,
+		});
+		try {
+			const res = await request(express().use(handle.router)).post("/touch");
+			expect(res.status).toBe(200);
+			expect(seen.policy?.name).toBe("auth.session");
+			expect(res.headers["set-cookie"]?.[0] ?? "").toMatch(/^auth\.session=/);
+		} finally {
+			await handle.dispose();
+		}
 	});
 
 	it("sets the cookie the section describes: its name, Domain, SameSite and lifetime", async () => {

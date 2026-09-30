@@ -337,46 +337,43 @@ describe("the standalone composes federation grants from its config", () => {
 	it.each([
 		[
 			"a __Secure- name that is not secure",
+			"name",
 			{ SESSION_NAME: "__Secure-auth.session", SESSION_SECURE: "false" },
 			/__Secure- prefix requires session\.secure=true/,
 		],
 		[
 			"a name that is not an RFC 6265 token",
+			"name",
 			{ SESSION_NAME: "auth session" },
 			/is not a cookie name \(an RFC 6265 token\)/,
 		],
+		[
+			"a domain that is a URL",
+			"domain",
+			{ SESSION_NAME: "auth.session", SESSION_DOMAIN: "https://auth.example.com" },
+			/is not a cookie domain/,
+		],
 	])(
-		"refuses at boot a session cookie no browser keeps, %s, with or without the subject revocation service",
-		async (_what, cookie, refusal) => {
-			const settled = (config: AppConfig) =>
-				boot(config, true).then(
+		"refuses at validation a session cookie no browser keeps, %s, naming session.%s, with or without the subject revocation service",
+		async (_what, key, cookie, refusal) => {
+			for (const grants of [{}, GRANTS_ON]) {
+				const caught = await boot(resolveConfig({ ...BASE_ENV, ...grants, ...cookie }), true).then(
 					async (handle) => {
 						await handle.dispose();
 						return undefined;
 					},
 					(err: unknown) => err,
 				);
-			// Without the service nothing requires the store's
-			// sessionCookiePolicy: its route refuses the cookie before it mounts.
-			const alone = await settled(resolveConfig({ ...BASE_ENV, ...cookie }));
-			expect(alone).toMatchObject({
-				name: "BootError",
-				reason: "contribute-factory-failed",
-				details: { module: "session-store" },
-				cause: { reason: "config-validation-failed" },
-			});
-			expect(messageChain(alone)).toMatch(refusal);
-
-			// The service lists the slot to size its horizon, and it is eager, so
-			// the store's provider runs first and refuses the same cookie.
-			const withService = await settled(resolveConfig({ ...BASE_ENV, ...GRANTS_ON, ...cookie }));
-			expect(withService).toMatchObject({
-				name: "BootError",
-				reason: "provides-factory-failed",
-				details: { module: "session-store", componentKey: "sessionCookiePolicy" },
-				cause: { reason: "config-validation-failed" },
-			});
-			expect(messageChain(withService)).toMatch(refusal);
+				expect(caught).toMatchObject({
+					name: "BootError",
+					reason: "config-validation-failed",
+					stage: "validateManifests",
+					details: {
+						issues: [expect.objectContaining({ path: ["session", key] })],
+					},
+				});
+				expect(messageChain(caught)).toMatch(refusal);
+			}
 		},
 	);
 
