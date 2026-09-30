@@ -491,13 +491,11 @@ export const MERGE_ROW_GROUPS: readonly MergeRowGroup[] = [
 
 /**
  * The ADR's mapping of a row's decision onto the admission, for `authority`,
- * the registered requirement that declares the second-factor authority,
- * stepping up to its registered page: `requirement: "acr"` stays `"acr"`,
- * `"baseline"` becomes the authority's name, and a `step_up`'s requirement
- * becomes `whenStillUnmet` (`"acr"` → `"unmet"`, `"baseline"` →
- * `"reauthenticate"`). Throws for anything that is not a registered
- * requirement, for one that does not declare the authority, and for a
- * `step_up` from one that registered no page: the rows are the authority's.
+ * the registered second-factor authority: `requirement: "acr"` stays
+ * `"acr"`, `"baseline"` becomes the authority's name, and a `step_up`'s
+ * requirement becomes `whenStillUnmet` (`"acr"` → `"unmet"`, `"baseline"` →
+ * `"reauthenticate"`) with its registered page. Throws unless `authority` is
+ * a registered requirement that declares the authority.
  */
 export function mergeAdmission(
 	expected: MergeDecision,

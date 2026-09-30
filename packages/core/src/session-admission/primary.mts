@@ -205,21 +205,14 @@ export function primaryFromDto(dto: PrimaryAuthenticationDto): PrimaryAuthentica
 	return Object.freeze({ ...fields, authTime: new Date(authTimeMs) });
 }
 
-/**
- * The completing requirement, as far as what it may add goes: the registered
- * copy's name, and its declaration as registration read it — a boolean, never
- * a field a raw requirement answers.
- */
+/** The completing requirement as registered: its name and its declaration, read once. */
 export type CompletingRequirement = Pick<RegisteredRequirement, "name" | "secondFactorAuthority">;
 
 /**
  * What `requirement` may add as it completes: an `amr` of non-empty strings,
  * none a primary's marker, `mfa` never alone; `mfaAt` never beside an empty
- * `amr`. A second-factor value or an `mfaAt` from a requirement that does not
- * declare the second-factor authority is refused, whatever its name, so a
- * risk score or a re-consent cannot make a session meet `urn:o3co:acr:mfa`;
- * the authority's completion must be a verified second factor
- * (`checkSecondFactor`). A frozen copy.
+ * `amr`. A second factor from the second-factor authority alone, and from it
+ * a verified one (`checkSecondFactor`). A frozen copy.
  */
 export function checkPrimaryAdditions(
 	requirement: CompletingRequirement,
@@ -258,14 +251,10 @@ const addsSecondFactor = (amr: readonly string[], hasMfaAt: boolean): boolean =>
 	hasMfaAt || amr.some((entry) => SECOND_FACTOR_AMR.has(entry));
 
 /**
- * An addition that carries a second factor, whoever adds it, is a verified
- * second factor: at least one second-factor `amr` value of the factor's own
- * (not `mfa`), `mfa` beside it (only the email code may leave it out, see
- * ADR 2026-09-25-multi-factor-authentication), and `mfaAt`; an `mfaAt`
- * beside an empty `amr` verified nothing. Only the second-factor authority
- * may add one (`checkPrimaryAdditions`), and it must: `resumePrimary` does
- * not re-ask a completed requirement, so this is what keeps a completion
- * that verified nothing from establishing a password-only session.
+ * A second factor added, whoever adds it, is a verified one: a second-factor
+ * `amr` value of the factor's own (not `mfa`), `mfa` beside it (only the
+ * email code may leave it out, the MFA ADR's D14), and `mfaAt`; an `mfaAt`
+ * beside an empty `amr` verified nothing.
  */
 function checkSecondFactor(
 	amr: readonly string[],
@@ -312,11 +301,9 @@ function checkAddedAmr(
 }
 
 /**
- * `value` as a `PrimaryAdditionsDto` read back from a continuation: the
- * `amr` rules, `mfaAtMs` epoch milliseconds, and a second factor, when one
- * is added, a verified one (`checkSecondFactor`). Whether `requirement` may
- * add one is its registration's, which a store does not hold: `resumePrimary`
- * holds each entry read back to it (`checkPrimaryAdditions`).
+ * `value` as a `PrimaryAdditionsDto` read back from a continuation: the `amr`
+ * rules, `mfaAtMs` epoch milliseconds, and a second factor added a verified
+ * one. Whether `requirement` may add one is `resumePrimary`'s to check.
  */
 function checkPrimaryAdditionsDto(requirement: string, value: unknown): PrimaryAdditionsDto {
 	const refuse = (what: string): never => {
@@ -355,17 +342,11 @@ function copyCompleted(value: unknown, refuse: (what: string) => never): Complet
 
 /**
  * `value` as a `PrimaryContinuation`: a primary DTO and `done`, the
- * completed requirements with what each added — held to what any completion
- * keeps, a second factor a verified one — no name twice, at most one entry
- * adding a second factor, every instant epoch milliseconds. A frozen deep
- * copy: what a requirement's record holds and what `resumePrimary` reads
- * back.
- *
- * Which requirement declares the second-factor authority is the
- * registration's, which this check does not hold. So it accepts an entry
- * under the authority's name that added nothing, and a verified second factor
- * under a name that does not declare the authority: `resumePrimary`, the one
- * check that knows the registration, refuses both before composing.
+ * completed requirements with what each added — a second factor a verified
+ * one, added by one entry at most — no name twice, every instant epoch
+ * milliseconds. A frozen deep copy: what a requirement's record holds and
+ * what `resumePrimary` reads back. Which requirement declares the
+ * second-factor authority it does not know: `resumePrimary` checks that.
  */
 export function checkPrimaryContinuation(value: unknown): PrimaryContinuation {
 	const refuse = (what: string): never => {

@@ -336,12 +336,10 @@ export interface SessionRequirement {
 	/** The key it is contributed under; refused at boot otherwise (the `mfaFactors` rule). */
 	readonly name: string;
 	/**
-	 * Whether this requirement is the second-factor authority: the one
-	 * requirement that may reach and add a second factor's `amr` values
-	 * (`SECOND_FACTOR_AMR`) and `mfaAt`, whose completion of a login must be a
-	 * verified second factor, and which boot binds to core's MFA ports. At
-	 * most one registered requirement declares it; absent is `false`. Core
-	 * weighs this declaration, never a requirement's name.
+	 * Whether this is the second-factor authority: the one requirement that may
+	 * reach and add `SECOND_FACTOR_AMR` values and `mfaAt`, bound at boot to
+	 * core's MFA ports. At most one per composition; absent is `false`. Core
+	 * weighs this, never a name.
 	 */
 	readonly secondFactorAuthority?: boolean;
 	/** The `amr` values a step-up through this requirement can add; empty when it offers none. */
@@ -745,16 +743,12 @@ export function registeredRequirement(value: unknown, issuer?: string): Register
 /**
  * A registered requirement's `reach`, read once after the name-keyed pass
  * and held to the one home of these rules: an iterable of non-empty strings,
- * no primary's marker (`pwd`, `fed`), a second-factor value only from the
- * requirement that declares the second-factor authority, a `stepUpPage`
- * when not empty, and empty unless the requirement declares that authority
- * (`recordSecondFactor`, which stamps `mfaAt`, is the one way a completed
- * step-up is written into a live session, so any other reach could never be
- * met). The name is not weighed. Boot, `resolverForTests` and the contract
- * suite all run it. Answers a read-only snapshot and seals a registered copy
- * on it; a refused reach is not sealed. `remedy` is appended to the refusal
- * of a non-empty reach from a requirement that does not declare the
- * authority.
+ * no primary's marker (`pwd`, `fed`), a `stepUpPage` when not empty, and a
+ * second-factor value or any value at all only from the second-factor
+ * authority (only its step-up is ever written into a live session). Boot,
+ * `resolverForTests` and the contract suite all run it. Answers a read-only
+ * snapshot and seals a registered copy on it; a refused reach is not sealed.
+ * `remedy` is appended to the refusal of a non-empty reach from any other.
  */
 export function sealRegisteredReach(
 	requirement: SessionRequirement,

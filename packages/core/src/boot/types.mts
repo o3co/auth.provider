@@ -1213,11 +1213,8 @@ export interface SessionRequirementMissingDetails {
 
 /**
  * More than one registered session requirement declares the second-factor
- * authority (`SessionRequirement.secondFactorAuthority`): at most one may,
- * since what a session vouches for of a second factor has one source.
- * `requirements` names each that declares it, with the module that
- * contributed it, in registration order. See ADR
- * 2026-09-28-session-admission.
+ * authority (`SessionRequirement.secondFactorAuthority`); at most one may.
+ * `requirements` names each, with its module, in registration order.
  */
 export interface DuplicateSecondFactorAuthorityDetails {
 	readonly reason: "duplicate-second-factor-authority";

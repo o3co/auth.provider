@@ -40,13 +40,11 @@ const ALLOW_ANY_REACH_REMEDY = "pass allowAnyReach for a test of admission's own
 
 /**
  * The resolver a test hands a consumer: `requirements` by their names, in the
- * order given. Two of one name are refused, as boot refuses a duplicate
- * contribution, and so are two that declare the second-factor authority, as
- * boot refuses them (`duplicate-second-factor-authority`), whatever
- * `allowAnyReach` says. With `issuer`, each page is held to that origin. Each
- * reach is read once, here, held to boot's rules unless `allowAnyReach`, and
- * the resolver answers that snapshot. Boot's binding of the authority to the
- * MFA ports is not checked: a test builds no ports.
+ * order given. Two of one name, or two that declare the second-factor
+ * authority, are refused before any reach is read, as boot orders them. With
+ * `issuer`, each page is held to that origin. Each reach is read once, here,
+ * held to boot's rules unless `allowAnyReach`, and the resolver answers that
+ * snapshot. The authority's binding to the MFA ports is boot's alone.
  */
 export function resolverForTests(
 	requirements: readonly SessionRequirement[],
@@ -57,8 +55,6 @@ export function resolverForTests(
 	}
 	const byName = new Map<string, RegisteredRequirement>();
 	let authority: string | undefined;
-	// Every requirement registered, and the two duplicates boot refuses before
-	// it reads a reach refused here, first, as boot orders them.
 	for (const candidate of requirements) {
 		// What is wrong is named by the registration itself, as boot reports it.
 		const requirement = registeredRequirement(candidate, options.issuer);

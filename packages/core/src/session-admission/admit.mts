@@ -1132,12 +1132,10 @@ function composeRecorded(
  * before asking anything, a continuation `checkPrimaryContinuation` cannot
  * read, a completion by any requirement but the one that interrupted (or
  * one not registered with `admitPrimary`, or already done), and additions —
- * this completion's and each one read back from `done` — that their
- * requirement may not make as registered: a second factor from the
- * requirement that declares the second-factor authority alone, and a
- * verified one from it. Then composes `recorded` from the primary and every
- * completion and asks each requirement not yet done; any may interrupt again
- * with the updated continuation.
+ * this completion's and each read back from `done` — their requirement may
+ * not make as registered (`checkPrimaryAdditions`). Then composes `recorded`
+ * from the primary and every completion and asks each requirement not yet
+ * done; any may interrupt again with the updated continuation.
  */
 export async function resumePrimary(
 	deps: AdmissionDeps,
@@ -1191,9 +1189,8 @@ export async function resumePrimary(
 		recorded: passwordSessionAuthentication(),
 	});
 	const done: readonly CompletedRequirement[] = Object.freeze([
-		// Each earlier completion, read back, is held again to what its
-		// requirement may add as registered: which one declares the
-		// second-factor authority is the registration's, not the record's.
+		// Held again to its requirement's declaration as registered, not as the
+		// record says.
 		...earlier.map(({ entry, registered }) =>
 			Object.freeze({
 				requirement: entry.requirement,

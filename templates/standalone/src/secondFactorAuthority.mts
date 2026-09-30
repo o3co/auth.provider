@@ -15,15 +15,9 @@
  */
 
 /**
- * The template's guard that a second factor it asks for has an authority.
- * When the parsed `mfa.mode` is not `off`, `expectedSessionRequirements`
- * declares `mfa`, and boot refuses the composition unless a module registers
- * it; boot weighs no name, though, so any requirement registered as `mfa`
- * would meet that declaration. This refuses the boot unless the requirement
- * registered as `mfa` declares the second-factor authority — the one
- * requirement core lets reach and add a second factor, bound to its MFA
- * ports — so a requirement merely named `mfa` cannot stand in for MFA. See
- * ADR 2026-09-28-session-admission, D7.
+ * The template's guard that the requirement it declares for MFA is the
+ * declared second-factor authority: boot weighs no name, so a requirement
+ * merely named `mfa` would meet the declaration alone.
  */
 
 import { type AppConfig, type AppHandle, readMfaMode } from "@o3co/auth-provider-core";
@@ -31,12 +25,7 @@ import { type AppConfig, type AppHandle, readMfaMode } from "@o3co/auth-provider
 /** The requirement the template declares for MFA: the MFA package's. */
 const MFA_REQUIREMENT = "mfa";
 
-/**
- * The parsed `mfa.mode` asks for a second factor, and the requirement
- * registered as `mfa` does not declare the second-factor authority (or none
- * is registered): logins would get no second factor. Thrown after the handle
- * is disposed.
- */
+/** A second factor is asked for and the requirement registered as `mfa` is not the authority. */
 export class MfaRequirementNotAuthorityError extends Error {
 	readonly reason = "mfa-requirement-not-second-factor-authority";
 
@@ -49,11 +38,9 @@ export class MfaRequirementNotAuthorityError extends Error {
 }
 
 /**
- * Once boot has registered the session requirements, and before the server
- * listens: under a parsed `mfa.mode` other than `off`, disposes `handle` and
- * refuses the boot (`MfaRequirementNotAuthorityError`) unless the requirement
- * registered as `mfa` declares the second-factor authority. Under `off` it
- * asks nothing. The mode is read as `expectedSessionRequirements` reads it.
+ * After boot, before listening: under a parsed `mfa.mode` other than `off`,
+ * disposes `handle` and throws `MfaRequirementNotAuthorityError` unless the
+ * requirement registered as `mfa` declares the second-factor authority.
  */
 export async function requireMfaSecondFactorAuthority(
 	switches: AppConfig,

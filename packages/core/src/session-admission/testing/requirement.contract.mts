@@ -51,11 +51,7 @@ export interface ContractCase {
 export interface RequirementContractInput {
 	/** The key the requirement is contributed under. */
 	readonly key: string;
-	/**
-	 * Whether the requirement under test is a fixture: a fixture never
-	 * declares the second-factor authority, which boot binds to core's MFA
-	 * ports.
-	 */
+	/** Whether the requirement under test is a fixture: a fixture never declares the second-factor authority. */
 	readonly fixture: boolean;
 	/**
 	 * The issuer its page is registered on, as boot registers it on
@@ -153,8 +149,7 @@ export function sessionRequirementContract(
 					"a requirement's name is the key it is contributed under",
 				);
 				if (fixture) {
-					// Read as registration reads it: a declaration that is neither
-					// true, false nor absent does not register.
+					// As registration reads it: anything but a boolean does not register.
 					assert.notEqual(
 						registeredRequirement(requirement, issuer).secondFactorAuthority,
 						true,

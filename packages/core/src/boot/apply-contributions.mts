@@ -651,8 +651,7 @@ async function checkSessionRequirements(
 		} catch (cause) {
 			return failed(registration, cause);
 		}
-		// A requirement that does not declare the authority reaches nothing in
-		// this release (the seal refused it), and is bound to no port.
+		// Any other reaches nothing (the seal refused it) and is bound to no port.
 		if (!registration.requirement.secondFactorAuthority) continue;
 		// biome-ignore lint/style/noNonNullAssertion: the plan has a blueprint for every module it planned
 		const blueprint = material.plan.depsBlueprint.get(registration.module)!;

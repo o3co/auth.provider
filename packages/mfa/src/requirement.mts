@@ -17,9 +17,7 @@
 /**
  * The `mfa` session requirement: what MFA means to every consumer of a session,
  * through core's admission, reached through `sessionRequirements.mfa` only. It
- * declares the second-factor authority: the one requirement core lets reach and
- * add a second factor, and binds to its MFA ports at boot. The name is this
- * package's own; core weighs the declaration.
+ * declares the second-factor authority; the name `mfa` is this package's own.
  *
  * `reach` (the enabled factors' `amrValues`, plus `mfa` when one `addsMfa`) is
  * read once, after every factor has registered, and kept: boot refuses it unless
