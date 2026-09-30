@@ -24,7 +24,9 @@
 import { fileURLToPath } from "node:url";
 import { memoryRateLimiterModule, moduleReferences } from "@o3co/auth-provider-core";
 import { CORE_RELOCATIONS, renamedVariableCaptures } from "@o3co/auth-provider-core/testing";
+import { federationGrantsModules } from "@o3co/auth-provider-federation-grants";
 import {
+	redisFederationGrantStoreModule,
 	redisRateLimiterModule,
 	redisRefreshTokenFamilyStoreModule,
 } from "@o3co/auth-provider-redis";
@@ -35,10 +37,14 @@ const RENAMING_MODULES = [
 	memoryRateLimiterModule,
 	redisRateLimiterModule,
 	redisRefreshTokenFamilyStoreModule,
+	redisFederationGrantStoreModule,
 ];
 
 /** Every package reference the template's modules declare, core's last. */
-const LIBRARY_REFERENCES: readonly URL[] = moduleReferences([redisRateLimiterModule]);
+const LIBRARY_REFERENCES: readonly URL[] = moduleReferences([
+	redisRateLimiterModule,
+	...federationGrantsModules,
+]);
 
 /** The libraries' references resolved under `env`, in the order `app.mts` layers them. */
 export function libraryLayers(env: Readonly<Record<string, string>>): Config {

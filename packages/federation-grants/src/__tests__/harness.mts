@@ -232,7 +232,7 @@ export function harness(options: HarnessOptions = {}): Harness {
 	}) as FederationGrantStore;
 
 	const limits = {
-		...resolveFederationGrantRetrievalLimits({ federationGrants: {} }),
+		...resolveFederationGrantRetrievalLimits({}),
 		...options.limits,
 	};
 

@@ -14,37 +14,24 @@
  * limitations under the License.
  */
 
-// The `federationGrants` configuration block (ADR
-// 2026-09-17-federation-grants-offline-delegation), declared in core rather
-// than in the route package: this schema strips keys it does not know and the
-// standalone validates against it before any module's `configSchema` runs,
-// and the Redis grant store, installed whether or not the routes are, reads
-// the same block.
-//
-// Presence-and-shape only, but for the one-year ceiling on the tombstone
-// retention, which the stores are handed directly. The real bounds are
-// enforced where the values are used (`assertFederationGrantRetrievalLimits`,
-// the store's constructor); the defaults live in `config/reference.conf`.
+/**
+ * The schema of `federation-grants {}`, the federation-grants module's own
+ * section (ADR 2026-09-17-federation-grants-offline-delegation): every key an
+ * operator writes, each leaf read from the string a variable carries, strict
+ * at every level. The real bounds are enforced where the values are used
+ * (`resolveFederationGrantRetrievalLimits`, the acquisition settings); the
+ * defaults live in the package's `config/reference.conf`. The grant stores'
+ * own keys — their retention, their key ring — are their sections', and
+ * refused here.
+ */
 
 import { describe, expect, it } from "vitest";
-import { fullSectionsSchema } from "#/config/application.schema.mjs";
+import { federationGrantsConfigSchema } from "#/module.mjs";
 
-/**
- * What an operator writes, after HOCON has turned `${?VAR}` into strings.
- *
- * Picked out of `fullSectionsSchema` rather than parsed beside every other
- * section: what is being checked is that the key is DECLARED there — an
- * undeclared one is stripped — and the section's own shape.
- */
-const section = fullSectionsSchema.pick({ federationGrants: true });
-const parse = (federationGrants: unknown) =>
-	section.parse({ federationGrants } as never).federationGrants;
+const parse = (section: unknown) => federationGrantsConfigSchema.parse(section);
 
-describe("the federationGrants section", () => {
-	it("survives the pre-parse with every key an operator set", () => {
-		// The failure this guards against is silent: an undeclared block is
-		// stripped, the module sees defaults, and an operator's encryption keys
-		// or lifetime bound are simply not there.
+describe("the federation-grants section", () => {
+	it("keeps every key an operator set", () => {
 		const written = {
 			enabled: true,
 			defaultExpiresIn: 1209600,
@@ -57,9 +44,9 @@ describe("the federationGrants section", () => {
 			refreshLockTtlMs: 30000,
 			lockWaitMs: 5000,
 			persistRetryBudgetMs: 3000,
-			tombstoneRetention: 2592000,
-			encryptionMode: "required",
-			encryptionKeys: [{ id: "k-2026-09", key: "c2VjcmV0" }],
+			allowKeepOnSubjectRevocation: false,
+			identityLookup: "unsupported",
+			consent: { url: "/consent/grants" },
 			connections: {
 				graph: {
 					federation: "entra",
@@ -71,9 +58,7 @@ describe("the federationGrants section", () => {
 					authorizationParams: { prompt: "consent" },
 					callbackURL: "https://app.example.test/grants/cb",
 					// What check 5's Store matches a person on (federation-grants
-					// ADR). Undeclared in the connection's value schema it would be
-					// stripped here, and check 5 would ask the Store with no
-					// evidence at all.
+					// ADR); check 5 asks the Store with them.
 					identityClaims: ["oid", "tid"],
 				},
 			},
@@ -86,6 +71,9 @@ describe("the federationGrants section", () => {
 		// boolean would refuse every environment-driven deployment.
 		expect(parse({ enabled: "true" })?.enabled).toBe(true);
 		expect(parse({ enabled: "false" })?.enabled).toBe(false);
+		expect(parse({ allowKeepOnSubjectRevocation: "true" })?.allowKeepOnSubjectRevocation).toBe(
+			true,
+		);
 		expect(
 			parse({
 				connections: {
@@ -107,31 +95,18 @@ describe("the federationGrants section", () => {
 		expect(parse({ maxExpiresIn: "2592000" })?.maxExpiresIn).toBe(2592000);
 		expect(parse({ maxExpiresIn: " 2592000 " })?.maxExpiresIn).toBe(2592000);
 
-		// And nothing else, unlike the `z.coerce.number()` of the sections
-		// around it: `Number()` reads `null` and `[]` as `0`, `true` as `1` and
-		// `"1e3"` as `1000`, which would NORMALISE a malformed duration before
-		// the strict reader downstream — which refuses exactly these — saw it.
-		// `tombstoneRetention: null` would disable tombstones silently;
-		// `refreshBuffer: null` would hand out tokens with milliseconds left.
+		// And nothing else, unlike `z.coerce.number()`: `Number()` reads `null`
+		// and `[]` as `0`, `true` as `1` and `"1e3"` as `1000`, which would
+		// NORMALISE a malformed duration before the strict reader downstream —
+		// which refuses exactly these — saw it. `refreshBuffer: null` would
+		// hand out tokens with milliseconds left.
 		for (const value of ["thirty", "", "1e3", "0x10", -1, 0, 1.5, null, true, false, [], [45]]) {
 			expect(() => parse({ maxExpiresIn: value }), JSON.stringify(value)).toThrow();
 		}
-		for (const value of [null, true, [], "1e3"]) {
-			expect(() => parse({ tombstoneRetention: value }), JSON.stringify(value)).toThrow();
-		}
 	});
 
-	it("holds the tombstone retention to a year, the ceiling of every duration here", () => {
-		// Past the Date range it is a deadline no store can keep; a year is the
-		// typo guard every duration an operator writes has.
-		expect(parse({ tombstoneRetention: 31_536_000 })?.tombstoneRetention).toBe(31_536_000);
-		for (const value of [31_536_001, 1e18, "31536001"]) {
-			expect(() => parse({ tombstoneRetention: value }), JSON.stringify(value)).toThrow();
-		}
-	});
-
-	it("is absent when nothing declares it, and an empty block is valid", () => {
-		expect(section.parse({} as never).federationGrants).toBeUndefined();
+	it("is absent when nothing declares it, and an empty section is valid", () => {
+		expect(parse(undefined)).toBeUndefined();
 		expect(parse({})).toStrictEqual({});
 		// An operator who removed every connection has an empty map, not a
 		// missing key: removing the last one must remain an operable change.
@@ -139,8 +114,8 @@ describe("the federationGrants section", () => {
 	});
 
 	it("keeps the vocabulary of the keys whose values are a closed set", () => {
-		expect(parse({ encryptionMode: "allow-plaintext" })?.encryptionMode).toBe("allow-plaintext");
-		expect(() => parse({ encryptionMode: "off" })).toThrow();
+		expect(parse({ identityLookup: "required" })?.identityLookup).toBe("required");
+		expect(() => parse({ identityLookup: "optional" })).toThrow();
 	});
 
 	it("refuses a connection missing what has no sensible default", () => {
@@ -158,6 +133,28 @@ describe("the federationGrants section", () => {
 			const partial: Record<string, unknown> = { ...whole };
 			delete partial[missing];
 			expect(() => parse({ connections: { graph: partial } }), missing).toThrow();
+		}
+	});
+
+	it("refuses a key it does not declare, a grant store's among them, at every level", () => {
+		for (const section of [
+			{ tombstoneRetention: 60 },
+			{ encryptionMode: "required" },
+			{ encryptionKeys: [{ id: "k", key: "c2VjcmV0" }] },
+			{ consent: { uri: "/consent" } },
+			{
+				connections: {
+					graph: {
+						federation: "entra",
+						scopes: ["openid"],
+						boundary: "b",
+						maxAccessTokenLifetime: 3600,
+						scope: ["openid"],
+					},
+				},
+			},
+		]) {
+			expect(() => parse(section), JSON.stringify(section)).toThrow();
 		}
 	});
 });

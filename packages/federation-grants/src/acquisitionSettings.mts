@@ -56,13 +56,11 @@ const refuse = (message: string, options?: ErrorOptions): never => {
 };
 
 /**
- * The provider's browser-facing origin: the issuer's — `issuer` when the
- * caller hands one (the `oauthTokenSettings` slot's), otherwise
- * `oauth.jwt.issuer` as the configuration carries it.
+ * The provider's browser-facing origin: the issuer's, as the caller hands it —
+ * the `oauthTokenSettings` slot's, or `oauth.jwt.issuer` as the configuration
+ * carries it.
  */
-const issuerOrigin = (config: unknown, given: unknown): string => {
-	const issuer =
-		given ?? (config as { oauth?: { jwt?: { issuer?: unknown } } })?.oauth?.jwt?.issuer;
+const issuerOrigin = (issuer: unknown): string => {
 	if (typeof issuer !== "string") return refuse("oauth.jwt.issuer must be configured");
 	try {
 		return new URL(issuer).origin;
@@ -80,26 +78,25 @@ const issuerOrigin = (config: unknown, given: unknown): string => {
  * another origin could not show the user the client, the expiry, or that the
  * access outlives logout (the federation-grants ADR, D8).
  */
-const consentUrl = (config: unknown, origin: string): string => {
-	const written = (config as { federationGrants?: { consent?: { url?: unknown } } })
-		?.federationGrants?.consent?.url;
+const consentUrl = (section: AcquisitionSection | undefined, origin: string): string => {
+	const written = section?.consent?.url;
 	if (typeof written !== "string" || written === "") {
 		return refuse(
-			"federationGrants.consent.url must name the deployment's consent page. The provider ships " +
+			"federation-grants.consent.url must name the deployment's consent page. The provider ships " +
 				"no UI, a grant is never created without the user's consent, and there is no default: " +
 				"enabling federation grants is a statement that such a page exists (D8)",
 		);
 	}
 	if (written.startsWith("/") && !written.startsWith("//")) {
 		if (written.includes("#"))
-			return refuse("federationGrants.consent.url must not carry a fragment");
+			return refuse("federation-grants.consent.url must not carry a fragment");
 		// A path has to STAY a path once resolved: `/.//evil.example/consent`
 		// normalises to `//evil.example/consent`, which a browser reads as another
 		// host. Resolved against the provider's origin, it must still be on it.
 		const resolved = new URL(written, origin);
 		if (resolved.origin !== origin || resolved.pathname.startsWith("//")) {
 			return refuse(
-				`federationGrants.consent.url ${JSON.stringify(written)} does not stay on the provider's ` +
+				`federation-grants.consent.url ${JSON.stringify(written)} does not stay on the provider's ` +
 					"own origin once resolved",
 			);
 		}
@@ -110,7 +107,7 @@ const consentUrl = (config: unknown, origin: string): string => {
 		url = new URL(written);
 	} catch {
 		return refuse(
-			`federationGrants.consent.url must be a path or an absolute URL, and ${JSON.stringify(written)} is neither`,
+			`federation-grants.consent.url must be a path or an absolute URL, and ${JSON.stringify(written)} is neither`,
 		);
 	}
 	if (
@@ -120,7 +117,7 @@ const consentUrl = (config: unknown, origin: string): string => {
 		url.password !== ""
 	) {
 		return refuse(
-			`federationGrants.consent.url must be on the provider's own origin (${origin}), without a ` +
+			`federation-grants.consent.url must be on the provider's own origin (${origin}), without a ` +
 				"fragment or credentials: the page reads the consent data with the session cookie, and " +
 				"this provider never allows a credentialed cross-origin read",
 		);
@@ -159,13 +156,12 @@ const loginEntry = (entry: LoginEntry | undefined): LoginEntry => {
 	return entry;
 };
 
-const identityLookup = (config: unknown): FederationGrantIdentityLookup => {
-	const written = (config as { federationGrants?: { identityLookup?: unknown } })?.federationGrants
-		?.identityLookup;
+const identityLookup = (section: AcquisitionSection | undefined): FederationGrantIdentityLookup => {
+	const written = section?.identityLookup;
 	if (written === undefined) return "required";
 	if (written === "required" || written === "unsupported") return written;
 	return refuse(
-		`federationGrants.identityLookup must be "required" or "unsupported", and was ${JSON.stringify(written)}`,
+		`federation-grants.identityLookup must be "required" or "unsupported", and was ${JSON.stringify(written)}`,
 	);
 };
 
@@ -181,7 +177,7 @@ const acquisitionConnection = (
 	connection: FederationGrantConnection,
 	origin: string,
 ): FederationGrantAcquisitionConnection => {
-	const key = `federationGrants.connections.${connection.name}.callbackURL`;
+	const key = `federation-grants.connections.${connection.name}.callbackURL`;
 	const written = connection.callbackUri;
 	if (written === undefined) {
 		return refuse(
@@ -201,18 +197,29 @@ const acquisitionConnection = (
 	return { ...connection, callbackUri: written };
 };
 
+/** What acquisition reads of `federation-grants {}`, each as written. */
+interface AcquisitionSection {
+	readonly consent?: { readonly url?: unknown };
+	readonly identityLookup?: unknown;
+}
+
+/**
+ * What creating a grant needs, from `section` (`federation-grants {}`): the
+ * consent page and the identity lookup; the connections, each with its
+ * callback; the login page; and the provider's origin, off `options.issuer`.
+ */
 export function resolveFederationGrantAcquisitionSettings(
-	config: unknown,
+	section: AcquisitionSection | undefined,
 	connections: ReadonlyMap<string, FederationGrantConnection>,
 	login: LoginEntry | undefined,
-	/** The issuer of the `oauthTokenSettings` slot, when the composition holds it. */
-	options: { readonly issuer?: string } = {},
+	/** The issuer the routes are built on: the `oauthTokenSettings` slot's, or the configuration's. */
+	options: { readonly issuer?: unknown } = {},
 ): FederationGrantAcquisitionSettings {
-	const origin = issuerOrigin(config, options.issuer);
+	const origin = issuerOrigin(options.issuer);
 	const settings: FederationGrantAcquisitionSettings = {
-		consentUrl: consentUrl(config, origin),
+		consentUrl: consentUrl(section, origin),
 		login: loginEntry(login),
-		identityLookup: identityLookup(config),
+		identityLookup: identityLookup(section),
 		origin,
 		connections: new Map(
 			[...connections.values()].map((entry) => [entry.name, acquisitionConnection(entry, origin)]),
@@ -238,7 +245,7 @@ export function federationGrantIdentityRegistration(
 }
 
 const IDENTITY_LOOKUP_REMEDY =
-	'install a userRepository that covers it, or set federationGrants.identityLookup = "unsupported" ' +
+	'install a userRepository that covers it, or set federation-grants.identityLookup = "unsupported" ' +
 	"to record that this deployment does not refuse an upstream account already linked to another user";
 
 /**
@@ -269,7 +276,7 @@ export function requireFederationGrantIdentityLookup(
 	if (mode === "unsupported" || connections.size === 0) return;
 	if (typeof userRepository?.findSubjectByFederatedIdentity !== "function") {
 		refuse(
-			'federationGrants.identityLookup is "required" (the default), and the userRepository has no ' +
+			'federation-grants.identityLookup is "required" (the default), and the userRepository has no ' +
 				"findSubjectByFederatedIdentity. Implement it — side-effect-free, answering who holds an " +
 				'upstream identity across every registration — or set identityLookup = "unsupported" to ' +
 				"record that this deployment does not refuse an upstream account already linked to another user",
@@ -277,7 +284,7 @@ export function requireFederationGrantIdentityLookup(
 	}
 	if (typeof userRepository?.supportsFederatedIdentityLookup !== "function") {
 		refuse(
-			'federationGrants.identityLookup is "required" (the default), and the userRepository has no ' +
+			'federation-grants.identityLookup is "required" (the default), and the userRepository has no ' +
 				"supportsFederatedIdentityLookup: it cannot say which upstream registrations its lookup " +
 				"covers, so a lookup that sees only the name and sub it is handed would read an account " +
 				`another user holds as linked to nobody. Implement it, or ${IDENTITY_LOOKUP_REMEDY}`,
@@ -306,7 +313,7 @@ export function requireFederationGrantIdentityLookup(
 				(covered as PromiseLike<unknown>).then(undefined, () => undefined);
 			}
 			refuse(
-				`federationGrants.connections.${connection.name}: the userRepository ` +
+				`federation-grants.connections.${connection.name}: the userRepository ` +
 					(threw ? "threw when asked whether it covers" : "does not cover") +
 					` the registration its identities are issued under (federation "${registration.provider}", ` +
 					`issuer ${registration.issuer}, client ${registration.clientId}, identityClaims ` +

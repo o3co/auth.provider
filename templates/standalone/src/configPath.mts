@@ -147,7 +147,7 @@ export function resolveLayers(own: OwnLayers, references: readonly URL[]): Recor
 export const SWITCHES: readonly string[] = [
 	"core.sessionRequirements",
 	"federations",
-	"federationGrants.enabled",
+	"federation-grants.enabled",
 	"federationGrantStore.adapter",
 	"federationGrantIntentStore.adapter",
 	"federationTokenStore.type",

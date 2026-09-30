@@ -147,9 +147,12 @@ function resolveConfig(): AppConfig {
 				redirectAllowlist: [],
 			},
 		},
-		federationGrants: {
-			...config.federationGrants,
+		"redis-federation-grant-store": {
+			...(config["redis-federation-grant-store"] as object | undefined),
 			encryptionKeys: [{ id: "k-test", key: ENCRYPTION_KEY }],
+		},
+		"federation-grants": {
+			...config["federation-grants"],
 			connections: {
 				[CONNECTION]: {
 					federation: "upstream",

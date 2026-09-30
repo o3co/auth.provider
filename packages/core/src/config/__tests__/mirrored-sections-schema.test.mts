@@ -21,7 +21,7 @@ import { makeValidAppConfig } from "#/testing/fixtures/valid-config.mjs";
 
 /**
  * The sections core's schema still mirrors, transitionally, for another
- * package's modules: `redisFederationGrantStore`, `webauthn`, and the stores'
+ * package's modules: `webauthn`, `federation-grants.enabled`, and the stores'
  * sections presence-only. Boot's composed parse applies each
  * mirror whenever the configuration carries the section, the module that
  * reads it loaded or not; a check here goes when its mirror leaves core.
@@ -66,18 +66,34 @@ describe("the stores' sections, and the paths they moved from", () => {
 	});
 });
 
-describe("redisFederationGrantStore's listing allowance", () => {
-	it("is held to a year, the ceiling of every duration an operator writes", () => {
-		// Past the Date range it is a deadline Redis refuses after the script
-		// has reserved the grant in its subject's index, which is left with no
-		// TTL; the store refuses it too, as the second line.
-		const allowance = (listingAllowanceMs: unknown) =>
-			parse({ ...base, redisFederationGrantStore: { listingAllowanceMs } })
-				.redisFederationGrantStore?.listingAllowanceMs;
-		expect(allowance(31_536_000_000)).toBe(31_536_000_000);
-		for (const value of [31_536_000_001, 1e21]) {
-			expect(() => allowance(value), String(value)).toThrow();
-		}
+describe("the federation-grants sections, and the paths they moved from", () => {
+	// Each module's section schema coerces and refuses; core keeps these as
+	// written, for the modules and for the relocation refusal.
+	const WRITTEN = { keyPrefix: "{x}", tombstoneRetention: "not-a-duration", bogus: true };
+
+	it.each([
+		"federationGrants",
+		"redisFederationGrantStore",
+		"core-federation-grant-store-memory",
+		"redis-federation-grant-store",
+		"redis-federation-grant-intent-store",
+	])("keeps %s as written", (section) => {
+		expect((parse({ ...base, [section]: WRITTEN }) as Record<string, unknown>)[section]).toEqual(
+			WRITTEN,
+		);
+		expect(
+			(AppConfigSchema.parse({ ...base, [section]: WRITTEN }) as Record<string, unknown>)[section],
+		).toEqual(WRITTEN);
+	});
+
+	it("reads federation-grants.enabled from a variable's string, the one key read before modules, and keeps the rest as written", () => {
+		const written = { enabled: "true", maxExpiresIn: "not-a-duration", connections: {} };
+		const parsed = { ...written, enabled: true };
+		expect(parse({ ...base, "federation-grants": written })["federation-grants"]).toEqual(parsed);
+		expect(
+			AppConfigSchema.parse({ ...base, "federation-grants": written })["federation-grants"],
+		).toEqual(parsed);
+		expect(() => parse({ ...base, "federation-grants": { enabled: "sometimes" } })).toThrow();
 	});
 });
 

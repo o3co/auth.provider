@@ -928,83 +928,15 @@ export const fullSectionsSchema = z.object({
 	// them.
 	deployment: z.unknown().optional(),
 	sessionRequirements: z.unknown().optional(),
-	// The federation-grants section (see the federation-grants ADR). The bundled
-	// Redis grant store reads it too and is installed whether or not the routes
-	// are, so losing the block would silently drop the operator's encryption
-	// keys and lifetime bound. Bounds live where the values are used
-	// (`assertFederationGrantRetrievalLimits`, the store's constructor);
-	// defaults in `config/reference.conf`.
-	federationGrants: z
-		.object({
-			enabled: coerceBooleanFromEnv.optional(),
-			// Seconds. A new grant's lifetime, and the most an operator permits;
-			// the code's one-year ceiling still applies above it.
-			defaultExpiresIn: durationFromEnv(z.number().int().positive()).optional(),
-			maxExpiresIn: durationFromEnv(z.number().int().positive()).optional(),
-			// Seconds. The retrieval's timings.
-			refreshBuffer: durationFromEnv(z.number().int().nonnegative()).optional(),
-			ineligibleRetryAfter: durationFromEnv(z.number().int().positive()).optional(),
-			refreshFailureBackoff: durationFromEnv(z.number().int().nonnegative()).optional(),
-			// Milliseconds, as the limits they become are.
-			upstreamTimeoutMs: durationFromEnv(z.number().int().positive()).optional(),
-			upstreamHardTimeoutMs: durationFromEnv(z.number().int().positive()).optional(),
-			refreshLockTtlMs: durationFromEnv(z.number().int().positive()).optional(),
-			lockWaitMs: durationFromEnv(z.number().int().nonnegative()).optional(),
-			persistRetryBudgetMs: durationFromEnv(z.number().int().positive()).optional(),
-			// Seconds. How long a record answers past the end of what it was
-			// authorized for; zero keeps no tombstones. At most one year: past the
-			// Date range it is a deadline no store can keep, and stores refuse it.
-			tombstoneRetention: durationFromEnv(
-				z.number().int().nonnegative().max(MAX_DURATION_SECONDS),
-			).optional(),
-			// Whether a subject-wide revocation may be asked to leave this
-			// subject's established grants standing. An allowance, not an
-			// instruction: the caller must ask, the request and the outcome are
-			// both reported, and boot refuses it with an adapter that cannot stamp
-			// the two boundaries separately.
-			allowKeepOnSubjectRevocation: coerceBooleanFromEnv.optional(),
-			// Whether the connect callback refuses an upstream account already
-			// linked to another local user, which needs
-			// `UserRepository.findSubjectByFederatedIdentity`. "required", the
-			// default, refuses to boot without it; "unsupported" records that this
-			// deployment does not make that check.
-			identityLookup: z.enum(["required", "unsupported"]).optional(),
-			// The deployment's consent page for grants. No default: enabling the
-			// feature states that such a page exists, and boot refuses it without
-			// one. A path, or an absolute URL on the provider's origin.
-			consent: z.object({ url: z.string().min(1).optional() }).optional(),
-			// The credential envelope's key ring. The first key seals; every
-			// listed key opens, so a key stays in the ring for as long as a paused
-			// grant may live.
-			encryptionMode: z.enum(["required", "allow-plaintext"]).optional(),
-			encryptionKeys: z
-				.array(z.object({ id: z.string().min(1), key: z.string().min(1) }))
-				.optional(),
-			// What a grant may be for. An empty map is valid: removing the last
-			// connection must remain an operable change.
-			connections: z
-				.record(
-					z.string().min(1),
-					z.object({
-						federation: z.string().min(1),
-						scopes: z.array(z.string().min(1)).min(1),
-						resource: z.string().min(1).optional(),
-						// No default for either: a guessed access-token maximum
-						// invents a residual-access policy, and a guessed boundary
-						// silently shares one.
-						boundary: z.string().min(1),
-						maxAccessTokenLifetime: durationFromEnv(z.number().int().positive()),
-						allowScopeSubsets: coerceBooleanFromEnv.optional(),
-						authorizationParams: z.record(z.string(), z.string()).optional(),
-						callbackURL: z.string().min(1).optional(),
-						// Verified id_token claims handed to the Store beside the
-						// subject for the linked-account check. Names only; the
-						// package checks them.
-						identityClaims: z.array(z.string()).optional(),
-					}),
-				)
-				.optional(),
-		})
+	// Presence-only: the path the federation-grants section, and the grant
+	// stores' own keys, moved from.
+	federationGrants: z.unknown().optional(),
+	// The federation-grants module's section, parsed by its module. Mirrored
+	// for the one key a composition root reads before it knows its modules,
+	// `enabled`; every other key is kept as written.
+	"federation-grants": z
+		.object({ enabled: coerceBooleanFromEnv.optional() })
+		.passthrough()
 		.optional(),
 	session: z
 		.object({
@@ -1318,16 +1250,6 @@ export const fullSectionsSchema = z.object({
 			memory: z.unknown().optional(),
 		})
 		.optional(),
-	// This adapter's own layout: where a grant's keys live and how far past a
-	// horizon the subject index keeps a member. What a grant may be is
-	// `federationGrants` above.
-	redisFederationGrantStore: z
-		.object({
-			keyPrefix: z.string().optional(),
-			// One year at most, as every duration here; see tombstoneRetention.
-			listingAllowanceMs: z.coerce.number().int().nonnegative().max(MAX_DURATION_MS).optional(),
-		})
-		.optional(),
 	// Adapter for the RFC 7009 access-token denylist; default `"memory"` in
 	// HOCON. Memory forks per replica (a revocation on one leaves the token
 	// working on the others), so `core-access-token-denylist-memory` is in the
@@ -1392,11 +1314,13 @@ export const fullSectionsSchema = z.object({
 	redisReplaySeenSet: z.unknown().optional(),
 	redisSessionStores: z.unknown().optional(),
 	redisFederationTokenStore: z.unknown().optional(),
+	redisFederationGrantStore: z.unknown().optional(),
 	// Presence-only: the stores' own sections, each parsed by its module. A
 	// package's `reference.conf` is layered whenever any of its modules is
 	// loaded, so it sets these sections while their own module may not be;
 	// declared here, they are not named as ignored at boot.
 	"core-rate-limiter-memory": z.unknown().optional(),
+	"core-federation-grant-store-memory": z.unknown().optional(),
 	"redis-access-token-denylist": z.unknown().optional(),
 	"redis-challenge-store": z.unknown().optional(),
 	"redis-consent-store": z.unknown().optional(),
@@ -1408,6 +1332,8 @@ export const fullSectionsSchema = z.object({
 	"redis-replay-seen-set": z.unknown().optional(),
 	"redis-session-stores": z.unknown().optional(),
 	"redis-federation-token-store": z.unknown().optional(),
+	"redis-federation-grant-store": z.unknown().optional(),
+	"redis-federation-grant-intent-store": z.unknown().optional(),
 });
 
 /**

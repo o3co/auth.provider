@@ -185,13 +185,15 @@ const DOCUMENTED_ENV: Readonly<Record<string, string>> = {
 	FEDERATION_GRANTS_ENABLED: "true",
 	FEDERATION_GRANT_STORE_ADAPTER: "redis",
 	FEDERATION_GRANT_INTENT_STORE_ADAPTER: "redis",
-	FEDERATION_GRANTS_ENCRYPTION_MODE: "required",
+	REDIS_FEDERATION_GRANT_STORE_ENCRYPTION_MODE: "required",
 	FEDERATION_GRANTS_ALLOW_KEEP_ON_SUBJECT_REVOCATION: "false",
 	// Acquisition's two deployment decisions — whether the callback
 	// refuses an upstream account linked to another user, and the consent page.
 	FEDERATION_GRANTS_IDENTITY_LOOKUP: "required",
 	FEDERATION_GRANTS_CONSENT_URL: "/consent/grants",
 	REDIS_FEDERATION_GRANT_STORE_KEY_PREFIX: "fg:",
+	// The intent store's own namespace, which a deployment moves with the grant store's.
+	REDIS_FEDERATION_GRANT_INTENT_STORE_KEY_PREFIX: "fg:",
 
 	// --- multi-factor authentication ----------------------------------
 	// The mode (ADR 2026-09-25-multi-factor-authentication), which the MFA
@@ -270,6 +272,8 @@ const DELIBERATELY_UNSET: Readonly<Record<string, string>> = {
 		"renamed REDIS_REFRESH_TOKEN_FAMILY_STORE_KEY_PREFIX, and only captured — set alone, or to another value, it fails boot",
 	REFRESH_TOKEN_FAMILY_STORE_CAS_RETRY_LIMIT:
 		"renamed REDIS_REFRESH_TOKEN_FAMILY_STORE_CAS_RETRY_LIMIT, and only captured — set alone, or to another value, it fails boot",
+	FEDERATION_GRANTS_ENCRYPTION_MODE:
+		"renamed REDIS_FEDERATION_GRANT_STORE_ENCRYPTION_MODE, and only captured — set alone, or to another value, it fails boot",
 };
 
 /**
@@ -428,7 +432,7 @@ describe("the shipped config boots with every documented override supplied as a 
 		expect(config.federations.oidc?.enabled).toBe(true);
 		// A leftover string here would be read as "on" by a truthiness check
 		// and as "off" by `=== true`, for a feature whose whole default is off.
-		expect(config.federationGrants?.enabled).toBe(true);
+		expect(config["federation-grants"]?.enabled).toBe(true);
 	});
 
 	it("turns every non-boolean override into its declared type", async () => {

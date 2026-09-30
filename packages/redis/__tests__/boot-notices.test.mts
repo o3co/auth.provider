@@ -199,15 +199,16 @@ describe("the plaintext guard's notices", () => {
 		expect(tokens.calls).toEqual([plaintextWarning("federation-tokens")]);
 
 		const grants = recordingLogger();
-		const provideGrants = redisFederationGrantStoreModuleFor().provides?.federationGrantStore as (
-			deps: unknown,
-		) => unknown;
-		provideGrants({
-			federationGrantStoreClient: grantClient,
-			config: { federationGrants: { encryptionMode: "allow-plaintext" } },
-			deploymentMode: "unset",
-			logger: grants.logger,
-		});
+		const grantModule = redisFederationGrantStoreModuleFor();
+		const provideGrants = grantModule.provides?.federationGrantStore as (deps: unknown) => unknown;
+		provideGrants(
+			withSection(grantModule, {
+				federationGrantStoreClient: grantClient,
+				config: { "redis-federation-grant-store": { encryptionMode: "allow-plaintext" } },
+				deploymentMode: "unset",
+				logger: grants.logger,
+			}),
+		);
 		expect(grants.calls).toEqual([plaintextWarning("federation-grants")]);
 	});
 

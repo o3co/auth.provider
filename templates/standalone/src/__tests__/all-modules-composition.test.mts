@@ -381,7 +381,10 @@ describe("discovery", () => {
 
 	/** The grant connections dropped: they name the OIDC federation. */
 	const withoutConnections = (config: AppConfig): AppConfig =>
-		({ ...config, federationGrants: { ...config.federationGrants, connections: {} } }) as AppConfig;
+		({
+			...config,
+			"federation-grants": { ...config["federation-grants"], connections: {} },
+		}) as AppConfig;
 
 	const FEATURE_SWITCHES: ReadonlyArray<
 		readonly [

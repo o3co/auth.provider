@@ -166,8 +166,8 @@ function resolveConfig(env: Record<string, string>): AppConfig {
 		// What the resolution captured of core's renamed variables, which the
 		// schema's parse drops.
 		"renamed-variables": capturedRenames(env),
-		federationGrants: {
-			...config.federationGrants,
+		"redis-federation-grant-store": {
+			...(config["redis-federation-grant-store"] as object | undefined),
 			encryptionKeys: [{ id: "k-test", key: ENCRYPTION_KEY }],
 		},
 	} as AppConfig;
@@ -386,8 +386,8 @@ describe("the standalone composes federation grants from its config", () => {
 		// The lock must outlive the raised hard timeout, or boot refuses first.
 		const raised = {
 			...shipped,
-			federationGrants: {
-				...shipped.federationGrants,
+			"federation-grants": {
+				...shipped["federation-grants"],
 				upstreamHardTimeoutMs: 60_000,
 				refreshLockTtlMs: 65_000,
 			},
@@ -561,7 +561,7 @@ describe("the standalone composes federation grants from its config", () => {
 			...GRANTS_ON,
 			USER_SESSION_STORES_ADAPTER: "redis",
 			FEDERATION_GRANT_STORE_ADAPTER: "redis",
-			FEDERATION_GRANTS_ENCRYPTION_MODE: "allow-plaintext",
+			REDIS_FEDERATION_GRANT_STORE_ENCRYPTION_MODE: "allow-plaintext",
 		});
 		let error: unknown;
 		try {

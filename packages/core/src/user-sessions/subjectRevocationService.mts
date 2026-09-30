@@ -23,7 +23,7 @@
  * **Keeping is the reason it exists.** A password change wants sessions
  * gone; whether a backend's month-old calendar integration dies with it is
  * a question of residual access that differs per deployment. So the
- * allowance is configuration (`federationGrants.allowKeepOnSubjectRevocation`,
+ * allowance is configuration (`federation-grants.allowKeepOnSubjectRevocation`,
  * default `false`), not a call argument any caller could set. A `"keep"`
  * refused by policy is carried out as a full revocation, and the report
  * says so (see {@link SubjectRevocationReport.federationGrants}).
@@ -124,7 +124,7 @@ export interface SubjectRevocationServiceDeps {
 	 */
 	readonly watermarkTtlMs: number;
 	readonly federationGrantStore?: FederationGrantStore;
-	/** `federationGrants.allowKeepOnSubjectRevocation`, already resolved. */
+	/** `federation-grants.allowKeepOnSubjectRevocation`, already resolved. */
 	readonly allowKeep: boolean;
 	readonly federationGrantAudit?: (event: FederationGrantAuditEvent) => void | Promise<void>;
 	readonly correlationId?: string;
@@ -151,7 +151,7 @@ export function createSubjectRevocationService(
 	const revocation = deps.subjectRevocation;
 	if (deps.allowKeep && (revocation === undefined || !supportsSessionsOnlyRevocation(revocation))) {
 		throw new TypeError(
-			`federationGrants.allowKeepOnSubjectRevocation is on, but the subjectRevocation adapter (kind "${revocation?.kind ?? "absent"}") ` +
+			`federation-grants.allowKeepOnSubjectRevocation is on, but the subjectRevocation adapter (kind "${revocation?.kind ?? "absent"}") ` +
 				"cannot stamp a sessions-only boundary: keeping a subject's federation grants needs revokeSessionsBefore and " +
 				"grantsRevokedBefore. Without them every keep would silently revoke, which reads like the policy working.",
 		);

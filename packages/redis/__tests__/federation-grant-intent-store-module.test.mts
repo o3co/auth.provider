@@ -27,40 +27,35 @@ import {
 const client = {} as FederationGrantIntentStoreClient;
 
 describe("the Redis federation grant intent store module", () => {
-	it("needs the client and the configuration, and says which slot it fills", () => {
+	it("needs the client, and says which slot it fills", () => {
 		expect(redisFederationGrantIntentStoreModule.name).toBe("redis-federation-grant-intent-store");
 		expect(redisFederationGrantIntentStoreModule.requires).toStrictEqual([
 			"federationGrantIntentStoreClient",
-			"config",
 		]);
 		expect(Object.keys(redisFederationGrantIntentStoreModule.provides ?? {})).toStrictEqual([
 			"federationGrantIntentStore",
 		]);
 	});
 
-	it("reads the grant store's key prefix, so the two namespaces move together", () => {
-		// Both live under one prefix (ADR
-		// 2026-09-17-federation-grants-offline-delegation, D16); a deployment
-		// that changed it must not find acquisition's records left in the old
-		// one.
+	it("reads its own section's key prefix, fg: when it is not set, and refuses a key it does not declare", () => {
 		expect(
-			resolveRedisFederationGrantIntentStoreOptions({
-				redisFederationGrantStore: { keyPrefix: "tenant-a:fg:" },
-			}),
+			resolveRedisFederationGrantIntentStoreOptions({ keyPrefix: "tenant-a:fg:" }),
 		).toStrictEqual({ keyPrefix: "tenant-a:fg:" });
-		expect(resolveRedisFederationGrantIntentStoreOptions({})).toStrictEqual({ keyPrefix: "fg:" });
+		expect(resolveRedisFederationGrantIntentStoreOptions(undefined)).toStrictEqual({
+			keyPrefix: "fg:",
+		});
+		expect(() => resolveRedisFederationGrantIntentStoreOptions({ prefix: "x:" })).toThrow();
 	});
 
 	it("builds a redis store, and refuses a prefix that would break the shared slot", () => {
 		const provide = redisFederationGrantIntentStoreModule.provides?.federationGrantIntentStore as (
 			deps: unknown,
 		) => { kind: string };
-		expect(provide({ federationGrantIntentStoreClient: client, config: {} }).kind).toBe("redis");
+		expect(provide({ federationGrantIntentStoreClient: client, section: undefined }).kind).toBe(
+			"redis",
+		);
 		expect(() =>
-			provide({
-				federationGrantIntentStoreClient: client,
-				config: { redisFederationGrantStore: { keyPrefix: "fg{x}:" } },
-			}),
+			provide({ federationGrantIntentStoreClient: client, section: { keyPrefix: "fg{x}:" } }),
 		).toThrow(/brace/);
 	});
 });

@@ -25,12 +25,11 @@ import { describe, expect, it } from "vitest";
 import { memoryFederationGrantStoreModule } from "#/federation-grants/module.mjs";
 
 /** The module's own section, `core-federation-grant-store-memory`, parsed with its schema. */
-const parse = (section: unknown) =>
-	(
-		memoryFederationGrantStoreModule.section?.schema as unknown as {
-			parse(value: unknown): { tombstoneRetention?: number } | undefined;
-		}
-	).parse(section);
+const parse = (section: unknown): { tombstoneRetention?: number } | undefined => {
+	const schema = memoryFederationGrantStoreModule.section?.schema;
+	if (schema === undefined) throw new Error("the module declares no section");
+	return schema.parse(section) as { tombstoneRetention?: number } | undefined;
+};
 
 describe("memoryFederationGrantStoreModule", () => {
 	it("declares itself unsafe to run on more than one replica, and says what forks", () => {
@@ -47,9 +46,9 @@ describe("memoryFederationGrantStoreModule", () => {
 		expect(parse({ tombstoneRetention: 0 })?.tombstoneRetention).toBe(0);
 	});
 
-	it("refuses a retention that is not a duration rather than reading it as zero, and a key it does not declare", () => {
+	it("refuses a retention that is not a duration, or past a year, rather than reading it as zero, and a key it does not declare", () => {
 		for (const section of [
-			...[null, true, [], "1e3", "thirty", -1, 1.5].map((tombstoneRetention) => ({
+			...[null, true, [], "1e3", "thirty", -1, 1.5, 31_536_001].map((tombstoneRetention) => ({
 				tombstoneRetention,
 			})),
 			{ tombstone: 60 },

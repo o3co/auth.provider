@@ -15,7 +15,7 @@
  */
 
 /**
- * `federationGrants.*` as an operator writes it, turned into the limits the
+ * `federation-grants {}` as an operator writes it, turned into the limits the
  * retrieval takes (ADR 2026-09-17-federation-grants-offline-delegation, D3,
  * D10 and D12). The conversion goes wrong silently: seconds forwarded as
  * milliseconds, or a default substituted for an explicitly invalid value,
@@ -33,14 +33,15 @@ import {
 	resolveFederationGrantRetrievalLimits,
 } from "#/federation-grants/settings.mjs";
 
+/** The federation-grants package's `reference.conf`, which ships the section's defaults. */
 const referenceConf = readFileSync(
-	fileURLToPath(new URL("../../../config/reference.conf", import.meta.url)),
+	fileURLToPath(new URL("../../../../federation-grants/config/reference.conf", import.meta.url)),
 	"utf8",
 );
 
-/** The `federationGrants` block of `reference.conf`, as `key = number` pairs. */
+/** The `federation-grants` section of that file, as `key = number` pairs. */
 function shippedDefaults(): Record<string, number> {
-	const block = /\nfederationGrants \{\n([\s\S]*?)\n\}/.exec(referenceConf);
+	const block = /\nfederation-grants \{\n([\s\S]*?)\n\}/.exec(referenceConf);
 	const found: Record<string, number> = {};
 	for (const line of (block?.[1] ?? "").split("\n")) {
 		const pair = /^\s{2}([A-Za-z]+) = (\d+)$/.exec(line);
@@ -59,7 +60,7 @@ describe("FEDERATION_GRANT_SETTING_DEFAULTS", () => {
 		for (const [key, value] of Object.entries(shipped)) {
 			expect(
 				(FEDERATION_GRANT_SETTING_DEFAULTS as Record<string, number>)[key],
-				`reference.conf federationGrants.${key}`,
+				`reference.conf federation-grants.${key}`,
 			).toBe(value);
 		}
 	});
@@ -67,9 +68,7 @@ describe("FEDERATION_GRANT_SETTING_DEFAULTS", () => {
 
 describe("resolveFederationGrantKeepPolicy", () => {
 	const resolve = (written: unknown) =>
-		resolveFederationGrantKeepPolicy({
-			federationGrants: { allowKeepOnSubjectRevocation: written },
-		});
+		resolveFederationGrantKeepPolicy({ allowKeepOnSubjectRevocation: written });
 
 	it("is off when an operator wrote nothing", () => {
 		// Including the deployments that predate the key: what a subject-wide
@@ -103,12 +102,10 @@ describe("resolveFederationGrantKeepPolicy", () => {
 describe("resolveFederationGrantRetrievalLimits", () => {
 	it("converts every seconds-based setting into the milliseconds the retrieval takes", () => {
 		const limits = resolveFederationGrantRetrievalLimits({
-			federationGrants: {
-				maxExpiresIn: 86_400,
-				refreshBuffer: 45,
-				ineligibleRetryAfter: 600,
-				refreshFailureBackoff: 15,
-			},
+			maxExpiresIn: 86_400,
+			refreshBuffer: 45,
+			ineligibleRetryAfter: 600,
+			refreshFailureBackoff: 15,
 		});
 		expect(limits.maxExpiresInMs).toBe(86_400_000);
 		expect(limits.refreshBufferMs).toBe(45_000);
@@ -118,13 +115,11 @@ describe("resolveFederationGrantRetrievalLimits", () => {
 
 	it("passes the millisecond settings through as they are written", () => {
 		const limits = resolveFederationGrantRetrievalLimits({
-			federationGrants: {
-				upstreamTimeoutMs: 8_000,
-				upstreamHardTimeoutMs: 20_000,
-				refreshLockTtlMs: 25_000,
-				lockWaitMs: 4_000,
-				persistRetryBudgetMs: 2_000,
-			},
+			upstreamTimeoutMs: 8_000,
+			upstreamHardTimeoutMs: 20_000,
+			refreshLockTtlMs: 25_000,
+			lockWaitMs: 4_000,
+			persistRetryBudgetMs: 2_000,
 		});
 		expect(limits.upstreamTimeoutMs).toBe(8_000);
 		expect(limits.upstreamHardTimeoutMs).toBe(20_000);
@@ -134,7 +129,7 @@ describe("resolveFederationGrantRetrievalLimits", () => {
 	});
 
 	it("fills an absent knob from the shipped default", () => {
-		const limits = resolveFederationGrantRetrievalLimits({ federationGrants: {} });
+		const limits = resolveFederationGrantRetrievalLimits({});
 		expect(limits.refreshBufferMs).toBe(FEDERATION_GRANT_SETTING_DEFAULTS.refreshBuffer * 1000);
 		expect(limits.upstreamHardTimeoutMs).toBe(
 			FEDERATION_GRANT_SETTING_DEFAULTS.upstreamHardTimeoutMs,
@@ -147,21 +142,21 @@ describe("resolveFederationGrantRetrievalLimits", () => {
 		// against the watermark `verifyJwt` reads, so a federation-grant-specific
 		// skew would be a second allowance for one comparison, and the
 		// boundary's retention would have to cover whichever is larger.
-		const limits = resolveFederationGrantRetrievalLimits({ federationGrants: {} });
+		const limits = resolveFederationGrantRetrievalLimits({});
 		expect(limits.revocationSkewMs).toBe(1_000);
 	});
 
 	it("refuses an explicitly invalid value rather than defaulting over it", () => {
 		// A default substituted here is a typo that boots.
-		for (const federationGrants of [
+		for (const section of [
 			{ refreshBuffer: -1 },
 			{ upstreamTimeoutMs: 0 },
 			{ maxExpiresIn: Number.NaN },
 			{ lockWaitMs: "soon" },
 		]) {
 			expect(
-				() => resolveFederationGrantRetrievalLimits({ federationGrants }),
-				JSON.stringify(federationGrants),
+				() => resolveFederationGrantRetrievalLimits(section),
+				JSON.stringify(section),
 			).toThrow();
 		}
 	});
@@ -172,12 +167,12 @@ describe("resolveFederationGrantRetrievalLimits", () => {
 		// unsuffixed setting is whole seconds and every `*Ms` one is whole
 		// milliseconds, and an operator who wrote otherwise meant something
 		// else. The message names the key because a deployment has ten of them.
-		expect(() =>
-			resolveFederationGrantRetrievalLimits({ federationGrants: { refreshBuffer: 1.5 } }),
-		).toThrow(/refreshBuffer.*whole number of seconds/);
-		expect(() =>
-			resolveFederationGrantRetrievalLimits({ federationGrants: { lockWaitMs: 2.5 } }),
-		).toThrow(/lockWaitMs.*whole number of milliseconds/);
+		expect(() => resolveFederationGrantRetrievalLimits({ refreshBuffer: 1.5 })).toThrow(
+			/refreshBuffer.*whole number of seconds/,
+		);
+		expect(() => resolveFederationGrantRetrievalLimits({ lockWaitMs: 2.5 })).toThrow(
+			/lockWaitMs.*whole number of milliseconds/,
+		);
 	});
 
 	it("refuses a value that is not a number, rather than coercing it into one", async () => {
@@ -189,7 +184,7 @@ describe("resolveFederationGrantRetrievalLimits", () => {
 		// instead of refreshing them.
 		for (const refreshBuffer of [null, true, false, [], [45], "0x10", "1e3", " ", new Date(1000)]) {
 			expect(
-				() => resolveFederationGrantRetrievalLimits({ federationGrants: { refreshBuffer } }),
+				() => resolveFederationGrantRetrievalLimits({ refreshBuffer }),
 				JSON.stringify(refreshBuffer),
 			).toThrow(/refreshBuffer/);
 		}
@@ -198,10 +193,9 @@ describe("resolveFederationGrantRetrievalLimits", () => {
 	it("takes the decimal string an environment variable arrives as", async () => {
 		// The other half of the same rule: HOCON substitutes `${?VAR}` as a
 		// string, always, so a plain decimal one is what an operator wrote.
-		expect(
-			resolveFederationGrantRetrievalLimits({ federationGrants: { refreshBuffer: "45" } })
-				.refreshBufferMs,
-		).toBe(45_000);
+		expect(resolveFederationGrantRetrievalLimits({ refreshBuffer: "45" }).refreshBufferMs).toBe(
+			45_000,
+		);
 	});
 
 	it("refuses an allowance so large that nothing is ever fresh", async () => {
@@ -209,39 +203,35 @@ describe("resolveFederationGrantRetrievalLimits", () => {
 		// `refreshBufferMs` is an allowance rather than a timer, so the
 		// downstream check only asks for finite and non-negative. A buffer
 		// past the ceiling makes every token look stale for ever.
-		expect(() =>
-			resolveFederationGrantRetrievalLimits({ federationGrants: { refreshBuffer: 1e21 } }),
-		).toThrow(/refreshBuffer/);
-		expect(() =>
-			resolveFederationGrantRetrievalLimits({ federationGrants: { lockWaitMs: 1e21 } }),
-		).toThrow(/lockWaitMs/);
+		expect(() => resolveFederationGrantRetrievalLimits({ refreshBuffer: 1e21 })).toThrow(
+			/refreshBuffer/,
+		);
+		expect(() => resolveFederationGrantRetrievalLimits({ lockWaitMs: 1e21 })).toThrow(/lockWaitMs/);
 	});
 
 	it("refuses a soft deadline past the hard one, and a lock that cannot outlive a refresh", () => {
 		expect(() =>
 			resolveFederationGrantRetrievalLimits({
-				federationGrants: { upstreamTimeoutMs: 30_000, upstreamHardTimeoutMs: 25_000 },
+				upstreamTimeoutMs: 30_000,
+				upstreamHardTimeoutMs: 25_000,
 			}),
 		).toThrow();
-		expect(() =>
-			resolveFederationGrantRetrievalLimits({
-				federationGrants: { refreshLockTtlMs: 26_000 },
-			}),
-		).toThrow();
+		expect(() => resolveFederationGrantRetrievalLimits({ refreshLockTtlMs: 26_000 })).toThrow();
 	});
 
 	it("refuses a grant lifetime past the one-year ceiling the code enforces", () => {
 		// `assertFederationGrantRetrievalLimits` does not check this one — it
 		// is a lifetime, not a timer — so the resolver has to.
-		expect(() =>
-			resolveFederationGrantRetrievalLimits({ federationGrants: { maxExpiresIn: 31_536_001 } }),
-		).toThrow(/maxExpiresIn/);
+		expect(() => resolveFederationGrantRetrievalLimits({ maxExpiresIn: 31_536_001 })).toThrow(
+			/maxExpiresIn/,
+		);
 	});
 
 	it("refuses a backoff longer than the interval that is meant to bound it", () => {
 		expect(() =>
 			resolveFederationGrantRetrievalLimits({
-				federationGrants: { refreshFailureBackoff: 600, ineligibleRetryAfter: 300 },
+				refreshFailureBackoff: 600,
+				ineligibleRetryAfter: 300,
 			}),
 		).toThrow();
 	});
@@ -254,33 +244,30 @@ describe("resolveFederationGrantAcquisitionLimits", () => {
 			maxLifetimeMs: 2_592_000_000,
 		});
 		expect(
-			resolveFederationGrantAcquisitionLimits({
-				federationGrants: { defaultExpiresIn: 86_400, maxExpiresIn: "604800" },
-			}),
+			resolveFederationGrantAcquisitionLimits({ defaultExpiresIn: 86_400, maxExpiresIn: "604800" }),
 		).toEqual({ defaultLifetimeMs: 86_400_000, maxLifetimeMs: 604_800_000 });
 	});
 
 	it("refuses a default the maximum would silently cut down", () => {
 		expect(() =>
 			resolveFederationGrantAcquisitionLimits({
-				federationGrants: { defaultExpiresIn: 7_776_000, maxExpiresIn: 2_592_000 },
+				defaultExpiresIn: 7_776_000,
+				maxExpiresIn: 2_592_000,
 			}),
 		).toThrow(/defaultExpiresIn .* must not exceed/);
 	});
 
 	it("refuses a default of nothing, a maximum of nothing, and a maximum past the ceiling", () => {
-		expect(() =>
-			resolveFederationGrantAcquisitionLimits({ federationGrants: { defaultExpiresIn: 0 } }),
-		).toThrow(/positive/);
+		expect(() => resolveFederationGrantAcquisitionLimits({ defaultExpiresIn: 0 })).toThrow(
+			/positive/,
+		);
 		// Zero passes the seconds reader, which takes any whole number from 0;
 		// a grant that may live no time at all is the maximum's own refusal.
-		expect(() =>
-			resolveFederationGrantAcquisitionLimits({ federationGrants: { maxExpiresIn: 0 } }),
-		).toThrow(/maxExpiresIn must be a positive number of seconds/);
-		expect(() =>
-			resolveFederationGrantAcquisitionLimits({
-				federationGrants: { maxExpiresIn: 31_536_001 },
-			}),
-		).toThrow(/one year|no greater than/);
+		expect(() => resolveFederationGrantAcquisitionLimits({ maxExpiresIn: 0 })).toThrow(
+			/maxExpiresIn must be a positive number of seconds/,
+		);
+		expect(() => resolveFederationGrantAcquisitionLimits({ maxExpiresIn: 31_536_001 })).toThrow(
+			/one year|no greater than/,
+		);
 	});
 });

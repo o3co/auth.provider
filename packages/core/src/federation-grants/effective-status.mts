@@ -73,7 +73,7 @@ export interface EffectiveFederationGrantStatusContext {
 	 * terminal fact and before anything that needs a connection to compare with.
 	 */
 	readonly connection: FederationGrantConnection | undefined;
-	/** `federationGrants.maxExpiresIn` as it is configured now, in milliseconds. */
+	/** `federation-grants.maxExpiresIn` as it is configured now, in milliseconds. */
 	readonly maxExpiresInMs: number;
 	/** The subject's grants boundary; `null` when none is in force. */
 	readonly grantsBoundary: Date | null;

@@ -33,7 +33,7 @@ import {
 	createSubjectRevocationService,
 	defineModule,
 	type FederationGrantAuditEvent,
-	fullSectionsSchema,
+	type FederationGrantSettings,
 	type Logger,
 	loggableError,
 	type ProviderDeps,
@@ -42,20 +42,9 @@ import {
 	resolveFederationGrantKeepPolicy,
 	resolveSubjectRevocationHorizonMs,
 } from "@o3co/auth-provider-core";
-import { z } from "zod";
 import { cascadeLogout } from "./cascadeLogout.mjs";
 
 const NAME = "subjectRevocationServiceModule";
-
-/**
- * Core strips the keys no installed module declares, and the two this reads —
- * whether grants exist at all, and whether keeping one is allowed — both live
- * in that block. Taking core's shape rather than restating it keeps the
- * `${?VAR}` coercions in one place.
- */
-const configSchema = z.object({
-	federationGrants: fullSectionsSchema.shape.federationGrants,
-});
 
 const REQUIRES = [
 	"config",
@@ -96,8 +85,20 @@ type Requires = (typeof REQUIRES)[number];
 type Optional = (typeof OPTIONAL)[number];
 export type SubjectRevocationServiceModuleDeps = ProviderDeps<Requires, Optional>;
 
+/**
+ * The two keys this reads of the federation-grants module's section — whether
+ * grants exist at all, and whether keeping one is allowed — as the
+ * configuration carries it; core's composed parse coerces `enabled`.
+ */
+const grantsSection = (
+	deps: SubjectRevocationServiceModuleDeps,
+): (FederationGrantSettings & { readonly enabled?: unknown }) | undefined =>
+	(deps.config as { "federation-grants"?: FederationGrantSettings & { enabled?: unknown } })[
+		"federation-grants"
+	];
+
 const grantsEnabled = (deps: SubjectRevocationServiceModuleDeps): boolean =>
-	deps.config.federationGrants?.enabled === true;
+	grantsSection(deps)?.enabled === true;
 
 /**
  * What ended a grant, told to the deployment's sink.
@@ -171,7 +172,6 @@ const auditor = (
  */
 export const subjectRevocationServiceModule = defineModule<Requires, Optional>({
 	name: "subject-revocation-service",
-	configSchema,
 	requires: REQUIRES,
 	optional: OPTIONAL,
 	/**
@@ -189,7 +189,7 @@ export const subjectRevocationServiceModule = defineModule<Requires, Optional>({
 			const store = deps.federationGrantStore;
 			if (enabled && store === undefined) {
 				throw new Error(
-					`${NAME}: federationGrants.enabled = true requires a federationGrantStore ` +
+					`${NAME}: federation-grants.enabled = true requires a federationGrantStore ` +
 						"component. Without it a subject-wide revocation would end the sessions and " +
 						"the tokens, report itself complete, and leave every offline credential the " +
 						"subject had standing (D13).",
@@ -242,7 +242,7 @@ export const subjectRevocationServiceModule = defineModule<Requires, Optional>({
 				// deployment that has none is an allowance over nothing, and
 				// letting it through would make the service refuse an adapter
 				// that a grantless deployment has every right to use.
-				allowKeep: enabled && resolveFederationGrantKeepPolicy(deps.config),
+				allowKeep: enabled && resolveFederationGrantKeepPolicy(grantsSection(deps)),
 				...(deps.auditSink === undefined
 					? {}
 					: { federationGrantAudit: auditor(deps.auditSink, deps.logger) }),

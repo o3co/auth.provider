@@ -14,7 +14,6 @@
  * limitations under the License.
  */
 
-
 /**
  * The package's `config/reference.conf`: the federation-grants module reads
  * its own section, `federation-grants`, declares this file as its section's

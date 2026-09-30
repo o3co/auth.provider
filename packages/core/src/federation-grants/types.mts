@@ -195,7 +195,7 @@ export function hasFederationGrantAuthorization<G extends FederationGrant>(
 }
 
 /**
- * A connection as the domain rules need it: the `federationGrants.connections.<name>`
+ * A connection as the domain rules need it: the `federation-grants.connections.<name>`
  * entry, joined with the upstream issuer and client ID of the federation it
  * points at. Reading it from configuration is the package's job.
  */

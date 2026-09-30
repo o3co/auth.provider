@@ -153,7 +153,7 @@ const boot = async (allowKeep: boolean, opts: BootOptions = {}) => {
 		},
 		rateLimit: { ...full.rateLimit, failMode: "closed" },
 		audit: { sink: { type: "none" } },
-		federationGrants: {
+		"federation-grants": {
 			enabled: true,
 			allowKeepOnSubjectRevocation: allowKeep,
 			connections: {

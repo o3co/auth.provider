@@ -104,7 +104,7 @@ export class InMemoryUserRepository implements UserRepository {
 	 * and knows neither which registration a name is nor which other
 	 * registrations of an IdP a person signed in through. A deployment that
 	 * requires the lookup installs a Store that does, or records that it does
-	 * not with `federationGrants.identityLookup = "unsupported"`.
+	 * not with `federation-grants.identityLookup = "unsupported"`.
 	 */
 	supportsFederatedIdentityLookup(
 		_registration: FederatedIdentityRegistration,

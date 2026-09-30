@@ -177,8 +177,8 @@ const OPERATOR_LAYER: string = (() => {
 		file,
 		`federations.google.clientUrl = ${quoted(FEDERATION_LANDING)}
 federations.oidc.clientUrl = ${quoted(FEDERATION_LANDING)}
-federationGrants {
-  encryptionKeys = [{ id = "k-test", key = ${quoted(ENCRYPTION_KEY)} }]
+redis-federation-grant-store.encryptionKeys = [{ id = "k-test", key = ${quoted(ENCRYPTION_KEY)} }]
+federation-grants {
   connections {
     ${CONNECTION} {
       federation = "oidc"

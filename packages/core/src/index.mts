@@ -210,6 +210,9 @@ export {
 	// for the packages outside core that read a section this file declares.
 	coerceBooleanFromEnv,
 	composeConfigSchema,
+	// A duration read strictly from a number or the decimal string a variable
+	// carries, for the packages outside core that declare a section's schema.
+	durationFromEnv,
 	fullSectionsSchema,
 	isLifetimeSeconds,
 	// The hop ceiling `http.trustProxy` is held to, which the
@@ -1370,10 +1373,11 @@ export {
 	listFederationGrantsForSubject,
 	revokeFederationGrant,
 } from "./federation-grants/revoke.mjs";
-// The `federationGrants.*` block an operator writes, turned into
-// the limits the retrieval takes. In core because the block is core's.
+// The federation-grants module's section, as an operator writes it, turned
+// into the limits the retrieval takes, which core's grant domain defines.
 export {
 	FEDERATION_GRANT_SETTING_DEFAULTS,
+	type FederationGrantSettings,
 	resolveFederationGrantAcquisitionLimits,
 	resolveFederationGrantKeepPolicy,
 	resolveFederationGrantRetrievalLimits,

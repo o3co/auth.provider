@@ -76,7 +76,7 @@ const options = (connections: ReadonlyMap<string, FederationGrantConnection>) =>
 	connections,
 	refresher: () => undefined,
 	grantsBoundary: async () => null,
-	limits: resolveFederationGrantRetrievalLimits({ federationGrants: {} }),
+	limits: resolveFederationGrantRetrievalLimits({}),
 	background: createFederationGrantBackground(),
 	now: () => new Date(),
 });
