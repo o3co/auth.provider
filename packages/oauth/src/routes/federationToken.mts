@@ -14,6 +14,13 @@
  * limitations under the License.
  */
 
+/**
+ * The federation token route: the handler, which runs the stages in order and
+ * stops at the first that answers, and the caller's standing (refresh family,
+ * session, client, linked federation), whose session read core's
+ * session-admission drift guard pins to this file.
+ */
+
 import {
 	auditErrorText,
 	emitAuditEvent,
@@ -25,6 +32,7 @@ import type { Request, RequestHandler, Response, Router } from "express";
 import { identifyCaller } from "./federationTokenCaller.mjs";
 import {
 	createStoreUnavailableLog,
+	type FederationTokenCaller,
 	type FederationTokenContext,
 	type FederationTokenRouterOptions,
 } from "./federationTokenContext.mjs";
@@ -37,6 +45,135 @@ type ExpressLike = {
 	Router: () => Router;
 	json: () => RequestHandler;
 	urlencoded: (opts: { extended: boolean }) => RequestHandler;
+};
+
+/**
+ * Steps 5 to 8, the caller's standing: its refresh family is not revoked, its
+ * session is live, its client may use this route, and the federation is
+ * linked to the session. Returns `false` once answered.
+ */
+const checkCallerStanding = async (
+	ctx: FederationTokenContext,
+	caller: FederationTokenCaller,
+): Promise<boolean> => {
+	const { opts, req, res, name, federation, logger, storeUnavailable } = ctx;
+	const { familyId, sid, azp, sub } = caller;
+
+	// Step 5: family revocation, fail-closed. A throw is `503`, never `401
+	// invalid_token`, which would send the client to replace a token nobody
+	// could judge (RFC 6750 §3.1).
+	let revoked: boolean;
+	try {
+		revoked = await opts.refreshTokenFamilyRevocation.isFamilyRevoked(familyId);
+	} catch (error) {
+		logger.error(
+			{ federation, store: "refresh_token_family", err: loggableError(error) },
+			"federation_token_store_unavailable",
+		);
+		res.status(503).json({
+			error: "temporarily_unavailable",
+			error_description: "refresh token store unavailable",
+		});
+		return false;
+	}
+	if (revoked) {
+		emitAuditEvent(opts.auditSink, {
+			timestamp: new Date(),
+			type: "federation.token.family_revoked",
+			subject: sub ?? undefined,
+			ip: req.ip,
+			userAgent: req.get("user-agent"),
+			details: { sid },
+		});
+		res.setHeader(
+			"WWW-Authenticate",
+			'Bearer error="invalid_token", error_description="family revoked"',
+		);
+		res.status(401).json({
+			error: "invalid_token",
+			error_description: "family revoked",
+		});
+		return false;
+	}
+
+	// Step 6: Load session. null → 401 invalid_token. Throw → 503.
+	let session: Awaited<ReturnType<typeof opts.userSessionStore.get>>;
+	try {
+		session = await opts.userSessionStore.get(sid);
+	} catch (error) {
+		storeUnavailable(federation, "user_session", "get", error);
+		res.status(503).json({
+			error: "temporarily_unavailable",
+			error_description: "session store unavailable",
+		});
+		return false;
+	}
+	if (!session) {
+		res.setHeader(
+			"WWW-Authenticate",
+			'Bearer error="invalid_token", error_description="session not found"',
+		);
+		res.status(401).json({
+			error: "invalid_token",
+			error_description: "session not found",
+		});
+		return false;
+	}
+
+	// Read the federation index once, for the membership check and cleanup.
+	let federations: ReadonlyArray<string>;
+	try {
+		federations = await opts.sessionFederationIndex.listFederations(sid);
+	} catch (error) {
+		storeUnavailable(federation, "session_federation_index", "list", error);
+		res.status(503).json({
+			error: "temporarily_unavailable",
+			error_description: "session store unavailable",
+		});
+		return false;
+	}
+
+	// Step 7: Client must exist AND have allowedAzpForFederationToken === true.
+	let client: Awaited<ReturnType<typeof opts.clientRepository.findById>>;
+	try {
+		client = await opts.clientRepository.findById(azp);
+	} catch (error) {
+		logClientRepositoryUnavailable(
+			logger,
+			{ site: "federation_token", step: "find", clientId: azp },
+			error,
+		);
+		res.status(503).json({
+			error: "temporarily_unavailable",
+			error_description: "client repository unavailable",
+		});
+		return false;
+	}
+	if (!client?.allowedAzpForFederationToken) {
+		emitAuditEvent(opts.auditSink, {
+			timestamp: new Date(),
+			type: "federation.token.forbidden",
+			subject: sub ?? undefined,
+			ip: req.ip,
+			userAgent: req.get("user-agent"),
+			details: { federation, azp },
+		});
+		res.status(403).json({
+			error: "forbidden",
+			error_description: "client is not permitted to access federation tokens",
+		});
+		return false;
+	}
+
+	// Step 8: Federation must be linked to this session.
+	if (!federations.includes(name)) {
+		res.status(404).json({
+			error: "federation_not_linked",
+			error_description: sanitizeErrorText(`federation '${name}' is not linked to this session`),
+		});
+		return false;
+	}
+	return true;
 };
 
 /**
@@ -77,114 +214,7 @@ export function createRouter(express: ExpressLike, opts: FederationTokenRouterOp
 		};
 		const caller = await identifyCaller(ctx);
 		if (caller === null) return;
-		const { familyId, sid, azp, sub } = caller;
-
-		// Step 5: family revocation, fail-closed. A throw is `503`, never `401
-		// invalid_token`, which would send the client to replace a token nobody
-		// could judge (RFC 6750 §3.1).
-		let revoked: boolean;
-		try {
-			revoked = await opts.refreshTokenFamilyRevocation.isFamilyRevoked(familyId);
-		} catch (error) {
-			logger.error(
-				{ federation, store: "refresh_token_family", err: loggableError(error) },
-				"federation_token_store_unavailable",
-			);
-			return res.status(503).json({
-				error: "temporarily_unavailable",
-				error_description: "refresh token store unavailable",
-			});
-		}
-		if (revoked) {
-			emitAuditEvent(opts.auditSink, {
-				timestamp: new Date(),
-				type: "federation.token.family_revoked",
-				subject: sub ?? undefined,
-				ip: req.ip,
-				userAgent: req.get("user-agent"),
-				details: { sid },
-			});
-			res.setHeader(
-				"WWW-Authenticate",
-				'Bearer error="invalid_token", error_description="family revoked"',
-			);
-			return res.status(401).json({
-				error: "invalid_token",
-				error_description: "family revoked",
-			});
-		}
-
-		// Step 6: Load session. null → 401 invalid_token. Throw → 503.
-		let session: Awaited<ReturnType<typeof opts.userSessionStore.get>>;
-		try {
-			session = await opts.userSessionStore.get(sid);
-		} catch (error) {
-			storeUnavailable(federation, "user_session", "get", error);
-			return res.status(503).json({
-				error: "temporarily_unavailable",
-				error_description: "session store unavailable",
-			});
-		}
-		if (!session) {
-			res.setHeader(
-				"WWW-Authenticate",
-				'Bearer error="invalid_token", error_description="session not found"',
-			);
-			return res.status(401).json({
-				error: "invalid_token",
-				error_description: "session not found",
-			});
-		}
-
-		// Read the federation index once, for the membership check and cleanup.
-		let federations: ReadonlyArray<string>;
-		try {
-			federations = await opts.sessionFederationIndex.listFederations(sid);
-		} catch (error) {
-			storeUnavailable(federation, "session_federation_index", "list", error);
-			return res.status(503).json({
-				error: "temporarily_unavailable",
-				error_description: "session store unavailable",
-			});
-		}
-
-		// Step 7: Client must exist AND have allowedAzpForFederationToken === true.
-		let client: Awaited<ReturnType<typeof opts.clientRepository.findById>>;
-		try {
-			client = await opts.clientRepository.findById(azp);
-		} catch (error) {
-			logClientRepositoryUnavailable(
-				logger,
-				{ site: "federation_token", step: "find", clientId: azp },
-				error,
-			);
-			return res.status(503).json({
-				error: "temporarily_unavailable",
-				error_description: "client repository unavailable",
-			});
-		}
-		if (!client?.allowedAzpForFederationToken) {
-			emitAuditEvent(opts.auditSink, {
-				timestamp: new Date(),
-				type: "federation.token.forbidden",
-				subject: sub ?? undefined,
-				ip: req.ip,
-				userAgent: req.get("user-agent"),
-				details: { federation, azp },
-			});
-			return res.status(403).json({
-				error: "forbidden",
-				error_description: "client is not permitted to access federation tokens",
-			});
-		}
-
-		// Step 8: Federation must be linked to this session.
-		if (!federations.includes(name)) {
-			return res.status(404).json({
-				error: "federation_not_linked",
-				error_description: sanitizeErrorText(`federation '${name}' is not linked to this session`),
-			});
-		}
+		if (!(await checkCallerStanding(ctx, caller))) return;
 
 		const tokens = await readStoredTokens(ctx, caller);
 		if (tokens === null) return;
