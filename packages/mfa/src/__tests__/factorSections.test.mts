@@ -108,6 +108,20 @@ describe("mfa-email-factor, the email factor's section", () => {
 
 	it("holds a code's life to 60-1800 s, its sends to 1-10, the pause between them to 0-600 s, and the per-subject budget to a whole limit and a window of at most a year", () => {
 		for (const [key, value] of [
+			["codeTtlSeconds", 60],
+			["codeTtlSeconds", 1800],
+			["maxSends", 1],
+			["maxSends", 10],
+			["resendAfterSeconds", 0],
+			["resendAfterSeconds", 600],
+			["sendLimit", { limit: 1, windowSeconds: 31_536_000 }],
+		] as const) {
+			expect(
+				refusedAt(mfaEmailFactorConfigSchema, { ...EMAIL_DEFAULTS, [key]: value }),
+				`${key} ${JSON.stringify(value)}`,
+			).toEqual([]);
+		}
+		for (const [key, value] of [
 			["codeTtlSeconds", 59],
 			["codeTtlSeconds", 1801],
 			["maxSends", 0],
@@ -174,6 +188,11 @@ describe("mfa-recovery-code-factor, the recovery-code factor's section", () => {
 	});
 
 	it("refuses a key it does not know, and a count outside 1-20", () => {
+		for (const count of [1, 20]) {
+			expect(refusedAt(mfaRecoveryCodeFactorConfigSchema, { ...RECOVERY_DEFAULTS, count })).toEqual(
+				[],
+			);
+		}
 		expect(
 			refusedAt(mfaRecoveryCodeFactorConfigSchema, { ...RECOVERY_DEFAULTS, size: 16 }),
 		).toEqual([":unrecognized_keys"]);
