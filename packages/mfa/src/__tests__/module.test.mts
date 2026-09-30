@@ -453,13 +453,13 @@ describe("the boot refusals", () => {
 
 	it("refuses a page that is not a section holding a string url before any factory runs, naming the key", async () => {
 		for (const [page, key] of [
-			[{ url: 5 }, "mfa.page.url"],
-			[{}, "mfa.page.url"],
-			["/mfa", "mfa.page"],
+			[{ url: 5 }, /mfa\.page\.url(?![.\w])/],
+			[{}, /mfa\.page\.url(?![.\w])/],
+			["/mfa", /mfa\.page(?![.\w])/],
 		] as const) {
 			const err = await refusal({ config: configFor("required", { page }) });
-			expect(err.reason, key).toBe("config-validation-failed");
-			expect(err.message, key).toContain(key);
+			expect(err.reason, String(key)).toBe("config-validation-failed");
+			expect(err.message, String(key)).toMatch(key);
 		}
 	});
 
