@@ -59,13 +59,13 @@ import type { Request, RequestHandler, Response, Router } from "express";
 // kept because the /token grant clears it from older sessions (see
 // authorization.mts `sessionMutation.clear`).
 import type {} from "express-session";
-import { parseAccessTokenHeader } from "./accessTokenHeader.mjs";
 import type { ClientIdMetadataDocumentOptions } from "./clients/clientIdMetadataDocument.mjs";
 import { createClientAuthMiddleware } from "./middleware/clientAuth.mjs";
 import { OAUTH_RATE_LIMIT_PREFIXES } from "./rateLimitPrefixes.mjs";
 import { createAuthorizeHandler } from "./routes/authorize.mjs";
 import { createConsentRouter } from "./routes/consent.mjs";
 import * as federationTokenRoute from "./routes/federationToken.mjs";
+import { createIntrospectCallerCheck } from "./routes/introspectCaller.mjs";
 import { introspectionOutageAnswers } from "./routes/introspectUnavailable.mjs";
 import * as logoutRoute from "./routes/logout.mjs";
 import { createRevokeRouter } from "./routes/revoke.mjs";
@@ -434,65 +434,16 @@ export const createOAuthRouter = async (
 				next();
 			},
 			rateLimitGuard(OAUTH_RATE_LIMIT_PREFIXES.introspect),
-			async (req: Request, res: Response, next) => {
-				// Bearer (RFC 6750 §2.1) or DPoP (RFC 9449 §7.1) — the caller's own
-				// access token used as the introspection credential. Which scheme a
-				// given token may use is enforced against its `cnf` by
-				// `protectedResourceBindingMw` upstream.
-				const credentialToken = parseAccessTokenHeader(req.headers.authorization);
-				if (credentialToken !== null) {
-					// Self-introspection pattern: RFC 7662 requires a valid credential to call introspect.
-					// When the caller uses their own access token as that credential, the token in the
-					// request body must match the one in the Authorization header. If they differ, return
-					// inactive (not 403) per RFC 7662 §2.2 — the server must not reveal whether the
-					// token exists.
-					if (req.body.token !== credentialToken) {
-						return res.status(200).json({ active: false });
-					}
-					try {
-						// Token-as-credential self-intro — calling-client identity is not
-						// established (introspectClientAuthMw is skipped on this
-						// fall-through path), so audience pinning is deferred. alg / iss /
-						// typ + signature are still pinned by the central verifier, and
-						// the denylist is consulted so revoked ATs cannot serve as their
-						// own introspection credential.
-						await verifyJwt(credentialToken, keyStore, {
-							type: "access_token",
-							expectedIssuer: canonicalIssuer,
-							legacyTypAccept: legacyTypAcceptOpt ?? false,
-							// Token-accepting surface — forward what the composition
-							// wired, jti denylist and subject watermark both.
-							revocation: { denylist: accessTokenDenylist, subjectRevocation },
-							logger,
-						});
-						return next();
-					} catch (cause) {
-						// A keystore or revocation store that could not answer says
-						// nothing about the token: 503, never `active: false` — see
-						// `answerIntrospectionUnavailable` above.
-						if (isVerificationUnavailable(cause)) {
-							return answerIntrospectionUnavailable(req, res, cause);
-						}
-						// Distinguish non-access-token typ rejections so SIEM
-						// can spot a refresh / id token presented as a Bearer
-						// credential. RFC 7662 §2.2 forbids leaking the typ to the
-						// caller — the audit log carries the signal instead.
-						// Other JwtVerificationError reasons (alg / iss / aud /
-						// signature / expired / kid_*) already emit
-						// `jwt_verify_rejected` from the central verifier — SIEM
-						// rule authors should NOT double-count by also matching
-						// `introspect_non_access_token` for those reasons.
-						if (cause instanceof JwtVerificationError && cause.reason === "typ") {
-							logger.warn(
-								{ reason: "non_access_token", site: "introspect_bearer" },
-								"introspect_non_access_token",
-							);
-						}
-						return res.status(200).json({ active: false });
-					}
-				}
-				return introspectClientAuthMw(req, res, next);
-			},
+			createIntrospectCallerCheck({
+				keyStore,
+				canonicalIssuer,
+				legacyTypAccept: legacyTypAcceptOpt,
+				accessTokenDenylist,
+				subjectRevocation,
+				introspectClientAuthMw,
+				auditSink,
+				logger,
+			}),
 			async (req: Request, res: Response) => {
 				const { token } = req.body;
 				if (!token) {
