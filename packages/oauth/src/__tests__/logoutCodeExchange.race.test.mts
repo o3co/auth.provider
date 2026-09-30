@@ -447,7 +447,7 @@ describe("a logout and a code exchange on the same session", () => {
 				sid: SID,
 				clientId: CLIENT_ID,
 				familyId: w.familyId(),
-				err: expect.objectContaining({ message: outage.message }),
+				err: expect.objectContaining({ name: "Error", detail: outage.message }),
 			}),
 			REVOCATION_FAILED_LINE,
 		);
@@ -577,7 +577,9 @@ describe("the composition's family index", () => {
 		try {
 			expect((await exchange()).status).toBe(200);
 			expect(index.addFamilyId).toHaveBeenCalledTimes(1);
-			expect(lines).toEqual([[{ slot: "sessionFamilyIndex", kind: "memory" }, NO_SESSION_END_LINE]]);
+			expect(lines).toEqual([
+				[{ slot: "sessionFamilyIndex", kind: "memory" }, NO_SESSION_END_LINE],
+			]);
 		} finally {
 			await handle.dispose();
 		}

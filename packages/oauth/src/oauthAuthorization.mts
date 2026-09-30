@@ -19,11 +19,13 @@ import {
 	AUDIT_SINK_ABSENCE_POLICY,
 	type CodeRepository,
 	coerceBooleanFromEnv,
+	consoleLogger,
 	defineModule,
 	type GrantHandler,
 	type Module,
 	type ProviderDeps,
 	SUBJECT_REVOCATION_ABSENCE_POLICY,
+	supportsSessionEnd,
 } from "@o3co/auth-provider-core";
 import { z } from "zod";
 import {
@@ -241,6 +243,22 @@ function requireCodeRepository(deps: OAuthAuthorizationModuleDeps): CodeReposito
 }
 
 /**
+ * Say once, at boot, that the authorization_code grant links families to
+ * sessions through an index without the session-end capability: a logout
+ * racing a code exchange can then miss the family the exchange opens.
+ */
+function warnWithoutSessionEnd(deps: OAuthAuthorizationModuleDeps): void {
+	const index = deps.sessionFamilyIndex;
+	if (deps.userSessionStore === undefined || index === undefined || supportsSessionEnd(index)) {
+		return;
+	}
+	(deps.logger ?? consoleLogger).warn(
+		{ slot: "sessionFamilyIndex", kind: index.kind },
+		"session_family_index_without_session_end",
+	);
+}
+
+/**
  * The deps every contribution of {@link oauthAuthorizationModule} receives:
  * exactly its `requires` / `optional`, typed. Each grant factory
  * declares the subset it reads, so the wiring below is checked, not trusted.
@@ -269,8 +287,14 @@ export const oauthAuthorizationModule = (params: { config: AppConfig }): Module 
 	// (`isEnabled`). The package's reference.conf ships each off; a
 	// deployment's own layer, or the switch's variable, turns one on.
 	if (built.authorizationCode) {
-		grants.authorization_code = (deps) =>
-			createAuthorizationGrant({ ...deps, codeRepository: requireCodeRepository(deps) });
+		grants.authorization_code = (deps) => {
+			const grant = createAuthorizationGrant({
+				...deps,
+				codeRepository: requireCodeRepository(deps),
+			});
+			warnWithoutSessionEnd(deps);
+			return grant;
+		};
 		Object.assign(admissionActions, AUTHORIZATION_CODE_GRANT_ADMISSION_ACTIONS);
 	}
 	if (built.refreshToken) {

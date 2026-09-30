@@ -22,10 +22,17 @@ import type {
 	SessionRPRegistry,
 	UserSessionStore,
 } from "@o3co/auth-provider-core";
-import { loggableError } from "@o3co/auth-provider-core";
+import { loggableError, supportsSessionEnd } from "@o3co/auth-provider-core";
 
 export interface CascadeLogoutOptions {
 	readonly sid: string;
+	/**
+	 * The session's `expiresAt`. With it, an index with the session-end
+	 * capability marks the session ended at step 1, so a family added after
+	 * the listing is refused rather than left unrevoked. Without it (the
+	 * session record is gone), the families are only listed.
+	 */
+	readonly expiresAt?: Date;
 	readonly refreshTokenFamilyRevocation: RefreshTokenFamilyRevocation;
 	readonly federationTokenStore: FederationTokenStore;
 	readonly userSessionStore: UserSessionStore;
@@ -52,8 +59,10 @@ export type CascadeLogoutResult =
 /**
  * Runs the logout store cascade in a fixed order:
  *
- *   1. Read the fanout context (`sessionFamilyIndex.listFamilyIds`). Failure
- *      returns `failed` step 1; nothing else ran, so a retry is safe.
+ *   1. Read the fanout context: `sessionFamilyIndex.endSession` when the
+ *      index has the session-end capability and `expiresAt` is given, which
+ *      marks the session ended before it lists; `listFamilyIds` otherwise.
+ *      Failure returns `failed` step 1; nothing else ran, so a retry is safe.
  *   2. Fanout, collect-and-tally: `revokeFamily` per family, then
  *      `federationTokenStore.removeBySid`. Any failure returns `failed` step 2
  *      with every error, before step 3: cleanup would erase the bookkeeping a
@@ -74,9 +83,13 @@ export async function cascadeLogout(opts: CascadeLogoutOptions): Promise<Cascade
 	const logger = opts.logger ?? console;
 
 	// Step 1: read fanout context.
+	const index = opts.sessionFamilyIndex;
 	let familyIds: ReadonlyArray<string>;
 	try {
-		familyIds = await opts.sessionFamilyIndex.listFamilyIds(opts.sid);
+		familyIds =
+			opts.expiresAt !== undefined && supportsSessionEnd(index)
+				? await index.endSession(opts.sid, opts.expiresAt)
+				: await index.listFamilyIds(opts.sid);
 	} catch (error) {
 		return { outcome: "failed", step: 1, errors: [error] };
 	}
@@ -137,11 +150,10 @@ export async function cascadeLogout(opts: CascadeLogoutOptions): Promise<Cascade
 		return { outcome: "failed", step: 4, errors: [error] };
 	}
 
-	// Clear the family index again after the delete: an `addFamilyId` from the
-	// authorization grant interleaved between step 3 and step 4 would leave an
-	// orphan (the grant's session re-check narrows that window, not closes
-	// it). Idempotent (`removeBySid` on a missing sid is a no-op) and
-	// best-effort; orphans are bounded by the index's TTL anyway.
+	// Clear the family index again after the delete: a family added between
+	// step 3 and step 4 (one the ended mark refused, or one added on an index
+	// without the mark) would otherwise stay until the index's TTL. Idempotent
+	// and best-effort; `removeBySid` keeps the ended mark.
 	await opts.sessionFamilyIndex.removeBySid(opts.sid).catch((error) => {
 		logger.warn(
 			{ operation: "remove_family_index_after_delete", sid: opts.sid, err: loggableError(error) },

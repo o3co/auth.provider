@@ -807,6 +807,7 @@ export function createRouter(express: ExpressLike, opts: LogoutRouterOptions): R
 		// Step 6: Cascade logout.
 		const cascade = await cascadeLogout({
 			sid,
+			expiresAt: session.expiresAt,
 			refreshTokenFamilyRevocation: opts.refreshTokenFamilyRevocation,
 			federationTokenStore: opts.federationTokenStore,
 			userSessionStore: opts.userSessionStore,

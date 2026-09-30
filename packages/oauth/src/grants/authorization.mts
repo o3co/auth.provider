@@ -41,6 +41,7 @@ import {
 	resolveAccessTokenLifetime,
 	resolveRefreshTokenLifetime,
 	resolveTokenBindingSettings,
+	supportsSessionEnd,
 	type Token,
 	type UserSession,
 	unrepresentedResources,
@@ -67,6 +68,7 @@ export type AuthorizationGrantDeps = Pick<
 	| "userSessionStore"
 	| "subjectRevocation"
 	| "refreshTokenFamilyRotation"
+	| "refreshTokenFamilyRevocation"
 	| "sessionFamilyIndex"
 	| "sessionRPRegistry"
 > &
@@ -136,6 +138,31 @@ export const createAuthorizationGrant = (deps: AuthorizationGrantDeps): GrantHan
 			{ store, step, clientId: auditErrorText(clientId), err: loggableError(err) },
 			"authorization_grant_store_unavailable",
 		);
+	};
+
+	/**
+	 * Revoke the family a refused exchange registered, whose tokens were never
+	 * served. Never throws: a failure is one error line, and the refusal
+	 * stands.
+	 */
+	const revokeRefusedFamily = async (
+		familyId: string,
+		at: { readonly sid: string; readonly clientId: string },
+	): Promise<void> => {
+		if (!deps.refreshTokenFamilyRotation || !deps.refreshTokenFamilyRevocation) return;
+		try {
+			await deps.refreshTokenFamilyRevocation.revokeFamily(familyId);
+		} catch (err) {
+			logger?.error(
+				{
+					sid: at.sid,
+					clientId: auditErrorText(at.clientId),
+					familyId,
+					err: loggableError(err),
+				},
+				"authorization_grant_refused_family_revocation_failed",
+			);
+		}
 	};
 
 	/**
@@ -644,12 +671,10 @@ export const createAuthorizationGrant = (deps: AuthorizationGrantDeps): GrantHan
 				try {
 					const clientRecord = await clientRepository.findById(authenticatedClientId);
 
-					// The second read, right before mutating the family index: a
-					// `cascadeLogout` since the first read (spanning both signings, the
-					// family registration and `findById`) would orphan the new tokens
-					// from logout. This narrows the window; it does not close the gap
-					// between this check and `addFamilyId`, which needs an atomic
-					// check-and-add.
+					// The second read, right before the family is added: a session
+					// ended since the first read (spanning both signings, the family
+					// registration and `findById`) is refused here. A logout between
+					// this read and the add is caught by the add itself (below).
 					//
 					// The claim carries the first read's `sub`: the tokens were signed
 					// from it and the id_token is minted from this read, so a different
@@ -679,7 +704,34 @@ export const createAuthorizationGrant = (deps: AuthorizationGrantDeps): GrantHan
 					// two are too. `?.` would silently no-op on a misconfigured root.
 					linking = "session_family_index";
 					// biome-ignore lint/style/noNonNullAssertion: intentional — see invariant comment above
-					await deps.sessionFamilyIndex!.addFamilyId(sid, familyId, userSession.expiresAt);
+					const familyIndex = deps.sessionFamilyIndex!;
+					// With the session-end capability, either the logout's listing
+					// includes this family or the add answers "ended"; no token is
+					// served for a family a logout could miss. Without it, the add is
+					// unguarded; `oauthAuthorizationModule` warns of that at boot.
+					if (supportsSessionEnd(familyIndex)) {
+						const added = await familyIndex.addFamilyIdUnlessEnded(
+							sid,
+							familyId,
+							userSession.expiresAt,
+						);
+						if (added === "ended") {
+							logger?.warn(
+								{ sid, clientId: authenticatedClientId },
+								"authorization_grant_rejected_session_invalidated_during_token_issuance",
+							);
+							await revokeRefusedFamily(familyId, { sid, clientId: authenticatedClientId });
+							return {
+								result: {
+									status: 400,
+									error: "invalid_grant",
+									errorDescription: "session_invalidated",
+								},
+							};
+						}
+					} else {
+						await familyIndex.addFamilyId(sid, familyId, userSession.expiresAt);
+					}
 					linking = "session_rp_registry";
 					// biome-ignore lint/style/noNonNullAssertion: intentional — same invariant
 					await deps.sessionRPRegistry!.registerRP(

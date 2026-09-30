@@ -60,10 +60,12 @@ const SESSION_EXPIRES_AT = new Date(Date.now() + HOUR);
 /** Every store `cascadeLogout` fans out to, each one a spy that succeeds. */
 const cascadeStores = () => ({
 	userSessionStore: {
-		get: vi.fn(async (sid: string): Promise<{ sid: string; expiresAt: Date } | null> => ({
-			sid,
-			expiresAt: SESSION_EXPIRES_AT,
-		})),
+		get: vi.fn(
+			async (sid: string): Promise<{ sid: string; expiresAt: Date } | null> => ({
+				sid,
+				expiresAt: SESSION_EXPIRES_AT,
+			}),
+		),
 		delete: vi.fn(async () => undefined),
 	},
 	sessionRPRegistry: { removeBySid: vi.fn(async () => undefined) },
@@ -237,7 +239,10 @@ describe("subjectRevocationServiceModule", () => {
 			const result = await service.revokeAllForSubject({ subject: "u-1" });
 
 			expect(stores.userSessionStore.get).toHaveBeenCalledWith("sid-1");
-			expect(stores.sessionFamilyIndex.endSession).toHaveBeenCalledWith("sid-1", SESSION_EXPIRES_AT);
+			expect(stores.sessionFamilyIndex.endSession).toHaveBeenCalledWith(
+				"sid-1",
+				SESSION_EXPIRES_AT,
+			);
 			expect(stores.sessionFamilyIndex.listFamilyIds).not.toHaveBeenCalled();
 			expect(stores.refreshTokenFamilyRevocation.revokeFamily).toHaveBeenCalledWith("fam-1");
 			expect(result.sessionsRevoked).toEqual(["sid-1"]);

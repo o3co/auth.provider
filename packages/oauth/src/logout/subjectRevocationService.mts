@@ -207,25 +207,32 @@ export const subjectRevocationServiceModule = defineModule<Requires, Optional>({
 			return createSubjectRevocationService({
 				subjectSessionIndex: deps.subjectSessionIndex,
 				subjectRevocation,
-				cascadeSession: async (sid: string) => ({
-					// `cascadeLogout` answers with its own union, and its `step`
-					// is what makes a failure retryable. What this needs is the
-					// one bit the helper's loop branches on; the detail is
-					// already in the log the cascade wrote.
-					ok:
-						(
-							await cascadeLogout({
-								sid,
-								refreshTokenFamilyRevocation: deps.refreshTokenFamilyRevocation,
-								federationTokenStore: deps.federationTokenStore,
-								userSessionStore: deps.userSessionStore,
-								sessionRPRegistry: deps.sessionRPRegistry,
-								sessionFamilyIndex: deps.sessionFamilyIndex,
-								sessionFederationIndex: deps.sessionFederationIndex,
-								...(deps.logger === undefined ? {} : { logger: deps.logger }),
-							})
-						).outcome === "done",
-				}),
+				cascadeSession: async (sid: string) => {
+					// The session's own `expiresAt`, for the cascade's ended mark.
+					// A read that fails throws, and the helper counts the session
+					// failed and logs it; a session already gone has none.
+					const session = await deps.userSessionStore.get(sid);
+					return {
+						// `cascadeLogout` answers with its own union, and its `step`
+						// is what makes a failure retryable. What this needs is the
+						// one bit the helper's loop branches on; the detail is
+						// already in the log the cascade wrote.
+						ok:
+							(
+								await cascadeLogout({
+									sid,
+									...(session === null ? {} : { expiresAt: session.expiresAt }),
+									refreshTokenFamilyRevocation: deps.refreshTokenFamilyRevocation,
+									federationTokenStore: deps.federationTokenStore,
+									userSessionStore: deps.userSessionStore,
+									sessionRPRegistry: deps.sessionRPRegistry,
+									sessionFamilyIndex: deps.sessionFamilyIndex,
+									sessionFederationIndex: deps.sessionFederationIndex,
+									...(deps.logger === undefined ? {} : { logger: deps.logger }),
+								})
+							).outcome === "done",
+					};
+				},
 				// The boundary must outlive the longest-lived thing it covers,
 				// which this module can read and the service cannot: the token
 				// lifetimes from `oauthTokenSettings` when the composition holds
