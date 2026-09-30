@@ -39,7 +39,7 @@ import express from "express";
 import request from "supertest";
 import { describe, expect, it, vi } from "vitest";
 import { DEVICE_GRANT_ADMISSION_ACTIONS } from "#/admissionActions.mjs";
-import { deviceGrantModule } from "#/module.mjs";
+import { deviceGrantConfigSchema, deviceGrantModule } from "#/module.mjs";
 import { liveCookieSession, liveSessionStore } from "./liveSessions.mjs";
 
 const CLIENT_ID = "tv-app";
@@ -87,16 +87,16 @@ const makeDeps = (overrides: { csrfGuard?: unknown } = {}) => {
 			oauth: {
 				jwt: { issuer: `https://${SERVER_HOST}` },
 				accessToken: { expiresIn: 300 },
-				deviceAuthorization: {
-					enabled: true,
-					"verification-uri": "https://example.test/device",
-					"verification-uri-complete": false,
-					"code-lifetime-seconds": 600,
-					"polling-interval-seconds": 5,
-					// Present because the module refuses to mount without it, and
-					// the contributed budget below agrees with it.
-					rateLimit: { limit: 50, windowSeconds: 300 },
-				},
+			},
+			"device-grant": {
+				enabled: true,
+				verificationUri: "https://example.test/device",
+				verificationUriComplete: false,
+				codeLifetimeSeconds: 600,
+				pollingIntervalSeconds: 5,
+				// Present because the module refuses to mount without it, and
+				// the contributed budget below agrees with it.
+				rateLimit: { limit: 50, windowSeconds: 300 },
 			},
 			rateLimit: { failMode: "open" },
 		},
@@ -123,14 +123,24 @@ const makeDeps = (overrides: { csrfGuard?: unknown } = {}) => {
 	return { deps, store, logger };
 };
 
-/** The verification route of the module built for `deps.config`, as `createApp` would call it. */
-const verificationRouteFor = (deps: { readonly config: unknown }) =>
-	deviceGrantModule({ config: deps.config as AppConfig }).contributes?.routes?.[1] as (
-		d: unknown,
-	) => {
+/**
+ * The verification route of the module built for `deps.config`, as `createApp`
+ * would call it: handed the module's section as boot parses it.
+ */
+const verificationRouteFor = (deps: { readonly config: unknown }) => {
+	const factory = deviceGrantModule({ config: deps.config as AppConfig }).contributes
+		?.routes?.[1] as (d: unknown) => {
 		mountPath: string;
 		handler: express.RequestHandler;
 	};
+	return (d: { readonly config: unknown }) =>
+		factory({
+			...d,
+			section: deviceGrantConfigSchema.parse(
+				(d.config as { "device-grant"?: unknown })["device-grant"],
+			),
+		});
+};
 
 /** Mount the module's contributed verification route behind a fixed session. */
 const mountVerification = (deps: { readonly config: unknown }) => {

@@ -166,7 +166,12 @@ describe("a path a section moved from, written in the operator's own layer", () 
 		const err = await refused({ operatorHocon: hocon });
 		expect(err.reason).toBe("config-path-relocated");
 		const { relocated } = err.details as unknown as {
-			relocated: { module: string; from: string; to: string | null; environmentVariable?: string }[];
+			relocated: {
+				module: string;
+				from: string;
+				to: string | null;
+				environmentVariable?: string;
+			}[];
 		};
 		return relocated;
 	};
@@ -250,7 +255,11 @@ describe("a path a section moved from, written in the operator's own layer", () 
 			].join("\n"),
 		);
 
-		const moved = (from: string, to: string) => ({ module: "mtls", from: `oauth.mtls.${from}`, to });
+		const moved = (from: string, to: string) => ({
+			module: "mtls",
+			from: `oauth.mtls.${from}`,
+			to,
+		});
 		expect(relocated).toHaveLength(17);
 		expect(relocated).toEqual(
 			expect.arrayContaining([
@@ -269,14 +278,8 @@ describe("a path a section moved from, written in the operator's own layer", () 
 				moved("full-pki.revocation.allowed-hosts", "mtls.fullPki.revocation.allowedHosts"),
 				moved("full-pki.revocation.fetch-timeout-ms", "mtls.fullPki.revocation.fetchTimeoutMs"),
 				moved("full-pki.revocation.cache-ttl-seconds", "mtls.fullPki.revocation.cacheTtlSeconds"),
-				moved(
-					"full-pki.revocation.max-response-bytes",
-					"mtls.fullPki.revocation.maxResponseBytes",
-				),
-				moved(
-					"full-pki.revocation.ocsp-require-nonce",
-					"mtls.fullPki.revocation.ocspRequireNonce",
-				),
+				moved("full-pki.revocation.max-response-bytes", "mtls.fullPki.revocation.maxResponseBytes"),
+				moved("full-pki.revocation.ocsp-require-nonce", "mtls.fullPki.revocation.ocspRequireNonce"),
 			]),
 		);
 	});

@@ -82,6 +82,11 @@ export interface TokenExchangeDependencies
 	readonly tokenExchangeValidatorResolver: Pick<TokenExchangeValidatorResolver, "get">;
 	/** What the oauth module provides of `oauth {}`; the configuration is read when absent. */
 	readonly oauthTokenSettings?: OAuthTokenSettings;
+	/**
+	 * The module's own section, `oauth-token-exchange {}`: the deepest actor
+	 * chain accepted before the current actor is added, 3 when unset.
+	 */
+	readonly section?: { readonly maxActorChainDepth?: number };
 }
 
 export function createTokenExchangeGrant(deps: TokenExchangeDependencies): GrantHandler {
@@ -926,10 +931,7 @@ function parseRequestedExpiresIn(value: unknown): number | undefined | typeof MA
 }
 
 function getMaxActorChainDepth(deps: TokenExchangeDependencies): number {
-	const tokenExchange = deps.config.oauth.tokenExchange as
-		| { maxActorChainDepth?: unknown }
-		| undefined;
-	const maxActorChainDepth = tokenExchange?.maxActorChainDepth;
+	const maxActorChainDepth: unknown = deps.section?.maxActorChainDepth;
 	return typeof maxActorChainDepth === "number" &&
 		Number.isInteger(maxActorChainDepth) &&
 		maxActorChainDepth > 0

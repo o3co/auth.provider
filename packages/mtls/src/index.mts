@@ -19,9 +19,9 @@
  *
  * The header parsers, `validateCertChain`, the PEM codec and the `fullPki/`
  * internals are not exported: consumers reach them through config
- * (`cert-header-dialect`, `mode`, `trusted-cas`). The trusted-proxy matcher is
+ * (`certHeaderDialect`, `mode`, `trustedCas`). The trusted-proxy matcher is
  * core's, shared with `http.trustProxy`. Only the `full-pki` algorithm
- * vocabulary is exported, so the legal `signature-algorithms` values are the
+ * vocabulary is exported, so the legal `signatureAlgorithms` values are the
  * list the schema enforces rather than prose that drifts.
  */
 

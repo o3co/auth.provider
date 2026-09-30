@@ -77,6 +77,8 @@ function buildGrant(
 		grantPolicy?: GrantPolicyHook;
 		logger?: Logger;
 		userSessionStore?: UserSessionStore;
+		/** The module's own section, `oauth-token-exchange {}`. */
+		section?: { maxActorChainDepth?: number };
 	} = {},
 ) {
 	// null = explicitly absent; undefined = use default
@@ -98,6 +100,7 @@ function buildGrant(
 		...(overrides.grantPolicy ? { grantPolicy: overrides.grantPolicy } : {}),
 		...(overrides.logger ? { logger: overrides.logger } : {}),
 		...(overrides.userSessionStore ? { userSessionStore: overrides.userSessionStore } : {}),
+		...(overrides.section ? { section: overrides.section } : {}),
 	});
 }
 
@@ -1461,15 +1464,7 @@ describe("createTokenExchangeGrant — happy path", () => {
 	});
 
 	it("rejects actor delegation when adding actor would exceed maxActorChainDepth", async () => {
-		const g = buildGrant({
-			config: {
-				...mockConfig,
-				oauth: {
-					...mockConfig.oauth,
-					tokenExchange: { maxActorChainDepth: 2 },
-				},
-			} as unknown as AppConfig,
-		});
+		const g = buildGrant({ section: { maxActorChainDepth: 2 } });
 		const subject = await signSelfIssuedAccessToken({
 			family_id: "fam-1",
 			act: { sub: "svc-2", act: { sub: "svc-1" } },

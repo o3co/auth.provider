@@ -86,7 +86,7 @@ const GENERAL_NAME_URI = 6;
  * stable — audit logs read them. The `unsupported_*` reasons are shapes RFC
  * 5280 permits that this resolver recognises but does not implement.
  * `algorithm_not_permitted` is a CRL signed outside
- * `oauth.mtls.full-pki.signature-algorithms`, the path's own policy.
+ * `mtls.fullPki.signatureAlgorithms`, the path's own policy.
  */
 export type CrlUnavailableReason =
 	| "no_distribution_point"

@@ -40,9 +40,9 @@ describe("the package's config/reference.conf", () => {
 	const modules = [tokenExchangeModule];
 
 	it("is read at the section named after its module", () => {
-		expect(modules.map((module) => [module.name, module.section !== undefined, module.section?.at])).toEqual([
-			["oauth-token-exchange", true, undefined],
-		]);
+		expect(
+			modules.map((module) => [module.name, module.section !== undefined, module.section?.at]),
+		).toEqual([["oauth-token-exchange", true, undefined]]);
 	});
 
 	it("is declared by the module and holds only its section, which its schema parses without losing a path", () => {

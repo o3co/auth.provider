@@ -33,7 +33,11 @@ import {
 	createMemoryReplaySeenSet,
 	defineModule,
 } from "@o3co/auth-provider-core";
-import { makeValidCoreConfig } from "@o3co/auth-provider-core/testing";
+import {
+	CORE_RELOCATIONS,
+	makeValidCoreConfig,
+	renamedVariableCaptures,
+} from "@o3co/auth-provider-core/testing";
 import { dpopModule } from "@o3co/auth-provider-dpop";
 import express, { type RequestHandler, Router } from "express";
 import { exportJWK, generateKeyPair, SignJWT } from "jose";
@@ -59,26 +63,31 @@ const makeBoot = ({ dispatchPolicy }: DualBootOpts): BootstrapMap =>
 			oauth: {
 				...makeValidCoreConfig().oauth,
 				tokenBinding: { "dispatch-policy": dispatchPolicy },
-				dpop: {
-					enabled: true,
-					"iat-window-seconds": 60,
-					"alg-whitelist": ["ES256", "ES384", "EdDSA", "RS256"],
-					"replay-store-ttl-seconds": 300,
-				},
-				mtls: {
-					enabled: true,
-					source: "header",
-					"cert-header": "x-forwarded-client-cert",
-					"cert-header-dialect": "plain-pem",
-					// The header source is only accepted from an
-					// allowlisted peer. supertest dials the ephemeral listener
-					// over loopback, which is what the app observes as the
-					// forwarding hop here.
-					"trusted-proxies": ["loopback"],
-					mode: "self-signed",
-					"trusted-cas": [],
-				},
 			},
+			dpop: {
+				enabled: true,
+				iatWindowSeconds: 60,
+				algWhitelist: ["ES256", "ES384", "EdDSA", "RS256"],
+				replayStoreTtlSeconds: 300,
+			},
+			mtls: {
+				enabled: true,
+				source: "header",
+				certHeader: "x-forwarded-client-cert",
+				certHeaderDialect: "plain-pem",
+				// The header source is only accepted from an
+				// allowlisted peer. supertest dials the ephemeral listener
+				// over loopback, which is what the app observes as the
+				// forwarding hop here.
+				trustedProxies: ["loopback"],
+				mode: "self-signed",
+				trustedCas: [],
+			},
+			"renamed-variables": renamedVariableCaptures({
+				modules: [dpopModule, mtlsModule],
+				core: CORE_RELOCATIONS,
+				env: {},
+			}),
 		} as never,
 		pathResolver: (s: string) => s,
 		// DPoP records every proof it accepts in the seen-set.

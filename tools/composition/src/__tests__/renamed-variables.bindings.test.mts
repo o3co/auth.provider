@@ -91,6 +91,20 @@ describe("the variables renamed with a move, across every shipped layer", () => 
 		expect(fullSet.modules.some((module) => module.section?.renamedVariables !== undefined)).toBe(
 			true,
 		);
+		for (const name of ["dpop", "oauth-token-exchange"]) {
+			expect(LAYERS.some((path) => path.endsWith(join(name, "config", "reference.conf")))).toBe(
+				true,
+			);
+		}
+		expect(
+			Object.keys(
+				fullSet.modules.find((module) => module.name === "dpop")?.section?.renamedVariables ?? {},
+			),
+		).toEqual([
+			"OAUTH_DPOP_NONCE_REQUIRED",
+			"OAUTH_DPOP_NONCE_TTL_SECONDS",
+			"OAUTH_DPOP_NONCE_SECRET",
+		]);
 
 		expect(
 			renamedVariableProblems({

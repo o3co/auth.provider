@@ -105,10 +105,10 @@ describe("the paths the dpop, mtls, device-grant and oauth-token-exchange sectio
 		const parsed = parse({ ...base, oauth: { ...base.oauth, [key]: written } });
 		expect((parsed.oauth as Record<string, unknown>)[key]).toEqual(written);
 		expect(
-			(AppConfigSchema.parse({ ...base, oauth: { ...base.oauth, [key]: written } }).oauth as Record<
-				string,
-				unknown
-			>)[key],
+			(
+				AppConfigSchema.parse({ ...base, oauth: { ...base.oauth, [key]: written } })
+					.oauth as Record<string, unknown>
+			)[key],
 		).toEqual(written);
 	});
 

@@ -16,7 +16,7 @@
 
 /**
  * `dpopModule` composed through `createApp`:
- *   - with `oauth.dpop.enabled = false` (default), no DPoP middleware is
+ *   - with `dpop.enabled = false` (default), no DPoP middleware is
  *     mounted;
  *   - enabled, a valid proof populates `req.tokenBinding` (`kind`,
  *     `confirmation.jkt`) and an invalid one is `400 invalid_dpop_proof`;
@@ -36,19 +36,28 @@ import {
 	type ReplaySeenSet,
 } from "@o3co/auth-provider-core";
 import {
+	CORE_RELOCATIONS,
 	createTestOAuthTokenSettings,
 	makeValidCoreConfig,
+	renamedVariableCaptures,
 } from "@o3co/auth-provider-core/testing";
 import express, { type RequestHandler, Router } from "express";
 import { exportJWK, generateKeyPair, SignJWT } from "jose";
 import request from "supertest";
 import { describe, expect, it, vi } from "vitest";
-import { dpopModule } from "#/module.mjs";
+import { dpopConfigSchema, dpopModule } from "#/module.mjs";
 import { computeJkt } from "#/thumbprint.mjs";
 
 // ---------------------------------------------------------------------------
 // Fixtures
 // ---------------------------------------------------------------------------
+
+/** What a resolution under an environment that sets none captures of the module's and core's renamed variables. */
+const UNSET_RENAMED_VARIABLES = renamedVariableCaptures({
+	modules: [dpopModule],
+	core: CORE_RELOCATIONS,
+	env: {},
+});
 
 /** Minimal bootstrap with extended dpop config. */
 const makeBoot = (dpopEnabled: boolean): BootstrapMap =>
@@ -57,16 +66,17 @@ const makeBoot = (dpopEnabled: boolean): BootstrapMap =>
 			...makeValidCoreConfig(),
 			oauth: {
 				...makeValidCoreConfig().oauth,
-				dpop: {
-					enabled: dpopEnabled,
-					"iat-window-seconds": 60,
-					"alg-whitelist": ["ES256", "ES384", "EdDSA", "RS256"],
-					"replay-store-ttl-seconds": 300,
-				},
 				tokenBinding: {
 					"dispatch-policy": "intent-explicit",
 				},
 			},
+			dpop: {
+				enabled: dpopEnabled,
+				iatWindowSeconds: 60,
+				algWhitelist: ["ES256", "ES384", "EdDSA", "RS256"],
+				replayStoreTtlSeconds: 300,
+			},
+			"renamed-variables": UNSET_RENAMED_VARIABLES,
 		} as never,
 		pathResolver: (s: string) => s,
 		// Where every accepted proof's jti is recorded.
@@ -122,7 +132,8 @@ const makeTokenBindingObserver =
 const buildMechanism = (config: unknown) => {
 	const factory = dpopModule.contributes?.tokenBindingMechanisms?.[0];
 	if (factory === undefined) throw new Error("dpopModule contributes no mechanism factory");
-	return factory({ config, replaySeenSet: createMemoryReplaySeenSet() } as never);
+	const section = dpopConfigSchema.parse((config as { dpop?: unknown }).dpop);
+	return factory({ config, section, replaySeenSet: createMemoryReplaySeenSet() } as never);
 };
 
 // ---------------------------------------------------------------------------
@@ -411,7 +422,7 @@ describe("dpopModule — integration via createApp", () => {
 				reason: "contribute-factory-failed",
 			});
 			const message = String(refusal?.cause?.message);
-			expect(message).toMatch(/oauth\.dpop\.enabled = true requires a replaySeenSet/);
+			expect(message).toMatch(/dpop\.enabled = true requires a replaySeenSet/);
 			expect(message).toMatch(/memoryReplaySeenSetModule \(single replica only\)/);
 			expect(message).toMatch(/redisReplaySeenSetModule/);
 		}
@@ -420,12 +431,11 @@ describe("dpopModule — integration via createApp", () => {
 	it("refuses the retired oauth.dpop.replay-store key rather than ignoring it", async () => {
 		// A deployment that sets this key may have wired a shared DPoP store
 		// beside a memory seen-set. Ignored silently, its DPoP records would
-		// move into memory with no signal, so the stale key fails boot and
-		// names what replaced it.
+		// move into memory with no signal, so the stale key fails boot.
 		const boot = makeBoot(true) as unknown as {
-			config: { oauth: { dpop: Record<string, unknown> } };
+			config: { oauth: Record<string, unknown> };
 		};
-		boot.config.oauth.dpop["replay-store"] = "redis";
+		boot.config.oauth.dpop = { "replay-store": "redis" };
 
 		const refusal = await createApp({
 			modules: [dpopModule],
@@ -435,12 +445,14 @@ describe("dpopModule — integration via createApp", () => {
 				await handle.dispose();
 				return undefined;
 			},
-			(err: unknown) => err as { reason?: unknown; details?: { issues?: { message: string }[] } },
+			(err: unknown) => err as { reason?: unknown; message?: string; details?: unknown },
 		);
-		expect(refusal).toMatchObject({ name: "BootError", reason: "config-validation-failed" });
-		const messages = (refusal?.details?.issues ?? []).map((i) => i.message).join("\n");
-		expect(messages).toMatch(/oauth\.dpop\.replay-store was removed/);
-		expect(messages).toMatch(/replaySeenSet/);
+		expect(refusal).toMatchObject({
+			name: "BootError",
+			reason: "config-path-relocated",
+			details: { relocated: [{ module: "dpop", from: "oauth.dpop.replay-store", to: null }] },
+		});
+		expect(refusal?.message).toMatch(/oauth\.dpop\.replay-store was removed/);
 	});
 
 	it("when enabled: absent DPoP header leaves req.tokenBinding unset (mechanism returns null)", async () => {
@@ -536,6 +548,7 @@ describe("dpopModule — integration via createApp", () => {
 		expect(() =>
 			factory?.({
 				config: boot.config,
+				section: dpopConfigSchema.parse((boot.config as { dpop?: unknown }).dpop),
 				replaySeenSet: createMemoryReplaySeenSet(),
 				oauthTokenSettings: createTestOAuthTokenSettings({ issuer: "https://slot.test" }),
 			} as never),
@@ -569,24 +582,21 @@ describe("dpopModule — integration via createApp", () => {
 describe("dpopModule — server-provided nonce from config", () => {
 	const withNonce = (secret: string | undefined, required: "as" | "as+rs" = "as"): BootstrapMap => {
 		const boot = makeBoot(true);
-		const config = boot.config as { oauth: { dpop: Record<string, unknown> } };
+		const config = boot.config as unknown as { dpop: Record<string, unknown> };
 		return {
 			...boot,
 			config: {
 				...config,
-				oauth: {
-					...config.oauth,
-					dpop: {
-						...config.oauth.dpop,
-						nonce: { required, "ttl-seconds": 300, ...(secret === undefined ? {} : { secret }) },
-					},
+				dpop: {
+					...config.dpop,
+					nonce: { required, ttlSeconds: 300, ...(secret === undefined ? {} : { secret }) },
 				},
 			} as never,
 		};
 	};
 
 	it("refuses to build a mechanism when a nonce is required but no shared secret is configured", () => {
-		expect(() => buildMechanism(withNonce(undefined).config)).toThrow(/oauth\.dpop\.nonce\.secret/);
+		expect(() => buildMechanism(withNonce(undefined).config)).toThrow(/dpop\.nonce\.secret/);
 	});
 
 	it("measures the secret on its decoded length, and names its key and env var when it falls short", () => {
@@ -596,7 +606,7 @@ describe("dpopModule — server-provided nonce from config", () => {
 		// HS256 key are; the refusal names the key and the env var, as theirs do.
 		const hex16 = "0123456789abcdef0123456789abcdef";
 		expect(() => buildMechanism(withNonce(hex16).config)).toThrow(
-			/oauth\.dpop\.nonce\.secret must carry at least 32 bytes[\s\S]*OAUTH_DPOP_NONCE_SECRET/,
+			/dpop\.nonce\.secret must carry at least 32 bytes[\s\S]*DPOP_NONCE_SECRET/,
 		);
 		// `openssl rand -base64 32`, what reference.conf tells the operator to run.
 		expect(() =>
@@ -766,14 +776,15 @@ const bootReplica = async (opts: ReplicaBootOptions) => {
 			...(opts.mode === undefined ? {} : { core: { deployment: { mode: opts.mode } } }),
 			oauth: {
 				...base.oauth,
-				dpop: {
-					enabled: opts.enabled ?? true,
-					"iat-window-seconds": 60,
-					"alg-whitelist": ["ES256"],
-					"replay-store-ttl-seconds": opts.replayTtlSeconds ?? 300,
-				},
 				tokenBinding: { "dispatch-policy": "intent-explicit" },
 			},
+			dpop: {
+				enabled: opts.enabled ?? true,
+				iatWindowSeconds: 60,
+				algWhitelist: ["ES256"],
+				replayStoreTtlSeconds: opts.replayTtlSeconds ?? 300,
+			},
+			"renamed-variables": UNSET_RENAMED_VARIABLES,
 		},
 		pathResolver: (s: string) => s,
 		...(opts.logger === undefined ? {} : { logger: opts.logger }),

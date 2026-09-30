@@ -363,9 +363,10 @@ describe("the configuration createApp is handed reaches every loaded module whol
 		const { resolved } = await boot();
 		// A default each package ships and no layer above it sets.
 		for (const path of [
-			"oauth.deviceAuthorization.rateLimit.windowSeconds",
-			"oauth.dpop.iat-window-seconds",
-			"oauth.mtls.full-pki.max-chain-depth",
+			"device-grant.rateLimit.windowSeconds",
+			"dpop.iatWindowSeconds",
+			"mtls.fullPki.maxChainDepth",
+			"oauth-token-exchange.maxActorChainDepth",
 			"webauthn.rateLimit.authenticationOptions.limit",
 			"mfa-totp-factor.enabled",
 		]) {
@@ -388,36 +389,33 @@ describe("the configuration createApp is handed reaches every loaded module whol
 	it("keeps each added package's switch as the deployment wrote it", async () => {
 		const { config } = await boot();
 		const on = config as unknown as Record<string, unknown>;
-		expect(valueAt(on, "oauth.deviceAuthorization.enabled")).toBe(true);
-		expect(valueAt(on, "oauth.dpop.enabled")).toBe(true);
-		expect(valueAt(on, "oauth.mtls.enabled")).toBe(true);
-		expect(valueAt(on, "oauth.mtls.trusted-proxies")).toEqual(["loopback"]);
+		expect(valueAt(on, "device-grant.enabled")).toBe(true);
+		expect(valueAt(on, "dpop.enabled")).toBe(true);
+		expect(valueAt(on, "mtls.enabled")).toBe(true);
+		expect(valueAt(on, "mtls.trustedProxies")).toEqual(["loopback"]);
 		expect(valueAt(on, "webauthn.rpId")).toBe("auth.test");
 	});
 
 	it("reads the device grant's switch in phase one as the operator wrote it, so the grant registers", () => {
 		// A deployment that adds the device grant to the template's modules
-		// reads its switch before boot too: `deviceGrantModule({ config })`
-		// decides from it whether the grant exists.
+		// hands it phase one's configuration: `deviceGrantModule({ config })`
+		// decides from `device-grant.enabled` there, read as its section's
+		// schema reads it, whether the grant exists.
 		const operator = join(mkdtempSync(join(tmpdir(), "full-set-472-")), "device.conf");
 		writeFileSync(
 			operator,
-			`oauth.deviceAuthorization {\n  enabled = \${?DEVICE_GRANT_ENABLED}\n  verification-uri = "${ISSUER}/device"\n}\n`,
+			`device-grant {\n  enabled = \${?DEVICE_GRANT_ENABLED}\n  verificationUri = "${ISSUER}/device"\n}\n`,
 		);
-		const reads = ["oauth.deviceAuthorization.enabled"];
 		const switches = readSwitches(
 			readOwnLayers([operator, ...ownFiles()], {
 				env: { ...SINGLE_ENV, DEVICE_GRANT_ENABLED: "true" },
 			}),
-			{ reads },
 		);
 		expect(contributionNames(deviceGrantModule({ config: switches }), "grants")).toEqual([
 			DEVICE_CODE_GRANT_TYPE,
 		]);
 		// And off where nothing says on: the grant is opt-in.
-		const unset = readSwitches(readOwnLayers([operator, ...ownFiles()], { env: SINGLE_ENV }), {
-			reads,
-		});
+		const unset = readSwitches(readOwnLayers([operator, ...ownFiles()], { env: SINGLE_ENV }));
 		expect(contributionNames(deviceGrantModule({ config: unset }), "grants")).toEqual([]);
 	});
 

@@ -34,11 +34,14 @@ describe("the package's config/reference.conf", () => {
 	const modules = [deviceGrantModule({ config: makeValidAppConfig() })];
 
 	it("is read at the section named after its module", () => {
-		expect(modules.map((module) => [module.name, module.section !== undefined, module.section?.at])).toEqual([["device-grant", true, undefined]]);
+		expect(
+			modules.map((module) => [module.name, module.section !== undefined, module.section?.at]),
+		).toEqual([["device-grant", true, undefined]]);
 	});
 
 	it("is declared by each of them and holds only their sections, which their schemas parse without losing a path", () => {
-		const read = (path: string): unknown => parseFile(path, { env: {} }).toObject();
+		const read = (path: string, env: Readonly<Record<string, string>>): unknown =>
+			parseFile(path, { env: { ...env } }).toObject();
 		expect(packageReferenceProblems({ reference: REFERENCE, modules, read })).toEqual([]);
 	});
 });

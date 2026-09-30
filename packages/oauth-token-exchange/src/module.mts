@@ -44,6 +44,19 @@ const tokenExchangeConfigSchema = z.object({
 	}),
 });
 
+/**
+ * The schema of `oauth-token-exchange {}`, the module's own section. Strict:
+ * a key it does not declare refuses boot. `maxActorChainDepth` bounds RFC 8693
+ * actor delegation chains, so repeated exchanges cannot nest `act` claims
+ * without limit; its default is in the package's `config/reference.conf`.
+ */
+const tokenExchangeSectionSchema = z
+	.object({
+		maxActorChainDepth: z.coerce.number().int().positive(),
+	})
+	.strict()
+	.optional();
+
 const REQUIRES = [
 	"tokenExchangeValidatorResolver",
 	"clientRepository",
@@ -100,9 +113,24 @@ export type TokenExchangeModuleDeps = ProviderDeps<Requires, Optional>;
  * token types and projects them as the grant's
  * `tokenExchangeValidatorResolver`.
  */
-export const tokenExchangeModule: Module = defineModule<Requires, Optional>({
+export const tokenExchangeModule: Module = defineModule<
+	Requires,
+	Optional,
+	typeof tokenExchangeSectionSchema
+>({
 	name: "oauth-token-exchange",
 	configSchema: tokenExchangeConfigSchema,
+	// The package's `config/reference.conf` holds this section's default and
+	// binds OAUTH_TOKEN_EXCHANGE_MAX_ACTOR_CHAIN_DEPTH at its new path, the
+	// name that path derives, so no variable is renamed.
+	section: {
+		schema: tokenExchangeSectionSchema,
+		reference: new URL("../config/reference.conf", import.meta.url),
+		relocatedFrom: {
+			"oauth.tokenExchange": { to: "", environmentVariable: null },
+			"oauth.tokenExchange.maxActorChainDepth": "maxActorChainDepth",
+		},
+	},
 	requires: REQUIRES,
 	optional: OPTIONAL,
 	// Same policies as oauthModule: an unfilled denylist slot must be declared
@@ -115,7 +143,7 @@ export const tokenExchangeModule: Module = defineModule<Requires, Optional>({
 	},
 	contributes: {
 		grants: {
-			[TOKEN_EXCHANGE_GRANT_TYPE]: (deps: TokenExchangeModuleDeps) =>
+			[TOKEN_EXCHANGE_GRANT_TYPE]: (deps) =>
 				createTokenExchangeGrant({
 					...deps,
 					// Core's resolver returns the contract this grant reads; no cast.

@@ -35,8 +35,8 @@ const ROOT_PEM = readFileSync(join(fixturesDir, "root.pem"), "utf8");
 interface FullPkiOverrides {
 	readonly source?: "header" | "tls-layer";
 	readonly mode?: "self-signed" | "pki" | "full-pki";
-	readonly "trusted-cas"?: readonly string[];
-	readonly "full-pki"?: unknown;
+	readonly trustedCas?: readonly string[];
+	readonly fullPki?: unknown;
 }
 
 const makeBoot = (overrides: FullPkiOverrides): BootstrapMap =>
@@ -45,17 +45,17 @@ const makeBoot = (overrides: FullPkiOverrides): BootstrapMap =>
 			...makeValidCoreConfig(),
 			oauth: {
 				...makeValidCoreConfig().oauth,
-				mtls: {
-					enabled: true,
-					source: overrides.source ?? "header",
-					"cert-header": "x-forwarded-client-cert",
-					"cert-header-dialect": "envoy",
-					mode: overrides.mode ?? "full-pki",
-					"trusted-cas": overrides["trusted-cas"] ?? [ROOT_PEM],
-					"trusted-proxies": ["loopback"],
-					...(overrides["full-pki"] === undefined ? {} : { "full-pki": overrides["full-pki"] }),
-				},
 				tokenBinding: { "dispatch-policy": "intent-explicit" },
+			},
+			mtls: {
+				enabled: true,
+				source: overrides.source ?? "header",
+				certHeader: "x-forwarded-client-cert",
+				certHeaderDialect: "envoy",
+				mode: overrides.mode ?? "full-pki",
+				trustedCas: overrides.trustedCas ?? [ROOT_PEM],
+				trustedProxies: ["loopback"],
+				...(overrides.fullPki === undefined ? {} : { fullPki: overrides.fullPki }),
 			},
 		} as never,
 		pathResolver: (s: string) => s,
@@ -65,29 +65,29 @@ const boot = (overrides: FullPkiOverrides) =>
 	createApp({ modules: [mtlsModule], bootstrapComponents: makeBoot(overrides) });
 
 const FULL_PKI_DEFAULTS = {
-	"max-chain-depth": 6,
-	"signature-algorithms": ["ecdsaWithSHA256", "sha256WithRSAEncryption"],
-	"min-rsa-key-bits": 2048,
+	maxChainDepth: 6,
+	signatureAlgorithms: ["ecdsaWithSHA256", "sha256WithRSAEncryption"],
+	minRsaKeyBits: 2048,
 };
 
 describe("mode = full-pki — boot invariants", () => {
 	it("refuses an empty trusted-cas, as the narrow mode does", async () => {
 		await expect(
 			boot({
-				"trusted-cas": [],
-				"full-pki": {
+				trustedCas: [],
+				fullPki: {
 					...FULL_PKI_DEFAULTS,
 					revocation: {
 						mode: "disabled",
-						"on-unavailable": "reject",
-						"allowed-hosts": [],
-						"fetch-timeout-ms": 3000,
-						"cache-ttl-seconds": 3600,
-						"max-response-bytes": 1_048_576,
+						onUnavailable: "reject",
+						allowedHosts: [],
+						fetchTimeoutMs: 3000,
+						cacheTtlSeconds: 3600,
+						maxResponseBytes: 1_048_576,
 					},
 				},
 			}),
-		).rejects.toThrow(/trusted-cas/);
+		).rejects.toThrow(/trustedCas/);
 	});
 
 	it("refuses to boot without an explicit revocation decision", async () => {
@@ -98,8 +98,8 @@ describe("mode = full-pki — boot invariants", () => {
 		// the same configuration as a backstop with close wording, so a looser
 		// matcher would pass on the backstop alone and miss the removal of the
 		// boot check, the one naming config keys the operator can act on.
-		await expect(boot({ "full-pki": FULL_PKI_DEFAULTS })).rejects.toThrow(
-			/mtlsModule:[\s\S]*oauth\.mtls\.full-pki\.revocation\.mode and \.on-unavailable/,
+		await expect(boot({ fullPki: FULL_PKI_DEFAULTS })).rejects.toThrow(
+			/mtlsModule:[\s\S]*mtls\.fullPki\.revocation\.mode and \.onUnavailable/,
 		);
 	});
 
@@ -128,19 +128,19 @@ describe("mode = full-pki — boot invariants", () => {
 	it("refuses revocation.mode = crl with no allowed-hosts", async () => {
 		await expect(
 			boot({
-				"full-pki": {
+				fullPki: {
 					...FULL_PKI_DEFAULTS,
 					revocation: {
 						mode: "crl",
-						"on-unavailable": "reject",
-						"allowed-hosts": [],
-						"fetch-timeout-ms": 3000,
-						"cache-ttl-seconds": 3600,
-						"max-response-bytes": 1_048_576,
+						onUnavailable: "reject",
+						allowedHosts: [],
+						fetchTimeoutMs: 3000,
+						cacheTtlSeconds: 3600,
+						maxResponseBytes: 1_048_576,
 					},
 				},
 			}),
-		).rejects.toThrow(/allowed-hosts/);
+		).rejects.toThrow(/allowedHosts/);
 	});
 
 	it.each(["ocsp", "both"] as const)(
@@ -150,20 +150,20 @@ describe("mode = full-pki — boot invariants", () => {
 			// distribution point is; the same second layer applies.
 			await expect(
 				boot({
-					"full-pki": {
+					fullPki: {
 						...FULL_PKI_DEFAULTS,
 						revocation: {
 							mode,
-							"on-unavailable": "reject",
-							"allowed-hosts": [],
-							"fetch-timeout-ms": 3000,
-							"cache-ttl-seconds": 3600,
-							"max-response-bytes": 1_048_576,
-							"ocsp-require-nonce": true,
+							onUnavailable: "reject",
+							allowedHosts: [],
+							fetchTimeoutMs: 3000,
+							cacheTtlSeconds: 3600,
+							maxResponseBytes: 1_048_576,
+							ocspRequireNonce: true,
 						},
 					},
 				}),
-			).rejects.toThrow(/allowed-hosts/);
+			).rejects.toThrow(/allowedHosts/);
 		},
 	);
 
@@ -171,16 +171,16 @@ describe("mode = full-pki — boot invariants", () => {
 		"boots with revocation.mode = %s and an allowlist",
 		async (mode) => {
 			const handle = await boot({
-				"full-pki": {
+				fullPki: {
 					...FULL_PKI_DEFAULTS,
 					revocation: {
 						mode,
-						"on-unavailable": "reject",
-						"allowed-hosts": ["ocsp.example.test"],
-						"fetch-timeout-ms": 3000,
-						"cache-ttl-seconds": 3600,
-						"max-response-bytes": 1_048_576,
-						"ocsp-require-nonce": true,
+						onUnavailable: "reject",
+						allowedHosts: ["ocsp.example.test"],
+						fetchTimeoutMs: 3000,
+						cacheTtlSeconds: 3600,
+						maxResponseBytes: 1_048_576,
+						ocspRequireNonce: true,
 					},
 				},
 			});
@@ -192,15 +192,15 @@ describe("mode = full-pki — boot invariants", () => {
 		// "disabled" is a statement, not an omission — and it is accepted,
 		// because an operator who has written it down has made the decision.
 		const handle = await boot({
-			"full-pki": {
+			fullPki: {
 				...FULL_PKI_DEFAULTS,
 				revocation: {
 					mode: "disabled",
-					"on-unavailable": "reject",
-					"allowed-hosts": [],
-					"fetch-timeout-ms": 3000,
-					"cache-ttl-seconds": 3600,
-					"max-response-bytes": 1_048_576,
+					onUnavailable: "reject",
+					allowedHosts: [],
+					fetchTimeoutMs: 3000,
+					cacheTtlSeconds: 3600,
+					maxResponseBytes: 1_048_576,
 				},
 			},
 		});
@@ -212,15 +212,15 @@ describe("mode = full-pki — boot invariants", () => {
 		// most likely PKI configuration unreachable.
 		const handle = await boot({
 			source: "tls-layer",
-			"full-pki": {
+			fullPki: {
 				...FULL_PKI_DEFAULTS,
 				revocation: {
 					mode: "crl",
-					"on-unavailable": "reject",
-					"allowed-hosts": ["crl.example.test"],
-					"fetch-timeout-ms": 3000,
-					"cache-ttl-seconds": 3600,
-					"max-response-bytes": 1_048_576,
+					onUnavailable: "reject",
+					allowedHosts: ["crl.example.test"],
+					fetchTimeoutMs: 3000,
+					cacheTtlSeconds: 3600,
+					maxResponseBytes: 1_048_576,
 				},
 			},
 		});
@@ -233,7 +233,7 @@ describe("mode = full-pki — boot invariants", () => {
 });
 
 describe("mtlsConfigSchema — full-pki", () => {
-	const parse = (mtls: Record<string, unknown>) => mtlsConfigSchema.safeParse({ oauth: { mtls } });
+	const parse = (mtls: Record<string, unknown>) => mtlsConfigSchema.safeParse(mtls);
 
 	it.each(["ocsp", "both"] as const)(
 		"accepts revocation.mode = %s with a non-empty allowed-hosts",
@@ -243,8 +243,8 @@ describe("mtlsConfigSchema — full-pki", () => {
 			const result = parse({
 				enabled: true,
 				mode: "full-pki",
-				"full-pki": {
-					revocation: { mode, "on-unavailable": "reject", "allowed-hosts": ["ocsp.example.test"] },
+				fullPki: {
+					revocation: { mode, onUnavailable: "reject", allowedHosts: ["ocsp.example.test"] },
 				},
 			});
 			expect(result.success).toBe(true);
@@ -255,8 +255,8 @@ describe("mtlsConfigSchema — full-pki", () => {
 		const result = parse({
 			enabled: true,
 			mode: "full-pki",
-			"full-pki": {
-				revocation: { mode: "stapled", "on-unavailable": "reject" },
+			fullPki: {
+				revocation: { mode: "stapled", onUnavailable: "reject" },
 			},
 		});
 		expect(result.success).toBe(false);
@@ -266,8 +266,8 @@ describe("mtlsConfigSchema — full-pki", () => {
 		const result = parse({
 			enabled: true,
 			mode: "full-pki",
-			"full-pki": {
-				revocation: { mode: "ocsp", "allowed-hosts": ["ocsp.example.test"] },
+			fullPki: {
+				revocation: { mode: "ocsp", allowedHosts: ["ocsp.example.test"] },
 			},
 		});
 		expect(result.success).toBe(false);
@@ -275,39 +275,31 @@ describe("mtlsConfigSchema — full-pki", () => {
 
 	it("requires the nonce by default (RFC 8954), and lets an operator state otherwise", () => {
 		const strict = mtlsConfigSchema.parse({
-			oauth: {
-				mtls: {
-					enabled: true,
-					mode: "full-pki",
-					"full-pki": {
-						revocation: {
-							mode: "ocsp",
-							"on-unavailable": "reject",
-							"allowed-hosts": ["ocsp.example.test"],
-						},
-					},
+			enabled: true,
+			mode: "full-pki",
+			fullPki: {
+				revocation: {
+					mode: "ocsp",
+					onUnavailable: "reject",
+					allowedHosts: ["ocsp.example.test"],
 				},
 			},
 		});
-		expect(strict.oauth.mtls["full-pki"]?.revocation?.["ocsp-require-nonce"]).toBe(true);
+		expect(strict.fullPki?.revocation?.ocspRequireNonce).toBe(true);
 
 		const lenient = mtlsConfigSchema.parse({
-			oauth: {
-				mtls: {
-					enabled: true,
-					mode: "full-pki",
-					"full-pki": {
-						revocation: {
-							mode: "ocsp",
-							"on-unavailable": "reject",
-							"allowed-hosts": ["ocsp.example.test"],
-							"ocsp-require-nonce": false,
-						},
-					},
+			enabled: true,
+			mode: "full-pki",
+			fullPki: {
+				revocation: {
+					mode: "ocsp",
+					onUnavailable: "reject",
+					allowedHosts: ["ocsp.example.test"],
+					ocspRequireNonce: false,
 				},
 			},
 		});
-		expect(lenient.oauth.mtls["full-pki"]?.revocation?.["ocsp-require-nonce"]).toBe(false);
+		expect(lenient.fullPki?.revocation?.ocspRequireNonce).toBe(false);
 	});
 
 	it("refuses an unknown signature algorithm rather than matching nothing", () => {
@@ -316,9 +308,9 @@ describe("mtlsConfigSchema — full-pki", () => {
 		const result = parse({
 			enabled: true,
 			mode: "full-pki",
-			"full-pki": {
-				"signature-algorithms": ["sha1WithRSAEncryption"],
-				revocation: { mode: "crl", "on-unavailable": "reject" },
+			fullPki: {
+				signatureAlgorithms: ["sha1WithRSAEncryption"],
+				revocation: { mode: "crl", onUnavailable: "reject" },
 			},
 		});
 		expect(result.success).toBe(false);
@@ -328,9 +320,9 @@ describe("mtlsConfigSchema — full-pki", () => {
 		const result = parse({
 			enabled: true,
 			mode: "full-pki",
-			"full-pki": {
-				"signature-algorithms": ["ecdsaWithSHA1"],
-				revocation: { mode: "crl", "on-unavailable": "reject" },
+			fullPki: {
+				signatureAlgorithms: ["ecdsaWithSHA1"],
+				revocation: { mode: "crl", onUnavailable: "reject" },
 			},
 		});
 		expect(result.success).toBe(false);

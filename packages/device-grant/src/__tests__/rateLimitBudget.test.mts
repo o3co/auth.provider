@@ -18,7 +18,7 @@
  * The device grant's `device_verification` budget: the verification
  * endpoint's `device_verification:user:<subject>` limit, which RFC 8628 §5.1
  * sizes the user code's entropy against. The module contributes
- * `oauth.deviceAuthorization.rateLimit` as a `rateLimitBudgets` entry for
+ * `device-grant.rateLimit` as a `rateLimitBudgets` entry for
  * every limiter to read; without it a shared limiter would serve the
  * endpoint its `defaultLimit` of 60 per 60 s, twelve times the five attempts
  * the boot refusal reasons from.
@@ -36,8 +36,7 @@ import {
 	isDeviceVerificationRateLimitSpec,
 } from "#/verificationBudget.mjs";
 
-const switchedOn = (enabled: boolean) =>
-	({ oauth: { deviceAuthorization: { enabled } } }) as unknown as AppConfig;
+const switchedOn = (enabled: boolean) => ({ "device-grant": { enabled } }) as unknown as AppConfig;
 
 /** What the module, built with the grant `enabled` or not, contributes for `device_verification`. */
 const verificationBudget = async (
@@ -53,7 +52,7 @@ describe("the device grant's device_verification budget", () => {
 		expect(DEVICE_VERIFICATION_RATE_LIMIT_PREFIX).toBe("device_verification");
 	});
 
-	it("is oauth.deviceAuthorization.rateLimit, with the grant on or off", async () => {
+	it("is device-grant.rateLimit, with the grant on or off", async () => {
 		// Nothing keys the prefix while the grant is off; the budget stands
 		// either way, as the section's default does.
 		for (const enabled of [true, false]) {
@@ -92,13 +91,13 @@ describe("the device grant's device_verification budget", () => {
 			await expect(
 				verificationBudget({ rateLimit: { limit, windowSeconds } }),
 				`limit=${JSON.stringify(limit)} windowSeconds=${JSON.stringify(windowSeconds)}`,
-			).rejects.toThrow(/^oauth\.deviceAuthorization\.rateLimit must be/);
+			).rejects.toThrow(/^device-grant\.rateLimit must be/);
 		}
 		await expect(
 			verificationBudget({ rateLimit: { limit: "five", windowSeconds: 300 } }),
 		).rejects.toThrow(/\(got limit "five", windowSeconds 300\)$/);
 		await expect(verificationBudget({ rateLimit: null })).rejects.toThrow(
-			/^oauth\.deviceAuthorization\.rateLimit must be/,
+			/^device-grant\.rateLimit must be/,
 		);
 	});
 });
