@@ -26,6 +26,7 @@
 import { describe, expect, it } from "vitest";
 import { BootError } from "#/boot/types.mjs";
 import { createApp, defineModule, type Module } from "#/index.mjs";
+import type { Logger } from "#/logging/Logger.mjs";
 import { readAcrTable } from "#/session-admission/acr.mjs";
 import type { AdmissionAction } from "#/session-admission/actions.mjs";
 import { admitSession, cookieClaim } from "#/session-admission/admit.mjs";
@@ -39,15 +40,47 @@ const boot = (
 	modules: readonly Module[],
 	expected: readonly string[] = [],
 	extra: Partial<Parameters<typeof createApp>[0]> = {},
+	logger?: Logger,
 ) =>
 	createApp({
 		modules,
 		bootstrapComponents: {
 			config: { ...makeValidCoreConfig(), sessionRequirements: { expected } },
 			pathResolver: (p: string) => p,
+			...(logger === undefined ? {} : { logger }),
 		} as never,
 		...extra,
 	});
+
+interface Line {
+	readonly level: string;
+	readonly fields: Record<string, unknown>;
+	readonly message: string | undefined;
+}
+
+const recordingLogger = (): { readonly logger: Logger; readonly lines: Line[] } => {
+	const lines: Line[] = [];
+	const at =
+		(level: string) =>
+		(first: unknown, second?: unknown): void => {
+			lines.push({
+				level,
+				fields:
+					typeof first === "object" && first !== null ? (first as Record<string, unknown>) : {},
+				message: typeof first === "string" ? first : (second as string | undefined),
+			});
+		};
+	const logger = {
+		trace: () => {},
+		debug: () => {},
+		info: at("info"),
+		warn: at("warn"),
+		error: at("error"),
+		fatal: () => {},
+		child: () => logger,
+	} as unknown as Logger;
+	return { logger, lines };
+};
 
 const refusal = async (promise: Promise<unknown>): Promise<BootError> => {
 	const err = await promise.then(
@@ -155,12 +188,18 @@ describe("the admissionActions kind — registered through createApp", () => {
 		}
 	});
 
-	it("reads each declaration once, at stage 1: changing it after boot changes nothing registered", async () => {
+	it("reads each declaration's grade once: a getter answering differently afterwards changes nothing registered", async () => {
 		const seen: { resolver?: SessionRequirementResolver } = {};
-		const declaration: { grade: string } = { grade: "credential_change" };
+		let reads = 0;
+		const declaration = {
+			get grade() {
+				reads++;
+				return reads === 1 ? "credential_change" : "grants_nothing";
+			},
+		};
 		const handle = await boot([consumer(seen, { "acme.export": declaration })]);
 		try {
-			declaration.grade = "grants_nothing";
+			expect(reads).toBe(1);
 			expect(seen.resolver?.action("acme.export")?.grade).toBe("credential_change");
 		} finally {
 			await handle.dispose();
@@ -258,23 +297,26 @@ describe("the admissionActions kind — refused", () => {
 	])("a container that is %s is refused at stage 1", async (_what, actions) => {
 		const err = await refusal(boot([registering("test:acme", actions)]));
 		expect(err.reason).toBe("contribution-malformed");
+		expect(err.stage).toBe("validateManifests");
 		expect(err.details).toMatchObject({ module: "test:acme", kind: "admissionActions" });
 		expect(err.details).not.toHaveProperty("name");
 	});
 
-	it("an override of an action is refused at stage 1: an action's grade is its registrant's", async () => {
+	it("an override of an action is refused at stage 1 as the kind guarded, naming the module and the action: an action's grade is its registrant's", async () => {
 		const err = await refusal(
 			boot([
 				registering("test:acme", { "acme.export": { grade: "credential_change" } }),
 				registering("test:loosen", { "acme.export": { grade: "use" } }, "overrides"),
 			]),
 		);
-		expect(err.reason).toBe("contribution-malformed");
-		expect(err.details).toMatchObject({
-			module: "test:loosen",
+		expect(err.reason).toBe("contribution-kind-guarded");
+		expect(err.stage).toBe("validateManifests");
+		expect(err.details).toEqual({
+			reason: "contribution-kind-guarded",
 			kind: "admissionActions",
-			name: "acme.export",
 			channel: "overrides",
+			module: "test:loosen",
+			name: "acme.export",
 		});
 	});
 
@@ -294,6 +336,9 @@ describe("the admissionActions kind — refused", () => {
 		);
 		expect(err.reason).toBe("contribution-kind-guarded");
 		expect(err.details).toMatchObject({ kind: "admissionActions" });
+		// No override is offered as the remedy: this kind refuses every one.
+		expect(err.message).not.toMatch(/override one/);
+		expect(err.message).toMatch(/no module overrides one/);
 	});
 
 	it("a requirement whose remediation is a registered action's name refuses boot: registered as a remediation it would skip every requirement for that action", async () => {
@@ -326,6 +371,44 @@ describe("the admissionActions kind — refused", () => {
 			kind: "sessionRequirements",
 			name: "acme",
 		});
+		// Both sides: the requirement's module, and the module that registered the action.
 		expect(err.message).toMatch(/acme\.export/);
+		expect(err.message).toMatch(/"test:requirement"/);
+		expect(err.message).toMatch(/"test:acme"/);
+	});
+});
+
+describe("the admission_actions_registered boot line", () => {
+	it("says once at info, in registration order, each action's name, its grade and the module that registered it, grants_nothing among them", async () => {
+		const { logger, lines } = recordingLogger();
+		const handle = await boot(
+			[
+				registering("test:second", { "acme.peek": { grade: "grants_nothing" } }),
+				consumer({}, { "acme.export": { grade: "credential_change" } }),
+			],
+			[],
+			{},
+			logger,
+		);
+		await handle.dispose();
+		expect(lines.filter((line) => line.message === "admission_actions_registered")).toEqual([
+			{
+				level: "info",
+				message: "admission_actions_registered",
+				fields: {
+					actions: [
+						{ name: "acme.peek", grade: "grants_nothing", module: "test:second" },
+						{ name: "acme.export", grade: "credential_change", module: "test:consumer" },
+					],
+				},
+			},
+		]);
+	});
+
+	it("says nothing when no module registers an action", async () => {
+		const { logger, lines } = recordingLogger();
+		const handle = await boot([], [], {}, logger);
+		await handle.dispose();
+		expect(lines.filter((line) => line.message === "admission_actions_registered")).toEqual([]);
 	});
 });
