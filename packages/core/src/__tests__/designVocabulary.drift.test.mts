@@ -493,6 +493,11 @@ const VOCABULARY: readonly VocabularyRow[] = [
 		home: "packages/core/src/security/controlCharacters.mts",
 		definition: /(?:function|const)\s+hasControlCharacter\b/,
 	},
+	{
+		concept: "what a mail sender answered — delivered, refused at a limit, or else an outage",
+		home: "packages/core/src/mail/outcome.mts",
+		definition: /(?:function|const)\s+mailSendOutcome\b/,
+	},
 	// Declared before their homes define them: each names the build step of
 	// the MFA ADR that builds it.
 	{
