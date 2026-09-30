@@ -126,6 +126,9 @@ export function createConnectHandler({
 				return;
 			}
 			if (parked === null) {
+				// Parked for another browser, or no longer live: the store does not say
+				// which, so the audit carries the one outcome the answer gives both.
+				failed(req, res, "stale", intent);
 				plain(res, 400, "This link has expired or has already been used. Start again.");
 				return;
 			}
