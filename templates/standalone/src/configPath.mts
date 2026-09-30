@@ -38,6 +38,8 @@ import {
 	readTransitionalConfig,
 } from "@o3co/auth-provider-core";
 import { type Config, empty, parseFile } from "@o3co/ts.hocon";
+import type { LoggingSettings } from "./logger.mjs";
+import { LOGGING_SECTION, loggingModule } from "./modules.mjs";
 
 export interface ResolvedConfigPaths {
 	readonly applicationConfPath: string;
@@ -121,12 +123,13 @@ export function resolveLayers(own: OwnLayers, references: readonly URL[]): Recor
 
 /**
  * What the template reads before it knows its modules: the switches
- * `buildModules` and its module factories choose by, the log level
- * (`logger.mts`), and what `expectedSessionRequirements` reads — the
- * configuration's `sessionRequirements` and `mfa.mode`. A module a deployment
- * adds that reads its configuration when it is built adds those paths here,
- * or passes them to `readSwitches` as `reads`. `two-phase-config.test.mts`
- * holds the list to what the template reads.
+ * `buildModules` and its module factories choose by, and what
+ * `expectedSessionRequirements` reads — the configuration's
+ * `sessionRequirements` and `mfa.mode`. The log level is the `logging`
+ * module's, read with that module's own schema (`readLogging`). A module a
+ * deployment adds that reads its configuration when it is built adds those
+ * paths here, or passes them to `readSwitches` as `reads`.
+ * `two-phase-config.test.mts` holds the list to what the template reads.
  *
  * Every path here and in `reads` must be one core's transitional base
  * declares (a section core's schema has, or mirrors for a package), or
@@ -136,7 +139,6 @@ export function resolveLayers(own: OwnLayers, references: readonly URL[]): Recor
  * `reference.conf` sets. Parse it in the module, or read it after boot.
  */
 export const SWITCHES: readonly string[] = [
-	"logging",
 	"mfa.mode",
 	"sessionRequirements",
 	"federations",
@@ -174,6 +176,29 @@ export function readSwitches(own: OwnLayers, options: SwitchesOptions = {}): App
 		...SWITCHES,
 		...(options.reads ?? []),
 	]);
+}
+
+/**
+ * The `logging` module's section, read before the modules are known, for the
+ * logger the template writes through while it reads its configuration and
+ * hands boot as the `logger` bootstrap component: the composition's own
+ * layers over the module's reference (the template's) and core's, parsed with
+ * the module's own schema, as boot parses the section again. A value the
+ * schema refuses is a `RangeError` naming each operator path under `logging`.
+ */
+export function readLogging(own: OwnLayers): LoggingSettings {
+	const resolved = resolveLayers(own, moduleReferences([loggingModule]));
+	const result = LOGGING_SECTION.safeParse(resolved.logging);
+	if (!result.success) {
+		const issues = result.error.issues;
+		throw new RangeError(
+			`Config validation failed — ${issues.length} issue(s) found: ${issues
+				.map((issue) => `${["logging", ...issue.path.map(String)].join(".")}: ${issue.message}`)
+				.join("; ")}`,
+			{ cause: result.error },
+		);
+	}
+	return result.data;
 }
 
 /**

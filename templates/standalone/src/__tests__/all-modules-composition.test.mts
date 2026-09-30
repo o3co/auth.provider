@@ -181,6 +181,7 @@ const ALL_ON_MODULES = [
 	"google-federation-config",
 	"oidc-federation-config",
 	"federation-oidc-oidc",
+	"logging",
 	"key-store",
 	"test:repositories",
 	"audit-sink",

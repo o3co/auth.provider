@@ -61,6 +61,7 @@ import {
 	inMemoryFederationTokenStoreModule,
 	inMemorySessionStoresModule,
 	keyStoreModule,
+	loggingModule,
 	oidcFederationConfigModule,
 	repositoriesModule,
 	standaloneRedisClientsModule,
@@ -335,6 +336,9 @@ export function buildModules(config: AppConfig, overrides: BuildModulesOverrides
 		...(oidcFederations.length > 0
 			? [oidcFederationConfigModule, ...oidcFederations.map((name) => oidcFederationModule(name))]
 			: []),
+		// Owns `logging {}`: the logger is built from it before boot
+		// (`readLogging`), and boot parses it as this module's section.
+		loggingModule,
 		overrides.keyStoreModule ?? keyStoreModule,
 		overrides.repositoriesModule ?? repositoriesModule,
 		// The audit sink, always wired: `emitAuditEvent` no-ops on an empty slot,

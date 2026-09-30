@@ -211,7 +211,8 @@ describe("logging", () => {
 	])("gives the logger the level %s sets", (_name, env, hocon, level) => {
 		const own = readOwnLayers(ownFiles(hocon), { env: { ...BASE_ENV, ...env } });
 		expect(readLogging(own)).toEqual({ level });
-		expect(createAppLogger(readLogging(own)).level).toBe(level);
+		const logger = createAppLogger(readLogging(own)) as unknown as { readonly level: string };
+		expect(logger.level).toBe(level);
 	});
 
 	it("refuses a level it does not know before boot, naming logging.level", () => {

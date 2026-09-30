@@ -20,8 +20,10 @@
  * 1. `readSwitches` — its own files over core's `reference.conf`, read with
  *    core's transitional reader — parses only `SWITCHES`, what the template
  *    reads before it knows its modules: the switches `buildModules` chooses
- *    them by, the log level, and what `expectedSessionRequirements` reads —
- *    the configuration's `sessionRequirements` and `mfa.mode`;
+ *    them by, and what `expectedSessionRequirements` reads — the
+ *    configuration's `sessionRequirements` and `mfa.mode` (the log level is
+ *    the `logging` module's section, which `readLogging` reads with that
+ *    module's schema: `own-modules.test.mts`);
  * 2. `resolveForBoot` — its own files over the `reference.conf` of every
  *    package its modules come from, core's last — handed to `createApp`
  *    unparsed, which parses it once with every loaded module's schema.
@@ -56,7 +58,6 @@ import {
 	resolveLayers,
 	SWITCHES,
 } from "../configPath.mjs";
-import { createAppLogger } from "../logger.mjs";
 
 const configDir = fileURLToPath(new URL("../../config", import.meta.url));
 
@@ -172,9 +173,8 @@ describe("phase one reads its switches and nothing else", () => {
 		const { config, reads } = recording(
 			readSwitches(readOwnLayers(ownFiles("production"), { env })),
 		);
-		// What `app.mts` reads of phase one: the logger, the modules, and what
-		// the composition expects of session admission.
-		createAppLogger(config);
+		// What `app.mts` reads of phase one: the modules, and what the
+		// composition expects of session admission.
 		expectedSessionRequirements(config);
 		buildModules(config, { environment: "production" });
 		const covered = (path: string) =>
@@ -211,7 +211,7 @@ describe("phase two: what createApp is handed", () => {
 		const reference = join(dir, "reference.conf");
 		writeFileSync(
 			reference,
-			'widget { size = 3 }\nhttp { port = 1 }\nlogging { level = "widget-level" }\n',
+			'widget { size = 3 }\naudit.sink.type = "widget-sink"\noauth.oidcMode = "widget-mode"\n',
 		);
 		return {
 			name: "widget",
@@ -229,9 +229,9 @@ describe("phase two: what createApp is handed", () => {
 		// The package's own section, from its reference.
 		expect(resolved.widget).toEqual({ size: 3 });
 		// The template's application.conf wins over a package's reference…
-		expect(resolved.http?.port).toBe(3000);
+		expect(resolved.audit?.sink).toEqual({ type: "logger" });
 		// …and a package's reference over core's.
-		expect(resolved.logging?.level).toBe("widget-level");
+		expect(resolved.oauth?.oidcMode).toBe("widget-mode");
 	});
 
 	it("layers no reference a loaded module does not declare", () => {

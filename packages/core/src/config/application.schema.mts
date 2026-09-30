@@ -698,11 +698,16 @@ export const CoreConfigSchema = z.object({
 		// would time out and the replica would answer 503 with nothing wrong.
 		readinessTimeoutMs: z.coerce.number().int().positive().max(2_147_483_647),
 	}),
-	// Shape-only; the default lives in HOCON. `silent` is a threshold, not a
-	// level anything emits at.
-	logging: z.object({
-		level: z.enum(["trace", "debug", "info", "warn", "error", "fatal", "silent"]),
-	}),
+	// The level a composition's logger emits at. Core reads none of it: the
+	// module that owns it (the standalone template's `logging`) ships its
+	// default. Declared here while core's schema mirrors it, so a
+	// configuration carrying it is held to this vocabulary. `silent` is a
+	// threshold, not a level anything emits at.
+	logging: z
+		.object({
+			level: z.enum(["trace", "debug", "info", "warn", "error", "fatal", "silent"]),
+		})
+		.optional(),
 	oauth: z.object({
 		jwt: jwtSchema,
 		// The access-token lifetime: `defaultExpiresIn`, `maxExpiresIn`, and the

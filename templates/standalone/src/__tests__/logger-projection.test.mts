@@ -45,7 +45,7 @@ const store = Object.assign(new Error("the Store could not be read", { cause: pa
 const failed = Object.assign(new Error("request failed", { cause: store }), {
 	type: "upstream.failed", status: 502,
 });
-createAppLogger({ logging: { level: "info" } }).error({ err: loggableError(failed) }, "unhandled_request_error");
+createAppLogger({ level: "info" }).error({ err: loggableError(failed) }, "unhandled_request_error");
 `;
 
 describe("createAppLogger writes a projected error whole", () => {

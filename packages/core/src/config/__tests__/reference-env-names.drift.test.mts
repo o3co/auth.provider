@@ -60,7 +60,6 @@ const LEGACY_BASELINE = 61;
  * template's layers. Entries are deleted, never added (see the file header).
  */
 const LEGACY: readonly string[] = [
-	"core: LOG_LEVEL at logging.level",
 	"core: OAUTH_GRANTS_JWT_BEARER_ENABLED at oauth.grants.urn:ietf:params:oauth:grant-type:jwt-bearer.enabled",
 	"core: OAUTH_CIMD_ENABLED at oauth.clientIdMetadataDocuments.enabled",
 	"core: OAUTH_CIMD_ALLOWED_SCOPES at oauth.clientIdMetadataDocuments.allowedScopes",
@@ -99,6 +98,7 @@ const LEGACY: readonly string[] = [
 	"mfa: MFA_TOTP_ISSUER at mfa.factors.totp.issuer",
 	"webauthn: WEBAUTHN_AUTHENTICATION_OPTIONS_RATE_LIMIT at webauthn.rateLimit.authenticationOptions.limit",
 	"webauthn: WEBAUTHN_AUTHENTICATION_OPTIONS_RATE_WINDOW_SECONDS at webauthn.rateLimit.authenticationOptions.windowSeconds",
+	"template: LOG_LEVEL at logging.level",
 	"template: OAUTH_JWT_ALGORITHM at oauth.jwt.signingKey.local.algorithm",
 	"template: OAUTH_JWT_KID at oauth.jwt.signingKey.local.kid",
 	"template: OAUTH_JWT_SECRET at oauth.jwt.signingKey.local.secret",

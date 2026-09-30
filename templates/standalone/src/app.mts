@@ -20,6 +20,7 @@ import helmet from "helmet";
 import { buildModules } from "./buildModules.mjs";
 import {
 	expectedSessionRequirements,
+	readLogging,
 	readOwnLayers,
 	readSwitches,
 	resolveConfigPaths,
@@ -46,10 +47,11 @@ const own = readOwnLayers([envConfPath, applicationConfPath]);
 // when the parsed `mfa.mode` asks for a second factor.
 const switches: AppConfig = readSwitches(own);
 
-// Built from config so its level is operator-controlled, and wired into
+// Built from the `logging` module's section, read now with that module's
+// schema, so its level is operator-controlled from the first line; wired into
 // `bootstrapComponents` so every module that declares `optional: ["logger"]`
 // logs through it rather than its own default (template README, "Logging").
-const logger = createAppLogger(switches);
+const logger = createAppLogger(readLogging(own));
 
 await (async (): Promise<void> => {
 	// Step 2: Create the Express app and apply base security middleware.

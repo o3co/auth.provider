@@ -100,14 +100,29 @@ export function templateReference(): URL {
 /**
  * The schemas the template's modules parse their sections with: core's
  * declarations of those paths, which core's schema still mirrors, so each
- * rule (the signing-key union, the Redis connection's shape) has one
- * definition. A section refused here refuses the boot naming the operator's
+ * rule (the log levels, the signing-key union, the Redis connection's
+ * shape) has one definition. A section refused here refuses the boot naming the operator's
  * path.
  */
+export const LOGGING_SECTION = CoreConfigSchema.shape.logging.unwrap();
 const SIGNING_KEY_SECTION = CoreConfigSchema.shape.oauth.shape.jwt.out.shape.signingKey.unwrap();
 const REDIS_CLIENTS_SECTION = fullSectionsSchema.shape.refreshTokenFamilyStore
 	.unwrap()
 	.shape.redis.unwrap();
+
+/**
+ * Logging module: owns `logging {}`, the level the composition's logger
+ * emits at, with its default in the template's `config/reference.conf`. It
+ * provides nothing. The logger exists before boot — the template writes
+ * through it while it reads its configuration and chooses its modules, and
+ * boot takes it as the `logger` bootstrap component — so the template reads
+ * this section for it with this module's schema (`readLogging`), and boot
+ * parses the section again as this module's, naming the operator's path.
+ */
+export const loggingModule = defineModule({
+	name: "logging",
+	section: { schema: LOGGING_SECTION, reference: templateReference() },
+});
 
 /**
  * KeyStore module: provides the JWT signing KeyStore from its own section,
