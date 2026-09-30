@@ -27,8 +27,9 @@ export interface RedisSessionFamilyIndexOptions {
 	readonly keyPrefix: string;
 	/**
 	 * Where the session's "ended" mark is kept: `${endedKeyPrefix}${sid}`. A
-	 * namespace apart from `keyPrefix`'s, so no sid's family set shares a key
-	 * with a mark. Without it the index has no `SupportsSessionEnd`.
+	 * namespace apart from `keyPrefix`'s — neither may start with the other, a
+	 * `RangeError` at construction — so no sid's family set shares a key with a
+	 * mark. Without it the index has no `SupportsSessionEnd`.
 	 */
 	readonly endedKeyPrefix?: string;
 }
@@ -49,7 +50,16 @@ export interface RedisSessionFamilyIndexOptions {
 export function createRedisSessionFamilyIndex(
 	opts: RedisSessionFamilyIndexOptions,
 ): SessionFamilyIndex {
-	const zset = createRedisSidSortedSet({ client: opts.client, keyPrefix: opts.keyPrefix });
+	const { client, keyPrefix, endedKeyPrefix } = opts;
+	if (
+		endedKeyPrefix !== undefined &&
+		(endedKeyPrefix.startsWith(keyPrefix) || keyPrefix.startsWith(endedKeyPrefix))
+	) {
+		throw new RangeError(
+			`createRedisSessionFamilyIndex: endedKeyPrefix "${endedKeyPrefix}" and keyPrefix "${keyPrefix}" overlap; neither may start with the other`,
+		);
+	}
+	const zset = createRedisSidSortedSet({ client, keyPrefix });
 	const index: SessionFamilyIndex = {
 		kind: "redis",
 		async addFamilyId(sid, familyId, expiresAt) {
@@ -63,7 +73,6 @@ export function createRedisSessionFamilyIndex(
 		},
 	};
 
-	const { client, endedKeyPrefix } = opts;
 	const writeEndMark = client.writeEndMark?.bind(client);
 	const hasEndMark = client.hasEndMark?.bind(client);
 	if (
