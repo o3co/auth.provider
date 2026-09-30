@@ -26,7 +26,7 @@
 
 import { generateKeyPairSync } from "node:crypto";
 import { once } from "node:events";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { type AddressInfo, createServer, type Socket } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -126,6 +126,8 @@ interface BootOptions {
 	readonly env?: Readonly<Record<string, string | undefined>>;
 	/** HOCON an operator writes, a layer above the template's own files. */
 	readonly hocon?: string;
+	/** The composition's own files in place of the shipped ones (`withApplicationValues`). */
+	readonly files?: readonly string[];
 	/** Keep the shipped Redis refresh-token family store, and with it the shared Redis clients. */
 	readonly redis?: boolean;
 	/** Changes the resolved configuration before `createApp` parses it, as a hand-built root may. */
@@ -156,7 +158,7 @@ async function bootTemplate(options: BootOptions = {}): Promise<AppHandle> {
 			(entry): entry is [string, string] => entry[1] !== undefined,
 		),
 	);
-	const own = readOwnLayers(ownFiles(options.hocon), { env });
+	const own = readOwnLayers(options.files ?? ownFiles(options.hocon), { env });
 	const switches = readSwitches(own);
 	const modules = buildModules(switches, {
 		environment: "development",
@@ -452,6 +454,103 @@ describe("cors", () => {
 		await expect(
 			bootTemplate({ env: { CORS_ALLOWED_ORIGINS: "https://app.example.com/" } }),
 		).rejects.toThrow(/cors\.allowedOrigins/);
+	});
+});
+
+/**
+ * The template's own files with `hocon` written into its `application.conf`,
+ * above the shipped content: a value an operator sets there, above the
+ * lines that bind the environment variables.
+ */
+function withApplicationValues(hocon: string): string[] {
+	const { applicationConfPath, envConfPath } = resolveConfigPaths(configDir, "development");
+	const dir = mkdtempSync(join(tmpdir(), "own-modules-application-"));
+	operatorDirs.push(dir);
+	const application = join(dir, "application.conf");
+	writeFileSync(application, `${hocon}\n${readFileSync(applicationConfPath, "utf8")}`);
+	const development = join(dir, "development.conf");
+	writeFileSync(development, readFileSync(envConfPath, "utf8"));
+	return [development, application];
+}
+
+describe("an environment variable wins over a value the template's application.conf sets", () => {
+	it("HTTP_PORT over http.port", async () => {
+		const handle = await bootTemplate({
+			files: withApplicationValues("http.port = 4000"),
+			env: { HTTP_PORT: "8080" },
+		});
+		try {
+			expect(handle.components.httpHostSettings?.port).toBe(8080);
+		} finally {
+			await handle.dispose();
+		}
+	});
+
+	it("HTTP_TRUST_PROXY over http.trustProxy", async () => {
+		const handle = await bootTemplate({
+			files: withApplicationValues("http.trustProxy = 1"),
+			env: { HTTP_TRUST_PROXY: "loopback" },
+		});
+		try {
+			expect(handle.components.httpSettings?.trustProxy).toEqual(["loopback"]);
+		} finally {
+			await handle.dispose();
+		}
+	});
+
+	it("CORS_ALLOWED_ORIGINS over cors.allowedOrigins", async () => {
+		const handle = await bootTemplate({
+			files: withApplicationValues('cors.allowedOrigins = ["https://file.example.com"]'),
+			env: { CORS_ALLOWED_ORIGINS: "https://env.example.com" },
+		});
+		try {
+			expect(handle.components.httpSettings?.cors.allowedOrigins).toEqual([
+				"https://env.example.com",
+			]);
+		} finally {
+			await handle.dispose();
+		}
+	});
+
+	it("REFRESH_TOKEN_FAMILY_STORE_REDIS_URL over refreshTokenFamilyStore.redis.url", async () => {
+		const redis = await listeningRedis();
+		const handle = await bootTemplate({
+			redis: true,
+			files: withApplicationValues('refreshTokenFamilyStore.redis.url = "redis://127.0.0.1:9"'),
+			env: {
+				REFRESH_TOKEN_FAMILY_STORE_REDIS_URL: `redis://127.0.0.1:${redis.port}`,
+				REFRESH_TOKEN_FAMILY_STORE_REDIS_PASSWORD: "url-test-password",
+			},
+		});
+		try {
+			await vi.waitFor(() => expect(redis.received()).toContain("url-test-password"), {
+				timeout: 10_000,
+			});
+		} finally {
+			await handle.dispose().catch(() => {});
+			await redis.close();
+		}
+	});
+
+	it("REFRESH_TOKEN_FAMILY_STORE_REDIS_PASSWORD over refreshTokenFamilyStore.redis.password", async () => {
+		const redis = await listeningRedis();
+		const handle = await bootTemplate({
+			redis: true,
+			files: withApplicationValues('refreshTokenFamilyStore.redis.password = "from-the-file"'),
+			env: {
+				REFRESH_TOKEN_FAMILY_STORE_REDIS_URL: `redis://127.0.0.1:${redis.port}`,
+				REFRESH_TOKEN_FAMILY_STORE_REDIS_PASSWORD: "from-the-environment",
+			},
+		});
+		try {
+			await vi.waitFor(() => expect(redis.received()).toContain("from-the-environment"), {
+				timeout: 10_000,
+			});
+			expect(redis.received()).not.toContain("from-the-file");
+		} finally {
+			await handle.dispose().catch(() => {});
+			await redis.close();
+		}
 	});
 });
 
