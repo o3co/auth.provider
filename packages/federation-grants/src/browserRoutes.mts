@@ -105,6 +105,14 @@ import { federationGrantIdentityRegistration } from "./acquisitionSettings.mjs";
 import type { FederationGrantsAdmissionAction } from "./admissionActions.mjs";
 import { createFederationGrantAuditBridge, routeDeniedEvent } from "./audit.mjs";
 import type { FederationGrantBackground } from "./background.mjs";
+import {
+	type CallbackError,
+	clientReturn,
+	jsonError,
+	NO_PENDING,
+	noStoreNoReferrer,
+	plain,
+} from "./browserAnswers.mjs";
 import { callbackParamsOf, claimOf, isPrefetch, sessionIdOf, single } from "./browserRequest.mjs";
 import { federationGrantConnectUri } from "./lodgeRoute.mjs";
 import { createFederationGrantLog, type LogFields } from "./log.mjs";
@@ -184,14 +192,6 @@ export interface FederationGrantBrowserRouterOptions {
 /** The limiter tag; a budget of its own, apart from the JSON routes'. */
 export const FEDERATION_GRANTS_BROWSER_RATE_LIMIT_PREFIX = "federation_grants_browser";
 
-/**
- * One answer for every challenge with nothing behind it — answered, expired,
- * never issued, issued to another browser — so the response does not say
- * which. The sibling's wording, for the page that already handles it.
- */
-const NO_PENDING =
-	"no pending consent for this challenge: it was answered, has expired, or was not issued to this session; start again";
-
 const BODY_LIMIT = "8kb";
 
 /**
@@ -225,29 +225,6 @@ function csrfRefusal(verdict: unknown): CsrfRefusalReason | null {
 		? (reason as CsrfRefusalReason)
 		: "unrecognized";
 }
-
-// ---------------------------------------------------------------------------
-// Transport
-// ---------------------------------------------------------------------------
-
-const noStoreNoReferrer: RequestHandler = (_req, res, next) => {
-	res.set("Cache-Control", "no-store");
-	res.set("Pragma", "no-cache");
-	// The challenge and the handle travel in URLs; neither may leave in a
-	// Referer header to whatever the page links to.
-	res.set("Referrer-Policy", "no-referrer");
-	next();
-};
-
-/** A navigation's refusal: plain text, never a JSON body a user would see raw. */
-const plain = (res: Response, status: number, message: string): void => {
-	res.status(status).type("text/plain").send(message);
-};
-
-/** The page's refusal, in `/oauth/consent`'s shape. */
-const jsonError = (res: Response, status: number, error: string, description: string): void => {
-	res.status(status).json({ error, error_description: description });
-};
 
 // ---------------------------------------------------------------------------
 // The judgement both halves share
@@ -406,15 +383,6 @@ function consentLocation(consentUrl: string, issuer: string, challenge: string):
 	// Always absolute on the issuer: a normalised path would turn
 	// `/.//evil.example/consent` into a protocol-relative `//evil.example/consent`
 	// Location carrying the challenge to another host. Boot refuses such a path too.
-	return url.href;
-}
-
-/** Where a declined flow ends: the client's own URI, with what it needs and nothing else. */
-function clientReturn(intent: FederationGrantIntent, error?: string): string {
-	const url = new URL(intent.redirectUri);
-	url.searchParams.set("grant_id", intent.grantId);
-	url.searchParams.set("state", intent.clientState);
-	if (error !== undefined) url.searchParams.set("error", error);
 	return url.href;
 }
 
@@ -1578,24 +1546,6 @@ export function createFederationGrantBrowserRouter(
 	router.use(unexpectedErrors(options.logger, "federation_grants_browser"));
 	return router;
 }
-
-/**
- * What a failed callback sends back to the client, and nothing else.
- * `identity_unverifiable` is not `temporarily_unavailable`: asking again will not
- * change it.
- */
-type CallbackError =
-	| "access_denied"
-	| "reauthentication_required"
-	| "account_mismatch"
-	| "identity_conflict"
-	| "identity_unverifiable"
-	| "refresh_token_absent"
-	| "upstream_token_ineligible"
-	| "scope_exceeded"
-	| "upstream_error"
-	| "temporarily_unavailable"
-	| "grant_not_authorizable";
 
 /**
  * Check 5's verdict. When it holds, `outcome` is what the grant's event
