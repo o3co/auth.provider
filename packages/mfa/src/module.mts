@@ -79,11 +79,9 @@ const MFA_ROUTES_MOUNT_PATH = "/session/mfa";
 export const MFA_RATE_LIMIT_PREFIX = "mfa";
 
 /**
- * `mfa.rateLimit.routes` as the MFA routes' budget, or `null` when the section
- * gives none: the prefix then falls to the limiter's `defaultLimit`. Read as a
- * coercing schema reads it, since a configuration may fill it from
- * environment variables HOCON substitutes as strings; a budget given that no
- * limiter can apply is a `RangeError` naming the key.
+ * `mfa.rateLimit.routes` as the MFA routes' budget, `null` when not given;
+ * read as a coercing schema reads it, and a `RangeError` naming the key when
+ * no limiter can apply it.
  */
 function routesBudget(section: unknown): RateLimitSpec | null {
 	const given = (section as { rateLimit?: { routes?: unknown } } | null | undefined)?.rateLimit

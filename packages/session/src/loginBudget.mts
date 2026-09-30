@@ -14,10 +14,7 @@
  * limitations under the License.
  */
 
-/**
- * The budget `POST /session/login` is limited by, as the session module
- * contributes it for every limiter to read.
- */
+/** The `login` budget the session module contributes for `POST /session/login`. */
 
 import {
 	configuredNumber,
@@ -30,17 +27,10 @@ import {
 export const LOGIN_RATE_LIMIT_PREFIX = "login";
 
 /**
- * `rateLimit.login` (`{ windowMs, limit }`, the window in milliseconds) as a
- * limiter's budget, the window in whole seconds: a sub-second window rounds up
- * to one, since a zero window is not a window. `null` when the configuration
- * gives no `rateLimit.login`: the prefix then falls to the limiter's
- * `defaultLimit`.
- *
- * Each field is read as the schema's `z.coerce.number()` reads it, since
- * HOCON substitutes an environment variable as a string. A value given that
- * no limiter can apply is a `RangeError` naming `rateLimit.login`, a
- * hand-built configuration included: skipped, the endpoint that resists
- * password guessing would run on the limiter's default.
+ * `rateLimit.login` (`{ windowMs, limit }`) as a budget, the window rounded up
+ * to whole seconds (at least one); `null` when not given. Fields read as the
+ * schema coerces them; a value no limiter can apply is a `RangeError` naming
+ * `rateLimit.login`.
  */
 export function readLoginRateLimitBudget(config: unknown): RateLimitSpec | null {
 	const login = (config as { rateLimit?: { login?: unknown } } | undefined)?.rateLimit?.login;

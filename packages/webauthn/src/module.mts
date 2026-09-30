@@ -57,11 +57,9 @@ import { createRegistrationVerifyHandler } from "./routes/registrationVerify.mjs
 const WEBAUTHN_SECTION_SCHEMA = z.unknown();
 
 /**
- * `webauthn.rateLimit.authenticationOptions` as the options route's budget, or `null` when the
- * section gives none: the prefix then falls to the limiter's `defaultLimit`. Read as
- * `webauthnConfigSchema` coerces it, since `reference.conf` fills both fields from environment
- * variables HOCON substitutes as strings and the section's schema checks nothing; a budget given
- * that no limiter can apply is a `RangeError` naming the key.
+ * `webauthn.rateLimit.authenticationOptions` as the options route's budget, `null` when not given;
+ * read as `webauthnConfigSchema` coerces it, and a `RangeError` naming the key when no limiter can
+ * apply it.
  */
 const authenticationOptionsBudget = (section: unknown): RateLimitSpec | null => {
 	const given = (section as { rateLimit?: { authenticationOptions?: unknown } } | null | undefined)

@@ -31,20 +31,13 @@ interface CreateRedisRateLimiterOptions {
 	client: RateLimiterClient;
 	limits?: Record<string, RateLimitSpec>;
 	defaultLimit?: RateLimitSpec;
-	/**
-	 * The budgets the prefixes' owners contributed, read at each check; an
-	 * entry of `limits` wins over one (core's `createRateLimitBudgetLookup`).
-	 */
+	/** The owners' contributed budgets, read at each check; `limits` wins over one. */
 	budgets?: RateLimitBudgetResolver;
-	/**
-	 * What the guard does while Redis cannot answer (`RateLimiter.failMode`):
-	 * `"open"` lets the request through, `"closed"` answers 503. Not given,
-	 * the limiter declares none, which the guard reads as `"closed"`.
-	 */
+	/** The limiter's outage policy (`RateLimiter.failMode`); not given, none (closed). */
 	failMode?: RateLimitFailMode;
 }
 
-/** `failMode` as given, or a `RangeError` from `who` naming `name` when it is neither policy. */
+/** `failMode` as given, or a `RangeError` naming it when it is neither policy. */
 function checkedFailMode(
 	who: string,
 	name: string,
@@ -68,17 +61,10 @@ function checkedFailMode(
  * hook; its lifetime belongs to the composition root.
  */
 export function createRedisRateLimiter(opts: CreateRedisRateLimiterOptions): RateLimiter {
-	// Every spec it was given, `defaultLimit` included, must be one it can
-	// apply as written: core's lookup refuses anything else, by the predicate
-	// the in-process limiter is held to, and holds what it checked, so a later
-	// change to the caller's objects cannot hand Redis a window nobody
-	// validated. `redisRateLimiterBuilder` accepts a config object that never
-	// passed the zod schema, so this is where a zero window (`EXPIRE key 0`
-	// deletes the counter), a limit of zero or less, NaN, a fraction, or a
-	// window past the Date range (an `EXPIRE` Redis refuses after the `INCR`)
-	// is refused, rather than replaced by the default, a looser budget than
-	// the operator wrote. Only a default nobody gave is the built-in 60 per
-	// 60 s.
+	// Every spec given, `defaultLimit` included, is refused unless usable as
+	// written (a zero window deletes the counter; one past the Date range is an
+	// `EXPIRE` Redis refuses), never replaced by the default. Only a default
+	// nobody gave is the built-in 60 per 60 s.
 	const budgetFor = createRateLimitBudgetLookup("createRedisRateLimiter", {
 		...(opts.limits === undefined ? {} : { limits: opts.limits }),
 		// Only `undefined` is "not given": a `null` default is refused.
@@ -178,7 +164,6 @@ export const redisRateLimiterModule = defineModule({
 			};
 			const cfg = config.redisRateLimiter;
 			return createRedisRateLimiter({
-				// What the guard does while Redis cannot answer; not given, closed.
 				failMode: checkedFailMode("", "rateLimit.failMode", config.rateLimit?.failMode),
 				client: deps.rateLimiterClient,
 				// What an operator declared on this limiter wins over the budget a

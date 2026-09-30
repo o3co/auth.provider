@@ -30,10 +30,7 @@ export interface MemoryRateLimiterOptions {
 	limits?: Record<string, RateLimitSpec>;
 	defaultLimit: RateLimitSpec;
 	maxBuckets?: number;
-	/**
-	 * The budgets the prefixes' owners contributed, read at each check; an
-	 * entry of `limits` wins over one (`createRateLimitBudgetLookup`).
-	 */
+	/** The owners' contributed budgets, read at each check; `limits` wins over one. */
 	budgets?: RateLimitBudgetResolver;
 }
 

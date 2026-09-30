@@ -15,9 +15,8 @@
  */
 
 /**
- * The budget a limiter applies to a key, for every bundled limiter: one
- * precedence, so one configuration is one budget whichever limiter a
- * composition mounts.
+ * The one precedence every bundled limiter takes a key's budget by, so one
+ * configuration is one budget whichever limiter is mounted.
  */
 
 import type { RateLimitBudgetResolver } from "../modules/manifest/synthetic-keys.mjs";
@@ -25,18 +24,13 @@ import type { RateLimitSpec } from "./types.mjs";
 import { assertUsableRateLimitSpecs } from "./usableSpec.mjs";
 
 export interface RateLimitBudgetLookupOptions {
-	/**
-	 * What an operator declared on this limiter, by prefix. An entry wins over
-	 * the budget the prefix's owner contributed: it is an explicit statement
-	 * about this limiter.
-	 */
+	/** What an operator declared on this limiter, by prefix; wins over a contributed budget. */
 	readonly limits?: Readonly<Record<string, RateLimitSpec>>;
 	/** What a key under a prefix nothing budgets is limited by. */
 	readonly defaultLimit: RateLimitSpec;
 	/**
-	 * The budgets the prefixes' owners contributed (`rateLimitBudgetResolver`),
-	 * read at each lookup: they register after the limiter is built. Each was
-	 * held to `isUsableRateLimitSpec` when it registered.
+	 * The owners' contributed budgets (`rateLimitBudgetResolver`), read at each
+	 * lookup: they register after the limiter is built.
 	 */
 	readonly budgets?: RateLimitBudgetResolver;
 }
@@ -56,14 +50,10 @@ const prefixOf = (key: string): string => {
 };
 
 /**
- * The lookup a limiter takes each key's budget from: its own `limits` entry
- * for the key's prefix, else the budget the prefix's owner contributed, else
- * `defaultLimit`. A budget switched off by its owner is absent from the
- * resolver, so its prefix falls to `defaultLimit`, never to no limit.
- *
- * `limits` and `defaultLimit` are refused here, with `who` in the message,
- * when a limiter cannot apply them as written, and held as they were checked:
- * a later change to the caller's objects reaches no lookup.
+ * A key's budget: the limiter's own `limits` entry for its prefix, else the
+ * contributed budget, else `defaultLimit` (never no limit). `limits` and
+ * `defaultLimit` are refused, naming `who`, unless usable as written, and held
+ * as checked.
  */
 export function createRateLimitBudgetLookup(
 	who: string,

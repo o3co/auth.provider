@@ -106,9 +106,8 @@ export type RateLimitCheckOutcome =
  * {@link rateLimiterUnavailableEnvelope} under `"closed"`, proceed under
  * `"open"`), so the policy and its reporting exist once.
  *
- * The policy is the limiter's own `failMode`, since only its backend can be
- * down: `"open"` when it says so, `"closed"` otherwise — when it declares
- * none, as the in-process limiter does, and for any other value.
+ * The policy is the limiter's own `failMode` (only its backend can be down):
+ * `"open"` when it says so, `"closed"` otherwise, none declared included.
  *
  * The outage report's `ip` / `userAgent` are read from `ctx`.
  */
