@@ -31,7 +31,7 @@ A composition root resolves its configuration — its own files over the `refere
 2. laid over what was written, so a key no schema declares is kept — at the top, and under a section core declares;
 3. then with each loaded module's `configSchema`, over the base's output, and with each module's own section at its path, written back there: a loaded module's section is never stripped.
 
-A value any of them refuses refuses boot (`config-validation-failed`), naming each path the operator wrote. A top-level section nothing loaded owns is kept and named once in the log — `config_sections_ignored`, at `warn`, with the names, to the logger bootstrapped beside the configuration — which is where a misspelt section name shows. A section that holds no key sets nothing and is not named, as core's own `reference.conf` leaves `jwks` when `JWKS_PATH` and `JWKS_CACHE_MAX_AGE` are unset. While core's schema still mirrors other packages' sections (below), it names none of them: a mirrored section counts as owned, loaded module or not. What boot parsed is the `config` slot; read it from the handle.
+A value any of them refuses refuses boot (`config-validation-failed`), naming each path the operator wrote. A top-level section nothing loaded owns is kept and named once in the log — `config_sections_ignored`, at `warn`, with the names, to the logger bootstrapped beside the configuration — which is where a misspelt section name shows. A section that sets nothing — empty, or holding only empty sections — is not named, as core's own `reference.conf` leaves `jwks` when `JWKS_PATH` and `JWKS_CACHE_MAX_AGE` are unset. While core's schema still mirrors other packages' sections (below), it names none of them: a mirrored section counts as owned, loaded module or not. What boot parsed is the `config` slot; read it from the handle.
 
 ```typescript
 import { fileURLToPath } from "node:url";
@@ -76,6 +76,7 @@ Defaults live in a `reference.conf`, never in the schema: core's own sections' i
 | `federations` | Federation providers, keyed by name: `{ enabled, type?, … }`. Core reads `enabled` (the federation-stores wiring check at boot); `type` and the rest of the entry belong to the adapter package that reads it — the adapter packages are listed in the [root README](../../README.md) |
 | `repositories` | Repository config for clients, users, and codes — each a `type` plus its sub-section |
 | `endpoints` | `login.url`: the deployment's login page. `consent.url`: its consent page for clients that are not first-party (default `/consent`). `mfa.url`: its page for a step-up (default `/mfa`), which the MFA package's `mfa` requirement registers as its step-up page; without that package, nothing sends a browser there |
+| `core` | Core's own section, strict: a key it does not declare, at any level, refuses boot (`config-validation-failed`), naming the key and never its value |
 | `core.deployment.mode` | How many replicas the operator says run: `single`, `multi`, or unset (`CORE_DEPLOYMENT_MODE`). No default: unset is a state of its own. Boot fills the `deploymentMode` slot from it, and under `multi` refuses every module that declares state which forks per replica. `deployment.mode` is refused naming this path; `DEPLOYMENT_MODE` is declared renamed `CORE_DEPLOYMENT_MODE`, and set alone or to another value it refuses boot |
 | `core.sessionRequirements.expected` | The session requirements this composition expects — the extensions that change what "logged in" means, MFA among them — compared at boot with what the installed modules register (see [Session admission](#session-admission)). Once written, it is compared both ways, whether or not anything consults session admission: a name no installed module registers refuses boot (`session-requirement-missing`), and so does a registered requirement it leaves out (`session-requirements-undeclared`). Required whenever a module that consults session admission is installed (`oauthModule` is one), and refused unwritten there (`session-requirements-undeclared`); `[]` says "none"; no default, so a composition states its posture. `sessionRequirements.expected` is refused naming this path |
 | `mfaFactorStore.adapter`, `mfaTransactionStore.adapter` | Which store keeps enrolled factors (`memory`, `redis` or `store`) and which keeps MFA transactions and the lock state (`memory` or `redis`); both `memory` by default. Read by a composition root that installs MFA and picks its stores by name, which none does yet: the standalone template installs no MFA module, and refuses boot under a mode other than `"off"` (it declares `mfa`, which nothing there registers) |
@@ -295,7 +296,7 @@ The origins `corsMw` (`src/middleware/cors.mts`) lets read are the `httpSettings
 
 ### Surface
 
-`browserFacingCorsRoutes(config)` is the table, and it is an **allowlist** — the opposite polarity to the sender-constraint mount beside it. That one guards a credential and must therefore cover routes core has never heard of; this one *grants* a cross-origin read, so a route core has never heard of is exactly the one that must not silently acquire it.
+`browserFacingCorsRoutes(config, { issuer, jwksPath })` is the table, and it is an **allowlist** — the opposite polarity to the sender-constraint mount beside it. That one guards a credential and must therefore cover routes core has never heard of; this one *grants* a cross-origin read, so a route core has never heard of is exactly the one that must not silently acquire it.
 
 | Path | Methods |
 |---|---|
@@ -304,7 +305,7 @@ The origins `corsMw` (`src/middleware/cors.mts`) lets read are the `httpSettings
 | `/oauth/revoke` | `POST` |
 | `/.well-known/openid-configuration` | `GET` |
 | `/.well-known/oauth-authorization-server` | `GET` |
-| `jwks.path` (default `/.well-known/jwks.json`) | `GET` |
+| `jwks.path` (default `/.well-known/jwks.json`), the path the jwks module's route serves; none without the module | `GET` |
 
 The two discovery rows are the same document: OIDC Discovery 1.0 appends its suffix to the issuer, RFC 8414 inserts its well-known string between host and path, and `discoveryPathsFor` (`src/discovery/wellKnownPaths.mts`) forms both for the configured issuer — for `https://as.example/tenant-a` that is `/tenant-a/.well-known/openid-configuration` and `/.well-known/oauth-authorization-server/tenant-a` — so the route, its advertisement and this table cannot drift.
 

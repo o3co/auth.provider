@@ -51,12 +51,13 @@ const frozen = (core: CoreRelocations): CoreRelocations =>
 /**
  * Core's shipped declaration, frozen whole: the replica count and the
  * expected session requirements moved into `core`, and `DEPLOYMENT_MODE`
- * renamed with the first. No variable sets the expected session
- * requirements.
+ * renamed with the first. A variable binds `core.deployment.mode` alone: the
+ * rest of `deployment`, and the expected session requirements, have none.
  */
 export const CORE_RELOCATIONS: CoreRelocations = frozen({
 	relocatedFrom: {
-		deployment: "deployment",
+		deployment: { to: "deployment", environmentVariable: null },
+		"deployment.mode": "deployment.mode",
 		sessionRequirements: { to: "sessionRequirements", environmentVariable: null },
 	},
 	renamedVariables: { DEPLOYMENT_MODE: "deployment.mode" },

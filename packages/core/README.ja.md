@@ -31,7 +31,7 @@ composition root は自分の設定を解決します — 自分のファイル�
 2. 書かれたものの上に重ねるので、どのスキーマも宣言していないキーは残ります — トップレベルでも、core が宣言するセクションの下でも;
 3. そのうえで、読み込まれた各モジュールの `configSchema` で base の出力をパースし、各モジュール自身のセクションをそのパスでパースしてそこに書き戻します: 読み込まれたモジュールのセクションが取り除かれることはありません。
 
-どれかが拒否する値は、オペレーターが書いた各パスを示して boot を拒否します（`config-validation-failed`）。読み込まれたどのモジュールも所有しないトップレベルのセクションは残され、設定と並べて bootstrap したロガーに一度だけ名前が出ます — `config_sections_ignored`（`warn`、名前つき）。セクション名の綴り間違いはここに現れます。キーを一つも持たないセクションは何も設定しないので名前が出ません。`JWKS_PATH` と `JWKS_CACHE_MAX_AGE` が未設定のとき core 自身の `reference.conf` が残す `jwks` がそれに当たります。core のスキーマが他パッケージのセクションをまだミラーしている間（下記）、それらはどれも名前が出ません: ミラーされたセクションは、モジュールが読み込まれているかどうかにかかわらず所有されているものとして数えます。boot がパースしたものは `config` スロットにあります。ハンドルから読んでください。
+どれかが拒否する値は、オペレーターが書いた各パスを示して boot を拒否します（`config-validation-failed`）。読み込まれたどのモジュールも所有しないトップレベルのセクションは残され、設定と並べて bootstrap したロガーに一度だけ名前が出ます — `config_sections_ignored`（`warn`、名前つき）。セクション名の綴り間違いはここに現れます。何も設定しないセクション — 空のもの、または空のセクションだけを持つもの — は名前が出ません。`JWKS_PATH` と `JWKS_CACHE_MAX_AGE` が未設定のとき core 自身の `reference.conf` が残す `jwks` がそれに当たります。core のスキーマが他パッケージのセクションをまだミラーしている間（下記）、それらはどれも名前が出ません: ミラーされたセクションは、モジュールが読み込まれているかどうかにかかわらず所有されているものとして数えます。boot がパースしたものは `config` スロットにあります。ハンドルから読んでください。
 
 ```typescript
 import { fileURLToPath } from "node:url";
@@ -76,6 +76,7 @@ const config = handle.components.config; // boot がパースしたもの
 | `federations` | フェデレーションプロバイダー。名前をキーとする `{ enabled, type?, … }`。core が読むのは `enabled`（boot 時のフェデレーションストア配線チェック）だけで、`type` とエントリの残りはそれを読むアダプターパッケージのもの — アダプターパッケージは [ルート README](../../README.md) に一覧がある |
 | `repositories` | client、user、code の Repository 設定 — それぞれ `type` とそのサブセクション |
 | `endpoints` | `login.url`: デプロイのログインページ。`consent.url`: first-party でないクライアント向けの同意ページ（デフォルト `/consent`）。`mfa.url`: ステップアップのページ（デフォルト `/mfa`）。MFA パッケージの `mfa` 要件がこれをステップアップのページとして登録する。そのパッケージが無ければ、ブラウザーをそこへ送るものはない |
+| `core` | core 自身のセクションで、厳格: どの階層でも宣言されていないキーはブートを拒否し（`config-validation-failed`）、キーを示し、値は決して示さない |
 | `core.deployment.mode` | オペレーターが述べるレプリカ数: `single`、`multi`、または未設定（`CORE_DEPLOYMENT_MODE`）。既定値は無い: 未設定はそれ自体が一つの状態である。boot はこれから `deploymentMode` スロットを埋め、`multi` のもとではレプリカごとに分岐する状態を宣言するすべてのモジュールを拒否する。`deployment.mode` はこのパスを示して拒否される。`DEPLOYMENT_MODE` は `CORE_DEPLOYMENT_MODE` へ改名されたと宣言されており、単独で、または別の値で設定されているとブートを拒否する |
 | `core.sessionRequirements.expected` | この構成が期待するセッション要件 — 「ログイン済み」の意味を変える拡張で、MFA はその一つ — で、ブート時にインストールされたモジュールが登録したものと比較される（[セッション許可](#セッション許可) を参照）。書かれていれば、セッション許可に問い合わせるモジュールの有無にかかわらず両方向で比較する: インストールされたどのモジュールも登録しない名前はブートを拒否し（`session-requirement-missing`）、登録された要件を書き漏らしても拒否する（`session-requirements-undeclared`）。セッション許可に問い合わせるモジュールがインストールされているときは必須（`oauthModule` はその一つ）で、書かれていなければ拒否する（`session-requirements-undeclared`）。`[]` は「なし」。既定値は無く、構成は自らの姿勢を述べる。`sessionRequirements.expected` はこのパスを示して拒否される |
 | `mfaFactorStore.adapter`、`mfaTransactionStore.adapter` | 登録済みの要素を保持するストア（`memory`、`redis`、`store`）と、MFA のトランザクションとロック状態を保持するストア（`memory`、`redis`）。どちらも既定は `memory`。MFA を組み込み、ストアを名前で選ぶ composition root が読むが、まだそうするものはない: standalone テンプレートは MFA モジュールを組み込まず、`"off"` 以外のモードではブートを拒否する（`mfa` を宣言するが、そこで登録するものは無い） |
@@ -295,7 +296,7 @@ core が自分でマウントするもの（この順）: レスポンスを読�
 
 ### 対象ルート
 
-`browserFacingCorsRoutes(config)` がその表で、**許可リスト**です — 隣にある sender-constraint のマウントとは逆の極性です。あちらはクレデンシャルを守るので core が知らないルートまで覆う必要がありますが、こちらはクロスオリジンの読み取りを*与える*ので、core が知らないルートこそ黙ってそれを得てはいけないルートです。
+`browserFacingCorsRoutes(config, { issuer, jwksPath })` がその表で、**許可リスト**です — 隣にある sender-constraint のマウントとは逆の極性です。あちらはクレデンシャルを守るので core が知らないルートまで覆う必要がありますが、こちらはクロスオリジンの読み取りを*与える*ので、core が知らないルートこそ黙ってそれを得てはいけないルートです。
 
 | パス | メソッド |
 |---|---|
@@ -304,7 +305,7 @@ core が自分でマウントするもの（この順）: レスポンスを読�
 | `/oauth/revoke` | `POST` |
 | `/.well-known/openid-configuration` | `GET` |
 | `/.well-known/oauth-authorization-server` | `GET` |
-| `jwks.path`（既定 `/.well-known/jwks.json`） | `GET` |
+| `jwks.path`（既定 `/.well-known/jwks.json`）。jwks モジュールのルートが提供するパスで、モジュールが無ければ無し | `GET` |
 
 2 つの discovery の行は同じドキュメントです: OIDC Discovery 1.0 は issuer に接尾辞を付け足し、RFC 8414 は well-known 文字列をホストとパスの間に挿入します。`discoveryPathsFor`（`src/discovery/wellKnownPaths.mts`）が設定された issuer に対して両方を作ります — `https://as.example/tenant-a` なら `/tenant-a/.well-known/openid-configuration` と `/.well-known/oauth-authorization-server/tenant-a` — ので、ルート、その広告、この表がずれることはありません。
 

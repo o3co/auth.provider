@@ -34,7 +34,9 @@ import { CORE_RELOCATIONS } from "#/config/core-relocations.mjs";
 import { coreReference } from "#/config/references.mjs";
 import { RENAMED_VARIABLES_SECTION } from "#/config/removed-keys.mjs";
 import { jwksModule } from "#/jwks/module.mjs";
+import { createSymmetricKeyStore } from "#/keys/KeyStore.mjs";
 import type { Logger } from "#/logging/Logger.mjs";
+import { defineModule } from "#/modules/manifest/index.mjs";
 import { makeValidAppConfig, makeValidCoreConfig } from "#/testing/fixtures/valid-config.mjs";
 import { renamedVariableCaptures } from "#/testing/renamedVariables.mjs";
 
@@ -222,11 +224,17 @@ describe("a root that parses its resolved configuration with AppConfigSchema bef
 		};
 	};
 
+	/** The key store the jwks module requires. */
+	const keyStoreModule = defineModule({
+		name: "test:key-store",
+		provides: { keyStore: () => createSymmetricKeyStore("core-section-test-secret-for-jwks!!") },
+	});
+
 	it.each([
 		['deployment.mode = "multi"', [], "deployment.mode"],
 		['sessionRequirements.expected = ["mfa"]', [], "sessionRequirements.expected"],
-		['oauth.jwt.jwksPath = "/keys/jwks.json"', [jwksModule], "oauth.jwt.jwksPath"],
-		["oauth.jwt.jwksCacheMaxAge = 60", [jwksModule], "oauth.jwt.jwksCacheMaxAge"],
+		['oauth.jwt.jwksPath = "/keys/jwks.json"', [jwksModule, keyStoreModule], "oauth.jwt.jwksPath"],
+		["oauth.jwt.jwksCacheMaxAge = 60", [jwksModule, keyStoreModule], "oauth.jwt.jwksCacheMaxAge"],
 	] as const)(
 		"is refused for %s as relocated, the parse keeping the old path",
 		async (hocon, modules, from) => {

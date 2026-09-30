@@ -36,6 +36,7 @@ import {
 	findRelocatedKeys,
 	findRenamedVariables,
 	type HandedConfiguration,
+	pathsSetBy,
 	RENAMED_VARIABLES_SECTION,
 	type RelocatedPath,
 	type RenamedVariable,
@@ -1845,8 +1846,10 @@ function conflictingOutputs(
  * sorted: not a section core's transitional base declares — its
  * own, or one it mirrors — not a top-level key of a loaded module's
  * `configSchema`, and not the first key of a loaded module's section path.
- * A section that holds no key is none of them: it sets nothing, as a
- * `reference.conf` leaves a section whose variables are unset. Boot keeps
+ * A section that sets nothing (`pathsSetBy`, the walk the relocation refusal
+ * reads a configuration with) is none of them: an empty one, or one holding
+ * only empty ones, as a `reference.conf` leaves a section whose variables are
+ * unset. Boot keeps
  * them in the `config` slot and names them once in the log; a misspelt
  * section name is what an operator finds there.
  * @internal
@@ -1860,12 +1863,8 @@ function ignoredSections(modules: readonly Module[], raw: unknown): readonly str
 		if (m.section !== undefined) owned.add(sectionSegmentsOf(m)[0] as string);
 	}
 	const sections = raw as Readonly<Record<string, unknown>>;
-	const empty = (key: string): boolean => {
-		const value = sections[key];
-		return isPlainRecord(value) && Object.keys(value).length === 0;
-	};
 	return Object.keys(sections)
-		.filter((key) => !owned.has(key) && !empty(key))
+		.filter((key) => !owned.has(key) && pathsSetBy(sections[key]).length > 0)
 		.sort();
 }
 
@@ -2332,7 +2331,8 @@ function withCoreRelocations(modules: readonly Module[], core: CoreRelocations):
  * - `section.relocatedFrom` is a list of such paths, read at every index (a
  *   hole is refused, not skipped), or a plain map (prototype
  *   `Object.prototype` or `null`) from such paths to `""`, a path inside the
- *   section, or `null` (removed).
+ *   section, `null` (removed), or `{ to, environmentVariable: null }` with
+ *   `to` either of the first two, for a new path no variable binds.
  * - No old path is or holds a loaded module's section, its own or another's:
  *   a configuration setting that section would then be refused.
  * - No two loaded modules claim overlapping old paths (the same one, or one

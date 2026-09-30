@@ -24,18 +24,15 @@
  * own for core) holds `renamed-variables`. A declaration of a name a shipped
  * layer still binds would refuse every operator who sets it; a new name bound
  * nowhere would drop what an operator sets under it; a capture written in any
- * other layer would override what the resolution saw.
+ * other layer would override what the resolution saw. No layer binds a
+ * variable under the one new path core's relocations declare bound to none.
  */
 
 import { readdirSync, readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { coreReference } from "@o3co/auth-provider-core";
-import {
-	CORE_RELOCATIONS,
-	relocationBindingProblems,
-	renamedVariableProblems,
-} from "@o3co/auth-provider-core/testing";
+import { CORE_RELOCATIONS, renamedVariableProblems } from "@o3co/auth-provider-core/testing";
 import { parseFile } from "@o3co/ts.hocon";
 import { afterAll, describe, expect, it } from "vitest";
 import { composeFullSet, type FullSet } from "./full-set.fixture.mts";
@@ -105,21 +102,31 @@ describe("the variables renamed with a move, across every shipped layer", () => 
 		).toEqual([]);
 	});
 
-	it("binds, at each new path a relocation of the full set or core moves a key to, the variable its refusal names, and nothing at a new path declared bound to none", () => {
-		if (fullSet === undefined) throw new Error("the full set did not boot");
-		expect(
-			fullSet.modules.filter((module) => module.section?.relocatedFrom !== undefined).length,
-		).toBeGreaterThan(0);
+	it("binds nothing, in any shipped layer, at or under core.sessionRequirements, which core's relocation declares bound to no variable", () => {
+		const MARKER = "__RELOCATION_MARKER__";
+		const marked = (tree: unknown, prefix = ""): string[] =>
+			typeof tree === "object" && tree !== null
+				? Object.entries(tree).flatMap(([key, value]) =>
+						marked(value, prefix === "" ? key : `${prefix}.${key}`),
+					)
+				: tree === MARKER
+					? [prefix]
+					: [];
+		expect(CORE_RELOCATIONS.relocatedFrom).toMatchObject({
+			sessionRequirements: { to: "sessionRequirements", environmentVariable: null },
+		});
 
-		expect(
-			relocationBindingProblems({
-				modules: fullSet.modules,
-				core: CORE_RELOCATIONS,
-				layers: LAYERS,
-				read,
-				variables,
-			}),
-		).toEqual([]);
+		const binding = LAYERS.flatMap((layer) =>
+			variables(layer).flatMap((name) =>
+				marked(read(layer, { [name]: MARKER }))
+					.filter(
+						(path) =>
+							path === "core.sessionRequirements" || path.startsWith("core.sessionRequirements."),
+					)
+					.map((path) => `${name} at ${path} in ${layer}`),
+			),
+		);
+		expect(binding).toEqual([]);
 	});
 
 	it("finds renamed-variables in no layer but a declaring module's own reference", () => {

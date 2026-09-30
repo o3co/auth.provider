@@ -66,8 +66,8 @@ const DEPLOYMENT_MODE_HOME = "packages/core/src/deployment/mode.mts";
 
 /**
  * Where core's own section declares the paths it moved from: it names the
- * section's old path, `deployment`, and the old path of its variable,
- * `deployment.mode`, and reads neither.
+ * section's old path, `deployment`, and `deployment.mode`, the old path of
+ * the key and of its variable, and reads neither.
  */
 const DEPLOYMENT_RELOCATION_HOME = "packages/core/src/config/core-relocations.mts";
 
@@ -1421,7 +1421,10 @@ function sessionRecordReadSites(): Map<string, SessionRecordRead[]> {
 	return sites;
 }
 
-/** Core's configuration schema: the one schema that declares `deployment`. */
+/**
+ * Core's configuration schema: the one schema that declares `deployment` —
+ * under core's own section, and presence-only at the path it moved from.
+ */
 const DEPLOYMENT_SCHEMA_HOME = "packages/core/src/config/application.schema.mts";
 
 /** The literals that name the section or its key, as a helper or a reflection is handed them. */
@@ -2011,7 +2014,7 @@ describe("design-vocabulary map (docs/design-vocabulary.md)", () => {
 		);
 		expect(counts, `require the deploymentMode slot (${DEPLOYMENT_MODE_HOME})`).toEqual({
 			[DEPLOYMENT_MODE_HOME]: 1,
-			[DEPLOYMENT_RELOCATION_HOME]: 2,
+			[DEPLOYMENT_RELOCATION_HOME]: 3,
 		});
 	});
 
@@ -2020,7 +2023,7 @@ describe("design-vocabulary map (docs/design-vocabulary.md)", () => {
 			Object.entries(deploymentTouchSites("schema")).map(([file, found]) => [file, found.length]),
 		);
 		expect(counts, "the section is core's: a module requires the deploymentMode slot").toEqual({
-			[DEPLOYMENT_SCHEMA_HOME]: 1,
+			[DEPLOYMENT_SCHEMA_HOME]: 2,
 		});
 	});
 

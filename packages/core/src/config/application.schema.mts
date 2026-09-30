@@ -273,6 +273,11 @@ const jwtSchemaBase = z.object({
 	// is a migration override. `coerceBooleanFromEnv` because this section sits
 	// behind `z.preprocess`, which the hocon bridge does not coerce through.
 	legacyTypAccept: coerceBooleanFromEnv.optional(),
+	// Presence-only: the JWKS module's old paths, kept so a root that parses
+	// with `AppConfigSchema` before boot still hands them to the relocation
+	// refusal. Nothing reads them.
+	jwksPath: z.unknown().optional(),
+	jwksCacheMaxAge: z.unknown().optional(),
 });
 
 /**
@@ -907,7 +912,8 @@ export const CoreConfigSchema = z.object({
 				.optional(),
 		),
 	}),
-	// Core's own section.
+	// Core's own section, strict at every level: an unknown key is refused,
+	// named and never its value.
 	core: z
 		.object({
 			// How many replicas this deployment runs, read by core alone
@@ -924,6 +930,7 @@ export const CoreConfigSchema = z.object({
 				.object({
 					mode: z.enum(["single", "multi"]).optional(),
 				})
+				.strict()
 				.optional(),
 			// The requirement names a composition expects (session-admission ADR),
 			// compared at the end of boot's stage 4 with what registered, both ways
@@ -938,8 +945,10 @@ export const CoreConfigSchema = z.object({
 						}),
 					),
 				})
+				.strict()
 				.optional(),
 		})
+		.strict()
 		.optional(),
 });
 
@@ -1018,6 +1027,12 @@ const federationEntrySchema = z
  * declarations here until they have schemas of their own.
  */
 export const fullSectionsSchema = z.object({
+	// Presence-only: the paths core's own settings moved from, kept so a root
+	// that parses with `AppConfigSchema` before boot still hands them to the
+	// relocation refusal, which refuses them before boot's parse. Nothing reads
+	// them.
+	deployment: z.unknown().optional(),
+	sessionRequirements: z.unknown().optional(),
 	// The federation-grants section (see the federation-grants ADR). The bundled
 	// Redis grant store reads it too and is installed whether or not the routes
 	// are, so losing the block would silently drop the operator's encryption
