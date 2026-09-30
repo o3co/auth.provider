@@ -279,8 +279,8 @@ async function applyGrantPolicy(
 			grantType: GRANT_TYPE,
 			policy: deps.grantPolicy.kind,
 		});
-		if (reading.outcome === "invalid") return { result: reading.result };
-		if (reading.outcome === "deny") {
+		if (reading.verdict === "invalid") return { result: reading.result };
+		if (reading.verdict === "deny") {
 			// RFC 6749 §5.2 makes `error` 1*NQSCHAR: a malformed policy code is logged
 			// (sanitised) and replaced by `invalid_request`, RFC 8693 §2.2.2's code for a
 			// request refused by policy. `/oauth/token` checks too; this covers a
