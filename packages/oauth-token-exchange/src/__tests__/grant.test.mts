@@ -2264,6 +2264,33 @@ describe("createTokenExchangeGrant — the session rule, the actor, and what the
 			}
 		});
 
+		it("the grant policy's", async () => {
+			const spy = consoleError();
+			try {
+				const g = buildGrant({
+					grantPolicy: {
+						kind: "decision-service",
+						evaluate: async () => {
+							throw storeReplyError();
+						},
+					},
+				});
+				const { result } = await exchange(g, {
+					subject_token: await signSelfIssuedAccessToken({}),
+				});
+				expect(result.status).toBe(503);
+				const lines = spy.mock.calls.filter((call) => call[1] === "grant_policy_unavailable");
+				expect(lines).toHaveLength(1);
+				expect(lines[0]?.[0]).toMatchObject({
+					grantType: TOKEN_EXCHANGE_GRANT_TYPE,
+					policy: "decision-service",
+					err: expect.objectContaining({ name: "ReplyError" }),
+				});
+			} finally {
+				spy.mockRestore();
+			}
+		});
+
 		it.each(["subject", "actor"] as const)("the %s validator's", async (role) => {
 			const spy = consoleError();
 			try {
