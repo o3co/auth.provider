@@ -107,6 +107,10 @@ const OPTIONAL = [
 	// The login page connect sends a browser that is not signed in to, which
 	// the session module provides: required once grants are enabled.
 	"loginEntry",
+	// The deployment's CSRF policy the consent answer is held to, which the
+	// session module provides: required once grants are enabled
+	// (`requireCsrfGuard`).
+	"csrfGuard",
 	// What the oauth module provides of `oauth {}`: the issuer every route
 	// and the acquisition settings are built on. Read from the configuration
 	// when no module provides it.
@@ -277,6 +281,38 @@ const requireUserSessionStore = (deps: FederationGrantsModuleDeps): UserSessionS
 		);
 	}
 	return store;
+};
+
+/**
+ * The `csrfGuard` slot the session module provides — the policy
+ * `/session/login` runs. The consent answer is a state change made with the
+ * browser's session cookie: it spends the question and sends the user
+ * upstream. Without the guard, or with one that has no `check`, it would have
+ * no request-origin check at all.
+ */
+const requireCsrfGuard = (
+	deps: FederationGrantsModuleDeps,
+): NonNullable<FederationGrantsModuleDeps["csrfGuard"]> => {
+	const guard = deps.csrfGuard;
+	if (guard === undefined) {
+		throw new Error(
+			"federationGrantsModule: federation grants are enabled and no csrfGuard is installed. " +
+				"POST /session/federation-grants/consent, the user's answer, is made with the browser's " +
+				"session cookie and is held to the deployment's CSRF policy — the one /session/login runs, " +
+				"an Origin/Referer check against session.csrf.trustedOrigins and a signed double-submit " +
+				"token — through the csrfGuard slot the session module (sessionModule) provides. " +
+				"Install the session module, fill the csrfGuard slot with a guard of your own that keeps " +
+				"core's CsrfGuard contract, or leave federation grants disabled.",
+		);
+	}
+	if (typeof guard.check !== "function") {
+		throw new Error(
+			"federationGrantsModule: the csrfGuard installed has no check function, which the consent " +
+				"answer asks. Install the session module's guard (sessionModule), or one that keeps core's " +
+				"CsrfGuard contract.",
+		);
+	}
+	return guard;
 };
 
 /** The refresher core calls: the connection's provider, or nothing for one that lost its capability. */
@@ -475,6 +511,7 @@ export const federationGrantsModule = defineModule<Requires, Optional>({
 						authorizerFor: authorizerFor(deps),
 						consentUrl: acquisition.consentUrl,
 						login: acquisition.login,
+						csrfGuard: requireCsrfGuard(deps),
 						issuer: issuerOf(deps),
 						rateLimiter: requireLimiter(deps),
 						background: deps.federationGrantBackground,

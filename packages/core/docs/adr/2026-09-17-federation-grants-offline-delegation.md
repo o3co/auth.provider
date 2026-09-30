@@ -751,6 +751,10 @@ a consent. A refused renewal retires that renewal's pointer, conditionally on
 its handle. The POST additionally refuses an explicit cross-site
 `Sec-Fetch-Site`. Events: `federation.grant.authorization_failed` (D18).
 
+**Amended 2026-09-30 (#728, #710 C4):** the POST is held to the deployment's
+`csrfGuard` — the browser-origin policy `/session/login` and device
+verification apply — in place of its own `Sec-Fetch-Site` check.
+
 The grant ID in the redirect is not proof of anything. Every grant-addressed
 route requires `sub` (D9), so a grant that belongs to another user cannot be
 adopted by mistake, and the status response carries `upstream` so the client

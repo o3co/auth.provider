@@ -15,13 +15,14 @@
  */
 
 /**
- * The MFA configuration this package reads: the key ring `mfa.encryptionKeys`
- * and the TOTP factor's `mfa.factors.totp`. See ADR
+ * The MFA configuration this package reads: the `mfa` section — the key ring
+ * `mfa.encryptionKeys`, a transaction's life and attempts, the subject lock —
+ * and the TOTP factor's own section, `mfa-totp-factor`. See ADR
  * 2026-09-25-multi-factor-authentication, "Configuration and defaults".
  *
- * - `readMfaSettings` reads no factor's section: `mfa.factors.totp` is the
- *   TOTP factor's module's alone (`readMfaTotpSettings`), so a composition
- *   without that module is never refused over it.
+ * - `readMfaSettings` reads the `mfa` section alone: `mfa-totp-factor` is the
+ *   TOTP factor's module's (`readMfaTotpSettings`), so a composition without
+ *   that module is never refused over it.
  * - The ring is refused empty, with a key that is not canonical base64 of 32
  *   bytes, with a duplicate id (core's sealing rules, under the key it was
  *   read from), and with the published development sample key wherever the
@@ -29,8 +30,8 @@
  *   or the deployment mode (the `deploymentMode` slot's value, which the MFA
  *   module passes) is `multi`. No refusal quotes a key or an id.
  * - TOTP's parameters are held to their ranges: digits 6-8, period 15-120 s,
- *   window 0-2, SHA1, SHA256 or SHA512; the issuer defaults to the host
- *   `oauth.jwt.issuer` names.
+ *   window 0-2, SHA1, SHA256 or SHA512; the issuer defaults to the host of
+ *   the deployment's issuer.
  * - `mfa.transactionTtlSeconds` is held to 60-1800 seconds and
  *   `mfa.maxAttemptsPerTransaction` to 1-10 (the ADR states neither bound),
  *   and the subject lock, `mfa.lockout`, to core's `checkMfaLockoutPolicy`
@@ -45,13 +46,17 @@ import {
 	MFA_DEVELOPMENT_SAMPLE_KEY,
 	type MfaSettingsOptions,
 	mfaConfigSchema,
+	mfaSectionSchema,
 	readMfaSettings,
 	readMfaTotpSettings,
 } from "#/config.mjs";
 
-/** `readMfaSettings` under the deployment mode a configuration that states none has, unless `options` names one. */
+/** `readMfaSettings` over the `mfa` section of `config`, under the deployment mode a configuration that states none has, unless `options` names one. */
 const readSettings = (config: unknown, options: Partial<MfaSettingsOptions> = {}) =>
-	readMfaSettings(config, { deploymentMode: "unset", ...options });
+	readMfaSettings((config as { mfa?: unknown } | undefined)?.mfa, {
+		deploymentMode: "unset",
+		...options,
+	});
 
 const KEY_A = randomBytes(32).toString("base64");
 const KEY_B = randomBytes(32).toString("base64");
@@ -93,13 +98,19 @@ const configWith = (mfa: Record<string, unknown>, extra: Record<string, unknown>
 const valid = (overrides: Record<string, unknown> = {}) =>
 	configWith({
 		encryptionKeys: [{ id: "k1", key: KEY_A }],
-		factors: { totp: { ...TOTP } },
 		...TRANSACTION,
 		...overrides,
 	});
 
-const withTotp = (totp: Record<string, unknown>) =>
-	valid({ factors: { totp: { ...TOTP, ...totp } } });
+/** The deployment's issuer, which an unset TOTP issuer defaults to the host of. */
+const ISSUER = "https://auth.example";
+
+/** The TOTP factor's section, `mfa-totp-factor`, with `totp` laid over the defaults. */
+const withTotp = (totp: Record<string, unknown>) => ({ ...TOTP, ...totp });
+
+/** `readMfaTotpSettings` over `section`, as the module calls it: with the deployment's issuer. */
+const readTotp = (section: unknown, issuer: unknown = ISSUER) =>
+	readMfaTotpSettings(section, { issuer });
 
 /** The refusal `read` throws, as a RangeError. */
 function refusal(read: () => unknown): string {
@@ -130,29 +141,44 @@ describe("the MFA settings this package reads", () => {
 		expect(settings.encryptionKeys[0]?.key.equals(Buffer.from(KEY_B, "base64"))).toBe(true);
 		expect(settings.encryptionKeys[1]?.key.equals(Buffer.from(KEY_A, "base64"))).toBe(true);
 		expect(settings).not.toHaveProperty("totp");
-		expect(readMfaTotpSettings(valid())).toEqual({
-			enabled: true,
-			algorithm: "SHA1",
-			digits: 6,
-			period: 30,
-			window: 1,
-			issuer: "auth.example",
-		});
 		expect(settings.transactionTtlSeconds).toBe(600);
 		expect(settings.maxAttemptsPerTransaction).toBe(5);
 		expect(settings.lockout).toEqual(LOCKOUT);
 		expect(settings.developmentSampleKeyAccepted).toBe(false);
 	});
 
-	it("refuses a configuration without an mfa section, naming it", () => {
-		for (const config of [undefined, {}]) {
-			expect(refusal(() => readSettings(config))).toMatch(/^mfa /);
-			expect(refusal(() => readMfaTotpSettings(config))).toMatch(/^mfa /);
+	it("refuses a section written as a value, not a section of keys, saying so rather than calling it missing", () => {
+		for (const value of ["required", 1, true, ["required"], null]) {
+			const settings = refusal(() => readSettings({ mfa: value }));
+			expect(settings, JSON.stringify(value)).toMatch(/^mfa must be a section of keys/);
+			const totp = refusal(() => readTotp(value));
+			expect(totp, JSON.stringify(value)).toMatch(/^mfa-totp-factor must be a section of keys/);
+			const parsed = mfaSectionSchema.safeParse(value);
+			expect(parsed.success, JSON.stringify(value)).toBe(false);
+			expect(
+				parsed.error?.issues.map((issue) => issue.message),
+				JSON.stringify(value),
+			).toEqual(["must be a section of keys"]);
 		}
 	});
 
-	it("exports the schema of the section it reads", () => {
+	it("refuses a missing section, naming it", () => {
+		for (const config of [undefined, {}]) {
+			expect(refusal(() => readSettings(config))).toMatch(/^mfa /);
+		}
+		expect(refusal(() => readTotp(undefined))).toMatch(/^mfa-totp-factor /);
+	});
+
+	it("exports the schema of the mfa section it reads: its mode, the ring, the transaction's keys and the lock — no factor's", () => {
+		expect(Object.keys(mfaConfigSchema.shape).sort()).toEqual([
+			"encryptionKeys",
+			"lockout",
+			"maxAttemptsPerTransaction",
+			"mode",
+			"transactionTtlSeconds",
+		]);
 		expect(mfaConfigSchema.safeParse(valid().mfa).success).toBe(true);
+		expect(mfaConfigSchema.safeParse({ ...valid().mfa, mode: "sometimes" }).success).toBe(false);
 		expect(mfaConfigSchema.safeParse({}).success).toBe(false);
 	});
 });
@@ -308,7 +334,6 @@ describe("the development sample key", () => {
 							{ id: "sample", key: MFA_DEVELOPMENT_SAMPLE_KEY },
 						]
 					: [{ id: "sample", key: MFA_DEVELOPMENT_SAMPLE_KEY }],
-				factors: { totp: { ...TOTP } },
 				...TRANSACTION,
 			},
 			extra,
@@ -433,30 +458,73 @@ describe("the development sample key", () => {
 	});
 });
 
-describe("the TOTP factor's parameters", () => {
-	it("holds digits to 6-8, period to 15-120 seconds and window to 0-2 steps", () => {
-		for (const [key, accepted, refused] of [
-			["digits", [6, 7, 8], [5, 9, 6.5, "6", null]],
-			["period", [15, 30, 120], [14, 121, 0, 30.5, "30"]],
-			["window", [0, 1, 2], [-1, 3, 1.5, "1"]],
+describe("the TOTP factor's section, mfa-totp-factor", () => {
+	it("reads the section as the package's reference.conf ships it, the issuer the deployment's host", () => {
+		expect(readTotp(withTotp({}))).toEqual({
+			enabled: true,
+			algorithm: "SHA1",
+			digits: 6,
+			period: 30,
+			window: 1,
+			issuer: "auth.example",
+		});
+	});
+
+	it("holds digits to 6-8, period to 15-120 seconds and window to 0-2 steps: a whole number, or the decimal digits an environment variable carries", () => {
+		for (const [key, accepted, refused, range] of [
+			[
+				"digits",
+				[
+					[6, 6],
+					[8, 8],
+					["7", 7],
+					[" 8 ", 8],
+				],
+				[5, 9, 6.5, "6.5", "5", "", "0x7", "7e0", null, true, []],
+				"6 to 8",
+			],
+			[
+				"period",
+				[
+					[15, 15],
+					[120, 120],
+					["30", 30],
+				],
+				[14, 121, 0, 30.5, "0x1e", " ", null, true],
+				"15 to 120 seconds",
+			],
+			[
+				"window",
+				[
+					[0, 0],
+					[2, 2],
+					["0", 0],
+				],
+				[-1, 3, 1.5, "-1", "", null, true, []],
+				"0 to 2 steps",
+			],
 		] as const) {
-			for (const value of accepted) {
-				expect(readMfaTotpSettings(withTotp({ [key]: value }))[key], `${key} ${value}`).toBe(value);
+			for (const [value, read] of accepted) {
+				expect(readTotp(withTotp({ [key]: value }))[key], `${key} ${JSON.stringify(value)}`).toBe(
+					read,
+				);
 			}
 			for (const value of refused) {
-				const message = refusal(() => readMfaTotpSettings(withTotp({ [key]: value })));
-				expect(message, `${key} ${String(value)}`).toContain(`mfa.factors.totp.${key}`);
+				const message = refusal(() => readTotp(withTotp({ [key]: value })));
+				expect(message, `${key} ${JSON.stringify(value)}`).toContain(
+					`mfa-totp-factor.${key} must be a whole number from ${range}`,
+				);
 			}
 		}
 	});
 
 	it("takes SHA1, SHA256 and SHA512, spelled so", () => {
 		for (const algorithm of ["SHA1", "SHA256", "SHA512"]) {
-			expect(readMfaTotpSettings(withTotp({ algorithm })).algorithm).toBe(algorithm);
+			expect(readTotp(withTotp({ algorithm })).algorithm).toBe(algorithm);
 		}
 		for (const algorithm of ["sha1", "SHA-1", "MD5", 1]) {
-			expect(refusal(() => readMfaTotpSettings(withTotp({ algorithm })))).toContain(
-				"mfa.factors.totp.algorithm",
+			expect(refusal(() => readTotp(withTotp({ algorithm })))).toContain(
+				"mfa-totp-factor.algorithm",
 			);
 		}
 	});
@@ -471,66 +539,48 @@ describe("the TOTP factor's parameters", () => {
 			["0", false],
 			["", false],
 		] as const) {
-			expect(readMfaTotpSettings(withTotp({ enabled: value })).enabled, String(value)).toBe(
-				enabled,
-			);
+			expect(readTotp(withTotp({ enabled: value })).enabled, String(value)).toBe(enabled);
 		}
-		expect(refusal(() => readMfaTotpSettings(withTotp({ enabled: "yes" })))).toContain(
-			"mfa.factors.totp.enabled",
+		expect(refusal(() => readTotp(withTotp({ enabled: "yes" })))).toContain(
+			"mfa-totp-factor.enabled",
 		);
 	});
 
-	it("defaults the issuer to the host oauth.jwt.issuer names, without its port", () => {
-		expect(readMfaTotpSettings(withTotp({})).issuer).toBe("auth.example");
-		expect(
-			readMfaTotpSettings({
-				...withTotp({}),
-				oauth: { jwt: { issuer: "https://login.example.com:8443/tenant" } },
-			}).issuer,
-		).toBe("login.example.com");
-		expect(readMfaTotpSettings(withTotp({ issuer: "Example Co" })).issuer).toBe("Example Co");
+	it("defaults the issuer to the host of the deployment's issuer it is handed, without its port", () => {
+		expect(readTotp(withTotp({})).issuer).toBe("auth.example");
+		expect(readTotp(withTotp({}), "https://login.example.com:8443/tenant").issuer).toBe(
+			"login.example.com",
+		);
+		expect(readTotp(withTotp({ issuer: "Example Co" }), "https://x.example").issuer).toBe(
+			"Example Co",
+		);
 	});
 
-	it("defaults the issuer to the host of the issuer it is handed — the oauthTokenSettings slot's — over the configuration's", () => {
-		expect(
-			readMfaTotpSettings(withTotp({}), { issuer: "https://login.example.org:8443/tenant" }).issuer,
-		).toBe("login.example.org");
-		expect(
-			readMfaTotpSettings(withTotp({ issuer: "Example Co" }), { issuer: "https://x.example" })
-				.issuer,
-		).toBe("Example Co");
-	});
-
-	it("refuses an issuer the otpauth label cannot carry, and a default it cannot find", () => {
+	it("refuses an issuer the otpauth label cannot carry, and a default it cannot find, naming MFA_TOTP_FACTOR_ISSUER", () => {
 		for (const issuer of ["", "Example:Co", 1]) {
-			expect(refusal(() => readMfaTotpSettings(withTotp({ issuer })))).toContain(
-				"mfa.factors.totp.issuer",
-			);
+			expect(refusal(() => readTotp(withTotp({ issuer })))).toContain("mfa-totp-factor.issuer");
 		}
-		for (const oauth of [{ jwt: { issuer: "not a url" } }, { jwt: {} }, undefined]) {
-			const message = refusal(() => readMfaTotpSettings({ ...withTotp({}), oauth }));
-			expect(message).toContain("mfa.factors.totp.issuer");
-			expect(message).toContain("MFA_TOTP_ISSUER");
+		for (const deployment of ["not a url", undefined, 1, "https://[2001:db8::1]"]) {
+			const message = refusal(() => readMfaTotpSettings(withTotp({}), { issuer: deployment }));
+			expect(message, String(deployment)).toContain("mfa-totp-factor.issuer");
+			expect(message, String(deployment)).toContain("MFA_TOTP_FACTOR_ISSUER");
 		}
 	});
 
 	it("resolves the issuer only for a factor that is on: a switched-off one never refuses over a default nothing uses", () => {
-		const noHost = { jwt: { issuer: "https://[2001:db8::1]" } };
-		const off = readMfaTotpSettings({ ...withTotp({ enabled: false }), oauth: noHost });
+		const noHost = "https://[2001:db8::1]";
+		const off = readTotp(withTotp({ enabled: false }), noHost);
 		expect(off.enabled).toBe(false);
 		expect(off.issuer).toBeUndefined();
 		// Written, it is kept, and still held to its rule.
-		expect(
-			readMfaTotpSettings({ ...withTotp({ enabled: false, issuer: "Example" }), oauth: noHost })
-				.issuer,
-		).toBe("Example");
-		expect(
-			refusal(() => readMfaTotpSettings(withTotp({ enabled: false, issuer: "a:b" }))),
-		).toContain("mfa.factors.totp.issuer");
-		// On, the same configuration is refused.
-		expect(refusal(() => readMfaTotpSettings({ ...withTotp({}), oauth: noHost }))).toContain(
-			"MFA_TOTP_ISSUER",
+		expect(readTotp(withTotp({ enabled: false, issuer: "Example" }), noHost).issuer).toBe(
+			"Example",
 		);
+		expect(refusal(() => readTotp(withTotp({ enabled: false, issuer: "a:b" })))).toContain(
+			"mfa-totp-factor.issuer",
+		);
+		// On, the same configuration is refused.
+		expect(refusal(() => readTotp(withTotp({}), noHost))).toContain("MFA_TOTP_FACTOR_ISSUER");
 	});
 
 	it("refuses an issuer that is not well-formed text, carries a control character, or is blank", () => {
@@ -547,40 +597,25 @@ describe("the TOTP factor's parameters", () => {
 			"\t",
 		]) {
 			expect(
-				refusal(() => readMfaTotpSettings(withTotp({ issuer }))),
+				refusal(() => readTotp(withTotp({ issuer }))),
 				JSON.stringify(issuer),
-			).toContain("mfa.factors.totp.issuer");
+			).toContain("mfa-totp-factor.issuer");
 		}
 		for (const issuer of ["Example Co", "Exämple", "例え"]) {
-			expect(readMfaTotpSettings(withTotp({ issuer })).issuer).toBe(issuer);
+			expect(readTotp(withTotp({ issuer })).issuer).toBe(issuer);
 		}
 	});
 
-	it("refuses a configuration without the section, naming the reference.conf that carries it", () => {
-		for (const mfa of [{ mode: "off" }, { factors: {} }]) {
-			const message = refusal(() => readMfaTotpSettings({ ...valid(), mfa }));
-			expect(message).toContain("mfa.factors");
-			expect(message).toContain("@o3co/auth-provider-mfa/reference.conf");
-		}
+	it("refuses a missing section, naming the reference.conf that carries it", () => {
+		const message = refusal(() => readTotp(undefined));
+		expect(message).toContain("mfa-totp-factor");
+		expect(message).toContain("@o3co/auth-provider-mfa/reference.conf");
 	});
 
-	it("reads the factor's section without the key ring, the transaction's keys or the lock, which the factor never reads", () => {
-		expect(readMfaTotpSettings(configWith({ factors: { totp: { ...TOTP } } })).algorithm).toBe(
-			"SHA1",
-		);
-	});
-
-	it("is not read by readMfaSettings: the MFA module's settings read no factor's section, which is its factor module's", () => {
-		const noHost = { jwt: { issuer: "https://[2001:db8::1]" } };
-		for (const config of [
-			withTotp({ digits: 9 }),
-			withTotp({ issuer: "a:b" }),
-			withTotp({ enabled: "yes" }),
-			{ ...withTotp({}), oauth: noHost },
-			valid({ factors: undefined }),
-		]) {
-			const settings = readSettings(config);
-			expect(settings, JSON.stringify(config.mfa)).not.toHaveProperty("totp");
+	it("is not read by readMfaSettings: the MFA module's settings read the mfa section alone, whatever a factors key there holds", () => {
+		for (const factors of [{ totp: { digits: 9 } }, { totp: { enabled: "yes" } }, { totp: {} }]) {
+			const settings = readSettings(valid({ factors }));
+			expect(settings, JSON.stringify(factors)).not.toHaveProperty("totp");
 			expect(settings.encryptionKeys).toHaveLength(1);
 		}
 	});

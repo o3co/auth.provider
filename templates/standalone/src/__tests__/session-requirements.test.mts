@@ -18,16 +18,27 @@
  * The template's posture on session admission (the session-admission ADR's
  * D7). What it expects is its configuration's `sessionRequirements.expected`
  * — `[]` in the shipped `config/application.conf`, since `buildModules`
- * installs no module that registers a requirement — with `mfa` added when the
- * PARSED `mfa.mode` is not `off` (`expectedSessionRequirements`), never from
- * the raw `MFA_MODE`. The template installs no MFA module, so a mode that asks
- * for a second factor is refused at boot (`session-requirement-missing`)
- * rather than letting logins through on a password alone.
+ * installs no module that registers a requirement — with `mfa` added when
+ * `mfa.mode` is not `off` (`expectedSessionRequirements`). The template reads
+ * the mode itself (`readMfaMode`): from its own layers, where its
+ * `application.conf` binds `MFA_MODE`, held to `off`, `optional` and
+ * `required`, absent read as `off`. It installs no MFA module, so a mode that
+ * asks for a second factor is refused at boot (`session-requirement-missing`)
+ * rather than letting logins through on a password alone, and the `mfa`
+ * section is not handed to boot. That reading goes at the MFA ADR's
+ * build-order step 20, which installs the MFA module.
  */
 
-import { BootError } from "@o3co/auth-provider-core";
+import { BootError, type Module } from "@o3co/auth-provider-core";
 import { afterEach, describe, expect, it } from "vitest";
-import { expectedSessionRequirements, readOwnLayers, resolveLayers } from "../configPath.mjs";
+import {
+	expectedSessionRequirements,
+	readMfaMode,
+	readOwnLayers,
+	readSwitches,
+	resolveForBoot,
+	resolveLayers,
+} from "../configPath.mjs";
 import {
 	type Composition,
 	compose,
@@ -56,8 +67,9 @@ describe("what the template expects of session admission", () => {
 	it("is [] in the shipped configuration under the shipped mfa.mode, off, and the composition boots with it", async () => {
 		const own = readOwnLayers(ownFiles(), { env: SINGLE_ENV });
 		expect(resolveLayers(own, []).sessionRequirements).toEqual({ expected: [] });
+		expect(readMfaMode(readSwitches(own))).toBe("off");
 		current = await compose();
-		expect(current.config.mfa.mode).toBe("off");
+		expect(current.config).not.toHaveProperty("mfa");
 		expect(current.config.sessionRequirements).toEqual({ expected: [] });
 		expect([...(current.handle.components.sessionRequirementResolver?.entries() ?? [])]).toEqual(
 			[],
@@ -94,6 +106,42 @@ describe("what the template expects of session admission", () => {
 		});
 	});
 
+	it("refuses an MFA_MODE that is none of the three before boot, a RangeError naming mfa.mode that quotes nothing of it", async () => {
+		const err = await refusal(compose({ env: { ...SINGLE_ENV, MFA_MODE: "sentinel-mode" } }));
+		expect(err).toBeInstanceOf(RangeError);
+		expect(err).not.toBeInstanceOf(BootError);
+		expect((err as RangeError).message).toContain("mfa.mode");
+		expect((err as RangeError).message).not.toContain("sentinel-mode");
+	});
+
+	it("refuses an mfa section written as a value, not a section of keys, before boot, naming mfa.mode, though MFA_MODE says required", async () => {
+		for (const value of ["required", '"required"', "true", "1", "[required]", "null"]) {
+			const err = await refusal(
+				compose({
+					env: { ...SINGLE_ENV, MFA_MODE: "required" },
+					operatorHocon: `mfa = ${value}\n`,
+				}),
+			);
+			expect(err, value).toBeInstanceOf(RangeError);
+			expect(err, value).not.toBeInstanceOf(BootError);
+			expect((err as RangeError).message, value).toContain("mfa.mode");
+		}
+	});
+
+	it("hands boot an mfa section holding more than the mode, which boot names once as a section nothing owns", async () => {
+		for (const hocon of ['mfa.mdoe = "required"\n', "mfa.factors.totp.enabled = false\n"]) {
+			current = await compose({ operatorHocon: hocon });
+			expect(current.resolved, hocon).toHaveProperty("mfa");
+			const ignored = current.logger.lines.filter(
+				(line) => line.args[1] === "config_sections_ignored",
+			);
+			expect(ignored, hocon).toHaveLength(1);
+			expect(ignored[0]?.args[0], hocon).toEqual({ sections: ["mfa"] });
+			await current.handle.dispose();
+			current = undefined;
+		}
+	});
+
 	it("refuses the boot when the configuration expects mfa under mfa.mode = off and no installed module registers it", async () => {
 		const err = await refusal(
 			compose({ operatorHocon: 'sessionRequirements.expected = ["mfa"]\n' }),
@@ -104,6 +152,82 @@ describe("what the template expects of session admission", () => {
 			configKey: "sessionRequirements.expected",
 			missing: ["mfa"],
 		});
+	});
+});
+
+describe("where the template reads mfa.mode from", () => {
+	it("binds MFA_MODE in its own application.conf, with no default: absent, the section holds nothing", () => {
+		const bound = (env: Readonly<Record<string, string>>) =>
+			(readOwnLayers(ownFiles(), { env }).config.toObject() as { mfa?: unknown }).mfa;
+		expect(bound({ ...SINGLE_ENV, MFA_MODE: "required" })).toEqual({ mode: "required" });
+		expect(bound(SINGLE_ENV)).toEqual({});
+	});
+
+	it("hands boot no mfa section unless a loaded module reads it", () => {
+		const own = readOwnLayers(ownFiles(), { env: { ...SINGLE_ENV, MFA_MODE: "off" } });
+		const expected = expectedSessionRequirements(readSwitches(own));
+		expect(resolveForBoot(own, [], expected)).not.toHaveProperty("mfa");
+		// A module that reads the section: resolveForBoot reads its name and section alone.
+		const reader = { name: "mfa", section: {} } as unknown as Module;
+		expect((resolveForBoot(own, [reader], expected) as { mfa?: unknown }).mfa).toEqual({
+			mode: "off",
+		});
+	});
+
+	it("hands boot the mfa section when a loaded module's section sits under it, or moved from under it", () => {
+		const own = readOwnLayers(ownFiles(), { env: { ...SINGLE_ENV, MFA_MODE: "off" } });
+		const expected = expectedSessionRequirements(readSwitches(own));
+		for (const module of [
+			{ name: "nested", section: { at: "mfa.nested" } },
+			{ name: "fork-totp", section: { relocatedFrom: ["mfa.factors.totp"] } },
+			{ name: "fork-renamed", section: { relocatedFrom: { "mfa.factors.totp.window": "window" } } },
+		]) {
+			expect(
+				(resolveForBoot(own, [module as unknown as Module], expected) as { mfa?: unknown }).mfa,
+				module.name,
+			).toEqual({ mode: "off" });
+		}
+	});
+});
+
+describe("readMfaMode", () => {
+	it.each(["off", "optional", "required"] as const)("reads %s", (mode) => {
+		expect(readMfaMode({ mfa: { mode } })).toBe(mode);
+	});
+
+	it.each([
+		["no configuration", undefined],
+		["no mfa section", {}],
+		["no mode", { mfa: {} }],
+	])("reads %s as off", (_label, config) => {
+		expect(readMfaMode(config)).toBe("off");
+	});
+
+	it.each([
+		["a string", "required"],
+		["a boolean", true],
+		["a number", 1],
+		["a list", ["required"]],
+		["null", null],
+	])(
+		"refuses an mfa section that is %s, not a section of keys, with the RangeError naming mfa.mode",
+		(_label, mfa) => {
+			expect(() => readMfaMode({ mfa })).toThrow(
+				new RangeError('mfa.mode must be "off", "optional" or "required"'),
+			);
+		},
+	);
+
+	it.each([
+		["a mode it does not know", "maybe"],
+		["a casing slip", "Required"],
+		["an empty string", ""],
+		["null", null],
+		["a non-string", true],
+	])("refuses %s with a RangeError naming mfa.mode, never reading it as off", (_label, mode) => {
+		expect(() => readMfaMode({ mfa: { mode } })).toThrow(
+			new RangeError('mfa.mode must be "off", "optional" or "required"'),
+		);
 	});
 });
 
@@ -146,7 +270,7 @@ describe("expectedSessionRequirements", () => {
 		expect(expectedSessionRequirements({} as never)).toBeUndefined();
 	});
 
-	it("reads the parsed mode alone: a mode that is none of the three is a RangeError naming mfa.mode, never read as off", () => {
+	it("refuses a mode that is none of the three: a RangeError naming mfa.mode, never read as off", () => {
 		expect(() => expectedSessionRequirements({ mfa: { mode: "on" } } as never)).toThrow(
 			/mfa\.mode/,
 		);

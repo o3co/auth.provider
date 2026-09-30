@@ -26,7 +26,7 @@ The standalone template composes it from `FEDERATION_GRANTS_ENABLED=true` — se
 - the upstream authorization and refresh calls — the federation adapter's delegated-authorization capability, which only `@o3co/auth-provider-federation-oidc` implements ([`docs/offline-access.md`](docs/offline-access.md));
 - the consent page — the deployment's;
 - client authentication — `@o3co/auth-provider-oauth`'s `createClientAuthMiddleware`; and the issuer every URL here is built on — the oauth module's, read through the `oauthTokenSettings` slot when a composition holds it and from `oauth.jwt.issuer` when not ([#728](https://github.com/o3co/auth.provider/issues/728));
-- the browser session and login — `@o3co/auth-provider-session` (the `session-middleware` route, and the login page through the `loginEntry` slot its session module provides);
+- the browser session, login and the CSRF policy — `@o3co/auth-provider-session` (the `session-middleware` route, the login page through the `loginEntry` slot its session module provides, and the policy the consent answer is held to through its `csrfGuard` slot);
 - whether the session behind the browser's cookie may go on — core's session admission (`admitSession`, [the session-admission ADR](../core/docs/adr/2026-09-28-session-admission.md)): the durable session, the subject's sessions boundary and the registered session requirements. The browser half asks it at every step and keeps the flow's own checks ([below](#the-browser-half-connect-and-consent)).
 
 **Why a separate package.** What these routes disclose is an *upstream* access token, held on a user's standing consent, for a backend the user is not present at. Behind `/oauth/token` it would inherit grant dispatch, `token.issued`, this provider's token minting and a sender-constraint policy that cannot bind a credential another issuer minted; inside the oauth package it would make an optional feature part of every deployment's routing surface, so enabling ordinary OAuth would acquire this lifecycle by accident. The domain and the store ports are core's so that a store adapter depends on core and never on these routes.
@@ -62,7 +62,8 @@ const app = await createApp({
     // Where a client's intent waits for the user's consent and the upstream's answer.
     memoryFederationGrantIntentStoreModule,
     // …and the session modules you already run: the browser half mounts after
-    // `session-middleware` and admits the durable session behind the cookie.
+    // `session-middleware`, admits the durable session behind the cookie, and
+    // holds the consent answer to the session module's `csrfGuard`.
   ],
   bootstrapComponents: { config, pathResolver: import.meta.resolve, clientRepository, keyStore },
 });
@@ -72,7 +73,7 @@ const app = await createApp({
 
 The grant store is a separate module again, because a store is what a deployment installs whether or not it mounts these routes: a subject-wide revocation reaches grants through the same port (an ordinary logout leaves them standing, D14 — a grant is consent to act while the user is away). `memoryFederationGrantStoreModule` is single-replica only; a scaled deployment wires `redisFederationGrantStoreModule` from `@o3co/auth-provider-redis`. The same holds for the intent store: `memoryFederationGrantIntentStoreModule` on one replica, `redisFederationGrantIntentStoreModule` on several — an intent lodged on one replica is otherwise unknown to the one the browser lands on.
 
-Creating grants also needs, each refused at boot when missing rather than met by a user mid-flow: `federationGrants.consent.url` (the deployment's consent page — there is no default), a `callbackURL` on every connection, a `loginEntry` (the session module's, which needs `endpoints.login.url`), a `userSessionStore` (what session admission reads), and, once a connection is configured, either a `userRepository` whose `supportsFederatedIdentityLookup` answers `true` for every connection's registration (with `findSubjectByFederatedIdentity` beside it) or `federationGrants.identityLookup = "unsupported"`. The bundled `InMemoryUserRepository` covers no registration, so a deployment on it with a connection configured must choose the second. Each is described where the flow uses it, below.
+Creating grants also needs, each refused at boot when missing rather than met by a user mid-flow: `federationGrants.consent.url` (the deployment's consent page — there is no default), a `callbackURL` on every connection, a `loginEntry` (the session module's, which needs `endpoints.login.url`), a `csrfGuard` (the session module's CSRF policy, which the [consent answer](#get-and-post-sessionfederation-grantsconsent) is held to), a `userSessionStore` (what session admission reads), and, once a connection is configured, either a `userRepository` whose `supportsFederatedIdentityLookup` answers `true` for every connection's registration (with `findSubjectByFederatedIdentity` beside it) or `federationGrants.identityLookup = "unsupported"`. The bundled `InMemoryUserRepository` covers no registration, so a deployment on it with a connection configured must choose the second. Each is described where the flow uses it, below.
 
 Enabling the feature also requires a `subjectRevocation` component that carries the **grants boundary** — `revokeSessionsBefore` and `grantsRevokedBefore` beside the pair #296 shipped (D13). A grant outlives the session it was agreed through, so that boundary is what reaches one on a replica that never saw the withdrawal, and every disclosure is compared against it. Three compositions are refused at boot rather than per request:
 
@@ -169,6 +170,12 @@ say what each one means and what to do.
   another replica holds the refresh (`lock_timeout`) or won the write
   (`concurrent_update`) is `federation_grant_token_contended`, a warn: nothing
   is down.
+- **A consent answer the CSRF policy refuses** is one warn,
+  `federation_grant_consent_csrf_refused`, with `reason` — the guard's
+  (`foreign_origin`, `token_absent`, `token_invalid`), or `unrecognized` for a
+  verdict outside its contract, which is refused too — the request's
+  `correlationId`, and the `origin` its `Origin` header named, when it named
+  one.
 - **What escaped a handler** is `federation_grants_unexpected_error`, at error,
   with `site` and `err`: the handler that caught it (`token`, `status`,
   `revoke`, `create`, `reauthorize`, `connect`, `consent`, `callback`), or the
@@ -560,15 +567,18 @@ and plain text, never a JSON body.
    the same one — and the browser is sent to `federationGrants.consent.url`
    with `?challenge=`.
 
-It does not apply the login flow's `Sec-Fetch-Site` refusal: a client's site
-sending the browser here is what connect is for. That is sound only because
-holding the handle authorizes nothing — see "What the exemption depends on"
-below.
+It is not held to the navigation rule the account-link start is (the
+`csrfGuard`'s `checkNavigation`, which refuses `Sec-Fetch-Site: cross-site`):
+a client's site sending the browser here is what connect is for. That is
+sound only because holding the handle authorizes nothing — see "What the
+exemption depends on" below.
 
 ### `GET` and `POST /session/federation-grants/consent`
 
 The deployment page's contract, and deliberately the same one `/oauth/consent`
-has, so one page can serve both kinds of consent.
+has, so one page can serve both kinds of consent. The answer here is also
+held to the deployment's CSRF policy ([below](#the-answer-and-the-csrf-policy)),
+which a page posting as described there meets for both.
 
 `GET ?challenge=` answers what to show:
 
@@ -591,16 +601,60 @@ from the answer, so an absolute date computed when the page renders would be
 an estimate the grant does not keep. `continues_after_logout` is what D8
 obliges the page to tell the user. `expires_in` is what is left of the flow.
 
-The page's URL carries the challenge, so the page sends
-`Referrer-Policy: no-referrer` on its own responses: the provider's
-`no-referrer` covers only the provider's answers, and an outbound link the
-page renders would otherwise hand the challenge to its target.
+The page's URL carries the challenge, so the page keeps its URL on its own
+origin: it sends `Referrer-Policy: same-origin` on its own responses. The
+provider's `no-referrer` covers only the provider's answers, and an outbound
+link the page renders would otherwise hand the challenge to its target. Not
+`no-referrer`, however it is set — the header, `<meta name="referrer">`, or
+`rel="noreferrer"` on the form: a form post under it carries `Origin: null`,
+which the answer's CSRF check refuses whatever else the post carries. A host
+that sends `no-referrer` on every response (helmet's default, which the
+standalone template installs) sets `same-origin` on the page's own.
 
 `POST` with `challenge` and `decision` (`accept` or `deny`). Both success paths
 are `303`: an approval to the upstream's authorization endpoint, a refusal
 back to the client's `redirect_uri` with `error=access_denied`, the client's
 own `state` and the `grant_id`. A refused renewal ends that renewal and
 nothing else; the grant keeps working.
+
+#### The answer and the CSRF policy
+
+The answer is held to the deployment's CSRF policy — the `csrfGuard` slot the
+session module provides, the rule `POST /session/login` runs — before the
+route reads the answer's session binding, the challenge or the intent store,
+so a refused answer spends no consent (the session middleware and the route's
+throttle run before it, as on every route):
+
+- **The page's form post.** The page is on the provider's origin
+  (`federationGrants.consent.url` must be) and posts the answer as a form. The
+  browser's `Origin` names that origin, which is accepted.
+- **An origin on `session.csrf.trustedOrigins`** is accepted too, whatever
+  `Sec-Fetch-Site` says, `cross-site` included: the list names who may change
+  state here, so no client's origin belongs on it — connect's exemption
+  depends on that (the federation-grants ADR's D7). It does not make a page on
+  another origin a consent page: such a page cannot read the consent data,
+  and under `same-origin` its cross-origin post carries `Origin: null`.
+- **Any other origin** in the `Origin` — or, without one, the `Referer` — is
+  refused whatever else the answer carries: `Origin: null`, which a form post
+  from a page under `no-referrer` sends, among them.
+- **No origin at all** — a user agent that sends neither header: the answer
+  carries the guard's double-submit token, its cookie's value echoed in its
+  form field or its header — with the session module's guard, the
+  `<session.name>.csrf` cookie, `csrf_token` and `x-csrf-token`.
+  `GET /session/csrf` hands one out, as it does for `POST /session/login`. A
+  page may always include the token: it counts only when the answer names no
+  origin.
+
+The origin a request is compared with is the one the provider sees
+(`req.protocol` and `req.host`): behind a reverse proxy, `http.trustProxy`
+names the proxy, and the proxy forwards `X-Forwarded-Proto` and
+`X-Forwarded-Host` — or keeps the browser's `Host` — so that they are the ones
+the browser addressed, as `/session/login` needs. `http.trustProxy` alone
+does not help a proxy that rewrites `Host` and forwards no
+`X-Forwarded-Host`.
+
+A refused answer is logged as one warn line,
+`federation_grant_consent_csrf_refused` ([below](#what-is-logged)).
 
 | Exit | HTTP | `error` | `error_description` |
 |---|---:|---|---|
@@ -612,7 +666,8 @@ nothing else; the grant keeps working.
 | `decision` neither `accept` nor `deny` | 400 | `invalid_request` | (nothing is spent) |
 | Session admission does not admit the session: revoked, expired, predating the sessions boundary, or refused by a session requirement (a step-up among them) | 403 | `reauthentication_required` | `sign in again to continue` |
 | The client may no longer use the connection | 403 | `access_denied` | `connection_not_permitted` |
-| A cross-site `Sec-Fetch-Site` on the answer | 403 | `invalid_request` | `cross-site answer refused` |
+| The CSRF policy refuses the answer's origin — another origin's, or `Origin: null` — or answers a verdict outside its contract | 403 | `invalid_request` | `cross-site answer refused` |
+| The answer names no origin, and carries no valid CSRF token | 403 | `invalid_request` | `no origin and no valid csrf token` |
 | This deployment's own throttle (`federation_grants_browser`) | 429 | `rate_limited` | `provider` |
 | A store of this package could not answer | 503 | `temporarily_unavailable` | `storage` |
 | Session admission could not answer — the session store, the sessions boundary or a session requirement — described as every consumer of admission describes it (core's `describeAdmissionOutage`) | 503 | `temporarily_unavailable` | `session store unavailable`, `revocation store unavailable` or `session requirement unavailable` |
@@ -818,15 +873,15 @@ owner of a conflicting account.
 
 ### What the exemption depends on
 
-Connect skips the request-origin check because consent is its CSRF defence.
-That holds only while connect never approves anything, every grant and renewal
-goes through consent (first-party clients included), the answer needs the
-challenge and the exact session binding, the consent data is never readable
-cross-origin with credentials (hence the same-origin page), and the challenge
-never leaks through a referrer (`Referrer-Policy: no-referrer` on every
-response, the deployment's page included). Making consent skippable later is
-a redesign of this, not a UI
-option.
+Connect is held to no request-origin check because consent is its CSRF
+defence: the answer is held to the deployment's `csrfGuard`, and needs the
+challenge and the exact session binding. That holds only while connect never
+approves anything, every grant and renewal goes through consent (first-party
+clients included), the consent data is never readable cross-origin with
+credentials (hence the same-origin page), and the challenge never reaches
+another origin through a referrer (`Referrer-Policy: no-referrer` on the
+provider's responses, `same-origin` on the deployment's page). Making consent
+skippable later is a redesign of this, not a UI option.
 
 A flow that ended without a grant — declined, the wrong account, a session to
 refresh, a stale link — emits `federation.grant.authorization_failed` with a

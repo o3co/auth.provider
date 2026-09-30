@@ -26,15 +26,20 @@
  * for both `POST` outcomes. None inherits the JSON router's client
  * authentication, 404 or throttle body.
  *
- * Connect is cross-site by construction, so it skips the login flow's
- * `Sec-Fetch-Site` check and `session.csrf.trustedOrigins` is not widened to
- * client origins; consent is its CSRF defence. That holds only while connect
- * never approves or creates an upstream transaction, every grant and renewal
- * (first-party clients too) goes through consent, the answer needs the
- * challenge AND the exact session binding, the consent data is never readable
- * cross-origin with credentials, the challenge never leaks via a referrer
- * (`Referrer-Policy: no-referrer` on every response), and the answer re-admits
- * the session. Making consent skippable is a redesign of this exemption.
+ * Connect is cross-site by construction, so it is not held to the navigation
+ * rule the account-link start is (the `csrfGuard`'s `checkNavigation`), and
+ * `session.csrf.trustedOrigins` is not widened to client origins; consent is
+ * its CSRF defence. The answer is held to the deployment's `csrfGuard`
+ * (`check`: this origin, as core's `CsrfGuard` defines it, or a trusted one,
+ * or, naming no origin, the guard's double-submit token) and needs the
+ * challenge AND the exact session binding. That holds only while connect never approves
+ * or creates an upstream transaction, every grant and renewal (first-party
+ * clients too) goes through consent, the consent data is never readable
+ * cross-origin with credentials, the challenge never reaches another origin
+ * via a referrer (`Referrer-Policy: no-referrer` on every response here; the
+ * deployment's page keeps its own URL on its origin), and the answer
+ * re-admits the session. Making consent skippable is a redesign of this
+ * exemption.
  *
  * Whether the session may go on is core's `admitSession` on the cookie's claim,
  * as `federation_grants.connect`, `.consent` and `.callback` (the callback asks
@@ -63,6 +68,8 @@ import {
 	admitSession,
 	type ClientRepository,
 	type CookieCarrier,
+	type CsrfGuard,
+	type CsrfVerdict,
 	checkCanonicalIssuer,
 	checkResolver,
 	checkWithFailMode,
@@ -148,6 +155,11 @@ export interface FederationGrantBrowserRouterOptions {
 	 * `redirect_to` protocol: the session module's `loginEntry` slot.
 	 */
 	readonly login: Pick<LoginEntry, "urlFor">;
+	/**
+	 * The deployment's CSRF policy, the `csrfGuard` slot the session module
+	 * provides: the consent answer is held to its request rule.
+	 */
+	readonly csrfGuard: Pick<CsrfGuard, "check">;
 	/** `oauth.jwt.issuer`, held to core's `checkCanonicalIssuer`: every URL this router builds is built on it. */
 	readonly issuer: string;
 	/** The browser budget; its own `failMode` is the outage policy. */
@@ -183,6 +195,38 @@ const NO_PENDING =
 	"no pending consent for this challenge: it was answered, has expired, or was not issued to this session; start again";
 
 const BODY_LIMIT = "8kb";
+
+/**
+ * Why the consent answer was refused: the `csrfGuard`'s reason, or
+ * `unrecognized` for a verdict outside its contract.
+ */
+type CsrfRefusalReason = Extract<CsrfVerdict, { outcome: "refused" }>["reason"] | "unrecognized";
+
+/** The consent answer's `error_description` for each {@link CsrfRefusalReason}. */
+const CSRF_REFUSAL: Readonly<Record<CsrfRefusalReason, string>> = Object.freeze({
+	foreign_origin: "cross-site answer refused",
+	token_absent: "no origin and no valid csrf token",
+	token_invalid: "no origin and no valid csrf token",
+	unrecognized: "cross-site answer refused",
+});
+
+/**
+ * The guard's verdict read fail-closed: `null` for an acceptance, otherwise
+ * why not. Only `{ outcome: "accepted" }` accepts; a promise, another outcome
+ * or an unknown reason refuses, and a promise's rejection is handled here.
+ */
+function csrfRefusal(verdict: unknown): CsrfRefusalReason | null {
+	const read = verdict as { readonly outcome?: unknown; readonly reason?: unknown } | null;
+	if (typeof (verdict as { then?: unknown } | null)?.then === "function") {
+		(verdict as PromiseLike<unknown>).then(undefined, () => undefined);
+		return "unrecognized";
+	}
+	if (read?.outcome === "accepted") return null;
+	const reason = read?.outcome === "refused" ? read.reason : undefined;
+	return typeof reason === "string" && Object.hasOwn(CSRF_REFUSAL, reason)
+		? (reason as CsrfRefusalReason)
+		: "unrecognized";
+}
 
 // ---------------------------------------------------------------------------
 // Transport
@@ -846,11 +890,16 @@ export function createFederationGrantBrowserRouter(
 		parserRefusals,
 		admitted(shuttingDownJson, async (req, res) => {
 			try {
-				// Belt to the challenge's braces: a page on this origin sends
-				// `same-origin`, and a navigation from nowhere sends `none`.
-				const site = req.get("sec-fetch-site");
-				if (site !== undefined && site !== "same-origin" && site !== "none") {
-					jsonError(res, 403, "invalid_request", "cross-site answer refused");
+				// Asked before the route reads the session binding, the challenge or
+				// the intent store, so a refused answer spends no consent.
+				const refusal = csrfRefusal(options.csrfGuard.check(req));
+				if (refusal !== null) {
+					log.refused("federation_grant_consent_csrf_refused", {
+						reason: refusal,
+						correlationId: requestIdOf(res),
+						origin: req.get("origin"),
+					});
+					jsonError(res, 403, "invalid_request", CSRF_REFUSAL[refusal]);
 					return;
 				}
 				const body = (req.body ?? {}) as Record<string, unknown>;

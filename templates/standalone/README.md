@@ -284,16 +284,23 @@ It reads the two files above once, under one snapshot of the environment
 variable changed, while the process starts cannot make boot parse something
 other than what the modules were chosen by. First, before it knows its
 modules, it reads the switches `buildModules` chooses them by — the adapters,
-the federations, the log level — and what it derives the session requirements
-it expects from (`sessionRequirements`, `mfa.mode`) from the two files above
-over core's `reference.conf` alone (`readSwitches`, with core's transitional
-reader), parsing those paths (`SWITCHES`) and nothing else. It sees nothing
+the federations, the log level — and the `sessionRequirements` it derives the
+session requirements it expects from, from the two files above over core's
+`reference.conf` alone (`readSwitches`, with core's transitional reader),
+parsing those paths (`SWITCHES`) and nothing else. Beside them it reads
+`mfa.mode` itself (`readMfaMode`): the MFA module's key, which a composition
+root does not read, taken raw from the template's own layers — its
+`application.conf` binds `MFA_MODE`, with no default — and held to `off`,
+`optional` and `required`, absent read as `off`. It reads that key only until
+it installs the MFA module, at the MFA ADR's build-order step 20, which
+removes the reading. It sees nothing
 a package's `reference.conf` alone sets — none is layered yet — and a module
 you add to `buildModules` that reads its configuration when it is built adds
 the paths it reads to `SWITCHES`. Then it hands `createApp` the configuration as resolved over every
 loaded module's `reference.conf` (`resolveForBoot`), unparsed, with the session
-requirements phase one derived written in: boot parses it
-once, with every loaded module's schema, and strips no module's section. What
+requirements phase one derived written in, and without the `mfa` section
+unless a loaded module reads it: boot parses it once, with every loaded
+module's schema, and strips no module's section. What
 the template reads after boot — `http.trustProxy`, the port, the readiness
 timeout — it reads from the parsed configuration. A top-level section no
 loaded module owns is kept and logged once at boot as
@@ -402,8 +409,12 @@ other grant ignores it and mints the default.
 
 If you set `SESSION_SECURE=false` for local HTTP development or set `SESSION_DOMAIN`
 for shared-domain cookies, also set `SESSION_NAME` to a non-`__Host-` value such as
-`auth.sid`. The server fails fast when a `__Host-` cookie name is combined with
-attributes that browsers reject for that prefix.
+`auth.sid` — with `SESSION_SECURE=false`, one with no prefix: a `__Secure-` name
+needs `SESSION_SECURE=true` too. The server fails fast when a `__Host-` or
+`__Secure-` cookie name is combined with attributes that browsers reject for that
+prefix (in any case), on a `SESSION_NAME` that is not a cookie name (an RFC 6265
+token: no space, `;` or other separator), and on a `SESSION_DOMAIN` that is not a
+host name (a scheme, a port or a path).
 
 #### CSRF on `/session/login` and `/session/logout`
 
@@ -422,7 +433,9 @@ Two configuration notes:
   request.
 - If your login UI is served from a **different origin** than the provider,
   list that origin under `session.csrf.trustedOrigins` in your HOCON config.
-  `cors.allowedOrigins` does not confer CSRF trust — see
+  A listed origin can also answer federation-grant consents and device
+  verification, so a client's origin is never listed (the federation-grants
+  ADR's D7). `cors.allowedOrigins` does not confer CSRF trust — see
   [CORS](#cors) for what it does confer.
 
 ### CORS
@@ -753,7 +766,19 @@ is `/oauth/consent`'s, so one page can serve both. `GET
 duration after approval, not a date), `continues_after_logout` (which the page
 must show), and `expires_in` (what is left of the flow). `POST` with
 `challenge` and `decision` (`accept` | `deny`) answers `303` — to the upstream,
-or back to the client. Every acquisition and renewal goes through it.
+or back to the client. Every acquisition and renewal goes through it. The
+answer is held to the session module's CSRF policy: post it as a form from the
+page, and serve the page with `Referrer-Policy: same-origin` — not
+`no-referrer`, whether by the header, `<meta name="referrer">` or
+`rel="noreferrer"` on the form, under which the browser sends `Origin: null`
+and the answer is refused. This app's `helmet()` sends `no-referrer` on every
+response, so a page it serves sets `Referrer-Policy: same-origin` on its own
+route. Behind a proxy, `HTTP_TRUST_PROXY` names it, and it forwards
+`X-Forwarded-Proto` and `X-Forwarded-Host` (or keeps the browser's `Host`). A
+user agent that sends neither `Origin` nor `Referer` echoes the token
+`GET /session/csrf` hands out, as for `POST /session/login`; a page may always
+include it, since it counts only when neither is sent. The package README has
+the rule.
 
 **The login page** is the one `ENDPOINTS_LOGIN_URL` names, reached with
 `redirect_to=<the connect link>`; it signs the user in and navigates back to
@@ -995,7 +1020,7 @@ To add a custom module, import it in `src/buildModules.mts` and add it to the ar
 
 Keep the other rules there too: the session store module stays first, and a module that fills a store slot replaces that slot's adapter switch rather than being added beside it. [`src/app.mts`](src/app.mts) needs no change: it passes `buildModules(config, …)` to `createApp`, mounts the router `createApp` returns, and wires the server's lifetime — `installGracefulShutdown` (below) drains it and calls `handle.dispose()`.
 
-A module that contributes a session requirement — the MFA package's `mfa`, or one of your own — changes what "logged in" means, so its name goes in `sessionRequirements.expected`, which `config/application.conf` ships as `[]`: the template installs none. Boot compares the list with what the modules register. A name listed that nothing registers refuses the boot (`session-requirement-missing`), and so does a registered requirement the list leaves out (`session-requirements-undeclared`). When `mfa.mode` (`MFA_MODE`) is not `off`, the template adds `mfa` to the list (`expectedSessionRequirements`, [`src/configPath.mts`](src/configPath.mts)), keeping the names you wrote. It installs no MFA module, so such a mode refuses the boot (`session-requirement-missing`) rather than let logins through on a password alone.
+A module that contributes a session requirement — the MFA package's `mfa`, or one of your own — changes what "logged in" means, so its name goes in `sessionRequirements.expected`, which `config/application.conf` ships as `[]`: the template installs none. Boot compares the list with what the modules register. A name listed that nothing registers refuses the boot (`session-requirement-missing`), and so does a registered requirement the list leaves out (`session-requirements-undeclared`). When `mfa.mode` (`MFA_MODE`) is not `off`, the template adds `mfa` to the list (`expectedSessionRequirements`, [`src/configPath.mts`](src/configPath.mts)), keeping the names you wrote. It installs no MFA module, so such a mode refuses the boot (`session-requirement-missing`) rather than let logins through on a password alone; a mode that is none of the three is refused before boot, naming `mfa.mode`. The template reads the mode itself, before it chooses its modules, until it installs the MFA module (the MFA ADR's build-order step 20).
 
 ### Shutdown guarantees
 

@@ -23,7 +23,6 @@
  * registers, so both are held to one list. Nothing here runs a test.
  */
 
-import type { MfaMode } from "../../mfa/mode.mjs";
 import type { UserSession } from "../../user-sessions/types.mjs";
 import { type AcrTable, readAcrTable } from "../acr.mjs";
 import type { Admission, RegisteredStepUpPage } from "../requirement.mjs";
@@ -79,7 +78,8 @@ export type MergeDecision =
 /** One row: what it pins, as the ADR words it; its mode, session, request and factors; and the rule's decision. */
 export interface MergeRow {
 	readonly row: string;
-	readonly mode: MfaMode;
+	/** The MFA module's `mfa.mode` the row runs under. */
+	readonly mode: "off" | "optional" | "required";
 	/** The record admission reads, `sid-1` of `user-1`; `null` for no store. */
 	readonly session: UserSession | null;
 	readonly acrValues?: readonly string[];

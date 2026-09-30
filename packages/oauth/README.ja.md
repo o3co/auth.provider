@@ -361,7 +361,7 @@ grant_type=client_credentials
 
 ページが表示するものを登録すること: クライアントレコードの `clientName`（RFC 7591 `client_name`）と `clientUri`（`client_uri`）。ループバックの `redirect_uri` を持つネイティブクライアントは、MCP 認可仕様がページに警告を求めるケースである — `redirect_uri` が応答にあるのはまさにそのためである。
 
-**Client ID Metadata Document のクライアントは自分で名乗る。** その `client_name` と `client_uri` は、ホストを支配する誰かが書いたドキュメントから来るので、"Google Drive" と名乗るのに何のコストも無い。唯一の検証済みの事実は `client_id` の URL が名指すホストで、応答はそれを `client_id_host` として運ぶ: ドラフトの求めるとおりそれを目立つように表示し、`client_name` を単独で見せないこと。`client_uri` のリンクがページ URL とそのチャレンジをそのホストに渡さないよう、ページは `Referrer-Policy: no-referrer`（または `strict-origin`）で配信すること。
+**Client ID Metadata Document のクライアントは自分で名乗る。** その `client_name` と `client_uri` は、ホストを支配する誰かが書いたドキュメントから来るので、"Google Drive" と名乗るのに何のコストも無い。唯一の検証済みの事実は `client_id` の URL が名指すホストで、応答はそれを `client_id_host` として運ぶ: ドラフトの求めるとおりそれを目立つように表示し、`client_name` を単独で見せないこと。`client_uri` のリンクがページ URL とそのチャレンジをそのホストに渡さないよう、ページは `Referrer-Policy: same-origin`（または `strict-origin`）で配信すること。`no-referrer` ではない: federation-grant の同意にも答えるページは、その回答を `Origin: null` で POST することになり、federation-grants の回答はそれを拒否する（[その README](../federation-grants/README.md#the-answer-and-the-csrf-policy)）。
 
 ## Client ID Metadata Documents (#529)
 

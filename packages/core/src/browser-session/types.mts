@@ -82,6 +82,11 @@ export type NavigationVerdict =
  *   none) the `Origin` or `Referer` is held to this origin and the trusted
  *   ones, and a request naming neither is refused.
  *
+ * *This origin* is the request's own: its protocol and host as Express reads
+ * them (`req.protocol`, `req.host`), the forwarded ones under `trust proxy`.
+ * An `Origin` or `Referer` that is not a URL — `Origin: null` among them —
+ * names another origin.
+ *
  * The token's signing key is derived from the session cookie's secret, which
  * the session store's module owns, while the session module provides the
  * guard: the guard's provider signs and checks the token through

@@ -199,7 +199,7 @@ pnpm run start
 2. **`config/application.conf`** — このデプロイの設定。
 3. **読み込むモジュールの各パッケージの `reference.conf`**、その次に **`@o3co/auth-provider-core` のもの** — ライブラリのデフォルト。インストール済みパッケージから解決される: 各モジュールが自分のパッケージのファイルを宣言し、core の `moduleReferences(modules)` がそれを core のものを最後にして列挙する。上の 2 ファイルのどちらも設定していないキーは、ここから値を得る。
 
-上の 2 ファイルは、環境変数の一つのスナップショットのもとで一度だけ読み（`readOwnLayers`）、その一度の読み込みから二つの段階を組み立てる — 起動中にファイルが置き換えられても、変数が変わっても、boot がモジュールを選んだものと違うものをパースすることはない。読み込みは二段階で行う（[#728](https://github.com/o3co/auth.provider/issues/728)、[`src/configPath.mts`](src/configPath.mts)）。まず、モジュールを知る前に、`buildModules` がモジュールを選ぶスイッチ — アダプター、フェデレーション、ログレベル — と、期待するセッション要件を導く元（`sessionRequirements`、`mfa.mode`）を、上の 2 ファイルを core の `reference.conf` だけの上に重ねて読む（`readSwitches`、core の transitional reader で読む）。パースするのはそれらのパス（`SWITCHES`）だけである。パッケージの `reference.conf` だけが設定するものはこの段階では見えない — まだどれも重ねていない — ので、組み立て時に設定を読むモジュールを `buildModules` に加えるなら、そのモジュールが読むパスを `SWITCHES` に加える。次に、読み込むすべてのモジュールの `reference.conf` の上に解決した設定を、第一段階で導いたセッション要件を書き込んで、パースせずに `createApp` に渡す（`resolveForBoot`）: boot はそれを、読み込まれたすべてのモジュールのスキーマで一度だけパースし、どのモジュールのセクションも取り除かない。boot の後にテンプレートが読むもの — `http.trustProxy`、ポート、readiness のタイムアウト — は、パース済みの設定から読む。読み込まれたどのモジュールも所有しないトップレベルのセクションは残され、boot 時に `config_sections_ignored` として一度だけログに出る: セクション名の綴り間違いはここに現れる。
+上の 2 ファイルは、環境変数の一つのスナップショットのもとで一度だけ読み（`readOwnLayers`）、その一度の読み込みから二つの段階を組み立てる — 起動中にファイルが置き換えられても、変数が変わっても、boot がモジュールを選んだものと違うものをパースすることはない。読み込みは二段階で行う（[#728](https://github.com/o3co/auth.provider/issues/728)、[`src/configPath.mts`](src/configPath.mts)）。まず、モジュールを知る前に、`buildModules` がモジュールを選ぶスイッチ — アダプター、フェデレーション、ログレベル — と、期待するセッション要件を導く元の `sessionRequirements` を、上の 2 ファイルを core の `reference.conf` だけの上に重ねて読む（`readSwitches`、core の transitional reader で読む）。パースするのはそれらのパス（`SWITCHES`）だけである。それと並んで `mfa.mode` をテンプレート自身が読む（`readMfaMode`）: composition root が読まない MFA モジュールのキーを、テンプレート自身のレイヤーから生のまま — `application.conf` が既定値なしで `MFA_MODE` を束縛する — 読み、`off`・`optional`・`required` に限り、無いときは `off` とする。このキーを読むのは MFA モジュールを組み込むまでで、MFA ADR のビルド順のステップ 20 がこの読み込みを取り除く。パッケージの `reference.conf` だけが設定するものはこの段階では見えない — まだどれも重ねていない — ので、組み立て時に設定を読むモジュールを `buildModules` に加えるなら、そのモジュールが読むパスを `SWITCHES` に加える。次に、読み込むすべてのモジュールの `reference.conf` の上に解決した設定を、第一段階で導いたセッション要件を書き込み、読み込むモジュールが読まない限り `mfa` セクションを除いて、パースせずに `createApp` に渡す（`resolveForBoot`）: boot はそれを、読み込まれたすべてのモジュールのスキーマで一度だけパースし、どのモジュールのセクションも取り除かない。boot の後にテンプレートが読むもの — `http.trustProxy`、ポート、readiness のタイムアウト — は、パース済みの設定から読む。読み込まれたどのモジュールも所有しないトップレベルのセクションは残され、boot 時に `config_sections_ignored` として一度だけログに出る: セクション名の綴り間違いはここに現れる。
 
 overlay の値は `application.conf` より優先される。scaffold には `development.conf` と `production.conf` が同梱されている。別の環境（例: `staging`）を追加するときは `config/staging.conf` を作成し、`CONFIG_ENV=staging` を設定する。`{ENV}.conf` が存在しない場合は起動時エラーになる — タイポは黙ってデフォルトにフォールバックせず、fail-fast する。
 
@@ -287,7 +287,7 @@ openssl pkey -in jwt-private.pem -pubout -out jwt-public.pem
 | `SESSION_STORAGE_REDIS_URL` | `redis://localhost:6379` | セッションストア用 Redis 接続 URL |
 | `SESSION_STORAGE_REDIS_PASSWORD` | — | セッションストア用 Redis パスワード |
 
-ローカルの HTTP 開発のために `SESSION_SECURE=false` を設定する場合や、ドメインを共有する Cookie のために `SESSION_DOMAIN` を設定する場合は、`SESSION_NAME` も `auth.sid` のような `__Host-` でない値にすること。`__Host-` の Cookie 名が、ブラウザがその prefix に対して拒否する属性と組み合わされると、サーバーは fail-fast する。
+ローカルの HTTP 開発のために `SESSION_SECURE=false` を設定する場合や、ドメインを共有する Cookie のために `SESSION_DOMAIN` を設定する場合は、`SESSION_NAME` も `auth.sid` のような `__Host-` でない値にすること — `SESSION_SECURE=false` なら接頭辞の無い値にする: `__Secure-` の名前も `SESSION_SECURE=true` を要する。`__Host-` や `__Secure-`（大文字小文字は問わない）の Cookie 名が、ブラウザがその prefix に対して拒否する属性と組み合わされると、`SESSION_NAME` が Cookie の名前（RFC 6265 のトークン: 空白、`;` などの区切り文字を含まない）でないと、また `SESSION_DOMAIN` がホスト名でない（スキーム、ポート、パスを含む）と、サーバーは fail-fast する。
 
 #### `/session/login` と `/session/logout` の CSRF 対策
 
@@ -296,7 +296,7 @@ openssl pkey -in jwt-private.pem -pubout -out jwt-public.pem
 設定上の注意が 2 点ある:
 
 - TLS 終端プロキシの背後では `HTTP_TRUST_PROXY` を設定する（`true` ではなく、プロキシのアドレスまたは CIDR レンジに）。設定しないと `req.protocol` は `http` と読まれる一方でブラウザは `Origin: https://…` を送るため、origin 側の判定がすべてのリクエストを拒否する。
-- ログイン UI をプロバイダーと**別 origin** で配信している場合は、その origin を HOCON 設定の `session.csrf.trustedOrigins` に列挙する。`cors.allowedOrigins` は CSRF 上の信頼を与えない — それが何を与えるかは [CORS](#cors) を参照。
+- ログイン UI をプロバイダーと**別 origin** で配信している場合は、その origin を HOCON 設定の `session.csrf.trustedOrigins` に列挙する。列挙した origin はフェデレーショングラントの同意とデバイス検証にも回答できるので、クライアントの origin は決して載せない（federation-grants ADR の D7）。`cors.allowedOrigins` は CSRF 上の信頼を与えない — それが何を与えるかは [CORS](#cors) を参照。
 
 ### CORS
 
@@ -494,7 +494,7 @@ worker:
 
 **クライアント側から見たフロー。** `POST /oauth/federation-grants`（クライアント認証付き）は `sub` に対する intent を登録し、`grant_id` と `connect_uri` を返す。クライアントはユーザーのブラウザをそこへ送る。プロバイダーは必要ならユーザーをサインインさせ、デプロイ側の同意ページを見せ、上流へ送り、`grant_id` と `state` を付けてブラウザをクライアントの `redirect_uri` に戻す — トークンは決して載せない。その後クライアントは、自身の資格情報とユーザーの `sub` を使い、ユーザー不在のまま `/oauth/federation-grants/:grantId/token`、`/status`、`/revoke` を呼ぶ。
 
-**同意ページ**はデプロイ側のもので、プロバイダーと same-origin であり、その契約は `/oauth/consent` のものと同じなので、1 つのページで両方を担える。`GET /session/federation-grants/consent?challenge=…` は JSON を返す: `client_id`、`client_name`、`connection`、`scopes`、`resource`、`grant_expires_in`（承認後の期間であって日付ではない）、`continues_after_logout`（ページが必ず表示すること）、`expires_in`（フローの残り時間）。`challenge` と `decision`（`accept` | `deny`）を付けた `POST` は `303` を返す — 上流へ、またはクライアントへ戻す。取得も更新もすべてここを通る。
+**同意ページ**はデプロイ側のもので、プロバイダーと same-origin であり、その契約は `/oauth/consent` のものと同じなので、1 つのページで両方を担える。`GET /session/federation-grants/consent?challenge=…` は JSON を返す: `client_id`、`client_name`、`connection`、`scopes`、`resource`、`grant_expires_in`（承認後の期間であって日付ではない）、`continues_after_logout`（ページが必ず表示すること）、`expires_in`（フローの残り時間）。`challenge` と `decision`（`accept` | `deny`）を付けた `POST` は `303` を返す — 上流へ、またはクライアントへ戻す。取得も更新もすべてここを通る。回答は session モジュールの CSRF ポリシーに照らされる: ページからフォームで POST し、ページは `Referrer-Policy: same-origin` で配信する — `no-referrer` ではない（ヘッダー、`<meta name="referrer">`、フォームの `rel="noreferrer"` のいずれによるものも）。その下ではブラウザが `Origin: null` を送り、回答は拒否される。このアプリの `helmet()` はすべての応答に `no-referrer` を付けるので、このアプリが配信するページは自身のルートで `Referrer-Policy: same-origin` を付ける。プロキシの背後では `HTTP_TRUST_PROXY` がそのプロキシを指し、プロキシは `X-Forwarded-Proto` と `X-Forwarded-Host` を転送する（またはブラウザの `Host` を保つ）。`Origin` も `Referer` も送らないユーザーエージェントは、`POST /session/login` と同じく `GET /session/csrf` が渡すトークンを送り返す。トークンはどちらも送られないときにだけ効くので、ページはいつでもトークンを含めてよい。規則はパッケージの README にある。
 
 **ログインページ**は `ENDPOINTS_LOGIN_URL` が指すもので、`redirect_to=<the connect link>` 付きで到達する。ユーザーをサインインさせ、`/oauth/authorize` の場合と同様に、そのリンクへそのまま戻る。そのリンクを `POST /session/login` の `redirect_to` として送信してはならない: そのルートの完全一致 allowlist はランディングページ用で、フローごとの handle は拒否する。
 
@@ -663,7 +663,7 @@ probe は接続を開いた builder が登録するため、リストはこの�
 
 そこにある他のルールも守ること: セッションストアモジュールは先頭のままにし、ストアスロットを埋めるモジュールは、そのスロットのアダプタースイッチの横に追加するのではなく、スイッチを置き換える。[`src/app.mts`](src/app.mts) は変更不要である: `buildModules(config, …)` を `createApp` に渡し、`createApp` が返すルーターをマウントし、サーバーのライフタイムを配線している — `installGracefulShutdown`（下記）がサーバーを drain し、`handle.dispose()` を呼ぶ。
 
-セッション要件を寄与するモジュール — MFA パッケージの `mfa`、あるいは自前のもの — は「ログイン済み」の意味を変えるので、その名前を `sessionRequirements.expected` に書く。`config/application.conf` はこれを `[]` として出荷する: テンプレートは何も組み込まない。boot はこのリストをモジュールが登録したものと比較する。リストにあって何も登録しない名前はブートを拒否し（`session-requirement-missing`）、登録された要件をリストが書き漏らしても拒否する（`session-requirements-undeclared`）。`mfa.mode`（`MFA_MODE`）が `off` でないとき、テンプレートはリストに `mfa` を加える（`expectedSessionRequirements`、[`src/configPath.mts`](src/configPath.mts)）。書いた名前はそのまま残る。テンプレートは MFA モジュールを組み込まないので、そのようなモードはパスワードだけでログインを通すのではなく、ブートを拒否する（`session-requirement-missing`）。
+セッション要件を寄与するモジュール — MFA パッケージの `mfa`、あるいは自前のもの — は「ログイン済み」の意味を変えるので、その名前を `sessionRequirements.expected` に書く。`config/application.conf` はこれを `[]` として出荷する: テンプレートは何も組み込まない。boot はこのリストをモジュールが登録したものと比較する。リストにあって何も登録しない名前はブートを拒否し（`session-requirement-missing`）、登録された要件をリストが書き漏らしても拒否する（`session-requirements-undeclared`）。`mfa.mode`（`MFA_MODE`）が `off` でないとき、テンプレートはリストに `mfa` を加える（`expectedSessionRequirements`、[`src/configPath.mts`](src/configPath.mts)）。書いた名前はそのまま残る。テンプレートは MFA モジュールを組み込まないので、そのようなモードはパスワードだけでログインを通すのではなく、ブートを拒否する（`session-requirement-missing`）。3 つのどれでもないモードは、ブートの前に `mfa.mode` を名指して拒否する。テンプレートは MFA モジュールを組み込むまで（MFA ADR のビルド順のステップ 20）、モジュールを選ぶ前にこのモードを自ら読む。
 
 ### シャットダウンの保証
 

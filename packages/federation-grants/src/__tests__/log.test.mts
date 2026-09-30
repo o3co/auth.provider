@@ -49,6 +49,13 @@ describe("createFederationGrantLog", () => {
 		});
 	});
 
+	it("writes a refused request at warn, object-first, with no err", () => {
+		const { logger, lines } = createLogSpy();
+		createFederationGrantLog(logger).refused("x_refused", { reason: "foreign_origin" });
+		expect(written(lines)).toEqual(["warn x_refused"]);
+		expect(payloadOf(lines, "x_refused")).toEqual({ reason: "foreign_origin" });
+	});
+
 	it("carries no err for a line with no cause, and one for a cause that is undefined", () => {
 		const { logger, lines } = createLogSpy();
 		const log = createFederationGrantLog(logger);
