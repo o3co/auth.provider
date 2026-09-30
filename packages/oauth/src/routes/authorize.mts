@@ -17,13 +17,10 @@
 import {
 	type Admission,
 	type AdmissionDeps,
-	type AuditSink,
 	admitSession,
 	auditErrorList,
 	auditErrorText,
 	boundPolicyAudience,
-	buildCanonicalRequestUrl,
-	type ClientRepository,
 	type CodeRepository,
 	type ConsentStore,
 	checkResolver,
@@ -33,27 +30,21 @@ import {
 	describeAdmissionOutage,
 	emitAuditEvent,
 	extractResourceParam,
-	type GrantPolicyHook,
 	isEmailVerified,
 	isGrantTypeAllowed,
 	isWellFormedClientId,
 	isWellFormedErrorCode,
 	LOGIN_RETURN_PARAMETER,
-	type Logger,
 	type LoginEntry,
 	logClientRepositoryUnavailable,
 	logGrantPolicyUnavailable,
 	loggableError,
 	matchesRegisteredRedirectUri,
-	type PendingConsentStore,
 	type PublicClient,
 	parseScopeTokens,
 	readSpaceDelimitedParameter,
-	type SessionRequirementResolver,
-	type SubjectRevocation,
 	sanitizeErrorText,
 	type UserSession,
-	type UserSessionStore,
 	unrepresentedResources,
 } from "@o3co/auth-provider-core";
 import type { Request, RequestHandler, Response } from "express";
@@ -63,7 +54,13 @@ import {
 	PKCE_METHOD_S256,
 	pkceMethodsForClient,
 } from "../grants/pkce.mjs";
-import type { ResolvedOAuthOptions } from "../resolveOAuthOptions.mjs";
+import {
+	type AuthorizeContext,
+	type AuthorizeHandlerOptions,
+	authorizeParams,
+	authorizeRequestUrl,
+	toStr,
+} from "./authorizeContext.mjs";
 import { newConsentChallenge, PENDING_CONSENT_TTL_MS } from "./consent.mjs";
 import {
 	REAUTH_ASK_PARAM,
@@ -72,53 +69,11 @@ import {
 	reauthAskStoreFor,
 } from "./reauthAsk.mjs";
 
+export type { AuthorizeHandlerOptions } from "./authorizeContext.mjs";
+export { authorizeParams } from "./authorizeContext.mjs";
+
 /** The action /authorize admits, as `oauthModule` registers it. */
 const AUTHORIZE_ACTION = "oauth.authorize" satisfies keyof typeof OAUTH_ROUTER_ADMISSION_ACTIONS;
-
-export interface AuthorizeHandlerOptions {
-	readonly clientRepository: ClientRepository;
-	readonly codeRepository: CodeRepository;
-	readonly grantPolicy?: GrantPolicyHook;
-	readonly auditSink?: AuditSink;
-	readonly logger: Logger;
-	/** The canonical issuer, config-only: never request-derived (Host is attacker-controlled). */
-	readonly issuer: string;
-	/**
-	 * The login trip for a browser that must log in: `urlFor(returnTo)` is the
-	 * login page with the request to come back to — the `loginEntry` slot's.
-	 */
-	readonly login: Pick<LoginEntry, "urlFor">;
-	/**
-	 * Consent-page URL for a client that is not first-party. A thunk, evaluated
-	 * per request.
-	 */
-	readonly consentUrl: () => string;
-	/** Where consent records live. Without it a client that is not first-party is refused. */
-	readonly consentStore?: ConsentStore;
-	/**
-	 * Where a request is parked while the consent page asks. Wired with
-	 * `consentStore`; the router refuses one without the other.
-	 */
-	readonly pendingConsentStore?: PendingConsentStore;
-	/** The `oauth.*` knobs, resolved once at router composition. */
-	readonly oauth: ResolvedOAuthOptions;
-	/**
-	 * The durable session store admission reads the cookie's session from.
-	 * Without it (no session-backed login) admission decides on the cookie alone.
-	 */
-	readonly userSessionStore?: UserSessionStore;
-	/**
-	 * The subject-revocation boundary admission applies to the live record: a
-	 * session established before the subject's sessions were revoked is refused
-	 * here too, not only at the token side.
-	 */
-	readonly subjectRevocation?: SubjectRevocation;
-	/**
-	 * The registered session requirements admission asks about. Required: a
-	 * handler built without one is refused.
-	 */
-	readonly requirements: SessionRequirementResolver;
-}
 
 /**
  * The parameter this endpoint adds to a page it sends the browser to, naming
@@ -132,31 +87,6 @@ export const REDIRECT_TO_PARAM = LOGIN_RETURN_PARAMETER;
 const loginRedirect = (res: Response, login: Pick<LoginEntry, "urlFor">, target: string): void => {
 	res.redirect(login.urlFor(target));
 };
-
-/**
- * Per-request state threaded through the §4.1 steps below. Constructed only
- * after `resolveClientAndRedirectUri` validated `redirect_uri` against the
- * client allowlist, so holding it is itself the proof that redirect-based
- * errors (RFC 6749 §4.1.2.1) are permitted.
- */
-interface AuthorizeContext {
-	readonly req: Request;
-	readonly res: Response;
-	readonly opts: AuthorizeHandlerOptions;
-	/** The configured issuer's origin — what a parked request's URL is built from. */
-	readonly issuerOrigin: string;
-	readonly clientId: string;
-	readonly redirectUri: string;
-	/** Verbatim `state` when it was a single string; echoed on every response. */
-	readonly state: string | undefined;
-	/**
-	 * The request's parameters — query string on GET, form body on POST — so
-	 * every check reads the same object however the request arrived.
-	 */
-	readonly params: Record<string, unknown>;
-}
-
-const toStr = (v: unknown): string | undefined => (typeof v === "string" ? v : undefined);
 
 // RFC 6749 §4.1.2.1: errors that prevent redirect (invalid client or
 // redirect_uri) are 400 JSON; the rest redirect with error params. The same
@@ -325,28 +255,6 @@ const checkFirstPartyOrConsentable = async (
 const subjectOf = (req: Request): string | null => {
 	const id = req.session?.user?.id;
 	return typeof id === "string" && id.length > 0 ? id : null;
-};
-
-/**
- * This authorization request as a GET URL on the issuer's origin, with a
- * POST's form parameters written as the query: what the consent, login and
- * step-up pages return to, and what an ask is bound to. Not
- * `req.originalUrl`: a POST's URL alone names no client, `redirect_uri` or
- * PKCE.
- */
-const authorizeRequestUrl = (issuerOrigin: string, req: Request): URL => {
-	const url = new URL(buildCanonicalRequestUrl(issuerOrigin, req.originalUrl));
-	url.search = "";
-	for (const [name, value] of Object.entries(authorizeParams(req))) {
-		if (typeof value === "string") {
-			url.searchParams.append(name, value);
-		} else if (Array.isArray(value)) {
-			for (const item of value) {
-				if (typeof item === "string") url.searchParams.append(name, item);
-			}
-		}
-	}
-	return url;
 };
 
 /**
@@ -547,16 +455,6 @@ const SINGLE_VALUED_QUERY_PARAMS = [
 	// One JSON object, read by `checkClaimsParameter`.
 	"claims",
 ] as const;
-
-/**
- * The authorization request's parameters: a POST's form body or a GET's
- * query (OIDC Core §3.1.2.1 requires both methods). Read in one place so no
- * check silently applies to GET alone.
- */
-export const authorizeParams = (req: Request): Record<string, unknown> =>
-	req.method === "POST"
-		? ((req.body ?? {}) as Record<string, unknown>)
-		: (req.query as Record<string, unknown>);
 
 /** The `prompt` values this server honours. */
 type PromptDirective = {
