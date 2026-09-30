@@ -17,11 +17,9 @@ import type {
 	CodeRepositoryClient,
 	ConsentRecordFields,
 	ConsentStoreClient,
-	DeviceCodeRecordFields,
 	DeviceCodeStoreClient,
 	DisposableRefreshTokenFamilyClient,
 	FederationGrantConsentAnswered,
-	FederationGrantHashFields,
 	FederationGrantIntentAdmission,
 	FederationGrantIntentStoreClient,
 	FederationGrantStoreClient,
@@ -44,6 +42,14 @@ import type {
 	SubjectSessionIndexMultiClient,
 	UserSessionStoreClient,
 } from "./clients.mjs";
+import {
+	deviceCodeRecordOf,
+	fgFields,
+	fgiText,
+	fgNumber,
+	fgWritten,
+	hashFields,
+} from "./ioredis/codec.mjs";
 import {
 	CONSENT_FIND,
 	CONSENT_GRANT,
@@ -140,24 +146,6 @@ async function runScript(
 	script.cached = true;
 	return reply;
 }
-
-/**
- * `HGETALL`'s flat `[field, value, …]` reply — as a script returns it — as
- * the hash's fields. Anything but a list is no fields. The one reading of
- * that reply, shared by every store here that has a script answer a hash.
- */
-const hashFields = (flat: unknown): Record<string, string> => {
-	const pairs = Array.isArray(flat) ? (flat as string[]) : [];
-	const fields: Record<string, string> = {};
-	for (let i = 0; i + 1 < pairs.length; i += 2) {
-		fields[pairs[i] as string] = pairs[i + 1] as string;
-	}
-	return fields;
-};
-
-/** `HGETALL`'s flat `[field, value, …]` reply as the record's fields. */
-const deviceCodeRecordOf = (flat: unknown): DeviceCodeRecordFields =>
-	hashFields(flat) as unknown as DeviceCodeRecordFields;
 
 /**
  * Whether `LUA_COMPARE_AND_DELETE` is expected in the server's script cache: `true` lets the
@@ -780,24 +768,6 @@ export interface FederationGrantRedisCommands {
 	): Promise<"OK" | null>;
 }
 
-/** A number as a Redis argument: never in exponent form, whatever its magnitude. */
-const fgNumber = (value: number): string =>
-	Number.isFinite(value) ? value.toFixed(0) : String(value);
-
-/** `HGETALL`'s flat `[field, value, …]` reply as the record's fields. */
-const fgFields = (flat: unknown): FederationGrantHashFields =>
-	hashFields(flat) as unknown as FederationGrantHashFields;
-
-/**
- * A write's reply: `[1, fields]` when it happened, `[0]` when it was refused.
- * Absence and a failed precondition are the same answer on purpose: the
- * record may change again before the caller looks, so the port re-reads.
- */
-const fgWritten = (reply: unknown): FederationGrantHashFields | null => {
-	if (!Array.isArray(reply) || reply[0] !== 1) return null;
-	return fgFields(reply[1]);
-};
-
 /**
  * The federation grant store's connection, separate from {@link makeIoredisClients} so that a
  * Cluster deployment can have one.
@@ -994,8 +964,6 @@ const fgiLiveUntil = (fields: readonly (string | null)[], nowMs: number): boolea
 	const expiresAt = Number(fields[0]);
 	return Number.isFinite(expiresAt) && nowMs < expiresAt;
 };
-
-const fgiText = (reply: unknown): string | null => (typeof reply === "string" ? reply : null);
 
 const ADMISSION_REFUSALS = new Set(["limit", "collision", "closed", "expired"]);
 
