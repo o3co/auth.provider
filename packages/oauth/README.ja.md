@@ -163,7 +163,7 @@ standalone テンプレートの [`buildModules.mts`](../../templates/standalone
 | ディレクトリ | 責務 |
 |---|---|
 | `src/`（ルート） | 組み立て: `oauthModule`、`oauthAuthorizationModule`、`oauthSessionModule`（4 つ目の `subjectRevocationServiceModule` は、それが配線するカスケードと並んで `logout/` にある）、`createOAuthRouter`（下のすべてのルートを組み合わせる）、オプションの解決、core のアクセストークンヘッダーパーサーの再 export、そして依存先が落ちていて検証できなかったトークンに全ルートが返す 1 つの答え（`verificationUnavailable.mts`）。 |
-| [`routes/`](./src/routes) | エンドポイント群ごとのルーターまたはハンドラー — authorize、consent、logout、federation token、revoke、userinfo。ルートは `grants/`、`logout/`、`middleware/`、`clients/` を使ってよいが、それらのどれもルートを import しない。`routes/authorizeRequest.mts` は grant のヘルパーを 1 つ（クライアントごとの PKCE 方式の規則）も読む。`/authorize` は PKCE を `/token` と同じやり方で検証するからである。両者が読む RFC 8707 `resource` の規則は core のもの（[`grants/resourceIndicator.mts`](../core/src/grants/resourceIndicator.mts)）で、WebAuthn グラントと共有している。 |
+| [`routes/`](./src/routes) | エンドポイント群ごとのルーターまたはハンドラー（`/authorize` はハンドラーと、それが順に呼ぶ段階ごとのファイル） — authorize、consent、logout、federation token、revoke、userinfo。ルートは `grants/`、`logout/`、`middleware/`、`clients/` を使ってよいが、それらのどれもルートを import しない。`routes/authorizeRequest.mts` は grant のヘルパーを 1 つ（クライアントごとの PKCE 方式の規則）も読む。`/authorize` は PKCE を `/token` と同じやり方で検証するからである。両者が読む RFC 8707 `resource` の規則は core のもの（[`grants/resourceIndicator.mts`](../core/src/grants/resourceIndicator.mts)）で、WebAuthn グラントと共有している。 |
 | [`grants/`](./src/grants) | グラントハンドラー: core のグラント契約の上での、リクエストからトークンへの純粋な判断。HTTP を持たない。 |
 | [`middleware/`](./src/middleware) | クライアント認証。兄弟パッケージが再利用する。 |
 | [`logout/`](./src/logout) | 順序の決まったセッションカスケード（`cascadeLogout`）、RP へのバックチャネル POST、フロントチャネルのページ、subject revocation service を配線するモジュール。 |

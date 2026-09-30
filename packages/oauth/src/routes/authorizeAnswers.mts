@@ -15,9 +15,10 @@
  */
 
 /**
- * How `/authorize` answers once `redirect_uri` is validated: an error on it,
- * with `state` (RFC 6749 §4.1.2.1), the `authorize.rejected` audit event, and
- * the login-page redirect. Before that, the client stage answers JSON itself.
+ * How `/authorize` answers: the login-page redirect (also sent by the login
+ * check, before any lookup) and, once `redirect_uri` is validated, an error on
+ * it with `state` (RFC 6749 §4.1.2.1) and the `authorize.rejected` audit event.
+ * Until then, the client stage answers JSON itself.
  */
 
 import { emitAuditEvent, type LoginEntry, sanitizeErrorText } from "@o3co/auth-provider-core";
