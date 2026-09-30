@@ -61,7 +61,7 @@ export type FetchRejection =
  * timed out, an HTTP error, a redirect, too large, the wrong type), as against
  * those about the URL a certificate names. They are faults of the source or
  * of this server's configuration, never a verdict on the certificate, and no
- * client can cause them. `crl.mts` and `ocsp.mts` read this to mark an
+ * client can cause them. `crl.mts` and `ocspFetch.mts` read this to mark an
  * unavailability as an outage.
  */
 const SOURCE_FAILURES: ReadonlySet<FetchRejection> = new Set<FetchRejection>([
