@@ -124,7 +124,7 @@ export function resolveLayers(own: OwnLayers, references: readonly URL[]): Recor
 /**
  * What the template reads before it knows its modules, through core's
  * reader: the switches `buildModules` and its module factories choose by, and
- * the configuration's `sessionRequirements`, which
+ * the configuration's `core.sessionRequirements`, which
  * `expectedSessionRequirements` reads (the log level is `readLogging`'s). A
  * module a deployment adds that reads its configuration when it is built adds
  * those paths here, or passes them to `readSwitches` as `reads`.
@@ -145,7 +145,7 @@ export function resolveLayers(own: OwnLayers, references: readonly URL[]): Recor
  * `reference.conf` sets. Parse it in the module, or read it after boot.
  */
 export const SWITCHES: readonly string[] = [
-	"sessionRequirements",
+	"core.sessionRequirements",
 	"federations",
 	"federationGrants.enabled",
 	"federationGrantStore.adapter",
@@ -184,6 +184,9 @@ function isPlainSection(value: unknown): value is Readonly<Record<string, unknow
 	const prototype: unknown = Object.getPrototypeOf(value);
 	return prototype === Object.prototype || prototype === null;
 }
+
+/** `core.sessionRequirements`, as the composition declares it to boot. */
+export type SessionRequirements = NonNullable<AppConfig["core"]>["sessionRequirements"];
 
 /** `mfa.mode`, as `readMfaMode` answers it. */
 export type MfaMode = (typeof MFA_MODES)[number];
@@ -255,7 +258,7 @@ export function readLogging(own: OwnLayers): LoggingSettings {
 
 /**
  * What this composition expects of session admission, from phase one: the
- * configuration's `sessionRequirements.expected` as written, with `mfa`
+ * configuration's `core.sessionRequirements.expected` as written, with `mfa`
  * appended when `mfa.mode` (`readMfaMode`) is not `off` and the list does not
  * name it. Boot's checks never act on `mfa.mode`, and the template installs no
  * MFA module, so it is here that a mode asking for a second factor becomes a
@@ -267,8 +270,8 @@ export function readLogging(own: OwnLayers): LoggingSettings {
  * 2026-09-28-session-admission; the reading of `mfa.mode` goes at the MFA
  * ADR's build-order step 20.
  */
-export function expectedSessionRequirements(switches: AppConfig): AppConfig["sessionRequirements"] {
-	const written = switches.sessionRequirements?.expected;
+export function expectedSessionRequirements(switches: AppConfig): SessionRequirements {
+	const written = switches.core?.sessionRequirements?.expected;
 	const mode = readMfaMode(switches);
 	if (mode === "off") return written === undefined ? undefined : { expected: [...written] };
 	const declared = [...(written ?? [])];
@@ -304,9 +307,9 @@ const consumedMfa = (mfa: unknown, modules: readonly Module[]): boolean =>
  * Phase two: what `createApp` parses once, with every loaded module's schema:
  * the composition's own layers, the same read phase one had, over the
  * `reference.conf` of every package `modules` come from, core's last,
- * resolved and unparsed, with `sessionRequirements` — what phase one says the
- * composition expects (`expectedSessionRequirements`) — written over the
- * resolved section when there is one to write. An `mfa` section holding
+ * resolved and unparsed, with `core.sessionRequirements` — what phase one
+ * says the composition expects (`expectedSessionRequirements`) — written over
+ * the resolved section when there is one to write. An `mfa` section holding
  * nothing but the mode, which the template read for itself (`readMfaMode`),
  * is left out when no loaded module owns it; anything more reaches boot,
  * which names an unowned section once. The MFA ADR's build-order step 20
@@ -318,12 +321,15 @@ const consumedMfa = (mfa: unknown, modules: readonly Module[]): boolean =>
 export function resolveForBoot(
 	own: OwnLayers,
 	modules: readonly Module[],
-	sessionRequirements: AppConfig["sessionRequirements"],
+	sessionRequirements: SessionRequirements,
 ): AppConfig {
 	const layered = resolveLayers(own, moduleReferences(modules));
 	const { mfa: _consumed, ...withoutMfa } = layered;
 	const resolved = consumedMfa(layered.mfa, modules) ? withoutMfa : layered;
 	return (sessionRequirements === undefined
 		? resolved
-		: { ...resolved, sessionRequirements }) as unknown as AppConfig;
+		: {
+				...resolved,
+				core: { ...(resolved.core as Record<string, unknown> | undefined), sessionRequirements },
+			}) as unknown as AppConfig;
 }

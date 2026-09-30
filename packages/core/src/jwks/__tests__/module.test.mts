@@ -23,6 +23,7 @@ import { defineModule } from "../../modules/index.mjs";
 import { createTestApp } from "../../testing/create-test-app.mjs";
 import { makeValidAppConfig } from "../../testing/fixtures/valid-config.mjs";
 import { jwksModule } from "../module.mjs";
+import { JWKS_SECTION } from "../section.mjs";
 
 // The JWKS route only publishes a key set for an asymmetric keystore,
 // so the module's serve-path tests run against EdDSA — the shipped default.
@@ -49,17 +50,6 @@ const hs256KeyStoreModule = defineModule({
 		keyStore: () => createSymmetricKeyStore("test-secret-for-jwks-module!!!!"),
 	},
 });
-
-function withJwksPath(jwksPath: string) {
-	const config = makeValidAppConfig() as { oauth?: { jwt?: Record<string, unknown> } };
-	return {
-		...config,
-		oauth: {
-			...config.oauth,
-			jwt: { ...config.oauth?.jwt, jwksPath },
-		},
-	} as unknown as ReturnType<typeof makeValidAppConfig>;
-}
 
 describe("jwksModule", () => {
 	it("contributes a route with id 'jwks' (mounted unconditionally, no issuer needed)", async () => {
@@ -110,17 +100,54 @@ describe("jwksModule", () => {
 		expect(res.headers["cache-control"]).toBe("no-store");
 		await handle.dispose();
 	});
+});
 
-	it("reflects a configured oauth.jwt.jwksCacheMaxAge in Cache-Control", async () => {
-		const config = makeValidAppConfig() as { oauth?: { jwt?: Record<string, unknown> } };
-		const withMaxAge = {
-			...config,
-			oauth: { ...config.oauth, jwt: { ...config.oauth?.jwt, jwksCacheMaxAge: 3600 } },
-		} as unknown as ReturnType<typeof makeValidAppConfig>;
-		const handle = await createTestApp({
+describe("jwksModule — discoveryMetadata contribution (OIDC aggregator)", () => {
+	it("contributes the issuer-relative default jwks_uri so core advertises it in discovery", async () => {
+		const factory = jwksModule.contributes?.discoveryMetadata?.[0];
+		expect(factory).toBeDefined();
+		// Awaited as the boot planner does: a contribution factory may answer with
+		// a promise, and every kind's declared type says so.
+		const meta = await factory?.({ section: undefined } as never);
+		// jwks owns `jwks_uri`; the aggregator prefixes it with the issuer. The
+		// path must match the route the same module registers (single source of
+		// truth via resolveJwksPath) so discovery never advertises a dangling URI.
+		expect(meta?.endpoints?.jwks_uri).toBe("/.well-known/jwks.json");
+	});
+});
+
+describe("jwksModule — its own section, jwks {}", () => {
+	/** The fixture's configuration with `jwks` as given, and `over` laid on it. */
+	const withJwks = (jwks: Record<string, unknown>, over: Record<string, unknown> = {}) =>
+		({ ...makeValidAppConfig(), jwks, ...over }) as unknown as ReturnType<
+			typeof makeValidAppConfig
+		>;
+	const boot = (config: ReturnType<typeof makeValidAppConfig>) =>
+		createTestApp({
 			modules: [jwksModule, keyStoreModule],
-			bootstrapComponents: { config: withMaxAge, pathResolver: (s) => s },
+			bootstrapComponents: { config, pathResolver: (s) => s },
 		});
+	const refusal = async (config: ReturnType<typeof makeValidAppConfig>) => {
+		try {
+			const handle = await boot(config);
+			await handle.dispose();
+		} catch (err) {
+			return err as { reason?: string; details?: unknown; message: string };
+		}
+		return expect.fail("boot should have been refused");
+	};
+
+	it("serves the path jwks.path names, and not the default", async () => {
+		const handle = await boot(withJwks({ path: "/keys/jwks.json" }));
+		const app = express();
+		app.use(handle.router);
+		expect((await request(app).get("/keys/jwks.json")).status).toBe(200);
+		expect((await request(app).get("/.well-known/jwks.json")).status).toBe(404);
+		await handle.dispose();
+	});
+
+	it("sends the max-age jwks.cacheMaxAge names, read from the decimal string a variable carries", async () => {
+		const handle = await boot(withJwks({ cacheMaxAge: "3600" }));
 		const app = express();
 		app.use(handle.router);
 		const res = await request(app).get("/.well-known/jwks.json");
@@ -128,46 +155,114 @@ describe("jwksModule", () => {
 		await handle.dispose();
 	});
 
-	it("serves the configured oauth.jwt.jwksPath override (and not the default)", async () => {
-		const config = withJwksPath("/keys/jwks.json");
-		const handle = await createTestApp({
-			modules: [jwksModule, keyStoreModule],
-			bootstrapComponents: { config, pathResolver: (s) => s },
+	it("advertises jwks.path as jwks_uri", async () => {
+		const meta = await jwksModule.contributes?.discoveryMetadata?.[0]?.({
+			section: { path: "/keys/jwks.json" },
+		} as never);
+		expect(meta?.endpoints?.jwks_uri).toBe("/keys/jwks.json");
+	});
+
+	it("refuses a jwks.path that is not an absolute path, naming jwks.path", async () => {
+		const err = await refusal(withJwks({ path: "keys/jwks.json" }));
+		expect(err.reason).toBe("config-validation-failed");
+		expect(err.message).toContain("jwks.path");
+	});
+
+	it("refuses an empty jwks.cacheMaxAge rather than serving max-age=0", async () => {
+		const err = await refusal(withJwks({ cacheMaxAge: "" }));
+		expect(err.reason).toBe("config-validation-failed");
+		expect(err.message).toContain("jwks.cacheMaxAge");
+	});
+
+	it.each([
+		["jwksPath", "jwks.path", "JWKS_PATH", "/keys/jwks.json"],
+		["jwksCacheMaxAge", "jwks.cacheMaxAge", "JWKS_CACHE_MAX_AGE", 3600],
+	] as const)(
+		"refuses oauth.jwt.%s written at its old path, naming %s and %s",
+		async (key, to, variable, value) => {
+			const fixture = makeValidAppConfig();
+			const err = await refusal(
+				withJwks({}, { oauth: { ...fixture.oauth, jwt: { ...fixture.oauth.jwt, [key]: value } } }),
+			);
+			expect(err.details).toEqual({
+				reason: "config-path-relocated",
+				relocated: [
+					{ module: "jwks", from: `oauth.jwt.${key}`, to, environmentVariable: variable },
+				],
+			});
+		},
+	);
+});
+
+describe("jwksModule — the CORS table lists the path its route serves", () => {
+	const ORIGIN = "https://spa.example";
+	const boot = (modules: Parameters<typeof createTestApp>[0]["modules"]) =>
+		createTestApp({
+			modules,
+			bootstrapComponents: {
+				config: {
+					...makeValidAppConfig(),
+					cors: { allowedOrigins: [ORIGIN] },
+					jwks: { path: "/keys/jwks.json" },
+				} as unknown as ReturnType<typeof makeValidAppConfig>,
+				pathResolver: (s) => s,
+			},
 		});
+	const originAllowedOn = async (
+		handle: Awaited<ReturnType<typeof boot>>,
+		path: string,
+	): Promise<unknown> => {
 		const app = express();
 		app.use(handle.router);
-		expect((await request(app).get("/keys/jwks.json")).status).toBe(200);
-		expect((await request(app).get("/.well-known/jwks.json")).status).toBe(404);
+		const res = await request(app).get(path).set("Origin", ORIGIN);
+		return res.headers["access-control-allow-origin"];
+	};
+
+	it("with the module installed: the path jwks.path moves the route to, and not the default", async () => {
+		const handle = await boot([jwksModule, keyStoreModule]);
+		expect(await originAllowedOn(handle, "/keys/jwks.json")).toBe(ORIGIN);
+		expect(await originAllowedOn(handle, "/.well-known/jwks.json")).toBeUndefined();
+		await handle.dispose();
+	});
+
+	it("without the module: no JWKS path, the one jwks.path names or the default", async () => {
+		const handle = await boot([keyStoreModule]);
+		expect(await originAllowedOn(handle, "/keys/jwks.json")).toBeUndefined();
+		expect(await originAllowedOn(handle, "/.well-known/jwks.json")).toBeUndefined();
 		await handle.dispose();
 	});
 });
 
-describe("jwksModule — discoveryMetadata contribution (OIDC aggregator)", () => {
-	it("contributes the issuer-relative default jwks_uri so core advertises it in discovery", async () => {
-		const config = makeValidAppConfig();
-		const factory = jwksModule.contributes?.discoveryMetadata?.[0];
-		expect(factory).toBeDefined();
-		// Awaited as the boot planner does: a contribution factory may answer with
-		// a promise, and every kind's declared type says so.
-		const meta = await factory?.({ config } as never);
-		// jwks owns `jwks_uri`; the aggregator prefixes it with the issuer. The
-		// path must match the route the same module registers (single source of
-		// truth via resolveJwksPath) so discovery never advertises a dangling URI.
-		expect(meta?.endpoints?.jwks_uri).toBe("/.well-known/jwks.json");
+describe("JWKS_SECTION, the schema of jwks {}", () => {
+	const issuesAt = (value: unknown): string[] => {
+		const result = JWKS_SECTION.safeParse(value);
+		return result.success ? [] : result.error.issues.map((issue) => issue.path.join("."));
+	};
+
+	it("accepts an absent section, an empty one, an absolute path and a non-negative whole max-age", () => {
+		for (const value of [undefined, {}, { path: "/keys/jwks.json", cacheMaxAge: 0 }]) {
+			expect(issuesAt(value), JSON.stringify(value)).toEqual([]);
+		}
 	});
 
-	it("reflects a configured oauth.jwt.jwksPath override in the contributed jwks_uri", async () => {
-		const config = withJwksPath("/keys/jwks.json");
-		const meta = await jwksModule.contributes?.discoveryMetadata?.[0]?.({ config } as never);
-		expect(meta?.endpoints?.jwks_uri).toBe("/keys/jwks.json");
+	it("refuses a path that is not absolute, or would normalise to another route, at path", () => {
+		for (const path of ["keys/jwks.json", "/keys//jwks.json", "/../keys", "/keys?x=1"]) {
+			expect(issuesAt({ path }), path).toEqual(["path"]);
+		}
+	});
+
+	it("refuses a negative or fractional max-age at cacheMaxAge", () => {
+		for (const cacheMaxAge of [-1, 1.5]) {
+			expect(issuesAt({ cacheMaxAge }), String(cacheMaxAge)).toEqual(["cacheMaxAge"]);
+		}
 	});
 });
 
 describe("jwksModule — route collision detection", () => {
-	it("advertises GET <jwksPath> so a module claiming the same route fails the boot fast", async () => {
+	it("advertises GET <jwks.path> so a module claiming the same route fails the boot fast", async () => {
 		// jwksModule mounts its router at "/" and registers the JWKS path
 		// internally; without a `routes` advertisement the boot collision checker
-		// cannot see the effective GET <jwksPath> and a second module claiming it
+		// cannot see the effective GET <jwks.path> and a second module claiming it
 		// would silently shadow (or be shadowed by) the JWKS route, leaving the
 		// advertised `jwks_uri` broken. The advertisement makes it a boot error.
 		const config = makeValidAppConfig();

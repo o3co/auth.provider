@@ -402,6 +402,114 @@ describe("a relocated path — a manifest that names one it cannot", () => {
 	});
 });
 
+describe("a relocated path — to a new path no variable binds", () => {
+	/** `legacy.retries` moved to a key its variable binds, `legacy.label` to one no variable binds. */
+	const relocating = (label: unknown = { to: "label", environmentVariable: null }, more = {}) =>
+		defineModule({
+			name: "fixture-relocating",
+			section: {
+				schema: RetrySection,
+				relocatedFrom: { "legacy.retries": "retries", "legacy.label": label } as never,
+				...more,
+			},
+		});
+
+	it("names no variable for a key moved there, and still names the variable of a key moved beside it", async () => {
+		const err = await refusal(
+			createApp({
+				modules: [relocating()],
+				bootstrapComponents: bootWith({ ...current, legacy: { retries: 3, label: "old" } }),
+			}),
+		);
+
+		expect(err.details).toEqual({
+			reason: "config-path-relocated",
+			relocated: [
+				{
+					module: "fixture-relocating",
+					from: "legacy.retries",
+					to: "fixture-relocating.retries",
+					environmentVariable: "FIXTURE_RELOCATING_RETRIES",
+				},
+				{ module: "fixture-relocating", from: "legacy.label", to: "fixture-relocating.label" },
+			],
+		});
+		expect(err.message).toContain(
+			"legacy.label has moved to fixture-relocating.label; see CHANGELOG. Write it there and remove",
+		);
+		expect(err.message).not.toContain("FIXTURE_RELOCATING_LABEL");
+	});
+
+	it("names no variable for a key under a subtree moved whole there", async () => {
+		const err = await refusal(
+			createApp({
+				modules: [
+					defineModule({
+						name: "fixture-relocating",
+						section: {
+							schema: RetrySection,
+							relocatedFrom: { legacy: { to: "", environmentVariable: null } } as never,
+						},
+					}),
+				],
+				bootstrapComponents: bootWith({ ...current, legacy: { label: "old" } }),
+			}),
+		);
+
+		expect(err.details).toEqual({
+			reason: "config-path-relocated",
+			relocated: [
+				{ module: "fixture-relocating", from: "legacy.label", to: "fixture-relocating.label" },
+			],
+		});
+	});
+
+	it("refuses at stage 1 a variable declared renamed onto it: no variable binds the new path", async () => {
+		const err = await refusal(
+			createApp({
+				modules: [relocating(undefined, { renamedVariables: { LEGACY_LABEL: "legacy.label" } })],
+				bootstrapComponents: bootWith(current),
+			}),
+		);
+
+		expect(err.reason).toBe("module-section-path-invalid");
+		expect(err.details).toMatchObject({
+			module: "fixture-relocating",
+			renamedVariable: "LEGACY_LABEL",
+			problem: expect.stringContaining("no variable binds"),
+		});
+	});
+
+	it.each([
+		["without environmentVariable", { to: "label" }],
+		["naming a variable", { to: "label", environmentVariable: "FIXTURE_RELOCATING_LABEL" }],
+		["to a removed key", { to: null, environmentVariable: null }],
+		["to a path with an empty key", { to: "a..b", environmentVariable: null }],
+		["with another key", { to: "label", environmentVariable: null, variable: false }],
+		[
+			"as a Map",
+			new Map<string, unknown>([
+				["to", "label"],
+				["environmentVariable", null],
+			]),
+		],
+	])(
+		"refuses at stage 1 a new path written as an object %s, naming the old path",
+		async (_label, label) => {
+			const err = await refusal(
+				createApp({ modules: [relocating(label)], bootstrapComponents: bootWith(current) }),
+			);
+
+			expect(err.reason).toBe("module-section-path-invalid");
+			expect(err.details).toMatchObject({
+				module: "fixture-relocating",
+				relocatedFrom: "legacy.label",
+				problem: expect.stringContaining("environmentVariable: null"),
+			});
+		},
+	);
+});
+
 describe("a relocated path — claimed by two loaded modules", () => {
 	const relocating = (name: string, relocatedFrom: readonly string[] | Record<string, string>) =>
 		defineModule({ name, section: { schema: RetrySection, relocatedFrom } });

@@ -5,7 +5,7 @@
 
 /**
  * `redisDeviceCodeStoreModule` through the boot planner. With it, a
- * composition running the device grant can declare `deployment.mode =
+ * composition running the device grant can declare `core.deployment.mode =
  * "multi"`: `checkReplicaSafety` refuses the in-memory store under that mode,
  * since pending authorizations fork per replica. Pinned: the planner accepts
  * the Redis store where it refuses the memory one, and the slot it fills is
@@ -61,7 +61,7 @@ const deviceGrantStandIn = defineModule({
 const multiReplicaConfig = (extra: Record<string, unknown> = {}) =>
 	({
 		...makeValidCoreConfig(),
-		deployment: { mode: "multi" },
+		core: { deployment: { mode: "multi" } },
 		...extra,
 	}) as never;
 
@@ -81,7 +81,7 @@ describe("redisDeviceCodeStoreModule manifest", () => {
 });
 
 describe("redisDeviceCodeStoreModule wiring", () => {
-	it('boots under deployment.mode = "multi" and fills deviceCodeStore with the Redis adapter', async () => {
+	it('boots under core.deployment.mode = "multi" and fills deviceCodeStore with the Redis adapter', async () => {
 		const handle = await createApp({
 			modules: [redisDeviceCodeStoreModule, deviceGrantStandIn],
 			bootstrapComponents: {

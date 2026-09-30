@@ -566,8 +566,18 @@ export interface AppHandle {
 	 * `lifecycle[K].cleanup` was declared). Errors thrown during individual
 	 * cleanup callbacks are aggregated; the returned Promise rejects with an
 	 * AggregateError whose `errors` field contains every cleanup error.
+	 * Waits for every cleanup, however long it takes: bounding it is the
+	 * host's, sized by {@link AppHandle.cleanupAllowanceMs}.
 	 */
 	dispose(): Promise<void>;
+
+	/**
+	 * The longest `tailMs` a cleanup was registered with through
+	 * `lifecycleRegistrar`, or `undefined` when none declared one: the least
+	 * a host that bounds `dispose()` allows the whole of it. Tails do not add.
+	 * Read when asked, so a cleanup registered after boot counts.
+	 */
+	readonly cleanupAllowanceMs: number | undefined;
 
 	/**
 	 * Read-only typed view of the materialised component map, Object.frozen.
@@ -1130,7 +1140,7 @@ export interface DiscoveryDocumentInvalidDetails {
 
 /**
  * A composition holds state in this process's memory that a multi-replica
- * deployment must share, while `deployment.mode` says `"multi"`.
+ * deployment must share, while `core.deployment.mode` says `"multi"`.
  * `modules` names every offending module rather than the first, so one boot
  * attempt tells the operator everything they have to change.
  */
@@ -1216,13 +1226,13 @@ export interface SessionRequirementKindGuardedDetails {
 }
 
 /**
- * `sessionRequirements.expected` is written and leaves out a registered
+ * `core.sessionRequirements.expected` is written and leaves out a registered
  * requirement, or is not written while a consumer of session admission is
  * installed. See ADR 2026-09-28-session-admission.
  */
 export interface SessionRequirementsUndeclaredDetails {
 	readonly reason: "session-requirements-undeclared";
-	readonly configKey: "sessionRequirements.expected";
+	readonly configKey: "core.sessionRequirements.expected";
 	/** What the configuration declares; `undefined` when it declares nothing. */
 	readonly declared: readonly string[] | undefined;
 	/** What registered, in registration order. */
@@ -1237,14 +1247,14 @@ export interface SessionRequirementsUndeclaredDetails {
 }
 
 /**
- * `sessionRequirements.expected` names a requirement no installed module
+ * `core.sessionRequirements.expected` names a requirement no installed module
  * registers: refused, whether or not anything consults session admission,
  * rather than left believing the requirement is in force. See ADR
  * 2026-09-28-session-admission.
  */
 export interface SessionRequirementMissingDetails {
 	readonly reason: "session-requirement-missing";
-	readonly configKey: "sessionRequirements.expected";
+	readonly configKey: "core.sessionRequirements.expected";
 	/** The declared names nothing registers, in declaration order. */
 	readonly missing: readonly string[];
 	/** What the configuration declares. */

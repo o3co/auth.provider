@@ -34,6 +34,7 @@
 export {
 	createFederationGrantBackground,
 	type FederationGrantBackground,
+	federationGrantsCleanupTailMs,
 } from "./background.mjs";
 export {
 	federationGrantBackgroundModule,

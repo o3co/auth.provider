@@ -26,6 +26,7 @@ import { z } from "zod";
 import { environmentVariableFor } from "#/config/environment-variable.mjs";
 import {
 	findRelocatedKeys,
+	pathsSetBy,
 	type RemovedKey,
 	relocatedKeyMessage,
 	withRemovedKeys,
@@ -77,6 +78,31 @@ describe("withRemovedKeys", () => {
 		// reports the type mismatch.
 		expect(schema.safeParse("nonsense").success).toBe(false);
 		expect(schema.safeParse([1, 2]).success).toBe(false);
+	});
+});
+
+describe("pathsSetBy — what a configuration value sets", () => {
+	const set = (value: unknown) => pathsSetBy(value, ["at"]).map((path) => path.join("."));
+
+	it("is one path for a value, a list of values (an empty one too) and data that is not plain", () => {
+		for (const value of [1, "x", null, false, [1, 2], [], new Date(0)]) {
+			expect(set(value), JSON.stringify(value)).toEqual(["at"]);
+		}
+	});
+
+	it("walks a section and a list of sections, each index a key", () => {
+		expect(set({ a: 1, b: { c: "x" }, d: [{ e: 1 }, { f: 2 }] })).toEqual([
+			"at.a",
+			"at.b.c",
+			"at.d.0.e",
+			"at.d.1.f",
+		]);
+	});
+
+	it("is nothing for an empty section, one holding only empty sections, or a list of empty sections", () => {
+		for (const value of [{}, { a: {} }, { a: { b: {} } }, { list: [{}] }]) {
+			expect(set(value), JSON.stringify(value)).toEqual([]);
+		}
 	});
 });
 

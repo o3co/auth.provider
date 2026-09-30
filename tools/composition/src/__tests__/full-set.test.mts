@@ -29,7 +29,7 @@
  * modules can change the answer: the token endpoint's body rule, with two
  * more routers beneath `/oauth`, and the logger every module that answers a
  * request must receive. `full-set.redis.test.mts` boots the same set on real
- * Redis under `deployment.mode = "multi"`.
+ * Redis under `core.deployment.mode = "multi"`.
  *
  * The MFA package is installed as a deployment installs it (`mfaModules` over
  * the MFA stores, `mfa.mode = "optional"`, a key of the deployment's own), so
@@ -559,20 +559,23 @@ describe("the session requirements: the MFA package's, and the two a deployment 
 		);
 	});
 
-	it("are declared: the composition's sessionRequirements.expected names exactly them — mfa, as a deployment that installs the MFA package declares it, and the deployment's own", async () => {
+	it("are declared: the composition's core.sessionRequirements.expected names exactly them — mfa, as a deployment that installs the MFA package declares it, and the deployment's own", async () => {
 		const { config } = await boot();
-		expect([...(config.sessionRequirements?.expected ?? [])].sort()).toEqual(
+		expect([...(config.core?.sessionRequirements?.expected ?? [])].sort()).toEqual(
 			[...REGISTERED].sort(),
 		);
 	});
 
 	it("refuse the boot when the declaration is the template's own — nothing expected — naming what registered and who consults admission", async () => {
 		const err = await refused({
-			adjust: (config) => ({ ...config, sessionRequirements: { expected: [] } }),
+			adjust: (config) => ({
+				...config,
+				core: { ...config.core, sessionRequirements: { expected: [] } },
+			}),
 		});
 		expect(err.reason).toBe("session-requirements-undeclared");
 		expect(err.details).toMatchObject({
-			configKey: "sessionRequirements.expected",
+			configKey: "core.sessionRequirements.expected",
 			declared: [],
 			registered: expect.arrayContaining(REGISTERED),
 			consumedBy: expect.arrayContaining(["oauth", "mfa"]),
@@ -583,12 +586,12 @@ describe("the session requirements: the MFA package's, and the two a deployment 
 		const err = await refused({
 			adjust: (config) => ({
 				...config,
-				sessionRequirements: { expected: [...REGISTERED, "risk"] },
+				core: { ...config.core, sessionRequirements: { expected: [...REGISTERED, "risk"] } },
 			}),
 		});
 		expect(err.reason).toBe("session-requirement-missing");
 		expect(err.details).toMatchObject({
-			configKey: "sessionRequirements.expected",
+			configKey: "core.sessionRequirements.expected",
 			missing: ["risk"],
 			declared: [...REGISTERED, "risk"],
 			registered: expect.arrayContaining(REGISTERED),
@@ -608,12 +611,17 @@ describe("the session requirements: the MFA package's, and the two a deployment 
 			features: { mfa: false },
 			adjust: (config) => ({
 				...config,
-				sessionRequirements: { expected: [...(config.sessionRequirements?.expected ?? []), "mfa"] },
+				core: {
+					...config.core,
+					sessionRequirements: {
+						expected: [...(config.core?.sessionRequirements?.expected ?? []), "mfa"],
+					},
+				},
 			}),
 		});
 		expect(err.reason).toBe("session-requirement-missing");
 		expect(err.details).toMatchObject({
-			configKey: "sessionRequirements.expected",
+			configKey: "core.sessionRequirements.expected",
 			missing: ["mfa"],
 			registered: [...FIXTURE_REQUIREMENTS],
 		});
@@ -626,7 +634,7 @@ describe("the session requirements: the MFA package's, and the two a deployment 
 		});
 		expect(err.reason).toBe("session-requirement-missing");
 		expect(err.details).toMatchObject({
-			configKey: "sessionRequirements.expected",
+			configKey: "core.sessionRequirements.expected",
 			missing: ["mfa"],
 			registered: [...FIXTURE_REQUIREMENTS],
 		});

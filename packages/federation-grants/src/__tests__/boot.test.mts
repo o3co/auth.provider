@@ -44,7 +44,11 @@ import {
 	makeValidFullSections,
 } from "@o3co/auth-provider-core/testing";
 import { describe, expect, it } from "vitest";
-import { federationGrantsModules } from "#/index.mjs";
+import {
+	createFederationGrantBackground,
+	type FederationGrantBackground,
+	federationGrantsModules,
+} from "#/index.mjs";
 import {
 	ACQUISITION_GRANT_SETTINGS,
 	acquisitionComponents,
@@ -76,6 +80,20 @@ const storeModule = defineModule({
 	name: "test-federation-grant-store",
 	provides: { federationGrantStore: () => createMemoryFederationGrantStore() },
 });
+
+/** The same store, whose cleanup writes to `order`. */
+const storeModuleClosingInto = (order: string[]) =>
+	defineModule({
+		name: "test-federation-grant-store",
+		provides: { federationGrantStore: () => createMemoryFederationGrantStore() },
+		lifecycle: {
+			federationGrantStore: {
+				cleanup: () => {
+					order.push("store closed");
+				},
+			},
+		},
+	});
 
 /**
  * A store that says it keeps grants somewhere they survive a restart. The port
@@ -187,6 +205,10 @@ interface Setup {
 	readonly withCsrfGuard?: boolean | "without-check";
 	/** The oauthTokenSettings the composition holds; none by default. */
 	readonly tokenSettingsIssuer?: string;
+	/** Where the memory store's cleanup records that it ran; no cleanup by default. */
+	readonly storeClosed?: string[];
+	/** A registry the host supplies through `overrideComponents`, in place of the module's. */
+	readonly background?: FederationGrantBackground;
 }
 
 /**
@@ -220,11 +242,20 @@ const boot = (setup: Setup) => {
 		...federationGrantsModules,
 		...(setup.withStore === false
 			? []
-			: [setup.store === "durable" ? durableStoreModule : storeModule]),
+			: [
+					setup.store === "durable"
+						? durableStoreModule
+						: setup.storeClosed === undefined
+							? storeModule
+							: storeModuleClosingInto(setup.storeClosed),
+				]),
 		...(setup.federationFirst === false ? federation : []),
 	];
 	return createApp({
 		modules,
+		...(setup.background === undefined
+			? {}
+			: { overrideComponents: { federationGrantBackground: setup.background } }),
 		bootstrapComponents: {
 			config: {
 				...makeValidCoreConfig(),
@@ -408,6 +439,72 @@ describe("enabling the feature", () => {
 	it("boots with an empty connection map, because removing the last one is operable", async () => {
 		const handle = await boot({ connections: {}, provider: null });
 		await handle.dispose();
+	});
+});
+
+describe("the cleanup allowance an enabled deployment registers", () => {
+	it("is the refresh tail of the shipped budgets plus the margin: 45 seconds", async () => {
+		const handle = await boot({});
+		expect(handle.cleanupAllowanceMs).toBe(45_000);
+		await handle.dispose();
+	});
+
+	it("grows with a raised budget", async () => {
+		// The lock must outlive the raised hard timeout, or boot refuses first.
+		const handle = await boot({
+			grants: { upstreamHardTimeoutMs: 60_000, refreshLockTtlMs: 65_000 },
+		});
+		expect(handle.cleanupAllowanceMs).toBe(60_000 + 3_000 + 5_000 + 12_000);
+		await handle.dispose();
+	});
+
+	it("is absent while the feature is off", async () => {
+		const handle = await boot({ enabled: false });
+		expect(handle.cleanupAllowanceMs).toBeUndefined();
+		await handle.dispose();
+	});
+
+	it("is registered without draining a host-supplied registry that a failed boot never started", async () => {
+		// The browser half refuses after the JSON half registered the tail.
+		const background = createFederationGrantBackground();
+		await expect(boot({ background, withCsrfGuard: false })).rejects.toThrow(/csrfGuard/);
+		expect(background.closing).toBe(false);
+		expect(background.admit()).toBeTypeOf("function");
+	});
+
+	it("does not make dispose wait on a host-supplied registry that nothing drained", async () => {
+		const background = createFederationGrantBackground();
+		const handle = await boot({ background });
+		expect(handle.cleanupAllowanceMs).toBe(45_000);
+		background.register(new Promise<void>(() => {}));
+		const outcome = await Promise.race([
+			handle.dispose().then(() => "disposed"),
+			new Promise((resolve) => setTimeout(() => resolve("still waiting"), 50)),
+		]);
+		expect(outcome).toBe("disposed");
+		expect(background.closing).toBe(false);
+	});
+});
+
+describe("with the feature on, the drain", () => {
+	it("runs ahead of the store's own cleanup", async () => {
+		const order: string[] = [];
+		const handle = await boot({ storeClosed: order });
+		let persist!: () => void;
+		handle.components.federationGrantBackground?.register(
+			new Promise<void>((resolve) => {
+				persist = () => resolve();
+			}).then(() => {
+				order.push("late write persisted");
+			}),
+		);
+
+		const disposed = handle.dispose();
+		await new Promise((resolve) => setTimeout(resolve, 10));
+		expect(order).toEqual([]);
+		persist();
+		await disposed;
+		expect(order).toEqual(["late write persisted", "store closed"]);
 	});
 });
 

@@ -100,7 +100,7 @@ const bootApp = async () => {
 	const config = {
 		...base,
 		oauth: { ...base.oauth, jwt: { ...base.oauth.jwt, issuer: "https://test.example" } },
-		deployment: { mode: "single" },
+		core: { ...base.core, deployment: { mode: "single" } },
 	};
 	const handle = await createApp({
 		modules: [

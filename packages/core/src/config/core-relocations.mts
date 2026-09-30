@@ -26,16 +26,18 @@ import type { ModuleSection } from "../modules/manifest/module-section.mjs";
 /** Core's declaration: the two fields of a module's `section` that say where it moved from. */
 export type CoreRelocations = Pick<ModuleSection, "relocatedFrom" | "renamedVariables">;
 
-/** `core`, frozen with every map it holds. */
-const frozen = (core: CoreRelocations): CoreRelocations =>
-	Object.freeze({
-		...(core.relocatedFrom === undefined
-			? {}
-			: { relocatedFrom: Object.freeze(core.relocatedFrom) }),
-		...(core.renamedVariables === undefined
-			? {}
-			: { renamedVariables: Object.freeze(core.renamedVariables) }),
-	});
-
-/** Core's shipped declaration, frozen whole. */
-export const CORE_RELOCATIONS: CoreRelocations = frozen({});
+/**
+ * Core's shipped declaration, frozen with every map and entry it holds: the
+ * replica count and the expected session requirements moved into `core`, and
+ * `DEPLOYMENT_MODE` renamed with the first. A variable binds
+ * `core.deployment.mode` alone: the rest of `deployment`, and the expected
+ * session requirements, have none.
+ */
+export const CORE_RELOCATIONS: CoreRelocations = Object.freeze({
+	relocatedFrom: Object.freeze({
+		deployment: Object.freeze({ to: "deployment", environmentVariable: null }),
+		"deployment.mode": "deployment.mode",
+		sessionRequirements: Object.freeze({ to: "sessionRequirements", environmentVariable: null }),
+	}),
+	renamedVariables: Object.freeze({ DEPLOYMENT_MODE: "deployment.mode" }),
+});

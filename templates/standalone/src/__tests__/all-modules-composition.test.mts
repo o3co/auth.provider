@@ -24,7 +24,7 @@
  * surviving its neighbours in either mount order, and a store outage answered
  * 503 and logged once. The fixture file says what is real and what is
  * substituted; `all-modules-composition.multi.test.mts` boots the same
- * composition on Redis under `deployment.mode = "multi"`.
+ * composition on Redis under `core.deployment.mode = "multi"`.
  *
  * `knownDefect` marks a contract the composition breaks today; its comment
  * names the defect. In the monorepo it is `it.fails`: the fix that mends the

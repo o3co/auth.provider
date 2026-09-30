@@ -29,6 +29,7 @@ export {
 	AdapterFactoryError,
 	type BuilderContext,
 	createAdapterFactory,
+	type LifecycleCleanupOptions,
 	type LifecycleRegistrar,
 } from "./adapters/AdapterFactory.mjs";
 export {
@@ -709,6 +710,8 @@ export type {
 	// core composes the budgets into.
 	RateLimitBudgetFactory,
 	RateLimitBudgetResolver,
+	// A relocatedFrom entry whose new path no environment variable binds.
+	RelocationWithoutVariable,
 	// The manifest's replica-safety declaration, so a package
 	// building its manifest from config can type the value it attaches.
 	ReplicaSafetyDeclaration,

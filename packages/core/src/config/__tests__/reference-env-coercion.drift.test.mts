@@ -35,6 +35,7 @@ import {
 	schemasAtPath,
 	unreadableLeafPaths,
 } from "#/config/schema-path.mjs";
+import { JWKS_SECTION } from "#/jwks/section.mjs";
 import { makeValidCoreConfig } from "#/testing/fixtures/valid-config.mjs";
 
 describe("every leaf core's schema declares reads the string an environment variable arrives as", () => {
@@ -72,7 +73,7 @@ describe("every leaf core's schema declares reads the string an environment vari
 		// Core's coercers are known to read it.
 		expect(readsEnvironmentString(coerceBooleanFromEnv)).toBe(true);
 		expect(readsEnvironmentString(coerceBooleanFromEnv.optional())).toBe(true);
-		const durations = schemasAtPath(TransitionalConfigSchema, ["oauth", "jwt", "jwksCacheMaxAge"]);
+		const durations = schemasAtPath(JWKS_SECTION, ["cacheMaxAge"]);
 		expect(durations).toHaveLength(1);
 		expect(durations.every(readsEnvironmentString)).toBe(true);
 		expect(
@@ -83,16 +84,12 @@ describe("every leaf core's schema declares reads the string an environment vari
 	});
 });
 
-describe("oauth.jwt.jwksCacheMaxAge and redisFederationTokenStore.scanFallback, read from the strings an operator's variables carry", () => {
+describe("jwks.cacheMaxAge and redisFederationTokenStore.scanFallback, read from the strings an operator's variables carry", () => {
 	const base = makeValidCoreConfig();
 
-	const withMaxAge = (jwksCacheMaxAge: unknown) =>
-		TransitionalConfigSchema.safeParse({
-			...base,
-			oauth: { ...base.oauth, jwt: { ...base.oauth.jwt, jwksCacheMaxAge } },
-		});
+	const withMaxAge = (cacheMaxAge: unknown) => JWKS_SECTION.safeParse({ cacheMaxAge });
 
-	it("oauth.jwt.jwksCacheMaxAge, from the plain decimal string a variable carries", () => {
+	it("jwks.cacheMaxAge, from the plain decimal string a variable carries", () => {
 		for (const [written, read] of [
 			["600", 600],
 			[" 600 ", 600],
@@ -101,12 +98,11 @@ describe("oauth.jwt.jwksCacheMaxAge and redisFederationTokenStore.scanFallback, 
 		] as const) {
 			const parsed = withMaxAge(written);
 			expect(parsed.success, JSON.stringify(written)).toBe(true);
-			if (parsed.success)
-				expect(parsed.data.oauth.jwt.jwksCacheMaxAge, JSON.stringify(written)).toBe(read);
+			if (parsed.success) expect(parsed.data?.cacheMaxAge, JSON.stringify(written)).toBe(read);
 		}
 	});
 
-	it("oauth.jwt.jwksCacheMaxAge refuses what is not a duration, rather than reading it as 0 or 1", () => {
+	it("jwks.cacheMaxAge refuses what is not a duration, rather than reading it as 0 or 1", () => {
 		// `Number()` reads `""`, `null` and `[]` as 0 and `true` as 1: an
 		// exported-but-empty variable would serve `max-age=0`, and every
 		// verifier would refetch the JWKS on each check.
@@ -117,7 +113,7 @@ describe("oauth.jwt.jwksCacheMaxAge and redisFederationTokenStore.scanFallback, 
 				expect(
 					parsed.error.issues.map((issue) => issue.path.join(".")),
 					JSON.stringify(written),
-				).toEqual(["oauth.jwt.jwksCacheMaxAge"]);
+				).toEqual(["cacheMaxAge"]);
 			}
 		}
 	});

@@ -1,6 +1,6 @@
 # user-sessions
 
-Last updated: 2026-09-29
+Last updated: 2026-09-30
 
 ## Responsibility
 
@@ -53,7 +53,7 @@ The store contracts are shared suites (`*.contract.mts`), run here against the m
 ## Failure and lifecycle
 
 - Store methods reject on a backend failure; the revocation helpers convert every such rejection into a reported failure and never throw (`cascadeSubjectSessions` in particular), because their callers have already written something they cannot undo.
-- The memory adapters GC lazily on read and write, hold no timers and need no disposal. They are single-replica: the module is refused under `deployment.mode = "multi"`.
+- The memory adapters GC lazily on read and write, hold no timers and need no disposal. They are single-replica: the module is refused under `core.deployment.mode = "multi"`.
 - No cancellation or deadlines; a subject cascade is sequential by design.
 
 ## Contract tests

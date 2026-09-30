@@ -163,7 +163,7 @@ grants); each package's README lists its routes.
 | `GET`, `POST /oauth/userinfo` | oauth | OpenID Connect userinfo |
 | `GET`, `POST /oauth/logout` | oauth | RP-initiated logout, with the back-channel logout cascade |
 | `GET /.well-known/openid-configuration` | core | Discovery, served when `oauthModule` is installed |
-| `GET /.well-known/jwks.json` | core | Verification keys (`oauth.jwt.jwksPath` moves it); under HS256 it answers `404 jwks_not_published` |
+| `GET /.well-known/jwks.json` | core | Verification keys (`jwks.path` moves it); under HS256 it answers `404 jwks_not_published` |
 | `GET /session/csrf` | session | Issue a double-submit CSRF token |
 | `POST /session/login` | session | Local authentication |
 | `POST /session/logout` | session | End the browser session |

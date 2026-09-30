@@ -170,7 +170,7 @@ async function boot(
 	const config = {
 		...base,
 		// A single-replica composition: no warning about the per-process limiter.
-		deployment: { mode: "single" },
+		core: { ...base.core, deployment: { mode: "single" } },
 		oauth: {
 			...base.oauth,
 			jwt: { ...base.oauth.jwt, issuer: ISSUER },

@@ -678,6 +678,68 @@ describe("assembleApp — 17. listen() wraps router in Express app", () => {
 
 			await expect(handle.dispose()).rejects.toThrow(/lifecycle-registrar/);
 		});
+
+		it("reports the longest registered tail as the cleanup allowance, and none without one", () => {
+			const express = { Router: () => makeMockRouter() as never };
+			const reg = createLifecycleRegistrar();
+			reg.register(async () => {}, { tailMs: 12_000 });
+			reg.register(async () => {}, { tailMs: 45_000 });
+			reg.register(async () => {});
+			expect(
+				assembleApp(makeFrozenWorld([]), { express, lifecycleReg: reg }).cleanupAllowanceMs,
+			).toBe(45_000);
+
+			const untailed = createLifecycleRegistrar();
+			untailed.register(async () => {});
+			expect(
+				assembleApp(makeFrozenWorld([]), { express, lifecycleReg: untailed }).cleanupAllowanceMs,
+			).toBeUndefined();
+			expect(assembleApp(makeFrozenWorld([]), { express }).cleanupAllowanceMs).toBeUndefined();
+		});
+
+		it("counts a tail registered after the handle was built, whose cleanup dispose also drains", async () => {
+			const ran: string[] = [];
+			const reg = createLifecycleRegistrar();
+			const handle = assembleApp(makeFrozenWorld([]), {
+				express: { Router: () => makeMockRouter() as never },
+				lifecycleReg: reg,
+			});
+			expect(handle.cleanupAllowanceMs).toBeUndefined();
+			reg.register(
+				async () => {
+					ran.push("late cleanup");
+				},
+				{ tailMs: 30_000 },
+			);
+			expect(handle.cleanupAllowanceMs).toBe(30_000);
+			await handle.dispose();
+			expect(ran).toEqual(["late cleanup"]);
+		});
+
+		it("does not give up on a cleanup that outlives its tail", async () => {
+			// The tail is what a host bounding dispose() allows; dispose itself
+			// waits for every cleanup.
+			const reg = createLifecycleRegistrar();
+			let finish!: () => void;
+			const finished = new Promise<void>((resolve) => {
+				finish = resolve;
+			});
+			reg.register(() => finished, { tailMs: 1 });
+			const handle = assembleApp(makeFrozenWorld([]), {
+				express: { Router: () => makeMockRouter() as never },
+				lifecycleReg: reg,
+			});
+
+			let settled = false;
+			const disposed = handle.dispose().then(() => {
+				settled = true;
+			});
+			await new Promise((resolve) => setTimeout(resolve, 20));
+			expect(settled).toBe(false);
+			finish();
+			await disposed;
+			expect(settled).toBe(true);
+		});
 	});
 
 	// ---------------------------------------------------------------------------

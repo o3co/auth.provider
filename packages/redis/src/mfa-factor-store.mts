@@ -266,7 +266,7 @@ const moduleConfigSchema = z.object({
  * instance), with its keys under `redisMfaFactorStore.keyPrefix` (`mfaf:`).
  *
  * Declares no `replicaSafety`: every replica reads the one store, so a
- * composition with it may declare `deployment.mode = "multi"`. Before it
+ * composition with it may declare `core.deployment.mode = "multi"`. Before it
  * provides the store it runs the durability check
  * (`internal/mfa-durability.mts`): an `allkeys-*` eviction policy refuses the
  * boot (`mfa-factor-store-evictable`), and each warning goes to the `logger`

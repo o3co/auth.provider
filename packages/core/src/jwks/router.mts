@@ -49,15 +49,15 @@ function toPublicJwk(jwk: Record<string, unknown>): Record<string, unknown> | nu
 export interface JwksRouterOptions {
 	/**
 	 * Absolute path the router registers internally. Defaults to
-	 * {@link DEFAULT_JWKS_PATH}. Callers honoring the `oauth.jwt.jwksPath`
-	 * override resolve it via `resolveJwksPath` and pass the result here so
-	 * the registered path matches the advertised `jwks_uri`.
+	 * {@link DEFAULT_JWKS_PATH}. Callers honoring `jwks.path` resolve it via
+	 * `resolveJwksPath` and pass the result here so the registered path
+	 * matches the advertised `jwks_uri`.
 	 */
 	path?: string;
 	/**
 	 * `Cache-Control: public, max-age=<N>` lifetime in seconds for the JWKS
 	 * response. Defaults to {@link DEFAULT_JWKS_CACHE_MAX_AGE}. Callers
-	 * honoring `oauth.jwt.jwksCacheMaxAge` resolve it via
+	 * honoring `jwks.cacheMaxAge` resolve it via
 	 * `resolveJwksCacheMaxAge`. Keep well below the key-overlap window so a
 	 * freshly-rotated kid propagates to caching verifiers in time.
 	 */

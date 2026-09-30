@@ -22,7 +22,7 @@ import { createMemoryConsentStore, createMemoryPendingConsentStore } from "./mem
  * and, with it, the memory {@link PendingConsentStore} the consent step
  * parks requests in: one feature, one switch, so the two cannot be wired
  * apart. Dev and single-replica only — no persistence across restarts, and
- * refused by name under `deployment.mode = "multi"`.
+ * refused by name under `core.deployment.mode = "multi"`.
  */
 export const memoryConsentStoreModule = defineModule({
 	name: "core-consent-store-memory",

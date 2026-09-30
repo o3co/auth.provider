@@ -33,6 +33,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { parseFile } from "@o3co/ts.hocon";
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
+import { CORE_RELOCATIONS } from "#/config/core-relocations.mjs";
 import { coreReference } from "#/config/references.mjs";
 import { defineModule } from "#/modules/manifest/index.mjs";
 import {
@@ -174,28 +175,35 @@ describe("renamedVariableProblems", () => {
 		).toEqual([]);
 	});
 
-	it("holds core's own section's renames to core's own reference.conf", () => {
+	it("holds core's own section's renames to core's own reference.conf, which captures the shipped ones", () => {
+		const core = fileURLToPath(coreReference());
+
+		expect(
+			renamedVariableProblems({ modules: [], core: CORE_RELOCATIONS, layers: [core], read }),
+		).toEqual([]);
+	});
+
+	it("names a rename of core's own section that core's own reference.conf neither binds nor captures", () => {
 		const core = fileURLToPath(coreReference());
 
 		const problems = renamedVariableProblems({
 			modules: [],
 			core: {
-				relocatedFrom: { deployment: "deployment" },
-				renamedVariables: { DEPLOYMENT_MODE: "deployment.mode" },
+				...CORE_RELOCATIONS,
+				renamedVariables: { ...CORE_RELOCATIONS.renamedVariables, LEGACY_CORE_FLAG: "core.flag" },
 			},
 			layers: [core],
 			read,
 		});
 
 		expect(problems).toEqual([
-			'module "core": CORE_DEPLOYMENT_MODE is bound at core.deployment.mode in no layer',
+			'module "core": CORE_FLAG is bound at core.flag in no layer',
 			expect.stringMatching(
-				/^module "core": CORE_DEPLOYMENT_MODE is not captured by core's own reference\.conf/,
+				/^module "core": CORE_FLAG is not captured by core's own reference\.conf/,
 			),
 			expect.stringMatching(
-				/^module "core": DEPLOYMENT_MODE is not captured by core's own reference\.conf/,
+				/^module "core": LEGACY_CORE_FLAG is not captured by core's own reference\.conf/,
 			),
-			`module "core": DEPLOYMENT_MODE, declared renamed, is bound at deployment.mode in ${core}`,
 		]);
 	});
 });
@@ -227,10 +235,7 @@ describe("renamedVariableCaptures", () => {
 		expect(
 			renamedVariableCaptures({
 				modules: [],
-				core: {
-					relocatedFrom: { deployment: "deployment" },
-					renamedVariables: { DEPLOYMENT_MODE: "deployment.mode" },
-				},
+				core: CORE_RELOCATIONS,
 				env: { DEPLOYMENT_MODE: "multi" },
 			}),
 		).toEqual({ DEPLOYMENT_MODE: "multi", CORE_DEPLOYMENT_MODE: null });

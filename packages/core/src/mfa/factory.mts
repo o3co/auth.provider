@@ -31,7 +31,7 @@ import type { MfaTransactionStore, MfaTransactionStoreFactory } from "./transact
 /**
  * Says, once per store built, that an in-process factor store forgets every
  * enrollment at the next restart. Object-first, at warn: it is a deployment
- * choice, not an outage. It warns under every `deployment.mode`, `single`
+ * choice, not an outage. It warns under every `core.deployment.mode`, `single`
  * included, unlike the replica-safety warning: the loss is at a restart, which
  * one replica suffers as much as many, and it is the loss the MFA ADR's D12
  * guards against.

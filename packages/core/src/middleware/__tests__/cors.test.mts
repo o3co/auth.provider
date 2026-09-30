@@ -52,13 +52,13 @@ const UNGUARDED_PATHS = ["/oauth/introspect", "/oauth/authorize"] as const;
  */
 function buildApp(
 	allowedOrigins: readonly string[],
-	config: { oauth?: { jwt?: { jwksPath?: unknown } } } = {},
+	jwksPath: string | null = "/.well-known/jwks.json",
 	logger?: { warn: (m: string) => void },
 ): Express {
 	const app = express();
 	const mw = corsMw({
 		allowedOrigins,
-		routes: browserFacingCorsRoutes(config),
+		routes: browserFacingCorsRoutes({}, jwksPath === null ? {} : { jwksPath }),
 		...(logger ? { logger: logger as never } : {}),
 	});
 	if (mw !== null) app.use(mw);
@@ -237,12 +237,15 @@ describe("corsMw — an exact-match allowlist on the browser-facing surface", ()
 			expect(res.headers["access-control-allow-origin"]).toBeUndefined();
 		});
 
-		it("follows oauth.jwt.jwksPath rather than assuming the default", async () => {
-			const app = buildApp([ALLOWED], { oauth: { jwt: { jwksPath: "/keys.json" } } });
-			// The route table is resolved through the same `resolveJwksPath` the
-			// route registration and the advertised `jwks_uri` use.
-			const moved = await request(app).get("/.well-known/jwks.json").set("Origin", ALLOWED);
+		it("lists the JWKS path it is handed rather than assuming the default, and none without one", async () => {
+			const moved = await request(buildApp([ALLOWED], "/keys.json"))
+				.get("/.well-known/jwks.json")
+				.set("Origin", ALLOWED);
 			expect(moved.headers["access-control-allow-origin"]).toBeUndefined();
+			const none = await request(buildApp([ALLOWED], null))
+				.get("/.well-known/jwks.json")
+				.set("Origin", ALLOWED);
+			expect(none.headers["access-control-allow-origin"]).toBeUndefined();
 		});
 
 		it("matches the path the way the router does — case and trailing slash", async () => {
@@ -339,7 +342,7 @@ describe("corsMw — an exact-match allowlist on the browser-facing surface", ()
 		});
 
 		it("never admits an entry it warned about", async () => {
-			const app = buildApp([ALLOWED, "https://bad.example.com/"], {}, { warn: () => {} });
+			const app = buildApp([ALLOWED, "https://bad.example.com/"], undefined, { warn: () => {} });
 			const res = await request(app).post("/oauth/token").set("Origin", "https://bad.example.com");
 			expect(res.headers["access-control-allow-origin"]).toBeUndefined();
 		});
@@ -464,7 +467,7 @@ describe("assembleApp mounts the CORS middleware from config", () => {
 
 describe("browserFacingCorsRoutes — discovery paths follow the issuer", () => {
 	const wellKnown = (config: Parameters<typeof browserFacingCorsRoutes>[0]) =>
-		browserFacingCorsRoutes(config)
+		browserFacingCorsRoutes(config, { jwksPath: "/.well-known/jwks.json" })
 			.map((r) => r.path)
 			.filter((path) => path.includes("/.well-known/"));
 

@@ -157,7 +157,7 @@ standalone テンプレートのような構成での主なエンドポイント
 | `GET`, `POST /oauth/userinfo` | oauth | OpenID Connect の userinfo |
 | `GET`, `POST /oauth/logout` | oauth | RP 起点のログアウトと、バックチャネルログアウトのカスケード |
 | `GET /.well-known/openid-configuration` | core | ディスカバリー。`oauthModule` が組み込まれているときに提供される |
-| `GET /.well-known/jwks.json` | core | 検証鍵（`oauth.jwt.jwksPath` で移動できる）。HS256 では `404 jwks_not_published` を返す |
+| `GET /.well-known/jwks.json` | core | 検証鍵（`jwks.path` で移動できる）。HS256 では `404 jwks_not_published` を返す |
 | `GET /session/csrf` | session | double-submit CSRF トークンの発行 |
 | `POST /session/login` | session | ローカル認証 |
 | `POST /session/logout` | session | ブラウザセッションの終了 |

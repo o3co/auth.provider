@@ -120,8 +120,9 @@ export interface RelocatedPath {
 	readonly from: readonly string[];
 	readonly to: readonly string[] | null;
 	/**
-	 * Whether no environment variable binds the new path yet — it lies under a
-	 * section path that is still transitional — so none is named.
+	 * Whether no environment variable binds the new path, so none is named: it
+	 * lies under a section path that is still transitional, or the entry was
+	 * written `{ to, environmentVariable: null }`.
 	 */
 	readonly unbound?: boolean;
 	/**
@@ -135,8 +136,8 @@ export interface RelocatedPath {
  * A key a configuration still sets at or under a relocated path: where it was
  * written, where it moved (`null` when removed), and the environment variable
  * bound to the new path (`environmentVariableFor`; list-of-object elements are
- * indexed), absent when removed, when nothing binds the new path yet, or when
- * the new path is the section itself.
+ * indexed), absent when removed, when no variable binds the new path (an
+ * `unbound` relocation), or when the new path is the section itself.
  */
 export interface RelocatedKey {
 	readonly from: string;
@@ -168,8 +169,9 @@ const startsWith = (path: readonly string[], prefix: readonly string[]): boolean
 /**
  * Where the key at `path` moved: the most specific relocation covering it
  * (longest `from`, first on a tie), the key's new path (`null` when removed)
- * and the variable bound there (none under a transitional section path, or
- * for the section itself); `undefined` when no relocation covers it.
+ * and the variable bound there (none for an `unbound` relocation — under a
+ * transitional section path, or written `{ to, environmentVariable: null }` —
+ * or for the section itself); `undefined` when no relocation covers it.
  */
 export function relocateKey<R extends RelocatedPath>(
 	path: readonly string[],
@@ -198,39 +200,41 @@ export function relocateKey<R extends RelocatedPath>(
 }
 
 /**
- * Every key `config` sets at or under a relocated path, each once, in
- * relocation order and then configuration key order; each result carries the
- * relocation that mapped it (`relocateKey`). A value, a list of values (an
- * environment variable carries it whole) and non-plain data (a Date, a URL)
- * are one key each; a subtree and a list of objects (each index a key) are
- * walked, and an empty one sets nothing (HOCON leaves `{}` for an unset
- * `${?VARIABLE}`). Keys are read as own properties.
+ * Every path `value`, written at `path`, sets — what a configuration sets, as
+ * boot reads it for the relocation refusal and the notice of sections nothing
+ * owns. A value, a list of values (an environment variable carries it whole)
+ * and non-plain data (a Date, a URL) are one path each; a subtree and a
+ * non-empty list of objects (each index a key) are walked; an empty subtree,
+ * or one holding only empty ones, sets nothing (HOCON leaves `{}` for an
+ * unset `${?VARIABLE}`). Keys are read as own properties.
+ */
+export function pathsSetBy(value: unknown, path: readonly string[] = []): (readonly string[])[] {
+	if (isPlainObject(value)) {
+		return Object.keys(value).flatMap((key) => pathsSetBy(value[key], [...path, key]));
+	}
+	if (Array.isArray(value) && value.length > 0 && value.every(isPlainObject)) {
+		return value.flatMap((element, index) => pathsSetBy(element, [...path, String(index)]));
+	}
+	return [path];
+}
+
+/**
+ * Every key `config` sets at or under a relocated path (`pathsSetBy`), each
+ * once, in relocation order and then configuration key order; each result
+ * carries the relocation that mapped it (`relocateKey`).
  */
 export function findRelocatedKeys<R extends RelocatedPath>(
 	config: unknown,
 	relocations: readonly R[],
 ): (RelocatedKey & { readonly relocation: R })[] {
 	const found = new Map<string, RelocatedKey & { readonly relocation: R }>();
-	const add = (path: readonly string[]): void => {
-		const key = relocateKey(path, relocations);
-		if (key !== undefined) found.set(key.from, key);
-	};
-	const walk = (path: readonly string[], value: unknown): void => {
-		if (isPlainObject(value)) {
-			for (const key of Object.keys(value)) walk([...path, key], value[key]);
-			return;
-		}
-		if (Array.isArray(value) && value.length > 0 && value.every(isPlainObject)) {
-			value.forEach((element, index) => {
-				walk([...path, String(index)], element);
-			});
-			return;
-		}
-		add(path);
-	};
 	for (const relocation of relocations) {
 		const value = readOwn(config, relocation.from);
-		if (value !== undefined) walk(relocation.from, value);
+		if (value === undefined) continue;
+		for (const path of pathsSetBy(value, relocation.from)) {
+			const key = relocateKey(path, relocations);
+			if (key !== undefined) found.set(key.from, key);
+		}
 	}
 	return [...found.values()];
 }
@@ -318,25 +322,34 @@ export function withoutRenamedVariables(config: unknown): unknown {
 }
 
 /**
+ * What `createApp` was handed as the configuration: an object, nothing, or a
+ * value that is not an object.
+ */
+export type HandedConfiguration = "object" | "none" | "not-an-object";
+
+/**
  * What to tell the operator whose environment breaks a rename, in the words a
  * relocated key is refused in, or the composition that captures no value for
- * it: that it handed no configuration (`configured` false), or which
- * `reference.conf` captures the names — core's own for module "core", else
- * the module's `section.reference`. Names the variables and the paths, never
- * a value: a variable may carry a secret.
+ * it: that it handed no configuration, or one that is not an object
+ * (`handed`), or which `reference.conf` captures the names — core's own for
+ * module "core", else the module's `section.reference`. Names the variables
+ * and the paths, never a value: a variable may carry a secret.
  */
 export function renamedVariableMessage(
 	rename: RenamedVariable & {
 		readonly module: string;
 		readonly state: RenamedVariableState;
 	},
-	configured = true,
+	handed: HandedConfiguration = "object",
 ): string {
 	const names = rename.to === null ? rename.from : `${rename.from} or ${rename.to}`;
 	switch (rename.state) {
 		case "uncaptured": {
-			if (!configured) {
+			if (handed === "none") {
 				return `createApp was handed no configuration, so whether the environment sets ${names} cannot be told.`;
+			}
+			if (handed === "not-an-object") {
+				return `createApp was handed a configuration that is not an object, so whether the environment sets ${names} cannot be told.`;
 			}
 			const capturing =
 				rename.module === "core"

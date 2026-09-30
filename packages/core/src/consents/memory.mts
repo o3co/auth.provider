@@ -43,7 +43,7 @@ export interface MemoryConsentStore extends ConsentStore {
  *
  * Single-replica only: a "yes" recorded on one replica is asked for again on
  * every other, so the module that provides this declares itself
- * replica-unsafe and `deployment.mode = "multi"` refuses it by name.
+ * replica-unsafe and `core.deployment.mode = "multi"` refuses it by name.
  */
 export function createMemoryConsentStore(): MemoryConsentStore {
 	const records = new Map<string, ConsentRecord>();

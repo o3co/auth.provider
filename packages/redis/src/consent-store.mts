@@ -17,7 +17,7 @@
 /**
  * Redis-backed `ConsentStore` and `PendingConsentStore`: consent records and
  * parked consent requests every replica reads, so the consent step for
- * non-first-party clients can run under `deployment.mode = "multi"`. One module
+ * non-first-party clients can run under `core.deployment.mode = "multi"`. One module
  * provides both slots; `createOAuthRouter` refuses a composition with one and
  * not the other.
  *
@@ -343,7 +343,7 @@ export const redisPendingConsentStoreBuilder: AdapterBuilder<PendingConsentStore
  * `defineModule` manifest providing both consent slots off the shared Redis
  * clients, the counterpart of core's `memoryConsentStoreModule`. Declares no
  * `replicaSafety`, so a composition using it may declare
- * `deployment.mode = "multi"`. Its client slots come from `makeIoredisClients`
+ * `core.deployment.mode = "multi"`. Its client slots come from `makeIoredisClients`
  * (or the standalone's shared clients module); config lives under
  * `redisConsentStore`, never a bare top-level `keyPrefix`.
  */

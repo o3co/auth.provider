@@ -245,7 +245,7 @@ describe("sessionStoreModule", () => {
 });
 
 // ---------------------------------------------------------------------------
-// `SESSION_STORAGE_TYPE=memory` under `deployment.mode = "multi"`.
+// `SESSION_STORAGE_TYPE=memory` under `core.deployment.mode = "multi"`.
 // express-session's MemoryStore is per process like every other memory store
 // the replica-safety guard refuses, but the storage type is config, which a
 // static manifest cannot know. `sessionStoreModuleFor(config)` builds the
@@ -291,11 +291,11 @@ describe("sessionStoreModuleFor(config) — replica-safety declaration", () => {
 		}
 	});
 
-	it('is refused by the replica-safety guard under deployment.mode = "multi", by name', () => {
+	it('is refused by the replica-safety guard under core.deployment.mode = "multi", by name', () => {
 		expect(() =>
 			checkReplicaSafety({
 				modules: [sessionStoreModuleFor(memoryConfig as never)],
-				config: { deployment: { mode: "multi" } },
+				config: { core: { deployment: { mode: "multi" } } },
 			}),
 		).toThrow(
 			expect.objectContaining({
@@ -306,12 +306,12 @@ describe("sessionStoreModuleFor(config) — replica-safety declaration", () => {
 		);
 	});
 
-	it('is silent under deployment.mode = "single" and warns when the mode is unset', () => {
+	it('is silent under core.deployment.mode = "single" and warns when the mode is unset', () => {
 		const warn = vi.fn();
 		const logger = { warn, info: vi.fn(), error: vi.fn(), debug: vi.fn() } as never;
 		checkReplicaSafety({
 			modules: [sessionStoreModuleFor(memoryConfig as never)],
-			config: { deployment: { mode: "single" } },
+			config: { core: { deployment: { mode: "single" } } },
 			logger,
 		});
 		expect(warn).not.toHaveBeenCalled();
@@ -330,7 +330,7 @@ describe("sessionStoreModuleFor(config) — replica-safety declaration", () => {
 		expect(() =>
 			checkReplicaSafety({
 				modules: [sessionStoreModuleFor(redisConfig as never)],
-				config: { deployment: { mode: "multi" } },
+				config: { core: { deployment: { mode: "multi" } } },
 			}),
 		).not.toThrow();
 	});
@@ -341,7 +341,7 @@ describe("sessionStoreModule (static manifest) — factory-time refusal under mu
 	// stage-1 guard anything, so the route factory — which is where the
 	// storage type is first known for certain — refuses the same combination
 	// with the same reason rather than mounting a per-process store. The mode
-	// is the `deploymentMode` slot core fills from `deployment.mode`; the
+	// is the `deploymentMode` slot core fills from `core.deployment.mode`; the
 	// configuration's own `deployment` is not read.
 	const factoryOf = (m: unknown) => {
 		const factory = (m as Module).contributes?.routes?.[0];
@@ -406,13 +406,13 @@ describe("sessionStoreModule (static manifest) — factory-time refusal under mu
 	it("decides by the slot, whatever the configuration's deployment says", async () => {
 		await expect(
 			factoryOf(sessionStoreModule)({
-				config: { ...memoryConfig, deployment: { mode: "single" } } as never,
+				config: { ...memoryConfig, core: { deployment: { mode: "single" } } } as never,
 				deploymentMode: "multi",
 				lifecycleRegistrar: undefined,
 			} as never),
 		).rejects.toMatchObject({ reason: "replica-unsafe-adapter" });
 		const route = await factoryOf(sessionStoreModule)({
-			config: { ...memoryConfig, deployment: { mode: "multi" } } as never,
+			config: { ...memoryConfig, core: { deployment: { mode: "multi" } } } as never,
 			deploymentMode: "single",
 			lifecycleRegistrar: undefined,
 		} as never);
@@ -420,8 +420,8 @@ describe("sessionStoreModule (static manifest) — factory-time refusal under mu
 	});
 
 	it.each([
-		["refused", "deployment.mode = multi", { mode: "multi" }],
-		["mounted", "deployment.mode = single", { mode: "single" }],
+		["refused", "core.deployment.mode = multi", { mode: "multi" }],
+		["mounted", "core.deployment.mode = single", { mode: "single" }],
 		["mounted", "an empty deployment section", {}],
 		["mounted", "no deployment section", undefined],
 	] as const)(
@@ -434,7 +434,7 @@ describe("sessionStoreModule (static manifest) — factory-time refusal under mu
 					config: {
 						...base,
 						session: { ...base.session, storage: { type: "memory" } },
-						...(deployment === undefined ? {} : { deployment }),
+						...(deployment === undefined ? {} : { core: { ...base.core, deployment } }),
 					},
 					pathResolver: (p: string) => p,
 				} as never,

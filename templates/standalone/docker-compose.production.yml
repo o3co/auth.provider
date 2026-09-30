@@ -28,8 +28,8 @@
 #   and every IP-keyed rate limit — means the client, not the proxy; compose
 #   refuses to start until you supply it. See README "Multi-replica
 #   deployments".
-# - **Scale out.** This is one replica (DEPLOYMENT_MODE=single). Before
-#   `--scale app=N`, set DEPLOYMENT_MODE=multi and read that same README
+# - **Scale out.** This is one replica (CORE_DEPLOYMENT_MODE=single). Before
+#   `--scale app=N`, set CORE_DEPLOYMENT_MODE=multi and read that same README
 #   section — boot will then refuse any in-memory store that must be shared.
 # - **Invent secrets.** SESSION_SECRET comes from `.env`, which is required
 #   here — chmod 600 it, keep it out of git (`git local-files` or your secret
@@ -96,7 +96,7 @@ services:
       # why the adapter block further down states every one of them explicitly
       # instead of leaving them to inherit. Before `--scale app=N`, set `multi`
       # and read the README's "Multi-replica deployments".
-      DEPLOYMENT_MODE: single
+      CORE_DEPLOYMENT_MODE: single
       # Behind the TLS terminator this file assumes, `req.ip` is the proxy's
       # address and `req.protocol` reads `http` until this names the hop. The
       # README calls it required for exactly that reason, and the cost of
@@ -154,7 +154,7 @@ services:
       # authenticated session, finds no user session behind it, and sends the
       # browser to log in again, where the still-valid cookie puts it straight
       # back. A login loop that clears only when the user deletes the cookie.
-      # `DEPLOYMENT_MODE: single` says nothing about it: the replica guard
+      # `CORE_DEPLOYMENT_MODE: single` says nothing about it: the replica guard
       # answers "can these stores be shared", not "do these two stores have the
       # same lifetime".
       USER_SESSION_STORES_ADAPTER: redis
