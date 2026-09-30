@@ -19,14 +19,14 @@
  * budget of each rate-limit prefix it owns — the default limit and window it
  * reads from its own settings — name-keyed by the prefix, and core composes
  * them into one view, the synthetic `rateLimitBudgetResolver`, that a limiter
- * reads at request time. Two modules contributing one prefix refuse boot. No
- * limiter reads the view yet: the bundled ones still seed their limits from
- * `resolveSeededLimitSpecs`.
+ * reads at request time. Two modules contributing one prefix refuse boot.
  */
 
-import { describe, expect, it } from "vitest";
-import { defineModule } from "../../modules/manifest/index.mjs";
+import { describe, expect, it, vi } from "vitest";
+import { MAX_DURATION_SECONDS } from "../../config/durations.mjs";
+import { defineModule, type Module } from "../../modules/manifest/index.mjs";
 import { memoryRateLimiterModule } from "../../ratelimit/module.mjs";
+import type { RateLimiter } from "../../ratelimit/types.mjs";
 import { makeValidCoreConfig } from "../../testing/fixtures/valid-config.mjs";
 import { createApp, mergeWithBuiltins } from "../create-app.mjs";
 import type { BootstrapMap } from "../types.mjs";
@@ -126,41 +126,303 @@ describe("rateLimitBudgets — contributed by the module that owns the prefix", 
 		await handle.dispose();
 	});
 
-	it("an override gives a budget to a prefix whose owner switched it off", async () => {
-		const owner = defineModule({
-			name: "budget-owner",
-			contributes: { rateLimitBudgets: { fixture: () => null } },
-		});
-		const replacer = defineModule({
-			name: "budget-replacer",
-			overrides: { rateLimitBudgets: { fixture: () => ({ limit: 2, windowSeconds: 30 }) } },
-		});
-
-		const handle = await createApp({ modules: [owner, replacer], bootstrapComponents: bootWith() });
-
-		expect(handle.components.rateLimitBudgetResolver?.get("fixture")).toEqual({
-			limit: 2,
-			windowSeconds: 30,
-		});
-		await handle.dispose();
-	});
-
-	it("an override replaces the budget another module contributed for the prefix", async () => {
+	it("an override tightens the budget another module contributed for the prefix", async () => {
 		const owner = defineModule({
 			name: "budget-owner",
 			contributes: { rateLimitBudgets: { fixture: () => ({ limit: 5, windowSeconds: 60 }) } },
 		});
 		const replacer = defineModule({
 			name: "budget-replacer",
-			overrides: { rateLimitBudgets: { fixture: () => ({ limit: 1, windowSeconds: 10 }) } },
+			overrides: { rateLimitBudgets: { fixture: () => ({ limit: 1, windowSeconds: 600 }) } },
 		});
 
 		const handle = await createApp({ modules: [owner, replacer], bootstrapComponents: bootWith() });
 
 		expect(handle.components.rateLimitBudgetResolver?.get("fixture")).toEqual({
 			limit: 1,
-			windowSeconds: 10,
+			windowSeconds: 600,
 		});
+		await handle.dispose();
+	});
+});
+
+/** A module that requires the limiter, so the planner builds it. */
+const limiterUser = defineModule({
+	name: "limiter-user",
+	requires: ["rateLimiter"],
+	contributes: { grantMiddleware: [() => null] },
+});
+
+/** The bundled in-process limiter, its default 60 per 60 s, and a module that uses it. */
+const withMemoryLimiter = (extra: Record<string, unknown> = {}): BootstrapMap =>
+	bootWith({
+		deployment: { mode: "single" },
+		memoryRateLimiter: {
+			limits: {},
+			defaultLimit: { limit: 60, windowSeconds: 60 },
+			maxBuckets: 100,
+		},
+		...extra,
+	});
+
+type Budget = { readonly limit: number; readonly windowSeconds: number } | null;
+
+/** The boot of an owner contributing `contributed` and a module overriding it with `overridden`. */
+const overriding = (contributed: Budget, overridden: Budget, bootstrap: BootstrapMap) =>
+	createApp({
+		modules: [
+			memoryRateLimiterModule,
+			limiterUser,
+			defineModule({
+				name: "budget-owner",
+				contributes: { rateLimitBudgets: { fixture: () => contributed } },
+			}),
+			defineModule({
+				name: "budget-replacer",
+				overrides: { rateLimitBudgets: { fixture: () => overridden } },
+			}),
+		],
+		bootstrapComponents: bootstrap,
+	});
+
+describe("rateLimitBudgets — an override may only tighten", () => {
+	it.each<readonly [string, Budget]>([
+		["a higher limit", { limit: 6, windowSeconds: 300 }],
+		["a shorter window", { limit: 5, windowSeconds: 299 }],
+		["both", { limit: 1_000_000, windowSeconds: 1 }],
+	])(
+		"refuses boot on an override that loosens a contributed budget — %s — naming both",
+		async (_label, loosened) => {
+			const err = await refusal(
+				overriding({ limit: 5, windowSeconds: 300 }, loosened, withMemoryLimiter()),
+			);
+
+			expect(err.reason).toBe("contribute-factory-failed");
+			expect(err.details).toMatchObject({
+				module: "budget-replacer",
+				kind: "rateLimitBudgets",
+				name: "fixture",
+			});
+			expect(err.message).toContain("may only tighten");
+			expect(err.message).toContain("limit 5, windowSeconds 300");
+			expect(err.message).toContain(
+				`(got limit ${loosened?.limit}, windowSeconds ${loosened?.windowSeconds})`,
+			);
+		},
+	);
+
+	it("refuses boot on an override one second over a year, which counts a longer window as tighter", async () => {
+		const err = await refusal(
+			overriding(
+				{ limit: 5, windowSeconds: 300 },
+				{ limit: 5, windowSeconds: MAX_DURATION_SECONDS + 1 },
+				withMemoryLimiter(),
+			),
+		);
+		expect(err.reason).toBe("contribute-factory-failed");
+		expect(err.details).toMatchObject({ module: "budget-replacer", name: "fixture" });
+		expect(err.message).toContain("at most a year");
+	});
+
+	it("registers an override no looser than the budget it replaces", async () => {
+		const handle = await overriding(
+			{ limit: 5, windowSeconds: 300 },
+			{ limit: 5, windowSeconds: 300 },
+			withMemoryLimiter(),
+		);
+		expect(handle.components.rateLimitBudgetResolver?.get("fixture")).toEqual({
+			limit: 5,
+			windowSeconds: 300,
+		});
+		await handle.dispose();
+	});
+
+	it("holds an override of a switched-off budget to the limiter's defaultLimit", async () => {
+		const tighter = await overriding(null, { limit: 2, windowSeconds: 600 }, withMemoryLimiter());
+		expect(tighter.components.rateLimitBudgetResolver?.get("fixture")).toEqual({
+			limit: 2,
+			windowSeconds: 600,
+		});
+		await tighter.dispose();
+
+		for (const looser of [
+			{ limit: 61, windowSeconds: 600 },
+			{ limit: 2, windowSeconds: 59 },
+		]) {
+			const err = await refusal(overriding(null, looser, withMemoryLimiter()));
+			expect(err.message, JSON.stringify(looser)).toContain("may only tighten");
+		}
+	});
+
+	it("holds an override that switches a budget off to the limiter's defaultLimit", async () => {
+		const looser = await refusal(
+			overriding({ limit: 5, windowSeconds: 300 }, null, withMemoryLimiter()),
+		);
+		expect(looser.message).toContain("may only tighten");
+
+		const tighter = await overriding({ limit: 100, windowSeconds: 30 }, null, withMemoryLimiter());
+		expect(tighter.components.rateLimitBudgetResolver?.get("fixture")).toBeUndefined();
+		await tighter.dispose();
+	});
+
+	it("registers an override that leaves a switched-off budget off, with no limiter to compare it with", async () => {
+		const handle = await createApp({
+			modules: [
+				defineModule({
+					name: "budget-owner",
+					contributes: { rateLimitBudgets: { fixture: () => null } },
+				}),
+				defineModule({
+					name: "budget-replacer",
+					overrides: { rateLimitBudgets: { fixture: () => null } },
+				}),
+			],
+			bootstrapComponents: bootWith(),
+		});
+		expect(handle.components.rateLimitBudgetResolver?.get("fixture")).toBeUndefined();
+		await handle.dispose();
+	});
+
+	it("refuses an override of a switched-off budget when no limiter declares its default", async () => {
+		const err = await refusal(
+			createApp({
+				modules: [
+					defineModule({
+						name: "budget-owner",
+						contributes: { rateLimitBudgets: { fixture: () => null } },
+					}),
+					defineModule({
+						name: "budget-replacer",
+						overrides: { rateLimitBudgets: { fixture: () => ({ limit: 1, windowSeconds: 600 }) } },
+					}),
+				],
+				bootstrapComponents: bootWith(),
+			}),
+		);
+
+		expect(err.reason).toBe("contribute-factory-failed");
+		expect(err.message).toContain("defaultLimit");
+	});
+});
+
+describe("rateLimitBudgets — the boot line", () => {
+	const spyLogger = () => ({
+		trace: vi.fn(),
+		debug: vi.fn(),
+		info: vi.fn(),
+		warn: vi.fn(),
+		error: vi.fn(),
+		fatal: vi.fn(),
+		child: vi.fn(),
+	});
+
+	it("logs each prefix with its budget and the module that set it, and the limiter's kind and outage policy", async () => {
+		const logger = spyLogger();
+		const handle = await createApp({
+			modules: [
+				memoryRateLimiterModule,
+				limiterUser,
+				defineModule({
+					name: "budget-owner",
+					contributes: {
+						rateLimitBudgets: {
+							fixture: () => ({ limit: 5, windowSeconds: 300 }),
+							"fixture-off": () => null,
+						},
+					},
+				}),
+				defineModule({
+					name: "budget-tightener",
+					overrides: { rateLimitBudgets: { fixture: () => ({ limit: 1, windowSeconds: 600 }) } },
+				}),
+			],
+			bootstrapComponents: { ...withMemoryLimiter(), logger: logger as never },
+		});
+
+		expect(
+			logger.info.mock.calls.filter((call) => call[1] === "rate_limit_budgets_registered"),
+		).toEqual([
+			[
+				{
+					limiter: { kind: "memory", failMode: "closed" },
+					budgets: [
+						{
+							prefix: "fixture",
+							budget: { limit: 1, windowSeconds: 600 },
+							module: "budget-tightener",
+							by: "override",
+						},
+						{ prefix: "fixture-off", budget: null, module: "budget-owner", by: "contribution" },
+					],
+				},
+				"rate_limit_budgets_registered",
+			],
+		]);
+		await handle.dispose();
+	});
+
+	it.each<readonly [string, () => RateLimiter]>([
+		[
+			"a failMode outside the guard's two",
+			() =>
+				({
+					kind: "custom",
+					failMode: "maybe",
+					check: async () => ({ allowed: true }),
+				}) as unknown as RateLimiter,
+		],
+		[
+			"a failMode that cannot be read",
+			() =>
+				({
+					kind: "custom",
+					get failMode(): never {
+						throw new Error("getter down");
+					},
+					check: async () => ({ allowed: true }),
+				}) as RateLimiter,
+		],
+	])("reports a wired limiter with %s as an invalid outage policy", async (_label, limiter) => {
+		const logger = spyLogger();
+		const handle = await createApp({
+			modules: [
+				defineModule({ name: "custom-limiter", provides: { rateLimiter: limiter } }),
+				limiterUser,
+			],
+			bootstrapComponents: { ...bootWith(), logger: logger as never },
+		});
+
+		expect(
+			logger.info.mock.calls.filter((call) => call[1] === "rate_limit_budgets_registered"),
+		).toEqual([
+			[
+				{ limiter: { kind: "custom", failMode: "invalid" }, budgets: [] },
+				"rate_limit_budgets_registered",
+			],
+		]);
+		await handle.dispose();
+	});
+
+	it("warns when rateLimit.failMode says open and the wired limiter answers another policy", async () => {
+		const logger = spyLogger();
+		const handle = await createApp({
+			modules: [memoryRateLimiterModule, limiterUser],
+			bootstrapComponents: {
+				...withMemoryLimiter({
+					rateLimit: { login: { windowMs: 900_000, limit: 20 }, failMode: "open" },
+				}),
+				logger: logger as never,
+			},
+		});
+
+		expect(
+			logger.warn.mock.calls.filter((call) => call[1] === "rate_limit_fail_mode_not_applied"),
+		).toEqual([
+			[
+				{ configured: "open", limiter: { kind: "memory", failMode: "closed" } },
+				"rate_limit_fail_mode_not_applied",
+			],
+		]);
 		await handle.dispose();
 	});
 });
@@ -202,6 +464,7 @@ describe("rateLimitBudgets — refused", () => {
 		["a fractional window", { limit: 5, windowSeconds: 1.5 }],
 		["a NaN limit", { limit: Number.NaN, windowSeconds: 60 }],
 		["a window past the Date range", { limit: 5, windowSeconds: Number.MAX_SAFE_INTEGER }],
+		["a window one second over a year", { limit: 5, windowSeconds: MAX_DURATION_SECONDS + 1 }],
 	])(
 		"a budget no limiter can apply as written — %s — refuses boot naming the module and prefix",
 		async (_label, budget) => {
@@ -223,7 +486,6 @@ describe("rateLimitBudgets — refused", () => {
 		},
 	);
 
-	type Budget = { readonly limit: number; readonly windowSeconds: number } | null;
 	const spec = (): Budget => ({ limit: 5, windowSeconds: 60 });
 	const off = (): Budget => null;
 
@@ -323,35 +585,70 @@ describe("rateLimitBudgets — refused", () => {
 	});
 });
 
-describe("rateLimitBudgets — no limiter reads them yet", () => {
-	it("the memory limiter still limits a contributed prefix by its own limits alone", async () => {
-		const owner = defineModule({
-			name: "budget-owner",
-			contributes: { rateLimitBudgets: { fixture: () => ({ limit: 1, windowSeconds: 60 }) } },
-		});
+describe("rateLimitBudgets — the in-process limiter reads them", () => {
+	/** The limiter a consumer of the slot is handed, after a boot with `modules`. */
+	const limiterAfter = async (modules: readonly Module[]) => {
+		let handed: RateLimiter | undefined;
 		const limiterUser = defineModule({
 			name: "limiter-user",
 			requires: ["rateLimiter"],
-			contributes: { grantMiddleware: [() => null] },
+			contributes: {
+				grantMiddleware: [
+					(deps) => {
+						handed = deps.rateLimiter;
+						return null;
+					},
+				],
+			},
 		});
-
 		const handle = await createApp({
-			modules: [memoryRateLimiterModule, owner, limiterUser],
+			modules: [memoryRateLimiterModule, ...modules, limiterUser],
 			bootstrapComponents: bootWith({
 				deployment: { mode: "single" },
 				memoryRateLimiter: {
-					limits: {},
+					limits: { declared: { limit: 4, windowSeconds: 45 } },
 					defaultLimit: { limit: 60, windowSeconds: 60 },
 					maxBuckets: 100,
 				},
 			}),
 		});
+		if (handed === undefined) throw new Error("no consumer was handed the limiter");
+		return { handle, limiter: handed };
+	};
 
-		const limiter = handle.components.rateLimiter;
-		const first = await limiter?.check("fixture:ip:1.2.3.4", { ip: "1.2.3.4" });
-		const second = await limiter?.check("fixture:ip:1.2.3.4", { ip: "1.2.3.4" });
-		expect(first?.limit).toBe(60);
-		expect(second?.allowed).toBe(true);
+	it("limits a contributed prefix by its budget", async () => {
+		const owner = defineModule({
+			name: "budget-owner",
+			contributes: { rateLimitBudgets: { fixture: () => ({ limit: 1, windowSeconds: 60 }) } },
+		});
+		const { handle, limiter } = await limiterAfter([owner]);
+
+		const first = await limiter.check("fixture:ip:1.2.3.4", { ip: "1.2.3.4" });
+		const second = await limiter.check("fixture:ip:1.2.3.4", { ip: "1.2.3.4" });
+		expect(first.limit).toBe(1);
+		expect(second.allowed).toBe(false);
+		await handle.dispose();
+	});
+
+	it("limits a prefix its own limits declare by that entry, over a contributed budget", async () => {
+		const owner = defineModule({
+			name: "budget-owner",
+			contributes: { rateLimitBudgets: { declared: () => ({ limit: 1, windowSeconds: 60 }) } },
+		});
+		const { handle, limiter } = await limiterAfter([owner]);
+
+		expect((await limiter.check("declared:ip:1.2.3.4", { ip: "1.2.3.4" })).limit).toBe(4);
+		await handle.dispose();
+	});
+
+	it("limits a prefix whose budget is switched off by its defaultLimit", async () => {
+		const owner = defineModule({
+			name: "budget-owner",
+			contributes: { rateLimitBudgets: { fixture: () => null } },
+		});
+		const { handle, limiter } = await limiterAfter([owner]);
+
+		expect((await limiter.check("fixture:ip:1.2.3.4", { ip: "1.2.3.4" })).limit).toBe(60);
 		await handle.dispose();
 	});
 });

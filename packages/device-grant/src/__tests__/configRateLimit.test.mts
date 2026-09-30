@@ -19,16 +19,22 @@
  * user code against, as a config key that reaches the limiter (otherwise the
  * `device_verification:` prefix falls through to the adapter's 60/60s
  * default). Pins both ends: the schema boundary (defaults and bounds), and the
- * documented key in `reference.conf` resolving, through the real HOCON parser
- * and the real limiter module, to a budget of five.
+ * documented key in `reference.conf` resolving, through the real HOCON parser,
+ * the budget the module contributes and the real limiter module, to a budget
+ * of five.
  */
 
 import { fileURLToPath } from "node:url";
-import { memoryRateLimiterModule } from "@o3co/auth-provider-core";
+import {
+	type AppConfig,
+	memoryRateLimiterModule,
+	type RateLimitSpec,
+} from "@o3co/auth-provider-core";
 import { parseFile } from "@o3co/ts.hocon";
 import { validate } from "@o3co/ts.hocon/zod";
 import { describe, expect, it } from "vitest";
-import { deviceGrantConfigSchema } from "#/module.mjs";
+import { deviceGrantConfigSchema, deviceGrantModule } from "#/module.mjs";
+import { DEVICE_VERIFICATION_RATE_LIMIT_PREFIX } from "#/verificationBudget.mjs";
 
 const REFERENCE_CONF = fileURLToPath(new URL("../../config/reference.conf", import.meta.url));
 
@@ -76,8 +82,22 @@ describe("oauth.deviceAuthorization.rateLimit — schema boundary", () => {
 });
 
 describe("oauth.deviceAuthorization.rateLimit — the documented key resolves", () => {
-	/** Six attempts under the verification prefix: the advertised limit and which were allowed. */
-	const spendSix = async (parsed: unknown) => {
+	/**
+	 * Six attempts under the verification prefix, on the memory limiter module
+	 * reading the budget the device-grant module contributes from `parsed`: the
+	 * advertised limit and which were allowed.
+	 */
+	const spendSix = async (parsed: {
+		readonly oauth: { readonly deviceAuthorization: { readonly rateLimit?: unknown } };
+	}) => {
+		const contribute = deviceGrantModule({ config: parsed as unknown as AppConfig }).contributes
+			?.rateLimitBudgets?.[DEVICE_VERIFICATION_RATE_LIMIT_PREFIX] as (
+			deps: unknown,
+		) => RateLimitSpec | null;
+		const budget = contribute({ section: parsed.oauth.deviceAuthorization });
+		const budgets = new Map(
+			budget === null ? [] : [[DEVICE_VERIFICATION_RATE_LIMIT_PREFIX, budget]],
+		);
 		const provide = memoryRateLimiterModule.provides?.rateLimiter as (deps: unknown) => {
 			check(
 				key: string,
@@ -86,12 +106,15 @@ describe("oauth.deviceAuthorization.rateLimit — the documented key resolves", 
 		};
 		const limiter = provide({
 			config: {
-				...(parsed as Record<string, unknown>),
 				memoryRateLimiter: {
 					limits: {},
 					defaultLimit: { limit: 60, windowSeconds: 60 },
 					maxBuckets: 10_000,
 				},
+			},
+			rateLimitBudgetResolver: {
+				get: (prefix: string) => budgets.get(prefix),
+				entries: () => budgets.entries(),
 			},
 		});
 
@@ -107,8 +130,9 @@ describe("oauth.deviceAuthorization.rateLimit — the documented key resolves", 
 	};
 
 	it("reaches the limiter as a budget of five from reference.conf alone", async () => {
-		// End to end through what a deployment actually runs: the shipped
-		// HOCON defaults, the schema, and the memory limiter module's seed.
+		// The shipped HOCON defaults and the schema, the budget the module
+		// contributes from them, handed to the memory limiter module through a
+		// resolver built here (createApp's is pinned by the composition suite).
 		// The sixth attempt under the verification prefix is the one refused.
 		const parsed = validate(parseFile(REFERENCE_CONF), deviceGrantConfigSchema);
 		expect(parsed.oauth.deviceAuthorization.rateLimit).toEqual({ limit: 5, windowSeconds: 300 });

@@ -44,6 +44,14 @@ another's body limit, or a memory store booting under `deployment.mode =
   sits behind the session's CSRF guard, projects every error it logs, and
   answers a `RangeError` from `resumePrimary` — a continuation naming a
   requirement a deploy removed, say — as "log in again".
+- **The budget in force for each prefix a package owns, on both bundled
+  limiters.** `login`, `device_verification`,
+  `webauthn-authentication-options` and `mfa` — each the budget its owning
+  module contributes — and `token`, which the oauth module claims with no budget of its own (`null`), so it falls to the limiter's `defaultLimit`, asked of the limiter
+  the full set hands a consumer, on the in-process limiter and on the Redis
+  one: with the shipped configuration, with each owner's own key set, with the
+  limiter's own `limits` declaring every prefix (which wins), and with the
+  owners switched off.
 - **What it checks on real Redis, under `deployment.mode = "multi"`.** That
   nothing in the full set declares replica-unsafe state, that each added
   memory store is refused at boot by name, and that two replicas on one

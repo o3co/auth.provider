@@ -32,13 +32,14 @@
  */
 
 import assert from "node:assert/strict";
-import type { RateLimitFailMode } from "../../ratelimit/guard.mjs";
 import type {
 	RateLimitContext,
 	RateLimitDecision,
 	RateLimiter,
+	RateLimitFailMode,
 	RateLimitSpec,
 } from "../../ratelimit/types.mjs";
+import { isUsableRateLimitSpec } from "../../ratelimit/usableSpec.mjs";
 import type { ContractCase } from "../../session-admission/testing/requirement.contract.mjs";
 
 export interface RateLimiterContractInput {
@@ -106,6 +107,17 @@ export function rateLimiterContract(input: RateLimiterContractInput): readonly C
 				assert.ok(
 					FAIL_MODES.has(limiter.failMode),
 					`failMode ${JSON.stringify(limiter.failMode)} is not "open" or "closed"`,
+				);
+			},
+		},
+		{
+			name: "defaultLimit, when present, is a budget a limiter can apply as written",
+			run: async () => {
+				const limiter = build();
+				if (!("defaultLimit" in limiter) || limiter.defaultLimit === undefined) return;
+				assert.ok(
+					isUsableRateLimitSpec(limiter.defaultLimit),
+					`defaultLimit ${JSON.stringify(limiter.defaultLimit)} is not a usable { limit, windowSeconds }`,
 				);
 			},
 		},

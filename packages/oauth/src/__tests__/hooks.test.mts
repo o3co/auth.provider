@@ -34,9 +34,8 @@ import { describe, expect, it, vi } from "vitest";
 import { createOAuthRouter } from "#/routes.mjs";
 import { authorizationServerRegistry } from "./_helpers/authorizationServerRegistry.mjs";
 
-// `checkRateLimit` reads `config.rateLimit.failMode` in the catch
-// path. The mock config carries `failMode: "open"` to exercise the
-// default behavior; closed-mode tests below override `rateLimit` per-test.
+// A limiter outage is answered by the limiter's own `failMode`; the mock
+// config carries `rateLimit.failMode = "open"`, which the routes do not read.
 // PKCE/S256 is mandatory at /authorize, so every request meant to
 // reach the hook under test carries a valid S256 challenge (RFC 7636
 // appendix-B example pair).
@@ -249,6 +248,7 @@ describe("oauth routes — hooks", () => {
 			const app = await buildApp({
 				rateLimiter: {
 					kind: "broken",
+					failMode: "open",
 					async check() {
 						throw new Error("redis down");
 					},
@@ -277,7 +277,7 @@ describe("oauth routes — hooks", () => {
 		// see a limiter outage regardless of audit sink status — a Redis-backed
 		// audit sink drops during the same outage; `failMode = "closed"` adds
 		// 503 enforcement on top.
-		describe("failMode policy + logger emission", () => {
+		describe("the limiter's failMode + logger emission", () => {
 			const makeMockLogger = (): Logger & { error: ReturnType<typeof vi.fn> } => ({
 				debug: vi.fn(),
 				info: vi.fn(),
@@ -285,19 +285,27 @@ describe("oauth routes — hooks", () => {
 				error: vi.fn(),
 			});
 
-			const brokenRateLimiter: RateLimiter = {
+			const brokenRateLimiter = (failMode: "open" | "closed"): RateLimiter => ({
 				kind: "broken",
+				failMode,
 				async check() {
 					throw new Error("redis down");
 				},
-			};
+			});
+
+			const configWithFailMode = (failMode: "open" | "closed") =>
+				({
+					...(mockConfig as unknown as Record<string, unknown>),
+					rateLimit: { login: { windowMs: 60_000, limit: 100 }, failMode },
+				}) as unknown as AppConfig;
 
 			it("failMode='open' + limiter throws → request allowed + logger.error('rate_limiter_failed_open')", async () => {
 				const logger = makeMockLogger();
 				const app = await buildApp({
-					rateLimiter: brokenRateLimiter,
+					rateLimiter: brokenRateLimiter("open"),
 					logger,
-					// mockConfig already has failMode: "open"
+					// The limiter's policy, not the configuration's `rateLimit.failMode`.
+					config: configWithFailMode("closed"),
 				});
 
 				const res = await request(app)
@@ -319,17 +327,11 @@ describe("oauth routes — hooks", () => {
 
 			it("failMode='closed' + limiter throws → 503 service_unavailable + logger.error('rate_limiter_failed_closed')", async () => {
 				const logger = makeMockLogger();
-				const closedConfig = {
-					...(mockConfig as unknown as Record<string, unknown>),
-					rateLimit: {
-						login: { windowMs: 60_000, limit: 100 },
-						failMode: "closed",
-					},
-				} as unknown as AppConfig;
 				const app = await buildApp({
-					rateLimiter: brokenRateLimiter,
+					rateLimiter: brokenRateLimiter("closed"),
 					logger,
-					config: closedConfig,
+					// The limiter's policy, not the configuration's `rateLimit.failMode`.
+					config: configWithFailMode("open"),
 				});
 
 				const res = await request(app)
@@ -370,17 +372,12 @@ describe("oauth routes — hooks", () => {
 
 			it("failMode='closed' + limiter succeeds and allows → no logger.error call (failMode only affects error path)", async () => {
 				const logger = makeMockLogger();
-				const closedConfig = {
-					...(mockConfig as unknown as Record<string, unknown>),
-					rateLimit: {
-						login: { windowMs: 60_000, limit: 100 },
+				const app = await buildApp({
+					rateLimiter: {
+						...createStubRateLimiter(() => ({ allowed: true })),
 						failMode: "closed",
 					},
-				} as unknown as AppConfig;
-				const app = await buildApp({
-					rateLimiter: createStubRateLimiter(() => ({ allowed: true })),
 					logger,
-					config: closedConfig,
 				});
 
 				const res = await request(app)

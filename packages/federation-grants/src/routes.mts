@@ -41,7 +41,6 @@ import {
 	describeIssuerRejection,
 	type Logger,
 	type RateLimiter,
-	type RateLimitFailMode,
 	type ReplaySeenSet,
 } from "@o3co/auth-provider-core";
 import { createClientAuthMiddleware } from "@o3co/auth-provider-oauth";
@@ -235,8 +234,8 @@ export interface FederationGrantRouterOptions extends FederationGrantTokenHandle
 	 * `connect_uri` is built on.
 	 */
 	readonly issuer: string;
+	/** The routes' budget; its own `failMode` is the outage policy. */
 	readonly rateLimiter: RateLimiter;
-	readonly failMode: RateLimitFailMode;
 	/** Where a `private_key_jwt` assertion's single-use `jti` is recorded. */
 	readonly replaySeenSet?: ReplaySeenSet;
 }
@@ -292,7 +291,6 @@ export function createFederationGrantRouter(options: FederationGrantRouterOption
 		createRateLimitGuard({
 			limiter: options.rateLimiter,
 			tag: FEDERATION_GRANTS_RATE_LIMIT_PREFIX,
-			failMode: options.failMode,
 			deniedDescription: "provider",
 			...(options.logger === undefined ? {} : { logger: options.logger }),
 			...(options.auditSink === undefined ? {} : { auditSink: options.auditSink }),

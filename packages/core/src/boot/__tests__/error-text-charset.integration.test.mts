@@ -246,7 +246,6 @@ describe("the rate limiter", () => {
 									createRateLimitGuard({
 										limiter: deps.rateLimiter,
 										tag: "login",
-										failMode: "closed",
 									}),
 									(_req, res) => {
 										res.status(200).json({ reached: true });

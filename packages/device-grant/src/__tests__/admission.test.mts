@@ -86,7 +86,7 @@ interface HarnessOptions {
 	readonly userSessionStore?: UserSessionStore;
 	readonly subjectRevocation?: SubjectRevocation;
 	readonly requireEmailVerified?: boolean;
-	/** The verification budget; five, as the module seeds it, unless a test needs it spent sooner. */
+	/** The verification budget; five, as the module contributes it, unless a test needs it spent sooner. */
 	readonly limit?: number;
 }
 
@@ -116,7 +116,6 @@ const harness = async (options: HarnessOptions = {}) => {
 				limits: { device_verification: { limit: options.limit ?? 5, windowSeconds: 300 } },
 				defaultLimit: { limit: 60, windowSeconds: 60 },
 			}),
-			failMode: "closed",
 			userSessionStore: options.userSessionStore ?? liveSessionStore(),
 			...(options.subjectRevocation === undefined
 				? {}
@@ -413,7 +412,6 @@ describe("device verification on session admission", () => {
 					limits: { device_verification: { limit: 5, windowSeconds: 300 } },
 					defaultLimit: { limit: 60, windowSeconds: 60 },
 				}),
-				failMode: "closed",
 				userSessionStore: liveSessionStore(),
 				requirements: forged,
 				requireEmailVerified: false,
@@ -431,7 +429,6 @@ describe("device verification on session admission", () => {
 				limits: { device_verification: { limit: 5, windowSeconds: 300 } },
 				defaultLimit: { limit: 60, windowSeconds: 60 },
 			}),
-			failMode: "closed",
 			userSessionStore: liveSessionStore(),
 			requirements: resolverForTests(
 				[fixture(() => ({ outcome: "step_up", whenStillUnmet: "reauthenticate" }))],
@@ -463,7 +460,6 @@ describe("device verification on session admission", () => {
 					limits: { device_verification: { limit: 5, windowSeconds: 300 } },
 					defaultLimit: { limit: 60, windowSeconds: 60 },
 				}),
-				failMode: "closed",
 				userSessionStore: liveSessionStore(),
 				requireEmailVerified: false,
 			} as never),

@@ -7,7 +7,6 @@ import { z } from "zod";
 import { MAX_DURATION_SECONDS } from "../config/durations.mjs";
 import { defineModule } from "../modules/index.mjs";
 import { createMemoryRateLimiter, DEFAULT_MEMORY_RATE_LIMITER_MAX_BUCKETS } from "./memory.mjs";
-import { resolveSeededLimitSpecs } from "./seededSpecs.mjs";
 import type { RateLimitSpec } from "./types.mjs";
 
 const rateLimitSpecSchema = z.object({
@@ -16,9 +15,11 @@ const rateLimitSpecSchema = z.object({
 });
 
 /**
- * In-memory RateLimiter module. Matches the memory branch of
- * `registerBuiltinRateLimiters`. For production multi-instance deployments,
- * use `redisRateLimiterModule` from `@o3co/auth-provider-redis`.
+ * In-memory RateLimiter module: `memoryRateLimiter`'s limits and default, and
+ * the budgets the prefixes' owners contribute (`rateLimitBudgetResolver`),
+ * which the memory branch of `registerBuiltinRateLimiters` does not read. For
+ * production multi-instance deployments, use `redisRateLimiterModule` from
+ * `@o3co/auth-provider-redis`.
  */
 export const memoryRateLimiterModule = defineModule({
 	name: "core-rate-limiter-memory",
@@ -28,7 +29,7 @@ export const memoryRateLimiterModule = defineModule({
 		reason:
 			"rate-limit counters fork per replica — every configured limit is effectively multiplied by the replica count, and resets on each deploy",
 	},
-	requires: ["config"] as const,
+	requires: ["config", "rateLimitBudgetResolver"] as const,
 	configSchema: z.object({
 		memoryRateLimiter: z
 			.object({
@@ -58,13 +59,8 @@ export const memoryRateLimiterModule = defineModule({
 				}
 			).memoryRateLimiter;
 			return createMemoryRateLimiter({
-				// `/session/login` limits under the `login:` prefix, but its window
-				// and limit are configured at `rateLimit.login`; the device
-				// verification endpoint likewise under `device_verification:`,
-				// configured at `oauth.deviceAuthorization.rateLimit`. Seeding
-				// keeps those the single source of truth; an operator-declared
-				// entry for either prefix still wins. See `resolveSeededLimitSpecs`.
-				limits: resolveSeededLimitSpecs(cfg.limits, deps.config),
+				limits: cfg.limits,
+				budgets: deps.rateLimitBudgetResolver,
 				defaultLimit: cfg.defaultLimit,
 				maxBuckets: cfg.maxBuckets,
 			});

@@ -39,6 +39,7 @@ import {
 	createMemoryReplaySeenSet,
 	createSymmetricKeyStore,
 	DeviceCodeStoreError,
+	defineModule,
 } from "@o3co/auth-provider-core";
 import {
 	createTestCsrfGuard,
@@ -124,6 +125,8 @@ interface Overrides {
 	readonly withCsrfGuard?: boolean;
 	/** Drop the `audit.sink.type = "none"` declaration the fixture carries. */
 	readonly withoutAuditDeclaration?: boolean;
+	/** Modules listed after the device grant's. */
+	readonly extraModules?: readonly Module[];
 }
 
 const makeBoot = (overrides: Overrides): BootstrapMap => {
@@ -132,8 +135,6 @@ const makeBoot = (overrides: Overrides): BootstrapMap => {
 	return {
 		config: {
 			...core,
-			// The device_authorization guard reads the product-wide outage
-			// policy, `rateLimit.failMode`, like every other guarded route.
 			rateLimit: full.rateLimit,
 			// The module attaches AUDIT_SINK_ABSENCE_POLICY, so a boot
 			// with no sink must say so — which is what this fixture is.
@@ -177,7 +178,10 @@ const makeBoot = (overrides: Overrides): BootstrapMap => {
 const boot = (overrides: Overrides) => {
 	const bootstrapComponents = makeBoot(overrides);
 	return createApp({
-		modules: [deviceGrantModule({ config: bootstrapComponents.config as AppConfig })],
+		modules: [
+			deviceGrantModule({ config: bootstrapComponents.config as AppConfig }),
+			...(overrides.extraModules ?? []),
+		],
 		bootstrapComponents,
 	});
 };
@@ -485,6 +489,12 @@ describe("deviceGrantModule — the route it actually contributes", () => {
 		csrfGuard: createTestCsrfGuard(),
 		// The synthetic key the planner fills (the session-admission ADR's D1).
 		sessionRequirementResolver: resolverForTests([]),
+		// The contributed budgets, as the planner fills them from this module's contribution.
+		rateLimitBudgetResolver: {
+			get: (prefix: string) =>
+				prefix === "device_verification" ? { limit: 5, windowSeconds: 300 } : undefined,
+			entries: () => new Map().entries(),
+		},
 		rateLimiter: createMemoryRateLimiter({
 			limits: {
 				device_verification: { limit: 5, windowSeconds: 300 },
@@ -574,27 +584,16 @@ describe("deviceGrantModule — the route it actually contributes", () => {
 		expect(next.status).toBe(429);
 	});
 
-	it("refuses to mount device_authorization without the outage policy, rateLimit.failMode", () => {
-		// The guard's fail-open / fail-closed choice is the product's, made
-		// once in config. Defaulting it here would be a second policy.
-		const deps = enabledDeps();
-		const factory = contributionsFor(deps)?.routes?.[0] as (d: unknown) => unknown;
-		expect(() => factory({ ...deps, config: { ...deps.config, rateLimit: undefined } })).toThrow(
-			/rateLimit\.failMode/,
-		);
-	});
-
-	it("refuses to mount device/verification without the outage policy, rateLimit.failMode", () => {
-		// The verification endpoint applies the same policy from the same key.
-		// A composition that enables the grant with no `failMode` is
-		// refused for this route too, not only for device_authorization — or
-		// the refusal would depend on which factory the planner ran first.
-		const deps = enabledDeps();
-		const factory = contributionsFor(deps)?.routes?.[1] as (d: unknown) => unknown;
-		expect(() => factory({ ...deps, config: { ...deps.config, rateLimit: undefined } })).toThrow(
-			/rateLimit\.failMode/,
-		);
-	});
+	it.each([0, 1])(
+		"mounts route %i with no rateLimit.failMode: the outage policy is the limiter's own",
+		(index) => {
+			const deps = enabledDeps();
+			const factory = contributionsFor(deps)?.routes?.[index] as (d: unknown) => unknown;
+			expect(() =>
+				factory({ ...deps, config: { ...deps.config, rateLimit: undefined } }),
+			).not.toThrow();
+		},
+	);
 
 	/** Mount the contributed verification route behind a fixed end-user session. */
 	const mountVerificationRoute = (deps: TestDeps) => {
@@ -704,15 +703,18 @@ describe("deviceGrantModule — the route it actually contributes", () => {
 		["closed", 503, "service_unavailable"],
 		["open", 404, "invalid_user_code"],
 	] as const)(
-		"applies rateLimit.failMode = %s from config on the mounted device/verification route",
+		"applies the limiter's failMode = %s on the mounted device/verification route, whatever rateLimit.failMode says",
 		async (failMode, status, error) => {
 			// What no test of the handler alone can observe: that the module
-			// reads `rateLimit.failMode` and hands it to this route.
+			// hands this route the limiter, whose own policy applies.
 			const deps = enabledDeps();
 			const app = mountVerificationRoute({
 				...deps,
-				config: { ...deps.config, rateLimit: { failMode } },
-				rateLimiter: brokenLimiter,
+				config: {
+					...deps.config,
+					rateLimit: { failMode: failMode === "open" ? "closed" : "open" },
+				},
+				rateLimiter: { ...brokenLimiter, failMode },
 			});
 
 			const res = await request(app)
@@ -1405,14 +1407,48 @@ describe("deviceGrantModule — the route it actually contributes", () => {
 
 	it("refuses to mount device/verification without the budget, oauth.deviceAuthorization.rateLimit", () => {
 		// The "requires a rateLimiter" refusal reasons from a budget of five,
-		// and the limiter applies five only because its adapter module seeds
-		// `device_verification` from this key. The seed leaves the adapter's
-		// 60/60s default in place when the key is missing, so a hand-built
-		// config that never passed the schema would boot with a refusal that
-		// argued from five while the limiter applied sixty.
+		// and the limiter applies five only because this module contributes
+		// `device_verification` from this key. With the key missing it
+		// contributes none, leaving the limiter's 60/60s default, so a
+		// hand-built config that never passed the schema would boot with a
+		// refusal that argued from five while the limiter applied sixty.
 		const deps = withVerificationBudget(undefined);
 		const factory = contributionsFor(deps)?.routes?.[1] as (d: unknown) => unknown;
 		expect(() => factory(deps)).toThrow(/oauth\.deviceAuthorization\.rateLimit/);
+	});
+
+	it.each([
+		["a budget another module set", { limit: 3, windowSeconds: 600 }],
+		["no budget at all", undefined],
+	])(
+		"refuses to mount device/verification when the contributed device_verification budget is %s, not oauth.deviceAuthorization.rateLimit",
+		(_label, inForce) => {
+			const deps = {
+				...enabledDeps(),
+				rateLimitBudgetResolver: {
+					get: (prefix: string) => (prefix === "device_verification" ? inForce : undefined),
+					entries: () => new Map().entries(),
+				},
+			};
+			const factory = contributionsFor(deps)?.routes?.[1] as (d: unknown) => unknown;
+			expect(() => factory(deps)).toThrow(/contributed device_verification budget/);
+			expect(() => factory(deps)).toThrow(/oauth\.deviceAuthorization\.rateLimit/);
+		},
+	);
+
+	it("refuses boot when a module overrides the device_verification budget, even to tighten it", async () => {
+		const tightener = defineModule({
+			name: "test:device-verification-tightener",
+			overrides: {
+				rateLimitBudgets: { device_verification: () => ({ limit: 3, windowSeconds: 600 }) },
+			},
+		});
+		const err = await boot({ deviceAuthorization: ENABLED, extraModules: [tightener] }).then(
+			() => undefined,
+			(caught: unknown) => caught as Error,
+		);
+		expect(err?.message).toMatch(/device_verification/);
+		expect(err?.message).toMatch(/oauth\.deviceAuthorization\.rateLimit/);
 	});
 
 	it.each([
@@ -1424,9 +1460,9 @@ describe("deviceGrantModule — the route it actually contributes", () => {
 		// construction naming its own `limits.device_verification`.
 		["a window past the Date range", { limit: 5, windowSeconds: 1e13 }],
 	])("refuses to mount device/verification with %s as the budget", (_label, rateLimit) => {
-		// The same shapes the seed declines to apply: with one definition of
-		// "usable" shared with core, a budget the module accepts is one the
-		// limiter was seeded from.
+		// The same shapes the contributed budget refuses: with one definition
+		// of "usable" shared with core, a budget the route accepts is the one
+		// the limiter applies.
 		const deps = withVerificationBudget(rateLimit);
 		const factory = contributionsFor(deps)?.routes?.[1] as (d: unknown) => unknown;
 		expect(() => factory(deps)).toThrow(/oauth\.deviceAuthorization\.rateLimit/);
@@ -1438,9 +1474,10 @@ describe("deviceGrantModule — the route it actually contributes", () => {
 		expect(() => factory(deps)).not.toThrow();
 	});
 
-	it("mounts device/verification with the budget as numeric strings, as the seed reads it", () => {
-		// The seed and this refusal read the key the same way — as core's
-		// schema coerces it — so a budget the seed applies is one this accepts.
+	it("mounts device/verification with the budget as numeric strings, as the contributed budget reads it", () => {
+		// The contributed budget and this refusal read the key the same way —
+		// as a coercing schema does — so a budget the limiter applies is one
+		// this accepts.
 		const deps = withVerificationBudget({ limit: "5", windowSeconds: "300" });
 		const factory = contributionsFor(deps)?.routes?.[1] as (d: unknown) => unknown;
 		expect(() => factory(deps)).not.toThrow();

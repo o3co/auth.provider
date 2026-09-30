@@ -38,6 +38,10 @@
  * (`mfa_step_up_unsupported`); the requirement then sends the session to log in
  * instead.
  *
+ * Contributes `mfa.rateLimit.routes` as the budget of the `mfa` prefix every
+ * `/session/mfa` POST limits under, for every limiter to read; none when the
+ * section gives none.
+ *
  * Contributes the `mfa-routes` mount at `/session/mfa`, after the session
  * middleware. Its factory runs after every factor has registered, so it checks
  * the installed factors (`checkInstalledFactors`). The routes themselves are not
@@ -52,6 +56,8 @@ import {
 	type Logger,
 	type MfaFactorResolver,
 	type Module,
+	type RateLimitSpec,
+	requireUsableConfiguredRateLimitSpec,
 	type SessionRequirement,
 	type StepUpPage,
 	supportsSecondFactorUpdate,
@@ -67,6 +73,24 @@ export const MFA_ROUTES_ID = "mfa-routes";
 
 /** Where the MFA routes are mounted. */
 const MFA_ROUTES_MOUNT_PATH = "/session/mfa";
+
+/**
+ * The key prefix every `/session/mfa` POST limits under (`mfa:ip:<ip>`), the
+ * flood guard of ADR 2026-09-25-multi-factor-authentication. No `:`.
+ */
+export const MFA_RATE_LIMIT_PREFIX = "mfa";
+
+/**
+ * `mfa.rateLimit.routes` as the MFA routes' budget, `null` when not given;
+ * read as a coercing schema reads it, and a `RangeError` naming the key when
+ * no limiter can apply it.
+ */
+function routesBudget(section: unknown): RateLimitSpec | null {
+	const given = (section as { rateLimit?: { routes?: unknown } } | null | undefined)?.rateLimit
+		?.routes;
+	if (given === undefined) return null;
+	return requireUsableConfiguredRateLimitSpec("mfa.rateLimit.routes", given);
+}
 
 /** What a composition root tells the MFA module that its configuration cannot. */
 export interface MfaModuleOptions {
@@ -245,6 +269,9 @@ export function mfaModule(options: MfaModuleOptions = {}): Module {
 		optional: ["auditSink", "logger"],
 		absencePolicies: { auditSink: AUDIT_SINK_ABSENCE_POLICY },
 		contributes: {
+			rateLimitBudgets: {
+				[MFA_RATE_LIMIT_PREFIX]: (deps) => routesBudget(deps.section),
+			},
 			sessionRequirements: {
 				mfa: (deps) => {
 					const mode: MfaMode = deps.section?.mode ?? "off";

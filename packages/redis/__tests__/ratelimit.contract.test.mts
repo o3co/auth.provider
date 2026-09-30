@@ -7,8 +7,7 @@
  * The Redis rate limiter against the `RateLimiter` port's contract suite,
  * published on core's testing entry: over a stand-in for the atomic
  * `incrementWithTtl` script, one that answers and one whose connection is
- * down. Declares no `failMode` of its own: the guard takes the policy from
- * `rateLimit.failMode`.
+ * down, each under both outage policies the limiter can answer.
  */
 
 import { rateLimiterContract } from "@o3co/auth-provider-core/testing";
@@ -33,14 +32,18 @@ const down = () => ({
 	},
 });
 
-describe("createRedisRateLimiter — the RateLimiter contract", () => {
-	it.each(
-		rateLimiterContract({
-			build: () => createRedisRateLimiter({ client: answering() }),
-			withOutage: () => createRedisRateLimiter({ client: down() }),
-			withBudget: (spec) => createRedisRateLimiter({ client: answering(), defaultLimit: spec }),
-		}),
-	)("$name", async ({ run }) => {
-		await run();
-	});
-});
+describe.each(["open", "closed"] as const)(
+	"createRedisRateLimiter under failMode %s — the RateLimiter contract",
+	(failMode) => {
+		it.each(
+			rateLimiterContract({
+				build: () => createRedisRateLimiter({ client: answering(), failMode }),
+				withOutage: () => createRedisRateLimiter({ client: down(), failMode }),
+				withBudget: (spec) =>
+					createRedisRateLimiter({ client: answering(), defaultLimit: spec, failMode }),
+			}),
+		)("$name", async ({ run }) => {
+			await run();
+		});
+	},
+);

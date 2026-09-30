@@ -67,6 +67,7 @@ import {
 import { extractUserClaims } from "../internal/extractUserClaims.mjs";
 import { loginRequestFacts } from "../internal/loginRequest.mjs";
 import { refusalEnvelope } from "../internal/refusalEnvelope.mjs";
+import { LOGIN_RATE_LIMIT_PREFIX, readLoginRateLimitBudget } from "../loginBudget.mjs";
 import { createRedirectAllowlistValidator } from "../redirect-allowlist.mjs";
 
 const DEFAULT_SESSION_TTL_MS = 86400_000;
@@ -192,13 +193,13 @@ export const createRouter = (
 	});
 
 	// The login guard runs on the same `RateLimiter` as the OAuth endpoints,
-	// so a shared adapter gives one bucket set across replicas. `login` is the
-	// key prefix adapters resolve the spec by; the bundled ones seed it from
-	// `config.rateLimit.login`.
-	const loginLimitSpec = {
-		limit: config.rateLimit.login.limit,
-		windowSeconds: Math.max(1, Math.ceil(config.rateLimit.login.windowMs / 1000)),
-	};
+	// keyed under the prefix the session module contributes this budget for.
+	const loginLimitSpec = readLoginRateLimitBudget(config);
+	if (loginLimitSpec === null) {
+		throw new Error(
+			"createRouter: POST /session/login requires rateLimit.login { windowMs, limit }",
+		);
+	}
 	if (rateLimiter === undefined) {
 		// The per-process fallback is replica-unsafe state, so the deployment
 		// mode decides: "multi" refuses at boot (the limit would really be
@@ -229,18 +230,17 @@ export const createRouter = (
 	const loginLimiter: RateLimiter =
 		rateLimiter ??
 		createMemoryRateLimiter({
-			limits: { login: loginLimitSpec },
+			limits: { [LOGIN_RATE_LIMIT_PREFIX]: loginLimitSpec },
 			defaultLimit: loginLimitSpec,
 		});
 
 	// The check and outage policy are core's `createRateLimitGuard`, shared
-	// with the OAuth endpoints (same `failMode`, same `rate_limit.unavailable`
-	// audit event). `RateLimit-*` headers fall back to the documented login
-	// spec when the adapter reports none.
+	// with the OAuth endpoints (the limiter's own `failMode`, the same
+	// `rate_limit.unavailable` audit event). `RateLimit-*` headers fall back to
+	// the documented login spec when the adapter reports none.
 	const loginRateLimit = createRateLimitGuard({
 		limiter: loginLimiter,
-		tag: "login",
-		failMode: config.rateLimit.failMode,
+		tag: LOGIN_RATE_LIMIT_PREFIX,
 		logger,
 		auditSink,
 		headerFallback: loginLimitSpec,

@@ -68,13 +68,18 @@ const userRepository = {
 	authenticateByToken: vi.fn(),
 } as unknown as UserRepository;
 
-/** A limiter that records every key it is asked about and answers to script. */
+/**
+ * A limiter that records every key it is asked about and answers to script,
+ * with `failMode` as its own outage policy when given.
+ */
 const scriptedLimiter = (
 	answer: (key: string, callIndex: number) => RateLimitDecision | Error,
+	failMode?: "open" | "closed",
 ): RateLimiter & { keys: string[] } => {
 	const keys: string[] = [];
 	return {
 		kind: "scripted",
+		...(failMode === undefined ? {} : { failMode }),
 		keys,
 		async check(key) {
 			const result = answer(key, keys.length);
@@ -159,8 +164,8 @@ describe("/session/login rate limiting — shared limiter", () => {
 
 	it("advertises the limit the adapter enforced, not the one configured here", async () => {
 		// An operator who declares `limits.login` on the adapter overrides the
-		// value seeded from `rateLimit.login`. A header advertising a limit no
-		// request is measured against is worse than no header at all.
+		// budget contributed from `rateLimit.login`. A header advertising a limit
+		// no request is measured against is worse than no header at all.
 		const limiter = scriptedLimiter(() => ({ allowed: true, remaining: 4, limit: 5 }));
 		const res = await login(makeApp({ rateLimiter: limiter }));
 		expect(res.headers["ratelimit-limit"]).toBe("5");
@@ -184,22 +189,32 @@ describe("/session/login rate limiting — shared limiter", () => {
 });
 
 describe("/session/login rate limiting — limiter failure", () => {
-	it("fails closed with 503 when the limiter throws and failMode is closed", async () => {
-		// Parity with the OAuth endpoints: one failMode policy for the product,
-		// not one per router.
-		const limiter = scriptedLimiter(() => new Error("redis down"));
-		const res = await login(makeApp({ rateLimiter: limiter }));
+	it("fails closed with 503 when the limiter throws and its failMode is closed", async () => {
+		// Parity with the OAuth endpoints: the limiter's one outage policy, not
+		// one per router. The configuration's `rateLimit.failMode` is not read.
+		const limiter = scriptedLimiter(() => new Error("redis down"), "closed");
+		const config = {
+			...stubConfig,
+			rateLimit: { login: { windowMs: 900_000, limit: 20 }, failMode: "open" },
+		} as unknown as AppConfig;
+		const res = await login(makeApp({ rateLimiter: limiter, config }));
 		expect(res.status).toBe(503);
 	});
 
-	it("fails open when failMode is open", async () => {
+	it("fails open when the limiter's failMode is open", async () => {
+		const limiter = scriptedLimiter(() => new Error("redis down"), "open");
+		const res = await login(makeApp({ rateLimiter: limiter }));
+		expect(res.status).not.toBe(503);
+	});
+
+	it("fails closed when the limiter declares no failMode", async () => {
 		const limiter = scriptedLimiter(() => new Error("redis down"));
 		const config = {
 			...stubConfig,
 			rateLimit: { login: { windowMs: 900_000, limit: 20 }, failMode: "open" },
 		} as unknown as AppConfig;
 		const res = await login(makeApp({ rateLimiter: limiter, config }));
-		expect(res.status).not.toBe(503);
+		expect(res.status).toBe(503);
 	});
 
 	it("emits rate_limit.unavailable when an audit sink is wired", async () => {
@@ -221,6 +236,13 @@ describe("/session/login rate limiting — limiter failure", () => {
 		// The error's name under `cause`, not its message: the message stays in
 		// the log line.
 		expect(ev?.details).toEqual({ tag: "login", cause: { name: "Error" } });
+	});
+});
+
+describe("/session/login rate limiting — the budget", () => {
+	it("refuses to build the router over a configuration with no rateLimit.login", () => {
+		const config = { ...stubConfig, rateLimit: { failMode: "closed" } } as unknown as AppConfig;
+		expect(() => makeApp({ config })).toThrow(/rateLimit\.login/);
 	});
 });
 
