@@ -50,11 +50,8 @@ vi.mock("ioredis", () => {
 
 const importModule = async () => await import("../modules.mjs");
 
-const baseConfig = {
-	refreshTokenFamilyStore: {
-		redis: { url: "redis://example.com:6379" },
-	},
-};
+/** The module's own section, `refreshTokenFamilyStore.redis`, as boot hands it over. */
+const baseSection = { url: "redis://example.com:6379" };
 
 describe("standaloneRedisClientsModule.deviceCodeStoreClient", () => {
 	beforeEach(() => {
@@ -85,10 +82,10 @@ describe("standaloneRedisClientsModule.deviceCodeStoreClient", () => {
 		const lifecycleRegistrar: LifecycleRegistrar = { register: () => {} };
 
 		const client = (await provides.deviceCodeStoreClient?.({
-			config: { ...baseConfig },
+			section: { ...baseSection },
 			lifecycleRegistrar,
 		})) as Record<string, unknown>;
-		await provides.rateLimiterClient?.({ config: { ...baseConfig }, lifecycleRegistrar });
+		await provides.rateLimiterClient?.({ section: { ...baseSection }, lifecycleRegistrar });
 
 		expect(redisCtorCalls).toHaveLength(1);
 		for (const method of ["create", "findPending", "decide", "poll", "remove"]) {

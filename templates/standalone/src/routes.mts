@@ -43,7 +43,7 @@ export interface MountRoutesOptions {
 	readonly router: Router;
 	/** The readiness probes the builders registered (`handle.readinessProbes`). */
 	readonly probes: readonly ReadinessProbe[];
-	/** Per-probe deadline, in milliseconds: `config.http.readinessTimeoutMs`. */
+	/** Per-probe deadline, in milliseconds: the `http` module's `readinessTimeoutMs`. */
 	readonly readinessTimeoutMs: number;
 	readonly metrics: Metrics;
 	readonly logger: Logger;

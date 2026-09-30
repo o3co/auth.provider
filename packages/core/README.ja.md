@@ -54,17 +54,17 @@ const handle = await createApp({
 const config = handle.components.config; // boot がパースしたもの
 ```
 
-各セクションがモジュール名の下に移るまで — #728 の移動 PR — core のスキーマは他パッケージが所有するセクション（`oauth.mtls`、`oauth.dpop`、`oauth.deviceAuthorization`、`webauthn`、`memoryRateLimiter` / `redisRateLimiter`、`redis*` のストア名前空間）をまだミラーしており、boot は設定がそれを持つたびに、それを読むモジュールが読み込まれているかどうかにかかわらず検証します。composition root がモジュールを知る前に読まなければならないもの — モジュールを選ぶスイッチ、ログレベル — は、自分のファイルを core の `reference.conf` だけの上に重ねて解決し（`coreReference()`: まだモジュールを知らないので、どのパッケージの reference も分かりません）、`readTransitionalConfig(resolved, paths)`（[`src/config/composed.mts`](src/config/composed.mts)）で読みます: 指定した各パスを core の base がそこに宣言するスキーマでパースし、それ以外は書かれたまま検査しません — 検査するのは boot です。したがってこの第一段階は、パッケージの `reference.conf` だけが設定するものを見ず、パッケージの reference が補うセクションを読んではいけません。これは過渡的なもので、それらのスイッチが composition root 自身のセクションに移った時点でなくなります。standalone テンプレートの [`app.mts`](../../templates/standalone/src/app.mts) は、ちょうどこの二段階で設定を読みます。
+各セクションがモジュール名の下に移るまで — #728 の移動 PR — core のスキーマは他パッケージが所有するセクション（`oauth.mtls`、`oauth.dpop`、`oauth.deviceAuthorization`、`webauthn`、`memoryRateLimiter` / `redisRateLimiter`、`redis*` のストア名前空間）をまだミラーしており、boot は設定がそれを持つたびに、それを読むモジュールが読み込まれているかどうかにかかわらず検証します。composition root がモジュールを知る前に読まなければならないもの — モジュールを選ぶスイッチ — は、自分のファイルを core の `reference.conf` だけの上に重ねて解決し（`coreReference()`: まだモジュールを知らないので、どのパッケージの reference も分かりません）、`readTransitionalConfig(resolved, paths)`（[`src/config/composed.mts`](src/config/composed.mts)）で読みます: 指定した各パスを core の base がそこに宣言するスキーマでパースし、それ以外は書かれたまま検査しません — 検査するのは boot です。したがってこの第一段階は、パッケージの `reference.conf` だけが設定するものを見ず、パッケージの reference が補うセクションを読んではいけません。これは過渡的なもので、それらのスイッチが composition root 自身のセクションに移った時点でなくなります。standalone テンプレートの [`app.mts`](../../templates/standalone/src/app.mts) は、ちょうどこの二段階で設定を読みます。
 
 `AppConfigSchema` は非推奨です。`createApp` の前にこれでパースすると、宣言していないセクションがすべて取り除かれ — #472、#495、#496 はそうしてセクションを失いました — それを続ける構成は、解決したものより少ないものを boot に渡すことになります。export は残り、そこから推論される型 `AppConfig` はパース済みの設定の型です。
 
-デフォルトはスキーマではなく [`config/reference.conf`](config/reference.conf) にあります。トップレベルのフィールド（すべてのデプロイが持つセクション。モジュールが所有するセクションは、所有するパッケージが記述します）:
+デフォルトはスキーマではなく `reference.conf` にあります。core 自身のセクションは [`config/reference.conf`](config/reference.conf)、モジュールのセクションはそのマニフェストが宣言する `reference.conf`（standalone テンプレートの `http`、`logging`、鍵ストアの設定はテンプレートのもの）です。core のスキーマが宣言するトップレベルのフィールド（モジュールが所有するセクションは、所有するパッケージまたはテンプレートが記述します。必須なのは行にそう書いたものだけです）:
 
 | フィールド | 説明 |
 | --- | --- |
-| `http.port` | HTTP リッスンポート |
-| `http.trustProxy` | Express の `trust proxy` 設定: `false` / アドレスリスト（IP、CIDR レンジ、名前付きレンジ `loopback` / `linklocal` / `uniquelocal`）/ ホップ数 / `true`。エントリは boot 時に検証される。`true` はプロセスに到達できる誰からの forwarded アドレスも信じるため、プロキシを明示することを推奨 |
-| `oauth.jwt` | JWT 署名設定 — `issuer`、`signingKey`（`provider` とそのサブセクション）、`jwksPath`、`jwksCacheMaxAge` |
+| `http` | ホストプロセスの HTTP 設定 — `port`、`trustProxy`（Express の `trust proxy`: `false` / IP・CIDR レンジ・名前付きレンジ `loopback` / `linklocal` / `uniquelocal` のアドレスリスト / ホップ数 / `true`）、`readinessTimeoutMs`。`httpSettings` を provide するモジュール（standalone テンプレートの `http` モジュール）が所有し、デフォルトもそこにある。core はどれも読まず、デフォルトも持たない。core のスキーマはこのセクションを宣言しているので、設定が持つたびにエントリは boot 時に検証される。`true` はプロセスに到達できる誰からの forwarded アドレスも信じるため、プロキシを明示することを推奨 |
+| `logging.level` | composition の logger が出力するレベル。composition root の logging モジュール（standalone テンプレートの `logging`）が所有し、デフォルトもそこにある。core はこれを読まず、スキーマが語彙を宣言している |
+| `oauth.jwt` | JWT 設定 — `issuer`、`jwksPath`、`jwksCacheMaxAge`、そして `signingKey`（`provider` とそのサブセクション）: `keyStore` を provide するモジュール（standalone テンプレートの `key-store`）のセクションで、デフォルトもそこにある。core は `signingKey` を読まない |
 | `oauth.accessToken.defaultExpiresIn` | リクエストが有効期間を指定しないときに全グラントが発行するアクセストークンの有効期間（秒）。指定できるのは token exchange（`expires_in` パラメータ）だけで、他のグラントはそのパラメータを無視する。有効期間は `resolveAccessTokenLifetime(config)` で読む。スキーマが拒否する値にはキーを名指しした `RangeError` を投げ（規則は `isLifetimeSeconds` で、数値として渡される有効期間のために export されている）、同梱のグラントはすべて構築時に読むので、それが拒否する手組みの config はリクエストではなく構築（と起動）で失敗する |
 | `oauth.accessToken.maxExpiresIn` | token exchange の `expires_in` で得られる上限。超えるリクエストはこの値に切り詰められる。未設定ならデフォルトと同じで、明示的に設定しない限り延長されない。デフォルトがこれを超えると両キーを名指しして起動失敗 |
 | `oauth.accessToken.expiresIn` | `defaultExpiresIn` の**非推奨（deprecated）**エイリアス。`defaultExpiresIn` 未設定の間だけ読まれる（`reference.conf` は出荷時の `3600` をこのキーに置いている）。パース後の config はこの名前にも解決済みのデフォルトを持つ |
@@ -78,7 +78,7 @@ const config = handle.components.config; // boot がパースしたもの
 | `endpoints` | `login.url`: デプロイのログインページ。`consent.url`: first-party でないクライアント向けの同意ページ（デフォルト `/consent`）。`mfa.url`: ステップアップのページ（デフォルト `/mfa`）。MFA パッケージの `mfa` 要件がこれをステップアップのページとして登録する。そのパッケージが無ければ、ブラウザーをそこへ送るものはない |
 | `sessionRequirements.expected` | この構成が期待するセッション要件 — 「ログイン済み」の意味を変える拡張で、MFA はその一つ — で、ブート時にインストールされたモジュールが登録したものと比較される（[セッション許可](#セッション許可) を参照）。書かれていれば、セッション許可に問い合わせるモジュールの有無にかかわらず両方向で比較する: インストールされたどのモジュールも登録しない名前はブートを拒否し（`session-requirement-missing`）、登録された要件を書き漏らしても拒否する（`session-requirements-undeclared`）。セッション許可に問い合わせるモジュールがインストールされているときは必須（`oauthModule` はその一つ）で、書かれていなければ拒否する（`session-requirements-undeclared`）。`[]` は「なし」。既定値は無く、構成は自らの姿勢を述べる |
 | `mfaFactorStore.adapter`、`mfaTransactionStore.adapter` | 登録済みの要素を保持するストア（`memory`、`redis`、`store`）と、MFA のトランザクションとロック状態を保持するストア（`memory`、`redis`）。どちらも既定は `memory`。MFA を組み込み、ストアを名前で選ぶ composition root が読むが、まだそうするものはない: standalone テンプレートは MFA モジュールを組み込まず、`"off"` 以外のモードではブートを拒否する（`mfa` を宣言するが、そこで登録するものは無い） |
-| `cors.allowedOrigins` | token / userinfo / revocation / discovery・JWKS のレスポンスを読める browser origin — [CORS](#cors) を参照。空（既定）なら CORS は無効。CSRF の信頼は与えない（`session.csrf.trustedOrigins` を使う） |
+| `cors.allowedOrigins` | token / userinfo / revocation / discovery・JWKS のレスポンスを読める browser origin — [CORS](#cors) を参照。空（既定）なら CORS は無効。`httpSettings` を provide するモジュールがないとき core が読む。standalone テンプレートの `http` モジュールはこのリストをそのスロットで渡す。CSRF の信頼は与えない（`session.csrf.trustedOrigins` を使う） |
 
 ### グラントシステム
 
@@ -259,7 +259,7 @@ JWT の `exp`・`iat`・`nbf` は、有限で Date の範囲に収まるとき�
 
 それぞれ、提供者のテストが実行する契約スイートと、読む側のテストがスロットを埋めるテストダブルが `@o3co/auth-provider-core/testing` にあります。`deploymentMode` には提供者もテストダブルもありません: core 自身のテストが boot の埋めた値に対して契約スイートを実行し、読む側のテストはスロットをリテラルで埋めます。スイートとダブル: `oauthTokenSettingsContract` と `createTestOAuthTokenSettings`、`loginCompletionContract` と `createRecordingLoginCompletion`、`loginEntryContract` と `createTestLoginEntry`、`csrfGuardContract` と `createTestCsrfGuard`、`csrfTokenSignerContract` と `createTestCsrfTokenSigner`、`sessionCookiePolicyContract` と `createTestSessionCookiePolicy`、`httpSettingsContract` と `createTestHttpSettings`、`deploymentModeContract`、`rateLimiterContract` と `createTestRateLimiter`。各スロットが持つものは [docs/adapter-surface.md](../../docs/adapter-surface.md) にあります。
 
-モジュールが provide する設定スロット — `oauthTokenSettings`、`httpSettings`、`sessionCookiePolicy`。core が自ら埋めて予約している `deploymentMode` は含まない — は、所有者がロードされている間、出どころが一つです: 所有者はそれを `authoritative` に挙げます。これは自分の `provides` のキーに型付けされたリストです（oauth モジュールは `oauthTokenSettings` を、セッションストアのモジュールは `sessionCookiePolicy` を挙げています。`httpSettings` には提供者がありません）。所有者自身のコードは自分のセクションを読むので、そのスロットへの `overrideComponents` のエントリは二つ目の出どころになります — 読む側は上書きに従い、モジュールはセクションのとおりに動き続ける — ので、boot はそれを拒否します（`authoritative-component-overridden`）。モジュールが provide しないキーを authoritative に挙げることも拒否します（`authoritative-without-provides`）。所有者をロードしない組み立ては、上書きを含めて自分でスロットを埋めます。ロードされたモジュールが provide するほかのキーは上書きできます。
+モジュールが provide する設定スロット — `oauthTokenSettings`、`httpSettings`、`sessionCookiePolicy`。core が自ら埋めて予約している `deploymentMode` は含まない — は、所有者がロードされている間、出どころが一つです: 所有者はそれを `authoritative` に挙げます。これは自分の `provides` のキーに型付けされたリストです（oauth モジュールは `oauthTokenSettings` を、セッションストアのモジュールは `sessionCookiePolicy` を挙げています。standalone テンプレートの `http` モジュールは `httpSettings` を挙げています）。所有者自身のコードは自分のセクションを読むので、そのスロットへの `overrideComponents` のエントリは二つ目の出どころになります — 読む側は上書きに従い、モジュールはセクションのとおりに動き続ける — ので、boot はそれを拒否します（`authoritative-component-overridden`）。モジュールが provide しないキーを authoritative に挙げることも拒否します（`authoritative-without-provides`）。所有者をロードしない組み立ては、上書きを含めて自分でスロットを埋めます。ロードされたモジュールが provide するほかのキーは上書きできます。
 
 ```typescript
 const myModule = defineModule({
@@ -284,13 +284,13 @@ const myModule = defineModule({
 
 `createApp` はマニフェストを検証し、設定を合成・パースし、コンポーネントグラフを実体化し、すべての contribution を適用し、ワールドを freeze してルートをマウントします。起動の拒否は `BootError`（[`src/boot/types.mts`](src/boot/types.mts)）です: そのメッセージは背後のエラーを `loggableError` の規則で名指し — パーサーが引用したもの、Redis の応答の引数、Error でない throw された値を引用することはありません — 出力されるとき（`util.inspect`、`console.error`、Node の unhandled rejection の出力）は、持っているすべてのエラーを射影として示します。`cause` と `details.originalError` は、それを読むコードのために throw された値のままです。返される `router` はそのままマウントでき（`app.use(handle.router)`）、`handle.listen(port)` で配信することもできます。`handle.dispose()` はすべての cleanup を reverse-topological 順で実行し、すべての失敗を持つ `AggregateError` で reject します。別途の `init()` ステップはありません。
 
-core が自分でマウントするもの（この順）: `cors.allowedOrigins` が空でなければ `corsMw`、contribute された機構が 1 つ以上あればそれらを合成した単一の `tokenBindingMw`、protected-resource の sender-constraint チェック（常に。トークンエンドポイントへの POST を除くすべてのリクエストで）、グラントのディスパッチ前に `grantMiddleware` の contribution、issuer が設定されかつ `providerRoot` を宣言するモジュールがあれば OIDC discovery ルート、そしてすべてのルートの後に終端のエラーハンドラー（[`src/middleware/terminalError.mts`](src/middleware/terminalError.mts)）。このハンドラーは組み立てたルートが通してしまったものに答えるので、それらのエラーがホスト自身のハンドラーへ届くことはありません（ホストが起動後に `handle.router` へ加えたルートはその後ろに付くので対象外です）: ボディパーサーの拒否は — body-parser 自身の `type` で読み — RFC 6749 のエンベロープで `400 malformed_body`、`413 body_too_large`、`415 unsupported_encoding`（Express がデコードできなかったパスは `400 malformed_path`）とし、ログには出しません。`expose` の付いたそれ以外の `http-errors` の 4xx は、自身のステータスのまま `invalid_request` / `request_refused` とし、401 の `WWW-Authenticate` や 405 の `Allow` を持っていれば（1 KiB まで）それを付けます。それ以外はすべて `500 server_error` で、`endpoint` とエラーの射影を付けて error レベルの `unhandled_request_error` として 1 回ログに出します。どの応答も `Cache-Control: no-store` と `Pragma: no-cache` です。レスポンスのヘッダーが送られた後のエラーも同じようにログに出し、レスポンスがまだ終わっていなければ接続を閉じます。どのルートも答えなかったリクエストは、これまでどおりホストへ渡ります。このハンドラーは `terminalErrorHandler(logger)` として export されており、ルーターと並べて自前のルートをマウントするホストが、その後ろで同じ答えを返すのに使えます。それ以外 — JWKS（`jwksModule`）、liveness と readiness（`createHealthcheckRouter`、`createReadinessRouter`）、OAuth と session のルート — は、composition root が組み込むモジュールかルーターです。
+core が自分でマウントするもの（この順）: レスポンスを読ませるオリジンがあれば `corsMw`（[CORS](#cors)）、contribute された機構が 1 つ以上あればそれらを合成した単一の `tokenBindingMw`、protected-resource の sender-constraint チェック（常に。トークンエンドポイントへの POST を除くすべてのリクエストで）、グラントのディスパッチ前に `grantMiddleware` の contribution、issuer が設定されかつ `providerRoot` を宣言するモジュールがあれば OIDC discovery ルート、そしてすべてのルートの後に終端のエラーハンドラー（[`src/middleware/terminalError.mts`](src/middleware/terminalError.mts)）。このハンドラーは組み立てたルートが通してしまったものに答えるので、それらのエラーがホスト自身のハンドラーへ届くことはありません（ホストが起動後に `handle.router` へ加えたルートはその後ろに付くので対象外です）: ボディパーサーの拒否は — body-parser 自身の `type` で読み — RFC 6749 のエンベロープで `400 malformed_body`、`413 body_too_large`、`415 unsupported_encoding`（Express がデコードできなかったパスは `400 malformed_path`）とし、ログには出しません。`expose` の付いたそれ以外の `http-errors` の 4xx は、自身のステータスのまま `invalid_request` / `request_refused` とし、401 の `WWW-Authenticate` や 405 の `Allow` を持っていれば（1 KiB まで）それを付けます。それ以外はすべて `500 server_error` で、`endpoint` とエラーの射影を付けて error レベルの `unhandled_request_error` として 1 回ログに出します。どの応答も `Cache-Control: no-store` と `Pragma: no-cache` です。レスポンスのヘッダーが送られた後のエラーも同じようにログに出し、レスポンスがまだ終わっていなければ接続を閉じます。どのルートも答えなかったリクエストは、これまでどおりホストへ渡ります。このハンドラーは `terminalErrorHandler(logger)` として export されており、ルーターと並べて自前のルートをマウントするホストが、その後ろで同じ答えを返すのに使えます。それ以外 — JWKS（`jwksModule`）、liveness と readiness（`createHealthcheckRouter`、`createReadinessRouter`）、OAuth と session のルート — は、composition root が組み込むモジュールかルーターです。
 
 `express` は任意の peer dependency で、遅延ロードされます: `createApp` はルーターを作るために import し（`await import("express")`）、boot は `handle.listen()` がルーターを包む `express()` ファクトリーのためにも require します（`createRequire`）— import が失敗した場合はルーターもそこから得ます。
 
 ## CORS
 
-`cors.allowedOrigins` を消費するのは `corsMw`（`src/middleware/cors.mts`）で、`assembleApp` はこれを**最初に** — 他のすべてのミドルウェアとルート contribution より前に — マウントします。空のリスト（既定）なら何もマウントしません: CORS ヘッダーも `Vary` も付きません。
+`corsMw`（`src/middleware/cors.mts`）がレスポンスを読ませるオリジンは、composition が `httpSettings` スロットを持つときはその `cors.allowedOrigins`（standalone テンプレートの `http` モジュールが提供します）、持たないときは設定の `cors.allowedOrigins` です。2 つを混ぜることはありません。`assembleApp` はこのミドルウェアを**最初に** — 他のすべてのミドルウェアとルート contribution より前に — マウントします。空のリスト（既定）なら何もマウントしません: CORS ヘッダーも `Vary` も付きません。契約に反するオリジンを持つスロット（`checkSerializedOrigin` が拒否するエントリー、または文字列のリストでないもの）は、メンバーとインデックスを示す `RangeError` で boot を拒否します。
 
 ### 対象ルート
 
@@ -340,6 +340,15 @@ import {
 // boot より前にこの構成が読むもの。rawConfig は createApp 自身がパースする（#728）。
 const config = readTransitionalConfig(rawConfig, ["http.port", "oauth.jwt.signingKey", "repositories"]);
 
+// 署名鍵とポートはこの構成自身の設定: core は `oauth.jwt.signingKey` にも `http` にも
+// デフォルトを持たないので、rawConfig がそれを持つ（standalone テンプレートは自分の
+// `config/reference.conf` に置いている）。
+const { signingKey } = config.oauth.jwt;
+const port = config.http?.port;
+if (signingKey === undefined || port === undefined) {
+  throw new Error("oauth.jwt.signingKey and http.port are required");
+}
+
 // repositories.*（'type' セレクター）と oauth.jwt.signingKey（'provider' セレクター）は同じ入れ子の
 // アダプターサブセクション形式に従う。flatten() はどちらも { type, ...サブセクションフィールド } に正規化してから factory に渡す:
 const flatten = (
@@ -361,7 +370,7 @@ const flatten = (
 
 const keyStoreFactory = createKeyStoreFactory();
 registerBuiltinKeyStores(keyStoreFactory);
-const keyStore = await keyStoreFactory.create(flatten(config.oauth.jwt.signingKey));
+const keyStore = await keyStoreFactory.create(flatten(signingKey));
 
 const { clientFactory, userFactory, codeFactory } = createRepositoryFactories();
 
@@ -389,7 +398,7 @@ const handle = await createApp({
 
 const server = express();
 server.use(handle.router);
-server.listen(config.http.port);
+server.listen(port);
 ```
 
 ### カスタムグラントタイプの実装

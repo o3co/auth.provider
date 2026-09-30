@@ -15,9 +15,9 @@
  */
 /**
  * Zod schemas for the application config. They are a pure type contract: the
- * shape required at the boundary, not defaults. Defaults live only in
- * `packages/core/config/reference.conf`, whose `${?ENV_VAR}` substitutions are
- * the only override surface, so parsing `{}` fails. Tests load through
+ * shape required at the boundary, not defaults. Defaults live only in a
+ * `reference.conf` — core's own sections' in `packages/core/config/reference.conf`,
+ * a module's in the one its manifest declares — so parsing `{}` fails. Tests load through
  * `parseFile` or start from `makeValidCoreConfig`
  * (`@o3co/auth-provider-core/testing`). See ADR 2026-04-30.
  */
@@ -264,7 +264,9 @@ const jwtSchemaBase = z.object({
 			});
 		}
 	}),
-	signingKey: signingKeySchema,
+	// The section of the module that provides `keyStore`; core reads none of it
+	// and ships no default.
+	signingKey: signingKeySchema.optional(),
 	// JWKS publishing path (OIDC `jwks_uri`). Operator-choosable per OIDC
 	// Discovery; defaults to `/.well-known/jwks.json` when unset (applied by
 	// `resolveJwksPath`). Must be an absolute path so the JWKS route and the
@@ -292,7 +294,9 @@ const jwtSchemaBase = z.object({
 
 /**
  * Detects legacy flat `oauth.jwt.*` fields on the raw input: Zod strips unknown
- * keys before `superRefine` runs, so only `z.preprocess` can see them.
+ * keys before `superRefine` runs, so only `z.preprocess` can see them. This
+ * pipe's `out.shape.signingKey` is read as the signing-key section's schema:
+ * keep that path, or change its readers with it.
  */
 const jwtSchema = z.preprocess((raw, ctx) => {
 	if (typeof raw === "object" && raw !== null && !Array.isArray(raw)) {
@@ -680,25 +684,33 @@ const trustProxySchema = z
 /**
  * Minimal always-required config for the auth provider core.
  * Token-only deployments (no session, no federation) only need these sections.
+ * The modules owning `logging`, `http` and `oauth.jwt.signingKey` parse their
+ * sections with the declarations here until they have schemas of their own.
  */
 export const CoreConfigSchema = z.object({
-	http: z.object({
-		port: z.coerce.number(),
-		// Boolean, hop count or address list. See `trustProxySchema`.
-		trustProxy: trustProxySchema,
-		// Per-probe deadline for the readiness endpoint; keep it well under the
-		// orchestrator's probe timeout, or a partitioned dependency reads as a
-		// slow replica instead of an unready one. Default in HOCON. Bounded both
-		// ways because `setTimeout` turns 0 (an empty env var through
-		// `z.coerce.number()`) and anything above 2^31-1 into 1ms: every probe
-		// would time out and the replica would answer 503 with nothing wrong.
-		readinessTimeoutMs: z.coerce.number().int().positive().max(2_147_483_647),
-	}),
-	// Shape-only; the default lives in HOCON. `silent` is a threshold, not a
-	// level anything emits at.
-	logging: z.object({
-		level: z.enum(["trace", "debug", "info", "warn", "error", "fatal", "silent"]),
-	}),
+	// The section of the module that provides `httpSettings`; core reads none
+	// of it and ships no default.
+	http: z
+		.object({
+			port: z.coerce.number(),
+			// Boolean, hop count or address list. See `trustProxySchema`.
+			trustProxy: trustProxySchema,
+			// Per-probe deadline for the readiness endpoint; keep it well under the
+			// orchestrator's probe timeout, or a partitioned dependency reads as a
+			// slow replica instead of an unready one. Bounded both ways because
+			// `setTimeout` turns 0 (an empty env var through `z.coerce.number()`)
+			// and anything above 2^31-1 into 1ms: every probe would time out and
+			// the replica would answer 503 with nothing wrong.
+			readinessTimeoutMs: z.coerce.number().int().positive().max(2_147_483_647),
+		})
+		.optional(),
+	// The composition root's logging module's section; core reads none of it
+	// and ships no default. `silent` is a threshold, not a level.
+	logging: z
+		.object({
+			level: z.enum(["trace", "debug", "info", "warn", "error", "fatal", "silent"]),
+		})
+		.optional(),
 	oauth: z.object({
 		jwt: jwtSchema,
 		// The access-token lifetime: `defaultExpiresIn`, `maxExpiresIn`, and the
@@ -996,7 +1008,9 @@ const federationEntrySchema = z
  * transitional base (`TransitionalConfigSchema`); each mirror stays for the
  * coercions and checks it applies, validated whenever the configuration carries
  * it, until its package owns the section. Mirrors are presence and shape only:
- * bounds and defaults stay with the owning package.
+ * bounds and defaults stay with the owning package. The modules owning `cors`
+ * and `refreshTokenFamilyStore.redis` parse their sections with the
+ * declarations here until they have schemas of their own.
  */
 export const fullSectionsSchema = z.object({
 	// The federation-grants section (see the federation-grants ADR). The bundled

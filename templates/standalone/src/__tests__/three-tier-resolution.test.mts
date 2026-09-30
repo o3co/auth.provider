@@ -21,6 +21,7 @@ import { validate } from "@o3co/ts.hocon/zod";
 import { describe, expect, it } from "vitest";
 import { buildModules } from "../buildModules.mjs";
 import { readMfaMode, resolveConfigPaths } from "../configPath.mjs";
+import { templateReference } from "../modules.mjs";
 
 // config/ is two levels above this test file:
 //   src/__tests__/ → src/ → standalone/ → config/
@@ -43,6 +44,7 @@ function buildResolvedConfig(env: string, extraEnv: Record<string, string> = {})
 	return validate(
 		parseFile(envConfPath, { env: resolvedEnv })
 			.withFallback(parseFile(applicationConfPath, { env: resolvedEnv }))
+			.withFallback(parseFile(fileURLToPath(templateReference()), { env: resolvedEnv }))
 			.withFallback(parseFile(libraryReferencePath, { env: resolvedEnv })),
 		AppConfigSchema,
 	);
@@ -96,6 +98,7 @@ describe("three-tier HOCON resolution (env → application.conf → reference.co
 		const raw = (env: Record<string, string>) =>
 			parseFile(envConfPath, { env })
 				.withFallback(parseFile(applicationConfPath, { env }))
+				.withFallback(parseFile(fileURLToPath(templateReference()), { env }))
 				.withFallback(parseFile(fileURLToPath(coreReference()), { env }))
 				.toObject();
 		expect(raw(testEnv)).toHaveProperty("mfa", {});

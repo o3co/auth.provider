@@ -29,6 +29,7 @@ import { parseFile } from "@o3co/ts.hocon";
 import { validate } from "@o3co/ts.hocon/zod";
 import { describe, expect, it } from "vitest";
 import { resolveConfigPaths } from "../configPath.mjs";
+import { templateReference } from "../modules.mjs";
 
 const standaloneDir = fileURLToPath(new URL("../..", import.meta.url));
 const configDir = fileURLToPath(new URL("../../config", import.meta.url));
@@ -65,6 +66,7 @@ function resolveWith(env: Record<string, string>, configEnv = "production"): App
 	return validate(
 		parseFile(envConfPath, { env })
 			.withFallback(parseFile(applicationConfPath, { env }))
+			.withFallback(parseFile(fileURLToPath(templateReference()), { env }))
 			.withFallback(parseFile(fileURLToPath(coreReference()), { env })),
 		AppConfigSchema,
 	);
@@ -117,11 +119,12 @@ describe("the Dockerfile installs with everything pnpm needs", () => {
 
 describe("the dev compose can reach every Redis it configures", () => {
 	it("sets every *_REDIS_URL the template config reads", () => {
-		// The template's application.conf substitutes several Redis URLs, each
-		// defaulting to `redis://localhost:6379` — which inside the container is
-		// the container itself. `.env.example` is what the compose file loads,
-		// so a URL missing from it is a boot that dials nothing.
-		const conf = read("/config/application.conf");
+		// The template's application.conf and its own reference.conf substitute
+		// several Redis URLs, each defaulting to `redis://localhost:6379` —
+		// which inside the container is the container itself. `.env.example` is
+		// what the compose file loads, so a URL missing from it is a boot that
+		// dials nothing.
+		const conf = read("/config/application.conf") + read("/config/reference.conf");
 		const declared = [...conf.matchAll(/\$\{\?([A-Z0-9_]*REDIS_URL)\}/g)].map((m) => m[1]);
 		expect(declared.length).toBeGreaterThan(0);
 

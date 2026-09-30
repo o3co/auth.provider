@@ -37,6 +37,7 @@ import { validate } from "@o3co/ts.hocon/zod";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { buildModules } from "../buildModules.mjs";
 import { resolveConfigPaths } from "../configPath.mjs";
+import { templateReference } from "../modules.mjs";
 
 const configDir = fileURLToPath(new URL("../../config", import.meta.url));
 
@@ -53,6 +54,7 @@ function loadShipped(env: Record<string, string> = {}): AppConfig {
 	return validate(
 		parseFile(envConfPath, { env: resolvedEnv })
 			.withFallback(parseFile(applicationConfPath, { env: resolvedEnv }))
+			.withFallback(parseFile(fileURLToPath(templateReference()), { env: resolvedEnv }))
 			.withFallback(parseFile(fileURLToPath(coreReference()), { env: resolvedEnv })),
 		AppConfigSchema,
 	);

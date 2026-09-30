@@ -144,7 +144,7 @@ const testKeyStoreModule = defineModule({
 			registerBuiltinKeyStores(factory);
 			return factory.create({
 				type: "local",
-				...((c as AppConfig).oauth.jwt.signingKey.local ?? {}),
+				...((c as AppConfig).oauth.jwt.signingKey?.local ?? {}),
 			});
 		},
 	},
@@ -222,7 +222,7 @@ describe("the template's audit sink", () => {
 			// An audit trail is evidence, not diagnostics. `LOG_LEVEL=warn` is an
 			// ordinary production setting and `silent` is a legitimate one;
 			// neither may silently drop audit events.
-			const appLogger = createAppLogger({ ...baseConfig, logging: { level: "silent" } });
+			const appLogger = createAppLogger({ level: "silent" });
 			const auditLogger = createAuditLogger();
 			expect((appLogger as unknown as { level: string }).level).toBe("silent");
 			expect((auditLogger as unknown as { level: string }).level).toBe("info");

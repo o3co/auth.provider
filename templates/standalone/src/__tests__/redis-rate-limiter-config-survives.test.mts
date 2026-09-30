@@ -45,6 +45,7 @@ import {
 	resolveConfigPaths,
 	resolveForBoot,
 } from "../configPath.mjs";
+import { loggingModule } from "../modules.mjs";
 
 const configDir = fileURLToPath(new URL("../../config", import.meta.url));
 
@@ -128,7 +129,12 @@ async function bootShipped() {
 		handle: await createApp({
 			modules,
 			bootstrapComponents: {
-				config: resolveForBoot(own, modules, expectedSessionRequirements(switches)),
+				// The template's own reference too, which its application.conf is layered over.
+				config: resolveForBoot(
+					own,
+					[...modules, loggingModule],
+					expectedSessionRequirements(switches),
+				),
 				pathResolver: (s: string) => s,
 				rateLimiterClient: makeCountingClient() as never,
 			},

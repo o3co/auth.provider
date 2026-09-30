@@ -88,7 +88,7 @@ const handle = await createApp({
 
 const server = express();
 server.use(handle.router);
-server.listen(config.http.port);
+server.listen(port); // the composition's own setting; the standalone template's `http` module owns it
 // on shutdown
 await handle.dispose();
 ```

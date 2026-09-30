@@ -21,8 +21,8 @@
  * the configuration with `resolveTokenBindingSettings`.
  *
  * The issuer is the `oauthTokenSettings` slot's when the composition holds it
- * (the oauth module provides the slot eagerly), otherwise the configuration's,
- * since core runs in compositions without the oauth module. The stage-1
+ * — the key is present, whatever a provider answered — otherwise the
+ * configuration's, since core runs in compositions without the oauth module. The stage-1
  * checks read the configuration alone because no provider has run by then
  * (`validate-manifests.mts`, the `grantPolicy` issuer check).
  */
@@ -40,7 +40,7 @@ type Components = Readonly<Record<string, unknown>>;
  * unvalidated, for each reader to hold to its own rule.
  */
 export function compositionIssuer(components: Components): unknown {
-	if (components.oauthTokenSettings !== undefined) {
+	if (Object.hasOwn(components, "oauthTokenSettings")) {
 		return checkOAuthTokenSettings(components.oauthTokenSettings, components.config).issuer;
 	}
 	return (components.config as { oauth?: { jwt?: { issuer?: unknown } } } | undefined)?.oauth?.jwt

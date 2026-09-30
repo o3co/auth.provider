@@ -44,8 +44,11 @@ const smokeKeyPair = generateKeyPairSync("ed25519", {
 	privateKeyEncoding: { type: "pkcs8", format: "pem" },
 });
 
+/** The `http` module's section, as the hand-built configuration below carries it. */
+const HTTP = { port: 0, trustProxy: false, readinessTimeoutMs: 1000 };
+
 const config: AppConfig = {
-	http: { port: 0, trustProxy: false, readinessTimeoutMs: 1000 },
+	http: HTTP,
 	logging: { level: "silent" },
 	// A composition with a consumer of session admission states what it
 	// expects (ADR 2026-09-28-session-admission): the shipped
@@ -158,7 +161,7 @@ const testKeyStoreModule = defineModule({
 			registerBuiltinKeyStores(factory);
 			return factory.create({
 				type: "local",
-				...((c as AppConfig).oauth.jwt.signingKey.local ?? {}),
+				...((c as AppConfig).oauth.jwt.signingKey?.local ?? {}),
 			});
 		},
 	},
@@ -184,7 +187,7 @@ describe("standalone smoke test", () => {
 		app.use(
 			createReadinessRouter(express, {
 				probes: handle.readinessProbes,
-				timeoutMs: config.http.readinessTimeoutMs,
+				timeoutMs: HTTP.readinessTimeoutMs,
 			}),
 		);
 		app.use(handle.router);
@@ -275,7 +278,7 @@ describe("standalone smoke test", () => {
 						},
 					},
 				],
-				timeoutMs: config.http.readinessTimeoutMs,
+				timeoutMs: HTTP.readinessTimeoutMs,
 			}),
 		);
 		const res = await request(app).get("/readyz");
@@ -654,7 +657,7 @@ describe("standalone smoke test", () => {
 		registerBuiltinKeyStores(ksf);
 		const keyStore = await ksf.create({
 			type: "local",
-			...(config.oauth.jwt.signingKey.local ?? {}),
+			...(config.oauth.jwt.signingKey?.local ?? {}),
 		});
 		// The token must carry the deployment's configured `iss`: introspection
 		// pins it (RFC 9068 §4), and every deployment has one.
