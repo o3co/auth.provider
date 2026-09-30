@@ -18,6 +18,11 @@ import { createSymmetricKeyStore, defineModule, type GrantHandler } from "@o3co/
 import { createTestApp, makeValidAppConfig } from "@o3co/auth-provider-core/testing";
 import { describe, expect, it, vi } from "vitest";
 import { oauthSessionModule } from "#/oauthSession.mjs";
+import { capturing, withGrants } from "./_helpers/sections.mjs";
+
+/** `config` with the captures of the renames the module declares, as a resolution under an empty environment makes them. */
+const captured = <C extends object>(config: C): C =>
+	capturing(config, [oauthSessionModule({ config: config as never })]);
 
 // ---------------------------------------------------------------------------
 // Shared test-only stubs
@@ -37,11 +42,7 @@ const keyStoreModule = defineModule({
 
 describe("oauthSessionModule", () => {
 	it("wires session liveness into the registered grant", async () => {
-		const base = makeValidAppConfig();
-		const config = {
-			...base,
-			oauth: { ...base.oauth, grants: { ...base.oauth.grants, session: { enabled: true } } },
-		};
+		const config = withGrants(makeValidAppConfig(), { session: true });
 		const get = vi.fn(async () => null);
 		const handle = await createTestApp({
 			modules: [
@@ -59,7 +60,7 @@ describe("oauthSessionModule", () => {
 					},
 				}),
 			],
-			bootstrapComponents: { config, pathResolver: (s) => s },
+			bootstrapComponents: { config: captured(config), pathResolver: (s) => s },
 		});
 		try {
 			const grant = handle.inspect.grants.get("session") as GrantHandler;
@@ -81,11 +82,7 @@ describe("oauthSessionModule", () => {
 		// `deps.logger`, and the boot planner hands a module only the slots its
 		// manifest names: a manifest without `logger` answered the 503 and logged
 		// nothing.
-		const base = makeValidAppConfig();
-		const config = {
-			...base,
-			oauth: { ...base.oauth, grants: { ...base.oauth.grants, session: { enabled: true } } },
-		};
+		const config = withGrants(makeValidAppConfig(), { session: true });
 		const logger = {
 			trace: vi.fn(),
 			debug: vi.fn(),
@@ -113,7 +110,7 @@ describe("oauthSessionModule", () => {
 					},
 				}),
 			],
-			bootstrapComponents: { config, pathResolver: (s) => s, logger },
+			bootstrapComponents: { config: captured(config), pathResolver: (s) => s, logger },
 		});
 		try {
 			const grant = handle.inspect.grants.get("session") as GrantHandler;
@@ -147,79 +144,46 @@ describe("oauthSessionModule", () => {
 		expect(module.name).toBe("oauth-session");
 	});
 
-	it("registers the session grant when config.oauth.grants.session.enabled is explicitly true", async () => {
-		const base = makeValidAppConfig();
-		const config = {
-			...base,
-			oauth: { ...base.oauth, grants: { ...base.oauth.grants, session: { enabled: true } } },
-		};
+	it("registers the session grant when oauth-session.enabled is explicitly true", async () => {
+		const config = withGrants(makeValidAppConfig(), { session: true });
 		const handle = await createTestApp({
 			modules: [oauthSessionModule({ config }), keyStoreModule],
-			bootstrapComponents: { config, pathResolver: (s) => s },
+			bootstrapComponents: { config: captured(config), pathResolver: (s) => s },
 		});
 		expect(handle.inspect.grants.has("session")).toBe(true);
 		await handle.dispose();
 	});
 
-	it("contributes no grant when config.oauth.grants.session.enabled === false", async () => {
-		const base = makeValidAppConfig();
-		const config = {
-			...base,
-			oauth: { ...base.oauth, grants: { ...base.oauth.grants, session: { enabled: false } } },
-		};
+	it("contributes no grant when oauth-session.enabled === false", async () => {
+		const config = withGrants(makeValidAppConfig(), { session: false });
 		const handle = await createTestApp({
 			modules: [oauthSessionModule({ config }), keyStoreModule],
-			bootstrapComponents: { config, pathResolver: (s) => s },
+			bootstrapComponents: { config: captured(config), pathResolver: (s) => s },
 		});
 		expect(handle.inspect.grants.has("session")).toBe(false);
 		await handle.dispose();
 	});
 
-	it("contributes no grant when config.oauth.grants.session is the string 'false' (HOCON env-substitution outcome)", async () => {
-		// Mirrors the corresponding oauthAuthorization test: HOCON env-var
-		// substitution resolves env values as strings (no schema coercion on
-		// the `grants` passthrough sub-tree). Under the strict opt-in check,
-		// a resolved `enabled: "false"` correctly evaluates to not-enabled,
-		// restoring the env-disable invariant.
-		const base = makeValidAppConfig();
-		const config = {
-			...base,
-			oauth: {
-				...base.oauth,
-				grants: {
-					...base.oauth.grants,
-					session: { enabled: "false" as unknown as boolean },
-				},
-			},
-		};
+	it("contributes no grant when oauth-session.enabled is the string 'false' (HOCON env-substitution outcome)", async () => {
+		// HOCON env-var substitution resolves env values as strings, which the
+		// switch reads as the section's schema does: `"false"` is off.
+		const config = withGrants(makeValidAppConfig(), { session: "false" });
 		const handle = await createTestApp({
 			modules: [oauthSessionModule({ config }), keyStoreModule],
-			bootstrapComponents: { config, pathResolver: (s) => s },
+			bootstrapComponents: { config: captured(config), pathResolver: (s) => s },
 		});
 		expect(handle.inspect.grants.has("session")).toBe(false);
 		await handle.dispose();
 	});
 
-	it("registers the session grant when config.oauth.grants.session.enabled is the string 'true' (env-enable)", async () => {
-		// An operator setting `OAUTH_GRANTS_SESSION_ENABLED=true` produces a
-		// resolved `enabled: "true"` (string) on the passthrough `grants`
-		// sub-tree. The opt-in check accepts both boolean `true` and string
-		// `"true"` so the documented env-enable pattern works at runtime,
-		// matching the CHANGELOG's operator-facing guidance.
-		const base = makeValidAppConfig();
-		const config = {
-			...base,
-			oauth: {
-				...base.oauth,
-				grants: {
-					...base.oauth.grants,
-					session: { enabled: "true" as unknown as boolean },
-				},
-			},
-		};
+	it("registers the session grant when oauth-session.enabled is the string 'true' (env-enable)", async () => {
+		// An operator setting `OAUTH_SESSION_ENABLED=true` produces a resolved
+		// `enabled: "true"` (string), which reads as on so the documented
+		// env-enable pattern works at runtime.
+		const config = withGrants(makeValidAppConfig(), { session: "true" });
 		const handle = await createTestApp({
 			modules: [oauthSessionModule({ config }), keyStoreModule],
-			bootstrapComponents: { config, pathResolver: (s) => s },
+			bootstrapComponents: { config: captured(config), pathResolver: (s) => s },
 		});
 		expect(handle.inspect.grants.has("session")).toBe(true);
 		await handle.dispose();
@@ -229,7 +193,7 @@ describe("oauthSessionModule", () => {
 		const config = makeValidAppConfig();
 		const handle = await createTestApp({
 			modules: [oauthSessionModule({ config }), keyStoreModule],
-			bootstrapComponents: { config, pathResolver: (s) => s },
+			bootstrapComponents: { config: captured(config), pathResolver: (s) => s },
 		});
 		const handler = handle.inspect.grants.get("session") as GrantHandler | undefined;
 		if (!handler) throw new Error("expected session grant to be registered");

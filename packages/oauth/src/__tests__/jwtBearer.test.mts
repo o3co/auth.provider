@@ -1365,12 +1365,7 @@ describe("jwt-bearer grant — enabling it without a verifier", () => {
 	const configWith = (enabled: boolean) =>
 		({
 			...(makeValidAppConfig() as unknown as Record<string, unknown>),
-			oauth: {
-				...(makeValidAppConfig() as unknown as { oauth: Record<string, unknown> }).oauth,
-				grants: {
-					"urn:ietf:params:oauth:grant-type:jwt-bearer": { enabled },
-				},
-			},
+			"oauth-authorization": { grants: { jwtBearer: { enabled } } },
 		}) as never;
 
 	/** The contributed grant factories, or `{}` when the module contributes none. */

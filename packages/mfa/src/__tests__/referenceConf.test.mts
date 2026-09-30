@@ -356,8 +356,8 @@ describe("the package's reference.conf", () => {
 		expect(resolve({ MFA_PAGE_URL: "/account/mfa" }).mfa.page).toEqual({ url: "/account/mfa" });
 		const core = parseFile(CORE_REFERENCE, {
 			env: { ...REQUIRED_ENV, ENDPOINTS_MFA_URL: "/account/mfa", MFA_PAGE_URL: "/account/mfa" },
-		}).toObject() as { endpoints?: object };
-		expect(core.endpoints).not.toHaveProperty("mfa");
+		}).toObject();
+		expect(core).not.toHaveProperty("endpoints.mfa");
 	});
 
 	it("takes the development sample key through MFA_ENCRYPTION_KEY in development, and refuses it in production", () => {

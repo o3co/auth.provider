@@ -38,6 +38,8 @@ const REQUIRES = [
 	"sessionFederationIndex",
 	"refreshTokenFamilyRevocation",
 	"federationTokenStore",
+	// The session's lifetime, which the horizon is sized from.
+	"sessionCookiePolicy",
 ] as const;
 const OPTIONAL = [
 	"subjectSessionIndex",
@@ -45,10 +47,9 @@ const OPTIONAL = [
 	"federationGrantStore",
 	"auditSink",
 	"logger",
-	// What the horizon is sized from: the oauth module's token settings and
-	// the session store's cookie policy.
+	// The token lifetimes the horizon is sized from, read from the
+	// configuration without it.
 	"oauthTokenSettings",
-	"sessionCookiePolicy",
 ] as const;
 type Declared = ProviderDeps<(typeof REQUIRES)[number], (typeof OPTIONAL)[number]>;
 

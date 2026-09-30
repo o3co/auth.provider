@@ -621,7 +621,7 @@ refused unless it is a string, not blank (a blank environment override is a
 boot failure, not "no token"), made only of letters, digits, `-._~+/` and
 trailing `=` padding — no whitespace, no line break, and no `Bearer ` prefix,
 which the adapter adds — and it clears core's shared-secret floor
-(`MIN_SECRET_ENTROPY_BYTES`, the one `SESSION_SECRET` and `OAUTH_JWT_SECRET`
+(`MIN_SECRET_ENTROPY_BYTES`, the one `SESSION_STORE_SECRET` and `OAUTH_JWT_SECRET`
 clear), measured on the decoded length of a hex or base64 value, so
 `openssl rand -hex 16` is 16 bytes however long it looks. Whoever holds the
 token speaks to the Store as auth.provider. The shape is checked here because

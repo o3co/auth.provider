@@ -48,6 +48,7 @@ import {
 } from "@o3co/auth-provider-core";
 import {
 	createTestApp,
+	createTestLoginEntry,
 	GrantRegistry,
 	makeValidAppConfig,
 	resolverForTests,
@@ -76,7 +77,7 @@ const config = {
 		accessToken: { defaultExpiresIn: 3600, maxExpiresIn: 3600 },
 		refreshToken: { ...base.oauth.refreshToken, expiresIn: 86400 },
 	},
-	rateLimit: { ...base.rateLimit, failMode: "open" as const },
+	rateLimit: { failMode: "open" as const },
 } as unknown as AppConfig;
 
 const clientRecord = {
@@ -146,6 +147,7 @@ async function buildApp(): Promise<Harness> {
 		}),
 	);
 	const { router } = await createOAuthRouter(express, {
+		loginEntry: createTestLoginEntry(),
 		requirements: resolverForTests([], { actions: OAUTH_ADMISSION_ACTIONS }),
 		registry,
 		config,

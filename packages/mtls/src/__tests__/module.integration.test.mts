@@ -62,11 +62,9 @@ const makeBoot = (mtls: MtlsTestConfig): BootstrapMap =>
 	({
 		config: {
 			...makeValidCoreConfig(),
-			oauth: {
-				...makeValidCoreConfig().oauth,
-				tokenBinding: {
-					"dispatch-policy": "intent-explicit",
-				},
+			core: {
+				...makeValidCoreConfig().core,
+				tokenBinding: { dispatchPolicy: "intent-explicit" },
 			},
 			mtls: {
 				enabled: mtls.enabled,

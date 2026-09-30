@@ -79,7 +79,7 @@ beforeAll(async () => {
 	env = {
 		...MULTI_ENV,
 		REFRESH_TOKEN_FAMILY_STORE_REDIS_URL: url,
-		SESSION_STORAGE_REDIS_URL: url,
+		SESSION_STORE_STORAGE_REDIS_URL: url,
 	};
 	inspect = new Redis({ host: redis.host, port: redis.port, db: redis.db });
 });

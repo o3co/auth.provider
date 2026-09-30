@@ -53,7 +53,6 @@ import {
 import {
 	createTestOAuthTokenSettings,
 	makeValidCoreConfig,
-	makeValidFullSections,
 } from "@o3co/auth-provider-core/testing";
 import { HttpUserRepository } from "@o3co/auth-provider-foundation";
 import type { Request, RequestHandler } from "express";
@@ -243,7 +242,6 @@ const boot = async (
 	/** A session requirement a module of the composition contributes, and the composition declares. */
 	requirement?: SessionRequirement,
 ) => {
-	const full = makeValidFullSections();
 	const handle = await createApp({
 		modules: [
 			federationModule,
@@ -278,7 +276,7 @@ const boot = async (
 						clientId: "provider-client",
 					},
 				},
-				rateLimit: { ...full.rateLimit, failMode: "closed" },
+				rateLimit: { failMode: "closed" },
 				audit: { sink: { type: "none" } },
 				"federation-grants": {
 					enabled: true,

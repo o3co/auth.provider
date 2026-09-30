@@ -331,10 +331,10 @@ describe("discovery", () => {
 	 * is gone from the document and from the app, and nothing else moves.
 	 */
 	const GRANT_SWITCHES: ReadonlyArray<readonly [grant: string, variable: string]> = [
-		["session", "OAUTH_GRANTS_SESSION_ENABLED"],
-		["authorization_code", "OAUTH_GRANTS_AUTHORIZATION_CODE_ENABLED"],
-		["refresh_token", "OAUTH_GRANTS_REFRESH_TOKEN_ENABLED"],
-		["client_credentials", "OAUTH_GRANTS_CLIENT_CREDENTIALS_ENABLED"],
+		["session", "OAUTH_SESSION_ENABLED"],
+		["authorization_code", "OAUTH_AUTHORIZATION_GRANTS_AUTHORIZATION_CODE_ENABLED"],
+		["refresh_token", "OAUTH_AUTHORIZATION_GRANTS_REFRESH_TOKEN_ENABLED"],
+		["client_credentials", "OAUTH_AUTHORIZATION_GRANTS_CLIENT_CREDENTIALS_ENABLED"],
 	];
 
 	it.each(GRANT_SWITCHES)(
@@ -361,7 +361,9 @@ describe("discovery", () => {
 	);
 
 	it("Client ID Metadata Documents off: the flag is gone and nothing else moves", async () => {
-		const { app } = await boot({ env: { ...SINGLE_ENV, OAUTH_CIMD_ENABLED: "false" } });
+		const { app } = await boot({
+			env: { ...SINGLE_ENV, OAUTH_CLIENT_ID_METADATA_DOCUMENTS_ENABLED: "false" },
+		});
 		const doc = (await request(app).get(DISCOVERY_PATHS[0])).body;
 		expectValidMetadata(doc);
 		expect(doc.client_id_metadata_document_supported).toBeUndefined();

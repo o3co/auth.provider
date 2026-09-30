@@ -2866,7 +2866,7 @@ describe("corrupt code records + PKCE branches", () => {
 		// verifier for `S256`, compare it verbatim for `plain`. Grow the
 		// admissible method set without revisiting that comparison and this
 		// fails.
-		const policy = resolvePkceOptions(undefined);
+		const policy = resolvePkceOptions();
 		const admissible = new Set([
 			...pkceMethodsForClient(policy, null),
 			...pkceMethodsForClient(policy, { allowPlainPkce: true }),

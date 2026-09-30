@@ -86,10 +86,10 @@ const ENV: Readonly<Record<string, string>> = {
 	OAUTH_JWT_ALGORITHM: "HS256",
 	OAUTH_JWT_SECRET: JWT_SECRET,
 	OAUTH_JWT_ISSUER: ISSUER,
-	SESSION_SECRET: "federation-grants-survive-logout-session.at-least-32-bytes.ok",
-	SESSION_SECURE: "false",
-	SESSION_NAME: "auth.session",
-	SESSION_STORAGE_TYPE: "memory",
+	SESSION_STORE_SECRET: "federation-grants-survive-logout-session.at-least-32-bytes.ok",
+	SESSION_STORE_SECURE: "false",
+	SESSION_STORE_NAME: "auth.session",
+	SESSION_STORE_STORAGE_TYPE: "memory",
 	CLIENT_USER_TYPE: "yaml",
 	REFRESH_TOKEN_FAMILY_STORE_REDIS_URL: "redis://redis.test:6379",
 	USER_SESSION_STORES_ADAPTER: "memory",
@@ -338,7 +338,7 @@ describe("a grant outlives the browser session at both logout endpoints", () => 
 		expect(loginRes.status).toBe(200);
 
 		const cookies = loginRes.headers["set-cookie"] as unknown as string[];
-		const csrfCookiePrefix = `${config.session.name}.csrf=`;
+		const csrfCookiePrefix = `${(config["session-store"] as { name: string }).name}.csrf=`;
 		const reissued = cookies
 			.find((c) => c.startsWith(csrfCookiePrefix))
 			?.slice(csrfCookiePrefix.length)

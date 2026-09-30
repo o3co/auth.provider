@@ -152,17 +152,19 @@ const recordedTokenType = (named: unknown): string | undefined => {
 
 /**
  * The session cookie name assumed when neither
- * `federationTransactionCookieName` nor `config.session.name` is given (a
- * hand-built config only): `reference.conf`'s default without `__Host-`.
+ * `federationTransactionCookieName` nor the configuration's
+ * `session-store.name` is given (a router built by hand; the session module
+ * passes the name the `sessionCookiePolicy` slot carries): the package
+ * default without `__Host-`.
  */
 const FALLBACK_SESSION_COOKIE_NAME = "auth.session";
 
-/** Read `config.session.name` without assuming the caller supplied a full AppConfig. */
+/** Read `session-store.name` without assuming the caller supplied a full configuration. */
 const readSessionCookieName = (config: unknown): string => {
 	if (config == null || typeof config !== "object") return FALLBACK_SESSION_COOKIE_NAME;
-	const session = (config as { session?: unknown }).session;
-	if (session == null || typeof session !== "object") return FALLBACK_SESSION_COOKIE_NAME;
-	const name = (session as { name?: unknown }).name;
+	const store = (config as { "session-store"?: unknown })["session-store"];
+	if (store == null || typeof store !== "object") return FALLBACK_SESSION_COOKIE_NAME;
+	const name = (store as { name?: unknown }).name;
 	return typeof name === "string" && name.length > 0 ? name : FALLBACK_SESSION_COOKIE_NAME;
 };
 

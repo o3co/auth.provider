@@ -18,12 +18,14 @@ import {
 	type AppConfig,
 	AUDIT_SINK_ABSENCE_POLICY,
 	type CodeRepository,
+	coerceBooleanFromEnv,
 	defineModule,
 	type GrantHandler,
 	type Module,
 	type ProviderDeps,
 	SUBJECT_REVOCATION_ABSENCE_POLICY,
 } from "@o3co/auth-provider-core";
+import { z } from "zod";
 import {
 	AUTHORIZATION_CODE_GRANT_ADMISSION_ACTIONS,
 	REFRESH_TOKEN_GRANT_ADMISSION_ACTIONS,
@@ -33,17 +35,116 @@ import { createClientCredentialsGrant } from "./grants/clientCredentials.mjs";
 import { createJwtBearerGrant, JWT_BEARER_GRANT_TYPE } from "./grants/jwtBearer.mjs";
 import { createRefreshTokenGrant } from "./grants/refreshToken.mjs";
 
+/** A grant's switch: off unless the operator says so. */
+const ENABLED = coerceBooleanFromEnv.optional();
+
+/** One grant's own keys: whether it registers. */
+const grantSwitch = z.object({ enabled: ENABLED }).strict().optional();
+
 /**
- * Returns true if `value` is an explicit opt-in to enable a feature: the
- * boolean `true` (an `application.conf` literal) or the string `"true"`
- * (from `OAUTH_GRANTS_X_ENABLED=true`, since HOCON's `passthrough` sub-trees
- * such as `oauth.grants.*` do not coerce env-var substitutions). Everything
- * else is refused, including `"false"` and truthy strings like `"yes"` /
- * `"1"`.
+ * The schema of `oauth-authorization {}`, the module's own section, strict at
+ * every level: the switch of each grant the module installs, under `grants`.
+ * An absent switch is off; the defaults are the package's `reference.conf`'s.
  */
-function isExplicitlyEnabled(value: unknown): boolean {
-	return value === true || value === "true";
-}
+export const oauthAuthorizationConfigSchema = z
+	.object({
+		grants: z
+			.object({
+				authorizationCode: grantSwitch,
+				refreshToken: grantSwitch,
+				clientCredentials: grantSwitch,
+				jwtBearer: grantSwitch,
+			})
+			.strict()
+			.optional(),
+	})
+	.strict()
+	.optional();
+
+/** The grants' keys under `grants`, each by the grant it switches. */
+type GrantKey = "authorizationCode" | "refreshToken" | "clientCredentials" | "jwtBearer";
+
+/**
+ * The module's section, with the paths it moved from and the variables
+ * renamed with them: each `oauth.grants.<grant>` refuses boot naming its key
+ * under `oauth-authorization.grants`, and its variable is held to the new
+ * name. The authorization_code grant's `pkce` block is removed: PKCE with
+ * `S256` is mandatory for every authorization-code client, so a key or
+ * variable still setting one refuses boot.
+ */
+const SECTION = {
+	schema: oauthAuthorizationConfigSchema,
+	reference: new URL("../config/reference.conf", import.meta.url),
+	relocatedFrom: {
+		"oauth.grants.authorization_code": "grants.authorizationCode",
+		"oauth.grants.authorization_code.pkce": null,
+		"oauth.grants.refresh_token": "grants.refreshToken",
+		"oauth.grants.client_credentials": "grants.clientCredentials",
+		[`oauth.grants.${JWT_BEARER_GRANT_TYPE}`]: "grants.jwtBearer",
+	},
+	renamedVariables: {
+		OAUTH_GRANTS_AUTHORIZATION_CODE_ENABLED: "oauth.grants.authorization_code.enabled",
+		OAUTH_GRANTS_AUTHORIZATION_CODE_PKCE_REQUIRE_S256:
+			"oauth.grants.authorization_code.pkce.requireS256",
+		OAUTH_GRANTS_REFRESH_TOKEN_ENABLED: "oauth.grants.refresh_token.enabled",
+		OAUTH_GRANTS_CLIENT_CREDENTIALS_ENABLED: "oauth.grants.client_credentials.enabled",
+		OAUTH_GRANTS_JWT_BEARER_ENABLED: `oauth.grants.${JWT_BEARER_GRANT_TYPE}.enabled`,
+	},
+} as const;
+
+/**
+ * Whether the grant under `key` is on in the configuration the composition
+ * root read before boot: `oauth-authorization.grants.<key>.enabled` read as
+ * the section's schema reads it, so an environment variable's `"true"` is on.
+ * Anything the schema refuses is off, the secure default, and boot then
+ * refuses the value.
+ */
+const isEnabled = (config: unknown, key: GrantKey): boolean => {
+	const grants = (
+		config as
+			| { "oauth-authorization"?: { grants?: Record<string, { enabled?: unknown } | undefined> } }
+			| undefined
+	)?.["oauth-authorization"]?.grants;
+	const read = ENABLED.safeParse(grants?.[key]?.enabled);
+	return read.success && read.data === true;
+};
+
+/** Each grant's key under `grants`, in the order the section declares them. */
+const GRANT_KEYS: readonly GrantKey[] = [
+	"authorizationCode",
+	"refreshToken",
+	"clientCredentials",
+	"jwtBearer",
+];
+
+/**
+ * The module's section, held to the decisions the module was built with:
+ * whether each grant registers is decided from the configuration handed to
+ * `oauthAuthorizationModule`, before boot, and each switch is parsed again from
+ * the configuration `createApp` is handed. A switch that reads otherwise there
+ * refuses boot, naming its key, in either direction; a composition would
+ * otherwise run without a grant its configuration turns on, or with one it
+ * turns off.
+ */
+const sectionFor = (built: Readonly<Record<GrantKey, boolean>>) => ({
+	...SECTION,
+	schema: oauthAuthorizationConfigSchema.superRefine((section, ctx) => {
+		for (const key of GRANT_KEYS) {
+			const booted = section?.grants?.[key]?.enabled === true;
+			if (booted === built[key]) continue;
+			const [decided, parsed] = built[key] ? ["on", "off"] : ["off", "on"];
+			ctx.addIssue({
+				code: "custom",
+				path: ["grants", key, "enabled"],
+				message:
+					`oauthAuthorizationModule was built from a configuration with grants.${key} ${decided}, ` +
+					`but the configuration createApp parsed has oauth-authorization.grants.${key}.enabled ${parsed}. ` +
+					"Whether the grant registers is decided from the first. Hand oauthAuthorizationModule " +
+					"the configuration read from the same files and environment as the one createApp is handed.",
+			});
+		}
+	}),
+});
 
 const REQUIRES = [
 	"config",
@@ -107,13 +208,13 @@ const REFRESH_TOKEN_FAMILY_SLOTS = [
  * refresh token would be redeemed with no rotation and no replay check;
  * without revocation a detected replay would be a 503 and a revoked family
  * never read. A deployment that does not want token families turns the
- * grant off (`oauth.grants.refresh_token.enabled = false`).
+ * grant off (`oauth-authorization.grants.refreshToken.enabled = false`).
  */
 function requireRefreshTokenFamilies(deps: OAuthAuthorizationModuleDeps): void {
 	const missing = REFRESH_TOKEN_FAMILY_SLOTS.filter((slot) => deps[slot] === undefined);
 	if (missing.length === 0) return;
 	throw new Error(
-		"The refresh_token grant is enabled (oauth.grants.refresh_token.enabled) but " +
+		"The refresh_token grant is enabled (oauth-authorization.grants.refreshToken.enabled) but " +
 			`${missing.join(" and ")} ${missing.length === 1 ? "is" : "are"} not wired. The grant ` +
 			"rotates each refresh token through its family and revokes the family on a replay, " +
 			"and /oauth/revoke revokes the family the grant reads; without them a refresh token " +
@@ -132,7 +233,7 @@ function requireRefreshTokenFamilies(deps: OAuthAuthorizationModuleDeps): void {
 function requireCodeRepository(deps: OAuthAuthorizationModuleDeps): CodeRepository {
 	if (deps.codeRepository !== undefined) return deps.codeRepository;
 	throw new Error(
-		"The authorization_code grant is enabled (oauth.grants.authorization_code.enabled) but " +
+		"The authorization_code grant is enabled (oauth-authorization.grants.authorizationCode.enabled) but " +
 			"codeRepository is not wired. The grant redeems the codes /authorize issues into it. " +
 			"Wire a code repository (redisCodeRepositoryModule for more than one replica), or turn " +
 			"the grant off.",
@@ -155,32 +256,24 @@ export type OAuthAuthorizationModuleDeps = ProviderDeps<Requires, Optional>;
  * through `requires` from the DI graph.
  */
 export const oauthAuthorizationModule = (params: { config: AppConfig }): Module => {
-	// `oauth.grants` is `z.object({}).passthrough()` in the schema — values
-	// arrive unvalidated. The `enabled` field can be the boolean `true` /
-	// `false` (HOCON literal) OR the string `"true"` / `"false"` (HOCON env
-	// substitution outcome). Typing `enabled` as `unknown` keeps the local
-	// cast honest with runtime reality; `isExplicitlyEnabled` below performs
-	// the strict opt-in narrowing.
-	const grantsCfg = params.config.oauth.grants as Record<string, { enabled?: unknown }>;
-
 	// Each factory takes `Pick<GrantDependencies, …>` of the slots it reads,
 	// and this module's typed deps satisfy every pick — so a grant reading a
 	// slot this module never declared is a compile error at its wiring below.
 	const grants: Record<string, (deps: OAuthAuthorizationModuleDeps) => GrantHandler> = {};
+	const built = Object.fromEntries(
+		GRANT_KEYS.map((key) => [key, isEnabled(params.config, key)]),
+	) as Record<GrantKey, boolean>;
 	// Each grant that admits a session registers its action beside it.
 	const admissionActions: Record<string, AdmissionActionDeclaration> = {};
-	// Per the secure-default opt-in discipline: a grant is registered only
-	// when `enabled` is explicitly truthy (boolean `true` or the string `"true"`
-	// from HOCON env-var substitution — see `isExplicitlyEnabled` above).
-	// Library reference.conf sets `enabled = false` as the secure baseline;
-	// each deployment's application.conf (or env override) must explicitly
-	// flip individual grants to activate them.
-	if (isExplicitlyEnabled(grantsCfg.authorization_code?.enabled)) {
+	// Secure-default opt-in: a grant is registered only when its switch is on
+	// (`isEnabled`). The package's reference.conf ships each off; a
+	// deployment's own layer, or the switch's variable, turns one on.
+	if (built.authorizationCode) {
 		grants.authorization_code = (deps) =>
 			createAuthorizationGrant({ ...deps, codeRepository: requireCodeRepository(deps) });
 		Object.assign(admissionActions, AUTHORIZATION_CODE_GRANT_ADMISSION_ACTIONS);
 	}
-	if (isExplicitlyEnabled(grantsCfg.refresh_token?.enabled)) {
+	if (built.refreshToken) {
 		Object.assign(admissionActions, REFRESH_TOKEN_GRANT_ADMISSION_ACTIONS);
 		grants.refresh_token = (deps) => {
 			// Refused at boot, not at the first refresh: see the function.
@@ -193,7 +286,7 @@ export const oauthAuthorizationModule = (params: { config: AppConfig }): Module 
 	// deployment that never enables this grant is not made to wire one, and the
 	// factory below refuses to register the grant when it is missing rather
 	// than registering one that would accept anything.
-	if (isExplicitlyEnabled(grantsCfg["urn:ietf:params:oauth:grant-type:jwt-bearer"]?.enabled)) {
+	if (built.jwtBearer) {
 		grants[JWT_BEARER_GRANT_TYPE] = (deps) => {
 			const { userRepository, assertionVerifier } = deps;
 			if (!userRepository) {
@@ -223,17 +316,13 @@ export const oauthAuthorizationModule = (params: { config: AppConfig }): Module 
 	// `AuthenticatedClient.allowedGrantTypes` (deny-by-absence) is the
 	// authoritative access gate; the server-wide flag is a kill switch, and
 	// keeps M2M off in deployments that never use it.
-	if (isExplicitlyEnabled(grantsCfg.client_credentials?.enabled)) {
+	if (built.clientCredentials) {
 		grants.client_credentials = (deps) => createClientCredentialsGrant(deps);
 	}
 
-	// No `configSchema`: this module reads only slices `CoreConfigSchema`
-	// declares (`oauth.grants.{authorization_code,refresh_token}.enabled`,
-	// `oauth.accessToken`, `oauth.refreshToken.expiresIn`), which boot's
-	// composed parse already validates. One is needed only for a read of a
-	// key in `fullSectionsSchema` (e.g. `config.session`, `config.endpoints`).
-	return defineModule<Requires, Optional>({
+	return defineModule<Requires, Optional, typeof oauthAuthorizationConfigSchema>({
 		name: "oauth-authorization",
+		section: sectionFor(built),
 		requires: REQUIRES,
 		optional: OPTIONAL,
 		// `subjectRevocation` is optional to wire, not optional to decide.

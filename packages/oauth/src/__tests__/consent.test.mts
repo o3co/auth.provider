@@ -36,7 +36,7 @@ import {
 	type PublicClient,
 	type UserSessionStore,
 } from "@o3co/auth-provider-core";
-import { resolverForTests } from "@o3co/auth-provider-core/testing";
+import { createTestLoginEntry, resolverForTests } from "@o3co/auth-provider-core/testing";
 import express from "express";
 import request from "supertest";
 import { describe, expect, it, vi } from "vitest";
@@ -59,13 +59,10 @@ const makeConfig = (consentUrl?: string): AppConfig =>
 		oauth: {
 			jwt: { issuer: "https://issuer.example" },
 			oidcMode: "dual",
-			grants: {},
+			...(consentUrl === undefined ? {} : { consentPage: { url: consentUrl } }),
 		},
 		rateLimit: { failMode: "open" as const },
-		endpoints: {
-			login: { url: "/login" },
-			...(consentUrl === undefined ? {} : { consent: { url: consentUrl } }),
-		},
+		endpoints: { login: { url: "/login" } },
 	}) as unknown as AppConfig;
 
 type Session = Record<string, unknown>;
@@ -118,6 +115,7 @@ const makeApp = async (opts: {
 		opts.pendingConsentStore ?? createMemoryPendingConsentStore();
 	const logger = createMockLogger();
 	const { router } = await createOAuthRouter(express, {
+		loginEntry: createTestLoginEntry(),
 		requirements: resolverForTests([], { actions: OAUTH_ADMISSION_ACTIONS }),
 		registry: authorizationServerRegistry(),
 		config: makeConfig(opts.consentUrl),

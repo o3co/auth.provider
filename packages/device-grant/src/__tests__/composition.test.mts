@@ -55,7 +55,7 @@ import {
 	memoryRefreshTokenFamilyStoreModule,
 	memorySessionStoresModule,
 } from "@o3co/auth-provider-core";
-import { makeValidAppConfig } from "@o3co/auth-provider-core/testing";
+import { makeValidAppConfig, renamedVariableCaptures } from "@o3co/auth-provider-core/testing";
 import { oauthModule, subjectRevocationServiceModule } from "@o3co/auth-provider-oauth";
 import { sessionModule, sessionStoreModuleFor } from "@o3co/auth-provider-session";
 import express, { type RequestHandler } from "express";
@@ -125,7 +125,7 @@ const makeConfig = (deviceGrant: Record<string, unknown>): AppConfig => {
 		...base,
 		// supertest speaks plain HTTP, and express-session sets no `Secure`
 		// cookie on it — which also rules out the fixture's `__Host-` name.
-		session: { ...base.session, name: "auth.session", secure: false },
+		"session-store": { ...base["session-store"], name: "auth.session", secure: false },
 		"device-grant": deviceGrant,
 	} as AppConfig;
 };
@@ -154,20 +154,29 @@ const bootWith = async (
 		readonly overrideComponents?: Partial<ComponentMap>;
 	} = {},
 ) => {
+	const modules = [
+		...ordered,
+		jwksModule,
+		sessionModule,
+		swap.deviceCodeStore ?? memoryDeviceCodeStoreModule,
+		memoryRateLimiterModule,
+		memorySessionStoresModule,
+		memoryFederationTokenStoreModule,
+		memoryAccessTokenDenylistModule,
+		deploymentProviders,
+	];
 	const handle = await createApp({
-		modules: [
-			...ordered,
-			jwksModule,
-			sessionModule,
-			swap.deviceCodeStore ?? memoryDeviceCodeStoreModule,
-			memoryRateLimiterModule,
-			memorySessionStoresModule,
-			memoryFederationTokenStoreModule,
-			memoryAccessTokenDenylistModule,
-			deploymentProviders,
-		],
+		modules,
 		bootstrapComponents: {
-			config,
+			// What a resolution of the modules' references under an empty
+			// environment captures of the variables they declare renamed.
+			config: {
+				...config,
+				"renamed-variables": {
+					...(config as { "renamed-variables"?: object })["renamed-variables"],
+					...renamedVariableCaptures({ modules, env: {} }),
+				},
+			},
 			pathResolver: (s: string) => s,
 			...(swap.logger ? { logger: swap.logger } : {}),
 			...(swap.auditSink ? { auditSink: swap.auditSink } : {}),

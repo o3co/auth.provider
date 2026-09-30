@@ -244,7 +244,14 @@ describe("renamedVariableCaptures", () => {
 				core: CORE_RELOCATIONS,
 				env: { DEPLOYMENT_MODE: "multi" },
 			}),
-		).toEqual({ DEPLOYMENT_MODE: "multi", CORE_DEPLOYMENT_MODE: null });
+		).toEqual({
+			DEPLOYMENT_MODE: "multi",
+			CORE_DEPLOYMENT_MODE: null,
+			OAUTH_TOKEN_BINDING_DISPATCH_POLICY: null,
+			CORE_TOKEN_BINDING_DISPATCH_POLICY: null,
+			OAUTH_TOKEN_BINDING_BIND_CONFIDENTIAL_CLIENT_REFRESH_TOKENS: null,
+			CORE_TOKEN_BINDING_BIND_CONFIDENTIAL_CLIENT_REFRESH_TOKENS: null,
+		});
 	});
 });
 

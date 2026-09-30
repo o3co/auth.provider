@@ -29,7 +29,11 @@ import {
 	createMemoryPendingConsentStore,
 	createSymmetricKeyStore,
 } from "@o3co/auth-provider-core";
-import { GrantRegistry, resolverForTests } from "@o3co/auth-provider-core/testing";
+import {
+	createTestLoginEntry,
+	GrantRegistry,
+	resolverForTests,
+} from "@o3co/auth-provider-core/testing";
 import express from "express";
 import request from "supertest";
 import { describe, expect, it, vi } from "vitest";
@@ -106,6 +110,7 @@ const makeApp = async (opts: {
 			}),
 	) as unknown as typeof fetch;
 	const { router } = await createOAuthRouter(express, {
+		loginEntry: createTestLoginEntry(),
 		requirements: resolverForTests([], { actions: OAUTH_ADMISSION_ACTIONS }),
 		registry:
 			opts.authorizationCode === false ? new GrantRegistry() : authorizationServerRegistry(),

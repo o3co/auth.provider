@@ -59,7 +59,7 @@ export {
 	MAX_CSRF_TTL_SECONDS,
 } from "./csrf.mjs";
 // The `csrfTokenSigner` slot the session store's module provides from
-// `session.secret`; exported so a composition that mounts its own cookie
+// `session-store.secret`; exported so a composition that mounts its own cookie
 // session provides the slot the same way, and its tokens keep verifying.
 export { createSessionCsrfTokenSigner } from "./csrf-token-signer.mjs";
 // The session-admission ADR's D5 — the tail of a login: the session written

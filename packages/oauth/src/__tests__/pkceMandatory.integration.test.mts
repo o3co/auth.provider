@@ -30,7 +30,11 @@ import {
 	createSymmetricKeyStore,
 	type PublicClient,
 } from "@o3co/auth-provider-core";
-import { GrantRegistry, resolverForTests } from "@o3co/auth-provider-core/testing";
+import {
+	createTestLoginEntry,
+	GrantRegistry,
+	resolverForTests,
+} from "@o3co/auth-provider-core/testing";
 import express from "express";
 import request from "supertest";
 import { describe, expect, it, vi } from "vitest";
@@ -121,6 +125,7 @@ const makeApp = async (
 	);
 
 	const { router } = await createOAuthRouter(express, {
+		loginEntry: createTestLoginEntry(),
 		requirements: resolverForTests([], { actions: OAUTH_ADMISSION_ACTIONS }),
 		registry,
 		config,
@@ -464,34 +469,5 @@ describe("/token — the same policy object decides redemption", () => {
 		const res = await redeem(app, { code_verifier: "wrong-verifier".padEnd(43, "y") });
 		expect(res.status).toBe(400);
 		expect(res.body.error).toBe("invalid_grant");
-	});
-});
-
-describe("operator signal for the inert pkce knobs", () => {
-	it("warns exactly once for a boot, not once per resolution", async () => {
-		// `makeApp` resolves the SAME config twice, exactly as a real boot does:
-		// once in `createAuthorizationGrant` for the token endpoint and once in
-		// `createOAuthRouter` for the routers. Both must read one policy — and
-		// the operator must be told once, not once per reader.
-		const { logger } = await makeApp({
-			oauth: {
-				grants: { authorization_code: { pkce: { requireS256: false, defaultMethod: "plain" } } },
-			},
-		});
-		const warnings = logger.warn.mock.calls.filter(
-			(call) => call[1] === "pkce_config_ignored_s256_is_mandatory",
-		);
-		expect(warnings).toHaveLength(1);
-		expect(warnings[0]?.[0]).toEqual(
-			expect.objectContaining({ ignoredKeys: ["requireS256", "defaultMethod"] }),
-		);
-	});
-
-	it("stays silent for a config that carries no inert key", async () => {
-		const { logger } = await makeApp();
-		expect(logger.warn).not.toHaveBeenCalledWith(
-			expect.anything(),
-			"pkce_config_ignored_s256_is_mandatory",
-		);
 	});
 });

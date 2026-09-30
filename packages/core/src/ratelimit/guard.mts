@@ -51,7 +51,7 @@ export interface RateLimitGuardOptions {
 	/**
 	 * Configured spec backing the `RateLimit-Limit` / `RateLimit-Reset` headers
 	 * when the decision does not carry `limit` / `resetAt`. Callers with a
-	 * documented per-endpoint spec (e.g. `rateLimit.login`) pass it here;
+	 * documented per-endpoint spec (e.g. `session.rateLimit.login`) pass it here;
 	 * without it the guard only advertises what the adapter actually reported,
 	 * because a header value the caller invented is a limit no request is
 	 * measured against.

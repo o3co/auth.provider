@@ -126,7 +126,7 @@ const envFor = (origin: string): Record<string, string> => ({
 	OAUTH_JWT_ALGORITHM: "HS256",
 	OAUTH_JWT_SECRET: "store-credential-composition.at-least-32-bytes.ok",
 	OAUTH_JWT_ISSUER: "https://auth.test",
-	SESSION_SECRET: "store-credential-composition-session.at-least-32-bytes.ok",
+	SESSION_STORE_SECRET: "store-credential-composition-session.at-least-32-bytes.ok",
 	CLIENT_USER_TYPE: "http",
 	CLIENT_USER_AUTHENTICATE_URL: `${origin}/authenticate`,
 	CLIENT_USER_AUTHENTICATE_BY_TOKEN_URL: `${origin}/authenticate-by-token`,
@@ -166,9 +166,9 @@ describe("CLIENT_USER_BEARER_TOKEN reaches the Store through the shipped composi
 describe("a token the Store refuses, seen from outside the booted app", () => {
 	/** Every store on memory, so the boot opens no socket but the Store's. */
 	const MEMORY_ENV: Readonly<Record<string, string>> = {
-		SESSION_SECURE: "false",
-		SESSION_NAME: "auth.session",
-		SESSION_STORAGE_TYPE: "memory",
+		SESSION_STORE_SECURE: "false",
+		SESSION_STORE_NAME: "auth.session",
+		SESSION_STORE_STORAGE_TYPE: "memory",
 		USER_SESSION_STORES_ADAPTER: "memory",
 		RATE_LIMITER_ADAPTER: "memory",
 		OAUTH_CODE_ADAPTER: "memory",

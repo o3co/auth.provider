@@ -37,11 +37,16 @@ import {
 import express from "express";
 import { afterEach, describe, expect, it } from "vitest";
 import { sessionStoreModule, sessionStoreModuleFor } from "#/modules/sessionStoreModule.mjs";
-import { sessionCookiePolicyFrom } from "#/session-cookie-policy.mjs";
+import {
+	type SessionCookieConfigSlice,
+	sessionCookiePolicyFrom,
+} from "#/session-cookie-policy.mjs";
+import { withSessionCaptures, withStore } from "./_helpers/sections.mjs";
 
-type SessionSlice = AppConfig["session"];
+type SessionSlice = SessionCookieConfigSlice;
 
-const fixture = (): SessionSlice => makeValidAppConfig().session as SessionSlice;
+const fixture = (): SessionSlice =>
+	(makeValidAppConfig() as unknown as { "session-store": SessionSlice })["session-store"];
 
 const CONFIGURATIONS: ReadonlyArray<readonly [string, SessionSlice]> = [
 	["the fixture's __Host- cookie", fixture()],
@@ -82,10 +87,11 @@ describe("sessionCookiePolicyFrom", () => {
 	});
 
 	const HOST_PREFIX =
-		"session.name with __Host- prefix requires session.secure=true and session.domain=null";
-	const SECURE_PREFIX = "session.name with __Secure- prefix requires session.secure=true";
+		"session-store.name with __Host- prefix requires session-store.secure=true and session-store.domain=null";
+	const SECURE_PREFIX =
+		"session-store.name with __Secure- prefix requires session-store.secure=true";
 	const notADomain = (domain: string) =>
-		`session.domain ${JSON.stringify(domain)} is not a cookie domain (a host name, one leading dot allowed)`;
+		`session-store.domain ${JSON.stringify(domain)} is not a cookie domain (a host name, one leading dot allowed)`;
 
 	/**
 	 * Session sections, each with what the policy refuses it with
@@ -124,7 +130,7 @@ describe("sessionCookiePolicyFrom", () => {
 		[
 			"a name that is not a cookie name",
 			{ name: "auth session" },
-			'session.name "auth session" is not a cookie name (an RFC 6265 token)',
+			'session-store.name "auth session" is not a cookie name (an RFC 6265 token)',
 		],
 		[
 			"a cookie with no prefix and an empty domain",
@@ -166,8 +172,9 @@ describe("sessionCookiePolicyFrom", () => {
 	it.each(CASES)(
 		"%s: the session store boots with it exactly when the policy is built, and refuses it at validation with the policy's message",
 		async (_what, change, refusal) => {
-			const base = makeValidAppConfig() as AppConfig;
-			const config = { ...base, session: { ...base.session, ...change } } as AppConfig;
+			const config = withSessionCaptures(
+				withStore(makeValidAppConfig(), change as Record<string, unknown>),
+			) as AppConfig;
 			const booting = createTestApp({
 				modules: [sessionStoreModuleFor(config)],
 				bootstrapComponents: { config, pathResolver: (s: string) => s },
@@ -184,7 +191,7 @@ describe("sessionCookiePolicyFrom", () => {
 		},
 	);
 
-	it("refuses a cross-site cookie that is not secure, which core's schema refuses before it is built", () => {
+	it("refuses a cross-site cookie that is not secure", () => {
 		expect(() =>
 			sessionCookiePolicyFrom({
 				...fixture(),
@@ -192,17 +199,14 @@ describe("sessionCookiePolicyFrom", () => {
 				sameSite: "none",
 				secure: false,
 			}),
-		).toThrow('session.sameSite = "none" requires session.secure = true');
+		).toThrow('session-store.sameSite = "none" requires session-store.secure = true');
 	});
 
-	it.each([0, -1, 1.5, MAX_DURATION_MS + 1, Number.NaN])(
-		"refuses a lifetime of %s, which core's schema refuses before it is built",
-		(maxAge) => {
-			expect(() => sessionCookiePolicyFrom({ ...fixture(), maxAge })).toThrow(
-				`session.maxAge must be a whole number of milliseconds from 1 to ${MAX_DURATION_MS}`,
-			);
-		},
-	);
+	it.each([0, -1, 1.5, MAX_DURATION_MS + 1, Number.NaN])("refuses a lifetime of %s", (maxAge) => {
+		expect(() => sessionCookiePolicyFrom({ ...fixture(), maxAge })).toThrow(
+			`session-store.maxAge must be a whole number of milliseconds from 1 to ${MAX_DURATION_MS}`,
+		);
+	});
 
 	it("builds a lifetime of 1 and of the ceiling", () => {
 		expect(sessionCookiePolicyFrom({ ...fixture(), maxAge: 1 }).maxAgeMs).toBe(1);
@@ -298,13 +302,17 @@ const settled = (boot: Promise<{ dispose(): Promise<void> }>): Promise<unknown> 
 describe("the session store module provides sessionCookiePolicy", () => {
 	it("hands a module that requires it the session cookie's attributes", async () => {
 		const seen: { policy?: SessionCookiePolicy } = {};
-		const config = makeValidAppConfig() as AppConfig;
+		const config = withSessionCaptures(makeValidAppConfig()) as AppConfig;
 		const handle = await createTestApp({
 			modules: [sessionStoreModuleFor(config), consumer(seen)],
 			bootstrapComponents: { config, pathResolver: (s: string) => s },
 		});
 		handles.push(handle);
-		expect(seen.policy).toEqual(sessionCookiePolicyFrom(config.session));
+		expect(seen.policy).toEqual(
+			sessionCookiePolicyFrom(
+				(config as unknown as { "session-store": SessionSlice })["session-store"],
+			),
+		);
 		expect(Object.isFrozen(seen.policy)).toBe(true);
 	});
 
@@ -315,8 +323,8 @@ describe("the session store module provides sessionCookiePolicy", () => {
 		"%s: a section it refuses is refused at validation, whether or not a module requires the slot",
 		async (_form, form) => {
 			const base = makeValidAppConfig() as AppConfig;
-			const config = { ...base, session: { ...base.session, name: "auth session" } } as AppConfig;
-			const message = 'session.name "auth session" is not a cookie name (an RFC 6265 token)';
+			const config = withSessionCaptures(withStore(base, { name: "auth session" })) as AppConfig;
+			const message = 'session-store.name "auth session" is not a cookie name (an RFC 6265 token)';
 			for (const readers of [[], [consumer({})]]) {
 				expect(
 					await settled(
@@ -331,7 +339,7 @@ describe("the session store module provides sessionCookiePolicy", () => {
 					stage: "validateManifests",
 					details: {
 						reason: "config-validation-failed",
-						issues: [{ code: "custom", path: ["session", "name"], message }],
+						issues: [{ code: "custom", path: ["session-store", "name"], message }],
 					},
 				});
 			}
@@ -355,7 +363,7 @@ describe("the session store module names sessionCookiePolicy authoritative", () 
 	it.each(FORMS)(
 		"%s: an override of the slot refuses boot, naming the module and the key, whether or not a module requires it",
 		async (_form, form) => {
-			const config = makeValidAppConfig() as AppConfig;
+			const config = withSessionCaptures(makeValidAppConfig()) as AppConfig;
 			for (const readers of [[], [consumer({})]]) {
 				const caught = await settled(
 					createTestApp({
@@ -379,7 +387,7 @@ describe("the session store module names sessionCookiePolicy authoritative", () 
 		"lets a composition without the module fill the slot itself, through %s",
 		async (map) => {
 			const seen: { policy?: SessionCookiePolicy } = {};
-			const config = makeValidAppConfig() as AppConfig;
+			const config = withSessionCaptures(makeValidAppConfig()) as AppConfig;
 			const handle = await createTestApp({
 				modules: [consumer(seen)],
 				bootstrapComponents: {

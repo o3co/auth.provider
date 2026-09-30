@@ -270,7 +270,7 @@ export interface ContributesMap<Deps = ProviderDeps<never, never>> {
 	 * `assembleApp` into one `tokenBindingMw` on the token endpoint, before grant
 	 * dispatch. Use this, NOT `grantMiddleware`, for a mechanism. `null`s are
 	 * dropped, and the `DispatchPolicy` from
-	 * `config.oauth.tokenBinding.dispatch-policy` arbitrates across modules.
+	 * `config.core.tokenBinding.dispatchPolicy` arbitrates across modules.
 	 * List-shaped; one module may contribute several. See ADR
 	 * 2026-05-20-token-binding-first-class-abstraction.
 	 */

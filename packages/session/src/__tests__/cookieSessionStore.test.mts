@@ -88,6 +88,7 @@ const fake = vi.hoisted(() => {
 
 vi.mock("redis", () => ({ createClient: () => fake.client }));
 
+import { deriveFederationTransactionCookieName } from "#/federations/transaction.mjs";
 import { sessionStoreModuleFor } from "#/modules/sessionStoreModule.mjs";
 import {
 	makeFederationTokenStore,
@@ -98,6 +99,7 @@ import {
 } from "#/routes/__tests__/federation-harness.mjs";
 import { createRouter as createFederationRouter } from "#/routes/Federation.mjs";
 import { createRouter as createSessionRouter } from "#/routes/Session.mjs";
+import { withSessionCaptures, withStore } from "./_helpers/sections.mjs";
 
 /** A logger whose every level is a spy; `child` answers the same logger. */
 function spyLogger() {
@@ -176,20 +178,18 @@ const alice = { id: "user-1", username: "alice" };
  */
 async function boot(logger: SpyLogger): Promise<express.Express> {
 	const base = makeValidAppConfig();
-	const config = {
-		...base,
-		session: {
-			...base.session,
+	const config = withSessionCaptures({
+		...withStore(base, {
 			name: "test.sid",
 			secure: false,
 			storage: { type: "redis", redis: { url: "redis://fake:6379" } },
-		},
+		}),
 		core: { ...base.core, deployment: { mode: "single" } },
-	};
+	});
 	const routes = defineModule({
 		name: "test:cookie-session-routes",
-		// The CSRF token's signer, from the session store's module.
-		requires: ["csrfTokenSigner"],
+		// The CSRF token's signer and the session cookie, from the session store's module.
+		requires: ["csrfTokenSigner", "sessionCookiePolicy"],
 		contributes: {
 			routes: [
 				() => {
@@ -213,17 +213,21 @@ async function boot(logger: SpyLogger): Promise<express.Express> {
 							authenticate: vi.fn(async () => alice),
 							authenticateByToken: vi.fn(async () => alice),
 						} as unknown as UserRepository,
-						config: config as never,
+						section: (config as unknown as { session: Record<string, unknown> }).session,
+						sessionCookie: deps.sessionCookiePolicy,
 						deploymentMode: "single",
 						logger: logger as unknown as Logger,
 					}),
 				}),
-				() => ({
+				(deps) => ({
 					id: "test-federation",
 					mountPath: "/session",
 					handler: createFederationRouter(express, {
 						requirements: resolverForTests([], { actions: SESSION_ADMISSION_ACTIONS }),
 						config: config as never,
+						federationTransactionCookieName: deriveFederationTransactionCookieName(
+							deps.sessionCookiePolicy.name,
+						),
 						federationProviders: new Map([
 							[
 								"test",

@@ -52,13 +52,28 @@ import {
 } from "#/csrf.mjs";
 import { sessionModule } from "#/module.mjs";
 import { sessionStoreModuleFor } from "#/modules/sessionStoreModule.mjs";
+import { withSessionCaptures, withStore } from "./_helpers/sections.mjs";
 
 const TRUSTED = "https://app.contract.test";
 
-/** The fixture configuration's session section, trusting one origin beside its own. */
+/** The fixture configuration's session cookie (the session store's section). */
+const fixtureCookie = () =>
+	(
+		makeValidAppConfig() as unknown as {
+			"session-store": {
+				name: string;
+				secure: boolean;
+				sameSite: "lax" | "strict" | "none";
+				domain: string | null;
+				maxAge: number;
+			};
+		}
+	)["session-store"];
+
+/** The fixture configuration's session cookie, trusting one origin beside its own. */
 const sessionSlice = (): SessionCsrfConfigSlice => {
-	const { session } = makeValidAppConfig();
-	return { ...session, csrf: { trustedOrigins: [TRUSTED] } };
+	const { name, secure, sameSite, domain } = fixtureCookie();
+	return { name, secure, sameSite, domain, csrf: { trustedOrigins: [TRUSTED] } };
 };
 
 /** What the guards below sign with: the `csrfTokenSigner` slot's double. */
@@ -76,7 +91,7 @@ const guardOver = (now?: () => number): CsrfGuard => {
 };
 
 describe("createSessionCsrfGuard keeps core's csrfGuard contract", () => {
-	const { session } = makeValidAppConfig();
+	const session = fixtureCookie();
 	it.each(
 		csrfGuardContract({
 			build: () => guardOver(),
@@ -242,12 +257,10 @@ afterEach(async () => {
 });
 
 const boot = async (seen: { guard?: CsrfGuard }): Promise<express.Express> => {
-	const base = makeValidAppConfig();
 	// supertest speaks plain HTTP: no `Secure` cookie and no `__Host-` name.
-	const config = {
-		...base,
-		session: { ...base.session, name: "auth.session", secure: false },
-	} as AppConfig;
+	const config = withSessionCaptures(
+		withStore(makeValidAppConfig(), { name: "auth.session", secure: false }),
+	) as AppConfig;
 	const handle = await createTestApp({
 		// The session store's middleware first, as every composition lists it.
 		modules: [sessionStoreModuleFor(config), sessionModule, ...stores, probe(seen)],

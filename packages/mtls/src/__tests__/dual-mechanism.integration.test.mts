@@ -60,9 +60,9 @@ const makeBoot = ({ dispatchPolicy }: DualBootOpts): BootstrapMap =>
 	({
 		config: {
 			...makeValidCoreConfig(),
-			oauth: {
-				...makeValidCoreConfig().oauth,
-				tokenBinding: { "dispatch-policy": dispatchPolicy },
+			core: {
+				...makeValidCoreConfig().core,
+				tokenBinding: { dispatchPolicy },
 			},
 			dpop: {
 				enabled: true,

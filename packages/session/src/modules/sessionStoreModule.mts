@@ -9,17 +9,21 @@
  */
 
 import {
-	type AppConfig,
 	BootError,
 	type BuilderContext,
 	checkDeploymentMode,
+	coerceBooleanFromEnv,
 	consoleLogger,
 	defineModule,
-	fullSectionsSchema,
+	describeWeakSecret,
+	MAX_DURATION_MS,
+	MIN_SECRET_ENTROPY_BYTES,
+	measureSecretEntropyBytes,
 	type ReplicaSafetyDeclaration,
 	type SessionCookiePolicy,
 } from "@o3co/auth-provider-core";
 import session from "express-session";
+import { z } from "zod";
 import { createSessionCsrfTokenSigner } from "../csrf-token-signer.mjs";
 import { guardCookieSession } from "../internal/cookieSession.mjs";
 import {
@@ -29,27 +33,108 @@ import {
 } from "../session-cookie-policy.mjs";
 import { createSessionStoreFactory, registerBuiltinSessionStores } from "../store/factory.mjs";
 
+/** The secret's key and variable, as refusals name them. */
+const SECRET = { configKey: "session-store.secret", envVar: "SESSION_STORE_SECRET" } as const;
+
 /**
- * Module-level config schema: this module owns the `session` config slice via
- * `fullSectionsSchema.pick`. The boot planner composes the manifests'
- * configSchemas into the validated `config` slot before any factory runs.
- * A section that yields no session cookie is refused there, naming the key.
+ * The schema of `session-store {}`, the module's own section: the session
+ * cookie (its name, lifetime and attributes, and the secret that signs it)
+ * and the store express-session keeps sessions in. Strict at the top; a
+ * storage type's own block passes through to the store factory. A section
+ * that yields no session cookie is refused naming the key
+ * (`sessionCookieRefusal`), and a secret below the 256-bit floor naming the
+ * secret. The secret has no default: absent, the module refuses to build
+ * (`requireSecret`).
  */
-const sessionStoreConfigSchema = fullSectionsSchema
-	.pick({
-		session: true,
+export const sessionStoreConfigSchema = z
+	.object({
+		// Signs the cookie that is the authenticated session, so guessing it
+		// forges logins: held to the floor the JWT signing secret is held to.
+		secret: z
+			.string()
+			.superRefine((value, ctx) => {
+				const actualBytes = measureSecretEntropyBytes(value);
+				if (actualBytes < MIN_SECRET_ENTROPY_BYTES) {
+					ctx.addIssue({ code: "custom", message: describeWeakSecret(actualBytes, SECRET) });
+				}
+			})
+			.optional(),
+		name: z.string(),
+		// Positive and bounded: 0 (an exported-but-empty variable) makes
+		// express-session emit an already-expired cookie.
+		maxAge: z.coerce.number().int().positive().max(MAX_DURATION_MS),
+		secure: coerceBooleanFromEnv,
+		sameSite: z.enum(["lax", "none", "strict"]),
+		domain: z.string().nullable(),
+		storage: z
+			.object({
+				type: z.string(),
+				// Per-type options for `storage.type = "redis"`: the route spreads
+				// `storage[storage.type]` into the store factory.
+				redis: z.object({ url: z.string(), password: z.string().optional() }).strict().optional(),
+			})
+			.passthrough(),
 	})
-	.superRefine((config, ctx) => {
-		const refusal = sessionCookieRefusal(config.session);
+	.strict()
+	.superRefine((section, ctx) => {
+		const refusal = sessionCookieRefusal(section);
 		if (refusal !== undefined) {
-			ctx.addIssue({ code: "custom", path: ["session", refusal.key], message: refusal.message });
+			ctx.addIssue({ code: "custom", path: [refusal.key], message: refusal.message });
 		}
 	});
+
+/** `session-store {}` as its schema leaves it. */
+type SessionStoreSection = z.output<typeof sessionStoreConfigSchema>;
+
+/**
+ * The secret the session cookie is signed with; a refusal naming the key and
+ * its variable when the section carries none.
+ */
+function requireSecret(section: SessionStoreSection): string {
+	if (section.secret !== undefined) return section.secret;
+	throw new Error(
+		`${SECRET.configKey} is not set: it signs the session cookie, and has no default. Set ${SECRET.envVar} to at least 32 bytes of random material (openssl rand -hex 32).`,
+	);
+}
+
+/**
+ * The module's section, with the paths it moved from and the variables
+ * renamed with them: each key of the session cookie and its store moved from
+ * `session` to `session-store`, and its `SESSION_*` variable to
+ * `SESSION_STORE_*`.
+ */
+const SECTION = {
+	schema: sessionStoreConfigSchema,
+	reference: new URL("../../config/reference.conf", import.meta.url),
+	relocatedFrom: {
+		"session.secret": "secret",
+		"session.name": "name",
+		"session.maxAge": "maxAge",
+		"session.secure": "secure",
+		"session.sameSite": "sameSite",
+		"session.domain": "domain",
+		"session.storage": { to: "storage", environmentVariable: null },
+		"session.storage.type": "storage.type",
+		"session.storage.redis.url": "storage.redis.url",
+		"session.storage.redis.password": "storage.redis.password",
+	},
+	renamedVariables: {
+		SESSION_SECRET: "session.secret",
+		SESSION_NAME: "session.name",
+		SESSION_MAX_AGE: "session.maxAge",
+		SESSION_SECURE: "session.secure",
+		SESSION_SAME_SITE: "session.sameSite",
+		SESSION_DOMAIN: "session.domain",
+		SESSION_STORAGE_TYPE: "session.storage.type",
+		SESSION_STORAGE_REDIS_URL: "session.storage.redis.url",
+		SESSION_STORAGE_REDIS_PASSWORD: "session.storage.redis.password",
+	},
+} as const;
 
 const MODULE_NAME = "session-store";
 
 /**
- * What forks per replica when `session.storage.type = "memory"`. Quoted
+ * What forks per replica when `session-store.storage.type = "memory"`. Quoted
  * by the replica-safety guard into a refused boot and into the unset-mode
  * warning, so it names the consequence rather than the fix.
  */
@@ -61,13 +146,13 @@ const MEMORY_STORE_REPLICA_SAFETY: ReplicaSafetyDeclaration = {
 
 /** The slice of config this module's manifest is built from. */
 export interface SessionStoreModuleConfig {
-	readonly session?: { readonly storage?: { readonly type?: unknown } };
+	readonly "session-store"?: { readonly storage?: { readonly type?: unknown } };
 }
 
 const storageTypeOf = (config: SessionStoreModuleConfig | undefined): unknown =>
-	config?.session?.storage?.type;
+	config?.["session-store"]?.storage?.type;
 
-/** One policy per `session` section: the route mounts the cookie the slot holds. */
+/** One policy per `session-store` section: the route mounts the cookie the slot holds. */
 const policies = new WeakMap<SessionCookieConfigSlice, SessionCookiePolicy>();
 
 function sessionCookieOf(session: SessionCookieConfigSlice): SessionCookiePolicy {
@@ -83,16 +168,16 @@ function buildSessionStoreModule(replicaSafety: ReplicaSafetyDeclaration | undef
 	// Written type arguments infer nothing, so the section schema (none) and
 	// the provided keys `authoritative` is typed against are written too.
 	return defineModule<
-		"config" | "deploymentMode",
+		"deploymentMode",
 		"lifecycleRegistrar" | "readinessRegistrar" | "logger",
-		never,
+		typeof sessionStoreConfigSchema,
 		"sessionCookiePolicy" | "csrfTokenSigner"
 	>({
 		name: MODULE_NAME,
-		configSchema: sessionStoreConfigSchema,
+		section: SECTION,
 		// `deploymentMode`: memory storage is refused under `multi`, so a mode
 		// read as absent must not lift that.
-		requires: ["config", "deploymentMode"],
+		requires: ["deploymentMode"],
 		// `logger` is optional: the redis client's error handler, and the
 		// middleware's report of a store that cannot load or save a session,
 		// fall back to consoleLogger when the composition wires no logger slot.
@@ -102,22 +187,22 @@ function buildSessionStoreModule(replicaSafety: ReplicaSafetyDeclaration | undef
 			// The session cookie's attributes, for a module that sets a cookie of
 			// its own beside the session's or sizes what must outlive a session:
 			// this module owns the cookie, and the others require the slot instead
-			// of reading `session.*`. They are the attributes express-session is
-			// given below; the signing secret is not among them.
-			sessionCookiePolicy: (deps) => sessionCookieOf((deps.config as AppConfig).session),
+			// of reading `session-store.*`. They are the attributes express-session
+			// is given below; the signing secret is not among them.
+			sessionCookiePolicy: (deps) => sessionCookieOf(deps.section),
 			// The CSRF token's signature, under a key derived from the secret this
 			// module owns: the session module's guard and routes sign through it,
 			// and neither the secret nor the key leaves the signer.
-			csrfTokenSigner: (deps) =>
-				createSessionCsrfTokenSigner((deps.config as AppConfig).session.secret),
+			csrfTokenSigner: (deps) => createSessionCsrfTokenSigner(requireSecret(deps.section)),
 		},
-		// The route mounts the cookie `session.*` describes: an override would
-		// describe a cookie no browser is given.
+		// The route mounts the cookie `session-store.*` describes: an override
+		// would describe a cookie no browser is given.
 		authoritative: ["sessionCookiePolicy"],
 		contributes: {
 			routes: [
 				async (deps) => {
-					const config = deps.config as AppConfig;
+					const section = deps.section;
+					const secret = requireSecret(section);
 					const replicas = checkDeploymentMode(
 						deps.deploymentMode,
 						"session-store: deploymentMode",
@@ -129,7 +214,7 @@ function buildSessionStoreModule(replicaSafety: ReplicaSafetyDeclaration | undef
 					};
 					const factory = createSessionStoreFactory(ctx);
 					registerBuiltinSessionStores(factory);
-					const storageSlice = config.session.storage as { type: string } & Record<string, unknown>;
+					const storageSlice = section.storage as { type: string } & Record<string, unknown>;
 					// The static `sessionStoreModule` declares no `replicaSafety`
 					// (the storage type is config), so it told the stage-1 guard
 					// nothing: refuse the combination here, with the same reason,
@@ -139,12 +224,12 @@ function buildSessionStoreModule(replicaSafety: ReplicaSafetyDeclaration | undef
 						throw new BootError({
 							stage: "applyContributions",
 							reason: "replica-unsafe-adapter",
-							message: `core.deployment.mode is "multi" but session.storage.type is "memory", which cannot be shared across replicas: ${MEMORY_STORE_REPLICA_SAFETY.reason}. Set session.storage.type = "redis", or set core.deployment.mode = "single".`,
+							message: `core.deployment.mode is "multi" but session-store.storage.type is "memory", which cannot be shared across replicas: ${MEMORY_STORE_REPLICA_SAFETY.reason}. Set session-store.storage.type = "redis", or set core.deployment.mode = "single".`,
 							details: { reason: "replica-unsafe-adapter", modules: [MODULE_NAME] },
 						});
 					}
 					// The slot's cookie, refused before the store opens a connection.
-					const cookie = sessionCookieOf(config.session);
+					const cookie = sessionCookieOf(section);
 					const store = await factory.create({
 						type: storageSlice.type,
 						...((storageSlice[storageSlice.type] ?? {}) as Record<string, unknown>),
@@ -154,7 +239,7 @@ function buildSessionStoreModule(replicaSafety: ReplicaSafetyDeclaration | undef
 					// one error line either way (`../internal/cookieSession.mts`).
 					const middleware = session({
 						name: cookie.name,
-						secret: config.session.secret,
+						secret,
 						resave: false,
 						saveUninitialized: false,
 						store,
@@ -183,7 +268,7 @@ function buildSessionStoreModule(replicaSafety: ReplicaSafetyDeclaration | undef
 /**
  * The session-store module built for one config.
  *
- * `session.storage.type = "memory"` is express-session's per-process
+ * `session-store.storage.type = "memory"` is express-session's per-process
  * `MemoryStore`, the same shape as every memory store the replica-safety guard
  * refuses under `core.deployment.mode = "multi"`, but the type is config, so a
  * static manifest cannot carry the declaration. This declares `replicaSafety`

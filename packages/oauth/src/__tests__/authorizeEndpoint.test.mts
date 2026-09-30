@@ -40,7 +40,7 @@ import {
 	type UserSession,
 	type UserSessionStore,
 } from "@o3co/auth-provider-core";
-import { resolverForTests } from "@o3co/auth-provider-core/testing";
+import { createTestLoginEntry, resolverForTests } from "@o3co/auth-provider-core/testing";
 import express from "express";
 import request from "supertest";
 import { describe, expect, it, vi } from "vitest";
@@ -65,7 +65,6 @@ const S256_CHALLENGE = crypto.createHash("sha256").update(VERIFIER).digest("base
 
 const makeConfig = (
 	oauthOverrides: Record<string, unknown>,
-	loginUrl = "/login",
 	federations: Record<string, unknown> = {},
 ): AppConfig =>
 	({
@@ -80,7 +79,6 @@ const makeConfig = (
 			...oauthOverrides,
 		},
 		rateLimit: { failMode: "open" as const },
-		endpoints: { login: { url: loginUrl } },
 	}) as unknown as AppConfig;
 
 const makeApp = async (opts: {
@@ -104,7 +102,7 @@ const makeApp = async (opts: {
 	sessionStoreFail?: "set" | "get";
 	/** Merged into `config.oauth`. */
 	oauth?: Record<string, unknown>;
-	/** `endpoints.login.url`; default `/login`. */
+	/** The login page of the entry the router is handed; default `/login`. */
 	loginUrl?: string;
 	/** The `loginEntry` slot, when a module provides it. */
 	loginEntry?: LoginEntry;
@@ -157,7 +155,6 @@ const makeApp = async (opts: {
 		registry: authorizationServerRegistry(),
 		config: makeConfig(
 			opts.oauth ?? {},
-			opts.loginUrl,
 			opts.federation === "trusted"
 				? { google: { enabled: true, trustUpstreamAmr: true } }
 				: opts.federation === "untrusted"
@@ -170,7 +167,8 @@ const makeApp = async (opts: {
 		...(opts.grantPolicy ? { grantPolicy: opts.grantPolicy } : {}),
 		...(opts.auditSink ? { auditSink: opts.auditSink } : {}),
 		...(opts.userSessionStore ? { userSessionStore: opts.userSessionStore } : {}),
-		...(opts.loginEntry ? { loginEntry: opts.loginEntry } : {}),
+		// The session module's entry for the page, unless the test hands one.
+		loginEntry: opts.loginEntry ?? createTestLoginEntry(opts.loginUrl ?? "/login"),
 		...(opts.logger ? { logger: opts.logger } : {}),
 		...(opts.federation
 			? {
@@ -273,7 +271,7 @@ const redirectParams = (res: request.Response): URLSearchParams => {
 /**
  * A `loginEntry` that records every target it is asked for and sends
  * the browser to `/sign-in`, under a parameter of its own — so a trip built
- * from it cannot be mistaken for one built from `endpoints.login.url`.
+ * from it cannot be mistaken for one built by the default entry.
  */
 const recordingLoginEntry = (): { readonly asked: string[]; readonly entry: LoginEntry } => {
 	const asked: string[] = [];
@@ -2015,6 +2013,7 @@ describe("/authorize — the acr table at boot", () => {
 		// requirement reaches, which is a warning now that MFA is installed.
 		const logger = createMockLogger();
 		const { router } = await createOAuthRouter(express, {
+			loginEntry: createTestLoginEntry(),
 			registry: authorizationServerRegistry(),
 			config: makeConfig({ authorize: { acrValues } }),
 			requirements: resolverForTests(

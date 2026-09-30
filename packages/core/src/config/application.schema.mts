@@ -23,27 +23,8 @@
  */
 import { z } from "zod";
 
-/**
- * A list an environment variable may carry as one comma-separated string.
- * Entries are trimmed and empties dropped, so `"a, ,b"` is `["a", "b"]` and an
- * exported-but-empty variable is `[]`.
- */
-const commaList = z.union([z.array(z.string()), z.string()]).transform((value) =>
-	Array.isArray(value)
-		? value
-		: value
-				.split(",")
-				.map((entry) => entry.trim())
-				.filter((entry) => entry.length > 0),
-);
-
 import { checkCanonicalIssuer, describeIssuerRejection } from "../issuer/canonical.mjs";
 import { isWellFormedKid, MAX_KID_LENGTH } from "../keys/kid.mjs";
-import {
-	describeWeakSecret,
-	MIN_SECRET_ENTROPY_BYTES,
-	measureSecretEntropyBytes,
-} from "../keys/secretEntropy.mjs";
 import {
 	checkSerializedOrigin,
 	describeSerializedOriginRejection,
@@ -53,7 +34,7 @@ import {
 	checkTrustedProxyEntry,
 	describeTrustedProxyEntryRejection,
 } from "../net/trusted-proxy.mjs";
-import { MAX_DURATION_MS, MAX_DURATION_SECONDS } from "./durations.mjs";
+import { MAX_DURATION_SECONDS } from "./durations.mjs";
 import { type RemovedKey, withRemovedKeys } from "./removed-keys.mjs";
 import { environmentCoercer } from "./schema-path.mjs";
 
@@ -87,13 +68,6 @@ export const coerceBooleanFromEnv = environmentCoercer(
 		}),
 	),
 );
-
-const rateLimitSchema = z.object({
-	// An empty env var coerces to 0, and a zero window (or limit) would turn the
-	// /session/login brute-force guard into a no-op that still looks configured.
-	windowMs: z.coerce.number().int().positive().max(MAX_DURATION_MS),
-	limit: z.coerce.number().int().positive(),
-});
 
 const rateLimitSpecSchema = z.object({
 	limit: z.coerce.number().int().positive(),
@@ -686,7 +660,12 @@ export const CoreConfigSchema = z.object({
 		// `resolveAccessTokenLifetime`.
 		accessToken: accessTokenSchema,
 		refreshToken: refreshTokenSchema,
-		grants: z.object({}).passthrough(),
+		// Presence-only: the path the grant switches moved from (each grant's
+		// under its module's section, `oauth-session` and
+		// `oauth-authorization`), kept so a root that parses with
+		// `AppConfigSchema` before boot still hands it to the relocation
+		// refusal. Nothing reads it.
+		grants: z.unknown().optional(),
 		// As an OIDC OP, `/authorize` rejects requests without `openid` unless the
 		// operator chooses dual OAuth/OIDC mode. Default in HOCON.
 		oidcMode: z.enum(["oidc-required", "dual"]),
@@ -740,28 +719,12 @@ export const CoreConfigSchema = z.object({
 				enabled: coerceBooleanFromEnv,
 			})
 			.optional(),
-		// Client ID Metadata Documents: a `client_id` that is the https URL of the
-		// client's own registration (draft-ietf-oauth-client-id-metadata-document;
-		// the MCP 2026-07-28 registration model). Off by default. List keys also
-		// take a comma-separated string, for environment variables. Every ceiling
-		// here is the operator's: a document says who a client is, never what it
-		// may reach.
-		clientIdMetadataDocuments: z
-			.object({
-				enabled: coerceBooleanFromEnv,
-				allowedScopes: commaList.optional(),
-				allowedAudiences: commaList.optional(),
-				allowedHosts: commaList.optional(),
-				deniedHosts: commaList.optional(),
-				maxBytes: z.coerce.number().int().positive().optional(),
-				timeoutMs: z.coerce.number().int().positive().optional(),
-				cacheMaxAgeMs: z.coerce.number().int().nonnegative().optional(),
-				maxCacheEntries: z.coerce.number().int().positive().optional(),
-				staleIfErrorMs: z.coerce.number().int().nonnegative().optional(),
-				negativeCacheMs: z.coerce.number().int().nonnegative().optional(),
-				maxConcurrentFetches: z.coerce.number().int().positive().optional(),
-			})
-			.optional(),
+		// Presence-only: the keys of `oauth {}` the oauth module's own schema
+		// declares — the consent page, and the Client ID Metadata Documents —
+		// kept so a root that parses with `AppConfigSchema` before boot does not
+		// strip them. The module parses them.
+		consentPage: z.unknown().optional(),
+		clientIdMetadataDocuments: z.unknown().optional(),
 		// What `POST /oauth/revoke` promises for access tokens:
 		//   "denylist"    — the `jti` goes into the `accessTokenDenylist`
 		//                   component that verification consults. Boot refuses an
@@ -784,27 +747,11 @@ export const CoreConfigSchema = z.object({
 				subject: z.enum(["watermark", "unsupported"]).optional(),
 			})
 			.optional(),
-		// Declared in core because the dispatch policy spans every installed
-		// binding mechanism (DPoP, mTLS, ...). Default in HOCON; `assembleApp`'s
-		// `tokenBindingMw` reads it through `resolveTokenBindingSettings`
-		// (`"intent-explicit"` when absent), and no slot carries it. See
-		// `packages/core/docs/adr/2026-05-20-token-binding-first-class-abstraction.md`.
-		tokenBinding: z
-			.object({
-				"dispatch-policy": z.enum(["intent-explicit", "strict-mutual-exclusion"]),
-				// Bind a confidential client's refresh token to the presented DPoP
-				// key or client certificate, as is always done for public clients.
-				// RFC 9449 §5 and RFC 8705 §7.1 neither require nor forbid it: a
-				// confidential client authenticates on refresh, and this
-				// implementation refuses an unauthenticated caller and an RT whose
-				// `azp` is not that client. Hardening for deployments whose key is
-				// better protected than the client secret (HSM or TPM vs an env var).
-				// Off by default: a bound RT pins the client to one key for its whole
-				// lifetime, so rotating mid-lifetime breaks refresh. Core's, like
-				// `dispatch-policy`, read through `resolveTokenBindingSettings`.
-				bindConfidentialClientRefreshTokens: coerceBooleanFromEnv.optional(),
-			})
-			.optional(),
+		// Presence-only: the path core's token-binding settings moved from
+		// (`core.tokenBinding`), kept so a root that parses with
+		// `AppConfigSchema` before boot still hands it to the relocation
+		// refusal. Nothing reads it.
+		tokenBinding: z.unknown().optional(),
 	}),
 	// Core's own section, strict at every level: an unknown key is refused,
 	// named and never its value.
@@ -838,6 +785,29 @@ export const CoreConfigSchema = z.object({
 							error: "core.sessionRequirements.expected names each requirement",
 						}),
 					),
+				})
+				.strict()
+				.optional(),
+			// The settings across every mechanism at core's token-binding
+			// extension point (DPoP, mTLS, ...), core's as the point is: read
+			// through `resolveTokenBindingSettings` alone, and carried by no
+			// slot. See
+			// `packages/core/docs/adr/2026-05-20-token-binding-first-class-abstraction.md`.
+			tokenBinding: z
+				.object({
+					// How `tokenBindingMw` arbitrates when several mechanisms succeed
+					// on one request.
+					dispatchPolicy: z.enum(["intent-explicit", "strict-mutual-exclusion"]),
+					// Bind a confidential client's refresh token to the presented DPoP
+					// key or client certificate, as is always done for public clients.
+					// RFC 9449 §5 and RFC 8705 §7.1 neither require nor forbid it: a
+					// confidential client authenticates on refresh, and this
+					// implementation refuses an unauthenticated caller and an RT whose
+					// `azp` is not that client. Hardening for deployments whose key is
+					// better protected than the client secret (HSM or TPM vs an env
+					// var). Off by default: a bound RT pins the client to one key for
+					// its whole lifetime, so rotating mid-lifetime breaks refresh.
+					bindConfidentialClientRefreshTokens: coerceBooleanFromEnv.optional(),
 				})
 				.strict()
 				.optional(),
@@ -937,121 +907,28 @@ export const fullSectionsSchema = z.object({
 		.object({ enabled: coerceBooleanFromEnv.optional() })
 		.passthrough()
 		.optional(),
-	session: z
+	// The oauth package's grant modules' sections, each parsed by its module.
+	// Mirrored for the keys a composition root reads before it knows its
+	// modules — whether each grant is on — kept as written.
+	"oauth-session": z.object({ enabled: z.unknown().optional() }).passthrough().optional(),
+	"oauth-authorization": z.object({ grants: z.unknown().optional() }).passthrough().optional(),
+	// Presence-only: the session module's section, `session`, which its module
+	// parses, and under it the paths the session store's keys moved from; and
+	// `rateLimit`, where the login's budget moved from. Kept so a root that
+	// parses with `AppConfigSchema` before boot still hands them to the
+	// relocation refusal. Core reads `rateLimit.failMode` alone, as written,
+	// for boot's `rate_limit_fail_mode_not_applied` warning.
+	session: z.unknown().optional(),
+	rateLimit: z.unknown().optional(),
+	// The session store's section, parsed by its module. Mirrored for the key
+	// a composition root reads before it knows its modules — the storage its
+	// store module is built for — kept as written.
+	"session-store": z
 		.object({
-			// Signs the cookie that is the authenticated session, so guessing it
-			// forges logins: held to the same 256-bit floor as the JWT signing
-			// secret. It goes straight into express-session, so this schema is the
-			// only place to check it.
-			secret: z.string().superRefine((value, ctx) => {
-				const actualBytes = measureSecretEntropyBytes(value);
-				if (actualBytes < MIN_SECRET_ENTROPY_BYTES) {
-					ctx.addIssue({
-						code: z.ZodIssueCode.custom,
-						message: describeWeakSecret(actualBytes, {
-							configKey: "session.secret",
-							envVar: "SESSION_SECRET",
-						}),
-					});
-				}
-			}),
-			name: z.string(),
-			// Positive and bounded: a `maxAge` of 0 (an exported-but-empty
-			// SESSION_MAX_AGE) makes express-session emit an already-expired cookie,
-			// which looks like a login outage with nothing in the logs.
-			maxAge: z.coerce.number().int().positive().max(MAX_DURATION_MS),
-			// `SESSION_SECURE=false` (plain-HTTP local runs, the umbrella E2E)
-			// arrives as a string, and must not depend on the hocon bridge happening
-			// to reach this leaf.
-			secure: coerceBooleanFromEnv,
-			sameSite: z.enum(["lax", "none", "strict"]),
-			domain: z.string().nullable(),
-			/**
-			 * The exact URLs `POST /session/login` may accept as `redirect_to`,
-			 * matched after `new URL(x).href` normalization, with no wildcard or
-			 * prefix form. Optional because absence fails closed: a missing key
-			 * refuses the redirect, naming this path, rather than opening one.
-			 * Validated where the router is built (`@o3co/auth-provider-session`),
-			 * because the rule also narrows entries against `session.domain`.
-			 */
-			redirectAllowlist: z.array(z.string()).optional(),
-			/**
-			 * CSRF policy for the state-changing session routes. Optional: every
-			 * value has a code-side default, so a hand-built config need not
-			 * restate it.
-			 *
-			 * `trustedOrigins` is not `cors.allowedOrigins`: "may this origin read
-			 * my responses" and "may it make me change state" are separate
-			 * questions. List a login UI served from another origin here,
-			 * explicitly. The same list decides where an account-link start
-			 * (`?link=1`) may be navigated from.
-			 */
-			csrf: z
-				.object({
-					trustedOrigins: z.array(z.string()),
-					// A positive integer: the value is stringified into the CSRF token
-					// as its expiry, so 0 (an empty SESSION_CSRF_TTL_SECONDS through
-					// `z.coerce.number()`), a negative or a fractional value silently
-					// makes every token expired or unverifiable at issue. The ceiling
-					// is policy: a token meant to outlive an open login form must not
-					// become a long-lived bearer value in a JS-readable cookie. It
-					// restates `MAX_CSRF_TTL_SECONDS` from
-					// `@o3co/auth-provider-session`'s `csrf.mts` (session depends on
-					// core, not the reverse); a test there pins the two together.
-					ttlSeconds: z.coerce.number().int().positive().max(86_400),
-				})
-				.optional(),
-			storage: z
-				.object({
-					type: z.string(),
-					// Per-type options for `storage.type = "redis"` (the shipped
-					// default): sessionStoreModule reads this block as `storageSlice`
-					// and spreads `storageSlice[storageSlice.type]` into the store
-					// factory — see packages/session/src/modules/sessionStoreModule.mts.
-					redis: z
-						.object({
-							url: z.string(),
-							password: z.string().optional(),
-						})
-						.optional(),
-				})
-				.passthrough(),
+			storage: z.object({ type: z.unknown().optional() }).passthrough().optional(),
 		})
-		.superRefine((session, ctx) => {
-			// Browsers refuse to store a `SameSite=None` cookie that is not
-			// `Secure`, so the combination fails on the client with no server-side
-			// signal.
-			if (session.sameSite === "none" && session.secure !== true) {
-				ctx.addIssue({
-					code: z.ZodIssueCode.custom,
-					path: ["secure"],
-					message:
-						'session.sameSite = "none" requires session.secure = true (env ' +
-						"SESSION_SECURE=true): browsers drop a SameSite=None cookie that is not " +
-						'Secure, so no session would ever be established. Use sameSite = "lax" ' +
-						"for local HTTP development.",
-				});
-			}
-		}),
-	/**
-	 * Rate limits for session routes (`/session/login` brute-force protection).
-	 * `windowMs` is milliseconds, the `express-rate-limit` shape. The login guard
-	 * runs on the shared `rateLimiter` component, keyed `login:ip:<ip>`; these
-	 * values stay its source of truth, which the session module contributes as
-	 * the `login` budget, in whole seconds, for every limiter to read.
-	 *
-	 * OAuth endpoint limits (`/token`, `/authorize`) are separate: the
-	 * `rateLimiter` slot's modules take them in their own sections
-	 * (`core-rate-limiter-memory.*` / `redis-rate-limiter.*`) in
-	 * `windowSeconds` (`ratelimit/types.mts`).
-	 */
-	rateLimit: z.object({
-		login: rateLimitSchema,
-		// Presence-only: the path `redis-rate-limiter.failMode` moved from, kept
-		// for the relocation refusal and for boot's
-		// `rate_limit_fail_mode_not_applied` warning.
-		failMode: z.unknown().optional(),
-	}),
+		.passthrough()
+		.optional(),
 	federations: z.record(z.string(), federationEntrySchema),
 	repositories: z.object({
 		client: z
@@ -1070,15 +947,9 @@ export const fullSectionsSchema = z.object({
 			})
 			.passthrough(),
 	}),
-	endpoints: z.object({
-		// Required: `oauthModule` needs it at boot, so consumers need no null
-		// guard. Default `/login` lives in HOCON.
-		login: z.object({ url: z.string() }),
-		// The deployment-owned consent page for non-first-party clients, like
-		// `login`. Default `/consent` from HOCON: the deployment's page, not the
-		// `/oauth/consent` JSON API it calls.
-		consent: z.object({ url: z.string() }).optional(),
-	}),
+	// Presence-only: the paths the login and consent pages moved from
+	// (`session.loginPage.url`, `oauth.consentPage.url`). Nothing reads them.
+	endpoints: z.unknown().optional(),
 	cors: z.object({
 		/**
 		 * The browser origins allowed to read the token, userinfo, revocation and
@@ -1187,9 +1058,9 @@ export const fullSectionsSchema = z.object({
 		.optional(),
 	// Adapter for the rate limiter, which serves both the OAuth endpoints and
 	// `/session/login`, so `"redis"` is what makes either safe across replicas.
-	// Default `"memory"` in HOCON. `rateLimit.login` still configures the login
-	// window and limit, which the session module contributes as the `login`
-	// budget.
+	// Default `"memory"` in HOCON. `session.rateLimit.login` configures the
+	// login window and limit, which the session module contributes as the
+	// `login` budget.
 	rateLimiter: z
 		.object({
 			adapter: z.enum(["memory", "redis"]).optional(),
@@ -1198,8 +1069,8 @@ export const fullSectionsSchema = z.object({
 	// Adapter for the four user-session stores (`userSessionStore`,
 	// `sessionRPRegistry`, `sessionFamilyIndex`, `sessionFederationIndex`).
 	// Multi-replica deployments MUST use `"redis"`: memory loses session state
-	// on restart and across replicas. Top-level, not under `session.*`, which
-	// is the express-session cookie configuration.
+	// on restart and across replicas. Top-level, not under `session-store`,
+	// which is the express-session cookie and its store.
 	userSessionStores: z
 		.object({
 			adapter: z.enum(["memory", "redis"]).optional(),

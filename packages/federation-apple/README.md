@@ -237,7 +237,7 @@ and so is the one thing to settle before deploying:
 The transaction cookie is `__Secure-`, not `__Host-`, so any host under the same
 registrable domain (any `*.example.com` for `auth.example.com`) can plant one
 and log a victim's browser into the attacker's own Apple account. Run no
-untrusted content on any of those hosts; `session.domain = null` protects the
+untrusted content on any of those hosts; `session-store.domain = null` protects the
 session cookie, not this one.
 
 An RFC 9207 `iss` in the posted body is compared with

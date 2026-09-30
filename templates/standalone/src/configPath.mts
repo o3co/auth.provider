@@ -160,10 +160,11 @@ export const SWITCHES: readonly string[] = [
 	"accessTokenDenylist.adapter",
 	"replaySeenSet.adapter",
 	"consentStore.adapter",
-	"session.storage",
+	"session-store.storage",
 	"repositories.code",
 	"oauth.code.adapter",
-	"oauth.grants",
+	"oauth-session.enabled",
+	"oauth-authorization.grants",
 	"oauth.accessToken",
 ];
 

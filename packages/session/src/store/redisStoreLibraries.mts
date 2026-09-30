@@ -113,7 +113,7 @@ export async function loadRedisStoreLibraries(
 		const names = notInstalled.map(({ name }) => `"${name}"`).join(" and ");
 		const [otherFailure] = other;
 		throw new Error(
-			`${names} ${notInstalled.length === 1 ? "is" : "are"} not installed: run ${INSTALL_COMMAND}${otherFailure === undefined ? "" : `; "${otherFailure.name}" failed to load as well, for another reason, which is this error's cause`} (session.storage.type is "redis", and redis and connect-redis are optional peer dependencies of @o3co/auth-provider-session, which does not install them)`,
+			`${names} ${notInstalled.length === 1 ? "is" : "are"} not installed: run ${INSTALL_COMMAND}${otherFailure === undefined ? "" : `; "${otherFailure.name}" failed to load as well, for another reason, which is this error's cause`} (session-store.storage.type is "redis", and redis and connect-redis are optional peer dependencies of @o3co/auth-provider-session, which does not install them)`,
 			{ cause: otherFailure === undefined ? firstMissing.reason : otherFailure.reason },
 		);
 	}

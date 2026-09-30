@@ -41,11 +41,9 @@ const makeBoot = (dispatchPolicy?: "intent-explicit" | "strict-mutual-exclusion"
 	({
 		config: {
 			...makeValidCoreConfig(),
-			oauth: {
-				...makeValidCoreConfig().oauth,
-				...(dispatchPolicy !== undefined
-					? { tokenBinding: { "dispatch-policy": dispatchPolicy } }
-					: {}),
+			core: {
+				...makeValidCoreConfig().core,
+				...(dispatchPolicy !== undefined ? { tokenBinding: { dispatchPolicy } } : {}),
 			},
 		} as never,
 		pathResolver: (s: string) => s,

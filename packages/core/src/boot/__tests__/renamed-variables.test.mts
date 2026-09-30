@@ -35,6 +35,7 @@ import { CORE_RELOCATIONS } from "../../config/core-relocations.mjs";
 import { defineModule } from "../../modules/manifest/index.mjs";
 import type { Module } from "../../modules/manifest/module-spec.mjs";
 import { makeValidCoreConfig } from "../../testing/fixtures/valid-config.mjs";
+import { renamedVariableCaptures } from "../../testing/renamedVariables.mjs";
 import { createApp } from "../create-app.mjs";
 import type { AppHandle, BootstrapMap } from "../types.mjs";
 import { BootError } from "../types.mjs";
@@ -326,13 +327,14 @@ describe("a renamed variable — the capture", () => {
 		);
 
 		expect(err.reason).toBe("environment-variable-renamed");
-		expect(err.details).toMatchObject({
-			renamed: [
-				{ module: "core", state: "uncaptured" },
-				{ module: "fixture-renaming", state: "uncaptured" },
-				{ module: "fixture-renaming", state: "uncaptured" },
-			],
-		});
+		const renamed = (err.details as unknown as { renamed: { module: string; state: string }[] })
+			.renamed;
+		expect(renamed.filter(({ module }) => module === "fixture-renaming")).toMatchObject([
+			{ state: "uncaptured" },
+			{ state: "uncaptured" },
+		]);
+		expect(renamed.filter(({ module }) => module === "core")).not.toHaveLength(0);
+		expect(renamed.every(({ state }) => state === "uncaptured")).toBe(true);
 		expect(err.message).toContain(
 			"createApp was handed no configuration, so whether the environment sets LEGACY_RETRIES or FIXTURE_RENAMING_RETRIES cannot be told.",
 		);
@@ -570,7 +572,10 @@ describe("a renamed variable — core's own section, as it ships", () => {
 	};
 	const captured = (values: Record<string, string | null>) => ({
 		...makeValidCoreConfig(),
-		"renamed-variables": { DEPLOYMENT_MODE: null, CORE_DEPLOYMENT_MODE: null, ...values },
+		"renamed-variables": {
+			...renamedVariableCaptures({ modules: [], core: CORE_RELOCATIONS, env: {} }),
+			...values,
+		},
 	});
 
 	it("refuses its old name alone, naming core, the new name and the path in core's section", () => {
@@ -616,7 +621,12 @@ describe("a renamed variable — core's own section, as it ships", () => {
 		const { "renamed-variables": _captures, ...uncaptured } = makeValidCoreConfig();
 		const err = refusedBy(uncaptured);
 
-		expect(err.details).toMatchObject({ renamed: [{ module: "core", state: "uncaptured" }] });
+		const renamed = (err.details as unknown as { renamed: { module: string; state: string }[] })
+			.renamed;
+		expect(renamed).not.toHaveLength(0);
+		expect(renamed.every(({ module, state }) => module === "core" && state === "uncaptured")).toBe(
+			true,
+		);
 		expect(err.message).toContain("core's own reference.conf");
 		expect(err.message).not.toContain('module "core" comes from');
 	});

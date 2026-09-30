@@ -21,8 +21,8 @@ import { makeValidAppConfig } from "#/testing/fixtures/valid-config.mjs";
 
 /**
  * The sections core's schema still mirrors, transitionally, for another
- * package's modules: `webauthn`, `federation-grants.enabled`, and the stores'
- * sections presence-only. Boot's composed parse applies each
+ * package's modules: `webauthn`, `federation-grants.enabled`, and the stores',
+ * the oauth modules' and the session modules' sections presence-only. Boot's composed parse applies each
  * mirror whenever the configuration carries the section, the module that
  * reads it loaded or not; a check here goes when its mirror leaves core.
  *
@@ -59,10 +59,10 @@ describe("the stores' sections, and the paths they moved from", () => {
 		).toEqual(WRITTEN);
 	});
 
-	it("keeps rateLimit.failMode as written, beside the login budget", () => {
-		expect(
-			parse({ ...base, rateLimit: { ...base.rateLimit, failMode: "sometimes" } }).rateLimit,
-		).toMatchObject({ failMode: "sometimes" });
+	it("keeps rateLimit.failMode as written", () => {
+		expect(parse({ ...base, rateLimit: { failMode: "sometimes" } }).rateLimit).toEqual({
+			failMode: "sometimes",
+		});
 	});
 });
 
@@ -122,6 +122,43 @@ describe("the paths the dpop, mtls, device-grant and oauth-token-exchange sectio
 			expect(parse(base).oauth).not.toHaveProperty(key);
 		},
 	);
+});
+
+describe("the oauth and session modules' sections, and the paths their settings moved from", () => {
+	// Each module's section schema coerces and refuses; core keeps these as
+	// written, for the modules, for a root that reads the switches before it
+	// knows its modules, and for the relocation refusal.
+	it.each([
+		["oauth-session", { enabled: "sometimes", bogus: true }],
+		["oauth-authorization", { grants: { authorizationCode: { enabled: "x" } }, bogus: true }],
+		["session", { loginPage: { url: "" }, secret: "moved", bogus: true }],
+		["session-store", { storage: { type: 42 }, maxAge: "0", bogus: true }],
+		["endpoints", { login: { url: "/login" }, consent: {}, client: { url: "x" } }],
+		["rateLimit", { login: { windowMs: 0 }, failMode: "open" }],
+	])("keeps %s as written", (section, written) => {
+		expect((parse({ ...base, [section]: written }) as Record<string, unknown>)[section]).toEqual(
+			written,
+		);
+		expect(
+			(AppConfigSchema.parse({ ...base, [section]: written }) as Record<string, unknown>)[section],
+		).toEqual(written);
+	});
+
+	it.each([
+		["grants", { session: { enabled: "x" }, authorization_code: { pkce: { requireS256: 1 } } }],
+		["tokenBinding", { "dispatch-policy": "x" }],
+		["clientIdMetadataDocuments", { enabled: "x", maxBytes: -1 }],
+		["consentPage", { url: 42 }],
+	])("keeps oauth.%s as written", (key, written) => {
+		const parsed = parse({ ...base, oauth: { ...base.oauth, [key]: written } });
+		expect((parsed.oauth as Record<string, unknown>)[key]).toEqual(written);
+		expect(
+			(
+				AppConfigSchema.parse({ ...base, oauth: { ...base.oauth, [key]: written } })
+					.oauth as Record<string, unknown>
+			)[key],
+		).toEqual(written);
+	});
 });
 
 describe("webauthn's mirror", () => {

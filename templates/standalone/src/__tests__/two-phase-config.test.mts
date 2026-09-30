@@ -72,7 +72,7 @@ const configDir = fileURLToPath(new URL("../../config", import.meta.url));
 const REQUIRED_ENV = {
 	OAUTH_JWT_SECRET: "two-phase-config-secret.at-least-32-bytes.ok",
 	OAUTH_JWT_ISSUER: "https://auth.test",
-	SESSION_SECRET: "two-phase-config-session.at-least-32-bytes.ok",
+	SESSION_STORE_SECRET: "two-phase-config-session.at-least-32-bytes.ok",
 };
 
 /** The environments the template ships for: none but the secrets, and the Redis-backed production one. */
@@ -81,15 +81,15 @@ const ENVIRONMENTS: Readonly<Record<string, Readonly<Record<string, string>>>> =
 	"every adapter on Redis, MFA optional": {
 		...REQUIRED_ENV,
 		CORE_DEPLOYMENT_MODE: "multi",
-		SESSION_STORAGE_TYPE: "redis",
-		SESSION_STORAGE_REDIS_URL: "redis://redis:6379",
+		SESSION_STORE_STORAGE_TYPE: "redis",
+		SESSION_STORE_STORAGE_REDIS_URL: "redis://redis:6379",
 		REFRESH_TOKEN_FAMILY_STORE_REDIS_URL: "redis://redis:6379",
 		USER_SESSION_STORES_ADAPTER: "redis",
 		RATE_LIMITER_ADAPTER: "redis",
 		OAUTH_CODE_ADAPTER: "redis",
 		HTTP_PORT: "8080",
 		HTTP_TRUST_PROXY: "loopback",
-		SESSION_SECURE: "false",
+		SESSION_STORE_SECURE: "false",
 		MFA_MODE: "optional",
 	},
 };

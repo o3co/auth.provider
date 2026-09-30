@@ -50,6 +50,7 @@ import {
 	errorEnvelope,
 	type Logger,
 	type NavigationVerdict,
+	type SessionCookiePolicy,
 } from "@o3co/auth-provider-core";
 import type { CookieOptions, NextFunction, Request, RequestHandler, Response } from "express";
 import { constantTimeEquals } from "./internal/constantTimeEquals.mjs";
@@ -95,7 +96,7 @@ export interface CsrfProtectionOptions {
 	/**
 	 * What signs and verifies a token's `<expiry>.<nonce>`: the
 	 * `csrfTokenSigner` slot's signer, which the session store's module
-	 * provides from `session.secret` (`createSessionCsrfTokenSigner`). The
+	 * provides from `session-store.secret` (`createSessionCsrfTokenSigner`). The
 	 * protection holds neither the secret nor the key.
 	 */
 	readonly signer: CsrfTokenSigner;
@@ -489,7 +490,7 @@ export const checkNavigationOrigin = (
  *   names from the session cookie and gives its attributes.
  *
  * `csrf` signs through the `csrfTokenSigner` slot, which the session store's
- * module fills from `session.secret`: the session module builds it with
+ * module fills from `session-store.secret`: the session module builds it with
  * {@link createCsrfProtectionFromConfig}, as the session routes build theirs,
  * so a token the guard issues passes the routes' check, and one the routes
  * issue passes the guard's.
@@ -536,8 +537,9 @@ export const createCsrfIssueHandler = (csrf: CsrfProtection): RequestHandler => 
 };
 
 /**
- * The `session.*` slice this module reads. Declared structurally so the helper
- * can be called with a partial config in tests without an `AppConfig` cast.
+ * What the CSRF protection reads of a session: the session cookie's name and
+ * attributes and the session module's `csrf` settings. Declared structurally
+ * so the helper can be called with a partial slice in tests.
  */
 export interface SessionCsrfConfigSlice {
 	readonly name: string;
@@ -553,16 +555,32 @@ export interface SessionCsrfConfigSlice {
 }
 
 /**
- * Build the protection from the `session` config slice, signing through
+ * Build the protection from a session's CSRF slice, signing through
  * `options.signer` (the `csrfTokenSigner` slot's signer). The slice carries no
  * secret: this reads the cookie's name and attributes and the token's lifetime.
  *
- * The cookie name is derived as `<session.name>.csrf`, so it inherits the
+ * The cookie name is derived as `<session cookie name>.csrf`, so it inherits the
  * session cookie's prefix. For `__Host-` that means the CSRF cookie cannot
  * disagree with `sessionStoreModule`'s boot guard (`secure` on, no domain): a
  * `__Host-` cookie the browser silently drops would look exactly like a client
  * that forgot to send the token.
  */
+/**
+ * A session's CSRF slice: the session cookie's name and attributes, as the
+ * `sessionCookiePolicy` slot carries them (`domain` absent: a host-only
+ * cookie), and the session module's `csrf` settings.
+ */
+export const sessionCsrfSlice = (
+	cookie: Pick<SessionCookiePolicy, "name" | "secure" | "sameSite" | "domain">,
+	csrf: SessionCsrfConfigSlice["csrf"],
+): SessionCsrfConfigSlice => ({
+	name: cookie.name,
+	secure: cookie.secure,
+	sameSite: cookie.sameSite,
+	domain: cookie.domain ?? null,
+	...(csrf === undefined ? {} : { csrf }),
+});
+
 export const createCsrfProtectionFromConfig = (
 	session: SessionCsrfConfigSlice,
 	options: Pick<CsrfProtectionOptions, "signer"> & Partial<CsrfProtectionOptions>,
