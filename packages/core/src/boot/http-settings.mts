@@ -16,8 +16,8 @@
 
 /**
  * The CORS origins of a held `httpSettings` slot, checked: what core's CORS
- * middleware reads instead of `cors.allowedOrigins` when the composition
- * holds the slot. Core reads nothing else of it.
+ * middleware reads instead of `cors.allowedOrigins` when the slot's key is
+ * present, whatever a provider answered. Core reads nothing else of it.
  */
 
 import { describeValue } from "../errors/describe-value.mjs";

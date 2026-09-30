@@ -618,13 +618,14 @@ export function assembleApp(
 	// Mounted on an ALLOWLIST of paths, deliberately the opposite polarity to the
 	// sender-constraint mount below (core README, CORS). `corsMw` returns null
 	// for an empty origin list: no CORS headers, not even `Vary`.
-	// The origins: the `httpSettings` slot's when held, else the configuration's.
+	// The origins: the `httpSettings` slot's when its key is present (whatever a
+	// provider answered), else the configuration's.
 	{
 		const components = frozen.components as Record<string, unknown>;
 		const config = components.config as
 			| { cors?: { allowedOrigins?: unknown }; oauth?: { jwt?: { jwksPath?: unknown } } }
 			| undefined;
-		const fromSlot = components.httpSettings !== undefined;
+		const fromSlot = Object.hasOwn(components, "httpSettings");
 		const configured = fromSlot ? undefined : config?.cors?.allowedOrigins;
 		const logger = components.logger as Logger | undefined;
 		// The configuration's list is read through the shape normaliser the
