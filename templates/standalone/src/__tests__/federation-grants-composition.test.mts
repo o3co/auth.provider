@@ -488,3 +488,105 @@ describe("the browser consent route parses its own body, with sessionModule list
 		expect(res.headers["cache-control"]).toContain("no-store");
 	});
 });
+
+describe("the grants consent answer is held to the session module's CSRF guard", () => {
+	// No browser is signed in here: an answer the guard accepts reaches the
+	// route's own `401 login_required`, and one it refuses stops at its `403`.
+	const CONSENT = "/session/federation-grants/consent";
+	const ISSUER_ORIGIN = "https://auth.test";
+	const SIBLING = "https://account.auth.test";
+	/** What the deployment's proxy forwards: the origin the browser addressed. */
+	const FORWARDED = { "X-Forwarded-Proto": "https", "X-Forwarded-Host": "auth.test" };
+	const CROSS_SITE = { error: "invalid_request", error_description: "cross-site answer refused" };
+	const NO_ORIGIN = {
+		error: "invalid_request",
+		error_description: "no origin and no valid csrf token",
+	};
+
+	let handleRef: Awaited<ReturnType<typeof boot>> | undefined;
+
+	afterEach(async () => {
+		await handleRef?.dispose();
+		handleRef = undefined;
+	});
+
+	/** The standalone with grants on and `SIBLING` on `session.csrf.trustedOrigins`, behind its proxy. */
+	const bootTrustingSibling = async () => {
+		const config = resolveConfig({ ...BASE_ENV, ...GRANTS_ON });
+		const trusting = {
+			...config,
+			session: { ...config.session, csrf: { ...config.session.csrf, trustedOrigins: [SIBLING] } },
+		} as AppConfig;
+		handleRef = await boot(trusting, true);
+		return express().set("trust proxy", "loopback").use(handleRef.router);
+	};
+
+	/** The token `GET /session/csrf` hands out, and the `Cookie` header that carries it back. */
+	const tokenFrom = async (app: express.Express) => {
+		const issued = await request(app).get("/session/csrf").set(FORWARDED);
+		expect(issued.status).toBe(200);
+		const [cookie] = (issued.headers["set-cookie"] as unknown as string[])[0]?.split(";") ?? [];
+		return { token: issued.body.csrf_token as string, cookie: cookie ?? "" };
+	};
+
+	const answer = (
+		app: express.Express,
+		headers: Readonly<Record<string, string>>,
+		body: Readonly<Record<string, string>> = {},
+	) =>
+		request(app)
+			.post(CONSENT)
+			.set(FORWARDED)
+			.set({ ...headers })
+			.type("form")
+			.send({ challenge: "c", decision: "accept", ...body });
+
+	it("accepts the issuer's own Origin", async () => {
+		const app = await bootTrustingSibling();
+		const res = await answer(app, { Origin: ISSUER_ORIGIN, "Sec-Fetch-Site": "same-origin" });
+		expect(res.status).toBe(401);
+		expect(res.body.error).toBe("login_required");
+	});
+
+	it("refuses Origin: null, even with the token GET /session/csrf hands out", async () => {
+		const app = await bootTrustingSibling();
+		const { token, cookie } = await tokenFrom(app);
+		const res = await answer(
+			app,
+			{ Origin: "null", "Sec-Fetch-Site": "same-origin", Cookie: cookie },
+			{ csrf_token: token },
+		);
+		expect(res.status).toBe(403);
+		expect(res.body).toEqual(CROSS_SITE);
+	});
+
+	it("refuses an answer with no Origin, no Referer and no token, and accepts one echoing the token GET /session/csrf hands out", async () => {
+		const app = await bootTrustingSibling();
+		const refused = await answer(app, { "Sec-Fetch-Site": "same-origin" });
+		expect(refused.status).toBe(403);
+		expect(refused.body).toEqual(NO_ORIGIN);
+		const { token, cookie } = await tokenFrom(app);
+		const accepted = await answer(app, { Cookie: cookie }, { csrf_token: token });
+		expect(accepted.status).toBe(401);
+		expect(accepted.body.error).toBe("login_required");
+	});
+
+	it("accepts an origin on session.csrf.trustedOrigins sending Sec-Fetch-Site: same-site", async () => {
+		const app = await bootTrustingSibling();
+		const res = await answer(app, { Origin: SIBLING, "Sec-Fetch-Site": "same-site" });
+		expect(res.status).toBe(401);
+		expect(res.body.error).toBe("login_required");
+	});
+
+	it("refuses a cross-site answer, even with the token", async () => {
+		const app = await bootTrustingSibling();
+		const { token, cookie } = await tokenFrom(app);
+		const res = await answer(
+			app,
+			{ Origin: "https://evil.test", "Sec-Fetch-Site": "cross-site", Cookie: cookie },
+			{ csrf_token: token },
+		);
+		expect(res.status).toBe(403);
+		expect(res.body).toEqual(CROSS_SITE);
+	});
+});

@@ -181,6 +181,8 @@ interface Setup {
 	 * provides when `endpoints.login.url` names no page.
 	 */
 	readonly withLoginEntry?: boolean | "unconfigured";
+	/** The CSRF policy the consent answer is held to — the `csrfGuard` slot. */
+	readonly withCsrfGuard?: boolean;
 	/** The oauthTokenSettings the composition holds; none by default. */
 	readonly tokenSettingsIssuer?: string;
 }
@@ -244,9 +246,11 @@ const boot = (setup: Setup) => {
 						oauthTokenSettings: createTestOAuthTokenSettings({ issuer: setup.tokenSettingsIssuer }),
 					}),
 			...(() => {
-				const { federationGrantIntentStore, userRepository, loginEntry } = acquisitionComponents();
+				const { federationGrantIntentStore, userRepository, loginEntry, csrfGuard } =
+					acquisitionComponents();
 				return {
 					...(setup.withIntentStore === false ? {} : { federationGrantIntentStore }),
+					...(setup.withCsrfGuard === false ? {} : { csrfGuard }),
 					...(setup.withLoginEntry === false
 						? {}
 						: {
@@ -495,6 +499,20 @@ describe("what creating a grant needs", () => {
 
 	it("boots disabled without a loginEntry: a deployment that leaves grants off owes nothing", async () => {
 		const handle = await boot({ enabled: false, withLoginEntry: false });
+		await handle.dispose();
+	});
+
+	it("refuses a deployment with no csrfGuard, naming the component", async () => {
+		// The consent answer is held to the deployment's CSRF policy, the
+		// `csrfGuard` slot the session module provides; enabled without it, the
+		// answer would have no request-origin check at all.
+		await expect(boot({ withCsrfGuard: false })).rejects.toThrow(
+			/federation grants are enabled and no csrfGuard is installed/,
+		);
+	});
+
+	it("boots disabled without a csrfGuard: a deployment that leaves grants off owes nothing", async () => {
+		const handle = await boot({ enabled: false, withCsrfGuard: false });
 		await handle.dispose();
 	});
 

@@ -21,12 +21,16 @@
  * Mounted for real, behind a stand-in for express-session, over the real
  * lodging function and the real in-memory stores. What is faked is the world
  * outside the provider: which browser is asking, the durable sessions, the
- * subject's boundary, and the upstream's authorization endpoint.
+ * subject's boundary, the upstream's authorization endpoint, and the
+ * deployment's CSRF policy (core's `csrfGuard` double, which keeps the slot's
+ * contract). The app sits behind a proxy it trusts, as a deployment does, so
+ * a request carries the origin the browser addressed: the issuer's.
  */
 
 import { randomUUID } from "node:crypto";
 import {
 	type AuditEvent,
+	type CsrfGuard,
 	createMemoryFederationGrantIntentStore,
 	createMemoryFederationGrantStore,
 	createMemoryRateLimiter,
@@ -45,7 +49,11 @@ import {
 	type SessionRequirement,
 	type UserSession,
 } from "@o3co/auth-provider-core";
-import { createTestLoginEntry, resolverForTests } from "@o3co/auth-provider-core/testing";
+import {
+	createTestCsrfGuard,
+	createTestLoginEntry,
+	resolverForTests,
+} from "@o3co/auth-provider-core/testing";
 import express from "express";
 import request from "supertest";
 import { describe, expect, it, vi } from "vitest";
@@ -62,6 +70,18 @@ import { createLogSpy, payloadOf, written } from "./logSpy.mjs";
 const ISSUER = "https://auth.test";
 const REDIRECT = "https://client.test/connected";
 const DAY = 86_400_000;
+
+/** A sibling host the deployment lists on `session.csrf.trustedOrigins`. */
+const TRUSTED_SIBLING = "https://account.auth.test";
+
+/** What the deployment's proxy forwards: the request as the browser addressed it. */
+const FORWARDED = { "X-Forwarded-Proto": "https", "X-Forwarded-Host": new URL(ISSUER).host };
+
+/** What a browser adds to a form post from the deployment's own consent page. */
+const FROM_THE_PAGE: Readonly<Record<string, string>> = {
+	Origin: ISSUER,
+	"Sec-Fetch-Site": "same-origin",
+};
 
 const CONNECTION: FederationGrantAcquisitionConnection = {
 	name: "calendar",
@@ -134,6 +154,8 @@ interface WorldOptions {
 	readonly issuer?: string;
 	/** The `loginEntry` slot: core's double for `/login` by default. */
 	readonly login?: LoginEntry;
+	/** The `csrfGuard` slot: core's double, trusting {@link TRUSTED_SIBLING}, by default. */
+	readonly csrfGuard?: CsrfGuard;
 }
 
 function world(options: WorldOptions = {}) {
@@ -222,7 +244,16 @@ function world(options: WorldOptions = {}) {
 			},
 		});
 
+	const csrfGuard = options.csrfGuard ?? createTestCsrfGuard({ trustedOrigins: [TRUSTED_SIBLING] });
 	const app = express();
+	// Behind the deployment's proxy: `X-Forwarded-Proto` and `-Host` name the
+	// origin the browser addressed, which the guard compares an `Origin` with.
+	app.set("trust proxy", "loopback");
+	// A stand-in for the deployment's token endpoint (`GET /session/csrf`):
+	// the guard's `issue`, which sets the token's cookie and answers it.
+	app.get("/csrf", (_req, res) => {
+		res.json({ csrf_token: csrfGuard.issue(res) });
+	});
 	// A stand-in for express-session: which browser this is comes from a header.
 	app.use((req, _res, next) => {
 		const id = req.get("x-browser");
@@ -293,6 +324,7 @@ function world(options: WorldOptions = {}) {
 					: undefined,
 			consentUrl: "/consent/grants",
 			login: options.login ?? createTestLoginEntry("/login"),
+			csrfGuard,
 			issuer: options.issuer ?? ISSUER,
 			grantsBoundary: async () => {
 				if (state.grantsBoundary instanceof Error) throw state.grantsBoundary;
@@ -386,16 +418,30 @@ function world(options: WorldOptions = {}) {
 		return browser === undefined ? call : call.set("x-browser", browser);
 	};
 
+	/**
+	 * The answer, carrying `headers` — by default what a browser adds to a post
+	 * from the deployment's own page — as JSON, or as the page's form post.
+	 */
 	const answer = (
 		body: Record<string, unknown>,
 		browser: string,
-		headers: Record<string, string> = {},
+		headers: Readonly<Record<string, string>> = FROM_THE_PAGE,
+		as: "json" | "form" = "json",
 	) =>
 		request(app)
 			.post(`${FEDERATION_GRANTS_BROWSER_MOUNT_PATH}/consent`)
 			.set("x-browser", browser)
-			.set(headers)
+			.set(FORWARDED)
+			.set({ ...headers })
+			.type(as)
 			.send(body);
+
+	/** A token the guard issued, and the `Cookie` header that carries it back. */
+	const csrfToken = async (): Promise<{ readonly token: string; readonly cookie: string }> => {
+		const issued = await request(app).get("/csrf");
+		const [cookie] = (issued.headers["set-cookie"] as unknown as string[])[0]?.split(";") ?? [];
+		return { token: issued.body.csrf_token as string, cookie: cookie ?? "" };
+	};
 
 	return {
 		app,
@@ -415,6 +461,8 @@ function world(options: WorldOptions = {}) {
 		challengeFor,
 		page,
 		answer,
+		csrfGuard,
+		csrfToken,
 	};
 }
 
@@ -750,6 +798,7 @@ describe("POST /session/federation-grants/consent — the answer", () => {
 		// Appendix A.8 allows no `"`: the values are quoted with `'`.
 		expect(unknown.body.error_description).toBe("decision must be 'accept' or 'deny'");
 		const crossSite = await w.answer({ challenge, decision: "accept" }, "b-1", {
+			Origin: "https://evil.test",
 			"Sec-Fetch-Site": "cross-site",
 		});
 		expect(crossSite.status).toBe(403);
@@ -777,6 +826,192 @@ describe("POST /session/federation-grants/consent — the answer", () => {
 		const foreign = await w.answer({ challenge, decision: "accept" }, "b-2");
 		expect(foreign.status).toBe(400);
 		expect((await w.answer({ challenge, decision: "accept" }, "b-1")).status).toBe(303);
+	});
+});
+
+describe("POST /session/federation-grants/consent — held to the deployment's csrfGuard", () => {
+	const CROSS_SITE_ANSWER = {
+		error: "invalid_request",
+		error_description: "cross-site answer refused",
+	};
+	const NO_ORIGIN_NO_TOKEN = {
+		error: "invalid_request",
+		error_description: "no origin and no valid csrf token",
+	};
+
+	/** A signed-in browser `b-1` with a question parked for it, and the challenge. */
+	const parked = async (options: WorldOptions = {}) => {
+		const w = world(options);
+		const { handle } = await w.lodge();
+		w.signIn("b-1");
+		return { w, challenge: await w.challengeFor(handle, "b-1") };
+	};
+
+	/** The answer refused: nothing was spent, so the page's own answer still goes through. */
+	const stillParked = async (w: World, challenge: string) => {
+		expect((await w.answer({ challenge, decision: "accept" }, "b-1")).status).toBe(303);
+	};
+
+	it("accepts the page's answer: its Origin is the issuer's", async () => {
+		const { w, challenge } = await parked();
+		const response = await w.answer({ challenge, decision: "accept" }, "b-1");
+		expect(response.status).toBe(303);
+		expect(new URL(response.headers.location as string).origin).toBe("https://issuer.example");
+	});
+
+	it("refuses a foreign Origin, even with a valid token, and spends nothing", async () => {
+		const { w, challenge } = await parked();
+		const { token, cookie } = await w.csrfToken();
+		const attempts: readonly Readonly<Record<string, string>>[] = [
+			{ Origin: "https://evil.test" },
+			{ Origin: "https://evil.test", Cookie: cookie, "x-csrf-token": token },
+		];
+		for (const headers of attempts) {
+			const refused = await w.answer({ challenge, decision: "accept" }, "b-1", headers);
+			expect(refused.status).toBe(403);
+			expect(refused.body).toEqual(CROSS_SITE_ANSWER);
+		}
+		await stillParked(w, challenge);
+	});
+
+	it("refuses a cross-site answer as a browser sends one", async () => {
+		const { w, challenge } = await parked();
+		const refused = await w.answer({ challenge, decision: "deny" }, "b-1", {
+			Origin: "https://evil.test",
+			"Sec-Fetch-Site": "cross-site",
+		});
+		expect(refused.status).toBe(403);
+		expect(refused.body).toEqual(CROSS_SITE_ANSWER);
+		await stillParked(w, challenge);
+	});
+
+	it("refuses Origin: null — a form post from a page served with Referrer-Policy: no-referrer — even with a valid token", async () => {
+		const { w, challenge } = await parked();
+		const { token, cookie } = await w.csrfToken();
+		const attempts: readonly Readonly<Record<string, string>>[] = [
+			{ Origin: "null", "Sec-Fetch-Site": "same-origin" },
+			{ Origin: "null", "Sec-Fetch-Site": "same-origin", Cookie: cookie },
+		];
+		for (const headers of attempts) {
+			const refused = await w.answer(
+				{ challenge, decision: "accept", csrf_token: token },
+				"b-1",
+				headers,
+				"form",
+			);
+			expect(refused.status).toBe(403);
+			expect(refused.body).toEqual(CROSS_SITE_ANSWER);
+		}
+		await stillParked(w, challenge);
+	});
+
+	it("refuses an answer with no Origin, no Referer and no token", async () => {
+		const { w, challenge } = await parked();
+		const attempts: readonly Readonly<Record<string, string>>[] = [
+			{},
+			{ "Sec-Fetch-Site": "same-origin" },
+		];
+		for (const headers of attempts) {
+			const refused = await w.answer({ challenge, decision: "accept" }, "b-1", headers);
+			expect(refused.status).toBe(403);
+			expect(refused.body).toEqual(NO_ORIGIN_NO_TOKEN);
+		}
+		await stillParked(w, challenge);
+	});
+
+	it("refuses an answer with no Origin and no Referer whose token does not match its cookie", async () => {
+		const { w, challenge } = await parked();
+		const first = await w.csrfToken();
+		const second = await w.csrfToken();
+		const refused = await w.answer({ challenge, decision: "accept" }, "b-1", {
+			Cookie: first.cookie,
+			"x-csrf-token": second.token,
+		});
+		expect(refused.status).toBe(403);
+		expect(refused.body).toEqual(NO_ORIGIN_NO_TOKEN);
+		await stillParked(w, challenge);
+	});
+
+	it("accepts an answer with no Origin and no Referer that echoes the guard's token in the form field", async () => {
+		const { w, challenge } = await parked();
+		const { token, cookie } = await w.csrfToken();
+		const response = await w.answer(
+			{ challenge, decision: "accept", [w.csrfGuard.bodyField as string]: token },
+			"b-1",
+			{ Cookie: cookie },
+			"form",
+		);
+		expect(response.status).toBe(303);
+	});
+
+	it("accepts an answer with no Origin and no Referer that echoes the guard's token in the header", async () => {
+		const { w, challenge } = await parked();
+		const { token, cookie } = await w.csrfToken();
+		const response = await w.answer({ challenge, decision: "deny" }, "b-1", {
+			Cookie: cookie,
+			[w.csrfGuard.headerName]: token,
+		});
+		expect(response.status).toBe(303);
+		expect(new URL(response.headers.location as string).searchParams.get("error")).toBe(
+			"access_denied",
+		);
+	});
+
+	it("accepts an answer from a trusted sibling origin, which sends Sec-Fetch-Site: same-site", async () => {
+		const { w, challenge } = await parked();
+		const response = await w.answer({ challenge, decision: "accept" }, "b-1", {
+			Origin: TRUSTED_SIBLING,
+			"Sec-Fetch-Site": "same-site",
+		});
+		expect(response.status).toBe(303);
+	});
+
+	it("refuses a same-site sibling origin the guard does not trust", async () => {
+		const { w, challenge } = await parked();
+		const refused = await w.answer({ challenge, decision: "accept" }, "b-1", {
+			Origin: "https://blog.auth.test",
+			"Sec-Fetch-Site": "same-site",
+		});
+		expect(refused.status).toBe(403);
+		expect(refused.body).toEqual(CROSS_SITE_ANSWER);
+		await stillParked(w, challenge);
+	});
+
+	it("asks the guard it is handed, and nothing else: its verdict alone decides", async () => {
+		const accepting: CsrfGuard = Object.freeze({
+			...createTestCsrfGuard(),
+			check: () => ({ outcome: "accepted" as const }),
+		});
+		const lenient = await parked({ csrfGuard: accepting });
+		const accepted = await lenient.w.answer(
+			{ challenge: lenient.challenge, decision: "accept" },
+			"b-1",
+			{ Origin: "https://evil.test", "Sec-Fetch-Site": "cross-site" },
+		);
+		expect(accepted.status).toBe(303);
+
+		const refusing: CsrfGuard = Object.freeze({
+			...createTestCsrfGuard(),
+			check: () => ({ outcome: "refused" as const, reason: "token_invalid" as const }),
+		});
+		const strict = await parked({ csrfGuard: refusing });
+		const refused = await strict.w.answer(
+			{ challenge: strict.challenge, decision: "accept" },
+			"b-1",
+		);
+		expect(refused.status).toBe(403);
+		expect(refused.body).toEqual(NO_ORIGIN_NO_TOKEN);
+	});
+
+	it("asks the guard before the session: a refused answer from a browser that is not signed in is 403, not login_required", async () => {
+		const w = world();
+		const refused = await w.answer({ challenge: "c", decision: "accept" }, "nobody", {
+			Origin: "null",
+		});
+		expect(refused.status).toBe(403);
+		expect(refused.body).toEqual(CROSS_SITE_ANSWER);
+		const unauthenticated = await w.answer({ challenge: "c", decision: "accept" }, "nobody");
+		expect(unauthenticated.status).toBe(401);
 	});
 });
 
