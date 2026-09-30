@@ -27,6 +27,7 @@ import { randomBytes } from "node:crypto";
 import {
 	createApp,
 	createMemoryMfaFactorStore,
+	type MfaFactor,
 	type MfaFactorResolver,
 	type UserSessionStore,
 } from "@o3co/auth-provider-core";
@@ -38,6 +39,7 @@ import {
 	generateRecoveryCodes,
 	RECOVERY_CODE_FACTOR_KIND,
 } from "#/recovery/factor.mjs";
+import { issueRecoveryCodes } from "#/recovery/issue.mjs";
 import { mfaRecoveryCodeFactorModule } from "#/recovery/module.mjs";
 import { createMfaSealing } from "#/sealing.mjs";
 import { mfaRecoveryCodeFactorConfigForTests } from "#/testing/index.mjs";
@@ -140,6 +142,75 @@ describe("generateRecoveryCodes", () => {
 		expect(
 			generateRecoveryCodes({ ...createRecoveryCodeFactor({ count: 10 }) }, digests),
 		).toBeUndefined();
+	});
+});
+
+describe("issueRecoveryCodes", () => {
+	const ring = [{ id: "k1", key: randomBytes(32) }];
+	const sealing = createMfaSealing({ ring });
+	const resolverOf = (...factors: MfaFactor[]): MfaFactorResolver => ({
+		get: (kind) => factors.find((factor) => factor.kind === kind),
+		entries: function* () {
+			for (const factor of factors) yield [factor.kind, factor] as const;
+		},
+	});
+	const issue = (options: Partial<Parameters<typeof issueRecoveryCodes>[0]> = {}) =>
+		issueRecoveryCodes({
+			factors: resolverOf(createRecoveryCodeFactor({ count: 10 })),
+			factorStore: createMemoryMfaFactorStore(),
+			sealing,
+			subject: "u-alice",
+			binding: "email_proof",
+			nowMs: 1_900_000_000_000,
+			...options,
+		});
+
+	it("writes one record holding the set, as the binding it follows authorized it, and answers the codes once", async () => {
+		const factorStore = createMemoryMfaFactorStore();
+		const issued = await issue({ factorStore });
+		expect(issued).toEqual({ issued: true, codes: expect.any(Array) });
+		const [record, ...rest] = await factorStore.list("u-alice");
+		expect(rest).toEqual([]);
+		expect(record).toMatchObject({
+			kind: RECOVERY_CODE_FACTOR_KIND,
+			binding: "email_proof",
+			label: undefined,
+			version: 0,
+			createdAt: new Date(1_900_000_000_000),
+		});
+		const opened = record === undefined ? undefined : sealing.openFactorData(record, record.data);
+		expect(opened?.state).toBe("ok");
+	});
+
+	it("issues nothing while the factor is off, or when the kind is another package's factor", async () => {
+		const factorStore = createMemoryMfaFactorStore();
+		expect(await issue({ factors: resolverOf(), factorStore })).toBeUndefined();
+		expect(
+			await issue({
+				factors: resolverOf({ ...createRecoveryCodeFactor({ count: 10 }) }),
+				factorStore,
+			}),
+		).toBeUndefined();
+		expect(await factorStore.list("u-alice")).toEqual([]);
+	});
+
+	it("never throws: a set that cannot be made or written answers not issued, with why", async () => {
+		const down = new Error("factor store unreachable");
+		const failingStore = {
+			...createMemoryMfaFactorStore(),
+			create: async () => {
+				throw down;
+			},
+		};
+		expect(await issue({ factorStore: failingStore })).toEqual({ issued: false, cause: down });
+		const broken = new RangeError("no digest");
+		const brokenSealing = {
+			...sealing,
+			digestsFor: () => {
+				throw broken;
+			},
+		};
+		expect(await issue({ sealing: brokenSealing })).toEqual({ issued: false, cause: broken });
 	});
 });
 

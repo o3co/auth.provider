@@ -203,7 +203,7 @@ describe("a factor's login code", () => {
 	it("refused at the sender's limit is answered 429, the pending code cleared, and the transaction kept", async () => {
 		const sender = createRecordingMailSender();
 		sender.refuseAtLimit();
-		const { app, record, transactionStore, audit } = await withMailedFactor({ sender });
+		const { app, record, transactionStore, audit, logger } = await withMailedFactor({ sender });
 		const { agent, transaction } = await beginLogin(app);
 
 		const res = await challenge(agent, transaction, record.id);
@@ -217,6 +217,55 @@ describe("a factor's login code", () => {
 		expect(kept).not.toBeNull();
 		expect(kept?.challenge).toBeUndefined();
 		expect(audit.of("mfa.challenge.sent")).toEqual([]);
+		expect(
+			logger.warn.mock.calls.filter((call) => call[1] === "mfa_mail_refused_at_limit"),
+		).toEqual([
+			[
+				{ route: "challenge", purpose: "login_code", kind: KIND, cleared: true },
+				"mfa_mail_refused_at_limit",
+			],
+		]);
+	});
+
+	it("says truthfully whether the pending code was cleared: a clear the store does not write — it answers null, or fails — is logged cleared false, at the limit and at an outage alike", async () => {
+		/** A transaction store whose clearing of the challenge answers `clearing`. */
+		const clearingWith = (clearing: () => Promise<null>): MfaTransactionStore => {
+			const store = createMemoryMfaTransactionStore();
+			return {
+				...store,
+				update: async (id, version, patch) =>
+					(patch as { challenge?: unknown }).challenge === null
+						? clearing()
+						: store.update(id, version, patch),
+			};
+		};
+		const notWritten = async () => null;
+		const failing = async (): Promise<null> => {
+			throw new Error("transaction store unreachable");
+		};
+		for (const [clearing, limited] of [
+			[notWritten, true],
+			[failing, true],
+			[notWritten, false],
+			[failing, false],
+		] as const) {
+			const sender = createRecordingMailSender();
+			if (limited) sender.refuseAtLimit();
+			else sender.failWith(new Error("relay down"));
+			const { app, record, logger } = await withMailedFactor({
+				sender,
+				transactionStore: clearingWith(clearing),
+			});
+			const { agent, transaction } = await beginLogin(app);
+
+			const res = await challenge(agent, transaction, record.id);
+
+			expect(res.status).toBe(limited ? 429 : 503);
+			const line = [...logger.warn.mock.calls, ...logger.error.mock.calls].find(
+				(call) => call[1] === "mfa_mail_refused_at_limit" || call[1] === "mfa_mail_unavailable",
+			)?.[0];
+			expect(line, `${String(limited)} ${clearing.name}`).toMatchObject({ cleared: false });
+		}
 	});
 
 	it("that the sender cannot send is answered 503 once — mfa_mail_unavailable, carrying neither the code nor the address — the pending code cleared, and the transaction kept", async () => {

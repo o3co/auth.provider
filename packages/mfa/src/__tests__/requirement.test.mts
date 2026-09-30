@@ -1208,6 +1208,23 @@ describe("admitPrimary — after a password login", () => {
 		).toEqual(asked);
 	});
 
+	it("says at warn when the proof it asks for cannot be given — no sender, or no address — naming the subject and why, never the address", async () => {
+		const logger = silentLogger();
+		await firstBinding({ mailWired: false, requireEmailProof: "always", logger });
+		await firstBinding(
+			{ mailWired: true, requireEmailProof: "always", logger },
+			{ email: "not an address" },
+		);
+		expect(logger.warn.mock.calls).toEqual([
+			[{ sub: "u-alice", reason: "no_sender" }, "mfa_email_proof_unprovable"],
+			[{ sub: "u-alice", reason: "no_address" }, "mfa_email_proof_unprovable"],
+		]);
+		const quiet = silentLogger();
+		await firstBinding({ mailWired: true, logger: quiet });
+		await firstBinding({ mailWired: false, logger: quiet });
+		expect(quiet.warn).not.toHaveBeenCalled();
+	});
+
 	it("asks for it while the operator reset's flag stands, whatever the setting (D25)", async () => {
 		const flagged = (store: MfaTransactionStore) => store.requireEmailProofAtNextBinding("u-alice");
 		const asked = { hint: true, emailProof: "required" };

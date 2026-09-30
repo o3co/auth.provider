@@ -553,3 +553,106 @@ describe("a first binding that races or fails part-way", () => {
 		expect(audit.of("mfa.recovery_codes.generated")).toEqual([]);
 	});
 });
+
+/** Every caller waits until `n` have arrived, then all go on. */
+function barrier(n: number): () => Promise<void> {
+	let arrived = 0;
+	let release: () => void = () => {};
+	const open = new Promise<void>((resolve) => {
+		release = resolve;
+	});
+	return async () => {
+		arrived += 1;
+		if (arrived >= n) release();
+		await open;
+	};
+}
+
+describe("two transactions of one subject racing the first binding", () => {
+	it("leaves at most one first factor: a completion that finds another record beside its own after writing it removes its own, answers 401 login_required and records mfa.first_binding_conflict", async () => {
+		const memory = createMemoryMfaFactorStore();
+		const arrive = barrier(2);
+		const audit = recordingAuditSink();
+		const directory = new WitnessingUserRepository();
+		const { app, userSessionStore } = await boot({
+			config: configFor("required"),
+			// Both completions pass the zero-records check before either writes.
+			factorStore: {
+				...memory,
+				create: async (record) => {
+					if (record.kind === "totp") await arrive();
+					return memory.create(record);
+				},
+			},
+			auditSink: audit,
+			userRepository: directory,
+		});
+		const create = vi.spyOn(userSessionStore as UserSessionStore, "create");
+		const owner = await beginFirstBinding(app);
+		const other = await beginFirstBinding(app);
+		expect(owner.transaction).not.toBe(other.transaction);
+		const ownerBegun = await beginEnrollment(owner.agent, owner.transaction, "totp");
+		const otherBegun = await beginEnrollment(other.agent, other.transaction, "totp");
+
+		const answers = await Promise.all([
+			completeEnrollment(owner.agent, owner.transaction, totpProofOf(ownerBegun.body.secret)),
+			completeEnrollment(other.agent, other.transaction, totpProofOf(otherBegun.body.secret)),
+		]);
+
+		const records = await memory.list(ALICE.id);
+		const bound = records.filter((record) => record.kind === "totp");
+		expect(bound.length).toBeLessThanOrEqual(1);
+		const completed = answers.filter((res) => res.status === 200);
+		const refused = answers.filter((res) => res.status === 401);
+		expect(completed.length + refused.length).toBe(2);
+		expect(completed).toHaveLength(bound.length);
+		for (const res of refused) {
+			expect(res.body).toEqual({ error: "login_required", error_description: "Log in again" });
+		}
+		// Only a binding that stands issues codes, marks the witness, is audited and signs in.
+		expect(records.filter((record) => record.kind === "recovery_code")).toHaveLength(bound.length);
+		expect(directory.marks).toHaveLength(bound.length);
+		expect(audit.of("mfa.factor.enrolled")).toHaveLength(bound.length);
+		expect(audit.of("mfa.recovery_codes.generated")).toHaveLength(bound.length);
+		expect(create).toHaveBeenCalledTimes(bound.length);
+		expect(audit.of("mfa.first_binding_conflict")).toHaveLength(refused.length);
+		for (const event of audit.of("mfa.first_binding_conflict")) {
+			expect(event).toMatchObject({ subject: ALICE.id, details: { kind: "totp" } });
+			expect(Object.keys(event.details ?? {})).toEqual(["kind"]);
+		}
+	});
+
+	it("removes its own factor and answers 503 once when the records cannot be read again after it was written: never a binding it could not check", async () => {
+		const memory = createMemoryMfaFactorStore();
+		let written = false;
+		const { app, logger, userSessionStore } = await boot({
+			config: configFor("required"),
+			factorStore: {
+				...memory,
+				create: async (record) => {
+					await memory.create(record);
+					written = true;
+				},
+				list: async (subject) => {
+					if (written) throw new Error("factor store unreachable");
+					return memory.list(subject);
+				},
+			},
+		});
+		const create = vi.spyOn(userSessionStore as UserSessionStore, "create");
+		const { agent, transaction } = await beginFirstBinding(app);
+		const begun = await beginEnrollment(agent, transaction, "totp");
+
+		const res = await completeEnrollment(agent, transaction, totpProofOf(begun.body.secret));
+
+		expect(res.status).toBe(503);
+		expect(events(logger, "error")).toEqual(["mfa_store_unavailable"]);
+		expect(logger.error.mock.calls[0]?.[0]).toMatchObject({
+			route: "enrollment",
+			store: "mfa_factor",
+			step: "list",
+		});
+		expect(await memory.list(ALICE.id)).toEqual([]);
+		expect(create).not.toHaveBeenCalled();
+	});
+});

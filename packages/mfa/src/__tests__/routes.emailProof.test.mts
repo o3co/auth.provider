@@ -29,6 +29,7 @@
 import {
 	createMemoryMfaFactorStore,
 	createMemoryMfaTransactionStore,
+	type MailSender,
 	type MfaTransactionStore,
 } from "@o3co/auth-provider-core";
 import {
@@ -367,6 +368,115 @@ describe("D25's flag", () => {
 
 		expect((await completeEnrollment(agent, transaction, "000000")).status).toBe(401);
 		expect(await store.emailProofRequiredAtNextBinding(ALICE.id)).toBe(true);
+	});
+});
+
+describe("D25's flag set after the transaction opened", () => {
+	it("is read again when the enrollment begins: the transaction then owes the proof, 403 until it is given, and the proof can be given", async () => {
+		const store = createMemoryMfaTransactionStore();
+		const { app, sender } = await withMail({ transactionStore: store, requireEmailProof: "never" });
+		const { agent, transaction, hints } = await beginFirstBinding(app);
+		expect(hints.email_proof).toBe(false);
+		await store.requireEmailProofAtNextBinding(ALICE.id);
+
+		const begun = await beginEnrollment(agent, transaction, "totp");
+
+		expect(begun.status).toBe(403);
+		expect(begun.body).toEqual(PROOF_REQUIRED);
+		expect(await store.get(transaction)).toMatchObject({
+			emailProof: "required",
+			pendingEnrollment: undefined,
+		});
+		expect((await readTransaction(agent, transaction)).body).toMatchObject({ email_proof: true });
+		expect((await challengeProof(agent, transaction)).status).toBe(200);
+		expect((await verify(agent, transaction, ACCOUNT_EMAIL, lastCode(sender))).status).toBe(200);
+		expect((await beginEnrollment(agent, transaction, "totp")).status).toBe(200);
+	});
+
+	it("is read again when the enrollment completes: set between the start and the completion, nothing is bound and the proof is owed", async () => {
+		const store = createMemoryMfaTransactionStore();
+		const { app, factorStore } = await withMail({
+			transactionStore: store,
+			requireEmailProof: "never",
+		});
+		const { agent, transaction } = await beginFirstBinding(app);
+		const begun = await beginEnrollment(agent, transaction, "totp");
+		await store.requireEmailProofAtNextBinding(ALICE.id);
+
+		const done = await completeEnrollment(agent, transaction, totpProofOf(begun.body.secret));
+
+		expect(done.status).toBe(403);
+		expect(done.body).toEqual(PROOF_REQUIRED);
+		expect(await factorStore.list(ALICE.id)).toEqual([]);
+		expect(await store.get(transaction)).toMatchObject({ emailProof: "required", attempts: 0 });
+		expect(await store.emailProofRequiredAtNextBinding(ALICE.id)).toBe(true);
+	});
+
+	it("that cannot be read, or reads other than a boolean, is answered 503 once, and nothing is kept", async () => {
+		for (const answer of [
+			async (): Promise<boolean> => {
+				throw new Error("transaction store unreachable");
+			},
+			async () => "yes" as never,
+		]) {
+			const store = createMemoryMfaTransactionStore();
+			let reads = 0;
+			const { app, logger } = await withMail({
+				transactionStore: {
+					...store,
+					// The login's own read answers; the enrollment's does not.
+					emailProofRequiredAtNextBinding: async (subject) =>
+						reads++ === 0 ? store.emailProofRequiredAtNextBinding(subject) : answer(),
+				},
+				requireEmailProof: "never",
+			});
+			const { agent, transaction } = await beginFirstBinding(app);
+
+			const begun = await beginEnrollment(agent, transaction, "totp");
+
+			expect(begun.status).toBe(503);
+			expect(events(logger, "error")).toEqual(["mfa_store_unavailable"]);
+			expect(logger.error.mock.calls[0]?.[0]).toMatchObject({
+				route: "enrollment",
+				store: "mfa_transaction",
+				step: "emailProofRequiredAtNextBinding",
+			});
+			expect(await store.get(transaction)).toMatchObject({ version: 0 });
+		}
+	});
+});
+
+describe("a sender's rejection in the logs", () => {
+	it("carries its name, code and status alone — never its text, which may quote the address and the code", async () => {
+		const sent: string[] = [];
+		const sender: MailSender = {
+			kind: "rejecting",
+			send: async (mail) => {
+				sent.push(mail.code);
+				throw Object.assign(
+					new Error(`550 5.1.1 <${mail.to}>: Recipient address rejected; code ${mail.code}`),
+					{ code: "EENVELOPE", responseCode: 550 },
+				);
+			},
+		};
+		const { app, logger } = await boot({
+			config: configFor("required"),
+			mailSender: sender,
+			userRepository: directory(),
+		});
+		const { agent, transaction } = await beginFirstBinding(app);
+
+		const res = await challengeProof(agent, transaction);
+
+		expect(res.status).toBe(503);
+		expect(events(logger, "error")).toEqual(["mfa_mail_unavailable"]);
+		expect(logger.error.mock.calls[0]?.[0]).toMatchObject({
+			err: { name: "Error", code: "EENVELOPE", status: 550 },
+		});
+		const line = logger.error.mock.calls[0]?.[0] as { err?: object } | undefined;
+		expect(Object.keys(line?.err ?? {}).sort()).toEqual(["code", "name", "status"]);
+		expect(loggedText(logger)).not.toContain(ALICE.email);
+		expect(loggedText(logger)).not.toContain(sent[0] as string);
 	});
 });
 
