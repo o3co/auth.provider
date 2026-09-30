@@ -15,9 +15,9 @@
  */
 
 /**
- * The user's stored upstream tokens: read once, a link with no record removed
- * from the session's index (best effort) and answered `404`, and handed on as
- * stored while they do not expire within the refresh buffer.
+ * The user's stored upstream tokens: read before any refresh, a link with no
+ * record removed from the session's index (best effort) and answered `404`,
+ * and handed on as stored while they do not expire within the refresh buffer.
  */
 
 import {

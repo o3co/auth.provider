@@ -16,8 +16,8 @@
 
 /**
  * Reading an adapter's refresh answer: each field read once behind a guard,
- * its lifetime and token type judged, and the scope it names bounded by the
- * grant. Nothing here writes, logs or answers.
+ * its lifetime and token type judged, and the rules that bound the scope it
+ * names. Nothing here writes, logs or answers.
  */
 
 import {
@@ -158,9 +158,8 @@ export const readRefreshAnswer = (
 ): RefreshReading => {
 	// The adapter's answer is unverified third-party data, read field by
 	// field behind guards: it may be `null`, a getter may throw, and an
-	// exception here would lose the rotated refresh token this branch
-	// salvages. No (or an empty) access token is a failed refresh, never a
-	// 200 without `access_token` (RFC 6749 §5.1).
+	// exception here would lose the rotated refresh token `recordRefresh`
+	// salvages.
 	const unreadable = new Set<string>();
 	const answer: Partial<RefreshedTokens> =
 		typeof refreshed === "object" && refreshed !== null

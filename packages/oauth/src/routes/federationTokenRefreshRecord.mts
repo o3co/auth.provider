@@ -104,7 +104,9 @@ export const recordRefresh = async (
 		}
 	};
 
-	// The adapter answered something this route cannot read as a token.
+	// The adapter answered something this route cannot read as a token. No
+	// (or an empty) access token is a failed refresh, never a 200 without
+	// `access_token` (RFC 6749 §5.1).
 	if (!isUsableToken(answer.accessToken) || lifetimeIsBroken || tokenTypeIsBroken) {
 		await keepRotatedRefreshToken();
 		emitAuditEvent(opts.auditSink, {
