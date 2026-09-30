@@ -23,21 +23,18 @@ import {
 	classifyFederationRefreshError,
 	emitAuditEvent,
 	isBearerTokenType,
-	isVerificationUnavailable,
-	JwtVerificationError,
 	logClientRepositoryUnavailable,
 	loggableError,
 	parseScopeTokens,
 	sanitizeErrorText,
 	supportsLock,
 	supportsRefresh,
-	verifyJwt,
 } from "@o3co/auth-provider-core";
 import type { Request, RequestHandler, Response, Router } from "express";
-import { parseAccessTokenHeader } from "../accessTokenHeader.mjs";
-import { refuseVerificationUnavailable } from "../verificationUnavailable.mjs";
+import { identifyCaller } from "./federationTokenCaller.mjs";
 import {
 	createStoreUnavailableLog,
+	type FederationTokenContext,
 	type FederationTokenRouterOptions,
 } from "./federationTokenContext.mjs";
 
@@ -208,68 +205,19 @@ export function createRouter(express: ExpressLike, opts: FederationTokenRouterOp
 		res.setHeader("Cache-Control", "no-store");
 		res.setHeader("Pragma", "no-cache");
 
-		// Step 1: Extract the access token from the Authorization header —
-		// Bearer (RFC 6750 §2.1) or DPoP (RFC 9449 §7.1). Scheme-vs-`cnf`
-		// agreement is enforced by `protectedResourceBindingMw` upstream.
-		const token = parseAccessTokenHeader(req.headers.authorization);
-		if (token === null) {
-			res.setHeader(
-				"WWW-Authenticate",
-				'Bearer error="invalid_token", error_description="missing access token"',
-			);
-			return res
-				.status(401)
-				.json({ error: "invalid_token", error_description: "missing access token" });
-		}
-
-		// Steps 2 + 3: alg / iss / typ (at+jwt) and signature, pinned by the
-		// verifier. Audience is not checked: the calling client is not
-		// separately authenticated (logged as `jwt_verify_aud_skipped`).
-		let payload: Record<string, unknown>;
-		try {
-			const verified = await verifyJwt(token, opts.keyStore, {
-				type: "access_token",
-				expectedIssuer: opts.issuer ?? "",
-				legacyTypAccept: opts.legacyTypAccept ?? false,
-				// A token-accepting surface: forward both the jti denylist and the
-				// subject watermark.
-				revocation: {
-					denylist: opts.accessTokenDenylist,
-					subjectRevocation: opts.subjectRevocation,
-				},
-				logger: opts.logger,
-			});
-			payload = verified.payload as Record<string, unknown>;
-		} catch (error) {
-			// The keystore or a revocation store did not answer: the server's
-			// outage, not a verdict on the token (`isVerificationUnavailable`).
-			if (isVerificationUnavailable(error)) {
-				return refuseVerificationUnavailable(res, error, logger, "federation_token");
-			}
-			// Log the verifier's reason only: its message quotes token content,
-			// and it has already logged `jwt_verify_rejected`.
-			const verdict = error instanceof JwtVerificationError ? error.reason : undefined;
-			logger.warn(
-				verdict === undefined
-					? { federation, err: loggableError(error) }
-					: { federation, reason: verdict },
-				"federation_token_jwt_verify_failed",
-			);
-			res.setHeader(
-				"WWW-Authenticate",
-				'Bearer error="invalid_token", error_description="invalid token"',
-			);
-			return res.status(401).json({
-				error: "invalid_token",
-				error_description: "invalid token",
-			});
-		}
-
-		// Step 4: Extract family_id, sid, azp from payload.
-		const familyId = typeof payload.family_id === "string" ? payload.family_id : null;
-		const sid = typeof payload.sid === "string" ? payload.sid : null;
-		const azp = typeof payload.azp === "string" ? payload.azp : null;
-		const sub = typeof payload.sub === "string" ? payload.sub : null;
+		const ctx: FederationTokenContext = {
+			opts,
+			req,
+			res,
+			name,
+			federation,
+			logger,
+			storeUnavailable,
+			refreshBufferMs,
+		};
+		const caller = await identifyCaller(ctx);
+		if (caller === null) return;
+		const { familyId, sid, azp, sub } = caller;
 
 		/**
 		 * Refuses a token whose type this route may not delegate. `502`: what
@@ -297,34 +245,6 @@ export function createRouter(express: ExpressLike, opts: FederationTokenRouterOp
 				error_description: "token_type_unsupported",
 			});
 		};
-
-		if (!familyId) {
-			res.setHeader(
-				"WWW-Authenticate",
-				'Bearer error="invalid_token", error_description="missing family_id claim"',
-			);
-			return res
-				.status(401)
-				.json({ error: "invalid_token", error_description: "missing family_id claim" });
-		}
-		if (!sid) {
-			res.setHeader(
-				"WWW-Authenticate",
-				'Bearer error="invalid_token", error_description="missing sid claim"',
-			);
-			return res
-				.status(401)
-				.json({ error: "invalid_token", error_description: "missing sid claim" });
-		}
-		if (!azp) {
-			res.setHeader(
-				"WWW-Authenticate",
-				'Bearer error="invalid_token", error_description="missing azp claim"',
-			);
-			return res
-				.status(401)
-				.json({ error: "invalid_token", error_description: "missing azp claim" });
-		}
 
 		// Step 5: family revocation, fail-closed. A throw is `503`, never `401
 		// invalid_token`, which would send the client to replace a token nobody
