@@ -119,11 +119,11 @@ export const SINGLE_ENV: Readonly<Record<string, string>> = {
 	// The user repository is replaced (see the header); `yaml` keeps the
 	// shipped `http` adapter's URL requirements out of config validation.
 	CLIENT_USER_TYPE: "yaml",
-	OAUTH_GRANTS_SESSION_ENABLED: "true",
-	OAUTH_GRANTS_AUTHORIZATION_CODE_ENABLED: "true",
-	OAUTH_GRANTS_REFRESH_TOKEN_ENABLED: "true",
-	OAUTH_GRANTS_CLIENT_CREDENTIALS_ENABLED: "true",
-	OAUTH_CIMD_ENABLED: "true",
+	OAUTH_SESSION_ENABLED: "true",
+	OAUTH_AUTHORIZATION_GRANTS_AUTHORIZATION_CODE_ENABLED: "true",
+	OAUTH_AUTHORIZATION_GRANTS_REFRESH_TOKEN_ENABLED: "true",
+	OAUTH_AUTHORIZATION_GRANTS_CLIENT_CREDENTIALS_ENABLED: "true",
+	OAUTH_CLIENT_ID_METADATA_DOCUMENTS_ENABLED: "true",
 	FEDERATION_GRANTS_ENABLED: "true",
 	FEDERATION_GRANTS_CONSENT_URL: "/consent/grants",
 	// The in-memory user repository covers no registration; `required` is a

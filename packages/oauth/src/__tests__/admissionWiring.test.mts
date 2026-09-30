@@ -54,11 +54,10 @@ const config = {
 		jwt: { issuer: "https://issuer.example", secret: "test-secret" },
 		accessToken: { expiresIn: 300 },
 		refreshToken: { expiresIn: 86400 },
-		grants: {
-			session: { enabled: true },
-			authorization_code: { enabled: true },
-			refresh_token: { enabled: true },
-		},
+	},
+	"oauth-session": { enabled: true },
+	"oauth-authorization": {
+		grants: { authorizationCode: { enabled: true }, refreshToken: { enabled: true } },
 	},
 	rateLimit: { failMode: "open" as const },
 	endpoints: { login: { url: "/login" } },
@@ -213,7 +212,7 @@ describe("the grant manifests declare what admission reads", () => {
 	});
 
 	it("oauthSessionModule declares nothing when the grant is off", () => {
-		const off = { ...config, oauth: { ...config.oauth, grants: {} } } as unknown as AppConfig;
+		const off = { ...config, "oauth-session": { enabled: false } } as unknown as AppConfig;
 		const module = oauthSessionModule({ config: off });
 		expect(module.requires ?? []).not.toContain("sessionRequirementResolver");
 	});

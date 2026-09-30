@@ -93,12 +93,12 @@ const config: AppConfig = {
 			unknownFamilyPolicy: "reject" as const,
 			legacyRtPolicy: "reject" as const,
 		},
-		// The grant this whole test is about: it mints straight from an
-		// authenticated browser session, which is the BFF topology.
-		grants: { session: { enabled: true } },
 		oidcMode: "oidc-required",
 		code: { adapter: "memory" as const },
 	},
+	// The grant this whole test is about: it mints straight from an
+	// authenticated browser session, which is the BFF topology.
+	"oauth-session": { enabled: true },
 	session: {
 		secret: "test-session-secret.at-least-32-bytes.ok",
 		name: "auth.sid",

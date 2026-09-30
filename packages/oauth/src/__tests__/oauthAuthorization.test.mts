@@ -47,6 +47,11 @@ import { createOAuthRouter } from "#/routes.mjs";
 import { OAUTH_ADMISSION_ACTIONS } from "./_helpers/admissionActions.mjs";
 import { authorizationServerRegistry } from "./_helpers/authorizationServerRegistry.mjs";
 import { createMockLogger } from "./_helpers/mockLogger.mjs";
+import { capturing, withGrants } from "./_helpers/sections.mjs";
+
+/** `config` with the captures of the renames the module declares, as a resolution under an empty environment makes them. */
+const captured = <C extends object>(config: C): C =>
+	capturing(config, [oauthAuthorizationModule({ config: config as never })]);
 
 // ---------------------------------------------------------------------------
 // Shared test-only stubs
@@ -235,27 +240,13 @@ describe("oauthAuthorizationModule — manifest shape", () => {
 		// symmetric operational control with authorization_code / refresh_token.
 		// client_credentials is NOT in the factory default (standalone template is
 		// server/browser-only) — the deployment must opt in explicitly.
-		const base = makeValidAppConfig();
-		const config = {
-			...base,
-			oauth: {
-				...base.oauth,
-				grants: { ...base.oauth.grants, client_credentials: { enabled: true } },
-			},
-		};
+		const config = withGrants(makeValidAppConfig(), { clientCredentials: true });
 		const module = oauthAuthorizationModule({ config });
 		expect(module.contributes?.grants?.client_credentials).toBeDefined();
 	});
 
 	it("omits client_credentials grant when config says enabled=false", () => {
-		const base = makeValidAppConfig();
-		const config = {
-			...base,
-			oauth: {
-				...base.oauth,
-				grants: { ...base.oauth.grants, client_credentials: { enabled: false } },
-			},
-		};
+		const config = withGrants(makeValidAppConfig(), { clientCredentials: false });
 		const module = oauthAuthorizationModule({ config });
 		expect(module.contributes?.grants?.client_credentials).toBeUndefined();
 	});
@@ -280,43 +271,22 @@ describe("oauthAuthorizationModule — manifest shape", () => {
 	});
 
 	it("omits authorization_code grant when config says enabled=false", () => {
-		const base = makeValidAppConfig();
-		const config = {
-			...base,
-			oauth: {
-				...base.oauth,
-				grants: { ...base.oauth.grants, authorization_code: { enabled: false } },
-			},
-		};
+		const config = withGrants(makeValidAppConfig(), { authorizationCode: false });
 		const module = oauthAuthorizationModule({ config });
 		expect(module.contributes?.grants?.authorization_code).toBeUndefined();
 	});
 
 	it("omits refresh_token grant when config says enabled=false", () => {
-		const base = makeValidAppConfig();
-		const config = {
-			...base,
-			oauth: {
-				...base.oauth,
-				grants: { ...base.oauth.grants, refresh_token: { enabled: false } },
-			},
-		};
+		const config = withGrants(makeValidAppConfig(), { refreshToken: false });
 		const module = oauthAuthorizationModule({ config });
 		expect(module.contributes?.grants?.refresh_token).toBeUndefined();
 	});
 
 	it("does NOT register authorization_code when config omits the enabled key entirely (=== true semantics)", () => {
 		const base = makeValidAppConfig();
-		const config = {
-			...base,
-			oauth: {
-				...base.oauth,
-				// Empty grants override — simulates a config where no built-in
-				// is opted in. Under the strict `=== true` check, absent
-				// `enabled` keys mean "not registered".
-				grants: {} as Record<string, unknown>,
-			},
-		};
+		// No switch written — a config where no built-in is opted in: an absent
+		// `enabled` means "not registered".
+		const config = { ...base, "oauth-authorization": {} };
 		const module = oauthAuthorizationModule({ config });
 		expect(module.contributes?.grants?.authorization_code).toBeUndefined();
 		expect(module.contributes?.grants?.refresh_token).toBeUndefined();
@@ -324,62 +294,32 @@ describe("oauthAuthorizationModule — manifest shape", () => {
 	});
 
 	it("does NOT register a grant when enabled is the string 'false' (HOCON env-substitution outcome)", () => {
-		// HOCON env-var substitution (`enabled = ${?OAUTH_GRANTS_X_ENABLED}`)
-		// resolves the env value as a string — there is no schema coercion
-		// to boolean on the `grants` passthrough sub-tree. Under the strict
-		// opt-in check, a resolved `enabled: "false"` correctly evaluates
-		// to not-enabled.
-		const base = makeValidAppConfig();
-		const config = {
-			...base,
-			oauth: {
-				...base.oauth,
-				grants: {
-					authorization_code: { enabled: "false" as unknown as boolean },
-				} as Record<string, unknown>,
-			},
-		};
+		// HOCON env-var substitution (`enabled = ${?VAR}`) resolves the env
+		// value as a string, which the switch reads as the section's schema
+		// does: `"false"` is off.
+		const config = withGrants(makeValidAppConfig(), { authorizationCode: "false" });
 		const module = oauthAuthorizationModule({ config });
 		expect(module.contributes?.grants?.authorization_code).toBeUndefined();
 	});
 
 	it("registers a grant when enabled is the string 'true' (HOCON env-substitution outcome)", () => {
 		// Mirror of the env-disable test for the env-enable path. An operator
-		// setting `OAUTH_GRANTS_CLIENT_CREDENTIALS_ENABLED=true` produces a
-		// resolved `enabled: "true"` (string) on the passthrough `grants`
-		// sub-tree. The opt-in check accepts both boolean `true` and string
-		// `"true"` so the documented env-enable pattern actually works.
-		const base = makeValidAppConfig();
-		const config = {
-			...base,
-			oauth: {
-				...base.oauth,
-				grants: {
-					...base.oauth.grants,
-					client_credentials: { enabled: "true" as unknown as boolean },
-				},
-			},
-		};
+		// setting `OAUTH_AUTHORIZATION_GRANTS_CLIENT_CREDENTIALS_ENABLED=true`
+		// produces a resolved `enabled: "true"` (string), which reads as on so
+		// the documented env-enable pattern actually works.
+		const config = withGrants(makeValidAppConfig(), { clientCredentials: "true" });
 		const module = oauthAuthorizationModule({ config });
 		expect(module.contributes?.grants?.client_credentials).toBeDefined();
 	});
 
-	it("does NOT register a grant for unrelated truthy strings like 'yes' / '1'", () => {
-		// Strictness check: only the canonical forms (boolean `true`,
-		// string `"true"`) opt in. Other truthy values do not — this
-		// keeps misconfigurations loud rather than silently enabling
-		// something via, e.g., a copy-paste from a different bool encoding.
-		const base = makeValidAppConfig();
-		for (const value of ["yes", "1", "TRUE", "True", 1] as unknown[]) {
-			const config = {
-				...base,
-				oauth: {
-					...base.oauth,
-					grants: {
-						client_credentials: { enabled: value as boolean },
-					} as Record<string, unknown>,
-				},
-			};
+	it("does NOT register a grant for a value the switch's schema refuses, like 'yes' or 1", () => {
+		// The switch is read as `coerceBooleanFromEnv` reads it: "true", "1"
+		// and their case variants are on; anything it refuses is off here, and
+		// boot then refuses the value, naming the key.
+		for (const value of ["yes", "on", 1] as const) {
+			const config = withGrants(makeValidAppConfig(), {
+				clientCredentials: value as unknown as string,
+			});
 			const module = oauthAuthorizationModule({ config });
 			expect(module.contributes?.grants?.client_credentials).toBeUndefined();
 		}
@@ -417,7 +357,7 @@ describe("oauthAuthorizationModule — createTestApp integration", () => {
 				keyStoreModule,
 				...familyStoreModules,
 			],
-			bootstrapComponents: { config, pathResolver: (s) => s },
+			bootstrapComponents: { config: captured(config), pathResolver: (s) => s },
 		});
 		expect(handle.inspect.grants.has("authorization_code")).toBe(true);
 		expect(handle.inspect.grants.has("refresh_token")).toBe(true);
@@ -426,14 +366,7 @@ describe("oauthAuthorizationModule — createTestApp integration", () => {
 	});
 
 	it("registers client_credentials grant at boot when explicitly enabled", async () => {
-		const base = makeValidAppConfig();
-		const config = {
-			...base,
-			oauth: {
-				...base.oauth,
-				grants: { ...base.oauth.grants, client_credentials: { enabled: true } },
-			},
-		};
+		const config = withGrants(makeValidAppConfig(), { clientCredentials: true });
 		const handle = await createTestApp({
 			modules: [
 				oauthAuthorizationModule({ config }),
@@ -442,7 +375,7 @@ describe("oauthAuthorizationModule — createTestApp integration", () => {
 				keyStoreModule,
 				...familyStoreModules,
 			],
-			bootstrapComponents: { config, pathResolver: (s) => s },
+			bootstrapComponents: { config: captured(config), pathResolver: (s) => s },
 		});
 		expect(handle.inspect.grants.has("authorization_code")).toBe(true);
 		expect(handle.inspect.grants.has("refresh_token")).toBe(true);
@@ -451,18 +384,10 @@ describe("oauthAuthorizationModule — createTestApp integration", () => {
 	});
 
 	it("does not register authorization_code grant when config says enabled=false", async () => {
-		const base = makeValidAppConfig();
-		const config = {
-			...base,
-			oauth: {
-				...base.oauth,
-				grants: {
-					...base.oauth.grants,
-					authorization_code: { enabled: false },
-					refresh_token: { enabled: true },
-				},
-			},
-		};
+		const config = withGrants(makeValidAppConfig(), {
+			authorizationCode: false,
+			refreshToken: true,
+		});
 		const handle = await createTestApp({
 			modules: [
 				oauthAuthorizationModule({ config }),
@@ -471,7 +396,7 @@ describe("oauthAuthorizationModule — createTestApp integration", () => {
 				keyStoreModule,
 				...familyStoreModules,
 			],
-			bootstrapComponents: { config, pathResolver: (s) => s },
+			bootstrapComponents: { config: captured(config), pathResolver: (s) => s },
 		});
 		expect(handle.inspect.grants.has("authorization_code")).toBe(false);
 		expect(handle.inspect.grants.has("refresh_token")).toBe(true);
@@ -488,13 +413,6 @@ describe("oauthAuthorizationModule — createTestApp integration", () => {
  * grant's to require: on, it must be wired; off, the composition needs none.
  */
 describe("oauthAuthorizationModule — the authorization_code grant needs a code repository", () => {
-	const withGrants = (grants: Record<string, { enabled: boolean }>) => {
-		const base = makeValidAppConfig();
-		return {
-			...base,
-			oauth: { ...base.oauth, grants: { ...base.oauth.grants, ...grants } },
-		};
-	};
 	const boot = (config: AppConfig, modules: readonly Module[]) =>
 		createTestApp({
 			modules: [
@@ -504,11 +422,11 @@ describe("oauthAuthorizationModule — the authorization_code grant needs a code
 				...familyStoreModules,
 				...modules,
 			],
-			bootstrapComponents: { config, pathResolver: (s: string) => s },
+			bootstrapComponents: { config: captured(config), pathResolver: (s: string) => s },
 		});
 
 	it("refuses to boot with the grant on and no code repository, naming the slot and the switch", async () => {
-		const refusal = await boot(withGrants({ authorization_code: { enabled: true } }), []).then(
+		const refusal = await boot(withGrants(makeValidAppConfig(), { authorizationCode: true }), []).then(
 			async (handle) => {
 				await handle.dispose();
 				return undefined;
@@ -521,16 +439,16 @@ describe("oauthAuthorizationModule — the authorization_code grant needs a code
 			details: { module: "oauth-authorization", kind: "grants", name: "authorization_code" },
 		});
 		expect(String(refusal?.cause?.message)).toMatch(
-			/authorization_code grant is enabled \(oauth\.grants\.authorization_code\.enabled\) but codeRepository is not wired/,
+			/authorization_code grant is enabled \(oauth-authorization\.grants\.authorizationCode\.enabled\) but codeRepository is not wired/,
 		);
 	});
 
 	it("boots with the grant off and no code repository", async () => {
 		const handle = await boot(
-			withGrants({
-				authorization_code: { enabled: false },
-				refresh_token: { enabled: false },
-				client_credentials: { enabled: true },
+			withGrants(makeValidAppConfig(), {
+				authorizationCode: false,
+				refreshToken: false,
+				clientCredentials: true,
 			}),
 			[],
 		);
@@ -540,7 +458,7 @@ describe("oauthAuthorizationModule — the authorization_code grant needs a code
 	});
 
 	it("boots with the grant on and a code repository wired", async () => {
-		const handle = await boot(withGrants({ authorization_code: { enabled: true } }), [
+		const handle = await boot(withGrants(makeValidAppConfig(), { authorizationCode: true }), [
 			codeRepositoryModule,
 		]);
 		expect(handle.inspect.grants.has("authorization_code")).toBe(true);
@@ -558,16 +476,8 @@ describe("oauthAuthorizationModule — the authorization_code grant needs a code
  * decides: on, both slots must be filled.
  */
 describe("oauthAuthorizationModule — the refresh_token grant needs its token families", () => {
-	const withRefreshToken = (enabled: boolean) => {
-		const base = makeValidAppConfig();
-		return {
-			...base,
-			oauth: {
-				...base.oauth,
-				grants: { ...base.oauth.grants, refresh_token: { enabled } },
-			},
-		};
-	};
+	const withRefreshToken = (enabled: boolean) =>
+		withGrants(makeValidAppConfig(), { refreshToken: enabled });
 	const boot = (config: AppConfig, families: readonly Module[]) =>
 		createTestApp({
 			modules: [
@@ -577,7 +487,7 @@ describe("oauthAuthorizationModule — the refresh_token grant needs its token f
 				keyStoreModule,
 				...families,
 			],
-			bootstrapComponents: { config, pathResolver: (s: string) => s },
+			bootstrapComponents: { config: captured(config), pathResolver: (s: string) => s },
 		});
 	const refusalOf = (config: AppConfig, families: readonly Module[]) =>
 		boot(config, families).then(
@@ -597,7 +507,7 @@ describe("oauthAuthorizationModule — the refresh_token grant needs its token f
 		});
 		const message = String(refusal?.cause?.message);
 		expect(message).toMatch(
-			/refresh_token grant is enabled \(oauth\.grants\.refresh_token\.enabled\) but refreshTokenFamilyRotation and refreshTokenFamilyRevocation are not wired/,
+			/refresh_token grant is enabled \(oauth-authorization\.grants\.refreshToken\.enabled\) but refreshTokenFamilyRotation and refreshTokenFamilyRevocation are not wired/,
 		);
 		expect(message).toMatch(/memoryRefreshTokenFamilyStoreModule/);
 		expect(message).toMatch(/redisRefreshTokenFamilyStoreModule/);
@@ -1663,7 +1573,7 @@ describe("oauthAuthorizationModule — declared absence for subjectRevocation", 
 			createTestApp({
 				modules: [oauthAuthorizationModule({ config })],
 				bootstrapComponents: {
-					config,
+					config: captured(config),
 					pathResolver: (s: string) => s,
 					clientRepository: { findById: async () => null, authenticate: async () => null },
 					codeRepository: {
@@ -1687,7 +1597,7 @@ describe("oauthAuthorizationModule — declared absence for subjectRevocation", 
 			createTestApp({
 				modules: [oauthAuthorizationModule({ config }), ...familyStoreModules],
 				bootstrapComponents: {
-					config,
+					config: captured(config),
 					pathResolver: (s: string) => s,
 					clientRepository: { findById: async () => null, authenticate: async () => null },
 					codeRepository: {

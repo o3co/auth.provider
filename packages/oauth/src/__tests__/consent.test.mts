@@ -59,13 +59,10 @@ const makeConfig = (consentUrl?: string): AppConfig =>
 		oauth: {
 			jwt: { issuer: "https://issuer.example" },
 			oidcMode: "dual",
-			grants: {},
+			...(consentUrl === undefined ? {} : { consentPage: { url: consentUrl } }),
 		},
 		rateLimit: { failMode: "open" as const },
-		endpoints: {
-			login: { url: "/login" },
-			...(consentUrl === undefined ? {} : { consent: { url: consentUrl } }),
-		},
+		endpoints: { login: { url: "/login" } },
 	}) as unknown as AppConfig;
 
 type Session = Record<string, unknown>;

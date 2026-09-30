@@ -466,32 +466,3 @@ describe("/token — the same policy object decides redemption", () => {
 		expect(res.body.error).toBe("invalid_grant");
 	});
 });
-
-describe("operator signal for the inert pkce knobs", () => {
-	it("warns exactly once for a boot, not once per resolution", async () => {
-		// `makeApp` resolves the SAME config twice, exactly as a real boot does:
-		// once in `createAuthorizationGrant` for the token endpoint and once in
-		// `createOAuthRouter` for the routers. Both must read one policy — and
-		// the operator must be told once, not once per reader.
-		const { logger } = await makeApp({
-			oauth: {
-				grants: { authorization_code: { pkce: { requireS256: false, defaultMethod: "plain" } } },
-			},
-		});
-		const warnings = logger.warn.mock.calls.filter(
-			(call) => call[1] === "pkce_config_ignored_s256_is_mandatory",
-		);
-		expect(warnings).toHaveLength(1);
-		expect(warnings[0]?.[0]).toEqual(
-			expect.objectContaining({ ignoredKeys: ["requireS256", "defaultMethod"] }),
-		);
-	});
-
-	it("stays silent for a config that carries no inert key", async () => {
-		const { logger } = await makeApp();
-		expect(logger.warn).not.toHaveBeenCalledWith(
-			expect.anything(),
-			"pkce_config_ignored_s256_is_mandatory",
-		);
-	});
-});

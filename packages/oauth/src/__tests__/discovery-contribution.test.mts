@@ -148,18 +148,16 @@ describe("oauthModule — discoveryMetadata contribution", () => {
 	});
 
 	it("does not widen code_challenge_methods_supported from any pkce config block", async () => {
-		// Enforcement ignores `oauth.grants.authorization_code.pkce.
-		// supportedMethods`, and so does discovery: a config that carries the
-		// key advertises exactly what the AS enforces, which is S256.
+		// No configuration shapes the PKCE policy (boot refuses the removed
+		// `oauth.grants.authorization_code.pkce` block), and discovery reads
+		// none: a configuration handed here carrying one advertises exactly what
+		// the AS enforces, which is S256.
 		const base = makeValidAppConfig();
 		const config = {
 			...base,
 			oauth: {
 				...base.oauth,
-				grants: {
-					...base.oauth.grants,
-					authorization_code: { pkce: { supportedMethods: ["S256", "plain"] } },
-				},
+				grants: { authorization_code: { pkce: { supportedMethods: ["S256", "plain"] } } },
 			},
 		} as unknown as AppConfig;
 		const factory = oauthModule({ config }).contributes?.discoveryMetadata?.[0];

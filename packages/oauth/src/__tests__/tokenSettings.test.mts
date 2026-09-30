@@ -52,6 +52,7 @@ import {
 import { describe, expect, it } from "vitest";
 import { oauthModule } from "#/module.mjs";
 import { oauthTokenSettingsFrom } from "#/tokenSettings.mjs";
+import { withOauthCaptures } from "./_helpers/sections.mjs";
 
 const fixture = (): AppConfig => makeValidAppConfig() as AppConfig;
 
@@ -194,7 +195,7 @@ describe("the oauth module provides oauthTokenSettings", () => {
 		const config = everySwitchOn();
 		const handle = await createTestApp({
 			modules: [oauthModule({ config }), ...stubs],
-			bootstrapComponents: { config, pathResolver: (s: string) => s },
+			bootstrapComponents: { config: withOauthCaptures(config), pathResolver: (s: string) => s },
 		});
 		try {
 			const provided = handle.components.oauthTokenSettings;
@@ -240,7 +241,7 @@ describe("the oauth module names oauthTokenSettings authoritative", () => {
 		const config = fixture();
 		const caught = await createApp({
 			modules: [oauthModule({ config }), ...stubs, reader({})],
-			bootstrapComponents: { config, pathResolver: (s: string) => s },
+			bootstrapComponents: { config: withOauthCaptures(config), pathResolver: (s: string) => s },
 			overrideComponents: { oauthTokenSettings: SECOND },
 		}).then(
 			async (handle) => {
@@ -263,7 +264,7 @@ describe("the oauth module names oauthTokenSettings authoritative", () => {
 		const config = fixture();
 		const handle = await createApp({
 			modules: [...stubs, reader(seen)],
-			bootstrapComponents: { config, pathResolver: (s: string) => s },
+			bootstrapComponents: { config: withOauthCaptures(config), pathResolver: (s: string) => s },
 			overrideComponents: { oauthTokenSettings: SECOND },
 		});
 		try {

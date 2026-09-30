@@ -39,6 +39,7 @@ import { describe, expect, it, vi } from "vitest";
 import { oauthModule } from "#/module.mjs";
 import { createOAuthRouter } from "#/routes.mjs";
 import { codeRecord } from "./_helpers/codeRecord.mjs";
+import { withOauthCaptures } from "./_helpers/sections.mjs";
 
 const SECRET = "test-secret-at-least-32-chars!!";
 const keyStore = createSymmetricKeyStore(SECRET);
@@ -49,7 +50,6 @@ const mockConfig = {
 		jwt: { issuer: "https://auth.example" },
 		accessToken: { expiresIn: 3600 },
 		refreshToken: { expiresIn: 86400 },
-		grants: {},
 	},
 	endpoints: {
 		login: { url: "/login" },
@@ -474,7 +474,7 @@ describe("oauthModule — refreshTokenFamilyRevocation composition via createTes
 				keyStoreForC1,
 				refreshTokenFamilyRevocationModule,
 			],
-			bootstrapComponents: { config, pathResolver: (s) => s },
+			bootstrapComponents: { config: withOauthCaptures(config), pathResolver: (s) => s },
 		});
 
 		const app = express();

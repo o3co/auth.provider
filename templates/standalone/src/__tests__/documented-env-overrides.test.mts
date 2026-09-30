@@ -25,6 +25,7 @@ import {
 	moduleReferences,
 	resolveAccessTokenLifetime,
 } from "@o3co/auth-provider-core";
+import { oauthModule } from "@o3co/auth-provider-oauth";
 import { describe, expect, it } from "vitest";
 import { buildModules } from "../buildModules.mjs";
 import {
@@ -103,32 +104,29 @@ const DOCUMENTED_ENV: Readonly<Record<string, string>> = {
 	OAUTH_REVOCATION_SUBJECT: "unsupported",
 	OAUTH_REQUIRE_EMAIL_VERIFIED: "true",
 	OAUTH_REQUIRE_GRANT_TYPE_ALLOWLIST: "true",
-	OAUTH_GRANTS_JWT_BEARER_ENABLED: "false",
 	OAUTH_NONCE_MAX_LENGTH: "256",
 	OAUTH_RESOURCE_INDICATOR_ENABLED: "true",
-	OAUTH_CIMD_ENABLED: "true",
-	OAUTH_CIMD_ALLOWED_SCOPES: "read, write",
-	OAUTH_CIMD_ALLOWED_AUDIENCES: "https://mcp.example",
-	OAUTH_CIMD_ALLOWED_HOSTS: "client.example, .trusted.example",
-	OAUTH_CIMD_DENIED_HOSTS: "evil.example",
-	OAUTH_CIMD_MAX_BYTES: "8192",
-	OAUTH_CIMD_TIMEOUT_MS: "3000",
-	OAUTH_CIMD_CACHE_MAX_AGE_MS: "60000",
-	OAUTH_CIMD_MAX_CACHE_ENTRIES: "128",
-	OAUTH_CIMD_STALE_IF_ERROR_MS: "120000",
-	OAUTH_CIMD_NEGATIVE_CACHE_MS: "30000",
-	OAUTH_CIMD_MAX_CONCURRENT_FETCHES: "4",
+	OAUTH_CLIENT_ID_METADATA_DOCUMENTS_ENABLED: "true",
+	OAUTH_CLIENT_ID_METADATA_DOCUMENTS_ALLOWED_SCOPES: "read, write",
+	OAUTH_CLIENT_ID_METADATA_DOCUMENTS_ALLOWED_AUDIENCES: "https://mcp.example",
+	OAUTH_CLIENT_ID_METADATA_DOCUMENTS_ALLOWED_HOSTS: "client.example, .trusted.example",
+	OAUTH_CLIENT_ID_METADATA_DOCUMENTS_DENIED_HOSTS: "evil.example",
+	OAUTH_CLIENT_ID_METADATA_DOCUMENTS_MAX_BYTES: "8192",
+	OAUTH_CLIENT_ID_METADATA_DOCUMENTS_TIMEOUT_MS: "3000",
+	OAUTH_CLIENT_ID_METADATA_DOCUMENTS_CACHE_MAX_AGE_MS: "60000",
+	OAUTH_CLIENT_ID_METADATA_DOCUMENTS_MAX_CACHE_ENTRIES: "128",
+	OAUTH_CLIENT_ID_METADATA_DOCUMENTS_STALE_IF_ERROR_MS: "120000",
+	OAUTH_CLIENT_ID_METADATA_DOCUMENTS_NEGATIVE_CACHE_MS: "30000",
+	OAUTH_CLIENT_ID_METADATA_DOCUMENTS_MAX_CONCURRENT_FETCHES: "4",
 	CORE_TOKEN_BINDING_DISPATCH_POLICY: "intent-explicit",
 	CORE_TOKEN_BINDING_BIND_CONFIDENTIAL_CLIENT_REFRESH_TOKENS: "true",
 
-	// --- oauth.grants -------------------------------------------------
-	OAUTH_GRANTS_SESSION_ENABLED: "false",
-	OAUTH_GRANTS_AUTHORIZATION_CODE_ENABLED: "true",
-	OAUTH_GRANTS_REFRESH_TOKEN_ENABLED: "true",
-	OAUTH_GRANTS_CLIENT_CREDENTIALS_ENABLED: "true",
-	// Tombstone: inert, but a still-exported value must reach the boot
-	// warning rather than failing parse.
-	OAUTH_GRANTS_AUTHORIZATION_CODE_PKCE_REQUIRE_S256: "true",
+	// --- the grant switches ------------------------------------------
+	OAUTH_SESSION_ENABLED: "false",
+	OAUTH_AUTHORIZATION_GRANTS_AUTHORIZATION_CODE_ENABLED: "true",
+	OAUTH_AUTHORIZATION_GRANTS_REFRESH_TOKEN_ENABLED: "true",
+	OAUTH_AUTHORIZATION_GRANTS_CLIENT_CREDENTIALS_ENABLED: "true",
+	OAUTH_AUTHORIZATION_GRANTS_JWT_BEARER_ENABLED: "false",
 
 	// --- session ------------------------------------------------------
 	SESSION_SECRET: "documented-env-session-secret.at-least-32-bytes.ok",
@@ -245,7 +243,7 @@ const DOCUMENTED_ENV: Readonly<Record<string, string>> = {
 
 	// --- endpoints ----------------------------------------------------
 	ENDPOINTS_LOGIN_URL: "/login",
-	ENDPOINTS_CONSENT_URL: "/consent",
+	OAUTH_CONSENT_PAGE_URL: "/consent",
 
 	// --- cors ---------------------------------------------------------
 	// A list, in the only shape an environment variable can carry one.
@@ -278,11 +276,50 @@ const DELIBERATELY_UNSET: Readonly<Record<string, string>> = {
 		"renamed CORE_TOKEN_BINDING_DISPATCH_POLICY, and only captured — set alone, or to another value, it fails boot",
 	OAUTH_TOKEN_BINDING_BIND_CONFIDENTIAL_CLIENT_REFRESH_TOKENS:
 		"renamed CORE_TOKEN_BINDING_BIND_CONFIDENTIAL_CLIENT_REFRESH_TOKENS, and only captured — set alone, or to another value, it fails boot",
+	OAUTH_GRANTS_SESSION_ENABLED:
+		"renamed OAUTH_SESSION_ENABLED, and only captured — set alone, or to another value, it fails boot",
+	OAUTH_GRANTS_AUTHORIZATION_CODE_ENABLED:
+		"renamed OAUTH_AUTHORIZATION_GRANTS_AUTHORIZATION_CODE_ENABLED, and only captured — set alone, or to another value, it fails boot",
+	OAUTH_GRANTS_REFRESH_TOKEN_ENABLED:
+		"renamed OAUTH_AUTHORIZATION_GRANTS_REFRESH_TOKEN_ENABLED, and only captured — set alone, or to another value, it fails boot",
+	OAUTH_GRANTS_CLIENT_CREDENTIALS_ENABLED:
+		"renamed OAUTH_AUTHORIZATION_GRANTS_CLIENT_CREDENTIALS_ENABLED, and only captured — set alone, or to another value, it fails boot",
+	OAUTH_GRANTS_JWT_BEARER_ENABLED:
+		"renamed OAUTH_AUTHORIZATION_GRANTS_JWT_BEARER_ENABLED, and only captured — set alone, or to another value, it fails boot",
+	ENDPOINTS_CONSENT_URL:
+		"renamed OAUTH_CONSENT_PAGE_URL, and only captured — set alone, or to another value, it fails boot",
+	OAUTH_CIMD_ENABLED:
+		"renamed OAUTH_CLIENT_ID_METADATA_DOCUMENTS_ENABLED, and only captured — set alone, or to another value, it fails boot",
+	OAUTH_CIMD_ALLOWED_SCOPES:
+		"renamed OAUTH_CLIENT_ID_METADATA_DOCUMENTS_ALLOWED_SCOPES, and only captured — set alone, or to another value, it fails boot",
+	OAUTH_CIMD_ALLOWED_AUDIENCES:
+		"renamed OAUTH_CLIENT_ID_METADATA_DOCUMENTS_ALLOWED_AUDIENCES, and only captured — set alone, or to another value, it fails boot",
+	OAUTH_CIMD_ALLOWED_HOSTS:
+		"renamed OAUTH_CLIENT_ID_METADATA_DOCUMENTS_ALLOWED_HOSTS, and only captured — set alone, or to another value, it fails boot",
+	OAUTH_CIMD_DENIED_HOSTS:
+		"renamed OAUTH_CLIENT_ID_METADATA_DOCUMENTS_DENIED_HOSTS, and only captured — set alone, or to another value, it fails boot",
+	OAUTH_CIMD_MAX_BYTES:
+		"renamed OAUTH_CLIENT_ID_METADATA_DOCUMENTS_MAX_BYTES, and only captured — set alone, or to another value, it fails boot",
+	OAUTH_CIMD_TIMEOUT_MS:
+		"renamed OAUTH_CLIENT_ID_METADATA_DOCUMENTS_TIMEOUT_MS, and only captured — set alone, or to another value, it fails boot",
+	OAUTH_CIMD_CACHE_MAX_AGE_MS:
+		"renamed OAUTH_CLIENT_ID_METADATA_DOCUMENTS_CACHE_MAX_AGE_MS, and only captured — set alone, or to another value, it fails boot",
+	OAUTH_CIMD_MAX_CACHE_ENTRIES:
+		"renamed OAUTH_CLIENT_ID_METADATA_DOCUMENTS_MAX_CACHE_ENTRIES, and only captured — set alone, or to another value, it fails boot",
+	OAUTH_CIMD_STALE_IF_ERROR_MS:
+		"renamed OAUTH_CLIENT_ID_METADATA_DOCUMENTS_STALE_IF_ERROR_MS, and only captured — set alone, or to another value, it fails boot",
+	OAUTH_CIMD_NEGATIVE_CACHE_MS:
+		"renamed OAUTH_CLIENT_ID_METADATA_DOCUMENTS_NEGATIVE_CACHE_MS, and only captured — set alone, or to another value, it fails boot",
+	OAUTH_CIMD_MAX_CONCURRENT_FETCHES:
+		"renamed OAUTH_CLIENT_ID_METADATA_DOCUMENTS_MAX_CONCURRENT_FETCHES, and only captured — set alone, or to another value, it fails boot",
+	OAUTH_GRANTS_AUTHORIZATION_CODE_PKCE_REQUIRE_S256:
+		"the authorization-code grant's pkce block was removed, and this is only captured — set at all, it fails boot",
 };
 
 /**
  * The provider environment `o3co/auth`'s `tests/docker-compose.yml` sets,
- * transcribed. The umbrella E2E boots the shipped template with exactly this,
+ * transcribed: each renamed variable under its old and its new name, the two
+ * at one value. The umbrella E2E boots the shipped template with exactly this,
  * so a parse failure here is a red umbrella build that this repository can see
  * first. `SESSION_SECURE=false` is the one it cannot run without: the suite
  * speaks plain HTTP.
@@ -294,24 +331,37 @@ const DELIBERATELY_UNSET: Readonly<Record<string, string>> = {
  */
 const UMBRELLA_E2E_ENV: Readonly<Record<string, string>> = {
 	OAUTH_JWT_ALGORITHM: "HS256",
+	KEY_STORE_LOCAL_ALGORITHM: "HS256",
 	OAUTH_JWT_SECRET: "e2e-shared-hs256-secret.at-least-32-bytes.ok",
+	KEY_STORE_LOCAL_SECRET: "e2e-shared-hs256-secret.at-least-32-bytes.ok",
 	OAUTH_JWT_ISSUER: "https://auth.e2e.test",
 	SESSION_SECRET: "lO0QH09fuKSGuViZ9myJbH3jsgai99A2GpC3RYRuy6Y=",
+	SESSION_STORE_SECRET: "lO0QH09fuKSGuViZ9myJbH3jsgai99A2GpC3RYRuy6Y=",
 	SESSION_SECURE: "false",
+	SESSION_STORE_SECURE: "false",
 	SESSION_NAME: "auth.session",
+	SESSION_STORE_NAME: "auth.session",
 	DEPLOYMENT_MODE: "multi",
 	CORE_DEPLOYMENT_MODE: "multi",
 	REFRESH_TOKEN_FAMILY_STORE_REDIS_URL: "redis://redis:6379",
+	REDIS_CLIENTS_URL: "redis://redis:6379",
 	SESSION_STORAGE_REDIS_URL: "redis://redis:6379",
+	SESSION_STORE_STORAGE_REDIS_URL: "redis://redis:6379",
 	USER_SESSION_STORES_ADAPTER: "redis",
+	STANDALONE_ADAPTERS_USER_SESSION_STORES: "redis",
 	RATE_LIMITER_ADAPTER: "redis",
+	STANDALONE_ADAPTERS_RATE_LIMITER: "redis",
 	OAUTH_CODE_ADAPTER: "redis",
+	STANDALONE_ADAPTERS_CODE_REPOSITORY: "redis",
 	FEDERATION_TOKEN_STORE_TYPE: "redis",
+	STANDALONE_ADAPTERS_FEDERATION_TOKEN_STORE: "redis",
 	REDIS_FEDERATION_TOKEN_STORE_ENCRYPTION_KEY: "BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc=",
 	CLIENT_USER_TYPE: "yaml",
+	STANDALONE_ADAPTERS_USER_REPOSITORY: "yaml",
 	OAUTH_RESOURCE_INDICATOR_ENABLED: "true",
 	OAUTH_REQUIRE_EMAIL_VERIFIED: "true",
-	OAUTH_GRANTS_AUTHORIZATION_CODE_PKCE_REQUIRE_S256: "true",
+	OAUTH_GRANTS_SESSION_ENABLED: "true",
+	OAUTH_SESSION_ENABLED: "true",
 };
 
 /** The template's own files for `configEnv`, under `operatorLayer` — HOCON an operator adds above them — when given. */
@@ -375,6 +425,16 @@ async function bootParsed(
 	await handle.dispose();
 	if (parsed === undefined) throw new Error("createApp booted without the parsed configuration");
 	return parsed;
+}
+
+/** `oauth {}` as the oauth module's own schema parses it. */
+function oauthSection(config: AppConfig): {
+	readonly consentPage?: { readonly url: string };
+	readonly clientIdMetadataDocuments?: Readonly<Record<string, unknown>>;
+} {
+	const schema = oauthModule({ config }).section?.schema;
+	if (schema === undefined) throw new Error("the oauth module declares no section");
+	return schema.parse(config.oauth) as ReturnType<typeof oauthSection>;
 }
 
 /** Every `${?VAR}` in a HOCON layer, ignoring commented-out lines. */
@@ -460,8 +520,9 @@ describe("the shipped config boots with every documented override supplied as a 
 		// A Redis store's section, which its module (not loaded here) parses.
 		const sections = config as unknown as Record<string, { keyPrefix?: unknown } | undefined>;
 		expect(sections["redis-consent-store"]?.keyPrefix).toBe("tenant-a:consent:");
-		// The comma-separated lists become lists, trimmed; the numbers, numbers.
-		expect(config.oauth.clientIdMetadataDocuments).toEqual({
+		// The comma-separated lists become lists, trimmed; the numbers, numbers:
+		// the oauth module's schema reads them (the module is not loaded here).
+		expect(oauthSection(config).clientIdMetadataDocuments).toEqual({
 			enabled: true,
 			allowedScopes: ["read", "write"],
 			allowedAudiences: ["https://mcp.example"],

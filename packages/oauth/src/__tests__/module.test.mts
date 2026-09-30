@@ -51,6 +51,7 @@ import { oauthModule } from "#/module.mjs";
 import { oauthAuthorizationModule } from "#/oauthAuthorization.mjs";
 import { oauthSessionModule } from "#/oauthSession.mjs";
 import { createMockLogger } from "./_helpers/mockLogger.mjs";
+import { withGrants, withOauthCaptures } from "./_helpers/sections.mjs";
 
 /**
  * A federation that satisfies the `FederationProvider` contract, with whatever
@@ -296,7 +297,7 @@ describe("oauthModule — createTestApp boot failure", () => {
 					codeRepositoryModule,
 					keyStoreModule,
 				],
-				bootstrapComponents: { config, pathResolver: (s) => s },
+				bootstrapComponents: { config: withOauthCaptures(config), pathResolver: (s) => s },
 			}),
 		).rejects.toMatchObject({
 			name: "BootError",
@@ -316,7 +317,7 @@ describe("oauthModule — createTestApp boot failure", () => {
 				codeRepositoryModule,
 				keyStoreModule,
 			],
-			bootstrapComponents: { config, pathResolver: (s) => s },
+			bootstrapComponents: { config: withOauthCaptures(config), pathResolver: (s) => s },
 		});
 	};
 
@@ -376,7 +377,7 @@ describe("oauthModule — createTestApp route inspection", () => {
 				codeRepositoryModule,
 				keyStoreModule,
 			],
-			bootstrapComponents: { config, pathResolver: (s) => s },
+			bootstrapComponents: { config: withOauthCaptures(config), pathResolver: (s) => s },
 		});
 		const routeIds = handle.inspect.routes.map((r) => r.contribution.id);
 		expect(routeIds).toContain("oauth-endpoints");
@@ -399,7 +400,7 @@ describe("oauthModule — createTestApp route inspection", () => {
 				codeRepositoryModule,
 				keyStoreModule,
 			],
-			bootstrapComponents: { config, pathResolver: (s) => s },
+			bootstrapComponents: { config: withOauthCaptures(config), pathResolver: (s) => s },
 		});
 		const oauthRoute = handle.inspect.routes.find((r) => r.contribution.id === "oauth-endpoints");
 		expect(oauthRoute?.contribution.mountPath).toBe("/oauth");
@@ -429,7 +430,7 @@ describe("oauthModule — createTestApp route inspection", () => {
 				codeRepositoryModule,
 				keyStoreModule,
 			],
-			bootstrapComponents: { config, pathResolver: (s) => s },
+			bootstrapComponents: { config: withOauthCaptures(config), pathResolver: (s) => s },
 		});
 		const app = express();
 		app.use(handle.router);
@@ -487,7 +488,7 @@ describe("oauthModule — the acr table in the served discovery document", () =>
 				asymmetricKeyStoreModule,
 				...extraModules,
 			],
-			bootstrapComponents: { config, pathResolver: (s) => s, logger },
+			bootstrapComponents: { config: withOauthCaptures(config), pathResolver: (s) => s, logger },
 		});
 		const app = express();
 		app.use(handle.router);
@@ -604,7 +605,7 @@ describe("oauthModule + jwksModule — discovery/JWKS path agreement", () => {
 				// observable with a keystore that has public material.
 				asymmetricKeyStoreModule,
 			],
-			bootstrapComponents: { config, pathResolver: (s) => s },
+			bootstrapComponents: { config: withOauthCaptures(config), pathResolver: (s) => s },
 		});
 		const app = express();
 		app.use(handle.router);
@@ -644,7 +645,7 @@ describe("oauthModule + jwksModule — discovery/JWKS path agreement", () => {
 				codeRepositoryModule,
 				keyStoreModule,
 			],
-			bootstrapComponents: { config, pathResolver: (s) => s },
+			bootstrapComponents: { config: withOauthCaptures(config), pathResolver: (s) => s },
 		});
 		const app = express();
 		app.use(handle.router);
@@ -709,7 +710,7 @@ describe("oauthModule + jwksModule — discovery/JWKS path agreement", () => {
 				codeRepositoryModule,
 				keyStoreModule,
 			],
-			bootstrapComponents: { config, pathResolver: (s) => s },
+			bootstrapComponents: { config: withOauthCaptures(config), pathResolver: (s) => s },
 		});
 		const app = express();
 		app.use(handle.router);
@@ -725,22 +726,14 @@ describe("oauthModule + jwksModule — discovery/JWKS path agreement", () => {
 	it("advertises exactly the grant types the config actually enabled", async () => {
 		// End-to-end guard on the anti-drift property: `grant_types_supported` is
 		// read off the same `grantHandlerResolver` `/oauth/token` dispatches
-		// against, so a grant gated off by `oauth.grants.<name>.enabled` cannot be
-		// advertised, and one gated on cannot be missed.
-		const base = issuerConfig();
-		const config = {
-			...base,
-			oauth: {
-				...base.oauth,
-				grants: {
-					...base.oauth.grants,
-					authorization_code: { enabled: true },
-					refresh_token: { enabled: true },
-					// Left off on purpose — it must not appear below.
-					client_credentials: { enabled: false },
-				},
-			},
-		} as ReturnType<typeof makeValidAppConfig>;
+		// against, so a grant whose switch is off cannot be advertised, and one
+		// switched on cannot be missed.
+		const config = withGrants(issuerConfig(), {
+			authorizationCode: true,
+			refreshToken: true,
+			// Left off on purpose — it must not appear below.
+			clientCredentials: false,
+		}) as ReturnType<typeof makeValidAppConfig>;
 		const handle = await createTestApp({
 			modules: [
 				oauthModule({ config }),
@@ -755,7 +748,7 @@ describe("oauthModule + jwksModule — discovery/JWKS path agreement", () => {
 				codeRepositoryModule,
 				keyStoreModule,
 			],
-			bootstrapComponents: { config, pathResolver: (s) => s },
+			bootstrapComponents: { config: withOauthCaptures(config), pathResolver: (s) => s },
 		});
 		const app = express();
 		app.use(handle.router);
@@ -781,7 +774,7 @@ describe("oauthModule + jwksModule — discovery/JWKS path agreement", () => {
 				codeRepositoryModule,
 				asymmetricKeyStoreModule,
 			],
-			bootstrapComponents: { config, pathResolver: (s) => s },
+			bootstrapComponents: { config: withOauthCaptures(config), pathResolver: (s) => s },
 		});
 		const app = express();
 		app.use(handle.router);
@@ -846,7 +839,7 @@ describe("oauthModule — behavioral: rateLimiter + auditSink forwarding", () =>
 				rateLimiterModule,
 				auditSinkModule,
 			],
-			bootstrapComponents: { config, pathResolver: (s) => s },
+			bootstrapComponents: { config: withOauthCaptures(config), pathResolver: (s) => s },
 		});
 
 		// Mount the routes onto an express app for HTTP probing
@@ -1020,7 +1013,7 @@ describe("oauthModule — federation logout via typed deps", () => {
 				refreshTokenFamilyRevocationModule,
 				federationModule,
 			],
-			bootstrapComponents: { config, pathResolver: (s) => s },
+			bootstrapComponents: { config: withOauthCaptures(config), pathResolver: (s) => s },
 		});
 
 		const app = express();
@@ -1130,7 +1123,7 @@ describe("oauthModule — federation logout via typed deps", () => {
 				federationTokenStoreModule,
 				refreshTokenFamilyRevocationModule,
 			],
-			bootstrapComponents: { config, pathResolver: (s) => s },
+			bootstrapComponents: { config: withOauthCaptures(config), pathResolver: (s) => s },
 		});
 
 		const app = express();
@@ -1206,7 +1199,7 @@ describe("oauthModule — the login trip is the loginEntry slot when a module pr
 				keyStoreModule,
 				...modules,
 			],
-			bootstrapComponents: { config, pathResolver: (s) => s },
+			bootstrapComponents: { config: withOauthCaptures(config), pathResolver: (s) => s },
 		});
 		try {
 			const app = express();
@@ -1277,19 +1270,11 @@ describe("oauthModule — a consumer of session admission", () => {
 		readonly refresh_token: boolean;
 		readonly session: boolean;
 	}) => {
-		const base = makeValidAppConfig();
-		return {
-			...base,
-			oauth: {
-				...base.oauth,
-				grants: {
-					...base.oauth.grants,
-					authorization_code: { enabled: enabled.authorization_code },
-					refresh_token: { enabled: enabled.refresh_token },
-					session: { enabled: enabled.session },
-				},
-			},
-		} as ReturnType<typeof makeValidAppConfig>;
+		return withGrants(makeValidAppConfig(), {
+			authorizationCode: enabled.authorization_code,
+			refreshToken: enabled.refresh_token,
+			session: enabled.session,
+		}) as ReturnType<typeof makeValidAppConfig>;
 	};
 
 	it("registers each session-bound grant's action beside the grant, graded use", () => {
@@ -1320,19 +1305,13 @@ describe("oauthModule — a composition with no authorization_code grant", () =>
 	 */
 	const headlessConfig = (authorizationCode: boolean) => {
 		const base = makeValidAppConfig();
-		return {
-			...base,
-			oauth: {
-				...base.oauth,
-				jwt: { ...base.oauth.jwt, issuer: "https://auth.example.com" },
-				grants: {
-					...base.oauth.grants,
-					authorization_code: { enabled: authorizationCode },
-					refresh_token: { enabled: false },
-					client_credentials: { enabled: true },
-				},
+		return withGrants(
+			{
+				...base,
+				oauth: { ...base.oauth, jwt: { ...base.oauth.jwt, issuer: "https://auth.example.com" } },
 			},
-		} as ReturnType<typeof makeValidAppConfig>;
+			{ authorizationCode, refreshToken: false, clientCredentials: true },
+		) as ReturnType<typeof makeValidAppConfig>;
 	};
 	const boot = (authorizationCode: boolean, extra: readonly Module[] = []) => {
 		const config = headlessConfig(authorizationCode);
@@ -1346,7 +1325,7 @@ describe("oauthModule — a composition with no authorization_code grant", () =>
 				keyStoreModule,
 				...extra,
 			],
-			bootstrapComponents: { config, pathResolver: (s) => s },
+			bootstrapComponents: { config: withOauthCaptures(config), pathResolver: (s) => s },
 		});
 	};
 
@@ -1398,7 +1377,7 @@ describe("oauthModule — a composition with no authorization_code grant", () =>
 				clientRepositoryModule,
 				keyStoreModule,
 			],
-			bootstrapComponents: { config, pathResolver: (s) => s, logger },
+			bootstrapComponents: { config: withOauthCaptures(config), pathResolver: (s) => s, logger },
 		});
 		const app = express();
 		app.use(handle.router);
@@ -1423,7 +1402,7 @@ describe("oauthModule — a composition with no authorization_code grant", () =>
 				clientRepositoryModule,
 				keyStoreModule,
 			],
-			bootstrapComponents: { config, pathResolver: (s) => s },
+			bootstrapComponents: { config: withOauthCaptures(config), pathResolver: (s) => s },
 		}).then(
 			async (handle) => {
 				await handle.dispose();

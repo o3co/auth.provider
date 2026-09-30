@@ -26,11 +26,23 @@ import { memoryRateLimiterModule, moduleReferences } from "@o3co/auth-provider-c
 import { CORE_RELOCATIONS, renamedVariableCaptures } from "@o3co/auth-provider-core/testing";
 import { federationGrantsModules } from "@o3co/auth-provider-federation-grants";
 import {
+	oauthAuthorizationModule,
+	oauthModule,
+	oauthSessionModule,
+} from "@o3co/auth-provider-oauth";
+import {
 	redisFederationGrantStoreModule,
 	redisRateLimiterModule,
 	redisRefreshTokenFamilyStoreModule,
 } from "@o3co/auth-provider-redis";
 import { type Config, empty, parseFile } from "@o3co/ts.hocon";
+
+/** The oauth package's modules, whose manifests read nothing of the configuration they are handed but the grant switches. */
+const OAUTH_MODULES = [
+	oauthModule({ config: {} as never }),
+	oauthSessionModule({ config: {} as never }),
+	oauthAuthorizationModule({ config: {} as never }),
+];
 
 /** The modules the template composes that declare a renamed variable. */
 const RENAMING_MODULES = [
@@ -38,12 +50,14 @@ const RENAMING_MODULES = [
 	redisRateLimiterModule,
 	redisRefreshTokenFamilyStoreModule,
 	redisFederationGrantStoreModule,
+	...OAUTH_MODULES,
 ];
 
 /** Every package reference the template's modules declare, core's last. */
 const LIBRARY_REFERENCES: readonly URL[] = moduleReferences([
 	redisRateLimiterModule,
 	...federationGrantsModules,
+	...OAUTH_MODULES,
 ]);
 
 /** The libraries' references resolved under `env`, in the order `app.mts` layers them. */
