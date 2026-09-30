@@ -21,6 +21,7 @@ import {
 	policyOutOfBounds,
 	readGrantPolicyDecision,
 } from "#/grants/grantPolicy.mjs";
+import { consoleLogger } from "#/logging/consoleLogger.mjs";
 import type {
 	GrantPolicyContext,
 	GrantPolicyDecision,
@@ -137,6 +138,46 @@ describe("evaluateGrantPolicy", () => {
 			);
 		},
 	);
+
+	// A composition that wires no logger leaves the grant's `undefined`; the
+	// policy's two lines still reach core's console logger.
+	it("writes a throwing policy's line to core's console logger when the grant has no logger", async () => {
+		const spy = vi.spyOn(consoleLogger, "error").mockImplementation(() => {});
+		try {
+			const outcome = await evaluateGrantPolicy(
+				hook(async () => {
+					throw new Error("policy service down");
+				}),
+				request,
+				context,
+				["read"],
+				{ logger: undefined },
+			);
+			expect(outcome).toMatchObject({ ok: false, result: { status: 503 } });
+			expect(spy.mock.calls.map(([, event]) => event)).toEqual(["grant_policy_unavailable"]);
+		} finally {
+			spy.mockRestore();
+		}
+	});
+
+	it("writes an invalid decision's line to core's console logger when the grant has no logger", async () => {
+		const spy = vi.spyOn(consoleLogger, "error").mockImplementation(() => {});
+		try {
+			const outcome = await evaluateGrantPolicy(
+				hook(async () => ({ outcome: "denied" }) as unknown as GrantPolicyDecision),
+				request,
+				context,
+				["read"],
+				{ logger: undefined },
+			);
+			expect(outcome).toEqual({ ok: false, result: DECISION_INVALID });
+			expect(spy.mock.calls).toEqual([
+				[{ grantType: request.grantType, policy: "stub" }, "grant_policy_decision_invalid"],
+			]);
+		} finally {
+			spy.mockRestore();
+		}
+	});
 
 	it("passes a deny through as 400 with the policy's own error", async () => {
 		const outcome = await evaluateGrantPolicy(
@@ -314,11 +355,17 @@ describe("readGrantPolicyDecision", () => {
 		);
 	});
 
-	it("reads an invalid decision without a logger", () => {
-		expect(readGrantPolicyDecision({}, undefined, site)).toEqual({
-			verdict: "invalid",
-			result: DECISION_INVALID,
-		});
+	it("writes an invalid decision's line to core's console logger when it is given no logger", () => {
+		const spy = vi.spyOn(consoleLogger, "error").mockImplementation(() => {});
+		try {
+			expect(readGrantPolicyDecision({}, undefined, site)).toEqual({
+				verdict: "invalid",
+				result: DECISION_INVALID,
+			});
+			expect(spy.mock.calls).toEqual([[site, "grant_policy_decision_invalid"]]);
+		} finally {
+			spy.mockRestore();
+		}
 	});
 });
 
