@@ -250,7 +250,9 @@ describe("memoryMfaTransactionStoreModule", () => {
 		expect(memoryMfaTransactionStoreModule.replicaSafety?.reason).toMatch(
 			/unknown to the replica that receives the verification/,
 		);
-		expect(memoryMfaTransactionStoreModule.replicaSafety?.reason).toMatch(/per replica/);
+		expect(memoryMfaTransactionStoreModule.replicaSafety?.reason).toMatch(
+			/the attempt limits and the lockout are counted per replica/,
+		);
 		// With a durable factor store beside it, a restart after an operator
 		// reset lets a password holder bind without the email proof (the MFA
 		// ADR's D25).
