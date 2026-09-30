@@ -25,8 +25,8 @@
 
 import type { RateLimitSpec } from "@o3co/auth-provider-core";
 import { describe, expect, it } from "vitest";
-import { webauthnModule } from "../module.mjs";
-import { WEBAUTHN_AUTHENTICATION_OPTIONS_RATE_LIMIT_TAG } from "../routes/authenticationOptions.mjs";
+import { webauthnModule } from "#/module.mjs";
+import { WEBAUTHN_AUTHENTICATION_OPTIONS_RATE_LIMIT_TAG } from "#/routes/authenticationOptions.mjs";
 
 /** What the module contributes for its options route, from the `webauthn` section. */
 const optionsBudget = async (section: unknown): Promise<RateLimitSpec | null | undefined> =>
