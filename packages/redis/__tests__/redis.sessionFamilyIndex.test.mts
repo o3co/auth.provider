@@ -14,17 +14,27 @@
  * limitations under the License.
  */
 
+import {
+	type SessionFamilyIndex,
+	type SupportsSessionEnd,
+	supportsSessionEnd,
+} from "@o3co/auth-provider-core";
 import Redis from "ioredis";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import type { SessionFamilyIndexClient } from "../src/clients.mjs";
 import { makeIoredisClients } from "../src/ioredis.mjs";
 import { createRedisSessionFamilyIndex } from "../src/sessionFamilyIndex.mjs";
-import { runSessionFamilyIndexContract } from "./sessionFamilyIndex.contract.mjs";
-import { serverDeadlines, testRedis } from "./support/redis.mjs";
+import {
+	runSessionEndContract,
+	runSessionFamilyIndexContract,
+} from "./sessionFamilyIndex.contract.mjs";
+import { serverDeadlines, type TestRedis, testRedis } from "./support/redis.mjs";
 
+let at: TestRedis;
 let raw: Redis;
 
 beforeAll(async () => {
-	const at = await testRedis();
+	at = await testRedis();
 	raw = new Redis(at);
 });
 
@@ -33,17 +43,32 @@ afterAll(async () => {
 });
 
 let suiteCounter = 0;
-runSessionFamilyIndexContract(
-	async () => {
-		suiteCounter += 1;
-		const { sessionFamilyIndexClient } = makeIoredisClients(raw);
-		return createRedisSessionFamilyIndex({
-			client: sessionFamilyIndexClient,
-			keyPrefix: `t16:${suiteCounter}:`,
-		});
-	},
-	{ expiry: serverDeadlines(() => raw) },
-);
+const freshIndex = async (): Promise<SessionFamilyIndex> => {
+	suiteCounter += 1;
+	const { sessionFamilyIndexClient } = makeIoredisClients(raw);
+	return createRedisSessionFamilyIndex({
+		client: sessionFamilyIndexClient,
+		keyPrefix: `t16:${suiteCounter}:fi:`,
+		endedKeyPrefix: `t16:${suiteCounter}:fi-ended:`,
+	});
+};
+
+runSessionFamilyIndexContract(freshIndex, { expiry: serverDeadlines(() => raw) });
+runSessionEndContract(freshIndex, { expiry: serverDeadlines(() => raw) });
+
+/** An index that claims the session-end capability, over `client`. */
+const capable = (
+	client: SessionFamilyIndexClient,
+	prefix: string,
+): SessionFamilyIndex & SupportsSessionEnd => {
+	const idx = createRedisSessionFamilyIndex({
+		client,
+		keyPrefix: `${prefix}fi:`,
+		endedKeyPrefix: `${prefix}fi-ended:`,
+	});
+	if (!supportsSessionEnd(idx)) throw new Error("the Redis index does not claim SupportsSessionEnd");
+	return idx;
+};
 
 // ---------------------------------------------------------------------------
 // Concurrency cases
@@ -82,5 +107,110 @@ describe("SessionFamilyIndex concurrency", () => {
 		const list = await idx.listFamilyIds("sid-dedup");
 		expect(list).toHaveLength(1);
 		expect(list[0]).toBe("fam-dedup");
+	});
+
+	it("an add that falls between an end's mark and its listing is listed by the end and answers ended", async () => {
+		// The end's listing is held once its mark is written, and the add runs
+		// to its answer in that gap, on a connection of its own.
+		const { sessionFamilyIndexClient: base } = makeIoredisClients(raw);
+		let markWritten!: () => void;
+		const marked = new Promise<void>((resolve) => {
+			markWritten = resolve;
+		});
+		let releaseListing!: () => void;
+		const listingHeld = new Promise<void>((resolve) => {
+			releaseListing = resolve;
+		});
+		const gated: SessionFamilyIndexClient = {
+			...base,
+			zRange: async (key, start, stop) => {
+				markWritten();
+				await listingHeld;
+				return base.zRange(key, start, stop);
+			},
+		};
+		const grantConnection = new Redis(at);
+		try {
+			const ending = capable(gated, "t16:between:");
+			const granting = capable(
+				makeIoredisClients(grantConnection).sessionFamilyIndexClient,
+				"t16:between:",
+			);
+			const expiresAt = new Date(Date.now() + 60_000);
+			const listing = ending.endSession("sid-between", expiresAt);
+			await marked;
+			const answer = await granting.addFamilyIdUnlessEnded("sid-between", "fam-A", expiresAt);
+			releaseListing();
+			expect(answer).toBe("ended");
+			expect(await listing).toContain("fam-A");
+		} finally {
+			grantConnection.disconnect();
+		}
+	});
+
+	it("500 interleaved add/end pairs over two connections: in every pair the end lists the family or the add answers ended", async () => {
+		// One connection stands for the replica that serves the logout, the
+		// other for the one that serves the grant; each pair has a sid of its
+		// own, and which side starts first alternates.
+		const logoutConnection = new Redis(at);
+		const grantConnection = new Redis(at);
+		try {
+			const logout = capable(
+				makeIoredisClients(logoutConnection).sessionFamilyIndexClient,
+				"t16:pairs:",
+			);
+			const grant = capable(
+				makeIoredisClients(grantConnection).sessionFamilyIndexClient,
+				"t16:pairs:",
+			);
+			const expiresAt = new Date(Date.now() + 60_000);
+			const pairs = await Promise.all(
+				Array.from({ length: 500 }, async (_, i) => {
+					const sid = `sid-pair-${i}`;
+					const familyId = `fam-${i}`;
+					if (i % 2 === 0) {
+						const ending = logout.endSession(sid, expiresAt);
+						const answer = await grant.addFamilyIdUnlessEnded(sid, familyId, expiresAt);
+						return { familyId, listed: await ending, answer };
+					}
+					const adding = grant.addFamilyIdUnlessEnded(sid, familyId, expiresAt);
+					const listed = await logout.endSession(sid, expiresAt);
+					return { familyId, listed, answer: await adding };
+				}),
+			);
+			const neither = pairs.filter(
+				(pair) => !pair.listed.includes(pair.familyId) && pair.answer !== "ended",
+			);
+			expect(neither).toEqual([]);
+		} finally {
+			logoutConnection.disconnect();
+			grantConnection.disconnect();
+		}
+	});
+});
+
+// ---------------------------------------------------------------------------
+// The mark's key
+// ---------------------------------------------------------------------------
+
+describe("SessionFamilyIndex — the ended mark's key", () => {
+	it("is a key of its own under endedKeyPrefix, expiring at expiresAt, beside the family set", async () => {
+		const idx = capable(makeIoredisClients(raw).sessionFamilyIndexClient, "t16:layout:");
+		const expiresAt = new Date(Date.now() + 60_000);
+		await idx.addFamilyIdUnlessEnded("sid-1", "fam-A", expiresAt);
+		await idx.endSession("sid-1", expiresAt);
+		expect(await raw.type("t16:layout:fi-ended:sid-1")).toBe("string");
+		expect(await raw.pexpiretime("t16:layout:fi-ended:sid-1")).toBe(expiresAt.getTime());
+		expect(await raw.zrange("t16:layout:fi:sid-1", 0, -1)).toEqual(["fam-A"]);
+	});
+
+	it("outlives removeBySid, which removes the family set alone", async () => {
+		const idx = capable(makeIoredisClients(raw).sessionFamilyIndexClient, "t16:layout2:");
+		const expiresAt = new Date(Date.now() + 60_000);
+		await idx.addFamilyIdUnlessEnded("sid-1", "fam-A", expiresAt);
+		await idx.endSession("sid-1", expiresAt);
+		await idx.removeBySid("sid-1");
+		expect(await raw.exists("t16:layout2:fi:sid-1")).toBe(0);
+		expect(await raw.exists("t16:layout2:fi-ended:sid-1")).toBe(1);
 	});
 });

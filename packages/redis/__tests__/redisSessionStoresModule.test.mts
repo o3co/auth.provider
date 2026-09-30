@@ -14,7 +14,12 @@
  * limitations under the License.
  */
 
-import { createApp, defineModule } from "@o3co/auth-provider-core";
+import {
+	createApp,
+	defineModule,
+	type SessionFamilyIndex,
+	supportsSessionEnd,
+} from "@o3co/auth-provider-core";
 import { makeValidCoreConfig } from "@o3co/auth-provider-core/testing";
 import Redis from "ioredis";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -115,6 +120,44 @@ describe("redisSessionStoresModule wiring", () => {
 			expect((components.sessionFederationIndex as { kind: string }).kind).toBe("redis");
 			expect((components.subjectSessionIndex as { kind: string }).kind).toBe("redis");
 			expect((components.subjectRevocation as { kind: string }).kind).toBe("redis");
+		} finally {
+			await handle.dispose();
+		}
+	});
+
+	it("provides a family index with the session-end capability, its mark under the section's keyPrefix", async () => {
+		const activator = defineModule({
+			name: "activator",
+			requires: ["sessionFamilyIndex"] as never,
+			contributes: {
+				routes: [
+					{
+						mountPath: "/__test_noop__",
+						id: "test-noop",
+						handler: ((_req: unknown, _res: unknown, next: () => void) => next()) as never,
+					},
+				],
+			},
+		});
+		const handle = await createApp({
+			modules: [redisSessionStoresModule, activator],
+			bootstrapComponents: {
+				config: minBoot({ "redis-session-stores": { keyPrefix: "wire-end:" } }),
+				pathResolver: (p: string) => p,
+				...makeIoredisClients(raw),
+			} as never,
+		});
+		try {
+			const index = (handle.components as { sessionFamilyIndex?: SessionFamilyIndex })
+				.sessionFamilyIndex;
+			if (!supportsSessionEnd(index)) {
+				throw new Error("the module's family index does not claim SupportsSessionEnd");
+			}
+			const expiresAt = new Date(Date.now() + 60_000);
+			await index.addFamilyIdUnlessEnded("sid-1", "fam-A", expiresAt);
+			expect(await index.endSession("sid-1", expiresAt)).toEqual(["fam-A"]);
+			expect(await raw.exists("wire-end:fi-ended:sid-1")).toBe(1);
+			expect(await raw.zrange("wire-end:fi:sid-1", 0, -1)).toEqual(["fam-A"]);
 		} finally {
 			await handle.dispose();
 		}
