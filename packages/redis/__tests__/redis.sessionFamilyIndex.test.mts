@@ -221,7 +221,7 @@ describe("SessionFamilyIndex — the ended mark's key", () => {
 		expect(await raw.pexpiretime("t16:layout:fi-ended:sid-1")).toBe(
 			expiresAt.getTime() + DEFAULT_CLOCK_SKEW_MS,
 		);
-		expect(await raw.zrange("t16:layout:fi:sid-1", 0, -1)).toEqual(["fam-A"]);
+		expect(await raw.zrange("t16:layout:fi:sid-1", "0", "-1")).toEqual(["fam-A"]);
 	});
 
 	it("outlives removeBySid, which removes the family set alone", async () => {

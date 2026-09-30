@@ -157,7 +157,7 @@ describe("redisSessionStoresModule wiring", () => {
 			await index.addFamilyIdUnlessEnded("sid-1", "fam-A", expiresAt);
 			expect(await index.endSession("sid-1", expiresAt)).toEqual(["fam-A"]);
 			expect(await raw.exists("ss:fi-ended:sid-1")).toBe(1);
-			expect(await raw.zrange("ss:fi:sid-1", 0, -1)).toEqual(["fam-A"]);
+			expect(await raw.zrange("ss:fi:sid-1", "0", "-1")).toEqual(["fam-A"]);
 		} finally {
 			await handle.dispose();
 		}

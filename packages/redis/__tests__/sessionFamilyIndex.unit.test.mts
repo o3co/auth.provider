@@ -20,7 +20,11 @@
 // contract suite and the concurrency cases against Redis are in
 // `redis.sessionFamilyIndex.test.mts`.
 
-import { DEFAULT_CLOCK_SKEW_MS, supportsSessionEnd } from "@o3co/auth-provider-core";
+import {
+	DEFAULT_CLOCK_SKEW_MS,
+	type SessionFamilyIndex,
+	supportsSessionEnd,
+} from "@o3co/auth-provider-core";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { SessionFamilyIndexClient, SessionSidSortedSetMultiClient } from "../src/clients.mjs";
 import {
@@ -221,7 +225,7 @@ describe("redisSessionFamilyIndexBuilder — the ended mark", () => {
 			const idx = redisSessionFamilyIndexBuilder(
 				{ client: sortedSetOnly, keyPrefix } as never,
 				{ lifecycle: undefined } as never,
-			);
+			) as SessionFamilyIndex;
 			expect(idx.kind).toBe("redis");
 			expect(supportsSessionEnd(idx)).toBe(false);
 		}
@@ -233,7 +237,7 @@ describe("redisSessionFamilyIndexBuilder — the ended mark", () => {
 			const idx = redisSessionFamilyIndexBuilder(
 				{ client, keyPrefix } as never,
 				{ lifecycle: undefined } as never,
-			);
+			) as SessionFamilyIndex;
 			expect(supportsSessionEnd(idx)).toBe(false);
 			await idx.addFamilyId("sid-1", "fam-A", FUTURE());
 		}
@@ -245,7 +249,7 @@ describe("redisSessionFamilyIndexBuilder — the ended mark", () => {
 		const idx = redisSessionFamilyIndexBuilder(
 			{ client } as never,
 			{ lifecycle: undefined } as never,
-		);
+		) as SessionFamilyIndex;
 		if (!supportsSessionEnd(idx)) throw new Error("the index does not claim SupportsSessionEnd");
 		const expiresAt = FUTURE();
 		await idx.endSession("sid-1", expiresAt);
@@ -260,7 +264,7 @@ describe("redisSessionFamilyIndexBuilder — the ended mark", () => {
 		const idx = redisSessionFamilyIndexBuilder(
 			{ client, keyPrefix: "x:fi:", endedKeyPrefix: "x:fi-ended:" } as never,
 			{ lifecycle: undefined } as never,
-		);
+		) as SessionFamilyIndex;
 		if (!supportsSessionEnd(idx)) throw new Error("the index does not claim SupportsSessionEnd");
 		const expiresAt = FUTURE();
 		await idx.endSession("sid-1", expiresAt);
