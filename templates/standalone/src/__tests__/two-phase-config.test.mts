@@ -46,6 +46,10 @@ import {
 	createApp,
 	type Module,
 } from "@o3co/auth-provider-core";
+import {
+	redisFederationGrantIntentStoreModule,
+	redisFederationGrantStoreModule,
+} from "@o3co/auth-provider-redis";
 import { parseFile } from "@o3co/ts.hocon";
 import { validate } from "@o3co/ts.hocon/zod";
 import { describe, expect, it } from "vitest";
@@ -272,6 +276,61 @@ describe("phase two: what createApp is handed", () => {
 		// An environment variable's string, as HOCON substituted it: createApp parses it.
 		expect(resolved.http?.port).toBe("8080");
 		expect(resolved.core?.sessionRequirements).toEqual({ expected: ["mfa"] });
+	});
+});
+
+describe("phase two refuses the Redis grant store's key prefix moved while the intent store's is left at its default", () => {
+	const env = ENVIRONMENTS["the secrets alone"] as Readonly<Record<string, string>>;
+	const GRANT = "REDIS_FEDERATION_GRANT_STORE_KEY_PREFIX";
+	const INTENT = "REDIS_FEDERATION_GRANT_INTENT_STORE_KEY_PREFIX";
+	const BOTH_ON_REDIS = [redisFederationGrantStoreModule, redisFederationGrantIntentStoreModule];
+
+	/** Phase two over the template's development files, the variables set beside the secrets. */
+	const resolve = (
+		variables: Readonly<Record<string, string>>,
+		modules: readonly Module[] = BOTH_ON_REDIS,
+		files: readonly string[] = ownFiles("development"),
+	) => resolveForBoot(readOwnLayers(files, { env: { ...env, ...variables } }), modules, undefined);
+
+	/** What phase two refused with. */
+	const refusal = (...args: Parameters<typeof resolve>): RangeError => {
+		try {
+			resolve(...args);
+		} catch (err) {
+			if (err instanceof RangeError) return err;
+			throw err;
+		}
+		throw new Error("phase two resolved");
+	};
+
+	it("the grant store's set and the intent store's left alone: refused, naming both keys and both variables and quoting no value", () => {
+		const { message } = refusal({ [GRANT]: "t1:fg:" });
+		expect(message).toContain(`redis-federation-grant-store.keyPrefix (${GRANT})`);
+		expect(message).toContain(`redis-federation-grant-intent-store.keyPrefix (${INTENT})`);
+		expect(message).not.toContain("fg:");
+	});
+
+	it("the grant store's written in the operator's own layer: refused the same", () => {
+		const operator = operatorLayer('redis-federation-grant-store.keyPrefix = "t1:fg:"\n');
+		const { message } = refusal({}, BOTH_ON_REDIS, [operator, ...ownFiles("development")]);
+		expect(message).toContain(`redis-federation-grant-intent-store.keyPrefix (${INTENT})`);
+		expect(message).not.toContain("fg:");
+	});
+
+	it.each([
+		["both set to the same prefix", { [GRANT]: "t1:fg:", [INTENT]: "t1:fg:" }],
+		["each set to a prefix of its own", { [GRANT]: "t1:fg:", [INTENT]: "t1:fgi:" }],
+		["neither set", {}],
+	])("%s: resolved", (_, variables) => {
+		const resolved = resolve(variables) as unknown as Record<string, { keyPrefix?: unknown }>;
+		expect(resolved["redis-federation-grant-store"]?.keyPrefix).toBe(variables[GRANT] ?? "fg:");
+		expect(resolved["redis-federation-grant-intent-store"]?.keyPrefix).toBe(
+			variables[INTENT] ?? "fg:",
+		);
+	});
+
+	it("the grant store's set with the intent store not on Redis: resolved, as nothing of acquisition's is kept there", () => {
+		expect(() => resolve({ [GRANT]: "t1:fg:" }, [redisFederationGrantStoreModule])).not.toThrow();
 	});
 });
 

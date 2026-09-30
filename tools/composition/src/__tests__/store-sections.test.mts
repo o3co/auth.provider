@@ -430,6 +430,40 @@ describe("federation grants read at their modules' names, through the template's
 	});
 });
 
+describe("the Redis grant store's key prefix moved and the intent store's left at its default", () => {
+	const GRANT = "REDIS_FEDERATION_GRANT_STORE_KEY_PREFIX";
+	const INTENT = "REDIS_FEDERATION_GRANT_INTENT_STORE_KEY_PREFIX";
+
+	it("refuses boot, naming both keys and both variables and quoting no value", async () => {
+		const err = await composeFullSet(onRedis({ env: { [GRANT]: "t1:fg:" } })).then(
+			async (composition) => {
+				await composition.handle.dispose();
+				throw new Error("the full set booted");
+			},
+			(error: unknown) => error,
+		);
+		expect(err).toBeInstanceOf(RangeError);
+		const { message } = err as RangeError;
+		expect(message).toContain(`redis-federation-grant-store.keyPrefix (${GRANT})`);
+		expect(message).toContain(`redis-federation-grant-intent-store.keyPrefix (${INTENT})`);
+		expect(message).not.toContain("fg:");
+	});
+
+	it.each([
+		["both set to the same prefix", { [GRANT]: "t1:fg:", [INTENT]: "t1:fg:" }],
+		["each set to a prefix of its own", { [GRANT]: "t1:fg:", [INTENT]: "t1:fgi:" }],
+		["neither set", {}],
+	])("boots with %s", async (_, env: Readonly<Record<string, string>>) => {
+		const composition = await boot(onRedis({ env }));
+		expect(sectionOf(composition, "redis-federation-grant-store")).toMatchObject({
+			keyPrefix: env[GRANT] ?? "fg:",
+		});
+		expect(sectionOf(composition, "redis-federation-grant-intent-store")).toEqual({
+			keyPrefix: env[INTENT] ?? "fg:",
+		});
+	});
+});
+
 describe("a path the federation-grants sections moved from, written in the operator's own layer", () => {
 	const unbound = (module: string, from: string, to: string) => ({ module, from, to });
 	const bound = (module: string, from: string, to: string, environmentVariable: string) => ({
