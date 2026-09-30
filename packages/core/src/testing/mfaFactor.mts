@@ -104,12 +104,15 @@ export interface TestMfaFactorOptions {
 	/**
 	 * Mail codes instead, and take precedence over `challenge`: the enrollment
 	 * asks for its code to be mailed (`email_factor_enrollment`) and each
-	 * challenge for another (`login_code`), which a verification repeats; the
-	 * latest stands across attempts. Enrollable only by an account with an
-	 * address, which the factor never keeps.
+	 * challenge for another (`login_code`), each expiring ten minutes on, which
+	 * a verification repeats; the latest stands across attempts. Enrollable
+	 * only by an account with an address, which the factor never keeps.
 	 */
 	readonly mail?: boolean;
 }
+
+/** How long a code the double mails is accepted. */
+const MAILED_CODE_TTL_MS = 600_000;
 
 /**
  * A second factor with a trivial protocol, for tests: the enrollment answers
@@ -131,13 +134,17 @@ export function createTestMfaFactor(options: TestMfaFactorOptions = {}): MfaFact
 		counting: options.counting ?? true,
 		guessable: options.guessable ?? false,
 		describe: () => ({}),
-		beginEnrollment: async () => {
+		beginEnrollment: async (ctx) => {
 			const secret = newSecret();
 			return mails
 				? {
 						state: { secret },
 						response: { sent: true },
-						mail: { purpose: "email_factor_enrollment", code: secret },
+						mail: {
+							purpose: "email_factor_enrollment",
+							code: secret,
+							expiresAtMs: ctx.nowMs + MAILED_CODE_TTL_MS,
+						},
 					}
 				: { state: { secret }, response: { secret } };
 		},
@@ -172,12 +179,12 @@ export function createTestMfaFactor(options: TestMfaFactorOptions = {}): MfaFact
 					reusableChallenge: true,
 					enrollable: (user: Readonly<Record<string, unknown>>) =>
 						typeof user.email === "string" && user.email !== "",
-					challenge: async () => {
+					challenge: async (ctx) => {
 						const code = newSecret();
 						return {
 							state: { code },
 							response: { sent: true },
-							mail: { purpose: "login_code", code },
+							mail: { purpose: "login_code", code, expiresAtMs: ctx.nowMs + MAILED_CODE_TTL_MS },
 						};
 					},
 				}
