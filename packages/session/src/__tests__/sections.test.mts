@@ -327,7 +327,13 @@ describe("session-store's schema", () => {
 });
 
 describe("session's schema", () => {
-	const parse = (section: Record<string, unknown>) => sessionSectionSchema.safeParse(section);
+	/** `section` laid over the two keys the schema requires, as the package's reference ships them, parsed. */
+	const parse = (section: Record<string, unknown>) =>
+		sessionSectionSchema.safeParse({
+			loginPage: { url: "/login" },
+			rateLimit: { login: { windowMs: 900_000, limit: 20 } },
+			...section,
+		});
 	const paths = (result: ReturnType<typeof parse>): string[] =>
 		result.success ? [] : result.error.issues.map((issue) => issue.path.join("."));
 
@@ -614,6 +620,21 @@ describe("boot, over a configuration that captures the modules' renamed variable
 			SESSION_STORE_SECRET: secret,
 		});
 		await handle.dispose();
+	});
+
+	it.each([
+		["loginPage", "the login page"],
+		["rateLimit", "the login's budget"],
+	] as const)("refuses a session with no %s (%s) at validation, naming the key", async (key) => {
+		const err = await refusal((config) => {
+			const { [key]: _gone, ...section } = config.session as Record<string, unknown>;
+			return { ...config, session: section };
+		});
+
+		expect(err.reason).toBe("config-validation-failed");
+		expect((err.details as unknown as { issues: unknown[] }).issues).toContainEqual(
+			expect.objectContaining({ path: ["session", key] }),
+		);
 	});
 
 	/** The fixture's configuration without `session-store.secret`. */

@@ -43,7 +43,7 @@ import { describe, expect, it } from "vitest";
 import { oauthModule } from "#/module.mjs";
 import { oauthAuthorizationModule } from "#/oauthAuthorization.mjs";
 import { oauthSessionModule } from "#/oauthSession.mjs";
-import { capturing, withGrants } from "./_helpers/sections.mjs";
+import { capturing, type GrantSwitches, withGrants } from "./_helpers/sections.mjs";
 
 /** The package's defaults, as a composition root finds them. */
 const REFERENCE = new URL("../../config/reference.conf", import.meta.url);
@@ -112,9 +112,15 @@ describe("the package's config/reference.conf", () => {
 	it("is declared by each of them and holds only their sections, which their schemas parse without losing a path", () => {
 		const read = (path: string, env: Readonly<Record<string, string>>): unknown =>
 			parseFile(path, { env: { ...env } }).toObject();
-		expect(
-			packageReferenceProblems({ reference: REFERENCE, modules: everyModule(), read }),
-		).toEqual([]);
+		// Built from the reference itself, as a root that layers it builds them:
+		// each module's section holds the switches to what it was built with.
+		const config = { ...makeValidAppConfig(), ...defaults() } as AppConfig;
+		const modules = [
+			oauthModule({ config }),
+			oauthSessionModule({ config }),
+			oauthAuthorizationModule({ config }),
+		];
+		expect(packageReferenceProblems({ reference: REFERENCE, modules, read })).toEqual([]);
 	});
 
 	it("ships every grant off and the consent page at /consent", () => {
@@ -465,4 +471,90 @@ describe("boot, over a configuration that captures the modules' renamed variable
 		expect(err.reason).toBe("config-validation-failed");
 		expect(err.message).toContain('"urll"');
 	});
+});
+
+describe("the switches the modules were built with, held to the ones boot parses", () => {
+	/** Every switch off, and `change` over them. */
+	const switches = (change: GrantSwitches): GrantSwitches => ({
+		session: false,
+		authorizationCode: false,
+		refreshToken: false,
+		clientCredentials: false,
+		jwtBearer: false,
+		...change,
+	});
+
+	/** What boot refused: the modules built from `built`'s switches, booted with `booted`'s. */
+	async function refusedBuiltFrom(built: GrantSwitches, booted: GrantSwitches): Promise<BootError> {
+		const base = makeValidAppConfig();
+		const builtConfig = withGrants(base, switches(built)) as AppConfig;
+		const modules = [
+			oauthSessionModule({ config: builtConfig }),
+			oauthAuthorizationModule({ config: builtConfig }),
+		];
+		// What the grants require besides their sections, so a refusal names the configuration.
+		const slots = defineModule({
+			name: "test:slots",
+			provides: {
+				clientRepository: () => new InMemoryClientRepository(new Map()),
+				keyStore: () => createSymmetricKeyStore("oauth-sections-test-secret.at-least-32-bytes"),
+			},
+		});
+		try {
+			const handle = await createApp({
+				modules: [...modules, slots],
+				bootstrapComponents: {
+					config: capturing(withGrants(base, switches(booted)), modules),
+					pathResolver: (s: string) => s,
+				} as never,
+			});
+			await handle.dispose();
+		} catch (err) {
+			expect(err).toBeInstanceOf(BootError);
+			return err as BootError;
+		}
+		return expect.fail("boot should have been refused");
+	}
+
+	it.each([
+		["off, and boot parses it on", { session: false }, { session: true }, "off", "on"],
+		["on, and boot parses it off", { session: true }, { session: false }, "on", "off"],
+	] as const)(
+		"oauth-session: built with the session grant %s: refused, naming oauth-session.enabled",
+		async (_what, built, booted, decided, parsed) => {
+			const err = await refusedBuiltFrom(built, booted);
+
+			expect(err.reason).toBe("config-validation-failed");
+			expect(err.message).toContain(
+				`built from a configuration with the session grant ${decided}, but the configuration createApp parsed has oauth-session.enabled ${parsed}`,
+			);
+		},
+	);
+
+	it.each([
+		[
+			"off, and boot parses it on",
+			{ clientCredentials: false },
+			{ clientCredentials: true },
+			"off",
+			"on",
+		],
+		[
+			"on, and boot parses it off",
+			{ clientCredentials: true },
+			{ clientCredentials: false },
+			"on",
+			"off",
+		],
+	] as const)(
+		"oauth-authorization: built with client_credentials %s: refused, naming oauth-authorization.grants.clientCredentials.enabled",
+		async (_what, built, booted, decided, parsed) => {
+			const err = await refusedBuiltFrom(built, booted);
+
+			expect(err.reason).toBe("config-validation-failed");
+			expect(err.message).toContain(
+				`built from a configuration with grants.clientCredentials ${decided}, but the configuration createApp parsed has oauth-authorization.grants.clientCredentials.enabled ${parsed}`,
+			);
+		},
+	);
 });

@@ -53,14 +53,15 @@ describe("resolveSubjectRevocationHorizonMs", () => {
 			accessToken: { expiresIn: 3600 },
 			...((over.oauth as Record<string, unknown>) ?? {}),
 		},
-		"session-store": { maxAge: 43_200_000 },
 		...over,
 	});
+	/** The session store's slot, carrying a session lifetime of `maxAgeMs`. */
+	const session = (maxAgeMs: number) => ({ sessionCookie: { maxAgeMs } as never });
 
 	it("outlasts the longest-lived thing a cascade could have missed", () => {
 		// A refresh token of a day, in seconds; a session of twelve hours, in
 		// milliseconds. Two units, which is the first thing this gets wrong.
-		const horizon = resolveSubjectRevocationHorizonMs(config());
+		const horizon = resolveSubjectRevocationHorizonMs(config(), session(43_200_000));
 		expect(horizon).toBeGreaterThan(86_400_000);
 	});
 
@@ -70,22 +71,24 @@ describe("resolveSubjectRevocationHorizonMs", () => {
 		// computed from the default expires while those longer tokens are still
 		// valid — and a token that outlives the boundary that revoked it works
 		// again.
-		const horizon = resolveSubjectRevocationHorizonMs({
-			oauth: {
-				refreshToken: { expiresIn: 60 },
-				accessToken: { defaultExpiresIn: 60, maxExpiresIn: 86_400 },
+		const horizon = resolveSubjectRevocationHorizonMs(
+			{
+				oauth: {
+					refreshToken: { expiresIn: 60 },
+					accessToken: { defaultExpiresIn: 60, maxExpiresIn: 86_400 },
+				},
 			},
-			"session-store": { maxAge: 60_000 },
-		});
+			session(60_000),
+		);
 		expect(horizon).toBeGreaterThan(86_400_000);
 	});
 
 	it("reads the deprecated alias where that is all a deployment has", () => {
 		// `expiresIn` alone means both the default and the maximum.
-		const horizon = resolveSubjectRevocationHorizonMs({
-			oauth: { refreshToken: { expiresIn: 60 }, accessToken: { expiresIn: 7_200 } },
-			"session-store": { maxAge: 60_000 },
-		});
+		const horizon = resolveSubjectRevocationHorizonMs(
+			{ oauth: { refreshToken: { expiresIn: 60 }, accessToken: { expiresIn: 7_200 } } },
+			session(60_000),
+		);
 		expect(horizon).toBeGreaterThan(7_200_000);
 		expect(horizon).toBeLessThan(7_200_000 + 600_000);
 	});
@@ -94,14 +97,12 @@ describe("resolveSubjectRevocationHorizonMs", () => {
 		// `verifyJwt` passes `clockTolerance`, so a token is accepted for five
 		// minutes past its `exp`. A watermark sized to the nominal expiry leaves
 		// exactly that window with no backstop behind it.
-		const horizon = resolveSubjectRevocationHorizonMs(config());
+		const horizon = resolveSubjectRevocationHorizonMs(config(), session(43_200_000));
 		expect(horizon).toBeGreaterThanOrEqual(86_400_000 + 300_000);
 	});
 
 	it("takes the session lifetime when it is the longer one", () => {
-		const horizon = resolveSubjectRevocationHorizonMs(
-			config({ "session-store": { maxAge: 30 * 86_400_000 } }),
-		);
+		const horizon = resolveSubjectRevocationHorizonMs(config(), session(30 * 86_400_000));
 		expect(horizon).toBeGreaterThan(30 * 86_400_000);
 	});
 
@@ -109,6 +110,7 @@ describe("resolveSubjectRevocationHorizonMs", () => {
 		// Nothing says an access token must be shorter than a refresh token.
 		const horizon = resolveSubjectRevocationHorizonMs(
 			config({ oauth: { refreshToken: { expiresIn: 60 }, accessToken: { expiresIn: 86_400 } } }),
+			session(43_200_000),
 		);
 		expect(horizon).toBeGreaterThanOrEqual(86_400_000 + 300_000);
 	});
@@ -117,12 +119,21 @@ describe("resolveSubjectRevocationHorizonMs", () => {
 		// A hand-built configuration bypasses the schema, and a horizon
 		// computed from a missing lifetime is a boundary that expires early.
 		for (const broken of [
-			{ "session-store": { maxAge: 43_200_000 } },
-			{ oauth: { refreshToken: { expiresIn: 86_400 }, accessToken: { expiresIn: 3600 } } },
-			config({ "session-store": { maxAge: null } }),
+			{},
 			config({ oauth: { refreshToken: { expiresIn: "soon" }, accessToken: { expiresIn: 3600 } } }),
 		]) {
-			expect(() => resolveSubjectRevocationHorizonMs(broken), JSON.stringify(broken)).toThrow();
+			expect(
+				() => resolveSubjectRevocationHorizonMs(broken, session(43_200_000)),
+				JSON.stringify(broken),
+			).toThrow();
+		}
+	});
+
+	it("refuses to size a boundary without the session store's slot, naming it: core reads no session-store key", () => {
+		for (const written of [config(), config({ "session-store": { maxAge: 43_200_000 } })]) {
+			const call = () => resolveSubjectRevocationHorizonMs(written);
+			expect(call, JSON.stringify(written)).toThrow(RangeError);
+			expect(call, JSON.stringify(written)).toThrow("no sessionCookiePolicy was handed");
 		}
 	});
 
@@ -169,14 +180,6 @@ describe("resolveSubjectRevocationHorizonMs", () => {
 				const call = () => resolveSubjectRevocationHorizonMs(config(), from);
 				expect(call, path).toThrow(RangeError);
 				expect(call, path).toThrow(path);
-			}
-			// The configuration's session lifetime, as a configuration built by
-			// hand may carry it.
-			for (const maxAge of [1n, circular]) {
-				const call = () =>
-					resolveSubjectRevocationHorizonMs(config({ "session-store": { maxAge } }));
-				expect(call).toThrow(RangeError);
-				expect(call).toThrow("session-store.maxAge");
 			}
 		});
 

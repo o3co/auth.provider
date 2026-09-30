@@ -52,7 +52,10 @@ import {
 	resolveSubjectRevocationHorizonMs,
 	revokeAllForSubject,
 } from "@o3co/auth-provider-core";
-import { makeValidCoreConfig, makeValidFullSections } from "@o3co/auth-provider-core/testing";
+import {
+	createTestSessionCookiePolicy,
+	makeValidCoreConfig,
+} from "@o3co/auth-provider-core/testing";
 import { cascadeLogout, subjectRevocationServiceModule } from "@o3co/auth-provider-oauth";
 import express from "express";
 import request from "supertest";
@@ -136,14 +139,11 @@ interface BootOptions {
 }
 
 const boot = async (allowKeep: boolean, opts: BootOptions = {}) => {
-	const full = makeValidFullSections();
 	const components = opts.components ?? shared();
+	const sessionCookiePolicy = createTestSessionCookiePolicy();
 	const events: { type: string; details?: Record<string, unknown> }[] = [];
 	const config = {
 		...makeValidCoreConfig(),
-		// The service sizes the boundary from the lifetimes it has to
-		// outlive, and reads them here.
-		"session-store": full["session-store"],
 		federations: {
 			upstream: {
 				enabled: true,
@@ -188,6 +188,9 @@ const boot = async (allowKeep: boolean, opts: BootOptions = {}) => {
 				defaultLimit: { limit: 100, windowSeconds: 60 },
 			}),
 			...CASCADE_STORES,
+			// The service sizes the boundary from the lifetimes it has to
+			// outlive: the session's is the session store's slot.
+			sessionCookiePolicy,
 			...components,
 			auditSink: {
 				record: (event: { type: string; details?: Record<string, unknown> }) => {
@@ -241,7 +244,9 @@ const boot = async (allowKeep: boolean, opts: BootOptions = {}) => {
 	const service = handle.components.subjectRevocationService as SubjectRevocationService;
 	// The horizon a grant-unaware caller sizes the watermark to: the longest
 	// of the session, refresh-token and access-token lifetimes, plus skew.
-	const horizonMs = resolveSubjectRevocationHorizonMs(config);
+	const horizonMs = resolveSubjectRevocationHorizonMs(config, {
+		sessionCookie: sessionCookiePolicy,
+	});
 	return { handle, app, service, events, horizonMs, ...components };
 };
 

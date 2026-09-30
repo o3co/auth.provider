@@ -19,9 +19,9 @@
  * (`session.loginPage.url`) and the `redirect_to` protocol by which
  * `/authorize` and the federation-grants connect flow send a browser to it. It
  * holds the page to the rules the session section's schema holds the key to.
- * With no login page configured it is still built, so a composition that
- * installs a consumer and never sends a browser to log in boots; it fails
- * where the page is read, naming the key.
+ * The session module's section requires the page; `loginEntryFromConfig`,
+ * over a configuration without one, still builds an entry, which fails where
+ * the page is read, naming the key.
  */
 
 import {
@@ -200,14 +200,5 @@ describe("the session module provides loginEntry", () => {
 		);
 		expect(seen.entry?.url).toBe("/sign-in?tenant=a");
 		expect(seen.entry?.urlFor("/back")).toBe("/sign-in?tenant=a&redirect_to=%2Fback");
-	});
-
-	it("boots with no login page configured: the entry fails only where it is read", async () => {
-		const seen: { entry?: LoginEntry } = {};
-		const base = makeValidAppConfig();
-		const { loginPage: _page, ...section } = base.session as Record<string, unknown>;
-		await boot({ ...base, session: section } as AppConfig, seen);
-		expect(seen.entry).toBeDefined();
-		expect(() => seen.entry?.url).toThrow(/session\.loginPage\.url/);
 	});
 });
