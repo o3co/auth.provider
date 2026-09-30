@@ -1,8 +1,8 @@
 # @o3co/auth-provider-foundation
 
-最終更新: 2026-09-26
+最終更新: 2026-09-30
 
-auth.provider のための「the Store」 — デプロイ自身のユーザーサービス — の HTTP クライアント。`HttpUserRepository` は core の `UserRepository` ポートを HTTPS で実装する: ユーザーを認証し、フェデレーション ID をリンクし、federation grants が求める ID の照会に答える。`registerBuiltinAdapters` はそれを `"http"` ユーザーアダプターとして登録する。
+auth.provider のための「the Store」 — デプロイ自身のユーザーサービス — の HTTP クライアント。`HttpUserRepository` は core の `UserRepository` ポートを HTTPS で実装する: ユーザーを認証し、フェデレーション ID をリンクし、federation grants が求める ID の照会に答える。`registerBuiltinAdapters` はそれを `"http"` ユーザーアダプターとして登録する。このパッケージはまた、Store の MFA エンドポイント — Store が主体の第二要素と登録の証人を保持する場所 — の契約を、それを名指す設定セクションと、その失敗が投げるものとともに定める。
 
 ## 責務と役割
 
@@ -16,10 +16,11 @@ auth.provider のための「the Store」 — デプロイ自身のユーザー�
 - 通信が報告するもの — リクエストを引用しうる — を何も投げないこと。
 - リクエストの期限とレスポンスサイズの上限。
 - ID の照会が起動時に判定される根拠となるカバレッジ宣言。
+- Store の MFA エンドポイントの契約: 各エンドポイントに何を送り、各応答が何を意味するか、そして Store が送るものが何一つクライアントに届かないこと（[後述](#store-の-mfa-エンドポイント)）。要素のエンドポイントを名指す `foundation-mfa-factor-store` セクション。その失敗が投げる `MfaStoreError`。
 
-**持たないもの:** ポートと `User` の形（core）。ユーザーをいつ認証し、ID をいつリンクし、所有者をいつ照会するか — セッションルート（[`@o3co/auth-provider-session`](../session/README.ja.md)）、`oauth` の jwt-bearer グラント（[`@o3co/auth-provider-oauth`](../oauth/README.ja.md)）、federation grants（[`@o3co/auth-provider-federation-grants`](../federation-grants/README.md)）。Store 自体。core の開発用ユーザーアダプター（`yaml` / `static`）。Redis バックエンドのストア（[`@o3co/auth-provider-redis`](../redis/README.md)。Redis の認可コードストアもこちら）。
+**持たないもの:** ポートと `User` の形（core）。MFA のポートと MFA エンドポイントの JSON ボディ（core の [`mfa/storeWire.mts`](../core/src/mfa/storeWire.mts)。Store 自身の実装とテストキットの偽の Store もこれを読む）。ユーザーをいつ認証し、ID をいつリンクし、所有者をいつ照会するか — セッションルート（[`@o3co/auth-provider-session`](../session/README.ja.md)）、`oauth` の jwt-bearer グラント（[`@o3co/auth-provider-oauth`](../oauth/README.ja.md)）、federation grants（[`@o3co/auth-provider-federation-grants`](../federation-grants/README.md)）。Store 自体。core の開発用ユーザーアダプター（`yaml` / `static`）。Redis バックエンドのストア（[`@o3co/auth-provider-redis`](../redis/README.md)。Redis の認可コードストアもこちら）。
 
-**別パッケージである理由。** core が同梱するのはファイルから読む開発用のユーザーアダプターだけで、本番のデプロイはユーザーを自前のサービスに持ち、これはそのためのクライアントである。差し替え可能な部品 — 独自の `UserRepository` 実装を持つデプロイはこれをインストールしない — であり、core 以外の何にも依存しない（グローバルの `fetch` のみで、他の依存は無い）。
+**別パッケージである理由。** core が同梱するのはファイルから読む開発用のユーザーアダプターだけで、本番のデプロイはユーザーを自前のサービスに持ち、これはそのためのクライアントである。差し替え可能な部品 — 独自の `UserRepository` 実装を持つデプロイはこれをインストールしない — であり、パッケージとしては core だけに依存する（グローバルの `fetch` と、セクションのスキーマのための `zod`）。
 
 ## インストール
 
@@ -27,7 +28,7 @@ auth.provider のための「the Store」 — デプロイ自身のユーザー�
 npm install @o3co/auth-provider-foundation @o3co/auth-provider-core
 ```
 
-peer dependency: `@o3co/auth-provider-core`。このパッケージ自身の dependencies は無い。
+peer dependency: `@o3co/auth-provider-core`。このパッケージ自身の dependency は、設定セクションのスキーマのための `zod` だけ。
 
 ## 使い方
 
@@ -118,11 +119,42 @@ federation grants のデプロイ（`@o3co/auth-provider-federation-grants`、AD
 
 **カバレッジ。** grants モジュールが起動時に尋ねる probe は同期的で Store に届かないので、`federatedIdentityLookupCoverage` が Store の照会のカバー範囲を中継する: 登録ごとに一つのエントリー `{ provider, issuer, clientId, requiredClaims }` で、四つのフィールドすべてを完全一致で比較し（トリムなし、大文字小文字の畳み込みなし、末尾スラッシュの許容なし）、`requiredClaims` は戦略が必要とするクレーム名 — 登録と `sub` だけで足りる戦略なら `[]`。`supportsFederatedIdentityLookup(registration, identityClaims)` は、登録と一致するエントリーがあり、その `requiredClaims` のすべてが `identityClaims` に含まれるとき `true`。federation grants が有効で connection が一つ以上あり、`federationGrants.identityLookup` が `"required"`（デフォルト）のとき、grants モジュールはこれが `false` になる connection をすべて起動時に拒否する。`"unsupported"` のとき、または connection が無いときは何も求めない。誰も宣言していない登録はローカルで `registration_not_covered` と答え、宣言済みの登録で必要なクレームが欠けていれば `identity_not_resolvable` と答え、どちらもリクエストは送らない。宣言は構築時にスナップショットされ、重複した登録、不正なエントリー、URL の無いカバレッジは構築エラーになる。`federationGrants.connections` と同じく環境変数の形は無い（リストは HOCON のもの）。`findSubjectByFederatedIdentityUrl` が設定されていなければ `supportsFederatedIdentityLookup` と `findSubjectByFederatedIdentity` は存在せず、そのうえで `"required"` の下に connection を持つデプロイは起動時に拒否される。
 
+## Store の MFA エンドポイント
+
+Store は主体の第二要素（MFA ADR の D7）と登録の証人（D12）を保持できる。決めるのはプロバイダーで、Store は保存するだけ。要素の `data` はプロバイダーが先に封印し、Store はそれを復号も記録もせず、そこから何かを導きもしない。このパッケージは契約と、要素のエンドポイントを名指すセクションと、その失敗が投げるものを持つ。`HttpUserRepository` はこれらのリクエストを一つも送らない。JSON ボディは core の [`mfa/storeWire.mts`](../core/src/mfa/storeWire.mts)（`MfaStoreFactor`、`MfaStoreUpdateRequest` など）で、両側が使う変換もそこにある。
+
+**どのリクエストも** 設定された URL そのままへの JSON の `POST` で — パスもクエリも足さないので、主体や要素の ID がリクエスト行や Store のアクセスログに現れることはない — ユーザーリポジトリの規則に従う: 同じ `bearerToken`・期限・レスポンス上限、`https` かループバックの `http`、リダイレクトを追わない、`Bearer` チャレンジ付きの `401` / `403` は拒否された資格情報（[ワイヤ契約](#ワイヤ契約)）。
+
+**要素のレコード** は `{ id, subject, kind, label?, binding?, createdAtMs, lastUsedAtMs?, version, data }`。時刻はエポックミリ秒の数値で、`…Ms` と名付ける。値の無い省略可能なフィールドは省く: `null` は決して「未設定」ではなく、どれかのフィールドに `null` を持つレコードはプロバイダーが読めないレコードである。`id` は base64url の 22 文字（16 バイトの乱数）、`kind` はヒントのトークン（`^[a-z][a-z0-9_-]{0,63}$`）、`label` は 1〜64 文字で、正しい形の文字列であり、行を分けたり並びを変えたりする文字を含まない。`binding` は `password`・`email_proof`・`mfa`、`version` は安全な非負整数、`data` はバイト単位でそのまま保持される文字列。この形から外れたレコードはプロバイダーが読めないレコードである（core の `isMfaFactorId`・`isMfaFactorKind`・`isMfaFactorLabel`）。
+
+| エンドポイント | リクエスト | 応答 |
+| --- | --- | --- |
+| list（`listUrl`） | `{ subject }` | `200 { factors: [record…] }`: 主体について保持するすべてのレコード。無ければ `[]`。他のステータスは throw。 |
+| create（`createUrl`） | `{ factor: record }` | `2xx`（`204`）: 作成。`409`: その `(subject, id)` は保持済みで、そのまま残る。他のステータスは throw。 |
+| update（`updateUrl`） | `{ subject, id, expectedVersion, changes: { data, label?, lastUsedAtMs? } }` | `200 { factor: record }`、`expectedVersion + 1` で書かれたレコード。`409`: バージョンが動いた。`404`: レコードが無い — どちらもポートの `null`。他のステータスは throw。 |
+| delete（`deleteUrl`） | `{ subject, id }` または `{ subject, all: true }` | `2xx`（`204`）、または何も無かったときの `404`: どちらも完了。他のステータスは throw。 |
+| markMfaEnrolled（`markMfaEnrolledUrl`） | `{ subject, enrolled }` | `204`（すでにその値を保持しているときも）。`404`: Store にその主体が無い — エラー（主体は認証したばかりである）。他のステータスは throw。 |
+
+- **更新は変更だけを書く。** 更新はレコードを `subject` と `id` で名指し、期待するバージョンと、変更として `data`・`label`・`lastUsedAtMs` だけを運ぶ。省いたものは消える。`id`・`subject`・`kind`・`binding`・`createdAtMs` は変更として送られず、Store はそれらを変えてはならない。他のフィールドを持つ変更は拒否する（`400`）。Store は `expectedVersion` で原子的に比較して書き、`version` を一つ上げる。
+- **レコードは常にすべて。** list は Store が主体について保持するすべてのレコードを、Store 自身やプロバイダーが読めないものも含めて、その主体のものだけ返す。プロバイダーは読めないレコード — フィールドの欠落、型違い、範囲外や形の外、`null` — と、別の主体を名指すレコード、一覧にすでにある ID を持つ二つ目のレコードを、存在するが使えないものとして扱う: その主体の一覧は丸ごと拒否され（core の `readMfaStoreListAnswer`）、レコードが少ないとは決して読まれない。だからそのようなレコードで主体が「要素ゼロ」と数えられることも、最初の紐付けが開くことも無い。通信の失敗は障害であり、空の一覧ではない。
+- **更新の応答が `expectedVersion + 1` 以外のバージョン** なら、成功ではなく障害で、主体と要素の ID を名指すエラー行一行になる。
+- **証人** は `authenticate` で `User.mfaEnrolled` として返される: 真偽値で、主体が初めて印を付けられるまでは省かれ、core の `readMfaEnrollmentWitness` を通してだけ読まれる。
+
+**呼び出しが失敗したとき、Store が送ったものは何一つクライアントに届かない**: ステータスも、エラーの文面も、ヘッダーも、レコードも、レコードが読めなかったかどうかも。これらのエンドポイントの失敗はすべて、プロバイダーの障害の応答 `503 temporarily_unavailable` になる。何が起きたかは運用者のログ行と監査イベントにだけ届き、アダプターが投げる `MfaStoreError`（[`src/mfa/storeFailure.mts`](src/mfa/storeFailure.mts)）を通る。それは操作、エンドポイントのオリジンとパス、数値としてのステータス、そしてバージョンが飛んだときは主体と要素の ID — ログ行が切り詰めても両方が残るようにメッセージの先頭に置き、それぞれ core の `auditErrorText` を通して最大 64 文字 — から作られ、ボディやステータス文言やヘッダーからは決して作られない。ボディは読まずに解放され、HTTP 層が応答に使ったり表示したりする `status`・`statusCode`・`cause` を持たない。通信の失敗・期限・拒否された資格情報は、ユーザーリポジトリのエラーを投げる。`reason` は `unexpected_status`（表に無いステータス。`storeStatus` に入る）、`unknown_subject`（`markMfaEnrolledUrl` の `404`）、`malformed_answer`（表と違うボディの `2xx`）、`unreadable_record`（読めないレコードを含む一覧）、`version_skipped`（`expectedVersion + 1` 以外のバージョン）。
+
+読めるレコードの `id`・`kind`・`label` は、設計としてクライアントに届く: MFA ADR のページがそれを表示する（アカウントページの要素一覧 F4、最初の紐付けで登録できる種類 F3）。届くのは読み手が保つ形のものだけなので、Store がそこに書いたそれ以外のものは届かない。
+
+**要素のエンドポイントの設定。** 四つのエンドポイントは、主体の要素を Store に保持するモジュールのセクション `foundation-mfa-factor-store`（モジュール名と同じ。[`src/mfa/section.mts`](src/mfa/section.mts)）にある。パッケージの [`config/reference.conf`](config/reference.conf)（`@o3co/auth-provider-foundation/reference.conf` として export）が、各キーをそのパスから名付けた変数に既定値なしで結ぶ: `listUrl` は `FOUNDATION_MFA_FACTOR_STORE_LIST_URL`、`createUrl` は `FOUNDATION_MFA_FACTOR_STORE_CREATE_URL`、`updateUrl` は `FOUNDATION_MFA_FACTOR_STORE_UPDATE_URL`、`deleteUrl` は `FOUNDATION_MFA_FACTOR_STORE_DELETE_URL`。セクションの知らないキーと、`https` でもループバックの `http` でもない URL は、設定の検証で起動を拒否し、キーを表示可能な文字だけで名指して値は引用しない。各 URL は必須である: セクションを読むモジュールはストアを eager に提供し（`foundationMfaFactorStoreLifecycle`）、先に `readFoundationMfaFactorStoreUrls` を呼ぶので、四つのどれかが未設定のままそれを入れた構成は、ストアを必要とするものがあってもなくても、欠けたキーとその変数をすべて名指して起動を拒否する。
+
+`markMfaEnrolledUrl` はこのセクションに無い。証人は要素を何が保持していてもユーザーリポジトリを通して書かれる — Redis の要素と Store の証人の組み合わせもそこに含まれる — ので、その URL はユーザーリポジトリの設定に属し、そこにはそれを名指すキーが無い。その契約: URL があれば、ユーザーリポジトリは証人を書く（`markMfaEnrolled`）。無ければ、リポジトリは `markMfaEnrolled` を持たない — その能力が無いだけで、起動の拒否にはならない。証人は省略可能だからである（MFA ADR の D12）。そして MFA が有効でユーザーリポジトリが証人を書けない構成には、要素を何が保持していても、起動時に警告が出る。失われた要素ストアが最初の紐付けを開かないようにするのが証人だからである。
+
+**契約に対するテスト。** [`@o3co/auth-provider-test-kit`](../test-kit/README.md) が、登録の証人の契約スイートと、これらのエンドポイントに表のとおり — 指示すれば壊れた Store のように — 応答する偽の Store を持つ。このパッケージのテストは、証人を `HttpUserRepository.authenticate` で読み戻しながら、そのスイートを偽の Store に対して走らせる。
+
 ## Store が自分で守るべきこと
 
-- **誰が呼べるか。** `authenticateByToken` と紐付けが運ぶものは秘密ではない — フェデレーションのコールバックの `<provider>:<sub>` は識別子である — ので、誰にでも応答する Store では、`authenticateByTokenUrl` に届く者は誰でも既知の ID をそのユーザーに解決でき、開いた `linkFederatedIdentityUrl` に届く者は誰でも任意の ID を任意の `userId` に結びつけられる。`bearerToken`（`CLIENT_USER_BEARER_TOKEN`、`openssl rand -hex 32` で生成）を設定し、Store は四つのエンドポイントすべてで、`Authorization` が `Bearer <そのトークン>` と正確に一致しない（定数時間で比較する）リクエストを拒否し、そのヘッダーをログに出さない。一つのトークンが四つの URL すべてに送られるので、それらは一つの信頼境界でなければならない: どれか一つのエンドポイントを運用する者は、他のエンドポイントも受け付ける資格情報を持つことになる。拒否は `401` と `WWW-Authenticate: Bearer error="invalid_token"`（RFC 6750 §3）で返す — 有効だが足りないトークンなら `403` と `error="insufficient_scope"` で。このチャレンジがあれば、Store が受け付けないトークン — 打ち間違い、途中で止まったローテーション — はすべての呼び出しで障害になり、各呼び出し元はそれを下の表のとおり報告する。チャレンジが無ければ `401` や `403` はワイヤ上の意味 — 「ユーザーが居ない」またはリンクの拒否 — を保ち、不一致はすべてのログインの失敗としてしか現れない。同じ理由で、ユーザーのパスワード誤り、未知の ID、ポリシーが拒否するリンクに `Bearer` チャレンジを付けてはならない: その応答は Store が auth.provider を拒否したと読まれ、そのユーザーのログインやリンクの失敗が障害になる。ローテーションは、Store に古いトークンと新しいトークンの両方を受け付けさせ、auth.provider を新しいものに移し、それから古いものを廃止する。`bearerToken` が無ければどのリクエストも `Authorization` ヘッダーを持たないので、Store は別の方法で auth.provider だけを受け入れる: ネットワークポリシーやプライベートネットワーク、または Store の前段でプラットフォームが提供する相互 TLS（ループバックアドレス上のサイドカー。`http` の例外が受け付ける）で。このアダプター自身はクライアント証明書を提供しない: Node の `fetch` がそれを受け取るのは `undici` のディスパッチャー経由だけで、このパッケージはその依存を持たない。`user:password@` を含む URL は拒否される。
+- **誰が呼べるか。** `authenticateByToken` と紐付けが運ぶものは秘密ではない — フェデレーションのコールバックの `<provider>:<sub>` は識別子である — ので、誰にでも応答する Store では、`authenticateByTokenUrl` に届く者は誰でも既知の ID をそのユーザーに解決でき、開いた `linkFederatedIdentityUrl` に届く者は誰でも任意の ID を任意の `userId` に結びつけられる。MFA のエンドポイントも同じである: 開いた `deleteUrl` や `markMfaEnrolledUrl` に届く者は誰でも主体の要素を消し、証人を外せ、その主体の次のパスワードログインは、パスワードを持つ誰にでも最初の紐付けを開く。`bearerToken`（`CLIENT_USER_BEARER_TOKEN`、`openssl rand -hex 32` で生成）を設定し、Store は auth.provider に提供するすべてのエンドポイント — ユーザーリポジトリの四つも MFA のエンドポイントも — で、`Authorization` が `Bearer <そのトークン>` と正確に一致しない（定数時間で比較する）リクエストを拒否し、そのヘッダーをログに出さない。一つのトークンがそれらの URL すべてに送られるので、それらは一つの信頼境界でなければならない: どれか一つのエンドポイントを運用する者は、他のエンドポイントも受け付ける資格情報を持つことになる。拒否は `401` と `WWW-Authenticate: Bearer error="invalid_token"`（RFC 6750 §3）で返す — 有効だが足りないトークンなら `403` と `error="insufficient_scope"` で。このチャレンジがあれば、Store が受け付けないトークン — 打ち間違い、途中で止まったローテーション — はすべての呼び出しで障害になり、各呼び出し元はそれを下の表のとおり報告する。チャレンジが無ければ `401` や `403` はワイヤ上の意味 — 「ユーザーが居ない」またはリンクの拒否 — を保ち、不一致はすべてのログインの失敗としてしか現れない。同じ理由で、ユーザーのパスワード誤り、未知の ID、ポリシーが拒否するリンクに `Bearer` チャレンジを付けてはならない: その応答は Store が auth.provider を拒否したと読まれ、そのユーザーのログインやリンクの失敗が障害になる。ローテーションは、Store に古いトークンと新しいトークンの両方を受け付けさせ、auth.provider を新しいものに移し、それから古いものを廃止する。`bearerToken` が無ければどのリクエストも `Authorization` ヘッダーを持たないので、Store は別の方法で auth.provider だけを受け入れる: ネットワークポリシーやプライベートネットワーク、または Store の前段でプラットフォームが提供する相互 TLS（ループバックアドレス上のサイドカー。`http` の例外が受け付ける）で。このアダプター自身はクライアント証明書を提供しない: Node の `fetch` がそれを受け取るのは `undici` のディスパッチャー経由だけで、このパッケージはその依存を持たない。`user:password@` を含む URL は拒否される。
 - **URL に秘密を入れない。** クエリ文字列のトークンは秘密のままではいられない: すべてのリクエスト行に載り、Store 自身のアクセスログにも途中のプロキシにも届く。このアダプターが投げるエラー（セッションルートがログに出す）はエンドポイントをオリジンとパスだけで示し、クエリやフラグメントは決して示さないので、少なくともこのデプロイのログにはクエリは届かない。呼び出し元の資格情報は `bearerToken` に置く。このアダプターが投げるものはどれもそれを含まない。
-- **リダイレクトせずに応答する。** どのリクエストもリダイレクトを追わないので、パスワード、トークン、リンクのリクエスト、ID は設定された URL — 下の `https` の規則が検査する URL — にだけ届き、それ以外のどこからの応答もユーザー、リンク、照会の答えとして受け取られない。四つのエンドポイントのどれからの `3xx` も、他の想定外のステータスと同じく例外になる（セッションルートと jwt-bearer グラントは `503 temporarily_unavailable`、grants のコールバックは `temporarily_unavailable` を返す）ので、リダイレクトする URL — 正規のホストへリダイレクトするホストの別名、末尾スラッシュの付加、パスの移動 — の背後にある Store はすべての呼び出しで失敗する。各 URL には、リダイレクトするエンドポイントではなく応答するエンドポイントを設定する。
+- **リダイレクトせずに応答する。** どのリクエストもリダイレクトを追わないので、パスワード、トークン、リンクのリクエスト、ID は設定された URL — 下の `https` の規則が検査する URL — にだけ届き、それ以外のどこからの応答もユーザー、リンク、照会の答えとして受け取られない。どのエンドポイントからの `3xx` も、他の想定外のステータスと同じく例外になる（セッションルートと jwt-bearer グラントは `503 temporarily_unavailable`、grants のコールバックは `temporarily_unavailable` を返す）ので、リダイレクトする URL — 正規のホストへリダイレクトするホストの別名、末尾スラッシュの付加、パスの移動 — の背後にある Store はすべての呼び出しで失敗する。各 URL には、リダイレクトするエンドポイントではなく応答するエンドポイントを設定する。
 
 **拒否されたトークンが呼び出し元ごとにどう見えるか。** どの呼び出し元も `StoreCredentialRefusedError` を他の Store の障害 — `StoreTransportError` や `TimeoutError` も — と同じく扱い、違うのはログに出すものである:
 
@@ -161,6 +193,7 @@ federation grants のデプロイ（`@o3co/auth-provider-federation-grants`、AD
 - `StoreTransportError`、`StoreTransportFailure` — 通信の失敗で投げられるもの。`name`、`reason`、`code` は契約の一部で、こちらも `status` を持たない（[`src/repositories/storeErrors.mts`](src/repositories/storeErrors.mts)）。
 - `DEFAULT_MAX_RESPONSE_BYTES` — レスポンス上限のデフォルト。
 - `FederatedIdentityLookupCoverage` — カバレッジのエントリー一つの型。
+- `MfaStoreError`・`MfaStoreFailure`・`MfaStoreOperation` — MFA エンドポイントの失敗が投げるもの。`name`・`reason`・`operation`・`storeStatus` は契約の一部で、`status` は持たない（[`src/mfa/storeFailure.mts`](src/mfa/storeFailure.mts)）。アダプターが投げるときに通す関数と、`foundation-mfa-factor-store` セクションのスキーマと読み取り（[`src/mfa/section.mts`](src/mfa/section.mts)）はパッケージ内部のもの。
 
 ## テスト
 
@@ -173,10 +206,15 @@ federation grants のデプロイ（`@o3co/auth-provider-federation-grants`、AD
 | [`wwwAuthenticate.test.mts`](src/repositories/__tests__/wwwAuthenticate.test.mts) | どの `WWW-Authenticate` の値が `Bearer` チャレンジを持つか、敵対的な 64 KiB の値を一度の走査で読むこと |
 | [`registerBuiltinAdapters.test.mts`](src/repositories/__tests__/registerBuiltinAdapters.test.mts) | `"http"` のビルダー、そのデフォルトと文字列の変換、組み立て時に拒否される設定 |
 | [`endpointUrl.test.mts`](src/__tests__/endpointUrl.test.mts) | https またはループバックの規則 |
+| [`storeFailure.test.mts`](src/mfa/__tests__/storeFailure.test.mts) | MFA エンドポイントの失敗が投げるもの: Store の書いたものがエラーのどの形にも届かないこと、ボディを読まずに解放すること、応答に使うステータスを持たないこと。飛んだバージョンのログ行が、どれほど長くても主体と要素 ID を無害化し上限をつけて名指すこと |
+| [`section.test.mts`](src/mfa/__tests__/section.test.mts) | `foundation-mfa-factor-store` セクション: スキーマ、読み取り、`createApp` を通した欠落・不正・未知のキーでの起動拒否（モジュールだけを入れた構成も） |
+| [`referenceConf.test.mts`](src/mfa/__tests__/referenceConf.test.mts) | パッケージの `reference.conf`: そのセクションだけを持ち、各 URL がそのパスから名付けた変数に既定値なしで結ばれること |
+| [`enrollmentWitness.contract.test.mts`](src/mfa/__tests__/enrollmentWitness.contract.test.mts) | テストキットの証人スイートを偽の Store に対して走らせ、`HttpUserRepository.authenticate` で読み戻す。`HttpUserRepository` が `markMfaEnrolled` を持たない間、書き込みはテストの代役が行う |
 
 ## 関連
 
-- [`@o3co/auth-provider-core`](../core/README.ja.md) — `UserRepository` ポート、`createRepositoryFactories`、開発用ユーザーアダプター
+- [`@o3co/auth-provider-core`](../core/README.ja.md) — `UserRepository` ポート、`createRepositoryFactories`、開発用ユーザーアダプター、MFA のポートと MFA エンドポイントのワイヤ形式
+- [`@o3co/auth-provider-test-kit`](../test-kit/README.md) — 登録の証人の契約スイートと偽の Store
 - [`@o3co/auth-provider-session`](../session/README.ja.md) — `authenticate`・`authenticateByToken`・`linkFederatedIdentity` を呼ぶルート
 - [`@o3co/auth-provider-federation-grants`](../federation-grants/README.md) — ID の照会の呼び出し元
 - [auth.provider](../../README.ja.md) — リポジトリ全体のドキュメント

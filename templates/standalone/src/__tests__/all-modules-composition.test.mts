@@ -118,7 +118,8 @@ const TEMPLATE_PACKAGES: Readonly<Record<string, string>> = {
 
 /**
  * Workspace packages the template does not depend on, so nothing here can
- * boot them. Each is a module a deployment adds to this manifest by hand —
+ * boot them. Each but the test kit, which has no module, is a module a
+ * deployment adds to this manifest by hand —
  * `modules.mts` provides the Redis clients their stores need for that reason
  * — and `tools/composition` in the monorepo boots each beside every module
  * here, through this file's fixture.
@@ -132,6 +133,7 @@ const NOT_IN_TEMPLATE: Readonly<Record<string, string>> = {
 		"mfaModules (mfaTotpFactorModule, mfaModule); private until the MFA ADR's build-order step 20 wires it",
 	"@o3co/auth-provider-mtls": "mtlsModule",
 	"@o3co/auth-provider-oauth-token-exchange": "tokenExchangeModule",
+	"@o3co/auth-provider-test-kit": "no module: contract suites and fakes, for tests",
 	"@o3co/auth-provider-webauthn": "webauthnModule, webauthnSessionSubjectModule",
 };
 

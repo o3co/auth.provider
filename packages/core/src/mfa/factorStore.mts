@@ -25,6 +25,8 @@
  */
 
 import type { AdapterFactory } from "../adapters/AdapterFactory.mjs";
+import { lineSafeText } from "../logging/loggableError.mjs";
+import { isHintToken } from "../session-admission/requirement.mjs";
 
 /** One second factor bound to one subject. Every field is a required key: a store that drops one does not compile. */
 export interface MfaFactorRecord {
@@ -45,6 +47,31 @@ export interface MfaFactorRecord {
 	/** The factor's own state, sealed. Opaque to every store. */
 	readonly data: string;
 }
+
+/** The most characters a factor's label holds. */
+export const MFA_FACTOR_LABEL_MAX_LENGTH = 64;
+
+const FACTOR_ID = /^[A-Za-z0-9_-]{22}$/;
+
+/** Whether `value` is a factor id as the provider makes one: 16 random bytes, base64url, 22 characters. */
+export const isMfaFactorId = (value: unknown): value is string =>
+	typeof value === "string" && FACTOR_ID.test(value);
+
+/** Whether `value` is a factor's kind: a hint token, since a first binding's hints name each kind. */
+export const isMfaFactorKind = (value: unknown): value is string => isHintToken(value);
+
+/**
+ * Whether `value` is a label a page can show as it is: 1 to
+ * {@link MFA_FACTOR_LABEL_MAX_LENGTH} characters, well formed, none of them
+ * one that breaks or reorders a line (`lineSafeText` leaves it unchanged).
+ */
+export const isMfaFactorLabel = (value: unknown): value is string =>
+	typeof value === "string" &&
+	value.length > 0 &&
+	value.length <= MFA_FACTOR_LABEL_MAX_LENGTH * 2 &&
+	[...value].length <= MFA_FACTOR_LABEL_MAX_LENGTH &&
+	value.isWellFormed() &&
+	lineSafeText(value) === value;
 
 /** What an update replaces. Every other field of the record stays as it was. */
 export interface MfaFactorRecordUpdate {
