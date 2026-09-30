@@ -29,6 +29,7 @@ import { inspect } from "node:util";
 import type {
 	BootstrapMap,
 	ClientRepository,
+	CsrfGuard,
 	FederatedIdentityLookup,
 	FederatedIdentityLookupResult,
 	FederatedIdentityRegistration,
@@ -64,6 +65,7 @@ import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest
 import { federationGrantsModules } from "#/index.mjs";
 import {
 	ACQUISITION_LOGIN_PAGE,
+	acquisitionCsrfGuard,
 	acquisitionLoginEntry,
 	callbackUrlFor,
 } from "./acquisitionFixture.mjs";
@@ -126,6 +128,20 @@ const clientRepository: ClientRepository = {
 
 /** The oauthTokenSettings the composition holds, when a test puts them there; none by default. */
 let tokenSettings: OAuthTokenSettings | undefined;
+
+/** The csrfGuard the composition holds, when a test puts one there; core's double by default. */
+let csrfGuard: CsrfGuard | undefined;
+
+/**
+ * What a browser adds to a form post from the deployment's own consent page,
+ * and what the deployment's proxy forwards: the origin the browser addressed.
+ */
+const FROM_THE_PAGE = {
+	Origin: new URL(ISSUER).origin,
+	"Sec-Fetch-Site": "same-origin",
+	"X-Forwarded-Proto": new URL(ISSUER).protocol.replace(/:$/, ""),
+	"X-Forwarded-Host": new URL(ISSUER).host,
+};
 
 /** Whose account the fake upstream's exchange verifies; a test may add claims. */
 let exchangeUpstream: { issuer: string; subject: string; claims?: Record<string, string> } = {
@@ -285,9 +301,10 @@ const boot = async (
 			clientRepository,
 			userRepository,
 			userSessionStore: { get: async (sid: string) => durable.get(sid) ?? null },
-			// The login page, which the session module provides in a real
-			// composition.
+			// The login page and the CSRF policy, which the session module
+			// provides in a real composition.
 			loginEntry: acquisitionLoginEntry(),
+			csrfGuard: csrfGuard ?? acquisitionCsrfGuard(),
 			sessionRPRegistry: {},
 			sessionFamilyIndex: {},
 			sessionFederationIndex: {},
@@ -301,6 +318,8 @@ const boot = async (
 		} as unknown as BootstrapMap,
 	});
 	const app = express();
+	// Behind the deployment's proxy, as the page's answer arrives.
+	app.set("trust proxy", "loopback");
 	app.use(handle.router);
 	return { handle, app };
 };
@@ -356,6 +375,7 @@ describe("a grant created end to end, and spent", () => {
 			const approved = await request(app)
 				.post("/session/federation-grants/consent")
 				.set("x-browser", "b-1")
+				.set(FROM_THE_PAGE)
 				.send({ challenge, decision: "accept" });
 			expect(approved.status).toBe(303);
 			const state = new URL(approved.headers.location as string).searchParams.get("state") ?? "";
@@ -437,6 +457,7 @@ describe("a grant created end to end, and spent", () => {
 			const approved = await request(app)
 				.post("/session/federation-grants/consent")
 				.set("x-browser", "b-conflict")
+				.set(FROM_THE_PAGE)
 				.send({ challenge, decision: "accept" });
 			const state = new URL(approved.headers.location as string).searchParams.get("state") ?? "";
 			const returned = await request(app)
@@ -493,6 +514,63 @@ describe("a grant created end to end, and spent", () => {
 			expect(login.searchParams.get("redirect_to")).toBe(connect.href);
 		} finally {
 			tokenSettings = undefined;
+			await handle.dispose();
+		}
+	});
+
+	it("holds the consent answer to the csrfGuard the composition holds", async () => {
+		// The session module provides the slot in a real composition; one that
+		// refuses every request refuses the page's own answer, so the slot's
+		// verdict is what decides.
+		csrfGuard = Object.freeze({
+			...acquisitionCsrfGuard(),
+			check: () => ({ outcome: "refused" as const, reason: "foreign_origin" as const }),
+		});
+		const { handle, app } = await boot();
+		try {
+			const connect = await lodgeFor(app);
+			signIn("b-guarded", new Date());
+			const started = await request(app)
+				.get(`${connect.pathname}${connect.search}`)
+				.set("x-browser", "b-guarded");
+			const challenge =
+				new URL(started.headers.location as string, ISSUER).searchParams.get("challenge") ?? "";
+			const refused = await request(app)
+				.post("/session/federation-grants/consent")
+				.set("x-browser", "b-guarded")
+				.set(FROM_THE_PAGE)
+				.send({ challenge, decision: "accept" });
+			expect(refused.status).toBe(403);
+			expect(refused.body).toEqual({
+				error: "invalid_request",
+				error_description: "cross-site answer refused",
+			});
+		} finally {
+			csrfGuard = undefined;
+			await handle.dispose();
+		}
+	});
+
+	it("accepts the page's answer through the composed deployment, and refuses one sent with Origin: null", async () => {
+		const { handle, app } = await boot();
+		try {
+			const connect = await lodgeFor(app);
+			signIn("b-origin", new Date());
+			const started = await request(app)
+				.get(`${connect.pathname}${connect.search}`)
+				.set("x-browser", "b-origin");
+			const challenge =
+				new URL(started.headers.location as string, ISSUER).searchParams.get("challenge") ?? "";
+			const answer = (origin: string) =>
+				request(app)
+					.post("/session/federation-grants/consent")
+					.set("x-browser", "b-origin")
+					.set({ ...FROM_THE_PAGE, Origin: origin })
+					.type("form")
+					.send({ challenge, decision: "accept" });
+			expect((await answer("null")).status).toBe(403);
+			expect((await answer(FROM_THE_PAGE.Origin)).status).toBe(303);
+		} finally {
 			await handle.dispose();
 		}
 	});
@@ -674,6 +752,7 @@ describe("the identity lookup over HTTP, composed", () => {
 		const approved = await request(app)
 			.post("/session/federation-grants/consent")
 			.set("x-browser", browser)
+			.set(FROM_THE_PAGE)
 			.send({ challenge, decision: "accept" });
 		const state = new URL(approved.headers.location as string).searchParams.get("state") ?? "";
 		const returned = await request(app)
@@ -899,6 +978,7 @@ describe("a consented grant survives the initiating session's end and a restart"
 		const approved = await request(app)
 			.post("/session/federation-grants/consent")
 			.set("x-browser", browser)
+			.set(FROM_THE_PAGE)
 			.send({ challenge, decision: "accept" });
 		expect(approved.status).toBe(303);
 		const state = new URL(approved.headers.location as string).searchParams.get("state") ?? "";
@@ -1016,6 +1096,7 @@ describe("a grant the upstream asked the user for, and one starved of scope, rec
 		const approved = await request(app)
 			.post("/session/federation-grants/consent")
 			.set("x-browser", browser)
+			.set(FROM_THE_PAGE)
 			.send({ challenge, decision: "accept" });
 		expect(approved.status).toBe(303);
 		const state = new URL(approved.headers.location as string).searchParams.get("state") ?? "";

@@ -17,13 +17,17 @@
 /**
  * What every composition that enables federation grants brings: a consent
  * page, a callback per connection on the provider's own origin, somewhere to
- * lodge an intent, and the identity lookup (the federation-grants ADR, D7
- * check 5). The tests that exercise spending a grant need all of it present and
+ * lodge an intent, the login page, the CSRF policy the consent answer is held
+ * to, and the identity lookup (the federation-grants ADR, D7 check 5). The tests that exercise spending a grant need all of it present and
  * none of it to be what they are about — so it lives here once.
  */
 
 import { createMemoryFederationGrantIntentStore, defineModule } from "@o3co/auth-provider-core";
-import { createTestLoginEntry, makeValidCoreConfig } from "@o3co/auth-provider-core/testing";
+import {
+	createTestCsrfGuard,
+	createTestLoginEntry,
+	makeValidCoreConfig,
+} from "@o3co/auth-provider-core/testing";
 
 const ISSUER = (makeValidCoreConfig() as { oauth: { jwt: { issuer: string } } }).oauth.jwt.issuer;
 
@@ -44,7 +48,13 @@ export const callbackUrlFor = (connection: string): string =>
 	`${new URL(ISSUER).origin}/session/federation-grants/callback/${connection}`;
 
 /**
- * Merged into `bootstrapComponents`, with the login entry. The Store covers every registration and
+ * The `csrfGuard` slot the consent answer is held to: the session module
+ * provides it in a real composition; core's double stands in for it.
+ */
+export const acquisitionCsrfGuard = () => createTestCsrfGuard();
+
+/**
+ * Merged into `bootstrapComponents`, with the login entry and the CSRF guard. The Store covers every registration and
  * establishes "linked to nobody" — a test composition's answer, not a
  * production one: a real Store says `unlinked` only after it has looked
  * everywhere a link could be.
@@ -52,6 +62,7 @@ export const callbackUrlFor = (connection: string): string =>
 export const acquisitionComponents = () => ({
 	federationGrantIntentStore: createMemoryFederationGrantIntentStore(),
 	loginEntry: acquisitionLoginEntry(),
+	csrfGuard: acquisitionCsrfGuard(),
 	userRepository: {
 		authenticate: async () => null,
 		authenticateByToken: async () => null,
