@@ -44,7 +44,6 @@
 
 import type {
 	Admission,
-	AdmissionAction,
 	AdmissionDeps,
 	CookieCarrier,
 	Logger,
@@ -56,7 +55,6 @@ import type {
 	UserSessionStore,
 } from "@o3co/auth-provider-core";
 import {
-	ADMISSION_ACTIONS,
 	admitSession,
 	checkResolver,
 	checkWithFailMode,
@@ -70,6 +68,7 @@ import {
 	rateLimiterUnavailableEnvelope,
 } from "@o3co/auth-provider-core";
 import type { Request, RequestHandler, Response } from "express";
+import type { DeviceGrantAdmissionAction } from "./admissionActions.mjs";
 import { DEVICE_CODE_STORE_UNAVAILABLE, reportDeviceCodeStoreOutage } from "./storeOutage.mjs";
 import { DEVICE_VERIFICATION_RATE_LIMIT_PREFIX, type DeviceGrantDependencies } from "./types.mjs";
 
@@ -80,11 +79,11 @@ const ACTIONS: readonly Action[] = ["lookup", "approve", "deny"];
 const isAction = (value: unknown): value is Action =>
 	typeof value === "string" && (ACTIONS as readonly string[]).includes(value);
 
-/** Each body action as admission is asked about it: its own name, graded `use`. */
-const ADMITTED_AS: Readonly<Record<Action, AdmissionAction>> = {
-	lookup: ADMISSION_ACTIONS["device.lookup"],
-	approve: ADMISSION_ACTIONS["device.approve"],
-	deny: ADMISSION_ACTIONS["device.deny"],
+/** Each body action as admission is asked about it: the action the device grant registers for it. */
+const ADMITTED_AS: Readonly<Record<Action, DeviceGrantAdmissionAction>> = {
+	lookup: "device.lookup",
+	approve: "device.approve",
+	deny: "device.deny",
 };
 
 /** Device verification selects no `acr`: nothing asks for one here. */
@@ -255,7 +254,11 @@ export const createDeviceVerificationHandler = (
 	}
 	// Likewise the resolver — missing, or one the planner did not build:
 	// refused here, not answered 500 on every request.
-	const requirements = checkResolver(options.requirements, "createDeviceVerificationHandler");
+	const requirements = checkResolver(
+		options.requirements,
+		"createDeviceVerificationHandler",
+		Object.values(ADMITTED_AS),
+	);
 	const now = options.now ?? Date.now;
 	// Admission's dependencies: this handler's own slots and clock.
 	const admissionDeps: AdmissionDeps = {

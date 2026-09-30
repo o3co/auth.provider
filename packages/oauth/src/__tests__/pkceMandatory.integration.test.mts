@@ -36,6 +36,7 @@ import request from "supertest";
 import { describe, expect, it, vi } from "vitest";
 import { createAuthorizationGrant } from "#/grants/authorization.mjs";
 import { createOAuthRouter } from "#/routes.mjs";
+import { OAUTH_ADMISSION_ACTIONS } from "./_helpers/admissionActions.mjs";
 import { createMockLogger } from "./_helpers/mockLogger.mjs";
 
 const CLIENT_ID = "conf-client";
@@ -110,7 +111,7 @@ const makeApp = async (
 	registry.register(
 		"authorization_code",
 		createAuthorizationGrant({
-			sessionRequirementResolver: resolverForTests([]),
+			sessionRequirementResolver: resolverForTests([], { actions: OAUTH_ADMISSION_ACTIONS }),
 			config,
 			keyStore: createSymmetricKeyStore("test-secret-at-least-32-chars!!"),
 			codeRepository,
@@ -120,7 +121,7 @@ const makeApp = async (
 	);
 
 	const { router } = await createOAuthRouter(express, {
-		requirements: resolverForTests([]),
+		requirements: resolverForTests([], { actions: OAUTH_ADMISSION_ACTIONS }),
 		registry,
 		config,
 		clientRepository,

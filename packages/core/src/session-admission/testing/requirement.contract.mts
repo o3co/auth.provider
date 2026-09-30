@@ -20,7 +20,8 @@
  * and an async `run` that throws when the rule is broken, so a test file runs
  * them with its own runner (`it.each(cases)("$name", ({ run }) => run())`).
  * It holds a requirement to what boot registers and seals, to answering
- * verdicts (a `step_up` only with a page, an outage thrown, never `met`), to
+ * verdicts for every grade admission asks about (a `step_up` only with a
+ * page, an outage thrown, never `met`), to
  * never being asked over a dead session or for a declared remediation, and
  * to interruption answers that pass core's closed body.
  */
@@ -29,9 +30,9 @@ import assert from "node:assert/strict";
 import { requirementSession } from "../../user-sessions/authentication.mjs";
 import type { UserSession, UserSessionStore } from "../../user-sessions/types.mjs";
 import { readAcrTable } from "../acr.mjs";
+import { type ActionGrade, ADMISSION_GRADES } from "../actions.mjs";
 import { admitPrimary, admitSession, cookieClaim } from "../admit.mjs";
 import {
-	ADMISSION_ACTIONS,
 	isHintKey,
 	issuedRemediationActions,
 	type PrimaryAuthentication,
@@ -116,12 +117,20 @@ const counting = (
 
 const VERDICTS: ReadonlySet<string> = new Set(["met", "reauthenticate", "step_up", "unmet"]);
 
+/** Every grade a requirement is asked about: all but `remediation`, which admission never asks about. */
+const ASKED_GRADES = ADMISSION_GRADES.filter(
+	(grade): grade is ActionGrade => grade !== "remediation",
+);
+
+/** The action the suite admits with, registered on each resolver it builds. */
+const CONTRACT_ACTIONS = { "contract.action": { grade: "use" } } as const;
+
 /** The contract's cases over the requirement `input` describes. */
 export function sessionRequirementContract(
 	input: RequirementContractInput,
 ): readonly ContractCase[] {
 	const { key, fixture, issuer, build, withOutage, primary } = input;
-	const liveInput = (grade: "use" | "credential_change"): RequirementInput => {
+	const liveInput = (grade: ActionGrade): RequirementInput => {
 		const session = liveSession();
 		return {
 			session: {
@@ -167,7 +176,7 @@ export function sessionRequirementContract(
 			},
 		},
 		{
-			name: "remediations are the requirement's own routes — <name>.<route> — each once, none a consumer's action in ADMISSION_ACTIONS",
+			name: "remediations are the requirement's own routes — <name>.<route> — each once",
 			run: async () => {
 				// Registration holds the rule; a fixture that breaks it does not register.
 				const { name, remediations } = registeredRequirement(build(), issuer);
@@ -175,10 +184,6 @@ export function sessionRequirementContract(
 					assert.ok(
 						remediation.startsWith(`${name}.`),
 						`"${remediation}" is not a route of "${name}"`,
-					);
-					assert.ok(
-						!Object.hasOwn(ADMISSION_ACTIONS, remediation),
-						`"${remediation}" is a consumer's action: registered as a remediation it would skip every requirement for it`,
 					);
 				}
 				assert.equal(
@@ -205,12 +210,15 @@ export function sessionRequirementContract(
 					{
 						userSessionStore: storeAnswering(null),
 						subjectRevocation: undefined,
-						requirements: resolverForTests([requirement], issuer === undefined ? {} : { issuer }),
+						requirements: resolverForTests([requirement], {
+							...(issuer === undefined ? {} : { issuer }),
+							actions: CONTRACT_ACTIONS,
+						}),
 						acrTable: readAcrTable({}),
 						logger: undefined,
 						auditSink: undefined,
 					},
-					{ claim: claim(), action: { name: "contract.action", grade: "use" } },
+					{ claim: claim(), action: "contract.action" },
 				);
 				assert.equal(admission.outcome, "not_live");
 				assert.equal(requirement.calls(), 0, "admit was called about a session that is not live");
@@ -219,12 +227,15 @@ export function sessionRequirementContract(
 					{
 						userSessionStore: storeAnswering(liveSession()),
 						subjectRevocation: undefined,
-						requirements: resolverForTests([requirement], issuer === undefined ? {} : { issuer }),
+						requirements: resolverForTests([requirement], {
+							...(issuer === undefined ? {} : { issuer }),
+							actions: CONTRACT_ACTIONS,
+						}),
 						acrTable: readAcrTable({}),
 						logger: undefined,
 						auditSink: undefined,
 					},
-					{ claim: claim(), action: { name: "contract.action", grade: "use" } },
+					{ claim: claim(), action: "contract.action" },
 				);
 				assert.equal(requirement.calls(), 1, "admit was not asked about a live session");
 			},
@@ -240,8 +251,7 @@ export function sessionRequirementContract(
 					issuer === undefined ? {} : { issuer },
 				);
 				// The action core issued for the route, to the object that
-				// registered, not through the resolver: a literal would be
-				// normalised to credential_change and asked.
+				// registered, not through the resolver.
 				const issued =
 					issuedRemediationActions(requirement)?.[remediation.slice(requirement.name.length + 1)];
 				assert.ok(issued !== undefined, `core issued no action for "${remediation}"`);
@@ -267,7 +277,7 @@ export function sessionRequirementContract(
 		{
 			name: "admit answers a verdict, and a step_up only when stepUpPage is set",
 			run: async () => {
-				for (const grade of ["use", "credential_change"] as const) {
+				for (const grade of ASKED_GRADES) {
 					const requirement = build();
 					const verdict: unknown = await requirement.admit(liveInput(grade));
 					assert.ok(

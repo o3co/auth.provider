@@ -38,6 +38,7 @@ import { resolverForTests } from "@o3co/auth-provider-core/testing";
 import express from "express";
 import request from "supertest";
 import { describe, expect, it, vi } from "vitest";
+import { DEVICE_GRANT_ADMISSION_ACTIONS } from "#/admissionActions.mjs";
 import { createDeviceVerificationHandler } from "#/verificationEndpoint.mjs";
 import { LIVE_SID, liveCookieSession, liveSessionStore } from "./liveSessions.mjs";
 
@@ -120,7 +121,10 @@ const harness = async (options: HarnessOptions = {}) => {
 			...(options.subjectRevocation === undefined
 				? {}
 				: { subjectRevocation: options.subjectRevocation }),
-			requirements: resolverForTests(options.requirements ?? [], { issuer: ISSUER }),
+			requirements: resolverForTests(options.requirements ?? [], {
+				issuer: ISSUER,
+				actions: DEVICE_GRANT_ADMISSION_ACTIONS,
+			}),
 			requireEmailVerified: options.requireEmailVerified ?? false,
 			now: () => NOW,
 			logger,
@@ -176,8 +180,11 @@ describe("device verification on session admission", () => {
 		expect(asked).toEqual([]);
 	});
 
+	/** The grade each body action is admitted with: lookup and deny grant nothing. */
+	const GRADES = { lookup: "grants_nothing", approve: "use", deny: "grants_nothing" } as const;
+
 	it.each(ACTIONS)(
-		"admits %s as its own action, device.<action>, graded use, on the cookie's claim",
+		"admits %s as its own action, device.<action>, with its grade, on the cookie's claim",
 		async (action) => {
 			const asked: RequirementInput[] = [];
 			const { verify } = await harness({
@@ -186,7 +193,7 @@ describe("device verification on session admission", () => {
 			const res = await verify({ action, user_code: USER_CODE });
 			expect(res.status).toBe(200);
 			expect(asked).toHaveLength(1);
-			expect(asked[0]?.action).toEqual({ name: `device.${action}`, grade: "use" });
+			expect(asked[0]?.action).toEqual({ name: `device.${action}`, grade: GRADES[action] });
 			expect(asked[0]).toMatchObject({
 				carrier: "cookie",
 				subject: "user-1",
@@ -421,6 +428,26 @@ describe("device verification on session admission", () => {
 		);
 	});
 
+	it("refuses to be built on a resolver on which an action it admits is not registered, naming the action: a build error, not a 500 per request", () => {
+		expect(() =>
+			createDeviceVerificationHandler({
+				store: createMemoryDeviceCodeStore(),
+				settings,
+				rateLimiter: createMemoryRateLimiter({
+					limits: { device_verification: { limit: 5, windowSeconds: 300 } },
+					defaultLimit: { limit: 60, windowSeconds: 60 },
+				}),
+				userSessionStore: liveSessionStore(),
+				requirements: resolverForTests([], {
+					actions: { "device.lookup": { grade: "grants_nothing" } },
+				}),
+				requireEmailVerified: false,
+			} as never),
+		).toThrow(
+			/^createDeviceVerificationHandler: admits "device\.approve", which no module registers/,
+		);
+	});
+
 	it("reads no issuer: the page it answers is the one registration resolved on the issuer — built without one, it answers that page", async () => {
 		const handler = createDeviceVerificationHandler({
 			store: createMemoryDeviceCodeStore(),
@@ -432,7 +459,7 @@ describe("device verification on session admission", () => {
 			userSessionStore: liveSessionStore(),
 			requirements: resolverForTests(
 				[fixture(() => ({ outcome: "step_up", whenStillUnmet: "reauthenticate" }))],
-				{ issuer: "https://pages.example.test" },
+				{ issuer: "https://pages.example.test", actions: DEVICE_GRANT_ADMISSION_ACTIONS },
 			),
 			requireEmailVerified: false,
 			now: () => NOW,

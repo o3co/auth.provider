@@ -53,6 +53,7 @@ import {
 	requireFederationGrantIntentStore,
 	resolveFederationGrantAcquisitionSettings,
 } from "./acquisitionSettings.mjs";
+import { FEDERATION_GRANTS_ADMISSION_ACTIONS } from "./admissionActions.mjs";
 import { createFederationGrantBackground } from "./background.mjs";
 import {
 	createDisabledFederationGrantBrowserRouter,
@@ -381,6 +382,8 @@ export const federationGrantsModule = defineModule<Requires, Optional>({
 	requires: REQUIRES,
 	optional: OPTIONAL,
 	contributes: {
+		// What the browser half admits.
+		admissionActions: FEDERATION_GRANTS_ADMISSION_ACTIONS,
 		// The prefixes both routers limit under, claimed with no budget of their
 		// own, whether or not the feature is enabled.
 		rateLimitBudgets: {

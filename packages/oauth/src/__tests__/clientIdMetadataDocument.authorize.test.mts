@@ -34,6 +34,7 @@ import express from "express";
 import request from "supertest";
 import { describe, expect, it, vi } from "vitest";
 import { createOAuthRouter } from "#/routes.mjs";
+import { OAUTH_ADMISSION_ACTIONS } from "./_helpers/admissionActions.mjs";
 import { authorizationServerRegistry } from "./_helpers/authorizationServerRegistry.mjs";
 import { codeRecord } from "./_helpers/codeRecord.mjs";
 import { createMockLogger } from "./_helpers/mockLogger.mjs";
@@ -105,7 +106,7 @@ const makeApp = async (opts: {
 			}),
 	) as unknown as typeof fetch;
 	const { router } = await createOAuthRouter(express, {
-		requirements: resolverForTests([]),
+		requirements: resolverForTests([], { actions: OAUTH_ADMISSION_ACTIONS }),
 		registry:
 			opts.authorizationCode === false ? new GrantRegistry() : authorizationServerRegistry(),
 		config,

@@ -46,6 +46,7 @@ import request from "supertest";
 import { describe, expect, it } from "vitest";
 import { JWT_BEARER_CLIENT_ASSERTION_TYPE } from "#/middleware/clientAssertion.mjs";
 import { createOAuthRouter } from "#/routes.mjs";
+import { OAUTH_ADMISSION_ACTIONS } from "./_helpers/admissionActions.mjs";
 import { authorizationServerRegistry } from "./_helpers/authorizationServerRegistry.mjs";
 import { codeRecord } from "./_helpers/codeRecord.mjs";
 import { createMockLogger, type MockLogger } from "./_helpers/mockLogger.mjs";
@@ -94,7 +95,7 @@ const sqlLikeRepository = () => {
 async function buildApp(clientRepository: ClientRepository) {
 	const logger = createMockLogger();
 	const { router } = await createOAuthRouter(express, {
-		requirements: resolverForTests([]),
+		requirements: resolverForTests([], { actions: OAUTH_ADMISSION_ACTIONS }),
 		registry: authorizationServerRegistry(),
 		config,
 		clientRepository,

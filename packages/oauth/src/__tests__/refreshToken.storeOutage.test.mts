@@ -42,6 +42,7 @@ import { resolverForTests } from "@o3co/auth-provider-core/testing";
 import { SignJWT } from "jose";
 import { describe, expect, it } from "vitest";
 import { createRefreshTokenGrant, type RefreshTokenGrantDeps } from "#/grants/refreshToken.mjs";
+import { OAUTH_ADMISSION_ACTIONS } from "./_helpers/admissionActions.mjs";
 import { createMockLogger, type MockLogger } from "./_helpers/mockLogger.mjs";
 import {
 	REFUSED_COMMAND_MARKER,
@@ -93,7 +94,7 @@ const failingFamilyStore = (): RefreshTokenFamilyStore => {
 
 const grant = (deps: Partial<GrantDependencies>, logger: MockLogger) =>
 	createRefreshTokenGrant({
-		sessionRequirementResolver: resolverForTests([]),
+		sessionRequirementResolver: resolverForTests([], { actions: OAUTH_ADMISSION_ACTIONS }),
 		config,
 		keyStore: createSymmetricKeyStore(SECRET),
 		logger,

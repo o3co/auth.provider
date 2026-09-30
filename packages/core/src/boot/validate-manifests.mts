@@ -53,6 +53,10 @@ import type { Module } from "../modules/manifest/module-spec.mjs";
 import type { RouteContribution } from "../modules/manifest/route-contribution.mjs";
 import { SYNTHETIC_COMPONENT_KEYS } from "../modules/manifest/synthetic-keys.mjs";
 import {
+	admissionActionProblem,
+	registeredAdmissionAction,
+} from "../session-admission/actions.mjs";
+import {
 	lifetimeBeyondConfiguration,
 	lifetimeBeyondConfigurationMessage,
 } from "../token-settings/check.mjs";
@@ -106,16 +110,33 @@ const federationTypeSnapshots = new WeakMap<
 >();
 
 /**
+ * What each `admissionActions` declaration was read as, once, at stage 1 —
+ * its grade — keyed by the registration factory `nameKeyedFactory` answered
+ * for it, so what is checked is what registers.
+ */
+const admissionActionSnapshots = new WeakMap<object, { readonly grade: unknown }>();
+
+/**
  * The factory a name-keyed entry registers through. A `federationTypes` entry
  * is a declaration, `{ entrySchema, factory }`, not a factory: its schema and
  * factory are read once, here, and what registers is a
  * `RegisteredFederationType` whose `create` binds that factory to the deps
- * stage 4 hands every factory. `checkContributionShapes` holds the
+ * stage 4 hands every factory. An `admissionActions` entry is a declaration,
+ * `{ grade }`: its grade is read once, here, and what registers is the
+ * action `name` with that grade. `checkContributionShapes` holds each
  * snapshot's shape; a declaration that is not an object is left for it to
  * refuse. Every other value is its own factory.
  */
-function nameKeyedFactory(kind: string, value: unknown): unknown {
-	if (kind !== "federationTypes" || typeof value !== "object" || value === null) return value;
+function nameKeyedFactory(kind: string, name: string, value: unknown): unknown {
+	if (typeof value !== "object" || value === null) return value;
+	if (kind === "admissionActions") {
+		if (Array.isArray(value)) return value;
+		const grade: unknown = (value as { readonly grade?: unknown }).grade;
+		const register = () => registeredAdmissionAction(name, { grade });
+		admissionActionSnapshots.set(register, { grade });
+		return register;
+	}
+	if (kind !== "federationTypes") return value;
 	const { entrySchema, factory } = value as {
 		readonly entrySchema?: unknown;
 		readonly factory?: unknown;
@@ -173,7 +194,7 @@ function normaliseModule(m: Module): NormalisedModule {
 				contributesEntries.push({
 					kind: kind as ContributionKind,
 					key: name,
-					factory: nameKeyedFactory(kind, value),
+					factory: nameKeyedFactory(kind, name, value),
 					contributedBy: m.name,
 				});
 			}
@@ -196,7 +217,7 @@ function normaliseModule(m: Module): NormalisedModule {
 				overridesEntries.push({
 					kind: kind as ContributionKind,
 					key: name,
-					factory: nameKeyedFactory(kind, value),
+					factory: nameKeyedFactory(kind, name, value),
 					contributedBy: m.name,
 				});
 			}
@@ -237,6 +258,7 @@ const BUILTIN_CONTRIBUTION_KINDS = new Set<string>([
 	"discoveryMetadata",
 	"rateLimitBudgets",
 	"federationTypes",
+	"admissionActions",
 ]);
 
 // ---------------------------------------------------------------------------
@@ -674,11 +696,13 @@ const GUARDED_KINDS = ["sessionRequirements", "mfaFactors"] as const;
 /**
  * The kinds whose collector is the planner's alone: a host collector
  * for `rateLimitBudgets` could answer a looser budget than the owning module
- * contributed — on RFC 8628 §5.1's device-verification prefix, say — and
- * `federationTypes` is what the dispatch of configured federations will read.
- * Unlike `GUARDED_KINDS`, a module may override an entry of either.
+ * contributed — on RFC 8628 §5.1's device-verification prefix, say —
+ * `federationTypes` is what the dispatch of configured federations will read,
+ * and `admissionActions` is where admission reads the grade it hands the
+ * requirements. Unlike `GUARDED_KINDS`, a module may override an entry of the
+ * first two.
  */
-const PLANNER_OWNED_KINDS = ["rateLimitBudgets", "federationTypes"] as const;
+const PLANNER_OWNED_KINDS = ["rateLimitBudgets", "federationTypes", "admissionActions"] as const;
 
 /**
  * A requirement is switched off by not installing it, never removed from
@@ -735,7 +759,7 @@ export function refuseGuardedHostKinds(host: ContributionKindMap | undefined): v
 	for (const kind of PLANNER_OWNED_KINDS) {
 		if (Object.hasOwn(host, kind)) {
 			throw new BootError({
-				message: `contributionKinds replaces the collector for "${kind}", which is the planner's: the modules that own its entries contribute them, and a module may override one.`,
+				message: `contributionKinds replaces the collector for "${kind}", which is the planner's: the modules that own its entries contribute them, ${kind === "admissionActions" ? "and no module overrides one" : "and a module may override one"}.`,
 				reason: "contribution-kind-guarded",
 				stage: "validateManifests",
 				details: { reason: "contribution-kind-guarded", kind },
@@ -749,18 +773,24 @@ const containerShape = (container: unknown): string =>
 	container === null ? "null" : Array.isArray(container) ? "an array" : `a ${typeof container}`;
 
 /**
- * What a `rateLimitBudgets` or `federationTypes` contribution or override
- * must be, read off the manifest before any factory runs:
+ * What a `rateLimitBudgets`, `federationTypes` or `admissionActions`
+ * contribution or override must be, read off the manifest before any factory
+ * runs:
  *
- * - its container is a record keyed by prefix or type (normalisation would
- *   file an array as list-shaped under Symbol keys, and skip a function or
- *   `null`);
+ * - its container is a record keyed by prefix, type or action name
+ *   (normalisation would file an array as list-shaped under Symbol keys, and
+ *   skip a function or `null`);
  * - a prefix is not empty and holds no `:`, since a limiter key carries it
  *   before its first `:`, whatever the budget's factory answers;
  * - a declaration, as normalisation read it (`federationTypeSnapshots`), is
  *   an object with a Zod `entrySchema` and a `factory` function, so one
  *   written in JavaScript is refused as itself, not as a `TypeError` at
- *   registration.
+ *   registration;
+ * - an action's name and declaration, as normalisation read it
+ *   (`admissionActionSnapshots`), are what registration admits
+ *   (`admissionActionProblem`); an action is registered by the module that
+ *   admits it, so an override of one is refused as the kind guarded
+ *   (`contribution-kind-guarded`).
  *
  * Throws `contribution-malformed`; `name` is absent for a container.
  * @internal
@@ -771,7 +801,7 @@ function checkContributionShapes(
 ): void {
 	const refuse = (
 		m: Module,
-		kind: "rateLimitBudgets" | "federationTypes",
+		kind: "rateLimitBudgets" | "federationTypes" | "admissionActions",
 		name: string | undefined,
 		channel: "contributes" | "overrides",
 		problem: string,
@@ -796,6 +826,7 @@ function checkContributionShapes(
 			for (const [kind, keyedBy] of [
 				["rateLimitBudgets", "prefix"],
 				["federationTypes", "type"],
+				["admissionActions", "action name"],
 			] as const) {
 				const container = map?.[kind];
 				if (container === undefined) continue;
@@ -823,6 +854,26 @@ function checkContributionShapes(
 			const normalised = modules[index];
 			const entries =
 				channel === "contributes" ? normalised?.contributesEntries : normalised?.overridesEntries;
+			for (const entry of entries ?? []) {
+				if (entry.kind !== "admissionActions" || typeof entry.key !== "string") continue;
+				if (channel === "overrides") {
+					throw new BootError({
+						message: `Module "${m.name}" overrides admissionActions "${entry.key}", which no module may: an action is registered by the module that admits it, and its grade is that module's.`,
+						reason: "contribution-kind-guarded",
+						stage: "validateManifests",
+						details: {
+							reason: "contribution-kind-guarded",
+							kind: "admissionActions",
+							channel: "overrides",
+							module: m.name,
+							name: entry.key,
+						},
+					});
+				}
+				const snapshot = admissionActionSnapshots.get(entry.factory as object);
+				const problem = admissionActionProblem(entry.key, snapshot ?? entry.factory);
+				if (problem !== undefined) refuse(m, "admissionActions", entry.key, channel, problem);
+			}
 			for (const entry of entries ?? []) {
 				if (entry.kind !== "federationTypes" || typeof entry.key !== "string") continue;
 				const snapshot = federationTypeSnapshots.get(entry.factory as object);

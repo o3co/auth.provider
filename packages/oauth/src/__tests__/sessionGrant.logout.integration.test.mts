@@ -46,6 +46,7 @@ import request from "supertest";
 import { describe, expect, it, vi } from "vitest";
 import { createSessionGrant, type SessionGrantDeps } from "#/grants/session.mjs";
 import { createOAuthRouter } from "#/routes.mjs";
+import { OAUTH_ADMISSION_ACTIONS } from "./_helpers/admissionActions.mjs";
 import { codeRecord } from "./_helpers/codeRecord.mjs";
 
 const SECRET = "test-secret-at-least-32-chars!!";
@@ -126,12 +127,12 @@ async function buildApp(userSessionStore: UserSessionStore) {
 		createSessionGrant({
 			config,
 			keyStore,
-			sessionRequirementResolver: resolverForTests([]),
+			sessionRequirementResolver: resolverForTests([], { actions: OAUTH_ADMISSION_ACTIONS }),
 		} as unknown as SessionGrantDeps),
 	);
 
 	const { router } = await createOAuthRouter(express, {
-		requirements: resolverForTests([]),
+		requirements: resolverForTests([], { actions: OAUTH_ADMISSION_ACTIONS }),
 		registry,
 		config,
 		clientRepository,

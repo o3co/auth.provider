@@ -42,7 +42,10 @@ import express, { type RequestHandler } from "express";
 import supertest from "supertest";
 import { describe, expect, it, vi } from "vitest";
 import type { WebAuthnSubject } from "#/request.mjs";
-import { webauthnSessionSubjectModule } from "#/sessionSubject.mjs";
+import {
+	SESSION_SUBJECT_ADMISSION_ACTIONS,
+	webauthnSessionSubjectModule,
+} from "#/sessionSubject.mjs";
 
 const SUBJECT = "u-1";
 const SID = "s-1";
@@ -165,6 +168,7 @@ function setup(options: Setup = {}) {
 	const contribution = routeFactory(subjectFor)({
 		sessionRequirementResolver: resolverForTests(options.requirement ? [options.requirement] : [], {
 			issuer: ISSUER,
+			actions: SESSION_SUBJECT_ADMISSION_ACTIONS,
 		}),
 		...(options.noStore ? {} : { userSessionStore }),
 		...(options.subjectRevocation ? { subjectRevocation: options.subjectRevocation } : {}),
@@ -203,6 +207,12 @@ describe("webauthnSessionSubjectModule — the manifest", () => {
 		);
 	});
 
+	it("registers webauthn.register, graded credential_change: a passkey is a new way into the account", () => {
+		expect(module.contributes?.admissionActions).toEqual({
+			"webauthn.register": { grade: "credential_change" },
+		});
+	});
+
 	it("may be given the revocation boundary, an audit sink and a logger, each absence decided", () => {
 		expect([...(module.optional ?? [])].sort()).toEqual(
 			["auditSink", "logger", "subjectRevocation"].sort(),
@@ -213,7 +223,9 @@ describe("webauthnSessionSubjectModule — the manifest", () => {
 
 	it("contributes one route at the registration routes' mount path, after the session middleware and before both registration routes", () => {
 		const contribution = routeFactory(bySubject)({
-			sessionRequirementResolver: resolverForTests([]),
+			sessionRequirementResolver: resolverForTests([], {
+				actions: SESSION_SUBJECT_ADMISSION_ACTIONS,
+			}),
 			userSessionStore: {} as never,
 		});
 		expect(contribution.id).toBe("webauthn-session-subject");
@@ -234,6 +246,17 @@ describe("webauthnSessionSubjectModule — the manifest", () => {
 			factory({ sessionRequirementResolver: forged, userSessionStore: {} as never }),
 		).toThrow(
 			/^webauthnSessionSubjectModule: requirements must be the sessionRequirementResolver the boot planner built/,
+		);
+	});
+
+	it("refuses, when its route is built, a resolver on which webauthn.register is not registered, naming the module and the action", () => {
+		expect(() =>
+			routeFactory(bySubject)({
+				sessionRequirementResolver: resolverForTests([]),
+				userSessionStore: {} as never,
+			}),
+		).toThrow(
+			/^webauthnSessionSubjectModule: admits "webauthn\.register", which no module registers/,
 		);
 	});
 

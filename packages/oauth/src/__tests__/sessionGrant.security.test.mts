@@ -17,6 +17,7 @@ import request from "supertest";
 import { describe, expect, it, vi } from "vitest";
 import { createSessionGrant, type SessionGrantDeps } from "#/grants/session.mjs";
 import { createOAuthRouter } from "#/routes.mjs";
+import { OAUTH_ADMISSION_ACTIONS } from "./_helpers/admissionActions.mjs";
 import { codeRecord } from "./_helpers/codeRecord.mjs";
 import {
 	COMPOUND_DPOP_BINDING,
@@ -84,14 +85,14 @@ async function buildApp(
 	registry.register(
 		"session",
 		createSessionGrant({
-			sessionRequirementResolver: resolverForTests([]),
+			sessionRequirementResolver: resolverForTests([], { actions: OAUTH_ADMISSION_ACTIONS }),
 			config,
 			keyStore,
 			userSessionStore: store,
 		} as SessionGrantDeps),
 	);
 	const { router } = await createOAuthRouter(express, {
-		requirements: resolverForTests([]),
+		requirements: resolverForTests([], { actions: OAUTH_ADMISSION_ACTIONS }),
 		registry,
 		config,
 		keyStore,

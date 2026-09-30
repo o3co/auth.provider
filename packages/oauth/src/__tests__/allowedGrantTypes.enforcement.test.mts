@@ -34,6 +34,7 @@ import express from "express";
 import request from "supertest";
 import { describe, expect, it } from "vitest";
 import { createOAuthRouter } from "#/routes.mjs";
+import { OAUTH_ADMISSION_ACTIONS } from "./_helpers/admissionActions.mjs";
 import { codeRecord } from "./_helpers/codeRecord.mjs";
 
 const CLIENT_ID = "client-a";
@@ -113,7 +114,7 @@ const makeApp = async (
 	registry.register(STRICT_GRANT_TYPE, strictGrant());
 
 	const { router } = await createOAuthRouter(express, {
-		requirements: resolverForTests([]),
+		requirements: resolverForTests([], { actions: OAUTH_ADMISSION_ACTIONS }),
 		registry,
 		config:
 			options.requireGrantTypeAllowlist === undefined

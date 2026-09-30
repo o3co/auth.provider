@@ -99,6 +99,7 @@ import { WEBAUTHN_GRANT_TYPE } from "@o3co/auth-provider-webauthn";
 import type { Express } from "express";
 import request from "supertest";
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
+import { BUNDLED_ACTIONS } from "../../../../packages/mfa/src/__tests__/bundled-actions.fixture.mts";
 import {
 	APPLE_LANDING,
 	BINDER,
@@ -270,6 +271,38 @@ describe("the full set boots together", () => {
 			[...(handle.components.sessionRequirementResolver?.get("mfa")?.reach ?? [])].sort(),
 		).toEqual(["mfa", "otp"]);
 		expect((config as unknown as { mfa: { mode: unknown } }).mfa.mode).toBe("optional");
+	});
+
+	it("registers exactly the actions the bundled consumers admit, each with the grade the MFA requirement's verdict table is taken over, said at boot with its module", async () => {
+		const { logger } = await boot();
+		const said = logger.lines.filter((line) => line.args[1] === "admission_actions_registered");
+		expect(said).toHaveLength(1);
+		expect(said[0]?.level).toBe("info");
+		const { actions } = (said[0]?.args[0] ?? { actions: [] }) as {
+			actions: { name: string; grade: string; module: string }[];
+		};
+		/** The module of each bundled package that registers the action. */
+		const registrant: Readonly<Record<string, string>> = {
+			"oauth.authorize": "oauth",
+			"oauth.consent": "oauth",
+			"oauth.session_grant": "oauth-session",
+			"oauth.code_exchange": "oauth-authorization",
+			"oauth.refresh": "oauth-authorization",
+			"device.lookup": "device-grant",
+			"device.approve": "device-grant",
+			"device.deny": "device-grant",
+			"federation_grants.connect": "federation-grants",
+			"federation_grants.consent": "federation-grants",
+			"federation_grants.callback": "federation-grants",
+			"session.link": "session",
+			"session.link_callback": "session",
+			"webauthn.register": "webauthn-session-subject",
+		};
+		expect([...actions].sort((a, b) => a.name.localeCompare(b.name))).toEqual(
+			Object.entries(BUNDLED_ACTIONS)
+				.map(([name, { grade }]) => ({ name, grade, module: registrant[name] }))
+				.sort((a, b) => a.name.localeCompare(b.name)),
+		);
 	});
 
 	it("hands the deployment's logger to every added module that answers a request or binds a token", async () => {

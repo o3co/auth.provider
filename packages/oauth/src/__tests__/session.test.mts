@@ -23,6 +23,7 @@ import { resolverForTests } from "@o3co/auth-provider-core/testing";
 import { decodeJwt } from "jose";
 import { describe, expect, it, vi } from "vitest";
 import { createSessionGrant } from "#/grants/session.mjs";
+import { OAUTH_ADMISSION_ACTIONS } from "./_helpers/admissionActions.mjs";
 
 const mockConfig = {
 	oauth: {
@@ -38,7 +39,7 @@ const mockConfig = {
 } as unknown as GrantDependencies["config"];
 
 const makeDeps = (overrides?: Partial<GrantDependencies>) => ({
-	sessionRequirementResolver: resolverForTests([]),
+	sessionRequirementResolver: resolverForTests([], { actions: OAUTH_ADMISSION_ACTIONS }),
 	config: mockConfig,
 	keyStore: createSymmetricKeyStore("test-secret"),
 	...overrides,

@@ -52,6 +52,7 @@ import express from "express";
 import { decodeJwt, exportJWK, generateKeyPair, type JWK, SignJWT } from "jose";
 import request from "supertest";
 import { beforeAll, describe, expect, it, vi } from "vitest";
+import { DEVICE_GRANT_ADMISSION_ACTIONS } from "#/admissionActions.mjs";
 import { deviceGrantModule } from "#/module.mjs";
 import { DEVICE_CODE_GRANT_TYPE } from "#/types.mjs";
 import { liveCookieSession, liveSessionStore } from "./liveSessions.mjs";
@@ -410,6 +411,42 @@ describe("deviceGrantModule — boot", () => {
 	});
 });
 
+describe("deviceGrantModule — the actions it registers", () => {
+	it("registers the three body actions device verification admits, lookup and deny granting nothing", async () => {
+		const handle = await boot({ deviceAuthorization: ENABLED });
+		try {
+			const resolver = handle.components.sessionRequirementResolver;
+			expect(
+				["device.lookup", "device.approve", "device.deny"].map((name) => resolver?.action(name)),
+			).toEqual([
+				{ name: "device.lookup", grade: "grants_nothing" },
+				{ name: "device.approve", grade: "use" },
+				{ name: "device.deny", grade: "grants_nothing" },
+			]);
+		} finally {
+			await handle.dispose();
+		}
+	});
+
+	it("registers none while the grant is off: nothing admits them", async () => {
+		const handle = await boot({});
+		try {
+			expect(handle.components.sessionRequirementResolver?.action("device.lookup")).toBeUndefined();
+		} finally {
+			await handle.dispose();
+		}
+	});
+
+	it("exports what it registers, for a composition that mounts the verification handler itself", async () => {
+		const { DEVICE_GRANT_ADMISSION_ACTIONS } = await import("#/index.mjs");
+		expect(DEVICE_GRANT_ADMISSION_ACTIONS).toEqual({
+			"device.lookup": { grade: "grants_nothing" },
+			"device.approve": { grade: "use" },
+			"device.deny": { grade: "grants_nothing" },
+		});
+	});
+});
+
 describe("deviceGrantModule — discovery (RFC 8628 §4)", () => {
 	it("contributes the endpoint as an issuer-relative path when enabled", () => {
 		// A client has no other way to find the endpoint, so the metadata is
@@ -488,7 +525,7 @@ describe("deviceGrantModule — the route it actually contributes", () => {
 		// The `csrfGuard` slot: core's double, which accepts this origin.
 		csrfGuard: createTestCsrfGuard(),
 		// The synthetic key the planner fills (the session-admission ADR's D1).
-		sessionRequirementResolver: resolverForTests([]),
+		sessionRequirementResolver: resolverForTests([], { actions: DEVICE_GRANT_ADMISSION_ACTIONS }),
 		// The contributed budgets, as the planner fills them from this module's contribution.
 		rateLimitBudgetResolver: {
 			get: (prefix: string) =>
@@ -748,8 +785,11 @@ describe("deviceGrantModule — the route it actually contributes", () => {
 								: { outcome: "met" },
 					},
 				],
-				// Boot registers each page on oauth.jwt.issuer.
-				{ issuer: "https://as.example.test" },
+				{
+					...// Boot registers each page on oauth.jwt.issuer.
+					{ issuer: "https://as.example.test" },
+					actions: DEVICE_GRANT_ADMISSION_ACTIONS,
+				},
 			),
 		});
 		const verify = (action: string) =>

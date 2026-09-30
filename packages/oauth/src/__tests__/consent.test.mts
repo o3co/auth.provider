@@ -43,6 +43,7 @@ import { describe, expect, it, vi } from "vitest";
 import { withClientIdMetadataDocuments } from "#/clients/clientIdMetadataDocument.mjs";
 import { PENDING_CONSENT_TTL_MS } from "#/routes/consent.mjs";
 import { createOAuthRouter } from "#/routes.mjs";
+import { OAUTH_ADMISSION_ACTIONS } from "./_helpers/admissionActions.mjs";
 import { authorizationServerRegistry } from "./_helpers/authorizationServerRegistry.mjs";
 import { codeRecord } from "./_helpers/codeRecord.mjs";
 import { createMockLogger } from "./_helpers/mockLogger.mjs";
@@ -117,7 +118,7 @@ const makeApp = async (opts: {
 		opts.pendingConsentStore ?? createMemoryPendingConsentStore();
 	const logger = createMockLogger();
 	const { router } = await createOAuthRouter(express, {
-		requirements: resolverForTests([]),
+		requirements: resolverForTests([], { actions: OAUTH_ADMISSION_ACTIONS }),
 		registry: authorizationServerRegistry(),
 		config: makeConfig(opts.consentUrl),
 		clientRepository,

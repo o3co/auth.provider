@@ -35,6 +35,7 @@ import { resolverForTests } from "@o3co/auth-provider-core/testing";
 import express from "express";
 import request from "supertest";
 import { describe, expect, it, vi } from "vitest";
+import { SESSION_ADMISSION_ACTIONS } from "#/admissionActions.mjs";
 import {
 	deriveFederationTransactionCookieName,
 	FEDERATION_TRANSACTION_KEY_PREFIX,
@@ -205,7 +206,7 @@ function buildApp(knobs: Knobs = {}) {
 
 	app.use(
 		createRouter(express, {
-			requirements: resolverForTests([]),
+			requirements: resolverForTests([], { actions: SESSION_ADMISSION_ACTIONS }),
 			// `in` rather than `??`, so a test can pass `null` as the config and
 			// still reach the router's own fallback.
 			config: ("config" in knobs

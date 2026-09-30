@@ -32,6 +32,7 @@ import express from "express";
 import request from "supertest";
 import { describe, expect, it, vi } from "vitest";
 import { createOAuthRouter } from "#/routes.mjs";
+import { OAUTH_ADMISSION_ACTIONS } from "./_helpers/admissionActions.mjs";
 import { authorizationServerRegistry } from "./_helpers/authorizationServerRegistry.mjs";
 
 // A limiter outage is answered by the limiter's own `failMode`; the mock
@@ -142,7 +143,7 @@ async function buildApp(overrides: {
 	app.use(express.urlencoded({ extended: false }));
 
 	const { router } = await createOAuthRouter(express, {
-		requirements: resolverForTests([]),
+		requirements: resolverForTests([], { actions: OAUTH_ADMISSION_ACTIONS }),
 		registry: authorizationServerRegistry(),
 		config: overrides.config ?? mockConfig,
 		clientRepository: mockClientRepository,
@@ -497,7 +498,7 @@ describe("oauth routes — hooks", () => {
 			};
 
 			const { router } = await createOAuthRouter(express, {
-				requirements: resolverForTests([]),
+				requirements: resolverForTests([], { actions: OAUTH_ADMISSION_ACTIONS }),
 				registry: authorizationServerRegistry(),
 				config: mockConfig,
 				clientRepository: clientRepo,
@@ -597,7 +598,7 @@ describe("oauth routes — hooks", () => {
 			};
 
 			const { router } = await createOAuthRouter(express, {
-				requirements: resolverForTests([]),
+				requirements: resolverForTests([], { actions: OAUTH_ADMISSION_ACTIONS }),
 				registry: authorizationServerRegistry(),
 				config: mockConfig,
 				clientRepository: clientRepo,
@@ -635,7 +636,7 @@ describe("oauth routes — hooks", () => {
 				},
 			};
 			const { router } = await createOAuthRouter(express, {
-				requirements: resolverForTests([]),
+				requirements: resolverForTests([], { actions: OAUTH_ADMISSION_ACTIONS }),
 				registry: authorizationServerRegistry(),
 				config: mockConfig,
 				clientRepository: clientRepo,
@@ -670,7 +671,7 @@ describe("oauth routes — hooks", () => {
 				},
 			};
 			const { router } = await createOAuthRouter(express, {
-				requirements: resolverForTests([]),
+				requirements: resolverForTests([], { actions: OAUTH_ADMISSION_ACTIONS }),
 				registry: authorizationServerRegistry(),
 				config: mockConfig,
 				clientRepository: clientRepo,
@@ -707,7 +708,7 @@ describe("oauth routes — hooks", () => {
 			};
 
 			const { router } = await createOAuthRouter(express, {
-				requirements: resolverForTests([]),
+				requirements: resolverForTests([], { actions: OAUTH_ADMISSION_ACTIONS }),
 				registry: authorizationServerRegistry(),
 				config: mockConfig,
 				clientRepository: clientRepo,
@@ -740,7 +741,7 @@ describe("oauth routes — hooks", () => {
 			});
 
 			const { router } = await createOAuthRouter(express, {
-				requirements: resolverForTests([]),
+				requirements: resolverForTests([], { actions: OAUTH_ADMISSION_ACTIONS }),
 				registry: authorizationServerRegistry(),
 				config: mockConfig,
 				clientRepository: clientRepo,
@@ -778,7 +779,7 @@ describe("oauth routes — hooks", () => {
 			};
 
 			const { router } = await createOAuthRouter(express, {
-				requirements: resolverForTests([]),
+				requirements: resolverForTests([], { actions: OAUTH_ADMISSION_ACTIONS }),
 				registry: authorizationServerRegistry(),
 				config: mockConfig,
 				clientRepository: clientRepo,
@@ -824,7 +825,7 @@ describe("oauth routes — hooks", () => {
 			};
 
 			const { router } = await createOAuthRouter(express, {
-				requirements: resolverForTests([]),
+				requirements: resolverForTests([], { actions: OAUTH_ADMISSION_ACTIONS }),
 				registry: authorizationServerRegistry(),
 				config: mockConfig,
 				clientRepository: clientRepo,
@@ -874,7 +875,7 @@ describe("oauth routes — hooks", () => {
 			};
 
 			const { router } = await createOAuthRouter(express, {
-				requirements: resolverForTests([]),
+				requirements: resolverForTests([], { actions: OAUTH_ADMISSION_ACTIONS }),
 				registry: authorizationServerRegistry(),
 				config: mockConfig,
 				clientRepository: clientRepo,
@@ -917,7 +918,7 @@ describe("oauth routes — hooks", () => {
 			};
 			const { createAuthorizationGrant } = await import("#/grants/authorization.mjs");
 			const deps = {
-				sessionRequirementResolver: resolverForTests([]),
+				sessionRequirementResolver: resolverForTests([], { actions: OAUTH_ADMISSION_ACTIONS }),
 				config: mockConfig,
 				keyStore: createSymmetricKeyStore("test-secret-at-least-32-chars!!"),
 				codeRepository: codeRepo,
@@ -967,7 +968,7 @@ describe("oauth routes — hooks", () => {
 			};
 
 			const { router } = await createOAuthRouter(express, {
-				requirements: resolverForTests([]),
+				requirements: resolverForTests([], { actions: OAUTH_ADMISSION_ACTIONS }),
 				registry: authorizationServerRegistry(),
 				config: mockConfig,
 				clientRepository: clientRepo,

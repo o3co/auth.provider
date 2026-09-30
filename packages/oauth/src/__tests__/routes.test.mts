@@ -37,6 +37,7 @@ import express, { type Router } from "express";
 import request from "supertest";
 import { describe, expect, it, vi } from "vitest";
 import { createOAuthRouter } from "#/routes.mjs";
+import { OAUTH_ADMISSION_ACTIONS } from "./_helpers/admissionActions.mjs";
 import { authorizationServerRegistry } from "./_helpers/authorizationServerRegistry.mjs";
 import { codeRecord } from "./_helpers/codeRecord.mjs";
 import { createMockLogger } from "./_helpers/mockLogger.mjs";
@@ -143,7 +144,7 @@ function createTrackingExpress() {
 describe("createOAuthRouter", () => {
 	it("returns a router", async () => {
 		const result = await createOAuthRouter(mockExpress, {
-			requirements: resolverForTests([]),
+			requirements: resolverForTests([], { actions: OAUTH_ADMISSION_ACTIONS }),
 			registry: new GrantRegistry(),
 			config: mockConfig,
 			clientRepository: {} as ClientRepository,
@@ -173,7 +174,7 @@ describe("createOAuthRouter", () => {
 		};
 
 		await createOAuthRouter(trackingExpress, {
-			requirements: resolverForTests([]),
+			requirements: resolverForTests([], { actions: OAUTH_ADMISSION_ACTIONS }),
 			registry: new GrantRegistry(),
 			config: mockConfig,
 			clientRepository: {} as ClientRepository,
@@ -198,7 +199,7 @@ describe("createOAuthRouter", () => {
 		const { calls, expressLike } = createTrackingExpress();
 
 		await createOAuthRouter(expressLike, {
-			requirements: resolverForTests([]),
+			requirements: resolverForTests([], { actions: OAUTH_ADMISSION_ACTIONS }),
 			registry: new GrantRegistry(),
 			config: mockConfig,
 			clientRepository: {} as ClientRepository,
@@ -217,7 +218,7 @@ describe("createOAuthRouter", () => {
 		const { calls, expressLike } = createTrackingExpress();
 
 		await createOAuthRouter(expressLike, {
-			requirements: resolverForTests([]),
+			requirements: resolverForTests([], { actions: OAUTH_ADMISSION_ACTIONS }),
 			registry: authorizationServerRegistry(),
 			config: mockConfig,
 			clientRepository: {} as ClientRepository,
@@ -234,7 +235,7 @@ describe("createOAuthRouter", () => {
 		const { calls, expressLike } = createTrackingExpress();
 
 		await createOAuthRouter(expressLike, {
-			requirements: resolverForTests([]),
+			requirements: resolverForTests([], { actions: OAUTH_ADMISSION_ACTIONS }),
 			registry: new GrantRegistry(),
 			config: fullConfig,
 			clientRepository: {} as ClientRepository,
@@ -270,7 +271,7 @@ describe("createOAuthRouter", () => {
 			const registry = new GrantRegistry();
 			registry.register(opts.grantType, opts.grantHandler);
 			const { router } = await createOAuthRouter(express, {
-				requirements: resolverForTests([]),
+				requirements: resolverForTests([], { actions: OAUTH_ADMISSION_ACTIONS }),
 				registry,
 				config: fullConfig,
 				clientRepository: integrationClientRepo,
@@ -627,7 +628,7 @@ describe("createOAuthRouter", () => {
 			const registry = new GrantRegistry();
 			registry.register("session-mutating", sessionGrant);
 			const { router } = await createOAuthRouter(express, {
-				requirements: resolverForTests([]),
+				requirements: resolverForTests([], { actions: OAUTH_ADMISSION_ACTIONS }),
 				registry,
 				config: fullConfig,
 				clientRepository: integrationClientRepo,
@@ -661,7 +662,7 @@ describe("createOAuthRouter", () => {
 			app.use(express.json());
 			app.use(express.urlencoded({ extended: false }));
 			const { router } = await createOAuthRouter(express, {
-				requirements: resolverForTests([]),
+				requirements: resolverForTests([], { actions: OAUTH_ADMISSION_ACTIONS }),
 				registry: new GrantRegistry(),
 				config: fullConfig,
 				clientRepository: integrationClientRepo,
@@ -698,7 +699,7 @@ describe("createOAuthRouter — /authorize is the authorization_code grant's", (
 		expressLike: Parameters<typeof createOAuthRouter>[0],
 	) =>
 		createOAuthRouter(expressLike, {
-			requirements: resolverForTests([]),
+			requirements: resolverForTests([], { actions: OAUTH_ADMISSION_ACTIONS }),
 			registry,
 			config: mockConfig,
 			clientRepository: {} as ClientRepository,
@@ -725,7 +726,7 @@ describe("createOAuthRouter — /authorize is the authorization_code grant's", (
 
 	it("mounts no consent step without that grant: nothing parks a request for it", async () => {
 		const { router } = await createOAuthRouter(express, {
-			requirements: resolverForTests([]),
+			requirements: resolverForTests([], { actions: OAUTH_ADMISSION_ACTIONS }),
 			registry: registryOf("client_credentials"),
 			config: mockConfig,
 			clientRepository: {} as ClientRepository,

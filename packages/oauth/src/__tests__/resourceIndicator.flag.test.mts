@@ -42,6 +42,7 @@ import { describe, expect, it, vi } from "vitest";
 import { type AuthorizationGrantDeps, createAuthorizationGrant } from "#/grants/authorization.mjs";
 import { createClientCredentialsGrant } from "#/grants/clientCredentials.mjs";
 import { createRefreshTokenGrant, type RefreshTokenGrantDeps } from "#/grants/refreshToken.mjs";
+import { OAUTH_ADMISSION_ACTIONS } from "./_helpers/admissionActions.mjs";
 import { codeRecord } from "./_helpers/codeRecord.mjs";
 
 // ---------------------------------------------------------------------------
@@ -104,7 +105,7 @@ function makeRefreshDeps(
 		};
 	}
 	return {
-		sessionRequirementResolver: resolverForTests([]),
+		sessionRequirementResolver: resolverForTests([], { actions: OAUTH_ADMISSION_ACTIONS }),
 		config: base as unknown as GrantDependencies["config"],
 		keyStore,
 		...extra,
@@ -141,7 +142,7 @@ function makeAuthzDeps(
 		};
 	}
 	return {
-		sessionRequirementResolver: resolverForTests([]),
+		sessionRequirementResolver: resolverForTests([], { actions: OAUTH_ADMISSION_ACTIONS }),
 		config: base as unknown as GrantDependencies["config"],
 		keyStore: createSymmetricKeyStore("test-secret"),
 		codeRepository: {

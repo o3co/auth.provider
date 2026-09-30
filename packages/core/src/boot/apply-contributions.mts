@@ -37,8 +37,10 @@ import type {
 import { readRateLimitFailMode } from "../ratelimit/guard.mjs";
 import type { RateLimiter, RateLimitSpec } from "../ratelimit/types.mjs";
 import { isBoundedRateLimitSpec, isUsableRateLimitSpec } from "../ratelimit/usableSpec.mjs";
+import type { AdmissionAction } from "../session-admission/actions.mjs";
 import { sessionRequirementResolverOver } from "../session-admission/admit.mjs";
 import {
+	checkRemediationsAgainstActions,
 	type RegisteredRequirement,
 	registeredRequirement,
 	sealRegisteredReach,
@@ -338,6 +340,7 @@ export function prepareSyntheticProjections(
 		mfaFactors,
 		sessionRequirements,
 		rateLimitBudgets,
+		admissionActions,
 	} = contributionKinds;
 	if (grants !== undefined) {
 		inject("grantHandlerResolver", () =>
@@ -370,7 +373,7 @@ export function prepareSyntheticProjections(
 	// The session-requirement resolver is branded by its home: the object the
 	// planner records is the gated view a consumer is handed, so `admitSession`
 	// knows it and a home-made object forges nothing (ADR
-	// 2026-09-28-session-admission).
+	// 2026-09-28-session-admission). It answers the registered actions too.
 	if (
 		sessionRequirements !== undefined &&
 		!Object.hasOwn(components, "sessionRequirementResolver")
@@ -379,6 +382,7 @@ export function prepareSyntheticProjections(
 			{
 				get: (name) => sessionRequirements.get(name),
 				entries: () => sessionRequirements.entries(),
+				action: (name) => admissionActions?.get(name),
 			},
 			(view) => readableFromStage4(view, "sessionRequirementResolver", readGate),
 		);
@@ -614,6 +618,45 @@ function logRateLimitBudgets(
 	}
 }
 
+/** Each registered admission action's name, with the module that registered it, in init order. */
+function admissionActionRegistrants(material: ComponentWorld): ReadonlyMap<string, string> {
+	const registrants = new Map<string, string>();
+	for (const moduleName of material.plan.initOrder) {
+		// biome-ignore lint/style/noNonNullAssertion: every module in the init order was validated under its name
+		const normalised = material.plan.validated.byName.get(moduleName)!.normalised;
+		for (const entry of normalised.contributesEntries) {
+			if (entry.kind === "admissionActions" && typeof entry.key === "string") {
+				registrants.set(entry.key, moduleName);
+			}
+		}
+	}
+	return registrants;
+}
+
+/**
+ * Logs `admission_actions_registered` at info once any action is registered:
+ * each action's name, its grade and the module that registered it, in init
+ * order. An action graded `grants_nothing` is exempt from the MFA baseline on
+ * a session a record carries; this line is where an operator sees which
+ * module declared it.
+ * @internal
+ */
+function logAdmissionActions(
+	material: ComponentWorld,
+	components: Record<string, unknown>,
+	collector: NameKeyedCollector<AdmissionAction> | undefined,
+): void {
+	const actions = [...admissionActionRegistrants(material)].flatMap(([name, module]) => {
+		const action = collector?.get(name);
+		return action === undefined ? [] : [{ name, grade: action.grade, module }];
+	});
+	if (actions.length === 0) return;
+	((components.logger as Logger | undefined) ?? consoleLogger).info(
+		{ actions },
+		"admission_actions_registered",
+	);
+}
+
 /** One registered session requirement, with the module that contributed it. */
 interface RequirementRegistration {
 	readonly name: string;
@@ -672,6 +715,9 @@ const sameSet = (a: ReadonlySet<string>, b: ReadonlySet<string>): boolean =>
  *   module), before anything else is checked;
  * - seal each `reach` with `sealRegisteredReach`, which holds its rules, so
  *   the `acr` drop and admission read what was checked;
+ * - refuse a remediation named after a registered admission action
+ *   (`checkRemediationsAgainstActions`): it would skip every requirement for
+ *   that action;
  * - accept the second-factor authority, whatever its name, only from a
  *   module that requires every one of `MFA_PORTS`, reaching what core
  *   recomputes from the enabled factors, and declaring its own
@@ -697,8 +743,10 @@ async function checkSessionRequirements(
 	material: ComponentWorld,
 	components: Record<string, unknown>,
 	collector: NameKeyedCollector<RegisteredRequirement> | undefined,
+	actions: NameKeyedCollector<AdmissionAction> | undefined,
 ): Promise<void> {
 	if (collector === undefined) return;
+	const registrants = admissionActionRegistrants(material);
 	const registrations: RequirementRegistration[] = [];
 	// An override of the kind never reaches here: stage 1's guard refuses it
 	// off the same normalised entries this pass reads.
@@ -755,6 +803,10 @@ async function checkSessionRequirements(
 	for (const registration of registrations) {
 		let reach: ReadonlySet<string>;
 		try {
+			checkRemediationsAgainstActions(registration.requirement, (name) => {
+				const module = actions?.get(name) === undefined ? undefined : registrants.get(name);
+				return module === undefined ? undefined : `module ${JSON.stringify(module)}`;
+			});
 			reach = sealRegisteredReach(registration.requirement);
 		} catch (cause) {
 			return failed(registration, cause);
@@ -962,7 +1014,8 @@ function warnOnTokenBindingSurfaceOverlap(
  *      then feed `collector.register` (contributes) or `collector.replace`
  *      (overrides).
  *   2b. `checkSessionRequirements`, before a list-shaped factory reads a
- *      requirement's reach.
+ *      requirement's reach; then the rate-limit budgets' and the admission
+ *      actions' boot lines.
  *   3. List-shaped pass, in INPUT-ARRAY order: `collector.append` (dedup by
  *      reference is the collector's job); routes are wrapped as
  *      `CollectedRouteContribution` with a `declarationIndex`.
@@ -1152,8 +1205,14 @@ export async function applyContributions(
 	// reads a requirement's reach.
 	// ---------------------------------------------------------------------------
 
-	await checkSessionRequirements(material, components, contributionKinds.sessionRequirements);
+	await checkSessionRequirements(
+		material,
+		components,
+		contributionKinds.sessionRequirements,
+		contributionKinds.admissionActions,
+	);
 	logRateLimitBudgets(material, components, contributionKinds.rateLimitBudgets);
+	logAdmissionActions(material, components, contributionKinds.admissionActions);
 
 	// ---------------------------------------------------------------------------
 	// Step 3: List-shaped pass in INPUT-ARRAY order.
