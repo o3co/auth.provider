@@ -25,11 +25,13 @@
 import {
 	type AppConfig,
 	type AppHandle,
+	type AuditEvent,
 	type ClientRepository,
 	type CodeRepository,
 	createApp,
 	defaultRefreshTokenFamilyRevocationModule,
 	defineModule,
+	type GrantPolicyDecision,
 	jwksModule,
 	memoryRefreshTokenFamilyStoreModule,
 	type PublicClient,
@@ -401,6 +403,93 @@ describe("token exchange through oauthModule's POST /oauth/token", () => {
 				error_description: "requested_resources_not_in_audience: https://elsewhere.example",
 			});
 		});
+	});
+
+	// Only an exact "allow" allows and an exact "deny" refuses. Anything else
+	// is the deployment's policy at fault: a server error, never a token at
+	// the scope the request had before the policy ran, and never a denial.
+	describe("a policy decision that is neither allow nor deny", () => {
+		const logger = () => {
+			const spy = {
+				trace: vi.fn(),
+				debug: vi.fn(),
+				info: vi.fn(),
+				warn: vi.fn(),
+				error: vi.fn(),
+				fatal: vi.fn(),
+				child: () => spy,
+			};
+			return spy;
+		};
+
+		it.each([
+			["another outcome", { outcome: "denied", error: "access_denied" }],
+			["another case", { outcome: "Deny" }],
+			["no outcome", {}],
+			["null", null],
+		])(
+			"answers a decision with %s 500 server_error, logs it once and audits a failure",
+			async (_label, decision) => {
+				const log = logger();
+				const events: AuditEvent[] = [];
+				const app = await boot([
+					defineModule({
+						name: "test:grant-policy",
+						provides: {
+							grantPolicy: () => ({
+								kind: "test-policy",
+								evaluate: async () => decision as unknown as GrantPolicyDecision,
+							}),
+						},
+					}),
+					defineModule({ name: "test:logger", provides: { logger: () => log } }),
+					defineModule({
+						name: "test:audit-sink",
+						provides: {
+							auditSink: () => ({
+								kind: "spy",
+								record: async (event: AuditEvent) => {
+									events.push(event);
+								},
+							}),
+						},
+					}),
+				]);
+
+				const res = await exchange(app, gateway.clientId, {
+					subject_token: await signSelfIssuedAccessToken({ scope: "read write" }),
+					subject_token_type: ACCESS_TOKEN_TYPE,
+				});
+
+				expect(res.status).toBe(500);
+				expect(res.body).toEqual({
+					error: "server_error",
+					error_description: "policy_decision_invalid",
+				});
+				expect(
+					log.error.mock.calls.filter(([, event]) => event === "grant_policy_decision_invalid"),
+				).toEqual([
+					[
+						{ grantType: TOKEN_EXCHANGE_GRANT_TYPE, policy: "test-policy" },
+						"grant_policy_decision_invalid",
+					],
+				]);
+				expect(
+					events
+						.filter((event) => event.type.startsWith("token.issued"))
+						.map(({ type, details }) => ({ type, details })),
+				).toEqual([
+					{
+						type: "token.issued.failure",
+						details: {
+							grant_type: TOKEN_EXCHANGE_GRANT_TYPE,
+							error: "server_error",
+							reason: "policy_decision_invalid",
+						},
+					},
+				]);
+			},
+		);
 	});
 
 	describe("the refusal's log line — the resources are the caller's", () => {
