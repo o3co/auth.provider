@@ -57,7 +57,10 @@ import {
 	type UserSessionStore,
 	type WebAuthnCredentialStore,
 } from "@o3co/auth-provider-core";
-import { unreadableModuleLeaves } from "@o3co/auth-provider-core/testing";
+import {
+	createRecordingMailSender,
+	unreadableModuleLeaves,
+} from "@o3co/auth-provider-core/testing";
 import { DEVICE_CODE_GRANT_TYPE, deviceGrantModule } from "@o3co/auth-provider-device-grant";
 import { mfaConfigForTests, totpCodeForTests } from "@o3co/auth-provider-mfa/testing";
 import {
@@ -99,6 +102,7 @@ import {
 	webTokens,
 } from "@o3co/auth-provider-standalone/src/__tests__/all-modules-composition.fixture.mts";
 import { readOwnLayers, readSwitches } from "@o3co/auth-provider-standalone/src/configPath.mts";
+import { standardSmtpMailSenderModule } from "@o3co/auth-provider-standard";
 import { type FakeStore, startFakeStore } from "@o3co/auth-provider-test-kit";
 import { WEBAUTHN_GRANT_TYPE } from "@o3co/auth-provider-webauthn";
 import type { Express } from "express";
@@ -205,7 +209,6 @@ const DEPLOYMENT_MODULES = [
 	"deployment:github-federation-config",
 	"deployment:requirement-page",
 	"deployment:requirement-bare",
-	"deployment:mail-sender",
 ];
 
 describe("what the full set covers", () => {
@@ -270,6 +273,21 @@ describe("the full set's mail sender", () => {
 		expect(handle.components.mailSender).toBe(mail);
 		expect(mail.kind).toBe("recording");
 		expect(mail.sent).toEqual([]);
+	});
+
+	it("keeps the template's SMTP sender's module, whose sender the recording one stands in for, and no other mail sender", async () => {
+		const { modules } = await boot();
+		const providers = modules
+			.filter((module) => module.provides !== undefined && "mailSender" in module.provides)
+			.map((module) => module.name);
+		expect(providers).toEqual([standardSmtpMailSenderModule.name]);
+	});
+
+	it("gives the slot to a caller's own mailSender override, over the recording sender", async () => {
+		const own = createRecordingMailSender();
+		const { handle, mail } = await boot({ extraOverrides: () => ({ mailSender: own }) });
+		expect(handle.components.mailSender).toBe(own);
+		expect(handle.components.mailSender).not.toBe(mail);
 	});
 });
 

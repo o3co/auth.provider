@@ -31,11 +31,11 @@
  *   WebAuthn, Apple and GitHub config bridges and a `grantPolicy` (WebAuthn
  *   refuses to boot without one, and no package ships one). The federation
  *   bridges point each adapter's `fetch` at a fake upstream.
- * - A mail sender, core's recording one, built at every boot and handed to
- *   the tests (`FullSet.mail`). It joins the template's SMTP sender's module
- *   only because that module provides no sender yet: once it does (the MFA
- *   ADR's build-order step 17), two modules would provide the slot, and this
- *   one has to take the template's place instead.
+ * - A mail sender, core's recording one, handed to the tests
+ *   (`FullSet.mail`). It fills the slot as a composition root's override of
+ *   the template's SMTP sender's module: the module stays installed and its
+ *   section is parsed at every boot, and its sender, which needs a relay, is
+ *   never built.
  * - mTLS in-process on its `header` source from a loopback peer — the shape
  *   a TLS-terminating proxy gives it — with the mTLS package's test
  *   certificate.
@@ -700,14 +700,6 @@ function mfaStoreModules(config: AppConfig, stores: AddedStores): Module[] {
 	];
 }
 
-/** The deployment's mail sender: `mail`, built at every boot whether or not anything reads it. */
-const mailSenderModule = (mail: RecordingMailSender): Module =>
-	defineModule({
-		name: "deployment:mail-sender",
-		lifecycle: { mailSender: { eager: true } },
-		provides: { mailSender: () => mail },
-	});
-
 /** Every module the template does not compose, as a deployment adds them to its manifest. */
 function addedModules(
 	config: AppConfig,
@@ -717,7 +709,6 @@ function addedModules(
 	interrupt: ReadonlySet<string>,
 	ceremonies: FixtureCeremony[],
 	outage: { once: FixtureCeremony["requirement"] | undefined },
-	mail: RecordingMailSender,
 ): Module[] {
 	return [
 		deviceGrantModule({ config }),
@@ -755,7 +746,6 @@ function addedModules(
 		grantPolicyModule,
 		...requirementModules(interrupt, ceremonies, outage),
 		...federationBridges(config, features, f),
-		mailSenderModule(mail),
 	];
 }
 
@@ -901,8 +891,9 @@ export async function fullSetOptions(
 					: { ...featured, ...foundationMfaFactorStoreConfig(added.mfaFactorStoreAt) };
 			return options.adjust ? options.adjust(stored) : stored;
 		},
-		extraModules: (config) =>
-			addedModules(config, features, added, f, interrupt, opened, outage, mail),
+		extraModules: (config) => addedModules(config, features, added, f, interrupt, opened, outage),
+		// The caller's own overrides win, its own mail sender included.
+		extraOverrides: (config) => ({ mailSender: mail, ...options.extraOverrides?.(config) }),
 		extraClients: { ...EXTRA_CLIENTS, ...options.extraClients },
 		extraUsers: { ...EXTRA_USERS, ...options.extraUsers },
 	};
