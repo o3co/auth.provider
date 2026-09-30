@@ -21,6 +21,7 @@
  * same semver discipline as the main `.` export.
  */
 
+export { CORE_RELOCATIONS, type CoreRelocations } from "../config/core-relocations.mjs";
 /**
  * `GrantRegistry` for tests that construct a registry directly rather than
  * through `createApp` and a module's `contributes.grants`. Not on the package
@@ -70,7 +71,6 @@ export {
 	type ReferenceConfCheck,
 	referenceConfProblems,
 } from "./referenceConf.mjs";
-export { CORE_RELOCATIONS, type CoreRelocations } from "../config/core-relocations.mjs";
 export { type RenamedVariableCheck, renamedVariableProblems } from "./renamedVariables.mjs";
 export {
 	type CsrfGuardContractInput,

@@ -46,7 +46,7 @@ function layer(text: string): string {
 const capture = (...names: string[]): string =>
 	`renamed-variables {\n${names.map((name) => `  ${name} = null\n  ${name} = \${?${name}}\n`).join("")}}\n`;
 
-const SECTION = "fixture-renaming {\n  retries = 3\n  retries = ${?FIXTURE_RENAMING_RETRIES}\n}\n";
+const SECTION = `fixture-renaming {\n  retries = 3\n  retries = \${?FIXTURE_RENAMING_RETRIES}\n}\n`;
 
 const renaming = (renamedVariables: Record<string, string>, reference?: string) =>
 	defineModule({
@@ -105,7 +105,7 @@ describe("renamedVariableProblems", () => {
 
 	it("names an old name another layer still binds, as a declaration of a live variable would", () => {
 		const reference = layer(`${SECTION}${capture("OTHER_SETTING", "FIXTURE_RENAMING_RETRIES")}`);
-		const other = layer("other { setting = ${?OTHER_SETTING} }\n");
+		const other = layer(`other { setting = \${?OTHER_SETTING} }\n`);
 
 		expect(
 			renamedVariableProblems({
