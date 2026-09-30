@@ -71,7 +71,7 @@ describe("the template's mail sender", () => {
 		);
 	});
 
-	it("boots in production with the SMTP sender's module, which leaves the slot empty", async () => {
+	it("boots in production with the SMTP sender's module and no SMTP settings, building no sender where nothing reads the slot", async () => {
 		current = await compose();
 		expect(current.handle.components.mailSender).toBeUndefined();
 	});

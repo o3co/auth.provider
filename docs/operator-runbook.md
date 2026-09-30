@@ -669,6 +669,32 @@ wires it.
   development sender logs each code, and installs only where the name the
   configuration was selected by, and `CONFIG_ENV` and `NODE_ENV` wherever
   they are set, each read `development` or `test`.
+- **Mail failures: `429` and `503`.** `429` means the sender was refused at
+  a limit: the user may try again later, and a steady rate of them means the
+  relay's quota is too small for your sign-ins. `503` means the code did not
+  leave for another reason; a steady rate of them is an outage of your mail
+  path. With `@o3co/auth-provider-standard`'s SMTP sender, a limit is
+  only a relay reply `421`, `450`, `451` or `452` carrying the enhanced code
+  `4.7.1`, `4.7.28` or `4.5.3`, to the sender, the recipient or the message;
+  every other failure is a `MailTransportError`, whose message names the
+  stage and the relay's reply codes (`SMTP 550 5.1.1`), never the reply's
+  text, and whose `reason` says where to look:
+  - `unreachable`: the network, the relay's name, or TLS — a certificate that
+    does not name `standard-smtp-mail-sender.host` or chains to no CA the
+    process trusts (add yours with `NODE_EXTRA_CA_CERTS`), a relay that does
+    not offer STARTTLS under `secure = "starttls"`, or, under `none`, a host
+    that reached an address that is not loopback;
+  - `auth_failed`: the account (`STANDARD_SMTP_MAIL_SENDER_USER`, `_PASSWORD`);
+  - `rejected`: the relay's policy — the sender address (`_FROM`), the
+    recipient, the message — or a transient refusal that is not a limit
+    (`421 4.3.2`, the relay going down);
+  - `timeout`: no connection in 10 seconds, no greeting in 10, or no answer
+    in 20.
+
+  The SMTP sender's module needs `STANDARD_SMTP_MAIL_SENDER_HOST` and `_FROM`
+  only where something reads the `mailSender` slot; there it refuses the boot
+  without them. It sends each code to the one address the Store holds, and
+  to nobody else.
 - **The email factor's address.** The factor keeps no address: only a keyed
   digest of the one its enrollment code went to. A login code goes to the
   account's current address only while that digest matches, so **a change of
