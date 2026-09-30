@@ -30,8 +30,9 @@
  * because settling work registers more work (a release, then its audit).
  *
  * Not durable, no delivery guarantee, no SIGKILL protection, and it bounds
- * nothing: the host's cleanup budget does (at least 45 seconds when this package
- * is mounted; the standalone default is ten).
+ * nothing: the host's cleanup budget does. An enabled deployment registers the
+ * drain's tail with the lifecycle registrar ({@link federationGrantsCleanupTailMs}),
+ * which `AppHandle.cleanupAllowanceMs` reports to the host.
  *
  * A lock wait the call gave up on is kept out, because it may never settle; core
  * registers only the release, if the lock arrives. If it arrives after the drain
@@ -39,6 +40,8 @@
  * `/token` for that grant answers `503 temporarily_unavailable/lock_timeout`
  * meanwhile. Only a store whose lock acquisition is bounded avoids that.
  */
+
+import type { FederationGrantRetrievalLimits } from "@o3co/auth-provider-core";
 
 /**
  * The per-application registry. Exported so a composition root that mounts the
@@ -136,4 +139,33 @@ export function createFederationGrantBackground(): FederationGrantBackground {
 			return draining;
 		},
 	};
+}
+
+/** The least tail the drain registers: the shipped budgets' tail plus the margin. */
+const CLEANUP_FLOOR_MS = 45_000;
+
+/** What the tail adds to one refresh's: room for the cleanups after the drain, and the exit. */
+const CLEANUP_MARGIN_MS = 12_000;
+
+/** The longest delay a timer takes; a larger one fires after about a millisecond. */
+const MAX_TIMER_MS = 2_147_483_647;
+
+/**
+ * The `tailMs` the drain is registered with: one refresh's longest tail (the
+ * upstream hard timeout, the persist budget and the wait for the grant's lock,
+ * back to back) plus the margin, never below 45 seconds, never past what a
+ * timer can wait.
+ */
+export function federationGrantsCleanupTailMs(
+	limits: Pick<
+		FederationGrantRetrievalLimits,
+		"upstreamHardTimeoutMs" | "persistRetryBudgetMs" | "lockWaitMs"
+	>,
+): number {
+	const tail =
+		limits.upstreamHardTimeoutMs +
+		limits.persistRetryBudgetMs +
+		limits.lockWaitMs +
+		CLEANUP_MARGIN_MS;
+	return Math.min(Math.max(CLEANUP_FLOOR_MS, tail), MAX_TIMER_MS);
 }
