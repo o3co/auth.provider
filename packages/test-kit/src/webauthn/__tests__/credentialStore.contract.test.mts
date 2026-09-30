@@ -40,6 +40,9 @@ describe("webAuthnCredentialStoreContract over core's in-process store", () => {
 	}
 });
 
+const FOUND =
+	"finds a registered credential by its id, with the user, public key and sign count it was registered with";
+const LISTED = "lists every credential of a user, and no other user's";
 const ONE_USER =
 	"a credential id belongs to one user: registering one another user holds throws duplicate-credential, and changes nothing";
 const NO_REUPSERT =
@@ -82,6 +85,24 @@ describe("the suite refuses a store that breaks the contract", () => {
 			})),
 		);
 		expect(refused).toContain(ONE_USER);
+	});
+
+	it("one that overwrites a held credential's record and then throws duplicate-credential", async () => {
+		const refused = await refusedBy(() =>
+			broken((store) => ({
+				registerCredential: async (record) => {
+					if ((await store.findByCredentialId(record.credentialId)) === null) {
+						await store.registerCredential(record);
+						return;
+					}
+					await store.remove(record.credentialId);
+					await store.registerCredential(record);
+					throw new WebAuthnCredentialStorageError({ reason: "duplicate-credential" });
+				},
+			})),
+		);
+		expect(refused).toContain(ONE_USER);
+		expect(refused).toContain(NO_REUPSERT);
 	});
 
 	it("one that refuses a registration of a held credential id with an error other than duplicate-credential", async () => {
@@ -159,6 +180,39 @@ describe("the suite refuses a store that breaks the contract", () => {
 			}),
 		);
 		expect(refused).toContain(ONE_OF_CONCURRENT);
+	});
+
+	it("one whose found credential has a sign count of 0", async () => {
+		const refused = await refusedBy(() =>
+			broken((store) => ({
+				findByCredentialId: async (credentialId) => {
+					const found = await store.findByCredentialId(credentialId);
+					return found === null ? null : { ...found, signCount: 0 };
+				},
+			})),
+		);
+		expect(refused).toContain(FOUND);
+	});
+
+	it("one that lists every credential it holds, whoever's", async () => {
+		const refused = await refusedBy(() =>
+			broken((store) => {
+				const held: string[] = [];
+				return {
+					registerCredential: async (record) => {
+						await store.registerCredential(record);
+						held.push(record.credentialId);
+					},
+					listByUserId: async () => {
+						const found = await Promise.all(held.map((id) => store.findByCredentialId(id)));
+						return found.filter(
+							(credential): credential is WebAuthnCredential => credential !== null,
+						);
+					},
+				};
+			}),
+		);
+		expect(refused).toContain(LISTED);
 	});
 
 	it("one whose sign count update ignores the count it expects", async () => {
