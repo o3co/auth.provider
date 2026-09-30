@@ -23,9 +23,10 @@
  * kind claimed and absent from the resolver. Boot parses the section with the
  * module's schema before any factory runs and refuses what it cannot read,
  * naming the key; a configuration still setting the section's old path,
- * `mfa.factors.totp`, is refused naming the new one. From the whole
- * configuration it reads only the deployment's issuer, when no module
- * provides `oauthTokenSettings`. Stateless: nothing forks per replica.
+ * `mfa.factors.totp`, is refused naming the new one. The whole configuration
+ * is read for the deployment's issuer alone: `oauth.jwt.issuer` when no module
+ * provides `oauthTokenSettings`, and core's check of the slot when one does.
+ * Stateless: nothing forks per replica.
  */
 
 import { checkOAuthTokenSettings, defineModule } from "@o3co/auth-provider-core";
@@ -39,9 +40,9 @@ const configuredIssuer = (config: unknown): unknown =>
 /** The TOTP factor, contributed as `mfaFactors.totp`; `null` when switched off by its configuration. */
 export const mfaTotpFactorModule = defineModule({
 	name: "mfa-totp-factor",
-	// The package's `config/reference.conf` holds this section's defaults, and
-	// binds the variables of its old path there without one, so an operator
-	// still exporting them is refused rather than ignored.
+	// The package's `config/reference.conf` holds this section's defaults. It
+	// still binds the old path's two variables at that path, with no default,
+	// so an operator exporting one is refused rather than ignored.
 	section: {
 		schema: mfaTotpConfigSchema,
 		reference: new URL("../../config/reference.conf", import.meta.url),
