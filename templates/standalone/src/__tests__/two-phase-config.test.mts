@@ -321,7 +321,7 @@ describe("phase two refuses the Redis grant store's key prefix moved while the i
 		["both set to the same prefix", { [GRANT]: "t1:fg:", [INTENT]: "t1:fg:" }],
 		["each set to a prefix of its own", { [GRANT]: "t1:fg:", [INTENT]: "t1:fgi:" }],
 		["neither set", {}],
-	])("%s: resolved", (_, variables) => {
+	])("%s: resolved", (_, variables: Readonly<Record<string, string>>) => {
 		const resolved = resolve(variables) as unknown as Record<string, { keyPrefix?: unknown }>;
 		expect(resolved["redis-federation-grant-store"]?.keyPrefix).toBe(variables[GRANT] ?? "fg:");
 		expect(resolved["redis-federation-grant-intent-store"]?.keyPrefix).toBe(
