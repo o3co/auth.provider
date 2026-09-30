@@ -485,8 +485,9 @@ export const standaloneRedisClientsModule: Module = defineModule({
  * reason, and the trade the offline queue buys, is in
  * `docs/operator-runbook.md`, "Failure timing on the shared socket". In
  * short: on the driver's defaults a partition produces *waiting*, not errors,
- * so the `rateLimit.failMode = "closed"` policy (`createRateLimitGuard`),
- * which fires only when `limiter.check()` rejects, never engages.
+ * so the Redis limiter's `rateLimit.failMode = "closed"` policy, which the
+ * guard (`createRateLimitGuard`) applies only when `limiter.check()` rejects,
+ * never engages.
  * `commandTimeout` bounds every command, queued or on the wire, zombie socket
  * included; `maxRetriesPerRequest` bounds the offline queue's depth; the
  * queue stays on because the option is per connection and this socket also

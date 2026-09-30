@@ -10,6 +10,7 @@ import {
 	MAX_DURATION_SECONDS,
 	type RateLimitBudgetResolver,
 	type RateLimiter,
+	type RateLimitFailMode,
 	type RateLimitSpec,
 } from "@o3co/auth-provider-core";
 import { z } from "zod";
@@ -20,6 +21,7 @@ interface RedisRateLimiterConfig {
 	limits?: Record<string, RateLimitSpec>;
 	defaultLimit?: RateLimitSpec;
 	client?: RateLimiterClient;
+	failMode?: RateLimitFailMode;
 }
 
 /** The built-in default, for a configuration that gives none. */
@@ -34,6 +36,24 @@ interface CreateRedisRateLimiterOptions {
 	 * entry of `limits` wins over one (core's `createRateLimitBudgetLookup`).
 	 */
 	budgets?: RateLimitBudgetResolver;
+	/**
+	 * What the guard does while Redis cannot answer (`RateLimiter.failMode`):
+	 * `"open"` lets the request through, `"closed"` answers 503. Not given,
+	 * the limiter declares none, which the guard reads as `"closed"`.
+	 */
+	failMode?: RateLimitFailMode;
+}
+
+/** `failMode` as given, or a `RangeError` from `who` naming `name` when it is neither policy. */
+function checkedFailMode(
+	who: string,
+	name: string,
+	failMode: unknown,
+): RateLimitFailMode | undefined {
+	if (failMode === undefined || failMode === "open" || failMode === "closed") return failMode;
+	throw new RangeError(
+		`${who}${name} must be "open" or "closed" (got ${JSON.stringify(failMode) ?? String(failMode)})`,
+	);
 }
 
 /**
@@ -66,9 +86,11 @@ export function createRedisRateLimiter(opts: CreateRedisRateLimiterOptions): Rat
 		...(opts.budgets === undefined ? {} : { budgets: opts.budgets }),
 	});
 	const client = opts.client;
+	const failMode = checkedFailMode("createRedisRateLimiter: ", "failMode", opts.failMode);
 
 	return {
 		kind: "redis",
+		...(failMode === undefined ? {} : { failMode }),
 		async check(key) {
 			const { prefix, spec } = budgetFor(key);
 			// Take the PTTL with the count when the client offers it, so the
@@ -117,6 +139,7 @@ export const redisRateLimiterBuilder: AdapterBuilder<RateLimiter> = (config, _ct
 		client: cfg.client as RateLimiterClient,
 		limits: cfg.limits,
 		defaultLimit: cfg.defaultLimit,
+		failMode: cfg.failMode,
 	});
 };
 
@@ -128,9 +151,10 @@ const rateLimitSpecSchema = z.object({
 
 /**
  * `defineModule` manifest for the redis RateLimiter. Reads `redisRateLimiter`
- * config slice (limits + defaultLimit). The redis client itself comes from
- * the `rateLimiterClient` ComponentMap slot (per-purpose interface declared
- * in `@o3co/auth-provider-core`'s `ratelimit/types.mts`).
+ * config slice (limits + defaultLimit), and `rateLimit.failMode` as the
+ * limiter's own outage policy. The redis client itself comes from the
+ * `rateLimiterClient` ComponentMap slot (per-purpose interface declared in
+ * `@o3co/auth-provider-core`'s `ratelimit/types.mts`).
  */
 export const redisRateLimiterModule = defineModule({
 	name: "redis-rate-limiter",
@@ -145,15 +169,17 @@ export const redisRateLimiterModule = defineModule({
 	}),
 	provides: {
 		rateLimiter: (deps) => {
-			const cfg = (
-				deps.config as unknown as {
-					redisRateLimiter: {
-						limits: Record<string, RateLimitSpec>;
-						defaultLimit: RateLimitSpec;
-					};
-				}
-			).redisRateLimiter;
+			const config = deps.config as unknown as {
+				redisRateLimiter: {
+					limits: Record<string, RateLimitSpec>;
+					defaultLimit: RateLimitSpec;
+				};
+				rateLimit?: { failMode?: unknown };
+			};
+			const cfg = config.redisRateLimiter;
 			return createRedisRateLimiter({
+				// What the guard does while Redis cannot answer; not given, closed.
+				failMode: checkedFailMode("", "rateLimit.failMode", config.rateLimit?.failMode),
 				client: deps.rateLimiterClient,
 				// What an operator declared on this limiter wins over the budget a
 				// prefix's owner contributed, which wins over `defaultLimit`.

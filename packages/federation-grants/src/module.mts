@@ -40,7 +40,6 @@ import {
 	type FederationGrantRefresher,
 	fullSectionsSchema,
 	type ProviderDeps,
-	type RateLimitFailMode,
 	requireFederationGrantSubjectRevocation,
 	resolveFederationGrantAcquisitionLimits,
 	resolveFederationGrantRetrievalLimits,
@@ -157,7 +156,7 @@ const requireStore = (
  * Both routes are throttled before client authentication, so
  * that repeated unauthenticated hits are bounded before they reach a
  * repository lookup — and what happens when the limiter backend is down is the
- * product's decision (`rateLimit.failMode`), not this module's to default.
+ * limiter's own policy (`RateLimiter.failMode`), not this module's to choose.
  */
 const requireLimiter = (
 	deps: FederationGrantsModuleDeps,
@@ -171,18 +170,6 @@ const requireLimiter = (
 		);
 	}
 	return deps.rateLimiter;
-};
-
-const requireFailMode = (deps: FederationGrantsModuleDeps): RateLimitFailMode => {
-	const failMode = deps.config?.rateLimit?.failMode;
-	if (failMode !== "open" && failMode !== "closed") {
-		throw new Error(
-			'federationGrantsModule: federationGrants.enabled = true requires rateLimit.failMode ("open" | "closed"). ' +
-				"It is the product's one policy for a limiter-backend outage, and these routes " +
-				"apply it like every other throttled route rather than choosing for themselves.",
-		);
-	}
-	return failMode;
 };
 
 /**
@@ -380,7 +367,6 @@ export const federationGrantsModule = defineModule<Requires, Optional>({
 					federationGrantStore: store,
 				});
 				const rateLimiter = requireLimiter(deps);
-				const failMode = requireFailMode(deps);
 				const limits = resolveFederationGrantRetrievalLimits(deps.config);
 				const connections = resolveFederationGrantConnections(deps.config);
 				requireDelegatedCapability(deps, connections);
@@ -420,7 +406,6 @@ export const federationGrantsModule = defineModule<Requires, Optional>({
 						clientRepository: deps.clientRepository,
 						issuer: issuerOf(deps),
 						rateLimiter,
-						failMode,
 						...(deps.replaySeenSet === undefined ? {} : { replaySeenSet: deps.replaySeenSet }),
 						...(deps.auditSink === undefined ? {} : { auditSink: deps.auditSink }),
 						...(deps.logger === undefined ? {} : { logger: deps.logger }),
@@ -481,7 +466,6 @@ export const federationGrantsModule = defineModule<Requires, Optional>({
 						login: acquisition.login,
 						issuer: issuerOf(deps),
 						rateLimiter: requireLimiter(deps),
-						failMode: requireFailMode(deps),
 						background: deps.federationGrantBackground,
 						// The GRANTS boundary, for the callback's backstop and re-read.
 						grantsBoundary: boundaryFor(revocation),

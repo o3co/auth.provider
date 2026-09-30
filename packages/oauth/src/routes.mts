@@ -386,8 +386,8 @@ export const createOAuthRouter = async (
 		tokenEndpoint,
 	});
 
-	// The check and outage policy (failMode, context, 429 envelope) live in
-	// core's `createRateLimitGuard`, shared with the `/session/login`
+	// The check and outage policy (the limiter's failMode, context, 429
+	// envelope) live in core's `createRateLimitGuard`, shared with the `/session/login`
 	// brute-force guard. These endpoints emit RFC RateLimit-* headers too; no
 	// `headerFallback` is passed because no per-endpoint spec is configured
 	// here, so the guard advertises only what the adapter reported. Without a
@@ -397,7 +397,6 @@ export const createOAuthRouter = async (
 			? createRateLimitGuard({
 					limiter: rateLimiter,
 					tag,
-					failMode: config.rateLimit.failMode,
 					logger,
 					auditSink,
 				})

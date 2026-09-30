@@ -48,7 +48,6 @@ import {
 	MAX_DURATION_SECONDS,
 	type Module,
 	type ProviderDeps,
-	type RateLimitFailMode,
 	type RateLimitSpec,
 	requireUsableConfiguredRateLimitSpec,
 	resolveAccessTokenLifetime,
@@ -442,26 +441,6 @@ const requireCsrfGuard = (
 	return deps.csrfGuard;
 };
 
-/**
- * `rateLimit.failMode` is the product's one outage policy for a failed
- * limiter backend; defaulting it here would be a second policy, so its
- * absence refuses boot. Both route factories call this, so the refusal does
- * not depend on planner order.
- */
-const requireFailMode = (deps: DeviceGrantModuleDeps): RateLimitFailMode => {
-	const failMode = deps.config?.rateLimit?.failMode;
-	if (failMode !== "open" && failMode !== "closed") {
-		throw new Error(
-			"deviceGrantModule: oauth.deviceAuthorization.enabled = true requires " +
-				'rateLimit.failMode ("open" | "closed"). POST /oauth/device_authorization ' +
-				"and POST /oauth/device/verification both apply the shared rate-limit " +
-				"outage policy, and what that policy does when the limiter backend is " +
-				"down is the product's decision, not this module's.",
-		);
-	}
-	return failMode;
-};
-
 const requireRateLimiter = (
 	deps: DeviceGrantModuleDeps,
 ): NonNullable<DeviceGrantModuleDeps["rateLimiter"]> => {
@@ -637,7 +616,6 @@ export const deviceGrantModule = (params: { config: AppConfig }): Module => {
 						createRateLimitGuard({
 							limiter: requireRateLimiter(deps),
 							tag: DEVICE_AUTHORIZATION_RATE_LIMIT_PREFIX,
-							failMode: requireFailMode(deps),
 							...(deps.logger ? { logger: deps.logger } : {}),
 							auditSink: deps.auditSink,
 						}),
@@ -709,11 +687,10 @@ export const deviceGrantModule = (params: { config: AppConfig }): Module => {
 						csrfGuard.middleware,
 						createDeviceVerificationHandler({
 							store: requireDeviceCodeStore(deps),
-							rateLimiter: requireRateLimiter(deps),
-							// The outage policy the device_authorization guard applies.
 							// The handler keys its budget on the subject, so it runs the
-							// guard's check itself rather than the guard as middleware.
-							failMode: requireFailMode(deps),
+							// guard's check itself, with the limiter's own outage policy,
+							// rather than the guard as middleware.
+							rateLimiter: requireRateLimiter(deps),
 							// What session admission reads for every action: the
 							// live session, and the requirements registered.
 							userSessionStore,

@@ -324,6 +324,7 @@ describe("createRateLimitGuard — limiter outage (the limiter's failMode)", () 
 		const { sink, events } = spyAuditSink();
 		const limiter: RateLimiter = {
 			kind: "broken",
+			failMode: "open",
 			async check() {
 				throw "socket hangup";
 			},

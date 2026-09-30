@@ -81,7 +81,7 @@ const authenticationOptionsBudget = (section: unknown): RateLimitSpec | null => 
  * `rateLimiter` or else a per-process memory limiter (with a warning). The module contributes
  * `webauthn.rateLimit.authenticationOptions` as the tag's budget, which a wired limiter applies;
  * the fallback limiter applies `webauthnConfig.rateLimit.authenticationOptions`. The outage
- * policy is `config.rateLimit.failMode`, as for the OAuth endpoints and `/session/login`.
+ * policy is the limiter's own `failMode`, as for the OAuth endpoints and `/session/login`.
  */
 export const webauthnModule = defineModule<
 	| "webauthnConfig"
@@ -291,14 +291,13 @@ export const webauthnModule = defineModule<
 
 				router.post(
 					"/",
-					// `failMode` is read from the same product-wide config key the
-					// OAuth endpoints and `/session/login` read: a limiter outage
-					// must not mean "shed load" on one surface and "let everything
-					// through" on another.
+					// The outage policy is the limiter's own `failMode`, the one the
+					// OAuth endpoints and `/session/login` apply on the same limiter:
+					// an outage must not mean "shed load" on one surface and "let
+					// everything through" on another.
 					createRateLimitGuard({
 						limiter,
 						tag: WEBAUTHN_AUTHENTICATION_OPTIONS_RATE_LIMIT_TAG,
-						failMode: deps.config.rateLimit.failMode,
 						logger,
 						auditSink: deps.auditSink,
 						// This endpoint HAS a documented per-endpoint spec, so the

@@ -25,8 +25,8 @@ import { loggableError } from "../logging/loggableError.mjs";
 import type { RateLimitContext, RateLimitDecision, RateLimiter, RateLimitSpec } from "./types.mjs";
 
 /**
- * How the guard behaves when the limiter backend itself errors; mirrors
- * `config.rateLimit.failMode`. See {@link createRateLimitGuard}.
+ * How the guard behaves when the limiter backend itself errors: the
+ * limiter's own `RateLimiter.failMode`. See {@link createRateLimitGuard}.
  */
 export type RateLimitFailMode = "open" | "closed";
 
@@ -39,12 +39,6 @@ export interface RateLimitGuardOptions {
 	 * audit emissions. E.g. `"token"`, `"authorize"`, `"introspect"`, `"login"`.
 	 */
 	readonly tag: string;
-	/**
-	 * Policy for a limiter-backend outage, from `config.rateLimit.failMode`:
-	 * one policy for the product, not one per router. `"open"` lets the
-	 * request through; `"closed"` returns 503.
-	 */
-	readonly failMode: RateLimitFailMode;
 	/** Operator-visible outage channel. Defaults to `consoleLogger`. */
 	readonly logger?: Logger;
 	/**
@@ -83,11 +77,12 @@ export interface RateLimitOutageLogger {
 
 /**
  * What {@link checkWithFailMode} needs from {@link RateLimitGuardOptions}: the
- * limiter, the endpoint tag, the outage policy and its two channels.
+ * limiter, whose `failMode` is the outage policy, the endpoint tag and the
+ * outage's two channels.
  */
 export type RateLimitPolicyOptions = Pick<
 	RateLimitGuardOptions,
-	"limiter" | "tag" | "failMode" | "auditSink"
+	"limiter" | "tag" | "auditSink"
 > & {
 	/** Operator-visible outage channel. Defaults to `consoleLogger`. */
 	readonly logger?: RateLimitOutageLogger;
@@ -95,7 +90,8 @@ export type RateLimitPolicyOptions = Pick<
 
 /**
  * What {@link checkWithFailMode} hands back: the limiter's decision, or the
- * fact that it had none together with the policy the caller is to apply.
+ * fact that it had none together with the limiter's policy the caller is to
+ * apply.
  */
 export type RateLimitCheckOutcome =
 	| { readonly status: "decided"; readonly decision: RateLimitDecision }
@@ -110,16 +106,21 @@ export type RateLimitCheckOutcome =
  * {@link rateLimiterUnavailableEnvelope} under `"closed"`, proceed under
  * `"open"`), so the policy and its reporting exist once.
  *
+ * The policy is the limiter's own `failMode`, since only its backend can be
+ * down: `"open"` when it says so, `"closed"` otherwise — when it declares
+ * none, as the in-process limiter does, and for any other value.
+ *
  * The outage report's `ip` / `userAgent` are read from `ctx`.
  */
 export const checkWithFailMode = async (
-	{ limiter, tag, failMode, logger = consoleLogger, auditSink }: RateLimitPolicyOptions,
+	{ limiter, tag, logger = consoleLogger, auditSink }: RateLimitPolicyOptions,
 	key: string,
 	ctx: RateLimitContext,
 ): Promise<RateLimitCheckOutcome> => {
 	try {
 		return { status: "decided", decision: await limiter.check(key, ctx) };
 	} catch (cause) {
+		const failMode: RateLimitFailMode = limiter.failMode === "open" ? "open" : "closed";
 		// A limiter's error is a store's (a Redis reply echoes the command it
 		// refused), so the log line carries loggableError's projection, and a
 		// thrown non-Error says what kind it was, not what it held. The audit
@@ -167,7 +168,8 @@ export const rateLimiterUnavailableEnvelope = (): ErrorEnvelope =>
  * - **deny** → `RateLimit-*` headers, `Retry-After` when the decision carries
  *   a reset time, and a 429 with the RFC 6749 §5.2 envelope
  *   (`{error: "rate_limited"}`);
- * - **limiter outage** → applies `failMode` and reports on two channels:
+ * - **limiter outage** → applies the limiter's own `failMode` (closed when it
+ *   declares none) and reports on two channels:
  *   `logger.error` for operators, which works even when the audit sink shares
  *   the failed backend (typically Redis), and the `rate_limit.unavailable`
  *   audit event for dashboards.
@@ -178,13 +180,12 @@ export const rateLimiterUnavailableEnvelope = (): ErrorEnvelope =>
 export const createRateLimitGuard = ({
 	limiter,
 	tag,
-	failMode,
 	logger = consoleLogger,
 	auditSink,
 	headerFallback,
 	deniedDescription,
 }: RateLimitGuardOptions): RequestHandler => {
-	const policy: RateLimitPolicyOptions = { limiter, tag, failMode, logger, auditSink };
+	const policy: RateLimitPolicyOptions = { limiter, tag, logger, auditSink };
 	return async (req: Request, res: Response, next): Promise<void> => {
 		const ip = req.ip ?? "unknown";
 		// The same ip as the key, so a limiter that reuses ctx.ip for logging

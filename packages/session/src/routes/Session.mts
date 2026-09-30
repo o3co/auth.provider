@@ -176,8 +176,8 @@ export const createRouter = (
 
 	// The login guard runs on the same `RateLimiter` as the OAuth endpoints,
 	// so a shared adapter gives one bucket set across replicas. `login` is the
-	// key prefix adapters resolve the spec by; the bundled ones seed it from
-	// `config.rateLimit.login`.
+	// key prefix a limiter resolves the budget by, which the session module
+	// contributes from `config.rateLimit.login`.
 	const loginLimitSpec = {
 		limit: config.rateLimit.login.limit,
 		windowSeconds: Math.max(1, Math.ceil(config.rateLimit.login.windowMs / 1000)),
@@ -218,13 +218,12 @@ export const createRouter = (
 		});
 
 	// The check and outage policy are core's `createRateLimitGuard`, shared
-	// with the OAuth endpoints (same `failMode`, same `rate_limit.unavailable`
-	// audit event). `RateLimit-*` headers fall back to the documented login
-	// spec when the adapter reports none.
+	// with the OAuth endpoints (the limiter's own `failMode`, the same
+	// `rate_limit.unavailable` audit event). `RateLimit-*` headers fall back to
+	// the documented login spec when the adapter reports none.
 	const loginRateLimit = createRateLimitGuard({
 		limiter: loginLimiter,
 		tag: "login",
-		failMode: config.rateLimit.failMode,
 		logger,
 		auditSink,
 		headerFallback: loginLimitSpec,

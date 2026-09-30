@@ -87,7 +87,6 @@ import {
 	type LoginEntry,
 	parseScopeTokens,
 	type RateLimiter,
-	type RateLimitFailMode,
 	recordAuditEvent,
 	type SessionClaim,
 	type SessionRequirementResolver,
@@ -150,8 +149,8 @@ export interface FederationGrantBrowserRouterOptions {
 	readonly login: Pick<LoginEntry, "urlFor">;
 	/** `oauth.jwt.issuer`, held to core's `checkCanonicalIssuer`: every URL this router builds is built on it. */
 	readonly issuer: string;
+	/** The browser budget; its own `failMode` is the outage policy. */
 	readonly rateLimiter: RateLimiter;
-	readonly failMode: RateLimitFailMode;
 	readonly background: FederationGrantBackground;
 	/**
 	 * The subject's GRANTS boundary: what the callback's backstop and re-read
@@ -530,7 +529,6 @@ export function createFederationGrantBrowserRouter(
 				{
 					limiter: options.rateLimiter,
 					tag: FEDERATION_GRANTS_BROWSER_RATE_LIMIT_PREFIX,
-					failMode: options.failMode,
 					...(options.logger === undefined ? {} : { logger: options.logger }),
 					...(options.auditSink === undefined ? {} : { auditSink: options.auditSink }),
 				},
