@@ -205,6 +205,7 @@ standalone テンプレートの [`buildModules.mts`](../../templates/standalone
 - `sid` の無いコードは `400 invalid_grant` — ログインの配線が記録しなかった;
 - 1 度目で、ストアが解決できない `sid`、`expiresAt` を過ぎたセッション、サブジェクトを持たないセッション、あるいは（`subjectRevocation` が配線されていれば）サブジェクトのセッションが失効される前に確立されたセッションは `400 invalid_grant` / `session_invalid`;
 - 2 度目で、トークンの発行中に消えた・期限切れになった・失効した・別のサブジェクトを答えるセッションは `400 invalid_grant` / `session_invalidated` で、warn レベルで `authorization_grant_rejected_session_invalidated_during_token_issuance`、別のサブジェクトなら `…_session_subject_changed_during_token_issuance` としてログに出す（アドミッションはこれを `session.admission.subject_mismatch` としても監査する）;
+- 2 度目の読み取りの後、ファミリーを結び付けている間にログアウトがセッションを終わらせたときも、ファミリーインデックスが core のセッション終了ケイパビリティ（`SupportsSessionEnd`。同梱の 2 つのインデックスはどちらも持つ）を持てば同じ答え `400 invalid_grant` / `session_invalidated` で、同じ warn の行としてログに出す。ログアウトはファミリーを列挙する前にセッションに終了の印を書き、グラントは印を読む前にファミリーを追加するので、ログアウトがファミリーを失効させるか、グラントがトークンを出さないかのどちらかになる。グラントはそのとき自分が登録したファミリーを失効させる。失効に失敗すれば error レベルで 1 度 `authorization_grant_refused_family_revocation_failed`（`sid`、`clientId`、`familyId`、エラーの射影）としてログに出し、答えは変えない。この保証は core が述べるとおりストアを信頼する（読み書きが線形化可能で、読み取りはプライマリーが答える）。ケイパビリティの無いインデックスではファミリーは守られずに追加され、コード交換と競合するログアウトはそれを取りこぼしうる。boot は warn レベルで 1 度 `session_family_index_without_session_end`（`slot`、インデックスの `kind`）としてそう告げる;
 - セッションが満たさない登録済みのセッション要件は、それを名指して `400 invalid_grant`。ステップアップで満たせるなら `step_up: "<要件>"` を添える;
 - 答えられないストアは `503 temporarily_unavailable`: セッションの読み取りはアドミッションが `session_admission_unavailable` として 1 度だけ、結び付けの書き込みは `authorization_grant_store_unavailable` としてログに出す。
 
@@ -554,7 +555,7 @@ OIDC RP-Initiated Logout 1.0 の `end_session_endpoint`。パラメーター（`
 
 **カスケード**は [`cascadeLogout`](./src/logout/cascadeLogout.mts) で、決まった順序の 4 ステップからなる。その doc コメントが完全な契約で、[`cascadeLogout.test.mts`](./src/logout/__tests__/cascadeLogout.test.mts) がそれを固定している:
 
-1. セッションのリフレッシュトークンファミリーを読む。失敗したらカスケードはそこで止まる。
+1. セッションに終了の印を書き、そのリフレッシュトークンファミリーを読む（ファミリーインデックスがセッション終了ケイパビリティを持てばセッションの `expiresAt` を渡して `endSession`、無ければ `listFamilyIds`）。この後にファミリーを結び付けるコード交換は拒否される（[`authorization_code`](#authorization_code-セッションsidfamily_id-と-id_token) を参照）。失敗したらカスケードはそこで止まる。
 2. すべてのファミリーを失効させ、セッションのフェデレーショントークンを削除する。すべての操作を試み、**どれか 1 つでも**失敗すれば、再試行に必要な記録が消される前にカスケードはここで止まる。
 3. セッションの逆引きインデックスのエントリー（RP、ファミリー、フェデレーション）を削除する — ベストエフォートで、ログに出し、TTL で上限がある。
 4. 最後に `UserSession` を削除する。失敗したらカスケードはそこで止まる。
