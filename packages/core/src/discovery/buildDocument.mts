@@ -25,16 +25,18 @@ import type { OidcDiscoveryContribution } from "./types.mjs";
 const RESERVED_FIELDS = new Set(["issuer", "id_token_signing_alg_values_supported"]);
 
 /**
- * OIDC Discovery 1.0 §3 REQUIRED fields. The assembled document must carry all
- * of them, else the deployment is advertising a malformed discovery document —
- * a boot error. This is what makes the cross-module presence contract
- * structural: `jwks_uri` is required, so a composition that advertises an
- * issuer but omits the JWKS-contributing module fails fast at boot instead of
- * serving a document with a missing `jwks_uri`.
+ * The fields every assembled document carries, else it is malformed — a boot
+ * error. `jwks_uri` is among them, so a composition that advertises an issuer
+ * but omits the JWKS-contributing module fails at boot instead of serving a
+ * document with no `jwks_uri`. `authorization_endpoint` is not: RFC 8414 §2
+ * requires it only when a grant uses it, which {@link checkAuthorizationEndpoint}
+ * holds against `response_types_supported`. A document without it is an
+ * authorization server's and not an OpenID Provider's — OpenID Connect
+ * Discovery §3 requires the endpoint of every OP — and is served at both
+ * discovery paths all the same, where a resource server finds the keys.
  */
 const REQUIRED_FIELDS = [
 	"issuer",
-	"authorization_endpoint",
 	"token_endpoint",
 	"jwks_uri",
 	"response_types_supported",
@@ -43,16 +45,43 @@ const REQUIRED_FIELDS = [
 ] as const;
 
 /**
- * Required fields whose VALUE must be a non-empty array. The presence check
- * (`REQUIRED_FIELDS`) only verifies a field is defined; an empty array or a
- * scalar where an array is required still produces an OIDC-invalid document an
- * RP cannot use (e.g. `response_types_supported: []`). Validated after merge.
+ * Required fields whose value must be a non-empty array: present but empty,
+ * or a scalar, they advertise metadata no relying party can use.
  */
 const REQUIRED_NONEMPTY_ARRAY_FIELDS = [
-	"response_types_supported",
 	"subject_types_supported",
 	"id_token_signing_alg_values_supported",
 ] as const;
+
+/**
+ * A response type is what a client asks for at the authorization endpoint, so
+ * the document names the endpoint exactly when it lists a response type
+ * (RFC 8414 §2). A server with no grant that uses the endpoint lists
+ * `response_types_supported: []` — the field itself stays required — and
+ * names none.
+ */
+function checkAuthorizationEndpoint(doc: Record<string, unknown>): void {
+	const responseTypes = doc.response_types_supported;
+	if (!Array.isArray(responseTypes)) {
+		throw new DiscoveryDocumentError(
+			"discovery document field response_types_supported must be an array (empty when no " +
+				"grant uses the authorization endpoint)",
+		);
+	}
+	const namesEndpoint = doc.authorization_endpoint !== undefined;
+	if (namesEndpoint && responseTypes.length === 0) {
+		throw new DiscoveryDocumentError(
+			"discovery document names authorization_endpoint, so response_types_supported must be a " +
+				"non-empty array: a client asks for a response type there",
+		);
+	}
+	if (!namesEndpoint && responseTypes.length > 0) {
+		throw new DiscoveryDocumentError(
+			`discovery document lists response types (${JSON.stringify(responseTypes)}) but names no ` +
+				"authorization_endpoint to ask for them at",
+		);
+	}
+}
 
 /**
  * Known issuer-relative endpoint field NAMES that do NOT end in `_endpoint`.
@@ -197,15 +226,14 @@ export function buildDiscoveryDocument(
 	const missing = REQUIRED_FIELDS.filter((f) => doc[f] === undefined);
 	if (missing.length > 0) {
 		throw new DiscoveryDocumentError(
-			`discovery document is missing OIDC-required field(s): ${missing.join(", ")}. ` +
+			`discovery document is missing required field(s): ${missing.join(", ")}. ` +
 				`Ensure every endpoint-owning module (e.g. the OAuth module and the JWKS module) is wired ` +
 				`when an issuer is configured.`,
 		);
 	}
 
-	// Validity (not just presence): required array fields must be non-empty
-	// arrays. A scalar or `[]` here is present-but-OIDC-invalid (an RP cannot use
-	// `response_types_supported: []`), which the presence check above misses.
+	checkAuthorizationEndpoint(doc);
+	// Validity, not only presence: a scalar or `[]` passes the check above.
 	const invalidArrays = REQUIRED_NONEMPTY_ARRAY_FIELDS.filter(
 		(f) => !Array.isArray(doc[f]) || (doc[f] as unknown[]).length === 0,
 	);

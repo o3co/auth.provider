@@ -18,6 +18,7 @@ import {
 	type AppConfig,
 	AUDIT_SINK_ABSENCE_POLICY,
 	type CsrfGuard,
+	type CsrfTokenSigner,
 	consoleLogger,
 	defineModule,
 	fullSectionsSchema,
@@ -67,18 +68,15 @@ function deriveProviderCallbackUrls(
 
 /**
  * The `csrfGuard` slot's value: the signed double-submit token of
- * `createCsrfProtectionFromConfig` over `session.*` (key from
- * `session.secret`, cookie `<session.name>.csrf`) plus
- * `session.csrf.trustedOrigins`. The session routes build their own
- * `CsrfProtection`, which accepts this guard's tokens because the token is
- * signed, not stored. Should the session store's configuration become a
- * section of its own, move the key behind its `csrfTokenSigner` slot here and
- * in the session routes together.
+ * `createCsrfProtectionFromConfig` (cookie `<session.name>.csrf`, signed
+ * through `signer`) plus `session.csrf.trustedOrigins`. The session routes
+ * build their own `CsrfProtection` over the same signer, so each accepts the
+ * other's tokens: the token is signed, not stored.
  */
-const csrfGuardOf = (config: AppConfig, logger: Logger): CsrfGuard => {
+const csrfGuardOf = (config: AppConfig, signer: CsrfTokenSigner, logger: Logger): CsrfGuard => {
 	const session = config.session as unknown as SessionCsrfConfigSlice;
 	return createSessionCsrfGuard({
-		csrf: createCsrfProtectionFromConfig(session),
+		csrf: createCsrfProtectionFromConfig(session, { signer }),
 		trustedOrigins: session.csrf?.trustedOrigins ?? [],
 		logger,
 	});
@@ -95,7 +93,9 @@ const csrfGuardOf = (config: AppConfig, logger: Logger): CsrfGuard => {
  *
  * `requires`: `config` and `userRepository`; the three stores these routes
  * use (`userSessionStore`, `federationTokenStore`, `sessionFederationIndex`);
- * and the planner-derived `federationProviders`,
+ * `csrfTokenSigner`, what the CSRF token is signed and checked with (the
+ * session store's module provides it from `session.secret`, which this module
+ * never reads); and the planner-derived `federationProviders`,
  * `federationRedirectPolicyResolver` and `sessionRequirementResolver`
  * (password login and the federation link routes go through admission).
  *
@@ -111,6 +111,7 @@ export const sessionModule = defineModule<
 	| "userSessionStore"
 	| "federationTokenStore"
 	| "sessionFederationIndex"
+	| "csrfTokenSigner"
 	| "federationProviders"
 	| "federationRedirectPolicyResolver"
 	| "sessionRequirementResolver",
@@ -124,6 +125,7 @@ export const sessionModule = defineModule<
 		"userSessionStore",
 		"federationTokenStore",
 		"sessionFederationIndex",
+		"csrfTokenSigner",
 		"federationProviders",
 		"federationRedirectPolicyResolver",
 		"sessionRequirementResolver",
@@ -151,9 +153,10 @@ export const sessionModule = defineModule<
 	// requires the slot instead of rebuilding the policy from configuration.
 	provides: {
 		// The one CSRF policy: the guard `/session/login` runs, over the same
-		// key, cookie and trust list, so a token `GET /session/csrf` hands out is
-		// accepted wherever the slot is mounted (`csrfGuardOf`).
-		csrfGuard: (deps) => csrfGuardOf(deps.config as AppConfig, deps.logger ?? consoleLogger),
+		// signer, cookie and trust list, so a token `GET /session/csrf` hands out
+		// is accepted wherever the slot is mounted (`csrfGuardOf`).
+		csrfGuard: (deps) =>
+			csrfGuardOf(deps.config as AppConfig, deps.csrfTokenSigner, deps.logger ?? consoleLogger),
 		// The login page (`endpoints.login.url`) and the `redirect_to` protocol
 		// `/authorize` and the federation-grants connect flow send a browser
 		// there by. Built with no page configured, failing where it is read.
@@ -180,6 +183,8 @@ export const sessionModule = defineModule<
 						// them to the session routes adds no manifest surface.
 						federationTokenStore: deps.federationTokenStore,
 						sessionFederationIndex: deps.sessionFederationIndex,
+						// The CSRF token's signer, the one `csrfGuard` signs with.
+						csrfTokenSigner: deps.csrfTokenSigner,
 						...(deps.rateLimiter ? { rateLimiter: deps.rateLimiter } : {}),
 						...(deps.auditSink ? { auditSink: deps.auditSink } : {}),
 						...(deps.subjectSessionIndex ? { subjectSessionIndex: deps.subjectSessionIndex } : {}),

@@ -36,13 +36,14 @@ import {
 	type PublicClient,
 	type UserSessionStore,
 } from "@o3co/auth-provider-core";
-import { GrantRegistry, resolverForTests } from "@o3co/auth-provider-core/testing";
+import { resolverForTests } from "@o3co/auth-provider-core/testing";
 import express from "express";
 import request from "supertest";
 import { describe, expect, it, vi } from "vitest";
 import { withClientIdMetadataDocuments } from "#/clients/clientIdMetadataDocument.mjs";
 import { PENDING_CONSENT_TTL_MS } from "#/routes/consent.mjs";
 import { createOAuthRouter } from "#/routes.mjs";
+import { authorizationServerRegistry } from "./_helpers/authorizationServerRegistry.mjs";
 import { codeRecord } from "./_helpers/codeRecord.mjs";
 import { createMockLogger } from "./_helpers/mockLogger.mjs";
 import { expectOutageLine } from "./_helpers/projectedLog.mjs";
@@ -117,7 +118,7 @@ const makeApp = async (opts: {
 	const logger = createMockLogger();
 	const { router } = await createOAuthRouter(express, {
 		requirements: resolverForTests([]),
-		registry: new GrantRegistry(),
+		registry: authorizationServerRegistry(),
 		config: makeConfig(opts.consentUrl),
 		clientRepository,
 		codeRepository,

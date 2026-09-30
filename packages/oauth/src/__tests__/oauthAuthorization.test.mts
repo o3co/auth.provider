@@ -34,7 +34,6 @@ import {
 } from "@o3co/auth-provider-core";
 import {
 	createTestApp,
-	GrantRegistry,
 	makeValidAppConfig,
 	resolverForTests,
 } from "@o3co/auth-provider-core/testing";
@@ -45,6 +44,7 @@ import { type AuthorizationGrantDeps, createAuthorizationGrant } from "#/grants/
 import { createRefreshTokenGrant, type RefreshTokenGrantDeps } from "#/grants/refreshToken.mjs";
 import { oauthAuthorizationModule } from "#/oauthAuthorization.mjs";
 import { createOAuthRouter } from "#/routes.mjs";
+import { authorizationServerRegistry } from "./_helpers/authorizationServerRegistry.mjs";
 import { createMockLogger } from "./_helpers/mockLogger.mjs";
 
 // ---------------------------------------------------------------------------
@@ -194,7 +194,7 @@ async function buildAuthorizeApp(opts: {
 
 	const { router } = await createOAuthRouter(express, {
 		requirements: resolverForTests([]),
-		registry: new GrantRegistry(),
+		registry: authorizationServerRegistry(),
 		config: mergedConfig,
 		clientRepository: opts.clientRepo ?? authorizeClientRepo,
 		codeRepository: codeRepo,
@@ -477,6 +477,72 @@ describe("oauthAuthorizationModule — createTestApp integration", () => {
 		// client_credentials is not in the factory default and not added here —
 		// it must not be registered under === true opt-in semantics.
 		expect(handle.inspect.grants.has("client_credentials")).toBe(false);
+		await handle.dispose();
+	});
+});
+
+/**
+ * The authorization_code grant redeems the codes `/authorize` issues into the
+ * code repository, and no other grant reads one. So the repository is the
+ * grant's to require: on, it must be wired; off, the composition needs none.
+ */
+describe("oauthAuthorizationModule — the authorization_code grant needs a code repository", () => {
+	const withGrants = (grants: Record<string, { enabled: boolean }>) => {
+		const base = makeValidAppConfig();
+		return {
+			...base,
+			oauth: { ...base.oauth, grants: { ...base.oauth.grants, ...grants } },
+		};
+	};
+	const boot = (config: AppConfig, modules: readonly Module[]) =>
+		createTestApp({
+			modules: [
+				oauthAuthorizationModule({ config }),
+				clientRepositoryModule,
+				keyStoreModule,
+				...familyStoreModules,
+				...modules,
+			],
+			bootstrapComponents: { config, pathResolver: (s: string) => s },
+		});
+
+	it("refuses to boot with the grant on and no code repository, naming the slot and the switch", async () => {
+		const refusal = await boot(withGrants({ authorization_code: { enabled: true } }), []).then(
+			async (handle) => {
+				await handle.dispose();
+				return undefined;
+			},
+			(err: unknown) => err as { cause?: { message?: unknown } },
+		);
+		expect(refusal, "boot must be refused").toMatchObject({
+			name: "BootError",
+			reason: "contribute-factory-failed",
+			details: { module: "oauth-authorization", kind: "grants", name: "authorization_code" },
+		});
+		expect(String(refusal?.cause?.message)).toMatch(
+			/authorization_code grant is enabled \(oauth\.grants\.authorization_code\.enabled\) but codeRepository is not wired/,
+		);
+	});
+
+	it("boots with the grant off and no code repository", async () => {
+		const handle = await boot(
+			withGrants({
+				authorization_code: { enabled: false },
+				refresh_token: { enabled: false },
+				client_credentials: { enabled: true },
+			}),
+			[],
+		);
+		expect(handle.inspect.grants.has("client_credentials")).toBe(true);
+		expect(handle.inspect.grants.has("authorization_code")).toBe(false);
+		await handle.dispose();
+	});
+
+	it("boots with the grant on and a code repository wired", async () => {
+		const handle = await boot(withGrants({ authorization_code: { enabled: true } }), [
+			codeRepositoryModule,
+		]);
+		expect(handle.inspect.grants.has("authorization_code")).toBe(true);
 		await handle.dispose();
 	});
 });
@@ -1465,7 +1531,7 @@ describe("/authorize public-client PKCE/S256 mandatory (RFC 9700 §2.1.1)", () =
 
 		const { router } = await createOAuthRouter(express, {
 			requirements: resolverForTests([]),
-			registry: new GrantRegistry(),
+			registry: authorizationServerRegistry(),
 			config: authorizeConfig,
 			clientRepository: publicClientRepo,
 			codeRepository: codeRepo,

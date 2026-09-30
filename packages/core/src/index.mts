@@ -170,6 +170,11 @@ export {
 	type ReplicaSafetyModuleRef,
 	replicaUnsafeReason,
 } from "./boot/index.mjs";
+// The CSRF token's signature bounds, part of the `csrfTokenSigner` contract.
+export {
+	CSRF_SIGNATURE_MAX_LENGTH,
+	CSRF_SIGNATURE_MIN_LENGTH,
+} from "./browser-session/csrf-signature.mjs";
 // The login page's URL rule: the one home of what /authorize's fallback and
 // the session package's loginEntry do to a login page.
 export {
