@@ -185,7 +185,7 @@ without naming it yet, and `httpSettings` has no provider.
 | `challengeCeremony` | `ChallengeCeremony` | optional | `core/challenges/types.mts` | The ceremony driver — issue and verify — kept separate from its storage. |
 | `challengeStore` | `ChallengeStore` | optional | `core/challenges/types.mts` | In-flight WebAuthn ceremony challenges. |
 | `clientRepository` | `ClientRepository` | required | `core/repositories/ClientRepository.mts` | Registered OAuth clients. Read-only from this library's side. |
-| `codeRepository` | `CodeRepository` | required | `core/repositories/CodeRepository.mts` | Authorization codes. Single-use, and replica-shared in any deployment that scales. |
+| `codeRepository` | `CodeRepository` | optional | `core/repositories/CodeRepository.mts` | Authorization codes. Single-use, and replica-shared in any deployment that scales. Required with the `authorization_code` grant, which redeems the codes `/authorize` issues into it; a composition without that grant wires none. |
 | `deviceCodeStore` | `DeviceCodeStore` | optional | `core/device-authorization/types.mts` | Pending RFC 8628 device authorizations. Written as atomic operations rather than read-then-write pairs: `poll` reads the status *and* consumes an approval in one step, because two concurrent polls that both observe `approved` mint two tokens from one human approval. Absence must be declared (#298). |
 | `federationProviders` | `ReadonlyMap<string, FederationProvider>` | optional | `core/modules/manifest/synthetic-keys.mts` | Upstream IdP protocol adapters, contributed per federation module. The value type is the adapter port in `core/src/federations/types.mts`; it read `unknown` until that contract moved into core (#626 P1). |
 | `federationRedirectPolicies` | `{ readonly [name: string]: FederationRedire…` | optional | `session/federations/contributes.mts` | Per-federation `redirect_to` allowlist factories. Paired with the provider at boot; an unpaired one refuses. |
@@ -267,8 +267,9 @@ that safety.
 There is no absence policy for MFA: the `mfaCoordinator` slot and
 `MFA_ABSENCE_POLICY` left with the session-admission ADR (D6, D7). What a
 composition expects of session admission is declared by
-`sessionRequirements.expected` instead, and an `mfa.mode` other than `off`
-without a requirement named `mfa` refuses the boot (`session-requirement-missing`).
+`sessionRequirements.expected` instead: a name there that no module registers
+refuses the boot (`session-requirement-missing`), `mfa` without the MFA
+package among them.
 
 The subject-revocation pair shares one policy on purpose: two components, one
 capability, so a deployment without them has one thing to declare rather than

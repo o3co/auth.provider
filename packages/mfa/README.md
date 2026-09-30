@@ -22,7 +22,7 @@ Multi-factor authentication for [`auth.provider`](../../README.md): a second fac
 
 **Does not own:**
 
-- `mfa.mode` — core's key, which only the MFA requirement reads, through core's `readMfaMode`;
+- `mfa.mode` — core's key, which the MFA requirement reads through core's `readMfaMode` (the standalone template reads it too, to declare `mfa` in `sessionRequirements.expected`);
 - the `MfaFactor` contract, the `MfaFactorStore` and `MfaTransactionStore` ports and their adapters, the `mfaFactors` kind and `mfaFactorResolver` — core's (`packages/core/src/mfa/`), with Redis adapters in `@o3co/auth-provider-redis`;
 - the WebAuthn factor — `@o3co/auth-provider-webauthn`'s (the ADR's D4);
 - the pages: the login page's second step, the MFA page and the account page are the deployment's (D6).

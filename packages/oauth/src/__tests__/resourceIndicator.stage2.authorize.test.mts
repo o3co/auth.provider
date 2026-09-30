@@ -30,11 +30,12 @@ import {
 	createSymmetricKeyStore,
 	type GrantPolicyHook,
 } from "@o3co/auth-provider-core";
-import { GrantRegistry, resolverForTests } from "@o3co/auth-provider-core/testing";
+import { resolverForTests } from "@o3co/auth-provider-core/testing";
 import express from "express";
 import request from "supertest";
 import { describe, expect, it, vi } from "vitest";
 import { createOAuthRouter } from "#/routes.mjs";
+import { authorizationServerRegistry } from "./_helpers/authorizationServerRegistry.mjs";
 
 const CLIENT_ID = "client-1";
 const REDIRECT = "https://example.test/cb";
@@ -91,7 +92,7 @@ async function buildApp(opts: {
 
 	const { router } = await createOAuthRouter(express, {
 		requirements: resolverForTests([]),
-		registry: new GrantRegistry(),
+		registry: authorizationServerRegistry(),
 		config,
 		clientRepository: clientRepo,
 		codeRepository: codeRepo,

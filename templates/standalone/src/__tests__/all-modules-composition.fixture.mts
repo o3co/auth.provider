@@ -66,8 +66,9 @@ import express from "express";
 import helmet from "helmet";
 import request from "supertest";
 import { beforeAll, describe, expect, it } from "vitest";
-import { buildModules, withSessionRequirements } from "#/buildModules.mjs";
+import { buildModules } from "#/buildModules.mjs";
 import {
+	expectedSessionRequirements,
 	type OwnLayers,
 	readOwnLayers,
 	readSwitches,
@@ -191,6 +192,13 @@ federationGrants {
 	return file;
 })();
 
+/** `text` in a file of its own, for a layer above the composition's files. */
+function hoconFile(text: string): string {
+	const file = join(mkdtempSync(join(tmpdir(), "all-modules-operator-")), "operator.conf");
+	writeFileSync(file, text);
+	return file;
+}
+
 /** The composition's own files, highest first: the operator's layer, then the shipped production ones. */
 export function ownFiles(): string[] {
 	const { applicationConfPath, envConfPath } = resolveConfigPaths(configDir, "production");
@@ -201,15 +209,16 @@ export function ownFiles(): string[] {
  * Phase one, as `app.mts` reads it: the switches `buildModules` chooses
  * the modules by — and `reads`, what a module added to the composition reads
  * when it is built — from the composition's own files under `env` over core's
- * `reference.conf`, with the posture on session admission derived from the
- * parsed mode.
+ * `reference.conf`. What the composition expects of session admission is
+ * derived from it (`expectedSessionRequirements`), after `config` adjusts it
+ * as an operator's layer would.
  */
 export function resolveConfig(
 	env: Readonly<Record<string, string>>,
 	reads: readonly string[] = [],
 	own: OwnLayers = readOwnLayers(ownFiles(), { env }),
 ): AppConfig {
-	return withSessionRequirements(readSwitches(own, { reads }));
+	return readSwitches(own, { reads });
 }
 
 // ---------------------------------------------------------------------------
@@ -573,6 +582,8 @@ export type ModuleOrder = typeof AS_LISTED | typeof REVERSED;
 
 export interface ComposeOptions {
 	readonly env?: Readonly<Record<string, string>>;
+	/** HOCON an operator writes above the composition's own files, read in both phases. */
+	readonly operatorHocon?: string;
 	/**
 	 * Paths read before boot beside the template's switches: what a module
 	 * `extraModules` adds reads when it is built (`readSwitches`'s `reads`).
@@ -645,7 +656,12 @@ export async function compose(options: ComposeOptions = {}): Promise<Composition
 	const adjust = (config: AppConfig) => (options.config ? options.config(config) : config);
 	// The composition's own layers, read once for both phases, as `app.mts`
 	// reads them. Phase one: the switches the modules are chosen by.
-	const own = readOwnLayers(ownFiles(), { env });
+	const own = readOwnLayers(
+		options.operatorHocon === undefined
+			? ownFiles()
+			: [hoconFile(options.operatorHocon), ...ownFiles()],
+		{ env },
+	);
 	const switches = resolveConfig(env, options.reads, own);
 	const config = adjust(switches);
 	const fakes = await sharedUpstreams();
@@ -653,7 +669,7 @@ export async function compose(options: ComposeOptions = {}): Promise<Composition
 	const logger = createRecordingLogger();
 	// Phase two: the configuration as resolved over every loaded package's
 	// reference.conf, which createApp parses once.
-	const resolved = adjust(resolveForBoot(own, modules, switches.sessionRequirements));
+	const resolved = adjust(resolveForBoot(own, modules, expectedSessionRequirements(config)));
 	const handle = await createApp({
 		modules,
 		bootstrapComponents: {
@@ -795,12 +811,17 @@ export const DISCOVERY_PATHS = [
 /**
  * What RFC 8414 §2 and OpenID Connect Discovery §3 require of the document
  * this composition serves, and what each advertised URL must be: https, on
- * the issuer's origin.
+ * the issuer's origin. `authorizationCode` says whether the composition
+ * registers that grant (it does unless a test switches it off): with it the
+ * document names the authorization endpoint and lists the code response type
+ * and PKCE; without it, none of them.
  */
-export function expectValidMetadata(doc: Record<string, unknown>): void {
+export function expectValidMetadata(
+	doc: Record<string, unknown>,
+	{ authorizationCode = true }: { readonly authorizationCode?: boolean } = {},
+): void {
 	expect(doc.issuer).toBe(ISSUER);
 	for (const field of [
-		"authorization_endpoint",
 		"token_endpoint",
 		"jwks_uri",
 		"response_types_supported",
@@ -816,13 +837,20 @@ export function expectValidMetadata(doc: Record<string, unknown>): void {
 			expect(url.search + url.hash, field).toBe("");
 		}
 		if (field.endsWith("_supported") && Array.isArray(value)) {
-			expect(value.length, field).toBeGreaterThan(0);
+			if (field !== "response_types_supported") expect(value.length, field).toBeGreaterThan(0);
 			for (const entry of value) expect(typeof entry, field).toBe("string");
 			expect(new Set(value).size, `${field} repeats a value`).toBe(value.length);
 		}
 	}
-	expect(doc.response_types_supported).toEqual(["code"]);
-	expect(doc.code_challenge_methods_supported).toEqual(["S256"]);
+	if (authorizationCode) {
+		expect(doc.authorization_endpoint).toBe(`${ISSUER}/oauth/authorize`);
+		expect(doc.response_types_supported).toEqual(["code"]);
+		expect(doc.code_challenge_methods_supported).toEqual(["S256"]);
+	} else {
+		expect(doc).not.toHaveProperty("authorization_endpoint");
+		expect(doc.response_types_supported).toEqual([]);
+		expect(doc).not.toHaveProperty("code_challenge_methods_supported");
+	}
 }
 
 // ---------------------------------------------------------------------------
