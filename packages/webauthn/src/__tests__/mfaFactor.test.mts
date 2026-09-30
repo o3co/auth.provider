@@ -227,7 +227,7 @@ describe("the webauthn factor's contract values", () => {
 });
 
 describe("registration", () => {
-	it("asks for a credential under a new 32-byte user handle, named by the account's email, with a resident key discouraged, no attestation, the package's algorithms and the section's user verification", async () => {
+	it("asks for a credential under a new 32-byte user handle, named by the account's username, with a resident key discouraged, no attestation, the package's algorithms and the section's user verification", async () => {
 		const begun = await factorWith("required").beginEnrollment({
 			...ceremony(),
 			user: USER,
@@ -244,8 +244,8 @@ describe("registration", () => {
 		};
 		expect(options.rp).toEqual({ id: "test.example", name: "Test" });
 		expect(Buffer.from(options.user.id, "base64url")).toHaveLength(32);
-		expect(options.user.name).toBe(USER.email);
-		expect(options.user.displayName).toBe(USER.email);
+		expect(options.user.name).toBe(USER.username);
+		expect(options.user.displayName).toBe(USER.username);
 		expect(options.attestation).toBe("none");
 		expect(options.pubKeyCredParams.map((param) => param.alg)).toEqual([...WEBAUTHN_ALGORITHM_IDS]);
 		expect(options.excludeCredentials).toEqual([]);
@@ -275,19 +275,28 @@ describe("registration", () => {
 		expect(challenges.size).toBe(3);
 	});
 
-	it("names the account by its username when it has no email", async () => {
-		const { response } = await factorWith().beginEnrollment({
+	it("never names the account by its address, which the provider keeps none of and a page does not show", async () => {
+		const { response, state } = await factorWith().beginEnrollment({
 			...ceremony(),
-			user: { id: USER.id, username: "alice" },
+			user: USER,
 			factors: [],
 		});
-		expect((response as { user: { name: string } }).user.name).toBe("alice");
+		expect(JSON.stringify({ response, state }).toLowerCase()).not.toContain(USER.email);
 	});
 
-	it("refuses an account with neither an email nor a username, quoting nothing", async () => {
-		await expect(
-			factorWith().beginEnrollment({ ...ceremony(), user: { id: USER.id }, factors: [] }),
-		).rejects.toThrow(RangeError);
+	it("refuses an account with no username, quoting nothing of it", async () => {
+		let thrown: unknown;
+		try {
+			await factorWith().beginEnrollment({
+				...ceremony(),
+				user: { id: USER.id, email: USER.email },
+				factors: [],
+			});
+		} catch (err) {
+			thrown = err;
+		}
+		expect(thrown).toBeInstanceOf(RangeError);
+		expect(String(thrown)).not.toContain(USER.email);
 	});
 
 	it("keeps the subject's user handle for a further credential, and excludes every WebAuthn credential the subject holds", async () => {
