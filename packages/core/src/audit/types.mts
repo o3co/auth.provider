@@ -76,14 +76,24 @@ export const BUILT_IN_AUDIT_EVENT_TYPES = [
 	// routes'; each carries `subject`, `ip` and `userAgent`, and `kind` and
 	// `purpose` in its details. The MFA package is private until the template
 	// wires it, so no released composition emits them; the inventory's drift
-	// test names the step that emits each.
+	// test names the step that emits each. A deployment notifies the account
+	// holder from five of them, so each also carries, in its details, the
+	// factor's `binding` (`password`, `email_proof` or `mfa`, where a factor
+	// is named) and `by` (`user`, or `operator` for a removal or a reset):
+	// `mfa.factor.enrolled`; `mfa.factor.removed`; `mfa.recovery_codes.generated`,
+	// with `regenerated` (false beside the first counting factor);
+	// `mfa.locked.first`, the lock that begins an episode, with its `hold`;
+	// and `mfa.reset`, the operator reset, with the `kinds` it removed,
+	// `requireEmailProof` and `revokeSessions`. The event's `timestamp` is when.
 	"mfa.challenge.sent",
 	"mfa.enrollment_state_inconsistent",
 	"mfa.factor.enrolled",
 	"mfa.factor.removed",
 	"mfa.locked",
+	"mfa.locked.first",
 	"mfa.recovery_code.used",
 	"mfa.recovery_codes.generated",
+	"mfa.reset",
 	"mfa.verified",
 	"mfa.verify.failure",
 	"rate_limit.unavailable",

@@ -903,7 +903,8 @@ check this page, so when the two disagree, the constant is right:
 `logout.cascade_failed`, `logout.family_revoked`, `logout.success`,
 `mfa.challenge.sent`, `mfa.enrollment_state_inconsistent`,
 `mfa.factor.enrolled`, `mfa.factor.removed`, `mfa.locked`,
-`mfa.recovery_code.used`, `mfa.recovery_codes.generated`, `mfa.verified`,
+`mfa.locked.first`, `mfa.recovery_code.used`,
+`mfa.recovery_codes.generated`, `mfa.reset`, `mfa.verified`,
 `mfa.verify.failure`,
 `rate_limit.unavailable`, `session.admission.subject_mismatch`,
 `token.issued`, `token.issued.failure`.
