@@ -189,8 +189,7 @@ Store は主体の第二要素（MFA ADR の D7）と登録の証人（D12）を
 - `StoreTransportError`、`StoreTransportFailure` — 通信の失敗で投げられるもの。`name`、`reason`、`code` は契約の一部で、こちらも `status` を持たない（[`src/repositories/storeErrors.mts`](src/repositories/storeErrors.mts)）。
 - `DEFAULT_MAX_RESPONSE_BYTES` — レスポンス上限のデフォルト。
 - `FederatedIdentityLookupCoverage` — カバレッジのエントリー一つの型。
-- `MfaStoreError`・`MfaStoreFailure`・`MfaStoreOperation` と、それを作る `mfaStoreStatusError`・`mfaStoreMalformedAnswer`・`mfaStoreUnreadableRecord`・`mfaStoreVersionSkipped` — MFA エンドポイントの失敗が投げるもの。`name`・`reason`・`operation`・`storeStatus` は契約の一部（[`src/mfa/storeFailure.mts`](src/mfa/storeFailure.mts)）。
-- `FOUNDATION_MFA_FACTOR_STORE_SECTION`、`foundationMfaFactorStoreSection`（モジュールの `section` に渡すスキーマと reference）、`readFoundationMfaFactorStoreUrls`、型 `FoundationMfaFactorStoreSection` と `FoundationMfaFactorStoreUrls`（[`src/mfa/section.mts`](src/mfa/section.mts)）。
+- `MfaStoreError`・`MfaStoreFailure`・`MfaStoreOperation` — MFA エンドポイントの失敗が投げるもの。`name`・`reason`・`operation`・`storeStatus` は契約の一部で、`status` は持たない（[`src/mfa/storeFailure.mts`](src/mfa/storeFailure.mts)）。アダプターが投げるときに通す関数と、`foundation-mfa-factor-store` セクションのスキーマと読み取り（[`src/mfa/section.mts`](src/mfa/section.mts)）はパッケージ内部のもの。
 
 ## テスト
 

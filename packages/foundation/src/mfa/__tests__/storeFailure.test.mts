@@ -28,13 +28,13 @@
 import { inspect } from "node:util";
 import { auditedError, loggableError } from "@o3co/auth-provider-core";
 import { describe, expect, it } from "vitest";
+import { MfaStoreError } from "#/index.mjs";
 import {
-	MfaStoreError,
 	mfaStoreMalformedAnswer,
 	mfaStoreStatusError,
 	mfaStoreUnreadableRecord,
 	mfaStoreVersionSkipped,
-} from "#/index.mjs";
+} from "#/mfa/storeFailure.mjs";
 
 /** Text the Store wrote, which must reach nothing the error carries. */
 const MARKER = "STORE-WROTE-THIS";

@@ -519,16 +519,13 @@ Exported from [`src/index.mts`](src/index.mts):
   ([`src/repositories/storeErrors.mts`](src/repositories/storeErrors.mts)).
 - `DEFAULT_MAX_RESPONSE_BYTES` — the default response cap.
 - `FederatedIdentityLookupCoverage` — the type of one coverage entry.
-- `MfaStoreError`, `MfaStoreFailure`, `MfaStoreOperation` and the builders
-  `mfaStoreStatusError`, `mfaStoreMalformedAnswer`, `mfaStoreUnreadableRecord`,
-  `mfaStoreVersionSkipped` — what the MFA endpoints' failures throw; its
-  `name`, `reason`, `operation` and `storeStatus` are part of the contract
-  ([`src/mfa/storeFailure.mts`](src/mfa/storeFailure.mts)).
-- `FOUNDATION_MFA_FACTOR_STORE_SECTION`, `foundationMfaFactorStoreSection`
-  (the section's schema and reference, for a module's `section`),
-  `readFoundationMfaFactorStoreUrls`, and the types
-  `FoundationMfaFactorStoreSection` and `FoundationMfaFactorStoreUrls`
-  ([`src/mfa/section.mts`](src/mfa/section.mts)).
+- `MfaStoreError`, `MfaStoreFailure`, `MfaStoreOperation` — what the MFA
+  endpoints' failures throw; its `name`, `reason`, `operation` and
+  `storeStatus` are part of the contract, and it has no `status`
+  ([`src/mfa/storeFailure.mts`](src/mfa/storeFailure.mts)). The builders the
+  adapter throws through, and the `foundation-mfa-factor-store` section's
+  schema and reader ([`src/mfa/section.mts`](src/mfa/section.mts)), are the
+  package's own.
 
 ## Tests
 

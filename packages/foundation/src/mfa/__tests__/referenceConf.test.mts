@@ -27,7 +27,7 @@ import { fileURLToPath } from "node:url";
 import { packageReferenceProblems } from "@o3co/auth-provider-core/testing";
 import { parseFile } from "@o3co/ts.hocon";
 import { describe, expect, it } from "vitest";
-import { FOUNDATION_MFA_FACTOR_STORE_SECTION } from "#/index.mjs";
+import { FOUNDATION_MFA_FACTOR_STORE_SECTION } from "#/mfa/section.mjs";
 import { fixtureModule } from "./fixtureModule.mjs";
 
 const REFERENCE = new URL("../../../config/reference.conf", import.meta.url);

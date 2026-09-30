@@ -31,7 +31,8 @@ import {
 	startFakeStore,
 } from "@o3co/auth-provider-test-kit";
 import { describe, it } from "vitest";
-import { HttpUserRepository, mfaStoreStatusError } from "#/index.mjs";
+import { HttpUserRepository } from "#/index.mjs";
+import { mfaStoreStatusError } from "#/mfa/storeFailure.mjs";
 
 const USERS = [
 	{ subject: "user-1", username: "alice@example.com", password: "alice-password" },

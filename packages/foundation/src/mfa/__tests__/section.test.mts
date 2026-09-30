@@ -32,7 +32,7 @@ import {
 	FOUNDATION_MFA_FACTOR_STORE_SECTION,
 	foundationMfaFactorStoreSection,
 	readFoundationMfaFactorStoreUrls,
-} from "#/index.mjs";
+} from "#/mfa/section.mjs";
 import { consumer, fixtureModule } from "./fixtureModule.mjs";
 
 const URLS = {

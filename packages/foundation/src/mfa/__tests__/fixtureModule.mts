@@ -31,7 +31,7 @@ import {
 	FOUNDATION_MFA_FACTOR_STORE_SECTION,
 	foundationMfaFactorStoreSection,
 	readFoundationMfaFactorStoreUrls,
-} from "#/index.mjs";
+} from "#/mfa/section.mjs";
 
 export const fixtureModule = defineModule({
 	name: FOUNDATION_MFA_FACTOR_STORE_SECTION,
