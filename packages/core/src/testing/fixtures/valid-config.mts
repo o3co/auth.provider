@@ -35,9 +35,6 @@ import { renamedVariableCaptures } from "../renamedVariables.mjs";
  * Deliberate divergences from the `reference.conf` files:
  * - `session-store.storage.type` is `"memory"` (`"redis"` there);
  * - `federations` is `{}` (no built-in `google` block);
- * - the signing key is HS256 (EdDSA there) with an inline secret that clears
- *   the entropy floor, so the fixture carries no PEM material; tests of JWKS
- *   or asymmetric signing build their own key pair;
  * - `oauth.jwt.issuer` is a fixed test issuer (`${?OAUTH_JWT_ISSUER}` there);
  * - `repositories.*` carry only `type`;
  * - the grant switches, in the oauth package's modules' sections, turn on
@@ -109,23 +106,9 @@ export function makeValidCoreConfig() {
 				env: {},
 			}),
 		},
-		http: { port: 3000, trustProxy: false, readinessTimeoutMs: 1000 },
-		logging: { level: "info" },
 		oauth: {
 			jwt: {
 				issuer: "https://auth.test",
-				signingKey: {
-					provider: "local",
-					local: {
-						algorithm: "HS256",
-						kid: "v0",
-						// At least 32 bytes of key material. The '.' characters keep it
-						// out of the base64/base64url alphabets, so the UTF-8 reading
-						// (38 bytes) is the one that counts (`measureSecretEntropyBytes`).
-						secret: "test-hs256-secret.at-least-32-bytes.ok",
-						previousSecrets: [],
-					},
-				},
 			},
 			// The shape `reference.conf` loads to when no lifetime is overridden:
 			// the shipped literal sits on the deprecated `expiresIn`, and
@@ -180,7 +163,6 @@ export function makeValidFullSections() {
 		// purpose); the bundled modules refuse an unfilled `auditSink` otherwise.
 		// A test of the declared-absence guard removes the key.
 		audit: { sink: { type: "none" } },
-		cors: { allowedOrigins: [] },
 	} satisfies FullSectionsConfig;
 }
 

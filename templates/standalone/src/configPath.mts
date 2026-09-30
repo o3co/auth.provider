@@ -30,6 +30,7 @@
 
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { isDeepStrictEqual } from "node:util";
 import {
 	type AppConfig,
 	coreReference,
@@ -42,8 +43,8 @@ import {
 	redisFederationGrantStoreModule,
 } from "@o3co/auth-provider-redis";
 import { type Config, empty, parseFile } from "@o3co/ts.hocon";
-import type { LoggingSettings } from "./logger.mjs";
-import { LOGGING_SECTION, loggingModule } from "./modules.mjs";
+import { loggingModule, templateReference } from "./modules.mjs";
+import { type LoggingSettings, loggingSectionSchema } from "./sections.mjs";
 
 export interface ResolvedConfigPaths {
 	readonly applicationConfPath: string;
@@ -248,7 +249,7 @@ export function readSwitches(own: OwnLayers, options: SwitchesOptions = {}): App
  */
 export function readLogging(own: OwnLayers): LoggingSettings {
 	const resolved = resolveLayers(own, moduleReferences([loggingModule]));
-	const result = LOGGING_SECTION.safeParse(resolved.logging);
+	const result = loggingSectionSchema.safeParse(resolved.logging);
 	if (!result.success) {
 		const issues = result.error.issues;
 		throw new RangeError(
@@ -373,6 +374,30 @@ function refuseIntentPrefixLeftAtDefault(
 }
 
 /**
+ * The sections the template's own `config/reference.conf` sets that no module
+ * in `modules` owns and that nothing has changed: as that file sets them with
+ * no environment. Boot is not handed them, so a module of the template's the
+ * composition does not load names nothing at boot; a section an operator's
+ * layer or the environment changed is handed on, and boot names it once as a
+ * section nothing owns.
+ */
+function unownedTemplateDefaults(
+	resolved: Readonly<Record<string, unknown>>,
+	modules: readonly Module[],
+): readonly string[] {
+	const defaults = resolveLayers({ config: empty(), env: {} }, [templateReference()]);
+	return Object.keys(defaults).filter(
+		(name) =>
+			name !== RENAMED_VARIABLES &&
+			!ownsSection(modules, name) &&
+			isDeepStrictEqual(resolved[name], defaults[name]),
+	);
+}
+
+/** The section a resolution captures renamed variables in: never left out. */
+const RENAMED_VARIABLES = "renamed-variables";
+
+/**
  * Phase two: what `createApp` parses once, with every loaded module's schema:
  * the composition's own layers, the same read phase one had, over the
  * `reference.conf` of every package `modules` come from, core's last,
@@ -382,7 +407,9 @@ function refuseIntentPrefixLeftAtDefault(
  * nothing but the mode, which the template read for itself (`readMfaMode`),
  * is left out when no loaded module owns it; anything more reaches boot,
  * which names an unowned section once. The MFA ADR's build-order step 20
- * removes this with the template's reading.
+ * removes this with the template's reading. So is a section the template's
+ * own `reference.conf` sets for a module the composition does not load, left
+ * as that file sets it (`unownedTemplateDefaults`).
  *
  * Refuses, with a `RangeError`, the Redis intent store left on its default
  * key prefix where the grant store's was moved
@@ -396,8 +423,10 @@ export function resolveForBoot(
 	modules: readonly Module[],
 	sessionRequirements: SessionRequirements,
 ): AppConfig {
-	const layered = resolveLayers(own, moduleReferences(modules));
-	refuseIntentPrefixLeftAtDefault(layered, modules);
+	const all = resolveLayers(own, moduleReferences(modules));
+	refuseIntentPrefixLeftAtDefault(all, modules);
+	const unowned = new Set(unownedTemplateDefaults(all, modules));
+	const layered = Object.fromEntries(Object.entries(all).filter(([name]) => !unowned.has(name)));
 	const { mfa: _consumed, ...withoutMfa } = layered;
 	const resolved = consumedMfa(layered.mfa, modules) ? withoutMfa : layered;
 	return (sessionRequirements === undefined

@@ -189,7 +189,6 @@ const ALL_ON_MODULES = [
 	"federation-oidc-oidc",
 	"logging",
 	"http",
-	"cors",
 	"key-store",
 	"test:repositories",
 	"audit-sink",
@@ -250,7 +249,7 @@ describe("every module the template can turn on boots together", () => {
 	});
 
 	it("hands the deployment's logger to every module that answers a request", async () => {
-		// `app.mts` fills the `logger` slot so that `LOG_LEVEL` and the JSON
+		// `app.mts` fills the `logger` slot so that `LOGGING_LEVEL` and the JSON
 		// envelope reach every module; boot hands a module only the slots its
 		// manifest names, so a route or grant module without `logger` writes
 		// its outage lines to nobody.

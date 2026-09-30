@@ -53,30 +53,31 @@ const keyPair = generateKeyPairSync("ed25519", {
 	privateKeyEncoding: { type: "pkcs8", format: "pem" },
 });
 
-const baseConfig: AppConfig = {
+/** The template modules' sections sit beside core's, so the configuration is wider than `AppConfig`. */
+const baseConfig: AppConfig & Record<string, unknown> = {
 	// What a resolution under an environment that sets none captures of
 	// core's renamed variables.
 	...{
 		"renamed-variables": capturedRenames({}),
 	},
-	http: { port: 0, trustProxy: false, readinessTimeoutMs: 1000 },
+	http: { port: 0, trustProxy: false, readinessTimeoutMs: 1000, cors: { allowedOrigins: [] } },
 	logging: { level: "silent" },
+	"key-store": {
+		provider: "local",
+		local: {
+			algorithm: "EdDSA",
+			kid: "v0",
+			privateKey: keyPair.privateKey,
+			publicKey: keyPair.publicKey,
+			previousKeys: [],
+		},
+	},
 	// The shipped `application.conf` expects no session requirement (ADR
 	// 2026-09-28-session-admission).
 	core: { sessionRequirements: { expected: [] } },
 	oauth: {
 		jwt: {
 			issuer: "https://auth.test",
-			signingKey: {
-				provider: "local",
-				local: {
-					algorithm: "EdDSA",
-					kid: "v0",
-					privateKey: keyPair.privateKey,
-					publicKey: keyPair.publicKey,
-					previousKeys: [],
-				},
-			},
 		},
 		accessToken: { expiresIn: 3600 },
 		refreshToken: {
@@ -108,7 +109,6 @@ const baseConfig: AppConfig = {
 		user: { type: "yaml", path: "./config/users.yaml", timeout: 5000 },
 		code: { type: "memory", defaultExpiresIn: 600 },
 	},
-	cors: { allowedOrigins: [] },
 	audit: { sink: { type: "logger" } },
 };
 
@@ -150,7 +150,7 @@ const testKeyStoreModule = defineModule({
 			registerBuiltinKeyStores(factory);
 			return factory.create({
 				type: "local",
-				...((c as AppConfig).oauth.jwt.signingKey?.local ?? {}),
+				...((c as { "key-store"?: { local?: object } })["key-store"]?.local ?? {}),
 			});
 		},
 	},
@@ -225,7 +225,7 @@ describe("the template's audit sink", () => {
 
 	describe("the audit trail is not gated by logging.level", () => {
 		it("keeps the audit logger at info while the app logger is silenced", () => {
-			// An audit trail is evidence, not diagnostics. `LOG_LEVEL=warn` is an
+			// An audit trail is evidence, not diagnostics. `LOGGING_LEVEL=warn` is an
 			// ordinary production setting and `silent` is a legitimate one;
 			// neither may silently drop audit events.
 			const appLogger = createAppLogger({ level: "silent" });

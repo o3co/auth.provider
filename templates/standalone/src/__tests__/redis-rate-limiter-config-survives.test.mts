@@ -56,7 +56,7 @@ const configDir = fileURLToPath(new URL("../../config", import.meta.url));
  * UTF-8 length is what counts.
  */
 const ENV = {
-	OAUTH_JWT_SECRET: "test-secret-rate-limiter-e2e.at-least-32-bytes.ok",
+	KEY_STORE_LOCAL_SECRET: "test-secret-rate-limiter-e2e.at-least-32-bytes.ok",
 	OAUTH_JWT_ISSUER: "https://auth.test",
 	SESSION_STORE_SECRET: "test-session-secret-rate-limiter-e2e.at-least-32-bytes.ok",
 	RATE_LIMITER_ADAPTER: "redis",

@@ -22,6 +22,7 @@ import {
 	type AppConfig,
 	BootError,
 	createApp,
+	type Module,
 	moduleReferences,
 	resolveAccessTokenLifetime,
 } from "@o3co/auth-provider-core";
@@ -37,7 +38,7 @@ import {
 	resolveConfigPaths,
 	resolveForBoot,
 } from "../configPath.mjs";
-import { templateReference } from "../modules.mjs";
+import { httpModule, keyStoreModule, templateReference } from "../modules.mjs";
 
 /**
  * Boots the shipped config with EVERY documented override supplied the way an
@@ -65,7 +66,7 @@ const readmeJaPath = fileURLToPath(new URL("../../README.ja.md", import.meta.url
  * Every environment variable the shipped artifact documents, as the string an
  * operator would supply.
  *
- * `OAUTH_JWT_ALGORITHM` is `EdDSA` so the asymmetric key variables fit in the
+ * `KEY_STORE_LOCAL_ALGORITHM` is `EdDSA` so the asymmetric key variables fit in the
  * same map: the HS256 branch of `signingKey.local` is a `.strict()`
  * discriminated-union member and refuses `privateKeyPath` and friends by
  * design. The HS256 shape gets its own test below.
@@ -77,18 +78,18 @@ const DOCUMENTED_ENV: Readonly<Record<string, string>> = {
 	HTTP_READINESS_TIMEOUT_MS: "1500",
 
 	// --- logging ------------------------------------------------------
-	LOG_LEVEL: "debug",
+	LOGGING_LEVEL: "debug",
 
 	// --- oauth.jwt ----------------------------------------------------
 	OAUTH_JWT_ISSUER: "https://auth.test",
-	OAUTH_JWT_SIGNING_KEY_PROVIDER: "local",
-	OAUTH_JWT_ALGORITHM: "EdDSA",
-	OAUTH_JWT_KID: "v1",
-	OAUTH_JWT_SECRET: "documented-env-secret.at-least-32-bytes.ok",
-	OAUTH_JWT_PRIVATE_KEY: "-----BEGIN PRIVATE KEY-----\nMC4=\n-----END PRIVATE KEY-----",
-	OAUTH_JWT_PRIVATE_KEY_PATH: "./config/jwt-private.pem",
-	OAUTH_JWT_PUBLIC_KEY: "-----BEGIN PUBLIC KEY-----\nMCo=\n-----END PUBLIC KEY-----",
-	OAUTH_JWT_PUBLIC_KEY_PATH: "./config/jwt-public.pem",
+	KEY_STORE_PROVIDER: "local",
+	KEY_STORE_LOCAL_ALGORITHM: "EdDSA",
+	KEY_STORE_LOCAL_KID: "v1",
+	KEY_STORE_LOCAL_SECRET: "documented-env-secret.at-least-32-bytes.ok",
+	KEY_STORE_LOCAL_PRIVATE_KEY: "-----BEGIN PRIVATE KEY-----\nMC4=\n-----END PRIVATE KEY-----",
+	KEY_STORE_LOCAL_PRIVATE_KEY_PATH: "./config/jwt-private.pem",
+	KEY_STORE_LOCAL_PUBLIC_KEY: "-----BEGIN PUBLIC KEY-----\nMCo=\n-----END PUBLIC KEY-----",
+	KEY_STORE_LOCAL_PUBLIC_KEY_PATH: "./config/jwt-public.pem",
 	OAUTH_JWT_LEGACY_TYP_ACCEPT: "true",
 
 	// --- oauth tokens / policy ----------------------------------------
@@ -173,8 +174,8 @@ const DOCUMENTED_ENV: Readonly<Record<string, string>> = {
 	REDIS_SESSION_STORES_KEY_PREFIX: "ss:",
 	REDIS_REFRESH_TOKEN_FAMILY_STORE_KEY_PREFIX: "rtfam:",
 	REDIS_REFRESH_TOKEN_FAMILY_STORE_CAS_RETRY_LIMIT: "3",
-	REFRESH_TOKEN_FAMILY_STORE_REDIS_URL: "redis://redis:6379",
-	REFRESH_TOKEN_FAMILY_STORE_REDIS_PASSWORD: "rt-family-password",
+	REDIS_CLIENTS_URL: "redis://redis:6379",
+	REDIS_CLIENTS_PASSWORD: "rt-family-password",
 	// The federation token store's Redis branch.
 	FEDERATION_TOKEN_STORE_TYPE: "redis",
 	REDIS_FEDERATION_TOKEN_STORE_KEY_PREFIX: "ft:",
@@ -252,7 +253,7 @@ const DOCUMENTED_ENV: Readonly<Record<string, string>> = {
 	// A list, in the only shape an environment variable can carry one.
 	// The schema splits and validates it; the `turns every non-boolean
 	// override into its declared type` case below pins the result.
-	CORS_ALLOWED_ORIGINS: "https://app.example.com,http://localhost:5173",
+	HTTP_CORS_ALLOWED_ORIGINS: "https://app.example.com,http://localhost:5173",
 };
 
 /**
@@ -337,6 +338,30 @@ const DELIBERATELY_UNSET: Readonly<Record<string, string>> = {
 		"renamed SESSION_STORE_STORAGE_REDIS_URL, and only captured — set alone, or to another value, it fails boot",
 	SESSION_STORAGE_REDIS_PASSWORD:
 		"renamed SESSION_STORE_STORAGE_REDIS_PASSWORD, and only captured — set alone, or to another value, it fails boot",
+	LOG_LEVEL:
+		"renamed LOGGING_LEVEL, and only captured — set alone, or to another value, it fails boot",
+	CORS_ALLOWED_ORIGINS:
+		"renamed HTTP_CORS_ALLOWED_ORIGINS, and only captured — set alone, or to another value, it fails boot",
+	OAUTH_JWT_SIGNING_KEY_PROVIDER:
+		"renamed KEY_STORE_PROVIDER, and only captured — set alone, or to another value, it fails boot",
+	OAUTH_JWT_ALGORITHM:
+		"renamed KEY_STORE_LOCAL_ALGORITHM, and only captured — set alone, or to another value, it fails boot",
+	OAUTH_JWT_KID:
+		"renamed KEY_STORE_LOCAL_KID, and only captured — set alone, or to another value, it fails boot",
+	OAUTH_JWT_SECRET:
+		"renamed KEY_STORE_LOCAL_SECRET, and only captured — set alone, or to another value, it fails boot",
+	OAUTH_JWT_PRIVATE_KEY_PATH:
+		"renamed KEY_STORE_LOCAL_PRIVATE_KEY_PATH, and only captured — set alone, or to another value, it fails boot",
+	OAUTH_JWT_PUBLIC_KEY_PATH:
+		"renamed KEY_STORE_LOCAL_PUBLIC_KEY_PATH, and only captured — set alone, or to another value, it fails boot",
+	OAUTH_JWT_PRIVATE_KEY:
+		"renamed KEY_STORE_LOCAL_PRIVATE_KEY, and only captured — set alone, or to another value, it fails boot",
+	OAUTH_JWT_PUBLIC_KEY:
+		"renamed KEY_STORE_LOCAL_PUBLIC_KEY, and only captured — set alone, or to another value, it fails boot",
+	REFRESH_TOKEN_FAMILY_STORE_REDIS_URL:
+		"renamed REDIS_CLIENTS_URL, and only captured — set alone, or to another value, it fails boot",
+	REFRESH_TOKEN_FAMILY_STORE_REDIS_PASSWORD:
+		"renamed REDIS_CLIENTS_PASSWORD, and only captured — set alone, or to another value, it fails boot",
 };
 
 /**
@@ -422,18 +447,20 @@ const FEDERATION_STORES = Object.fromEntries(
  * session admission, phase two resolved over the reference of every package
  * the template's modules come from (the template's own and core's) and
  * parsed once by `createApp` — no bridge on the way.
- * No module is loaded: the parse is what this suite asks about, and each
- * key it reads is one core's schema declares.
+ * No module is loaded unless `modules` names one: the parse is what this
+ * suite asks about, and each key it reads is one core's schema declares, or
+ * the section of a module it loads.
  */
 async function bootParsed(
 	env: Record<string, string>,
 	configEnv = "production",
 	operatorLayer?: string,
+	modules: readonly Module[] = [],
 ): Promise<AppConfig> {
 	const own = readOwnLayers(ownFiles(configEnv, operatorLayer), { env });
 	const switches = readSwitches(own);
 	const handle = await createApp({
-		modules: [],
+		modules: [...modules],
 		bootstrapComponents: {
 			config: resolveForBoot(
 				own,
@@ -468,6 +495,16 @@ function sessionSection(config: AppConfig): { readonly csrf?: { readonly ttlSeco
 	const schema = sessionModule.section?.schema;
 	if (schema === undefined) throw new Error("the session module declares no section");
 	return schema.parse(config.session) as ReturnType<typeof sessionSection>;
+}
+
+/** `http {}` as the `http` module parsed it, in a configuration boot parsed with the module loaded. */
+function httpSectionOf(config: AppConfig): {
+	readonly port: number;
+	readonly readinessTimeoutMs: number;
+	readonly trustProxy: unknown;
+	readonly cors: { readonly allowedOrigins: readonly string[] };
+} {
+	return (config as unknown as { http: ReturnType<typeof httpSectionOf> }).http;
 }
 
 /** `oauth {}` as the oauth module's own schema parses it. */
@@ -544,9 +581,12 @@ describe("the shipped config boots with every documented override supplied as a 
 
 	it("turns every non-boolean override into its declared type", async () => {
 		const config = await bootParsed(DOCUMENTED_ENV);
-		expect(config.http?.port).toBe(3000);
-		expect(config.http?.readinessTimeoutMs).toBe(1500);
-		expect(config.http?.trustProxy).toEqual(["10.0.0.0/8", "loopback"]);
+		const http = httpSectionOf(
+			await bootParsed(DOCUMENTED_ENV, "production", undefined, [httpModule]),
+		);
+		expect(http.port).toBe(3000);
+		expect(http.readinessTimeoutMs).toBe(1500);
+		expect(http.trustProxy).toEqual(["10.0.0.0/8", "loopback"]);
 		expect(config.federations.google?.accessType).toBe("online");
 		// The new default wins over the deprecated variable, and the parsed
 		// config mirrors it onto the old key for readers that predate the split.
@@ -589,18 +629,20 @@ describe("the shipped config boots with every documented override supplied as a 
 		expect(sections["redis-mfa-factor-store"]?.keyPrefix).toBe("tenant-a:mfaf:");
 		expect(sections["redis-mfa-transaction-store"]?.keyPrefix).toBe("tenant-a:mfat:");
 		// A comma-separated string becomes a list of origins, trimmed.
-		expect(config.cors?.allowedOrigins).toEqual([
-			"https://app.example.com",
-			"http://localhost:5173",
-		]);
+		expect(http.cors.allowedOrigins).toEqual(["https://app.example.com", "http://localhost:5173"]);
 	});
 
-	describe("CORS_ALLOWED_ORIGINS", () => {
+	describe("HTTP_CORS_ALLOWED_ORIGINS", () => {
 		it("reads an exported-but-empty variable as no origins, not as an error", async () => {
 			// The .env / compose / ConfigMap shape. "CORS off" is what both the
 			// unset key and the empty string mean, so they must agree.
-			const config = await bootParsed({ ...DOCUMENTED_ENV, CORS_ALLOWED_ORIGINS: "" });
-			expect(config.cors?.allowedOrigins).toEqual([]);
+			const config = await bootParsed(
+				{ ...DOCUMENTED_ENV, HTTP_CORS_ALLOWED_ORIGINS: "" },
+				"production",
+				undefined,
+				[httpModule],
+			);
+			expect(httpSectionOf(config).cors.allowedOrigins).toEqual([]);
 		});
 
 		it("fails boot on an origin that could never match, naming the key", async () => {
@@ -614,9 +656,14 @@ describe("the shipped config boots with every documented override supplied as a 
 				"http://app.example.com", // plaintext off loopback
 				"https://app.example.com/callback", // a URL, not an origin
 			]) {
-				await expect(bootParsed({ ...DOCUMENTED_ENV, CORS_ALLOWED_ORIGINS: bad })).rejects.toThrow(
-					/cors\.allowedOrigins/,
-				);
+				await expect(
+					bootParsed(
+						{ ...DOCUMENTED_ENV, HTTP_CORS_ALLOWED_ORIGINS: bad },
+						"production",
+						undefined,
+						[httpModule],
+					),
+				).rejects.toThrow(/http\.cors\.allowedOrigins/);
 			}
 		});
 
@@ -626,34 +673,51 @@ describe("the shipped config boots with every documented override supplied as a 
 			// silently off for a key someone wrote.
 			for (const value of ["42", "true", '{ origin = "https://app.example.com" }']) {
 				await expect(
-					bootParsed(DOCUMENTED_ENV, "production", `cors.allowedOrigins = ${value}`),
+					bootParsed(DOCUMENTED_ENV, "production", `http.cors.allowedOrigins = ${value}`, [
+						httpModule,
+					]),
 					value,
-				).rejects.toThrow(/cors\.allowedOrigins/);
+				).rejects.toThrow(/http\.cors\.allowedOrigins/);
 			}
 		});
 
 		it("accepts the loopback http carve-out a dev front-end needs", async () => {
-			const config = await bootParsed({
-				...DOCUMENTED_ENV,
-				CORS_ALLOWED_ORIGINS: "http://localhost:5173,http://127.0.0.1:5173,https://app.example.com",
-			});
-			expect(config.cors?.allowedOrigins).toHaveLength(3);
+			const config = await bootParsed(
+				{
+					...DOCUMENTED_ENV,
+					HTTP_CORS_ALLOWED_ORIGINS:
+						"http://localhost:5173,http://127.0.0.1:5173,https://app.example.com",
+				},
+				"production",
+				undefined,
+				[httpModule],
+			);
+			expect(httpSectionOf(config).cors.allowedOrigins).toHaveLength(3);
 		});
 	});
 
 	it("parses the HS256 shape, whose strict union refuses asymmetric key fields", async () => {
-		// `OAUTH_JWT_ALGORITHM=HS256` is not a variation on the map above: the
-		// HS256 member of the signingKey union is `.strict()`, so a deployment
-		// that switches algorithm must also stop exporting the key-file
-		// variables. Worth pinning — it is the umbrella E2E's shape.
-		const { OAUTH_JWT_PRIVATE_KEY, OAUTH_JWT_PRIVATE_KEY_PATH, ...rest } = DOCUMENTED_ENV;
-		void OAUTH_JWT_PRIVATE_KEY;
-		void OAUTH_JWT_PRIVATE_KEY_PATH;
-		const { OAUTH_JWT_PUBLIC_KEY, OAUTH_JWT_PUBLIC_KEY_PATH, ...hs256 } = rest;
-		void OAUTH_JWT_PUBLIC_KEY;
-		void OAUTH_JWT_PUBLIC_KEY_PATH;
-		const config = await bootParsed({ ...hs256, OAUTH_JWT_ALGORITHM: "HS256" });
-		expect(config.oauth.jwt.signingKey?.local?.algorithm).toBe("HS256");
+		// `KEY_STORE_LOCAL_ALGORITHM=HS256` is not a variation on the map above:
+		// the HS256 member of the key store's `local` union is strict, so a
+		// deployment that switches algorithm must also stop exporting the
+		// key-file variables. Worth pinning — it is the umbrella E2E's shape.
+		const { KEY_STORE_LOCAL_PRIVATE_KEY, KEY_STORE_LOCAL_PRIVATE_KEY_PATH, ...rest } =
+			DOCUMENTED_ENV;
+		void KEY_STORE_LOCAL_PRIVATE_KEY;
+		void KEY_STORE_LOCAL_PRIVATE_KEY_PATH;
+		const { KEY_STORE_LOCAL_PUBLIC_KEY, KEY_STORE_LOCAL_PUBLIC_KEY_PATH, ...hs256 } = rest;
+		void KEY_STORE_LOCAL_PUBLIC_KEY;
+		void KEY_STORE_LOCAL_PUBLIC_KEY_PATH;
+		const config = await bootParsed(
+			{ ...hs256, KEY_STORE_LOCAL_ALGORITHM: "HS256" },
+			"production",
+			undefined,
+			[keyStoreModule],
+		);
+		expect(
+			(config as unknown as { "key-store": { local: { algorithm: string } } })["key-store"].local
+				.algorithm,
+		).toBe("HS256");
 	});
 
 	it("parses the environment the umbrella E2E boots, with SESSION_STORE_SECURE=false as a string", async () => {

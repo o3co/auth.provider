@@ -60,7 +60,6 @@ import {
 } from "@o3co/auth-provider-standard";
 import {
 	auditSinkModule,
-	corsModule,
 	googleFederationConfigModule,
 	httpModule,
 	inMemoryCodeRepositoryModule,
@@ -365,10 +364,9 @@ export function buildModules(config: AppConfig, overrides: BuildModulesOverrides
 		...(oidcFederations.length > 0
 			? [oidcFederationConfigModule, ...oidcFederations.map((name) => oidcFederationModule(name))]
 			: []),
-		// The template's own settings: `logging {}`, `http {}` and `cors {}`.
+		// The template's own settings: `logging {}` and `http {}`.
 		loggingModule,
 		httpModule,
-		corsModule,
 		overrides.keyStoreModule ?? keyStoreModule,
 		overrides.repositoriesModule ?? repositoriesModule,
 		// The audit sink, always wired: `emitAuditEvent` no-ops on an empty slot,

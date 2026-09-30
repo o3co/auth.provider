@@ -70,7 +70,7 @@ import { templateReference } from "../modules.mjs";
 const configDir = fileURLToPath(new URL("../../config", import.meta.url));
 
 const REQUIRED_ENV = {
-	OAUTH_JWT_SECRET: "two-phase-config-secret.at-least-32-bytes.ok",
+	KEY_STORE_LOCAL_SECRET: "two-phase-config-secret.at-least-32-bytes.ok",
 	OAUTH_JWT_ISSUER: "https://auth.test",
 	SESSION_STORE_SECRET: "two-phase-config-session.at-least-32-bytes.ok",
 };
@@ -83,7 +83,7 @@ const ENVIRONMENTS: Readonly<Record<string, Readonly<Record<string, string>>>> =
 		CORE_DEPLOYMENT_MODE: "multi",
 		SESSION_STORE_STORAGE_TYPE: "redis",
 		SESSION_STORE_STORAGE_REDIS_URL: "redis://redis:6379",
-		REFRESH_TOKEN_FAMILY_STORE_REDIS_URL: "redis://redis:6379",
+		REDIS_CLIENTS_URL: "redis://redis:6379",
 		USER_SESSION_STORES_ADAPTER: "redis",
 		RATE_LIMITER_ADAPTER: "redis",
 		OAUTH_CODE_ADAPTER: "redis",

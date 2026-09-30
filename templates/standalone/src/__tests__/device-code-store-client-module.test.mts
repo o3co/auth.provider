@@ -50,7 +50,7 @@ vi.mock("ioredis", () => {
 
 const importModule = async () => await import("../modules.mjs");
 
-/** The module's own section, `refreshTokenFamilyStore.redis`, as boot hands it over. */
+/** The module's own section, `redis-clients`, as boot hands it over. */
 const baseSection = { url: "redis://example.com:6379" };
 
 describe("standaloneRedisClientsModule.deviceCodeStoreClient", () => {

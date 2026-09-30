@@ -42,7 +42,7 @@ import { templateReference } from "../modules.mjs";
 const configDir = fileURLToPath(new URL("../../config", import.meta.url));
 
 const REQUIRED_ENV = {
-	OAUTH_JWT_SECRET: "access-token-alias.at-least-32-bytes.ok",
+	KEY_STORE_LOCAL_SECRET: "access-token-alias.at-least-32-bytes.ok",
 	OAUTH_JWT_ISSUER: "https://auth.test",
 	SESSION_STORE_SECRET: "access-token-alias-session.at-least-32-bytes.ok",
 };

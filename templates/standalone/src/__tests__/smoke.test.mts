@@ -46,9 +46,15 @@ const smokeKeyPair = generateKeyPairSync("ed25519", {
 });
 
 /** The `http` module's section, as the hand-built configuration below carries it. */
-const HTTP = { port: 0, trustProxy: false, readinessTimeoutMs: 1000 };
+const HTTP = {
+	port: 0,
+	trustProxy: false,
+	readinessTimeoutMs: 1000,
+	cors: { allowedOrigins: [] as string[] },
+};
 
-const config: AppConfig = {
+/** The template modules' sections sit beside core's, so the configuration is wider than `AppConfig`. */
+const config: AppConfig & Record<string, unknown> = {
 	// What a resolution under an environment that sets none captures of
 	// core's renamed variables.
 	...{
@@ -56,6 +62,16 @@ const config: AppConfig = {
 	},
 	http: HTTP,
 	logging: { level: "silent" },
+	"key-store": {
+		provider: "local",
+		local: {
+			algorithm: "EdDSA",
+			kid: "v0",
+			privateKey: smokeKeyPair.privateKey,
+			publicKey: smokeKeyPair.publicKey,
+			previousKeys: [],
+		},
+	},
 	// A composition with a consumer of session admission states what it
 	// expects (ADR 2026-09-28-session-admission): the shipped
 	// `application.conf` expects none, and so does this hand-built config.
@@ -63,16 +79,6 @@ const config: AppConfig = {
 	oauth: {
 		jwt: {
 			issuer: "https://auth.test",
-			signingKey: {
-				provider: "local",
-				local: {
-					algorithm: "EdDSA",
-					kid: "v0",
-					privateKey: smokeKeyPair.privateKey,
-					publicKey: smokeKeyPair.publicKey,
-					previousKeys: [],
-				},
-			},
 		},
 		accessToken: { expiresIn: 3600 },
 		refreshToken: {
@@ -110,7 +116,6 @@ const config: AppConfig = {
 		user: { type: "yaml", path: "./config/users.yaml", timeout: 5000 },
 		code: { type: "memory", defaultExpiresIn: 600 },
 	},
-	cors: { allowedOrigins: [] },
 };
 
 /**
@@ -165,7 +170,7 @@ const testKeyStoreModule = defineModule({
 			registerBuiltinKeyStores(factory);
 			return factory.create({
 				type: "local",
-				...((c as AppConfig).oauth.jwt.signingKey?.local ?? {}),
+				...((c as { "key-store"?: { local?: object } })["key-store"]?.local ?? {}),
 			});
 		},
 	},
@@ -661,7 +666,7 @@ describe("standalone smoke test", () => {
 		registerBuiltinKeyStores(ksf);
 		const keyStore = await ksf.create({
 			type: "local",
-			...(config.oauth.jwt.signingKey?.local ?? {}),
+			...(config["key-store"] as { local: object }).local,
 		});
 		// The token must carry the deployment's configured `iss`: introspection
 		// pins it (RFC 9068 §4), and every deployment has one.

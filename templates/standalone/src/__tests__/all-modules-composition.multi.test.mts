@@ -121,7 +121,6 @@ const ALL_ON_REDIS_MODULES = [
 	"federation-oidc-oidc",
 	"logging",
 	"http",
-	"cors",
 	"key-store",
 	"test:repositories",
 	"audit-sink",

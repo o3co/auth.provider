@@ -53,7 +53,7 @@ const TEMPLATE_CONFIG = fileURLToPath(
  * many as are today. A rename lowers it by the names it renames; nothing
  * raises it.
  */
-const CEILING = 42;
+const CEILING = 34;
 
 /** `LEGACY`'s first count: it only ever loses entries. */
 const LEGACY_BASELINE = 61;
@@ -84,14 +84,6 @@ const LEGACY: readonly string[] = [
 	"core: CLIENT_CODE_PASSWORD at repositories.code.redis.password",
 	"core: CLIENT_CODE_KEY_PREFIX at redisCodeRepository.keyPrefix",
 	"mfa: MFA_ENCRYPTION_KEY at mfa.encryptionKeys.0.key",
-	"template: LOG_LEVEL at logging.level",
-	"template: OAUTH_JWT_ALGORITHM at oauth.jwt.signingKey.local.algorithm",
-	"template: OAUTH_JWT_KID at oauth.jwt.signingKey.local.kid",
-	"template: OAUTH_JWT_SECRET at oauth.jwt.signingKey.local.secret",
-	"template: OAUTH_JWT_PRIVATE_KEY_PATH at oauth.jwt.signingKey.local.privateKeyPath",
-	"template: OAUTH_JWT_PUBLIC_KEY_PATH at oauth.jwt.signingKey.local.publicKeyPath",
-	"template: OAUTH_JWT_PRIVATE_KEY at oauth.jwt.signingKey.local.privateKey",
-	"template: OAUTH_JWT_PUBLIC_KEY at oauth.jwt.signingKey.local.publicKey",
 	"template: CLIENT_TYPE at repositories.client.type",
 	"template: CLIENT_PATH at repositories.client.yaml.path",
 	"template: CLIENT_USER_TYPE at repositories.user.type",

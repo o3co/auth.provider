@@ -41,7 +41,6 @@ import {
 	tokenBindingMw,
 } from "../middleware/tokenBinding.mjs";
 import type { ComponentKey } from "../modules/manifest/component-map.mjs";
-import { normalizeAllowedOrigins } from "../net/origin.mjs";
 import type { InternalReadinessRegistrar } from "../readiness/types.mjs";
 import { failureDetail } from "./failure-summary.mjs";
 import { httpSettingsCorsOrigins } from "./http-settings.mjs";
@@ -632,25 +631,15 @@ export function assembleApp(
 	// Mounted on an ALLOWLIST of paths, deliberately the opposite polarity to the
 	// sender-constraint mount below (core README, CORS). `corsMw` returns null
 	// for an empty origin list: no CORS headers, not even `Vary`.
-	// The origins: the `httpSettings` slot's when its key is present (whatever a
-	// provider answered), else the configuration's.
+	// The origins are the `httpSettings` slot's, whatever a provider answered; a
+	// composition without the slot allows no origin.
 	{
 		const components = frozen.components as Record<string, unknown>;
-		const config = components.config as
-			| { cors?: { allowedOrigins?: unknown }; oauth?: { jwt?: { issuer?: unknown } } }
-			| undefined;
-		const fromSlot = Object.hasOwn(components, "httpSettings");
-		const configured = fromSlot ? undefined : config?.cors?.allowedOrigins;
+		const config = components.config as { oauth?: { jwt?: { issuer?: unknown } } } | undefined;
 		const logger = components.logger as Logger | undefined;
-		// The configuration's list is read through the shape normaliser the
-		// schema shares, rather than tested for an array, so the two cannot
-		// disagree: the documented `${?CORS_ALLOWED_ORIGINS}` is a
-		// comma-separated string (the only way an environment variable carries
-		// a list), and an `Array.isArray` test would skip the middleware for any
-		// config that reaches here unparsed.
-		const allowedOrigins = fromSlot
+		const allowedOrigins = Object.hasOwn(components, "httpSettings")
 			? httpSettingsCorsOrigins(components.httpSettings)
-			: normalizeAllowedOrigins(configured);
+			: [];
 		if (allowedOrigins.length > 0) {
 			const mw = corsMw({
 				allowedOrigins,
@@ -661,18 +650,6 @@ export function assembleApp(
 				...(logger ? { logger } : {}),
 			});
 			if (mw !== null) router.use(mw);
-		} else if (
-			configured !== undefined &&
-			configured !== null &&
-			!Array.isArray(configured) &&
-			typeof configured !== "string"
-		) {
-			// An array or a string that normalises to nothing is an operator
-			// saying "no origins", which is CORS off and needs no comment. A
-			// shape neither reader can interpret is a misconfiguration, and
-			// staying silent about it is what this whole block is here to
-			// stop.
-			logger?.warn({ received: typeof configured }, "cors_allowed_origins_unreadable");
 		}
 	}
 

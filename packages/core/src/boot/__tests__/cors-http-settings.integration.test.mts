@@ -15,11 +15,10 @@
  */
 
 /**
- * The origins core's CORS middleware lets read are the `httpSettings` slot's
- * when the composition holds it, and the configuration's `cors.allowedOrigins`
- * only when it holds none: never the two mixed. A slot whose origins break the
- * slot's contract refuses the boot, naming the member, as the configuration's
- * schema refuses the same origins at its key.
+ * The origins core's CORS middleware lets read are the `httpSettings` slot's,
+ * and nothing else's: a composition without the slot allows no origin, and a
+ * `cors` section in the configuration is read by no one. A slot whose origins
+ * break the slot's contract refuses the boot, naming the member.
  */
 
 import express, { Router } from "express";
@@ -58,7 +57,7 @@ const httpModule = (settings: unknown) =>
 		lifecycle: { httpSettings: { eager: true } },
 	});
 
-/** A booted app with `cors.allowedOrigins` configured as `configured`, and `modules` beside the token route. */
+/** A booted app whose configuration writes `cors.allowedOrigins` as `configured`, and `modules` beside the token route. */
 const boot = async (configured: readonly string[], modules: ReturnType<typeof defineModule>[]) => {
 	const handle = await createApp({
 		modules: [tokenRoute, ...modules],
@@ -152,11 +151,12 @@ describe("the CORS mount reads the httpSettings slot when the composition holds 
 		}
 	});
 
-	it("reads the configuration's list when nothing fills the slot", async () => {
+	it("allows no origin when nothing fills the slot, whatever the configuration writes at cors", async () => {
 		const { app, handle } = await boot([CONFIG_ORIGIN], []);
 		try {
 			const res = await preflight(app, CONFIG_ORIGIN);
-			expect(res.headers["access-control-allow-origin"]).toBe(CONFIG_ORIGIN);
+			expect(res.headers["access-control-allow-origin"]).toBeUndefined();
+			expect(res.headers.vary).toBeUndefined();
 		} finally {
 			await handle.dispose();
 		}

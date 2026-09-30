@@ -22,7 +22,11 @@
  */
 
 import { fileURLToPath } from "node:url";
-import { memoryRateLimiterModule, moduleReferences } from "@o3co/auth-provider-core";
+import {
+	AppConfigSchema,
+	memoryRateLimiterModule,
+	moduleReferences,
+} from "@o3co/auth-provider-core";
 import { CORE_RELOCATIONS, renamedVariableCaptures } from "@o3co/auth-provider-core/testing";
 import { federationGrantsModules } from "@o3co/auth-provider-federation-grants";
 import {
@@ -37,6 +41,12 @@ import {
 } from "@o3co/auth-provider-redis";
 import { sessionModule, sessionStoreModule } from "@o3co/auth-provider-session";
 import { type Config, empty, parseFile } from "@o3co/ts.hocon";
+import {
+	httpModule,
+	keyStoreModule,
+	loggingModule,
+	standaloneRedisClientsModule,
+} from "../modules.mjs";
 
 /** The oauth package's modules, whose manifests read nothing of the configuration they are handed but the grant switches. */
 const OAUTH_MODULES = [
@@ -54,6 +64,10 @@ const RENAMING_MODULES = [
 	...OAUTH_MODULES,
 	sessionModule,
 	sessionStoreModule,
+	loggingModule,
+	httpModule,
+	keyStoreModule,
+	standaloneRedisClientsModule,
 ];
 
 /** Every package reference the template's modules declare, core's last. */
@@ -71,6 +85,20 @@ export function libraryLayers(env: Readonly<Record<string, string>>): Config {
 		(layered, reference) =>
 			layered.withFallback(parseFile(fileURLToPath(reference), { env: { ...env } })),
 		empty(),
+	);
+}
+
+/**
+ * What a test that parses `layers` with `AppConfigSchema` lays beside that
+ * parse: every top-level section core's schema does not declare — the
+ * template's own modules' among them — as written, which the parse drops.
+ */
+export function sectionsCoreDoesNotDeclare(layers: Config): Record<string, unknown> {
+	const raw = layers.toObject() as Record<string, unknown>;
+	return Object.fromEntries(
+		Object.entries(raw).filter(
+			([key]) => !Object.hasOwn(AppConfigSchema.shape, key) && key !== "renamed-variables",
+		),
 	);
 }
 

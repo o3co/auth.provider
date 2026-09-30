@@ -117,8 +117,8 @@ services:
       HTTP_TRUST_PROXY: ${HTTP_TRUST_PROXY:?set to your TLS terminator's address or CIDR range (e.g. 10.0.0.0/8, or `loopback` for a same-host sidecar) — never `true` behind an open network}
       # Point the process at the mounted secrets rather than the working-copy
       # paths `.env` carries for local runs.
-      OAUTH_JWT_PRIVATE_KEY_PATH: /run/secrets/jwt_private_key
-      OAUTH_JWT_PUBLIC_KEY_PATH: /run/secrets/jwt_public_key
+      KEY_STORE_LOCAL_PRIVATE_KEY_PATH: /run/secrets/jwt_private_key
+      KEY_STORE_LOCAL_PUBLIC_KEY_PATH: /run/secrets/jwt_public_key
       CLIENT_PATH: /run/secrets/client_registry
       # `environment` wins over `env_file`, which is the point here:
       # `.env.example` ships SESSION_STORE_SECURE=false / SESSION_STORE_NAME=auth.sid so a
@@ -138,7 +138,7 @@ services:
       # `ACCESS_TOKEN_DENYLIST_ADAPTER` already ship as `redis` in that config
       # layer and are left there on purpose — restating a value that agrees is
       # a second place to forget to change.
-      REFRESH_TOKEN_FAMILY_STORE_REDIS_URL: redis://redis:6379
+      REDIS_CLIENTS_URL: redis://redis:6379
       SESSION_STORE_STORAGE_TYPE: redis
       SESSION_STORE_STORAGE_REDIS_URL: redis://redis:6379
       # The UserSession stores: the provider's own record of who is signed in,

@@ -57,7 +57,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { buildModules } from "../buildModules.mjs";
 import { resolveConfigPaths } from "../configPath.mjs";
 import { templateReference } from "../modules.mjs";
-import { capturedRenames, libraryLayers } from "./library-references.fixture.mjs";
+import {
+	capturedRenames,
+	libraryLayers,
+	sectionsCoreDoesNotDeclare,
+} from "./library-references.fixture.mjs";
 
 // The redis session-store builder, which the baseline selects, dynamically
 // imports these; mock them so no socket opens.
@@ -134,8 +138,8 @@ const ENCRYPTION_KEY = Buffer.alloc(32, 7).toString("base64");
  * below flips one variable off this.
  */
 const ALL_REDIS_ENV: Readonly<Record<string, string>> = {
-	OAUTH_JWT_ALGORITHM: "HS256",
-	OAUTH_JWT_SECRET: "replica-safety-test-secret.at-least-32-bytes.ok",
+	KEY_STORE_LOCAL_ALGORITHM: "HS256",
+	KEY_STORE_LOCAL_SECRET: "replica-safety-test-secret.at-least-32-bytes.ok",
 	OAUTH_JWT_ISSUER: "https://auth.test",
 	SESSION_STORE_SECRET: "replica-safety-session-secret.at-least-32-bytes.ok",
 	SESSION_STORE_SECURE: "false",
@@ -144,7 +148,7 @@ const ALL_REDIS_ENV: Readonly<Record<string, string>> = {
 	SESSION_STORE_STORAGE_REDIS_URL: "redis://redis.test:6379",
 	CLIENT_USER_TYPE: "yaml",
 	CORE_DEPLOYMENT_MODE: "multi",
-	REFRESH_TOKEN_FAMILY_STORE_REDIS_URL: "redis://redis.test:6379",
+	REDIS_CLIENTS_URL: "redis://redis.test:6379",
 	USER_SESSION_STORES_ADAPTER: "redis",
 	RATE_LIMITER_ADAPTER: "redis",
 	OAUTH_CODE_ADAPTER: "redis",
@@ -159,14 +163,13 @@ const ALL_REDIS_ENV: Readonly<Record<string, string>> = {
 
 function resolveConfig(env: Record<string, string>): AppConfig {
 	const { applicationConfPath, envConfPath } = resolveConfigPaths(configDir, "production");
+	const layers = parseFile(envConfPath, { env })
+		.withFallback(parseFile(applicationConfPath, { env }))
+		.withFallback(parseFile(fileURLToPath(templateReference()), { env }))
+		.withFallback(libraryLayers(env));
 	return {
-		...validate(
-			parseFile(envConfPath, { env })
-				.withFallback(parseFile(applicationConfPath, { env }))
-				.withFallback(parseFile(fileURLToPath(templateReference()), { env }))
-				.withFallback(libraryLayers(env)),
-			AppConfigSchema,
-		),
+		...sectionsCoreDoesNotDeclare(layers),
+		...validate(layers, AppConfigSchema),
 		// What the resolution captured of core's renamed variables, which the
 		// schema's parse drops.
 		"renamed-variables": capturedRenames(env),
@@ -199,7 +202,7 @@ const testKeyStoreModule = defineModule({
 			registerBuiltinKeyStores(factory);
 			return factory.create({
 				type: "local",
-				...((c as AppConfig).oauth.jwt.signingKey?.local ?? {}),
+				...((c as { "key-store"?: { local?: object } })["key-store"]?.local ?? {}),
 			});
 		},
 	},

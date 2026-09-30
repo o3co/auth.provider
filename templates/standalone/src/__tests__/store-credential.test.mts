@@ -51,7 +51,11 @@ import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import { buildModules } from "../buildModules.mjs";
 import { resolveConfigPaths } from "../configPath.mjs";
 import { repositoriesModule, templateReference } from "../modules.mjs";
-import { capturedRenames, libraryLayers } from "./library-references.fixture.mjs";
+import {
+	capturedRenames,
+	libraryLayers,
+	sectionsCoreDoesNotDeclare,
+} from "./library-references.fixture.mjs";
 
 const configDir = fileURLToPath(new URL("../../config", import.meta.url));
 
@@ -100,14 +104,13 @@ const recordingStore = async (
 /** The shipped config for the production overlay, resolved against `env`. */
 const resolve = (env: Record<string, string>): AppConfig => {
 	const { applicationConfPath, envConfPath } = resolveConfigPaths(configDir, "production");
+	const layers = parseFile(envConfPath, { env })
+		.withFallback(parseFile(applicationConfPath, { env }))
+		.withFallback(parseFile(fileURLToPath(templateReference()), { env }))
+		.withFallback(libraryLayers(env));
 	return {
-		...validate(
-			parseFile(envConfPath, { env })
-				.withFallback(parseFile(applicationConfPath, { env }))
-				.withFallback(parseFile(fileURLToPath(templateReference()), { env }))
-				.withFallback(libraryLayers(env)),
-			AppConfigSchema,
-		),
+		...sectionsCoreDoesNotDeclare(layers),
+		...validate(layers, AppConfigSchema),
 		// What the resolution captured of core's renamed variables, which the
 		// schema's parse drops.
 		"renamed-variables": capturedRenames(env),
@@ -123,8 +126,8 @@ const userRepositoryFrom = (config: AppConfig): Promise<UserRepository> =>
 	);
 
 const envFor = (origin: string): Record<string, string> => ({
-	OAUTH_JWT_ALGORITHM: "HS256",
-	OAUTH_JWT_SECRET: "store-credential-composition.at-least-32-bytes.ok",
+	KEY_STORE_LOCAL_ALGORITHM: "HS256",
+	KEY_STORE_LOCAL_SECRET: "store-credential-composition.at-least-32-bytes.ok",
 	OAUTH_JWT_ISSUER: "https://auth.test",
 	SESSION_STORE_SECRET: "store-credential-composition-session.at-least-32-bytes.ok",
 	CLIENT_USER_TYPE: "http",
@@ -189,7 +192,7 @@ describe("a token the Store refuses, seen from outside the booted app", () => {
 				registerBuiltinKeyStores(factory);
 				return factory.create({
 					type: "local",
-					...((c as AppConfig).oauth.jwt.signingKey?.local ?? {}),
+					...((c as { "key-store"?: { local?: object } })["key-store"]?.local ?? {}),
 				});
 			},
 		},

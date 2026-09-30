@@ -762,13 +762,13 @@ export {
 // the designVocabulary drift guard fails any second definition.
 export { isLoopbackHostname } from "./net/loopback.mjs";
 // The serialized-origin vocabulary — what a configured browser origin
-// may be. Enforced on `cors.allowedOrigins` by the config schema at boot and
-// re-applied by `corsMw`, and on every web entry of the WebAuthn package's
-// `origin` / `topOrigin`; exported so a consumer assembling its own policy
-// holds origins to the same rules and refuses in the same words.
-// `normalizeAllowedOrigins` reads an origin list in both its spellings — an
-// array, or the comma-separated string an environment variable carries — for
-// `cors.allowedOrigins`; the WebAuthn package hands it only that string.
+// may be. Enforced on a composition's CORS list by the schema of the module
+// that provides `httpSettings`, re-applied by `corsMw`, and on every web entry
+// of the WebAuthn package's `origin` / `topOrigin`; exported so a consumer
+// assembling its own policy holds origins to the same rules and refuses in the
+// same words. `normalizeAllowedOrigins` reads an origin list in both its
+// spellings — an array, or the comma-separated string an environment variable
+// carries.
 export {
 	checkSerializedOrigin,
 	describeSerializedOriginRejection,

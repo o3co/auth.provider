@@ -436,10 +436,14 @@ describe("tools/live-check proxy without an expected issuer", () => {
 	});
 });
 
-describe("the launcher and the front name the session store's variables", () => {
+describe("the launcher and the front name the provider's variables after their paths", () => {
 	// The provider refuses to boot on an old name set alone: each was renamed
-	// with its key, `session.<key>` to `session-store.<key>`.
+	// with its key, `session.<key>` to `session-store.<key>`, the signing key's
+	// to `key-store.*`, the shared Redis connection's to `redis-clients.*`.
 	const OLD = [
+		"OAUTH_JWT_PRIVATE_KEY_PATH",
+		"OAUTH_JWT_PUBLIC_KEY_PATH",
+		"REFRESH_TOKEN_FAMILY_STORE_REDIS_URL",
 		"SESSION_SECRET",
 		"SESSION_NAME",
 		"SESSION_MAX_AGE",

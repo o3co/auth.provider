@@ -79,7 +79,7 @@ export interface ModuleSection<S extends SectionSchema = SectionSchema> {
 	readonly reference?: URL;
 	/**
 	 * Where the section sits today, as a dot-separated path of non-empty keys
-	 * (`"oauth.jwt.signingKey"`), for a section not yet moved under the module's name.
+	 * (`"parent.child"`), for a section not yet moved under the module's name.
 	 * Unset, it is the top-level key named exactly as the module (not split on
 	 * dots). Keys are read as own properties only; an invalid path refuses boot
 	 * (`module-section-path-invalid`). Transitional.

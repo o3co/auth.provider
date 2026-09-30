@@ -100,8 +100,8 @@ const ENCRYPTION_KEY = Buffer.alloc(32, 7).toString("base64");
 export const SINGLE_ENV: Readonly<Record<string, string>> = {
 	OAUTH_JWT_ISSUER: ISSUER,
 	// The shipped default algorithm (EdDSA), with the key pair inline.
-	OAUTH_JWT_PRIVATE_KEY: signingKey.privateKey,
-	OAUTH_JWT_PUBLIC_KEY: signingKey.publicKey,
+	KEY_STORE_LOCAL_PRIVATE_KEY: signingKey.privateKey,
+	KEY_STORE_LOCAL_PUBLIC_KEY: signingKey.publicKey,
 	SESSION_STORE_SECRET: "all-modules-composition-session.at-least-32-bytes.ok",
 	SESSION_STORE_SECURE: "false",
 	SESSION_STORE_NAME: "auth.session",
@@ -147,7 +147,7 @@ export const MULTI_ENV: Readonly<Record<string, string>> = {
 	CORE_DEPLOYMENT_MODE: "multi",
 	SESSION_STORE_STORAGE_TYPE: "redis",
 	SESSION_STORE_STORAGE_REDIS_URL: "redis://redis.test:6379",
-	REFRESH_TOKEN_FAMILY_STORE_REDIS_URL: "redis://redis.test:6379",
+	REDIS_CLIENTS_URL: "redis://redis.test:6379",
 	USER_SESSION_STORES_ADAPTER: "redis",
 	RATE_LIMITER_ADAPTER: "redis",
 	OAUTH_CODE_ADAPTER: "redis",

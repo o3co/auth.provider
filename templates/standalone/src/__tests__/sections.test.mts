@@ -38,8 +38,7 @@ const http = (overrides: Record<string, unknown> = {}) => ({
 	...overrides,
 });
 
-const parsedTrustProxy = (trustProxy: unknown) =>
-	httpSectionSchema.safeParse(http({ trustProxy }));
+const parsedTrustProxy = (trustProxy: unknown) => httpSectionSchema.safeParse(http({ trustProxy }));
 
 const issuePaths = (result: { success: boolean; error?: { issues: { path: PropertyKey[] }[] } }) =>
 	result.success ? [] : (result.error?.issues ?? []).map((issue) => issue.path.join("."));
@@ -255,12 +254,18 @@ describe("http.cors.allowedOrigins", () => {
 
 describe("http — the rest of the section", () => {
 	it("reads the port and the readiness deadline from the variables' strings", () => {
-		expect(httpSectionSchema.parse(http({ port: "8080", readinessTimeoutMs: "1500" }))).toMatchObject(
-			{ port: 8080, readinessTimeoutMs: 1500 },
-		);
+		expect(
+			httpSectionSchema.parse(http({ port: "8080", readinessTimeoutMs: "1500" })),
+		).toMatchObject({ port: 8080, readinessTimeoutMs: 1500 });
 	});
 
-	it.each([0, 2_147_483_648])("refuses the readiness deadline %s", (readinessTimeoutMs) => {
+	it.each([
+		["a blank variable", ""],
+		["zero", 0],
+		["a negative deadline", -1],
+		["a fractional deadline", 1.5],
+		["a deadline beyond Node's timer range", 2_147_483_648],
+	])("refuses %s as the readiness deadline", (_what, readinessTimeoutMs) => {
 		expect(issuePaths(httpSectionSchema.safeParse(http({ readinessTimeoutMs })))).toEqual([
 			"readinessTimeoutMs",
 		]);

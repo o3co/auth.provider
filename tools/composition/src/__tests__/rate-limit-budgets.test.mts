@@ -157,7 +157,7 @@ const envFor = (adapter: Adapter): Record<string, string> =>
 		: {
 				...SINGLE_ENV,
 				RATE_LIMITER_ADAPTER: "redis",
-				REFRESH_TOKEN_FAMILY_STORE_REDIS_URL: `redis://${redis.host}:${redis.port}/${redis.db}`,
+				REDIS_CLIENTS_URL: `redis://${redis.host}:${redis.port}/${redis.db}`,
 			};
 
 /** A key under `prefix` no earlier check in this run has counted. */

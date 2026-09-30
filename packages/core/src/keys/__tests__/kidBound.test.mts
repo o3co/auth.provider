@@ -21,12 +21,11 @@
  * `kid_unknown`, so a keystore built with one would sign only tokens that are
  * refused: a total outage, reported as the client's fault. So the rule is
  * checked where the kid is chosen: the current and every previous kid, on the
- * local and remote-signing stores, and in `oauth.jwt.signingKey`.
+ * local and remote-signing stores.
  */
 
 import { generateKeyPairSync, sign as nodeSign } from "node:crypto";
 import { describe, expect, it } from "vitest";
-import { CoreConfigSchema } from "#/config/application.schema.mjs";
 import { verifyJwt } from "#/jwt/verify.mjs";
 import { createAsymmetricKeyStore, createSymmetricKeyStore } from "#/keys/KeyStore.mjs";
 import { MAX_KID_LENGTH } from "#/keys/kid.mjs";
@@ -89,28 +88,6 @@ describe("a keystore refuses, when built, a kid verifyJwt would refuse", () => {
 			it("as the remote-signing store's current kid and as a previous kid", async () => {
 				await expect(remote(kid)).rejects.toThrow(/kid/);
 				await expect(remote("v0", kid)).rejects.toThrow(/previousKeys\[0\]\.kid/);
-			});
-
-			it("in oauth.jwt.signingKey — the current kid, previousSecrets and previousKeys", () => {
-				const jwt = CoreConfigSchema.shape.oauth.shape.jwt;
-				const parse = (local: Record<string, unknown>) =>
-					jwt.safeParse({ issuer: ISSUER, signingKey: { provider: "local", local } });
-				const hs = { algorithm: "HS256", kid: "v0", secret: SECRET, previousSecrets: [] };
-				const ed25519 = { algorithm: "EdDSA", kid: "v0", privateKey: "p", publicKey: "q" };
-				expect(parse({ ...hs, kid }).success).toBe(false);
-				expect(
-					parse({
-						...hs,
-						previousSecrets: [{ kid, secret: SECRET, expiresAt: "2030-01-01T00:00:00Z" }],
-					}).success,
-				).toBe(false);
-				expect(parse({ ...ed25519, kid }).success).toBe(false);
-				expect(
-					parse({
-						...ed25519,
-						previousKeys: [{ kid, publicKey: "q", expiresAt: "2030-01-01T00:00:00Z" }],
-					}).success,
-				).toBe(false);
 			});
 		});
 	}

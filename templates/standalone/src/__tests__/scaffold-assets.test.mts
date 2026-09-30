@@ -88,9 +88,9 @@ function bootableEnv(rel: string): Record<string, string> {
 	for (const [key, value] of composeAppEnvironment(rel)) {
 		if (value !== null) env[key] = value;
 	}
-	if (env.OAUTH_JWT_PRIVATE_KEY_PATH === undefined) {
-		env.OAUTH_JWT_ALGORITHM = "HS256";
-		env.OAUTH_JWT_SECRET = "scaffold-assets-compose.at-least-32-bytes.ok";
+	if (env.KEY_STORE_LOCAL_PRIVATE_KEY_PATH === undefined) {
+		env.KEY_STORE_LOCAL_ALGORITHM = "HS256";
+		env.KEY_STORE_LOCAL_SECRET = "scaffold-assets-compose.at-least-32-bytes.ok";
 	}
 	return env;
 }
@@ -124,7 +124,12 @@ describe("the dev compose can reach every Redis it configures", () => {
 		// which inside the container is the container itself. `.env.example` is
 		// what the compose file loads, so a URL missing from it is a boot that
 		// dials nothing.
-		const conf = read("/config/application.conf") + read("/config/reference.conf");
+		// The captures of renamed variables (`renamed-variables { … }`) read an
+		// old name only to refuse it, and dial nothing.
+		const conf = (read("/config/application.conf") + read("/config/reference.conf")).replace(
+			/^renamed-variables \{[\s\S]*?^\}/m,
+			"",
+		);
 		const declared = [...conf.matchAll(/\$\{\?([A-Z0-9_]*REDIS_URL)\}/g)].map((m) => m[1]);
 		expect(declared.length).toBeGreaterThan(0);
 

@@ -16,17 +16,16 @@
 
 /**
  * The CORS origins of a held `httpSettings` slot, checked: what core's CORS
- * middleware reads instead of `cors.allowedOrigins` when the slot's key is
- * present, whatever a provider answered. Core reads nothing else of it.
+ * middleware reads when the slot's key is present, whatever a provider
+ * answered. Core reads nothing else of it.
  */
 
 import { describeValue } from "../errors/describe-value.mjs";
 import { checkSerializedOrigin, describeSerializedOriginRejection } from "../net/origin.mjs";
 
 const WHY =
-	"Core's CORS middleware reads its origins from the httpSettings a composition holds, and " +
-	"from the configuration only when it holds none, so a slot that breaks its contract is " +
-	"refused rather than read beside the configuration's.";
+	"Core's CORS middleware reads its origins from the httpSettings a composition holds, so a " +
+	"slot that breaks its contract is refused rather than read.";
 
 const refuse = (member: string, rule: string): never => {
 	throw new RangeError(`httpSettings.${member} ${rule}. ${WHY}`);
@@ -45,7 +44,7 @@ const readOnce = (member: string, read: () => unknown): unknown => {
 
 /**
  * The slot's `cors.allowedOrigins`, read once, each entry held to
- * `checkSerializedOrigin` (the rule the schema holds the configuration's to),
+ * `checkSerializedOrigin` (the rule the module's schema holds its section's to),
  * answered as a frozen copy.
  *
  * @throws RangeError naming the member (and the index) that does not hold,

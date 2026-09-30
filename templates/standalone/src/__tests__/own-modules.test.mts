@@ -201,7 +201,7 @@ describe("the template's config/reference.conf", () => {
 			packageReferenceProblems({
 				reference: TEMPLATE_REFERENCE,
 				modules: [loggingModule, httpModule, keyStoreModule, standaloneRedisClientsModule],
-				read: (path) => parseFile(path, { env: {} }).toObject(),
+				read: (path, env) => parseFile(path, { env: { ...env } }).toObject(),
 			}),
 		).toEqual([]);
 	});
@@ -866,9 +866,7 @@ describe("key-store", () => {
 			signingKey.publicKey,
 		],
 	])("has boot refuse %s set alone, naming %s", async (from, to, path, value) => {
-		await expect(
-			bootTemplate({ env: { [from]: value, [to]: undefined } }),
-		).rejects.toMatchObject({
+		await expect(bootTemplate({ env: { [from]: value, [to]: undefined } })).rejects.toMatchObject({
 			details: {
 				reason: "environment-variable-renamed",
 				renamed: [{ module: "key-store", from, to, path, state: "unset" }],
@@ -990,9 +988,9 @@ describe("redis-clients", () => {
 	});
 
 	it("refuses an empty URL when a client is built, naming the key and its variable", async () => {
-		await expect(
-			bootTemplate({ redis: true, env: { REDIS_CLIENTS_URL: "" } }),
-		).rejects.toThrow(/redis-clients\.url.*REDIS_CLIENTS_URL/s);
+		await expect(bootTemplate({ redis: true, env: { REDIS_CLIENTS_URL: "" } })).rejects.toThrow(
+			/redis-clients\.url.*REDIS_CLIENTS_URL/s,
+		);
 	});
 
 	it("has boot refuse refreshTokenFamilyStore.redis, the path it moved from, naming the new paths and variables", async () => {
@@ -1025,7 +1023,11 @@ describe("redis-clients", () => {
 
 	it.each([
 		["REFRESH_TOKEN_FAMILY_STORE_REDIS_URL", "REDIS_CLIENTS_URL", "redis-clients.url"],
-		["REFRESH_TOKEN_FAMILY_STORE_REDIS_PASSWORD", "REDIS_CLIENTS_PASSWORD", "redis-clients.password"],
+		[
+			"REFRESH_TOKEN_FAMILY_STORE_REDIS_PASSWORD",
+			"REDIS_CLIENTS_PASSWORD",
+			"redis-clients.password",
+		],
 	])("has boot refuse %s set alone, naming %s", async (from, to, path) => {
 		await expect(
 			bootTemplate({ redis: true, env: { [from]: "redis://127.0.0.1:9" } }),

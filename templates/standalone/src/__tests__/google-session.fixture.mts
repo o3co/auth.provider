@@ -58,7 +58,11 @@ import { expect } from "vitest";
 import { buildModules } from "#/buildModules.mjs";
 import { resolveConfigPaths } from "#/configPath.mjs";
 import { templateReference } from "../modules.mjs";
-import { capturedRenames, libraryLayers } from "./library-references.fixture.mjs";
+import {
+	capturedRenames,
+	libraryLayers,
+	sectionsCoreDoesNotDeclare,
+} from "./library-references.fixture.mjs";
 
 const configDir = fileURLToPath(new URL("../../config", import.meta.url));
 
@@ -81,15 +85,15 @@ const GOOGLE_CLIENT_SECRET = "google-secret";
 const GOOGLE_CALLBACK = `${ISSUER}/session/oauth/federation/google/callback`;
 
 const ENV: Readonly<Record<string, string>> = {
-	OAUTH_JWT_ALGORITHM: "HS256",
-	OAUTH_JWT_SECRET: JWT_SECRET,
+	KEY_STORE_LOCAL_ALGORITHM: "HS256",
+	KEY_STORE_LOCAL_SECRET: JWT_SECRET,
 	OAUTH_JWT_ISSUER: ISSUER,
 	SESSION_STORE_SECRET: "google-session.fixture-session.at-least-32-bytes.ok",
 	SESSION_STORE_SECURE: "false",
 	SESSION_STORE_NAME: "auth.session",
 	SESSION_STORE_STORAGE_TYPE: "memory",
 	CLIENT_USER_TYPE: "yaml",
-	REFRESH_TOKEN_FAMILY_STORE_REDIS_URL: "redis://redis.test:6379",
+	REDIS_CLIENTS_URL: "redis://redis.test:6379",
 	USER_SESSION_STORES_ADAPTER: "memory",
 	RATE_LIMITER_ADAPTER: "memory",
 	OAUTH_CODE_ADAPTER: "memory",
@@ -122,14 +126,13 @@ function resolveConfig(google: GoogleWiring): AppConfig {
 				}
 			: { ...ENV };
 	const { applicationConfPath, envConfPath } = resolveConfigPaths(configDir, "production");
+	const layers = parseFile(envConfPath, { env })
+		.withFallback(parseFile(applicationConfPath, { env }))
+		.withFallback(parseFile(fileURLToPath(templateReference()), { env }))
+		.withFallback(libraryLayers(env));
 	return {
-		...validate(
-			parseFile(envConfPath, { env })
-				.withFallback(parseFile(applicationConfPath, { env }))
-				.withFallback(parseFile(fileURLToPath(templateReference()), { env }))
-				.withFallback(libraryLayers(env)),
-			AppConfigSchema,
-		),
+		...sectionsCoreDoesNotDeclare(layers),
+		...validate(layers, AppConfigSchema),
 		// What the resolution captured of core's renamed variables, which the
 		// schema's parse drops.
 		"renamed-variables": capturedRenames(env),
@@ -175,7 +178,7 @@ const testKeyStoreModule = defineModule({
 			registerBuiltinKeyStores(factory);
 			return factory.create({
 				type: "local",
-				...((c as AppConfig).oauth.jwt.signingKey?.local ?? {}),
+				...((c as { "key-store"?: { local?: object } })["key-store"]?.local ?? {}),
 			});
 		},
 	},

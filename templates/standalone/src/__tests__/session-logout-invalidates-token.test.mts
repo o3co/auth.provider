@@ -60,9 +60,15 @@ const USERNAME = "alice";
 const PASSWORD = "correct-horse-battery-staple";
 
 /** The `http` module's section, as the hand-built configuration below carries it. */
-const HTTP = { port: 0, trustProxy: false, readinessTimeoutMs: 1000 };
+const HTTP = {
+	port: 0,
+	trustProxy: false,
+	readinessTimeoutMs: 1000,
+	cors: { allowedOrigins: [] as string[] },
+};
 
-const config: AppConfig = {
+/** The template modules' sections sit beside core's, so the configuration is wider than `AppConfig`. */
+const config: AppConfig & Record<string, unknown> = {
 	// What a resolution under an environment that sets none captures of
 	// core's renamed variables.
 	...{
@@ -70,22 +76,22 @@ const config: AppConfig = {
 	},
 	http: HTTP,
 	logging: { level: "silent" },
+	"key-store": {
+		provider: "local",
+		local: {
+			algorithm: "EdDSA",
+			kid: "v0",
+			privateKey: keyPair.privateKey,
+			publicKey: keyPair.publicKey,
+			previousKeys: [],
+		},
+	},
 	// The session requirements this composition expects, as the shipped
 	// `application.conf` does (ADR 2026-09-28-session-admission): none.
 	core: { sessionRequirements: { expected: [] } },
 	oauth: {
 		jwt: {
 			issuer: "https://auth.test",
-			signingKey: {
-				provider: "local",
-				local: {
-					algorithm: "EdDSA",
-					kid: "v0",
-					privateKey: keyPair.privateKey,
-					publicKey: keyPair.publicKey,
-					previousKeys: [],
-				},
-			},
 		},
 		accessToken: { expiresIn: 3600 },
 		refreshToken: {
@@ -119,7 +125,6 @@ const config: AppConfig = {
 		user: { type: "yaml", path: "./config/users.yaml", timeout: 5000 },
 		code: { type: "memory", defaultExpiresIn: 600 },
 	},
-	cors: { allowedOrigins: [] },
 } as unknown as AppConfig;
 
 const testRepositoriesModule = defineModule({
@@ -160,7 +165,7 @@ const testKeyStoreModule = defineModule({
 			registerBuiltinKeyStores(factory);
 			return factory.create({
 				type: "local",
-				...((c as AppConfig).oauth.jwt.signingKey?.local ?? {}),
+				...((c as { "key-store"?: { local?: object } })["key-store"]?.local ?? {}),
 			});
 		},
 	},

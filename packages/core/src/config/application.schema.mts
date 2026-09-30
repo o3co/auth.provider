@@ -24,16 +24,6 @@
 import { z } from "zod";
 
 import { checkCanonicalIssuer, describeIssuerRejection } from "../issuer/canonical.mjs";
-import { isWellFormedKid, MAX_KID_LENGTH } from "../keys/kid.mjs";
-import {
-	checkSerializedOrigin,
-	describeSerializedOriginRejection,
-	normalizeAllowedOrigins,
-} from "../net/origin.mjs";
-import {
-	checkTrustedProxyEntry,
-	describeTrustedProxyEntryRejection,
-} from "../net/trusted-proxy.mjs";
 import { MAX_DURATION_SECONDS } from "./durations.mjs";
 import { type RemovedKey, withRemovedKeys } from "./removed-keys.mjs";
 import { environmentCoercer } from "./schema-path.mjs";
@@ -75,67 +65,6 @@ const rateLimitSpecSchema = z.object({
 	// Date range is one the limiter adapters refuse when they are built.
 	windowSeconds: z.coerce.number().int().positive().max(MAX_DURATION_SECONDS),
 });
-
-// A configured kid is held to the rule `verifyJwt` holds a kid header to
-// (`keys/kid.mts`): one it would refuse makes every token signed under it fail
-// as the client's fault. The keystores check again when they are built, for a
-// composition that builds one without this schema.
-const kidSchema = z.string().refine(isWellFormedKid, {
-	message: `must be a key id: a string of 1 to ${MAX_KID_LENGTH} characters with no control character`,
-});
-
-const hs256PreviousSecretSchema = z.object({
-	kid: kidSchema,
-	secret: z.string(),
-	expiresAt: z.string(),
-});
-
-// HS256 rotation keeps shared secrets under `previousSecrets`, not the
-// asymmetric `previousKeys`. `.strict()` so `previousKeys` under HS256 fails at
-// boot instead of surviving parse and breaking rotation at the first refresh.
-const signingKeyLocalHs256Schema = z
-	.object({
-		algorithm: z.literal("HS256"),
-		kid: kidSchema,
-		secret: z.string().optional(),
-		previousSecrets: z.array(hs256PreviousSecretSchema).optional(),
-	})
-	.strict();
-
-const signingKeyLocalAsymmetricSchema = z
-	.object({
-		algorithm: z.enum(["RS256", "ES256", "EdDSA"]),
-		kid: kidSchema,
-		privateKey: z.string().optional(),
-		privateKeyPath: z.string().optional(),
-		publicKey: z.string().optional(),
-		publicKeyPath: z.string().optional(),
-		// Optional so the shared HOCON default can omit `previousKeys = []`; the
-		// factory treats absent, null and [] alike.
-		previousKeys: z
-			.array(
-				z.object({
-					kid: kidSchema,
-					publicKey: z.string().optional(),
-					publicKeyPath: z.string().optional(),
-					expiresAt: z.string(),
-				}),
-			)
-			.optional(),
-	})
-	.passthrough();
-
-const signingKeyLocalSchema = z.discriminatedUnion("algorithm", [
-	signingKeyLocalHs256Schema,
-	signingKeyLocalAsymmetricSchema,
-]);
-
-const signingKeySchema = z
-	.object({
-		provider: z.string(),
-		local: signingKeyLocalSchema.optional(),
-	})
-	.passthrough();
 
 const LEGACY_JWT_FIELDS = [
 	"algorithm",
@@ -218,9 +147,10 @@ const jwtSchemaBase = z.object({
 			});
 		}
 	}),
-	// The section of the module that provides `keyStore`; core reads none of it
-	// and ships no default.
-	signingKey: signingKeySchema.optional(),
+	// Presence-only: the path the key-store module's section moved from, kept
+	// so a root that parses with `AppConfigSchema` before boot still hands it
+	// to the relocation refusal. Nothing reads it.
+	signingKey: z.unknown().optional(),
 	// When true, the JWT verifier accepts tokens with no `typ` header and warns.
 	// No schema default: `reference.conf` ships `false` (a typ-less token is a
 	// misconfiguration or downgrade signal); `OAUTH_JWT_LEGACY_TYP_ACCEPT=true`
@@ -236,9 +166,7 @@ const jwtSchemaBase = z.object({
 
 /**
  * Detects legacy flat `oauth.jwt.*` fields on the raw input: Zod strips unknown
- * keys before `superRefine` runs, so only `z.preprocess` can see them. This
- * pipe's `out.shape.signingKey` is read as the signing-key section's schema:
- * keep that path, or change its readers with it.
+ * keys before `superRefine` runs, so only `z.preprocess` can see them.
  */
 const jwtSchema = z.preprocess((raw, ctx) => {
 	if (typeof raw === "object" && raw !== null && !Array.isArray(raw)) {
@@ -249,7 +177,7 @@ const jwtSchema = z.preprocess((raw, ctx) => {
 				code: z.ZodIssueCode.custom,
 				message:
 					`oauth.jwt has legacy flat fields (${legacyPresent.join(", ")}). ` +
-					`Migrate to nested shape: oauth.jwt.signingKey.local.<field>. ` +
+					`Migrate to the key store's section: key-store.local.<field>. ` +
 					`See packages/core/README.md for migration guide.`,
 				path: [legacyPresent[0]],
 			});
@@ -535,124 +463,18 @@ const authorizeSchema = withRemovedKeys(
 );
 
 /**
- * Ceiling for `http.trustProxy` as a hop count: a typo guard, not a policy. A
- * large number meant as "trust everything" would silently grant the blanket
- * trust `true` states openly. Exported so the `httpSettings` contract suite
- * holds the slot to the same ceiling.
+ * Ceiling for a `trust proxy` hop count: a typo guard, not a policy. A large
+ * number meant as "trust everything" would silently grant the blanket trust
+ * `true` states openly. Exported so the `httpSettings` contract suite, and the
+ * module that parses a composition's HTTP settings, hold the value to it.
  */
 export const MAX_TRUST_PROXY_HOPS = 255;
 
 /**
- * A decimal, optionally signed or fractional: the env-var shapes meant as a hop
- * count. `-1` and `1.5` match on purpose, so they fail as bad hop counts rather
- * than read as one-entry address lists; `10.0.0.7` and `loopback` do not match.
- */
-const NUMERIC_STRING = /^-?[0-9]+(\.[0-9]+)?$/;
-
-/**
- * Normalises the config source's value into one of Express's `trust proxy`
- * shapes. HOCON substitutes `${?HTTP_TRUST_PROXY}` as a string, and a union
- * gives the hocon bridge nothing to coerce towards, so the mapping lives here.
- * Separate from `coerceBooleanFromEnv` on purpose: `1` and `0` are hop counts
- * here, not booleans; `true` / `false` / `""` agree.
- */
-const normalizeTrustProxy = (raw: unknown): unknown => {
-	if (Array.isArray(raw)) {
-		return raw.map((entry) => (typeof entry === "string" ? entry.trim() : entry));
-	}
-	if (typeof raw !== "string") return raw;
-
-	const value = raw.trim();
-	// An exported-but-empty variable is the .env / compose / ConfigMap shape
-	// that arrives as "". Fail closed rather than guessing at a policy.
-	if (value === "") return false;
-
-	const lower = value.toLowerCase();
-	if (lower === "true") return true;
-	if (lower === "false") return false;
-	if (NUMERIC_STRING.test(value)) return Number(value);
-
-	// A trailing comma is the ordinary list typo; dropping the empty tail is
-	// friendlier than reporting an "empty entry" the operator never wrote.
-	return value
-		.split(",")
-		.map((entry) => entry.trim())
-		.filter((entry) => entry !== "");
-};
-
-/**
- * `http.trustProxy`, handed straight to Express's `trust proxy`:
- *
- * - `false`: trust nothing; `req.ip` is the socket peer. The default.
- * - `true`: trust every hop. Correct only when nothing but the proxy can reach
- *   this process; otherwise anyone can choose `req.ip` and forge a rate-limit
- *   identity.
- * - a hop count: trust that many hops back from the socket peer.
- * - an address list: IP literals, CIDR ranges or named ranges (`loopback`,
- *   `linklocal`, `uniquelocal`); the only shape that says which hop is trusted.
- *
- * Entries are validated with `../net/trusted-proxy`, the vocabulary
- * `@o3co/auth-provider-mtls` uses, so a typo fails at boot naming its index
- * instead of silently never matching.
- */
-const trustProxySchema = z
-	.preprocess(
-		normalizeTrustProxy,
-		z.union([
-			z.boolean(),
-			z.number().int().min(0).max(MAX_TRUST_PROXY_HOPS),
-			z
-				.array(z.string())
-				.min(
-					1,
-					"must list at least one address, CIDR range, or named range — use `false` to trust no forwarding hop",
-				),
-		]),
-	)
-	.superRefine((value, ctx) => {
-		if (!Array.isArray(value)) return;
-		value.forEach((entry, index) => {
-			const rejection = checkTrustedProxyEntry(entry);
-			if (rejection !== null) {
-				ctx.addIssue({
-					code: z.ZodIssueCode.custom,
-					message: `http.trustProxy[${index}] ${describeTrustedProxyEntryRejection(rejection)}`,
-					path: [index],
-				});
-			}
-		});
-	});
-
-/**
  * Minimal always-required config for the auth provider core.
  * Token-only deployments (no session, no federation) only need these sections.
- * The modules owning `logging`, `http` and `oauth.jwt.signingKey` parse their
- * sections with the declarations here until they have schemas of their own.
  */
 export const CoreConfigSchema = z.object({
-	// The section of the module that provides `httpSettings`; core reads none
-	// of it and ships no default.
-	http: z
-		.object({
-			port: z.coerce.number(),
-			// Boolean, hop count or address list. See `trustProxySchema`.
-			trustProxy: trustProxySchema,
-			// Per-probe deadline for the readiness endpoint; keep it well under the
-			// orchestrator's probe timeout, or a partitioned dependency reads as a
-			// slow replica instead of an unready one. Bounded both ways because
-			// `setTimeout` turns 0 (an empty env var through `z.coerce.number()`)
-			// and anything above 2^31-1 into 1ms: every probe would time out and
-			// the replica would answer 503 with nothing wrong.
-			readinessTimeoutMs: z.coerce.number().int().positive().max(2_147_483_647),
-		})
-		.optional(),
-	// The composition root's logging module's section; core reads none of it
-	// and ships no default. `silent` is a threshold, not a level.
-	logging: z
-		.object({
-			level: z.enum(["trace", "debug", "info", "warn", "error", "fatal", "silent"]),
-		})
-		.optional(),
 	oauth: z.object({
 		jwt: jwtSchema,
 		// The access-token lifetime: `defaultExpiresIn`, `maxExpiresIn`, and the
@@ -886,9 +708,7 @@ const federationEntrySchema = z
  * transitional base (`TransitionalConfigSchema`); each mirror stays for the
  * coercions and checks it applies, validated whenever the configuration carries
  * it, until its package owns the section. Mirrors are presence and shape only:
- * bounds and defaults stay with the owning package. The modules owning `cors`
- * and `refreshTokenFamilyStore.redis` parse their sections with the
- * declarations here until they have schemas of their own.
+ * bounds and defaults stay with the owning package.
  */
 export const fullSectionsSchema = z.object({
 	// Presence-only: the paths core's own settings moved from, kept so a root
@@ -950,52 +770,10 @@ export const fullSectionsSchema = z.object({
 	// Presence-only: the paths the login and consent pages moved from
 	// (`session.loginPage.url`, `oauth.consentPage.url`). Nothing reads them.
 	endpoints: z.unknown().optional(),
-	cors: z.object({
-		/**
-		 * The browser origins allowed to read the token, userinfo, revocation and
-		 * discovery/JWKS responses. Empty (the default) means CORS is off and no
-		 * middleware is mounted.
-		 *
-		 * Matching is exact string equality against `Origin`, so entries are
-		 * validated at boot with `../net/origin`: `https://app.example.com/` (a
-		 * trailing slash) would otherwise admit nobody, silently. Accepts a list
-		 * or one comma-separated string (`${?CORS_ALLOWED_ORIGINS}`; the hocon
-		 * bridge cannot coerce to an array), and `null` reads as no list. Any
-		 * other shape is refused by path rather than silently turning CORS off.
-		 * This list confers no CSRF trust: see `session.csrf.trustedOrigins`.
-		 */
-		allowedOrigins: z
-			.preprocess(
-				// Normalisation is shared with `assembleApp`'s mount site
-				// (`net/origin.mts`), so the two cannot disagree. A shape neither
-				// reads is refused here; the mount site only warns
-				// (`cors_allowed_origins_unreadable`).
-				(raw, ctx) => {
-					if (raw === undefined) return raw;
-					if (raw !== null && typeof raw !== "string" && !Array.isArray(raw)) {
-						ctx.addIssue({
-							code: z.ZodIssueCode.custom,
-							message: `cors.allowedOrigins must be a list of origins, or one comma-separated string of them (CORS_ALLOWED_ORIGINS); got ${typeof raw === "object" ? "an object" : `a ${typeof raw}`}`,
-						});
-						return raw;
-					}
-					return normalizeAllowedOrigins(raw);
-				},
-				z.array(z.string()),
-			)
-			.superRefine((value, ctx) => {
-				value.forEach((entry, index) => {
-					const rejection = checkSerializedOrigin(entry);
-					if (rejection !== null) {
-						ctx.addIssue({
-							code: z.ZodIssueCode.custom,
-							message: `cors.allowedOrigins[${index}] ${describeSerializedOriginRejection(rejection)}`,
-							path: [index],
-						});
-					}
-				});
-			}),
-	}),
+	// Presence-only: the path the CORS list moved from (`http.cors`, the
+	// `http` module's), kept so a root that parses with `AppConfigSchema` before
+	// boot still hands it to the relocation refusal. Nothing reads it.
+	cors: z.unknown().optional(),
 	// The WebAuthn deployer section, which a composition root's bootstrap
 	// module parses with `webauthnConfigSchema`; lost here, the bootstrap fails
 	// on a missing `rpId` instead of reading the operator's. Presence-only:
@@ -1043,19 +821,9 @@ export const fullSectionsSchema = z.object({
 				.passthrough(),
 		})
 		.optional(),
-	// Connection config for the standalone refresh-token-family client; defaults
-	// in HOCON. The store's own settings (`keyPrefix`, `casRetryLimit`) are in
-	// its section, `redis-refresh-token-family-store`.
-	refreshTokenFamilyStore: z
-		.object({
-			redis: z
-				.object({
-					url: z.string(),
-					password: z.string().optional(),
-				})
-				.optional(),
-		})
-		.optional(),
+	// Presence-only: the path the shared Redis connection's settings moved from
+	// (`redis-clients`, the standalone template's module's). Nothing reads it.
+	refreshTokenFamilyStore: z.unknown().optional(),
 	// Adapter for the rate limiter, which serves both the OAuth endpoints and
 	// `/session/login`, so `"redis"` is what makes either safe across replicas.
 	// Default `"memory"` in HOCON. `session.rateLimit.login` configures the

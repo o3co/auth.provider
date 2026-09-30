@@ -48,7 +48,11 @@ import { buildModules } from "../buildModules.mjs";
 import { resolveConfigPaths } from "../configPath.mjs";
 import { templateReference } from "../modules.mjs";
 import { installGracefulShutdown } from "../shutdown.mjs";
-import { capturedRenames, libraryLayers } from "./library-references.fixture.mjs";
+import {
+	capturedRenames,
+	libraryLayers,
+	sectionsCoreDoesNotDeclare,
+} from "./library-references.fixture.mjs";
 
 // The same stand-ins `replica-safety.test.mts` boots under: no socket opens,
 // and the shared clients module's readiness probe gets its PONG.
@@ -107,15 +111,15 @@ const ENCRYPTION_KEY = Buffer.alloc(32, 7).toString("base64");
 
 /** A single-replica deployment with every shared store on memory, grants off. */
 const BASE_ENV: Readonly<Record<string, string>> = {
-	OAUTH_JWT_ALGORITHM: "HS256",
-	OAUTH_JWT_SECRET: "federation-grants-composition.at-least-32-bytes.ok",
+	KEY_STORE_LOCAL_ALGORITHM: "HS256",
+	KEY_STORE_LOCAL_SECRET: "federation-grants-composition.at-least-32-bytes.ok",
 	OAUTH_JWT_ISSUER: "https://auth.test",
 	SESSION_STORE_SECRET: "federation-grants-composition-session.at-least-32-bytes.ok",
 	SESSION_STORE_SECURE: "false",
 	SESSION_STORE_NAME: "auth.session",
 	SESSION_STORE_STORAGE_TYPE: "memory",
 	CLIENT_USER_TYPE: "yaml",
-	REFRESH_TOKEN_FAMILY_STORE_REDIS_URL: "redis://redis.test:6379",
+	REDIS_CLIENTS_URL: "redis://redis.test:6379",
 	USER_SESSION_STORES_ADAPTER: "memory",
 	RATE_LIMITER_ADAPTER: "memory",
 	OAUTH_CODE_ADAPTER: "memory",
@@ -153,13 +157,11 @@ const GRANTS_ON: Readonly<Record<string, string>> = {
 
 function resolveConfig(env: Record<string, string>): AppConfig {
 	const { applicationConfPath, envConfPath } = resolveConfigPaths(configDir, "production");
-	const config = validate(
-		parseFile(envConfPath, { env })
-			.withFallback(parseFile(applicationConfPath, { env }))
-			.withFallback(parseFile(fileURLToPath(templateReference()), { env }))
-			.withFallback(libraryLayers(env)),
-		AppConfigSchema,
-	);
+	const layers = parseFile(envConfPath, { env })
+		.withFallback(parseFile(applicationConfPath, { env }))
+		.withFallback(parseFile(fileURLToPath(templateReference()), { env }))
+		.withFallback(libraryLayers(env));
+	const config = { ...sectionsCoreDoesNotDeclare(layers), ...validate(layers, AppConfigSchema) };
 	// The key ring has no environment form (a list of { id, key } is HOCON's);
 	// the Redis grant store refuses to construct without one under "required".
 	return {
@@ -191,7 +193,7 @@ const testKeyStoreModule = defineModule({
 			registerBuiltinKeyStores(factory);
 			return factory.create({
 				type: "local",
-				...((c as AppConfig).oauth.jwt.signingKey?.local ?? {}),
+				...((c as { "key-store"?: { local?: object } })["key-store"]?.local ?? {}),
 			});
 		},
 	},

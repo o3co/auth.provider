@@ -69,7 +69,7 @@ beforeAll(async () => {
 	const url = `redis://${redis.host}:${redis.port}/${redis.db}`;
 	redisEnv = {
 		...MULTI_ENV,
-		REFRESH_TOKEN_FAMILY_STORE_REDIS_URL: url,
+		REDIS_CLIENTS_URL: url,
 		SESSION_STORE_STORAGE_REDIS_URL: url,
 	};
 });

@@ -143,8 +143,8 @@ describe("measureSecretEntropyBytes — base64 padding must be well-formed", () 
 
 describe("assertSecretEntropy", () => {
 	const requirement = {
-		configKey: "oauth.jwt.signingKey.local.secret",
-		envVar: "OAUTH_JWT_SECRET",
+		configKey: "key-store.local.secret",
+		envVar: "KEY_STORE_LOCAL_SECRET",
 	};
 
 	it("accepts a secret at exactly the floor", () => {
@@ -189,8 +189,8 @@ describe("assertSecretEntropy", () => {
 		} catch (err) {
 			message = (err as Error).message;
 		}
-		expect(message).toContain("oauth.jwt.signingKey.local.secret");
-		expect(message).toContain("OAUTH_JWT_SECRET");
+		expect(message).toContain("key-store.local.secret");
+		expect(message).toContain("KEY_STORE_LOCAL_SECRET");
 	});
 
 	it("tells the operator how to generate a compliant secret", () => {

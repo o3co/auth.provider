@@ -16,7 +16,6 @@
 import path from "node:path";
 import {
 	type AppConfig,
-	CoreConfigSchema,
 	consoleLogger,
 	createAuditSinkFactory,
 	createFederationTokenStoreFactory,
@@ -29,7 +28,6 @@ import {
 	createKeyStoreFactory,
 	createRepositoryFactories,
 	defineModule,
-	fullSectionsSchema,
 	type LifecycleRegistrar,
 	type Logger,
 	loggableError,
@@ -57,6 +55,12 @@ import { extractFederationSection } from "@o3co/auth-provider-session";
 // excludes.
 import { Redis } from "ioredis";
 import { createAuditLogger, createLoggerAuditSink } from "./logger.mjs";
+import {
+	httpSectionSchema,
+	keyStoreSectionSchema,
+	loggingSectionSchema,
+	redisClientsSectionSchema,
+} from "./sections.mjs";
 
 /**
  * Turn a `{ type, [type]: {...} }` adapter-config slice into the flat
@@ -95,26 +99,18 @@ export function templateReference(): URL {
 }
 
 /**
- * The section schemas: core's declarations of these paths, so each rule has
- * one definition until these modules have schemas of their own.
- */
-export const LOGGING_SECTION: ReturnType<(typeof CoreConfigSchema.shape.logging)["unwrap"]> =
-	CoreConfigSchema.shape.logging.unwrap();
-const HTTP_SECTION = CoreConfigSchema.shape.http.unwrap();
-const CORS_SECTION = fullSectionsSchema.shape.cors;
-const SIGNING_KEY_SECTION = CoreConfigSchema.shape.oauth.shape.jwt.out.shape.signingKey.unwrap();
-const REDIS_CLIENTS_SECTION = fullSectionsSchema.shape.refreshTokenFamilyStore
-	.unwrap()
-	.shape.redis.unwrap();
-
-/**
  * Logging module: owns `logging {}`. It provides nothing: the logger is built
  * before boot from this section (`readLogging`) and handed in as a bootstrap
  * component, since the template logs while it chooses its modules.
+ * `LOG_LEVEL` is renamed after the path, `LOGGING_LEVEL`.
  */
 export const loggingModule = defineModule({
 	name: "logging",
-	section: { schema: LOGGING_SECTION, reference: templateReference() },
+	section: {
+		schema: loggingSectionSchema,
+		reference: templateReference(),
+		renamedVariables: { LOG_LEVEL: "logging.level" },
+	},
 });
 
 /** What the host process reads of `http {}`, beside what the `httpSettings` slot carries. */
@@ -127,42 +123,31 @@ export interface HttpHostSettings {
 
 declare module "@o3co/auth-provider-core" {
 	interface ComponentMap {
-		/** The origins `cors {}` lists, parsed and frozen: the `cors` module's, for the `http` module. */
-		readonly corsAllowedOrigins?: readonly string[];
 		/** What the host process reads of `http {}`: provided by the `http` module. */
 		readonly httpHostSettings?: HttpHostSettings;
 	}
 }
 
 /**
- * CORS module: owns `cors {}`, the origins core's CORS middleware lets read.
- * Only the `http` module reads what it provides, for core's `httpSettings`.
- */
-export const corsModule = defineModule({
-	name: "cors",
-	section: { schema: CORS_SECTION, reference: templateReference() },
-	provides: {
-		corsAllowedOrigins: ({ section }) => Object.freeze([...section.allowedOrigins]),
-	},
-	// What `httpSettings` carries as its CORS origins: substituting it would
-	// get round `httpSettings` being authoritative.
-	authoritative: ["corsAllowedOrigins"],
-});
-
-/**
- * HTTP module: owns `http {}`, and provides core's `httpSettings` (with the
- * `cors` module's origins) and the host's `httpHostSettings`, which is eager:
- * only `app.mts` reads it, and no module requires it.
+ * HTTP module: owns `http {}`, its CORS list (`http.cors`) included, and
+ * provides core's `httpSettings`, authoritative, and the host's
+ * `httpHostSettings`, both eager: only `app.mts` reads the host's, and no
+ * module requires it. The list moved from `cors`, and `CORS_ALLOWED_ORIGINS`
+ * with it.
  */
 export const httpModule = defineModule({
 	name: "http",
-	section: { schema: HTTP_SECTION, reference: templateReference() },
-	requires: ["corsAllowedOrigins"] as const,
+	section: {
+		schema: httpSectionSchema,
+		reference: templateReference(),
+		relocatedFrom: { cors: "cors" },
+		renamedVariables: { CORS_ALLOWED_ORIGINS: "cors.allowedOrigins" },
+	},
 	provides: {
-		httpSettings: ({ section, corsAllowedOrigins }) =>
+		httpSettings: ({ section }) =>
 			Object.freeze({
 				trustProxy: section.trustProxy,
-				cors: Object.freeze({ allowedOrigins: corsAllowedOrigins }),
+				cors: Object.freeze({ allowedOrigins: Object.freeze([...section.cors.allowedOrigins]) }),
 			}),
 		httpHostSettings: ({ section }): HttpHostSettings =>
 			Object.freeze({ port: section.port, readinessTimeoutMs: section.readinessTimeoutMs }),
@@ -172,16 +157,28 @@ export const httpModule = defineModule({
 });
 
 /**
- * KeyStore module: provides the JWT signing KeyStore from its own section,
- * `oauth.jwt.signingKey`, through the built-in local/jwks adapters. Other
- * deployments wire their own KeyStore through a module of the same shape.
+ * KeyStore module: owns `key-store {}` and provides the JWT signing KeyStore
+ * from it through the built-in local adapter. The section moved from
+ * `oauth.jwt.signingKey`, and the variables bound to it are renamed after
+ * their paths (`KEY_STORE_*`). Other deployments wire their own KeyStore
+ * through a module of the same shape.
  */
 export const keyStoreModule: Module = defineModule({
 	name: "key-store",
 	section: {
-		schema: SIGNING_KEY_SECTION,
+		schema: keyStoreSectionSchema,
 		reference: templateReference(),
-		at: "oauth.jwt.signingKey",
+		relocatedFrom: { "oauth.jwt.signingKey": "" },
+		renamedVariables: {
+			OAUTH_JWT_SIGNING_KEY_PROVIDER: "oauth.jwt.signingKey.provider",
+			OAUTH_JWT_ALGORITHM: "oauth.jwt.signingKey.local.algorithm",
+			OAUTH_JWT_KID: "oauth.jwt.signingKey.local.kid",
+			OAUTH_JWT_SECRET: "oauth.jwt.signingKey.local.secret",
+			OAUTH_JWT_PRIVATE_KEY_PATH: "oauth.jwt.signingKey.local.privateKeyPath",
+			OAUTH_JWT_PUBLIC_KEY_PATH: "oauth.jwt.signingKey.local.publicKeyPath",
+			OAUTH_JWT_PRIVATE_KEY: "oauth.jwt.signingKey.local.privateKey",
+			OAUTH_JWT_PUBLIC_KEY: "oauth.jwt.signingKey.local.publicKey",
+		},
 	},
 	provides: {
 		keyStore: async ({ section }) => {
@@ -395,7 +392,8 @@ export const storesModule: Module = defineModule({
  * pins that.
  *
  * The connection's URL and password are the module's own section,
- * `refreshTokenFamilyStore.redis`. Per-store Redis instances belong in a
+ * `redis-clients`, which moved from `refreshTokenFamilyStore.redis` with its
+ * variables (`REDIS_CLIENTS_*`). Per-store Redis instances belong in a
  * custom composition root. An empty URL throws rather than falling back to
  * localhost. `io.quit()` is registered once with `lifecycleRegistrar`, so
  * `handle.dispose()` closes the connection.
@@ -407,9 +405,13 @@ export const storesModule: Module = defineModule({
 export const standaloneRedisClientsModule: Module = defineModule({
 	name: "redis-clients",
 	section: {
-		schema: REDIS_CLIENTS_SECTION,
+		schema: redisClientsSectionSchema,
 		reference: templateReference(),
-		at: "refreshTokenFamilyStore.redis",
+		relocatedFrom: { "refreshTokenFamilyStore.redis": "" },
+		renamedVariables: {
+			REFRESH_TOKEN_FAMILY_STORE_REDIS_URL: "refreshTokenFamilyStore.redis.url",
+			REFRESH_TOKEN_FAMILY_STORE_REDIS_PASSWORD: "refreshTokenFamilyStore.redis.password",
+		},
 	},
 	optional: ["lifecycleRegistrar", "readinessRegistrar", "logger"] as const,
 	provides: {
@@ -647,8 +649,8 @@ function getOrCreateClients(
 
 	if (section.url.length === 0) {
 		throw new Error(
-			"standaloneRedisClientsModule: `refreshTokenFamilyStore.redis.url` is required when any " +
-				"Redis-backed adapter is selected. Set REFRESH_TOKEN_FAMILY_STORE_REDIS_URL, or the " +
+			"standaloneRedisClientsModule: `redis-clients.url` is required when any " +
+				"Redis-backed adapter is selected. Set REDIS_CLIENTS_URL, or the " +
 				"key in a configuration layer, to a non-empty URL. Multi-replica deployments require " +
 				"a shared Redis 7.2+ instance.",
 		);

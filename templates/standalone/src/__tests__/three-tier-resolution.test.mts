@@ -32,7 +32,7 @@ const configDir = fileURLToPath(new URL("../../config", import.meta.url));
 // carries a 256-bit entropy floor, so these clear it (the '.' characters keep
 // them outside the base64 alphabet, so the UTF-8 length is what counts).
 const testEnv = {
-	OAUTH_JWT_SECRET: "test-secret-three-tier.at-least-32-bytes.ok",
+	KEY_STORE_LOCAL_SECRET: "test-secret-three-tier.at-least-32-bytes.ok",
 	OAUTH_JWT_ISSUER: "https://auth.test",
 	SESSION_STORE_SECRET: "test-session-secret-three-tier.at-least-32-bytes.ok",
 };
