@@ -16,11 +16,10 @@
 
 /**
  * `HttpMfaFactorStore` held to the test kit's `MfaFactorStore` contract
- * suite, over the kit's fake Store: a fresh Store and a fresh version floor
- * for each case, every request carrying the bearer token the Store requires.
+ * suite, over the kit's fake Store: a fresh Store for each case, every
+ * request carrying the bearer token the Store requires.
  */
 
-import { createMemoryReplaySeenSet } from "@o3co/auth-provider-core";
 import { mfaFactorStoreContract, startFakeStore } from "@o3co/auth-provider-test-kit";
 import { describe, it } from "vitest";
 import { HttpMfaFactorStore } from "#/index.mjs";
@@ -38,7 +37,6 @@ describe("HttpMfaFactorStore over the fake Store", () => {
 				deleteUrl: fake.urls.deleteUrl,
 				bearerToken: TOKEN,
 				timeout: 5000,
-				replaySeenSet: createMemoryReplaySeenSet(),
 			});
 			return { store, close: () => fake.close() };
 		},

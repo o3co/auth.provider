@@ -70,7 +70,11 @@ import {
 	type SessionRequirement,
 	SUBJECT_REVOCATION_ABSENCE_POLICY,
 } from "@o3co/auth-provider-core";
-import { createFakeIdp, type FakeIdp } from "@o3co/auth-provider-core/testing";
+import {
+	createFakeIdp,
+	type FakeIdp,
+	userRepositoryHttpOf,
+} from "@o3co/auth-provider-core/testing";
 import { DEVICE_CODE_GRANT_TYPE, deviceGrantModule } from "@o3co/auth-provider-device-grant";
 import { dpopModule } from "@o3co/auth-provider-dpop";
 import { appleFederationModule } from "@o3co/auth-provider-federation-apple";
@@ -608,7 +612,7 @@ function mfaStoreModules(config: AppConfig, stores: AddedStores): Module[] {
 	if (stores.mfaFactorStoreAt !== undefined) {
 		// As a composition root hands the user repository its settings.
 		return [
-			foundationMfaFactorStoreModule({ userRepositoryHttp: config.repositories.user.http }),
+			foundationMfaFactorStoreModule({ storeTransport: userRepositoryHttpOf(config) }),
 			transactions,
 		];
 	}

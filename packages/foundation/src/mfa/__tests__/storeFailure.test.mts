@@ -33,7 +33,6 @@ import {
 	mfaStoreMalformedAnswer,
 	mfaStoreStatusError,
 	mfaStoreUnreadableRecord,
-	mfaStoreVersionRolledBack,
 	mfaStoreVersionSkipped,
 } from "#/mfa/storeFailure.mjs";
 
@@ -182,34 +181,6 @@ describe("the other failures of an answer", () => {
 		expect(detail).toContain("42");
 		expect(detail.split("\n")).toHaveLength(1);
 		expect(answerable(error)).toEqual([]);
-	});
-
-	it("a list answering a version older than one written is one log line naming the subject and the factor id", () => {
-		const error = mfaStoreVersionRolledBack(URL_WITH_SECRETS, {
-			subject: "user-1",
-			id: "u1PIlRkb_cy7UmjYUKaL_A",
-			version: 3,
-		});
-		expect(error.reason).toBe("version_rolled_back");
-		expect(error.operation).toBe("list");
-		expect(error.storeStatus).toBeUndefined();
-		const detail = loggableError(error).detail ?? "";
-		expect(detail.startsWith("subject user-1, factor u1PIlRkb_cy7UmjYUKaL_A: ")).toBe(true);
-		expect(detail).toContain("version 3");
-		expect(detail.split("\n")).toHaveLength(1);
-		expect(everyForm(error)).not.toContain("QUERY-SECRET");
-		expect(answerable(error)).toEqual([]);
-		const hostile = `a\r\nforged: line${"x".repeat(10_000)}`;
-		const bounded = mfaStoreVersionRolledBack(URL_WITH_SECRETS, {
-			subject: hostile,
-			id: hostile,
-			version: 1,
-		});
-		expect(loggableError(bounded).detail ?? "").toMatch(
-			/^subject a\?\?forged: linex+\.\.\., factor a\?\?forged: linex+\.\.\.: /,
-		);
-		expect(bounded.message).not.toMatch(/[\r\n]/);
-		expect(bounded.message.length).toBeLessThan(400);
 	});
 
 	it("keeps both identifiers in the log line however long they are: each sanitised, printable, at most 64 characters, ahead of the endpoint", () => {

@@ -21,11 +21,11 @@
  *
  * Guarantees: the section's four URLs are read first, so a composition that
  * installs the module with any of them unset refuses the boot; the Store's
- * credential, deadline and response cap are the user repository's, handed
- * in by the composition root as it hands that repository its settings, and
- * read as the repository's builder reads them, so one token goes to every
- * Store endpoint; the version floor is kept in the `replaySeenSet` slot,
- * which every replica shares.
+ * credential, deadline and response cap are the Store transport settings the
+ * composition root must hand it — the user repository's HTTP settings, read
+ * as that repository's builder reads them — so one token goes to every Store
+ * endpoint, and settings absent or not a section of keys refuse the boot
+ * rather than send no credential. It requires no slot.
  */
 
 import { defineModule, type Module } from "@o3co/auth-provider-core";
@@ -39,40 +39,37 @@ import {
 
 export interface FoundationMfaFactorStoreModuleOptions {
 	/**
-	 * The user repository's HTTP settings as the configuration holds them
-	 * (`repositories.user.http`): its `bearerToken`, `timeout` and
-	 * `maxResponseBytes` are the Store's, text read as numbers. Absent, no
-	 * credential is sent and the defaults apply.
+	 * The Store transport settings: the user repository's HTTP settings as the
+	 * configuration holds them (`repositories.user.http`), whose `bearerToken`,
+	 * `timeout` and `maxResponseBytes` are the Store's, text read as numbers.
+	 * `{}` states none: no credential is sent, and the defaults apply.
 	 */
-	readonly userRepositoryHttp?: unknown;
+	readonly storeTransport: unknown;
 }
 
-/** The settings as a section of keys, or a refusal for anything else. */
+/** The settings as a section of keys, or a refusal for anything else, absent included. */
 function settingsOf(value: unknown): Readonly<Record<string, unknown>> {
-	if (value === undefined) return {};
 	if (typeof value !== "object" || value === null || Array.isArray(value)) {
 		throw new RangeError(
-			"foundation-mfa-factor-store: the user repository's HTTP settings must be a section of keys",
+			"foundation-mfa-factor-store: storeTransport, the Store transport settings, must be a section of keys ({} for none)",
 		);
 	}
 	return value as Readonly<Record<string, unknown>>;
 }
 
-/** The module, over the user repository's HTTP settings `options` hands it. */
+/** The module, over the Store transport settings `options` hands it. */
 export function foundationMfaFactorStoreModule(
-	options: FoundationMfaFactorStoreModuleOptions = {},
+	options: FoundationMfaFactorStoreModuleOptions,
 ): Module {
 	return defineModule({
 		name: "foundation-mfa-factor-store",
 		section: foundationMfaFactorStoreSection,
-		requires: ["replaySeenSet"] as const,
 		provides: {
-			mfaFactorStore: ({ section, replaySeenSet }) => {
+			mfaFactorStore: ({ section }) => {
 				const urls = readFoundationMfaFactorStoreUrls(section);
 				return new HttpMfaFactorStore({
 					...urls,
-					...readStoreTransportConfig(settingsOf(options.userRepositoryHttp)),
-					replaySeenSet,
+					...readStoreTransportConfig(settingsOf(options?.storeTransport)),
 				});
 			},
 		},

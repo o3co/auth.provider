@@ -23,8 +23,8 @@
  *
  * Guarantees: an error is built from an allowlist — the operation, the
  * endpoint by origin and path, the Store's status as a number, and for an
- * unexpected or rolled-back version the subject and factor id through
- * `auditErrorText`, at most 64 characters each and ahead of the rest —
+ * unexpected version the subject and factor id through `auditErrorText`, at
+ * most 64 characters each and ahead of the rest —
  * never from a body, a status text or a header the Store sent, and a body is
  * released unread. No `status`, `statusCode`, `expose` or `cause`: an HTTP
  * layer reading one would answer with the Store's status, and the client
@@ -48,9 +48,7 @@ export type MfaStoreFailure =
 	/** A list holding a record the provider cannot read: the list is refused, never read as none. */
 	| "unreadable_record"
 	/** An update answered a version other than the expected one plus one. */
-	| "version_skipped"
-	/** A list answered a record at a version older than one this provider wrote: the Store lost or rolled back a write. */
-	| "version_rolled_back";
+	| "version_skipped";
 
 /** An MFA endpoint answered outside the contract. `name`, `reason`, `operation` and `storeStatus` are part of the contract. */
 export class MfaStoreError extends Error {
@@ -152,22 +150,5 @@ export function mfaStoreVersionSkipped(
 			`${endpointOf("update", url)} answered a version other than ${update.expectedVersion + 1}`,
 		"version_skipped",
 		"update",
-	);
-}
-
-/**
- * A list answered `(subject, id)` at `version`, older than one this provider
- * wrote within the version floor's horizon. The subject and the factor id
- * lead the message, as for a skipped version.
- */
-export function mfaStoreVersionRolledBack(
-	url: string,
-	record: { readonly subject: string; readonly id: string; readonly version: number },
-): MfaStoreError {
-	return new MfaStoreError(
-		`subject ${identifier(record.subject)}, factor ${identifier(record.id)}: ` +
-			`${endpointOf("list", url)} answered version ${record.version}, older than one this provider wrote: the Store lost or rolled back a write`,
-		"version_rolled_back",
-		"list",
 	);
 }
