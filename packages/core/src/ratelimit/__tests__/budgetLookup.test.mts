@@ -142,6 +142,22 @@ describe("createRateLimitBudgetLookup", () => {
 		expect(lookup("login:ip:192.0.2.1").spec).toEqual({ limit: 60, windowSeconds: 60 });
 	});
 
+	it("hands out specs no caller can change: the next lookup applies the one it checked", () => {
+		const lookup = createRateLimitBudgetLookup("test", {
+			limits: { token: { limit: 5, windowSeconds: 60 } },
+			defaultLimit: DEFAULT,
+		});
+		for (const key of ["token:ip:192.0.2.1", "login:ip:192.0.2.1"]) {
+			const { spec } = lookup(key);
+			expect(Object.isFrozen(spec), key).toBe(true);
+			expect(() => {
+				(spec as { limit: number }).limit = 0;
+			}, key).toThrow(TypeError);
+		}
+		expect(lookup("token:ip:192.0.2.1").spec).toEqual({ limit: 5, windowSeconds: 60 });
+		expect(lookup("login:ip:192.0.2.1").spec).toEqual(DEFAULT);
+	});
+
 	it("refuses, naming the caller, a limits entry or a default no limiter can apply as written", () => {
 		expect(() =>
 			createRateLimitBudgetLookup("createExampleLimiter", {
