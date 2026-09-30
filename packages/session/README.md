@@ -1,6 +1,6 @@
 # @o3co/auth-provider-session
 
-Last updated: 2026-09-30
+Last updated: 2026-10-01
 
 Browser login, logout and upstream-IdP federation routes for
 [auth.provider](../../README.md), the redirect policy every federation adapter
@@ -42,7 +42,7 @@ responsibilities:
   (`session.csrf.*`), which other packages run through the `csrfGuard` slot;
   the login rate-limit guard's wiring and its budget (`session.rateLimit.login`, which
   the session module contributes as the `login` budget); the redirect
-  allowlists (`session.redirectAllowlist`, `federations.<name>.redirectAllowlist`);
+  allowlists (`session.redirectAllowlist`, `core.federations.<name>.redirectAllowlist`);
 - what the modules provide other packages through slots whose contracts
   are core's: `csrfGuard`, `loginEntry` and `loginCompletion`, and
   `sessionCookiePolicy` and `csrfTokenSigner`
@@ -381,7 +381,7 @@ The manifest ([`src/module.mts`](src/module.mts)):
   other two session stores, are `oauth`'s.
 - `optional`: `logger`, `rateLimiter`, `auditSink`, `subjectSessionIndex`,
   `subjectRevocation` (the boundary the linking routes' admission reads).
-  `auditSink` unwired must be declared with `audit.sink.type = "none"`, and
+  `auditSink` unwired must be declared with `core.declaredAbsent = ["auditSink"]`, and
   `subjectSessionIndex` and `subjectRevocation` unwired with
   `oauth.revocation.subject = "unsupported"`, or boot refuses.
 
@@ -617,7 +617,7 @@ when the signer's `verify` answers `true`, and one whose expiry lies more than
 `session.csrf.ttlSeconds` and 60 seconds of clock skew ahead is refused, since
 no token the routes issue expires later.
 Cross-origin login UIs list their origin on `session.csrf.trustedOrigins`;
-`cors.allowedOrigins` grants no CSRF trust. A listed origin can also answer
+`http.cors.allowedOrigins` grants no CSRF trust. A listed origin can also answer
 federation-grant consents and device verification, so a client's origin is
 never listed (the federation-grants ADR's D7).
 
@@ -655,7 +655,7 @@ both for each login path (`passwordSessionAuthentication`,
 | account linking (`?link=1`) | unchanged — a link is not a login | unchanged |
 
 **What an upstream IdP asserted counts only for a federation that trusts it**
-(`federations.<name>.trustUpstreamAmr`, default `false`, the MFA ADR's D13).
+(`core.federations.<name>.trustUpstreamAmr`, default `false`, the MFA ADR's D13).
 The upstream `amr` is what a provider surfaces on the profile (`profile.amr`, a
 string array; none of the bundled adapters does). By default it is kept in
 `authentication.upstreamAmr`, for the record: no token carries it and no
@@ -722,7 +722,7 @@ Two audit events: `federation.identity.linked` and `federation.identity.link_ref
 - The link request is already authenticated — that is what `link=1` on a live session guarantees — so a matching address is not what authorises the link; the session is. A Store may still refuse: one identity per provider per account, a maximum re-authentication age, a verified address required on the new identity.
 - `sub` is opaque and stable per issuer. Store `<provider>:<sub>` verbatim; never derive an identity from `email`.
 
-`@o3co/auth-provider-foundation`'s `HttpUserRepository` implements the seam when `linkFederatedIdentityUrl` is configured (`CLIENT_USER_LINK_FEDERATED_IDENTITY_URL`): see [its README](../foundation/README.md) for the wire contract. Core's in-memory repository links in memory only — development, not persistence.
+`@o3co/auth-provider-foundation`'s `HttpUserRepository` implements the seam when `linkFederatedIdentityUrl` is configured (`REPOSITORIES_USER_HTTP_LINK_FEDERATED_IDENTITY_URL`): see [its README](../foundation/README.md) for the wire contract. Core's in-memory repository links in memory only — development, not persistence.
 
 #### When the start answers a step-up
 
@@ -1064,17 +1064,17 @@ reading it as a gate would be reading a string.
 
 ### Configuring federations
 
-`federations.<name>` names a federation; `extractFederationSection`
+`core.federations.<name>` names a federation; `extractFederationSection`
 ([`src/federations/extract-federation-section.mts`](src/federations/extract-federation-section.mts))
 normalises a section for the module that reads it. Three shapes are accepted:
 
 ```hocon
-federations {
+core.federations {
   # Shorthand: the key names the type (here "google").
   google {
     enabled = true
-    clientId = ${FEDERATIONS_GOOGLE_CLIENT_ID}
-    clientSecret = ${FEDERATIONS_GOOGLE_CLIENT_SECRET}
+    clientId = ${CORE_FEDERATIONS_GOOGLE_CLIENT_ID}
+    clientSecret = ${CORE_FEDERATIONS_GOOGLE_CLIENT_SECRET}
     callbackURL = "https://auth.example.com/session/oauth/federation/google/callback"
     clientUrl = "https://app.example.com/"
   }
@@ -1116,7 +1116,7 @@ Boot rules:
 - `trustUpstreamAmr` sits at a section's top level, beside `enabled`, in every
   shape; it is `false` when absent, and anything but a boolean (after the
   schema's coercion) fails boot. Written inside a nested section's
-  sub-section (`federations.okta.oidc.trustUpstreamAmr`) it fails boot too,
+  sub-section (`core.federations.okta.oidc.trustUpstreamAmr`) it fails boot too,
   saying it belongs beside `enabled` — it would otherwise be ignored. No
   environment variable is wired for it. What it decides is
   [above](#what-a-session-records-about-the-authentication).
@@ -1133,11 +1133,11 @@ Boot rules:
 
 `GET /session/oauth/federation/:name?redirect_to=…` and `POST /session/login`'s
 `redirect_to` name where the browser goes afterwards. Every value either may name
-has to be listed: `federations.<name>.redirectAllowlist` for a federation (read
+has to be listed: `core.federations.<name>.redirectAllowlist` for a federation (read
 by its redirect policy), `session.redirectAllowlist` for the login.
 
 ```hocon
-federations {
+core.federations {
   google {
     enabled = true
     # …credentials…

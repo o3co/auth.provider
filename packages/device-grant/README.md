@@ -1,6 +1,6 @@
 # @o3co/auth-provider-device-grant
 
-Last updated: 2026-09-30
+Last updated: 2026-10-01
 
 OAuth 2.0 Device Authorization Grant ([RFC 8628](https://www.rfc-editor.org/rfc/rfc8628)) for [`auth.provider`](https://github.com/o3co/auth.provider) — the device-code flow for input-constrained clients: TV apps, CLIs, IoT.
 
@@ -137,7 +137,7 @@ const handle = await createApp({
     // …the modules that provide what these require: clientRepository,
     // codeRepository, keyStore, the user repository, the federation-token
     // store, an access-token denylist (or its declared absence), and an audit
-    // sink or `audit.sink.type = "none"` — boot refuses without one …
+    // sink or `core.declaredAbsent = ["auditSink"]` — boot refuses without one …
   ],
   bootstrapComponents: { config, pathResolver: import.meta.resolve },
 });
@@ -245,7 +245,7 @@ A limiter that *answers* "no" is not an outage. `429 slow_down` and the `device.
 
 `approve` emits `device.approved`, `deny` emits `device.denied`, and a subject who exhausts the verification budget emits `device.rate_limited` — the signal that an account is being used to guess codes. Each carries the subject, the client, the scope and the request's `ip` / `userAgent`; none carries the user code (the value being brute-forced) or the device code (a bearer credential). An `approve` or `deny` that meets a store outage emits `device.decision_outcome_unknown` with the subject, the `action` and the request's `ip` / `userAgent`: the decision may have been recorded before the reply was lost, and a device can then be handed tokens that no `device.approved` accounts for. It names no client, since the record could not be read. The names are part of core's `BUILT_IN_AUDIT_EVENT_TYPES` inventory.
 
-`auditSink` is optional to wire, not optional to decide (#363): a composition that mounts this module with no sink must write `audit.sink.type = "none"`, or boot refuses. A device approval is a consent, and a consent that vanishes with no symptom is the shape that rule exists to refuse.
+`auditSink` is optional to wire, not optional to decide (#363): a composition that mounts this module with no sink must write `core.declaredAbsent = ["auditSink"]`, or boot refuses. A device approval is a consent, and a consent that vanishes with no symptom is the shape that rule exists to refuse.
 
 ## The user code (§6.1)
 

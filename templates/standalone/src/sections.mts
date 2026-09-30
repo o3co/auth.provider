@@ -114,7 +114,7 @@ const trustProxySchema = z
  * `http.cors.allowedOrigins`: the browser origins allowed to read the token,
  * userinfo, revocation and discovery/JWKS responses; empty is CORS off. A list,
  * or the one comma-separated string `HTTP_CORS_ALLOWED_ORIGINS` carries
- * (`normalizeAllowedOrigins`, which core's CORS middleware reads with too);
+ * (`normalizeAllowedOrigins`, core's reading of an origin list);
  * `null` reads as no origins, any other shape is refused. Each entry must be a
  * serialized origin, matched by exact string equality: one that could never
  * match is refused, naming its index.

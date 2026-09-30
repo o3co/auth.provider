@@ -1,6 +1,6 @@
 # @o3co/auth-provider-federation-oidc
 
-Last updated: 2026-09-25
+Last updated: 2026-10-01
 
 Generic OpenID Connect federation provider for `auth.provider`: any
 OIDC-compliant identity provider — Okta, Entra ID, Auth0, Keycloak, a
@@ -59,7 +59,7 @@ the composition root fills — normally straight from the `federations` config
 section with `readOidcFederationConfigs`:
 
 ```ts
-import { createApp, defineModule } from "@o3co/auth-provider-core";
+import { createApp, defineModule, federationsOf } from "@o3co/auth-provider-core";
 import {
   oidcFederationModule,
   oidcFederationNames,
@@ -71,7 +71,7 @@ const oidcConfigBridgeModule = defineModule({
   name: "oidc-federation-config",
   requires: ["config"] as const,
   provides: {
-    oidcFederationConfigs: ({ config }) => readOidcFederationConfigs(config.federations),
+    oidcFederationConfigs: ({ config }) => readOidcFederationConfigs(federationsOf(config)),
   },
 });
 
@@ -80,7 +80,7 @@ const handle = await createApp({
     sessionStoreModuleFor(config),
     sessionModule,
     oidcConfigBridgeModule,
-    ...oidcFederationNames(config.federations).map((name) => oidcFederationModule(name)),
+    ...oidcFederationNames(federationsOf(config)).map((name) => oidcFederationModule(name)),
     // ... composition-root modules supplying userRepository + the session stores
   ],
   bootstrapComponents: { config, pathResolver },
@@ -93,13 +93,13 @@ The scaffold (`@o3co/create-auth-provider`) does exactly this in
 
 ### Configuration
 
-A `federations.<name>` section whose `type` is `oidc`. The section name is the
+A `core.federations.<name>` section whose `type` is `oidc`. The section name is the
 federation name: the browser starts at `/session/oauth/federation/<name>`, the
 IdP sends it back to `callbackURL`, and the identity handed to the Store is
 `<name>:<sub>`.
 
 ```hocon
-federations {
+core.federations {
   okta {
     enabled = true
     type = "oidc"
@@ -263,15 +263,15 @@ bundled adapter gives a token response.
 
 ### Scaffold environment variables
 
-The scaffold ships one instance, `federations.oidc`, disabled by default:
+The scaffold ships one instance, `core.federations.oidc`, disabled by default:
 
 | Variable | Default | Description |
 | --- | --- | --- |
-| `FEDERATIONS_OIDC_ENABLED` | `false` | Enable the instance |
-| `FEDERATIONS_OIDC_ISSUER` | — | Issuer identifier |
-| `FEDERATIONS_OIDC_CLIENT_ID` | — | Client ID |
-| `FEDERATIONS_OIDC_CLIENT_SECRET` | — | Client secret (`client_secret_basic`) |
-| `FEDERATIONS_OIDC_CALLBACK_URL` | `http://localhost:3000/session/oauth/federation/oidc/callback` | Callback |
+| `CORE_FEDERATIONS_OIDC_ENABLED` | `false` | Enable the instance |
+| `CORE_FEDERATIONS_OIDC_ISSUER` | — | Issuer identifier |
+| `CORE_FEDERATIONS_OIDC_CLIENT_ID` | — | Client ID |
+| `CORE_FEDERATIONS_OIDC_CLIENT_SECRET` | — | Client secret (`client_secret_basic`) |
+| `CORE_FEDERATIONS_OIDC_CALLBACK_URL` | `http://localhost:3000/session/oauth/federation/oidc/callback` | Callback |
 
 More instances are more sections in `config/application.conf`.
 
@@ -287,7 +287,7 @@ linked:
   `federations.<name>` and `federationRedirectPolicies.<name>`.
 - `readOidcFederationConfigs` ([`src/module.mts`](src/module.mts)) — fills that
   slot from a `federations` config section, refusing a malformed field by
-  `federations.<name>.<field>`.
+  `core.federations.<name>.<field>`.
 - `oidcFederationNames` ([`src/module.mts`](src/module.mts)) — the names of every
   enabled section of type `oidc`, sorted.
 - `OIDC_FEDERATION_TYPE` (`"oidc"`), `DEFAULT_OIDC_SCOPES`.

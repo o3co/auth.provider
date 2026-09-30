@@ -1,6 +1,6 @@
 # @o3co/auth-provider-webauthn
 
-Last updated: 2026-09-30
+Last updated: 2026-10-01
 
 Passkey (WebAuthn) credential registration and an authentication grant for [`auth.provider`](../../README.md): a user enrolls a passkey from an authenticated session, and later exchanges a passkey assertion for tokens at `/oauth/token`. The package also contributes WebAuthn as a second factor to the MFA package — [WebAuthn as a second factor](#webauthn-as-a-second-factor).
 
@@ -131,7 +131,7 @@ webauthn {
 
 **From the environment**, `WEBAUTHN_ORIGIN` (which `reference.conf` substitutes
 into `origin`) carries the same list comma-separated — the spelling
-`CORS_ALLOWED_ORIGINS` uses, read by the same function in core
+`HTTP_CORS_ALLOWED_ORIGINS` uses, read by the same function in core
 (`normalizeAllowedOrigins`): each entry is trimmed, empty entries are dropped,
 and every entry meets the rules in the table above exactly as it would in the
 list. The split yields only pieces of what you wrote, each checked as a list
@@ -232,7 +232,7 @@ const app = await createApp({
 });
 ```
 
-- **What it needs.** It requires `sessionRequirementResolver` and `userSessionStore`: the cookie path it serves is the store-backed one, so an admitted session is always a live record the mapper reads. `subjectRevocation`, `auditSink` and `logger` are taken when they are wired; the first two unwired are declared (`oauth.revocation.subject = "unsupported"`, `audit.sink.type = "none"`), as for every module that takes them. It is a consumer of admission, so the composition declares `core.sessionRequirements.expected`.
+- **What it needs.** It requires `sessionRequirementResolver` and `userSessionStore`: the cookie path it serves is the store-backed one, so an admitted session is always a live record the mapper reads. `subjectRevocation`, `auditSink` and `logger` are taken when they are wired; the first two unwired are declared (`oauth.revocation.subject = "unsupported"`, `core.declaredAbsent = ["auditSink"]`), as for every module that takes them. It is a consumer of admission, so the composition declares `core.sessionRequirements.expected`.
 - **Where it runs.** One route, `webauthn-session-subject` (`WEBAUTHN_SESSION_SUBJECT_ROUTE_ID`), at `/oauth/webauthn/registration`, after `session-middleware` and before both registration routes, on their two `POST`s alone. Both sides of that order must be installed: without `webauthnModule`, or without the module that contributes `session-middleware` (`sessionStoreModule` / `sessionStoreModuleFor` in `@o3co/auth-provider-session`), boot refuses with `route-order-target-missing`, naming the missing route; without a `userSessionStore`, with `missing-required-component`.
 - **`subjectFor` is synchronous in this release.** It is called with the live `UserSession` and answers the subject directly; a Promise is refused as an answer of the wrong shape. Accepting a Promise later widens the type and breaks no mapper written now.
 - **What it answers.** It admits the session as `webauthn.register`, which it registers graded `credential_change` — a passkey is a new way into the account, so a registered requirement (MFA's recent-authentication rule, when installed) applies:
