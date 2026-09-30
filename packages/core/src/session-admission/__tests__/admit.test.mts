@@ -1410,6 +1410,65 @@ describe("every untrusted input is read once, into a copy — a getter or a swap
 	});
 });
 
+describe("an action a consumer registered, passed by its name", () => {
+	const ACTIONS = {
+		"acme.export": { grade: "credential_change" },
+		"acme.peek": { grade: "grants_nothing" },
+	} as const;
+
+	it("asks every requirement with the grade the action registered", async () => {
+		const seen: AdmissionAction[] = [];
+		const watching = met("probe", {
+			admit: async ({ action }) => {
+				seen.push(action);
+				return { outcome: "met" };
+			},
+		});
+		const requirements = resolverForTests([watching], { actions: ACTIONS });
+		expect(
+			await admitSession(deps({ requirements }), request({ action: "acme.export" })),
+		).toMatchObject({ outcome: "admitted" });
+		await admitSession(deps({ requirements }), request({ action: "acme.peek" }));
+		expect(seen).toEqual([
+			{ name: "acme.export", grade: "credential_change" },
+			{ name: "acme.peek", grade: "grants_nothing" },
+		]);
+	});
+
+	it("refuses a name nothing registers, naming it, before anything is read", async () => {
+		let reads = 0;
+		const store = storeOf(async () => {
+			reads++;
+			return session();
+		});
+		for (const requirements of [resolverForTests([]), resolverForTests([], { actions: ACTIONS })]) {
+			await expect(
+				admitSession(
+					deps({ userSessionStore: store, requirements }),
+					request({ action: "acme.import" }),
+				),
+			).rejects.toThrow(/"acme\.import" is not a registered admission action/);
+		}
+		expect(reads).toBe(0);
+	});
+
+	it("logs the action by its registered name", async () => {
+		const { logger, lines } = recordingLogger();
+		const down = storeOf(async () => {
+			throw new Error("down");
+		});
+		await admitSession(
+			deps({
+				userSessionStore: down,
+				logger,
+				requirements: resolverForTests([], { actions: ACTIONS }),
+			}),
+			request({ action: "acme.peek" }),
+		);
+		expect(lines.map((line) => line.fields.action)).toEqual(["acme.peek"]);
+	});
+});
+
 describe("a bundled action is the bundled entry itself", () => {
 	it("accepts the frozen entry, and refuses a literal or a copy carrying a bundled name: the grade is not the caller's to restate", async () => {
 		expect(

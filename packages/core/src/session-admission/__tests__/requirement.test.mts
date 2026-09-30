@@ -435,9 +435,9 @@ describe("resolverForTests — the resolver a test builds", () => {
 		expect(reads).toBe(1);
 	});
 
-	it("exposes get and entries alone, frozen", () => {
+	it("exposes get, entries and action alone, frozen", () => {
 		const resolver = resolverForTests([]);
-		expect(Object.keys(resolver).sort()).toEqual(["entries", "get"]);
+		expect(Object.keys(resolver).sort()).toEqual(["action", "entries", "get"]);
 		expect(Object.isFrozen(resolver)).toBe(true);
 	});
 
