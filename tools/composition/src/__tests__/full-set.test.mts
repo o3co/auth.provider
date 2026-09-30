@@ -99,6 +99,7 @@ import {
 	webTokens,
 } from "@o3co/auth-provider-standalone/src/__tests__/all-modules-composition.fixture.mts";
 import { readOwnLayers, readSwitches } from "@o3co/auth-provider-standalone/src/configPath.mts";
+import { standardSmtpMailSenderModule } from "@o3co/auth-provider-standard";
 import { type FakeStore, startFakeStore } from "@o3co/auth-provider-test-kit";
 import { WEBAUTHN_GRANT_TYPE } from "@o3co/auth-provider-webauthn";
 import type { Express } from "express";
@@ -264,6 +265,14 @@ describe("the full set's mail sender", () => {
 		expect(handle.components.mailSender).toBe(mail);
 		expect(mail.kind).toBe("recording");
 		expect(mail.sent).toEqual([]);
+	});
+
+	it("keeps the template's SMTP sender's module, whose sender the recording one stands in for, and no other mail sender", async () => {
+		const { modules } = await boot();
+		const providers = modules
+			.filter((module) => module.provides !== undefined && "mailSender" in module.provides)
+			.map((module) => module.name);
+		expect(providers).toEqual([standardSmtpMailSenderModule.name]);
 	});
 });
 
