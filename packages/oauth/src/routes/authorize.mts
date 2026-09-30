@@ -15,7 +15,6 @@
  */
 
 import {
-	type Admission,
 	type AdmissionDeps,
 	admitSession,
 	auditErrorList,
@@ -25,12 +24,9 @@ import {
 	type ConsentStore,
 	checkResolver,
 	consentCovers,
-	cookieClaim,
 	deriveAudienceFromResources,
-	describeAdmissionOutage,
 	emitAuditEvent,
 	extractResourceParam,
-	isEmailVerified,
 	isGrantTypeAllowed,
 	isWellFormedClientId,
 	isWellFormedErrorCode,
@@ -39,10 +35,8 @@ import {
 	loggableError,
 	matchesRegisteredRedirectUri,
 	type PublicClient,
-	parseScopeTokens,
 	readSpaceDelimitedParameter,
 	sanitizeErrorText,
-	type UserSession,
 	unrepresentedResources,
 } from "@o3co/auth-provider-core";
 import type { Request, RequestHandler, Response } from "express";
@@ -52,17 +46,12 @@ import {
 	PKCE_METHOD_S256,
 	pkceMethodsForClient,
 } from "../grants/pkce.mjs";
-import { auditFailure, loginRedirect, redirectError } from "./authorizeAnswers.mjs";
+import { auditFailure, redirectError } from "./authorizeAnswers.mjs";
 import {
-	evaluateReauthentication,
 	type PromptDirective,
 	parseAcrValues,
 	parseMaxAge,
-	presentedAsk,
-	refuseUnmet,
 	resolvePrompt,
-	sendToLogin,
-	stepUpTrip,
 } from "./authorizeAsk.mjs";
 import {
 	type AuthorizeContext,
@@ -71,8 +60,14 @@ import {
 	authorizeRequestUrl,
 	toStr,
 } from "./authorizeContext.mjs";
+import {
+	checkEmailVerified,
+	checkLogin,
+	checkPromptNoneHasSession,
+	decideOnAdmission,
+} from "./authorizeSession.mjs";
 import { newConsentChallenge, PENDING_CONSENT_TTL_MS } from "./consent.mjs";
-import { type ReauthAskStore, reauthAskStoreFor } from "./reauthAsk.mjs";
+import { reauthAskStoreFor } from "./reauthAsk.mjs";
 
 export { REDIRECT_TO_PARAM } from "./authorizeAsk.mjs";
 export type { AuthorizeHandlerOptions } from "./authorizeContext.mjs";
@@ -343,17 +338,6 @@ const checkConsent = async (
 	return false;
 };
 
-// Refuse before a code is minted when a verified email is required and the
-// Store has published none. Artifacts derived from a code (refresh, token
-// exchange) are not re-checked: that would end a live session on a Store
-// hiccup. `access_denied` does not suggest the client sent something malformed.
-const checkEmailVerified = async (ctx: AuthorizeContext): Promise<boolean> => {
-	if (!(ctx.opts.oauth.requireEmailVerified && !isEmailVerified(ctx.req.session.user))) return true;
-	await auditFailure(ctx, { reason: "email_not_verified" });
-	redirectError(ctx, "access_denied", "email address is not verified");
-	return false;
-};
-
 /**
  * PKCE (OAuth 2.1 §4.1.1, RFC 9700 §2.1.1) for every client: a
  * `code_challenge` is required — confidential clients included, since a
@@ -418,123 +402,6 @@ const SINGLE_VALUED_QUERY_PARAMS = [
 	// One JSON object, read by `checkClaimsParameter`.
 	"claims",
 ] as const;
-
-/**
- * Regenerates the cookie session so nothing of the refused session survives.
- * A failure is that store's outage; a session that cannot regenerate at all
- * fails the same way.
- */
-const regenerateCookieSession = (
-	req: Request,
-): Promise<{ readonly failed: false } | { readonly failed: true; readonly cause: unknown }> =>
-	new Promise((resolve) => {
-		const session = (req as { session?: { regenerate?: unknown } }).session;
-		if (typeof session?.regenerate !== "function") {
-			resolve({
-				failed: true,
-				cause: new TypeError("the request's session cannot be regenerated"),
-			});
-			return;
-		}
-		(session.regenerate as (callback: (err?: unknown) => void) => void)((err) =>
-			resolve(err == null ? { failed: false } : { failed: true, cause: err }),
-		);
-	});
-
-/**
- * A new login, for `not_live`, `revoked`, `reauthenticate` and
- * `unauthenticated`. Under `prompt=none` the answer is `login_required` (OIDC
- * Core §3.1.2.6). Otherwise the cookie session is regenerated first, so a
- * login page that forwards signed-in users cannot loop on the refused
- * session's flag; if regeneration fails, answer `temporarily_unavailable` and
- * abandon the session so express-session does not write to that store again.
- */
-const newLogin = async (ctx: AuthorizeContext, prompt: PromptDirective): Promise<void> => {
-	if (prompt.silent) {
-		redirectError(
-			ctx,
-			"login_required",
-			"prompt=none was requested but no end-user session is present",
-		);
-		return;
-	}
-	const regenerated = await regenerateCookieSession(ctx.req);
-	if (regenerated.failed) {
-		ctx.opts.logger.error(
-			{ store: "cookie_session", step: "regenerate", err: loggableError(regenerated.cause) },
-			"authorize_cookie_session_unavailable",
-		);
-		(ctx.req as { session?: unknown }).session = undefined;
-		redirectError(ctx, "temporarily_unavailable", "session store unavailable");
-		return;
-	}
-	loginRedirect(ctx.res, ctx.opts.login, authorizeRequestUrl(ctx.issuerOrigin, ctx.req).toString());
-};
-
-/**
- * Acts on the admission, or returns `null` once answered. An outage is
- * `temporarily_unavailable` on the validated redirect URI — never the login
- * page, whose forwarding of signed-in users would loop. A dead or
- * unauthenticated session gets a new login. For the outcomes that carry a
- * session, freshness (`max_age`, `prompt=login`) is decided first, so
- * `prompt=none` with a stale `max_age` is `login_required` whatever the
- * verdict; then `unmet` is refused, `step_up` is a trip, and `admitted`
- * proceeds with the `acr` the session met.
- */
-const decideOnAdmission = async (
-	ctx: AuthorizeContext,
-	admission: Admission,
-	prompt: PromptDirective,
-	maxAge: number | undefined,
-	requested: readonly string[],
-	askStore: ReauthAskStore | undefined,
-): Promise<{ readonly session: UserSession | null; readonly acr: string | undefined } | null> => {
-	switch (admission.outcome) {
-		case "unavailable":
-			redirectError(ctx, "temporarily_unavailable", describeAdmissionOutage(admission.store));
-			return null;
-		case "not_live":
-		case "revoked":
-		case "reauthenticate":
-		// Never reached: a cookie whose flag is not exactly `true` was sent to
-		// log in, or answered `login_required`, before admission. Listed so the
-		// switch stays exhaustive over core's `Admission`.
-		case "unauthenticated":
-			await newLogin(ctx, prompt);
-			return null;
-		case "admitted":
-		case "step_up":
-		case "unmet": {
-			// The ask is read only when a decision below needs it.
-			const needsAsk = prompt.login || maxAge !== undefined || admission.outcome === "step_up";
-			const ask = needsAsk ? await presentedAsk(ctx, askStore) : null;
-			if (ask === undefined) return null;
-			const reauth = evaluateReauthentication(
-				ctx,
-				prompt,
-				maxAge,
-				admission.session,
-				askStore,
-				ask,
-			);
-			if (reauth === "answered") return null;
-			if (reauth === "login") {
-				// `evaluateReauthentication` refused already when there is no store.
-				await sendToLogin(ctx, askStore as ReauthAskStore, ask);
-				return null;
-			}
-			if (admission.outcome === "unmet") {
-				refuseUnmet(ctx, admission.requirement, requested);
-				return null;
-			}
-			if (admission.outcome === "step_up") {
-				await stepUpTrip(ctx, admission, prompt, askStore, ask);
-				return null;
-			}
-			return { session: admission.session, acr: admission.acr };
-		}
-	}
-};
 
 /**
  * Refuses request objects (`request`, `request_uri`), which this server does
@@ -995,25 +862,8 @@ export const createAuthorizeHandler = (opts: AuthorizeHandlerOptions): RequestHa
 		auditSink: opts.auditSink,
 	};
 	return async (req: Request, res: Response) => {
-		// `prompt=none` must not get a login page (a hidden iframe cannot act on
-		// it); it falls through so `login_required` can be delivered at the
-		// validated `redirect_uri`. Any list naming `none` opens this gate —
-		// forbidden combinations included, read tolerantly (`parseScopeTokens`)
-		// — since such a request still comes from a silent context and its
-		// `invalid_request` belongs at the RP's `redirect_uri`. Every other
-		// unauthenticated request is answered before any lookup.
-		const promptRaw = authorizeParams(req).prompt;
-		const wantsSilentAuth =
-			typeof promptRaw === "string" && parseScopeTokens(promptRaw).includes("none");
-
-		// The cookie's flag is checked first, with no store read, so an
-		// anonymous request costs no lookup. Whether the session behind it is
-		// live is admission's to decide, once, below.
-		const claim = cookieClaim(req);
-		if (!claim.authenticated && !wantsSilentAuth) {
-			loginRedirect(res, opts.login, authorizeRequestUrl(issuerOrigin, req).toString());
-			return;
-		}
+		const claim = checkLogin(req, res, opts, issuerOrigin);
+		if (claim === null) return;
 
 		// No early `response_type` gate: once the redirect target is validated,
 		// errors redirect so the user lands back in the app (RFC 6749
@@ -1048,17 +898,7 @@ export const createAuthorizeHandler = (opts: AuthorizeHandlerOptions): RequestHa
 		if (!checkRequestObjectUnsupported(ctx)) return;
 		const prompt = resolvePrompt(ctx);
 		if (prompt === null) return;
-		if (prompt.silent && !claim.authenticated) {
-			// OIDC Core §3.1.2.6. Now that `redirect_uri` is validated this
-			// reaches the RP's own listener rather than a login page it cannot
-			// use.
-			redirectError(
-				ctx,
-				"login_required",
-				"prompt=none was requested but no end-user session is present",
-			);
-			return;
-		}
+		if (!checkPromptNoneHasSession(ctx, prompt, claim)) return;
 		// RFC 6749 §3.1: refuse a repeated single-valued parameter before any of
 		// it is interpreted, ahead of re-authentication and every repository or
 		// policy call.
