@@ -34,24 +34,23 @@
  */
 
 import type { MfaKeyedDigest, MfaTransaction } from "@o3co/auth-provider-core";
+import {
+	type MfaCeremonyCall,
+	type MfaCeremonyKit,
+	type MfaChallengeOutcome,
+	type MfaFactorUnreadable,
+	type MfaRefusalReason,
+	type MfaVerifyOutcome,
+	UNKNOWN_FACTOR,
+} from "./ceremony.mjs";
 import { generateLongCode, readLongCode } from "./codes.mjs";
-import type {
-	MfaCeremonyCall,
-	MfaCeremonyKit,
-	MfaChallengeOutcome,
-	MfaFactorUnreadable,
-	MfaRefusalReason,
-	MfaVerifyOutcome,
-} from "./coordinator.mjs";
-import { keptState, maskMailAddress, readKeptState, sendMfaMail } from "./mail.mjs";
+import { keptState, mailRefusalOf, maskMailAddress, readKeptState, sendMfaMail } from "./mail.mjs";
 
 /** The `factor_id` that names the proof, and the kind its code is digested and sealed under. */
 export const ACCOUNT_EMAIL_FACTOR_ID = "account-email";
 
 /** How long a proof's code is accepted: ten minutes (D22), capped at the transaction's expiry. */
 const PROOF_CODE_TTL_MS = 600_000;
-
-const UNKNOWN_FACTOR = Object.freeze({ outcome: "unknown_factor" as const });
 
 /** A keyed digest as the proof's kept state holds it, read once. */
 const digestIn = (
@@ -114,7 +113,7 @@ export function createAccountEmailProof(kit: MfaCeremonyKit): {
 					} catch (cause) {
 						return { kept: false, refusal: failed(cause) };
 					}
-					const refused = await kit.write(tx, {
+					const kept = await kit.write(tx, {
 						challenge: {
 							factorId: ACCOUNT_EMAIL_FACTOR_ID,
 							kind: ACCOUNT_EMAIL_FACTOR_ID,
@@ -122,13 +121,8 @@ export function createAccountEmailProof(kit: MfaCeremonyKit): {
 							expiresAtMs,
 						},
 					});
-					if (refused !== undefined) return { kept: false, refusal: refused };
-					return {
-						kept: true,
-						clear: async () => {
-							await kit.transactions.update(tx.id, tx.version + 1, { challenge: null });
-						},
-					};
+					if ("outcome" in kept) return { kept: false, refusal: kept };
+					return { kept: true, clear: () => kit.clear(kept.written, "challenge") };
 				},
 			});
 			switch (mailed.outcome) {
@@ -147,18 +141,14 @@ export function createAccountEmailProof(kit: MfaCeremonyKit): {
 				case "no_address":
 					return { outcome: "proof_unavailable" };
 				case "refused_at_limit":
-					return { outcome: "mail_refused_at_limit" };
 				case "unavailable":
-					return {
-						outcome: "mail_unavailable",
-						purpose: "account_email_proof",
-						kind: ACCOUNT_EMAIL_FACTOR_ID,
-						reason: "outage",
-						cleared: mailed.cleared,
-						cause: mailed.cause,
-					};
-				default:
+					return mailRefusalOf(mailed, "account_email_proof", ACCOUNT_EMAIL_FACTOR_ID);
+				case "malformed":
+				case "address_mismatch":
+				case "key_unavailable":
 					return failed(new TypeError(`the proof's mail answered ${mailed.outcome}`));
+				default:
+					return mailed satisfies never;
 			}
 		},
 
@@ -217,9 +207,12 @@ export function createAccountEmailProof(kit: MfaCeremonyKit): {
 				emailProof: { provedAtMs: nowMs },
 				challenge: null,
 			});
-			// A resend moved the transaction on: the code this proves was replaced.
-			if (written?.outcome === "unknown_transaction") return refused("expired", attemptsRemaining);
-			if (written !== undefined) return written;
+			if ("outcome" in written) {
+				// A resend moved the transaction on: the code this proves was replaced.
+				return written.outcome === "unknown_transaction"
+					? refused("expired", attemptsRemaining)
+					: written;
+			}
 			return { outcome: "proved", ...about(tx) };
 		},
 	};

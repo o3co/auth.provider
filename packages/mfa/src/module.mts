@@ -24,9 +24,11 @@
  * factor finishes the login through it) and `deploymentMode` (the development
  * sample key and the routes' per-process limiter are refused under `multi`,
  * so a mode read as absent must not lift that); reads `rateLimiter`,
- * `auditSink` (absence declared) and `logger`. Nothing it keeps forks per
- * replica; without a shared `rateLimiter` its routes' limiter does, refused
- * under `multi`, warned about when the mode is unset.
+ * `auditSink` (absence declared), `logger`, `mailSender` — where the
+ * account-email proof and a factor's codes go — and `userRepository`, for
+ * the enrollment witness's write alone (`markMfaEnrolled`). Nothing it keeps
+ * forks per replica; without a shared `rateLimiter` its routes' limiter does,
+ * refused under `multi`, warned about when the mode is unset.
  *
  * Reads its own section, `mfa` — the mode, its settings and the step-up
  * page, `mfa.page.url` — and the deployment mode from the `deploymentMode`
@@ -36,13 +38,19 @@
  *
  * Contributes `sessionRequirements.mfa`. Its factory refuses the boot when
  * `mfa.mode` is `off` or unset, when the package's settings are unusable (naming
- * the key), or when `mfa.page.url` is unset. It builds the key ring's sealing
- * once per boot (so `mfa_factor_sealed_with_retired_key` is logged once per key
- * id) and keeps it, with the requirement core issues `mfa.step_up` to, for the
- * same boot's routes (`mfaBootState`). It warns once when the development sample
- * key is in use, and once when the user-session store cannot record a step-up
- * (`mfa_step_up_unsupported`); the requirement then sends the session to log in
- * instead.
+ * the key), when `mfa.page.url` is unset, or when
+ * `mfa.enrollment.requireEmailProof` is `always` and no `mailSender` is wired —
+ * nobody could give the proof, so nobody could bind (the MFA ADR's D20). It
+ * builds the key ring's sealing once per boot (so
+ * `mfa_factor_sealed_with_retired_key` is logged once per key id) and keeps it,
+ * with the requirement core issues `mfa.step_up` to and the enrollment
+ * witness, for the same boot's routes (`mfaBootState`). It warns once each:
+ * when the development sample key is in use; when the user-session store
+ * cannot record a step-up (`mfa_step_up_unsupported`), the requirement then
+ * sending the session to log in instead; when `when-mail` meets no
+ * `mailSender`, so a first binding asks no proof
+ * (`mfa_first_binding_without_email_proof`); and when the directory cannot
+ * write the witness (`mfa_enrollment_witness_unwritable`).
  *
  * Contributes `mfa.rateLimit.routes` as the budget of the `mfa` prefix every
  * `/session/mfa` POST limits under, for every limiter to read; none when the

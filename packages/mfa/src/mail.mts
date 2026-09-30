@@ -31,10 +31,13 @@
  *    expiring at the mail's expiry, capped at the transaction's.
  * 5. The sender is handed the purpose, the subject, that address, the code
  *    and the expiry; what it answered is read through `mailSendOutcome` alone.
- *    Anything but `delivered` clears the pending state and is never "sent".
+ *    Anything but `delivered` clears the pending state and is never "sent";
+ *    `cleared` says whether the clear was written.
  *
  * An outcome never carries the code; `sent` carries the address, for masking
- * only. Neither is ever logged.
+ * only. Neither is ever logged: a sender's failure is logged through
+ * `mailFailureOf`, never its text. `mailRefusalOf` is the one reading of a
+ * mail every ceremony refuses alike.
  */
 
 import {
@@ -46,9 +49,9 @@ import {
 	normaliseMailAddress,
 } from "@o3co/auth-provider-core";
 
-/** What `keep` answers: the state written, with how to clear it, or why it was not. */
+/** What `keep` answers: the state written, with how to clear it — `true` once the clear is written — or why it was not. */
 export type MfaMailKept<Refusal> =
-	| { readonly kept: true; readonly clear: () => Promise<void> }
+	| { readonly kept: true; readonly clear: () => Promise<boolean> }
 	| { readonly kept: false; readonly refusal: Refusal };
 
 export interface SendMfaMailOptions<Refusal> {
@@ -174,15 +177,94 @@ export async function sendMfaMail<Refusal>(
 		cause = err;
 	}
 	if (answer === "delivered") return { outcome: "sent", to, expiresAtMs };
-	let cleared = true;
+	let cleared: boolean;
 	try {
-		await kept.clear();
+		cleared = (await kept.clear()) === true;
 	} catch {
 		cleared = false;
 	}
 	return answer === "refused_at_limit"
 		? { outcome: "refused_at_limit", cleared }
 		: { outcome: "unavailable", cause, cleared };
+}
+
+/** A mail the ceremony needed and could not send: no sender wired, or the sender's outage. */
+export interface MfaMailUnavailable {
+	readonly outcome: "mail_unavailable";
+	readonly purpose: MailPurpose;
+	readonly kind: string;
+	readonly reason: "no_sender" | "outage";
+	/** Whether the pending code was cleared, where one was kept. */
+	readonly cleared?: boolean;
+	readonly cause?: unknown;
+}
+
+/** A mail every ceremony refuses alike: `429` at the sender's limit, else `503`. */
+export type MfaMailRefusal =
+	| MfaMailUnavailable
+	| {
+			readonly outcome: "mail_refused_at_limit";
+			readonly purpose: MailPurpose;
+			readonly kind: string;
+			readonly cleared: boolean;
+	  };
+
+/** `mailed`, one of the outcomes every ceremony answers alike, as its refusal for `purpose` and `kind`. */
+export function mailRefusalOf(
+	mailed: Extract<
+		MfaMailOutcome<unknown>,
+		{ outcome: "no_sender" | "refused_at_limit" | "unavailable" }
+	>,
+	purpose: MailPurpose,
+	kind: string,
+): MfaMailRefusal {
+	switch (mailed.outcome) {
+		case "refused_at_limit":
+			return { outcome: "mail_refused_at_limit", purpose, kind, cleared: mailed.cleared };
+		case "no_sender":
+			return { outcome: "mail_unavailable", purpose, kind, reason: "no_sender" };
+		case "unavailable":
+			return {
+				outcome: "mail_unavailable",
+				purpose,
+				kind,
+				reason: "outage",
+				cleared: mailed.cleared,
+				cause: mailed.cause,
+			};
+		default:
+			return mailed satisfies never;
+	}
+}
+
+/** A name or a code a sender's failure may be logged by: a short token, never text. */
+const TOKEN = /^[A-Za-z0-9_.-]{1,64}$/;
+
+/**
+ * What of a sender's failure may be logged: its `name` and `code` when each
+ * is a short token, and its `status` (or `responseCode`, SMTP's) when it is a
+ * whole number — never its message, which a relay may write the address or
+ * the code into.
+ */
+export function mailFailureOf(cause: unknown): {
+	readonly name?: string;
+	readonly code?: string | number;
+	readonly status?: number;
+} {
+	try {
+		if (typeof cause !== "object" || cause === null) return {};
+		const { name, code, status, responseCode } = cause as Readonly<Record<string, unknown>>;
+		const whole = (value: unknown): value is number =>
+			typeof value === "number" && Number.isSafeInteger(value);
+		const statusOf = whole(status) ? status : whole(responseCode) ? responseCode : undefined;
+		return {
+			...(typeof name === "string" && TOKEN.test(name) ? { name } : {}),
+			...((typeof code === "string" && TOKEN.test(code)) || whole(code) ? { code } : {}),
+			...(statusOf === undefined ? {} : { status: statusOf }),
+		};
+	} catch {
+		return {};
+	}
 }
 
 /**

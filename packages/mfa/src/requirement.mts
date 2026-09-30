@@ -107,7 +107,7 @@ export interface MfaRequirementOptions {
 	readonly stepUpRecordable: boolean;
 	/** `mfa.manage.maxAgeSeconds`: how long a second factor verified in a session stays recent. */
 	readonly recentMfaMaxAgeSeconds: number;
-	/** Where a first binding that offers nothing is said (`mfa_enrollment_nothing_enrollable`). */
+	/** Where a first binding that offers nothing, or asks a proof nobody can give, is said. */
 	readonly logger: Logger;
 	/** Where `mfa.enrollment_state_inconsistent` is recorded; none, it is not. */
 	readonly auditSink?: AuditSink;
@@ -381,7 +381,14 @@ export function createMfaRequirement(options: MfaRequirementOptions): SessionReq
 			hasAddress: normaliseMailAddress(primary.user.email) !== undefined,
 			requiredAtNextBinding: flagged,
 		});
-		// `unprovable` asks for a proof nobody can give: the binding is refused, never skipped.
+		// `unprovable` asks for a proof nobody can give: the binding is refused,
+		// never skipped, and said — the subject and why, never the address.
+		if (gate === "unprovable") {
+			logger.warn(
+				{ sub: primary.subject, reason: firstBinding.mailWired ? "no_address" : "no_sender" },
+				"mfa_email_proof_unprovable",
+			);
+		}
 		return gate !== "bind";
 	};
 

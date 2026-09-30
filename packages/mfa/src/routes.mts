@@ -51,12 +51,12 @@ import {
 import express, { type Request, type RequestHandler, type Response, type Router } from "express";
 import type {
 	MfaCeremonyCall,
-	MfaCoordinator,
 	MfaFactorUnreadable,
-	MfaMailRefusal,
 	MfaStoreOutage,
 	MfaVerifyOutcome,
-} from "./coordinator.mjs";
+} from "./ceremony.mjs";
+import type { MfaCoordinator } from "./coordinator.mjs";
+import { type MfaMailRefusal, mailFailureOf } from "./mail.mjs";
 import { RECOVERY_CODE_FACTOR_KIND } from "./recovery/factor.mjs";
 import { MFA_REQUIREMENT_NAME } from "./requirement.mjs";
 import type { MfaWitnessMark } from "./witness.mjs";
@@ -214,9 +214,14 @@ export function createMfaRouter(options: MfaRoutesOptions): Router {
 	/** A mail the ceremony could not send: `429` at the sender's limit; else logged once and `503`. */
 	const answerMail = (route: RouteName, res: Response, refusal: MfaMailRefusal): void => {
 		if (refusal.outcome === "mail_refused_at_limit") {
+			logger.warn(
+				{ route, purpose: refusal.purpose, kind: refusal.kind, cleared: refusal.cleared },
+				"mfa_mail_refused_at_limit",
+			);
 			res.status(429).json(MAIL_LIMITED);
 			return;
 		}
+		// A sender's failure by its name, code and status: its text may quote the address or the code.
 		logger.error(
 			{
 				route,
@@ -224,7 +229,7 @@ export function createMfaRouter(options: MfaRoutesOptions): Router {
 				kind: refusal.kind,
 				reason: refusal.reason,
 				...(refusal.cleared === undefined ? {} : { cleared: refusal.cleared }),
-				...(refusal.cause === undefined ? {} : { err: loggableError(refusal.cause) }),
+				...(refusal.cause === undefined ? {} : { err: mailFailureOf(refusal.cause) }),
 			},
 			"mfa_mail_unavailable",
 		);
@@ -534,6 +539,23 @@ export function createMfaRouter(options: MfaRoutesOptions): Router {
 					res.status(400).json(INVALID_LABEL);
 					return;
 				case "first_binding_closed":
+					res.status(401).json(LOGIN_REQUIRED);
+					return;
+				case "first_binding_conflict":
+					// Another transaction bound the subject's first factor at once: a
+					// password holder may be racing the owner.
+					emitAuditEvent(auditSink, {
+						timestamp: new Date(),
+						type: "mfa.first_binding_conflict",
+						subject: outcome.subject,
+						ip: call.request.ip,
+						userAgent: call.request.userAgent,
+						details: { kind: outcome.kind },
+					});
+					if (outcome.removal !== undefined) {
+						answerOutage("enrollment", res, outcome.removal);
+						return;
+					}
 					res.status(401).json(LOGIN_REQUIRED);
 					return;
 				case "unavailable":

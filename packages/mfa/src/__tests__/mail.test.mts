@@ -42,7 +42,7 @@ const digests = sealing.digestsFor("mailed");
 /** A keep that records what it was handed and answers kept, with a clear that records itself. */
 function keeping() {
 	const kept: { addressDigest: MfaKeyedDigest; expiresAtMs: number }[] = [];
-	const clear = vi.fn(async () => {});
+	const clear = vi.fn(async () => true);
 	const keep = vi.fn(async (addressDigest: MfaKeyedDigest, expiresAtMs: number) => {
 		kept.push({ addressDigest, expiresAtMs });
 		return { kept: true as const, clear };
@@ -68,7 +68,7 @@ const send = (
 			addressDigest: MfaKeyedDigest,
 			expiresAtMs: number,
 		) => Promise<
-			| { readonly kept: true; readonly clear: () => Promise<void> }
+			| { readonly kept: true; readonly clear: () => Promise<boolean> }
 			| { readonly kept: false; readonly refusal: unknown }
 		>;
 	} = {},

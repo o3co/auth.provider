@@ -19,9 +19,10 @@
  * factor enrolled on the login's transaction, which the requirement opened
  * with `enrollment` other than `none`.
  *
- * - Nothing is bound while the transaction owes the account-email proof, or
- *   once the subject holds any record: only zero records open a first
- *   binding.
+ * - Nothing is bound while the transaction owes the account-email proof —
+ *   D25's flag is read again at each call, so one set after the transaction
+ *   opened makes it owe the proof — or once the subject holds any record:
+ *   only zero records open a first binding.
  * - Only a counting factor the login's `User` may enroll is offered. Its
  *   start is kept sealed on the transaction (`o3co:mfa:enrollment`), with the
  *   digest of the address its code went to when it mailed one
@@ -29,9 +30,12 @@
  * - A completion reserves an attempt before the proof is checked, seals the
  *   factor's data, and then, in this order: consumes the transaction, writes
  *   the factor (`binding` `email_proof` when the proof was given, else
- *   `password`), clears D25's flag where the proof was given, issues the
- *   recovery codes, marks the witness. A lost race spends the transaction,
- *   never a factor. The caller resumes the login.
+ *   `password`), reads the subject's records again — another beside its own
+ *   means another transaction bound one at once, so it removes its own and
+ *   the login starts again — clears D25's flag where the proof was given,
+ *   issues the recovery codes, marks the witness. So at most one first
+ *   binding stands, and a lost race spends the transaction, never a factor.
+ *   The caller resumes the login.
  * - A codes write or a witness mark that fails never undoes the factor:
  *   the outcome says so, and the binding stands.
  */
@@ -43,81 +47,28 @@ import {
 	type MfaEnrollmentCompletion,
 	type MfaEnrollmentStart,
 	type MfaFactor,
-	type MfaFactorRecord,
 	type MfaTransaction,
-	type PrimaryContinuation,
 } from "@o3co/auth-provider-core";
-import type {
-	MfaCeremonyCall,
-	MfaCeremonyKit,
-	MfaCeremonySubject,
-	MfaFactorUnreadable,
-	MfaMailRefusal,
-	MfaRefusalReason,
-	MfaStoreOutage,
-	UnknownTransaction,
-} from "./coordinator.mjs";
-import { keptState, readKeptState, sendMfaMail } from "./mail.mjs";
-import { generateRecoveryCodes, RECOVERY_CODE_FACTOR_KIND } from "./recovery/factor.mjs";
-import type { MfaWitnessMark } from "./witness.mjs";
+import {
+	type MfaCeremonyCall,
+	type MfaCeremonyKit,
+	type MfaCeremonySubject,
+	type MfaEnrollmentBeginOutcome,
+	type MfaEnrollmentCompleteOutcome,
+	type MfaEnrollmentRefusal,
+	type MfaFactorUnreadable,
+	outage,
+	UNKNOWN_TRANSACTION,
+} from "./ceremony.mjs";
+import { keptState, mailRefusalOf, readKeptState, sendMfaMail } from "./mail.mjs";
+import { issueRecoveryCodes } from "./recovery/issue.mjs";
 
-/** The transaction opened no enrollment, or it is not a login's first binding. */
 const NOT_OPEN = Object.freeze({ outcome: "enrollment_not_open" as const });
-/** The account-email proof is owed first. */
 const PROOF_REQUIRED = Object.freeze({ outcome: "email_proof_required" as const });
-/** No counting factor of that kind this user may enroll. */
 const UNKNOWN_KIND = Object.freeze({ outcome: "unknown_kind" as const });
-/** The subject holds a record now: the login starts again. */
 const CLOSED = Object.freeze({ outcome: "first_binding_closed" as const });
 const NO_PENDING = Object.freeze({ outcome: "no_pending_enrollment" as const });
 const INVALID_LABEL = Object.freeze({ outcome: "invalid_label" as const });
-const UNKNOWN_TRANSACTION = Object.freeze({ outcome: "unknown_transaction" as const });
-
-type Refusal =
-	| typeof NOT_OPEN
-	| typeof PROOF_REQUIRED
-	| typeof UNKNOWN_KIND
-	| typeof CLOSED
-	| UnknownTransaction
-	| MfaStoreOutage;
-
-export type MfaEnrollmentBeginOutcome =
-	| Refusal
-	| MfaMailRefusal
-	/** The factor could not start its enrollment: an outage, never a refusal. */
-	| { readonly outcome: "enrollment_failed"; readonly kind: string; readonly cause: unknown }
-	| ({ readonly outcome: "begun"; readonly response: object } & MfaCeremonySubject);
-
-/** The recovery codes a binding issued: none when their factor is off; not issued when their write failed. */
-export type MfaIssuedRecoveryCodes =
-	| { readonly issued: true; readonly codes: readonly string[] }
-	| { readonly issued: false; readonly cause: unknown }
-	| undefined;
-
-export type MfaEnrollmentCompleteOutcome =
-	| Refusal
-	| MfaFactorUnreadable
-	| typeof NO_PENDING
-	| typeof INVALID_LABEL
-	| { readonly outcome: "spent" }
-	| ({
-			readonly outcome: "refused";
-			readonly reason: MfaRefusalReason | "duplicate";
-			readonly attemptsRemaining: number;
-	  } & MfaCeremonySubject)
-	| ({
-			readonly outcome: "enrolled";
-			/** What the login persisted, as the store answered it at consumption. */
-			readonly continuation: PrimaryContinuation | undefined;
-			/** What the binding adds to the login: the factor's `amr`, `mfa` when it adds it, and when. */
-			readonly adds: { readonly amr: readonly string[]; readonly mfaAt: Date };
-			readonly factor: { readonly id: string; readonly kind: string; readonly label?: string };
-			readonly binding: NonNullable<MfaFactorRecord["binding"]>;
-			readonly recoveryCodes: MfaIssuedRecoveryCodes;
-			readonly witness: MfaWitnessMark;
-			/** Why D25's flag could not be cleared after the proof was given; `undefined` when it was, or none was due. */
-			readonly flagUncleared: unknown;
-	  } & MfaCeremonySubject);
 
 /** A login's first binding over the coordinator's `kit` (see this file's header). */
 export function createMfaEnrollment(kit: MfaCeremonyKit): {
@@ -130,12 +81,15 @@ export function createMfaEnrollment(kit: MfaCeremonyKit): {
 
 	/**
 	 * The transaction `call` names when it is a login's first binding, with its
-	 * `User`, the account-email proof given where owed; else the refusal.
+	 * `User`, the account-email proof given where owed — D25's flag read again,
+	 * and written onto a transaction that did not owe the proof; else the
+	 * refusal.
 	 */
 	const opened = async (
 		call: MfaCeremonyCall,
 	): Promise<
-		{ readonly tx: MfaTransaction; readonly user: Readonly<Record<string, unknown>> } | Refusal
+		| { readonly tx: MfaTransaction; readonly user: Readonly<Record<string, unknown>> }
+		| MfaEnrollmentRefusal
 	> => {
 		const tx = await kit.bound(call);
 		if (tx === null) return UNKNOWN_TRANSACTION;
@@ -143,6 +97,14 @@ export function createMfaEnrollment(kit: MfaCeremonyKit): {
 		const user = tx.continuation?.primary.user;
 		if (tx.enrollment === "none" || user === undefined) return NOT_OPEN;
 		if (tx.emailProof === "required") return PROOF_REQUIRED;
+		if (tx.emailProof === "not_required") {
+			const flagged = await kit.emailProofRequired(tx.subject);
+			if (flagged !== false) {
+				if (flagged !== true) return flagged;
+				const owed = await kit.write(tx, { emailProof: "required" });
+				return "outcome" in owed ? owed : PROOF_REQUIRED;
+			}
+		}
 		return { tx, user };
 	};
 
@@ -162,38 +124,33 @@ export function createMfaEnrollment(kit: MfaCeremonyKit): {
 	};
 
 	/** Whether `subject` holds no record: the only state a first binding may start or finish in. */
-	const holdsNone = async (subject: string): Promise<boolean | MfaStoreOutage> => {
+	const holdsNone = async (subject: string) => {
 		const records = await kit.recordsOf(subject);
 		return "outcome" in records ? records : records.length === 0;
 	};
 
-	/** The recovery codes issued beside the first counting factor, as `binding` authorized it. */
-	const issueRecoveryCodes = async (
-		subject: string,
-		binding: NonNullable<MfaFactorRecord["binding"]>,
-		nowMs: number,
-	): Promise<MfaIssuedRecoveryCodes> => {
-		const factor = factors.get(RECOVERY_CODE_FACTOR_KIND);
-		if (factor === undefined) return undefined;
-		const set = generateRecoveryCodes(factor, sealing.digestsFor(RECOVERY_CODE_FACTOR_KIND));
-		if (set === undefined) return undefined;
+	/**
+	 * After this binding's factor `id` was written: its own record removed when
+	 * another stands beside it — another transaction bound one at once — or
+	 * when the records cannot be read to tell; `undefined` when it stands
+	 * alone.
+	 */
+	const conflict = async (
+		about: MfaCeremonySubject,
+		id: string,
+	): Promise<MfaEnrollmentCompleteOutcome | undefined> => {
+		const records = await kit.recordsOf(about.subject);
+		const alone = !("outcome" in records) && records.every((record) => record.id === id);
+		if (alone) return undefined;
+		let removal: ReturnType<typeof outage> | undefined;
 		try {
-			const id = randomBytes(16).toString("base64url");
-			await factorStore.create({
-				id,
-				subject,
-				kind: RECOVERY_CODE_FACTOR_KIND,
-				label: undefined,
-				binding,
-				createdAt: new Date(nowMs),
-				lastUsedAt: undefined,
-				version: 0,
-				data: sealing.sealFactorData({ subject, id, kind: RECOVERY_CODE_FACTOR_KIND }, set.data),
-			});
+			await factorStore.remove(about.subject, id);
 		} catch (cause) {
-			return { issued: false, cause };
+			removal = outage("mfa_factor", "remove", cause);
 		}
-		return { issued: true, codes: set.codes };
+		// A binding it could not check is an outage; one it saw beside another, a conflict.
+		if ("outcome" in records) return records;
+		return { outcome: "first_binding_conflict", removal, ...about };
 	};
 
 	return {
@@ -230,15 +187,12 @@ export function createMfaEnrollment(kit: MfaCeremonyKit): {
 			} catch (cause) {
 				return failed(cause);
 			}
-			const about: MfaCeremonySubject = {
-				subject: tx.subject,
-				kind: factor.kind,
-				purpose: tx.purpose,
-			};
 			const begun: MfaEnrollmentBeginOutcome = {
 				outcome: "begun",
 				response: started.response as object,
-				...about,
+				subject: tx.subject,
+				kind: factor.kind,
+				purpose: tx.purpose,
 			};
 			/** The pending enrollment, sealed with the address's digest when a code went out. */
 			const pending = (
@@ -270,14 +224,9 @@ export function createMfaEnrollment(kit: MfaCeremonyKit): {
 						} catch (cause) {
 							return { kept: false, refusal: failed(cause) };
 						}
-						const refused = await kit.write(tx, { pendingEnrollment });
-						if (refused !== undefined) return { kept: false, refusal: refused };
-						return {
-							kept: true,
-							clear: async () => {
-								await kit.transactions.update(tx.id, tx.version + 1, { pendingEnrollment: null });
-							},
-						};
+						const kept = await kit.write(tx, { pendingEnrollment });
+						if ("outcome" in kept) return { kept: false, refusal: kept };
+						return { kept: true, clear: () => kit.clear(kept.written, "pendingEnrollment") };
 					},
 				});
 				switch (mailed.outcome) {
@@ -286,29 +235,20 @@ export function createMfaEnrollment(kit: MfaCeremonyKit): {
 					case "not_kept":
 						return mailed.refusal;
 					case "refused_at_limit":
-						return { outcome: "mail_refused_at_limit" };
 					case "no_sender":
-						return {
-							outcome: "mail_unavailable",
-							purpose: "email_factor_enrollment",
-							kind: factor.kind,
-							reason: "no_sender",
-						};
 					case "unavailable":
-						return {
-							outcome: "mail_unavailable",
-							purpose: "email_factor_enrollment",
-							kind: factor.kind,
-							reason: "outage",
-							cleared: mailed.cleared,
-							cause: mailed.cause,
-						};
-					default:
+						return mailRefusalOf(mailed, "email_factor_enrollment", factor.kind);
+					case "malformed":
+					case "no_address":
+					case "address_mismatch":
+					case "key_unavailable":
 						return failed(
 							new TypeError(
 								"the factor's enrollment asked for a mail it cannot send to this account",
 							),
 						);
+					default:
+						return mailed satisfies never;
 				}
 			}
 
@@ -318,8 +258,8 @@ export function createMfaEnrollment(kit: MfaCeremonyKit): {
 			} catch (cause) {
 				return failed(cause);
 			}
-			const refused = await kit.write(tx, { pendingEnrollment });
-			return refused ?? begun;
+			const written = await kit.write(tx, { pendingEnrollment });
+			return "outcome" in written ? written : begun;
 		},
 
 		async complete(call) {
@@ -431,19 +371,24 @@ export function createMfaEnrollment(kit: MfaCeremonyKit): {
 					data,
 				});
 			} catch (cause) {
-				return { outcome: "unavailable", store: "mfa_factor", step: "create", cause };
+				return outage("mfa_factor", "create", cause);
 			}
+			// Another transaction of the subject's may have bound one at once:
+			// nothing follows the factor until it is known to stand alone.
+			const conflicted = await conflict(about, id);
+			if (conflicted !== undefined) return conflicted;
 			// D25: the flag an operator reset set is cleared only once the proof was
 			// given and the first counting factor written.
-			let flagUncleared: unknown;
-			if (binding === "email_proof") {
-				try {
-					await kit.transactions.consumeEmailProofRequirement(tx.subject);
-				} catch (cause) {
-					flagUncleared = cause;
-				}
-			}
-			const recoveryCodes = await issueRecoveryCodes(tx.subject, binding, nowMs);
+			const flagCleared =
+				binding === "email_proof" ? await kit.consumeEmailProofRequirement(tx.subject) : undefined;
+			const recoveryCodes = await issueRecoveryCodes({
+				factors,
+				factorStore,
+				sealing,
+				subject: tx.subject,
+				binding,
+				nowMs,
+			});
 			const witness = await kit.witness.mark(tx.subject);
 
 			return {
@@ -457,7 +402,7 @@ export function createMfaEnrollment(kit: MfaCeremonyKit): {
 				binding,
 				recoveryCodes,
 				witness,
-				flagUncleared,
+				flagUncleared: flagCleared?.failed,
 				...about,
 			};
 		},
