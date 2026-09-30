@@ -20,7 +20,8 @@
  * core's `reference.conf`, resolved and unparsed, as `createApp` is handed
  * it — and the variables that reach them: `MFA_ENCRYPTION_KEY` (the first key
  * of the ring, which has no default), `MFA_TOTP_FACTOR_ENABLED` and
- * `MFA_TOTP_FACTOR_ISSUER`; the transaction's life, its attempts and the
+ * `MFA_TOTP_FACTOR_ISSUER`; `mfa.mode`, `off` unless `MFA_MODE` says
+ * otherwise; the transaction's life, its attempts and the
  * subject lock, which have no variable (D19); and the two variables still
  * bound at the TOTP factor's old path, which boot refuses.
  */
@@ -179,9 +180,17 @@ describe("the package's reference.conf", () => {
 		}
 	});
 
-	it("keeps core's mfa.mode beside the package's keys", () => {
+	it("defaults mfa.mode to off and reads MFA_MODE: this file binds it, and core's reference.conf does not", () => {
 		expect(resolve().mfa.mode).toBe("off");
 		expect(resolve({ MFA_MODE: "optional" }).mfa.mode).toBe("optional");
+		const alone = (env: Record<string, string>) =>
+			(parseFile(MFA_REFERENCE, { env }).toObject() as { mfa?: { mode?: unknown } }).mfa?.mode;
+		expect(alone({})).toBe("off");
+		expect(alone({ MFA_MODE: "required" })).toBe("required");
+		const core = parseFile(CORE_REFERENCE, {
+			env: { ...REQUIRED_ENV, MFA_MODE: "required" },
+		}).toObject();
+		expect(core).not.toHaveProperty("mfa");
 	});
 
 	it("takes the development sample key through MFA_ENCRYPTION_KEY in development, and refuses it in production", () => {
