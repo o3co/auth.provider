@@ -451,6 +451,18 @@ describe("the boot refusals", () => {
 		expect(message).toContain("MFA_PAGE_URL");
 	});
 
+	it("refuses a page that is not a section holding a string url before any factory runs, naming the key", async () => {
+		for (const [page, key] of [
+			[{ url: 5 }, "mfa.page.url"],
+			[{}, "mfa.page.url"],
+			["/mfa", "mfa.page"],
+		] as const) {
+			const err = await refusal({ config: configFor("required", { page }) });
+			expect(err.reason, key).toBe("config-validation-failed");
+			expect(err.message, key).toContain(key);
+		}
+	});
+
 	it("refuses an empty mfa.page.url as unset, naming it and MFA_PAGE_URL — before core would refuse the page for its own reason", async () => {
 		const err = await refusal({ config: configFor("required", { page: { url: "" } }) });
 		expect(err.reason).toBe("contribute-factory-failed");
