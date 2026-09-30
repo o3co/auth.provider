@@ -27,8 +27,8 @@ import { describe, expect, it } from "vitest";
 import { BootError } from "#/boot/types.mjs";
 import { createApp, defineModule, type Module } from "#/index.mjs";
 import { readAcrTable } from "#/session-admission/acr.mjs";
-import { admitSession, cookieClaim } from "#/session-admission/admit.mjs";
 import type { AdmissionAction } from "#/session-admission/actions.mjs";
+import { admitSession, cookieClaim } from "#/session-admission/admit.mjs";
 import type {
 	SessionRequirement,
 	SessionRequirementResolver,
@@ -59,8 +59,11 @@ const refusal = async (promise: Promise<unknown>): Promise<BootError> => {
 };
 
 /** A module registering `actions` and nothing else. */
-const registering = (name: string, actions: unknown, channel: "contributes" | "overrides" = "contributes") =>
-	defineModule({ name, [channel]: { admissionActions: actions } } as never);
+const registering = (
+	name: string,
+	actions: unknown,
+	channel: "contributes" | "overrides" = "contributes",
+) => defineModule({ name, [channel]: { admissionActions: actions } } as never);
 
 /** A consumer of admission: it requires the resolver and keeps what it was handed. */
 const consumer = (seen: { resolver?: SessionRequirementResolver }, actions?: unknown) =>
@@ -200,25 +203,53 @@ describe("the admissionActions kind — refused", () => {
 	});
 
 	it.each([
-		["a name outside the grammar", { "Acme.Export": { grade: "use" } }, "Acme.Export", /two lower-case identifiers/],
-		["a name of one identifier", { export: { grade: "use" } }, "export", /two lower-case identifiers/],
-		["a grade outside the grades", { "acme.export": { grade: "read" } }, "acme.export", /grade must be one of/],
+		[
+			"a name outside the grammar",
+			{ "Acme.Export": { grade: "use" } },
+			"Acme.Export",
+			/two lower-case identifiers/,
+		],
+		[
+			"a name of one identifier",
+			{ export: { grade: "use" } },
+			"export",
+			/two lower-case identifiers/,
+		],
+		[
+			"a grade outside the grades",
+			{ "acme.export": { grade: "read" } },
+			"acme.export",
+			/grade must be one of/,
+		],
 		["no grade", { "acme.export": {} }, "acme.export", /grade must be one of/],
-		["the remediation grade", { "acme.export": { grade: "remediation" } }, "acme.export", /remediation is not an action's grade/],
-		["a declaration that is not an object", { "acme.export": "use" }, "acme.export", /a declaration is an object/],
+		[
+			"the remediation grade",
+			{ "acme.export": { grade: "remediation" } },
+			"acme.export",
+			/remediation is not an action's grade/,
+		],
+		[
+			"a declaration that is not an object",
+			{ "acme.export": "use" },
+			"acme.export",
+			/a declaration is an object/,
+		],
 		["a null declaration", { "acme.export": null }, "acme.export", /a declaration is an object/],
-	])("%s is refused at stage 1, naming the module and the action", async (_what, actions, name, problem) => {
-		const err = await refusal(boot([registering("test:acme", actions)]));
-		expect(err.reason).toBe("contribution-malformed");
-		expect(err.stage).toBe("validateManifests");
-		expect(err.details).toMatchObject({
-			module: "test:acme",
-			kind: "admissionActions",
-			name,
-			channel: "contributes",
-		});
-		expect((err.details as { problem: string }).problem).toMatch(problem);
-	});
+	])(
+		"%s is refused at stage 1, naming the module and the action",
+		async (_what, actions, name, problem) => {
+			const err = await refusal(boot([registering("test:acme", actions)]));
+			expect(err.reason).toBe("contribution-malformed");
+			expect(err.stage).toBe("validateManifests");
+			expect(err.details).toMatchObject({
+				module: "test:acme",
+				kind: "admissionActions",
+				name,
+				channel: "contributes",
+			});
+			expect((err.details as { problem: string }).problem).toMatch(problem);
+		},
+	);
 
 	it.each([
 		["an array", [{ grade: "use" }]],

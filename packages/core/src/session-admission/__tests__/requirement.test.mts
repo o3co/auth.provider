@@ -31,7 +31,6 @@ import type {
 	SessionView,
 } from "#/session-admission/requirement.mjs";
 import {
-	ADMISSION_ACTIONS,
 	ADMISSION_INFRASTRUCTURE_STORES,
 	checkStepUpPage,
 	describeAdmissionOutage,
@@ -282,7 +281,7 @@ describe("resolverForTests — the resolver a test builds", () => {
 		]);
 	});
 
-	it("holds remediations to the requirement's own routes — <name>.<route>, the route a lower-case identifier — each once, and never a consumer's action, which may share the namespace", () => {
+	it("holds remediations to the requirement's own routes — <name>.<route>, the route a lower-case identifier — each once, and never a registered action's name, which may share the namespace", () => {
 		expect(
 			resolverForTests([requirement("x", { remediations: ["x.step_up", "x.recover"] })]).get("x")
 				?.remediations,
@@ -303,20 +302,18 @@ describe("resolverForTests — the resolver a test builds", () => {
 				JSON.stringify(remediations),
 			).toThrow(RangeError);
 		}
-		// A consumer's action may share a requirement's namespace (`mfa.manage`,
-		// or a requirement named `oauth`): any name in `ADMISSION_ACTIONS` is
-		// refused, since a remediation under it would skip every requirement
-		// for that action.
-		expect(Object.hasOwn(ADMISSION_ACTIONS, "mfa.step_up")).toBe(false);
+		// A consumer's action may share a requirement's namespace: a registered
+		// action's name is refused, since a remediation under it would skip every
+		// requirement for that action.
 		expect(() =>
-			resolverForTests([requirement("oauth", { remediations: ["oauth.authorize"] })]),
+			resolverForTests([requirement("oauth", { remediations: ["oauth.authorize"] })], {
+				actions: { "oauth.authorize": { grade: "use" } },
+			}),
 		).toThrow(/oauth\.authorize/);
-		expect(() => resolverForTests([requirement("mfa", { remediations: ["mfa.manage"] })])).toThrow(
-			/mfa\.manage/,
-		);
 		expect(
-			resolverForTests([requirement("mfa", { remediations: ["mfa.step_up"] })]).get("mfa")
-				?.remediations,
+			resolverForTests([requirement("mfa", { remediations: ["mfa.step_up"] })], {
+				actions: { "mfa.manage": { grade: "credential_change" } },
+			}).get("mfa")?.remediations,
 		).toEqual(["mfa.step_up"]);
 	});
 
@@ -350,8 +347,10 @@ describe("resolverForTests — the resolver a test builds", () => {
 				return names === 1 ? "oauth" : "x";
 			},
 		};
-		// Read once as "oauth": its remediation is a consumer's action, refused.
-		expect(() => resolverForTests([renaming as never])).toThrow(/oauth\.authorize/);
+		// Read once as "oauth": its remediation is its own route, so it registers.
+		expect(resolverForTests([renaming as never]).get("oauth")?.remediations).toEqual([
+			"oauth.authorize",
+		]);
 		let reads = 0;
 		const swapping = {
 			...requirement("x"),

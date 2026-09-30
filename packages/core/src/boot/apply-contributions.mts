@@ -35,8 +35,8 @@ import type {
 } from "../modules/manifest/synthetic-keys.mjs";
 import type { RateLimitSpec } from "../ratelimit/types.mjs";
 import { isUsableRateLimitSpec, shownConfigValue } from "../ratelimit/usableSpec.mjs";
-import { sessionRequirementResolverOver } from "../session-admission/admit.mjs";
 import type { AdmissionAction } from "../session-admission/actions.mjs";
+import { sessionRequirementResolverOver } from "../session-admission/admit.mjs";
 import {
 	checkRemediationsAgainstActions,
 	type RegisteredRequirement,

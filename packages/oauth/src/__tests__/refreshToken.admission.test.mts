@@ -27,7 +27,6 @@
 
 import { createSecretKey } from "node:crypto";
 import {
-	ADMISSION_ACTIONS,
 	type AppConfig,
 	createInMemorySubjectRevocation,
 	createSymmetricKeyStore,
@@ -252,7 +251,7 @@ describe("the refresh grant on admission — a requirement's verdicts", () => {
 		const [input] = requirement.inputs;
 		expect(input?.carrier).toBe("token");
 		// The bundled action, the frozen entry itself.
-		expect(input?.action).toEqual(ADMISSION_ACTIONS["oauth.refresh"]);
+		expect(input?.action).toEqual({ name: "oauth.refresh", grade: "use" });
 		expect(input?.action.grade).toBe("use");
 		expect(input?.subject).toBe(SUBJECT);
 		expect(input?.session).toBeNull();

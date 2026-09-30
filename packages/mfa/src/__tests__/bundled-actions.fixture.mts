@@ -16,12 +16,10 @@
 
 /**
  * The actions the bundled consumers admit, each with the grade its package
- * registers and the carrier its consumer reads the session by, and the MFA
- * requirement's verdicts for them before actions were registered, when the
- * requirement admitted `device.lookup` and `device.deny` by name. The MFA
- * package's equivalence test holds the requirement to those verdicts over
- * these grades; `tools/composition` holds the full set's registrations to
- * these grades.
+ * registers and the carrier its consumer reads the session by, and the verdicts
+ * the MFA requirement answers for each. The MFA package's equivalence test
+ * holds the requirement to these verdicts over these grades; `tools/composition`
+ * holds the full set's registrations to these grades.
  */
 
 import type { ActionGrade, SessionClaim } from "@o3co/auth-provider-core";
@@ -86,10 +84,9 @@ export const SETUPS = {
 /**
  * The verdicts, one letter per situation — `m` met, `r` reauthenticate, `s`
  * step_up (sent to log in again when still unmet), `u` unmet — by mode and
- * setup, then by action. Taken from the requirement at `develop` dc1b9d606,
- * each action passed as its `ADMISSION_ACTIONS` entry.
+ * setup, then by action.
  */
-export const DEVELOP_VERDICTS: Readonly<Record<string, Readonly<Record<string, string>>>> = {
+export const VERDICTS: Readonly<Record<string, Readonly<Record<string, string>>>> = {
 	"optional · totp, recordable": {
 		"oauth.authorize": "mmmmmm",
 		"oauth.consent": "mmmmmm",

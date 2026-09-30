@@ -62,7 +62,7 @@ import type {
 	UserSessionStore,
 } from "../user-sessions/types.mjs";
 import { type AcrSelection, type AcrTable, selectAcr, stepUpReach } from "./acr.mjs";
-import { ADMISSION_GRADES, type AdmissionAction, type AdmissionGrade } from "./actions.mjs";
+import type { AdmissionAction } from "./actions.mjs";
 import {
 	additionsFromDto,
 	checkPrimaryAdditions,
@@ -72,7 +72,6 @@ import {
 	primaryFromDto,
 } from "./primary.mjs";
 import {
-	ADMISSION_ACTIONS,
 	type Admission,
 	type AdmissionAsks,
 	type AdmissionDeps,
@@ -295,19 +294,9 @@ export function tokenClaim(claims: TokenCarrier): SessionClaim {
 }
 
 // ---------------------------------------------------------------------------
-// The actions: `ADMISSION_ACTIONS` lives in `requirement.mts`, beside the
-// remediation rule that reads it.
+// The actions: each a consumer's registration (`actions.mts`) or a
+// remediation core issued to a requirement (`requirement.mts`).
 // ---------------------------------------------------------------------------
-
-const GRADES: ReadonlySet<string> = new Set<string>(ADMISSION_GRADES);
-
-/** The `action` field of a log line: a registered or bundled action's name, or an issued remediation's, else `custom`. */
-const actionLabel = (action: AdmissionAction, resolver: SessionRequirementResolver): string =>
-	resolver.action(action.name) === action ||
-	Object.hasOwn(ADMISSION_ACTIONS, action.name) ||
-	isIssuedAction(action)
-		? action.name
-		: "custom";
 
 /** The `remediation` names already said to be undeclared, once per process each, up to the cap; past it, once for all. */
 const undeclaredRemediations = new Set<string>();
@@ -347,10 +336,10 @@ interface CheckedRequest {
 }
 
 /**
- * The action a request names, read once: a registered action by its name —
- * the object registration made, so the grade is never the caller's to
- * restate — an issued remediation by its identity, or a bundled entry itself.
- * Anything else is copied.
+ * The action a request names: a registered action by its name — the object
+ * registration made, so the grade is never the caller's to restate — or a
+ * remediation core issued to a requirement, by its identity. Both are core's
+ * vocabulary, so a log line names either.
  */
 function checkedAction(asked: unknown, requirements: SessionRequirementResolver): AdmissionAction {
 	if (typeof asked === "string") {
@@ -362,27 +351,11 @@ function checkedAction(asked: unknown, requirements: SessionRequirementResolver)
 		}
 		return registered;
 	}
-	if (!isObject(asked))
-		throw new RangeError("admitSession: the action must be a name with a grade");
-	const name = nonEmptyString(asked.name);
-	const grade = asked.grade;
-	if (name === undefined || typeof grade !== "string" || !GRADES.has(grade)) {
-		throw new RangeError("admitSession: the action must be a name with a grade");
-	}
-	// A bundled name is accepted as the bundled entry itself alone: the grade
-	// is not the caller's to restate.
-	if (Object.hasOwn(ADMISSION_ACTIONS, name)) {
-		if ((asked as unknown) !== (ADMISSION_ACTIONS as Record<string, AdmissionAction>)[name]) {
-			throw new RangeError(
-				`admitSession: "${name}" is a bundled action: pass ADMISSION_ACTIONS["${name}"] itself, not a copy or a literal`,
-			);
-		}
-	}
-	// The issued object keeps its identity — that is what step 5 checks — and
-	// so does the bundled entry; anything else is copied.
-	return isIssuedAction(asked) || Object.hasOwn(ADMISSION_ACTIONS, name)
-		? (asked as unknown as AdmissionAction)
-		: Object.freeze({ name, grade: grade as AdmissionGrade });
+	// The issued object keeps its identity: that is what step 5 checks.
+	if (isIssuedAction(asked)) return asked;
+	throw new RangeError(
+		"admitSession: the action is a registered action's name, or a remediation core issued to a requirement (issuedRemediationActions)",
+	);
 }
 
 /** A caller's fault is a `RangeError` before anything is read. Answers core's copy of what it read, each input read once. */
@@ -524,7 +497,7 @@ export async function admitSession(
 		now,
 		logger,
 	} = checked;
-	const label = actionLabel(checked.action, resolver);
+	const label = checked.action.name;
 	const unavailable = (store: string, err: unknown): Admission => {
 		logger?.error(
 			{ store, action: label, err: loggableError(err) },
@@ -721,11 +694,10 @@ function stepUpVerdict(
 }
 
 /**
- * The action as the requirements see it: `use` and `credential_change`
- * as given; `remediation` only for the object core issued to one of these
- * requirements at registration — a literal, a copy, or `ADMISSION_ACTIONS`'
- * own entry carries no brand — else `credential_change`, the strictest
- * grade, said once per process per name.
+ * The action as the requirements see it: a registered action as registered;
+ * `remediation` only for an object core issued to one of these requirements —
+ * else, one issued to a requirement another composition registered, as
+ * `credential_change`, the strictest grade, said once per process per name.
  */
 function effectiveAction(
 	requirements: readonly (readonly [string, RegisteredRequirement])[],
@@ -740,16 +712,18 @@ function effectiveAction(
 	) {
 		return asked;
 	}
-	// The name is the consumer's own, so the line says `custom`; once per
-	// name, and once for all past the cap, so a route cannot fill the log.
+	// Once per name, and once for all past the cap, so the log stays bounded.
 	if (undeclaredRemediations.size < UNDECLARED_REMEDIATION_CAP) {
 		if (!undeclaredRemediations.has(asked.name)) {
 			undeclaredRemediations.add(asked.name);
-			logger?.warn({ action: "custom" }, "session_admission_remediation_undeclared");
+			logger?.warn({ action: asked.name }, "session_admission_remediation_undeclared");
 		}
 	} else if (!undeclaredRemediations.has(asked.name) && !undeclaredRemediationsOverflowed) {
 		undeclaredRemediationsOverflowed = true;
-		logger?.warn({ action: "custom", overflow: true }, "session_admission_remediation_undeclared");
+		logger?.warn(
+			{ action: asked.name, overflow: true },
+			"session_admission_remediation_undeclared",
+		);
 	}
 	return { name: asked.name, grade: "credential_change" };
 }

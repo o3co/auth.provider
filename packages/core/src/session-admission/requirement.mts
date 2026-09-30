@@ -16,7 +16,7 @@
 
 /**
  * The vocabulary of session admission (ADR 2026-09-28-session-admission):
- * the claim, the action, the `Admission` answer, `SessionRequirement` with
+ * the claim, the request, the `Admission` answer, `SessionRequirement` with
  * its input and verdict, the step-up page, and the establishment half
  * (`PrimaryAuthentication`, the interruption, the `PrimaryContinuation`,
  * the `Establishment` capability). Types and the registration checks only;
@@ -37,7 +37,7 @@ import type {
 	UserSessionStore,
 } from "../user-sessions/types.mjs";
 import { type AcrTable, SECOND_FACTOR_AMR } from "./acr.mjs";
-import type { AdmissionAction, AdmissionGrade } from "./actions.mjs";
+import type { AdmissionAction } from "./actions.mjs";
 
 /**
  * The stores admission reads itself, by the name an `unavailable` admission
@@ -390,53 +390,18 @@ export const isHintToken = (value: unknown): value is string =>
 	typeof value === "string" && HINT_TOKEN.test(value);
 
 // ---------------------------------------------------------------------------
-// The actions
+// The remediations
 // ---------------------------------------------------------------------------
-
-const action = <N extends string, G extends AdmissionGrade>(
-	name: N,
-	grade: G,
-): { readonly name: N; readonly grade: G } => Object.freeze({ name, grade });
-
-/**
- * The bundled consumers' actions, each with its grade. A deployment's
- * own route builds `{ name, grade }` for what it does and is treated by its
- * grade; `remediation` is accepted only for a name a registered requirement
- * declared, else treated as `credential_change`. The consumers' actions
- * alone: a remediation (`mfa.step_up`) is a requirement's own route, issued
- * to it at registration (`registeredRequirement`), and never a member.
- */
-export const ADMISSION_ACTIONS = Object.freeze({
-	"oauth.authorize": action("oauth.authorize", "use"),
-	"oauth.consent": action("oauth.consent", "use"),
-	"oauth.session_grant": action("oauth.session_grant", "use"),
-	"oauth.code_exchange": action("oauth.code_exchange", "use"),
-	"oauth.refresh": action("oauth.refresh", "use"),
-	"device.lookup": action("device.lookup", "grants_nothing"),
-	"device.approve": action("device.approve", "use"),
-	"device.deny": action("device.deny", "grants_nothing"),
-	"federation_grants.connect": action("federation_grants.connect", "use"),
-	"federation_grants.consent": action("federation_grants.consent", "use"),
-	"federation_grants.callback": action("federation_grants.callback", "use"),
-	"session.link": action("session.link", "credential_change"),
-	"session.link_callback": action("session.link_callback", "use"),
-	"webauthn.register": action("webauthn.register", "credential_change"),
-	"mfa.manage": action("mfa.manage", "credential_change"),
-});
-
-/** A bundled action's name. */
-export type AdmissionActionName = keyof typeof ADMISSION_ACTIONS;
 
 /** A remediation's route, after the requirement's own name and a dot: a lower-case identifier. */
 const REMEDIATION_ROUTE = /^[a-z][a-z0-9_]*$/;
 
 /**
  * `remediations` as a requirement may declare them: each `<name>.<route>`,
- * declared once, and never a name in `ADMISSION_ACTIONS`. A consumer's
- * action may share a requirement's namespace (`mfa.manage` beside `mfa`),
- * and registered as a remediation it would skip every requirement for that
- * action. Another requirement's name is impossible by construction: the
- * route holds no dot, and the kind refuses a second requirement of one name.
+ * declared once. Another requirement's name is impossible by construction:
+ * the route holds no dot, and the kind refuses a second requirement of one
+ * name. A registered action's name is refused once both kinds have registered
+ * (`checkRemediationsAgainstActions`).
  */
 function checkRemediations(name: string, value: unknown, refuse: (what: string) => never): void {
 	if (!isNameList(value)) refuse("remediations must be a list of names");
@@ -447,11 +412,6 @@ function checkRemediations(name: string, value: unknown, refuse: (what: string) 
 		if (route === undefined || !REMEDIATION_ROUTE.test(route)) {
 			refuse(
 				`remediation "${remediation}" is not a route of this requirement's own: a remediation is named "${prefix}<route>", the route a lower-case identifier`,
-			);
-		}
-		if (Object.hasOwn(ADMISSION_ACTIONS, remediation)) {
-			refuse(
-				`remediation "${remediation}" is a consumer's action in ADMISSION_ACTIONS: registered as a remediation it would skip every requirement for that action`,
 			);
 		}
 		if (seen.has(remediation)) refuse(`remediation "${remediation}" is declared twice`);
@@ -595,7 +555,7 @@ export const issuedActionsOf = (
 	copy: SessionRequirement,
 ): Readonly<Record<string, AdmissionAction>> | undefined => actionsByCopy.get(copy);
 
-/** Whether `action` is one core issued to a registered requirement — never a literal, a copy or `ADMISSION_ACTIONS`' own entry. */
+/** Whether `action` is one core issued to a registered requirement — never a literal or a copy. */
 export const isIssuedAction = (action: unknown): action is AdmissionAction =>
 	typeof action === "object" && action !== null && issuedActions.has(action as AdmissionAction);
 

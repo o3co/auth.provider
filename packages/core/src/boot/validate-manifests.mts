@@ -44,7 +44,10 @@ import type {
 import type { Module } from "../modules/manifest/module-spec.mjs";
 import type { RouteContribution } from "../modules/manifest/route-contribution.mjs";
 import { SYNTHETIC_COMPONENT_KEYS } from "../modules/manifest/synthetic-keys.mjs";
-import { admissionActionProblem, registeredAdmissionAction } from "../session-admission/actions.mjs";
+import {
+	admissionActionProblem,
+	registeredAdmissionAction,
+} from "../session-admission/actions.mjs";
 import {
 	lifetimeBeyondConfiguration,
 	lifetimeBeyondConfigurationMessage,

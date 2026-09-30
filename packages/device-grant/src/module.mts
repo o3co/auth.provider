@@ -57,12 +57,12 @@ import {
 import { createClientAuthMiddleware } from "@o3co/auth-provider-oauth";
 import express, { type ErrorRequestHandler, type RequestHandler, type Response } from "express";
 import { z } from "zod";
+import { DEVICE_GRANT_ADMISSION_ACTIONS } from "./admissionActions.mjs";
 import {
 	createDeviceAuthorizationHandler,
 	DEVICE_CODE_LIFETIME_SECONDS,
 	DEVICE_POLLING_INTERVAL_SECONDS,
 } from "./deviceAuthorizationEndpoint.mjs";
-import { DEVICE_GRANT_ADMISSION_ACTIONS } from "./admissionActions.mjs";
 import { createDeviceCodeGrant } from "./grant.mjs";
 import { DEVICE_AUTHORIZATION_RATE_LIMIT_PREFIX, DEVICE_CODE_GRANT_TYPE } from "./types.mjs";
 import { createDeviceVerificationHandler } from "./verificationEndpoint.mjs";

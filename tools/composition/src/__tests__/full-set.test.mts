@@ -99,6 +99,7 @@ import { WEBAUTHN_GRANT_TYPE } from "@o3co/auth-provider-webauthn";
 import type { Express } from "express";
 import request from "supertest";
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
+import { BUNDLED_ACTIONS } from "../../../../packages/mfa/src/__tests__/bundled-actions.fixture.mts";
 import {
 	APPLE_LANDING,
 	BINDER,
@@ -268,6 +269,18 @@ describe("the full set boots together", () => {
 			[...(handle.components.sessionRequirementResolver?.get("mfa")?.reach ?? [])].sort(),
 		).toEqual(["mfa", "otp"]);
 		expect((config as unknown as { mfa: { mode: unknown } }).mfa.mode).toBe("optional");
+	});
+
+	it("registers every action a bundled consumer admits, each with the grade the MFA requirement's verdict table is taken over", async () => {
+		const { handle } = await boot();
+		const resolver = handle.components.sessionRequirementResolver;
+		expect(
+			Object.fromEntries(
+				Object.keys(BUNDLED_ACTIONS).map((name) => [name, resolver?.action(name)?.grade]),
+			),
+		).toEqual(
+			Object.fromEntries(Object.entries(BUNDLED_ACTIONS).map(([name, { grade }]) => [name, grade])),
+		);
 	});
 
 	it("hands the deployment's logger to every added module that answers a request or binds a token", async () => {

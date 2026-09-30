@@ -899,6 +899,15 @@ export {
 	type UnsatisfiableAcrValue,
 	vouchableAcrTable,
 } from "./session-admission/acr.mjs";
+// The grades core owns, and what a consumer registers for each action it
+// admits (`contributes.admissionActions`).
+export {
+	type ActionGrade,
+	ADMISSION_GRADES,
+	type AdmissionAction,
+	type AdmissionActionDeclaration,
+	type AdmissionGrade,
+} from "./session-admission/actions.mjs";
 export {
 	admitPrimary,
 	admitSession,
@@ -934,19 +943,8 @@ export type {
 	LoginInterruptionStep,
 } from "./session-admission/login-completion.mjs";
 export { checkPrimaryContinuation } from "./session-admission/primary.mjs";
-// The grades core owns, and what a consumer registers for each action it
-// admits (`contributes.admissionActions`).
 export {
-	ADMISSION_GRADES,
-	type ActionGrade,
-	type AdmissionAction,
-	type AdmissionActionDeclaration,
-	type AdmissionGrade,
-} from "./session-admission/actions.mjs";
-export {
-	ADMISSION_ACTIONS,
 	type Admission,
-	type AdmissionActionName,
 	type AdmissionAsks,
 	type AdmissionDeps,
 	type AdmissionInfrastructureStore,

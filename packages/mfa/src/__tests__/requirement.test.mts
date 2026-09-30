@@ -28,8 +28,8 @@
  */
 
 import {
-	ADMISSION_GRADES,
 	type ActionGrade,
+	ADMISSION_GRADES,
 	type AdmissionAction,
 	admitPrimary,
 	createMemoryMfaTransactionStore,
@@ -306,7 +306,6 @@ const MET: RequirementVerdict = { outcome: "met" };
 const REAUTHENTICATE: RequirementVerdict = { outcome: "reauthenticate" };
 const UNMET: RequirementVerdict = { outcome: "unmet" };
 const STEP_UP: RequirementVerdict = { outcome: "step_up", whenStillUnmet: "reauthenticate" };
-
 
 interface AdmitRow {
 	readonly row: string;

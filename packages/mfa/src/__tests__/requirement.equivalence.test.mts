@@ -16,9 +16,8 @@
 
 /**
  * The `mfa` requirement over every action a bundled consumer admits, as its
- * package registers it, under both modes and three factor setups, answers what
- * it answered when it admitted `device.lookup` and `device.deny` by name
- * (`bundled-actions.fixture.mts`): deciding by grade changed no verdict.
+ * package registers it, under both modes and three factor setups, answers the
+ * verdict table in `bundled-actions.fixture.mts`.
  */
 
 import {
@@ -35,10 +34,10 @@ import { createMfaRequirement } from "#/requirement.mjs";
 import { createLoginTransactions } from "#/transactions.mjs";
 import {
 	BUNDLED_ACTIONS,
-	DEVELOP_VERDICTS,
 	SESSION_SITUATIONS,
 	SETUPS,
 	TOKEN_SITUATIONS,
+	VERDICTS,
 } from "./bundled-actions.fixture.mjs";
 import { FACTORS, factorStoreHolding, resolverOver } from "./requirementHarness.mjs";
 
@@ -136,12 +135,12 @@ function inputsFor(name: string): RequirementInput[] {
 	});
 }
 
-describe("the mfa requirement over the bundled actions, by the grades their packages register", () => {
+describe("the mfa requirement over every bundled action, by the grade its package registers", () => {
 	for (const mode of ["optional", "required"] as const) {
 		for (const [setup, { factors, stepUpRecordable }] of Object.entries(SETUPS)) {
-			const table = DEVELOP_VERDICTS[`${mode} · ${setup}`] as Readonly<Record<string, string>>;
+			const table = VERDICTS[`${mode} · ${setup}`] as Readonly<Record<string, string>>;
 
-			it(`answers what it answered when it decided by name — ${mode}, ${setup}`, async () => {
+			it(`answers the table's verdicts — ${mode}, ${setup}`, async () => {
 				const requirement = createMfaRequirement({
 					mode,
 					factors: resolverOver(factors.map(() => FACTORS.totp())),
