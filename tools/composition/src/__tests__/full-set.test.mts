@@ -162,6 +162,8 @@ const ADDED: Readonly<Record<string, readonly string[]>> = {
 	],
 	"@o3co/auth-provider-mtls": ["mtls"],
 	"@o3co/auth-provider-oauth-token-exchange": ["oauth-token-exchange"],
+	// No module: contract suites and fakes, for tests.
+	"@o3co/auth-provider-test-kit": [],
 	"@o3co/auth-provider-webauthn": [
 		"webauthn",
 		"webauthn-session-subject",
