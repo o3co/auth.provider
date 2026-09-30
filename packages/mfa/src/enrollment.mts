@@ -29,8 +29,9 @@
  * - A completion reserves an attempt before the proof is checked, seals the
  *   factor's data, and then, in this order: consumes the transaction, writes
  *   the factor (`binding` `email_proof` when the proof was given, else
- *   `password`), issues the recovery codes, marks the witness. A lost race
- *   spends the transaction, never a factor. The caller resumes the login.
+ *   `password`), clears D25's flag where the proof was given, issues the
+ *   recovery codes, marks the witness. A lost race spends the transaction,
+ *   never a factor. The caller resumes the login.
  * - A codes write or a witness mark that fails never undoes the factor:
  *   the outcome says so, and the binding stands.
  */
@@ -114,6 +115,8 @@ export type MfaEnrollmentCompleteOutcome =
 			readonly binding: NonNullable<MfaFactorRecord["binding"]>;
 			readonly recoveryCodes: MfaIssuedRecoveryCodes;
 			readonly witness: MfaWitnessMark;
+			/** Why D25's flag could not be cleared after the proof was given; `undefined` when it was, or none was due. */
+			readonly flagUncleared: unknown;
 	  } & MfaCeremonySubject);
 
 /** A login's first binding over the coordinator's `kit` (see this file's header). */
@@ -430,6 +433,16 @@ export function createMfaEnrollment(kit: MfaCeremonyKit): {
 			} catch (cause) {
 				return { outcome: "unavailable", store: "mfa_factor", step: "create", cause };
 			}
+			// D25: the flag an operator reset set is cleared only once the proof was
+			// given and the first counting factor written.
+			let flagUncleared: unknown;
+			if (binding === "email_proof") {
+				try {
+					await kit.transactions.consumeEmailProofRequirement(tx.subject);
+				} catch (cause) {
+					flagUncleared = cause;
+				}
+			}
 			const recoveryCodes = await issueRecoveryCodes(tx.subject, binding, nowMs);
 			const witness = await kit.witness.mark(tx.subject);
 
@@ -444,6 +457,7 @@ export function createMfaEnrollment(kit: MfaCeremonyKit): {
 				binding,
 				recoveryCodes,
 				witness,
+				flagUncleared,
 				...about,
 			};
 		},

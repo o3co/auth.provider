@@ -372,6 +372,21 @@ export function mfaModule(options: MfaModuleOptions = {}): Module {
 							"mfa_step_up_unsupported",
 						);
 					}
+					// D20: under "always" nobody could give the proof without a sender, so
+					// nobody could bind; under "when-mail" a first binding goes without it.
+					const { requireEmailProof } = settings.enrollment;
+					const mailWired = deps.mailSender !== undefined;
+					if (requireEmailProof === "always" && !mailWired) {
+						throw new RangeError(
+							'mfa.enrollment.requireEmailProof is "always" and no mail sender is wired: nobody could give the account-email proof, so nobody could bind a factor — wire a mail sender, or set mfa.enrollment.requireEmailProof (MFA_ENROLLMENT_REQUIRE_EMAIL_PROOF) to "when-mail" or "never"',
+						);
+					}
+					if (requireEmailProof === "when-mail" && !mailWired) {
+						logger.warn(
+							{ setting: "mfa.enrollment.requireEmailProof", value: requireEmailProof },
+							"mfa_first_binding_without_email_proof",
+						);
+					}
 					// A directory that cannot write the witness leaves D12's defence to
 					// what the Store answers on authenticate: said once.
 					const witness = createMfaEnrollmentWitness(deps.userRepository);
@@ -391,6 +406,9 @@ export function mfaModule(options: MfaModuleOptions = {}): Module {
 						recentMfaMaxAgeSeconds: settings.manage.maxAgeSeconds,
 						logger,
 						auditSink: deps.auditSink,
+						firstBinding: { requireEmailProof, mailWired },
+						emailProofRequiredAtNextBinding: (subject) =>
+							deps.mfaTransactionStore.emailProofRequiredAtNextBinding(subject),
 					});
 					bootStates.set(deps.mfaFactorResolver, {
 						mode,

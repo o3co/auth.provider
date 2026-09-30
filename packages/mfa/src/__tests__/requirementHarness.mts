@@ -29,6 +29,12 @@ import {
 	type MfaFactorStore,
 } from "@o3co/auth-provider-core";
 
+/** The first-binding gate's inputs of a composition with no mail sender and no operator reset: no proof is asked. */
+export const WITHOUT_MAIL = {
+	firstBinding: { requireEmailProof: "when-mail", mailWired: false },
+	emailProofRequiredAtNextBinding: async () => false,
+} as const;
+
 /** A factor that declares `amrValues`, adds `mfa` or not, counts or not; it verifies nothing. */
 export function stubFactor(
 	kind: string,

@@ -31,6 +31,8 @@
  *   once succeeds once, and a lost race never spends a factor's state.
  * - A store that cannot answer, a factor whose data does not open, and a
  *   factor that throws are outages: never a wrong code, never "no factor".
+ * - `factor_id: "account-email"` names the account-email proof (`proof.mts`)
+ *   on a transaction that owes it; a first binding is `enrollment.mts`'s.
  * - A verified counting factor marks the enrollment witness of a login whose
  *   `User` does not carry it (D12); a mark that fails never fails the login.
  * - A factor is handed its records opened and digests under the ring; it
@@ -68,6 +70,7 @@ import {
 	type MfaEnrollmentCompleteOutcome,
 } from "./enrollment.mjs";
 import { keptState, readKeptState, sendMfaMail } from "./mail.mjs";
+import { ACCOUNT_EMAIL_FACTOR_ID, createAccountEmailProof } from "./proof.mjs";
 import type { MfaRequirementMode } from "./requirement.mjs";
 import type { MfaSealing } from "./sealing.mjs";
 import { type MfaEnrollmentWitness, type MfaWitnessMark, reconciles } from "./witness.mjs";
@@ -190,6 +193,8 @@ export type MfaChallengeOutcome =
 	| ({ readonly outcome: "sent"; readonly response: object } & MfaCeremonySubject)
 	/** A login code whose factor recorded another address, or none it can read: the factor is refused. */
 	| ({ readonly outcome: "address_mismatch" } & MfaCeremonySubject)
+	/** The account-email proof is asked for and nobody can give it: no sender, or no address. */
+	| { readonly outcome: "proof_unavailable" }
 	| {
 			readonly outcome: "challenge_failed";
 			readonly kind: string;
@@ -209,6 +214,8 @@ export type MfaVerifyOutcome =
 	  } & MfaCeremonySubject)
 	/** The proof was right, and another verification consumed the transaction first. */
 	| { readonly outcome: "spent" }
+	/** The account-email proof was given: the first binding may proceed. */
+	| ({ readonly outcome: "proved" } & MfaCeremonySubject)
 	/** The proof was right, but it does not count and the subject holds no counting factor it can use (F3). */
 	| ({ readonly outcome: "enrollment_required" } & MfaCeremonySubject)
 	| ({
@@ -572,6 +579,7 @@ export function createMfaCoordinator(options: MfaCoordinatorOptions): MfaCoordin
 		},
 	};
 	const enrollment = createMfaEnrollment(kit);
+	const proof = createAccountEmailProof(kit);
 
 	return {
 		async describe(call) {
@@ -623,6 +631,7 @@ export function createMfaCoordinator(options: MfaCoordinatorOptions): MfaCoordin
 			const tx = await bound(call);
 			if (tx === null) return UNKNOWN_TRANSACTION;
 			if ("outcome" in tx) return tx;
+			if (call.factorId === ACCOUNT_EMAIL_FACTOR_ID) return proof.challenge(tx);
 			const records = await recordsOf(tx.subject);
 			if ("outcome" in records) return records;
 			const found = named(records, call.factorId);
@@ -768,6 +777,7 @@ export function createMfaCoordinator(options: MfaCoordinatorOptions): MfaCoordin
 			const tx = await bound(call);
 			if (tx === null) return UNKNOWN_TRANSACTION;
 			if ("outcome" in tx) return tx;
+			if (call.factorId === ACCOUNT_EMAIL_FACTOR_ID) return proof.verify(call, tx);
 			let records = await recordsOf(tx.subject);
 			if ("outcome" in records) return records;
 			const found = named(records, call.factorId);

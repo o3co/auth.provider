@@ -92,6 +92,10 @@ const EMAIL_PROOF_REQUIRED = errorEnvelope(
 	"mfa_email_proof_required",
 	"The account-email proof comes first",
 );
+const EMAIL_PROOF_UNAVAILABLE = errorEnvelope(
+	"mfa_email_proof_unavailable",
+	"The account-email proof cannot be given for this account",
+);
 
 /** A refused proof, with the attempts the transaction has left. */
 const notAccepted = (attemptsRemaining: number) => ({
@@ -380,6 +384,9 @@ export function createMfaRouter(options: MfaRoutesOptions): Router {
 					});
 					res.status(403).json(FACTOR_REFUSED);
 					return;
+				case "proof_unavailable":
+					res.status(403).json(EMAIL_PROOF_UNAVAILABLE);
+					return;
 				case "none":
 					res.status(200).json({});
 					return;
@@ -429,6 +436,17 @@ export function createMfaRouter(options: MfaRoutesOptions): Router {
 						details: { kind: outcome.kind, purpose: outcome.purpose, reason: outcome.reason },
 					});
 					res.status(401).json(notAccepted(outcome.attemptsRemaining));
+					return;
+				case "proved":
+					emitAuditEvent(auditSink, {
+						timestamp: new Date(),
+						type: "mfa.verified",
+						subject: outcome.subject,
+						ip: call.request.ip,
+						userAgent: call.request.userAgent,
+						details: { kind: outcome.kind, purpose: outcome.purpose },
+					});
+					res.status(200).json({ email_proof: "verified" });
 					return;
 				case "verified":
 					emitAuditEvent(auditSink, {
@@ -562,6 +580,12 @@ export function createMfaRouter(options: MfaRoutesOptions): Router {
 						);
 					}
 					witnessUnwritten(outcome.subject, outcome.witness);
+					if (outcome.flagUncleared !== undefined) {
+						logger.warn(
+							{ sub: outcome.subject, err: loggableError(outcome.flagUncleared) },
+							"mfa_email_proof_flag_uncleared",
+						);
+					}
 					// The codes are answered here, once; a page that got none points to their regeneration.
 					await completeLogin("enrollment", req, res, outcome, {
 						factor: outcome.factor,

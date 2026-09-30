@@ -571,6 +571,12 @@ const VOCABULARY: readonly VocabularyRow[] = [
 		home: "packages/mfa/src/recovery/factor.mts",
 		definition: /(?:function|const)\s+generateRecoveryCodes\b/,
 	},
+	{
+		concept:
+			"the first-binding gate — whether the account-email proof comes before a subject's first way into the account (the MFA ADR's D24, D25)",
+		home: "packages/mfa/src/firstBinding.mts",
+		definition: /(?:function|const)\s+firstBindingGate\b/,
+	},
 ];
 
 /**

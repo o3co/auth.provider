@@ -42,8 +42,10 @@
  * record that may count stands, the login's `User` must not say the subject
  * enrolled: a witness `true` or malformed is recorded and thrown, under either
  * mode (D12). With no records, `optional` establishes and `required` interrupts
- * for a first binding offering the counting factors the user may enroll. Other
- * primaries establish without a read: the baseline applies after `pwd` only.
+ * for a first binding offering the counting factors the user may enroll, the
+ * account-email proof first where the one gate (`firstBinding.mts`) asks for
+ * it. Other primaries establish without a read: the baseline applies after
+ * `pwd` only.
  *
  * Every method is a closure: core calls them on a registered copy, and the
  * contract suite on a spread of the object.
@@ -60,6 +62,7 @@ import {
 	type MfaFactorRecord,
 	type MfaFactorResolver,
 	type MfaFactorStore,
+	normaliseMailAddress,
 	PASSWORD_AMR,
 	type PrimaryAuthentication,
 	type RequirementInput,
@@ -72,6 +75,7 @@ import {
 	type SessionView,
 	type StepUpPage,
 } from "@o3co/auth-provider-core";
+import { firstBindingGate, type RequireEmailProof } from "./firstBinding.mjs";
 import type { LoginInterruption, LoginTransactions } from "./transactions.mjs";
 import { MfaEnrollmentStateInconsistentError } from "./witness.mjs";
 
@@ -107,6 +111,13 @@ export interface MfaRequirementOptions {
 	readonly logger: Logger;
 	/** Where `mfa.enrollment_state_inconsistent` is recorded; none, it is not. */
 	readonly auditSink?: AuditSink;
+	/** What the first-binding gate reads of the composition: `mfa.enrollment.requireEmailProof`, and whether a mail sender is wired. */
+	readonly firstBinding: {
+		readonly requireEmailProof: RequireEmailProof;
+		readonly mailWired: boolean;
+	};
+	/** D25's flag for `subject` (`MfaTransactionStore.emailProofRequiredAtNextBinding`); rejects on an outage. */
+	readonly emailProofRequiredAtNextBinding: (subject: string) => Promise<boolean>;
 }
 
 /** What recent MFA is read from: a live session's primary time and its last second factor. */
@@ -218,6 +229,8 @@ export function createMfaRequirement(options: MfaRequirementOptions): SessionReq
 		recentMfaMaxAgeSeconds,
 		logger,
 		auditSink,
+		firstBinding,
+		emailProofRequiredAtNextBinding,
 	} = options;
 
 	/**
@@ -350,6 +363,28 @@ export function createMfaRequirement(options: MfaRequirementOptions): SessionReq
 		}
 	};
 
+	/**
+	 * Whether the account-email proof comes before `primary`'s first binding:
+	 * the gate over the setting, the sender, the login's address and D25's
+	 * flag. A flag that cannot be read, or reads other than a boolean, throws.
+	 */
+	const proofAsked = async (primary: PrimaryAuthentication): Promise<boolean> => {
+		const flagged: unknown = await emailProofRequiredAtNextBinding(primary.subject);
+		if (typeof flagged !== "boolean") {
+			throw new TypeError(
+				"MfaTransactionStore.emailProofRequiredAtNextBinding answered something that is not a boolean",
+			);
+		}
+		const gate = firstBindingGate({
+			requireEmailProof: firstBinding.requireEmailProof,
+			mailWired: firstBinding.mailWired,
+			hasAddress: normaliseMailAddress(primary.user.email) !== undefined,
+			requiredAtNextBinding: flagged,
+		});
+		// `unprovable` asks for a proof nobody can give: the binding is refused, never skipped.
+		return gate !== "bind";
+	};
+
 	/** The interruption that opens the login's transaction with `interruption`'s answer. */
 	const interrupt = (interruption: LoginInterruption): RequirementInterruption => ({
 		open: (sessionId, continuation) => transactions.open(sessionId, continuation, interruption),
@@ -390,11 +425,11 @@ export function createMfaRequirement(options: MfaRequirementOptions): SessionReq
 			if (!records.some(mayCount)) checkWitness(primary);
 			if (records.length > 0) return interrupt({ error: "mfa_required" });
 			if (mode === "optional") return "establish";
+			const emailProof = await proofAsked(primary);
 			return interrupt({
 				error: "mfa_enrollment_required",
 				enrollable: enrollableFor(primary.user),
-				// No account-email proof before a first binding yet: no mail is wired.
-				emailProof: false,
+				emailProof,
 			});
 		},
 	};

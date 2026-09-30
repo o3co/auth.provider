@@ -40,7 +40,13 @@ import {
 	TOKEN_SITUATIONS,
 	VERDICTS,
 } from "./bundled-actions.fixture.mjs";
-import { FACTORS, factorRecord, factorStoreHolding, resolverOver } from "./requirementHarness.mjs";
+import {
+	FACTORS,
+	factorRecord,
+	factorStoreHolding,
+	resolverOver,
+	WITHOUT_MAIL,
+} from "./requirementHarness.mjs";
 
 const NOW = Date.parse("2026-09-30T00:00:00Z");
 const minutesAgo = (minutes: number): Date => new Date(NOW - minutes * 60_000);
@@ -158,6 +164,7 @@ describe("the mfa requirement over every bundled action, by the grade its packag
 					stepUpRecordable,
 					recentMfaMaxAgeSeconds: 300,
 					logger: silent(),
+					...WITHOUT_MAIL,
 				});
 				const answered: Record<string, string> = {};
 				for (const name of Object.keys(BUNDLED_ACTIONS)) {
