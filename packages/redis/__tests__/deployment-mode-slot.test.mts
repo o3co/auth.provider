@@ -26,7 +26,11 @@ import {
 	redisFederationGrantStoreModule,
 	resolveRedisFederationGrantStoreOptions,
 } from "../src/federation-grant-store.mjs";
-import { redisFederationTokenStoreModule } from "../src/federation-tokens.mjs";
+import {
+	createRedisFederationTokenStore,
+	redisFederationTokenStoreBuilder,
+	redisFederationTokenStoreModule,
+} from "../src/federation-tokens.mjs";
 
 const tokenClient = {
 	get: async () => null,
@@ -259,5 +263,69 @@ describe("the grant store's configuration", () => {
 		expect(
 			resolveRedisFederationGrantStoreOptions(grants, { environment: "staging" }, "unset").guard,
 		).toEqual({ environment: "staging", deploymentMode: "unset" });
+	});
+});
+
+describe("the token store's factory and builder hold the deployment mode they are handed", () => {
+	const KEY = Buffer.alloc(32, 7);
+
+	/** The two exports a composition root that builds the token store by hand calls. */
+	const ENTRIES = [
+		{
+			name: "createRedisFederationTokenStore",
+			build: (options: Record<string, unknown>, logger?: Logger) =>
+				createRedisFederationTokenStore({
+					client: tokenClient,
+					...(logger === undefined ? {} : { logger }),
+					...options,
+				} as never),
+		},
+		{
+			name: "redisFederationTokenStoreBuilder",
+			build: (options: Record<string, unknown>, logger?: Logger) =>
+				redisFederationTokenStoreBuilder(
+					{ client: tokenClient, ...options },
+					logger === undefined ? {} : { logger },
+				),
+		},
+	] as const;
+
+	describe.each(ENTRIES)("$name", (entry) => {
+		it("refuses a mode it cannot read — none, MULTI, null, 1 — as a TypeError naming it, before anything is built", () => {
+			const refusal = new TypeError(
+				`${entry.name}: deploymentMode must be "single", "multi" or "unset"`,
+			);
+			for (const encryption of [{ mode: "allow-plaintext" }, { mode: "required", key: KEY }]) {
+				expect(() => entry.build({ encryption }), `none, ${encryption.mode}`).toThrow(refusal);
+				for (const deploymentMode of ["MULTI", null, 1]) {
+					expect(
+						() => entry.build({ encryption, deploymentMode }),
+						`${String(deploymentMode)}, ${encryption.mode}`,
+					).toThrow(refusal);
+				}
+			}
+		});
+
+		it("refuses plaintext under multi", () => {
+			expect(() =>
+				entry.build({ encryption: { mode: "allow-plaintext" }, deploymentMode: "multi" }),
+			).toThrow(new RangeError(refusedUnderMulti("federation-tokens")));
+		});
+
+		it.each(["single", "unset"] as const)(
+			"allows plaintext with the warning under %s",
+			(deploymentMode) => {
+				const { logger, warn } = recordingLogger();
+				const store = entry.build(
+					{ encryption: { mode: "allow-plaintext" }, deploymentMode },
+					logger,
+				) as { kind: string };
+				expect(store.kind).toBe("redis");
+				expect(warn).toHaveBeenCalledWith(
+					{ store: "federation-tokens", mode: "allow-plaintext" },
+					"federation_store_plaintext",
+				);
+			},
+		);
 	});
 });
