@@ -271,15 +271,35 @@ describe("the full set boots together", () => {
 		expect((config as unknown as { mfa: { mode: unknown } }).mfa.mode).toBe("optional");
 	});
 
-	it("registers every action a bundled consumer admits, each with the grade the MFA requirement's verdict table is taken over", async () => {
-		const { handle } = await boot();
-		const resolver = handle.components.sessionRequirementResolver;
-		expect(
-			Object.fromEntries(
-				Object.keys(BUNDLED_ACTIONS).map((name) => [name, resolver?.action(name)?.grade]),
-			),
-		).toEqual(
-			Object.fromEntries(Object.entries(BUNDLED_ACTIONS).map(([name, { grade }]) => [name, grade])),
+	it("registers exactly the actions the bundled consumers admit, each with the grade the MFA requirement's verdict table is taken over, said at boot with its module", async () => {
+		const { logger } = await boot();
+		const said = logger.lines.filter((line) => line.args[1] === "admission_actions_registered");
+		expect(said).toHaveLength(1);
+		expect(said[0]?.level).toBe("info");
+		const { actions } = (said[0]?.args[0] ?? { actions: [] }) as {
+			actions: { name: string; grade: string; module: string }[];
+		};
+		/** The module of each bundled package that registers the action. */
+		const registrant: Readonly<Record<string, string>> = {
+			"oauth.authorize": "oauth",
+			"oauth.consent": "oauth",
+			"oauth.session_grant": "oauth-session",
+			"oauth.code_exchange": "oauth-authorization",
+			"oauth.refresh": "oauth-authorization",
+			"device.lookup": "device-grant",
+			"device.approve": "device-grant",
+			"device.deny": "device-grant",
+			"federation_grants.connect": "federation-grants",
+			"federation_grants.consent": "federation-grants",
+			"federation_grants.callback": "federation-grants",
+			"session.link": "session",
+			"session.link_callback": "session",
+			"webauthn.register": "webauthn-session-subject",
+		};
+		expect([...actions].sort((a, b) => a.name.localeCompare(b.name))).toEqual(
+			Object.entries(BUNDLED_ACTIONS)
+				.map(([name, { grade }]) => ({ name, grade, module: registrant[name] }))
+				.sort((a, b) => a.name.localeCompare(b.name)),
 		);
 	});
 

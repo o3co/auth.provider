@@ -580,7 +580,7 @@ describe("admit — decides by grade alone, over every grade core has", () => {
 		credential_change: STEP_UP,
 	};
 
-	it("answers each grade an action registers with — core never asks about a remediation", async () => {
+	it("answers each grade an action registers with", async () => {
 		const { requirement } = build("required");
 		for (const grade of ADMISSION_GRADES) {
 			if (grade === "remediation") continue;
