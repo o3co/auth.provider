@@ -39,28 +39,29 @@ const send = (overrides: Partial<MailSend> = {}): MailSend => ({
 describe("renderStandardMail", () => {
 	it("renders the login code as a sign-in code, with the minutes it has left and what to do if the reader did not sign in", () => {
 		expect(renderStandardMail(send(), NOW)).toEqual({
-			subject: "Your sign-in code",
+			subjectLine: "Your sign-in code",
 			text: "Your sign-in code is 482913.\nIt expires in 10 minutes.\n\nIf you did not try to sign in, someone may know your password: change it.\n",
 		});
 	});
 
 	it("renders the account-email proof and the email factor's enrollment code as confirmations of the address", () => {
 		expect(renderStandardMail(send({ purpose: "account_email_proof" }), NOW)).toEqual({
-			subject: "Confirm your email address",
+			subjectLine: "Confirm your email address",
 			text: "Your code to confirm this email address is 482913.\nIt expires in 10 minutes.\n\nIf you did not try to sign in, someone may know your password: change it.\n",
 		});
 		expect(renderStandardMail(send({ purpose: "email_factor_enrollment" }), NOW)).toEqual({
-			subject: "Confirm sign-in codes by email",
+			subjectLine: "Confirm sign-in codes by email",
 			text: "Your code to receive sign-in codes at this address is 482913.\nIt expires in 10 minutes.\n\nIf you did not ask for this, someone may know your password: change it.\n",
 		});
 	});
 
-	it("gives every purpose a subject line of its own, on one line, and a body carrying the code", () => {
+	it("gives every purpose a subject line of its own, on one line and named apart from the send's subject, and a body carrying the code", () => {
 		const subjects = new Set<string>();
 		for (const purpose of MAIL_PURPOSES) {
 			const rendered = renderStandardMail(send({ purpose }), NOW);
-			subjects.add(rendered.subject);
-			expect(rendered.subject).not.toMatch(/[\r\n]/);
+			subjects.add(rendered.subjectLine);
+			expect(rendered.subjectLine).not.toMatch(/[\r\n]/);
+			expect(rendered).not.toHaveProperty("subject");
 			expect(rendered.text).toContain("482913");
 		}
 		expect(subjects.size).toBe(MAIL_PURPOSES.length);
@@ -77,9 +78,9 @@ describe("renderStandardMail", () => {
 
 	it("renders nothing of the account or the recipient", () => {
 		for (const purpose of MAIL_PURPOSES) {
-			const { subject, text } = renderStandardMail(send({ purpose }), NOW);
+			const { subjectLine, text } = renderStandardMail(send({ purpose }), NOW);
 			for (const part of ["u-alice", "alice@example.com", "alice"]) {
-				expect(`${subject}\n${text}`, `${purpose} ${part}`).not.toContain(part);
+				expect(`${subjectLine}\n${text}`, `${purpose} ${part}`).not.toContain(part);
 			}
 		}
 	});
