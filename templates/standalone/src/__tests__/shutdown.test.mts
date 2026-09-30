@@ -125,6 +125,7 @@ function install(
 		cleanup?: () => void | Promise<void>;
 		drainTimeoutMs?: number;
 		cleanupTimeoutMs?: number;
+		cleanupAllowanceMs?: number | undefined;
 		logger?: ReturnType<typeof makeLogger>;
 	} = {},
 ) {
@@ -138,6 +139,7 @@ function install(
 		cleanup: opts.cleanup ?? (() => {}),
 		...(opts.drainTimeoutMs === undefined ? {} : { drainTimeoutMs: opts.drainTimeoutMs }),
 		...(opts.cleanupTimeoutMs === undefined ? {} : { cleanupTimeoutMs: opts.cleanupTimeoutMs }),
+		...("cleanupAllowanceMs" in opts ? { cleanupAllowanceMs: opts.cleanupAllowanceMs } : {}),
 		exit,
 		onSignal: (name, handler) => signals.set(name, handler),
 		offSignal: (name) => signals.delete(name),
@@ -458,6 +460,90 @@ describe("installGracefulShutdown", () => {
 		const { signals } = install();
 		signals.get("SIGTERM")?.();
 		expect(signals.size).toBe(0);
+	});
+});
+
+describe("the cleanup allowance the handle reports", () => {
+	it("gives cleanup the allowance when it is longer than the drain", async () => {
+		vi.useFakeTimers();
+		try {
+			const { signals, finishDraining, exit } = install({
+				cleanup: () => new Promise<void>((resolve) => setTimeout(resolve, 30_000)),
+				drainTimeoutMs: 5_000,
+				cleanupAllowanceMs: 45_000,
+			});
+			signals.get("SIGTERM")?.();
+			finishDraining();
+			await vi.advanceTimersByTimeAsync(31_000);
+			expect(exit).toHaveBeenCalledExactlyOnceWith(0);
+		} finally {
+			vi.useRealTimers();
+		}
+	});
+
+	it("gives up on cleanup at the allowance, and logs it as the budget", async () => {
+		vi.useFakeTimers();
+		try {
+			const { signals, finishDraining, exit, logger } = install({
+				cleanup: () => new Promise<void>(() => {}),
+				drainTimeoutMs: 5_000,
+				cleanupAllowanceMs: 45_000,
+			});
+			signals.get("SIGTERM")?.();
+			finishDraining();
+			await vi.advanceTimersByTimeAsync(44_999);
+			expect(exit).not.toHaveBeenCalled();
+			await vi.advanceTimersByTimeAsync(1);
+			expect(logger.error).toHaveBeenCalledWith(
+				{ cleanupTimeoutMs: 45_000 },
+				"shutdown_cleanup_timed_out",
+			);
+			expect(exit).toHaveBeenCalledExactlyOnceWith(1);
+		} finally {
+			vi.useRealTimers();
+		}
+	});
+
+	it("keeps the longer budget when the allowance is shorter", async () => {
+		vi.useFakeTimers();
+		try {
+			const { signals, finishDraining, exit, logger } = install({
+				cleanup: () => new Promise<void>(() => {}),
+				drainTimeoutMs: 5_000,
+				cleanupAllowanceMs: 2_000,
+			});
+			signals.get("SIGTERM")?.();
+			finishDraining();
+			await vi.advanceTimersByTimeAsync(4_999);
+			expect(exit).not.toHaveBeenCalled();
+			await vi.advanceTimersByTimeAsync(1);
+			expect(logger.error).toHaveBeenCalledWith(
+				{ cleanupTimeoutMs: 5_000 },
+				"shutdown_cleanup_timed_out",
+			);
+		} finally {
+			vi.useRealTimers();
+		}
+	});
+
+	it("leaves cleanup its own budget when the handle reports no allowance", async () => {
+		vi.useFakeTimers();
+		try {
+			const { signals, finishDraining, logger } = install({
+				cleanup: () => new Promise<void>(() => {}),
+				drainTimeoutMs: 5_000,
+				cleanupAllowanceMs: undefined,
+			});
+			signals.get("SIGTERM")?.();
+			finishDraining();
+			await vi.advanceTimersByTimeAsync(5_000);
+			expect(logger.error).toHaveBeenCalledWith(
+				{ cleanupTimeoutMs: 5_000 },
+				"shutdown_cleanup_timed_out",
+			);
+		} finally {
+			vi.useRealTimers();
+		}
 	});
 });
 
