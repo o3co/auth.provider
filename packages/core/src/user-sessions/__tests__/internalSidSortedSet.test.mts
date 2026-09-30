@@ -49,6 +49,15 @@ describe("createMemorySidSortedSet", () => {
 		expect(z.list("sid-1")).toEqual([]);
 	});
 
+	it("add answers whether it recorded: true before expiry, false after it", () => {
+		// One reading of the clock decides both what is recorded and what the
+		// caller is told.
+		const z = createMemorySidSortedSet();
+		expect(z.add("sid-1", "google", FUTURE())).toBe(true);
+		expect(z.add("sid-1", "google", FUTURE())).toBe(true);
+		expect(z.add("sid-2", "google", PAST())).toBe(false);
+	});
+
 	it("list GCs entries past expiry", async () => {
 		const z = createMemorySidSortedSet();
 		// Wide timing margins, so a loaded CI runner does not flake.
