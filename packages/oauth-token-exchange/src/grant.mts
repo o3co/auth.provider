@@ -15,10 +15,10 @@
  */
 
 /**
- * The RFC 8693 token-exchange grant: client authentication, the subject and
- * actor token rules (sender constraint, refresh-token family, session,
- * `may_act`), the scope, audience and resource ceilings, the policy hook, and
- * issuance.
+ * The RFC 8693 token-exchange grant: builds the handler, which runs the stages in
+ * order and answers the first refusal. It holds what the grant asks the deployment
+ * itself: the refresh-token family rule and the session rule over each validated
+ * token, and the policy hook.
  */
 
 import type {
