@@ -173,7 +173,7 @@ function buildApp() {
 	app.use(
 		createRouter(express, {
 			requirements: resolverForTests([], { actions: SESSION_ADMISSION_ACTIONS }),
-			config: { session: { name: "harness.session" } } as never,
+			config: { "session-store": { name: "harness.session" } } as never,
 			federationProviders: new Map<string, FederationProvider>([["apple", apple]]),
 			federationRedirectPolicyResolver: new Map([["apple", makePermissivePolicy()]]) as never,
 			providerCallbackUrls: new Map([["apple", CALLBACK_URL]]),

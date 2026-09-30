@@ -26,6 +26,7 @@ import { createClient } from "redis";
 import request from "supertest";
 import { describe, expect, it, vi } from "vitest";
 import { sessionStoreModule, sessionStoreModuleFor } from "../modules/sessionStoreModule.mjs";
+import { withSessionCaptures, withStore } from "./_helpers/sections.mjs";
 
 // The redis session-store builder dynamically imports these; mock them so the
 // readiness-forwarding test below never opens a socket.
@@ -57,7 +58,7 @@ vi.mock("connect-redis", async () => {
 });
 
 interface SessionLikeConfig {
-	session: {
+	"session-store": {
 		secret: string;
 		name: string;
 		secure: boolean;
@@ -69,7 +70,7 @@ interface SessionLikeConfig {
 }
 
 const baseConfig: SessionLikeConfig = {
-	session: {
+	"session-store": {
 		secret: "test-secret-at-least-32-chars-long!",
 		name: "test.sid",
 		secure: false,
@@ -91,10 +92,11 @@ function makeRegistrar(): LifecycleRegistrar & { calls: Array<() => Promise<void
 }
 
 describe("sessionStoreModule", () => {
-	it("declares lifecycleRegistrar and readinessRegistrar as optional and config as required", () => {
+	it("declares lifecycleRegistrar and readinessRegistrar as optional, and reads its own section, not config", () => {
 		const m = sessionStoreModule as unknown as Module;
 		expect(m.name).toBe("session-store");
-		expect(m.requires).toContain("config");
+		expect(m.requires).not.toContain("config");
+		expect(m.section?.at).toBeUndefined();
 		expect(m.optional).toContain("lifecycleRegistrar");
 		expect(m.optional).toContain("readinessRegistrar");
 	});
@@ -107,7 +109,7 @@ describe("sessionStoreModule", () => {
 			throw new Error("expected sessionStoreModule.contributes.routes[0] to be a factory");
 		}
 		const route = await factory({
-			config: baseConfig as never,
+			section: baseConfig["session-store"] as never,
 			deploymentMode: "unset",
 			lifecycleRegistrar: undefined,
 		} as never);
@@ -123,7 +125,7 @@ describe("sessionStoreModule", () => {
 		const factory = m.contributes?.routes?.[0];
 		if (typeof factory !== "function") throw new Error("not a factory");
 		const route = await factory({
-			config: baseConfig as never,
+			section: baseConfig["session-store"] as never,
 			deploymentMode: "unset",
 			lifecycleRegistrar: undefined,
 		} as never);
@@ -138,14 +140,14 @@ describe("sessionStoreModule", () => {
 		if (typeof factory !== "function") throw new Error("not a factory");
 		const reg = makeRegistrar();
 		const route = await factory({
-			config: baseConfig as never,
+			section: baseConfig["session-store"] as never,
 			deploymentMode: "unset",
 			lifecycleRegistrar: reg,
 		} as never);
 		// Route is constructed successfully even with a registrar present; the
 		// memory builder doesn't register anything (no sub-resources to clean).
 		// The redis builder path WOULD register `client.quit()` — that branch is
-		// covered by the standalone smoke test when `session.storage.type` is
+		// covered by the standalone smoke test when `session-store.storage.type` is
 		// configured to "redis".
 		expect(route.id).toBe("session-middleware");
 		expect(reg.calls).toHaveLength(0);
@@ -163,11 +165,9 @@ describe("sessionStoreModule", () => {
 
 		const probes: Array<{ name: string; check: () => Promise<unknown> }> = [];
 		await factory({
-			config: {
-				session: {
-					...baseConfig.session,
-					storage: { type: "redis", redis: { url: "redis://localhost:6379" } },
-				},
+			section: {
+				...baseConfig["session-store"],
+				storage: { type: "redis", redis: { url: "redis://localhost:6379" } },
 			} as never,
 			deploymentMode: "unset",
 			lifecycleRegistrar: makeRegistrar(),
@@ -183,13 +183,11 @@ describe("sessionStoreModule", () => {
 		const factory = m.contributes?.routes?.[0];
 		if (typeof factory !== "function") throw new Error("not a factory");
 		const route = await factory({
-			config: {
-				session: {
-					...baseConfig.session,
-					name: "auth.sid",
-					secure: false,
-					domain: null,
-				},
+			section: {
+				...baseConfig["session-store"],
+				name: "auth.sid",
+				secure: false,
+				domain: null,
 			} as never,
 			deploymentMode: "unset",
 			lifecycleRegistrar: undefined,
@@ -214,13 +212,11 @@ describe("sessionStoreModule", () => {
 
 		await expect(
 			factory({
-				config: {
-					session: {
-						...baseConfig.session,
-						name: "__Host-auth.session",
-						secure: false,
-						domain: null,
-					},
+				section: {
+					...baseConfig["session-store"],
+					name: "__Host-auth.session",
+					secure: false,
+					domain: null,
 				} as never,
 				deploymentMode: "unset",
 				lifecycleRegistrar: undefined,
@@ -229,13 +225,11 @@ describe("sessionStoreModule", () => {
 
 		await expect(
 			factory({
-				config: {
-					session: {
-						...baseConfig.session,
-						name: "__Host-auth.session",
-						secure: true,
-						domain: "example.com",
-					},
+				section: {
+					...baseConfig["session-store"],
+					name: "__Host-auth.session",
+					secure: true,
+					domain: "example.com",
 				} as never,
 				deploymentMode: "unset",
 				lifecycleRegistrar: undefined,
@@ -255,14 +249,14 @@ describe("sessionStoreModule", () => {
 
 const memoryConfig = baseConfig;
 const redisConfig: SessionLikeConfig = {
-	session: {
-		...baseConfig.session,
+	"session-store": {
+		...baseConfig["session-store"],
 		storage: { type: "redis", redis: { url: "redis://localhost:6379" } } as { type: string },
 	},
 };
 
 describe("sessionStoreModuleFor(config) — replica-safety declaration", () => {
-	it("declares replica-unsafe state on the manifest when session.storage.type is memory", () => {
+	it("declares replica-unsafe state on the manifest when session-store.storage.type is memory", () => {
 		const m = sessionStoreModuleFor(memoryConfig as never) as unknown as Module;
 		expect(m.replicaSafety?.unsafe).toBe(true);
 		// The guard quotes this; it has to say what breaks, not "use redis".
@@ -276,7 +270,7 @@ describe("sessionStoreModuleFor(config) — replica-safety declaration", () => {
 		expect(replicaUnsafeReason(m)).toBeUndefined();
 	});
 
-	it("is otherwise the same module: name, slots, configSchema and the one route", () => {
+	it("is otherwise the same module: name, slots, section and the one route", () => {
 		const base = sessionStoreModule as unknown as Module;
 		for (const m of [
 			sessionStoreModuleFor(memoryConfig as never),
@@ -286,7 +280,7 @@ describe("sessionStoreModuleFor(config) — replica-safety declaration", () => {
 			expect(built.name).toBe(base.name);
 			expect(built.requires).toEqual(base.requires);
 			expect(built.optional).toEqual(base.optional);
-			expect(built.configSchema).toBe(base.configSchema);
+			expect(built.section).toBe(base.section);
 			expect(built.contributes?.routes).toHaveLength(1);
 		}
 	});
@@ -357,7 +351,7 @@ describe("sessionStoreModule (static manifest) — factory-time refusal under mu
 	it('refuses memory storage when the slot says "multi"', async () => {
 		await expect(
 			factoryOf(sessionStoreModule)({
-				config: memoryConfig as never,
+				section: memoryConfig["session-store"] as never,
 				deploymentMode: "multi",
 				lifecycleRegistrar: undefined,
 			} as never),
@@ -371,7 +365,7 @@ describe("sessionStoreModule (static manifest) — factory-time refusal under mu
 	it('mounts memory storage when the slot says "single" or "unset"', async () => {
 		for (const deploymentMode of ["single", "unset"] as const) {
 			const route = await factoryOf(sessionStoreModule)({
-				config: memoryConfig as never,
+				section: memoryConfig["session-store"] as never,
 				deploymentMode,
 				lifecycleRegistrar: undefined,
 			} as never);
@@ -381,7 +375,7 @@ describe("sessionStoreModule (static manifest) — factory-time refusal under mu
 
 	it('mounts redis storage when the slot says "multi"', async () => {
 		const route = await factoryOf(sessionStoreModule)({
-			config: redisConfig as never,
+			section: redisConfig["session-store"] as never,
 			deploymentMode: "multi",
 			lifecycleRegistrar: undefined,
 		} as never);
@@ -392,7 +386,7 @@ describe("sessionStoreModule (static manifest) — factory-time refusal under mu
 		for (const deploymentMode of [undefined, "MULTI", null]) {
 			await expect(
 				factoryOf(sessionStoreModule)({
-					config: redisConfig as never,
+					section: redisConfig["session-store"] as never,
 					deploymentMode,
 					lifecycleRegistrar: undefined,
 				} as never),
@@ -407,12 +401,14 @@ describe("sessionStoreModule (static manifest) — factory-time refusal under mu
 		await expect(
 			factoryOf(sessionStoreModule)({
 				config: { ...memoryConfig, core: { deployment: { mode: "single" } } } as never,
+				section: memoryConfig["session-store"] as never,
 				deploymentMode: "multi",
 				lifecycleRegistrar: undefined,
 			} as never),
 		).rejects.toMatchObject({ reason: "replica-unsafe-adapter" });
 		const route = await factoryOf(sessionStoreModule)({
 			config: { ...memoryConfig, core: { deployment: { mode: "multi" } } } as never,
+			section: memoryConfig["session-store"] as never,
 			deploymentMode: "single",
 			lifecycleRegistrar: undefined,
 		} as never);
@@ -431,11 +427,10 @@ describe("sessionStoreModule (static manifest) — factory-time refusal under mu
 			const boot = createApp({
 				modules: [sessionStoreModule],
 				bootstrapComponents: {
-					config: {
-						...base,
-						session: { ...base.session, storage: { type: "memory" } },
+					config: withSessionCaptures({
+						...withStore(base, { storage: { type: "memory" } }),
 						...(deployment === undefined ? {} : { core: { ...base.core, deployment } }),
-					},
+					}),
 					pathResolver: (p: string) => p,
 				} as never,
 			});
@@ -464,19 +459,23 @@ describe("sessionStoreModule (static manifest) — factory-time refusal under mu
 
 describe("the session store refuses the cookie its sessionCookiePolicy refuses", () => {
 	const HOST_PREFIX =
-		"session.name with __Host- prefix requires session.secure=true and session.domain=null";
-	const SECURE_PREFIX = "session.name with __Secure- prefix requires session.secure=true";
-	const NOT_A_TOKEN = 'session.name "auth session" is not a cookie name (an RFC 6265 token)';
+		"session-store.name with __Host- prefix requires session-store.secure=true and session-store.domain=null";
+	const SECURE_PREFIX =
+		"session-store.name with __Secure- prefix requires session-store.secure=true";
+	const NOT_A_TOKEN = 'session-store.name "auth session" is not a cookie name (an RFC 6265 token)';
 	const notADomain = (domain: string) =>
-		`session.domain ${JSON.stringify(domain)} is not a cookie domain (a host name, one leading dot allowed)`;
-	const CROSS_SITE = 'session.sameSite = "none" requires session.secure = true';
-	const LIFETIME = `session.maxAge must be a whole number of milliseconds from 1 to ${MAX_DURATION_MS}`;
+		`session-store.domain ${JSON.stringify(domain)} is not a cookie domain (a host name, one leading dot allowed)`;
+	const CROSS_SITE =
+		'session-store.sameSite = "none" requires session-store.secure = true (SESSION_STORE_SECURE=true): browsers drop a SameSite=None cookie that is not Secure';
+	const LIFETIME = `session-store.maxAge must be a whole number of milliseconds from 1 to ${MAX_DURATION_MS}`;
 
-	/** The fixture's configuration with `change` laid over its session section. */
-	const configWith = (change: Record<string, unknown>) => {
-		const base = makeValidAppConfig();
-		return { ...base, session: { ...base.session, ...change } };
-	};
+	/** The session store's section of a configuration, as a route factory is handed it. */
+	const storeOf = (config: object): never =>
+		(config as { "session-store": unknown })["session-store"] as never;
+
+	/** The fixture's configuration with `change` laid over its session store's section. */
+	const configWith = (change: Record<string, unknown>) =>
+		withSessionCaptures(withStore(makeValidAppConfig(), change));
 
 	const FORMS = [
 		["sessionStoreModuleFor(config)", (config: never) => sessionStoreModuleFor(config)],
@@ -509,7 +508,7 @@ describe("the session store refuses the cookie its sessionCookiePolicy refuses",
 			"an empty name",
 			"name",
 			{ name: "" },
-			'session.name "" is not a cookie name (an RFC 6265 token)',
+			'session-store.name "" is not a cookie name (an RFC 6265 token)',
 		],
 		[
 			"a __Secure- name that is not secure",
@@ -545,8 +544,8 @@ describe("the session store refuses the cookie its sessionCookiePolicy refuses",
 		],
 	] as const;
 
-	/** A refusal core's schema makes first, with its own message: [what, key, change, the policy's message]. */
-	const REFUSED_BY_CORE = [
+	/** A refusal the schema's own leaves make, or the policy's, for SameSite: [what, key, change, the policy's message]. */
+	const REFUSED_BY_THE_SCHEMA = [
 		[
 			"SameSite=None that is not secure",
 			"secure",
@@ -560,7 +559,7 @@ describe("the session store refuses the cookie its sessionCookiePolicy refuses",
 
 	describe.each(FORMS)("through createApp, with %s installed alone", (_form, form) => {
 		it.each(REFUSED_BY_THE_STORE)(
-			"refuses %s at validation, its one issue naming session.%s with the policy's message",
+			"refuses %s at validation, its one issue naming session-store.%s with the policy's message",
 			async (_what, key, change, message) => {
 				expect(await settled(bootAlone(form, change))).toMatchObject({
 					name: "BootError",
@@ -568,21 +567,23 @@ describe("the session store refuses the cookie its sessionCookiePolicy refuses",
 					stage: "validateManifests",
 					details: {
 						reason: "config-validation-failed",
-						issues: [{ code: "custom", path: ["session", key], message }],
+						issues: [{ code: "custom", path: ["session-store", key], message }],
 					},
 				});
 			},
 		);
 
-		it.each(REFUSED_BY_CORE)(
-			"refuses %s at validation, naming session.%s",
+		it.each(REFUSED_BY_THE_SCHEMA)(
+			"refuses %s at validation, naming session-store.%s",
 			async (_what, key, change) => {
 				expect(await settled(bootAlone(form, change))).toMatchObject({
 					name: "BootError",
 					reason: "config-validation-failed",
 					stage: "validateManifests",
 					details: {
-						issues: expect.arrayContaining([expect.objectContaining({ path: ["session", key] })]),
+						issues: expect.arrayContaining([
+							expect.objectContaining({ path: ["session-store", key] }),
+						]),
 					},
 				});
 			},
@@ -622,12 +623,12 @@ describe("the session store refuses the cookie its sessionCookiePolicy refuses",
 		return factory;
 	};
 
-	it.each([...REFUSED_BY_THE_STORE, ...REFUSED_BY_CORE])(
+	it.each([...REFUSED_BY_THE_STORE, ...REFUSED_BY_THE_SCHEMA])(
 		"the route refuses %s itself, with the policy's message, for deps no parse validated",
 		async (_what, _key, change, message) => {
 			await expect(
 				factoryOf(sessionStoreModule)({
-					config: configWith(change) as never,
+					section: storeOf(configWith(change)),
 					deploymentMode: "unset",
 					lifecycleRegistrar: undefined,
 				} as never),
@@ -640,7 +641,7 @@ describe("the session store refuses the cookie its sessionCookiePolicy refuses",
 		vi.mocked(createClient).mockClear();
 		await expect(
 			factoryOf(sessionStoreModule)({
-				config: configWith({ name: "auth session", storage: redis }) as never,
+				section: storeOf(configWith({ name: "auth session", storage: redis })),
 				deploymentMode: "unset",
 				lifecycleRegistrar: undefined,
 			} as never),
@@ -648,14 +649,14 @@ describe("the session store refuses the cookie its sessionCookiePolicy refuses",
 		expect(createClient).not.toHaveBeenCalled();
 
 		await factoryOf(sessionStoreModule)({
-			config: configWith({ storage: redis }) as never,
+			section: storeOf(configWith({ storage: redis })),
 			deploymentMode: "unset",
 			lifecycleRegistrar: undefined,
 		} as never);
 		expect(createClient).toHaveBeenCalledTimes(1);
 	});
 
-	it("mounts the cookie its provider built, though config.session changed after", async () => {
+	it("mounts the cookie its provider built, though config's session-store changed after", async () => {
 		const config = configWith({ name: "auth.session", secure: false }) as AppConfig;
 		const seen: { policy?: SessionCookiePolicy } = {};
 		const handle = await createApp({
@@ -668,7 +669,8 @@ describe("the session store refuses the cookie its sessionCookiePolicy refuses",
 					contributes: {
 						routes: [
 							(deps) => {
-								(deps.config as { session: { name: string } }).session.name = "auth.other";
+								(deps.config as unknown as { "session-store": { name: string } })["session-store"].name =
+									"auth.other";
 								return { id: "test:mutator", mountPath: "/mutator", handler: express.Router() };
 							},
 						],
@@ -707,13 +709,15 @@ describe("the session store refuses the cookie its sessionCookiePolicy refuses",
 
 	it("sets the cookie the section describes: its name, Domain, SameSite and lifetime", async () => {
 		const route = await factoryOf(sessionStoreModule)({
-			config: configWith({
-				name: "auth.session",
-				secure: false,
-				sameSite: "strict",
-				domain: "example.com",
-				maxAge: 60_000,
-			}) as never,
+			section: storeOf(
+				configWith({
+					name: "auth.session",
+					secure: false,
+					sameSite: "strict",
+					domain: "example.com",
+					maxAge: 60_000,
+				}),
+			),
 			deploymentMode: "unset",
 			lifecycleRegistrar: undefined,
 		} as never);
@@ -742,7 +746,7 @@ describe("the session store refuses the cookie its sessionCookiePolicy refuses",
 
 	it("sets a host-only cookie for an empty domain", async () => {
 		const route = await factoryOf(sessionStoreModule)({
-			config: configWith({ name: "auth.session", secure: false, domain: "" }) as never,
+			section: storeOf(configWith({ name: "auth.session", secure: false, domain: "" })),
 			deploymentMode: "unset",
 			lifecycleRegistrar: undefined,
 		} as never);

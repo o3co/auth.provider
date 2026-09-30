@@ -28,13 +28,13 @@ import { templateReference } from "../modules.mjs";
 const configDir = fileURLToPath(new URL("../../config", import.meta.url));
 
 // Provide required secrets so AppConfigSchema parse succeeds. These are
-// test-only values — no real keys are embedded here. SESSION_SECRET
+// test-only values — no real keys are embedded here. SESSION_STORE_SECRET
 // carries a 256-bit entropy floor, so these clear it (the '.' characters keep
 // them outside the base64 alphabet, so the UTF-8 length is what counts).
 const testEnv = {
 	OAUTH_JWT_SECRET: "test-secret-three-tier.at-least-32-bytes.ok",
 	OAUTH_JWT_ISSUER: "https://auth.test",
-	SESSION_SECRET: "test-session-secret-three-tier.at-least-32-bytes.ok",
+	SESSION_STORE_SECRET: "test-session-secret-three-tier.at-least-32-bytes.ok",
 };
 
 function buildResolvedConfig(env: string, extraEnv: Record<string, string> = {}): AppConfig {
@@ -110,7 +110,7 @@ describe("three-tier HOCON resolution (env → application.conf → reference.co
 
 	it("core's reference.conf ships no rateLimit.failMode: it is the Redis limiter's own key", () => {
 		const config = buildResolvedConfig("development");
-		expect(config.rateLimit).not.toHaveProperty("failMode");
+		expect(config).not.toHaveProperty("rateLimit.failMode");
 	});
 
 	it("template application.conf ships clientCredentials.enabled off", () => {

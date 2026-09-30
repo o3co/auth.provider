@@ -15,22 +15,25 @@
  */
 
 /**
- * The oauth package's sections and core's token-binding settings, through the
- * template's own reading of the full set: the operator's layer and
- * environment read once, phase one's switches, then the layers over every
+ * The oauth and session packages' sections and core's token-binding settings,
+ * through the template's own reading of the full set: the operator's layer
+ * and environment read once, phase one's switches, then the layers over every
  * loaded package's `reference.conf` handed to boot. The grant switches sit in
  * the sections of the modules that install the grants, `oauth-session` and
  * `oauth-authorization`, and phase one reads them there; the consent page and
  * the Client ID Metadata Documents in the oauth module's `oauth {}`; the
- * token-binding settings in core's `core {}`. A path they moved from refuses
- * boot naming the new one, a key a section does not declare is refused, and a
- * variable renamed with them refuses boot unless its new name carries the same
- * value.
+ * token-binding settings in core's `core {}`; the session cookie and its store
+ * in the session store's `session-store {}`, whose storage phase one reads;
+ * the login page and the login's budget in the session module's `session {}`.
+ * A path they moved from refuses boot naming the new one, a key a section does
+ * not declare is refused, and a variable renamed with them refuses boot unless
+ * its new name carries the same value.
  */
 
 import { BootError, resolveTokenBindingSettings } from "@o3co/auth-provider-core";
 import {
 	DISCOVERY_PATHS,
+	MULTI_ENV,
 	SINGLE_ENV,
 } from "@o3co/auth-provider-standalone/src/__tests__/all-modules-composition.fixture.mts";
 import request from "supertest";
@@ -154,6 +157,67 @@ describe("the oauth module's section and core's token-binding settings, read whe
 	});
 });
 
+describe("the session modules' sections, read where they now sit", () => {
+	it("session-store: the session cookie the SESSION_STORE_* variables describe, which the sessionCookiePolicy slot carries", async () => {
+		const composition = await boot({
+			env: {
+				...SINGLE_ENV,
+				SESSION_STORE_NAME: "auth.moved",
+				SESSION_STORE_MAX_AGE: "7200000",
+				SESSION_STORE_SAME_SITE: "strict",
+			},
+		});
+
+		expect(parsedAt(composition, "session-store")).toMatchObject({
+			name: "auth.moved",
+			maxAge: 7_200_000,
+			secure: false,
+			sameSite: "strict",
+		});
+		expect(composition.handle.components.sessionCookiePolicy).toMatchObject({
+			name: "auth.moved",
+			secure: false,
+			sameSite: "strict",
+			maxAgeMs: 7_200_000,
+		});
+	});
+
+	it("session.loginPage.url, which SESSION_LOGIN_PAGE_URL sets, is the page the loginEntry slot sends a browser to", async () => {
+		const composition = await boot({
+			env: { ...SINGLE_ENV, SESSION_LOGIN_PAGE_URL: "/sign-in?tenant=acme" },
+		});
+
+		expect(parsedAt(composition, "session.loginPage.url")).toBe("/sign-in?tenant=acme");
+		expect(composition.handle.components.loginEntry?.urlFor("/back")).toBe(
+			"/sign-in?tenant=acme&redirect_to=%2Fback",
+		);
+	});
+
+	it.each([
+		["SESSION_STORE_STORAGE_TYPE=memory", { SESSION_STORE_STORAGE_TYPE: "memory" }, ""],
+		[
+			'session-store.storage.type = "memory" in the operator\'s layer',
+			{},
+			'session-store.storage.type = "memory"\n',
+		],
+	])(
+		'%s under core.deployment.mode = "multi": phase one builds the store for memory, and the guard refuses it by name',
+		async (_what, env, operatorHocon) => {
+			/** The modules the guard refuses: the full set leaves its own stores in memory. */
+			const unsafe = async (options: FullSetOptions): Promise<unknown> => {
+				const err = await refused(options);
+				expect(err.reason).toBe("replica-unsafe-adapter");
+				return (err.details as { modules: unknown }).modules;
+			};
+
+			expect(await unsafe({ env: { ...MULTI_ENV, ...env }, operatorHocon })).toContain(
+				"session-store",
+			);
+			expect(await unsafe({ env: MULTI_ENV })).not.toContain("session-store");
+		},
+	);
+});
+
 describe("a path the settings moved from, written in the operator's own layer", () => {
 	/** Every key written at an old path, refused as moved. */
 	async function relocatedBy(operatorHocon: string): Promise<unknown> {
@@ -236,6 +300,69 @@ describe("a path the settings moved from, written in the operator's own layer", 
 		]);
 	});
 
+	it("session: each key of the session cookie and its store refused, naming its path under session-store and its variable", async () => {
+		const relocated = await relocatedBy(
+			[
+				"session {",
+				'  secret = "moved-session-secret.at-least-32-bytes.ok"',
+				'  name = "auth.moved"',
+				"  maxAge = 7200000",
+				"  secure = false",
+				'  sameSite = "strict"',
+				'  domain = "auth.example.com"',
+				'  storage { type = "memory", redis { url = "redis://x:6379", password = "p" } }',
+				"}",
+				"",
+			].join("\n"),
+		);
+
+		expect(relocated).toHaveLength(9);
+		expect(relocated).toEqual(
+			expect.arrayContaining(
+				(
+					[
+						["secret", "SECRET"],
+						["name", "NAME"],
+						["maxAge", "MAX_AGE"],
+						["secure", "SECURE"],
+						["sameSite", "SAME_SITE"],
+						["domain", "DOMAIN"],
+						["storage.type", "STORAGE_TYPE"],
+						["storage.redis.url", "STORAGE_REDIS_URL"],
+						["storage.redis.password", "STORAGE_REDIS_PASSWORD"],
+					] as const
+				).map(([key, variable]) => ({
+					module: "session-store",
+					from: `session.${key}`,
+					to: `session-store.${key}`,
+					environmentVariable: `SESSION_STORE_${variable}`,
+				})),
+			),
+		);
+	});
+
+	it("endpoints.login.url: refused, naming session.loginPage.url and its variable", async () => {
+		expect(await relocatedBy('endpoints.login.url = "/sign-in"\n')).toEqual([
+			{
+				module: "session",
+				from: "endpoints.login.url",
+				to: "session.loginPage.url",
+				environmentVariable: "SESSION_LOGIN_PAGE_URL",
+			},
+		]);
+	});
+
+	it("rateLimit.login: refused, naming session.rateLimit.login and no variable", async () => {
+		expect(await relocatedBy("rateLimit.login { windowMs = 60000, limit = 7 }\n")).toEqual([
+			{
+				module: "session",
+				from: "rateLimit.login.windowMs",
+				to: "session.rateLimit.login.windowMs",
+			},
+			{ module: "session", from: "rateLimit.login.limit", to: "session.rateLimit.login.limit" },
+		]);
+	});
+
 	it("oauth.tokenBinding: each key refused, naming its path under core.tokenBinding and its variable", async () => {
 		const relocated = await relocatedBy(
 			[
@@ -273,6 +400,10 @@ describe("a key a section does not declare", () => {
 		["oauth-authorization.grants.refreshToken.enable = true", "enable"],
 		['oauth.consentPage.path = "/consent"', "path"],
 		['core.tokenBinding.policy = "strict-mutual-exclusion"', "policy"],
+		['session.loginPag.url = "/sign-in"', "loginPag"],
+		["session.rateLimit.login.windowSeconds = 60", "windowSeconds"],
+		['session-store.storag.type = "memory"', "storag"],
+		['session-store.storage.redis.passwd = "p"', "passwd"],
 	])("%s: refused, naming %s", async (hocon, key) => {
 		const err = await refused({ operatorHocon: `${hocon}\n` });
 
@@ -371,6 +502,34 @@ describe("a variable renamed with the move, through the template's reading", () 
 			value: "true",
 			parsed: true,
 		},
+		{
+			module: "session",
+			from: "ENDPOINTS_LOGIN_URL",
+			to: "SESSION_LOGIN_PAGE_URL",
+			path: "session.loginPage.url",
+			value: "/sign-in",
+			parsed: "/sign-in",
+		},
+		...(
+			[
+				["SECRET", "secret", "t-prime-session-secret.at-least-32-bytes.ok", undefined],
+				["NAME", "name", "auth.renamed", undefined],
+				["MAX_AGE", "maxAge", "7200000", 7_200_000],
+				["SECURE", "secure", "false", false],
+				["SAME_SITE", "sameSite", "strict", undefined],
+				["DOMAIN", "domain", "auth.example.com", undefined],
+				["STORAGE_TYPE", "storage.type", "memory", undefined],
+				["STORAGE_REDIS_URL", "storage.redis.url", "redis://renamed.test:6379", undefined],
+				["STORAGE_REDIS_PASSWORD", "storage.redis.password", "renamed-password", undefined],
+			] as const
+		).map(([name, key, value, parsed]) => ({
+			module: "session-store",
+			from: `SESSION_${name}`,
+			to: `SESSION_STORE_${name}`,
+			path: `session-store.${key}`,
+			value,
+			parsed: parsed ?? value,
+		})),
 	];
 
 	it.each(ROWS)(

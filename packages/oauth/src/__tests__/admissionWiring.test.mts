@@ -38,7 +38,7 @@ import {
 	type SessionRequirementResolver,
 	SUBJECT_REVOCATION_ABSENCE_POLICY,
 } from "@o3co/auth-provider-core";
-import { GrantRegistry, resolverForTests } from "@o3co/auth-provider-core/testing";
+import { createTestLoginEntry, GrantRegistry, resolverForTests } from "@o3co/auth-provider-core/testing";
 import express from "express";
 import { describe, expect, it } from "vitest";
 import { OAUTH_ROUTER_ADMISSION_ACTIONS } from "#/admissionActions.mjs";
@@ -86,6 +86,7 @@ describe("the consumers' factories refuse to build without the requirements reso
 	it("createOAuthRouter throws, naming the option", async () => {
 		await expect(
 			createOAuthRouter(express, {
+				loginEntry: createTestLoginEntry(),
 				registry: new GrantRegistry(),
 				config,
 				clientRepository,
@@ -99,6 +100,7 @@ describe("the consumers' factories refuse to build without the requirements reso
 
 	it("createOAuthRouter builds with resolverForTests", async () => {
 		const { router } = await createOAuthRouter(express, {
+			loginEntry: createTestLoginEntry(),
 			registry: new GrantRegistry(),
 			config,
 			clientRepository,
@@ -118,6 +120,7 @@ describe("the consumers' factories refuse to build without the requirements reso
 		} as never);
 		const build = (actions: Readonly<Record<string, { readonly grade: "use" }>>) =>
 			createOAuthRouter(express, {
+				loginEntry: createTestLoginEntry(),
 				registry,
 				config,
 				clientRepository,
@@ -172,6 +175,7 @@ describe("the consumers' factories refuse to build without the requirements reso
 			);
 		await expect(
 			createOAuthRouter(express, {
+				loginEntry: createTestLoginEntry(),
 				registry: new GrantRegistry(),
 				config,
 				clientRepository,

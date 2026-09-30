@@ -30,6 +30,7 @@ import {
 import {
 	createTestApp,
 	createTestCsrfTokenSigner,
+	createTestSessionCookiePolicy,
 	makeValidAppConfig,
 	resolverForTests,
 } from "@o3co/auth-provider-core/testing";
@@ -38,6 +39,7 @@ import request from "supertest";
 import { describe, expect, it, vi } from "vitest";
 import { SESSION_ADMISSION_ACTIONS } from "#/admissionActions.mjs";
 import { sessionModule } from "#/module.mjs";
+import { withSessionCaptures } from "./_helpers/sections.mjs";
 
 // ---------------------------------------------------------------------------
 // Shared test-only stubs (typed-slot const Modules)
@@ -110,6 +112,12 @@ const csrfTokenSignerModule = defineModule({
 	provides: { csrfTokenSigner: () => createTestCsrfTokenSigner() },
 });
 
+/** The session cookie, where the session store's module is not loaded. */
+const sessionCookiePolicyModule = defineModule({
+	name: "test:session-cookie-policy",
+	provides: { sessionCookiePolicy: () => createTestSessionCookiePolicy() },
+});
+
 /**
  * Stubs for three oauth-package slots that no session-package module
  * provides. The boot-time `federation-stores-incomplete` validator requires
@@ -166,6 +174,7 @@ const baseTestModules = [
 	federationTokenStoreModule,
 	sessionFederationIndexModule,
 	csrfTokenSignerModule,
+	sessionCookiePolicyModule,
 	// Oauth-package stubs for the `federation-stores-incomplete` validator (above).
 	sessionRPRegistryModule,
 	sessionFamilyIndexModule,
@@ -227,7 +236,7 @@ describe("sessionModule (boot integration)", () => {
 		const config = makeValidAppConfig();
 		const handle = await createTestApp({
 			modules: baseTestModules,
-			bootstrapComponents: { config, pathResolver: (s: string) => s },
+			bootstrapComponents: { config: withSessionCaptures(config), pathResolver: (s: string) => s },
 		});
 		expect(handle.routes.some((r) => r.contribution.mountPath === "/session")).toBe(true);
 		await handle.dispose();
@@ -249,7 +258,7 @@ describe("sessionModule (boot integration)", () => {
 		} as AppConfig;
 		const handle = await createTestApp({
 			modules: [...baseTestModules, stubFederationModule],
-			bootstrapComponents: { config, pathResolver: (s: string) => s },
+			bootstrapComponents: { config: withSessionCaptures(config), pathResolver: (s: string) => s },
 		});
 		expect(handle.inspect.federations.has("stub")).toBe(true);
 		await handle.dispose();
@@ -272,7 +281,7 @@ describe("sessionModule (boot integration)", () => {
 		await expect(
 			createTestApp({
 				modules: [...baseTestModules, stubFederationModule],
-				bootstrapComponents: { config, pathResolver: (s: string) => s },
+				bootstrapComponents: { config: withSessionCaptures(config), pathResolver: (s: string) => s },
 			}),
 		).rejects.toThrow(/callbackURL is required/);
 	});
@@ -291,7 +300,7 @@ describe("sessionModule (boot integration)", () => {
 		} as AppConfig;
 		const handle = await createTestApp({
 			modules: baseTestModules,
-			bootstrapComponents: { config, pathResolver: (s: string) => s },
+			bootstrapComponents: { config: withSessionCaptures(config), pathResolver: (s: string) => s },
 		});
 		// No throw at boot, no entry in the federation registry.
 		expect(handle.inspect.federations.has("disabledFed")).toBe(false);
@@ -377,6 +386,8 @@ describe("sessionModule — the link routes are a consumer of session admission"
 		};
 		const contribution = factory({
 			config,
+			section: base.session,
+			sessionCookiePolicy: createTestSessionCookiePolicy(),
 			federationProviders: new Map([["stub", stubFederationProvider]]),
 			federationRedirectPolicyResolver: new Map([
 				[
@@ -472,6 +483,8 @@ describe("sessionModule — the password login is a consumer of session admissio
 		};
 		const contribution = factory({
 			config,
+			section: base.session,
+			sessionCookiePolicy: createTestSessionCookiePolicy(),
 			deploymentMode: "single",
 			userRepository: {
 				authenticate: async () => ({ id: "user-1", username: "alice" }),
@@ -564,6 +577,8 @@ describe("sessionModule — the login throttle reads the deploymentMode slot", (
 		};
 		return factory({
 			config: { ...base, core: { ...base.core, deployment } },
+			section: base.session,
+			sessionCookiePolicy: createTestSessionCookiePolicy(),
 			deploymentMode,
 			csrfTokenSigner: createTestCsrfTokenSigner(),
 			logger,
@@ -614,10 +629,10 @@ describe("sessionModule — the login throttle reads the deploymentMode slot", (
 			const boot = createTestApp({
 				modules: baseTestModules,
 				bootstrapComponents: {
-					config: {
+					config: withSessionCaptures({
 						...base,
 						...(deployment === undefined ? {} : { core: { ...base.core, deployment } }),
-					},
+					}),
 					pathResolver: (s: string) => s,
 					logger,
 				} as never,

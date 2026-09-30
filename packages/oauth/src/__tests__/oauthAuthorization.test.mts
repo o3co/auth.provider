@@ -34,6 +34,7 @@ import {
 } from "@o3co/auth-provider-core";
 import {
 	createTestApp,
+	createTestLoginEntry,
 	makeValidAppConfig,
 	resolverForTests,
 } from "@o3co/auth-provider-core/testing";
@@ -199,6 +200,7 @@ async function buildAuthorizeApp(opts: {
 	) as AppConfig;
 
 	const { router } = await createOAuthRouter(express, {
+		loginEntry: createTestLoginEntry(),
 		requirements: resolverForTests([], { actions: OAUTH_ADMISSION_ACTIONS }),
 		registry: authorizationServerRegistry(),
 		config: mergedConfig,
@@ -1441,6 +1443,7 @@ describe("/authorize public-client PKCE/S256 mandatory (RFC 9700 §2.1.1)", () =
 		};
 
 		const { router } = await createOAuthRouter(express, {
+			loginEntry: createTestLoginEntry(),
 			requirements: resolverForTests([], { actions: OAUTH_ADMISSION_ACTIONS }),
 			registry: authorizationServerRegistry(),
 			config: authorizeConfig,

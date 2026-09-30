@@ -40,6 +40,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { FederationRedirectPolicy } from "#/federations/redirect-policy.mjs";
 import { sessionModule } from "#/module.mjs";
 import { sessionStoreModuleFor } from "#/modules/sessionStoreModule.mjs";
+import { withSessionCaptures, withStore } from "./_helpers/sections.mjs";
 
 /** Every character a contributed text might carry that RFC 6749 does not allow. */
 const HOSTILE = 'say "hi" \\ see §3 — café\r\nX-Injected: 1 \u{1F600}';
@@ -121,11 +122,12 @@ const limiterAnswering = (decision: Partial<RateLimitDecision>): RateLimiter => 
 });
 
 const config = (): AppConfig => {
-	const base = makeValidAppConfig();
+	// supertest speaks plain HTTP, so no `Secure` cookie and no `__Host-` name.
+	const base = withSessionCaptures(
+		withStore(makeValidAppConfig(), { name: "auth.session", secure: false }),
+	);
 	return {
 		...base,
-		// supertest speaks plain HTTP, so no `Secure` cookie and no `__Host-` name.
-		session: { ...base.session, name: "auth.session", secure: false },
 		federations: {
 			...base.federations,
 			stub: {

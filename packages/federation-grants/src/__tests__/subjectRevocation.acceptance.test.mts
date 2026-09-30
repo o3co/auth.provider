@@ -143,7 +143,7 @@ const boot = async (allowKeep: boolean, opts: BootOptions = {}) => {
 		...makeValidCoreConfig(),
 		// The service sizes the boundary from the lifetimes it has to
 		// outlive, and reads them here.
-		session: full.session,
+		"session-store": full["session-store"],
 		federations: {
 			upstream: {
 				enabled: true,
@@ -151,7 +151,7 @@ const boot = async (allowKeep: boolean, opts: BootOptions = {}) => {
 				clientId: connection.upstreamClientId,
 			},
 		},
-		rateLimit: { ...full.rateLimit, failMode: "closed" },
+		rateLimit: { failMode: "closed" },
 		audit: { sink: { type: "none" } },
 		"federation-grants": {
 			enabled: true,

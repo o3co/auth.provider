@@ -109,10 +109,10 @@ const BASE_ENV: Readonly<Record<string, string>> = {
 	OAUTH_JWT_ALGORITHM: "HS256",
 	OAUTH_JWT_SECRET: "federation-grants-composition.at-least-32-bytes.ok",
 	OAUTH_JWT_ISSUER: "https://auth.test",
-	SESSION_SECRET: "federation-grants-composition-session.at-least-32-bytes.ok",
-	SESSION_SECURE: "false",
-	SESSION_NAME: "auth.session",
-	SESSION_STORAGE_TYPE: "memory",
+	SESSION_STORE_SECRET: "federation-grants-composition-session.at-least-32-bytes.ok",
+	SESSION_STORE_SECURE: "false",
+	SESSION_STORE_NAME: "auth.session",
+	SESSION_STORE_STORAGE_TYPE: "memory",
 	CLIENT_USER_TYPE: "yaml",
 	REFRESH_TOKEN_FAMILY_STORE_REDIS_URL: "redis://redis.test:6379",
 	USER_SESSION_STORES_ADAPTER: "memory",
@@ -130,8 +130,8 @@ const BASE_ENV: Readonly<Record<string, string>> = {
 const ALL_REDIS_ENV: Readonly<Record<string, string>> = {
 	...BASE_ENV,
 	CORE_DEPLOYMENT_MODE: "multi",
-	SESSION_STORAGE_TYPE: "redis",
-	SESSION_STORAGE_REDIS_URL: "redis://redis.test:6379",
+	SESSION_STORE_STORAGE_TYPE: "redis",
+	SESSION_STORE_STORAGE_REDIS_URL: "redis://redis.test:6379",
 	USER_SESSION_STORES_ADAPTER: "redis",
 	RATE_LIMITER_ADAPTER: "redis",
 	OAUTH_CODE_ADAPTER: "redis",
@@ -329,7 +329,7 @@ describe("the standalone composes federation grants from its config", () => {
 		// The connect flow's login trip is the session module's loginEntry,
 		// built from the configured login page: the URL connect sends
 		// a browser that is not signed in to.
-		const page = config.endpoints.login.url;
+		const page = (config.session as { loginPage: { url: string } }).loginPage.url;
 		const back = "https://auth.example/session/federation-grants/connect?request=h";
 		expect(handleRef.components.loginEntry?.urlFor(back)).toBe(
 			`${page}${page.includes("?") ? "&" : "?"}redirect_to=${encodeURIComponent(back)}`,
@@ -464,23 +464,23 @@ describe("the standalone composes federation grants from its config", () => {
 		[
 			"a __Secure- name that is not secure",
 			"name",
-			{ SESSION_NAME: "__Secure-auth.session", SESSION_SECURE: "false" },
-			/__Secure- prefix requires session\.secure=true/,
+			{ SESSION_STORE_NAME: "__Secure-auth.session", SESSION_STORE_SECURE: "false" },
+			/__Secure- prefix requires session-store\.secure=true/,
 		],
 		[
 			"a name that is not an RFC 6265 token",
 			"name",
-			{ SESSION_NAME: "auth session" },
+			{ SESSION_STORE_NAME: "auth session" },
 			/is not a cookie name \(an RFC 6265 token\)/,
 		],
 		[
 			"a domain that is a URL",
 			"domain",
-			{ SESSION_NAME: "auth.session", SESSION_DOMAIN: "https://auth.example.com" },
+			{ SESSION_STORE_NAME: "auth.session", SESSION_STORE_DOMAIN: "https://auth.example.com" },
 			/is not a cookie domain/,
 		],
 	])(
-		"refuses at validation a session cookie no browser keeps, %s, naming session.%s, with or without the subject revocation service",
+		"refuses at validation a session cookie no browser keeps, %s, naming session-store.%s, with or without the subject revocation service",
 		async (_what, key, cookie, refusal) => {
 			for (const grants of [{}, GRANTS_ON]) {
 				const caught = await boot(resolveConfig({ ...BASE_ENV, ...grants, ...cookie }), true).then(
@@ -495,7 +495,7 @@ describe("the standalone composes federation grants from its config", () => {
 					reason: "config-validation-failed",
 					stage: "validateManifests",
 					details: {
-						issues: [expect.objectContaining({ path: ["session", key] })],
+						issues: [expect.objectContaining({ path: ["session-store", key] })],
 					},
 				});
 				expect(messageChain(caught)).toMatch(refusal);
@@ -505,16 +505,16 @@ describe("the standalone composes federation grants from its config", () => {
 
 	it.each([
 		// `config/application.conf`'s own cookie: `__Host-`, secure, host-only.
-		["the template's default", { SESSION_NAME: undefined, SESSION_SECURE: undefined }],
+		["the template's default", { SESSION_STORE_NAME: undefined, SESSION_STORE_SECURE: undefined }],
 		// `.env.example`'s plain-HTTP pair, which `make dev` runs with.
-		[".env.example's", { SESSION_NAME: "auth.sid", SESSION_SECURE: "false" }],
+		[".env.example's", { SESSION_STORE_NAME: "auth.sid", SESSION_STORE_SECURE: "false" }],
 		// `docker-compose.production.yml` restores the default name, secure.
 		[
 			"the production compose file's",
-			{ SESSION_NAME: "__Host-auth.session", SESSION_SECURE: "true" },
+			{ SESSION_STORE_NAME: "__Host-auth.session", SESSION_STORE_SECURE: "true" },
 		],
 		// o3co/auth's `tests/docker-compose.yml`, which the umbrella E2E boots.
-		["the umbrella E2E's", { SESSION_NAME: "auth.session", SESSION_SECURE: "false" }],
+		["the umbrella E2E's", { SESSION_STORE_NAME: "auth.session", SESSION_STORE_SECURE: "false" }],
 	])(
 		"boots %s session cookie, with or without the subject revocation service",
 		async (_what, cookie) => {
@@ -675,9 +675,10 @@ describe("the grants consent answer is held to the session module's CSRF guard",
 	/** The standalone with grants on and `SIBLING` on `session.csrf.trustedOrigins`, behind its proxy. */
 	const bootTrustingSibling = async () => {
 		const config = resolveConfig({ ...BASE_ENV, ...GRANTS_ON });
+		const session = config.session as { csrf?: object };
 		const trusting = {
 			...config,
-			session: { ...config.session, csrf: { ...config.session.csrf, trustedOrigins: [SIBLING] } },
+			session: { ...session, csrf: { ...session.csrf, trustedOrigins: [SIBLING] } },
 		} as AppConfig;
 		handleRef = await boot(trusting, true);
 		return express().set("trust proxy", "loopback").use(handleRef.router);

@@ -125,7 +125,7 @@ const makeConfig = (deviceGrant: Record<string, unknown>): AppConfig => {
 		...base,
 		// supertest speaks plain HTTP, and express-session sets no `Secure`
 		// cookie on it — which also rules out the fixture's `__Host-` name.
-		session: { ...base.session, name: "auth.session", secure: false },
+		"session-store": { ...base["session-store"], name: "auth.session", secure: false },
 		"device-grant": deviceGrant,
 	} as AppConfig;
 };
@@ -173,7 +173,7 @@ const bootWith = async (
 			config: {
 				...config,
 				"renamed-variables": {
-					...config["renamed-variables"],
+					...(config as { "renamed-variables"?: object })["renamed-variables"],
 					...renamedVariableCaptures({ modules, env: {} }),
 				},
 			},

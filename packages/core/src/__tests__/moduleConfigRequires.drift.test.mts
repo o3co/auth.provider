@@ -73,9 +73,7 @@ const CONFIG_REQUIRERS: readonly string[] = [
 	"packages/oauth -> oauth-session",
 	"packages/oauth -> subject-revocation-service",
 	"packages/oauth-token-exchange -> oauth-token-exchange",
-	"packages/session -> login-completion",
 	"packages/session -> session",
-	"packages/session -> session-store",
 	"packages/webauthn -> webauthn",
 	// The Redis stores read their own sections, and the deployment mode.
 	"packages/redis -> redis-code-repository",

@@ -54,6 +54,7 @@ import {
 import {
 	loginCompletionModule,
 	sessionModule,
+	sessionStoreModule,
 	sessionStoreModuleFor,
 } from "@o3co/auth-provider-session";
 import express from "express";
@@ -139,11 +140,11 @@ export const TOTP_SECTION = mfaTotpFactorConfigForTests()["mfa-totp-factor"];
 
 /**
  * What a composition layering the package's reference.conf and core's
- * captures of the MFA modules' renamed variables and core's own, under an
- * environment that sets none.
+ * captures of the MFA modules' renamed variables, the session package's
+ * modules' and core's own, under an environment that sets none.
  */
 export const UNSET_RENAMED_VARIABLES = renamedVariableCaptures({
-	modules: [mfaTotpFactorModule, mfaModule()],
+	modules: [mfaTotpFactorModule, mfaModule(), sessionModule, sessionStoreModule],
 	core: CORE_RELOCATIONS,
 	env: {},
 });
@@ -165,12 +166,8 @@ export function configFor(
 	return {
 		...base,
 		oauth: { ...base.oauth, jwt: { ...base.oauth.jwt, issuer: ISSUER } },
-		session: {
-			...base.session,
-			name: "auth.session",
-			secure: false,
-			redirectAllowlist: ["https://app.example/after"],
-		},
+		"session-store": { ...base["session-store"], name: "auth.session", secure: false },
+		session: { ...base.session, redirectAllowlist: ["https://app.example/after"] },
 		...coreConfigForTests({ expected }),
 		...mfaConfigForTests({ key: MFA_KEY, mode, ...(mfa as Partial<MfaConfigForTestsOptions>) }),
 		...mfaTotpFactorConfigForTests(totp as MfaTotpFactorConfigForTestsOptions),

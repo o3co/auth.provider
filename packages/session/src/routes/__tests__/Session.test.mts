@@ -31,13 +31,19 @@ import { describe, expect, it, vi } from "vitest";
 import { createCsrfProtection } from "#/csrf.mjs";
 import { createRouter } from "#/routes/Session.mjs";
 
-/** Minimal AppConfig stub */
-const stubConfig: AppConfig = {
+/**
+ * Minimal configuration stub: the session module's section, `session`, and
+ * the session cookie the store's section, `session-store`, describes, which
+ * the router receives through the `sessionCookiePolicy` slot.
+ */
+const stubConfig = {
 	cors: { allowedOrigins: [] },
-	rateLimit: {
-		login: { windowMs: 60_000, limit: 100 },
-	},
 	session: {
+		rateLimit: {
+			login: { windowMs: 60_000, limit: 100 },
+		},
+	},
+	"session-store": {
 		name: "auth.session",
 		secure: false,
 		sameSite: "lax",
@@ -46,17 +52,37 @@ const stubConfig: AppConfig = {
 } as unknown as AppConfig;
 
 /**
- * `stubConfig` with the session slice overridden — the redirect allowlist and
- * the cookie domain are the two keys the `redirect_to` policy is built from.
+ * `stubConfig` with the redirect allowlist and the cookie domain overridden —
+ * the two keys the `redirect_to` policy is built from.
  */
-const configWith = (session: {
+const configWith = (settings: {
 	readonly domain?: string | null;
 	readonly redirectAllowlist?: readonly string[];
-}): AppConfig =>
-	({
-		...stubConfig,
-		session: { ...stubConfig.session, ...session },
-	}) as unknown as AppConfig;
+}): AppConfig => {
+	const { domain, redirectAllowlist } = settings;
+	const stub = stubConfig as unknown as Record<string, Record<string, unknown>>;
+	return {
+		...stub,
+		session: {
+			...stub.session,
+			...(redirectAllowlist === undefined ? {} : { redirectAllowlist }),
+		},
+		"session-store": { ...stub["session-store"], ...(domain === undefined ? {} : { domain }) },
+	} as unknown as AppConfig;
+};
+
+/** The session cookie a configuration's `session-store` describes, as the `sessionCookiePolicy` slot carries it. */
+const cookieOf = (config: AppConfig) => {
+	const cookie = (config as unknown as { "session-store": Record<string, unknown> })[
+		"session-store"
+	] as { name: string; secure: boolean; sameSite: "lax" | "strict" | "none"; domain: string | null };
+	return {
+		name: cookie.name,
+		secure: cookie.secure,
+		sameSite: cookie.sameSite,
+		domain: cookie.domain ?? undefined,
+	};
+};
 
 /**
  * A double-submit pair minted with the signer the router is given and the
@@ -230,7 +256,8 @@ function buildApp(
 	const router = createRouter(express, {
 		csrfTokenSigner: SIGNER,
 		userRepository,
-		config,
+		section: (config as unknown as { session: Record<string, unknown> }).session,
+		sessionCookie: cookieOf(config),
 		deploymentMode,
 		requirements: resolverForTests([]),
 		...(userSessionStore !== undefined ? { userSessionStore } : {}),
@@ -462,8 +489,8 @@ describe("Session routes — POST /session/login", () => {
 
 	/**
 	 * `redirect_to` is held to the federation flow's exact-match allowlist, and
-	 * an absent allowlist is the empty allowlist. `session.domain` defaults to
-	 * null, so "any absolute http(s) URL, narrowed to `session.domain`" would
+	 * an absent allowlist is the empty allowlist. `session-store.domain`
+	 * defaults to null, so "any absolute http(s) URL, narrowed to the domain" would
 	 * store any URL on the internet by default. `req.session.redirectTo` is
 	 * public on `SessionData`, and an MFA login transaction carries it back to
 	 * the page (`MfaTransaction.redirectTo`), so an embedder must be handed a
@@ -622,7 +649,7 @@ describe("Session routes — POST /session/login", () => {
 
 		// Same as the federation policy: a dead allowlist entry is a boot failure,
 		// not a redirect that is silently refused at request time.
-		it("refuses at construction an allowlist entry outside session.domain", () => {
+		it("refuses at construction an allowlist entry outside session-store.domain", () => {
 			expect(() =>
 				buildApp({
 					config: configWith({

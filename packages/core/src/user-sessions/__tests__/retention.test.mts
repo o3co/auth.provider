@@ -53,7 +53,7 @@ describe("resolveSubjectRevocationHorizonMs", () => {
 			accessToken: { expiresIn: 3600 },
 			...((over.oauth as Record<string, unknown>) ?? {}),
 		},
-		session: { maxAge: 43_200_000 },
+		"session-store": { maxAge: 43_200_000 },
 		...over,
 	});
 
@@ -75,7 +75,7 @@ describe("resolveSubjectRevocationHorizonMs", () => {
 				refreshToken: { expiresIn: 60 },
 				accessToken: { defaultExpiresIn: 60, maxExpiresIn: 86_400 },
 			},
-			session: { maxAge: 60_000 },
+			"session-store": { maxAge: 60_000 },
 		});
 		expect(horizon).toBeGreaterThan(86_400_000);
 	});
@@ -84,7 +84,7 @@ describe("resolveSubjectRevocationHorizonMs", () => {
 		// `expiresIn` alone means both the default and the maximum.
 		const horizon = resolveSubjectRevocationHorizonMs({
 			oauth: { refreshToken: { expiresIn: 60 }, accessToken: { expiresIn: 7_200 } },
-			session: { maxAge: 60_000 },
+			"session-store": { maxAge: 60_000 },
 		});
 		expect(horizon).toBeGreaterThan(7_200_000);
 		expect(horizon).toBeLessThan(7_200_000 + 600_000);
@@ -100,7 +100,7 @@ describe("resolveSubjectRevocationHorizonMs", () => {
 
 	it("takes the session lifetime when it is the longer one", () => {
 		const horizon = resolveSubjectRevocationHorizonMs(
-			config({ session: { maxAge: 30 * 86_400_000 } }),
+			config({ "session-store": { maxAge: 30 * 86_400_000 } }),
 		);
 		expect(horizon).toBeGreaterThan(30 * 86_400_000);
 	});
@@ -117,9 +117,9 @@ describe("resolveSubjectRevocationHorizonMs", () => {
 		// A hand-built configuration bypasses the schema, and a horizon
 		// computed from a missing lifetime is a boundary that expires early.
 		for (const broken of [
-			{ session: { maxAge: 43_200_000 } },
+			{ "session-store": { maxAge: 43_200_000 } },
 			{ oauth: { refreshToken: { expiresIn: 86_400 }, accessToken: { expiresIn: 3600 } } },
-			config({ session: { maxAge: null } }),
+			config({ "session-store": { maxAge: null } }),
 			config({ oauth: { refreshToken: { expiresIn: "soon" }, accessToken: { expiresIn: 3600 } } }),
 		]) {
 			expect(() => resolveSubjectRevocationHorizonMs(broken), JSON.stringify(broken)).toThrow();
@@ -173,9 +173,9 @@ describe("resolveSubjectRevocationHorizonMs", () => {
 			// The configuration's session lifetime, as a configuration built by
 			// hand may carry it.
 			for (const maxAge of [1n, circular]) {
-				const call = () => resolveSubjectRevocationHorizonMs(config({ session: { maxAge } }));
+				const call = () => resolveSubjectRevocationHorizonMs(config({ "session-store": { maxAge } }));
 				expect(call).toThrow(RangeError);
-				expect(call).toThrow("session.maxAge");
+				expect(call).toThrow("session-store.maxAge");
 			}
 		});
 
@@ -197,7 +197,7 @@ describe("resolveSubjectRevocationHorizonMs", () => {
 				["sessionCookiePolicy.maxAgeMs", { sessionCookie: sessionCookie(Number.NaN) }],
 				["sessionCookiePolicy.maxAgeMs", { sessionCookie: sessionCookie("12h") }],
 				["sessionCookiePolicy.maxAgeMs", { sessionCookie: sessionCookie(undefined) }],
-				// The session store's provider holds session.maxAge to whole
+				// The session store's provider holds session-store.maxAge to whole
 				// milliseconds within the one-year ceiling, as the schema does.
 				["sessionCookiePolicy.maxAgeMs", { sessionCookie: sessionCookie(1.5) }],
 				["sessionCookiePolicy.maxAgeMs", { sessionCookie: sessionCookie(MAX_DURATION_MS + 1) }],

@@ -50,17 +50,19 @@ import {
 import { createCsrfProtection } from "#/csrf.mjs";
 import { createRouter } from "#/routes/Session.mjs";
 
-const config = {
-	cors: { allowedOrigins: [] },
+/** The session module's section, as the router receives it. */
+const section = {
 	rateLimit: { login: { windowMs: 60_000, limit: 100 } },
-	session: {
-		name: "auth.session",
-		secure: false,
-		sameSite: "lax",
-		domain: null,
-		redirectAllowlist: ["https://app.example.com/after"],
-	},
-} as never;
+	redirectAllowlist: ["https://app.example.com/after"],
+};
+
+/** The session cookie, as the `sessionCookiePolicy` slot carries it. */
+const sessionCookie = {
+	name: "auth.session",
+	secure: false,
+	sameSite: "lax",
+	domain: undefined,
+} as const;
 
 /** The signer the router is given, and a protection over it that mints the tokens these requests carry. */
 const SIGNER = createTestCsrfTokenSigner();
@@ -239,7 +241,8 @@ function setup(options: Setup = {}) {
 		createRouter(express, {
 			csrfTokenSigner: SIGNER,
 			userRepository,
-			config,
+			section,
+			sessionCookie,
 			deploymentMode: "unset",
 			userSessionStore,
 			subjectSessionIndex: subjectSessionIndex as never,
@@ -303,7 +306,8 @@ describe("the session router takes the session requirements", () => {
 			createRouter(express, {
 				csrfTokenSigner: SIGNER,
 				userRepository: {} as UserRepository,
-				config,
+				section,
+			sessionCookie,
 				deploymentMode: "unset",
 				logger: spyLogger() as unknown as Logger,
 				requirements: undefined as never,
@@ -317,7 +321,8 @@ describe("the session router takes the session requirements", () => {
 			createRouter(express, {
 				csrfTokenSigner: SIGNER,
 				userRepository: {} as UserRepository,
-				config,
+				section,
+			sessionCookie,
 				deploymentMode: "unset",
 				logger: spyLogger() as unknown as Logger,
 				requirements: forged as never,

@@ -143,7 +143,7 @@ describe("token exchange through oauthModule's POST /oauth/token", () => {
 				config: {
 					...config,
 					"renamed-variables": {
-						...config["renamed-variables"],
+						...(config as { "renamed-variables"?: object })["renamed-variables"],
 						...renamedVariableCaptures({ modules, env: {} }),
 					},
 				},

@@ -22,12 +22,13 @@
  * never an implicit pass.
  */
 
-import { type CsrfTokenSigner, fullSectionsSchema, type Logger } from "@o3co/auth-provider-core";
+import type { CsrfTokenSigner, Logger } from "@o3co/auth-provider-core";
 import { createTestCsrfTokenSigner } from "@o3co/auth-provider-core/testing";
 import express, { type NextFunction, type Request, type Response } from "express";
 import request from "supertest";
 import { describe, expect, it, vi } from "vitest";
 import type { CsrfProtectionOptions } from "#/csrf.mjs";
+import { sessionSectionSchema } from "#/module.mjs";
 import {
 	checkRequestOrigin,
 	createCsrfGuard,
@@ -502,12 +503,11 @@ describe("csrf — ttlSeconds validation at construction", () => {
 		expect(() => createCsrfProtection({ signer: SIGNER, ttlSeconds: 7200.5 })).toThrow();
 	});
 
-	it("agrees with the config schema about what is acceptable", () => {
-		// Two guards, one rule. If either side's bounds drift this fails, which
-		// is the point — the schema restates a constant it cannot import.
+	it("agrees with the session section's schema about what is acceptable", () => {
+		// Two guards, one rule. If either side's bounds drift this fails.
 		const cases = [7200, MAX_CSRF_TTL_SECONDS, 1, 0, -1, 7200.5, MAX_CSRF_TTL_SECONDS + 1];
 		for (const ttlSeconds of cases) {
-			const schemaAccepts = fullSectionsSchema.shape.session.shape.csrf.safeParse({
+			const schemaAccepts = sessionSectionSchema.shape.csrf.unwrap().safeParse({
 				trustedOrigins: [],
 				ttlSeconds,
 			}).success;

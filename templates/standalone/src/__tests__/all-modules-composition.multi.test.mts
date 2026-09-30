@@ -186,7 +186,7 @@ describe('every module on, every shared store on Redis, core.deployment.mode = "
 	 * boot names the module that declared the state it would fork.
 	 */
 	const MEMORY_SWITCHES: ReadonlyArray<readonly [variable: string, module: string]> = [
-		["SESSION_STORAGE_TYPE", "session-store"],
+		["SESSION_STORE_STORAGE_TYPE", "session-store"],
 		["USER_SESSION_STORES_ADAPTER", "standalone-in-memory-session-stores"],
 		["OAUTH_CODE_ADAPTER", "standalone-in-memory-code-repository"],
 		["FEDERATION_TOKEN_STORE_TYPE", "standalone-in-memory-federation-token-store"],

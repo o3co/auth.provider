@@ -211,7 +211,7 @@ function buildApp(knobs: Knobs = {}) {
 			// still reach the router's own fallback.
 			config: ("config" in knobs
 				? knobs.config
-				: { session: { name: "harness.session" } }) as never,
+				: { "session-store": { name: "harness.session" } }) as never,
 			federationProviders: providers,
 			federationRedirectPolicyResolver: new Map([["apple", makePermissivePolicy()]]) as never,
 			providerCallbackUrls: callbackUrls,
@@ -437,8 +437,8 @@ describe("the transaction cookie's name follows the deployment's session cookie"
 		return header?.split("=")[0] ?? "";
 	};
 
-	it("derives it from config.session.name, dropping a __Host- prefix it could not satisfy", async () => {
-		expect(await cookieNameFrom({ session: { name: "__Host-acme.sid" } })).toBe(
+	it("derives it from the configuration's session-store.name, dropping a __Host- prefix it could not satisfy", async () => {
+		expect(await cookieNameFrom({ "session-store": { name: "__Host-acme.sid" } })).toBe(
 			"__Secure-acme.sid.federation",
 		);
 	});
@@ -446,7 +446,13 @@ describe("the transaction cookie's name follows the deployment's session cookie"
 	it("falls back to the reference default when the config carries no session name", async () => {
 		// Only reachable through a hand-built AppConfig; the module wiring always
 		// passes the real name.
-		for (const config of [{}, { session: {} }, { session: { name: "" } }, null, "nonsense"]) {
+		for (const config of [
+			{},
+			{ "session-store": {} },
+			{ "session-store": { name: "" } },
+			null,
+			"nonsense",
+		]) {
 			expect(await cookieNameFrom(config)).toBe("__Secure-auth.session.federation");
 		}
 	});

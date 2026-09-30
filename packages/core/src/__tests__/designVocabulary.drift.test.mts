@@ -995,7 +995,7 @@ const SESSION_RECORD_READS_ALLOWED: ReadonlyArray<AllowedSessionRecordRead> = [
 	},
 	{
 		file: "packages/session/src/modules/sessionStoreModule.mts",
-		read: "storageSlice=config.session.storageas{type:string}&Record<string,unknown>",
+		read: "storageSlice=section.storageas{type:string}&Record<string,unknown>",
 		count: 1,
 		why: "the cookie-session storage settings, the base of a pinned spread into a store factory's create",
 	},

@@ -35,6 +35,7 @@ import {
 	redisRateLimiterModule,
 	redisRefreshTokenFamilyStoreModule,
 } from "@o3co/auth-provider-redis";
+import { sessionModule, sessionStoreModule } from "@o3co/auth-provider-session";
 import { type Config, empty, parseFile } from "@o3co/ts.hocon";
 
 /** The oauth package's modules, whose manifests read nothing of the configuration they are handed but the grant switches. */
@@ -51,6 +52,8 @@ const RENAMING_MODULES = [
 	redisRefreshTokenFamilyStoreModule,
 	redisFederationGrantStoreModule,
 	...OAUTH_MODULES,
+	sessionModule,
+	sessionStoreModule,
 ];
 
 /** Every package reference the template's modules declare, core's last. */
@@ -58,6 +61,8 @@ const LIBRARY_REFERENCES: readonly URL[] = moduleReferences([
 	redisRateLimiterModule,
 	...federationGrantsModules,
 	...OAUTH_MODULES,
+	sessionModule,
+	sessionStoreModule,
 ]);
 
 /** The libraries' references resolved under `env`, in the order `app.mts` layers them. */

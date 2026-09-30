@@ -16,12 +16,12 @@
 
 /**
  * The session package's `loginEntry`: the deployment's login page
- * (`endpoints.login.url`) and the `redirect_to` protocol by which `/authorize`
- * and the federation-grants connect flow send a browser to it. It holds the
- * page to the rules `/authorize`'s own login redirect keeps (oauth's
- * configSchema and `loginRedirect`). With no login page configured it is
- * still built, so a composition that installs a consumer and never sends a
- * browser to log in boots; it fails where the page is read, naming the key.
+ * (`session.loginPage.url`) and the `redirect_to` protocol by which
+ * `/authorize` and the federation-grants connect flow send a browser to it. It
+ * holds the page to the rules the session section's schema holds the key to.
+ * With no login page configured it is still built, so a composition that
+ * installs a consumer and never sends a browser to log in boots; it fails
+ * where the page is read, naming the key.
  */
 
 import {
@@ -36,6 +36,7 @@ import {
 import {
 	createTestApp,
 	createTestCsrfTokenSigner,
+	createTestSessionCookiePolicy,
 	loginEntryContract,
 	makeValidAppConfig,
 } from "@o3co/auth-provider-core/testing";
@@ -43,6 +44,7 @@ import express from "express";
 import { afterEach, describe, expect, it } from "vitest";
 import { createLoginEntry, loginEntryFromConfig } from "#/login-entry.mjs";
 import { sessionModule } from "#/module.mjs";
+import { withSession, withSessionCaptures } from "./_helpers/sections.mjs";
 
 describe("createLoginEntry keeps core's loginEntry contract", () => {
 	it.each(loginEntryContract({ build: (url) => createLoginEntry(url) }))(
@@ -97,7 +99,7 @@ describe("createLoginEntry keeps core's loginEntry contract", () => {
 });
 
 describe("loginEntryFromConfig", () => {
-	it("answers the configured endpoints.login.url", () => {
+	it("answers the configured session.loginPage.url", () => {
 		const entry = loginEntryFromConfig(makeValidAppConfig());
 		expect(entry.url).toBe("/login");
 		expect(entry.urlFor("/back")).toBe("/login?redirect_to=%2Fback");
@@ -105,14 +107,14 @@ describe("loginEntryFromConfig", () => {
 
 	it.each([
 		["absent", {}],
-		["empty", { login: { url: "" } }],
+		["empty", { loginPage: { url: "" } }],
 	])(
-		"is built when endpoints.login.url is %s, and fails where the page is read, naming the key",
-		(_what, endpoints) => {
-			const entry = loginEntryFromConfig({ ...makeValidAppConfig(), endpoints });
+		"is built when session.loginPage.url is %s, and fails where the page is read, naming the key",
+		(_what, session) => {
+			const entry = loginEntryFromConfig({ ...makeValidAppConfig(), session });
 			expect(Object.isFrozen(entry)).toBe(true);
-			expect(() => entry.url).toThrow(/endpoints\.login\.url/);
-			expect(() => entry.urlFor("/back")).toThrow(/endpoints\.login\.url/);
+			expect(() => entry.url).toThrow(/session\.loginPage\.url/);
+			expect(() => entry.urlFor("/back")).toThrow(/session\.loginPage\.url/);
 		},
 	);
 });
@@ -156,8 +158,9 @@ const stores = [
 		async removeFederation() {},
 		async removeBySid() {},
 	} as unknown as SessionFederationIndex),
-	// Where the session store's module is loaded, it provides this.
+	// Where the session store's module is loaded, it provides these.
 	providing("test:csrf-token-signer", "csrfTokenSigner", createTestCsrfTokenSigner()),
+	providing("test:session-cookie-policy", "sessionCookiePolicy", createTestSessionCookiePolicy()),
 ];
 
 /** A module that requires the entry and keeps what it was handed. */
@@ -183,7 +186,7 @@ afterEach(async () => {
 const boot = async (config: AppConfig, seen: { entry?: LoginEntry }) => {
 	const handle = await createTestApp({
 		modules: [sessionModule, ...stores, probe(seen)],
-		bootstrapComponents: { config, pathResolver: (s: string) => s },
+		bootstrapComponents: { config: withSessionCaptures(config), pathResolver: (s: string) => s },
 	});
 	handles.push(handle);
 };
@@ -191,8 +194,10 @@ const boot = async (config: AppConfig, seen: { entry?: LoginEntry }) => {
 describe("the session module provides loginEntry", () => {
 	it("hands a module that requires it the configured login page", async () => {
 		const seen: { entry?: LoginEntry } = {};
-		const base = makeValidAppConfig();
-		await boot({ ...base, endpoints: { login: { url: "/sign-in?tenant=a" } } } as AppConfig, seen);
+		await boot(
+			withSession(makeValidAppConfig(), { loginPage: { url: "/sign-in?tenant=a" } }) as AppConfig,
+			seen,
+		);
 		expect(seen.entry?.url).toBe("/sign-in?tenant=a");
 		expect(seen.entry?.urlFor("/back")).toBe("/sign-in?tenant=a&redirect_to=%2Fback");
 	});
@@ -200,9 +205,9 @@ describe("the session module provides loginEntry", () => {
 	it("boots with no login page configured: the entry fails only where it is read", async () => {
 		const seen: { entry?: LoginEntry } = {};
 		const base = makeValidAppConfig();
-		// Core's schema takes any string here, the empty one included.
-		await boot({ ...base, endpoints: { login: { url: "" } } } as AppConfig, seen);
+		const { loginPage: _page, ...section } = base.session as Record<string, unknown>;
+		await boot({ ...base, session: section } as AppConfig, seen);
 		expect(seen.entry).toBeDefined();
-		expect(() => seen.entry?.url).toThrow(/endpoints\.login\.url/);
+		expect(() => seen.entry?.url).toThrow(/session\.loginPage\.url/);
 	});
 });

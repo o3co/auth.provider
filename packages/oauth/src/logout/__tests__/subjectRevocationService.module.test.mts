@@ -43,7 +43,7 @@ const HOUR = 3_600_000;
 
 const config = (over: Record<string, unknown> = {}) => ({
 	oauth: { accessToken: { expiresIn: 300 }, refreshToken: { expiresIn: 86_400 } },
-	session: { maxAge: 24 * HOUR },
+	"session-store": { maxAge: 24 * HOUR },
 	...over,
 });
 
@@ -313,14 +313,14 @@ describe("subjectRevocationServiceModule", () => {
 			expect(kept).toEqual([resolveSubjectRevocationHorizonMs(config())]);
 		});
 
-		it("sizes it from the session lifetime of the sessionCookiePolicy the composition holds, over session.maxAge", async () => {
+		it("sizes it from the session lifetime of the sessionCookiePolicy the composition holds, over session-store.maxAge", async () => {
 			const { kept, revocation } = recording();
 			await build({
 				subjectRevocation: revocation,
 				sessionCookiePolicy: createTestSessionCookiePolicy({ maxAgeMs: 10 * 24 * HOUR }),
 			}).revokeAllForSubject({ subject: "u-1" });
 			expect(kept).toEqual([
-				resolveSubjectRevocationHorizonMs(config({ session: { maxAge: 10 * 24 * HOUR } })),
+				resolveSubjectRevocationHorizonMs(config({ "session-store": { maxAge: 10 * 24 * HOUR } })),
 			]);
 		});
 
@@ -450,7 +450,7 @@ describe("subjectRevocationServiceModule", () => {
 		// those credentials live for is configuration only a module can read.
 		const revocation = createInMemorySubjectRevocation();
 		const stamp = vi.spyOn(revocation, "revokeBefore");
-		const deployment = config({ session: { maxAge: 40 * 24 * HOUR } });
+		const deployment = config({ "session-store": { maxAge: 40 * 24 * HOUR } });
 		const service = build({ config: deployment, subjectRevocation: revocation });
 
 		await service.revokeAllForSubject({ subject: "u-1" });

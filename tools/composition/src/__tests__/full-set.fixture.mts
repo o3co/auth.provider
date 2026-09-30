@@ -437,11 +437,19 @@ function requirementModules(
 			},
 		};
 		return defineModule<
-			"config" | "userSessionStore" | "sessionRequirementResolver" | "csrfGuard",
+			| "sessionCookiePolicy"
+			| "userSessionStore"
+			| "sessionRequirementResolver"
+			| "csrfGuard",
 			"subjectSessionIndex" | "logger"
 		>({
 			name: spec.module,
-			requires: ["config", "userSessionStore", "sessionRequirementResolver", "csrfGuard"],
+			requires: [
+				"sessionCookiePolicy",
+				"userSessionStore",
+				"sessionRequirementResolver",
+				"csrfGuard",
+			],
 			optional: ["subjectSessionIndex", "logger"],
 			absencePolicies: { subjectSessionIndex: SUBJECT_REVOCATION_ABSENCE_POLICY },
 			contributes: {
@@ -468,7 +476,6 @@ function requirementModules(
 				},
 				routes: [
 					(deps) => {
-						const config = deps.config as AppConfig;
 						const logger = deps.logger ?? consoleLogger;
 						// The deployment's CSRF guard: an interruption's fresh token is
 						// the one the login router and every guarded route accept.
@@ -524,7 +531,7 @@ function requirementModules(
 								...(deps.subjectSessionIndex
 									? { subjectSessionIndex: deps.subjectSessionIndex }
 									: {}),
-								sessionTtlMs: config.session.maxAge,
+								sessionTtlMs: deps.sessionCookiePolicy.maxAgeMs,
 								reporter: () => ({
 									storeUnavailable: (store, step, cause) =>
 										logger.error(
