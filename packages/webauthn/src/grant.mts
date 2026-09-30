@@ -224,6 +224,9 @@ export const createWebAuthnGrant = (deps: WebAuthnGrantDeps): GrantHandler => {
 			// spent: the retry of this assertion is then `invalid_grant`, and the
 			// user starts the ceremony again.
 			// ------------------------------------------------------------------
+			// Read before the consume: a challenge still live when consumed, at or after this instant,
+			// was issued after `redeemedAtMs - challengeTtlMs`, and the gesture came after its issuance.
+			const redeemedAtMs = Date.now();
 			let ceremonyOutcome: Awaited<ReturnType<typeof deps.challengeCeremony.consume>>;
 			try {
 				ceremonyOutcome = await deps.challengeCeremony.consume(
@@ -268,10 +271,9 @@ export const createWebAuthnGrant = (deps: WebAuthnGrantDeps): GrantHandler => {
 					},
 				};
 			}
-			// The gesture happened no later than now and no earlier than one challenge lifetime ago
-			// (an assertion can be held until its challenge expires); `auth_time` takes the earlier
-			// bound, so it never claims a fresher authentication than the one made (RFC 9470 §6.1).
-			const authTime = authTimeClaim(new Date(Date.now() - deps.webauthnConfig.challengeTtlMs));
+			// An assertion can be held until its challenge expires, so `auth_time` is the earliest
+			// instant the gesture could have been made: never fresher than it was (RFC 9470 §6.1).
+			const authTime = authTimeClaim(new Date(redeemedAtMs - deps.webauthnConfig.challengeTtlMs));
 
 			// ------------------------------------------------------------------
 			// Step 5: Atomic CAS sign-count update
