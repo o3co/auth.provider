@@ -81,7 +81,7 @@ const handle = await createApp({
 | スロット | 提供者 | 内容 | 読む側 |
 | --- | --- | --- | --- |
 | `csrfGuard` | `sessionModule` | `POST /session/login` が実行する [CSRF ポリシー](#状態変更ルートの-csrf-対策): 状態を変えるリクエストには `middleware` — 同じ `403 access_denied` と同じログ行 — と、その判定だけを返し何も書かない `check`、フローを始めるナビゲーションには `checkNavigation`（[アカウントリンクの開始](#フェデレーション間のアカウントリンク482)の規則）、そして `issue`。トークンのフォームフィールドは `csrf_token`。 | デバイス検証（グラントが有効なとき）、federation-grants の同意の回答（グラントが有効なとき） |
-| `loginEntry` | `sessionModule` | ログインページ `session.loginPage.url` と、ページ自身のクエリの fragment より前に `redirect_to` を加える `urlFor(returnTo)`。クエリに既に `redirect_to` を持つページは、エントリの構築時に拒否され、`session.loginPage.url` としては設定の検証で拒否される。ページが設定されていなくても作られ、ページが読まれる場所で失敗する。 | `/authorize`（これを必須とする）。federation-grants の connect フロー（グラントが有効なとき） |
+| `loginEntry` | `sessionModule` | ログインページ `session.loginPage.url` と、ページ自身のクエリの fragment より前に `redirect_to` を加える `urlFor(returnTo)`。クエリに既に `redirect_to` を持つページは、エントリの構築時に拒否され、`session.loginPage.url`（セクションが必須とする）としては設定の検証で拒否される。 | `/authorize`（これを必須とする）。federation-grants の connect フロー（グラントが有効なとき） |
 | `loginCompletion` | `loginCompletionModule` | [`establishSession`](#セッションの確立) と [`answerInterruption`](#requirement-がログインを中断するとき)。モジュールが require するセッションストア、`csrfGuard`、`sessionCookiePolicy`（セッションの寿命はそのポリシーのもの）の上に作られる。`sessionModule` と並べて読み込む独立したモジュール: 中断の応答のトークンは、誰がスロットを埋めたかによらずデプロイメントの `csrfGuard` のものであり、`sessionModule` は自分が埋めるスロットを require できない。 | requirement の完了処理（MFA パッケージのもの） |
 | `sessionCookiePolicy` | セッションストアのモジュール | セッション cookie の名前、`secure`、`sameSite`、ドメイン、寿命: ストアのルートが cookie をマウントする元の値。core の契約を破るセクションは設定の検証で拒否される（[後述](#ブラウザセッションストア)）。authoritative: ストアのモジュールがロードされている間、このスロットへの `overrideComponents` のエントリは起動を拒否する（`authoritative-component-overridden`）。ストアは `session-store.*` のとおりの cookie をマウントし続けるからである。モジュールをロードしない組み立ては自分でスロットを埋める。 | これを require する `sessionModule`（CSRF cookie、セッションの寿命、フェデレーションのトランザクション cookie の名前）と `loginCompletionModule`。subject revocation service が、任意で、horizon の算出に |
 | `csrfTokenSigner` | セッションストアのモジュール | この用途のためだけに `session-store.secret` から導出した鍵による CSRF トークンの署名: HKDF-SHA256（salt なし、info `o3co.auth.provider/session-csrf/v1`、32 バイト）、続いて HMAC-SHA256、base64url。テストの固定ベクターがこの導出を固定するので、secret を保つ限りトークンは検証を通る。secret も鍵もこの外に出ない。 | `sessionModule`: その `csrfGuard` と `/session` のルート |
@@ -104,8 +104,8 @@ CSRF トークンの鍵は `session-store.secret` から導出され、`session-
 | `session-store.storage.redis.url`、`.password` | `SESSION_STORE_STORAGE_REDIS_URL`、`SESSION_STORE_STORAGE_REDIS_PASSWORD` | `redis://localhost:6379`、なし | Redis ストアの接続先 |
 | `session.redirectAllowlist` | | `[]` | [リダイレクト許可リスト](#リダイレクト許可リスト) |
 | `session.csrf.trustedOrigins`、`.ttlSeconds` | `SESSION_CSRF_TTL_SECONDS`（`ttlSeconds`） | `[]`、`7200` | [CSRF](#状態変更ルートの-csrf-対策) |
-| `session.loginPage.url` | `SESSION_LOGIN_PAGE_URL` | `/login` | `loginEntry` スロットが示すページ: パスか絶対 URL で、自身の `redirect_to` を持たない |
-| `session.rateLimit.login` | | `{ windowMs = 900000, limit = 20 }` | `POST /session/login` の予算。モジュールが `login` として寄与する |
+| `session.loginPage.url` | `SESSION_LOGIN_PAGE_URL` | `/login` | 必須。`loginEntry` スロットが示すページ: パスか絶対 URL で、自身の `redirect_to` を持たない |
+| `session.rateLimit.login` | | `{ windowMs = 900000, limit = 20 }` | 必須。`POST /session/login` の予算。モジュールが `login` として寄与する |
 
 各セクションは厳格: 宣言されていないキーは、キーを名指しして起動を拒否する。これらのキーの移動元のパス — `session` の下の cookie とそのストアの各キー、`endpoints.login.url`、`rateLimit.login` — は、新しいパスとその環境変数を名指しして起動を拒否する（`config-path-relocated`）。一緒に改名された環境変数 — `SESSION_<KEY>` は `SESSION_STORE_<KEY>` へ、`ENDPOINTS_LOGIN_URL` は `SESSION_LOGIN_PAGE_URL` へ — は、旧名だけが設定されているか新名と違う値で設定されていると起動を拒否し（`environment-variable-renamed`）、同じ値ならどちらも起動する。
 

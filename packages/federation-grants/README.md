@@ -555,10 +555,10 @@ and plain text, never a JSON body.
    exact-match allowlist names fixed landing pages and would refuse this
    link — as it would refuse an authorize URL — for carrying a per-flow
    handle. The slot is optional in the manifest and required once grants are
-   enabled, and an entry the session module builds with no login page fails
-   where the page is read, so an enabled deployment without the slot, or
-   without a login page, is refused at boot rather than answering this step
-   with a 500.
+   enabled, and an entry that names no login page fails where the page is
+   read, so an enabled deployment without the slot, or with an entry that
+   names no page, is refused at boot rather than answering this step with a
+   500.
 4. Signed in as someone other than the intent's subject: `403`, plain, and no
    redirect anywhere.
 5. Session admission does not admit the session — the durable session is

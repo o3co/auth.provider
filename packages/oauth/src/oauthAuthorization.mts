@@ -109,6 +109,43 @@ const isEnabled = (config: unknown, key: GrantKey): boolean => {
 	return read.success && read.data === true;
 };
 
+/** Each grant's key under `grants`, in the order the section declares them. */
+const GRANT_KEYS: readonly GrantKey[] = [
+	"authorizationCode",
+	"refreshToken",
+	"clientCredentials",
+	"jwtBearer",
+];
+
+/**
+ * The module's section, held to the decisions the module was built with:
+ * whether each grant registers is decided from the configuration handed to
+ * `oauthAuthorizationModule`, before boot, and each switch is parsed again from
+ * the configuration `createApp` is handed. A switch that reads otherwise there
+ * refuses boot, naming its key, in either direction; a composition would
+ * otherwise run without a grant its configuration turns on, or with one it
+ * turns off.
+ */
+const sectionFor = (built: Readonly<Record<GrantKey, boolean>>) => ({
+	...SECTION,
+	schema: oauthAuthorizationConfigSchema.superRefine((section, ctx) => {
+		for (const key of GRANT_KEYS) {
+			const booted = section?.grants?.[key]?.enabled === true;
+			if (booted === built[key]) continue;
+			const [decided, parsed] = built[key] ? ["on", "off"] : ["off", "on"];
+			ctx.addIssue({
+				code: "custom",
+				path: ["grants", key, "enabled"],
+				message:
+					`oauthAuthorizationModule was built from a configuration with grants.${key} ${decided}, ` +
+					`but the configuration createApp parsed has oauth-authorization.grants.${key}.enabled ${parsed}. ` +
+					"Whether the grant registers is decided from the first. Hand oauthAuthorizationModule " +
+					"the configuration read from the same files and environment as the one createApp is handed.",
+			});
+		}
+	}),
+});
+
 const REQUIRES = [
 	"config",
 	"clientRepository",
@@ -223,17 +260,20 @@ export const oauthAuthorizationModule = (params: { config: AppConfig }): Module 
 	// and this module's typed deps satisfy every pick — so a grant reading a
 	// slot this module never declared is a compile error at its wiring below.
 	const grants: Record<string, (deps: OAuthAuthorizationModuleDeps) => GrantHandler> = {};
+	const built = Object.fromEntries(
+		GRANT_KEYS.map((key) => [key, isEnabled(params.config, key)]),
+	) as Record<GrantKey, boolean>;
 	// Each grant that admits a session registers its action beside it.
 	const admissionActions: Record<string, AdmissionActionDeclaration> = {};
 	// Secure-default opt-in: a grant is registered only when its switch is on
 	// (`isEnabled`). The package's reference.conf ships each off; a
 	// deployment's own layer, or the switch's variable, turns one on.
-	if (isEnabled(params.config, "authorizationCode")) {
+	if (built.authorizationCode) {
 		grants.authorization_code = (deps) =>
 			createAuthorizationGrant({ ...deps, codeRepository: requireCodeRepository(deps) });
 		Object.assign(admissionActions, AUTHORIZATION_CODE_GRANT_ADMISSION_ACTIONS);
 	}
-	if (isEnabled(params.config, "refreshToken")) {
+	if (built.refreshToken) {
 		Object.assign(admissionActions, REFRESH_TOKEN_GRANT_ADMISSION_ACTIONS);
 		grants.refresh_token = (deps) => {
 			// Refused at boot, not at the first refresh: see the function.
@@ -246,7 +286,7 @@ export const oauthAuthorizationModule = (params: { config: AppConfig }): Module 
 	// deployment that never enables this grant is not made to wire one, and the
 	// factory below refuses to register the grant when it is missing rather
 	// than registering one that would accept anything.
-	if (isEnabled(params.config, "jwtBearer")) {
+	if (built.jwtBearer) {
 		grants[JWT_BEARER_GRANT_TYPE] = (deps) => {
 			const { userRepository, assertionVerifier } = deps;
 			if (!userRepository) {
@@ -276,13 +316,13 @@ export const oauthAuthorizationModule = (params: { config: AppConfig }): Module 
 	// `AuthenticatedClient.allowedGrantTypes` (deny-by-absence) is the
 	// authoritative access gate; the server-wide flag is a kill switch, and
 	// keeps M2M off in deployments that never use it.
-	if (isEnabled(params.config, "clientCredentials")) {
+	if (built.clientCredentials) {
 		grants.client_credentials = (deps) => createClientCredentialsGrant(deps);
 	}
 
 	return defineModule<Requires, Optional, typeof oauthAuthorizationConfigSchema>({
 		name: "oauth-authorization",
-		section: SECTION,
+		section: sectionFor(built),
 		requires: REQUIRES,
 		optional: OPTIONAL,
 		// `subjectRevocation` is optional to wire, not optional to decide.

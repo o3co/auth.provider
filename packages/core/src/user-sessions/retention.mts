@@ -55,28 +55,9 @@ import type { OAuthTokenSettings } from "../token-settings/types.mjs";
 export const SUBJECT_REVOCATION_MIN_RETENTION_MS = FEDERATION_GRANT_LIFETIME_CEILING_MS + 60_000;
 
 /**
- * Milliseconds an operator configured, or a refusal that names the path. The
- * token lifetimes have resolvers of their own in the configuration schema;
- * this reads what has none, the session store's `session-store.maxAge`.
- */
-const lifetimeMs = (value: unknown, path: string): number => {
-	const raw = typeof value === "number" ? value : Number.NaN;
-	if (!Number.isFinite(raw) || raw <= 0) {
-		throw new RangeError(
-			`resolveSubjectRevocationHorizonMs: ${path} must be a positive number of ` +
-				`milliseconds, and was ${describeValue(value)}. ` +
-				"The subject's revocation boundary is sized from it, and one computed from a " +
-				"missing lifetime expires while the sessions it covers are still being accepted.",
-		);
-	}
-	return raw;
-};
-
-/**
  * The session lifetime a `sessionCookiePolicy` carries, held to the rule the
- * configuration's `session-store.maxAge` is held to where it is parsed — whole
- * milliseconds from 1 to the one-year ceiling, as the schema and the session
- * store's provider hold it — or a refusal that names the slot's member.
+ * session store holds its lifetime to — whole milliseconds from 1 to the
+ * one-year ceiling — or a refusal that names the slot's member.
  */
 const slotLifetimeMs = (value: unknown, path: string): number => {
 	if (
@@ -130,11 +111,13 @@ const slotLifetimeSeconds = (value: unknown, path: string): number => {
 export function resolveSubjectRevocationHorizonMs(
 	config: unknown,
 	/**
-	 * The lifetimes as the slots carry them, when the caller holds them: the
-	 * oauth module's `oauthTokenSettings` and the session store's
-	 * `sessionCookiePolicy`. A slot handed here is read in place of `config`
-	 * and held to its configuration key's rule, a RangeError naming the
-	 * slot's member otherwise.
+	 * The lifetimes as the slots carry them: the oauth module's
+	 * `oauthTokenSettings`, when the caller holds it, read in place of
+	 * `config`; and the session store's `sessionCookiePolicy`, which carries
+	 * the session's lifetime and is required, since the session's settings
+	 * are the session store's and core reads none of them. Each is held to its
+	 * key's rule, a RangeError naming the slot's member otherwise; an absent
+	 * `sessionCookie` is a RangeError naming the slot.
 	 */
 	from: {
 		readonly tokenSettings?: Pick<
@@ -144,7 +127,6 @@ export function resolveSubjectRevocationHorizonMs(
 		readonly sessionCookie?: Pick<SessionCookiePolicy, "maxAgeMs">;
 	} = {},
 ): number {
-	const root = config as { "session-store"?: { maxAge?: unknown } } | undefined;
 	const { tokenSettings, sessionCookie } = from;
 	// Through the key's one reader, which holds it to the schema's rule.
 	const refreshMs =
@@ -167,10 +149,15 @@ export function resolveSubjectRevocationHorizonMs(
 						?.maxExpiresIn,
 					"oauthTokenSettings.accessTokenLifetime.maxExpiresIn",
 				)) * 1000;
-	const sessionMs =
-		sessionCookie === undefined
-			? lifetimeMs(root?.["session-store"]?.maxAge, "session-store.maxAge")
-			: slotLifetimeMs(sessionCookie.maxAgeMs, "sessionCookiePolicy.maxAgeMs");
+	if (sessionCookie === undefined) {
+		throw new RangeError(
+			"resolveSubjectRevocationHorizonMs: no sessionCookiePolicy was handed. The subject's " +
+				"revocation boundary must outlast the sessions it covers, and their lifetime is the " +
+				"session store's, which that slot carries: hand the slot (the session store's module " +
+				"provides it), or size the boundary yourself.",
+		);
+	}
+	const sessionMs = slotLifetimeMs(sessionCookie.maxAgeMs, "sessionCookiePolicy.maxAgeMs");
 	const longest = Math.max(
 		sessionMs,
 		refreshMs + DEFAULT_CLOCK_SKEW_MS,

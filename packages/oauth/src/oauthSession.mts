@@ -65,6 +65,33 @@ const isEnabled = (config: unknown): boolean => {
 };
 
 /**
+ * The module's section, held to the decision the module was built with:
+ * whether the grant registers is decided from the configuration handed to
+ * `oauthSessionModule`, before boot, and `oauth-session.enabled` is parsed
+ * again from the configuration `createApp` is handed. A switch that reads
+ * otherwise there refuses boot, naming the key, in either direction; a
+ * composition would otherwise run without a grant its configuration turns on,
+ * or with one it turns off.
+ */
+const sectionFor = (enabled: boolean) => ({
+	...SECTION,
+	schema: oauthSessionConfigSchema.superRefine((section, ctx) => {
+		const booted = section?.enabled === true;
+		if (booted === enabled) return;
+		const [built, parsed] = enabled ? ["on", "off"] : ["off", "on"];
+		ctx.addIssue({
+			code: "custom",
+			path: ["enabled"],
+			message:
+				`oauthSessionModule was built from a configuration with the session grant ${built}, ` +
+				`but the configuration createApp parsed has oauth-session.enabled ${parsed}. ` +
+				"Whether the grant registers is decided from the first. Hand oauthSessionModule " +
+				"the configuration read from the same files and environment as the one createApp is handed.",
+		});
+	}),
+});
+
+/**
  * Declarative manifest for the session grant. It needs no
  * `clientRepository`: the grant authorizes against `ctx.authenticatedClient`.
  *
@@ -73,12 +100,13 @@ const isEnabled = (config: unknown): boolean => {
  * nothing. Hand it the configuration the composition root boots with.
  */
 export const oauthSessionModule = (params: { config: AppConfig }): Module => {
-	if (!isEnabled(params.config)) {
-		return defineModule({ name: "oauth-session", section: SECTION });
+	const enabled = isEnabled(params.config);
+	if (!enabled) {
+		return defineModule({ name: "oauth-session", section: sectionFor(enabled) });
 	}
 	return defineModule({
 		name: "oauth-session",
-		section: SECTION,
+		section: sectionFor(enabled),
 		// `config` is required because createSessionGrant reads the access-token lifetime from it
 		// when building the token response for authenticated sessions.
 		// `sessionRequirementResolver`: the synthetic key every consumer of

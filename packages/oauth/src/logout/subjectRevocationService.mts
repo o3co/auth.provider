@@ -70,9 +70,10 @@ const OPTIONAL = [
 	"federationGrantStore",
 	"auditSink",
 	"logger",
-	// What the boundary must outlive: the oauth module's token
-	// lifetimes and the session store's session lifetime, read from the
-	// configuration when the composition holds neither.
+	// What the boundary must outlive: the oauth module's token lifetimes,
+	// read from the configuration when the composition does not hold them,
+	// and the session store's session lifetime, which the configuration does
+	// not carry for core: without the slot the provider refuses, naming it.
 	"oauthTokenSettings",
 	"sessionCookiePolicy",
 ] as const;
@@ -226,9 +227,11 @@ export const subjectRevocationServiceModule = defineModule<Requires, Optional>({
 						).outcome === "done",
 				}),
 				// The boundary must outlive the longest-lived thing it covers,
-				// which this module can read and the service cannot: the slots'
-				// lifetimes when the composition holds them, otherwise
-				// the configuration's.
+				// which this module can read and the service cannot: the token
+				// lifetimes from `oauthTokenSettings` when the composition holds
+				// it, otherwise the configuration's; the session's from
+				// `sessionCookiePolicy`, without which the resolver refuses,
+				// naming the slot.
 				watermarkTtlMs: resolveSubjectRevocationHorizonMs(deps.config, {
 					...(deps.oauthTokenSettings === undefined
 						? {}

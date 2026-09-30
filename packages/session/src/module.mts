@@ -40,7 +40,7 @@ import {
 } from "./csrf.mjs";
 import { extractFederationSection } from "./federations/extract-federation-section.mjs";
 import { deriveFederationTransactionCookieName } from "./federations/transaction.mjs";
-import { loginEntryOf } from "./login-entry.mjs";
+import { createLoginEntry } from "./login-entry.mjs";
 import { LOGIN_RATE_LIMIT_PREFIX, readLoginRateLimitBudget } from "./loginBudget.mjs";
 import * as federationRoutes from "./routes/Federation.mjs";
 import * as sessionRoutes from "./routes/Session.mjs";
@@ -82,9 +82,10 @@ export const sessionSectionSchema = z
 			.optional(),
 		/**
 		 * The deployment's login page, which the `loginEntry` slot sends a
-		 * browser that is not signed in to: non-empty, and with no
-		 * `redirect_to` of its own, as the slot adds one naming the request to
-		 * come back to (core's `LoginEntry` contract).
+		 * browser that is not signed in to: required (the package's reference
+		 * ships `/login`), non-empty, and with no `redirect_to` of its own, as
+		 * the slot adds one naming the request to come back to (core's
+		 * `LoginEntry` contract).
 		 */
 		loginPage: z
 			.object({
@@ -95,13 +96,13 @@ export const sessionSectionSchema = z
 						message: `session.loginPage.url must not carry a "${LOGIN_RETURN_PARAMETER}" query parameter of its own: the provider adds "${LOGIN_RETURN_PARAMETER}" when it sends a browser to the login page, naming the request to come back to`,
 					}),
 			})
-			.strict()
-			.optional(),
+			.strict(),
 		/**
 		 * `POST /session/login`'s brute-force budget, `windowMs` in
 		 * milliseconds, which the module contributes as the `login` budget
-		 * every limiter reads. Zero (an exported-but-empty variable) would turn
-		 * the guard into a no-op that still looks configured.
+		 * every limiter reads: required (the package's reference ships 20 per
+		 * 15 minutes). Zero (an exported-but-empty variable) would turn the
+		 * guard into a no-op that still looks configured.
 		 */
 		rateLimit: z
 			.object({
@@ -112,8 +113,7 @@ export const sessionSectionSchema = z
 					})
 					.strict(),
 			})
-			.strict()
-			.optional(),
+			.strict(),
 	})
 	.strict();
 
@@ -272,9 +272,8 @@ export const sessionModule = defineModule<
 			),
 		// The login page (`session.loginPage.url`) and the `redirect_to`
 		// protocol `/authorize` and the federation-grants connect flow send a
-		// browser there by. Built with no page configured, failing where it is
-		// read.
-		loginEntry: (deps) => loginEntryOf(deps.section.loginPage?.url),
+		// browser there by.
+		loginEntry: (deps) => createLoginEntry(deps.section.loginPage.url),
 		// `loginCompletion` is the login-completion module's
 		// (`modules/loginCompletionModule.mts`): it answers with the
 		// deployment's `csrfGuard`, a slot this module fills and so cannot

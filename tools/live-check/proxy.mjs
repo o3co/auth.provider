@@ -18,7 +18,7 @@ const PORT = Number(process.env.LIVE_CHECK_PORT ?? 3210);
 const PROVIDER_PORT = Number(process.env.LIVE_CHECK_PROVIDER_PORT ?? 3000);
 const FEDERATION = process.env.LIVE_CHECK_FEDERATION ?? "google";
 const EXPECTED_ISS = process.env.LIVE_CHECK_EXPECTED_ISS || null;
-const SESSION_COOKIE = process.env.SESSION_NAME ?? "auth.session";
+const SESSION_COOKIE = process.env.SESSION_STORE_NAME ?? "auth.session";
 const START_PATH = `/session/oauth/federation/${FEDERATION}`;
 const CALLBACK_PATH = `${START_PATH}/callback`;
 

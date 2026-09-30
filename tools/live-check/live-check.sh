@@ -211,7 +211,7 @@ start() {
 	# From here on a failure or an interrupt takes the processes down with it.
 	trap 'stop; exit 130' INT TERM
 
-	LIVE_CHECK_PORT="$PORT" LIVE_CHECK_PROVIDER_PORT="$PROVIDER_PORT" SESSION_NAME=auth.session \
+	LIVE_CHECK_PORT="$PORT" LIVE_CHECK_PROVIDER_PORT="$PROVIDER_PORT" SESSION_STORE_NAME=auth.session \
 		LIVE_CHECK_FEDERATION="$fed" LIVE_CHECK_EXPECTED_ISS="$expected" \
 		node "$HERE/proxy.mjs" >"$STATE/proxy.log" 2>&1 &
 	record_pid $! proxy
@@ -232,13 +232,13 @@ start() {
 		export OAUTH_JWT_ISSUER="http://localhost:$PROVIDER_PORT"
 		export OAUTH_JWT_PRIVATE_KEY_PATH="$STATE/keys/jwt-private.pem"
 		export OAUTH_JWT_PUBLIC_KEY_PATH="$STATE/keys/jwt-public.pem"
-		SESSION_SECRET="$(cat "$STATE/session-secret")"
-		export SESSION_SECRET
-		export SESSION_SECURE=false SESSION_NAME=auth.session
+		SESSION_STORE_SECRET="$(cat "$STATE/session-secret")"
+		export SESSION_STORE_SECRET
+		export SESSION_STORE_SECURE=false SESSION_STORE_NAME=auth.session
 		export CLIENT_USER_AUTHENTICATE_URL="http://localhost:$PORT/__store/authenticate"
 		export CLIENT_USER_AUTHENTICATE_BY_TOKEN_URL="http://localhost:$PORT/__store/authenticate-by-token"
 		export CLIENT_CODE_ENDPOINT_URI="$REDIS_URL"
-		export SESSION_STORAGE_REDIS_URL="$REDIS_URL"
+		export SESSION_STORE_STORAGE_REDIS_URL="$REDIS_URL"
 		export REFRESH_TOKEN_FAMILY_STORE_REDIS_URL="$REDIS_URL"
 		export NODE_OPTIONS='--conditions=development'
 		exec pnpm exec tsx src/app.mts

@@ -37,9 +37,8 @@ import {
  * The login entry for the page `url` — a path or an absolute URL, which may
  * carry a query and a fragment of its own, but not `redirect_to`: `urlFor`
  * adds it, and a page that carried one would send two. The rule is core's
- * (`loginPageCarriesReturn`, `loginPageUrlFor`), the one `/authorize`'s own
- * fallback keeps too: `redirect_to` in the page's query, before any fragment,
- * the target encoded whole. Frozen.
+ * (`loginPageCarriesReturn`, `loginPageUrlFor`): `redirect_to` in the page's
+ * query, before any fragment, the target encoded whole. Frozen.
  */
 export function createLoginEntry(url: string): LoginEntry {
 	if (typeof url !== "string" || url === "") {
@@ -62,11 +61,11 @@ export function createLoginEntry(url: string): LoginEntry {
  * The login entry for the page `written`, as the session module's section
  * carries it at `session.loginPage.url`.
  *
- * Built whether or not the page is configured: the section may leave the key
- * out, and a composition that installs a consumer of the slot and never sends
- * a browser to log in still boots. Without a page, `url` and `urlFor` throw,
- * naming the key; `/authorize` and the federation-grants connect flow read
- * `url` when they are built, and refuse to boot.
+ * Built whether or not the page is written, for a configuration no schema
+ * parsed (`loginEntryFromConfig`; the session module's section requires the
+ * key). Without a page, `url` and `urlFor` throw, naming the key;
+ * `/authorize` and the federation-grants connect flow read `url` when they
+ * are built, and refuse to boot.
  */
 export function loginEntryOf(written: unknown): LoginEntry {
 	if (typeof written === "string" && written !== "") return createLoginEntry(written);
