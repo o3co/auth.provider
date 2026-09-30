@@ -22,11 +22,12 @@ another's body limit, or a memory store booting under `deployment.mode =
 - **What it boots.** The template's composition with every package the
   template does not depend on added the way a deployment adds them to that
   manifest — the device grant, DPoP, mTLS, token exchange, WebAuthn, the MFA
-  package (its modules over the MFA stores, `mfa.mode = "optional"`, and
-  `mfa` added to the template's `sessionRequirements.expected`), and the
-  Apple and GitHub federations — plus the small modules
-  a deployment writes itself (config bridges, a grant policy, a session-to-WebAuthn-subject
-  bridge, and two session requirements — each with the completion route a
+  package (its modules over the MFA stores — the email factor's among them,
+  switched off — `mfa.mode = "optional"`, and `mfa` added to the template's
+  `sessionRequirements.expected`), and the Apple and GitHub federations —
+  plus the small modules a deployment writes itself (config bridges, a grant
+  policy, a mail sender that records what it is handed, a
+  session-to-WebAuthn-subject bridge, and two session requirements — each with the completion route a
   requirement's module contributes, built on the session package's exported
   `establishSession` and `answerInterruption`). The composition, the body and outage helpers and the outage runner
   are not copied: they are the template suite's, exported by its fixture,

@@ -154,10 +154,12 @@ const ADDED: Readonly<Record<string, readonly string[]>> = {
 	"@o3co/auth-provider-dpop": ["dpop"],
 	"@o3co/auth-provider-federation-apple": ["federation-apple"],
 	"@o3co/auth-provider-federation-github": ["federation-github"],
-	// mfaModules, over core's memory MFA stores.
+	// mfaModules and the email factor's module, over core's memory MFA stores.
 	"@o3co/auth-provider-mfa": [
 		"mfa-totp-factor",
+		"mfa-recovery-code-factor",
 		"mfa",
+		"mfa-email-factor",
 		"core-mfa-factor-store-memory",
 		"core-mfa-transaction-store-memory",
 	],
@@ -175,6 +177,7 @@ const ADDED: Readonly<Record<string, readonly string[]>> = {
 /** The modules a deployment writes itself, beside the packages' (see the fixture). */
 const DEPLOYMENT_MODULES = [
 	"deployment:webauthn-config",
+	"deployment:mail-sender",
 	"deployment:grant-policy",
 	"deployment:apple-federation-config",
 	"deployment:github-federation-config",
