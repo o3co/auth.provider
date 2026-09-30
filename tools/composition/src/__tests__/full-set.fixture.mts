@@ -34,6 +34,9 @@
  * - mTLS in-process on its `header` source from a loopback peer — the shape
  *   a TLS-terminating proxy gives it — with the mTLS package's test
  *   certificate.
+ * - With `mfaFactorStoreAt`, the Store keeps the MFA factors: foundation's
+ *   `foundationMfaFactorStoreModule` over those endpoints, handed the user
+ *   repository's HTTP settings as a composition root hands them.
  * - WebAuthn registration reads `req.webauthnSubject`, which the package's
  *   `webauthnSessionSubjectModule` sets from the admitted browser session;
  *   the deployment's mapper here is the session's opaque subject.
@@ -72,6 +75,8 @@ import { DEVICE_CODE_GRANT_TYPE, deviceGrantModule } from "@o3co/auth-provider-d
 import { dpopModule } from "@o3co/auth-provider-dpop";
 import { appleFederationModule } from "@o3co/auth-provider-federation-apple";
 import { githubFederationModule } from "@o3co/auth-provider-federation-github";
+import { foundationMfaFactorStoreModule } from "@o3co/auth-provider-foundation";
+import { foundationMfaFactorStoreConfig } from "@o3co/auth-provider-foundation/testing";
 import { mfaModules } from "@o3co/auth-provider-mfa";
 import { mtlsModule } from "@o3co/auth-provider-mtls";
 import {
@@ -92,6 +97,7 @@ import {
 	ISSUER,
 	resettable,
 } from "@o3co/auth-provider-standalone/src/__tests__/all-modules-composition.fixture.mts";
+import type { FakeStoreUrls } from "@o3co/auth-provider-test-kit";
 import {
 	webauthnConfigSchema,
 	webauthnModule,
@@ -591,6 +597,25 @@ interface AddedStores {
 	readonly challenge: Stores;
 	readonly credential: Module;
 	readonly mfa: Stores;
+	/** The Store's MFA factor endpoints, when the Store keeps the factors. */
+	readonly mfaFactorStoreAt: FakeStoreUrls | undefined;
+}
+
+/** The two MFA stores' modules: the factor store the Store's when `stores` says so. */
+function mfaStoreModules(config: AppConfig, stores: AddedStores): Module[] {
+	const transactions =
+		stores.mfa === "redis" ? redisMfaTransactionStoreModule : memoryMfaTransactionStoreModule;
+	if (stores.mfaFactorStoreAt !== undefined) {
+		// As a composition root hands the user repository its settings.
+		return [
+			foundationMfaFactorStoreModule({ userRepositoryHttp: config.repositories.user.http }),
+			transactions,
+		];
+	}
+	return [
+		stores.mfa === "redis" ? redisMfaFactorStoreModule : memoryMfaFactorStoreModule,
+		transactions,
+	];
 }
 
 /** Every module the template does not compose, as a deployment adds them to its manifest. */
@@ -624,12 +649,7 @@ function addedModules(
 		// the requirement named mfa, over the two MFA stores. The environment
 		// is the one the template composes as.
 		...(features.mfa
-			? [
-					...mfaModules({ environment: "production" }),
-					...(stores.mfa === "redis"
-						? [redisMfaFactorStoreModule, redisMfaTransactionStoreModule]
-						: [memoryMfaFactorStoreModule, memoryMfaTransactionStoreModule]),
-				]
+			? [...mfaModules({ environment: "production" }), ...mfaStoreModules(config, stores)]
 			: []),
 		grantPolicyModule,
 		...requirementModules(interrupt, ceremonies, outage),
@@ -707,6 +727,12 @@ export interface FullSetOptions extends Omit<ComposeOptions, "extraModules" | "r
 	/** The two MFA stores' adapter against the rest. */
 	readonly mfaStores?: Stores;
 	/**
+	 * The Store's MFA factor endpoints (a fake Store's `urls`): given, the
+	 * factor store is foundation's module over them, on the user repository's
+	 * HTTP settings, and the transaction store stays as `mfaStores` says.
+	 */
+	readonly mfaFactorStoreAt?: FakeStoreUrls;
+	/**
 	 * The WebAuthn credential store module. Default: core's memory module on
 	 * memory stores, the deployment's own on Redis (no package ships a shared
 	 * one).
@@ -735,6 +761,7 @@ export async function fullSetOptions(options: FullSetOptions = {}): Promise<Comp
 		deviceCode: options.deviceCodeStore ?? stores,
 		challenge: options.challengeStore ?? stores,
 		mfa: options.mfaStores ?? stores,
+		mfaFactorStoreAt: options.mfaFactorStoreAt,
 		credential:
 			options.credentialStore ??
 			(stores === "redis" ? deploymentCredentialStoreModule : memoryWebAuthnCredentialStoreModule),
@@ -745,6 +772,7 @@ export async function fullSetOptions(options: FullSetOptions = {}): Promise<Comp
 		deviceCodeStore: _deviceCodeStore,
 		challengeStore: _challengeStore,
 		mfaStores: _mfaStores,
+		mfaFactorStoreAt: _mfaFactorStoreAt,
 		credentialStore: _credentialStore,
 		adjust: _adjust,
 		interruptLogins,
@@ -760,7 +788,11 @@ export async function fullSetOptions(options: FullSetOptions = {}): Promise<Comp
 		config: (resolved) => {
 			const adjusted = options.config ? options.config(resolved) : resolved;
 			const featured = withFeatures(adjusted, features);
-			return options.adjust ? options.adjust(featured) : featured;
+			const stored =
+				added.mfaFactorStoreAt === undefined
+					? featured
+					: { ...featured, ...foundationMfaFactorStoreConfig(added.mfaFactorStoreAt) };
+			return options.adjust ? options.adjust(stored) : stored;
 		},
 		extraModules: (config) => addedModules(config, features, added, f, interrupt, opened, outage),
 		extraClients: { ...EXTRA_CLIENTS, ...options.extraClients },
