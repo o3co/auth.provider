@@ -56,7 +56,7 @@ export interface IntrospectResponse {
 	/**
 	 * RFC 9470 §6.2: when the user authenticated, in seconds since the epoch —
 	 * the primary authentication's time, which a step-up does not move. Absent
-	 * when the token carries none, as one minted before this member existed.
+	 * when the token carries none.
 	 */
 	readonly auth_time?: number;
 }
