@@ -23,7 +23,9 @@
  * kind claimed and absent from the resolver. Boot parses the section with the
  * module's schema before any factory runs and refuses what it cannot read,
  * naming the key; a configuration still setting the section's old path,
- * `mfa.factors.totp`, is refused naming the new one. The whole configuration
+ * `mfa.factors.totp`, is refused naming the new one, and so is an environment
+ * setting a variable renamed with the move unless its new name carries the
+ * same value. The whole configuration
  * is read for the deployment's issuer alone: `oauth.jwt.issuer` when no module
  * provides `oauthTokenSettings`, and core's check of the slot when one does.
  * Stateless: nothing forks per replica.
@@ -40,13 +42,16 @@ const configuredIssuer = (config: unknown): unknown =>
 /** The TOTP factor, contributed as `mfaFactors.totp`; `null` when switched off by its configuration. */
 export const mfaTotpFactorModule = defineModule({
 	name: "mfa-totp-factor",
-	// The package's `config/reference.conf` holds this section's defaults. It
-	// still binds the old path's two variables at that path, with no default,
-	// so an operator exporting one is refused rather than ignored.
+	// The package's `config/reference.conf` holds this section's defaults and
+	// binds each key's variable at its new path, and nothing at the old one.
 	section: {
 		schema: mfaTotpConfigSchema,
 		reference: new URL("../../config/reference.conf", import.meta.url),
 		relocatedFrom: ["mfa.factors.totp"],
+		renamedVariables: {
+			MFA_TOTP_ENABLED: "mfa.factors.totp.enabled",
+			MFA_TOTP_ISSUER: "mfa.factors.totp.issuer",
+		},
 	},
 	requires: ["config"] as const,
 	// The issuer an unset TOTP issuer defaults to the host of, which the

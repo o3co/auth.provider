@@ -2433,7 +2433,10 @@ function renameOf(
 	}
 	if (moved.environmentVariable === undefined) {
 		return {
-			problem: `its new path "${moved.to}" lies under the section's transitional path, which no variable binds yet`,
+			problem:
+				moved.relocation.unbound === true
+					? `its new path "${moved.to}" lies under the section's transitional path, which no variable binds yet`
+					: `its new path "${moved.to}" is the section itself, which no variable binds`,
 		};
 	}
 	if (moved.environmentVariable === from) {
