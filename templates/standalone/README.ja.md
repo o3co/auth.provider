@@ -449,7 +449,7 @@ federations {
 | `REDIS_FEDERATION_GRANT_STORE_ENCRYPTION_MODE` | `required` | `required` または `allow-plaintext`。`FEDERATION_TOKENS_ALLOW_INSECURE=1` でない限り、平文は production/staging と `CORE_DEPLOYMENT_MODE=multi` のもとでは拒否される |
 | `FEDERATION_GRANTS_ALLOW_KEEP_ON_SUBJECT_REVOCATION` | `false` | subject 全体の失効に、確立済みのグラントを残すよう*求めて*よいかどうか。許可であって指示ではない |
 | `REDIS_FEDERATION_GRANT_STORE_KEY_PREFIX` | `fg:` | Redis グラントストアのキー名前空間 |
-| `REDIS_FEDERATION_GRANT_INTENT_STORE_KEY_PREFIX` | `fg:` | Redis インテントストアのキー名前空間。グラントストアのものと一緒に設定する |
+| `REDIS_FEDERATION_GRANT_INTENT_STORE_KEY_PREFIX` | `fg:` | Redis インテントストアのキー名前空間。グラントストアのものと一緒に設定する。グラントストアのものを設定してこちらを既定値のままにすると、テンプレートは起動を拒否する |
 
 機能自身の設定は `federation-grants {}` セクション、Redis グラントストアの設定 — 鍵リング、暗号化モード、prefix — は `redis-federation-grant-store {}` にある。**環境変数の形を持たないものが 2 つある** — リストは HOCON のものだからである: connection と、暗号鍵リング。デプロイ側が所有するレイヤー — たとえば `config/production.conf` — に書く:
 

@@ -567,7 +567,8 @@ intent a backend lodged, the consent challenge and the connect transaction
 under `<prefix>{intents}:…`, where the prefix is its own section's,
 `redis-federation-grant-intent-store.keyPrefix` (default `fg:`, the grant
 store's default) — a deployment that moves the grant store's namespace sets
-this one to the same value. It is its own module so that grants can live in
+this one to the same value; the standalone template refuses to boot with the
+grant store's moved and this one left at its default. It is its own module so that grants can live in
 Redis while acquisition stays in memory on a single replica (a restart then
 loses flows in progress and nothing else); nothing spans the two keyspaces.
 

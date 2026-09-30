@@ -700,7 +700,7 @@ needs before it issues a refresh token is in
 | `REDIS_FEDERATION_GRANT_STORE_ENCRYPTION_MODE` | `required` | `required` or `allow-plaintext`. Plaintext is refused in production/staging and under `CORE_DEPLOYMENT_MODE=multi` unless `FEDERATION_TOKENS_ALLOW_INSECURE=1` |
 | `FEDERATION_GRANTS_ALLOW_KEEP_ON_SUBJECT_REVOCATION` | `false` | Whether a subject-wide revocation may be *asked* to leave established grants standing. An allowance, not an instruction |
 | `REDIS_FEDERATION_GRANT_STORE_KEY_PREFIX` | `fg:` | Key namespace of the Redis grant store |
-| `REDIS_FEDERATION_GRANT_INTENT_STORE_KEY_PREFIX` | `fg:` | Key namespace of the Redis intent store; set it with the grant store's |
+| `REDIS_FEDERATION_GRANT_INTENT_STORE_KEY_PREFIX` | `fg:` | Key namespace of the Redis intent store; set it with the grant store's — the template refuses to boot with the grant store's set and this one left at its default |
 
 The feature's own settings are the `federation-grants {}` section; the Redis
 grant store's — its key ring, its encryption mode, its prefix — are
