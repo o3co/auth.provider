@@ -38,6 +38,7 @@ import { resolverForTests } from "@o3co/auth-provider-core/testing";
 import express from "express";
 import request from "supertest";
 import { describe, expect, it, vi } from "vitest";
+import { DEVICE_GRANT_ADMISSION_ACTIONS } from "#/admissionActions.mjs";
 import { createDeviceVerificationHandler } from "#/verificationEndpoint.mjs";
 import { LIVE_SID, liveCookieSession, liveSessionStore } from "./liveSessions.mjs";
 
@@ -121,7 +122,10 @@ const harness = async (options: HarnessOptions = {}) => {
 			...(options.subjectRevocation === undefined
 				? {}
 				: { subjectRevocation: options.subjectRevocation }),
-			requirements: resolverForTests(options.requirements ?? [], { issuer: ISSUER }),
+			requirements: resolverForTests(options.requirements ?? [], {
+				issuer: ISSUER,
+				actions: DEVICE_GRANT_ADMISSION_ACTIONS,
+			}),
 			requireEmailVerified: options.requireEmailVerified ?? false,
 			now: () => NOW,
 			logger,
@@ -438,7 +442,7 @@ describe("device verification on session admission", () => {
 			userSessionStore: liveSessionStore(),
 			requirements: resolverForTests(
 				[fixture(() => ({ outcome: "step_up", whenStillUnmet: "reauthenticate" }))],
-				{ issuer: "https://pages.example.test" },
+				{ issuer: "https://pages.example.test", actions: DEVICE_GRANT_ADMISSION_ACTIONS },
 			),
 			requireEmailVerified: false,
 			now: () => NOW,

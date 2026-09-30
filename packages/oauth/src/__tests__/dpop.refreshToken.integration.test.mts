@@ -43,6 +43,7 @@ import { resolverForTests } from "@o3co/auth-provider-core/testing";
 import { decodeJwt, SignJWT } from "jose";
 import { describe, expect, it } from "vitest";
 import { createRefreshTokenGrant, type RefreshTokenGrantDeps } from "#/grants/refreshToken.mjs";
+import { OAUTH_ADMISSION_ACTIONS } from "./_helpers/admissionActions.mjs";
 import {
 	COMPOUND_DPOP_BINDING,
 	COMPOUND_MTLS_BINDING,
@@ -78,7 +79,7 @@ const mockConfig = {
 const mockDeps: RefreshTokenGrantDeps = {
 	config: mockConfig,
 	keyStore,
-	sessionRequirementResolver: resolverForTests([]),
+	sessionRequirementResolver: resolverForTests([], { actions: OAUTH_ADMISSION_ACTIONS }),
 };
 
 /** `mockDeps` with the opt-in `oauth.tokenBinding.bindConfidentialClientRefreshTokens` set. */

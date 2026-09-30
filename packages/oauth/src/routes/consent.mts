@@ -40,7 +40,6 @@
 
 import { randomBytes, timingSafeEqual } from "node:crypto";
 import {
-	ADMISSION_ACTIONS,
 	type AdmissionDeps,
 	type AuditSink,
 	admitSession,
@@ -60,6 +59,7 @@ import {
 	type UserSessionStore,
 } from "@o3co/auth-provider-core";
 import type { Request, RequestHandler, Response, Router } from "express";
+import type { OAUTH_ROUTER_ADMISSION_ACTIONS } from "../admissionActions.mjs";
 import { isClientIdMetadataDocumentClient } from "../clients/clientIdMetadataDocument.mjs";
 
 /**
@@ -205,7 +205,7 @@ export function createConsentRouter(express: ExpressLike, opts: ConsentRouterOpt
 		const claim = cookieClaim(req);
 		const admission = await admitSession(admissionDeps, {
 			claim,
-			action: ADMISSION_ACTIONS["oauth.consent"],
+			action: "oauth.consent" satisfies keyof typeof OAUTH_ROUTER_ADMISSION_ACTIONS,
 		});
 		switch (admission.outcome) {
 			case "unavailable":

@@ -51,6 +51,7 @@ import express from "express";
 import { decodeJwt, exportJWK, generateKeyPair, type JWK, SignJWT } from "jose";
 import request from "supertest";
 import { beforeAll, describe, expect, it, vi } from "vitest";
+import { DEVICE_GRANT_ADMISSION_ACTIONS } from "#/admissionActions.mjs";
 import { deviceGrantModule } from "#/module.mjs";
 import { DEVICE_CODE_GRANT_TYPE } from "#/types.mjs";
 import { liveCookieSession, liveSessionStore } from "./liveSessions.mjs";
@@ -520,7 +521,7 @@ describe("deviceGrantModule — the route it actually contributes", () => {
 		// The `csrfGuard` slot: core's double, which accepts this origin.
 		csrfGuard: createTestCsrfGuard(),
 		// The synthetic key the planner fills (the session-admission ADR's D1).
-		sessionRequirementResolver: resolverForTests([]),
+		sessionRequirementResolver: resolverForTests([], { actions: DEVICE_GRANT_ADMISSION_ACTIONS }),
 		rateLimiter: createMemoryRateLimiter({
 			limits: {
 				device_verification: { limit: 5, windowSeconds: 300 },
@@ -782,8 +783,11 @@ describe("deviceGrantModule — the route it actually contributes", () => {
 								: { outcome: "met" },
 					},
 				],
-				// Boot registers each page on oauth.jwt.issuer.
-				{ issuer: "https://as.example.test" },
+				{
+					...// Boot registers each page on oauth.jwt.issuer.
+					{ issuer: "https://as.example.test" },
+					actions: DEVICE_GRANT_ADMISSION_ACTIONS,
+				},
 			),
 		});
 		const verify = (action: string) =>

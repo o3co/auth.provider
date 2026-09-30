@@ -31,6 +31,7 @@ import { resolverForTests } from "@o3co/auth-provider-core/testing";
 import express, { type Request, type Response } from "express";
 import request from "supertest";
 import { describe, expect, it, vi } from "vitest";
+import { SESSION_ADMISSION_ACTIONS } from "#/admissionActions.mjs";
 import { createFederationRedirectPolicy } from "#/federations/redirect-policy.mjs";
 import { createRouter } from "#/routes/Federation.mjs";
 
@@ -279,7 +280,7 @@ function buildStatelessApp({
 	app.use(
 		createRouter(express, {
 			config: {} as never,
-			requirements: resolverForTests([]),
+			requirements: resolverForTests([], { actions: SESSION_ADMISSION_ACTIONS }),
 			federationProviders: providers,
 			federationRedirectPolicyResolver: federationRedirectPolicyResolver ?? defaultResolver,
 			providerCallbackUrls: providerCallbackUrls ?? new Map([["test", TEST_CALLBACK_URL]]),
@@ -354,7 +355,7 @@ function buildCallbackApp({
 	app.use(
 		createRouter(express, {
 			config: (config ?? {}) as never,
-			requirements: resolverForTests([]),
+			requirements: resolverForTests([], { actions: SESSION_ADMISSION_ACTIONS }),
 			federationProviders: providers,
 			federationRedirectPolicyResolver: federationRedirectPolicyResolver ?? defaultResolver,
 			providerCallbackUrls: providerCallbackUrls ?? new Map([["test", TEST_CALLBACK_URL]]),
@@ -1540,7 +1541,7 @@ describe("Federation routes", () => {
 			expect(() =>
 				createRouter(express, {
 					config: {} as never,
-					requirements: resolverForTests([]),
+					requirements: resolverForTests([], { actions: SESSION_ADMISSION_ACTIONS }),
 					federationProviders: new Map(),
 					federationRedirectPolicyResolver: new Map(),
 					userRepository: makeUserRepository(),
@@ -1556,7 +1557,7 @@ describe("Federation routes", () => {
 			expect(() =>
 				createRouter(express, {
 					config: {} as never,
-					requirements: resolverForTests([]),
+					requirements: resolverForTests([], { actions: SESSION_ADMISSION_ACTIONS }),
 					federationProviders: new Map(),
 					federationRedirectPolicyResolver: new Map(),
 					userRepository: makeUserRepository(),
@@ -1572,7 +1573,7 @@ describe("Federation routes", () => {
 			expect(() =>
 				createRouter(express, {
 					config: {} as never,
-					requirements: resolverForTests([]),
+					requirements: resolverForTests([], { actions: SESSION_ADMISSION_ACTIONS }),
 					federationProviders: new Map(),
 					federationRedirectPolicyResolver: new Map(),
 					userRepository: makeUserRepository(),
@@ -1588,7 +1589,7 @@ describe("Federation routes", () => {
 			expect(() =>
 				createRouter(express, {
 					config: {} as never,
-					requirements: resolverForTests([]),
+					requirements: resolverForTests([], { actions: SESSION_ADMISSION_ACTIONS }),
 					federationProviders: new Map(),
 					federationRedirectPolicyResolver: new Map(),
 					userRepository: undefined as never,
@@ -1639,7 +1640,7 @@ describe("Federation routes", () => {
 			expect(() =>
 				createRouter(express, {
 					config: {} as never,
-					requirements: resolverForTests([]),
+					requirements: resolverForTests([], { actions: SESSION_ADMISSION_ACTIONS }),
 					federationProviders: new Map(),
 					federationRedirectPolicyResolver: new Map(),
 					userRepository: makeUserRepository(),
@@ -3337,7 +3338,7 @@ describe("the federation login callback answers a store that cannot answer as an
 		app.use(
 			createRouter(express, {
 				config: {} as never,
-				requirements: resolverForTests([]),
+				requirements: resolverForTests([], { actions: SESSION_ADMISSION_ACTIONS }),
 				federationProviders: new Map([["test", makeFakeProvider()]]),
 				federationRedirectPolicyResolver: new Map([["test", makePermissivePolicy()]]),
 				providerCallbackUrls: new Map([["test", TEST_CALLBACK_URL]]),
@@ -3368,7 +3369,7 @@ describe("a federation route's composition fault is a 500, logged once at error"
 		app.use(
 			createRouter(express, {
 				config: {} as never,
-				requirements: resolverForTests([]),
+				requirements: resolverForTests([], { actions: SESSION_ADMISSION_ACTIONS }),
 				federationProviders: new Map([["test", makeFakeProvider()]]),
 				federationRedirectPolicyResolver:
 					options.policies ?? new Map([["test", makePermissivePolicy()]]),
@@ -3517,7 +3518,7 @@ describe("a redirect policy that answers a 5xx is logged once at error; its 4xx 
 		app.use(
 			createRouter(express, {
 				config: {} as never,
-				requirements: resolverForTests([]),
+				requirements: resolverForTests([], { actions: SESSION_ADMISSION_ACTIONS }),
 				federationProviders: new Map([["test", makeFakeProvider()]]),
 				federationRedirectPolicyResolver: new Map([
 					["test", { ...makePermissivePolicy(), validateRedirect }],

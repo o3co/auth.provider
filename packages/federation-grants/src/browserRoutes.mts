@@ -61,8 +61,6 @@
 
 import { randomBytes } from "node:crypto";
 import {
-	ADMISSION_ACTIONS,
-	type AdmissionAction,
 	type AdmissionDeps,
 	type AuditSink,
 	admitSession,
@@ -106,6 +104,7 @@ import {
 } from "@o3co/auth-provider-core";
 import express, { type Request, type RequestHandler, type Response, type Router } from "express";
 import { federationGrantIdentityRegistration } from "./acquisitionSettings.mjs";
+import type { FederationGrantsAdmissionAction } from "./admissionActions.mjs";
 import { createFederationGrantAuditBridge, routeDeniedEvent } from "./audit.mjs";
 import type { FederationGrantBackground } from "./background.mjs";
 import { federationGrantConnectUri } from "./lodgeRoute.mjs";
@@ -320,10 +319,10 @@ type Judgement =
 			readonly admissionStore?: string;
 	  };
 
-/** The admission action of each browser step, each graded `use`. */
-const CONNECT: AdmissionAction = ADMISSION_ACTIONS["federation_grants.connect"];
-const CONSENT: AdmissionAction = ADMISSION_ACTIONS["federation_grants.consent"];
-const CALLBACK: AdmissionAction = ADMISSION_ACTIONS["federation_grants.callback"];
+/** The admission action of each browser step, as the module registers it. */
+const CONNECT: FederationGrantsAdmissionAction = "federation_grants.connect";
+const CONSENT: FederationGrantsAdmissionAction = "federation_grants.consent";
+const CALLBACK: FederationGrantsAdmissionAction = "federation_grants.callback";
 
 /** The browser half selects no `acr`: nothing asks for one here. */
 const NO_ACR_TABLE: AdmissionDeps["acrTable"] = Object.freeze({});
@@ -337,7 +336,7 @@ const NO_ACR_TABLE: AdmissionDeps["acrTable"] = Object.freeze({});
 async function admittedSession(
 	deps: AdmissionDeps,
 	claim: SessionClaim,
-	action: AdmissionAction,
+	action: FederationGrantsAdmissionAction,
 ): Promise<UserSession | null | { readonly unavailable: string }> {
 	const admission = await admitSession(deps, { claim, action });
 	if (admission.outcome === "unavailable") return { unavailable: admission.store };
@@ -361,7 +360,7 @@ async function judge(
 	admission: AdmissionDeps,
 	req: Request,
 	claim: SessionClaim,
-	action: AdmissionAction,
+	action: FederationGrantsAdmissionAction,
 	intent: FederationGrantIntent,
 	now: () => Date,
 ): Promise<Judgement> {

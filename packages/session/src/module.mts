@@ -26,6 +26,7 @@ import {
 	SUBJECT_REVOCATION_ABSENCE_POLICY,
 } from "@o3co/auth-provider-core";
 import express from "express";
+import { SESSION_ADMISSION_ACTIONS } from "./admissionActions.mjs";
 import {
 	createCsrfProtectionFromConfig,
 	createSessionCsrfGuard,
@@ -171,6 +172,8 @@ export const sessionModule = defineModule<
 		// require.
 	},
 	contributes: {
+		// What the link flow's start and callback admit.
+		admissionActions: SESSION_ADMISSION_ACTIONS,
 		routes: [
 			(deps) => {
 				const config = deps.config as AppConfig;

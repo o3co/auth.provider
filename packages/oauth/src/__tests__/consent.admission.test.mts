@@ -48,6 +48,7 @@ import express from "express";
 import request from "supertest";
 import { describe, expect, it, vi } from "vitest";
 import { createOAuthRouter } from "#/routes.mjs";
+import { OAUTH_ADMISSION_ACTIONS } from "./_helpers/admissionActions.mjs";
 import { authorizationServerRegistry } from "./_helpers/authorizationServerRegistry.mjs";
 import { createMockLogger } from "./_helpers/mockLogger.mjs";
 
@@ -158,7 +159,10 @@ const makeApp = async (opts: {
 		consentStore,
 		pendingConsentStore,
 		logger,
-		requirements: resolverForTests(opts.requirements ?? [], { issuer: ISSUER }),
+		requirements: resolverForTests(opts.requirements ?? [], {
+			issuer: ISSUER,
+			actions: OAUTH_ADMISSION_ACTIONS,
+		}),
 		...(opts.userSessionStore ? { userSessionStore: opts.userSessionStore } : {}),
 		...(opts.subjectRevocation ? { subjectRevocation: opts.subjectRevocation } : {}),
 		...(opts.auditSink ? { auditSink: opts.auditSink } : {}),

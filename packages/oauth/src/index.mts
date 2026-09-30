@@ -14,6 +14,9 @@
  * limitations under the License.
  */
 
+// What createOAuthRouter admits, for a composition that mounts the router
+// itself and registers them.
+export { OAUTH_ROUTER_ADMISSION_ACTIONS } from "./admissionActions.mjs";
 // Client ID Metadata Documents — a client whose client_id is the https
 // URL of its own registration (draft-ietf-oauth-client-id-metadata-document).
 export {

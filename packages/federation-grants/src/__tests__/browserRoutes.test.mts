@@ -58,6 +58,7 @@ import {
 import express from "express";
 import request from "supertest";
 import { describe, expect, it, vi } from "vitest";
+import { FEDERATION_GRANTS_ADMISSION_ACTIONS } from "#/admissionActions.mjs";
 import { createFederationGrantBackground, type FederationGrantBackground } from "#/background.mjs";
 import {
 	createFederationGrantBrowserRouter,
@@ -294,7 +295,10 @@ function world(options: WorldOptions = {}) {
 					return state.sessionsBoundary;
 				},
 			},
-			requirements: resolverForTests(options.requirements ?? [], { issuer: ISSUER }),
+			requirements: resolverForTests(options.requirements ?? [], {
+				issuer: ISSUER,
+				actions: FEDERATION_GRANTS_ADMISSION_ACTIONS,
+			}),
 			revocationSkewMs: 1000,
 			connections: {
 				get: (name: string) => {
@@ -3762,7 +3766,9 @@ describe("the browser half on session admission", () => {
 
 	it("refuses to be built without the subject revocation it reads the sessions boundary through: no boundary is no backstop", () => {
 		expect(() =>
-			createFederationGrantBrowserRouter({ requirements: resolverForTests([]) } as never),
+			createFederationGrantBrowserRouter({
+				requirements: resolverForTests([], { actions: FEDERATION_GRANTS_ADMISSION_ACTIONS }),
+			} as never),
 		).toThrow(/subjectRevocation/);
 	});
 

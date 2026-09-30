@@ -29,9 +29,7 @@
 
 import { randomBytes } from "node:crypto";
 import {
-	ADMISSION_ACTIONS,
 	type Admission,
-	type AdmissionAction,
 	type AppConfig,
 	type AuditSink,
 	admitSession,
@@ -60,6 +58,7 @@ import {
 	type UserSessionStore,
 } from "@o3co/auth-provider-core";
 import type { Request, RequestHandler, Response, Router } from "express";
+import type { SessionAdmissionAction } from "../admissionActions.mjs";
 import { checkNavigationOrigin } from "../csrf.mjs";
 import { type EstablishSessionStep, establishSession } from "../establish-session.mjs";
 import { mergeFederatedClaims } from "../federations/claim-precedence.mjs";
@@ -387,7 +386,7 @@ export const createRouter = (
 	 * The link flow's one reading of a session: admission, with this router's
 	 * slots. An outage is logged on `log`, once, by admission.
 	 */
-	const admitLink = (claim: SessionClaim, action: AdmissionAction, log: Logger) =>
+	const admitLink = (claim: SessionClaim, action: SessionAdmissionAction, log: Logger) =>
 		admitSession(
 			{
 				userSessionStore,
@@ -521,7 +520,7 @@ export const createRouter = (
 		if (typeof link.subject !== "string" || link.subject.length === 0) return notLive();
 		const admission = await admitLink(
 			linkClaim({ sid: currentSid, subject: link.subject }),
-			ADMISSION_ACTIONS["session.link_callback"],
+			"session.link_callback",
 			log,
 		);
 		if (admission.outcome === "unavailable") {
@@ -1250,7 +1249,7 @@ export const createRouter = (
 				const claim = cookieClaim(req);
 				const admission = await admitLink(
 					claim,
-					ADMISSION_ACTIONS["session.link"],
+					"session.link",
 					logger.child({ provider: provider.name }),
 				);
 				if (admission.outcome === "unavailable") {

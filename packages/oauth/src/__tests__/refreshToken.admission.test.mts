@@ -45,6 +45,7 @@ import { resolverForTests } from "@o3co/auth-provider-core/testing";
 import { decodeJwt, SignJWT } from "jose";
 import { describe, expect, it, vi } from "vitest";
 import { createRefreshTokenGrant } from "#/grants/refreshToken.mjs";
+import { OAUTH_ADMISSION_ACTIONS } from "./_helpers/admissionActions.mjs";
 import { createMockLogger, type MockLogger } from "./_helpers/mockLogger.mjs";
 
 const SECRET = "test-secret-at-least-32-chars!!";
@@ -145,6 +146,7 @@ const makeGrant = (opts: {
 		refreshTokenFamilyRevocation: { revokeFamily: vi.fn(async () => {}) } as never,
 		sessionRequirementResolver: resolverForTests(opts.requirements ?? [], {
 			issuer: "https://issuer.test",
+			actions: OAUTH_ADMISSION_ACTIONS,
 		}),
 		...(opts.userSessionStore ? { userSessionStore: opts.userSessionStore } : {}),
 		...(opts.subjectRevocation ? { subjectRevocation: opts.subjectRevocation } : {}),

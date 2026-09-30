@@ -32,6 +32,7 @@ import {
 import express from "express";
 import { z } from "zod";
 import { vouchableAcrValues } from "./acrValues.mjs";
+import { OAUTH_ROUTER_ADMISSION_ACTIONS } from "./admissionActions.mjs";
 import { CLIENT_ASSERTION_ALGORITHMS } from "./middleware/clientAssertion.mjs";
 import { createOAuthRouter } from "./routes.mjs";
 import { oauthTokenSettingsFrom } from "./tokenSettings.mjs";
@@ -176,6 +177,8 @@ export const oauthModule = (_params: { config: AppConfig }): Module => {
 		// this module is installed.
 		lifecycle: { oauthTokenSettings: { eager: true } },
 		contributes: {
+			// What the router's /authorize and consent step admit.
+			admissionActions: OAUTH_ROUTER_ADMISSION_ACTIONS,
 			routes: [
 				// oauth-endpoints — always contributed.
 				async (deps) => {

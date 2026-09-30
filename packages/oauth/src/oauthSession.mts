@@ -20,6 +20,7 @@ import {
 	type Module,
 	SUBJECT_REVOCATION_ABSENCE_POLICY,
 } from "@o3co/auth-provider-core";
+import { SESSION_GRANT_ADMISSION_ACTIONS } from "./admissionActions.mjs";
 import { createSessionGrant } from "./grants/session.mjs";
 
 /**
@@ -81,6 +82,7 @@ export const oauthSessionModule = (params: { config: AppConfig }): Module => {
 			auditSink: AUDIT_SINK_ABSENCE_POLICY,
 		},
 		contributes: {
+			admissionActions: SESSION_GRANT_ADMISSION_ACTIONS,
 			grants: {
 				session: (deps) => createSessionGrant(deps),
 			},

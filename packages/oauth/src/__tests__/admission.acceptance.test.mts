@@ -40,6 +40,7 @@ import { describe, expect, it, vi } from "vitest";
 import { createRefreshTokenGrant } from "#/grants/refreshToken.mjs";
 import { createSessionGrant } from "#/grants/session.mjs";
 import { createOAuthRouter } from "#/routes.mjs";
+import { OAUTH_ADMISSION_ACTIONS } from "./_helpers/admissionActions.mjs";
 import { authorizationServerRegistry } from "./_helpers/authorizationServerRegistry.mjs";
 
 const ISSUER = "https://issuer.test";
@@ -105,7 +106,10 @@ const fixtureRequirement = () => {
 };
 
 const buildApp = async (requirement: SessionRequirement) => {
-	const requirements = resolverForTests([requirement], { issuer: ISSUER });
+	const requirements = resolverForTests([requirement], {
+		issuer: ISSUER,
+		actions: OAUTH_ADMISSION_ACTIONS,
+	});
 	const userSessionStore = {
 		kind: "memory",
 		create: vi.fn(async () => {}),

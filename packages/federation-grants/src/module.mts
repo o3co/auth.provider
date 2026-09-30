@@ -54,6 +54,7 @@ import {
 	requireFederationGrantIntentStore,
 	resolveFederationGrantAcquisitionSettings,
 } from "./acquisitionSettings.mjs";
+import { FEDERATION_GRANTS_ADMISSION_ACTIONS } from "./admissionActions.mjs";
 import { createFederationGrantBackground } from "./background.mjs";
 import {
 	createDisabledFederationGrantBrowserRouter,
@@ -389,6 +390,8 @@ export const federationGrantsModule = defineModule<Requires, Optional>({
 	requires: REQUIRES,
 	optional: OPTIONAL,
 	contributes: {
+		// What the browser half admits.
+		admissionActions: FEDERATION_GRANTS_ADMISSION_ACTIONS,
 		routes: [
 			(deps: FederationGrantsModuleDeps) => {
 				if (!isEnabled(deps)) {
