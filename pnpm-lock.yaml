@@ -457,6 +457,9 @@ importers:
       '@o3co/auth-provider-core':
         specifier: workspace:*
         version: link:../core
+      '@o3co/ts.hocon':
+        specifier: ^1.13.0
+        version: 1.13.0(yaml@2.9.0)(zod@4.6.5)
       '@types/accepts':
         specifier: ^1.3.7
         version: 1.3.7

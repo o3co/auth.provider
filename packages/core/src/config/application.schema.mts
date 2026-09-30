@@ -23,20 +23,6 @@
  */
 import { z } from "zod";
 
-/**
- * A list an environment variable may carry as one comma-separated string.
- * Entries are trimmed and empties dropped, so `"a, ,b"` is `["a", "b"]` and an
- * exported-but-empty variable is `[]`.
- */
-const commaList = z.union([z.array(z.string()), z.string()]).transform((value) =>
-	Array.isArray(value)
-		? value
-		: value
-				.split(",")
-				.map((entry) => entry.trim())
-				.filter((entry) => entry.length > 0),
-);
-
 import { checkCanonicalIssuer, describeIssuerRejection } from "../issuer/canonical.mjs";
 import { isWellFormedKid, MAX_KID_LENGTH } from "../keys/kid.mjs";
 import {
@@ -686,7 +672,12 @@ export const CoreConfigSchema = z.object({
 		// `resolveAccessTokenLifetime`.
 		accessToken: accessTokenSchema,
 		refreshToken: refreshTokenSchema,
-		grants: z.object({}).passthrough(),
+		// Presence-only: the path the grant switches moved from (each grant's
+		// under its module's section, `oauth-session` and
+		// `oauth-authorization`), kept so a root that parses with
+		// `AppConfigSchema` before boot still hands it to the relocation
+		// refusal. Nothing reads it.
+		grants: z.unknown().optional(),
 		// As an OIDC OP, `/authorize` rejects requests without `openid` unless the
 		// operator chooses dual OAuth/OIDC mode. Default in HOCON.
 		oidcMode: z.enum(["oidc-required", "dual"]),
@@ -740,28 +731,12 @@ export const CoreConfigSchema = z.object({
 				enabled: coerceBooleanFromEnv,
 			})
 			.optional(),
-		// Client ID Metadata Documents: a `client_id` that is the https URL of the
-		// client's own registration (draft-ietf-oauth-client-id-metadata-document;
-		// the MCP 2026-07-28 registration model). Off by default. List keys also
-		// take a comma-separated string, for environment variables. Every ceiling
-		// here is the operator's: a document says who a client is, never what it
-		// may reach.
-		clientIdMetadataDocuments: z
-			.object({
-				enabled: coerceBooleanFromEnv,
-				allowedScopes: commaList.optional(),
-				allowedAudiences: commaList.optional(),
-				allowedHosts: commaList.optional(),
-				deniedHosts: commaList.optional(),
-				maxBytes: z.coerce.number().int().positive().optional(),
-				timeoutMs: z.coerce.number().int().positive().optional(),
-				cacheMaxAgeMs: z.coerce.number().int().nonnegative().optional(),
-				maxCacheEntries: z.coerce.number().int().positive().optional(),
-				staleIfErrorMs: z.coerce.number().int().nonnegative().optional(),
-				negativeCacheMs: z.coerce.number().int().nonnegative().optional(),
-				maxConcurrentFetches: z.coerce.number().int().positive().optional(),
-			})
-			.optional(),
+		// Presence-only: the keys of `oauth {}` the oauth module's own schema
+		// declares — the consent page, and the Client ID Metadata Documents —
+		// kept so a root that parses with `AppConfigSchema` before boot does not
+		// strip them. The module parses them.
+		consentPage: z.unknown().optional(),
+		clientIdMetadataDocuments: z.unknown().optional(),
 		// What `POST /oauth/revoke` promises for access tokens:
 		//   "denylist"    — the `jti` goes into the `accessTokenDenylist`
 		//                   component that verification consults. Boot refuses an
@@ -944,6 +919,11 @@ export const fullSectionsSchema = z.object({
 		.object({ enabled: coerceBooleanFromEnv.optional() })
 		.passthrough()
 		.optional(),
+	// The oauth package's grant modules' sections, each parsed by its module.
+	// Mirrored for the keys a composition root reads before it knows its
+	// modules — whether each grant is on — kept as written.
+	"oauth-session": z.object({ enabled: z.unknown().optional() }).passthrough().optional(),
+	"oauth-authorization": z.object({ grants: z.unknown().optional() }).passthrough().optional(),
 	session: z
 		.object({
 			// Signs the cookie that is the authenticated session, so guessing it
@@ -1081,10 +1061,9 @@ export const fullSectionsSchema = z.object({
 		// Required: `oauthModule` needs it at boot, so consumers need no null
 		// guard. Default `/login` lives in HOCON.
 		login: z.object({ url: z.string() }),
-		// The deployment-owned consent page for non-first-party clients, like
-		// `login`. Default `/consent` from HOCON: the deployment's page, not the
-		// `/oauth/consent` JSON API it calls.
-		consent: z.object({ url: z.string() }).optional(),
+		// Presence-only: the path the consent page moved from
+		// (`oauth.consentPage.url`, the oauth module's). Nothing reads it.
+		consent: z.unknown().optional(),
 	}),
 	cors: z.object({
 		/**

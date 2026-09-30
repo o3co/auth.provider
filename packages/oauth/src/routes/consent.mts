@@ -17,7 +17,7 @@
 /**
  * The consent step for clients that are not first-party. `/authorize` parks
  * the request under an unguessable challenge and redirects to the
- * deployment's page (`endpoints.consent.url?challenge=…`), which talks to
+ * deployment's page (`oauth.consentPage.url?challenge=…`), which talks to
  * this router:
  *
  * - `GET /oauth/consent?challenge=…` describes the ask: client name and URI,

@@ -40,10 +40,10 @@ import { renamedVariableCaptures } from "../renamedVariables.mjs";
  *   or asymmetric signing build their own key pair;
  * - `oauth.jwt.issuer` is a fixed test issuer (`${?OAUTH_JWT_ISSUER}` there);
  * - `repositories.*` carry only `type`;
- * - `oauth.grants` enables `session`, `authorization_code` and
- *   `refresh_token` explicitly (`oauthAuthorizationModule` requires
- *   `enabled === true`) and omits `client_credentials`, as the standalone
- *   template does.
+ * - the grant switches, in the oauth package's modules' sections, turn on
+ *   `oauth-session.enabled` and
+ *   `oauth-authorization.grants.{authorizationCode,refreshToken}.enabled`
+ *   (off there) and omit `clientCredentials`, as the standalone template does.
  *
  * Like a resolution of `reference.conf` under an environment that sets none
  * of them, it captures every variable core's own section and core's own
@@ -81,8 +81,27 @@ export function coreConfigForTests(options: CoreConfigForTestsOptions = {}) {
 	} satisfies Pick<CoreConfig, "core">;
 }
 
-export function makeValidCoreConfig() {
+/**
+ * The grant switches the fixture turns on, in the oauth package's modules'
+ * sections: the session, authorization-code and refresh-token grants.
+ */
+function grantSwitchesForTests() {
 	return {
+		"oauth-session": { enabled: true },
+		"oauth-authorization": {
+			grants: {
+				authorizationCode: { enabled: true },
+				refreshToken: { enabled: true },
+				// clientCredentials: deliberately omitted -- the fixture mirrors
+				// the standalone template, where client_credentials remains off
+				// unless the deployment explicitly enables M2M.
+			},
+		},
+	} satisfies Pick<FullSectionsConfig, "oauth-session" | "oauth-authorization">;
+}
+
+export function makeValidCoreConfig() {
+	const core = {
 		...{
 			[RENAMED_VARIABLES_SECTION]: renamedVariableCaptures({
 				modules: [memoryRateLimiterModule],
@@ -117,14 +136,6 @@ export function makeValidCoreConfig() {
 				unknownFamilyPolicy: "reject",
 				legacyRtPolicy: "reject",
 			},
-			grants: {
-				session: { enabled: true },
-				authorization_code: { enabled: true },
-				refresh_token: { enabled: true },
-				// client_credentials: deliberately omitted -- factory mirrors the
-				// standalone template defaults, where client_credentials remains
-				// off unless the deployment explicitly enables M2M.
-			},
 			oidcMode: "oidc-required",
 			// Declares both subject-level revocation slots absent: this fixture
 			// has none, on purpose. A test of the declared-absence guard removes
@@ -137,6 +148,7 @@ export function makeValidCoreConfig() {
 		// posture. A test of the declaration itself removes the key.
 		...coreConfigForTests(),
 	} satisfies CoreConfig;
+	return { ...core, ...grantSwitchesForTests() };
 }
 
 export function makeValidFullSections() {

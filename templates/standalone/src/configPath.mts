@@ -163,7 +163,8 @@ export const SWITCHES: readonly string[] = [
 	"session.storage",
 	"repositories.code",
 	"oauth.code.adapter",
-	"oauth.grants",
+	"oauth-session.enabled",
+	"oauth-authorization.grants",
 	"oauth.accessToken",
 ];
 

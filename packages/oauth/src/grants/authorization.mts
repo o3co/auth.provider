@@ -208,8 +208,8 @@ export const createAuthorizationGrant = (deps: AuthorizationGrantDeps): GrantHan
 
 	// One PKCE policy, through the same resolver `/authorize` uses, so
 	// `/authorize` cannot mint a code that `/token` refuses. Resolved once at
-	// composition; `logger` carries the inert-config warning.
-	const pkce = resolveOAuthOptions(config, logger).pkce;
+	// composition.
+	const pkce = resolveOAuthOptions(config).pkce;
 
 	// The lifetimes, also resolved once when the grant is built, so a
 	// hand-built configuration the resolvers refuse fails composition rather

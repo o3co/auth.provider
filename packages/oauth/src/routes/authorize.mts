@@ -476,7 +476,7 @@ const checkConsent = async (
 		redirectError(ctx, "temporarily_unavailable", "consent store unavailable");
 		return false;
 	}
-	// `endpoints.consent.url` may already carry a query string, like the
+	// `oauth.consentPage.url` may already carry a query string, like the
 	// login URL.
 	const consentUrl = ctx.opts.consentUrl();
 	const joiner = consentUrl.includes("?") ? "&" : "?";

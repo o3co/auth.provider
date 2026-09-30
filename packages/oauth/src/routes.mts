@@ -302,7 +302,7 @@ export const createOAuthRouter = async (
 	// here, at router composition; see `resolveOAuthOptions` for the defensive
 	// reads and per-field defaults. The /authorize handler receives the whole
 	// object (routes/authorize.mts).
-	const options = resolveOAuthOptions(config, logger);
+	const options = resolveOAuthOptions(config);
 	// `/authorize` answers `acr_values` only from the entries this composition
 	// can satisfy — the same table discovery advertises — and an entry dropped
 	// is said once, here, at composition. With no `/authorize` there is no
@@ -420,9 +420,11 @@ export const createOAuthRouter = async (
 					// The session module's login entry when a module provides it;
 					// otherwise the login page read from the configuration per request.
 					login: loginEntry ?? loginTripFromConfig(() => config.endpoints.login.url),
-					// The consent page, read like the login page. The default lives
-					// in HOCON; a hand-built config without the key falls back the same way.
-					consentUrl: () => config.endpoints.consent?.url ?? "/consent",
+					// The consent page, `oauth.consentPage.url`, read per request. The
+					// default lives in the package's reference.conf; a hand-built config
+					// without the key falls back the same way.
+					consentUrl: () =>
+						(config.oauth as { consentPage?: { url?: string } }).consentPage?.url ?? "/consent",
 					consentStore,
 					pendingConsentStore,
 					oauth: { ...options, acrValues: acrTable },

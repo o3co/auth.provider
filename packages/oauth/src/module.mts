@@ -18,6 +18,7 @@ import {
 	ACCESS_TOKEN_DENYLIST_ABSENCE_POLICY,
 	type AppConfig,
 	AUDIT_SINK_ABSENCE_POLICY,
+	coerceBooleanFromEnv,
 	consoleLogger,
 	defineModule,
 	LOGIN_RETURN_PARAMETER,
@@ -69,6 +70,85 @@ const oauthConfigSchema = z.object({
 });
 
 /**
+ * A list an environment variable may carry as one comma-separated string:
+ * entries trimmed and empties dropped, so an exported-but-empty variable is
+ * `[]`.
+ */
+const commaList = z.union([z.array(z.string()), z.string()]).transform((value) =>
+	Array.isArray(value)
+		? value
+		: value
+				.split(",")
+				.map((entry) => entry.trim())
+				.filter((entry) => entry.length > 0),
+);
+
+/**
+ * The keys of `oauth {}` this module's schema declares: the consent page and
+ * the Client ID Metadata Documents (draft-ietf-oauth-client-id-metadata-document).
+ * The rest of `oauth {}` is still declared by core's schema, so this one keeps
+ * no other key and refuses none; boot lays what it parses over the section.
+ * Each leaf reads the string an environment variable carries.
+ */
+export const oauthSectionSchema = z.object({
+	/**
+	 * The deployment-owned page a client that is not first-party is sent to
+	 * with `?challenge=<id>`: a path or an absolute URL, which may carry a
+	 * query of its own.
+	 */
+	consentPage: z.object({ url: z.string() }).strict().optional(),
+	/**
+	 * A `client_id` that is the https URL of the client's own registration.
+	 * Off by default. The list keys also take a comma-separated string. Every
+	 * ceiling here is the operator's: a document says who a client is, never
+	 * what it may reach.
+	 */
+	clientIdMetadataDocuments: z
+		.object({
+			enabled: coerceBooleanFromEnv,
+			allowedScopes: commaList.optional(),
+			allowedAudiences: commaList.optional(),
+			allowedHosts: commaList.optional(),
+			deniedHosts: commaList.optional(),
+			maxBytes: z.coerce.number().int().positive().optional(),
+			timeoutMs: z.coerce.number().int().positive().optional(),
+			cacheMaxAgeMs: z.coerce.number().int().nonnegative().optional(),
+			maxCacheEntries: z.coerce.number().int().positive().optional(),
+			staleIfErrorMs: z.coerce.number().int().nonnegative().optional(),
+			negativeCacheMs: z.coerce.number().int().nonnegative().optional(),
+			maxConcurrentFetches: z.coerce.number().int().positive().optional(),
+		})
+		.optional(),
+});
+
+/**
+ * The module's section, `oauth`, with the package's defaults: the consent
+ * page moved from `endpoints.consent.url`, and `ENDPOINTS_CONSENT_URL` and the
+ * Client ID Metadata Documents' `OAUTH_CIMD_*` variables renamed after their
+ * paths (`OAUTH_CONSENT_PAGE_URL`, `OAUTH_CLIENT_ID_METADATA_DOCUMENTS_*`).
+ */
+const SECTION = {
+	schema: oauthSectionSchema,
+	reference: new URL("../config/reference.conf", import.meta.url),
+	relocatedFrom: { "endpoints.consent.url": "consentPage.url" },
+	renamedVariables: {
+		ENDPOINTS_CONSENT_URL: "endpoints.consent.url",
+		OAUTH_CIMD_ENABLED: "oauth.clientIdMetadataDocuments.enabled",
+		OAUTH_CIMD_ALLOWED_SCOPES: "oauth.clientIdMetadataDocuments.allowedScopes",
+		OAUTH_CIMD_ALLOWED_AUDIENCES: "oauth.clientIdMetadataDocuments.allowedAudiences",
+		OAUTH_CIMD_ALLOWED_HOSTS: "oauth.clientIdMetadataDocuments.allowedHosts",
+		OAUTH_CIMD_DENIED_HOSTS: "oauth.clientIdMetadataDocuments.deniedHosts",
+		OAUTH_CIMD_MAX_BYTES: "oauth.clientIdMetadataDocuments.maxBytes",
+		OAUTH_CIMD_TIMEOUT_MS: "oauth.clientIdMetadataDocuments.timeoutMs",
+		OAUTH_CIMD_CACHE_MAX_AGE_MS: "oauth.clientIdMetadataDocuments.cacheMaxAgeMs",
+		OAUTH_CIMD_MAX_CACHE_ENTRIES: "oauth.clientIdMetadataDocuments.maxCacheEntries",
+		OAUTH_CIMD_STALE_IF_ERROR_MS: "oauth.clientIdMetadataDocuments.staleIfErrorMs",
+		OAUTH_CIMD_NEGATIVE_CACHE_MS: "oauth.clientIdMetadataDocuments.negativeCacheMs",
+		OAUTH_CIMD_MAX_CONCURRENT_FETCHES: "oauth.clientIdMetadataDocuments.maxConcurrentFetches",
+	},
+} as const;
+
+/**
  * Declarative manifest for the OAuth 2.0 endpoint suite. Every dependency
  * flows through the typed DI graph (`requires` / `optional`).
  *
@@ -91,8 +171,8 @@ export const oauthModule = (_params: { config: AppConfig }): Module => {
 	//
 	// The type arguments are written out, though inference from `requires`,
 	// `optional` and `provides` would give the same. Written, they infer
-	// nothing, so the section schema (none: `never`) and the provided keys
-	// `authoritative` is typed against are written too.
+	// nothing, so the section schema and the provided keys `authoritative` is
+	// typed against are written too.
 	return defineModule<
 		| "config"
 		| "clientRepository"
@@ -117,10 +197,11 @@ export const oauthModule = (_params: { config: AppConfig }): Module => {
 		| "replaySeenSet"
 		| "loginEntry"
 		| "logger",
-		never,
+		typeof oauthSectionSchema,
 		"oauthTokenSettings"
 	>({
 		name: "oauth",
+		section: SECTION,
 		configSchema: oauthConfigSchema,
 		requires: [
 			"config", // createOAuthRouter reads config.oauth.jwt.issuer, accessToken / refreshToken expiry
