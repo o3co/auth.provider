@@ -86,6 +86,7 @@ import {
 } from "./ocspAnswer.mjs";
 import { equalBytes } from "./ocspBytes.mjs";
 import { fetchResponse } from "./ocspFetch.mjs";
+import { parseResponse } from "./ocspParse.mjs";
 import { buildRequest, checkNonce } from "./ocspRequest.mjs";
 import { ocspResponders } from "./ocspResponders.mjs";
 
@@ -98,8 +99,6 @@ export type {
 export { checkMustStaple } from "./ocspMustStaple.mjs";
 export { type OcspResponders, ocspResponders } from "./ocspResponders.mjs";
 
-/** `id-pkix-ocsp-basic` response type (RFC 6960 §4.2.1). */
-const OID_OCSP_BASIC = "1.3.6.1.5.5.7.48.1.1";
 /** `id-kp-OCSPSigning` (RFC 6960 §4.2.2.2). */
 const OID_KP_OCSP_SIGNING = "1.3.6.1.5.5.7.3.9";
 /** `id-pkix-ocsp-nocheck` (RFC 6960 §4.2.2.2.1): the CA vouches for the responder for its certificate's lifetime. */
@@ -144,16 +143,6 @@ const CRL_REASON_NAMES: Readonly<Record<number, string>> = {
 	8: "removeFromCRL",
 	9: "privilegeWithdrawn",
 	10: "aACompromise",
-};
-
-/** `OCSPResponseStatus` names (RFC 6960 §4.2.1). */
-const RESPONSE_STATUS_NAMES: Readonly<Record<number, string>> = {
-	0: "successful",
-	1: "malformedRequest",
-	2: "internalError",
-	3: "tryLater",
-	5: "sigRequired",
-	6: "unauthorized",
 };
 
 /** Reasons remembered for the negative window, and at which granularity. */
@@ -296,65 +285,6 @@ type SignerRefusal = {
 	readonly ok: false;
 	readonly reason: "bad_signature" | "algorithm_not_permitted";
 	readonly detail: string;
-};
-
-type Parsed =
-	| { readonly ok: true; readonly basic: pkijs.BasicOCSPResponse }
-	| {
-			readonly ok: false;
-			readonly reason: "unparseable" | "responder_error";
-			readonly detail: string;
-			readonly cause?: unknown;
-	  };
-
-const parseResponse = (bytes: Uint8Array): Parsed => {
-	let response: pkijs.OCSPResponse;
-	try {
-		response = pkijs.OCSPResponse.fromBER(bytes);
-	} catch (err) {
-		return {
-			ok: false,
-			reason: "unparseable",
-			detail: "not a DER OCSPResponse",
-			cause: err,
-		};
-	}
-	const status = response.responseStatus.valueBlock.valueDec;
-	if (status !== 0) {
-		return {
-			ok: false,
-			reason: "responder_error",
-			detail: `the responder answered ${RESPONSE_STATUS_NAMES[status] ?? "status"} (${status})`,
-		};
-	}
-	const responseBytes = response.responseBytes;
-	if (responseBytes === undefined) {
-		return {
-			ok: false,
-			reason: "unparseable",
-			detail: "a successful response with no responseBytes",
-		};
-	}
-	if (responseBytes.responseType !== OID_OCSP_BASIC) {
-		return {
-			ok: false,
-			reason: "unparseable",
-			detail: `responseType ${responseBytes.responseType} is not id-pkix-ocsp-basic`,
-		};
-	}
-	try {
-		return {
-			ok: true,
-			basic: pkijs.BasicOCSPResponse.fromBER(responseBytes.response.valueBlock.valueHexView),
-		};
-	} catch (err) {
-		return {
-			ok: false,
-			reason: "unparseable",
-			detail: "not a DER BasicOCSPResponse",
-			cause: err,
-		};
-	}
 };
 
 /**
