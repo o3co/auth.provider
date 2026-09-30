@@ -49,7 +49,11 @@ const RULES = {
 	challengeMail:
 		"challenge, when it asks for a code to be mailed, asks for a login code, non-empty, with an expiry after now when it gives one and the keyed digest of the account's address, another at each challenge, and its response carries no form of the code",
 	handed:
-		"the address digest a factor records is the one it is handed — of the address its code went to, kept at the send — at an enrollment's completion and at a verification under a newer key, whatever the account's address reads by then",
+		"completeEnrollment records exactly the address digest it is handed — of the address its code went to, kept at the send — never one of the address the account answered at the start or answers by the completion",
+	unhanded:
+		"completeEnrollment, after its code was mailed, completes nothing when it is handed no address digest",
+	rotated:
+		"verify, handed the address digest under a newer key than the one recorded, keeps it in its next data, and a later challenge mails it",
 	unreadable:
 		"challenge, over data whose address digest is gone or is no digest, still asks for its login code, with a null address digest, and never throws: the coordinator refuses the factor",
 	noAddress:
@@ -522,7 +526,7 @@ describe("mfaFactorContract", () => {
 		).toEqual([RULES.challengeMail]);
 	});
 
-	it("fails a factor that records a digest of the account's address as it reads at completion, or at a verification a digest it was not handed", async () => {
+	it("fails a factor that records a digest of the account's address as it reads at completion, or at a verification anything but the digest it was handed", async () => {
 		const digestOf = (email: unknown) =>
 			createTestMfaDigests("test").digest([normaliseMailAddress(email) as string]);
 		expect(
@@ -552,7 +556,7 @@ describe("mfaFactorContract", () => {
 					})),
 				),
 				JSON.stringify(next),
-			).toEqual([RULES.handed]);
+			).toEqual([RULES.rotated]);
 		}
 	});
 
@@ -634,5 +638,51 @@ describe("mfaFactorContract", () => {
 				})),
 			),
 		).toEqual([RULES.noAddress]);
+	});
+	it("fails a factor that records a digest it made of the account's address itself: at the start, or when none is handed", async () => {
+		const digestOf = (email: unknown) =>
+			createTestMfaDigests("test").digest([normaliseMailAddress(email) as string]);
+		// Kept from the start, and recorded in place of the one handed.
+		const fromTheStart = (factor: MfaFactor): MfaFactor => ({
+			...factor,
+			beginEnrollment: async (ctx) => {
+				const start = await factor.beginEnrollment(ctx);
+				return { ...start, state: { ...start.state, mine: digestOf(ctx.user.email) } };
+			},
+			completeEnrollment: async (ctx) =>
+				factor.completeEnrollment({ ...ctx, addressDigest: ctx.state.mine as never }),
+		});
+		expect(await failing(inputFor({ mail: true }, fromTheStart))).toEqual([
+			RULES.handed,
+			RULES.unhanded,
+		]);
+		// Its own, when none is handed.
+		const fallingBack = (factor: MfaFactor): MfaFactor => ({
+			...factor,
+			completeEnrollment: async (ctx) =>
+				factor.completeEnrollment({
+					...ctx,
+					addressDigest: ctx.addressDigest ?? digestOf(ctx.user.email),
+				}),
+		});
+		expect(await failing(inputFor({ mail: true }, fallingBack))).toEqual([RULES.unhanded]);
+	});
+
+	it("fails a factor that keeps no digest it is handed under a newer key, or keeps the old one", async () => {
+		const rewrapping = (next: (ctx: Parameters<MfaFactor["verify"]>[0]) => unknown) =>
+			inputFor({ mail: true }, (factor) => ({
+				...factor,
+				verify: async (ctx) => {
+					const verdict = await factor.verify(ctx);
+					if (!verdict.ok) return verdict;
+					const { next: _dropped, ...kept } = verdict;
+					const changed = next(ctx);
+					return changed === undefined ? kept : { ...kept, next: changed as never };
+				},
+			}));
+		// Every rotation write removed.
+		expect(await failing(rewrapping(() => undefined))).toEqual([RULES.rotated]);
+		// The recorded digest kept, not the one handed.
+		expect(await failing(rewrapping((ctx) => ctx.factor.data))).toEqual([RULES.rotated]);
 	});
 });
