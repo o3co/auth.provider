@@ -112,6 +112,21 @@ describe("the CORS mount reads the httpSettings slot when the composition holds 
 		}
 	});
 
+	it("builds a provider of the slot that nothing requires: one listing no origin wins over cors.allowedOrigins", async () => {
+		const lazy = defineModule({
+			name: "http",
+			provides: { httpSettings: () => createTestHttpSettings({ allowedOrigins: [] }) },
+		});
+		const { app, handle } = await boot([CONFIG_ORIGIN], [lazy]);
+		try {
+			const res = await preflight(app, CONFIG_ORIGIN);
+			expect(res.headers["access-control-allow-origin"]).toBeUndefined();
+			expect(handle.components.httpSettings).toBeDefined();
+		} finally {
+			await handle.dispose();
+		}
+	});
+
 	it("reads a slot the host fills through overrideComponents", async () => {
 		const handle = await createApp({
 			modules: [tokenRoute],
