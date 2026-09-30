@@ -5,9 +5,10 @@
 
 import {
 	type AdapterBuilder,
-	assertUsableRateLimitSpecs,
+	createRateLimitBudgetLookup,
 	defineModule,
 	MAX_DURATION_SECONDS,
+	type RateLimitBudgetResolver,
 	type RateLimiter,
 	type RateLimitSpec,
 	resolveSeededLimitSpecs,
@@ -25,15 +26,15 @@ interface RedisRateLimiterConfig {
 /** The built-in default, for a configuration that gives none. */
 const DEFAULT_LIMIT: RateLimitSpec = { limit: 60, windowSeconds: 60 };
 
-function keyPrefix(key: string): string {
-	const colon = key.indexOf(":");
-	return colon === -1 ? key : key.slice(0, colon);
-}
-
 interface CreateRedisRateLimiterOptions {
 	client: RateLimiterClient;
 	limits?: Record<string, RateLimitSpec>;
 	defaultLimit?: RateLimitSpec;
+	/**
+	 * The budgets the prefixes' owners contributed, read at each check; an
+	 * entry of `limits` wins over one (core's `createRateLimitBudgetLookup`).
+	 */
+	budgets?: RateLimitBudgetResolver;
 }
 
 /**
@@ -49,34 +50,28 @@ interface CreateRedisRateLimiterOptions {
  */
 export function createRedisRateLimiter(opts: CreateRedisRateLimiterOptions): RateLimiter {
 	// Every spec it was given, `defaultLimit` included, must be one it can
-	// apply as written (core's predicate, which the in-process limiter uses
-	// too). `redisRateLimiterBuilder` accepts a config object that never passed
-	// the zod schema, so this is where a zero window (`EXPIRE key 0` deletes
-	// the counter), a limit of zero or less, NaN, a fraction, or a window past
-	// the Date range (an `EXPIRE` Redis refuses after the `INCR`) is refused,
-	// rather than replaced by the default, a looser budget than the operator
-	// wrote. Only a default nobody gave is the built-in 60 per 60 s.
-	assertUsableRateLimitSpecs("createRedisRateLimiter", opts);
-	// Held as they were checked, the default included, as the in-process
-	// limiter holds them: a later change to the caller's objects cannot reach
-	// a check, and so cannot hand Redis a window nobody validated.
-	const limits: Record<string, RateLimitSpec> = Object.fromEntries(
-		Object.entries(opts.limits ?? {}).map(([prefix, spec]) => [
-			prefix,
-			{ limit: spec.limit, windowSeconds: spec.windowSeconds },
-		]),
-	);
-	const givenDefault = opts.defaultLimit ?? DEFAULT_LIMIT;
-	const defaultLimit: RateLimitSpec = {
-		limit: givenDefault.limit,
-		windowSeconds: givenDefault.windowSeconds,
-	};
+	// apply as written: core's lookup refuses anything else, by the predicate
+	// the in-process limiter is held to, and holds what it checked, so a later
+	// change to the caller's objects cannot hand Redis a window nobody
+	// validated. `redisRateLimiterBuilder` accepts a config object that never
+	// passed the zod schema, so this is where a zero window (`EXPIRE key 0`
+	// deletes the counter), a limit of zero or less, NaN, a fraction, or a
+	// window past the Date range (an `EXPIRE` Redis refuses after the `INCR`)
+	// is refused, rather than replaced by the default, a looser budget than
+	// the operator wrote. Only a default nobody gave is the built-in 60 per
+	// 60 s.
+	const budgetFor = createRateLimitBudgetLookup("createRedisRateLimiter", {
+		...(opts.limits === undefined ? {} : { limits: opts.limits }),
+		// Only `undefined` is "not given": a `null` default is refused.
+		defaultLimit: opts.defaultLimit === undefined ? DEFAULT_LIMIT : opts.defaultLimit,
+		...(opts.budgets === undefined ? {} : { budgets: opts.budgets }),
+	});
 	const client = opts.client;
 
 	return {
 		kind: "redis",
 		async check(key) {
-			const spec = limits[keyPrefix(key)] ?? defaultLimit;
+			const { prefix, spec } = budgetFor(key);
 			// Take the PTTL with the count when the client offers it, so the
 			// decision can say when the window ends — without `resetAt` the guard's
 			// 429 carries no `Retry-After` behind Redis while the memory adapter's
@@ -93,7 +88,7 @@ export function createRedisRateLimiter(opts: CreateRedisRateLimiterOptions): Rat
 				return {
 					allowed: false,
 					remaining: 0,
-					reason: `limit:${keyPrefix(key)}`,
+					reason: `limit:${prefix}`,
 					limit: spec.limit,
 					...resetAt,
 				};
@@ -140,7 +135,7 @@ const rateLimitSpecSchema = z.object({
  */
 export const redisRateLimiterModule = defineModule({
 	name: "redis-rate-limiter",
-	requires: ["rateLimiterClient", "config"] as const,
+	requires: ["rateLimiterClient", "config", "rateLimitBudgetResolver"] as const,
 	configSchema: z.object({
 		redisRateLimiter: z
 			.object({
@@ -161,6 +156,7 @@ export const redisRateLimiterModule = defineModule({
 			).redisRateLimiter;
 			return createRedisRateLimiter({
 				client: deps.rateLimiterClient,
+				budgets: deps.rateLimitBudgetResolver,
 				// `/session/login` limits under the `login:` prefix, but its window
 				// and limit are configured at `rateLimit.login`; the device
 				// verification endpoint likewise under `device_verification:`,

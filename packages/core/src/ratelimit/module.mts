@@ -28,7 +28,7 @@ export const memoryRateLimiterModule = defineModule({
 		reason:
 			"rate-limit counters fork per replica — every configured limit is effectively multiplied by the replica count, and resets on each deploy",
 	},
-	requires: ["config"] as const,
+	requires: ["config", "rateLimitBudgetResolver"] as const,
 	configSchema: z.object({
 		memoryRateLimiter: z
 			.object({
@@ -58,6 +58,7 @@ export const memoryRateLimiterModule = defineModule({
 				}
 			).memoryRateLimiter;
 			return createMemoryRateLimiter({
+				budgets: deps.rateLimitBudgetResolver,
 				// `/session/login` limits under the `login:` prefix, but its window
 				// and limit are configured at `rateLimit.login`; the device
 				// verification endpoint likewise under `device_verification:`,

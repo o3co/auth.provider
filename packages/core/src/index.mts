@@ -757,6 +757,13 @@ export type {
 	GrantPolicyHookFactory,
 	GrantPolicyRequest,
 } from "./policy/types.mjs";
+// The one lookup every bundled limiter takes a key's budget from.
+export {
+	createRateLimitBudgetLookup,
+	type RateLimitBudget,
+	type RateLimitBudgetLookup,
+	type RateLimitBudgetLookupOptions,
+} from "./ratelimit/budgetLookup.mjs";
 export {
 	DEVICE_VERIFICATION_RATE_LIMIT_PREFIX,
 	isDeviceVerificationRateLimitSpec,
