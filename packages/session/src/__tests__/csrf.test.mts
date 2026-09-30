@@ -381,6 +381,65 @@ describe("csrf — what verify answers", () => {
 	});
 });
 
+describe("csrf — the signer after construction", () => {
+	const pair = (csrf: ReturnType<typeof makeCsrf>, token: string) =>
+		fakeRequest({
+			cookies: { [csrf.cookieName]: token },
+			headers: { [csrf.headerName]: token },
+		});
+
+	/** A well-formed token whose signature the signer did not make. */
+	const forged = (csrf: ReturnType<typeof makeCsrf>): string => {
+		const [expiry, nonce, signature] = csrf.mint().split(".");
+		return `${expiry}.${nonce}.${tampered(signature as string)}`;
+	};
+
+	it("checks with the verify it was built over: a verify replaced on the signer afterwards passes no forged token", () => {
+		const signer: { sign: CsrfTokenSigner["sign"]; verify: CsrfTokenSigner["verify"] } = {
+			sign: SIGNER.sign,
+			verify: SIGNER.verify,
+		};
+		const csrf = makeCsrf({ signer });
+		const token = forged(csrf);
+		signer.verify = () => true;
+		expect(csrf.verify(pair(csrf, token))).toBe("invalid");
+		expect(createSessionCsrfGuard({ csrf }).check(pair(csrf, token))).toEqual({
+			outcome: "refused",
+			reason: "token_invalid",
+		});
+	});
+
+	it("signs with the sign it was built over: a sign replaced on the signer afterwards changes no token it mints", () => {
+		const signer: { sign: CsrfTokenSigner["sign"]; verify: CsrfTokenSigner["verify"] } = {
+			sign: SIGNER.sign,
+			verify: SIGNER.verify,
+		};
+		const csrf = makeCsrf({ signer });
+		signer.sign = () => "A".repeat(43);
+		const token = csrf.mint();
+		const [expiry, nonce, signature] = token.split(".");
+		expect(SIGNER.verify(`${expiry}.${nonce}`, signature as string)).toBe(true);
+		expect(csrf.verify(pair(csrf, token))).toBe("valid");
+	});
+
+	it("reads sign and verify off the signer once, so accessors that answer other methods later change nothing", () => {
+		let probed = false;
+		const signer = {
+			get sign() {
+				return probed ? () => "A".repeat(43) : SIGNER.sign;
+			},
+			get verify() {
+				return probed ? () => true : SIGNER.verify;
+			},
+		} as CsrfTokenSigner;
+		const csrf = makeCsrf({ signer });
+		probed = true;
+		expect(csrf.verify(pair(csrf, forged(csrf)))).toBe("invalid");
+		const [expiry, nonce, signature] = csrf.mint().split(".");
+		expect(SIGNER.verify(`${expiry}.${nonce}`, signature as string)).toBe(true);
+	});
+});
+
 describe("csrf — a token's expiry", () => {
 	const NOW_MS = 1_800_000_000_000;
 	const nowSeconds = NOW_MS / 1000;
