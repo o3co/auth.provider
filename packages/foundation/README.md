@@ -251,14 +251,14 @@ exactly (no trimming, no case folding, no trailing-slash tolerance), and
 registration and `sub` alone. `supportsFederatedIdentityLookup(registration,
 identityClaims)` is `true` when an entry equals the registration and every
 `requiredClaims` name is among `identityClaims`. When federation grants are enabled and have at
-least one connection and `federationGrants.identityLookup` is `"required"` (the
+least one connection and `federation-grants.identityLookup` is `"required"` (the
 default), the grants module refuses at boot every connection it is `false` for;
 under `"unsupported"`, or with no connection, it asks nothing. A registration nobody declared is
 answered `registration_not_covered` locally, and a declared one arriving
 without a required claim `identity_not_resolvable`, with no request either
 way. The declaration is snapshotted at construction; a duplicate registration,
 a malformed entry, or coverage without the URL is a construction error. It has
-no environment-variable form (a list is HOCON's), as `federationGrants.connections`
+no environment-variable form (a list is HOCON's), as `federation-grants.connections`
 has none. `supportsFederatedIdentityLookup` and `findSubjectByFederatedIdentity`
 are absent when `findSubjectByFederatedIdentityUrl` is not configured, and a
 deployment that then has a connection under `"required"` is refused at boot.

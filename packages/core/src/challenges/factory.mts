@@ -40,7 +40,7 @@ export function createChallengeStoreFactory(): ChallengeStoreFactory {
  * Register the in-tree built-in builders on a ChallengeStoreFactory.
  * Currently registers "memory", capped at the adapter config's `maxEntries`
  * (`factory.create({ type: "memory", maxEntries })`, read as
- * `challengeStore.memory.maxEntries` is: absent means the default, a value it
+ * `core-challenge-store-memory.maxEntries` is: absent means the default, a value it
  * cannot use is a RangeError naming the key). Throws AdapterFactoryError
  * reason "duplicate" if any builtin name is already registered.
  */

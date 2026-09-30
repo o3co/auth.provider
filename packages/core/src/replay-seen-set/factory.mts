@@ -31,7 +31,7 @@ export function createReplaySeenSetFactory(): ReplaySeenSetFactory {
 /**
  * Register the in-tree built-in builders: `memory`, capped at the adapter
  * config's `maxEntries` (`factory.create({ type: "memory", maxEntries })`,
- * read as `replaySeenSet.memory.maxEntries` is: absent means the default, a
+ * read as `core-replay-seen-set-memory.maxEntries` is: absent means the default, a
  * value it cannot use is a RangeError naming the key).
  */
 export function registerBuiltinReplaySeenSets(factory: ReplaySeenSetFactory): void {
