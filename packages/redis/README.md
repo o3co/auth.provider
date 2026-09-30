@@ -1,6 +1,6 @@
 # @o3co/auth-provider-redis
 
-Last updated: 2026-09-30
+Last updated: 2026-10-01
 
 Redis-backed implementations of the store ports `@o3co/auth-provider-core`
 declares, a `defineModule` manifest for each, and the wrappers that turn one
@@ -106,6 +106,12 @@ imports (see [Entry points](#entry-points)). The package depends on `zod`.
   `private_key_jwt` and WebAuthn. A Redis at `maxmemory` refuses every
   consumer alike — keep the seen-set's instance sized for the flood, or on
   one of its own.
+- **For the family index's "ended" mark, operations that are linearizable**
+  (core's `SupportsSessionEnd`): that a logout and a grant on one session
+  never both miss each other holds only while every operation sees each one
+  completed before it. Redis's asynchronous replication does not hold that
+  across a failover, where a promoted replica may lack a write the old
+  primary acknowledged.
 - **For the MFA stores, a server that keeps what it is written** (the MFA
   ADR's D12). An enrolled second factor lost to an eviction or a restart
   reads as "never enrolled", and whoever holds the password can then bind
@@ -162,7 +168,19 @@ Each one implements a port core declares; the slot name is in parentheses.
   a first binding) as a key of its own, left out when the session recorded
   none: an envelope without it reads as a session with none, a malformed one
   is refused as corrupt, and a release before this one ignores the key. A
-  step-up keeps it as it was.
+  step-up keeps it as it was. The `SessionFamilyIndex` has the session-end
+  capability (core's `SupportsSessionEnd`) when it is given an
+  `endedKeyPrefix` and a `SessionFamilyIndexClient` with `writeEndMark` and
+  `hasEndMark`, which `makeIoredisClients`, the module and the builder
+  provide: the mark is a string at `<endedKeyPrefix><sid>` (`ss:fi-ended:` by
+  default) expiring at the session's `expiresAt`, beside the family set, and
+  `removeBySid` leaves it. `endSession` writes the mark and then lists;
+  `addFamilyIdUnlessEnded` adds and then reads the mark. Each reply is in
+  before the next command is sent, with no script, so the two keys need not
+  share a Cluster slot. An index over a client without the two methods works
+  as before, without the capability; `createRedisSessionFamilyIndex` refuses
+  an `endedKeyPrefix` that overlaps `keyPrefix` (either starting with the
+  other).
 - `FederationTokenStore` (`federationTokenStore`) — the upstream IdP tokens
   held for a session. See [Federation-token keys and logout](#federation-token-keys-and-logout).
 - `FederationGrantStore` (`federationGrantStore`) and
@@ -444,7 +462,7 @@ give the same answers:
 | `FederationTokenStore` | a `ttl` that is not a positive number of seconds ending within the Date range (at construction) | `PX` and the index TTL = `ttl` × 1000, rounded up |
 | The federation-token lock (`acquireLock`) and the federation-grant refresh lock | a TTL that is not a positive lifetime, or a wait that is not a non-negative one, ending within the Date range | `PX` = the TTL, rounded up |
 | `UserSessionStore.create` | an Invalid Date `expiresAt`; an `authTime` or `authentication.mfaAt` that is an Invalid Date or before the epoch (the stored envelope reads back neither) | `PX` = the remaining life (a `Date` is whole milliseconds, and always within the range); `recordSecondFactor` keeps it (`KEEPTTL`) |
-| `SessionRPRegistry.registerRP`, `SessionFamilyIndex.addFamilyId`, `SessionFederationIndex.addFederation`, `SubjectSessionIndex.addSid` | an Invalid Date `expiresAt` (and, for `registerRP`, an Invalid Date `registeredAt`) | `PEXPIREAT` = the session's `expiresAt` |
+| `SessionRPRegistry.registerRP`, `SessionFamilyIndex.addFamilyId`, `addFamilyIdUnlessEnded`, `endSession`, `SessionFederationIndex.addFederation`, `SubjectSessionIndex.addSid` | an Invalid Date `expiresAt` (and, for `registerRP`, an Invalid Date `registeredAt`) | `PEXPIREAT` = the session's `expiresAt`; the family index's "ended" mark `PXAT` = the same |
 | `ConsentStore.grant`, `PendingConsentStore.set` | an `expiresAt` outside the Date range (a consent with none is `undefined`, kept until revoked) | `PEXPIRE` = the remaining life, rounded up, plus the five-minute slack |
 | `SubjectRevocation.revokeBefore`, `revokeSessionsBefore` | a boundary or `expiresAt` that is an Invalid Date | `PXAT` = the later of the `expiresAt` asked for and the key's current deadline, raised to the grants floor for a full revocation — never lowered |
 | `FederationGrantStore`, `FederationGrantIntentStore` | a caller's clock that is an Invalid Date (`RangeError`); an intent or authorization expiry that is not a date writes nothing (`{ ok: false }`, as the port says); a `tombstoneRetentionMs`, `listingAllowanceMs` or `reservationAllowanceMs` that ends past the Date range, at construction. The scripts set a key's deadline after writing it, so a deadline Redis refused left the key with no TTL, and a retention past 2^53 left records that do not read back. The config schemas hold the retention and the listing allowance to one year | `PEXPIREAT` = the record's expiry plus its retention or listing allowance, rounded up (`math.ceil`) inside the script that writes it |

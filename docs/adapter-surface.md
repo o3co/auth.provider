@@ -215,7 +215,7 @@ wired limiter, never from the key.
 | `refreshTokenFamilyRotation` | `RefreshTokenFamilyRotation` | optional | `core/refresh-token-family/types.mts` | Atomic rotate-or-detect-replay. Wired separately so a deployment can have the store without the CAS path. |
 | `refreshTokenFamilyStore` | `RefreshTokenFamilyStore` | optional | `core/refresh-token-family/types.mts` | Refresh-token family records — the state rotation and replay detection read. |
 | `replaySeenSet` | `ReplaySeenSet` | optional | `core/replay-seen-set/types.mts` | The generic seen-set primitive the replay stores are built on: one atomic check-and-mark per single-use value, scoped per consumer. Records `private_key_jwt` `jti`s, consumed WebAuthn challenges and every accepted DPoP proof (`dpop-proof:<jkt>`); DPoP enabled with the slot empty refuses to boot. The jwt-bearer ID-JAG verifier takes its seen-set as an option from the composition, not from this slot. |
-| `sessionFamilyIndex` | `SessionFamilyIndex` | optional | `core/user-sessions/types.mts` | Session → refresh-token families, so logout can revoke them. |
+| `sessionFamilyIndex` | `SessionFamilyIndex` | optional | `core/user-sessions/types.mts` | Session → refresh-token families, so logout can revoke them. The session-end capability `SupportsSessionEnd` (`endSession`, `addFamilyIdUnlessEnded`, detected by `supportsSessionEnd`) is optional: for a logout's end and a grant's add on one session, the end lists the family or the add answers `"ended"`, while the store keeps each operation linearizable. Both bundled indexes have it; the Redis one over a `SessionFamilyIndexClient` with `writeEndMark` and `hasEndMark`, and an `endedKeyPrefix`. |
 | `sessionFederationIndex` | `SessionFederationIndex` | optional | `core/user-sessions/types.mts` | Session → upstream federations, so logout can propagate. |
 | `sessionRPRegistry` | `SessionRPRegistry` | optional | `core/user-sessions/types.mts` | Which RPs a session has authenticated to, for back-channel logout. |
 | `subjectRevocation` | `SubjectRevocation` | optional | `core/user-sessions/types.mts` | Per-subject not-before watermark: what a credential change stamps so tokens minted before it stop verifying. Absence must be declared (#406). |
@@ -244,7 +244,7 @@ wired limiter, never from the key.
 | `rateLimiterClient` | `RateLimiterClient` | optional | `redis/clients.mts` | Vendor-facing half — what `@o3co/auth-provider-redis` needs from a driver, not what a module consumes. |
 | `refreshTokenFamilyClient` | `RefreshTokenFamilyClient` | optional | `redis/clients.mts` | Vendor-facing half — what `@o3co/auth-provider-redis` needs from a driver, not what a module consumes. |
 | `replaySeenSetClient` | `ReplaySeenSetClient` | optional | `redis/clients.mts` | Vendor-facing half — what `@o3co/auth-provider-redis` needs from a driver, not what a module consumes. |
-| `sessionFamilyIndexClient` | `SessionSidSortedSetClient` | optional | `redis/clients.mts` | Vendor-facing half — what `@o3co/auth-provider-redis` needs from a driver, not what a module consumes. |
+| `sessionFamilyIndexClient` | `SessionFamilyIndexClient` | optional | `redis/clients.mts` | Vendor-facing half — what `@o3co/auth-provider-redis` needs from a driver, not what a module consumes. |
 | `sessionFederationIndexClient` | `SessionSidSortedSetClient` | optional | `redis/clients.mts` | Vendor-facing half — what `@o3co/auth-provider-redis` needs from a driver, not what a module consumes. |
 | `sessionRPRegistryClient` | `SessionRPRegistryClient` | optional | `redis/clients.mts` | Vendor-facing half — what `@o3co/auth-provider-redis` needs from a driver, not what a module consumes. |
 | `subjectRevocationClient` | `SubjectRevocationClient` | optional | `redis/clients.mts` | Vendor-facing half — what `@o3co/auth-provider-redis` needs from a driver, not what a module consumes. |
@@ -330,6 +330,7 @@ out-of-tree adapter can import and run:
 | `SupportsSecondFactorUpdate` (the `UserSessionStore` step-up capability; run only for a store that claims it) | `packages/core/src/user-sessions/__tests__/userSessionStore.contract.mts` (`runSecondFactorUpdateContract`) |
 | `SessionRPRegistry` | `packages/core/src/user-sessions/__tests__/sessionRPRegistry.contract.mts` |
 | `SessionFamilyIndex` | `packages/core/src/user-sessions/__tests__/sessionFamilyIndex.contract.mts` |
+| `SupportsSessionEnd` (the `SessionFamilyIndex` session-end capability; run only for an index that claims it) | `packages/core/src/user-sessions/__tests__/sessionFamilyIndex.contract.mts` (`runSessionEndContract`) |
 | `SessionFederationIndex` | `packages/core/src/user-sessions/__tests__/sessionFederationIndex.contract.mts` |
 | `RateLimiter` (`failMode` included) | `packages/core/src/testing/slots/rateLimiter.mts` (`rateLimiterContract`) |
 | `MailSender` | `packages/test-kit/src/mail/mailSender.contract.mts` (`mailSenderContract`), published on `@o3co/auth-provider-test-kit`, over core's `createRecordingMailSender`, and the standard package's SMTP sender over a scripted relay and over Mailpit |
