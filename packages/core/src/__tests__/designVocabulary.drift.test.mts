@@ -251,9 +251,9 @@ const VOCABULARY: readonly VocabularyRow[] = [
 		definition: /(?:function|const)\s+vouchableAcrTable\b/,
 	},
 	{
-		concept: "mfa.mode as a consumer reads it (the MFA ADR's D19)",
-		home: "packages/core/src/mfa/mode.mts",
-		definition: /(?:function|const)\s+readMfaMode\b/,
+		concept: "the values of mfa.mode, the MFA module's key (the MFA ADR's D19)",
+		home: "packages/mfa/src/config.mts",
+		definition: /(?:function|const)\s+MFA_MODES\b/,
 	},
 	{
 		// Kept in the grants boundary's home, which admission imports: moving

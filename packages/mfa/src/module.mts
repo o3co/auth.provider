@@ -53,7 +53,7 @@ import {
 	type StepUpPage,
 	supportsSecondFactorUpdate,
 } from "@o3co/auth-provider-core";
-import { type MfaSettings, mfaSectionSchema, readMfaSettings } from "./config.mjs";
+import { type MfaMode, type MfaSettings, mfaSectionSchema, readMfaSettings } from "./config.mjs";
 import { createMfaRequirement, type MfaRequirementMode } from "./requirement.mjs";
 import { createMfaSealing, type MfaSealing } from "./sealing.mjs";
 import { mfaTotpFactorModule } from "./totp/module.mjs";
@@ -246,7 +246,7 @@ export function mfaModule(options: MfaModuleOptions = {}): Module {
 		contributes: {
 			sessionRequirements: {
 				mfa: (deps) => {
-					const mode = deps.section?.mode ?? "off";
+					const mode: MfaMode = deps.section?.mode ?? "off";
 					if (mode === "off") {
 						throw new RangeError(
 							'mfa.mode is "off" (or unset) while the MFA module is installed: remove the MFA module, or set mfa.mode to "required" or "optional"',

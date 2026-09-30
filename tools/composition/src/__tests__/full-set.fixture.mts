@@ -166,6 +166,7 @@ export type Stores = "memory" | "redis";
 /** The settings with no default, laid over the resolved config for `features`. */
 function withFeatures(config: AppConfig, features: Features): AppConfig {
 	const c = config as unknown as {
+		mfa?: Record<string, unknown>;
 		oauth: Record<string, Record<string, unknown>>;
 		federations: Record<string, Record<string, unknown>>;
 		webauthn?: Record<string, unknown>;
@@ -190,8 +191,8 @@ function withFeatures(config: AppConfig, features: Features): AppConfig {
 		// The MFA package on, as a deployment turns it on: `optional` — users
 		// with a factor are challenged, nobody is forced — and a key of its own.
 		mfa: features.mfa
-			? { ...config.mfa, mode: "optional", encryptionKeys: [{ key: MFA_KEY }] }
-			: { ...config.mfa, mode: "off" },
+			? { ...c.mfa, mode: "optional", encryptionKeys: [{ key: MFA_KEY }] }
+			: { ...c.mfa, mode: "off" },
 		oauth: {
 			...c.oauth,
 			deviceAuthorization: {

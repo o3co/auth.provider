@@ -126,6 +126,10 @@ afterEach(async () => {
 	current = undefined;
 });
 
+/** The `mfa` section a configuration carries: the MFA module's, which core's type does not name. */
+const mfaOf = (config: unknown): Record<string, unknown> | undefined =>
+	(config as { mfa?: Record<string, unknown> }).mfa;
+
 /** Boots and remembers the full set, so `afterEach` disposes it. */
 async function boot(options: FullSetOptions = {}): Promise<FullSet> {
 	current = await composeFullSet(options);
@@ -263,7 +267,7 @@ describe("the full set boots together", () => {
 		expect(
 			[...(handle.components.sessionRequirementResolver?.get("mfa")?.reach ?? [])].sort(),
 		).toEqual(["mfa", "otp"]);
-		expect(config.mfa.mode).toBe("optional");
+		expect((config as unknown as { mfa: { mode: unknown } }).mfa.mode).toBe("optional");
 	});
 
 	it("hands the deployment's logger to every added module that answers a request or binds a token", async () => {
@@ -524,7 +528,7 @@ describe("the session requirements: the MFA package's, and the two a deployment 
 
 	it('refuse the boot under mfa.mode = "off" with the MFA module installed: remove the module, or set mfa.mode', async () => {
 		const err = await refused({
-			adjust: (config) => ({ ...config, mfa: { ...config.mfa, mode: "off" } }),
+			adjust: (config) => ({ ...config, mfa: { ...mfaOf(config), mode: "off" } }),
 		});
 		expect(err.reason).toBe("contribute-factory-failed");
 		expect(err.details).toMatchObject({ module: "mfa", kind: "sessionRequirements" });
@@ -549,7 +553,7 @@ describe("the session requirements: the MFA package's, and the two a deployment 
 	it("refuse the boot under mfa.mode = required without the MFA package: the template declares mfa from the mode, and nothing registers it", async () => {
 		const err = await refused({
 			features: { mfa: false },
-			adjust: (config) => ({ ...config, mfa: { ...config.mfa, mode: "required" } }),
+			adjust: (config) => ({ ...config, mfa: { ...mfaOf(config), mode: "required" } }),
 		});
 		expect(err.reason).toBe("session-requirement-missing");
 		expect(err.details).toMatchObject({
@@ -775,7 +779,7 @@ function softwarePasskey(rpId: string, origin: string) {
 describe("a passkey sign-in under mfa.mode = required", () => {
 	it("is kept by its refresh token: the WebAuthn grant's hwk is a second-factor value, so the refresh is met without a sid or a primary's marker", async () => {
 		const { app, handle } = await boot({
-			adjust: (config) => ({ ...config, mfa: { ...config.mfa, mode: "required" } }),
+			adjust: (config) => ({ ...config, mfa: { ...mfaOf(config), mode: "required" } }),
 			extraClients: {
 				[PASSKEY_APP.id]: {
 					tokenEndpointAuthMethod: "client_secret_basic",

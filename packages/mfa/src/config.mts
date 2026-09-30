@@ -126,6 +126,9 @@ export const mfaTotpConfigSchema = z.object(
  */
 export const MFA_MODES = ["off", "optional", "required"] as const;
 
+/** `mfa.mode`, one of {@link MFA_MODES}. */
+export type MfaMode = (typeof MFA_MODES)[number];
+
 /** `mfa.mode`, one of {@link MFA_MODES}; anything else is refused, never read as `off`. */
 const mfaModeSchema = z.enum(MFA_MODES, { error: 'must be "off", "optional" or "required"' });
 

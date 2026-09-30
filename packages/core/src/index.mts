@@ -572,8 +572,7 @@ export {
 	MfaTransactionStoreFullError,
 } from "./mfa/memoryTransactionStore.mjs";
 // MFA (the MFA ADR): the stores, their memory adapters, factories and
-// modules; `mfa.mode` as a consumer reads it
-export { type MfaMode, readMfaMode } from "./mfa/mode.mjs";
+// modules
 export { memoryMfaFactorStoreModule, memoryMfaTransactionStoreModule } from "./mfa/module.mjs";
 export {
 	checkMfaLockoutPolicy,
