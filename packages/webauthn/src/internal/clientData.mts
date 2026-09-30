@@ -15,9 +15,10 @@
  */
 
 /**
- * The one reading of a response's client data outside `@simplewebauthn/server`'s verification:
- * with the library's own decoder, so a field read here is read from the text the library
- * verifies, base64url canonical or not. Not exported from the package barrel.
+ * A response's client data read with `@simplewebauthn/server`'s own decoder, base64url canonical
+ * or not. The registration route reads the challenge it consumes here, and the registration
+ * top-origin check the top origin, so each is read from the text the library verifies. Not
+ * exported from the package barrel.
  */
 
 import { decodeClientDataJSON } from "@simplewebauthn/server/helpers";
@@ -35,7 +36,7 @@ export function readClientData(
 	} catch {
 		return undefined;
 	}
-	return typeof clientData === "object" && clientData !== null
+	return typeof clientData === "object" && clientData !== null && !Array.isArray(clientData)
 		? (clientData as Readonly<Record<string, unknown>>)
 		: undefined;
 }
