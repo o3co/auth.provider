@@ -161,12 +161,52 @@ describe("standardDevelopmentMailSenderModule", () => {
 		}
 	});
 
-	it("is refused where CONFIG_ENV says production or staging, whatever environment it is handed", async () => {
-		for (const configEnv of ["staging", " PRODUCTION "]) {
+	it("is refused where CONFIG_ENV says production or staging, whatever environment it is handed, naming CONFIG_ENV", async () => {
+		for (const [configEnv, named] of [
+			["staging", "staging"],
+			[" PRODUCTION ", "production"],
+		] as const) {
 			vi.stubEnv("CONFIG_ENV", configEnv);
 			await expect(provide({ environment: "development" }, "single"), configEnv).rejects.toThrow(
-				/refused because the environment is "(production|staging)"/,
+				new RangeError(
+					`standard-development-mail-sender logs every code it is handed, refused because CONFIG_ENV is "${named}": install standard-smtp-mail-sender, or a mail sender of your own`,
+				),
 			);
+		}
+	});
+
+	it("is refused where CONFIG_ENV or NODE_ENV, when set, names anything but development or test: the allow-list holds for every name", async () => {
+		for (const configEnv of ["prod", "live", "production-eu", "stg", " QA "]) {
+			vi.stubEnv("CONFIG_ENV", configEnv);
+			await expect(provide({ environment: "development" }, "single"), configEnv).rejects.toThrow(
+				new RangeError(
+					`standard-development-mail-sender logs every code it is handed, refused because CONFIG_ENV "${configEnv.trim().toLowerCase()}" is not development or test: install standard-smtp-mail-sender, or a mail sender of your own`,
+				),
+			);
+		}
+		vi.unstubAllEnvs();
+		for (const nodeEnv of ["prod", "Live"]) {
+			vi.stubEnv("NODE_ENV", nodeEnv);
+			await expect(provide({ environment: "development" }, "single"), nodeEnv).rejects.toThrow(
+				new RangeError(
+					`standard-development-mail-sender logs every code it is handed, refused because NODE_ENV "${nodeEnv.toLowerCase()}" is not development or test: install standard-smtp-mail-sender, or a mail sender of your own`,
+				),
+			);
+		}
+	});
+
+	it("lets the sender in where CONFIG_ENV and NODE_ENV each read development or test, or are not set", async () => {
+		for (const [configEnv, nodeEnv] of [
+			["development", "test"],
+			[" Test ", "development"],
+			["", "test"],
+		] as const) {
+			vi.stubEnv("CONFIG_ENV", configEnv);
+			vi.stubEnv("NODE_ENV", nodeEnv);
+			expect(
+				(await provide({ environment: "development" }, "single")).kind,
+				`${configEnv} ${nodeEnv}`,
+			).toBe("standard-development");
 		}
 	});
 
@@ -185,11 +225,11 @@ describe("standardDevelopmentMailSenderModule", () => {
 		}
 	});
 
-	it("is refused where NODE_ENV is production or staging, whatever environment it is handed", async () => {
+	it("is refused where NODE_ENV is production or staging, whatever environment it is handed, naming NODE_ENV", async () => {
 		for (const nodeEnv of ["production", "Staging "]) {
 			vi.stubEnv("NODE_ENV", nodeEnv);
 			await expect(provide({ environment: "development" }, "single"), nodeEnv).rejects.toThrow(
-				/refused because the environment is "(production|staging)"/,
+				/refused because NODE_ENV is "(production|staging)"/,
 			);
 		}
 	});
