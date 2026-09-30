@@ -296,6 +296,26 @@ describe("a renamed variable — the capture", () => {
 			],
 		});
 		expect(err.message).toContain("renamed-variables");
+		expect(err.message).toContain(
+			'the reference.conf of the package module "fixture-renaming" comes from',
+		);
+		expect(err.message).toContain("by hand");
+	});
+
+	it("refuses a composition handed no configuration, saying that is what is missing", async () => {
+		const err = await refusal(
+			createApp({
+				modules: [renaming()],
+				bootstrapComponents: { pathResolver: (s: string) => s } as unknown as BootstrapMap,
+			}),
+		);
+
+		expect(err.reason).toBe("environment-variable-renamed");
+		expect(err.details).toMatchObject({
+			renamed: [{ state: "uncaptured" }, { state: "uncaptured" }],
+		});
+		expect(err.message).toContain("no configuration");
+		expect(err.message).not.toContain("Layer the reference.conf");
 	});
 
 	it("refuses a rename whose new name alone is not captured", async () => {
@@ -556,6 +576,14 @@ describe("a renamed variable — core's own section", () => {
 		});
 	});
 
+	it("names core's own reference.conf when the configuration does not capture its names", () => {
+		const err = refusedBy({ ...makeValidCoreConfig() });
+
+		expect(err.details).toMatchObject({ renamed: [{ module: "core", state: "uncaptured" }] });
+		expect(err.message).toContain("core's own reference.conf");
+		expect(err.message).not.toContain('module "core" comes from');
+	});
+
 	it("holds its declaration as a module's: a name that did not change is refused", () => {
 		expect(() =>
 			validateManifests({
@@ -727,6 +755,28 @@ describe("a renamed variable — a manifest that declares one boot cannot hold",
 			problem: expect.stringContaining('"fixture-renaming"'),
 		});
 	});
+
+	it.each([
+		["named core", defineModule({ name: "core" })],
+		[
+			"whose section is read at core",
+			defineModule({ name: "fixture-core", section: { schema: RetrySection, at: "core" } }),
+		],
+		[
+			"whose section is read under core",
+			defineModule({ name: "fixture-core", section: { schema: RetrySection, at: "core.fixture" } }),
+		],
+	])(
+		"refuses a module %s: core's own section, and its name in boot's messages",
+		async (_label, module) => {
+			const err = await refusedAtStageOne([module]);
+
+			expect(err.details).toMatchObject({
+				module: module.name,
+				problem: expect.stringContaining("core"),
+			});
+		},
+	);
 
 	it("refuses a module whose section is read at the reserved renamed-variables", async () => {
 		const reserved = defineModule({ name: "renamed-variables", section: { schema: RetrySection } });

@@ -18,19 +18,28 @@
  * `renamedVariableProblems`, on core's testing entry: the bindings every
  * declared rename needs across the layers a composition ships. Each old and
  * new name is captured in `renamed-variables` (`null` unset, the string
- * set); an old name is bound nowhere else; a new name is bound at its path.
- * `packageReferenceProblems` holds a package's own reference to it.
+ * set) by the declaring module's own `section.reference` (core's own
+ * `reference.conf` for core), and by no other layer; an old name is bound
+ * nowhere else; a new name is bound at its path. `packageReferenceProblems`
+ * holds a package's own reference to it. `renamedVariableCaptures` derives
+ * what a resolution under an environment captures, for a configuration built
+ * by hand.
  */
 
 import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { pathToFileURL } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { parseFile } from "@o3co/ts.hocon";
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
+import { coreReference } from "#/config/references.mjs";
 import { defineModule } from "#/modules/manifest/index.mjs";
-import { packageReferenceProblems, renamedVariableProblems } from "#/testing/index.mjs";
+import {
+	packageReferenceProblems,
+	renamedVariableCaptures,
+	renamedVariableProblems,
+} from "#/testing/index.mjs";
 
 const read = (path: string, env: Readonly<Record<string, string>>): unknown =>
 	parseFile(path, { env: { ...env } }).toObject();
@@ -60,7 +69,40 @@ const renaming = (renamedVariables: Record<string, string>, reference?: string) 
 	});
 
 describe("renamedVariableProblems", () => {
-	it("finds nothing wrong when both names are captured, the new one bound at its path and the old one nowhere else", () => {
+	it("finds nothing wrong when the module's own reference captures both names, binds the new one at its path, and binds the old one nowhere else", () => {
+		const reference = layer(`${SECTION}${capture("LEGACY_RETRIES", "FIXTURE_RENAMING_RETRIES")}`);
+
+		expect(
+			renamedVariableProblems({
+				modules: [renaming({ LEGACY_RETRIES: "legacy.retries" }, reference)],
+				layers: [reference],
+				read,
+			}),
+		).toEqual([]);
+	});
+
+	it("names a name the module's reference does not capture, and one it captures without its null", () => {
+		const reference = layer(
+			`${SECTION}renamed-variables {\n  FIXTURE_RENAMING_RETRIES = \${?FIXTURE_RENAMING_RETRIES}\n}\n`,
+		);
+
+		expect(
+			renamedVariableProblems({
+				modules: [renaming({ LEGACY_RETRIES: "legacy.retries" }, reference)],
+				layers: [reference],
+				read,
+			}),
+		).toEqual([
+			expect.stringMatching(
+				/^module "fixture-renaming": FIXTURE_RENAMING_RETRIES is not captured by its section\.reference/,
+			),
+			expect.stringMatching(
+				/^module "fixture-renaming": LEGACY_RETRIES is not captured by its section\.reference/,
+			),
+		]);
+	});
+
+	it("names a module that declares renames and no section.reference to capture them", () => {
 		const reference = layer(`${SECTION}${capture("LEGACY_RETRIES", "FIXTURE_RENAMING_RETRIES")}`);
 
 		expect(
@@ -69,23 +111,25 @@ describe("renamedVariableProblems", () => {
 				layers: [reference],
 				read,
 			}),
-		).toEqual([]);
+		).toEqual([
+			expect.stringMatching(/^[^:]*reference\.conf: captures FIXTURE_RENAMING_RETRIES,/),
+			expect.stringMatching(/^[^:]*reference\.conf: captures LEGACY_RETRIES,/),
+			'module "fixture-renaming": declares renamed variables and no section.reference, whose file captures them',
+		]);
 	});
 
-	it("names a name no layer captures, and one captured without its null", () => {
-		const reference = layer(
-			`${SECTION}renamed-variables {\n  FIXTURE_RENAMING_RETRIES = \${?FIXTURE_RENAMING_RETRIES}\n}\n`,
-		);
+	it("names a layer other than the declaring reference that captures a name, as an operator's file overriding a capture would", () => {
+		const reference = layer(`${SECTION}${capture("LEGACY_RETRIES", "FIXTURE_RENAMING_RETRIES")}`);
+		const application = layer("renamed-variables { LEGACY_RETRIES = null }\n");
 
 		expect(
 			renamedVariableProblems({
-				modules: [renaming({ LEGACY_RETRIES: "legacy.retries" })],
-				layers: [reference],
+				modules: [renaming({ LEGACY_RETRIES: "legacy.retries" }, reference)],
+				layers: [application, reference],
 				read,
 			}),
 		).toEqual([
-			expect.stringMatching(/^module "fixture-renaming": FIXTURE_RENAMING_RETRIES is not captured/),
-			expect.stringMatching(/^module "fixture-renaming": LEGACY_RETRIES is not captured/),
+			`${application}: captures LEGACY_RETRIES, which no module whose section.reference it is declares renamed`,
 		]);
 	});
 
@@ -94,7 +138,7 @@ describe("renamedVariableProblems", () => {
 
 		expect(
 			renamedVariableProblems({
-				modules: [renaming({ LEGACY_RETRIES: "legacy.retires" })],
+				modules: [renaming({ LEGACY_RETRIES: "legacy.retires" }, reference)],
 				layers: [reference],
 				read,
 			}),
@@ -109,7 +153,7 @@ describe("renamedVariableProblems", () => {
 
 		expect(
 			renamedVariableProblems({
-				modules: [renaming({ OTHER_SETTING: "legacy.retries" })],
+				modules: [renaming({ OTHER_SETTING: "legacy.retries" }, reference)],
 				layers: [reference, other],
 				read,
 			}),
@@ -123,35 +167,78 @@ describe("renamedVariableProblems", () => {
 
 		expect(
 			renamedVariableProblems({
-				modules: [renaming({ LEGACY_GONE_FLAG: "legacy-gone.flag" })],
+				modules: [renaming({ LEGACY_GONE_FLAG: "legacy-gone.flag" }, reference)],
 				layers: [reference],
 				read,
 			}),
 		).toEqual([]);
 	});
 
-	it("holds core's own section's renames when given them", () => {
-		const reference = layer(`${capture("DEPLOYMENT_MODE")}`);
+	it("holds core's own section's renames to core's own reference.conf", () => {
+		const core = fileURLToPath(coreReference());
 
+		const problems = renamedVariableProblems({
+			modules: [],
+			core: {
+				relocatedFrom: { deployment: "deployment" },
+				renamedVariables: { DEPLOYMENT_MODE: "deployment.mode" },
+			},
+			layers: [core],
+			read,
+		});
+
+		expect(problems).toEqual([
+			'module "core": CORE_DEPLOYMENT_MODE is bound at core.deployment.mode in no layer',
+			expect.stringMatching(
+				/^module "core": CORE_DEPLOYMENT_MODE is not captured by core's own reference\.conf/,
+			),
+			expect.stringMatching(
+				/^module "core": DEPLOYMENT_MODE is not captured by core's own reference\.conf/,
+			),
+			`module "core": DEPLOYMENT_MODE, declared renamed, is bound at deployment.mode in ${core}`,
+		]);
+	});
+});
+
+describe("renamedVariableCaptures", () => {
+	it("is what a resolution under the environment captures: each declared name's value, or null when unset", () => {
+		const reference = layer(
+			`${SECTION}${capture("LEGACY_RETRIES", "FIXTURE_RENAMING_RETRIES", "LEGACY_GONE_FLAG")}`,
+		);
+		const modules = [
+			renaming(
+				{ LEGACY_RETRIES: "legacy.retries", LEGACY_GONE_FLAG: "legacy-gone.flag" },
+				reference,
+			),
+		];
+		const env = { LEGACY_RETRIES: "5", LEGACY_GONE_FLAG: "", UNRELATED: "x" };
+
+		expect(renamedVariableCaptures({ modules, env })).toEqual({
+			LEGACY_RETRIES: "5",
+			FIXTURE_RENAMING_RETRIES: null,
+			LEGACY_GONE_FLAG: "",
+		});
+		expect(renamedVariableCaptures({ modules, env })).toEqual(
+			(read(reference, env) as { "renamed-variables": unknown })["renamed-variables"],
+		);
+	});
+
+	it("captures core's own section's names when given them", () => {
 		expect(
-			renamedVariableProblems({
+			renamedVariableCaptures({
 				modules: [],
 				core: {
 					relocatedFrom: { deployment: "deployment" },
 					renamedVariables: { DEPLOYMENT_MODE: "deployment.mode" },
 				},
-				layers: [reference],
-				read,
+				env: { DEPLOYMENT_MODE: "multi" },
 			}),
-		).toEqual([
-			'module "core": CORE_DEPLOYMENT_MODE is bound at core.deployment.mode in no layer',
-			expect.stringMatching(/^module "core": CORE_DEPLOYMENT_MODE is not captured/),
-		]);
+		).toEqual({ DEPLOYMENT_MODE: "multi", CORE_DEPLOYMENT_MODE: null });
 	});
 });
 
 describe("packageReferenceProblems — renamed variables", () => {
-	it("holds the package's reference to its modules' renames, and owns the captures of names they declare", () => {
+	it("holds the package's reference to its modules' renames, and to capturing no other name", () => {
 		const good = layer(`${SECTION}${capture("LEGACY_RETRIES", "FIXTURE_RENAMING_RETRIES")}`);
 		expect(
 			packageReferenceProblems({
@@ -169,8 +256,8 @@ describe("packageReferenceProblems — renamed variables", () => {
 				read,
 			}),
 		).toEqual([
+			`${bad}: captures STRAY_NAME, which no module whose section.reference it is declares renamed`,
 			expect.stringMatching(/^module "fixture-renaming": FIXTURE_RENAMING_RETRIES is not captured/),
-			"renamed-variables.STRAY_NAME: no module declaring this reference declares STRAY_NAME renamed",
 		]);
 	});
 });
