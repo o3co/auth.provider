@@ -45,7 +45,11 @@ vi.mock("@simplewebauthn/server", () => ({
 }));
 
 import { verifyAuthenticationResponse, verifyRegistrationResponse } from "@simplewebauthn/server";
-import { verifyWebAuthnAssertion, verifyWebAuthnAttestation } from "../internal/verification.mjs";
+import {
+	verifyWebAuthnAssertion,
+	verifyWebAuthnAssertionWithBackupState,
+	verifyWebAuthnAttestation,
+} from "../internal/verification.mjs";
 
 const mockVerifyRegistration = vi.mocked(verifyRegistrationResponse);
 const mockVerifyAuthentication = vi.mocked(verifyAuthenticationResponse);
@@ -782,3 +786,100 @@ describe("cross-origin authentication is the deployment's decision", () => {
 		});
 	});
 });
+
+describe("verifyWebAuthnAssertionWithBackupState", () => {
+	/** A verified assertion as the library answers one: its counter and its backup state. */
+	const verified = (newCounter: number, credentialBackedUp: boolean) =>
+		mockVerifyAuthentication.mockResolvedValueOnce({
+			verified: true,
+			authenticationInfo: {
+				newCounter,
+				credentialID: "dGVzdC1jcmVkZW50aWFsLWlk",
+				userVerified: true,
+				credentialDeviceType: credentialBackedUp ? "multiDevice" : "singleDevice",
+				credentialBackedUp,
+				authenticatorExtensionResults: undefined,
+				origin: "https://example.com",
+				rpID: "example.com",
+			},
+		});
+
+	/** An input whose credential carries its id, key, count and transports alone. */
+	const input = (signCount: number) => ({
+		credential: {
+			credentialId: "dGVzdC1jcmVkZW50aWFsLWlk",
+			publicKey: STUB_PUBLIC_KEY,
+			signCount,
+			transports: ["usb"] as const,
+		},
+		response: STUB_AUTHENTICATION_RESPONSE,
+		expectedChallenge: "some-challenge",
+		expectedRpId: "example.com",
+		expectedOrigins: ["https://example.com"],
+	});
+
+	it.each([true, false])(
+		"answers the new count and the backup state the verified authenticator data carries: %s",
+		async (backedUp) => {
+			verified(8, backedUp);
+			expect(await verifyWebAuthnAssertionWithBackupState(input(5))).toEqual({
+				ok: true,
+				newSignCount: 8,
+				backedUp,
+			});
+		},
+	);
+
+	it("accepts a count of 0 against a stored 0, the authenticator that keeps no counter", async () => {
+		verified(0, false);
+		expect(await verifyWebAuthnAssertionWithBackupState(input(0))).toEqual({
+			ok: true,
+			newSignCount: 0,
+			backedUp: false,
+		});
+	});
+
+	it("refuses a count that did not increase over the stored one as sign_count_regression", async () => {
+		verified(5, false);
+		expect(await verifyWebAuthnAssertionWithBackupState(input(5))).toEqual({
+			ok: false,
+			reason: "sign_count_regression",
+		});
+		mockVerifyAuthentication.mockRejectedValueOnce(
+			new Error("Response counter value 0 was lower than expected 5"),
+		);
+		expect(await verifyWebAuthnAssertionWithBackupState(input(5))).toEqual({
+			ok: false,
+			reason: "sign_count_regression",
+		});
+	});
+
+	it("maps the library's refusals as verifyWebAuthnAssertion does", async () => {
+		mockVerifyAuthentication.mockRejectedValueOnce(
+			new Error('Unexpected authentication response challenge "x", expected "y"'),
+		);
+		expect(await verifyWebAuthnAssertionWithBackupState(input(0))).toEqual({
+			ok: false,
+			reason: "challenge_mismatch",
+		});
+	});
+
+	it("leaves verifyWebAuthnAssertion's answer as it is: the new count alone", async () => {
+		verified(9, true);
+		expect(await verifyWebAuthnAssertion(makeStoredCredentialInput(3))).toEqual({
+			ok: true,
+			newSignCount: 9,
+		});
+	});
+});
+
+/** verifyWebAuthnAssertion's input over a stored credential at `signCount`. */
+function makeStoredCredentialInput(signCount: number) {
+	return {
+		credential: makeStoredCredential(signCount),
+		response: STUB_AUTHENTICATION_RESPONSE,
+		expectedChallenge: "some-challenge",
+		expectedRpId: "example.com",
+		expectedOrigins: ["https://example.com"],
+	};
+}

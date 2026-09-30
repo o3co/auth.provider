@@ -77,6 +77,7 @@ describe("generateRegistrationOptionsForUser", () => {
 			userName: "alice@example.com",
 			userDisplayName: "Alice",
 			excludeCredentials: [],
+			residentKey: "preferred",
 			challenge: makeChallenge(),
 		});
 
@@ -92,6 +93,7 @@ describe("generateRegistrationOptionsForUser", () => {
 			userName: "alice@example.com",
 			userDisplayName: "Alice",
 			excludeCredentials: [],
+			residentKey: "preferred",
 			challenge: makeChallenge(),
 		});
 
@@ -99,6 +101,59 @@ describe("generateRegistrationOptionsForUser", () => {
 		// TextEncoder produces UTF-8 bytes; Buffer.from encodes those to base64url.
 		const expectedId = Buffer.from(new TextEncoder().encode(userId)).toString("base64url");
 		expect(result.user.id).toBe(expectedId);
+	});
+
+	it("uses a user handle given as bytes as those bytes", async () => {
+		const handle = crypto.getRandomValues(new Uint8Array(32));
+		const result = await generateRegistrationOptionsForUser({
+			config: BASE_CONFIG,
+			userId: handle,
+			userName: "alice@example.com",
+			userDisplayName: "Alice",
+			excludeCredentials: [],
+			residentKey: "discouraged",
+			challenge: makeChallenge(),
+		});
+
+		expect(result.user.id).toBe(Buffer.from(handle).toString("base64url"));
+	});
+
+	it.each(["discouraged", "preferred", "required"] as const)(
+		"asks for the resident key it is given: %s",
+		async (residentKey) => {
+			const result = await generateRegistrationOptionsForUser({
+				config: BASE_CONFIG,
+				userId: "user-1",
+				userName: "alice@example.com",
+				userDisplayName: "Alice",
+				excludeCredentials: [],
+				residentKey,
+				challenge: makeChallenge(),
+			});
+
+			expect(result.authenticatorSelection?.residentKey).toBe(residentKey);
+			expect(result.authenticatorSelection?.requireResidentKey).toBe(residentKey === "required");
+		},
+	);
+
+	it("excludes credentials given as descriptors: each id with its transports", async () => {
+		const result = await generateRegistrationOptionsForUser({
+			config: BASE_CONFIG,
+			userId: "user-1",
+			userName: "alice@example.com",
+			userDisplayName: "Alice",
+			excludeCredentials: [
+				{ credentialId: "Y3JlZC0x", transports: ["usb", "nfc"] },
+				{ credentialId: "Y3JlZC0y" },
+			],
+			residentKey: "discouraged",
+			challenge: makeChallenge(),
+		});
+
+		expect(result.excludeCredentials).toEqual([
+			{ id: "Y3JlZC0x", type: "public-key", transports: ["usb", "nfc"] },
+			{ id: "Y3JlZC0y", type: "public-key" },
+		]);
 	});
 
 	it("honours excludeCredentials — passes 2 fake credentials", async () => {
@@ -111,6 +166,7 @@ describe("generateRegistrationOptionsForUser", () => {
 			userName: "alice@example.com",
 			userDisplayName: "Alice",
 			excludeCredentials: [cred1, cred2],
+			residentKey: "preferred",
 			challenge: makeChallenge(),
 		});
 
@@ -127,6 +183,7 @@ describe("generateRegistrationOptionsForUser", () => {
 			userName: "alice@example.com",
 			userDisplayName: "Alice",
 			excludeCredentials: [],
+			residentKey: "preferred",
 			challenge: makeChallenge(),
 		});
 
@@ -140,6 +197,7 @@ describe("generateRegistrationOptionsForUser", () => {
 			userName: "alice@example.com",
 			userDisplayName: "Alice",
 			excludeCredentials: [],
+			residentKey: "preferred",
 			challenge: makeChallenge(),
 		});
 
@@ -153,6 +211,7 @@ describe("generateRegistrationOptionsForUser", () => {
 			userName: "alice@example.com",
 			userDisplayName: "Alice",
 			excludeCredentials: [],
+			residentKey: "preferred",
 			challenge: makeChallenge(),
 		});
 
@@ -169,6 +228,7 @@ describe("generateRegistrationOptionsForUser", () => {
 			userName: "alice@example.com",
 			userDisplayName: "Alice",
 			excludeCredentials: [],
+			residentKey: "preferred",
 			challenge: challengeBytes,
 		});
 
@@ -217,6 +277,22 @@ describe("generateAuthenticationOptionsForUser", () => {
 		expect(result.allowCredentials?.[0].id).toBe("Y3JlZC0x");
 	});
 
+	it("allows credentials given as descriptors: each id with its transports", async () => {
+		const result = await generateAuthenticationOptionsForUser({
+			config: BASE_CONFIG,
+			allowCredentials: [
+				{ credentialId: "Y3JlZC0x", transports: ["internal", "hybrid"] },
+				{ credentialId: "Y3JlZC0y" },
+			],
+			challenge: makeChallenge(),
+		});
+
+		expect(result.allowCredentials).toEqual([
+			{ id: "Y3JlZC0x", type: "public-key", transports: ["internal", "hybrid"] },
+			{ id: "Y3JlZC0y", type: "public-key" },
+		]);
+	});
+
 	it("passes userVerification='required' from config", async () => {
 		const result = await generateAuthenticationOptionsForUser({
 			config: { ...BASE_CONFIG, userVerification: "required" },
@@ -254,6 +330,7 @@ describe("the advertised algorithm set is this package's, not the library's defa
 			userName: "alice@example.com",
 			userDisplayName: "Alice",
 			excludeCredentials: [],
+			residentKey: "preferred",
 			challenge: makeChallenge(),
 		});
 
