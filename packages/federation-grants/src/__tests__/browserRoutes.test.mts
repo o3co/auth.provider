@@ -1046,7 +1046,10 @@ describe("POST /session/federation-grants/consent — held to the deployment's c
 		["a promise of acceptance", () => Promise.resolve({ outcome: "accepted" })],
 		["a promise that rejects", () => Promise.reject(new Error("injected: async guard"))],
 		["another outcome", () => ({ outcome: "reject" })],
-		["a refusal with a reason outside the contract", () => ({ outcome: "refused", reason: "nope" })],
+		[
+			"a refusal with a reason outside the contract",
+			() => ({ outcome: "refused", reason: "nope" }),
+		],
 		["nothing", () => undefined],
 	])(
 		"refuses the answer when the guard's verdict is %s, as cross-site, and spends nothing",
