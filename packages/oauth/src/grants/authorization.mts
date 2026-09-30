@@ -19,6 +19,7 @@ import {
 	type AdmissionDeps,
 	admitSession,
 	auditErrorText,
+	authTimeClaim,
 	checkResolver,
 	codeClaimFirstRead,
 	codeClaimRevalidation,
@@ -549,6 +550,9 @@ export const createAuthorizationGrant = (deps: AuthorizationGrantDeps): GrantHan
 			// IdP asserted (see ADR 2026-09-25-multi-factor-authentication).
 			const amr = wellFormedAmr(userSession ? vouchedAmr(userSession) : undefined);
 			const acr = wellFormedAcr(codeData.acr);
+			// The primary authentication's time, which a step-up never moves: the
+			// id_token's `auth_time`, on the access and refresh tokens too (RFC 9470 §6.1).
+			const authTime = userSession ? authTimeClaim(userSession.authTime) : undefined;
 
 			// Both tokens carry family_id and, when present, sid, so introspect and
 			// refresh need not re-read the session store. No sid without a
@@ -560,6 +564,7 @@ export const createAuthorizationGrant = (deps: AuthorizationGrantDeps): GrantHan
 					// So a resource server (or auth.policy-verifier) can gate on them.
 					...(amr ? { amr } : {}),
 					...(acr ? { acr } : {}),
+					...(authTime !== undefined ? { auth_time: authTime } : {}),
 				},
 				{
 					expiresIn: accessTokenExpiresIn,
@@ -587,6 +592,7 @@ export const createAuthorizationGrant = (deps: AuthorizationGrantDeps): GrantHan
 					// `acr` lives on the code, spent here, so nowhere else holds it.
 					...(amr ? { amr } : {}),
 					...(acr ? { acr } : {}),
+					...(authTime !== undefined ? { auth_time: authTime } : {}),
 				},
 				{
 					expiresIn: refreshTokenExpiresIn,
