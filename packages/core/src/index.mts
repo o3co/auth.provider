@@ -222,7 +222,11 @@ export { MAX_DURATION_MS, MAX_DURATION_SECONDS } from "./config/durations.mjs";
 export { coreReference, moduleReferences } from "./config/references.mjs";
 // How the deployment runs — what its HTTP behaviour depends on of the
 // `http` module's settings, and how many replicas the operator says run —
-// each through a slot rather than the configuration.
+// each through a slot rather than the configuration. `deploymentModeOf` is
+// the reading boot fills `deploymentMode` with, for a composition root that
+// builds a reader by hand; `checkDeploymentMode` is what every reader holds
+// the value it is handed to.
+export { checkDeploymentMode, deploymentModeOf } from "./deployment/mode.mjs";
 export type { DeploymentMode, HttpSettings } from "./deployment/types.mjs";
 // OIDC discovery aggregation — modules contribute `discoveryMetadata`
 // (OidcDiscoveryContributionFactory above) and core synthesizes the

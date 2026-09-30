@@ -15,9 +15,11 @@
  */
 
 /**
- * The one reading of the configuration's `deployment.mode`: what boot fills
+ * The one reading of the configuration's `deployment.mode` — what boot fills
  * the `deploymentMode` slot with before any provider runs, and what the
- * replica-safety guard decides by. Every other reader requires the slot.
+ * replica-safety guard decides by — and the check a reader holds the slot's
+ * value to. Every other module requires the slot; a composition root that
+ * builds a reader by hand passes `deploymentModeOf(config)`.
  */
 
 import type { DeploymentMode } from "./types.mjs";
@@ -26,9 +28,20 @@ import type { DeploymentMode } from "./types.mjs";
  * `single` or `multi` as `deployment.mode` states it, `unset` for anything
  * else — absence included. Core's schema admits only the two, or none; any
  * other value reaches here only through a configuration the schema never
- * saw, and reads as the mode that warns rather than the one that is silent.
+ * saw, and reads as `unset`, never as `single` or `multi`.
  */
 export function deploymentModeOf(config: unknown): DeploymentMode {
 	const mode = (config as { deployment?: { mode?: unknown } } | undefined)?.deployment?.mode;
 	return mode === "single" || mode === "multi" ? mode : "unset";
+}
+
+/**
+ * `value` when it is one of the slot's three values, or a `TypeError` naming
+ * `name`, the value's source — absence included. A reader refuses what it
+ * cannot read as a mode rather than reading it as `unset`: a mode lost on the
+ * way would lift the refusals `multi` makes.
+ */
+export function checkDeploymentMode(value: unknown, name: string): DeploymentMode {
+	if (value === "single" || value === "multi" || value === "unset") return value;
+	throw new TypeError(`${name} must be "single", "multi" or "unset"`);
 }

@@ -155,9 +155,7 @@ export async function materializeComponents(
 	// The replica count, from the configuration stage 1 parsed — the value its
 	// replica-safety guard decided by. Stage 1 refuses the key from every
 	// other source.
-	components.deploymentMode = deploymentModeOf(
-		(bootstrapComponents as Record<string, unknown>).config,
-	);
+	components.deploymentMode = deploymentModeOf(bootstrapComponents.config);
 
 	// Synthetic projections are stable read-through views of the collectors
 	// stage 4 fills, so a provider that requires one gets the object the world
