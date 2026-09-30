@@ -15,10 +15,12 @@
  */
 
 /**
- * The MFA routes under `/session/mfa`: `GET /transaction`, `POST /challenge`
- * and `POST /verify`, over the coordinator; a verified second factor resumes
- * the login through core's `resumePrimary` and finishes it through the
- * `loginCompletion` slot. See README, "The routes".
+ * The MFA routes under `/session/mfa`: `GET /transaction`, `POST /challenge`,
+ * `POST /verify`, and a login's first binding, `POST /enrollment` and
+ * `POST /enrollment/complete`, over the coordinator; a verified second
+ * factor, or a factor bound, resumes the login through core's
+ * `resumePrimary` and finishes it through the `loginCompletion` slot. See
+ * README, "The routes".
  *
  * - Every answer is `no-store`. Bodies are parsed on these paths alone.
  * - Every POST sits behind the deployment's CSRF guard, then the flood guard
@@ -26,7 +28,10 @@
  * - The transaction id is read from the body or the `MFA-Transaction` header,
  *   never from the URL, and never logged; a missing, malformed, foreign,
  *   spent or expired one is answered alike.
- * - Each outage is answered `503` and logged once, at error.
+ * - Each outage is answered `503` and logged once, at error. A mail the
+ *   sender refused at its limit is `429`; a factor whose recorded address no
+ *   longer matches the login's is `403`, recorded as
+ *   `mfa.email_address_mismatch`. Neither the code nor the address is logged.
  */
 
 import {
@@ -46,12 +51,15 @@ import {
 import express, { type Request, type RequestHandler, type Response, type Router } from "express";
 import type {
 	MfaCeremonyCall,
-	MfaCoordinator,
 	MfaFactorUnreadable,
 	MfaStoreOutage,
 	MfaVerifyOutcome,
-} from "./coordinator.mjs";
+} from "./ceremony.mjs";
+import type { MfaCoordinator } from "./coordinator.mjs";
+import { type MfaMailRefusal, mailFailureOf } from "./mail.mjs";
+import { RECOVERY_CODE_FACTOR_KIND } from "./recovery/factor.mjs";
 import { MFA_REQUIREMENT_NAME } from "./requirement.mjs";
+import type { MfaWitnessMark } from "./witness.mjs";
 
 /** The header a transaction id may travel in beside the body. */
 const TRANSACTION_HEADER = "MFA-Transaction";
@@ -68,6 +76,26 @@ const ENROLLMENT_REQUIRED = errorEnvelope(
 	"mfa_enrollment_required",
 	"A second factor that counts must be enrolled",
 );
+const FACTOR_REFUSED = errorEnvelope(
+	"mfa_factor_refused",
+	"This second factor cannot be used: use another",
+);
+const MAIL_LIMITED = errorEnvelope("rate_limited", "Too many codes sent: try again later");
+const NOT_OPEN = errorEnvelope("invalid_request", "No enrollment is open in this MFA transaction");
+const NO_PENDING = errorEnvelope(
+	"invalid_request",
+	"No enrollment is pending in this MFA transaction",
+);
+const UNKNOWN_KIND = errorEnvelope("invalid_request", "Unknown second factor kind");
+const INVALID_LABEL = errorEnvelope("invalid_request", "Invalid label");
+const EMAIL_PROOF_REQUIRED = errorEnvelope(
+	"mfa_email_proof_required",
+	"The account-email proof comes first",
+);
+const EMAIL_PROOF_UNAVAILABLE = errorEnvelope(
+	"mfa_email_proof_unavailable",
+	"The account-email proof cannot be given for this account",
+);
 
 /** A refused proof, with the attempts the transaction has left. */
 const notAccepted = (attemptsRemaining: number) => ({
@@ -75,8 +103,8 @@ const notAccepted = (attemptsRemaining: number) => ({
 	attempts_remaining: attemptsRemaining,
 });
 
-/** Which route a line is logged by. */
-type RouteName = "transaction" | "challenge" | "verify";
+/** Which route a line is logged by: the enrollment's two share one name. */
+type RouteName = "transaction" | "challenge" | "verify" | "enrollment";
 
 export interface MfaRoutesOptions {
 	readonly coordinator: MfaCoordinator;
@@ -178,14 +206,56 @@ export function createMfaRouter(options: MfaRoutesOptions): Router {
 	};
 
 	/**
+	 * A first binding that could not stand and whose factor could not be
+	 * removed: the factor may be a password holder's, so it is said at error
+	 * — the subject and the kind, never the factor's data.
+	 */
+	const factorStanding = (sub: string, kind: string, cause: unknown): void => {
+		logger.error({ sub, kind, err: loggableError(cause) }, "mfa_first_binding_factor_standing");
+	};
+
+	/** A witness mark that failed: once at warn; what it followed stands, and the next login heals it. */
+	const witnessUnwritten = (sub: string, mark: MfaWitnessMark | undefined): void => {
+		if (mark?.outcome !== "unwritten") return;
+		logger.warn({ sub, err: loggableError(mark.cause) }, "mfa_enrollment_witness_unwritten");
+	};
+
+	/** A mail the ceremony could not send: `429` at the sender's limit; else logged once and `503`. */
+	const answerMail = (route: RouteName, res: Response, refusal: MfaMailRefusal): void => {
+		if (refusal.outcome === "mail_refused_at_limit") {
+			logger.warn(
+				{ route, purpose: refusal.purpose, kind: refusal.kind, cleared: refusal.cleared },
+				"mfa_mail_refused_at_limit",
+			);
+			res.status(429).json(MAIL_LIMITED);
+			return;
+		}
+		// A sender's failure by its name, code and status: its text may quote the address or the code.
+		logger.error(
+			{
+				route,
+				purpose: refusal.purpose,
+				kind: refusal.kind,
+				reason: refusal.reason,
+				...(refusal.cleared === undefined ? {} : { cleared: refusal.cleared }),
+				...(refusal.cause === undefined ? {} : { err: mailFailureOf(refusal.cause) }),
+			},
+			"mfa_mail_unavailable",
+		);
+		res.status(503).json(MFA_UNAVAILABLE);
+	};
+
+	/**
 	 * The login a verified second factor resumes: `resumePrimary`, then the
 	 * session established, or another requirement's interruption answered. A
 	 * continuation core refuses sends the user back to the password.
 	 */
 	const completeLogin = async (
+		route: RouteName,
 		req: Request,
 		res: Response,
-		verified: Extract<MfaVerifyOutcome, { outcome: "verified" }>,
+		verified: Pick<Extract<MfaVerifyOutcome, { outcome: "verified" }>, "continuation" | "adds">,
+		answer: Readonly<Record<string, unknown>> = {},
 	): Promise<void> => {
 		let resumed: PrimaryAdmission;
 		try {
@@ -214,7 +284,7 @@ export function createMfaRouter(options: MfaRoutesOptions): Router {
 				req,
 				res,
 				reporter: {
-					storeUnavailable: (store, step, cause) => storeUnavailable("verify", store, step, cause),
+					storeUnavailable: (store, step, cause) => storeUnavailable(route, store, step, cause),
 				},
 			});
 			return;
@@ -226,7 +296,7 @@ export function createMfaRouter(options: MfaRoutesOptions): Router {
 				return {
 					storeUnavailable: (store, step, cause) =>
 						storeUnavailable(
-							"verify",
+							route,
 							store,
 							step,
 							cause,
@@ -250,15 +320,15 @@ export function createMfaRouter(options: MfaRoutesOptions): Router {
 			return;
 		}
 		csrfGuard.issue(res);
-		res.status(200).json({ message: "Logged in successfully" });
+		res.status(200).json({ message: "Logged in successfully", ...answer });
 	};
 
 	router
-		.all(["/transaction", "/challenge", "/verify"], noStore)
+		.all(["/transaction", "/challenge", "/verify", "/enrollment", "/enrollment/complete"], noStore)
 		// These paths' own bodies, parsed here: the mount is under `/session`,
 		// where other modules mount routes too.
 		.post(
-			["/challenge", "/verify"],
+			["/challenge", "/verify", "/enrollment", "/enrollment/complete"],
 			express.json(),
 			express.urlencoded({ extended: false }),
 			csrfGuard.middleware,
@@ -313,6 +383,24 @@ export function createMfaRouter(options: MfaRoutesOptions): Router {
 					);
 					res.status(503).json(MFA_UNAVAILABLE);
 					return;
+				case "mail_unavailable":
+				case "mail_refused_at_limit":
+					answerMail("challenge", res, outcome);
+					return;
+				case "address_mismatch":
+					emitAuditEvent(auditSink, {
+						timestamp: new Date(),
+						type: "mfa.email_address_mismatch",
+						subject: outcome.subject,
+						ip: call.request.ip,
+						userAgent: call.request.userAgent,
+						details: { kind: outcome.kind, purpose: outcome.purpose },
+					});
+					res.status(403).json(FACTOR_REFUSED);
+					return;
+				case "proof_unavailable":
+					res.status(403).json(EMAIL_PROOF_UNAVAILABLE);
+					return;
 				case "none":
 					res.status(200).json({});
 					return;
@@ -353,15 +441,35 @@ export function createMfaRouter(options: MfaRoutesOptions): Router {
 					answerOutage("verify", res, outcome);
 					return;
 				case "refused":
+					if (outcome.factorIdDropped === true) {
+						// A factor answering outside its contract: the value it named is never logged.
+						logger.warn({ kind: outcome.kind }, "mfa_refusal_factor_id_dropped");
+					}
 					emitAuditEvent(auditSink, {
 						timestamp: new Date(),
 						type: "mfa.verify.failure",
 						subject: outcome.subject,
 						ip: call.request.ip,
 						userAgent: call.request.userAgent,
-						details: { kind: outcome.kind, purpose: outcome.purpose, reason: outcome.reason },
+						details: {
+							kind: outcome.kind,
+							purpose: outcome.purpose,
+							reason: outcome.reason,
+							...(isMfaFactorId(outcome.factorId) ? { factorId: outcome.factorId } : {}),
+						},
 					});
 					res.status(401).json(notAccepted(outcome.attemptsRemaining));
+					return;
+				case "proved":
+					emitAuditEvent(auditSink, {
+						timestamp: new Date(),
+						type: "mfa.verified",
+						subject: outcome.subject,
+						ip: call.request.ip,
+						userAgent: call.request.userAgent,
+						details: { kind: outcome.kind, purpose: outcome.purpose },
+					});
+					res.status(200).json({ email_proof: "verified" });
 					return;
 				case "verified":
 					emitAuditEvent(auditSink, {
@@ -372,8 +480,170 @@ export function createMfaRouter(options: MfaRoutesOptions): Router {
 						userAgent: call.request.userAgent,
 						details: { kind: outcome.kind, purpose: outcome.purpose },
 					});
-					await completeLogin(req, res, outcome);
+					witnessUnwritten(outcome.subject, outcome.witness);
+					await completeLogin("verify", req, res, outcome);
 					return;
+			}
+		});
+
+	router
+		.post("/enrollment", async (req: Request, res: Response) => {
+			const call = callOf(req, postedTransactionId(req));
+			const outcome = await coordinator.beginEnrollment({
+				...call,
+				kind: (req.body as { kind?: unknown } | undefined)?.kind,
+			});
+			switch (outcome.outcome) {
+				case "unknown_transaction":
+					res.status(400).json(UNKNOWN_TRANSACTION);
+					return;
+				case "enrollment_not_open":
+					res.status(400).json(NOT_OPEN);
+					return;
+				case "email_proof_required":
+					res.status(403).json(EMAIL_PROOF_REQUIRED);
+					return;
+				case "unknown_kind":
+					res.status(400).json(UNKNOWN_KIND);
+					return;
+				case "first_binding_closed":
+					res.status(401).json(LOGIN_REQUIRED);
+					return;
+				case "unavailable":
+					answerOutage("enrollment", res, outcome);
+					return;
+				case "mail_unavailable":
+				case "mail_refused_at_limit":
+					answerMail("enrollment", res, outcome);
+					return;
+				case "enrollment_failed":
+					logger.error(
+						{ route: "enrollment", kind: outcome.kind, err: loggableError(outcome.cause) },
+						"mfa_factor_enrollment_unavailable",
+					);
+					res.status(503).json(MFA_UNAVAILABLE);
+					return;
+				case "begun":
+					res.status(200).json(outcome.response);
+					return;
+			}
+		})
+		.post("/enrollment/complete", async (req: Request, res: Response) => {
+			const call = callOf(req, postedTransactionId(req));
+			const body = req.body as { proof?: unknown; label?: unknown } | undefined;
+			const outcome = await coordinator.completeEnrollment({
+				...call,
+				proof: body?.proof,
+				label: body?.label,
+			});
+			switch (outcome.outcome) {
+				case "unknown_transaction":
+				case "spent":
+					res.status(400).json(UNKNOWN_TRANSACTION);
+					return;
+				case "enrollment_not_open":
+					res.status(400).json(NOT_OPEN);
+					return;
+				case "email_proof_required":
+					res.status(403).json(EMAIL_PROOF_REQUIRED);
+					return;
+				case "no_pending_enrollment":
+					res.status(400).json(NO_PENDING);
+					return;
+				case "unknown_kind":
+					res.status(400).json(UNKNOWN_KIND);
+					return;
+				case "invalid_label":
+					res.status(400).json(INVALID_LABEL);
+					return;
+				case "first_binding_closed":
+					res.status(401).json(LOGIN_REQUIRED);
+					return;
+				case "first_binding_conflict":
+					// Another transaction bound the subject's first factor at once: a
+					// password holder may be racing the owner.
+					emitAuditEvent(auditSink, {
+						timestamp: new Date(),
+						type: "mfa.first_binding_conflict",
+						subject: outcome.subject,
+						ip: call.request.ip,
+						userAgent: call.request.userAgent,
+						details: { kind: outcome.kind, removed: outcome.standing === undefined },
+					});
+					if (outcome.standing !== undefined) {
+						factorStanding(outcome.subject, outcome.kind, outcome.standing.cause);
+						res.status(503).json(MFA_UNAVAILABLE);
+						return;
+					}
+					res.status(401).json(LOGIN_REQUIRED);
+					return;
+				case "first_binding_unchecked":
+					answerOutage("enrollment", res, outcome.listing);
+					if (outcome.standing !== undefined) {
+						factorStanding(outcome.subject, outcome.kind, outcome.standing.cause);
+					}
+					return;
+				case "unavailable":
+				case "unreadable":
+					answerOutage("enrollment", res, outcome);
+					return;
+				case "refused":
+					res.status(401).json(notAccepted(outcome.attemptsRemaining));
+					return;
+				case "enrolled": {
+					const audited = {
+						timestamp: new Date(),
+						subject: outcome.subject,
+						ip: call.request.ip,
+						userAgent: call.request.userAgent,
+					};
+					emitAuditEvent(auditSink, {
+						...audited,
+						type: "mfa.factor.enrolled",
+						details: {
+							kind: outcome.kind,
+							purpose: outcome.purpose,
+							binding: outcome.binding,
+							by: "user",
+						},
+					});
+					const codes = outcome.recoveryCodes;
+					if (codes?.issued === true) {
+						emitAuditEvent(auditSink, {
+							...audited,
+							type: "mfa.recovery_codes.generated",
+							details: {
+								kind: RECOVERY_CODE_FACTOR_KIND,
+								purpose: outcome.purpose,
+								binding: outcome.binding,
+								by: "user",
+								regenerated: false,
+							},
+						});
+					} else if (codes?.issued === false) {
+						logger.error(
+							{ sub: outcome.subject, err: loggableError(codes.cause) },
+							"mfa_recovery_codes_unwritten",
+						);
+					}
+					witnessUnwritten(outcome.subject, outcome.witness);
+					if (outcome.flagUncleared !== undefined) {
+						logger.warn(
+							{ sub: outcome.subject, err: loggableError(outcome.flagUncleared) },
+							"mfa_email_proof_flag_uncleared",
+						);
+					}
+					// The codes are answered here, once; a page that got none points to their regeneration.
+					await completeLogin("enrollment", req, res, outcome, {
+						factor: outcome.factor,
+						...(codes === undefined
+							? {}
+							: codes.issued
+								? { recovery_codes: codes.codes }
+								: { recovery_codes_issued: false }),
+					});
+					return;
+				}
 			}
 		});
 

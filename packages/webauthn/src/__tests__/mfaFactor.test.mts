@@ -345,6 +345,7 @@ describe("registration", () => {
 			expectedChallenge: "Y2hhbGxlbmdl",
 			expectedRpId: "test.example",
 			expectedOrigins: ["https://test.example"],
+			expectedTopOrigins: ["https://embedder.test.example"],
 			userVerification: "required",
 		});
 	});
@@ -554,11 +555,21 @@ describe("an assertion's verification", () => {
 		},
 	);
 
-	it("refuses as sign_count_regression a counter that did not increase over the stored one", async () => {
+	it("refuses as sign_count_regression a counter that did not increase over the stored one, naming the factor", async () => {
 		mockAssertion.mockResolvedValueOnce({ ok: false, reason: "sign_count_regression" });
 		expect(await verify(factorWith(), assertion("Y3JlZC1h"))).toEqual({
 			ok: false,
 			reason: "sign_count_regression",
+			factorId: "factor-a",
+		});
+	});
+
+	it("names, in a sign_count_regression, the factor whose credential asserted, not the one the request named", async () => {
+		mockAssertion.mockResolvedValueOnce({ ok: false, reason: "sign_count_regression" });
+		expect(await verify(factorWith(), assertion("Y3JlZC1i"), { factor: A })).toEqual({
+			ok: false,
+			reason: "sign_count_regression",
+			factorId: "factor-b",
 		});
 	});
 

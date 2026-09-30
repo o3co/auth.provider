@@ -32,6 +32,9 @@
  *     NOT from the request body — prevents victim-targeted enrollment.
  *   - nickname, when present, is a string of 1–64 characters.
  *   - Multi-origin support: config.origin[] is passed to verifyWebAuthnAttestation.
+ *   - A top origin the browser reports must be one of config.topOrigin, for a
+ *     cross-origin ceremony — the rule an assertion is held to — else 400
+ *     top_origin_mismatch.
  *   - A store that cannot answer — the ceremony's consume or the credential
  *     insert — is 503 temporarily_unavailable, logged once at error level as
  *     `webauthn_ceremony_store_unavailable` (`../internal/storeUnavailable.mts`).
@@ -217,6 +220,7 @@ export function createRegistrationVerifyHandler(deps: RegistrationVerifyDeps): R
 			expectedChallenge: challengeValue,
 			expectedRpId: deps.config.rpId,
 			expectedOrigins: deps.config.origin,
+			...(deps.config.topOrigin === undefined ? {} : { expectedTopOrigins: deps.config.topOrigin }),
 			userVerification: deps.config.userVerification,
 		});
 

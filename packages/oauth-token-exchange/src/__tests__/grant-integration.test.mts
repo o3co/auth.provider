@@ -20,9 +20,11 @@ import {
 	createApp,
 	defaultRefreshTokenFamilyRevocationModule,
 	defineModule,
+	evaluateGrantPolicy,
 	type GrantContext,
 	type GrantHandler,
 	type GrantPolicyDecision,
+	type GrantPolicyHook,
 	type GrantPolicyRequest,
 	type Module,
 	memoryRefreshTokenFamilyStoreModule,
@@ -717,7 +719,7 @@ describe("tokenExchangeModule booted through createApp — revocation", () => {
 				"a subject_token carrying a compound cnf",
 				() => subject({ cnf: { jkt: JKT, "x5t#S256": X5T } }),
 				dpop(JKT),
-				"subject_token has compound cnf binding which is not supported (Stage 1)",
+				"subject_token has compound cnf binding which is not supported",
 			],
 			[
 				"a subject_token with no lifetime left",
@@ -759,7 +761,7 @@ describe("tokenExchangeModule booted through createApp — revocation", () => {
 				"an actor_token carrying a compound cnf",
 				async () => withActor(await actor({ cnf: { jkt: JKT, "x5t#S256": X5T } })),
 				dpop(JKT),
-				"actor_token has compound cnf binding which is not supported (Stage 1)",
+				"actor_token has compound cnf binding which is not supported",
 			],
 			[
 				"a subject_token whose may_act does not name the actor_token's subject",
@@ -1134,26 +1136,28 @@ describe("tokenExchangeModule booted through createApp — revocation", () => {
 		});
 	});
 
-	// A policy deny carries the policy's own `error`. RFC 6749 §5.2 makes
-	// `error` 1*NQSCHAR (printable ASCII without `"` and `\`), so a code
-	// outside that set — or none — is answered `invalid_request`, §2.2.2's
-	// code for a request refused by policy, and the policy's code is logged,
-	// sanitised, for the operator who wrote it.
+	// A policy deny is `400` with the policy's own `error`, as on every grant
+	// (RFC 6749 §5.2). §5.2 makes `error` 1*NQSCHAR (printable ASCII without
+	// `"` and `\`), so a code outside that set — or none — is answered
+	// `invalid_request`, §2.2.2's code for a request refused by policy, and the
+	// policy's code is logged, sanitised, for the operator who wrote it.
 	describe("a policy deny", () => {
-		const denying = (error: string, errorDescription: unknown = "denied by the test policy") =>
+		const denyingPolicy = (
+			error: string,
+			errorDescription: unknown = "denied by the test policy",
+		): GrantPolicyHook => ({
+			kind: "test",
+			evaluate: async () =>
+				({
+					outcome: "deny",
+					error,
+					errorDescription,
+				}) as unknown as GrantPolicyDecision,
+		});
+		const denying = (error: string, errorDescription?: unknown) =>
 			defineModule({
 				name: "test:denying-grant-policy",
-				provides: {
-					grantPolicy: () => ({
-						kind: "test",
-						evaluate: async () =>
-							({
-								outcome: "deny",
-								error,
-								errorDescription,
-							}) as unknown as GrantPolicyDecision,
-					}),
-				},
+				provides: { grantPolicy: () => denyingPolicy(error, errorDescription) },
 			});
 		const warnings = () => {
 			const logger = {
@@ -1216,22 +1220,34 @@ describe("tokenExchangeModule booted through createApp — revocation", () => {
 				const { grant } = await boot([denying("access_denied", description)]);
 				const { result } = await exchange(grant, await body());
 				expect(result).toEqual({
-					status: 403,
+					status: 400,
 					error: "access_denied",
 					errorDescription: "denied by policy",
 				});
 			},
 		);
 
-		it("keeps a well-formed deny code, access_denied as 403", async () => {
-			const { grant } = await boot([denying("access_denied")]);
-			const { result } = await exchange(grant, await body());
-			expect(result).toEqual({
-				status: 403,
-				error: "access_denied",
-				errorDescription: "denied by the test policy",
-			});
-		});
+		// The other grants answer a deny through core's `evaluateGrantPolicy`.
+		it.each(["access_denied", "invalid_request", "invalid_scope"])(
+			"answers a deny carrying %s as core's policy evaluation does: 400, the policy's code and description",
+			async (code) => {
+				const { grant } = await boot([denying(code)]);
+				const { result } = await exchange(grant, await body());
+				expect(result).toEqual({
+					status: 400,
+					error: code,
+					errorDescription: "denied by the test policy",
+				});
+				const otherGrants = await evaluateGrantPolicy(
+					denyingPolicy(code),
+					{ grantType: TOKEN_EXCHANGE_GRANT_TYPE },
+					{ issuer: ISSUER },
+					[],
+					{ logger: undefined },
+				);
+				expect(otherGrants).toEqual({ ok: false, result });
+			},
+		);
 	});
 
 	// Core's ExchangeTokenValidator contract: `null` means the token is not

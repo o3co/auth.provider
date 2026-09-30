@@ -163,10 +163,10 @@ export const webauthnConfigSchema = z.object({
 	origin: z.preprocess(readOriginList, z.array(originEntry).min(1)),
 	/**
 	 * Origins this RP may be framed by: the parent pages' origins (not this RP's) that a browser
-	 * reports as `topOrigin` for a cross-origin (iframe) ceremony. Optional; absent, an
-	 * authentication response reporting a cross-origin `topOrigin` is refused, the right answer
-	 * for a deployment never meant to be embedded. Enforced only where the browser reports one
-	 * (Safari does not).
+	 * reports as `topOrigin` for a cross-origin (iframe) ceremony. Optional; absent, a
+	 * registration or authentication response reporting a cross-origin `topOrigin` is refused, the
+	 * right answer for a deployment never meant to be embedded. Enforced only where the browser
+	 * reports one (Safari does not).
 	 *
 	 * Same rules as `origin`'s web entries; the Android app form is refused, since nothing frames
 	 * it. From the environment, `WEBAUTHN_TOP_ORIGIN` is a comma-separated list, and an empty

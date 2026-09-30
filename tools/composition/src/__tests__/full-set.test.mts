@@ -314,7 +314,7 @@ describe("the full set boots together", () => {
 		expect([...discovery.body.grant_types_supported].sort()).toEqual(ALL_GRANTS);
 	});
 
-	it("installs the MFA package: the TOTP factor from its reference.conf, and the requirement named mfa under mfa.mode = optional, reaching what the factor reaches", async () => {
+	it("installs the MFA package: the TOTP and recovery-code factors from its reference.conf, and the requirement named mfa under mfa.mode = optional, reaching what the factors reach", async () => {
 		const { handle, config } = await boot();
 		expect(handle.components.mfaFactorResolver?.get("totp")?.amrValues).toEqual(["otp"]);
 		expect(
@@ -324,7 +324,7 @@ describe("the full set boots together", () => {
 		).toEqual([...FIXTURE_REQUIREMENTS, "mfa"].sort());
 		expect(
 			[...(handle.components.sessionRequirementResolver?.get("mfa")?.reach ?? [])].sort(),
-		).toEqual(["mfa", "otp"]);
+		).toEqual(["mfa", "otp", "recovery"]);
 		expect((config as unknown as { mfa: { mode: unknown } }).mfa.mode).toBe("optional");
 	});
 
@@ -333,12 +333,12 @@ describe("the full set boots together", () => {
 		expect(handle.components.mfaFactorResolver?.get("webauthn")).toBeUndefined();
 	});
 
-	it("turns the WebAuthn second factor on through its variable, and the requirement named mfa then reaches hwk and swk beside TOTP's otp", async () => {
+	it("turns the WebAuthn second factor on through its variable, and the requirement named mfa then reaches hwk and swk beside TOTP's otp and the recovery codes'", async () => {
 		const { handle } = await boot({ env: { ...SINGLE_ENV, WEBAUTHN_MFA_FACTOR_ENABLED: "true" } });
 		expect(handle.components.mfaFactorResolver?.get("webauthn")?.amrValues).toEqual(["hwk", "swk"]);
 		expect(
 			[...(handle.components.sessionRequirementResolver?.get("mfa")?.reach ?? [])].sort(),
-		).toEqual(["hwk", "mfa", "otp", "swk"]);
+		).toEqual(["hwk", "mfa", "otp", "recovery", "swk"]);
 	});
 
 	it("registers exactly the actions the bundled consumers admit, each with the grade the MFA requirement's verdict table is taken over, said at boot with its module", async () => {

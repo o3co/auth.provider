@@ -1,6 +1,6 @@
 # @o3co/auth-provider-webauthn
 
-Last updated: 2026-09-30
+Last updated: 2026-10-01
 
 Passkey (WebAuthn) credential registration and an authentication grant for [`auth.provider`](../../README.md): a user enrolls a passkey from an authenticated session, and later exchanges a passkey assertion for tokens at `/oauth/token`. The package also contributes WebAuthn as a second factor to the MFA package — [WebAuthn as a second factor](#webauthn-as-a-second-factor).
 
@@ -152,8 +152,11 @@ schema refuses at boot.
 
 `origin` is where the ceremony runs. `topOrigin` is the page it runs *inside*,
 when that is a different origin — a passkey prompt in an iframe. The browser
-reports it, and `@simplewebauthn/server` 14 refuses such a response unless the
-deployment named the embedding origins it accepts:
+reports it, and a registration or an authentication that reports one is
+refused unless the deployment named the embedding origins it accepts.
+`@simplewebauthn/server` 14 holds an authentication to that rule and checks no
+top origin at registration, so this package holds a registration to the same
+rule — both the grant's and the second factor's:
 
 ```hocon
 webauthn {
@@ -164,10 +167,14 @@ webauthn {
 From the environment, `WEBAUTHN_TOP_ORIGIN` is comma-separated the same way,
 and an exported-but-empty one reads as unset.
 
-Absent, a reported cross-origin authentication is refused, which is the right
-answer for a deployment that never meant to be embedded — and the refusal is
-`top_origin_mismatch`, not `origin_mismatch`, so it does not send an operator
-to the `origin` list above, which cannot fix it. Same shape rules as `origin`,
+Absent, a reported cross-origin registration or authentication is refused,
+which is the right answer for a deployment that never meant to be embedded. A
+top origin reported for a ceremony that is not cross-origin is refused too. The
+grant's routes answer the refusal as `top_origin_mismatch`
+(`400 {"error":"top_origin_mismatch"}` at `registration/verify`), not
+`origin_mismatch`, so it does not send an operator to the `origin` list above,
+which cannot fix it. The second factor answers it `invalid`, as it answers
+every refusal. Same shape rules as `origin`,
 minus the Android app form: a top origin is a browsing context, and Credential
 Manager's origin has no frame above it.
 
@@ -275,13 +282,13 @@ The defaults are in [`config/reference.conf`](config/reference.conf); a composit
 
 **What it keeps.** Each factor's data is `{credentialId, publicKey, signCount, transports, backupEligible, backedUp, userHandle}`, which the MFA package seals before it reaches the factor store. `backupEligible` (BE) is fixed at registration and decides the `amr`; `backedUp` (BS) is the backup state the credential last reported, kept for the record and read by no decision. Its credentials live in the MFA factor store alone — never in the grant's `WebAuthnCredentialStore` — so a credential enrolled as a second factor, perhaps without user verification, never signs anyone in through the passwordless grant.
 
-**Registration**, which the MFA package's enrollment drives (not yet built there): the options ask for a credential under the subject's WebAuthn user handle — 32 random bytes made at its first WebAuthn enrollment and kept in each such factor's data, never an account name — named for the authenticator by the account's username, never its address (the provider keeps none, and a page shows none), exclude every WebAuthn credential the subject holds, ask for no attestation, offer `WEBAUTHN_ALGORITHM_IDS`, ask for the section's user verification and a resident key `discouraged`. The proof is the `RegistrationResponseJSON`; its attestation is verified, and a credential id the subject already holds is refused as a duplicate. A credential is only ever looked up among its own subject's factors, so one id held by two subjects is not refused.
+**Registration**, which the MFA package's enrollment drives (not yet built there): the options ask for a credential under the subject's WebAuthn user handle — 32 random bytes made at its first WebAuthn enrollment and kept in each such factor's data, never an account name — named for the authenticator by the account's username, never its address (the provider keeps none, and a page shows none), exclude every WebAuthn credential the subject holds, ask for no attestation, offer `WEBAUTHN_ALGORITHM_IDS`, ask for the section's user verification and a resident key `discouraged`. The proof is the `RegistrationResponseJSON`; its attestation is verified, its top origin is held to `webauthn.topOrigin` as an assertion's is ([Being framed](#being-framed-toporigin)), and a credential id the subject already holds is refused as a duplicate. A credential is only ever looked up among its own subject's factors, so one id held by two subjects is not refused.
 
 **`residentKey: "discouraged"` is advisory.** A synced platform passkey is discoverable whatever is asked. It may then appear in the browser's passkey picker for this relying party, where choosing it for the passwordless grant fails as an unknown credential: the grant reads its own credential store, which never holds a second factor. The failure is cosmetic; the credential still works as the second factor.
 
 **Assertion.** The factor's challenge (`POST /session/mfa/challenge`) answers the request options, listing every WebAuthn factor of the subject in `allowCredentials`; its challenge is kept on the MFA transaction, sealed, until the relying party's `challengeTtlMs` or the transaction's end, whichever comes first. The page names the same `factor_id` at the challenge and at the verification, and sends the `AuthenticationResponseJSON` as the `proof`. A verification takes the challenge from the transaction — read and cleared in one step — so an assertion is checked against a challenge once: a second answer to it, or one past its time, is refused (`expired`) and the page asks for a new one. The credential is found by its id among the subject's WebAuthn factors, whichever of them the request named; a user handle the response carries must be that credential's (a `null` one is none), and the backup eligibility it reports must be the one registered — BE is fixed when a credential is made (WebAuthn §6.1.3) — or it is refused as invalid. The new sign count and the backup state the assertion reports are written by compare-and-set on the record's version; a lost compare-and-set is no evidence of anything, and the MFA package reads the factor again and checks the assertion again against it.
 
-**The sign count** (WebAuthn §6.1.1) is judged only once the signature verified: an assertion whose signature does not verify is refused as invalid whatever its counter. A signed counter that did not increase over the stored one is refused and audited as `mfa.verify.failure` with `reason: "sign_count_regression"` — a possibly cloned authenticator. A counter of `0` against a stored `0` is an authenticator that keeps no counter: it passes and stays `0`, and gives no clone signal.
+**The sign count** (WebAuthn §6.1.1) is judged only once the signature verified: an assertion whose signature does not verify is refused as invalid whatever its counter. A signed counter that did not increase over the stored one is refused and audited as `mfa.verify.failure` with `reason: "sign_count_regression"` and `factorId`, the record id of the factor whose credential asserted — a possibly cloned authenticator. A counter of `0` against a stored `0` is an authenticator that keeps no counter: it passes and stays `0`, and gives no clone signal.
 
 **`amr`** (the MFA ADR's D14): `hwk` for a credential that is not backup-eligible (BE = 0), bound to one device; `swk` for one that is (BE = 1), a multi-device credential, whether or not it is backed up yet; `mfa` beside either. With attestation `none` — what this factor asks for — BE and BS are what the authenticator reports about itself: `hwk` means *reported* device-bound, not proof of hardware. Attested hardware would be `phrh` with attestation, which this factor does not offer.
 

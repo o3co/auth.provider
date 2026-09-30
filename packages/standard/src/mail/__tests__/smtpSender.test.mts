@@ -546,14 +546,8 @@ describe("the SMTP sender's answers", () => {
 });
 
 describe("the SMTP sender's envelope", () => {
-	it("names the one recipient as written, a quoted local part holding a separator or an at sign included, and nobody else", async () => {
-		for (const to of [
-			'"a,b"@example.com',
-			'"a;b"@example.com',
-			'"bob@evil.example,carol"@example.com',
-			'"x@evil.example;y"@example.com',
-			'"a:b(c)"@example.com',
-		]) {
+	it("names the one recipient as written, a quoted local part holding a separator included, and nobody else", async () => {
+		for (const to of ['"a,b"@example.com', '"a;b"@example.com', '"a:b(c)"@example.com']) {
 			const relay = await relayWith();
 			expect(mailSendOutcome(await senderAt(relay.port).send(mailTo(to))), to).toBe("delivered");
 			expect(
@@ -571,18 +565,21 @@ describe("the SMTP sender's envelope", () => {
 		}
 	});
 
-	it("rejects as rejected, before any connection, a recipient whose quoted local part holds an angle bracket, which the transport refuses in an envelope address", async () => {
+	it("refuses, before any connection, a recipient the provider reads as no address: a quoted angle bracket, at sign, percent or bang, or a routing operator", async () => {
 		const relay = await relayWith();
 		for (const to of [
 			'"a<b"@example.com',
 			'"a>b"@example.com',
 			'"x>bob@evil.example"@example.com',
+			'"bob@evil.example,carol"@example.com',
+			'"x@evil.example;y"@example.com',
+			"bob%evil.example@example.com",
+			"evil.example!bob@example.com",
 		]) {
 			const error = await rejectionOf(senderAt(relay.port).send(mailTo(to)));
-			expect(error, to).toBeInstanceOf(MailTransportError);
-			expect((error as MailTransportError).reason, to).toBe("rejected");
-			expect((error as Error).message, to).toContain("the SMTP transport");
-			expect((error as Error).message, to).not.toContain("example");
+			expect(error, to).toBeInstanceOf(RangeError);
+			expect((error as Error).message, to).not.toContain("evil");
+			expect((error as Error).message, to).not.toContain("bob");
 		}
 		expect(relay.connections()).toBe(0);
 	});

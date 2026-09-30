@@ -31,14 +31,27 @@
  *   once succeeds once, and a lost race never spends a factor's state.
  * - A store that cannot answer, a factor whose data does not open, and a
  *   factor that throws are outages: never a wrong code, never "no factor".
+ * - `factor_id: "account-email"` names the account-email proof (`proof.mts`)
+ *   on a transaction that owes it; a first binding is `enrollment.mts`'s.
+ *   Both are handed the coordinator's reads and writes as the kit; what the
+ *   three share is `ceremony.mts`'s contract.
+ * - A verified counting factor marks the enrollment witness of a login whose
+ *   `User` does not carry it (D12); a mark that fails never fails the login.
  * - A factor is handed its records opened and digests under the ring; it
- *   never sees a key, a store or a transaction.
+ *   never sees a key, a store, a transaction or the mail sender. A code it
+ *   asks to be mailed goes through `sendMfaMail` (`mail.mts`), to the
+ *   login's address, and the digest of that address is kept with the pending
+ *   challenge and handed back to the verification.
+ * - A refusal carries the factor id the factor named only when it is one of
+ *   the subject's factors of the kind verified: nothing else reaches the audit.
+ *   Another is dropped and flagged, never quoted.
  */
 
 import {
 	getBoundMfaTransaction,
 	isConsumedMfaTransaction,
 	isMfaFactorUpdateWritten,
+	type MailSender,
 	MFA_AMR,
 	type MfaEnrolledFactor,
 	type MfaFactor,
@@ -46,25 +59,43 @@ import {
 	type MfaFactorResolver,
 	type MfaFactorState,
 	type MfaFactorStore,
+	type MfaKeyedDigest,
 	type MfaTransaction,
-	type MfaTransactionBinding,
 	type MfaTransactionPatch,
 	type MfaTransactionStore,
 	type MfaVerification,
-	type PrimaryContinuation,
 	readMfaAttemptReservation,
 } from "@o3co/auth-provider-core";
+import {
+	type MfaCeremonyCall,
+	type MfaCeremonyKit,
+	type MfaCeremonySubject,
+	type MfaChallengeOutcome,
+	type MfaDescribeOutcome,
+	type MfaEnrollmentBeginOutcome,
+	type MfaEnrollmentCompleteOutcome,
+	type MfaFactorUnreadable,
+	type MfaRefusalReason,
+	type MfaStoreOutage,
+	type MfaVerifyOutcome,
+	OUTSIDE_CONTRACT,
+	outage,
+	UNKNOWN_FACTOR,
+	UNKNOWN_TRANSACTION,
+	type UnknownTransaction,
+} from "./ceremony.mjs";
+import { createMfaEnrollment } from "./enrollment.mjs";
+import { keptState, mailRefusalOf, readKeptState, sendMfaMail } from "./mail.mjs";
+import { ACCOUNT_EMAIL_FACTOR_ID, createAccountEmailProof } from "./proof.mjs";
 import type { MfaRequirementMode } from "./requirement.mjs";
 import type { MfaSealing } from "./sealing.mjs";
+import { type MfaEnrollmentWitness, reconciles } from "./witness.mjs";
 
 /** A transaction id as the login makes one: 32 bytes, base64url. */
 const TRANSACTION_ID = /^[A-Za-z0-9_-]{43}$/;
 
 /** How many times a verification writes a factor whose compare-and-set it keeps losing. */
 const ADVANCE_ROUNDS = 3;
-
-/** Why a store's answer outside its port's promise is an outage: it is never read as a verdict. */
-const OUTSIDE_CONTRACT = new TypeError("the store answered outside its port's contract");
 
 /** Whether `written`, what a transaction's `update` answered other than `null`, is `tx` at its next version. */
 const isWrittenAt = (written: unknown, tx: MfaTransaction): boolean => {
@@ -83,113 +114,11 @@ const declaresEach = (factor: MfaFactor, amr: unknown): amr is readonly string[]
 	amr.length > 0 &&
 	amr.every((value) => typeof value === "string" && factor.amrValues.includes(value));
 
-/** The MFA store that could not answer. */
-export type MfaStoreName = "mfa_transaction" | "mfa_factor";
-
-/** A store that could not answer: the operation, and why. */
-export interface MfaStoreOutage {
-	readonly outcome: "unavailable";
-	readonly store: MfaStoreName;
-	readonly step: string;
-	readonly cause: unknown;
-}
-
-/**
- * A factor that cannot be used as stored: its data does not open
- * (`unreadable`), or opens under a key the ring lacks (`key_unavailable`,
- * naming it), or the factor threw reading it (`verification`); or its
- * pending challenge's kept state does not open (`challenge`, naming the key
- * when it is the one missing).
- */
-export interface MfaFactorUnreadable {
-	readonly outcome: "unreadable";
-	readonly kind: string;
-	readonly factorId: string;
-	readonly state: "unreadable" | "key_unavailable" | "verification" | "challenge";
-	readonly keyId?: string;
-	readonly cause?: unknown;
-}
-
-/** Who and what an outcome concerns, for its audit event. */
-export interface MfaCeremonySubject {
-	readonly subject: string;
-	readonly kind: string;
-	readonly purpose: MfaTransaction["purpose"];
-}
-
-/** No usable transaction: unknown, foreign, spent, expired, or not a login's. */
-const UNKNOWN_TRANSACTION = Object.freeze({ outcome: "unknown_transaction" as const });
-/** No factor of the subject's that an installed factor verifies, by the id named. */
-const UNKNOWN_FACTOR = Object.freeze({ outcome: "unknown_factor" as const });
-
-type UnknownTransaction = typeof UNKNOWN_TRANSACTION;
-type UnknownFactor = typeof UNKNOWN_FACTOR;
-
-/** What a transaction's reader is shown of it. */
-export interface MfaTransactionView {
-	readonly purpose: MfaTransaction["purpose"];
-	readonly factors: readonly {
-		readonly id: string;
-		readonly kind: string;
-		readonly label?: string;
-		readonly hint?: string;
-	}[];
-	readonly enrollment: MfaTransaction["enrollment"];
-	readonly emailProof: boolean;
-	readonly expiresIn: number;
-	readonly attemptsRemaining: number;
-}
-
-/** A refused proof, with what is left of the transaction's attempts. */
-export type MfaRefusalReason = Extract<MfaVerification, { ok: false }>["reason"] | "exhausted";
-
-export type MfaDescribeOutcome =
-	| UnknownTransaction
-	| MfaStoreOutage
-	| { readonly outcome: "described"; readonly view: MfaTransactionView };
-
-export type MfaChallengeOutcome =
-	| UnknownTransaction
-	| UnknownFactor
-	| MfaStoreOutage
-	| MfaFactorUnreadable
-	| { readonly outcome: "none" }
-	| ({ readonly outcome: "sent"; readonly response: object } & MfaCeremonySubject)
-	| {
-			readonly outcome: "challenge_failed";
-			readonly kind: string;
-			readonly factorId: string;
-			readonly cause: unknown;
-	  };
-
-export type MfaVerifyOutcome =
-	| UnknownTransaction
-	| UnknownFactor
-	| MfaStoreOutage
-	| MfaFactorUnreadable
-	| ({
-			readonly outcome: "refused";
-			readonly reason: MfaRefusalReason;
-			readonly attemptsRemaining: number;
-	  } & MfaCeremonySubject)
-	/** The proof was right, and another verification consumed the transaction first. */
-	| { readonly outcome: "spent" }
-	/** The proof was right, but it does not count and the subject holds no counting factor it can use (F3). */
-	| ({ readonly outcome: "enrollment_required" } & MfaCeremonySubject)
-	| ({
-			readonly outcome: "verified";
-			/** What the login persisted, as the store answered it at consumption. */
-			readonly continuation: PrimaryContinuation | undefined;
-			/** What the verification adds to the login: the factor's `amr`, `mfa` when it adds it, and when. */
-			readonly adds: { readonly amr: readonly string[]; readonly mfaAt: Date };
-	  } & MfaCeremonySubject);
-
-/** One call's request: the transaction named, the binding the browser presents, and what a factor may read of the request. */
-export interface MfaCeremonyCall {
-	readonly transactionId: string | undefined;
-	readonly binding: MfaTransactionBinding;
-	readonly request: { readonly ip?: string; readonly userAgent?: string };
-}
+/** What a refusal says of the factor it concerns, as the `refused` outcome carries it. */
+type RefusalConcerns = Pick<
+	Extract<MfaVerifyOutcome, { outcome: "refused" }>,
+	"factorId" | "factorIdDropped"
+>;
 
 export interface MfaCoordinator {
 	describe(call: MfaCeremonyCall): Promise<MfaDescribeOutcome>;
@@ -197,6 +126,14 @@ export interface MfaCoordinator {
 	verify(
 		call: MfaCeremonyCall & { readonly factorId: unknown; readonly proof: unknown },
 	): Promise<MfaVerifyOutcome>;
+	/** A login's first binding begun: the enrollment of the factor of `kind` started (`enrollment.mts`). */
+	beginEnrollment(
+		call: MfaCeremonyCall & { readonly kind: unknown },
+	): Promise<MfaEnrollmentBeginOutcome>;
+	/** A login's first binding completed: the proof taken, the factor bound (`enrollment.mts`). */
+	completeEnrollment(
+		call: MfaCeremonyCall & { readonly proof: unknown; readonly label: unknown },
+	): Promise<MfaEnrollmentCompleteOutcome>;
 }
 
 export interface MfaCoordinatorOptions {
@@ -208,16 +145,13 @@ export interface MfaCoordinatorOptions {
 	readonly maxAttemptsPerTransaction: number;
 	/** `mfa.mode`: under `required` a factor that does not count completes no login for a subject with no counting factor it can use. */
 	readonly mode: MfaRequirementMode;
+	/** Where a factor's codes are mailed; none wired, a factor that asks for one is an outage. */
+	readonly mailSender?: MailSender;
+	/** The enrollment witness a verified counting factor reconciles. */
+	readonly witness: MfaEnrollmentWitness;
 	/** The clock, in epoch milliseconds. Defaults to `Date.now`. */
 	readonly now?: () => number;
 }
-
-const outage = (store: MfaStoreName, step: string, cause: unknown): MfaStoreOutage => ({
-	outcome: "unavailable",
-	store,
-	step,
-	cause,
-});
 
 /** Whether `value` is an object `res.json` answers as the factor built it: a plain object. */
 const isPlainObject = (value: unknown): value is object => {
@@ -232,7 +166,16 @@ const byAge = (a: MfaFactorRecord, b: MfaFactorRecord): number =>
 
 /** The coordinator over `options` (see this file's header). */
 export function createMfaCoordinator(options: MfaCoordinatorOptions): MfaCoordinator {
-	const { factors, factorStore, transactions, sealing, maxAttemptsPerTransaction, mode } = options;
+	const {
+		factors,
+		factorStore,
+		transactions,
+		sealing,
+		maxAttemptsPerTransaction,
+		mode,
+		mailSender,
+		witness,
+	} = options;
 	const now = options.now ?? (() => Date.now());
 
 	/** The login transaction `call` names, bound to its binding; `null` when there is none to use. */
@@ -326,8 +269,9 @@ export function createMfaCoordinator(options: MfaCoordinatorOptions): MfaCoordin
 	/**
 	 * The state a verification of `factor` is handed: the pending challenge
 	 * for this factor, taken — or read, for a factor that keeps it across
-	 * attempts — and opened; none when there is none, it is another factor's,
-	 * or it has expired. Kept state that does not open is unreadable.
+	 * attempts — and opened, with the digest of the address its code went to;
+	 * none when there is none, it is another factor's, or it has expired. Kept
+	 * state that does not open is unreadable.
 	 */
 	const challengeState = async (
 		tx: MfaTransaction,
@@ -335,7 +279,12 @@ export function createMfaCoordinator(options: MfaCoordinatorOptions): MfaCoordin
 		record: MfaFactorRecord,
 		nowMs: number,
 	): Promise<
-		{ readonly state: MfaFactorState | undefined } | MfaStoreOutage | MfaFactorUnreadable
+		| {
+				readonly state: MfaFactorState | undefined;
+				readonly addressDigest?: MfaKeyedDigest;
+		  }
+		| MfaStoreOutage
+		| MfaFactorUnreadable
 	> => {
 		if (factor.challenge === undefined) return { state: undefined };
 		let pending: MfaTransaction["challenge"] | null;
@@ -361,7 +310,13 @@ export function createMfaCoordinator(options: MfaCoordinatorOptions): MfaCoordin
 			{ transactionId: tx.id, kind: record.kind, use: "challenge" },
 			pending.state,
 		);
-		if (opened.state === "ok") return { state: opened.value };
+		const kept = opened.state === "ok" ? readKeptState(opened.value) : undefined;
+		if (kept !== undefined) {
+			return {
+				state: kept.state,
+				...(kept.addressDigest === undefined ? {} : { addressDigest: kept.addressDigest }),
+			};
+		}
 		// Kept state that does not open is an outage, never an absent challenge.
 		return {
 			outcome: "unreadable",
@@ -371,6 +326,114 @@ export function createMfaCoordinator(options: MfaCoordinatorOptions): MfaCoordin
 			...(opened.state === "key_unavailable" ? { keyId: opened.keyId } : {}),
 		};
 	};
+
+	/**
+	 * One of `tx`'s attempts reserved, after the bound read held: the
+	 * attempts left; `exhausted` past the limit, which the store answers by
+	 * deleting the transaction; unknown when none was reserved.
+	 */
+	const reserve = async (
+		tx: MfaTransaction,
+	): Promise<
+		| { readonly attemptsRemaining: number }
+		| { readonly outcome: "exhausted" }
+		| UnknownTransaction
+		| MfaStoreOutage
+	> => {
+		let answered: unknown;
+		try {
+			answered = await transactions.reserveAttempt(tx.id, maxAttemptsPerTransaction);
+		} catch (cause) {
+			return outage("mfa_transaction", "reserveAttempt", cause);
+		}
+		const reservation = readMfaAttemptReservation(answered, maxAttemptsPerTransaction);
+		if (reservation === undefined) {
+			return outage("mfa_transaction", "reserveAttempt", OUTSIDE_CONTRACT);
+		}
+		if (!reservation.ok) {
+			// Past the limit the store deleted the transaction; with none reserved, it was gone.
+			return reservation.attempts > 0 ? { outcome: "exhausted" } : UNKNOWN_TRANSACTION;
+		}
+		return { attemptsRemaining: Math.max(0, maxAttemptsPerTransaction - reservation.attempts) };
+	};
+
+	/** `tx` consumed at the version read: the record as the store answered it; `spent` when another consumed it first. */
+	const consume = async (
+		tx: MfaTransaction,
+	): Promise<MfaTransaction | { readonly outcome: "spent" } | MfaStoreOutage> => {
+		let consumed: MfaTransaction | null;
+		try {
+			consumed = await transactions.consume(tx.id, tx.version);
+		} catch (cause) {
+			return outage("mfa_transaction", "consume", cause);
+		}
+		if (consumed === null) return { outcome: "spent" };
+		if (!isConsumedMfaTransaction(consumed, tx)) {
+			return outage("mfa_transaction", "consume", OUTSIDE_CONTRACT);
+		}
+		return consumed;
+	};
+
+	/** `patch` written at `tx`'s version: the transaction the store answered, its id and next version checked; else why not. */
+	const write = async (
+		tx: MfaTransaction,
+		patch: MfaTransactionPatch,
+	): Promise<{ readonly written: MfaTransaction } | UnknownTransaction | MfaStoreOutage> => {
+		let written: unknown;
+		try {
+			written = await transactions.update(tx.id, tx.version, patch);
+		} catch (cause) {
+			return outage("mfa_transaction", "update", cause);
+		}
+		if (written === null) return UNKNOWN_TRANSACTION;
+		if (!isWrittenAt(written, tx)) return outage("mfa_transaction", "update", OUTSIDE_CONTRACT);
+		return { written: written as MfaTransaction };
+	};
+
+	const kit: MfaCeremonyKit = {
+		factors,
+		factorStore,
+		sealing,
+		mailSender,
+		witness,
+		now,
+		bound,
+		recordsOf,
+		reserve,
+		consume,
+		write,
+		clear: async (written, field) => !("outcome" in (await write(written, { [field]: null }))),
+		emailProofRequired: async (subject) => {
+			let flagged: unknown;
+			try {
+				flagged = await transactions.emailProofRequiredAtNextBinding(subject);
+			} catch (cause) {
+				return outage("mfa_transaction", "emailProofRequiredAtNextBinding", cause);
+			}
+			return typeof flagged === "boolean"
+				? flagged
+				: outage("mfa_transaction", "emailProofRequiredAtNextBinding", OUTSIDE_CONTRACT);
+		},
+		consumeEmailProofRequirement: async (subject) => {
+			try {
+				await transactions.consumeEmailProofRequirement(subject);
+				return undefined;
+			} catch (failed) {
+				return { failed };
+			}
+		},
+		answerable: isPlainObject,
+		declaredAmr: (factor, data) => {
+			try {
+				const amr: unknown = factor.amrFor(data);
+				return declaresEach(factor, amr) ? amr : undefined;
+			} catch {
+				return undefined;
+			}
+		},
+	};
+	const enrollment = createMfaEnrollment(kit);
+	const proof = createAccountEmailProof(kit);
 
 	return {
 		async describe(call) {
@@ -422,6 +485,7 @@ export function createMfaCoordinator(options: MfaCoordinatorOptions): MfaCoordin
 			const tx = await bound(call);
 			if (tx === null) return UNKNOWN_TRANSACTION;
 			if ("outcome" in tx) return tx;
+			if (call.factorId === ACCOUNT_EMAIL_FACTOR_ID) return proof.challenge(tx);
 			const records = await recordsOf(tx.subject);
 			if ("outcome" in records) return records;
 			const found = named(records, call.factorId);
@@ -437,7 +501,6 @@ export function createMfaCoordinator(options: MfaCoordinatorOptions): MfaCoordin
 				cause,
 			});
 			let issued: Awaited<ReturnType<NonNullable<MfaFactor["challenge"]>>>;
-			let sealed: string | undefined;
 			try {
 				issued = await factor.challenge({
 					subject: tx.subject,
@@ -451,50 +514,99 @@ export function createMfaCoordinator(options: MfaCoordinatorOptions): MfaCoordin
 				if (!isPlainObject(issued?.response)) {
 					throw new TypeError("the factor's challenge answered a response that is not an object");
 				}
-				sealed =
-					issued.state === undefined
-						? undefined
-						: sealing.sealState(
-								{ transactionId: tx.id, kind: record.kind, use: "challenge" },
-								issued.state,
-							);
 			} catch (cause) {
 				return failed(cause);
 			}
-			// The challenge lives no longer than its transaction; one without state
-			// clears a pending one, which answered an earlier challenge.
-			const patch: MfaTransactionPatch | undefined =
-				sealed !== undefined
-					? {
-							challenge: {
-								factorId: record.id,
-								kind: record.kind,
-								state: sealed,
-								expiresAtMs: tx.expiresAtMs,
-							},
-						}
-					: tx.challenge !== undefined
-						? { challenge: null }
-						: undefined;
-			if (patch !== undefined) {
-				let written: unknown;
-				try {
-					written = await transactions.update(tx.id, tx.version, patch);
-				} catch (cause) {
-					return outage("mfa_transaction", "update", cause);
-				}
-				if (written === null) return UNKNOWN_TRANSACTION;
-				if (!isWrittenAt(written, tx)) {
-					return outage("mfa_transaction", "update", OUTSIDE_CONTRACT);
-				}
-			}
-			return {
-				outcome: "sent",
-				response: issued.response as object,
+			const about: MfaCeremonySubject = {
 				subject: tx.subject,
 				kind: record.kind,
 				purpose: tx.purpose,
 			};
+			const sent: MfaChallengeOutcome = {
+				outcome: "sent",
+				response: issued.response as object,
+				...about,
+			};
+			/** The pending challenge, sealed with the address's digest when a code went out, living until `expiresAtMs`. */
+			const pending = (addressDigest: MfaKeyedDigest | undefined, expiresAtMs: number) => ({
+				factorId: record.id,
+				kind: record.kind,
+				state: sealing.sealState(
+					{ transactionId: tx.id, kind: record.kind, use: "challenge" },
+					keptState({ state: issued.state, addressDigest }),
+				),
+				expiresAtMs,
+			});
+
+			if (issued.mail !== undefined) {
+				const mailed = await sendMfaMail<MfaChallengeOutcome>({
+					sender: mailSender,
+					mail: issued.mail,
+					purpose: "login_code",
+					subject: tx.subject,
+					address: tx.continuation?.primary.user.email,
+					nowMs,
+					notAfterMs: tx.expiresAtMs,
+					digests: sealing.digestsFor(record.kind),
+					keep: async (addressDigest, expiresAtMs) => {
+						let challenge: ReturnType<typeof pending>;
+						try {
+							challenge = pending(addressDigest, expiresAtMs);
+						} catch (cause) {
+							return { kept: false, refusal: failed(cause) };
+						}
+						const kept = await write(tx, { challenge });
+						if ("outcome" in kept) return { kept: false, refusal: kept };
+						return { kept: true, clear: () => kit.clear(kept.written, "challenge") };
+					},
+				});
+				switch (mailed.outcome) {
+					case "sent":
+						return sent;
+					case "not_kept":
+						return mailed.refusal;
+					case "address_mismatch":
+						return { outcome: "address_mismatch", ...about };
+					case "key_unavailable":
+						return {
+							outcome: "unreadable",
+							kind: record.kind,
+							factorId: record.id,
+							state: "key_unavailable",
+							keyId: mailed.keyId,
+						};
+					case "refused_at_limit":
+					case "no_sender":
+					case "unavailable":
+						return mailRefusalOf(mailed, "login_code", record.kind);
+					case "malformed":
+					case "no_address":
+						return failed(
+							new TypeError("the factor's challenge asked for a mail that is not a login code"),
+						);
+					default:
+						return mailed satisfies never;
+				}
+			}
+
+			// The challenge lives no longer than its transaction; one without state
+			// clears a pending one, which answered an earlier challenge.
+			let patch: MfaTransactionPatch | undefined;
+			try {
+				patch =
+					issued.state !== undefined
+						? { challenge: pending(undefined, tx.expiresAtMs) }
+						: tx.challenge !== undefined
+							? { challenge: null }
+							: undefined;
+			} catch (cause) {
+				return failed(cause);
+			}
+			if (patch !== undefined) {
+				const written = await write(tx, patch);
+				if ("outcome" in written) return written;
+			}
+			return sent;
 		},
 
 		async verify(call) {
@@ -502,6 +614,7 @@ export function createMfaCoordinator(options: MfaCoordinatorOptions): MfaCoordin
 			const tx = await bound(call);
 			if (tx === null) return UNKNOWN_TRANSACTION;
 			if ("outcome" in tx) return tx;
+			if (call.factorId === ACCOUNT_EMAIL_FACTOR_ID) return proof.verify(call, tx);
 			let records = await recordsOf(tx.subject);
 			if ("outcome" in records) return records;
 			const found = named(records, call.factorId);
@@ -513,10 +626,15 @@ export function createMfaCoordinator(options: MfaCoordinatorOptions): MfaCoordin
 				kind: record.kind,
 				purpose: tx.purpose,
 			};
-			const refused = (reason: MfaRefusalReason, attemptsRemaining: number): MfaVerifyOutcome => ({
+			const refused = (
+				reason: MfaRefusalReason,
+				attemptsRemaining: number,
+				concerns: RefusalConcerns = {},
+			): MfaVerifyOutcome => ({
 				outcome: "refused",
 				reason,
 				attemptsRemaining,
+				...concerns,
 				...about,
 			});
 			const unreadable = (cause: unknown): MfaFactorUnreadable => ({
@@ -532,21 +650,11 @@ export function createMfaCoordinator(options: MfaCoordinatorOptions): MfaCoordin
 			let opened = openKind(tx.subject, record, records);
 			if ("outcome" in opened) return opened;
 
-			let answered: unknown;
-			try {
-				answered = await transactions.reserveAttempt(tx.id, maxAttemptsPerTransaction);
-			} catch (cause) {
-				return outage("mfa_transaction", "reserveAttempt", cause);
+			const reserved = await reserve(tx);
+			if ("outcome" in reserved) {
+				return reserved.outcome === "exhausted" ? refused("exhausted", 0) : reserved;
 			}
-			const reservation = readMfaAttemptReservation(answered, maxAttemptsPerTransaction);
-			if (reservation === undefined) {
-				return outage("mfa_transaction", "reserveAttempt", OUTSIDE_CONTRACT);
-			}
-			if (!reservation.ok) {
-				// Past the limit the store deleted the transaction; with none reserved, it was gone.
-				return reservation.attempts > 0 ? refused("exhausted", 0) : UNKNOWN_TRANSACTION;
-			}
-			const attemptsRemaining = Math.max(0, maxAttemptsPerTransaction - reservation.attempts);
+			const { attemptsRemaining } = reserved;
 
 			const pending = await challengeState(tx, factor, record, nowMs);
 			if ("outcome" in pending) return pending;
@@ -562,7 +670,7 @@ export function createMfaCoordinator(options: MfaCoordinatorOptions): MfaCoordin
 						/** What the verification adds: the factor's values, as it declares them. */
 						readonly added: readonly string[];
 				  }
-				| { readonly reason: MfaRefusalReason }
+				| ({ readonly reason: MfaRefusalReason } & RefusalConcerns)
 				| MfaFactorUnreadable
 			> => {
 				if ("outcome" in opened) return opened;
@@ -578,12 +686,21 @@ export function createMfaCoordinator(options: MfaCoordinatorOptions): MfaCoordin
 						factor: self,
 						factors: all,
 						state: pending.state,
+						...(pending.addressDigest === undefined
+							? {}
+							: { addressDigest: pending.addressDigest }),
 						proof: call.proof,
 					});
 				} catch (cause) {
 					return unreadable(cause);
 				}
-				if (!result.ok) return { reason: result.reason };
+				if (!result.ok) {
+					if (result.factorId === undefined) return { reason: result.reason };
+					const concerned = all.find((candidate) => candidate.id === result.factorId);
+					return concerned === undefined
+						? { reason: result.reason, factorIdDropped: true }
+						: { reason: result.reason, factorId: concerned.id };
+				}
 				const verified = all.find((candidate) => candidate.id === result.factorId);
 				if (verified === undefined) {
 					return unreadable(
@@ -607,7 +724,10 @@ export function createMfaCoordinator(options: MfaCoordinatorOptions): MfaCoordin
 
 			let checked = await check();
 			if ("outcome" in checked) return checked;
-			if ("reason" in checked) return refused(checked.reason, attemptsRemaining);
+			if ("reason" in checked) {
+				const { reason, ...concerns } = checked;
+				return refused(reason, attemptsRemaining, concerns);
+			}
 
 			// F3: under `required`, a factor that does not count completes no login
 			// for a subject left with no counting factor it can use.
@@ -617,16 +737,8 @@ export function createMfaCoordinator(options: MfaCoordinatorOptions): MfaCoordin
 
 			// Consumed before the factor moves on: a lost race spends the
 			// transaction, never the factor's state.
-			let consumed: MfaTransaction | null;
-			try {
-				consumed = await transactions.consume(tx.id, tx.version);
-			} catch (cause) {
-				return outage("mfa_transaction", "consume", cause);
-			}
-			if (consumed === null) return { outcome: "spent" };
-			if (!isConsumedMfaTransaction(consumed, tx)) {
-				return outage("mfa_transaction", "consume", OUTSIDE_CONTRACT);
-			}
+			const consumed = await consume(tx);
+			if ("outcome" in consumed) return consumed;
 
 			for (let round = 1; ; round++) {
 				const { verified, next } = checked;
@@ -682,8 +794,16 @@ export function createMfaCoordinator(options: MfaCoordinatorOptions): MfaCoordin
 				if ("outcome" in opened) return opened;
 				checked = await check();
 				if ("outcome" in checked) return checked;
-				if ("reason" in checked) return refused(checked.reason, 0);
+				if ("reason" in checked) {
+					const { reason, ...concerns } = checked;
+					return refused(reason, 0, concerns);
+				}
 			}
+
+			// D12: a counting factor verified for a login's `User` that does not
+			// say it enrolled marks it, so a mark that failed heals here.
+			const user = consumed.continuation?.primary.user;
+			const marked = reconciles(factor, user) ? await witness.mark(tx.subject) : undefined;
 
 			return {
 				outcome: "verified",
@@ -692,8 +812,12 @@ export function createMfaCoordinator(options: MfaCoordinatorOptions): MfaCoordin
 					amr: [...new Set([...checked.added, ...(factor.addsMfa ? [MFA_AMR] : [])])],
 					mfaAt: new Date(nowMs),
 				},
+				witness: marked,
 				...about,
 			};
 		},
+
+		beginEnrollment: (call) => enrollment.begin(call),
+		completeEnrollment: (call) => enrollment.complete(call),
 	};
 }
