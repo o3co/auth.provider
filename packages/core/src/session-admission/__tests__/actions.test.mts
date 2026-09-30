@@ -67,23 +67,16 @@ describe("registeredAdmissionAction — an action as it is registered", () => {
 		expect(reads).toBe(1);
 	});
 
-	it("admits a name of two lower-case identifiers joined by a dot, as every bundled consumer's is", () => {
+	it("admits two lower-case identifiers joined by a dot, each part a letter then letters, digits or underscores", () => {
 		for (const name of [
-			"oauth.authorize",
-			"oauth.consent",
-			"oauth.session_grant",
-			"oauth.code_exchange",
-			"oauth.refresh",
-			"device.lookup",
-			"device.approve",
-			"device.deny",
-			"federation_grants.connect",
-			"federation_grants.consent",
-			"federation_grants.callback",
-			"session.link",
-			"session.link_callback",
-			"webauthn.register",
+			"a.b",
+			"acme.export",
+			"a_b.c_d",
+			"acme_pay.refund_all",
 			"a1.b2",
+			"v2_api.read_3",
+			"x.y_",
+			"x_.y",
 		]) {
 			expect(admissionActionProblem(name, { grade: "use" }), name).toBeUndefined();
 		}

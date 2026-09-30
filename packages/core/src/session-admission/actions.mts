@@ -55,7 +55,7 @@ export interface AdmissionActionDeclaration {
 	readonly grade: ActionGrade;
 }
 
-/** An action's name: two lower-case identifiers joined by a dot, the consumer's and the verb's (`device.lookup`). */
+/** An action's name: two lower-case identifiers joined by a dot, the consumer's and the verb's (`acme.export`). */
 const ACTION_NAME = /^[a-z][a-z0-9_]*\.[a-z][a-z0-9_]*$/;
 
 /** Whether `name` is an action's name as registration admits it. */
@@ -76,7 +76,7 @@ const isDeclaration = (value: unknown): value is { readonly grade?: unknown } =>
  */
 export function admissionActionProblem(name: string, declaration: unknown): string | undefined {
 	if (!isAdmissionActionName(name)) {
-		return `an action's name is two lower-case identifiers joined by a dot, the consumer's and the verb's (device.lookup), not ${JSON.stringify(name)}`;
+		return `an action's name is two lower-case identifiers joined by a dot, the consumer's and the verb's (acme.export), not ${JSON.stringify(name)}`;
 	}
 	if (!isDeclaration(declaration)) return "a declaration is an object, { grade }";
 	const grade = declaration.grade;

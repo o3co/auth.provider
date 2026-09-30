@@ -238,7 +238,7 @@ export interface ContributesMap<Deps = ProviderDeps<never, never>> {
 	};
 	/**
 	 * The actions this module admits through session admission, keyed by the
-	 * name it passes `admitSession` (`device.lookup`), each declaring one of
+	 * name it passes `admitSession` (`acme.export`), each declaring one of
 	 * core's grades. A declaration, not a factory: boot reads each once, at
 	 * stage 1. A name outside the grammar, a grade outside the grades (or
 	 * `remediation`, a requirement's), a container that is not a record and an
