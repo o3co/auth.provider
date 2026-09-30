@@ -22,7 +22,7 @@
  * `session-requirements.test.mts`.
  */
 
-import type { AppConfig, SessionRequirement } from "@o3co/auth-provider-core";
+import type { SessionRequirement } from "@o3co/auth-provider-core";
 import { resolverForTests } from "@o3co/auth-provider-core/testing";
 import { describe, expect, it } from "vitest";
 import {
@@ -40,8 +40,8 @@ const requirement = (over: Partial<SessionRequirement> = {}): SessionRequirement
 	...over,
 });
 
-/** A handle over `requirements`, recording whether it was disposed. */
-const handleOver = (requirements: readonly SessionRequirement[] | undefined) => {
+/** A handle over `requirements`, recording whether it was disposed; `failing` makes its dispose reject. */
+const handleOver = (requirements: readonly SessionRequirement[] | undefined, failing?: Error) => {
 	const disposed: boolean[] = [];
 	return {
 		disposed,
@@ -52,18 +52,17 @@ const handleOver = (requirements: readonly SessionRequirement[] | undefined) => 
 					: { sessionRequirementResolver: resolverForTests(requirements) },
 			dispose: async () => {
 				disposed.push(true);
+				if (failing !== undefined) throw failing;
 			},
 		},
 	};
 };
 
-const switches = (mode: string): AppConfig => ({ mfa: { mode } }) as unknown as AppConfig;
-
 describe("requireMfaSecondFactorAuthority", () => {
 	it("asks nothing under mfa.mode = off, whatever is registered", async () => {
 		for (const requirements of [undefined, [], [requirement()]]) {
 			const { handle, disposed } = handleOver(requirements);
-			await requireMfaSecondFactorAuthority(switches("off"), handle);
+			await requireMfaSecondFactorAuthority("off", handle);
 			expect(disposed).toEqual([]);
 		}
 	});
@@ -72,7 +71,7 @@ describe("requireMfaSecondFactorAuthority", () => {
 		"passes under mfa.mode = %s when the requirement registered as mfa declares the second-factor authority",
 		async (mode) => {
 			const { handle, disposed } = handleOver([requirement({ secondFactorAuthority: true })]);
-			await requireMfaSecondFactorAuthority(switches(mode), handle);
+			await requireMfaSecondFactorAuthority(mode, handle);
 			expect(disposed).toEqual([]);
 		},
 	);
@@ -84,7 +83,7 @@ describe("requireMfaSecondFactorAuthority", () => {
 				const { handle, disposed } = handleOver([
 					requirement(declared === undefined ? {} : { secondFactorAuthority: declared }),
 				]);
-				const err = await requireMfaSecondFactorAuthority(switches(mode), handle).then(
+				const err = await requireMfaSecondFactorAuthority(mode, handle).then(
 					() => undefined,
 					(caught: unknown) => caught,
 				);
@@ -99,12 +98,31 @@ describe("requireMfaSecondFactorAuthority", () => {
 		},
 	);
 
+	it("keeps its refusal when disposing the handle fails, with that failure as its cause", async () => {
+		const cleanup = new AggregateError([new Error("store close failed")], "cleanup failed");
+		const { handle, disposed } = handleOver([requirement()], cleanup);
+		const err = await requireMfaSecondFactorAuthority("required", handle).then(
+			() => undefined,
+			(caught: unknown) => caught,
+		);
+		expect(err).toBeInstanceOf(MfaRequirementNotAuthorityError);
+		expect((err as Error).cause).toBe(cleanup);
+		expect(disposed).toEqual([true]);
+	});
+
+	it("decides by the mode it is handed, not by a configuration it reads", async () => {
+		const { handle } = handleOver([requirement()]);
+		await expect(requireMfaSecondFactorAuthority("required", handle)).rejects.toBeInstanceOf(
+			MfaRequirementNotAuthorityError,
+		);
+	});
+
 	it("refuses when nothing is registered as mfa, or no resolver was built: the second factor asked for has no authority", async () => {
 		for (const requirements of [undefined, [], [requirement({ name: "other" })]]) {
 			const { handle, disposed } = handleOver(requirements);
-			await expect(
-				requireMfaSecondFactorAuthority(switches("required"), handle),
-			).rejects.toBeInstanceOf(MfaRequirementNotAuthorityError);
+			await expect(requireMfaSecondFactorAuthority("required", handle)).rejects.toBeInstanceOf(
+				MfaRequirementNotAuthorityError,
+			);
 			expect(disposed).toEqual([true]);
 		}
 	});

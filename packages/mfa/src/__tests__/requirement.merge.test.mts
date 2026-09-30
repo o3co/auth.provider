@@ -117,33 +117,20 @@ const deps = (row: MergeRow): AdmissionDeps => ({
 	auditSink: undefined,
 });
 
-const decide = (row: MergeRow): Promise<Admission> =>
-	admitSession(deps(row), {
+const decide = (rowDeps: AdmissionDeps, row: MergeRow): Promise<Admission> =>
+	admitSession(rowDeps, {
 		claim: claim(),
 		action: ADMISSION_ACTIONS["oauth.authorize"],
 		asks: { acrValues: row.acrValues ?? [] },
 	});
 
-/**
- * The requirement a row's decision names, as registered: the one this
- * package registers, the declared second-factor authority. Under `off` no
- * requirement is registered, and those rows name none; they are mapped with
- * it all the same.
- */
-const authorityFor = (row: MergeRow) => {
-	const registered = resolverForTests(
-		[realRequirement(row.mode === "off" ? "optional" : row.mode, row.factors)],
-		{ issuer: ISSUER },
-	).get("mfa");
-	if (registered === undefined) throw new Error("the mfa requirement did not register");
-	return registered;
-};
-
 for (const group of MERGE_ROW_GROUPS) {
 	describe(group.title, () => {
 		it.each(group.rows)("$row", async (row) => {
-			expect(await decide(row)).toEqual(
-				mergeAdmission(row.expected, row.session, authorityFor(row)),
+			// The requirement the row's composition registered: under `off`, none.
+			const rowDeps = deps(row);
+			expect(await decide(rowDeps, row)).toEqual(
+				mergeAdmission(row.expected, row.session, rowDeps.requirements.get("mfa")),
 			);
 		});
 	});

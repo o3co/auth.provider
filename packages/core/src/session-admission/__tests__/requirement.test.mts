@@ -23,6 +23,7 @@
 import { describe, expect, expectTypeOf, it } from "vitest";
 import type {
 	PrimaryAuthentication,
+	RegisteredRequirement,
 	RequirementInput,
 	RequirementSession,
 	RequirementVerdict,
@@ -37,6 +38,7 @@ import {
 	issuedRemediationActions,
 	registeredRequirement,
 	sealRegisteredReach,
+	secondFactorAuthorities,
 	stepUpPageUrl,
 } from "#/session-admission/requirement.mjs";
 import { resolverForTests } from "#/session-admission/testing/resolver.mjs";
@@ -487,6 +489,17 @@ describe("resolverForTests — the resolver a test builds", () => {
 		).toThrow(/both declare the second-factor authority/);
 	});
 
+	it("secondFactorAuthorities answers the registered requirements that declare the authority, in the order given: the one home of the at-most-one rule", () => {
+		const resolver = anyReach([
+			requirement("a"),
+			requirement("first", { secondFactorAuthority: true }),
+			requirement("b", { secondFactorAuthority: false }),
+		]);
+		const registered = [...resolver.entries()].map(([, r]) => r);
+		expect(secondFactorAuthorities(registered).map((r) => r.name)).toEqual(["first"]);
+		expect(secondFactorAuthorities([])).toEqual([]);
+	});
+
 	it("refuses a second authority before it seals any reach, as boot does: the duplicate is named even when the first one's reach is refused too", () => {
 		const badReach = requirement("first", {
 			secondFactorAuthority: true,
@@ -637,7 +650,7 @@ describe("resolverForTests — the resolver a test builds", () => {
 describe("sealRegisteredReach — a registered reach, read once after the name-keyed pass and sealed on the copy", () => {
 	// `"none"` rather than `undefined`: a default parameter would replace an
 	// explicit `undefined` with the page.
-	const requirement = (
+	const raw = (
 		name: string,
 		reach: unknown,
 		page: SessionRequirement["stepUpPage"] | "none" = { url: "/x", params: {} },
@@ -651,11 +664,16 @@ describe("sealRegisteredReach — a registered reach, read once after the name-k
 			admit: async () => ({ outcome: "met" }),
 		}) as SessionRequirement;
 
-	/** A requirement that declares the second-factor authority, under a name that is not `mfa`. */
-	const authority = (reach: unknown, name = "second"): SessionRequirement => ({
-		...requirement(name, reach),
-		secondFactorAuthority: true,
-	});
+	/** `raw`'s requirement as registration copies it: what the seal is handed. */
+	const requirement = (
+		name: string,
+		reach: unknown,
+		page: SessionRequirement["stepUpPage"] | "none" = { url: "/x", params: {} },
+	): RegisteredRequirement => registeredRequirement(raw(name, reach, page), ISSUER);
+
+	/** A registered requirement that declares the second-factor authority, under a name that is not `mfa`. */
+	const authority = (reach: unknown, name = "second"): RegisteredRequirement =>
+		registeredRequirement({ ...raw(name, reach), secondFactorAuthority: true }, ISSUER);
 
 	it("answers the reach as a set of its own, and lets the requirement that declares the second-factor authority reach the second-factor values, whatever its name", () => {
 		const reach = new Set(["otp", "hwk", "mfa"]);
@@ -679,10 +697,12 @@ describe("sealRegisteredReach — a registered reach, read once after the name-k
 		}
 		// Saying it is not the authority is saying nothing.
 		expect(() =>
-			sealRegisteredReach({
-				...requirement("risk", new Set(["risk-ok"])),
-				secondFactorAuthority: false,
-			}),
+			sealRegisteredReach(
+				registeredRequirement(
+					{ ...raw("risk", new Set(["risk-ok"])), secondFactorAuthority: false },
+					ISSUER,
+				),
+			),
 		).toThrow(/only the second-factor authority adds vouched values to a session/);
 		// The page is still asked for first: a reach without one says so.
 		expect(() => sealRegisteredReach(requirement("risk", new Set(["risk-ok"]), "none"))).toThrow(
@@ -696,7 +716,7 @@ describe("sealRegisteredReach — a registered reach, read once after the name-k
 			/so any other reach must be empty$/,
 		);
 		// And a registered copy that is refused is not sealed.
-		const registered = registeredRequirement(requirement("risk", new Set(["risk-ok"])), ISSUER);
+		const registered = requirement("risk", new Set(["risk-ok"]));
 		expect(() => sealRegisteredReach(registered)).toThrow(RangeError);
 		expect("add" in registered.reach).toBe(true);
 		// The authority reaches what its factors do, a value of its own included.
@@ -716,14 +736,14 @@ describe("sealRegisteredReach — a registered reach, read once after the name-k
 
 	it("reads the getter once", () => {
 		let reads = 0;
-		const source = authority(undefined);
+		const source = { ...raw("second", undefined), secondFactorAuthority: true };
 		Object.defineProperty(source, "reach", {
 			get() {
 				reads++;
 				return new Set(["risk-ok"]);
 			},
 		});
-		sealRegisteredReach(source);
+		sealRegisteredReach(registeredRequirement(source, ISSUER));
 		expect(reads).toBe(1);
 	});
 
@@ -777,19 +797,18 @@ describe("sealRegisteredReach — a registered reach, read once after the name-k
 		expect(seen).toEqual(["risk-ok"]);
 	});
 
-	it("answers a frozen set of its own for a requirement that is not a registered copy — what the contract suite checks — and seals nothing on it", () => {
-		const live = new Set(["risk-ok"]);
-		const source = authority(live);
-		const checked = sealRegisteredReach(source);
-		expect(checked).not.toBe(live);
-		live.add("other");
-		expect([...checked]).toEqual(["risk-ok"]);
-		expect(source.reach).toBe(live);
+	it("refuses a requirement that is not a registered copy: the declaration it weighs is the one registration read", () => {
+		const source = { ...raw("second", new Set(["risk-ok"])), secondFactorAuthority: true };
+		expect(() => sealRegisteredReach(source as never)).toThrow(/is not a registered copy/);
+		// A copy of a registered one is not one either.
+		expect(() => sealRegisteredReach({ ...authority(new Set(["risk-ok"])) } as never)).toThrow(
+			/is not a registered copy/,
+		);
 	});
 
 	it("accepts an iterable of values that is not a string — an array — answering a Set, and seals a registered copy on it", () => {
 		expect([...sealRegisteredReach(authority(["risk-ok", "risk-ok"]))]).toEqual(["risk-ok"]);
-		const registered = registeredRequirement(authority(["risk-ok"]), ISSUER);
+		const registered = authority(["risk-ok"]);
 		sealRegisteredReach(registered);
 		expect("add" in registered.reach).toBe(false);
 		expect(registered.reach.has("risk-ok")).toBe(true);
@@ -821,10 +840,12 @@ describe("sealRegisteredReach — a registered reach, read once after the name-k
 			expect(() => sealRegisteredReach(authority(reach)), String(reach)).toThrow(RangeError);
 		}
 		expect(() =>
-			sealRegisteredReach({
-				...requirement("second", new Set(["otp"]), "none"),
-				secondFactorAuthority: true,
-			}),
+			sealRegisteredReach(
+				registeredRequirement(
+					{ ...raw("second", new Set(["otp"]), "none"), secondFactorAuthority: true },
+					ISSUER,
+				),
+			),
 		).toThrow(/where the step-up starts/);
 	});
 

@@ -1237,7 +1237,7 @@ describe("the second-factor authority is declared, and bound to core's MFA ports
 		expect(err.message).toContain("install only one of the modules that contribute them");
 	});
 
-	it("refuses a second declaration whatever else is wrong with either: the duplicate is what the composition must fix first", async () => {
+	it("refuses a second declaration even when either's reach or ports are wrong: the duplicate is what the composition must fix first", async () => {
 		const err = await refusal(
 			boot(
 				[

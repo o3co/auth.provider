@@ -205,6 +205,29 @@ describe("mergeAdmission — the rows are the declared authority's", () => {
 		}
 	});
 
+	it("maps a row that names no requirement with no authority given — what a composition without one registers — and throws for one that names it", () => {
+		expect(mergeAdmission({ outcome: "met", acr: MFA }, session, undefined)).toEqual({
+			outcome: "admitted",
+			session,
+			acr: MFA,
+		});
+		expect(mergeAdmission({ outcome: "unmet", requirement: "acr" }, session, undefined)).toEqual({
+			outcome: "unmet",
+			requirement: "acr",
+			session,
+		});
+		for (const named of [
+			decision,
+			{ outcome: "step_up", requirement: "acr", acrValues: [MFA] } as const,
+			{ outcome: "unmet", requirement: "baseline" } as const,
+			{ outcome: "reauthenticate" } as const,
+		]) {
+			expect(() => mergeAdmission(named, session, undefined), JSON.stringify(named)).toThrow(
+				/names the second-factor authority, and none is given/,
+			);
+		}
+	});
+
 	it("throws for an object that is not a registered requirement, however it is shaped", () => {
 		const copy = {
 			name: AUTHORITY,

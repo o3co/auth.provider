@@ -126,7 +126,7 @@ describe("the requirement the template declares for MFA must be the declared sec
 	});
 
 	it.each(["optional", "required"] as const)(
-		"refuses the boot under MFA_MODE=%s when a module registers a requirement named mfa that does not declare the authority, disposing the handle before it listens",
+		"refuses the boot under MFA_MODE=%s when a module registers a requirement named mfa that does not declare the authority, disposing the handle",
 		async (mode) => {
 			const disposed: string[] = [];
 			// Not MFA: named `mfa`, reaching nothing, bound to no MFA port.

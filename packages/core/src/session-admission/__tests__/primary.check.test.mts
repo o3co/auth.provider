@@ -46,7 +46,7 @@ const AUTHORITY = { name: "second", secondFactorAuthority: true } as const;
 const plain = (name: string) => ({ name, secondFactorAuthority: false }) as const;
 
 describe("CompletingRequirement — what the addition checks read of a requirement", () => {
-	it("is the registered copy's name and declaration: a boolean read once at registration, never a raw requirement's field", () => {
+	it("is Pick<RegisteredRequirement, 'name' | 'secondFactorAuthority'>, the declaration a required boolean", () => {
 		expectTypeOf<CompletingRequirement>().toEqualTypeOf<
 			Pick<RegisteredRequirement, "name" | "secondFactorAuthority">
 		>();
