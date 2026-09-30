@@ -21,7 +21,11 @@
 
 import type { RateLimitBudgetResolver } from "../modules/manifest/synthetic-keys.mjs";
 import type { RateLimitSpec } from "./types.mjs";
-import { assertUsableRateLimitSpecs } from "./usableSpec.mjs";
+import {
+	assertUsableRateLimitSpecs,
+	isUsableRateLimitSpec,
+	shownConfigValue,
+} from "./usableSpec.mjs";
 
 export interface RateLimitBudgetLookupOptions {
 	/** What an operator declared on this limiter, by prefix; wins over a contributed budget. */
@@ -29,8 +33,8 @@ export interface RateLimitBudgetLookupOptions {
 	/** What a key under a prefix nothing budgets is limited by. */
 	readonly defaultLimit: RateLimitSpec;
 	/**
-	 * The owners' contributed budgets (`rateLimitBudgetResolver`), read at each
-	 * lookup: they register after the limiter is built.
+	 * The owners' contributed budgets (`rateLimitBudgetResolver`), read and
+	 * checked at each lookup: they register after the limiter is built.
 	 */
 	readonly budgets?: RateLimitBudgetResolver;
 }
@@ -58,7 +62,8 @@ const prefixOf = (key: string): string => {
  * A key's budget: the limiter's own `limits` entry for its prefix, else the
  * contributed budget, else `defaultLimit` (never no limit). `limits` and
  * `defaultLimit` are refused, naming `who`, unless usable as written, and held
- * as checked.
+ * as checked; a contributed budget that is not usable throws at its lookup, so
+ * the check is an outage, never an unlimited key.
  */
 export function createRateLimitBudgetLookup(
 	who: string,
@@ -76,9 +81,16 @@ export function createRateLimitBudgetLookup(
 		windowSeconds: options.defaultLimit.windowSeconds,
 	});
 	const { budgets } = options;
+	const contributed = (prefix: string): RateLimitSpec | undefined => {
+		const budget = budgets?.get(prefix);
+		if (budget === undefined || isUsableRateLimitSpec(budget)) return budget;
+		throw new RangeError(
+			`${who}: the budget contributed for "${prefix}" is not one a limiter can apply as written (got ${shownConfigValue(budget)})`,
+		);
+	};
 	const lookup = (key: string): RateLimitBudget => {
 		const prefix = prefixOf(key);
-		return { prefix, spec: limits[prefix] ?? budgets?.get(prefix) ?? defaultLimit };
+		return { prefix, spec: limits[prefix] ?? contributed(prefix) ?? defaultLimit };
 	};
 	return Object.assign(lookup, { defaultLimit });
 }

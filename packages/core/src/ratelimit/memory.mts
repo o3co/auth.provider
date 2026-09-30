@@ -48,8 +48,8 @@ function pruneExpiredBuckets(buckets: Map<string, BucketState>, now: number): vo
 
 /**
  * Removes the bucket that resets first. Every `resetAt` is finite: it is
- * `Date.now()` plus a window construction checked, from specs the limiter
- * holds as it checked them. And a non-empty map always loses one bucket,
+ * `Date.now()` plus a window the lookup checked — at construction, or for a
+ * contributed budget at the lookup itself. And a non-empty map always loses one bucket,
  * since the first entry is taken before any comparison, so the caller's
  * `while (size >= max)` loop always makes progress.
  */
