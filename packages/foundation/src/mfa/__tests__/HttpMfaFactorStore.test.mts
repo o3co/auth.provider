@@ -654,6 +654,24 @@ describe("the transport", () => {
 		expect(error.message).toContain("timed out after 200ms");
 	});
 
+	it("throws a TimeoutError when the Store sends its head and then stalls the body", async () => {
+		const origin = await serve((_request, _body, response) => {
+			response.writeHead(200, { "Content-Type": "application/json" });
+			response.write('{"factors":[');
+			// ...and never ends.
+		});
+		const store = new HttpMfaFactorStore({
+			listUrl: `${origin}/mfa/list`,
+			createUrl: `${origin}/mfa/create`,
+			updateUrl: `${origin}/mfa/update`,
+			deleteUrl: `${origin}/mfa/delete`,
+			timeout: 200,
+			replaySeenSet: createMemoryReplaySeenSet(),
+		});
+		const error = await rejection(store.list("user-1"));
+		expect(error.name).toBe("TimeoutError");
+	});
+
 	it("refuses an answer over the response cap, quoting none of it", async () => {
 		fake.answer("list", () => json(200, { factors: [], padding: MARKER.repeat(50) }));
 		const error = await rejection(storeOver({ maxResponseBytes: 256 }).list("user-1"));
