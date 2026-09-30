@@ -195,7 +195,7 @@ config-parse time unless noted.
 | Signing key material (`OAUTH_JWT_PRIVATE_KEY_PATH` + `OAUTH_JWT_PUBLIC_KEY_PATH`, or the inline `OAUTH_JWT_PRIVATE_KEY` / `OAUTH_JWT_PUBLIC_KEY`) | required for `EdDSA` (the default), `ES256`, `RS256`; the boot error prints the `openssl` commands | `packages/core/src/keys/factory.mts` |
 | `OAUTH_JWT_SECRET` (only with `OAUTH_JWT_ALGORITHM=HS256`) | at least 32 bytes of key material, measured on the *decoded* length of hex/base64 | `packages/core/src/keys/secretEntropy.mts`, applied in `keys/factory.mts` |
 | `session.secret` (`SESSION_SECRET`) | same 32-byte floor | `application.schema.mts` (`fullSectionsSchema.session.secret`) |
-| `session.name` / `session.secure` / `session.domain` | a `__Host-` cookie name (the default) requires `secure = true` and `domain = null` (checked when the session route is built, not at config parse); `sameSite = "none"` requires `secure = true` | `packages/session/src/modules/sessionStoreModule.mts`; `application.schema.mts` |
+| `session.name` / `session.secure` / `session.domain` / `session.sameSite` (`SESSION_NAME`, `SESSION_SECURE`, `SESSION_DOMAIN`, `SESSION_SAME_SITE`) | a `__Host-` cookie name (the default) requires `secure = true` and `domain = null`, a `__Secure-` name requires `secure = true`, and the name must be an RFC 6265 token — no space, `;` or other separator, not empty — checked by the session store before it mounts the cookie, not at config parse (see the session cookie below); `sameSite = "none"` requires `secure = true`, at config parse | `packages/session/src/session-cookie-policy.mts`, applied by `packages/session/src/modules/sessionStoreModule.mts`; `application.schema.mts` |
 | `repositories.user.http.authenticateUrl` / `authenticateByTokenUrl` (`CLIENT_USER_AUTHENTICATE_URL`, `CLIENT_USER_AUTHENTICATE_BY_TOKEN_URL`) | absolute `https` (loopback `http` only); `timeout` a positive integer ≤ 2147483647 ms. Whether an endpoint redirects cannot be checked at construction, so it is required all the same: each URL is the endpoint that answers — a `3xx` is not followed, so a URL that redirects fails every call ([foundation README](../packages/foundation/README.md#what-the-store-must-enforce-itself)) | `packages/foundation/src/repositories/HttpUserRepository.mts` |
 | `repositories.user.http.bearerToken` (`CLIENT_USER_BEARER_TOKEN`) | optional — unset sends the Store no `Authorization` header. Set, including exported but empty, and `repositories.user.type = "http"` (`CLIENT_USER_TYPE`; the standalone's default — core's `reference.conf` defaults to `yaml`, which never reads the `http` block): a bare RFC 6750 token (no `Bearer ` prefix, no whitespace) with at least 32 bytes of key material, measured like `SESSION_SECRET`; the message never quotes the value. One token goes to all four Store URLs, so they must be one trust domain. The Store should refuse every request without it, with `401` (or `403`) and a `Bearer` challenge; a token it refuses is not a boot failure but an outage on every Store call (see the Store row in [§3](#3-what-fail-closed-looks-like-on-each-path); [foundation README](../packages/foundation/README.md#what-the-store-must-enforce-itself)) | `packages/foundation/src/repositories/HttpUserRepository.mts`, with core's `keys/secretEntropy.mts` |
 | `refreshTokenFamilyStore.redis.url` (`REFRESH_TOKEN_FAMILY_STORE_REDIS_URL`) | required whenever any Redis adapter is selected — it is the one shared socket | `templates/standalone/src/modules.mts` (`standaloneRedisClientsModule`) |
@@ -230,6 +230,23 @@ Module-level messages that arrive wrapped in a factory failure:
 
 - Keys: `privateKey or privateKeyPath is required for EdDSA algorithm — no signing key is configured` (with the `openssl` commands); `Duplicate kid values: …`; `previousKeys is not valid for HS256 — use previousSecrets` and the mirror for asymmetric algorithms (`packages/core/src/keys/factory.mts`).
 - Standalone Redis: `` `refreshTokenFamilyStore.redis.url` is required when any Redis-backed adapter is selected `` (`templates/standalone/src/modules.mts`).
+- The session cookie: the session store refuses, before it mounts the cookie
+  and whatever else is installed, a cookie a browser would not keep or that is
+  not a cookie. The `cause` is itself a `config-validation-failed` BootError
+  whose one issue names the key: `session.name with __Host- prefix requires
+  session.secure=true and session.domain=null`, `session.name with __Secure-
+  prefix requires session.secure=true` and `session.name "<name>" is not a
+  cookie name (an RFC 6265 token)` (issue `session.name`); `session.sameSite =
+  "none" requires session.secure = true` (`session.secure`) and
+  `session.maxAge must be a whole number of milliseconds from 1 to
+  31536000000` (`session.maxAge`), which config parse refuses first. It
+  arrives as `contribute-factory-failed` from the store's route, or as
+  `provides-factory-failed` from its `sessionCookiePolicy` provider where a
+  module requires that slot — the subject revocation service, with federation
+  grants on. For plain HTTP set `SESSION_SECURE=false` with a `SESSION_NAME`
+  that carries no prefix (`auth.sid`); behind TLS set `SESSION_SECURE=true`;
+  unset `SESSION_DOMAIN` for a `__Host-` name
+  (`packages/session/src/modules/sessionStoreModule.mts`).
 - Federation grants (#593): the same guard, the same environment variable, and
   the message names `[federation-grants]` rather than `[federation-tokens]`
   (`packages/redis/src/internal/encryption-mode.mts`). One more refusal of its

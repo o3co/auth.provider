@@ -176,7 +176,7 @@ Each provider runs core's contract suite in this package's tests.
 | `csrfGuard` | `sessionModule` | The [CSRF policy](#csrf-on-the-state-changing-routes) `POST /session/login` runs: `check` and `middleware` for a request that changes state — the same `403 access_denied` and log line — `checkNavigation` for a navigation that starts a flow (the [account-link start](#account-linking-across-federations-482)'s rule), and `issue`. The token's form field is `csrf_token`. | Device verification, once the grant is enabled |
 | `loginEntry` | `sessionModule` | The login page, `endpoints.login.url`, and `urlFor(returnTo)`, which adds `redirect_to` to the page's own query, before any fragment. A page whose query already carries `redirect_to` is refused when the entry is built, as `/authorize`'s own fallback refuses it. Built when no page is configured, and failing where the page is read. | `/authorize` when a module provides it; the federation-grants connect flow, once grants are enabled |
 | `loginCompletion` | `loginCompletionModule` | [`establishSession`](#establishing-the-session) and [`answerInterruption`](#when-a-requirement-interrupts-the-login) over the session stores and the `csrfGuard` the module requires, and `session.maxAge`. Its own module, loaded beside `sessionModule`: an interruption's token is the deployment's `csrfGuard`'s, whoever filled the slot, and `sessionModule` cannot require the slot it fills. | A requirement's completion (the MFA package's) |
-| `sessionCookiePolicy` | the session store's module | The session cookie's name, `secure`, `sameSite`, domain and lifetime, as express-session is given them. Refused wherever it would break core's contract: where the store refuses the cookie, with the store's message — a `__Host-` name that is not secure or that names a domain — and where the store does not yet — a name that is not a cookie name, a `__Secure-` name or a `SameSite=None` cookie that is not secure, a lifetime out of range. | Nothing bundled yet |
+| `sessionCookiePolicy` | the session store's module | The session cookie's name, `secure`, `sameSite`, domain and lifetime: the cookie the store mounts, built by the same function. A section that would break core's contract yields none, and the store refuses it at boot ([below](#browser-session-store)). Authoritative: while the store's module is loaded an `overrideComponents` entry for the slot refuses boot (`authoritative-component-overridden`), since the store would go on mounting the cookie `session.*` describes; a composition without the module fills the slot itself. | The subject revocation service, optionally, to size its horizon |
 | `csrfTokenSigner` | the session store's module | The CSRF token's signature under a key derived from `session.secret` for this purpose alone: HKDF-SHA256, no salt, info `o3co.auth.provider/session-csrf/v1`, 32 bytes, then HMAC-SHA256, base64url. A fixed vector in the tests pins the derivation, so a token verifies for as long as the secret is kept. Neither the secret nor the key leaves it. | `sessionModule`: its `csrfGuard` and the `/session` routes |
 
 The CSRF token's key is derived from `session.secret`, which the session
@@ -215,9 +215,26 @@ What holds:
   browser route declares `after: ["session-middleware"]`, so it mounts after
   this route wherever either is listed, and a composition without a route of
   that id fails boot with `route-order-target-missing`.
-- **A `__Host-` cookie name needs `session.secure = true` and
-  `session.domain = null`**, or boot fails. `__Host-auth.session` is the default
-  name.
+- **The cookie is the `sessionCookiePolicy`'s, and boot refuses one a browser
+  would not keep.** The route builds the cookie with the function that provides
+  the slot and mounts express-session from it, so the slot's readers see the
+  cookie browsers are given. Before the store opens a connection, and whether or
+  not a module requires the slot, it refuses:
+  - a `__Host-` name — the default, `__Host-auth.session` — unless
+    `session.secure = true` and `session.domain = null`;
+  - a `__Secure-` name unless `session.secure = true`;
+  - a `session.name` that is not an RFC 6265 token (a space, a `;`, empty);
+  - `session.sameSite = "none"` unless `session.secure = true`;
+  - a `session.maxAge` outside 1 ms to a year (`MAX_DURATION_MS`).
+
+  The refusal is a `BootError` `config-validation-failed` whose message is the
+  rule and whose one issue names the key — `session.name` for the name rules,
+  `session.secure` for `SameSite=None`, `session.maxAge` — as the `cause` of
+  `contribute-factory-failed`, or of `provides-factory-failed` where a module
+  requires the slot and its provider runs first. Core's schema refuses the
+  `SameSite=None` and lifetime cases before either, at validation. A plain-HTTP
+  run sets `session.secure = false` with a name that carries no prefix
+  (`auth.sid`).
 - **`memory` is refused under `deployment.mode = "multi"`.** express-session's
   `MemoryStore` forks per replica: a login served by one replica is unknown to
   the others, logout clears only the replica it lands on, and a restart loses
@@ -1227,12 +1244,12 @@ The bundled adapters are the worked examples — for instance
 | Test file | Pins |
 | --- | --- |
 | [`src/__tests__/module.test.mts`](src/__tests__/module.test.mts) | the manifest's slots and absence policies, the two routers at `/session`, and the `callbackURL` boot rule |
-| [`src/__tests__/sessionStoreModule.test.mts`](src/__tests__/sessionStoreModule.test.mts) | the middleware route at `/`, the cookie name, the `__Host-` rule, and the replica-safety declaration and refusal |
+| [`src/__tests__/sessionStoreModule.test.mts`](src/__tests__/sessionStoreModule.test.mts) | the middleware route at `/`, the cookie it sets, each cookie refused at boot through `createApp` and by the route itself before the store opens, the cookies that still mount, and the replica-safety declaration and refusal |
 | [`src/store/__tests__/factory.test.mts`](src/store/__tests__/factory.test.mts) | the two built-in stores, the `session-store` readiness probe, and the Redis client's error listener |
 | [`src/__tests__/cookieSessionStore.test.mts`](src/__tests__/cookieSessionStore.test.mts) | the cookie-session store failing under the real express-session and connect-redis: the middleware's `503` and its one line, and a route's outage answered once with the session not written again |
 | [`src/__tests__/csrf.test.mts`](src/__tests__/csrf.test.mts) | the signed token, its expiry bound, the signer refused when built and read as refusing unless `verify` answers `true`, the origin check and the guard's acceptance rule |
 | [`src/__tests__/csrfTokenSigner.test.mts`](src/__tests__/csrfTokenSigner.test.mts) | the session store's `csrfTokenSigner`: core's contract, the fixed vectors, the entropy floor, a token signed under `session.secret` passing `/session/*` and the `csrfGuard` slot, and an override replacing it; `sessionModule` and a hand-built router refused without a signer, signing through the slot's, its tokens passing between the slot and `/session/*`, and reading no `session.secret` on any route |
-| [`src/__tests__/csrfGuard.test.mts`](src/__tests__/csrfGuard.test.mts), [`loginEntry.test.mts`](src/__tests__/loginEntry.test.mts), [`loginCompletion.test.mts`](src/__tests__/loginCompletion.test.mts), [`sessionCookiePolicy.test.mts`](src/__tests__/sessionCookiePolicy.test.mts) | what the modules provide other packages: each keeps core's contract, the modules provide it, the guard answers and logs as `/session/login`'s does and accepts the tokens `GET /session/csrf` hands out, the login entry is built without a page and fails where it is read, and the cookie policy refuses what the store refuses and whatever else would break the contract, over every combination of the cookie's attributes |
+| [`src/__tests__/csrfGuard.test.mts`](src/__tests__/csrfGuard.test.mts), [`loginEntry.test.mts`](src/__tests__/loginEntry.test.mts), [`loginCompletion.test.mts`](src/__tests__/loginCompletion.test.mts), [`sessionCookiePolicy.test.mts`](src/__tests__/sessionCookiePolicy.test.mts) | what the modules provide other packages: each keeps core's contract, the modules provide it, the guard answers and logs as `/session/login`'s does and accepts the tokens `GET /session/csrf` hands out, the login entry is built without a page and fails where it is read, the cookie policy refuses whatever would break the contract, over every combination of the cookie's attributes, and the store refuses at boot exactly what it refuses, with its message; an override of the policy beside the store's module refuses boot, and a composition without the module fills the slot |
 | [`src/__tests__/establish-session.test.mts`](src/__tests__/establish-session.test.mts) | the login tail: what it writes (the establishment's primary alone, and a forged establishment refused), its sequence, what it hands each write, and the rollback at every point it can fail |
 | [`src/routes/__tests__/Session.test.mts`](src/routes/__tests__/Session.test.mts), [`loginRateLimit.test.mts`](src/routes/__tests__/loginRateLimit.test.mts) | login, what logout invalidates and that a store outage does not stop the `UserSession` delete, the outage answers and their one log line, and the login rate-limit guard |
 | [`src/routes/__tests__/Session.loginAdmission.test.mts`](src/routes/__tests__/Session.loginAdmission.test.mts) | the password login on session admission: what a requirement is asked, each outcome's answer, the interruption's two phases and the answer to each failure after the regeneration; `answerInterruption` on its own — its answer, its reporter and outcome at each failure, and what it refuses |

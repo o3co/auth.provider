@@ -402,8 +402,11 @@ other grant ignores it and mints the default.
 
 If you set `SESSION_SECURE=false` for local HTTP development or set `SESSION_DOMAIN`
 for shared-domain cookies, also set `SESSION_NAME` to a non-`__Host-` value such as
-`auth.sid`. The server fails fast when a `__Host-` cookie name is combined with
-attributes that browsers reject for that prefix.
+`auth.sid` — with `SESSION_SECURE=false`, one with no prefix: a `__Secure-` name
+needs `SESSION_SECURE=true` too. The server fails fast when a `__Host-` or
+`__Secure-` cookie name is combined with attributes that browsers reject for that
+prefix, and on a `SESSION_NAME` that is not a cookie name (an RFC 6265 token: no
+space, `;` or other separator).
 
 #### CSRF on `/session/login` and `/session/logout`
 
