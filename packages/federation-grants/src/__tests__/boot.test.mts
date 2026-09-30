@@ -432,6 +432,23 @@ describe("the actions it registers", () => {
 		}
 	});
 
+	it("registers them while the feature is off too: the switch is read when the routes are built, after the actions register", async () => {
+		const handle = await boot({
+			enabled: false,
+			withStore: false,
+			withLimiter: false,
+			withAudit: false,
+			provider: null,
+		});
+		try {
+			expect(
+				handle.components.sessionRequirementResolver?.action("federation_grants.connect"),
+			).toEqual({ name: "federation_grants.connect", grade: "use" });
+		} finally {
+			await handle.dispose();
+		}
+	});
+
 	it("exports none of them: the router that admits them is mounted by the module alone", async () => {
 		const entry = await import("#/index.mjs");
 		expect(Object.hasOwn(entry, "FEDERATION_GRANTS_ADMISSION_ACTIONS")).toBe(false);

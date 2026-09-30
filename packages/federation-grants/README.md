@@ -517,7 +517,11 @@ admitted by core's session admission, on the cookie's claim, as the step's own
 action — `federation_grants.connect`, `federation_grants.consent` (the read
 and the answer) and `federation_grants.callback` (check 3, and again, with
 the same claim, just before the activation), each graded `use` as
-`federationGrantsModule` registers it. Admission
+`federationGrantsModule` registers it — whether or not `federationGrants.enabled`
+is set, so `admission_actions_registered` lists them either way: a module's
+registration follows a switch only when the module decides, as it is built,
+whether it installs the admitting code, and this one reads its switch when the
+routes are built. Admission
 reads the durable session behind the cookie — live, the cookie's own
 subject's, not past its `expiresAt` — the subject's sessions boundary through
 `subjectRevocation`, and the registered session requirements. What stays
