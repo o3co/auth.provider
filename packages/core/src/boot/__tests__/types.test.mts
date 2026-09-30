@@ -70,7 +70,7 @@ describe("BootStage", () => {
 // ---------------------------------------------------------------------------
 
 describe("BootErrorReason", () => {
-	it("contains exactly the 37 reason literals", () => {
+	it("contains exactly the 38 reason literals", () => {
 		expectTypeOf<BootErrorReason>().toEqualTypeOf<
 			| "module-factory-not-called"
 			| "duplicate-module-name"
@@ -106,6 +106,7 @@ describe("BootErrorReason", () => {
 			| "contribution-kind-guarded"
 			| "contribution-malformed"
 			| "config-path-relocated"
+			| "environment-variable-renamed"
 			| "authoritative-without-provides"
 			| "authoritative-component-overridden"
 			| "token-settings-lifetime-exceeds-configuration"
