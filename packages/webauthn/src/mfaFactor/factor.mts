@@ -20,7 +20,8 @@
  *
  * - Registration asks for a credential under the subject's WebAuthn user
  *   handle — 32 random bytes made at its first WebAuthn enrollment and kept
- *   in each such factor's data — excluding the subject's WebAuthn
+ *   in each such factor's data — and named by its username, never its
+ *   address, excluding the subject's WebAuthn
  *   credentials, with a resident key discouraged, no attestation,
  *   `WEBAUTHN_ALGORITHM_IDS` and the section's user verification. Completion
  *   verifies the attestation and keeps the credential's backup eligibility
@@ -267,18 +268,17 @@ function readAssertion(proof: unknown): AuthenticationResponseJSON | undefined {
 }
 
 /**
- * The name the authenticator shows for the account: its email, else its
- * username. A `RangeError`, quoting neither, when it has neither as
- * well-formed text.
+ * The name the authenticator shows for the account: its username, never its
+ * address, which the provider keeps none of and a page does not show. A
+ * `RangeError`, quoting nothing, when it has none as well-formed text.
  */
 function accountOf(user: Readonly<Record<string, unknown>>): string {
-	for (const candidate of [user.email, user.username]) {
-		if (typeof candidate === "string" && candidate.length > 0 && candidate.isWellFormed()) {
-			return candidate;
-		}
+	const { username } = user;
+	if (typeof username === "string" && username.length > 0 && username.isWellFormed()) {
+		return username;
 	}
 	throw new RangeError(
-		"a WebAuthn factor names the account by its email or username; it has neither as well-formed text",
+		"a WebAuthn factor names the account by its username; it has none as well-formed text",
 	);
 }
 
