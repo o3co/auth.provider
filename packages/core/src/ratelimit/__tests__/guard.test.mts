@@ -63,15 +63,22 @@ const scriptedLimiter = (
 	};
 };
 
-/** `error` accepts both of `Logger.error`'s overloads, and records each call. */
+const unexpectedLoggerCall = (member: string): never => {
+	throw new Error(`guard.test: logger.${member} is not expected`);
+};
+
+/**
+ * `error` accepts both of `Logger.error`'s overloads, and records each call.
+ * The guard writes only `error`: `trace`, `fatal` and `child` throw if called.
+ */
 const makeLogger = (): Logger & { error: Mock<(...args: unknown[]) => void> } => ({
-	trace: vi.fn(),
+	trace: vi.fn(() => unexpectedLoggerCall("trace")),
 	debug: vi.fn(),
 	info: vi.fn(),
 	warn: vi.fn(),
 	error: vi.fn<(...args: unknown[]) => void>(),
-	fatal: vi.fn(),
-	child: vi.fn(),
+	fatal: vi.fn(() => unexpectedLoggerCall("fatal")),
+	child: vi.fn((): Logger => unexpectedLoggerCall("child")),
 });
 
 const spyAuditSink = (): { sink: AuditSink; events: AuditEvent[] } => {
