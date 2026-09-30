@@ -193,9 +193,7 @@ describe("an update on the wire", () => {
 				lastUsedAtMs: Date.parse("2026-09-03T00:00:00.000Z"),
 			},
 		});
-		expectTypeOf<keyof MfaStoreFactorChanges>().toEqualTypeOf<
-			"data" | "label" | "lastUsedAtMs"
-		>();
+		expectTypeOf<keyof MfaStoreFactorChanges>().toEqualTypeOf<"data" | "label" | "lastUsedAtMs">();
 		expectTypeOf<keyof MfaStoreUpdateRequest>().toEqualTypeOf<
 			"subject" | "id" | "expectedVersion" | "changes"
 		>();
@@ -245,7 +243,10 @@ describe("an update on the wire", () => {
 			).toThrow(RangeError);
 		}
 		expect(() =>
-			toMfaStoreUpdateRequest("user-1", "factor-1", 1, { ...next, lastUsedAt: new Date(Number.NaN) }),
+			toMfaStoreUpdateRequest("user-1", "factor-1", 1, {
+				...next,
+				lastUsedAt: new Date(Number.NaN),
+			}),
 		).toThrow(RangeError);
 	});
 });
