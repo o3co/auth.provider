@@ -40,7 +40,7 @@ A package changes what the provider does in one of four ways, and each has its o
 
 | Axis | What it does | Mechanism | Examples |
 | --- | --- | --- | --- |
-| **Plugin** | Adds behaviour | A `routes`, `grants` or `federations` contribution | `device-grant`, the `federation-*` packages, `webauthn` |
+| **Plugin** | Adds behaviour | A `routes`, `grants` or `federations` contribution, with the `admissionActions` its routes and grants admit | `device-grant`, the `federation-*` packages, `webauthn` |
 | **Adapter** | Implements a port core declares | `provides` of a `ComponentMap` slot | The memory and Redis stores, `foundation`'s `HttpUserRepository` |
 | **Capability** | Lets an adapter opt into more than its port | An optional method, detected by a `supportsX` guard beside the port | `supportsSecondFactorUpdate`, `supportsSessionsOnlyRevocation`, `supportsLogout`, `supportsRefresh`, `supportsClaimMapping`, `supportsDelegatedAuthorization`, `supportsLock`, `supportsMfaEnrollmentWitness` |
 | **Extension** | Changes what an existing core decision means | A contribution kind core composes (a package that owns a decision declares the kind for it, as `session` does for `federationRedirectPolicies`) | `tokenBindingMechanisms` (dpop, mtls), `tokenExchangeValidators`, `federationRedirectPolicies`, `sessionRequirements` (the MFA package's `mfa` requirement) |

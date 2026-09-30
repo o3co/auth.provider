@@ -1188,8 +1188,7 @@ export interface ContributionKindGuardedDetails {
  * `rateLimitBudgets` prefix that is empty or holds `:` — no limiter key
  * carries it — a `federationTypes` declaration that is not an object with a
  * Zod `entrySchema` and a `factory`, or an `admissionActions` entry whose
- * name, declaration or grade registration refuses, or that overrides an
- * action. `problem` says which.
+ * name, declaration or grade registration refuses. `problem` says which.
  */
 export interface ContributionMalformedDetails {
 	readonly reason: "contribution-malformed";
