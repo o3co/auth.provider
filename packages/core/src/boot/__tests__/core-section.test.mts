@@ -26,34 +26,58 @@
 
 import { fileURLToPath } from "node:url";
 import { parseFile, parseString } from "@o3co/ts.hocon";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { createApp } from "#/boot/create-app.mjs";
 import { type AppHandle, BootError, type BootstrapMap } from "#/boot/types.mjs";
 import { coreReference } from "#/config/references.mjs";
+import type { Logger } from "#/logging/Logger.mjs";
 import { makeValidCoreConfig } from "#/testing/fixtures/valid-config.mjs";
 
-/** The sections core's reference sets that these tests read. */
-const READ = ["core", "renamed-variables"] as const;
+/** The sections core's reference sets that these tests read: core's own, the JWKS module's, and the captures. */
+const READ = ["core", "jwks", "renamed-variables"] as const;
 
-/** Core's valid configuration, under `operator` HOCON and core's own `reference.conf`, resolved under `env`. */
+/**
+ * Core's valid configuration, with `operator` HOCON over core's own
+ * `reference.conf`, resolved under `env`: the sections in `READ`, and every
+ * one the operator writes.
+ */
 function resolved(env: Record<string, string>, operator = ""): Record<string, unknown> {
-	const reference = parseFile(fileURLToPath(coreReference()), {
-		env: { OAUTH_JWT_ISSUER: "https://auth.test", ...env },
-	}).toObject() as Record<string, unknown>;
-	const layers = parseString(operator, { env }).toObject() as Record<string, unknown>;
+	const own = parseString(operator, { env });
+	const layered = own
+		.withFallback(
+			parseFile(fileURLToPath(coreReference()), {
+				env: { OAUTH_JWT_ISSUER: "https://auth.test", ...env },
+			}),
+		)
+		.toObject() as Record<string, unknown>;
+	const sections = [...READ, ...Object.keys(own.toObject() as Record<string, unknown>)];
 	return {
 		...makeValidCoreConfig(),
-		...Object.fromEntries(READ.map((section) => [section, reference[section]])),
-		...layers,
+		...Object.fromEntries(sections.map((section) => [section, layered[section]])),
 	};
 }
 
-const bootstrap = (config: Record<string, unknown>): BootstrapMap =>
-	({ config: config as never, pathResolver: (s: string) => s }) as BootstrapMap;
+const bootstrap = (config: Record<string, unknown>, logger?: Logger): BootstrapMap =>
+	({
+		config: config as never,
+		pathResolver: (s: string) => s,
+		...(logger === undefined ? {} : { logger }),
+	}) as BootstrapMap;
 
-/** Boots no module over the configuration resolved under `env`. */
-const boot = (env: Record<string, string>, operator = ""): Promise<AppHandle> =>
-	createApp({ modules: [], bootstrapComponents: bootstrap(resolved(env, operator)) });
+/** Boots no module over the configuration resolved under `env`, logging to `logger`. */
+const boot = (env: Record<string, string>, operator = "", logger?: Logger): Promise<AppHandle> =>
+	createApp({ modules: [], bootstrapComponents: bootstrap(resolved(env, operator), logger) });
+
+/** A logger that records its warnings. */
+const recordingLogger = (): Logger & { readonly warn: ReturnType<typeof vi.fn> } =>
+	({
+		trace: vi.fn(),
+		debug: vi.fn(),
+		info: vi.fn(),
+		warn: vi.fn(),
+		error: vi.fn(),
+		fatal: vi.fn(),
+	}) as unknown as Logger & { readonly warn: ReturnType<typeof vi.fn> };
 
 /** What `createApp` refused with, or a failure when it booted. */
 async function refusal(promise: Promise<AppHandle>): Promise<BootError> {
@@ -119,8 +143,8 @@ describe("the paths core's settings moved from", () => {
 	it("refuses sessionRequirements.expected, naming core.sessionRequirements.expected", async () => {
 		const err = await refusal(boot({}, "sessionRequirements.expected = []\n"));
 
-		expect(err.reason).toBe("config-path-relocated");
-		expect(err.details).toMatchObject({
+		expect(err.details).toEqual({
+			reason: "config-path-relocated",
 			relocated: [
 				{
 					module: "core",
@@ -129,6 +153,33 @@ describe("the paths core's settings moved from", () => {
 				},
 			],
 		});
+		expect(err.message).not.toContain("environment variable CORE_SESSION_REQUIREMENTS_EXPECTED");
+	});
+});
+
+describe("the JWKS module's section, shipped in core's reference.conf, in a composition without the module", () => {
+	/** The sections the boot named as nothing owns, once per boot. */
+	const ignoredBy = async (env: Record<string, string>, operator = ""): Promise<unknown[]> => {
+		const logger = recordingLogger();
+		const handle = await boot(env, operator, logger);
+		await handle.dispose();
+		return logger.warn.mock.calls
+			.filter(([, message]) => message === "config_sections_ignored")
+			.map(([fields]) => fields);
+	};
+
+	it("is named as no ignored section while its variables are unset", async () => {
+		expect(await ignoredBy({})).toEqual([]);
+	});
+
+	it("is named once as ignored when the operator writes jwks.path", async () => {
+		expect(await ignoredBy({}, 'jwks.path = "/keys/jwks.json"\n')).toEqual([
+			{ sections: ["jwks"] },
+		]);
+	});
+
+	it("is named once as ignored when JWKS_PATH is set", async () => {
+		expect(await ignoredBy({ JWKS_PATH: "/keys/jwks.json" })).toEqual([{ sections: ["jwks"] }]);
 	});
 });
 

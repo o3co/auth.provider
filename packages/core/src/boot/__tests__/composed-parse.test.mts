@@ -549,6 +549,27 @@ describe("config_sections_ignored — a top-level section nobody owns", () => {
 		expect(ignored).toEqual([[{ sections: ["typoSection", "zeta"] }, "config_sections_ignored"]]);
 	});
 
+	it("does not name a section that holds no key: it sets nothing, as a reference leaves one whose variables are unset", async () => {
+		const logger = recordingLogger();
+		const config = await bootAndRead(
+			[],
+			resolved({ emptySection: {}, typoSection: { enabled: true } }),
+			logger,
+		);
+		expect(config.emptySection).toEqual({});
+		expect(
+			logger.warn.mock.calls.filter(([, message]) => message === "config_sections_ignored"),
+		).toEqual([[{ sections: ["typoSection"] }, "config_sections_ignored"]]);
+	});
+
+	it("names a section that holds only an empty section: a key is written there", async () => {
+		const logger = recordingLogger();
+		await bootAndRead([], resolved({ typoSection: { nested: {} } }), logger);
+		expect(
+			logger.warn.mock.calls.filter(([, message]) => message === "config_sections_ignored"),
+		).toEqual([[{ sections: ["typoSection"] }, "config_sections_ignored"]]);
+	});
+
 	it("names the sections of a configuration handed as an object that is not plain data, by its own keys", async () => {
 		// Boot's parse takes an instance as the configuration; its own keys are
 		// the sections, and a key its prototype carries is not one.

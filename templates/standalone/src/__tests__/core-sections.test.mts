@@ -94,21 +94,55 @@ describe("core's own settings and the JWKS module's, as the template reads them"
 
 describe("a path core's or the JWKS module's settings moved from, written in the operator's own layer", () => {
 	it.each([
-		['deployment.mode = "single"', "core", "deployment.mode", "core.deployment.mode"],
+		[
+			'deployment.mode = "single"',
+			"core",
+			"deployment.mode",
+			"core.deployment.mode",
+			"CORE_DEPLOYMENT_MODE",
+		],
 		[
 			"sessionRequirements.expected = []",
 			"core",
 			"sessionRequirements.expected",
 			"core.sessionRequirements.expected",
+			undefined,
 		],
-		['oauth.jwt.jwksPath = "/keys/jwks.json"', "jwks", "oauth.jwt.jwksPath", "jwks.path"],
-		["oauth.jwt.jwksCacheMaxAge = 60", "jwks", "oauth.jwt.jwksCacheMaxAge", "jwks.cacheMaxAge"],
-	])("%s: refused, naming %s's new path", async (hocon, module, from, to) => {
-		const err = await refused({ CORE_DEPLOYMENT_MODE: "single" }, { operatorHocon: `${hocon}\n` });
+		[
+			'oauth.jwt.jwksPath = "/keys/jwks.json"',
+			"jwks",
+			"oauth.jwt.jwksPath",
+			"jwks.path",
+			"JWKS_PATH",
+		],
+		[
+			"oauth.jwt.jwksCacheMaxAge = 60",
+			"jwks",
+			"oauth.jwt.jwksCacheMaxAge",
+			"jwks.cacheMaxAge",
+			"JWKS_CACHE_MAX_AGE",
+		],
+	])(
+		"%s: refused, naming %s's new path and the variable that binds it, if any",
+		async (hocon, module, from, to, variable) => {
+			const err = await refused(
+				{ CORE_DEPLOYMENT_MODE: "single" },
+				{ operatorHocon: `${hocon}\n` },
+			);
 
-		expect(err.reason).toBe("config-path-relocated");
-		expect(err.details).toMatchObject({ relocated: [{ module, from, to }] });
-	});
+			expect(err.details).toEqual({
+				reason: "config-path-relocated",
+				relocated: [
+					{
+						module,
+						from,
+						to,
+						...(variable === undefined ? {} : { environmentVariable: variable }),
+					},
+				],
+			});
+		},
+	);
 });
 
 describe("DEPLOYMENT_MODE, renamed CORE_DEPLOYMENT_MODE, through the template's reading", () => {

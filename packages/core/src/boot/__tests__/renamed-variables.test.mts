@@ -333,7 +333,29 @@ describe("a renamed variable — the capture", () => {
 				{ module: "fixture-renaming", state: "uncaptured" },
 			],
 		});
-		expect(err.message).toContain("no configuration");
+		expect(err.message).toContain(
+			"createApp was handed no configuration, so whether the environment sets LEGACY_RETRIES or FIXTURE_RENAMING_RETRIES cannot be told.",
+		);
+		expect(err.message).not.toContain("Layer the reference.conf");
+	});
+
+	it.each([
+		["a string", "http.port = 3000"],
+		["null", null],
+		["a number", 42],
+	])("refuses a configuration that is %s, saying it is not an object", async (_label, config) => {
+		const err = await refusal(
+			createApp({
+				modules: [renaming()],
+				bootstrapComponents: { config, pathResolver: (s: string) => s } as unknown as BootstrapMap,
+			}),
+		);
+
+		expect(err.reason).toBe("environment-variable-renamed");
+		expect(err.message).toContain(
+			"createApp was handed a configuration that is not an object, so whether the environment sets LEGACY_RETRIES or FIXTURE_RENAMING_RETRIES cannot be told.",
+		);
+		expect(err.message).not.toContain("no configuration");
 		expect(err.message).not.toContain("Layer the reference.conf");
 	});
 
