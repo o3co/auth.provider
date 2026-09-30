@@ -58,9 +58,9 @@ export interface RateLimiter {
 	 * The limiter's outage policy: what the guard does when `check` throws
 	 * (`"open"` lets the request through, `"closed"` answers `503`), logged and
 	 * audited either way. It belongs to the limiter because only its backend can
-	 * be down, and the guard reads it from here alone. Absent (as on the
-	 * in-process limiter, which has no backend) means `closed`; so does any
-	 * value but `"open"`.
+	 * be down, and the guard reads it from here alone, once, when it is built.
+	 * Only absence (as on the in-process limiter, which has no backend) means
+	 * `closed`; any other value refuses the guard's or the policy's build.
 	 */
 	readonly failMode?: RateLimitFailMode;
 	/**
