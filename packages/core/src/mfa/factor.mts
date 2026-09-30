@@ -130,9 +130,12 @@ export interface MfaVerifyContext extends MfaCeremonyContext {
 	/** The proof as the request carried it. The factor reads it and refuses what it cannot read as `malformed`. */
 	readonly proof: unknown;
 	/**
-	 * After a challenge whose login code went out: the current address's
-	 * digest under the ring's first key. A factor whose recorded digest names
-	 * another key keeps this one in `next`, so that key can leave the ring.
+	 * After a challenge whose login code went out: the keyed digest, under the
+	 * ring's first key, of the address that code was sent to, made when it was
+	 * sent and kept with the pending challenge — never from a later read of the
+	 * Store. A factor whose recorded digest names another key keeps this one in
+	 * `next`, so that key can leave the ring; it records nothing else of an
+	 * address.
 	 */
 	readonly addressDigest?: MfaKeyedDigest;
 }
@@ -151,6 +154,15 @@ export interface MfaEnrollmentCompletionContext extends MfaEnrollmentContext {
 	readonly state: MfaFactorState;
 	/** The proof as the request carried it. */
 	readonly proof: unknown;
+	/**
+	 * After a start whose code went out: the keyed digest, under the ring's
+	 * first key, of the address that code was sent to, made when it was sent
+	 * and kept with the pending enrollment — never from a later read of the
+	 * Store, so `user` may by now answer another address. The factor records
+	 * this one, never a digest of `user.email` of its own; without it, it
+	 * completes nothing.
+	 */
+	readonly addressDigest?: MfaKeyedDigest;
 }
 
 /** What a factor may ask a code to be mailed for; the account-email proof is the coordinator's own. */
@@ -159,14 +171,20 @@ export type MfaFactorMailPurpose = Exclude<MailPurpose, "account_email_proof">;
 /**
  * A code a challenge or an enrollment asks the coordinator to mail: its
  * purpose, the code and, when the factor gives one, when it stops being
- * accepted — never text. The coordinator resolves the recipient, the address
- * on the account's user record at that moment, as `normaliseMailAddress`
- * spells it. An enrollment code goes to it, and the factor records that
- * address's keyed digest (`digests.digest([address])`) in its data on
- * completion, never the address. A login code goes to it only when it matches
- * the digest the mail carries ({@link MfaLoginCodeMail}); on a mismatch, or
- * no address, the factor is refused until the user re-enrolls it after recent
- * MFA, and `key_unavailable` is an outage. The coordinator keeps the state
+ * accepted — never text. The coordinator resolves the recipient when it
+ * sends: the address on the account's user record at that moment, as
+ * `normaliseMailAddress` spells it. It keeps that address's keyed digest,
+ * under the ring's first key, with the pending state, and hands it back to
+ * the call that takes the code: an enrollment's completion, which the factor
+ * records in its data, never the address and never a digest of its own
+ * ({@link MfaEnrollmentCompletionContext.addressDigest}); a verification
+ * ({@link MfaVerifyContext.addressDigest}). So what a factor records is the
+ * address the code went to, whatever the Store answers by then. A login code
+ * goes only when the address matches the digest the mail carries
+ * ({@link MfaLoginCodeMail}). On a mismatch, no address, or a digest that is
+ * `null` or no keyed digest, the factor is refused until the user re-enrolls
+ * it after recent MFA, `mfa.email_address_mismatch` is recorded, and nothing
+ * is sent; `key_unavailable` is an outage. The coordinator keeps the state
  * first, expiring at the earlier of `expiresAtMs` and the transaction's
  * expiry, and sends after with that expiry; a send refused at a limit or
  * failed clears that state, and is never "sent".
@@ -180,8 +198,13 @@ export interface MfaFactorMail<P extends MfaFactorMailPurpose = MfaFactorMailPur
 
 /** A login code to mail, with the keyed digest of the address the factor was enrolled with. */
 export interface MfaLoginCodeMail extends MfaFactorMail<"login_code"> {
-	/** Made with the context's `digests` over `[normaliseMailAddress(address)]`: the digest the factor recorded at enrollment. */
-	readonly addressDigest: MfaKeyedDigest;
+	/**
+	 * The digest the factor recorded, as it was handed: over
+	 * `[normaliseMailAddress(address)]`. `null` when its data holds none it can
+	 * read — a mismatch, which the coordinator refuses; never a value that is
+	 * no keyed digest.
+	 */
+	readonly addressDigest: MfaKeyedDigest | null;
 }
 
 /** What a challenge answers: the state the coordinator keeps, if any, the page's response, and a login code to mail. */

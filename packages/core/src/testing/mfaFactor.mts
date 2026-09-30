@@ -46,9 +46,11 @@ type Challenge = Awaited<ReturnType<NonNullable<MfaFactor["challenge"]>>>;
 // The digests a factor's tests hand it
 // ---------------------------------------------------------------------------
 
-/** The one key the test digests are made under, by id. */
-const TEST_DIGEST_KEY_ID = "test-key";
-const TEST_DIGEST_KEY = Buffer.from("o3co:mfa:test-digests-key:000000", "utf8");
+/** The test keys, by id: the first, and the one a rotated ring puts before it. */
+const TEST_DIGEST_KEYS: ReadonlyMap<string, Buffer> = new Map([
+	["test-key", Buffer.from("o3co:mfa:test-digests-key:000000", "utf8")],
+	["test-key-2", Buffer.from("o3co:mfa:test-digests-key:000002", "utf8")],
+]);
 
 /** `parts` bound to `kind`, each length-prefixed, so no part can move into its neighbour. */
 function framed(kind: string, parts: readonly string[]): Buffer {
@@ -62,23 +64,56 @@ function framed(kind: string, parts: readonly string[]): Buffer {
 	);
 }
 
+export interface TestMfaDigestsOptions {
+	/**
+	 * A ring whose first key is a second test key (`test-key-2`), still
+	 * holding the first: new digests are made under the second, and one made
+	 * under either matches — as after a key rotation.
+	 */
+	readonly rotated?: boolean;
+}
+
 /**
- * Keyed digests for a factor of `kind` under one fixed test key, as the
+ * Keyed digests for a factor of `kind` under a fixed test key, as the
  * coordinator makes them under the ring: HMAC-SHA-256 over the kind and the
- * parts, each length-prefixed, compared in constant time; a digest naming
- * another key is `key_unavailable`. For tests only: the key is public.
+ * parts, each length-prefixed, compared in constant time; a digest naming a
+ * key the ring does not hold is `key_unavailable`. For tests only: the keys
+ * are public.
  */
-export function createTestMfaDigests(kind: string): MfaDigests {
-	const digestOf = (parts: readonly string[]): string =>
-		createHmac("sha256", TEST_DIGEST_KEY).update(framed(kind, parts)).digest("base64url");
+export function createTestMfaDigests(
+	kind: string,
+	options: TestMfaDigestsOptions = {},
+): MfaDigests {
+	const ring: readonly string[] =
+		options.rotated === true ? ["test-key-2", "test-key"] : ["test-key"];
+	const first = ring[0] as string;
+	const digestOf = (keyId: string, parts: readonly string[]): string =>
+		createHmac("sha256", TEST_DIGEST_KEYS.get(keyId) as Buffer)
+			.update(framed(kind, parts))
+			.digest("base64url");
 	return {
-		digest: (parts): MfaKeyedDigest => ({ keyId: TEST_DIGEST_KEY_ID, digest: digestOf(parts) }),
+		digest: (parts): MfaKeyedDigest => ({ keyId: first, digest: digestOf(first, parts) }),
 		matchesDigest: (parts, stored): MfaDigestMatch => {
-			if (stored.keyId !== TEST_DIGEST_KEY_ID) return "key_unavailable";
-			return constantTimeStringEqual(digestOf(parts), stored.digest) ? "match" : "mismatch";
+			if (!ring.includes(stored.keyId)) return "key_unavailable";
+			return constantTimeStringEqual(digestOf(stored.keyId, parts), stored.digest)
+				? "match"
+				: "mismatch";
 		},
 	};
 }
+
+/** Whether `value` is a keyed digest: a key id and a digest, each a non-empty string. */
+function isKeyedDigest(value: unknown): value is MfaKeyedDigest {
+	if (typeof value !== "object" || value === null) return false;
+	const { keyId, digest } = value as { readonly keyId?: unknown; readonly digest?: unknown };
+	return typeof keyId === "string" && keyId !== "" && typeof digest === "string" && digest !== "";
+}
+
+/** A copy of `digest` holding its two fields alone. */
+const copyOf = (digest: MfaKeyedDigest): MfaKeyedDigest => ({
+	keyId: digest.keyId,
+	digest: digest.digest,
+});
 
 // ---------------------------------------------------------------------------
 // The factor double
@@ -107,8 +142,10 @@ export interface TestMfaFactorOptions {
 	 * asks for its code to be mailed (`email_factor_enrollment`) and each
 	 * challenge for another (`login_code`), each expiring ten minutes on, which
 	 * a verification repeats; the latest stands across attempts. Enrollable
-	 * only by an account with an address. It keeps that address's keyed
-	 * digest, never the address, and mails it with each login code.
+	 * only by an account whose address `normaliseMailAddress` reads. It keeps
+	 * the address digest its completion is handed, never the address or a
+	 * digest of its own, and mails it with each login code — `null` when its
+	 * data holds none it can read.
 	 */
 	readonly mail?: boolean;
 }
@@ -154,9 +191,10 @@ export function createTestMfaFactor(options: TestMfaFactorOptions = {}): MfaFact
 			if (typeof ctx.proof !== "string") return { ok: false, reason: "malformed" };
 			if (ctx.proof !== ctx.state.secret) return { ok: false, reason: "invalid" };
 			if (!mails) return { ok: true, data: { secret: ctx.state.secret } };
-			const address = normaliseMailAddress(ctx.user.email);
-			if (address === undefined) return { ok: false, reason: "invalid" };
-			return { ok: true, data: { addressDigest: ctx.digests.digest([address]) } };
+			// The digest of the address the code went to, as handed: no code went out without one.
+			const handed: unknown = ctx.addressDigest;
+			if (!isKeyedDigest(handed)) return { ok: false, reason: "expired" };
+			return { ok: true, data: { addressDigest: copyOf(handed) } };
 		},
 		verify: async (ctx) => {
 			if (typeof ctx.proof !== "string") return { ok: false, reason: "malformed" };
@@ -164,10 +202,12 @@ export function createTestMfaFactor(options: TestMfaFactorOptions = {}): MfaFact
 				const code = ctx.state?.code;
 				if (typeof code !== "string") return { ok: false, reason: "expired" };
 				if (ctx.proof !== code) return { ok: false, reason: "invalid" };
-				const recorded = ctx.factor.data.addressDigest as MfaKeyedDigest | undefined;
-				// A digest re-made under the ring's first key replaces one under another.
-				return ctx.addressDigest !== undefined && ctx.addressDigest.keyId !== recorded?.keyId
-					? { ok: true, factorId: ctx.factor.id, next: { addressDigest: ctx.addressDigest } }
+				const recorded = ctx.factor.data.addressDigest;
+				const handed: unknown = ctx.addressDigest;
+				// The handed digest, under the ring's first key, replaces one under another.
+				return isKeyedDigest(handed) &&
+					(!isKeyedDigest(recorded) || handed.keyId !== recorded.keyId)
+					? { ok: true, factorId: ctx.factor.id, next: { addressDigest: copyOf(handed) } }
 					: { ok: true, factorId: ctx.factor.id };
 			}
 			const { secret } = ctx.factor.data;
@@ -186,7 +226,7 @@ export function createTestMfaFactor(options: TestMfaFactorOptions = {}): MfaFact
 			? {
 					reusableChallenge: true,
 					enrollable: (user: Readonly<Record<string, unknown>>) =>
-						typeof user.email === "string" && user.email !== "",
+						normaliseMailAddress(user.email) !== undefined,
 					challenge: async (ctx) => {
 						const code = newSecret();
 						return {
@@ -196,7 +236,10 @@ export function createTestMfaFactor(options: TestMfaFactorOptions = {}): MfaFact
 								purpose: "login_code",
 								code,
 								expiresAtMs: ctx.nowMs + MAILED_CODE_TTL_MS,
-								addressDigest: ctx.factor.data.addressDigest as MfaKeyedDigest,
+								// None it can read is a mismatch, which the coordinator refuses.
+								addressDigest: isKeyedDigest(ctx.factor.data.addressDigest)
+									? copyOf(ctx.factor.data.addressDigest)
+									: null,
 							},
 						};
 					},

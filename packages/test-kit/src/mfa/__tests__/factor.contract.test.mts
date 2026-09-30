@@ -490,7 +490,9 @@ describe("mfaFactorContract", () => {
 					(factor) => ({
 						verify: async (ctx) => {
 							const verdict = await factor.verify(ctx);
-							return verdict.ok ? { ...verdict, next: { lastTo: QUOTED.email } } : verdict;
+							return verdict.ok
+								? { ...verdict, next: { ...ctx.factor.data, lastTo: QUOTED.email } }
+								: verdict;
 						},
 					}),
 					QUOTED,
@@ -507,11 +509,10 @@ describe("mfaFactorContract", () => {
 			createTestMfaDigests("test").digest(["someone@example.com"]),
 			createTestMfaDigests("another-kind").digest([USER.email]),
 		]) {
-			// Mailed so whatever the data holds, it breaks the unreadable case too.
 			expect(
 				await failing(challenging((sent) => ({ ...sent, mail: { ...sent.mail, addressDigest } }))),
 				JSON.stringify(addressDigest),
-			).toEqual([RULES.challengeMail, RULES.unreadable]);
+			).toEqual([RULES.challengeMail]);
 		}
 		// Null is for data that holds no digest, never for data that does.
 		expect(
