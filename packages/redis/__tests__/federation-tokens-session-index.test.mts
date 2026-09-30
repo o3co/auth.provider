@@ -53,7 +53,7 @@ function createFakeRedis() {
 				ttls.set(k, ttl);
 				return "OK";
 			},
-		),
+		) as FederationTokenStoreClient["set"],
 		del: vi.fn(async (...keys: string[]) => keys.reduce((n, k) => n + removeKey(k), 0)),
 		unlink: vi.fn(async (...keys: string[]) => keys.reduce((n, k) => n + removeKey(k), 0)),
 		sAddWithTtl: vi.fn(async (key: string, member: string, ttlMs: number) => {
