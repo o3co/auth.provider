@@ -282,6 +282,7 @@ describe("establishSession", () => {
 			const mfaAt = new Date("2026-09-28T09:01:00.000Z");
 			const mfa: SessionRequirement = {
 				name: "mfa",
+				secondFactorAuthority: true,
 				reach: new Set(["otp", "mfa"]),
 				stepUpPage: { url: "/mfa", params: {} },
 				remediations: ["mfa.step_up"],

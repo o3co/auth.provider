@@ -139,12 +139,12 @@ export function selectAcr(
 }
 
 /**
- * The `amr` values second factors add, reserved to the requirement named
- * `mfa`: a requirement of any other name may neither reach nor add one (boot
- * refuses the reach, `resumePrimary` the addition), so a risk score or a
- * re-consent cannot make a session meet `urn:o3co:acr:mfa`. An entry that
- * lacks only these would be met with MFA installed, which decides the drop's
- * boot line.
+ * The `amr` values second factors add, reserved to the requirement that
+ * declares the second-factor authority: no other may reach or add one,
+ * whatever its name (boot refuses the reach, `resumePrimary` the addition),
+ * so a risk score or a re-consent cannot make a session meet
+ * `urn:o3co:acr:mfa`. An entry that lacks only these would be met with MFA
+ * installed, which decides the drop's boot line.
  */
 export const SECOND_FACTOR_AMR: ReadonlySet<string> = new Set([
 	OTP_AMR,

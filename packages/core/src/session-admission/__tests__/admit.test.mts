@@ -1499,10 +1499,11 @@ describe("step 6 — acr_values, with the reach of what is registered", () => {
 		const record = session();
 		const requirements = resolverForTests(
 			[
-				met("mfa", {
+				met("verifier", {
+					secondFactorAuthority: true,
 					reach: new Set(["hwk"]),
-					stepUpPage: { url: "/mfa", params: {} },
-					remediations: ["mfa.step_up"],
+					stepUpPage: { url: "/verifier", params: {} },
+					remediations: ["verifier.step_up"],
 				}),
 			],
 			{ issuer: ISSUER },
@@ -1515,7 +1516,11 @@ describe("step 6 — acr_values, with the reach of what is registered", () => {
 					asks: { acrValues: ["urn:example:both"] },
 				}),
 			),
-		).toMatchObject({ outcome: "step_up", requirement: "mfa", acrValues: ["urn:example:both"] });
+		).toMatchObject({
+			outcome: "step_up",
+			requirement: "verifier",
+			acrValues: ["urn:example:both"],
+		});
 	});
 
 	it("selects over the vouched amr, with reach the union of every requirement's reach when the session is live", async () => {

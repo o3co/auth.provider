@@ -38,9 +38,6 @@ import type {
 } from "../user-sessions/types.mjs";
 import { type AcrTable, SECOND_FACTOR_AMR } from "./acr.mjs";
 
-/** The one requirement that may reach or add a second-factor value, or a verification time. */
-export const MFA_REQUIREMENT_NAME = "mfa";
-
 /**
  * The stores admission reads itself, by the name an `unavailable` admission
  * gives each one's outage. Every other `Admission.store` is a requirement's
@@ -338,6 +335,13 @@ export type RequirementVerdict =
 export interface SessionRequirement {
 	/** The key it is contributed under; refused at boot otherwise (the `mfaFactors` rule). */
 	readonly name: string;
+	/**
+	 * Whether this is the second-factor authority: the one requirement that may
+	 * reach and add `SECOND_FACTOR_AMR` values and `mfaAt`, bound at boot to
+	 * core's MFA ports. At most one per composition; absent is `false`. Core
+	 * weighs this, never a name.
+	 */
+	readonly secondFactorAuthority?: boolean;
 	/** The `amr` values a step-up through this requirement can add; empty when it offers none. */
 	readonly reach: ReadonlySet<string>;
 	/** Where that step-up starts: required when `reach` is not empty, allowed when it is (a re-consent). Copied and validated at registration; a `step_up` verdict names no page of its own. */
@@ -471,6 +475,14 @@ const isIterableOfValues = (value: unknown): value is Iterable<unknown> =>
 
 /** The copies `registeredRequirement` made: what `sealRegisteredReach` seals. */
 const registeredCopies = new WeakSet<SessionRequirement>();
+
+/**
+ * Whether `value` is a copy `registeredRequirement` made — never the object
+ * a factory returned, nor a copy of a registered one.
+ * @internal
+ */
+export const isRegisteredRequirement = (value: unknown): value is RegisteredRequirement =>
+	typeof value === "object" && value !== null && registeredCopies.has(value as SessionRequirement);
 
 /** Each registered copy's sealed reach: read once at the end of boot's stage 4, answered afterwards. */
 const sealedReach = new WeakMap<SessionRequirement, ReadonlySet<string>>();
@@ -627,15 +639,18 @@ function registeredPage(
  */
 export interface RegisteredRequirement extends SessionRequirement {
 	readonly stepUpPage: RegisteredStepUpPage | undefined;
+	/** The declaration as it was read once at registration: `false` when absent. */
+	readonly secondFactorAuthority: boolean;
 }
 
 /**
  * `value` as it is registered: its shape held to the contract and copied,
  * each field read once, so what the resolver answers at request time is
  * what was registered. `name` must be RFC 6749 error-code characters and
- * not one of admission's own store names; `stepUpPage` is checked and
- * resolved once to its `href` on `issuer` (a path page with no issuer is
- * refused); `admit` and `admitPrimary` delegate to the value's.
+ * not one of admission's own store names; `secondFactorAuthority` is `true`,
+ * `false` or absent (read as `false`); `stepUpPage` is checked and resolved
+ * once to its `href` on `issuer` (a path page with no issuer is refused);
+ * `admit` and `admitPrimary` delegate to the value's.
  *
  * `reach` is NOT read here: it may be a getter over what registers in the
  * same pass (MFA's, over `mfaFactorResolver`). `sealRegisteredReach` reads
@@ -669,6 +684,10 @@ export function registeredRequirement(value: unknown, issuer?: string): Register
 			`the name is one admission gives an outage of its own stores (${ADMISSION_INFRASTRUCTURE_STORES.join(", ")}): a consumer telling an outage by its store would take the requirement's for the store's`,
 		);
 	}
+	const declared = value.secondFactorAuthority;
+	if (declared !== undefined && typeof declared !== "boolean") {
+		refuse("secondFactorAuthority must be true, false or absent");
+	}
 	// A page that fails names what is wrong itself (`checkStepUpPage`); one
 	// that passes is resolved here, once, on the issuer it was checked on.
 	const page = value.stepUpPage;
@@ -699,6 +718,7 @@ export function registeredRequirement(value: unknown, issuer?: string): Register
 	}
 	const copy: RegisteredRequirement = Object.freeze({
 		name,
+		secondFactorAuthority: declared === true,
 		get reach() {
 			return sealedReach.get(copy) ?? source.reach;
 		},
@@ -723,21 +743,24 @@ export function registeredRequirement(value: unknown, issuer?: string): Register
 /**
  * A registered requirement's `reach`, read once after the name-keyed pass
  * and held to the one home of these rules: an iterable of non-empty strings,
- * no primary's marker (`pwd`, `fed`), a second-factor value only under
- * `mfa`, a `stepUpPage` when not empty, and empty unless the requirement is
- * named `mfa` (MFA's is the one way a completed step-up is written into a
- * live session, so any other reach could never be met). Boot,
+ * no primary's marker (`pwd`, `fed`), a `stepUpPage` when not empty, and a
+ * second-factor value or any value at all only from the second-factor
+ * authority (only its step-up is ever written into a live session). Boot,
  * `resolverForTests` and the contract suite all run it. Answers a read-only
- * snapshot and seals a registered copy on it; a refused reach is not
- * sealed. `remedy` is appended to the refusal of a non-empty non-`mfa` reach.
+ * snapshot and seals a registered copy on it; a refused reach is not sealed.
+ * `remedy` is appended to the refusal of a non-empty reach from any other.
  */
 export function sealRegisteredReach(
-	requirement: SessionRequirement,
+	requirement: RegisteredRequirement,
 	remedy?: string,
 ): ReadonlySet<string> {
 	const refuse = (what: string): never => {
 		throw new RangeError(`session requirement "${requirement.name}": ${what}`);
 	};
+	if (!isRegisteredRequirement(requirement)) {
+		return refuse("is not a registered copy: its declaration is the one registration read");
+	}
+	const authority = requirement.secondFactorAuthority;
 	const reach: unknown = requirement.reach;
 	if (!isIterableOfValues(reach)) return refuse("reach must be a Set of amr values");
 	const read = new Set<string>();
@@ -747,9 +770,9 @@ export function sealRegisteredReach(
 		if (value === PASSWORD_AMR || value === FEDERATED_AMR) {
 			refuse(`reach names "${value}", a primary's marker, which no step-up adds`);
 		}
-		if (requirement.name !== MFA_REQUIREMENT_NAME && SECOND_FACTOR_AMR.has(value)) {
+		if (!authority && SECOND_FACTOR_AMR.has(value)) {
 			refuse(
-				`reach names "${value}", a second-factor value only the requirement named ${MFA_REQUIREMENT_NAME} may reach`,
+				`reach names "${value}", a second-factor value only the second-factor authority may reach`,
 			);
 		}
 		read.add(value);
@@ -757,9 +780,9 @@ export function sealRegisteredReach(
 	if (read.size > 0 && requirement.stepUpPage === undefined) {
 		refuse("a requirement that reaches something must declare where the step-up starts");
 	}
-	if (read.size > 0 && requirement.name !== MFA_REQUIREMENT_NAME) {
+	if (read.size > 0 && !authority) {
 		refuse(
-			`reaches ${[...read].map((value) => `"${value}"`).join(", ")}: in this release only the requirement named "${MFA_REQUIREMENT_NAME}" adds vouched values to a session, so any other reach must be empty${remedy === undefined ? "" : ` — ${remedy}`}`,
+			`reaches ${[...read].map((value) => `"${value}"`).join(", ")}: in this release only the second-factor authority adds vouched values to a session, so any other reach must be empty${remedy === undefined ? "" : ` — ${remedy}`}`,
 		);
 	}
 	return seal(requirement, read);
@@ -772,7 +795,7 @@ export function sealRegisteredReach(
  * For `resolverForTests` alone.
  * @internal
  */
-export function snapshotReach(requirement: SessionRequirement): ReadonlySet<string> {
+export function snapshotReach(requirement: RegisteredRequirement): ReadonlySet<string> {
 	const reach: unknown = requirement.reach;
 	if (!isIterableOfValues(reach)) {
 		throw new RangeError(
@@ -781,6 +804,12 @@ export function snapshotReach(requirement: SessionRequirement): ReadonlySet<stri
 	}
 	return seal(requirement, reach as Iterable<string>);
 }
+
+/** The registered requirements among `requirements` that declare the second-factor authority, in order: at most one may. */
+export const secondFactorAuthorities = (
+	requirements: Iterable<RegisteredRequirement>,
+): RegisteredRequirement[] =>
+	[...requirements].filter((requirement) => requirement.secondFactorAuthority);
 
 /**
  * The read side of the `sessionRequirements` kind — the synthetic key
@@ -855,7 +884,7 @@ export interface PrimaryAuthentication {
 	readonly request: { readonly ip?: string; readonly userAgent?: string };
 }
 
-/** What a completing requirement verified: the `amr` it adds, and when a second factor was verified (the requirement named `mfa` alone). */
+/** What a completing requirement verified: the `amr` it adds, and when a second factor was verified (the second-factor authority alone). */
 export interface PrimaryAdditions {
 	readonly amr: readonly string[];
 	readonly mfaAt?: Date;

@@ -337,9 +337,9 @@ function requirementModules(
 	ceremonies: FixtureCeremony[],
 	outage: { once: FixtureCeremony["requirement"] | undefined },
 ): Module[] {
-	// Neither reaches anything: only the requirement named `mfa` may declare a
-	// non-empty reach, and a page may still stand with an empty one (a step-up
-	// that adds no value).
+	// Neither reaches anything: only the requirement that declares the
+	// second-factor authority may declare a non-empty reach, and a page may
+	// still stand with an empty one (a step-up that adds no value).
 	const noReach: ReadonlySet<string> = new Set();
 	const fixture = (spec: {
 		readonly module: string;

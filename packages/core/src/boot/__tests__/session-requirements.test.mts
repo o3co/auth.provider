@@ -172,17 +172,27 @@ const factor = (kind: string, amrValues: readonly string[], addsMfa: boolean): M
 /** A name-keyed collector a host might try to hand in for a built-in kind. */
 const stores = [memoryMfaFactorStoreModule, memoryMfaTransactionStoreModule];
 
-/** An MFA implementation: requires the three ports, reaches what the factors reach, declares mfa.step_up. */
-const mfaModule = (over: Partial<SessionRequirement> = {}, requires?: readonly string[]) =>
+/**
+ * An MFA implementation, under a name that is not `mfa`: declares the
+ * second-factor authority, requires the three ports, reaches what the factors
+ * reach, declares its `step_up` remediation.
+ */
+const authorityModule = (
+	over: Partial<SessionRequirement> = {},
+	requires?: readonly string[],
+	name = "verifier",
+	moduleName = "test:verifier",
+) =>
 	defineModule({
-		name: "test:mfa",
+		name: moduleName,
 		requires: (requires ?? ["mfaFactorResolver", "mfaFactorStore", "mfaTransactionStore"]) as never,
 		contributes: {
 			sessionRequirements: {
-				mfa: (deps: {
+				[name]: (deps: {
 					mfaFactorResolver?: { entries(): Iterable<readonly [string, MfaFactor]> };
 				}) => ({
-					name: "mfa",
+					name,
+					secondFactorAuthority: true,
 					// A real getter over the resolver, read after the pass: a
 					// spread would read it at factory time, before the factors.
 					get reach() {
@@ -193,8 +203,8 @@ const mfaModule = (over: Partial<SessionRequirement> = {}, requires?: readonly s
 						}
 						return reach;
 					},
-					stepUpPage: { url: "/mfa", params: {} },
-					remediations: ["mfa.step_up"],
+					stepUpPage: { url: `/${name}`, params: {} },
+					remediations: [`${name}.step_up`],
 					hintKeys: [],
 					admit: async () => ({ outcome: "met" as const }),
 					...over,
@@ -577,10 +587,10 @@ describe("the overrides guard reads what the pass reads", () => {
 
 describe("a factor's values are read once, at registration, and the reach is recomputed from that snapshot alone", () => {
 	const mfaWith = (reach: readonly string[]) =>
-		mfaModule({ reach: new Set(reach) } as Partial<SessionRequirement>);
+		authorityModule({ reach: new Set(reach) } as Partial<SessionRequirement>);
 	const factorModule = (value: () => unknown) =>
 		defineModule({ name: "test:factors", contributes: { mfaFactors: { totp: value as never } } });
-	const expected = { sessionRequirements: { expected: ["mfa"] } };
+	const expected = { sessionRequirements: { expected: ["verifier"] } };
 
 	it("a getter that answers a valid list at registration and another afterwards: the recomputation reads what was validated", async () => {
 		const shifting = (later: readonly string[]) => {
@@ -597,7 +607,7 @@ describe("a factor's values are read once, at registration, and the reach is rec
 		// registration is refused, whatever a later read says.
 		const err = await refusal(boot([shifting(["x"]), ...stores, mfaWith(["x", "mfa"])], expected));
 		expect(err.reason).toBe("contribute-factory-failed");
-		expect(err.details).toMatchObject({ kind: "sessionRequirements", name: "mfa" });
+		expect(err.details).toMatchObject({ kind: "sessionRequirements", name: "verifier" });
 		expect(err.message).toMatch(/reach/);
 		// And the validated list is what the reach is compared with, not a
 		// primary's marker a later read answers.
@@ -608,7 +618,7 @@ describe("a factor's values are read once, at registration, and the reach is rec
 				expected,
 			);
 			try {
-				expect([...(seen.resolver?.get("mfa")?.reach ?? [])].sort()).toEqual(["mfa", "otp"]);
+				expect([...(seen.resolver?.get("verifier")?.reach ?? [])].sort()).toEqual(["mfa", "otp"]);
 			} finally {
 				await handle.dispose();
 			}
@@ -621,18 +631,19 @@ describe("a factor's values are read once, at registration, and the reach is rec
 		// The requirement's own factory runs in the name-keyed pass after the
 		// factor registered, and pushes onto the list the factor handed in.
 		const late = defineModule({
-			name: "test:mfa",
+			name: "test:verifier",
 			requires: ["mfaFactorResolver", "mfaFactorStore", "mfaTransactionStore"] as never,
 			contributes: {
 				sessionRequirements: {
-					mfa: (deps: { mfaFactorResolver?: { get(kind: string): unknown } }) => {
+					verifier: (deps: { mfaFactorResolver?: { get(kind: string): unknown } }) => {
 						pushedAfter = deps.mfaFactorResolver?.get("totp") !== undefined;
 						amrValues.push("x");
 						return {
-							name: "mfa",
+							name: "verifier",
+							secondFactorAuthority: true,
 							reach: new Set(["otp", "x", "mfa"]),
-							stepUpPage: { url: "/mfa", params: {} },
-							remediations: ["mfa.step_up"],
+							stepUpPage: { url: "/verifier", params: {} },
+							remediations: ["verifier.step_up"],
 							hintKeys: [],
 							admit: async () => ({ outcome: "met" as const }),
 						};
@@ -648,7 +659,7 @@ describe("a factor's values are read once, at registration, and the reach is rec
 		);
 		expect(pushedAfter).toBe(true);
 		expect(err.reason).toBe("contribute-factory-failed");
-		expect(err.details).toMatchObject({ kind: "sessionRequirements", name: "mfa" });
+		expect(err.details).toMatchObject({ kind: "sessionRequirements", name: "verifier" });
 	});
 
 	it("addsMfa is read once too: a getter answering true at registration and false afterwards changes nothing", async () => {
@@ -670,7 +681,7 @@ describe("a factor's values are read once, at registration, and the reach is rec
 			expected,
 		);
 		try {
-			expect([...(seen.resolver?.get("mfa")?.reach ?? [])].sort()).toEqual(["mfa", "otp"]);
+			expect([...(seen.resolver?.get("verifier")?.reach ?? [])].sort()).toEqual(["mfa", "otp"]);
 		} finally {
 			await handle.dispose();
 		}
@@ -678,7 +689,7 @@ describe("a factor's values are read once, at registration, and the reach is rec
 });
 
 describe("what could throw raw at the end of stage 4 fails as a BootError", () => {
-	it("a factor whose amrValues throw on a later read — the requirement's own getter's — fails as the mfa contribution, not as a raw TypeError", async () => {
+	it("a factor whose amrValues throw on a later read — the requirement's own getter's — fails as the authority's contribution, not as a raw TypeError", async () => {
 		let reads = 0;
 		const flaky = defineModule({
 			name: "test:factors",
@@ -697,16 +708,18 @@ describe("what could throw raw at the end of stage 4 fails as a BootError", () =
 			},
 		});
 		const err = await refusal(
-			boot([flaky, ...stores, mfaModule()], { sessionRequirements: { expected: ["mfa"] } }),
+			boot([flaky, ...stores, authorityModule()], {
+				sessionRequirements: { expected: ["verifier"] },
+			}),
 		);
 		expect(err).toBeInstanceOf(BootError);
 		expect(err.reason).toBe("contribute-factory-failed");
-		expect(err.details).toMatchObject({ kind: "sessionRequirements", name: "mfa" });
+		expect(err.details).toMatchObject({ kind: "sessionRequirements", name: "verifier" });
 	});
 });
 
 describe("the reach and the page, checked at the end of stage 4", () => {
-	it("refuses a second-factor value in the reach of a requirement not named mfa, naming the module and the requirement", async () => {
+	it("refuses a second-factor value in the reach of a requirement that does not declare the second-factor authority, naming the module and the requirement", async () => {
 		const err = await refusal(
 			boot(
 				[
@@ -791,7 +804,7 @@ describe("the reach and the page, checked at the end of stage 4", () => {
 		}
 	});
 
-	it("refuses a requirement reaching anything under any name but mfa: in this release only the MFA requirement adds vouched values to a session", async () => {
+	it("refuses a requirement reaching anything that does not declare the second-factor authority: in this release only the authority adds vouched values to a session", async () => {
 		const err = await refusal(
 			boot(
 				[
@@ -813,7 +826,42 @@ describe("the reach and the page, checked at the end of stage 4", () => {
 			name: "risk",
 		});
 		expect(err.message).toMatch(/reach/);
-		expect(err.message).toMatch(/mfa/);
+		expect(err.message).toMatch(/only the second-factor authority adds vouched values/);
+	});
+
+	it("holds a requirement named mfa that does not declare the second-factor authority to the rules of any other: a second-factor value in its reach is refused, and nothing binds it to the MFA ports", async () => {
+		const err = await refusal(
+			boot(
+				[
+					contributing("test:named", {
+						mfa: () =>
+							requirement("mfa", {
+								reach: new Set(["otp", "mfa"]),
+								stepUpPage: { url: "/mfa", params: {} },
+							}),
+					}),
+				],
+				{ sessionRequirements: { expected: ["mfa"] } },
+			),
+		);
+		expect(err.reason).toBe("contribute-factory-failed");
+		expect(err.details).toMatchObject({ module: "test:named", name: "mfa" });
+		expect(err.message).toMatch(/only the second-factor authority may reach/);
+		// Reaching nothing, it registers from a module that requires none of
+		// the MFA ports, and declares no `mfa.step_up`.
+		const seen: { resolver?: SessionRequirementResolver } = {};
+		const handle = await boot(
+			[
+				contributing("test:named", { mfa: () => requirement("mfa", { remediations: [] }) }),
+				consumer(seen),
+			],
+			{ sessionRequirements: { expected: ["mfa"] } },
+		);
+		try {
+			expect(seen.resolver?.get("mfa")?.secondFactorAuthority).toBe(false);
+		} finally {
+			await handle.dispose();
+		}
 	});
 
 	it("refuses a requirement whose remediation is not its own route — a fixture declaring oauth.authorize — as the contribution's failure, naming the module", async () => {
@@ -1049,19 +1097,21 @@ describe("boot's checks do not act on mfa.mode", () => {
 	);
 });
 
-describe("the name mfa is reserved, and bound to core's MFA ports", () => {
+describe("the second-factor authority is declared, and bound to core's MFA ports, whatever its name", () => {
 	const totp = factor("totp", ["otp"], true);
 	const factors = defineModule({
 		name: "test:factors",
 		contributes: { mfaFactors: { totp: () => totp } },
 	});
-	const expected = { sessionRequirements: { expected: ["mfa"] } };
+	const expected = { sessionRequirements: { expected: ["verifier"] } };
 
-	it("accepts an MFA implementation: the ports required, the reach the factors' union with mfa, mfa.step_up declared", async () => {
+	it("accepts an MFA implementation under a name that is not mfa: the declaration, the ports required, the reach the factors' union with mfa, its step_up declared", async () => {
 		const seen: { resolver?: SessionRequirementResolver } = {};
-		const handle = await boot([factors, ...stores, mfaModule(), consumer(seen)], expected);
+		const handle = await boot([factors, ...stores, authorityModule(), consumer(seen)], expected);
 		try {
-			expect([...(seen.resolver?.get("mfa")?.reach ?? [])].sort()).toEqual(["mfa", "otp"]);
+			const registered = seen.resolver?.get("verifier");
+			expect(registered?.secondFactorAuthority).toBe(true);
+			expect([...(registered?.reach ?? [])].sort()).toEqual(["mfa", "otp"]);
 		} finally {
 			await handle.dispose();
 		}
@@ -1071,18 +1121,19 @@ describe("the name mfa is reserved, and bound to core's MFA ports", () => {
 		let reads = 0;
 		const live = new Set(["otp", "mfa"]);
 		const keeping = defineModule({
-			name: "test:mfa",
+			name: "test:verifier",
 			requires: ["mfaFactorResolver", "mfaFactorStore", "mfaTransactionStore"] as never,
 			contributes: {
 				sessionRequirements: {
-					mfa: () => ({
-						name: "mfa",
+					verifier: () => ({
+						name: "verifier",
+						secondFactorAuthority: true,
 						get reach() {
 							reads++;
 							return live;
 						},
-						stepUpPage: { url: "/mfa", params: {} },
-						remediations: ["mfa.step_up"],
+						stepUpPage: { url: "/verifier", params: {} },
+						remediations: ["verifier.step_up"],
 						hintKeys: [],
 						admit: async () => ({ outcome: "met" as const }),
 					}),
@@ -1095,7 +1146,7 @@ describe("the name mfa is reserved, and bound to core's MFA ports", () => {
 		const handle = await boot([keeping, ...stores, consumer(seen), factors], expected);
 		try {
 			expect(reads).toBe(1);
-			const registered = seen.resolver?.get("mfa");
+			const registered = seen.resolver?.get("verifier");
 			expect([...(registered?.reach ?? [])].sort()).toEqual(["mfa", "otp"]);
 			live.add("hwk");
 			live.delete("otp");
@@ -1112,33 +1163,144 @@ describe("the name mfa is reserved, and bound to core's MFA ports", () => {
 		}
 	});
 
-	it("refuses a requirement named mfa from a module that does not require the three ports, naming the module", async () => {
+	it("refuses the second-factor authority from a module that does not require the three ports, naming the module", async () => {
 		const err = await refusal(
-			boot([factors, ...stores, mfaModule({}, ["mfaFactorResolver"])], expected),
+			boot([factors, ...stores, authorityModule({}, ["mfaFactorResolver"])], expected),
 		);
 		expect(err.reason).toBe("contribute-factory-failed");
 		expect(err.details).toMatchObject({
-			module: "test:mfa",
+			module: "test:verifier",
 			kind: "sessionRequirements",
-			name: "mfa",
+			name: "verifier",
 		});
+		expect(err.message).toMatch(/second-factor authority/);
 		expect(err.message).toMatch(/mfaFactorStore/);
 	});
 
-	it("refuses a requirement named mfa whose reach is not the set core recomputes from the factors", async () => {
+	it("refuses the second-factor authority whose reach is not the set core recomputes from the factors", async () => {
 		const err = await refusal(
-			boot([factors, ...stores, mfaModule({ reach: new Set(["otp"]) })], expected),
+			boot([factors, ...stores, authorityModule({ reach: new Set(["otp"]) })], expected),
 		);
 		expect(err.reason).toBe("contribute-factory-failed");
+		expect(err.details).toMatchObject({ name: "verifier" });
 		expect(err.message).toMatch(/reach/);
 	});
 
-	it("refuses a requirement named mfa that does not declare mfa.step_up", async () => {
+	it("refuses the second-factor authority that does not declare its own step_up remediation", async () => {
 		const err = await refusal(
-			boot([factors, ...stores, mfaModule({ remediations: ["mfa.other"] })], expected),
+			boot([factors, ...stores, authorityModule({ remediations: ["verifier.other"] })], expected),
 		);
 		expect(err.reason).toBe("contribute-factory-failed");
-		expect(err.message).toMatch(/mfa\.step_up/);
+		expect(err.message).toMatch(/verifier\.step_up/);
+	});
+
+	it("refuses two requirements that declare the second-factor authority — duplicate-second-factor-authority, naming each with its module in registration order — after the cleanups", async () => {
+		const closing = defineModule({
+			name: "test:closing",
+			provides: { closingSlot: () => 1 },
+			lifecycle: {
+				closingSlot: {
+					eager: true,
+					cleanup: () => {
+						throw new Error("closing failed");
+					},
+				},
+			},
+		} as never);
+		const err = await refusal(
+			boot(
+				[
+					closing,
+					factors,
+					...stores,
+					authorityModule(),
+					authorityModule({}, undefined, "keys", "test:keys"),
+				],
+				{ sessionRequirements: { expected: ["verifier", "keys"] } },
+			),
+		);
+		expect(err.reason).toBe("duplicate-second-factor-authority");
+		expect(err.stage).toBe("applyContributions");
+		expect(err.details).toEqual({
+			reason: "duplicate-second-factor-authority",
+			requirements: [
+				{ name: "verifier", module: "test:verifier" },
+				{ name: "keys", module: "test:keys" },
+			],
+			cleanupErrors: [
+				expect.objectContaining({ module: "test:closing", componentKey: "closingSlot" }),
+			],
+		});
+		expect(err.message).toContain('"verifier" (module "test:verifier")');
+		expect(err.message).toContain('"keys" (module "test:keys")');
+		expect(err.message).toMatch(/at most one/);
+		expect(err.message).toContain("install only one of the modules that contribute them");
+	});
+
+	it("refuses a second declaration even when either's reach or ports are wrong: the duplicate is what the composition must fix first", async () => {
+		const err = await refusal(
+			boot(
+				[
+					factors,
+					...stores,
+					authorityModule({ reach: new Set(["otp"]) }),
+					authorityModule({}, ["mfaFactorResolver"], "keys", "test:keys"),
+				],
+				{ sessionRequirements: { expected: ["verifier", "keys"] } },
+			),
+		);
+		expect(err.reason).toBe("duplicate-second-factor-authority");
+	});
+
+	it("refuses a declaration that is neither true, false nor absent as the contribution's failure, naming the module", async () => {
+		for (const declared of ["yes", 1, null]) {
+			const err = await refusal(
+				boot(
+					[
+						contributing("test:risk", {
+							risk: () => ({
+								...requirement("risk"),
+								secondFactorAuthority: declared as never,
+							}),
+						}),
+					],
+					{ sessionRequirements: { expected: ["risk"] } },
+				),
+			);
+			expect(err.reason, String(declared)).toBe("contribute-factory-failed");
+			expect(err.details, String(declared)).toMatchObject({
+				module: "test:risk",
+				kind: "sessionRequirements",
+				name: "risk",
+			});
+			expect(err.message, String(declared)).toMatch(
+				/secondFactorAuthority must be true, false or absent/,
+			);
+		}
+	});
+
+	it("boots one authority beside requirements that do not declare it, and binds only the one that does", async () => {
+		const seen: { resolver?: SessionRequirementResolver } = {};
+		const handle = await boot(
+			[
+				factors,
+				...stores,
+				contributing("test:named", { mfa: () => requirement("mfa", { remediations: [] }) }),
+				authorityModule(),
+				consumer(seen),
+			],
+			{ sessionRequirements: { expected: ["mfa", "verifier"] } },
+		);
+		try {
+			expect(
+				[...(seen.resolver?.entries() ?? [])].map(([name, r]) => [name, r.secondFactorAuthority]),
+			).toEqual([
+				["mfa", false],
+				["verifier", true],
+			]);
+		} finally {
+			await handle.dispose();
+		}
 	});
 });
 
@@ -1163,12 +1325,48 @@ describe("the session_requirements_registered boot line", () => {
 				message: "session_requirements_registered",
 				fields: {
 					requirements: [
-						{ name: "b", module: "test:second", remediations: [] },
-						{ name: "a", module: "test:first", remediations: ["a.step_up"] },
+						{ name: "b", module: "test:second", remediations: [], secondFactorAuthority: false },
+						{
+							name: "a",
+							module: "test:first",
+							remediations: ["a.step_up"],
+							secondFactorAuthority: false,
+						},
 					],
 				},
 			},
 		]);
+	});
+
+	it("says which requirement declares the second-factor authority, whatever its name, so the log tells the authority from a requirement merely named mfa", async () => {
+		const { logger, lines } = recordingLogger();
+		const handle = await boot(
+			[
+				defineModule({
+					name: "test:factors",
+					contributes: { mfaFactors: { totp: () => factor("totp", ["otp"], true) } },
+				}),
+				...stores,
+				contributing("test:named", { mfa: () => requirement("mfa", { remediations: [] }) }),
+				authorityModule(),
+			],
+			{ sessionRequirements: { expected: ["mfa", "verifier"] } },
+			{},
+			logger,
+		);
+		await handle.dispose();
+		const [registered] = lines.filter((line) => line.message === "session_requirements_registered");
+		expect(registered?.fields).toEqual({
+			requirements: [
+				{ name: "mfa", module: "test:named", remediations: [], secondFactorAuthority: false },
+				{
+					name: "verifier",
+					module: "test:verifier",
+					remediations: ["verifier.step_up"],
+					secondFactorAuthority: true,
+				},
+			],
+		});
 	});
 
 	it("says nothing when neither a consumer nor a requirement is installed", async () => {
@@ -1180,17 +1378,17 @@ describe("the session_requirements_registered boot line", () => {
 });
 
 describe("stage 4: the reach without mfa, a refusal's cleanups, every consumer named", () => {
-	it("recomputes the mfa reach without mfa when no factor adds it", async () => {
+	it("recomputes the authority's reach without mfa when no factor adds it", async () => {
 		const plain = defineModule({
 			name: "test:factors",
 			contributes: { mfaFactors: { totp: () => factor("totp", ["otp"], false) } },
 		});
 		const seen: { resolver?: SessionRequirementResolver } = {};
-		const handle = await boot([plain, ...stores, mfaModule(), consumer(seen)], {
-			sessionRequirements: { expected: ["mfa"] },
+		const handle = await boot([plain, ...stores, authorityModule(), consumer(seen)], {
+			sessionRequirements: { expected: ["verifier"] },
 		});
 		try {
-			expect([...(seen.resolver?.get("mfa")?.reach ?? [])]).toEqual(["otp"]);
+			expect([...(seen.resolver?.get("verifier")?.reach ?? [])]).toEqual(["otp"]);
 		} finally {
 			await handle.dispose();
 		}

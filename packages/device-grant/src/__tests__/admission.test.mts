@@ -59,8 +59,8 @@ const ACTIONS = ["lookup", "approve", "deny"] as const;
 /**
  * A requirement that answers `answer` for every input and records each one.
  * Its page is set so a `step_up` is one admission can answer; its reach is
- * empty, as every requirement's but `mfa` must be for now (see ADR
- * 2026-09-28-session-admission).
+ * empty, as every requirement's but the second-factor authority's must be
+ * for now (see ADR 2026-09-28-session-admission).
  */
 const fixture = (
 	answer: (input: RequirementInput) => RequirementVerdict,
