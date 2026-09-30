@@ -15,10 +15,11 @@
  */
 
 /**
- * `mfa.mode` as its consumers read it: the MFA package, whose requirement is
- * its one request-time reader, and the standalone template, which declares
- * `mfa` in `sessionRequirements.expected` when the mode is not `off`. Boot
- * validates the value, and its checks do not act on it: they check
+ * `mfa.mode` as the standalone template reads it before it knows its modules,
+ * to declare `mfa` in `sessionRequirements.expected` when the mode is not
+ * `off`. The MFA module, the mode's one request-time reader, reads it from its
+ * own section, whose schema admits the same three values. Boot validates the
+ * value, and its checks do not act on it: they check
  * `sessionRequirements.expected`. Session consumers never read it; admission
  * decides what "logged in" means (ADR 2026-09-28-session-admission).
  */

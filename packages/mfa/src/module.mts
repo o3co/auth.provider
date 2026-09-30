@@ -22,6 +22,9 @@
  * a module bound to them), `userSessionStore` and `sessionRequirementResolver`;
  * reads `auditSink` (absence declared) and `logger`. Nothing forks per replica.
  *
+ * Reads its own section, `mfa` — the mode and its settings — and, from the
+ * whole configuration, `endpoints.mfa.url` and `deployment.mode`.
+ *
  * Contributes `sessionRequirements.mfa`. Its factory refuses the boot when
  * `mfa.mode` is `off` or unset, when the package's settings are unusable (naming
  * the key), or when `endpoints.mfa.url` is unset. It builds the key ring's sealing

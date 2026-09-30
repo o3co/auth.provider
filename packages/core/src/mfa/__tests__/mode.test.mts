@@ -15,8 +15,8 @@
  */
 
 /**
- * `mfa.mode` as a consumer reads it (the MFA ADR's D19): the MFA package, and
- * the standalone template's declaration of `mfa`.
+ * `mfa.mode` as a consumer reads it (the MFA ADR's D19): the standalone
+ * template's declaration of `mfa`.
  */
 
 import { describe, expect, it } from "vitest";

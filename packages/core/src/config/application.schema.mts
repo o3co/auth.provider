@@ -913,14 +913,15 @@ export const CoreConfigSchema = z.object({
 		),
 	}),
 	// Whether a password login asks for a second factor (MFA and
-	// session-admission ADRs), read by the MFA package; the standalone template
-	// declares `mfa` in `sessionRequirements.expected` from it. Core declares
-	// the key because this schema strips unknown keys, and boot's checks do not
-	// act on it. An unknown value is refused here, in the schema `createApp`
-	// parses itself. Defaulting to `off`
-	// in the schema is a deliberate exception to ADR 2026-04-30, so the parsed
-	// type always carries `mfa`. The rest of the section passes through to the
-	// package that reads it.
+	// session-admission ADRs). The MFA module reads it from its own section,
+	// whose schema admits the same three values. Core declares the key for the
+	// standalone template, which reads it before it knows its modules — a
+	// picked read takes only a path core's schema declares — and declares
+	// `mfa` in `sessionRequirements.expected` from it; boot's checks do not act
+	// on it. An unknown value is refused here too. Defaulting to `off` in the
+	// schema is a deliberate exception to ADR 2026-04-30, so the parsed type
+	// always carries `mfa`. The rest of the section passes through to the
+	// MFA module.
 	mfa: z
 		.object({
 			mode: z
