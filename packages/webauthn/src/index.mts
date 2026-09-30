@@ -18,6 +18,9 @@
 export { type WebAuthnConfig, webauthnConfigSchema } from "./config.mjs";
 export { WEBAUTHN_GRANT_TYPE } from "./grant.mjs";
 export { WEBAUTHN_ALGORITHM_IDS } from "./internal/options.mjs";
+// The WebAuthn second factor, contributed as `mfaFactors.webauthn` (the MFA
+// ADR's D4, F7), with its section `webauthn-mfa-factor`.
+export { webauthnMfaFactorModule } from "./mfaFactor/module.mjs";
 export { webauthnModule } from "./module.mjs";
 // WebAuthnSubject + Express Request augmentation — consumers importing this
 // package gain the augmentation automatically via declaration merging.

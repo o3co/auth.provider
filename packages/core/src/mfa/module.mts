@@ -72,7 +72,7 @@ export const memoryMfaTransactionStoreModule = defineModule({
 	replicaSafety: {
 		unsafe: true,
 		reason:
-			"MFA transactions and attempt limits fork per replica — a transaction started on one replica is unknown to the replica that receives the verification, and the attempt limits, the lockout and the trusted browsers are counted per replica; and a restart loses the email proof an operator reset required, so beside a durable factor store a password holder can then bind without it",
+			"MFA transactions and attempt limits fork per replica — a transaction started on one replica is unknown to the replica that receives the verification, and the attempt limits and the lockout are counted per replica; and a restart loses the email proof an operator reset required, so beside a durable factor store a password holder can then bind without it",
 	},
 	provides: {
 		mfaTransactionStore: ({ section }) =>

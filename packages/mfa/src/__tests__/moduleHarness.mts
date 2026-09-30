@@ -65,6 +65,7 @@ import {
 	type MfaConfigForTestsOptions,
 	type MfaTotpFactorConfigForTestsOptions,
 	mfaConfigForTests,
+	mfaEmailFactorConfigForTests,
 	mfaRecoveryCodeFactorConfigForTests,
 	mfaTotpFactorConfigForTests,
 } from "#/testing/index.mjs";
@@ -153,8 +154,8 @@ export const UNSET_RENAMED_VARIABLES = renamedVariableCaptures({
  * The composition's configuration: core's valid fixture, a login over plain
  * HTTP (no `Secure` cookie), `expected` declared (`mfa` alone by default), the `mfa` section under
  * `mode`, and the TOTP factor's `mfa-totp-factor` section, each with the keys
- * given laid over it, the recovery-code factor's section as its defaults, and
- * the captures of the renamed variables, all unset.
+ * given laid over it, the recovery-code and email factors' sections as their
+ * defaults, and the captures of the renamed variables, all unset.
  */
 export function configFor(
 	mode: "off" | "optional" | "required",
@@ -172,6 +173,7 @@ export function configFor(
 		...mfaConfigForTests({ key: MFA_KEY, mode, ...(mfa as Partial<MfaConfigForTestsOptions>) }),
 		...mfaTotpFactorConfigForTests(totp as MfaTotpFactorConfigForTestsOptions),
 		...mfaRecoveryCodeFactorConfigForTests(),
+		...mfaEmailFactorConfigForTests(),
 		"renamed-variables": UNSET_RENAMED_VARIABLES,
 	} as unknown as AppConfig;
 }

@@ -70,6 +70,7 @@ export {
 export {
 	createTestMfaDigests,
 	createTestMfaFactor,
+	type TestMfaDigestsOptions,
 	type TestMfaFactorOptions,
 	testMfaFactorProofs,
 } from "./mfaFactor.mjs";

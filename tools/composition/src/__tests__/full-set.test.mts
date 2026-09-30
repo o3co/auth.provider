@@ -42,7 +42,7 @@
  * only the part of the rule that is broken, and asserts the rest.
  */
 
-import { createHash, generateKeyPairSync, sign, X509Certificate } from "node:crypto";
+import { createHash, X509Certificate } from "node:crypto";
 import { mkdtempSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -52,6 +52,7 @@ import {
 	type MfaTransactionStore,
 	passwordSessionAuthentication,
 	type SubjectSessionIndex,
+	supportsSecondFactorUpdate,
 	toMfaStoreFactor,
 	type UserSessionStore,
 	type WebAuthnCredentialStore,
@@ -126,6 +127,7 @@ import {
 	seedTotp,
 	TV,
 } from "./full-set.fixture.mts";
+import { softwarePasskey } from "./software-passkey.mts";
 
 let current: FullSet | undefined;
 
@@ -169,6 +171,7 @@ const ADDED: Readonly<Record<string, readonly string[]>> = {
 	"@o3co/auth-provider-mfa": [
 		"mfa-totp-factor",
 		"mfa-recovery-code-factor",
+		"mfa-email-factor",
 		"mfa",
 		"core-mfa-factor-store-memory",
 		"core-mfa-transaction-store-memory",
@@ -180,6 +183,7 @@ const ADDED: Readonly<Record<string, readonly string[]>> = {
 	"@o3co/auth-provider-webauthn": [
 		"webauthn",
 		"webauthn-session-subject",
+		"webauthn-mfa-factor",
 		"core-webauthn-credential-store-memory",
 		"core-challenge-store-memory",
 		"core-default-challenge-ceremony",
@@ -201,6 +205,7 @@ const DEPLOYMENT_MODULES = [
 	"deployment:github-federation-config",
 	"deployment:requirement-page",
 	"deployment:requirement-bare",
+	"deployment:mail-sender",
 ];
 
 describe("what the full set covers", () => {
@@ -259,6 +264,15 @@ const ALL_GRANTS = [
 	...ADDED_GRANTS,
 ].sort();
 
+describe("the full set's mail sender", () => {
+	it("fills the mailSender slot with the recording sender the full set hands its tests", async () => {
+		const { handle, mail } = await boot();
+		expect(handle.components.mailSender).toBe(mail);
+		expect(mail.kind).toBe("recording");
+		expect(mail.sent).toEqual([]);
+	});
+});
+
 describe("the full set boots together", () => {
 	it("mounts every added route, registers every federation and every grant", async () => {
 		const { handle, app } = await boot();
@@ -294,6 +308,19 @@ describe("the full set boots together", () => {
 			[...(handle.components.sessionRequirementResolver?.get("mfa")?.reach ?? [])].sort(),
 		).toEqual(["mfa", "otp"]);
 		expect((config as unknown as { mfa: { mode: unknown } }).mfa.mode).toBe("optional");
+	});
+
+	it("installs the WebAuthn second factor's module, off by its reference.conf: no webauthn factor", async () => {
+		const { handle } = await boot();
+		expect(handle.components.mfaFactorResolver?.get("webauthn")).toBeUndefined();
+	});
+
+	it("turns the WebAuthn second factor on through its variable, and the requirement named mfa then reaches hwk and swk beside TOTP's otp", async () => {
+		const { handle } = await boot({ env: { ...SINGLE_ENV, WEBAUTHN_MFA_FACTOR_ENABLED: "true" } });
+		expect(handle.components.mfaFactorResolver?.get("webauthn")?.amrValues).toEqual(["hwk", "swk"]);
+		expect(
+			[...(handle.components.sessionRequirementResolver?.get("mfa")?.reach ?? [])].sort(),
+		).toEqual(["hwk", "mfa", "otp", "swk"]);
 	});
 
 	it("registers exactly the actions the bundled consumers admit, each with the grade the MFA requirement's verdict table is taken over, said at boot with its module", async () => {
@@ -393,6 +420,7 @@ describe("the configuration createApp is handed reaches every loaded module whol
 			"mtls.fullPki.maxChainDepth",
 			"oauth-token-exchange.maxActorChainDepth",
 			"webauthn.rateLimit.authenticationOptions.limit",
+			"webauthn-mfa-factor.userVerification",
 			"mfa-totp-factor.enabled",
 		]) {
 			expect(valueAt(resolved, path), path).toBeDefined();
@@ -1082,64 +1110,6 @@ const TOTP_PKCE = (() => {
 /** A confidential client that signs users in with a passkey and keeps them signed in with refresh tokens. */
 const PASSKEY_APP = { id: "passkey-app", secret: "passkey-app-secret" } as const;
 
-const b64url = (bytes: Buffer | Uint8Array): string => Buffer.from(bytes).toString("base64url");
-
-/**
- * A software passkey: a P-256 key whose public half is registered for
- * `userId` as the WebAuthn package stores it (COSE), and an assertion over
- * a challenge the provider issued, signed as an authenticator signs one —
- * authenticator data (the RP id's hash, user present and verified, a
- * counter) and the client data's hash, ECDSA over SHA-256, DER.
- */
-function softwarePasskey(rpId: string, origin: string) {
-	const { privateKey, publicKey } = generateKeyPairSync("ec", { namedCurve: "P-256" });
-	const jwk = publicKey.export({ format: "jwk" });
-	const x = Buffer.from(jwk.x as string, "base64url");
-	const y = Buffer.from(jwk.y as string, "base64url");
-	// COSE_Key {1: 2 (EC2), 3: -7 (ES256), -1: 1 (P-256), -2: x, -3: y}, CBOR.
-	const cose = Buffer.concat([
-		Buffer.from([0xa5, 0x01, 0x02, 0x03, 0x26, 0x20, 0x01, 0x21, 0x58, 0x20]),
-		x,
-		Buffer.from([0x22, 0x58, 0x20]),
-		y,
-	]);
-	const credentialId = b64url(createHash("sha256").update(cose).digest().subarray(0, 16));
-	let counter = 0;
-	return {
-		credentialId,
-		publicKey: new Uint8Array(cose),
-		assert(challenge: string) {
-			counter += 1;
-			const clientDataJSON = Buffer.from(
-				JSON.stringify({ type: "webauthn.get", challenge, origin, crossOrigin: false }),
-			);
-			const count = Buffer.alloc(4);
-			count.writeUInt32BE(counter);
-			const authenticatorData = Buffer.concat([
-				createHash("sha256").update(rpId).digest(),
-				Buffer.from([0x05]),
-				count,
-			]);
-			const signature = sign(
-				"sha256",
-				Buffer.concat([authenticatorData, createHash("sha256").update(clientDataJSON).digest()]),
-				privateKey,
-			);
-			return {
-				id: credentialId,
-				rawId: credentialId,
-				type: "public-key",
-				response: {
-					clientDataJSON: b64url(clientDataJSON),
-					authenticatorData: b64url(authenticatorData),
-					signature: b64url(signature),
-				},
-				clientExtensionResults: {},
-			};
-		},
-	};
-}
-
 describe("a passkey sign-in under mfa.mode = required", () => {
 	it("is kept by its refresh token: the WebAuthn grant's hwk is a second-factor value, so the refresh is met without a sid or a primary's marker", async () => {
 		const { app, handle } = await boot({
@@ -1157,7 +1127,7 @@ describe("a passkey sign-in under mfa.mode = required", () => {
 		const { webauthnCredentialStore } = handle.components as unknown as {
 			webauthnCredentialStore: WebAuthnCredentialStore;
 		};
-		const passkey = softwarePasskey("auth.test", ISSUER);
+		const passkey = softwarePasskey({ rpId: "auth.test", origin: ISSUER });
 		await webauthnCredentialStore.registerCredential({
 			userId: ALICE.sub,
 			credentialId: passkey.credentialId,
@@ -1685,6 +1655,113 @@ describe("session admission at the link start and WebAuthn registration", () => 
 	});
 });
 
+describe("recent MFA at the link start and WebAuthn registration, under mfa.mode = optional", () => {
+	/** The stores the scenarios read and write, as the full set wires them. */
+	const storesOf = ({ handle }: FullSet) =>
+		handle.components as unknown as {
+			mfaFactorStore: MfaFactorStore;
+			userSessionStore: UserSessionStore;
+		};
+
+	/** Alice signed in with no factor, so the login recorded no second factor; the sid of the UserSession it wrote. */
+	const signedInWithSid = async (set: FullSet) => {
+		const create = vi.spyOn(storesOf(set).userSessionStore, "create");
+		const signed = await signedIn(set.app);
+		const sid = (create.mock.calls[0]?.[0] as { sid?: unknown } | undefined)?.sid;
+		expect(typeof sid).toBe("string");
+		create.mockRestore();
+		return { ...signed, sid: sid as string };
+	};
+
+	/** A TOTP factor for alice: a counting factor. */
+	const holdTotp = (set: FullSet) =>
+		storesOf(set).mfaFactorStore.create({
+			id: "f-alice",
+			subject: ALICE.sub,
+			kind: "totp",
+			label: undefined,
+			binding: "password",
+			createdAt: new Date(),
+			lastUsedAt: undefined,
+			version: 0,
+			data: "sealed",
+		});
+
+	/** A step-up recorded in alice's session at `at`, as the MFA page's step-up records a verified TOTP code. */
+	const verifiedSecondFactor = async (set: FullSet, sid: string, at: Date) => {
+		const store = storesOf(set).userSessionStore;
+		if (!supportsSecondFactorUpdate(store))
+			throw new Error("the full set's store records a step-up");
+		expect(await store.recordSecondFactor(sid, { amr: ["otp", "mfa"], at })).not.toBeNull();
+	};
+
+	const registrationOptions = (
+		agent: ReturnType<typeof request.agent>,
+		header: string,
+		token: string,
+	) => agent.post("/oauth/webauthn/registration/options").set(header, token).send({});
+
+	it("steps a subject who holds a counting factor up at both when no second factor was verified in the session: 403 step_up_required, naming mfa and its page", async () => {
+		const set = await boot();
+		const { agent, header, token } = await signedInWithSid(set);
+		await holdTotp(set);
+
+		const page = new URL("/mfa", ISSUER).href;
+		const link = await linkStart(agent);
+		expect(link.status).toBe(403);
+		expect(link.body).toMatchObject({ error: "step_up_required", requirement: "mfa", page });
+		const registration = await registrationOptions(agent, header, token);
+		expect(registration.status).toBe(403);
+		expect(registration.body).toMatchObject({
+			error: "step_up_required",
+			requirement: "mfa",
+			page,
+		});
+	});
+
+	it("steps it up when its second factor was verified before mfa.manage.maxAgeSeconds, five minutes by the reference", async () => {
+		const set = await boot();
+		const { agent, header, token, sid } = await signedInWithSid(set);
+		await holdTotp(set);
+		await verifiedSecondFactor(set, sid, new Date(Date.now() - 6 * 60_000));
+
+		expect((await linkStart(agent)).status).toBe(403);
+		expect((await registrationOptions(agent, header, token)).status).toBe(403);
+	});
+
+	it("admits it at both once a second factor was verified within the window", async () => {
+		const set = await boot();
+		const { agent, header, token, sid } = await signedInWithSid(set);
+		await holdTotp(set);
+		await verifiedSecondFactor(set, sid, new Date());
+
+		expect((await linkStart(agent)).status).toBe(302);
+		expect((await registrationOptions(agent, header, token)).status).toBe(200);
+	});
+
+	it("admits a subject with no counting factor on a recent sign-in, and answers one whose sign-in is older than the window 401 at both: login_required at the link start, the registration route's own unauthorized", async () => {
+		const set = await boot();
+		const { agent, header, token } = await signedInWithSid(set);
+		expect((await linkStart(agent)).status).toBe(302);
+		expect((await registrationOptions(agent, header, token)).status).toBe(200);
+
+		// The same session, read as if its sign-in were ten minutes old.
+		const store = storesOf(set).userSessionStore;
+		const read = store.get.bind(store);
+		vi.spyOn(store, "get").mockImplementation(async (sid) => {
+			const session = await read(sid);
+			return session === null ? null : { ...session, authTime: new Date(Date.now() - 10 * 60_000) };
+		});
+		const link = await linkStart(agent);
+		expect(link.status).toBe(401);
+		expect(link.body.error).toBe("login_required");
+		// No subject reaches the registration route: its own 401.
+		const registration = await registrationOptions(agent, header, token);
+		expect(registration.status).toBe(401);
+		expect(registration.body.error).toBe("unauthorized");
+	});
+});
+
 // ---------------------------------------------------------------------------
 // Token exchange and the session behind the subject token
 // ---------------------------------------------------------------------------
@@ -2072,6 +2149,32 @@ const OUTAGES: readonly OutageCase<FullSet>[] = [
 		module: "webauthn-session-subject",
 		slot: "userSessionStore",
 		surface: "POST /oauth/webauthn/registration/options (the session-subject module's read)",
+		run: async (app, outage) => {
+			const { agent, header, token } = await signedIn(app);
+			outage.down = true;
+			return agent.post("/oauth/webauthn/registration/options").set(header, token).send({});
+		},
+		answer: { status: 503, error: "temporarily_unavailable" },
+		event: "session_admission_unavailable",
+	},
+	{
+		module: "session",
+		slot: "mfaFactorStore",
+		surface:
+			"GET /session/oauth/federation/google?link=1 (the mfa requirement's read of the subject's factors)",
+		run: async (app, outage) => {
+			const { agent } = await signedIn(app);
+			outage.down = true;
+			return linkStart(agent);
+		},
+		answer: { status: 503, error: "temporarily_unavailable" },
+		event: "session_admission_unavailable",
+	},
+	{
+		module: "webauthn-session-subject",
+		slot: "mfaFactorStore",
+		surface:
+			"POST /oauth/webauthn/registration/options (the mfa requirement's read of the subject's factors)",
 		run: async (app, outage) => {
 			const { agent, header, token } = await signedIn(app);
 			outage.down = true;

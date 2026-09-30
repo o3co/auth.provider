@@ -47,11 +47,13 @@ import {
 } from "@o3co/auth-provider-core/testing";
 import { afterEach, describe, expect, it } from "vitest";
 import { MFA_DEVELOPMENT_SAMPLE_KEY } from "#/config.mjs";
+import { mfaEmailFactorModule } from "#/email/module.mjs";
 import { MFA_ROUTES_ID, mfaBootState, mfaModule, mfaModules } from "#/module.mjs";
 import { mfaRecoveryCodeFactorModule } from "#/recovery/module.mjs";
 import { createMfaSealing } from "#/sealing.mjs";
 import { mfaTotpFactorModule } from "#/totp/module.mjs";
 import {
+	ALICE,
 	boot,
 	configFor,
 	disposeAll,
@@ -62,7 +64,7 @@ import {
 	spyLogger,
 	TOTP_SECTION,
 } from "./moduleHarness.mjs";
-import { stubFactor } from "./requirementHarness.mjs";
+import { factorRecord, stubFactor } from "./requirementHarness.mjs";
 import { beginLogin, seedTotp, verify, wrongCode } from "./routesHarness.mjs";
 
 afterEach(disposeAll);
@@ -82,14 +84,16 @@ const TOTP_OFF = { enabled: false };
 // ---------------------------------------------------------------------------
 
 describe("mfaModules", () => {
-	it("is the TOTP factor's module, the recovery-code factor's and the MFA module", () => {
+	it("is the TOTP factor's module, the recovery-code factor's, the email factor's and the MFA module", () => {
 		expect(mfaModules().map((m) => m.name)).toEqual([
 			mfaTotpFactorModule.name,
 			mfaRecoveryCodeFactorModule.name,
+			mfaEmailFactorModule.name,
 			"mfa",
 		]);
 		expect(mfaModules()[0]).toBe(mfaTotpFactorModule);
 		expect(mfaModules()[1]).toBe(mfaRecoveryCodeFactorModule);
+		expect(mfaModules()[2]).toBe(mfaEmailFactorModule);
 	});
 
 	it("requires what the requirement is bound to, the CSRF guard its POSTs sit behind and the login's completion, and not the configuration; reads the rate limiter, the audit sink — its absence declared — and the logger", () => {
@@ -770,5 +774,62 @@ describe("a session store without recordSecondFactor", () => {
 	it("is not said for a store that records a step-up", async () => {
 		const { logger } = await boot();
 		expect(events(logger, "warn")).not.toContain("mfa_step_up_unsupported");
+	});
+});
+
+// ---------------------------------------------------------------------------
+// Recent MFA's window
+// ---------------------------------------------------------------------------
+
+describe("recent MFA's window", () => {
+	/**
+	 * What admission hands the requirement about alice's password session, signed in two hours ago,
+	 * whose second factor was verified `minutes` ago, for an action that adds a way into the account.
+	 */
+	const credentialChange = (minutes: number) => {
+		const session: UserSession = {
+			sid: "sid-1",
+			sub: ALICE.id,
+			authTime: new Date(Date.now() - 2 * 3_600_000),
+			createdAt: new Date(Date.now() - 2 * 3_600_000),
+			expiresAt: new Date(Date.now() + 3_600_000),
+			claims: {},
+			amr: ["pwd", "otp", "mfa"],
+			authentication: {
+				primary: "pwd",
+				federation: undefined,
+				upstreamAmr: undefined,
+				mfaAt: new Date(Date.now() - minutes * 60_000),
+			},
+		};
+		return {
+			session: {
+				sid: session.sid,
+				sub: session.sub,
+				authTime: session.authTime,
+				expiresAt: session.expiresAt,
+			},
+			authentication: requirementSession(session),
+			carrier: "cookie" as const,
+			subject: session.sub,
+			action: { name: "test.change", grade: "credential_change" as const },
+			asks: undefined,
+			now: new Date(),
+		};
+	};
+
+	it("is the one mfa.manage.maxAgeSeconds sets: a second factor half an hour old is recent under an hour's window, and not under five minutes", async () => {
+		const factorStore = createMemoryMfaFactorStore();
+		await factorStore.create(factorRecord(ALICE.id));
+		const admitted = async (maxAgeSeconds: number) => {
+			// configFor builds the section with mfaConfigForTests, these options laid over it.
+			const { handle } = await boot({
+				config: configFor("optional", { manage: { maxAgeSeconds } }),
+				factorStore,
+			});
+			return handle.components.sessionRequirementResolver?.get("mfa")?.admit(credentialChange(30));
+		};
+		expect(await admitted(3_600)).toEqual({ outcome: "met" });
+		expect(await admitted(300)).toEqual({ outcome: "step_up", whenStillUnmet: "reauthenticate" });
 	});
 });

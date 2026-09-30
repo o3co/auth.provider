@@ -377,6 +377,8 @@ The MFA requirement, in `packages/mfa`: `name: "mfa"`; `reach` = the coordinator
 | any | credential_change | recent MFA | `met` |
 | `optional` | use | any | `met` |
 
+*Amended 2026-09-30: under `required`, `credential_change` is recent MFA on top of the baseline — the baseline is asked first and its answer stands unless it is met. The two "any | credential_change" rows read alone let a password session without a second factor, whose subject holds no counting factor, meet the grade on a recent primary while `use` stepped it up; the strictest grade (D4) is never looser than `use`, and every consumer applies the baseline (the MFA ADR's §7).*
+
 `admitPrimary` = `decideAfterPrimary` and `openLoginTransaction` behind one `Interruption`, asked once per login — `resumePrimary` does not ask it again after its own completion (D5); the transaction persists the continuation, and the verified factor's completion calls `resumePrimary` with it and then `establishSession` (D5). `/authorize`'s D17 ask handling — the trips, the accumulating record, `prompt=none` → `interaction_required` — stays in `oauth`, driven by `Admission` instead of by `decideMfaRequirement`.
 
 ### D7 — A requirement installed is a requirement on; what a composition expects is declared; asking for one that is not installed is refused (re-decides the MFA ADR's O2)

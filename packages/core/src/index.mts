@@ -234,6 +234,7 @@ export { MAX_DURATION_MS, MAX_DURATION_SECONDS } from "./config/durations.mjs";
 // The reference.conf files a composition layers beneath its own
 // configuration — core's, and each loaded module's package's (`section.reference`).
 export { coreReference, moduleReferences } from "./config/references.mjs";
+export { productionEnvironmentIn, readEnvironmentName } from "./deployment/environment.mjs";
 // How the deployment runs — what its HTTP behaviour depends on of the
 // `http` module's settings, and how many replicas the operator says run —
 // each through a slot rather than the configuration. `deploymentModeOf` is
@@ -550,12 +551,21 @@ export {
 	lineSafeText,
 	loggableError,
 } from "./logging/loggableError.mjs";
-// Mail: the port MFA codes and notices leave through
-export type { MailMessage, MailSender } from "./mail/types.mjs";
+export { normaliseMailAddress } from "./mail/address.mjs";
+export { type MailSendOutcome, mailSendOutcome } from "./mail/outcome.mjs";
+// Mail: the port a one-time code the provider issued leaves through
+export {
+	MAIL_PURPOSES,
+	type MailPurpose,
+	type MailSend,
+	type MailSender,
+	type MailSendResult,
+} from "./mail/types.mjs";
 // MFA — the second-factor contract (the manifest group below exports its
 // MfaFactor name)
 export type {
 	MfaCeremonyContext,
+	MfaChallenge,
 	MfaChallengeContext,
 	MfaDigestMatch,
 	MfaDigests,
@@ -563,9 +573,13 @@ export type {
 	MfaEnrollmentCompletion,
 	MfaEnrollmentCompletionContext,
 	MfaEnrollmentContext,
+	MfaEnrollmentStart,
 	MfaFactorData,
+	MfaFactorMail,
+	MfaFactorMailPurpose,
 	MfaFactorState,
 	MfaKeyedDigest,
+	MfaLoginCodeMail,
 	MfaVerification,
 	MfaVerifyContext,
 } from "./mfa/factor.mjs";

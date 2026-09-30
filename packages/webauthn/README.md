@@ -2,23 +2,25 @@
 
 Last updated: 2026-09-30
 
-Passkey (WebAuthn) credential registration and an authentication grant for [`auth.provider`](../../README.md): a user enrolls a passkey from an authenticated session, and later exchanges a passkey assertion for tokens at `/oauth/token`.
+Passkey (WebAuthn) credential registration and an authentication grant for [`auth.provider`](../../README.md): a user enrolls a passkey from an authenticated session, and later exchanges a passkey assertion for tokens at `/oauth/token`. The package also contributes WebAuthn as a second factor to the MFA package — [WebAuthn as a second factor](#webauthn-as-a-second-factor).
 
 ## Responsibility
 
-**Role.** Passkeys as a primary login at the authorization server. The package adds three ceremony routes under `/oauth/webauthn/` and the `urn:o3co:oauth:grant-type:webauthn` grant, which `/oauth/token` dispatches like any other grant, and a module that bridges the browser's session to the registration routes.
+**Role.** Passkeys as a primary login at the authorization server, and WebAuthn as a second factor after a password. The package adds three ceremony routes under `/oauth/webauthn/` and the `urn:o3co:oauth:grant-type:webauthn` grant, which `/oauth/token` dispatches like any other grant, a module that bridges the browser's session to the registration routes, and a module that contributes the `webauthn` second factor under core's `mfaFactors` kind.
 
 **Owns:**
 
 - the ceremonies: generating registration and authentication options, verifying the attestation and persisting the credential, verifying an assertion and its sign count, and minting tokens for it;
 - the bridge from an admitted browser session to `req.webauthnSubject`, `webauthnSessionSubjectModule` — [Registering from a browser session](#registering-from-a-browser-session);
-- the WebAuthn configuration (`webauthnConfigSchema`, the `webauthnConfig` slot) and its defaults ([`config/reference.conf`](config/reference.conf), exported as `@o3co/auth-provider-webauthn/reference.conf`);
+- the WebAuthn second factor, `webauthnMfaFactorModule`: its ceremonies, what it keeps of a credential, and its `amr` — [WebAuthn as a second factor](#webauthn-as-a-second-factor);
+- the WebAuthn configuration (`webauthnConfigSchema`, the `webauthnConfig` slot), the second factor's section (`webauthn-mfa-factor`), and their defaults ([`config/reference.conf`](config/reference.conf), exported as `@o3co/auth-provider-webauthn/reference.conf`);
 - the algorithm set offered and accepted (`WEBAUTHN_ALGORITHM_IDS`), and the rate limit on the unauthenticated `authentication/options` route;
 - the boundary with `@simplewebauthn/server`, the WebAuthn library the verification runs on.
 
 **Does not own:**
 
 - the stores and their contracts — `WebAuthnCredentialStore`, `ChallengeStore` and `ChallengeCeremony` are core's ports (with core's memory implementations); a deployment wires a persistent credential store;
+- the second factor's ceremony — its transaction, its routes under `/session/mfa`, the sealing of what it keeps, the subject lock — and its records (core's `MfaFactorStore`): the MFA package's and core's; this package imports nothing of the MFA package;
 - who the user is at registration: the user handle a session maps to is the deployment's `subjectFor`, and whether that session may proceed is core's session admission; a subject taken from a bearer token, or from a cookie session without a user-session store, is set by middleware the deployment writes;
 - scope decisions — the deployment's `grantPolicy`, which this grant requires;
 - signup, account recovery, email: the deployment's own flows, outside the authorization server.
@@ -249,6 +251,42 @@ A `subjectFor` that throws, answers a subject whose fields throw when read, or a
 
 **Two bridges stay the deployment's own middleware.** A subject taken from a bearer token is not a session this module reads, and the module leaves it in place for a request that carries no signed-in cookie; and a cookie-only composition without a `userSessionStore` cannot install the module (the store is required), so it writes its own bridge too. Either sets `req.webauthnSubject` before the registration routes (a route contribution with `before: ["webauthn-registration-options", "webauthn-registration-verify"]`) and holds itself to the rules below — the opaque handle, and a session strong enough to enroll a credential.
 
+## WebAuthn as a second factor
+
+`webauthnMfaFactorModule` ([`src/mfaFactor/module.mts`](src/mfaFactor/module.mts)) contributes the `webauthn` factor ([`src/mfaFactor/factor.mts`](src/mfaFactor/factor.mts)) under core's `mfaFactors` kind, where the MFA package's `mfa` requirement reads it (the MFA ADR's D4, F7). It reads its own section, and takes the `webauthnConfig` slot — the relying party the grant uses — when it is wired: with the factor off, the module boots without it; with the factor on and no relying party, the boot is refused (`contribute-factory-failed`, naming `webauthnConfig` and `webauthn.rpId`, `rpName`, `origin`). It is stateless.
+
+```ts
+import { webauthnMfaFactorModule } from "@o3co/auth-provider-webauthn";
+
+modules: [
+    ...mfaModules({ environment }),   // @o3co/auth-provider-mfa
+    webauthnBootstrap,                // the webauthnConfig slot, as above
+    webauthnMfaFactorModule,
+    // ...
+]
+```
+
+| Key | Env | Default | Meaning |
+| --- | --- | --- | --- |
+| `webauthn-mfa-factor.enabled` | `WEBAUTHN_MFA_FACTOR_ENABLED` | `false` | Whether the factor is offered; off, the kind is claimed and no factor is contributed |
+| `webauthn-mfa-factor.userVerification` | `WEBAUTHN_MFA_FACTOR_USER_VERIFICATION` | `preferred` | What its registrations and assertions ask for (`required`, `preferred`, `discouraged`); `required` also refuses a response without the UV flag |
+
+The defaults are in [`config/reference.conf`](config/reference.conf); a composition that does not layer it is refused at boot, naming the file. An unknown key in the section is refused by its name.
+
+**What it keeps.** Each factor's data is `{credentialId, publicKey, signCount, transports, backupEligible, backedUp, userHandle}`, which the MFA package seals before it reaches the factor store. `backupEligible` (BE) is fixed at registration and decides the `amr`; `backedUp` (BS) is the backup state the credential last reported, kept for the record and read by no decision. Its credentials live in the MFA factor store alone — never in the grant's `WebAuthnCredentialStore` — so a credential enrolled as a second factor, perhaps without user verification, never signs anyone in through the passwordless grant.
+
+**Registration**, which the MFA package's enrollment drives (not yet built there): the options ask for a credential under the subject's WebAuthn user handle — 32 random bytes made at its first WebAuthn enrollment and kept in each such factor's data, never an account name — named for the authenticator by the account's username, never its address (the provider keeps none, and a page shows none), exclude every WebAuthn credential the subject holds, ask for no attestation, offer `WEBAUTHN_ALGORITHM_IDS`, ask for the section's user verification and a resident key `discouraged`. The proof is the `RegistrationResponseJSON`; its attestation is verified, and a credential id the subject already holds is refused as a duplicate. A credential is only ever looked up among its own subject's factors, so one id held by two subjects is not refused.
+
+**`residentKey: "discouraged"` is advisory.** A synced platform passkey is discoverable whatever is asked. It may then appear in the browser's passkey picker for this relying party, where choosing it for the passwordless grant fails as an unknown credential: the grant reads its own credential store, which never holds a second factor. The failure is cosmetic; the credential still works as the second factor.
+
+**Assertion.** The factor's challenge (`POST /session/mfa/challenge`) answers the request options, listing every WebAuthn factor of the subject in `allowCredentials`; its challenge is kept on the MFA transaction, sealed, until the relying party's `challengeTtlMs` or the transaction's end, whichever comes first. The page names the same `factor_id` at the challenge and at the verification, and sends the `AuthenticationResponseJSON` as the `proof`. A verification takes the challenge from the transaction — read and cleared in one step — so an assertion is checked against a challenge once: a second answer to it, or one past its time, is refused (`expired`) and the page asks for a new one. The credential is found by its id among the subject's WebAuthn factors, whichever of them the request named; a user handle the response carries must be that credential's (a `null` one is none), and the backup eligibility it reports must be the one registered — BE is fixed when a credential is made (WebAuthn §6.1.3) — or it is refused as invalid. The new sign count and the backup state the assertion reports are written by compare-and-set on the record's version; a lost compare-and-set is no evidence of anything, and the MFA package reads the factor again and checks the assertion again against it.
+
+**The sign count** (WebAuthn §6.1.1) is judged only once the signature verified: an assertion whose signature does not verify is refused as invalid whatever its counter. A signed counter that did not increase over the stored one is refused and audited as `mfa.verify.failure` with `reason: "sign_count_regression"` — a possibly cloned authenticator. A counter of `0` against a stored `0` is an authenticator that keeps no counter: it passes and stays `0`, and gives no clone signal.
+
+**`amr`** (the MFA ADR's D14): `hwk` for a credential that is not backup-eligible (BE = 0), bound to one device; `swk` for one that is (BE = 1), a multi-device credential, whether or not it is backed up yet; `mfa` beside either. With attestation `none` — what this factor asks for — BE and BS are what the authenticator reports about itself: `hwk` means *reported* device-bound, not proof of hardware. Attested hardware would be `phrh` with attestation, which this factor does not offer.
+
+**Guessing.** A signature cannot be guessed: the factor is not held to the subject lock that bounds TOTP codes, and counts as MFA.
+
 ## Endpoints
 
 - `POST /oauth/webauthn/registration/options` — generates `PublicKeyCredentialCreationOptions`. Requires an authenticated subject: `req.webauthnSubject`, set by `webauthnSessionSubjectModule` from the browser's session, or by the deployment's own middleware (a bearer token, a store-less cookie session).
@@ -387,7 +425,7 @@ For the anchored formats the check is fail-closed (the library's fix for GHSA-6h
 
 ## SECURITY — sign-count handling
 
-The grant rejects sign-count regressions per WebAuthn §2.4 (clone detection). The §2.4 corner case where both stored and reported sign counts are `0` is allowed (some authenticators always report `0`). The sign-count update is atomic CAS — concurrent assertion races return `false` and the grant fails with `invalid_grant` rather than minting tokens for a stale view.
+The grant rejects sign-count regressions per WebAuthn §2.4 (clone detection), judged only once the assertion's signature verified: the library is handed a stored count of `0`, so its own count check, which runs before the signature's, never refuses. The §2.4 corner case where both stored and reported sign counts are `0` is allowed (some authenticators always report `0`). The sign-count update is atomic CAS — concurrent assertion races return `false` and the grant fails with `invalid_grant` rather than minting tokens for a stale view. The second factor applies the same counter rule, and reads a lost compare-and-set again rather than failing — [WebAuthn as a second factor](#webauthn-as-a-second-factor).
 
 ## Dependency: SimpleWebAuthn
 
@@ -408,10 +446,11 @@ Implemented:
 - Multi-origin support (`config.origin: string[]`), web and Android — see [Multi-origin](#multi-origin-one-rp-for-the-site-and-the-android-app)
 - RFC 8707 `resource` forwarded to `grantPolicy` when `oauth.resourceIndicator.enabled` is set, read by core's `extractResourceParam` exactly as the oauth grants read it: each value whole, the empty entries of a repeated parameter dropped (`resource=&resource=https://x` reaches the policy as `["https://x"]`), and an all-empty parameter as no resource
 - Refresh-token issuance for allowed clients ([#480](https://github.com/o3co/auth.provider/issues/480))
+- WebAuthn as a second factor, contributed to the MFA package: asserted through its routes; enrolled through its enrollment, which the MFA package does not yet offer
 
 Not implemented:
 
-- WebAuthn as an MFA factor
+- The passwordless grant stamping `hwk` or `swk` by the backup state: it stamps `hwk` for every passkey
 - Audience derivation from `resource` for this grant — `client_credentials`, `refresh_token` and `/authorize` derive it; here `resource` reaches the policy hook and nothing else, and the audience a passkey token gets is the rule on `AuthenticatedClient.allowedAudiences` ([#520](https://github.com/o3co/auth.provider/issues/520))
 - Attestation root verification for the formats the library ships no trust anchors for (`packed`, `tpm`, `fido-u2f`) — see [`attestationPreference` default](#security--attestationpreference-default)
 
@@ -422,10 +461,11 @@ Not implemented:
 - `src/routes/` — the three ceremony handlers, one per endpoint.
 - `src/internal/` — the SimpleWebAuthn boundary (options generation and response verification, and the mapping of library failures onto this package's error codes), and the one answer to a store outage the grant and the routes share.
 - [`src/sessionSubject.mts`](src/sessionSubject.mts) — `webauthnSessionSubjectModule`: the session bridge on core's admission.
+- `src/mfaFactor/` — the second factor: its module, the factor and its section's schema.
 - [`src/config.mts`](src/config.mts) — the config schema and the `webauthnConfig` slot; [`src/request.mts`](src/request.mts) — the `req.webauthnSubject` augmentation.
-- [`src/testing/index.mts`](src/testing/index.mts) — the testing entry, `@o3co/auth-provider-webauthn/testing`: `createTestWebAuthnConfig`, the `webauthn` section a test builds.
+- [`src/testing/index.mts`](src/testing/index.mts) — the testing entry, `@o3co/auth-provider-webauthn/testing`: `createTestWebAuthnConfig`, the `webauthn` section a test builds, and `webauthnMfaFactorConfigForTests`, the `webauthn-mfa-factor` section.
 
-The ports these depend on (`WebAuthnCredentialStore`, `ChallengeCeremony`, `ChallengeStore`) are core's.
+The ports these depend on (`WebAuthnCredentialStore`, `ChallengeCeremony`, `ChallengeStore`, and the second factor's `MfaFactor` contract) are core's.
 
 ## License
 

@@ -125,6 +125,7 @@ const ALL_ON_REDIS_MODULES = [
 	"key-store",
 	"test:repositories",
 	"audit-sink",
+	"standard-smtp-mail-sender",
 	"redis-clients",
 	"redis-federation-token-store",
 	"redis-federation-grant-store",

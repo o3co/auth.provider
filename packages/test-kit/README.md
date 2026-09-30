@@ -28,7 +28,10 @@ devDependencies.
   its two login endpoints over HTTP, in [`src/mfa/fakeStore.mts`](src/mfa/fakeStore.mts);
 - `mfaFactorContract`, the conformance suite of a second factor — a value of
   core's `mfaFactors` contribution kind — in
-  [`src/mfa/factor.contract.mts`](src/mfa/factor.contract.mts).
+  [`src/mfa/factor.contract.mts`](src/mfa/factor.contract.mts);
+- `mailSenderContract`, the conformance suite of a mail sender — the value of
+  core's `mailSender` slot — in
+  [`src/mail/mailSender.contract.mts`](src/mail/mailSender.contract.mts).
 
 **Does not own:** the ports, their types and the reading of the witness
 (core); the wire format of the Store's MFA endpoints (core's
@@ -132,10 +135,31 @@ Store-backed store run it.
 MFA coordinator relies on: a kind a hint can carry; `amrValues` it can vouch
 for — no primary's marker, no `mfa` — and `amrFor` answering at least one of
 them; boolean flags; state and data that survive the JSON round trip sealing
-puts them through, and are handed back after it; a hint that never shows the
-account's address; a proof the factor cannot read answered `malformed`,
-never thrown; and a valid proof that completes an enrollment and verifies the
-factor it enrolled. It enrolls at one instant and verifies an hour later,
+puts them through, and are handed back after it; a code an enrollment or a
+challenge asks to be mailed only for the call's purpose —
+`email_factor_enrollment` for an enrollment, `login_code` for a challenge —
+never empty, with an expiry after the call's time when it gives one, another
+code at each challenge, and in no form in the page's response; a login code
+with the keyed digest of the account's address, normalised
+(`normaliseMailAddress`); the digest a factor records exactly the one it is
+handed (`addressDigest`) — of the address its code went to, as the
+coordinator kept it at the send — never one of the address the account
+answered at the start or answers by the completion, and no completion
+without one; a digest a verification is handed under a newer key kept in
+its next data and mailed by the next challenge; over data
+whose digest is gone or unreadable, a login code still asked for, with a
+`null` digest and no throw, so the coordinator refuses the factor; no
+answer — the pending enrollment's state and response, the enrolled data and
+label, a challenge's state and response, a verification's next data —
+carrying the account's address, as given or as `normaliseMailAddress`
+spells it, since the provider keeps none and the coordinator mails a code
+to the address on the user record at the time, only while it matches that
+digest; a hint that never shows the account's address; a proof the factor cannot read answered
+`malformed`, never thrown; and a valid proof that completes an enrollment and
+verifies the factor it enrolled. A code and an address are looked for in the
+strings an answer holds as a reader decodes them — object keys, map and set
+entries included — in any case, never in its JSON text, so no escaping hides
+one. It enrolls at one instant and verifies an hour later,
 every call made for the account's `User.id` as its subject; state and data
 are held to the rule the coordinator seals them by — JSON values JSON gives
 back as they are, in plain or null-prototype objects.
@@ -158,6 +182,35 @@ describe("my factor keeps the MFA factor contract", () => {
 
 Every call is handed core's test digests for the factor's kind
 (`createTestMfaDigests`). The MFA package's TOTP factor runs it.
+
+## A mail sender's contract suite
+
+`mailSenderContract(input)` holds a `MailSender` to what the provider relies
+on: a `kind`; a send the relay accepts answered `{ outcome: "delivered" }`,
+the relay then holding one mail whose envelope names the recipient alone —
+no Bcc — and that carries the code, for every purpose — the relay copied
+before the send and compared whole after it, so it then holds that one mail
+more and nothing else new; a relay refusing at a limit answered
+`{ outcome: "refused_at_limit" }`; each answer read as the provider reads it,
+through core's `mailSendOutcome`, so an extra key or an accessor is an
+outage and a null-prototype record is an answer; under each other way a
+relay refuses (`MAIL_RELAY_REFUSALS`: the recipient, the message, the relay
+unreachable, the sender's credentials, a transient failure) a rejection,
+never an answer; and the mail left as it was. The suite writes each refusing
+relay's reply; every text field of the mail and the reply carry one mark, and
+no rejection's `loggableError` projection — its message and its causes' —
+carries the mark — in text, or in base64 at any of the three offsets a field
+may start at — a field of the mail in base64 or the expiry, searched in
+lower case over letters and digits alone.
+
+`build()` answers a sender over a relay that accepts, and `relayed()`, what
+that relay holds (`RelayedMail`: the recipients its envelope named, in
+order, and the whole message as text); `refusing(refusal, reply)` answers a sender over a
+relay that refuses as `refusal` names, answering `reply` as its own text.
+
+What it cannot see, and a sender's own tests must: what the sender logs
+itself (a transport's debug transcript, say), an error's properties outside
+the projection, and an encoding of the mail other than base64.
 
 ## The fake Store
 
@@ -201,6 +254,8 @@ too — for as long as it runs: give it test data only.
 Exported from [`src/index.mts`](src/index.mts):
 
 - `ContractCase`, core's type of a suite's case;
+- `mailSenderContract`, with `MailSenderContractInput`, `MAIL_RELAY_REFUSALS`,
+  `MailRelayRefusal` and `RelayedMail`;
 - `mfaFactorStoreContract`, with `MfaFactorStoreContractInput` and
   `MfaFactorStoreHarness`;
 - `mfaEnrollmentWitnessContract`, with `MfaEnrollmentWitnessContractInput`,
@@ -217,7 +272,8 @@ Exported from [`src/index.mts`](src/index.mts):
 | --- | --- |
 | [`enrollmentWitness.contract.test.mts`](src/mfa/__tests__/enrollmentWitness.contract.test.mts) | the witness's suite over an in-process repository and over the fake Store; each broken repository — one that erases or sets every witness when it refuses a subject among them — refused by the case that names what it breaks; the outage case present only with `withOutage`; the kit's `ContractCase` core's |
 | [`factorStore.contract.test.mts`](src/mfa/__tests__/factorStore.contract.test.mts) | the factor store's suite over core's in-process store; each broken store — one that drops an undefined field, rewrites data, overwrites a duplicate, lets every writer win, changes a field an update does not carry, reaches another subject's record, removes every subject's records, writes the same id under another subject or the subject's other factors on a successful update, or answers an update at `Number.MAX_SAFE_INTEGER` with `null` rather than a `RangeError` — refused by the case that names what it breaks; every record id in the provider's shape; a harness built and closed per case |
-| [`factor.contract.test.mts`](src/mfa/__tests__/factor.contract.test.mts) | the factor suite over core's double, with and without a challenge; each broken factor refused by the case that names what it breaks |
+| [`factor.contract.test.mts`](src/mfa/__tests__/factor.contract.test.mts) | the factor suite over core's double, with and without a challenge, and mailing its codes, for accounts whose address is padded, internationalised or decomposed; each broken factor — a code in any spelling or escaping in a response, an address in any case, escaping or normalised spelling in an answer, the address kept where its keyed digest belongs, a digest of the address the account answered at the start or answers by the completion rather than the one handed, a completion that completes with none handed, a verification that keeps no digest handed under a newer key or keeps the old one, a challenge over an unreadable digest that throws or mails no `null`, a code for another purpose, an expiry already past, one code at two challenges — refused by the case that names what it breaks |
+| [`mailSender.contract.test.mts`](src/mail/__tests__/mailSender.contract.test.mts) | the mail sender suite over core's recording sender; each broken sender — an old answer, a lost mail, a mail to another mailbox too, a limit read as an outage, an outage or a transient failure answered, a rejection carrying the mail or the relay's reply in any case or in base64, the mail changed — refused by the case that names what it breaks |
 | [`fakeStore.test.mts`](src/mfa/__tests__/fakeStore.test.mts) | each endpoint's answers over real HTTP: every record answered back, the update's compare-and-set and what it writes, `409` / `404`, changes carrying another field refused, the witness mark's `204` / `404` and idempotence, the credential, what it refuses before it records a request, what it records, and an endpoint answered as told — at once, later, or never |
 
 ## See also

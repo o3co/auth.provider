@@ -51,6 +51,8 @@ describe("the MFA package's admission actions", () => {
 		expect(modules.map((module) => module.name).sort()).toEqual([
 			"mfa",
 			"mfa",
+			"mfa-email-factor",
+			"mfa-email-factor",
 			"mfa-recovery-code-factor",
 			"mfa-recovery-code-factor",
 			"mfa-totp-factor",

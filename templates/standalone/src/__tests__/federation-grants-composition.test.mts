@@ -38,6 +38,7 @@ import {
 	memoryRefreshTokenFamilyStoreModule,
 	registerBuiltinKeyStores,
 } from "@o3co/auth-provider-core";
+import { standardSmtpMailSenderConfigForTests } from "@o3co/auth-provider-standard/testing";
 import { parseFile } from "@o3co/ts.hocon";
 import { validate } from "@o3co/ts.hocon/zod";
 import express from "express";
@@ -565,7 +566,13 @@ describe("the standalone composes federation grants from its config", () => {
 		});
 		let error: unknown;
 		try {
-			handleRef = await boot(config, false, "production");
+			// Under production the template installs the SMTP sender's module,
+			// whose section the package's builder carries.
+			handleRef = await boot(
+				{ ...config, ...standardSmtpMailSenderConfigForTests() },
+				false,
+				"production",
+			);
 		} catch (caught) {
 			error = caught;
 		}

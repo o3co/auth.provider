@@ -584,6 +584,8 @@ export type ModuleOrder = typeof AS_LISTED | typeof REVERSED;
 
 export interface ComposeOptions {
 	readonly env?: Readonly<Record<string, string>>;
+	/** The name the configuration was selected by, as `app.mts` hands `buildModules` it; `production` by default. */
+	readonly environment?: string;
 	/** HOCON an operator writes above the composition's own files, read in both phases. */
 	readonly operatorHocon?: string;
 	/**
@@ -622,7 +624,7 @@ export interface ComposeOptions {
 export function composedModules(config: AppConfig, options: ComposeOptions = {}): Module[] {
 	let modules = [
 		...buildModules(config, {
-			environment: "production",
+			environment: options.environment ?? "production",
 			repositoriesModule: testRepositoriesModule(options.extraClients, options.extraUsers),
 			...(options.shippedRefreshTokenFamilyStore
 				? {}

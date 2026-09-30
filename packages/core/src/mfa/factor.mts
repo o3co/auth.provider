@@ -18,14 +18,17 @@
  * The contract a second factor implements, and what the coordinator hands it
  * (ADR 2026-09-25-multi-factor-authentication).
  *
- * A factor never sees a key, a store or a transaction. The coordinator opens
- * the subject's records, seals and writes what the factor returns, keeps
- * per-ceremony state on the transaction, and digests codes that are compared
- * but never recovered ({@link MfaDigests}). So sealing stays in one place and a
- * factor package need not depend on the coordinator: a factor arrives as an
- * `mfaFactors` contribution keyed by its kind, read back through the synthetic
- * `mfaFactorResolver`.
+ * A factor never sees a key, a store, a transaction or the mail sender. The
+ * coordinator opens the subject's records, seals and writes what the factor
+ * returns, keeps per-ceremony state on the transaction, digests codes that
+ * are compared but never recovered ({@link MfaDigests}), and sends the code a
+ * factor asks to be mailed ({@link MfaFactorMail}). So sealing and sending
+ * stay in one place and a factor package need not depend on the coordinator:
+ * a factor arrives as an `mfaFactors` contribution keyed by its kind, read
+ * back through the synthetic `mfaFactorResolver`.
  */
+
+import type { MailPurpose } from "../mail/types.mjs";
 
 /**
  * A factor's own state, as the coordinator opened it from a record's `data`.
@@ -126,6 +129,15 @@ export interface MfaVerifyContext extends MfaCeremonyContext {
 	readonly state: MfaFactorState | undefined;
 	/** The proof as the request carried it. The factor reads it and refuses what it cannot read as `malformed`. */
 	readonly proof: unknown;
+	/**
+	 * After a challenge whose login code went out: the keyed digest, under the
+	 * ring's first key, of the address that code was sent to, made when it was
+	 * sent and kept with the pending challenge — never from a later read of the
+	 * Store. A factor whose recorded digest names another key keeps this one in
+	 * `next`, so that key can leave the ring; it records nothing else of an
+	 * address.
+	 */
+	readonly addressDigest?: MfaKeyedDigest;
 }
 
 /** The start of an enrollment. */
@@ -142,6 +154,79 @@ export interface MfaEnrollmentCompletionContext extends MfaEnrollmentContext {
 	readonly state: MfaFactorState;
 	/** The proof as the request carried it. */
 	readonly proof: unknown;
+	/**
+	 * After a start whose code went out: the keyed digest, under the ring's
+	 * first key, of the address that code was sent to, made when it was sent
+	 * and kept with the pending enrollment — never from a later read of the
+	 * Store, so `user` may by now answer another address. The factor records
+	 * this one, never a digest of `user.email` of its own; without it, it
+	 * completes nothing.
+	 */
+	readonly addressDigest?: MfaKeyedDigest;
+}
+
+/** What a factor may ask a code to be mailed for; the account-email proof is the coordinator's own. */
+export type MfaFactorMailPurpose = Exclude<MailPurpose, "account_email_proof">;
+
+/**
+ * A code a challenge or an enrollment asks the coordinator to mail: its
+ * purpose, the code and, when the factor gives one, when it stops being
+ * accepted — never text. The coordinator resolves the recipient when it
+ * sends: the address on the account's user record at that moment, as
+ * `normaliseMailAddress` spells it. In this order:
+ *
+ * 1. A login code: the comparison comes first, before anything is written.
+ *    The address must match the digest the mail carries
+ *    ({@link MfaLoginCodeMail}). On a mismatch, no address, or a digest that
+ *    is `null` or no keyed digest, no code and no digest are kept, the factor
+ *    is refused until the user re-enrolls it after recent MFA,
+ *    `mfa.email_address_mismatch` is recorded, and nothing is sent;
+ *    `key_unavailable` is an outage, and keeps nothing either. An enrollment
+ *    code has nothing to compare.
+ * 2. The state is kept, with the keyed digest of the address, under the
+ *    ring's first key, expiring at the earlier of `expiresAtMs` and the
+ *    transaction's expiry.
+ * 3. The code is sent with that expiry. A send refused at a limit or failed
+ *    clears the state, and is never "sent".
+ *
+ * The kept digest is handed back to the call that takes the code: an
+ * enrollment's completion, which the factor records in its data, never the
+ * address and never a digest of its own
+ * ({@link MfaEnrollmentCompletionContext.addressDigest}); a verification
+ * ({@link MfaVerifyContext.addressDigest}). So what a factor records is the
+ * address the code went to, whatever the Store answers by then.
+ */
+export interface MfaFactorMail<P extends MfaFactorMailPurpose = MfaFactorMailPurpose> {
+	readonly purpose: P;
+	readonly code: string;
+	/** Epoch milliseconds, after the call's `nowMs`; absent, the transaction's expiry. */
+	readonly expiresAtMs?: number;
+}
+
+/** A login code to mail, with the keyed digest of the address the factor was enrolled with. */
+export interface MfaLoginCodeMail extends MfaFactorMail<"login_code"> {
+	/**
+	 * The digest the factor recorded, as it was handed: over
+	 * `[normaliseMailAddress(address)]`. `null` when its data holds none it can
+	 * read — a mismatch, which the coordinator refuses; never a value that is
+	 * no keyed digest.
+	 */
+	readonly addressDigest: MfaKeyedDigest | null;
+}
+
+/** What a challenge answers: the state the coordinator keeps, if any, the page's response, and a login code to mail. */
+export interface MfaChallenge {
+	readonly state?: MfaFactorState;
+	/** What the page is answered: request options, where a code went. Never the code `mail` carries. */
+	readonly response: unknown;
+	readonly mail?: MfaLoginCodeMail;
+}
+
+/** What the start of an enrollment answers; `response` as {@link MfaChallenge}'s, `mail` the enrollment's code. */
+export interface MfaEnrollmentStart {
+	readonly state: MfaFactorState;
+	readonly response: unknown;
+	readonly mail?: MfaFactorMail<"email_factor_enrollment">;
 }
 
 /** What a verification answers. */
@@ -203,13 +288,9 @@ export interface MfaFactor {
 	 * fail-closed default, a verification takes it. See {@link MfaVerifyContext.state}.
 	 */
 	readonly reusableChallenge?: boolean;
-	/** Prepare a verification: send a code, answer WebAuthn request options. Absent for a factor that needs none. */
-	challenge?(
-		ctx: MfaChallengeContext,
-	): Promise<{ readonly state?: MfaFactorState; readonly response: unknown }>;
+	/** Prepare a verification: a code to mail, WebAuthn request options. Absent for a factor that needs none. */
+	challenge?(ctx: MfaChallengeContext): Promise<MfaChallenge>;
 	verify(ctx: MfaVerifyContext): Promise<MfaVerification>;
-	beginEnrollment(
-		ctx: MfaEnrollmentContext,
-	): Promise<{ readonly state: MfaFactorState; readonly response: unknown }>;
+	beginEnrollment(ctx: MfaEnrollmentContext): Promise<MfaEnrollmentStart>;
 	completeEnrollment(ctx: MfaEnrollmentCompletionContext): Promise<MfaEnrollmentCompletion>;
 }

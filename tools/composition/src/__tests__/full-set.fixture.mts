@@ -31,6 +31,11 @@
  *   WebAuthn, Apple and GitHub config bridges and a `grantPolicy` (WebAuthn
  *   refuses to boot without one, and no package ships one). The federation
  *   bridges point each adapter's `fetch` at a fake upstream.
+ * - A mail sender, core's recording one, built at every boot and handed to
+ *   the tests (`FullSet.mail`). It joins the template's SMTP sender's module
+ *   only because that module provides no sender yet: once it does (the MFA
+ *   ADR's build-order step 17), two modules would provide the slot, and this
+ *   one has to take the template's place instead.
  * - mTLS in-process on its `header` source from a loopback peer — the shape
  *   a TLS-terminating proxy gives it — with the mTLS package's test
  *   certificate.
@@ -40,6 +45,8 @@
  * - WebAuthn registration reads `req.webauthnSubject`, which the package's
  *   `webauthnSessionSubjectModule` sets from the admitted browser session;
  *   the deployment's mapper here is the session's opaque subject.
+ * - The WebAuthn second factor's module beside the MFA package, off by its
+ *   reference.conf.
  *
  * The fakes are shared by every boot in a file and put back as they were made
  * before each one (`resettable`, from the template's fixture).
@@ -73,7 +80,9 @@ import {
 } from "@o3co/auth-provider-core";
 import {
 	createFakeIdp,
+	createRecordingMailSender,
 	type FakeIdp,
+	type RecordingMailSender,
 	userRepositoryHttpOf,
 } from "@o3co/auth-provider-core/testing";
 import { DEVICE_CODE_GRANT_TYPE, deviceGrantModule } from "@o3co/auth-provider-device-grant";
@@ -110,6 +119,7 @@ import {
 import type { FakeStoreUrls } from "@o3co/auth-provider-test-kit";
 import {
 	webauthnConfigSchema,
+	webauthnMfaFactorModule,
 	webauthnModule,
 	webauthnSessionSubjectModule,
 } from "@o3co/auth-provider-webauthn";
@@ -690,6 +700,14 @@ function mfaStoreModules(config: AppConfig, stores: AddedStores): Module[] {
 	];
 }
 
+/** The deployment's mail sender: `mail`, built at every boot whether or not anything reads it. */
+const mailSenderModule = (mail: RecordingMailSender): Module =>
+	defineModule({
+		name: "deployment:mail-sender",
+		lifecycle: { mailSender: { eager: true } },
+		provides: { mailSender: () => mail },
+	});
+
 /** Every module the template does not compose, as a deployment adds them to its manifest. */
 function addedModules(
 	config: AppConfig,
@@ -699,6 +717,7 @@ function addedModules(
 	interrupt: ReadonlySet<string>,
 	ceremonies: FixtureCeremony[],
 	outage: { once: FixtureCeremony["requirement"] | undefined },
+	mail: RecordingMailSender,
 ): Module[] {
 	return [
 		deviceGrantModule({ config }),
@@ -729,9 +748,14 @@ function addedModules(
 					...mfaStoreModules(config, stores),
 				]
 			: []),
+		// The WebAuthn second factor, over the relying party the WebAuthn
+		// bootstrap provides: off by its reference.conf, on through
+		// WEBAUTHN_MFA_FACTOR_ENABLED.
+		...(features.webauthn && features.mfa ? [webauthnMfaFactorModule] : []),
 		grantPolicyModule,
 		...requirementModules(interrupt, ceremonies, outage),
 		...federationBridges(config, features, f),
+		mailSenderModule(mail),
 	];
 }
 
@@ -828,10 +852,15 @@ export interface FullSetOptions extends Omit<ComposeOptions, "extraModules" | "r
 
 export interface FullSet extends Composition {
 	readonly fakes: Fakes;
+	/** The mail sender the full set installs: every code a composed module sends. */
+	readonly mail: RecordingMailSender;
 }
 
-/** The template's composition options for the full set. */
-export async function fullSetOptions(options: FullSetOptions = {}): Promise<ComposeOptions> {
+/** The template's composition options for the full set, sending mail through `mail`. */
+export async function fullSetOptions(
+	options: FullSetOptions = {},
+	mail: RecordingMailSender = createRecordingMailSender(),
+): Promise<ComposeOptions> {
 	const features = { ...ALL_ON, ...options.features };
 	const stores = options.stores ?? "memory";
 	const f = await sharedFakes();
@@ -872,7 +901,8 @@ export async function fullSetOptions(options: FullSetOptions = {}): Promise<Comp
 					: { ...featured, ...foundationMfaFactorStoreConfig(added.mfaFactorStoreAt) };
 			return options.adjust ? options.adjust(stored) : stored;
 		},
-		extraModules: (config) => addedModules(config, features, added, f, interrupt, opened, outage),
+		extraModules: (config) =>
+			addedModules(config, features, added, f, interrupt, opened, outage, mail),
 		extraClients: { ...EXTRA_CLIENTS, ...options.extraClients },
 		extraUsers: { ...EXTRA_USERS, ...options.extraUsers },
 	};
@@ -880,8 +910,9 @@ export async function fullSetOptions(options: FullSetOptions = {}): Promise<Comp
 
 /** Boots the full set: the template's composition, every other package added. */
 export async function composeFullSet(options: FullSetOptions = {}): Promise<FullSet> {
-	const composition = await compose(await fullSetOptions(options));
-	return { ...composition, fakes: await sharedFakes() };
+	const mail = createRecordingMailSender();
+	const composition = await compose(await fullSetOptions(options, mail));
+	return { ...composition, fakes: await sharedFakes(), mail };
 }
 
 export { deploymentCredentialStoreModule, memoryWebAuthnCredentialStoreModule };

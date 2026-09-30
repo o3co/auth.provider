@@ -29,6 +29,7 @@
 		"@o3co/auth-provider-oauth": "workspace:*",
 		"@o3co/auth-provider-redis": "workspace:*",
 		"@o3co/auth-provider-session": "workspace:*",
+		"@o3co/auth-provider-standard": "workspace:*",
 		"@o3co/ts.hocon": "^1.13.0",
 		"connect-redis": "^10.0.0",
 		"express": "^5.2.1",
