@@ -59,8 +59,8 @@ export type GrantPolicyDecision =
 			readonly error: string;
 			/**
 			 * Sent as `error_description`, held to the same characters. One
-			 * that is empty or not a string is not sent; the endpoint's own
-			 * default is.
+			 * that is empty or not a string is not sent: `/oauth/token` sends
+			 * no description, and `/oauth/authorize` its own default.
 			 */
 			readonly errorDescription?: string;
 	  };
