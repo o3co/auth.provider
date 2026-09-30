@@ -15,13 +15,14 @@
  */
 
 import { describe, expect, it } from "vitest";
+import { AppConfigSchema } from "#/config/application.schema.mjs";
 import { TransitionalConfigSchema } from "#/config/composed.mjs";
 import { makeValidAppConfig } from "#/testing/fixtures/valid-config.mjs";
 
 /**
  * The sections core's schema still mirrors, transitionally, for another
  * package's modules: `redisRateLimiter`, the `redis*` store namespaces,
- * `oauth.mtls`, `oauth.dpop`, `webauthn`. Boot's composed parse applies each
+ * `webauthn`. Boot's composed parse applies each
  * mirror whenever the configuration carries the section, the module that
  * reads it loaded or not; a check here goes when its mirror leaves core.
  *
@@ -92,51 +93,31 @@ describe("redisFederationGrantStore's listing allowance", () => {
 	});
 });
 
-describe("oauth.mtls's mirror", () => {
-	it("coerces the env-var spelling of enabled", () => {
-		const parsed = parse({ ...base, oauth: { ...base.oauth, mtls: { enabled: "true" } } });
-		expect(parsed.oauth.mtls?.enabled).toBe(true);
+describe("the paths the dpop, mtls, device-grant and oauth-token-exchange sections moved from", () => {
+	// A root that parses with `AppConfigSchema` before boot hands what it kept
+	// to the relocation refusal; the schema checks nothing under them.
+	it.each([
+		["dpop", { enabled: "not-a-boolean", "replay-store": "redis", nonce: { secret: "x" } }],
+		["mtls", { mode: "pki-ish", "cert-header": "x-client-cert" }],
+		["deviceAuthorization", { store: "memory", rateLimit: { limit: 5, windowSeconds: 1e13 } }],
+		["tokenExchange", { maxActorChainDepth: "not-a-number" }],
+	])("keeps oauth.%s as written", (key, written) => {
+		const parsed = parse({ ...base, oauth: { ...base.oauth, [key]: written } });
+		expect((parsed.oauth as Record<string, unknown>)[key]).toEqual(written);
+		expect(
+			(
+				AppConfigSchema.parse({ ...base, oauth: { ...base.oauth, [key]: written } })
+					.oauth as Record<string, unknown>
+			)[key],
+		).toEqual(written);
 	});
 
-	it("refuses a trust posture the module does not have", () => {
-		expect(() => parse({ ...base, oauth: { ...base.oauth, mtls: { mode: "pki-ish" } } })).toThrow();
-	});
-
-	it("is absent when omitted — the defaults live in the mtls reference.conf", () => {
-		expect(parse(base).oauth.mtls).toBeUndefined();
-	});
-});
-
-describe("oauth.dpop's mirror", () => {
-	it("coerces the env-var spelling of enabled", () => {
-		const parsed = parse({ ...base, oauth: { ...base.oauth, dpop: { enabled: "1" } } });
-		expect(parsed.oauth.dpop?.enabled).toBe(true);
-	});
-
-	it("refuses the retired replay-store key, whatever it says, naming what replaced it", () => {
-		// DPoP proofs are recorded in the `replaySeenSet` slot now, and the
-		// key's two readings — a per-process fallback, or a mandatory
-		// `dpopReplayStore` slot — no longer exist. Ignored, a deployment that
-		// had wired a shared DPoP store beside a memory seen-set would move
-		// its DPoP records into memory with no new signal.
-		for (const value of ["memory", "redis"]) {
-			const result = TransitionalConfigSchema.safeParse({
-				...base,
-				oauth: { ...base.oauth, dpop: { enabled: true, "replay-store": value } },
-			});
-			expect(result.success).toBe(false);
-			const issue = result.success
-				? undefined
-				: result.error.issues.find((i) => i.path.join(".") === "oauth.dpop.replay-store");
-			expect(issue?.message).toMatch(/^oauth\.dpop\.replay-store was removed in /);
-			expect(issue?.message).toMatch(/replaySeenSet/);
-			expect(issue?.message).toMatch(/Remove this field from your config\.$/);
-		}
-	});
-
-	it("is absent when omitted — the defaults live in the dpop reference.conf", () => {
-		expect(parse(base).oauth.dpop).toBeUndefined();
-	});
+	it.each(["dpop", "mtls", "deviceAuthorization", "tokenExchange"])(
+		"is absent when oauth.%s is",
+		(key) => {
+			expect(parse(base).oauth).not.toHaveProperty(key);
+		},
+	);
 });
 
 describe("webauthn's mirror", () => {

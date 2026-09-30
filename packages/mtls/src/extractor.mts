@@ -222,7 +222,7 @@ export const createMtlsMechanism = (options: MtlsMechanismOptions): TokenBinding
 	// it is matched against the socket peer (`peerAddressOf`).
 	const isTrustedProxy =
 		source === "header"
-			? createTrustedProxyMatcher(options.trustedProxies ?? [], { label: "trusted-proxies" })
+			? createTrustedProxyMatcher(options.trustedProxies ?? [], { label: "mtls.trustedProxies" })
 			: () => false as boolean;
 
 	if (mode === "pki" || mode === "full-pki") {

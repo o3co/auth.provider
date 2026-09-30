@@ -93,14 +93,11 @@ describe("readTransitionalConfig — the switches a composition root reads befor
 	});
 
 	it("does not refuse a section a package's reference completes, unless it reads it", () => {
-		// Before the modules are known, the device grant's reference is not
+		// Before the modules are known, the WebAuthn package's reference is not
 		// layered: its `windowSeconds` is missing, and boot, which layers it,
 		// accepts what the operator wrote.
 		const partial = resolved({
-			oauth: {
-				...makeValidCoreConfig().oauth,
-				deviceAuthorization: { rateLimit: { limit: 10 } },
-			},
+			webauthn: { rateLimit: { authenticationOptions: { limit: 10 } } },
 		});
 		expect(TransitionalConfigSchema.safeParse(partial).success).toBe(false);
 		expect(() => readTransitionalConfig(partial, ["oauth.code", "oauth.grants"])).not.toThrow();

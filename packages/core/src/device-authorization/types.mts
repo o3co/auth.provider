@@ -176,11 +176,11 @@ export interface DeviceCodeStore {
  * grant enabled to write a line that is itself refused.
  */
 export const DEVICE_CODE_STORE_ABSENCE_POLICY: AbsencePolicy = {
-	configKey: ["oauth", "deviceAuthorization", "store"],
+	configKey: ["device-grant", "store"],
 	absentValue: "unsupported",
 	hint:
 		"the device authorization grant has nowhere to record a pending authorization, " +
-		"so no device can ever be authorized. With oauth.deviceAuthorization.enabled = true " +
+		"so no device can ever be authorized. With device-grant.enabled = true " +
 		"wire a store (memoryDeviceCodeStoreModule on a single replica, " +
 		"redisDeviceCodeStoreModule otherwise) — the declaration is refused there; it is " +
 		"for a deployment that leaves the grant off",

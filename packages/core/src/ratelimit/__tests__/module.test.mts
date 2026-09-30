@@ -97,7 +97,7 @@ describe("memoryRateLimiterModule", () => {
 					maxBuckets: 10_000,
 				},
 				rateLimit: { login: { windowMs: 900_000, limit: 0 } },
-				oauth: { deviceAuthorization: { rateLimit: { limit: 2, windowSeconds: 300 } } },
+				"device-grant": { rateLimit: { limit: 2, windowSeconds: 300 } },
 				webauthn: { rateLimit: { authenticationOptions: { limit: "thirty", windowSeconds: 60 } } },
 				mfa: {
 					rateLimit: { routes: { limit: 2, windowSeconds: 300 } },

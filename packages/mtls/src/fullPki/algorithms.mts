@@ -112,7 +112,7 @@ export const checkSignatureAlgorithm = (
 	);
 	return {
 		ok: false,
-		detail: `${known?.[0] ?? signatureAlgorithmOid} is not in oauth.mtls.full-pki.signature-algorithms`,
+		detail: `${known?.[0] ?? signatureAlgorithmOid} is not in mtls.fullPki.signatureAlgorithms`,
 	};
 };
 

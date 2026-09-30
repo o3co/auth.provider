@@ -162,7 +162,9 @@ export type Stores = "memory" | "redis";
 function withFeatures(config: AppConfig, features: Features): AppConfig {
 	const c = config as unknown as {
 		mfa?: Record<string, unknown>;
-		oauth: Record<string, Record<string, unknown>>;
+		"device-grant"?: Record<string, unknown>;
+		dpop?: Record<string, unknown>;
+		mtls?: Record<string, unknown>;
 		federations: Record<string, Record<string, unknown>>;
 		webauthn?: Record<string, unknown>;
 		core?: { sessionRequirements?: { expected?: readonly string[] } };
@@ -191,24 +193,22 @@ function withFeatures(config: AppConfig, features: Features): AppConfig {
 		mfa: features.mfa
 			? { ...c.mfa, mode: "optional", encryptionKeys: [{ key: MFA_KEY }] }
 			: { ...c.mfa, mode: "off" },
-		oauth: {
-			...c.oauth,
-			deviceAuthorization: {
-				...c.oauth.deviceAuthorization,
-				enabled: features.deviceGrant,
-				"verification-uri": `${ISSUER}/device`,
-			},
-			dpop: { ...c.oauth.dpop, enabled: features.dpop },
-			mtls: {
-				...c.oauth.mtls,
-				enabled: features.mtls,
-				source: "header",
-				"cert-header": "x-forwarded-client-cert",
-				"cert-header-dialect": "plain-pem",
-				// supertest dials loopback, which the app sees as the forwarding hop.
-				"trusted-proxies": ["loopback"],
-				mode: "self-signed",
-			},
+		"device-grant": {
+			...c["device-grant"],
+			enabled: features.deviceGrant,
+			verificationUri: `${ISSUER}/device`,
+		},
+		dpop: { ...c.dpop, enabled: features.dpop },
+		// The forwarded certificate in the header the package's reference names,
+		// `x-forwarded-client-cert`.
+		mtls: {
+			...c.mtls,
+			enabled: features.mtls,
+			source: "header",
+			certHeaderDialect: "plain-pem",
+			// supertest dials loopback, which the app sees as the forwarding hop.
+			trustedProxies: ["loopback"],
+			mode: "self-signed",
 		},
 		webauthn: {
 			...c.webauthn,
@@ -757,9 +757,6 @@ export async function fullSetOptions(options: FullSetOptions = {}): Promise<Comp
 	const outage = { once: failAskOnce };
 	return {
 		...compose,
-		// `deviceGrantModule({ config })` decides from phase one whether the
-		// grant exists: read its switch there, as a deployment adding it does.
-		reads: [...(compose.reads ?? []), "oauth.deviceAuthorization.enabled"],
 		config: (resolved) => {
 			const adjusted = options.config ? options.config(resolved) : resolved;
 			const featured = withFeatures(adjusted, features);

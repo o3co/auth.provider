@@ -18,8 +18,9 @@
  * This package's boot refusals must be reachable from the configuration path
  * `packages/core/README.md` documents: the composition root hands `createApp`
  * the configuration it resolved, and boot parses it once, laying every
- * schema's output over what was written. A parse that dropped `oauth.mtls`
- * would let `enabled` fall to its `false` default: mTLS would report itself
+ * schema's output over what was written, and the module's section is parsed
+ * at `mtls`. A parse that dropped `mtls` would let `enabled` fall to its
+ * `false` default: mTLS would report itself
  * switched off rather than misconfigured, and every refusal would be
  * unreachable. These tests boot `mtlsModule` that way and ask it what it makes
  * of the result, at boot, where its refusals are.
@@ -32,7 +33,7 @@ import { mtlsModule } from "#/module.mjs";
 
 /**
  * The documented composition root: the resolved configuration with the
- * operator's `oauth.mtls` block, handed to `createApp`. Answers the
+ * operator's `mtls` block, handed to `createApp`. Answers the
  * configuration boot parsed, or the boot's refusal with every cause it
  * carries as one text.
  */
@@ -40,7 +41,7 @@ async function throughDocumentedPath(
 	mtls: Record<string, unknown> | undefined,
 ): Promise<{ readonly config: unknown } | { readonly refused: string }> {
 	const base = makeValidAppConfig();
-	const resolved = mtls === undefined ? base : { ...base, oauth: { ...base.oauth, mtls } };
+	const resolved = mtls === undefined ? base : { ...base, mtls };
 	try {
 		const handle = await createApp({
 			modules: [mtlsModule],
@@ -60,11 +61,12 @@ async function throughDocumentedPath(
 	}
 }
 
-/** `mtlsModule`'s single `tokenBindingMechanisms` contribution. */
+/** `mtlsModule`'s single `tokenBindingMechanisms` contribution, handed the section boot parsed. */
 function contributeMechanism(config: unknown): unknown {
 	const [factory] = mtlsModule.contributes?.tokenBindingMechanisms ?? [];
 	if (!factory) throw new Error("mtlsModule no longer contributes a token-binding mechanism");
-	return (factory as (deps: { config: unknown }) => unknown)({ config });
+	const section = (config as { mtls?: unknown }).mtls;
+	return (factory as (deps: { section: unknown }) => unknown)({ section });
 }
 
 /** The configuration boot parsed, failing the test when boot refused. */
@@ -81,15 +83,15 @@ async function refusedWith(mtls: Record<string, unknown>): Promise<string> {
 	return result.refused;
 }
 
-describe("oauth.mtls reaches the module through the documented config path", () => {
+describe("mtls reaches the module through the documented config path", () => {
 	it("survives boot's parse instead of arriving as the disabled default", async () => {
 		const config = (await booted({
 			enabled: true,
 			source: "tls-layer",
 			mode: "self-signed",
-		})) as { oauth: { mtls: { enabled: boolean; mode: string } } };
-		expect(config.oauth.mtls.enabled).toBe(true);
-		expect(config.oauth.mtls.mode).toBe("self-signed");
+		})) as { mtls: { enabled: boolean; mode: string } };
+		expect(config.mtls.enabled).toBe(true);
+		expect(config.mtls.mode).toBe("self-signed");
 	});
 
 	it("contributes a mechanism, where a stripped block contributed none", async () => {
@@ -97,28 +99,28 @@ describe("oauth.mtls reaches the module through the documented config path", () 
 		expect(contributeMechanism(config)).not.toBeNull();
 	});
 
-	it("reaches the empty-allowed-hosts refusal under a fetching revocation mode", async () => {
+	it("reaches the empty-allowedHosts refusal under a fetching revocation mode", async () => {
 		const refused = await refusedWith({
 			enabled: true,
 			mode: "full-pki",
-			"trusted-cas": ["-----BEGIN CERTIFICATE-----"],
-			"full-pki": { revocation: { mode: "crl", "on-unavailable": "reject" } },
+			trustedCas: ["-----BEGIN CERTIFICATE-----"],
+			fullPki: { revocation: { mode: "crl", onUnavailable: "reject" } },
 		});
-		expect(refused).toMatch(/non-empty oauth\.mtls\.full-pki/);
+		expect(refused).toMatch(/non-empty mtls\.fullPki/);
 	});
 
 	it("reaches the undeclared-revocation refusal under full-pki", async () => {
 		const refused = await refusedWith({
 			enabled: true,
 			mode: "full-pki",
-			"trusted-cas": ["-----BEGIN CERTIFICATE-----"],
+			trustedCas: ["-----BEGIN CERTIFICATE-----"],
 		});
-		expect(refused).toMatch(/requires oauth\.mtls\.full-pki\.revocation/);
+		expect(refused).toMatch(/requires mtls\.fullPki\.revocation/);
 	});
 
-	it("reaches the empty-trusted-proxies refusal under a header source", async () => {
+	it("reaches the empty-trustedProxies refusal under a header source", async () => {
 		const refused = await refusedWith({ enabled: true, source: "header" });
-		expect(refused).toMatch(/trusted-proxies allowlist/);
+		expect(refused).toMatch(/trustedProxies allowlist/);
 	});
 
 	it("still contributes nothing when the operator leaves mTLS off", async () => {

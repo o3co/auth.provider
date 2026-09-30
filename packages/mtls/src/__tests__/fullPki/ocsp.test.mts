@@ -469,7 +469,7 @@ describe("OCSP resolver — the signature-algorithm policy applies to the answer
 		expect(result).toMatchObject({ ok: false, reason: "algorithm_not_permitted" });
 		if (!result.ok) {
 			expect(result.detail).toContain("1.2.840.10045.4.1");
-			expect(result.detail).toContain("signature-algorithms");
+			expect(result.detail).toContain("mtls.fullPki.signatureAlgorithms");
 		}
 		expect(r.size()).toBe(1);
 		await r.resolve(leaf.cert, int.cert, NOW);

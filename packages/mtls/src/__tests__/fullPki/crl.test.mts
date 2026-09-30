@@ -584,7 +584,7 @@ describe("CRL resolver — the signature-algorithm policy applies to the CRL too
 		expect(first).toMatchObject({ ok: false, reason: "algorithm_not_permitted" });
 		if (!first.ok) {
 			expect(first.detail).toContain("1.2.840.10045.4.1");
-			expect(first.detail).toContain("signature-algorithms");
+			expect(first.detail).toContain("mtls.fullPki.signatureAlgorithms");
 		}
 		expect(resolver.size()).toBe(1);
 

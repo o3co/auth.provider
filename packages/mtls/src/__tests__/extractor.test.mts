@@ -514,7 +514,7 @@ describe("createMtlsMechanism — trusted-proxy allowlist for the header source"
 				trustedProxies: ["loopback", "proxy.internal"],
 				mode: "self-signed",
 			}),
-		).toThrow(/trusted-proxies\[1\]/);
+		).toThrow(/mtls\.trustedProxies\[1\]/);
 	});
 });
 

@@ -1,6 +1,6 @@
 # @o3co/auth-provider-oauth-token-exchange
 
-Last updated: 2026-09-29
+Last updated: 2026-09-30
 
 RFC 8693 Token Exchange grant for [auth.provider](https://github.com/o3co/auth.provider).
 Supports on-behalf-of, delegation (`act` claim), and scope / audience narrowing.
@@ -225,7 +225,7 @@ Because `invalid_request` covers both a malformed request and a refused token, t
 
    The impersonation check is deliberately narrower: an entry that also constrains `iss` is **never** satisfied by a client identity. No token was presented for the actor, so there is no issuer to compare, and substituting this AS's own issuer would be a guess in the permissive direction. Write `may_act` entries as `{ "sub": "<client-id>" }` when the intended actor is a client acting in its own name.
 
-9. **Actor chains are bounded.** `oauth.tokenExchange.maxActorChainDepth` defaults to `3` and can be overridden with `OAUTH_TOKEN_EXCHANGE_MAX_ACTOR_CHAIN_DEPTH`. When an `actor_token` would add to an already-full nested `act` chain, the handler rejects the request with `actor_chain_too_deep`.
+9. **Actor chains are bounded.** `oauth-token-exchange.maxActorChainDepth`, the module's own section, defaults to `3` in the package's [`config/reference.conf`](config/reference.conf), which a composition root layers because the module declares it, and can be overridden with `OAUTH_TOKEN_EXCHANGE_MAX_ACTOR_CHAIN_DEPTH`. A key unknown to the section refuses boot, and `oauth.tokenExchange`, its old path, refuses boot naming the new one. When an `actor_token` would add to an already-full nested `act` chain, the handler rejects the request with `actor_chain_too_deep`.
 
 10. **Family cascade.** Issued access_tokens inherit the subject's `family_id` claim. Revoking the subject's family (e.g. on logout) automatically invalidates every token exchanged from it. This is the same mechanism auth.provider's introspect and userinfo endpoints use.
 

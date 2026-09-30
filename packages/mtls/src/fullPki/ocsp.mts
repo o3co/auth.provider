@@ -989,7 +989,7 @@ export const createOcspResolver = (options: OcspResolverOptions): OcspResolver =
 					reason: "nonce_missing",
 					detail:
 						"the response carries no nonce, so nothing binds it to this request " +
-						"(RFC 6960 §4.4.1; set ocsp-require-nonce = false only for a responder " +
+						"(RFC 6960 §4.4.1; set mtls.fullPki.revocation.ocspRequireNonce = false only for a responder " +
 						"that pre-produces its answers)",
 				};
 			}
