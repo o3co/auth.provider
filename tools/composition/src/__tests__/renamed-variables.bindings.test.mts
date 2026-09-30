@@ -20,14 +20,17 @@
  * repository ships (each package's `config/reference.conf` and the standalone
  * template's `config/*.conf`): its old and new names captured in
  * `renamed-variables`, its new name bound at its path, its old name bound
- * nowhere else. A declaration of a name a shipped layer still binds would
- * refuse every operator who sets it; a new name bound nowhere would drop
- * what an operator sets under it.
+ * nowhere else — and no layer but a declaring module's own reference (core's
+ * own for core) holds `renamed-variables`. A declaration of a name a shipped
+ * layer still binds would refuse every operator who sets it; a new name bound
+ * nowhere would drop what an operator sets under it; a capture written in any
+ * other layer would override what the resolution saw.
  */
 
 import { readdirSync } from "node:fs";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { coreReference } from "@o3co/auth-provider-core";
 import { CORE_RELOCATIONS, renamedVariableProblems } from "@o3co/auth-provider-core/testing";
 import { parseFile } from "@o3co/ts.hocon";
 import { afterAll, describe, expect, it } from "vitest";
@@ -83,5 +86,26 @@ describe("the variables renamed with a move, across every shipped layer", () => 
 				read,
 			}),
 		).toEqual([]);
+	});
+
+	it("finds renamed-variables in no layer but a declaring module's own reference", () => {
+		if (fullSet === undefined) throw new Error("the full set did not boot");
+		const declaring = new Set([
+			...fullSet.modules.flatMap((module) =>
+				module.section?.renamedVariables === undefined || module.section.reference === undefined
+					? []
+					: [resolve(fileURLToPath(module.section.reference))],
+			),
+			...(CORE_RELOCATIONS.renamedVariables === undefined
+				? []
+				: [resolve(fileURLToPath(coreReference()))]),
+		]);
+		const holding = LAYERS.filter((layer) => {
+			const tree = read(layer, {}) as Record<string, unknown>;
+			return Object.hasOwn(tree, "renamed-variables");
+		}).map((layer) => resolve(layer));
+
+		expect(holding.length).toBeGreaterThan(0);
+		expect(holding.filter((layer) => !declaring.has(layer))).toEqual([]);
 	});
 });

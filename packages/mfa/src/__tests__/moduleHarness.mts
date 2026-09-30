@@ -41,12 +41,13 @@ import {
 	type SessionFederationIndex,
 	type UserSessionStore,
 } from "@o3co/auth-provider-core";
-import { makeValidAppConfig } from "@o3co/auth-provider-core/testing";
+import { makeValidAppConfig, renamedVariableCaptures } from "@o3co/auth-provider-core/testing";
 import { sessionModule, sessionStoreModuleFor } from "@o3co/auth-provider-session";
 import express from "express";
 import request from "supertest";
 import { type Mock, vi } from "vitest";
 import { type MfaModuleOptions, mfaModule, mfaModules } from "#/module.mjs";
+import { mfaTotpFactorModule } from "#/totp/module.mjs";
 
 export const ISSUER = "https://auth.example";
 
@@ -126,14 +127,12 @@ export const TOTP_SECTION = {
 
 /**
  * What a composition layering the package's reference.conf captures of the
- * TOTP factor's renamed variables when none of them is set.
+ * TOTP factor's renamed variables under an environment that sets none.
  */
-export const UNSET_RENAMED_VARIABLES = {
-	MFA_TOTP_ENABLED: null,
-	MFA_TOTP_ISSUER: null,
-	MFA_TOTP_FACTOR_ENABLED: null,
-	MFA_TOTP_FACTOR_ISSUER: null,
-} as const;
+export const UNSET_RENAMED_VARIABLES = renamedVariableCaptures({
+	modules: [mfaTotpFactorModule],
+	env: {},
+});
 
 /**
  * The composition's configuration: core's valid fixture, a login over plain
