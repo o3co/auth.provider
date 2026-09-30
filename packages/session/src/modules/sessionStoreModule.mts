@@ -11,7 +11,6 @@
 import {
 	type AppConfig,
 	BootError,
-	type BootStage,
 	type BuilderContext,
 	checkDeploymentMode,
 	consoleLogger,
@@ -34,10 +33,18 @@ import { createSessionStoreFactory, registerBuiltinSessionStores } from "../stor
  * Module-level config schema: this module owns the `session` config slice via
  * `fullSectionsSchema.pick`. The boot planner composes the manifests'
  * configSchemas into the validated `config` slot before any factory runs.
+ * A section that yields no session cookie is refused there, naming the key.
  */
-const sessionStoreConfigSchema = fullSectionsSchema.pick({
-	session: true,
-});
+const sessionStoreConfigSchema = fullSectionsSchema
+	.pick({
+		session: true,
+	})
+	.superRefine((config, ctx) => {
+		const refusal = sessionCookieRefusal(config.session);
+		if (refusal !== undefined) {
+			ctx.addIssue({ code: "custom", path: ["session", refusal.key], message: refusal.message });
+		}
+	});
 
 const MODULE_NAME = "session-store";
 
@@ -60,25 +67,16 @@ export interface SessionStoreModuleConfig {
 const storageTypeOf = (config: SessionStoreModuleConfig | undefined): unknown =>
 	config?.session?.storage?.type;
 
-/**
- * The cookie express-session is given and the `sessionCookiePolicy` slot holds.
- * A section that yields none refuses boot: `config-validation-failed` naming the key.
- */
-function sessionCookieOf(session: SessionCookieConfigSlice, stage: BootStage): SessionCookiePolicy {
-	const refusal = sessionCookieRefusal(session);
-	if (refusal !== undefined) {
-		throw new BootError({
-			stage,
-			reason: "config-validation-failed",
-			message: refusal.message,
-			details: {
-				reason: "config-validation-failed",
-				issues: [{ code: "custom", path: ["session", refusal.key], message: refusal.message }],
-				modules: [{ module: MODULE_NAME }],
-			},
-		});
+/** One policy per `session` section: the route mounts the cookie the slot holds. */
+const policies = new WeakMap<SessionCookieConfigSlice, SessionCookiePolicy>();
+
+function sessionCookieOf(session: SessionCookieConfigSlice): SessionCookiePolicy {
+	let policy = policies.get(session);
+	if (policy === undefined) {
+		policy = sessionCookiePolicyFrom(session);
+		policies.set(session, policy);
 	}
-	return sessionCookiePolicyFrom(session);
+	return policy;
 }
 
 function buildSessionStoreModule(replicaSafety: ReplicaSafetyDeclaration | undefined) {
@@ -106,8 +104,7 @@ function buildSessionStoreModule(replicaSafety: ReplicaSafetyDeclaration | undef
 			// this module owns the cookie, and the others require the slot instead
 			// of reading `session.*`. They are the attributes express-session is
 			// given below; the signing secret is not among them.
-			sessionCookiePolicy: (deps) =>
-				sessionCookieOf((deps.config as AppConfig).session, "materializeComponents"),
+			sessionCookiePolicy: (deps) => sessionCookieOf((deps.config as AppConfig).session),
 			// The CSRF token's signature, under a key derived from the secret this
 			// module owns: the session module's guard and routes sign through it,
 			// and neither the secret nor the key leaves the signer.
@@ -147,7 +144,7 @@ function buildSessionStoreModule(replicaSafety: ReplicaSafetyDeclaration | undef
 						});
 					}
 					// The slot's cookie, refused before the store opens a connection.
-					const cookie = sessionCookieOf(config.session, "applyContributions");
+					const cookie = sessionCookieOf(config.session);
 					const store = await factory.create({
 						type: storageSlice.type,
 						...((storageSlice[storageSlice.type] ?? {}) as Record<string, unknown>),

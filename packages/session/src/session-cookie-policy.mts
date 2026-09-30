@@ -27,9 +27,10 @@
  * lifetime. The signing secret is not among them.
  *
  * One rule ({@link sessionCookieRefusal}) decides which sections yield a
- * cookie; the store refuses at boot what it refuses, so no section yields a
- * policy that breaks core's contract (`sessionCookiePolicyContract`) or a
- * cookie the store mounts and the policy refuses.
+ * cookie; the store's configSchema refuses at validation what it refuses, so
+ * no section yields a policy that breaks core's contract
+ * (`sessionCookiePolicyContract`) or a cookie the store mounts and the policy
+ * refuses.
  */
 
 import { MAX_DURATION_MS, type SessionCookiePolicy } from "@o3co/auth-provider-core";
@@ -45,24 +46,33 @@ export interface SessionCookieConfigSlice {
 
 /** Why no session cookie is built from a section: the `session.*` key it names, and the rule. */
 export interface SessionCookieRefusal {
-	readonly key: keyof SessionCookieConfigSlice;
+	readonly key: "name" | "secure" | "domain" | "maxAge";
 	readonly message: string;
 }
 
 /** RFC 6265 §4.1.1: a cookie name is an RFC 2616 token — visible ASCII but separators. */
 const COOKIE_NAME = /^[!#$%&'*+\-.^_`|~0-9A-Za-z]+$/;
 
+/** A `Domain` a cookie can carry: LDH labels, one leading dot allowed (the `cookie` package's rule). */
+const COOKIE_DOMAIN =
+	/^([.]?[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)([.][a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)*$/i;
+
+/** RFC 6265bis: browsers match the `__Host-` and `__Secure-` prefixes case-insensitively. */
+const HOST_PREFIX = /^__host-/i;
+const SECURE_PREFIX = /^__secure-/i;
+
 /**
  * Why `session` yields no session cookie, or `undefined`: a cookie a browser
  * drops (a `__Host-` name not secure or with a domain, an empty one included; a
  * `__Secure-` name or `SameSite=None` not secure), a name that is not an RFC
- * 6265 token, a lifetime outside 1 to `MAX_DURATION_MS` ms.
+ * 6265 token, a domain a cookie cannot carry, a lifetime outside 1 to
+ * `MAX_DURATION_MS` ms.
  */
 export function sessionCookieRefusal(
 	session: SessionCookieConfigSlice,
 ): SessionCookieRefusal | undefined {
 	const { name, secure, sameSite, domain, maxAge } = session;
-	if (name.startsWith("__Host-") && (secure !== true || domain !== null)) {
+	if (HOST_PREFIX.test(name) && (secure !== true || domain !== null)) {
 		return {
 			key: "name",
 			message:
@@ -75,10 +85,16 @@ export function sessionCookieRefusal(
 			message: `session.name ${JSON.stringify(name)} is not a cookie name (an RFC 6265 token)`,
 		};
 	}
-	if (name.startsWith("__Secure-") && secure !== true) {
+	if (SECURE_PREFIX.test(name) && secure !== true) {
 		return {
 			key: "name",
 			message: "session.name with __Secure- prefix requires session.secure=true",
+		};
+	}
+	if (domain !== null && domain !== "" && !COOKIE_DOMAIN.test(domain)) {
+		return {
+			key: "domain",
+			message: `session.domain ${JSON.stringify(domain)} is not a cookie domain (a host name, one leading dot allowed)`,
 		};
 	}
 	if (sameSite === "none" && secure !== true) {

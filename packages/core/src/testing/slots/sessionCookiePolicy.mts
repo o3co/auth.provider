@@ -38,6 +38,14 @@ export interface SessionCookiePolicyContractInput {
 /** RFC 6265 §4.1.1: a cookie name is an RFC 2616 token — visible ASCII but separators. */
 const COOKIE_NAME = /^[!#$%&'*+\-.^_`|~0-9A-Za-z]+$/;
 
+/** A `Domain` a cookie can carry: LDH labels, one leading dot allowed (the `cookie` package's rule). */
+const COOKIE_DOMAIN =
+	/^([.]?[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)([.][a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)*$/i;
+
+/** RFC 6265bis: browsers match the `__Host-` and `__Secure-` prefixes case-insensitively. */
+const HOST_PREFIX = /^__host-/i;
+const SECURE_PREFIX = /^__secure-/i;
+
 const SAME_SITE: ReadonlySet<unknown> = new Set(["lax", "strict", "none"]);
 
 /** The cases of the `sessionCookiePolicy` contract over the policy `input` builds. */
@@ -68,12 +76,12 @@ export function sessionCookiePolicyContract(
 			},
 		},
 		{
-			name: "domain is a non-empty string, or undefined for a host-only cookie",
+			name: "domain is a cookie domain — a host name, one leading dot allowed — or undefined for a host-only cookie",
 			run: async () => {
 				const { domain } = build();
 				assert.ok(
-					domain === undefined || (typeof domain === "string" && domain.length > 0),
-					`domain ${JSON.stringify(domain)} is neither a domain nor undefined`,
+					domain === undefined || (typeof domain === "string" && COOKIE_DOMAIN.test(domain)),
+					`domain ${JSON.stringify(domain)} is neither a cookie domain nor undefined`,
 				);
 			},
 		},
@@ -94,14 +102,14 @@ export function sessionCookiePolicyContract(
 			run: async () => {
 				const { name, secure, domain } = build();
 				if (typeof name !== "string") return;
-				if (name.startsWith("__Secure-")) {
+				if (SECURE_PREFIX.test(name)) {
 					assert.equal(
 						secure,
 						true,
 						"a __Secure- cookie that is not secure is dropped by the browser",
 					);
 				}
-				if (!name.startsWith("__Host-")) return;
+				if (!HOST_PREFIX.test(name)) return;
 				assert.equal(secure, true, "a __Host- cookie that is not secure is dropped by the browser");
 				assert.equal(
 					domain,
