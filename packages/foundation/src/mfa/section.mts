@@ -21,14 +21,16 @@
  * without a default.
  *
  * Guarantees: the schema refuses an unknown key and a URL that is not https
- * or loopback http, naming the key and quoting no value; a URL left out
- * passes the schema — the reference binds each one to a variable that may be
- * unset — and {@link readFoundationMfaFactorStoreUrls} refuses it, which the
- * module calls before it provides the store, so a composition that selects
- * the adapter with any URL missing refuses the boot.
+ * or loopback http, naming the key in printable characters and quoting no
+ * value; a URL left out passes the schema — the reference binds each one to
+ * a variable that may be unset — and {@link readFoundationMfaFactorStoreUrls}
+ * refuses it. A module that reads the section provides its store eagerly
+ * ({@link foundationMfaFactorStoreLifecycle}) and calls the reader first, so
+ * a composition that installs it with any URL missing refuses the boot,
+ * whether or not anything requires the store.
  */
 
-import type { ModuleSection } from "@o3co/auth-provider-core";
+import { auditErrorText, type ModuleSection } from "@o3co/auth-provider-core";
 import { z } from "zod";
 import { checkSecureEndpoint, describeEndpointRejection } from "../endpointUrl.mjs";
 
@@ -71,7 +73,7 @@ const schema = z.strictObject(
 	{
 		error: (issue) => {
 			if (issue.code === "unrecognized_keys") {
-				return `has a key it does not know: ${issue.keys.map((key) => JSON.stringify(key)).join(", ")}`;
+				return `has a key it does not know: ${issue.keys.map((key) => `"${auditErrorText(key)}"`).join(", ")}`;
 			}
 			return issue.input === undefined ? SECTION_MISSING : "must be a section of keys";
 		},
@@ -83,6 +85,14 @@ export const foundationMfaFactorStoreSection = {
 	schema,
 	reference: new URL("../../config/reference.conf", import.meta.url),
 } as const satisfies ModuleSection<typeof schema>;
+
+/**
+ * The lifecycle of a module that reads the section: its store is built at
+ * boot whether or not anything requires it, so the reader always runs.
+ */
+export const foundationMfaFactorStoreLifecycle = {
+	mfaFactorStore: { eager: true },
+} as const;
 
 /** The section as its schema reads it. */
 export type FoundationMfaFactorStoreSection = z.output<typeof schema>;

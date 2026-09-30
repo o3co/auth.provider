@@ -15,10 +15,10 @@
  */
 
 /**
- * A module that reads `foundation-mfa-factor-store` as the Store adapter's
- * module does — its section declared with the package's schema and
- * reference, its URLs read before it provides — standing in a memory store
- * for the adapter; and a module that selects it by requiring a factor store.
+ * A module that reads `foundation-mfa-factor-store` as a module providing the
+ * Store-backed factor store must — the package's schema and reference, its
+ * store provided eagerly, its URLs read first — with a memory store in the
+ * adapter's place; and a module that requires a factor store.
  */
 
 import {
@@ -29,6 +29,7 @@ import {
 } from "@o3co/auth-provider-core";
 import {
 	FOUNDATION_MFA_FACTOR_STORE_SECTION,
+	foundationMfaFactorStoreLifecycle,
 	foundationMfaFactorStoreSection,
 	readFoundationMfaFactorStoreUrls,
 } from "#/mfa/section.mjs";
@@ -42,6 +43,7 @@ export const fixtureModule = defineModule({
 			return createMemoryMfaFactorStore();
 		},
 	},
+	lifecycle: foundationMfaFactorStoreLifecycle,
 });
 
 /** A module that needs a factor store, and records the one it was handed. */
