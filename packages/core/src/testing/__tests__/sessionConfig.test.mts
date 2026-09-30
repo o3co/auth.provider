@@ -15,9 +15,9 @@
  */
 
 /**
- * The builders core's testing entry offers for the `session` and
- * `federations` sections, so a test that boots a login over plain HTTP, or
- * with a federation, writes neither section by hand.
+ * The builders core's testing entry offers for the session cookie
+ * (`session-store`) and the `federations` section, so a test that boots a
+ * login over plain HTTP, or with a federation, writes neither by hand.
  */
 
 import { describe, expect, it } from "vitest";
@@ -25,25 +25,33 @@ import { AppConfigSchema } from "#/config/application.schema.mjs";
 import { makeValidAppConfig, withFederation, withInsecureSessionCookie } from "#/testing/index.mjs";
 
 describe("withInsecureSessionCookie", () => {
-	it("answers a copy whose session cookie a plain-HTTP client keeps: not Secure, and so no __Host- name", () => {
+	it("answers a copy whose session cookie — the session store's section — a plain-HTTP client keeps: not Secure, and so no __Host- name", () => {
 		const config = makeValidAppConfig();
 		const insecure = withInsecureSessionCookie(config);
-		expect(insecure.session.secure).toBe(false);
-		expect(insecure.session.name.startsWith("__Host-")).toBe(false);
-		expect(AppConfigSchema.parse(insecure).session).toMatchObject({
+		const cookie = insecure["session-store"];
+		expect(cookie.secure).toBe(false);
+		expect(cookie.name.startsWith("__Host-")).toBe(false);
+		expect(AppConfigSchema.parse(insecure)["session-store"]).toMatchObject({
 			secure: false,
-			name: insecure.session.name,
+			name: cookie.name,
 		});
+	});
+
+	it("writes nothing under the session module's section, where the cookie's keys refuse boot", () => {
+		const config = makeValidAppConfig();
+		expect(withInsecureSessionCookie(config).session).toEqual(config.session);
 	});
 
 	it("keeps every other key, and leaves the configuration it was given as it was", () => {
 		const config = makeValidAppConfig();
 		const insecure = withInsecureSessionCookie(config);
-		expect({ ...insecure, session: config.session }).toEqual(config);
-		expect({ ...insecure.session, name: config.session.name, secure: true }).toEqual(
-			config.session,
-		);
-		expect(config.session.secure).toBe(true);
+		expect({ ...insecure, "session-store": config["session-store"] }).toEqual(config);
+		expect({
+			...insecure["session-store"],
+			name: config["session-store"].name,
+			secure: true,
+		}).toEqual(config["session-store"]);
+		expect(config["session-store"].secure).toBe(true);
 	});
 });
 
