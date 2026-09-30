@@ -547,7 +547,8 @@ export function createMfaCoordinator(options: MfaCoordinatorOptions): MfaCoordin
 				| {
 						readonly verified: MfaEnrolledFactor;
 						readonly next: MfaEnrolledFactor["data"];
-						readonly amr: readonly string[];
+						/** What the verification adds: the factor's values, as it declares them. */
+						readonly added: readonly string[];
 				  }
 				| { readonly reason: MfaRefusalReason }
 				| MfaFactorUnreadable
@@ -589,7 +590,7 @@ export function createMfaCoordinator(options: MfaCoordinatorOptions): MfaCoordin
 						new TypeError("the factor's amrFor answered values it does not declare"),
 					);
 				}
-				return { verified, next, amr };
+				return { verified, next, added: amr };
 			};
 
 			let checked = await check();
@@ -676,7 +677,7 @@ export function createMfaCoordinator(options: MfaCoordinatorOptions): MfaCoordin
 				outcome: "verified",
 				continuation: consumed.continuation,
 				adds: {
-					amr: [...new Set([...checked.amr, ...(factor.addsMfa ? [MFA_AMR] : [])])],
+					amr: [...new Set([...checked.added, ...(factor.addsMfa ? [MFA_AMR] : [])])],
 					mfaAt: new Date(nowMs),
 				},
 				...about,
