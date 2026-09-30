@@ -58,7 +58,7 @@ const config = handle.components.config; // boot がパースしたもの
 
 `AppConfigSchema` は非推奨です。`createApp` の前にこれでパースすると、宣言していないセクションがすべて取り除かれ — #472、#495、#496 はそうしてセクションを失いました — それを続ける構成は、解決したものより少ないものを boot に渡すことになります。export は残り、そこから推論される型 `AppConfig` はパース済みの設定の型です。
 
-デフォルトはスキーマではなく [`config/reference.conf`](config/reference.conf) にあります。トップレベルのフィールド（すべてのデプロイが持つセクション。モジュールが所有するセクションは、所有するパッケージが記述します）:
+デフォルトはスキーマではなく `reference.conf` にあります。core 自身のセクションは [`config/reference.conf`](config/reference.conf)、モジュールのセクションはそのマニフェストが宣言する `reference.conf`（standalone テンプレートの `http`、`logging`、鍵ストアの設定はテンプレートのもの）です。core のスキーマが宣言するトップレベルのフィールド（モジュールが所有するセクションは、所有するパッケージまたはテンプレートが記述します。必須なのは行にそう書いたものだけです）:
 
 | フィールド | 説明 |
 | --- | --- |

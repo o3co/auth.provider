@@ -58,7 +58,7 @@ Until each section moves under its module's name — the move pull requests of #
 
 `AppConfigSchema` is deprecated. Parsing with it before `createApp` strips every section it does not declare — how #472, #495 and #496 lost theirs — so a composition that still does hands boot less than it resolved. It stays exported, and `AppConfig`, its inferred type, is the type of the parsed configuration.
 
-Defaults live in [`config/reference.conf`](config/reference.conf), not in the schema. Top-level fields (the sections every deployment carries; module-owned sections are documented by the package that owns them):
+Defaults live in a `reference.conf`, never in the schema: core's own sections' in [`config/reference.conf`](config/reference.conf), a module's in the `reference.conf` its manifest declares (the standalone template's `http`, `logging` and key-store settings in the template's). Top-level fields core's schema declares (module-owned sections are documented by the package or template that owns them; a section is required only where the row says so):
 
 | Field | Description |
 | --- | --- |

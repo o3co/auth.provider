@@ -15,9 +15,9 @@
  */
 /**
  * Zod schemas for the application config. They are a pure type contract: the
- * shape required at the boundary, not defaults. Defaults live only in
- * `packages/core/config/reference.conf`, whose `${?ENV_VAR}` substitutions are
- * the only override surface, so parsing `{}` fails. Tests load through
+ * shape required at the boundary, not defaults. Defaults live only in a
+ * `reference.conf` — core's own sections' in `packages/core/config/reference.conf`,
+ * a module's in the one its manifest declares — so parsing `{}` fails. Tests load through
  * `parseFile` or start from `makeValidCoreConfig`
  * (`@o3co/auth-provider-core/testing`). See ADR 2026-04-30.
  */
