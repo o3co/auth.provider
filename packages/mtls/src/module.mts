@@ -149,26 +149,25 @@ export const mtlsConfigSchema = z
 /** The `mtls` section as its schema leaves it. */
 type MtlsSection = z.output<typeof mtlsConfigSchema>;
 
-/** `mtls.fullPki` in the shape `createMtlsMechanism` takes it. */
+type FullPkiSection = NonNullable<MtlsSection["fullPki"]>;
+
+/** `mtls.fullPki`, its revocation decided, in the shape `createMtlsMechanism` takes it. */
 const fullPkiOption = (
-	fullPki: NonNullable<MtlsSection["fullPki"]>,
+	fullPki: FullPkiSection,
+	revocation: NonNullable<FullPkiSection["revocation"]>,
 ): NonNullable<MtlsMechanismOptions["fullPki"]> => ({
 	"max-chain-depth": fullPki.maxChainDepth,
 	"signature-algorithms": fullPki.signatureAlgorithms as readonly SignatureAlgorithmName[],
 	"min-rsa-key-bits": fullPki.minRsaKeyBits,
-	...(fullPki.revocation === undefined
-		? {}
-		: {
-				revocation: {
-					mode: fullPki.revocation.mode,
-					"on-unavailable": fullPki.revocation.onUnavailable,
-					"allowed-hosts": fullPki.revocation.allowedHosts,
-					"fetch-timeout-ms": fullPki.revocation.fetchTimeoutMs,
-					"cache-ttl-seconds": fullPki.revocation.cacheTtlSeconds,
-					"max-response-bytes": fullPki.revocation.maxResponseBytes,
-					"ocsp-require-nonce": fullPki.revocation.ocspRequireNonce,
-				},
-			}),
+	revocation: {
+		mode: revocation.mode,
+		"on-unavailable": revocation.onUnavailable,
+		"allowed-hosts": revocation.allowedHosts,
+		"fetch-timeout-ms": revocation.fetchTimeoutMs,
+		"cache-ttl-seconds": revocation.cacheTtlSeconds,
+		"max-response-bytes": revocation.maxResponseBytes,
+		"ocsp-require-nonce": revocation.ocspRequireNonce,
+	},
 });
 
 // ---------------------------------------------------------------------------
@@ -295,7 +294,9 @@ export const mtlsModule = defineModule<never, "logger", typeof mtlsConfigSchema>
 				//
 				// The revocation settings have no defaults: "the CRL endpoint is
 				// unreachable" and "the certificate is not revoked" are different
-				// facts, and only the operator can decide which one to act on.
+				// facts, and only the operator can decide which one to act on. The
+				// mechanism reads `fullPki` in this mode alone.
+				let fullPkiOptions: MtlsMechanismOptions["fullPki"];
 				if (cfg.mode === "full-pki") {
 					const fullPki = cfg.fullPki;
 					if (fullPki?.revocation === undefined) {
@@ -325,6 +326,7 @@ export const mtlsModule = defineModule<never, "logger", typeof mtlsConfigSchema>
 								"mtls.trustedProxies draws for forwarded headers.",
 						);
 					}
+					fullPkiOptions = fullPkiOption(fullPki, fullPki.revocation);
 				}
 
 				// --- Boot-time fail-loud check 2: narrow PKI + tls-layer is not supported. ---
@@ -349,7 +351,7 @@ export const mtlsModule = defineModule<never, "logger", typeof mtlsConfigSchema>
 					trustedProxies: cfg.trustedProxies,
 					mode: cfg.mode,
 					trustedCas: cfg.trustedCas,
-					...(cfg.fullPki ? { fullPki: fullPkiOption(cfg.fullPki) } : {}),
+					...(fullPkiOptions === undefined ? {} : { fullPki: fullPkiOptions }),
 					logger: deps.logger,
 				});
 			},

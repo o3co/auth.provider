@@ -80,6 +80,12 @@ describe("dpopModule — discoveryMetadata contribution", () => {
 		expect(all).not.toHaveProperty("dpop_signing_alg_values_supported");
 	});
 
+	it("contributes nothing when algWhitelist is empty, rather than advertising no algorithm", async () => {
+		const meta = await contribution(dpopSection({ enabled: true, algWhitelist: [] }));
+		const all = { ...(meta.endpoints ?? {}), ...(meta.metadata ?? {}) };
+		expect(all).not.toHaveProperty("dpop_signing_alg_values_supported");
+	});
+
 	it("contributes nothing when the dpop section is absent entirely", async () => {
 		const meta = await contribution(dpopSection(undefined));
 		const all = { ...(meta.endpoints ?? {}), ...(meta.metadata ?? {}) };

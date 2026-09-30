@@ -597,6 +597,7 @@ describe("dpopModule — server-provided nonce from config", () => {
 
 	it("refuses to build a mechanism when a nonce is required but no shared secret is configured", () => {
 		expect(() => buildMechanism(withNonce(undefined).config)).toThrow(/dpop\.nonce\.secret/);
+		expect(() => buildMechanism(withNonce("").config)).toThrow(/dpop\.nonce\.secret is unset/);
 	});
 
 	it("measures the secret on its decoded length, and names its key and env var when it falls short", () => {

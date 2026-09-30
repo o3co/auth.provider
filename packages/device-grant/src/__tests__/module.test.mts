@@ -1577,6 +1577,14 @@ describe("deviceGrantModule — disabled surface", () => {
 		expect(contributes?.grants).toBeUndefined();
 	});
 
+	it("contributes no grant when the switch it is handed is none its section's schema reads", () => {
+		// Boot refuses the value; the factory builds the grant off meanwhile.
+		const contributes = contributionsFor({
+			config: { "device-grant": { ...ENABLED, enabled: "yes" } },
+		});
+		expect(contributes?.grants).toBeUndefined();
+	});
+
 	it("contributes the grant when enabled", () => {
 		const contributes = contributionsFor({
 			config: { "device-grant": ENABLED },
