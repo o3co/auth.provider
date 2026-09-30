@@ -50,6 +50,7 @@
 		"msw": "^2.15.0",
 		"vitest": "^5.0.2",
 		"@vitest/coverage-v8": "^5.0.2",
-		"@o3co/ts.hocon": "^1.13.0"
+		"@o3co/ts.hocon": "^1.13.0",
+		"@o3co/auth-provider-test-kit": "workspace:*"
 	}
 }
