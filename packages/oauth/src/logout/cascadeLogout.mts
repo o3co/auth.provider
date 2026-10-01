@@ -22,7 +22,21 @@ import type {
 	SessionRPRegistry,
 	UserSessionStore,
 } from "@o3co/auth-provider-core";
-import { loggableError, supportsSessionEnd } from "@o3co/auth-provider-core";
+import { loggableError } from "@o3co/auth-provider-core";
+import { endSessionIfCapable, type LogoutBegun } from "./sessionEnd.mjs";
+
+/** The stores the cascade runs over: its options less how step 1 starts. */
+export type CascadeLogoutStores = Omit<CascadeLogoutOptions, "expiresAt">;
+
+/**
+ * How step 1 starts: from the families a begun logout read (`begun`; it
+ * lists them when the begin read none), by ending the session (`end`), or by
+ * listing the families without marking anything (`list`).
+ */
+type CascadeStart =
+	| { readonly kind: "begun"; readonly familyIds: ReadonlyArray<string> | undefined }
+	| { readonly kind: "end"; readonly expiresAt: Date }
+	| { readonly kind: "list" };
 
 export interface CascadeLogoutOptions {
 	readonly sid: string;
@@ -86,17 +100,51 @@ export type CascadeLogoutResult =
  *
  * @param opts.logger - Defaults to `console`.
  */
-export async function cascadeLogout(opts: CascadeLogoutOptions): Promise<CascadeLogoutResult> {
+export function cascadeLogout(opts: CascadeLogoutOptions): Promise<CascadeLogoutResult> {
+	return runCascade(
+		opts.expiresAt !== undefined ? { kind: "end", expiresAt: opts.expiresAt } : { kind: "list" },
+		opts,
+	);
+}
+
+/**
+ * The cascade of a logout `beginLogout` began: step 1 revokes the families
+ * the begin read when it ended the session, and lists them when it read none
+ * (no session-end capability). Nothing is marked again.
+ */
+export function cascadeLogoutFrom(
+	begun: Extract<LogoutBegun, { outcome: "begun" }>,
+	stores: CascadeLogoutStores,
+): Promise<CascadeLogoutResult> {
+	return runCascade({ kind: "begun", familyIds: begun.familyIds }, stores);
+}
+
+/**
+ * The cascade of a session no logout began — one read by its subject, not
+ * by a request that holds the session: step 1 lists the families and marks
+ * nothing.
+ */
+export function cascadeLogoutUnmarked(stores: CascadeLogoutStores): Promise<CascadeLogoutResult> {
+	return runCascade({ kind: "list" }, stores);
+}
+
+async function runCascade(
+	start: CascadeStart,
+	opts: CascadeLogoutStores,
+): Promise<CascadeLogoutResult> {
 	const logger = opts.logger ?? console;
 
 	// Step 1: read fanout context.
 	const index = opts.sessionFamilyIndex;
 	let familyIds: ReadonlyArray<string>;
 	try {
-		familyIds =
-			opts.expiresAt !== undefined && supportsSessionEnd(index)
-				? await index.endSession(opts.sid, opts.expiresAt)
-				: await index.listFamilyIds(opts.sid);
+		const read =
+			start.kind === "begun"
+				? start.familyIds
+				: start.kind === "end"
+					? await endSessionIfCapable(index, opts.sid, start.expiresAt)
+					: undefined;
+		familyIds = read ?? (await index.listFamilyIds(opts.sid));
 	} catch (error) {
 		return { outcome: "failed", step: 1, errors: [error] };
 	}

@@ -344,7 +344,7 @@ describe("POST /oauth/logout", () => {
 			expect(fedTokenStore.removeBySid).toHaveBeenCalledWith("sid-1");
 		});
 
-		it("marks the session ended in a family index with the session-end capability, with the session's own expiresAt", async () => {
+		it("marks the session ended once, in a family index with the session-end capability, with the session's own expiresAt, and the cascade revokes the families that mark read", async () => {
 			const sessionFamilyIndex = {
 				...makeSessionFamilyIndex(),
 				endSession: vi.fn(async (_sid: string, _expiresAt: Date) => ["fam-1"]),
@@ -356,10 +356,120 @@ describe("POST /oauth/logout", () => {
 			const res = await postLogout(app, { id_token_hint: await mintIdToken() });
 
 			expect(res.status).toBe(200);
-			expect(sessionFamilyIndex.endSession).toHaveBeenCalledTimes(1);
-			expect(sessionFamilyIndex.endSession).toHaveBeenCalledWith("sid-1", baseSession.expiresAt);
+			expect(sessionFamilyIndex.endSession.mock.calls).toEqual([["sid-1", baseSession.expiresAt]]);
 			expect(sessionFamilyIndex.listFamilyIds).not.toHaveBeenCalled();
 			expect(refreshFamilyRevocation.revokeFamily).toHaveBeenCalledWith("fam-1");
+		});
+
+		it("ends the session in a family index with the session-end capability before it lists the relying parties", async () => {
+			const sessionFamilyIndex = {
+				...makeSessionFamilyIndex(),
+				endSession: vi.fn(async (_sid: string, _expiresAt: Date) => ["fam-1"]),
+				addFamilyIdUnlessEnded: vi.fn(async () => "added" as const),
+			};
+			const sessionRPRegistry = makeSessionRPRegistry();
+			const app = buildApp({ sessionFamilyIndex, sessionRPRegistry });
+
+			const res = await postLogout(app, { id_token_hint: await mintIdToken() });
+
+			expect(res.status).toBe(200);
+			const ended = sessionFamilyIndex.endSession.mock.invocationCallOrder[0] as number;
+			const listed = (sessionRPRegistry.listRPs as ReturnType<typeof vi.fn>).mock
+				.invocationCallOrder[0] as number;
+			expect(ended).toBeLessThan(listed);
+		});
+
+		it("a session end that fails before the listing is 503, logged once, with no relying party listed", async () => {
+			const logger = createMockLogger();
+			const sessionFamilyIndex = {
+				...makeSessionFamilyIndex(),
+				endSession: vi.fn(async () => {
+					throw storeReplyError();
+				}),
+				addFamilyIdUnlessEnded: vi.fn(async () => "added" as const),
+			};
+			const sessionRPRegistry = makeSessionRPRegistry();
+			const app = buildApp({ sessionFamilyIndex, sessionRPRegistry, logger });
+
+			const res = await postLogout(app, { id_token_hint: await mintIdToken() });
+
+			expect(res.status).toBe(503);
+			expect(sessionRPRegistry.listRPs).not.toHaveBeenCalled();
+			expectOutageLine(logger, "logout_store_unavailable", {
+				store: "session_family_index",
+				step: "endSession",
+				left: "unknown",
+			});
+		});
+
+		it("a failed session end is audited as logout.cascade_failed at step 1, naming the store and what it left", async () => {
+			const auditSink: AuditSink = { kind: "mock", record: vi.fn().mockResolvedValue(undefined) };
+			const sessionFamilyIndex = {
+				...makeSessionFamilyIndex(),
+				endSession: vi.fn(async () => {
+					throw storeReplyError();
+				}),
+				addFamilyIdUnlessEnded: vi.fn(async () => "added" as const),
+			};
+			const app = buildApp({ sessionFamilyIndex, auditSink });
+
+			expect((await postLogout(app, { id_token_hint: await mintIdToken() })).status).toBe(503);
+			expect(auditSink.record).toHaveBeenCalledWith(
+				expect.objectContaining({
+					type: "logout.cascade_failed",
+					details: { sid: "sid-1", step: 1, store: "session_family_index", left: "unknown" },
+				}),
+			);
+		});
+
+		it("a relying-party listing that fails after the session end is 503, logged and audited as half-ended", async () => {
+			const logger = createMockLogger();
+			const auditSink: AuditSink = { kind: "mock", record: vi.fn().mockResolvedValue(undefined) };
+			const sessionFamilyIndex = {
+				...makeSessionFamilyIndex(),
+				endSession: vi.fn(async () => ["fam-1"]),
+				addFamilyIdUnlessEnded: vi.fn(async () => "added" as const),
+			};
+			const sessionRPRegistry = makeSessionRPRegistry({
+				listRPs: vi.fn(async () => {
+					throw storeReplyError();
+				}),
+			});
+			const app = buildApp({ sessionFamilyIndex, sessionRPRegistry, logger, auditSink });
+
+			expect((await postLogout(app, { id_token_hint: await mintIdToken() })).status).toBe(503);
+			expectOutageLine(logger, "logout_store_unavailable", {
+				store: "session_rp_registry",
+				step: "list",
+				left: "half_ended",
+			});
+			expect(auditSink.record).toHaveBeenCalledWith(
+				expect.objectContaining({
+					type: "logout.cascade_failed",
+					details: { sid: "sid-1", step: 1, store: "session_rp_registry", left: "half_ended" },
+				}),
+			);
+		});
+
+		it("a relying-party listing that fails without the session-end capability is 503, logged as unchanged, and not audited", async () => {
+			const logger = createMockLogger();
+			const auditSink: AuditSink = { kind: "mock", record: vi.fn().mockResolvedValue(undefined) };
+			const sessionRPRegistry = makeSessionRPRegistry({
+				listRPs: vi.fn(async () => {
+					throw storeReplyError();
+				}),
+			});
+			const app = buildApp({ sessionRPRegistry, logger, auditSink });
+
+			expect((await postLogout(app, { id_token_hint: await mintIdToken() })).status).toBe(503);
+			expectOutageLine(logger, "logout_store_unavailable", {
+				store: "session_rp_registry",
+				step: "list",
+				left: "unchanged",
+			});
+			expect(auditSink.record).not.toHaveBeenCalledWith(
+				expect.objectContaining({ type: "logout.cascade_failed" }),
+			);
 		});
 
 		it("confirmed=1 form-submission shape (hint + confirmed + state) completes hint-based logout, not 400", async () => {
