@@ -44,8 +44,13 @@ import { isLoopbackHostname } from "./loopback.mjs";
  *   ignoring case, `_` and `-`. Values are otherwise free. A registered
  *   parameter of the same effective name as one this provider appends would
  *   reach the client beside it, and which one a client reads is its
- *   framework's choice; an allowlist on names leaves no spelling a framework
- *   could read as another name (`iss[]`, `;iss=`, `%69ss`).
+ *   framework's choice; an allowlist on names leaves no spelling a parser
+ *   could read as another name (`iss[]`, `;iss=`, `%69ss`). What is covered
+ *   is the names as written and the common normalizations (case, `_`, `-`),
+ *   not a mapping a client configures (an alias, a prefix it strips): a
+ *   client reads the OAuth fields by their canonical names. A module that
+ *   appends names of its own reserves them through
+ *   {@link redirectUriQueryCarries}, compared the same way.
  */
 
 /** Why a registered redirect URI was refused. */
@@ -80,12 +85,14 @@ const EXECUTABLE_SCHEME_LABELS: ReadonlySet<string> = new Set([
 const QUERY_NAME = /^[A-Za-z0-9_-]+$/;
 
 /**
- * A query name as name-normalizing middleware sees it: case folded, `_` and
- * `-` removed. Such middleware (camelCase to snake_case, a leading `_`
- * stripped) keeps a name's letters and digits and changes only these, so
- * `_state`, `errorDescription` and `error-description` all key as a response
- * parameter. Only ever applied to an allowlisted, hence ASCII, name, where
- * `toLowerCase` is exact ASCII folding.
+ * A query name as the common name normalizations see it: case folded, `_` and
+ * `-` removed. Case-insensitive collection, camelCase to snake_case, kebab to
+ * snake and a stripped leading `_` keep a name's letters and digits and change
+ * only these, so `_state`, `errorDescription` and `error-description` all key
+ * as a response parameter. A mapping a client configures itself (an alias, a
+ * prefix it strips) is outside what any fixed comparison can cover: a client
+ * reads the OAuth fields by their canonical names. Only ever applied to an
+ * allowlisted, hence ASCII, name, where `toLowerCase` is exact ASCII folding.
  */
 const nameKey = (name: string): string => name.toLowerCase().replace(/[_-]/g, "");
 
@@ -101,28 +108,70 @@ const RESPONSE_PARAMETERS: ReadonlyMap<string, string> = new Map(
 );
 
 /**
- * The query's verdict, read from `url.search` UNDECODED: the WHATWG parser has
- * found where the query starts and ends, and only percent-encodes characters
- * the name allowlist refuses anyway, so a name is judged as it was written.
- * `URLSearchParams` would decode `%69ss` into `iss`, turn `+` into a space and
- * drop empty pairs, judging a different string from the one registered.
+ * The query's parameter names, as written: `url.search` UNDECODED, pairs split
+ * on `&`, each name running to the first `=` or being the whole pair. `[]` for
+ * no query and for a bare trailing `?`.
  *
- * Pairs are split on `&`; a name runs to the first `=`, or is the whole pair.
- * A `;` is refused anywhere, values included: some parsers split on it too and
- * would read `?a=x;iss=y` as carrying `iss`.
+ * Read from `url.search` because the WHATWG parser has found where the query
+ * starts and ends, and it decodes nothing: it only percent-encodes characters
+ * the name allowlist refuses anyway. So a name is judged as it was written,
+ * with one exception: the parser trims leading and trailing C0 controls and
+ * spaces from the whole input (`?foo ` reads as `?foo`), as it does when a
+ * redirect is built from the same string. `URLSearchParams` would decode
+ * `%69ss` into `iss`, turn `+` into a space and drop empty pairs, judging a
+ * different string from the one registered.
+ */
+function queryNames(url: URL): string[] {
+	const query = url.search.slice(1);
+	if (query === "") return [];
+	return query.split("&").map((pair) => {
+		const equals = pair.indexOf("=");
+		return equals === -1 ? pair : pair.slice(0, equals);
+	});
+}
+
+/**
+ * The query's verdict. A `;` is refused anywhere, values included: some
+ * parsers split on it too and would read `?a=x;iss=y` as carrying `iss`. Then
+ * the first name outside the allowlist, or the first response parameter,
+ * decides.
  */
 function queryRejection(url: URL): RedirectUriRejection | null {
-	const query = url.search.slice(1); // "" for no query and for a bare trailing `?`
-	if (query === "") return null;
-	if (query.includes(";")) return { reason: "query-name-invalid" };
-	for (const pair of query.split("&")) {
-		const equals = pair.indexOf("=");
-		const name = equals === -1 ? pair : pair.slice(0, equals);
+	if (url.search.includes(";")) return { reason: "query-name-invalid" };
+	for (const name of queryNames(url)) {
 		if (!QUERY_NAME.test(name)) return { reason: "query-name-invalid" };
 		const reserved = RESPONSE_PARAMETERS.get(nameKey(name));
 		if (reserved !== undefined) return { reason: "reserved-parameter", parameter: reserved };
 	}
 	return null;
+}
+
+/**
+ * Which of `names` a redirect URI's query already carries, compared as
+ * {@link checkRedirectUri} compares the response's own names (case, `_` and
+ * `-` ignored): the name as given in `names`, for the first match in query
+ * order, or `undefined` for none or an unparsable URI.
+ *
+ * For a module that appends parameters of its own to a registered URI and
+ * reserves them: the names are that module's, the comparison is this one's,
+ * so the two reservations cannot drift apart. A name outside the allowlist
+ * is never matched here; {@link checkRedirectUri} refuses it, and a caller
+ * runs both.
+ */
+export function redirectUriQueryCarries(uri: string, names: readonly string[]): string | undefined {
+	let url: URL;
+	try {
+		url = new URL(uri);
+	} catch {
+		return undefined;
+	}
+	const byKey = new Map(names.map((name) => [nameKey(name), name]));
+	for (const name of queryNames(url)) {
+		if (!QUERY_NAME.test(name)) continue;
+		const carried = byKey.get(nameKey(name));
+		if (carried !== undefined) return carried;
+	}
+	return undefined;
 }
 
 /**

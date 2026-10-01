@@ -44,7 +44,7 @@
  */
 
 import { randomBytes } from "node:crypto";
-import { checkRedirectUri } from "../net/redirect-uri.mjs";
+import { checkRedirectUri, redirectUriQueryCarries } from "../net/redirect-uri.mjs";
 import { federationGrantAllowlist } from "./allowlist.mjs";
 import { carrying, carryingFailure } from "./carry.mjs";
 import { effectiveFederationGrantStatus } from "./effective-status.mjs";
@@ -277,20 +277,18 @@ export type FederationGrantReauthorizationResult =
 const RESERVED_RESULT_PARAMETERS = ["grant_id", "state", "error"] as const;
 
 /**
- * The reserved result parameter a redirect URI already carries, if any.
+ * The reserved result parameter a redirect URI already carries, if any, by
+ * its canonical name. Names are compared as the redirect-URI rule compares
+ * the authorization response's (case, `_` and `-` ignored), so `GRANT_ID`,
+ * `grantId` and `_grant_id` are `grant_id`: a client framework that reads
+ * names case-insensitively would otherwise read the registered one.
  *
  * Exported so that where the URI is REGISTERED can refuse it too — at boot, for
  * a deployment whose clients are configured — and lodging keeps refusing it as
  * the belt for a repository that validates nothing.
  */
 export function federationGrantRedirectUriReservedParameter(uri: string): string | undefined {
-	let parsed: URL;
-	try {
-		parsed = new URL(uri);
-	} catch {
-		return undefined;
-	}
-	return RESERVED_RESULT_PARAMETERS.find((name) => parsed.searchParams.has(name));
+	return redirectUriQueryCarries(uri, RESERVED_RESULT_PARAMETERS);
 }
 
 const defaultRandomId = (): string => randomBytes(32).toString("base64url");
