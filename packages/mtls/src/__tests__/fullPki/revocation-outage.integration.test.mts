@@ -31,12 +31,12 @@
  */
 
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
-import type { AddressInfo } from "node:net";
+import { type AddressInfo, connect } from "node:net";
 import { type Logger, protectedResourceBindingMw, tokenBindingMw } from "@o3co/auth-provider-core";
 import express from "express";
 import { SignJWT } from "jose";
 import request from "supertest";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, beforeAll, describe, expect, it } from "vitest";
 import { createMtlsMechanism } from "#/extractor.mjs";
 import { computeCertThumbprint } from "#/thumbprint.mjs";
 import type { Minted } from "./pkiFactory.mjs";
@@ -101,14 +101,25 @@ const listen = async (
 	return `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
 };
 
-/** A loopback origin nothing listens on. */
-const closedOrigin = async (): Promise<string> => {
-	const server = createServer();
-	await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
-	const { port } = server.address() as AddressInfo;
-	await new Promise<void>((resolve) => server.close(() => resolve()));
-	return `http://127.0.0.1:${port}`;
-};
+/**
+ * A loopback origin nothing listens on, so a fetch to it is refused. Port 2 is
+ * privileged and below every ephemeral range, so no `listen(0)` in any test
+ * running beside this one is handed it (port 1 is on fetch's bad-port list).
+ */
+const REFUSED_ORIGIN = "http://127.0.0.1:2";
+
+beforeAll(async () => {
+	const code = await new Promise<string | undefined>((resolve) => {
+		const { hostname, port } = new URL(REFUSED_ORIGIN);
+		const socket = connect(Number(port), hostname);
+		socket.once("connect", () => {
+			socket.destroy();
+			resolve(undefined);
+		});
+		socket.once("error", (err: NodeJS.ErrnoException) => resolve(err.code));
+	});
+	expect(code, `something listens on ${REFUSED_ORIGIN}`).toBe("ECONNREFUSED");
+});
 
 type LeafCrl = "refused" | "hanging" | "garbage" | "clean" | "revoked";
 
@@ -141,10 +152,8 @@ const pki = async (
 		res.writeHead(body === undefined ? 404 : 200, { "content-type": "application/pkix-crl" });
 		res.end(body === undefined ? undefined : Buffer.from(body));
 	});
-	const intPoint = extra.intSourcesRefused
-		? `${await closedOrigin()}/root.crl`
-		: `${live}/root.crl`;
-	const intResponder = extra.intSourcesRefused ? `${await closedOrigin()}/ocsp` : undefined;
+	const intPoint = extra.intSourcesRefused ? `${REFUSED_ORIGIN}/root.crl` : `${live}/root.crl`;
+	const intResponder = extra.intSourcesRefused ? `${REFUSED_ORIGIN}/root-ocsp` : undefined;
 	const int = await mintIntermediate("Intermediate", 2, root, {
 		extensions: [
 			basicConstraints(true),
@@ -155,20 +164,15 @@ const pki = async (
 	});
 	const leafPoint =
 		leafCrl === "refused"
-			? `${await closedOrigin()}/int.crl`
+			? `${REFUSED_ORIGIN}/int.crl`
 			: leafCrl === "hanging"
 				? // Accepts the connection and never answers.
 					`${await listen(() => {})}/int.crl`
 				: `${live.replace("127.0.0.1", leafPointHost)}/int.crl`;
-	const morePoints: string[] = [];
-	for (const [index, kind] of (extra.morePoints ?? []).entries()) {
-		morePoints.push(
-			kind === "missing"
-				? `${live}/int-missing-${index}.crl`
-				: `${await closedOrigin()}/int-${index}.crl`,
-		);
-	}
-	const leafResponder = leafResponderRefused ? `${await closedOrigin()}/ocsp` : undefined;
+	const morePoints = (extra.morePoints ?? []).map((kind, index) =>
+		kind === "missing" ? `${live}/int-missing-${index}.crl` : `${REFUSED_ORIGIN}/int-${index}.crl`,
+	);
+	const leafResponder = leafResponderRefused ? `${REFUSED_ORIGIN}/ocsp` : undefined;
 	const leaf = await mintLeaf(extra.leafCn ?? "client", 10, int, {
 		...(extra.leafOrganization !== undefined ? { organization: extra.leafOrganization } : {}),
 		extensions: [
