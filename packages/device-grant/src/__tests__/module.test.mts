@@ -326,15 +326,31 @@ describe("deviceGrantModule — boot", () => {
 		},
 	);
 
-	it("refuses to boot enabled with a csrfGuard whose middleware cannot be read, naming the slot", async () => {
-		const unreadable = new Error("adapter unavailable");
-		const guard = Object.defineProperty({ ...createTestCsrfGuard() }, "middleware", {
-			get: () => {
-				throw unreadable;
-			},
-		});
-		await expect(bootWithGuard(guard)).rejects.toThrow(/csrfGuard\.middleware could not be read/);
-	});
+	const throwing = {
+		get: () => {
+			throw new Error("adapter unavailable");
+		},
+	};
+	it.each([
+		[
+			"middleware",
+			() => Object.defineProperty({ ...createTestCsrfGuard() }, "middleware", throwing),
+		],
+		[
+			"middleware's arity",
+			() => ({
+				...createTestCsrfGuard(),
+				middleware: Object.defineProperty(() => undefined, "length", throwing),
+			}),
+		],
+	])(
+		"refuses to boot enabled with a csrfGuard whose %s cannot be read, naming the slot",
+		async (_, guard) => {
+			await expect(bootWithGuard(guard())).rejects.toThrow(
+				/csrfGuard\.middleware could not be read/,
+			);
+		},
+	);
 
 	it("boots disabled without a csrfGuard", async () => {
 		// The slot is optional in the manifest: a deployment that installs the

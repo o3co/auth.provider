@@ -445,16 +445,18 @@ const requireCsrfMiddleware = (deps: DeviceGrantModuleDeps): RequestHandler => {
 		"Install the session module's guard (sessionModule), or one that keeps core's " +
 		"CsrfGuard contract.";
 	let middleware: unknown;
+	let usable: boolean;
 	try {
 		middleware = (guard as { readonly middleware?: unknown } | null)?.middleware;
+		// Express runs a function of at most three parameters on a request; one
+		// of four is an error handler, skipped on every request.
+		usable = typeof middleware === "function" && middleware.length <= 3;
 	} catch (cause) {
 		throw new Error(`deviceGrantModule: csrfGuard.middleware could not be read. ${install}`, {
 			cause,
 		});
 	}
-	// Express runs a function of at most three parameters on a request; one
-	// of four is an error handler, skipped on every request.
-	if (typeof middleware !== "function" || middleware.length > 3) {
+	if (!usable) {
 		throw new Error(
 			"deviceGrantModule: csrfGuard.middleware is not a request handler. " +
 				"POST /oauth/device/verification mounts it in front of the whole route. " +
