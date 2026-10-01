@@ -239,7 +239,11 @@ export type MfaEnrollmentBeginOutcome =
 	| ({
 			readonly outcome: "begun";
 			readonly response: object;
-			/** An `enroll` transaction's, which the page completes the enrollment on. */
+			/**
+			 * An `enroll` transaction's, which the page completes the enrollment on;
+			 * `expiresIn` is how long the enrollment begun on it can be completed —
+			 * a mailed code's life, capped at the transaction's.
+			 */
 			readonly transaction?: MfaOpenedTransaction;
 	  } & MfaCeremonySubject);
 

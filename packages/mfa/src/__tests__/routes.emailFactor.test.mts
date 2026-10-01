@@ -418,9 +418,8 @@ describe("enrolling the email factor", () => {
 		expect(email?.binding).toBe("email_proof");
 		if (email === undefined) return;
 		const opened = suiteSealing().openFactorData(email, email.data);
-		expect(opened).toEqual({
-			state: "ok",
-			value: { addressDigest: recordedDigest(ALICE.email) },
+		expect(opened.state === "ok" ? opened.value : opened).toEqual({
+			addressDigest: recordedDigest(ALICE.email),
 		});
 	});
 
