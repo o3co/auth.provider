@@ -426,7 +426,7 @@ export async function admitSession(
 		recordable: () =>
 			(recordable ??=
 				session !== null &&
-				supportsSecondFactorUpdate(deps.userSessionStore) &&
+				supportsSecondFactorUpdate(checked.userSessionStore) &&
 				sessionAuthentication(session) !== undefined),
 	});
 }

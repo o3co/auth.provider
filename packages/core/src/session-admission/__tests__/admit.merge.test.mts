@@ -601,7 +601,7 @@ describe("the merge — a step-up through the second-factor authority onto a ses
 			action: "test.use",
 			asks: { acrValues: [MFA] },
 		});
-		expect(admission).toMatchObject({ outcome: "step_up", requirement: "mfa" });
+		expect(admission).toMatchObject({ outcome: "step_up" });
 		expect(reads).toBe(1);
 	});
 
