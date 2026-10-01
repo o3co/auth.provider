@@ -215,21 +215,19 @@ export interface FederationGrantLodgingRefused extends FederationGrantLodgingAbs
 	readonly failure?: FederationGrantLodgingFailure;
 }
 
+/** A first intent's refusal of a connection the deployment does not have. */
+export interface FederationGrantConnectionNotConfigured
+	extends FederationGrantLodgingAbsorbedCarrier {
+	readonly ok: false;
+	readonly reason: "connection_not_configured";
+	/** The connection the request named. Not enumerable (`carry.mts`). */
+	readonly connection?: string;
+}
+
 export type FederationGrantLodgingResult =
 	| FederationGrantLodged
 	| FederationGrantLodgingRefused
-	| ({
-			readonly ok: false;
-			readonly reason: "connection_not_configured";
-			/** The connection the request named. Not enumerable (`carry.mts`). */
-			readonly connection?: string;
-	  } & FederationGrantLodgingAbsorbedCarrier);
-
-/** A first intent's refusal of a connection the deployment does not have. */
-type ConnectionNotConfigured = Extract<
-	FederationGrantLodgingResult,
-	{ readonly reason: "connection_not_configured" }
->;
+	| FederationGrantConnectionNotConfigured;
 
 export type FederationGrantReauthorizationResult =
 	| (FederationGrantLodged & {
@@ -306,7 +304,9 @@ type RequestCheck =
 	| FederationGrantLodgingRefused;
 
 /** `storage`, carrying what failed where nothing enumerates it (`carry.mts`). */
-const storage = (failure: FederationGrantLodgingFailure): FederationGrantLodgingRefused =>
+const storage = (
+	failure: FederationGrantLodgingFailure,
+): FederationGrantLodgingRefused & { readonly reason: "storage" } =>
 	carryingFailure({ ok: false, reason: "storage" }, failure);
 
 /** Every answer a renewal refuses with. */
@@ -423,7 +423,9 @@ function intentRecord(input: {
 	};
 }
 
-type Admitted = { readonly ok: true } | FederationGrantLodgingRefused;
+type Admitted =
+	| { readonly ok: true }
+	| (FederationGrantLodgingRefused & { readonly reason: "storage" | "intent_limit" });
 
 async function admit(
 	store: FederationGrantIntentStore,
@@ -485,7 +487,7 @@ export async function lodgeFederationGrantIntent(
 	}
 	const connection = deps.connections.get(request.connection);
 	if (connection === undefined) {
-		return carrying<ConnectionNotConfigured>(
+		return carrying<FederationGrantConnectionNotConfigured>(
 			{ ok: false, reason: "connection_not_configured" },
 			"connection",
 			request.connection,
