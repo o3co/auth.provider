@@ -95,7 +95,6 @@ import {
 	type Logger,
 	loggableError,
 	type MfaFactorResolver,
-	type MfaTransactionStore,
 	type Module,
 	type RateLimiter,
 	type RateLimitSpec,

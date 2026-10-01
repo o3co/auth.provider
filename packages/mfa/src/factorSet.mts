@@ -100,14 +100,17 @@ const LEASE_WAITS_MS = [25, 50, 100, 200, 400] as const;
 /**
  * The most Store and directory calls one writer makes under the lease — what
  * the lease is sized from, and `factorSetBudget.test.mts` holds every writer
- * to: a first binding by the account-email proof over one standing
- * recovery-code set makes nine (the first-binding note, the consume, the
- * factor, the records read again, D25's flag, the sets read, the new set,
- * the old set's removal, the witness); the operator reset seven (the read,
- * D25's flag, its authorization, the lock state's reset, the removal, the
- * read again, the witness); a removal five; a mark four; a release two.
+ * to: a first binding by the account-email proof over two standing
+ * recovery-code sets (a binding by password keeps the one that stood) makes
+ * ten (the first-binding note, the consume, the factor, the records read
+ * again, D25's flag, the sets read, the new set, each old set's removal, the
+ * witness); the operator reset seven (the read, D25's flag, its
+ * authorization, the lock state's reset, the removal, the read again, the
+ * witness); a removal five; a mark four; a release two. More standing sets
+ * than two each add a removal, which the lease's time cuts off when it runs
+ * short: the set left is reported unreplaced.
  */
-export const FACTOR_SET_STORE_CALLS = 9;
+export const FACTOR_SET_STORE_CALLS = 10;
 
 /** How many Store calls' time a lease stands: the writer's calls, the acquire, and one to spare. */
 const LEASE_STORE_TIMEOUTS = FACTOR_SET_STORE_CALLS + 2;
@@ -204,7 +207,12 @@ export type MfaFactorRemoval<Refusal> = (
 export interface MfaFactorSetWrites {
 	readonly factorStore: MfaFactorStore;
 	readonly witness: MfaEnrollmentWitness;
-	/** `write`, started only while the lease's time allows a write; else `refused(cause)`, nothing started. */
+	/**
+	 * `write`, started only while the lease's time allows a write, and bounded
+	 * by one Store timeout: `refused(cause)` when it was not started, or not
+	 * answered in time — which may still land, as a transaction-store call
+	 * not answered is an outage.
+	 */
 	run<T>(write: () => Promise<T>, refused: (cause: unknown) => T): Promise<T>;
 }
 
@@ -670,7 +678,12 @@ export function createMfaFactorSet(options: {
 				} catch {
 					return refused(new Error(LEASE_SPENT));
 				}
-				return call();
+				try {
+					return await within(call, storeTimeoutMs, "a transaction-store write under the lease");
+				} catch (cause) {
+					if (cause instanceof NotAnswered) return refused(cause);
+					throw cause;
+				}
 			},
 		};
 	};
