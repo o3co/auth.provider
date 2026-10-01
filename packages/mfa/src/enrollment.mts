@@ -78,7 +78,7 @@ import {
 	outage,
 	UNKNOWN_TRANSACTION,
 } from "./ceremony.mjs";
-import { mayCount, reopenedEnrollment } from "./firstBinding.mjs";
+import { mayCount, recordsAfterFirstBinding, reopenedEnrollment } from "./firstBinding.mjs";
 import { keptState, mailedAnswer, mailRefusalOf, readKeptState, sendMfaMail } from "./mail.mjs";
 import { issueRecoveryCodes } from "./recovery/issue.mjs";
 
@@ -90,6 +90,16 @@ const closed = (purpose: MfaTransaction["purpose"]) =>
 	({ outcome: "first_binding_closed", purpose }) as const;
 const FACTOR_LIMIT = Object.freeze({ outcome: "factor_limit" as const });
 const NO_PENDING = Object.freeze({ outcome: "no_pending_enrollment" as const });
+
+/** What a first binding is bound by: `password`, or `email_proof` after the account-email proof. */
+type FirstBindingBy = "password" | "email_proof";
+
+/**
+ * The binding a first binding's start counts by when the completion alone
+ * will know it (a session's proof): `email_proof`, the fewest records it can
+ * come to; the completion counts by the binding it makes.
+ */
+const UNTIL_COMPLETION: FirstBindingBy = "email_proof";
 
 /** How many times a binding that cannot stand tries to remove its own factor before it says the factor stands. */
 const REMOVAL_TRIES = 3;
@@ -160,16 +170,23 @@ export function createMfaEnrollment(kit: MfaCeremonyKit): {
 
 	/**
 	 * Why the subject's `records` refuse a binding now — a first one beside a
-	 * record that may count, another beside none, or at the limit — else
-	 * `undefined`.
+	 * record that may count, another beside none — or the limit: another
+	 * factor at it, or a first binding by `firstBy` whose factor and codes
+	 * would pass it (`recordsAfterFirstBinding`); else `undefined`.
 	 */
 	const refusedBy = (
 		purpose: MfaTransaction["purpose"],
 		first: boolean,
 		records: readonly MfaFactorRecord[],
+		firstBy: FirstBindingBy,
 	): MfaEnrollmentRefusal | undefined => {
 		const counted = records.some((record) => mayCount(factors, record));
-		if (first) return counted ? closed(purpose) : undefined;
+		if (first) {
+			if (counted) return closed(purpose);
+			return recordsAfterFirstBinding(factors, records, firstBy) <= kit.maxFactorsPerSubject
+				? undefined
+				: FACTOR_LIMIT;
+		}
 		if (!counted) return closed(purpose);
 		return records.length < kit.maxFactorsPerSubject ? undefined : FACTOR_LIMIT;
 	};
@@ -220,7 +237,7 @@ export function createMfaEnrollment(kit: MfaCeremonyKit): {
 			const records = await kit.recordsOf(session.subject);
 			if ("outcome" in records) return records;
 			const first = reopenedEnrollment(factors, records) === "required";
-			const refused = refusedBy("enroll", first, records);
+			const refused = refusedBy("enroll", first, records, UNTIL_COMPLETION);
 			if (refused !== undefined) return refused;
 			const tx = await kit.openEnrollment(call, session, {
 				enrollment: first ? "required" : "allowed",
@@ -234,7 +251,16 @@ export function createMfaEnrollment(kit: MfaCeremonyKit): {
 		if (factor === undefined) return UNKNOWN_KIND;
 		const records = await kit.recordsOf(open.tx.subject);
 		if ("outcome" in records) return records;
-		const refused = refusedBy(open.tx.purpose, isFirstBinding(open.tx), records);
+		const refused = refusedBy(
+			open.tx.purpose,
+			isFirstBinding(open.tx),
+			records,
+			open.tx.purpose === "login"
+				? typeof open.tx.emailProof === "object"
+					? "email_proof"
+					: "password"
+				: UNTIL_COMPLETION,
+		);
 		return refused ?? { ...open, factor, records };
 	};
 
@@ -292,13 +318,31 @@ export function createMfaEnrollment(kit: MfaCeremonyKit): {
 	const conflict = async (
 		about: MfaCeremonySubject,
 		id: string,
+		binding: FirstBindingBy,
 	): Promise<MfaEnrollmentCompleteOutcome | undefined> => {
 		const records = await kit.recordsOf(about.subject);
 		const alone =
 			!("outcome" in records) &&
 			records.some((record) => record.id === id) &&
 			records.every((record) => record.id === id || !mayCount(factors, record));
-		if (alone) return undefined;
+		if (alone) {
+			const others = records.filter((record) => record.id !== id);
+			if (recordsAfterFirstBinding(factors, others, binding) <= kit.maxFactorsPerSubject) {
+				return undefined;
+			}
+			// Past the limit, as bindings made at once can take it: its own is removed.
+			const standing = await removeOwn(about.subject, id);
+			return standing === undefined
+				? FACTOR_LIMIT
+				: {
+						outcome: "factor_standing",
+						factor: { id, kind: about.kind },
+						binding,
+						listing: undefined,
+						standing,
+						...about,
+					};
+		}
 		const standing = await removeOwn(about.subject, id);
 		if ("outcome" in records) {
 			return { outcome: "first_binding_unchecked", listing: records, standing, ...about };
@@ -440,8 +484,6 @@ export function createMfaEnrollment(kit: MfaCeremonyKit): {
 			const records = await kit.recordsOf(tx.subject);
 			if ("outcome" in records) return records;
 			const first = isFirstBinding(tx);
-			const refused = refusedBy(tx.purpose, first, records);
-			if (refused !== undefined) return refused;
 			// A first binding in a session is by the proof when one was given there.
 			let proved = typeof tx.emailProof === "object";
 			if (first && !proved && tx.purpose === "enroll") {
@@ -449,6 +491,9 @@ export function createMfaEnrollment(kit: MfaCeremonyKit): {
 				if (typeof standing !== "boolean") return standing;
 				proved = standing;
 			}
+			const firstBy: FirstBindingBy = proved ? "email_proof" : "password";
+			const refused = refusedBy(tx.purpose, first, records, firstBy);
+			if (refused !== undefined) return refused;
 
 			const about: MfaCeremonySubject = {
 				subject: tx.subject,
@@ -531,11 +576,7 @@ export function createMfaEnrollment(kit: MfaCeremonyKit): {
 			// transaction, never a factor.
 			const consumed = await kit.consume(tx);
 			if ("outcome" in consumed) return consumed;
-			const binding: NonNullable<MfaFactorRecord["binding"]> = !first
-				? "mfa"
-				: proved
-					? "email_proof"
-					: "password";
+			const binding: NonNullable<MfaFactorRecord["binding"]> = first ? firstBy : "mfa";
 			try {
 				await factorStore.create({
 					id,
@@ -584,7 +625,7 @@ export function createMfaEnrollment(kit: MfaCeremonyKit): {
 			}
 			// Another transaction of the subject's may have bound one at once:
 			// nothing follows the factor until it is known to stand alone.
-			const conflicted = await conflict(about, id);
+			const conflicted = await conflict(about, id, firstBy);
 			if (conflicted !== undefined) return conflicted;
 			// D25: the flag an operator reset set is cleared only once the proof was
 			// given and the first counting factor written.

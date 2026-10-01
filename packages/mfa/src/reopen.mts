@@ -34,7 +34,8 @@
  * there spends neither the transaction, nor an attempt, nor the proof: a
  * first binding's witness; the counting factors the user may enroll — none,
  * or one that cannot say, is an outage; D25's flag and the gate — a proof
- * nobody can give is refused; and, for `allowed`, `mfa.maxFactorsPerSubject`.
+ * nobody can give is refused; and `mfa.maxFactorsPerSubject` — for a first
+ * binding, its factor and its codes, less a set they replace.
  */
 
 import {
@@ -55,6 +56,7 @@ import {
 	enrollableKinds,
 	firstBindingGate,
 	MfaEnrollableError,
+	recordsAfterFirstBinding,
 	reopenedEnrollment,
 } from "./firstBinding.mjs";
 
@@ -117,6 +119,10 @@ export function createLoginReopen(kit: MfaCeremonyKit): {
 			});
 			if (gate.outcome === "unprovable") {
 				return { outcome: "binding_refused", unprovable: gate.reason };
+			}
+			const by = gate.outcome === "prove" ? "email_proof" : "password";
+			if (recordsAfterFirstBinding(kit.factors, records, by) > kit.maxFactorsPerSubject) {
+				return { outcome: "binding_refused", unprovable: undefined };
 			}
 			return { enrollment, enrollable, emailProof: gate.outcome === "prove" };
 		},

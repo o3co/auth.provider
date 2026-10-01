@@ -69,6 +69,10 @@ export interface IssueRecoveryCodesOptions {
 	readonly nowMs: number;
 }
 
+/** Whether a set issued beside a binding by `binding` replaces the sets that stood: the one rule (see this file's header). */
+export const replacesStandingSets = (binding: NonNullable<MfaFactorRecord["binding"]>): boolean =>
+	binding !== "password";
+
 /** A new set for `options.subject` (see this file's header). */
 export async function issueRecoveryCodes(
 	options: IssueRecoveryCodesOptions,
@@ -95,7 +99,7 @@ export async function issueRecoveryCodes(
 		const issued = { issued: true as const, codes: set.codes };
 		if ("cause" in standing) return { ...issued, regenerated: true, unreplaced: standing };
 		if (standing.ids.length === 0) return { ...issued, regenerated: false };
-		if (options.binding === "password") {
+		if (!replacesStandingSets(options.binding)) {
 			return { ...issued, regenerated: true, unreplaced: { kept: "password_binding" } };
 		}
 		const failed = await removeEach(factorStore, subject, standing.ids);

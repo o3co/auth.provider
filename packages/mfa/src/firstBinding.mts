@@ -39,6 +39,8 @@
  */
 
 import type { MailAddressFact, MfaFactorRecord, MfaFactorResolver } from "@o3co/auth-provider-core";
+import { RECOVERY_CODE_FACTOR_KIND } from "./recovery/factor.mjs";
+import { replacesStandingSets } from "./recovery/issue.mjs";
 
 export type { MailAddressFact };
 
@@ -65,6 +67,25 @@ export const reopenedEnrollment = (
 	records: readonly Pick<MfaFactorRecord, "kind">[],
 ): "allowed" | "required" =>
 	records.some((record) => mayCount(factors, record)) ? "allowed" : "required";
+
+/**
+ * How many records the subject holds once a first binding by `binding`
+ * stands beside `records` (its own factor not among them): those records,
+ * less the recovery-code sets the binding's new set replaces, plus its
+ * factor and — the recovery-code factor installed — the new set. Held to
+ * `mfa.maxFactorsPerSubject`.
+ */
+export const recordsAfterFirstBinding = (
+	factors: MfaFactorResolver,
+	records: readonly Pick<MfaFactorRecord, "kind">[],
+	binding: NonNullable<MfaFactorRecord["binding"]>,
+): number => {
+	const replaced = replacesStandingSets(binding);
+	const staying = records.filter(
+		(record) => !(replaced && record.kind === RECOVERY_CODE_FACTOR_KIND),
+	).length;
+	return staying + 1 + (factors.get(RECOVERY_CODE_FACTOR_KIND) === undefined ? 0 : 1);
+};
 
 /** A factor's `enrollable` that threw: its `kind`, and the factor's error as `cause`, never quoted. */
 export class MfaEnrollableError extends Error {

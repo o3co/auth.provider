@@ -503,6 +503,43 @@ describe("recovery codes alone (required: a first binding)", () => {
 		},
 	);
 
+	it("refuses, with the code and the transaction kept, a first binding by password that would pass mfa.maxFactorsPerSubject with the set it keeps", async () => {
+		const { app, factorStore, transactionStore, set } = await composed({
+			requireEmailProof: "never",
+			maxFactorsPerSubject: 2,
+		});
+		const { agent, transaction } = await beginLogin(app);
+
+		const res = await verify(agent, transaction, set.record.id, set.codes[0]);
+
+		expect(res.status).toBe(403);
+		expect(res.body).toEqual(ENROLLMENT_REQUIRED);
+		expect((await storedData(factorStore, set.record)).data.codes).toHaveLength(3);
+		expect(await transactionStore.get(transaction)).toMatchObject({ attempts: 0 });
+	});
+
+	it("does not count the set an email_proof binding replaces: it binds at mfa.maxFactorsPerSubject", async () => {
+		const { app, factorStore, set, sender } = await composed({
+			sender: true,
+			maxFactorsPerSubject: 2,
+		});
+		const { agent, transaction } = await beginLogin(app);
+		const res = await verify(agent, transaction, set.record.id, set.codes[0]);
+		expect(res.status, JSON.stringify(res.body)).toBe(403);
+		const reopened = res.body.transaction as string;
+		if (sender === undefined) throw new Error("no sender");
+		await giveEmailProof(agent, reopened, sender);
+		const begun = await beginEnrollment(agent, reopened, "totp");
+
+		const done = await completeEnrollment(agent, reopened, totpProofOf(begun.body.secret));
+
+		expect(done.status, JSON.stringify(done.body)).toBe(200);
+		expect((await factorStore.list(ALICE.id)).map((record) => record.kind).sort()).toEqual([
+			"recovery_code",
+			"totp",
+		]);
+	});
+
 	it("answers 503 with nothing spent when D25's flag cannot be read: no attempt, so retries past mfa.maxAttemptsPerTransaction keep the transaction", async () => {
 		const { app, factorStore, transactionStore, set } = await composed();
 		vi.spyOn(transactionStore, "emailProofRequiredAtNextBinding").mockRejectedValue(
