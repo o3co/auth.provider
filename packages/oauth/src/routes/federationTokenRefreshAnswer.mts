@@ -38,9 +38,12 @@ import {
 export const isUsableToken = (value: unknown): value is string =>
 	typeof value === "string" && value !== "";
 
-/** Seconds a token has left: finite and in the future. `NaN` and `-5` are neither. */
+/**
+ * Seconds a token has left: finite and at least one. `NaN`, `-5` and `0.5`
+ * are not: below a second, the answer's `expires_in` would be `0`.
+ */
 const isUsableLifetime = (value: unknown): value is number =>
-	typeof value === "number" && Number.isFinite(value) && value > 0;
+	typeof value === "number" && Number.isFinite(value) && value >= 1;
 
 /**
  * One field of an adapter's answer, or `undefined` if its getter throws: an
@@ -194,13 +197,24 @@ export const readRefreshAnswer = (
 	// judge it. `null` is the upstream committing to no finite
 	// lifetime; `undefined` on both fields is it saying nothing, which this
 	// route has always stored as `null`.
-	const derivedExpiry: Date | null = isUsableDate(answer.expiresAt)
-		? answer.expiresAt
-		: answer.expiresAt === null
-			? null
-			: isUsableLifetime(answer.expiresIn)
-				? new Date(Date.now() + answer.expiresIn * 1000)
-				: null;
+	const now = Date.now();
+	const instant = isUsableDate(answer.expiresAt) ? answer.expiresAt : undefined;
+	const fromLifetime = isUsableLifetime(answer.expiresIn)
+		? new Date(now + answer.expiresIn * 1000)
+		: undefined;
+	// Both usable: the earlier stands, so neither field can lengthen the
+	// other (core's `retrieve.mts` dates a token the same way). A lifetime
+	// past the Date range is later than any instant.
+	const derivedExpiry: Date | null =
+		instant !== undefined
+			? fromLifetime !== undefined &&
+				isUsableDate(fromLifetime) &&
+				fromLifetime.getTime() < instant.getTime()
+				? fromLifetime
+				: instant
+			: answer.expiresAt === null
+				? null
+				: (fromLifetime ?? null);
 
 	// The derived instant is judged too: a finite `expiresIn` can overflow
 	// the Date range, and the Invalid Date stores as `null`. A lifetime in
@@ -219,7 +233,9 @@ export const readRefreshAnswer = (
 		contradictsItself ||
 		(statedLifetime && !isUsableLifetime(answer.expiresIn)) ||
 		(statedInstant && !isUsableDate(answer.expiresAt)) ||
-		((statedLifetime || statedInstant) && derivedExpiry !== null && !isUsableDate(derivedExpiry));
+		((statedLifetime || statedInstant) && derivedExpiry !== null && !isUsableDate(derivedExpiry)) ||
+		// Already expired: stored, it would be refreshed again on every request.
+		(derivedExpiry !== null && derivedExpiry.getTime() <= now);
 
 	// The refreshed token's type: unreadable or not a type name is broken
 	// (joins the refusals of an unusable answer, as core's `retrieve.mts`

@@ -1378,6 +1378,119 @@ describe("POST /oauth/federation/:name/token", () => {
 				},
 			);
 
+			describe("judges the lifetime it derives, as core's retrieve.mts does", () => {
+				const withFrozenDate = async (run: () => Promise<void>) => {
+					vi.useFakeTimers({ toFake: ["Date"], now: Date.now() });
+					try {
+						await run();
+					} finally {
+						vi.useRealTimers();
+					}
+				};
+				const auditedApp = (answer: unknown) => {
+					const auditSink: AuditSink = { kind: "mock", record: vi.fn() };
+					const fedTokenStore = makeFedTokenStore({
+						get: vi.fn().mockResolvedValue({
+							...baseFedTokens,
+							expiresAt: new Date(Date.now() - 1000),
+						}),
+					});
+					const refreshProvider = {
+						...federationBase("google"),
+						refreshToken: vi.fn().mockResolvedValue(answer),
+					} as unknown as FederationProvider;
+					const app = buildApp({
+						fedTokenStore,
+						auditSink,
+						getFederationProviders: () =>
+							new Map<string, FederationProvider>([["google", refreshProvider]]),
+					});
+					return { app, fedTokenStore, auditSink };
+				};
+				const expectInvalidExpiry = (
+					res: { status: number; body: { error?: string } },
+					fedTokenStore: FederationTokenStore,
+					auditSink: AuditSink,
+				) => {
+					expect(res.status).toBe(500);
+					expect(res.body.error).toBe("refresh_failed");
+					expect(fedTokenStore.update).not.toHaveBeenCalled();
+					expect(auditSink.record).toHaveBeenCalledWith(
+						expect.objectContaining({
+							type: "federation.token.refresh_failed",
+							details: expect.objectContaining({ reason: "invalid_expiry" }),
+						}),
+					);
+				};
+
+				it("refuses an expiresAt already in the past", async () => {
+					// Stored, it would be refreshed again on every request, spending
+					// or rotating the upstream refresh token each time.
+					const { app, fedTokenStore, auditSink } = auditedApp({
+						accessToken: "new-at",
+						expiresAt: new Date(Date.now() - 60_000),
+					});
+					const res = await postFedToken(app, "google", await mintAccessToken());
+
+					expectInvalidExpiry(res, fedTokenStore, auditSink);
+				});
+
+				it("refuses an expiresAt equal to now", async () => {
+					await withFrozenDate(async () => {
+						const { app, fedTokenStore, auditSink } = auditedApp({
+							accessToken: "new-at",
+							expiresAt: new Date(Date.now()),
+						});
+						const res = await postFedToken(app, "google", await mintAccessToken());
+
+						expectInvalidExpiry(res, fedTokenStore, auditSink);
+					});
+				});
+
+				it("refuses a fractional expiresIn below one second", async () => {
+					const { app, fedTokenStore, auditSink } = auditedApp({
+						accessToken: "new-at",
+						expiresIn: 0.5,
+					});
+					const res = await postFedToken(app, "google", await mintAccessToken());
+
+					expectInvalidExpiry(res, fedTokenStore, auditSink);
+				});
+
+				it("takes expiresIn when it ends before expiresAt", async () => {
+					// A far `expiresAt` beside a short `expiresIn` must not be stored
+					// and advertised as the token's lifetime.
+					await withFrozenDate(async () => {
+						const { app, fedTokenStore } = auditedApp({
+							accessToken: "new-at",
+							expiresIn: 60,
+							expiresAt: new Date("2100-01-01T00:00:00Z"),
+						});
+						const res = await postFedToken(app, "google", await mintAccessToken());
+
+						expect(res.status).toBe(200);
+						expect(res.body.expires_in).toBe(60);
+						expect(storedExpiry(fedTokenStore)?.getTime()).toBe(Date.now() + 60_000);
+					});
+				});
+
+				it("takes expiresAt when it ends before expiresIn", async () => {
+					await withFrozenDate(async () => {
+						const expiresAt = new Date(Date.now() + 600_000);
+						const { app, fedTokenStore } = auditedApp({
+							accessToken: "new-at",
+							expiresIn: 7200,
+							expiresAt,
+						});
+						const res = await postFedToken(app, "google", await mintAccessToken());
+
+						expect(res.status).toBe(200);
+						expect(res.body.expires_in).toBe(600);
+						expect(storedExpiry(fedTokenStore)?.getTime()).toBe(expiresAt.getTime());
+					});
+				});
+			});
+
 			it("does not recreate a record a concurrent logout deleted", async () => {
 				// Salvaging a rotated token must not put credentials back after the
 				// user asked for them to be dropped. Losing the token on a refresh
