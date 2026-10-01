@@ -33,7 +33,7 @@ import {
 	type SupportsSessionEnd,
 } from "@o3co/auth-provider-core";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { beginLogout, joinSession } from "../sessionEnd.mjs";
+import { beginLogout, joinSession, type LogoutBeginOutage } from "../sessionEnd.mjs";
 
 const SID = "sid-1";
 const EXPIRES_AT = new Date(Date.now() + 3_600_000);
@@ -129,7 +129,7 @@ describe("beginLogout — what a failure leaves", () => {
 			outage: {
 				store: "session_family_index",
 				step: "endSession",
-				session: "unknown",
+				left: "unknown",
 				error: boom,
 			},
 		});
@@ -144,7 +144,7 @@ describe("beginLogout — what a failure leaves", () => {
 			throw new Error("the listing after the mark failed");
 		});
 		const begun = await beginLogout(s, SID, EXPIRES_AT);
-		expect(begun).toMatchObject({ outcome: "unavailable", outage: { session: "unknown" } });
+		expect(begun).toMatchObject({ outcome: "unavailable", outage: { left: "unknown" } });
 		expect(await joinSession(s, JOIN)).toEqual({ outcome: "ended" });
 	});
 
@@ -154,14 +154,13 @@ describe("beginLogout — what a failure leaves", () => {
 		vi.spyOn(s.sessionRPRegistry, "listRPs").mockRejectedValue(boom);
 		expect(await beginLogout(s, SID, EXPIRES_AT)).toEqual({
 			outcome: "unavailable",
-			outage: { store: "session_rp_registry", step: "list", session: "half_ended", error: boom },
+			outage: { store: "session_rp_registry", step: "list", left: "half_ended", error: boom },
 		});
 		expect(await joinSession(s, JOIN)).toEqual({ outcome: "ended" });
 	});
 
-	it("both listings failing name the registry, with the federation index as alsoUnavailable", async () => {
+	it("a federation listing that fails after the mark leaves the session half-ended, naming the federation index", async () => {
 		const s = stores();
-		const rpsDown = new Error("registry down");
 		const federationsDown = new Error("index down");
 		vi.spyOn(s.sessionFederationIndex, "listFederations").mockRejectedValue(federationsDown);
 		expect(await beginLogout(s, SID, EXPIRES_AT)).toEqual({
@@ -169,24 +168,31 @@ describe("beginLogout — what a failure leaves", () => {
 			outage: {
 				store: "session_federation_index",
 				step: "list",
-				session: "half_ended",
+				left: "half_ended",
 				error: federationsDown,
 			},
 		});
+	});
+
+	it("both listings failing name the registry, with the federation index as alsoUnavailable", async () => {
+		const s = stores();
+		const rpsDown = new Error("registry down");
+		const federationsDown = new Error("index down");
+		vi.spyOn(s.sessionFederationIndex, "listFederations").mockRejectedValue(federationsDown);
 		vi.spyOn(s.sessionRPRegistry, "listRPs").mockRejectedValue(rpsDown);
 		expect(await beginLogout(s, SID, EXPIRES_AT)).toEqual({
 			outcome: "unavailable",
 			outage: {
 				store: "session_rp_registry",
 				step: "list",
-				session: "half_ended",
+				left: "half_ended",
 				error: rpsDown,
 				alsoUnavailable: { store: "session_federation_index", error: federationsDown },
 			},
 		});
 	});
 
-	it("without the session-end capability: nothing is marked, a failed listing leaves the session unchanged, and the families are not read", async () => {
+	it("without the session-end capability: nothing is marked, and the families are left for the cascade to read", async () => {
 		const index = withoutSessionEnd(createInMemorySessionFamilyIndex());
 		const s = { ...stores(), sessionFamilyIndex: index };
 		await s.sessionRPRegistry.registerRP(SID, RP, EXPIRES_AT);
@@ -198,12 +204,18 @@ describe("beginLogout — what a failure leaves", () => {
 			familyIds: undefined,
 		});
 		expect(index.listFamilyIds).not.toHaveBeenCalled();
+	});
 
+	it("without the session-end capability, a failed listing leaves the session unchanged", async () => {
+		const s = {
+			...stores(),
+			sessionFamilyIndex: withoutSessionEnd(createInMemorySessionFamilyIndex()),
+		};
 		const boom = new Error("registry down");
 		vi.spyOn(s.sessionRPRegistry, "listRPs").mockRejectedValue(boom);
 		expect(await beginLogout(s, SID, EXPIRES_AT)).toEqual({
 			outcome: "unavailable",
-			outage: { store: "session_rp_registry", step: "list", session: "unchanged", error: boom },
+			outage: { store: "session_rp_registry", step: "list", left: "unchanged", error: boom },
 		});
 	});
 });
@@ -224,6 +236,7 @@ describe("joinSession", () => {
 		expect(await joinSession(s, JOIN)).toEqual({
 			outcome: "unavailable",
 			store: "session_rp_registry",
+			step: "register",
 			error: boom,
 		});
 		expect(await s.sessionFamilyIndex.listFamilyIds(SID)).toEqual([]);
@@ -239,6 +252,7 @@ describe("joinSession", () => {
 		expect(await joinSession(s, JOIN)).toEqual({
 			outcome: "unavailable",
 			store: "session_family_index",
+			step: "add",
 			error: boom,
 		});
 		expect((await s.sessionRPRegistry.listRPs(SID)).map((rp) => rp.clientId)).toEqual([
@@ -246,5 +260,22 @@ describe("joinSession", () => {
 			"client-1",
 		]);
 		expect(removeBySid).not.toHaveBeenCalled();
+	});
+});
+
+describe("LogoutBeginOutage", () => {
+	it("pairs each store with its own step and the states it can leave", () => {
+		const outages: LogoutBeginOutage[] = [
+			{ store: "session_family_index", step: "endSession", left: "unknown", error: null },
+			{ store: "session_rp_registry", step: "list", left: "half_ended", error: null },
+			{ store: "session_federation_index", step: "list", left: "unchanged", error: null },
+			// @ts-expect-error — the family index's only step is endSession
+			{ store: "session_family_index", step: "list", left: "unknown", error: null },
+			// @ts-expect-error — a failed mark leaves the session unknown, never unchanged
+			{ store: "session_family_index", step: "endSession", left: "unchanged", error: null },
+			// @ts-expect-error — a listing does not mark: its state is never unknown
+			{ store: "session_rp_registry", step: "list", left: "unknown", error: null },
+		];
+		expect(outages).toHaveLength(6);
 	});
 });
