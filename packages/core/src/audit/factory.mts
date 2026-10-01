@@ -165,7 +165,9 @@ export function createAuditFanOut(sources: AuditFanOutSources): AuditSink {
 				const read: unknown = shared.type;
 				type = typeof read === "string" ? read : undefined;
 			} catch {
-				// Handed to no sink: each one known has failed it.
+				// Handed to no sink: each one known has failed it, and a re-entered
+				// event is still named, so none is dropped without a line.
+				if (reentered) report(sources.logger, "warn", { type: undefined }, "audit_sink_reentered");
 				for (const { position } of targets) reportFailure(sources.logger, position, undefined);
 				return;
 			}
