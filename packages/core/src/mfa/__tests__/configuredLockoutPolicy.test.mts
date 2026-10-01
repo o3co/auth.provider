@@ -82,6 +82,18 @@ describe("checkConfiguredMfaLockoutPolicy — a lockout policy a deployment may 
 		).toThrow(/^mfa\.lockout\.threshold must be at most mfa\.lockout\.hardLimit$/);
 	});
 
+	it("answers with the store's port check where both checks would refuse", () => {
+		for (const bad of [{ threshold: 1, hardLimit: 9.5 }, { hardLimit: Number.NaN }]) {
+			expect(
+				() => checkConfiguredMfaLockoutPolicy({ ...DEFAULTS, ...bad }),
+				String(bad.hardLimit),
+			).toThrow(/^mfa\.lockout\.hardLimit must be a positive whole number$/);
+		}
+		expect(() =>
+			checkConfiguredMfaLockoutPolicy({ ...DEFAULTS, threshold: 50, hardLimit: 9 }),
+		).toThrow(/^mfa\.lockout\.threshold must be at most mfa\.lockout\.hardLimit$/);
+	});
+
 	it("runs the store's port check first: a hardLimit above 100 and a policy that is no object are its refusals", () => {
 		expect(() => checkConfiguredMfaLockoutPolicy({ ...DEFAULTS, hardLimit: 101 })).toThrow(
 			/^mfa\.lockout\.hardLimit must be at most 100/,

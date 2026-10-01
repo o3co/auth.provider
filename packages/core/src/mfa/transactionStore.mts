@@ -752,8 +752,7 @@ export const MFA_LOCKOUT_MAX_HARD_LIMIT = 100;
 
 /**
  * The smallest `hardLimit` a configured policy may set
- * ({@link checkConfiguredMfaLockoutPolicy}): the weekly cap's default, so the
- * staged backoff acts before the hard hold.
+ * ({@link checkConfiguredMfaLockoutPolicy}).
  */
 export const MFA_LOCKOUT_MIN_HARD_LIMIT = 10;
 
@@ -983,14 +982,14 @@ const isPositiveWhole = (value: unknown): value is number =>
 /**
  * The store's port check. Refuses a lockout policy a store cannot apply as
  * written, with a `RangeError` naming `setting` and the field: an object,
- * every field a positive whole
- * number, `maxSeconds` ≥ `baseSeconds`, `threshold` ≤ `hardLimit` (else the
- * backoff never engages before the hard hold), `hardLimit` ≤
- * {@link MFA_LOCKOUT_MAX_HARD_LIMIT}, and every duration ending within the
- * Date range. Every store operation taking a policy calls it. A policy read
- * from configuration is held to {@link checkConfiguredMfaLockoutPolicy}
- * instead, which runs this first. Answers the policy it checked, each field
- * read once: a store applies that copy, so what it applies is what was checked.
+ * every field a positive whole number, `maxSeconds` ≥ `baseSeconds`,
+ * `threshold` ≤ `hardLimit` (a threshold above it is never reached),
+ * `hardLimit` ≤ {@link MFA_LOCKOUT_MAX_HARD_LIMIT}, and every duration ending
+ * within the Date range. Every store operation taking a policy calls it. A
+ * policy a deployment configures is checked by
+ * {@link checkConfiguredMfaLockoutPolicy}, which runs this first and adds a
+ * floor. Answers the policy it checked, each field read once: a store applies
+ * that copy, so what it applies is what was checked.
  *
  * @param setting - where the policy was read from, for the message.
  */
@@ -1044,8 +1043,8 @@ export function checkMfaLockoutPolicy(
 }
 
 /**
- * The check for a lockout policy read from configuration, at boot: the store's
- * port check ({@link checkMfaLockoutPolicy}), then the floor. A `RangeError`
+ * Checks a lockout policy a deployment configures: the store's port check
+ * ({@link checkMfaLockoutPolicy}), then the floor. A `RangeError`
  * naming `setting` and the reason refuses a `hardLimit` below
  * {@link MFA_LOCKOUT_MIN_HARD_LIMIT}, or one not above `threshold`. Answers
  * the port check's copy.
@@ -1059,7 +1058,7 @@ export function checkConfiguredMfaLockoutPolicy(
 	const checked = checkMfaLockoutPolicy(policy, setting);
 	if (checked.hardLimit < MFA_LOCKOUT_MIN_HARD_LIMIT) {
 		throw new RangeError(
-			`${setting}.hardLimit must be at least ${MFA_LOCKOUT_MIN_HARD_LIMIT}: the attempt that is the hardLimit-th since the last success holds whatever its outcome, so a small value locks out a correct code`,
+			`${setting}.hardLimit must be at least ${MFA_LOCKOUT_MIN_HARD_LIMIT}: the hardLimit-th attempt since the last success fixes the hard hold whatever its outcome, so a small value holds guessable factors even after a correct code`,
 		);
 	}
 	if (checked.hardLimit <= checked.threshold) {
