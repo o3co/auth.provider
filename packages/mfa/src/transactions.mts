@@ -123,22 +123,26 @@ export function createLoginTransactions({
 				throw new RangeError("a first binding's email_proof must be true or false");
 			}
 			const firstBinding = interruption.error === "mfa_enrollment_required";
-			const transaction = loginTransaction({
-				sessionId,
-				continuation,
-				enrollment: firstBinding ? "required" : "none",
-				emailProof: firstBinding && interruption.emailProof,
-				nowMs: now(),
-				ttlSeconds,
-			});
-			await store.create(transaction);
-			return interruptionAnswer(transaction.id, ttlSeconds, interruption);
+			const id = newTransactionId();
+			await store.create(
+				loginTransaction({
+					id,
+					sessionId,
+					continuation,
+					enrollment: firstBinding ? "required" : "none",
+					emailProof: firstBinding && interruption.emailProof,
+					nowMs: now(),
+					ttlSeconds,
+				}),
+			);
+			return interruptionAnswer(id, ttlSeconds, interruption);
 		},
 	};
 }
 
-/** A new login transaction over `continuation`, bound to the session `sessionId` names. */
+/** The new login transaction `id` over `continuation`, bound to the session `sessionId` names. */
 const loginTransaction = (shape: {
+	readonly id: string;
 	readonly sessionId: string;
 	readonly continuation: PrimaryContinuation;
 	readonly enrollment: MfaTransaction["enrollment"];
@@ -146,7 +150,7 @@ const loginTransaction = (shape: {
 	readonly nowMs: number;
 	readonly ttlSeconds: number;
 }): MfaTransaction => ({
-	id: newTransactionId(),
+	id: shape.id,
 	purpose: "login",
 	binding: { kind: "session", id: shape.sessionId },
 	subject: shape.continuation.primary.subject,
@@ -218,9 +222,19 @@ export async function openLoginBinding(
 	) {
 		throw new RangeError("a binding beside a factor that may count owes no account-email proof");
 	}
-	const transaction = loginTransaction(shape);
-	await store.create(transaction);
-	return interruptionAnswer(transaction.id, shape.ttlSeconds, {
+	const id = newTransactionId();
+	await store.create(
+		loginTransaction({
+			id,
+			sessionId: shape.sessionId,
+			continuation: shape.continuation,
+			enrollment: shape.enrollment,
+			emailProof: shape.emailProof,
+			nowMs: shape.nowMs,
+			ttlSeconds: shape.ttlSeconds,
+		}),
+	);
+	return interruptionAnswer(id, shape.ttlSeconds, {
 		error: "mfa_enrollment_required",
 		enrollable: shape.enrollable,
 		emailProof: shape.emailProof,
