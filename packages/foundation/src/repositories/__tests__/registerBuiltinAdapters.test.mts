@@ -17,6 +17,7 @@
 import {
 	AdapterFactoryError,
 	createAdapterFactory,
+	supportsMfaEnrollmentWitness,
 	type UserRepository,
 } from "@o3co/auth-provider-core";
 import { HttpResponse, http } from "msw";
@@ -173,6 +174,40 @@ describe("registerBuiltinAdapters", () => {
 		await expect(
 			userFactory.create({ ...base, federatedIdentityLookupCoverage: [] }),
 		).resolves.toBeDefined();
+	});
+
+	it("http builder forwards markMfaEnrolledUrl whenever it is set, and refuses one that is not a string rather than dropping it", async () => {
+		const userFactory = createAdapterFactory<UserRepository>("UserRepository");
+		registerBuiltinAdapters({ userFactory });
+		const base = {
+			type: "http",
+			authenticateUrl: `${BASE_URL}/auth`,
+			authenticateByTokenUrl: `${BASE_URL}/auth/token`,
+			timeout: 5000,
+		};
+		expect(supportsMfaEnrollmentWitness(await userFactory.create(base))).toBe(false);
+
+		const marks: unknown[] = [];
+		server.use(
+			http.post(`${BASE_URL}/mfa/enrolled`, async ({ request }) => {
+				marks.push(await request.json());
+				return new HttpResponse(null, { status: 204 });
+			}),
+		);
+		const witnessing = await userFactory.create({
+			...base,
+			markMfaEnrolledUrl: `${BASE_URL}/mfa/enrolled`,
+		});
+		expect(supportsMfaEnrollmentWitness(witnessing)).toBe(true);
+		await witnessing.markMfaEnrolled?.("u1", true);
+		expect(marks).toEqual([{ subject: "u1", enrolled: true }]);
+
+		for (const value of [42, true, {}, [`${BASE_URL}/mfa/enrolled`], null]) {
+			await expect(
+				userFactory.create({ ...base, markMfaEnrolledUrl: value }),
+				JSON.stringify(value),
+			).rejects.toThrow(/"markMfaEnrolledUrl"/);
+		}
 	});
 
 	it("http builder coerces string timeout to number (env-override path)", async () => {

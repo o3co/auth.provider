@@ -4,8 +4,9 @@ Last updated: 2026-10-01
 
 The HTTP client of "the Store" — the deployment's own user service — for
 auth.provider. `HttpUserRepository` implements core's `UserRepository` port over
-HTTPS: it authenticates users, links federated identities, and answers the
-identity lookup federation grants ask for. `registerBuiltinAdapters` registers
+HTTPS: it authenticates users, links federated identities, answers the
+identity lookup federation grants ask for, and writes the MFA enrollment
+witness. `registerBuiltinAdapters` registers
 it as the `"http"` user adapter. The package also fixes the contract of the
 Store's MFA endpoints — where a Store keeps a subject's second factors and the
 enrollment witness — with the configuration section that names them and what
@@ -113,6 +114,7 @@ defaults are in [the template's `reference.conf`](../../templates/standalone/con
 | `linkFederatedIdentityUrl` | `REPOSITORIES_USER_HTTP_LINK_FEDERATED_IDENTITY_URL` | Optional. Enables account linking. |
 | `findSubjectByFederatedIdentityUrl` | `REPOSITORIES_USER_HTTP_FIND_SUBJECT_BY_FEDERATED_IDENTITY_URL` | Optional. The identity lookup. |
 | `federatedIdentityLookupCoverage` | — (a list; HOCON only) | What the lookup covers. Default `[]`. |
+| `markMfaEnrolledUrl` | `REPOSITORIES_USER_HTTP_MARK_MFA_ENROLLED_URL` | Optional. Writes the MFA enrollment witness ([below](#the-witness-written-through-the-user-repository)). No default. |
 | `bearerToken` | `REPOSITORIES_USER_HTTP_BEARER_TOKEN` | Optional. Sent on every request as `Authorization: Bearer <token>`; at least 32 bytes of key material. Unset, no `Authorization` header is sent. See [who may call the Store](#what-the-store-must-enforce-itself). |
 | `timeout` | `REPOSITORIES_USER_HTTP_TIMEOUT` | Milliseconds. Default 5000. |
 | `maxResponseBytes` | `REPOSITORIES_USER_HTTP_MAX_RESPONSE_BYTES` | Default 1048576. |
@@ -143,6 +145,17 @@ assertion's subject handle from `oauth`'s jwt-bearer grant. For both:
   names each line they log);
 - any other status throws.
 
+**The MFA enrollment witness on both reads.** A Store that keeps the witness
+(the MFA ADR's D12) MUST answer `User.mfaEnrolled` on `authenticate` and on
+`authenticateByToken` alike: a boolean, left out until the subject is first
+marked. A federated login records the witness from `authenticateByToken`'s
+`User`, so a Store that answers it on `authenticate` alone leaves federated
+sessions without the defence the witness gives. The adapter hands
+`mfaEnrolled` through as the Store answered it, and core reads it
+(`readMfaEnrollmentWitness`): any value other than `true`, `false` or absent
+is malformed, which the MFA package answers `503` and never a first binding.
+The test kit's witness suite holds a Store to both reads.
+
 The body of a non-`2xx` answer is discarded unread, for these and for linking.
 No request follows a redirect, including the identity lookup: a `3xx` is one
 more status that throws, and its `Location` is never contacted.
@@ -150,7 +163,7 @@ more status that throws, and its `Location` is never contacted.
 **A `401` or `403` with a `Bearer` challenge is a refused credential.** When
 `bearerToken` is configured, a `401` or `403` carrying
 `WWW-Authenticate: Bearer …` (RFC 6750 §3 — `invalid_token`,
-`insufficient_scope`) from any of the four endpoints throws a
+`insufficient_scope`) from any endpoint it posts to throws a
 `StoreCredentialRefusedError`, `HttpUserRepository: the Store at <url> refused
 this deployment's credential (HTTP <status> with a Bearer challenge) — …`,
 instead of the reading this section otherwise gives that status: not "no such
@@ -287,8 +300,10 @@ enrollment witness (D12). The provider decides and the Store persists; the
 Store never decodes, logs or derives anything from a factor's `data`, which
 the provider seals first. This package holds the contract, the section that
 names the factor endpoints and what their failures throw; `HttpUserRepository`
-sends none of these requests, and `HttpMfaFactorStore` sends the four factor
-endpoints' ([below](#the-store-backed-factor-store)). The JSON bodies are core's
+sends the witness's request when `markMfaEnrolledUrl` is configured
+([below](#the-witness-written-through-the-user-repository)), and
+`HttpMfaFactorStore` the four factor endpoints'
+([below](#the-store-backed-factor-store)). The JSON bodies are core's
 [`mfa/storeWire.mts`](../core/src/mfa/storeWire.mts) (`MfaStoreFactor`,
 `MfaStoreUpdateRequest`, …), with the codec both sides use.
 
@@ -337,8 +352,9 @@ cannot read (core's `isMfaFactorId`, `isMfaFactorKind`, `isMfaFactorLabel`).
 - **A version other than `expectedVersion + 1`** in an update's answer is an
   outage, never a success, and one error line naming the subject and the
   factor id.
-- **The witness** is answered back on `authenticate` as `User.mfaEnrolled`: a
-  boolean, left out until the subject is first marked, read only through
+- **The witness** is answered back on `authenticate` and on
+  `authenticateByToken` as `User.mfaEnrolled` ([both reads](#the-wire-contract)):
+  a boolean, left out until the subject is first marked, read only through
   core's `readMfaEnrollmentWitness`.
 - **The factors' integrity and freshness are the Store's.** A record's
   version never goes back, and a write the Store acknowledged is never lost —
@@ -400,14 +416,18 @@ variable, whether or not anything requires the store.
 
 `markMfaEnrolledUrl` is not in this section. The witness is written through
 the user repository whatever keeps the factors — Redis factors with the
-Store's witness among them — so its URL belongs with the user repository's
-settings, which have no key for it. Its contract: with the URL, the user
-repository writes the witness (`markMfaEnrolled`); without it, the
-repository has no `markMfaEnrolled` — the capability is absent, never a
+Store's witness among them — so its URL is a key of the user repository's
+settings: `repositories.user.http.markMfaEnrolledUrl`
+(`REPOSITORIES_USER_HTTP_MARK_MFA_ENROLLED_URL`), with no default. With the
+URL, the user repository writes the witness (`markMfaEnrolled`); without it,
+the repository has no `markMfaEnrolled` — the capability is absent, never a
 refused boot, since the witness is optional (the MFA ADR's D12) — and a
 composition with MFA on whose user repository cannot write the witness is
-warned at boot, whatever keeps the factors: the witness is what keeps a lost
-factor store from opening a first binding.
+warned at boot (`mfa_enrollment_witness_unwritable`), whatever keeps the
+factors: the witness is what keeps a lost factor store from opening a first
+binding. A value set that is not a string, a URL that is not `https` or
+loopback `http`, and one carrying `user:password@` refuse the boot when the
+repository is built, naming `markMfaEnrolledUrl` and quoting no value.
 
 ### The Store-backed factor store
 
@@ -466,15 +486,43 @@ record left out from a complete one, or a factor removed and answered again
 from one never removed: the Store is responsible for the factors' integrity
 and freshness ([what the Store must enforce itself](#what-the-store-must-enforce-itself)).
 
-**No witness is written through the Store.** `HttpUserRepository` has no
-`markMfaEnrolled`, and the user repository's settings have no
-`markMfaEnrolledUrl`: whatever keeps the factors, the provider writes no
-enrollment witness to the Store, and reads back on `authenticate` whatever
-`mfaEnrolled` the Store answers. With no witness written, nothing but the
-Store keeps a subject's factor list whole: a Store that drops a subject's
-records lets a password-only login through under `mfa.mode = "optional"`,
-and opens a first binding to whoever holds the password under `required`.
-The enrollment witness is what stops that (the MFA ADR's D12).
+### The witness written through the user repository
+
+With `markMfaEnrolledUrl`, `HttpUserRepository.markMfaEnrolled(subject,
+enrolled)` posts `{ subject, enrolled }` to it
+([`src/mfa/markEnrolled.mts`](src/mfa/markEnrolled.mts)), with the user
+repository's credential and deadline; it reads no body, so the response cap
+does not apply. `204` is done; `404` throws an
+`MfaStoreError` `unknown_subject`, and any other status — a `200` and a
+redirect included — `unexpected_status`, the body released unread. A
+transport failure, the deadline and a refused credential throw the user
+repository's errors. A subject that is not a non-empty string, or a value
+that is not a boolean, is a `RangeError`, and nothing is sent.
+
+The MFA package marks a subject `true` once its first counting factor is
+written — a first binding at a login or in a signed-in session — and again
+whenever a counting factor is verified where the login's `User` does not say
+the subject enrolled, a step-up included, so a mark that failed is written at
+the subject's next such verification; a mark that fails is one warning
+(`mfa_enrollment_witness_unwritten`) and the login completes. A Store that
+takes the marks but never answers `mfaEnrolled` back is therefore marked once
+per counting verification.
+The witness then stops a lost factor store from opening a first binding: a
+login whose `User` says the subject enrolled, beside no factor that counts,
+is `503` (`mfa.enrollment_state_inconsistent`), never a password-only login
+or a first binding.
+
+Without the URL nothing is written, and the provider reads back whatever
+`mfaEnrolled` the Store answers. Then nothing but the Store keeps a
+subject's factor list whole: a Store that drops a subject's records lets a
+password-only login through under `mfa.mode = "optional"`, and opens a first
+binding to whoever holds the password under `required`.
+
+**Turning it on.** A subject that enrolled before
+`REPOSITORIES_USER_HTTP_MARK_MFA_ENROLLED_URL` was set has no witness until
+its next counting verification, and until then a lost factor store reads it
+as never enrolled. When you set the URL, backfill `mfaEnrolled = true` in the
+Store for every subject that holds a counting factor.
 
 ### Testing against the contract
 
@@ -483,7 +531,8 @@ witness's contract suite, `MfaFactorStore`'s (`mfaFactorStoreContract`), and a
 fake Store that answers these endpoints as the table says — and, told to, as
 a broken Store would. This package's tests run the factor store's suite
 against `HttpMfaFactorStore` over the fake Store, and the witness's suite
-reading the witness back through `HttpUserRepository.authenticate`. The
+against `HttpUserRepository` with `markMfaEnrolledUrl` over it, reading the
+witness back through `authenticate` and `authenticateByToken`. The
 section's test builder, `foundationMfaFactorStoreConfig`, is on
 `@o3co/auth-provider-foundation/testing`.
 
@@ -580,7 +629,7 @@ message this adapter throws quotes a URL's query string or fragment.
 Every option is validated in the **constructor**, so a misconfigured deployment
 fails at boot rather than at the first login attempt.
 
-**Every URL must use `https://`** (the link and lookup endpoints included). They carry plaintext user credentials — a
+**Every URL must use `https://`** (the link, lookup and witness endpoints included). They carry plaintext user credentials — a
 password on `authenticateUrl`, a token on `authenticateByTokenUrl`, a verified
 upstream identity on `findSubjectByFederatedIdentityUrl` — so an
 `http://` URL does not merely weaken the connection, it publishes the credential
@@ -618,8 +667,8 @@ against it rather than relying on the abort signal, because aborting a request
 does not reliably interrupt a read already in flight. That is the slow-loris
 shape — headers arrive promptly, then the body dribbles or stops — and without
 the race it hangs forever. A request that outlives the deadline rejects with a
-`timed out after <n>ms` error naming the endpoint, named `TimeoutError` on all
-four requests, so a reporter that classifies by name reads it as a timeout.
+`timed out after <n>ms` error naming the endpoint, named `TimeoutError` on
+every request, so a reporter that classifies by name reads it as a timeout.
 
 **`maxResponseBytes` must be a positive integer**, defaulting to
 `DEFAULT_MAX_RESPONSE_BYTES` (1 MiB). The cap is enforced against
@@ -679,18 +728,22 @@ Exported from [`src/testing/index.mts`](src/testing/index.mts) as
 `foundationMfaFactorStoreConfig(urls, extra?)`, the
 `foundation-mfa-factor-store` section as a configuration fragment to lay over
 a test's configuration, holding the four URLs `urls` holds — a fake Store's
-`urls` included, its other endpoints left behind — and `extra` as given.
+`urls` included, its other endpoints left behind — and `extra` as given; and
+`foundationUserRepositoryHttpConfig(urls, extra?)`, the user repository's
+`http` block, holding the Store URLs the `"http"` builder reads that `urls`
+holds — its MFA factor endpoints left behind — and `extra` as given, which a
+composition places with core's `withUserRepositoryHttp`.
 
 ## Tests
 
 | Test file | Pins |
 | --- | --- |
-| [`HttpUserRepository.test.mts`](src/repositories/__tests__/HttpUserRepository.test.mts) | authentication and its answers, the `User` shape check, the https rule, the timeout and the response cap, linking, and the identity lookup's presence, probe and wire |
+| [`HttpUserRepository.test.mts`](src/repositories/__tests__/HttpUserRepository.test.mts) | authentication and its answers, `mfaEnrolled` handed through as the Store answered it, the `User` shape check, the https rule, the timeout and the response cap, linking, and the identity lookup's presence, probe and wire |
 | [`HttpUserRepository.transport.test.mts`](src/repositories/__tests__/HttpUserRepository.transport.test.mts) | against real HTTP servers: the identity lookup releasing a refused answer's connection, and a redirect refused on each of the four requests — to another origin, to the same origin, or with no `Location` — with nothing sent to a redirect target |
 | [`HttpUserRepository.credential.test.mts`](src/repositories/__tests__/HttpUserRepository.credential.test.mts) | against real HTTP servers: `Authorization: Bearer <token>` on each of the four requests when `bearerToken` is set and no `Authorization` header when it is not, by hand and through the `"http"` builder; a weak, malformed, blank or non-string token refused at construction; the token in no failure and no inspection of the repository; a transport failure a `StoreTransportError` that says what failed — a refused connection and an https URL on a plain-HTTP port (not reached), a peer that reflects the token into a status line or header, a head over the size limit (malformed response), a close after a `1xx`, mid-head, before any byte, or of a pooled keep-alive connection between two requests (connection closed), a chunked body (not read), a TLS 1.2 server that refuses the handshake (not reached, `ERR_SSL_SSL/TLS_ALERT_HANDSHAKE_FAILURE`) — with its code and no cause; a timeout a `TimeoutError` whether the headers or the body stall; with a token sent, a `401` or `403` with a `Bearer` challenge a `StoreCredentialRefusedError` (`storeStatus`, no `status`) on each of the four, and one without — or with no token sent — read as before |
 | [`storeErrors.test.mts`](src/repositories/__tests__/storeErrors.test.mts) | which transport codes are kept, and the two named errors' shape — no `status`, no cause |
 | [`wwwAuthenticate.test.mts`](src/repositories/__tests__/wwwAuthenticate.test.mts) | which `WWW-Authenticate` values carry a `Bearer` challenge, and a hostile 64 KiB value read in one pass |
-| [`registerBuiltinAdapters.test.mts`](src/repositories/__tests__/registerBuiltinAdapters.test.mts) | the `"http"` builder, its defaults and string coercion, and configuration refused at build time |
+| [`registerBuiltinAdapters.test.mts`](src/repositories/__tests__/registerBuiltinAdapters.test.mts) | the `"http"` builder, its defaults and string coercion, the optional URLs it forwards, and configuration refused at build time |
 | [`endpointUrl.test.mts`](src/__tests__/endpointUrl.test.mts) | the https-or-loopback rule |
 | [`storeFailure.test.mts`](src/mfa/__tests__/storeFailure.test.mts) | what the MFA endpoints' failures throw: nothing the Store wrote in any form the error leaves in, the body released unread, no status to answer with; a skipped version's log line naming the subject and the factor id, each sanitised and bounded, however long they are |
 | [`section.test.mts`](src/mfa/__tests__/section.test.mts) | the `foundation-mfa-factor-store` section: its schema, its reader, and through `createApp` with the package's module the boot refused for a missing, malformed or unknown key, the module installed alone included |
@@ -698,8 +751,11 @@ a test's configuration, holding the four URLs `urls` holds — a fake Store's
 | [`HttpMfaFactorStore.contract.test.mts`](src/mfa/__tests__/HttpMfaFactorStore.contract.test.mts) | the test kit's `MfaFactorStore` suite against `HttpMfaFactorStore` over the fake Store |
 | [`HttpMfaFactorStore.test.mts`](src/mfa/__tests__/HttpMfaFactorStore.test.mts) | what it sends — each URL as configured, the bearer token, the sealed data byte for byte and nothing it was sealed from, nothing the codec refuses; each operation's answers, and a Store that breaks the contract: `404`, `5xx`, a redirect, a malformed answer, an unreadable record, a foreign subject, a repeated id, a skipped version, an answer that did not write the changes; nothing the Store sent in anything thrown; the credential refused (naming this store), a deadline over the head or the body, the cap, an unreachable Store; construction, and neither the token nor the endpoints shown when the store is inspected |
 | [`foundationMfaFactorStoreConfig.test.mts`](src/testing/__tests__/foundationMfaFactorStoreConfig.test.mts) | the testing entry's section builder |
+| [`foundationUserRepositoryHttpConfig.test.mts`](src/testing/__tests__/foundationUserRepositoryHttpConfig.test.mts) | the testing entry's builder of the user repository's `http` block, which the `"http"` builder takes |
+| [`storeRequestMessages.test.mts`](src/mfa/__tests__/storeRequestMessages.test.mts) | one wording for a transport failure at the MFA endpoints, whichever client sends to them |
 | [`referenceConf.test.mts`](src/mfa/__tests__/referenceConf.test.mts) | the package's `reference.conf`: only that section, each URL bound to the variable named after its path, no default |
-| [`enrollmentWitness.contract.test.mts`](src/mfa/__tests__/enrollmentWitness.contract.test.mts) | the test kit's witness suite against its fake Store, read back through `HttpUserRepository.authenticate` and written by a stand-in while `HttpUserRepository` has no `markMfaEnrolled` |
+| [`enrollmentWitness.contract.test.mts`](src/mfa/__tests__/enrollmentWitness.contract.test.mts) | the test kit's witness suite against `HttpUserRepository` over its fake Store, written through `markMfaEnrolled` and read back through `authenticate` and `authenticateByToken`; the capability present with `markMfaEnrolledUrl` alone |
+| [`markEnrolled.test.mts`](src/mfa/__tests__/markEnrolled.test.mts) | `markMfaEnrolled`: what it sends — the URL as configured, `{ subject, enrolled }`, the bearer token, nothing for a subject or a value out of shape; `204` done, `404` `unknown_subject`, any other status `unexpected_status` with no `Location` contacted; a refused credential, a deadline and an unreachable Store; nothing the Store sent, nor the query or the subject, in anything thrown; the URL held to the https rule |
 
 ## See also
 

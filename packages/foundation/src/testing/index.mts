@@ -26,6 +26,20 @@ import {
 
 const URL_KEYS = ["listUrl", "createUrl", "updateUrl", "deleteUrl"] as const;
 
+/** The Store URLs the `"http"` user adapter's builder reads (`registerBuiltinAdapters`). */
+const USER_REPOSITORY_URL_KEYS = [
+	"authenticateUrl",
+	"authenticateByTokenUrl",
+	"linkFederatedIdentityUrl",
+	"findSubjectByFederatedIdentityUrl",
+	"markMfaEnrolledUrl",
+] as const;
+
+/** The user repository's Store URLs, as the `"http"` builder names them. */
+export type FoundationUserRepositoryUrls = Readonly<
+	Record<(typeof USER_REPOSITORY_URL_KEYS)[number], unknown>
+>;
+
 /**
  * The `foundation-mfa-factor-store` section as a configuration fragment to
  * lay over a test's configuration: the four URLs `urls` holds — a fake
@@ -41,4 +55,21 @@ export function foundationMfaFactorStoreConfig(
 		if (urls[key] !== undefined) section[key] = urls[key];
 	}
 	return { [FOUNDATION_MFA_FACTOR_STORE_SECTION]: { ...section, ...extra } };
+}
+
+/**
+ * The user repository's `http` block, as the `"http"` builder reads it: the
+ * Store URLs `urls` holds — a fake Store's `urls` included, its MFA factor
+ * endpoints left behind — and `extra` as given. A composition places it with
+ * core's `withUserRepositoryHttp`.
+ */
+export function foundationUserRepositoryHttpConfig(
+	urls: Partial<FoundationUserRepositoryUrls>,
+	extra: Readonly<Record<string, unknown>> = {},
+): Readonly<Record<string, unknown>> {
+	const block: Record<string, unknown> = {};
+	for (const key of USER_REPOSITORY_URL_KEYS) {
+		if (urls[key] !== undefined) block[key] = urls[key];
+	}
+	return { ...block, ...extra };
 }

@@ -279,6 +279,7 @@ export const repositoriesSectionSchema = z
 						authenticateByTokenUrl: z.unknown().optional(),
 						linkFederatedIdentityUrl: z.unknown().optional(),
 						findSubjectByFederatedIdentityUrl: z.unknown().optional(),
+						markMfaEnrolledUrl: z.unknown().optional(),
 						federatedIdentityLookupCoverage: z.unknown().optional(),
 						bearerToken: z.unknown().optional(),
 						timeout: z.unknown().optional(),
