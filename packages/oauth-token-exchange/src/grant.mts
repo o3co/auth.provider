@@ -27,7 +27,6 @@ import type {
 	GrantHandler,
 	GrantHandlerResult,
 	GrantPolicyContext,
-	GrantPolicyDecision,
 	GrantPolicyRequest,
 	OAuthTokenSettings,
 	ProviderDeps,
@@ -43,6 +42,7 @@ import {
 	logGrantPolicyUnavailable,
 	loggableError,
 	policyOutOfBounds,
+	readGrantPolicyDecision,
 	resolveAccessTokenLifetime,
 } from "@o3co/auth-provider-core";
 import { invalidRequest, isRefusal, tokenAnswer } from "./answers.mjs";
@@ -257,9 +257,9 @@ async function applyGrantPolicy(
 			userAgent: ctx.userAgent,
 			issuer: ctx.issuer ?? "",
 		};
-		let decision: GrantPolicyDecision;
+		let answer: unknown;
 		try {
-			decision = await deps.grantPolicy.evaluate(policyRequest, policyContext);
+			answer = await deps.grantPolicy.evaluate(policyRequest, policyContext);
 		} catch (err) {
 			logGrantPolicyUnavailable(
 				deps.logger,
@@ -270,16 +270,24 @@ async function applyGrantPolicy(
 				result: {
 					status: 503,
 					error: "temporarily_unavailable",
-					errorDescription: "grant policy evaluation failed",
+					// Core's `evaluateGrantPolicy` text for a policy that throws, repeated
+					// until core exports that answer.
+					errorDescription: "policy evaluation unavailable",
 				},
 			};
 		}
-		if (decision.outcome === "deny") {
+		// Core's reading: a decision that is neither allow nor deny is its 500.
+		const reading = readGrantPolicyDecision(answer, deps.logger, {
+			grantType: GRANT_TYPE,
+			policy: deps.grantPolicy.kind,
+		});
+		if (reading.verdict === "invalid") return { result: reading.result };
+		if (reading.verdict === "deny") {
 			// RFC 6749 §5.2 makes `error` 1*NQSCHAR: a malformed policy code is logged
 			// (sanitised) and replaced by `invalid_request`, RFC 8693 §2.2.2's code for a
 			// request refused by policy. `/oauth/token` checks too; this covers a
 			// composition dispatching the handler from its own route.
-			let error = decision.error;
+			let error = reading.decision.error;
 			if (!isWellFormedErrorCode(error)) {
 				deps.logger?.warn(
 					{ error: auditErrorText(String(error)) },
@@ -288,19 +296,23 @@ async function applyGrantPolicy(
 				error = "invalid_request";
 			}
 			// A JavaScript policy can return anything as its description; one
-			// that is empty or not a string is not sent — RFC 6749 A.8 makes
-			// the field 1*NQSCHAR — and the default is.
-			const description = decision.errorDescription;
+			// that is empty or not a string is not sent (RFC 6749 A.8 makes the
+			// field 1*NQSCHAR), and nothing replaces it, as `/oauth/token` answers
+			// the other grants' deny.
+			const description = reading.decision.errorDescription;
 			// `400` whatever the code (RFC 6749 §5.2), as core's
 			// `evaluateGrantPolicy` answers the other grants' deny.
 			return {
 				result: {
 					status: 400,
 					error,
-					errorDescription: (typeof description === "string" && description) || "denied by policy",
+					...(typeof description === "string" && description !== ""
+						? { errorDescription: description }
+						: {}),
 				},
 			};
 		}
+		const { decision } = reading;
 		// Presence, not truthiness, and it must be an array (a JS policy returning a
 		// string would throw at `.filter`). The policy may narrow, never widen: its scope
 		// must lie within the subject's scope AND the client's `allowedScopes`, else

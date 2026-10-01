@@ -27,11 +27,13 @@
 import crypto from "node:crypto";
 import {
 	type AppConfig,
+	type AuditEvent,
 	type AuditSink,
 	type ClientRepository,
 	type CodeRepository,
 	createSymmetricKeyStore,
 	type FederationProvider,
+	type GrantPolicyDecision,
 	type GrantPolicyHook,
 	type Logger,
 	type LoginEntry,
@@ -857,6 +859,57 @@ describe("/authorize — policy evaluation edges", () => {
 		}
 	});
 
+	// Only an exact "allow" allows and an exact "deny" refuses. Anything else
+	// is the deployment's policy at fault: `server_error` and no code, audited
+	// as a failure, not as a denial.
+	it.each([
+		["another outcome", { outcome: "denied", error: "access_denied" }],
+		["another case", { outcome: "Deny" }],
+		["no outcome", {}],
+		["null", null],
+	])(
+		"redirects a decision with %s as server_error without a code, logs it once and audits a failure",
+		async (_label, decision) => {
+			const logger = createMockLogger();
+			const record = vi.fn(async (_event: AuditEvent) => {});
+			const { app, createCode } = await makeApp({
+				logger,
+				auditSink: { kind: "spy", record },
+				grantPolicy: {
+					kind: "test-policy",
+					evaluate: async () => decision as unknown as GrantPolicyDecision,
+				},
+			});
+			const params = redirectParams(await authorize(app, baseQuery));
+			expect(Object.fromEntries(params)).toEqual({
+				error: "server_error",
+				error_description: "policy_decision_invalid",
+				state: "xyz",
+			});
+			expect(createCode).not.toHaveBeenCalled();
+			expect(
+				logger.error.mock.calls.filter(([, event]) => event === "grant_policy_decision_invalid"),
+			).toEqual([
+				[
+					{ site: "authorize", grantType: "authorization_code", policy: "test-policy" },
+					"grant_policy_decision_invalid",
+				],
+			]);
+			expect(
+				record.mock.calls
+					.map(([event]) => event)
+					.filter((event) => event.type.startsWith("authorize."))
+					.map(({ type, clientId, details }) => ({ type, clientId, details })),
+			).toEqual([
+				{
+					type: "authorize.rejected",
+					clientId: CLIENT_ID,
+					details: { reason: "policy_decision_invalid" },
+				},
+			]);
+		},
+	);
+
 	it('redirects a deny without errorDescription as "policy denied"', async () => {
 		const { app } = await makeApp({
 			grantPolicy: {
@@ -958,6 +1011,20 @@ describe("/authorize — rejection audit vocabulary (authorize.rejected)", () =>
 				type: "authorize.rejected",
 				clientId: CLIENT_ID,
 				details: expect.objectContaining({ reason: "grant_type_not_allowed" }),
+			}),
+		);
+	});
+
+	it("emits authorize.rejected when scope is omitted and the client declares no defaultScopes", async () => {
+		const record = vi.fn(async () => {});
+		const { app } = await makeApp({ auditSink: { record }, client: { defaultScopes: undefined } });
+		const res = await authorize(app, baseQuery);
+		expect(redirectParams(res).get("error")).toBe("invalid_scope");
+		expect(record).toHaveBeenCalledWith(
+			expect.objectContaining({
+				type: "authorize.rejected",
+				clientId: CLIENT_ID,
+				details: { reason: "scope_omitted_without_default" },
 			}),
 		);
 	});

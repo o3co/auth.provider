@@ -95,19 +95,16 @@ appear on a request the client did not deliberately construct?*
 
 Under the default `intent-explicit` policy an explicit mechanism wins over
 ambient ones, and **two** succeeding explicit mechanisms are a `400
-invalid_request` — the AS refuses to guess which binding the client meant.
+invalid_request` — the AS refuses to guess which binding the client meant. So
+are two succeeding **ambient** mechanisms when no explicit one succeeded: a
+request on which your ambient mechanism and mTLS both succeed is answered 400
+unless an explicit proof also succeeds, and the line
+`token_binding_ambiguous` tells the operator.
 
-Two known sharp edges:
-
-- Get this backwards on an ambient mechanism (marking it explicit) and any
-  request carrying both it and a real explicit proof becomes a 400 for
-  well-behaved clients.
-- Two succeeding **ambient** mechanisms currently resolve first-registered-wins
-  rather than rejecting. That asymmetry is pinned in
-  `packages/core/src/middleware/__tests__/tokenBinding.test.mts`; if yours is
-  the second ambient mechanism to ship, decide deliberately whether first-wins
-  is right and change the test if it is not. Do not let the existing behavior
-  decide by default.
+Do not mark an ambient mechanism explicit to avoid that 400. Its signal would
+then win over mTLS on every request carrying both, whether or not the client
+meant to bind with it, and any request carrying both it and a real explicit
+proof would become a 400 for well-behaved clients.
 
 ### 4. `extract` must be all-or-nothing
 
@@ -159,8 +156,7 @@ around merging.
 - [ ] Contributed via `tokenBindingMechanisms`, not `grantMiddleware`
 - [ ] `kind` is lowercase snake_case and chosen as a permanent public name
 - [ ] `intentExplicit` reflects whether the signal can appear without client
-      intent — and, if ambient, the multi-ambient behavior was decided rather
-      than inherited
+      intent
 - [ ] `extract` returns `null` only for absence, throws for invalid material
 - [ ] Thrown `code` is a string matching `/^[a-z][a-z0-9_]*$/`, or the
       `invalid_<kind>_proof` fallback is the intended wire result
@@ -168,6 +164,9 @@ around merging.
       the same PR
 - [ ] Integration test mounting your module alongside `dpopModule` and
       `mtlsModule`, covering both valid and invalid material
+- [ ] If your mechanism is ambient: an integration test presenting its signal
+      together with an mTLS client certificate, answered `400
+      invalid_request`
 
 ### Reference
 

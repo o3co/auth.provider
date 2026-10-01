@@ -38,8 +38,9 @@ import { createRedisUserSessionStore } from "../userSessionStore.mjs";
  * no session or access token.
  *
  * `keyPrefix` is the outer namespace; each store gets a fixed subprefix
- * (`us:` / `rp:` / `fi:` / `fed:` / `sub:` / `rev:`). The subject-keyed stores
- * do not share one with the sid-keyed stores, so a sid cannot collide with a
+ * (`us:` / `rp:` / `fi:` / `fed:` / `sub:` / `rev:`), and the family index's
+ * "ended" marks one of their own (`fi-ended:`). The subject-keyed stores do
+ * not share one with the sid-keyed stores, so a sid cannot collide with a
  * subject. To override a single subprefix, use the per-adapter constructors.
  *
  * `keyPrefix` is its own section's, `redis-session-stores` (strict);
@@ -87,6 +88,7 @@ export const redisSessionStoresModule = defineModule({
 			return createRedisSessionFamilyIndex({
 				client: deps.sessionFamilyIndexClient,
 				keyPrefix: `${deps.section.keyPrefix}fi:`,
+				endedKeyPrefix: `${deps.section.keyPrefix}fi-ended:`,
 			});
 		},
 		sessionFederationIndex: (deps) => {

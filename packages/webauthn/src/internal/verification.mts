@@ -25,8 +25,8 @@
  * A registration's top origin is held to the rule the library holds an assertion's to, which it
  * does not apply to a registration: a top origin the client data reports must be one of the
  * expected top origins, and belong to a cross-origin ceremony. None reported passes, as it does
- * for an assertion (Safari reports none). The client data is read with the library's own decoder,
- * so the text judged is the text it verified.
+ * for an assertion (Safari reports none). The client data is read as the library decodes it
+ * (`./clientData.mts`), so the text judged is the text it verified.
  * - `topOriginAccepted` mirrors `verifyAuthenticationResponse`'s `crossOrigin` branch: recheck it
  *   at every `@simplewebauthn/server` bump.
  * - Once `verifyRegistrationResponse` takes an expected top origin, pass it through and delete
@@ -37,6 +37,12 @@
  * it. A count that did not increase over the stored one is a regression, but for 0 against a
  * stored 0 — an authenticator that keeps no counter (WebAuthn §6.1.1).
  *
+ * An assertion's user handle, which the library does not compare, is held here to the one the
+ * caller expects (WebAuthn §7.2 step 6), once the signature verified and before the count: one
+ * carried must be the expected bytes' unpadded base64url, and no other spelling of them — padded,
+ * the standard alphabet, the handle read as text — is accepted. None carried (`null` is none)
+ * passes: a non-discoverable credential may return none.
+ *
  * Attestation chain failures ("x5c could not be chained to any specified trust anchor") match no
  * prefix and read as "unknown"; there is no dedicated reason for them.
  */
@@ -44,7 +50,7 @@
 import type { AuthenticatorTransport, WebAuthnCredential } from "@o3co/auth-provider-core";
 import type { AuthenticationResponseJSON, RegistrationResponseJSON } from "@simplewebauthn/server";
 import { verifyAuthenticationResponse, verifyRegistrationResponse } from "@simplewebauthn/server";
-import { decodeClientDataJSON } from "@simplewebauthn/server/helpers";
+import { readClientData } from "./clientData.mjs";
 import { WEBAUTHN_ALGORITHM_IDS } from "./options.mjs";
 
 // ---------------------------------------------------------------------------
@@ -183,9 +189,9 @@ function topOriginAccepted(
 	clientDataJSON: string,
 	expected: readonly string[] | undefined,
 ): boolean {
-	const clientData: unknown = decodeClientDataJSON(clientDataJSON);
-	if (typeof clientData !== "object" || clientData === null) return false;
-	const { crossOrigin, topOrigin } = clientData as { crossOrigin?: unknown; topOrigin?: unknown };
+	const clientData = readClientData(clientDataJSON);
+	if (clientData === undefined) return false;
+	const { crossOrigin, topOrigin } = clientData;
 	if (topOrigin === undefined) return true;
 	return crossOrigin === true && typeof topOrigin === "string" && !!expected?.includes(topOrigin);
 }
@@ -255,6 +261,12 @@ export interface AssertionVerificationInput {
 	 * default).
 	 */
 	readonly expectedTopOrigins?: readonly string[];
+	/**
+	 * The user handle of the account the credential belongs to. Given, a response carrying
+	 * another is refused as `user_handle_mismatch`; absent, the response's user handle is not
+	 * read.
+	 */
+	readonly expectedUserHandle?: Uint8Array;
 }
 
 export type AssertionVerificationResult =
@@ -267,6 +279,7 @@ export type AssertionVerificationResult =
 				| "challenge_mismatch"
 				| "rp_id_mismatch"
 				| "signature_invalid"
+				| "user_handle_mismatch"
 				| "sign_count_regression"
 				| "unknown";
 	  };
@@ -334,6 +347,9 @@ export async function verifyWebAuthnAssertionWithBackupState(
 		if (!verification.verified) {
 			return { ok: false, reason: "signature_invalid" };
 		}
+		if (!userHandleAccepted(input.response.response.userHandle, input.expectedUserHandle)) {
+			return { ok: false, reason: "user_handle_mismatch" };
+		}
 
 		const { newCounter, credentialBackedUp, credentialDeviceType } =
 			verification.authenticationInfo;
@@ -357,6 +373,15 @@ export async function verifyWebAuthnAssertionWithBackupState(
 	} catch (err) {
 		return mapAuthenticationError(err);
 	}
+}
+
+/**
+ * Whether the user handle a response carries may stand for the account whose handle is
+ * `expected`: none expected, none carried, or `expected`'s unpadded base64url.
+ */
+function userHandleAccepted(presented: unknown, expected: Uint8Array | undefined): boolean {
+	if (expected === undefined || presented === undefined || presented === null) return true;
+	return presented === Buffer.from(expected).toString("base64url");
 }
 
 function mapAuthenticationError(err: unknown): Extract<AssertionVerificationResult, { ok: false }> {

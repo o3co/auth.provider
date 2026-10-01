@@ -22,6 +22,7 @@ import {
 	type ExchangeTokenValidator,
 	type GrantContext,
 	type GrantPolicyContext,
+	type GrantPolicyDecision,
 	type GrantPolicyHook,
 	type GrantPolicyRequest,
 	type Logger,
@@ -2263,6 +2264,33 @@ describe("createTokenExchangeGrant — the session rule, the actor, and what the
 			}
 		});
 
+		it("the grant policy's", async () => {
+			const spy = consoleError();
+			try {
+				const g = buildGrant({
+					grantPolicy: {
+						kind: "decision-service",
+						evaluate: async () => {
+							throw storeReplyError();
+						},
+					},
+				});
+				const { result } = await exchange(g, {
+					subject_token: await signSelfIssuedAccessToken({}),
+				});
+				expect(result.status).toBe(503);
+				const lines = spy.mock.calls.filter((call) => call[1] === "grant_policy_unavailable");
+				expect(lines).toHaveLength(1);
+				expect(lines[0]?.[0]).toMatchObject({
+					grantType: TOKEN_EXCHANGE_GRANT_TYPE,
+					policy: "decision-service",
+					err: expect.objectContaining({ name: "ReplyError" }),
+				});
+			} finally {
+				spy.mockRestore();
+			}
+		});
+
 		it.each(["subject", "actor"] as const)("the %s validator's", async (role) => {
 			const spy = consoleError();
 			try {
@@ -2291,5 +2319,33 @@ describe("createTokenExchangeGrant — the session rule, the actor, and what the
 				spy.mockRestore();
 			}
 		});
+	});
+
+	it("logs a policy decision that is neither allow nor deny on core's console logger when no logger is wired", async () => {
+		const spy = vi.spyOn(consoleLogger, "error").mockImplementation(() => {});
+		try {
+			const g = buildGrant({
+				grantPolicy: {
+					kind: "test-policy",
+					evaluate: async () => ({}) as unknown as GrantPolicyDecision,
+				},
+			});
+			const { result } = await exchange(g, {
+				subject_token: await signSelfIssuedAccessToken({}),
+			});
+			expect(result).toEqual({
+				status: 500,
+				error: "server_error",
+				errorDescription: "policy_decision_invalid",
+			});
+			expect(spy.mock.calls.filter((call) => call[1] === "grant_policy_decision_invalid")).toEqual([
+				[
+					{ grantType: TOKEN_EXCHANGE_GRANT_TYPE, policy: "test-policy" },
+					"grant_policy_decision_invalid",
+				],
+			]);
+		} finally {
+			spy.mockRestore();
+		}
 	});
 });

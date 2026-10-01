@@ -177,6 +177,23 @@ export interface SessionSidSortedSetClient {
 	zRem(key: string, member: string): Promise<number>;
 }
 
+/**
+ * Backing client for the SessionFamilyIndex adapter: the sorted set, and the
+ * session's "ended" mark beside it. The mark's two methods are optional, and
+ * the index has core's `SupportsSessionEnd` only over a client with both.
+ *
+ * What a client owes that capability: its writes (`writeEndedMark`,
+ * `multi().exec()`) resolve only once the server has replied, and its reads
+ * (`hasEndedMark`, `zRange`) are served by the primary. The index sends each
+ * command only after the previous one has resolved.
+ */
+export interface SessionFamilyIndexClient extends SessionSidSortedSetClient {
+	/** Write the mark at `key`, expiring at the epoch-ms `msTimestamp` (`SET key 1 PXAT msTimestamp`). */
+	writeEndedMark?(key: string, msTimestamp: number): Promise<void>;
+	/** Whether the mark at `key` is there (`EXISTS key`). */
+	hasEndedMark?(key: string): Promise<boolean>;
+}
+
 // --- Subject-keyed clients -------------------------------------------------
 
 /**

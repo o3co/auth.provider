@@ -22,6 +22,7 @@ import type {
 	RefreshTokenFamilyClient,
 	RefreshTokenFamilyMultiClient,
 	ReplaySeenSetClient,
+	SessionFamilyIndexClient,
 	SessionRPRegistryClient,
 	SessionRPRegistryMultiClient,
 	SessionSidSortedSetClient,
@@ -76,10 +77,15 @@ describe("makeIoredisClients return shape", () => {
 		>().toMatchTypeOf<SessionRPRegistryClient>();
 	});
 
-	it("sessionFamilyIndexClient satisfies SessionSidSortedSetClient", () => {
+	it("sessionFamilyIndexClient satisfies SessionFamilyIndexClient, a SessionSidSortedSetClient", () => {
 		expectTypeOf<
 			IoredisClientsReturn["sessionFamilyIndexClient"]
-		>().toMatchTypeOf<SessionSidSortedSetClient>();
+		>().toMatchTypeOf<SessionFamilyIndexClient>();
+		expectTypeOf<SessionFamilyIndexClient>().toMatchTypeOf<SessionSidSortedSetClient>();
+	});
+
+	it("a SessionSidSortedSetClient is a SessionFamilyIndexClient: the mark's two methods are optional", () => {
+		expectTypeOf<SessionSidSortedSetClient>().toMatchTypeOf<SessionFamilyIndexClient>();
 	});
 
 	it("sessionFederationIndexClient satisfies SessionSidSortedSetClient", () => {
@@ -167,9 +173,9 @@ describe("ComponentMap declaration-merge — per-purpose client slots", () => {
 		>();
 	});
 
-	it("sessionFamilyIndexClient slot is optional and of SessionSidSortedSetClient type", () => {
+	it("sessionFamilyIndexClient slot is optional and of SessionFamilyIndexClient type", () => {
 		expectTypeOf<ComponentMap["sessionFamilyIndexClient"]>().toEqualTypeOf<
-			SessionSidSortedSetClient | undefined
+			SessionFamilyIndexClient | undefined
 		>();
 	});
 

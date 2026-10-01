@@ -80,6 +80,7 @@ export type {
 	ReserveMfaSubjectAttemptReply,
 	RetireFederationGrantIntentInput,
 	RevokeFederationGrantInput,
+	SessionFamilyIndexClient,
 	SessionRPRegistryClient,
 	SessionRPRegistryMultiClient,
 	SessionSidSortedSetClient,

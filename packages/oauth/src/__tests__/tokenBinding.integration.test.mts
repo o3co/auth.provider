@@ -19,7 +19,7 @@
  * through the real Express + oauth router stack: a grant handler observes the
  * value the middleware wrote. The middleware unit tests
  * (`packages/core/src/middleware/__tests__/tokenBinding.test.mts`) use a fake
- * `req`/`res` pair and cannot see `routes.mts` drop the field.
+ * `req`/`res` pair and cannot see `routes/token.mts` drop the field.
  */
 
 import {

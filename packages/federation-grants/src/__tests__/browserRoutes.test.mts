@@ -1542,7 +1542,67 @@ describe("the callback for a renewal", () => {
 	});
 });
 
+/**
+ * Each way the connection can stop being the one an intent was lodged against:
+ * gone, another federation entry, another identity revision, another
+ * authorization revision, or another callback.
+ */
+const CONNECTION_CHANGES: readonly (readonly [
+	string,
+	FederationGrantAcquisitionConnection | undefined,
+])[] = [
+	["removed", undefined],
+	["re-pointed onto another federation", { ...CONNECTION, federation: "upstream-other" }],
+	["moved to another upstream client", { ...CONNECTION, upstreamClientId: "provider-client-2" }],
+	["widened to another scope", { ...CONNECTION, scopes: [...CONNECTION.scopes, "contacts.read"] }],
+	[
+		"given another callback",
+		{ ...CONNECTION, callbackUri: `${ISSUER}/v2/session/federation-grants/callback/calendar` },
+	],
+];
+
+const changeConnection = (
+	w: World,
+	changed: FederationGrantAcquisitionConnection | undefined,
+): void => {
+	if (changed === undefined) w.state.connections.delete(CONNECTION.name);
+	else w.state.connections.set(CONNECTION.name, changed);
+};
+
 describe("what the flow re-checks at each step, and the dates it records", () => {
+	it.each(CONNECTION_CHANGES)(
+		"stops at connect when the connection was %s since the intent was lodged",
+		async (_, changed) => {
+			const w = world();
+			const { handle, grantId } = await w.lodge();
+			w.signIn("b-1");
+			changeConnection(w, changed);
+			const response = await w.connect(handle, "b-1");
+			expect(response.status).toBe(400);
+			isPlain(response);
+			expect(response.text).toBe(
+				"The connection has changed since this request was made. Start again.",
+			);
+			await w.background.drain();
+			expect(
+				w.events.find((e) => e.type === "federation.grant.authorization_failed"),
+			).toMatchObject({ details: { grantId, outcome: "connection_changed" } });
+		},
+	);
+
+	it.each(CONNECTION_CHANGES)(
+		"exchanges no code at the callback when the connection was %s since the flow was approved",
+		async (_, changed) => {
+			const w = world();
+			const a = await approved(w, "b-1");
+			changeConnection(w, changed);
+			expect(returned(await callback(w, { state: a.state, code: "c" }, "b-1")).get("error")).toBe(
+				"grant_not_authorizable",
+			);
+			expect(w.state.exchanged).toHaveLength(0);
+		},
+	);
+
 	it("stops at connect when the client may no longer use the connection, or its callback moved", async () => {
 		const w = world();
 		const { handle } = await w.lodge();
@@ -1940,6 +2000,38 @@ describe("connect, when the world fails or moves", () => {
 		expect(response.status).toBe(400);
 		isPlain(response);
 		expect(response.text).toMatch(/expired or has already been used/);
+	});
+
+	it("audits a connect whose question cannot be parked for this browser as a stale link, with the flow's grant", async () => {
+		// The question already parked for another browser of the same user, and a
+		// flow that finished while this browser was being judged.
+		const arrangements: readonly ((w: World, handle: string) => Promise<void>)[] = [
+			async (w, handle) => {
+				w.signIn("b-2");
+				await w.challengeFor(handle, "b-2");
+			},
+			async (w, handle) => {
+				w.state.before.set("userSessionStore.get", () =>
+					w.intents.finishIntent(handle, w.state.now),
+				);
+			},
+		];
+		for (const arrange of arrangements) {
+			const w = world();
+			const { handle, grantId } = await w.lodge();
+			w.signIn("b-1");
+			await arrange(w, handle);
+			const response = await w.connect(handle, "b-1");
+			expect(response.status).toBe(400);
+			isPlain(response);
+			expect(response.text).toBe("This link has expired or has already been used. Start again.");
+			await w.background.drain();
+			expect(
+				w.events
+					.filter((e) => e.type === "federation.grant.authorization_failed")
+					.map((e) => e.details),
+			).toEqual([expect.objectContaining({ grantId, outcome: "stale", correlationId: "corr-1" })]);
+		}
 	});
 
 	it("asks a browser with no durable session behind its cookie to sign in again", async () => {
@@ -2920,6 +3012,86 @@ describe("connect — what an outage logs", () => {
 	});
 });
 
+describe("connect — what an outage audits", () => {
+	/** Every event written, without its timestamp and request metadata. */
+	const audited = (w: World) =>
+		w.events.map(({ type, clientId, subject, details }) => ({ type, clientId, subject, details }));
+
+	it("audits a handle the intent store cannot read as unavailable, naming no flow, beside its one line", async () => {
+		const w = world();
+		const { handle } = await w.lodge();
+		w.signIn("b-1");
+		w.state.faults.set("getIntent", 0);
+		const response = await w.connect(handle, "b-1");
+		expect(response.status).toBe(503);
+		isPlain(response);
+		expect(response.text).toBe("Temporarily unavailable.");
+		expect(written(await settledLines(w))).toEqual(["error federation_grant_connect_unavailable"]);
+		expect(payloadOf(w.lines, "federation_grant_connect_unavailable")).toEqual({
+			correlationId: response.headers["x-request-id"],
+			reason: "storage",
+			store: "federation_grant_intent",
+			step: "get_intent",
+			err: injected("getIntent"),
+		});
+		expect(audited(w)).toEqual([
+			{
+				type: "federation.grant.authorization_failed",
+				clientId: "",
+				subject: "",
+				details: {
+					correlationId: response.headers["x-request-id"],
+					grantId: "",
+					outcome: "unavailable",
+					operation: "connect",
+				},
+			},
+		]);
+	});
+
+	it.each([
+		["parkConsent", "federation_grant_intent", "park_consent"],
+		["isCurrentIntent", "federation_grant", "is_current_intent"],
+	] as const)(
+		"audits %s failing as unavailable with the flow's grant, client, subject and connection, beside its one line",
+		async (method, store, step) => {
+			const w = world();
+			const { handle, grantId } = await w.lodge();
+			w.signIn("b-1");
+			w.state.faults.set(method, 0);
+			const response = await w.connect(handle, "b-1");
+			expect(response.status).toBe(503);
+			isPlain(response);
+			expect(response.text).toBe("Temporarily unavailable.");
+			expect(written(await settledLines(w))).toEqual([
+				"error federation_grant_connect_unavailable",
+			]);
+			expect(payloadOf(w.lines, "federation_grant_connect_unavailable")).toEqual({
+				grantId,
+				correlationId: response.headers["x-request-id"],
+				reason: "storage",
+				store,
+				step,
+				err: injected(method),
+			});
+			expect(audited(w)).toEqual([
+				{
+					type: "federation.grant.authorization_failed",
+					clientId: CLIENT.clientId,
+					subject: "alice",
+					details: {
+						correlationId: "corr-1",
+						grantId,
+						connection: CONNECTION.name,
+						outcome: "unavailable",
+						operation: "connect",
+					},
+				},
+			]);
+		},
+	);
+});
+
 describe("consent — what an outage logs", () => {
 	/** A question parked for alice's browser `b-1`. */
 	async function asked(w: World) {
@@ -3766,7 +3938,12 @@ describe("the browser half on session admission", () => {
 			createFederationGrantBrowserRouter({
 				requirements: resolverForTests([], { actions: FEDERATION_GRANTS_ADMISSION_ACTIONS }),
 			} as never),
-		).toThrow(/subjectRevocation/);
+		).toThrow(
+			new TypeError(
+				"createFederationGrantBrowserRouter: subjectRevocation is required — the sessions " +
+					"boundary a session must have authenticated after is read through it",
+			),
+		);
 	});
 
 	it("refuses to be built on an issuer that is not an absolute http(s) URL: the consent location and the connect URI are built on it, and on mailto:, urn: or data: each would throw, a 500 on every request", () => {

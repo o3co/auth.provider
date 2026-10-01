@@ -42,7 +42,8 @@ const RULES = {
 	decision:
 		"check answers a decision: allowed true or false, and remaining, limit, resetAt and reason well-formed when present",
 	outage: "an outage is thrown, never answered as a decision",
-	budget: "a key is allowed its limit and refused past it, and another key is counted apart",
+	budget:
+		"a key is allowed its limit and refused past it, under a prefix named after an Object.prototype member too, and another key is counted apart",
 } as const;
 
 const downDouble = () => {
@@ -247,6 +248,27 @@ describe("rateLimiterContract — each way a limiter can break it", () => {
 				withBudget: (spec) => {
 					const shared = createTestRateLimiter({ limit: spec.limit });
 					return { ...shared, check: (_key, ctx) => shared.check("one-bucket", ctx) };
+				},
+			}),
+		).toEqual([RULES.budget]);
+	});
+
+	it("a budget looked up on a plain object, which finds an Object.prototype member for a prefix named after one", async () => {
+		expect(
+			await failing({
+				build: () => createTestRateLimiter(),
+				withBudget: (spec) => {
+					const limits: Record<string, RateLimitSpec> = {};
+					const counts = new Map<string, number>();
+					return {
+						kind: "plain-object",
+						check: async (key) => {
+							const { limit } = limits[key.slice(0, key.indexOf(":"))] ?? spec;
+							const count = (counts.get(key) ?? 0) + 1;
+							counts.set(key, count);
+							return { allowed: !(count > limit) };
+						},
+					};
 				},
 			}),
 		).toEqual([RULES.budget]);

@@ -451,19 +451,12 @@ describe("the lodging routes", () => {
 		});
 	});
 
-	it("logs the renewed grant's connection when it is no longer configured — a renewal names none", async () => {
+	it("writes no outage line for a renewal on a removed connection: it is refused as not permitted", async () => {
 		const h = harness();
 		await h.seed();
 		h.world.connections.delete(connection.name);
-		expect((await renew(h)).status).toBe(503);
-		expect(written(await settled(h))).toEqual(["error federation_grant_lodge_unavailable"]);
-		expect(payloadOf(h.lines, "federation_grant_lodge_unavailable")).toEqual({
-			operation: "reauthorize",
-			grantId: GRANT_ID,
-			correlationId: REQUEST_ID,
-			reason: "connection_not_configured",
-			connection: connection.name,
-		});
+		expect((await renew(h)).status).toBe(403);
+		expect(written(await settled(h))).toEqual([]);
 	});
 
 	it("logs a renewal's key missing from the ring", async () => {

@@ -56,12 +56,12 @@
  * answers an outage as 503 and anything else as a verdict on the certificate.
  */
 
-import { createHash } from "node:crypto";
 import * as pkijs from "pkijs";
 import { type AlgorithmPolicy, checkSignatureAlgorithm } from "./algorithms.mjs";
 import { checkCrlCriticalExtensions, extensionValueParsed } from "./criticalExtensions.mjs";
 import { DEFAULT_ALGORITHM_POLICY } from "./defaults.mjs";
 import { type GuardedFetch, isSourceFailure } from "./fetchGuard.mjs";
+import { GENERAL_NAME_URI, isHttpUrl, issuerKeyId } from "./revocationSource.mjs";
 
 /** OID of the `cRLDistributionPoints` extension (RFC 5280 §4.2.1.13). */
 const OID_CRL_DISTRIBUTION_POINTS = "2.5.29.31";
@@ -77,9 +77,6 @@ const OID_ISSUING_DISTRIBUTION_POINT = "2.5.29.28";
 
 /** `cRLSign` bit of `keyUsage`, MSB-first within the first octet. */
 const KEY_USAGE_CRL_SIGN = 0x02;
-
-/** `GeneralName` tag for `uniformResourceIdentifier`. */
-const GENERAL_NAME_URI = 6;
 
 /**
  * Why a certificate's revocation status could not be determined. Values are
@@ -171,8 +168,6 @@ export type CrlDistributionPoints =
 			readonly reason: "no_distribution_point" | "unsupported_distribution_point";
 			readonly detail: string;
 	  };
-
-const isHttpUrl = (value: string): boolean => /^https?:\/\//i.test(value);
 
 /** The absolute HTTP(S) URIs a distribution point is named by, in order. */
 const httpUrls = (point: pkijs.DistributionPoint): readonly string[] => {
@@ -430,17 +425,7 @@ const checkScope = (
 	};
 };
 
-/**
- * A cache entry is keyed by the distribution point *and* the key the CRL was
- * verified against. Two CAs can share a subject name — a key rollover keeps
- * the DN — and a CRL accepted for one must never be handed to a certificate
- * the other issued.
- */
-const issuerKeyId = (issuer: pkijs.Certificate): string =>
-	createHash("sha256")
-		.update(new Uint8Array(issuer.subjectPublicKeyInfo.toSchema().toBER(false)))
-		.digest("hex");
-
+/** A cache entry is keyed by the distribution point *and* the key the CRL was verified against. */
 const usableKey = (url: string, issuerId: string): string => `crl:${url}\n${issuerId}`;
 
 /**

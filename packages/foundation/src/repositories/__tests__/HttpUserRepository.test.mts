@@ -150,6 +150,40 @@ describe("HttpUserRepository", () => {
 			);
 		});
 
+		// An empty `id` would become an empty subject, which OpenID Connect Core
+		// §2 does not allow as a `sub`.
+		it.each([
+			["an empty id", { id: "", username: "alice" }],
+			["an empty username", { id: "u1", username: "" }],
+		])("throws on a 2xx carrying %s, from every call that reads a user", async (_, body) => {
+			const LINK_URL = `${BASE_URL}/user/link`;
+			const linking = new HttpUserRepository({
+				authenticateUrl: `${BASE_URL}/user/authenticate`,
+				authenticateByTokenUrl: `${BASE_URL}/user/authenticate/token`,
+				linkFederatedIdentityUrl: LINK_URL,
+				timeout: 5000,
+			});
+			server.use(
+				http.post(`${BASE_URL}/user/authenticate`, () => HttpResponse.json(body)),
+				http.post(`${BASE_URL}/user/authenticate/token`, () => HttpResponse.json(body)),
+				http.post(LINK_URL, () => HttpResponse.json(body)),
+			);
+			await expect(linking.authenticate("alice@example.com", "pass")).rejects.toThrow(
+				/invalid User shape/,
+			);
+			await expect(linking.authenticateByToken("valid-token")).rejects.toThrow(
+				/invalid User shape/,
+			);
+			await expect(
+				linking.linkFederatedIdentity?.("user-1", {
+					provider: "apple",
+					sub: "a1",
+					token: "apple:a1",
+					claims: {},
+				}),
+			).rejects.toThrow(/invalid User shape/);
+		});
+
 		it("accepts valid User shape with extra fields (index-signature passthrough)", async () => {
 			server.use(
 				http.post(`${BASE_URL}/user/authenticate`, () => {

@@ -3,7 +3,7 @@
  * Licensed under the Apache License, Version 2.0 (the "License");
  */
 
-import Redis from "ioredis";
+import { Redis } from "ioredis";
 import { afterAll, beforeAll } from "vitest";
 import { createRedisChallengeStore } from "../src/challenges.mjs";
 import type { ChallengeStoreClient } from "../src/clients.mjs";

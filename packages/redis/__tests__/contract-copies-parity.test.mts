@@ -82,7 +82,10 @@ const COPIES: ReadonlyArray<{
 	{
 		core: "user-sessions/__tests__/sessionFamilyIndex.contract.mts",
 		copy: "sessionFamilyIndex.contract.mts",
-		runners: [["runSessionFamilyIndexContract", "redis.sessionFamilyIndex.test.mts"]],
+		runners: [
+			["runSessionFamilyIndexContract", "redis.sessionFamilyIndex.test.mts"],
+			["runSessionEndContract", "redis.sessionFamilyIndex.test.mts"],
+		],
 	},
 	{
 		core: "user-sessions/__tests__/sessionFederationIndex.contract.mts",

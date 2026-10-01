@@ -386,17 +386,21 @@ export {
 } from "./grants/confirmationMatch.mjs";
 export { isEmailVerified } from "./grants/emailVerifiedGate.mjs";
 // Grant-policy evaluation and its bounds: the one answer every minting
-// path gives a policy that throws, denies, or exceeds its ceiling.
+// path gives a policy that throws, denies, returns a decision that is
+// neither allow nor deny, or exceeds its ceiling.
 export {
 	boundPolicyAudience,
 	type EvaluateGrantPolicyOptions,
 	evaluateGrantPolicy,
 	type GrantPolicyAllow,
+	type GrantPolicyDeny,
 	type GrantPolicyOutcome,
+	type GrantPolicyReading,
 	logGrantPolicyUnavailable,
 	type PolicyAudienceOutcome,
 	type PolicyScopeCeiling,
 	policyOutOfBounds,
+	readGrantPolicyDecision,
 } from "./grants/grantPolicy.mjs";
 // id_token generation (OIDC Core §2)
 export {
@@ -1117,6 +1121,7 @@ export type {
 	SubjectSessionIndex,
 	SubjectSessionIndexFactory,
 	SupportsSecondFactorUpdate,
+	SupportsSessionEnd,
 	UserSession,
 	UserSessionClaims,
 	UserSessionStore,
@@ -1125,6 +1130,7 @@ export type {
 export {
 	SUBJECT_REVOCATION_ABSENCE_POLICY,
 	supportsSecondFactorUpdate,
+	supportsSessionEnd,
 } from "./user-sessions/types.mjs";
 
 // ---------------------------------------------------------------------------

@@ -1,6 +1,6 @@
 # @o3co/auth-provider-core
 
-最終更新: 2026-09-30
+最終更新: 2026-10-01
 
 ## 責務と役割
 
@@ -534,6 +534,7 @@ const userRepo = new InMemoryUserRepository(users);
 #### GrantPolicyHook（scope / audience / token exchange のポリシー）
 
 - `GrantPolicyHook.evaluate(request, ctx)` は allow（narrowing 可）/ deny を返す
+- allow になるのは `outcome` がちょうど `"allow"` のときだけ、拒否になるのはちょうど `"deny"` のときだけである。それ以外 — 別の文字列や大文字小文字違い、`outcome` がない、オブジェクトでない値 — は不正な決定で、allow にはならない: `/oauth/token` では説明 `policy_decision_invalid` 付きの `500 server_error`、`/oauth/authorize` ではリダイレクトの `error=server_error` で答え、ポリシーの `kind` だけを付けて（決定の中身は付けずに）`grant_policy_decision_invalid`（error）としてログに残し、理由 `policy_decision_invalid` の失敗として監査する。ポリシーを参照するすべてのグラントと `/oauth/authorize` は決定を `readGrantPolicyDecision`（[`grants/grantPolicy.mts`](src/grants/grantPolicy.mts)）で読む。ロガーが渡されなければ、この関数は core のコンソールロガーにログを書く
 - deny の `error` は RFC 6749 のエラーコード `1*NQSCHAR`（空でない、`"` と `\` を除く印字可能な ASCII）でなければならない（`isWellFormedErrorCode`、[`errors/envelope.mts`](src/errors/envelope.mts)）。それ以外のコードを `/oauth/token` は `invalid_request`、`/oauth/authorize` は `access_denied` として返し、ポリシーのコードをサニタイズしてログに残す
 - `/oauth/authorize` で 1 回だけ評価、`/oauth/token` は Code record に persist された `grantedScope` / `grantedAudience` を再利用（`authorization_code` では再評価しない）
 - その他のグラント（refresh / client_credentials / token-exchange）はトークンエンドポイントで評価
@@ -563,7 +564,7 @@ sender-constrained なトークンバインディングは第一級の拡張面�
 
 複数の機構が組み込まれたとき、`core.tokenBinding.dispatchPolicy`（core 自身のセクションにある — single source of truth）が調停します:
 
-- `intent-explicit`（既定）— ambient より explicit-intent の機構を優先する。
+- `intent-explicit`（既定）— ambient より explicit-intent の機構を優先する。explicit-intent の機構が 2 つ以上成功したとき、または explicit-intent の成功がなく ambient の機構が 2 つ以上成功したときは `invalid_request` で拒否し、warn の 1 行 `token_binding_ambiguous`（`tier` と、成功した `mechanisms`）をログに出す。
 - `strict-mutual-exclusion` — 2 つ以上の機構の `extract` がバインディングを返したら `invalid_request` で拒否する。
 
 環境変数での上書き: `CORE_TOKEN_BINDING_DISPATCH_POLICY`。
@@ -577,6 +578,7 @@ sender-constrained なトークンバインディングは第一級の拡張面�
 フェデレーションと OIDC 対応のための任意スロットの 2 つのグループで、モジュール（`memorySessionStoresModule`、`memoryFederationTokenStoreModule`）か Redis アダプターが提供します:
 
 - `userSessionStore` と、sid / subject をキーとするその兄弟: セッションのメタデータ（auth_time、セッションがどう確立されたか — `authentication` —、アクティブな RP、family ID、OIDC claim）、ログアウトの fan-out 用インデックス、subject 単位の失効 — [`src/user-sessions/README.md`](src/user-sessions/README.md)。`SupportsSecondFactorUpdate` — `UserSessionStore` の任意の capability で、生きているセッションで検証された第 2 要素を記録する（`recordSecondFactor`）。ステップアップに必要。同梱の 2 つのストアはどちらも実装している。`supportsSecondFactorUpdate(store)` ガードで検出する。
+- `SupportsSessionEnd` — `SessionFamilyIndex` の任意の capability（`endSession`、`addFamilyIdUnlessEnded`）。同じセッションに対するログアウトの end とグラントの add について、end の一覧がその family を含むか、add が `"ended"` と答えるかのどちらかになる。同梱の 2 つのインデックスはどちらも実装している（Redis のものは印を書けるクライアントの上で）。`supportsSessionEnd(index)` ガードで検出する。ストアが読み書きを線形化可能に保ち、読み取りをプライマリで処理すること（各操作は、それが始まる前に完了したすべての書き込みを見る）を信頼している。Redis の非同期レプリケーションはフェイルオーバーをまたいでこれを保証しない。昇格したレプリカは、旧プライマリが応答済みの書き込みを持たないことがある。レプリカが答える読み取りも同様である。この保証は、関係するすべての時計でセッションの寿命内にある操作について成り立つ。印はその寿命にクロックスキューの許容幅（`DEFAULT_CLOCK_SKEW_MS`）を足した間だけ残る。
 - `federationTokenStore`: `(sid, federationName)` をキーとする上流 IdP のトークンで、ログアウトで削除される。Redis アダプターは `refresh_token` を AES-256-GCM で暗号化し、`allow-plaintext` は opt-in で警告を出力する。ストアは `FederationTokens` のすべてのフィールドを round-trip させなければならない — `expiresAt: null` を含め、記録がないフィールドは `null` ではなく `undefined` で返す。フィールドごとのポート契約は [src/README.md](src/README.md#federation-tokens) に、必須キーのためにストア実装者が変えることは [docs/upgrading-required-record-keys.md](../../docs/upgrading-required-record-keys.md) にある。
 
 `@o3co/auth-provider-oauth` が両方を消費します: ログアウトと連鎖失効、id_token と `/userinfo`、`POST /oauth/federation/:name/token`。いずれかの `federations.<name>.enabled` が true のとき、`userSessionStore`、`sessionRPRegistry`、`sessionFamilyIndex`、`sessionFederationIndex`、`federationTokenStore`、`refreshTokenFamilyRevocation` のどれかが欠けた構成を boot は拒否します（`federation-stores-incomplete`）。

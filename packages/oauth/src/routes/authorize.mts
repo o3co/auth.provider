@@ -29,11 +29,12 @@ import {
 	extractResourceParam,
 	isWellFormedErrorCode,
 	logGrantPolicyUnavailable,
+	readGrantPolicyDecision,
 	sanitizeErrorText,
 } from "@o3co/auth-provider-core";
 import type { Request, RequestHandler, Response } from "express";
 import type { OAUTH_ROUTER_ADMISSION_ACTIONS } from "../admissionActions.mjs";
-import { redirectError } from "./authorizeAnswers.mjs";
+import { auditFailure, redirectError } from "./authorizeAnswers.mjs";
 import { parseAcrValues, parseMaxAge, resolvePrompt } from "./authorizeAsk.mjs";
 import {
 	checkAuthorizationCodeGrantAllowed,
@@ -83,7 +84,6 @@ const applyGrantPolicy = async (
 		/** The client's full allowlist — the policy's `originalScope`. */
 		originalScope: readonly string[];
 		/**
-		/**
 		 * The audiences this grant may mint for: the client's `allowedAudiences`,
 		 * or empty. Policy may narrow within it, never originate outside it.
 		 */
@@ -110,9 +110,9 @@ const applyGrantPolicy = async (
 	if (grantPolicy) {
 		// `opts.issuer` is config-only, never request-derived, so decisions
 		// match the minted tokens' `iss`. A throw fails closed.
-		let decision: Awaited<ReturnType<typeof grantPolicy.evaluate>>;
+		let answer: unknown;
 		try {
-			decision = await grantPolicy.evaluate(
+			answer = await grantPolicy.evaluate(
 				{
 					grantType: "authorization_code",
 					clientId: ctx.clientId,
@@ -143,12 +143,24 @@ const applyGrantPolicy = async (
 			redirectError(ctx, "temporarily_unavailable", "policy evaluation unavailable");
 			return null;
 		}
-		if (decision.outcome === "deny") {
+		const reading = readGrantPolicyDecision(answer, ctx.opts.logger, {
+			site: "authorize",
+			grantType: "authorization_code",
+			policy: grantPolicy.kind,
+		});
+		if (reading.verdict === "invalid") {
+			// Core's answer on the redirect, audited as a failure, not a denial.
+			const { error, errorDescription } = reading.result;
+			await auditFailure(ctx, { reason: errorDescription });
+			redirectError(ctx, error, errorDescription);
+			return null;
+		}
+		if (reading.verdict === "deny") {
 			// RFC 6749 §4.1.2.1 makes `error` 1*NQSCHAR. The policy's code goes
 			// out as given when it is one; otherwise the redirect says
 			// `access_denied` — the authorization server refused — and the code
 			// is logged, sanitised, for the operator who wrote the policy.
-			let error = decision.error;
+			let error = reading.decision.error;
 			if (!isWellFormedErrorCode(error)) {
 				ctx.opts.logger.warn(
 					{ error: auditErrorText(String(error)) },
@@ -158,9 +170,14 @@ const applyGrantPolicy = async (
 			}
 			// A description that is empty or not a string is not sent (RFC 6749
 			// A.8 makes the field 1*NQSCHAR); the default is.
-			redirectError(ctx, error, sanitizeErrorText(decision.errorDescription) || "policy denied");
+			redirectError(
+				ctx,
+				error,
+				sanitizeErrorText(reading.decision.errorDescription) || "policy denied",
+			);
 			return null;
 		}
+		const { decision } = reading;
 		// Presence, not truthiness: `""` and `null` are malformed answers; only
 		// `undefined` is "no opinion".
 		if (decision.grantedScope !== undefined) {
@@ -313,7 +330,7 @@ export const createAuthorizeHandler = (opts: AuthorizeHandlerOptions): RequestHa
 		if (!pkce) return;
 		if (!checkNonce(ctx)) return;
 
-		const scopes = resolveScopes(ctx, scope, client);
+		const scopes = await resolveScopes(ctx, scope, client);
 		if (!scopes) return;
 
 		// A client that is not first-party mints only with the user's recorded

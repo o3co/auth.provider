@@ -1,6 +1,6 @@
 # @o3co/auth-provider-federation-grants
 
-Last updated: 2026-09-30
+Last updated: 2026-10-01
 
 Federation grants for [`auth.provider`](https://github.com/o3co/auth.provider) — offline delegation of upstream access tokens (#593). A user consents once that a client may reach one upstream connection on their behalf; the client then obtains upstream access tokens over HTTP, later, with the user nowhere near a browser.
 
@@ -139,8 +139,7 @@ say what each one means and what to do.
   `err`: nothing was thrown. A store or an upstream that did not answer in
   time is `err` "not answered in time; no longer waited for"; a credential
   write retried within the persist budget is one line, with `attempts`. A
-  lodging's `connection_not_configured` names the `connection` — a renewal's
-  is its grant's.
+  lodging's `connection_not_configured` names the `connection` it asked for.
 - **The browser's session that cannot be judged** — the session store, the
   subject's sessions boundary, or a session requirement that throws — is the
   same `503` or redirect, and its one line is session admission's:
@@ -321,19 +320,21 @@ Ownership first, with the same `404 grant_not_found` for an unknown id,
 another client's grant and another subject's. Then the subject's grants
 boundary: a grant a subject-wide revocation covers is revoked here, durably,
 before anything else is asked of it, and answers `410 grant_revoked/backstop`.
-Then what a renewal cannot mend — each with the status `/token` gives it,
-but for a connection the deployment no longer configures, which is
-`503 temporarily_unavailable/connection_not_configured` here, an outage the
-deployment may put right without the client, where `/token` folds it into
-`403 access_denied/connection_not_permitted`: `400 authorization_pending`, `410 grant_revoked/<by>`,
-`410 grant_expired/<reason>`, `410 connection_identity_changed`,
+Then the rest in `/token`'s order, each with the status `/token` gives it. A
+grant that is over comes first: `410 grant_revoked/<by>`,
+`410 grant_expired/<reason>`, `400 authorization_pending`. Then the
+configuration: a connection the deployment no longer configures and one the
+client may no longer use are one answer, `403 access_denied/connection_not_permitted`
+— a client is never sent to its operator about a grant that is over, and one
+that may not use the connection can act on nothing after it. Then what a
+renewal cannot mend: `410 connection_identity_changed`,
 `502 upstream_token_ineligible/<reason>` for every reason but one — a consent
 mends no token lifetime, type or shape, but it does mend a consent an
 accumulating IdP widened under a narrower grant, so `scope_exceeded` is
 admitted and the 201 reports it (#616; the guide's Entra section says how) —
 and a key missing from the ring as `503 temporarily_unavailable/key_unavailable`,
-an outage rather than a reason to send the user through consent again. Then the client's current permission
-and the request itself, as above. A renewal takes no place against the bound.
+an outage rather than a reason to send the user through consent again. Then
+the request itself, as above. A renewal takes no place against the bound.
 
 A renewal emits `federation.grant.requested` with `outcome: "reauthorization"`;
 a backstop it wrote emits `federation.grant.revoked` with `outcome: "backstop"`.
@@ -572,7 +573,16 @@ and plain text, never a JSON body.
    `403`, plain.
 7. Otherwise one consent challenge is parked for this browser — a reload gets
    the same one — and the browser is sent to `federation-grants.consent.url`
-   with `?challenge=`.
+   with `?challenge=`. A question already parked for another browser, or a
+   flow that ended meanwhile, is answered as step 2 is: `400`, plain, and
+   `federation.grant.authorization_failed` with the outcome `stale`.
+
+A `503` at step 2, 5, 6 or 7 — the intent store could not read the handle or
+park the question, or admission, the grant store or the client registry could
+not judge — is audited as a refusal is: `federation.grant.authorization_failed`
+with the outcome `unavailable`, beside its one log line. One whose handle
+could not be read has no flow to name: it carries no grant, client, subject or
+connection, and the request's own correlation id.
 
 It is not held to the navigation rule the account-link start is (the
 `csrfGuard`'s `checkNavigation`, which refuses `Sec-Fetch-Site: cross-site`):

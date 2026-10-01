@@ -1,6 +1,6 @@
 # @o3co/auth-provider-core
 
-Last updated: 2026-09-30
+Last updated: 2026-10-01
 
 ## Responsibility
 
@@ -535,6 +535,7 @@ Every other key is open, and is still expected to keep one type across the event
 #### GrantPolicyHook (scope / audience / token exchange policy)
 
 - `GrantPolicyHook.evaluate(request, ctx)` returns allow (with optional narrowing) or deny
+- Only an `outcome` that is exactly `"allow"` allows and only one that is exactly `"deny"` refuses. Anything else — another string or case, no `outcome`, a value that is not an object — is an invalid decision, never allow: `500 server_error` with the description `policy_decision_invalid` at `/oauth/token`, `error=server_error` on the `/oauth/authorize` redirect, logged as `grant_policy_decision_invalid` (error) with the policy's `kind` and never the decision, and audited as a failure with reason `policy_decision_invalid`. Every grant that consults the policy, and `/oauth/authorize`, reads a decision with `readGrantPolicyDecision`, which writes the line on core's console logger when it is handed no logger ([`grants/grantPolicy.mts`](src/grants/grantPolicy.mts))
 - A deny's `error` must be an RFC 6749 error code, `1*NQSCHAR`: non-empty printable ASCII without `"` and `\` (`isWellFormedErrorCode`, [`errors/envelope.mts`](src/errors/envelope.mts)). `/oauth/token` answers any other code `invalid_request`, and `/oauth/authorize` answers it `access_denied`, logging the policy's code sanitised
 - `/oauth/authorize` evaluates once; `/oauth/token` re-uses `grantedScope` / `grantedAudience` persisted on the Code record (no re-evaluation for `authorization_code`)
 - Other grants (refresh / client_credentials / token-exchange) evaluate at the token endpoint
@@ -564,7 +565,7 @@ Both packages contribute via `tokenBindingMechanisms`. Core's `assembleApp` coll
 
 When multiple mechanisms are installed, `core.tokenBinding.dispatchPolicy` (in core's own section — single source of truth) arbitrates:
 
-- `intent-explicit` (default) — prefer explicit-intent mechanisms over ambient.
+- `intent-explicit` (default) — prefer explicit-intent mechanisms over ambient. Two or more explicit successes, or two or more ambient successes with no explicit one, are rejected with `invalid_request` and logged once at warn, `token_binding_ambiguous`, with the `tier` and the `mechanisms` that succeeded.
 - `strict-mutual-exclusion` — reject `invalid_request` if more than one mechanism's `extract` returns a binding.
 
 Env override: `CORE_TOKEN_BINDING_DISPATCH_POLICY`.
@@ -578,6 +579,7 @@ The grants in `@o3co/auth-provider-oauth` emit `cnf`-bound RTs only for mechanis
 Two groups of optional slots for federation and OIDC support, provided by a module (`memorySessionStoresModule`, `memoryFederationTokenStoreModule`) or by the Redis adapters:
 
 - `userSessionStore` and its sid- and subject-keyed siblings: session metadata (auth_time, how the session was established — `authentication` — active RPs, family IDs, OIDC claims), the logout fan-out indexes, and subject-wide revocation — [`src/user-sessions/README.md`](src/user-sessions/README.md). `SupportsSecondFactorUpdate` — optional capability on `UserSessionStore` that records a second factor verified in a live session (`recordSecondFactor`), which a step-up needs. Both bundled stores implement it; detect it with the `supportsSecondFactorUpdate(store)` guard.
+- `SupportsSessionEnd` — optional capability on `SessionFamilyIndex` (`endSession`, `addFamilyIdUnlessEnded`): for a logout's end and a grant's add on one session, the end lists the family or the add answers `"ended"`. Both bundled indexes implement it (the Redis one over a client that can write the mark); detect it with the `supportsSessionEnd(index)` guard. It trusts the store to keep its reads and writes linearizable, and reads served by the primary: each sees every write completed before it began. Redis's asynchronous replication does not guarantee that across a failover, where a promoted replica may lack a write the old primary acknowledged, nor does a read answered by a replica. The guarantee holds for operations inside the session's life on every clock involved; the mark lasts the life plus the clock-skew allowance (`DEFAULT_CLOCK_SKEW_MS`).
 - `federationTokenStore`: `(sid, federationName)`-keyed upstream IdP tokens, deleted at logout. The Redis adapter encrypts `refresh_token` with AES-256-GCM; `allow-plaintext` is opt-in and emits a warning. A store must round-trip every field of `FederationTokens` — `expiresAt: null` included, and `undefined`, never `null`, for a field with nothing recorded. The port contract, field by field, is in [src/README.md](src/README.md#federation-tokens), and what a store implementer changes for the required keys is [docs/upgrading-required-record-keys.md](../../docs/upgrading-required-record-keys.md).
 
 `@o3co/auth-provider-oauth` consumes both: logout and cascading revocation, id_token and `/userinfo`, and `POST /oauth/federation/:name/token`. When any `federations.<name>.enabled` is true, boot refuses a composition missing any of `userSessionStore`, `sessionRPRegistry`, `sessionFamilyIndex`, `sessionFederationIndex`, `federationTokenStore` and `refreshTokenFamilyRevocation` (`federation-stores-incomplete`).

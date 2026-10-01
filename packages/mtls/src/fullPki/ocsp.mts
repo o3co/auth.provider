@@ -53,12 +53,7 @@ import type { AlgorithmPolicy } from "./algorithms.mjs";
 import { DEFAULT_ALGORITHM_POLICY } from "./defaults.mjs";
 import type { GuardedFetch } from "./fetchGuard.mjs";
 import type { Answer, OcspLookup, OcspResponderUnavailable } from "./ocspAnswer.mjs";
-import {
-	createOcspCache,
-	DEFAULT_MAX_CACHE_ENTRIES,
-	issuerKeyId,
-	serialHex,
-} from "./ocspCache.mjs";
+import { createOcspCache, DEFAULT_MAX_CACHE_ENTRIES, serialHex } from "./ocspCache.mjs";
 import {
 	checkDelegateRevocation,
 	hasNoCheck,
@@ -72,6 +67,7 @@ import { ocspResponders } from "./ocspResponders.mjs";
 import { checkResponseShape } from "./ocspShape.mjs";
 import { identifySigner, verifySignature } from "./ocspSigner.mjs";
 import { decodeStatus, freshness } from "./ocspStatus.mjs";
+import { issuerKeyId } from "./revocationSource.mjs";
 
 export type {
 	OcspCertificateStatus,
