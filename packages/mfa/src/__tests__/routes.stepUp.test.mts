@@ -648,7 +648,7 @@ describe("the step-up's refusals", () => {
 		expect(create).not.toHaveBeenCalled();
 	});
 
-	it("answers 503 to a session whose login's User said it enrolled while no counting factor is on record — the event recorded — and to a factor store that cannot answer", async () => {
+	it("answers 401 login_required to a session whose login's User said it enrolled while no counting factor is on record — nothing recorded — and 503 to a factor store that cannot answer", async () => {
 		const { app, factorStore, transactionStore, userSessionStore, audit } = await composed();
 		const { agent } = await signIn(app, userSessionStore);
 		const create = vi.spyOn(transactionStore, "create");
@@ -659,14 +659,9 @@ describe("the step-up's refusals", () => {
 
 		const inconsistent = await stepUp(agent);
 
-		expect(inconsistent.status).toBe(503);
-		expect(inconsistent.body.error).toBe("temporarily_unavailable");
-		expect(audit.of("mfa.enrollment_state_inconsistent")).toEqual([
-			expect.objectContaining({
-				subject: ALICE.id,
-				details: { purpose: "session", action: "mfa.manage", witness: "enrolled" },
-			}),
-		]);
+		expect(inconsistent.status).toBe(401);
+		expect(inconsistent.body).toEqual(LOGIN_REQUIRED);
+		expect(audit.of("mfa.enrollment_state_inconsistent")).toEqual([]);
 		spy.mockRestore();
 
 		vi.spyOn(factorStore, "list").mockRejectedValue(new Error("factor store unreachable"));

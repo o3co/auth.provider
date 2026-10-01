@@ -280,50 +280,30 @@ describe("a subject with no counting factor, in a session that recorded no facts
 describe("a subject with no counting factor whose session recorded a witness that says it enrolled, or nothing readable", () => {
 	for (const mode of MODES) {
 		for (const kind of KINDS) {
-			it(`${mode} · ${kind}: is an outage for each first binding — unavailable, naming the requirement, the event recorded, nothing else read`, async () => {
+			it(`${mode} · ${kind}: sends the session to log in again for each first binding, recording nothing and reading nothing else`, async () => {
 				for (const witness of ["enrolled", "malformed"] as const) {
 					const events: AuditEvent[] = [];
 					const transactionStore = createMemoryMfaTransactionStore();
 					const flag = vi.spyOn(transactionStore, "emailProofRequiredAtNextBinding");
 					const proof = vi.spyOn(transactionStore, "sessionEmailProofAt");
+					const mark = vi.spyOn(transactionStore, "firstBindingAt");
 					const { requirement } = build({ mode, transactionStore, events });
 					for (const action of ACTIONS) {
 						const session = sessionOf(kind, facts(witness));
-						await expect(
-							requirement.admit(inputFor(session, action)),
-							action,
-						).rejects.toMatchObject({
-							name: "MfaEnrollmentStateInconsistentError",
-							reason: "mfa_enrollment_state_inconsistent",
-							witness,
-						});
-						expect(await admit(requirement, session, action), action).toEqual({
-							outcome: "unavailable",
-							store: "mfa",
-						});
+						expect(await requirement.admit(inputFor(session, action)), action).toEqual(
+							REAUTHENTICATE,
+						);
 					}
-					expect(events.map((event) => [event.type, event.subject, event.details])).toEqual(
-						ACTIONS.flatMap((action) => [
-							[
-								"mfa.enrollment_state_inconsistent",
-								SUBJECT,
-								{ purpose: "session", action, witness },
-							],
-							[
-								"mfa.enrollment_state_inconsistent",
-								SUBJECT,
-								{ purpose: "session", action, witness },
-							],
-						]),
-					);
+					expect(events).toEqual([]);
 					expect(flag).not.toHaveBeenCalled();
 					expect(proof).not.toHaveBeenCalled();
+					expect(mark).not.toHaveBeenCalled();
 				}
 			});
 		}
 	}
 
-	it("compares the witness with the records that may count: recovery codes alone, or a kind every installed factor declares non-counting, beside it are the same outage", async () => {
+	it("compares the witness with the records that may count: recovery codes alone, or a kind every installed factor declares non-counting, beside it send the session to log in again", async () => {
 		const paper = stubFactor("paper", ["paper"], { counting: false });
 		for (const records of [
 			[factorRecord(SUBJECT, "recovery_code")],
@@ -335,10 +315,10 @@ describe("a subject with no counting factor whose session recorded a witness tha
 				factors: [FACTORS.totp(), FACTORS.recovery(), paper],
 			});
 			for (const action of ACTIONS) {
-				await expect(
-					requirement.admit(inputFor(sessionOf("fed", facts("enrolled")), action)),
+				expect(
+					await requirement.admit(inputFor(sessionOf("fed", facts("enrolled")), action)),
 					JSON.stringify(records.map((record) => record.kind)),
-				).rejects.toMatchObject({ reason: "mfa_enrollment_state_inconsistent" });
+				).toEqual(REAUTHENTICATE);
 			}
 		}
 	});

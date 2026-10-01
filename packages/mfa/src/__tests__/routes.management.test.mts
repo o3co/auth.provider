@@ -46,6 +46,7 @@ import {
 	WitnessingUserRepository,
 } from "./moduleHarness.mjs";
 import {
+	beginLogin,
 	freezeClock,
 	mfaPost,
 	newFactorId,
@@ -58,6 +59,7 @@ import {
 	suiteSealing,
 	T0,
 	thawClock,
+	verify,
 } from "./routesHarness.mjs";
 
 beforeEach(() => freezeClock());
@@ -81,15 +83,34 @@ const FACTOR_CONFLICT = {
 	error_description: "The factor changed while it was renamed: try again",
 };
 
-/** Boots `mode` with the email factor on, a recording sender, an audit sink and alice's directory entry. */
-async function composed(mode: "optional" | "required" = "optional") {
+/**
+ * Boots `mode` with the email factor on, a recording sender, an audit sink and
+ * alice's directory entry — saying she enrolled, or holding no address, when
+ * `alice` asks it.
+ */
+async function composed(
+	mode: "optional" | "required" = "optional",
+	options: {
+		readonly alice?: { readonly enrolled?: boolean; readonly noAddress?: boolean };
+		readonly requireEmailProof?: "when-mail" | "always" | "never";
+	} = {},
+) {
 	const factorStore = createMemoryMfaFactorStore();
 	const audit = recordingAuditSink();
-	const users = new WitnessingUserRepository(directoryEntries());
+	const entries = directoryEntries();
+	const entry = entries.get(ALICE.username);
+	if (entry !== undefined && options.alice?.enrolled === true) entry.mfaEnrolled = true;
+	if (entry !== undefined && options.alice?.noAddress === true) delete entry.email;
+	const users = new WitnessingUserRepository(entries);
 	const logger = spyLogger();
 	const booted = await boot({
 		config: {
-			...configFor(mode),
+			...configFor(
+				mode,
+				options.requireEmailProof === undefined
+					? {}
+					: { enrollment: { requireEmailProof: options.requireEmailProof } },
+			),
 			...mfaEmailFactorConfigForTests({ enabled: true }),
 		} as AppConfig,
 		factorStore,
@@ -229,6 +250,94 @@ describe("GET /session/mfa/factors", () => {
 		expect(stateOf(stale.id)).toBe("address_changed");
 	});
 
+	it("lists as unreadable an email factor whose record holds no readable digest, and one beside a session whose User has no address", async () => {
+		const digest = suiteSealing().digestsFor("email").digest([ALICE.email]);
+		for (const [what, setup, data] of [
+			["no readable digest", {}, { addressDigest: "not a digest" }],
+			["no address", { noAddress: true }, { addressDigest: digest }],
+		] as const) {
+			const built = await composed("optional", { alice: setup });
+			const { agent } = await signedIn(built);
+			const email = await seedFactor(built.factorStore, "email", data);
+
+			const res = await list(agent);
+
+			const listed = (res.body.factors as { id: string; state: string }[]).find(
+				(factor) => factor.id === email.id,
+			);
+			expect(listed?.state, what).toBe("unreadable");
+			await disposeAll();
+		}
+	});
+
+	it("lists as unreadable, logging the key to put back, a recovery set and an email factor whose digests name a key the ring no longer holds", async () => {
+		const built = await composed();
+		const { agent } = await signedIn(built);
+		const gone = (value: { keyId: string; digest: string }) => ({ ...value, keyId: "k-gone" });
+		const set = recoverySet(2).data as { codes: { keyId: string; digest: string }[] };
+		const codes = await seedFactor(built.factorStore, "recovery_code", {
+			codes: set.codes.map(gone),
+		});
+		const email = await seedFactor(built.factorStore, "email", {
+			addressDigest: gone(suiteSealing().digestsFor("email").digest([ALICE.email])),
+		});
+
+		const res = await list(agent);
+
+		const stateOf = (id: string) =>
+			(res.body.factors as { id: string; state: string; recovery_codes_remaining?: number }[]).find(
+				(factor) => factor.id === id,
+			);
+		expect(stateOf(codes.id)).toEqual(expect.objectContaining({ state: "unreadable" }));
+		expect(stateOf(codes.id)?.recovery_codes_remaining).toBeUndefined();
+		expect(stateOf(email.id)?.state).toBe("unreadable");
+		for (const record of [codes, email]) {
+			expect(built.logger.error).toHaveBeenCalledWith(
+				{
+					route: "factors",
+					kind: record.kind,
+					factorId: record.id,
+					state: "key_unavailable",
+					keyId: "k-gone",
+				},
+				"mfa_factor_unreadable",
+			);
+		}
+	});
+
+	it("leaves out a date a record holds that is not a valid date, and answers 503 for one that is no date at all", async () => {
+		const built = await composed();
+		const { agent } = await signedIn(built);
+		await seedFactor(built.factorStore, "recovery_code", recoverySet(2).data);
+		const read = built.factorStore.list.bind(built.factorStore);
+		const listing = vi.spyOn(built.factorStore, "list");
+
+		listing.mockImplementation(async (subject) =>
+			(await read(subject)).map((record) => ({
+				...record,
+				createdAt: new Date(Number.NaN),
+				lastUsedAt: new Date(Number.NaN),
+			})),
+		);
+		const invalid = await list(agent);
+		expect(invalid.status, JSON.stringify(invalid.body)).toBe(200);
+		expect(invalid.body.factors).toHaveLength(2);
+		for (const factor of invalid.body.factors as Record<string, unknown>[]) {
+			expect(factor).not.toHaveProperty("created_at");
+			expect(factor).not.toHaveProperty("last_used_at");
+		}
+
+		listing.mockImplementation(async (subject) =>
+			(await read(subject)).map((record) => ({
+				...record,
+				createdAt: "yesterday" as unknown as Date,
+			})),
+		);
+		const notADate = await list(agent);
+		expect(notADate.status).toBe(503);
+		expect(notADate.body).toEqual(UNAVAILABLE);
+	});
+
 	it("is admitted as mfa.view: a session past mfa.manage.maxAgeSeconds is listed, while a rename from it steps up", async () => {
 		const built = await composed();
 		const { agent, totp } = await signedIn(built);
@@ -345,7 +454,7 @@ describe("POST /session/mfa/factors/remove", () => {
 		expect(built.audit.of("mfa.factor.removed")).toEqual([
 			expect.objectContaining({
 				subject: ALICE.id,
-				details: { kind: "totp", binding: "password", by: "user" },
+				details: { kind: "totp", factorId: other.record.id, binding: "password", by: "user" },
 			}),
 		]);
 		expect(built.users.marks.slice(marks)).toEqual([]);
@@ -408,6 +517,27 @@ describe("POST /session/mfa/factors/remove", () => {
 		expect(built.audit.of("mfa.factor.removed")).toEqual([]);
 	});
 
+	it("under required, answers 409 mfa_last_factor when the other counting records are not usable — a TOTP whose data does not open, an email factor whose address changed", async () => {
+		for (const other of ["unreadable totp", "address_changed email"] as const) {
+			const built = await composed("required");
+			const { agent, totp } = await signedIn(built);
+			if (other === "unreadable totp") {
+				await seedTotp(built.factorStore, ALICE.id, { sealedFor: BOB.id });
+			} else {
+				await seedFactor(built.factorStore, "email", {
+					addressDigest: suiteSealing().digestsFor("email").digest(["old@example.com"]),
+				});
+			}
+
+			const res = await remove(agent, totp.record.id);
+
+			expect(res.status, other).toBe(409);
+			expect(res.body, other).toEqual(LAST_FACTOR);
+			expect(await built.factorStore.list(ALICE.id), other).toHaveLength(2);
+			await disposeAll();
+		}
+	});
+
 	it("under required, removes a recovery set, a kind no longer installed, and a counting factor beside another of its kind", async () => {
 		const built = await composed("required");
 		const { agent, totp } = await signedIn(built);
@@ -445,6 +575,88 @@ describe("POST /session/mfa/factors/remove", () => {
 		expect(res.status, JSON.stringify(res.body)).toBe(403);
 		expect(res.body).toMatchObject(STEP_UP_REQUIRED);
 		expect(await built.factorStore.list(ALICE.id)).toHaveLength(1);
+	});
+
+	it("carries on as removed when the store removed the record and then failed: 200, audited, the witness cleared", async () => {
+		const built = await composed();
+		const { agent, totp } = await signedIn(built);
+		const removeFor = built.factorStore.remove.bind(built.factorStore);
+		vi.spyOn(built.factorStore, "remove").mockImplementationOnce(async (subject, id) => {
+			await removeFor(subject, id);
+			throw new Error("timed out after the write");
+		});
+		const marked = vi.spyOn(built.users, "markMfaEnrolled");
+
+		const res = await remove(agent, totp.record.id);
+
+		expect(res.status, JSON.stringify(res.body)).toBe(200);
+		expect(built.audit.of("mfa.factor.removed")).toHaveLength(1);
+		expect(marked.mock.calls).toEqual([[ALICE.id, false]]);
+	});
+
+	it("decides the witness from the records read before, less the one removed, when they cannot be read again, said once at warn", async () => {
+		const built = await composed();
+		const { agent, totp } = await signedIn(built);
+		await seedFactor(built.factorStore, "recovery_code", recoverySet(2).data);
+		const read = built.factorStore.list.bind(built.factorStore);
+		const removed = vi.spyOn(built.factorStore, "remove");
+		vi.spyOn(built.factorStore, "list").mockImplementation(async (subject) => {
+			if (removed.mock.calls.length > 0) throw new Error("factor store unreachable");
+			return read(subject);
+		});
+		const marked = vi.spyOn(built.users, "markMfaEnrolled");
+
+		const res = await remove(agent, totp.record.id);
+
+		expect(res.status, JSON.stringify(res.body)).toBe(200);
+		expect(marked.mock.calls).toEqual([[ALICE.id, false]]);
+		expect(
+			events(built.logger, "warn").filter((event) => event === "mfa_factor_removal_unread"),
+		).toHaveLength(1);
+	});
+
+	it("leaves the witness cleared when a login's mark lands after a removal cleared it", async () => {
+		const built = await composed();
+		const totp = await seedTotp(built.factorStore);
+		const mark = built.users.markMfaEnrolled.bind(built.users);
+		vi.spyOn(built.users, "markMfaEnrolled").mockImplementationOnce(async (subject, enrolled) => {
+			// The subject's last factor is removed, and the witness cleared, just before this mark.
+			await built.factorStore.removeAllForSubject(subject);
+			await mark(subject, false);
+			await mark(subject, enrolled);
+		});
+
+		await signInWithTotp(built.app, built.userSessionStore, totp);
+
+		expect(built.users.marks.at(-1)).toEqual({ subject: ALICE.id, enrolled: false });
+	});
+
+	it("sends the session that removed the last counting factor to log in again for every further change, recording nothing, and the next sign-in may change them", async () => {
+		const built = await composed("optional", {
+			alice: { enrolled: true },
+			requireEmailProof: "never",
+		});
+		const { agent, totp } = await signedIn(built);
+		const codes = recoverySet(2);
+		const set = await seedFactor(built.factorStore, "recovery_code", codes.data);
+		expect((await remove(agent, totp.record.id)).status).toBe(200);
+
+		const answers = [
+			await mfaPost(agent, "/enrollment", { kind: "totp" }),
+			await rename(agent, { factor_id: set.id, label: "Paper" }),
+			await remove(agent, set.id),
+		];
+		for (const res of answers) {
+			expect(res.status, JSON.stringify(res.body)).toBe(401);
+			expect(res.body).toMatchObject({ error: "login_required" });
+		}
+		expect(built.audit.of("mfa.enrollment_state_inconsistent")).toEqual([]);
+
+		const again = await beginLogin(built.app);
+		const verified = await verify(again.agent, again.transaction, set.id, codes.codes[0]);
+		expect(verified.status, JSON.stringify(verified.body)).toBe(200);
+		const renamed = await rename(again.agent, { factor_id: set.id, label: "Paper" });
+		expect(renamed.status, JSON.stringify(renamed.body)).toBe(200);
 	});
 
 	it("answers 503 when the factor store cannot remove, logged once, writing no witness", async () => {
