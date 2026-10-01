@@ -775,17 +775,21 @@ time asked about, and absent when it does not read back as a proof: losing
 one fails closed, and the user proves again. The factor store's durability
 check does not cover it.
 
-**A subject's first-binding mark.** One string per subject, written by one
-script that keeps the later of the mark held and the one noted — the later
-`atMs`, and of two at one time the later end, as core's
-`laterFirstBindingMark` — with `PX` from the store's own clock; a held mark
-that has ended on that clock, or a held value that is no mark, gives way to
-any note, and an earlier note leaves the key and its lifetime alone. A read
-answers it absent at or past `untilMs` on that clock or at the time asked
-about, and refuses one that does not read back as a mark: an outage, never
-absent, since an absent mark trusts the session it is there to distrust.
-The module's durability check covers it as it covers the email-proof
-requirement.
+**A subject's first-binding mark.** One string per subject, judged on one
+clock, the server's (`TIME` in its two scripts): its end, which mark a note
+keeps and the key's deadline. The note script refuses a mark whose end is
+not after that clock, or whose time lies further from it than
+`DEFAULT_CLOCK_SKEW_MS`, and otherwise keeps the later time and the later end
+of the mark held and the one noted — as core's `laterFirstBindingMark` —
+written with `PXAT` at that end; a held value that is no mark, or whose time
+lies further ahead than the skew, gives way to the note. The read script
+answers the value and the server's clock in one step, and the read answers
+the mark absent only once that clock passes its end: this side's clock
+(`now`) decides nothing about a mark. A value that does not read back as a
+mark, whatever its end looks like, is an outage, never absent, since an
+absent mark trusts the session it is there to distrust. The module's
+durability check covers it as it covers the email-proof requirement; a
+`volatile-*` policy may evict it, which fails open.
 
 **Durability at boot (D12).** Before providing its store each module asks the
 server, through its client's `durability()`, each part on its own: the policy
@@ -797,9 +801,10 @@ tell RDB snapshots from none. The policy is judged by an allow-list:
 (`mfa-factor-store-evictable`, `mfa-transaction-store-evictable`) whatever
 else could not be read; `noeviction` passes; the four `volatile-*` policies
 pass the factor store, whose keys carry no TTL, and are one warning from the
-transaction store (`mfa_transaction_store_lock_evictable`) — its lock and
-week keys carry a TTL once no run is counted, and an evicted one lifts a D21
-hold early. RDB snapshots without AOF (`mfa_factor_store_lossy`,
+transaction store (`mfa_transaction_store_lock_evictable`, with
+`evictableFamilies`) — its lock and week keys carry a TTL once no run is
+counted, and an evicted one lifts a D21 hold early; a first-binding mark
+always carries one, and an evicted mark fails open. RDB snapshots without AOF (`mfa_factor_store_lossy`,
 `mfa_transaction_store_lossy`) and no persistence (`…_volatile`) are each one
 warning. A part that could not be read — a question the server refused
 (`NOPERM`, an unknown or renamed command, a disabled one), or answered without
