@@ -48,6 +48,12 @@
  *   sender refused at its limit is `429`; a factor whose recorded address no
  *   longer matches the login's is `403`, recorded as
  *   `mfa.email_address_mismatch`. Neither the code nor the address is logged.
+ * - A guessable proof the subject lock holds is `429 mfa_locked`, with the
+ *   hold, the kinds that still work, and `Retry-After` in whole seconds
+ *   rounded up — none for the hard hold — recorded as `mfa.locked`, and
+ *   also as `mfa.locked.first` when it begins an episode.
+ * - A recovery code spent answers, and records as `mfa.recovery_code.used`,
+ *   how many codes the set has left.
  */
 
 import {
@@ -132,6 +138,16 @@ const ENROLLMENT_CONFLICT = errorEnvelope(
 
 /** What adding a factor from a session is admitted as: it adds a way into the account. */
 const MFA_MANAGE: MfaAdmissionAction = "mfa.manage";
+
+/** A proof the subject lock held, unchecked: the hold, and the kinds that still work. */
+const locked = (hold: string, usableKinds: readonly string[]) => ({
+	...errorEnvelope(
+		"mfa_locked",
+		"Too many failed attempts: use another second factor, or try later",
+	),
+	hold,
+	usable_kinds: usableKinds,
+});
 
 /** A refused proof, with the attempts the transaction has left. */
 const notAccepted = (attemptsRemaining: number) => ({
@@ -598,6 +614,35 @@ export function createMfaRouter(options: MfaRoutesOptions): Router {
 				case "unreadable":
 					answerOutage("verify", res, outcome);
 					return;
+				case "locked": {
+					const held = { kind: outcome.kind, purpose: outcome.purpose, hold: outcome.hold };
+					emitAuditEvent(auditSink, {
+						timestamp: new Date(),
+						type: "mfa.locked",
+						subject: outcome.subject,
+						ip: call.request.ip,
+						userAgent: call.request.userAgent,
+						details: held,
+					});
+					if (outcome.first) {
+						emitAuditEvent(auditSink, {
+							timestamp: new Date(),
+							type: "mfa.locked.first",
+							subject: outcome.subject,
+							ip: call.request.ip,
+							userAgent: call.request.userAgent,
+							details: {
+								...held,
+								...(outcome.binding === undefined ? {} : { binding: outcome.binding }),
+							},
+						});
+					}
+					if (outcome.retryAfterMs !== null) {
+						res.set("Retry-After", String(Math.max(1, Math.ceil(outcome.retryAfterMs / 1000))));
+					}
+					res.status(429).json(locked(outcome.hold, outcome.usableKinds));
+					return;
+				}
 				case "refused":
 					if (outcome.factorIdDropped === true) {
 						// A factor answering outside its contract: the value it named is never logged.
@@ -639,7 +684,29 @@ export function createMfaRouter(options: MfaRoutesOptions): Router {
 						details: { kind: outcome.kind, purpose: outcome.purpose },
 					});
 					witnessUnwritten(outcome.subject, outcome.witness);
-					await completeLogin("verify", req, res, outcome);
+					if (outcome.recoveryCodesRemaining !== undefined) {
+						emitAuditEvent(auditSink, {
+							timestamp: new Date(),
+							type: "mfa.recovery_code.used",
+							subject: outcome.subject,
+							ip: call.request.ip,
+							userAgent: call.request.userAgent,
+							details: {
+								kind: outcome.kind,
+								purpose: outcome.purpose,
+								remaining: outcome.recoveryCodesRemaining,
+							},
+						});
+					}
+					await completeLogin(
+						"verify",
+						req,
+						res,
+						outcome,
+						outcome.recoveryCodesRemaining === undefined
+							? {}
+							: { recovery_codes_remaining: outcome.recoveryCodesRemaining },
+					);
 					return;
 			}
 		});

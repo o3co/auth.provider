@@ -81,6 +81,7 @@ import {
 	isHintToken,
 	issuedRemediationActions,
 	type Logger,
+	loggableError,
 	type MfaFactorResolver,
 	type Module,
 	type RateLimiter,
@@ -96,6 +97,7 @@ import { MFA_ADMISSION_ACTIONS } from "./admissionActions.mjs";
 import { type MfaMode, type MfaSettings, mfaSectionSchema, readMfaSettings } from "./config.mjs";
 import { createMfaCoordinator } from "./coordinator.mjs";
 import { mfaEmailFactorModule } from "./email/module.mjs";
+import { createMfaSubjectLock } from "./lock.mjs";
 import { mfaRecoveryCodeFactorModule } from "./recovery/module.mjs";
 import { createMfaRequirement, type MfaRequirementMode } from "./requirement.mjs";
 import { createMfaRouter } from "./routes.mjs";
@@ -478,6 +480,16 @@ export function mfaModule(options: MfaModuleOptions = {}): Module {
 								transactions: deps.mfaTransactionStore,
 								sealing,
 								maxAttemptsPerTransaction: settings.maxAttemptsPerTransaction,
+								lock: createMfaSubjectLock({
+									store: deps.mfaTransactionStore,
+									policy: settings.lockout,
+									// The answer stands; the attempt left pending counts as a failure.
+									unsettled: ({ subject, kind, step, outcome, cause }) =>
+										logger.warn(
+											{ sub: subject, kind, step, outcome, err: loggableError(cause) },
+											"mfa_subject_lock_unsettled",
+										),
+								}),
 								mode,
 								mailSender: deps.mailSender,
 								witness,

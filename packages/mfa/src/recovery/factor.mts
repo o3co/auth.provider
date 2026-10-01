@@ -23,17 +23,23 @@
  * - A set is `count` long codes, answered once in groups; the record keeps
  *   only a keyed digest of each code, each naming its key, under the kind's
  *   digests — never a code.
- * - Its verification is not built: `verify` throws, which the coordinator
- *   answers `503`, never a code accepted or refused.
+ * - A verification reads the proof as typed and compares it with every
+ *   digest of the set; a match answers the set without that digest, which
+ *   the coordinator writes by compare-and-set, so a code is spent once. A
+ *   digest whose key left the ring throws: an outage, never a code refused.
+ *   A set with no code left is kept, and refuses every code.
  */
 
 import {
 	type MfaDigests,
 	type MfaFactor,
 	type MfaFactorData,
+	type MfaKeyedDigest,
+	type MfaVerification,
+	type MfaVerifyContext,
 	RECOVERY_CODE_AMR,
 } from "@o3co/auth-provider-core";
-import { formatLongCode, generateLongCode } from "../codes.mjs";
+import { formatLongCode, generateLongCode, readLongCode } from "../codes.mjs";
 
 /** The kind a recovery-code set's record carries, and the key the factor is contributed under. */
 export const RECOVERY_CODE_FACTOR_KIND = "recovery_code";
@@ -58,6 +64,44 @@ const notEnrolled = async (): Promise<never> => {
 	throw new RangeError("recovery codes are issued beside a counting factor, never enrolled");
 };
 
+/** The digests a set's data holds; `undefined` for data that is not a set. */
+const digestsIn = (data: MfaFactorData): readonly MfaKeyedDigest[] | undefined => {
+	const codes = data.codes;
+	if (!Array.isArray(codes)) return undefined;
+	const kept = codes.filter(
+		(entry): entry is MfaKeyedDigest =>
+			typeof entry === "object" &&
+			entry !== null &&
+			typeof (entry as MfaKeyedDigest).keyId === "string" &&
+			typeof (entry as MfaKeyedDigest).digest === "string",
+	);
+	return kept.length === codes.length ? kept : undefined;
+};
+
+/**
+ * `proof` checked against the set `data` holds, under `digests`: every
+ * digest compared, so the time taken does not say which one matched. A
+ * match answers the set without it.
+ */
+function spendRecoveryCode(
+	digests: MfaDigests,
+	factorId: string,
+	data: MfaFactorData,
+	proof: unknown,
+): MfaVerification {
+	const kept = digestsIn(data);
+	if (kept === undefined) throw new TypeError("a recovery-code set's data is not a set of digests");
+	const code = readLongCode(proof);
+	if (code === undefined) return { ok: false, reason: "malformed" };
+	const found = kept.map((stored) => digests.matchesDigest([code], stored));
+	if (found.includes("key_unavailable")) {
+		throw new RangeError("a recovery code's digest names a key the ring no longer holds");
+	}
+	const matched = found.indexOf("match");
+	if (matched === -1) return { ok: false, reason: "invalid" };
+	return { ok: true, factorId, next: { codes: kept.filter((_, index) => index !== matched) } };
+}
+
 /** The `recovery_code` factor, issuing sets of `settings.count` codes. */
 export function createRecoveryCodeFactor(settings: RecoveryCodeFactorSettings): MfaFactor {
 	const factor: MfaFactor = Object.freeze({
@@ -69,9 +113,8 @@ export function createRecoveryCodeFactor(settings: RecoveryCodeFactorSettings): 
 		guessable: false,
 		describe: () => ({}),
 		enrollable: () => false,
-		verify: async (): Promise<never> => {
-			throw new Error("this build does not verify recovery codes");
-		},
+		verify: async (ctx: MfaVerifyContext) =>
+			spendRecoveryCode(ctx.digests, ctx.factor.id, ctx.factor.data, ctx.proof),
 		beginEnrollment: notEnrolled,
 		completeEnrollment: notEnrolled,
 	});
@@ -97,4 +140,13 @@ export function generateRecoveryCodes(
 		codes: codes.map(formatLongCode),
 		data: { codes: codes.map((code) => digests.digest([code])) },
 	};
+}
+
+/**
+ * How many codes the set `data` holds, for a factor this file made; none
+ * for data that is not a set; `undefined` for any other factor.
+ */
+export function recoveryCodesLeft(factor: MfaFactor, data: MfaFactorData): number | undefined {
+	if (!issuers.has(factor)) return undefined;
+	return digestsIn(data)?.length ?? 0;
 }
