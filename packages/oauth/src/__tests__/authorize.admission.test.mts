@@ -1034,6 +1034,51 @@ describe("/authorize on admission — the ask is read until the code is minted",
 		);
 	});
 
+	it("two passes read one ask: the one that finds it spent writes no successor of it and is judged with no ask, so only one code mints without a new login", async () => {
+		const { requirement, state } = steppingUp();
+		const clock = { authTime: minutesAgo(5) };
+		const race = { armed: false };
+		const harness = await makeApp({
+			userSessionStore: storeAnswering(async () => record({ authTime: clock.authTime })),
+			requirements: [requirement],
+			// Armed, the next read hands the ask back and the other pass spends it straight after.
+			onAskGet: () => {
+				if (!race.armed) return undefined;
+				race.armed = false;
+				return "spend";
+			},
+		});
+		const toLogin = loginRedirectTo(
+			await authorize(harness.app, { ...baseQuery, prompt: "login" }),
+		);
+		await loggedInNow(clock);
+		const key = `reauth:${toLogin.searchParams.get("reauth_ask")}`;
+		const spentAsk = harness.records.get(key) as { reauth: { loginAskedAt: number } };
+
+		// The first pass spends the login ask and writes the step-up trip's.
+		const backA = returnOf(sentTo(await authorize(harness.app, queryOf(toLogin))));
+		// The second read the same ask before the first spent it.
+		harness.records.set(key, spentAsk);
+		race.armed = true;
+		const toLoginB = loginRedirectTo(await authorize(harness.app, queryOf(toLogin)));
+
+		const asks = [...harness.records.values()].map(
+			(value) => (value as { reauth: Record<string, unknown> }).reauth,
+		);
+		expect(asks.filter((ask) => ask.loginAskedAt === spentAsk.reauth.loginAskedAt)).toHaveLength(1);
+		const askB = harness.records.get(`reauth:${toLoginB.searchParams.get("reauth_ask")}`) as {
+			reauth: Record<string, unknown>;
+		};
+		expect(askB.reauth.stepUpAskedAt).toEqual({});
+		expect(askB.reauth.loginAskedAt).toBeGreaterThan(spentAsk.reauth.loginAskedAt);
+
+		state.met = true;
+		expect(codeOf(await authorize(harness.app, queryOf(backA)))).toBe("code-x");
+		const params = redirectParams(await authorize(harness.app, queryOf(toLoginB)));
+		expect(params.get("error")).toBe("login_required");
+		expect(harness.createCode).toHaveBeenCalledTimes(1);
+	});
+
 	it("a refused return replayed is refused again, not sent on another trip", async () => {
 		const { requirement } = steppingUp("unmet");
 		const harness = await makeApp({
