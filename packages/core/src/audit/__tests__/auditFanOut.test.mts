@@ -197,6 +197,25 @@ describe("createAuditFanOut", () => {
 		expect(handed).toEqual(emitted);
 	});
 
+	it("refuses a sink's change to the timestamp, so the next sink reads the time emitted", async () => {
+		const later = createRecordingAuditSink();
+		const rewriting: AuditSink = {
+			kind: "rewriting",
+			record: async (e) => {
+				e.timestamp.setTime(86_400_000);
+				e.timestamp.setUTCFullYear(2000);
+			},
+		};
+		const fanOut = createAuditFanOut({
+			hooks: () => [rewriting, later],
+			logger: () => spyLogger().logger,
+		});
+
+		await fanOut.record(event());
+
+		expect(later.events[0]?.timestamp.getTime()).toBe(0);
+	});
+
 	it("logs a failing sink as audit_sink_failed with its position and the event's type, and nothing of the event", async () => {
 		const { logger, error } = spyLogger();
 		const fanOut = createAuditFanOut({

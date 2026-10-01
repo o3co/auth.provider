@@ -114,6 +114,31 @@ describe("auditHooks — fanned out through the auditSink slot", () => {
 		expect(hook.events.map((e) => e.type)).toEqual(["test.event"]);
 	});
 
+	it("fills the slot for a module that requires it from the hooks alone", async () => {
+		const hook = createRecordingAuditSink();
+		let handed: AuditSink | undefined;
+		const requiring = defineModule({
+			name: "test:audit-requirer",
+			requires: ["auditSink"],
+			contributes: {
+				grantMiddleware: [
+					(deps) => {
+						handed = deps.auditSink;
+						return null;
+					},
+				],
+			},
+		});
+
+		await createApp({
+			modules: [auditHooksModule("test", hook), requiring],
+			bootstrapComponents: bootWith(),
+		});
+		await recordAuditEvent(handed as AuditSink, event);
+
+		expect(hook.events).toHaveLength(1);
+	});
+
 	it("still refuses boot when nothing fills the slot and no module contributes a hook", async () => {
 		const err = await refusal(
 			createApp({ modules: [auditReader().module], bootstrapComponents: bootWith() }),
