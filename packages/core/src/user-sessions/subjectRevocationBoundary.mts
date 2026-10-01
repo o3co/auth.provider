@@ -41,11 +41,19 @@ export function checkSubjectRevocationInstant(value: unknown, name: string): num
 	return ms;
 }
 
+/** The furthest a `Date` reaches either side of the epoch, in milliseconds (ECMA-262). */
+const MAX_DATE_MS = 8_640_000_000_000_000;
+
+/** Whether `ms` is an instant a `Date` can hold: anything else reads back as an Invalid Date. */
+const holdsAsDate = (ms: unknown): ms is number =>
+	typeof ms === "number" && Number.isFinite(ms) && Math.abs(ms) <= MAX_DATE_MS;
+
 /**
  * The rule every store bounds a boundary by: `before` when it is no later
  * than `storeNowMs + DEFAULT_CLOCK_SKEW_MS`, else exactly that, with `clamped`
  * saying which. A `RangeError` for a `before` that is no date, or a clock
- * that is not a finite instant: the bound is never skipped. A store whose
+ * whose reading or bound a `Date` cannot hold: the bound is never skipped,
+ * and never answers an Invalid Date. A store whose
  * clock is read in-process calls it in the step that writes; a store whose
  * clock is a server's clamps in its own atomic step there, and may call it
  * with the `now` that server answers to tell whether it clamped.
@@ -55,10 +63,10 @@ export function clampSubjectRevocationBoundary(
 	storeNowMs: number,
 ): { readonly boundary: Date; readonly clamped: boolean } {
 	const beforeMs = checkSubjectRevocationInstant(before, "before");
-	if (typeof storeNowMs !== "number" || !Number.isFinite(storeNowMs)) {
-		throw new RangeError("SubjectRevocation: the store's clock must be a finite instant");
+	const latestMs = typeof storeNowMs === "number" ? storeNowMs + DEFAULT_CLOCK_SKEW_MS : Number.NaN;
+	if (!holdsAsDate(storeNowMs) || !holdsAsDate(latestMs)) {
+		throw new RangeError("SubjectRevocation: the store's clock must be an instant a Date can hold");
 	}
-	const latestMs = storeNowMs + DEFAULT_CLOCK_SKEW_MS;
 	return beforeMs > latestMs
 		? { boundary: new Date(latestMs), clamped: true }
 		: { boundary: new Date(beforeMs), clamped: false };

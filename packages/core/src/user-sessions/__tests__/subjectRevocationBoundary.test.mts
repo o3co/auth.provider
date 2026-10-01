@@ -80,10 +80,23 @@ describe("clampSubjectRevocationBoundary", () => {
 		["NaN", Number.NaN],
 		["Infinity", Number.POSITIVE_INFINITY],
 		["undefined", undefined],
+		["-1e20, before the Date range", -1e20],
+		["8.64e15, the Date range's end, whose bound lies past it", 8.64e15],
+		["the Date range's start less the skew", -8.64e15 - DEFAULT_CLOCK_SKEW_MS - 1],
 	])("refuses a store clock of %s: the bound is never skipped", (_label, storeNowMs) => {
-		expect(() => clampSubjectRevocationBoundary(new Date(NOW), storeNowMs as number)).toThrow(
-			new RangeError("SubjectRevocation: the store's clock must be a finite instant"),
-		);
+		// A clock or a bound no Date can hold would record an Invalid Date,
+		// a boundary every comparison reads as covering nothing.
+		for (const before of [new Date(0), new Date(NOW)]) {
+			expect(() => clampSubjectRevocationBoundary(before, storeNowMs as number)).toThrow(
+				new RangeError("SubjectRevocation: the store's clock must be an instant a Date can hold"),
+			);
+		}
+	});
+
+	it("never answers an Invalid Date", () => {
+		const latest = 8.64e15 - DEFAULT_CLOCK_SKEW_MS;
+		const { boundary } = clampSubjectRevocationBoundary(new Date(8.64e15), latest);
+		expect(boundary.getTime()).toBe(8.64e15);
 	});
 });
 
