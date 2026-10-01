@@ -28,6 +28,7 @@ import { redisDurability } from "../durability.mjs";
 import {
 	MFA_FACTOR_UPDATE,
 	MFA_FIRST_BINDING_NOTE,
+	MFA_FIRST_BINDING_READ,
 	MFA_SUBJECT_EXEMPT,
 	MFA_SUBJECT_RESERVE,
 	MFA_SUBJECT_SETTLE,
@@ -71,6 +72,12 @@ export function makeIoredisMfaFactorStoreClient(io: Redis): MfaFactorStoreClient
 }
 
 const HOLDS: ReadonlySet<unknown> = new Set(["backoff", "weekly", "hard"]);
+
+/** The server's clock as a script answers it: decimal text of whole milliseconds; `undefined` for anything else. */
+const serverMs = (text: unknown): number | undefined =>
+	typeof text === "string" && /^(0|[1-9][0-9]*)$/.test(text) && Number.isSafeInteger(Number(text))
+		? Number(text)
+		: undefined;
 
 /**
  * The `MfaTransactionStore`'s client over one ioredis connection. Also part of
@@ -191,21 +198,30 @@ export function makeIoredisMfaTransactionStoreClient(io: Redis): MfaTransactionS
 			return await io.get(key);
 		},
 		async noteFirstBinding(key, input) {
-			await runScript(
+			const reply = await runScript(
 				io,
 				MFA_FIRST_BINDING_NOTE,
 				[key],
-				[
-					input.value,
-					String(input.atMs),
-					String(input.untilMs),
-					String(input.ttlMs),
-					String(input.nowMs),
-				],
+				[String(input.atMs), String(input.untilMs), String(input.skewMs)],
+			);
+			const [noted, now] = Array.isArray(reply) ? reply : [];
+			const serverNowMs = serverMs(now);
+			if (noted === 1 && serverNowMs !== undefined) return { noted: true };
+			if (noted === 0 && serverNowMs !== undefined) return { noted: false, serverNowMs };
+			throw new Error(
+				"MfaTransactionStore: the first-binding note script answered nothing it knows",
 			);
 		},
 		async firstBindingMark(key) {
-			return await io.get(key);
+			const reply = await runScript(io, MFA_FIRST_BINDING_READ, [key], []);
+			const [now, value] = Array.isArray(reply) ? reply : [];
+			const serverNowMs = serverMs(now);
+			if (serverNowMs === undefined || (value !== null && typeof value !== "string")) {
+				throw new Error(
+					"MfaTransactionStore: the first-binding read script answered nothing it knows",
+				);
+			}
+			return { value, serverNowMs };
 		},
 		durability: () => redisDurability(io),
 	};

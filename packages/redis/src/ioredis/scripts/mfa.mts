@@ -394,35 +394,60 @@ keep()
 return 1
 `;
 
+// A subject's first-binding mark is judged on one clock, the server's (`TIME`): its end, which
+// mark a note keeps, and the key's deadline. A replica's clock decides none of them.
+
 /**
- * `MfaTransactionStoreClient.noteFirstBinding`: keeps the later of the mark held and the one
- * noted, as core's `laterFirstBindingMark` does. `KEYS[1]` = the subject's mark; `ARGV[1]` =
- * the mark as written, `ARGV[2]` = its `atMs`, `ARGV[3]` = its `untilMs`, `ARGV[4]` = its
- * lifetime in milliseconds, `ARGV[5]` = the store's clock. Returns 1 when it wrote, 0 when the
- * mark held stands and was kept. A held value that is no mark — not JSON, a time not whole or
- * before the epoch, an end not after its time or past the Date range — is replaced: what does
- * not read back is never kept over a mark that does.
+ * `MfaTransactionStoreClient.noteFirstBinding`. `KEYS[1]` = the subject's mark; `ARGV[1]` =
+ * its `atMs`, `ARGV[2]` = its `untilMs` (whole, the shape already checked), `ARGV[3]` = the
+ * clock skew allowed. Refuses, writing nothing, a mark whose end is not after the server's
+ * clock or whose time lies further from it than the skew: `{0, now}`. Otherwise keeps the
+ * later time and the later end of the mark held, while it stands, and this one, as core's
+ * `laterFirstBindingMark` does, written to expire at that end (`PXAT`): `{1, now}`. A held
+ * value that is no mark — not JSON, a time not whole or before the epoch, an end not after
+ * its time, either past the Date range, a time further ahead than the skew — is replaced:
+ * what does not read back is never kept over a mark that does.
  */
 const LUA_MFA_FIRST_BINDING_NOTE = `
+local t = redis.call('TIME')
+local now = tonumber(t[1]) * 1000 + math.floor(tonumber(t[2]) / 1000)
+local at, untl, skew = tonumber(ARGV[1]), tonumber(ARGV[2]), tonumber(ARGV[3])
+local stamp = string.format('%.0f', now)
+if not (untl > now) or at > now + skew or at < now - skew then return {0, stamp} end
+local MAX = 8640000000000000
 local function mark_of(text)
   local ok, mark = pcall(cjson.decode, text)
   if not ok or type(mark) ~= 'table' then return nil end
-  local at, untl = mark.atMs, mark.untilMs
-  if type(at) ~= 'number' or type(untl) ~= 'number' then return nil end
-  if at ~= at or at < 0 or math.floor(at) ~= at or math.floor(untl) ~= untl then return nil end
-  if not (untl > at) or untl > 8640000000000000 then return nil end
-  return at, untl
+  local h_at, h_until = mark.atMs, mark.untilMs
+  if type(h_at) ~= 'number' or type(h_until) ~= 'number' then return nil end
+  if h_at ~= h_at or h_at < 0 or math.floor(h_at) ~= h_at or math.floor(h_until) ~= h_until then
+    return nil
+  end
+  if not (h_until > h_at) or h_until > MAX or h_at > now + skew then return nil end
+  return h_at, h_until
 end
 local held = redis.call('GET', KEYS[1])
 if held then
-  local at, untl = mark_of(held)
-  if at ~= nil and untl > tonumber(ARGV[5]) then
-    local next_at, next_until = tonumber(ARGV[2]), tonumber(ARGV[3])
-    if at > next_at or (at == next_at and untl >= next_until) then return 0 end
+  local h_at, h_until = mark_of(held)
+  if h_at ~= nil and h_until > now then
+    if h_at > at then at = h_at end
+    if h_until > untl then untl = h_until end
   end
 end
-redis.call('SET', KEYS[1], ARGV[1], 'PX', ARGV[4])
-return 1
+local until_text = string.format('%.0f', untl)
+local value = '{"atMs":' .. string.format('%.0f', at) .. ',"untilMs":' .. until_text .. '}'
+redis.call('SET', KEYS[1], value, 'PXAT', until_text)
+return {1, stamp}
+`.trim();
+
+/**
+ * `MfaTransactionStoreClient.firstBindingMark`: `KEYS[1]` = the subject's mark. Returns the
+ * server's clock and the key's value (nil when there is none), read in one step.
+ */
+const LUA_MFA_FIRST_BINDING_READ = `
+local t = redis.call('TIME')
+local now = tonumber(t[1]) * 1000 + math.floor(tonumber(t[2]) / 1000)
+return {string.format('%.0f', now), redis.call('GET', KEYS[1])}
 `.trim();
 
 export const MFA_TX_CREATE = defineScript(LUA_MFA_TX_CREATE);
@@ -434,3 +459,4 @@ export const MFA_SUBJECT_RESERVE = defineScript(LUA_MFA_SUBJECT_RESERVE);
 export const MFA_SUBJECT_SETTLE = defineScript(LUA_MFA_SUBJECT_SETTLE);
 export const MFA_SUBJECT_EXEMPT = defineScript(LUA_MFA_SUBJECT_EXEMPT);
 export const MFA_FIRST_BINDING_NOTE = defineScript(LUA_MFA_FIRST_BINDING_NOTE);
+export const MFA_FIRST_BINDING_READ = defineScript(LUA_MFA_FIRST_BINDING_READ);

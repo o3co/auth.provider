@@ -584,7 +584,7 @@ export function createMemoryMfaTransactionStore(
 			const storeNowMs = clock();
 			// Gone on this store's clock: reclaimed now rather than at a sweep.
 			if (mark.untilMs <= storeNowMs) marks.delete(subject);
-			return firstBindingAnswer(mark, nowMs, storeNowMs);
+			return firstBindingAnswer(mark, storeNowMs);
 		},
 	};
 }

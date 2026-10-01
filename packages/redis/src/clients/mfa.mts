@@ -158,16 +158,24 @@ export interface NoteMfaExemptSuccessInput {
 	readonly policy: MfaLockoutPolicy;
 }
 
-/** A subject's first-binding mark to note, as the store's key keeps it. */
+/** A subject's first-binding mark to note; the server's clock judges it. */
 export interface NoteMfaFirstBindingInput {
-	/** The mark as written: JSON `{atMs, untilMs}`. */
-	readonly value: string;
 	readonly atMs: number;
 	readonly untilMs: number;
-	/** Milliseconds from when the server takes the write to `untilMs`, on the store's clock. */
-	readonly ttlMs: number;
-	/** The store's clock: a mark held whose `untilMs` is at or before it no longer stands. */
-	readonly nowMs: number;
+	/** How far either side of the server's clock a mark's time may lie (`DEFAULT_CLOCK_SKEW_MS`). */
+	readonly skewMs: number;
+}
+
+/** What a note answers: kept, or refused on the server's clock, which it names. */
+export type NoteMfaFirstBindingReply =
+	| { readonly noted: true }
+	| { readonly noted: false; readonly serverNowMs: number };
+
+/** A subject's first-binding mark as read, with the server's clock at the read. */
+export interface MfaFirstBindingRead {
+	/** The key's value; `null` when there is none. */
+	readonly value: string | null;
+	readonly serverNowMs: number;
 }
 
 /**
@@ -258,13 +266,15 @@ export interface MfaTransactionStoreClient {
 	/** The session's email proof at `key` (`GET`); `null` when there is none. */
 	sessionEmailProof(key: string): Promise<string | null>;
 	/**
-	 * Atomically: write `input.value` at `key` (`SET … PX input.ttlMs`) unless the mark held
-	 * there still stands at `input.nowMs` and was noted after `input.atMs`, or at it and ends
-	 * no earlier than `input.untilMs`. A held value that is not a mark is replaced.
+	 * Atomically, on the server's clock: refuse a mark whose `untilMs` is not after it or
+	 * whose `atMs` lies further from it than `input.skewMs`, writing nothing; otherwise write
+	 * the later `atMs` and the later `untilMs` of the mark held, while it stands, and this
+	 * one, expiring at that `untilMs` (`SET … PXAT`). A held value that is not a mark, or
+	 * whose time lies further ahead than `input.skewMs`, is replaced.
 	 */
-	noteFirstBinding(key: string, input: NoteMfaFirstBindingInput): Promise<void>;
-	/** The subject's first-binding mark at `key` (`GET`); `null` when there is none. */
-	firstBindingMark(key: string): Promise<string | null>;
+	noteFirstBinding(key: string, input: NoteMfaFirstBindingInput): Promise<NoteMfaFirstBindingReply>;
+	/** The subject's first-binding mark at `key`, and the server's clock, in one step. */
+	firstBindingMark(key: string): Promise<MfaFirstBindingRead>;
 	/** As `MfaFactorStoreClient.durability`: the requirement must be kept as the factors are. */
 	durability(): Promise<RedisDurability>;
 }
