@@ -266,7 +266,11 @@ async function signedInRequest(
 		req: signing.req,
 		reporter,
 	});
-	assert.equal(result.outcome, "established", "the completion did not establish the session to renew");
+	assert.equal(
+		result.outcome,
+		"established",
+		"the completion did not establish the session to renew",
+	);
 	const signedIn = Object.freeze({ ...cookieSessionOf(signing.req) });
 	const { req, session } = fakeRequest(options);
 	Object.assign(cookieSessionOf(req) as CookieSession, signedIn, BESIDE_SIGNED_IN);
@@ -576,10 +580,21 @@ export function loginCompletionContract(
 					"the renewed session holds the signed-in state as it was, and nothing beside it",
 				);
 				const claim = cookieClaim(req as unknown as Parameters<typeof cookieClaim>[0]);
-				assert.equal(claim.authenticated, true, "admission does not read the renewed session as signed in");
-				assert.equal(claim.subject, SUBJECT, "the renewed session is signed in for another subject");
+				assert.equal(
+					claim.authenticated,
+					true,
+					"admission does not read the renewed session as signed in",
+				);
+				assert.equal(
+					claim.subject,
+					SUBJECT,
+					"the renewed session is signed in for another subject",
+				);
 				assert.equal(claim.sid, kept.sid, "the renewed session names another session record");
-				assert.ok(session.saved >= 1, "the renewed session was not saved before the outcome was answered");
+				assert.ok(
+					session.saved >= 1,
+					"the renewed session was not saved before the outcome was answered",
+				);
 				assert.deepEqual(session.lastSaved, kept, "the session saved is not the renewed one");
 			},
 		},
@@ -653,6 +668,9 @@ const sessionOperation = (
 		}
 	});
 
+/** The signed-in state a renewal keeps: what `establishSession` writes and `cookieClaim` reads. */
+const SIGNED_IN_FIELDS = ["isAuthenticated", "user", "sid"] as const;
+
 /** Drops the request's cookie session after an outage, so nothing is saved or named by a cookie. */
 const abandon = (req: Request): void => {
 	(req as unknown as { session?: unknown }).session = undefined;
@@ -681,7 +699,8 @@ export interface RecordingLoginCompletionOptions {
  * `sid` — a failure after the record is counted rolls it back;
  * `answerInterruption` regenerates, opens the ceremony on the new id,
  * saves and answers the requirement's `403`, with a fresh token from
- * `options.csrfGuard` when it is given one.
+ * `options.csrfGuard` when it is given one; `renewSession` regenerates,
+ * writes back the signed-in fields the session held, and saves.
  */
 export function createRecordingLoginCompletion(
 	options: RecordingLoginCompletionOptions = {},
@@ -777,6 +796,23 @@ export function createRecordingLoginCompletion(
 			options.csrfGuard?.issue(res);
 			res.status(answer.status).json(answer.body);
 			return { outcome: "answered" };
+		},
+		async renewSession({ req, reporter }): Promise<SessionRenewalResult> {
+			const held = cookieSessionOf(req);
+			const kept = SIGNED_IN_FIELDS.flatMap((field) =>
+				held?.[field] === undefined ? [] : [[field, held[field]] as const],
+			);
+			const unavailable = (step: SessionRenewalStep, cause: unknown): SessionRenewalResult => {
+				reporter.storeUnavailable("cookie_session", step, cause);
+				abandon(req);
+				return { outcome: "unavailable", store: "cookie_session", step };
+			};
+			const regenerated = await sessionOperation("regenerate", req);
+			if (regenerated.failed) return unavailable("regenerate", regenerated.cause);
+			Object.assign(cookieSessionOf(req) as CookieSession, Object.fromEntries(kept));
+			const saved = await sessionOperation("save", req);
+			if (saved.failed) return unavailable("save", saved.cause);
+			return { outcome: "renewed" };
 		},
 	};
 }

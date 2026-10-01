@@ -1205,6 +1205,7 @@ describe("step 5 — the requirements", () => {
 			outcome: "step_up",
 			requirement: "r",
 			session: record,
+			view: viewOf(record),
 			// As registered: resolved once, on the issuer, to the URL a
 			// consumer answers.
 			page: { url: "/r", params: { v: "1" }, href: `${ISSUER}/r?v=1` },

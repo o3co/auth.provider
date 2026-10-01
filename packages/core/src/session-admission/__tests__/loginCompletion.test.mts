@@ -693,9 +693,7 @@ describe("loginCompletionContract — each way a completion can break it", () =>
 			await failing(renewingWith(({ isAuthenticated, user }) => ({ isAuthenticated, user }))),
 		).toContain(RULES.renewed);
 		expect(
-			await failing(
-				renewingWith(({ user, sid }) => ({ isAuthenticated: false, user, sid })),
-			),
+			await failing(renewingWith(({ user, sid }) => ({ isAuthenticated: false, user, sid }))),
 		).toContain(RULES.renewed);
 	});
 

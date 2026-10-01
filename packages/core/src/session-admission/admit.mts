@@ -69,6 +69,7 @@ import {
 	copyVerdict,
 	effectiveAction,
 	isVerdict,
+	type LiveRecord,
 	type RequirementOutcome,
 	stepUpVerdict,
 } from "./requirement-verdict.mjs";
@@ -286,9 +287,12 @@ export async function admitSession(
 	};
 
 	// Steps 1 to 4: the claim, the live read, the subject, the revocation boundary.
-	const live = await readLiveSession(checked, unavailable);
-	if ("answer" in live) return live.answer;
-	const { session } = live;
+	const read = await readLiveSession(checked, unavailable);
+	if ("answer" in read) return read.answer;
+	const { session } = read;
+	// The admission's own copy of the view: what a requirement does to the one
+	// it is handed never reaches the consumer.
+	const live: LiveRecord | null = session === null ? null : { session, view: viewOf(session) };
 
 	// Step 5: the requirements, by the action's effective grade: only the
 	// issued remediation keeps its grade and skips them.
@@ -331,7 +335,7 @@ export async function admitSession(
 			if (answer.outcome === "met") continue;
 			verdict =
 				answer.outcome === "step_up"
-					? stepUpVerdict(name, requirement, answer.whenStillUnmet, session, deps)
+					? stepUpVerdict(name, requirement, answer.whenStillUnmet, live, deps)
 					: { outcome: answer.outcome, requirement: name };
 			break;
 		}
@@ -358,7 +362,7 @@ export async function admitSession(
 
 	// Step 7: the merge.
 	return merge(verdict, selection, {
-		session,
+		live,
 		noneConfigured,
 		requirements,
 		// What step 5 handed the requirements, the same reading the selection took.

@@ -44,12 +44,21 @@
  * drops the request's cookie session, which must be neither saved against
  * the failed store nor named by a cookie. Without a `UserSessionStore` only
  * steps 4, 6 and 7 run. The CSRF token and the response stay with the routes.
+ *
+ * `renewSession` moves a signed-in session to a new id: the signed-in state
+ * this file writes — `isAuthenticated`, `user`, `sid` — carried over and
+ * nothing else, saved. The regeneration destroys the old id, so a copy of it
+ * gains nothing recorded after the renewal (the MFA ADR's D27). A failure
+ * drops the request's cookie session as above.
  */
 
 import { randomUUID } from "node:crypto";
 import {
 	type Establishment,
 	isEstablishment,
+	type SessionRenewalReporter,
+	type SessionRenewalResult,
+	type SessionRenewalStep,
 	type SubjectSessionIndex,
 	type UserSessionStore,
 } from "@o3co/auth-provider-core";
@@ -58,18 +67,18 @@ import type { Request } from "express";
 // module in an import keeps it resolvable from the emitted declaration file,
 // so a consumer compiling under `skipLibCheck: false` reads the augmentation
 // as one and not as a stray ambient module.
-import type {} from "express-session";
+import type { SessionData } from "express-session";
 import { abandonCookieSession, sessionOperation } from "./internal/cookieSession.mjs";
 
 declare module "express-session" {
 	interface SessionData {
-		/** Written by {@link establishSession}: the session is a login's. */
+		/** Written by {@link establishSession}, carried over by {@link renewSession}: the session is a login's. */
 		isAuthenticated?: boolean;
-		/** Written by {@link establishSession}: the `User` the login verified. */
+		/** Written by {@link establishSession}, carried over by {@link renewSession}: the `User` the login verified. */
 		user?: Record<string, unknown>;
 		/** Written by {@link establishSession} when the login carried a `redirect_to` its allowlist accepted. */
 		redirectTo?: string;
-		/** The `UserSession` record's id, written by {@link establishSession} when a record was created. */
+		/** The `UserSession` record's id, written by {@link establishSession} when a record was created, carried over by {@link renewSession}. */
 		sid?: string;
 	}
 }
@@ -312,4 +321,37 @@ export async function establishSession<S extends string = never, T extends strin
 	}
 
 	return { outcome: "established", sid: record?.sid };
+}
+
+/**
+ * Move the request's signed-in express session to a new id (sequence in this
+ * file's header). Answers `renewed`, or `unavailable` at the step that
+ * failed after telling the reporter, the request's cookie session dropped.
+ * A session that is not signed in stays so: only the fields it holds are
+ * carried over.
+ */
+export async function renewSession(
+	req: Request,
+	reporter: SessionRenewalReporter,
+): Promise<SessionRenewalResult> {
+	// Read before the regeneration: `req.session` is the old one until then.
+	const held = req.session as Partial<SessionData> | undefined;
+	const { isAuthenticated, user, sid } = held ?? {};
+
+	const unavailable = (step: SessionRenewalStep, cause: unknown): SessionRenewalResult => {
+		reporter.storeUnavailable("cookie_session", step, cause);
+		abandonCookieSession(req);
+		return { outcome: "unavailable", store: "cookie_session", step };
+	};
+
+	const regenerated = await sessionOperation((done) => req.session.regenerate(done));
+	if (regenerated.failed) return unavailable("regenerate", regenerated.cause);
+
+	if (isAuthenticated !== undefined) req.session.isAuthenticated = isAuthenticated;
+	if (user !== undefined) req.session.user = user;
+	if (sid !== undefined) req.session.sid = sid;
+
+	const saved = await sessionOperation((done) => req.session.save(done));
+	if (saved.failed) return unavailable("save", saved.cause);
+	return { outcome: "renewed" };
 }
