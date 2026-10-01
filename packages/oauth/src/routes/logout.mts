@@ -45,8 +45,9 @@ import accepts from "accepts";
 import type { Request, RequestHandler, Response, Router } from "express";
 import { parseAccessTokenHeader } from "../accessTokenHeader.mjs";
 import { broadcastBackchannelLogout } from "../logout/broadcastBackchannel.mjs";
-import { cascadeLogout } from "../logout/cascadeLogout.mjs";
+import { cascadeLogoutFrom } from "../logout/cascadeLogout.mjs";
 import { renderFrontchannelLogoutHtml } from "../logout/renderFrontchannel.mjs";
+import { beginLogout, type LogoutLeftState } from "../logout/sessionEnd.mjs";
 import { refuseVerificationUnavailable } from "../verificationUnavailable.mjs";
 
 type ExpressLike = {
@@ -204,7 +205,7 @@ export interface LogoutRouterOptions {
 	getFederationProviders: () => ReadonlyMap<string, FederationProvider> | undefined;
 	/** Override for unit tests. Defaults to the global `fetch`. */
 	fetchImpl?: typeof fetch;
-	/** Structured logger shared with broadcastBackchannelLogout and cascadeLogout. */
+	/** Structured logger shared with broadcastBackchannelLogout and the cascade. */
 	logger?: Logger;
 	/** Audit sink for operator observability events. No-op when undefined. */
 	auditSink?: AuditSink;
@@ -255,11 +256,18 @@ export function createRouter(express: ExpressLike, opts: LogoutRouterOptions): R
 	};
 	const logoutStoreUnavailable = (
 		logger: EventLogger,
-		store: "user_session" | "session_rp_registry" | "session_federation_index",
-		step: "get" | "list",
+		store:
+			| "user_session"
+			| "session_rp_registry"
+			| "session_federation_index"
+			| "session_family_index",
+		step: "get" | "list" | "endSession",
 		error: unknown,
-		/** A second store that failed in the same read, already projected. */
-		also: { readonly alsoUnavailable?: { readonly store: string; readonly err: unknown } } = {},
+		/** What the failure left of the session, and a second store that failed in the same read, already projected. */
+		also: {
+			readonly left?: LogoutLeftState;
+			readonly alsoUnavailable?: { readonly store: string; readonly err: unknown };
+		} = {},
 	): void => {
 		logger.error({ store, step, err: loggableError(error), ...also }, "logout_store_unavailable");
 	};
@@ -707,44 +715,41 @@ export function createRouter(express: ExpressLike, opts: LogoutRouterOptions): R
 			return res.status(200).json({ logged_out: true });
 		}
 
-		// Read the RP registry (for back-channel broadcast) and the federation
-		// index (for the IdP redirect) together, before the cascade; one log
-		// line for the outage, with a second failure as `alsoUnavailable`.
-		const [rpsRead, federationsRead] = await Promise.allSettled([
-			opts.sessionRPRegistry.listRPs(sid),
-			opts.sessionFederationIndex.listFederations(sid),
-		]);
-		if (rpsRead.status === "rejected" || federationsRead.status === "rejected") {
-			if (rpsRead.status === "rejected") {
-				logoutStoreUnavailable(
-					opts.logger ?? console,
-					"session_rp_registry",
-					"list",
-					rpsRead.reason,
-					federationsRead.status === "rejected"
-						? {
-								alsoUnavailable: {
-									store: "session_federation_index",
-									err: loggableError(federationsRead.reason),
-								},
-							}
-						: {},
-				);
-			} else if (federationsRead.status === "rejected") {
-				logoutStoreUnavailable(
-					opts.logger ?? console,
-					"session_federation_index",
-					"list",
-					federationsRead.reason,
-				);
+		// Begin the logout: the relying parties to tell, the federations, and
+		// what the cascade starts from. An outage is one log line, saying what
+		// it left of the session.
+		const begun = await beginLogout(opts, sid, session.expiresAt);
+		if (begun.outcome === "unavailable") {
+			const { outage } = begun;
+			logoutStoreUnavailable(opts.logger ?? console, outage.store, outage.step, outage.error, {
+				left: outage.left,
+				...("alsoUnavailable" in outage && outage.alsoUnavailable
+					? {
+							alsoUnavailable: {
+								store: outage.alsoUnavailable.store,
+								err: loggableError(outage.alsoUnavailable.error),
+							},
+						}
+					: {}),
+			});
+			// A begin that left state behind is the logout's first step failing,
+			// audited as the cascade's step 1 has always been.
+			if (outage.left !== "unchanged") {
+				emitAuditEvent(opts.auditSink, {
+					timestamp: new Date(),
+					type: "logout.cascade_failed",
+					subject: sub ?? undefined,
+					ip: req.ip,
+					userAgent: req.get("user-agent"),
+					details: { sid, step: 1, store: outage.store, left: outage.left },
+				});
 			}
 			return res.status(503).json({
 				error: "temporarily_unavailable",
 				error_description: "session store unavailable",
 			});
 		}
-		const rps = rpsRead.value;
-		const federations: ReadonlyArray<string> = federationsRead.value;
+		const { rps, federations } = begun;
 
 		// Step 4: Broadcast Back-Channel Logout (best-effort — never throws).
 		if (sub) {
@@ -805,9 +810,8 @@ export function createRouter(express: ExpressLike, opts: LogoutRouterOptions): R
 		}
 
 		// Step 6: Cascade logout.
-		const cascade = await cascadeLogout({
+		const cascade = await cascadeLogoutFrom(begun, {
 			sid,
-			expiresAt: session.expiresAt,
 			refreshTokenFamilyRevocation: opts.refreshTokenFamilyRevocation,
 			federationTokenStore: opts.federationTokenStore,
 			userSessionStore: opts.userSessionStore,
@@ -821,7 +825,7 @@ export function createRouter(express: ExpressLike, opts: LogoutRouterOptions): R
 			// The outage's one error-level line. Which step stopped the cascade,
 			// and how many operations failed there; the first failure's
 			// projection (each step-2 failure also has its own structured warn
-			// line from `cascadeLogout`).
+			// line from the cascade).
 			(opts.logger ?? console).error(
 				{
 					store: "logout_cascade",

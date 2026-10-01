@@ -134,7 +134,7 @@ async function buildWorld(
 		contributionKinds,
 	});
 	const plan = planBoot(validated, minBoot, undefined);
-	return materializeComponents(plan, minBoot, undefined);
+	return materializeComponents(plan, minBoot, undefined, contributionKinds);
 }
 
 // Minimal stub handler factory to satisfy RouteContribution.handler shape

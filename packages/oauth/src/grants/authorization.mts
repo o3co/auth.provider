@@ -41,7 +41,6 @@ import {
 	resolveAccessTokenLifetime,
 	resolveRefreshTokenLifetime,
 	resolveTokenBindingSettings,
-	supportsSessionEnd,
 	type Token,
 	type UserSession,
 	unrepresentedResources,
@@ -50,6 +49,7 @@ import {
 } from "@o3co/auth-provider-core";
 import { stepUpRefusal } from "../admission.mjs";
 import type { AUTHORIZATION_CODE_GRANT_ADMISSION_ACTIONS } from "../admissionActions.mjs";
+import { joinSession } from "../logout/sessionEnd.mjs";
 import { resolveOAuthOptions } from "../resolveOAuthOptions.mjs";
 import { PKCE_METHOD_S256, pkceMethodsForClient } from "./pkce.mjs";
 
@@ -709,9 +709,6 @@ export const createAuthorizationGrant = (deps: AuthorizationGrantDeps): GrantHan
 			// to logout. With a store wired, the first read already refused a code
 			// without a sid.
 			if (deps.userSessionStore && sid) {
-				// Which dependency the block is waiting on, so the one catch can log
-				// the one that failed.
-				let linking: "client" | "session_family_index" | "session_rp_registry" = "client";
 				try {
 					const clientRecord = await clientRepository.findById(authenticatedClientId);
 
@@ -746,62 +743,53 @@ export const createAuthorizationGrant = (deps: AuthorizationGrantDeps): GrantHan
 					// Composition-root invariant: the session-stores module wires its
 					// sibling stores together, so with userSessionStore present these
 					// two are too. `?.` would silently no-op on a misconfigured root.
-					linking = "session_family_index";
-					// biome-ignore lint/style/noNonNullAssertion: intentional — see invariant comment above
-					const familyIndex = deps.sessionFamilyIndex!;
-					// With the session-end capability, either the logout's listing
-					// includes this family or the add answers "ended"; no token is
-					// served for a family a logout could miss. Without it, the add is
-					// unguarded; `oauthAuthorizationModule` warns of that at boot.
-					if (supportsSessionEnd(familyIndex)) {
-						const added = await familyIndex.addFamilyIdUnlessEnded(
-							sid,
-							familyId,
-							userSession.expiresAt,
-						);
-						if (added === "ended") {
-							const at = { sid, clientId: authenticatedClientId };
-							const refusal = sessionInvalidated(at);
-							await revokeRefusedFamily(familyId, at);
-							return { result: refusal };
-						}
-					} else {
-						await familyIndex.addFamilyId(sid, familyId, userSession.expiresAt);
-					}
-					linking = "session_rp_registry";
-					// biome-ignore lint/style/noNonNullAssertion: intentional — same invariant
-					await deps.sessionRPRegistry!.registerRP(
-						sid,
+					const joined = await joinSession(
 						{
-							clientId: authenticatedClientId,
-							// Typed reads: a misspelt field would silently drop the RP
-							// from the logout cascade.
-							backchannelLogoutUri: clientRecord?.backchannelLogoutUri,
-							backchannelLogoutSessionRequired: clientRecord?.backchannelLogoutSessionRequired,
-							frontchannelLogoutUri: clientRecord?.frontchannelLogoutUri,
-							frontchannelLogoutSessionRequired: clientRecord?.frontchannelLogoutSessionRequired,
-							registeredAt: new Date(),
+							// biome-ignore lint/style/noNonNullAssertion: intentional — see the invariant above
+							sessionRPRegistry: deps.sessionRPRegistry!,
+							// biome-ignore lint/style/noNonNullAssertion: intentional — same invariant
+							sessionFamilyIndex: deps.sessionFamilyIndex!,
 						},
-						userSession.expiresAt,
+						{
+							sid,
+							rp: {
+								clientId: authenticatedClientId,
+								// Typed reads: a misspelt field would silently drop the RP
+								// from the logout cascade.
+								backchannelLogoutUri: clientRecord?.backchannelLogoutUri,
+								backchannelLogoutSessionRequired: clientRecord?.backchannelLogoutSessionRequired,
+								frontchannelLogoutUri: clientRecord?.frontchannelLogoutUri,
+								frontchannelLogoutSessionRequired: clientRecord?.frontchannelLogoutSessionRequired,
+								registeredAt: new Date(),
+							},
+							familyId,
+							expiresAt: userSession.expiresAt,
+						},
 					);
-				} catch (err) {
-					// Fail closed on any throw here. The errorDescription is generic
-					// because the try spans the client lookup and the store writes; the
-					// log line names the one that threw.
-					if (linking === "client") {
-						logClientRepositoryUnavailable(
-							logger,
-							{ site: "authorization_code", step: "find", clientId: authenticatedClientId },
-							err,
-						);
-					} else {
-						storeUnavailable(
-							linking,
-							linking === "session_family_index" ? "add" : "register",
-							authenticatedClientId,
-							err,
-						);
+					if (joined.outcome === "ended") {
+						const at = { sid, clientId: authenticatedClientId };
+						const refusal = sessionInvalidated(at);
+						await revokeRefusedFamily(familyId, at);
+						return { result: refusal };
 					}
+					if (joined.outcome === "unavailable") {
+						storeUnavailable(joined.store, joined.step, authenticatedClientId, joined.error);
+						return {
+							result: {
+								status: 503,
+								error: "temporarily_unavailable",
+								errorDescription: "session linking unavailable",
+							},
+						};
+					}
+				} catch (err) {
+					// Fail closed: the client lookup threw (the joins answer their
+					// outages above, and admission answers its own).
+					logClientRepositoryUnavailable(
+						logger,
+						{ site: "authorization_code", step: "find", clientId: authenticatedClientId },
+						err,
+					);
 					return {
 						result: {
 							status: 503,

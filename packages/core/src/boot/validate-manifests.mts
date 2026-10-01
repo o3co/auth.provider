@@ -67,6 +67,7 @@ import {
 	lifetimeBeyondConfiguration,
 	lifetimeBeyondConfigurationMessage,
 } from "../token-settings/check.mjs";
+import { contributesAuditHooks } from "./audit-fan-out.mjs";
 import { failureSummary } from "./failure-summary.mjs";
 import { checkReplicaSafety } from "./replica-safety.mjs";
 import type {
@@ -705,11 +706,26 @@ const GUARDED_KINDS = ["sessionRequirements", "mfaFactors"] as const;
  * for `rateLimitBudgets` could answer a looser budget than the owning module
  * contributed — on RFC 8628 §5.1's device-verification prefix, say —
  * `federationTypes` is what the dispatch of configured federations will read,
- * and `admissionActions` is where admission reads the grade it hands the
- * requirements. Unlike `GUARDED_KINDS`, a module may override an entry of the
- * first two.
+ * `admissionActions` is where admission reads the grade it hands the
+ * requirements, and `auditHooks` is what the audit fan-out in the `auditSink`
+ * slot reads at each event, the slot stage 1 counts as filled once a hook is
+ * contributed. Unlike `GUARDED_KINDS`, a module may override an entry of the
+ * first two; `auditHooks` is list-shaped, and a list kind has no override.
  */
-const PLANNER_OWNED_KINDS = ["rateLimitBudgets", "federationTypes", "admissionActions"] as const;
+const PLANNER_OWNED_KINDS = [
+	"rateLimitBudgets",
+	"federationTypes",
+	"admissionActions",
+	"auditHooks",
+] as const;
+
+/** What a refusal of a host collector for a planner-owned `kind` says of its entries. */
+const plannerOwnedEntries = (kind: (typeof PLANNER_OWNED_KINDS)[number]): string =>
+	kind === "auditHooks"
+		? "and the audit fan-out in the auditSink slot reads them"
+		: kind === "admissionActions"
+			? "and no module overrides one"
+			: "and a module may override one";
 
 /**
  * A requirement is switched off by not installing it, never removed from
@@ -766,7 +782,7 @@ export function refuseGuardedHostKinds(host: ContributionKindMap | undefined): v
 	for (const kind of PLANNER_OWNED_KINDS) {
 		if (Object.hasOwn(host, kind)) {
 			throw new BootError({
-				message: `contributionKinds replaces the collector for "${kind}", which is the planner's: the modules that own its entries contribute them, ${kind === "admissionActions" ? "and no module overrides one" : "and a module may override one"}.`,
+				message: `contributionKinds replaces the collector for "${kind}", which is the planner's: the modules that own its entries contribute them, ${plannerOwnedEntries(kind)}.`,
 				reason: "contribution-kind-guarded",
 				stage: "validateManifests",
 				details: { reason: "contribution-kind-guarded", kind },
@@ -921,19 +937,16 @@ function checkContributionShapes(
 
 /**
  * Step 4: Requires/optional closure check.
- * For each module, every key in `requires` must appear in either
- * `bootstrapComponents`, the union of all modules' `provides`, or
- * `overrideComponents`, or be in the synthetic-key set (auto-satisfied).
+ * For each module, every key in `requires` must be planned (`plannedKeys`:
+ * `bootstrapComponents`, the union of all modules' `provides`,
+ * `overrideComponents`, and `auditSink` when `auditHooks` are contributed),
+ * or be in the synthetic-key set (auto-satisfied).
  * @internal
  */
 function checkRequiresClosure(
 	modules: readonly NormalisedModule[],
-	bootstrap: BootstrapMap,
-	override: Partial<ComponentMap> | undefined,
+	plannedKeys: ReadonlySet<string>,
 ): void {
-	const bootstrapKeys = new Set<string>(Object.keys(bootstrap));
-	const overrideKeys = new Set<string>(Object.keys(override ?? {}));
-
 	// Build a map: ComponentKey → providing NormalisedModule
 	const providerIndex = new Map<ComponentKey, NormalisedModule>();
 	for (const m of modules) {
@@ -943,10 +956,7 @@ function checkRequiresClosure(
 	}
 
 	const isSatisfied = (key: ComponentKey): boolean =>
-		bootstrapKeys.has(key) ||
-		overrideKeys.has(key) ||
-		providerIndex.has(key) ||
-		SYNTHETIC_COMPONENT_KEYS.has(key);
+		plannedKeys.has(key) || SYNTHETIC_COMPONENT_KEYS.has(key);
 
 	// Find the first module in input order whose requires contains an unsatisfied key
 	for (const m of modules) {
@@ -2844,8 +2854,9 @@ interface StageOneContext {
 	readonly parsedConfig: unknown;
 	/**
 	 * Provides ∪ bootstrapComponents ∪ overrideComponents, the three component
-	 * sources. Wiring guards must test all three, or a composition root wiring
-	 * through bootstrap or override is falsely rejected.
+	 * sources, and `auditSink` when a module contributes `auditHooks` (core
+	 * fills it then). Wiring guards must test all three, or a composition root
+	 * wiring through bootstrap or override is falsely rejected.
 	 */
 	readonly plannedKeys: ReadonlySet<string>;
 }
@@ -2969,8 +2980,7 @@ export const STAGE_ONE_PRE_CONFIG_CHECKS: readonly StageOneCheck[] = freezeCheck
 	{
 		id: "requires-closure",
 		spec: "A2-β §5.1 step 4",
-		run: (ctx) =>
-			checkRequiresClosure(ctx.modules, ctx.bootstrapComponents, ctx.overrideComponents),
+		run: (ctx) => checkRequiresClosure(ctx.modules, ctx.plannedKeys),
 	},
 	{
 		id: "contribution-kind-coverage",
@@ -3138,6 +3148,7 @@ export function validateManifests(input: ValidateManifestsInput): ValidatedManif
 			...normalisedModules.flatMap((m) => m.providesKeys as string[]),
 			...Object.keys(bootstrapComponents),
 			...Object.keys(overrideComponents ?? {}),
+			...(contributesAuditHooks(normalisedModules) ? ["auditSink"] : []),
 		]),
 	};
 

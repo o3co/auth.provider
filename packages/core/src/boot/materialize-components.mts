@@ -25,6 +25,7 @@
 import { deploymentModeOf } from "../deployment/mode.mjs";
 import type { ComponentKey, ComponentMap } from "../modules/manifest/component-map.mjs";
 import { prepareSyntheticProjections } from "./apply-contributions.mjs";
+import { auditSlotFor } from "./audit-fan-out.mjs";
 import { failureSummary } from "./failure-summary.mjs";
 import type {
 	BootPlan,
@@ -116,7 +117,9 @@ async function runCleanupsReverse(cleanupRecords: readonly CleanupRecord[]): Pro
  * `core.deployment.mode`, injects the synthetic projections of
  * `contributionKinds` when given (a provider that requires one reads it
  * lazily, filled once stage 4 registers the contributions), then runs each
- * provider factory in `plan.providerActivations` order.
+ * provider factory in `plan.providerActivations` order. The `auditSink`
+ * slot is `audit-fan-out.mts`'s to fill (`auditSlotFor`); a cleanup is still
+ * handed the provider's own value.
  *
  * A factory failure becomes `BootError reason="provides-factory-failed"`, its
  * message naming the thrown value by `failureSummary` (never
@@ -163,6 +166,10 @@ export async function materializeComponents(
 	if (contributionKinds !== undefined) {
 		prepareSyntheticProjections(components, contributionKinds);
 	}
+
+	// The `auditSink` slot's handling, `audit-fan-out.mts`'s alone.
+	const auditSlot = auditSlotFor(plan, contributionKinds, components);
+	auditSlot.beforeProviders();
 
 	for (const activation of plan.providerActivations) {
 		const { module: moduleName, componentKey } = activation;
@@ -218,7 +225,7 @@ export async function materializeComponents(
 			});
 		}
 
-		components[componentKey as string] = value;
+		components[componentKey as string] = auditSlot.provided(componentKey, value);
 
 		const cleanupFn = manifest.lifecycle?.[componentKey]?.cleanup;
 		if (cleanupFn !== undefined) {

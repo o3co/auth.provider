@@ -19,9 +19,9 @@
  * order they can interleave: either the logout revokes the family the
  * exchange opened, or the exchange serves no token and revokes it itself.
  *
- * Driven through `cascadeLogout` and the real grant over core's memory
- * stores. A checkpoint holds one side at a store call while the other runs
- * to its answer.
+ * Driven through `cascadeLogout` or the real logout router, and the real
+ * grant, over core's memory stores. A checkpoint holds one side at a store
+ * call while the other runs to its answer.
  */
 
 import crypto from "node:crypto";
@@ -56,10 +56,14 @@ import {
 	makeValidAppConfig,
 	resolverForTests,
 } from "@o3co/auth-provider-core/testing";
+import express from "express";
+import { SignJWT } from "jose";
+import request from "supertest";
 import { describe, expect, it, vi } from "vitest";
 import { createAuthorizationGrant } from "#/grants/authorization.mjs";
 import { cascadeLogout } from "#/logout/cascadeLogout.mjs";
 import { oauthAuthorizationModule } from "#/oauthAuthorization.mjs";
+import { createRouter as createLogoutRouter } from "#/routes/logout.mjs";
 import { oauthConfigForTests } from "#/testing/index.mjs";
 import { OAUTH_ADMISSION_ACTIONS } from "./_helpers/admissionActions.mjs";
 import { codeRecord } from "./_helpers/codeRecord.mjs";
@@ -304,7 +308,7 @@ describe("a logout and a code exchange on the same session", () => {
 		expect(await w.revocation.isFamilyRevoked(w.familyId())).toBe(true);
 	});
 
-	it("end before add: the add answers ended, the exchange refuses with no tokens, registers no RP, and the family is revoked", async () => {
+	it("end before add: the add answers ended, the exchange refuses with no tokens, and the family is revoked; the RP it registered first goes with the session's clean-up", async () => {
 		const w = await world();
 		const held = checkpoint();
 		const logout = w.logout({
@@ -322,9 +326,10 @@ describe("a logout and a code exchange on the same session", () => {
 
 		expectSessionInvalidated(result);
 		expect(w.answers).toEqual(["ended"]);
-		expect(registered).toEqual([]);
+		expect(registered.map((rp) => rp.clientId)).toEqual([CLIENT_ID]);
 		expect(await w.revocation.isFamilyRevoked(w.familyId())).toBe(true);
 		expect(await logout).toEqual({ outcome: "done" });
+		expect(await w.grantStores.sessionRPRegistry.listRPs(SID)).toEqual([]);
 	});
 
 	it("an add between the listing and the clean-up: the add answers ended", async () => {
@@ -466,6 +471,136 @@ describe("a logout and a code exchange on the same session", () => {
 		expect(index.listFamilyIds).toHaveBeenCalledWith(SID);
 		expect(cascade).toEqual({ outcome: "done" });
 		expect(await w.revocation.isFamilyRevoked(w.familyId())).toBe(true);
+	});
+});
+
+describe("the logout route and a code exchange: the relying parties it lists", () => {
+	const ISSUER = "https://auth.example";
+	const SECRET = "logout-route-race-secret-at-least-32-chars";
+
+	/**
+	 * `POST /oauth/logout` over the world's logout stores, with an id_token
+	 * hint for the session: the client ids of the relying parties each RP
+	 * listing returned are pushed on `listed`; with `held`, the route waits
+	 * there once its listing has answered.
+	 */
+	const logoutRoute = async (
+		w: Awaited<ReturnType<typeof world>>,
+		listed: string[][],
+		held?: Checkpoint,
+	): Promise<request.Response> => {
+		const registry = w.logoutStores.sessionRPRegistry;
+		const app = express();
+		app.use(
+			"/oauth",
+			createLogoutRouter(express, {
+				keyStore: createSymmetricKeyStore(SECRET),
+				issuer: ISSUER,
+				...w.logoutStores,
+				sessionRPRegistry: {
+					...registry,
+					listRPs: async (sid: string) => {
+						const rps = await registry.listRPs(sid);
+						listed.push(rps.map((rp) => rp.clientId));
+						await held?.pass();
+						return rps;
+					},
+				},
+				clientRepository: { findById: async () => null, authenticate: async () => null },
+				getFederationProviders: () => undefined,
+				fetchImpl: vi.fn(async () => new Response(null, { status: 200 })),
+			}),
+		);
+		const hint = await new SignJWT({ sub: SUBJECT, aud: CLIENT_ID, sid: SID })
+			.setProtectedHeader({ alg: "HS256", kid: "v0", typ: "JWT" })
+			.setIssuer(ISSUER)
+			.setIssuedAt()
+			.setExpirationTime("1h")
+			.sign(crypto.createSecretKey(Buffer.from(SECRET)));
+		return request(app).post("/oauth/logout").type("form").send({ id_token_hint: hint });
+	};
+
+	for (const when of ["before", "after"] as const) {
+		it(`an exchange held ${when} its RP registration while the logout runs: the RP is in the logout's list, or the exchange is refused`, async () => {
+			const w = await world();
+			const held = checkpoint();
+			const exchange = w.exchange({
+				...w.grantStores,
+				sessionRPRegistry: holding(w.grantStores.sessionRPRegistry, "registerRP", held, { when }),
+			});
+			await held.arrived;
+
+			const listed: string[][] = [];
+			expect((await logoutRoute(w, listed)).status).toBe(200);
+			held.release();
+			const result = await exchange;
+
+			const told = listed.flat().includes(CLIENT_ID);
+			const refused =
+				"errorDescription" in result && result.errorDescription === "session_invalidated";
+			expect({ told, refused, status: result.status }).toMatchObject(
+				told ? { told: true } : { refused: true },
+			);
+		});
+	}
+
+	it("a relying-party listing that fails after the session is marked: 503, the session half-ended — kept, its families unrevoked, its code exchanges refused — until a retry", async () => {
+		const w = await world();
+		expect((await w.exchange()).status).toBe(200);
+		const family = w.familyId();
+		const registry = w.logoutStores.sessionRPRegistry;
+		const listRPs = vi.spyOn(registry, "listRPs").mockRejectedValueOnce(new Error("registry down"));
+
+		const listed: string[][] = [];
+		expect((await logoutRoute(w, listed)).status).toBe(503);
+		expect(listRPs).toHaveBeenCalledTimes(1);
+		expect(await w.userSessionStore.get(SID)).not.toBeNull();
+		expect(await w.revocation.isFamilyRevoked(family)).toBe(false);
+		expect((await registry.listRPs(SID)).map((rp) => rp.clientId)).toEqual([CLIENT_ID]);
+		expectSessionInvalidated(await w.exchange());
+
+		// The retry completes the logout.
+		expect((await logoutRoute(w, listed)).status).toBe(200);
+		expect(await w.userSessionStore.get(SID)).toBeNull();
+		expect(await w.revocation.isFamilyRevoked(family)).toBe(true);
+	});
+
+	it("an exchange whose family cannot join after its relying party registered: 503 with no token, and the registration stays", async () => {
+		const w = await world();
+		const failing = {
+			...w.grantStores,
+			sessionFamilyIndex: {
+				...w.grantStores.sessionFamilyIndex,
+				addFamilyIdUnlessEnded: async () => {
+					throw new Error("index down");
+				},
+			} as SessionFamilyIndex,
+		};
+		const result = await w.exchange(failing);
+		expect(result).toMatchObject({
+			status: 503,
+			error: "temporarily_unavailable",
+			errorDescription: "session linking unavailable",
+		});
+		expect(result).not.toHaveProperty("tokens");
+		expect((await w.grantStores.sessionRPRegistry.listRPs(SID)).map((rp) => rp.clientId)).toEqual([
+			CLIENT_ID,
+		]);
+	});
+
+	it("an exchange that runs while the logout is held after its RP listing is refused as ended", async () => {
+		const w = await world();
+		const held = checkpoint();
+		const listed: string[][] = [];
+		const logout = logoutRoute(w, listed, held);
+		await held.arrived;
+
+		const result = await w.exchange();
+		held.release();
+
+		expectSessionInvalidated(result);
+		expect(listed).toEqual([[]]);
+		expect((await logout).status).toBe(200);
 	});
 });
 

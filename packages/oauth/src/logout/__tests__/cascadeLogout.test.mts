@@ -8,7 +8,12 @@ import type {
 } from "@o3co/auth-provider-core";
 import { describe, expect, it, vi } from "vitest";
 import { createMockLogger } from "../../__tests__/_helpers/mockLogger.mjs";
-import { cascadeLogout } from "../cascadeLogout.mjs";
+import {
+	type CascadeLogoutOptions,
+	cascadeLogout,
+	cascadeLogoutFrom,
+	cascadeLogoutUnmarked,
+} from "../cascadeLogout.mjs";
 
 // ---------------------------------------------------------------------------
 // Mock factories
@@ -597,5 +602,62 @@ describe("cascadeLogout — an index with the session-end capability", () => {
 		expect(fts.removeBySid).not.toHaveBeenCalled();
 		expect(sessionFamilyIndex.removeBySid).not.toHaveBeenCalled();
 		expect(uss.delete).not.toHaveBeenCalled();
+	});
+});
+
+describe("the module's own entries: from a begun logout, and unmarked", () => {
+	const stores = (sessionFamilyIndex: SessionFamilyIndex) => ({
+		sid: "sid-1",
+		refreshTokenFamilyRevocation: makeFamilyRevocation(),
+		federationTokenStore: makeFedStore(),
+		userSessionStore: makeUserSessionStore(),
+		sessionRPRegistry: makeSessionRPRegistry(),
+		sessionFamilyIndex,
+		sessionFederationIndex: makeSessionFederationIndex(),
+	});
+	const endingIndex = () => ({
+		...makeSessionFamilyIndex({ listFamilyIds: vi.fn(async () => ["fam-listed"]) }),
+		endSession: vi.fn(async () => ["fam-ended"]),
+		addFamilyIdUnlessEnded: vi.fn(async () => "added" as const),
+	});
+
+	it("cascadeLogoutFrom revokes the families the begin read, and reads and marks nothing more", async () => {
+		const index = endingIndex();
+		const s = stores(index);
+		const result = await cascadeLogoutFrom(
+			{ outcome: "begun", rps: [], federations: [], familyIds: ["fam-ended"] },
+			s,
+		);
+		expect(result).toEqual({ outcome: "done" });
+		expect(s.refreshTokenFamilyRevocation.revokeFamily).toHaveBeenCalledWith("fam-ended");
+		expect(index.endSession).not.toHaveBeenCalled();
+		expect(index.listFamilyIds).not.toHaveBeenCalled();
+	});
+
+	it("cascadeLogoutFrom a begin that read no families — no session-end capability — lists them", async () => {
+		const index = makeSessionFamilyIndex({ listFamilyIds: vi.fn(async () => ["fam-listed"]) });
+		const s = stores(index);
+		await cascadeLogoutFrom(
+			{ outcome: "begun", rps: [], federations: [], familyIds: undefined },
+			s,
+		);
+		expect(s.refreshTokenFamilyRevocation.revokeFamily).toHaveBeenCalledWith("fam-listed");
+	});
+
+	it("cascadeLogoutUnmarked lists the families and marks nothing, on an index that could", async () => {
+		const index = endingIndex();
+		const s = stores(index);
+		expect(await cascadeLogoutUnmarked(s)).toEqual({ outcome: "done" });
+		expect(index.endSession).not.toHaveBeenCalled();
+		expect(s.refreshTokenFamilyRevocation.revokeFamily).toHaveBeenCalledWith("fam-listed");
+	});
+
+	it("the public cascadeLogout takes no list of families", () => {
+		const options: CascadeLogoutOptions = {
+			...stores(makeSessionFamilyIndex()),
+			// @ts-expect-error — the families a begin read are the module's own hand-off
+			familyIds: [],
+		};
+		expect(options.sid).toBe("sid-1");
 	});
 });
