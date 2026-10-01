@@ -297,7 +297,8 @@ describe.each(["memory", "redis"] as const)("the step-up round trip, stores in %
 		const page = browser();
 		const create = vi.spyOn(storesOf(a).userSessionStore, "create");
 		await signIn(a.app, page, user);
-		const sid = (create.mock.calls[0]?.[0] as { sid: string }).sid;
+		const created = create.mock.calls[0]?.[0] as { readonly sid: string } | undefined;
+		if (created === undefined) throw new Error("the login created no session record");
 		create.mockRestore();
 		const factor = await seedTotp(a.handle.components, a.config, user.id);
 		// The step-up is made in a later second than the login, so auth_time tells them apart.
@@ -309,10 +310,12 @@ describe.each(["memory", "redis"] as const)("the step-up round trip, stores in %
 
 		const tokens = await redeem(a.app, code);
 		expect(tokens.status, JSON.stringify(tokens.body)).toBe(200);
-		const session = await storesOf(b).userSessionStore.get(sid);
-		const authTime = Math.floor((session?.authTime as Date).getTime() / 1000);
-		const mfaAt = Math.floor((session?.authentication?.mfaAt as Date).getTime() / 1000);
-		expect(mfaAt).toBeGreaterThan(authTime);
+		const session = await storesOf(b).userSessionStore.get(created.sid);
+		if (session === null) throw new Error("the session record is gone");
+		const authTime = Math.floor(session.authTime.getTime() / 1000);
+		const mfaAt = session.authentication?.mfaAt;
+		expect(mfaAt).toBeInstanceOf(Date);
+		expect(Math.floor((mfaAt as Date).getTime() / 1000)).toBeGreaterThan(authTime);
 		for (const token of [tokens.body.id_token, tokens.body.access_token] as string[]) {
 			expect(claimsOf(token)).toMatchObject({
 				amr: ["pwd", "otp", "mfa"],

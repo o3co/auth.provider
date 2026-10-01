@@ -900,7 +900,8 @@ describe("/authorize on admission — the ask is read until the code is minted",
 	};
 
 	/** The request a page hands back, as a query. */
-	const queryOf = (url: URL): Record<string, string> => Object.fromEntries(url.searchParams.entries());
+	const queryOf = (url: URL): Record<string, string> =>
+		Object.fromEntries(url.searchParams.entries());
 
 	/** The request a step-up page returns to. */
 	const returnOf = (page: URL): URL => new URL(page.searchParams.get("redirect_to") as string);
@@ -919,7 +920,9 @@ describe("/authorize on admission — the ask is read until the code is minted",
 			requirements: [requirement],
 			consent: true,
 		});
-		const toLogin = loginRedirectTo(await authorize(harness.app, { ...baseQuery, prompt: "login" }));
+		const toLogin = loginRedirectTo(
+			await authorize(harness.app, { ...baseQuery, prompt: "login" }),
+		);
 		await loggedInNow(clock);
 		const toStepUp = sentTo(await authorize(harness.app, queryOf(toLogin)));
 		expect(toStepUp.pathname).toBe("/step-up");
@@ -956,7 +959,9 @@ describe("/authorize on admission — the ask is read until the code is minted",
 			userSessionStore: storeAnswering(async () => record({ authTime: clock.authTime })),
 			requirements: [requirement],
 		});
-		const toLogin = loginRedirectTo(await authorize(harness.app, { ...baseQuery, prompt: "login" }));
+		const toLogin = loginRedirectTo(
+			await authorize(harness.app, { ...baseQuery, prompt: "login" }),
+		);
 		await loggedInNow(clock);
 		const back = returnOf(sentTo(await authorize(harness.app, queryOf(toLogin))));
 		state.met = true;
@@ -988,7 +993,9 @@ describe("/authorize on admission — the ask is read until the code is minted",
 			// The first read hands the ask back and another pass spends it straight after.
 			onAskGet: (n) => (n === 1 ? "spend" : undefined),
 		});
-		const toLogin = loginRedirectTo(await authorize(harness.app, { ...baseQuery, prompt: "login" }));
+		const toLogin = loginRedirectTo(
+			await authorize(harness.app, { ...baseQuery, prompt: "login" }),
+		);
 		await loggedInNow(clock);
 		const params = redirectParams(await authorize(harness.app, queryOf(toLogin)));
 		expect(params.get("error")).toBe("login_required");
@@ -1014,7 +1021,9 @@ describe("/authorize on admission — the ask is read until the code is minted",
 			userSessionStore: storeAnswering(async () => record({ authTime: clock.authTime })),
 			onAskGet: (n) => (n === 2 ? "fail" : undefined),
 		});
-		const toLogin = loginRedirectTo(await authorize(harness.app, { ...baseQuery, prompt: "login" }));
+		const toLogin = loginRedirectTo(
+			await authorize(harness.app, { ...baseQuery, prompt: "login" }),
+		);
 		await loggedInNow(clock);
 		const params = redirectParams(await authorize(harness.app, queryOf(toLogin)));
 		expect(params.get("error")).toBe("temporarily_unavailable");
@@ -1098,15 +1107,15 @@ describe("/authorize on admission — prompt=login from a browser that is not si
 
 	it("records nothing without prompt=login, under prompt=none, or with no session store", async () => {
 		const plain = await makeApp({ session: { isAuthenticated: false } });
-		expect(loginRedirectTo(await authorize(plain.app, baseQuery)).searchParams.has("reauth_ask")).toBe(
-			false,
-		);
+		expect(
+			loginRedirectTo(await authorize(plain.app, baseQuery)).searchParams.has("reauth_ask"),
+		).toBe(false);
 		expect(plain.records.size).toBe(0);
 
 		const silent = await makeApp({ session: { isAuthenticated: false } });
-		expect(redirectParams(await authorize(silent.app, { ...baseQuery, prompt: "none" })).get("error")).toBe(
-			"login_required",
-		);
+		expect(
+			redirectParams(await authorize(silent.app, { ...baseQuery, prompt: "none" })).get("error"),
+		).toBe("login_required");
 		expect(silent.records.size).toBe(0);
 
 		const storeless = await makeApp({ session: { isAuthenticated: false }, sessionStore: false });
@@ -1253,9 +1262,9 @@ describe("/authorize on admission — a reauthenticate verdict is answered with 
 		expect(secondPage.pathname).toBe("/step-up");
 		state.met = true;
 		const last = new URL(secondPage.searchParams.get("redirect_to") as string);
-		expect(codeOf(await authorize(harness.app, Object.fromEntries(last.searchParams.entries())))).toBe(
-			"code-x",
-		);
+		expect(
+			codeOf(await authorize(harness.app, Object.fromEntries(last.searchParams.entries()))),
+		).toBe("code-x");
 	});
 });
 
