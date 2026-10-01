@@ -39,7 +39,9 @@ export interface GrantPolicyContext {
  * What a policy returns. `outcome` must be exactly `"allow"` or `"deny"`:
  * any other value, or a value that is not such a record, is an invalid
  * decision, answered `500 server_error` and never allowed
- * (`readGrantPolicyDecision`).
+ * (`readGrantPolicyDecision`). Each field is read once, into a plain copy
+ * the provider acts on; a field that throws when read makes the decision
+ * invalid.
  */
 export type GrantPolicyDecision =
 	| {

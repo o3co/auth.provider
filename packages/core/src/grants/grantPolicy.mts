@@ -14,6 +14,13 @@
  * limitations under the License.
  */
 
+/**
+ * Reading and evaluating a grant policy's decision: the one reading of what
+ * a policy returned, the fail-closed evaluation every minting path applies,
+ * and the answers to a policy that throws or exceeds its ceiling. A decision
+ * is read once, into a plain copy, before anything acts on it.
+ */
+
 import { consoleLogger } from "../logging/consoleLogger.mjs";
 import type { Logger } from "../logging/Logger.mjs";
 import { loggableError } from "../logging/loggableError.mjs";
@@ -136,7 +143,7 @@ export function readGrantPolicyDecision(
 	logger: Pick<Logger, "error"> | undefined,
 	context: { readonly grantType: string; readonly policy: string; readonly site?: string },
 ): GrantPolicyReading {
-	const reading = snapshotOf(decision);
+	const reading = plainCopyOf(decision);
 	if (reading !== undefined) return reading;
 	(logger ?? consoleLogger).error(
 		{
@@ -156,7 +163,7 @@ export function readGrantPolicyDecision(
  * `decision` as an allow or a deny, each field read once into a plain copy;
  * `undefined` when it is neither or a field throws when read.
  */
-function snapshotOf(
+function plainCopyOf(
 	decision: unknown,
 ): Exclude<GrantPolicyReading, { readonly verdict: "invalid" }> | undefined {
 	if (typeof decision !== "object" || decision === null) return undefined;

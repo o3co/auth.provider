@@ -339,6 +339,15 @@ describe("evaluateGrantPolicy", () => {
 		expect(reads).toBe(1);
 	});
 
+	it("refuses a grantedScope with a hole in it as 500 server_error", async () => {
+		const grantedScope: string[] = [];
+		grantedScope[1] = "read";
+		const outcome = await evaluateGrantPolicy(allow({ grantedScope }), request, context, ["read"], {
+			logger: undefined,
+		});
+		expect(outcome).toMatchObject({ ok: false, result: { status: 500, error: "server_error" } });
+	});
+
 	it("refuses a non-array grantedScope as 500 server_error instead of throwing", async () => {
 		// A JS policy returning a string passes a truthiness check, and
 		// `.filter` then throws a TypeError that /token dispatch does not
@@ -421,7 +430,7 @@ describe("readGrantPolicyDecision", () => {
 		);
 		const reading = readGrantPolicyDecision(answer, { error: vi.fn() }, site);
 		expect(reads.toSorted()).toEqual(["grantedAudience", "grantedScope", "outcome"]);
-		expect(reading).toEqual({
+		expect(reading).toStrictEqual({
 			verdict: "allow",
 			decision: {
 				outcome: "allow",
@@ -468,7 +477,7 @@ describe("readGrantPolicyDecision", () => {
 		);
 		const reading = readGrantPolicyDecision(answer, { error: vi.fn() }, site);
 		expect(reads.toSorted()).toEqual(["error", "errorDescription", "outcome"]);
-		expect(reading).toEqual({
+		expect(reading).toStrictEqual({
 			verdict: "deny",
 			decision: { outcome: "deny", error: "access_denied", errorDescription: "not today" },
 		});
