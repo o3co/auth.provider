@@ -102,10 +102,13 @@ function buildApp({
 	failDestroy = false,
 	logger,
 	trail,
+	dropThrows = false,
 }: {
 	failDestroy?: boolean;
 	logger?: ReturnType<typeof spyLogger>;
 	trail?: string[];
+	/** Make dropping the request's session throw. */
+	dropThrows?: boolean;
 } = {}) {
 	const records = new Map<string, unknown>();
 	const backing = makeRecordStore(records);
@@ -141,7 +144,10 @@ function buildApp({
 			configurable: true,
 			get: () => session,
 			set: (value: Record<string, unknown> | undefined) => {
-				if (value === undefined) trail?.push("session_dropped");
+				if (value === undefined) {
+					if (dropThrows) throw new Error("drop failed");
+					trail?.push("session_dropped");
+				}
 				session = value;
 			},
 		});
@@ -170,6 +176,11 @@ function buildApp({
 			federationTokenStore: makeFederationTokenStore(),
 			...(logger === undefined ? {} : { logger: logger as unknown as Logger }),
 		}),
+	);
+	app.use(
+		(err: unknown, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
+			res.status(500).json({ unhandled: err instanceof Error ? err.message : String(err) });
+		},
 	);
 	return { app, records, exchangeCode };
 }
@@ -295,5 +306,27 @@ describe("a refused form_post callback whose transaction cannot be discarded", (
 		expect(res.body.error).toBe("invalid_state");
 		expect(records.has(`${FEDERATION_TRANSACTION_KEY_PREFIX}${flow.id}`)).toBe(false);
 		expect(trail).toEqual([]);
+	});
+	it("lets a session drop that throws propagate rather than answer the refusal", async () => {
+		const { app, records } = buildApp();
+		const flow = await startFormPost(app);
+		const logger = spyLogger();
+		const { app: broken, records: brokenRecords } = buildApp({
+			failDestroy: true,
+			logger,
+			dropThrows: true,
+		});
+		for (const [key, value] of records) brokenRecords.set(key, value);
+
+		const res = await request(broken)
+			.post("/oauth/federation/apple/callback")
+			.set("Cookie", flow.cookie)
+			.type("form")
+			.send({ state: "not-the-state", code: "c" });
+
+		expect(res.status).toBe(500);
+		expect(res.body).toEqual({ unhandled: "drop failed" });
+		expect(logger.warn).toHaveBeenCalledTimes(1);
+		expect(logger.warn.mock.calls[0]?.[0]).toMatchObject({ err: { detail: "store down" } });
 	});
 });

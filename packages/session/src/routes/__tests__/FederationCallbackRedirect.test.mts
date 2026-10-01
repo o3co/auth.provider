@@ -87,6 +87,7 @@ describe("redirectAfterCallback", () => {
 
 		expect(res.status).toBe(302);
 		expect(res.headers.location).toBe("https://app.example.com/done?to=/dash");
+		expect(resolveCallbackRedirect).toHaveBeenCalledTimes(1);
 		expect(resolveCallbackRedirect).toHaveBeenCalledWith({ redirectTo: "/dash" });
 		for (const level of ["trace", "debug", "info", "warn", "error", "fatal"] as const) {
 			expect(logger[level]).not.toHaveBeenCalled();
@@ -143,7 +144,17 @@ describe("redirectAfterCallback", () => {
 			error_description: "policy store down",
 		});
 		expect(logger.error).toHaveBeenCalledTimes(1);
-		expect(logger.error.mock.calls[0]?.[1]).toBe("redirect_policy_server_fault");
+		expect(logger.error).toHaveBeenCalledWith(
+			{
+				status: 503,
+				error: "temporarily_unavailable",
+				errorDescription: "policy store down",
+			},
+			"redirect_policy_server_fault",
+		);
+		for (const level of ["trace", "debug", "info", "warn", "fatal"] as const) {
+			expect(logger[level]).not.toHaveBeenCalled();
+		}
 	});
 
 	it("answers a client-error refusal with a malformed code as invalid_request, never server_error", async () => {
@@ -156,5 +167,38 @@ describe("redirectAfterCallback", () => {
 		expect(res.body.error).toBe("invalid_request");
 		expect(logger.warn).toHaveBeenCalledTimes(1);
 		expect(logger.warn.mock.calls[0]?.[1]).toBe("redirect_policy_error_malformed");
+	});
+	it("lets a policy that throws propagate, answering nothing itself", async () => {
+		const logger = spyLogger();
+		const policy = {
+			validateRedirect: () => ({ ok: true as const, value: undefined }),
+			resolveCallbackRedirect: () => {
+				throw new Error("policy broke");
+			},
+		} as FederationRedirectPolicy;
+		const app = express();
+		let thrown: unknown;
+		app.get("/callback", (_req, res) => {
+			try {
+				redirectAfterCallback(
+					{ federationRedirectPolicyResolver: new Map([["test", policy]]) },
+					provider,
+					undefined,
+					res,
+					logger as unknown as Logger,
+				);
+			} catch (err) {
+				thrown = err;
+				res.status(599).end();
+			}
+		});
+
+		const res = await request(app).get("/callback");
+
+		expect(res.status).toBe(599);
+		expect(thrown).toMatchObject({ message: "policy broke" });
+		for (const level of ["trace", "debug", "info", "warn", "error", "fatal"] as const) {
+			expect(logger[level]).not.toHaveBeenCalled();
+		}
 	});
 });
