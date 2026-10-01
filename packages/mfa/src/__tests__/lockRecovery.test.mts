@@ -397,6 +397,36 @@ describe("a release", () => {
 		expect(await recovery.release(SUBJECT, SID)).toMatchObject({ outcome: "held", hold: "hard" });
 	});
 
+	it("counts a record whose kind cannot be read, never throwing: the hard hold stands", async () => {
+		const factorStore = createMemoryMfaFactorStore();
+		const unreadable = {
+			...recordOf("odd", "totp", T - 1_000),
+			get kind(): string {
+				throw new Error("a lazy field could not load");
+			},
+		};
+		vi.spyOn(factorStore, "list").mockResolvedValue([unreadable] as never);
+		const { store, recovery } = setup({ boundary: async () => AFTER_THE_ATTACK, factorStore });
+		await latch(store);
+		clock = T + DEFAULT_CLOCK_SKEW_MS + 120_000;
+		await recovery.authorize(SUBJECT, SID, "key", clock);
+
+		expect(await recovery.release(SUBJECT, SID)).toMatchObject({ outcome: "held", hold: "hard" });
+	});
+
+	it("reads the generation again after a pause when it moved before its acquire, and applies", async () => {
+		const { store, recovery } = setup({ boundary: async () => AFTER_THE_ATTACK });
+		clock = T + DEFAULT_CLOCK_SKEW_MS + 120_000;
+		await recovery.authorize(SUBJECT, SID, "key", clock);
+		vi.spyOn(store, "acquireSubjectLease").mockResolvedValueOnce({ outcome: "stale" });
+
+		expect(await recovery.release(SUBJECT, SID)).toMatchObject({
+			outcome: "released",
+			applied: true,
+		});
+		expect(store.acquireSubjectLease).toHaveBeenCalledTimes(2);
+	});
+
 	it("hands null as the guessable records' earliest time when only exempt records remain", async () => {
 		const factorStore = createMemoryMfaFactorStore();
 		await factorStore.create(recordOf("exempt", "key", T - 8_000));

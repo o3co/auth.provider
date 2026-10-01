@@ -602,6 +602,55 @@ describe("resetMfaForSubject", () => {
 		}
 	});
 
+	it("stops at D25's flag, or at the lock state, when that write is not answered within a Store call's time", async () => {
+		for (const [method, at] of [
+			["requireEmailProofAtNextBinding", "email_proof"],
+			["authorizeSubjectRecovery", "lock"],
+		] as const) {
+			const { reset, transactionStore, factorStore } = await setup();
+			vi.spyOn(transactionStore, method).mockReturnValue(new Promise<never>(() => {}));
+
+			const report = await reset.resetMfaForSubject(ALICE.id, { requireEmailProof: true });
+
+			expect(report).toMatchObject({ complete: false, stoppedAt: at });
+			expect(await factorStore.list(ALICE.id)).toHaveLength(3);
+		}
+	});
+
+	it("stops at the factors, the witness left, when records still stand after a removal the store answered", async () => {
+		const factorStore = createMemoryMfaFactorStore();
+		vi.spyOn(factorStore, "removeAllForSubject").mockResolvedValue(undefined);
+		const { reset, users } = await setup({ factorStore });
+
+		const report = await reset.resetMfaForSubject(ALICE.id);
+
+		expect(report).toMatchObject({ complete: false, stoppedAt: "factors", generation: 1 });
+		expect(report).not.toHaveProperty("removed");
+		expect(users.marks).toEqual([]);
+	});
+
+	it("reports the records removed as listed, unsorted, when one of several is no record", async () => {
+		const factorStore = createMemoryMfaFactorStore();
+		vi.spyOn(factorStore, "list")
+			.mockResolvedValueOnce([recordOf("totp-a", "totp"), null] as never)
+			.mockResolvedValue([]);
+		const { reset } = await setup({ factorStore });
+
+		const report = await reset.resetMfaForSubject(ALICE.id);
+
+		expect(report).toMatchObject({ complete: true, removed: { kinds: ["totp"], count: 2 } });
+	});
+
+	it("reads the generation again after a pause when it moved before its acquire, and completes", async () => {
+		const { reset, transactionStore } = await setup();
+		vi.spyOn(transactionStore, "acquireSubjectLease").mockResolvedValueOnce({ outcome: "stale" });
+
+		const report = await reset.resetMfaForSubject(ALICE.id);
+
+		expect(report.complete).toBe(true);
+		expect(transactionStore.acquireSubjectLease).toHaveBeenCalledTimes(2);
+	});
+
 	it("stops, the witness left, when the records cannot be removed", async () => {
 		const factorStore = createMemoryMfaFactorStore();
 		vi.spyOn(factorStore, "removeAllForSubject").mockRejectedValue(new Error("down"));
