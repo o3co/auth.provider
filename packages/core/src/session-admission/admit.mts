@@ -53,15 +53,14 @@ import {
 import { readEnrollmentFacts } from "../user-sessions/enrollmentFacts.mjs";
 import type { UserSession, UserSessionClaims } from "../user-sessions/types.mjs";
 import { type AcrSelection, selectAcr, stepUpReach } from "./acr.mjs";
+import { askEvery, establish } from "./establishment.mjs";
 import { isObject, nonEmptyString } from "./input-values.mjs";
-import { checkInterruptionAnswer } from "./interruption-answer.mjs";
 import { readLiveSession } from "./live-session.mjs";
 import {
 	additionsFromDto,
 	checkPrimaryAdditions,
 	checkPrimaryAuthentication,
 	checkPrimaryContinuation,
-	continuationOf,
 	frozenUserCopy,
 	primaryFromDto,
 } from "./primary.mjs";
@@ -72,15 +71,12 @@ import type {
 	AdmissionRequest,
 	CompletedRequirement,
 	Establishment,
-	InterruptAdmission,
 	PrimaryAdmission,
 	PrimaryAuthentication,
 	PrimaryContinuation,
 	RegisteredRequirement,
 	RequirementInput,
-	RequirementInterruption,
 	SessionClaim,
-	SessionRequirementResolver,
 	SessionView,
 } from "./requirement.mjs";
 import { checkResolver } from "./requirement-resolver.mjs";
@@ -93,6 +89,7 @@ import {
 } from "./requirement-verdict.mjs";
 import { merge } from "./verdict-merge.mjs";
 
+export { isEstablishment, isInterruptAdmission } from "./establishment.mjs";
 export {
 	checkResolver,
 	type SessionRequirementSource,
@@ -388,12 +385,6 @@ export async function admitSession(
 // Establishment
 // ---------------------------------------------------------------------------
 
-/** The establishments `admitPrimary`, `resumePrimary` and `establishWithoutAsking` built. */
-const knownEstablishments = new WeakSet<object>();
-
-/** The interruptions `admitPrimary` and `resumePrimary` answered. */
-const knownInterruptions = new WeakSet<object>();
-
 /**
  * The primaries core's builders made (`passwordPrimary`, and
  * `establishWithoutAsking`'s own): what `admitPrimary` accepts. A
@@ -434,96 +425,6 @@ export function passwordPrimary(facts: PasswordLoginFacts): PrimaryAuthenticatio
 	});
 	knownPrimaries.add(primary);
 	return primary;
-}
-
-/** Whether `value` is an `Establishment` one of the three built: a copy, or an object shaped like one, is not. */
-export function isEstablishment(value: unknown): value is Establishment {
-	return typeof value === "object" && value !== null && knownEstablishments.has(value);
-}
-
-/** Whether `value` is an interruption `admitPrimary` or `resumePrimary` answered: a copy, or an object shaped like one, is not. */
-export function isInterruptAdmission(value: unknown): value is InterruptAdmission {
-	return typeof value === "object" && value !== null && knownInterruptions.has(value);
-}
-
-const establish = (primary: PrimaryAuthentication): Establishment => {
-	const built = Object.freeze({ primary });
-	knownEstablishments.add(built);
-	return built as unknown as Establishment;
-};
-
-/** An outage at establishment: logged once, at error, object-first, with the requirement's name and the projection. */
-const unavailableAtEstablishment = (
-	deps: AdmissionDeps,
-	store: string,
-	err: unknown,
-): PrimaryAdmission => {
-	deps.logger?.error(
-		{ store, phase: "establishment", err: loggableError(err) },
-		"session_admission_unavailable",
-	);
-	return { outcome: "unavailable", store };
-};
-
-/**
- * Asks every requirement with `admitPrimary` not in `done`, in registration
- * order, about `composed`; one that completed is not asked again in this
- * login, whatever it added. The first interruption wins, carrying the
- * continuation and an `open` that validates the answer. A throw, or an
- * answer that is neither `establish` nor an interruption, is `unavailable`.
- */
-async function askEvery(
-	deps: AdmissionDeps,
-	requirements: SessionRequirementResolver,
-	composed: PrimaryAuthentication,
-	primary: PrimaryAuthentication,
-	done: readonly CompletedRequirement[],
-): Promise<PrimaryAdmission> {
-	const completed = new Set(done.map((entry) => entry.requirement));
-	for (const [name, requirement] of requirements.entries()) {
-		const ask = requirement.admitPrimary;
-		if (ask === undefined || completed.has(name)) continue;
-		let answer: unknown;
-		try {
-			answer = await ask.call(requirement, composed);
-		} catch (err) {
-			return unavailableAtEstablishment(deps, name, err);
-		}
-		if (answer === "establish") continue;
-		// The answer's `open` is read once, here.
-		const open = isObject(answer) ? answer.open : undefined;
-		if (typeof open === "function") {
-			// The continuation names who interrupted: `resumePrimary` accepts
-			// that requirement's completion alone.
-			const continuation = continuationOf(primary, done, name);
-			const interruption = Object.freeze({
-				outcome: "interrupt" as const,
-				requirement: name,
-				continuation,
-				open: async (sessionId: string) => {
-					if (nonEmptyString(sessionId) === undefined) {
-						throw new RangeError("open: the session id must be a non-empty string");
-					}
-					// The requirement persists what core built.
-					return checkInterruptionAnswer(
-						await (open as RequirementInterruption["open"]).call(answer, sessionId, continuation),
-						name,
-						requirement.hintKeys,
-					);
-				},
-			});
-			knownInterruptions.add(interruption);
-			return interruption as unknown as InterruptAdmission;
-		}
-		return unavailableAtEstablishment(
-			deps,
-			name,
-			new TypeError(
-				"a requirement answered something that is neither establish nor an interruption",
-			),
-		);
-	}
-	return { outcome: "establish", establishment: establish(composed) };
 }
 
 /**
