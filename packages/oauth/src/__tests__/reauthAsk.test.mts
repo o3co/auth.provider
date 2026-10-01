@@ -27,6 +27,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
 	createReauthAskStore,
 	REAUTH_ASK_KEY_PREFIX,
+	REAUTH_ASK_MAX_CHAIN_MS,
 	REAUTH_ASK_TTL_MS,
 	type ReauthAskRecord,
 	type ReauthAskSessionStore,
@@ -215,6 +216,42 @@ describe("createReauthAskStore — minting and spending an ask", () => {
 		const id = await store.ask(record);
 
 		expect(await store.consume(id, REQUEST)).toEqual(record);
+	});
+
+	it("caps a chain of trips at 30 minutes from its first ask, however recent its last write", async () => {
+		expect(REAUTH_ASK_MAX_CHAIN_MS).toBe(30 * 60 * 1000);
+		const backing = memoryStore();
+		const store = createReauthAskStore(backing);
+		const now = Date.now();
+		const record: ReauthAskRecord = {
+			request: REQUEST,
+			createdAt: now - REAUTH_ASK_MAX_CHAIN_MS - 1000,
+			loginAskedAt: now - 60_000,
+			stepUpAskedAt: { fixture: now },
+		};
+		const id = await store.ask(record);
+
+		expect(await store.read(id, REQUEST)).toBeNull();
+		expect(await store.consume(id, REQUEST)).toBeNull();
+	});
+
+	it("holds a chain inside its cap: a record written late in it expires at the cap, not a whole window later", async () => {
+		const backing = memoryStore();
+		const store = createReauthAskStore(backing);
+		const createdAt = Date.now() - REAUTH_ASK_MAX_CHAIN_MS + 60_000;
+		const id = await store.ask({
+			request: REQUEST,
+			createdAt,
+			loginAskedAt: Date.now(),
+			stepUpAskedAt: {},
+		});
+		const stored = backing.records.get(`${REAUTH_ASK_KEY_PREFIX}${id}`) as {
+			cookie: { expires: Date; maxAge: number };
+		};
+		// What the store reaps the record by.
+		expect(stored.cookie.expires.getTime()).toBe(createdAt + REAUTH_ASK_MAX_CHAIN_MS);
+		expect(stored.cookie.maxAge).toBeLessThanOrEqual(60_000);
+		expect(await store.read(id, REQUEST)).not.toBeNull();
 	});
 
 	it("writes askedAt beside a login ask, for one release, so an older replica reads the record it would have written", async () => {
