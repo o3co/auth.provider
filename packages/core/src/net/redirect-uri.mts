@@ -133,7 +133,7 @@ export function describeRedirectUriRejection(rejection: RedirectUriRejection): s
 		case "scheme-not-reverse-domain":
 			return (
 				`custom scheme ${JSON.stringify(rejection.scheme)} must use the RFC 8252 §7.1 reverse-domain shape ` +
-				`(e.g. "com.example.app"); dotless legacy schemes are refused, deliberately, with no bypass (#395)`
+				`(e.g. "com.example.app"); dotless legacy schemes are refused, deliberately, with no bypass`
 			);
 	}
 }

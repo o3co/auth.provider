@@ -57,7 +57,7 @@ export function requireFederationGrantSubjectRevocation(input: {
 			`${module}: federation-grants.enabled = true requires a subjectRevocation component. ` +
 				"A grant outlives the session it was agreed through, so the boundary is the only " +
 				"thing that ends one a user has withdrawn from a replica that never saw the " +
-				"withdrawal (D13). Install the bundled memory pair (single replica only) or an " +
+				"withdrawal. Install the bundled memory pair (single replica only) or an " +
 				"adapter such as redisSessionStoresModule.",
 		);
 	}
@@ -65,7 +65,7 @@ export function requireFederationGrantSubjectRevocation(input: {
 		throw new Error(
 			`${module}: the subjectRevocation adapter (kind "${subjectRevocation.kind}") does not carry ` +
 				"the grants boundary. Federation grants need revokeSessionsBefore and " +
-				"grantsRevokedBefore beside revokeBefore and revokedBefore (D13): without the " +
+				"grantsRevokedBefore beside revokeBefore and revokedBefore: without the " +
 				"second boundary there is nothing to compare a grant against, and a subject-wide " +
 				"revocation could not be asked to keep one. Update the adapter, or install one of " +
 				"the bundled implementations.",
@@ -81,7 +81,7 @@ export function requireFederationGrantSubjectRevocation(input: {
 				'boundary is kept in "memory". The grants outlive the process and the boundary ' +
 				"does not, so a restart — or the replica that never held it — would hand out a " +
 				"credential for a grant that was revoked. Wire the boundary into the same kind of " +
-				"storage the grants are in (D13).",
+				"storage the grants are in.",
 		);
 	}
 	return subjectRevocation;
