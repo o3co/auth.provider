@@ -761,7 +761,7 @@ async function judgeAndLodge(
 	const configured = deps.connections.get(grant.connection);
 	const status = statusOf(deps, inspection, configured, boundary, now());
 
-	if (status.status === "revoked" && status.reason === "backstop" && grant.status !== "revoked") {
+	if (status.status === "revoked" && status.reason === "backstop") {
 		// Written down, not only reported: a revocation that lived only in the
 		// comparison would vanish the day the boundary is lost.
 		let written: Awaited<ReturnType<FederationGrantStore["revoke"]>>;
