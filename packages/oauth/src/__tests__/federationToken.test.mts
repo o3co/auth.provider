@@ -4602,8 +4602,8 @@ describe("POST /oauth/federation/:name/token — a token is never refreshed befo
 describe("POST /oauth/federation/:name/token — a record removed while the refresh waits for the lock is never refreshed", () => {
 	// A logout or an unlink that removes the record while a refresh waits for
 	// the lock asked for its refresh token to be dropped: the refresh answers
-	// as if the link were gone, and writes nothing back.
-	it("is answered unlinked, with no upstream call and no write", async () => {
+	// as if the link were gone, and writes no record back.
+	it("is answered unlinked, with no upstream call and no record written back", async () => {
 		const store = memoryFederationTokenStoreModule.provides?.federationTokenStore?.({} as never) as
 			| (FederationTokenStore & SupportsLock)
 			| undefined;
