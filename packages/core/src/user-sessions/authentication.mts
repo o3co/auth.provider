@@ -32,6 +32,11 @@
  * login; else its primary cannot be told. It has no second factor on
  * record. A pre-upgrade session is never read as more trusted than it was
  * written.
+ *
+ * A record comes from the deployment's own store, which may answer a value
+ * in a shape the types do not admit. Such an `authentication`, or such a
+ * pre-upgrade `amr`, reads as one that cannot be told: no primary, and
+ * nothing vouched for. No reader throws on it.
  */
 
 import { federationsOf } from "../federations/configured.mjs";
@@ -61,35 +66,15 @@ export function copySessionAuthentication(
 }
 
 /**
- * How `session` was established, or `undefined` when that cannot be told — a
+ * How `session` was established, or `undefined` when that cannot be told: a
  * session written before the `authentication` key whose `amr` names neither a
- * federation nor a password. The baseline re-authenticates such a session
- * rather than guess. A copy: nothing done to the answer reaches the
+ * federation nor a password, or one whose `authentication` or pre-upgrade
+ * `amr` is not in a shape it admits. The baseline re-authenticates such a
+ * session rather than guess. A copy: nothing done to the answer reaches the
  * session.
  */
 export function sessionAuthentication(session: UserSession): SessionAuthentication | undefined {
-	if (session.authentication !== undefined) {
-		return copySessionAuthentication(session.authentication);
-	}
-	const amr = session.amr ?? [];
-	if (amr.includes(FEDERATED_AMR)) {
-		const upstream = amr.filter((value) => value !== FEDERATED_AMR);
-		return {
-			primary: FEDERATED_AMR,
-			federation: undefined,
-			upstreamAmr: upstream.length > 0 ? upstream : undefined,
-			mfaAt: undefined,
-		};
-	}
-	if (amr.includes(PASSWORD_AMR)) {
-		return {
-			primary: PASSWORD_AMR,
-			federation: undefined,
-			upstreamAmr: undefined,
-			mfaAt: undefined,
-		};
-	}
-	return undefined;
+	return readRecord(session).established;
 }
 
 /**
@@ -97,30 +82,77 @@ export function sessionAuthentication(session: UserSession): SessionAuthenticati
  * matched against and a token may carry. A recorded session's `amr`, which
  * holds nothing else; for one written before the `authentication` key, the
  * split: a federated session vouches for `fed` alone. Otherwise a stored
- * `amr` that is not `wellFormedAmr` vouches for nothing: a custom store's
- * record is not trusted for its shape.
+ * `amr` that is not `wellFormedAmr`, or an `authentication` not in a shape
+ * it admits, vouches for nothing: a custom store's record is not trusted for
+ * its shape.
  */
 export function vouchedAmr(session: UserSession): readonly string[] {
-	return readVouchedAmr(session) ?? [];
+	return readRecord(session).vouched ?? [];
 }
 
 /**
- * `vouchedAmr`'s answer, or `undefined` for a stored `amr` it cannot tell:
- * present, not an empty array, and not `wellFormedAmr`. The split is made on
- * the array before its shape is read, so a pre-upgrade federated record that
- * also holds a value no token may carry still vouches for `fed`.
+ * Whether a second factor can be recorded on `session`: its primary can be
+ * told and what it vouches for can be read. `sessionAfterSecondFactor`
+ * answers `null` exactly when this is false.
  */
-function readVouchedAmr(session: UserSession): readonly string[] | undefined {
-	const stored: unknown = session.amr;
-	if (
-		session.authentication === undefined &&
-		Array.isArray(stored) &&
-		stored.includes(FEDERATED_AMR)
-	) {
-		return [FEDERATED_AMR];
+export function canRecordSecondFactor(session: UserSession): boolean {
+	return isRecordable(readRecord(session));
+}
+
+/** A session record as the readers above take it, each part `undefined` when it cannot be told. */
+interface RecordReading {
+	readonly established: SessionAuthentication | undefined;
+	readonly vouched: readonly string[] | undefined;
+}
+
+/** A reading a second factor can be recorded on. */
+interface RecordableReading extends RecordReading {
+	readonly established: SessionAuthentication;
+	readonly vouched: readonly string[];
+}
+
+const isRecordable = (reading: RecordReading): reading is RecordableReading =>
+	reading.established !== undefined && reading.vouched !== undefined;
+
+/**
+ * The one reading of a session record: `authentication` and `amr` each read
+ * once, and answered as copies. An `authentication` that
+ * {@link readAuthentication} refuses tells nothing. A pre-upgrade record is
+ * split on an array that holds `fed` before its shape is read, so one that
+ * also holds a value no token may carry is still federated and vouches for
+ * `fed`; what is beside `fed` is kept as its upstream `amr` only when
+ * `wellFormedAmr`. Any other stored `amr` vouches only when it is absent, an
+ * empty array, or `wellFormedAmr`.
+ */
+function readRecord(session: UserSession): RecordReading {
+	const stored: unknown = session.authentication;
+	const amr: unknown = session.amr;
+	const values = Array.isArray(amr) ? Array.from(amr as unknown[]) : undefined;
+	const vouched = amr === undefined || values?.length === 0 ? [] : wellFormedAmr(values);
+	if (stored !== undefined) {
+		const read = readAuthentication(stored, isReadableVerificationTime);
+		return read.admitted === undefined
+			? { established: undefined, vouched: undefined }
+			: { established: read.admitted, vouched };
 	}
-	if (stored === undefined || (Array.isArray(stored) && stored.length === 0)) return [];
-	return wellFormedAmr(stored);
+	if (values?.includes(FEDERATED_AMR)) {
+		const upstream = values.filter((value) => value !== FEDERATED_AMR);
+		return {
+			established: {
+				primary: FEDERATED_AMR,
+				federation: undefined,
+				upstreamAmr: upstream.length > 0 ? wellFormedAmr(upstream) : undefined,
+				mfaAt: undefined,
+			},
+			vouched: [FEDERATED_AMR],
+		};
+	}
+	return {
+		established: vouched?.includes(PASSWORD_AMR)
+			? { primary: PASSWORD_AMR, federation: undefined, upstreamAmr: undefined, mfaAt: undefined }
+			: undefined,
+		vouched,
+	};
 }
 
 /** What a login path records about how the user authenticated: the `amr` and `authentication` a session is created with. */
@@ -180,7 +212,14 @@ export function federatedSessionAuthentication(login: {
  * still recorded no later than `nowMs` (`notAfter`).
  */
 const isRecordableVerificationTime = (ms: number, nowMs: number): boolean =>
-	Number.isFinite(ms) && ms >= 0 && ms <= nowMs + DEFAULT_CLOCK_SKEW_MS;
+	isReadableVerificationTime(ms) && ms <= nowMs + DEFAULT_CLOCK_SKEW_MS;
+
+/**
+ * Whether `ms` is an instant a stored `mfaAt` may hold as it is read: at or
+ * after the epoch. The readers hold no clock; what reads `mfaAt` against one
+ * caps it there.
+ */
+const isReadableVerificationTime = (ms: number): boolean => Number.isFinite(ms) && ms >= 0;
 
 /** `ms` as an instant no later than `nowMs`, the store's clock: a new `Date`. */
 const notAfter = (ms: number, nowMs: number): Date => new Date(Math.min(ms, nowMs));
@@ -283,42 +322,86 @@ export function recordableSessionAuthentication(
 	nowMs: number,
 ): SessionAuthentication | undefined {
 	if (authentication === undefined) return undefined;
-	const refuse = (field: string, rule: string): never => {
-		throw new RangeError(`UserSession ${sid}: ${field} must be ${rule}`);
-	};
-	if (
-		typeof authentication !== "object" ||
-		authentication === null ||
-		Array.isArray(authentication)
-	) {
-		return refuse("authentication", "an object, or undefined");
-	}
-	const a = authentication as Partial<Record<keyof SessionAuthentication, unknown>>;
-	if (typeof a.primary !== "string" || a.primary.length === 0) {
-		refuse("authentication.primary", "a non-empty string");
-	}
-	if (a.federation !== undefined && typeof a.federation !== "string") {
-		refuse("authentication.federation", "a string, or undefined");
-	}
-	if (
-		a.upstreamAmr !== undefined &&
-		!(Array.isArray(a.upstreamAmr) && a.upstreamAmr.every((value) => typeof value === "string"))
-	) {
-		refuse("authentication.upstreamAmr", "a list of strings, or undefined");
-	}
-	if (
-		a.mfaAt !== undefined &&
-		!(a.mfaAt instanceof Date && isRecordableVerificationTime(a.mfaAt.getTime(), nowMs))
-	) {
-		refuse(
-			"authentication.mfaAt",
-			"a valid date at or after the epoch, no further ahead than hosts' clocks drift, or undefined",
+	const read = readAuthentication(authentication, (ms) => isRecordableVerificationTime(ms, nowMs));
+	if (read.admitted === undefined) {
+		throw new RangeError(
+			`UserSession ${sid}: ${read.refused} must be ${RECORDABLE_RULES[read.refused]}`,
 		);
 	}
-	const valid = authentication as SessionAuthentication;
+	const { mfaAt } = read.admitted;
 	return {
-		...copySessionAuthentication(valid),
-		mfaAt: valid.mfaAt === undefined ? undefined : notAfter(valid.mfaAt.getTime(), nowMs),
+		...read.admitted,
+		mfaAt: mfaAt === undefined ? undefined : notAfter(mfaAt.getTime(), nowMs),
+	};
+}
+
+/** The fields {@link readAuthentication} may refuse. */
+type AuthenticationField =
+	| "authentication"
+	| "authentication.primary"
+	| "authentication.federation"
+	| "authentication.upstreamAmr"
+	| "authentication.mfaAt";
+
+/** What `recordableSessionAuthentication` says each field must be. */
+const RECORDABLE_RULES: Readonly<Record<AuthenticationField, string>> = {
+	authentication: "an object, or undefined",
+	"authentication.primary": "a non-empty string",
+	"authentication.federation": "a string, or undefined",
+	"authentication.upstreamAmr": "a list of strings, or undefined",
+	"authentication.mfaAt":
+		"a valid date at or after the epoch, no further ahead than hosts' clocks drift, or undefined",
+};
+
+/** {@link readAuthentication}'s answer: a copy of what it admits, or the first field it refuses. */
+type AuthenticationRead =
+	| { readonly admitted: SessionAuthentication; readonly refused?: undefined }
+	| { readonly admitted?: undefined; readonly refused: AuthenticationField };
+
+/**
+ * `value` as a `SessionAuthentication`, each field read once and the answer
+ * a copy, or the first field it refuses: not an object; a `primary` that is
+ * not a non-empty string; a `federation` that is not a string; an
+ * `upstreamAmr` that is not a list of strings; an `mfaAt` that is not a
+ * `Date` whose time `admitsMfaAt`. A field may be `undefined`, `primary`
+ * excepted. The one rule a store records by and the readers read by.
+ */
+function readAuthentication(
+	value: unknown,
+	admitsMfaAt: (ms: number) => boolean,
+): AuthenticationRead {
+	if (typeof value !== "object" || value === null || Array.isArray(value)) {
+		return { refused: "authentication" };
+	}
+	const a = value as Partial<Record<keyof SessionAuthentication, unknown>>;
+	const primary = a.primary;
+	if (typeof primary !== "string" || primary.length === 0) {
+		return { refused: "authentication.primary" };
+	}
+	const federation = a.federation;
+	if (federation !== undefined && typeof federation !== "string") {
+		return { refused: "authentication.federation" };
+	}
+	const upstream = a.upstreamAmr;
+	const upstreamAmr = Array.isArray(upstream) ? Array.from(upstream as unknown[]) : upstream;
+	if (
+		upstreamAmr !== undefined &&
+		!(Array.isArray(upstreamAmr) && upstreamAmr.every((v) => typeof v === "string"))
+	) {
+		return { refused: "authentication.upstreamAmr" };
+	}
+	const mfaAt = a.mfaAt;
+	const mfaAtMs = mfaAt instanceof Date ? mfaAt.getTime() : Number.NaN;
+	if (mfaAt !== undefined && !admitsMfaAt(mfaAtMs)) {
+		return { refused: "authentication.mfaAt" };
+	}
+	return {
+		admitted: {
+			primary,
+			federation,
+			upstreamAmr: upstreamAmr as string[] | undefined,
+			mfaAt: mfaAt === undefined ? undefined : new Date(mfaAtMs),
+		},
 	};
 }
 
@@ -333,9 +416,10 @@ export function recordableSessionAuthentication(
  *
  * A pre-upgrade session is split first: `["hwk", "fed"]` plus TOTP becomes
  * `amr` `["fed", "otp", "mfa"]` and `upstreamAmr` `["hwk"]`, so an untrusted
- * IdP's `hwk` never meets `phr`. `null` for one whose primary cannot be
- * told, or whose stored `amr` `vouchedAmr` cannot read. The event is checked
- * first (`checkSecondFactorEvent`).
+ * IdP's `hwk` never meets `phr`. `null` when `canRecordSecondFactor` is
+ * false: the primary cannot be told, or the stored `amr` `vouchedAmr` cannot
+ * read. The session is read once. The event is checked first
+ * (`checkSecondFactorEvent`).
  */
 export function sessionAfterSecondFactor(
 	session: UserSession,
@@ -343,10 +427,9 @@ export function sessionAfterSecondFactor(
 	nowMs: number,
 ): RecordedAuthentication | null {
 	checkSecondFactorEvent(event, nowMs);
-	const authentication = sessionAuthentication(session);
-	if (authentication === undefined) return null;
-	const vouched = readVouchedAmr(session);
-	if (vouched === undefined) return null;
+	const reading = readRecord(session);
+	if (!isRecordable(reading)) return null;
+	const { established: authentication, vouched } = reading;
 	const atMs = Math.min(event.at.getTime(), nowMs);
 	const storedMs =
 		authentication.mfaAt === undefined
@@ -361,15 +444,16 @@ export function sessionAfterSecondFactor(
 
 /**
  * What a session requirement is asked about `session`: how it was
- * established and what it vouches for, through the two readers above, or
- * `null` when there is no session (no `sid`, or no `UserSessionStore`).
+ * established and what it vouches for, as the two readers above answer
+ * them from one reading of the record, or `null` when there is no session (no `sid`, or no `UserSessionStore`).
  * Admission builds it here and nowhere else, and its `acr` selection reads
  * the `amr` from it: one built from the record's own `amr` would let a
  * value an untrusted IdP asserted in a pre-upgrade session meet an `acr`.
  */
 export function requirementSession(session: UserSession | null): RequirementSession | null {
 	if (session === null) return null;
-	return frozenRequirementSession(sessionAuthentication(session), vouchedAmr(session));
+	const { established, vouched } = readRecord(session);
+	return frozenRequirementSession(established, vouched ?? []);
 }
 
 /**
