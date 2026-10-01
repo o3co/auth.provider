@@ -23,6 +23,8 @@
  */
 
 import {
+	BootError,
+	createApp,
 	createMemoryMfaFactorStore,
 	createMemoryMfaTransactionStore,
 	defineModule,
@@ -35,6 +37,7 @@ import {
 	type SubjectRevocationService,
 } from "@o3co/auth-provider-core";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { createMfaSubjectLeases } from "#/factorSet.mjs";
 import { createMfaReset } from "#/reset.mjs";
 import { mfaResetModule } from "#/resetModule.mjs";
 import {
@@ -52,6 +55,8 @@ import {
 	completeEnrollment,
 	enrollFromAccount,
 	freezeClock,
+	mfaPost,
+	newFactorId,
 	recordingAuditSink,
 	seedTotp,
 	signInWithTotp,
@@ -151,9 +156,12 @@ async function setup(
 		subjectRevocationService: service,
 		...(options.withoutDirectory === true ? {} : { userRepository: users }),
 		mailWired: options.mailWired ?? true,
-		storeTimeoutMs: 1_000,
+		leases: createMfaSubjectLeases({
+			store: transactionStore,
+			storeTimeoutMs: 1_000,
+			...(options.monotonicNow === undefined ? {} : { monotonicNow: options.monotonicNow }),
+		}),
 		auditSink: audit,
-		...(options.monotonicNow === undefined ? {} : { monotonicNow: options.monotonicNow }),
 	});
 	return { reset, factorStore, transactionStore, users, service, audit };
 }
@@ -592,6 +600,95 @@ describe("mfaResetModule", () => {
 		expect(service.revokeAllForSubject).toHaveBeenCalledTimes(2);
 	});
 
+	it("holds the lease mfaModule's lease owner gives: six of mfa.storeTimeoutMs", async () => {
+		const transactionStore = createMemoryMfaTransactionStore();
+		const { handle } = await boot({
+			config: configFor("required", { storeTimeoutMs: 2_000 }),
+			transactionStore,
+			extraModules: [mfaResetModule, providingService(revocationService())],
+		});
+		const acquire = vi.spyOn(transactionStore, "acquireSubjectLease");
+		const components = handle.components as unknown as {
+			readonly mfaReset: ReturnType<typeof createMfaReset>;
+		};
+
+		expect((await components.mfaReset.resetMfaForSubject(ALICE.id)).complete).toBe(true);
+
+		expect(acquire.mock.calls.map(([, request]) => request.ttlMs)).toEqual([12_000]);
+	});
+
+	it("is refused at boot without mfaModule, naming the lease owner it requires", async () => {
+		const config = configFor("required", {}, {}, []);
+		const stores = defineModule({
+			name: "test:mfa-stores",
+			provides: {
+				mfaFactorStore: () => createMemoryMfaFactorStore(),
+				mfaTransactionStore: () => createMemoryMfaTransactionStore(),
+			} as never,
+		});
+		let refused: unknown;
+		try {
+			const handle = await createApp({
+				modules: [stores, providingService(revocationService()), mfaResetModule],
+				bootstrapComponents: { config, pathResolver: (s: string) => s } as never,
+			});
+			await handle.dispose();
+		} catch (err) {
+			refused = err;
+		}
+
+		expect(refused).toBeInstanceOf(BootError);
+		expect((refused as BootError).message).toContain("mfaSubjectLeases");
+	});
+
+	it("serialises a reset behind a removal holding the subject's lease: the lock state is reset only once the removal is done", async () => {
+		const factorStore = createMemoryMfaFactorStore();
+		const transactionStore = createMemoryMfaTransactionStore();
+		const totp = await seedTotp(factorStore);
+		await factorStore.create({ ...recordOf(newFactorId(), "recovery_code"), data: "x" });
+		const booted = await boot({
+			factorStore,
+			transactionStore,
+			extraModules: [mfaResetModule, providingService(revocationService())],
+		});
+		const { agent } = await signInWithTotp(booted.app, booted.userSessionStore as never, totp);
+		const codes = (await factorStore.list(ALICE.id)).find((r) => r.kind === "recovery_code");
+		if (codes === undefined) throw new Error("no set");
+		let reached: () => void = () => {};
+		const removing = new Promise<void>((resolve) => {
+			reached = resolve;
+		});
+		let open: () => void = () => {};
+		const gate = new Promise<void>((resolve) => {
+			open = resolve;
+		});
+		const remove = factorStore.remove.bind(factorStore);
+		const removed = vi.fn();
+		vi.spyOn(factorStore, "remove").mockImplementation(async (subject, id) => {
+			reached();
+			await gate;
+			await remove(subject, id);
+			removed();
+		});
+		const apply = vi.spyOn(transactionStore, "applySubjectRecovery");
+		const components = booted.handle.components as unknown as {
+			readonly mfaReset: ReturnType<typeof createMfaReset>;
+		};
+
+		const removal = mfaPost(agent, "/factors/remove", { factor_id: codes.id });
+		await removing;
+		const reset = components.mfaReset.resetMfaForSubject(ALICE.id);
+		await new Promise((resolve) => setTimeout(resolve, 300));
+		expect(apply).not.toHaveBeenCalled();
+		open();
+
+		expect((await removal).status).toBe(200);
+		expect((await reset).complete).toBe(true);
+		expect(apply.mock.invocationCallOrder[0]).toBeGreaterThan(
+			removed.mock.invocationCallOrder[0] as number,
+		);
+	});
+
 	it("refuses the boot without a subject revocation service", async () => {
 		const refused = await refusal({ extraModules: [mfaResetModule] });
 
@@ -620,7 +717,7 @@ describe("a factor-set write begun before a reset or a recovery", () => {
 			transactionStore: setup.transactionStore,
 			subjectRevocationService: revocationService(),
 			mailWired: false,
-			storeTimeoutMs: 1_000,
+			leases: createMfaSubjectLeases({ store: setup.transactionStore, storeTimeoutMs: 1_000 }),
 		});
 		await reset.resetMfaForSubject(ALICE.id);
 		const create = vi.spyOn(setup.factorStore, "create");

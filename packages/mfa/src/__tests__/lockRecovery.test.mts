@@ -35,7 +35,7 @@ import {
 	OTP_AMR,
 } from "@o3co/auth-provider-core";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { createMfaFactorSet } from "#/factorSet.mjs";
+import { createMfaFactorSet, createMfaSubjectLeases } from "#/factorSet.mjs";
 import { createMfaLockRecovery } from "#/lockRecovery.mjs";
 import { createMfaEnrollmentWitness } from "#/witness.mjs";
 
@@ -101,8 +101,7 @@ function setup(
 		factors: FACTORS,
 		factorStore,
 		witness: createMfaEnrollmentWitness(undefined),
-		leases: store,
-		storeTimeoutMs: 1_000,
+		leases: createMfaSubjectLeases({ store, storeTimeoutMs: 1_000 }),
 	});
 	const recovery = createMfaLockRecovery({
 		store,
@@ -203,8 +202,7 @@ describe("the entry's configuration", () => {
 			factors: FACTORS,
 			factorStore: createMemoryMfaFactorStore(),
 			witness: createMfaEnrollmentWitness(undefined),
-			leases: store,
-			storeTimeoutMs: 1_000,
+			leases: createMfaSubjectLeases({ store, storeTimeoutMs: 1_000 }),
 		});
 		const options = { store, factorSet, factors: FACTORS };
 		expect(() =>

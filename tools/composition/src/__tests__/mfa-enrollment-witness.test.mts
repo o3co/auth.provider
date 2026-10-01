@@ -27,17 +27,16 @@
  * lost factors would open.
  */
 
-import type {
-	AuditEvent,
-	AuditSink,
-	MfaFactorStore,
-	MfaTransactionStore,
-	SubjectRevocationService,
-	SupportsMfaEnrollmentWitness,
-	UserRepository,
-	UserSessionStore,
+import {
+	type AuditEvent,
+	type AuditSink,
+	defineModule,
+	type MfaFactorStore,
+	type SubjectRevocationService,
+	type SupportsMfaEnrollmentWitness,
+	type UserSessionStore,
 } from "@o3co/auth-provider-core";
-import { createMfaReset } from "@o3co/auth-provider-mfa";
+import { type MfaReset, mfaResetModule } from "@o3co/auth-provider-mfa";
 import { mfaConfigForTests, totpCodeForTests } from "@o3co/auth-provider-mfa/testing";
 import { type FakeStore, startFakeStore } from "@o3co/auth-provider-test-kit";
 import type { Express } from "express";
@@ -144,9 +143,8 @@ async function boot(
 const storesOf = ({ handle }: FullSet) =>
 	handle.components as unknown as {
 		readonly mfaFactorStore: MfaFactorStore;
-		readonly mfaTransactionStore: MfaTransactionStore;
 		readonly userSessionStore: UserSessionStore;
-		readonly userRepository: SupportsMfaEnrollmentWitness & UserRepository;
+		readonly userRepository: SupportsMfaEnrollmentWitness;
 	};
 
 /** What the MFA module logged at warn under `event`. */
@@ -352,11 +350,6 @@ describe.each(["store", "memory"] as const)(
 	"the witness at the operator reset, the factors kept in %s",
 	(factors) => {
 		it("sends {enrolled: false} to the Store last, after every record was removed", async () => {
-			const set = await boot(factors);
-			const { done } = await firstBinding(set.app);
-			expect(done.status, JSON.stringify(done.body)).toBe(200);
-			expect(store.enrolled(ALICE.id)).toBe(true);
-			const stores = storesOf(set);
 			const ended: SubjectRevocationService = {
 				revokeAllForSubject: async () => ({
 					sessionsRevoked: [],
@@ -373,14 +366,20 @@ describe.each(["store", "memory"] as const)(
 					federationGrants: { requested: "revoke", applied: "revoke" },
 				}),
 			};
-			const reset = createMfaReset({
-				factorStore: stores.mfaFactorStore,
-				transactionStore: stores.mfaTransactionStore,
-				subjectRevocationService: ended,
-				userRepository: stores.userRepository,
-				mailWired: false,
-				storeTimeoutMs: 5_000,
+			const set = await boot(factors, {
+				modules: [
+					mfaResetModule,
+					defineModule({
+						name: "test:subject-revocation-service",
+						provides: { subjectRevocationService: () => ended } as never,
+					}),
+				],
 			});
+			const { done } = await firstBinding(set.app);
+			expect(done.status, JSON.stringify(done.body)).toBe(200);
+			expect(store.enrolled(ALICE.id)).toBe(true);
+			const stores = storesOf(set);
+			const reset = (set.handle.components as unknown as { readonly mfaReset: MfaReset }).mfaReset;
 			const from = store.requests.length;
 
 			const report = await reset.resetMfaForSubject(ALICE.id);
