@@ -605,9 +605,9 @@ expected to change.
 
 **Keep the replicas' clocks within 1 second of each other (NTP).** A
 credential change, or any other call to `revokeAllForSubject`, sets a boundary
-for the subject. A sign-in made at or before that boundary is refused: a token
-whose `iat` is at or before it, or a session whose `authTime` is. The
-comparison is inclusive, with an allowance of
+for the subject. A sign-in dated no later than the boundary plus an allowance is refused: a
+token by its `iat`, a session by its `authTime`. The comparison is inclusive,
+with an allowance of
 `DEFAULT_SUBJECT_REVOCATION_SKEW_MS` = 1 s (`packages/core/src/jwt/verify.mts`;
 for sessions, `coveredByRevocationBoundary` in
 `packages/core/src/federation-grants/effective-status.mts`).
@@ -618,13 +618,17 @@ their clocks disagree:
 
 | The sign-in replica's clock is | Effect | Kind |
 | --- | --- | --- |
-| behind the revoking replica's | A legitimate sign-in made just after the revocation is dated at or before the boundary, and is refused. The user signs in again. | availability |
-| ahead of the revoking replica's by more than 1 s | A token or session made just before the revocation is dated after the boundary, and survives it. | security |
+| behind the revoking replica's | A legitimate sign-in made just after the revocation is dated no later than 1 s after the boundary, and is refused. The user signs in again. | availability |
+| ahead of the revoking replica's by more than 1 s | A token or session made just before the revocation is dated more than 1 s after the boundary, and survives it. | security |
 
 The allowance stays at 1 s, not the 5 minutes (`DEFAULT_CLOCK_SKEW_MS`) allowed
 elsewhere. Each second of allowance refuses another second of sign-ins after
 the boundary, so 5 minutes would refuse the first logins after a password
 change for up to 5 minutes.
+
+The same 1 s allowance, and the same dependence on the replicas' clocks, apply
+where the boundary is compared with a federation grant's consent, an MFA
+continuation, or a device authorization.
 
 ---
 
