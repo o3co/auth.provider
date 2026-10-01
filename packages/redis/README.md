@@ -695,6 +695,7 @@ slot and prefix, so a deployment can put the factors on a Redis of their own.
 | `mfat:week:{<subject>}` | sorted set | the weekly window: one member per failure, scored by its time |
 | `mfat:proof:{<subject>}` | string | the email proof an operator reset requires at the next first binding |
 | `mfat:session-proof:{<subject>}:<sid>` | string | the account-email proof given in one session, JSON `{provedAtMs, untilMs}`, expiring at `untilMs` |
+| `mfat:first-binding:{<subject>}` | string | the subject's first-binding mark, JSON `{atMs, untilMs}`, expiring at `untilMs` |
 
 Subjects and ids are base64url of their JSON, as the federation grant store
 spells its ids, so no brace moves a hash tag and no two values share a key.
@@ -773,6 +774,18 @@ its end. A read answers it absent at or past `untilMs` on that clock or at the
 time asked about, and absent when it does not read back as a proof: losing
 one fails closed, and the user proves again. The factor store's durability
 check does not cover it.
+
+**A subject's first-binding mark.** One string per subject, written by one
+script that keeps the later of the mark held and the one noted — the later
+`atMs`, and of two at one time the later end, as core's
+`laterFirstBindingMark` — with `PX` from the store's own clock; a held mark
+that has ended on that clock, or a held value that is no mark, gives way to
+any note, and an earlier note leaves the key and its lifetime alone. A read
+answers it absent at or past `untilMs` on that clock or at the time asked
+about, and refuses one that does not read back as a mark: an outage, never
+absent, since an absent mark trusts the session it is there to distrust.
+The module's durability check covers it as it covers the email-proof
+requirement.
 
 **Durability at boot (D12).** Before providing its store each module asks the
 server, through its client's `durability()`, each part on its own: the policy
