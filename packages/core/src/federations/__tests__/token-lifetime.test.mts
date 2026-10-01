@@ -136,7 +136,7 @@ describe("readUpstreamTokenLifetime — the verdicts", () => {
 		const reading = finite(read(1e13, at(CALLED_AT + 3_600_000)));
 		expect(reading.obtainedAt.getTime()).toBe(CALLED_AT);
 		expect(reading.expiresAt.getTime()).toBe(CALLED_AT + 3_600_000);
-		expect(reading.effectiveLifetime).toBe(3600);
+		expect(reading).toHaveProperty("issuedLifetime", 1e13);
 	});
 
 	it.each([
@@ -195,20 +195,21 @@ describe("readUpstreamTokenLifetime — the dating of a finite lifetime", () => 
 			stated: "both",
 			obtainedAt: at(CALLED_AT),
 			expiresAt: at(CALLED_AT + 3_600_000),
-			effectiveLifetime: 3600,
+			issuedLifetime: 3600,
 		});
 	});
 
-	it("both fields, expiresAt earlier than calledAt + expiresIn: the earlier stands, and the token is still dated from the call", () => {
+	it("both fields, expiresAt earlier than calledAt + expiresIn: the earlier ends it, it is dated from the call, and the lifetime is kept as issued", () => {
 		// Dated back to fit the issued lifetime, it would be half spent the moment
-		// it was obtained.
+		// it was obtained; shortened to fit the end, a maximum would judge less
+		// than was issued.
 		const reading = finite(read(3600, at(CALLED_AT + 1_800_000)));
 		expect(reading).toEqual({
 			verdict: "finite",
 			stated: "both",
 			obtainedAt: at(CALLED_AT),
 			expiresAt: at(CALLED_AT + 1_800_000),
-			effectiveLifetime: 1800,
+			issuedLifetime: 3600,
 		});
 	});
 
@@ -217,7 +218,7 @@ describe("readUpstreamTokenLifetime — the dating of a finite lifetime", () => 
 		expect(reading.stated).toBe("both");
 		expect(reading.obtainedAt.getTime()).toBe(CALLED_AT);
 		expect(reading.expiresAt.getTime()).toBe(CALLED_AT + 3_600_000);
-		expect(reading.effectiveLifetime).toBe(3600);
+		expect(reading).toHaveProperty("issuedLifetime", 3600);
 	});
 
 	it("expiresIn alone: dated from the call", () => {
@@ -226,30 +227,29 @@ describe("readUpstreamTokenLifetime — the dating of a finite lifetime", () => 
 			stated: "expiresIn",
 			obtainedAt: at(CALLED_AT),
 			expiresAt: at(CALLED_AT + 3_600_000),
-			effectiveLifetime: 3600,
+			issuedLifetime: 3600,
 		});
 	});
 
 	it("expiresIn alone, fractional: counted to the millisecond", () => {
 		const reading = finite(read(1.5, undefined));
 		expect(reading.expiresAt.getTime()).toBe(CALLED_AT + 1500);
-		expect(reading.effectiveLifetime).toBe(1.5);
+		expect(reading).toHaveProperty("issuedLifetime", 1.5);
 	});
 
-	it("expiresAt alone: dated from the call, its lifetime what was left then", () => {
+	it("expiresAt alone: dated from the call, and no lifetime was issued", () => {
 		expect(finite(read(undefined, at(CALLED_AT + 1_800_000)))).toEqual({
 			verdict: "finite",
 			stated: "expiresAt",
 			obtainedAt: at(CALLED_AT),
 			expiresAt: at(CALLED_AT + 1_800_000),
-			effectiveLifetime: 1800,
 		});
 	});
 
 	it("expiresAt alone at the end of the Date range is finite: a maximum is the consumer's", () => {
 		const reading = finite(read(undefined, at(MAX_INSTANT_MS)));
 		expect(reading.expiresAt.getTime()).toBe(MAX_INSTANT_MS);
-		expect(reading.effectiveLifetime).toBe((MAX_INSTANT_MS - CALLED_AT) / 1000);
+		expect(reading).not.toHaveProperty("issuedLifetime");
 	});
 
 	it("answers Dates of its own, never the adapter's objects", () => {
@@ -269,16 +269,18 @@ describe("readUpstreamTokenLifetime — the dating of a finite lifetime", () => 
 		["both, the instant far later", 3600, at(MAX_INSTANT_MS)],
 		["expiresIn alone, a fractional millisecond", 1.0005, undefined],
 	])(
-		"%s: obtainedAt is calledAt, expiresAt is obtainedAt + effectiveLifetime to the ms, and no more than a stated expiresIn",
+		"%s: obtainedAt is calledAt, expiresAt is after it and no later than a stated expiresIn allows, which is kept as issued",
 		(_, expiresIn, expiresAt) => {
 			const reading = finite(read(expiresIn, expiresAt, 0));
 			expect(reading.obtainedAt.getTime()).toBe(CALLED_AT);
-			expect(reading.effectiveLifetime).toBeGreaterThan(0);
-			if (typeof expiresIn === "number") {
-				expect(reading.effectiveLifetime).toBeLessThanOrEqual(expiresIn);
-			}
 			const span = reading.expiresAt.getTime() - reading.obtainedAt.getTime();
-			expect(Math.abs(span - reading.effectiveLifetime * 1000)).toBeLessThan(1);
+			expect(span).toBeGreaterThan(0);
+			if (typeof expiresIn === "number") {
+				expect(reading).toHaveProperty("issuedLifetime", expiresIn);
+				expect(span).toBeLessThanOrEqual(expiresIn * 1000);
+			} else {
+				expect(reading).not.toHaveProperty("issuedLifetime");
+			}
 		},
 	);
 });

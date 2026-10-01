@@ -189,11 +189,12 @@ describe("retrieveFederationGrantToken — the refresh", () => {
 				refreshed("1", DUE, { expiresAt: new Date(DUE.getTime() + 30 * MIN) }),
 			);
 			// Neither field can lengthen the other: the token ends at the earlier
-			// instant, and what is stored is the life it has from the call.
+			// instant, and the lifetime is kept as issued beside that end.
 			expect(await retrieve()).toMatchObject({ ok: true, accessToken: "at-1", expiresIn: 1800 });
 			expect((await stored())?.accessToken).toMatchObject({
 				obtainedAt: DUE,
-				issuedLifetime: 1800,
+				issuedLifetime: 3600,
+				effectiveExpiresAt: new Date(DUE.getTime() + 30 * MIN),
 			});
 		});
 

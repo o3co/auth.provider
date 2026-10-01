@@ -22,6 +22,7 @@ import {
 	connection,
 	DAY,
 	type Harness,
+	HOUR,
 	harness,
 	MIN,
 	now,
@@ -149,6 +150,71 @@ describe("retrieveFederationGrantToken — what is evaluated before any token", 
 			setNow(at(MIN));
 			expect(await retrieve()).toMatchObject({ ok: true, accessToken: "at-1", refreshed: true });
 			expect(h.refresh).toHaveBeenCalledTimes(1);
+		});
+
+		it("is judged against the CURRENT maximum by the lifetime issued, though its adapter's expiry ended it sooner", async () => {
+			// 3600 s issued, ended by the adapter's expiry after 1800: lowering the
+			// maximum to 2000 must still withhold it.
+			await h.seed();
+			setNow(at(HOUR - 15_000));
+			h.refresh.mockResolvedValue(
+				refreshed("1", now(), { expiresAt: new Date(now().getTime() + 30 * MIN) }),
+			);
+			expect(await retrieve()).toMatchObject({ ok: true, accessToken: "at-1", refreshed: true });
+			h.world.connections.set(connection.name, { ...connection, maxAccessTokenLifetime: 2000 });
+			setNow(at(HOUR));
+			h.refresh.mockRejectedValue(Object.assign(new Error("down"), { status: 503 }));
+			expect(await retrieve()).toMatchObject({ ok: false, code: "temporarily_unavailable" });
+			expect(h.refresh).toHaveBeenCalledTimes(2);
+		});
+
+		it("reads a record without an effective end as before: it ends its issued lifetime after it was obtained", async () => {
+			// Written before the field, by a store that does not keep it, or dated
+			// back by an earlier reading: nothing is invented for it.
+			await h.seed({
+				credentials: {
+					refreshToken: SECRET,
+					accessToken: {
+						value: "at-old",
+						tokenType: "Bearer",
+						obtainedAt: new Date(T0.getTime() - 30 * MIN),
+						issuedLifetime: 3600,
+						scopes: [...SCOPES],
+					},
+				},
+			});
+			setNow(at(10 * MIN));
+			expect(await retrieve()).toMatchObject({ ok: true, accessToken: "at-old", expiresIn: 1200 });
+			expect(h.refresh).not.toHaveBeenCalled();
+		});
+
+		it("ends a stored token at its effective end, never later than its issued lifetime allows", async () => {
+			const seed = (effectiveExpiresAt: Date) =>
+				h.seed({
+					id: `g-${effectiveExpiresAt.getTime()}`,
+					credentials: {
+						refreshToken: SECRET,
+						accessToken: {
+							value: "at-0",
+							tokenType: "Bearer",
+							obtainedAt: T0,
+							issuedLifetime: 3600,
+							effectiveExpiresAt,
+							scopes: [...SCOPES],
+						},
+					},
+				});
+			await seed(at(20 * MIN));
+			await seed(at(2 * HOUR));
+			setNow(at(10 * MIN));
+			expect(await retrieve({ grantId: `g-${at(20 * MIN).getTime()}` })).toMatchObject({
+				ok: true,
+				expiresIn: 600,
+			});
+			expect(await retrieve({ grantId: `g-${at(2 * HOUR).getTime()}` })).toMatchObject({
+				ok: true,
+				expiresIn: 3000,
+			});
 		});
 
 		it("is judged against the CURRENT maximum: a cached token does not become disclosable by ageing", async () => {
