@@ -330,10 +330,16 @@ describe("readFederationUpstreamOutage — the walk, saying when a field it read
 		expect(readFederationUpstreamOutage(raisedOver(response))).toBe("unreadable");
 	});
 
-	it("is outage when an outage is read beside a field that cannot be read, as isFederationUpstreamOutage answers", () => {
-		const timedOut = throwingOn(Object.assign(new Error("x"), { name: "TimeoutError" }), "status");
-		expect(readFederationUpstreamOutage(timedOut)).toBe("outage");
-		expect(isFederationUpstreamOutage(timedOut)).toBe(true);
+	it("is outage when an outage is read after a field that cannot be read, as isFederationUpstreamOutage answers", () => {
+		const reset = throwingOn(Object.assign(new Error("x"), { code: "ECONNRESET" }), "name");
+		const overServerError = throwingOn(
+			raisedOver(Object.assign(new Error("x"), { status: 503 })),
+			"name",
+		);
+		for (const error of [reset, overServerError]) {
+			expect(readFederationUpstreamOutage(error)).toBe("outage");
+			expect(isFederationUpstreamOutage(error)).toBe(true);
+		}
 	});
 
 	it("leaves isFederationUpstreamOutage false for what cannot be read", () => {

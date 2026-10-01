@@ -419,6 +419,16 @@ describe("classifyFederationRefreshError", () => {
 			}
 		});
 
+		it("is network when the outage walk finds an outage beside a field it cannot read", () => {
+			for (const key of ["error", "status", "code"]) {
+				const timedOut = throwingOn(Object.assign(new Error("x"), { name: "TimeoutError" }), key);
+				expect(classifyFederationRefreshError(timedOut), key).toEqual({
+					reason: "network",
+					structured: true,
+				});
+			}
+		});
+
 		it("classifies a Proxy whose getPrototypeOf trap throws, and does not throw", () => {
 			const proxy = new Proxy(
 				{},

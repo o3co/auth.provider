@@ -190,7 +190,8 @@ export function isKnownFederationRefreshErrorCode(code: unknown): code is string
  *
  * `reason` is safe to act on alone: `invalid_grant` is the IdP's structured
  * verdict on the refresh token, never read during an outage or off a message.
- * Never throws: a field that cannot be read makes the error `unknown`.
+ * Never throws: a field that cannot be read makes the error `unknown`,
+ * or `network` beside an outage.
  */
 export function classifyFederationRefreshError(
 	error: unknown,
@@ -201,15 +202,11 @@ export function classifyFederationRefreshError(
 		const status = readOrUnreadable(error, "status");
 		const networkCode = extractNetworkCode(error);
 		const outage = readFederationUpstreamOutage(error);
-		// Nothing read off an error with an unreadable field is safe to act on.
-		if (
-			code === UNREADABLE ||
-			status === UNREADABLE ||
-			networkCode === UNREADABLE ||
-			outage === "unreadable"
-		) {
-			return { reason: "unknown", structured: false };
-		}
+		const unreadable = code === UNREADABLE || status === UNREADABLE || networkCode === UNREADABLE;
+		// An outage is read first: whatever else cannot be read, it is no verdict.
+		if (unreadable && outage === "outage") return { reason: "network", structured: true };
+		// Otherwise nothing read off an error with an unreadable field is safe to act on.
+		if (unreadable || outage === "unreadable") return { reason: "unknown", structured: false };
 		if (typeof code === "string" && KNOWN_ERROR_CODES.has(code)) extras.upstreamCode = code;
 		const retryAfter = retryAfterSeconds(error);
 		if (retryAfter !== undefined) extras.retryAfterSeconds = retryAfter;
