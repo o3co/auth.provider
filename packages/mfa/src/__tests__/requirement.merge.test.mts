@@ -37,6 +37,7 @@ import {
 	type SessionRequirement,
 	type StepUpPage,
 	type UserSession,
+	type SupportsSecondFactorUpdate,
 	type UserSessionStore,
 } from "@o3co/auth-provider-core";
 import {
@@ -104,11 +105,14 @@ const realRequirement = (
 		...NO_FIRST_BINDING_MARK,
 	});
 
-const storeOf = (session: UserSession): UserSessionStore => ({
+const storeOf = (session: UserSession): UserSessionStore & SupportsSecondFactorUpdate => ({
 	kind: "test",
 	create: async () => {},
 	get: async (sid) => (sid === session.sid ? session : null),
 	delete: async () => {},
+	// A store that can record a second factor, as the coordinator's
+	// `stepUpRecordable: true` above says the composition's store can.
+	recordSecondFactor: async () => null,
 });
 
 const claim = () =>
