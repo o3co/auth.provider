@@ -137,7 +137,13 @@ export const narrowedScope = (
  * A refresh answer as `readRefreshAnswer` read it, and how it judged it. Every
  * verdict on the answer is here, so the code that acts on it judges nothing.
  */
-export type RefreshReading = {
+export interface RefreshReading {
+	/** The answered access token when it is usable; `undefined` is a failed refresh. */
+	readonly accessToken: string | undefined;
+	/** The answered refresh token when it is usable, whether or not it differs from the stored one. */
+	readonly rotatedRefreshToken: string | undefined;
+	/** The answered id token when it is usable. */
+	readonly rotatedIdToken: string | undefined;
 	readonly derivedExpiry: Date | null;
 	readonly lifetimeIsBroken: boolean;
 	readonly tokenTypeIsBroken: boolean;
@@ -145,17 +151,7 @@ export type RefreshReading = {
 	readonly nextTokenType: string | undefined;
 	/** How the answer named the scope, for `narrowedScope`. */
 	readonly answeredScope: AnsweredScope;
-} & (
-	| {
-			readonly accessTokenIsUsable: true;
-			/** Each field as read once; one whose getter threw is `undefined`. */
-			readonly answer: Partial<RefreshedTokens> & { readonly accessToken: string };
-	  }
-	| {
-			readonly accessTokenIsUsable: false;
-			readonly answer: Partial<RefreshedTokens>;
-	  }
-);
+}
 
 /**
  * Reads `refreshed` once. `currentTokens` is the freshest snapshot of the
@@ -247,17 +243,19 @@ export const readRefreshAnswer = (
 	// Bearer. The disclosure check refuses it instead.
 	const nextTokenType = answeredType ?? currentTokens.tokenType;
 
-	const judged = {
+	const usable = (value: unknown): string | undefined => (isUsableToken(value) ? value : undefined);
+	return {
+		// No (or an empty) access token is a failed refresh, never a 200
+		// without `access_token` (RFC 6749 §5.1).
+		accessToken: usable(answer.accessToken),
+		// `??` on the raw field would let `""` through, and an empty string
+		// overwriting a usable stored token strands the connection.
+		rotatedRefreshToken: usable(answer.refreshToken),
+		rotatedIdToken: usable(answer.idToken),
 		derivedExpiry,
 		lifetimeIsBroken,
 		tokenTypeIsBroken,
 		nextTokenType,
 		answeredScope: classifyAnsweredScope(answer, unreadable),
 	};
-	const { accessToken } = answer;
-	// No (or an empty) access token is a failed refresh, never a 200 without
-	// `access_token` (RFC 6749 §5.1).
-	return isUsableToken(accessToken)
-		? { ...judged, accessTokenIsUsable: true, answer: { ...answer, accessToken } }
-		: { ...judged, accessTokenIsUsable: false, answer };
 };

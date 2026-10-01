@@ -29,7 +29,6 @@ import {
 } from "@o3co/auth-provider-core";
 import type { Response } from "express";
 import type { FederationTokenCaller, FederationTokenContext } from "./federationTokenContext.mjs";
-import { isUsableToken } from "./federationTokenCredential.mjs";
 import { isDisclosable, refuseUndisclosableTokenType } from "./federationTokenDisclosure.mjs";
 import { narrowedScope, type RefreshReading } from "./federationTokenRefreshAnswer.mjs";
 import { answerToken } from "./federationTokenSuccess.mjs";
@@ -46,7 +45,15 @@ export const recordRefresh = async (
 ): Promise<Response> => {
 	const { opts, req, res, name, federation, logger, storeUnavailable } = ctx;
 	const { sid, sub } = caller;
-	const { answer, derivedExpiry, lifetimeIsBroken, tokenTypeIsBroken, nextTokenType } = reading;
+	const {
+		accessToken,
+		rotatedRefreshToken,
+		rotatedIdToken,
+		derivedExpiry,
+		lifetimeIsBroken,
+		tokenTypeIsBroken,
+		nextTokenType,
+	} = reading;
 
 	/**
 	 * Keeps a rotated refresh token even when this refresh brought
@@ -56,7 +63,7 @@ export const recordRefresh = async (
 	 * the route still answers its refusal, not a 503.
 	 */
 	const keepRotatedRefreshToken = async (): Promise<void> => {
-		if (isUsableToken(answer.refreshToken) && answer.refreshToken !== currentTokens.refreshToken) {
+		if (rotatedRefreshToken !== undefined && rotatedRefreshToken !== currentTokens.refreshToken) {
 			let step: "get" | "update" = "get";
 			try {
 				// `currentTokens` may be stale (the lock TTL can lapse during the
@@ -81,10 +88,10 @@ export const recordRefresh = async (
 					step = "update";
 					await opts.federationTokenStore.update(sid, name, {
 						...latest,
-						refreshToken: answer.refreshToken,
+						refreshToken: rotatedRefreshToken,
 						// Rotated alongside it, and worth the same: the stored
 						// `id_token` is what logout sends as `id_token_hint`.
-						idToken: isUsableToken(answer.idToken) ? answer.idToken : latest.idToken,
+						idToken: rotatedIdToken ?? latest.idToken,
 					});
 				}
 			} catch (error) {
@@ -97,7 +104,7 @@ export const recordRefresh = async (
 	};
 
 	// The adapter answered something this route cannot read as a token.
-	if (!reading.accessTokenIsUsable || lifetimeIsBroken || tokenTypeIsBroken) {
+	if (accessToken === undefined || lifetimeIsBroken || tokenTypeIsBroken) {
 		await keepRotatedRefreshToken();
 		emitAuditEvent(opts.auditSink, {
 			timestamp: new Date(),
@@ -109,7 +116,7 @@ export const recordRefresh = async (
 				federation,
 				reason: lifetimeIsBroken
 					? "invalid_expiry"
-					: !reading.accessTokenIsUsable
+					: accessToken === undefined
 						? "no_access_token"
 						: "invalid_token_type",
 			},
@@ -127,15 +134,11 @@ export const recordRefresh = async (
 	// request. `null` omits `expires_in` (optional in RFC 6749 §5.1).
 	const nextExpiresAt = derivedExpiry;
 	const updatedTokens = {
-		accessToken: reading.answer.accessToken,
-		// `??` would let `""` through, and an empty string overwriting a
-		// usable stored token strands the connection at the next request.
-		refreshToken: isUsableToken(answer.refreshToken)
-			? answer.refreshToken
-			: currentTokens.refreshToken,
+		accessToken,
+		refreshToken: rotatedRefreshToken ?? currentTokens.refreshToken,
 		// IdPs like Google/GitHub typically return no new id_token on refresh;
 		// keep the stored one, which logout sends as `id_token_hint`.
-		idToken: isUsableToken(answer.idToken) ? answer.idToken : currentTokens.idToken,
+		idToken: rotatedIdToken ?? currentTokens.idToken,
 		expiresAt: nextExpiresAt,
 		// What the upstream last named, else what the record carried; judged
 		// below, before the write, so the write and the response agree.
