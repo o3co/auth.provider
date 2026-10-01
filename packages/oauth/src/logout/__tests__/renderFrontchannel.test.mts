@@ -1,7 +1,10 @@
 import { assert, describe, expect, it } from "vitest";
-import { createMockLogger } from "../../__tests__/_helpers/mockLogger.mjs";
-import { expectBestEffortWarn } from "../../__tests__/_helpers/projectedLog.mjs";
-import { renderFrontchannelLogoutHtml } from "../renderFrontchannel.mjs";
+import { createMockLogger, type MockLogger } from "../../__tests__/_helpers/mockLogger.mjs";
+import {
+	expectBestEffortWarn,
+	serialisedCalls,
+} from "../../__tests__/_helpers/projectedLog.mjs";
+import { type FrontchannelRP, renderFrontchannelLogoutHtml } from "../renderFrontchannel.mjs";
 
 describe("renderFrontchannelLogoutHtml", () => {
 	it("emits one iframe per RP with frontchannelLogoutUri", () => {
@@ -90,29 +93,6 @@ describe("renderFrontchannelLogoutHtml", () => {
 		expect(html).toMatch(/%3Cscript%3Ealert%281%29%3C%2Fscript%3E/);
 	});
 
-	it("preserves fragment in frontchannelLogoutUri (fragment must come after query)", () => {
-		const html = renderFrontchannelLogoutHtml({
-			rps: [{ clientId: "rp", frontchannelLogoutUri: "https://rp.example/fc#app-route" }],
-			issuer: "https://auth.example",
-			sid: "sid-1",
-		});
-		// Expected: ...fc?iss=...&sid=...#app-route
-		// Find the iframe src attribute content (HTML-escaped form in output)
-		const match = html.match(/<iframe src="([^"]+)"/);
-		assert(match !== null, "expected an iframe src in the rendered HTML");
-		const src = (match[1] ?? "").replace(/&amp;/g, "&"); // undo HTML escape
-		// Query params come before fragment:
-		const queryIdx = src.indexOf("?");
-		const fragIdx = src.indexOf("#");
-		expect(queryIdx).toBeGreaterThan(-1);
-		expect(fragIdx).toBeGreaterThan(queryIdx);
-		// Fragment is preserved:
-		expect(src).toContain("#app-route");
-		// Both params are in the query portion:
-		expect(src.substring(queryIdx, fragIdx)).toContain("iss=");
-		expect(src.substring(queryIdx, fragIdx)).toContain("sid=sid-1");
-	});
-
 	it("appends to existing query string with `&` separator", () => {
 		const html = renderFrontchannelLogoutHtml({
 			rps: [{ clientId: "rp", frontchannelLogoutUri: "https://rp.example/fc?tenant=foo" }],
@@ -171,12 +151,18 @@ describe("renderFrontchannelLogoutHtml", () => {
 		expect(html).not.toContain("window.location.href");
 	});
 
-	it("skips RPs with invalid frontchannelLogoutUri instead of throwing", () => {
+	it("skips an RP whose iframe URL cannot be built instead of throwing", () => {
 		const logger = createMockLogger();
 		const html = renderFrontchannelLogoutHtml({
 			rps: [
 				{ clientId: "good", frontchannelLogoutUri: "https://good.example/fc" },
-				{ clientId: "bad", frontchannelLogoutUri: "not-a-url" },
+				{
+					clientId: "bad",
+					frontchannelLogoutUri: "https://bad.example/fc",
+					get frontchannelLogoutSessionRequired(): boolean {
+						throw new TypeError("field unavailable");
+					},
+				},
 			],
 			issuer: "https://auth.example",
 			sid: "sid-1",
@@ -185,7 +171,7 @@ describe("renderFrontchannelLogoutHtml", () => {
 		// good RP still produces an iframe
 		expect(html).toContain("good.example");
 		// bad RP is skipped
-		expect(html).not.toContain("not-a-url");
+		expect(html).not.toContain("bad.example");
 		// exactly one iframe in the output
 		expect([...html.matchAll(/<iframe/g)].length).toBe(1);
 		// one structured warning for the bad RP, with the error's projection
@@ -195,6 +181,94 @@ describe("renderFrontchannelLogoutHtml", () => {
 			{ clientId: "bad" },
 			"TypeError",
 		);
+	});
+
+	describe("a frontchannelLogoutUri held to the redirect-URI rules", () => {
+		const render = (rps: ReadonlyArray<FrontchannelRP>, logger: MockLogger): string =>
+			renderFrontchannelLogoutHtml({
+				rps: [{ clientId: "good", frontchannelLogoutUri: "https://good.example/fc" }, ...rps],
+				issuer: "https://auth.example",
+				sid: "sid-1",
+				logger,
+			});
+		const iframeCount = (html: string): number => [...html.matchAll(/<iframe/g)].length;
+
+		it.each([
+			["a non-http(s) scheme", "ftp://rp.example/fc", "scheme-not-reverse-domain"],
+			["an executable scheme", "data:text/plain,signed-out", "executable-scheme"],
+			["plain http off a loopback host", "http://rp.example/fc", "http-non-loopback"],
+			["a fragment", "https://rp.example/fc#app-route", "fragment"],
+			["userinfo", "https://user@rp.example/fc", "userinfo"],
+			["a value that is not a URL", "not-a-url", "unparsable"],
+		])(
+			"refuses %s: never rendered, the other RPs are, and one warn names the reason, never the URI",
+			(_label, uri, reason) => {
+				const logger = createMockLogger();
+				const html = render([{ clientId: "rp", frontchannelLogoutUri: uri }], logger);
+
+				expect(iframeCount(html)).toBe(1);
+				expect(html).toContain("good.example");
+				expect(html).not.toContain("rp.example");
+				expect(html).not.toContain(uri);
+				// Warned once: refused before an iframe URL is built.
+				expect(logger.warn).toHaveBeenCalledTimes(1);
+				expectBestEffortWarn(
+					logger,
+					"logout_frontchannel_uri_refused",
+					{ site: "logout", clientId: "rp", reason },
+					null,
+				);
+				expect(serialisedCalls(logger)).not.toContain(uri);
+			},
+		);
+
+		it("refuses a value that is not a string, and one whose read throws", () => {
+			const logger = createMockLogger();
+			const html = render(
+				[
+					{ clientId: "number", frontchannelLogoutUri: 42 as unknown as string },
+					{
+						clientId: "throws",
+						get frontchannelLogoutUri(): string {
+							throw new Error("field unavailable");
+						},
+					},
+				],
+				logger,
+			);
+
+			expect(iframeCount(html)).toBe(1);
+			expect(logger.warn).toHaveBeenCalledTimes(2);
+			expectBestEffortWarn(
+				logger,
+				"logout_frontchannel_uri_refused",
+				{ site: "logout", clientId: "number", reason: "not-a-string" },
+				null,
+			);
+			expectBestEffortWarn(
+				logger,
+				"logout_frontchannel_uri_refused",
+				{ site: "logout", clientId: "throws", reason: "unreadable" },
+				null,
+			);
+		});
+
+		it("renders a loopback http URI and skips an absent one, without a warn", () => {
+			const logger = createMockLogger();
+			const html = render(
+				[
+					{ clientId: "loopback", frontchannelLogoutUri: "http://127.0.0.1:8080/fc" },
+					{ clientId: "null", frontchannelLogoutUri: null as unknown as string },
+					{ clientId: "empty", frontchannelLogoutUri: "" },
+					{ clientId: "none" },
+				],
+				logger,
+			);
+
+			expect(iframeCount(html)).toBe(2);
+			expect(html).toContain("http://127.0.0.1:8080/fc?iss=");
+			expect(logger.warn).not.toHaveBeenCalled();
+		});
 	});
 
 	it("postLogoutRedirectUri is safe against </script> injection (CSP-safe pattern)", () => {

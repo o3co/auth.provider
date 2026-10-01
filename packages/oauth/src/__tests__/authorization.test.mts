@@ -35,6 +35,7 @@ import { createAuthorizationGrant } from "#/grants/authorization.mjs";
 import { pkceMethodsForClient, resolvePkceOptions } from "#/grants/pkce.mjs";
 import { OAUTH_ADMISSION_ACTIONS } from "./_helpers/admissionActions.mjs";
 import { createMockLogger } from "./_helpers/mockLogger.mjs";
+import { expectBestEffortWarn, serialisedCalls } from "./_helpers/projectedLog.mjs";
 
 // codeData must carry client_id and redirect_uri (required fields), and
 // `body.redirect_uri` must match codeData.redirect_uri or /token rejects.
@@ -2036,6 +2037,139 @@ describe("createAuthorizationGrant", () => {
 					});
 				},
 			);
+
+			describe("a frontchannelLogoutUri held to the redirect-URI rules", () => {
+				/** One code exchange against `record`; the RP registration it made and the logger. */
+				const exchangeWith = async (record: object) => {
+					const registerRPSpy = vi.fn(async (_sid: string, _rp: unknown, _exp: Date) => {});
+					const logger = createMockLogger();
+					const clientRepository: ClientRepository = {
+						...mockClientRepository,
+						findById: vi.fn().mockResolvedValue(record),
+					};
+					const handler = createAuthorizationGrant({
+						...makeDeps(
+							vi.fn().mockResolvedValue({ code: "abc", sid: "session-xyz", ...validCode }),
+							clientRepository,
+						),
+						userSessionStore: {
+							kind: "spy",
+							async create() {},
+							async get() {
+								return {
+									sid: "session-xyz",
+									sub: "u1",
+									authTime: new Date(),
+									createdAt: new Date(),
+									expiresAt: new Date(Date.now() + 3600_000),
+									claims: {},
+									amr: undefined,
+									authentication: undefined,
+								};
+							},
+							async delete() {},
+						},
+						sessionFamilyIndex: makeSessionFamilyIndex({ addFamilyId: vi.fn(async () => {}) }),
+						sessionRPRegistry: makeSessionRPRegistry({ registerRP: registerRPSpy }),
+						logger,
+					});
+					const { result } = await handler.handle({
+						body: {
+							code: "abc",
+							client_id: "client1",
+							redirect_uri: RP_URI,
+							code_verifier: CODE_VERIFIER,
+						},
+						session: { code: "abc", user: { id: "u1" } },
+						issuer: "localhost",
+						metadata: { ip: "127.0.0.1" },
+						authenticatedClient: DEFAULT_AUTH_CLIENT,
+					});
+					expect(registerRPSpy).toHaveBeenCalledTimes(1);
+					const [, rpData] = registerRPSpy.mock.calls[0] as [string, Record<string, unknown>, Date];
+					return { result, rpData, logger };
+				};
+
+				const baseRecord = {
+					clientId: "client1",
+					allowedRedirectUris: [RP_URI],
+					allowedScopes: ["read"],
+					backchannelLogoutUri: "https://rp.example/back",
+				};
+
+				it.each([
+					["a non-http(s) scheme", "ftp://rp.example/front", "scheme-not-reverse-domain"],
+					["an executable scheme", "data:text/plain,signed-out", "executable-scheme"],
+					["plain http off a loopback host", "http://rp.example/front", "http-non-loopback"],
+					["a fragment", "https://rp.example/front#section", "fragment"],
+					["a value that is not a URL", "not-a-url", "unparsable"],
+					["a value that is not a string", 42, "not-a-string"],
+				])(
+					"refuses %s: the RP is registered without it, the exchange still succeeds, and one warn names the reason, never the URI",
+					async (_label, uri, reason) => {
+						const { result, rpData, logger } = await exchangeWith({
+							...baseRecord,
+							frontchannelLogoutUri: uri,
+						});
+
+						expect(result.status).toBe(200);
+						expect(rpData.frontchannelLogoutUri).toBeUndefined();
+						// The other logout channel is untouched.
+						expect(rpData.backchannelLogoutUri).toBe("https://rp.example/back");
+						expect(logger.warn).toHaveBeenCalledTimes(1);
+						expectBestEffortWarn(
+							logger,
+							"logout_frontchannel_uri_refused",
+							{ site: "authorization_code", clientId: "client1", reason },
+							null,
+						);
+						expect(serialisedCalls(logger)).not.toContain(String(uri));
+					},
+				);
+
+				it("refuses a frontchannelLogoutUri whose read throws, without failing the exchange", async () => {
+					const record = {
+						...baseRecord,
+						get frontchannelLogoutUri(): string {
+							throw new Error("field unavailable");
+						},
+					};
+					const { result, rpData, logger } = await exchangeWith(record);
+
+					expect(result.status).toBe(200);
+					expect(rpData.frontchannelLogoutUri).toBeUndefined();
+					expect(rpData.backchannelLogoutUri).toBe("https://rp.example/back");
+					expect(logger.error).not.toHaveBeenCalled();
+					expectBestEffortWarn(
+						logger,
+						"logout_frontchannel_uri_refused",
+						{ site: "authorization_code", clientId: "client1", reason: "unreadable" },
+						null,
+					);
+				});
+
+				it("registers a frontchannelLogoutUri the rules accept, loopback http included, without a warn", async () => {
+					for (const uri of ["https://rp.example/front?tenant=a", "http://127.0.0.1:8080/front"]) {
+						const { rpData, logger } = await exchangeWith({
+							...baseRecord,
+							frontchannelLogoutUri: uri,
+						});
+						expect(rpData.frontchannelLogoutUri).toBe(uri);
+						expect(logger.warn).not.toHaveBeenCalled();
+					}
+				});
+
+				it("registers no front-channel entry, silently, for a record without one", async () => {
+					for (const uri of [undefined, null, ""]) {
+						const { rpData, logger } = await exchangeWith({
+							...baseRecord,
+							frontchannelLogoutUri: uri,
+						});
+						expect(rpData.frontchannelLogoutUri).toBeUndefined();
+						expect(logger.warn).not.toHaveBeenCalled();
+					}
+				});
+			});
 
 			it("issues tokens carrying family_id and sid without userSessionStore", async () => {
 				// No userSessionStore in deps — grant must succeed without linkFamily/registerRP.
