@@ -236,6 +236,26 @@ each names:
 
 Module-level messages that arrive wrapped in a factory failure:
 
+- Client registrations (the `yaml` / `static` client repository, which holds
+  `allowedRedirectUris`, `postLogoutRedirectUris` and
+  `federationGrantRedirectUris` to core's `checkRedirectUri`,
+  `packages/core/src/net/redirect-uri.mts`): `Invalid entry "<client>" in
+  <file>: …`, naming each bad entry. Two of them are about the query:
+  `allowedRedirectUris entry "https://client.example/cb?iss=x": must not
+  carry "iss" in its query (compared ignoring case, "_" and "-"): …` — the
+  query names `code`, `state`, `iss`, `error` or `error_description`, which
+  this provider appends when it redirects there, in any case and with `_` or
+  `-` anywhere in it (`_state`, `errorDescription`); and
+  `allowedRedirectUris entry "https://client.example/cb?filter[x]=1": query
+  parameter names may use only letters, digits, "_" and "-", each parameter
+  must have a name, and the query must not contain ";": …` — a name outside
+  `[A-Za-z0-9_-]`, a parameter with no name (`?=x`, `?a=1&&b=2`, a trailing
+  `&`), or a `;` anywhere in the query, values included.
+  `postLogoutRedirectUris` reads the same with its own field name;
+  `federationGrantRedirectUris` reports the reason alone
+  (`federationGrantRedirectUris: reserved-parameter` or
+  `… query-name-invalid`). Rename or remove the parameter in the registration,
+  and carry the client's own context in `state` or in the path.
 - Keys: `privateKey or privateKeyPath is required for EdDSA algorithm — no signing key is configured` (with the `openssl` commands); `Duplicate kid values: …`; `previousKeys is not valid for HS256 — use previousSecrets` and the mirror for asymmetric algorithms (`packages/core/src/keys/factory.mts`).
 - Standalone Redis: `` `redis-clients.url` is required when any Redis-backed adapter is selected `` (`templates/standalone/src/modules.mts`).
 - Standalone federation grant intents on Redis: `redis-federation-grant-store.keyPrefix
@@ -2213,6 +2233,22 @@ before you flip — and a relying party holding the secret can also mint.
      federation checks, `key-store.local.*` and `KEY_STORE_LOCAL_*` for the key
      store's, `REPOSITORIES_USER_HTTP_BEARER_TOKEN` for the Store credential's:
      a log alert matching the old text needs the new one.
+
+7. **Registered redirect URIs: query names.** Check every
+   `allowedRedirectUris`, `postLogoutRedirectUris` and
+   `federationGrantRedirectUris` entry, and every Client ID Metadata Document
+   you depend on. A query name outside `[A-Za-z0-9_-]` (`?filter[x]=1`,
+   `?a.b=1`), a parameter with no name, a `;` anywhere in the query, or one
+   of `code`, `state`, `iss`, `error` and `error_description` (compared
+   ignoring case, `_` and `-`) now fails boot for a `yaml` / `static` client,
+   with the messages in [§1](#boot-refusals-you-will-meet), and makes a CIMD
+   client unresolvable (`400 invalid_client` at `/authorize`, with the
+   `cimd_document_rejected` warning). A federation-grant lodging whose
+   registered URI such a query fails is answered `redirect_uri_invalid`,
+   `state` and `error` included, where it used to be
+   `redirect_uri_reserved_parameter`; both are `400 invalid_request`. Rename
+   or remove such parameters, and carry the client's context in `state` or in
+   the path.
 
 ### Rolling out
 
