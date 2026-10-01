@@ -26,8 +26,8 @@ import type { FederationTokenCaller, FederationTokenContext } from "./federation
 
 /**
  * Hands `token` to the caller, whose type the path has already judged
- * disclosable. `expires_in` is computed after the audit, which runs the sink
- * synchronously, so it never overstates the lifetime left when the answer goes.
+ * disclosable. `expires_in` is computed last, just before the answer is sent,
+ * so time spent before it (the audit call included) is not counted as lifetime left.
  */
 export const answerToken = (
 	ctx: FederationTokenContext,

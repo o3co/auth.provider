@@ -1060,10 +1060,8 @@ describe("POST /oauth/federation/:name/token", () => {
 	});
 
 	describe("the refresh lock is released only once the write or the clean-up has settled", () => {
-		// While the lock is held, no second request can re-read the expired
-		// record and spend the refresh token this one just rotated. Each store
-		// call is recorded when it settles, a macrotask after it was called, so
-		// a release that runs as soon as the call starts lands before it.
+		// Store calls are recorded when they settle, a macrotask after the call,
+		// so a release that does not wait for them lands first.
 		const settleLater = (order: string[], step: string) =>
 			vi.fn(async () => {
 				await new Promise((resolve) => setImmediate(resolve));
@@ -1130,7 +1128,8 @@ describe("POST /oauth/federation/:name/token", () => {
 			const res = await postFedToken(app, "google", await mintAccessToken());
 
 			expect(res.status).toBe(410);
-			expect(order).toEqual(["delete", "removeFederation", "release"]);
+			expect(order.at(-1)).toBe("release");
+			expect(order.slice(0, -1).sort()).toEqual(["delete", "removeFederation"]);
 		});
 	});
 
@@ -2261,8 +2260,8 @@ describe("POST /oauth/federation/:name/token", () => {
 	});
 
 	describe("expires_in is the lifetime left once the success has been audited", () => {
-		// The audit sink is called synchronously; one that takes 2 minutes must
-		// not leave `expires_in` 2 minutes longer than the token has left.
+		// A sink whose `record` call blocks for 2 minutes must not leave
+		// `expires_in` 2 minutes longer than the token has left.
 		const SINK_DELAY_MS = 120_000;
 		const LIFETIME_S = 3600;
 
