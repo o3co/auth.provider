@@ -1087,7 +1087,7 @@ describe("createRedisMfaTransactionStore — a subject's first-binding mark", ()
 		}
 	});
 
-	it("replaces a mark it cannot read back with the next note, one noted far ahead included", async () => {
+	it("replaces a mark it cannot read back with the next note", async () => {
 		const prefix = freshPrefix();
 		const store = storeAt(prefix);
 		const key = markKey(prefix, "user-1");
@@ -1102,6 +1102,24 @@ describe("createRedisMfaTransactionStore — a subject's first-binding mark", ()
 			await store.noteFirstBinding("user-1", now, now + 10 * MINUTE);
 			expect(await store.firstBindingAt("user-1", now), value.slice(0, 60)).toBe(now);
 		}
+	});
+
+	it("replaces, never merges, a held value with a field a note never writes, however late its times", async () => {
+		// Merged, its later times would stay, and this side refuses them as an
+		// outage no note could then repair.
+		const prefix = freshPrefix();
+		const store = storeAt(prefix);
+		const key = markKey(prefix, "user-1");
+		const now = Math.floor(await serverClock(first)());
+		const held = { atMs: now + 6 * MINUTE, untilMs: now + 20 * MINUTE, x: 1 };
+		await first().set(key, JSON.stringify(held), "PXAT", held.untilMs);
+		await store.noteFirstBinding("user-1", now, now + 10 * MINUTE);
+		expect(JSON.parse((await first().get(key)) as string)).toStrictEqual({
+			atMs: now,
+			untilMs: now + 10 * MINUTE,
+		});
+		expect(await deadlineOf(key)).toBe(now + 10 * MINUTE);
+		expect(await store.firstBindingAt("user-1", now)).toBe(now);
 	});
 
 	it("refuses to read a key of another type, an outage, and a note overwrites it", async () => {
