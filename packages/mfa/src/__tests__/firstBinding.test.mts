@@ -29,6 +29,7 @@ import {
 	type FirstBindingGate,
 	firstBindingGate,
 	type MailAddressFact,
+	MfaEnrollableError,
 	type RequireEmailProof,
 	reopenedEnrollment,
 } from "#/firstBinding.mjs";
@@ -129,15 +130,21 @@ describe("enrollableKinds", () => {
 		expect(enrollableKinds(factors, { id: "u" })).toEqual(["webauthn", "totp"]);
 	});
 
-	it("offers nothing of a factor whose enrollable throws", () => {
+	it("lets a factor's enrollable throw through, naming its kind: a factor that cannot answer is an outage", () => {
+		const broken = new Error("broken");
 		const throwing = {
 			...stubFactor("email", ["email"]),
 			enrollable: () => {
-				throw new Error("broken");
+				throw broken;
 			},
 		};
-		expect(enrollableKinds(resolverOver([throwing, FACTORS.totp()]), { id: "u" })).toEqual([
-			"totp",
-		]);
+		let thrown: unknown;
+		try {
+			enrollableKinds(resolverOver([FACTORS.totp(), throwing]), { id: "u" });
+		} catch (err) {
+			thrown = err;
+		}
+		expect(thrown).toBeInstanceOf(MfaEnrollableError);
+		expect(thrown).toMatchObject({ kind: "email", cause: broken });
 	});
 });

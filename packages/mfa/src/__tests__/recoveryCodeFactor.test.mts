@@ -267,7 +267,7 @@ describe("issueRecoveryCodes", () => {
 	it("writes one record holding the set, as the binding it follows authorized it, and answers the codes once", async () => {
 		const factorStore = createMemoryMfaFactorStore();
 		const issued = await issue({ factorStore });
-		expect(issued).toEqual({ issued: true, codes: expect.any(Array) });
+		expect(issued).toEqual({ issued: true, codes: expect.any(Array), regenerated: false });
 		const [record, ...rest] = await factorStore.list("u-alice");
 		expect(rest).toEqual([]);
 		expect(record).toMatchObject({
@@ -313,29 +313,28 @@ describe("issueRecoveryCodes", () => {
 	});
 });
 
-describe("issueRecoveryCodes, replacing a set", () => {
+describe("issueRecoveryCodes, replacing the sets that stood", () => {
 	const ring = [{ id: "k1", key: randomBytes(32) }];
 	const sealing = createMfaSealing({ ring });
+	const factor = createRecoveryCodeFactor({ count: 10 });
 	const factors: MfaFactorResolver = {
 		get: (kind) => (kind === RECOVERY_CODE_FACTOR_KIND ? factor : undefined),
 		entries: function* () {
 			yield [RECOVERY_CODE_FACTOR_KIND, factor] as const;
 		},
 	};
-	const factor = createRecoveryCodeFactor({ count: 10 });
-	const standing = (factorStore: MfaFactorStore, id = "old-set") =>
-		factorStore.create({
-			id,
-			subject: "u-alice",
-			kind: RECOVERY_CODE_FACTOR_KIND,
-			label: undefined,
-			binding: "password",
-			createdAt: new Date(0),
-			lastUsedAt: undefined,
-			version: 0,
-			data: "sealed",
-		});
-	const replace = (factorStore: MfaFactorStore) =>
+	const recordOf = (id: string, kind = RECOVERY_CODE_FACTOR_KIND) => ({
+		id,
+		subject: "u-alice",
+		kind,
+		label: undefined,
+		binding: "password" as const,
+		createdAt: new Date(0),
+		lastUsedAt: undefined,
+		version: 0,
+		data: "sealed",
+	});
+	const issue = (factorStore: MfaFactorStore, keep?: "password_binding") =>
 		issueRecoveryCodes({
 			factors,
 			factorStore,
@@ -343,16 +342,16 @@ describe("issueRecoveryCodes, replacing a set", () => {
 			subject: "u-alice",
 			binding: "email_proof",
 			nowMs: 1_900_000_000_000,
-			replace: true,
+			...(keep === undefined ? {} : { keep }),
 		});
 
-	it("writes the new set, then removes the subject's other sets: regenerated", async () => {
+	it("writes the new set, then removes the sets that stood before it: regenerated", async () => {
 		const factorStore = createMemoryMfaFactorStore();
-		await standing(factorStore);
+		await factorStore.create(recordOf("old-set"));
 		const create = vi.spyOn(factorStore, "create");
 		const remove = vi.spyOn(factorStore, "remove");
 
-		expect(await replace(factorStore)).toEqual({
+		expect(await issue(factorStore)).toEqual({
 			issued: true,
 			codes: expect.any(Array),
 			regenerated: true,
@@ -365,9 +364,25 @@ describe("issueRecoveryCodes, replacing a set", () => {
 		);
 	});
 
+	it("never removes a set written after its listing, such as one another binding issued", async () => {
+		const factorStore = createMemoryMfaFactorStore();
+		await factorStore.create(recordOf("old-set"));
+		const create = factorStore.create.bind(factorStore);
+		vi.spyOn(factorStore, "create").mockImplementation(async (record) => {
+			await create(recordOf("later-set"));
+			return create(record);
+		});
+
+		await issue(factorStore);
+
+		const ids = (await factorStore.list("u-alice")).map((record) => record.id);
+		expect(ids).toContain("later-set");
+		expect(ids).not.toContain("old-set");
+	});
+
 	it("is not regenerated when no other set stood", async () => {
 		const factorStore = createMemoryMfaFactorStore();
-		expect(await replace(factorStore)).toEqual({
+		expect(await issue(factorStore)).toEqual({
 			issued: true,
 			codes: expect.any(Array),
 			regenerated: false,
@@ -375,48 +390,54 @@ describe("issueRecoveryCodes, replacing a set", () => {
 		expect(await factorStore.list("u-alice")).toHaveLength(1);
 	});
 
-	it("leaves the old set standing when it cannot be removed, and says why: the new one is issued", async () => {
+	it("keeps the sets that stood when asked to, saying why", async () => {
 		const factorStore = createMemoryMfaFactorStore();
-		await standing(factorStore);
-		const down = new Error("remove failed");
-		vi.spyOn(factorStore, "remove").mockRejectedValue(down);
+		await factorStore.create(recordOf("old-set"));
+		const remove = vi.spyOn(factorStore, "remove");
 
-		expect(await replace(factorStore)).toEqual({
+		expect(await issue(factorStore, "password_binding")).toEqual({
 			issued: true,
 			codes: expect.any(Array),
 			regenerated: true,
-			unreplaced: down,
+			unreplaced: { kept: "password_binding" },
 		});
+		expect(remove).not.toHaveBeenCalled();
 		expect(await factorStore.list("u-alice")).toHaveLength(2);
 	});
 
-	it("says why when the sets cannot be listed after the write, regenerated as one may stand", async () => {
+	it("leaves the old set standing when it cannot be removed, and says why — a rejection with no reason included", async () => {
+		const factorStore = createMemoryMfaFactorStore();
+		await factorStore.create(recordOf("old-set"));
+		vi.spyOn(factorStore, "remove").mockRejectedValue(undefined);
+
+		const issued = await issue(factorStore);
+
+		expect(issued).toMatchObject({ issued: true, regenerated: true });
+		const unreplaced = (issued as { unreplaced?: object }).unreplaced;
+		expect(unreplaced !== undefined && "cause" in unreplaced).toBe(true);
+		expect(await factorStore.list("u-alice")).toHaveLength(2);
+	});
+
+	it("writes the new set when the sets cannot be listed first, regenerated as one may stand, and says why", async () => {
 		const factorStore = createMemoryMfaFactorStore();
 		const down = new Error("list failed");
-		vi.spyOn(factorStore, "list").mockRejectedValue(down);
+		vi.spyOn(factorStore, "list").mockRejectedValueOnce(down);
+		const remove = vi.spyOn(factorStore, "remove");
 
-		expect(await replace(factorStore)).toEqual({
+		expect(await issue(factorStore)).toEqual({
 			issued: true,
 			codes: expect.any(Array),
 			regenerated: true,
-			unreplaced: down,
+			unreplaced: { cause: down },
 		});
+		expect(remove).not.toHaveBeenCalled();
+		expect(await factorStore.list("u-alice")).toHaveLength(1);
 	});
 
 	it("removes no record of another kind", async () => {
 		const factorStore = createMemoryMfaFactorStore();
-		await factorStore.create({
-			id: "totp-1",
-			subject: "u-alice",
-			kind: "totp",
-			label: undefined,
-			binding: "password",
-			createdAt: new Date(0),
-			lastUsedAt: undefined,
-			version: 0,
-			data: "sealed",
-		});
-		await replace(factorStore);
+		await factorStore.create(recordOf("totp-1", "totp"));
+		await issue(factorStore);
 		expect((await factorStore.list("u-alice")).map((record) => record.kind).sort()).toEqual([
 			RECOVERY_CODE_FACTOR_KIND,
 			"totp",

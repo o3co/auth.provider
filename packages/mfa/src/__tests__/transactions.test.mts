@@ -204,7 +204,7 @@ describe("the login's transaction", () => {
 
 describe("a login's transaction reopened for a binding", () => {
 	const shape = {
-		sessionId: "sess-1",
+		binding: { kind: "session" as const, id: "sess-1" },
 		continuation: CONTINUATION,
 		enrollable: ["totp"],
 		nowMs: NOW,
