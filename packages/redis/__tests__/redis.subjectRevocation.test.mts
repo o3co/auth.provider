@@ -311,6 +311,34 @@ describe("SubjectRevocation — the two boundaries on one key", () => {
 		expect(await raw.get(key)).toBe("1000");
 	});
 
+	it.each([
+		["ALL", ["ALL"]],
+		["an empty mode", [""]],
+		// EVAL arguments are positional: with no mode, `before` takes its place.
+		["no mode", []],
+	])("refuses %s, leaving the record as it was", async (_label, mode) => {
+		// A mode it did not know would be read as sessions-only, leaving the
+		// subject's grants unrevoked.
+		const key = `t593e:mode:${mode.length === 0 ? "absent" : mode[0]}`;
+		await raw.set(key, "1000", "PX", 600_000);
+		const expiry = await raw.pexpiretime(key);
+		const now = await serverClock(() => raw)();
+		await expect(
+			raw.eval(
+				SET_REVOCATION_BOUNDARIES.source,
+				1,
+				key,
+				...mode,
+				String(now),
+				String(now + 600_000),
+				String(SUBJECT_REVOCATION_MIN_RETENTION_MS),
+				String(DEFAULT_CLOCK_SKEW_MS),
+			),
+		).rejects.toThrow(/subject revocation: invalid argument/);
+		expect(await raw.get(key)).toBe("1000");
+		expect(await raw.pexpiretime(key)).toBe(expiry);
+	});
+
 	const unreadableInstants = [
 		"NaN",
 		"nan",

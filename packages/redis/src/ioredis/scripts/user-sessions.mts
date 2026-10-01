@@ -40,7 +40,7 @@ return 0
  * one atomic step. `KEYS[1]` = the record; `ARGV` = mode (`all` | `sessions`), `before` and the
  * proposed expiry (epoch ms), the grant retention (ms), and the clock skew (whole ms, at most a
  * day). The instants and the retention are whole milliseconds a `Date` can hold, the retention
- * not negative.
+ * not negative, and the mode one of the two.
  * Returns the value written and the server's `TIME` in epoch ms; an argument outside that, or a
  * stored value it cannot read, is refused with an error before anything is written.
  *
@@ -82,7 +82,9 @@ local retention = tonumber(ARGV[4])
 -- inf, which would skip the clamp, and a negative one moves the bound back.
 local MAX_SKEW = 86400000
 local skew = tonumber(ARGV[5])
-if not (wholeMs(before) and wholeMs(expiresAt) and wholeMs(retention) and retention >= 0
+-- Any other mode would be read as sessions-only, leaving grants unrevoked.
+if not ((mode == "all" or mode == "sessions")
+  and wholeMs(before) and wholeMs(expiresAt) and wholeMs(retention) and retention >= 0
   and wholeMs(skew) and skew >= 0 and skew <= MAX_SKEW) then
   return redis.error_reply("subject revocation: invalid argument")
 end
