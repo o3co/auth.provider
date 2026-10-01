@@ -121,6 +121,10 @@ const alternating = (keyPrefix: string): MfaTransactionStore => {
 		subjectGeneration: (subject) => pick().subjectGeneration(subject),
 		acquireSubjectLease: (subject, request) => pick().acquireSubjectLease(subject, request),
 		releaseSubjectLease: (subject, token) => pick().releaseSubjectLease(subject, token),
+		authorizeSubjectRecovery: (subject, authorization) =>
+			pick().authorizeSubjectRecovery(subject, authorization),
+		applySubjectRecovery: (subject, application) =>
+			pick().applySubjectRecovery(subject, application),
 	};
 };
 

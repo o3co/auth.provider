@@ -291,6 +291,43 @@ describe("createMemoryMfaTransactionStore — a cap on the transactions it holds
 		expect(store.transactions).toBe(1);
 	});
 
+	it("counts recovery authorizations against its cap: at the cap a new one is refused as a store fault, and one replacing another's slot is no new entry", async () => {
+		const store = createMemoryMfaTransactionStore({ now: () => T0, maxEntries: 2 });
+		const authorization = (sid: string, recoveryId: string) => ({
+			operation: "recover" as const,
+			sid,
+			recoveryId,
+			expiresAtMs: T0 + 600_000,
+		});
+		await store.create(TX("tx-1"));
+		await store.authorizeSubjectRecovery("user-1", authorization("sid-1", "r-1"));
+		await store.authorizeSubjectRecovery("user-1", authorization("sid-1", "r-2"));
+		const refusal = await refusalOf(
+			store.authorizeSubjectRecovery("user-1", authorization("sid-2", "r-3")),
+		);
+		expect(refusal).toBeInstanceOf(MfaTransactionStoreFullError);
+		expect(await refusalOf(store.create(TX("tx-2")))).toBeInstanceOf(MfaTransactionStoreFullError);
+	});
+
+	it("reclaims lapsed authorizations before it refuses", async () => {
+		let now = T0;
+		const store = createMemoryMfaTransactionStore({
+			now: () => now,
+			maxEntries: 2,
+			minSweepIntervalMs: 0,
+		});
+		await store.authorizeSubjectRecovery("user-1", {
+			operation: "recover",
+			sid: "sid-1",
+			recoveryId: "r-1",
+			expiresAtMs: T0 + 1_000,
+		});
+		await store.create(TX("long"));
+		now = T0 + 2_000;
+		await store.create(TX("next"));
+		expect(store.transactions).toBe(2);
+	});
+
 	it("refuses a cap above what a Map can hold, 2^24 entries", () => {
 		expect(createMemoryMfaTransactionStore({ maxEntries: 2 ** 24 }).maxEntries).toBe(16_777_216);
 		expect(() => createMemoryMfaTransactionStore({ maxEntries: 2 ** 24 + 1 })).toThrow(

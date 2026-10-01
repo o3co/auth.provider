@@ -34,6 +34,7 @@ import {
 	readMfaSubjectAttemptReservation,
 	readMfaSubjectCount,
 	readMfaSubjectLeaseAnswer,
+	readMfaSubjectRecoveryAnswer,
 	readSessionEmailProof,
 } from "#/mfa/transactionStore.mjs";
 
@@ -491,6 +492,139 @@ describe("readMfaSubjectLeaseAnswer", () => {
 	});
 });
 
+describe("readMfaSubjectRecoveryAnswer", () => {
+	const applied = (
+		cleared: { week: boolean; run: boolean; hard: boolean },
+		hard: boolean,
+	): Record<string, unknown> => ({
+		outcome: "applied",
+		recoveryId: "r",
+		generation: 1,
+		cleared,
+		hard,
+	});
+
+	it.each<[string, Record<string, unknown>]>([
+		["the budget given back", applied({ week: true, run: true, hard: false }, false)],
+		["everything given back", applied({ week: true, run: true, hard: true }, false)],
+		[
+			"the week given back while the hard hold stands",
+			applied({ week: true, run: false, hard: false }, true),
+		],
+		[
+			"the hard hold lifted while the week stands",
+			applied({ week: false, run: true, hard: true }, false),
+		],
+	])("reads an apply: %s", (_label, answer) => {
+		expect(readMfaSubjectRecoveryAnswer(answer)).toEqual(answer);
+	});
+
+	it("reads an apply already made and each refusal, copied to their fields", () => {
+		expect(
+			readMfaSubjectRecoveryAnswer({
+				outcome: "already_applied",
+				recoveryId: "r",
+				generation: 3,
+				hard: true,
+				cleared: { week: true, run: true, hard: true },
+			}),
+		).toEqual({ outcome: "already_applied", recoveryId: "r", generation: 3, hard: true });
+		for (const reason of [
+			"unauthorized",
+			"expired",
+			"not_revoked_since",
+			"boundary_ahead",
+			"lease_not_held",
+		]) {
+			expect(readMfaSubjectRecoveryAnswer({ outcome: "refused", reason, hard: false })).toEqual({
+				outcome: "refused",
+				reason,
+				hard: false,
+			});
+		}
+	});
+
+	it.each<[string, unknown]>([
+		[
+			"the hard hold lifted and still standing",
+			applied({ week: true, run: true, hard: true }, true),
+		],
+		[
+			"the run kept with no hard hold standing",
+			applied({ week: true, run: false, hard: false }, false),
+		],
+		[
+			"the hard hold lifted with the run kept",
+			applied({ week: true, run: false, hard: true }, false),
+		],
+		[
+			"the run ended under a hard hold that stands",
+			applied({ week: true, run: true, hard: false }, true),
+		],
+		["nothing given back", applied({ week: false, run: false, hard: false }, false)],
+		[
+			"the run ended and the week kept, with no hard hold lifted",
+			applied({ week: false, run: true, hard: false }, false),
+		],
+		[
+			"an apply at generation 0",
+			{ ...applied({ week: true, run: true, hard: false }, false), generation: 0 },
+		],
+		[
+			"a generation that is not whole",
+			{ ...applied({ week: true, run: true, hard: false }, false), generation: 1.5 },
+		],
+		[
+			"an empty recoveryId",
+			{ ...applied({ week: true, run: true, hard: false }, false), recoveryId: "" },
+		],
+		[
+			"a cleared part that is not a boolean",
+			applied({ week: true, run: 1 as never, hard: false }, false),
+		],
+		["no cleared parts", { outcome: "applied", recoveryId: "r", generation: 1, hard: false }],
+		[
+			"a hard hold that is not a boolean",
+			applied({ week: true, run: true, hard: false }, "no" as never),
+		],
+		[
+			"an apply already made at generation 0",
+			{ outcome: "already_applied", recoveryId: "r", generation: 0, hard: false },
+		],
+		["a refusal it does not know", { outcome: "refused", reason: "busy", hard: false }],
+		["a refusal with no hard hold named", { outcome: "refused", reason: "expired" }],
+		["an outcome it does not know", { outcome: "released", hard: false }],
+		["nothing", undefined],
+		["null", null],
+	])("reads %s as no answer", (_label, answer) => {
+		expect(readMfaSubjectRecoveryAnswer(answer)).toBeUndefined();
+	});
+
+	it("reads each field once, and a getter that throws as no answer", () => {
+		let reads = 0;
+		const answer = {
+			outcome: "refused",
+			reason: "expired",
+			get hard() {
+				reads++;
+				return reads === 1 ? true : "no";
+			},
+		};
+		expect(readMfaSubjectRecoveryAnswer(answer)).toEqual({
+			outcome: "refused",
+			reason: "expired",
+			hard: true,
+		});
+		expect(
+			readMfaSubjectRecoveryAnswer({
+				get outcome(): string {
+					throw new Error("boom");
+				},
+			}),
+		).toBeUndefined();
+	});
+});
+
 describe("readMfaSubjectCount", () => {
 	it("reads a safe whole number from 0", () => {
 		expect(readMfaSubjectCount(0)).toBe(0);
@@ -514,6 +648,7 @@ describe("on the package's root", () => {
 	it("are the readings", () => {
 		expect(core.readMfaSubjectLeaseAnswer).toBe(readMfaSubjectLeaseAnswer);
 		expect(core.readMfaSubjectCount).toBe(readMfaSubjectCount);
+		expect(core.readMfaSubjectRecoveryAnswer).toBe(readMfaSubjectRecoveryAnswer);
 		expect(core.readMfaAttemptReservation).toBe(readMfaAttemptReservation);
 		expect(core.readMfaSubjectAttemptReservation).toBe(readMfaSubjectAttemptReservation);
 		expect(core.isConsumedMfaTransaction).toBe(isConsumedMfaTransaction);
