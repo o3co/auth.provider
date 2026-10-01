@@ -337,6 +337,21 @@ describe("createMemoryFederationGrantStore", () => {
 			const { written } = await replace(token({ effectiveExpiresAt: new Date(Number.NaN) }));
 			expect(written.ok).toBe(false);
 		});
+
+		/** An Invalid Date whose own `getTime` says otherwise. */
+		const disguised = (): Date =>
+			Object.assign(new Date(Number.NaN), { getTime: () => at(33 * MIN).getTime() });
+
+		it.each<[string, unknown]>([
+			["an Invalid Date whose own getTime answers an instant", disguised()],
+			["a string", at(33 * MIN).toISOString()],
+			["a number", at(33 * MIN).getTime()],
+			["null", null],
+			["a Date look-alike", { getTime: () => at(33 * MIN).getTime() }],
+		])("refuses %s as its end, or its obtainedAt, and does not throw", async (_, value) => {
+			expect((await replace(token({ effectiveExpiresAt: value }))).written.ok).toBe(false);
+			expect((await replace(token({ obtainedAt: value }))).written.ok).toBe(false);
+		});
 	});
 
 	it("hands every failed write its own result: one caller's object is not another's", async () => {

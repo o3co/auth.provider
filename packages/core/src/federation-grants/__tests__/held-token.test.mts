@@ -60,8 +60,28 @@ describe("federationGrantHeldToken", () => {
 		).toEqual(at(3_600_000));
 	});
 
-	it("reads an effective end that is not an instant as an end that is none", () => {
-		const held = federationGrantHeldToken({ ...stored, effectiveExpiresAt: new Date(Number.NaN) });
+	const LOOK_ALIKE = { getTime: () => at(1_800_000).getTime() };
+	it.each<[string, unknown]>([
+		["an Invalid Date", new Date(Number.NaN)],
+		["a string", at(1_800_000).toISOString()],
+		["null", null],
+		["a Date look-alike", LOOK_ALIKE],
+	])("reads %s as an end that is no instant, and never throws", (_, effectiveExpiresAt) => {
+		const held = federationGrantHeldToken({
+			...stored,
+			effectiveExpiresAt: effectiveExpiresAt as Date,
+		});
 		expect(Number.isNaN(held.expiresAt.getTime())).toBe(true);
+	});
+
+	it("reads an obtainedAt that is no instant as a token held since no instant, and never throws", () => {
+		for (const obtainedAt of [at(0).toISOString(), null, LOOK_ALIKE]) {
+			const held = federationGrantHeldToken({
+				...stored,
+				obtainedAt: obtainedAt as unknown as Date,
+			});
+			expect(Number.isNaN(held.obtainedAt.getTime())).toBe(true);
+			expect(Number.isNaN(held.expiresAt.getTime())).toBe(true);
+		}
 	});
 });

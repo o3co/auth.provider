@@ -469,6 +469,29 @@ describe("retrieveFederationGrantToken — dependencies and upstreams that misbe
 			});
 		});
 
+		it("reads an expiry that throws when its type is asked as malformed, and keeps the rotated refresh token", async () => {
+			await h.seed();
+			setNow(GONE);
+			const throwing = new Proxy(new Date(GONE.getTime() + HOUR), {
+				getPrototypeOf() {
+					throw new Error("a trap that throws");
+				},
+			});
+			h.refresh.mockResolvedValue(refreshed("1", GONE, { expiresAt: throwing }));
+			expect(await retrieve()).toStrictEqual({
+				ok: false,
+				code: "upstream_token_ineligible",
+				reason: "malformed_token_response",
+				retryAfterSeconds: 300,
+			});
+			expect(await stored()).toStrictEqual({
+				refreshToken: `${SECRET}-1`,
+				accessToken: undefined,
+			});
+			await Promise.all(h.background);
+			expect(await lockIsFree(h)).toBe(true);
+		});
+
 		it("reads an expiry that is a Date holding no instant as no finite lifetime, and keeps the rotated refresh token", async () => {
 			await h.seed();
 			setNow(GONE);
