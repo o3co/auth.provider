@@ -28,8 +28,10 @@
  * across sockets rather than queued on one client.
  */
 
+import { createHash } from "node:crypto";
 import {
 	createMemoryMfaTransactionStore,
+	MFA_MAX_TRANSACTIONS_PER_BINDING,
 	MFA_CLOCK_SKEW_ALLOWANCE_MS,
 	type MfaLockoutPolicy,
 	type MfaSubjectAttemptReservation,
@@ -237,6 +239,10 @@ async function resetSubject(store: MfaTransactionStore, subject: string): Promis
 const deadlineOf = async (key: string): Promise<number> =>
 	Number(await first().call("PEXPIRETIME", key));
 
+/** A binding's index, as the adapter names it: the SHA-256 of the whole binding, never its id. */
+const bindingKey = (prefix: string, binding: { readonly kind: string; readonly id: string }) =>
+	`${prefix}binding:{${createHash("sha256").update(JSON.stringify([binding.kind, binding.id])).digest("base64url")}}`;
+
 describe("createRedisMfaTransactionStore — the transaction", () => {
 	it('declares kind "redis"', () => {
 		expect(storeAt(freshPrefix()).kind).toBe("redis");
@@ -248,7 +254,9 @@ describe("createRedisMfaTransactionStore — the transaction", () => {
 		const expiresAtMs = Date.now() + 10 * MINUTE + 0.25;
 		await store.create(TX({ expiresAtMs }));
 		const key = `${prefix}tx:{${keyPart("tx-1")}}`;
-		expect(await first().keys(`${prefix}*`)).toEqual([key]);
+		expect((await first().keys(`${prefix}*`)).sort()).toEqual(
+			[key, bindingKey(prefix, TX().binding)].sort(),
+		);
 		expect(await first().type(key)).toBe("hash");
 		// Whole milliseconds, rounded up: the key outlives the instant rather
 		// than dying before it.
@@ -473,6 +481,102 @@ describe("createRedisMfaTransactionStore — the transaction", () => {
 		for (const keyPrefix of ["mfat:{x}:", "mfat}:", "{mfat:"]) {
 			expect(() => storeAt(keyPrefix), keyPrefix).toThrow(RangeError);
 		}
+	});
+});
+
+describe("createRedisMfaTransactionStore — the live transactions one binding holds", () => {
+	const N = MFA_MAX_TRANSACTIONS_PER_BINDING;
+	const A = { kind: "session", id: "Qx7-dP_2mZkL9vRt3YbN8cW-4sHj_E1a" } as const;
+	const B = { kind: "session", id: "Rk2_aW-9pLmX3vQt7ZbN0cY-5sJh_F8b" } as const;
+
+	/** `count` transactions `<prefix>-<i>` bound to `binding`, each expiring a second after the one before. */
+	async function opened(
+		store: MfaTransactionStore,
+		prefix: string,
+		count: number,
+		binding: MfaTransaction["binding"],
+	): Promise<number[]> {
+		const base = Date.now() + 10 * MINUTE;
+		const deadlines: number[] = [];
+		for (let i = 0; i < count; i++) {
+			const expiresAtMs = base + i * 1_000 + 0.25;
+			await store.create(TX({ id: `${prefix}-${i}`, binding, expiresAtMs }));
+			deadlines.push(Math.ceil(expiresAtMs));
+		}
+		return deadlines;
+	}
+
+	it("indexes a binding's transactions in one sorted set, <prefix>binding:{<digest>}, scored by deadline and expiring at the latest", async () => {
+		const prefix = freshPrefix();
+		const store = storeAt(prefix);
+		const deadlines = await opened(store, "tab", 2, A);
+		const index = bindingKey(prefix, A);
+		expect(await first().type(index)).toBe("zset");
+		const members = await first().zrange(index, 0, -1, "WITHSCORES");
+		expect(members).toHaveLength(4);
+		expect([Number(members[1]), Number(members[3])]).toEqual(deadlines);
+		expect(await deadlineOf(index)).toBe(deadlines[1]);
+		// Each member names its transaction's key part, after the incarnation `create` wrote.
+		for (const [i, member] of [members[0], members[2]].entries()) {
+			const incarnation = await first().hget(`${prefix}tx:{${keyPart(`tab-${i}`)}}`, "incarnation");
+			expect(member).toBe(`${incarnation}:${keyPart(`tab-${i}`)}`);
+		}
+	});
+
+	it("keeps the express session id out of every key it writes", async () => {
+		const prefix = freshPrefix();
+		const store = storeAt(prefix);
+		await opened(store, "tab", N + 1, A);
+		await store.consume("tab-3", 1);
+		for (const key of await first().keys(`${prefix}*`)) {
+			expect(key).not.toContain(A.id);
+			expect(key).not.toContain(keyPart(A.id));
+		}
+	});
+
+	it("holds at most N members, its deadline the latest of them, and ends an evicted transaction's key", async () => {
+		const prefix = freshPrefix();
+		const store = storeAt(prefix);
+		const deadlines = await opened(store, "tab", N + 2, A);
+		const index = bindingKey(prefix, A);
+		expect(await first().zcard(index)).toBe(N);
+		expect(await deadlineOf(index)).toBe(deadlines[N + 1]);
+		expect(await first().exists(`${prefix}tx:{${keyPart("tab-0")}}`)).toBe(0);
+		expect(await first().exists(`${prefix}tx:{${keyPart("tab-1")}}`)).toBe(0);
+	});
+
+	it("takes a transaction out of the index when it is consumed or its attempts end, and the key goes with the last", async () => {
+		const prefix = freshPrefix();
+		const store = storeAt(prefix);
+		await opened(store, "tab", 2, A);
+		const index = bindingKey(prefix, A);
+		await store.consume("tab-0", 1);
+		expect(await first().zcard(index)).toBe(1);
+		await store.reserveAttempt("tab-1", 1);
+		await store.reserveAttempt("tab-1", 1);
+		expect(await first().exists(index)).toBe(0);
+	});
+
+	it("never ends another binding's transaction: an eviction deletes a key only while it holds the incarnation the index took", async () => {
+		// A member left behind (its transaction removed without it), and the
+		// id taken again by another binding: evicting the member must leave
+		// the other binding's transaction alone.
+		const prefix = freshPrefix();
+		const store = storeAt(prefix);
+		await store.create(TX({ id: "shared", binding: A, expiresAtMs: Date.now() + 5 * MINUTE }));
+		await first().del(`${prefix}tx:{${keyPart("shared")}}`);
+		await store.create(TX({ id: "shared", binding: B }));
+		await opened(store, "tab", N, A);
+		expect(await first().zcard(bindingKey(prefix, A))).toBe(N);
+		expect(await store.get("shared")).toMatchObject({ binding: B });
+		expect(await first().zcard(bindingKey(prefix, B))).toBe(1);
+	});
+
+	it("refuses a create whose binding index it cannot write: an outage", async () => {
+		const prefix = freshPrefix();
+		const store = storeAt(prefix);
+		await first().set(bindingKey(prefix, A), "not a sorted set");
+		await expect(store.create(TX({ binding: A }))).rejects.toThrow();
 	});
 });
 

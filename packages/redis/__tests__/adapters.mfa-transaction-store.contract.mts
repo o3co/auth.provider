@@ -18,6 +18,7 @@ import {
 	DEFAULT_CLOCK_SKEW_MS,
 	getBoundMfaTransaction,
 	MFA_CLOCK_SKEW_ALLOWANCE_MS,
+	MFA_MAX_TRANSACTIONS_PER_BINDING,
 	MFA_RECOVERY_AUTHORIZATION_MAX_MS,
 	MFA_WEEKLY_WINDOW_MS,
 	type MfaLockoutPolicy,
@@ -825,6 +826,110 @@ export function runMfaTransactionStoreContract(
 			const results = await Promise.all(Array.from({ length: 10 }, () => store.consume("tx-1", 1)));
 			expect(results.filter((r) => r !== null)).toHaveLength(1);
 			expect(await store.get("tx-1")).toBeNull();
+		});
+	});
+
+	describe("MfaTransactionStore contract: the live transactions one binding holds", () => {
+		const N = MFA_MAX_TRANSACTIONS_PER_BINDING;
+		const MINE: MfaTransactionBinding = { kind: "session", id: SESSION_ID };
+		const OTHER: MfaTransactionBinding = { kind: "session", id: "Rk2_aW-9pLmX3vQt7ZbN0cY-5sJh_F8b" };
+
+		/**
+		 * `count` transactions `<prefix>-<i>` bound to `binding`, created one
+		 * after another, each expiring a second after the one before: the
+		 * first is the oldest.
+		 */
+		async function opened(
+			store: MfaTransactionStore,
+			prefix: string,
+			count: number,
+			binding: MfaTransactionBinding = MINE,
+		): Promise<string[]> {
+			const base = Math.max(Date.now(), await expiry.now()) + 10 * MINUTE;
+			const ids: string[] = [];
+			for (let i = 0; i < count; i++) {
+				const id = `${prefix}-${i}`;
+				await store.create(TX({ id, binding, expiresAtMs: base + i * 1_000 }));
+				ids.push(id);
+			}
+			return ids;
+		}
+
+		/** The ids of `ids` a read still answers. */
+		async function live(store: MfaTransactionStore, ids: readonly string[]): Promise<string[]> {
+			const read = await Promise.all(ids.map(async (id) => [id, await store.get(id)] as const));
+			return read.filter(([, tx]) => tx !== null).map(([id]) => id);
+		}
+
+		it("keeps N: one more ends the binding's oldest, and the new one stands", async () => {
+			const store = await factory();
+			const ids = await opened(store, "tab", N + 1);
+			expect(await live(store, ids)).toStrictEqual(ids.slice(1));
+		});
+
+		it("ends one for each create past N, the oldest first", async () => {
+			const store = await factory();
+			const ids = await opened(store, "tab", N + 3);
+			expect(await live(store, ids)).toStrictEqual(ids.slice(3));
+		});
+
+		it("leaves every other binding's transactions alone", async () => {
+			const store = await factory();
+			const mine = await opened(store, "mine", N);
+			const other = await opened(store, "other", N, OTHER);
+			await store.create(TX({ id: "mine-next" }));
+			expect(await live(store, mine)).toStrictEqual(mine.slice(1));
+			expect(await live(store, other)).toStrictEqual(other);
+		});
+
+		it("never ends the transaction it creates, even one that expires before the rest", async () => {
+			const store = await factory();
+			const ids = await opened(store, "tab", N);
+			await store.create(
+				TX({ id: "sooner", expiresAtMs: Math.max(Date.now(), await expiry.now()) + MINUTE }),
+			);
+			expect(await store.get("sooner")).not.toBeNull();
+			expect(await live(store, ids)).toStrictEqual(ids.slice(1));
+		});
+
+		it("does not count a consumed transaction", async () => {
+			const store = await factory();
+			const ids = await opened(store, "tab", N);
+			expect(await store.consume(ids[N - 1] as string, 1)).not.toBeNull();
+			await store.create(TX({ id: "next" }));
+			expect(await live(store, ids)).toStrictEqual(ids.slice(0, N - 1));
+			expect(await store.get("next")).not.toBeNull();
+		});
+
+		it("does not count a transaction its attempts ended", async () => {
+			const store = await factory();
+			const ids = await opened(store, "tab", N);
+			const last = ids[N - 1] as string;
+			expect(await store.reserveAttempt(last, 1)).toEqual({ ok: true, attempts: 1 });
+			expect(await store.reserveAttempt(last, 1)).toEqual({ ok: false, attempts: 1 });
+			await store.create(TX({ id: "next" }));
+			expect(await live(store, ids)).toStrictEqual(ids.slice(0, N - 1));
+		});
+
+		it("does not count an expired transaction, even one opened after the rest", async () => {
+			const store = await factory();
+			const ids = await opened(store, "tab", N - 1);
+			const at = Math.max(Date.now(), await expiry.now()) + 300;
+			await store.create(TX({ id: "brief", expiresAtMs: at }));
+			await expiry.passed(at);
+			await store.create(TX({ id: "next" }));
+			expect(await live(store, ids)).toStrictEqual(ids);
+			expect(await store.get("next")).not.toBeNull();
+		});
+
+		it("holds at most N once every create in flight has answered", async () => {
+			const store = await factory();
+			const base = Math.max(Date.now(), await expiry.now()) + 10 * MINUTE;
+			const ids = Array.from({ length: N + 5 }, (_, i) => `tab-${i}`);
+			await Promise.all(
+				ids.map((id, i) => store.create(TX({ id, expiresAtMs: base + i * 1_000 }))),
+			);
+			expect(await live(store, ids)).toHaveLength(N);
 		});
 	});
 
