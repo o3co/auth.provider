@@ -14,7 +14,12 @@
  * limitations under the License.
  */
 
+import type { EventLogger } from "../../logging/Logger.mjs";
 import { SUBJECT_REVOCATION_MIN_RETENTION_MS } from "../retention.mjs";
+import {
+	checkSubjectRevocationInstant,
+	clampSubjectRevocationBoundary,
+} from "../subjectRevocationBoundary.mjs";
 import type { SubjectRevocation, SupportsSessionsOnlyRevocation } from "../types.mjs";
 
 interface Watermark {
@@ -23,15 +28,6 @@ interface Watermark {
 	readonly grantsBeforeMs: number | null;
 	readonly expiresAtMs: number;
 }
-
-/** Every comparison with NaN is false, so a NaN boundary covers nothing while looking like one. */
-const instant = (value: Date, name: string): number => {
-	const ms = value?.getTime?.();
-	if (typeof ms !== "number" || Number.isNaN(ms)) {
-		throw new RangeError(`SubjectRevocation: ${name} must be a date`);
-	}
-	return ms;
-};
 
 /**
  * In-process Map-backed {@link SubjectRevocation}, carrying both the
@@ -45,16 +41,22 @@ const instant = (value: Date, name: string): number => {
  * one killed. The fields take their maxima independently, so a sessions-only
  * stamp cannot drag the grants boundary forward, nor a late full revocation
  * drag the sessions boundary back.
+ *
+ * One clock, `now` (default the wall clock), bounds a boundary
+ * (`clampSubjectRevocationBoundary`) and lets a record lapse. A boundary it
+ * clamps is said at warn on `logger`: the replica that asked runs ahead.
  */
-export function createInMemorySubjectRevocation(): SubjectRevocation &
-	SupportsSessionsOnlyRevocation {
+export function createInMemorySubjectRevocation(
+	options: { readonly now?: () => number; readonly logger?: Pick<EventLogger, "warn"> } = {},
+): SubjectRevocation & SupportsSessionsOnlyRevocation {
+	const clock = options.now ?? Date.now;
 	const entries = new Map<string, Watermark>();
 
 	/** The record as it stands, or nothing when it has lapsed. */
 	const live = (subject: string): Watermark | undefined => {
 		const entry = entries.get(subject);
 		if (entry === undefined) return undefined;
-		if (entry.expiresAtMs <= Date.now()) {
+		if (entry.expiresAtMs <= clock()) {
 			entries.delete(subject);
 			return undefined;
 		}
@@ -98,16 +100,47 @@ export function createInMemorySubjectRevocation(): SubjectRevocation &
 		});
 	};
 
+	/**
+	 * Records `before`, clamped on this store's clock, and then says a clamp
+	 * at warn. The write comes first and a failing logger is ignored: the
+	 * boundary is what ends tokens already issued.
+	 */
+	const record = (
+		subject: string,
+		before: Date,
+		expiresAt: Date,
+		grants: "advance" | "keep",
+	): void => {
+		const expiresAtMs = checkSubjectRevocationInstant(expiresAt, "expiresAt");
+		const requestedMs = checkSubjectRevocationInstant(before, "before");
+		const { boundary, clamped } = clampSubjectRevocationBoundary(before, clock());
+		const beforeMs = boundary.getTime();
+		write(subject, beforeMs, grants === "advance" ? beforeMs : null, expiresAtMs);
+		if (!clamped) return;
+		try {
+			options.logger?.warn(
+				{
+					store: "memory",
+					subject,
+					requestedBefore: new Date(requestedMs).toISOString(),
+					recordedBefore: boundary.toISOString(),
+				},
+				"subject_revocation_boundary_clamped",
+			);
+		} catch {
+			// The boundary is recorded; only its signal is lost.
+		}
+	};
+
 	return {
 		kind: "memory",
 
 		async revokeBefore(subject, before, expiresAt) {
-			const beforeMs = instant(before, "before");
-			write(subject, beforeMs, beforeMs, instant(expiresAt, "expiresAt"));
+			record(subject, before, expiresAt, "advance");
 		},
 
 		async revokeSessionsBefore(subject, before, expiresAt) {
-			write(subject, instant(before, "before"), null, instant(expiresAt, "expiresAt"));
+			record(subject, before, expiresAt, "keep");
 		},
 
 		async revokedBefore(subject) {

@@ -36,6 +36,7 @@ import {
 	type MfaFactor,
 	type SessionRequirement,
 	type StepUpPage,
+	type SupportsSecondFactorUpdate,
 	type UserSession,
 	type UserSessionStore,
 } from "@o3co/auth-provider-core";
@@ -82,10 +83,15 @@ const ISSUER = "https://auth.test";
 /** `mfa.page.url` as the package's reference.conf ships it. */
 const PAGE: StepUpPage = { url: "/mfa", params: {} };
 
-/** The requirement the MFA module registers under `mode`, over the factors of `factors`. */
+/**
+ * The requirement the MFA module registers under `mode`, over the factors
+ * of `factors`; able to record a step-up exactly when the session store
+ * can, as boot builds it.
+ */
 const realRequirement = (
 	mode: "optional" | "required",
 	factors: MergeFactors,
+	stepUpRecordable: boolean,
 ): SessionRequirement =>
 	createMfaRequirement({
 		mode,
@@ -98,7 +104,7 @@ const realRequirement = (
 			ttlSeconds: 600,
 		}),
 		stepUpPage: PAGE,
-		stepUpRecordable: true,
+		stepUpRecordable,
 		recentMfaMaxAgeSeconds: 300,
 		logger: consoleLogger,
 		...WITHOUT_MAIL,
@@ -106,11 +112,22 @@ const realRequirement = (
 		sealing: SEALING,
 	});
 
-const storeOf = (session: UserSession): UserSessionStore => ({
+/**
+ * Whether a row's store can record a second factor: every row's can,
+ * unless the row says its store cannot.
+ */
+const recordsSecondFactor = (row: MergeRow): boolean =>
+	!("storeRecords" in row && row.storeRecords === false);
+
+const storeOf = (
+	session: UserSession,
+	records: boolean,
+): UserSessionStore & Partial<SupportsSecondFactorUpdate> => ({
 	kind: "test",
 	create: async () => {},
 	get: async (sid) => (sid === session.sid ? session : null),
 	delete: async () => {},
+	...(records ? { recordSecondFactor: async () => null } : {}),
 });
 
 const claim = () =>
@@ -118,10 +135,11 @@ const claim = () =>
 
 /** What a composition registers under the row's mode: the real requirement, or — under off, which the module refuses — none. */
 const deps = (row: MergeRow): AdmissionDeps => ({
-	userSessionStore: row.session === null ? undefined : storeOf(row.session),
+	userSessionStore:
+		row.session === null ? undefined : storeOf(row.session, recordsSecondFactor(row)),
 	subjectRevocation: undefined,
 	requirements: resolverForTests(
-		row.mode === "off" ? [] : [realRequirement(row.mode, row.factors)],
+		row.mode === "off" ? [] : [realRequirement(row.mode, row.factors, recordsSecondFactor(row))],
 		{ issuer: ISSUER, actions: { "test.use": { grade: "use" } } },
 	),
 	acrTable: MERGE_ACR_TABLE,

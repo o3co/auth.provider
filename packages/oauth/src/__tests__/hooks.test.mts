@@ -19,9 +19,9 @@ import {
 	type AuditEvent,
 	type AuditSink,
 	type ClientRepository,
-	type Code,
 	type CodeRepository,
 	createSymmetricKeyStore,
+	type GrantContext,
 	type GrantPolicyHook,
 	type Logger,
 	type RateLimitDecision,
@@ -34,6 +34,8 @@ import { describe, expect, it, vi } from "vitest";
 import { createOAuthRouter } from "#/routes.mjs";
 import { OAUTH_ADMISSION_ACTIONS } from "./_helpers/admissionActions.mjs";
 import { authorizationServerRegistry } from "./_helpers/authorizationServerRegistry.mjs";
+import { codeRecord } from "./_helpers/codeRecord.mjs";
+import { createMockLogger } from "./_helpers/mockLogger.mjs";
 
 // A limiter outage is answered by the limiter's own `failMode`; the mock
 // config carries `rateLimit.failMode = "open"`, which the routes do not read.
@@ -98,11 +100,12 @@ const mockClientRepository: ClientRepository = {
 
 const mockCodeRepository: CodeRepository = {
 	// A Code requires client_id + redirect_uri.
-	createCode: async () => ({
-		code: "test-code",
-		client_id: "client1",
-		redirect_uri: "https://rp.example/cb",
-	}),
+	createCode: async () =>
+		codeRecord({
+			code: "test-code",
+			client_id: "client1",
+			redirect_uri: "https://rp.example/cb",
+		}),
 	findByCode: async () => null,
 	consumeByCode: async () => null,
 	removeByCode: async () => {},
@@ -280,12 +283,7 @@ describe("oauth routes — hooks", () => {
 		// audit sink drops during the same outage; `failMode = "closed"` adds
 		// 503 enforcement on top.
 		describe("the limiter's failMode + logger emission", () => {
-			const makeMockLogger = (): Logger & { error: ReturnType<typeof vi.fn> } => ({
-				debug: vi.fn(),
-				info: vi.fn(),
-				warn: vi.fn(),
-				error: vi.fn(),
-			});
+			const makeMockLogger = createMockLogger;
 
 			const brokenRateLimiter = (failMode: "open" | "closed"): RateLimiter => ({
 				kind: "broken",
@@ -478,6 +476,7 @@ describe("oauth routes — hooks", () => {
 			const clientRepo: ClientRepository = {
 				findById: async () => ({
 					clientId: "client-42",
+					tokenEndpointAuthMethod: "client_secret_basic",
 					allowedRedirectUris: ["https://example.test/cb"],
 					firstParty: true,
 					allowedScopes: ["read"],
@@ -488,11 +487,12 @@ describe("oauth routes — hooks", () => {
 			};
 			const codeRepo: CodeRepository = {
 				// A Code requires client_id + redirect_uri.
-				createCode: async () => ({
-					code: "auth-code-1",
-					client_id: "client1",
-					redirect_uri: "https://rp.example/cb",
-				}),
+				createCode: async () =>
+					codeRecord({
+						code: "auth-code-1",
+						client_id: "client1",
+						redirect_uri: "https://rp.example/cb",
+					}),
 				findByCode: async () => null,
 				consumeByCode: async () => null,
 				removeByCode: async () => {},
@@ -547,6 +547,7 @@ describe("oauth routes — hooks", () => {
 			const clientRepo: ClientRepository = {
 				findById: async () => ({
 					clientId: "client-1",
+					tokenEndpointAuthMethod: "client_secret_basic",
 					allowedRedirectUris: ["https://example.test/cb"],
 					firstParty: true,
 					allowedScopes: opts.allowedScopes ?? ["read", "write"],
@@ -559,13 +560,13 @@ describe("oauth routes — hooks", () => {
 					opts.captureCode?.(params);
 					// Echo identity fields from params so the returned Code
 					// satisfies the required shape.
-					return {
+					return codeRecord({
 						code: "code-1",
 						client_id: params.client_id,
 						redirect_uri: params.redirect_uri,
 						grantedScope: params.grantedScope,
 						grantedAudience: params.grantedAudience,
-					};
+					});
 				},
 				findByCode: async () => null,
 				consumeByCode: async () => null,
@@ -774,8 +775,6 @@ describe("oauth routes — hooks", () => {
 		it("redirects server_error when grantPolicy returns scopes outside client allowance", async () => {
 			const { app, clientRepo, codeRepo } = buildAuthorizeApp({
 				allowedScopes: ["read"],
-				// What an omitted `scope` parameter grants.
-				defaultScopes: ["read"],
 			});
 			const grantPolicy: GrantPolicyHook = {
 				kind: "escalating",
@@ -910,7 +909,7 @@ describe("oauth routes — hooks", () => {
 		it("authorization grant reads Code.grantedScope (not session.granted_scopes)", async () => {
 			// Simulate that /authorize ran earlier and persisted ["read"] on the Code,
 			// but the session got tampered to ["write"]. Code must win.
-			const persistedCode: Code = {
+			const persistedCode = codeRecord({
 				code: "code-xyz",
 				client_id: "client-1",
 				redirect_uri: "https://example.test/cb",
@@ -919,7 +918,7 @@ describe("oauth routes — hooks", () => {
 				code_challenge_method: "S256",
 				grantedScope: ["read"],
 				sid: "test-sid-1",
-			};
+			});
 			const codeRepo: CodeRepository = {
 				createCode: async () => persistedCode,
 				findByCode: async () => persistedCode,
@@ -938,6 +937,16 @@ describe("oauth routes — hooks", () => {
 				},
 			};
 			const handler = createAuthorizationGrant(deps);
+			// Keys no writer sets: the grant must not read them.
+			const tamperedSession: GrantContext["session"] & {
+				code_client_id: string;
+				granted_scopes: string[];
+			} = {
+				code: "code-xyz",
+				code_client_id: "client-1",
+				granted_scopes: ["write"],
+				user: { id: "u1" },
+			};
 
 			const { result } = await handler.handle({
 				body: {
@@ -946,12 +955,7 @@ describe("oauth routes — hooks", () => {
 					redirect_uri: "https://example.test/cb",
 					code_verifier: PKCE_CODE_VERIFIER,
 				},
-				session: {
-					code: "code-xyz",
-					code_client_id: "client-1",
-					granted_scopes: ["write"],
-					user: { id: "u1" },
-				},
+				session: tamperedSession,
 				issuer: "https://auth.example",
 				metadata: {},
 				authenticatedClient: {

@@ -16,6 +16,11 @@
 
 import {
 	type AdapterBuilder,
+	checkSubjectRevocationInstant,
+	clampSubjectRevocationBoundary,
+	consoleLogger,
+	DEFAULT_CLOCK_SKEW_MS,
+	type EventLogger,
 	SUBJECT_REVOCATION_MIN_RETENTION_MS,
 	type SubjectRevocation,
 	type SupportsSessionsOnlyRevocation,
@@ -26,6 +31,8 @@ export interface RedisSubjectRevocationOptions {
 	readonly client: SubjectRevocationClient;
 	/** Defaults to the bundle's production layout, `ss:rev:`. */
 	readonly keyPrefix?: string;
+	/** Where a clamped boundary is said, at warn. Absent, `consoleLogger`. */
+	readonly logger?: Pick<EventLogger, "warn">;
 }
 
 /**
@@ -37,9 +44,10 @@ export interface RedisSubjectRevocationOptions {
  * behind, must not move the line back and resurrect every token the first one
  * killed. Last-writer-wins does that, and a client-side read-compare-write
  * does it one round-trip later. So the comparison runs on the server in one
- * command (`setRevocationBoundaries`), and the same guard covers the entry's
- * expiry: shortening an in-force watermark would retire the line while tokens
- * it must refuse are still presentable. An expired key is an absent key, so a
+ * command (the client's `advanceRevocationBoundaries`, or
+ * `setRevocationBoundaries` over a client without it), and the same guard
+ * covers the entry's expiry: shortening an in-force watermark would retire the
+ * line while tokens it must refuse are still presentable. An expired key is an absent key, so a
  * reset after the previous watermark lapsed starts from its own value, as in
  * the in-process adapter.
  *
@@ -51,7 +59,13 @@ export interface RedisSubjectRevocationOptions {
  * the caller's to shorten: it must outlive a grant lifetime the code bounds
  * absolutely, even when the caller knows nothing of grants. A sessions-only
  * stamp sets no such floor.
- * See ADR 2026-09-17-federation-grants-offline-delegation, D13.
+ * See `packages/core/docs/adr/2026-09-17-federation-grants-offline-delegation.md`.
+ *
+ * A boundary later than the server's `TIME` plus `DEFAULT_CLOCK_SKEW_MS` is
+ * clamped to that in the same script (`advanceRevocationBoundaries`), and the
+ * clamp is said at warn after the write; a failing logger never fails the
+ * revocation. Over a client without that method the boundary is recorded
+ * unclamped, and construction says so at warn.
  */
 export function createRedisSubjectRevocation(
 	deps: RedisSubjectRevocationOptions,
@@ -70,22 +84,76 @@ export function createRedisSubjectRevocation(
 	) {
 		throw new Error(
 			"createRedisSubjectRevocation: this driver has no `setRevocationBoundaries`. " +
-				"It predates the two revocation boundaries of #593 (D13) and can only advance " +
-				"one, so a sessions-only stamp made through it would revoke the subject's " +
-				"federation grants. Upgrade the driver rather than the adapter.",
+				"Without it a driver can advance only one revocation boundary, so a sessions-only " +
+				"stamp made through it would revoke the subject's federation grants. Upgrade the " +
+				"driver rather than the adapter.",
 		);
 	}
+
+	const logger = deps.logger ?? consoleLogger;
+	const warn = (obj: Record<string, unknown>, msg: string): void => {
+		try {
+			logger.warn(obj, msg);
+		} catch {
+			// Only the signal is lost.
+		}
+	};
+	const advance =
+		typeof deps.client.advanceRevocationBoundaries === "function"
+			? deps.client.advanceRevocationBoundaries.bind(deps.client)
+			: undefined;
+	if (advance === undefined) warn({ store: "redis" }, "subject_revocation_clamp_unsupported");
 
 	/** What a `Date` can hold: ±100 000 000 days from the epoch (ECMA-262). */
 	const MAX_DATE_MS = 8_640_000_000_000_000;
 
-	/** Every comparison with NaN is false, so a NaN boundary covers nothing while looking like one. */
-	const instant = (value: Date, name: string): number => {
-		const ms = value?.getTime?.();
-		if (typeof ms !== "number" || Number.isNaN(ms)) {
-			throw new RangeError(`SubjectRevocation: ${name} must be a date`);
+	/**
+	 * Records `before`, clamped on the server's clock in the write's own
+	 * script, and then says a clamp at warn: the write first, since the
+	 * boundary is what ends tokens already issued.
+	 */
+	const record = async (
+		subject: string,
+		mode: "all" | "sessions",
+		before: Date,
+		expiresAt: Date,
+	): Promise<void> => {
+		const expiresAtMs = checkSubjectRevocationInstant(expiresAt, "expiresAt");
+		const beforeMs = checkSubjectRevocationInstant(before, "before");
+		if (advance === undefined) {
+			await deps.client.setRevocationBoundaries(
+				key(subject),
+				mode,
+				beforeMs,
+				expiresAtMs,
+				SUBJECT_REVOCATION_MIN_RETENTION_MS,
+			);
+			return;
 		}
-		return ms;
+		const { serverNowMs } = await advance(key(subject), mode, {
+			beforeMs,
+			expiresAtMs,
+			grantRetentionMs: SUBJECT_REVOCATION_MIN_RETENTION_MS,
+			skewMs: DEFAULT_CLOCK_SKEW_MS,
+		});
+		let clamp: ReturnType<typeof clampSubjectRevocationBoundary>;
+		try {
+			clamp = clampSubjectRevocationBoundary(before, serverNowMs);
+		} catch {
+			// A clock the client answered that is no instant: the boundary is
+			// recorded, and only whether it was clamped is unknown.
+			return;
+		}
+		if (!clamp.clamped) return;
+		warn(
+			{
+				store: "redis",
+				subject,
+				requestedBefore: new Date(beforeMs).toISOString(),
+				recordedBefore: clamp.boundary.toISOString(),
+			},
+			"subject_revocation_boundary_clamped",
+		);
 	};
 
 	/**
@@ -139,23 +207,11 @@ export function createRedisSubjectRevocation(
 		kind: "redis",
 
 		async revokeBefore(subject, before, expiresAt) {
-			await deps.client.setRevocationBoundaries(
-				key(subject),
-				"all",
-				instant(before, "before"),
-				instant(expiresAt, "expiresAt"),
-				SUBJECT_REVOCATION_MIN_RETENTION_MS,
-			);
+			await record(subject, "all", before, expiresAt);
 		},
 
 		async revokeSessionsBefore(subject, before, expiresAt) {
-			await deps.client.setRevocationBoundaries(
-				key(subject),
-				"sessions",
-				instant(before, "before"),
-				instant(expiresAt, "expiresAt"),
-				SUBJECT_REVOCATION_MIN_RETENTION_MS,
-			);
+			await record(subject, "sessions", before, expiresAt);
 		},
 
 		async revokedBefore(subject) {
@@ -177,13 +233,19 @@ export function createRedisSubjectRevocation(
  * switching between the two keeps the keyspace. A missing `client` throws at
  * boot, as in every other builder here, rather than at the first command.
  */
-export const redisSubjectRevocationBuilder: AdapterBuilder<SubjectRevocation> = (config, _ctx) => {
-	const c = config as { client?: SubjectRevocationClient; keyPrefix?: string };
+export const redisSubjectRevocationBuilder: AdapterBuilder<SubjectRevocation> = (config, ctx) => {
+	const c = config as {
+		client?: SubjectRevocationClient;
+		keyPrefix?: string;
+		logger?: Pick<EventLogger, "warn">;
+	};
 	if (!c.client) {
 		throw new Error("redisSubjectRevocationBuilder: 'client' option is required");
 	}
+	const logger = c.logger ?? ctx?.logger;
 	return createRedisSubjectRevocation({
 		client: c.client,
 		keyPrefix: c.keyPrefix ?? "ss:rev:",
+		...(logger !== undefined ? { logger } : {}),
 	});
 };

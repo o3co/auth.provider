@@ -378,7 +378,7 @@ accepted.
 
 | Variable | Default | Description |
 |---|---|---|
-| `HTTP_PORT` | `3000` | Port the server listens on |
+| `HTTP_PORT` | `3000` | Port the server listens on, `0` to `65535` in decimal digits; `0` lets the OS choose a free one. Set but empty, it fails boot |
 | `HTTP_TRUST_PROXY` | `false` | Express `trust proxy`: `false`, an address/CIDR list (`10.0.0.0/8,loopback`), a hop count (`1`), or `true`. **Required behind a load balancer** — otherwise every IP-keyed rate limit shares one bucket across all users. Prefer naming the proxy over `true`. See [Multi-replica deployments](#multi-replica-deployments) |
 | `HTTP_READINESS_TIMEOUT_MS` | `1000` | Per-probe deadline for `/readyz` (see [Health endpoints](#health-endpoints)) |
 | `LOGGING_LEVEL` | `info` | Minimum level emitted: `trace`\|`debug`\|`info`\|`warn`\|`error`\|`fatal`\|`silent`. Does **not** gate the audit trail — see [Audit trail](#audit-trail) |

@@ -120,6 +120,7 @@ export interface MfaStoreMarkEnrolledRequest {
 const BINDING_NAMES = {
 	password: true,
 	email_proof: true,
+	federated: true,
 	mfa: true,
 } as const satisfies Record<MfaStoreFactorBinding, true>;
 const BINDINGS: ReadonlySet<unknown> = new Set(Object.keys(BINDING_NAMES));
@@ -167,7 +168,7 @@ function checkLabel(value: unknown): string {
 /** A record as the wire carries it; a `RangeError` for one {@link readMfaStoreFactor} would not read back. */
 export function toMfaStoreFactor(record: MfaFactorRecord): MfaStoreFactor {
 	if (record.binding !== undefined && !BINDINGS.has(record.binding)) {
-		throw refuse('binding must be "password", "email_proof", "mfa" or absent');
+		throw refuse('binding must be "password", "email_proof", "federated", "mfa" or absent');
 	}
 	if (!isVersion(record.version)) throw refuse("version must be a safe non-negative integer");
 	if (!isMfaFactorKind(record.kind)) throw refuse("kind must be a hint token");

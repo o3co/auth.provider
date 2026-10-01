@@ -29,6 +29,7 @@ import {
 	type FederationTokenStore,
 	type GrantHandler,
 	jwksModule,
+	type LoginEntry,
 	type Module,
 	memoryAccessTokenDenylistModule,
 	memoryFederationTokenStoreModule,
@@ -55,6 +56,7 @@ import { describe, expect, it, vi } from "vitest";
 import { oauthModule } from "#/module.mjs";
 import { oauthAuthorizationModule } from "#/oauthAuthorization.mjs";
 import { oauthSessionModule } from "#/oauthSession.mjs";
+import { codeRecord } from "./_helpers/codeRecord.mjs";
 import { createMockLogger } from "./_helpers/mockLogger.mjs";
 import { withGrants, withOauthCaptures } from "./_helpers/sections.mjs";
 
@@ -85,11 +87,12 @@ const fakeClientRepository: ClientRepository = {
 
 const fakeCodeRepository: CodeRepository = {
 	// Code requires client_id + redirect_uri.
-	createCode: async () => ({
-		code: "fake-code",
-		client_id: "client1",
-		redirect_uri: "https://rp.example/cb",
-	}),
+	createCode: async () =>
+		codeRecord({
+			code: "fake-code",
+			client_id: "client1",
+			redirect_uri: "https://rp.example/cb",
+		}),
 	findByCode: async () => null,
 	consumeByCode: async () => null,
 	removeByCode: async () => {},
@@ -336,7 +339,7 @@ describe("oauthModule — the acr table in the served discovery document", () =>
 		} as never,
 	});
 	const boot = async (
-		extraModules: readonly Parameters<typeof createTestApp>[0]["modules"][number][],
+		extraModules: readonly Module[],
 		federations: Record<string, unknown> = {},
 	) => {
 		const config = acrConfig(federations);
@@ -565,7 +568,7 @@ describe("oauthModule + jwksModule — discovery/JWKS path agreement", () => {
 				...base.oauth,
 				revocation: { accessToken: "unsupported", subject: "unsupported" },
 			},
-		} as ReturnType<typeof makeValidAppConfig>;
+		} as unknown as ReturnType<typeof makeValidAppConfig>;
 		const handle = await createTestApp({
 			modules: [
 				oauthModule({ config }),
@@ -1142,7 +1145,7 @@ describe("oauthModule — the login trip is the loginEntry slot when a module pr
 									},
 								},
 							),
-						),
+						) as LoginEntry,
 				},
 			}),
 		]);

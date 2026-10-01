@@ -170,7 +170,7 @@ describe("createRedisMfaFactorStore — what is Redis-specific", () => {
 		// list — is refused at the write instead: one bad record written would
 		// make every factor of its subject unreadable. A date that is not one
 		// reads back as no Date; a version that is not a whole number is one no
-		// compare-and-set can match; a binding outside the three of ADR
+		// compare-and-set can match; a binding outside the four of ADR
 		// 2026-09-25-multi-factor-authentication, D24, or a field that is not
 		// the type the record declares, is not a record.
 		const prefix = freshPrefix();
@@ -183,7 +183,7 @@ describe("createRedisMfaFactorStore — what is Redis-specific", () => {
 			["version fractional", { version: 1.5 }],
 			["version negative", { version: -1 }],
 			["version NaN", { version: Number.NaN }],
-			["binding outside the three", { binding: "admin" }],
+			["binding outside the four", { binding: "admin" }],
 			["binding null", { binding: null }],
 			["kind not a string", { kind: 7 }],
 			["data not a string", { data: 7 }],

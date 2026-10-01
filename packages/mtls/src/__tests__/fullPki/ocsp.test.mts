@@ -58,6 +58,9 @@ import {
 	unknownNonCriticalExtension,
 } from "./pkiFactory.mjs";
 
+/** What `new Response` takes as its body. */
+type ResponseBody = ConstructorParameters<typeof Response>[0];
+
 const NOW = new Date("2027-01-01T00:00:00Z");
 const RESPONDER_URL = "http://ocsp.test/int";
 const MIRROR_URL = "http://ocsp.test/int-mirror";
@@ -1046,7 +1049,7 @@ describe("OCSP resolver — through the guarded fetch", () => {
 		const { int, leaf } = await chain();
 		const fetchImpl = vi.fn(
 			async () =>
-				new Response(new Uint8Array(4_096) as unknown as BodyInit, {
+				new Response(new Uint8Array(4_096) as unknown as ResponseBody, {
 					status: 200,
 					headers: { "content-type": "application/ocsp-response" },
 				}),
@@ -1061,7 +1064,7 @@ describe("OCSP resolver — through the guarded fetch", () => {
 		const bytes = await mintOcspResponse({ issuer: int, subject: leaf });
 		const fetchImpl = vi.fn(
 			async () =>
-				new Response(bytes as unknown as BodyInit, {
+				new Response(bytes as unknown as ResponseBody, {
 					status: 200,
 					headers: { "content-type": "text/html" },
 				}),
@@ -1094,7 +1097,7 @@ describe("OCSP resolver — through the guarded fetch", () => {
 				subject: leaf,
 				nonce: nonceOf(body) as Uint8Array,
 			});
-			return new Response(bytes as unknown as BodyInit, {
+			return new Response(bytes as unknown as ResponseBody, {
 				status: 200,
 				headers: { "content-type": "application/ocsp-response" },
 			});

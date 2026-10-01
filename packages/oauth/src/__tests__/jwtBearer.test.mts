@@ -447,7 +447,7 @@ describe("jwt-bearer grant — scope is a ceiling, never a grant", () => {
 describe("jwt-bearer grant — an omitted scope draws on defaultScopes, never the allowlist", () => {
 	const client = (over: Record<string, unknown>) =>
 		({ authenticatedClient: { clientId: "c1", ...over } }) as never;
-	const scopeOf = (result: { status: number } & Record<string, unknown>) =>
+	const scopeOf = (result: GrantResult) =>
 		"tokens" in result
 			? decodeJwt((result.tokens as { access_token: string }).access_token).scope
 			: expect.fail("expected tokens");
@@ -540,7 +540,7 @@ describe("jwt-bearer grant — grantPolicy is consulted, fail-closed", () => {
 			defaultScopes: ["read", "write"],
 		},
 	} as never;
-	const scopeOf = (result: { status: number } & Record<string, unknown>) =>
+	const scopeOf = (result: GrantResult) =>
 		"tokens" in result
 			? decodeJwt((result.tokens as { access_token: string }).access_token).scope
 			: expect.fail("expected tokens");
@@ -564,14 +564,22 @@ describe("jwt-bearer grant — grantPolicy is consulted, fail-closed", () => {
 
 	it("consults the policy for an unauthenticated caller too, with no clientId", async () => {
 		// RFC 7523 §3 makes client authentication optional; policy is not.
-		const evaluate = vi.fn(async (): Promise<GrantPolicyDecision> => ({ outcome: "allow" }));
+		const evaluate = vi.fn(
+			async (..._args: Parameters<GrantPolicyHook["evaluate"]>): Promise<GrantPolicyDecision> => ({
+				outcome: "allow",
+			}),
+		);
 		await build({ grantPolicy: policyOf(evaluate) }).handle(ctx({}, { authenticatedClient: null }));
 		expect(evaluate).toHaveBeenCalledTimes(1);
 		expect(evaluate.mock.calls[0]?.[0]).toMatchObject({ clientId: undefined, subject: "u-1" });
 	});
 
 	it("passes an omitted scope to the policy as undefined, not as an empty list", async () => {
-		const evaluate = vi.fn(async (): Promise<GrantPolicyDecision> => ({ outcome: "allow" }));
+		const evaluate = vi.fn(
+			async (..._args: Parameters<GrantPolicyHook["evaluate"]>): Promise<GrantPolicyDecision> => ({
+				outcome: "allow",
+			}),
+		);
 		await build({ grantPolicy: policyOf(evaluate) }).handle(ctx());
 		expect(evaluate.mock.calls[0]?.[0]).toMatchObject({ requestedScope: undefined });
 	});
@@ -657,7 +665,7 @@ describe("jwt-bearer grant — aud names the client's configured resource audien
 			...over,
 		},
 	});
-	const claimsOf = (result: { status: number } & Record<string, unknown>) =>
+	const claimsOf = (result: GrantResult) =>
 		"tokens" in result
 			? decodeJwt((result.tokens as { access_token: string }).access_token)
 			: expect.fail("expected tokens");
@@ -897,7 +905,10 @@ describe("jwt-bearer grant — aud names the client's configured resource audien
 		});
 
 		it("forwards resource to the policy under the flag, and nothing without it", async () => {
-			const evaluate = vi.fn(async () => ({ outcome: "allow" }) as GrantPolicyDecision);
+			const evaluate = vi.fn(
+				async (..._args: Parameters<GrantPolicyHook["evaluate"]>) =>
+					({ outcome: "allow" }) as GrantPolicyDecision,
+			);
 			await build({ config: flagOn, grantPolicy: policyOf(evaluate) }).handle(
 				ctx({ resource: "https://other.example" }, registered()),
 			);

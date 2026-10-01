@@ -48,9 +48,14 @@ import {
 	MERGE_ROW_GROUPS,
 	type MergeRow,
 	mergeAdmission,
+	mergeSessionStore,
 } from "#/session-admission/testing/merge.rows.mjs";
 import { resolverForTests } from "#/session-admission/testing/resolver.mjs";
-import type { UserSession, UserSessionStore } from "#/user-sessions/types.mjs";
+import {
+	supportsSecondFactorUpdate,
+	type UserSession,
+	type UserSessionStore,
+} from "#/user-sessions/types.mjs";
 import { TEST_ACTIONS } from "./actions.fixture.mjs";
 
 const { MFA, PHR, KBA } = MERGE_ACR;
@@ -79,10 +84,16 @@ const KNOWN_PRIMARIES: ReadonlySet<string> = new Set(["pwd", "fed"]);
 
 /**
  * A stand-in for the second-factor authority — the MFA requirement's `admit`:
- * its table for the `use` grade, under `mode` with `reach`. The MFA package's
- * own requirement runs the same rows in that package.
+ * its table for the `use` grade, under `mode` with `reach`, sending to log in
+ * a session it would step up when its store cannot record the step-up
+ * (`recordable` false), as the MFA requirement does. The MFA package's own
+ * requirement runs the same rows in that package.
  */
-const authority = (mode: MergeRow["mode"], reach: ReadonlySet<string>): SessionRequirement => ({
+const authority = (
+	mode: MergeRow["mode"],
+	reach: ReadonlySet<string>,
+	recordable = true,
+): SessionRequirement => ({
 	name: AUTHORITY,
 	secondFactorAuthority: true,
 	reach,
@@ -98,9 +109,10 @@ const authority = (mode: MergeRow["mode"], reach: ReadonlySet<string>): SessionR
 		if (primary === "fed" || authentication?.authentication?.mfaAt !== undefined) {
 			return { outcome: "met" };
 		}
-		return reach.size > 0
+		if (reach.size === 0) return { outcome: "unmet" };
+		return recordable
 			? { outcome: "step_up", whenStillUnmet: "reauthenticate" }
-			: { outcome: "unmet" };
+			: { outcome: "reauthenticate" };
 	},
 });
 
@@ -111,15 +123,19 @@ const storeOf = (session: UserSession): UserSessionStore => ({
 	delete: async () => {},
 });
 
+/** `storeOf` with the step-up capability: a store that can record a second factor. */
+const recordingStoreOf = (session: UserSession): UserSessionStore =>
+	Object.assign(storeOf(session), { recordSecondFactor: async () => null });
+
 const claim = () =>
 	cookieClaim({ session: { isAuthenticated: true, sid: "sid-1", user: { id: "user-1" } } });
 
-/** Admission's deps over `requirements`, registered on the issuer as boot registers them. */
+/** Admission's deps over `requirements` and `store`, registered on the issuer as boot registers them. */
 const depsOver = (
-	session: UserSession | null,
+	store: UserSessionStore | undefined,
 	requirements: SessionRequirementResolver,
 ): AdmissionDeps => ({
-	userSessionStore: session === null ? undefined : storeOf(session),
+	userSessionStore: store,
 	subjectRevocation: undefined,
 	requirements,
 	acrTable: MERGE_ACR_TABLE,
@@ -132,9 +148,13 @@ const depsOver = (
  * reaching requirements neither of which is the authority: the reach rules
  * boot holds a registration to are lifted, the snapshot kept.
  */
-const deps = (session: UserSession | null, requirements: SessionRequirement[]): AdmissionDeps =>
+const deps = (
+	session: UserSession | null,
+	requirements: SessionRequirement[],
+	store: (session: UserSession) => UserSessionStore = recordingStoreOf,
+): AdmissionDeps =>
 	depsOver(
-		session,
+		session === null ? undefined : store(session),
 		resolverForTests(requirements, { allowAnyReach: true, issuer: ISSUER, actions: TEST_ACTIONS }),
 	);
 
@@ -144,14 +164,14 @@ const deps = (session: UserSession | null, requirements: SessionRequirement[]): 
  * mapped onto the admission of that registered requirement.
  */
 const decide = async (row: MergeRow): Promise<{ admission: Admission; expected: Admission }> => {
-	const requirements = resolverForTests([authority(row.mode, MERGE_REACH[row.factors])], {
-		issuer: ISSUER,
-		actions: TEST_ACTIONS,
-	});
+	const requirements = resolverForTests(
+		[authority(row.mode, MERGE_REACH[row.factors], row.storeRecords !== false)],
+		{ issuer: ISSUER, actions: TEST_ACTIONS },
+	);
 	const registered = requirements.get(AUTHORITY);
 	if (registered === undefined) throw new Error("the stand-in did not register");
 	return {
-		admission: await admitSession(depsOver(row.session, requirements), {
+		admission: await admitSession(depsOver(mergeSessionStore(row), requirements), {
 			claim: claim(),
 			action: "test.use",
 			asks: { acrValues: row.acrValues ?? [] },
@@ -221,11 +241,14 @@ describe("mergeAdmission — the rows are the declared authority's", () => {
 			requirement: "acr",
 			session,
 		});
+		expect(
+			mergeAdmission({ outcome: "reauthenticate", requirement: "acr" }, session, undefined),
+		).toEqual({ outcome: "reauthenticate", requirement: "acr", session });
 		for (const named of [
 			decision,
 			{ outcome: "step_up", requirement: "acr", acrValues: [MFA] } as const,
 			{ outcome: "unmet", requirement: "baseline" } as const,
-			{ outcome: "reauthenticate" } as const,
+			{ outcome: "reauthenticate", requirement: "baseline" } as const,
 		]) {
 			expect(() => mergeAdmission(named, session, undefined), JSON.stringify(named)).toThrow(
 				/names the second-factor authority, and none is given/,
@@ -268,16 +291,17 @@ describe("mergeAdmission — the rows are the declared authority's", () => {
 	});
 });
 
+/** A requirement that is met, reaches `reach`, and steps up nowhere of its own. */
+const reaching = (name: string, reach: readonly string[]): SessionRequirement => ({
+	name,
+	reach: new Set(reach),
+	stepUpPage: reach.length > 0 ? { url: `/${name}`, params: { via: name } } : undefined,
+	remediations: [`${name}.step_up`],
+	hintKeys: [],
+	admit: async () => ({ outcome: "met" }),
+});
+
 describe("the merge — the rows the MFA table does not reach", () => {
-	/** A requirement that is met, reaches `reach`, and steps up nowhere of its own. */
-	const reaching = (name: string, reach: readonly string[]): SessionRequirement => ({
-		name,
-		reach: new Set(reach),
-		stepUpPage: reach.length > 0 ? { url: `/${name}`, params: { via: name } } : undefined,
-		remediations: [`${name}.step_up`],
-		hintKeys: [],
-		admit: async () => ({ outcome: "met" }),
-	});
 	const session = passwordSession(["pwd"]);
 	const ask = (requirements: SessionRequirement[], acrValues: readonly string[]) =>
 		admitSession(deps(session, requirements), {
@@ -464,5 +488,156 @@ describe("the merge — the rows the MFA table does not reach", () => {
 			action: "test.use",
 		});
 		expect(admission).toEqual({ outcome: "reauthenticate", requirement: "first", session: null });
+	});
+});
+
+describe("the merge — a step-up through the second-factor authority onto a session that cannot record it", () => {
+	const session = passwordSession(["pwd"]);
+	/** The authority, met under `optional`, reaching `reach`. */
+	const met = (reach: readonly string[]): SessionRequirement =>
+		authority("optional", new Set(reach));
+	const ask = (
+		requirements: SessionRequirement[],
+		acrValues: readonly string[],
+		options: { store?: (session: UserSession) => UserSessionStore; record?: UserSession } = {},
+	) =>
+		admitSession(deps(options.record ?? session, requirements, options.store), {
+			claim: claim(),
+			action: "test.use",
+			asks: { acrValues },
+		});
+
+	it("steps up through the authority onto a store with the capability and a primary that is told", async () => {
+		expect(await ask([met(["otp", "mfa"])], [MFA])).toMatchObject({
+			outcome: "step_up",
+			requirement: AUTHORITY,
+			acrValues: [MFA],
+		});
+	});
+
+	it("answers reauthenticate (acr) onto a store without the capability when only the authority finishes the entry", async () => {
+		expect(
+			await ask([met(["otp", "mfa"]), reaching("keys", ["swk"])], [MFA], { store: storeOf }),
+		).toEqual({ outcome: "reauthenticate", requirement: "acr", session });
+	});
+
+	it("answers reauthenticate (acr) onto a record whose primary cannot be told when only the authority finishes the entry", async () => {
+		const unknown: UserSession = { ...session, amr: ["kba"], authentication: undefined };
+		expect(await ask([met(["otp", "mfa"])], [MFA], { record: unknown })).toEqual({
+			outcome: "reauthenticate",
+			requirement: "acr",
+			session: unknown,
+		});
+	});
+
+	it("skips the authority and steps up through the next requirement whose reach finishes the entry", async () => {
+		expect(await ask([met(["hwk"]), reaching("keys", ["swk"])], [PHR], { store: storeOf })).toEqual(
+			{
+				outcome: "step_up",
+				requirement: "keys",
+				session,
+				view: viewOf(session),
+				page: { url: "/keys", params: { via: "keys" }, href: `${ISSUER}/keys?via=keys` },
+				acrValues: [PHR],
+				whenStillUnmet: "unmet",
+			},
+		);
+	});
+
+	it("steps up through a requirement that does not declare the authority onto a store without the capability", async () => {
+		expect(await ask([reaching("keys", ["swk"])], [PHR], { store: storeOf })).toMatchObject({
+			outcome: "step_up",
+			requirement: "keys",
+			acrValues: [PHR],
+		});
+	});
+
+	it("passes the authority's own step_up through onto a store without the capability: the requirement answers for its own step-up", async () => {
+		const stepping = authority("required", new Set(["otp", "mfa"]));
+		expect(await ask([stepping], [], { store: storeOf })).toEqual({
+			outcome: "step_up",
+			requirement: AUTHORITY,
+			session,
+			view: viewOf(session),
+			page: { url: "/verifier", params: {}, href: `${ISSUER}/verifier` },
+			acrValues: [],
+			whenStillUnmet: "reauthenticate",
+		});
+		expect(await ask([stepping], [MFA], { store: storeOf })).toMatchObject({
+			outcome: "step_up",
+			requirement: AUTHORITY,
+			acrValues: [MFA],
+			whenStillUnmet: "unmet",
+		});
+	});
+
+	it("reads the store's capability only when the merge would step up through the authority: a store whose probe throws still admits a session asked no acr", async () => {
+		const throwing = (record: UserSession): UserSessionStore =>
+			Object.defineProperty(storeOf(record), "recordSecondFactor", {
+				get: () => {
+					throw new Error("the probe was read");
+				},
+			});
+		expect(await ask([met(["otp", "mfa"])], [], { store: throwing })).toEqual({
+			outcome: "admitted",
+			session,
+			view: viewOf(session),
+			acr: undefined,
+		});
+		const held = passwordSession(["pwd", "otp", "mfa"], minutesAgo(1));
+		expect(
+			await ask([met(["otp", "mfa"])], [MFA], { store: throwing, record: held }),
+		).toMatchObject({ outcome: "admitted", acr: MFA });
+	});
+
+	it("probes the store admission read the session from, not the deps a second time", async () => {
+		let reads = 0;
+		const once = deps(session, [met(["otp", "mfa"])]);
+		const swapping = Object.defineProperty({ ...once }, "userSessionStore", {
+			get: () => (reads++ === 0 ? recordingStoreOf(session) : storeOf(session)),
+		});
+		const admission = await admitSession(swapping, {
+			claim: claim(),
+			action: "test.use",
+			asks: { acrValues: [MFA] },
+		});
+		expect(admission).toMatchObject({ outcome: "step_up" });
+		expect(reads).toBe(1);
+	});
+
+	it("keeps unmet (acr) when the authority registered no page: it could not have finished the entry either way", async () => {
+		const pageless: SessionRequirement = { ...met(["otp", "mfa"]), stepUpPage: undefined };
+		expect(await ask([pageless], [MFA], { store: storeOf })).toEqual({
+			outcome: "unmet",
+			requirement: "acr",
+			session,
+		});
+	});
+});
+
+describe("mergeSessionStore", () => {
+	const row = MERGE_ROW_GROUPS.flatMap((group) => group.rows).find(
+		(candidate): candidate is MergeRow & { session: UserSession } => candidate.session !== null,
+	);
+	if (row === undefined) throw new Error("the merge rows hold no row with a session");
+
+	it("answers no store for a row without a session", () => {
+		expect(mergeSessionStore({ ...row, session: null })).toBeUndefined();
+	});
+
+	it("answers the row's session for its own sid alone, and writes nothing", async () => {
+		const store = mergeSessionStore(row) as UserSessionStore;
+		expect(await store.get(row.session.sid)).toBe(row.session);
+		expect(await store.get(`${row.session.sid}-other`)).toBeNull();
+		await expect(store.create(row.session)).resolves.toBeUndefined();
+		await expect(store.delete(row.session.sid)).resolves.toBeUndefined();
+		expect(await store.get(row.session.sid)).toBe(row.session);
+	});
+
+	it("can record a second factor unless the row says its store cannot", () => {
+		expect(supportsSecondFactorUpdate(mergeSessionStore(row))).toBe(true);
+		expect(supportsSecondFactorUpdate(mergeSessionStore({ ...row, storeRecords: false }))).toBe(
+			false,
+		);
 	});
 });

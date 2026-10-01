@@ -406,7 +406,7 @@ export async function createOidcProvider(
 		for (const [key, value] of Object.entries(extra)) {
 			if (RESERVED_DELEGATED_AUTHORIZATION_PARAMS.has(key)) {
 				throw new Error(
-					`${label}: authorizationParams may not set "${key}" — this provider owns it (#593, D17)`,
+					`${label}: authorizationParams may not set "${key}" — this provider owns it`,
 				);
 			}
 			// A value that is not a string would be sent spelled out ("undefined"),

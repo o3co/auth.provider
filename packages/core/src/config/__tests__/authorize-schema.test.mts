@@ -59,6 +59,8 @@ describe("oauth.authorize schema — removed-field preprocess", () => {
 		expect(issue?.message).toMatch(/was removed/);
 		expect(issue?.message).toMatch(/firstParty: true/);
 		expect(issue?.message).toMatch(/Remove this field from your config/);
+		// The note states the rule; `removedIn` alone cites the release's CHANGELOG entry.
+		expect(issue?.message).not.toMatch(/#31[67]/);
 	});
 });
 

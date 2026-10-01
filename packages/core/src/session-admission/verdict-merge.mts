@@ -18,7 +18,10 @@
  * Step 7 of `admitSession`: the requirements' verdict and the `acr`
  * selection merged by the session-admission ADR's table. The hint of a
  * `step_up` it answers lists only the entries the stepping requirement's own
- * trip can finish.
+ * trip can finish. In the met + step_up row, a step-up through the
+ * second-factor authority is never offered for `acr_values` onto a session
+ * whose store has no `recordSecondFactor` or whose primary cannot be told:
+ * the answer is a new login (`reauthenticate`, `acr`) instead.
  */
 
 import type { AcrSelection } from "./acr.mjs";
@@ -34,6 +37,12 @@ export interface MergeContext {
 	/** The vouched `amr`. */
 	readonly held: readonly string[];
 	readonly table: AdmissionDeps["acrTable"];
+	/**
+	 * Whether a second factor can be recorded on the live session: the store
+	 * has the step-up capability and the record's primary can be told. Called
+	 * only where the met + step_up row would choose the authority.
+	 */
+	readonly recordable: () => boolean;
 }
 
 /** The merge table of ADR 2026-09-28-session-admission: `R` the requirements' verdict, `A` the acr selection (`undefined` when nothing was asked). */
@@ -100,18 +109,26 @@ const finishes = (
  * reach covers everything one alternative of a reachable entry lacks, with
  * the entries that requirement alone can finish as the hint — `undefined`
  * when no single requirement covers any, since no one trip can finish it.
+ * The second-factor authority is passed over when the session cannot record
+ * its trip; when it alone could have finished one, the answer is
+ * `reauthenticate` (`acr`).
  */
 function stepUpThroughOne(
 	reachable: readonly string[],
 	context: MergeContext,
 	live: LiveRecord,
 ): Admission | undefined {
+	let unrecordable = false;
 	for (const [name, requirement] of context.requirements) {
 		// What this requirement's reach alone can finish, beside what is held.
 		const finishable = reachable.filter((acr: string) => finishes(context, requirement, acr));
 		// A requirement whose reach covers an entry registered a page: boot
 		// holds a non-empty reach to one. Without one nothing could finish it.
 		if (finishable.length > 0 && requirement.stepUpPage !== undefined) {
+			if (requirement.secondFactorAuthority && !context.recordable()) {
+				unrecordable = true;
+				continue;
+			}
 			return {
 				outcome: "step_up",
 				requirement: name,
@@ -124,5 +141,7 @@ function stepUpThroughOne(
 			};
 		}
 	}
-	return undefined;
+	return unrecordable
+		? { outcome: "reauthenticate", requirement: "acr", session: live.session }
+		: undefined;
 }

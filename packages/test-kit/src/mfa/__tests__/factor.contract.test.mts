@@ -20,7 +20,8 @@
  * the contract fails the case that names it.
  */
 
-import { type MfaFactor, normaliseMailAddress } from "@o3co/auth-provider-core";
+import { createHash, randomBytes } from "node:crypto";
+import { type MfaFactor, type MfaFactorData, normaliseMailAddress } from "@o3co/auth-provider-core";
 import {
 	createTestMfaDigests,
 	createTestMfaFactor,
@@ -63,6 +64,10 @@ const RULES = {
 	verifyMalformed: "verify answers malformed for a proof it cannot read, and never throws for one",
 	verify:
 		"verify takes a valid proof, names a factor the subject holds, and answers next data that survives a JSON round trip",
+	identity:
+		"identity, when present, answers the enrolled data a non-empty string, the same at a second reading, through another JSON round trip, and for the next data a verification answers",
+	identityUnreadable:
+		"identity, when present, answers a non-empty string or undefined over data it cannot read, never one string for two of them unless it is the enrolled data's own, and never throws",
 } as const;
 
 const USER = { id: "u-contract", username: "contract", email: "contract@example.com" };
@@ -76,6 +81,26 @@ const inputFor = (
 	user: USER,
 	...testMfaFactorProofs,
 });
+
+/**
+ * An identity as a factor might answer it: for the double that mails, its
+ * address digest, key id and digest; otherwise a digest of its secret. None
+ * when the data holds neither. The digest of the secret is a stand-in for
+ * these tests alone: a real factor's identity is never derived from a
+ * secret, since an unsalted hash of a secret is a verifier for it.
+ */
+const identityOf = (data: MfaFactorData): string | undefined => {
+	const { secret, addressDigest } = data as {
+		readonly secret?: unknown;
+		readonly addressDigest?: { readonly keyId?: unknown; readonly digest?: unknown } | null;
+	};
+	if (typeof secret === "string") return createHash("sha256").update(secret).digest("base64url");
+	const { keyId, digest } = addressDigest ?? {};
+	return typeof keyId === "string" && typeof digest === "string" ? `${keyId}:${digest}` : undefined;
+};
+
+/** The double, answering `identity` as {@link identityOf} does. */
+const identified = (factor: MfaFactor): MfaFactor => ({ ...factor, identity: identityOf });
 
 /** The names of the cases the factors `input` builds fail. */
 const failing = async (input: MfaFactorContractInput): Promise<string[]> => {
@@ -100,6 +125,12 @@ describe("mfaFactorContract", () => {
 		expect(await failing(inputFor({ challenge: true }))).toEqual([]);
 		expect(await failing(inputFor({ mail: true }))).toEqual([]);
 		expect(await failing(inputFor({ kind: "test_2", amrValues: ["hwk", "swk"] }))).toEqual([]);
+	});
+
+	it("passes the double with an identity of what its data records, with and without a challenge, and with mail", async () => {
+		expect(await failing(inputFor({}, identified))).toEqual([]);
+		expect(await failing(inputFor({ challenge: true }, identified))).toEqual([]);
+		expect(await failing(inputFor({ mail: true }, identified))).toEqual([]);
 	});
 
 	it("passes a factor that holds every call to the account's id as its subject, enrollment and verification alike", async () => {
@@ -819,5 +850,76 @@ describe("mfaFactorContract", () => {
 		expect(await failing(rewrapping(() => undefined))).toEqual([RULES.rotated]);
 		// The recorded digest kept, not the one handed.
 		expect(await failing(rewrapping((ctx) => ctx.factor.data))).toEqual([RULES.rotated]);
+	});
+	it("fails an identity that answers no string, or an empty one, for the data its enrollment completes with", async () => {
+		expect(
+			await failing(inputFor({}, (factor) => ({ ...factor, identity: () => undefined }))),
+		).toEqual([RULES.identity]);
+		// An empty string is no identity over data it cannot read either.
+		expect(await failing(inputFor({}, (factor) => ({ ...factor, identity: () => "" })))).toEqual([
+			RULES.identity,
+			RULES.identityUnreadable,
+		]);
+	});
+
+	it("fails an identity that answers another string at each reading of one record's data", async () => {
+		expect(
+			await failing(
+				inputFor({}, (factor) => ({
+					...factor,
+					identity: () => randomBytes(8).toString("hex"),
+				})),
+			),
+		).toEqual([RULES.identity]);
+	});
+
+	it("fails an identity that a verification's next data changes", async () => {
+		expect(
+			await failing(
+				inputFor({}, (factor) => ({
+					...factor,
+					identity: (data) => JSON.stringify(data),
+					verify: async (ctx) => {
+						const verdict = await factor.verify(ctx);
+						return verdict.ok
+							? { ...verdict, next: { ...ctx.factor.data, usedAtMs: ctx.nowMs } }
+							: verdict;
+					},
+				})),
+			),
+		).toEqual([RULES.identity]);
+	});
+
+	it("fails an identity that throws, or answers what is no string, over data it cannot read", async () => {
+		const over = (unreadable: (data: MfaFactorData) => string | undefined) =>
+			inputFor({}, (factor) => ({
+				...factor,
+				identity: (data) => (typeof data.secret === "string" ? identityOf(data) : unreadable(data)),
+			}));
+		expect(
+			await failing(
+				over(() => {
+					throw new TypeError("no secret");
+				}),
+			),
+		).toEqual([RULES.identityUnreadable]);
+		expect(await failing(over(() => 7 as never))).toEqual([RULES.identityUnreadable]);
+		expect(await failing(over(() => ""))).toEqual([RULES.identityUnreadable]);
+	});
+
+	it("fails an identity that answers one string for two data it cannot read", async () => {
+		// Read through a member without checking it: a removed digest, or one that
+		// is a number or a string, answers "undefined:undefined" alike.
+		const careless = (factor: MfaFactor): MfaFactor => ({
+			...factor,
+			identity: (data) => {
+				const digest = data.addressDigest as
+					| { readonly keyId?: unknown; readonly digest?: unknown }
+					| null
+					| undefined;
+				return `${String(digest?.keyId)}:${String(digest?.digest)}`;
+			},
+		});
+		expect(await failing(inputFor({ mail: true }, careless))).toEqual([RULES.identityUnreadable]);
 	});
 });

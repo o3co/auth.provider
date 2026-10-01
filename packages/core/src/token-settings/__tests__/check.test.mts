@@ -133,6 +133,8 @@ describe("checkOAuthTokenSettings", () => {
 			const label = `${member} in ${JSON.stringify(value)}`;
 			expect(() => checkOAuthTokenSettings(value, CONFIG), label).toThrow(RangeError);
 			expect(() => checkOAuthTokenSettings(value, CONFIG), label).toThrow(member);
+			// The refusal states the rule it enforces, with no issue number.
+			expect(() => checkOAuthTokenSettings(value, CONFIG), label).not.toThrow(/#\d/);
 		}
 	});
 

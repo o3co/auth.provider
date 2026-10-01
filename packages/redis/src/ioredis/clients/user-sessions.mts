@@ -16,8 +16,7 @@
 
 /**
  * The session stores' clients over one ioredis connection. Every MULTI/EXEC reply is checked
- * for a queued failure, and the subject index's sweep and the revocation record's write run
- * EVALSHA-first under a cache flag of this module.
+ * for a queued failure, and every script runs through `runScript`, EVALSHA-first.
  */
 
 import type { Redis } from "ioredis";
@@ -32,20 +31,12 @@ import type {
 	SubjectSessionIndexMultiClient,
 	UserSessionStoreClient,
 } from "../../clients.mjs";
-import { assertPipelineSucceeded, isNoScriptError, runScript } from "../commands.mjs";
+import { assertPipelineSucceeded, runScript } from "../commands.mjs";
 import {
-	LUA_PRUNE_AND_LIST,
-	LUA_PRUNE_AND_LIST_SHA,
-	LUA_SET_REVOCATION_BOUNDARIES,
-	LUA_SET_REVOCATION_BOUNDARIES_SHA,
+	PRUNE_AND_LIST,
 	REPLACE_IF_UNCHANGED,
+	SET_REVOCATION_BOUNDARIES,
 } from "../scripts/user-sessions.mjs";
-
-/** Script-cache residency flag for {@link LUA_SET_REVOCATION_BOUNDARIES}. */
-let watermarkScriptCached = false;
-
-/** Script-cache residency flag for {@link LUA_PRUNE_AND_LIST}. */
-let pruneAndListScriptCached = false;
 
 export function makeIoredisUserSessionStoreClient(io: Redis): UserSessionStoreClient {
 	const userSessionStoreClient: UserSessionStoreClient = {
@@ -197,20 +188,8 @@ export function makeIoredisSubjectSessionIndexClient(io: Redis): SubjectSessionI
 	const subjectSessionIndexClient: SubjectSessionIndexClient = {
 		multi: () => buildSubjectIndexMulti(io.multi()),
 		zAdd: (k, e) => io.zadd(k, e.score, e.value) as Promise<unknown> as Promise<number>,
-		async pruneExpiredAndList(key) {
-			// EVALSHA-first with a NOSCRIPT fallback, as above.
-			if (pruneAndListScriptCached) {
-				try {
-					return (await io.evalsha(LUA_PRUNE_AND_LIST_SHA, 1, key)) as string[];
-				} catch (err) {
-					if (!isNoScriptError(err)) throw err;
-					pruneAndListScriptCached = false;
-				}
-			}
-			const r = (await io.eval(LUA_PRUNE_AND_LIST, 1, key)) as string[];
-			pruneAndListScriptCached = true;
-			return r;
-		},
+		pruneExpiredAndList: async (key) =>
+			(await runScript(io, PRUNE_AND_LIST, [key], [])) as string[],
 		zRem: (k, m) => io.zrem(k, m) as Promise<number>,
 		unlink: (k) => io.unlink(k),
 	};
@@ -220,28 +199,29 @@ export function makeIoredisSubjectSessionIndexClient(io: Redis): SubjectSessionI
 export function makeIoredisSubjectRevocationClient(io: Redis): SubjectRevocationClient {
 	const subjectRevocationClient: SubjectRevocationClient = {
 		get: (k) => io.get(k),
-		async setRevocationBoundaries(key, mode, beforeMs, expiresAtMs, grantRetentionMs) {
-			// EVALSHA-first with a NOSCRIPT fallback to EVAL; see `scriptCached` in
-			// `./federation-tokens.mts`.
-			const args = [
-				key,
-				mode,
-				String(beforeMs),
-				String(expiresAtMs),
-				String(grantRetentionMs),
-			] as const;
-			if (watermarkScriptCached) {
-				try {
-					return (await io.evalsha(LUA_SET_REVOCATION_BOUNDARIES_SHA, 1, ...args)) as string;
-				} catch (err) {
-					if (!isNoScriptError(err)) throw err;
-					watermarkScriptCached = false;
-				}
-			}
-			const stored = (await io.eval(LUA_SET_REVOCATION_BOUNDARIES, 1, ...args)) as string;
-			// EVAL implicitly loads the script into Redis's server-side cache.
-			watermarkScriptCached = true;
-			return stored;
+		setRevocationBoundaries: async (key, mode, beforeMs, expiresAtMs, grantRetentionMs) => {
+			const [value] = (await runScript(
+				io,
+				SET_REVOCATION_BOUNDARIES,
+				[key],
+				[mode, String(beforeMs), String(expiresAtMs), String(grantRetentionMs)],
+			)) as [string, string];
+			return value;
+		},
+		advanceRevocationBoundaries: async (key, mode, write) => {
+			const [value, serverNow] = (await runScript(
+				io,
+				SET_REVOCATION_BOUNDARIES,
+				[key],
+				[
+					mode,
+					String(write.beforeMs),
+					String(write.expiresAtMs),
+					String(write.grantRetentionMs),
+					String(write.skewMs),
+				],
+			)) as [string, string];
+			return { value, serverNowMs: Number(serverNow) };
 		},
 	};
 	return subjectRevocationClient;

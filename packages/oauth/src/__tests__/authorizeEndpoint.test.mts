@@ -31,6 +31,7 @@ import {
 	type AuditSink,
 	type ClientRepository,
 	type CodeRepository,
+	type CreateCodeInput,
 	createSymmetricKeyStore,
 	type FederationProvider,
 	type GrantPolicyDecision,
@@ -54,6 +55,7 @@ import {
 import { createOAuthRouter } from "#/routes.mjs";
 import { OAUTH_ADMISSION_ACTIONS } from "./_helpers/admissionActions.mjs";
 import { authorizationServerRegistry } from "./_helpers/authorizationServerRegistry.mjs";
+import { codeRecord } from "./_helpers/codeRecord.mjs";
 import { createMockLogger } from "./_helpers/mockLogger.mjs";
 
 const CLIENT_ID = "client-a";
@@ -93,7 +95,7 @@ const makeApp = async (opts: {
 	/** `createCode` rejects (code store outage). */
 	createCodeThrows?: boolean;
 	/** Spy target: receives the createCode params. */
-	createCode?: ReturnType<typeof vi.fn>;
+	createCode?: (params: CreateCodeInput) => Promise<unknown>;
 	/** Session object the request carries; default authenticated user-1. */
 	session?: Record<string, unknown>;
 	/** Pass `false` to compose without an express-session store. */
@@ -141,7 +143,11 @@ const makeApp = async (opts: {
 	};
 	const createCode =
 		opts.createCode ??
-		vi.fn(async () => ({ code: "code-x", client_id: CLIENT_ID, redirect_uri: REDIRECT_URI }));
+		vi.fn(async (_params: CreateCodeInput) => ({
+			code: "code-x",
+			client_id: CLIENT_ID,
+			redirect_uri: REDIRECT_URI,
+		}));
 	const codeRepository: CodeRepository = {
 		createCode: async (params) => {
 			if (opts.createCodeThrows) throw new Error("store down");
@@ -729,7 +735,7 @@ describe("/authorize — policy evaluation edges", () => {
 	});
 
 	it("passes requestedScope as undefined when no scope was sent", async () => {
-		const evaluate = vi.fn(async () => ({ outcome: "allow" as const }));
+		const evaluate = vi.fn(async (_input: unknown) => ({ outcome: "allow" as const }));
 		const { app } = await makeApp({ grantPolicy: { kind: "test", evaluate } });
 		const res = await authorize(app, baseQuery);
 		expect(redirectParams(res).get("code")).toBe("code-x");
@@ -970,9 +976,9 @@ describe("/authorize — code issuance failure", () => {
 
 describe("/authorize — success audit subject (authorize.granted)", () => {
 	it("emits no authorize.granted for a session whose user has no id: such a cookie is not admitted, and the browser is sent to log in", async () => {
-		const record = vi.fn(async () => {});
+		const record = vi.fn(async (_event: AuditEvent) => {});
 		const { app, createCode } = await makeApp({
-			auditSink: { record },
+			auditSink: { kind: "test", record },
 			session: { isAuthenticated: true, user: {} },
 		});
 		const res = await authorize(app, baseQuery);
@@ -983,8 +989,8 @@ describe("/authorize — success audit subject (authorize.granted)", () => {
 	});
 
 	it("emits authorize.granted with the admitted session's subject", async () => {
-		const record = vi.fn(async () => {});
-		const { app } = await makeApp({ auditSink: { record } });
+		const record = vi.fn(async (_event: AuditEvent) => {});
+		const { app } = await makeApp({ auditSink: { kind: "test", record } });
 		const res = await authorize(app, baseQuery);
 		expect(redirectParams(res).get("code")).toBe("code-x");
 		const event = record.mock.calls.find(
@@ -999,9 +1005,9 @@ describe("/authorize — rejection audit vocabulary (authorize.rejected)", () =>
 	it("emits authorize.rejected when the client is not registered for the code grant", async () => {
 		// /authorize rejections carry their own name, not the token endpoint's
 		// `token.issued.failure`, so the success/failure pair names one operation.
-		const record = vi.fn(async () => {});
+		const record = vi.fn(async (_event: AuditEvent) => {});
 		const { app } = await makeApp({
-			auditSink: { record },
+			auditSink: { kind: "test", record },
 			client: { allowedGrantTypes: ["client_credentials"] },
 		});
 		const res = await authorize(app, baseQuery);
@@ -1016,8 +1022,11 @@ describe("/authorize — rejection audit vocabulary (authorize.rejected)", () =>
 	});
 
 	it("emits authorize.rejected when scope is omitted and the client declares no defaultScopes", async () => {
-		const record = vi.fn(async () => {});
-		const { app } = await makeApp({ auditSink: { record }, client: { defaultScopes: undefined } });
+		const record = vi.fn(async (_event: AuditEvent) => {});
+		const { app } = await makeApp({
+			auditSink: { kind: "test", record },
+			client: { defaultScopes: undefined },
+		});
 		const res = await authorize(app, baseQuery);
 		expect(redirectParams(res).get("error")).toBe("invalid_scope");
 		expect(record).toHaveBeenCalledWith(
@@ -1490,7 +1499,11 @@ describe("/authorize — step-up and re-authentication", () => {
 		return new Date();
 	};
 	const mintingCode = () =>
-		vi.fn(async () => ({ code: "code-x", client_id: CLIENT_ID, redirect_uri: REDIRECT_URI }));
+		vi.fn(async (_params: CreateCodeInput) => ({
+			code: "code-x",
+			client_id: CLIENT_ID,
+			redirect_uri: REDIRECT_URI,
+		}));
 	/** The login-page redirect, with the round-tripped authorize URL parsed. */
 	const loginRedirectTo = (res: request.Response): URL => {
 		expect(res.status).toBe(302);
@@ -1605,7 +1618,7 @@ describe("/authorize — step-up and re-authentication", () => {
 				{ prompt: "login", reauth_after: "0" },
 				{ max_age: "60", reauth_ask: "not-an-ask-this-server-minted" },
 				{ prompt: "login", reauth_ask: "a".repeat(43) },
-			]) {
+			] as Query[]) {
 				const res = await authorize(harness.app, { ...baseQuery, ...forged });
 				// The login page, every time — never a code.
 				loginRedirectTo(res);
@@ -2109,7 +2122,8 @@ describe("/authorize — the acr table at boot", () => {
 			),
 			clientRepository: { findById: async () => null, authenticate: async () => null },
 			codeRepository: {
-				createCode: async () => ({ code: "c", client_id: CLIENT_ID, redirect_uri: REDIRECT_URI }),
+				createCode: async () =>
+					codeRecord({ code: "c", client_id: CLIENT_ID, redirect_uri: REDIRECT_URI }),
 				findByCode: async () => null,
 				consumeByCode: async () => null,
 				removeByCode: async () => {},

@@ -47,8 +47,10 @@ import { createRedisUserSessionStore } from "../userSessionStore.mjs";
  * `redisSessionStores`, the section's old path, refuses boot naming it. The
  * optional `logger` goes to the two stores that report a stored record they
  * cannot read, the user-session store (`user_session_corrupt_envelope`) and
- * the RP registry (`session_rp_registry_corrupt_envelope`); `consoleLogger`
- * when it is empty.
+ * the RP registry (`session_rp_registry_corrupt_envelope`), and to the
+ * revocation store, which says a clamped boundary
+ * (`subject_revocation_boundary_clamped`) and a client that cannot clamp
+ * (`subject_revocation_clamp_unsupported`); `consoleLogger` when it is empty.
  */
 export const redisSessionStoresModule = defineModule({
 	name: "redis-session-stores",
@@ -107,6 +109,7 @@ export const redisSessionStoresModule = defineModule({
 			return createRedisSubjectRevocation({
 				client: deps.subjectRevocationClient,
 				keyPrefix: `${deps.section.keyPrefix}rev:`,
+				...(deps.logger !== undefined ? { logger: deps.logger } : {}),
 			});
 		},
 	},

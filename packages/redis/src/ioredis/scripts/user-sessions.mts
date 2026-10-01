@@ -19,7 +19,6 @@
  * the server's clock, and the subject revocation record's forward-only write.
  */
 
-import { createHash } from "node:crypto";
 import { defineScript } from "./define.mjs";
 
 /**
@@ -39,8 +38,13 @@ return 0
 /**
  * The subject revocation record's only write: both boundaries (sessions, grants) in one key,
  * one atomic step. `KEYS[1]` = the record; `ARGV` = mode (`all` | `sessions`), `before` and the
- * proposed expiry (epoch ms), the grant retention (ms). Returns the value written; a stored value
- * it cannot read is refused with an error.
+ * proposed expiry (epoch ms), the grant retention (ms), and optionally the clock skew (whole ms,
+ * at most a day).
+ * Returns the value written and the server's `TIME` in epoch ms; a stored value it cannot read is
+ * refused with an error.
+ *
+ * Given the skew, `before` is clamped to `TIME` plus the skew before anything else reads it: a
+ * boundary further ahead is no replica's clock reading. One behind `TIME` is kept as given.
  *
  * Boundaries and expiry only move forward: a boundary moved back resurrects tokens an earlier
  * revocation killed, and a shorter expiry retires the record while tokens it must refuse are
@@ -56,7 +60,7 @@ return 0
  * `v1:` records exist an old writer can move the sessions boundary backward, so drain old
  * writers first. See packages/core/docs/adr/2026-09-17-federation-grants-offline-delegation.md.
  */
-export const LUA_SET_REVOCATION_BOUNDARIES = `
+const LUA_SET_REVOCATION_BOUNDARIES = `
 local mode = ARGV[1]
 -- What a Date can hold (ECMA-262). A stored value outside it is not a
 -- boundary: the read path refuses it, and carrying it forward here would
@@ -68,9 +72,18 @@ end
 local before = tonumber(ARGV[2])
 local expiresAt = tonumber(ARGV[3])
 local retention = tonumber(ARGV[4])
-if before == nil or expiresAt == nil or retention == nil then
+-- A skew is whole milliseconds, at most a day: tonumber also takes nan and
+-- inf, which would skip the clamp, and a negative one moves the bound back.
+local MAX_SKEW = 86400000
+local skew = ARGV[5] and tonumber(ARGV[5])
+local skewInvalid = ARGV[5] ~= nil and not (skew ~= nil and skew == skew and skew >= 0
+  and skew <= MAX_SKEW and math.floor(skew) == skew)
+if before == nil or expiresAt == nil or retention == nil or skewInvalid then
   return redis.error_reply("subject revocation: non-numeric argument")
 end
+local t = redis.call("TIME")
+local now = tonumber(t[1]) * 1000 + math.floor(tonumber(t[2]) / 1000)
+if skew ~= nil and before > now + skew then before = now + skew end
 
 local sessions = nil
 local grants = nil
@@ -127,13 +140,8 @@ if persistent then
 else
   redis.call("SET", KEYS[1], value, "PXAT", expiresAt)
 end
-return value
+return { value, string.format("%.0f", now) }
 `.trim();
-
-/** See {@link LUA_COMPARE_AND_DELETE_SHA} for why the digest is precomputed. */
-export const LUA_SET_REVOCATION_BOUNDARIES_SHA = createHash("sha1")
-	.update(LUA_SET_REVOCATION_BOUNDARIES)
-	.digest("hex");
 
 /**
  * Sweep-then-list for the subject session index. `KEYS[1]` = the subject's sorted set; returns
@@ -144,14 +152,13 @@ export const LUA_SET_REVOCATION_BOUNDARIES_SHA = createHash("sha1")
  * between them. One script makes the sweep and the read agree on the boundary. A
  * non-deterministic `TIME` is fine: Redis 7 replicates scripts by their effects.
  */
-export const LUA_PRUNE_AND_LIST = `
+const LUA_PRUNE_AND_LIST = `
 local t = redis.call("TIME")
 local now = tonumber(t[1]) * 1000 + math.floor(tonumber(t[2]) / 1000)
 redis.call("ZREMRANGEBYSCORE", KEYS[1], "-inf", now)
 return redis.call("ZRANGEBYSCORE", KEYS[1], now, "+inf")
 `.trim();
 
-/** See {@link LUA_COMPARE_AND_DELETE_SHA} for why the digest is precomputed. */
-export const LUA_PRUNE_AND_LIST_SHA = createHash("sha1").update(LUA_PRUNE_AND_LIST).digest("hex");
-
 export const REPLACE_IF_UNCHANGED = defineScript(LUA_REPLACE_IF_UNCHANGED);
+export const SET_REVOCATION_BOUNDARIES = defineScript(LUA_SET_REVOCATION_BOUNDARIES);
+export const PRUNE_AND_LIST = defineScript(LUA_PRUNE_AND_LIST);
