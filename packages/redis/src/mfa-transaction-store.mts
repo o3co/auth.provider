@@ -127,9 +127,11 @@ import {
 	consoleLogger,
 	DEFAULT_CLOCK_SKEW_MS,
 	defineModule,
+	type EventLogger,
 	type FirstBindingMark,
 	firstBindingAnswer,
 	isStorableExpiry,
+	loggableError,
 	MFA_CLOCK_SKEW_ALLOWANCE_MS,
 	MFA_MAX_TRANSACTIONS_PER_BINDING,
 	MFA_RECOVERY_AUTHORIZATION_MAX_MS,
@@ -169,6 +171,12 @@ export interface RedisMfaTransactionStoreOptions {
 	 * `Date.now`.
 	 */
 	readonly now?: () => number;
+	/**
+	 * Where a binding index step that failed after its operation answered is
+	 * warned (`mfa_transaction_evict_failed`, `mfa_transaction_unindex_failed`).
+	 * Default `consoleLogger`.
+	 */
+	readonly logger?: Pick<EventLogger, "warn">;
 }
 
 /** How each patch field is written into the hash. */
@@ -416,31 +424,51 @@ export function createRedisMfaTransactionStore(
 		options.keyPrefix ?? DEFAULT_REDIS_MFA_TRANSACTION_STORE_KEY_PREFIX,
 		"MfaTransactionStore (redis)",
 	);
+	const logger = options.logger ?? consoleLogger;
 	const txKey = (id: string): string => `${keyPrefix}tx:{${mfaKeyPart(id)}}`;
 	const indexKey = (digest: string): string => `${keyPrefix}binding:{${digest}}`;
 	/** A transaction's member in its binding's index. */
 	const memberOf = (incarnation: string, id: string): string => `${incarnation}:${mfaKeyPart(id)}`;
 	/**
 	 * Takes a transaction already gone out of its binding's index. Best
-	 * effort: the operation that removed it has answered, and a member left
-	 * behind leaves first at the next create past the cap, its eviction
-	 * deleting nothing (the incarnation is gone).
+	 * effort: the operation that removed it has answered, and must keep its
+	 * answer. A member that fails to leave is warned, and counts for a
+	 * transaction that is gone until its `expiresAtMs`: it scores late, so it
+	 * is not taken out first, and meanwhile a create past the cap may end a
+	 * live transaction early. Its own eviction deletes nothing (the
+	 * incarnation is gone).
 	 */
-	const unindex = async (removed: Partial<MfaRemovedTransaction>, id: string): Promise<void> => {
+	const unindex = async (
+		removed: Partial<MfaRemovedTransaction>,
+		id: string,
+		operation: "consume" | "reserveAttempt",
+	): Promise<void> => {
 		const { index, incarnation } = removed;
 		if (index === undefined || incarnation === undefined) return;
 		if (!isKeyText(index) || !isKeyText(incarnation)) return;
 		await client
 			.unindexTransaction(indexKey(index), memberOf(incarnation, id))
-			.catch(() => undefined);
+			.catch((err: unknown) =>
+				logger.warn({ operation, err: loggableError(err) }, "mfa_transaction_unindex_failed"),
+			);
 	};
-	/** Ends a transaction its binding's index took out, while it holds the incarnation the member names. */
+	/**
+	 * Ends a transaction its binding's index took out, while it holds the
+	 * incarnation the member names. Best effort: the create that took it out
+	 * has written and indexed its own transaction, and a failed eviction must
+	 * not turn that working ceremony into an outage. It is warned, and the
+	 * transaction not ended stays, one past the cap, until it expires.
+	 */
 	const evict = async (member: string): Promise<void> => {
 		const at = member.indexOf(":");
 		const incarnation = member.slice(0, at);
 		const part = member.slice(at + 1);
 		if (at < 0 || !isKeyText(incarnation) || !isKeyText(part)) return;
-		await client.evictTransaction(`${keyPrefix}tx:{${part}}`, incarnation);
+		await client
+			.evictTransaction(`${keyPrefix}tx:{${part}}`, incarnation)
+			.catch((err: unknown) =>
+				logger.warn({ err: loggableError(err) }, "mfa_transaction_evict_failed"),
+			);
 	};
 	const subjectKeys = (subject: string): MfaSubjectKeys => {
 		const tag = `{${mfaKeyPart(subject)}}`;
@@ -519,7 +547,7 @@ export function createRedisMfaTransactionStore(
 				);
 			}
 			const { ok, attempts, removed } = await client.reserveAttempt(txKey(id), max, clock());
-			if (removed !== undefined) await unindex(removed, id);
+			if (removed !== undefined) await unindex(removed, id, "reserveAttempt");
 			return { ok, attempts };
 		},
 
@@ -532,7 +560,7 @@ export function createRedisMfaTransactionStore(
 			if (!isWholeVersion(expectedVersion)) return null;
 			const fields = await client.consume(txKey(id), String(expectedVersion));
 			if (fields === null) return null;
-			await unindex(fields, id);
+			await unindex(fields, id, "consume");
 			return transactionOf(fields, id, clock());
 		},
 
@@ -730,6 +758,7 @@ export const redisMfaTransactionStoreModule = defineModule({
 			const store = createRedisMfaTransactionStore({
 				client: deps.mfaTransactionStoreClient,
 				keyPrefix: deps.section.keyPrefix,
+				logger: deps.logger ?? consoleLogger,
 			});
 			await checkRedisMfaStoreDurability(
 				"mfaTransactionStore",
