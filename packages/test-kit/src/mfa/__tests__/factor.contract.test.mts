@@ -85,7 +85,9 @@ const inputFor = (
 /**
  * An identity as a factor might answer it: for the double that mails, its
  * address digest, key id and digest; otherwise a digest of its secret. None
- * when the data holds neither.
+ * when the data holds neither. The digest of the secret is a stand-in for
+ * these tests alone: a real factor's identity is never derived from a
+ * secret, since an unsalted hash of a secret is a verifier for it.
  */
 const identityOf = (data: MfaFactorData): string | undefined => {
 	const { secret, addressDigest } = data as {

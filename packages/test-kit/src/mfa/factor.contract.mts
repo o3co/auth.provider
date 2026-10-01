@@ -42,8 +42,13 @@
  * for its enrolled data, the same at each reading, through a JSON round trip
  * and for a verification's next data, and over data it cannot read a
  * non-empty string or `undefined`, never one string for two such data
- * unless it is the enrolled data's own, never a throw. The suite enrolls at one instant and verifies an hour later, so a
- * factor that refuses reuse within a time step is not asked to verify at the
+ * unless it is the enrolled data's own, never a throw. The suite enrolls one
+ * authenticator alone, so it cannot tell an identity too coarse — a
+ * constant, or one two authenticators share — from a sound one: such an
+ * identity judges every second enrollment of the kind a duplicate, and the
+ * factor's own tests must show two authenticators answer two identities. The
+ * suite enrolls at one instant and verifies an hour later, so a factor that
+ * refuses reuse within a time step is not asked to verify at the
  * step it enrolled. Every call is made for the account's `User.id` as its
  * subject, and handed core's test digests (`createTestMfaDigests`), made for
  * the factor's kind. State and data are held to the rule the coordinator
@@ -1003,10 +1008,7 @@ export function mfaFactorContract(input: MfaFactorContractInput): readonly Contr
 					{ unexpected: true },
 					...Object.keys(data).flatMap((key) => {
 						const { [key]: _removed, ...without } = data;
-						return [
-							without,
-							...UNREADABLE_MEMBERS.map((value) => ({ ...data, [key]: value })),
-						];
+						return [without, ...UNREADABLE_MEMBERS.map((value) => ({ ...data, [key]: value }))];
 					}),
 				];
 				// Each once: data with its one member removed is `{}` again.

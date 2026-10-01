@@ -42,7 +42,9 @@ export interface MfaFactorRecord {
 	 * What authorized the binding: recorded for audit, not enforced.
 	 * `password`: a password sign-in alone; `federated`: a federated sign-in
 	 * alone, at the upstream IdP; `email_proof`: the account-email proof;
-	 * `mfa`: recent MFA, beside another factor.
+	 * `mfa`: recent MFA, beside another factor. A record written before the
+	 * MFA package wrote `federated` may hold `password` for a federated
+	 * binding: `password` alone does not prove a password was used.
 	 */
 	readonly binding: "password" | "email_proof" | "federated" | "mfa" | undefined;
 	readonly createdAt: Date;

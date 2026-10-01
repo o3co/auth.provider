@@ -135,14 +135,19 @@ export function mfaFactorStoreContract(
 		}),
 
 		test("round-trips every binding and any kind", async (store) => {
-			const records = [
-				RECORD({ id: factorId("a"), kind: "totp", binding: "password" }),
-				RECORD({ id: factorId("b"), kind: "email", binding: "email_proof" }),
-				RECORD({ id: factorId("c"), kind: "webauthn", binding: "mfa" }),
+			// One record for each binding the record declares: a value added there
+			// and not here does not compile.
+			const bound = {
+				password: RECORD({ id: factorId("a"), kind: "totp", binding: "password" }),
+				email_proof: RECORD({ id: factorId("b"), kind: "email", binding: "email_proof" }),
+				mfa: RECORD({ id: factorId("c"), kind: "webauthn", binding: "mfa" }),
+				federated: RECORD({ id: factorId("f"), kind: "webauthn", binding: "federated" }),
+			} satisfies Record<NonNullable<MfaFactorRecord["binding"]>, MfaFactorRecord>;
+			const records = byId([
+				...Object.values(bound),
 				RECORD({ id: factorId("d"), kind: "recovery_code", binding: undefined }),
 				RECORD({ id: factorId("e"), kind: "acme-contributed", binding: "mfa" }),
-				RECORD({ id: factorId("f"), kind: "webauthn", binding: "federated" }),
-			];
+			]);
 			for (const record of records) await store.create(record);
 			assert.deepStrictEqual(byId(await store.list("user-1")), records);
 		}),
