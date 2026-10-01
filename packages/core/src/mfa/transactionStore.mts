@@ -708,7 +708,10 @@ export interface MfaLockoutPolicy {
 	readonly threshold: number;
 	/** The first backoff lock, in seconds (900); each further failure doubles it. */
 	readonly baseSeconds: number;
-	/** The longest backoff lock, in seconds (86400). */
+	/**
+	 * The longest backoff lock, in seconds (86400); a configured policy, at
+	 * most {@link MFA_LOCKOUT_MAX_BACKOFF_SECONDS}.
+	 */
 	readonly maxSeconds: number;
 	/**
 	 * How long after the last lock ends the backoff is forgotten, in seconds
@@ -755,6 +758,12 @@ export const MFA_LOCKOUT_MAX_HARD_LIMIT = 100;
  * ({@link checkConfiguredMfaLockoutPolicy}).
  */
 export const MFA_LOCKOUT_MIN_HARD_LIMIT = 10;
+
+/**
+ * The longest `maxSeconds` a configured policy may set, a week
+ * ({@link checkConfiguredMfaLockoutPolicy}).
+ */
+export const MFA_LOCKOUT_MAX_BACKOFF_SECONDS = 604_800;
 
 /**
  * Which hold refused a guessable attempt. Once fixed, no time, no settle, no
@@ -1044,10 +1053,11 @@ export function checkMfaLockoutPolicy(
 
 /**
  * Checks a lockout policy a deployment configures: the store's port check
- * ({@link checkMfaLockoutPolicy}), then the floor. A `RangeError`
+ * ({@link checkMfaLockoutPolicy}), then its own bounds. A `RangeError`
  * naming `setting` and the reason refuses a `hardLimit` below
- * {@link MFA_LOCKOUT_MIN_HARD_LIMIT}, or one not above `threshold`. Answers
- * the port check's copy.
+ * {@link MFA_LOCKOUT_MIN_HARD_LIMIT}, one not above `threshold`, or a
+ * `maxSeconds` above {@link MFA_LOCKOUT_MAX_BACKOFF_SECONDS}. Answers the
+ * port check's copy.
  *
  * @param setting - where the policy was read from, for the message.
  */
@@ -1064,6 +1074,11 @@ export function checkConfiguredMfaLockoutPolicy(
 	if (checked.hardLimit <= checked.threshold) {
 		throw new RangeError(
 			`${setting}.hardLimit must be above ${setting}.threshold: the staged backoff must act before the hard hold`,
+		);
+	}
+	if (checked.maxSeconds > MFA_LOCKOUT_MAX_BACKOFF_SECONDS) {
+		throw new RangeError(
+			`${setting}.maxSeconds must be at most ${MFA_LOCKOUT_MAX_BACKOFF_SECONDS} (a week): standing failures are counted over the week, so a longer backoff can outlast every failure that justified it`,
 		);
 	}
 	return checked;

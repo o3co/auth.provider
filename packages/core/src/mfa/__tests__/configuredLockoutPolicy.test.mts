@@ -24,6 +24,7 @@ import * as core from "#/index.mjs";
 import {
 	checkConfiguredMfaLockoutPolicy,
 	checkMfaLockoutPolicy,
+	MFA_LOCKOUT_MAX_BACKOFF_SECONDS,
 	MFA_LOCKOUT_MIN_HARD_LIMIT,
 	type MfaLockoutPolicy,
 } from "#/mfa/transactionStore.mjs";
@@ -100,6 +101,36 @@ describe("checkConfiguredMfaLockoutPolicy — a lockout policy a deployment may 
 		);
 		expect(() => checkConfiguredMfaLockoutPolicy(null as never)).toThrow(
 			/^mfa\.lockout must be an object$/,
+		);
+	});
+
+	it("exports the longest backoff a configured policy may set, a week", () => {
+		expect(core.MFA_LOCKOUT_MAX_BACKOFF_SECONDS).toBe(604_800);
+		expect(MFA_LOCKOUT_MAX_BACKOFF_SECONDS).toBe(604_800);
+	});
+
+	it("admits a maxSeconds of a week", () => {
+		const aWeek = { ...DEFAULTS, maxSeconds: 604_800 };
+		expect(checkConfiguredMfaLockoutPolicy(aWeek)).toEqual(aWeek);
+	});
+
+	it("refuses a maxSeconds longer than a week, naming the path and the reason: the backoff would outlast the week's failures", () => {
+		for (const maxSeconds of [604_801, 2_592_000]) {
+			expect(() =>
+				checkConfiguredMfaLockoutPolicy({ ...DEFAULTS, maxSeconds }, "mfa.lockout"),
+			).toThrow(/^mfa\.lockout\.maxSeconds must be at most 604800 \(a week\): .*week.*outlast/);
+		}
+	});
+
+	it("answers with the store's port check where it would refuse a maxSeconds longer than a week too", () => {
+		expect(() =>
+			checkConfiguredMfaLockoutPolicy({ ...DEFAULTS, baseSeconds: 700_000, maxSeconds: 650_000 }),
+		).toThrow(/^mfa\.lockout\.maxSeconds must be at least mfa\.lockout\.baseSeconds$/);
+		expect(() => checkConfiguredMfaLockoutPolicy({ ...DEFAULTS, maxSeconds: 604_801.5 })).toThrow(
+			/^mfa\.lockout\.maxSeconds must be a positive whole number$/,
+		);
+		expect(() => checkConfiguredMfaLockoutPolicy({ ...DEFAULTS, maxSeconds: 9e12 })).toThrow(
+			/^mfa\.lockout\.maxSeconds must end within the Date range$/,
 		);
 	});
 
