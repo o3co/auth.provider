@@ -1150,6 +1150,36 @@ describe("/authorize on admission — prompt=login from a browser that is not si
 		);
 	});
 
+	it("records no ask for a request longer than 8 KB: the plain login redirect", async () => {
+		const harness = await makeApp({ session: { isAuthenticated: false } });
+		const back = loginRedirectTo(
+			await authorize(harness.app, { ...baseQuery, prompt: "login", state: "s".repeat(9_000) }),
+		);
+		expect(back.searchParams.has("reauth_ask")).toBe(false);
+		expect(harness.records.size).toBe(0);
+
+		// One within the bound is recorded.
+		const within = await makeApp({ session: { isAuthenticated: false } });
+		const recorded = loginRedirectTo(
+			await authorize(within.app, { ...baseQuery, prompt: "login", state: "s".repeat(7_000) }),
+		);
+		expect(recorded.searchParams.get("reauth_ask")).toBeTruthy();
+	});
+
+	it("records no ask for a request whose client_id is missing or cannot name a client: the plain login redirect", async () => {
+		const { client_id: _omitted, ...withoutClient } = baseQuery;
+		for (const query of [
+			{ ...withoutClient, prompt: "login" },
+			{ ...baseQuery, client_id: "bad\u0001id", prompt: "login" },
+			{ ...baseQuery, client_id: "c".repeat(300), prompt: "login" },
+		]) {
+			const harness = await makeApp({ session: { isAuthenticated: false } });
+			const back = loginRedirectTo(await authorize(harness.app, query));
+			expect(back.searchParams.has("reauth_ask"), JSON.stringify(query.client_id)).toBe(false);
+			expect(harness.records.size).toBe(0);
+		}
+	});
+
 	it("records nothing without prompt=login, under prompt=none, or with no session store", async () => {
 		const plain = await makeApp({ session: { isAuthenticated: false } });
 		expect(
