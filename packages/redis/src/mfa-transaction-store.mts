@@ -23,7 +23,7 @@
  *
  * ```text
  * <keyPrefix>tx:{<id>}                          HASH   one transaction, expiring at its expiresAtMs
- * <keyPrefix>lock:{<subject>}                   HASH   the lockout run, reservations in flight
+ * <keyPrefix>lock:{<subject>}                   HASH   the lockout run, reservations in flight, the hard hold
  * <keyPrefix>week:{<subject>}                   ZSET   the weekly window: one member per attempt, scored by time
  * <keyPrefix>proof:{<subject>}                  STRING the email-proof requirement, with no TTL
  * <keyPrefix>session-proof:{<subject>}:<sid>    STRING a session's account-email proof, expiring at its end
@@ -51,9 +51,9 @@
  * Lockout answers are judged on the time the caller passes; what the scripts
  * forget and Redis reclaims is judged no later than the server's clock less
  * `MFA_CLOCK_SKEW_ALLOWANCE_MS`. While a run is counted (until a success, an
- * exempt success below `hardLimit` or `clearSubjectState`) the subject's keys
- * carry no TTL, and a subject state a script cannot read is refused, never
- * read as empty.
+ * exempt success before the hard hold or `clearSubjectState`) or the hard
+ * hold stands (until `clearSubjectState`) the subject's keys carry no TTL,
+ * and a subject state a script cannot read is refused, never read as empty.
  *
  * The requirement must last as enrolled factors do: it has no TTL, and the
  * module runs the factor store's durability check.

@@ -24,7 +24,8 @@
  * subject state is judged on the times callers pass, the sweep included (it
  * uses the latest). Sweeps run on writes, paced like the challenge store's,
  * and drop subject state once nothing in it can hold an attempt again (see
- * `prune`; the consecutive run lasts until a success). The email-proof
+ * `prune`; the consecutive run lasts until a success, and the hard hold
+ * until the subject's state is cleared). The email-proof
  * requirement the operator reset records is not lock state: only its
  * consumption at the next first binding removes it.
  *
@@ -149,6 +150,8 @@ interface SubjectState {
 	readonly pending: Map<string, number>;
 	/** Whether a refusal was answered since an attempt was last let through: an episode is under way. */
 	refusing: boolean;
+	/** When the run reached the hard limit: from then the hold stands until the state is cleared. */
+	hard?: number;
 }
 
 /** Where a session's proof is kept: the subject and the `sid` as one unambiguous key. */
@@ -305,7 +308,10 @@ export function createMemoryMfaTransactionStore(
 	}
 
 	const isEmpty = (state: SubjectState): boolean =>
-		state.run.length === 0 && state.week.length === 0 && state.pending.size === 0;
+		state.hard === undefined &&
+		state.run.length === 0 &&
+		state.week.length === 0 &&
+		state.pending.size === 0;
 
 	function stateOf(subject: string): SubjectState {
 		let state = subjects.get(subject);
@@ -451,7 +457,8 @@ export function createMemoryMfaTransactionStore(
 				return { ok: false, hold, retryAfterMs, first };
 			};
 
-			if (state.run.length >= policy.hardLimit) return refuse("hard", null);
+			if (state.hard === undefined && state.run.length >= policy.hardLimit) state.hard = nowMs;
+			if (state.hard !== undefined) return refuse("hard", null);
 
 			const backoff = backoffUntil(state.run, policy, nowMs);
 			const weekly = weeklyUntil(state.week, policy, nowMs);
@@ -471,6 +478,9 @@ export function createMemoryMfaTransactionStore(
 			state.week.push(attempt);
 			state.pending.set(attempt.id, attempt.seq);
 			state.refusing = false;
+			// The attempt that brings the run to the limit holds it in the same
+			// step: no later settle or exempt success can bring it back below.
+			if (state.run.length >= policy.hardLimit) state.hard = nowMs;
 			return { ok: true, reservation: attempt.id };
 		},
 
@@ -511,10 +521,11 @@ export function createMemoryMfaTransactionStore(
 			const state = subjects.get(subject);
 			if (state === undefined) return;
 			prune(state, nowMs);
-			// The attempts up to this success end while fewer than the hard
-			// limit; at it they stand until cleared. A later attempt stays.
-			const upTo = state.run.filter((a) => a.atMs <= nowMs);
-			if (upTo.length < hardLimit) {
+			// A run at the limit holds, as at a reservation; held, nothing
+			// ends. Otherwise the attempts up to this success end, and a later
+			// one stays.
+			if (state.hard === undefined && state.run.length >= hardLimit) state.hard = nowMs;
+			if (state.hard === undefined) {
 				state.run = state.run.filter((a) => a.atMs > nowMs);
 			}
 			settleEmpty(subject, state);
