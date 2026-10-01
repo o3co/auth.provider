@@ -37,7 +37,7 @@ import {
 	type SubjectRevocationService,
 } from "@o3co/auth-provider-core";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { createMfaSubjectLeases } from "#/factorSet.mjs";
+import { createMfaSubjectLeases, FACTOR_SET_STORE_CALLS } from "#/factorSet.mjs";
 import { createMfaReset } from "#/reset.mjs";
 import { mfaResetModule } from "#/resetModule.mjs";
 import {
@@ -581,7 +581,9 @@ describe("resetMfaForSubject", () => {
 			},
 		]) {
 			const factorStore = createMemoryMfaFactorStore();
-			vi.spyOn(factorStore, "list").mockResolvedValue([odd] as never);
+			vi.spyOn(factorStore, "list")
+				.mockResolvedValueOnce([odd] as never)
+				.mockResolvedValue([]);
 			const { reset, audit } = await setup({ factorStore });
 
 			const report = await reset.resetMfaForSubject(ALICE.id);
@@ -708,7 +710,7 @@ describe("mfaResetModule", () => {
 		expect(service.revokeAllForSubject).toHaveBeenCalledTimes(2);
 	});
 
-	it("holds the lease mfaModule's lease owner gives: six of mfa.storeTimeoutMs", async () => {
+	it("holds the lease mfaModule's lease owner gives: FACTOR_SET_STORE_CALLS + 2 of mfa.storeTimeoutMs, as every writer", async () => {
 		const transactionStore = createMemoryMfaTransactionStore();
 		const { handle } = await boot({
 			config: configFor("required", { storeTimeoutMs: 2_000 }),
@@ -722,7 +724,9 @@ describe("mfaResetModule", () => {
 
 		expect((await components.mfaReset.resetMfaForSubject(ALICE.id)).complete).toBe(true);
 
-		expect(acquire.mock.calls.map(([, request]) => request.ttlMs)).toEqual([12_000]);
+		expect(acquire.mock.calls.map(([, request]) => request.ttlMs)).toEqual([
+			(FACTOR_SET_STORE_CALLS + 2) * 2_000,
+		]);
 	});
 
 	it("is refused at boot without mfaModule, naming the lease owner it requires", async () => {

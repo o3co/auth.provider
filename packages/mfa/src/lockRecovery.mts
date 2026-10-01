@@ -144,11 +144,17 @@ const guessableBoundSince =
 	(records: readonly MfaFactorRecord[]): number | null => {
 		let earliest: number | null = null;
 		for (const record of records) {
-			const factor = factors.get(record.kind);
-			// A kind not installed may be installed again: its record counts, fail-closed.
-			if (factor?.guessable === false) continue;
-			const at = record.createdAt instanceof Date ? record.createdAt.getTime() : Number.NaN;
-			const since = Number.isSafeInteger(at) && at >= 0 ? at : 0;
+			let since = 0;
+			try {
+				const factor = factors.get(record.kind);
+				// A kind not installed may be installed again: its record counts, fail-closed.
+				if (factor?.guessable === false) continue;
+				const at = record.createdAt instanceof Date ? record.createdAt.getTime() : Number.NaN;
+				since = Number.isSafeInteger(at) && at >= 0 ? at : 0;
+			} catch {
+				// A record whose fields cannot be read counts, as the earliest there is: fail-closed.
+				since = 0;
+			}
 			earliest = earliest === null ? since : Math.min(earliest, since);
 		}
 		return earliest;

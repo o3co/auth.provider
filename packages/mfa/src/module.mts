@@ -63,11 +63,12 @@
  * action its routes admit a signed-in session's enrollment, rename or removal
  * for, and `mfa.view`, graded `use`, for the list of its factors.
  *
- * Provides `mfaSubjectLeases`, the subject's lease owner over the MFA
- * transaction store and `mfa.storeTimeoutMs` (`factorSet.mts`): built once per
- * boot and transaction store, the one the routes' writes hold too, and the
- * one `mfaResetModule` requires — so the operator reset is available only
- * where this module is installed.
+ * Provides `mfaSubjectLeases`, authoritative: the subject's lease owner over
+ * the MFA transaction store, built by this module from `mfa.storeTimeoutMs`
+ * (`factorSet.mts`) — its routes build theirs from the same settings, so every
+ * writer holds a lease of the same rules — and the one `mfaResetModule`
+ * requires: the operator reset is available only where this module is
+ * installed.
  *
  * Contributes the MFA routes (`routes.mts`) at `/session/mfa`, after the
  * session middleware. Their factory runs after every factor has registered,
@@ -126,28 +127,6 @@ declare module "@o3co/auth-provider-core" {
 		/** The subject's lease owner `mfaModule` builds from `mfa.storeTimeoutMs`: what every writer of a subject's factor set holds. */
 		readonly mfaSubjectLeases?: MfaSubjectLeases;
 	}
-}
-
-/**
- * Each boot's lease owner, by the transaction store it holds and the
- * timeout it was built with: the routes and the `mfaSubjectLeases` slot get
- * the same one. A module cannot require a slot it provides, so they meet here.
- */
-const leaseOwners = new WeakMap<object, Map<number, MfaSubjectLeases>>();
-
-/** The lease owner over `store` at `storeTimeoutMs`, built on first use. */
-function leaseOwnerFor(store: MfaTransactionStore, storeTimeoutMs: number): MfaSubjectLeases {
-	let byTimeout = leaseOwners.get(store);
-	if (byTimeout === undefined) {
-		byTimeout = new Map();
-		leaseOwners.set(store, byTimeout);
-	}
-	let owner = byTimeout.get(storeTimeoutMs);
-	if (owner === undefined) {
-		owner = createMfaSubjectLeases({ store, storeTimeoutMs });
-		byTimeout.set(storeTimeoutMs, owner);
-	}
-	return owner;
 }
 
 /** The id of the MFA routes' contribution: what another route orders itself against. */
@@ -418,11 +397,13 @@ export function mfaModule(options: MfaModuleOptions = {}): Module {
 		authoritative: ["mfaSubjectLeases"],
 		provides: {
 			mfaSubjectLeases: (deps) =>
-				leaseOwnerFor(
-					deps.mfaTransactionStore,
-					readMfaSettings(deps.section, { ...options, deploymentMode: deps.deploymentMode })
-						.storeTimeoutMs,
-				),
+				createMfaSubjectLeases({
+					store: deps.mfaTransactionStore,
+					storeTimeoutMs: readMfaSettings(deps.section, {
+						...options,
+						deploymentMode: deps.deploymentMode,
+					}).storeTimeoutMs,
+				}),
 		},
 		contributes: {
 			admissionActions: MFA_ADMISSION_ACTIONS,
@@ -524,7 +505,10 @@ export function mfaModule(options: MfaModuleOptions = {}): Module {
 						factors: deps.mfaFactorResolver,
 						factorStore: deps.mfaFactorStore,
 						witness,
-						leases: leaseOwnerFor(deps.mfaTransactionStore, settings.storeTimeoutMs),
+						leases: createMfaSubjectLeases({
+							store: deps.mfaTransactionStore,
+							storeTimeoutMs: settings.storeTimeoutMs,
+						}),
 					});
 					const requirements = checkResolver(
 						deps.sessionRequirementResolver,

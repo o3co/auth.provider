@@ -29,9 +29,10 @@
  *   bounded while for another holder, then `busy` with the holder's whole
  *   seconds left; `changed` when the generation moved since the start, a
  *   recovery or a reset in between — runs whole under it, and releases it.
- * - The lease stands six of `mfa.storeTimeoutMs`, one more than the most Store
- *   calls a removal makes; a timeout whose six pass core's longest lease is
- *   refused (`checkFactorSetStoreTimeout`). From the acquire, a local monotonic
+ * - The lease stands {@link LEASE_STORE_TIMEOUTS} of `mfa.storeTimeoutMs`: the
+ *   most Store calls one writer makes under it ({@link FACTOR_SET_STORE_CALLS}),
+ *   the acquire, and one to spare; a timeout whose lease would pass core's
+ *   longest is refused (`checkFactorSetStoreTimeout`). From the acquire, a local monotonic
  *   deadline: a read under the lease is given up when it would leave less than
  *   one Store timeout, and so is a write that would start with less — before
  *   the first write, `busy` with nothing written; after it, an overrun.
@@ -64,10 +65,10 @@
  *   the lease. It needs no start of the caller's: the store judges the apply
  *   on its own authorization, and a generation that moved between its read
  *   and its acquire is read again.
- * - One lease owner per boot (`createMfaSubjectLeases`, over the MFA
- *   transaction store and `mfa.storeTimeoutMs`), handed to every writer as
- *   an opaque handle: the factor set's writes and the operator reset hold the
- *   same lease length, per-call bound and wait rules.
+ * - The lease owner (`createMfaSubjectLeases`), built by `mfaModule` from
+ *   `mfa.storeTimeoutMs` over the MFA transaction store, is handed to every
+ *   writer as an opaque handle: every writer — the factor set's and the
+ *   operator reset — holds a lease of the same rules.
  * - The operator reset (`createMfaFactorSetReset`): one lease, waited for —
  *   never gone on without — across the lock state's reset, the removal of
  *   every record and the witness's clear, in that order.
@@ -96,8 +97,20 @@ import type { MfaEnrollmentWitness, MfaWitnessMark } from "./witness.mjs";
 /** The pauses, in milliseconds, between tries for a lease another write holds: then `busy`. */
 const LEASE_WAITS_MS = [25, 50, 100, 200, 400] as const;
 
-/** The most Store calls one removal makes: its read, removal, read after a failed removal, read again and clear (a mark makes four). */
-const STORE_CALLS_PER_WRITE = 5;
+/**
+ * The most Store and directory calls one writer makes under the lease — what
+ * the lease is sized from, and `factorSetBudget.test.mts` holds every writer
+ * to: a first binding by the account-email proof over one standing
+ * recovery-code set makes nine (the first-binding note, the consume, the
+ * factor, the records read again, D25's flag, the sets read, the new set,
+ * the old set's removal, the witness); the operator reset seven (the read,
+ * D25's flag, its authorization, the lock state's reset, the removal, the
+ * read again, the witness); a removal five; a mark four; a release two.
+ */
+export const FACTOR_SET_STORE_CALLS = 9;
+
+/** How many Store calls' time a lease stands: the writer's calls, the acquire, and one to spare. */
+const LEASE_STORE_TIMEOUTS = FACTOR_SET_STORE_CALLS + 2;
 
 /** How many of its own leases the operator reset waits for another holder's to end. */
 const RESET_WAIT_LEASES = 2;
@@ -105,9 +118,9 @@ const RESET_WAIT_LEASES = 2;
 /** The longest pause, in milliseconds, between the operator reset's tries for the lease. */
 const RESET_PAUSE_MS = 250;
 
-/** The lease a write takes when one Store call may take `storeTimeoutMs`: one more than the most a write makes, at least core's shortest. */
+/** The lease a write takes when one Store call may take `storeTimeoutMs`, at least core's shortest. */
 const leaseMsFor = (storeTimeoutMs: number): number =>
-	Math.max((STORE_CALLS_PER_WRITE + 1) * storeTimeoutMs, MFA_SUBJECT_LEASE_MIN_MS);
+	Math.max(LEASE_STORE_TIMEOUTS * storeTimeoutMs, MFA_SUBJECT_LEASE_MIN_MS);
 
 /**
  * `storeTimeoutMs`, `mfa.storeTimeoutMs`, when the lease it makes fits core's
@@ -120,10 +133,10 @@ export function checkFactorSetStoreTimeout(storeTimeoutMs: number): number {
 			`mfa.storeTimeoutMs: ${String(storeTimeoutMs)} is not a whole number of milliseconds from 1`,
 		);
 	}
-	const leaseMs = (STORE_CALLS_PER_WRITE + 1) * storeTimeoutMs;
+	const leaseMs = LEASE_STORE_TIMEOUTS * storeTimeoutMs;
 	if (leaseMs > MFA_SUBJECT_LEASE_MAX_MS) {
 		throw new RangeError(
-			`mfa.storeTimeoutMs: ${storeTimeoutMs} ms makes a factor-set write's lease ${leaseMs} ms (${STORE_CALLS_PER_WRITE + 1} Store calls' time), past the longest subject lease, ${MFA_SUBJECT_LEASE_MAX_MS} ms: a write could outlive its lease. Set it to at most ${Math.floor(MFA_SUBJECT_LEASE_MAX_MS / (STORE_CALLS_PER_WRITE + 1))} ms`,
+			`mfa.storeTimeoutMs: ${storeTimeoutMs} ms makes a factor-set write's lease ${leaseMs} ms (${LEASE_STORE_TIMEOUTS} Store calls' time), past the longest subject lease, ${MFA_SUBJECT_LEASE_MAX_MS} ms: a write could outlive its lease. Set it to at most ${Math.floor(MFA_SUBJECT_LEASE_MAX_MS / LEASE_STORE_TIMEOUTS)} ms`,
 		);
 	}
 	return storeTimeoutMs;
@@ -513,7 +526,7 @@ const owners = new WeakMap<MfaSubjectLeases, ReturnType<typeof subjectLeases>>()
  * A lease owner over `options.store`, its per-call bound `storeTimeoutMs`
  * (held to {@link checkFactorSetStoreTimeout}: a `RangeError` naming
  * `mfa.storeTimeoutMs` for one whose lease would pass core's longest) and its
- * lease six of it.
+ * lease {@link LEASE_STORE_TIMEOUTS} of it.
  */
 export function createMfaSubjectLeases(options: {
 	/** Where the subject's generation and lease are kept, and its recovery applied. */
@@ -979,8 +992,9 @@ export function createMfaFactorSetReset(options: {
 				async (time, token): Promise<MfaFactorSetResetOutcome> => {
 					try {
 						const listed: unknown = await time.read(() => factorStore.list(subject));
+						// As listed: a deployment's malformed record must not cost the report.
 						progress.snapshot = Array.isArray(listed)
-							? [...(listed as MfaFactorRecord[])].sort(byAge)
+							? [...(listed as MfaFactorRecord[])]
 							: undefined;
 					} catch (cause) {
 						if (cause instanceof OutOfTime) throw cause;
@@ -989,7 +1003,11 @@ export function createMfaFactorSetReset(options: {
 					if (steps.requireEmailProof !== undefined) {
 						time.beforeWrite();
 						try {
-							await steps.requireEmailProof();
+							await within(
+								steps.requireEmailProof,
+								storeTimeoutMs,
+								"requireEmailProofAtNextBinding",
+							);
 						} catch (cause) {
 							return stopped("email_proof", cause);
 						}
@@ -997,7 +1015,7 @@ export function createMfaFactorSetReset(options: {
 					progress.stage = "lock";
 					time.beforeWrite();
 					try {
-						await steps.authorize();
+						await within(steps.authorize, storeTimeoutMs, "authorizeSubjectRecovery");
 					} catch (cause) {
 						return stopped("lock", cause);
 					}
@@ -1039,6 +1057,20 @@ export function createMfaFactorSetReset(options: {
 					try {
 						await factorStore.removeAllForSubject(subject);
 					} catch (cause) {
+						return stopped("factors", cause, { generation: answer.generation });
+					}
+					// A store that answered the removal and left records stops it before the witness.
+					try {
+						const left: unknown = await time.read(() => factorStore.list(subject));
+						if (!Array.isArray(left) || left.length > 0) {
+							return stopped(
+								"factors",
+								new Error("records still stand after the removal, or the list is no list"),
+								{ generation: answer.generation },
+							);
+						}
+					} catch (cause) {
+						if (cause instanceof OutOfTime) throw cause;
 						return stopped("factors", cause, { generation: answer.generation });
 					}
 					progress.removedDone = true;
