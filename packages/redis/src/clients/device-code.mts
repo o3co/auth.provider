@@ -99,9 +99,14 @@ export type DeviceCodeDecisionInput =
 			 * client-side would be the second read the port rules out.
 			 */
 			readonly grantedScope?: readonly string[];
-			/** The approving session's `amr`, written as handed. Omitted, the record holds none. */
+			/**
+			 * The approving session's `amr` and when it authenticated (epoch ms),
+			 * each written as handed; omitted, the record holds none. A client
+			 * MUST write them in the same atomic write as the approval; one that
+			 * does not makes every approval read both as absent.
+			 */
 			readonly amr?: readonly string[];
-			/** When the approving session authenticated, in epoch milliseconds. Omitted, the record holds none. */
+			/** See `amr`. */
 			readonly authTimeMs?: number;
 	  };
 

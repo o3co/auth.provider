@@ -1160,8 +1160,14 @@ const SESSION_RECORD_READS_ALLOWED: ReadonlyArray<AllowedSessionRecordRead> = [
 	// A device approval's amr: what the approving session vouched for at
 	// device verification (`vouchedAmr`), carried on the record to the poll.
 	{
+		file: "packages/core/src/device-authorization/approval.mts",
+		read: "approval.amr",
+		count: 1,
+		why: "what a device-code store records of an approval's amr, read once and checked: what device verification filled with vouchedAmr, never a session record",
+	},
+	{
 		file: "packages/core/src/device-authorization/memory.mts",
-		read: "input.amr",
+		read: "{amr}=recordableDeviceApproval(input,input.nowMs)",
 		count: 1,
 		why: DEVICE_CODE_AMR_STORE_WHY,
 	},
@@ -1173,7 +1179,7 @@ const SESSION_RECORD_READS_ALLOWED: ReadonlyArray<AllowedSessionRecordRead> = [
 	},
 	{
 		file: "packages/redis/src/device-code-store.mts",
-		read: "input.amr",
+		read: "{amr}=recordableDeviceApproval(input,input.nowMs)",
 		count: 1,
 		why: DEVICE_CODE_AMR_STORE_WHY,
 	},

@@ -37,7 +37,7 @@
  */
 
 import { isStorableExpiry } from "../adapters/expiry.mjs";
-import { authTimeClaim, wellFormedAmr } from "../grants/authenticationClaims.mjs";
+import { recordableDeviceApproval } from "./approval.mjs";
 import { DeviceCodeStoreError } from "./errors.mjs";
 import type {
 	ApproveDeviceAuthorizationInput,
@@ -126,39 +126,6 @@ export interface MemoryDeviceCodeStoreOptions {
 
 const positiveIntegerOr = (value: number | undefined, fallback: number): number =>
 	typeof value === "number" && Number.isInteger(value) && value > 0 ? value : fallback;
-
-/**
- * An approval's `amr` as recorded: a frozen copy, so no reader writes through
- * to what the poll hands on. Absent stays absent.
- *
- * @throws `RangeError` for one that is not a non-empty list of non-empty strings.
- */
-const approvedAmr = (amr: readonly string[] | undefined): readonly string[] | undefined => {
-	if (amr === undefined) return undefined;
-	const copy = wellFormedAmr(amr);
-	if (copy === undefined) {
-		throw new RangeError(
-			"DeviceCodeStore.approve: amr must be a non-empty list of non-empty strings",
-		);
-	}
-	return Object.freeze(copy);
-};
-
-/**
- * An approval's authentication instant as recorded, in epoch milliseconds.
- * Absent stays absent.
- *
- * @throws `RangeError` for one that is not a valid `Date` at or after the epoch.
- */
-const approvedAuthTimeMs = (authTime: Date | undefined): number | undefined => {
-	if (authTime === undefined) return undefined;
-	if (!(authTime instanceof Date && authTimeClaim(authTime) !== undefined)) {
-		throw new RangeError(
-			"DeviceCodeStore.approve: authTime must be a valid Date at or after the epoch",
-		);
-	}
-	return authTime.getTime();
-};
 
 export interface MemoryDeviceCodeStore extends DeviceCodeStore {
 	/** Entry count, for tests and for the sweep's own coverage. */
@@ -289,8 +256,7 @@ export const createMemoryDeviceCodeStore = (
 
 		approve: async (input: ApproveDeviceAuthorizationInput): Promise<DeviceDecisionOutcome> => {
 			// Refused before the lookup, so a refused approval changes nothing.
-			const amr = approvedAmr(input.amr);
-			const authTimeMs = approvedAuthTimeMs(input.authTime);
+			const { amr, authTimeMs } = recordableDeviceApproval(input, input.nowMs);
 			const entry = livePendingByUserCode(input.userCode, input.nowMs);
 			if (entry === null) return { status: "not_found" };
 			if (entry === "expired") return { status: "expired" };

@@ -51,6 +51,7 @@ import {
 	type DevicePollOutcome,
 	defineModule,
 	isStorableExpiry,
+	recordableDeviceApproval,
 	wellFormedAmr,
 } from "@o3co/auth-provider-core";
 import type {
@@ -152,38 +153,6 @@ const toAuthorization = (fields: DeviceCodeRecordFields): DeviceAuthorization =>
 	authTimeMs: parseAuthTimeMs(fields.authTimeMs),
 });
 
-/**
- * An approval's `amr` as the script is handed it. Absent stays absent.
- *
- * @throws `RangeError` for one that is not a non-empty list of non-empty strings.
- */
-const approvedAmr = (amr: readonly string[] | undefined): readonly string[] | undefined => {
-	if (amr === undefined) return undefined;
-	const copy = wellFormedAmr(amr);
-	if (copy === undefined) {
-		throw new RangeError(
-			"DeviceCodeStore.approve: amr must be a non-empty list of non-empty strings",
-		);
-	}
-	return copy;
-};
-
-/**
- * An approval's authentication instant as the script is handed it, in epoch
- * milliseconds. Absent stays absent.
- *
- * @throws `RangeError` for one that is not a valid `Date` at or after the epoch.
- */
-const approvedAuthTimeMs = (authTime: Date | undefined): number | undefined => {
-	if (authTime === undefined) return undefined;
-	if (!(authTime instanceof Date && authTimeClaim(authTime) !== undefined)) {
-		throw new RangeError(
-			"DeviceCodeStore.approve: authTime must be a valid Date at or after the epoch",
-		);
-	}
-	return authTime.getTime();
-};
-
 const decisionOutcome = (reply: DeviceCodeDecisionReply): DeviceDecisionOutcome => {
 	switch (reply.kind) {
 		case "ok":
@@ -255,8 +224,7 @@ export function createRedisDeviceCodeStore(opts: RedisDeviceCodeStoreOptions): D
 
 		async approve(input: ApproveDeviceAuthorizationInput): Promise<DeviceDecisionOutcome> {
 			// Refused before the script runs, so a refused approval writes nothing.
-			const amr = approvedAmr(input.amr);
-			const authTimeMs = approvedAuthTimeMs(input.authTime);
+			const { amr, authTimeMs } = recordableDeviceApproval(input, input.nowMs);
 			// Omitted means "grant what was asked for"; supplied is narrowed
 			// against `requestedScope` inside the script, never widened.
 			return decisionOutcome(

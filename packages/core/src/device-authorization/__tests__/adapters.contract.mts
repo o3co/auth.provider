@@ -24,6 +24,7 @@
  */
 
 import { describe, expect, it } from "vitest";
+import { DEFAULT_CLOCK_SKEW_MS } from "../../jwt/verify.mjs";
 import type { DeviceCodeStore } from "../types.mjs";
 
 export interface DeviceCodeStoreContractFactory {
@@ -426,6 +427,54 @@ export const runDeviceCodeStoreContract = (
 					authTime: new Date(0),
 				});
 				expect(decided.status === "ok" && decided.authorization.authTimeMs).toBe(0);
+			});
+		});
+
+		it("refuses an authentication time further ahead of the approval's clock than the skew tolerated between hosts, and records nothing", async () => {
+			// One further ahead is no clock's reading; kept, it would read as a
+			// fresh authentication for longer than it is.
+			await withStore(async (store) => {
+				await store.create(seed);
+				await expect(
+					store.approve({
+						userCode: seed.userCode,
+						subject: "user-1",
+						nowMs: NOW,
+						authTime: new Date(NOW + DEFAULT_CLOCK_SKEW_MS + 1),
+					}),
+				).rejects.toThrow(RangeError);
+				expect(await store.findPendingByUserCode(seed.userCode, NOW)).toMatchObject({
+					status: "pending",
+				});
+			});
+		});
+
+		it("records an authentication time a little ahead of the approval's clock as that clock's instant", async () => {
+			await withStore(async (store) => {
+				await store.create(seed);
+				const decided = await store.approve({
+					userCode: seed.userCode,
+					subject: "user-1",
+					nowMs: NOW,
+					authTime: new Date(NOW + DEFAULT_CLOCK_SKEW_MS),
+				});
+				expect(decided.status === "ok" && decided.authorization.authTimeMs).toBe(NOW);
+				const polled = await store.poll(seed.deviceCode, NOW + 10 * 1000);
+				expect(polled.status === "approved" && polled.authorization.authTimeMs).toBe(NOW);
+			});
+		});
+
+		it("records an authentication time held to a fractional clock as a whole millisecond", async () => {
+			await withStore(async (store) => {
+				await store.create(seed);
+				await store.approve({
+					userCode: seed.userCode,
+					subject: "user-1",
+					nowMs: NOW + 0.5,
+					authTime: new Date(NOW + 1_000),
+				});
+				const polled = await store.poll(seed.deviceCode, NOW + 10 * 1000);
+				expect(polled.status === "approved" && polled.authorization.authTimeMs).toBe(NOW);
 			});
 		});
 

@@ -325,6 +325,10 @@ built on their own — `makeIoredisMfaFactorStoreClient(io)`,
 `makeIoredisMfaTransactionStoreClient(io)` — for the database or instance of
 their own that D12 prefers.
 
+A `DeviceCodeStoreClient` of your own writes an approval's `amr` and
+`authTimeMs` in `decide`'s same atomic write as the approval itself; one that
+does not makes every approval read both as absent.
+
 For mixed-backend deployments (another backend for `ChallengeStore`, Redis for
 `FederationTokenStore`), wire each per-purpose slot individually instead of
 spreading.
@@ -679,8 +683,9 @@ from the record's own exact timestamp: a record inside its TTL whose deadline
 has passed on the caller's clock expires, and is dropped.
 
 *Rolling upgrade.* A record approved before an upgrade, or by a replica that
-has not been upgraded yet, holds no `approvedAtMs`, `amr` or `authTimeMs`, and
-reads each as absent. So does a stored `amr` that is not a non-empty JSON
+has not been upgraded yet, holds none of the fields that release did not
+write, and reads each as absent. An older replica that polls an approval a
+newer one wrote ignores the fields it does not know. So does a stored `amr` that is not a non-empty JSON
 list of non-empty strings, or an `authTimeMs` that is not the whole epoch
 milliseconds of an instant at or after the epoch. Nothing needs migrating.
 
