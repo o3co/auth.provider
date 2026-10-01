@@ -1019,7 +1019,13 @@ wires it.
   and one that does not — a user with no factor, a federated session — is
   answered `unmet_authentication_requirements`. A browser that is not
   signed in and sends `prompt=login` has the ask recorded before its
-  login, so it logs in once. The ask's store failing is
+  login, so it logs in once — only for a request within 8 KB that names a
+  well-formed `client_id` (a check of its shape: the client is looked up
+  later); any other gets the plain login redirect and no record. On
+  `session-store.storage.type = "memory"` such an ask whose browser never
+  returns stays until the process restarts — express-session's memory store
+  reaps a record only when it is read — bounded by the `/authorize` rate
+  limit and the 8 KB cap. The ask's store failing is
   `authorize_reauth_ask_store_unavailable`. During a rolling upgrade from a
   release that spent the ask when it read it, a replica on that release
   can spend it before consent resumes the request: the user is asked to

@@ -26,6 +26,7 @@
 import {
 	type Admission,
 	authTimeAt,
+	isWellFormedClientId,
 	LOGIN_RETURN_PARAMETER,
 	type Logger,
 	loggableError,
@@ -34,7 +35,11 @@ import {
 } from "@o3co/auth-provider-core";
 import type { Request } from "express";
 import { loginRedirect, redirectError } from "./authorizeAnswers.mjs";
-import { type AuthorizeContext, authorizeRequestUrl } from "./authorizeContext.mjs";
+import {
+	type AuthorizeContext,
+	authorizeParams,
+	authorizeRequestUrl,
+} from "./authorizeContext.mjs";
 import { REAUTH_ASK_PARAM, type ReauthAskRecord, type ReauthAskStore } from "./reauthAsk.mjs";
 
 /** The `prompt` values this server honours. */
@@ -263,11 +268,21 @@ const returnWithAsk = (askRequest: string, askId: string): string => {
 };
 
 /**
+ * The longest authorize request, as the canonical URL an ask binds, for
+ * which an ask is recorded before the client is looked up: the record holds
+ * that URL, and an anonymous caller chooses its size.
+ */
+export const ANONYMOUS_ASK_MAX_REQUEST_BYTES = 8 * 1024;
+
+/**
  * Where the login page returns a browser that is not signed in and sent
  * `prompt=login`: this request with a login ask recorded before the login,
- * so the login it makes meets the prompt on the way back. Without an ask
- * store, or when the ask cannot be recorded (logged), the request as it
- * came: the user is then asked to log in again on the way back.
+ * so the login it makes meets the prompt on the way back. Recorded only for
+ * a request of the shape a client sends — a well-formed `client_id`, the
+ * canonical request within `ANONYMOUS_ASK_MAX_REQUEST_BYTES` — a check of its
+ * shape, not a lookup. Otherwise, without an ask store, or when the ask
+ * cannot be recorded (logged), the request as it came: the user is then
+ * asked to log in again on the way back.
  */
 export const loginReturnWithAsk = async (
 	req: Request,
@@ -278,6 +293,12 @@ export const loginReturnWithAsk = async (
 	const asIs = authorizeRequestUrl(issuerOrigin, req).toString();
 	if (askStore === undefined) return asIs;
 	const askRequest = askRequestFor(issuerOrigin, req);
+	if (
+		!isWellFormedClientId(authorizeParams(req).client_id) ||
+		Buffer.byteLength(askRequest, "utf8") > ANONYMOUS_ASK_MAX_REQUEST_BYTES
+	) {
+		return asIs;
+	}
 	const now = Date.now();
 	try {
 		const askId = await askStore.ask({

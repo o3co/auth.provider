@@ -1175,7 +1175,7 @@ describe("/authorize on admission — prompt=login from a browser that is not si
 		]) {
 			const harness = await makeApp({ session: { isAuthenticated: false } });
 			const back = loginRedirectTo(await authorize(harness.app, query));
-			expect(back.searchParams.has("reauth_ask"), JSON.stringify(query.client_id)).toBe(false);
+			expect(back.searchParams.has("reauth_ask"), JSON.stringify(query)).toBe(false);
 			expect(harness.records.size).toBe(0);
 		}
 	});
