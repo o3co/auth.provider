@@ -326,35 +326,6 @@ describe("the reservation", () => {
 			cause: down,
 		});
 	});
-
-	it.each([
-		["nothing", undefined],
-		["a pass without its reservation", { ok: true }],
-		["a pass with an empty reservation", { ok: true, reservation: "" }],
-		["a hold it does not name", { ok: false, hold: "forever", retryAfterMs: 1, first: true }],
-		[
-			"a hard hold with a time to come back",
-			{ ok: false, hold: "hard", retryAfterMs: 1, first: true },
-		],
-		["a backoff with none", { ok: false, hold: "backoff", retryAfterMs: null, first: true }],
-		["a weekly hold already over", { ok: false, hold: "weekly", retryAfterMs: 0, first: true }],
-		["a time that is no number", { ok: false, hold: "weekly", retryAfterMs: "1", first: true }],
-		[
-			"a refusal that does not say whether it is first",
-			{ ok: false, hold: "hard", retryAfterMs: null },
-		],
-	])("is an outage, never a pass or a hold, when the store answers %s", async (_, answer) => {
-		const { lock } = lockOver({}, (store) => ({
-			...store,
-			reserveSubjectAttempt: async () => answer as never,
-		}));
-
-		expect(await lock.enter(SUBJECT, GUESSABLE)).toMatchObject({
-			outcome: "unavailable",
-			store: "mfa_transaction",
-			step: "reserveSubjectAttempt",
-		});
-	});
 });
 
 describe("a verification's attempt, through the routes", () => {
@@ -420,6 +391,52 @@ describe("a verification's attempt, through the routes", () => {
 		const { agent, transaction } = await beginLogin(app);
 		const res = await verify(agent, transaction, record.id, totpCode(secret));
 		expect(res.status, JSON.stringify(res.body)).toBe(429);
+	});
+
+	it("answers a reservation outside the port 503, an outage at reserveSubjectAttempt, never a hold, and never checks the proof", async () => {
+		const factorStore = createMemoryMfaFactorStore();
+		await seedTotp(factorStore);
+		const checked = vi.fn(async () => ({ ok: true as const, factorId: "never" }));
+		const probe: MfaFactor = {
+			kind: "probe",
+			amrValues: [OTP_AMR],
+			amrFor: () => [OTP_AMR],
+			addsMfa: true,
+			counting: true,
+			guessable: true,
+			describe: () => ({}),
+			verify: checked,
+			beginEnrollment: async () => {
+				throw new Error("not enrolled here");
+			},
+			completeEnrollment: async () => {
+				throw new Error("not enrolled here");
+			},
+		};
+		const record = await seedFactor(factorStore, "probe", {});
+		const store = createMemoryMfaTransactionStore();
+		const { app, logger } = await boot({
+			config: configFor("required"),
+			factorStore,
+			transactionStore: {
+				...store,
+				// A hold the port does not name: core's reader refuses it.
+				reserveSubjectAttempt: async () =>
+					({ ok: false, hold: "forever", retryAfterMs: 1, first: true }) as never,
+			},
+			extraModules: [contributing(probe)],
+		});
+		const { agent, transaction } = await beginLogin(app);
+
+		const res = await verify(agent, transaction, record.id, "123456");
+
+		expect(res.status).toBe(503);
+		expect(events(logger, "error")).toEqual(["mfa_store_unavailable"]);
+		expect(logger.error.mock.calls[0]?.[0]).toMatchObject({
+			store: "mfa_transaction",
+			step: "reserveSubjectAttempt",
+		});
+		expect(checked).not.toHaveBeenCalled();
 	});
 
 	it("keeps a factor that throws a failure: a proof crafted to make it throw buys no free guess", async () => {

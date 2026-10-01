@@ -25,21 +25,23 @@
  *   the time its verification passes, so one verification has one time.
  * - A refusal names its hold, when an attempt may come back (none for the
  *   hard hold), and whether it begins an episode.
- * - A reservation the store cannot answer, or answers outside the port, is
- *   an outage: never a pass, never a hold.
+ * - A reservation the store cannot answer, or answers outside the port
+ *   (core's `readMfaSubjectAttemptReservation`), is an outage: never a pass,
+ *   never a hold.
  * - Settling never throws: a settle or an exempt success the store does not
  *   take is handed to `unsettled` once, and the answer stands. The attempt
  *   it leaves pending counts as a failure.
  */
 
-import type {
-	MfaFactor,
-	MfaFactorRecord,
-	MfaFactorResolver,
-	MfaLockoutPolicy,
-	MfaSubjectAttemptOutcome,
-	MfaSubjectHold,
-	MfaTransactionStore,
+import {
+	type MfaFactor,
+	type MfaFactorRecord,
+	type MfaFactorResolver,
+	type MfaLockoutPolicy,
+	type MfaSubjectAttemptOutcome,
+	type MfaSubjectHold,
+	type MfaTransactionStore,
+	readMfaSubjectAttemptReservation,
 } from "@o3co/auth-provider-core";
 import { type MfaStoreOutage, OUTSIDE_CONTRACT, outage } from "./ceremony.mjs";
 
@@ -91,37 +93,6 @@ export interface MfaSubjectLockOptions {
 	readonly unsettled: (failure: MfaSubjectLockUnsettled) => void;
 }
 
-const HOLDS: ReadonlySet<unknown> = new Set<MfaSubjectHold>(["backoff", "weekly", "hard"]);
-
-/**
- * What `reserveSubjectAttempt` answered, as the port promises it: a
- * reservation, or a hold with a time to come back (none for `hard`) and
- * `first`; `undefined` for anything else.
- */
-function readReservation(
-	answer: unknown,
-): { readonly reservation: string } | Omit<MfaSubjectLocked, "outcome"> | undefined {
-	try {
-		if (typeof answer !== "object" || answer === null) return undefined;
-		const { ok, reservation, hold, retryAfterMs, first } = answer as Readonly<
-			Record<string, unknown>
-		>;
-		if (ok === true) {
-			return typeof reservation === "string" && reservation !== "" ? { reservation } : undefined;
-		}
-		if (ok !== false || !HOLDS.has(hold) || typeof first !== "boolean") return undefined;
-		const comesBack =
-			hold === "hard"
-				? retryAfterMs === null
-				: typeof retryAfterMs === "number" && Number.isFinite(retryAfterMs) && retryAfterMs > 0;
-		return comesBack
-			? { hold: hold as MfaSubjectHold, retryAfterMs: retryAfterMs as number | null, first }
-			: undefined;
-	} catch {
-		return undefined;
-	}
-}
-
 /** The subject lock over `options` (see this file's header). */
 export function createMfaSubjectLock(options: MfaSubjectLockOptions): MfaSubjectLock {
 	const { store, policy, unsettled } = options;
@@ -162,11 +133,18 @@ export function createMfaSubjectLock(options: MfaSubjectLockOptions): MfaSubject
 			} catch (cause) {
 				return outage("mfa_transaction", "reserveSubjectAttempt", cause);
 			}
-			const read = readReservation(answer);
+			const read = readMfaSubjectAttemptReservation(answer);
 			if (read === undefined) {
 				return outage("mfa_transaction", "reserveSubjectAttempt", OUTSIDE_CONTRACT);
 			}
-			if (!("reservation" in read)) return { outcome: "locked", ...read };
+			if (!read.ok) {
+				return {
+					outcome: "locked",
+					hold: read.hold,
+					retryAfterMs: read.retryAfterMs,
+					first: read.first,
+				};
+			}
 			const { reservation } = read;
 			return once(subject, factor.kind, "settleSubjectAttempt", (outcome) =>
 				store.settleSubjectAttempt(subject, reservation, outcome),
