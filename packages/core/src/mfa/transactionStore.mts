@@ -614,9 +614,10 @@ export interface MfaLockoutPolicy {
 	/** Failures allowed in any rolling seven days (10). */
 	readonly weeklyBudget: number;
 	/**
-	 * Consecutive failures (100) that hold guessable proofs until the held factor
-	 * is rebound or the subject reset; an exempt success does not lift the hold
-	 * (NIST SP 800-63B-4 §3.2.2). At most {@link MFA_LOCKOUT_MAX_HARD_LIMIT}.
+	 * Consecutive failures (100) that hold guessable proofs until the subject's
+	 * lock state is cleared (`clearSubjectState`); no time and no exempt success
+	 * lifts the hold (NIST SP 800-63B-4 §3.2.2). At most
+	 * {@link MFA_LOCKOUT_MAX_HARD_LIMIT}.
 	 */
 	readonly hardLimit: number;
 }
@@ -748,18 +749,18 @@ export interface MfaTransactionStore {
 		outcome: MfaSubjectAttemptOutcome,
 	): Promise<void>;
 	/**
-	 * An exempt success (a recovery code, WebAuthn, the 80-bit email proof). While
-	 * the run is shorter than `policy.hardLimit` it ends the run up to `nowMs` (a
-	 * later reservation stays); at or past it the run, and the hard hold, stand.
-	 * The week stands, and lets no attempt through. Call it only after the
+	 * An exempt success (a recovery code, a WebAuthn assertion). While the
+	 * attempts up to `nowMs`, reservations in flight among them, are fewer than
+	 * `policy.hardLimit`, it ends the run up to `nowMs`; at or past it they, and
+	 * the hard hold, stand. An attempt reserved after `nowMs` always stays. The
+	 * week stands, and lets no attempt through. Call it only after the
 	 * transaction holding the exempt proof was consumed. A `RangeError` for what
 	 * {@link checkMfaLockoutPolicy} refuses.
 	 */
 	noteExemptSuccess(subject: string, nowMs: number, policy: MfaLockoutPolicy): Promise<void>;
 	/**
-	 * Forget `subject`'s lock state (the run and the week). Its callers are the
-	 * MFA module's authorized recovery and the operator reset: no revocation
-	 * and no credential change clears the lock.
+	 * Forget `subject`'s lock state (the run and the week). No revocation and
+	 * no credential change calls it.
 	 */
 	clearSubjectState(subject: string): Promise<void>;
 
@@ -820,13 +821,26 @@ const isPositiveWhole = (value: unknown): value is number =>
  * backoff never engages before the hard hold), `hardLimit` ≤
  * {@link MFA_LOCKOUT_MAX_HARD_LIMIT}, and every duration ending within the
  * Date range. Called at boot and again by every store operation taking a policy.
+ * Answers the policy it checked, each field read once: a store applies that
+ * copy, so what it applies is what was checked.
  *
  * @param setting - where the policy was read from, for the message.
  */
-export function checkMfaLockoutPolicy(policy: MfaLockoutPolicy, setting = "mfa.lockout"): void {
+export function checkMfaLockoutPolicy(
+	policy: MfaLockoutPolicy,
+	setting = "mfa.lockout",
+): Readonly<MfaLockoutPolicy> {
 	if (!isRecord(policy)) {
 		throw new RangeError(`${setting} must be an object`);
 	}
+	const checked: MfaLockoutPolicy = {
+		threshold: policy.threshold,
+		baseSeconds: policy.baseSeconds,
+		maxSeconds: policy.maxSeconds,
+		memorySeconds: policy.memorySeconds,
+		weeklyBudget: policy.weeklyBudget,
+		hardLimit: policy.hardLimit,
+	};
 	for (const field of [
 		"threshold",
 		"baseSeconds",
@@ -835,29 +849,30 @@ export function checkMfaLockoutPolicy(policy: MfaLockoutPolicy, setting = "mfa.l
 		"weeklyBudget",
 		"hardLimit",
 	] as const) {
-		if (!isPositiveWhole(policy[field])) {
+		if (!isPositiveWhole(checked[field])) {
 			throw new RangeError(`${setting}.${field} must be a positive whole number`);
 		}
 	}
-	if (policy.maxSeconds < policy.baseSeconds) {
+	if (checked.maxSeconds < checked.baseSeconds) {
 		throw new RangeError(`${setting}.maxSeconds must be at least ${setting}.baseSeconds`);
 	}
-	if (policy.threshold > policy.hardLimit) {
+	if (checked.threshold > checked.hardLimit) {
 		throw new RangeError(`${setting}.threshold must be at most ${setting}.hardLimit`);
 	}
-	if (policy.hardLimit > MFA_LOCKOUT_MAX_HARD_LIMIT) {
+	if (checked.hardLimit > MFA_LOCKOUT_MAX_HARD_LIMIT) {
 		throw new RangeError(
 			`${setting}.hardLimit must be at most ${MFA_LOCKOUT_MAX_HARD_LIMIT} (NIST SP 800-63B-4's cap on consecutive failures)`,
 		);
 	}
 	for (const [field, ms] of [
-		["maxSeconds", policy.maxSeconds * 1000],
-		["memorySeconds", policy.memorySeconds * 1000],
+		["maxSeconds", checked.maxSeconds * 1000],
+		["memorySeconds", checked.memorySeconds * 1000],
 	] as const) {
 		if (!isStorableLifetime(ms)) {
 			throw new RangeError(`${setting}.${field} must end within the Date range`);
 		}
 	}
+	return Object.freeze(checked);
 }
 
 // ---------------------------------------------------------------------------

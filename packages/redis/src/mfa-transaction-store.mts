@@ -354,9 +354,9 @@ export function createRedisMfaTransactionStore(
 		},
 
 		async noteExemptSuccess(subject, nowMs, policy) {
-			checkMfaLockoutPolicy(policy);
+			const checked = checkMfaLockoutPolicy(policy);
 			checkInstant(nowMs, "noteExemptSuccess");
-			await client.noteExemptSuccess(subjectKeys(subject), { nowMs, policy });
+			await client.noteExemptSuccess(subjectKeys(subject), { nowMs, policy: checked });
 		},
 
 		async clearSubjectState(subject) {

@@ -35,8 +35,8 @@ import {
 } from "@o3co/auth-provider-core";
 import { Redis } from "ioredis";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { makeIoredisMfaTransactionStoreClient } from "#/ioredis.mjs";
 import { MFA_SUBJECT_EXEMPT } from "#/ioredis/scripts/mfa.mjs";
+import { makeIoredisMfaTransactionStoreClient } from "#/ioredis.mjs";
 import { createRedisMfaTransactionStore } from "#/mfa-transaction-store.mjs";
 import { runMfaTransactionStoreContract } from "./adapters.mfa-transaction-store.contract.mjs";
 import { serverClock, serverPasses, testRedis } from "./support/redis.mjs";
