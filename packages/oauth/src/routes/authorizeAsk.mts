@@ -327,17 +327,27 @@ export const loginReturnWithAsk = async (
 };
 
 /**
+ * How far ahead of this clock a session's authentication instant may be and
+ * still be compared with an ask: the skew tolerated between replicas for an
+ * instant one of them recorded — a login on one replica whose return reaches
+ * another moments later, whose clock runs a little behind. Read as now
+ * within it. Not core's `DEFAULT_CLOCK_SKEW_MS` (five minutes), which would
+ * let a session stamped that far ahead meet an ask without a new login.
+ */
+export const ASK_REPLICA_SKEW_MS = 1_000;
+
+/**
  * The session's authentication instant in milliseconds, for comparing with
- * an ask's: `undefined` when core's `authTimeAt` cannot read it against the
- * clock, or when it is ahead of the clock at all — an instant ahead was
- * stamped by a clock this one cannot check, so it shows no login made since
- * an ask. Unreadable is a login trip, or `login_required` once a login was
- * asked for or under `prompt=none`.
+ * an ask's, capped at the clock: `undefined` when core's `authTimeAt` cannot
+ * read it against the clock, or when it is more than `ASK_REPLICA_SKEW_MS`
+ * ahead — stamped by a clock this one cannot check, so it shows no login
+ * made since an ask. Unreadable is a login trip, or `login_required` once a
+ * login was asked for or under `prompt=none`.
  */
 export const readableAuthTime = (session: UserSession, nowMs: number): number | undefined => {
 	if (authTimeAt(session.authTime, nowMs) === undefined) return undefined;
 	const at = session.authTime.getTime();
-	return at > nowMs ? undefined : at;
+	return at > nowMs + ASK_REPLICA_SKEW_MS ? undefined : Math.min(at, nowMs);
 };
 
 /**
