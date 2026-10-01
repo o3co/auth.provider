@@ -154,18 +154,21 @@ export function createAuditFanOut(sources: AuditFanOutSources): AuditSink {
 			const targets: { readonly sink: AuditSink; readonly position: number }[] = [];
 			if (sources.sink !== undefined) targets.push({ sink: sources.sink, position: 0 });
 			let shared: AuditEvent;
+			let type: string | undefined;
 			try {
 				if (!reentered) {
 					let position = 1;
 					for (const hook of sources.hooks()) targets.push({ sink: hook, position: position++ });
 				}
 				shared = frozenCopy(event, new Map()) as AuditEvent;
+				// Read once: an event that is not plain data may answer twice.
+				const read: unknown = shared.type;
+				type = typeof read === "string" ? read : undefined;
 			} catch {
 				// Handed to no sink: each one known has failed it.
 				for (const { position } of targets) reportFailure(sources.logger, position, undefined);
 				return;
 			}
-			const type = typeof shared.type === "string" ? shared.type : undefined;
 			if (reentered) report(sources.logger, "warn", { type }, "audit_sink_reentered");
 			await Promise.all(
 				targets.map(({ sink: target, position }) =>
@@ -181,28 +184,25 @@ export function createAuditFanOut(sources: AuditFanOutSources): AuditSink {
 	};
 }
 
-/** Whether `target` took `event`: its call isolated, a failure answered `false`. */
-function delivered(target: AuditSink, event: AuditEvent): Promise<boolean> {
+/**
+ * Whether `target` took `event`: its call isolated, a failure answered
+ * `false`. The answer is awaited, so a native promise is observed through the
+ * engine's own subscription, whatever its `then` property says.
+ */
+async function delivered(target: AuditSink, event: AuditEvent): Promise<boolean> {
 	let answer: unknown;
 	try {
 		answer = handTo(target, event);
 	} catch {
-		return Promise.resolve(false);
+		return false;
 	}
-	if (!isThenable(answer)) return Promise.resolve(false);
-	const settled = answer;
-	return new Promise<boolean>((resolve) => {
-		try {
-			// A native promise is subscribed to through its own `then`, which a
-			// sink may have replaced: its throw is the sink's failure too.
-			Promise.resolve(settled).then(
-				() => resolve(true),
-				() => resolve(false),
-			);
-		} catch {
-			resolve(false);
-		}
-	});
+	if (!isThenable(answer)) return false;
+	try {
+		await answer;
+		return true;
+	} catch {
+		return false;
+	}
 }
 
 const isThenable = (value: unknown): value is PromiseLike<unknown> => {
