@@ -15,9 +15,10 @@
  */
 
 /**
- * The MFA transaction, the subject lock state that bounds guessable proofs, a
- * session's account-email proof, a subject's first-binding mark, the port
- * that keeps them, and its `mfaTransactionStore` slot. See ADR 2026-09-25-multi-factor-authentication
+ * The MFA transaction, the subject lock state that bounds guessable proofs and
+ * its authorized recovery, a subject's generation, lease and recovery-set
+ * floor, a session's account-email proof, a subject's first-binding mark, the
+ * port that keeps them, and its `mfaTransactionStore` slot. See ADR 2026-09-25-multi-factor-authentication
  * (the MFA transaction; attempts, lockout and rate limits; D24).
  *
  * A transaction is the short-lived, single-use record of one second-factor
@@ -32,6 +33,14 @@
  * hard hold or an applied recovery ends it), nor does the hard hold (only
  * an applied recovery lifts it), and an open sign-up lets anyone mint
  * subjects.
+ *
+ * Every mechanism a subject's factor-set writes rely on is state of this
+ * store, judged in its atomic operations: a writer captures the subject's
+ * generation, writes under the subject's lease acquired at that generation,
+ * and the generation moves only under the lease, at an applied recovery or
+ * reset. The lease is logical: a write that outlives it is told so at its
+ * release, never stopped.
+ *
  * Transactions are bounded by their expiry alone, not per subject and not
  * per session: nothing caps the transactions one session holds, and how many
  * are open is bounded only by the rate limits of the routes that open them.
@@ -1177,8 +1186,9 @@ export function readMfaSubjectRecoveryAnswer(
 }
 
 /**
- * Where MFA transactions, the subject lock state, a session's account-email
- * proof and a subject's first-binding mark are kept.
+ * Where MFA transactions, the subject lock state and its authorized recovery,
+ * a subject's generation, lease and recovery-set floor, a session's
+ * account-email proof and a subject's first-binding mark are kept.
  *
  * Every operation is atomic on its own. A store that cannot answer throws:
  * an outage is `503`, never a verdict on a proof.

@@ -16,8 +16,9 @@
 
 /**
  * Redis {@link MfaTransactionStore}: the single-use record of each
- * second-factor ceremony, the subject lock that bounds guessable proofs, the
- * email proof an operator reset requires, the account-email proof given in a
+ * second-factor ceremony, the subject lock that bounds guessable proofs and
+ * its authorized recovery, a subject's generation, lease and recovery-set
+ * floor, the email proof an operator reset requires, the account-email proof given in a
  * session, and a subject's first-binding mark (see
  * packages/core/docs/adr/2026-09-25-multi-factor-authentication.md).
  *
@@ -25,14 +26,20 @@
  * <keyPrefix>tx:{<id>}                          HASH   one transaction, expiring at its expiresAtMs
  * <keyPrefix>lock:{<subject>}                   HASH   the lockout run, reservations in flight, the hard hold
  * <keyPrefix>week:{<subject>}                   ZSET   the weekly window: one member per attempt, scored by time
+ * <keyPrefix>recovery:{<subject>}               HASH   the generation, the recovery-set floor, the recovery authorizations
+ * <keyPrefix>lease:{<subject>}                  STRING the lease holder's token, expiring at the lease's end
  * <keyPrefix>proof:{<subject>}                  STRING the email-proof requirement, with no TTL
  * <keyPrefix>session-proof:{<subject>}:<sid>    STRING a session's account-email proof, expiring at its end
  * <keyPrefix>first-binding:{<subject>}          STRING a subject's first-binding mark, expiring at its end
  * ```
  *
  * `<id>`, `<subject>` and `<sid>` are base64url of their JSON (`internal/mfa-keys.mts`).
- * A subject's lock and week share its hash tag, so each operation on them is one
- * script on one Cluster slot. Every operation a race could split is one script
+ * A subject's lock, week, recovery hash and lease share its hash tag, so each
+ * operation on them is one script on one Cluster slot. The recovery hash
+ * carries no TTL once it holds a generation or a floor (losing either would
+ * refuse a writer or bring an older recovery-code set back); before that it
+ * expires a day after its latest authorization ends. A lease and an
+ * authorization end on the server's clock. Every operation a race could split is one script
  * (`makeIoredisClients`): insert-only create, compare-and-set update,
  * `reserveAttempt`, `takeChallenge`, `consume`, and each lockout step, which
  * reads, decides and writes the subject state at once.
