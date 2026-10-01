@@ -4476,10 +4476,15 @@ describe("POST /oauth/federation/:name/token — a token is never refreshed befo
 	it("records when the refresh call began as obtainedAt, and the capped end beyond it", async () => {
 		// The cap counts from when the answer is read, so the recorded life
 		// (`expiresAt − obtainedAt`) exceeds the maximum by the call's duration.
+		// The replaced token's obtainedAt is not carried forward.
 		await withFrozenDate(async () => {
 			const CALL_MS = 120_000;
 			const calledAt = Date.now();
-			const store = await seeded({ ...baseFedTokens, expiresAt: new Date(Date.now() - 1000) });
+			const store = await seeded({
+				...baseFedTokens,
+				obtainedAt: new Date(Date.now() - 3_600_000),
+				expiresAt: new Date(Date.now() - 1000),
+			});
 			const { app } = appWith(store, async () => {
 				vi.setSystemTime(Date.now() + CALL_MS);
 				return { accessToken: "new-at", expiresIn: 2 * 86_400 };
@@ -4494,8 +4499,12 @@ describe("POST /oauth/federation/:name/token — a token is never refreshed befo
 		});
 	});
 
-	it("records no obtainedAt for a token with no finite expiry", async () => {
-		const store = await seeded({ ...baseFedTokens, expiresAt: new Date(Date.now() - 1000) });
+	it("records no obtainedAt for a token with no finite expiry, and drops the replaced token's", async () => {
+		const store = await seeded({
+			...baseFedTokens,
+			obtainedAt: new Date(Date.now() - 3_600_000),
+			expiresAt: new Date(Date.now() - 1000),
+		});
 		const { app } = appWith(store, async () => ({ accessToken: "new-at" }));
 
 		const res = await postFedToken(app, "google", await mintAccessToken());

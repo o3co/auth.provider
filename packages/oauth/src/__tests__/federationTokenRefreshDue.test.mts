@@ -98,13 +98,19 @@ describe("refreshIsDue", () => {
 			expect(due({ obtainedAt: new Date(NOW - 100), expiresAt: new Date(NOW + 1000) })).toBe(false);
 		});
 
-		it("believes an obtainedAt a little ahead of now, as another replica's clock may be", () => {
-			expect(due(held(NOW + 5000))).toBe(false);
+		it("believes an obtainedAt up to a second ahead of now, as replicas' clocks may differ", () => {
+			expect(due(held(NOW + 1000))).toBe(false);
+		});
+
+		it("keeps the buffer rule for an obtainedAt more than a second ahead of now", () => {
+			// Believing it would let a skewed writer keep a token from being
+			// refreshed until it reached the floor.
+			expect(due(held(NOW + 1001))).toBe(true);
+			expect(due(held(NOW + 5000))).toBe(true);
 		});
 
 		it("keeps the buffer rule for an obtainedAt it does not believe: one not before its own end", () => {
-			// Within the buffer, an obtainedAt further ahead than the buffer's
-			// allowance is never before the end, so this is the one shape left.
+			expect(due({ obtainedAt: new Date(NOW + 500), expiresAt: new Date(NOW + 500) })).toBe(true);
 			expect(due({ obtainedAt: new Date(NOW + 5000), expiresAt: new Date(NOW + 5000) })).toBe(true);
 			expect(due({ obtainedAt: new Date(NOW + 6000), expiresAt: new Date(NOW + 5000) })).toBe(true);
 		});

@@ -20,9 +20,10 @@
  * it is known to be obtained less than half its lifetime ago and has at least
  * the refresh floor left. That rule only ever delays a refresh: an
  * `obtainedAt` that is absent, or that core's `judgeHeldUpstreamToken` does
- * not believe, leaves the buffer rule alone. It reads the record's instants
- * on this replica's clock, so it assumes replicas' clocks agree to within the
- * floor.
+ * not believe (dated more than the floor ahead of this replica's clock, or
+ * not before its own end), leaves the buffer rule alone. It reads the
+ * record's instants on this replica's clock, so it assumes replicas' clocks
+ * agree to within the floor.
  */
 
 import { type FederationTokens, judgeHeldUpstreamToken } from "@o3co/auth-provider-core";
@@ -44,9 +45,9 @@ export const refreshIsDue = (
 	if (obtainedAt === undefined || remainingMs < REFRESH_FLOOR_MS) return true;
 	// Never refreshed before it is half spent, so a lifetime shorter than the
 	// buffer is not refreshed on every request. A token not believed reads as
-	// half spent: the buffer rule stands.
-	return judgeHeldUpstreamToken(
-		{ obtainedAt, expiresAt },
-		{ now, allowanceMs: ctx.refreshBufferMs },
-	).halfSpent;
+	// half spent: the buffer rule stands. The allowance is the replicas' clock
+	// agreement, not the buffer: a writer dated further ahead would keep its
+	// token from being refreshed until it reached the floor.
+	return judgeHeldUpstreamToken({ obtainedAt, expiresAt }, { now, allowanceMs: REFRESH_FLOOR_MS })
+		.halfSpent;
 };
