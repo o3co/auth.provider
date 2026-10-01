@@ -407,6 +407,18 @@ describe("classifyFederationRefreshError", () => {
 			}
 		});
 
+		it("is unknown, not invalid_grant, when a field the outage check reads along the chain cannot be read", () => {
+			const response = throwingOn(new Response(null, { status: 400 }), "status");
+			for (const [label, cause] of [
+				["an Error cause's status", throwingOn(new Error("cause"), "status")],
+				["an Error cause's name", throwingOn(new Error("cause"), "name")],
+				["the Response it was raised over's status", response],
+			] as const) {
+				const error = Object.assign(new Error("rejected"), { error: "invalid_grant", cause });
+				expect(classifyFederationRefreshError(error), label).toEqual(UNKNOWN);
+			}
+		});
+
 		it("classifies a Proxy whose getPrototypeOf trap throws, and does not throw", () => {
 			const proxy = new Proxy(
 				{},

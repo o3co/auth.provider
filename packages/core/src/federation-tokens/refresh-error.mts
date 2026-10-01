@@ -15,7 +15,7 @@
  */
 
 import { guardedRead, isError, thrownText } from "../logging/loggableError.mjs";
-import { isFederationUpstreamOutage } from "./upstreamOutage.mjs";
+import { readFederationUpstreamOutage } from "./upstreamOutage.mjs";
 
 /**
  * What an upstream federation refresh failed with.
@@ -137,23 +137,25 @@ function retryAfterSeconds(error: object): number | undefined {
 
 /** The fields of the thrown value the structured reading decides by, each read once. */
 interface ReadFields {
+	/** Whether the outage walk (`readFederationUpstreamOutage`) found one. */
+	readonly outage: boolean;
 	readonly code: unknown;
 	readonly status: unknown;
 	readonly networkCode: string | undefined;
 }
 
-function structuredReason(
-	error: object,
-	{ code, status, networkCode }: ReadFields,
-): FederationRefreshErrorReason | undefined {
+function structuredReason({
+	outage: walked,
+	code,
+	status,
+	networkCode,
+}: ReadFields): FederationRefreshErrorReason | undefined {
 	// An outage (unreachable, timed out or 5xx, on the error, its Error causes or
 	// its Response, or a 5xx `status` on a non-Error an adapter threw) is read
 	// before the codes that reject the refresh token. A 5xx is never a verdict
 	// on it: an IdP that is down and answers `invalid_grant` must not cost the
 	// user their upstream tokens. A 429 is no outage.
-	const outage =
-		isFederationUpstreamOutage(error) ||
-		(typeof status === "number" && status >= 500 && status < 600);
+	const outage = walked || (typeof status === "number" && status >= 500 && status < 600);
 	// A 429 (RFC 6585 §4) asks for less and is no verdict on the refresh token,
 	// whatever its body names, so it is read before any code that ends the
 	// credential. Some IdPs (Google, Microsoft) echo `too_many_requests` as `.error`.
@@ -198,15 +200,21 @@ export function classifyFederationRefreshError(
 		const code = readOrUnreadable(error, "error");
 		const status = readOrUnreadable(error, "status");
 		const networkCode = extractNetworkCode(error);
+		const outage = readFederationUpstreamOutage(error);
 		// Nothing read off an error with an unreadable field is safe to act on.
-		if (code === UNREADABLE || status === UNREADABLE || networkCode === UNREADABLE) {
+		if (
+			code === UNREADABLE ||
+			status === UNREADABLE ||
+			networkCode === UNREADABLE ||
+			outage === "unreadable"
+		) {
 			return { reason: "unknown", structured: false };
 		}
 		if (typeof code === "string" && KNOWN_ERROR_CODES.has(code)) extras.upstreamCode = code;
 		const retryAfter = retryAfterSeconds(error);
 		if (retryAfter !== undefined) extras.retryAfterSeconds = retryAfter;
 
-		const reason = structuredReason(error, { code, status, networkCode });
+		const reason = structuredReason({ outage: outage === "outage", code, status, networkCode });
 		if (reason !== undefined) return { reason, structured: true, ...extras };
 	}
 	// Message fallback for errors not from openid-client. It reads an outage
