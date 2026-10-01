@@ -15,16 +15,12 @@
  */
 
 /**
- * The federation routes. `GET /oauth/federation/:name` starts a federation
- * (state, PKCE, nonce; for `form_post`, a transaction record and its cookie).
- * The callback — `GET` for a `query` federation, `POST` for `form_post` —
- * checks the envelope, exchanges the code, resolves the identity through
- * `UserRepository`, then either links it to the live session (`?link=1`) or
- * establishes a session via `establishSession`, from an establishment core
- * builds without asking the requirements (`establishWithoutAsking`), and
- * redirects per the federation's redirect policy. The link flow reads its
- * session through admission: `session.link` at the start, and
- * `session.link_callback` over the `sid` and subject the start recorded.
+ * The federation router: the start, `GET /oauth/federation/:name`, and the
+ * callback, `GET` for a `query` federation and `POST` for `form_post`. It
+ * builds the stages' context once and runs the callback's stages in order,
+ * stopping at the first that answers. The login stays here: a session
+ * established via `establishSession` from what `establishWithoutAsking`
+ * builds. Core's guards pin that call and the `profile.amr` reads to this file.
  */
 
 import {
@@ -230,13 +226,6 @@ export const createRouter = (
 		deriveFederationTransactionCookieName(readSessionCookieName(config));
 	const linkTrustedOrigins = readCsrfTrustedOrigins(config);
 
-	const {
-		transactionStore,
-		transactionCookiePath,
-		transactionCookieAttributes,
-		clearTransactionCookie,
-	} = createTransactionCookie(providerCallbackUrls, transactionCookieName);
-
 	const ctx: FederationRouterContext = {
 		federationProviders,
 		federationRedirectPolicyResolver,
@@ -249,18 +238,16 @@ export const createRouter = (
 		logger,
 		linkTrustedOrigins,
 		admitLink,
-		transactionCookieName,
-		transactionStore,
-		transactionCookiePath,
-		transactionCookieAttributes,
-		clearTransactionCookie,
+		...createTransactionCookie(providerCallbackUrls, transactionCookieName),
 	};
 
 	/**
 	 * The callback leg, shared by the GET and POST routes; only the parameter
 	 * source differs (query string for `"query"`, form body for
 	 * `"form_post"`). One handler because it is the security boundary: two
-	 * copies would be two places for the state check to drift.
+	 * copies would be two places for the state check to drift. The state
+	 * check, then the identity, then the link or the login; a stage that
+	 * answers returns `null`, and the handler stops there.
 	 */
 	const runCallback = async (
 		provider: FederationProvider,

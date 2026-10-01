@@ -66,7 +66,8 @@ export const identifyFederatedUser = async (
 	}
 
 	// Exchange the authorization code for a FederationProfile
-	// providerCallbackUrls is the authoritative map; same entry verified above in the start handler.
+	// providerCallbackUrls is the authoritative map; the same entry the start
+	// verified (`FederationStart.mts`).
 	const callbackUrl = providerCallbackUrls.get(provider.name);
 	if (!callbackUrl) {
 		logMisconfigured(log, "no_callback_url");
@@ -80,8 +81,9 @@ export const identifyFederatedUser = async (
 	}
 
 	// What the adapter sees of the callback, minus `code` (passed in its own
-	// field) and `state` (already checked here): a generic bag carrying them
-	// would be a second, unchecked place to read a credential from.
+	// field) and `state` (already checked, `FederationCallbackState.mts`): a
+	// generic bag carrying them would be a second, unchecked place to read a
+	// credential from.
 	const { code: _code, state: _state, ...adapterCallbackParams } = params;
 
 	let profile: Awaited<ReturnType<FederationProvider["exchangeCode"]>>;
