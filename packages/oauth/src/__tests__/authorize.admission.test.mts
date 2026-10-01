@@ -1268,6 +1268,112 @@ describe("/authorize on admission — a reauthenticate verdict is answered with 
 	});
 });
 
+describe("/authorize on admission — the session's authentication time is read against the clock", () => {
+	/** Further ahead of the clock than core's skew allows: an instant `authTimeAt` cannot read. */
+	const beyondTheSkew = () => new Date(Date.now() + 10 * 60_000);
+
+	const steppingUp = () => {
+		const state = { met: false };
+		const requirement = fixture("fixture", () =>
+			state.met ? { outcome: "met" } : { outcome: "step_up", whenStillUnmet: "reauthenticate" },
+		);
+		return { requirement, state };
+	};
+
+	it("max_age: a session authenticated further ahead than the skew allows is sent to log in, never minted from", async () => {
+		const harness = await makeApp({
+			userSessionStore: storeWith(record({ authTime: beyondTheSkew() })),
+		});
+		const back = loginRedirectTo(await authorize(harness.app, { ...baseQuery, max_age: "3600" }));
+		expect(back.searchParams.get("reauth_ask")).toBeTruthy();
+		expect(harness.createCode).not.toHaveBeenCalled();
+	});
+
+	it("max_age under prompt=none: such a session is login_required", async () => {
+		const harness = await makeApp({
+			userSessionStore: storeWith(record({ authTime: beyondTheSkew() })),
+		});
+		const params = redirectParams(
+			await authorize(harness.app, { ...baseQuery, max_age: "3600", prompt: "none" }),
+		);
+		expect(params.get("error")).toBe("login_required");
+	});
+
+	it("max_age: an instant ahead within the skew reads as now, and is fresh", async () => {
+		const harness = await makeApp({
+			userSessionStore: storeWith(record({ authTime: new Date(Date.now() + 60_000) })),
+		});
+		expect(codeOf(await authorize(harness.app, { ...baseQuery, max_age: "0" }))).toBe("code-x");
+	});
+
+	it("a login asked for is not met by a session whose authentication time cannot be read: login_required", async () => {
+		const clock = { authTime: minutesAgo(5) };
+		const harness = await makeApp({
+			userSessionStore: storeAnswering(async () => record({ authTime: clock.authTime })),
+		});
+		const back = loginRedirectTo(await authorize(harness.app, { ...baseQuery, prompt: "login" }));
+		clock.authTime = beyondTheSkew();
+		const params = redirectParams(
+			await authorize(harness.app, Object.fromEntries(back.searchParams.entries())),
+		);
+		expect(params.get("error")).toBe("login_required");
+		expect(harness.createCode).not.toHaveBeenCalled();
+	});
+
+	it("a session back from a step-up trip with an authentication time that cannot be read is sent to log in, then refused if it still cannot be", async () => {
+		const { requirement } = steppingUp();
+		const clock = { authTime: minutesAgo(5) };
+		const harness = await makeApp({
+			userSessionStore: storeAnswering(async () => record({ authTime: clock.authTime })),
+			requirements: [requirement],
+		});
+		const page = new URL((await authorize(harness.app, baseQuery)).headers.location as string);
+		expect(page.pathname).toBe("/step-up");
+		const back = new URL(page.searchParams.get("redirect_to") as string);
+		clock.authTime = beyondTheSkew();
+		const toLogin = loginRedirectTo(
+			await authorize(harness.app, Object.fromEntries(back.searchParams.entries())),
+		);
+		const ask = (
+			harness.records.get(`reauth:${toLogin.searchParams.get("reauth_ask")}`) as {
+				reauth: Record<string, unknown>;
+			}
+		).reauth;
+		expect(ask.loginAskedAt).toEqual(expect.any(Number));
+		expect(ask.stepUpAskedAt).toEqual({ fixture: expect.any(Number) });
+
+		const params = redirectParams(
+			await authorize(harness.app, Object.fromEntries(toLogin.searchParams.entries())),
+		);
+		expect(params.get("error")).toBe("login_required");
+	});
+
+	it("a session back from a reauthenticate login trip with an authentication time that cannot be read is refused, not sent again", async () => {
+		const clock = { authTime: minutesAgo(5) };
+		const harness = await makeApp({
+			userSessionStore: storeAnswering(async () => record({ authTime: clock.authTime })),
+			requirements: [fixture("fixture", () => ({ outcome: "reauthenticate" }))],
+		});
+		const back = loginRedirectTo(await authorize(harness.app, baseQuery));
+		clock.authTime = beyondTheSkew();
+		harness.login({ isAuthenticated: true, user: { id: SUBJECT }, sid: SID });
+		const params = redirectParams(
+			await authorize(harness.app, Object.fromEntries(back.searchParams.entries())),
+		);
+		expect(params.get("error")).toBe("login_required");
+		expect(harness.regenerated).toBe(1);
+	});
+
+	it("a record whose authTime is not a valid Date never reaches these checks: admission answers not_live, and the browser logs in anew", async () => {
+		const harness = await makeApp({
+			userSessionStore: storeWith(record({ authTime: new Date(Number.NaN) })),
+		});
+		loginRedirectTo(await authorize(harness.app, { ...baseQuery, max_age: "3600" }));
+		expect(harness.regenerated).toBe(1);
+		expect(harness.createCode).not.toHaveBeenCalled();
+	});
+});
+
 describe("/authorize on admission — a POST's parameters survive every trip", () => {
 	// OIDC Core §3.1.2.1: a POST carries the authorization request in its form
 	// body. Every page the browser is sent to must return it to the same
