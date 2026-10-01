@@ -1182,6 +1182,24 @@ describe("/authorize on admission — prompt=login from a browser that is not si
 		);
 	});
 
+	it("a cookie whose session is dead, with prompt=login, records the login ask too, so the browser logs in once", async () => {
+		const live: { session: UserSession | null } = { session: null };
+		const harness = await makeApp({ userSessionStore: storeAnswering(async () => live.session) });
+		const back = loginRedirectTo(await authorize(harness.app, { ...baseQuery, prompt: "login" }));
+		expect(harness.regenerated).toBe(1);
+
+		await new Promise((resolve) => setTimeout(resolve, 2));
+		live.session = record({ authTime: new Date() });
+		harness.login({ isAuthenticated: true, user: { id: SUBJECT }, sid: SID });
+		const done = new URL(
+			(await authorize(harness.app, Object.fromEntries(back.searchParams.entries()))).headers
+				.location as string,
+			ISSUER,
+		);
+		expect(done.origin + done.pathname).toBe(REDIRECT_URI);
+		expect(done.searchParams.get("code")).toBe("code-x");
+	});
+
 	it("records no ask for a request longer than 8 KB: the plain login redirect", async () => {
 		const harness = await makeApp({ session: { isAuthenticated: false } });
 		const back = loginRedirectTo(
