@@ -607,6 +607,10 @@ sender-constrained なトークンバインディングは第一級の拡張面�
 - `SupportsLock` — `FederationTokenStore` の任意の capability で、`(sid, federationName)` 単位の advisory lock を提供し、並行リフレッシュが上流に殺到するのを防ぐ。同梱の両ストアが実装しており、`supportsLock(store)` ガードで検出する。その背後のロック実装 — core の `createInProcessLock`（`src/federation-tokens/lock/memory.mts`）と `@o3co/auth-provider-redis` の `createRedisLock` — は内部実装で export されない。ロックが必要な独自ストアは代わりに `SupportsLock` を公開する。
 - `Client.allowedAzpForFederationToken` — `Client` レコードの opt-in フラグ。ないときは `false`。`POST /oauth/federation/:name/token` を利用するクライアントは `true` に設定しなければならない。
 
+### フェデレーショングラント
+
+フェデレーショングラントのドメイン — グラントのレコード、そのストア、lodging、取得、失効 — は [`src/federation-grants/README.md`](src/federation-grants/README.md) に記述されています。グラントの credential を書き込むパッケージは、保存するアクセストークンを `federationGrantAccessToken(token, lifetime)`（[`src/federation-grants/held-token.mts`](src/federation-grants/held-token.mts)）で組み立てます。取得がリフレッシュしたトークンを保存するのとまったく同じ規則に従います。保存するのは `readUpstreamTokenLifetime` の読み取りが `verdict: "finite"` かつ `stated: "both"` のときだけで、それ以外の読み取り（`expiresIn` だけのものを含む）は `no_finite_lifetime` として拒否します。そうした読み取りから組み立てたトークンでは、`obtainedAt` は呼び出しの開始、`issuedLifetime` は発行されたままの `expiresIn`、`effectiveExpiresAt` は読み取りの終わり `min(expiresAt, calledAt + expiresIn)` になります。
+
 ### OIDC id_token とクレームフィルター
 
 `authorization_code` グラントと `/oauth/userinfo` エンドポイントが使用する 2 つの低レベルヘルパー。
