@@ -609,6 +609,10 @@ Two groups of optional slots for federation and OIDC support, provided by a modu
 - `SupportsLock` — optional capability on `FederationTokenStore` for per-`(sid, federationName)` advisory locks, which keep concurrent refreshes from stampeding the upstream. Both bundled stores implement it; detect it with the `supportsLock(store)` guard. The lock implementations behind them — core's `createInProcessLock` (`src/federation-tokens/lock/memory.mts`) and `@o3co/auth-provider-redis`'s `createRedisLock` — are internal and not exported; a custom store that needs locking exposes `SupportsLock` instead.
 - `Client.allowedAzpForFederationToken` — opt-in flag on the `Client` record; absent means `false`. A client that consumes `POST /oauth/federation/:name/token` must set it to `true`.
 
+### Federation grants
+
+The federation grant domain — the grant record, its stores, lodging, retrieval and revocation — is described in [`src/federation-grants/README.md`](src/federation-grants/README.md). A package that writes a grant's credential builds the stored access token with `federationGrantAccessToken(token, lifetime)` ([`src/federation-grants/held-token.mts`](src/federation-grants/held-token.mts)), from a `finite` reading of `readUpstreamTokenLifetime` that names its issued lifetime, exactly as the retrieval stores a refreshed one: `obtainedAt` is the call's start, `issuedLifetime` the `expiresIn` as issued, and `effectiveExpiresAt` the reading's end, `min(expiresAt, calledAt + expiresIn)`.
+
 ### OIDC id_token and claim filter
 
 Two low-level helpers used by the `authorization_code` grant and the `/oauth/userinfo` endpoint.

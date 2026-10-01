@@ -104,6 +104,30 @@ describe("core barrel — federation grant domain rules", () => {
 		).toThrow(RangeError);
 	});
 
+	it("re-exports the stored access token a credential keeps, built from a lifetime reading as the retrieval builds it", () => {
+		const calledAt = Date.UTC(2026, 0, 1);
+		const reading = core.readUpstreamTokenLifetime(
+			{ expiresIn: 3600, expiresAt: new Date(calledAt + 600_000) },
+			{ calledAt, now: calledAt + 1_000, floorMs: 0 },
+		);
+		if (reading.verdict !== "finite" || reading.stated !== "both") {
+			throw new Error(`unexpected reading: ${reading.verdict}`);
+		}
+		expect(
+			core.federationGrantAccessToken(
+				{ value: "at", tokenType: "Bearer", scopes: ["read"] },
+				reading,
+			),
+		).toStrictEqual({
+			value: "at",
+			tokenType: "Bearer",
+			obtainedAt: new Date(calledAt),
+			issuedLifetime: 3600,
+			effectiveExpiresAt: new Date(calledAt + 600_000),
+			scopes: ["read"],
+		});
+	});
+
 	it("re-exports the refresh-error classifier both token routes share", () => {
 		expect(core.classifyFederationRefreshError(new Error("boom"))).toEqual({
 			reason: "unknown",

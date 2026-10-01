@@ -1408,6 +1408,9 @@ export {
 	type FederationGrantStoreFactory,
 	registerBuiltinFederationGrantStores,
 } from "./federation-grants/factory.mjs";
+// The access token a grant's credential stores, from a finite lifetime reading:
+// every writer of a credential builds it here, so each keeps the same three facts.
+export { federationGrantAccessToken } from "./federation-grants/held-token.mjs";
 export {
 	createFederationGrantIntentStoreFactory,
 	type FederationGrantIntentStoreFactory,
