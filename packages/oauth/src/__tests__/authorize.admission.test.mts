@@ -1039,6 +1039,81 @@ describe("/authorize on admission — the ask is read until the code is minted",
 	});
 });
 
+describe("/authorize on admission — prompt=login from a browser that is not signed in", () => {
+	const askOf = (harness: { records: Map<string, unknown> }, url: URL) =>
+		(
+			harness.records.get(`reauth:${url.searchParams.get("reauth_ask")}`) as
+				| { reauth: Record<string, unknown> }
+				| undefined
+		)?.reauth;
+
+	it("records the login ask before the login, so the browser logs in once and gets its code", async () => {
+		const clock = { authTime: minutesAgo(5) };
+		const harness = await makeApp({
+			userSessionStore: storeAnswering(async () => record({ authTime: clock.authTime })),
+			session: { isAuthenticated: false },
+		});
+		const back = loginRedirectTo(await authorize(harness.app, { ...baseQuery, prompt: "login" }));
+		expect(back.searchParams.get("prompt")).toBe("login");
+
+		// The login the page performs: a new session, authenticated after the ask.
+		await new Promise((resolve) => setTimeout(resolve, 2));
+		clock.authTime = new Date();
+		harness.login({ isAuthenticated: true, user: { id: SUBJECT }, sid: SID });
+		const res = await authorize(harness.app, Object.fromEntries(back.searchParams.entries()));
+		const done = new URL(res.headers.location as string, ISSUER);
+		expect(done.origin + done.pathname).toBe(REDIRECT_URI);
+		expect(done.searchParams.get("code")).toBe("code-x");
+		expect(askOf(harness, back)).toBeUndefined();
+	});
+
+	it("records it before the client is looked up, as every unauthenticated request is answered", async () => {
+		const harness = await makeApp({
+			userSessionStore: storeWith(record()),
+			session: { isAuthenticated: false },
+			clientNotFound: true,
+		});
+		const back = loginRedirectTo(await authorize(harness.app, { ...baseQuery, prompt: "login" }));
+		expect(askOf(harness, back)).toMatchObject({
+			loginAskedAt: expect.any(Number),
+			stepUpAskedAt: {},
+		});
+	});
+
+	it("an ask store that cannot record it falls back to the plain login redirect, logged", async () => {
+		const harness = await makeApp({
+			userSessionStore: storeWith(record()),
+			session: { isAuthenticated: false },
+			sessionStoreFail: "set",
+		});
+		const back = loginRedirectTo(await authorize(harness.app, { ...baseQuery, prompt: "login" }));
+		expect(back.searchParams.has("reauth_ask")).toBe(false);
+		expect(back.searchParams.get("prompt")).toBe("login");
+		expect(harness.logger.error).toHaveBeenCalledWith(
+			{ err: expect.objectContaining({ name: "Error" }) },
+			"authorize_reauth_ask_store_unavailable",
+		);
+	});
+
+	it("records nothing without prompt=login, under prompt=none, or with no session store", async () => {
+		const plain = await makeApp({ session: { isAuthenticated: false } });
+		expect(loginRedirectTo(await authorize(plain.app, baseQuery)).searchParams.has("reauth_ask")).toBe(
+			false,
+		);
+		expect(plain.records.size).toBe(0);
+
+		const silent = await makeApp({ session: { isAuthenticated: false } });
+		expect(redirectParams(await authorize(silent.app, { ...baseQuery, prompt: "none" })).get("error")).toBe(
+			"login_required",
+		);
+		expect(silent.records.size).toBe(0);
+
+		const storeless = await makeApp({ session: { isAuthenticated: false }, sessionStore: false });
+		const back = loginRedirectTo(await authorize(storeless.app, { ...baseQuery, prompt: "login" }));
+		expect(back.searchParams.has("reauth_ask")).toBe(false);
+	});
+});
+
 describe("/authorize on admission — a POST's parameters survive every trip", () => {
 	// OIDC Core §3.1.2.1: a POST carries the authorization request in its form
 	// body. Every page the browser is sent to must return it to the same
