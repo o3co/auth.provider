@@ -482,6 +482,19 @@ describe("createClientIdMetadataDocumentResolver — the document", () => {
 		);
 	});
 
+	it("refuses a redirect_uris entry whose query core's redirect-URI rule refuses", async () => {
+		await refuses(
+			"a response parameter",
+			{ redirect_uris: ["https://client.example/cb?iss=x"] },
+			/redirect_uris entry .* must not carry "iss" in its query/,
+		);
+		await refuses(
+			"a bracketed name",
+			{ redirect_uris: ["https://client.example/cb?filter[x]=1"] },
+			/redirect_uris entry .* query parameter names may use only/,
+		);
+	});
+
 	it("refuses a shared-secret method, a client_secret, and private_key_jwt", async () => {
 		await refuses("basic", { token_endpoint_auth_method: "client_secret_basic" }, /not allowed/);
 		await refuses("secret", { client_secret: "s" }, /client_secret/);
