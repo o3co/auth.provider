@@ -214,8 +214,11 @@ enrollment's answer, which goes to the account's own browser, naming the
 account only by its username, verbatim — the address in it nowhere else; an
 error the factor throws, probed over a canary account, quoting neither its
 address nor its username; a hint that never shows the account's address; a proof the factor cannot read answered
-`malformed`, never thrown; and a valid proof that completes an enrollment and
-verifies the factor it enrolled. A code and an address are looked for in the
+`malformed`, never thrown; a valid proof that completes an enrollment and
+verifies the factor it enrolled; and, for a factor that answers `identity`, a
+non-empty string for its enrolled data, the same at each reading, through a
+JSON round trip and for a verification's next data, and over data it cannot
+read a non-empty string or `undefined`, never a throw. A code and an address are looked for in the
 strings an answer holds as a reader decodes them — object keys, map and set
 entries included — in any case, an address with its percent-escapes decoded
 too, never in its JSON text, so no escaping hides one. It enrolls at one instant and verifies an hour later,

@@ -129,7 +129,7 @@ Store は主体の第二要素（MFA ADR の D7）と登録の証人（D12）を
 
 **どのリクエストも** 設定された URL そのままへの JSON の `POST` で — パスもクエリも足さないので、主体や要素の ID がリクエスト行や Store のアクセスログに現れることはない — ユーザーリポジトリの規則に従う: 同じ `bearerToken`・期限・レスポンス上限、`https` かループバックの `http`、リダイレクトを追わない、`Bearer` チャレンジ付きの `401` / `403` は拒否された資格情報（[ワイヤ契約](#ワイヤ契約)）。
 
-**要素のレコード** は `{ id, subject, kind, label?, binding?, createdAtMs, lastUsedAtMs?, version, data }`。時刻はエポックミリ秒の数値で、`…Ms` と名付ける。値の無い省略可能なフィールドは省く: `null` は決して「未設定」ではなく、どれかのフィールドに `null` を持つレコードはプロバイダーが読めないレコードである。`id` は base64url の 22 文字（16 バイトの乱数）、`kind` はヒントのトークン（`^[a-z][a-z0-9_-]{0,63}$`）、`label` は 1〜64 文字で、正しい形の文字列であり、行を分けたり並びを変えたりする文字を含まない。`binding` は `password`・`email_proof`・`mfa`、`version` は安全な非負整数、`data` はバイト単位でそのまま保持される文字列。この形から外れたレコードはプロバイダーが読めないレコードである（core の `isMfaFactorId`・`isMfaFactorKind`・`isMfaFactorLabel`）。
+**要素のレコード** は `{ id, subject, kind, label?, binding?, createdAtMs, lastUsedAtMs?, version, data }`。時刻はエポックミリ秒の数値で、`…Ms` と名付ける。値の無い省略可能なフィールドは省く: `null` は決して「未設定」ではなく、どれかのフィールドに `null` を持つレコードはプロバイダーが読めないレコードである。`id` は base64url の 22 文字（16 バイトの乱数）、`kind` はヒントのトークン（`^[a-z][a-z0-9_-]{0,63}$`）、`label` は 1〜64 文字で、正しい形の文字列であり、行を分けたり並びを変えたりする文字を含まない。`binding` は `password`・`email_proof`・`federated`・`mfa`、`version` は安全な非負整数、`data` はバイト単位でそのまま保持される文字列。この形から外れたレコードはプロバイダーが読めないレコードである（core の `isMfaFactorId`・`isMfaFactorKind`・`isMfaFactorLabel`）。
 
 | エンドポイント | リクエスト | 応答 |
 | --- | --- | --- |
