@@ -21,8 +21,8 @@ import type { Code } from "./types.mjs";
  * fields but the code, which the repository mints.
  *
  * Derived from {@link Code} so a field added to the record is one the writer
- * has to name; every key is required so a forgotten `nonce` or `acr` cannot
- * issue a code whose id_token lacks it. Only `expiresIn` may be omitted, for
+ * has to name; every key is required so a forgotten `nonce`, `acr` or `amr`
+ * cannot issue a code whose tokens lack it. Only `expiresIn` may be omitted, for
  * the repository's configured default (whole seconds).
  *
  * `expiresIn` is in seconds, a positive finite number whose end is within the

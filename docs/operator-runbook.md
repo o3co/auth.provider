@@ -2046,13 +2046,28 @@ before you flip — and a relying party holding the secret can also mint.
   change keys, so a mixed fleet opens a replay window (see the DPoP note in
   [Before you upgrade](#before-you-upgrade)).
 - An authorization code carries the `amr` its `/authorize` vouched for, and
-  `/token` stamps that, not the session record's. During a roll, a code an
-  older replica issued carries none, and its tokens carry no `amr`; an older
-  replica that redeems a newer one's code stamps the record's, as it always
-  did, which differs only for a session that recorded a second factor
-  between `/authorize` and `/token`. Either lasts at most one code lifetime
+  `/token` stamps that, not the session record's. A mixed fleet issues and
+  redeems codes across releases for at most one code lifetime
   (`redis-code-repository.defaultExpiresIn`, 600 s by default) after the
-  roll.
+  roll, but what those codes mint outlives them:
+
+  - a code an older replica issued, redeemed by this release, yields tokens
+    without `amr`, and the refresh grant carries none forward at every
+    refresh until the token's family ends — `oauth.refreshToken.expiresIn`
+    after the login that began it (a day by default) — or the user signs in
+    again. Under `mfa.mode = "required"` such a family is refused at its
+    first refresh (`400 invalid_grant`), and the relying party authorizes
+    again;
+  - a code this release issued, redeemed by an older replica, is stamped
+    with the session record's `amr`, as before — which differs only for a
+    session that recorded a second factor between `/authorize` and `/token`
+    — and the refresh grant carries that forward the same way.
+
+  Under `oauth.refreshToken.unknownFamilyPolicy = "accept"` a token with no
+  family record has no such bound. A deployment for which that matters
+  revokes the families issued during the roll, or calls
+  `revokeAllForSubject` for the subjects concerned, once the fleet is on the
+  new release; the rest waits a family lifetime.
 
 ### Rolling back — state written by a newer release
 

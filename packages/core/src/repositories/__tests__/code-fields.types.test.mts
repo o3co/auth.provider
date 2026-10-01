@@ -25,7 +25,8 @@
  * bind to its request, `acr` gone one that no longer attests the step-up the
  * user performed, `amr` gone tokens that carry no `amr`, `sid` gone makes
  * `/token` refuse the code where a session store is wired and otherwise
- * leaves the RP nothing to match a logout against, `grantedAudience` gone falls back to the client as the audience.
+ * leaves the RP nothing to match a logout against, `grantedAudience` gone
+ * falls back to the client as the audience.
  * So `Code` holds every field as a REQUIRED key, `undefined` where
  * `/authorize` recorded nothing. `CreateCodeInput` is tied to the same keys,
  * so a field added to the record must be named there too; only `expiresIn`

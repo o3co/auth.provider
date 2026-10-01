@@ -17,7 +17,8 @@
 /**
  * How a session was established and what this provider vouches for, read
  * one way by every consumer (session admission through `requirementSession`,
- * `/token` and the `session` grant through `vouchedAmr`), beside what each
+ * `/authorize`, which records it on the code `/token` stamps, and the
+ * `session` grant through `vouchedAmr`), beside what each
  * login path records (`passwordSessionAuthentication`,
  * `federatedSessionAuthentication`, `federationTrustsUpstreamAmr`), so the
  * write and the read are one design. See ADR

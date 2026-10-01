@@ -298,11 +298,11 @@ describe("an authorization code carries the amr /authorize vouched for", () => {
 	);
 
 	it.each([
-		["no amr (one minted before codes carried it)", undefined],
-		["an empty amr", []],
-		["an amr that is not a list", "pwd"],
+		["that carries none (one minted before codes carried it)", undefined],
+		["with an empty amr", []],
+		["with an amr that is not a list", "pwd"],
 	])(
-		"a code with %s is exchanged for tokens that carry no amr, whatever the session holds",
+		"a code %s is exchanged for tokens that carry no amr, whatever the session holds",
 		async (_, amr) => {
 			const w = await world(passwordSessionAuthentication(), { amr });
 			const code = await w.authorize();
